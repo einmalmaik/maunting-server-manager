@@ -275,67 +275,6 @@
       "user": "Utilisateur"
     }
   },
-  "permissions": {
-    "users": {
-      "read": "Afficher la liste des utilisateurs",
-      "manage": "Créer, modifier, supprimer des utilisateurs",
-      "permissions": {
-        "manage": "Gérer les rôles des utilisateurs et les autorisations du serveur"
-      }
-    },
-    "roles": {
-      "manage": "Créer, modifier, supprimer des rôles"
-    },
-    "panel": {
-      "settings": {
-        "read": "Lire les paramètres du panneau",
-        "write": "Modifier les paramètres du panneau (Steam, email, ...)"
-      }
-    },
-    "servers": {
-      "create": "Créer un nouveau serveur",
-      "delete": "Supprimer des serveurs (globaux, non délégables)"
-    },
-    "system": {
-      "view": "Afficher les ressources système, les interfaces, la version"
-    },
-    "server": {
-      "view": "Afficher le serveur en liste et en détail",
-      "start": "Démarrer le serveur",
-      "stop": "Arrêter le serveur",
-      "restart": "Redémarrer le serveur",
-      "install": "Installer ou réinstaller le serveur",
-      "config": {
-        "write": "Modifier les paramètres du serveur (nom, redémarrage automatique, planification de sauvegarde)"
-      },
-      "network": {
-        "manage": "Changer les ports et lier l'IP"
-      },
-      "resources": {
-        "manage": "Modifier les limites du CPU/RAM/disque"
-      },
-      "console": {
-        "read": "Lire la console et les journaux",
-        "write": "Envoyer des commandes à la console"
-      },
-      "files": {
-        "read": "Lire et télécharger des fichiers",
-        "write": "Télécharger, créer, modifier, extraire des fichiers",
-        "delete": "Supprimer des fichiers"
-      },
-      "backups": {
-        "read": "Liste des sauvegardes",
-        "create": "Créer une sauvegarde",
-        "restore": "Restaurer la sauvegarde",
-        "delete": "Supprimer la sauvegarde"
-      },
-      "mods": {
-        "read": "Liste des mods, recherche d'atelier",
-        "write": "Abonnez-vous, supprimez, réorganisez les mods",
-        "toggle": "Activer ou désactiver les mods"
-      }
-    }
-  },
   "serverPermissions": {
     "title": "Autorisations",
     "subtitle": "Qui peut faire quoi sur ce serveur",
@@ -376,7 +315,7 @@
   },
   "auth": {
     "login": "Connectez-vous",
-    "loginDescription": "Connectez-vous à votre gestionnaire de serveur",
+    "loginDescription": "Connectez-vous à votre gestionnaire de services",
     "register": "S'inscrire",
     "registerDescription": "Créer un nouveau compte",
     "username": "Nom d'utilisateur",
@@ -408,10 +347,10 @@
   },
   "setup": {
     "welcome": "Bienvenue chez MSM",
-    "welcomeDesc": "Le gestionnaire de serveur Maunting est prêt. Créez maintenant le compte propriétaire pour gérer vos serveurs de jeux.",
+    "welcomeDesc": "Le gestionnaire de services Maunting est prêt. Créez maintenant le compte propriétaire pour gérer vos serveurs de jeux.",
     "start": "Commencer",
     "title": "Configuration initiale",
-    "description": "Créez le compte propriétaire pour votre gestionnaire de serveur",
+    "description": "Créez le compte propriétaire pour votre gestionnaire de services",
     "createOwner": "Créer un propriétaire",
     "error": "L'installation a échoué.",
     "verifyEmail": "Vérifier l'e-mail",
@@ -683,7 +622,8 @@
     "providerSmtp": "SMTP",
     "providerResend": "Renvoyer",
     "tabs": {
-      "backup": "Sauvegarde"
+      "backup": "Sauvegarde",
+      "cloudflare": "Cloudflare"
     },
     "backup": {
       "statusTitle": "État de la sauvegarde",
@@ -711,7 +651,34 @@
       "passwordHint": "Stocké chiffré. Le mot de passe n'est jamais renvoyé et est requis pour chiffrer/déchiffrer les sauvegardes.",
       "savePassword": "Enregistrer le mot de passe",
       "passwordSaved": "Mot de passe de sauvegarde enregistré"
-    }
+    },
+    "testConnection": "Tester la connexion",
+    "cloudflare": {
+      "title": "Cloudflare DNS",
+      "description": "Gérer Cloudflare DNS pour les sous-domaines automatiques.",
+      "configured": "Configuré",
+      "notConfigured": "Non configuré",
+      "currentKey": "Jeton API actuel",
+      "newToken": "Nouveau jeton API",
+      "tokenLabel": "Jeton API",
+      "tokenHint": "Jeton Bearer avec autorisations Zone:Read et DNS:Edit. Stocké chiffré en toute sécurité avec DIS Sidecar.",
+      "tokenPlaceholder": "Bearer Token...",
+      "deleteToken": "Supprimer le jeton",
+      "deleteConfirm": "Voulez-vous vraiment supprimer le jeton API Cloudflare enregistré ?",
+      "deleted": "Jeton API Cloudflare supprimé",
+      "defaultZoneLabel": "Zone par défaut (Domaine)",
+      "zonePlaceholder": "Sélectionner une zone...",
+      "zoneHint": "Utilisé pour les sous-domaines automatiques : {game}-{name}.{zone}",
+      "disabledHint": "Cloudflare DNS est désactivé dans Général.",
+      "enabled": "Cloudflare DNS",
+      "enabledHint": "Active la gestion Cloudflare DNS et les sous-domaines automatiques.",
+      "test": "Tester la connexion",
+      "testSuccess": "Le jeton API Cloudflare est valide",
+      "save": "Enregistrer les paramètres",
+      "saved": "Paramètres Cloudflare enregistrés"
+    },
+    "cloudflareEnabled": "Cloudflare DNS",
+    "cloudflareEnabledHint": "Active la gestion Cloudflare DNS et les sous-domaines automatiques."
   },
   "profile": {
     "title": "Profil",
@@ -746,13 +713,12 @@
     "regenerateBackupCodes": "Regénérer les codes de secours",
     "regenerateBackupCodesConfirm": "Les anciens codes de secours seront entièrement supprimés et remplacés par de nouveaux codes. Continuer ?",
     "backupCodesRegenerated": "De nouveaux codes de secours ont été générés. Téléchargez-les maintenant sous forme de fichier.",
-    "backupCodesFileTitle": "Maunting Server Manager - Codes de secours",
+    "backupCodesFileTitle": "Maunting Service Manager - Codes de secours",
     "backupCodesFileIntro": "Ces codes de secours servent de connexion d'urgence si votre code 2FA n'est pas disponible.",
     "backupCodesFileUser": "Compte",
     "backupCodesFileGeneratedAt": "Généré le",
     "otpRequired": "Code 2FA requis",
     "notVerified": "Non vérifié",
-    "2faQrCode": "Code QR 2FA",
     "deleteAccountTitle": "Supprimer le compte",
     "deleteAccountSubtitle": "Supprimez définitivement votre compte personnel et toutes les données associées.",
     "ownerCannotDelete": "En tant que propriétaire du système, vous ne pouvez pas supprimer votre compte pour éviter un verrouillage total.",
@@ -783,7 +749,12 @@
     "modUpdateAvailable": "Mise à jour du mod disponible pour {{mod}} sur le serveur {{server}}",
     "activeLabel": "Notifications par e-mail : actives",
     "inactiveLabel": "Notifications par e-mail : désactivées",
-    "updateFailed": "Impossible d'enregistrer le paramètre de notification."
+    "updateFailed": "Impossible d'enregistrer le paramètre de notification.",
+    "title": "Notifications",
+    "emailLabel": "Notifications par e-mail",
+    "emailHint": "Connexions, événements serveur, mises à jour.",
+    "aiLabel": "Avis de l'IA dans le panneau",
+    "aiHint": "Un avis quand une tâche se termine ou attend. Pas d'e-mails."
   },
   "updater": {
     "manualConfigsRestored": "Les fichiers de configuration manuelle ont été automatiquement restaurés.",
@@ -880,5 +851,28 @@
     "s3ItemPassword": "Le déchiffrement n'est possible qu'avec le mot de passe de sauvegarde défini sur cette instance",
     "s3ItemLocalOnly": "Aucune configuration : les sauvegardes restent locales — aucune donnée n'est transmise à des tiers",
     "section4Updated": "Aucune donnée personnelle n'est partagée avec des tiers. Pour des raisons techniques, les données chiffrées de sauvegarde peuvent être stockées sur un stockage externe compatible S3 si l'administrateur le configure (voir section 6). Dans ce cas, le fournisseur de stockage reçoit uniquement des données chiffrées."
+  },
+  "ai": {
+    "memoryNotice": {
+      "title": "L'IA peut retenir des choses sur vous",
+      "body": "Si vous l'autorisez, l'assistant conserve durablement vos préférences et habitudes — y compris personnelles. Ces notes sont transmises au fournisseur d'IA à chaque requête. Faites attention à ce que vous partagez. La mémoire est actuellement désactivée.",
+      "enable": "Activer",
+      "later": "Plus tard",
+      "never": "Ne plus demander",
+      "hint": "Vous pouvez modifier cela à tout moment sous Profil → IA, où vous pouvez aussi consulter et supprimer les entrées.",
+      "enabled": "Mémoire activée.",
+      "failed": "Votre réponse n'a pas pu être enregistrée."
+    },
+    "notice": {
+      "completed": "L'IA a terminé votre tâche.",
+      "waitingConfirmation": "L'IA attend votre confirmation.",
+      "waitingUser": "L'IA vous pose une question.",
+      "failed": "La tâche de l'IA a échoué.",
+      "open": "Ouvrir l'assistant"
+    },
+    "profile": {
+      "title": "Assistant IA",
+      "description": "L'exploitant du panneau fournit la cle API, le modele et les fournisseurs. Ici, vous gerez ce que l'assistant sait de vous."
+    }
   }
 }

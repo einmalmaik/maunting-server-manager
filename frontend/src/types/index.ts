@@ -7,7 +7,23 @@ export interface User {
   email_verified: boolean
   two_factor_enabled: boolean
   email_notifications: boolean
+  /** Hinweise der KI im Panel. Getrennt von den E-Mails — sie verschickt keine. */
+  ai_notifications: boolean
+  /** Geräte-Benachrichtigungen (Pop-ups auf Windows und Android). */
+  device_notifications?: boolean
+  /** IANA-Zeitzone des Benutzers (z. B. 'Europe/Berlin'). */
+  time_zone?: string | null
+  /** Explizite Einwilligung für ortsbezogene KI-Anfragen; keine Koordinaten. */
+  location_sharing_enabled?: boolean
+  /** Rufname des KI-Assistenten; null heißt Standardname 'Singra'. */
+  agent_name?: string | null
+  /** Gewählter KI-Zugang — am Konto, damit App und Overlay dieselbe Wahl sehen. */
+  ai_provider_id?: number | null
   role_id: number | null
+  /** Alle globalen Rollen; role_id bleibt kompatible Primärrolle. */
+  role_ids?: number[]
+  /** URL zum hochgeladenen Profilbild */
+  avatar_url?: string | null
   created_at: string
 }
 
@@ -30,6 +46,9 @@ export interface Server {
   last_auto_restart_completed_at: string | null
   last_auto_restart_status: string | null
   next_auto_restart_at: string | null
+  // „Von der KI verwaltet": die KI hat den Neustart-Zeitplan zuletzt gesetzt.
+  // Manuelles Speichern nimmt die Verwaltung zurück (Backend).
+  restart_ai_managed: boolean
   started_at: string | null
   uptime_seconds: number | null
   cpu_limit_percent: number | null
@@ -45,6 +64,8 @@ export interface Server {
   /** Multi-node: host node id (never contains secrets) */
   node_id?: number | null
   node_name?: string | null
+  /** Server aus einem Shop-Vertrag (Hoster-Kundenserver). Nur das Flag — kein Integrationsname, kein Vertragsstatus. */
+  is_hoster_managed?: boolean
   guardian_observed_state?: string
   guardian_enabled?: boolean
   guardian_probe_timestamp?: string | null
@@ -60,6 +81,23 @@ export interface GuardianAttempt {
   timestamp?: string
 }
 
+/**
+ * Was die KI zu einem Vorfall veranlasst hat — `null`, wenn nichts.
+ *
+ * `mode` unterscheidet die beiden Wege: `briefed` heisst, der Vorfall wird beim
+ * naechsten Chat erwaehnt (keine Freigabe, kein Lauf), `healing` heisst, ein
+ * Lauf wurde gestartet. Der Ausgang steht in `run_status` und nicht hier — die
+ * Notiz sagt nur, dass etwas veranlasst wurde.
+ */
+export interface GuardianIncidentAi {
+  mode: 'briefed' | 'healing'
+  /** Status des Heilungslaufs, `null` bei `briefed` oder abgeraeumtem Lauf. */
+  run_status: string | null
+  /** Ob die Notiz zum angemeldeten Benutzer gehoert — nur dann fuehrt ein Link in seinen Chat. */
+  mine: boolean
+  at: string
+}
+
 export interface GuardianIncident {
   id: number
   title: string
@@ -70,6 +108,7 @@ export interface GuardianIncident {
   created_at: string
   resolved_at: string | null
   attempts: GuardianAttempt[]
+  ai?: GuardianIncidentAi | null
 }
 
 /** Node registry entry from GET /api/nodes (no auth tokens). */
@@ -157,6 +196,8 @@ export interface PostgresPowerUserCredential {
 
 export interface ServerCreateResult extends Server {
   postgres_credentials?: PostgresCredential[]
+  /** Persistente, secret-freie Vorgangs-ID für Status und Support-Korrelation. */
+  task_id?: string
 }
 
 export interface PostgresDatabase {
@@ -261,7 +302,7 @@ export interface PostgresExtension {
   trusted?: boolean
 }
 
-export type BlueprintPortRole = 'game' | 'query' | 'rcon' | 'voice' | 'web' | 'custom'
+export type BlueprintPortRole = 'game' | 'query' | 'rcon' | 'voice' | 'web' | 'peer' | 'custom'
 export type BlueprintPortProtocol = 'tcp' | 'udp'
 
 export interface BlueprintPortDef {
@@ -277,6 +318,8 @@ export interface GameInfo {
   category?: string
   mod_support: boolean
   supports_steam_workshop: boolean
+  supports_curseforge?: boolean
+  mod_provider?: 'curseforge' | 'steam' | null
   supports_server_file_updates?: boolean
   // v1.4.7+: Exec-Tab-Opt-in aus dem Blueprint (runtime.enableExec).
   enable_exec?: boolean
@@ -296,6 +339,8 @@ export interface BlueprintListEntry {
   source_type: 'steam' | 'http' | 'github' | 'dockerOnly' | 'custom' | 'manualUpload'
   supports_mods: boolean
   supports_steam_workshop: boolean
+  supports_curseforge?: boolean
+  mod_provider?: 'curseforge' | 'steam' | null
   mod_injection: 'none' | 'startupArg' | 'file'
   ports: BlueprintPortDef[]
 }

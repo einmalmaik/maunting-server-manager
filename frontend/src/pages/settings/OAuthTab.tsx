@@ -10,6 +10,7 @@ import { API_ORIGIN } from '@/config/api'
 import { confirm } from '@/stores/confirmStore'
 import { Switch } from '@/components/ui/Switch'
 import { NumberStepper } from '@/components/ui/NumberStepper'
+import { Dropdown } from '@/components/ui/Dropdown'
 
 interface FormState {
   id: number | null
@@ -241,11 +242,9 @@ export function OAuthTab() {
     <div className="space-y-6">
       {/* Provider list */}
       <div className="msm-card p-6">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center">
-            <KeyRound className="w-5 h-5 text-secondary" />
-          </div>
-          <h2 className="font-headline text-headline-sm text-primary flex-1">
+        <div className="flex items-center gap-2 mb-6">
+          <KeyRound className="h-5 w-5 text-secondary" aria-hidden="true" />
+          <h2 className="font-headline text-lg font-semibold text-on-surface flex-1">
             {t('settings.oauth.providers')}
           </h2>
           {canWrite && (
@@ -341,11 +340,9 @@ export function OAuthTab() {
       {/* Global switches */}
       {switches && (
         <div className="msm-card p-6">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center">
-              <ShieldCheck className="w-5 h-5 text-secondary" />
-            </div>
-            <h2 className="font-headline text-headline-sm text-primary">
+          <div className="flex items-center gap-2 mb-6">
+            <ShieldCheck className="h-5 w-5 text-secondary" aria-hidden="true" />
+            <h2 className="font-headline text-lg font-semibold text-on-surface">
               {t('settings.oauth.switches')}
             </h2>
           </div>
@@ -437,7 +434,7 @@ function ProviderDialog({
           <h2 className="font-headline text-headline-sm text-primary">
             {form.id === null ? t('settings.oauth.createTitle') : t('settings.oauth.editTitle')}
           </h2>
-          <button type="button" onClick={onClose} className="text-on-surface-variant hover:text-on-surface">
+          <button type="button" aria-label={t('common.close')} onClick={onClose} className="text-on-surface-variant hover:text-on-surface">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -457,7 +454,7 @@ function ProviderDialog({
                 readOnly={form.id !== null}
                 disabled={form.id !== null}
               />
-              <p className="font-body-md text-xs text-on-surface-variant mt-1">
+              <p className="msm-field-help">
                 {t('settings.oauth.providerSlugHint')}
               </p>
             </div>
@@ -479,27 +476,26 @@ function ProviderDialog({
             <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
               {t('settings.oauth.providerPreset')}
             </label>
-            <select
+            <Dropdown
               value={form.preset}
-              onChange={(e) => setForm({ ...form, preset: e.target.value as OAuthPreset })}
-              className="msm-input"
+              onChange={(val) => setForm({ ...form, preset: val as OAuthPreset })}
+              options={OAUTH_PRESETS.map((p) => ({
+                value: p,
+                label: t(`settings.oauth.preset.${p}` as any, p),
+              }))}
               disabled={form.id !== null}
-            >
-              {OAUTH_PRESETS.map((p) => (
-                <option key={p} value={p}>
-                  {t(`settings.oauth.preset.${p}` as any, p)}
-                </option>
-              ))}
-            </select>
+              aria-label={t('settings.oauth.providerPreset')}
+            />
           </div>
 
-          <div className="flex items-center justify-between py-2 px-3 rounded-md bg-surface-container-low">
+          <label className="flex items-center justify-between gap-4 rounded-lg border border-outline-variant/40 bg-surface-container-high px-3 py-2">
             <span className="font-label-md text-sm text-on-surface">{t('settings.oauth.providerEnabled')}</span>
             <Switch
               checked={form.enabled}
               onCheckedChange={(v) => setForm({ ...form, enabled: v })}
+              aria-label={t('settings.oauth.providerEnabled')}
             />
-          </div>
+          </label>
 
           <div>
             <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
@@ -526,7 +522,7 @@ function ProviderDialog({
               placeholder={form.client_secret_present ? '•••••••• (leave empty to keep)' : 'GOCSPX-…'}
               autoComplete="off"
             />
-            <p className="font-body-md text-xs text-on-surface-variant mt-1">
+            <p className="msm-field-help">
               {t('settings.oauth.providerSecretHint')}
             </p>
           </div>
@@ -613,7 +609,7 @@ function ProviderDialog({
                 className="msm-input font-mono text-sm min-h-[80px]"
                 placeholder='{"id":"sub","email":"email"}'
               />
-              <p className="font-body-md text-xs text-on-surface-variant mt-1">
+              <p className="msm-field-help">
                 {t('settings.oauth.providerClaimsHint')}
               </p>
             </div>

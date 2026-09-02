@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle } from 'lucide-react'
 import { useConfirmStore } from '@/stores/confirmStore'
@@ -29,6 +29,21 @@ export function ConfirmDialog() {
     return () => window.removeEventListener('keydown', onKey)
   }, [pending, resolve])
 
+  // Wer den Dialog geöffnet hat, steht nur während des Renderns fest: das
+  // `autoFocus` des Bestätigen-Knopfes zieht den Fokus schon vor jedem Effekt
+  // in den Dialog. Deshalb hier merken und beim Schließen zurückgeben — sonst
+  // fällt die Tastaturbedienung auf `document.body` und beginnt von vorn.
+  const previousFocus = useRef<HTMLElement | null>(null)
+  if (pending && !previousFocus.current) {
+    previousFocus.current = document.activeElement as HTMLElement | null
+  }
+  useEffect(() => {
+    if (pending) return
+    const target = previousFocus.current
+    previousFocus.current = null
+    if (target?.isConnected) target.focus()
+  }, [pending])
+
   if (!pending) return null
 
   const isDanger = !!pending.danger
@@ -56,7 +71,10 @@ export function ConfirmDialog() {
                 {pending.title}
               </h2>
             )}
-            <p className="font-body-md text-sm text-on-surface">
+            {/* `whitespace-pre-line`, damit mehrzeilige Meldungen ihre Struktur
+                behalten. Ohne das lief eine Aufzaehlung — etwa was eine
+                KI-Aktion genau aendert — zu einem Fliesstext zusammen. */}
+            <p className="font-body-md whitespace-pre-line text-sm text-on-surface">
               {pending.message}
             </p>
           </div>

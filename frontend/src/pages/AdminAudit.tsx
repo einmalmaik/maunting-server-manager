@@ -125,12 +125,14 @@ export function AdminAudit() {
 
       {rows.length > 0 && (
         <div className="msm-card overflow-x-auto">
-          <table className="w-full min-w-[40rem] text-left text-sm">
+          <table className="w-full min-w-[58rem] text-left text-sm">
             <thead className="border-b border-outline-variant bg-surface-container-high text-xs uppercase tracking-wide text-on-surface-variant">
               <tr>
                 <th className="px-3 py-2 font-medium">{t('audit.colTime', 'Zeit')}</th>
                 <th className="px-3 py-2 font-medium">{t('audit.colUser', 'User-ID')}</th>
                 <th className="px-3 py-2 font-medium">{t('audit.colAction', 'Action')}</th>
+                <th className="px-3 py-2 font-medium">{t('audit.colOrigin', 'Herkunft')}</th>
+                <th className="px-3 py-2 font-medium">{t('audit.colCorrelation', 'Vorgang')}</th>
                 <th className="px-3 py-2 font-medium">{t('audit.colTarget', 'Ziel')}</th>
                 <th className="px-3 py-2 font-medium">{t('audit.colDetails', 'Details')}</th>
               </tr>
@@ -143,6 +145,12 @@ export function AdminAudit() {
                   </td>
                   <td className="px-3 py-2 font-mono text-xs">{row.user_id ?? '—'}</td>
                   <td className="px-3 py-2 font-mono text-xs text-on-surface">{row.action}</td>
+                  <td className="px-3 py-2 text-xs text-on-surface-variant">
+                    {t(`audit.origins.${row.origin}`, { defaultValue: row.origin })}
+                  </td>
+                  <td className="px-3 py-2 font-mono text-xs text-on-surface-variant" title={row.correlation_id ?? undefined}>
+                    {row.correlation_id ? row.correlation_id.slice(0, 8) : '—'}
+                  </td>
                   <td className="px-3 py-2 text-on-surface-variant">{formatAuditTarget(row)}</td>
                   <td className="max-w-md break-all px-3 py-2 font-mono text-xs text-on-surface-variant">
                     {safeAuditDetails(row.details)}

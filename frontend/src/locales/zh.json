@@ -275,67 +275,6 @@
       "user": "用户"
     }
   },
-  "permissions": {
-    "users": {
-      "read": "查看用户列表",
-      "manage": "创建、编辑、删除用户",
-      "permissions": {
-        "manage": "管理用户角色和服务器权限"
-      }
-    },
-    "roles": {
-      "manage": "创建、编辑、删除角色"
-    },
-    "panel": {
-      "settings": {
-        "read": "读取面板设置",
-        "write": "更改面板设置（Steam、电子邮件...）"
-      }
-    },
-    "servers": {
-      "create": "创建一个新服务器",
-      "delete": "删除服务器（全局，不可委托）"
-    },
-    "system": {
-      "view": "查看系统资源、接口、版本"
-    },
-    "server": {
-      "view": "查看服务器列表和详细信息",
-      "start": "启动服务器",
-      "stop": "停止服务器",
-      "restart": "重启服务器",
-      "install": "安装或重新安装服务器",
-      "config": {
-        "write": "编辑服务器设置（名称、自动重启、备份计划）"
-      },
-      "network": {
-        "manage": "更改端口并绑定IP"
-      },
-      "resources": {
-        "manage": "更改 CPU/RAM/磁盘限制"
-      },
-      "console": {
-        "read": "读取控制台和日志",
-        "write": "发送命令到控制台"
-      },
-      "files": {
-        "read": "读取和下载文件",
-        "write": "上传、创建、编辑、提取文件",
-        "delete": "删除文件"
-      },
-      "backups": {
-        "read": "列出备份",
-        "create": "创建备份",
-        "restore": "恢复备份",
-        "delete": "删除备份"
-      },
-      "mods": {
-        "read": "列出模组、搜索研讨会",
-        "write": "订阅、删除、重新排序模组",
-        "toggle": "启用或禁用模组"
-      }
-    }
-  },
   "serverPermissions": {
     "title": "权限",
     "subtitle": "谁可以在此服务器上执行什么操作",
@@ -683,7 +622,8 @@
     "providerSmtp": "邮件传输协议",
     "providerResend": "重新发送",
     "tabs": {
-      "backup": "备份"
+      "backup": "备份",
+      "cloudflare": "Cloudflare"
     },
     "backup": {
       "statusTitle": "备份状态",
@@ -711,7 +651,34 @@
       "passwordHint": "加密存储。密码永远不会返回，且加密/解密备份时需要。",
       "savePassword": "保存密码",
       "passwordSaved": "备份密码已保存"
-    }
+    },
+    "testConnection": "测试连接",
+    "cloudflare": {
+      "title": "Cloudflare DNS",
+      "description": "管理用于自动子域名的 Cloudflare DNS。",
+      "configured": "已配置",
+      "notConfigured": "未配置",
+      "currentKey": "当前 API 令牌",
+      "newToken": "新 API 令牌",
+      "tokenLabel": "API 令牌",
+      "tokenHint": "具有 Zone:Read 和 DNS:Edit 权限的 Bearer 令牌。通过 DIS Sidecar 安全加密存储。",
+      "tokenPlaceholder": "Bearer 令牌...",
+      "deleteToken": "移除令牌",
+      "deleteConfirm": "您确定要移除已保存的 Cloudflare API 令牌吗？",
+      "deleted": "Cloudflare API 令牌已移除",
+      "defaultZoneLabel": "默认区域（域名）",
+      "zonePlaceholder": "选择区域...",
+      "zoneHint": "用于自动子域名：{game}-{name}.{zone}",
+      "disabledHint": "Cloudflare DNS 在通用设置中已禁用。",
+      "enabled": "Cloudflare DNS",
+      "enabledHint": "启用 Cloudflare DNS 管理和自动子域名。",
+      "test": "测试连接",
+      "testSuccess": "Cloudflare API 令牌有效",
+      "save": "保存设置",
+      "saved": "Cloudflare 设置已保存"
+    },
+    "cloudflareEnabled": "Cloudflare DNS",
+    "cloudflareEnabledHint": "启用 Cloudflare DNS 管理和自动子域名。"
   },
   "profile": {
     "title": "公司简介",
@@ -746,13 +713,12 @@
     "regenerateBackupCodes": "重新生成备份代码",
     "regenerateBackupCodesConfirm": "旧的备份代码将被完全删除并替换为新代码。继续吗？",
     "backupCodesRegenerated": "新的备份代码已生成。请立即将其作为文件下载。",
-    "backupCodesFileTitle": "Maunting Server Manager - 备份代码",
+    "backupCodesFileTitle": "Maunting Service Manager - 备份代码",
     "backupCodesFileIntro": "如果你的 2FA 代码不可用，这些备份代码可用于紧急登录。",
     "backupCodesFileUser": "账户",
     "backupCodesFileGeneratedAt": "生成时间",
     "otpRequired": "需要 2FA 代码",
     "notVerified": "未验证",
-    "2faQrCode": "2FA 二维码",
     "deleteAccountTitle": "删除帐户",
     "deleteAccountSubtitle": "永久删除您的个人帐户和所有相关数据。",
     "ownerCannotDelete": "作为系统所有者，您无法删除您的帐户以防止完全锁定。",
@@ -783,7 +749,12 @@
     "modUpdateAvailable": "Mod 更新可用于服务器 {{server}} 上的 {{mod}}",
     "activeLabel": "电子邮件通知：有效",
     "inactiveLabel": "电子邮件通知：已禁用",
-    "updateFailed": "无法保存通知设置。"
+    "updateFailed": "无法保存通知设置。",
+    "title": "通知",
+    "emailLabel": "邮件通知",
+    "emailHint": "登录、服务器事件、更新。",
+    "aiLabel": "面板内的 AI 提示",
+    "aiHint": "任务完成或等待时给出提示。不发邮件。"
   },
   "updater": {
     "manualConfigsRestored": "手动配置文件已自动恢复。",
@@ -880,5 +851,28 @@
     "s3ItemPassword": "仅可使用在此实例上设置的备份密码进行解密",
     "s3ItemLocalOnly": "未配置：备份保留在本地 — 不会向第三方传输任何数据",
     "section4Updated": "不会与第三方共享任何个人数据。由于技术原因，如果管理员进行了配置，加密备份数据可能会存储在外部 S3 兼容存储上（见第 6 节）。在这种情况下，存储提供商仅接收加密数据。"
+  },
+  "ai": {
+    "memoryNotice": {
+      "title": "AI 可以记住关于你的信息",
+      "body": "如果你允许，助手会长期记录你的偏好和习惯，其中也包括个人信息。每次请求都会将这些记录发送给 AI 服务商。请注意分享的内容。记忆功能目前已停用。",
+      "enable": "启用",
+      "later": "稍后",
+      "never": "不再询问",
+      "hint": "你可以随时在「个人资料 → AI」中更改，并在那里查看和删除各条记录。",
+      "enabled": "记忆已启用。",
+      "failed": "无法保存你的选择。"
+    },
+    "notice": {
+      "completed": "AI 已完成你的任务。",
+      "waitingConfirmation": "AI 正在等待你的确认。",
+      "waitingUser": "AI 有一个问题要问你。",
+      "failed": "AI 任务失败。",
+      "open": "打开助手"
+    },
+    "profile": {
+      "title": "AI 助手",
+      "description": "API 密钥、模型和服务商由面板运营方设置。你在这里管理助手对你的了解。"
+    }
   }
 }

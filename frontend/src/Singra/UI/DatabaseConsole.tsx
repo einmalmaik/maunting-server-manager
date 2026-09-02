@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useMemo, useState } from 'react'
+import { ReactNode, RefObject, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowUpDown,
   Boxes,
@@ -27,8 +27,15 @@ import {
   Wand2,
   X,
 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { Dropdown } from '@/components/ui/Dropdown'
 import { Checkbox } from '@/components/ui/Checkbox'
+import {
+  readSqlConsoleEntries,
+  sqlConsoleStorageKeys,
+  writeSqlConsoleEntries,
+} from '@/lib/sqlConsoleStorage'
+import { useAuthStore } from '@/stores/authStore'
 import type {
   PostgresDatabase,
   PostgresDatabaseStats,
@@ -41,6 +48,78 @@ import type {
 
 type TabKey = 'tables' | 'sql' | 'users'
 
+const FOKUSSIERBAR =
+  'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+/** Escape schließt den Dialog, Tab bleibt darin, der Fokus kehrt danach zurück.
+ *
+ *  Diese Datei hat vier Modale, die alle dasselbe brauchen — deshalb steht die
+ *  Hilfsfunktion hier und nicht projektweit: außerhalb ist das Muster in
+ *  NodeEnrollmentDialog und ResourceEditorDialog jeweils ausgeschrieben.
+ *  `gesperrt` hält Escape zurück, solange eine Aktion läuft: ein Dialog, der
+ *  gerade löscht oder speichert, darf nicht unter der Antwort weggezogen werden.
+ */
+function useDialogTastatur(
+  dialogRef: RefObject<HTMLDivElement>,
+  onClose: () => void,
+  gesperrt = false,
+) {
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+  const gesperrtRef = useRef(gesperrt)
+  gesperrtRef.current = gesperrt
+  // Beim ersten Rendern gemerkt, nicht im Effekt: `autoFocus` greift schon beim
+  // Einhängen des Feldes. Ein Effekt merkte sich sonst ein Feld aus dem Dialog
+  // selbst und gäbe den Fokus nach dem Schließen ins Leere zurück.
+  const vorherigerFokus = useRef<HTMLElement | null>(
+    document.activeElement instanceof HTMLElement ? document.activeElement : null,
+  )
+
+  useEffect(() => {
+    // `autoFocus` hat zu diesem Zeitpunkt bereits gegriffen. Nur wenn niemand
+    // im Dialog steht, wird der Fokus hineingeholt.
+    const dialog = dialogRef.current
+    if (dialog && !dialog.contains(document.activeElement)) {
+      dialog.querySelector<HTMLElement>(FOKUSSIERBAR)?.focus()
+    }
+
+    const beiTaste = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        if (gesperrtRef.current) return
+        event.preventDefault()
+        onCloseRef.current()
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      const offen = dialogRef.current
+      if (!offen) return
+      const ziele = Array.from(offen.querySelectorAll<HTMLElement>(FOKUSSIERBAR))
+      if (ziele.length === 0) return
+
+      const erstes = ziele[0]
+      const letztes = ziele[ziele.length - 1]
+      const aktiv = document.activeElement
+      if (event.shiftKey && (aktiv === erstes || !offen.contains(aktiv))) {
+        event.preventDefault()
+        letztes.focus()
+      } else if (!event.shiftKey && (aktiv === letztes || !offen.contains(aktiv))) {
+        event.preventDefault()
+        erstes.focus()
+      }
+    }
+
+    document.addEventListener('keydown', beiTaste)
+    return () => {
+      document.removeEventListener('keydown', beiTaste)
+      const zurueck = vorherigerFokus.current
+      if (zurueck?.isConnected) zurueck.focus()
+    }
+    // Der Dialog lebt nur, solange er offen ist — einmal einhängen genügt.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+}
+
 export interface SqlFavorite {
   id: string
   title: string
@@ -51,6 +130,7 @@ export interface SqlFavorite {
 export interface DatabaseConsoleProps {
   title: string
   subtitle: string
+  /** Zweites Glied der Brotkrume. Ohne Angabe steht dort das übersetzte "Datenbank". */
   databaseLabel?: string
   databases: Array<Pick<PostgresDatabase, 'id' | 'name' | 'owner_role' | 'is_power_user'>>
   selectedDatabaseId: number | null
@@ -62,6 +142,13 @@ export interface DatabaseConsoleProps {
   sqlText: string
   sqlResult: PostgresSqlResult | null
   history: string[]
+  /**
+   * Benennt die Konsole, zu der Verlauf und Favoriten gehören — 'panel' oder
+   * 'server-7'. Zusammen mit der Benutzerkennung ergibt das den Speicher-
+   * schlüssel (siehe lib/sqlConsoleStorage.ts). Pflicht und nicht optional,
+   * damit eine neue Einbindung die Trennung nicht stillschweigend aufhebt.
+   */
+  storageScope: string
   canAdmin: boolean
   canManagePowerUser?: boolean
   powerUserActive?: boolean
@@ -107,7 +194,7 @@ export interface DatabaseConsoleProps {
 export function DatabaseConsole({
   title,
   subtitle,
-  databaseLabel = 'Datenbank',
+  databaseLabel,
   databases,
   selectedDatabaseId,
   stats,
@@ -118,6 +205,7 @@ export function DatabaseConsole({
   sqlText,
   sqlResult,
   history,
+  storageScope,
   canAdmin,
   canManagePowerUser = false,
   powerUserActive = false,
@@ -146,6 +234,7 @@ export function DatabaseConsole({
   onDeleteRows,
   onInsertRow,
 }: DatabaseConsoleProps) {
+  const { t, i18n } = useTranslation()
   const [activeTab, setActiveTab] = useState<TabKey>('tables')
   const [search, setSearch] = useState('')
   const [openDropdown, setOpenDropdown] = useState<'filter' | 'sort' | 'columns' | null>(null)
@@ -161,45 +250,55 @@ export function DatabaseConsole({
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [showSaveFavoriteModal, setShowSaveFavoriteModal] = useState(false)
 
+  // Verlauf und Favoriten gehören dem angemeldeten Benutzer und dieser einen
+  // Konsole. Die Benutzerkennung holt sich die Komponente selbst aus dem
+  // Auth-Store, statt sie sich reichen zu lassen: eine Prop kann jede neue
+  // Einbindung vergessen — und genau daran hing der Fehler. Der Schlüssel war
+  // global, localStorage überlebt das Abmelden, und der nächste Benutzer am
+  // selben Rechner las die Abfragen des vorigen im Verlaufsmenü mit.
+  const userId = useAuthStore((state) => state.user?.id ?? 'anonym')
+  const storageKeys = useMemo(() => sqlConsoleStorageKeys(userId, storageScope), [userId, storageScope])
+
   // Persistent History
-  const [localHistory, setLocalHistory] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('msm_sql_history')
-      if (saved) return JSON.parse(saved)
-    } catch {}
-    return history || []
-  })
+  const [localHistory, setLocalHistory] = useState<string[]>(() =>
+    readSqlConsoleEntries<string>(storageKeys.history),
+  )
+
+  // Persistent Favorites
+  const [favorites, setFavorites] = useState<SqlFavorite[]>(() =>
+    readSqlConsoleEntries<SqlFavorite>(storageKeys.favorites),
+  )
+
+  // Wechselt der Schlüssel zur Laufzeit — anderer Benutzer, andere Konsole —,
+  // muss der angezeigte Zustand mitwechseln. Sonst stünde weiter der Inhalt des
+  // alten Schlüssels auf dem Schirm und die nächste Abfrage schriebe ihn unter
+  // dem neuen fest; die Trennung wäre wieder aufgehoben.
+  useEffect(() => {
+    setLocalHistory(readSqlConsoleEntries<string>(storageKeys.history))
+    setFavorites(readSqlConsoleEntries<SqlFavorite>(storageKeys.favorites))
+  }, [storageKeys])
 
   useEffect(() => {
     if (history.length > 0) {
       setLocalHistory((prev) => {
         const merged = Array.from(new Set([...history, ...prev])).slice(0, 30)
-        try { localStorage.setItem('msm_sql_history', JSON.stringify(merged)) } catch {}
+        writeSqlConsoleEntries(storageKeys.history, merged)
         return merged
       })
     }
-  }, [history])
-
-  // Persistent Favorites
-  const [favorites, setFavorites] = useState<SqlFavorite[]>(() => {
-    try {
-      const saved = localStorage.getItem('msm_sql_favorites')
-      if (saved) return JSON.parse(saved)
-    } catch {}
-    return []
-  })
+  }, [history, storageKeys])
 
   const saveFavorite = (favTitle: string) => {
     if (!sqlText.trim()) return
     const newFav: SqlFavorite = {
       id: String(Date.now()),
-      title: favTitle.trim() || 'Abfrage',
+      title: favTitle.trim() || t('databaseConsole.sql.untitledFavorite'),
       sql: sqlText.trim(),
       createdAt: new Date().toISOString(),
     }
     setFavorites((prev) => {
       const next = [newFav, ...prev.filter((f) => f.sql !== sqlText.trim())]
-      try { localStorage.setItem('msm_sql_favorites', JSON.stringify(next)) } catch {}
+      writeSqlConsoleEntries(storageKeys.favorites, next)
       return next
     })
     setShowSaveFavoriteModal(false)
@@ -208,7 +307,7 @@ export function DatabaseConsole({
   const deleteFavorite = (id: string) => {
     setFavorites((prev) => {
       const next = prev.filter((f) => f.id !== id)
-      try { localStorage.setItem('msm_sql_favorites', JSON.stringify(next)) } catch {}
+      writeSqlConsoleEntries(storageKeys.favorites, next)
       return next
     })
   }
@@ -217,21 +316,22 @@ export function DatabaseConsole({
     if (sqlText.trim()) {
       setLocalHistory((prev) => {
         const next = [sqlText.trim(), ...prev.filter((h) => h !== sqlText.trim())].slice(0, 30)
-        try { localStorage.setItem('msm_sql_history', JSON.stringify(next)) } catch {}
+        writeSqlConsoleEntries(storageKeys.history, next)
         return next
       })
     }
     onRunSql()
   }
 
+  const zeilenEinheit = t('databaseConsole.rowsUnit')
   const safeDatabases = Array.isArray(databases) ? databases : []
   const selectedDatabase = safeDatabases.find((db) => db.id === selectedDatabaseId) || safeDatabases[0] || null
   const groupedTables = useMemo(() => groupTables(tables), [tables])
 
   const tabs: Array<{ key: TabKey; label: string; icon: typeof Table2 }> = [
-    { key: 'tables', label: 'Tabellen', icon: Table2 },
-    { key: 'sql', label: 'SQL-Konsole', icon: Play },
-    ...(onCreateUser ? [{ key: 'users' as TabKey, label: 'Benutzer', icon: Users }] : []),
+    { key: 'tables', label: t('databaseConsole.tabs.tables'), icon: Table2 },
+    { key: 'sql', label: t('databaseConsole.tabs.sql'), icon: Play },
+    ...(onCreateUser ? [{ key: 'users' as TabKey, label: t('databaseConsole.tabs.users'), icon: Users }] : []),
   ]
 
   const resultColumns = rows?.columns ?? []
@@ -288,11 +388,14 @@ export function DatabaseConsole({
 
   const handleConfirmDeleteSelectedRows = async () => {
     if (!selectedTable || !onDeleteRows || !processedRows) return
-    const indices = Array.from(selectedRowIndices)
-    const rowConditions = indices.map((idx) => {
-      const row = processedRows.rows[idx]
-      return buildRowKeyConditions(row, tableInfo, resultColumns)
-    })
+    const rowConditions: Array<Record<string, any>> = []
+    for (const idx of selectedRowIndices) {
+      const bedingung = buildRowKeyConditions(processedRows.rows[idx], tableInfo, resultColumns)
+      // Eine einzige nicht eindeutig ansprechbare Zeile sperrt den ganzen Lauf.
+      // Der Dialog fängt den Fehler und zeigt ihn an, gelöscht wird nichts.
+      if (bedingung === null) throw new Error(t('databaseConsole.rowNotAddressable'))
+      rowConditions.push(bedingung)
+    }
     await onDeleteRows(selectedTable.schema, selectedTable.name, rowConditions)
     setSelectedRowIndices(new Set())
   }
@@ -302,9 +405,9 @@ export function DatabaseConsole({
       <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
         <div>
           <div className="flex items-center gap-2 text-xs text-on-surface-variant">
-            <span>Server</span>
+            <span>{t('databaseConsole.breadcrumbServer')}</span>
             <span>/</span>
-            <span>{databaseLabel}</span>
+            <span>{databaseLabel ?? t('databaseConsole.database')}</span>
             {selectedDatabase && (
               <>
                 <span>/</span>
@@ -323,14 +426,14 @@ export function DatabaseConsole({
                 ...(onDeleteDatabase
                   ? [{
                       value: '__delete__',
-                      label: 'Datenbank löschen',
+                      label: t('databaseConsole.deleteDatabase'),
                       icon: <Trash2 className="h-4 w-4 text-status-error" />,
                       disabled: !selectedDatabaseId,
                     }]
                   : []),
               ]}
               value={selectedDatabaseId != null ? String(selectedDatabaseId) : null}
-              placeholder="Datenbank auswählen"
+              placeholder={t('databaseConsole.selectDatabase')}
               onChange={(value) => {
                 if (value === '__delete__') {
                   onDeleteDatabase?.()
@@ -345,13 +448,13 @@ export function DatabaseConsole({
           {onRefresh && (
             <button className="msm-btn-secondary h-11 px-3 inline-flex items-center gap-2" onClick={onRefresh}>
               <RefreshCw className="h-4 w-4" />
-              Aktualisieren
+              {t('common.refresh')}
             </button>
           )}
           {canAdmin && onCreateDatabase && (
             <button className="msm-btn-primary h-11 px-4 inline-flex items-center gap-2" onClick={onCreateDatabase}>
               <Plus className="h-4 w-4" />
-              Datenbank verbinden
+              {t('databaseConsole.connectDatabase')}
             </button>
           )}
         </div>
@@ -364,12 +467,12 @@ export function DatabaseConsole({
       )}
 
       <div className="grid gap-3 xl:grid-cols-6">
-        <MetricCard icon={Database} label="Datenbank" value={selectedDatabase?.name || '-'} hint={stats?.engine || 'PostgreSQL'} />
-        <MetricCard icon={CheckCircle2} label="Status" value={stats?.status === 'healthy' ? 'Gesund' : 'Unklar'} hint="Backend-geprüft" tone="success" />
-        <MetricCard icon={Table2} label="Tabellen" value={formatNumber(stats?.table_count ?? tables.length)} hint="In dieser Datenbank" tone="violet" />
-        <MetricCard icon={HardDrive} label="Speicher" value={formatBytes(stats?.size_bytes)} hint="Gesamte Datengröße" tone="mint" />
-        <MetricCard icon={Users} label="Verbindungen" value={formatConnections(stats)} hint="Aktive / maximale" tone="blue" />
-        <MetricCard icon={Clock3} label="Latenz" value={formatLatency(stats?.latency_ms)} hint="Backend-Verbindung" tone="green" />
+        <MetricCard icon={Database} label={t('databaseConsole.metrics.database')} value={selectedDatabase?.name || '-'} hint={stats?.engine || 'PostgreSQL'} />
+        <MetricCard icon={CheckCircle2} label={t('databaseConsole.metrics.status')} value={stats?.status === 'healthy' ? t('databaseConsole.metrics.statusHealthy') : t('databaseConsole.metrics.statusUnknown')} hint={t('databaseConsole.metrics.statusHint')} tone="success" />
+        <MetricCard icon={Table2} label={t('databaseConsole.metrics.tables')} value={formatNumber(stats?.table_count ?? tables.length, i18n.language)} hint={t('databaseConsole.metrics.tablesHint')} tone="violet" />
+        <MetricCard icon={HardDrive} label={t('databaseConsole.metrics.storage')} value={formatBytes(stats?.size_bytes)} hint={t('databaseConsole.metrics.storageHint')} tone="mint" />
+        <MetricCard icon={Users} label={t('databaseConsole.metrics.connections')} value={formatConnections(stats)} hint={t('databaseConsole.metrics.connectionsHint')} tone="blue" />
+        <MetricCard icon={Clock3} label={t('databaseConsole.metrics.latency')} value={formatLatency(stats?.latency_ms)} hint={t('databaseConsole.metrics.latencyHint')} tone="green" />
       </div>
 
       <div className="flex flex-wrap items-center gap-1 border-b border-outline-variant">
@@ -406,23 +509,23 @@ export function DatabaseConsole({
           <section className="msm-card p-4 xl:col-span-9 flex flex-col h-full overflow-hidden">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2 shrink-0">
               <div>
-                <h3 className="font-headline text-lg font-semibold text-on-surface">SQL-Konsole</h3>
-                <p className="text-xs text-on-surface-variant">Interaktive SQL-Befehle ausführen, formatieren und als Favorit speichern.</p>
+                <h3 className="font-headline text-lg font-semibold text-on-surface">{t('databaseConsole.sql.title')}</h3>
+                <p className="text-xs text-on-surface-variant">{t('databaseConsole.sql.subtitle')}</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button
                   className="msm-btn-secondary px-3 py-1.5 text-xs inline-flex items-center gap-1.5 text-status-warning"
                   onClick={() => setShowSaveFavoriteModal(true)}
                   disabled={!sqlText.trim()}
-                  title="Als Favorit speichern"
+                  title={t('databaseConsole.sql.saveFavoriteTitle')}
                 >
                   <Star className="h-3.5 w-3.5 fill-status-warning/20" />
-                  Favorit speichern
+                  {t('databaseConsole.sql.saveFavorite')}
                 </button>
                 {onImport && (
                   <label className="msm-btn-secondary cursor-pointer px-3 py-1.5 text-xs inline-flex items-center gap-1.5">
                     <FileUp className="h-3.5 w-3.5" />
-                    Import
+                    {t('databaseConsole.sql.import')}
                     <input className="hidden" type="file" accept=".sql,text/sql,text/plain" onChange={(event) => {
                       const file = event.target.files?.[0]
                       if (file) onImport(file)
@@ -433,7 +536,7 @@ export function DatabaseConsole({
                 {onExport && (
                   <button className="msm-btn-secondary px-3 py-1.5 text-xs inline-flex items-center gap-1.5" onClick={onExport}>
                     <Download className="h-3.5 w-3.5" />
-                    Export
+                    {t('databaseConsole.sql.export')}
                   </button>
                 )}
               </div>
@@ -454,13 +557,13 @@ export function DatabaseConsole({
             <div className="mt-2.5 mb-2 flex flex-wrap items-center gap-2 shrink-0">
               <button className="msm-btn-primary px-4 py-1.5 text-xs inline-flex items-center gap-2" onClick={handleRunSqlWithHistory} disabled={!canAdmin || busy === 'sql'}>
                 <Play className="h-3.5 w-3.5" />
-                Ausführen
+                {t('databaseConsole.sql.run')}
               </button>
               <button className="msm-btn-secondary px-3 py-1.5 text-xs inline-flex items-center gap-2" onClick={() => onSqlTextChange(formatSql(sqlText))}>
                 <Wand2 className="h-3.5 w-3.5" />
-                Formatieren
+                {t('databaseConsole.sql.format')}
               </button>
-              <span className="text-[11px] text-on-surface-variant">Ctrl+Enter · Max. 500 Zeilen im Ergebnis</span>
+              <span className="text-[11px] text-on-surface-variant">{t('databaseConsole.sql.hint')}</span>
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto pr-1">
               <SqlResult result={sqlResult} />
@@ -473,7 +576,7 @@ export function DatabaseConsole({
               <div className="flex flex-col h-1/2 min-h-0">
                 <h4 className="mb-2 flex items-center gap-2 text-xs font-semibold text-on-surface shrink-0">
                   <Star className="h-3.5 w-3.5 text-status-warning fill-status-warning/20" />
-                  SQL-Favoriten ({favorites.length})
+                  {t('databaseConsole.sql.favorites')} ({favorites.length})
                 </h4>
                 <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5 pr-1">
                   {favorites.map((fav) => (
@@ -491,14 +594,14 @@ export function DatabaseConsole({
                       <button
                         className="text-on-surface-variant/50 hover:text-status-error opacity-0 group-hover:opacity-100 transition p-0.5 shrink-0"
                         onClick={() => deleteFavorite(fav.id)}
-                        title="Favorit entfernen"
+                        title={t('databaseConsole.sql.removeFavorite')}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   ))}
                   {!favorites.length && (
-                    <p className="text-[11px] text-on-surface-variant/70 italic py-2">Keine Favoriten gespeichert.</p>
+                    <p className="text-[11px] text-on-surface-variant/70 italic py-2">{t('databaseConsole.sql.noFavorites')}</p>
                   )}
                 </div>
               </div>
@@ -508,17 +611,19 @@ export function DatabaseConsole({
                 <h4 className="mb-2 flex items-center justify-between text-xs font-semibold text-on-surface shrink-0">
                   <span className="flex items-center gap-2">
                     <History className="h-3.5 w-3.5 text-secondary" />
-                    Abfrageverlauf
+                    {t('databaseConsole.sql.history')}
                   </span>
                   {localHistory.length > 0 && (
                     <button
                       className="text-[10px] text-on-surface-variant hover:text-on-surface"
                       onClick={() => {
                         setLocalHistory([])
-                        try { localStorage.removeItem('msm_sql_history') } catch {}
+                        // Leeren heißt leeren: der Eintrag verschwindet aus dem
+                        // Browserspeicher, nicht nur aus der Anzeige.
+                        try { localStorage.removeItem(storageKeys.history) } catch {}
                       }}
                     >
-                      Leeren
+                      {t('databaseConsole.sql.clearHistory')}
                     </button>
                   )}
                 </h4>
@@ -534,7 +639,7 @@ export function DatabaseConsole({
                     </button>
                   ))}
                   {!localHistory.length && (
-                    <p className="text-[11px] text-on-surface-variant/70 italic py-2">Noch keine Abfragen im Verlauf.</p>
+                    <p className="text-[11px] text-on-surface-variant/70 italic py-2">{t('databaseConsole.sql.noHistory')}</p>
                   )}
                 </div>
               </div>
@@ -547,7 +652,7 @@ export function DatabaseConsole({
           <aside className="msm-card p-4 xl:col-span-3 flex flex-col h-full overflow-hidden">
             <div className="relative shrink-0">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-on-surface-variant" />
-              <input className="msm-input pl-9 text-xs h-9" placeholder="Tabellen suchen..." onChange={(e) => setSearch(e.target.value)} />
+              <input className="msm-input pl-9 text-xs h-9" placeholder={t('databaseConsole.tables.searchPlaceholder')} onChange={(e) => setSearch(e.target.value)} />
             </div>
             <div className="mt-3 flex-1 min-h-0 space-y-4 overflow-y-auto pr-1">
               {groupedTables.map((group) => {
@@ -574,7 +679,7 @@ export function DatabaseConsole({
                             <Table2 className="h-4 w-4 shrink-0" />
                             <span className="truncate font-mono text-xs">{table.name}</span>
                           </span>
-                          <span className="shrink-0 font-mono text-[11px] text-on-surface-variant/80">{formatRows(table.row_estimate)}</span>
+                          <span className="shrink-0 font-mono text-[11px] text-on-surface-variant/80">{formatRows(table.row_estimate, zeilenEinheit, i18n.language)}</span>
                         </button>
                       ))}
                     </div>
@@ -585,7 +690,7 @@ export function DatabaseConsole({
             {canAdmin && onCreateTable && (
               <button className="msm-btn-secondary mt-3 w-full py-2 inline-flex items-center justify-center gap-2 text-xs shrink-0" onClick={onCreateTable}>
                 <Plus className="h-3.5 w-3.5" />
-                Neue Tabelle erstellen
+                {t('databaseConsole.tables.create')}
               </button>
             )}
           </aside>
@@ -596,14 +701,14 @@ export function DatabaseConsole({
               <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between shrink-0 border-b border-outline-variant pb-3">
                 <div>
                   <h3 className="font-headline text-base font-semibold text-on-surface">
-                    Tabelle: <span className="font-mono text-secondary">{selectedTable?.name || '-'}</span>
+                    {t('databaseConsole.tables.current')} <span className="font-mono text-secondary">{selectedTable?.name || '-'}</span>
                   </h3>
-                  <p className="text-xs text-on-surface-variant">{formatRows(tableInfo?.row_estimate)} · {formatBytes(tableInfo?.size_bytes)}</p>
+                  <p className="text-xs text-on-surface-variant">{formatRows(tableInfo?.row_estimate, zeilenEinheit, i18n.language)} · {formatBytes(tableInfo?.size_bytes)}</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   {selectedRowIndices.size > 0 && (
                     <span className="text-xs font-mono text-secondary font-medium">
-                      {selectedRowIndices.size} gewählt
+                      {selectedRowIndices.size} {t('databaseConsole.tables.selected')}
                     </span>
                   )}
 
@@ -613,30 +718,30 @@ export function DatabaseConsole({
                       <button
                         className="msm-btn-primary px-2.5 h-8 inline-flex items-center gap-1 text-xs"
                         onClick={() => setShowInsertModal(true)}
-                        title="Neue Zeile einfügen"
+                        title={t('databaseConsole.rows.insertTitle')}
                       >
                         <Plus className="h-3.5 w-3.5" />
-                        + Zeile
+                        {t('databaseConsole.rows.insert')}
                       </button>
                     )}
                     {selectedSingleIndex !== null && onUpdateRow && (
                       <button
                         className="msm-btn-secondary px-2.5 h-8 inline-flex items-center gap-1 text-xs"
                         onClick={() => setEditingRowIndex(selectedSingleIndex)}
-                        title="Zeile bearbeiten"
+                        title={t('databaseConsole.rows.editTitle')}
                       >
                         <Pencil className="h-3.5 w-3.5 text-secondary" />
-                        Bearbeiten
+                        {t('databaseConsole.rows.edit')}
                       </button>
                     )}
                     {selectedRowIndices.size > 0 && onDeleteRows && (
                       <button
                         className="msm-btn-destructive px-2.5 h-8 inline-flex items-center gap-1 text-xs"
                         onClick={() => setShowDeleteModal(true)}
-                        title="Ausgewählte Zeilen löschen"
+                        title={t('databaseConsole.rows.deleteTitle')}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
-                        Löschen
+                        {t('databaseConsole.rows.delete')}
                       </button>
                     )}
                   </div>
@@ -647,7 +752,7 @@ export function DatabaseConsole({
                       <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-on-surface-variant" />
                       <input
                         className="msm-input pl-8 h-8 text-xs"
-                        placeholder="Suchen..."
+                        placeholder={t('databaseConsole.rows.searchPlaceholder')}
                         onChange={(event) => setSearch(event.target.value)}
                         onKeyDown={(event) => {
                           if (event.key === 'Enter') onSearchRows(search)
@@ -656,7 +761,7 @@ export function DatabaseConsole({
                     </div>
                     <ToolbarToggleButton
                       icon={Filter}
-                      label="Filter"
+                      label={t('databaseConsole.toolbar.filter')}
                       active={openDropdown === 'filter'}
                       hasState={Boolean(filterColumn && filterValue)}
                       disabled={!resultColumns.length}
@@ -664,7 +769,7 @@ export function DatabaseConsole({
                     />
                     <ToolbarToggleButton
                       icon={ArrowUpDown}
-                      label="Sortieren"
+                      label={t('databaseConsole.toolbar.sort')}
                       active={openDropdown === 'sort'}
                       hasState={Boolean(sortColumn)}
                       disabled={!resultColumns.length}
@@ -672,14 +777,14 @@ export function DatabaseConsole({
                     />
                     <ToolbarToggleButton
                       icon={Columns3}
-                      label="Spalten"
+                      label={t('databaseConsole.toolbar.columns')}
                       active={openDropdown === 'columns'}
                       hasState={hiddenColumns.size > 0}
                       disabled={!resultColumns.length}
                       onClick={() => setOpenDropdown(openDropdown === 'columns' ? null : 'columns')}
                     />
                     {canAdmin && onDropTable && (
-                      <button className="msm-btn-destructive px-2 h-8 inline-flex items-center gap-1 text-xs" onClick={onDropTable} title="Tabelle löschen">
+                      <button className="msm-btn-destructive px-2 h-8 inline-flex items-center gap-1 text-xs" onClick={onDropTable} title={t('databaseConsole.tables.drop')}>
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     )}
@@ -738,8 +843,8 @@ export function DatabaseConsole({
                 <Layers3 className="h-4 w-4" />
               </div>
               <div>
-                <h3 className="font-headline text-sm font-semibold text-on-surface truncate">{selectedTable?.name || 'Keine Tabelle'}</h3>
-                <p className="text-[11px] text-on-surface-variant">Schema & Indizes</p>
+                <h3 className="font-headline text-sm font-semibold text-on-surface truncate">{selectedTable?.name || t('databaseConsole.schema.noTable')}</h3>
+                <p className="text-[11px] text-on-surface-variant">{t('databaseConsole.schema.heading')}</p>
               </div>
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto pr-1">
@@ -749,24 +854,24 @@ export function DatabaseConsole({
               <div className="mt-3 border-t border-outline-variant pt-3 shrink-0">
                 <h4 className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-on-surface">
                   <KeyRound className="h-3.5 w-3.5 text-status-warning" />
-                  Power-User
+                  {t('databaseConsole.powerUser.title')}
                 </h4>
                 <div className="space-y-1.5 text-[11px]">
                   <p className="text-on-surface-variant">
                     {powerUserActive
-                      ? 'Owner-Zugang aktiv (kein Cluster-SUPERUSER).'
-                      : 'Power-User nur für bewusste Admin-Arbeiten aktivieren.'}
+                      ? t('databaseConsole.powerUser.active')
+                      : t('databaseConsole.powerUser.inactive')}
                   </p>
                   <div className="flex flex-wrap gap-1.5">
                     {powerUserActive ? (
                       <>
-                        <button className="msm-btn-secondary px-2.5 py-1 text-[11px]" onClick={onRotatePowerUser}>Rotieren</button>
-                        <button className="msm-btn-destructive px-2.5 py-1 text-[11px]" onClick={onDemotePowerUser}>Entziehen</button>
+                        <button className="msm-btn-secondary px-2.5 py-1 text-[11px]" onClick={onRotatePowerUser}>{t('databaseConsole.powerUser.rotate')}</button>
+                        <button className="msm-btn-destructive px-2.5 py-1 text-[11px]" onClick={onDemotePowerUser}>{t('databaseConsole.powerUser.demote')}</button>
                       </>
                     ) : (
                       <button className="msm-btn-secondary px-2.5 py-1 text-[11px] inline-flex items-center gap-1" onClick={onEnablePowerUser}>
                         <Shield className="h-3 w-3" />
-                        Aktivieren
+                        {t('databaseConsole.powerUser.enable')}
                       </button>
                     )}
                   </div>
@@ -836,43 +941,55 @@ function SaveFavoriteModal({
   onClose: () => void
   onSave: (title: string) => void
 }) {
+  const { t } = useTranslation()
   const [title, setTitle] = useState('')
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useDialogTastatur(dialogRef, onClose)
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
-      <div className="msm-card max-w-md w-full p-6 shadow-2xl space-y-4">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sql-favorit-titel"
+        className="msm-card max-w-md w-full p-6 shadow-2xl space-y-4"
+      >
         <div className="flex items-center justify-between">
-          <h3 className="font-headline text-base font-bold text-on-surface flex items-center gap-2">
+          <h3
+            id="sql-favorit-titel"
+            className="font-headline text-base font-bold text-on-surface flex items-center gap-2"
+          >
             <Star className="h-4 w-4 text-status-warning fill-status-warning/20" />
-            Abfrage als Favorit speichern
+            {t('databaseConsole.favoriteModal.title')}
           </h3>
-          <button className="text-on-surface-variant hover:text-on-surface" onClick={onClose}><X className="h-4 w-4" /></button>
+          <button aria-label={t('common.close')} className="text-on-surface-variant hover:text-on-surface" onClick={onClose}><X className="h-4 w-4" /></button>
         </div>
         <div className="space-y-1">
-          <label className="text-xs text-on-surface-variant font-medium">Titel / Bezeichnung</label>
+          <label className="text-xs text-on-surface-variant font-medium">{t('databaseConsole.favoriteModal.titleLabel')}</label>
           <input
             className="msm-input text-xs"
-            placeholder="z. B. Aktive Benutzer suchen"
+            placeholder={t('databaseConsole.favoriteModal.titlePlaceholder')}
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             autoFocus
           />
         </div>
         <div className="space-y-1">
-          <label className="text-xs text-on-surface-variant font-medium">SQL-Befehl</label>
+          <label className="text-xs text-on-surface-variant font-medium">{t('databaseConsole.favoriteModal.sqlLabel')}</label>
           <div className="rounded border border-outline-variant bg-surface-container p-2 font-mono text-[11px] text-on-surface-variant max-h-32 overflow-y-auto">
             {sql}
           </div>
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-outline-variant pt-3">
           <button className="msm-btn-secondary px-3 py-1.5 text-xs" onClick={onClose}>
-            Abbrechen
+            {t('common.cancel')}
           </button>
           <button
             className="msm-btn-primary px-4 py-1.5 text-xs"
             onClick={() => onSave(title)}
             disabled={!title.trim()}
           >
-            Speichern
+            {t('common.save')}
           </button>
         </div>
       </div>
@@ -888,34 +1005,35 @@ function UsersPanel({ users, canAdmin, busy, onCreateUser, onRotateUser, onDelet
   onRotateUser?: (userId: number) => void
   onDeleteUser?: (userId: number) => void
 }) {
+  const { t, i18n } = useTranslation()
   return (
     <div className="msm-card p-4">
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <h3 className="font-headline text-lg font-semibold text-on-surface">Datenbank-Benutzer</h3>
-          <p className="text-xs text-on-surface-variant">Zusätzliche Benutzer mit Zugriff auf die Datenbanken dieses Servers.</p>
+          <h3 className="font-headline text-lg font-semibold text-on-surface">{t('databaseConsole.users.title')}</h3>
+          <p className="text-xs text-on-surface-variant">{t('databaseConsole.users.subtitle')}</p>
         </div>
         {canAdmin && onCreateUser && (
           <button className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2" onClick={onCreateUser} disabled={busy === 'create-user'}>
             <Plus className="h-4 w-4" />
-            Benutzer erstellen
+            {t('databaseConsole.users.create')}
           </button>
         )}
       </div>
       {!users.length ? (
         <div className="rounded-lg border border-outline-variant p-8 text-center text-sm text-on-surface-variant">
-          Keine Datenbank-Benutzer vorhanden.
+          {t('databaseConsole.users.empty')}
         </div>
       ) : (
         <div className="overflow-hidden rounded-lg border border-outline-variant">
           <table className="min-w-full text-sm">
             <thead className="bg-surface-container-highest text-on-surface">
               <tr>
-                <th className="px-3 py-2 text-left font-mono font-medium">Benutzername</th>
-                <th className="px-3 py-2 text-left font-mono font-medium">Passwort</th>
-                <th className="px-3 py-2 text-left font-mono font-medium">Erstellt</th>
-                <th className="px-3 py-2 text-left font-mono font-medium">Zuletzt rotiert</th>
-                {canAdmin && <th className="px-3 py-2 text-right font-mono font-medium">Aktionen</th>}
+                <th className="px-3 py-2 text-left font-mono font-medium">{t('databaseConsole.users.username')}</th>
+                <th className="px-3 py-2 text-left font-mono font-medium">{t('databaseConsole.users.password')}</th>
+                <th className="px-3 py-2 text-left font-mono font-medium">{t('databaseConsole.users.createdAt')}</th>
+                <th className="px-3 py-2 text-left font-mono font-medium">{t('databaseConsole.users.lastRotated')}</th>
+                {canAdmin && <th className="px-3 py-2 text-right font-mono font-medium">{t('databaseConsole.users.actions')}</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-outline-variant">
@@ -923,18 +1041,18 @@ function UsersPanel({ users, canAdmin, busy, onCreateUser, onRotateUser, onDelet
                 <tr key={user.id} className="bg-surface-container text-on-surface-variant hover:bg-surface-container-high">
                   <td className="px-3 py-2 font-mono text-xs text-on-surface">{user.username}</td>
                   <td className="px-3 py-2 font-mono text-xs">{user.password_mask}</td>
-                  <td className="px-3 py-2 font-mono text-xs">{formatDate(user.created_at)}</td>
-                  <td className="px-3 py-2 font-mono text-xs">{user.last_rotated_at ? formatDate(user.last_rotated_at) : '-'}</td>
+                  <td className="px-3 py-2 font-mono text-xs">{formatDate(user.created_at, i18n.language)}</td>
+                  <td className="px-3 py-2 font-mono text-xs">{user.last_rotated_at ? formatDate(user.last_rotated_at, i18n.language) : '-'}</td>
                   {canAdmin && (
                     <td className="px-3 py-2 text-right">
                       <div className="inline-flex gap-2">
                         {onRotateUser && (
                           <button className="msm-btn-secondary px-2 py-1 text-xs" onClick={() => onRotateUser(user.id)} disabled={busy === `rotate-user-${user.id}`}>
-                            Rotieren
+                            {t('databaseConsole.users.rotate')}
                           </button>
                         )}
                         {onDeleteUser && (
-                          <button className="msm-btn-destructive px-2 py-1 text-xs" onClick={() => onDeleteUser(user.id)} disabled={busy === `delete-user-${user.id}`}>
+                          <button className="msm-btn-destructive px-2 py-1 text-xs" onClick={() => onDeleteUser(user.id)} disabled={busy === `delete-user-${user.id}`} title={t('databaseConsole.users.delete')}>
                             <Trash2 className="h-3 w-3" />
                           </button>
                         )}
@@ -989,8 +1107,9 @@ function RowsGrid({ result, selectable, selectedIndices, onToggleRow, onToggleAl
   onToggleRow?: (index: number) => void
   onToggleAll?: () => void
 }) {
-  if (!result) return <div className="rounded-lg border border-outline-variant p-8 text-center text-xs text-on-surface-variant">Tabelle auswählen.</div>
-  if (!result.columns.length) return <p className="text-xs text-on-surface-variant p-4">{result.status || 'Keine Daten.'}</p>
+  const { t } = useTranslation()
+  if (!result) return <div className="rounded-lg border border-outline-variant p-8 text-center text-xs text-on-surface-variant">{t('databaseConsole.rows.selectTable')}</div>
+  if (!result.columns.length) return <p className="text-xs text-on-surface-variant p-4">{result.status || t('databaseConsole.rows.noData')}</p>
   const allSelected = selectable && result.rows.length > 0 && selectedIndices?.size === result.rows.length
   return (
     <div className="w-full">
@@ -1029,7 +1148,8 @@ function RowsGrid({ result, selectable, selectedIndices, onToggleRow, onToggleAl
 }
 
 function SchemaPanel({ tableInfo }: { tableInfo: PostgresTableInfo | null }) {
-  if (!tableInfo) return <p className="text-xs text-on-surface-variant text-center py-6">Keine Schema-Details geladen.</p>
+  const { t, i18n } = useTranslation()
+  if (!tableInfo) return <p className="text-xs text-on-surface-variant text-center py-6">{t('databaseConsole.schema.empty')}</p>
 
   const pkNames = new Set(
     tableInfo.columns.filter((c) => (c as any).primary_key || c.name === 'id').map((c) => c.name)
@@ -1039,11 +1159,11 @@ function SchemaPanel({ tableInfo }: { tableInfo: PostgresTableInfo | null }) {
     <div className="space-y-4 text-xs">
       <div className="grid grid-cols-2 gap-2 rounded-lg border border-outline-variant bg-surface-container-high p-2.5">
         <div>
-          <span className="text-[11px] text-on-surface-variant block">Geschätzte Zeilen</span>
-          <span className="font-mono font-bold text-xs text-on-surface">{formatRows(tableInfo.row_estimate)}</span>
+          <span className="text-[11px] text-on-surface-variant block">{t('databaseConsole.schema.estimatedRows')}</span>
+          <span className="font-mono font-bold text-xs text-on-surface">{formatRows(tableInfo.row_estimate, t('databaseConsole.rowsUnit'), i18n.language)}</span>
         </div>
         <div>
-          <span className="text-[11px] text-on-surface-variant block">Datengröße</span>
+          <span className="text-[11px] text-on-surface-variant block">{t('databaseConsole.schema.dataSize')}</span>
           <span className="font-mono font-bold text-xs text-on-surface">{formatBytes(tableInfo.size_bytes)}</span>
         </div>
       </div>
@@ -1052,7 +1172,7 @@ function SchemaPanel({ tableInfo }: { tableInfo: PostgresTableInfo | null }) {
         <div className="mb-2 flex items-center justify-between">
           <h4 className="font-semibold text-on-surface flex items-center gap-1.5">
             <Columns3 className="h-3.5 w-3.5 text-secondary" />
-            Spalten ({tableInfo.columns.length})
+            {t('databaseConsole.schema.columns')} ({tableInfo.columns.length})
           </h4>
         </div>
         <div className="overflow-hidden rounded-lg border border-outline-variant divide-y divide-outline-variant bg-surface-container">
@@ -1061,7 +1181,7 @@ function SchemaPanel({ tableInfo }: { tableInfo: PostgresTableInfo | null }) {
             return (
               <div key={column.name} className="flex items-center justify-between gap-2 px-2.5 py-1.5 text-xs hover:bg-surface-container-high transition">
                 <span className="truncate font-mono font-medium text-on-surface flex items-center gap-1">
-                  {isPk && <span className="text-[9px] font-bold text-status-warning bg-status-warning/15 px-1 py-0.2 rounded" title="Primärschlüssel">PK</span>}
+                  {isPk && <span className="text-[9px] font-bold text-status-warning bg-status-warning/15 px-1 py-0.5 rounded" title={t('databaseConsole.schema.primaryKey')}>PK</span>}
                   {column.name}
                 </span>
                 <div className="flex items-center gap-1 shrink-0">
@@ -1082,7 +1202,7 @@ function SchemaPanel({ tableInfo }: { tableInfo: PostgresTableInfo | null }) {
         <div>
           <h4 className="mb-2 font-semibold text-on-surface flex items-center gap-1.5">
             <Boxes className="h-3.5 w-3.5 text-sky-400" />
-            Indizes ({tableInfo.indexes.length})
+            {t('databaseConsole.schema.indexes')} ({tableInfo.indexes.length})
           </h4>
           <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
             {tableInfo.indexes.map((idx) => (
@@ -1098,7 +1218,7 @@ function SchemaPanel({ tableInfo }: { tableInfo: PostgresTableInfo | null }) {
         <div>
           <h4 className="mb-2 font-semibold text-on-surface flex items-center gap-1.5">
             <Sparkles className="h-3.5 w-3.5 text-violet-400" />
-            Fremdschlüssel ({tableInfo.foreign_keys.length})
+            {t('databaseConsole.schema.foreignKeys')} ({tableInfo.foreign_keys.length})
           </h4>
           <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
             {tableInfo.foreign_keys.map((fk) => (
@@ -1177,26 +1297,27 @@ function FilterDropdown({ columns, filterColumn, filterValue, onFilterColumn, on
   onFilterValue: (value: string) => void
   onClose: () => void
 }) {
+  const { t } = useTranslation()
   const active = Boolean(filterColumn && filterValue)
   return (
     <DropdownPanel onClose={onClose}>
       <div className="space-y-3">
         <div className="space-y-1">
-          <label className="text-xs text-on-surface-variant">Spalte</label>
+          <label className="text-xs text-on-surface-variant">{t('databaseConsole.filter.column')}</label>
           <Dropdown
             options={columns.map((col) => ({ value: col, label: col }))}
             value={filterColumn || null}
-            placeholder="-- Spalte wählen --"
+            placeholder={t('databaseConsole.filter.columnPlaceholder')}
             onChange={(value) => onFilterColumn(value)}
             buttonClassName="h-9 text-sm"
           />
         </div>
         <div className="space-y-1">
-          <label className="text-xs text-on-surface-variant">Wert enthält</label>
+          <label className="text-xs text-on-surface-variant">{t('databaseConsole.filter.valueContains')}</label>
           <input
             className="msm-input h-9 text-sm"
             value={filterValue}
-            placeholder="Text..."
+            placeholder={t('databaseConsole.filter.valuePlaceholder')}
             onChange={(event) => onFilterValue(event.target.value)}
           />
         </div>
@@ -1205,7 +1326,7 @@ function FilterDropdown({ columns, filterColumn, filterValue, onFilterColumn, on
             className="msm-btn-secondary w-full py-1.5 text-xs"
             onClick={() => { onFilterColumn(''); onFilterValue('') }}
           >
-            Zurücksetzen
+            {t('databaseConsole.reset')}
           </button>
         )}
       </div>
@@ -1221,33 +1342,34 @@ function SortDropdown({ columns, sortColumn, sortDirection, onSortColumn, onSort
   onSortDirection: (value: 'asc' | 'desc') => void
   onClose: () => void
 }) {
+  const { t } = useTranslation()
   return (
     <DropdownPanel onClose={onClose}>
       <div className="space-y-3">
         <div className="space-y-1">
-          <label className="text-xs text-on-surface-variant">Spalte</label>
+          <label className="text-xs text-on-surface-variant">{t('databaseConsole.filter.column')}</label>
           <Dropdown
             options={columns.map((col) => ({ value: col, label: col }))}
             value={sortColumn || null}
-            placeholder="-- Spalte wählen --"
+            placeholder={t('databaseConsole.filter.columnPlaceholder')}
             onChange={(value) => onSortColumn(value)}
             buttonClassName="h-9 text-sm"
           />
         </div>
         <div className="space-y-1">
-          <label className="text-xs text-on-surface-variant">Richtung</label>
+          <label className="text-xs text-on-surface-variant">{t('databaseConsole.sort.direction')}</label>
           <div className="flex gap-2">
             <button
               className={`msm-btn-secondary flex-1 py-1.5 text-xs ${sortDirection === 'asc' ? 'ring-1 ring-primary' : ''}`}
               onClick={() => onSortDirection('asc')}
             >
-              Aufsteigend
+              {t('databaseConsole.sort.ascending')}
             </button>
             <button
               className={`msm-btn-secondary flex-1 py-1.5 text-xs ${sortDirection === 'desc' ? 'ring-1 ring-primary' : ''}`}
               onClick={() => onSortDirection('desc')}
             >
-              Absteigend
+              {t('databaseConsole.sort.descending')}
             </button>
           </div>
         </div>
@@ -1256,7 +1378,7 @@ function SortDropdown({ columns, sortColumn, sortDirection, onSortColumn, onSort
             className="msm-btn-secondary w-full py-1.5 text-xs"
             onClick={() => { onSortColumn(''); onSortDirection('asc') }}
           >
-            Zurücksetzen
+            {t('databaseConsole.reset')}
           </button>
         )}
       </div>
@@ -1271,6 +1393,7 @@ function ColumnsDropdown({ columns, hiddenColumns, onToggle, onReset, onClose }:
   onReset: () => void
   onClose: () => void
 }) {
+  const { t } = useTranslation()
   return (
     <DropdownPanel onClose={onClose}>
       <div className="space-y-2">
@@ -1288,7 +1411,7 @@ function ColumnsDropdown({ columns, hiddenColumns, onToggle, onReset, onClose }:
         </div>
         {hiddenColumns.size > 0 && (
           <button className="msm-btn-secondary w-full py-1.5 text-xs" onClick={onReset}>
-            Zurücksetzen
+            {t('databaseConsole.reset')}
           </button>
         )}
       </div>
@@ -1309,9 +1432,12 @@ function EditRowModal({
   onClose: () => void
   onSave: (keyConditions: Record<string, any>, updates: Record<string, any>) => Promise<void>
 }) {
+  const { t } = useTranslation()
   const [formData, setFormData] = useState<Record<string, any>>(() => ({ ...initialRow }))
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useDialogTastatur(dialogRef, onClose, isSubmitting)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -1319,6 +1445,12 @@ function EditRowModal({
     setError(null)
     try {
       const keyConditions = buildRowKeyConditions(initialRow, tableInfo, columns)
+      if (keyConditions === null) {
+        // Dieselbe Bedingung baut auch das UPDATE. Unvollständig hieße hier:
+        // die Korrektur einer Zeile überschreibt still mehrere.
+        setError(t('databaseConsole.rowNotAddressable'))
+        return
+      }
       const updates: Record<string, any> = {}
       for (const col of columns) {
         if (formData[col] !== initialRow[col]) {
@@ -1331,7 +1463,7 @@ function EditRowModal({
       }
       await onSave(keyConditions, updates)
     } catch (err: any) {
-      setError(err?.message || 'Fehler beim Speichern der Zeile')
+      setError(err?.message || t('databaseConsole.editRow.saveError'))
     } finally {
       setIsSubmitting(false)
     }
@@ -1339,12 +1471,20 @@ function EditRowModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
-      <div className="msm-card max-h-[85vh] w-full max-w-xl flex flex-col overflow-hidden p-6 shadow-2xl">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="zeile-bearbeiten-titel"
+        className="msm-card max-h-[85vh] w-full max-w-xl flex flex-col overflow-hidden p-6 shadow-2xl"
+      >
         <div className="flex items-center justify-between">
-          <h3 className="font-headline text-lg font-bold text-on-surface">Zeile bearbeiten</h3>
-          <button className="text-on-surface-variant hover:text-on-surface" onClick={onClose}><X className="h-5 w-5" /></button>
+          <h3 id="zeile-bearbeiten-titel" className="font-headline text-lg font-bold text-on-surface">
+            {t('databaseConsole.editRow.title')}
+          </h3>
+          <button aria-label={t('common.close')} className="text-on-surface-variant hover:text-on-surface" onClick={onClose}><X className="h-5 w-5" /></button>
         </div>
-        <p className="mt-1 text-xs text-on-surface-variant">Werte für die ausgewählte Tabellenzeile anpassen.</p>
+        <p className="mt-1 text-xs text-on-surface-variant">{t('databaseConsole.editRow.subtitle')}</p>
         {error && <div className="mt-3 rounded border border-status-error/30 bg-status-error/10 p-2 text-xs text-status-error">{error}</div>}
         <form onSubmit={handleSubmit} className="mt-4 flex-1 space-y-3 overflow-y-auto pr-1">
           {columns.map((col) => (
@@ -1359,10 +1499,10 @@ function EditRowModal({
           ))}
           <div className="mt-6 flex items-center justify-end gap-2 border-t border-outline-variant pt-4">
             <button type="button" className="msm-btn-secondary px-4 py-2 text-sm" onClick={onClose} disabled={isSubmitting}>
-              Abbrechen
+              {t('common.cancel')}
             </button>
             <button type="submit" className="msm-btn-primary px-4 py-2 text-sm" disabled={isSubmitting}>
-              {isSubmitting ? 'Speichert...' : 'Änderungen speichern'}
+              {isSubmitting ? t('databaseConsole.editRow.saving') : t('databaseConsole.editRow.submit')}
             </button>
           </div>
         </form>
@@ -1380,9 +1520,12 @@ function InsertRowModal({
   onClose: () => void
   onSave: (rowData: Record<string, any>) => Promise<void>
 }) {
+  const { t } = useTranslation()
   const [formData, setFormData] = useState<Record<string, any>>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useDialogTastatur(dialogRef, onClose, isSubmitting)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -1396,13 +1539,13 @@ function InsertRowModal({
         }
       }
       if (Object.keys(rowData).length === 0) {
-        setError('Mindestens ein Feld muss ausgefüllt werden.')
+        setError(t('databaseConsole.insertRow.emptyError'))
         setIsSubmitting(false)
         return
       }
       await onSave(rowData)
     } catch (err: any) {
-      setError(err?.message || 'Fehler beim Einfügen der Zeile')
+      setError(err?.message || t('databaseConsole.insertRow.saveError'))
     } finally {
       setIsSubmitting(false)
     }
@@ -1410,12 +1553,20 @@ function InsertRowModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
-      <div className="msm-card max-h-[85vh] w-full max-w-xl flex flex-col overflow-hidden p-6 shadow-2xl">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="zeile-einfuegen-titel"
+        className="msm-card max-h-[85vh] w-full max-w-xl flex flex-col overflow-hidden p-6 shadow-2xl"
+      >
         <div className="flex items-center justify-between">
-          <h3 className="font-headline text-lg font-bold text-on-surface">Neue Zeile hinzufügen</h3>
-          <button className="text-on-surface-variant hover:text-on-surface" onClick={onClose}><X className="h-5 w-5" /></button>
+          <h3 id="zeile-einfuegen-titel" className="font-headline text-lg font-bold text-on-surface">
+            {t('databaseConsole.insertRow.title')}
+          </h3>
+          <button aria-label={t('common.close')} className="text-on-surface-variant hover:text-on-surface" onClick={onClose}><X className="h-5 w-5" /></button>
         </div>
-        <p className="mt-1 text-xs text-on-surface-variant">Werte für eine neue Tabellenzeile eingeben.</p>
+        <p className="mt-1 text-xs text-on-surface-variant">{t('databaseConsole.insertRow.subtitle')}</p>
         {error && <div className="mt-3 rounded border border-status-error/30 bg-status-error/10 p-2 text-xs text-status-error">{error}</div>}
         <form onSubmit={handleSubmit} className="mt-4 flex-1 space-y-3 overflow-y-auto pr-1">
           {columns.map((col) => (
@@ -1423,7 +1574,7 @@ function InsertRowModal({
               <label className="text-xs font-mono font-medium text-on-surface-variant">{col}</label>
               <input
                 className="msm-input font-mono text-xs"
-                placeholder="Wert eingeben..."
+                placeholder={t('databaseConsole.insertRow.valuePlaceholder')}
                 value={formData[col] || ''}
                 onChange={(e) => setFormData({ ...formData, [col]: e.target.value })}
               />
@@ -1431,10 +1582,10 @@ function InsertRowModal({
           ))}
           <div className="mt-6 flex items-center justify-end gap-2 border-t border-outline-variant pt-4">
             <button type="button" className="msm-btn-secondary px-4 py-2 text-sm" onClick={onClose} disabled={isSubmitting}>
-              Abbrechen
+              {t('common.cancel')}
             </button>
             <button type="submit" className="msm-btn-primary px-4 py-2 text-sm" disabled={isSubmitting}>
-              {isSubmitting ? 'Einfügen...' : 'Zeile einfügen'}
+              {isSubmitting ? t('databaseConsole.insertRow.saving') : t('databaseConsole.insertRow.submit')}
             </button>
           </div>
         </form>
@@ -1452,8 +1603,11 @@ function DeleteConfirmModal({
   onClose: () => void
   onConfirm: () => Promise<void>
 }) {
+  const { t } = useTranslation()
   const [isDeleting, setIsDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useDialogTastatur(dialogRef, onClose, isDeleting)
 
   const handleConfirm = async () => {
     setIsDeleting(true)
@@ -1461,7 +1615,7 @@ function DeleteConfirmModal({
     try {
       await onConfirm()
     } catch (err: any) {
-      setError(err?.message || 'Fehler beim Löschen der Zeilen')
+      setError(err?.message || t('databaseConsole.deleteRows.deleteError'))
     } finally {
       setIsDeleting(false)
     }
@@ -1469,21 +1623,31 @@ function DeleteConfirmModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
-      <div className="msm-card w-full max-w-md p-6 shadow-2xl space-y-4">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="zeilen-loeschen-titel"
+        className="msm-card w-full max-w-md p-6 shadow-2xl space-y-4"
+      >
         <div className="flex items-center justify-between">
-          <h3 className="font-headline text-lg font-bold text-status-error">Zeile(n) löschen</h3>
-          <button className="text-on-surface-variant hover:text-on-surface" onClick={onClose}><X className="h-5 w-5" /></button>
+          <h3 id="zeilen-loeschen-titel" className="font-headline text-lg font-bold text-status-error">
+            {t('databaseConsole.deleteRows.title')}
+          </h3>
+          <button aria-label={t('common.close')} className="text-on-surface-variant hover:text-on-surface" onClick={onClose}><X className="h-5 w-5" /></button>
         </div>
+        {/* Die Anzahl steckt im Satz statt in einem eigenen <strong>: die Stelle,
+            an der sie im Satz steht, ist je Sprache eine andere. */}
         <p className="text-sm text-on-surface-variant">
-          Möchtest du die <strong className="text-on-surface font-mono">{count}</strong> ausgewählte(n) Zeile(n) wirklich unwiderruflich aus der Tabelle löschen?
+          {t('databaseConsole.deleteRows.question', { anzahl: count })}
         </p>
         {error && <div className="rounded border border-status-error/30 bg-status-error/10 p-2 text-xs text-status-error">{error}</div>}
         <div className="flex items-center justify-end gap-2 border-t border-outline-variant pt-4">
           <button className="msm-btn-secondary px-4 py-2 text-sm" onClick={onClose} disabled={isDeleting}>
-            Abbrechen
+            {t('common.cancel')}
           </button>
           <button className="msm-btn-destructive px-4 py-2 text-sm" onClick={handleConfirm} disabled={isDeleting}>
-            {isDeleting ? 'Löscht...' : 'Unwiderruflich löschen'}
+            {isDeleting ? t('databaseConsole.deleteRows.deleting') : t('databaseConsole.deleteRows.submit')}
           </button>
         </div>
       </div>
@@ -1491,7 +1655,21 @@ function DeleteConfirmModal({
   )
 }
 
-function buildRowKeyConditions(row: Record<string, any>, tableInfo: PostgresTableInfo | null, columns: string[]): Record<string, any> {
+/** Baut die WHERE-Bedingung, die genau diese eine Zeile beschreibt.
+ *
+ *  Gibt `null` zurück, wenn das nicht möglich ist. Das ist der Kern: ohne
+ *  Primärschlüssel beschreiben nur ALLE Spalten die Zeile. Fehlt auch nur
+ *  eine — weil sie NULL ist (`spalte = NULL` trifft nie) oder JSON enthält
+ *  (lässt sich nicht per `=` vergleichen) — dann wäre die Bedingung kürzer
+ *  als die Zeile und träfe womöglich fremde Zeilen mit. Am Ende der Kette
+ *  steht ein `DELETE ... WHERE` ohne `LIMIT`; eine unvollständige Bedingung
+ *  löscht dort still zu viel. Lieber gar nichts tun und es sagen.
+ */
+export function buildRowKeyConditions(
+  row: Record<string, any>,
+  tableInfo: PostgresTableInfo | null,
+  columns: string[],
+): Record<string, any> | null {
   const pkCols = tableInfo?.columns.filter((c) => c.primary_key || c.name === 'id').map((c) => c.name) || []
   if (pkCols.length > 0 && pkCols.every((col) => col in row && row[col] !== undefined && row[col] !== null)) {
     const keys: Record<string, any> = {}
@@ -1502,11 +1680,12 @@ function buildRowKeyConditions(row: Record<string, any>, tableInfo: PostgresTabl
   }
   const keys: Record<string, any> = {}
   for (const col of columns) {
-    if (col in row && row[col] !== undefined && row[col] !== null && typeof row[col] !== 'object') {
-      keys[col] = row[col]
-    }
+    const wert = row[col]
+    if (!(col in row) || wert === undefined || wert === null || typeof wert === 'object') return null
+    keys[col] = wert
   }
-  return keys
+  // Ohne jede Spalte wäre die Bedingung leer — das träfe die ganze Tabelle.
+  return Object.keys(keys).length > 0 ? keys : null
 }
 
 function compareValues(a: unknown, b: unknown, direction: 'asc' | 'desc'): number {
@@ -1532,9 +1711,9 @@ function groupTables(tables: PostgresTable[]) {
   return Array.from(map.entries()).map(([schema, grouped]) => ({ schema, tables: grouped }))
 }
 
-function formatDate(value: string): string {
+function formatDate(value: string, sprache: string): string {
   try {
-    return new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
+    return new Intl.DateTimeFormat(sprache, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
   } catch {
     return value
   }
@@ -1553,13 +1732,16 @@ function formatBytes(value?: number | null) {
   return `${size.toFixed(size >= 10 ? 0 : 1)} ${units[index]}`
 }
 
-function formatRows(value?: number | null) {
+/** `einheit` ist das übersetzte Wort für "Zeilen", `sprache` die gewählte
+ *  Oberflächensprache — die Funktion steht außerhalb der Komponenten und hat
+ *  deshalb weder eigenes `t` noch eigenes `i18n`. */
+function formatRows(value: number | null | undefined, einheit: string, sprache: string) {
   if (value == null) return '-'
-  return `${formatNumber(value)} Zeilen`
+  return `${formatNumber(value, sprache)} ${einheit}`
 }
 
-function formatNumber(value: number) {
-  return new Intl.NumberFormat('de-DE').format(value)
+function formatNumber(value: number, sprache: string) {
+  return new Intl.NumberFormat(sprache).format(value)
 }
 
 function formatConnections(stats: PostgresDatabaseStats | null) {

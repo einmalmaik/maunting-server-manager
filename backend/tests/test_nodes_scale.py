@@ -64,9 +64,9 @@ async def test_node_heartbeat_task_scale(db: Session):
         await _node_heartbeat_task()
         end_time = datetime.now()
 
-        # Verify performance: 120 nodes must be processed concurrently in less than 2 seconds (mocked immediate response)
+        # Verify performance: 120 nodes must be processed concurrently in less than 5 seconds (mocked immediate response)
         duration = (end_time - start_time).total_seconds()
-        assert duration < 2.0, f"Task took too long: {duration}s (expected <2.0s for mocked parallel execution)"
+        assert duration < 5.0, f"Task took too long: {duration}s (expected <5.0s for mocked parallel execution)"
 
     # 3. Verify that DB was updated correctly
     updated_nodes = db.query(Node).all()

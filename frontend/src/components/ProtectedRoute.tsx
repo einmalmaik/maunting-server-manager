@@ -14,11 +14,13 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }, [isAuthenticated, isLoading, checkAuth])
 
   if (isLoading) {
-    return <Loader fullScreen label="Maunting Server Manager" />
+    return <Loader fullScreen label="Maunting Service Manager" />
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace state={{ from: location.pathname }} />
+    // Mit den Suchparametern, damit nach der Anmeldung auch der Reiter
+    // aus /servers/7?tab=console wieder stimmt.
+    return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />
   }
 
   return <>{children}</>

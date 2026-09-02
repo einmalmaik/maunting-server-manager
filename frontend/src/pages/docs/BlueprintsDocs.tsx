@@ -415,6 +415,9 @@ export function BlueprintsDocs() {
               <FieldRow field="runtime.configPatches" type="list" required={false}>{t('docs.reference.runtimeConfigPatches')}</FieldRow>
               <FieldRow field="runtime.stopGracePeriodSeconds" type="integer" required={false}>{t('docs.reference.runtimeStopGracePeriodSeconds')}</FieldRow>
               <FieldRow field="runtime.startupCheckSeconds" type="float" required={false}>{t('docs.reference.runtimeStartupCheckSeconds')}</FieldRow>
+              <FieldRow field="runtime.allowUnprivilegedUserNamespaces" type="boolean" required={false}>
+                {t('docs.reference.runtimeAllowUnprivilegedUserNamespaces', 'Allows nested unprivileged user namespaces for runtimes such as UMU/pressure-vessel. Default: false. Only Docker seccomp is relaxed; cap-drop=ALL, no-new-privileges, non-root user, and the host-network/privileged bans remain active.')}
+              </FieldRow>
               {/* v1.4.7+: Exec-Tab-Opt-in. Default false. Erlaubt authentifizierten
                   Usern mit Permission ``server.console.exec``, One-Shot-Befehle
                   im MSM-Container auszufuehren (argv, kein Shell). Siehe
@@ -475,6 +478,11 @@ export function BlueprintsDocs() {
             <FieldTable>
               <FieldRow field="mods.supportsMods" type="boolean" required={false}>{t('docs.reference.modsSupportsMods')}</FieldRow>
               <FieldRow field="mods.supportsSteamWorkshop" type="boolean" required={false}>{t('docs.reference.modsSupportsSteamWorkshop')}</FieldRow>
+              <FieldRow field="mods.supportsCurseForge" type="boolean" required={false}>{t('docs.reference.modsSupportsCurseForge')}</FieldRow>
+              <FieldRow field="mods.curseforgeGameId" type="string" required={false}>{t('docs.reference.modsCurseforgeGameId')}</FieldRow>
+              <FieldRow field="mods.curseforgeClassId" type="string" required={false}>{t('docs.reference.modsCurseforgeClassId')}</FieldRow>
+              <FieldRow field="mods.curseforgeInstallPath" type="string" required={false}>{t('docs.reference.modsCurseforgeInstallPath')}</FieldRow>
+              <FieldRow field="mods.modStartupArgumentSeparator" type="string" required={false}>{t('docs.reference.modsModStartupArgumentSeparator')}</FieldRow>
               <FieldRow field="mods.workshopAppId" type="string" required={false}>{t('docs.reference.modsWorkshopAppId')}</FieldRow>
               <FieldRow field="mods.filterTags" type="list" required={false}>{t('docs.reference.modsFilterTags')}</FieldRow>
               <FieldRow field="mods.modInjection" type="enum" required={false}>{t('docs.reference.modsModInjection')}</FieldRow>
@@ -484,6 +492,13 @@ export function BlueprintsDocs() {
               <FieldRow field="mods.postInstall" type="list" required={false}>{t('docs.reference.modsPostInstall')}</FieldRow>
               <FieldRow field="backup.includePaths" type="list" required={false}>{t('docs.reference.backupIncludePaths')}</FieldRow>
             </FieldTable>
+
+            <h3 className="font-bold text-primary mt-6 mb-2">logs</h3>
+            <FieldTable>
+              <FieldRow field="logs.sources" type="list" required={false}>{t('docs.reference.logsSources')}</FieldRow>
+              <FieldRow field="logs.redact" type="list" required={false}>{t('docs.reference.logsRedact')}</FieldRow>
+              <FieldRow field="logs.max_tail_bytes" type="integer" required={false}>{t('docs.reference.logsMaxTailBytes')}</FieldRow>
+            </FieldTable>
           </section>
 
           <section id="docs-howto" className="msm-card p-6 scroll-mt-20">
@@ -491,6 +506,9 @@ export function BlueprintsDocs() {
 
             <h3 className="font-bold text-on-surface mt-4">{t('docs.howto.h1')}</h3>
             <p className="font-body-md text-body-md text-on-surface-variant mb-2">{t('docs.howto.b1')}</p>
+
+            <h3 className="font-bold text-on-surface mt-6">{t('docs.howto.hCurseForge')}</h3>
+            <p className="font-body-md text-body-md text-on-surface-variant mb-2">{t('docs.howto.bCurseForge')}</p>
 
             <h3 className="font-bold text-on-surface mt-6">{t('docs.howto.h2')}</h3>
             <p className="font-body-md text-body-md text-on-surface-variant mb-2">{t('docs.howto.b2')}</p>

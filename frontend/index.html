@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" href="/favicon.ico" sizes="any" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     
     <!-- Cache Control -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
@@ -24,8 +24,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="MSM" />
-    <meta name="application-name" content="Maunting Server Manager" />
-    <meta name="description" content="Modular game server management panel for Conan Exiles UE5 and DayZ" />
+    <meta name="application-name" content="Maunting Service Manager" />
+    <meta name="description" content="Self-hosted game server and application management panel." />
     
     <!-- Prevent FOUC -->
     <style>
@@ -41,10 +41,14 @@
       }
     </style>
     
-    <title>Maunting Server Manager</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet" />
+    <title>Maunting Service Manager</title>
+
+    <!--
+      Keine Schriften von Dritten. Inter, Manrope, IBM Plex Sans und JetBrains
+      Mono kommen aus src/main.tsx (@fontsource) und damit aus dem eigenen
+      Build. Hier standen bis dahin drei Zeilen, die sie zur Laufzeit bei
+      Google holten; die Begründung für den Wechsel steht in src/main.tsx.
+    -->
   </head>
   <body>
     <div id="root"></div>

@@ -7,7 +7,7 @@ export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export DEBIAN_FRONTEND="${DEBIAN_FRONTEND:-noninteractive}"
 
 # ═══════════════════════════════════════════════════════════════
-#  Maunting Server Manager — Zero-Config One-Line Installer
+#  Maunting Service Manager — Zero-Config One-Line Installer
 #  Supports: Ubuntu 22.04+, Debian 12+, WSL2
 #
 #  Usage:  sudo bash install.sh
@@ -497,7 +497,7 @@ setup_rootless_docker() {
     ok "Rootless Docker bereit (${MSM_DOCKER_HOST})"
 }
 
-log "=== Maunting Server Manager Installation ==="
+log "=== Maunting Service Manager Installation ==="
 log "Log: $LOG_FILE"
 log ""
 
@@ -770,6 +770,10 @@ if $SHOULD_COPY_FILES; then
             rsync -a --chown="$MSM_USER:$MSM_USER" --delete --exclude '.env' --exclude 'node_modules/' \
                 "$SCRIPT_DIR/dis-sidecar/" "$MSM_DIR/dis-sidecar/"
         fi
+        if [[ -d "$SCRIPT_DIR/searxng-sidecar" ]]; then
+            rsync -a --chown="$MSM_USER:$MSM_USER" --delete \
+                "$SCRIPT_DIR/searxng-sidecar/" "$MSM_DIR/searxng-sidecar/"
+        fi
         if [[ -d "$SCRIPT_DIR/msm-agent" ]]; then
             rsync -a --chown="$MSM_USER:$MSM_USER" --delete \
                 --exclude '.env' --exclude 'venv/' --exclude 'servers/' \
@@ -797,7 +801,7 @@ if $SHOULD_COPY_FILES; then
         2>/dev/null || true
     # In-place Install (git checkout as root) leaves trees root-owned. Backend +
     # agent venvs are created as $MSM_USER and need write access to their dirs.
-    for _msm_tree in backend frontend dis-sidecar msm-agent docs scripts helper-scripts; do
+    for _msm_tree in backend frontend dis-sidecar searxng-sidecar msm-agent docs scripts helper-scripts; do
         if [[ -d "$MSM_DIR/$_msm_tree" ]]; then
             chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/$_msm_tree" 2>/dev/null || true
         fi
@@ -814,7 +818,7 @@ fi
 # Always re-own code trees before Python venv work — even when SHOULD_COPY_FILES
 # is false (e.g. git checkout as root left msm-agent root:root).
 if id "$MSM_USER" &>/dev/null; then
-    for _msm_tree in backend frontend dis-sidecar msm-agent docs scripts helper-scripts; do
+    for _msm_tree in backend frontend dis-sidecar searxng-sidecar msm-agent docs scripts helper-scripts; do
         if [[ -d "$MSM_DIR/$_msm_tree" ]]; then
             chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/$_msm_tree" \
                 || err "chown $MSM_USER:$MSM_USER auf $MSM_DIR/$_msm_tree fehlgeschlagen"
@@ -1241,7 +1245,7 @@ cat > "$ENV_FILE" <<EOF
 # ÄNDERUNGEN NUR MIT VORSICHT
 # Vollständige Erklärung aller Werte: $MSM_DIR/backend/.env.example
 
-MSM_APP_NAME="Maunting Server Manager"
+MSM_APP_NAME="Maunting Service Manager"
 MSM_DEBUG=false
 MSM_DATABASE_URL="$DB_URL"
 MSM_DATABASE_URL_ASYNC="$DB_URL_ASYNC"
@@ -1314,6 +1318,21 @@ EOF
 chmod 600 "$DIS_ENV_FILE"
 chown "$MSM_USER:$MSM_USER" "$DIS_ENV_FILE"
 
+# SearXNG-Sidecar Environment (zufälliger Secret-Key für CSRF & Sessions)
+if [[ -d "$MSM_DIR/searxng-sidecar" ]]; then
+    SEARXNG_ENV_FILE="$MSM_DIR/searxng-sidecar/.env"
+    if [[ ! -f "$SEARXNG_ENV_FILE" ]]; then
+        SEARXNG_SECRET=$(openssl rand -hex 32 2>/dev/null || tr -dc 'a-f0-9' < /dev/urandom | head -c 64)
+        cat > "$SEARXNG_ENV_FILE" <<EOF
+# Automatisch generiert für SearXNG-Sidecar
+SEARXNG_SECRET_KEY="$SEARXNG_SECRET"
+SEARXNG_BASE_URL=http://127.0.0.1:8888/
+EOF
+        chmod 600 "$SEARXNG_ENV_FILE"
+        chown "$MSM_USER:$MSM_USER" "$SEARXNG_ENV_FILE"
+    fi
+fi
+
 # ═══════════════════════════════════════════════════════════════
 # 7. Python-Backend einrichten
 # ═══════════════════════════════════════════════════════════════
@@ -1330,6 +1349,18 @@ if $RUN_BACKEND_SETUP; then
     log "Installiere Python-Abhängigkeiten..."
     # recreate=true: clean venv after in-place wipe / dependency upgrades
     prepare_app_venv "$MSM_DIR/backend" "Python-Backend" true
+
+    # Lokales Embeddingmodell fuer die KI-Gedaechtnissuche (~507 MB).
+    # Bewusst hier und nicht zur Laufzeit: das Panel laedt im Betrieb niemals
+    # Gewichte aus dem Internet nach. Ein Fehlschlag bricht die Installation
+    # nicht ab — ohne Modell laeuft die Suche ohne Vektoren weiter.
+    log "Stelle KI-Embeddingmodell bereit (einmalig, ~507 MB)..."
+    su - msm -c "
+        cd $MSM_DIR/backend
+        source venv/bin/activate
+        python3 scripts/fetch_embedding_model.py
+    " 2>&1 | tee -a "$LOG_FILE" || warn "Embeddingmodell nicht verfuegbar - KI-Gedaechtnis laeuft ohne Vektoren."
+
     ok "Python-Backend bereit"
 
     # MSM Agent (lokaler Node, rootless Docker) — eigenes venv, gleiche User-ID
@@ -1549,7 +1580,9 @@ $DOMAIN {
         X-Content-Type-Options nosniff
         X-Frame-Options DENY
         Referrer-Policy strict-origin-when-cross-origin
-        Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+        # microphone=(self): der Realtime-Sprachmodus braucht getUserMedia auf
+        # der eigenen Herkunft; microphone=() blockierte ihn vollstaendig.
+        Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()"
     }
 
     handle /api/* {
@@ -1578,7 +1611,9 @@ $DOMAIN {
         X-Content-Type-Options nosniff
         X-Frame-Options DENY
         Referrer-Policy strict-origin-when-cross-origin
-        Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+        # microphone=(self): der Realtime-Sprachmodus braucht getUserMedia auf
+        # der eigenen Herkunft; microphone=() blockierte ihn vollstaendig.
+        Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()"
     }
 
     handle /api/* {
@@ -1695,9 +1730,36 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
+    # ── SearXNG Search Sidecar Service ──
+    if [[ -d "$MSM_DIR/searxng-sidecar" ]]; then
+        cat > /etc/systemd/system/msm-searxng.service <<EOF
+[Unit]
+Description=MSM SearXNG Search Sidecar
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=$MSM_USER
+Group=$MSM_USER
+WorkingDirectory=$MSM_DIR/searxng-sidecar
+Environment="DOCKER_HOST=$MSM_DOCKER_HOST"
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/usr/bin/docker compose up
+ExecStop=/usr/bin/docker compose down
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    fi
+
     cat > /etc/systemd/system/msm-panel.service <<EOF
 [Unit]
-Description=Maunting Server Manager Panel
+Description=Maunting Service Manager Panel
 After=network.target redis-server.service msm-dis-sidecar.service
 Wants=redis-server.service
 Requires=msm-dis-sidecar.service
@@ -1768,6 +1830,9 @@ EOF
     if $SYSTEMD_AVAILABLE; then
         systemctl daemon-reload
         systemctl enable msm-dis-sidecar.service
+        if [[ -d "$MSM_DIR/searxng-sidecar" ]]; then
+            systemctl enable msm-searxng.service 2>/dev/null || true
+        fi
         systemctl enable msm-panel.service
         if $INSTALL_LOCAL_AGENT && [[ -f /etc/systemd/system/msm-agent.service ]]; then
             systemctl enable msm-agent.service
@@ -1979,6 +2044,14 @@ if $SYSTEMD_AVAILABLE; then
     done
     $DIS_READY || err "DIS Sidecar ist nicht bereit. Prüfe: journalctl -u msm-dis-sidecar -n 50"
 
+    # SearXNG Sidecar starten
+    if [[ -f /etc/systemd/system/msm-searxng.service ]]; then
+        log "Starte SearXNG Search Sidecar..."
+        systemctl restart msm-searxng.service 2>/dev/null \
+            || systemctl start msm-searxng.service 2>/dev/null || true
+        ok "SearXNG Sidecar bereit."
+    fi
+
     # DIS Migration: Fernet -> DIS (einmalig, nur wenn alte Daten vorhanden)
     if [[ -f "$MSM_DIR/backend/msm.db" ]] || [[ "$DB_URL" == postgresql* ]]; then
         log "Pruefe DIS-Migration (Fernet -> DIS)..."
@@ -2038,9 +2111,9 @@ fi
 echo ""
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 if $REINSTALL_MODE; then
-    echo -e "${GREEN}  Maunting Server Manager erfolgreich aktualisiert!${NC}"
+    echo -e "${GREEN}  Maunting Service Manager erfolgreich aktualisiert!${NC}"
 else
-    echo -e "${GREEN}  Maunting Server Manager erfolgreich installiert!${NC}"
+    echo -e "${GREEN}  Maunting Service Manager erfolgreich installiert!${NC}"
 fi
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 

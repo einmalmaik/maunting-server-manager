@@ -172,11 +172,36 @@ def reconcile_orphaned_lifecycle_statuses(db: Session) -> int:
     """Nach Prozess-Neustart: DB kann noch ``starting``/``stopping`` zeigen, obwohl der
     In-Memory-Job weg ist. Status an Docker-Realität anbinden, damit das Panel nicht
     ewig „Startet…“ anzeigt und WebSockets sinnlos offen bleiben."""
+    from services.node_service import probe_node_metrics
+
     servers = db.query(Server).filter(Server.status.in_(_TRANSIENT_STATUSES)).all()
     changed = 0
+    # Ein Probe je Node, nicht je Server.
+    node_reachable: dict[int, bool] = {}
     for server in servers:
         if is_lifecycle_job_active(server.id):
             continue
+        node = server.node
+        if node is not None:
+            if node.id not in node_reachable:
+                # Bewusst nicht `node.status` auswerten: dieser Lauf passiert beim
+                # Start, bevor der Heartbeat-Job registriert ist. Der gespeicherte
+                # Status stammt dann noch von vor dem Herunterfahren und stuende
+                # gerade im gemeinsamen Neustart von Panel und Node auf "online".
+                node_reachable[node.id] = (
+                    probe_node_metrics(node, mark_status=False) is not None
+                )
+            if not node_reachable[node.id]:
+                # `inspect_state` kann "Container weg" nicht von "Agent nicht
+                # erreichbar" unterscheiden und liefert beides als None, woraus
+                # `get_status` ein "stopped" macht. Fuer einen tatsaechlich
+                # laufenden Server waere das eine falsche Tatsachenbehauptung:
+                # der Auto-Restart wuerde stillschweigend uebersprungen und ein
+                # Blueprint-Wechsel koennte das Verzeichnis unter einem
+                # laufenden Container loeschen. Lieber den Uebergangsstatus
+                # stehen lassen — der Statusabruf korrigiert ihn, sobald die
+                # Node wieder antwortet.
+                continue
         plugin = get_plugin(server.game_type)
         if not plugin:
             server.status = "failed"
@@ -362,6 +387,7 @@ def queue_lifecycle_operation(
     server: Server,
     operation: LifecycleOperation,
     notification: LifecycleNotification | None = None,
+    task_id: str | None = None,
 ) -> dict:
     """Startet eine Lifecycle-Aktion ausserhalb des HTTP-Request-Pfads.
 
@@ -452,6 +478,7 @@ def queue_lifecycle_operation(
             operation,
             notification or LifecycleNotification(),
             operation_epoch,
+            task_id,
         )
     except Exception as exc:
         _mark_job_done(server.id)
@@ -470,10 +497,11 @@ def _start_lifecycle_thread(
     operation: LifecycleOperation,
     notification: LifecycleNotification,
     operation_epoch: int,
+    task_id: str | None = None,
 ) -> None:
     thread = threading.Thread(
         target=_run_lifecycle_job,
-        args=(server_id, operation, notification, operation_epoch),
+        args=(server_id, operation, notification, operation_epoch, task_id),
         daemon=True,
         name=f"msm-lifecycle-{server_id}-{operation}",
     )
@@ -485,20 +513,25 @@ def _run_lifecycle_job(
     operation: LifecycleOperation,
     notification: LifecycleNotification | None = None,
     operation_epoch: int | None = None,
+    task_id: str | None = None,
 ) -> None:
     if operation_epoch is None:
         operation_epoch = _advance_operation_epoch(server_id)
     db = SessionLocal()
     lock = get_server_lifecycle_lock(server_id)
+    task_succeeded = False
+    task_error_code = "server_lifecycle_failed"
     try:
         with lock:
             _ensure_operation_current(server_id, operation_epoch)
             server = db.query(Server).filter(Server.id == server_id).first()
             if not server:
+                task_error_code = "server_not_found"
                 return
             plugin = get_plugin(server.game_type)
             if not plugin:
                 _set_status(db, server, "failed", "Spiel-Typ nicht unterstützt")
+                task_error_code = "unsupported_game_type"
                 return
 
             _set_status(db, server, _operation_status(operation), None)
@@ -522,10 +555,12 @@ def _run_lifecycle_job(
                         )
                     elif operation == "kill":
                         _run_kill(db, server)
+                    task_succeeded = True
                     if notification and notification.enabled:
                         _send_lifecycle_notification(notification, server.name, _operation_done_text(operation))
                 except LifecycleOperationCancelled:
                     db.rollback()
+                    task_error_code = "lifecycle_superseded"
                     logger.info(
                         "Lifecycle-%s fuer Server %s wurde durch eine neuere Operation abgebrochen",
                         operation,
@@ -533,6 +568,7 @@ def _run_lifecycle_job(
                     )
                 except Exception as exc:
                     db.rollback()
+                    task_error_code = "server_lifecycle_failed"
                     server = db.query(Server).filter(Server.id == server_id).first()
                     if server:
                         message = _safe_error_message(getattr(exc, "detail", exc))
@@ -541,7 +577,33 @@ def _run_lifecycle_job(
                         db.commit()
                         _append_console_log(server.id, f"[MSM] Lifecycle-{operation} fehlgeschlagen: {message}\n")
                     logger.warning("Lifecycle-%s fuer Server %s fehlgeschlagen: %s", operation, server_id, exc)
+    except Exception as exc:
+        db.rollback()
+        task_error_code = "server_lifecycle_failed"
+        logger.warning(
+            "Lifecycle-%s fuer Server %s ausserhalb der Operation fehlgeschlagen: %s",
+            operation,
+            server_id,
+            type(exc).__name__,
+        )
+        if task_id is None:
+            raise
     finally:
+        from services.operation_task_service import finish_lifecycle_task
+
+        try:
+            finish_lifecycle_task(
+                db,
+                task_id,
+                succeeded=task_succeeded,
+                error_code=task_error_code,
+            )
+        except Exception:
+            db.rollback()
+            logger.warning(
+                "Lifecycle-Task konnte nicht abgeschlossen werden (server_id=%s)",
+                server_id,
+            )
         _mark_job_done(server_id)
         db.close()
 
@@ -1101,10 +1163,15 @@ def sync_desired_state_to_agent(db: Session, server: Server) -> bool:
         return True
     except Exception as exc:
         db.rollback()
+        # `code` UND die Meldung: bei einer Agent-Ablehnung ist `exc.code`
+        # None, und der Grund (welches Feld, welche Regel) steht nur im Text.
+        # Ohne ihn stand hier woertlich "code=None" — der Betreiber von
+        # Vorfall 66 sah zweimal denselben Fehlschlag ohne jede Auskunft.
         logger.warning(
-            "Guardian desired-state sync failed for server_id=%s code=%s",
+            "Guardian desired-state sync failed for server_id=%s code=%s detail=%s",
             server.id,
             getattr(exc, "code", type(exc).__name__),
+            str(exc)[:400],
         )
         return False
 
@@ -1117,7 +1184,8 @@ def switch_server_blueprint(db: Session, server: Server, new_blueprint_id: str, 
     2. Neuer Blueprint MUSS existieren.
     3. MANDATORY CENTRAL BACKUP: Erstellt IMMER ein Backup ueber backup_orchestrator.create_server_backup().
        Schlaegt das Backup fehl, wird abgebrochen.
-    4. Alte Spieldateien in install_dir bereinigen (Clean Wipe).
+    4. Alte Spieldateien bereinigen — **nachweislich**. Bleibt etwas liegen,
+       bricht der Wechsel ab, statt Erfolg zu melden (siehe `wipe_server_root`).
     5. Blueprint / game_type in DB aktualisieren & Ports neu zuweisen.
     6. Re-Installation des neuen Blueprints ausloesen.
     """
@@ -1156,8 +1224,18 @@ def switch_server_blueprint(db: Session, server: Server, new_blueprint_id: str, 
             new_blueprint_id,
         )
         backup_record = create_server_backup(server.id, db, name=backup_name, timeout_seconds=600)
-        if not backup_record or getattr(backup_record, "status", None) == "failed":
-            raise RuntimeError("Backup-Status meldet 'failed'.")
+        # Hier stand `getattr(backup_record, "status", None) == "failed"`. Die
+        # Spalte gab es nie — `Backup` hat kein `status` —, der `getattr`-Default
+        # lieferte immer `None`, und die Bedingung konnte damit unter keinen
+        # Umstaenden zutreffen. Ein Pflicht-Backup, das nichts geprueft hat.
+        #
+        # `verified_at` ist die wahre Entsprechung: es wird nur gesetzt, wenn das
+        # Archiv nach dem Schreiben nachgemessen wurde (Datei vorhanden, nicht
+        # leer, Pruefsumme gerechnet). Ohne diesen Nachweis wird das gesamte
+        # Serververzeichnis gleich darunter geloescht — und der Weg zurueck
+        # waere eine Behauptung.
+        if backup_record is None or backup_record.verified_at is None:
+            raise RuntimeError("Backup ist nicht nachweisbar erfolgreich.")
     except Exception as exc:
         logger.error("Pre-Switch Backup fuer Server ID=%s fehlgeschlagen: %s", server.id, exc)
         raise HTTPException(
@@ -1168,24 +1246,28 @@ def switch_server_blueprint(db: Session, server: Server, new_blueprint_id: str, 
             },
         )
 
-    # 2. Alte Spieldateien in install_dir reinigen
-    try:
-        target_node = server.node
-        if target_node is not None and not target_node.is_local:
-            from services.node_client import NodeClient
-            NodeClient.from_node(target_node).files_delete_server_root(server.id)
-        elif server.install_dir and os.path.exists(server.install_dir):
-            for item in os.listdir(server.install_dir):
-                item_path = os.path.join(server.install_dir, item)
-                if os.path.isdir(item_path):
-                    shutil.rmtree(item_path, ignore_errors=True)
-                else:
-                    try:
-                        os.remove(item_path)
-                    except Exception:
-                        pass
-    except Exception as exc:
-        logger.warning("Datei-Reinigung vor Blueprint-Wechsel fuer Server ID=%s: %s", server.id, exc)
+    # 2. Alte Spieldateien reinigen — und zwar nachweislich.
+    #
+    # Hier stand frueher ein Block, der `os.path.exists`, `os.listdir`,
+    # `os.remove` und `shutil.rmtree` benutzte. **Dieses Modul hat `os` und
+    # `shutil` nie importiert.** Der lokale Zweig lief also in einen `NameError`,
+    # noch bevor er die erste Datei ansah — und ein `except Exception` darum
+    # herum machte daraus eine Zeile im Log. Der Wechsel meldete danach
+    # "Blueprint erfolgreich gewechselt".
+    #
+    # Auf jedem lokalen Node hat der Wechsel damit **noch nie** eine Datei
+    # geloescht. Aufgefallen ist es erst, als ein Minecraft-Server nach dem
+    # Versionswechsel den Start mit "world was created in a different version"
+    # verweigerte: die alte Welt lag unberuehrt da.
+    #
+    # `wipe_server_root` raeumt den Container ab, loescht ohne
+    # Fehlerunterdrueckung, repariert bei Bedarf die Dateirechte (Container legen
+    # ihre Daten unter eigener UID an) und prueft zum Schluss nach. Scheitert es,
+    # endet der Wechsel hier — gefahrlos, denn das Pflicht-Backup aus Schritt 1
+    # liegt bereits vor und `game_type` ist noch unveraendert.
+    from services.server_file_access_service import wipe_server_root
+
+    files_removed = wipe_server_root(db, server)
 
     # 3. Game Type / Blueprint ID im Server Model aktualisieren
     server.game_type = new_blueprint_id
@@ -1238,5 +1320,10 @@ def switch_server_blueprint(db: Session, server: Server, new_blueprint_id: str, 
         "old_blueprint": old_game_type,
         "new_blueprint": new_blueprint_id,
         "backup_id": getattr(backup_record, "id", None),
+        # Wieviele Eintraege der oberen Ebene entfernt wurden — `None`, wenn der
+        # Node-Agent geleert hat und keine Zahl meldet. Steht hier, damit die
+        # Oberflaeche und die KI das Aufraeumen **belegen** koennen statt es zu
+        # behaupten: genau diese Behauptung war der Betriebsfehler.
+        "files_removed": files_removed,
         "status": server.status,
     }

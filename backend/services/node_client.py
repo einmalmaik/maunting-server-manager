@@ -421,12 +421,14 @@ class NodeClient:
         data = self._request("GET", f"/containers/{quote(name, safe='')}/logs", params={"tail": tail})
         return str(data.get("logs", ""))
 
-    def exec_in_container(self, name: str, command: list[str]) -> dict[str, Any]:
+    def exec_in_container(
+        self, name: str, command: list[str], timeout: float = _LONG_TIMEOUT
+    ) -> dict[str, Any]:
         return self._request(
             "POST",
             f"/containers/{quote(name, safe='')}/exec",
             json={"command": command},
-            timeout=_LONG_TIMEOUT,
+            timeout=timeout,
         )
 
     def update_container_resources(self, name: str, updates: dict[str, int | None]) -> dict[str, Any]:
@@ -508,12 +510,20 @@ class NodeClient:
             json=payload,
         )
 
-    def files_delete(self, server_id: int | str, path: str) -> dict[str, Any]:
-        return self._request(
-            "DELETE",
-            "/files/delete",
-            params={"server_id": str(server_id), "path": path},
-        )
+    def files_delete(
+        self,
+        server_id: int | str,
+        path: str,
+        expected_revision: str | None = None,
+    ) -> dict[str, Any]:
+        # `expected_revision` ist freiwillig: Aufrufer, die nur aufräumen
+        # (Manifeste, `.bak`-Reste), haben keinen Inhalt gelesen und können
+        # keine Revision nennen. Wer eine nennt, bekommt vom Agenten ein 409,
+        # falls die Datei sich zwischen Lesen und Löschen geändert hat.
+        params = {"server_id": str(server_id), "path": path}
+        if expected_revision is not None:
+            params["expected_revision"] = expected_revision
+        return self._request("DELETE", "/files/delete", params=params)
 
     def files_rename(self, server_id: int | str, old_path: str, new_path: str) -> dict[str, Any]:
         return self._request(
@@ -852,6 +862,19 @@ def _safe_detail(resp: httpx.Response) -> str:
         detail = body.get("detail") if isinstance(body, dict) else None
         if isinstance(detail, str) and detail:
             return detail[:300]
+        # Der Agent meldet Ablehnungen als {"code": ..., "message": ...} —
+        # etwa jede Guardian-Desired-State-Abweisung (msm-agent/routers/
+        # guardian.py). Ohne diesen Zweig degenerierte genau diese Auskunft zu
+        # "Agent error HTTP 422", und im Panel-Log stand nie, WAS der Agent
+        # abgelehnt hat.
+        if isinstance(detail, dict):
+            teile = [
+                str(detail[k])[:150]
+                for k in ("code", "message")
+                if isinstance(detail.get(k), str) and detail[k]
+            ]
+            if teile:
+                return f"Agent error HTTP {resp.status_code}: " + " — ".join(teile)
         # FastAPI/Pydantic validation errors: list of {loc, msg, type}
         if isinstance(detail, list) and detail:
             parts: list[str] = []

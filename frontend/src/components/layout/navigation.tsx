@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { Archive, BookOpen, Boxes, Database, History, LayoutDashboard, Network, Server, Settings, Shield, Users } from 'lucide-react'
+import { Archive, BookOpen, Bot, Boxes, Calendar as CalendarIcon, Database, History, LayoutDashboard, Network, Server, Settings, Shield, StickyNote, Users, UsersRound } from 'lucide-react'
 
 export type NavGroupName = 'Overview' | 'Infrastructure' | 'Administration' | 'Panel' | 'Help'
 export interface NavigationItem { to: string; icon: LucideIcon; label: string; group: NavGroupName }
@@ -14,6 +14,17 @@ interface NavigationAccess {
   canManagePanelBackups: boolean
   canReadPanelDatabase: boolean
   canViewNodes: boolean
+  canUseAi: boolean
+  /**
+   * ai.skills.use — reicht für /teams, aber nicht für den Chat.
+   *
+   * Seit die Skills aus den Profileinstellungen unter Teams gezogen sind, ist
+   * das der einzige Weg zu den eigenen. Ohne diesen Eintrag verlöre ihn, wer
+   * lesen darf, aber nicht chatten.
+   */
+  canUseSkills: boolean
+  calendarEnabled?: boolean
+  notesEnabled?: boolean
 }
 
 /**
@@ -23,8 +34,12 @@ interface NavigationAccess {
 export function buildNavigation(labels: Record<string, string>, access: NavigationAccess): NavigationItem[] {
   return [
     { to: '/', icon: LayoutDashboard, label: labels.dashboard, group: 'Overview' },
+    ...(access.calendarEnabled !== false ? [{ to: '/calendar', icon: CalendarIcon, label: labels.calendar || 'Kalender', group: 'Overview' as const }] : []),
+    ...(access.notesEnabled !== false ? [{ to: '/notes', icon: StickyNote, label: labels.notes || 'Notizen', group: 'Overview' as const }] : []),
     { to: '/servers', icon: Server, label: labels.servers, group: 'Infrastructure' },
     ...(access.owner || access.canViewNodes ? [{ to: '/admin/nodes', icon: Network, label: labels.nodes, group: 'Infrastructure' as const }] : []),
+    ...(access.owner || access.canUseAi ? [{ to: '/ai', icon: Bot, label: labels.ai, group: 'Infrastructure' as const }] : []),
+    ...(access.owner || access.canUseAi || access.canUseSkills ? [{ to: '/teams', icon: UsersRound, label: labels.teams, group: 'Infrastructure' as const }] : []),
     ...(access.owner || access.canManageUsers ? [{ to: '/users', icon: Users, label: labels.users, group: 'Administration' as const }] : []),
     ...(access.owner || access.canManageRoles ? [{ to: '/roles', icon: Shield, label: labels.roles, group: 'Administration' as const }] : []),
     ...(access.owner || access.canViewAudit ? [{ to: '/admin/audit', icon: History, label: labels.audit, group: 'Administration' as const }] : []),

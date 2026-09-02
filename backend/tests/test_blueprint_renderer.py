@@ -127,6 +127,24 @@ def test_install_dir_substitution() -> None:
     assert argv == ["/srv/app/server", "-port=80"]
 
 
+def test_server_name_substitution_keeps_spaces_inside_one_argv_element() -> None:
+    bp = load_blueprint_dict(_bp_with_startup(
+        "/data/server TheIsland?listen?SessionName={SERVER_NAME}?Port={GAME_PORT}"
+    ))
+
+    argv = render_argv(
+        bp,
+        install_dir="/data",
+        ports={"game": 7777, "query": None, "rcon": None},
+        server_name="Maunt ARK",
+    )
+
+    assert argv == [
+        "/data/server",
+        "TheIsland?listen?SessionName=Maunt ARK?Port=7777",
+    ]
+
+
 def test_env_token_substitution() -> None:
     bp = load_blueprint_dict({
         "version": 1,
@@ -262,3 +280,61 @@ def test_bind_ip_in_env_values() -> None:
         bind_ip="1.2.3.4",
     )
     assert out == {"BIND": "1.2.3.4", "PORT": "27015"}
+
+
+def test_curseforge_renders_with_custom_separator() -> None:
+    """CurseForge Mods (z.B. ARK: Survival Ascended) werden mit individuellem Separator (',') gerendert."""
+    bp = load_blueprint_dict(_bp_with_startup(
+        "/data/ArkAscendedServer -port={GAME_PORT} {MOD_ARG}",
+        mods={
+            "supportsMods": True,
+            "supportsCurseForge": True,
+            "curseforgeGameId": "83374",
+            "modInjection": "startupArg",
+            "modStartupArgumentFormat": "-mods={mods}",
+            "modStartupArgumentSeparator": ",",
+        },
+    ))
+    argv = render_argv(
+        bp,
+        install_dir="/data",
+        ports={"game": 7777, "query": None, "rcon": None},
+        active_mod_ids=["927142", "928111", "930222"],
+    )
+    assert argv == ["/data/ArkAscendedServer", "-port=7777", "-mods=927142,928111,930222"]
+
+
+
+def test_options_url_survives_single_empty_token() -> None:
+    """Ein leeres Token darf eine UE-Options-URL nicht mitreißen.
+
+    Regression: ARK packt Map, ``?listen``, Port, RCON und beide Passwörter in
+    EIN argv-Element. Solange nur ein Teil davon leer ist (ein Server ohne
+    Passwort ist der Normalfall), muss das Element vollständig erhalten
+    bleiben — sonst startet der Server ohne Map und ohne ``?listen``, läuft
+    scheinbar, ist aber unsichtbar und nicht joinbar.
+    """
+    bp = load_blueprint_dict(_bp_with_startup(
+        "/data/server {ENV.MAP_NAME}?listen?Port={GAME_PORT}?ServerPassword={ENV.SERVER_PASSWORD}"
+    ))
+    argv = render_argv(
+        bp,
+        install_dir="/data",
+        ports={"game": 7777, "query": None, "rcon": None},
+        extra_env={"MAP_NAME": "TheIsland_WP", "SERVER_PASSWORD": ""},
+    )
+    assert argv == ["/data/server", "TheIsland_WP?listen?Port=7777?ServerPassword="]
+
+
+def test_arg_dropped_when_every_token_is_empty() -> None:
+    """Sind ALLE Tokens eines Elements leer, bleibt es gedroppt (kein Stub)."""
+    bp = load_blueprint_dict(_bp_with_startup(
+        "/data/server -port={GAME_PORT} -auth={ENV.USER}:{ENV.PASS}"
+    ))
+    argv = render_argv(
+        bp,
+        install_dir="/data",
+        ports={"game": 7777, "query": None, "rcon": None},
+        extra_env={"USER": "", "PASS": ""},
+    )
+    assert argv == ["/data/server", "-port=7777"]

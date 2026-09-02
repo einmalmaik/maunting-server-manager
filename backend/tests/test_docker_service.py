@@ -221,6 +221,27 @@ class TestRunContainer:
         kwargs = client.containers.run.call_args.kwargs
         assert kwargs["tty"] is False
 
+    def test_user_namespace_opt_in_only_relaxes_seccomp(self):
+        """UMU/bwrap erhält User-Namespaces ohne Privileged oder neue Caps."""
+        client = MagicMock()
+        client.images.get.return_value = SimpleNamespace(id="local-image")
+        client.containers.get.side_effect = docker_service.NotFound("missing")
+        client.containers.run.return_value = SimpleNamespace(id="abc")
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.run_container(
+                name="msm-srv-105",
+                image="ghcr.io/einmalmaik/msm-asa-runtime:test",
+                allow_unprivileged_user_namespaces=True,
+            )
+
+        assert result["ok"] is True
+        kwargs = client.containers.run.call_args.kwargs
+        assert kwargs["security_opt"] == ["no-new-privileges", "seccomp=unconfined"]
+        assert kwargs["cap_drop"] == ["ALL"]
+        assert kwargs.get("cap_add") is None
+        assert kwargs.get("privileged", False) is False
+
     def test_run_container_tty_true_when_requested(self):
         """Opt-in: tty=True wird durchgereicht fuer interaktive Auth-Recovery-Container."""
         client = MagicMock()
@@ -558,7 +579,7 @@ class TestBindMountPermissionRepair:
         kwargs = mock_run.call_args.kwargs
         assert kwargs["volumes"] == [VolumeBind(str(tmp_path), "/home/container", read_only=False)]
         script = kwargs["command"][1]
-        assert "chmod a+rwX" in script
+        assert "g+rwxs" in script
         assert "chown 1000:1000" in script
         assert "chown -h 1000:1000" in script
 
@@ -568,8 +589,49 @@ class TestBindMountPermissionRepair:
 
         assert result == {"ok": True}
         script = mock_run.call_args.kwargs["command"][1]
-        assert "chmod a+rwX" in script
+        assert "g+rwxs" in script
         assert "chown" not in script
+
+    def test_the_repair_never_opens_files_to_everyone(self, tmp_path):
+        """**Die Invariante dieser Funktion.**
+
+        Hier stand einmal ``chmod a+rwX``, und das ``a`` umfasst „andere“: die
+        Reparatur machte jede Serverdatei fuer jeden Prozess auf dem Host
+        beschreibbar. Sie laeuft **vor jedem Serverstart** — ein einmal
+        aufgeraeumtes Verzeichnis war damit beim naechsten Start wieder offen,
+        und `scripts/fix-server-permissions.sh` haette das Problem nur so lange
+        geloest, bis jemand einen Server neu startet.
+
+        Panel und Spielprozess teilen sich die Dateien jetzt ueber die
+        **Gruppe** des Serververzeichnisses. „Andere“ bleiben aussen vor, und
+        `g+s` sorgt dafuer, dass auch neu angelegte Dateien die Gruppe erben.
+        """
+        with patch("services.docker_service.run_ephemeral", return_value={"ok": True}) as mock_run:
+            docker_service.repair_bind_mount_permissions(str(tmp_path))
+
+        script = mock_run.call_args.kwargs["command"][1]
+        assert "a+rwX" not in script, (
+            "die Reparatur oeffnet die Dateien wieder fuer den ganzen Host"
+        )
+        assert "o-rwx" in script, "„andere“ werden nicht ausgesperrt"
+        # Und die Gruppe wird uebernommen, sonst gehoert nach der Reparatur
+        # nichts mehr zusammen.
+        assert "chgrp" in script
+
+    def test_executables_keep_their_x_for_the_group(self, tmp_path):
+        """Startskripte muessen ausfuehrbar bleiben.
+
+        Ein pauschales ``g+rw`` auf Dateien nimmt ihnen das ``x`` nicht weg —
+        aber es setzt es auch nicht, wenn nur der Eigentuemer es hatte. Ohne
+        die dritte Zeile startet ein Spielserver nicht mehr, weil sein
+        Startskript fuer die geteilte Gruppe nicht ausfuehrbar ist.
+        """
+        with patch("services.docker_service.run_ephemeral", return_value={"ok": True}) as mock_run:
+            docker_service.repair_bind_mount_permissions(str(tmp_path))
+
+        script = mock_run.call_args.kwargs["command"][1]
+        assert "-perm -u+x" in script
+        assert "chmod g+x" in script
 
 
 class TestEphemeralRun:

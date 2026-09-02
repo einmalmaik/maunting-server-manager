@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { act, render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import * as client from '@/api/client'
 import i18n from '@/i18n'
@@ -55,6 +55,9 @@ const DEFAULT_SETTINGS = {
   backup_on_start: false,
   backup_interval_hours: 0,
   backup_retention_count: 3,
+  backup_ai_managed: false,
+  backup_ai_task_title: null,
+  next_auto_backup_at: null,
 }
 
 function baseBackup(over: Partial<any> = {}) {
@@ -272,6 +275,73 @@ describe('Backups — S3 Cloud Features', () => {
     expect(screen.getByTitle('Löschen')).toBeInTheDocument()
   })
 
+  it('zeigt im Einstellungs-Panel das KI-Abzeichen nur, wenn die KI verwaltet', async () => {
+    // Das Abzeichen ist die halbe Konfliktregel: wer hier manuell speichert,
+    // nimmt der KI die Verwaltung ab, und der zuständige Auftrag wird
+    // pausiert (Backend). Damit das jemand weiss, bevor er speichert, müssen
+    // Abzeichen und Hinweis stehen — aber nur, wenn es stimmt.
+    mockApi((p) => {
+      if (p.startsWith('/backups/1/settings')) {
+        return {
+          ...DEFAULT_SETTINGS,
+          backup_interval_hours: 24,
+          backup_ai_managed: true,
+          backup_ai_task_title: 'Tägliche Sicherung',
+        }
+      }
+      if (p.startsWith('/backups/1/status')) return INACTIVE_STATUS
+      if (p === '/backup-config/status') return STATUS_RESPONSE
+      if (p === '/backups/1') return []
+      return undefined
+    })
+    renderBackups()
+
+    fireEvent.click(await screen.findByRole('button', { name: /Einstellungen/ }))
+    expect(
+      await screen.findByText(i18n.t('backups.aiManagedByTask', { title: 'Tägliche Sicherung' })),
+    ).toBeInTheDocument()
+    expect(screen.getByText(i18n.t('backups.aiManagedSaveHint'))).toBeInTheDocument()
+  })
+
+  it('zeigt ein Intervall ausserhalb des Rasters am Dropdown-Trigger an', async () => {
+    // Die KI darf jedes Intervall bis 720 h setzen — das Optionsraster kennt
+    // nur feste Stufen. Ein gespeicherter Wert wie 4 h muss trotzdem am
+    // Trigger stehen; ohne die Einspeisung zeigte die Dropdown-Komponente nur
+    // den Platzhalter 'Auswählen'.
+    mockApi((p) => {
+      if (p.startsWith('/backups/1/settings')) {
+        return { ...DEFAULT_SETTINGS, backup_interval_hours: 4 }
+      }
+      if (p.startsWith('/backups/1/status')) return INACTIVE_STATUS
+      if (p === '/backup-config/status') return STATUS_RESPONSE
+      if (p === '/backups/1') return []
+      return undefined
+    })
+    renderBackups()
+
+    fireEvent.click(await screen.findByRole('button', { name: /Einstellungen/ }))
+    const trigger = await screen.findByRole('button', {
+      name: i18n.t('backups.interval', 'Intervall'),
+    })
+    expect(trigger).toHaveTextContent(i18n.t('backups.intervalHours', { count: 4 }))
+  })
+
+  it('zeigt ohne KI-Verwaltung kein Abzeichen', async () => {
+    mockApi((p) => {
+      if (p.startsWith('/backups/1/settings')) return DEFAULT_SETTINGS
+      if (p.startsWith('/backups/1/status')) return INACTIVE_STATUS
+      if (p === '/backup-config/status') return STATUS_RESPONSE
+      if (p === '/backups/1') return []
+      return undefined
+    })
+    renderBackups()
+
+    fireEvent.click(await screen.findByRole('button', { name: /Einstellungen/ }))
+    await screen.findByText(i18n.t('backups.schedulingTitle', 'Backup-Einstellungen'))
+    expect(screen.queryByText(i18n.t('backups.aiManaged'))).toBeNull()
+    expect(screen.queryByText(i18n.t('backups.aiManagedSaveHint'))).toBeNull()
+  })
+
   it('uses msm-* Design-DNA classes and no raw hex colors', async () => {
     const backup = baseBackup({ s3_key: null, encrypted: false, local_exists: true })
     mockApi((p) => {
@@ -303,5 +373,81 @@ describe('Backups — S3 Cloud Features', () => {
     renderBackups()
     const badge = await screen.findByText('S3: Aktiv')
     expect(badge.textContent).not.toMatch(/access|secret|password|key/i)
+  })
+
+  /**
+   * Ein Ladefehler ist kein Leerzustand. Bei einem Backup-Manager ist
+   * "Keine Backups vorhanden" die gefährlichste aller Falschaussagen: der
+   * Betreiber glaubt, seine Sicherungen sind weg, und steuert gegen.
+   */
+  it('zeigt bei abgelehnter Backupliste die Fehlermeldung statt "Keine Backups vorhanden"', async () => {
+    mockApi((p) => {
+      if (p.startsWith('/backups/1/settings')) return DEFAULT_SETTINGS
+      if (p.startsWith('/backups/1/status')) return INACTIVE_STATUS
+      if (p === '/backup-config/status') return STATUS_RESPONSE
+      if (p === '/backups/1') throw new Error('403')
+      return undefined
+    })
+    renderBackups()
+
+    expect(await screen.findByText('Die Backups konnten nicht geladen werden.')).toBeInTheDocument()
+    expect(screen.queryByText('Keine Backups vorhanden')).not.toBeInTheDocument()
+  })
+
+  /**
+   * Der Statuspoll ist die einzige Quelle für "es läuft gerade etwas" — auch
+   * für Vorgänge, die der Zeitplan oder jemand anderes gestartet hat. Er darf
+   * darum nie ganz stehen, aber im Ruhezustand seltener fragen.
+   */
+  it('fragt den Status im Ruhezustand alle 10 s und bei laufendem Backup alle 2 s', async () => {
+    vi.useFakeTimers()
+    let aktuellerStatus: unknown = INACTIVE_STATUS
+    let statusAufrufe = 0
+    mockApi((p) => {
+      if (p.startsWith('/backups/1/settings')) return DEFAULT_SETTINGS
+      if (p.startsWith('/backups/1/status')) {
+        statusAufrufe += 1
+        return aktuellerStatus
+      }
+      if (p === '/backup-config/status') return STATUS_RESPONSE
+      if (p === '/backups/1') return []
+      return undefined
+    })
+
+    try {
+      renderBackups()
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      const nachMount = statusAufrufe
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4000)
+      })
+      expect(statusAufrufe).toBe(nachMount)
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(6000)
+      })
+      expect(statusAufrufe).toBe(nachMount + 1)
+
+      aktuellerStatus = {
+        active: true,
+        operation: 'creating',
+        started_at: new Date().toISOString(),
+        estimated_size_mb: null,
+      }
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10000)
+      })
+      const beimStart = statusAufrufe
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4000)
+      })
+      expect(statusAufrufe).toBe(beimStart + 2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

@@ -1,6 +1,7 @@
 import i18n from '@/i18n'
 import { apiUrl } from '@/config/api'
 import { toast } from '@/stores/toastStore'
+import { useAuthStore } from '@/stores/authStore'
 
 export { API_BASE, apiUrl } from '@/config/api'
 
@@ -26,6 +27,83 @@ export class SanitizedApiError extends Error {
     this.status = options.status ?? null
     this.code = options.code ?? null
   }
+}
+
+/**
+ * Die native Sitzung der Desktop-App (MSS) — im Panel immer `null`.
+ *
+ * Das Panel authentifiziert über HttpOnly-Cookies; ein Tauri-WebView bekommt
+ * auf einem fremden Origin nie welche. Die App registriert deshalb beim Start
+ * genau ein Objekt: woher das Access-Token kommt und wie rotiert wird
+ * (Refresh-Token liegt im OS-Tresor, nicht hier). Ist es gesetzt, tragen
+ * `api()`/`apiStream()` einen `Authorization: Bearer` und delegieren den
+ * 401-Refresh — alles andere (Fehlerübersetzung, 429-Toast, SESSION_EXPIRED →
+ * `clearSession`) bleibt derselbe Weg wie im Browser. CSRF entfällt nicht per
+ * Sonderfall: ohne Cookies findet `getCsrfToken()` schlicht nichts, und das
+ * Backend befreit gültige Bearer ohnehin (`dependencies.verify_csrf`).
+ */
+export interface NativeSitzung {
+  /** Das aktuelle Access-Token — `null`, solange keines da ist. */
+  token(): string | null
+  /** Rotiert über den Tresor. `false` heißt: die Sitzung ist endgültig weg. */
+  erneuern(): Promise<boolean>
+}
+
+let nativeSitzung: NativeSitzung | null = null
+
+export function registriereNativeSitzung(sitzung: NativeSitzung): void {
+  nativeSitzung = sitzung
+}
+
+/**
+ * Restlaufzeit eines JWT in Sekunden — `null`, wenn die Nutzlast nicht
+ * lesbar ist. Nur gelesen, nie geprüft: die Prüfung bleibt beim Server,
+ * hier geht es allein darum, ein absehbar totes Token nicht erst in einen
+ * Handshake zu tragen.
+ */
+function tokenRestSekunden(token: string): number | null {
+  try {
+    const nutzlast = JSON.parse(
+      atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')),
+    ) as { exp?: unknown }
+    const exp = Number(nutzlast.exp)
+    if (!Number.isFinite(exp)) return null
+    return exp - Math.floor(Date.now() / 1000)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Subprotokolle für authentifizierte WebSockets (`msm.bearer, <token>`).
+ *
+ * Ein Browser-WebSocket kann keinen Authorization-Header setzen; das
+ * Subprotokoll-Feld ist der eine Header, den er erreicht — und ein Token in
+ * der URL wäre einer in Zugriffs- und Proxy-Logs. Im Panel `undefined`:
+ * dort authentifiziert der WS-Handshake über das mitgesendete Cookie.
+ *
+ * Async und frischegeprüft, weil ein WS-Handshake — anders als HTTP — keinen
+ * 401-Retry hat: ein abgelaufenes Token heißt close(1008) **vor** accept, und
+ * die Oberfläche sieht nur „Verbindung verloren". Genau so starb der
+ * Sprachmodus der Desktop-App: das Access-Token lebt 15 Minuten, das Overlay
+ * rotiert es nie von selbst, und der planmäßige Reconnect nach der
+ * Sitzungshöchstdauer (== Token-Laufzeit) kam damit immer mit einem toten
+ * Token an. Unter 60 s Rest — oder wenn die Nutzlast nicht lesbar ist — wird
+ * deshalb erst rotiert.
+ */
+export async function wsProtokolle(): Promise<string[] | undefined> {
+  if (!nativeSitzung) return undefined
+  const token = nativeSitzung.token()
+  const rest = token ? tokenRestSekunden(token) : 0
+  if (rest === null || rest < 60) {
+    await nativeSitzung.erneuern().catch(() => false)
+  }
+  const frisch = nativeSitzung.token()
+  return frisch ? ['msm.bearer', frisch] : undefined
+}
+
+function nativesToken(): string | null {
+  return nativeSitzung?.token() ?? null
 }
 
 /**
@@ -87,9 +165,37 @@ function extractErrorMessage(detail: unknown): string | null {
   return String(detail)
 }
 
+/**
+ * Macht aus einem reinen Fehlercode einen Satz.
+ *
+ * Die Zustandsfehler der KI-Aktionen antworten mit `{"code": "..."}` und ganz
+ * ohne Text (routers/ai_actions.py::_state_error). Das ist Absicht: der Code
+ * ist die stabile Kennung an der Schnittstelle, den Satz dazu hält die
+ * Oberfläche. Nur hielt sie ihn bisher nirgends — die Meldung fiel auf
+ * `res.statusText` zurück, und der Benutzer las „Conflict", statt zu erfahren,
+ * dass sich die Datei seit der Vorschau geändert hat.
+ *
+ * Nachgeschlagen wird im einzigen Katalog, den es dafür gibt. Kennt er den
+ * Code nicht, bleibt es beim bisherigen Rückfall: ein Statustext ist immer noch
+ * besser als ein roher Schlüssel in der Oberfläche.
+ */
+function translateErrorCode(code: string): string | null {
+  const key = `ai.errors.codes.${code}`
+  return i18n.exists(key) ? i18n.t(key) : null
+}
+
 let refreshPromise: Promise<void> | null = null
 
 async function doRefresh(): Promise<void> {
+  // Nativ (Desktop-App): die Rotation läuft über den OS-Tresor, nicht über
+  // Cookies — aber durch denselben Trichter hier, damit gleichzeitige 401er
+  // weiterhin genau einen Refresh auslösen.
+  if (nativeSitzung) {
+    if (!(await nativeSitzung.erneuern())) {
+      throw new Error('Session abgelaufen')
+    }
+    return
+  }
   const res = await fetch(apiUrl('/auth/refresh'), {
     method: 'POST',
     credentials: 'include',
@@ -126,6 +232,11 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
     headers['Content-Type'] = 'application/json'
   }
 
+  const bearer = nativesToken()
+  if (bearer) {
+    headers['Authorization'] = `Bearer ${bearer}`
+  }
+
   if (isStateChanging) {
     const csrf = getCsrfToken()
     if (csrf) {
@@ -153,8 +264,12 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   if (res.status === 401 && path !== '/auth/refresh' && path !== '/auth/login') {
     try {
       await refreshToken()
-      // Header neu bauen (CSRF koennte sich geaendert haben)
+      // Header neu bauen (CSRF und Bearer koennten sich geaendert haben)
       const newHeaders = { ...headers }
+      const neuesBearer = nativesToken()
+      if (neuesBearer) {
+        newHeaders['Authorization'] = `Bearer ${neuesBearer}`
+      }
       const newCsrf = getCsrfToken()
       if (newCsrf) {
         newHeaders['X-CSRF-Token'] = newCsrf
@@ -167,7 +282,18 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
       })
       captureCsrfFromResponse(res)
     } catch {
-      // Refresh fehlgeschlagen — Weiterleitung zum Login im Aufrufer.
+      // Refresh fehlgeschlagen — die Sitzung ist zu Ende, und der Speicher des
+      // Tabs muss das nachvollziehen. Vorher tat es niemand: kein Aufrufer
+      // wertete SESSION_EXPIRED aus, `isAuthenticated` blieb true, die Wache
+      // der Route griff nicht, und offene Intervalle (z. B. das
+      // Fünf-Sekunden-Polling der Serverdetails) feuerten weiter gegen den
+      // ratenbegrenzten Refresh. Danach fiel zwar das Flag, aber sonst nichts —
+      // Benutzer, Rechte und die Knotenliste mit ihren Agentenadressen standen
+      // weiter im Speicher. `clearSession()` ist der eine Weg, den auch das
+      // bewusste Abmelden geht.
+      // `getState()` läuft erst zur Aufrufzeit, der Importzyklus zum authStore
+      // ist damit unkritisch.
+      useAuthStore.getState().clearSession()
       // Lokalisierte Meldung, damit der Caller die Fehlermeldung direkt
       // anzeigen kann (kein doppelter `t()`-Aufruf noetig). Diese Meldung
       // stammt aus einem verarbeiteten Backend-Response-Pfad und ist
@@ -194,11 +320,21 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
           code = detail.code
         }
       } catch {
-        message = text
+        // Kein JSON — dann hat nicht das Backend geantwortet, sondern etwas
+        // davor (Proxy-Fehlerseite bei 502/504, abgeschnittener Rumpf). Dieser
+        // Text ist nie durch die Bereinigung des Backends gelaufen und darf
+        // deshalb nicht in die Meldung: er zeigte dem Benutzer sonst die
+        // komplette HTML-Seite samt Kennung und Version des Proxys.
+        // `message` bleibt null, der Rückfall auf statusText greift von allein.
       }
       if (message) {
         message = i18n.t(message)
       }
+    }
+    // Bewusst erst nach `i18n.t(message)`: der Satz aus dem Katalog ist bereits
+    // übersetzt und darf nicht ein zweites Mal als Schlüssel gelesen werden.
+    if (!message && code) {
+      message = translateErrorCode(code)
     }
     throw new SanitizedApiError(message || res.statusText || `HTTP ${res.status}`, {
       status: res.status,
@@ -211,4 +347,88 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   }
 
   return res.json()
+}
+
+/**
+ * Fuehrt einen authentifizierten API-Request aus, ohne den Response-Body zu
+ * konsumieren. Das ist fuer POST-SSE notwendig: EventSource unterstuetzt
+ * weder POST noch den CSRF-Header. Auth-, CSRF- und Fehlerverhalten bleiben
+ * damit identisch zum normalen API-Client.
+ */
+export async function apiStream(path: string, options: RequestInit): Promise<Response> {
+  const method = (options.method || 'GET').toUpperCase()
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'text/event-stream',
+    ...((options.headers as Record<string, string>) || {}),
+  }
+  const bearer = nativesToken()
+  if (bearer) headers['Authorization'] = `Bearer ${bearer}`
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+    const csrf = getCsrfToken()
+    if (csrf) headers['X-CSRF-Token'] = csrf
+  }
+
+  const url = apiUrl(path)
+  const fetchOptions: RequestInit = {
+    ...options,
+    method,
+    credentials: 'include',
+    headers,
+    cache: 'no-store',
+  }
+  let res = await fetch(url, fetchOptions)
+  captureCsrfFromResponse(res)
+
+  if (res.status === 401 && path !== '/auth/refresh' && path !== '/auth/login') {
+    try {
+      await refreshToken()
+      const retryHeaders = { ...headers }
+      const neuesBearer = nativesToken()
+      if (neuesBearer) retryHeaders['Authorization'] = `Bearer ${neuesBearer}`
+      const csrf = getCsrfToken()
+      if (csrf) retryHeaders['X-CSRF-Token'] = csrf
+      else delete retryHeaders['X-CSRF-Token']
+      res = await fetch(url, { ...fetchOptions, headers: retryHeaders })
+      captureCsrfFromResponse(res)
+    } catch {
+      // Wie in `api()`: der ganze Sitzungsspeicher fällt, sonst bleibt die
+      // Oberfläche scheinbar angemeldet stehen — mit fremden Daten darin.
+      useAuthStore.getState().clearSession()
+      throw new SanitizedApiError(i18n.t('errors.SESSION_EXPIRED'))
+    }
+  }
+
+  if (!res.ok) {
+    if (res.status === 429) {
+      const message = i18n.t('errors.RATE_LIMITED')
+      toast.error(message)
+      throw new SanitizedApiError(message, { status: 429 })
+    }
+    const text = await res.text()
+    let message: string | null = null
+    let code: string | null = null
+    if (text) {
+      try {
+        const parsed = JSON.parse(text)
+        const detail = parsed.detail ?? parsed.message ?? parsed.error ?? parsed
+        message = extractErrorMessage(detail)
+        if (detail && typeof detail === 'object' && typeof detail.code === 'string') {
+          code = detail.code
+        }
+      } catch {
+        // Kein JSON — siehe `api()`: der Rohtext stammt nicht vom Backend und
+        // bleibt außen vor.
+      }
+    }
+    // Derselbe Rückfall wie in `api()`. Der Stream-Start scheitert mit genau
+    // derselben Antwort, sobald ein Vorschlag nicht mehr ausführbar ist.
+    const ausCode = !message && code ? translateErrorCode(code) : null
+    throw new SanitizedApiError(
+      (message ? i18n.t(message) : ausCode) || res.statusText || `HTTP ${res.status}`,
+      { status: res.status, code: code ?? undefined },
+    )
+  }
+
+  return res
 }

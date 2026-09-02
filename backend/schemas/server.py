@@ -193,6 +193,9 @@ class ServerResponse(BaseModel):
     last_auto_restart_completed_at: datetime | None = None
     last_auto_restart_status: str | None = None
     next_auto_restart_at: datetime | None = None
+    # „Von der KI verwaltet": die KI hat den Neustart-Zeitplan zuletzt gesetzt.
+    # Eine manuelle Änderung nimmt das Flag zurück (routers/servers.py).
+    restart_ai_managed: bool = False
     started_at: datetime | None = None
     uptime_seconds: int | None = None
     cpu_limit_percent: int | None
@@ -208,6 +211,10 @@ class ServerResponse(BaseModel):
     # Phase 3 multi-node: which node hosts this server (no secrets)
     node_id: int | None = None
     node_name: str | None = None
+    # Server aus einem Shop-Vertrag (hoster_services.server_id). Nur das Flag:
+    # Integrationsname und Vertragsstatus sind Geschaeftsdaten und gehen nicht
+    # an jeden mit server.view — auch nicht an den Kunden selbst.
+    is_hoster_managed: bool = False
 
     class Config:
         from_attributes = True
@@ -215,6 +222,7 @@ class ServerResponse(BaseModel):
 
 class ServerCreateResponse(ServerResponse):
     postgres_credentials: list[PostgresOneTimeCredential] = Field(default_factory=list)
+    task_id: str | None = None
 
 
 class ServerStatusResponse(BaseModel):

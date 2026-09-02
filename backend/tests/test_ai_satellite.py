@@ -1,0 +1,242 @@
+"""Tests für das modulare Satelliten- und Regionsanalysesystem (Copernicus / Sentinel).
+
+Prüft Rechte, Tool-Gating, sichere Speicherung, Geocoding und Fehlerbehandlung.
+"""
+
+from __future__ import annotations
+
+import httpx
+import pytest
+from sqlalchemy.orm import Session
+
+from models import Role, RolePermission, User
+from services import (
+    ai_action_errors,
+    ai_action_service,
+    ai_geo_service,
+    ai_regional_connectors_service,
+    ai_satellite_service,
+)
+from services.role_service import set_user_roles
+
+
+def _allow_satellite(db: Session, user: User) -> None:
+    role = Role(name=f"satellit-{user.id}", description=None, is_system=False)
+    db.add(role)
+    db.flush()
+    db.add(RolePermission(role_id=role.id, permission_key="ai.satellite.use"))
+    db.commit()
+    set_user_roles(db, user, [role.id])
+
+
+def test_satellite_without_permission_is_rejected(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ai_satellite_service, "is_configured", lambda: True)
+
+    with pytest.raises(ai_action_errors.AiActionValidationError):
+        ai_action_service.execute_read_tool(
+            db,
+            user=regular_user,
+            tool_name="analyze_region",
+            arguments={"location": "Berlin"},
+        )
+
+
+def test_without_credentials_tool_is_not_offered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ai_satellite_service, "is_configured", lambda: False)
+
+    names = {item["function"]["name"] for item in ai_action_service.provider_tool_definitions()}
+    assert "analyze_region" not in names
+    assert "control_region_camera" not in names
+
+
+def test_with_credentials_tool_appears_in_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ai_satellite_service, "is_configured", lambda: True)
+
+    names = {item["function"]["name"] for item in ai_action_service.provider_tool_definitions()}
+    assert "analyze_region" in names
+    assert "control_region_camera" in names
+
+
+def test_region_camera_control_is_permission_checked_and_does_not_fetch(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(ai_action_errors.AiActionValidationError):
+        ai_action_service.execute_read_tool(
+            db,
+            user=regular_user,
+            tool_name="control_region_camera",
+            arguments={"action": "zoom_in"},
+        )
+
+    _allow_satellite(db, regular_user)
+    monkeypatch.setattr(
+        ai_geo_service,
+        "geocode_location",
+        lambda _location: pytest.fail("Ein relativer Zoom darf keine Geodaten abrufen"),
+    )
+    result = ai_action_service.execute_read_tool(
+        db,
+        user=regular_user,
+        tool_name="control_region_camera",
+        arguments={"action": "zoom_in"},
+    )
+
+    assert result["action"] == "zoom_in"
+    assert isinstance(result["command_id"], str)
+    assert result["command_id"]
+
+
+def test_region_camera_focus_geocodes_only_the_landmark(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _allow_satellite(db, regular_user)
+    requested: list[str] = []
+
+    def geocode(location: str) -> dict:
+        requested.append(location)
+        return {
+            "name": "Verbotene Stadt, Peking",
+            "country": "China",
+            "latitude": 39.9163,
+            "longitude": 116.3972,
+            "bbox": [116.3872, 39.9063, 116.4072, 39.9263],
+        }
+
+    monkeypatch.setattr(ai_geo_service, "geocode_location", geocode)
+    result = ai_action_service.execute_read_tool(
+        db,
+        user=regular_user,
+        tool_name="control_region_camera",
+        arguments={"action": "focus_location", "location": "Verbotene Stadt, Peking"},
+    )
+
+    assert requested == ["Verbotene Stadt, Peking"]
+    assert result["action"] == "focus_location"
+    assert result["location"] == "Verbotene Stadt, Peking"
+    assert result["coordinates"]["latitude"] == 39.9163
+
+
+def test_region_camera_focus_validates_action_specific_arguments(
+    db: Session, regular_user: User,
+) -> None:
+    _allow_satellite(db, regular_user)
+
+    with pytest.raises(ai_action_errors.AiActionValidationError):
+        ai_action_service.execute_read_tool(
+            db,
+            user=regular_user,
+            tool_name="control_region_camera",
+            arguments={"action": "focus_location"},
+        )
+    with pytest.raises(ai_action_errors.AiActionValidationError):
+        ai_action_service.execute_read_tool(
+            db,
+            user=regular_user,
+            tool_name="control_region_camera",
+            arguments={"action": "zoom_in", "location": "Peking"},
+        )
+
+
+def test_store_and_retrieve_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_store = {}
+
+    from services.panel_settings_service import PanelSettingsService
+    from services.auth_service import AuthService
+
+    monkeypatch.setattr(PanelSettingsService, "get", lambda k, default="": fake_store.get(k, default))
+    monkeypatch.setattr(PanelSettingsService, "set", lambda k, v: fake_store.__setitem__(k, v))
+    monkeypatch.setattr(AuthService, "encrypt_secret", lambda plain, aad=None: f"enc:{plain}")
+    monkeypatch.setattr(AuthService, "decrypt_secret", lambda enc, aad=None: enc.replace("enc:", "", 1) if enc.startswith("enc:") else "")
+
+    assert ai_satellite_service.is_configured() is False
+    ai_satellite_service.store_credentials("client_123", "secret_abc")
+    assert ai_satellite_service.is_configured() is True
+    creds = ai_satellite_service.get_credentials()
+    assert creds == {"client_id": "client_123", "client_secret": "secret_abc"}
+
+    ai_satellite_service.store_credentials("", "")
+    assert ai_satellite_service.is_configured() is False
+
+
+def test_satellite_search_coalesces_token_and_short_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    class FakeClient:
+        def post(self, url, **_kwargs):
+            calls.append(url)
+            if url == ai_satellite_service._TOKEN_ENDPOINT:
+                return httpx.Response(200, json={"access_token": "synthetic-token", "expires_in": 300})
+            return httpx.Response(200, json={"features": []})
+
+    ai_satellite_service.shutdown_http_client()
+    ai_satellite_service._token_cache.clear()
+    ai_satellite_service._search_cache.clear()
+    monkeypatch.setattr(ai_satellite_service, "get_credentials", lambda: {"client_id": "client", "client_secret": "secret"})
+    monkeypatch.setattr(ai_satellite_service, "_external_http_client", lambda: FakeClient())
+
+    assert ai_satellite_service.search_satellite_imagery([1, 2, 3, 4]) == []
+    assert ai_satellite_service.search_satellite_imagery([1, 2, 3, 4]) == []
+
+    assert calls == [ai_satellite_service._TOKEN_ENDPOINT, ai_satellite_service._STAC_ENDPOINT]
+
+
+def test_geo_service_analyze_region(db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch) -> None:
+    _allow_satellite(db, regular_user)
+    monkeypatch.setattr(ai_satellite_service, "is_configured", lambda: False)
+
+    result = ai_action_service.execute_read_tool(
+        db,
+        user=regular_user,
+        tool_name="analyze_region",
+        arguments={"location": "Berlin"},
+    )
+
+    assert result["status"] == "success"
+    assert "Berlin" in result["location"]
+    assert result["coordinates"]["latitude"] == 52.52
+    assert result["coordinates"]["longitude"] == 13.405
+    assert "weather" in result
+    assert "satellite" in result
+    assert result["satellite"]["available"] is True
+    assert "layers" in result["satellite"]
+    layers = result["satellite"]["layers"]
+    assert list(layers) == ["latest_imagery"]
+    latest_imagery = layers["latest_imagery"]
+    assert "arcgisonline" in latest_imagery["url"]
+    assert latest_imagery["mission"] == "ArcGIS World Imagery"
+    assert latest_imagery["resolution"] == "anbieterabhängig"
+    assert result["news"] == []
+    assert result["news_status"] == "not_allowed"
+    assert result["camera"]["mode"] == "focus"
+    assert isinstance(result["camera"]["command_id"], str)
+
+
+def test_chat_region_initial_skips_optional_connectors(db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch) -> None:
+    _allow_satellite(db, regular_user)
+    monkeypatch.setattr(ai_satellite_service, "is_configured", lambda: False)
+    monkeypatch.setattr(
+        ai_regional_connectors_service, "traffic",
+        lambda *_args, **_kwargs: pytest.fail("traffic must not block the first chat result"),
+    )
+    monkeypatch.setattr(
+        ai_regional_connectors_service, "public_posts",
+        lambda *_args, **_kwargs: pytest.fail("public posts must not block the first chat result"),
+    )
+
+    result = ai_action_service.execute_read_tool(
+        db,
+        user=regular_user,
+        tool_name="analyze_region",
+        arguments={"location": "Berlin"},
+        fast_region=True,
+    )
+
+    assert result["status"] == "success"
+    assert "traffic" not in result
+    assert result["news_status"] == "pending"

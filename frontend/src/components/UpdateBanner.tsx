@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Download, X, RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
@@ -10,6 +10,8 @@ export function UpdateBanner() {
   const [status, setStatus] = useState<GitUpdateStatus | null>(null)
   const [dismissed, setDismissed] = useState(false)
   const [updating, setUpdating] = useState(false)
+  // Kennung der Prüfschleife nach dem Update, damit sie das Abhängen nicht überlebt
+  const checkRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const fetchStatus = () => {
     api<GitUpdateStatus>('/system/update/status')
@@ -27,7 +29,10 @@ export function UpdateBanner() {
     fetchStatus()
     // Poll updates status every 5 minutes
     const tId = setInterval(fetchStatus, 300000)
-    return () => clearInterval(tId)
+    return () => {
+      clearInterval(tId)
+      if (checkRef.current) clearInterval(checkRef.current)
+    }
   }, [])
 
   const handleUpdate = async () => {
@@ -41,6 +46,13 @@ export function UpdateBanner() {
       let checkCount = 0
       const interval = setInterval(async () => {
         checkCount++
+        // Grenze gilt unabhängig davon, ob die Abfrage antwortet oder wirft
+        if (checkCount > 40) { // 2 Minuten
+          clearInterval(interval)
+          setUpdating(false)
+          toast.error(t('updater.updateTimeout', 'Update-Timeout. Bitte lade die Seite manuell neu.'))
+          return
+        }
         try {
           const check = await api<GitUpdateStatus>('/system/update/status')
           if (check.ok && !check.update_available) {
@@ -49,14 +61,10 @@ export function UpdateBanner() {
             window.location.reload()
           }
         } catch {
-          // Ignore connection errors during reboot
-          if (checkCount > 40) { // 2 minutes timeout
-            clearInterval(interval)
-            setUpdating(false)
-            toast.error(t('updater.updateTimeout', 'Update-Timeout. Bitte lade die Seite manuell neu.'))
-          }
+          // Verbindungsfehler während des Neustarts sind erwartet
         }
       }, 3000)
+      checkRef.current = interval
     } catch (err: any) {
       toast.error(err.message)
       setUpdating(false)

@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from services import docker_service
+from services import server_config_wishes
 from services.docker_service import PortPublish, VolumeBind
 
 from blueprints.schema import Blueprint, BlueprintModInjection
@@ -183,6 +184,21 @@ def finish_install(server_id: int, result: dict) -> None:
             server.status = "error"
             server.status_message = err[:500]
         db.commit()
+        # Der persistente Provisionierungs-Task folgt demselben fachlichen
+        # Abschluss wie der Serverstatus. Es werden keine Installationsdetails
+        # oder Credentials in den Task übernommen.
+        from services.operation_task_service import finish_server_provisioning
+
+        finish_server_provisioning(
+            db,
+            server_id,
+            succeeded=bool(result.get("ok")),
+            success_phase=(
+                "awaiting_files"
+                if result.get("next_status") == "awaiting_files"
+                else "ready"
+            ),
+        )
     except Exception as e:
         # Kein Re-Raise — Thread soll nicht crashen, nur loggen
         logger.warning("finish_install failed for server %s: %s", server_id, e)
@@ -321,6 +337,30 @@ def _bounded_log_buffer_append(buffer: list[str], line: str, *, max_chars: int =
         total -= len(buffer.pop(0))
 
 
+def _resolve_steam_login(server_id: int) -> tuple[str, str] | None:
+    """Liefert Benutzername und Passwort fuer den SteamCMD-Login dieses Servers.
+
+    Zuerst ein diesem Server zugewiesenes Benutzer-Credential, sonst der
+    panelweite Account. Faellt beides aus, gibt es bewusst keinen stillen
+    Rueckfall — der Aufrufer meldet das als verstaendlichen Fehler.
+
+    Eigene, kurzlebige Session: der Aufruf kommt aus einem Installations-Thread,
+    der keine Request-Session besitzt.
+    """
+    from database import SessionLocal
+    from models import KIND_STEAM_ACCOUNT
+    from services.credential_service import resolve_for_server
+
+    db = SessionLocal()
+    try:
+        resolved = resolve_for_server(db, server_id, KIND_STEAM_ACCOUNT)
+    finally:
+        db.close()
+    if resolved is None or not resolved.username:
+        return None
+    return resolved.username, resolved.secret
+
+
 def run_steamcmd_install(
     *,
     server_id: int,
@@ -378,16 +418,17 @@ def run_steamcmd_install(
         pass  # non-fatal
 
     if use_authenticated_login:
-        if not SteamAccountService.is_configured():
+        login = _resolve_steam_login(server_id)
+        if login is None:
             err = (
-                "Dieses Spiel benötigt einen globalen Steam-Account-Login. "
-                "Bitte unter Einstellungen → Steam Account einen Benutzer "
-                "und Passwort hinterlegen (Steam Guard muss deaktiviert sein)."
+                "Dieses Spiel benötigt einen Steam-Account-Login. Bitte im Server "
+                "unter Zugangsdaten ein eigenes Steam-Konto hinterlegen oder unter "
+                "Einstellungen → Steam Account einen panelweiten Account setzen "
+                "(Steam Guard muss deaktiviert sein)."
             )
             _append_console_log(server_id, f"[MSM] {err}\n")
             return {"ok": False, "error": err}
-        username = SteamAccountService.get_username()
-        password = SteamAccountService.get_decrypted_password()
+        username, password = login
         login_args = ["+login", username, password]
         secrets_to_redact = [username, password]
     else:
@@ -597,15 +638,17 @@ def run_steamcmd_workshop_download_batch(
         }
 
     if use_authenticated_login:
-        if not SteamAccountService.is_configured():
+        login = _resolve_steam_login(server_id)
+        if login is None:
             err = (
                 "Dieses Spiel benötigt einen Steam-Account für Workshop-Downloads. "
-                "Bitte unter Einstellungen → Steam Account hinterlegen."
+                "Bitte im Server unter Zugangsdaten ein eigenes Steam-Konto "
+                "hinterlegen oder unter Einstellungen → Steam Account einen "
+                "panelweiten Account setzen."
             )
             _append_console_log(server_id, f"[MSM] {err}\n")
             return {"ok": False, "error": err}
-        username = SteamAccountService.get_username()
-        password = SteamAccountService.get_decrypted_password()
+        username, password = login
         login_args = ["+login", username, password]
         secrets_to_redact = [username, password]
     else:
@@ -1257,6 +1300,21 @@ class GamePlugin(ABC):
             )
             return {"error": str(e)}
 
+        # Die Werte, die dieser eine Server dauerhaft haben soll — **nach**
+        # prepare_runtime, damit ein Serverwunsch einen Blueprint-Patch
+        # ueberschreiben kann und nicht umgekehrt.
+        #
+        # Der Anlass ist gemessen (Server 107, 15.–19.08.2026): ein
+        # ausgefuehrter Konfigurationsvorschlag stand vier Tage spaeter nicht
+        # mehr in der Datei, weil der laufende Spielprozess sie beim Autosave
+        # vollstaendig neu geschrieben hatte. Seitdem merkt sich der Server den
+        # Wunsch statt nur das Ergebnis, und diese Zeile ist die Stelle, an der
+        # daraus eine Zusage wird.
+        #
+        # Bewusst ohne try/except: die Funktion faengt selbst und meldet in die
+        # Konsole. Ein Zusatzwunsch darf keinen Serverstart verhindern.
+        server_config_wishes.wuensche_durchsetzen(server)
+
         # Rechte NACH prepare_runtime erneut normalisieren, damit neu erstellte
         # Ordner (ensureDirs wie logs/, UserData/) und Seed-Dateien die Rechte
         # des Container-Users (uid:gid) erhalten.
@@ -1277,6 +1335,13 @@ class GamePlugin(ABC):
             tmpfs_paths=self.container_tmpfs_paths(server),
             extra_networks=self.container_extra_networks(server),
             startup_check_seconds=getattr(getattr(self.get_blueprint(), "runtime", None), "startupCheckSeconds", None) or 2.0,
+            allow_unprivileged_user_namespaces=bool(
+                getattr(
+                    getattr(self.get_blueprint(), "runtime", None),
+                    "allowUnprivilegedUserNamespaces",
+                    False,
+                )
+            ),
             server_id=server.id,  # enables pull progress in console
             node=node,
         )
@@ -1325,7 +1390,14 @@ class GamePlugin(ABC):
             return ServerStatus(status="stopped")
 
         is_running = state["status"] == "running"
-        live_stats = docker_service.stats(name, node=node) if is_running else None
+        if not is_running:
+            live_stats = None
+        elif "cpu_percent" in state:
+            # Node-Zweig: der Agent hat CPU und RAM zusammen mit dem Zustand
+            # geliefert. Ein zweiter Aufruf wäre dieselbe Anfrage noch einmal.
+            live_stats = state
+        else:
+            live_stats = docker_service.stats(name, node=node)
         started_at = _parse_docker_started_at(state.get("started_at")) if is_running else None
         uptime_seconds = None
         if started_at is not None:

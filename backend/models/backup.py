@@ -25,4 +25,27 @@ class Backup(Base):
     s3_bucket: Mapped[str | None] = mapped_column(String(255), nullable=True)
     encrypted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # Der **Nachweis**, nicht die Beschreibung.
+    #
+    # Bis hierher war das blosse Vorhandensein einer Zeile der einzige Beleg, dass
+    # ein Backup geglueckt ist — und `size_mb` als zweiter Anhaltspunkt taugt
+    # nicht: es ist `bytes // (1024*1024)`, also **0** fuer jedes Archiv unter
+    # einem Megabyte. Ein frischer Server hat genau so eines. Wer `size_mb > 0`
+    # als Erfolgspruefung schreibt, verwirft das einzige Backup, das er hat.
+    #
+    # `verified_at` traegt deshalb die Aussage, die vorher nirgends stand: die
+    # Datei wurde nach dem Schreiben **nachgemessen** — sie existiert, sie ist
+    # nicht leer, und ihre Pruefsumme steht in `sha256`. Gesetzt wird es nur
+    # dort, wo diese Messung stattgefunden hat; NULL heisst "unbewiesen", nie
+    # "kaputt". Alle Altbestaende bleiben damit korrekt unbewiesen, statt
+    # rueckwirkend als geprueft zu gelten.
+    #
+    # `sha256` ist der Wert des **Archivs, wie es auf der Platte liegt** — beim
+    # verschluesselten lokalen Backup also der der `.enc`-Datei. Nur so laesst
+    # er sich ohne Schluessel nachrechnen, und genau dafuer ist er da.
+    sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     server: Mapped["Server"] = relationship("Server", back_populates="backups")

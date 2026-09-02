@@ -29,6 +29,21 @@ export interface SearchResponse {
   results: SearchResult[]
 }
 
+/** Ein Treffer *im* Dateiinhalt — mit Zeilennummer, anders als bei der Namenssuche. */
+export interface ContentMatch {
+  path: string
+  line: number
+  text: string
+}
+
+export interface ContentSearchResponse {
+  path: string
+  query: string
+  matches: ContentMatch[]
+  files_searched: number
+  truncated: boolean
+}
+
 export interface ReadResponse extends FileMetadata {
   path: string
   name: string

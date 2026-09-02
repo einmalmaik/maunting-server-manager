@@ -528,3 +528,284 @@ Kapselung:
 Exit-Plan:
   Markierte Tests auf explizite asyncio.run-Szenarien umstellen und den einen
   Eintrag aus dev-requirements.txt entfernen.
+
+---
+
+## model2vec + numpy — Lokale Embeddings für das KI-Gedächtnis
+
+Stand: 2026-08-08
+
+Problem:
+  Die Auswahl der Erinnerungen bei knappem Kontextbudget lief über
+  Wortüberlappung. Die greift ausschließlich innerhalb einer Sprache: ein
+  deutscher Eintrag und eine englische oder französische Frage haben kein
+  gemeinsames Wort, und das Gedächtnis wirkt in diesem Moment defekt, obwohl
+  der passende Eintrag danebenliegt.
+
+Notwendigkeit:
+  Semantische Ähnlichkeit braucht Vektoren. Gemessen am 2026-08-08 bietet
+  OpenRouter kein kostenloses Embedding-Modell — HTTP 402 bei
+  `openai/text-embedding-3-small`, HTTP 400 bei `openrouter/free`. Ein
+  Gedächtnis, dessen Suche einen bezahlten Provider-Account voraussetzt, wäre
+  für einen Teil der Betreiber nicht nutzbar. Also lokal.
+
+Alternativen (gemessen, nicht geschätzt):
+  - mem0ai: 35 Pakete. Ausgeschlossen aus drei unabhängigen Gründen.
+    `posthog` ist Pflichtabhängigkeit — Abschnitt 2 dieser Datei listet
+    Analytics-Bibliotheken im Server-Management-Kontext unter harte Verbote.
+    `httpx>=0.28.0` kollidiert mit unserem gepinnten `httpx==0.27.0` im
+    SSRF-geschützten Ausgangspfad. `openai>=1.90.0` wäre ein zweites
+    Provider-SDK neben dem eigenen Adapter, ohne dessen IP-Pinning.
+  - fastembed: 30 Pakete, davon `onnxruntime` als großes Binärpaket. Kein
+    Ausschlussgrund, aber deutlich mehr Fläche bei gleichem Nutzen.
+  - Postgres-Volltextsuche: sprachgebunden und damit am Problem vorbei.
+  - pgvector: MSM verwaltet seinen PostgreSQL selbst mit `postgres:17-alpine`
+    (config.managed_postgres_image), das die Erweiterung nicht enthält. Ein
+    Image-Wechsel träfe jede Installation. Bei bis zu 5.000 Einträgen je Bereich
+    (`ai_limit_service.MAX_MEMORY_ENTRIES_MAX` — die 100, die hier ursprünglich
+    stand, ist seit 2026-08-15 nur noch der Ausgangswert je Rolle) ist ein
+    Skalarprodukt in Python weiterhin schneller als der Datenbank-Roundtrip.
+    Der Deckel stieg am 2026-08-19 von 1.000 auf 5.000, und damit war die hier
+    verlangte Neuprüfung fällig; sie ging noch einmal für Python aus. Gemessen
+    an diesem Tag bei 5.000 Zeilen: das Skalarprodukt selbst kostet 38 ms, das
+    Einbetten der Frage 0,4 ms — die Zeit geht mit 381 ms in das Lesen der
+    Vektoren aus ihrer JSON-Spalte. pgvector löste beides, aber die Rechnung
+    klemmt nicht, und das Format ist eine Entscheidung in unserer eigenen
+    Tabelle: dieselben Zahlen als float32-Bytes brauchen 4,0 ms statt 381 ms,
+    ohne Erweiterung und ohne fremdes Image. Der Abstand ist trotzdem
+    aufgebraucht: bis
+    zur Index-Schwelle von etwa 10.000 Einträgen ist es keine Zehnerpotenz
+    mehr, sondern Faktor zwei, und in einen Prompt fließen mehrere Bereiche
+    nebeneinander. Steigt der Deckel erneut, ist pgvector neu zu prüfen — und
+    dann ohne den Ausweg, dass zuerst das Format an der Reihe wäre.
+
+Security:
+  `model2vec` berührt weder Secrets noch Server-Verbindungen. Der Dienst
+  bekommt bereits entschlüsselten Erinnerungstext und liefert Zahlen zurück.
+  Kein Netzwerkzugriff zur Laufzeit: die Gewichte kommen einmalig über
+  `backend/scripts/fetch_embedding_model.py`, aufgerufen aus install.sh und
+  update.sh. Ein Panel, das im Betrieb Gewichte nachlädt, wäre eine
+  Supply-Chain-Fläche und ist ausdrücklich ausgeschlossen.
+
+  Der berechnete Vektor liegt unverschlüsselt neben dem weiterhin
+  DIS-verschlüsselten Wert. Begründung: der `key` derselben Zeile steht ohnehin
+  im Klartext und verrät mehr als 256 Gleitkommazahlen, aus denen sich der Text
+  nicht rekonstruieren lässt. Der Gewinn ist konkret — die Auswahl findet vor
+  dem Entschlüsseln statt, was pro Chatnachricht dutzende Sidecar-Aufrufe
+  spart. Restrisiko benannt: wer die Datenbank besitzt, kann mit den Vektoren
+  Vermutungen über Inhalte bestätigen, den Text aber nicht lesen.
+
+Transitive Fläche und Lizenz:
+  23 Pakete, im Wesentlichen numpy, tokenizers, huggingface_hub. MIT.
+  `huggingface_hub` verlangt `httpx<1,>=0.23.0` und ist damit mit unserem
+  `httpx==0.27.0` verträglich — geprüft per Auflösungstest.
+
+Modell:
+  `minishlab/potion-multilingual-128M`, MIT, rund 507 MB. Statische
+  Embeddings, also eine vorberechnete Tabelle plus Mittelung — kein neuronales
+  Netz zur Laufzeit, daher kein torch und keine ONNX-Runtime.
+
+  Gemessene Grenzen, damit niemand mehr erwartet als es kann: `Zeitzone` zu
+  `timezone` 0,62, aber `Sicherung` zu `backup` nur 0,27. Unverwandtes trennt
+  es zuverlässig (nahe 0,0). In einem kleinen Vergleich über acht Fragen traf
+  Wortabgleich 5, Embedding 6, beide kombiniert 6. Deshalb ersetzt die
+  Bedeutungssuche den Wortabgleich nicht, sondern ergänzt ihn — im
+  Gameserver-Umfeld besteht viel Fachsprache aus Lehnwörtern, die wörtlich in
+  deutschen Einträgen stehen.
+
+Kapselung:
+  Ausschließlich `services/ai_embedding_service.py`. Kein anderer Modulteil
+  importiert model2vec oder numpy direkt.
+
+Exit-Plan:
+  `encode()` liefert `None`, wenn das Modell fehlt oder nicht lädt — die
+  Auswahl läuft dann über Wortabgleich, Nutzung und Aktualität weiter. Das ist
+  kein theoretischer Ausstieg, sondern ein getesteter Betriebszustand
+  (`test_ai_memory_embeddings.py::test_without_a_model_nothing_breaks`).
+  Entfernen heißt: zwei Zeilen aus requirements.txt, den Dienst löschen, die
+  beiden Spalten per Migration fallen lassen.
+
+---
+
+## pyyaml — Frontmatter der mitgelieferten Skills
+
+Stand: 2026-08-09
+
+Problem:
+  Skills sind seit Phase E Textdateien mit einem YAML-Kopf (`name`,
+  `description`). Der Kopf muss gelesen werden, bevor ein Skill überhaupt im
+  Verzeichnis auftauchen kann.
+
+Warum nicht selbst parsen:
+  Der Kopf hat nur zwei flache Zeichenkettenfelder — ein Fünfzeiler mit
+  `split(":", 1)` läge nahe. Er würde aber bei Anführungszeichen, mehrzeiligen
+  Werten und doppelten Doppelpunkten still das Falsche tun, und genau solche
+  Zeichen stehen in Skill-Beschreibungen ("Nutzen bei: Timeouts, 'Server nicht
+  gefunden'"). Ein Parser, der in diesen Fällen ohne Fehlermeldung einen halben
+  Satz liefert, ist schlechter als eine Bibliothek.
+
+Warum diese:
+  `pyyaml` steckt ohnehin im Abhängigkeitsbaum — `huggingface_hub` verlangt
+  `pyyaml>=5.1`, und `huggingface_hub` kommt über `model2vec`. Es wird hier nur
+  ausdrücklich gepinnt, weil `ai_skill_service` es direkt benutzt: eine
+  Bibliothek, auf die man sich verlässt, gehört in requirements.txt und nicht
+  in den Zufall eines transitiven Baums.
+
+Security:
+  Ausschließlich `yaml.safe_load`. `yaml.load` kann beliebige Python-Objekte
+  erzeugen und ist damit eine Codeausführung; `safe_load` kennt nur
+  Grunddatentypen. Gelesen werden nur Dateien aus `backend/ai_skills/`, also
+  Repo-Inhalt — kein Benutzerupload, kein Netzwerkinhalt.
+
+Kapselung:
+  Ausschließlich `services/ai_skill_service.py::_parse_shipped`. Eine
+  beschädigte Datei fällt dort mit einer Logzeile aus dem Verzeichnis, statt
+  den Start des Panels zu verhindern.
+
+Exit-Plan:
+  Ein eigener Parser wäre möglich, wenn man den Kopf auf ein striktes Format
+  ohne Sonderzeichen festlegt. Solange das nicht entschieden ist, bleibt die
+  Bibliothek — und sie kostet nichts, weil sie ohnehin installiert wird.
+
+## `data-url` (Rust, über das Tauri-Feature `webview-data-url`) — 23.08.2026
+
+Problem:
+  Der Sichtfeld-Indikator (`smart-system/src-tauri/src/sichtfeld.rs`) ist das
+  kleine rote Schild, das aufleuchtet, sobald die KI ein Bildschirmfoto macht.
+  Es ist ein eigenes, rahmenloses Tauri-Fenster und braucht Inhalt: ein
+  Fragment HTML mit einem Punkt und einem Satz.
+
+Warum nicht als Datei im Bundle:
+  Weil genau das der stille Weg wäre, den Indikator loszuwerden. Er hat
+  bewusst keinen Schalter — wer ihn abschalten will, müsste am Quelltext
+  arbeiten. Eine HTML-Datei im Bundle dagegen kann ein Installer, ein
+  Build-Schritt oder ein aufgeräumtes `dist`-Verzeichnis auslassen, und dann
+  scheitert der Fensterbau still. Der Indikator verschwindet, ohne dass jemand
+  eine Zeile Code geändert hätte, und die Aufnahme läuft weiter (so ist die
+  Fehlerbehandlung gebaut, und so muss sie sein). Als `data:`-URL steht der
+  Inhalt im Binärcode neben dem Aufruf.
+
+Warum diese:
+  Es ist keine gewählte Bibliothek, sondern das, was Tauri selbst für sein
+  Feature `webview-data-url` einzieht — `data-url` 0.3.2 aus dem
+  Servo-Projekt, MIT/Apache-2.0, reines Parsen von `data:`-URLs, kein I/O,
+  kein Netzwerk, keine eigenen Abhängigkeiten (eine einzige neue Zeile in
+  `Cargo.lock`). Die Alternative wäre ein eigener Fenstertyp gewesen — mehr
+  Code für weniger.
+
+Security:
+  Der einzige `data:`-Inhalt, der je gebaut wird, ist eine Konstante im
+  Quelltext. Kein Benutzertext, kein Modelltext, nichts aus dem Netz geht
+  dort hinein — sonst wäre es eine Stelle, an der fremder Text zu HTML wird.
+  Wer das ändern will, ändert die Zusage des Moduls mit.
+
+Kapselung:
+  Ausschließlich `sichtfeld.rs::fenster_zeigen`. Sonst nirgends im Programm.
+
+Exit-Plan:
+  Fällt das Feature weg, wird aus dem Fragment eine Datei im Bundle — mit
+  einem Test, der ihre Existenz im gebauten Paket prüft. Erst dann, denn ohne
+  diesen Test wäre die Datei genau das Risiko, das oben beschrieben ist.
+
+## `zune-jpeg` / `zune-core` (Rust, über das `image`-Feature `jpeg`) — 23.08.2026
+
+Problem:
+  Das Bildschirmfoto des Benutzerrechners muss zum Modell. Als PNG ist ein
+  Vollbild regelmäßig größer als eine Million Zeichen Base64 — es passte
+  weder durch die Größengrenze der Auftragsbrücke noch sinnvoll in ein
+  Kontextfenster. Genau daran scheiterte die Bildschirmsicht bis zu diesem
+  Tag: aufgenommen wurde, angekommen ist nie etwas.
+
+Warum diese:
+  Es ist keine gewählte Bibliothek, sondern das, was `image` für seinen
+  JPEG-Kodierer einzieht. Die Kiste `image` steht seit dem 21.08.2026 im
+  Baum (Verkleinern der Aufnahme, Tray-Icons); geändert hat sich nur die
+  Feature-Liste von `["png"]` auf `["png", "jpeg"]`. `zune-jpeg` ist der
+  reine Rust-Codec dahinter, `zune-core` sein gemeinsamer Typenspeicher —
+  beide MIT/Apache-2.0, kein I/O, kein Netzwerk, kein FFI, zwei Einträge in
+  `Cargo.lock`.
+
+  Die erste Fassung dieses Kommentars behauptete "kein neues Paket im Baum",
+  weil beide Kodierer derselben Kiste gehören. Das war falsch: ein Feature
+  zieht Abhängigkeiten nach, und `Cargo.lock` sagt es. Der Satz steht hier,
+  damit der nächste Leser nicht denselben Kurzschluss zieht.
+
+Alternativen:
+  Ein kleineres PNG (stärker verkleinern) wurde verworfen — Text auf einem
+  Bildschirmfoto ist genau das, was gelesen werden soll, und er verschwindet
+  als erstes. Gemessen liegt ein Foto mit 1280x720 als JPEG q75 bei 104.124
+  Zeichen Base64 und bleibt gut lesbar.
+
+Security:
+  Kodiert wird ausschließlich, was `bildschirm.rs` selbst aufgenommen hat.
+  Es wird nie ein fremdes JPEG **dekodiert** — der Angriffsweg eines
+  Bildparsers (fremde Datei, präparierte Header) existiert hier nicht.
+
+Kapselung:
+  Ausschließlich `smart-system/src-tauri/src/bildschirm.rs`. Sonst nirgends.
+
+Exit-Plan:
+  Fällt `image` weg, fällt beides mit. Ein eigener JPEG-Kodierer kommt nicht
+  in Frage; dann lieber wieder PNG und eine kleinere Kantenlänge.
+
+## `maplibre-gl` 6.6.0 — optionale MapTiler-Detailkarte (28.08.2026)
+
+Problem und Notwendigkeit:
+  Die Canvas-Kugel kann eine Welttextur mathematisch korrekt darstellen, aber
+  keine stufenlos lesbaren Stadt- und Landkarten liefern. MapTiler stellt
+  hierfür Vektorkacheln und aktuelle Bildkarten bereit; MapLibre ist der
+  schlanke, providerneutrale WebGL-Renderer. Ein eigenes Tile-Rendering wäre
+  deutlich mehr Code und würde keine Kartenquelle ersetzen.
+
+Security und Datenschutz:
+  Die Bibliothek verarbeitet nur Kartenkacheln im Browser. Sie erhält weder
+  Panel-Credentials noch Servermetadaten. Der Betreiber hinterlegt einen
+  verschlüsselt gespeicherten, auf die Panel-Origin beschränkten MapTiler-
+  Browser-Key. Der Key wird nur nach `ai.satellite.use` an die Kartenansicht
+  ausgegeben; ein unbeschränkter oder serverseitiger MapTiler-Key ist verboten.
+
+Wartung, Lizenz und Fläche:
+  Version 6.6.0, BSD-3-Clause, aktives Open-Source-Projekt. Die direkte
+  Abhängigkeitsfläche besteht aus 12 kleinen Geometrie-/Vektorkachel-Paketen.
+  `npm audit --omit=dev` meldet keine MapLibre-Advisory; drei bereits
+  vorhandene React-Router-Advisories bleiben separat offen.
+
+Kapselung und Exit:
+  Ausschließlich `MapTilerDetailMap.tsx` importiert MapLibre, dynamisch erst
+  beim Hineinzoomen. Entfernen heißt: diese Komponente, die optionale
+  Einstellung und die drei MapTiler-Endpunkte löschen; Sentinel und der
+  bestehende Globus bleiben unverändert.
+
+## `pipecat-ai` 1.8.1 — interner Voice-Frame-Rand (29.08.2026)
+
+Pipecat ist für genau einen Zweck zugelassen: die Reihenfolge von Audio- und
+sicheren Steuerframes innerhalb einer bestehenden Voice-Sitzung. Es ersetzt
+weder AiRun, den Run-Broker, Guardian, Tool-Registry, RBAC, Prefetch noch die
+MSM-Adapter für Transkription und ElevenLabs-TTS.
+
+Notwendigkeit und Kapselung:
+
+- `services/ai_voice/pipecat_pipeline.py` ist der einzige Produktionsimport.
+- Es gibt keinen Pipecat-Runner, keine LiveKit-Serialisierung, keinen neuen
+  Listener und keine Pipecat-Providerdienste.
+- Browser behalten denselben PCM-/JSON-Vertrag. Schlüssel, Abschriften,
+  Tool-Argumente und Rohresultate werden nicht zu Pipecat-Frames oder in Logs.
+- Das Paket ist bewusst optional für den Panelstart: Fehlt es, bleibt das
+  Panel erreichbar und der Sprachmodus meldet sich als nicht verfügbar.
+
+Version und Fläche:
+
+`pipecat-ai==1.8.1` ist exakt gepinnt. Es verlangt Pydantic ab 2.10.6; MSM
+pinnt deshalb `pydantic==2.10.6`. Die Basisdistribution bringt unter anderem
+OpenAI SDK, ONNX Runtime, Numba, Audio-Resampling, NLTK, Pillow und Protobuf
+mit. Diese Pakete werden nicht als neue MSM-Provideroberfläche benutzt. Vor
+einem Release sind der aufgelöste Python-3.12-/Linux-Baum, Lizenzen, Wheels und
+aktuelle High-/Critical-Advisories erneut zu prüfen.
+
+Sicherheits- und Exit-Plan:
+
+Die in den Pipecat-Advisories dokumentierten Fixstände, einschließlich der
+Runner-/Pfad- und LiveKit-Serializer-Themen, werden über die exakte Version und
+den Verzicht auf diese Komponenten eingehalten. Ein Sicherheitsfund oder ein
+Kompatibilitätsfehler führt nicht zu einem zweiten Voice-Pfad: das vorherige
+Release-Artefakt wird wiederhergestellt. Es gibt keine Datenbankmigration.

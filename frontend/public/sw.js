@@ -1,10 +1,10 @@
-// Service Worker for Maunting Server Manager PWA
+// Service Worker for Maunting Service Manager PWA
 
 // CACHE_NAME muss bei jedem Release erhoeht werden, in dem sich statische
 // Assets aendern (neue JS-Bundles, neue Icons, ...). Sonst liefert der SW
 // nach einem Deploy die alten Bundles aus dem Cache und der Browser sieht
 // den neuen Code nicht.
-const CACHE_NAME = 'msm-v7';
+const CACHE_NAME = 'msm-v8';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
@@ -38,9 +38,12 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
-  if (event.request.url.includes('/api/')) return;
 
   const url = new URL(event.request.url);
+  // Kartenkacheln, Satellitenbilder und andere fremde Medien gehören nicht in
+  // den PWA-Cache. Das Cache-Matching für viele kurzlebige Tile-URLs blockiert
+  // die Gestensteuerung und kann abgebrochene externe Requests erzeugen.
+  if (url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
   const isHashedAsset = url.pathname.startsWith('/assets/');
 
   const isHtmlRequest =

@@ -125,6 +125,40 @@ def _fetch_steam_mods_updated(app_id: str, workshop_ids: list[str]) -> dict[str,
     return {}
 
 
+def _fetch_curseforge_mods_updated(mod_ids: list[str]) -> dict[str, datetime]:
+    """Ruft modifizierte Timestamps für CurseForge-Mods per Batch-Abfrage ab."""
+    from services.curseforge_api_key_service import resolve_key
+
+    key = resolve_key()
+    if not key or not mod_ids:
+        return {}
+    results = {}
+    try:
+        url = "https://api.curseforge.com/v1/mods"
+        headers = {"x-api-key": key, "User-Agent": "MSM/1.0 (+updater-check)", "Content-Type": "application/json"}
+        num_ids = [int(mid) for mid in mod_ids if mid.isdigit()]
+        if not num_ids:
+            return {}
+        with httpx.Client(timeout=15.0, headers=headers, follow_redirects=True) as client:
+            resp = client.post(url, json={"modIds": num_ids})
+            resp.raise_for_status()
+            data = resp.json()
+            for item in data.get("data", []):
+                mid = str(item.get("id"))
+                dt_str = item.get("dateModified")
+                if mid and dt_str:
+                    try:
+                        dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        results[mid] = dt
+                    except Exception:
+                        pass
+    except Exception as exc:
+        logger.warning("CurseForge-Details für Mods konnten nicht abgerufen werden: %s", type(exc).__name__)
+    return results
+
+
 def _fetch_steam_mod_updated(app_id: str, workshop_id: str) -> datetime | None:
     """
     Ruft time_updated (als UTC-Datetime) für eine Workshop-Mod über die
@@ -326,8 +360,8 @@ def check_workshop_mod_updates(
     Keine neuen Klassen, keine Pipelines.
     """
     bp_mods = blueprint.effective_mods()
-    if not bp_mods.supportsSteamWorkshop or not bp_mods.workshopAppId:
-        logger.debug("Workshop-Update-Check übersprungen: kein Steam-Workshop-Support im Blueprint.")
+    if not (bp_mods.supportsSteamWorkshop or bp_mods.supportsCurseForge):
+        logger.debug("Mod-Update-Check übersprungen: kein Steam-Workshop- oder CurseForge-Support im Blueprint.")
         return []
 
     from services.node_service import client_for_server, resolve_server_node
@@ -340,19 +374,28 @@ def check_workshop_mod_updates(
             client = client_for_server(server)
         except NodeClientError as exc:
             logger.warning(
-                "Workshop-Update-Check übersprungen für Server %s: Node offline (%s)",
+                "Mod-Update-Check übersprungen für Server %s: Node offline (%s)",
                 server.id,
                 exc.message,
             )
             return []
 
-    workshop_app_id = bp_mods.workshopAppId
+    workshop_app_id = bp_mods.workshopAppId or ""
+    is_curseforge = bp_mods.supportsCurseForge
     active_mods = _query_active_mods(server.id)  # bereits enabled=True, sortiert
-    has_api_key = _has_steam_api_key()
+
+    if is_curseforge:
+        from services.curseforge_api_key_service import resolve_key as resolve_cf_key
+        has_api_key = bool(resolve_cf_key())
+    else:
+        has_api_key = _has_steam_api_key()
 
     # Batch-Abfrage aller aktiven Mod-Timestamps vor der Schleife, um N+1 HTTP-Requests zu vermeiden
     mod_ids = [str(m.workshop_id) for m in active_mods if m.workshop_id]
-    remote_updates = _fetch_steam_mods_updated(workshop_app_id, mod_ids) if (has_api_key and mod_ids) else {}
+    if is_curseforge:
+        remote_updates = _fetch_curseforge_mods_updated(mod_ids) if (has_api_key and mod_ids) else {}
+    else:
+        remote_updates = _fetch_steam_mods_updated(workshop_app_id, mod_ids) if (has_api_key and mod_ids) else {}
 
     results: list[dict[str, Any]] = []
 
@@ -361,34 +404,42 @@ def check_workshop_mod_updates(
         if not workshop_id:
             continue
 
-        # Präsenz-Heuristik (exakt wie SteamCMD-Layout)
-        local_path = (
-            Path(server.install_dir)
-            / "steamapps"
-            / "workshop"
-            / "content"
-            / workshop_app_id
-            / workshop_id
-        )
-        is_installed = False
-        if client is not None:
-            try:
-                remote_path = f"steamapps/workshop/content/{workshop_app_id}/{workshop_id}"
-                files = client.files_list(server.id, remote_path)
-                is_installed = len(files) > 0
-            except NodeClientError as exc:
-                if exc.status_code == 404:
-                    is_installed = False
-                else:
-                    is_installed = True
-            except Exception:
+        if is_curseforge:
+            if bp_mods.curseforgeInstallPath:
+                cf_target_dir = Path(server.install_dir) / bp_mods.curseforgeInstallPath
+                is_installed = cf_target_dir.exists() and any(cf_target_dir.glob(f"*{workshop_id}*"))
+            else:
+                # Startup argument injected (e.g. ASA)
                 is_installed = True
         else:
-            if local_path.exists():
+            # Präsenz-Heuristik (exakt wie SteamCMD-Layout)
+            local_path = (
+                Path(server.install_dir)
+                / "steamapps"
+                / "workshop"
+                / "content"
+                / workshop_app_id
+                / workshop_id
+            )
+            is_installed = False
+            if client is not None:
                 try:
-                    is_installed = any(local_path.iterdir())
-                except OSError:
-                    is_installed = False
+                    remote_path = f"steamapps/workshop/content/{workshop_app_id}/{workshop_id}"
+                    files = client.files_list(server.id, remote_path)
+                    is_installed = len(files) > 0
+                except NodeClientError as exc:
+                    if exc.status_code == 404:
+                        is_installed = False
+                    else:
+                        is_installed = True
+                except Exception:
+                    is_installed = True
+            else:
+                if local_path.exists():
+                    try:
+                        is_installed = any(local_path.iterdir())
+                    except OSError:
+                        is_installed = False
 
         db_updated: datetime | None = getattr(mod, "last_updated", None)
         # Normalisiere auf aware UTC falls nötig (DB-Sicherheit)
@@ -945,7 +996,17 @@ def cache_manual_configs(server: Any, blueprint: Optional[Blueprint] = None) -> 
     # tar-Archiv erzeugen (im Cache-Verzeichnis)
     try:
         # Wir wechseln kurz ins install_dir, damit die Pfade relativ sauber sind
-        cmd = ["tar", "-cf", str(cache_file), "-C", str(install_dir)] + files_to_backup
+        #
+        # `--` trennt Optionen von Operanden. Ohne diese Trennung deutet `tar`
+        # jeden Dateinamen, der mit einem Bindestrich beginnt, als **Option**.
+        # Die Namen stammen aus `rglob` ueber das Installationsverzeichnis, also
+        # aus dem Dateisystem — und dort kann eine Datei landen, ohne dass ein
+        # Mensch sie benannt hat: die KI darf Konfigurationsdateien anlegen, und
+        # ein Name wie `--use-compress-program=…` besteht jede Pfadpruefung, weil
+        # er weder absolut ist noch `..` enthaelt noch das Verzeichnis verlaesst.
+        # Beim naechsten Reinstall waere daraus eine Programmausfuehrung
+        # geworden.
+        cmd = ["tar", "-cf", str(cache_file), "-C", str(install_dir), "--"] + files_to_backup
         subprocess.run(cmd, check=True, capture_output=True, timeout=120)
     except Exception as exc:
         logger.warning("Konnte manuelle Configs für Server %s nicht cachen: %s", server.id, exc)
@@ -1277,8 +1338,11 @@ def apply_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
                 f"[MSM] Server-Datei-Update: git pull origin {branch} (synchron vor Start)\n",
             )
             node = getattr(server, "node", None)
+            # Derselbe serverbezogene Zugang wie im Installationspfad.
+            from games.blueprint_plugin import _resolve_github_token_for_server
+
+            token = _resolve_github_token_for_server(server_id)
             if node is not None and not getattr(node, "is_local", False):
-                from services.github_token_service import resolve_token
                 from services.node_client import NodeClient
 
                 cfg = blueprint.source.github
@@ -1287,12 +1351,12 @@ def apply_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
                     "server_id": str(server_id),
                     "repo": cfg.repo,
                     "branch": cfg.branch,
-                    "token": resolve_token(),
+                    "token": token,
                     "setup_commands": cfg.setupCommands,
                     "sub_path": cfg.subPath,
                     "runtime_image": blueprint.runtime.image,
                 })
-            return install_github_source(blueprint, install_dir)
+            return install_github_source(blueprint, install_dir, token)
         else:
             # manualUpload / dockerOnly / custom → Check sollte nie "update" liefern.
             return {

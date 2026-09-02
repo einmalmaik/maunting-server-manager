@@ -58,6 +58,38 @@ class Server(Base):
     guardian_last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     guardian_agent_quarantine_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     guardian_agent_recovery_suspension_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Guardian **fuer diesen einen Server** anders eingestellt als im Blueprint.
+    #
+    # Die Blueprint gilt fuer jeden Server ihres Spiels; sie kann nicht wissen,
+    # dass ausgerechnet auf dieser Node zwoelf Instanzen um acht Gigabyte
+    # streiten und der Start deshalb nicht in dreissig Sekunden durch ist. Genau
+    # dafuer gibt es diese Spalte: eine Handvoll Zahlen, die `compile_guardian_config`
+    # **nach** der Ableitung aus der Blueprint darueberlegt.
+    #
+    # Ausschliesslich Skalare, aus einer geschlossenen Menge, mit geklemmten
+    # Bereichen (`GUARDIAN_STELLSCHRAUBEN` im Compiler). Keine Listen, keine
+    # Regexe, keine Probentypen — dieselbe Begruendung, aus der `AENDERBARE_PFADE`
+    # in `blueprint_service` listenwertige Pfade ausschliesst.
+    guardian_overrides_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Konfigurationswerte, die **nach jedem Start** dastehen sollen.
+    #
+    # Der Anlass ist gemessen (Server 107, 15.–19.08.2026): ein ausgefuehrter
+    # Konfigurationsvorschlag stand vier Tage spaeter nicht mehr in der Datei.
+    # ARK haelt seine Einstellungen im Speicher und schreibt
+    # `GameUserSettings.ini` beim Autosave vollstaendig neu — was der laufende
+    # Prozess nicht kennt, verwirft er dabei.
+    #
+    # Deshalb merkt sich der Server den *Wunsch*, nicht nur das Ergebnis:
+    # `prepare_runtime` schreibt ihn vor jedem Start erneut in die Datei. Damit
+    # muss niemand wissen, welches Spiel seine Konfiguration zurueckschreibt —
+    # eine Liste dieser Art muesste gepflegt werden und wuerde beim ersten
+    # vergessenen Eintrag still wieder Werte verlieren.
+    #
+    # Aufbau und Grenzen in `services/server_config_wishes.py`; dieselbe
+    # Bauform wie `guardian_overrides_json`: Skalare, die **nach** der
+    # Blueprint-Ableitung darueberliegen.
+    config_wishes_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Auto-Restart
     # WICHTIG: Nur EIN Modus aktiv (Intervall oder feste Zeiten).
@@ -78,6 +110,16 @@ class Server(Base):
     last_auto_restart_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
     last_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Von der KI verwaltet: True, solange die KI diesen Zeitplan zuletzt gesetzt
+    # hat. Eine manuelle Änderung über das Panel gewinnt immer — sie nimmt das
+    # Flag zurück und deaktiviert den verknüpften stehenden Auftrag
+    # (ai_task_service.ki_zeitplan_verwaltung_aufheben). Die Task-Kennung ist
+    # ein weicher Verweis ohne DB-Fremdschlüssel (Migration 20260820_02 erklärt
+    # warum); ai_task_service.loeschen räumt die Verweise auf, Leser behandeln
+    # verschwundene Aufträge tolerant.
+    restart_ai_managed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    restart_ai_task_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
     # Backup-Scheduling
     # Hinweis für zukünftige Erweiterung (analog zu Restart):
     # - Aktuell nur backup_interval_hours (IntervalTrigger).
@@ -90,6 +132,9 @@ class Server(Base):
     backup_on_start: Mapped[bool] = mapped_column(Boolean, default=False)
     backup_interval_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 24=daily, 168=weekly, 720=monthly
     backup_retention_count: Mapped[int] = mapped_column(Integer, default=5)
+    # Von der KI verwaltet — gleiches Muster wie restart_ai_managed/-task_id.
+    backup_ai_managed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    backup_ai_task_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
     # Ressourcen
     cpu_limit_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -196,5 +241,15 @@ class Server(Base):
         try:
             from services.scheduler_service import get_next_restart_run_time
             return get_next_restart_run_time(self.id)
+        except Exception:
+            return None
+
+    @property
+    def next_auto_backup_at(self) -> datetime | None:
+        if not self.backup_interval_hours:
+            return None
+        try:
+            from services.scheduler_service import get_next_backup_run_time
+            return get_next_backup_run_time(self.id)
         except Exception:
             return None

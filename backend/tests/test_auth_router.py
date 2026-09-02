@@ -334,6 +334,56 @@ class TestRefresh:
         response = client.post("/api/auth/refresh")
         assert response.status_code == 401
 
+    def test_refresh_issues_revocable_access_token(
+        self, client: TestClient, owner_user: User, owner_cookies: dict, db: Session
+    ):
+        """Nach einer Rotation muss der Logout das Access-Token noch widerrufen koennen.
+
+        Ohne `jti` blieb ein entwendetes Access-Cookie nach dem Logout des Opfers
+        bis zum Ablauf (Default 15 Minuten) voll gueltig — genau die
+        Gegenmassnahme, die es fuer diesen Fall gibt, lief ins Leere.
+        """
+        from services.auth_service import AuthService as _AuthService
+
+        rotated_response = client.post("/api/auth/refresh", cookies=owner_cookies)
+        assert rotated_response.status_code == 200
+        rotated = dict(rotated_response.cookies)
+
+        payload = _AuthService.decode_token(rotated["__Secure-access_token"])
+        assert payload is not None
+        assert payload.get("jti"), "Access-Token aus /refresh traegt keine jti"
+
+        logout = client.post(
+            "/api/auth/logout",
+            cookies=rotated,
+            headers={"X-CSRF-Token": rotated["__Secure-csrf_token"]},
+        )
+        assert logout.status_code == 200
+
+        # Der eigentliche Beweis: das rotierte Token wird jetzt abgewiesen.
+        me = client.get("/api/auth/me", cookies=rotated)
+        assert me.status_code == 401
+
+    def test_refresh_keeps_token_family(
+        self, client: TestClient, owner_user: User, owner_cookies: dict, db: Session
+    ):
+        """Die Rotation darf die Token-Familie nicht wechseln.
+
+        Die Familie ist der Faden, an dem die Wiederverwendungserkennung haengt.
+        Der Test steht hier, weil die Rotation seit dem jti-Fix ueber
+        `issue_session` laeuft — ein vergessenes `family=` waere sonst still.
+        """
+        rotate = client.post("/api/auth/refresh", cookies=owner_cookies)
+        assert rotate.status_code == 200
+
+        families = {
+            rt.family
+            for rt in db.query(RefreshToken).filter(
+                RefreshToken.user_id == owner_user.id,
+            ).all()
+        }
+        assert len(families) == 1
+
 
 class TestGetCurrentUser:
     def test_me_returns_user(self, client: TestClient, owner_cookies: dict, owner_user: User):
@@ -618,6 +668,92 @@ class Test2FABackupCodes:
         })
         assert res2.status_code == 401
 
+    def test_2fa_setup_requires_csrf(self, client: TestClient, db: Session, owner_user: User, owner_cookies: dict):
+        """Ohne CSRF-Header darf /2fa/setup das TOTP-Geheimnis nicht austauschen.
+
+        Im Cross-Domain-Betrieb stehen alle Auth-Cookies auf SameSite=None; ein
+        fremdes Formular kann den Endpunkt dann ohne Preflight ausloesen. Vorher
+        legte das den zweiten Faktor des Opfers still und machte dessen
+        Authenticator unbrauchbar.
+        """
+        from tests._totp import random_totp_secret
+        from services.auth_service import AuthService as _AuthService
+
+        secret = random_totp_secret()
+        owner_user.two_factor_secret_encrypted = _AuthService.encrypt_secret(
+            secret, aad=f"msm:user:{owner_user.id}:2fa"
+        )
+        owner_user.two_factor_enabled = True
+        db.commit()
+        secret_before = owner_user.two_factor_secret_encrypted
+
+        res = client.post("/api/auth/2fa/setup", cookies=owner_cookies)
+
+        assert res.status_code == 403
+        db.refresh(owner_user)
+        assert owner_user.two_factor_enabled is True
+        assert owner_user.two_factor_secret_encrypted == secret_before
+
+    def test_2fa_setup_refuses_while_enabled(self, client: TestClient, db: Session, owner_user: User, owner_cookies: dict):
+        """Auch mit gueltigem CSRF-Token schaltet /2fa/setup ein aktives 2FA nicht ab.
+
+        Der zweite Faktor faellt nur dort, wo der aktuelle Code nachgewiesen
+        wird — sonst genuegte ein einziger Aufruf im eingeloggten Zustand.
+        """
+        from tests._totp import random_totp_secret
+        from services.auth_service import AuthService as _AuthService
+
+        secret = random_totp_secret()
+        owner_user.two_factor_secret_encrypted = _AuthService.encrypt_secret(
+            secret, aad=f"msm:user:{owner_user.id}:2fa"
+        )
+        owner_user.two_factor_enabled = True
+        db.commit()
+        secret_before = owner_user.two_factor_secret_encrypted
+        csrf = owner_cookies.get("__Secure-csrf_token")
+
+        res = client.post(
+            "/api/auth/2fa/setup",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf},
+        )
+
+        assert res.status_code == 400
+        db.refresh(owner_user)
+        assert owner_user.two_factor_enabled is True
+        assert owner_user.two_factor_secret_encrypted == secret_before
+
+    def test_2fa_setup_succeeds_with_csrf(self, client: TestClient, owner_cookies: dict):
+        """Gegenprobe: der regulaere Einrichtungsweg bleibt offen."""
+        csrf = owner_cookies.get("__Secure-csrf_token")
+        res = client.post(
+            "/api/auth/2fa/setup",
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert res.status_code == 200
+        assert res.json()["secret"]
+
+    def test_2fa_enable_requires_csrf(self, client: TestClient, db: Session, owner_user: User, owner_cookies: dict):
+        """Auch /2fa/enable ist zustandsaendernd und braucht deshalb CSRF-Schutz."""
+        from tests._totp import totp_now, random_totp_secret
+        from services.auth_service import AuthService as _AuthService
+
+        secret = random_totp_secret()
+        owner_user.two_factor_secret_encrypted = _AuthService.encrypt_secret(
+            secret, aad=f"msm:user:{owner_user.id}:2fa"
+        )
+        db.commit()
+
+        res = client.post(
+            f"/api/auth/2fa/enable?otp_code={totp_now(secret)}",
+            cookies=owner_cookies,
+        )
+
+        assert res.status_code == 403
+        db.refresh(owner_user)
+        assert owner_user.two_factor_enabled is False
+
     def test_2fa_disable_requires_current_otp(self, client: TestClient, db: Session, owner_user: User, owner_cookies: dict):
         from tests._totp import totp_now, random_totp_secret
         from services.auth_service import AuthService as _AuthService
@@ -700,12 +836,12 @@ class TestCsrfProtectionOnEndpoints:
         # Routers nutzen kein subprocess mehr (Docker-Runtime). Wir patchen
         # nur Filesystem/Firewall/Plugin, damit der Create-Pfad ohne Side-Effects
         # gegen den Docker-Daemon laufen kann.
-        with patch("routers.servers.os.makedirs"), \
-             patch("routers.servers.os.chmod"), \
-             patch("routers.servers.os.path.exists", return_value=False), \
-             patch("routers.servers.allocate_ports", return_value=(27015, 27016, 27017)), \
+        with patch("services.server_provisioning_service.os.makedirs"), \
+             patch("services.server_provisioning_service.os.chmod"), \
+             patch("services.server_provisioning_service.os.path.exists", return_value=False), \
+             patch("services.server_provisioning_service.allocate_ports", return_value=(27015, 27016, 27017)), \
              patch("routers.servers.open_ports"), \
-             patch("routers.servers.get_plugin", return_value=None):
+             patch("services.server_provisioning_service.get_plugin", return_value=None):
             csrf = owner_cookies.get("__Secure-csrf_token")
             response = client.post(
                 "/api/servers",

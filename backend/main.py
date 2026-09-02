@@ -4,8 +4,9 @@ import os
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
 
 from limits import parse
 from slowapi import _rate_limit_exceeded_handler
@@ -13,7 +14,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 
-from config import get_cors_origins, settings
+from config import TAURI_ORIGINS, get_cors_origins, settings
 from database import engine, Base
 from routers import (
     auth_router,
@@ -23,6 +24,7 @@ from routers import (
     mods_router,
     system_router,
     steam_router,
+    curseforge_router,
     panel_settings_router,
     files_router,
     roles_router,
@@ -39,39 +41,33 @@ from routers import (
     incidents_router,
     change_timeline_router,
     guardian_router,
+    ai_settings_router,
+    tasks_router,
+    ai_providers_router,
+    ai_chat_router,
+    ai_voice_router,
+    ai_actions_router,
+    desktop_router,
+    ai_approvals_router,
+    ai_autonomy_router,
+    ai_memory_router,
+    ai_tasks_router,
+    ai_skills_router,
+    ai_attachments_router,
+    credentials_router,
+    teams_router,
+    hoster_admin_router,
+    hoster_api_router,
+    hoster_handoff_router,
+    user_integrations_router,
+    popups_router,
+    calendar_router,
+    notes_router,
 )
-from middleware.rate_limit import limiter
-from services.rate_limit_settings import current_auth_limit_from_settings
+from middleware.rate_limit import limiter, auth_rate_limit
 from services.steam_service import close_steam_service
 from services.scheduler_service import start_scheduler, stop_scheduler, init_server_schedules
 from services.server_lifecycle_service import reconcile_orphaned_lifecycle_statuses
-
-
-# ── Auth-Endpunkte: dynamisches Limit aus panel_settings (Default 10/min) ──
-# Warum pro Request neu lesen: Admin kann Login-Schutz unter Einstellungen →
-# Sicherheit anpassen (Firmen-IP / akuter Angriff), ohne Backend-Neustart.
-# parse() ist billig; bei Settings-Lesefehler greift resolve_* den Default.
-
-
-def auth_rate_limit(request: Request) -> None:
-    """Strenges Rate-Limit für Login/2FA/Passwort-Reset/Setup pro IP.
-
-    Liest rate_limit_auth aus den Panel-Settings (3–50, Default 10).
-    Bei ungültigen/fehlenden Werten fail-closed auf Default — nie unlimitiert.
-    """
-    key = get_remote_address(request)
-    try:
-        per_minute = current_auth_limit_from_settings()
-    except Exception:
-        # DB/Cache-Fehler dürfen Auth nie ungeschützt lassen
-        per_minute = 10
-    limit_item = parse(f"{per_minute}/minute")
-    if not limiter.limiter.hit(limit_item, key):
-        raise HTTPException(
-            status_code=429,
-            detail="Zu viele Anfragen. Bitte warten Sie einen Moment.",
-            headers={"Retry-After": "60"},
-        )
 
 
 @asynccontextmanager
@@ -80,6 +76,28 @@ async def lifespan(app: FastAPI):
     import httpx
     limits = httpx.Limits(max_connections=200, max_keepalive_connections=50)
     app.state.http_client = httpx.AsyncClient(limits=limits, timeout=5.0)
+    app.state.ai_http_client = httpx.AsyncClient(
+        limits=httpx.Limits(max_connections=50, max_keepalive_connections=20),
+        timeout=httpx.Timeout(connect=5.0, read=90.0, write=10.0, pool=5.0),
+        follow_redirects=False,
+    )
+
+    # Ein KI-Lauf haengt nicht mehr am Request, der ihn ausgeloest hat. Damit er
+    # ueberhaupt irgendwo arbeiten kann, braucht er zwei Dinge aus dem Prozess:
+    # die Ereignisschleife der Anwendung (auf der er geplant wird — auch aus
+    # einem synchronen Endpunkt heraus, wenn ein Mensch eine Aktion bestaetigt)
+    # und den HTTP-Client fuer den Anbieter.
+    #
+    # Ohne diesen Aufruf plant `ai_run_service` nichts und sagt das auch — der
+    # Zustand in der Testsuite, in der es keine Anwendung gibt.
+    import asyncio as _asyncio
+
+    from services import ai_run_service as _ai_run_service
+
+    _ai_run_service.laufzeit_setzen(
+        _asyncio.get_running_loop(), app.state.ai_http_client
+    )
+
 
     os.makedirs(settings.servers_dir, exist_ok=True)
     os.makedirs("/opt/msm/backups", exist_ok=True)
@@ -88,6 +106,49 @@ async def lifespan(app: FastAPI):
     # Only bypassed if explicitly testing (e.g. pytest)
     import sys
     is_testing = os.getenv("MSM_TESTING") == "true" or "pytest" in sys.modules
+
+    # Der Modellkatalog bekommt denselben langlebigen Client. Er frischt sich
+    # kuenftig im Hintergrund auf und darf dafuer nicht den Client einer Anfrage
+    # benutzen — der ist geschlossen, sobald sie beantwortet ist.
+    #
+    # Und dann einmal holen, bevor ihn jemand braucht. Das ist der Unterschied
+    # zwischen "die erste Nachricht nach dem Neustart dauert eine Minute" und
+    # "sie dauert so lange wie jede andere": ohne Vorwaermen faellt der Abruf
+    # beim Anbieter genau in den Sendepfad des ersten Chats.
+    #
+    # In der Testsuite unterbleibt beides. Ein Vorwaermen dort waere ein echter
+    # Aufruf an OpenRouter bei jedem Hochfahren der Anwendung, und ein gesetzter
+    # Client liesse Tests im Hintergrund abrufen, die von nichts dergleichen
+    # wissen.
+    if not is_testing:
+        from services import ai_model_catalog as _ai_model_catalog
+        from services import ai_provider_service as _ai_provider_service
+
+        _ai_model_catalog.laufzeit_setzen(app.state.ai_http_client)
+        # Und woher ein schluesselpflichtiger Katalog seinen Schluessel bekommt.
+        # Eine eingehaengte Funktion statt eines Imports: der Katalog soll von
+        # Datenbank und DIS-Sidecar nichts wissen. Muss **vor** dem Vorwaermen
+        # stehen, sonst laeuft dessen erster Durchgang ohne sie.
+        _ai_model_catalog.schluesselquelle_setzen(
+            _ai_provider_service.katalogschluessel
+        )
+        _ai_model_catalog.vorwaermen_anstossen()
+
+    # Der Ausgangskorb der KI-Mails. Eine einzige Aufgabe auf dieser Schleife
+    # loest den Fall ab, in dem jede faellige Mail einen eigenen Thread mit
+    # eigener Ereignisschleife bekam — bei zehntausend gleichzeitig faelligen
+    # Auftraegen waren das zehntausend Threads und ebenso viele frische
+    # SMTP-Verbindungen.
+    #
+    # In der Testsuite unterbleibt der Start, aus demselben Grund wie beim
+    # Katalog daneben: ein Arbeiter, der im Hintergrund die Datenbank abfragt
+    # und Mails verschickt, gehoert nicht in Tests, die von nichts dergleichen
+    # wissen. Die Tests des Korbs starten ihn selbst.
+    if not is_testing:
+        from services import ai_mail_outbox as _ai_mail_outbox
+
+        _ai_mail_outbox.arbeiter_starten()
+
     from services.dis_client import DisClient
     if not is_testing and not DisClient.health_check():
         raise RuntimeError(
@@ -168,6 +229,12 @@ async def lifespan(app: FastAPI):
     if "singra_webhook_events" not in inspector.get_table_names():
         from models.singra_webhook_event import SingraWebhookEvent  # noqa: F401
         SingraWebhookEvent.__table__.create(bind=engine, checkfirst=True)
+
+    if legacy_schema_bridge and 'hoster_integrations' in inspector.get_table_names():
+        hi_cols = [c['name'] for c in inspector.get_columns('hoster_integrations')]
+        if 'is_sandbox' not in hi_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE hoster_integrations ADD COLUMN is_sandbox BOOLEAN NOT NULL DEFAULT false"))
 
     # Migration: servers.auth_required Spalte hinzufuegen (interaktive Auth-Recovery)
     if legacy_schema_bridge and 'servers' in inspector.get_table_names():
@@ -476,6 +543,16 @@ async def lifespan(app: FastAPI):
     from database import SessionLocal
     db = SessionLocal()
     try:
+        from services.operation_task_service import recover_interrupted_tasks
+
+        recovered_tasks = recover_interrupted_tasks(db)
+        if recovered_tasks:
+            import logging
+
+            logging.getLogger(__name__).info(
+                "%d offene Backend-Aufgabe(n) nach Panel-Start abgeglichen.",
+                recovered_tasks,
+            )
         reconciled = reconcile_orphaned_lifecycle_statuses(db)
         if reconciled:
             import logging
@@ -512,20 +589,134 @@ async def lifespan(app: FastAPI):
         import logging
         logging.getLogger(__name__).warning("OAuth-LoginChallenge-Cleanup fehlgeschlagen: %s", exc)
 
+    # Dasselbe fuer die E-Mail-Freigaben. Sie sind kurzlebig und werden nach
+    # dem Verbrauch nicht mehr gebraucht — die Tatsache, dass jemand zugestimmt
+    # hat, steht im Audit. Hier stuende sie ein zweites Mal, mit einem
+    # Tokenhash daneben.
+    try:
+        from database import SessionLocal as _SessionLocal3
+        from services.ai_approval_service import abgelaufene_aufraeumen
+        _approval_db = _SessionLocal3()
+        try:
+            abgelaufene_aufraeumen(_approval_db)
+        finally:
+            _approval_db.close()
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("KI-Freigaben-Cleanup fehlgeschlagen: %s", exc)
+
+
+    from services.ai_proposal_service import reconcile_interrupted_actions
+    from services.ai_chat_service import reconcile_interrupted_ai_streams
+    from services.ai_usage_service import verwaiste_reservierungen_abgleichen
+
+    from services.ai_run_service import unterbrochene_laeufe_abgleichen
+
+    _ai_recovery_db = SessionLocal()
+    try:
+        reconcile_interrupted_ai_streams(_ai_recovery_db)
+        reconcile_interrupted_actions(_ai_recovery_db)
+        # Nach den nachrichtengebundenen Zeilen: die Kontextverdichtung
+        # reserviert Kontingent ohne Nachricht, ihre Zeile findet der Abgleich
+        # oben deshalb nie. Bliebe sie auf `reserved`, wuerde sie einen
+        # Nebenlaeufigkeitsplatz dauerhaft belegen — der Zaehler kennt kein
+        # Zeitfenster und vergisst nichts.
+        verwaist = verwaiste_reservierungen_abgleichen(_ai_recovery_db)
+        if verwaist:
+            import logging
+
+            logging.getLogger(__name__).info(
+                "%d verwaiste KI-Reservierung(en) nach Panel-Start abgerechnet.",
+                verwaist,
+            )
+        # Ein Lauf im Zustand `running` hat den Neustart nicht ueberlebt: sein
+        # Arbeitsgedaechtnis endet mitten in einer Anbieterantwort, und ob ein
+        # Werkzeug schon lief, ist nicht mehr feststellbar. Ein halber
+        # Werkzeugaufruf, blind wiederholt, waere schlimmer als ein ehrlicher
+        # Abbruch. Geparkte Laeufe bleiben unangetastet — die warten auf einen
+        # Menschen und haben nichts in der Luft.
+        unterbrochene = unterbrochene_laeufe_abgleichen(_ai_recovery_db)
+        if unterbrochene:
+            import logging
+
+            logging.getLogger(__name__).info(
+                "%d unterbrochene(r) KI-Lauf/Laeufe nach Panel-Start abgeschlossen.",
+                unterbrochene,
+            )
+        # Unterbrochene **Worker** bekommen genau einen automatischen
+        # Wiederanlauf: ein neuer Lauf im selben Fenster mit Pruefauftrag —
+        # die persistierte Unterhaltung ist der Checkpoint
+        # (docs/agentic-framework.md). Die Laufzeit steht hier bereits
+        # (`laufzeit_setzen` frueh im Lifespan), der Vorflug kann also fliegen.
+        from services.ai_run_service import worker_wiederanlauf_saehen
+
+        gesaet = await worker_wiederanlauf_saehen(_ai_recovery_db)
+        if gesaet:
+            import logging
+
+            logging.getLogger(__name__).info(
+                "%d Worker nach Panel-Start wiederangelaufen.", gesaet
+            )
+    finally:
+        _ai_recovery_db.close()
 
     yield
 
     # Shutdown
+    #
+    # Der Modellkatalog zuerst, und zwar **vor** den Clients: eine noch laufende
+    # Auffrischung benutzt `ai_http_client`. Wird der geschlossen, waehrend sie
+    # laeuft, endet sie in einem RuntimeError auf einem geschlossenen Client —
+    # ein Fehler beim Herunterfahren, der nichts bedeutet und trotzdem im Log
+    # steht. Aufraeumen heisst hier: abbrechen und abwarten.
+    if not is_testing:
+        from services import ai_model_catalog as _ai_model_catalog
+
+        await _ai_model_catalog.aufraeumen()
+
+        # Der Ausgangskorb ebenfalls vor den Clients, und ebenfalls mit Abwarten:
+        # `cancel()` bittet nur. Eine Mail, die dabei abgebrochen wird, ist nicht
+        # verloren — ihre Zeile steht weiter auf `offen` und faellt nach der
+        # Uebernahmefrist zurueck in die Warteschlange. Genau dafuer gibt es die
+        # Tabelle.
+        from services import ai_mail_outbox as _ai_mail_outbox
+
+        await _ai_mail_outbox.aufraeumen()
+
     await app.state.http_client.aclose()
+    await app.state.ai_http_client.aclose()
+    from services.calendar_service import shutdown_caldav_client
+    from services.ai_web_search_service import shutdown_http_client
+    from services.ai_geo_service import shutdown_http_client as shutdown_geo_http_client
+    from services.ai_regional_connectors_service import shutdown_http_client as shutdown_regional_connectors_http_client
+    from services.ai_satellite_service import shutdown_http_client as shutdown_satellite_http_client
+
+    shutdown_caldav_client()
+    shutdown_http_client()
+    shutdown_geo_http_client()
+    shutdown_regional_connectors_http_client()
+    shutdown_satellite_http_client()
     stop_scheduler()
     await close_steam_service()
 
 
+# Die automatischen Doku-Routen sind bewusst abgeschaltet und werden weiter
+# unten unter /api/* neu registriert. Zwei Gruende:
+#
+# 1. FastAPI registriert /docs bereits im Konstruktor, der SPA-Mount auf "/"
+#    kommt erst am Dateiende. Starlette matcht in Registrierungsreihenfolge —
+#    im Single-Host-Betrieb lieferte ein Aufruf von https://panel/docs deshalb
+#    die Swagger-UI statt der Doku-Seite des Panels.
+# 2. /openapi.json haette keinerlei Auth-Dependency und gaebe damit anonym das
+#    vollstaendige Schema aller Endpunkte inklusive der Hoster-Verwaltung heraus.
 app = FastAPI(
     title=settings.app_name,
-    description="Maunting Server Manager — Universeller Game Server Manager",
+    description="Maunting Service Manager — Universeller Game Server Manager",
     version="3.0.0",
     lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
 # ── CORS: Explizite Origins (panel_url + MSM_CORS_ALLOWED_ORIGINS + Dev) ──
@@ -536,7 +727,13 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-CSRF-Token"],
+    allow_headers=[
+        "Content-Type",
+        "Authorization",
+        "X-CSRF-Token",
+        "Idempotency-Key",
+        "X-Task-Retry-Of",
+    ],
     expose_headers=["X-CSRF-Token"],
 )
 
@@ -552,6 +749,10 @@ def _csp_connect_src() -> str:
     """connect-src: 'self' plus panel/CORS origins (split FE + API / Vercel)."""
     parts = ["'self'"]
     for origin in _cors_origins:
+        # Desktop-Origins (Tauri) sind CORS-erlaubt, aber der Browser des
+        # Panels verbindet sich nie dorthin — in der CSP waeren sie nur Rauschen.
+        if origin in TAURI_ORIGINS:
+            continue
         if origin and origin not in parts:
             parts.append(origin)
         # ws/wss counterpart for console streams when SPA is same CSP host
@@ -562,14 +763,23 @@ def _csp_connect_src() -> str:
     return " ".join(parts)
 
 
+# Die Swagger- und ReDoc-Oberflaechen laden ihre Assets von jsdelivr. Die
+# Freigabe gilt ausschliesslich fuer diese beiden Pfade — jede andere Antwort
+# behaelt die enge Standard-CSP. Ohne diese Ausnahme waere die Seite leer, und
+# eine leere Seite haette man leicht fuer einen Serverfehler gehalten.
+_API_DOCS_PATHS = frozenset({"/api/docs", "/api/redoc"})
+_DOCS_CDN = "https://cdn.jsdelivr.net"
+
+
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
     response = await call_next(request)
+    docs_page = request.url.path in _API_DOCS_PATHS
     csp = (
         "default-src 'self'; "
-        "script-src 'self' https://singrabot.mauntingstudios.de https://client.crisp.chat https://embed.tawk.to; "
-        "style-src 'self' 'unsafe-inline' https://singrabot.mauntingstudios.de; "
-        "img-src 'self' data: https://singrabot.mauntingstudios.de; "
+        f"script-src 'self'{' ' + _DOCS_CDN if docs_page else ''} https://singrabot.mauntingstudios.de https://client.crisp.chat https://embed.tawk.to; "
+        f"style-src 'self' 'unsafe-inline'{' ' + _DOCS_CDN if docs_page else ''} https://singrabot.mauntingstudios.de; "
+        f"img-src 'self' data:{' ' + _DOCS_CDN if docs_page else ''} https://singrabot.mauntingstudios.de; "
         f"connect-src {_csp_connect_src()} https://singrabot.mauntingstudios.de https://client.crisp.chat wss://client.relay.crisp.chat https://va.tawk.to; "
         "font-src 'self' https://singrabot.mauntingstudios.de; "
         "frame-src 'self' https://singrabot.mauntingstudios.de; "
@@ -580,7 +790,15 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["Content-Security-Policy"] = csp
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    # `setdefault` und nicht Zuweisung — wie zwei Zeilen tiefer bei
+    # `Cache-Control`, und aus demselben Grund. Es gibt Endpunkte, deren Pfad
+    # **selbst** das Geheimnis ist: der Hoster-Handoff und die KI-Freigabe
+    # tragen ein Einmal-Token in der URL. Beide setzen deshalb ausdruecklich
+    # `no-referrer`, damit das Token nicht im `Referer` jeder nachgeladenen
+    # Ressource landet — und beide wurden hier bis eben wieder auf die
+    # allgemeine, laxere Regel zurueckgesetzt. Der strengere Wert des Handlers
+    # gewinnt jetzt; wo keiner gesetzt ist, gilt weiterhin die Vorgabe.
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
 
     # ── Cache-Control: Vite erzeugt content-gehashte Asset-Pfade ──
     # /assets/* → 1 Jahr immutable (Hash aendert sich bei jeder neuen Version)
@@ -600,13 +818,14 @@ async def security_headers_middleware(request: Request, call_next):
 
 
 # Router
-app.include_router(auth_router, dependencies=[Depends(auth_rate_limit)])
+app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(servers_router)
 app.include_router(backups_router)
 app.include_router(mods_router)
 app.include_router(system_router)
 app.include_router(steam_router)
+app.include_router(curseforge_router)
 app.include_router(panel_settings_router)
 app.include_router(nodes_router)
 app.include_router(files_router)
@@ -632,7 +851,65 @@ app.include_router(panel_database_router)
 app.include_router(incidents_router)
 app.include_router(change_timeline_router)
 app.include_router(guardian_router)
+app.include_router(ai_settings_router)
+app.include_router(ai_providers_router)
+app.include_router(ai_chat_router)
+app.include_router(ai_voice_router)
+app.include_router(ai_actions_router)
+app.include_router(desktop_router)
+# Ohne Anmeldung, aber unter dem strengen Auth-Limit: das Token im Pfad ist
+# die ganze Berechtigung, und ein Endpunkt, der Token gegen einen Bestand
+# prueft, gehoert hinter dieselbe Drossel wie der Login.
+app.include_router(ai_approvals_router, dependencies=[Depends(auth_rate_limit)])
+app.include_router(ai_memory_router)
+app.include_router(ai_tasks_router)
+app.include_router(ai_autonomy_router)
+app.include_router(ai_skills_router)
+app.include_router(ai_attachments_router)
+app.include_router(tasks_router)
+# Hoster-Anbindung (Phase 6). Panel-Verwaltung mit Cookie-Auth + CSRF,
+# externe Shop-API ausschliesslich per API-Key, Handoff-Einloesung per
+# Einmal-Token im Browser des Kunden.
+app.include_router(hoster_admin_router)
+app.include_router(hoster_api_router)
+app.include_router(hoster_handoff_router)
+# Zugangsdaten auf Benutzer- und Serverebene (Phase 7).
+app.include_router(credentials_router)
+app.include_router(teams_router)
+app.include_router(user_integrations_router)
+app.include_router(popups_router)
+app.include_router(calendar_router)
+app.include_router(notes_router)
 
+
+
+# ── OpenAPI: unter /api/*, angemeldet und rechtegebunden ──
+# Das Schema beschreibt jeden Endpunkt inklusive der Hoster-Verwaltung und der
+# erwarteten Header. Das ist kein Geheimnis, aber auch nichts, was ohne Login
+# herausgehen muss. `panel.settings.read` ist dasselbe Recht, das auch die
+# Provider- und Integrationsansichten oeffnet.
+from dependencies import require_global  # noqa: E402  (nach der App-Definition noetig)
+
+
+@app.get("/api/openapi.json", include_in_schema=False)
+def openapi_schema(_: object = Depends(require_global("panel.settings.read"))):
+    return JSONResponse(app.openapi())
+
+
+@app.get("/api/docs", include_in_schema=False)
+def swagger_ui(_: object = Depends(require_global("panel.settings.read"))):
+    return get_swagger_ui_html(
+        openapi_url="/api/openapi.json",
+        title=f"{settings.app_name} — API",
+    )
+
+
+@app.get("/api/redoc", include_in_schema=False)
+def redoc_ui(_: object = Depends(require_global("panel.settings.read"))):
+    return get_redoc_html(
+        openapi_url="/api/openapi.json",
+        title=f"{settings.app_name} — API",
+    )
 
 
 @app.get("/api/version")
@@ -649,12 +926,17 @@ def health():
 # damit /api/* und Health nicht vom SPA-Static-Fallback geschluckt werden.
 # /assets/* ohne html-Fallback: fehlende JS-Chunks liefern 404 (text/plain),
 # nicht index.html — verhindert „MIME type text/html“ bei veralteten Lazy-Chunks.
-import os
 _FRONTEND_DIST = "/opt/msm/frontend/dist"
+_FRONTEND_ASSETS = f"{_FRONTEND_DIST}/assets"
 if settings.serve_frontend and os.path.exists(_FRONTEND_DIST):
     app.mount(
         "/assets",
-        StaticFiles(directory=_FRONTEND_DIST, html=False),
+        # Der Mount entfernt `/assets` vor der Dateisuche. Vite legt seine
+        # Chunks aber in `dist/assets` ab; `dist` würde daher nach
+        # `dist/<chunk>.js` statt nach `dist/assets/<chunk>.js` suchen.
+        # Fehlende Chunks dürfen nie als SPA-HTML zurückkommen, weil das den
+        # laufenden Client (unter anderem die Realtime-WebRTC-Sitzung) stoppt.
+        StaticFiles(directory=_FRONTEND_ASSETS, html=False),
         name="frontend-assets",
     )
     app.mount("/", StaticFiles(directory=_FRONTEND_DIST, html=True), name="frontend")

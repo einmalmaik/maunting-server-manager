@@ -59,11 +59,64 @@ class BlueprintRegistry:
     def list(self) -> list[BlueprintEntry]:
         return sorted(self._entries.values(), key=lambda e: e.blueprint.meta.id)
 
+    COMMON_ALIASES: dict[str, str] = {
+        "minecraft": "minecraft_vanilla",
+        "vanilla": "minecraft_vanilla",
+        "minecraft_vanilla": "minecraft_vanilla",
+        "forge": "minecraft_forge",
+        "minecraft_forge": "minecraft_forge",
+        "fabric": "minecraft_fabric",
+        "minecraft_fabric": "minecraft_fabric",
+        "neoforge": "minecraft_neoforge",
+        "minecraft_neoforge": "minecraft_neoforge",
+        "paper": "minecraft_paper",
+        "minecraft_paper": "minecraft_paper",
+        "spigot": "minecraft_spigot",
+        "minecraft_spigot": "minecraft_spigot",
+        "purpur": "minecraft_purpur",
+        "minecraft_purpur": "minecraft_purpur",
+        "sponge": "minecraft_sponge",
+        "minecraft_sponge": "minecraft_sponge",
+        "ark": "ark_survival_evolved",
+        "ark_se": "ark_survival_evolved",
+        "ark_sa": "ark_ascended",
+        "asa": "ark_ascended",
+        "valheim": "valheim",
+        "palworld": "palworld",
+        "rust": "rust",
+        "conan": "conan_exiles_ue5",
+        "7days": "seven_days_to_die",
+        "7dtd": "seven_days_to_die",
+        "ets2": "euro_truck_simulator_2",
+        "fs22": "farming_simulator_22",
+        "forest": "the_forest",
+        "sons": "sons_of_the_forest",
+    }
+
     def get(self, blueprint_id: str) -> BlueprintEntry | None:
-        return self._entries.get(blueprint_id)
+        if not blueprint_id:
+            return None
+        clean = str(blueprint_id).strip()
+        entry = self._entries.get(clean)
+        if entry is not None:
+            return entry
+        normalized = clean.replace("-", "_").replace(" ", "_").lower()
+        entry = self._entries.get(normalized)
+        if entry is not None:
+            return entry
+        alias_target = self.COMMON_ALIASES.get(normalized)
+        if alias_target and alias_target in self._entries:
+            return self._entries[alias_target]
+        for k, v in self._entries.items():
+            if k.replace("-", "_").lower() == normalized:
+                return v
+            meta_name = (v.blueprint.meta.name or "").replace("-", "_").replace(" ", "_").lower().strip()
+            if meta_name == normalized:
+                return v
+        return None
 
     def exists(self, blueprint_id: str) -> bool:
-        return blueprint_id in self._entries
+        return self.get(blueprint_id) is not None
 
     # ── internal ─────────────────────────────────────────────────────────
 

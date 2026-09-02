@@ -5,9 +5,15 @@ Testet die Root-Cause des False-Positive-Update-Banners:
 - v-Prefix-Mismatch (z.B. '1.7.7' vs 'v1.7.7')
 - git-describe-Suffixe (z.B. 'v1.7.7-2-gabcdef')
 - Korrekte numerische Reihenfolge statt String-Vergleich
+
+Dazu der Zwischenspeicher des GitHub-Release-Checks: die Fusszeile fragt
+/version bei jedem Seitenaufbau ab, der Netzaufruf darf höchstens einmal
+pro TTL stattfinden.
 """
+import httpx
 import pytest
 
+import routers.system as system_router
 from routers.system import _strip_version, _version_newer
 
 
@@ -119,3 +125,82 @@ class TestEndToEndScenarios:
         norm_c = _strip_version(current_raw)
         norm_l = _strip_version(latest_raw)
         assert _version_newer(norm_l, norm_c) is False
+
+
+class _FakeResponse:
+    """Minimale httpx-Antwort für den gemockten Release-Aufruf."""
+
+    def __init__(self, status_code: int, payload: dict):
+        self.status_code = status_code
+        self._payload = payload
+
+    def json(self) -> dict:
+        return self._payload
+
+
+@pytest.fixture
+def leerer_release_cache(monkeypatch):
+    """Leert den Modul-Cache; monkeypatch stellt ihn nach dem Test wieder her."""
+    monkeypatch.setattr(system_router, "_GITHUB_RELEASE_CACHE", None)
+
+
+class TestReleaseCache:
+    """_get_latest_release ruft GitHub höchstens einmal pro TTL an."""
+
+    def test_zweiter_aufruf_geht_nicht_ins_netz(self, monkeypatch, leerer_release_cache):
+        aufrufe = []
+
+        def fake_get(url, **kwargs):
+            aufrufe.append(url)
+            return _FakeResponse(200, {"tag_name": "v1.7.8", "html_url": "https://example.test/r"})
+
+        monkeypatch.setattr(httpx, "get", fake_get)
+
+        erste = system_router._get_latest_release()
+        zweite = system_router._get_latest_release()
+
+        assert len(aufrufe) == 1
+        assert erste == {"tag_name": "v1.7.8", "html_url": "https://example.test/r"}
+        assert zweite == erste
+
+    def test_abgelaufener_eintrag_fragt_erneut(self, monkeypatch, leerer_release_cache):
+        aufrufe = []
+
+        def fake_get(url, **kwargs):
+            aufrufe.append(url)
+            return _FakeResponse(200, {"tag_name": "v1.7.8", "html_url": ""})
+
+        monkeypatch.setattr(httpx, "get", fake_get)
+
+        system_router._get_latest_release()
+        # Zeitstempel künstlich altern lassen (älter als die TTL).
+        ts, daten = system_router._GITHUB_RELEASE_CACHE
+        system_router._GITHUB_RELEASE_CACHE = (
+            ts - system_router._GITHUB_RELEASE_CACHE_TTL_SECONDS - 1,
+            daten,
+        )
+        system_router._get_latest_release()
+
+        assert len(aufrufe) == 2
+
+    def test_fehlschlag_wird_ebenfalls_gemerkt(self, monkeypatch, leerer_release_cache):
+        """Ohne Internetausgang darf nicht jeder Seitenaufbau in den Timeout laufen."""
+        aufrufe = []
+
+        def fake_get(url, **kwargs):
+            aufrufe.append(url)
+            raise httpx.ConnectError("kein Netz")
+
+        monkeypatch.setattr(httpx, "get", fake_get)
+
+        assert system_router._get_latest_release() == {}
+        assert system_router._get_latest_release() == {}
+        assert len(aufrufe) == 1
+
+    def test_rate_limit_liefert_keine_felder(self, monkeypatch, leerer_release_cache):
+        """403 (GitHub-Limit) -> leeres Ergebnis, keine erfundenen Versionsangaben."""
+        monkeypatch.setattr(
+            httpx, "get", lambda url, **kwargs: _FakeResponse(403, {"message": "rate limit"})
+        )
+
+        assert system_router._get_latest_release() == {}

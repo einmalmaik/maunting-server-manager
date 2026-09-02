@@ -5,6 +5,7 @@ from .backups import router as backups_router
 from .mods import router as mods_router
 from .system import router as system_router
 from .steam import router as steam_router
+from .curseforge import router as curseforge_router
 from .panel_settings import router as panel_settings_router
 from .files import router as files_router
 from .roles import router as roles_router
@@ -21,6 +22,27 @@ from .nodes import router as nodes_router
 from .incidents import router as incidents_router
 from .change_timeline import router as change_timeline_router
 from .guardian import router as guardian_router
+from .ai_settings import router as ai_settings_router
+from .tasks import router as tasks_router
+from .ai_providers import router as ai_providers_router
+from .ai_chat import router as ai_chat_router
+from .ai_voice import router as ai_voice_router
+from .ai_actions import router as ai_actions_router
+from .desktop import router as desktop_router
+from .ai_approvals import router as ai_approvals_router
+from .ai_autonomy import router as ai_autonomy_router
+from .ai_memory import router as ai_memory_router
+from .ai_tasks import router as ai_tasks_router
+from .ai_skills import router as ai_skills_router
+from .ai_attachments import router as ai_attachments_router
+from .credentials import router as credentials_router
+from .teams import router as teams_router
+from .hoster_admin import router as hoster_admin_router
+from .hoster_api import router as hoster_api_router, redeem_router as hoster_handoff_router
+from .user_integrations import router as user_integrations_router
+from .popups import router as popups_router
+from .calendar import router as calendar_router
+from .notes import router as notes_router
 
 __all__ = [
     "auth_router",
@@ -30,6 +52,7 @@ __all__ = [
     "mods_router",
     "system_router",
     "steam_router",
+    "curseforge_router",
     "panel_settings_router",
     "files_router",
     "roles_router",
@@ -46,4 +69,26 @@ __all__ = [
     "incidents_router",
     "change_timeline_router",
     "guardian_router",
+    "ai_settings_router",
+    "tasks_router",
+    "ai_providers_router",
+    "ai_chat_router",
+    "ai_voice_router",
+    "ai_actions_router",
+    "desktop_router",
+    "ai_approvals_router",
+    "ai_autonomy_router",
+    "ai_memory_router",
+    "ai_tasks_router",
+    "ai_skills_router",
+    "ai_attachments_router",
+    "credentials_router",
+    "teams_router",
+    "hoster_admin_router",
+    "hoster_api_router",
+    "hoster_handoff_router",
+    "user_integrations_router",
+    "popups_router",
+    "calendar_router",
+    "notes_router",
 ]  # noqa: E501

@@ -2,7 +2,8 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.exc import SQLAlchemyError
 
 from database import get_db
 from models import (
@@ -17,6 +18,7 @@ from models import (
 from schemas.user import AdminUserCreate, UserResponse, UserUpdate
 from schemas.role import (
     AssignRoleRequest,
+    AssignRolesRequest,
     ServerPermissionsRequest,
     ServerPermissionsResponse,
 )
@@ -24,19 +26,22 @@ from dependencies import require_global, verify_csrf
 from services import AuthService, EmailService
 from services.email_verification_service import EmailVerificationService
 from services.permission_service import (
+    direct_server_permission,
     has_global_permission,
-    has_server_permission,
     list_user_server_permission_keys,
     set_user_server_permissions,
 )
 from services.permission_catalog import SYSTEM_ROLE_ADMIN, SYSTEM_ROLE_USER
 from services.role_service import (
+    effective_user_role_permission_keys,
     get_role,
     get_role_by_name,
     role_permission_keys,
+    set_user_roles,
 )
 from services import audit_service, postgres_service
 from services.postgres_service import PostgresServiceError
+from services.user_deletion_service import prepare_user_deletion
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -68,12 +73,28 @@ def _ensure_no_server_escalation(
     required_keys: list[str],
 ) -> None:
     """Non-Owner darf einem Sub-User auf einem Server nur die Server-Keys
-    delegieren, die er auf diesem Server selbst hat (per Rolle pauschal oder
-    via eigene Per-Server-Delegation)."""
+    delegieren, die er auf diesem Server **selbst und dauerhaft** hat.
+
+    Geprueft wird mit ``direct_server_permission`` und nicht mit
+    ``has_server_permission``. Der Unterschied sind die geliehenen Teamrechte:
+    ``has_server_permission`` zaehlt seit der Team-Erweiterung auch das mit, was
+    jemandem nur ueber eine Mitgliedschaft zusteht.
+
+    Geliehenes weiterzugeben heisst hier, es dauerhaft zu machen. Eine
+    ``ServerPermission``-Zeile ueberlebt den Austritt aus dem Team, das
+    Aufloesen des Teams und den Rechteverlust dessen, der das Recht ins Team
+    gebracht hat. Genau das soll die Leihe nicht koennen — ``permission_service``
+    begruendet im Modul-Docstring, dass ein entzogenes Teamrecht sich „selbst
+    heilt“, und ``team_service.set_server_grants`` prueft aus demselben Grund
+    bereits gegen die direkte Berechtigung.
+
+    Der Owner-Umweg bleibt erhalten: ``direct_server_permission`` beruecksichtigt
+    den Serverbesitzer selbst.
+    """
     if actor.is_owner:
         return
     missing = sorted(
-        {k for k in required_keys if not has_server_permission(db, actor, server_id, k)}
+        {k for k in required_keys if not direct_server_permission(db, actor, server_id, k)}
     )
     if missing:
         raise HTTPException(
@@ -90,7 +111,8 @@ def list_users(
     db: Session = Depends(get_db),
     _: User = Depends(require_global("users.read")),
 ) -> list[User]:
-    return db.query(User).all()
+    # Rollen mitladen: sonst kostet role_ids je Benutzer eine eigene Abfrage.
+    return db.query(User).options(selectinload(User.role_assignments)).all()
 
 
 @router.get("/users/{user_id}", response_model=UserResponse)
@@ -125,12 +147,36 @@ def update_user(
     # Super-Admin-Recovery vorhanden).
     if user.is_owner and req.is_active is False:
         raise HTTPException(status_code=400, detail="Owner-Account darf nicht deaktiviert werden")
+
+    # Dieselbe Grenze wie beim Loeschen darunter — und aus demselben Grund.
+    #
+    # Geschuetzt war bisher nur der Owner. Ein Konto mit `users.manage` und
+    # sonst nichts konnte damit jeden Administrator uebernehmen, ohne je ein
+    # Recht zu vergeben:
+    #
+    #   1. `PATCH /api/admin/users/{admin}` mit neuer E-Mail und
+    #      `two_factor_enabled: false`. Der Setter schreibt `email_hash` mit.
+    #   2. `POST /api/auth/forgot-password` mit dieser Adresse — der Reset-Link
+    #      geht ins eigene Postfach.
+    #   3. Passwort setzen, anmelden. Der zweite Faktor ist in Schritt 1 gefallen.
+    #
+    # Rechte lassen sich also nicht nur vergeben, sondern auch **erben**, indem
+    # man sich das Konto nimmt, das sie hat. `delete_user` zieht diese Grenze
+    # seit jeher; hier fehlte sie.
+    _ensure_no_global_escalation(
+        db,
+        actor,
+        effective_user_role_permission_keys(db, user),
+    )
+
     if req.email is not None:
         user.email = req.email
     if req.is_active is not None:
         user.is_active = req.is_active
     if req.two_factor_enabled is not None:
         user.two_factor_enabled = req.two_factor_enabled
+    if req.time_zone is not None:
+        user.time_zone = req.time_zone
     db.commit()
     db.refresh(user)
     return user
@@ -162,9 +208,18 @@ def delete_user(
     # Eskalations-Schutz: Wer einen User loescht, dessen Rolle Keys haelt, die
     # man selbst nicht hat, koennte indirekt Berechtigungen verschieben
     # (z.B. ein Non-Owner-Admin loescht einen Admin). Nur Subset zulassen.
-    if user.role_id is not None:
-        target_keys = role_permission_keys(db, user.role_id)
-        _ensure_no_global_escalation(db, actor, target_keys)
+    _ensure_no_global_escalation(
+        db,
+        actor,
+        effective_user_role_permission_keys(db, user),
+    )
+
+    # Vor jedem Schreibzugriff: die drei RESTRICT-Fremdschluessel, die auf
+    # diesen Benutzer zeigen. Ohne diese Zeile lief `db.commit()` unten in den
+    # Fremdschluessel und die ungefangene IntegrityError wurde zu einer nackten
+    # HTTP 500 — der Gruender eines Teams war damit dauerhaft nicht loeschbar,
+    # ohne dass irgendwo stand, warum.
+    prepare_user_deletion(db, user)
 
     # FK-Cleanup: AuditLogs entkoppeln, Sessions & BackupCodes loeschen.
     db.query(AuditLog).filter(AuditLog.user_id == user_id).update(
@@ -214,6 +269,8 @@ async def create_user_admin(
             await EmailService.send_verification_code_email(req.email, req.username, code)
     db.commit()
     db.refresh(user)
+    if not user.is_owner and user.role_id is not None:
+        set_user_roles(db, user, [user.role_id])
     return user
 
 
@@ -228,6 +285,30 @@ def assign_role(
     actor: User = Depends(require_global("users.permissions.manage")),
     __: None = Depends(verify_csrf),
 ) -> User:
+    """Kompatibilitätsroute: ersetzt die Rollenmengen durch höchstens eine Rolle."""
+    role_ids = [] if req.role_id is None else [req.role_id]
+    return _assign_roles(user_id, role_ids, db, actor)
+
+
+@router.put("/users/{user_id}/roles", response_model=UserResponse)
+def assign_roles(
+    user_id: int,
+    req: AssignRolesRequest,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_global("users.permissions.manage")),
+    __: None = Depends(verify_csrf),
+) -> User:
+    """Ersetzt die globalen Rollen eines Benutzers durch eine validierte Menge."""
+    return _assign_roles(user_id, req.role_ids, db, actor)
+
+
+def _assign_roles(
+    user_id: int,
+    requested_role_ids: list[int],
+    db: Session,
+    actor: User,
+) -> User:
+    """Prüft Eskalationsgrenzen und speichert eine Multi-Role-Zuweisung."""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User nicht gefunden")
@@ -246,11 +327,13 @@ def assign_role(
     # Auch das Entfernen der aktuellen Rolle ist eine Eskalations-Aktion: ein
     # Non-Owner darf einem User keine Rolle wegnehmen, deren Keys er selbst
     # nicht besitzt (sonst koennte er einen Admin-Account "entwaffnen").
-    if user.role_id is not None:
-        current_keys = role_permission_keys(db, user.role_id)
-        _ensure_no_global_escalation(db, actor, current_keys)
-    if req.role_id is not None:
-        role = get_role(db, req.role_id)
+    current_keys = effective_user_role_permission_keys(db, user)
+    _ensure_no_global_escalation(db, actor, current_keys)
+
+    desired_role_ids = sorted(set(requested_role_ids))
+    desired_keys: set[str] = set()
+    for role_id in desired_role_ids:
+        role = get_role(db, role_id)
         if not role:
             raise HTTPException(status_code=404, detail="Rolle nicht gefunden")
         # Zuweisung der `admin`-System-Rolle ist nur dem Owner erlaubt
@@ -263,12 +346,30 @@ def assign_role(
         # Generalisiertes Eskalationsverbot: Actor muss alle Keys der
         # Ziel-Rolle selbst global besitzen — sonst koennte er sich (oder
         # andere) ueber eine Custom-Rolle hochziehen.
-        _ensure_no_global_escalation(
-            db, actor, role_permission_keys(db, role.id)
+        desired_keys.update(role_permission_keys(db, role.id))
+    _ensure_no_global_escalation(db, actor, sorted(desired_keys))
+
+    try:
+        set_user_roles(db, user, desired_role_ids, commit=False)
+        audit_service.record_privileged_action(
+            db,
+            user_id=actor.id,
+            action="user.roles.updated",
+            target_type="user",
+            target_id=user.id,
+            details={"role_ids": desired_role_ids},
         )
-    user.role_id = req.role_id
-    db.commit()
-    db.refresh(user)
+        db.commit()
+        db.refresh(user)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Rollenzuweisung konnte wegen einer gleichzeitigen Änderung nicht gespeichert werden",
+        ) from exc
     return user
 
 
@@ -394,7 +495,9 @@ class AuditLogOut(BaseModel):
     user_id: int | None
     action: str
     target_type: str | None
-    target_id: int | None
+    target_id: str | None
+    origin: str
+    correlation_id: str | None
     details: str | None
     created_at: datetime | None
 
@@ -416,7 +519,7 @@ def list_admin_audit_logs(
     limit: int = Query(50, ge=1, le=200),
     action: str | None = Query(None, max_length=64),
     target_type: str | None = Query(None, max_length=64),
-    target_id: int | None = Query(None, ge=1),
+    target_id: str | None = Query(None, max_length=64),
 ) -> list[AuditLog]:
     """Listet privilegierte Operator-Aktionen. Unberechtigt: 403 (kein leeres OK)."""
     try:

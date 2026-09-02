@@ -170,11 +170,9 @@ export function BackupTab() {
     <fieldset disabled={!canWrite} className="space-y-6 border-0 p-0 m-0">
       {/* Status Section */}
       <div className="msm-card p-6">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center">
-            <ShieldCheck className="w-5 h-5 text-secondary" />
-          </div>
-          <h2 className="font-headline text-headline-sm text-primary">{t('settings.backup.statusTitle')}</h2>
+        <div className="flex items-center gap-2 mb-4">
+          <ShieldCheck className="h-5 w-5 text-secondary" aria-hidden="true" />
+          <h2 className="font-headline text-lg font-semibold text-on-surface">{t('settings.backup.statusTitle')}</h2>
         </div>
         <div className="flex flex-wrap gap-4">
           <span className={`px-3 py-1.5 rounded-full text-sm font-medium border ${
@@ -196,11 +194,9 @@ export function BackupTab() {
 
       {/* S3 Config Form */}
       <form onSubmit={handleSaveS3} className="msm-card p-6">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center">
-            <Cloud className="w-5 h-5 text-secondary" />
-          </div>
-          <h2 className="font-headline text-headline-sm text-primary">{t('settings.backup.s3Title')}</h2>
+        <div className="flex items-center gap-2 mb-6">
+          <Cloud className="h-5 w-5 text-secondary" aria-hidden="true" />
+          <h2 className="font-headline text-lg font-semibold text-on-surface">{t('settings.backup.s3Title')}</h2>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -305,11 +301,9 @@ export function BackupTab() {
 
       {/* Backup Password Form */}
       <form onSubmit={handleSavePassword} className="msm-card p-6">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center">
-            <KeyRound className="w-5 h-5 text-secondary" />
-          </div>
-          <h2 className="font-headline text-headline-sm text-primary">{t('settings.backup.passwordTitle')}</h2>
+        <div className="flex items-center gap-2 mb-6">
+          <KeyRound className="h-5 w-5 text-secondary" aria-hidden="true" />
+          <h2 className="font-headline text-lg font-semibold text-on-surface">{t('settings.backup.passwordTitle')}</h2>
         </div>
 
         <div className="flex items-center gap-2 mb-4">
@@ -329,7 +323,7 @@ export function BackupTab() {
             onChange={(e) => setNewPassword(e.target.value)}
             placeholder={t('settings.backup.newPasswordPlaceholder')}
           />
-          <p className="font-body-md text-xs text-on-surface-variant mt-2">
+          <p className="msm-field-help">
             {t('settings.backup.passwordHint')}
           </p>
         </div>

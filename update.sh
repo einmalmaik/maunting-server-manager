@@ -3,7 +3,7 @@ set -euo pipefail
 umask 077
 
 # ═══════════════════════════════════════════════════════════════
-#  Maunting Server Manager — Updater
+#  Maunting Service Manager — Updater
 #
 #  Usage:  sudo bash update.sh [--check-only] [--force]
 #
@@ -63,7 +63,7 @@ restore_panel_ownership() {
     # git clean loescht untracked Dirs. Die .gitignore schuetzt jetzt die Daten-Pfade,
     # aber manuelle "Sauberkeit" Befehle sind riskant. Immer --dry-run zuerst.
     # Es gibt helper-scripts/recover-docker-storage.sh als Recovery (für den Docker-Store-Corruption-Fall).
-    for sub in backend frontend docs dis-sidecar msm-agent scripts helper-scripts; do
+    for sub in backend frontend docs dis-sidecar searxng-sidecar msm-agent scripts helper-scripts; do
         if [[ -d "$MSM_DIR/$sub" ]]; then
             # Hard fail for code trees used by venv setup — silent || true left
             # root-owned msm-agent after git pull and caused PEP 668 cascades.
@@ -179,7 +179,7 @@ if [[ -d /run/systemd/system ]] && command -v systemctl &>/dev/null; then
     SYSTEMD_AVAILABLE=true
 fi
 
-log "=== Maunting Server Manager Updater ==="
+log "=== Maunting Service Manager Updater ==="
 log "Repository: $GITHUB_OWNER/$GITHUB_REPO"
 log ""
 
@@ -523,6 +523,18 @@ log "Aktualisiere Python-Abhängigkeiten..."
 prepare_app_venv "$MSM_DIR/backend" "Python-Backend" false
 ok "Backend Dependencies aktualisiert"
 
+# Lokales Embeddingmodell fuer die KI-Gedaechtnissuche (~507 MB).
+# Bewusst hier und nicht zur Laufzeit: das Panel laedt im Betrieb niemals
+# Gewichte aus dem Internet nach. Ein Fehlschlag bricht das Update nicht ab —
+# ohne Modell laeuft die Suche ohne Vektoren weiter.
+log "Stelle KI-Embeddingmodell bereit (einmalig, ~507 MB)..."
+su - msm -c "
+    cd $MSM_DIR/backend
+    source venv/bin/activate
+    python3 scripts/fetch_embedding_model.py
+" 2>&1 | tee -a "$LOG_FILE" || warn "Embeddingmodell nicht verfuegbar - KI-Gedaechtnis laeuft ohne Vektoren."
+
+
 # ── MSM Agent aktualisieren (Monorepo, rootless Node) ──
 if [[ -d "$MSM_DIR/msm-agent" ]]; then
     log "Aktualisiere MSM Agent..."
@@ -609,6 +621,21 @@ EOF
 chmod 600 "$DIS_ENV_FILE"
 chown "$MSM_USER:$MSM_USER" "$DIS_ENV_FILE"
 
+# SearXNG-Sidecar Environment (zufälliger Secret-Key für CSRF & Sessions)
+if [[ -d "$MSM_DIR/searxng-sidecar" ]]; then
+    SEARXNG_ENV_FILE="$MSM_DIR/searxng-sidecar/.env"
+    if [[ ! -f "$SEARXNG_ENV_FILE" ]]; then
+        SEARXNG_SECRET=$(openssl rand -hex 32 2>/dev/null || tr -dc 'a-f0-9' < /dev/urandom | head -c 64)
+        cat > "$SEARXNG_ENV_FILE" <<EOF
+# Automatisch generiert für SearXNG-Sidecar
+SEARXNG_SECRET_KEY="$SEARXNG_SECRET"
+SEARXNG_BASE_URL=http://127.0.0.1:8888/
+EOF
+        chmod 600 "$SEARXNG_ENV_FILE"
+        chown "$MSM_USER:$MSM_USER" "$SEARXNG_ENV_FILE"
+    fi
+fi
+
 # ── DIS Sidecar Abhängigkeiten installieren ──
 log "Installiere DIS Sidecar-Abhängigkeiten..."
 if ! su - "$MSM_USER" -c "
@@ -650,10 +677,37 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
+    # SearXNG Search Sidecar Service
+    if [[ -d "$MSM_DIR/searxng-sidecar" ]]; then
+        cat > /etc/systemd/system/msm-searxng.service <<EOF
+[Unit]
+Description=MSM SearXNG Search Sidecar
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=$MSM_USER
+Group=$MSM_USER
+WorkingDirectory=$MSM_DIR/searxng-sidecar
+Environment="DOCKER_HOST=$MSM_DOCKER_HOST"
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/usr/bin/docker compose up
+ExecStop=/usr/bin/docker compose down
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    fi
+
     # Panel Service
     cat > /etc/systemd/system/msm-panel.service <<EOF
 [Unit]
-Description=Maunting Server Manager Panel
+Description=Maunting Service Manager Panel
 After=network.target redis-server.service msm-dis-sidecar.service
 Wants=redis-server.service
 Requires=msm-dis-sidecar.service
@@ -713,6 +767,9 @@ EOF
 
     systemctl daemon-reload
     systemctl enable msm-dis-sidecar.service
+    if [[ -d "$MSM_DIR/searxng-sidecar" ]]; then
+        systemctl enable msm-searxng.service 2>/dev/null || true
+    fi
     systemctl enable msm-panel.service
     if [[ -f /etc/systemd/system/msm-agent.service ]]; then
         systemctl enable msm-agent.service
@@ -839,6 +896,13 @@ if $SYSTEMD_AVAILABLE; then
         || err "DIS Sidecar konnte nicht gestartet werden."
     if ! systemctl is-active --quiet msm-dis-sidecar.service; then
         err "DIS Sidecar ist nicht aktiv. Prüfe: journalctl -u msm-dis-sidecar -n 50"
+    fi
+
+    if [[ -f /etc/systemd/system/msm-searxng.service ]]; then
+        log "Starte SearXNG Search Sidecar..."
+        systemctl restart msm-searxng.service 2>/dev/null \
+            || systemctl start msm-searxng.service 2>/dev/null || true
+        ok "SearXNG Sidecar bereit."
     fi
 
     # DIS Migration: Fernet -> DIS (einmalig, nur wenn alte Daten vorhanden)

@@ -74,3 +74,47 @@ jobs:
 
       - name: Test (vitest)
         run: npm test
+
+  smart-system:
+    name: Smart System (desktop frontend + cargo test)
+    # Windows, weil die App es ist: Ducking, Uebernahme und Tresor stehen
+    # unter `cfg(windows)`, und auf Linux waeren genau die Tests unbaubar,
+    # die hier zaehlen — die Sandbox-Grenze und die Freigabe.
+    # Die UI liegt in frontend/ (vite.desktop.config.ts); smart-system ist
+    # nur noch die Tauri-Huelle. Deshalb: Desktop-Build dort, cargo test hier.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            smart-system/package-lock.json
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: smart-system/src-tauri
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build desktop UI
+        working-directory: frontend
+        run: npm run build:desktop
+
+      - name: Install Tauri CLI
+        working-directory: smart-system
+        run: npm ci
+
+      - name: Rust tests
+        working-directory: smart-system/src-tauri
+        run: cargo test

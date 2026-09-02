@@ -78,12 +78,21 @@ class TestClosePorts:
         assert any("delete" in c and "27016/udp" in c for c in calls)
         assert any("delete" in c and "27017/tcp" in c for c in calls)
 
-    def test_idempotent_when_rule_missing(self):
-        # UFW gibt non-zero zurueck, wenn die Regel nicht existiert. Wir
-        # propagieren das nicht — der Caller bekommt trotzdem True.
+    def test_reports_false_when_rule_missing(self):
+        # UFW gibt non-zero zurück, wenn die Regel nicht existiert. Der Aufruf
+        # bleibt idempotent (keine Ausnahme), meldet aber ehrlich, dass nichts
+        # zu löschen war — sonst schreibt der Abgleich alle 30 Sekunden eine
+        # Audit-Zeile über eine Änderung, die nie stattgefunden hat.
         with patch("services.firewall_service._ufw_available", return_value=True), \
              patch("services.firewall_service.subprocess.run", return_value=_stub_run(returncode=1)):
-            assert fw.close_ports(27015) is True
+            assert fw.close_ports(27015) is False
+
+    def test_reports_false_when_ufw_found_nothing_to_delete(self):
+        # Der häufigere Fall: UFW meldet Exit 0 und "Could not delete".
+        stdout = "Could not delete non-existent rule\n"
+        with patch("services.firewall_service._ufw_available", return_value=True), \
+             patch("services.firewall_service.subprocess.run", return_value=_stub_run(stdout=stdout)):
+            assert fw.close_ports(27015) is False
 
 
 # ── cleanup_legacy_msm_ranges ────────────────────────────────────────────

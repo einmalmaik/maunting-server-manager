@@ -28,6 +28,7 @@ from games.blueprint_plugin import BlueprintPlugin
 class _FakeServer:
     """Minimal-Server-Stub fuer Plugin-Tests."""
     id: int = 1
+    name: str = "Test Server"
     install_dir: str = "/srv/test"
     game_port: int | None = 25566
     query_port: int | None = None
@@ -262,6 +263,42 @@ def test_native_enshrouded_builds_wine_command_with_query_port_runtime() -> None
         "WINEESYNC": "1",
         "WINEFSYNC": "1",
     }
+
+
+def test_native_ark_ascended_uses_pinned_umu_runtime_and_all_declared_ports() -> None:
+    """ASA 92.42 braucht UMU, Steam SDK und User-Namespaces statt direktem Proton."""
+    native_dir = Path(__file__).resolve().parents[1] / "blueprints" / "native"
+    blueprint = load_blueprint_file(native_dir / "ark_ascended.blueprint.json")
+    plugin = BlueprintPlugin(blueprint)
+    server = _FakeServer(
+        name="MauntARK",
+        game_port=7777,
+        query_port=27015,
+        rcon_port=37015,
+    )
+
+    with patch("games.blueprint_plugin.active_mod_ids", return_value=[]):
+        argv = plugin.build_container_command(server)
+
+    assert blueprint.runtime.image == "ghcr.io/einmalmaik/msm-asa-runtime:ge-proton10-34-umu1.4.0"
+    assert argv[:4] == [
+        "xvfb-run",
+        "-a",
+        "/opt/umu-launcher/umu-run",
+        "./ShooterGame/Binaries/Win64/ArkAscendedServer.exe",
+    ]
+    assert plugin.container_workdir(server) == "/home/container"
+    assert "-Port=7777" in argv
+    assert "-QueryPort=27015" in argv
+    assert "-RCONPort=37015" in argv
+    assert any("SessionName=MauntARK" in arg for arg in argv)
+    assert all("My-ASA-Server-by-MSM" not in arg for arg in argv)
+    assert "-crossplay" in argv
+    assert "-server" in argv
+    assert "-game" in argv
+    assert "-log" in argv
+    assert plugin.build_container_env(server)["WINEPREFIX"] == "/home/container/.umu-prefix-2430930"
+    assert blueprint.runtime.allowUnprivilegedUserNamespaces is True
 
 
 def test_native_enshrouded_prepares_query_port_and_runtime_directories(tmp_path) -> None:

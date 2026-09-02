@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Clock, Save } from 'lucide-react'
+import { Clock, Copy, Save } from 'lucide-react'
 import { api } from '@/api/client'
+import { API_ORIGIN } from '@/config/api'
 import { toast } from '@/stores/toastStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher'
+import { Button } from '@/components/ui/Button'
 import { Dropdown } from '@/components/ui/Dropdown'
+import { Switch } from '@/components/ui/Switch'
 import { normalizePanelLanguage } from '@/config/panelLocales'
 import { PanelSettings, EMPTY_PANEL_SETTINGS } from './types'
 
@@ -44,6 +47,10 @@ export function GeneralTab() {
           default_language: normalizePanelLanguage(i18n.language),
           time_format: settings.time_format,
           updates_automatic: settings.updates_automatic,
+          desktop_app_download_enabled: settings.desktop_app_download_enabled,
+          calendar_enabled: settings.calendar_enabled,
+          notes_enabled: settings.notes_enabled,
+          cloudflare_enabled: settings.cloudflare_enabled,
         }),
       })
       toast.success(t('settings.saved'))
@@ -80,8 +87,38 @@ export function GeneralTab() {
                 readOnly
                 className="msm-input opacity-60 cursor-not-allowed"
               />
-              <p className="font-body-md text-xs text-on-surface-variant mt-1.5">
+              <p className="msm-field-help">
                 {t('settings.panelUrlHint')}
+              </p>
+            </div>
+            {/* Abgelesen, nicht gepflegt: das laufende Frontend spricht ohnehin
+                mit dieser Adresse (VITE_API_URL, sonst der eigene Origin). Ein
+                eigenes Einstellungsfeld daneben könnte falsch gepflegt werden
+                und wäre dann eine zweite, unwahre Wahrheit. */}
+            <div>
+              <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                {t('settings.apiUrl', 'API-Adresse')}
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="url"
+                  value={API_ORIGIN}
+                  readOnly
+                  className="msm-input opacity-60 cursor-not-allowed"
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(API_ORIGIN)
+                    toast.success(t('hoster.copied'))
+                  }}
+                >
+                  <Copy className="w-4 h-4" />
+                </Button>
+              </div>
+              <p className="msm-field-help">
+                {t('settings.apiUrlHint')}
               </p>
             </div>
             <div>
@@ -92,7 +129,7 @@ export function GeneralTab() {
                 className={!canWrite ? 'pointer-events-none opacity-60' : ''}
                 onLanguageChange={(code) => setSettings({ ...settings, default_language: code })}
               />
-              <p className="font-body-md text-xs text-on-surface-variant mt-1.5">
+              <p className="msm-field-help">
                 {t('settings.defaultLanguageHint')}
               </p>
             </div>
@@ -109,28 +146,99 @@ export function GeneralTab() {
                 ]}
                 disabled={!canWrite}
               />
-              <p className="font-body-md text-xs text-on-surface-variant mt-1.5 inline-flex items-center gap-1.5">
+              <p className="msm-field-help inline-flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5" />
                 {t('settings.timeFormatHint')}
               </p>
             </div>
-            <div className="md:col-span-2 border-t border-border mt-4 pt-4">
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={settings.updates_automatic}
-                  onChange={(e) => setSettings({ ...settings, updates_automatic: e.target.checked })}
-                  disabled={!canWrite}
-                  className="w-4 h-4 rounded border-border text-primary focus:ring-primary focus:ring-offset-background"
-                />
-                <div>
+            <div className="md:col-span-2 border-t border-outline-variant/30 mt-6 pt-6">
+              <label className="flex items-center justify-between gap-4">
+                <span className="block">
                   <span className="block font-headline text-body-md text-primary font-semibold">
                     {t('settings.updatesAutomatic', 'Automatische Updates')}
                   </span>
                   <span className="block font-body text-xs text-on-surface-variant">
                     {t('settings.updatesAutomaticHint', 'Das Panel und die remote Nodes aktualisieren sich automatisch, sobald ein neues Commit auf GitHub verfügbar ist.')}
                   </span>
-                </div>
+                </span>
+                <Switch
+                  checked={settings.updates_automatic}
+                  onCheckedChange={(checked) => setSettings({ ...settings, updates_automatic: checked })}
+                  disabled={!canWrite}
+                  aria-label={t('settings.updatesAutomatic', 'Automatische Updates')}
+                />
+              </label>
+            </div>
+            <div className="md:col-span-2 border-t border-outline-variant/30 pt-6">
+              <label className="flex items-center justify-between gap-4">
+                <span className="block">
+                  <span className="block font-headline text-body-md text-primary font-semibold">
+                    {t('settings.desktopDownloadPromo', 'Desktop-App Download-Banner anzeigen')}
+                  </span>
+                  <span className="block font-body text-xs text-on-surface-variant">
+                    {t('settings.desktopDownloadPromoHint', 'Blendet in der Seitenleiste einen Download-Link zur Desktop-App für Windows (MSS) ein.')}
+                  </span>
+                </span>
+                <Switch
+                  checked={settings.desktop_app_download_enabled}
+                  onCheckedChange={(checked) => setSettings({ ...settings, desktop_app_download_enabled: checked })}
+                  disabled={!canWrite}
+                  aria-label={t('settings.desktopDownloadPromo', 'Desktop-App Download-Banner anzeigen')}
+                />
+              </label>
+            </div>
+            <div className="md:col-span-2 border-t border-outline-variant/30 pt-6">
+              <label className="flex items-center justify-between gap-4">
+                <span className="block">
+                  <span className="block font-headline text-body-md text-primary font-semibold">
+                    {t('settings.calendarEnabled', 'Integrierter Kalender')}
+                  </span>
+                  <span className="block font-body text-xs text-on-surface-variant">
+                    {t('settings.calendarEnabledHint', 'Aktiviert das Kalendermodul im Panel und ermöglicht der KI die Terminverwaltung.')}
+                  </span>
+                </span>
+                <Switch
+                  checked={settings.calendar_enabled}
+                  onCheckedChange={(checked) => setSettings({ ...settings, calendar_enabled: checked })}
+                  disabled={!canWrite}
+                  aria-label={t('settings.calendarEnabled', 'Integrierter Kalender')}
+                />
+              </label>
+            </div>
+            <div className="md:col-span-2 border-t border-outline-variant/30 pt-6">
+              <label className="flex items-center justify-between gap-4">
+                <span className="block">
+                  <span className="block font-headline text-body-md text-primary font-semibold">
+                    {t('settings.notesEnabled', 'Notizfunktion & Einkaufslisten')}
+                  </span>
+                  <span className="block font-body text-xs text-on-surface-variant">
+                    {t('settings.notesEnabledHint', 'Ermöglicht persönliche und geteilte Notizen, strukturierte Aufgaben, Checklisten und KI-Diktierfunktionen.')}
+                  </span>
+                </span>
+                <Switch
+                  checked={settings.notes_enabled}
+                  onCheckedChange={(checked) => setSettings({ ...settings, notes_enabled: checked })}
+                  disabled={!canWrite}
+                  aria-label={t('settings.notesEnabled', 'Notizfunktion & Einkaufslisten')}
+                />
+              </label>
+            </div>
+            <div className="md:col-span-2 border-t border-outline-variant/30 pt-6">
+              <label className="flex items-center justify-between gap-4">
+                <span className="block">
+                  <span className="block font-headline text-body-md text-primary font-semibold">
+                    {t('settings.cloudflareEnabled', 'Cloudflare DNS')}
+                  </span>
+                  <span className="block font-body text-xs text-on-surface-variant">
+                    {t('settings.cloudflareEnabledHint', 'Aktiviert die Cloudflare DNS Verwaltung und automatische Subdomains. Deaktiviert verbirgt sie für KI und UI.')}
+                  </span>
+                </span>
+                <Switch
+                  checked={settings.cloudflare_enabled}
+                  onCheckedChange={(checked) => setSettings({ ...settings, cloudflare_enabled: checked })}
+                  disabled={!canWrite}
+                  aria-label={t('settings.cloudflareEnabled', 'Cloudflare DNS')}
+                />
               </label>
             </div>
           </div>
@@ -138,18 +246,14 @@ export function GeneralTab() {
 
         {canWrite && (
           <div className="flex justify-end">
-            <button
-              type="submit"
-              disabled={saving}
-              className="msm-btn-primary px-6 py-3 inline-flex items-center gap-2 disabled:opacity-50"
-            >
+            <Button type="submit" disabled={saving}>
               {saving ? (
                 <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
               ) : (
                 <Save className="w-4 h-4" />
               )}
               {t('settings.save')}
-            </button>
+            </Button>
           </div>
         )}
       </fieldset>

@@ -665,7 +665,11 @@ class TestCrossAreaUnauthorizedDirectAPI:
         self, client: TestClient, regular_user: User, user_cookies: dict,
         user_csrf_token: str, test_server: Server, db: Session,
     ):
-        """VAL-CROSS-006: User with no permissions at all -> 403."""
+        """VAL-CROSS-006: User with no permissions at all -> 404.
+
+        404 statt 403: ohne `server.view` gibt es keine Auskunft, dass der
+        Server existiert (kein Existenzorakel per ID-Iteration).
+        """
         _set_resources(db, test_server, cpu=100)
 
         response = client.patch(
@@ -674,7 +678,7 @@ class TestCrossAreaUnauthorizedDirectAPI:
             cookies=user_cookies,
             headers={"X-CSRF-Token": user_csrf_token},
         )
-        assert response.status_code == 403
+        assert response.status_code == 404
         db.refresh(test_server)
         assert test_server.cpu_limit_percent == 100
 

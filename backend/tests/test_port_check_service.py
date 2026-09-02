@@ -40,8 +40,71 @@ class TestSsCheck:
             args = run.call_args.args[0]
             assert args[0] == "ss"
             assert "-Hltn" in args  # TCP-Flag
-            assert "sport" in args
-            assert ":22" in args[-1]
+            # Kein `sport = :N` mehr: ein Aufruf listet alle Listener, statt je
+            # Kandidat einen eigenen Prozess zu starten.
+            assert "sport" not in args
+
+    def test_a_free_port_is_free_even_when_others_listen(self):
+        """Der Schnappschuss darf nicht jeden Port als belegt melden.
+
+        Die Umstellung von "frage nach Port N" auf "liste alles" verschiebt die
+        Entscheidung vom Vorhandensein irgendeiner Ausgabe zum Vergleich der
+        Portnummer. Faellt das Parsen aus, waere plausibel *jeder* Port belegt —
+        und keine Servererstellung fuende je einen Port.
+        """
+        completed = MagicMock(
+            returncode=0,
+            stdout=(
+                "LISTEN 0 4096   0.0.0.0:22    0.0.0.0:*\n"
+                "LISTEN 0 511          *:80          *:*\n"
+                "LISTEN 0 128    [::1]:631       [::]:*\n"
+            ),
+        )
+        with patch("services.port_check_service.subprocess.run", return_value=completed):
+            assert pcs._port_in_use_via_ss(22, "tcp") is True
+            assert pcs._port_in_use_via_ss(80, "tcp") is True
+            # IPv6: der Adressteil enthaelt selbst Doppelpunkte.
+            assert pcs._port_in_use_via_ss(631, "tcp") is True
+            assert pcs._port_in_use_via_ss(27015, "tcp") is False
+
+    def test_many_checks_cost_a_single_process(self):
+        """Der eigentliche Grund der Aenderung, als Test.
+
+        Vorher startete jeder Kandidat einen eigenen ``ss``-Prozess. Bei einer
+        Servererstellung waren das gemessene 1181 Prozesse — auf einem
+        Windows-Entwicklungsrechner ueber hundert Sekunden, und damit allein
+        ein Fuenftel der Laufzeit der gesamten Testsuite.
+        """
+        completed = MagicMock(returncode=0, stdout="LISTEN 0 4096 0.0.0.0:22 0.0.0.0:*\n")
+        with patch("services.port_check_service.subprocess.run", return_value=completed) as run:
+            for port in range(20000, 20500):
+                pcs._port_in_use_via_ss(port, "tcp")
+            assert run.call_count == 1, f"{run.call_count} ss-Aufrufe fuer 500 Ports"
+
+    def test_a_missing_ss_is_not_retried_for_every_port(self):
+        """Auch der Fehlschlag wird gemerkt.
+
+        Ohne das startet ein System ohne ``ss`` weiterhin je Kandidat einen
+        Prozess, der sofort scheitert — der teuerste Fall ueberhaupt, weil der
+        Prozessstart selbst die Kosten sind, nicht die Antwort.
+        """
+        with patch(
+            "services.port_check_service.subprocess.run", side_effect=FileNotFoundError
+        ) as run:
+            for port in range(20000, 20500):
+                assert pcs._port_in_use_via_ss(port, "tcp") is False
+            assert run.call_count == 1
+
+    def test_tcp_and_udp_keep_separate_snapshots(self):
+        """Ein UDP-Listener auf 27015 sagt nichts ueber TCP 27015."""
+        def antwort(args, **_kwargs):
+            if "-Hlun" in args:
+                return MagicMock(returncode=0, stdout="UNCONN 0 0 0.0.0.0:27015 0.0.0.0:*\n")
+            return MagicMock(returncode=0, stdout="")
+
+        with patch("services.port_check_service.subprocess.run", side_effect=antwort):
+            assert pcs._port_in_use_via_ss(27015, "udp") is True
+            assert pcs._port_in_use_via_ss(27015, "tcp") is False
 
     def test_uses_udp_flag_for_udp(self):
         completed = MagicMock(returncode=0, stdout="")

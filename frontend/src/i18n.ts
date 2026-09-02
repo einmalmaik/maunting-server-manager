@@ -38,7 +38,19 @@ i18n
     returnEmptyString: false,
     // If a key is missing even in the fallback language, return the key itself
     // so the UI shows a human-readable indicator instead of a blank.
-    parseMissingKeyHandler: (key: string) => key,
+    //
+    // `fallbackValue` MUST be honoured. i18next calls this handler even when a
+    // `defaultValue` was resolved successfully — it passes the resolved text as
+    // the second argument (i18next 23.16.8, translator.js: the guard is
+    // `(usedKey || usedDefault)`, and the call site passes `usedDefault ? res :
+    // undefined`). The previous one-argument version therefore discarded EVERY
+    // `defaultValue` in the entire application.
+    //
+    // The visible consequence: an AI stream error rendered the raw key
+    // `ai.errors.codes.AI_TOOL_REJECTED` in a toast, even though AiChat.tsx
+    // supplies a two-step fallback. The operator saw a key where a sentence
+    // belonged, and the sentence existed all along.
+    parseMissingKeyHandler: (key: string, fallbackValue?: string) => fallbackValue ?? key,
   })
 
 if (typeof document !== 'undefined') {

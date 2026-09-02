@@ -20,7 +20,9 @@ import { confirm } from '@/stores/confirmStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import type { BlueprintListEntry } from '@/types'
 import { PageHeader } from '@/Singra/UI/PageHeader'
+import { Dropdown } from '@/components/ui/Dropdown'
 import { BlueprintBuilder, type BlueprintBuilderMode } from '@/features/blueprints/BlueprintBuilder'
+import { normalizeBlueprintId } from '@/features/blueprints/contract'
 
 /** Hilfsfunktion: lesbarer Label pro source_type */
 function sourceLabel(src: string): string {
@@ -115,7 +117,10 @@ export function Blueprints() {
         body && typeof body === 'object' && 'meta' in body
           ? ((body as { meta?: { id?: unknown } }).meta?.id ?? null)
           : null
-      if (incomingId !== expectedId) {
+      if (
+        typeof incomingId !== 'string'
+        || normalizeBlueprintId(incomingId) !== normalizeBlueprintId(expectedId)
+      ) {
         toast.error(t('blueprints.replaceIdMismatch', { expected: expectedId }))
         return
       }
@@ -273,7 +278,18 @@ export function Blueprints() {
             <div className="grid grid-cols-3 overflow-hidden rounded-lg border border-outline-variant/50 text-sm">
               {(['all', 'native', 'community'] as const).map((f) => <button key={f} type="button" onClick={() => setOriginFilter(f)} className={`min-h-11 px-2 font-label-md ${originFilter === f ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant'}`}>{f === 'all' ? t('blueprints.filterAll') : f === 'native' ? t('blueprints.filterNative') : t('blueprints.filterCommunity')}</button>)}
             </div>
-            {categories.length > 1 && <select aria-label={t('blueprints.filterCategory')} value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="msm-input min-h-11"><option value="all">{t('blueprints.filterCategory')}: {t('blueprints.filterAll')}</option>{categories.map(c => <option key={c} value={c}>{categoryLabel(c)}</option>)}</select>}
+            {categories.length > 1 && (
+              <Dropdown
+                value={categoryFilter}
+                onChange={(value) => setCategoryFilter(value)}
+                options={[
+                  { value: 'all', label: `${t('blueprints.filterCategory')}: ${t('blueprints.filterAll')}` },
+                  ...categories.map((c) => ({ value: c, label: categoryLabel(c) })),
+                ]}
+                aria-label={t('blueprints.filterCategory')}
+                className="min-h-11"
+              />
+            )}
           </div>
         </details>
 
@@ -297,17 +313,17 @@ export function Blueprints() {
 
         {/* Kategorie-Filter */}
         {categories.length > 1 && (
-          <select
-            aria-label={t('blueprints.filterCategory')}
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            className="hidden min-h-11 rounded-md border border-outline-variant/50 bg-surface-container px-3 py-2 font-body-md text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary md:block"
-          >
-            <option value="all">{t('blueprints.filterCategory')}: {t('blueprints.filterAll')}</option>
-            {categories.map((c) => (
-              <option key={c} value={c}>{categoryLabel(c)}</option>
-            ))}
-          </select>
+          <div className="hidden min-w-44 md:block">
+            <Dropdown
+              value={categoryFilter}
+              onChange={(value) => setCategoryFilter(value)}
+              options={[
+                { value: 'all', label: `${t('blueprints.filterCategory')}: ${t('blueprints.filterAll')}` },
+                ...categories.map((c) => ({ value: c, label: categoryLabel(c) })),
+              ]}
+              aria-label={t('blueprints.filterCategory')}
+            />
+          </div>
         )}
       </div>
 

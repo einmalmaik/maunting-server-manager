@@ -182,7 +182,11 @@ export function AdminNodes() {
 
   useEffect(() => {
     load()
-    const id = window.setInterval(load, 20_000)
+    const id = window.setInterval(() => {
+      // Im Hintergrundtab schaut niemand hin: kein Takt, keine Anfragen.
+      if (document.visibilityState !== 'visible') return
+      void load()
+    }, 20_000)
     return () => window.clearInterval(id)
   }, [load])
 
@@ -580,12 +584,12 @@ export function AdminNodes() {
                       },
                       {
                         value: systemUsedMb,
-                        colorClass: 'bg-neutral-500',
+                        colorClass: 'bg-outline',
                         label: t('nodes.diskSystemUsed', { value: formatRamMb(systemUsedMb) }),
                       },
                       {
                         value: freeMb,
-                        colorClass: 'bg-emerald-500',
+                        colorClass: 'bg-status-success',
                         label: t('nodes.diskFree', { value: formatRamMb(freeMb) }),
                       },
                     ]
@@ -610,10 +614,10 @@ export function AdminNodes() {
                               <span className="text-primary" title={t('nodes.diskPanelUsed', { value: formatRamMb(panelUsedMb) })}>
                                 ■ {t('nodes.diskPanelUsed', { value: formatRamMb(panelUsedMb) })}
                               </span>
-                              <span className="text-neutral-400" title={t('nodes.diskSystemUsed', { value: formatRamMb(systemUsedMb) })}>
+                              <span className="text-on-surface-variant" title={t('nodes.diskSystemUsed', { value: formatRamMb(systemUsedMb) })}>
                                 ■ {t('nodes.diskSystemUsed', { value: formatRamMb(systemUsedMb) })}
                               </span>
-                              <span className="text-emerald-400" title={t('nodes.diskFree', { value: formatRamMb(fDisk) })}>
+                              <span className="text-status-success" title={t('nodes.diskFree', { value: formatRamMb(fDisk) })}>
                                 ■ {t('nodes.diskFree', { value: formatRamMb(fDisk) })}
                               </span>
                             </div>

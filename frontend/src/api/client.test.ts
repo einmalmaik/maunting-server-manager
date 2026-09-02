@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import i18n from '@/i18n'
-import { api } from './client'
+import { useAuthStore } from '@/stores/authStore'
+import { useNodeStore } from '@/stores/nodeStore'
+import { usePermissionsStore } from '@/stores/permissionsStore'
+import { useToastStore } from '@/stores/toastStore'
+import { api, apiStream, getCsrfToken, SanitizedApiError } from './client'
 
 // Locking the language guarantees the test does not silently break, wenn der
 // LanguageDetector im jsdom-Env eine andere Sprache als Fallback waehlt.
@@ -35,6 +39,19 @@ describe('api client', () => {
   }
 
   describe('CSRF header', () => {
+    it('sends CSRF and keeps the SSE response body unread', async () => {
+      document.cookie = '__Secure-csrf_token=stream_csrf;path=/;secure'
+      const response = new Response('event: done\ndata: {}\n\n', { status: 200 })
+      fetchSpy.mockResolvedValueOnce(response)
+
+      const result = await apiStream('/ai/conversations/1/messages/stream', { method: 'POST', body: '{}' })
+
+      expect(result).toBe(response)
+      expect(await result.text()).toContain('event: done')
+      expect(fetchSpy.mock.calls[0][1]).toMatchObject({ credentials: 'include', cache: 'no-store' })
+      expect((fetchSpy.mock.calls[0][1]?.headers as Record<string, string>)['X-CSRF-Token']).toBe('stream_csrf')
+    })
+
     it('should send X-CSRF-Token for POST requests', async () => {
       document.cookie = '__Secure-csrf_token=test_csrf_value;path=/;secure'
       fetchSpy.mockReturnValueOnce(mockResponse(200, { ok: true }))
@@ -99,6 +116,26 @@ describe('api client', () => {
     })
   })
 
+  describe('CSRF-Speicher am Ende der Sitzung', () => {
+    // Der authStore-Test kann diese Zusage nicht prüfen: dort ist das ganze
+    // Modul gemockt, und `expect(clearCsrfTokenMemory).toHaveBeenCalled()`
+    // sichert nur einen Aufruf zu, nicht einen leeren Speicher. Hier läuft der
+    // echte Client, also steht die Zusage hier.
+    it('vergisst den gemerkten CSRF-Wert, wenn die Sitzung geräumt wird', async () => {
+      // So kommt der Wert im getrennten Hosting herein: über den Antwortkopf,
+      // weil `document.cookie` das Cookie der API-Herkunft dort nicht sieht.
+      fetchSpy.mockReturnValueOnce(
+        mockResponse(200, { ok: true }, { 'X-CSRF-Token': 'wert_dieser_sitzung' }),
+      )
+      await api('/test')
+      expect(getCsrfToken()).toBe('wert_dieser_sitzung')
+
+      useAuthStore.getState().clearSession()
+
+      expect(getCsrfToken()).toBeNull()
+    })
+  })
+
   describe('credentials', () => {
     it('should always include credentials: include', async () => {
       fetchSpy.mockReturnValueOnce(mockResponse(200, { ok: true }))
@@ -142,6 +179,72 @@ describe('api client', () => {
       )
     })
 
+    // Der gescheiterte Refresh ist ein Sitzungsende wie das Abmelden auch, und
+    // CLAUDE.md Abschnitt 4 verlangt danach einen leeren Speicher. Anfangs fiel
+    // hier gar nichts, dann nur `isAuthenticated` — Benutzer, Rechte und die
+    // Knotenliste mit den Agentenadressen standen weiter im Tab. Die beiden
+    // Tests prüfen deshalb den ganzen Speicher, nicht nur das Flag.
+    function sitzungsspeicherFuellen() {
+      useAuthStore.setState({
+        user: { id: 1, username: 'admin', is_owner: true } as any,
+        isAuthenticated: true,
+        isLoading: false,
+      })
+      usePermissionsStore.setState({ me: { is_owner: true } as any, isLoading: false, error: null })
+      useNodeStore.setState({
+        nodes: [{ id: 7, name: 'node-eu', host: 'https://10.0.0.7:8080' } as any],
+        total: 1,
+      })
+      useToastStore.setState({ toasts: [{ id: 1, message: 'Server prod-eu-1 gestoppt', type: 'error' }] })
+    }
+
+    function sitzungsspeicherIstLeer() {
+      expect(useAuthStore.getState().isAuthenticated).toBe(false)
+      expect(useAuthStore.getState().user).toBeNull()
+      expect(usePermissionsStore.getState().me).toBeNull()
+      expect(useNodeStore.getState().nodes).toEqual([])
+      expect(useToastStore.getState().toasts).toEqual([])
+    }
+
+    it('räumt den Sitzungsspeicher, wenn der Refresh scheitert', async () => {
+      // Ohne diesen Schritt bleibt `isAuthenticated` true: die Wache der Route
+      // greift nicht, die Oberfläche friert scheinbar angemeldet ein und
+      // laufende Intervalle pollen weiter gegen den Refresh-Endpunkt.
+      sitzungsspeicherFuellen()
+      fetchSpy
+        .mockReturnValueOnce(mockResponse(401, { detail: 'Unauthorized' }))
+        .mockReturnValueOnce(mockResponse(401, { detail: 'Invalid refresh' }))
+
+      await expect(api('/test')).rejects.toThrow(i18n.t('errors.SESSION_EXPIRED'))
+
+      sitzungsspeicherIstLeer()
+    })
+
+    it('räumt den Sitzungsspeicher auch im SSE-Pfad, wenn der Refresh scheitert', async () => {
+      sitzungsspeicherFuellen()
+      fetchSpy
+        .mockReturnValueOnce(mockResponse(401, { detail: 'Unauthorized' }))
+        .mockReturnValueOnce(mockResponse(401, { detail: 'Invalid refresh' }))
+
+      await expect(
+        apiStream('/ai/conversations/1/messages/stream', { method: 'POST', body: '{}' }),
+      ).rejects.toThrow(i18n.t('errors.SESSION_EXPIRED'))
+
+      sitzungsspeicherIstLeer()
+    })
+
+    it('lässt den Anmeldezustand in Ruhe, wenn der Refresh gelingt', async () => {
+      useAuthStore.setState({ isAuthenticated: true, isLoading: false })
+      fetchSpy
+        .mockReturnValueOnce(mockResponse(401, { detail: 'Unauthorized' }))
+        .mockReturnValueOnce(mockResponse(200, { message: 'refreshed' }))
+        .mockReturnValueOnce(mockResponse(200, { ok: true }))
+
+      await api('/test')
+
+      expect(useAuthStore.getState().isAuthenticated).toBe(true)
+    })
+
     it('should NOT refresh on /auth/login 401', async () => {
       fetchSpy.mockReturnValueOnce(mockResponse(401, { detail: 'Bad credentials' }))
 
@@ -180,8 +283,53 @@ describe('api client', () => {
         text: () => Promise.resolve('bad gateway'),
       } as Response)
 
-      // client.ts uses response text when json fails, then falls back to statusText
-      await expect(api('/test')).rejects.toThrow('bad gateway')
+      // Ein Rumpf, der kein JSON ist, stammt nicht vom Backend. Er wird
+      // verworfen, übrig bleibt der Statuscode.
+      await expect(api('/test')).rejects.toThrow('HTTP 502')
+    })
+
+    it('zeigt die Fehlerseite des Proxys nicht in der Meldung', async () => {
+      const proxySeite =
+        '<html><head><title>502 Bad Gateway</title></head><body>' +
+        '<center><h1>502 Bad Gateway</h1></center>' +
+        '<hr><center>nginx/1.24.0</center></body></html>'
+      fetchSpy.mockReturnValueOnce(Promise.resolve({
+        ok: false,
+        status: 502,
+        statusText: 'Bad Gateway',
+        headers: new Headers({ 'Content-Type': 'text/html' }),
+        json: () => Promise.reject(new Error('bad json')),
+        text: () => Promise.resolve(proxySeite),
+      } as Response))
+
+      const fehler = await api('/test')
+        .then(() => null)
+        .catch((e: SanitizedApiError) => e)
+
+      expect(fehler?.message).toBe('Bad Gateway')
+      // Weder Kennung noch Version des Proxys dürfen den Benutzer erreichen.
+      expect(fehler?.message).not.toContain('nginx')
+      expect(fehler?.message).not.toContain('<')
+    })
+
+    it('verwirft die Fehlerseite des Proxys auch im SSE-Pfad', async () => {
+      fetchSpy.mockReturnValueOnce(Promise.resolve({
+        ok: false,
+        status: 504,
+        statusText: 'Gateway Timeout',
+        headers: new Headers({ 'Content-Type': 'text/html' }),
+        text: () => Promise.resolve('<html><body><center>nginx/1.24.0</center></body></html>'),
+      } as Response))
+
+      const fehler = await apiStream('/ai/conversations/1/messages/stream', {
+        method: 'POST',
+        body: '{}',
+      })
+        .then(() => null)
+        .catch((e: SanitizedApiError) => e)
+
+      expect(fehler?.message).toBe('Gateway Timeout')
+      expect(fehler?.message).not.toContain('nginx')
     })
 
     it('should surface message + errors[] from structured detail', async () => {
@@ -212,6 +360,46 @@ describe('api client', () => {
       await expect(api('/test', { method: 'POST' })).rejects.toThrow(
         'An installation or update is already running. Please wait until that job has finished.',
       )
+    })
+
+    it('macht aus einem reinen {code} einen Satz statt "Conflict"', async () => {
+      // Genau die Antwort von routers/ai_actions.py::_state_error: ein Code,
+      // kein Text. Ohne Uebersetzung liest der Benutzer den Statustext des
+      // Browsers und erfaehrt nicht, dass sich die Datei geaendert hat.
+      fetchSpy.mockReturnValueOnce(Promise.resolve({
+        ok: false,
+        status: 409,
+        statusText: 'Conflict',
+        headers: new Headers(),
+        json: () => Promise.resolve({}),
+        text: () => Promise.resolve(JSON.stringify({ detail: { code: 'AI_ACTION_FILE_CHANGED' } })),
+      } as Response))
+
+      const fehler = await api('/ai/actions/abc/execute', { method: 'POST' })
+        .then(() => null)
+        .catch((e: SanitizedApiError) => e)
+
+      expect(fehler?.code).toBe('AI_ACTION_FILE_CHANGED')
+      expect(fehler?.message).toBe(i18n.t('ai.errors.codes.AI_ACTION_FILE_CHANGED'))
+      expect(fehler?.message).not.toBe('Conflict')
+      // Kein roher Schluessel: der Katalog muss den Code wirklich kennen.
+      expect(fehler?.message).not.toMatch(/^ai\./)
+    })
+
+    it('uebersetzt den Code auch im SSE-Pfad', async () => {
+      // Dieselbe Luecke stand ein zweites Mal in apiStream — der Stream-Start
+      // scheitert mit derselben Antwort, wenn der Server gerade belegt ist.
+      fetchSpy.mockReturnValueOnce(Promise.resolve({
+        ok: false,
+        status: 409,
+        statusText: 'Conflict',
+        headers: new Headers(),
+        text: () => Promise.resolve(JSON.stringify({ detail: { code: 'AI_ACTION_SERVER_BUSY' } })),
+      } as Response))
+
+      await expect(
+        apiStream('/ai/conversations/1/messages/stream', { method: 'POST', body: '{}' }),
+      ).rejects.toThrow(i18n.t('ai.errors.codes.AI_ACTION_SERVER_BUSY'))
     })
 
     it('should fallback to statusText when body is empty', async () => {

@@ -23,6 +23,8 @@ describe('AdminAudit', () => {
         action: 'postgres.admin.rotate',
         target_type: 'managed_postgres',
         target_id: null,
+        origin: 'system',
+        correlation_id: '0a613465-487d-44a0-af1c-5aa031a873c9',
         details: '{"nodes_updated":[1]}',
         created_at: '2026-07-30T10:00:00.000Z',
       },
@@ -36,6 +38,8 @@ describe('AdminAudit', () => {
 
     expect(await screen.findByText('postgres.admin.rotate')).toBeInTheDocument()
     expect(client.api).toHaveBeenCalledWith(expect.stringMatching(/^\/admin\/audit-logs\?/))
+    expect(screen.getByText('System')).toBeInTheDocument()
+    expect(screen.getByText('0a613465')).toBeInTheDocument()
     expect(screen.queryByText(/password\s*=/i)).not.toBeInTheDocument()
   })
 

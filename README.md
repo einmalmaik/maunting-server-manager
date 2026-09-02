@@ -3,9 +3,9 @@
 > [!IMPORTANT]
 > Dieses Panel befindet sich in aktiver Entwicklung. Der Einsatz in produktiven Umgebungen ohne vorheriges Backup wird nicht empfohlen.
 
-# Maunting Server Manager (MSM)
+# Maunting Service Manager (MSM)
 
-Maunting Server Manager (MSM) ist ein selbstgehostetes Web-Panel zur zentralen Steuerung von Game-Servern, Anwendungen und Linux-Workloads auf eigenen Servern oder VPS — ohne Notwendigkeit täglicher SSH-Eingaben.
+Maunting Service Manager (MSM) ist eine selbstgehostete Plattform für Infrastruktur und persönliche Organisation. Sie verbindet die Verwaltung von Game-Servern, Anwendungen und Linux-Workloads mit einer KI-gestützten Kommandozentrale, Kalendern, Recherche und regionalen Lageinformationen. Der Betreiber behält dabei die Kontrolle: Zugriffe, Werkzeuge und jede schreibende Aktion werden serverseitig geprüft.
 
 ---
 
@@ -31,7 +31,7 @@ MSM trennt die Benutzeroberfläche (Control Plane) von den eigentlichen Ausführ
 Eine zentrale Control Plane steuert beliebig viele Nodes. Neue Nodes werden über ein mTLS-Verfahren mit HMAC-Challenge und expliziter Bestätigung durch den Administrator eingebunden.
 
 ### 2. Guardian Engine (Autonomes Self-Healing)
-Auf jedem Node läuft die Guardian Engine als lokaler Hintergrunddienst. Sie überwacht Container-Zustände sowie HTTP-, TCP- und Regex-Probes. Bei Ausfällen führt der Node selbstständig definierte Recovery-Aktionen (z. B. Container-Neustart oder Quarantäne) durch — auch wenn die zentrale Control Plane offline oder nicht erreichbar ist. Incidents und Statusänderungen werden lokal protokolliert und synchronisiert, sobald die Verbindung wieder steht.
+Auf jedem Node läuft die Guardian Engine als lokaler Hintergrunddienst. Sie überwacht Container-Zustände sowie HTTP-, TCP- und Regex-Probes. Bei Ausfällen führt der Node selbstständig definierte Recovery-Aktionen (z. B. Container-Neustart oder Quarantäne) durch, auch wenn die zentrale Control Plane offline oder nicht erreichbar ist. Incidents und Statusänderungen werden lokal protokolliert und synchronisiert, sobald die Verbindung wieder steht.
 
 ### 3. Blueprint Integration
 Anwendungen werden nicht über starre Skripte, sondern über deklarative Blueprint-Dateien (YAML/JSON) definiert. Ein Blueprint legt Umgebungsvariablen, Ports, Docker-Images, Lautstärken-Mounts, Konfigurations-Templates und Guardian-Healthchecks fest. MSM ist dadurch nicht auf Game-Server beschränkt.
@@ -48,13 +48,29 @@ Verschlüsselung von Server- und Datenbank-Backups über den DIS Cryptographic S
 ### 7. Komponenten-Migration (`migrate-panel-components.sh`)
 Integrierter CLI-Assistent zum Verschieben von Control Plane, externem Frontend oder einzelnen Server-Instanzen zwischen Nodes inklusive atomarem Cutover und Rollback-Schutz.
 
+### 8. Hoster- und Shop-Anbindung (optional)
+Ein externer Shop kann Server über eine idempotente Desired-State-API bestellen, sperren und kündigen. Die Anbindung verwendet dieselbe Provisionierungs- und Lifecycle-Logik wie das Panel: Es gibt keinen zweiten Weg, einen Server anzulegen. Kunden gelangen über einen signierten Einmal-Link direkt ins Panel und benötigen kein zweites Passwort. **Ohne angelegte Integration ändert sich am Self-Hosted-Betrieb nichts.** Einrichtung und Betrieb in [`docs/self-hosting.md`](docs/self-hosting.md#hoster--und-shop-anbindung-optional-phase-6), die vollständige Endpunkt-, Webhook- und Signaturreferenz in [`docs/hoster-api.md`](docs/hoster-api.md) (im Panel auch unter **Hilfe → Hoster-API**).
+
+### 9. Sprachmodus (optional)
+Der Betreiber kann zwischen zwei Wegen wählen. Ohne OpenAI Realtime bleibt der bestehende Ablauf aus Transkription, Chatmodell, Pipecat und ElevenLabs unverändert. Ein panelweit aktivierter OpenAI-Realtime-Zugang führt Sprache dagegen direkt per WebRTC zwischen Browser beziehungsweise Desktop-App und OpenAI; das Backend hält über einen Sideband-Kanal Werkzeuge, RBAC, Guardian, Worker und Abrechnung unter Kontrolle. API-Schlüssel erreichen den Client nie. Der Realtime-Weg speichert keine Abschriften oder gesprochenen Antworten im Chat und fällt bei einem Fehler nicht still auf ElevenLabs zurück. Einrichtung und Netzwerkvoraussetzungen stehen in [`docs/self-hosting.md`](docs/self-hosting.md#sprachmodus-mit-der-ki-reden).
+
+### 10. Getrennte Zugangsdaten und Kubernetes
+GitHub-Token und Steam-Konten können panelweit, pro Benutzer oder pro Server hinterlegt werden. Ein Server verweist auf Zugangsdaten, statt deren Werte zu kopieren. Der Klartext ist nach dem Speichern nicht mehr auslesbar. Der Betreiber entscheidet, ob ein Server ohne eigene Zuordnung den zentralen Zugang nutzen darf. Für den Cluster-Betrieb liegen Kubernetes-Manifeste unter [`deploy/kubernetes/`](deploy/kubernetes/README.md) bereit (sie betreiben die Control Plane; Gameserver bleiben Docker-Container auf den angebundenen Nodes). **Der Standard-Self-Hosted-Betrieb funktioniert ohne beides.**
+
+### 11. KI-Kommandozentrale, Recherche und persönliche Organisation
+MSM ist mehr als ein Server-Panel. Der KI-Chat und der Sprachmodus nutzen einen zentralen, serverseitig kontrollierten Werkzeugkatalog. Die KI kann, abhängig von den erteilten Berechtigungen, Serverzustände, Logs, Dateien und Backups auswerten, Erinnerungen und Kalenderdaten einbeziehen, Webrecherchen durchführen und Aufgaben vorbereiten. Schreibende Änderungen werden als prüfbare Vorschläge ausgeführt oder benötigen eine bewusst aktivierte serverseitige Autonomie-Policy.
+
+Für regionale Fragen kombiniert die KI Geocoding, Wetter, Sentinel-Satellitendaten sowie verfügbare Verkehrs-, Nachrichten- und öffentliche soziale Signale. Die Ergebnisse erscheinen im Chat und Sprachmodus in einer interaktiven Karten- beziehungsweise Globusansicht. Satelliten- und Anbieterzugänge bleiben verschlüsselt im Backend; Rohdaten und Schlüssel werden nicht an den Browser gegeben.
+
+Mit einem aktiven OpenAI-Realtime-Zugang kann Audio direkt per WebRTC zwischen Browser oder Desktop-App und OpenAI laufen. MSM behält über einen serverseitigen Sideband-Kanal die Hoheit über Werkzeuge, RBAC, Bestätigungen, Guardian und Abrechnung. API-Schlüssel erreichen den Client nicht. Details zu Datenflüssen, Berechtigungen und den verfügbaren Werkzeugen stehen in [`docs/ai-system-architecture.md`](docs/ai-system-architecture.md).
+
 ---
 
 ## Vergleich: MSM vs. Pelican Panel vs. Klassische Panels
 
 Die folgende Tabelle vergleicht verifizierte technische Eigenschaften von MSM mit **Pelican Panel** (dem modernen Nachfolger von Pterodactyl) und **Klassischen Panels** (wie Pterodactyl v1 oder AMP).
 
-| Eigenschaft / Funktion | Maunting Server Manager (MSM) | Pelican Panel | Klassische Panels (z. B. Pterodactyl v1, AMP) |
+| Eigenschaft / Funktion | Maunting Service Manager (MSM) | Pelican Panel | Klassische Panels (z. B. Pterodactyl v1, AMP) |
 |---|---|---|---|
 | **Architektur** | Central Control Plane + Multi-Node (Multinode System) | Panel + Node-Architektur (Wings) | Monolithisch oder Panel + Daemon (Wings/AMP Instance) |
 | **Container-Sicherheit** | Standardmäßig Rootless Docker pro Node-User (`unix:///run/user/...`) | Standardmäßig privilegierter Root-Docker-Daemon | Standardmäßig privilegierter Root-Docker-Daemon |
@@ -227,6 +243,26 @@ sudo systemctl start msm-update.timer
 
 - **Dokumentation**: Ausführliche Anleitungen stehen in [`docs/self-hosting.md`](docs/self-hosting.md) sowie direkt im Panel unter **Dokumentation**.
 - **Issue Tracker**: [GitHub Issues](https://github.com/einmalmaik/maunting-server-manager/issues)
+
+---
+
+## Discord Rich Presence (Optional)
+
+Die Desktop-App (*Maunting Smart System* / MSS) unterstützt Discord Rich Presence (RPC). Wenn Discord auf Ihrem Rechner läuft, wird Ihr Status im Discord-Profil angezeigt (Standard: „Security needs trust“ / „Sicherheit braucht Vertrauen“).
+
+- **Lokale Verbindung**: Die Kommunikation erfolgt rein lokal über die Windows Named Pipe (`\\.\pipe\discord-ipc-0`). Es werden keine externen Anfragen an Discord-Server gesendet und keine Server-Adressen, Kennwörter oder Chat-Inhalte übertragen.
+- **Standard**: Die Standard-Anwendungs-ID (`1512525013155057735`) ist fest hinterlegt.
+- **Texte und Application-ID anpassen**: Sie können die Discord-Texte und die Client-ID nach eigenen Wünschen anpassen. Entweder über die `konfig.json` der Desktop-App:
+  ```json
+  {
+    "discord_rpc_aktiv": true,
+    "discord_client_id": "DEINE_APPLICATION_ID",
+    "discord_details": "Eigener Statustext Zeile 1",
+    "discord_state": "Eigener Statustext Zeile 2"
+  }
+  ```
+  Oder direkt im Quellcode in [`smart-system/src-tauri/src/discord.rs`](smart-system/src-tauri/src/discord.rs).
+- **Deaktivieren**: Rich Presence lässt sich in der `konfig.json` der Desktop-App mit `"discord_rpc_aktiv": false` jederzeit vollständig abschalten.
 
 ---
 

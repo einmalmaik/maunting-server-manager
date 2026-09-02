@@ -201,6 +201,33 @@ describe('ServerConsolePanel', () => {
     })
   })
 
+  it('vergibt zwei Zeilen ohne Server-ID im selben Flush verschiedene Marker', async () => {
+    setMe(ownerMe)
+    // React meldet doppelte Keys über console.error. Genau das darf hier
+    // nicht passieren: der Marker ist der React-Key, und zwei Zeilen ohne
+    // Server-ID im selben Flush müssen unterscheidbar bleiben.
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      render(<ServerConsolePanel serverId={42} />)
+      const ws = wsInstances[0]
+      act(() => { ws.simulateOpen() })
+      act(() => {
+        ws.simulateMessage('kein JSON, erste Zeile')
+        ws.simulateMessage('kein JSON, zweite Zeile')
+      })
+
+      await waitFor(() => {
+        expect(screen.getByText('kein JSON, erste Zeile')).toBeInTheDocument()
+        expect(screen.getByText('kein JSON, zweite Zeile')).toBeInTheDocument()
+      })
+
+      const meldungen = errorSpy.mock.calls.map((call) => call.map(String).join(' '))
+      expect(meldungen.filter((text) => text.includes('same key'))).toEqual([])
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+
   it('reconnects with last_id query param after disconnect', async () => {
     vi.useFakeTimers()
     try {

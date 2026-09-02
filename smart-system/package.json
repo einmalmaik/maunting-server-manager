@@ -1,0 +1,13 @@
+{
+  "name": "maunting-smart-system",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "MSS - Maunting Smart System, Desktop Companion fuer das MSM-Panel (Tauri v2). Die Oberflaeche kommt seit dem 21.08.2026 aus frontend/ (Desktop-Bau, vite.desktop.config.ts) - hier liegt nur noch die Tauri-Huelle.",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4"
+  }
+}

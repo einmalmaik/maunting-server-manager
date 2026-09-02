@@ -106,27 +106,44 @@ class TestFilesPermissions:
     def test_user_without_perm_cannot_browse(
         self, client: TestClient, regular_user: User, user_cookies: dict, server_with_dir: Server
     ):
+        # 404, nicht 403: wer den Server nicht einmal sehen darf, erfaehrt auch
+        # nicht, dass es ihn gibt (kein Existenzorakel per ID-Iteration).
         res = client.get(f"/api/files/{server_with_dir.id}/browse", cookies=user_cookies)
-        assert res.status_code == 403
+        assert res.status_code == 404
 
     def test_read_requires_files_read(
         self, client: TestClient, regular_user: User, user_cookies: dict, server_with_dir: Server, db: Session
     ):
         (Path(server_with_dir.install_dir) / "a.txt").write_text("hi")
-        # Nur write-Permission → read soll trotzdem failen.
-        _grant(db, regular_user, server_with_dir, ["server.files.write"])
+        # view + write, aber kein read → 403: der Server ist sichtbar, das
+        # konkrete Recht fehlt.
+        _grant(db, regular_user, server_with_dir, ["server.view", "server.files.write"])
         res = client.get(
             f"/api/files/{server_with_dir.id}/read?path=a.txt",
             cookies=user_cookies,
         )
         assert res.status_code == 403
 
+    def test_read_without_view_answers_not_found(
+        self, client: TestClient, regular_user: User, user_cookies: dict, server_with_dir: Server, db: Session
+    ):
+        """Ohne `server.view` gibt es kein 403 — das waere die Auskunft, dass
+        es den Server gibt. Ein Nutzer mit write-Delegation, aber ohne view,
+        ist ein konstruiertes, aber erlaubtes Rechtebild."""
+        (Path(server_with_dir.install_dir) / "a.txt").write_text("hi")
+        _grant(db, regular_user, server_with_dir, ["server.files.write"])
+        res = client.get(
+            f"/api/files/{server_with_dir.id}/read?path=a.txt",
+            cookies=user_cookies,
+        )
+        assert res.status_code == 404
+
     def test_delete_requires_files_delete(
         self, client: TestClient, regular_user: User, user_cookies: dict, user_csrf_token: str,
         server_with_dir: Server, db: Session
     ):
         (Path(server_with_dir.install_dir) / "x.txt").write_text("hi")
-        _grant(db, regular_user, server_with_dir, ["server.files.read", "server.files.write"])
+        _grant(db, regular_user, server_with_dir, ["server.view", "server.files.read", "server.files.write"])
         res = client.delete(
             f"/api/files/{server_with_dir.id}/delete?path=x.txt",
             cookies=user_cookies,
@@ -151,6 +168,80 @@ class TestBrowseReadWrite:
         res = client.get(f"/api/files/{server_with_dir.id}/browse", cookies=owner_cookies)
         assert res.status_code == 200
         assert res.json() == {"path": "", "entries": [], "exists": True}
+
+    def test_browse_repairs_permissions_before_giving_up(
+        self, client: TestClient, owner_cookies: dict, server_with_dir: Server
+    ):
+        """Ein verschlossenes Verzeichnis wird repariert statt mit 500 quittiert.
+
+        Unter Rootless Docker legt der Spielprozess seine Verzeichnisse als
+        gemappter Benutzer mit ``0750`` an. Das Panel laeuft als ``msm``, ist
+        weder Eigentuemer noch in dessen Gruppe — und schon ein ``stat()`` auf
+        einen Pfad darunter wirft. Gemeldet am 18.08.2026 als 500 ohne
+        Erklaerung, ausgeloest in ``browse_directory`` an genau der Zeile
+        ``target.exists()``, die **vor** dem schuetzenden ``try`` stand.
+
+        Der Schreibpfad kannte die Antwort schon: einmal die Rechte reparieren
+        und den Zugriff wiederholen. Dieser Test haelt fest, dass das Lesen es
+        jetzt auch tut — sonst konnte der Betreiber eine Datei speichern, die
+        er im selben Verzeichnis nicht auflisten kann.
+        """
+        versuche = {"n": 0}
+        echtes_exists = Path.exists
+
+        def _erst_gesperrt_dann_offen(self_pfad: Path) -> bool:
+            # Nur der geprueften Pfad blockiert, und nur beim ersten Mal:
+            # danach hat die Reparatur ihn geoeffnet.
+            if str(self_pfad) == server_with_dir.install_dir:
+                versuche["n"] += 1
+                if versuche["n"] == 1:
+                    raise PermissionError(13, "Permission denied")
+            return echtes_exists(self_pfad)
+
+        with (
+            patch.object(Path, "exists", _erst_gesperrt_dann_offen),
+            patch(
+                "routers.files._repair_install_permissions",
+                return_value={"ok": True},
+            ) as reparatur,
+        ):
+            res = client.get(
+                f"/api/files/{server_with_dir.id}/browse", cookies=owner_cookies
+            )
+
+        assert res.status_code == 200
+        assert res.json()["exists"] is True
+        # Und die Reparatur lief genau einmal — sie ist teuer (ein Container)
+        # und gehoert deshalb in den Fehlerfall, nicht vor jeden Zugriff.
+        assert reparatur.call_count == 1
+
+    def test_browse_answers_403_when_the_repair_fails(
+        self, client: TestClient, owner_cookies: dict, server_with_dir: Server
+    ):
+        """Bleibt es verschlossen, ist das ein 403 — kein 500.
+
+        Ein 500 heisst „MSM ist kaputt“ und schickt den Betreiber in die Logs.
+        Ein verschlossenes Verzeichnis ist aber eine Aussage ueber Rechte, und
+        genau die soll er lesen.
+        """
+        def _immer_gesperrt(self_pfad: Path) -> bool:
+            raise PermissionError(13, "Permission denied")
+
+        with (
+            patch.object(Path, "exists", _immer_gesperrt),
+            patch(
+                "routers.files._repair_install_permissions",
+                return_value={"ok": False, "error": "Container nicht startbar"},
+            ),
+        ):
+            res = client.get(
+                f"/api/files/{server_with_dir.id}/browse", cookies=owner_cookies
+            )
+
+        assert res.status_code == 403
+        # Und der Grund verraet nichts ueber Hostpfade oder Container.
+        assert "Berechtigung" in res.json()["detail"]
+        assert server_with_dir.install_dir not in res.text
 
     def test_write_then_read(self, client: TestClient, owner_cookies: dict, csrf_token: str, server_with_dir: Server):
         res = client.put(
@@ -340,7 +431,12 @@ class TestBrowseReadWrite:
         assert kwargs["volumes"][0].container_path == PERMISSION_REPAIR_CONTAINER_DIR
         script = kwargs["command"][1]
         assert f"find {PERMISSION_REPAIR_CONTAINER_DIR} -xdev -type f" in script
-        assert "chmod a+rwX" in script
+        # Geteilte **Gruppe** statt Weltrechte: `a+rwX` machte jede Serverdatei
+        # fuer jeden Prozess auf dem Host beschreibbar, und weil diese
+        # Reparatur vor jedem Serverstart laeuft, war ein aufgeraeumtes
+        # Verzeichnis beim naechsten Start wieder offen.
+        assert "g+rwxs" in script
+        assert "a+rwX" not in script
         assert "chown" not in script
 
     def test_file_permission_repair_does_not_change_runtime_owner(self, server_with_dir: Server):
@@ -352,32 +448,64 @@ class TestBrowseReadWrite:
 
         assert result == {"ok": True}
         script = mock_run.call_args.kwargs["command"][1]
-        assert "chmod a+rwX" in script
+        assert "g+rwxs" in script
+        assert "a+rwX" not in script
         assert "chown" not in script
 
-    def test_apply_permissions_uses_owner_scoped_modes_and_preserves_execute_bit(
+    def test_apply_permissions_never_locks_out_the_game_process(
         self,
         server_with_dir: Server,
     ):
+        """Der Router benutzt die nur-verschärfende Service-Fassung.
+
+        Hier stand vorher ein Test, der das Gegenteil zementierte: Er verlangte
+        exakt ``0750``/``0640`` — also genau die harte Fassung, die dem
+        Spielprozess (andere UID unter Rootless Docker) das Gruppen-Schreibrecht
+        nahm und mit dem exakten Modus das setgid-Bit der geteilten Verzeichnisse
+        löschte. Nach jedem Upload/Extract/Rename/Move/Restore konnte der Server
+        seine eigenen Dateien nicht mehr ändern, und neue Dateien erbten die
+        geteilte Gruppe nicht mehr.
+
+        Jetzt gilt die Service-Invariante (`server_file_access_service.
+        apply_permissions`): Modi werden nur **verschärft, nie zurückgedreht** —
+        vorhandene Gruppen-/Weltbits und setgid bleiben stehen.
+        """
         if os.name != "posix":
             pytest.skip("POSIX permission modes are not represented on Windows")
         from routers.files import _apply_permissions
+        from services.server_file_access_service import apply_permissions
+
+        # Router und Service teilen sich dieselbe Funktion — die alte
+        # Doppelimplementierung war der Grund, warum der Router die harte
+        # Fassung behielt, nachdem der Service längst repariert war.
+        assert _apply_permissions is apply_permissions
 
         root = Path(server_with_dir.install_dir)
         target = root / "runtime"
         target.mkdir()
+        # Geteiltes Verzeichnis wie nach fix-server-permissions.sh: setgid + g+rwx.
+        target.chmod(0o2770)
         executable = target / "PalServer.sh"
         executable.write_text("#!/bin/sh\n", encoding="utf-8")
         executable.chmod(0o711)
         config = target / "PalWorldSettings.ini"
         config.write_text("setting=value\n", encoding="utf-8")
-        config.chmod(0o666)
+        # Vom Spielprozess angelegt: Gruppe darf schreiben.
+        config.chmod(0o660)
 
         _apply_permissions(server_with_dir.install_dir, target)
 
-        assert target.stat().st_mode & 0o777 == 0o750
-        assert executable.stat().st_mode & 0o777 == 0o750
-        assert config.stat().st_mode & 0o777 == 0o640
+        # setgid und Gruppenrechte des geteilten Verzeichnisses bleiben.
+        assert target.stat().st_mode & 0o7777 & 0o2000, "setgid wurde geloescht"
+        assert target.stat().st_mode & 0o070 == 0o070, "Gruppenrechte wurden entzogen"
+        # Execute-Bit bleibt, Eigentuemer bekommt volle Rechte dazu.
+        assert executable.stat().st_mode & 0o100, "Execute-Bit des Eigentuemers weg"
+        assert executable.stat().st_mode & 0o010, "Execute-Bit der Gruppe weg"
+        # Das Gruppen-Schreibrecht der Spielprozess-Datei bleibt erhalten.
+        assert config.stat().st_mode & 0o060 == 0o060, (
+            "Gruppen-Lese/Schreibrecht wurde zurueckgedreht — der Spielprozess "
+            "kann seine eigene Konfiguration nicht mehr aendern"
+        )
 
 
 # ── Upload (Single-Shot) + Blocked Extensions ─────────────────────────────
@@ -650,6 +778,217 @@ class TestSearch:
         assert res.json()["results"] == []
 
 
+class TestContentSearch:
+    """Suche **im** Dateiinhalt — das Gegenstueck zur Namenssuche darueber.
+
+    Sie kam aus dem KI-Werkzeug: die KI konnte in Dateien hineinsuchen, ein
+    Mensch am Panel nicht. Beide gehen jetzt durch dieselbe Funktion
+    `server_file_access_service.search_file_contents`; unterschiedlich ist nur,
+    was der Aufrufer damit macht.
+    """
+
+    def test_content_search_returns_path_and_line(
+        self, client: TestClient, owner_cookies: dict, server_with_dir: Server
+    ):
+        root = Path(server_with_dir.install_dir)
+        (root / "Data").mkdir()
+        (root / "Data" / "buffs.xml").write_text(
+            "<buffs>\n  <buff name=\"other\"/>\n  <buff name=\"staminaLoss\" value=\"1.0\"/>\n</buffs>\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        res = client.get(
+            f"/api/files/{server_with_dir.id}/search-content?q=staminaloss",
+            cookies=owner_cookies,
+        )
+        assert res.status_code == 200
+        treffer = res.json()["matches"]
+        assert len(treffer) == 1
+        # Pfad **und** Zeilennummer: ohne die Zeile waere die Antwort nur
+        # "irgendwo in dieser Datei" und damit kaum besser als die Namenssuche.
+        assert treffer[0]["path"] == "Data/buffs.xml"
+        assert treffer[0]["line"] == 3
+        assert "staminaLoss" in treffer[0]["text"]
+
+    def test_content_search_does_not_leak_outside_the_server_root(
+        self, client: TestClient, owner_cookies: dict, server_with_dir: Server, tmp_path: Path
+    ):
+        nachbar = tmp_path / "nachbar"
+        nachbar.mkdir()
+        (nachbar / "geheim.cfg").write_text("streng-geheim\n", encoding="utf-8")
+        for pfad in ("../nachbar", "../nachbar/geheim.cfg", "/etc"):
+            res = client.get(
+                f"/api/files/{server_with_dir.id}/search-content?q=geheim&path={pfad}",
+                cookies=owner_cookies,
+            )
+            assert res.status_code in (200, 400)
+            if res.status_code == 200:
+                assert res.json()["matches"] == []
+
+    def test_content_search_requires_the_read_permission(
+        self,
+        client: TestClient,
+        user_cookies: dict,
+        db: Session,
+        regular_user: User,
+        server_with_dir: Server,
+    ):
+        """Dasselbe Recht wie beim Lesen einer Datei — sonst waere die Suche ein
+        Weg, Inhalte zu sehen, die man nicht oeffnen darf."""
+        (Path(server_with_dir.install_dir) / "server.cfg").write_text(
+            "maxPlayers=40\n", encoding="utf-8"
+        )
+        res = client.get(
+            f"/api/files/{server_with_dir.id}/search-content?q=maxPlayers",
+            cookies=user_cookies,
+        )
+        # Ohne jede Delegation (auch kein view): 404, kein Existenzorakel.
+        assert res.status_code == 404
+
+        _grant(db, regular_user, server_with_dir, ["server.view", "server.files.read"])
+        res = client.get(
+            f"/api/files/{server_with_dir.id}/search-content?q=maxPlayers",
+            cookies=user_cookies,
+        )
+        assert res.status_code == 200
+        assert [m["path"] for m in res.json()["matches"]] == ["server.cfg"]
+
+    def test_content_search_skips_an_unreadable_directory(
+        self,
+        client: TestClient,
+        owner_cookies: dict,
+        server_with_dir: Server,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Ein Ordner ohne Leserecht kostet den Ordner, nicht die ganze Suche.
+
+        Der Betriebsfall: ein Container legt sein Datenverzeichnis unter einer
+        fremden UID an, oder im Serververzeichnis liegt ein Symlink, der nach
+        draussen zeigt. Beides endet in `list_server_directory` als 403. Vorher
+        reichte die Verzeichnisauflistung der Suche diesen 403 weiter, und die
+        komplette Inhaltssuche scheiterte, obwohl jedes andere Verzeichnis
+        lesbar war.
+
+        Nachgestellt am `iterdir`, weil genau dort der PermissionError entsteht,
+        aus dem der 403 wird - eine gemockte HTTPException haette die Kette
+        nicht mitgeprueft.
+        """
+        root = Path(server_with_dir.install_dir)
+        (root / "Data").mkdir()
+        (root / "Data" / "buffs.xml").write_text(
+            "staminaLoss=1.0\n", encoding="utf-8"
+        )
+        (root / "world").mkdir()
+        (root / "world" / "level.dat").write_text(
+            "staminaLoss=egal\n", encoding="utf-8"
+        )
+
+        original_iterdir = Path.iterdir
+
+        def gesperrtes_iterdir(self: Path, *args, **kwargs):
+            if self.name == "world":
+                raise PermissionError(13, "Permission denied", str(self))
+            return original_iterdir(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "iterdir", gesperrtes_iterdir)
+
+        res = client.get(
+            f"/api/files/{server_with_dir.id}/search-content?q=staminaloss",
+            cookies=owner_cookies,
+        )
+        assert res.status_code == 200
+        daten = res.json()
+        # Das lesbare Verzeichnis wurde durchsucht ...
+        assert [m["path"] for m in daten["matches"]] == ["Data/buffs.xml"]
+        # ... und die Antwort verschweigt nicht, dass etwas ausgelassen wurde.
+        assert daten["truncated"] is True
+
+    def test_content_search_reports_truncation_when_the_root_is_unreadable(
+        self,
+        client: TestClient,
+        owner_cookies: dict,
+        server_with_dir: Server,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Nichts gefunden und nichts durchsucht sind zwei verschiedene Auskuenfte."""
+        root = Path(server_with_dir.install_dir)
+        (root / "server.cfg").write_text("maxPlayers=40\n", encoding="utf-8")
+
+        original_iterdir = Path.iterdir
+
+        def gesperrtes_iterdir(self: Path, *args, **kwargs):
+            if self.name == root.name:
+                raise PermissionError(13, "Permission denied", str(self))
+            return original_iterdir(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "iterdir", gesperrtes_iterdir)
+
+        res = client.get(
+            f"/api/files/{server_with_dir.id}/search-content?q=maxPlayers",
+            cookies=owner_cookies,
+        )
+        assert res.status_code == 200
+        daten = res.json()
+        assert daten["matches"] == []
+        assert daten["truncated"] is True
+
+    def test_content_search_resolves_the_node_agent_only_once(
+        self,
+        db: Session,
+        server_with_dir: Server,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Eine Suche, ein Node-Client — nicht einer je Verzeichnis und Datei.
+
+        Jeder Aufbau eines `NodeClient` lässt das Node-Token beim DIS-Sidecar
+        entschlüsseln und baut einen frisch angehefteten TLS-Kontext auf, beides
+        über das Netz. Bei ``SEARCH_MAX_FILES = 200`` wären das rund
+        vierhundert vermeidbare Runden für eine einzige Suche.
+
+        Geprüft wird an `_agent` selbst und nicht am Ergebnis: die Trefferliste
+        sieht in beiden Fällen gleich aus, der Unterschied liegt allein in der
+        Zahl der Aufbauten.
+        """
+        from services import server_file_access_service as dienst
+
+        baum = {
+            "": [
+                {"name": "Data", "is_dir": True},
+                {"name": "server.cfg", "is_dir": False},
+            ],
+            "Data": [{"name": "buffs.xml", "is_dir": False}],
+        }
+        inhalte = {
+            "server.cfg": "maxPlayers=40\n",
+            "Data/buffs.xml": "staminaLoss=1.0\n",
+        }
+
+        class FesterAgent:
+            def files_list(self, kennung: str, pfad: str) -> list[dict]:
+                return baum.get(pfad, [])
+
+            def files_read_info(self, kennung: str, pfad: str) -> dict:
+                return {"content": inhalte[pfad], "revision": "r1"}
+
+        aufbauten: list[int] = []
+
+        def gezaehlter_agent(server: Server, session: Session) -> FesterAgent:
+            aufbauten.append(server.id)
+            return FesterAgent()
+
+        monkeypatch.setattr(dienst, "_agent", gezaehlter_agent)
+
+        ergebnis = dienst.search_file_contents(
+            db, server_id=server_with_dir.id, query="staminaloss"
+        )
+
+        # Zwei Verzeichnisrunden und zwei Dateilesungen — und trotzdem nur ein
+        # einziger aufgelöster Node-Agent.
+        assert [t["path"] for t in ergebnis["matches"]] == ["Data/buffs.xml"]
+        assert ergebnis["files_searched"] == 2
+        assert aufbauten == [server_with_dir.id]
+
+
 class TestFileHistoryEndpoints:
     def test_history_list_requires_read_permission(
         self,
@@ -661,7 +1000,8 @@ class TestFileHistoryEndpoints:
             f"/api/files/{server_with_dir.id}/versions?path=config.ini",
             cookies=user_cookies,
         )
-        assert res.status_code == 403
+        # Ohne jede Delegation (auch kein view): 404, kein Existenzorakel.
+        assert res.status_code == 404
 
     def test_restore_requires_csrf(
         self,
@@ -786,3 +1126,52 @@ class TestTarExtract:
         )
         assert res.status_code == 200
         assert (Path(server_with_dir.install_dir) / "hello.txt").read_text() == "world"
+
+
+# ── Lese-Audit ────────────────────────────────────────────────────────────
+
+
+class TestReadAccessAudit:
+    """Dateilesen wird im Audit-Log festgehalten — gededuped, nicht je Klick.
+
+    Der Deckel (ein Eintrag je Benutzer, Server und Fenster) ist Teil der
+    Zusage in `permissionDetails.server_files_read.desc`: ohne ihn wuerde das
+    Durchklicken eines Ordnerbaums die Tabelle fluten.
+    """
+
+    def test_browse_writes_one_deduped_audit_entry(
+        self, client: TestClient, owner_cookies: dict, owner_user: User, server_with_dir: Server, db: Session
+    ):
+        from models import AuditLog
+
+        first = client.get(f"/api/files/{server_with_dir.id}/browse?path=", cookies=owner_cookies)
+        second = client.get(f"/api/files/{server_with_dir.id}/browse?path=", cookies=owner_cookies)
+        assert first.status_code == 200 and second.status_code == 200
+
+        entries = (
+            db.query(AuditLog)
+            .filter(
+                AuditLog.action == "server.files.read",
+                AuditLog.target_id == str(server_with_dir.id),
+            )
+            .all()
+        )
+        assert len(entries) == 1
+        assert entries[0].user_id == owner_user.id
+        assert entries[0].target_type == "server"
+
+    def test_denied_read_leaves_no_audit_entry(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict, server_with_dir: Server
+    ):
+        """Audit protokolliert Zugriffe, keine Versuche: die Rechtepruefung
+        steht davor, eine Ablehnung hinterlaesst keinen Lese-Eintrag."""
+        from models import AuditLog
+
+        res = client.get(f"/api/files/{server_with_dir.id}/browse?path=", cookies=user_cookies)
+        assert res.status_code == 404
+        assert (
+            db.query(AuditLog)
+            .filter(AuditLog.action == "server.files.read")
+            .count()
+            == 0
+        )

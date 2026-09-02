@@ -34,3 +34,30 @@ export function formatDurationSeconds(seconds: number | null | undefined): strin
   const secs = total % 60
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
 }
+
+export function getAvailableTimezones(): string[] {
+  try {
+    const intlWithSupported = Intl as typeof Intl & {
+      supportedValuesOf?: (key: string) => string[]
+    }
+    if (typeof intlWithSupported.supportedValuesOf === 'function') {
+      return intlWithSupported.supportedValuesOf('timeZone')
+    }
+  } catch {
+    // Fallback falls Browser-API nicht verfügbar
+  }
+  return [
+    'UTC',
+    'Europe/Berlin',
+    'Europe/London',
+    'Europe/Paris',
+    'America/New_York',
+    'America/Chicago',
+    'America/Denver',
+    'America/Los_Angeles',
+    'Asia/Tokyo',
+    'Asia/Singapore',
+    'Australia/Sydney',
+  ]
+}
+

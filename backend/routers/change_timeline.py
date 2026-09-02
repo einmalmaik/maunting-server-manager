@@ -9,6 +9,9 @@ from models import ChangeEvent, User
 
 router = APIRouter(prefix="/api/servers/{server_id}/change-timeline", tags=["change-timeline"])
 
+# Obergrenze der ausgelieferten Ereignisse: die neuesten, alles Ältere bleibt draußen.
+MAX_EREIGNISSE = 200
+
 
 @router.get("")
 def list_change_timeline(
@@ -17,10 +20,13 @@ def list_change_timeline(
     db: Session = Depends(get_db),
 ):
     require_server_permission(user, server_id, db, "server.view")
+    # Die Tabelle wächst mit jedem Lebenszyklus-Vorgang unbegrenzt weiter.
+    # Der Deckel schneidet dank der absteigenden Sortierung nur den alten Rest ab.
     events = (
         db.query(ChangeEvent)
         .filter(ChangeEvent.server_id == server_id)
         .order_by(ChangeEvent.timestamp.desc())
+        .limit(MAX_EREIGNISSE)
         .all()
     )
     res = []

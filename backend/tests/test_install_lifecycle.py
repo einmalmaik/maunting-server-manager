@@ -576,7 +576,10 @@ class TestPluginInstallCallback:
         test_server.install_dir = tempfile.mkdtemp()
         db.commit()
 
-        with patch("games.blueprint_plugin.SteamAccountService.is_configured", return_value=True), \
+        # Der Steam-Login wird jetzt ueber die gemeinsame Credential-Aufloesung
+        # ermittelt (Server-Bindung vor panelweitem Account). Hier interessiert
+        # nur, dass der Install-Thread terminal abschliesst.
+        with patch("games.blueprint_plugin._resolve_steam_login", return_value=("u", "p")), \
              patch("games.blueprint_plugin.run_steamcmd_install") as mock_run, \
              patch("games.blueprint_plugin.finish_install") as mock_finish:
             mock_run.return_value = {"ok": False, "error": "test failure"}

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 
 declare global {
@@ -29,7 +30,12 @@ interface CaptchaConfig {
 }
 
 export function CaptchaWidget({ onVerify }: CaptchaWidgetProps) {
+  const { t } = useTranslation()
   const [config, setConfig] = useState<CaptchaConfig | null>(null)
+  // Ohne diesen Zustand endet ein geblocktes Anbieterskript in einem leeren
+  // Kasten: der Benutzer sendet ohne Token, das Backend lehnt ab, und der
+  // einzige Hinweis steht in der Browserkonsole.
+  const [loadFailed, setLoadFailed] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const widgetIdRef = useRef<any>(null)
 
@@ -117,14 +123,20 @@ export function CaptchaWidget({ onVerify }: CaptchaWidgetProps) {
             initWidget()
           } else if (attempts > 50) {
             clearInterval(checkInterval)
-            console.error(`Timeout waiting for CAPTCHA global: ${checkGlobal}`)
+            setLoadFailed(true)
           }
         }, 100)
       }
 
+      // Wird das Skript geblockt, feuert `load` nie — ohne diesen Listener
+      // liefe nicht einmal der Timeout oben, und es bliebe vollständig still.
+      const handleError = () => setLoadFailed(true)
+
       script.addEventListener('load', handleLoad)
+      script.addEventListener('error', handleError)
       return () => {
         script.removeEventListener('load', handleLoad)
+        script.removeEventListener('error', handleError)
       }
     }
 
@@ -146,6 +158,14 @@ export function CaptchaWidget({ onVerify }: CaptchaWidgetProps) {
   }, [config])
 
   if (!config || !config.enabled) return null
+
+  if (loadFailed) {
+    return (
+      <p role="alert" className="my-4 text-center font-body-md text-sm text-error">
+        {t('auth.captchaLoadFailed')}
+      </p>
+    )
+  }
 
   return (
     <div className="flex justify-center my-4 msm-captcha-container" ref={containerRef} />

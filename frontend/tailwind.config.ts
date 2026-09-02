@@ -14,6 +14,7 @@ import type { Config } from 'tailwindcss'
 const config: Config = {
   content: [
     './index.html',
+    './desktop.html',
     './src/**/*.{js,ts,jsx,tsx}',
   ],
   darkMode: 'class',
@@ -134,9 +135,13 @@ const config: Config = {
         'mono': ['JetBrains Mono', 'monospace'],
       },
       fontSize: {
+        'display-sm': ['36px', { lineHeight: '1.15', fontWeight: '700' }],
         'headline-lg': ['32px', { lineHeight: '1.2', letterSpacing: '0', fontWeight: '700' }],
         'headline-lg-mobile': ['26px', { lineHeight: '1.2', fontWeight: '700' }],
         'headline-md': ['24px', { lineHeight: '1.3', fontWeight: '600' }],
+        'headline-sm': ['20px', { lineHeight: '1.3', fontWeight: '600' }],
+        'title-lg': ['18px', { lineHeight: '1.4', fontWeight: '600' }],
+        'title-sm': ['14px', { lineHeight: '1.4', fontWeight: '600' }],
         'body-lg': ['18px', { lineHeight: '1.6', fontWeight: '400' }],
         'body-md': ['16px', { lineHeight: '1.5', fontWeight: '400' }],
         'label-md': ['14px', { lineHeight: '1.4', letterSpacing: '0', fontWeight: '500' }],

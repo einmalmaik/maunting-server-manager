@@ -14,6 +14,10 @@ export interface PanelSettings {
   email_provider: string
   steam_api_key: string
   steam_api_configured: boolean
+  steam_api_source: 'env' | 'panel' | 'none'
+  curseforge_api_key: string
+  curseforge_api_configured: boolean
+  curseforge_api_source: 'env' | 'panel' | 'none'
   steam_account_username: string
   steam_account_configured: boolean
   github_token_configured: boolean
@@ -33,10 +37,19 @@ export interface PanelSettings {
   singra_webhook_secret_configured: boolean
   singra_webhook_secret_source: 'env' | 'panel' | 'none'
   updates_automatic: boolean
+  desktop_app_download_enabled: boolean
+  calendar_enabled: boolean
+  notes_enabled: boolean
   captcha_enabled: boolean
   captcha_provider: 'turnstile' | 'hcaptcha' | 'recaptcha' | 'none'
   captcha_site_key: string
   captcha_secret_key: string
+  cloudflare_enabled: boolean
+  cloudflare_api_token: string
+  cloudflare_api_configured: boolean
+  cloudflare_api_source: 'env' | 'panel' | 'none'
+  cloudflare_default_zone: string
+  proactive_enabled: boolean
   /** Login/Auth-Anfragen pro Minute pro IP (Default 10, Range 3–50) */
   rate_limit_auth: number
   /** Globale API-Anfragen pro Minute pro IP (Default 100, Range 50–1000) */
@@ -65,6 +78,10 @@ export const EMPTY_PANEL_SETTINGS: PanelSettings = {
   email_provider: 'none',
   steam_api_key: '',
   steam_api_configured: false,
+  steam_api_source: 'none',
+  curseforge_api_key: '',
+  curseforge_api_configured: false,
+  curseforge_api_source: 'none',
   steam_account_username: '',
   steam_account_configured: false,
   github_token_configured: false,
@@ -84,10 +101,19 @@ export const EMPTY_PANEL_SETTINGS: PanelSettings = {
   singra_webhook_secret_configured: false,
   singra_webhook_secret_source: 'none',
   updates_automatic: false,
+  desktop_app_download_enabled: true,
+  calendar_enabled: true,
+  notes_enabled: true,
   captcha_enabled: false,
   captcha_provider: 'none',
   captcha_site_key: '',
   captcha_secret_key: '',
+  cloudflare_enabled: true,
+  cloudflare_api_token: '',
+  cloudflare_api_configured: false,
+  cloudflare_api_source: 'none',
+  cloudflare_default_zone: '',
+  proactive_enabled: true,
   rate_limit_auth: RATE_LIMIT_AUTH_DEFAULT,
   rate_limit_global: RATE_LIMIT_GLOBAL_DEFAULT,
 }

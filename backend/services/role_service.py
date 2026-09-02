@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from models import Role, RolePermission
+from models import Role, RolePermission, User, UserRole
 from services.permission_catalog import (
     ALL_KEYS,
     SYSTEM_ROLE_ADMIN,
@@ -38,6 +38,79 @@ def role_permission_keys(db: Session, role_id: int) -> list[str]:
         .all()
     )
     return sorted({r[0] for r in rows})
+
+
+def effective_user_role_ids(db: Session, user: User) -> list[int]:
+    """Liefert alle Rollen eines Users und berücksichtigt Legacy-Datensätze.
+
+    ``users.role_id`` bleibt während der additiven Migration lesbar. Dadurch
+    verlieren Accounts auch dann keine Rechte, wenn ein Rolling Update die
+    Backfill-Migration noch nicht vollständig ausgeführt hat.
+    """
+    rows = db.query(UserRole.role_id).filter(UserRole.user_id == user.id).all()
+    role_ids = {row[0] for row in rows}
+    if user.role_id is not None:
+        role_ids.add(user.role_id)
+    return sorted(role_ids)
+
+
+def effective_user_role_permission_keys(db: Session, user: User) -> list[str]:
+    """Vereinigt die Permission-Keys aller globalen Rollen eines Users."""
+    role_ids = effective_user_role_ids(db, user)
+    if not role_ids:
+        return []
+    rows = (
+        db.query(RolePermission.permission_key)
+        .filter(RolePermission.role_id.in_(role_ids))
+        .all()
+    )
+    return sorted({row[0] for row in rows})
+
+
+def set_user_roles(
+    db: Session,
+    user: User,
+    role_ids: list[int],
+    *,
+    commit: bool = True,
+) -> list[int]:
+    """Ersetzt alle Rollen eines Users atomar und hält ``role_id`` kompatibel.
+
+    Die Funktion validiert vor der Mutation, damit eine unbekannte Rollen-ID
+    keine partielle Zuweisung hinterlässt. Doppelte IDs werden normalisiert.
+    """
+    desired = sorted(set(role_ids))
+    if desired:
+        existing_role_ids = {
+            row[0]
+            for row in db.query(Role.id).filter(Role.id.in_(desired)).all()
+        }
+        missing = sorted(set(desired) - existing_role_ids)
+        if missing:
+            raise ValueError(f"Unbekannte Rollen-IDs: {missing}")
+
+    existing = db.query(UserRole).filter(UserRole.user_id == user.id).all()
+    existing_by_role = {assignment.role_id: assignment for assignment in existing}
+    for role_id, assignment in existing_by_role.items():
+        if role_id not in desired:
+            db.delete(assignment)
+    for role_id in desired:
+        if role_id not in existing_by_role:
+            db.add(UserRole(user_id=user.id, role_id=role_id))
+
+    # Die kleinste ID ist nur ein stabiler Kompatibilitätswert. Autorisierung
+    # wertet immer die vollständige Zuordnungstabelle aus.
+    user.role_id = desired[0] if desired else None
+    if commit:
+        try:
+            db.commit()
+            db.refresh(user)
+        except Exception:
+            db.rollback()
+            raise
+    else:
+        db.flush()
+    return desired
 
 
 def _replace_role_permissions(db: Session, role_id: int, keys: list[str]) -> list[str]:
@@ -96,10 +169,9 @@ def update_role(
 def delete_role(db: Session, role: Role) -> None:
     if role.is_system:
         raise ValueError("System-Rolle kann nicht geloescht werden")
-    from models import User
-
-    in_use = db.query(User.id).filter(User.role_id == role.id).first()
-    if in_use is not None:
+    legacy_in_use = db.query(User.id).filter(User.role_id == role.id).first()
+    assigned_in_use = db.query(UserRole.id).filter(UserRole.role_id == role.id).first()
+    if legacy_in_use is not None or assigned_in_use is not None:
         raise ValueError("Rolle ist noch Usern zugewiesen")
     db.delete(role)
     db.commit()
@@ -155,10 +227,13 @@ def _sync_role_permissions(db: Session, role_id: int, target_keys: frozenset[str
 __all__ = [
     "create_role",
     "delete_role",
+    "effective_user_role_ids",
+    "effective_user_role_permission_keys",
     "ensure_system_roles",
     "get_role",
     "get_role_by_name",
     "list_roles",
     "role_permission_keys",
+    "set_user_roles",
     "update_role",
 ]

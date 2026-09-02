@@ -1,20 +1,7 @@
-import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import {
-  AlertTriangle,
-  ArrowLeft,
-  ArrowRightLeft,
-  Check,
-  Clipboard,
-  FileArchive,
-  GitBranch,
-  MonitorSmartphone,
-  Network,
-  Server,
-  ShieldCheck,
-  Terminal,
-} from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRightLeft, FileArchive, GitBranch, KeyRound, Mic, MonitorSmartphone, Network, Plug, Server, ShieldCheck, Terminal } from 'lucide-react'
+import { CodeBlock } from '@/components/docs/CodeBlock'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 
 export const PANEL_BOOTSTRAP_COMMAND = `curl -fsSL https://raw.githubusercontent.com/einmalmaik/maunting-server-manager/main/scripts/bootstrap.sh \\
@@ -30,42 +17,15 @@ const artifacts = [
 
 function CommandBlock({ command, label, testId }: { command: string; label: string; testId: string }) {
   const { t } = useTranslation()
-  const [copied, setCopied] = useState(false)
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(command)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1500)
-    } catch {
-      // Die Zwischenablage ist nur Komfort; Installationsfehler werden hier nicht vorgetaeuscht.
-    }
-  }
 
   return (
-    <div className="relative mt-4 overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest">
-      <div className="flex items-center justify-between gap-3 border-b border-outline-variant px-4 py-2.5">
-        <span className="inline-flex items-center gap-2 font-label-md text-xs uppercase tracking-wider text-on-surface-variant">
-          <Terminal className="h-4 w-4 text-primary" />
-          {label}
-        </span>
-        <button
-          type="button"
-          onClick={() => void copy()}
-          className="msm-btn-secondary inline-flex items-center gap-2 px-3 py-1.5 text-xs"
-          aria-label={copied ? t('docsSelfHosting.install.copied') : t('docsSelfHosting.install.copy')}
-        >
-          {copied ? <Check className="h-3.5 w-3.5 text-status-success" /> : <Clipboard className="h-3.5 w-3.5" />}
-          {copied ? t('docsSelfHosting.install.copied') : t('docsSelfHosting.install.copy')}
-        </button>
-      </div>
-      <pre className="overflow-x-auto p-4 font-mono text-xs leading-6 text-on-surface sm:text-sm">
-        <code data-testid={testId}>{command}</code>
-      </pre>
-      <span className="sr-only" role="status" aria-live="polite">
-        {copied ? t('docsSelfHosting.install.copied') : ''}
-      </span>
-    </div>
+    <CodeBlock
+      code={command}
+      label={label}
+      testId={testId}
+      copyLabel={t('docsSelfHosting.install.copy')}
+      copiedLabel={t('docsSelfHosting.install.copied')}
+    />
   )
 }
 
@@ -102,7 +62,11 @@ export function SelfHostingDocs() {
         status={<Network className="h-6 w-6 text-primary" aria-hidden="true" />}
       />
 
-      <nav className="sticky top-16 z-10 -mx-1 mb-6 flex gap-2 overflow-x-auto bg-surface/95 px-1 py-2 backdrop-blur lg:hidden" aria-label={t('docsSelfHosting.navigation.label')}>
+      {/* Die Sprungnavigation galt frueher nur unterhalb `lg` — auf dem Desktop,
+          wo die Seite am laengsten ist, gab es gar keine. Ausserdem fehlten die
+          beiden zuletzt ergaenzten Abschnitte, die dadurch nur durch Scrollen
+          auffindbar waren. */}
+      <nav className="sticky top-16 z-10 -mx-1 mb-6 flex gap-2 overflow-x-auto bg-surface/95 px-1 py-2 backdrop-blur" aria-label={t('docsSelfHosting.navigation.label')}>
         {[
           ['deployment-units', t('docsSelfHosting.units.title')],
           ['panel-install', t('docsSelfHosting.install.title')],
@@ -111,6 +75,10 @@ export function SelfHostingDocs() {
           ['enrollment', t('docsSelfHosting.enrollment.title')],
           ['guardian-state', t('docsSelfHosting.guardian.title')],
           ['artifacts', t('docsSelfHosting.artifacts.title')],
+          ['credentials-scoping', t('docsSelfHosting.credentials.title')],
+          ['hoster-integration', t('docsSelfHosting.hoster.title')],
+          ['voice-mode', t('docsSelfHosting.voice.title')],
+          ['smart-system', t('docsSelfHosting.smartSystem.title')],
         ].map(([id, label]) => (
           <a key={id} href={`#${id}`} className="msm-btn-secondary shrink-0 px-3 py-2 text-xs">{label}</a>
         ))}
@@ -309,6 +277,121 @@ export function SelfHostingDocs() {
               </div>
             ))}
           </dl>
+        </div>
+      </section>
+
+      {/* Zugangsdaten und Kubernetes (Phase 7). */}
+      <section aria-labelledby="credentials-scoping" className="msm-card mb-10 p-5 sm:p-6">
+        <div className="flex items-start gap-3">
+          <KeyRound className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+          <div>
+            <h2 id="credentials-scoping" className="font-headline text-headline-md text-on-surface">
+              {t('docsSelfHosting.credentials.title')}
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-on-surface-variant">
+              {t('docsSelfHosting.credentials.intro')}
+            </p>
+          </div>
+        </div>
+        <dl className="mt-5 grid gap-px overflow-hidden rounded-xl border border-outline-variant bg-outline-variant md:grid-cols-2">
+          {(['order', 'vault', 'server', 'fallback', 'limits', 'kubernetes'] as const).map(item => (
+            <div key={item} className="bg-surface-container p-4">
+              <dt className="text-sm font-semibold text-on-surface">{t(`docsSelfHosting.credentials.${item}.title`)}</dt>
+              <dd className="mt-1 text-sm leading-6 text-on-surface-variant">{t(`docsSelfHosting.credentials.${item}.body`)}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+
+      {/* Hoster-Anbindung (Phase 6). Optional: ohne angelegte Integration
+          aendert sich am Self-Hosted-Betrieb nichts. */}
+      <section aria-labelledby="hoster-integration" className="msm-card mb-10 p-5 sm:p-6">
+        <div className="flex items-start gap-3">
+          <Plug className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+          <div>
+            <h2 id="hoster-integration" className="font-headline text-headline-md text-on-surface">
+              {t('docsSelfHosting.hoster.title')}
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-on-surface-variant">
+              {t('docsSelfHosting.hoster.intro')}
+            </p>
+          </div>
+        </div>
+        <dl className="mt-5 grid gap-px overflow-hidden rounded-xl border border-outline-variant bg-outline-variant md:grid-cols-2">
+          {(['setup', 'api', 'lifecycle', 'webhooks', 'handoff', 'selfHosted'] as const).map(item => (
+            <div key={item} className="bg-surface-container p-4">
+              <dt className="text-sm font-semibold text-on-surface">{t(`docsSelfHosting.hoster.${item}.title`)}</dt>
+              <dd className="mt-1 text-sm leading-6 text-on-surface-variant">{t(`docsSelfHosting.hoster.${item}.body`)}</dd>
+            </div>
+          ))}
+        </dl>
+        {/* Dieser Abschnitt beschreibt den Betrieb. Wer den Shop tatsaechlich
+            anbindet, braucht die Endpunkt- und Webhook-Referenz. */}
+        <Link
+          to="/docs/hoster-api"
+          className="msm-btn-secondary mt-5 inline-flex items-center gap-2 px-4 py-2 text-sm"
+        >
+          <Plug className="h-4 w-4" />
+          {t('docsSelfHosting.hoster.apiReferenceLink')}
+        </Link>
+      </section>
+
+      {/* Sprachmodus. Steht hier und nicht auf einer eigenen Seite, weil er
+          fuer den Betreiber genau ein neuer Betriebsschritt ist: ein zweiter
+          Anbieterzugang mit eigenem Schluessel. */}
+      <section aria-labelledby="voice-mode" className="msm-card mb-10 p-5 sm:p-6">
+        <div className="flex items-start gap-3">
+          <Mic className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+          <div>
+            <h2 id="voice-mode" className="font-headline text-headline-md text-on-surface">
+              {t('docsSelfHosting.voice.title')}
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-on-surface-variant">
+              {t('docsSelfHosting.voice.intro')}
+            </p>
+          </div>
+        </div>
+        <dl className="mt-5 grid gap-px overflow-hidden rounded-xl border border-outline-variant bg-outline-variant md:grid-cols-2">
+          {(['access', 'model', 'permission', 'confirm', 'quota', 'relay', 'pipeline'] as const).map(item => (
+            <div key={item} className="bg-surface-container p-4">
+              <dt className="text-sm font-semibold text-on-surface">{t(`docsSelfHosting.voice.${item}.title`)}</dt>
+              <dd className="mt-1 text-sm leading-6 text-on-surface-variant">{t(`docsSelfHosting.voice.${item}.body`)}</dd>
+            </div>
+          ))}
+        </dl>
+        <div className="mt-4 flex gap-3 rounded-xl border border-status-warning/30 bg-status-warning/10 p-4 text-status-warning">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+          <p className="text-sm leading-6">{t('docsSelfHosting.voice.spokenLimit')}</p>
+        </div>
+      </section>
+
+      {/* Die Desktop-App. Sie ist optional, und die beiden Punkte, die im
+          Betrieb überraschen, stehen hier: dass man sich nur per Kopplung
+          anmeldet, und dass aus dem Browser kein Werkzeug den Rechner
+          erreicht. */}
+      <section aria-labelledby="smart-system" className="msm-card mb-10 p-5 sm:p-6">
+        <div className="flex items-start gap-3">
+          <MonitorSmartphone className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+          <div>
+            <h2 id="smart-system" className="font-headline text-headline-md text-on-surface">
+              {t('docsSelfHosting.smartSystem.title')}
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-on-surface-variant">
+              {t('docsSelfHosting.smartSystem.intro')}
+            </p>
+          </div>
+        </div>
+        <dl className="mt-5 grid gap-px overflow-hidden rounded-xl border border-outline-variant bg-outline-variant md:grid-cols-2">
+          {(['artifact', 'oberflaeche', 'pairing', 'permission', 'sandbox', 'takeover', 'uninstall'] as const).map(item => (
+            <div key={item} className="bg-surface-container p-4">
+              <dt className="text-sm font-semibold text-on-surface">{t(`docsSelfHosting.smartSystem.${item}.title`)}</dt>
+              <dd className="mt-1 text-sm leading-6 text-on-surface-variant">{t(`docsSelfHosting.smartSystem.${item}.body`)}</dd>
+            </div>
+          ))}
+        </dl>
+        <div className="mt-4 flex gap-3 rounded-xl border border-status-warning/30 bg-status-warning/10 p-4 text-status-warning">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+          <p className="text-sm leading-6">{t('docsSelfHosting.smartSystem.unsigned')}</p>
         </div>
       </section>
 

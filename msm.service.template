@@ -1,5 +1,5 @@
 [Unit]
-Description=Maunting Server Manager Panel
+Description=Maunting Service Manager Panel
 After=network.target redis-server.service msm-dis-sidecar.service
 Wants=redis-server.service
 Requires=msm-dis-sidecar.service

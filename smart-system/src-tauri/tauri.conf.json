@@ -1,0 +1,66 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Maunting Smart System",
+  "mainBinaryName": "MauntingSmartSystem",
+  "version": "0.1.0",
+  "identifier": "com.mauntingstudios.smart-system",
+  "build": {
+    "beforeDevCommand": "npm --prefix ../frontend run dev:desktop",
+    "devUrl": "http://localhost:1430",
+    "beforeBuildCommand": "npm --prefix ../frontend run build:desktop",
+    "frontendDist": "../../frontend/dist-desktop"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "MSS — Maunting Smart System",
+        "url": "desktop.html",
+        "width": 1100,
+        "height": 720,
+        "minWidth": 860,
+        "minHeight": 560,
+        "resizable": true,
+        "center": true
+      },
+      {
+        "label": "overlay",
+        "title": "MSS",
+        "url": "desktop.html?fenster=overlay",
+        "width": 460,
+        "height": 300,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "shadow": false,
+        "visible": false,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' https: http: ws: wss:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "publisher": "MauntingStudios",
+    "copyright": "© 2026 MauntingStudios",
+    "targets": ["nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQyODVGRUU0NUFGRjdCNTkKUldSWmUvOWE1UDZGUWxySngrT0pPcERHU21lamxjUHlRS3dTSnpFRnlucHIzK3hGcDFVN1o3blEK",
+      "endpoints": [
+        "https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

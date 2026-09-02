@@ -79,8 +79,19 @@ class AuthService:
         return hashlib.sha256(token.encode()).hexdigest()
 
     @staticmethod
-    def create_refresh_token(db: Session, user_id: int, family: str | None = None) -> str:
-        """Erstellt ein neues Refresh-Token, speichert Hash in DB, gibt Plain-Token zurueck."""
+    def create_refresh_token(
+        db: Session,
+        user_id: int,
+        family: str | None = None,
+        geraet: str | None = None,
+    ) -> str:
+        """Erstellt ein neues Refresh-Token, speichert Hash in DB, gibt Plain-Token zurueck.
+
+        ``geraet`` haelt fest, dass diese Sitzung von einem gekoppelten Geraet
+        stammt. Es steht an jeder Zeile der Familie, nicht nur an der ersten:
+        die Rotation baut das Token neu, und ohne den Wert an der neuen Zeile
+        waere die Herkunft nach dem ersten Erneuern weg.
+        """
         plain_token = secrets.token_urlsafe(32)
         token_hash = AuthService._hash_token(plain_token)
         token_family = family or secrets.token_urlsafe(16)
@@ -92,6 +103,7 @@ class AuthService:
             token_hash=token_hash,
             family=token_family,
             expires_at=expires_at,
+            geraet=geraet,
         )
         db.add(rt)
         db.commit()
@@ -127,6 +139,24 @@ class AuthService:
             RefreshToken.revoked_at.is_(None),
         ).update({"revoked_at": datetime.now(timezone.utc)})
         db.commit()
+
+    @staticmethod
+    def revoke_refresh_family(db: Session, user_id: int, family: str) -> int:
+        """Sperrt genau eine Sitzungskette aus — ein Geraet, nicht alle.
+
+        ``user_id`` steht im Filter und nicht nur im Aufrufer: eine Familie ist
+        eine geratene Zeichenkette weit von der naechsten entfernt, und ohne
+        diesen Filter koennte man mit einer fremden Kennung eine fremde Sitzung
+        beenden. Gibt die Zahl der getroffenen Zeilen zurueck, damit der
+        Aufrufer "gab es nicht" von "ist erledigt" unterscheiden kann.
+        """
+        getroffen = db.query(RefreshToken).filter(
+            RefreshToken.user_id == user_id,
+            RefreshToken.family == family,
+            RefreshToken.revoked_at.is_(None),
+        ).update({"revoked_at": datetime.now(timezone.utc)})
+        db.commit()
+        return int(getroffen)
 
     # ── CSRF Token ──
     @staticmethod
@@ -228,6 +258,15 @@ class AuthService:
         from models.email_verification import EmailVerification
         from models.audit_log import AuditLog
         from models.server_permission import ServerPermission
+
+        # Dieselbe Vorpruefung wie im Adminpfad, aus demselben Grund: die drei
+        # RESTRICT-Fremdschluessel auf diesen Benutzer haben `db.commit()` unten
+        # scheitern lassen, und die ungefangene IntegrityError wurde zu einer
+        # HTTP 500 ohne Hinweis. Der lokale Import haelt den Dienst frei von
+        # einer Abhaengigkeit, die `services/__init__` beim Laden schon braucht.
+        from services.user_deletion_service import prepare_user_deletion
+
+        prepare_user_deletion(db, user)
 
         # Delete JwtBlacklist items
         db.query(JwtBlacklist).filter(JwtBlacklist.user_id == user.id).delete()

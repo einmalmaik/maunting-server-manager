@@ -64,11 +64,8 @@ export function ResetPassword() {
           <Logo size="md" />
           <div>
             <h1 className="font-headline text-body-lg font-extrabold text-primary leading-tight">
-              MauntingStudios
+              MSM
             </h1>
-            <p className="font-mono-sm text-mono-sm text-on-surface-variant">
-              Server Manager
-            </p>
           </div>
         </div>
 

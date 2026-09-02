@@ -2,7 +2,7 @@ fastapi==0.111.0
 uvicorn[standard]==0.30.0
 sqlalchemy==2.0.31
 alembic==1.18.5
-pydantic==2.8.2
+pydantic==2.10.6
 pydantic-settings==2.3.4
 python-jose[cryptography]==3.3.0
 # Temporaer fuer Passwort-Migration (passlib -> DIS Argon2id).
@@ -32,3 +32,102 @@ docker==7.1.0
 # (Sektion: S3-Backup-Dependencies). Exit-Plan: S3Service-Fassade ermoeglicht
 # Austausch gegen alternative S3-Client-Library ohne Aenderung an Fachlogik.
 boto3==1.43.40
+
+# --- Lokale Embeddings fuer das KI-Gedaechtnis ---
+# model2vec: statische Satz-Embeddings, gekapselt in services/ai_embedding_service.py.
+# Warum lokal: OpenRouter bietet nachweislich kein kostenloses Embedding-Modell
+# (402 bei text-embedding-3-small, 400 bei openrouter/free). Eine Suche, die
+# einen bezahlten Account voraussetzt, waere fuer einen Teil der Betreiber tot.
+# Warum diese Bibliothek: statische Embeddings sind eine vorberechnete Tabelle
+# plus Mittelung — kein neuronales Netz zur Laufzeit, also kein torch und keine
+# ONNX-Runtime. Gemessener Abhaengigkeitsbaum: 23 Pakete gegenueber 35 bei
+# mem0ai, ohne Telemetriepaket (mem0ai verlangt posthog, was
+# docs/agent-rules/dependencies.md unter harte Verbote listet), ohne zweites
+# Provider-SDK neben unserem SSRF-gepinnten Adapter und ohne Kollision mit
+# httpx==0.27.0 (mem0ai verlangt >=0.28).
+# Beruehrt keine Secrets: der Dienst bekommt nur den bereits entschluesselten
+# Erinnerungstext und liefert Zahlen zurueck. Kein Netzzugriff zur Laufzeit —
+# die Gewichte kommen einmalig ueber install.sh/update.sh.
+# Exit-Plan: ai_embedding_service kapselt die gesamte Nutzung; faellt die
+# Bibliothek weg, liefert encode() None und die Suche laeuft ohne Vektoren.
+model2vec==0.8.2
+
+# --- WebSocket-Client fuer den Sprachmodus ---
+# websockets: die ausgehende Verbindung zur Stimme
+# (wss://api.elevenlabs.io/v1/text-to-speech/{voice}/stream-input), gekapselt in
+# services/ai_tts_elevenlabs.py.
+#
+# **Keine neue Abhaengigkeit im Baum, sondern eine bisher zufaellige.** Das Paket
+# ist laengst installiert, weil `uvicorn[standard]` es als `websockets>=10.4`
+# mitzieht — MSM benutzt es fuer den eingehenden Konsolen-WebSocket also schon
+# heute. Bisher stand es nur nirgends, und damit haette ein Wechsel von uvicorn
+# auf `wsproto` es lautlos entfernt. Ein ausdruecklicher Pin macht aus einer
+# stillschweigenden Annahme eine ueberpruefbare Zusage; der Abhaengigkeitsbaum
+# waechst dadurch um kein einziges Paket (websockets hat selbst keine).
+#
+# Der Eintrag kam am 2026-08-15 fuer OpenAIs Realtime-API und hat sie einen Tag
+# ueberlebt. Das ist kein Zufall, sondern der Grund, warum hier ein Paket steht
+# und kein Anbieter-SDK: `elevenlabs` waere ein zweites Paket samt eigenem
+# Abhaengigkeitsbaum fuer einen WebSocket, den wir schon sprechen koennen.
+#
+# Warum ueberhaupt eine ausgehende WS-Verbindung: httpx spricht kein WebSocket,
+# und Text stueckweise hineinzugeben ist der ganze Punkt — wer auf die fertige
+# Antwort wartet, bevor er sie vorlesen laesst, wartet zweimal. Das Panel leitet
+# den Ton deshalb selbst weiter, statt den Browser direkt mit dem Anbieter
+# sprechen zu lassen; nur so bleibt der Betreiberschluessel im Prozess.
+#
+# Beruehrt Secrets: ja, der Betreiberschluessel geht als `xi-api-key`-Kopf
+# hinaus. Genau deshalb ist die Bibliothek gekapselt, und genau deshalb ist es
+# eine, die ohnehin schon im Prozess laeuft, statt einer zweiten daneben.
+# Exit-Plan: ai_tts_elevenlabs kapselt die gesamte Nutzung; ein Wechsel auf
+# aiohttp oder wsproto beruehrt nur diese eine Datei.
+websockets==16.0
+# Pipecat orchestriert ausschließlich die internen Audio- und Steuerframes des
+# Sprachmodus. Die vorhandenen MSM-Adapter bleiben für STT, TTS, Provider,
+# AiRun, RBAC und Tool-Ausführung zuständig; deshalb keine Provider-Extras.
+# Der Import ist in services/ai_voice/pipecat_pipeline.py gekapselt und weich,
+# damit ein defektes optionales Voice-Paket weder Anmeldung noch Serverbetrieb
+# blockiert. Sicherheitsentscheidung und Exit-Plan: docs/agent-rules/dependencies.md.
+pipecat-ai==1.8.1
+# Transitiv durch model2vec, hier gepinnt, weil ai_embedding_service direkt
+# damit rechnet (Normalisierung, Skalarprodukt).
+numpy==2.5.1
+# Ebenfalls transitiv (huggingface_hub verlangt pyyaml>=5.1), hier gepinnt,
+# weil ai_skill_service direkt damit den Frontmatter der mitgelieferten
+# Skill-Dateien liest. Ein eigener Miniparser waere weniger Abhaengigkeit,
+# aber er wuerde bei Doppelpunkten, Anfuehrungszeichen und mehrzeiligen Werten
+# still das Falsche tun — und genau solche Zeichen stehen in
+# Skill-Beschreibungen. Gelesen wird ausschliesslich mit `safe_load`.
+pyyaml==6.0.2
+# QR-Code fuer die 2FA-Einrichtung, erzeugt im Panel.
+# Zweck: Bis hierher liess die Oberflaeche das Bild von api.qrserver.com holen
+# und schickte die vollstaendige otpauth://-URI als Query-Parameter mit — also
+# das Base32-TOTP-Geheimnis und die Kennung des Benutzers in das Zugriffslog
+# eines Fremden. Das Geheimnis allein genuegt fuer gueltige Codes (reines
+# RFC 6238, kein serverseitiger Zusatzfaktor), der zweite Faktor waere damit
+# keiner mehr.
+# Notwendigkeit: Vorhandener Code kann es nicht. Ein eigener Encoder waere
+# GF(256)-Arithmetik, Reed-Solomon, Kapazitaets- und Blocktabellen, acht Masken
+# mit vier Strafregeln und zwei BCH-Codes — geschaetzt 350-450 Zeilen mitten im
+# Auth-Pfad, das Zwei- bis Dreifache dessen, was adr-0007 beim OAuth-Eigenbau
+# noch fuer vertretbar hielt. Ein QR-Encoder kennt zudem keine Teilpunkte: eine
+# falsche Maske ergibt einen Code, der bei einer App scannt und bei der
+# naechsten nicht.
+# Security: beruehrt das TOTP-Geheimnis, aber nur lesend und nur im Speicher —
+# hinein geht die fertige URI, heraus kommt ein Bild. Kein Netzzugriff, kein
+# Dateizugriff, kein globaler Zustand. Genau das ist der Gewinn: das Geheimnis
+# verlaesst den Prozess nicht mehr.
+# Transitive Flaeche: null. `pip show segno` meldet ein leeres Requires; die
+# einzige Requires-Dist ist auf python_version < 3.10 bedingt, wir fahren 3.13.
+# Reines Python, keine kompilierte Erweiterung.
+# API: eine Funktion (`segno.make`) und ein Serialisierer. Schwer falsch zu
+# benutzen.
+# Lizenz: BSD (OSI-anerkannt), vertraeglich mit Projekt und Auslieferung.
+# Kapselung: ausschliesslich in services/totp_qr.py.
+# Entfernbarkeit: faellt die Bibliothek weg, ersetzt man diese eine Funktion;
+# `qr_datenuri` liefert dann None, und die Oberflaeche zeigt weiterhin
+# Geheimnis und otpauth-Link zum Abschreiben.
+# Alternativen geprueft: ein npm-Paket im Frontend (gleiche Wirkung, aber die
+# feindlichere Lieferkette und ein Paket mehr im Browser-Bundle, ohne
+# Sicherheitsgewinn) und der Eigenbau (siehe Notwendigkeit).
+segno==1.6.6

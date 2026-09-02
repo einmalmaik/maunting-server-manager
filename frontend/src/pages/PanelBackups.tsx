@@ -5,6 +5,7 @@ import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { PageHeader } from '@/Singra/UI/PageHeader'
+import { Dropdown } from '@/components/ui/Dropdown'
 
 /** Panel-Backup-List-Item (GET /api/panel-backups). */
 interface PanelBackupItem {
@@ -261,22 +262,20 @@ export function PanelBackups() {
               <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider text-xs">
                 {t('panelBackups.interval')}
               </label>
-              <select
-                value={settings.interval_hours}
-                onChange={(e) =>
+              <Dropdown
+                value={String(settings.interval_hours)}
+                onChange={(value) =>
                   setSettings({
                     ...settings,
-                    interval_hours: parseInt(e.target.value) || 24,
+                    interval_hours: parseInt(value) || 24,
                   })
                 }
-                className="msm-input"
-              >
-                {INTERVAL_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
+                options={INTERVAL_OPTIONS.map((opt) => ({
+                  value: String(opt.value),
+                  label: opt.label,
+                }))}
+                aria-label={t('panelBackups.interval')}
+              />
             </div>
 
             {/* Retention */}

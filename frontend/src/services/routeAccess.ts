@@ -5,6 +5,7 @@ export type RouteAccessState = 'loading' | 'allowed' | 'forbidden' | 'notFound' 
 export const routeAccessRules = {
   dashboard: null,
   docs: null,
+  ai: ['ai.chat.use', 'ai.skills.manage'],
   users: ['users.read', 'users.manage'],
   roles: ['roles.manage'],
   /** Admin-Audit-Protokoll (privilegierte Operator-Aktionen). */

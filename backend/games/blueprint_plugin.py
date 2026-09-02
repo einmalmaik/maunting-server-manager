@@ -17,6 +17,7 @@ alle Server-Typen dieselbe.
 from __future__ import annotations
 
 import glob
+import logging
 import os
 import re
 import shlex
@@ -30,6 +31,7 @@ from blueprints.http_source import install_http_source
 from blueprints.renderer import render_env_values
 from blueprints.schema import (
     BlueprintConfigPatchType,
+    BlueprintModInjection,
     BlueprintModListContent,
     BlueprintSteamCompatibility,
     BlueprintSourceType,
@@ -41,6 +43,7 @@ from games.base import (
     GamePlugin,
     _append_console_log,
     _require_bind_ip,
+    _resolve_steam_login,
     active_mod_ids,
     finish_install,
     run_steamcmd_install,
@@ -50,6 +53,106 @@ from games.ini_utils import set_ini_value
 from services.docker_service import PortPublish, VolumeBind
 from services.port_role_service import blueprint_port_requirements, normalize_port_protocol
 from services.steam_account_service import SteamAccountService
+
+
+logger = logging.getLogger(__name__)
+
+
+def _load_detached_server(server_id: int):
+    """Laedt einen Server samt Node in einer eigenen, sofort geschlossenen Session.
+
+    Der Aufrufer erhaelt ein vollstaendig geladenes, aber losgeloestes Objekt.
+    Das ist genau der Zustand, den ein Installations-Thread braucht:
+
+    - Er darf die Request-Session nicht verwenden. Die ist geschlossen, sobald
+      die Antwort geschrieben wurde, und waere ausserdem nicht thread-sicher.
+    - Er darf aber auch keine Session ueber die gesamte Installation offen
+      halten — ein SteamCMD-Lauf dauert Minuten bis Stunden und wuerde so lange
+      eine Verbindung aus dem Pool blockieren.
+
+    `joinedload` ist hier notwendig und nicht bloss eine Optimierung: nach dem
+    Schliessen der Session kann eine nicht geladene Relationship nicht mehr
+    nachgeladen werden.
+    """
+    from sqlalchemy.orm import joinedload
+
+    from database import SessionLocal
+    from models import Server
+
+    db = SessionLocal()
+    try:
+        server = (
+            db.query(Server)
+            .options(joinedload(Server.node))
+            .filter(Server.id == server_id)
+            .first()
+        )
+        if server is not None:
+            # `expunge_all` loest Server und Node aus der Session, ohne die
+            # bereits geladenen Werte zu verwerfen.
+            db.expunge_all()
+        return server
+    finally:
+        db.close()
+
+
+def _resolve_github_token_for_server(server_id: int) -> str:
+    """GitHub-Token fuer genau diesen Server (Bindung vor panelweitem Zugang).
+
+    Eigene, kurzlebige Session — der Aufruf kommt aus einem Installations-Thread.
+    Ohne verfuegbaren Zugang wird ein leerer String zurueckgegeben; oeffentliche
+    Repositories funktionieren dann weiterhin ohne Token.
+    """
+    from database import SessionLocal
+    from models import KIND_GITHUB_TOKEN
+    from services.credential_service import resolve_for_server
+
+    db = SessionLocal()
+    try:
+        resolved = resolve_for_server(db, server_id, KIND_GITHUB_TOKEN)
+    finally:
+        db.close()
+    return resolved.secret if resolved is not None else ""
+
+
+def _start_install_worker(server_id: int, name: str, body) -> None:
+    """Startet einen Installations-Thread, der immer terminal abschliesst.
+
+    Der Rumpf bekommt einen frisch geladenen Server uebergeben. Frueher
+    schleppten die Closures das Request-gebundene ORM-Objekt mit; ein Zugriff
+    auf `server.node` im Thread lief dann auf eine geschlossene Session und warf
+    `DetachedInstanceError` — auf Remote-Nodes bei jeder Installation.
+
+    `finish_install` ist der einzige Ort, der Serverstatus, Provisionierungs-Task
+    und die node-weite Install-Sperre abschliesst. Wirft der Thread davor eine
+    Ausnahme, wurde bisher nichts davon erreicht: Der Server blieb dauerhaft auf
+    "installing", der Task auf "running" und die Sperre bis zu ihrem TTL belegt —
+    damit war jede weitere Installation oder jedes Update auf diesem Node
+    blockiert. Der Wrapper faengt deshalb alles ab und meldet einen Fehlschlag.
+
+    Die Fehlermeldung nennt bewusst nur den Ausnahmetyp: Pfade und
+    Providerdetails gehoeren nicht in den fuer Benutzer sichtbaren Serverstatus.
+    """
+
+    def _runner() -> None:
+        try:
+            server = _load_detached_server(server_id)
+            if server is None:
+                # Der Server wurde zwischen Anforderung und Threadstart entfernt.
+                finish_install(
+                    server_id,
+                    {"ok": False, "error": "Server existiert nicht mehr"},
+                )
+                return
+            body(server)
+        except Exception as exc:
+            logger.exception("Installations-Thread abgebrochen (server_id=%s)", server_id)
+            finish_install(
+                server_id,
+                {"ok": False, "error": f"Installation abgebrochen ({type(exc).__name__})"},
+            )
+
+    threading.Thread(target=_runner, name=name, daemon=True).start()
 
 
 WORKSHOP_BATCH_SIZE = 25
@@ -111,6 +214,7 @@ class BlueprintPlugin(GamePlugin):
         bp_mods = blueprint.effective_mods()
         self.supports_mods = bp_mods.supportsMods
         self.supports_steam_workshop = bp_mods.supportsSteamWorkshop
+        self.supports_curseforge = bp_mods.supportsCurseForge
 
     # ─ Identitaet ─────────────────────────────────────────────────────────
 
@@ -125,12 +229,16 @@ class BlueprintPlugin(GamePlugin):
             assert bp.source.steam is not None
             requires_login = bp.source.steam.requiresLogin
 
-            if requires_login and not SteamAccountService.is_configured():
+            # Das Gate prueft dieselbe Aufloesung wie der spaetere Login: erst
+            # ein diesem Server zugewiesenes Konto, dann der panelweite Account.
+            # Sonst wuerde ein Kunde mit eigenem Steam-Konto hier abgewiesen,
+            # obwohl die Installation funktionieren wuerde.
+            if requires_login and _resolve_steam_login(server.id) is None:
                 error_msg = (
-                    "Dieses Spiel benötigt einen globalen Steam-Account-Login. "
-                    "Bitte unter Einstellungen → Steam Account einen Benutzer "
-                    "und Passwort hinterlegen (Steam Guard muss deaktiviert sein, "
-                    "siehe Hinweis dort)."
+                    "Dieses Spiel benötigt einen Steam-Account-Login. Bitte im "
+                    "Server unter Zugangsdaten ein eigenes Steam-Konto hinterlegen "
+                    "oder unter Einstellungen → Steam Account einen panelweiten "
+                    "Account setzen (Steam Guard muss deaktiviert sein)."
                 )
                 # Status auf "error" setzen, sonst bleibt der Server in
                 # "installing" haengen (Create-Route ignoriert Rueckgabewert).
@@ -141,7 +249,7 @@ class BlueprintPlugin(GamePlugin):
             install_dir = server.install_dir
             server_id = server.id
 
-            def _install():
+            def _install(server):
                 # Reinstall-Schutz (manuelle .cfg/.ini etc.): Cache vor, Restore nach.
                 # Frische Install: 0 Dateien → No-Op. Nutzt zentrale Helper aus updater.py.
                 from games.updater import _steam_effective_branch, perform_install_with_protection
@@ -177,14 +285,14 @@ class BlueprintPlugin(GamePlugin):
                 )
                 finish_install(server_id, result)
 
-            threading.Thread(target=_install, daemon=True).start()
+            _start_install_worker(server_id, f"install-steam-{server_id}", _install)
             return {"message": "Installation gestartet"}
 
         if bp.source.type == BlueprintSourceType.HTTP:
             install_dir = server.install_dir
             server_id = server.id
 
-            def _http_install():
+            def _http_install(server):
                 _append_console_log(server_id, "[MSM] HTTP-Source-Download startet\n")
                 node = getattr(server, "node", None)
                 reinstall = (
@@ -230,14 +338,14 @@ class BlueprintPlugin(GamePlugin):
                     )
                 finish_install(server_id, result)
 
-            threading.Thread(target=_http_install, daemon=True).start()
+            _start_install_worker(server_id, f"install-http-{server_id}", _http_install)
             return {"message": "Installation gestartet"}
 
         if bp.source.type == BlueprintSourceType.GITHUB:
             install_dir = server.install_dir
             server_id = server.id
 
-            def _github_install():
+            def _github_install(server):
                 from blueprints.github_source import install_github_source
 
                 _append_console_log(server_id, "[MSM] GitHub-Source: Clone/Pull startet\n")
@@ -252,8 +360,10 @@ class BlueprintPlugin(GamePlugin):
 
                 def _install_source():
                     node = getattr(server, "node", None)
+                    # Serverbezogener GitHub-Zugang vor dem panelweiten. Damit
+                    # laeuft ein Kundenserver nicht mit dem Token des Betreibers.
+                    token = _resolve_github_token_for_server(server_id)
                     if node is not None and not getattr(node, "is_local", False):
-                        from services.github_token_service import resolve_token
                         from services.node_client import NodeClient
 
                         cfg = bp.source.github
@@ -262,12 +372,12 @@ class BlueprintPlugin(GamePlugin):
                             "server_id": str(server_id),
                             "repo": cfg.repo,
                             "branch": cfg.branch,
-                            "token": resolve_token(),
+                            "token": token,
                             "setup_commands": cfg.setupCommands,
                             "sub_path": cfg.subPath,
                             "runtime_image": bp.runtime.image,
                         })
-                    return install_github_source(bp, install_dir)
+                    return install_github_source(bp, install_dir, token)
 
                 result = perform_install_with_protection(server, _install_source, blueprint=bp)
                 if result.get("ok"):
@@ -283,7 +393,7 @@ class BlueprintPlugin(GamePlugin):
                     )
                 finish_install(server_id, result)
 
-            threading.Thread(target=_github_install, daemon=True).start()
+            _start_install_worker(server_id, f"install-github-{server_id}", _github_install)
             return {"message": "Installation gestartet"}
 
         if bp.source.type == BlueprintSourceType.MANUAL_UPLOAD:
@@ -370,6 +480,7 @@ class BlueprintPlugin(GamePlugin):
             install_dir=self._runtime_data_dir(),
             ports=self._server_ports(server),
             bind_ip=server.public_bind_ip or None,
+            server_name=server.name,
             active_mod_ids=active_mod_ids(server),
             extra_env=self._blueprint.runtime.env,
             host_install_dir=server.install_dir,
@@ -449,6 +560,20 @@ class BlueprintPlugin(GamePlugin):
         node = getattr(server, "node", None)
         if node is not None and not getattr(node, "is_local", False):
             from services.node_client import NodeClient
+            from services import server_config_wishes
+
+            # Die dauerhaften Werte dieses Servers reisen im selben Kanal —
+            # sie sind strukturell dasselbe wie ein Blueprint-Patch, nur fuer
+            # einen Server statt fuer alle seines Spiels. **Hinten angehaengt**,
+            # damit ein Serverwunsch einen Blueprint-Patch ueberschreibt und
+            # nicht umgekehrt; der Agent wendet die Liste der Reihe nach an.
+            #
+            # Ohne das waere `wuensche_durchsetzen` auf einer entfernten Node
+            # ein stiller Fehlschlag: es schreibt lokal, wo die Datei gar nicht
+            # liegt.
+            wuensche = server_config_wishes.lese(
+                getattr(server, "config_wishes_json", None)
+            )
 
             NodeClient.from_node(node).files_prepare_runtime(
                 server.id,
@@ -457,7 +582,7 @@ class BlueprintPlugin(GamePlugin):
                     "required_files": self._blueprint.runtime.requiredFiles,
                     "executable_files": executable_files,
                     "seed_files": resolved_seeds,
-                    "patches": resolved_patches,
+                    "patches": resolved_patches + server_config_wishes.als_patches(wuensche),
                 },
             )
             return
@@ -645,8 +770,19 @@ class BlueprintPlugin(GamePlugin):
         if not self.supports_mods:
             return None
         bp_mods = self._blueprint.effective_mods()
+        provider = "none"
+        if bp_mods.supportsCurseForge:
+            provider = "curseforge"
+        elif bp_mods.supportsSteamWorkshop:
+            provider = "steam"
         return {
+            "provider": provider,
+            "supports_steam_workshop": bp_mods.supportsSteamWorkshop,
+            "supports_curseforge": bp_mods.supportsCurseForge,
             "workshop_id": bp_mods.workshopAppId,
+            "curseforge_game_id": bp_mods.curseforgeGameId,
+            "curseforge_class_id": bp_mods.curseforgeClassId,
+            "curseforge_install_path": bp_mods.curseforgeInstallPath,
             "dependency_resolution": False,
             "required_tags": bp_mods.filterTags,
         }
@@ -654,8 +790,233 @@ class BlueprintPlugin(GamePlugin):
     def install_mod(self, server, workshop_id: str) -> dict:
         return self.install_mods(server, [workshop_id])
 
+    def _install_curseforge_mods(self, server, workshop_ids: list[str]) -> dict:
+        bp_mods = self._blueprint.effective_mods()
+        clean_ids = [str(wid).strip() for wid in workshop_ids if str(wid).strip()]
+        if not clean_ids:
+            return {"ok": True, "applied": 0, "items": {}}
+
+        from services.curseforge_service import get_curseforge_service
+        from services.curseforge_api_key_service import resolve_key as resolve_cf_key
+        import asyncio
+        from database import SessionLocal
+        from models import Mod
+
+        # Startup-Arg Injektion (z. B. ASA) - Spiel laedt Mods beim Start selbst ueber -mods=...
+        if bp_mods.modInjection == BlueprintModInjection.STARTUP_ARG:
+            try:
+                async def _resolve_titles():
+                    svc = await get_curseforge_service()
+                    titles = {}
+                    for wid in clean_ids:
+                        try:
+                            info = await svc.get_mod_details(wid)
+                            if info and info.title:
+                                titles[wid] = info.title
+                        except Exception:
+                            pass
+                    return titles
+                titles = asyncio.run(_resolve_titles())
+                if titles:
+                    db = SessionLocal()
+                    try:
+                        for wid, title in titles.items():
+                            mod_row = db.query(Mod).filter(Mod.server_id == server.id, Mod.workshop_id == wid).first()
+                            if mod_row and not mod_row.name:
+                                mod_row.name = title
+                        db.commit()
+                    finally:
+                        db.close()
+            except Exception:
+                pass
+            for wid in clean_ids:
+                _append_console_log(server.id, f"[MSM] CurseForge Mod {wid} registriert (Start-Argument)\n")
+            self.update_modlist(server)
+            return {"ok": True, "applied": len(clean_ids), "items": {wid: {"ok": True} for wid in clean_ids}}
+
+        # Dateibasierte Installation (z. B. Minecraft mods/ oder plugins/)
+        import httpx
+
+        cf_key = resolve_cf_key()
+        if not cf_key:
+            return {"error": "CurseForge API-Key nicht konfiguriert (in Panel-Einstellungen hinterlegen)"}
+
+        base = Path(server.install_dir).resolve()
+        target_dir_rel = bp_mods.curseforgeInstallPath or "mods"
+        target_dir = (base / target_dir_rel).resolve()
+        try:
+            target_dir.relative_to(base)
+        except ValueError:
+            return {"error": "curseforgeInstallPath verlaesst install_dir"}
+
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        async def _download_cf():
+            svc = await get_curseforge_service()
+            errors = []
+            applied = 0
+            items = {}
+            for wid in clean_ids:
+                try:
+                    mod_info = await svc.get_mod_details(wid)
+                    if not mod_info:
+                        errors.append(f"CurseForge ID {wid} nicht gefunden (404/ungueltige ID)")
+                        items[wid] = {"ok": False, "error": f"Mod/Pack {wid} nicht auf CurseForge gefunden"}
+                        continue
+                    if not mod_info.latest_files:
+                        errors.append(f"{mod_info.title} (ID {wid}): Keine Dateien auf CurseForge verfuegbar")
+                        items[wid] = {"ok": False, "error": "Keine Release-Dateien verfuegbar"}
+                        continue
+                    file_obj = None
+                    if mod_info.has_server_pack and mod_info.server_pack_file_id:
+                        for lf in mod_info.latest_files:
+                            if isinstance(lf, dict) and lf.get("id") == mod_info.server_pack_file_id:
+                                file_obj = lf
+                                break
+                    if not file_obj:
+                        file_obj = mod_info.latest_files[0]
+
+                    dl_url = file_obj.get("downloadUrl")
+                    if not dl_url:
+                        dl_url = await svc.get_file_download_url(wid, file_obj["id"])
+                    if not dl_url:
+                        errors.append(f"{mod_info.title}: Direkter API-Download vom Mod-Autor deaktiviert oder keine URL")
+                        items[wid] = {"ok": False, "error": "Keine Download-URL verfuegbar"}
+                        continue
+                    file_name = file_obj.get("fileName") or f"mod_{wid}.jar"
+                    safe_name = Path(file_name).name
+                    dest_file_name = safe_name if str(wid) in safe_name else f"cf_{wid}_{safe_name}"
+                    dest_file = (target_dir / dest_file_name).resolve()
+                    dest_file.relative_to(base)
+
+                    async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as dl_client:
+                        resp = await dl_client.get(dl_url, headers={"x-api-key": cf_key})
+                        resp.raise_for_status()
+                        file_bytes = resp.content
+
+                    if safe_name.lower().endswith(".zip"):
+                        import io
+                        import json
+                        import zipfile
+                        with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+                            namelist = zf.namelist()
+                            has_overrides = any(m.filename.startswith("overrides/") for m in zf.infolist())
+                            manifest_bytes = None
+                            if "manifest.json" in namelist:
+                                manifest_bytes = zf.read("manifest.json")
+                            # Zielverzeichnis: Bei Modpacks mit 'overrides/' ins Server-Hauptverzeichnis,
+                            # sonst in den vom Blueprint vorgegebenen Mod-Pfad (target_dir, z. B. mods/, plugins/, Pak-Ordner etc.)
+                            extract_root = base if has_overrides else target_dir
+                            for member in zf.infolist():
+                                member_path = Path(member.filename)
+                                if member_path.is_absolute() or ".." in member_path.parts:
+                                    continue
+                                if has_overrides and member.filename.startswith("overrides/"):
+                                    rel_part = member.filename[len("overrides/"):]
+                                    if not rel_part:
+                                        continue
+                                    extracted_path = (base / rel_part).resolve()
+                                else:
+                                    extracted_path = (extract_root / member.filename).resolve()
+                                try:
+                                    extracted_path.relative_to(base)
+                                    if member.is_dir():
+                                        extracted_path.mkdir(parents=True, exist_ok=True)
+                                    else:
+                                        extracted_path.parent.mkdir(parents=True, exist_ok=True)
+                                        extracted_path.write_bytes(zf.read(member))
+                                        self._try_chown_install_path(server, extracted_path)
+                                except (ValueError, Exception):
+                                    pass
+
+                            # Wenn manifest.json vorhanden ist: deklarierte Mod-Dateien (files) nachladen
+                            if manifest_bytes:
+                                try:
+                                    manifest_data = json.loads(manifest_bytes.decode("utf-8"))
+                                    manifest_files = manifest_data.get("files") or []
+                                    if manifest_files:
+                                        _append_console_log(
+                                            server.id,
+                                            f"[MSM] Modpack Manifest erkannt ({len(manifest_files)} Mods) — lade Mod-Dateien nach...\n",
+                                        )
+                                        mods_dir = (base / "mods").resolve()
+                                        mods_dir.mkdir(parents=True, exist_ok=True)
+                                        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as mc_client:
+                                            for idx, fentry in enumerate(manifest_files, 1):
+                                                pid = fentry.get("projectID")
+                                                fid = fentry.get("fileID")
+                                                if not pid or not fid:
+                                                    continue
+                                                try:
+                                                    m_url = await svc.get_file_download_url(pid, fid)
+                                                    if m_url:
+                                                        m_resp = await mc_client.get(m_url, headers={"x-api-key": cf_key})
+                                                        if m_resp.status_code == 200:
+                                                            m_name = Path(m_url.split("?")[0]).name or f"mod_{pid}_{fid}.jar"
+                                                            m_target = (mods_dir / m_name).resolve()
+                                                            m_target.write_bytes(m_resp.content)
+                                                            self._try_chown_install_path(server, m_target)
+                                                except Exception:
+                                                    pass
+                                                if idx % 10 == 0 or idx == len(manifest_files):
+                                                    _append_console_log(
+                                                        server.id,
+                                                        f"[MSM] Modpack Download-Fortschritt: {idx}/{len(manifest_files)} Mods geladen\n",
+                                                    )
+                                except Exception as m_err:
+                                    logger.warning("Fehler beim Nachladen der Modpack-Dateien: %s", m_err)
+
+                        _append_console_log(
+                            server.id,
+                            f"[MSM] CurseForge Archiv {mod_info.title} ({safe_name}) entpackt nach {'Server-Wurzelverzeichnis' if has_overrides else target_dir_rel + '/'}\n",
+                        )
+                    else:
+                        dest_file.write_bytes(file_bytes)
+                        self._try_chown_install_path(server, dest_file)
+                        _append_console_log(
+                            server.id,
+                            f"[MSM] CurseForge Mod {mod_info.title} ({dest_file_name}) heruntergeladen nach {target_dir_rel}/\n",
+                        )
+
+                    applied += 1
+                    items[wid] = {"ok": True}
+
+                    # Mod-Name in Datenbank aktualisieren, falls noch generisch
+                    try:
+                        db = SessionLocal()
+                        try:
+                            mod_row = db.query(Mod).filter(Mod.server_id == server.id, Mod.workshop_id == str(wid)).first()
+                            if mod_row and (not mod_row.name or mod_row.name.startswith("CurseForge Modpack ") or mod_row.name.startswith("Mod ")):
+                                mod_row.name = mod_info.title
+                                db.commit()
+                        finally:
+                            db.close()
+                    except Exception:
+                        pass
+
+                except Exception as exc:
+                    errors.append(f"{wid}: {exc}")
+                    items[wid] = {"ok": False, "error": str(exc)}
+            res = {
+                "ok": len(errors) == 0,
+                "applied": applied,
+                "errors": errors,
+                "items": items,
+            }
+            if errors:
+                res["error"] = "; ".join(errors)
+            return res
+
+        res = asyncio.run(_download_cf())
+        self.update_modlist(server)
+        return res
+
     def install_mods(self, server, workshop_ids: list[str]) -> dict:
         bp_mods = self._blueprint.effective_mods()
+        if not bp_mods.supportsMods:
+            return {"error": "Mods nicht in dieser Blueprint aktiviert"}
+        if bp_mods.supportsCurseForge:
+            return self._install_curseforge_mods(server, workshop_ids)
         if not bp_mods.supportsSteamWorkshop or not bp_mods.workshopAppId:
             return {"error": "Steam Workshop nicht in dieser Blueprint aktiviert"}
         workshop_app_id = bp_mods.workshopAppId
@@ -910,8 +1271,58 @@ class BlueprintPlugin(GamePlugin):
         self.update_modlist(server)
         return {"ok": not errors, "synced": synced, "errors": errors}
 
+    def update_modlist(self, server) -> None:
+        """Aktualisiert Mod-Status (z. B. .disabled für dateibasierte CurseForge-Mods oder Modlist-Dateien)."""
+        bp_mods = self._blueprint.effective_mods()
+        if bp_mods.supportsCurseForge and bp_mods.modInjection != "startupArg":
+            target_dir_rel = bp_mods.curseforgeInstallPath or "mods"
+            from database import SessionLocal
+            from models import Mod
+            db = SessionLocal()
+            try:
+                mods = db.query(Mod).filter(Mod.server_id == server.id).all()
+                base = Path(server.install_dir).resolve()
+                target_dir = (base / target_dir_rel).resolve()
+                try:
+                    target_dir.relative_to(base)
+                    if target_dir.exists() and target_dir.is_dir():
+                        for mod in mods:
+                            wid = str(mod.workshop_id)
+                            matches = list(target_dir.glob(f"*{wid}*"))
+                            for p in matches:
+                                if not p.is_file():
+                                    continue
+                                if mod.enabled and p.name.endswith(".disabled"):
+                                    new_name = p.name[:-9]
+                                    p.rename(p.parent / new_name)
+                                elif not mod.enabled and not p.name.endswith(".disabled"):
+                                    p.rename(p.parent / f"{p.name}.disabled")
+                except Exception as exc:
+                    logger.warning("Fehler beim Synchronisieren des CurseForge-Mod-Status für Server %s: %s", server.id, exc)
+            finally:
+                db.close()
+            return
+
+        super().update_modlist(server)
+
     def cleanup_mod(self, server, workshop_id: str) -> dict:
         bp_mods = self._blueprint.effective_mods()
+        if bp_mods.supportsCurseForge:
+            target_dir_rel = bp_mods.curseforgeInstallPath or "mods"
+            if bp_mods.modInjection != "startupArg":
+                base = Path(server.install_dir).resolve()
+                target_dir = (base / target_dir_rel).resolve()
+                try:
+                    target_dir.relative_to(base)
+                    if target_dir.exists() and target_dir.is_dir():
+                        for p in target_dir.glob(f"*{workshop_id}*"):
+                            if p.is_file():
+                                p.unlink()
+                except Exception:
+                    pass
+            _append_console_log(server.id, f"[MSM] CurseForge Mod {workshop_id} entfernt\n")
+            return {"ok": True, "removed": [workshop_id]}
+
         if not bp_mods.supportsSteamWorkshop or not bp_mods.workshopAppId:
             return {"ok": True, "removed": []}
 

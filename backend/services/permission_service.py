@@ -4,39 +4,146 @@ Reihenfolge:
 1. Owner-Bypass (is_owner=True) -> alles erlaubt. Bootstrap-Safe.
 2. Globale Rolle hat den Key (gilt auch fuer server-scoped Keys = pauschal alle Server).
 3. Per-Server-Delegation (nur fuer server-scoped Keys, wenn server_id gegeben).
+4. Ueber ein Team — aber nur bis zur Obergrenze der *direkten* Rechte des
+   Teamgruenders. Siehe `_team_server_permission`.
 """
 from __future__ import annotations
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
-from models import RolePermission, Server, ServerPermission, User
+from models import (
+    HosterIntegration,
+    HosterService,
+    RolePermission,
+    Server,
+    ServerPermission,
+    Team,
+    TeamMember,
+    TeamServerGrant,
+    User,
+    UserRole,
+)
+from services.role_service import (
+    effective_user_role_ids,
+    effective_user_role_permission_keys,
+)
 
 
 def has_global_permission(db: Session, user: User, key: str) -> bool:
     if user.is_owner:
         return True
-    if user.role_id is None:
+    role_ids = effective_user_role_ids(db, user)
+    if not role_ids:
         return False
     exists = (
         db.query(RolePermission.id)
-        .filter(RolePermission.role_id == user.role_id, RolePermission.permission_key == key)
+        .filter(RolePermission.role_id.in_(role_ids), RolePermission.permission_key == key)
         .first()
     )
     return exists is not None
 
 
-def has_server_permission(db: Session, user: User, server_id: int, key: str) -> bool:
+HOSTER_CUSTOMERS_VIEW_KEY = "servers.hoster_customers.view"
+
+
+def hoster_customer_server_ids(db: Session) -> set[int]:
+    """Server, die zu einem Shop-Vertrag gehoeren — statusagnostisch.
+
+    Auch suspendierte oder in Kuendigung befindliche Vertraege sind
+    Kundendaten. `ondelete=SET NULL` auf `hoster_services.server_id` sorgt
+    dafuer, dass geloeschte Server hier von selbst verschwinden.
+    """
+    rows = (
+        db.query(HosterService.server_id)
+        .filter(HosterService.server_id.isnot(None))
+        .distinct()
+        .all()
+    )
+    return {r[0] for r in rows}
+
+
+def is_hoster_customer_server(db: Session, server_id: int) -> bool:
+    exists = (
+        db.query(HosterService.id)
+        .filter(HosterService.server_id == server_id)
+        .first()
+    )
+    return exists is not None
+
+
+def is_hoster_service_user_for_server(db: Session, user_id: int, server_id: int) -> bool:
+    """Ist dieser Benutzer der Dienstbenutzer der Integration dieses Kundenservers?
+
+    Der Dienstbenutzer verwaltet die Vertragsserver seiner Integration von
+    Berufs wegen (Provisionierung, Purge, Sandbox-Reset). Diese fachliche
+    Beziehung ersetzt fuer ihn den Hoster-Key — aber nur fuer Server der
+    eigenen Integration, nie fuer die eines anderen Shops.
+    """
+    exists = (
+        db.query(HosterService.id)
+        .join(HosterIntegration, HosterIntegration.id == HosterService.integration_id)
+        .filter(
+            HosterService.server_id == server_id,
+            HosterIntegration.service_user_id == user_id,
+        )
+        .first()
+    )
+    return exists is not None
+
+
+def direct_server_permission(
+    db: Session,
+    user: User,
+    server_id: int,
+    key: str,
+    *,
+    hoster_ids: set[int] | None = None,
+) -> bool:
+    """Rechte **ohne** Teams: Owner, globale Rolle, Per-Server-Delegation.
+
+    Diese Funktion ist die Abbruchbedingung der Rechtekette. Sie fragt bewusst
+    keine Teams ab, und genau deshalb kann es keine Weitergabe ueber mehrere
+    Teams hinweg geben: ein Team darf nur reichen, was sein Gruender *selbst*
+    haelt — nicht, was ihm seinerseits ein anderes Team geliehen hat.
+
+    Ohne diese Trennung waere zweierlei moeglich: eine Endlosschleife (Team A
+    fragt B fragt A) und eine Rechte-Waescherei ueber eine Kette von Teams, an
+    deren Ende niemand mehr sagen koennte, woher ein Recht eigentlich stammt.
+
+    Auf Hoster-Kundenservern zaehlt der pauschale Rollen-Zweig nur, wenn die
+    Rolle zusaetzlich `servers.hoster_customers.view` haelt — fuer **jeden**
+    server-scoped Key, nicht nur fuers Sehen: sonst waere die Liste sauber,
+    aber Konsole und Dateien blieben ueber eine erratene Server-ID offen.
+    Der Kunde selbst ist nicht betroffen, seine Rechte kommen als Delegation.
+    (`has_permission_anywhere` bleibt bewusst grosszuegiger: es entscheidet
+    nur das Werkzeug-Angebot, die Ausfuehrung laeuft immer ueber diese Kette.)
+    """
     if user.is_owner:
         return True
     # Pauschale Rolle (z.B. admin oder Custom-Rolle mit server.* Keys)
-    if user.role_id is not None:
-        role_grant = (
-            db.query(RolePermission.id)
-            .filter(RolePermission.role_id == user.role_id, RolePermission.permission_key == key)
-            .first()
-        )
-        if role_grant is not None:
-            return True
+    role_ids = effective_user_role_ids(db, user)
+    if role_ids:
+        granted_keys = {
+            row[0]
+            for row in db.query(RolePermission.permission_key)
+            .filter(
+                RolePermission.role_id.in_(role_ids),
+                RolePermission.permission_key.in_([key, HOSTER_CUSTOMERS_VIEW_KEY]),
+            )
+            .all()
+        }
+        if key in granted_keys:
+            # `hoster_ids` erlaubt Schleifen-Aufrufern (Team-Sichtbarkeit),
+            # die Kundenserver-Menge einmal zu holen statt EXISTS je Zeile.
+            if HOSTER_CUSTOMERS_VIEW_KEY in granted_keys:
+                return True
+            is_kunde = (
+                server_id in hoster_ids
+                if hoster_ids is not None
+                else is_hoster_customer_server(db, server_id)
+            )
+            if not is_kunde:
+                return True
     # Per-Server-Delegation
     delegated = (
         db.query(ServerPermission.id)
@@ -50,21 +157,317 @@ def has_server_permission(db: Session, user: User, server_id: int, key: str) -> 
     return delegated is not None
 
 
+def _team_server_permission(db: Session, user: User, server_id: int, key: str) -> bool:
+    """Rechte ueber ein Team — gedeckelt durch die direkten Rechte des Gruenders.
+
+    Der Eintrag in `team_server_grants` ist nur der Wunsch des Gruenders. Ob er
+    wirkt, wird hier bei **jeder** Pruefung neu entschieden, indem nachgesehen
+    wird, ob der Gruender den Key auf diesem Server direkt haelt.
+
+    Das hat drei Folgen, die alle erwuenscht sind:
+
+    - Rechteausweitung ist unmoeglich. Wer ein Team gruendet, sich selbst
+      eintraegt und `server.console.exec` auf einem fremden Server vergibt,
+      gewinnt nichts: die Obergrenze ist seine eigene Berechtigung.
+    - Es heilt sich selbst. Verliert der Gruender den Zugriff, verfaellt die
+      Weitergabe im selben Moment — ohne Aufraeumjob und ohne Zeilen, die
+      laenger gelten als ihre Grundlage.
+    - Es kostet eine zusaetzliche Abfrage, aber nur dann, wenn die direkte
+      Pruefung bereits gescheitert ist. Fuer Owner und Rolleninhaber aendert
+      sich nichts.
+    """
+    owner_ids = (
+        db.query(Team.owner_user_id)
+        .join(TeamMember, TeamMember.team_id == Team.id)
+        .join(TeamServerGrant, TeamServerGrant.team_id == Team.id)
+        .filter(
+            TeamMember.user_id == user.id,
+            TeamServerGrant.server_id == server_id,
+            TeamServerGrant.permission_key == key,
+        )
+        .distinct()
+        .all()
+    )
+    for (owner_user_id,) in owner_ids:
+        # Ein Gruender, der sich selbst ueber sein eigenes Team bedient, waere
+        # eine Schleife ohne Erkenntnisgewinn — sein direkter Anspruch wurde
+        # oben bereits geprueft.
+        if owner_user_id == user.id:
+            continue
+        owner = db.get(User, owner_user_id)
+        if owner is not None and direct_server_permission(db, owner, server_id, key):
+            return True
+    return False
+
+
+def has_server_permission(db: Session, user: User, server_id: int, key: str) -> bool:
+    if direct_server_permission(db, user, server_id, key):
+        return True
+    return _team_server_permission(db, user, server_id, key)
+
+
+def has_permission_anywhere(db: Session, user: User, key: str) -> bool:
+    """Haelt der Benutzer dieses Recht **irgendwo** — global oder auf irgendeinem Server?
+
+    Gebraucht wird das an genau einer Stelle: beim Zusammenstellen des
+    Werkzeugkatalogs fuer die KI. Dort gibt es noch keinen Server, ueber den
+    geurteilt werden koennte — das Modell waehlt ihn erst im Argument des
+    Aufrufs. Die Frage lautet deshalb nicht "darf er es hier", sondern "kann er
+    es ueberhaupt".
+
+    **Das ist bewusst die grosszuegigere Frage.** Sie entscheidet nur, was
+    angeboten wird. Ob ein Aufruf laeuft, entscheidet weiterhin
+    `has_server_permission` am konkreten Server — unveraendert und als einzige
+    Wahrheit. Eine Verwechslung der beiden waere eine Rechteausweitung: wer auf
+    Server A schreiben darf, duerfte es sonst auch auf B.
+
+    Dieselbe Reihenfolge wie in `has_server_permission`, nur mengenweise:
+    Owner, pauschale Rolle, Per-Server-Delegation, Team — und beim Team
+    derselbe Deckel, das direkte Recht des Gruenders.
+    """
+    if has_global_permission(db, user, key):
+        # Deckt Owner und die pauschale Rolle ab. Eine Rolle mit einem
+        # server-scoped Key gilt fuer alle Server (siehe Kopf dieser Datei).
+        return True
+    delegiert = (
+        db.query(ServerPermission.id)
+        .filter(
+            ServerPermission.user_id == user.id,
+            ServerPermission.permission_key == key,
+        )
+        .first()
+    )
+    if delegiert is not None:
+        return True
+    rows = (
+        db.query(TeamServerGrant.server_id, Team.owner_user_id)
+        .join(Team, Team.id == TeamServerGrant.team_id)
+        .join(TeamMember, TeamMember.team_id == Team.id)
+        .filter(
+            TeamMember.user_id == user.id,
+            TeamServerGrant.permission_key == key,
+        )
+        .distinct()
+        .all()
+    )
+    for server_id, owner_user_id in rows:
+        if owner_user_id == user.id:
+            continue
+        owner = db.get(User, owner_user_id)
+        if owner is not None and direct_server_permission(db, owner, server_id, key):
+            return True
+    return False
+
+
+def direkte_rechte(
+    db: Session, user: User, schluessel: set[str]
+) -> tuple[set[str], set[tuple[int, str]]]:
+    """Die direkten Rechte eines Benutzers, mengenweise — genau wie
+    `direct_server_permission`, nur fuer viele Schluessel auf einmal.
+
+    Zurueck kommen zwei Dinge, weil die Rechtekette zwei Arten von Anspruch
+    kennt: **pauschal** (Owner oder eine Rolle mit dem Key — gilt auf allen
+    Servern) und **je Server** (die Delegation in `server_permissions`). Beides
+    in einen Topf zu werfen waere hier falsch: der Gruenderdeckel unten fragt
+    nach einem Recht auf einem *bestimmten* Server, und ein pauschales Recht
+    beantwortet diese Frage anders als ein delegiertes.
+
+    Kosten: zwei Abfragen fuer die Rollen, eine fuer die Delegationen; beim
+    Owner keine einzige.
+    """
+    if user.is_owner:
+        return set(schluessel), set()
+    if not schluessel:
+        return set(), set()
+    pauschal = set(effective_user_role_permission_keys(db, user)) & schluessel
+    offen = schluessel - pauschal
+    if not offen:
+        return pauschal, set()
+    rows = (
+        db.query(ServerPermission.server_id, ServerPermission.permission_key)
+        .filter(
+            ServerPermission.user_id == user.id,
+            ServerPermission.permission_key.in_(offen),
+        )
+        .distinct()
+        .all()
+    )
+    return pauschal, {(server_id, key) for server_id, key in rows}
+
+
+def rechte_irgendwo(db: Session, user: User, schluessel: set[str]) -> set[str]:
+    """Welche dieser Rechte haelt der Benutzer **irgendwo** — global oder auf
+    irgendeinem Server?
+
+    Dieselbe Frage wie `has_permission_anywhere`, nur mengenweise gestellt. Die
+    dortige Beschreibung gilt unveraendert, samt der Warnung: das ist bewusst
+    die grosszuegigere Frage, sie entscheidet nur, was *angeboten* wird. Ob ein
+    Aufruf laeuft, entscheidet weiterhin `has_server_permission` am konkreten
+    Server.
+
+    Der Anlass war gemessen, nicht vermutet: der Werkzeugkatalog der KI fragt
+    24 verschiedene Rechteschluessel ab, und die Schleife ueber
+    `has_permission_anywhere` kostete dabei 73 Abfragen bei einem gewoehnlichen
+    Kunden und 93 bei einem Rolleninhaber — je Schluessel dreimal dieselbe
+    Frage nach den Rollen des Benutzers. Der Aufruf sitzt auf dem Pfad zum
+    ersten Token, dort zaehlt jede Runde zur Wartezeit.
+
+    `has_permission_anywhere` bleibt bestehen; wer genau ein Recht wissen will,
+    soll nicht erst eine Menge bauen muessen.
+    """
+    if not schluessel:
+        return set()
+    pauschal, delegiert = direkte_rechte(db, user, schluessel)
+    gefunden = pauschal | {key for _, key in delegiert}
+    offen = schluessel - gefunden
+    if not offen:
+        return gefunden
+    # Der Teamweg wird nur betreten, wenn ueberhaupt etwas offen ist — und er
+    # kostet nur dann etwas, wenn es auch Zeilen gibt.
+    rows = (
+        db.query(
+            TeamServerGrant.server_id,
+            TeamServerGrant.permission_key,
+            Team.owner_user_id,
+        )
+        .join(Team, Team.id == TeamServerGrant.team_id)
+        .join(TeamMember, TeamMember.team_id == Team.id)
+        .filter(
+            TeamMember.user_id == user.id,
+            TeamServerGrant.permission_key.in_(offen),
+        )
+        .distinct()
+        .all()
+    )
+    # Je Gruender einmal nachsehen, was er selbst haelt. Bei mehreren Servern
+    # oder Schluesseln desselben Teams waere das sonst eine Abfrage pro Zeile —
+    # genau der Fehler, den diese Funktion behebt.
+    gruender_rechte: dict[int, tuple[set[str], set[tuple[int, str]]]] = {}
+    for server_id, key, owner_user_id in rows:
+        if key in gefunden:
+            continue
+        # Ein Gruender, der sich selbst ueber sein eigenes Team bedient, waere
+        # eine Schleife ohne Erkenntnisgewinn — sein direkter Anspruch steht
+        # oben schon in `pauschal`/`delegiert`.
+        if owner_user_id == user.id:
+            continue
+        if owner_user_id not in gruender_rechte:
+            gruender = db.get(User, owner_user_id)
+            gruender_rechte[owner_user_id] = (
+                direkte_rechte(db, gruender, offen) if gruender is not None
+                else (set(), set())
+            )
+        g_pauschal, g_delegiert = gruender_rechte[owner_user_id]
+        if key in g_pauschal or (server_id, key) in g_delegiert:
+            gefunden.add(key)
+    return gefunden
+
+
+def benutzer_mit_recht(db: Session, kandidaten: list[User], key: str) -> set[int]:
+    """Welche dieser Benutzer halten den globalen Schlüssel? Zwei Abfragen.
+
+    Dieselbe Frage wie `has_global_permission`, nur für viele Benutzer auf
+    einmal. Der Anlass war gemessen: die Dienstbenutzerliste der Shop-Anbindung
+    fragte je Kandidat einzeln und kostete 1 + 2n Abfragen — 401 bei ihrer
+    Obergrenze von 200.
+
+    Zwei Fallen, die ein naiver Join übersieht und die deshalb hier stehen:
+
+    - **Owner** halten alles ohne eine einzige Zeile in der Datenbank.
+    - Die Rolle eines Benutzers kann allein in der Altspalte `users.role_id`
+      stehen, ohne Zeile in `user_roles`. `effective_user_role_ids` liest sie
+      ausdrücklich mit; wer nur `user_roles` joint, übersieht genau die
+      Konten, die ein Admin über die Benutzerverwaltung angelegt hat.
+    """
+    if not kandidaten:
+        return set()
+    rollen_mit_recht = {
+        row[0]
+        for row in db.query(RolePermission.role_id)
+        .filter(RolePermission.permission_key == key)
+        .all()
+    }
+    zuordnung: dict[int, set[int]] = {}
+    for user_id, role_id in (
+        db.query(UserRole.user_id, UserRole.role_id)
+        .filter(UserRole.user_id.in_([u.id for u in kandidaten]))
+        .all()
+    ):
+        zuordnung.setdefault(user_id, set()).add(role_id)
+
+    treffer: set[int] = set()
+    for u in kandidaten:
+        if u.is_owner:
+            treffer.add(u.id)
+            continue
+        rollen = set(zuordnung.get(u.id, ()))
+        if u.role_id is not None:
+            rollen.add(u.role_id)
+        if rollen & rollen_mit_recht:
+            treffer.add(u.id)
+    return treffer
+
+
+def _team_visible_server_ids(db: Session, user: User) -> set[int]:
+    """Server, die dieser Benutzer ueber ein Team sehen darf.
+
+    Dieselbe Obergrenze wie in `_team_server_permission`, nur mengenweise. Ohne
+    diese Ergaenzung saehe ein Teammitglied den Server im Detail (weil dort
+    `has_server_permission` prueft), aber nicht in der Liste — ein Widerspruch,
+    den die bestehende Delegation bewusst vermeidet.
+    """
+    rows = (
+        db.query(TeamServerGrant.server_id, Team.owner_user_id)
+        .join(Team, Team.id == TeamServerGrant.team_id)
+        .join(TeamMember, TeamMember.team_id == Team.id)
+        .filter(
+            TeamMember.user_id == user.id,
+            TeamServerGrant.permission_key == "server.view",
+        )
+        .distinct()
+        .all()
+    )
+    if not rows:
+        return set()
+    # Je Gruender nur einmal laden: bei mehreren Servern desselben Teams waere
+    # das sonst eine Abfrage pro Server. Die Kundenserver-Menge ebenso — die
+    # Schleife sitzt im 5-Sekunden-Poll der Serverliste jedes Teammitglieds.
+    hoster_ids = hoster_customer_server_ids(db)
+    owners: dict[int, User | None] = {}
+    visible: set[int] = set()
+    for server_id, owner_user_id in rows:
+        if owner_user_id == user.id:
+            continue
+        if owner_user_id not in owners:
+            owners[owner_user_id] = db.get(User, owner_user_id)
+        owner = owners[owner_user_id]
+        if owner is not None and direct_server_permission(
+            db, owner, server_id, "server.view", hoster_ids=hoster_ids
+        ):
+            visible.add(server_id)
+    return visible
+
+
 def list_visible_server_ids(db: Session, user: User) -> list[int] | None:
     """Server-IDs, die der User sehen darf. None = alle (Owner/pauschale Rolle)."""
     if user.is_owner:
         return None
-    if user.role_id is not None:
-        pauschal = (
-            db.query(RolePermission.id)
+    pauschal = False
+    role_ids = effective_user_role_ids(db, user)
+    if role_ids:
+        granted_keys = {
+            row[0]
+            for row in db.query(RolePermission.permission_key)
             .filter(
-                RolePermission.role_id == user.role_id,
-                RolePermission.permission_key == "server.view",
+                RolePermission.role_id.in_(role_ids),
+                RolePermission.permission_key.in_(["server.view", HOSTER_CUSTOMERS_VIEW_KEY]),
             )
-            .first()
-        )
-        if pauschal is not None:
-            return None
+            .all()
+        }
+        if "server.view" in granted_keys:
+            if HOSTER_CUSTOMERS_VIEW_KEY in granted_keys:
+                return None
+            pauschal = True
     # Nur Server, fuer die explizit `server.view` delegiert wurde, sind sichtbar.
     # So bleibt die Liste konsistent mit dem Detail-Endpoint (der ebenfalls
     # `server.view` prueft) — kein "sehe Server im Listing, kriege aber 403 im Detail".
@@ -77,16 +480,44 @@ def list_visible_server_ids(db: Session, user: User) -> list[int] | None:
         .distinct()
         .all()
     )
-    return [r[0] for r in rows]
+    visible = {r[0] for r in rows} | _team_visible_server_ids(db, user)
+    if pauschal:
+        # Pauschales `server.view` ohne den Hoster-Key: alle Server ausser den
+        # Kundenservern — vereinigt mit den Delegationen, damit ein Support-
+        # Mitarbeiter, der selbst Kunde ist, seinen eigenen Server behaelt.
+        hoster_ids = hoster_customer_server_ids(db)
+        alle = db.query(Server.id)
+        if hoster_ids:
+            alle = alle.filter(Server.id.notin_(hoster_ids))
+        visible |= {r[0] for r in alle.all()}
+    # Sortiert, damit die Reihenfolge nicht von der Mengenimplementierung
+    # abhaengt — Tests und Oberflaeche sollen dasselbe sehen.
+    return sorted(visible)
 
 
 def list_visible_servers(db: Session, user: User) -> list[Server]:
+    """Die sichtbaren Server samt ihrer Ports.
+
+    `selectinload(Server.ports)` ist kein Feinschliff: `ServerResponse` liest
+    die Ports bei jeder Serialisierung, und die Serverübersicht ruft diese
+    Liste alle fünf Sekunden ab. Ohne den Ladehinweis kostet sie eine Abfrage
+    je Server, mit ihm genau eine zusätzliche — gemessen 34 statt 2 bei
+    dreißig Servern, bei gleichem JSON.
+
+    `Server.node` bleibt bewusst ohne Hinweis: die Beziehung zeigt auf **eine**
+    Node, die die Identity Map ohnehin nur einmal holt.
+    """
     ids = list_visible_server_ids(db, user)
     if ids is None:
-        return db.query(Server).all()
+        return db.query(Server).options(selectinload(Server.ports)).all()
     if not ids:
         return []
-    return db.query(Server).filter(Server.id.in_(ids)).all()
+    return (
+        db.query(Server)
+        .options(selectinload(Server.ports))
+        .filter(Server.id.in_(ids))
+        .all()
+    )
 
 
 def list_user_server_permission_keys(
@@ -144,12 +575,13 @@ def set_user_server_permissions(
 
 
 def list_user_effective_global_keys(db: Session, user: User) -> list[str]:
-    """Globale Keys, die der User via Rolle hat (ohne Owner-Bypass auflisten)."""
-    if user.role_id is None:
+    """Globale Keys aller Rollen des Users (ohne Owner-Bypass auflisten)."""
+    role_ids = effective_user_role_ids(db, user)
+    if not role_ids:
         return []
     rows = (
         db.query(RolePermission.permission_key)
-        .filter(RolePermission.role_id == user.role_id)
+        .filter(RolePermission.role_id.in_(role_ids))
         .all()
     )
     return sorted({r[0] for r in rows})

@@ -13,6 +13,7 @@ KISS: keine neuen Abstraktionen, einfache subprocess + DB, keine partial-State-L
 Deutsche Kommentare passend zum Projekt-Stil.
 """
 
+import hashlib
 import logging
 import os
 import shutil
@@ -219,7 +220,17 @@ def run_backup(
                 except OSError:
                     pass
 
-        size_mb = os.path.getsize(final_filepath) // (1024 * 1024)
+        # Der Nachweis wird **hier** gefuehrt, nicht spaeter: an dieser Stelle
+        # ist das Archiv fertig geschrieben und noch keine Retention gelaufen.
+        # Gemessen wird in Bytes, nicht in Megabyte — `size_mb` ist eine
+        # Ganzzahldivision und damit 0 fuer jedes Archiv unter 1 MiB. Ein
+        # frischer Server hat genau so eines, und eine Pruefung auf `size_mb`
+        # haette ausgerechnet den harmlosesten Fall abgelehnt.
+        size_bytes = os.path.getsize(final_filepath)
+        if size_bytes <= 0:
+            raise RuntimeError("Backup-Archiv ist leer")
+        sha256 = _sha256_of(final_filepath)
+        size_mb = size_bytes // (1024 * 1024)
     except subprocess.TimeoutExpired as e:
         _cleanup_file(final_filepath)
         logger.error("Backup-Timeout für Server %s nach %ss", server_id, timeout_seconds)
@@ -245,6 +256,16 @@ def run_backup(
             filename=final_filepath,
             size_mb=size_mb,
             name=name or None,
+            # Nachgemessen ist nachgemessen. Der Zeitpunkt wird hier gesetzt und
+            # nicht spaeter durch den S3-Zweig ueberschrieben: der lokale
+            # Nachweis steht fuer sich, auch wenn der Upload scheitert.
+            #
+            # Und er wird **nur** gesetzt, wenn die Messung wirklich gelungen
+            # ist. Ohne Pruefsumme gab es keine Messung, also auch keinen
+            # Nachweis — der Datensatz bleibt gueltig, taugt aber nicht als
+            # Freigabe fuer einen KI-Eingriff oder einen Blueprint-Wechsel.
+            sha256=sha256,
+            verified_at=datetime.now(timezone.utc) if sha256 else None,
         )
         db.add(backup)
         db.commit()
@@ -341,6 +362,45 @@ def clear_active_backup_status(server_id: int) -> None:
 def get_active_backup_status(server_id: int) -> dict | None:
     """Liefert Snapshot oder None."""
     return _active_backups.get(server_id)
+
+
+def _sha256_of(filepath: str) -> str | None:
+    """Pruefsumme des Archivs, wie es auf der Platte liegt — oder ``None``.
+
+    Beim lokal verschluesselten Backup ist das die der ``.enc``-Datei und nicht
+    die des Klartext-Tars. Das ist Absicht: nur diese laesst sich ohne den
+    Schluessel nachrechnen, und genau dafuer ist der Wert da — als Beleg, dass
+    die Datei nach dem Schreiben noch dieselbe ist.
+
+    Gelesen wird in Bloecken. Ein Weltarchiv kann mehrere Gigabyte haben, und es
+    vollstaendig in den Speicher zu ziehen waere auf einer kleinen Node der
+    sichere Weg in den OOM-Killer — ausgerechnet beim Backup.
+
+    ``None`` heisst: nicht lesbar, also **nicht nachgemessen**. Der Datensatz
+    entsteht trotzdem — das Archiv ist geschrieben, und eine Zeile zu
+    verweigern, weil die Nachmessung scheiterte, waere die schlechtere von zwei
+    Ungenauigkeiten. Aber `verified_at` bleibt dann leer, und damit gilt das
+    Backup ueberall dort als unbewiesen, wo der Nachweis zaehlt: bei der
+    autonomen Guardian-Heilung und beim Blueprint-Wechsel, der das gesamte
+    Serververzeichnis leert. Die sichere Richtung ist "unbewiesen", nie
+    "vermutlich in Ordnung".
+
+    Dass die Ausnahme hier endet und nicht weiterfliegt, ist ebenfalls Absicht:
+    ein Fehler beim Nachmessen darf ein fertiges Backup nicht nachtraeglich in
+    einen Fehlschlag verwandeln und die Datei aufraeumen lassen.
+    """
+    digest = hashlib.sha256()
+    try:
+        with open(filepath, "rb") as datei:
+            for block in iter(lambda: datei.read(1024 * 1024), b""):
+                digest.update(block)
+    except OSError as exc:
+        logger.warning(
+            "Backup-Pruefsumme nicht berechenbar (%s) — Backup gilt als unbewiesen",
+            type(exc).__name__,
+        )
+        return None
+    return digest.hexdigest()
 
 
 def _cleanup_file(filepath: str) -> None:

@@ -9,6 +9,31 @@ import type { PermissionCatalog, Role } from '@/types/permissions'
 import { PermissionEditor } from '@/Singra/UI/PermissionEditor'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 
+/**
+ * Erlaubte Rollennamen — dieselbe Sprache wie `backend/schemas/role.py`.
+ *
+ * Der Bindestrich ist hier **maskiert**, im Backend steht er unmaskiert
+ * (`^[a-zA-Z0-9_-]+$`). Beide beschreiben dieselbe Menge; der Unterschied ist
+ * nur die Schreibweise, die der jeweilige Regex-Dialekt verlangt.
+ *
+ * Chrome uebersetzt das `pattern`-Attribut mit dem `v`-Flag, und dort ist ein
+ * unmaskierter Bindestrich in einer Zeichenklasse reserviert. Die Folge war
+ * kein stiller Fehler, sondern ein harter, gemeldet am 18.08.2026:
+ *
+ *   Pattern attribute value ^[a-zA-Z0-9_-]+$ is not a valid regular
+ *   expression: Invalid character in character class
+ *
+ * Ein `pattern`, das der Browser nicht uebersetzen kann, wird nicht
+ * grosszuegig ausgelegt — es faellt ganz aus. Die Maske nahm damit Namen an,
+ * die das Backend danach mit 422 abwies, und der Betreiber sah nur, dass
+ * Speichern nicht geht.
+ *
+ * Als Konstante und nicht als Literal im Attribut: `Roles.test.tsx` prueft
+ * damit beide Richtungen — dass der Browser den Ausdruck uebersetzen kann und
+ * dass er dieselben Namen annimmt wie das Backend.
+ */
+export const ROLLENNAME_MUSTER = '^[a-zA-Z0-9_\\-]+$'
+
 interface RoleFormProps {
   catalog: PermissionCatalog
   initial: Role | null
@@ -61,7 +86,7 @@ function RoleForm({ catalog, initial, onSubmit, onCancel }: RoleFormProps) {
             required
             minLength={2}
             maxLength={64}
-            pattern="^[a-zA-Z0-9_-]+$"
+            pattern={ROLLENNAME_MUSTER}
           />
         </div>
         <div>

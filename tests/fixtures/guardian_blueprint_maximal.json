@@ -22,6 +22,7 @@
     "configPatches": [],
     "stopGracePeriodSeconds": 30,
     "startupCheckSeconds": 5,
+    "allowUnprivilegedUserNamespaces": false,
     "enableExec": false,
     "execTimeoutSeconds": 60
   },

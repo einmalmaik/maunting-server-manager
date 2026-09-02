@@ -1,10 +1,32 @@
 from .user import User
+from .user_role import UserRole
+from .role_ai_limit import RoleAiLimit
+from .ai_usage_event import AiUsageEvent
+from .operation_task import OperationTask
+from .ai_provider import AiProvider
+from .ai_conversation import AiConversation, AiMessage
+from .ai_run import AiRun
+from .ai_action_proposal import AiActionProposal
+from .ai_autonomy_grant import AiAutonomyGrant
+from .ai_tool_result import AiToolResult
+from .ai_memory import AiMemoryEntry, AiMemoryPreference
+from .ai_skill import AiSkill
+from .ai_attachment import AiAttachment
+from .ai_guardian_notice import AiGuardianNotice
+from .ai_guardian_repair import AiGuardianRepair
+from .ai_action_approval import AiActionApproval
+from .ai_task import AiTask
+from .ai_mail_outbox import AiMailOutbox
+from .ai_meldung import AiMeldung
+from .desktop_job import DesktopJob
+from .device_pairing import DevicePairing
 from .server import Server
 from .node import Node
 from .node_enrollment import NodeEnrollment
 from .role import Role
 from .role_permission import RolePermission
 from .server_permission import ServerPermission
+from .team import Team, TeamInvitation, TeamMember, TeamServerGrant
 from .backup import Backup
 from .panel_backup import PanelBackup
 from .mod import Mod
@@ -26,13 +48,46 @@ from .webhook_delivery import WebhookDelivery
 from .singra_webhook_event import SingraWebhookEvent
 from .incident import Incident, GuardianIncidentDelivery
 from .change_event import ChangeEvent
+from .user_mailbox import UserMailbox
+from .user_calendar import UserCalendar
+from .calendar_event import CalendarEvent
+from .note import Note
+from .panel_popup import PanelPopup, UserPopupState
+from .credential import (
+    CREDENTIAL_KINDS,
+    KIND_GITHUB_TOKEN,
+    KIND_STEAM_ACCOUNT,
+    ServerCredentialBinding,
+    UserCredential,
+)
+from .hoster import (
+    HosterHandoff,
+    HosterIdentity,
+    HosterIntegration,
+    HosterProduct,
+    HosterService,
+    HosterWebhookDelivery,
+)
 
 __all__ = [
-    "User", "Server", "Node", "NodeEnrollment", "Role", "RolePermission", "ServerPermission",
+    "User", "UserRole", "RoleAiLimit", "AiUsageEvent", "OperationTask",
+    "AiProvider", "AiConversation", "AiMessage", "AiActionProposal",
+    "AiMemoryEntry", "AiMemoryPreference", "AiSkill", "AiAttachment",
+    "AiAutonomyGrant", "AiToolResult", "AiRun", "AiGuardianNotice",
+    "AiGuardianRepair", "AiTask", "AiActionApproval",
+    "AiMailOutbox", "AiMeldung", "DesktopJob", "DevicePairing",
+    "Server", "Node", "NodeEnrollment", "Role", "RolePermission", "ServerPermission",
+    "Team", "TeamInvitation", "TeamMember", "TeamServerGrant",
     "Backup", "PanelBackup", "Mod", "AuditLog", "RefreshToken", "JwtBlacklist",
     "EmailVerification", "BackupCode", "PanelSetting", "ServerPort",
     "OAuthProvider", "OAuthUserLink", "LoginChallenge",
     "PostgresDatabase", "PostgresUser", "PostgresGrant",
     "WebhookSubscription", "WebhookDelivery", "SingraWebhookEvent",
     "Incident", "GuardianIncidentDelivery", "ChangeEvent",
+    "HosterIntegration", "HosterProduct", "HosterIdentity", "HosterService",
+    "HosterHandoff", "HosterWebhookDelivery",
+    "UserCredential", "ServerCredentialBinding",
+    "CREDENTIAL_KINDS", "KIND_GITHUB_TOKEN", "KIND_STEAM_ACCOUNT",
+    "UserMailbox", "UserCalendar", "CalendarEvent", "Note",
+    "PanelPopup", "UserPopupState",
 ]  # noqa: E501

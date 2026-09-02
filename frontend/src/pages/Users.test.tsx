@@ -16,6 +16,7 @@ vi.mock('@/api/rbac', () => ({
   rbacApi: {
     listRoles: vi.fn(),
     assignRole: vi.fn(),
+    assignRoles: vi.fn(),
   },
 }))
 
@@ -37,7 +38,9 @@ function user(overrides: Partial<User>): User {
     email_verified: true,
     two_factor_enabled: false,
     email_notifications: false,
+    ai_notifications: true,
     role_id: null,
+    role_ids: [],
     created_at: '2026-01-01T00:00:00Z',
     ...overrides,
   }
@@ -59,6 +62,7 @@ const currentUser = user({
   email: 'current-user@example.invalid',
   is_owner: false,
   role_id: 7,
+  role_ids: [7],
 })
 const otherUser = user({
   id: 3,
@@ -108,6 +112,8 @@ describe('Users access workspace', () => {
         is_owner: false,
         role_id: 7,
         role_name: 'user',
+        role_ids: [7],
+        role_names: ['user'],
         global_keys: ['users.manage', 'users.permissions.manage'],
         server_keys: {},
       },
@@ -163,5 +169,39 @@ describe('Users access workspace', () => {
 
     expect(screen.getByRole('button', { name: /Rolle zuweisen: delegated-user/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Löschen: delegated-user/i })).toBeInTheDocument()
+  })
+
+  it('assigns multiple roles as one complete set', async () => {
+    vi.mocked(rbacApi.listRoles).mockResolvedValue([
+      {
+        id: 7,
+        name: 'user',
+        description: '',
+        is_system: true,
+        permissions: [],
+        created_at: '2026-01-01T00:00:00Z',
+      },
+      {
+        id: 8,
+        name: 'ai-vip',
+        description: '',
+        is_system: false,
+        permissions: [],
+        created_at: '2026-01-01T00:00:00Z',
+      },
+    ])
+    vi.mocked(rbacApi.assignRoles).mockResolvedValue({
+      ...otherUser,
+      role_id: 8,
+      role_ids: [8],
+    })
+    render(<Users />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Rolle zuweisen: delegated-user/i }))
+    fireEvent.click(screen.getByRole('option', { name: 'ai-vip' }))
+
+    await waitFor(() => {
+      expect(rbacApi.assignRoles).toHaveBeenCalledWith(3, [8])
+    })
   })
 })

@@ -33,7 +33,7 @@ export function RequirePermission({
   if (accessState === 'loading') {
     return (
       <div className="flex items-center justify-center h-64">
-        <Loader label="Maunting Server Manager" />
+        <Loader label="Maunting Service Manager" />
       </div>
     )
   }

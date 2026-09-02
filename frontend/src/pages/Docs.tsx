@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { BookOpen, KeyRound, ArrowRight, BookOpenCheck, FileText, ExternalLink, Network } from 'lucide-react'
+import { BookOpen, KeyRound, ArrowRight, BookOpenCheck, FileText, ExternalLink, Network, Plug } from 'lucide-react'
 import { usePublicLegalSettings } from '@/hooks/usePublicLegalSettings'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 
@@ -39,6 +39,13 @@ export function Docs() {
           title={t('docsIndex.selfHostingTitle')}
           description={t('docsIndex.selfHostingDesc')}
           cta={t('docsIndex.selfHostingLink')}
+        />
+        <DocCard
+          to="/docs/hoster-api"
+          icon={<Plug className="w-6 h-6" />}
+          title={t('docsIndex.hosterApiTitle')}
+          description={t('docsIndex.hosterApiDesc')}
+          cta={t('docsIndex.hosterApiLink')}
         />
         <LegalCard imprintUrl={imprintUrl} />
       </div>

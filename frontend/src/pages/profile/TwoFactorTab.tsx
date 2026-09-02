@@ -27,14 +27,19 @@ export function TwoFactorTab() {
   const [otpCode, setOtpCode] = useState('')
   const [faSecret, setFaSecret] = useState('')
   const [faUri, setFaUri] = useState('')
+  const [qrDataUri, setQrDataUri] = useState('')
   const [backupCodes, setBackupCodes] = useState<string[]>([])
 
   const handleSetup2FA = async () => {
     setError('')
     try {
-      const res = await api<{ secret: string; uri: string }>('/auth/2fa/setup', { method: 'POST' })
+      const res = await api<{ secret: string; uri: string; qr_data_uri: string | null }>(
+        '/auth/2fa/setup',
+        { method: 'POST' },
+      )
       setFaSecret(res.secret)
       setFaUri(res.uri)
+      setQrDataUri(res.qr_data_uri ?? '')
       setShow2FASetup(true)
     } catch (err: any) {
       setError(err.message)
@@ -55,6 +60,12 @@ export function TwoFactorTab() {
       }
       setShow2FASetup(false)
       setOtpCode('')
+      // Ist 2FA einmal aktiv, hat das Geheimnis in der Oberflaeche nichts mehr
+      // verloren — es bliebe sonst bis zum Seitenwechsel im Zustand stehen und
+      // in der Komponentenansicht jedes Entwicklerwerkzeugs lesbar.
+      setFaSecret('')
+      setFaUri('')
+      setQrDataUri('')
       setSuccess(t('profile.2faEnabled'))
       setTimeout(() => setSuccess(''), 5000)
     } catch (err: any) {
@@ -118,12 +129,10 @@ export function TwoFactorTab() {
 
   return (
     <div className="msm-card p-6">
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center">
-          <Shield className="w-5 h-5 text-secondary" />
-        </div>
+      <div className="flex items-center gap-2 mb-6">
+        <Shield className="h-5 w-5 text-secondary" aria-hidden="true" />
         <div className="flex-1">
-          <h2 className="font-headline text-headline-sm text-primary">{t('profile.2faStatus')}</h2>
+          <h2 className="font-headline text-lg font-semibold text-on-surface">{t('profile.2faStatus')}</h2>
           <p className="font-body-md text-sm text-on-surface-variant mt-1">
             {user?.two_factor_enabled ? t('profile.2faEnabled') : t('profile.2faDisabled')}
           </p>
@@ -176,17 +185,43 @@ export function TwoFactorTab() {
 
       {show2FASetup && (
         <div className="mt-4 space-y-4 border-t border-outline-variant/30 pt-4">
+          {/* Hier stand ein <img> auf api.qrserver.com. Die vollstaendige
+              `otpauth://`-URI ging dabei als Query-Parameter an einen fremden
+              Dienst — sie enthaelt das TOTP-Geheimnis und die Kennung des
+              Benutzers. Wer diese Zugriffslogs liest, erzeugt dauerhaft gueltige
+              Codes; der zweite Faktor waere damit keiner mehr.
+
+              Der Code entsteht jetzt im Panel (backend/services/totp_qr.py) und
+              kommt als `data:`-URI mit der Antwort von /2fa/setup. `data:` steht
+              in der img-src-Liste unserer CSP, die Anzeige traegt also auch dort,
+              wo FastAPI das SPA-Dokument selbst ausliefert und seine CSP damit
+              auf dem Dokument liegt.
+
+              Das Bild bleibt eine Beigabe: Geheimnis und Link stehen weiterhin
+              darunter. Laesst sich kein Code erzeugen, liefert das Backend null
+              und der Weg ohne Kamera ist unveraendert vollstaendig. */}
           <p className="font-body-md text-sm text-on-surface-variant">{t('profile.2faScan')}</p>
           {faUri && (
-            <div className="flex flex-col items-center gap-4">
-              <img
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(faUri)}`}
-                alt={t('profile.2faQrCode', '2FA QR Code')}
-                className="rounded-lg border border-outline-variant"
-              />
+            <div className="flex flex-col items-center gap-3">
+              {qrDataUri && (
+                <img
+                  src={qrDataUri}
+                  alt={t('profile.2faQrCode')}
+                  width={192}
+                  height={192}
+                  className="h-48 w-48 rounded border border-outline-variant"
+                />
+              )}
               <p className="font-mono-sm text-mono-sm text-on-surface-variant bg-surface-container-high px-3 py-1.5 rounded border border-outline-variant select-all">
                 {faSecret}
               </p>
+              <a
+                href={faUri}
+                className="msm-btn-secondary inline-flex items-center gap-2 px-4 py-2 text-sm"
+              >
+                <Shield className="h-4 w-4" aria-hidden="true" />
+                {t('profile.2faOpenApp')}
+              </a>
             </div>
           )}
           <form onSubmit={handleEnable2FA} className="mx-auto flex max-w-xs flex-col gap-3">

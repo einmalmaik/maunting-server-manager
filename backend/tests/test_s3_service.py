@@ -311,12 +311,27 @@ def test_upload_to_nonexistent_bucket_no_credential_leak():
 
 
 @mock_aws
-def test_delete_nonexistent_key_no_credential_leak():
+def test_delete_failure_no_credential_leak(caplog):
+    """Ein gescheitertes Delete nennt weder Zugriffsschlüssel noch Secret.
+
+    Der Fehlerpfad ist der gefährliche: boto3 hängt bei einem NoSuchBucket
+    gern die komplette Request-Signatur an die Ausnahme. Die Fassade darf nur
+    den Fehlercode weiterreichen — in der Ausnahme *und* im Log, denn beides
+    landet später in Tickets und Toasts.
+    """
     _setup_s3_config()
-    _create_moto_bucket()
-    # Delete on missing key is idempotent in S3 → should not raise
-    S3Service.delete_object("nonexistent")
-    # Verify no error and no credentials in any exception (none raised)
+    # Kein Bucket erstellt → NoSuchBucket
+    with pytest.raises(S3OperationError) as exc_info:
+        S3Service.delete_object("egal-welcher-key")
+    err_str = str(exc_info.value)
+    assert TEST_ACCESS_KEY not in err_str
+    assert TEST_SECRET_KEY not in err_str
+
+    eigene_logs = [r for r in caplog.records if r.name == "services.s3_service"]
+    assert eigene_logs, "das Scheitern muss protokolliert werden"
+    for record in eigene_logs:
+        assert TEST_ACCESS_KEY not in record.getMessage()
+        assert TEST_SECRET_KEY not in record.getMessage()
 
 
 # ── VAL-S3-019: Record-spezifischer Bucket (Bucket-Mismatch-Fix) ─────────

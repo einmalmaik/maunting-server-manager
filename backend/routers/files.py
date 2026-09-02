@@ -34,6 +34,7 @@ from blueprints.archive_extract import ArchiveExtractError, safe_extract_archive
 from database import get_db
 from models import Server, User
 from dependencies import get_current_user, verify_csrf, require_server_permission
+from services import audit_service
 from services import docker_service
 from services import file_edit_service
 from services import file_history_service
@@ -41,6 +42,13 @@ from services.file_edit_service import FileRevisionConflict
 from services.dis_client import DisSidecarError
 from services.node_client import NodeClient, NodeClientError
 from services.node_service import resolve_server_node
+from services.server_file_access_service import (
+    CHUNK_TMP_DIRNAME,
+    apply_permissions as _apply_permissions,
+    read_server_text,
+    search_file_contents,
+    write_server_text,
+)
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -59,8 +67,9 @@ MAX_CHUNKED_UPLOAD_SIZE = 10 * 1024 * 1024 * 1024  # 10 GB
 MAX_SEARCH_RESULTS = 200
 # Verzeichnis fuer Chunked-Upload-Temp-Dateien, relativ zum Server-Root.
 # Liegt INNERHALB des Roots, damit `_safe_path` weiter greift und keine
-# externen Tempfile-Pfade entstehen.
-CHUNK_TMP_DIRNAME = ".msm-uploads"
+# externen Tempfile-Pfade entstehen. Der Name steht im Service, weil auch die
+# Auflistung fuer die KI ihn ausblenden muss — zwei Kopien waeren zwei Orte,
+# an denen er sich aendern kann.
 PERMISSION_REPAIR_CONTAINER_DIR = docker_service.PERMISSION_REPAIR_CONTAINER_DIR
 
 
@@ -159,46 +168,6 @@ def _ensure_allowed_extension(filename: str) -> None:
     ext = os.path.splitext(filename)[1].lower()
     if ext in BLOCKED_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"Dateityp {ext} ist nicht erlaubt")
-
-
-def _apply_permissions(install_dir: str, target: Path) -> None:
-    """Apply owner-scoped modes without destroying existing execute bits."""
-    def _normalize(path: Path) -> None:
-        info = path.lstat()
-        if stat.S_ISLNK(info.st_mode):
-            return
-        if stat.S_ISDIR(info.st_mode):
-            path.chmod(0o750)
-        elif stat.S_ISREG(info.st_mode):
-            path.chmod(0o750 if stat.S_IMODE(info.st_mode) & 0o111 else 0o640)
-
-    try:
-        if target.is_dir():
-            _normalize(target)
-            for root, dirs, files in os.walk(target):
-                for d in dirs:
-                    try:
-                        _normalize(Path(root) / d)
-                    except OSError:
-                        pass
-                for f in files:
-                    try:
-                        _normalize(Path(root) / f)
-                    except OSError:
-                        pass
-        else:
-            _normalize(target)
-
-        base = Path(install_dir).resolve()
-        p = target.parent.resolve()
-        while p != base and p != p.parent:
-            try:
-                _normalize(p)
-            except OSError:
-                pass
-            p = p.parent
-    except Exception:
-        pass
 
 
 def _repair_install_permissions(install_dir: str) -> dict:
@@ -309,6 +278,9 @@ def browse_directory(
 ) -> dict:
     """List files and directories at the given path."""
     require_server_permission(user, server_id, db, "server.files.read")
+    audit_service.record_read_access(
+        db, user_id=user.id, server_id=server_id, action="server.files.read"
+    )
     server = _get_server(server_id, db)
     agent = _agent_client(server, db)
     if agent is not None:
@@ -335,7 +307,45 @@ def browse_directory(
 
     target = _safe_path(server.install_dir, path)
 
-    if not target.exists():
+    # `exists()` ist ein `stat()`, und das schlaegt fehl, sobald ein
+    # **Elternverzeichnis** dem Panel verschlossen ist. Genau das passiert
+    # unter Rootless Docker: der Spielprozess legt seine Verzeichnisse als
+    # gemappter Benutzer mit `0750` an, das Panel laeuft als `msm` und ist
+    # weder Eigentuemer noch in dessen Gruppe. Gemeldet am 18.08.2026:
+    #
+    #   File "routers/files.py", line 345, in browse_directory
+    #   PermissionError: [Errno 13] Permission denied:
+    #     '…/ark_ascended_107/ShooterGame/Saved/Config/WindowsServer'
+    #
+    # Der Schutz im `try` weiter unten griff dafuer nicht — er beginnt erst
+    # nach dieser Zeile. Der Betreiber sah einen 500er ohne Erklaerung, und
+    # zwar fuer ein Verzeichnis, das es gibt und auf das er ein Recht hat.
+    #
+    # Dieselbe Antwort wie am Schreibpfad (`_write_text_with_permission_repair`):
+    # einmal die Rechte reparieren und den Zugriff wiederholen. Die Reparatur
+    # laeuft in einem kurzlebigen Container als root und kann deshalb, was das
+    # Panel nicht kann — sie setzt `a+rwX`, ohne Eigentuemer zu verschieben.
+    # Ein Aufruf ohne vorherigen Fehler waere teuer und unnoetig; deshalb
+    # steht sie hier wie dort im `except` und nicht davor.
+    def _existiert() -> bool:
+        return target.exists()
+
+    try:
+        vorhanden = _existiert()
+    except PermissionError:
+        reparatur = _repair_install_permissions(server.install_dir)
+        if not reparatur.get("ok"):
+            raise HTTPException(
+                status_code=403, detail="Keine Berechtigung für dieses Verzeichnis"
+            )
+        try:
+            vorhanden = _existiert()
+        except PermissionError:
+            raise HTTPException(
+                status_code=403, detail="Keine Berechtigung für dieses Verzeichnis"
+            )
+
+    if not vorhanden:
         return {"path": path, "entries": [], "exists": False}
     if not target.is_dir():
         raise HTTPException(status_code=400, detail="Pfad ist kein Verzeichnis")
@@ -375,6 +385,9 @@ def search_paths(
     wir ``truncated=True``.
     """
     require_server_permission(user, server_id, db, "server.files.read")
+    audit_service.record_read_access(
+        db, user_id=user.id, server_id=server_id, action="server.files.read"
+    )
     server = _get_server(server_id, db)
     agent = _agent_client(server, db)
     if agent is not None:
@@ -414,6 +427,35 @@ def search_paths(
     return {"q": q, "results": results, "truncated": truncated}
 
 
+@router.get("/{server_id}/search-content")
+def search_contents(
+    server_id: int,
+    q: str = Query(..., min_length=1, max_length=128),
+    path: str = Query("", max_length=256),
+    context: int = Query(0, ge=0, le=5),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Sucht **in** den Dateien, nicht in ihren Namen.
+
+    `search_paths` daneben vergleicht nur Datei- und Ordnernamen. Wer wissen
+    will, in welcher Datei ein Wert steht, war damit auf Scrollen angewiesen —
+    bei einer Spielkonfiguration mit dreizehntausend Zeilen keine Antwort.
+
+    Dasselbe `server.files.read` wie beim Lesen einer Datei, und dieselbe
+    Funktion, die auch das KI-Werkzeug `search_server_files` benutzt. Der
+    Unterschied liegt allein im Empfaenger: hier geht die Trefferzeile
+    unredigiert an einen Menschen, der die Datei ohnehin im Editor oeffnen darf.
+    """
+    require_server_permission(user, server_id, db, "server.files.read")
+    audit_service.record_read_access(
+        db, user_id=user.id, server_id=server_id, action="server.files.read"
+    )
+    return search_file_contents(
+        db, server_id=server_id, query=q, relative_path=path, context=context
+    )
+
+
 @router.get("/{server_id}/read")
 def read_file(
     server_id: int,
@@ -423,31 +465,10 @@ def read_file(
 ) -> dict:
     """Read a text file's content."""
     require_server_permission(user, server_id, db, "server.files.read")
-    server = _get_server(server_id, db)
-    agent = _agent_client(server, db)
-    if agent is not None:
-        try:
-            info = agent.files_read_info(_agent_files_key(server), path)
-        except NodeClientError as exc:
-            raise _map_agent_error(exc) from exc
-        name = path.rsplit("/", 1)[-1] if path else ""
-        return {"path": path, "name": name, **info}
-
-    target = _safe_path(server.install_dir, path)
-
-    if not target.exists():
-        raise HTTPException(status_code=404, detail="Datei nicht gefunden")
-    if not target.is_file():
-        raise HTTPException(status_code=400, detail="Pfad ist keine Datei")
-    if target.stat().st_size > MAX_EDIT_SIZE:
-        raise HTTPException(status_code=413, detail="Datei zu gross zum Bearbeiten (max 5 MB)")
-
-    try:
-        info = file_edit_service.read_text(target)
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail="Datei konnte nicht gelesen werden") from exc
-
-    return {"path": path, "name": target.name, **info}
+    audit_service.record_read_access(
+        db, user_id=user.id, server_id=server_id, action="server.files.read"
+    )
+    return read_server_text(db, server_id=server_id, relative_path=path)
 
 
 @router.put("/{server_id}/write")
@@ -461,91 +482,17 @@ def write_file(
 ) -> dict:
     """Write/create a text file."""
     require_server_permission(user, server_id, db, "server.files.write")
-    server = _get_server(server_id, db)
-    agent = _agent_client(server, db)
-    if agent is not None:
-        try:
-            try:
-                current = agent.files_read_info(_agent_files_key(server), path)
-            except NodeClientError as exc:
-                if exc.status_code != 404:
-                    raise
-                current = None
-            if body.expected_revision is not None and (
-                current is None or current.get("revision") != body.expected_revision
-            ):
-                raise HTTPException(
-                    status_code=409,
-                    detail={"code": "FILE_REVISION_CONFLICT"},
-                )
-            if body.create_only and current is not None:
-                raise HTTPException(status_code=409, detail="Zieldatei existiert bereits")
-            if current is not None:
-                file_history_service.snapshot(
-                    server_id,
-                    path,
-                    str(current.get("content", "")),
-                    user.id,
-                )
-            result = agent.files_write(
-                _agent_files_key(server),
-                path,
-                body.content,
-                body.expected_revision,
-                body.create_only,
-            )
-        except NodeClientError as exc:
-            raise _map_agent_error(exc) from exc
-        except DisSidecarError as exc:
-            raise HTTPException(status_code=503, detail="Versionsspeicher ist nicht verfügbar") from exc
-        except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail="Versionsspeicher ist nicht verfügbar") from exc
-        return {"message": "Datei gespeichert", "path": path, **result}
-
-    target = _safe_path(server.install_dir, path)
-
-    try:
-        current = file_edit_service.read_text(target) if target.is_file() else None
-        if body.expected_revision is not None and (
-            current is None or current.get("revision") != body.expected_revision
-        ):
-            raise FileRevisionConflict(current.get("revision") if current else None)
-        if body.create_only and current is not None:
-            raise FileExistsError("Target file already exists")
-        if current is not None:
-            file_history_service.snapshot(
-                server_id,
-                path,
-                str(current["content"]),
-                user.id,
-            )
-        result = _write_text_with_permission_repair(
-            server,
-            target,
-            body.content,
-            body.expected_revision,
-            body.create_only,
-        )
-        _apply_permissions(server.install_dir, target)
-        result.update(file_edit_service.metadata(target))
-    except FileRevisionConflict as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "FILE_REVISION_CONFLICT",
-                "current_revision": exc.current_revision,
-            },
-        ) from exc
-    except FileExistsError as exc:
-        raise HTTPException(status_code=409, detail="Zieldatei existiert bereits") from exc
-    except DisSidecarError as exc:
-        raise HTTPException(status_code=503, detail="Versionsspeicher ist nicht verfügbar") from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail="Versionsspeicher ist nicht verfügbar") from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail="Datei konnte nicht gespeichert werden") from exc
-
-    return {"message": "Datei gespeichert", "path": path, **result}
+    result = write_server_text(
+        db,
+        user=user,
+        server_id=server_id,
+        relative_path=path,
+        content=body.content,
+        expected_revision=body.expected_revision,
+        create_only=body.create_only,
+        repair_permissions=_repair_install_permissions,
+    )
+    return {"message": "Datei gespeichert", **result}
 
 
 @router.get("/{server_id}/versions")
@@ -557,6 +504,9 @@ def list_file_versions(
 ) -> dict:
     """List encrypted history metadata without decrypting file content."""
     require_server_permission(user, server_id, db, "server.files.read")
+    audit_service.record_read_access(
+        db, user_id=user.id, server_id=server_id, action="server.files.read"
+    )
     server = _get_server(server_id, db)
     _safe_path(server.install_dir, path)
     try:
@@ -575,6 +525,9 @@ def read_file_version(
     user: User = Depends(get_current_user),
 ) -> dict:
     require_server_permission(user, server_id, db, "server.files.read")
+    audit_service.record_read_access(
+        db, user_id=user.id, server_id=server_id, action="server.files.read"
+    )
     server = _get_server(server_id, db)
     _safe_path(server.install_dir, path)
     try:
@@ -850,6 +803,9 @@ def chunked_upload_status(
 ) -> dict:
     """Aktueller Offset eines laufenden Chunked-Uploads (fuer Wiederaufnahme)."""
     require_server_permission(user, server_id, db, "server.files.read")
+    audit_service.record_read_access(
+        db, user_id=user.id, server_id=server_id, action="server.files.read"
+    )
     server = _get_server(server_id, db)
 
     if not upload_id.isalnum() or len(upload_id) != 32:
@@ -987,6 +943,9 @@ def download_file(
     from fastapi.responses import Response
 
     require_server_permission(user, server_id, db, "server.files.read")
+    audit_service.record_read_access(
+        db, user_id=user.id, server_id=server_id, action="server.files.read"
+    )
     server = _get_server(server_id, db)
     agent = _agent_client(server, db)
     if agent is not None:
@@ -1063,7 +1022,7 @@ def delete_path(
             agent.files_delete(_agent_files_key(server), path)
         except NodeClientError as exc:
             raise _map_agent_error(exc) from exc
-        return {"message": "Geloescht", "path": path}
+        return {"message": "Gelöscht", "path": path}
 
     target = _safe_path(server.install_dir, path)
 
@@ -1072,7 +1031,7 @@ def delete_path(
 
     # Never delete the install_dir itself
     if target.resolve() == Path(server.install_dir).resolve():
-        raise HTTPException(status_code=403, detail="Server-Stammverzeichnis kann nicht geloescht werden")
+        raise HTTPException(status_code=403, detail="Server-Stammverzeichnis kann nicht gelöscht werden")
 
     try:
         def _delete() -> None:
@@ -1081,11 +1040,11 @@ def delete_path(
             else:
                 target.unlink()
 
-        _run_with_permission_repair(server, "Pfad loeschen", _delete)
+        _run_with_permission_repair(server, "Pfad löschen", _delete)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Loeschen fehlgeschlagen: {e}")
+        raise HTTPException(status_code=500, detail=f"Löschen fehlgeschlagen: {e}")
 
-    return {"message": "Geloescht", "path": path}
+    return {"message": "Gelöscht", "path": path}
 
 
 @router.post("/{server_id}/rename")

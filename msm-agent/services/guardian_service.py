@@ -375,10 +375,14 @@ _BUILTIN_REDACTION_PATTERNS: dict[str, re.Pattern[str]] = {
     "database_url": re.compile(r"(?i)\b(?:postgres(?:ql)?|mysql)://[^\s]+"),
     "jwt": re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"),
 }
+_SENSITIVE_VALUE_RE = re.compile(
+    r"(?i)((?:serveradminpassword|serverpassword|admin_password|password|passwd|token|secret|api[_-]?key|authorization)\s*[=:]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s?&,;]+)"
+)
 
 
-def _redact(text: str, redactors: list[str]) -> str:
-    result = text
+def redact_log_text(text: str, redactors: list[str]) -> str:
+    """Redigiert sichere Pflichtmuster plus validierte Blueprint-Muster."""
+    result = _SENSITIVE_VALUE_RE.sub(r"\1[REDACTED]", text)
     for redactor in redactors:
         if redactor.startswith("regex:"):
             pattern = re.compile(redactor[6:])
@@ -448,7 +452,13 @@ def _collect_logs(server_id: int, container_name: str, desired: DesiredState) ->
     _REDACT_INPUT_LIMIT = 256 * 1024  # 256 KiB
     if len(joined) > _REDACT_INPUT_LIMIT:
         joined = joined[-_REDACT_INPUT_LIMIT:]
-    return _redact(joined, logs_config.redact)
+    return redact_log_text(joined, logs_config.redact)
+
+
+def console_log_config(server_id: int):
+    """Liefert den persistierten, validierten Logvertrag für die Konsole."""
+    desired = _load_desired(server_id)
+    return desired.guardian.logs if desired is not None else None
 
 
 def _diagnose(

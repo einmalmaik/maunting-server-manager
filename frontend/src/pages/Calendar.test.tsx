@@ -1,0 +1,169 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
+import * as client from '@/api/client'
+import i18n from '@/i18n'
+import { Calendar } from './Calendar'
+
+vi.mock('@/api/client', () => ({
+  api: vi.fn(),
+}))
+
+describe('Calendar Page Component', () => {
+  beforeEach(async () => {
+    vi.mocked(client.api).mockReset()
+    await i18n.changeLanguage('de')
+  })
+
+  it('renders calendar header, month view and action buttons', async () => {
+    const now = new Date()
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0).toISOString()
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 13, 0, 0).toISOString()
+    vi.mocked(client.api).mockResolvedValue([
+      {
+        id: 1,
+        event_id: 'evt-test-1',
+        title: 'Team Meeting Test',
+        start,
+        end,
+        description: 'Test agenda',
+        location: 'Office',
+        color: 'primary',
+      },
+    ])
+
+    render(
+      <MemoryRouter>
+        <Calendar />
+      </MemoryRouter>,
+    )
+
+    // Check title and action buttons
+    expect(screen.getByText('Kalender')).toBeInTheDocument()
+    expect(screen.getByText('Push testen')).toBeInTheDocument()
+    expect(screen.getByText('Abonnieren')).toBeInTheDocument()
+    expect(screen.queryByText('Aktualisieren')).not.toBeInTheDocument()
+
+    // Wait for event chip to appear
+    await waitFor(() => {
+      expect(screen.getByText('Team Meeting Test')).toBeInTheDocument()
+    })
+  })
+
+  it('switches between Month, Week, and Day views', async () => {
+    vi.mocked(client.api).mockResolvedValue([])
+
+    render(
+      <MemoryRouter>
+        <Calendar />
+      </MemoryRouter>,
+    )
+
+    // Switch to Week view
+    const weekBtn = screen.getByRole('button', { name: 'Woche' })
+    fireEvent.click(weekBtn)
+
+    // Switch to Day view
+    const dayBtn = screen.getByRole('button', { name: 'Tag' })
+    fireEvent.click(dayBtn)
+
+    expect(screen.getByText(/Termine für diesen Tag eingetragen/i)).toBeInTheDocument()
+  })
+
+  it('opens create event modal when clicking on a calendar day', async () => {
+    vi.mocked(client.api).mockResolvedValue([])
+
+    render(
+      <MemoryRouter>
+        <Calendar />
+      </MemoryRouter>,
+    )
+
+    // In month view, clicking the 15th day number cell opens the creation modal
+    const dayCells = screen.getAllByText('15')
+    fireEvent.click(dayCells[0])
+
+    expect(screen.getByPlaceholderText('z. B. Team-Meeting, Wartung Server 1')).toBeInTheDocument()
+    expect(screen.getByText('Speichern')).toBeInTheDocument()
+  })
+
+  it('triggers test-reminder API when clicking Push testen button', async () => {
+    vi.mocked(client.api).mockImplementation(async (url: string) => {
+      if (url === '/calendar/test-reminder') {
+        return {
+          status: 'success',
+          email_sent: true,
+          device_notifications_enabled: true,
+          title: 'Test-Termin: Server-Wartung & Backup-Check',
+          start: '27.08.2026 um 14:00 Uhr',
+          time_hint: 'in 1 Tag',
+        }
+      }
+      return []
+    })
+
+    render(
+      <MemoryRouter>
+        <Calendar />
+      </MemoryRouter>,
+    )
+
+    const testBtn = screen.getByRole('button', { name: /Push testen/i })
+    fireEvent.click(testBtn)
+
+    await waitFor(() => {
+      expect(client.api).toHaveBeenCalledWith('/calendar/test-reminder', { method: 'POST' })
+    })
+  })
+
+  it('renders category filter buttons and filters events', async () => {
+    vi.mocked(client.api).mockImplementation(async (url: string) => {
+      if (url.includes('/calendar/events')) {
+        return [
+          {
+            id: 1,
+            event_id: 'evt-1',
+            title: 'Team Meeting',
+            start: '2026-08-28T10:00:00Z',
+            end: '2026-08-28T11:00:00Z',
+            event_type: 'team',
+            team_name: 'DevOps',
+            color: 'emerald',
+          },
+          {
+            id: 2,
+            event_id: 'evt-2',
+            title: 'Server Reboot',
+            start: '2026-08-28T14:00:00Z',
+            end: '2026-08-28T15:00:00Z',
+            event_type: 'server',
+            server_name: 'Node-1',
+            color: 'purple',
+          },
+        ]
+      }
+      return []
+    })
+
+    render(
+      <MemoryRouter>
+        <Calendar />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByText('Alle')).toBeInTheDocument()
+    expect(screen.getByText('Persönlich')).toBeInTheDocument()
+    expect(screen.getByText('Team')).toBeInTheDocument()
+    expect(screen.getByText('Server-Wartung')).toBeInTheDocument()
+    expect(screen.getByText('Node')).toBeInTheDocument()
+
+    // Click on Server filter button
+    const serverFilterBtn = screen.getByRole('button', { name: /Server-Wartung/i })
+    fireEvent.click(serverFilterBtn)
+
+    await waitFor(() => {
+      expect(client.api).toHaveBeenCalledWith(expect.stringContaining('event_type=server'))
+    })
+  })
+})
+

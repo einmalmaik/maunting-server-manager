@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -43,11 +44,24 @@ def test_ensure_internal_postgres_proxies_to_agent():
     mock_client.postgres_ensure.assert_called_once_with(admin_password="secret")
 
 
-def test_ensure_internal_postgres_no_node_logs_only():
+def test_ensure_internal_postgres_no_node_logs_only(caplog):
+    """Ohne lokale Node bleibt der Startpfad folgenlos — aber nicht stumm.
+
+    "logs only" hat zwei Hälften: es wird gewarnt, und es passiert sonst
+    nichts. Die zweite ist die wichtigere — ohne das `return` liefe der Pfad
+    mit `local=None` weiter und das Admin-Passwort würde für eine Verbindung
+    entschlüsselt, die es gar nicht gibt.
+    """
     mock_db = MagicMock()
-    with patch.object(postgres_service, "get_local_node", return_value=None):
-        # Must not raise when no node (startup soft-fail path)
+    with patch.object(postgres_service, "get_local_node", return_value=None), \
+         patch.object(postgres_service, "client_for_node") as mock_client_for_node, \
+         patch.object(postgres_service, "_admin_password") as mock_admin_password, \
+         caplog.at_level(logging.WARNING, logger="services.postgres_service"):
         postgres_service.ensure_internal_postgres(mock_db)
+
+    assert any("no local node" in r.getMessage() for r in caplog.records)
+    mock_client_for_node.assert_not_called()
+    mock_admin_password.assert_not_called()
 
 
 def test_provision_uses_node_client_not_psycopg2():

@@ -8,9 +8,10 @@ import psutil
 from sqlalchemy import text
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 
 from config import settings
-from database import SessionLocal
+from database import SessionLocal, get_db
 from dependencies import get_current_user, require_global, verify_csrf
 from games import list_game_info
 from models import User
@@ -18,6 +19,16 @@ from services import network_interfaces_service
 from services.panel_settings_service import PanelSettingsService
 
 router = APIRouter(prefix="/api/system", tags=["system"])
+
+
+# ── Passiver Cache für den GitHub-Release-Check in /version ──
+# Die Fusszeile fragt /version bei jedem Seitenaufbau ab. Ohne Cache löst
+# das pro Aufruf eine ausgehende HTTPS-Anfrage aus; GitHub erlaubt
+# unangemeldet nur 60 pro Stunde und IP. Gleiches Muster wie
+# _UPDATE_CACHE in routers/servers.py. Kein Lock nötig: im schlechtesten
+# Fall laufen zwei Anfragen parallel gegen GitHub, das ist harmlos.
+_GITHUB_RELEASE_CACHE: tuple[float, dict] | None = None
+_GITHUB_RELEASE_CACHE_TTL_SECONDS = 3600
 
 
 @router.get("/legal")
@@ -209,6 +220,41 @@ def host_interfaces(user: User = Depends(require_global("system.view"))) -> dict
     }
 
 
+def _get_latest_release() -> dict:
+    """Liest das neueste GitHub-Release, höchstens einmal pro TTL.
+
+    Gibt ``{"tag_name": ..., "html_url": ...}`` zurück oder ein leeres Dict,
+    wenn der Aufruf fehlschlägt. Auch der Fehlschlag wird zwischengespeichert
+    — sonst läuft eine abgeschottete Installation ohne Internetausgang bei
+    jedem Seitenaufbau in den Zehn-Sekunden-Timeout.
+    """
+    global _GITHUB_RELEASE_CACHE
+
+    now = time.monotonic()
+    cached = _GITHUB_RELEASE_CACHE
+    if cached is not None and now - cached[0] < _GITHUB_RELEASE_CACHE_TTL_SECONDS:
+        return cached[1]
+
+    release: dict = {}
+    try:
+        url = (
+            f"https://api.github.com/repos/"
+            f"{settings.github_owner}/{settings.github_repo}/releases/latest"
+        )
+        resp = httpx.get(url, headers={"Accept": "application/vnd.github+json"}, timeout=10.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            release = {
+                "tag_name": data.get("tag_name", "unknown"),
+                "html_url": data.get("html_url", ""),
+            }
+    except Exception:
+        pass
+
+    _GITHUB_RELEASE_CACHE = (now, release)
+    return release
+
+
 @router.get("/version")
 def system_version(user: User = Depends(get_current_user)) -> dict:
     """Aktuelle Version + Update-Status (GitHub Releases).
@@ -220,23 +266,13 @@ def system_version(user: User = Depends(get_current_user)) -> dict:
     update_available = False
     release_url = None
 
-    try:
-        url = (
-            f"https://api.github.com/repos/"
-            f"{settings.github_owner}/{settings.github_repo}/releases/latest"
-        )
-        resp = httpx.get(url, headers={"Accept": "application/vnd.github+json"}, timeout=10.0)
-        if resp.status_code == 200:
-            data = resp.json()
-            latest = data.get("tag_name", "unknown")
-            release_url = data.get("html_url", "")
-            # SemVer-Vergleich: v-Prefix und git-describe-Suffixe
-            # normalisieren, dann numerisch pruefen ob latest > current.
-            norm_current = _strip_version(current)
-            norm_latest = _strip_version(latest)
-            update_available = _version_newer(norm_latest, norm_current)
-    except Exception:
-        pass
+    release = _get_latest_release()
+    if release:
+        latest = release["tag_name"]
+        release_url = release["html_url"]
+        # SemVer-Vergleich: v-Prefix und git-describe-Suffixe
+        # normalisieren, dann numerisch prüfen ob latest > current.
+        update_available = _version_newer(_strip_version(latest), _strip_version(current))
 
     return {
         "current_version": current,
@@ -337,3 +373,55 @@ def update_nodes_endpoint(
         return res
     finally:
         db.close()
+
+
+@router.get("/incident-alerts")
+def incident_alerts(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    """Liefert ungelöste Server-Vorfälle für Push & Alert-Benachrichtigungen."""
+    if not user.device_notifications:
+        return []
+
+    from models import Incident, Server, ServerPermission
+
+    # Server ermitteln, auf die der User Zugriff hat
+    if user.is_owner or any(r.role.name == "admin" for r in user.user_roles if r.role):
+        server_rows = db.query(Server.id, Server.name).all()
+        server_map = {s[0]: s[1] for s in server_rows}
+    else:
+        perms = (
+            db.query(ServerPermission.server_id, Server.name)
+            .join(Server, ServerPermission.server_id == Server.id)
+            .filter(ServerPermission.user_id == user.id)
+            .all()
+        )
+        server_map = {p[0]: p[1] for p in perms}
+
+    if not server_map:
+        return []
+
+    incidents = (
+        db.query(Incident)
+        .filter(Incident.server_id.in_(list(server_map.keys())), Incident.status != "resolved")
+        .order_by(Incident.created_at.desc())
+        .limit(10)
+        .all()
+    )
+
+    return [
+        {
+            "id": inc.id,
+            "uuid": inc.uuid,
+            "server_id": inc.server_id,
+            "server_name": server_map.get(inc.server_id, f"Server #{inc.server_id}"),
+            "title": inc.title,
+            "description": inc.description,
+            "type": inc.type,
+            "status": inc.status,
+            "created_at": inc.created_at.isoformat() if inc.created_at else None,
+        }
+        for inc in incidents
+    ]
+

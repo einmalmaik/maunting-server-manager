@@ -69,7 +69,45 @@ def _validated_incident(item: dict[str, Any], server_id: int) -> tuple[str, dict
     return incident_uuid, normalized
 
 
+def _attempt_key(att: dict) -> tuple | None:
+    """Identitaet eines Wiederherstellungsversuchs ueber mehrere Syncs hinweg.
+
+    Der Agent schreibt ``attempt`` (laufende Nummer) und ``at`` (Zeitpunkt des
+    **Beginns**) — msm-agent/services/guardian_service.py. Die alten Namen
+    ``attempt_number``/``started_at``/``timestamp``, nach denen hier frueher
+    gesucht wurde, kommen dort nirgends vor; der Schluessel war deshalb immer
+    ``None``, und die Liste wuchs bei jedem Sync um ihre eigene Laenge. Nach
+    einem Tag Betrieb standen dieselben drei Versuche hundertfach darin — und
+    genau diese Liste liest die KI, wenn sie einen Vorfall untersucht.
+
+    ``at`` gehoert mit in den Schluessel: nach einem Neustart des Agenten faengt
+    ``attempt`` wieder bei 1 an. Ohne den Zeitpunkt loeschte der neue Versuch 1
+    den alten Versuch 1 aus der Historie.
+
+    Die alten Namen bleiben als Rueckfall stehen, damit bereits gespeicherte
+    Zeilen aus der Zeit davor nicht als schluessellos gelten.
+    """
+    nummer = att.get("attempt", att.get("attempt_number"))
+    zeitpunkt = att.get("at", att.get("started_at", att.get("timestamp")))
+    if nummer is None and zeitpunkt is None:
+        return None
+    return (nummer, zeitpunkt)
+
+
 def _merge_attempts(existing_json: str | None, new_attempts: list[dict]) -> list[dict]:
+    """Vereinigt die gespeicherte Versuchsliste mit der des aktuellen Syncs.
+
+    Der Agent schickt bei jedem Sync seine **vollstaendige** Liste mit
+    (``_incident_payload``), und er aendert bestehende Eintraege nach: ein
+    Versuch entsteht mit ``result: "running"`` und bekommt danach ``executed``
+    oder ``failed``. Deshalb gewinnt bei gleichem Schluessel der **neue**
+    Eintrag. Behielte man den alten, stuende in der Historie fuer immer
+    "running" — ein Versuch, der nie zu Ende ging, wo in Wahrheit einer
+    fehlgeschlagen ist.
+
+    Die Reihenfolge ist die des ersten Auftretens: die Historie bleibt damit
+    chronologisch, auch wenn ein Eintrag spaeter ersetzt wird.
+    """
     try:
         existing = json.loads(existing_json) if existing_json else []
         if not isinstance(existing, list):
@@ -77,21 +115,34 @@ def _merge_attempts(existing_json: str | None, new_attempts: list[dict]) -> list
     except Exception:
         existing = []
 
-    # Merge based on started_at/attempt_number or timestamp to deduplicate
-    seen = set()
-    merged = []
-    for att in existing + new_attempts:
+    reihenfolge: list[tuple] = []
+    nach_schluessel: dict[tuple, dict] = {}
+    ohne_schluessel: list[dict] = []
+    gesehen_ohne: set[str] = set()
+    for att in existing + list(new_attempts or []):
         if not isinstance(att, dict):
             continue
-        # Use attempt_number or started_at/timestamp as a key
-        key = att.get("attempt_number") or att.get("started_at") or att.get("timestamp")
-        if key is not None:
-            if key not in seen:
-                seen.add(key)
-                merged.append(att)
-        else:
-            merged.append(att)
-    return merged
+        key = _attempt_key(att)
+        if key is None:
+            # Auch der schluessellose Eintrag wird entdoppelt — ueber seinen
+            # eigenen Inhalt. Ohne diese Zeilen war er das letzte Schlupfloch
+            # derselben Fehlerklasse: der Agent schickt bei jedem Sync seine
+            # vollstaendige Liste, ein Eintrag ohne `attempt` und ohne `at` fiel
+            # durch die Entdopplung, und die Liste wuchs auch nach der Behebung
+            # weiter — nur eben stiller. `sort_keys` macht die Erkennung
+            # unabhaengig davon, in welcher Reihenfolge der Agent seine Felder
+            # serialisiert.
+            marke = json.dumps(att, sort_keys=True, default=str)
+            if marke in gesehen_ohne:
+                continue
+            gesehen_ohne.add(marke)
+            ohne_schluessel.append(att)
+            continue
+        if key not in nach_schluessel:
+            reihenfolge.append(key)
+        nach_schluessel[key] = att
+
+    return [nach_schluessel[key] for key in reihenfolge] + ohne_schluessel
 
 
 def _notify_guardian_incident(server_id: int, incident_type: str, status: str, description: str) -> None:

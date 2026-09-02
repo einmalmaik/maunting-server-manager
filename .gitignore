@@ -44,6 +44,7 @@ RELEASE_NOTES_*.md
 /scripts/__pycache__/
 /helper-scripts/__pycache__/
 /frontend/dist
+/frontend/dist-desktop
 /frontend/node_modules
 /Design idee für mssm
 
@@ -79,3 +80,34 @@ node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/results.json
 .factory-test-data/evidence/e2e-safety/VAL-CROSS-001-api-get-after-edit.json
 .factory-test-data/evidence/e2e-safety-cross-area-pytest-output.txt
 prompt.txt
+/.claude
+
+# Lokales Embedding-Modell fuer das KI-Gedaechtnis (~507 MB).
+# Wird von install.sh/update.sh aus dem HuggingFace-Hub geladen und gehoert
+# niemals ins Repository.
+/backend/ml-models/
+
+# Versionsschnappschuesse des Dateimanagers (verschluesselte Serverdateien).
+# Entstehen zur Laufzeit bei jedem Schreibvorgang — auch bei dem, den
+# `propose_config_patch` ausloest. Betriebsdaten eines Panels, keine Quelle.
+#
+# Beide Orte: der Pfad haengt an `panel_config_dir`, und in einer
+# Produktivinstallation zeigt der auf das Wurzelverzeichnis des Panels
+# (`/opt/msm`), nicht auf `backend/`. Stand hier nur der zweite Eintrag, lag
+# das Verzeichnis mit den verschluesselten Dateiinhalten als untracked im
+# Arbeitsbaum und wartete auf ein unbedachtes `git add -A`.
+.msm-file-history/
+claude.md
+
+# Lokale Smart System Konzeptnotizen (nicht in Git committen)
+docs/smart-system-notes.md
+GEMINI.md
+/smart-system/.idea
+
+# AI Agent / Dev environment ignore
+.chrome-profile/
+local-plans/
+mcps/
+scratch/
+git_log.txt
+/.agents

@@ -13,7 +13,7 @@ describe('LegalFooter', () => {
 
     expect(screen.getByRole('link', { name: 'Datenschutz' })).toHaveAttribute('href', '/privacy')
     expect(screen.queryByText(/Impressum/i)).toBeNull()
-    expect(screen.getByText(/Maunting Server Manager v1.2.3/)).toBeInTheDocument()
+    expect(screen.getByText(/Maunting Service Manager v1.2.3/)).toBeInTheDocument()
   })
 
   it('renders the external Impressum link when an imprint URL is configured', () => {

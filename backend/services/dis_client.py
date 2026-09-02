@@ -29,6 +29,26 @@ class DisDecryptionError(DisSidecarError):
     """
 
 
+# Fehlernamen, unter denen der Sidecar meldet, dass ein Ciphertext schon **vor**
+# dem Entschluesseln unbrauchbar ist: "!!!" ist kein Base64 (atob wirft
+# InvalidCharacterError), "AAAA" sind drei Bytes und damit kuerzer als der
+# 12-Byte-IV (@msdis/shield wirft DisInvalidArgumentError, bevor es ueberhaupt
+# zu entschluesseln beginnt).
+#
+# Warum die Abbildung hierhin gehoert und nicht zu jedem einzelnen Aufrufer:
+# Ciphertexte kommen nicht nur aus der eigenen Datenbank, sondern auch von
+# aussen - das OAuth-State-Cookie ist einer davon. Fuer den Aufrufer ist ein
+# unbrauchbarer Ciphertext dasselbe wie ein falscher, beides heisst "der Wert
+# taugt nicht". Ohne diese Abbildung schluepft der Fall als DisSidecarError an
+# jedem `except DisDecryptionError` vorbei, denn DisDecryptionError ist dessen
+# Unterklasse und nicht umgekehrt - aus einem abgeschnittenen Cookie wird so ein
+# HTTP 500 statt einer Abweisung.
+#
+# Nur beim Entschluesseln: derselbe Fehlername beim Verschluesseln waere ein
+# Fehler in unserem eigenen Aufruf und soll laut bleiben.
+_UNBRAUCHBARER_CIPHERTEXT = ("DisInvalidArgumentError", "InvalidCharacterError")
+
+
 class DisClient:
     """Statische Fassade fuer DIS-Krypto-Operationen ueber den lokalen Sidecar."""
 
@@ -44,7 +64,7 @@ class DisClient:
     def _post(endpoint: str, payload: dict) -> dict:
         url = settings.dis_sidecar_url.rstrip("/") + endpoint
         try:
-            resp = httpx.post(url, json=payload, headers=DisClient._headers(), timeout=DisClient._timeout)
+            resp = _client.post(url, json=payload, headers=DisClient._headers())
         except httpx.HTTPError as e:
             raise DisSidecarError(f"DIS Sidecar nicht erreichbar: {e}") from e
         if resp.status_code == 401:
@@ -52,7 +72,12 @@ class DisClient:
         if resp.status_code == 400:
             body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
             err = body.get("error", "")
-            if err in ("DisDecryptionError", "DisIntegrityError"):
+            # Der zweite Zweig ist der Grund fuer _UNBRAUCHBARER_CIPHERTEXT: ein
+            # Wert, der nicht einmal die Form eines Ciphertext hat, ist fuer den
+            # Aufrufer kein Serverfehler, sondern ein ungueltiger Wert.
+            if err in ("DisDecryptionError", "DisIntegrityError") or (
+                endpoint == "/decrypt" and err in _UNBRAUCHBARER_CIPHERTEXT
+            ):
                 raise DisDecryptionError("Entschluesselung fehlgeschlagen")
             raise DisSidecarError(f"DIS Sidecar Fehler: {err or resp.status_code}")
         if resp.status_code != 200:
@@ -81,7 +106,9 @@ class DisClient:
     def decrypt(ciphertext: str, aad: str | None = None) -> str:
         """Entschluesselt einen DIS-AES-256-GCM-Ciphertext.
 
-        Raises DisDecryptionError bei falschem Key, Tampering oder AAD-Mismatch.
+        Raises DisDecryptionError bei falschem Key, Tampering, AAD-Mismatch oder
+        einem Ciphertext, den der Sidecar gar nicht erst lesen kann (siehe
+        _UNBRAUCHBARER_CIPHERTEXT).
         """
         payload: dict = {"ciphertext": ciphertext}
         if aad:
@@ -137,7 +164,30 @@ class DisClient:
         """Prueft ob der Sidecar erreichbar ist."""
         try:
             url = settings.dis_sidecar_url.rstrip("/") + "/health"
-            resp = httpx.get(url, headers=DisClient._headers(), timeout=5.0)
+            resp = _client.get(url, headers=DisClient._headers(), timeout=5.0)
             return resp.status_code == 200
         except httpx.HTTPError:
             return False
+
+
+# Ein gehaltener Client statt der Modulfunktion `httpx.post` je Aufruf: diese
+# baut bei jedem Aufruf einen vollständigen httpx.Client auf, und dessen
+# Konstruktor legt sofort einen SSL-Kontext an und liest dabei das komplette
+# CA-Bündel — auch wenn das Ziel ein http://127.0.0.1 ist. Über diesen Weg läuft
+# jede Krypto-Operation des Panels: jedes Passwort-Hashing, jede TOTP-Prüfung,
+# jedes Lesen einer E-Mail-Adresse. Der Aufschlag fiel bisher vor jedem
+# einzelnen Byte an den Sidecar an.
+#
+# Dasselbe Muster hält node_client.py mit `get_shared_sync_client` schon vor;
+# httpx.Client ist threadsicher und passt damit zu den Aufrufen aus
+# `asyncio.to_thread`. **Auf diese Zusage stützt sich inzwischen mehr als das
+# Wiederverwenden:** `ai_memory_service._entschluesseln_nebenlaeufig` schickt
+# beim Aufbau des Gedächtnisblocks mehrere `decrypt` gleichzeitig hier hinein,
+# weil deren Zahl sonst eins zu eins in der Wartezeit des Benutzers landet. Wer
+# diesen einen Client durch etwas ersetzt, das nur ein Aufrufer zur Zeit
+# verträgt, nimmt dem Gedächtnis damit still die Nebenläufigkeit weg.
+# Der Preis der Wiederverwendung: eine im Pool wartende
+# Keep-alive-Verbindung überlebt einen Neustart des Sidecars nicht. Der
+# betroffene Aufruf fällt dann in `except httpx.HTTPError` und damit
+# fail-closed — richtig, aber einmal spürbar.
+_client = httpx.Client(timeout=DisClient._timeout)

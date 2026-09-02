@@ -96,20 +96,41 @@ export function reconcileSavedContent(
   }
 }
 
+/**
+ * Die Fusszeile des Editors ruft das bei jedem Tastendruck auf. Ein `split`
+ * würde vorher das ganze Dokument in ein Zeilenarray zerlegen — bei einer
+ * mehrere Megabyte großen Serverkonfiguration Zehntausende Zeichenketten, die
+ * sofort wieder Müll sind. Der mehrzeilige Regex bricht dagegen bei der ersten
+ * eingerückten Zeile ab und legt nichts an.
+ */
 export function detectIndentation(content: string): string {
-  const indented = content.split(/\r?\n/).find((line) => /^(?:\t+| +)\S/.test(line))
-  if (!indented) return 'Einzug: –'
-  const prefix = indented.match(/^(\t+| +)/)?.[0] ?? ''
+  const treffer = content.match(/^(\t+| +)\S/m)
+  if (!treffer) return 'Einzug: –'
+  const prefix = treffer[1]
   return prefix.startsWith('\t') ? 'Tabs' : `Leerzeichen: ${prefix.length}`
 }
 
-/** Praezise Anzeige fuer Bytes — KISS ohne Locale. */
+/**
+ * Praezise Anzeige fuer Bytes — KISS ohne Locale.
+ *
+ * Null Bytes sind im Serveralltag ein Normalzustand: eine frisch angelegte
+ * `eula.txt`, eine gerade rotierte `latest.log`, ein leerer Ordner in der
+ * Summenzeile. Frueher stand dort derselbe Strich, den die Oberflaeche daneben
+ * fuer "nicht ermittelbar" benutzt (Rechte und Eigentuemer im Inspektor fallen
+ * auf `files.notAvailable` zurueck) — die Anzeige verschwieg damit eine
+ * Groesse, die sehr wohl bekannt ist. Der Strich bleibt darum den Faellen
+ * vorbehalten, in denen wirklich keine Zahl vorliegt.
+ *
+ * Die TB-Stufe fehlte, obwohl Backup-Archive sie erreichen: 2 TB standen als
+ * "2048.00 GB" da.
+ */
 export function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '-'
+  if (!Number.isFinite(bytes) || bytes < 0) return '-'
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+  if (bytes < 1024 * 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+  return `${(bytes / (1024 * 1024 * 1024 * 1024)).toFixed(2)} TB`
 }
 
 /** Pruefen, ob ein neuer Pfad innerhalb eines bestehenden Pfads liegt

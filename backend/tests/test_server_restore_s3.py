@@ -451,7 +451,7 @@ class TestLifecycleLock:
                 csrf = owner_cookies.get("__Secure-csrf_token")
                 with patch("services.docker_service.is_running", return_value=False), \
                      patch("services.docker_service.remove"), \
-                     patch("routers.backups._safe_extract_backup_tar", side_effect=Exception("extract fail")):
+                     patch("services.backup_restore_service._safe_extract_backup_tar", side_effect=Exception("extract fail")):
                     resp = client.post(
                         f"/api/backups/{test_server.id}/restore/{backup.id}",
                         cookies=owner_cookies,
@@ -571,7 +571,7 @@ class TestRollback:
                 csrf = owner_cookies.get("__Secure-csrf_token")
                 with patch("services.docker_service.is_running", return_value=False), \
                      patch("services.docker_service.remove"), \
-                     patch("routers.backups._safe_extract_backup_tar", side_effect=Exception("extract boom")):
+                     patch("services.backup_restore_service._safe_extract_backup_tar", side_effect=Exception("extract boom")):
                     resp = client.post(
                         f"/api/backups/{test_server.id}/restore/{backup.id}",
                         cookies=owner_cookies,

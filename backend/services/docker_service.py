@@ -58,6 +58,13 @@ _SYSTEM_ENV = {
 _LOG_CONFIG = {"max-size": "10m", "max-file": "3"}
 _HARDENING_CAP_DROP = ["ALL"]
 _HARDENING_SECURITY_OPT = ["no-new-privileges"]
+
+
+def _container_security_options(allow_unprivileged_user_namespaces: bool) -> list[str]:
+    options = list(_HARDENING_SECURITY_OPT)
+    if allow_unprivileged_user_namespaces:
+        options.append("seccomp=unconfined")
+    return options
 # Dedicated image for permission repair (runs as root to chown bind mounts).
 #
 # Purpose of repair_bind_mount_permissions():
@@ -837,6 +844,7 @@ def run_container(
     cap_adds: list[str] | None = None,
     tty: bool = False,  # opt-in for interactive auth/setup flows; default off (existing callers unchanged)
     restart_policy_name: str = "no",
+    allow_unprivileged_user_namespaces: bool = False,
     node: Any | None = None,
 ) -> dict:
     """Startet einen langlebigen Game-Server-Container.
@@ -877,6 +885,7 @@ def run_container(
             tty=tty,
             restart_policy_name=restart_policy_name,
             startup_check_seconds=startup_check_seconds,
+            allow_unprivileged_user_namespaces=allow_unprivileged_user_namespaces,
         )
 
     client, error = _client_or_error()
@@ -914,7 +923,7 @@ def run_container(
         "log_config": LogConfig(type=LogConfig.types.JSON, config=_LOG_CONFIG) if LogConfig else None,
         "cap_drop": _HARDENING_CAP_DROP,
         "cap_add": cap_adds or None,
-        "security_opt": _HARDENING_SECURITY_OPT,
+        "security_opt": _container_security_options(allow_unprivileged_user_namespaces),
         "read_only": read_only_rootfs,
         "environment": env or None,
         "ports": _ports_dict(ports),
@@ -952,7 +961,11 @@ def run_container(
                 logs = _decode(container.logs(tail=80, stdout=True, stderr=True)).strip()
                 detail = f"Container wurde direkt nach dem Start beendet (Exit-Code {exit_code})."
                 if logs:
-                    detail = f"{detail} Letzte Logs: {logs[:700]}"
+                    # Das ENDE der Ausgabe zeigen, nicht den Anfang: Tracebacks
+                    # und Abbruchmeldungen nennen den Grund in der letzten
+                    # Zeile. Ein Schnitt von vorn liefert zuverlässig den
+                    # unbrauchbaren Teil.
+                    detail = f"{detail} Letzte Logs: {logs[-700:]}"
                 return {
                     "ok": False,
                     "error": detail[:1000],
@@ -1114,6 +1127,7 @@ def _run_container_via_node(
     tty: bool,
     restart_policy_name: str,
     startup_check_seconds: float,
+    allow_unprivileged_user_namespaces: bool,
 ) -> dict:
     """Map local PortPublish/VolumeBind to agent create payload."""
     from services.node_client import NodeClient, NodeClientError
@@ -1152,6 +1166,7 @@ def _run_container_via_node(
         "tty": tty,
         "restart_policy_name": restart_policy_name,
         "startup_check_seconds": startup_check_seconds,
+        "allow_unprivileged_user_namespaces": allow_unprivileged_user_namespaces,
     }
     body = {k: v for k, v in body.items() if v is not None}
     try:
@@ -1178,6 +1193,12 @@ def inspect_state(name: str, *, node: Any | None = None) -> dict | None:
                 "started_at": None,
                 "exit_code": None,
                 "oom_killed": False,
+                # Der Agent liefert CPU und RAM in derselben Antwort. Wer sie
+                # hier wegwirft, holt sie mit einer zweiten, identischen Runde
+                # zur Node nach. Der lokale Zweig unten hat diese Schlüssel
+                # bewusst nicht — dort kostet der Wert eine eigene Abfrage.
+                "cpu_percent": stats.get("cpu_percent"),
+                "ram_mb": stats.get("ram_mb"),
             }
         except Exception as exc:
             if getattr(exc, "status_code", None) == 404:
@@ -1265,11 +1286,21 @@ def logs(name: str, lines: int = 200, *, node: Any | None = None) -> str:
 
 
 def exec_in(name: str, command: list[str], timeout: int = 30, *, node: Any | None = None) -> dict:
+    """Führt einen Befehl im Container aus.
+
+    ``timeout`` stammt aus dem Blueprint (``execTimeoutSeconds``) und gilt für
+    den Node-Zweig. Der lokale Docker-Zweig kennt an ``exec_run`` keine eigene
+    Frist; dort greift die 60-Sekunden-Vorgabe des docker-py-Clients. Das ist
+    bewusst so: ein Umbau auf ``exec_start(stream=True)`` wäre mehr Aufwand,
+    als die Sache wert ist, und eine Grenze gibt es dort ohnehin.
+    """
     if node is not None:
         try:
             from services.node_client import NodeClient
 
-            result = NodeClient.from_node(node).exec_in_container(name, command)
+            result = NodeClient.from_node(node).exec_in_container(
+                name, command, timeout=float(timeout)
+            )
             return {
                 "ok": bool(result.get("ok")),
                 "error": result.get("error") or "",
@@ -1505,21 +1536,62 @@ def repair_bind_mount_permissions(
     Ziel:
     - Wenn owner_uid_gid gesetzt ist, wird der Game-Prozess Owner der Dateien
       (wichtig fuer Wine-/Home-Verzeichnisse).
-    - Panel kann weiterhin Dateien anlegen/bearbeiten (ueber a+rwX im isolierten
-      Server-Verzeichnis).
+    - Panel und Spielprozess teilen sich die Dateien ueber die **Gruppe** des
+      Serververzeichnisses; ``setgid`` sorgt dafuer, dass neue Dateien sie
+      erben.
     - Symlinks werden nicht verfolgt; nur der Link selbst wird gechowned.
+
+    **Hier stand einmal ``chmod a+rwX``**, und das ``a`` war das Problem: es
+    umfasst „andere“, machte also jede Serverdatei fuer jeden Prozess auf dem
+    Host beschreibbar. Das war der schnelle Weg dahin, dass Panel (uid 994)
+    und Spielprozess (gemappte uid aus /etc/subuid) dieselben Dateien
+    anfassen koennen — er oeffnete aber weiter als noetig, und er machte jedes
+    Aufraeumen wieder zunichte, sobald er einmal ansprang.
+
+    Der Weg dorthin fuehrt jetzt ueber die Gruppe des Serververzeichnisses:
+    ``scripts/fix-server-permissions.sh`` legt sie an und macht ``msm`` zum
+    Mitglied. Diese Funktion uebernimmt sie fuer alles darunter und setzt
+    ``g+s`` auf Verzeichnisse — damit erbt auch jede Datei, die der
+    Spielprozess spaeter selbst schreibt, dieselbe Gruppe. „Andere“ bleiben
+    aussen vor.
+
+    Der Zugriffsschutz haengt ohnehin eine Ebene hoeher: ``/opt/msm`` darf nur
+    ``msm`` betreten, und wer im Panel an die Dateien kommt, entscheidet
+    ``server.files.read``/``.write``.
     """
     base = os.path.realpath(host_path)
     if not os.path.isdir(base):
         return {"ok": False, "error": "Server-Verzeichnis existiert nicht", "stdout": "", "stderr": ""}
 
+    # Die Gruppe, die Panel und Spielprozess teilen: die des Serververzeichnisses.
+    # Sie steht schon dran, wenn `fix-server-permissions.sh` gelaufen ist; sonst
+    # ist es die Gruppe dessen, der das Verzeichnis angelegt hat, und dann ist
+    # das Ergebnis dasselbe wie zuvor — nur ohne Weltrechte.
+    try:
+        geteilte_gid = os.stat(base).st_gid
+    except OSError:
+        geteilte_gid = None
+
     target = shlex.quote(container_path.rstrip("/") or PERMISSION_REPAIR_CONTAINER_DIR)
     # Kein set -e: einzelne chmod/chown-Fehler (z. B. root-owned Dateien unter
     # Rootless Docker) duerfen den gesamten Start nicht abbrechen.
-    script_parts = [
-        f"find {target} -xdev -type d -exec chmod a+rwX {{}} + 2>/dev/null || true",
-        f"find {target} -xdev -type f -exec chmod a+rwX {{}} + 2>/dev/null || true",
-    ]
+    script_parts = []
+    if geteilte_gid is not None:
+        # Gruppe **vor** den Rechten: sonst traegt eine Datei kurz g+rw fuer
+        # eine Gruppe, der sie gleich nicht mehr gehoert.
+        script_parts.append(
+            f"chgrp -R {int(geteilte_gid)} {target} 2>/dev/null || true"
+        )
+    script_parts.extend([
+        # `g+s` auf Verzeichnissen ist der Teil, der das Ergebnis **haelt**:
+        # ohne ihn traegt jede neu angelegte Datei wieder die Gruppe ihres
+        # Erzeugers, und in ein paar Tagen passt nichts mehr zusammen.
+        f"find {target} -xdev -type d -exec chmod u+rwx,g+rwxs,o-rwx {{}} + 2>/dev/null || true",
+        f"find {target} -xdev -type f -exec chmod u+rw,g+rw,o-rwx {{}} + 2>/dev/null || true",
+        # Ausfuehrbare Dateien behalten ihr x fuer die Gruppe — Spielserver
+        # starten sonst nicht, weil ihre Startskripte nicht mehr laufen.
+        f"find {target} -xdev -type f -perm -u+x -exec chmod g+x {{}} + 2>/dev/null || true",
+    ])
     if owner_uid_gid is not None:
         uid, gid = owner_uid_gid
         owner = f"{int(uid)}:{int(gid)}"

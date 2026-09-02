@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: msm
+  labels:
+    app.kubernetes.io/name: msm
+    # Erzwingt die restriktiven Pod-Security-Standards fuer alles in diesem
+    # Namespace. Die Manifeste sind bewusst so gebaut, dass sie das erfuellen —
+    # ein Container, der Root oder Capabilities braucht, wird hier abgewiesen.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest

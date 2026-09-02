@@ -56,7 +56,8 @@ export interface BlueprintDraft {
   }
   mods?: {
     supportsMods: boolean; supportsSteamWorkshop: boolean; workshopAppId?: string; filterTags: string[]
-    modInjection: 'none' | 'startupArg' | 'file'; modStartupArgumentFormat?: string; modListFilePath?: string
+    supportsCurseForge?: boolean; curseforgeGameId?: string; curseforgeClassId?: string; curseforgeInstallPath?: string
+    modInjection: 'none' | 'startupArg' | 'file'; modStartupArgumentFormat?: string; modStartupArgumentSeparator?: string; modListFilePath?: string
     modListContent: 'workshopIds' | 'postInstallTargetBasenames'
     postInstall: Array<{ operation: 'copy' | 'symlink'; source: string; target: string; required: boolean }>
   }
@@ -261,6 +262,9 @@ export function validateBlueprintDraft(draft: BlueprintDraft): BlueprintValidati
     if (!safeRelativePath(path)) add('paths', 'blueprintBuilder.validation.unsafePath', { path: path || '—' })
   })
   if (draft.mods?.supportsSteamWorkshop && !/^\d{1,10}$/.test(draft.mods.workshopAppId ?? '')) add('mods.workshopAppId', 'blueprintBuilder.validation.workshopAppId')
+  if (draft.mods?.supportsCurseForge && !/^\d{1,10}$/.test(draft.mods.curseforgeGameId ?? '')) add('mods.curseforgeGameId', 'blueprintBuilder.validation.curseforgeGameId')
+  if (draft.mods?.curseforgeClassId && !/^\d{1,10}$/.test(draft.mods.curseforgeClassId)) add('mods.curseforgeClassId', 'blueprintBuilder.validation.curseforgeClassId')
+  if (draft.mods?.curseforgeInstallPath && !safeRelativePath(draft.mods.curseforgeInstallPath)) add('mods.curseforgeInstallPath', 'blueprintBuilder.validation.curseforgeInstallPath')
   if (draft.mods?.modInjection === 'startupArg' && !(draft.mods.modStartupArgumentFormat ?? '').includes('{mods}')) add('mods.modStartupArgumentFormat', 'blueprintBuilder.validation.modArgument')
   if (draft.mods?.modInjection === 'file' && !safeRelativePath(draft.mods.modListFilePath ?? '')) add('mods.modListFilePath', 'blueprintBuilder.validation.modListPath')
   if (draft.mods?.modListContent === 'postInstallTargetBasenames' && !draft.mods.postInstall.length) add('mods.postInstall', 'blueprintBuilder.validation.postInstall')
@@ -385,9 +389,14 @@ export function validateBlueprintDraft(draft: BlueprintDraft): BlueprintValidati
   return issues
 }
 
+export function normalizeBlueprintId(value: string): string {
+  return value.trim().toLowerCase().replace(/ +/g, '_')
+}
+
 export function normalizeBlueprintDraft(draft: BlueprintDraft): BlueprintDraft {
   const clean = structuredClone(draft)
   const normalizeLines = (values: string[]) => values.map(value => value.trim()).filter(Boolean)
+  clean.meta.id = normalizeBlueprintId(clean.meta.id)
   clean.runtime.ensureDirs = normalizeLines(clean.runtime.ensureDirs)
   clean.runtime.requiredFiles = normalizeLines(clean.runtime.requiredFiles)
   clean.runtime.seedFiles = (clean.runtime.seedFiles ?? [])
@@ -407,17 +416,28 @@ export function normalizeBlueprintDraft(draft: BlueprintDraft): BlueprintDraft {
   if (clean.source.manual && !clean.source.manual.instructionsUrl) delete clean.source.manual.instructionsUrl
   if (clean.source.manual) clean.source.manual.requiredFiles = normalizeLines(clean.source.manual.requiredFiles)
   if (clean.mods && !clean.mods.workshopAppId) delete clean.mods.workshopAppId
+  if (clean.mods && !clean.mods.curseforgeGameId) delete clean.mods.curseforgeGameId
+  if (clean.mods && !clean.mods.curseforgeClassId) delete clean.mods.curseforgeClassId
+  if (clean.mods && !clean.mods.curseforgeInstallPath) delete clean.mods.curseforgeInstallPath
+  if (clean.mods && !clean.mods.modStartupArgumentSeparator) delete clean.mods.modStartupArgumentSeparator
   if (clean.mods) clean.mods.filterTags = normalizeLines(clean.mods.filterTags)
-  if (clean.mods && clean.mods.modInjection !== 'startupArg') delete clean.mods.modStartupArgumentFormat
+  if (clean.mods && clean.mods.modInjection !== 'startupArg') {
+    delete clean.mods.modStartupArgumentFormat
+    delete clean.mods.modStartupArgumentSeparator
+  }
   if (clean.mods && clean.mods.modInjection !== 'file') delete clean.mods.modListFilePath
   if (clean.mods) {
     const isDefaultModsBlock = !clean.mods.supportsMods
       && !clean.mods.supportsSteamWorkshop
+      && !clean.mods.supportsCurseForge
       && clean.mods.filterTags.length === 0
       && clean.mods.modInjection === 'none'
       && clean.mods.modListContent === 'workshopIds'
       && clean.mods.postInstall.length === 0
       && !clean.mods.workshopAppId
+      && !clean.mods.curseforgeGameId
+      && !clean.mods.curseforgeClassId
+      && !clean.mods.curseforgeInstallPath
       && !clean.mods.modStartupArgumentFormat
       && !clean.mods.modListFilePath
     if (isDefaultModsBlock) delete clean.mods

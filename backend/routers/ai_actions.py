@@ -1,0 +1,322 @@
+"""Bestaetigung und Ausfuehrung persistenter AI-Aktionsvorschlaege."""
+
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import and_, or_
+from sqlalchemy.orm import Session
+
+from database import get_db
+from dependencies import require_global, verify_csrf
+from models import AiActionProposal, AiConversation, AiRun, User
+from models.ai_conversation import ARTEN
+from models.ai_run import BEENDET
+from schemas.ai_action import (
+    AiActionConfirmationResponse,
+    AiActionExecuteRequest,
+    AiActionExecuteResponse,
+    AiActionProposalResponse,
+)
+from services import (
+    ai_action_errors,
+    ai_chat_service,
+    ai_proposal_service,
+    ai_run_service,
+)
+# Die Serialisierung eines Vorschlags liegt beim Vorschlag, nicht beim Router:
+# der Stream veroeffentlicht denselben Typ ueber SSE und muss dieselbe Quelle
+# benutzen. Solange sie hier stand, hatte `AiActionProposal` zwei Wahrheiten —
+# und die des Streams kannte weder `reason` noch `expected_effect`.
+from services.ai_proposal_service import proposal_response
+from services.dis_client import DisSidecarError
+
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/ai", tags=["ai-actions"])
+
+
+def _state_error(exc: ai_action_errors.AiActionStateError) -> HTTPException:
+    """Macht aus einem Zustandsfehler eine Antwort, die das Panel uebersetzen kann.
+
+    Hier standen fertige deutsche Saetze. `frontend/src/api/client.ts` schickt
+    jedes `detail` durch `i18n.t()`; ein Satz ist kein Schluessel, also gab
+    `parseMissingKeyHandler` (i18n.ts) ihn woertlich zurueck, und die
+    Vorschlagskarte zeigt genau diesen Text bevorzugt vor ihrem eigenen
+    t()-Rueckfall an. Ein Benutzer mit Sprache Englisch las deutsch.
+
+    Deshalb liefern wir den Schluessel selbst - denselben Weg gehen
+    routers/mods.py und routers/steam.py mit `errors.*` bereits. Die Saetze
+    stehen in de.json und en.json unter `ai.errors.codes`; die uebrigen
+    Sprachen fallen laut i18n.ts auf Englisch zurueck.
+
+    Der 409-Zweig bleibt unveraendert: dort traegt der strukturierte Code die
+    Aussage, und AiChat.tsx uebersetzt ihn ueber denselben Namensraum.
+    """
+    if exc.code == "AI_ACTION_NOT_FOUND":
+        return HTTPException(
+            status_code=404, detail="ai.errors.codes.AI_ACTION_NOT_FOUND"
+        )
+    if exc.code == "AI_ACTION_ACCESS_REVOKED":
+        return HTTPException(
+            status_code=403, detail="ai.errors.codes.AI_ACTION_ACCESS_REVOKED"
+        )
+    return HTTPException(status_code=409, detail={"code": exc.code})
+
+
+def _art(kind: str) -> str:
+    """Wie `ai_chat._art`: eine unbekannte Fensterangabe ist ein 404.
+
+    Zwei Zeilen doppelt statt eines gemeinsamen Moduls fuer eine
+    Zugehoerigkeitspruefung — ein Router, der einen anderen Router importiert,
+    waere der teurere Handel.
+    """
+    if kind not in ARTEN:
+        raise HTTPException(
+            status_code=404, detail="ai.errors.codes.AI_ACTION_NOT_FOUND"
+        )
+    return kind
+
+
+@router.get("/conversation/actions", response_model=list[AiActionProposalResponse])
+def list_conversation_actions(
+    kind: str = Query("primary"),
+    conversation_id: str | None = Query(
+        None,
+        description=(
+            "Kennung eines Worker-Fensters — dort ist kind mehrdeutig. "
+            "Hat Vorrang vor kind."
+        ),
+    ),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.chat.use")),
+) -> list[AiActionProposalResponse]:
+    """Alle Vorschlaege einer Unterhaltung, aeltester zuerst.
+
+    ``kind`` waehlt das Fenster; ohne Angabe der Dauerchat.
+
+    Diese Angabe ist noetig, seit eine Reparatur in einem eigenen Fenster
+    laeuft. Ein Reparaturlauf, der auf eine Bestaetigung wartet, legt seine
+    Vorschlaege mit **seiner** Unterhaltungskennung an — ohne den Parameter
+    liefert dieser Endpunkt sie nie, und die Karte, auf deren Klick der Lauf
+    wartet, waere im ganzen Panel nirgends zu sehen.
+
+    ``conversation_id`` ist derselbe Weg fuer Worker-Fenster: ein wartender
+    Auftrag zeigt seine Karte in der Worker-Ansicht, und die laedt ueber die
+    Kennung. Nur eigene Worker-Fenster — alles andere ist dasselbe 404 wie
+    ein unbekanntes.
+
+    **Der Dauerchat sieht zusaetzlich die offenen Karten seiner Auftraege.**
+    Ein Worker arbeitet in einem eigenen, unsichtbaren Fenster; seine
+    Vorschlaege lagen damit an einer Stelle, die der Mensch nur ueber zwei
+    Klicks in der Worker-Ansicht erreicht. Wer im Chat sagt „starte den
+    Server neu", erwartet den Knopf dort, wo er gefragt hat. Umgehaengt wird
+    nichts — die Karte bleibt bei ihrem Auftrag, sie wird hier nur
+    **mitgeliefert**, und zwar allein, solange sie offen ist. Erledigte,
+    abgelehnte und verfallene Karten bleiben im Auftragsfenster.
+
+    Sicherheitlich aendert das nichts: `conversation_id` ist an keiner
+    Rechtepruefung beteiligt. Bestaetigen und Ausfuehren gehen weiter durch
+    `owned_proposal` (Benutzer und `server.view`) und
+    `_require_tool_permission` (Werkzeug, Server, Recht); auch das
+    Bestaetigungsmerkmal bindet an die Vorschlagskennung, nicht an ein
+    Fenster.
+    """
+    if conversation_id is not None:
+        conversation = db.get(AiConversation, conversation_id)
+        if (
+            conversation is None
+            or conversation.user_id != user.id
+            or conversation.kind != "worker"
+        ):
+            raise HTTPException(
+                status_code=404, detail="ai.errors.codes.AI_ACTION_NOT_FOUND"
+            )
+    else:
+        conversation = ai_chat_service.get_or_create_conversation(db, user, _art(kind))
+        db.commit()
+    bedingung = AiActionProposal.conversation_id == conversation.id
+    if conversation_id is None and conversation.kind == "primary":
+        # Nur Fenster mit einem **lebenden** Lauf. Ein abgebrochener oder
+        # abgeloester Auftrag laesst seine Karte auf 'proposed' stehen; ohne
+        # diese Bedingung stuende sie von da an dauerhaft im Dauerchat und
+        # fuehrte auf Klick noch Wochen spaeter aus, was niemand mehr wollte.
+        # Mitgeliefert wird nur, worauf gerade wirklich jemand wartet — in
+        # seinem eigenen Fenster bleibt der Vorschlag sichtbar.
+        lebende = db.query(AiRun.conversation_id).filter(
+            AiRun.status.notin_(BEENDET)
+        )
+        eigene_worker = db.query(AiConversation.id).filter(
+            AiConversation.user_id == user.id,
+            AiConversation.kind == "worker",
+            AiConversation.id.in_(lebende),
+        )
+        bedingung = or_(
+            bedingung,
+            and_(
+                AiActionProposal.conversation_id.in_(eigene_worker),
+                AiActionProposal.status == "proposed",
+            ),
+        )
+    rows = db.query(AiActionProposal).filter(
+        bedingung,
+        AiActionProposal.user_id == user.id,
+    ).order_by(AiActionProposal.created_at.asc()).all()
+    return [proposal_response(row) for row in rows]
+
+
+@router.get("/actions/{proposal_id}", response_model=AiActionProposalResponse)
+def get_action(
+    proposal_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.chat.use")),
+) -> AiActionProposalResponse:
+    try:
+        proposal = ai_proposal_service.owned_proposal(db, proposal_id, user)
+    except ai_action_errors.AiActionStateError as exc:
+        # Ein entzogenes Recht ist etwas anderes als ein verschwundener
+        # Vorschlag. `_state_error` kennt den Unterschied und macht 403 daraus.
+        raise _state_error(exc) from exc
+    if proposal is None:
+        raise HTTPException(
+            status_code=404, detail="ai.errors.codes.AI_ACTION_NOT_FOUND"
+        )
+    return proposal_response(proposal)
+
+
+@router.post(
+    "/actions/{proposal_id}/confirm",
+    response_model=AiActionConfirmationResponse,
+)
+def confirm_action(
+    proposal_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.chat.use")),
+    _: None = Depends(verify_csrf),
+) -> AiActionConfirmationResponse:
+    try:
+        proposal, token = ai_proposal_service.confirm_proposal(
+            db, proposal_id=proposal_id, user=user
+        )
+        assert proposal.confirmation_expires_at is not None
+        return AiActionConfirmationResponse(
+            proposal_id=proposal.id,
+            confirmation_token=token,
+            expires_at=proposal.confirmation_expires_at,
+        )
+    except ai_action_errors.AiActionStateError as exc:
+        db.rollback()
+        raise _state_error(exc) from exc
+    except DisSidecarError as exc:
+        db.rollback()
+        # Nicht der Vorschlag ist weg, sondern der sichere Speicher ist gerade
+        # nicht erreichbar - der alte Satz sagte dem Benutzer das Falsche und
+        # sagte es ausserdem nur auf Deutsch.
+        raise HTTPException(
+            status_code=503, detail="ai.errors.codes.AI_ACTION_STORE_UNAVAILABLE"
+        ) from exc
+
+
+def _lauf_wecken(db: Session, run_id: str | None) -> None:
+    """Weckt den Lauf, der auf diesen Vorschlag gewartet hat.
+
+    **Hier ging es frueher nicht weiter.** Der Mensch hatte zugestimmt, die
+    Aktion lief — und der Zug, der sie vorgeschlagen hatte, existierte nicht
+    mehr. Man musste eine neue Nachricht schreiben, damit die KI erfuhr, wie ihr
+    eigener Vorschlag ausgegangen ist.
+
+    Gerufen wird das bei **Erfolg und bei Fehlschlag**. Ein gescheiterter
+    Neustart ist genau der Moment, in dem der Benutzer eine Aussage braucht;
+    bliebe der Lauf dann geparkt, waere die Karte rot und der Chat stumm.
+    Ob ueberhaupt geweckt wird, entscheidet `darf_fortsetzen`: solange noch ein
+    Vorschlag derselben Runde offen ist, passiert nichts.
+
+    Scheitert das Wecken selbst (kein laufendes Panel, Lauf ueberholt), bleibt
+    es bei der ausgefuehrten Aktion — die Zustimmung des Menschen darf nicht
+    daran haengen, ob die KI danach noch etwas vorhat.
+    """
+    if not run_id:
+        return
+    try:
+        ai_run_service.lauf_fortsetzen(db, run_id=run_id)
+    except Exception:
+        logger.warning(
+            "AI-Lauf konnte nach der Entscheidung nicht fortgesetzt werden run_id=%s",
+            run_id,
+        )
+
+
+@router.post(
+    "/actions/{proposal_id}/execute",
+    response_model=AiActionExecuteResponse,
+)
+def execute_action(
+    proposal_id: str,
+    payload: AiActionExecuteRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.chat.use")),
+    _: None = Depends(verify_csrf),
+) -> AiActionExecuteResponse:
+    # Vor dem `try` gesetzt, weil der `except`-Zweig ihn liest — und der kann
+    # jetzt schon beim Nachschlagen greifen.
+    run_id: str | None = None
+    try:
+        # Den Lauf **vorher** merken: scheitert die Ausfuehrung, ist die Zeile
+        # danach zurueckgerollt und neu geladen, und der Verweis waere
+        # umstaendlich wiederzubeschaffen.
+        #
+        # Das Nachschlagen steht ausdruecklich **im** `try`. Solange
+        # `owned_proposal` bei fehlendem Recht nur `None` zurueckgab, war es
+        # davor gefahrlos; seit es `AI_ACTION_ACCESS_REVOKED` wirft, waere das
+        # ein ungefangener Fehler und aus einer 403 wuerde eine 500.
+        vorab = ai_proposal_service.owned_proposal(db, proposal_id, user)
+        run_id = vorab.run_id if vorab is not None else None
+        proposal, result = ai_proposal_service.execute_proposal(
+            db,
+            proposal_id=proposal_id,
+            user=user,
+            confirmation_token=payload.confirmation_token.get_secret_value(),
+        )
+        antwort = AiActionExecuteResponse(
+            proposal=proposal_response(proposal), result=result
+        )
+        _lauf_wecken(db, proposal.run_id or run_id)
+        return antwort
+    except ai_action_errors.AiActionStateError as exc:
+        db.rollback()
+        # Der Fehlschlag ist bereits an der Vorschlagszeile festgehalten
+        # (`execute_proposal` committet ihn, bevor es wirft). Der Lauf darf ihn
+        # deshalb erfahren und den Benutzer unterrichten.
+        _lauf_wecken(db, run_id)
+        raise _state_error(exc) from exc
+    except DisSidecarError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=503, detail="ai.errors.codes.AI_ACTION_STORE_UNAVAILABLE"
+        ) from exc
+
+
+@router.post(
+    "/actions/{proposal_id}/reject",
+    response_model=AiActionProposalResponse,
+)
+def reject_action(
+    proposal_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.chat.use")),
+    _: None = Depends(verify_csrf),
+) -> AiActionProposalResponse:
+    run_id: str | None = None
+    try:
+        vorab = ai_proposal_service.owned_proposal(db, proposal_id, user)
+        run_id = vorab.run_id if vorab is not None else None
+        proposal = ai_proposal_service.reject_proposal(
+            db, proposal_id=proposal_id, user=user
+        )
+        _lauf_wecken(db, proposal.run_id or run_id)
+        return proposal_response(proposal)
+    except ai_action_errors.AiActionStateError as exc:
+        db.rollback()
+        _lauf_wecken(db, run_id)
+        raise _state_error(exc) from exc
+

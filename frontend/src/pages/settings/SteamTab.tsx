@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Save, Send, Gamepad2, AlertTriangle } from 'lucide-react'
+import { Save, Send, Gamepad2, AlertTriangle, Trash2, Undo2 } from 'lucide-react'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
@@ -16,6 +16,7 @@ export function SteamTab() {
   const [steamAccountPassword, setSteamAccountPassword] = useState('')
   const [savingSteamAccount, setSavingSteamAccount] = useState(false)
   const [newSteamKey, setNewSteamKey] = useState('')
+  const [clearSteamKey, setClearSteamKey] = useState(false)
   const [savingSteam, setSavingSteam] = useState(false)
   const [testingSteam, setTestingSteam] = useState(false)
 
@@ -76,11 +77,9 @@ export function SteamTab() {
     <fieldset disabled={!canWrite} className="space-y-6 border-0 p-0 m-0">
       {/* Steam API */}
       <div className="msm-card p-6">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center">
-            <Gamepad2 className="w-5 h-5 text-secondary" />
-          </div>
-          <h2 className="font-headline text-headline-sm text-primary">{t('settings.steamApiKey')}</h2>
+        <div className="flex items-center gap-2 mb-6">
+          <Gamepad2 className="h-5 w-5 text-secondary" aria-hidden="true" />
+          <h2 className="font-headline text-lg font-semibold text-on-surface">{t('settings.steamApiKey')}</h2>
         </div>
 
         <div className="space-y-4">
@@ -88,33 +87,68 @@ export function SteamTab() {
             <span className={`w-2 h-2 rounded-full ${settings.steam_api_configured ? 'bg-status-success' : 'bg-on-surface-variant'}`} />
             <span className="font-body-md text-sm text-on-surface">
               {settings.steam_api_configured ? t('settings.steamConfigured') : t('settings.steamNotConfigured')}
+              {settings.steam_api_source && settings.steam_api_source !== 'none' && (
+                <span className="ml-2 font-mono text-xs text-on-surface-variant">
+                  ({settings.steam_api_source === 'env' ? '.env' : 'Panel-DB'})
+                </span>
+              )}
             </span>
           </div>
 
-          {settings.steam_api_key && (
-            <div>
-              <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                {t('settings.steamCurrentKey')}
+          {/* Einheitliches API-Key Eingabefeld */}
+          <div className="rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                {t('settings.steamApiKey')}
               </label>
-              <input
-                type="text"
-                value={settings.steam_api_key}
-                readOnly
-                className="msm-input opacity-60 cursor-not-allowed font-mono text-sm"
-              />
+              {clearSteamKey ? (
+                <span className="text-xs text-status-warning flex items-center gap-1.5">
+                  {t('settings.keyWillBeCleared', { defaultValue: 'Wird beim Speichern entfernt' })}
+                  <button
+                    type="button"
+                    onClick={() => setClearSteamKey(false)}
+                    className="font-medium text-primary hover:underline inline-flex items-center gap-1"
+                  >
+                    <Undo2 className="h-3 w-3" />
+                    {t('common.undo', { defaultValue: 'Rückgängig' })}
+                  </button>
+                </span>
+              ) : settings.steam_api_configured && canWrite ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setClearSteamKey(true)
+                    setNewSteamKey('')
+                  }}
+                  className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-error transition-colors"
+                  title={t('settings.steamDeleteKey', { defaultValue: 'Schlüssel entfernen' })}
+                  aria-label={t('settings.steamDeleteKey', { defaultValue: 'Schlüssel entfernen' })}
+                >
+                  <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>{t('settings.steamDeleteKey', { defaultValue: 'Schlüssel entfernen' })}</span>
+                </button>
+              ) : null}
             </div>
-          )}
 
-          <div>
-            <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-              {t('settings.steamNewKey')}
-            </label>
             <PasswordInput
               value={newSteamKey}
-              onChange={(e) => setNewSteamKey(e.target.value)}
-              placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+              disabled={!canWrite || savingSteam || clearSteamKey}
+              onChange={(e) => {
+                setNewSteamKey(e.target.value)
+                setClearSteamKey(false)
+              }}
+              placeholder={
+                clearSteamKey
+                  ? t('settings.keyWillBeCleared', { defaultValue: 'Wird beim Speichern entfernt' })
+                  : settings.steam_api_configured
+                    ? t('settings.keyConfiguredHint', {
+                        defaultValue: 'Schlüssel hinterlegt; leer lassen, um ihn beizubehalten',
+                      })
+                    : 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'
+              }
             />
-            <p className="font-body-md text-xs text-on-surface-variant mt-2">
+
+            <p className="msm-field-help">
               {t('settings.steamKeyHint')}{' '}
               <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener noreferrer" className="text-secondary hover:underline">
                 steamcommunity.com/dev/apikey
@@ -122,16 +156,22 @@ export function SteamTab() {
             </p>
           </div>
 
-          <div className="flex gap-3 justify-end">
+          <div className="flex gap-3 justify-end flex-wrap pt-2">
             <button
               type="button"
               onClick={async () => {
                 setTestingSteam(true)
                 try {
-                  const res = await api<{ message: string; valid: boolean }>('/settings/steam-key/test')
-                  toast.success(res.message)
-                } catch (err: any) {
-                  toast.error(err.message)
+                  const res = await api<{ message: string; valid: boolean }>('/settings/steam-key/test', {
+                    method: 'POST',
+                  })
+                  if (res.valid) {
+                    toast.success(res.message)
+                  } else {
+                    toast.error(res.message)
+                  }
+                } catch (err: unknown) {
+                  toast.error(err instanceof Error ? err.message : String(err))
                 } finally {
                   setTestingSteam(false)
                 }
@@ -149,23 +189,32 @@ export function SteamTab() {
             <button
               type="button"
               onClick={async () => {
-                if (!newSteamKey.trim()) return
+                if (!newSteamKey.trim() && !clearSteamKey) return
                 setSavingSteam(true)
                 try {
-                  await api('/settings/steam-key', {
-                    method: 'POST',
-                    body: JSON.stringify({ steam_api_key: newSteamKey.trim() }),
-                  })
+                  if (clearSteamKey) {
+                    await api('/settings/steam-key', {
+                      method: 'POST',
+                      body: JSON.stringify({ steam_api_key: '' }),
+                    })
+                    setClearSteamKey(false)
+                    setNewSteamKey('')
+                  } else if (newSteamKey.trim()) {
+                    await api('/settings/steam-key', {
+                      method: 'POST',
+                      body: JSON.stringify({ steam_api_key: newSteamKey.trim() }),
+                    })
+                    setNewSteamKey('')
+                  }
                   toast.success(t('settings.steamSaved'))
-                  setNewSteamKey('')
                   await fetchSettings()
-                } catch (err: any) {
-                  toast.error(err.message)
+                } catch (err: unknown) {
+                  toast.error(err instanceof Error ? err.message : String(err))
                 } finally {
                   setSavingSteam(false)
                 }
               }}
-              disabled={savingSteam || !newSteamKey.trim() || !canWrite}
+              disabled={savingSteam || (!newSteamKey.trim() && !clearSteamKey) || !canWrite}
               className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
             >
               {savingSteam ? (
@@ -181,11 +230,9 @@ export function SteamTab() {
 
       {/* Steam Account */}
       <div className="msm-card p-6">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center">
-            <Gamepad2 className="w-5 h-5 text-secondary" />
-          </div>
-          <h2 className="font-headline text-headline-sm text-primary">{t('settings.steamAccountTitle')}</h2>
+        <div className="flex items-center gap-2 mb-6">
+          <Gamepad2 className="h-5 w-5 text-secondary" aria-hidden="true" />
+          <h2 className="font-headline text-lg font-semibold text-on-surface">{t('settings.steamAccountTitle')}</h2>
         </div>
 
         <div className="space-y-4">

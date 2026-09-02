@@ -154,6 +154,39 @@ class S3Service:
             raise S3OperationError(f"S3-Upload fehlgeschlagen: {err_code}") from e
 
     @staticmethod
+    def object_size(key: str, bucket: str | None = None) -> int | None:
+        """Groesse des Objekts im Bucket, oder ``None`` wenn es keines gibt.
+
+        Das ist der fehlende zweite Schritt zu ``upload_stream``. Der laedt hoch
+        und schweigt bei Erfolg — ``upload_fileobj`` gibt nichts zurueck, und ein
+        ausbleibender Fehler ist keine Zusage darueber, was im Bucket liegt.
+        Genau darauf ruhte bisher die Behauptung "Backup liegt in S3": auf einer
+        nicht geworfenen Ausnahme.
+
+        Fuer den autonomen Guardian-Betrieb reicht das nicht. Dort entscheidet
+        der Nachweis darueber, ob die KI eine produktive Datei anfassen darf, und
+        "es gab keinen Fehler" ist kein Nachweis.
+
+        ``None`` statt einer Ausnahme fuer den Normalfall "nicht da": der
+        Aufrufer will hier vergleichen, nicht abbrechen. Ein echtes Problem der
+        Verbindung wirft weiterhin.
+        """
+        cfg = S3Service._get_config()
+        client = S3Service._get_client()
+        target_bucket = bucket or cfg["bucket"]
+        try:
+            antwort = client.head_object(Bucket=target_bucket, Key=key)
+        except ClientError as e:
+            err_code = str(e.response.get("Error", {}).get("Code", "UnknownError"))
+            # 404/NoSuchKey/NotFound je nach Anbieter — alle heissen dasselbe.
+            if err_code in ("404", "NoSuchKey", "NotFound"):
+                return None
+            logger.warning("S3 head_object fehlgeschlagen (Key=%s): %s", key, err_code)
+            raise S3OperationError(f"S3-Pruefung fehlgeschlagen: {err_code}") from e
+        groesse = antwort.get("ContentLength")
+        return int(groesse) if groesse is not None else None
+
+    @staticmethod
     def download_stream(key: str, bucket: str | None = None):
         """Laedt ein Objekt als Stream (boto3 StreamBody, lazy read).
 

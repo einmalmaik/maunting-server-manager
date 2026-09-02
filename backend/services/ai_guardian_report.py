@@ -1,0 +1,280 @@
+"""Der Bericht nach einer Heilung, die ohne den Benutzer lief.
+
+Eigenes Modul und nicht Teil von `ai_guardian_service`: das eine startet
+Laeufe, das andere schliesst sie ab, und sie werden aus verschiedenen Richtungen
+gerufen — der Start aus dem Scheduler, der Bericht aus `_lauf_abschliessen` im
+Stream. Zusammengelegt haetten sie einen Importzyklus ueber `ai_stream_service`
+gebildet, den man nur mit einem verzoegerten Import haette aufloesen koennen.
+Dieselbe Konstruktion hat in diesem Projekt schon einmal das Panel zum Stillstand
+gebracht, als jemand den verzoegerten Import fuer Unordnung hielt.
+
+Verschickt wird bei **jedem** Endzustand, nicht nur bei Erfolg. "Nicht
+geschafft" ist fuer den Betreiber die wichtigere Nachricht von beiden: sein
+Server laeuft nicht, und niemand sass davor. Ein Heilungslauf, der still
+scheitert, waere die schlechteste Eigenschaft dieser ganzen Kopplung.
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import datetime, timezone
+
+from sqlalchemy.orm import Session
+
+from models import AiRun, Backup, Incident, Server, User
+# **Dieselbe** Funktion wie beim Aufgabenbericht, nicht eine zweite Fassung.
+# Hier stand eine wortgleiche Kopie, und sie ist auseinandergelaufen: die eine
+# schnitt den Abschlusstext von hinten ab (dort steht das Ergebnis), diese von
+# vorne (dort stehen die Ansagen vor jedem Werkzeugaufruf). Ein Heilungslauf hat
+# mehr Runden als ein Aufgabenlauf, also mehr Ansagen — die Mail an den
+# Betreiber trug damit ausgerechnet im wichtigeren Fall die Ankündigungen statt
+# des Ergebnisses. Kein Importzyklus: `ai_task_report` kennt dieses Modul nicht.
+from services.ai_task_report import abschlusstext
+from services.ai_redaction import redact_sensitive_text
+
+
+logger = logging.getLogger(__name__)
+
+#: Welche Endzustaende als "behoben" gelten. Ausschliesslich `completed` — ein
+#: abgebrochener oder fehlgeschlagener Lauf hat nichts bewiesen, auch wenn er
+#: unterwegs etwas getan hat.
+ERFOLG = ("completed",)
+
+
+def _utc(wert: datetime) -> datetime:
+    """SQLite gibt zeitzonenlose Werte zurueck, PostgreSQL zeitzonenbehaftete.
+
+    Ein Vergleich zwischen beiden wirft `TypeError` — hier ausgerechnet im
+    Berichtspfad, also dort, wo ein Fehler bedeutet, dass der Betreiber gar
+    nichts erfaehrt.
+    """
+    return wert.replace(tzinfo=timezone.utc) if wert.tzinfo is None else wert
+
+
+def _backupname(db: Session, *, run: AiRun, server_id: int) -> str | None:
+    """Das nachgewiesene Backup, das **dieser Lauf** angelegt hat — falls eines.
+
+    Gesucht wird ueber den Vorschlag, nicht ueber ein Zeitfenster. Das ist der
+    Unterschied zwischen einem Beleg und einer Vermutung, und er ist hier
+    entscheidend, weil der Betreiber diesen Satz liest, ohne ihn nachzupruefen.
+
+    Vorher stand hier "juengstes verifiziertes Backup dieses Servers seit dem
+    Vorfall". Auf einem Server mit stuendlichem Automatikbackup fand die Abfrage
+    damit regelmaessig ein **fremdes** Archiv — und zwar bevorzugt ein zu
+    junges, weil sie absteigend sortierte. Der Ablauf: Vorfall 03:05,
+    KI-Backup 03:15, Eingriff 03:20, Scheduler-Backup 03:30, Lauf endet 03:35.
+    Die Mail nannte das Archiv von 03:30, das die Aenderung der KI bereits
+    enthielt. Wer daraufhin zurueckrollt, macht die Aenderung nicht rueckgaengig,
+    sondern zementiert sie.
+
+    Schlimmer noch trat der Satz auch dann auf, wenn die KI ueberhaupt nichts
+    gesichert hatte — ein Neustart verlangt kein Backup.
+
+    `AiActionProposal` traegt `run_id` und `tool_name` und ist damit die Spur,
+    die es braucht. Findet sich keine, steht in der Mail nichts ueber ein
+    Backup — eine ausgelassene Zeile ist besser als eine falsche Zusage.
+    """
+    from models import AiActionProposal
+
+    vorschlag = (
+        db.query(AiActionProposal)
+        .filter(
+            AiActionProposal.run_id == run.id,
+            AiActionProposal.tool_name == "propose_backup",
+            AiActionProposal.status == "succeeded",
+            AiActionProposal.server_id == server_id,
+        )
+        .order_by(AiActionProposal.created_at.desc())
+        .first()
+    )
+    if vorschlag is None:
+        return None
+
+    # Der Name aus der Vorschau ist der, den die KI vergeben hat. Er steht dort
+    # bereits (`_execute_backup` legt ihn ab) und muss nicht aus der
+    # Backup-Tabelle geraten werden.
+    name = None
+    try:
+        import json as _json
+
+        vorschau = _json.loads(vorschlag.preview_json or "{}")
+        name = vorschau.get("backup_name") or vorschau.get("name")
+    except (TypeError, ValueError):
+        name = None
+
+    # Der Nachweis bleibt Bedingung: genannt wird nur, was auch `verified_at`
+    # traegt. Ein Name ohne Nachweis waere genau die Behauptung, die diese
+    # Kopplung nicht erheben soll.
+    zeile = (
+        db.query(Backup)
+        .filter(
+            Backup.server_id == server_id,
+            Backup.verified_at.isnot(None),
+            Backup.created_at >= _utc(vorschlag.created_at),
+        )
+        .order_by(Backup.created_at.asc())
+        .first()
+    )
+    if zeile is None:
+        return None
+    return str(name or zeile.name or zeile.filename.rsplit("/", 1)[-1])[:120]
+
+
+def bericht_versenden(db: Session, *, run: AiRun, zustand: dict) -> None:
+    """Stellt den Bericht dieses Heilungslaufs zu.
+
+    Tut nichts, wenn E-Mail nicht eingerichtet ist oder der Benutzer keine
+    Benachrichtigungen will. Beides ist eine gueltige Einstellung und kein
+    Fehler — der Lauf steht ohnehin im Chat.
+
+    Empfaenger ist **der Freigeber**, also derselbe Benutzer, in dessen Namen
+    gehandelt wurde. Nicht der Verteiler aus `guardian_incident_service`: der
+    fragt nur `server_permissions` ab und uebersieht damit Rollen und den Owner.
+    Hier ist die Zuordnung eindeutig — wer die Autonomie erteilt hat, erfaehrt,
+    was damit geschehen ist.
+    """
+    from services import ai_guardian_repair_service, ai_mail
+
+    rahmen = zustand.get("guardian") or {}
+    server_id = rahmen.get("server_id")
+    incident_id = rahmen.get("incident_id")
+    if not server_id or not incident_id:
+        return
+
+    # **Eine Mail je Auftrag, nicht je Lauf.**
+    #
+    # Seit ein Vorfall bis zu acht Anlaeufe bekommt, waere die alte Regel
+    # ("bei jedem Endzustand") acht Mails ueber einen Server — sieben davon mit
+    # "nicht behoben", und die achte widerspraeche ihnen. Der Betreiber koennte
+    # daraus nicht ablesen, ob sein Server laeuft.
+    #
+    # Der Rueckhalt gegen die naheliegende Gefahr — der Auftrag endet, ohne dass
+    # noch ein Lauf endet — steht in `ai_guardian_repair_service._schlussbericht`:
+    # laeuft die Frist im Takt ab, verschickt der Takt selbst.
+    auftrag = ai_guardian_repair_service.auftrag_aus_zustand(db, zustand)
+    if auftrag is not None and ai_guardian_repair_service.kampagne_laeuft_noch(db, zustand):
+        logger.debug(
+            "Heilungsbericht zurueckgestellt: Auftrag laeuft weiter repair_id=%s",
+            auftrag.id,
+        )
+        return
+
+    user = db.get(User, run.user_id)
+    server = db.get(Server, int(server_id))
+    vorfall = db.get(Incident, int(incident_id))
+    if user is None or server is None or vorfall is None:
+        return
+    # Die drei Vorbedingungen — Benachrichtigungen gewuenscht, Versandweg
+    # eingerichtet, Adresse lesbar — stehen seit dem zweiten Anlass (den
+    # faelligen KI-Aufgaben) in `ai_mail` und nicht mehr hier. Sie einzeln zu
+    # wiederholen hiess, sie irgendwann verschieden zu wiederholen.
+    adresse = ai_mail.empfaenger(db, user)
+    if adresse is None:
+        return
+
+    # Der Zustand des **Vorfalls**, nicht die Behauptung des Modells. Ein Lauf
+    # kann sauber enden und der Server trotzdem stehen; umgekehrt kann das
+    # Modell einen Fehlschlag melden, waehrend Guardian den Vorfall inzwischen
+    # als geloest sieht. Beides zusammen ergibt erst die Wahrheit — deshalb
+    # zaehlt hier die Und-Verknuepfung.
+    db.refresh(vorfall)
+    if auftrag is not None:
+        # Mit Auftrag ist der Lauf die falsche Einheit. Sein letzter Anlauf kann
+        # am Rundenbudget geendet sein, waehrend der Server laengst laeuft —
+        # oder sauber, waehrend nichts gehalten hat. `erledigt` sagt beides
+        # richtig: die Phase wird gesetzt, nachdem die **Anlage** befragt wurde
+        # (Vorfall geloest, Server im gewollten Zustand, keine Quarantaene).
+        geheilt = str(auftrag.phase) == "erledigt"
+    else:
+        geheilt = run.status in ERFOLG and vorfall.status == "resolved"
+
+    bericht = abschlusstext(db, run, zustand)
+    if not bericht:
+        bericht = (
+            "Der Assistent hat keinen Abschlussbericht hinterlassen. "
+            "Der Verlauf steht im KI-Chat des Panels."
+        )
+
+    _zustellen(
+        db=db,
+        user_id=int(user.id),
+        provider_id=run.provider_id,
+        to=adresse,
+        username=str(user.username),
+        # Geschwärzt und gekürzt wie im Auftragstext desselben Laufs
+        # (ai_guardian_service): der Name ist Betreibertext, kann aber aus einer
+        # Shop-Bestellung stammen. Von hier geht er über die Fakten im
+        # Ausgangskorb an den KI-Anbieter.
+        server_name=redact_sensitive_text(str(server.name or ""))[:64],
+        incident_type=str(vorfall.type),
+        geheilt=geheilt,
+        bericht=bericht,
+        backup_name=_backupname(db, run=run, server_id=server.id),
+    )
+
+
+def _zustellen(
+    *, db, user_id: int, provider_id: int | None = None, **felder
+) -> None:
+    """Legt den Heilungsbericht in den Ausgangskorb. Verschickt nichts.
+
+    Bleibt als eigene Funktion bestehen: sie ist die Stelle, an der die Tests
+    den Versand abfangen, und sie ist das einzige Stueck, das
+    **guardianspezifisch** ist — welcher Rahmen es sein soll.
+
+    Hier stand eine Koroutine in einem eigenen Thread, die erst verfasste und
+    dann verschickte. Sie ueberlebte keinen Neustart, und gerade dieser Bericht
+    darf nicht verlorengehen: er ist oft die einzige Spur davon, dass die KI in
+    Abwesenheit des Betreibers an einem Server gearbeitet hat. Jetzt entsteht
+    hier eine Zeile in der Datenbank, und der Arbeiter macht den Rest —
+    einschliesslich des Modellaufrufs, der damit innerhalb einer Schranke liegt.
+
+    Der hier gerenderte Text ist der **Rueckfall**. Er geht hinaus, wenn der
+    Verfassungsschritt im Arbeiter nichts liefert; verschickt wird in jedem Fall.
+    """
+    from services import ai_mail
+    from services.email_service import EmailService
+
+    rahmen = EmailService.ai_rahmen_healing(
+        str(felder.get("username") or ""),
+        server_name=str(felder.get("server_name") or ""),
+        incident_type=str(felder.get("incident_type") or ""),
+        geheilt=bool(felder.get("geheilt")),
+        backup_name=felder.get("backup_name"),
+    )
+    rahmen["provider_id"] = provider_id
+    betreff, text, html = EmailService.ai_mail_rendern(
+        rahmen, rueckfall=str(felder.get("bericht") or "")
+    )
+    ai_mail.zustellen(
+        name="ai-guardian-report",
+        db=db,
+        user_id=user_id,
+        betreff=betreff,
+        text=text,
+        html=html,
+        fakten=_fakten(felder),
+        rahmen=rahmen,
+    )
+
+
+def _fakten(felder: dict) -> str:
+    """Was das Modell ueber diese Mail wissen muss — ohne die Adresse.
+
+    Die Adresse steht eine Ebene hoeher in denselben Feldern und bleibt hier
+    ausdruecklich weg. Wer sie gar nicht erst zeigt, muss sie spaeter nicht aus
+    dem Text herausfiltern — und der Empfaenger kommt in jedem Fall aus
+    `ai_mail.empfaenger`, nie aus etwas, das ein Modell geschrieben hat.
+    """
+    zustand = "behoben" if felder.get("geheilt") else "nicht behoben"
+    zeilen = [
+        "Anlass: die Guardian-Engine hat eine Stoerung gemeldet, "
+        "der Assistent hat sie eigenstaendig bearbeitet.",
+        f"Server: {felder.get('server_name') or '(ohne Namen)'}",
+        f"Art der Stoerung: {felder.get('incident_type') or 'unbekannt'}",
+        f"Ergebnis laut Panel: {zustand}",
+    ]
+    if felder.get("backup_name"):
+        zeilen.append(f"Vor dem Eingriff angelegtes Backup: {felder['backup_name']}")
+    zeilen.append(f"Abschlussbericht des Laufs:\n{felder.get('bericht') or ''}")
+    return "\n".join(zeilen)

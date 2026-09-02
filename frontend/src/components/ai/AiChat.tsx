@@ -1,0 +1,1674 @@
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { AudioLines, CalendarClock, Check, ListPlus, Loader2, Mic, Paperclip, Pencil, Send, ShieldAlert, Sparkles, Square, Trash2, X, Zap } from 'lucide-react'
+import type { TFunction } from 'i18next'
+import { useTranslation } from 'react-i18next'
+
+import {
+  aiApi,
+  type AiAttachment,
+  type AiContextStatus,
+  type AiGeoCameraCommand,
+  type AiProviderAvailable,
+  type AiRegionalAnalysis,
+  type AiRunInfo,
+} from '@/api/ai'
+import { api, SanitizedApiError } from '@/api/client'
+import { Button, Dropdown, Avatar } from '@/Singra/UI'
+import {
+  aiChatPreferenceKeys,
+  readClosedGeoAnalysis,
+  readAiProviderChoice,
+  readAiReasoningChoice,
+  writeClosedGeoAnalysis,
+  writeAiProviderChoice,
+  writeAiReasoningChoice,
+} from '@/lib/aiChatPreferences'
+import { browserWahlInsKontoUebernehmen } from '@/lib/aiProviderKonto'
+import { useAuthStore } from '@/stores/authStore'
+import { confirm } from '@/stores/confirmStore'
+import { toast } from '@/stores/toastStore'
+import { AiActionProposalCard } from './AiActionProposalCard'
+import { AiAutonomyButton } from './AiAutonomyButton'
+import { AiContextMeter } from './AiContextMeter'
+import { AiMemoryNotice } from './AiMemoryNotice'
+import { AiSkillModal } from './AiSkillModal'
+import { denkwahlFuer, ReasoningPicker } from './ReasoningPicker'
+// Die Blase und ihre Bestandteile standen hier, solange es genau ein Fenster
+// gab. Sie liegen jetzt in `AiVerlauf`, weil das Guardian-Fenster denselben
+// Verlauf zeichnet — zwei Zeichner wären zwei Wahrheiten darüber, wie ein Zug
+// der KI aussieht. Die Schleife hier bleibt: an ihr hängen Bearbeiten und
+import { AiAntwortblase, formatMessageTime, KEINE_AUFRUFE, mergeEntries } from './AiVerlauf'
+import { WorkerLeiste } from './WorkerLeiste'
+import { useAiLauf } from './useAiLauf'
+import { ActiveProcessesCard } from './geo/ActiveProcessesCard'
+import { RegionalAnalysisLayout } from './geo/RegionalAnalysisLayout'
+import type { NewsItem } from './geo/RegionalInfoPanel'
+import { applyGeoCameraCommand, normalizeGeoCameraCommand, normalizeRegionalAnalysis } from './geo/regionalAnalysis'
+import { AI_ZUSTELLUNG_EVENT } from '@/lib/aiZustellung'
+import { useHasPermission } from '@/hooks/useHasPermission'
+import { starteAufnahme, type Aufnahme } from './voice/audioAufnahme'
+import { DictationWaveform } from './voice/DictationWaveform'
+
+function formatDiktatTimer(sekunden: number): string {
+  const m = Math.floor(sekunden / 60)
+  const s = sekunden % 60
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+}
+
+interface ServerOption {
+  id: number
+  name: string
+}
+
+const ATTACHMENT_ACCEPT = '.txt,.log,.cfg,.conf,.ini,.json,.properties,.toml,.yaml,.yml,.png,.jpg,.jpeg'
+
+/**
+ * Wie oft das Tipp-Signal höchstens gesendet wird.
+ *
+ * Die Ruhe-Karenz der Meldestelle liegt bei 10–20 Sekunden
+ * (docs/agentic-framework.md, §4) — ein Signal je zehn Sekunden hält sie
+ * zuverlässig offen, ohne je Tastendruck einen Request zu erzeugen.
+ * Übertragen wird nur der Zeitpunkt, nie der Text.
+ */
+const TIPP_TAKT_MS = 10_000
+
+/**
+ * Wie oft der offene Chat nach Fremdem sieht — Nachrichten aus einem zweiten
+ * Tab, der Desktop-App oder einer Meldestellen-Lieferung. Derselbe Abstand
+ * wie im Guardian-Fenster, aus demselben Grund: nachsehen, nicht streamen.
+ */
+const NACHSEHEN_MS = 20_000
+
+/**
+ * Die Denkwahl — dieselben zwei Felder, die auch auf der Leitung stehen und in
+ * `ai_runs` landen: **ob** nachgedacht wird und **wie tief**.
+ *
+ * Zwei Felder statt eines, weil die Anbieter selbst zwei Dinge kennen: 145 der
+ * 272 denkenden Modelle nennen ueberhaupt keine Stufen. `{an: true, stufe:
+ * null}` heisst dort „denk nach, so wie du es fuer richtig haeltst" — mit einem
+ * einzelnen Stufenfeld muesste man dafuer einen Wert erfinden.
+ */
+interface Denkwahl {
+  an: boolean
+  stufe: string | null
+}
+
+
+
+/**
+ * Mit welchem Modell der Chat aufgeht: dem zuletzt gewaehlten, sonst dem
+ * ersten benutzbaren.
+ *
+ * Die gemerkte Kennung wird nicht geglaubt, sondern gegen die Liste geprueft.
+ * Zwischen zwei Besuchen kann der Provider geloescht, sein Schluessel entfernt
+ * oder dem Benutzer die Rolle entzogen worden sein — dann steht er nicht mehr
+ * als `available` in der Liste, und ein Verweis darauf ergaebe eine
+ * Auswahlliste, deren angezeigter Wert in keiner ihrer Optionen vorkommt.
+ *
+ * Eine reine Funktion, damit sie sich ohne gerendertes Bauteil pruefen laesst.
+ */
+function providerBeimOeffnen(
+  providers: AiProviderAvailable[],
+  gemerkt: number | null,
+): number | null {
+  const benutzbar = providers.filter((item) => item.available)
+  if (gemerkt !== null && benutzbar.some((item) => item.id === gemerkt)) return gemerkt
+  return benutzbar[0]?.id ?? null
+}
+
+/**
+ * Der KI-Assistent: **eine** Unterhaltung, die die Seite ausfuellt.
+ *
+ * Bewusst wie ein Messenger und nicht wie ein Verwaltungsformular. Es gibt
+ * keinen Weg, einen zweiten Chat anzulegen — der Assistent ist ein
+ * Gespraechspartner, keine Ablage. Alles Weitere (Provider, Denkschritte,
+ * autonomer Modus, Skills) haengt als Schalter am Chat statt in eigenen
+ * Kaesten daneben.
+ */
+export interface AiChatProps {
+  onSwitchMode?: (mode: 'sprache' | 'guardian' | 'aufgaben') => void
+  canTasks?: boolean
+  hasVoice?: boolean
+}
+
+export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiChatProps = {}) {
+  const { t } = useTranslation()
+  const canAttach = useHasPermission('ai.attachments.use')
+  const canUseAutonomy = useHasPermission('ai.autonomous.use')
+  const canUseMemory = useHasPermission('ai.memory.use')
+  const canUseSkills = useHasPermission('ai.skills.use')
+  const canUseVoice = useHasPermission('ai.voice.use')
+  // Modell und Denkstufe merkt sich der Browser — je Benutzer, begruendet in
+  // `aiChatPreferences`. Die Kennung kommt aus dem Auth-Store statt aus einer
+  const currentUser = useAuthStore((state) => state.user)
+  const userId = currentUser?.id ?? 'anonym'
+  const merkSchluessel = useMemo(() => aiChatPreferenceKeys(userId), [userId])
+
+  const [skillsModalOpen, setSkillsModalOpen] = useState(false)
+  const [providers, setProviders] = useState<AiProviderAvailable[]>([])
+  const [providerId, setProviderId] = useState<number | null>(null)
+  const [attachments, setAttachments] = useState<AiAttachment[]>([])
+  const [servers, setServers] = useState<ServerOption[]>([])
+  // Zwei Felder, genau wie auf der Leitung und in `ai_runs`: **ob** nachgedacht
+  // wird und **wie tief**. Das ist keine Doppelung — 145 der 272 denkenden
+  // Modelle kennen ueberhaupt keine Stufen, dort ist `stufe` zwangslaeufig
+  // `null`, und ein einzelnes Feld muesste fuer sie einen Wert erfinden.
+  // Welche Stufen es gibt, sagt der Provider aus dem Katalog; sie sind je
+  // Modell verschieden und bereits auf die Rolle dieses Benutzers geklemmt.
+  // Die Wahl ueberlebt das Neuladen: sie steht im localStorage unter der
+  // Benutzerkennung. Der Anfangswert kommt deshalb aus einer Funktion — sonst
+  // stuende beim ersten Bild „kein Nachdenken", und der Effekt darunter setzte
+  // die gemerkte Stufe erst nach dem Laden der Provider nach.
+  const [denken, setDenken] = useState<Denkwahl>(
+    () => readAiReasoningChoice(merkSchluessel.reasoning) ?? { an: false, stufe: null },
+  )
+  // Ob der Einwilligungshinweis faellig ist. Die 24-Stunden-Regel entscheidet
+  // das Backend — hier steht nur das Ergebnis.
+  const [memoryNoticeDue, setMemoryNoticeDue] = useState(false)
+  const [input, setInput] = useState('')
+  const [dictationAvailable, setDictationAvailable] = useState(false)
+  const [dictating, setDictating] = useState(false)
+  const [transcribing, setTranscribing] = useState(false)
+  const [dictationQuota, setDictationQuota] = useState<{
+    monthly_limit_minutes: number | null
+    used_seconds: number
+    remaining_seconds: number | null
+  } | null>(null)
+  const [dictationElapsed, setDictationElapsed] = useState(0)
+  // Welche eigene Nachricht gerade umformuliert wird, und womit.
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editDraft, setEditDraft] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [uploading, setUploading] = useState(false)
+  const [dragging, setDragging] = useState(false)
+  // Was beim Oeffnen schon lief. Wird in einem eigenen Effekt angehaengt, weil
+  // das Anhaengen erst gehen kann, wenn die Verarbeitung steht.
+  const [laufBeimOeffnen, setLaufBeimOeffnen] = useState<AiRunInfo | null>(null)
+  // Wie voll der Kontext ist. `null` heisst „noch nicht geladen oder nicht
+  // abrufbar“ — der Ring bleibt dann schlicht weg.
+  const [contextStatus, setContextStatus] = useState<AiContextStatus | null>(null)
+  // Steht der Verlauf unten? Nur dann wird nachgeschoben. Anfangs ja — ein
+  // frisch geöffneter Chat zeigt die letzte Nachricht.
+  const [amEnde, setAmEnde] = useState(true)
+  // Warteschlange fuer Nachrichten, die waehrend des Streams eingegeben werden.
+  const [queuedMessages, setQueuedMessages] = useState<string[]>([])
+  // Regionale Analyse & Globus-Zustand
+  const [geoData, setGeoData] = useState<AiRegionalAnalysis | null>(null)
+  const [geoOpen, setGeoOpen] = useState(false)
+
+  const verlaufRef = useRef<HTMLDivElement | null>(null)
+  const mountedRef = useRef(true)
+  const dragDepthRef = useRef(0)
+  // Wann zuletzt „der Mensch tippt" gemeldet wurde — die Drossel des
+  // Tipp-Signals. Ein Ref und kein State: der Wert soll nichts neu zeichnen.
+  const letztesTippSignalRef = useRef(0)
+  // Welches Modell **jetzt** gewählt ist. `ladeKontext` braucht das, um eine
+  // Antwort zu erkennen, die zu einer älteren Wahl gehört. Zuweisung beim
+  // Render, dasselbe Muster wie `autoscrollRef` in ServerConsolePanel.
+  const providerRef = useRef<number | null>(null)
+  const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  const dictationRef = useRef<Aufnahme | null>(null)
+  const dictationChunksRef = useRef<ArrayBuffer[]>([])
+  const dictationSelectionRef = useRef<{ start: number; end: number } | null>(null)
+  providerRef.current = providerId
+
+  useEffect(() => {
+    let active = true
+    if (!providerId || !canUseVoice) {
+      setDictationAvailable(false)
+      setDictationQuota(null)
+      return
+    }
+    aiApi.getVoiceConfig(providerId)
+      .then((config) => {
+        if (active) {
+          setDictationAvailable(Boolean(config.dictation_available))
+          setDictationQuota({
+            monthly_limit_minutes: config.dictation_monthly_limit_minutes ?? null,
+            used_seconds: config.dictation_used_seconds ?? 0,
+            remaining_seconds: config.dictation_remaining_seconds ?? null,
+          })
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setDictationAvailable(false)
+          setDictationQuota(null)
+        }
+      })
+    return () => { active = false }
+  }, [providerId, canUseVoice])
+
+  const diktatAbbrechen = useCallback(() => {
+    if (dictationRef.current) {
+      dictationRef.current.beenden()
+      dictationRef.current = null
+    }
+    dictationChunksRef.current = []
+    setDictating(false)
+    setDictationElapsed(0)
+  }, [])
+
+  const diktatUmschalten = useCallback(async () => {
+    if (!providerId || transcribing) return
+    if (!dictationRef.current) {
+      if (
+        dictationQuota?.remaining_seconds !== null &&
+        dictationQuota?.remaining_seconds !== undefined &&
+        dictationQuota.remaining_seconds <= 0
+      ) {
+        toast.error(t('ai.chat.dictationQuotaExceeded'))
+        return
+      }
+      const feld = inputRef.current
+      const start = feld?.selectionStart ?? input.length
+      const end = feld?.selectionEnd ?? start
+      dictationSelectionRef.current = { start, end }
+      dictationChunksRef.current = []
+      try {
+        dictationRef.current = await starteAufnahme((chunk) => dictationChunksRef.current.push(chunk))
+        setDictating(true)
+        setDictationElapsed(0)
+      } catch {
+        toast.error(t('ai.chat.dictationError'))
+      }
+      return
+    }
+    dictationRef.current.beenden()
+    dictationRef.current = null
+    setDictating(false)
+    setDictationElapsed(0)
+    const chunks = dictationChunksRef.current
+    dictationChunksRef.current = []
+    const bytes = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0)
+    if (!bytes) return
+    const pcm = new Uint8Array(bytes)
+    let offset = 0
+    for (const chunk of chunks) {
+      pcm.set(new Uint8Array(chunk), offset)
+      offset += chunk.byteLength
+    }
+    setTranscribing(true)
+    try {
+      const { text } = await aiApi.transcribeVoice(providerId, pcm.buffer)
+      const sel = dictationSelectionRef.current
+      dictationSelectionRef.current = null
+      setInput((aktuelleEingabe) => {
+        const start = sel?.start ?? (inputRef.current?.selectionStart ?? aktuelleEingabe.length)
+        const end = sel?.end ?? (inputRef.current?.selectionEnd ?? start)
+        const neu = `${aktuelleEingabe.slice(0, start)}${text}${aktuelleEingabe.slice(end)}`.slice(0, 16_000)
+        requestAnimationFrame(() => {
+          const cursor = Math.min(neu.length, start + text.length)
+          inputRef.current?.setSelectionRange(cursor, cursor)
+          inputRef.current?.focus()
+        })
+        return neu
+      })
+      // Restkontingent aktualisieren
+      aiApi.getVoiceConfig(providerId).then((config) => {
+        setDictationQuota({
+          monthly_limit_minutes: config.dictation_monthly_limit_minutes ?? null,
+          used_seconds: config.dictation_used_seconds ?? 0,
+          remaining_seconds: config.dictation_remaining_seconds ?? null,
+        })
+      }).catch(() => {})
+    } catch {
+      toast.error(t('ai.chat.dictationError'))
+    } finally {
+      setTranscribing(false)
+    }
+  }, [dictationQuota, input, providerId, t, transcribing])
+
+  useEffect(() => {
+    if (!dictating) {
+      setDictationElapsed(0)
+      return
+    }
+    const timer = setInterval(() => {
+      setDictationElapsed((prev) => {
+        const next = prev + 1
+        if (
+          dictationQuota?.remaining_seconds !== null &&
+          dictationQuota?.remaining_seconds !== undefined &&
+          next >= dictationQuota.remaining_seconds
+        ) {
+          void diktatUmschalten()
+        }
+        return next
+      })
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [dictating, dictationQuota, diktatUmschalten])
+
+  useEffect(() => () => dictationRef.current?.beenden(), [])
+
+  useEffect(() => {
+    const handlePrefChange = () => {
+      const savedProvider = readAiProviderChoice(merkSchluessel.provider)
+      if (savedProvider !== null && savedProvider !== providerId) {
+        setProviderId(savedProvider)
+      }
+      const savedReasoning = readAiReasoningChoice(merkSchluessel.reasoning)
+      if (savedReasoning !== null) {
+        setDenken(savedReasoning)
+      }
+    }
+    const handleCleared = () => {
+      setEntries([])
+      setContextStatus(null)
+      setAttachments([])
+    }
+    window.addEventListener('msm:ai-preference-changed', handlePrefChange)
+    window.addEventListener('msm:ai-chat-cleared', handleCleared)
+    return () => {
+      window.removeEventListener('msm:ai-preference-changed', handlePrefChange)
+      window.removeEventListener('msm:ai-chat-cleared', handleCleared)
+    }
+  }, [merkSchluessel, providerId])
+
+  useEffect(() => {
+    // StrictMode fuehrt Setup/Cleanup in Entwicklung absichtlich doppelt aus.
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    Promise.all([
+      aiApi.listProviders(),
+      aiApi.getConversation(),
+      aiApi.listActions(),
+      canAttach ? aiApi.listAttachments() : Promise.resolve([] as AiAttachment[]),
+      // Nur für den Autonomie-Knopf, und nur dort wird die Liste gebraucht.
+      // Ohne das Recht holte jedes Öffnen der Seite alle sichtbaren Server
+      // samt Bind-IP, Spiel-, Query- und RCON-Port in den Browser — für eine
+      // Auswahlliste, die gar nicht gezeichnet wird.
+      canUseAutonomy
+        ? api<ServerOption[]>('/servers').catch(() => [] as ServerOption[])
+        : Promise.resolve([] as ServerOption[]),
+      // Scheitert der Abruf, wird der Hinweis nicht gezeigt statt den ganzen
+      // Chat scheitern zu lassen — er ist wichtig, aber nicht so wichtig.
+      canUseMemory
+        ? aiApi.getMemoryPreference().catch(() => null)
+        : Promise.resolve(null),
+      // Laeuft da noch etwas von vorhin? Scheitert die Frage, wird eben nicht
+      // angehaengt — der Verlauf steht ohnehin.
+      aiApi.getActiveRun().catch(() => null),
+    ])
+      .then(([providerRows, conversation, actions, attachmentRows, serverRows, memoryPreference, aktiverLauf]) => {
+        if (!active) return
+        setLaufBeimOeffnen(aktiverLauf)
+        setMemoryNoticeDue(Boolean(memoryPreference?.notice_due))
+        setProviders(providerRows)
+        // Die Wahl am Konto schlägt die im Browser: sie ist die eine Quelle,
+        // die auch Overlay und Desktop-App sehen. Der localStorage bleibt als
+        // Rückfall für Konten, die noch nie hier gewählt haben. Bewusst
+        // `getState()` statt Abo — die gespeicherte Wahl ändert sich beim
+        // Wechseln unten, und ein Abo lüde dann den ganzen Chat neu.
+        const kontoWahl = useAuthStore.getState().user?.ai_provider_id ?? null
+        setProviderId(providerBeimOeffnen(
+          providerRows,
+          kontoWahl ?? readAiProviderChoice(merkSchluessel.provider),
+        ))
+        // Einmalige Übernahme: eine Browser-Wahl aus der Zeit vor dem
+        // Konto-Feld wandert beim ersten Öffnen ans Konto. Ohne das spräche
+        // das Overlay bis zum nächsten manuellen Modellwechsel weiter mit dem
+        // erstbesten Zugang — und der kann beliebig langsam sein.
+        void browserWahlInsKontoUebernehmen()
+        // Vorschlaege werden chronologisch zwischen die Nachrichten einsortiert,
+        // damit man sieht, auf welche Antwort sie sich beziehen. Vorher standen
+        // sie gesammelt am Ende und wirkten losgeloest.
+        setEntries(mergeEntries(conversation.messages, actions))
+        setAttachments(attachmentRows)
+        setServers(serverRows.map((row) => ({ id: row.id, name: row.name })))
+      })
+      .catch((error: unknown) => {
+        if (active) toast.error(error instanceof SanitizedApiError ? error.message : t('ai.chat.errors.load'))
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [canAttach, canUseAutonomy, canUseMemory, merkSchluessel.provider, t])
+
+
+
+  /**
+   * Die Zahlen hinter dem Ring — abhaengig vom **Modell**, nicht nur vom Chat.
+   *
+   * Deshalb neu geholt, sobald der Provider wechselt: dasselbe Gespraech fuellt
+   * ein 128k-Fenster fast und ein 1M-Fenster kaum. Ohne das zeigte der Ring nach
+   * einem Modellwechsel weiter den Fuellstand des alten.
+   */
+  const ladeKontext = useCallback(async () => {
+    if (!providerId) {
+      setContextStatus(null)
+      return
+    }
+    try {
+      const status = await aiApi.getContextStatus(providerId)
+      // Nur übernehmen, wenn die Wahl seither dieselbe geblieben ist. Zwei
+      // Modellwechsel kurz hintereinander können sich überholen — die Auskunft
+      // ist bei kaltem Modellkatalog ein externer Abruf. Der Ring zeigte dann
+      // das Fenster des ersten Modells für das zweite an, und genau daran
+      // liest der Benutzer ab, wann gefaltet wird.
+      if (mountedRef.current && providerRef.current === providerId) setContextStatus(status)
+    } catch {
+      // Der Ring ist eine Zusatzauskunft. Faellt sie aus, verschwindet er —
+      // ein Fehlertoast fuer eine Anzeige waere laestiger als die fehlende Zahl.
+      if (mountedRef.current) setContextStatus(null)
+    }
+  }, [providerId])
+
+  useEffect(() => { void ladeKontext() }, [ladeKontext])
+
+  /**
+   * Der Lauf und sein Ereignisstrom — der Verlauf entsteht dort, nicht hier.
+   *
+   * Diese Komponente bleibt für das zuständig, was man sieht und bedient:
+   * Modellwahl, Denktiefe, Anhänge, Bearbeiten, Zeichnen. Wie aus dreizehn
+   * Ereignisarten ein Verlauf wird, steht in `useAiLauf` und lässt sich dort
+   * ohne gerendertes Bauteil prüfen.
+   */
+  const {
+    entries, setEntries, streaming, laufendeWerkzeuge, runId, setRunId,
+    merkeVorschlag, sendContent, haengeAn, stoppeLauf,
+  } = useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttachments })
+
+  const manuallyClosedGeoRef = useRef(false)
+  const closedGeoIdRef = useRef(readClosedGeoAnalysis(merkSchluessel.closedGeoAnalysis))
+  const lastSeenGeoIdRef = useRef<string | null>(null)
+  const lastSeenCameraCommandRef = useRef<string | null>(null)
+  const wasAnalyzingRegionRef = useRef(false)
+
+  useEffect(() => {
+    closedGeoIdRef.current = readClosedGeoAnalysis(merkSchluessel.closedGeoAnalysis)
+  }, [merkSchluessel.closedGeoAnalysis])
+
+  // Automatische Aktivierung des 3D-Globus bei einer neuen regionalen Analyse
+  useEffect(() => {
+    const isAnalyzing = laufendeWerkzeuge.some(
+      (w) => w.tool_name === 'analyze_region' || w.tool_name === 'control_region_camera',
+    )
+    if (isAnalyzing && !wasAnalyzingRegionRef.current) {
+      manuallyClosedGeoRef.current = false
+      setGeoOpen(true)
+    }
+    wasAnalyzingRegionRef.current = isAnalyzing
+  }, [laufendeWerkzeuge])
+
+  // Aktualisiert geoData aus der jüngsten Analyse und allen nachfolgenden Kamerabefehlen im Verlauf
+  useEffect(() => {
+    let latestAnalysis: AiRegionalAnalysis | null = null
+    let latestAnalysisGeoId = ''
+    let analysisMsgIdx = -1
+    let analysisSecIdx = -1
+
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const entry = entries[i]
+      if (entry.kind === 'message' && entry.message.sections) {
+        for (let j = entry.message.sections.length - 1; j >= 0; j--) {
+          const section = entry.message.sections[j]
+          if (
+            section.art === 'tool' &&
+            section.werkzeug?.tool_name === 'analyze_region' &&
+            section.werkzeug.geo_analysis
+          ) {
+            const geo = normalizeRegionalAnalysis(section.werkzeug.geo_analysis)
+            if (geo) {
+              latestAnalysis = geo
+              latestAnalysisGeoId = geo.camera?.command_id || `${entry.message.id}:${j}`
+              analysisMsgIdx = i
+              analysisSecIdx = j
+              break
+            }
+          }
+        }
+        if (latestAnalysis) break
+      }
+    }
+
+    if (!latestAnalysis) return
+
+    let combinedGeo = latestAnalysis
+    let latestCameraCommand: AiGeoCameraCommand | null = null
+
+    for (let i = Math.max(0, analysisMsgIdx); i < entries.length; i++) {
+      const entry = entries[i]
+      if (entry.kind === 'message' && entry.message.sections) {
+        const startJ = i === analysisMsgIdx ? analysisSecIdx + 1 : 0
+        for (let j = startJ; j < entry.message.sections.length; j++) {
+          const section = entry.message.sections[j]
+          if (
+            section.art === 'tool' &&
+            section.werkzeug?.tool_name === 'control_region_camera' &&
+            section.werkzeug.geo_camera
+          ) {
+            const command = normalizeGeoCameraCommand(section.werkzeug.geo_camera)
+            if (command) {
+              combinedGeo = applyGeoCameraCommand(combinedGeo, command) ?? combinedGeo
+              latestCameraCommand = command
+            }
+          }
+        }
+      }
+    }
+
+    const currentGeoId = latestCameraCommand?.command_id || latestAnalysisGeoId
+
+    if (lastSeenGeoIdRef.current !== currentGeoId) {
+      lastSeenGeoIdRef.current = currentGeoId
+      if (latestCameraCommand) {
+        lastSeenCameraCommandRef.current = latestCameraCommand.command_id
+      }
+      setGeoData(combinedGeo)
+      if (!manuallyClosedGeoRef.current && closedGeoIdRef.current !== currentGeoId) {
+        setGeoOpen(true)
+      }
+    } else {
+      setGeoData(combinedGeo)
+    }
+  }, [entries, streaming])
+
+  const newsFromSearch = useMemo<NewsItem[]>(() => {
+    if (!geoData?.location) return []
+    const curLoc = geoData.location.toLowerCase().split(',')[0].trim()
+
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const entry = entries[i]
+      if (entry.kind === 'message' && entry.message.sections) {
+        const hasMatchingAnalysis = entry.message.sections.some(
+          (s) =>
+            s.art === 'tool' &&
+            s.werkzeug?.tool_name === 'analyze_region' &&
+            s.werkzeug.geo_analysis?.location?.toLowerCase().includes(curLoc),
+        )
+
+        for (let j = entry.message.sections.length - 1; j >= 0; j--) {
+          const section = entry.message.sections[j]
+          if (
+            section.art === 'tool' &&
+            section.werkzeug?.tool_name === 'web_search' &&
+            (section.werkzeug.web_results || section.werkzeug.ergebnis)
+          ) {
+            const rawResults =
+              section.werkzeug.web_results ||
+              (
+                section.werkzeug.ergebnis as {
+                  results?: Array<{
+                    title?: string
+                    url?: string
+                    description?: string
+                    snippet?: string
+                  }>
+                }
+              )?.results
+
+            if (Array.isArray(rawResults) && rawResults.length > 0) {
+              const matchingResults = rawResults.filter((r) => {
+                if (hasMatchingAnalysis) return true
+                const text = `${r.title || ''} ${r.description || ''} ${r.snippet || ''}`.toLowerCase()
+                return text.includes(curLoc)
+              })
+
+              if (matchingResults.length > 0) {
+                return matchingResults.map((r, idx) => {
+                  let domain = 'Websuche'
+                  try {
+                    if (r.url) domain = new URL(r.url).hostname.replace(/^www\./, '')
+                  } catch {}
+                  return {
+                    id: `search-news-${idx}`,
+                    title: r.title || 'Nachrichtenbericht',
+                    source: domain,
+                    timeAgo: 'Aktuell',
+                    category: 'Websuche',
+                    url: r.url,
+                    snippet: r.description || r.snippet,
+                  }
+                })
+              }
+            }
+          }
+        }
+      }
+    }
+    return []
+  }, [entries, geoData?.location])
+
+  const userScrolledUpRef = useRef(false)
+  const bottomMarkerRef = useRef<HTMLDivElement | null>(null)
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null)
+
+  const scrolleNachUnten = useCallback((force = false) => {
+    if (!force && userScrolledUpRef.current) return
+    const kasten = verlaufRef.current
+    if (kasten) {
+      kasten.scrollTop = kasten.scrollHeight
+    }
+    bottomMarkerRef.current?.scrollIntoView({ block: 'end' })
+  }, [])
+
+  const prevGeoOpenRef = useRef(geoOpen)
+  useEffect(() => {
+    if (prevGeoOpenRef.current !== geoOpen) {
+      userScrolledUpRef.current = false
+      setAmEnde(true)
+      scrolleNachUnten(true)
+      const t1 = setTimeout(() => scrolleNachUnten(true), 50)
+      const t2 = setTimeout(() => scrolleNachUnten(true), 150)
+      const t3 = setTimeout(() => scrolleNachUnten(true), 350)
+      const t4 = setTimeout(() => scrolleNachUnten(true), 600)
+      return () => {
+        clearTimeout(t1)
+        clearTimeout(t2)
+        clearTimeout(t3)
+        clearTimeout(t4)
+      }
+    }
+    prevGeoOpenRef.current = geoOpen
+  }, [geoOpen, scrolleNachUnten])
+
+  // ResizeObserver: Sobald Markdown, Syntax-Highlighting, Tabellen oder Karten
+  // im Nachrichten-Container gerendert werden und die Höhe wächst, bleiben wir unten.
+  useEffect(() => {
+    const el = messagesContainerRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => {
+      if (!userScrolledUpRef.current) {
+        scrolleNachUnten(false)
+      }
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [scrolleNachUnten])
+
+  const initialScrollDoneRef = useRef(false)
+
+  useLayoutEffect(() => {
+    if (!loading && entries.length > 0 && !initialScrollDoneRef.current) {
+      scrolleNachUnten(true)
+    }
+  }, [loading, entries.length, scrolleNachUnten])
+
+  useEffect(() => {
+    if (!loading && entries.length > 0 && !initialScrollDoneRef.current) {
+      initialScrollDoneRef.current = true
+      userScrolledUpRef.current = false
+      setAmEnde(true)
+      scrolleNachUnten(true)
+      const timers = [
+        setTimeout(() => scrolleNachUnten(true), 30),
+        setTimeout(() => scrolleNachUnten(true), 100),
+        setTimeout(() => scrolleNachUnten(true), 250),
+        setTimeout(() => scrolleNachUnten(true), 500),
+        setTimeout(() => scrolleNachUnten(true), 1000),
+      ]
+      return () => {
+        timers.forEach(clearTimeout)
+      }
+    }
+  }, [loading, entries.length, scrolleNachUnten])
+
+  useEffect(() => {
+    if (amEnde && !userScrolledUpRef.current) {
+      scrolleNachUnten(false)
+    }
+  }, [amEnde, entries, scrolleNachUnten])
+
+  const availableProviders = useMemo(
+    () => providers.filter((provider) => provider.available),
+    [providers],
+  )
+
+  const aktiverProvider = useMemo(
+    () => availableProviders.find((provider) => provider.id === providerId) ?? null,
+    [availableProviders, providerId],
+  )
+
+  // Beim Providerwechsel die Wahl auf etwas Gueltiges bringen. Warum das noetig
+  // ist, steht bei `denkwahlFuer`.
+  useEffect(() => {
+    if (!aktiverProvider) return
+    setDenken((jetzt) => denkwahlFuer(jetzt, aktiverProvider))
+  }, [aktiverProvider])
+
+  /**
+   * Die Wahl merken — aber nur die **gewaehlte**, nicht die zurechtgebogene.
+   *
+   * Deshalb hier und nicht in einem Effekt auf `denken`: der Effekt darueber
+   * senkt die Stufe beim Wechsel auf ein Modell, das sie nicht kennt. Schriebe
+   * man auch das mit, waere „xhigh" nach einem kurzen Abstecher zu einem
+   * kleineren Modell dauerhaft verloren, ohne dass jemand es angefasst hat.
+   */
+  const waehleDenken = useCallback((wahl: Denkwahl) => {
+    setDenken(wahl)
+    writeAiReasoningChoice(merkSchluessel.reasoning, wahl)
+  }, [merkSchluessel.reasoning])
+
+  /**
+   * Das Modell merken. Auch hier nur die gewaehlte Kennung — was beim naechsten
+   * Oeffnen daraus wird, entscheidet `providerBeimOeffnen` gegen die dann
+   * gueltige Liste.
+   *
+   * Gemerkt wird am **Konto** (PATCH), nicht nur im Browser: Overlay und
+   * Desktop-App kennen den localStorage dieses Fensters nicht und liefen sonst
+   * stillschweigend auf einem anderen Modell als das Panel. Der localStorage
+   * bleibt als Rueckfall, falls der Server die Wahl gerade nicht annimmt —
+   * dann gilt sie wenigstens in diesem Fenster weiter.
+   */
+  const waehleProvider = useCallback((wert: string) => {
+    const id = Number(wert)
+    setProviderId(id)
+    writeAiProviderChoice(merkSchluessel.provider, id)
+    void api<{ ai_provider_id: number | null }>('/auth/me/ai-provider', {
+      method: 'PATCH',
+      body: JSON.stringify({ provider_id: id }),
+    })
+      .then((antwort) => useAuthStore.getState().updateUser({ ai_provider_id: antwort.ai_provider_id }))
+      .catch(() => undefined)
+  }, [merkSchluessel.provider])
+
+  /** Hochgeladen, aber noch nicht abgeschickt — die Chips über dem Eingabefeld. */
+  const offeneAnhaenge = useMemo(
+    () => attachments.filter((item) => item.message_id === null),
+    [attachments],
+  )
+
+  /** Anhänge nach der Nachricht, mit der sie gesendet wurden. */
+  const anhaengeJeNachricht = useMemo(() => {
+    const karte = new Map<string, AiAttachment[]>()
+    for (const item of attachments) {
+      if (!item.message_id) continue
+      const liste = karte.get(item.message_id)
+      if (liste) liste.push(item)
+      else karte.set(item.message_id, [item])
+    }
+    return karte
+  }, [attachments])
+
+  const uploadAttachment = useCallback(async (file: File | undefined) => {
+    if (!file || streaming || uploading) return
+    setUploading(true)
+    try {
+      const created = await aiApi.uploadAttachment(file)
+      // Nach Kennung einsetzen statt anhaengen: das Nachladen nach dem Absenden
+      // (siehe `message`-Ereignis) kann eine Antwort ueberholen, die noch
+      // unterwegs war. Beim blossen Anhaengen stuende die Datei dann zweimal in
+      // der Liste — React beschwert sich ueber den doppelten Key, und der
+      // Benutzer sieht einen Anhang, den er nur einmal hochgeladen hat.
+      if (mountedRef.current) {
+        setAttachments((current) => [
+          ...current.filter((item) => item.id !== created.id),
+          created,
+        ])
+      }
+    } catch (error: unknown) {
+      toast.error(error instanceof SanitizedApiError ? error.message : t('ai.attachments.error'))
+    } finally {
+      if (mountedRef.current) setUploading(false)
+    }
+  }, [streaming, t, uploading])
+
+  const removeAttachment = async (attachment: AiAttachment) => {
+    try {
+      await aiApi.deleteAttachment(attachment.id)
+      setAttachments((current) => current.filter((item) => item.id !== attachment.id))
+    } catch {
+      toast.error(t('ai.attachments.error'))
+    }
+  }
+
+  const clearHistory = async () => {
+    if (streaming) return
+    const accepted = await confirm({
+      title: t('ai.chat.clearTitle'),
+      message: t('ai.chat.clearConfirm'),
+      confirmText: t('ai.chat.clear'),
+      danger: true,
+    })
+    if (!accepted) return
+    try {
+      await aiApi.clearHistory()
+      initialScrollDoneRef.current = false
+      userScrolledUpRef.current = false
+      setEntries([])
+      setAttachments([])
+      setContextStatus(null)
+      window.dispatchEvent(new Event('msm:ai-chat-cleared'))
+    } catch (error: unknown) {
+      toast.error(error instanceof SanitizedApiError ? error.message : t('ai.chat.errors.delete'))
+    }
+  }
+
+  // Abarbeiten der Warteschlange, sobald der vorherige Lauf beendet ist
+  useEffect(() => {
+    if (!streaming && queuedMessages.length > 0 && providerId) {
+      const nextContent = queuedMessages[0]
+      setQueuedMessages((q) => q.slice(1))
+      void sendContent(nextContent)
+    }
+  }, [providerId, queuedMessages, sendContent, streaming])
+
+  const enqueueMessage = useCallback((content: string) => {
+    const text = content.trim()
+    if (!text) return
+    manuallyClosedGeoRef.current = false
+    setQueuedMessages((q) => [...q, text])
+    setInput('')
+  }, [])
+
+  const sendImmediatelyAndInterrupt = useCallback(async (content: string) => {
+    const text = content.trim()
+    if (!text || !providerId) return
+    manuallyClosedGeoRef.current = false
+    setInput('')
+    userScrolledUpRef.current = false
+    setAmEnde(true)
+    scrolleNachUnten(true)
+    if (streaming) {
+      await stoppeLauf()
+    }
+    await sendContent(text)
+  }, [providerId, scrolleNachUnten, sendContent, stoppeLauf, streaming])
+
+  const send = async (event: React.FormEvent) => {
+    event.preventDefault()
+    const content = input.trim()
+    if (!content || !providerId) return
+    manuallyClosedGeoRef.current = false
+    if (streaming) {
+      enqueueMessage(content)
+      return
+    }
+    setInput('')
+    userScrolledUpRef.current = false
+    setAmEnde(true)
+    scrolleNachUnten(true)
+    await sendContent(content)
+  }
+
+  /**
+   * Nimmt eine bereits gesendete eigene Nachricht zurück und stellt sie neu.
+   *
+   * Zwei Schritte, weil sie zwei verschiedene Dinge sind: der Schnitt räumt
+   * den Verlauf ab dieser Nachricht auf — sie selbst eingeschlossen —, und
+   * erst danach geht der neue Text den gewohnten Weg. Die KI sieht von der
+   * alten Fassung nichts mehr; sie steht weder im Verlauf noch im Kontext.
+   */
+  const submitEdit = async (messageId: string) => {
+    const content = editDraft.trim()
+    if (!content || !providerId || streaming) return
+    try {
+      await aiApi.editMessage(messageId, content)
+    } catch (error: unknown) {
+      toast.error(error instanceof SanitizedApiError ? error.message : t('ai.chat.errors.edit'))
+      return
+    }
+    // Erst wenn der Schnitt durch ist: sonst stünde die alte Fassung noch da,
+    // während der Server sie schon nicht mehr kennt.
+    setEntries((current) => {
+      const index = current.findIndex((item) => item.kind === 'message' && item.id === messageId)
+      return index === -1 ? current : current.slice(0, index)
+    })
+    setEditingId(null)
+    setEditDraft('')
+    userScrolledUpRef.current = false
+    setAmEnde(true)
+    scrolleNachUnten(true)
+    await sendContent(content)
+  }
+
+  /**
+   * Beim Oeffnen an einen laufenden Lauf anhaengen.
+   *
+   * Das ist die andere Haelfte von "der Lauf haengt an nichts": er arbeitet
+   * weiter, waehrend man woanders ist — und wenn man zurueckkommt, sieht man
+   * ihn wieder. Ohne das stuende hier eine abgebrochene Antwort.
+   */
+  useEffect(() => {
+    if (!laufBeimOeffnen) return
+    setLaufBeimOeffnen(null)
+    if (!laufBeimOeffnen.live) return
+    setRunId(laufBeimOeffnen.id)
+    void haengeAn(laufBeimOeffnen.id)
+  }, [haengeAn, laufBeimOeffnen, setRunId])
+
+  /**
+   * Fremdes nachladen — auf Zuruf **und** im Takt.
+   *
+   * Zuruf ist das Zustell-Ereignis der Glocke (Meldestellen-Lieferungen,
+   * beobachtete Laufwechsel). Er allein hat nicht gereicht: die Glocke sieht
+   * einen Lauf nur, wenn ihr Takt ihn trifft — wer im Chat stand, pollte dort
+   * nur alle 60 Sekunden, und ein Lauf aus einem zweiten Tab oder der
+   * Desktop-App begann und endete komplett zwischen zwei Blicken. Die
+   * Nachricht stand dann in der Datenbank und nirgendwo auf dem Schirm, bis
+   * jemand hart neu lud.
+   *
+   * Deshalb zusätzlich derselbe 20-Sekunden-Takt, den das Guardian-Fenster
+   * seit jeher hat (`GuardianAnsicht.NACHSEHEN_MS`): nachsehen, nicht
+   * streamen. Er ruht, solange das Fenster verdeckt ist — eine App im Tray
+   * soll nicht alle 20 Sekunden das Panel wecken; beim Sichtbarwerden wird
+   * einmal sofort nachgeladen.
+   *
+   * Nicht während eines Stroms: dann ist SSE die Wahrheit, und ein Nachladen
+   * mittendrin ersetzte den halb gezeichneten Zug durch seinen alten Stand.
+   * Das gilt auch für eine Antwort, die **unterwegs** ist, wenn der Strom
+   * beginnt: `veraltet` entwertet sie beim Effekt-Wechsel, sonst überschriebe
+   * sie die optimistischen Blasen, und die folgenden Deltas liefen ins Leere
+   * (`useAiLauf.aendere` findet die ID dann nicht mehr und schweigt).
+   */
+  useEffect(() => {
+    if (streaming) return
+    let veraltet = false
+    const nachladen = () => {
+      void Promise.all([aiApi.getConversation(), aiApi.listActions()])
+        .then(([conversation, actions]) => {
+          if (veraltet || !mountedRef.current) return
+          setEntries(mergeEntries(conversation.messages, actions))
+        })
+        .catch(() => undefined)
+    }
+    const takt = window.setInterval(() => {
+      if (document.visibilityState !== 'hidden') nachladen()
+    }, NACHSEHEN_MS)
+    const sichtbar = () => {
+      if (document.visibilityState === 'visible') nachladen()
+    }
+    window.addEventListener(AI_ZUSTELLUNG_EVENT, nachladen)
+    document.addEventListener('visibilitychange', sichtbar)
+    return () => {
+      veraltet = true
+      window.clearInterval(takt)
+      window.removeEventListener(AI_ZUSTELLUNG_EVENT, nachladen)
+      document.removeEventListener('visibilitychange', sichtbar)
+    }
+  }, [setEntries, streaming])
+
+  /**
+   * Das Tipp-Signal: gedrosselt, ohne Inhalt, ohne Fehlerbehandlung nach aussen.
+   *
+   * Die Meldestelle hält Worker-Meldungen zurück, solange der Mensch schreibt
+   * (Ruhe-Regel). Was sie dafür braucht, ist genau ein Zeitstempel — der Text
+   * verlässt den Browser nicht, nicht einmal seine Länge.
+   */
+  const tippSignal = useCallback(() => {
+    const jetzt = Date.now()
+    if (jetzt - letztesTippSignalRef.current < TIPP_TAKT_MS) return
+    letztesTippSignalRef.current = jetzt
+    void aiApi.typing().catch(() => undefined)
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="flex h-64 items-center justify-center" aria-label={t('common.loading')}>
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      </div>
+    )
+  }
+
+  const busy = streaming || uploading
+  const empty = entries.length === 0
+
+  return (
+    <RegionalAnalysisLayout
+      active={geoOpen}
+      data={geoData}
+      news={newsFromSearch}
+      loading={streaming && laufendeWerkzeuge.some((w) => w.tool_name === 'analyze_region')}
+      onClose={() => {
+        manuallyClosedGeoRef.current = true
+        if (lastSeenGeoIdRef.current) {
+          closedGeoIdRef.current = lastSeenGeoIdRef.current
+          writeClosedGeoAnalysis(merkSchluessel.closedGeoAnalysis, lastSeenGeoIdRef.current)
+        }
+        userScrolledUpRef.current = false
+        setAmEnde(true)
+        setGeoOpen(false)
+        scrolleNachUnten(true)
+        setTimeout(() => scrolleNachUnten(true), 50)
+        setTimeout(() => scrolleNachUnten(true), 150)
+        setTimeout(() => scrolleNachUnten(true), 350)
+      }}
+    >
+      <section
+        className="flex min-h-0 flex-1 flex-col overflow-hidden"
+        aria-label={t('ai.chat.title')}
+      onDragEnter={(event) => {
+        if (!canAttach || busy) return
+        event.preventDefault()
+        dragDepthRef.current += 1
+        setDragging(true)
+      }}
+      onDragOver={(event) => { if (canAttach && !busy) event.preventDefault() }}
+      onDragLeave={() => {
+        // Zaehler statt Boolean: das Verlassen eines Kindelements feuert
+        // ebenfalls `dragleave` und wuerde die Flaeche sonst flackern lassen.
+        dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+        if (dragDepthRef.current === 0) setDragging(false)
+      }}
+      onDrop={(event) => {
+        if (!canAttach || busy) return
+        event.preventDefault()
+        dragDepthRef.current = 0
+        setDragging(false)
+        void uploadAttachment(event.dataTransfer.files?.[0])
+      }}
+    >
+      {/* ── Kopfzeile: Provider, Denkschritte, Autonomie, Skills ───────── */}
+      <header className="flex flex-wrap items-center gap-1.5 sm:gap-2 border-b border-outline-variant/30 bg-surface-container-low/90 px-2.5 py-2 sm:px-5 sm:py-2.5 backdrop-blur-md shrink-0 sticky top-0 z-20">
+        <div className="w-48 sm:w-60 max-w-[260px] shrink-0">
+          <Dropdown
+            value={providerId ? String(providerId) : null}
+            onChange={waehleProvider}
+            options={availableProviders.map((provider) => ({
+              value: String(provider.id),
+              label: provider.name,
+              hint: provider.default_model,
+            }))}
+            placeholder={t('ai.chat.selectProvider')}
+            disabled={busy}
+            aria-label={t('ai.chat.selectProvider')}
+          />
+        </div>
+
+        <ReasoningPicker
+          provider={aktiverProvider}
+          wahl={denken}
+          onChange={waehleDenken}
+          disabled={busy}
+        />
+
+        {canUseAutonomy && <AiAutonomyButton servers={servers} disabled={busy} />}
+
+        {canUseSkills && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setSkillsModalOpen(true)}
+            className="h-8 px-2.5 text-xs flex items-center gap-1.5 border border-outline-variant/30 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 rounded-lg transition-colors"
+            title={t('ai.skills.directoryTitle', 'Assistenten-Skills')}
+            aria-label={t('ai.skills.directoryTitle', 'Assistenten-Skills')}
+          >
+            <Sparkles className="h-3.5 w-3.5 text-primary shrink-0" aria-hidden="true" />
+            <span className="hidden md:inline">{t('ai.skills.directoryTitle', 'Skills')}</span>
+          </Button>
+        )}
+
+        <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
+          {canTasks && onSwitchMode && (
+            <button
+              type="button"
+              onClick={() => onSwitchMode('aufgaben')}
+              className="inline-flex items-center gap-1.5 rounded-full border border-outline-variant/40 bg-surface-container-high/40 px-2.5 py-1 text-xs font-medium text-on-surface-variant hover:text-on-surface hover:border-outline-variant transition-colors"
+              aria-label={t('ai.tasks.toTasks')}
+              title={t('ai.tasks.toTasks')}
+            >
+              <CalendarClock className="h-4 w-4 shrink-0 text-secondary" aria-hidden="true" />
+              <span className="hidden md:inline">Aufgaben</span>
+            </button>
+          )}
+
+          {onSwitchMode && (
+            <button
+              type="button"
+              onClick={() => onSwitchMode('guardian')}
+              className="inline-flex items-center gap-1.5 rounded-full border border-outline-variant/40 bg-surface-container-high/40 px-2.5 py-1 text-xs font-medium text-on-surface-variant hover:text-on-surface hover:border-outline-variant transition-colors"
+              aria-label={t('ai.guardian.toGuardianMode')}
+              title={t('ai.guardian.toGuardianMode')}
+            >
+              <ShieldAlert className="h-4 w-4 shrink-0 text-tertiary" aria-hidden="true" />
+              <span className="hidden md:inline">Guardian</span>
+            </button>
+          )}
+
+          {hasVoice && onSwitchMode && (
+            <button
+              type="button"
+              onClick={() => onSwitchMode('sprache')}
+              className="inline-flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
+              aria-label={t('ai.voice.toVoiceMode')}
+              title={t('ai.voice.toVoiceMode')}
+            >
+              <AudioLines className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span className="hidden md:inline">Realtime</span>
+            </button>
+          )}
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={busy || empty}
+            onClick={() => void clearHistory()}
+            aria-label={t('ai.chat.clear')}
+            title={t('ai.chat.clear')}
+            className="h-9 w-9 p-0 text-on-surface-variant hover:text-status-danger transition-colors flex items-center justify-center rounded-lg"
+          >
+            <Trash2 className="h-5 w-5" aria-hidden="true" />
+          </Button>
+        </div>
+      </header>
+
+      {/* ── Die Worker-Leiste: lebende Hintergrund-Aufträge, einsehbar ── */}
+      <WorkerLeiste />
+
+      {/* ── Aktive Prozesse im 3-Spalten-Kommandozentrum ── */}
+      {geoOpen && (
+        <div className="hidden shrink-0 px-3 pt-2.5 lg:block">
+          <ActiveProcessesCard />
+        </div>
+      )}
+
+      {/* ── Verlauf ───────────────────────────────────────────────────── */}
+      <div
+        ref={verlaufRef}
+        className="relative min-h-0 flex-1 overflow-y-auto"
+        aria-live="polite"
+        onScroll={(event) => {
+          const { scrollTop, scrollHeight, clientHeight } = event.currentTarget
+          const isAtBottom = scrollHeight - scrollTop - clientHeight < 60
+          setAmEnde(isAtBottom)
+          if (isAtBottom) {
+            userScrolledUpRef.current = false
+          } else if (scrollHeight - scrollTop - clientHeight > 120) {
+            userScrolledUpRef.current = true
+          }
+        }}
+      >
+        {dragging && (
+          <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary/60 bg-primary/5">
+            <span className="flex items-center gap-2 text-sm font-medium text-primary">
+              <Paperclip className="h-4 w-4" aria-hidden="true" />
+              {t('ai.attachments.drop')}
+            </span>
+          </div>
+        )}
+
+        <div
+          ref={messagesContainerRef}
+          className="mx-auto w-full max-w-4xl xl:max-w-5xl 2xl:max-w-6xl px-3 py-6 sm:px-6"
+        >
+          {empty && (
+            <div className="py-16 text-center">
+              <Sparkles className="mx-auto h-10 w-10 text-primary/70" aria-hidden="true" />
+              <h2 className="mt-4 font-headline text-xl font-semibold text-on-surface">
+                {t('ai.chat.emptyTitle')}
+              </h2>
+              <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-on-surface-variant">
+                {t('ai.chat.emptyDescription')}
+              </p>
+              <ul className="mx-auto mt-6 grid max-w-lg gap-2 text-left">
+                {['logs', 'network', 'mods'].map((key) => (
+                  <li key={key}>
+                    <button
+                      type="button"
+                      className="w-full rounded-xl border border-outline-variant/40 bg-surface-container-low/40 px-4 py-3 text-sm text-on-surface-variant transition-colors hover:border-primary/40 hover:text-on-surface"
+                      onClick={() => setInput(t(`ai.chat.examples.${key}`))}
+                    >
+                      {t(`ai.chat.examples.${key}`)}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div className="space-y-4">
+            {entries.map((entry, index) => {
+              if (entry.kind === 'compacted') {
+                return (
+                  <div key={entry.id} className="flex items-center gap-3 py-2">
+                    <span className="h-px flex-1 bg-outline-variant/40" />
+                    <span className="text-xs text-on-surface-variant">{t('ai.chat.compacted')}</span>
+                    <span className="h-px flex-1 bg-outline-variant/40" />
+                  </div>
+                )
+              }
+              if (entry.kind === 'proposal') {
+                return (
+                  <AiActionProposalCard
+                    key={entry.id}
+                    proposal={entry.proposal}
+                    onChange={(updated) => {
+                      merkeVorschlag(updated)
+                      // **Hier ging es frueher nicht weiter.** Die Aktion lief,
+                      // und der Chat blieb stumm — man musste eine neue
+                      // Nachricht schreiben, damit die KI ueberhaupt erfuhr,
+                      // wie ihr eigener Vorschlag ausgegangen ist.
+                      const lauf = updated.run_id ?? runId
+                      if (lauf && updated.status !== 'proposed') {
+                        void haengeAn(lauf)
+                      }
+                    }}
+                  />
+                )
+              }
+
+              const { message } = entry
+              if (message.role === 'user') {
+                const isEditing = editingId === message.id
+                return (
+                  <article key={entry.id} className="group flex justify-end gap-3">
+                    {isEditing ? (
+                      <div className="w-full max-w-[85%] space-y-2">
+                        <textarea
+                          className="msm-input min-h-[4.5rem] w-full text-sm"
+                          value={editDraft}
+                          maxLength={16_000}
+                          autoFocus
+                          disabled={busy}
+                          onChange={(event) => setEditDraft(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Escape') { setEditingId(null); setEditDraft('') }
+                            if (event.key === 'Enter' && !event.shiftKey) {
+                              event.preventDefault()
+                              void submitEdit(message.id)
+                            }
+                          }}
+                          aria-label={t('ai.chat.edit')}
+                        />
+                        {/* Der Hinweis gehoert hierher, nicht in eine Rueckfrage
+                            danach: wer bearbeitet, soll vorher wissen, dass der
+                            Verlauf ab hier verschwindet. */}
+                        <p className="text-xs text-on-surface-variant">{t('ai.chat.editHint')}</p>
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            type="button" size="sm" variant="secondary" disabled={busy}
+                            onClick={() => { setEditingId(null); setEditDraft('') }}
+                          >
+                            <X className="h-4 w-4" aria-hidden="true" />
+                            {t('common.cancel')}
+                          </Button>
+                          <Button
+                            type="button" size="sm"
+                            disabled={busy || !editDraft.trim()}
+                            onClick={() => void submitEdit(message.id)}
+                          >
+                            <Check className="h-4 w-4" aria-hidden="true" />
+                            {t('ai.chat.editSend')}
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => { setEditingId(message.id); setEditDraft(message.content) }}
+                          className="mt-1 self-start rounded-lg p-1.5 text-on-surface-variant opacity-0 transition-opacity hover:text-on-surface focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-0"
+                          aria-label={t('ai.chat.edit')}
+                        >
+                          <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                        </button>
+                        <div className="flex max-w-[85%] flex-col items-end rounded-2xl rounded-br-md border border-primary/25 bg-primary/10 px-4 py-2.5">
+                          <p className="w-full whitespace-pre-wrap break-words text-base sm:text-sm leading-relaxed sm:leading-6 text-on-surface">
+                            {message.content}
+                          </p>
+                          {/* Die Anhaenge stehen **in** der Nachricht, mit der
+                              sie gesendet wurden. Vorher hingen sie nur an der
+                              Unterhaltung: nach einem Neuladen war nicht mehr
+                              erkennbar, zu welcher Frage sie gehoerten. */}
+                          <AnhangListe
+                            anhaenge={anhaengeJeNachricht.get(message.id) ?? []}
+                            t={t}
+                          />
+                          {message.created_at && (
+                            <span className="mt-1 text-[10px] text-on-surface-variant/70">
+                              {formatMessageTime(message.created_at)}
+                            </span>
+                          )}
+                        </div>
+                      </>
+                    )}
+                    <Avatar
+                      src={currentUser?.avatar_url}
+                      name={currentUser?.username}
+                      size="xs"
+                      className="mt-1 shrink-0"
+                    />
+                  </article>
+                )
+              }
+
+              return (
+                <AiAntwortblase
+                  key={entry.id}
+                  message={message}
+                  // Beantwortet ist eine Rückfrage, sobald irgendein späterer
+                  // Eintrag existiert: dann hat der Benutzer geschrieben, ob
+                  // per Knopf oder frei getippt. Damit überlebt der Zustand
+                  // auch ein Neuladen der Seite, ohne dass er irgendwo
+                  // gespeichert werden müsste.
+                  beantwortet={index < entries.length - 1}
+                  busy={busy}
+                  // Nur die noch schreibende Blase bekommt den Plan. Alle
+                  // anderen bekommen immer dieselbe leere Liste — sonst
+                  // entwertete eine je Runde neue Eigenschaft den `memo`
+                  // Vergleich für den ganzen Verlauf.
+                  laufendeWerkzeuge={
+                    message.status === 'streaming' ? laufendeWerkzeuge : KEINE_AUFRUFE
+                  }
+                  onAnswer={sendContent}
+                />
+              )
+            })}
+          </div>
+          <div ref={bottomMarkerRef} className="h-0 w-0 pointer-events-none" aria-hidden="true" />
+        </div>
+      </div>
+
+      {/* ── Eingabe ───────────────────────────────────────────────────── */}
+      <form className="shrink-0 border-t border-outline-variant/40 px-2.5 py-2 sm:px-4 sm:py-3 bg-surface" onSubmit={send}>
+        {/* Der Hinweis steht ueber dem Eingabefeld, nicht in einer
+            Einstellungsseite: er soll dort auftauchen, wo die Entscheidung
+            Folgen hat — bevor jemand etwas Persoenliches tippt. */}
+        {memoryNoticeDue && (
+          <AiMemoryNotice onAnswered={() => setMemoryNoticeDue(false)} />
+        )}
+        <div className="mx-auto w-full max-w-4xl xl:max-w-5xl 2xl:max-w-6xl">
+          {/* Nur Ungesendetes: alles Uebrige steht in seiner Nachricht. Vorher
+              blieb jeder Anhang hier stehen und ging bei jeder Folgefrage
+              erneut an den Anbieter. */}
+          {offeneAnhaenge.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-2" aria-label={t('ai.attachments.list')}>
+              {offeneAnhaenge.map((attachment) => (
+                <span
+                  key={attachment.id}
+                  className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-outline-variant/40 bg-surface-container-high px-2.5 py-1 text-xs text-on-surface-variant"
+                >
+                  <Paperclip className="h-3 w-3 shrink-0" aria-hidden="true" />
+                  <span className="truncate">{attachment.original_name}</span>
+                  <button
+                    type="button"
+                    className="rounded-sm p-0.5 hover:bg-surface-container-highest focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    disabled={busy}
+                    onClick={() => void removeAttachment(attachment)}
+                    aria-label={t('ai.attachments.remove')}
+                  >
+                    <X className="h-3 w-3" aria-hidden="true" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
+          {queuedMessages.length > 0 && (
+            <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-lg border border-outline-variant/30 bg-surface-container-high/60 px-2.5 py-1.5 text-xs text-on-surface-variant">
+              <span className="flex items-center gap-1 font-medium text-on-surface">
+                <ListPlus className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
+                Warteschlange ({queuedMessages.length}):
+              </span>
+              {queuedMessages.map((msg, idx) => (
+                <span
+                  key={idx}
+                  className="inline-flex max-w-[220px] items-center gap-1 rounded bg-surface-container-highest px-2 py-0.5 text-on-surface border border-outline-variant/40"
+                  title={msg}
+                >
+                  <span className="truncate">{msg}</span>
+                  <button
+                    type="button"
+                    className="text-on-surface-variant hover:text-status-danger transition-colors"
+                    onClick={() => setQueuedMessages((q) => q.filter((_, i) => i !== idx))}
+                    aria-label="Aus Warteschlange entfernen"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              ))}
+              {queuedMessages.length > 1 && (
+                <button
+                  type="button"
+                  className="ml-auto text-[11px] text-on-surface-variant hover:text-status-danger underline transition-colors"
+                  onClick={() => setQueuedMessages([])}
+                >
+                  Alle leeren
+                </button>
+              )}
+            </div>
+          )}
+
+          <div className="flex items-end gap-2 rounded-2xl border border-outline-variant/50 bg-surface-container-low/50 p-2 focus-within:border-primary/50">
+            {dictating ? (
+              <div className="flex flex-1 items-center gap-2 sm:gap-3 py-0.5 min-w-0">
+                {/* Status-Badge mit pulsierendem Punkt & Laufzeit-Timer */}
+                <div className="flex items-center gap-1.5 shrink-0 rounded-lg border border-status-danger/30 bg-status-danger/10 px-2.5 py-1 text-xs font-medium text-status-danger">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-status-danger opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-status-danger" />
+                  </span>
+                  <span className="tabular-nums font-semibold tracking-wider">
+                    {formatDiktatTimer(dictationElapsed)}
+                  </span>
+                </div>
+
+                {/* Restkontingent-Badge */}
+                <div
+                  className="hidden xs:flex items-center gap-1 shrink-0 rounded-lg border border-outline-variant/40 bg-surface-container-low/60 px-2 py-1 text-xs text-on-surface-variant"
+                  title={
+                    dictationQuota?.monthly_limit_minutes != null
+                      ? `Monatliches Limit: ${dictationQuota.monthly_limit_minutes} Min.`
+                      : 'Unbegrenztes Diktierkontingent'
+                  }
+                >
+                  <span className="tabular-nums font-medium text-on-surface">
+                    {dictationQuota?.monthly_limit_minutes != null
+                      ? t('ai.chat.dictationRemaining', {
+                          min: Math.max(
+                            0,
+                            Math.ceil(
+                              ((dictationQuota.remaining_seconds ?? 0) - dictationElapsed) / 60,
+                            ),
+                          ),
+                        })
+                      : t('ai.chat.dictationUnlimited')}
+                  </span>
+                </div>
+
+                {/* Stimmreaktive Wellenform */}
+                <div className="flex-1 h-9 min-w-[50px] max-w-full overflow-hidden rounded-md">
+                  <DictationWaveform aufnahme={dictationRef.current} className="h-full w-full" />
+                </div>
+
+                {/* Aktionen: Verwerfen & Beenden/Einfügen */}
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 w-8 rounded-full p-0 text-on-surface-variant hover:text-status-danger hover:bg-status-danger/10"
+                    onClick={diktatAbbrechen}
+                    aria-label={t('ai.chat.dictationCancel')}
+                    title={t('ai.chat.dictationCancel')}
+                  >
+                    <X className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="h-8 shrink-0 rounded-full px-2.5 text-xs flex items-center gap-1 bg-primary/15 text-primary hover:bg-primary/25 border border-primary/30"
+                    onClick={() => void diktatUmschalten()}
+                    aria-label={t('ai.chat.dictationStop')}
+                    title={t('ai.chat.dictationStop')}
+                  >
+                    <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span className="hidden sm:inline">{t('ai.chat.dictationStop')}</span>
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <>
+                {canAttach && (
+                  <label
+                    className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-on-surface-variant transition-colors ${
+                      uploading ? 'pointer-events-none opacity-50' : 'cursor-pointer hover:bg-surface-container-high hover:text-on-surface'
+                    }`}
+                    title={t('ai.attachments.add')}
+                  >
+                    {uploading
+                      ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                      : <Paperclip className="h-4 w-4" aria-hidden="true" />}
+                    <input
+                      type="file" className="sr-only" disabled={uploading} accept={ATTACHMENT_ACCEPT}
+                      aria-label={t('ai.attachments.add')}
+                      onChange={(event) => {
+                        void uploadAttachment(event.target.files?.[0])
+                        event.target.value = ''
+                      }}
+                    />
+                  </label>
+                )}
+                <textarea
+                  ref={inputRef}
+                  className="max-h-40 min-h-9 flex-1 resize-none border-0 bg-transparent py-1.5 text-sm leading-6 text-on-surface placeholder:text-on-surface-variant focus:outline-none"
+                  rows={1}
+                  maxLength={16000}
+                  value={input}
+                  onChange={(event) => {
+                    setInput(event.target.value)
+                    if (event.target.value.trim()) tippSignal()
+                    event.target.style.height = 'auto'
+                    event.target.style.height = `${Math.min(event.target.scrollHeight, 160)}px`
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                      event.preventDefault()
+                      if (event.altKey && streaming) {
+                        void sendImmediatelyAndInterrupt(input)
+                      } else {
+                        void send(event as unknown as React.FormEvent)
+                      }
+                    }
+                  }}
+                  placeholder={streaming ? 'Nachricht in Warteschlange einreihen oder mit Alt+Enter sofort senden…' : t('ai.chat.placeholder')}
+                  disabled={uploading || availableProviders.length === 0}
+                  aria-label={t('ai.chat.message')}
+                />
+                {dictationAvailable && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-9 w-9 shrink-0 rounded-full p-0"
+                    disabled={transcribing || uploading || !providerId}
+                    onClick={() => void diktatUmschalten()}
+                    aria-label={t('ai.chat.dictationStart')}
+                    title={t('ai.chat.dictationStart')}
+                  >
+                    {transcribing
+                      ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                      : <Mic className="h-4 w-4" aria-hidden="true" />}
+                  </Button>
+                )}
+              </>
+            )}
+            {/* Direkt neben dem Absenden, weil dort die Entscheidung faellt:
+                wer sieht, dass der Kontext gleich zusammengefasst wird, formuliert
+                die naechste Frage anders. In einer Einstellungsseite haette
+                dieselbe Zahl niemanden erreicht. */}
+            <AiContextMeter status={contextStatus} />
+            {streaming ? (
+              !input.trim() ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="destructive"
+                  className="h-9 w-9 shrink-0 rounded-full p-0 flex items-center justify-center bg-status-danger/15 text-status-danger hover:bg-status-danger/25 border border-status-danger/30 transition-colors"
+                  onClick={() => void stoppeLauf()}
+                  aria-label="KI stoppen (abbrechen)"
+                  title="KI stoppen (abbrechen)"
+                >
+                  <Square className="h-3.5 w-3.5 fill-current" aria-hidden="true" />
+                </Button>
+              ) : (
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-9 shrink-0 rounded-full px-2.5 text-xs flex items-center gap-1"
+                    onClick={() => enqueueMessage(input)}
+                    title="In Warteschlange einreihen (Enter)"
+                    aria-label="In Warteschlange einreihen"
+                  >
+                    <ListPlus className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span className="hidden sm:inline">Einreihen</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="destructive"
+                    className="h-9 w-9 shrink-0 rounded-full p-0 flex items-center justify-center bg-status-danger/15 text-status-danger hover:bg-status-danger/25 border border-status-danger/30"
+                    onClick={() => void sendImmediatelyAndInterrupt(input)}
+                    title="Sofort senden & Unterbrechen (Alt+Enter)"
+                    aria-label="Sofort senden & Unterbrechen"
+                  >
+                    <Zap className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                </div>
+              )
+            ) : (
+              <Button
+                type="submit"
+                size="sm"
+                className="h-9 w-9 shrink-0 rounded-full p-0"
+                disabled={uploading || !input.trim() || !providerId}
+                aria-label={t('ai.chat.send')}
+              >
+                <Send className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            )}
+          </div>
+
+          {availableProviders.length === 0 && (
+            <p className="mt-2 flex items-center gap-1.5 text-xs text-status-warning">
+              <Zap className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              {t('ai.chat.noProvider')}
+            </p>
+          )}
+          <p className="mt-2 text-center text-xs text-on-surface-variant hidden sm:block">{t('ai.chat.privacyHint')}</p>
+        </div>
+      </form>
+    </section>
+    <AiSkillModal open={skillsModalOpen} onClose={() => setSkillsModalOpen(false)} />
+    </RegionalAnalysisLayout>
+  )
+}
+
+/**
+ * Sortiert Vorschlaege chronologisch zwischen die Nachrichten.
+ *
+ * Beide Listen sind bereits nach `created_at` sortiert; hier werden sie nur
+ * zusammengefuehrt. Ein Vorschlag steht damit dort, wo er entstanden ist.
+ */
+/**
+ * Die Anhänge einer Nachricht, unter ihrem Text.
+ *
+ * Zeigt auch, wenn beim Aufnehmen etwas unkenntlich gemacht wurde. Vorher wurde
+ * eine Datei mit einem Tokenmuster komplett abgewiesen — bei echten Serverlogs
+ * passiert das ständig. Jetzt wird redigiert, und der Hinweis hier ist der
+ * Grund, warum niemand sich über ein `[REDACTED]` im eigenen Log wundern muss.
+ */
+
+
+function AnhangListe({ anhaenge, t }: { anhaenge: AiAttachment[]; t: TFunction }) {
+  if (anhaenge.length === 0) return null
+  return (
+    <ul className="mt-2 space-y-1 border-t border-primary/20 pt-2">
+      {anhaenge.map((anhang) => (
+        <li key={anhang.id} className="flex items-center gap-1.5 text-xs text-on-surface-variant">
+          <Paperclip className="h-3 w-3 shrink-0" aria-hidden="true" />
+          <span className="truncate">{anhang.original_name}</span>
+          {anhang.redacted_spans ? (
+            <span className="shrink-0 rounded-full border border-outline-variant/50 px-1.5 py-0.5 text-[10px]">
+              {t('ai.attachments.redacted', { count: anhang.redacted_spans })}
+            </span>
+          ) : null}
+        </li>
+      ))}
+    </ul>
+  )
+}

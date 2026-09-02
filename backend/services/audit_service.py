@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Any
+from uuid import UUID, uuid4
 
 from sqlalchemy.orm import Session
 
@@ -19,6 +21,7 @@ _SECRET_KEY_RE = re.compile(
     re.IGNORECASE,
 )
 _MAX_DETAILS_LEN = 500
+AUDIT_ORIGINS = frozenset({"direct", "ai", "external", "system"})
 
 
 def _redact_mapping(data: dict[str, Any]) -> dict[str, Any]:
@@ -46,7 +49,7 @@ def sanitize_audit_details(details: str | dict[str, Any] | None) -> str | None:
     if details is None:
         return None
     if isinstance(details, dict):
-        text = json.dumps(_redact_mapping(details), ensure_ascii=True, sort_keys=True)
+        text = json.dumps(_redact_mapping(details), ensure_ascii=True, sort_keys=True, default=str)
     else:
         text = str(details).strip()
         # Grobe Absicherung: bekannte Secret-Praefixe in freiem Text maskieren.
@@ -69,8 +72,10 @@ def record_privileged_action(
     user_id: int | None,
     action: str,
     target_type: str | None = None,
-    target_id: int | None = None,
+    target_id: str | int | None = None,
     details: str | dict[str, Any] | None = None,
+    origin: str = "direct",
+    correlation_id: str | UUID | None = None,
     commit: bool = False,
 ) -> AuditLog:
     """Schreibt einen AuditLog-Eintrag fuer privilegierte Operator-Aktionen.
@@ -83,12 +88,23 @@ def record_privileged_action(
         raise ValueError("Ungueltiger Audit-Action-Key.")
     if target_type is not None and len(target_type) > 64:
         raise ValueError("Ungueltiger Audit-Target-Typ.")
+    origin_clean = (origin or "").strip().lower()
+    if origin_clean not in AUDIT_ORIGINS:
+        raise ValueError("Ungueltige Audit-Herkunft.")
+    try:
+        correlation_clean = str(UUID(str(correlation_id))) if correlation_id else str(uuid4())
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ValueError("Ungueltige Audit-Korrelations-ID.") from exc
 
     entry = AuditLog(
         user_id=user_id,
         action=action_clean,
         target_type=target_type,
-        target_id=target_id,
+        # Einheitlich als Text: die Aufrufer uebergeben teils Zahlen
+        # (Benutzer, Server), teils UUIDs (Memory, Skills, Anhaenge).
+        target_id=None if target_id is None else str(target_id),
+        origin=origin_clean,
+        correlation_id=correlation_clean,
         details=sanitize_audit_details(details),
     )
     db.add(entry)
@@ -102,13 +118,67 @@ def record_privileged_action(
     return entry
 
 
+# Ein Lese-Eintrag je Benutzer, Ziel und Zugriffsart in diesem Fenster. Ohne
+# den Deckel fuellt das 5-Sekunden-Polling der Oberflaeche die Tabelle in
+# Stunden — der Erkenntniswert bleibt derselbe: "hat in dem Zeitraum gelesen".
+READ_ACCESS_DEDUPE = timedelta(minutes=10)
+
+READ_ACCESS_ACTIONS = frozenset(
+    {"server.console.read", "server.logs.read", "server.files.read"}
+)
+
+
+def record_read_access(
+    db: Session,
+    *,
+    user_id: int,
+    server_id: int,
+    action: str,
+    details: str | dict[str, Any] | None = None,
+    origin: str = "direct",
+) -> AuditLog | None:
+    """Protokolliert Lesezugriff auf Konsole, Logs oder Dateien eines Servers.
+
+    Wird an den Panel-Routern aufgerufen, nie in der Rechtepruefung — die
+    bleibt read-only. KI-Laeufe protokollieren ihre Werkzeugaufrufe bereits im
+    Lauf selbst und laufen nicht ueber diesen Helfer. Gibt None zurueck, wenn
+    im Dedupe-Fenster bereits ein gleicher Eintrag existiert.
+    """
+    if action not in READ_ACCESS_ACTIONS:
+        raise ValueError("Unbekannte Lesezugriffs-Aktion.")
+    cutoff = datetime.now(timezone.utc) - READ_ACCESS_DEDUPE
+    recent = (
+        db.query(AuditLog.id)
+        .filter(
+            AuditLog.user_id == user_id,
+            AuditLog.action == action,
+            AuditLog.target_type == "server",
+            AuditLog.target_id == str(server_id),
+            AuditLog.created_at >= cutoff,
+        )
+        .first()
+    )
+    if recent is not None:
+        return None
+    return record_privileged_action(
+        db,
+        user_id=user_id,
+        action=action,
+        target_type="server",
+        target_id=server_id,
+        details=details,
+        origin=origin,
+        commit=True,
+    )
+
+
 def list_audit_logs(
     db: Session,
     *,
     limit: int = 50,
     action: str | None = None,
     target_type: str | None = None,
-    target_id: int | None = None,
+    target_id: str | int | None = None,
 ) -> list[AuditLog]:
     """Listet die neuesten Audit-Eintraege mit optionalen Filtern."""
     limit = min(max(int(limit), 1), 200)
@@ -118,5 +188,5 @@ def list_audit_logs(
     if target_type:
         q = q.filter(AuditLog.target_type == target_type.strip())
     if target_id is not None:
-        q = q.filter(AuditLog.target_id == int(target_id))
+        q = q.filter(AuditLog.target_id == str(target_id))
     return q.limit(limit).all()

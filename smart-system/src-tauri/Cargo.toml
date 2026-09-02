@@ -1,0 +1,154 @@
+[package]
+name = "maunting-smart-system"
+version = "0.1.0"
+description = "MSS - Maunting Smart System, Desktop Companion fuer das MSM-Panel"
+edition = "2021"
+# Die Zahl muss stimmen, sonst ist sie schaedlich: hier stand 1.77, und ein
+# Build mit dieser Toolchain kam durch die Manifestpruefung und scheiterte
+# danach mitten in der Kompilierung mit einem Methodenfehler statt mit der
+# klaren Ansage, die Toolchain sei zu alt.
+#
+# Zwei Dinge setzen den Boden. Eigener Code: `Option::is_none_or`
+# (wakeword.rs) ist seit 1.82 stabil. Und die gesperrten Abhaengigkeiten:
+# `image` 0.25.10 und `keyring` 4.1.6 verlangen selbst 1.88. Wer eine der
+# beiden Zahlen senken will, muss zuerst die Ursache anfassen.
+rust-version = "1.88"
+
+[lib]
+name = "maunting_smart_system_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# tray-icon: System-Tray mit Statusfarben. image-png: Status-Icons werden als
+# PNG-Bytes eingebettet und zur Laufzeit dekodiert (tray::set_status).
+# webview-data-url: der Sichtfeld-Indikator (sichtfeld.rs) traegt sein HTML in
+# einer `data:`-URL statt in einer eigenen Datei im Bundle — eine Datei koennte
+# ein Installer auslassen, und genau das waere die stille Art, den Indikator
+# loszuwerden. Ohne dieses Feature weist Tauri `data:` beim Fensterbau ab. Es
+# zieht nur `data-url` neu in den Baum (Servo, MIT/Apache-2.0, reines Parsen,
+# kein I/O); `dom_query` fuer die CSP-Einbettung steht ohnehin schon im Lock.
+tauri = { version = "2", features = [
+    "image-png",
+    "webview-data-url",
+] }
+# Plattformuebergreifende System-Benachrichtigungen (Windows & Android)
+tauri-plugin-notification = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Refresh-Token im OS-Tresor (Windows Credential Manager / macOS Keychain) —
+# Projektregel: Tokens nie im Klartext auf der Platte. keyring ist die
+# etablierte, schmale Standard-Crate dafuer (MIT/Apache-2.0).
+# Default-Feature "v1" bringt die klassische Entry-API samt Windows- und
+# Apple-Store mit.
+keyring = "4"
+# Ordner-Auswahl fuer den Sandbox-Schritt des Einrichtungs-Assistenten.
+tauri-plugin-dialog = "2"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "blocking"] }
+
+# Lokales Wake-Word (Phase 3): rustpotter erkennt ein aus eigenen Aufnahmen
+# gebautes Referenz-Wakeword komplett offline (Apache-2.0, kein Netzwerk).
+# cpal ist der Standard fuer plattformuebergreifendes Audio-I/O in Rust,
+# hound schreibt die Kalibrierungs-WAVs. Keiner der drei beruehrt Secrets.
+rustpotter = "3.0.2"
+cpal = "0.18"
+hound = "3.5"
+
+# ── Arbeit auf dem Rechner des Benutzers (Phase 5) ────────────────────────
+# Nichts davon ist selbst gebaut; alle vier sind der jeweils gepflegte
+# Standard und beruehren weder Registry noch Kerneltreiber.
+#
+# dunce: `std::fs::canonicalize` liefert unter Windows `\\?\C:\...`, und ein
+# `starts_with` gegen einen normalen Pfad schlaegt damit fehl — genau die
+# Pruefung, die die Sandbox-Grenze traegt. dunce ist der De-facto-Ersatz.
+dunce = "1"
+# Programme, Dateien und Adressen oeffnen. Der offizielle Weg in Tauri v2;
+# `tauri-plugin-shell::open` ist deprecated und hatte GHSA-c9pr-q8gx-3mgp.
+tauri-plugin-opener = "2"
+
+[target.'cfg(windows)'.dependencies.enigo]
+# Maus und Tastatur. Version fest: enigo bricht seine API zwischen
+# Minor-Versionen regelmaessig, und die Uebernahme ist der Teil, bei dem ein
+# stiller Verhaltenswechsel am teuersten waere. `text()` sendet
+# Unicode-Ereignisse und umgeht das Tastaturlayout — Umlaute ohne Gefummel.
+version = "=0.6.1"
+
+[target.'cfg(windows)'.dependencies.xcap]
+# Bildschirmfotos ueber die Windows Graphics Capture API. Nachfolger der
+# eingestellten `screenshots`-Crate; unter 0.9.6 gab es sporadische Timeouts.
+version = "0.9"
+
+[target.'cfg(windows)'.dependencies.image]
+# Nur zum Verkleinern und Kodieren der Bildschirmfotos: ein Vollbild geht
+# sonst mit mehreren Megabyte in einen Prompt, und die Anbieter weisen zu
+# grosse Bilder ab, statt sie zu skalieren.
+#
+# `jpeg` seit dem 23.08.2026 und `png` weiterhin daneben: das Bildschirmfoto
+# geht als JPEG zum Modell (klein genug, um die Bruecke zu passieren), die
+# Tray-Icons bleiben PNG.
+#
+# Das Feature zieht `zune-jpeg` und `zune-core` nach (zwei Zeilen in
+# Cargo.lock, MIT/Apache-2.0, reines Kodieren, kein I/O) — bewertet in
+# docs/agent-rules/dependencies.md. Dass beide Kodierer derselben Kiste
+# gehoeren, heisst *nicht*, dass nichts dazukommt.
+version = "0.25"
+default-features = false
+features = ["png", "jpeg"]
+
+[target.'cfg(windows)'.dependencies.base64]
+# Das Bild reist als Text durch JSON zum Panel und weiter zum Modell.
+version = "0.22"
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+# Zwei globale Hotkeys (Fenster, Sprachsitzung; konfigurierbar, einzeln
+# abschaltbar) — Plugin statt eigener Hook: stabil, 0 % CPU.
+tauri-plugin-global-shortcut = "2"
+# Windows-Autostart; das Argument "--autostart" markiert Boot-Starts, damit
+# spaeter Crash-Guard und sanfter Start unterscheiden koennen, wer gestartet hat.
+tauri-plugin-autostart = "2"
+# Automatischer Updater fuer echte GitHub Releases
+tauri-plugin-updater = "2"
+# Papierkorb statt endgueltig: Geloeschtes in der Sandbox bleibt
+# wiederherstellbar. Ein `fs::remove_file` waere die unumkehrbare Fassung
+# derselben Zeile.
+trash = "5"
+
+[target.'cfg(windows)'.dependencies]
+# Offizielle Microsoft-Bindings — fuer das WASAPI-Audio-Ducking
+# (Session-Lautstaerken) und die Laufwerksuebersicht (system.rs, nur lesend:
+# GetLogicalDrives/GetDriveTypeW/GetDiskFreeSpaceExW). Eng feature-gegated,
+# kein Netzwerk.
+windows = { version = "0.62", features = [
+    "Win32_Media_Audio",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    # SHEmptyRecycleBinW/SHQueryRecycleBinW fuer `aufraeumen::papierkorb_leeren`.
+    # Keine neue Kiste, nur ein weiteres Modul derselben: die Bindungen sind
+    # generiert und ziehen nichts nach.
+    "Win32_UI_Shell",
+] }
+# Keine neue Kiste im Baum: exakt die Version, die wry/tauri ohnehin
+# mitbringen (Cargo.lock). Direkt gebraucht nur fuer den
+# PermissionRequested-Handler der Mikrofonfreigabe — WebView2 zeigt fuer
+# getUserMedia auf tauri.localhost keinen eigenen Prompt, ohne Handler
+# bliebe das Mikrofon in der App stumm.
+webview2-com = "0.38"
+# Der PWSTR-Typ, den webview2-com erwartet (windows-0.61-Familie nutzt
+# windows-strings 0.4). Unser `windows = 0.62` (WASAPI-Ducking) traegt einen
+# gleichnamigen, aber inkompatiblen Typ — dieselbe Kiste steht schon als
+# wry-Abhaengigkeit im Lock, hier wird sie nur direkt ansprechbar.
+windows-strings = "0.4"
+
+[features]
+# This feature is used for production builds or when a dev server is not
+# specified, DO NOT REMOVE!!
+custom-protocol = ["tauri/custom-protocol"]

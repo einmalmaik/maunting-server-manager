@@ -18,6 +18,8 @@ import logging
 import re
 import subprocess
 
+from sqlalchemy.orm import selectinload
+
 logger = logging.getLogger(__name__)
 
 # UFW-Comment-Praefix — wird in Regex zur Identifikation eigener Regeln genutzt.
@@ -96,15 +98,69 @@ def _allow(port: int, protocol: str, comment: str) -> bool:
 
 
 def _delete(port: int, protocol: str) -> bool:
-    # ``ufw delete allow PORT/PROTO`` ist idempotent: nicht existierende Regeln
-    # geben Exit 0 mit "Could not delete ..." aus.
+    """Löscht eine UFW-Regel und meldet, ob es überhaupt eine zu löschen gab.
+
+    ``ufw delete allow PORT/PROTO`` ist idempotent: eine nicht existierende
+    Regel gibt Exit 0 mit "Could not delete ..." aus. Genau dieser Fall muss
+    ``False`` melden. Sonst behauptet ``close_ports`` einen Erfolg, den es nie
+    gemessen hat — und der periodische Abgleich schreibt alle 30 Sekunden eine
+    Audit-Zeile für Regeln, die es längst nicht mehr gibt.
+    """
     result = _run_ufw("delete", "allow", f"{port}/{protocol}")
     if result.returncode != 0:
         logger.debug(
             "UFW delete %s/%s ohne Treffer: %s",
             port, protocol, (result.stderr or result.stdout).strip(),
         )
-    return True
+        return False
+    return "Could not delete" not in (result.stdout or "")
+
+
+# Eine Zeile aus ``ufw status``:
+#   25565/tcp                  ALLOW       Anywhere
+#   25565                      ALLOW       Anywhere
+# Die zweite Form ohne Protokoll gilt fuer TCP **und** UDP.
+_ALLOW_LINE_RE = re.compile(
+    r"^\s*(?P<port>\d+)(?:/(?P<protocol>tcp|udp))?\s+ALLOW\b",
+    re.IGNORECASE,
+)
+
+
+def allowed_ports() -> set[tuple[int, str]] | None:
+    """Liest die aktuell freigegebenen Ports. Aendert nichts.
+
+    Rueckgabe ist ``None``, wenn UFW nicht installiert oder nicht abfragbar
+    ist. Das ist ausdruecklich **nicht** dasselbe wie eine leere Menge: "keine
+    Firewall gefunden" und "Firewall blockiert alles" sind fuer eine Diagnose
+    entgegengesetzte Aussagen. Wer das verwechselt, meldet einem Betreiber ohne
+    UFW, seine Ports seien zu.
+
+    Eine Regel ohne Protokollangabe gilt in UFW fuer TCP und UDP und wird
+    entsprechend fuer beide aufgenommen.
+    """
+    if not _ufw_available():
+        return None
+    status = _run_ufw("status")
+    if status.returncode != 0:
+        logger.debug("UFW status nicht abfragbar: %s", (status.stderr or "").strip())
+        return None
+    # Ist die Firewall inaktiv, laesst sie alles durch — auch das ist nicht
+    # "alles gesperrt" und darf nicht als leere Menge durchgehen.
+    if "Status: inactive" in status.stdout:
+        return None
+
+    result: set[tuple[int, str]] = set()
+    for line in status.stdout.splitlines():
+        match = _ALLOW_LINE_RE.match(line)
+        if not match:
+            continue
+        port = int(match.group("port"))
+        protocol = (match.group("protocol") or "").lower()
+        if protocol:
+            result.add((port, protocol))
+        else:
+            result.update({(port, "tcp"), (port, "udp")})
+    return result
 
 
 def _comment_for(name: str, role: str) -> str:
@@ -226,7 +282,13 @@ def close_ports(
     user_id: int | None = None,
     reason: str = "Server gestoppt",
 ) -> bool:
-    """Schliesst (idempotent) die UFW-Regeln eines Servers und protokolliert dies im AuditLog."""
+    """Schließt (idempotent) die UFW-Regeln eines Servers und protokolliert dies im AuditLog.
+
+    Returns:
+        ``True`` nur, wenn tatsächlich mindestens eine Regel entfernt wurde.
+        War schon alles zu, ist die Rückgabe ``False`` — und es entsteht keine
+        Audit-Zeile für eine Änderung, die nie stattgefunden hat.
+    """
     deleted_any = False
     if node is not None and not getattr(node, "is_local", True):
         if not isinstance(game_port, list):
@@ -242,18 +304,16 @@ def close_ports(
     elif not _ufw_available():
         deleted_any = False
     elif isinstance(game_port, list):
-        deleted_any = True
         for port, protocol, _ in game_port:
-            if port:
-                _delete(port, protocol)
+            if port and _delete(port, protocol):
+                deleted_any = True
     else:
-        deleted_any = True
-        if game_port:
-            _delete(game_port, "udp")
-        if query_port:
-            _delete(query_port, "udp")
-        if rcon_port:
-            _delete(rcon_port, "tcp")
+        if game_port and _delete(game_port, "udp"):
+            deleted_any = True
+        if query_port and _delete(query_port, "udp"):
+            deleted_any = True
+        if rcon_port and _delete(rcon_port, "tcp"):
+            deleted_any = True
 
     if db is not None and server_id is not None and deleted_any:
         try:
@@ -278,10 +338,27 @@ def close_ports(
     return deleted_any
 
 
+# Status, in denen die Ports offen bleiben muessen.
+#
+# Der Grund ist eine Reihenfolge im Lifecycle: `open_ports` laeuft **bevor**
+# der Status auf `running` springt. Ein Server im Fenster `starting` oder
+# `restarting` hat also bereits offene Ports, sieht fuer eine Pruefung auf
+# `status != "running"` aber wie ein gestoppter aus. Der Reconcile-Job hat ihm
+# die Ports deshalb direkt nach dem Start wieder zugemacht: der Container lief,
+# aber niemand kam von aussen drauf — weder ueber die Serverliste noch per
+# Direktverbindung.
+#
+# Bewusst **nicht** enthalten sind `stopping` und `queued`. Bei `stopping`
+# sollen die Ports zufallen, das ist der Zweck; bei `queued` sind sie noch gar
+# nicht geoeffnet worden.
+_FIREWALL_KEEP_OPEN_STATUSES = frozenset({"running", "starting", "restarting"})
+
+
 def reconcile_firewall_rules(db) -> int:
     """Audit & Reconciliation: Schließt verwaiste Firewall-Regeln gestoppter/gecrashtes Server.
 
-    Prüft alle Server mit status != 'running' und ruft close_ports auf.
+    Schließt Ports nur für Server, die klar nicht aktiv sind. Die transienten
+    Startzustände bleiben unangetastet — siehe `_FIREWALL_KEEP_OPEN_STATUSES`.
     Ein AuditLog wird geschrieben, falls eine offene Regel geschlossen wird.
 
     Returns:
@@ -291,7 +368,12 @@ def reconcile_firewall_rules(db) -> int:
     from services.server_lifecycle_service import _ports
 
     try:
-        non_running = db.query(Server).filter(Server.status != "running").all()
+        non_running = (
+            db.query(Server)
+            .options(selectinload(Server.ports))
+            .filter(Server.status.notin_(tuple(_FIREWALL_KEEP_OPEN_STATUSES)))
+            .all()
+        )
     except Exception as exc:
         logger.warning("Fehler beim Abfragen nicht-laufender Server fuer Firewall-Reconciliation: %s", exc)
         return 0
@@ -300,6 +382,11 @@ def reconcile_firewall_rules(db) -> int:
     for srv in non_running:
         try:
             ports_list = _ports(srv)
+            if not ports_list:
+                # Ohne Ports gibt es nichts zu schließen. Der Aufruf hätte nur
+                # einen ``ufw --version``-Unterprozess gekostet und alle 30
+                # Sekunden eine Audit-Zeile über nichts geschrieben.
+                continue
             if close_ports(
                 ports_list,
                 node=srv.node,

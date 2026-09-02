@@ -7,11 +7,15 @@ import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 import { Link2, Unlink } from 'lucide-react'
 import { useOAuthLinks } from './useOAuthLinks'
+import { ConnectedMailboxesSection } from './ConnectedMailboxesSection'
+import { ConnectedCalendarsSection } from './ConnectedCalendarsSection'
 
 /**
- * Tab: Verknuepfte OAuth-Accounts.
- * Liest Links + verfuegbare Provider, bietet Link/Unlink, wertet den
- * OAuth-Callback-URL-Param `?linked=1` / `?error=...` aus.
+ * Tab: Verknuepfte Accounts & Dienste.
+ * Enthält:
+ * 1. OAuth / SSO Login-Provider (Google, Discord, GitHub ...)
+ * 2. E-Mail-Postfächer (IMAP / SMTP / Google) für den KI-Assistenten
+ * 3. Kalender (CalDAV) für den KI-Assistenten
  */
 export function LinkedAccountsTab() {
   const { t, i18n } = useTranslation()
@@ -69,78 +73,85 @@ export function LinkedAccountsTab() {
   const unlinkedProviders = oauthAvailable.filter((p) => !linkedSlugs.has(p.slug))
 
   return (
-    <div className="msm-card p-6">
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center">
-          <Link2 className="w-5 h-5 text-secondary" />
+    <div className="space-y-6">
+      {/* OAuth Login Accounts */}
+      <div className="msm-card p-6">
+        <div className="flex items-center gap-2 mb-6">
+          <Link2 className="h-5 w-5 text-secondary" aria-hidden="true" />
+          <div>
+            <h2 className="font-headline text-lg font-semibold text-on-surface">{t('profile.linkedAccounts.title')}</h2>
+            <p className="font-body-md text-sm text-on-surface-variant mt-1">
+              {t('profile.linkedAccounts.subtitle')}
+            </p>
+          </div>
         </div>
-        <div>
-          <h2 className="font-headline text-headline-sm text-primary">{t('profile.linkedAccounts.title')}</h2>
-          <p className="font-body-md text-sm text-on-surface-variant mt-1">
-            {t('profile.linkedAccounts.subtitle')}
-          </p>
-        </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center h-24">
+            <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {oauthLinks.length === 0 ? (
+              <p className="font-body-md text-sm text-on-surface-variant">
+                {t('profile.linkedAccounts.empty')}
+              </p>
+            ) : (
+              <ul className="divide-y divide-outline-variant/30">
+                {oauthLinks.map((link) => (
+                  <li key={link.id} className="py-3 first:pt-0 last:pb-0 flex items-center gap-4">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-label-md text-sm text-on-surface font-medium">{link.provider_name}</p>
+                      <p className="font-body-md text-xs text-on-surface-variant mt-0.5">
+                        {t('profile.linkedAccounts.linkedSince', { date: formatDate(link.created_at) })}
+                        {link.last_used_at && (
+                          <span className="ml-2">
+                            · {t('profile.linkedAccounts.lastUsed', { date: formatDate(link.last_used_at) })}
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleUnlink(link)}
+                      className="msm-btn-secondary px-3 py-1.5 text-xs inline-flex items-center gap-1.5"
+                    >
+                      <Unlink className="w-3.5 h-3.5" />
+                      {t('profile.linkedAccounts.unlink')}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {unlinkedProviders.length > 0 && (
+              <div className="pt-4 border-t border-outline-variant/30">
+                <p className="font-label-md text-xs text-on-surface-variant uppercase tracking-wider mb-3">
+                  {t('profile.linkedAccounts.connect')}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {unlinkedProviders.map((p) => (
+                    <a
+                      key={p.slug}
+                      href={apiUrl(`/oauth/${p.slug}/link/start`)}
+                      className="msm-btn-secondary px-3 py-2 text-sm inline-flex items-center gap-2"
+                    >
+                      <Link2 className="w-3.5 h-3.5" />
+                      {p.name}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      {loading ? (
-        <div className="flex items-center justify-center h-24">
-          <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {oauthLinks.length === 0 ? (
-            <p className="font-body-md text-sm text-on-surface-variant">
-              {t('profile.linkedAccounts.empty')}
-            </p>
-          ) : (
-            <ul className="divide-y divide-outline-variant/30">
-              {oauthLinks.map((link) => (
-                <li key={link.id} className="py-3 first:pt-0 last:pb-0 flex items-center gap-4">
-                  <div className="flex-1 min-w-0">
-                    <p className="font-label-md text-sm text-on-surface font-medium">{link.provider_name}</p>
-                    <p className="font-body-md text-xs text-on-surface-variant mt-0.5">
-                      {t('profile.linkedAccounts.linkedSince', { date: formatDate(link.created_at) })}
-                      {link.last_used_at && (
-                        <span className="ml-2">
-                          · {t('profile.linkedAccounts.lastUsed', { date: formatDate(link.last_used_at) })}
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleUnlink(link)}
-                    className="msm-btn-secondary px-3 py-1.5 text-xs inline-flex items-center gap-1.5"
-                  >
-                    <Unlink className="w-3.5 h-3.5" />
-                    {t('profile.linkedAccounts.unlink')}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
+      {/* Connected Mailboxes for AI */}
+      <ConnectedMailboxesSection />
 
-          {unlinkedProviders.length > 0 && (
-            <div className="pt-4 border-t border-outline-variant/30">
-              <p className="font-label-md text-xs text-on-surface-variant uppercase tracking-wider mb-3">
-                {t('profile.linkedAccounts.connect')}
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {unlinkedProviders.map((p) => (
-                  <a
-                    key={p.slug}
-                    href={apiUrl(`/oauth/${p.slug}/link/start`)}
-                    className="msm-btn-secondary px-3 py-2 text-sm inline-flex items-center gap-2"
-                  >
-                    <Link2 className="w-3.5 h-3.5" />
-                    {p.name}
-                  </a>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+      {/* Connected Calendars for AI */}
+      <ConnectedCalendarsSection />
     </div>
   )
 }

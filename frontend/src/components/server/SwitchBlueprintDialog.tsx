@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, RefreshCw, ShieldCheck } from "lucide-react";
 import { api } from "@/api/client";
+import { Dropdown } from "@/components/ui/Dropdown";
 import { toast } from "@/stores/toastStore";
 import type { BlueprintListEntry, Server } from "@/types";
 
@@ -23,13 +24,22 @@ export function SwitchBlueprintDialog({
   const [selectedId, setSelectedId] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const abbrechenRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
     setLoading(true);
-    api<BlueprintListEntry[]>("/blueprints")
+    // `GET /blueprints` antwortet mit `{ blueprints: [...] }`, nicht mit einem
+    // nackten Array — so liest es auch die Blueprint-Seite (Blueprints.tsx:62).
+    //
+    // Hier stand `Array.isArray(data) ? data : []`. Das war immer der leere
+    // Fall: das Dropdown blieb ohne Eintraege, ohne Fehler, ohne Hinweis. Ein
+    // stiller Rueckfall auf "nichts" ist schlimmer als ein Fehler — man sieht
+    // eine leere Auswahl und haelt sie fuer die Wahrheit.
+    api<{ blueprints: BlueprintListEntry[] }>("/blueprints")
       .then((data) => {
-        const list = Array.isArray(data) ? data : [];
+        const list = data?.blueprints ?? [];
         setBlueprints(list);
         if (list.length > 0) {
           const firstOther = list.find((b) => b.id !== server.game_type);
@@ -42,6 +52,60 @@ export function SwitchBlueprintDialog({
       })
       .finally(() => setLoading(false));
   }, [open, server.game_type, t]);
+
+  // Fokus wie im Nachbardialog ResourceEditorDialog.tsx: beim Öffnen springt er
+  // auf "Abbrechen", beim Schließen zurück auf den Knopf, der den Dialog
+  // geöffnet hat. Ohne das startet ein Tastaturbenutzer hinter der Seite und
+  // muss sich erst durch sie hindurch in den Dialog tabben.
+  useEffect(() => {
+    if (!open) return;
+    const vorherAktiv = document.activeElement as HTMLElement | null;
+    const zeitgeber = setTimeout(() => abbrechenRef.current?.focus(), 0);
+    return () => {
+      clearTimeout(zeitgeber);
+      vorherAktiv?.focus();
+    };
+  }, [open]);
+
+  // Escape schließt den Dialog, solange kein Wechsel läuft; Tab und Shift+Tab
+  // bleiben im Dialog gefangen. Gleiches Vorgehen wie ResourceEditorDialog.tsx.
+  useEffect(() => {
+    if (!open) return;
+    const beiTaste = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        // Die Blueprint-Auswahl behandelt Escape selbst und markiert die Taste
+        // dabei als verbraucht (Dropdown.tsx). Ein Escape, das nur die
+        // aufgeklappte Liste schließen soll, darf nicht gleich den ganzen
+        // Dialog mitnehmen.
+        if (submitting || e.defaultPrevented) return;
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key === "Tab") {
+        const fokussierbar = dialogRef.current?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        );
+        if (!fokussierbar || fokussierbar.length === 0) return;
+        const erstes = fokussierbar[0];
+        const letztes = fokussierbar[fokussierbar.length - 1];
+        const drinnen = dialogRef.current?.contains(document.activeElement);
+        if (e.shiftKey) {
+          if (document.activeElement === erstes || !drinnen) {
+            e.preventDefault();
+            letztes.focus();
+          }
+        } else {
+          if (document.activeElement === letztes || !drinnen) {
+            e.preventDefault();
+            erstes.focus();
+          }
+        }
+      }
+    };
+    window.addEventListener("keydown", beiTaste);
+    return () => window.removeEventListener("keydown", beiTaste);
+  }, [open, onClose, submitting]);
 
   if (!open) return null;
 
@@ -69,8 +133,17 @@ export function SwitchBlueprintDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
-      <div className="msm-card max-w-lg w-full p-6 shadow-2xl border border-outline/30 animate-in fade-in zoom-in duration-150">
-        <h2 className="font-headline text-headline-sm text-on-surface mb-2 flex items-center gap-2">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="switch-blueprint-title"
+        className="msm-card max-w-lg w-full p-6 shadow-2xl border border-outline/30 animate-in fade-in zoom-in duration-150"
+      >
+        <h2
+          id="switch-blueprint-title"
+          className="font-headline text-headline-sm text-on-surface mb-2 flex items-center gap-2"
+        >
           <RefreshCw className="w-5 h-5 text-primary" />
           {t("servers.switchBlueprintTitle", "Spiel / Blueprint wechseln")}
         </h2>
@@ -116,24 +189,30 @@ export function SwitchBlueprintDialog({
                 {t("common.loading", "Laden...")}
               </div>
             ) : (
-              <select
-                className="msm-input w-full"
-                value={selectedId}
-                onChange={(e) => setSelectedId(e.target.value)}
+              // Vorher ein natives <select>. Bei 27 nativen Blueprints ist die
+              // Liste hoeher als der Platz unter dem Feld, und der Browser
+              // klappte sie nach oben auf — im Dialog wirkt das wie ein Fehler.
+              // `Dropdown` ist die Auswahl, die das Panel ohnehin ueberall
+              // benutzt: sie klappt nach unten und begrenzt ihre Hoehe selbst.
+              <Dropdown
+                data-testid="switch-blueprint-select"
+                value={selectedId || null}
+                onChange={setSelectedId}
                 disabled={submitting || server.status !== "stopped"}
-              >
-                {blueprints.map((bp) => (
-                  <option key={bp.id} value={bp.id}>
-                    {bp.name} ({bp.category || "Native"})
-                  </option>
-                ))}
-              </select>
+                placeholder={t("servers.selectNewBlueprint", "Neues Spiel / Blueprint auswählen")}
+                aria-label={t("servers.selectNewBlueprint", "Neues Spiel / Blueprint auswählen")}
+                options={blueprints.map((bp) => ({
+                  value: bp.id,
+                  label: `${bp.name} (${bp.category || "Native"})`,
+                }))}
+              />
             )}
           </div>
         </div>
 
         <div className="flex justify-end gap-3 pt-2 border-t border-outline/20">
           <button
+            ref={abbrechenRef}
             type="button"
             className="msm-btn-secondary px-4 py-2 text-sm"
             onClick={onClose}

@@ -82,7 +82,7 @@ export function CaptchaTab() {
           </div>
 
           {settings.captcha_enabled && (
-            <div className="max-w-2xl space-y-6 border-t border-border/40 pt-6">
+            <div className="max-w-2xl space-y-6 border-t border-outline-variant/40 pt-6">
               <div>
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                   {t('settings.captcha.provider', { defaultValue: 'Anbieter' })}
@@ -101,22 +101,30 @@ export function CaptchaTab() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
+                  <label
+                    htmlFor="captcha-site-key"
+                    className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider"
+                  >
+                    {t('settings.captcha.siteKey', { defaultValue: 'Site Key (Website-Schlüssel)' })}
+                  </label>
                   <Input
                     id="captcha-site-key"
                     type="text"
-                    label={t('settings.captcha.siteKey', { defaultValue: 'Site Key (Website-Schlüssel)' })}
                     value={settings.captcha_site_key}
                     onChange={(event) => setSettings({ ...settings, captcha_site_key: event.target.value })}
                     placeholder="e.g. 0x4AAAAAA..."
                     disabled={!canWrite}
                   />
-                  <p className="font-body-md text-xs text-on-surface-variant mt-1.5">
+                  <p className="msm-field-help">
                     {t('settings.captcha.siteKeyHint', { defaultValue: 'Öffentlicher Schlüssel zur Anzeige des Widgets im Browser.' })}
                   </p>
                 </div>
 
                 <div>
-                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                  <label
+                    htmlFor="captcha-secret-key"
+                    className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider"
+                  >
                     {t('settings.captcha.secretKey', { defaultValue: 'Secret Key (Geheimer Schlüssel)' })}
                   </label>
                   <PasswordInput
@@ -126,7 +134,7 @@ export function CaptchaTab() {
                     placeholder={settings.captcha_secret_key ? '••••••••' : 'e.g. 0x4AAAAAA...'}
                     disabled={!canWrite}
                   />
-                  <p className="font-body-md text-xs text-on-surface-variant mt-1.5">
+                  <p className="msm-field-help">
                     {t('settings.captcha.secretKeyHint', { defaultValue: 'Privater Schlüssel zur serverseitigen Token-Validierung.' })}
                   </p>
                 </div>

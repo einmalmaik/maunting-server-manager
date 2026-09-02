@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import CodeMirror from '@uiw/react-codemirror'
 import { json } from '@codemirror/lang-json'
 import { yaml } from '@codemirror/lang-yaml'
@@ -119,6 +120,7 @@ export function FileEditorWorkspace({
   onClose,
   onReload,
 }: FileEditorWorkspaceProps) {
+  const { t } = useTranslation()
   const activeTab = tabs.find((tab) => tab.path === activePath) ?? null
   const editorRef = useRef<EditorView | null>(null)
   const tabRefs = useRef(new Map<string, HTMLButtonElement>())
@@ -248,20 +250,20 @@ export function FileEditorWorkspace({
   }, [focusTab, tabs])
 
   const saveIndicator = activeTab?.saveState === 'saving'
-    ? <><LoaderCircle className="h-3.5 w-3.5 animate-spin" /> Speichert…</>
+    ? <><LoaderCircle className="h-3.5 w-3.5 animate-spin" /> {t('files.editor.saving')}</>
     : activeTab?.saveState === 'conflict'
-      ? <><AlertTriangle className="h-3.5 w-3.5" /> Konflikt</>
+      ? <><AlertTriangle className="h-3.5 w-3.5" /> {t('files.editor.conflict')}</>
       : activeTab?.saveState === 'error'
-        ? <><AlertTriangle className="h-3.5 w-3.5" /> Speichern fehlgeschlagen</>
+        ? <><AlertTriangle className="h-3.5 w-3.5" /> {t('files.editor.saveError')}</>
         : activeTab?.saveState === 'dirty'
-          ? <><span className="h-2 w-2 rounded-full bg-status-warning" /> Ungespeichert</>
-          : <><Check className="h-3.5 w-3.5" /> Gespeichert</>
+          ? <><span className="h-2 w-2 rounded-full bg-status-warning" /> {t('files.editor.unsaved')}</>
+          : <><Check className="h-3.5 w-3.5" /> {t('files.editor.saved')}</>
 
   return (
     <section className="flex h-full min-h-[520px] min-w-0 flex-1 flex-col bg-surface-container-lowest/55 lg:min-h-0">
       <div role="tablist" aria-label={tabListLabel} className="flex min-h-10 items-end overflow-x-auto border-b border-outline-variant bg-surface-container-low/70 [scrollbar-width:thin]">
         {tabs.length === 0 ? (
-          <div className="px-4 py-2.5 text-xs text-on-surface-variant">Keine Datei geöffnet</div>
+          <div className="px-4 py-2.5 text-xs text-on-surface-variant">{t('files.editor.noFileOpen')}</div>
         ) : tabs.map((tab) => {
           const active = tab.path === activePath
           return (
@@ -293,7 +295,7 @@ export function FileEditorWorkspace({
               </button>
               <button
                 type="button"
-                aria-label={`${fileName(tab.path)} schließen`}
+                aria-label={t('files.editor.closeTab', { name: fileName(tab.path) })}
                 onClick={(event) => {
                   event.stopPropagation()
                   onClose(tab.path)
@@ -310,7 +312,7 @@ export function FileEditorWorkspace({
       {activeTab ? (
         <>
           <div className="flex min-h-10 items-center justify-between gap-3 border-b border-outline-variant px-3">
-            <p className="min-w-0 truncate font-mono text-[11px] text-on-surface-variant">Server-Dateien / {activeTab.path}</p>
+            <p className="min-w-0 truncate font-mono text-[11px] text-on-surface-variant">{t('files.serverFiles')} / {activeTab.path}</p>
             <div className="flex shrink-0 items-center gap-2">
               <span className={`hidden items-center gap-1.5 text-[11px] sm:inline-flex ${activeTab.saveState === 'conflict' || activeTab.saveState === 'error' ? 'text-status-error' : activeTab.saveState === 'clean' ? 'text-status-success' : 'text-status-warning'}`}>
                 {saveIndicator}
@@ -319,7 +321,7 @@ export function FileEditorWorkspace({
                 type="button"
                 onClick={() => setSearchOpen((value) => !value)}
                 className="msm-btn-tertiary flex h-8 w-8 items-center justify-center rounded-md"
-                aria-label="Suchen und ersetzen"
+                aria-label={t('files.editor.searchAndReplace')}
               >
                 <Search className="h-4 w-4" />
               </button>
@@ -330,7 +332,7 @@ export function FileEditorWorkspace({
                   disabled={activeTab.saveState === 'saving' || activeTab.saveState === 'clean' || activeTab.saveState === 'conflict'}
                   className="msm-btn-secondary inline-flex h-8 items-center gap-1.5 px-2.5 text-xs disabled:opacity-40"
                 >
-                  <Save className="h-3.5 w-3.5" /> Speichern
+                  <Save className="h-3.5 w-3.5" /> {t('common.save')}
                 </button>
               )}
             </div>
@@ -339,9 +341,9 @@ export function FileEditorWorkspace({
           {activeTab.saveState === 'conflict' && (
             <div className="flex flex-wrap items-center gap-3 border-b border-status-warning/30 bg-status-warning/8 px-3 py-2 text-xs text-status-warning">
               <AlertTriangle className="h-4 w-4 shrink-0" />
-              <p className="min-w-52 flex-1">Die Datei wurde außerhalb dieses Editors geändert. Dein lokaler Inhalt bleibt erhalten und wird nicht überschrieben.</p>
+              <p className="min-w-52 flex-1">{t('files.editor.conflictNotice')}</p>
               <button type="button" className="msm-btn-secondary inline-flex h-8 items-center gap-1.5 px-2.5 text-xs" onClick={() => onReload(activeTab.path)}>
-                <RotateCcw className="h-3.5 w-3.5" /> Server-Version neu laden
+                <RotateCcw className="h-3.5 w-3.5" /> {t('files.editor.reloadServerVersion')}
               </button>
             </div>
           )}
@@ -361,7 +363,7 @@ export function FileEditorWorkspace({
                     }
                     if (event.key === 'Escape') setSearchOpen(false)
                   }}
-                  placeholder="Suchen…"
+                  placeholder={t('files.editor.findPlaceholder')}
                   className="msm-input h-8 pl-8 pr-16 text-xs"
                 />
                 <span className="absolute right-2 top-1/2 -translate-y-1/2 font-mono text-[10px] text-on-surface-variant">{matches.length ? `${activeMatch + 1}/${matches.length}` : '0'}</span>
@@ -371,19 +373,19 @@ export function FileEditorWorkspace({
                 <input
                   value={replacement}
                   onChange={(event) => setReplacement(event.target.value)}
-                  placeholder="Ersetzen durch…"
+                  placeholder={t('files.editor.replacePlaceholder')}
                   disabled={!canWrite}
                   className="msm-input h-8 pl-8 text-xs disabled:opacity-50"
                 />
               </div>
               <div className="flex flex-wrap items-center gap-1">
-                <button type="button" onClick={() => setCaseSensitive((value) => !value)} className={`msm-btn-tertiary h-8 min-w-8 px-2 font-mono text-xs ${caseSensitive ? 'bg-primary/10 text-primary' : ''}`} aria-pressed={caseSensitive} title="Groß-/Kleinschreibung">Aa</button>
-                <button type="button" onClick={() => selectMatch(activeMatch - 1)} disabled={!matches.length} className="msm-btn-tertiary flex h-8 w-8 items-center justify-center disabled:opacity-40" aria-label="Vorheriger Treffer"><ChevronUp className="h-3.5 w-3.5" /></button>
-                <button type="button" onClick={() => selectMatch(activeMatch + 1)} disabled={!matches.length} className="msm-btn-tertiary flex h-8 w-8 items-center justify-center disabled:opacity-40" aria-label="Nächster Treffer"><ChevronDown className="h-3.5 w-3.5" /></button>
-                <button type="button" onClick={replaceCurrent} disabled={!canWrite || !matches.length} className="msm-btn-secondary h-8 px-2.5 text-xs disabled:opacity-40">Ersetzen</button>
-                <button type="button" onClick={replaceAll} disabled={!canWrite || !matches.length} className="msm-btn-secondary h-8 px-2.5 text-xs disabled:opacity-40">Alle ersetzen</button>
-                <button type="button" onClick={() => selectMatch(0)} disabled={!matches.length} className="msm-btn-tertiary h-8 px-2.5 text-xs disabled:opacity-40">Alle finden ({matches.length})</button>
-                <button type="button" onClick={() => setSearchOpen(false)} className="msm-btn-tertiary flex h-8 w-8 items-center justify-center" aria-label="Suche schließen"><X className="h-3.5 w-3.5" /></button>
+                <button type="button" onClick={() => setCaseSensitive((value) => !value)} className={`msm-btn-tertiary h-8 min-w-8 px-2 font-mono text-xs ${caseSensitive ? 'bg-primary/10 text-primary' : ''}`} aria-pressed={caseSensitive} title={t('files.editor.matchCase')}>Aa</button>
+                <button type="button" onClick={() => selectMatch(activeMatch - 1)} disabled={!matches.length} className="msm-btn-tertiary flex h-8 w-8 items-center justify-center disabled:opacity-40" aria-label={t('files.editor.previousMatch')}><ChevronUp className="h-3.5 w-3.5" /></button>
+                <button type="button" onClick={() => selectMatch(activeMatch + 1)} disabled={!matches.length} className="msm-btn-tertiary flex h-8 w-8 items-center justify-center disabled:opacity-40" aria-label={t('files.editor.nextMatch')}><ChevronDown className="h-3.5 w-3.5" /></button>
+                <button type="button" onClick={replaceCurrent} disabled={!canWrite || !matches.length} className="msm-btn-secondary h-8 px-2.5 text-xs disabled:opacity-40">{t('files.editor.replace')}</button>
+                <button type="button" onClick={replaceAll} disabled={!canWrite || !matches.length} className="msm-btn-secondary h-8 px-2.5 text-xs disabled:opacity-40">{t('files.editor.replaceAll')}</button>
+                <button type="button" onClick={() => selectMatch(0)} disabled={!matches.length} className="msm-btn-tertiary h-8 px-2.5 text-xs disabled:opacity-40">{t('files.editor.findAll', { anzahl: matches.length })}</button>
+                <button type="button" onClick={() => setSearchOpen(false)} className="msm-btn-tertiary flex h-8 w-8 items-center justify-center" aria-label={t('files.editor.closeSearch')}><X className="h-3.5 w-3.5" /></button>
               </div>
             </div>
           )}
@@ -409,8 +411,8 @@ export function FileEditorWorkspace({
             )}
           </div>
           <footer className="flex min-h-8 flex-wrap items-center gap-x-4 gap-y-1 border-t border-outline-variant bg-surface-container-low/80 px-3 py-1 font-mono text-[10px] text-on-surface-variant">
-            <span>Zeile {cursor.line}, Spalte {cursor.column}</span>
-            <span>Auswahl {cursor.selected}</span>
+            <span>{t('files.editor.cursorPosition', { zeile: cursor.line, spalte: cursor.column })}</span>
+            <span>{t('files.editor.selection', { anzahl: cursor.selected })}</span>
             <span>{detectIndentation(activeTab.content)}</span>
             <span>UTF-8</span>
             <span>{activeTab.lineEnding === '\r\n' ? 'CRLF' : 'LF'}</span>
@@ -422,7 +424,7 @@ export function FileEditorWorkspace({
       ) : (
         <div className="flex min-h-[520px] flex-1 flex-col items-center justify-center gap-3 px-6 text-center text-on-surface-variant">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-outline-variant bg-surface-container-low"><FileCode2 className="h-5 w-5 text-secondary" /></div>
-          <div><p className="text-sm font-medium text-on-surface">Datei zum Bearbeiten öffnen</p><p className="mt-1 max-w-sm text-xs">Mehrere Dateien bleiben als Tabs geöffnet. Änderungen werden nie stillschweigend verworfen.</p></div>
+          <div><p className="text-sm font-medium text-on-surface">{t('files.editor.emptyTitle')}</p><p className="mt-1 max-w-sm text-xs">{t('files.editor.emptyHint')}</p></div>
         </div>
       )}
     </section>

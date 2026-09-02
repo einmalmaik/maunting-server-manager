@@ -4,6 +4,8 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
   ArrowLeft,
+  Bot,
+  Brain,
   Clock,
   Cpu,
   Database,
@@ -34,7 +36,9 @@ import { Backups } from "./Backups";
 import { ServerConsolePanel } from "@/components/server/ServerConsolePanel";
 import { ServerRestartPanel } from "@/components/server/ServerRestartPanel";
 import { AuthSetupBanner } from "@/components/server/AuthSetupBanner";
+import { ServerCredentialsPanel } from "@/components/server/ServerCredentialsPanel";
 import { PageHeader } from "@/Singra/UI/PageHeader";
+import { Dropdown } from "@/components/ui/Dropdown";
 import { ResourceMetricCard } from "@/Singra/UI/ResourceMetricCard";
 import { DatabaseManager } from "@/components/server/DatabaseManager";
 import { OutgoingWebhooksPanel } from "@/components/server/OutgoingWebhooksPanel";
@@ -42,6 +46,7 @@ import { SwitchBlueprintDialog } from "@/components/server/SwitchBlueprintDialog
 import { GuardianBadge } from "@/features/guardian/GuardianBadge";
 import { GuardianQuarantineBanner } from "@/features/guardian/GuardianQuarantineBanner";
 import { GuardianTab } from "@/features/guardian/GuardianTab";
+import { AiMemoryManager } from "@/components/ai/AiMemoryManager";
 import type { GameInfo, Server } from "@/types";
 import { labelRole, mapBlueprintPorts } from "@/utils/portRoles";
 import { UptimeDisplay } from "@/components/server/UptimeDisplay";
@@ -54,6 +59,7 @@ type TabKey =
   | "restarts"
   | "backups"
   | "databases" | "webhooks"
+  | "memory"
   | "guardian";
 
 const VALID_TABS: TabKey[] = [
@@ -65,6 +71,7 @@ const VALID_TABS: TabKey[] = [
   "backups",
   "databases",
   "webhooks",
+  "memory",
   "guardian",
 ];
 
@@ -161,7 +168,13 @@ export function ServerDetail() {
     ports: {} as Record<string, string>,
     protocols: {} as Record<string, string>,
   });
-  const { interfaces } = useHostInterfaces(server?.node_id);
+  // Die Liste wird ausschließlich im Netzwerk-Dialog gelesen, also erst dann
+  // geladen. Sonst kostet jeder Aufruf der Detailseite zwei Anfragen für Daten,
+  // die niemand zu sehen bekommt.
+  const { interfaces, loading: interfacesLoading } = useHostInterfaces(
+    server?.node_id,
+    showEditNetwork,
+  );
 
   const serverId = parseInt(id || "0");
 
@@ -170,8 +183,22 @@ export function ServerDetail() {
   // isLoading-Check verhindert Permission-Load-Flash: Button erscheint erst
   // nach Abschluss des Permission-Loads (oder gar nicht bei fehlendem Recht).
   const canManageResources = useHasPermission("server.resources.manage", serverId);
+  const canUseAi = useHasPermission("ai.chat.use");
+  const canManageCredentials = useHasPermission("server.credentials.manage", serverId);
+  // Der Reiter mit dem Wissen dieser Anlage. Zwei Rechte, zwei Rollen:
+  // `ai.memory.use` entscheidet, ob der Reiter ueberhaupt erscheint —
+  // `AiMemoryManager` zeigt ohne dieses Recht gar nichts, und ein leerer
+  // Kasten waere schlechter als kein Reiter. `server.config.write`
+  // entscheidet nur, ob die Knoepfe zum Aendern dabei sind; lesen darf
+  // jeder, der bis hierher gekommen ist.
+  const canUseAiMemory = useHasPermission("ai.memory.use");
+  const canWriteServerConfig = useHasPermission("server.config.write", serverId);
   const permissionsLoading = usePermissionsStore((s) => s.isLoading);
   const showResourceEdit = !permissionsLoading && canManageResources;
+  // Dasselbe Anti-Flacker-Muster wie eine Zeile darueber: waehrend die Rechte
+  // laden, ist `canUseAiMemory` false. Ohne diese Bedingung erschiene der
+  // Reiter kurz nach dem Laden und sprungen die uebrigen zur Seite.
+  const showMemoryTab = !permissionsLoading && canUseAiMemory;
 
   const [showEditResource, setShowEditResource] = useState(false);
   const [mobileOverviewOpen, setMobileOverviewOpen] = useState(false);
@@ -179,14 +206,12 @@ export function ServerDetail() {
   const fetchAll = async () => {
     if (!serverId) return;
     try {
-      const [srv, st, gms] = await Promise.all([
+      const [srv, st] = await Promise.all([
         api<Server>(`/servers/${serverId}`),
         api<ServerStatus>(`/servers/${serverId}/status`).catch(() => null),
-        api<GameInfo[]>("/system/games").catch(() => []),
       ]);
       setServer(srv);
       setStatus(st);
-      setGames(Array.isArray(gms) ? gms : []);
     } catch {
       // silent
     } finally {
@@ -194,9 +219,32 @@ export function ServerDetail() {
     }
   };
 
+  // Der Spielekatalog hängt nicht am Server und ändert sich nur, wenn ein
+  // Blueprint dazukommt. Einmal holen statt alle fünf Sekunden.
+  useEffect(() => {
+    api<GameInfo[]>("/system/games")
+      .then((gms) => setGames(Array.isArray(gms) ? gms : []))
+      .catch(() => {});
+  }, []);
+
+  // Der Merker gehört in den Takt, nicht in `fetchAll`: die manuellen Aufrufer
+  // warten auf das Versprechen und löschen danach den optimistischen Status.
+  // Ein Frühausstieg in `fetchAll` ließe ihr `.then` sofort feuern.
+  const pollLaeuft = useRef(false);
+
   useEffect(() => {
     void fetchAll();
-    const handle = setInterval(fetchAll, 5000);
+    const handle = setInterval(() => {
+      // Im Hintergrundtab schaut niemand hin: kein Takt, keine Anfragen.
+      if (document.visibilityState !== "visible") return;
+      // Ist der vorherige Durchlauf noch unterwegs, wird dieser Takt
+      // ausgelassen, statt die Anfragen zu stapeln.
+      if (pollLaeuft.current) return;
+      pollLaeuft.current = true;
+      void fetchAll().finally(() => {
+        pollLaeuft.current = false;
+      });
+    }, 5000);
     return () => clearInterval(handle);
   }, [serverId]);
 
@@ -231,7 +279,7 @@ export function ServerDetail() {
     () => (Array.isArray(games) ? games : []).find((g) => g.id === server?.game_type),
     [games, server?.game_type],
   );
-  const showModTab = !!gameInfo?.supports_steam_workshop;
+  const showModTab = !!(gameInfo?.supports_steam_workshop || gameInfo?.supports_curseforge || gameInfo?.mod_support);
   /** Steam / HTTP / GitHub: manueller Datei-Update-Check (nicht Workshop-Mods). */
   const showServerFileUpdates = !!gameInfo?.supports_server_file_updates;
 
@@ -264,6 +312,13 @@ export function ServerDetail() {
       label: t("tabs.webhooks", { defaultValue: "Webhooks" }),
       icon: Webhook,
     });
+    if (showMemoryTab) {
+      list.push({
+        key: "memory",
+        label: t("tabs.memory", { defaultValue: "Wissen" }),
+        icon: Brain,
+      });
+    }
     if (server?.guardian_enabled) {
       list.push({
         key: "guardian",
@@ -272,11 +327,16 @@ export function ServerDetail() {
       });
     }
     return list;
-  }, [t, showModTab, gameInfo?.enable_exec, server?.guardian_enabled]);
+  }, [t, showModTab, showMemoryTab, gameInfo?.enable_exec, server?.guardian_enabled]);
 
   const rawTab = (searchParams.get("tab") || "files") as TabKey;
   const activeTab: TabKey =
-    VALID_TABS.includes(rawTab) && (rawTab !== "mods" || showModTab)
+    VALID_TABS.includes(rawTab)
+      && (rawTab !== "mods" || showModTab)
+      // Ein Aufruf mit ?tab=memory ohne das Recht faellt auf "files" zurueck
+      // statt einen leeren Bereich zu zeigen. Ein Lesezeichen ueberlebt einen
+      // Rechteentzug, der Reiter nicht.
+      && (rawTab !== "memory" || showMemoryTab)
       ? rawTab
       : "files";
 
@@ -295,7 +355,10 @@ export function ServerDetail() {
     // no "kill" branch here (handleKill dedicated; dead code removed per review Issue 6)
     setActionLoading(action);
     try {
-      await api(`/servers/${serverId}/${action}`, { method: "POST" });
+      await api(`/servers/${serverId}/${action}`, {
+        method: "POST",
+        headers: { "Idempotency-Key": crypto.randomUUID() },
+      });
       if (action === "restart") {
         lastServerUpdateBadgeRef.current = null;
       }
@@ -323,21 +386,45 @@ export function ServerDetail() {
         return networkForm[field] !== current;
       };
 
-      let customPortsChanged = false;
-      let protocolsChanged = false;
+      const currentPortsMap: Record<string, number | null> = {};
       server?.ports?.forEach((p) => {
-        if ((networkForm.protocols[p.role] || p.protocol) !== p.protocol) {
-          protocolsChanged = true;
-        }
-        if (p.role !== 'game' && p.role !== 'query' && p.role !== 'rcon') {
-          const current = p.port ? String(p.port) : "";
-          if ((networkForm.ports[p.role] || "") !== current) {
-            customPortsChanged = true;
+        currentPortsMap[p.role] = p.port;
+      });
+
+      let portsChanged = false;
+      let protocolsChanged = false;
+
+      if (portChanged("game_port") || portChanged("query_port") || portChanged("rcon_port")) {
+        portsChanged = true;
+      }
+
+      const portDefs = gameInfo?.ports ?? [];
+      const mappedPortRoles = portDefs.length > 0
+        ? mapBlueprintPorts(portDefs).map((p) => p.mappedRole)
+        : Object.keys(currentPortsMap);
+
+      if (mappedPortRoles.length !== (server?.ports?.length ?? 0)) {
+        portsChanged = true;
+      }
+
+      mappedPortRoles.forEach((role) => {
+        if (role !== "game" && role !== "query" && role !== "rcon") {
+          const formVal = networkForm.ports[role];
+          const formNum = formVal ? parseInt(formVal) : null;
+          const currentNum = currentPortsMap[role] ?? null;
+          if (formNum !== currentNum || !(role in currentPortsMap)) {
+            portsChanged = true;
           }
         }
       });
 
-      if (portChanged("game_port") || portChanged("query_port") || portChanged("rcon_port") || customPortsChanged || protocolsChanged) {
+      server?.ports?.forEach((p) => {
+        if ((networkForm.protocols[p.role] || p.protocol) !== p.protocol) {
+          protocolsChanged = true;
+        }
+      });
+
+      if (portsChanged || protocolsChanged) {
         const portsPayload: Record<string, number | null> = {};
         const protocolsPayload: Record<string, string> = {};
         portsPayload["game"] = networkForm.game_port ? parseInt(networkForm.game_port) : null;
@@ -346,13 +433,15 @@ export function ServerDetail() {
         if (networkForm.protocols.game) protocolsPayload.game = networkForm.protocols.game;
         if (networkForm.protocols.query) protocolsPayload.query = networkForm.protocols.query;
         if (networkForm.protocols.rcon) protocolsPayload.rcon = networkForm.protocols.rcon;
-        
-        Object.keys(networkForm.ports).forEach((role) => {
-          const val = networkForm.ports[role];
-          portsPayload[role] = val ? parseInt(val) : null;
-        });
-        Object.keys(networkForm.protocols).forEach((role) => {
-          protocolsPayload[role] = networkForm.protocols[role];
+
+        mappedPortRoles.forEach((role) => {
+          if (role !== "game" && role !== "query" && role !== "rcon") {
+            const val = networkForm.ports[role];
+            portsPayload[role] = val ? parseInt(val) : null;
+            if (networkForm.protocols[role]) {
+              protocolsPayload[role] = networkForm.protocols[role];
+            }
+          }
         });
 
         body.ports = portsPayload;
@@ -408,7 +497,10 @@ export function ServerDetail() {
     setOptimisticStatus("stopped");
     setActionLoading("kill");
     try {
-      await api(`/servers/${serverId}/kill`, { method: "POST" });
+      await api(`/servers/${serverId}/kill`, {
+        method: "POST",
+        headers: { "Idempotency-Key": crypto.randomUUID() },
+      });
       toast.success(t("servers.killSuccess"));
       void fetchAll().then(() => setOptimisticStatus(null));
     } catch (err: unknown) {
@@ -583,6 +675,20 @@ export function ServerDetail() {
             <ArrowLeft className="w-4 h-4" />
             <span>{t("common.back", "Back")}</span>
           </button>
+          {/* Der KI-Chat lebt seit dem Einzelchat ausschliesslich unter /ai.
+              Der Verweis bleibt hier, damit der Weg dorthin nicht verloren
+              geht — die KI findet den Server dann selbst ueber list_my_servers. */}
+          {canUseAi && (
+            <button
+              type="button"
+              className="msm-btn-secondary inline-flex min-h-11 items-center gap-2 px-3 py-2"
+              onClick={() => navigate("/ai")}
+              aria-label={t("tabs.ai")}
+            >
+              <Bot className="w-4 h-4" />
+              <span>{t("tabs.ai")}</span>
+            </button>
+          )}
           <button
             type="button"
             className="msm-btn-secondary inline-flex min-h-11 max-w-full items-center gap-2 px-3 py-2 text-left"
@@ -863,12 +969,18 @@ export function ServerDetail() {
           </div>
           <button
             onClick={() => setShowEditNetwork(true)}
-            className="msm-btn-secondary px-3 py-1.5 text-sm"
+            disabled={effectiveStatus === "running" || !!actionLoading}
+            title={effectiveStatus === "running" ? t("servers.networkEditRequiresStopped") : undefined}
+            className={`px-3 py-1.5 text-sm ${
+              effectiveStatus === "running" || !!actionLoading
+                ? "msm-btn-secondary opacity-50 cursor-not-allowed"
+                : "msm-btn-secondary"
+            }`}
           >
             {t("common.edit")}
           </button>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           <div>
             <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">
               {t("servers.node")}
@@ -894,6 +1006,8 @@ export function ServerDetail() {
               const baseRole = labelRole(p.role);
               const label = baseRole === 'game'
                 ? t('servers.gamePort')
+                : baseRole === 'peer'
+                ? t('servers.peerPort', { defaultValue: 'Peer-Port' })
                 : baseRole === 'query'
                 ? t('servers.queryPort')
                 : baseRole === 'rcon'
@@ -904,7 +1018,12 @@ export function ServerDetail() {
                   <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">
                     {label}
                   </p>
-                  <p className="font-headline text-display-sm text-primary">
+                  {/* Dieselbe Groesse wie Node und Bind-IP daneben. Hier stand
+                      `text-display-sm` — 36px fett gegen 16px normal in
+                      derselben Rasterzeile. Eine Portnummer ist kein
+                      Kennzahlwert wie auf dem Dashboard, sondern ein Datenfeld
+                      unter anderen. */}
+                  <p className="font-headline text-body-md text-primary">
                     {p.port ?? "-"}{" "}
                     <span className="text-sm font-body-md text-on-surface-variant">
                       {p.protocol.toUpperCase()}
@@ -919,7 +1038,7 @@ export function ServerDetail() {
                 <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">
                   {t("servers.gamePort")}
                 </p>
-                <p className="font-headline text-display-sm text-primary">
+                <p className="font-headline text-body-md text-primary">
                   {server.game_port ?? "-"}{" "}
                   <span className="text-sm font-body-md text-on-surface-variant">
                     UDP
@@ -930,7 +1049,7 @@ export function ServerDetail() {
                 <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">
                   {t("servers.queryPort")}
                 </p>
-                <p className="font-headline text-display-sm text-primary">
+                <p className="font-headline text-body-md text-primary">
                   {server.query_port ?? "-"}{" "}
                   <span className="text-sm font-body-md text-on-surface-variant">
                     UDP
@@ -941,7 +1060,7 @@ export function ServerDetail() {
                 <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">
                   {t("servers.rconPort")}
                 </p>
-                <p className="font-headline text-display-sm text-primary">
+                <p className="font-headline text-body-md text-primary">
                   {server.rcon_port ?? "-"}{" "}
                   <span className="text-sm font-body-md text-on-surface-variant">
                     TCP
@@ -953,6 +1072,10 @@ export function ServerDetail() {
         </div>
       </div>
       </div>
+
+      {/* Zugangsdaten: erscheint nur, wenn dieser Server welche braucht
+          oder bereits eine eigene Zuordnung hat (Zielpunkt 17.4). */}
+      <ServerCredentialsPanel serverId={serverId} canManage={canManageCredentials} />
 
       {/* Tabs */}
       <div className="sticky top-14 z-20 -mb-px overflow-x-auto border-b border-outline bg-background/95 backdrop-blur-xl [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:static md:bg-transparent md:backdrop-blur-none">
@@ -985,7 +1108,7 @@ export function ServerDetail() {
           <ServerConsolePanel serverId={serverId} mode="exec" />
         )}
         {activeTab === "mods" && showModTab && (
-          <ModManager serverId={serverId} />
+          <ModManager serverId={serverId} gameInfo={gameInfo} />
         )}
         {activeTab === "restarts" && (
           <ServerRestartPanel
@@ -997,6 +1120,15 @@ export function ServerDetail() {
         {activeTab === "backups" && <Backups serverId={serverId} />}
         {activeTab === "databases" && <DatabaseManager serverId={serverId} />}
         {activeTab === "webhooks" && <OutgoingWebhooksPanel serverId={serverId} />}
+        {activeTab === "memory" && showMemoryTab && (
+          <AiMemoryManager
+            scope={{
+              kind: "server_shared",
+              serverId,
+              canManage: canWriteServerConfig,
+            }}
+          />
+        )}
         {activeTab === "guardian" && (
           <GuardianTab server={server} onRefreshServer={fetchAll} />
         )}
@@ -1012,38 +1144,47 @@ export function ServerDetail() {
             <p className="font-body-md text-sm text-on-surface-variant mb-6">
               {t("servers.editNetworkDescription")}
             </p>
+            {effectiveStatus === "running" && (
+              <div className="mb-4 p-3 rounded-lg bg-status-warning/10 border border-status-warning/30 text-status-warning text-sm">
+                {t("servers.networkEditRequiresStopped")}
+              </div>
+            )}
             <form onSubmit={handleSaveNetwork} className="space-y-4">
               <div>
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                   {t("servers.publicBindIp")}
                 </label>
-                <select
-                  className="msm-input"
-                  value={networkForm.public_bind_ip}
-                  onChange={(e) =>
+                <Dropdown
+                  value={networkForm.public_bind_ip || null}
+                  onChange={(value) =>
                     setNetworkForm({
                       ...networkForm,
-                      public_bind_ip: e.target.value,
+                      public_bind_ip: value,
                     })
                   }
-                  required
-                >
-                  <option value="">{t("servers.bindIp.choose")}</option>
-                  {interfaces.map((iface) => (
-                    <option
-                      key={`${iface.interface}-${iface.ip}`}
-                      value={iface.ip}
-                    >
-                      {iface.ip} · {iface.interface}
-                      {iface.is_loopback
-                        ? ` (${t("servers.bindIp.loopback")})`
-                        : ""}
-                      {iface.is_private && !iface.is_loopback
-                        ? ` (${t("servers.bindIp.private")})`
-                        : ""}
-                    </option>
-                  ))}
-                </select>
+                  options={interfaces.map((iface) => {
+                    const tag = iface.is_loopback
+                      ? ` (${t("servers.bindIp.loopback")})`
+                      : iface.is_private && !iface.is_loopback
+                      ? ` (${t("servers.bindIp.private")})`
+                      : "";
+                    return {
+                      value: iface.ip,
+                      label: `${iface.ip} · ${iface.interface}${tag}`,
+                      hint: iface.interface,
+                    };
+                  })}
+                  disabled={interfacesLoading}
+                  placeholder={
+                    interfacesLoading
+                      ? t("servers.bindIp.loading")
+                      : interfaces.length === 0
+                      ? t("servers.bindIp.noneAvailable")
+                      : t("servers.bindIp.choose")
+                  }
+                  aria-label={t("servers.publicBindIp")}
+                  data-testid="server-detail-bind-ip"
+                />
                 <p className="font-body-md text-xs text-on-surface-variant mt-1">
                   {t("servers.bindIp.hint")}
                 </p>
@@ -1076,6 +1217,8 @@ export function ServerDetail() {
                       const baseRole = labelRole(role);
                       const label = baseRole === 'game'
                         ? t('servers.gamePort')
+                        : baseRole === 'peer'
+                        ? t('servers.peerPort', { defaultValue: 'Peer-Port' })
                         : baseRole === 'query'
                         ? t('servers.queryPort')
                         : baseRole === 'rcon'
@@ -1110,23 +1253,23 @@ export function ServerDetail() {
                               className="msm-input"
                               placeholder={t('servers.portAuto')}
                             />
-                            <select
-                              aria-label={`${label} protocol`}
-                              className="msm-input px-2"
+                            <Dropdown
                               value={protocol}
-                              onChange={(e) =>
+                              onChange={(value) =>
                                 setNetworkForm({
                                   ...networkForm,
                                   protocols: {
                                     ...networkForm.protocols,
-                                    [role]: e.target.value,
+                                    [role]: value,
                                   },
                                 })
                               }
-                            >
-                              <option value="udp">UDP</option>
-                              <option value="tcp">TCP</option>
-                            </select>
+                              options={[
+                                { value: "udp", label: "UDP" },
+                                { value: "tcp", label: "TCP" },
+                              ]}
+                              aria-label={`${label} protocol`}
+                            />
                           </div>
                         </div>
                       );
@@ -1145,7 +1288,7 @@ export function ServerDetail() {
                 <button
                   type="submit"
                   className="msm-btn-primary flex-1 py-2 disabled:opacity-50"
-                  disabled={savingNetwork}
+                  disabled={savingNetwork || effectiveStatus === "running"}
                 >
                   {savingNetwork ? t("common.loading") : t("common.save")}
                 </button>

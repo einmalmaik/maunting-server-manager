@@ -5,7 +5,7 @@ from database import get_db
 from dependencies import get_current_user, require_global, verify_csrf
 from models import User
 from schemas import RoleCreate, RoleResponse, RoleUpdate
-from services import role_service
+from services import audit_service, role_service
 from services.permission_catalog import SYSTEM_ROLE_ADMIN
 from services.permission_service import has_global_permission
 
@@ -85,6 +85,15 @@ def create_role(
     _ensure_no_escalation(db, actor, req.permissions)
     try:
         role = role_service.create_role(db, req.name, req.description, req.permissions)
+        audit_service.record_privileged_action(
+            db,
+            user_id=actor.id,
+            action="roles.create",
+            target_type="role",
+            target_id=role.id,
+            details={"name": role.name, "permissions": req.permissions or []},
+            commit=True,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return _to_response(db, role)
@@ -117,6 +126,18 @@ def update_role(
     _ensure_no_escalation(db, actor, req.permissions)
     try:
         role = role_service.update_role(db, role, req.name, req.description, req.permissions)
+        audit_service.record_privileged_action(
+            db,
+            user_id=actor.id,
+            action="roles.update",
+            target_type="role",
+            target_id=role.id,
+            details={
+                "name": role.name,
+                "permissions": req.permissions if req.permissions is not None else "[unchanged]",
+            },
+            commit=True,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return _to_response(db, role)
@@ -126,13 +147,23 @@ def update_role(
 def delete_role(
     role_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(require_global("roles.manage")),
+    actor: User = Depends(require_global("roles.manage")),
     __: None = Depends(verify_csrf),
 ) -> None:
     role = role_service.get_role(db, role_id)
     if not role:
         raise HTTPException(status_code=404, detail="Rolle nicht gefunden")
+    role_name = role.name
     try:
         role_service.delete_role(db, role)
+        audit_service.record_privileged_action(
+            db,
+            user_id=actor.id,
+            action="roles.delete",
+            target_type="role",
+            target_id=role_id,
+            details={"name": role_name},
+            commit=True,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

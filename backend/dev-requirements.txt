@@ -15,3 +15,25 @@ moto[s3]==5.2.2
 # Asyncio-Testausführung für echte Scheduler-, Streaming- und Multi-Node-Tests.
 # Test-only; keine Produktionseinbindung und kein Zugriff auf Runtime-Secrets.
 pytest-asyncio==1.4.0
+
+# Verteilt die Testdateien auf mehrere Prozesse (`-n auto --dist loadfile` in
+# pytest.ini). Die Suite lief sequenziell über zehn Minuten, auf acht Prozessen
+# gut drei. `loadfile` hält alle Tests einer Datei in einem Prozess — die
+# Fixtures bauen den Zustand je Datei auf.
+# Test-only; kein Produktionseinsatz.
+pytest-xdist==3.8.0
+
+# Macht aus einem hängenden Test einen Fehlschlag statt eines Stillstands.
+# Anlass: ein Provider-Mock meldete in jeder Runde denselben Werkzeugaufruf und
+# die Stream-Schleife drehte endlos. Ohne Zeitgrenze sah das nach einer langsamen
+# Suite aus statt nach einem Fehler — und die Ursache blieb lange unentdeckt.
+# Test-only; kein Produktionseinsatz.
+pytest-timeout==2.4.0
+
+# YAML-Parser für die Kubernetes-Vertragstests (test_kubernetes_manifests.py).
+# Bisher war PyYAML nur transitiv über moto→responses vorhanden. Der Test nutzt
+# `pytest.importorskip("yaml")` und hätte sich bei einer Änderung dieser Kette
+# still übersprungen — neun Tests, die Betriebsbedingungen erzwingen sollen,
+# wären wirkungslos geworden, ohne dass jemand es bemerkt.
+# Test-only; kein Produktionseinsatz.
+PyYAML==6.0.3

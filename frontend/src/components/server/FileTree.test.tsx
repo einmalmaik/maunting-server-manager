@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import i18n from '@/i18n'
 import { FileTree } from './FileTree'
 import type { FileEntry } from './fileWorkspaceTypes'
 
@@ -8,6 +9,10 @@ function entry(name: string, isDir: boolean): FileEntry {
 }
 
 describe('FileTree keyboard navigation', () => {
+  beforeEach(async () => {
+    await i18n.changeLanguage('de')
+  })
+
   it('uses one roving tab stop and supports arrows, Home and End', async () => {
     const onToggle = vi.fn()
     render(
@@ -17,6 +22,7 @@ describe('FileTree keyboard navigation', () => {
         loadingPaths={new Set()}
         activePath={null}
         searchResults={null}
+        contentMatches={null}
         searchTruncated={false}
         emptyLabel="Empty"
         searchEmptyLabel="No matches"

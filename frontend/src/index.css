@@ -11,12 +11,16 @@
     font-family: 'Inter', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    height: 100%;
+    overscroll-behavior: none;
   }
 
   body {
+    height: 100%;
     min-height: 100vh;
     margin: 0;
     padding: 0;
+    overscroll-behavior: none;
     background:
       radial-gradient(70rem 32rem at 50% -12rem, hsl(var(--dna-focus) / 0.12), transparent 68%),
       hsl(var(--dna-background));
@@ -107,7 +111,7 @@
   }
 
   .msm-card {
-    @apply msm-panel rounded-lg;
+    @apply msm-panel rounded-2xl;
   }
 
   .msm-database-console-grid {
@@ -128,10 +132,14 @@
   }
 
   /* Primary Button - controlled logo cyan, high contrast on dark */
+  /*
+   * Kein eigener focus-visible-Ring in den Button-Klassen: der globale
+   * :focus-visible-Outline weiter oben liegt zwei Pixel weiter außen und
+   * verdeckt jeden Ring vollständig. Eine Quelle für den Fokus, nicht zwei.
+   */
   .msm-btn-primary {
     @apply bg-primary text-on-primary font-label-md text-label-md rounded-md
            hover:shadow-primary-glow-hover active:scale-[0.98]
-           focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background
            disabled:pointer-events-none disabled:opacity-50
            transition-all duration-200;
     box-shadow: 0 12px 28px hsl(190 92% 62% / 0.18);
@@ -141,9 +149,8 @@
   .msm-btn-secondary {
     @apply bg-surface-container-high/50 border border-outline-variant
            text-on-surface-variant hover:text-on-surface
-           hover:bg-surface-variant/30 hover:border-outline
+           hover:bg-surface-variant hover:border-outline
            font-label-md text-label-md rounded-md
-           focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background
            disabled:pointer-events-none disabled:opacity-50
            active:scale-[0.98] transition-all duration-200;
   }
@@ -152,7 +159,6 @@
     @apply bg-transparent border border-transparent text-on-surface-variant
            hover:text-primary hover:bg-primary/10 hover:border-primary/20
            font-label-md text-label-md rounded-md
-           focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background
            disabled:pointer-events-none disabled:opacity-50
            active:scale-[0.98] transition-all duration-200;
   }
@@ -162,7 +168,6 @@
     @apply border border-status-destructive text-error
            hover:bg-status-destructive hover:text-on-error
            font-label-md text-label-md rounded-md
-           focus-visible:ring-2 focus-visible:ring-status-destructive focus-visible:ring-offset-2 focus-visible:ring-offset-background
            disabled:pointer-events-none disabled:opacity-50
            active:scale-[0.98] transition-all duration-200;
   }
@@ -223,16 +228,6 @@
            flex items-center justify-center p-4 z-50;
   }
 
-  .msm-modal {
-    @apply msm-card max-w-md w-full p-6;
-    box-shadow: 0 24px 56px hsl(0 0% 0% / 0.45);
-  }
-
-  /* Empty State */
-  .msm-empty {
-    @apply msm-card p-12 text-center;
-  }
-
   /* Alert Patterns */
   .msm-alert-success {
     @apply bg-status-success/10 border border-status-success/30
@@ -267,18 +262,29 @@
     @apply msm-nav-link bg-primary/10 text-primary border border-primary/20 font-bold;
   }
 
-  /* Ambient Glow — Decorative background element */
-  .msm-ambient-glow {
-    @apply absolute pointer-events-none;
-    background: radial-gradient(circle, hsl(194 44% 68% / 0.18) 0%, transparent 70%);
-  }
-
   /* Deep Grid Background */
   .msm-deep-grid {
     background-image:
       linear-gradient(to right, rgba(103, 232, 249, 0.06) 1px, transparent 1px),
       linear-gradient(to bottom, rgba(103, 232, 249, 0.06) 1px, transparent 1px);
     background-size: 40px 40px;
+  }
+
+  /* MSS (Desktop-App): Boot-Sequenz und Statuspuls.
+
+     Diese Klassen nutzt nur der Desktop-Einstieg (src/desktop/) — sie liegen
+     trotzdem hier, weil es genau ein Stylesheet gibt und ein zweites nur eine
+     zweite Wahrheit über dieselben Tokens wäre. */
+  .mss-blase {
+    animation: mss-puls 2.4s ease-in-out infinite;
+  }
+
+  /* Jedes Logo blendet weich ein, steht und blendet aus — wie die
+     Studio-Logos beim Start eines Spiels. Das Stehen ist der längste Teil:
+     ein Logo, das nur durchhuscht, hat man nicht gesehen. Die Dauer setzt
+     Splash.tsx per animationDuration; der Wert hier ist nur der Rückfall. */
+  .mss-splash-stufe {
+    animation: mss-splash-stufe 3200ms ease-in-out both;
   }
 
   /* CodeMirror Search Panel (Maunting DNA) */
@@ -316,3 +322,80 @@
     }
   }
 }
+
+/* MSS-Keyframes — ausserhalb der Layer, Keyframes gehoeren in keinen. */
+@keyframes mss-puls {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+}
+
+@keyframes mss-splash-stufe {
+  0% {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  14%,
+  84% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.02);
+  }
+}
+
+@keyframes calendar-slide-left {
+  0% {
+    opacity: 0;
+    transform: translateX(42px) scale(0.985);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes calendar-slide-right {
+  0% {
+    opacity: 0;
+    transform: translateX(-42px) scale(0.985);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+.animate-calendar-slide-left {
+  animation: calendar-slide-left 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-calendar-slide-right {
+  animation: calendar-slide-right 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* MapLibre Sight Tooltip Popup Styling (Design DNA) */
+.msm-sight-popup.maplibregl-popup {
+  z-index: 30;
+  pointer-events: none;
+}
+
+.msm-sight-popup .maplibregl-popup-content {
+  background: transparent !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+  border-radius: 0.75rem !important;
+}
+
+.msm-sight-popup .maplibregl-popup-tip {
+  display: none !important;
+}
+

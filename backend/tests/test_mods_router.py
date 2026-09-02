@@ -13,13 +13,30 @@ class TestListMods:
         assert response.status_code == 200
         assert isinstance(response.json(), list)
 
-    def test_user_with_permission_can_list(self, client: TestClient, regular_user: User, user_cookies: dict, test_server: Server, user_permission: list[ServerPermission]):
-        response = client.get(f"/api/mods/{test_server.id}", cookies=user_cookies)
+    def test_user_with_permission_can_list(self, client: TestClient, regular_user: User, user_cookies: dict, test_server: Server, user_permission: list[ServerPermission], db: Session):
+        mod = Mod(server_id=test_server.id, workshop_id="12345", name="Sichtbarer Mod", load_order=0)
+        db.add(mod)
+        db.commit()
+
+        with patch("routers.mods.get_plugin") as mock_get_plugin:
+            plugin = mock_get_plugin.return_value
+            plugin.supports_mods = True
+            plugin.check_for_mod_updates.return_value = []
+            response = client.get(f"/api/mods/{test_server.id}", cookies=user_cookies)
+
         assert response.status_code == 200
+        # Die 200 allein wäre keine Zusage: `server.mods.read` gibt den Inhalt
+        # frei, nicht nur den Zugang. Eine Route, die dem Delegierten stets eine
+        # leere Liste liefert, bestünde sonst unbemerkt.
+        data = response.json()
+        assert [item["workshop_id"] for item in data] == ["12345"]
+        assert data[0]["name"] == "Sichtbarer Mod"
 
     def test_user_without_permission_blocked(self, client: TestClient, regular_user: User, user_cookies: dict, test_server: Server):
+        # Ohne jedes Server-Recht (auch kein view): 404 statt 403 — wer den
+        # Server nicht sehen darf, erfaehrt auch nicht, dass es ihn gibt.
         response = client.get(f"/api/mods/{test_server.id}", cookies=user_cookies)
-        assert response.status_code == 403
+        assert response.status_code == 404
 
     def test_unauthorized_blocked(self, client: TestClient, test_server: Server):
         response = client.get(f"/api/mods/{test_server.id}")

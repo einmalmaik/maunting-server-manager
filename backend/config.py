@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    app_name: str = "Maunting Server Manager"
+    app_name: str = "Maunting Service Manager"
     debug: bool = False
 
     # Datenbank
@@ -94,6 +94,33 @@ class Settings(BaseSettings):
     # verifizierten Remote-Node umgewandelt werden; kein stiller Fallback.
     local_agent_enabled: bool = True
 
+    # Lokales Embedding-Modell fuer die Gedaechtnissuche der KI. Leer heisst:
+    # das mit dem Update ausgelieferte Verzeichnis `backend/ml-models/...`.
+    # Ein eigener Pfad ist fuer Betreiber gedacht, die die Gewichte zentral
+    # ablegen (Netzlaufwerk, geteiltes Volume) statt je Installation.
+    # Fehlt das Modell, laeuft die Suche ohne Vektoren weiter.
+    ai_embedding_model_dir: str = ""
+
+    # Lokale mehrsprachige Intent-Erkennung im Sprachmodus. Unterhalb von 0.7
+    # wäre ein spekulativer Abruf zu leicht auslösbar und deshalb nicht zulässig.
+    ai_intent_prefetch_confidence: float = 0.8
+
+    # Auf welchem Weg der Sprachmodus zuhoert. Leer heisst: der beste, den der
+    # gewaehlte Anbieter kann (`Anbieter.gehoer_wege`, nach Guete sortiert).
+    #
+    # Es gibt genau einen Grund, hier etwas einzutragen, und er ist kein
+    # technischer: OpenRouters Transkriptionsendpunkt wird aus **Guthaben**
+    # bezahlt und nicht ueber den hinterlegten Fremdschluessel. Ein Konto ohne
+    # Guthaben chattet also weiter und hoert nicht mehr. `MSM_AI_STT_WEG=chat`
+    # laesst stattdessen ein hoerfaehiges Chatmodell abschreiben — teurer je
+    # Aufruf, aber ueber dieselbe Abrechnung wie alles andere, und im Katalog
+    # gibt es solche Modelle zum Nulltarif.
+    #
+    # Ein Weg, den der Anbieter nicht kennt, ist ein **Fehler** und keine stille
+    # Rueckkehr zur Vorgabe: sonst laeuft ein Panel monatelang auf dem teuren
+    # Weg, weil sich jemand vertippt hat. Siehe `ai_stt.weg_fuer`.
+    ai_stt_weg: str = ""
+
     # Verwaltetes PostgreSQL fuer Game-Server-Datenbanken.
     # Der Host-Port ist absichtlich nur an Loopback gebunden. Game-Container
     # erreichen PostgreSQL ueber das interne Docker-Netz und msm-postgres:5432.
@@ -142,6 +169,8 @@ class Settings(BaseSettings):
     # als dediziertes Tool-Image mit pre-installed binary). steamcmd_path bleibt nur für Backward-Compat-Tests.
     steamcmd_path: str = "/usr/games/steamcmd"
     steam_api_key: str = ""
+    curseforge_api_key: str = ""
+    cloudflare_api_token: str = ""
     github_clone_token: str = ""
     """Optional: MSM_GITHUB_CLONE_TOKEN für private GitHub-Repos (source.type=github)."""
 
@@ -190,6 +219,27 @@ if settings.panel_url == "http://localhost" and not settings.debug:
     )
 
 
+# Feste Origins der Desktop-App (Smart System, Tauri v2): Windows-WebViews
+# melden sich mit http(s)://tauri.localhost, macOS/Linux mit tauri://localhost.
+# Bedingungslos erlaubt, weil nur Tauri-WebViews diese Origins erzeugen — ein
+# Browser kann sie nicht vortaeuschen, und wer den Origin-Header ausserhalb
+# eines Browsers faelscht, unterliegt CORS ohnehin nicht. In die CSP des
+# Panels gehoeren sie nicht (main.py filtert sie aus connect-src heraus).
+TAURI_ORIGINS = (
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+    "http://localhost:1430",
+    "http://127.0.0.1:1430",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost",
+    "http://127.0.0.1",
+)
+
+
 def get_cors_origins() -> list[str]:
     """Explizite CORS allowlist: panel_url + MSM_CORS_ALLOWED_ORIGINS + Dev-Defaults.
 
@@ -206,6 +256,8 @@ def get_cors_origins() -> list[str]:
             o = part.strip().rstrip("/")
             if o:
                 origins.append(o)
+
+    origins.extend(TAURI_ORIGINS)
 
     if settings.debug:
         for dev in (

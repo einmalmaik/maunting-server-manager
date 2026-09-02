@@ -14,6 +14,7 @@ from services.install_update_lock_service import (
     release_install_update_lock,
     acquire_install_update_lock_blocking,
 )
+from services import mod_update_service
 from services.mod_install_status_service import (
     INSTALL_RUNNING,
     mark_mod_failed,
@@ -25,8 +26,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/mods", tags=["mods"])
 
-_MOD_UPDATE_CHECK_CACHE: dict[int, float] = {}
-_MOD_UPDATE_CHECK_TTL_SECONDS = 300
 _MOD_ACTIONS = {"install", "update", "reinstall"}
 _WORKSHOP_ID_RE = re.compile(r"^\d{1,20}$")
 
@@ -43,47 +42,14 @@ def _validate_workshop_id(workshop_id: str) -> str:
     return value
 
 
-def _mark_update_candidates(db: Session, server_id: int, updates: list[dict]) -> None:
-    changed = False
-    for update in updates:
-        workshop_id = str(update.get("workshop_id") or "")
-        action = str(update.get("action") or "update")
-        if not workshop_id or action not in {"install", "update"}:
-            continue
-        mod = (
-            db.query(Mod)
-            .filter(Mod.server_id == server_id, Mod.workshop_id == workshop_id)
-            .first()
-        )
-        if not mod or mod.install_status == INSTALL_RUNNING:
-            continue
-        mod.install_status = "pending"
-        mod.install_action = action
-        mod.install_progress = 0
-        mod.install_eta_seconds = None
-        mod.install_error = None
-        mod.update_status = "missing" if action == "install" else "outdated"
-        mod.update_reason = str(update.get("reason") or action)
-        changed = True
-    if changed:
-        db.commit()
-
-
 def _refresh_mod_update_availability(db: Session, server: Server, plugin, *, force: bool = False) -> list[dict]:
-    if not plugin or not getattr(plugin, "supports_mods", False):
-        return []
-    now = time.time()
-    if not force and now - _MOD_UPDATE_CHECK_CACHE.get(server.id, 0) < _MOD_UPDATE_CHECK_TTL_SECONDS:
-        return []
-    _MOD_UPDATE_CHECK_CACHE[server.id] = now
-    try:
-        updates = plugin.check_for_mod_updates(server)
-    except Exception as exc:
-        logger.warning("Mod-Update-Check fehlgeschlagen fuer Server %s: %s", server.id, exc)
-        return []
-    if updates:
-        _mark_update_candidates(db, server.id, updates)
-    return updates
+    """Duenner Aufruf auf den gemeinsamen Service.
+
+    Die Logik liegt in `services/mod_update_service.py`, damit das AI-Werkzeug
+    `read_mod_updates` exakt dieselbe Pruefung ausfuehrt wie dieser Router —
+    inklusive derselben Fuenf-Minuten-Sperre gegen Serienabfragen bei Steam.
+    """
+    return mod_update_service.refresh_update_availability(db, server, plugin, force=force)
 
 
 def _server_has_active_mod_jobs(db: Session, server_id: int) -> bool:
@@ -123,7 +89,9 @@ def install_mod_bg(server_id: int, workshop_id: str, action: str = "install", re
                 except Exception as ce:
                     _append_console_log(server.id, f"[MSM] Mod {workshop_id} Re-Install Cleanup Warnung: {ce}\n")
             result = plugin.install_mod(server, workshop_id)
-            success = isinstance(result, dict) and result.get("ok", True) is not False and "error" not in result
+            has_error = bool(result.get("error")) if isinstance(result, dict) else bool(result)
+            is_ok = result.get("ok", True) is not False if isinstance(result, dict) else not has_error
+            success = isinstance(result, dict) and is_ok and not has_error
             if success:
                 updater.update_mod_metadata_after_success(server.id, workshop_id, remote_updated)
                 mark_mod_installed(server.id, workshop_id)
@@ -184,11 +152,9 @@ def reinstall_all_mods_bg(server_id: int, workshop_ids: list[str]) -> None:
                     mark_mod_failed(server.id, wid, _safe_error(exc))
                     _append_console_log(server.id, f"[MSM] Mod {wid}: fehlgeschlagen — {exc}\n")
                     continue
-                success = (
-                    isinstance(result, dict)
-                    and result.get("ok", True) is not False
-                    and "error" not in result
-                )
+                has_error = bool(result.get("error")) if isinstance(result, dict) else bool(result)
+                is_ok = result.get("ok", True) is not False if isinstance(result, dict) else not has_error
+                success = isinstance(result, dict) and is_ok and not has_error
                 if success:
                     updater.update_mod_metadata_after_success(server.id, wid, None)
                     mark_mod_installed(server.id, wid)
@@ -308,7 +274,7 @@ def install_existing_mod(
 ):
     require_server_permission(user, server_id, db, "server.mods.write")
     if action not in _MOD_ACTIONS:
-        raise HTTPException(status_code=400, detail="Ungueltige Mod-Aktion")
+        raise HTTPException(status_code=400, detail="Ungültige Mod-Aktion")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
@@ -510,7 +476,7 @@ def reorder_mods(server_id: int, order: list[int], db: Session = Depends(get_db)
     mods = db.query(Mod).filter(Mod.server_id == server_id).all()
     mod_map = {m.id: m for m in mods}
     if len(order) != len(mod_map) or len(set(order)) != len(order) or set(order) != set(mod_map):
-        raise HTTPException(status_code=400, detail="Ungueltige Mod-Ladereihenfolge")
+        raise HTTPException(status_code=400, detail="Ungültige Mod-Ladereihenfolge")
     for idx, mod_id in enumerate(order):
         mod_map[mod_id].load_order = idx
     db.commit()

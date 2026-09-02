@@ -1,11 +1,14 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import { api } from '@/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { Logo } from '@/components/Logo'
-import { LogOut, Plus, X } from 'lucide-react'
+import { LogOut, Plus, User as UserIcon, X } from 'lucide-react'
 import { buildNavigation, type NavGroupName } from './navigation'
+import { DesktopAppDownloadBadge } from './DesktopAppDownloadBadge'
+import { Avatar, BenachrichtigungsGlocke } from '@/Singra/UI'
 
 interface SidebarProps {
   mobile?: boolean
@@ -16,6 +19,9 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { user, logout } = useAuthStore()
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const userMenuRef = useRef<HTMLDivElement>(null)
+
   // Hooks duerfen nicht hinter `||`-Short-Circuit verschwinden — daher beide
   // Permissions getrennt aufrufen und erst danach booleisch verknuepfen.
   const hasUsersRead = useHasPermission('users.read')
@@ -29,8 +35,31 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
   const canReadPanelDatabase = useHasPermission('panel.database.read')
   const canReadNodes = useHasPermission('nodes.read')
   const canManageNodes = useHasPermission('nodes.manage')
+  const canChatWithAi = useHasPermission('ai.chat.use')
+  const canManageAiSkills = useHasPermission('ai.skills.manage')
+  const canUseSkills = useHasPermission('ai.skills.use')
+  const canUseAi = canChatWithAi || canManageAiSkills
   
   const asideRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false)
+      }
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        setUserMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [])
 
   useEffect(() => {
     if (!mobile) return
@@ -49,19 +78,45 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
     return () => document.removeEventListener('keydown', trapFocus)
   }, [mobile])
 
+  const [calendarEnabled, setCalendarEnabled] = useState(true)
+  const [notesEnabled, setNotesEnabled] = useState(true)
+
+  useEffect(() => {
+    api<{ calendar_enabled?: boolean; notes_enabled?: boolean }>('/settings/public')
+      .then((res) => {
+        if (typeof res.calendar_enabled === 'boolean') {
+          setCalendarEnabled(res.calendar_enabled)
+        }
+        if (typeof res.notes_enabled === 'boolean') {
+          setNotesEnabled(res.notes_enabled)
+        }
+      })
+      .catch(() => {})
+  }, [])
+
   const handleLogout = async () => {
+    setUserMenuOpen(false)
+    if (onNavigate) onNavigate()
     await logout()
     navigate('/login', { replace: true })
   }
 
+  const handleNavigateProfile = () => {
+    setUserMenuOpen(false)
+    if (onNavigate) onNavigate()
+    navigate('/profile')
+  }
+
   const navItems = buildNavigation({
-    dashboard: t('nav.dashboard'), servers: t('nav.servers'), users: t('nav.users'), roles: t('nav.roles'),
+    dashboard: t('nav.dashboard'), calendar: t('nav.calendar', 'Kalender'), notes: t('nav.notes', 'Notizen'), servers: t('nav.servers'), users: t('nav.users'), roles: t('nav.roles'),
+    teams: t('nav.teams'),
     audit: t('nav.audit', 'Audit'),
     settings: t('nav.settings'), blueprints: t('nav.blueprints'), panelBackups: t('nav.panelBackups'),
-    panelDatabase: t('nav.panelDatabase', 'Panel-Datenbank'), nodes: t('nav.nodes'), docs: t('nav.docs'),
+    panelDatabase: t('nav.panelDatabase', 'Panel-Datenbank'), nodes: t('nav.nodes'), docs: t('nav.docs'), ai: t('nav.ai'),
   }, {
     owner: Boolean(user?.is_owner), canManageUsers, canManageRoles, canViewAudit, canViewSettings,
-    canManagePanelBackups, canReadPanelDatabase, canViewNodes: canReadNodes || canManageNodes,
+    canManagePanelBackups, canReadPanelDatabase, canViewNodes: canReadNodes || canManageNodes, canUseAi, canUseSkills,
+    calendarEnabled, notesEnabled,
   })
   const groupLabels: Record<NavGroupName, string> = {
     Overview: t('navGroups.overview', 'Overview'), Infrastructure: t('navGroups.infrastructure', 'Infrastructure'),
@@ -82,11 +137,8 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
         <Logo size="md" />
         <div>
           <h1 className="font-headline text-body-lg font-extrabold text-primary leading-tight">
-            MauntingStudios
+            MSM
           </h1>
-          <p className="font-mono-sm text-mono-sm text-on-surface-variant">
-            Server Manager
-          </p>
         </div>
         {mobile && <button type="button" onClick={onNavigate} className="ml-auto grid min-h-11 min-w-11 place-items-center rounded-lg hover:bg-surface-container-high" aria-label={t('shell.closeNavigation', 'Close navigation')}><X className="h-5 w-5" /></button>}
       </div>
@@ -120,15 +172,89 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
         ))}
       </nav>
 
-      {/* Footer */}
-      <div className="mt-auto pt-4 border-t border-outline-variant/30 px-2 pb-4">
-        <button
-          onClick={handleLogout}
-          className="msm-nav-link text-on-surface-variant hover:text-error hover:bg-error-container/20"
-        >
-          <LogOut className="w-[18px] h-[18px]" />
-          <span className="font-label-md text-label-md">{t('nav.logout')}</span>
-        </button>
+      {/* Desktop App Download Badge */}
+      <DesktopAppDownloadBadge />
+
+      {/* Discord-style Footer: User Profile & Notification Bell */}
+      <div className="relative mt-auto border-t border-outline-variant/30 bg-surface-container-low/80 p-2">
+        <div className="flex items-center justify-between gap-1.5" ref={userMenuRef}>
+          {/* User Button */}
+          <button
+            type="button"
+            onClick={() => setUserMenuOpen((open) => !open)}
+            aria-expanded={userMenuOpen}
+            aria-haspopup="menu"
+            aria-label={t('shell.openUserMenu', 'Open user menu')}
+            className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg p-1.5 text-left transition-colors hover:bg-surface-variant/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            <Avatar
+              src={user?.avatar_url}
+              name={user?.username}
+              size="sm"
+            />
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-label-md text-xs font-semibold text-on-surface">
+                {user?.username}
+              </p>
+              <p className="truncate font-mono-sm text-[11px] text-on-surface-variant">
+                {user?.is_owner ? 'Owner' : user?.email}
+              </p>
+            </div>
+          </button>
+
+          {/* User Dropup Menu */}
+          {userMenuOpen && (
+            <div
+              role="menu"
+              className="absolute bottom-full left-2 mb-2 w-56 overflow-hidden rounded-xl border border-outline-variant bg-surface-container-high shadow-2xl z-50 animate-[fadeIn_.12s_ease-out]"
+            >
+              <div className="border-b border-outline-variant/30 p-3 bg-surface-container">
+                <div className="flex items-center gap-2.5">
+                  <Avatar
+                    src={user?.avatar_url}
+                    name={user?.username}
+                    size="sm"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-label-md text-sm font-semibold text-on-surface">
+                      {user?.username}
+                    </p>
+                    <p className="truncate font-mono-sm text-xs text-on-surface-variant">
+                      {user?.email}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="py-1">
+                <button
+                  type="button"
+                  onClick={handleNavigateProfile}
+                  role="menuitem"
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-on-surface transition-colors hover:bg-surface-container-highest"
+                >
+                  <UserIcon className="h-4 w-4 text-on-surface-variant" aria-hidden="true" />
+                  {t('profile.title', 'Profil')}
+                </button>
+              </div>
+
+              <div className="border-t border-outline-variant/30 py-1">
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  role="menuitem"
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-status-error transition-colors hover:bg-error-container/20"
+                >
+                  <LogOut className="h-4 w-4" aria-hidden="true" />
+                  {t('nav.logout', 'Abmelden')}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Notification Bell */}
+          <BenachrichtigungsGlocke placement="top" align="sidebar" />
+        </div>
       </div>
     </aside>
   )

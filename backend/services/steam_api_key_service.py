@@ -1,12 +1,9 @@
 """Panel-weiter Steam Web API Key (Workshop-Suche, Mod-Metadaten).
 
-Auflösung (ENV schlägt Panel):
-    1. ``settings.steam_api_key`` / ``MSM_STEAM_API_KEY`` / ``STEAM_API_KEY``
-    2. Panel-DB ``steam_web_api_key_enc`` (DIS-verschlüsselt, AAD ``msm:steam:api_key``)
-    3. Legacy plain ``steam_web_api_key`` in panel_settings (Migration)
-
-Speichern über die UI persistiert in DB **und** aktualisiert ``.env`` (best effort),
-damit Neustarts und ``install.sh``-Rewrites den Key nicht verlieren.
+Auflösung (Panel-DB schlägt ENV-Fallback):
+    1. Panel-DB ``steam_web_api_key_enc`` (DIS-verschlüsselt, AAD ``msm:steam:api_key``)
+    2. Legacy plain ``steam_web_api_key`` in panel_settings (Migration)
+    3. ENV-Fallback: ``settings.steam_api_key`` / ``MSM_STEAM_API_KEY`` / ``STEAM_API_KEY``
 """
 
 from __future__ import annotations
@@ -32,26 +29,30 @@ def _env_key() -> str:
     )
 
 
-def resolve_key() -> str:
-    key = _env_key()
-    if key:
-        return key
+def _panel_key() -> str:
     enc = PanelSettingsService.get(_PANEL_KEY_ENC, "")
     if enc:
         try:
-            return AuthService.decrypt_secret(enc, aad=_AAD).strip()
+            dec = AuthService.decrypt_secret(enc, aad=_AAD).strip()
+            if dec:
+                return dec
         except Exception:
             pass
     return PanelSettingsService.get(_PANEL_KEY_LEGACY, "").strip()
 
 
+def resolve_key() -> str:
+    panel = _panel_key()
+    if panel:
+        return panel
+    return _env_key()
+
+
 def current_source() -> Source:
+    if _panel_key():
+        return "panel"
     if _env_key():
         return "env"
-    if PanelSettingsService.get(_PANEL_KEY_ENC, "").strip():
-        return "panel"
-    if PanelSettingsService.get(_PANEL_KEY_LEGACY, "").strip():
-        return "panel"
     return "none"
 
 

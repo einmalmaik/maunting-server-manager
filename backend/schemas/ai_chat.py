@@ -1,0 +1,219 @@
+"""API-Vertraege fuer die eine persistente AI-Unterhaltung."""
+
+from datetime import datetime
+from typing import Literal
+from uuid import UUID
+
+from pydantic import BaseModel, Field
+
+
+class AiQuestionOption(BaseModel):
+    label: str
+    hint: str | None = None
+
+
+class AiQuestionPayload(BaseModel):
+    """Eine Rueckfrage der KI, so wie sie im Chat erscheint.
+
+    Dieselbe Form, die `question_payload()` erzeugt und das SSE-Ereignis
+    `question` traegt — hier nur fuer den Weg ueber den Verlauf, damit die Frage
+    ein Neuladen der Seite ueberlebt.
+    """
+
+    question: str
+    options: list[AiQuestionOption] = Field(default_factory=list)
+
+
+class AiConversationResponse(BaseModel):
+    id: str
+    #: Welches Fenster — ``primary`` (der Dauerchat) oder ``guardian`` (die
+    #: Reparaturen im Hintergrund). Siehe `models.ai_conversation.ARTEN`.
+    kind: str = "primary"
+    title: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class AiSection(BaseModel):
+    """Ein Abschnitt einer Antwort — Text, ein Werkzeugaufruf oder ein Denkblock.
+
+    Drei Formen in einem Typ statt dreier Listen: die **Reihenfolge zwischen
+    ihnen** ist die Information, um die es geht. "Ich sehe mir den Status an" —
+    Werkzeug — "der läuft, jetzt die Logs" — Werkzeug ist etwas anderes als
+    derselbe Text mit denselben Werkzeugen in beliebiger Anordnung, und aus
+    getrennten Listen lässt sich das nicht wiederherstellen.
+
+    ``denken`` kam zuletzt dazu und aus genau demselben Anlass: der Denktext war
+    ein flaches Feld daneben, die Oberfläche zeichnete ihn als *einen* Kasten
+    über allem, und die Gedanken der dritten Runde standen über dem Text der
+    ersten. ``AiMessageResponse.reasoning`` bleibt daneben bestehen — als
+    Ableitung, nicht als zweiter Speicher.
+
+    ``werkzeug`` traegt dieselbe Nutzlast wie das `tool`-Ereignis im Stream
+    (`_anzeigeeintrag`): Name, Server, Gruppe, Fehlschlag, Skillangaben. Bewusst
+    ohne Ergebnis — ein Logausschnitt gehoert nicht ungefragt in den sichtbaren
+    Verlauf.
+    """
+
+    art: Literal["text", "tool", "denken"]
+    inhalt: str | None = None
+    werkzeug: dict | None = None
+
+
+class AiMessageResponse(BaseModel):
+    id: str
+    role: str
+    content: str
+    # Denkschritte des Modells, sofern es welche geliefert hat. Getrennt von
+    # `content`, damit die Oberflaeche sie einklappen kann und niemand sie fuer
+    # die Antwort haelt.
+    reasoning: str | None = None
+    # Die Rueckfrage, die diese Nachricht gestellt hat. Sie ist Teil der
+    # Nachricht und keine eigene Blase — im Chat erscheint sie unter dem Text
+    # derselben Antwort, so wie ein Mensch eine Frage an das Gesagte anhaengt.
+    question: AiQuestionPayload | None = None
+    # Die Gliederung dieser Antwort: Text und Werkzeuge in der Reihenfolge, in
+    # der sie entstanden sind. Damit zeigt der nachgeladene Verlauf dasselbe wie
+    # der Live-Strom — vorher endeten die Werkzeuge mit der Verbindung.
+    #
+    # `None` heisst "aus der Zeit vor dieser Spalte". Die Oberflaeche zeigt
+    # solche Nachrichten dann wie immer: als reinen Text aus `content`.
+    sections: list[AiSection] | None = None
+    status: str
+    provider_id: int | None
+    model: str | None
+    created_at: datetime
+
+
+class AiConversationDetail(AiConversationResponse):
+    messages: list[AiMessageResponse] = Field(default_factory=list)
+    #: Gibt es aeltere Nachrichten als die aelteste hier gelieferte? Dann kann
+    #: die Oberflaeche mit ``?before=<id der aeltesten>`` weiterblaettern.
+    #:
+    #: Der Dauerchat brauchte das nie: zweihundert Nachrichten sind mehr, als
+    #: ein Mensch zurueckliest. Eine Reparatur ueber Stunden schreibt sie in
+    #: einem Anlauf voll, und dann ist das Blaettern der einzige Weg an den
+    #: Anfang — die Zusammenfassung ist eine Verdichtung, kein Verlauf.
+    has_more: bool = False
+
+
+class AiWorkerInfo(BaseModel):
+    """Ein Hintergrund-Auftrag, wie die Worker-Leiste des Chats ihn zeigt.
+
+    Bewusst nur das Nötigste: Kennung (führt zur lesbaren Unterhaltung),
+    geschwärzter Titel, Laufzustand und Beginn. Keine Serverdaten, kein
+    Auftragstext — die Leiste ist eine Übersicht, kein zweiter Verlauf
+    (docs/agentic-framework.md, §4: die Meldung ist das Ergebnis, nie der
+    Prozess; Werkzeugschritte sieht nur, wer die Worker-Ansicht öffnet).
+    """
+
+    conversation_id: str
+    title: str
+    #: Laufzustand: ``running`` oder eine der Parkstellen aus
+    #: `models.ai_run.WARTEND`. Beendete Aufträge stehen nie in der Liste —
+    #: so „räumt sie sich auf", ohne dass etwas gelöscht würde.
+    status: str
+    created_at: datetime
+
+
+class AiChatRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=16_000)
+    provider_id: int = Field(ge=1)
+    request_id: UUID
+    # Ob das Modell nachdenken soll. Bei 145 der 272 denkenden Modelle bei
+    # OpenRouter ist das die einzige Wahl, die es gibt — sie kennen keine Stufen.
+    reasoning: bool = False
+    # Wie *tief*, falls das Modell Stufen kennt: "minimal" bis "max". Der Wert
+    # ist ein Wunsch, keine Anweisung — `ai_reasoning.vorgabe` klemmt ihn auf
+    # das, was Modell und Rolle hergeben, bevor er den Server verlaesst.
+    reasoning_effort: str | None = Field(default=None, max_length=16)
+    # Hier stand `herkunft: Literal["panel", "desktop"]`. Das Feld ist am
+    # 21.08.2026 verschwunden, nicht umbenannt: die Herkunft entscheidet, ob
+    # die KI die Werkzeuge fuer den Rechner des Benutzers ueberhaupt angeboten
+    # bekommt, und so etwas darf kein Client von sich selbst behaupten. Sie
+    # kommt jetzt aus dem Token (`dependencies.session_herkunft`), das beim
+    # Koppeln ausgestellt wurde.
+
+
+class AiMessageEdit(BaseModel):
+    """Eine bereits gesendete eigene Nachricht neu formulieren.
+
+    Der neue Text ersetzt die alte Nachricht nicht — sie und alles Spaetere
+    verschwinden, und der Text wird als neue Nachricht gesendet. Anders waere
+    der Verlauf widerspruechlich: die verworfene Fassung stuende weiter im
+    Kontext und das Modell wuerde sie beruecksichtigen.
+    """
+
+    content: str = Field(min_length=1, max_length=16_000)
+
+
+class AiMessageEditResponse(BaseModel):
+    # Wie viele Zeilen der Schnitt entfernt hat. Die Oberflaeche zeigt es an,
+    # damit niemand raetselt, wohin der halbe Verlauf verschwunden ist.
+    removed: int
+
+
+class AiRunResponse(BaseModel):
+    """Ein Lauf der KI, so wie die Oberflaeche ihn sieht.
+
+    `live` ist die ehrliche Auskunft, ob dieser Prozess dem Lauf gerade beim
+    Arbeiten zusehen kann. Nach einem Neustart des Panels steht ein geparkter
+    Lauf weiterhin in der Datenbank, aber niemand haelt ihn im Speicher — die
+    Oberflaeche soll dann keinen Ladebalken zeigen, der sich nie bewegt.
+    """
+
+    id: str
+    status: str
+    stop_reason: str | None = None
+    message_id: str | None = None
+    live: bool = False
+    created_at: datetime
+    #: In welchem Fenster dieser Lauf arbeitet.
+    #:
+    #: Ohne diese Angabe kann die Oberflaeche einen Reparaturlauf nicht von
+    #: einem Chatlauf unterscheiden — und genau das war das Symptom: der Chat
+    #: haengte sich an den naechstbesten aktiven Lauf und zeichnete eine Heilung
+    #: in das Fenster des Menschen. Auch die Glocke braucht es, sonst meldet sie
+    #: "die KI ist mit deinem Auftrag fertig" fuer etwas, das niemand beauftragt
+    #: hat.
+    kind: str = "primary"
+    conversation_id: str | None = None
+    #: Um welchen Server es in diesem Lauf zuletzt ging — nur aus
+    #: nachgewiesenem Zugriff gefuellt (`ai_runs.last_server_id`). Die
+    #: Guardian-Ansicht nennt ihn in der Kopfzeile.
+    server_id: int | None = None
+
+
+class AiContextStatus(BaseModel):
+    """Wie voll der Kontext dieses Gespraechs ist — fuer den Ring beim Absenden.
+
+    ``known`` trennt „das Modell hat ein kleines Fenster“ von „ueber das Modell
+    ist nichts bekannt“. Im zweiten Fall zeigt die Oberflaeche ausdruecklich
+    keinen Prozentwert: ein geschaetzter saehe genauso aus wie ein gemessener,
+    und man wuerde ihm glauben.
+
+    Alle Zahlen sind **Schaetzungen**. MSM rechnet vier Zeichen je Token, statt
+    fuer jede Anbieterfamilie einen eigenen Tokenizer mitzuschleppen und ihn mit
+    jedem neuen Modell nachzuziehen. Fuer eine Anzeige, deren Zweck „noch viel
+    Platz“ oder „gleich wird zusammengefasst“ ist, reicht das; die Oberflaeche
+    sagt deshalb „etwa“.
+    """
+
+    known: bool
+    #: Das volle Fenster des Modells. ``None``, wenn unbekannt.
+    window_tokens: int | None = None
+    #: Was die Eingabe davon fuellen darf — Antwort und Sicherheit sind ab.
+    usable_tokens: int
+    #: Was das Gespraech davon gerade belegt. Kann ``usable_tokens``
+    #: ueberschreiten: dann wird beim naechsten Zug gekuerzt und gefaltet.
+    used_tokens: int
+    #: Ab wie viel Prozent der Belegung zusammengefasst wird — die Einstellung
+    #: des Betreibers. Hier stand einmal dieselbe Marke zusätzlich in Tokens;
+    #: das war eine zweite Zählweise auf derselben Skala, denn `used_tokens`
+    #: misst den ganzen Kontext, die Faltschwelle nur den faltbaren Teil.
+    #: Die Marke wird deshalb ohnehin eher erreicht als das Falten stattfindet:
+    #: gefaltet wird nur der **ältere** Teil, und die letzten zwölf
+    #: Nachrichten zählen nie dazu (`ai_compaction_service.KEEP_RECENT_MESSAGES`).
+    compaction_percent: int
+    #: Ob bereits eine Zusammenfassung im Kontext steckt.
+    summarized: bool

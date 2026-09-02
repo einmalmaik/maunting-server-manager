@@ -3,14 +3,13 @@ import shutil
 import threading
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, Header, HTTPException, WebSocket
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
-from config import settings
+from config import get_cors_origins
 from database import SessionLocal
 from database import get_db
 from models import Server, User
@@ -19,12 +18,10 @@ from schemas.postgres import PostgresOneTimeCredential
 from dependencies import (
     get_current_user,
     get_current_user_for_ws,
-    require_global,
     require_server_permission,
     verify_csrf,
 )
-from services import permission_service, postgres_service
-from blueprints.schema import BlueprintSourceType, _is_safe_relative_path
+from services import audit_service, permission_service, postgres_service
 from games import get_plugin
 from games.base import container_name_for, _console_log_path, _append_console_log
 from services import EmailService, docker_service
@@ -32,62 +29,32 @@ from services import exec_service
 from services.docker_iptables_service import accept_server as iptables_accept_server
 from services.docker_iptables_service import revoke_server as iptables_revoke_server
 from services.firewall_service import close_ports, open_ports
-from services.network_interfaces_service import default_bind_ip, list_host_interfaces
 from services.port_allocation_service import PortConflictError, allocate_ports
 from services.port_role_service import blueprint_port_requirements, normalize_port_protocol
 from services.scheduler_service import sync_server_restart_schedule, evaluate_disk_soft_limit
 from services.server_lifecycle_service import (
-    LifecycleNotification,
     get_server_lifecycle_lock,
     is_lifecycle_job_active,
-    queue_lifecycle_operation,
     should_preserve_lifecycle_status,
 )
-from services.console_stream_service import connect as ws_connect
+from services.console_stream_service import DeclaredLogConfig, connect as ws_connect
 from services.install_update_lock_service import (
-    INSTALL_UPDATE_ALREADY_RUNNING,
     release_install_update_lock,
     force_release_install_update_lock,
     try_acquire_install_update_lock,
 )
+from services.actor_context import ActorContext
+from services.server_provisioning_service import (
+    assert_remote_ports_available as _assert_remote_ports_available,
+    install_update_busy_error as _install_update_busy_error,
+    normalize_server_restart_mode as _normalize_server_restart_mode,
+    provision_server,
+)
+from services.server_action_service import request_lifecycle_operation
 
 import logging
 logger = logging.getLogger(__name__)
 
-
-def _assert_remote_ports_available(node, ports: list[tuple[str, int, str]], bind_ip: str) -> None:
-    if node is None or node.is_local:
-        return
-    from services.node_client import NodeClient
-
-    normalized = [(port, protocol, role) for role, port, protocol in ports]
-    result = NodeClient.from_node(node).ports_available(normalized, bind_ip or "0.0.0.0")
-    if not result.get("available", False):
-        conflicts = ", ".join(
-            f"{item.get('port')}/{item.get('protocol')}" for item in result.get("conflicts", [])
-        )
-        raise HTTPException(status_code=409, detail=f"Port auf dem Ziel-Node belegt: {conflicts}")
-
-
-def _normalize_server_restart_mode(server: Server) -> None:
-    """Stellt sicher, dass nicht beide Auto-Restart-Modi (Intervall + feste Zeiten) gleichzeitig aktiv sind.
-
-    Intervall hat Vorrang (konsistent mit sync_server_restart_schedule).
-    Verhindert „sowohl als auch“-Zustände in der DB durch direkte PATCHes, Legacy-Daten,
-    fehlende Client-Normalisierung oder Migrationen.
-
-    KISS: zentrale Normalisierung an der Persistenzstelle.
-    """
-    interval = getattr(server, "restart_interval_hours", None)
-    times = getattr(server, "restart_times_utc", None) or getattr(server, "restart_time_utc", None)
-
-    if interval:
-        # Interval wins: clear any fixed times
-        server.restart_time_utc = None
-        server.restart_times_utc = None
-    elif times:
-        # Only fixed times: clear interval
-        server.restart_interval_hours = None
 
 # ── Leichtergewichtiger, passiver Cache für Update-Checks im Status-Endpoint ──
 # Zweck: Frontend-Badge (Update-Verfügbarkeit) ohne teure Calls (Workshop/Steam)
@@ -146,247 +113,46 @@ def _port_requirements_for_server(server: Server, protocol_overrides: dict[str, 
     ]
 
 
-def _install_update_busy_error() -> HTTPException:
-    return HTTPException(
-        status_code=409,
-        detail={
-            "code": INSTALL_UPDATE_ALREADY_RUNNING,
-            "message": f"errors.{INSTALL_UPDATE_ALREADY_RUNNING}",
-        },
-    )
-
-
-
-
-
 @router.post("", response_model=ServerCreateResponse, status_code=201)
-async def create_server(req: ServerCreate, db: Session = Depends(get_db), user: User = Depends(require_global("servers.create")), _: None = Depends(verify_csrf)) -> ServerCreateResponse:
+async def create_server(
+    req: ServerCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    retry_of_id: str | None = Header(None, alias="X-Task-Retry-Of"),
+) -> ServerCreateResponse:
+    """Dünner HTTP-Adapter; RBAC und Provisionierung liegen im gemeinsamen Service.
 
-    base_dir = os.path.abspath(settings.servers_dir)
-
-    plugin = get_plugin(req.game_type)
-    bp = plugin.get_blueprint() if plugin else None
-
-    # Map blueprint ports to stable, unique requirements [(role, protocol)].
-    port_requirements = blueprint_port_requirements(bp.ports) if bp else [
-        ("game", "udp"),
-        ("query", "udp"),
-        ("rcon", "tcp"),
-    ]
-
-    # Overrides mapping
-    requested_ports = dict(req.ports or {})
-    if req.game_port is not None:
-        requested_ports["game"] = req.game_port
-    if req.query_port is not None:
-        requested_ports["query"] = req.query_port
-    if req.rcon_port is not None:
-        requested_ports["rcon"] = req.rcon_port
-
-    bind_ip = req.public_bind_ip or default_bind_ip()
-    # Phase 2/3: node from request or default local; ports scoped per node
-    from models import Node
-    from services.node_service import get_local_node
-
-    target_node = None
-    if req.node_id is not None:
-        target_node = db.query(Node).filter(Node.id == req.node_id).first()
-        if not target_node:
-            raise HTTPException(status_code=400, detail="Node nicht gefunden")
-    else:
-        target_node = get_local_node(db)
-    if target_node is not None and not target_node.is_local and req.public_bind_ip is None:
-        bind_ip = "0.0.0.0"
-    target_node_id = target_node.id if target_node else None
-    from services.node_capacity import ensure_ram_limit_fits
-
-    ensure_ram_limit_fits(
+    `provision_server` ist durchgehend synchron und macht dabei echtes I/O:
+    Socket-Binds, HTTP-Aufrufe an die Node mit zehn Sekunden Zeitlimit,
+    Verzeichnisse anlegen, Datenbanken einrichten. Auf dem Event-Loop
+    ausgeführt legt eine einzige Serveranlage das ganze Panel still — keine
+    andere Anfrage, kein WebSocket-Frame. Deshalb der Threadpool. Die Route
+    bleibt `async`, weil die Mailbenachrichtigung darunter awaited wird.
+    """
+    result = await run_in_threadpool(
+        provision_server,
         db,
-        target_node,
-        new_ram_limit_mb=req.ram_limit_mb,
-        exclude_server_id=None,
+        req,
+        ActorContext.for_user(user),
+        idempotency_key=idempotency_key,
+        retry_of_id=retry_of_id,
     )
-    check_host = True if (target_node is None or target_node.is_local) else False
-    try:
-        allocated = allocate_ports(
-            db,
-            exclude_server_id=None,
-            bind_ip=bind_ip or "0.0.0.0",
-            port_requirements=port_requirements,
-            requested_ports=requested_ports,
-            node_id=target_node_id,
-            check_host=check_host,
+    if not result.reused and EmailService.is_configured() and user.email_notifications:
+        await EmailService.send_server_installed_notification(
+            user.email,
+            user.username,
+            result.server.name,
         )
-    except PortConflictError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e))
 
-    if isinstance(allocated, tuple) and len(allocated) == 3 and all(isinstance(x, int) for x in allocated):
-        allocated = [
-            ("game", allocated[0], "udp"),
-            ("query", allocated[1], "udp"),
-            ("rcon", allocated[2], "tcp"),
-        ]
-    _assert_remote_ports_available(target_node, allocated, bind_ip or "0.0.0.0")
-
-    # Placeholder-Row zuerst einfügen, um stabile PK (server.id) zu erhalten.
-    # Danach install_dir = f".../{game_type}_{id}" - kollisionsfrei über alle Zeit,
-    # auch nach DELETEs (Count-basiert war die Ursache für dayz_1-Reuse).
-    # Placeholder wird bei Konflikt sofort wieder gelöscht (nie sichtbar für User).
-    server = Server(
-        name=req.name,
-        game_type=req.game_type,
-        install_dir="/tmp/msm-pending-create",
-        status="stopped",
-        auto_restart=req.auto_restart,
-        restart_interval_hours=req.restart_interval_hours,
-        restart_time_utc=req.restart_time_utc,
-        restart_times_utc=req.restart_times_utc,
-        cpu_limit_percent=req.cpu_limit_percent,
-        ram_limit_mb=req.ram_limit_mb,
-        disk_limit_gb=req.disk_limit_gb,
-        public_bind_ip=bind_ip,
-        node_id=target_node_id,
-    )
-    _normalize_server_restart_mode(server)
-    db.add(server)
-    db.commit()
-    db.refresh(server)
-
-    install_lock_acquired = False
-    if plugin:
-        install_lock_acquired = try_acquire_install_update_lock(
-            server.id, "install", node_id=server.node_id
-        )
-        if not install_lock_acquired:
-            db.delete(server)
-            db.commit()
-            raise _install_update_busy_error()
-
-    install_started = False
-    created_install_dir = False
-    server_deleted = False
-    postgres_credentials: list[dict] = []
-    try:
-        from models.server_port import ServerPort
-        for role, port_val, proto in allocated:
-            db.add(ServerPort(server_id=server.id, role=role, port=port_val, protocol=proto))
-        db.commit()
-        db.refresh(server)
-
-        is_remote_node = bool(target_node is not None and not target_node.is_local)
-        install_dir = os.path.join(base_dir, str(server.id) if is_remote_node else f"{req.game_type}_{server.id}")
-
-        # Vorheriges Verzeichnis auf Host prüfen (verwaist von abgebrochenem Install,
-        # manuellem Eingriff oder root-owned SteamCMD-Artifact). Saubere 409 statt
-        # mysteriösem EPERM auf chmod.
-        if not is_remote_node and os.path.exists(install_dir):
-            db.delete(server)
-            db.commit()
-            server_deleted = True
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"Server-Verzeichnis existiert bereits auf dem Host: {install_dir}. "
-                    "Möglicherweise verwaist aus einem vorherigen (fehlgeschlagenen) "
-                    "Installationsversuch. Bitte manuell aufräumen oder Support kontaktieren."
-                ),
-            )
-
-        # Verzeichnis anlegen - wird vom Panel-User (`msm`) angelegt. Vor jedem
-        # Container-Start normalisiert docker_service.repair_bind_mount_permissions()
-        # Owner/Rechte im Container-Kontext, damit Runtime (z. B. Wine) und Panel
-        # konsistent auf dieselben Dateien zugreifen können.
-        # exist_ok=False ist jetzt sicher (Guard oben).
-        try:
-            if is_remote_node:
-                from services.node_client import NodeClient
-                from services.node_service import ensure_node_online
-
-                ensure_node_online(target_node)
-                NodeClient.from_node(target_node).files_ensure_server_root(server.id)
-            else:
-                os.makedirs(install_dir, exist_ok=False)
-                os.chmod(install_dir, 0o777)
-            created_install_dir = True
-        except OSError as e:
-            # Bei jedem FS-Fehler die (noch nie sichtbare) Placeholder-Row entfernen.
-            db.delete(server)
-            db.commit()
-            raise HTTPException(status_code=500, detail=f"install_dir konnte nicht angelegt werden: {e}")
-
-        # install_dir endgültig setzen + persistieren.
-        server.install_dir = install_dir
-        db.commit()
-        db.refresh(server)
-
-        # Stabilen Container-Namen cachen (Debug/Audit).
-        server.container_name = container_name_for(server.id)
-        db.commit()
-        db.refresh(server)
-
-        if req.postgres_enabled:
-            try:
-                postgres_credentials = postgres_service.provision_server_databases(
-                    db,
-                    server,
-                    req.postgres_database_count or 1,
-                )
-            except Exception as exc:
-                raise HTTPException(status_code=503, detail=f"PostgreSQL-Provisionierung fehlgeschlagen: {exc}") from exc
-
-        # Auto-Install: Plugin startet Installation im Hintergrund.
-        # Firewall-Regeln werden ERST beim Start angelegt (Lifecycle-Kopplung).
-        plugin = get_plugin(req.game_type)
-        if plugin:
-            server.status = "installing"
-            server.status_message = "Installation gestartet"
-            db.commit()
-            try:
-                result = plugin.install(server)
-            except Exception:
-                raise HTTPException(status_code=500, detail="Installation konnte nicht gestartet werden")
-            if "error" in result:
-                raise HTTPException(status_code=500, detail=result["error"])
-            install_started = True
-    except Exception:
-        if install_lock_acquired and not install_started:
-            release_install_update_lock(server.id)
-        if not install_started and not server_deleted:
-            try:
-                postgres_service.drop_server_resources(db, server.id)
-            except Exception:
-                db.rollback()
-            try:
-                db.delete(server)
-                db.commit()
-            except Exception:
-                db.rollback()
-            if created_install_dir:
-                try:
-                    if target_node is not None and not target_node.is_local:
-                        from services.node_client import NodeClient
-
-                        NodeClient.from_node(target_node).files_delete_server_root(server.id)
-                    elif os.path.exists(server.install_dir):
-                        shutil.rmtree(server.install_dir)
-                except Exception:
-                    logger.warning("Install-Verzeichnis konnte nach Create-Abbruch nicht entfernt werden")
-        raise
-
-    if EmailService.is_configured() and user.email_notifications:
-        await EmailService.send_server_installed_notification(user.email, user.username, server.name)
-
-    sync_server_restart_schedule(server)
-    response = _server_response(server)
+    response = _server_response(result.server)
     create_resp = ServerCreateResponse.model_validate(response.model_dump())
     create_resp.postgres_credentials = [
         PostgresOneTimeCredential.model_validate(item)
-        for item in postgres_credentials
+        for item in result.postgres_credentials
     ]
+    create_resp.task_id = result.task.id
     return create_resp
 
 
@@ -429,19 +195,18 @@ def _server_response(server: Server) -> ServerResponse:
     return data
 
 
-def _reject_if_node_offline(server: Server) -> None:
-    """Block start/stop/file-ops when heartbeat marked the node offline."""
-    from services.node_service import NODE_OFFLINE_MSG, is_node_offline
-
-    node = getattr(server, "node", None)
-    if is_node_offline(node):
-        raise HTTPException(status_code=503, detail=NODE_OFFLINE_MSG)
-
-
 @router.get("", response_model=list[ServerResponse])
 def list_servers(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[ServerResponse]:
     servers = permission_service.list_visible_servers(db, user)
-    return [_server_response(s) for s in servers]
+    # Ein Batch-Query fuer alle Kundenserver — kein Lookup je Server, die
+    # Liste wird alle fuenf Sekunden abgefragt.
+    hoster_ids = permission_service.hoster_customer_server_ids(db)
+    responses = []
+    for s in servers:
+        data = _server_response(s)
+        data.is_hoster_managed = s.id in hoster_ids
+        responses.append(data)
+    return responses
 
 
 @router.get("/{server_id}", response_model=ServerResponse)
@@ -450,7 +215,9 @@ def get_server(server_id: int, db: Session = Depends(get_db), user: User = Depen
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
-    return _server_response(server)
+    data = _server_response(server)
+    data.is_hoster_managed = permission_service.is_hoster_customer_server(db, server_id)
+    return data
 
 
 @router.patch("/{server_id}", response_model=ServerResponse)
@@ -529,6 +296,33 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
             detail="Ressourcen- und Netzwerk-Aenderungen koennen nicht in einem gemeinsamen PATCH durchgefuehrt werden",
         )
 
+    # ── Netzwerkeinstellungen nur fuer gestoppte Server ──
+    # Port- und Bind-IP-Aenderungen an einem laufenden Server fuehren zu
+    # Portkonflikten auf dem Host (is_port_in_use), unerwarteten Recreates
+    # und Session-Abbruechen fuer Spieler. Deshalb werden Netzwerk-Aenderungen
+    # strikt nur bei gestoppten Servern zugelassen.
+    # Kein lokaler Import hier. `container_name_for`, `docker_service` und
+    # `is_lifecycle_job_active` stehen bereits oben im Modul — ein zweiter
+    # Import *innerhalb* dieser Verzweigung machte alle drei zu lokalen Namen
+    # der ganzen Funktion. Bei jedem PATCH ohne Netzwerkaenderung lief die
+    # Verzweigung nicht, der Name blieb unbelegt, und Zeile ~452 stieg mit
+    # `UnboundLocalError` aus — abgefangen als 500. Damit war jede Ressourcen-,
+    # Disk- und Konfigurationsaenderung kaputt, waehrend ausgerechnet die
+    # Netzwerkaenderung funktionierte.
+    if network_change:
+        if server.status == "running" or docker_service.is_running(
+            container_name_for(server.id), node=server.node
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Netzwerkeinstellungen können nur geändert werden, wenn der Server gestoppt ist",
+            )
+        if is_lifecycle_job_active(server_id):
+            raise HTTPException(
+                status_code=409,
+                detail="Server Lifecycle-Aktion läuft, Netzwerkeinstellungen können nicht geändert werden",
+            )
+
     # RAM booking guard: only when a numeric limit is being set/changed and the
     # node has a known host total (heartbeat). Unlimited (null) is not booked.
     if ram_changed and payload.get("ram_limit_mb") is not None:
@@ -537,7 +331,17 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
 
         guard_node = None
         if server.node_id is not None:
-            guard_node = db.query(NodeModel).filter(NodeModel.id == server.node_id).first()
+            # Dieselbe Node-Zeilensperre wie in der Provisionierung. Ohne sie
+            # laufen Kapazitaetspruefung und Buchung nicht gegeneinander
+            # serialisiert: zwei parallele Vorgaenge lesen beide den alten
+            # Stand und ueberbuchen den Node. Die Sperre haelt bis zum
+            # gemeinsamen Commit am Ende dieses Requests.
+            guard_node = (
+                db.query(NodeModel)
+                .filter(NodeModel.id == server.node_id)
+                .with_for_update()
+                .first()
+            )
         ensure_ram_limit_fits(
             db,
             guard_node,
@@ -577,6 +381,14 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
             node = getattr(server, "node", None)
             node_id = getattr(server, "node_id", None)
             check_host = True if (node is None or getattr(node, "is_local", True)) else False
+            if node_id is not None:
+                # Portvergabe gegen die Provisionierung serialisieren. Sonst
+                # koennen ein PATCH und ein gleichzeitiges Anlegen denselben
+                # Port auf demselben Node vergeben — beide lesen die belegten
+                # Ports, bevor einer von beiden schreibt.
+                from models import Node as NodeModel
+
+                db.query(NodeModel).filter(NodeModel.id == node_id).with_for_update().one()
             try:
                 allocated = allocate_ports(
                     db,
@@ -625,6 +437,19 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
             if key not in ("game_port", "query_port", "rcon_port", "ports", "port_protocols"):
                 setattr(server, key, val)
         _normalize_server_restart_mode(server)
+
+        # Manuelle Änderung am Neustart-Zeitplan gewinnt: „Von der KI
+        # verwaltet" wird zurückgenommen und der verknüpfte stehende Auftrag
+        # deaktiviert. Nur die Zeitplan-Felder zählen — ein Umbenennen des
+        # Servers ist keine Zeitplan-Entscheidung. Das KI-Werkzeug
+        # propose_restart_schedule_set geht nicht über diesen Endpunkt.
+        restart_zeitplan_felder = {
+            "auto_restart", "restart_interval_hours", "restart_time_utc", "restart_times_utc",
+        }
+        if restart_zeitplan_felder & set(payload.keys()):
+            from services.ai_task_service import ki_zeitplan_verwaltung_aufheben
+
+            ki_zeitplan_verwaltung_aufheben(db, server, bereich="restart")
 
         # ── Live CPU/RAM-Update und/oder Disk-Soft-Limit-Re-evaluation ──
         # Mixed resource/disk + network payloads wurden VOR diesem Punkt
@@ -775,272 +600,109 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
         raise HTTPException(status_code=500, detail="Server-Aktualisierung fehlgeschlagen")
 
     if network_change:
-        # Alte Firewall- und iptables-Regeln entfernen, neue anlegen - ABER
-        # nur, wenn der Server gerade laeuft. Fuer gestoppte Server bleiben die
-        # Regeln zu (Lifecycle-Kopplung).
-        plugin = get_plugin(server.game_type)
-        was_running = plugin is not None and docker_service.is_running(
-            container_name_for(server.id), node=server.node
-        )
+        # Der Ablauf steht in server_network_service, weil ihn seit dem
+        # KI-Vorschlag `propose_bind_ip_update` zwei Wege brauchen. Ein zweiter
+        # Weg, der die Firewall *fast* genauso behandelt, waere genau die stille
+        # Abweichung, die Zielpunkt 10 ausschliesst.
+        from services.server_network_service import recreate_server_network
 
-        if was_running:
-            close_ports(old_ports, node=server.node, name=server.name)
-            if server.node is None or server.node.is_local:
-                iptables_revoke_server(server.name, old_bind_ip or "", old_ports)
-            # Container stoppen - Plugin.start() legt ihn mit den neuen Ports/
-            # Bind-Werten frisch an.
-            plugin.stop(server)
-            new_ports = [(p.port, p.protocol, p.role) for p in server.ports]
-            open_ports(server.name, new_ports, node=server.node)
-            if server.node is None or server.node.is_local:
-                iptables_accept_server(server.name, server.public_bind_ip or "", new_ports)
-            plugin.start(server)
+        recreate_server_network(server, old_ports, old_bind_ip)
 
     if guardian_network_changed:
         from services.server_lifecycle_service import sync_desired_state_to_agent
 
         sync_desired_state_to_agent(db, server)
 
-    return _server_response(server)
+    data = _server_response(server)
+    # Dieselbe Ressource wie in GET: ohne das Flag verloere ein Konsument,
+    # der seinen Zustand aus der PATCH-Antwort aktualisiert, Badge und Tab.
+    data.is_hoster_managed = permission_service.is_hoster_customer_server(db, server_id)
+    return data
 
 
 @router.delete("/{server_id}")
-def delete_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
-    """Löscht einen Server vollständig:
+def delete_server(
+    server_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """HTTP-Rand der gemeinsamen Server-Loeschung.
 
-    1. Docker-Container stoppen + entfernen (idempotent, force=True killt auch
-       laufende Container).
-    2. UFW-Regeln für Ports schließen.
-    3. Install-Verzeichnis (Bind-Mount-Quelle) vom Host entfernen.
-    4. Backup-Verzeichnis (alle TAR-Archive) vom Host entfernen + S3-Objekte
-       der Backups best-effort löschen (vor Cascade, sonst verwaist).
-    5. MSM-Console-Log-Verzeichnis entfernen.
-    6. DB-Eintrag löschen (Cascade entfernt Permissions/Mods/Backups).
+    Die eigentliche Reihenfolge, Fehlerbehandlung und Rechtepruefung liegt in
+    `services.server_deletion_service`, damit Panel und Hoster-Anbindung exakt
+    denselben Weg verwenden (Zielpunkt 10).
     """
-    if not permission_service.has_global_permission(db, user, "servers.delete"):
-        raise HTTPException(status_code=403, detail="Keine Berechtigung")
-    server = db.query(Server).filter(Server.id == server_id).first()
-    if not server:
-        raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    from services.server_deletion_service import delete_server_completely
 
-    # 1. Container stoppen + entfernen (idempotent - force killt running)
-    container = container_name_for(server.id)
-    node = getattr(server, "node", None)
-    remove_result = docker_service.remove(container, force=True, node=node)
-    if not remove_result.get("ok"):
-        raise HTTPException(status_code=503, detail="Container konnte auf dem Node nicht entfernt werden")
-
-    # 2. Firewall- und iptables-Regeln schließen
-    ports_list = [(p.port, p.protocol, p.role) for p in server.ports]
-    close_ports(ports_list, node=node, name=server.name)
-    if node is None or node.is_local:
-        iptables_revoke_server(server.name, server.public_bind_ip or "", ports_list)
-
-    # 3. Install-Verzeichnis physisch löschen
-    install_dir = server.install_dir
-    dir_removed = False
-    if node is not None and not node.is_local:
-        try:
-            from services.node_client import NodeClient
-
-            NodeClient.from_node(node).files_delete_server_root(server.id)
-            dir_removed = True
-        except Exception as e:
-            raise HTTPException(
-                status_code=503,
-                detail="Abbruch: Server-Verzeichnis konnte auf dem Node nicht gelöscht werden",
-            ) from e
-    elif install_dir and os.path.exists(install_dir):
-        repair = docker_service.repair_bind_mount_permissions(install_dir)
-        if not repair.get("ok"):
-            logger.warning(
-                "Install-Verzeichnis-Rechte konnten vor Delete nicht normalisiert werden: %s",
-                repair.get("error") or "unbekannter Fehler",
-            )
-        try:
-            shutil.rmtree(install_dir)
-            dir_removed = True
-        except OSError as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Abbruch (Atomar): Install-Verzeichnis konnte nicht gelöscht werden. Bitte behebe die Berechtigungen (z. B. chown/chmod) oder lösche den Ordner manuell, bevor du den Server im Panel entfernst: {e}"
-            )
-
-    # 4. Backup-Verzeichnis (Files) löschen - DB-Cascade räumt Records
-    #    Nur fuer lokale Nodes, da Remote-Backups auf dem Node liegen.
-    backup_dir = f"/opt/msm/backups/{server.id}"
-    backups_removed = False
-    if node is None or node.is_local:
-        if os.path.exists(backup_dir):
-            try:
-                shutil.rmtree(backup_dir)
-                backups_removed = True
-            except OSError as e:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Abbruch (Atomar): Backup-Verzeichnis konnte nicht gelöscht werden. Bitte lösche den Ordner manuell: {e}"
-                )
-
-    # 5. MSM-Console-Log-Verzeichnis räumen (nur lokal vorhanden)
-    if node is None or node.is_local:
-        console_log_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "logs",
-            str(server.id),
-        )
-        if os.path.exists(console_log_dir):
-            try:
-                shutil.rmtree(console_log_dir)
-            except OSError as e:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Abbruch (Atomar): Console-Log-Verzeichnis konnte nicht gelöscht werden. Bitte lösche den Ordner manuell: {e}"
-                )
-
-    # 6. Verwaltete PostgreSQL-Ressourcen loeschen. Bei Fehler bleibt der
-    # Server-Datensatz erhalten, damit der Cleanup erneut versucht werden kann.
-    try:
-        postgres_service.drop_server_resources(db, server.id)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Abbruch: PostgreSQL-Ressourcen konnten nicht gelöscht werden. Bitte später erneut versuchen: {e}",
-        )
-
-    # 7. S3-Objekte der Backups best-effort löschen - VOR db.delete, da der
-    #    Cascade-Delete die Backup-Records (und damit s3_key) entfernt und
-    #    die S3-Objekte sonst permanent verwaisten. Local-Import + Warning-Log
-    #    wie in cleanup_old_backups / delete_backup (keine Secrets im Log).
-    for backup in server.backups:
-        if backup.s3_key:
-            try:
-                from services.s3_service import S3Service
-                S3Service.delete_object(backup.s3_key, bucket=backup.s3_bucket)
-            except Exception as e:
-                logger.warning(
-                    "S3-Delete fehlgeschlagen (Backup %s): %s",
-                    backup.id, type(e).__name__,
-                )
-
-    # 8. DB-Eintrag löschen (Cascade entfernt Permissions/Mods/Backups)
-    release_install_update_lock(server.id)
-    force_release_install_update_lock(server.id)
-    db.delete(server)
-    db.commit()
-    return {
-        "message": "Server gelöscht",
-        "cleanup": {
-            "container_removed": container,
-            "dir_removed": install_dir if dir_removed else None,
-            "backups_removed": backup_dir if backups_removed else None,
-        },
-    }
-
-
-def _missing_required_files(install_dir: str, required_files: list[str]) -> list[str]:
-    """Prueft, ob alle requiredFiles als reguläre Dateien (keine Symlinks) vorhanden sind."""
-    base = Path(install_dir).resolve()
-    missing: list[str] = []
-    for p in required_files:
-        if not _is_safe_relative_path(p):
-            missing.append(p)
-            continue
-        target = base / p
-        # Path-Traversal via resolve pruefen (Symlinks werden dabei dereferenziert,
-        # aber der Existenz-Check zaehlt Symlinks selbst als fehlend).
-        try:
-            resolved = target.resolve(strict=False)
-            resolved.relative_to(base)
-        except (ValueError, RuntimeError):
-            missing.append(p)
-            continue
-        # Symlinks gelten nicht als vorhanden - Defense-in-Depth.
-        if target.is_symlink() or not target.is_file():
-            missing.append(p)
-    return missing
+    return delete_server_completely(
+        db, server_id=server_id, actor=ActorContext.for_user(user)
+    )
 
 
 @router.post("/{server_id}/start")
-async def start_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
-    require_server_permission(user, server_id, db, "server.start")
-    server = db.query(Server).filter(Server.id == server_id).first()
-    if not server:
-        raise HTTPException(status_code=404, detail="Server nicht gefunden")
-    _reject_if_node_offline(server)
-    plugin = get_plugin(server.game_type)
-    if not plugin:
-        raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
+async def start_server(
+    server_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    retry_of_id: str | None = Header(None, alias="X-Task-Retry-Of"),
+) -> dict:
+    from services.server_lifecycle_service import LifecycleNotification
 
-    # Sicherheits-Vorprüfung: Server ohne explizite public_bind_ip darf nicht
-    # starten - sonst würde Docker auf 0.0.0.0 binden und die UFW-Falle auslösen.
-    if not server.public_bind_ip:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Server hat keine Bind-IP konfiguriert. Bitte im Server-Detail "
-                "eine Public-IP zuweisen, bevor er gestartet wird."
-            ),
-        )
-
-    # NEU: Pre-Check fuer manualUpload - VOR Firewall-Regeln.
-    bp = plugin.get_blueprint()
-    if bp and bp.source.type == BlueprintSourceType.MANUAL_UPLOAD:
-        manual = bp.source.manual
-        assert manual is not None
-        missing = _missing_required_files(server.install_dir, manual.requiredFiles)
-        if missing:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Server kann nicht gestartet werden - folgende Dateien fehlen "
-                    f"im Server-Verzeichnis: {', '.join(missing)}. "
-                    "Bitte über den File Manager hochladen (Archive können per "
-                    "Rechtsklick → Entpacken ausgepackt werden)."
-                ),
-            )
-
-    return queue_lifecycle_operation(
+    return request_lifecycle_operation(
         db,
-        server,
-        "start",
-        LifecycleNotification(user.email, user.username, user.email_notifications),
+        server_id=server_id,
+        operation="start",
+        actor=ActorContext.for_user(user),
+        notification=LifecycleNotification(user.email, user.username, user.email_notifications),
+        idempotency_key=idempotency_key,
+        retry_of_id=retry_of_id,
     )
 
 
 @router.post("/{server_id}/stop")
-async def stop_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
-    require_server_permission(user, server_id, db, "server.stop")
-    server = db.query(Server).filter(Server.id == server_id).first()
-    if not server:
-        raise HTTPException(status_code=404, detail="Server nicht gefunden")
-    _reject_if_node_offline(server)
-    plugin = get_plugin(server.game_type)
-    if not plugin:
-        raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
+async def stop_server(
+    server_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    retry_of_id: str | None = Header(None, alias="X-Task-Retry-Of"),
+) -> dict:
+    from services.server_lifecycle_service import LifecycleNotification
 
-    return queue_lifecycle_operation(
+    return request_lifecycle_operation(
         db,
-        server,
-        "stop",
-        LifecycleNotification(user.email, user.username, user.email_notifications),
+        server_id=server_id,
+        operation="stop",
+        actor=ActorContext.for_user(user),
+        notification=LifecycleNotification(user.email, user.username, user.email_notifications),
+        idempotency_key=idempotency_key,
+        retry_of_id=retry_of_id,
     )
 
 
 @router.post("/{server_id}/restart")
-async def restart_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
-    require_server_permission(user, server_id, db, "server.restart")
-    server = db.query(Server).filter(Server.id == server_id).first()
-    if not server:
-        raise HTTPException(status_code=404, detail="Server nicht gefunden")
-    _reject_if_node_offline(server)
-    plugin = get_plugin(server.game_type)
-    if not plugin:
-        raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
-    return queue_lifecycle_operation(
+async def restart_server(
+    server_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    retry_of_id: str | None = Header(None, alias="X-Task-Retry-Of"),
+) -> dict:
+    from services.server_lifecycle_service import LifecycleNotification
+
+    return request_lifecycle_operation(
         db,
-        server,
-        "restart",
-        LifecycleNotification(user.email, user.username, user.email_notifications),
+        server_id=server_id,
+        operation="restart",
+        actor=ActorContext.for_user(user),
+        notification=LifecycleNotification(user.email, user.username, user.email_notifications),
+        idempotency_key=idempotency_key,
+        retry_of_id=retry_of_id,
     )
 
 
@@ -1078,20 +740,32 @@ async def cancel_auth_setup(server_id: int, db: Session = Depends(get_db), user:
 
 
 @router.post("/{server_id}/kill")
-async def kill_server(server_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user), _: None = Depends(verify_csrf)) -> dict:
+def kill_server(
+    server_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    retry_of_id: str | None = Header(None, alias="X-Task-Retry-Of"),
+) -> dict:
     """Erzwungenes Beenden (Docker force remove). Als Notfall auch während start/restart nutzbar (emergency override des Job-Locks).
     Permission "server.kill" (Naming analog zu server.stop, nicht server.power.* für Code-Konsistenz mit bestehenden server.* Keys).
-    """
-    require_server_permission(user, server_id, db, "server.kill")
-    server = db.query(Server).filter(Server.id == server_id).first()
-    if not server:
-        raise HTTPException(status_code=404, detail="Server nicht gefunden")
 
-    return queue_lifecycle_operation(
+    Bewusst `def` statt `async def`: die Route wartet auf `docker_service.remove`
+    an der Node (30 s Zeitlimit). Auf dem Event-Loop hätte ein Kill gegen eine
+    nicht erreichbare Node das ganze Panel bis zum Zeitlimit eingefroren. Der
+    Kill-Zweig setzt `server.status` direkt statt über `_set_status` und hängt
+    an keinem laufenden Loop — der Wechsel in den Threadpool ändert also
+    nichts am Verhalten. Für start/stop/restart gilt das **nicht**: dort
+    verschickt `_set_status` den Webhook nur bei laufendem Loop.
+    """
+    return request_lifecycle_operation(
         db,
-        server,
-        "kill",
-        LifecycleNotification(user.email, user.username, user.email_notifications),
+        server_id=server_id,
+        operation="kill",
+        actor=ActorContext.for_user(user),
+        idempotency_key=idempotency_key,
+        retry_of_id=retry_of_id,
     )
 
 
@@ -1280,6 +954,28 @@ def install_server(server_id: int, db: Session = Depends(get_db), user: User = D
         raise HTTPException(status_code=400, detail="Spiel-Typ nicht unterstützt")
     if not try_acquire_install_update_lock(server.id, "install", node_id=server.node_id):
         raise _install_update_busy_error()
+    # Der Status vor der Installation wird gemerkt, damit ein Fehlstart ihn
+    # wiederherstellen kann. Ohne das blieb der Server dauerhaft auf
+    # "installing": weder die Statusaktualisierung noch die
+    # Lifecycle-Reconciliation korrigieren diesen Zustand, der Server war im
+    # Panel also nicht mehr bedienbar.
+    previous_status = server.status
+    previous_status_message = server.status_message
+
+    def _restore_status() -> None:
+        try:
+            db.rollback()
+            server.status = previous_status
+            server.status_message = previous_status_message
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.warning(
+                "Serverstatus konnte nach fehlgeschlagenem Installationsstart nicht "
+                "zurueckgesetzt werden (server_id=%s)",
+                server_id,
+            )
+
     try:
         server.status = "installing"
         server.status_message = "Installation gestartet"
@@ -1287,9 +983,17 @@ def install_server(server_id: int, db: Session = Depends(get_db), user: User = D
         result = plugin.install(server)
     except Exception:
         release_install_update_lock(server.id)
+        _restore_status()
         raise HTTPException(status_code=500, detail="Installation konnte nicht gestartet werden")
     if "error" in result:
         release_install_update_lock(server.id)
+        # plugin.install() hat den Server bereits selbst auf "error" gesetzt,
+        # wenn es die Installation gar nicht erst starten konnte. In dem Fall
+        # bleibt dieser Status stehen; nur ein noch auf "installing" stehender
+        # Server wird zurueckgesetzt.
+        db.refresh(server)
+        if server.status == "installing":
+            _restore_status()
         raise HTTPException(status_code=500, detail=result["error"])
     return {"message": "Installation gestartet", **result}
 
@@ -1322,7 +1026,6 @@ def unlock_server(
 
 # ── Erlaubte Origins fuer WebSocket-Upgrades ───────────────────────────────
 # Dieselbe Allowlist wie CORS (panel_url + MSM_CORS_ALLOWED_ORIGINS + Dev).
-from config import get_cors_origins
 
 
 def _ws_origin_allowed(origin: str | None) -> bool:
@@ -1358,6 +1061,7 @@ async def server_console_ws(websocket: WebSocket, server_id: int) -> None:
 
     db = SessionLocal()
     node = None
+    declared_logs = None
     try:
         try:
             user = get_current_user_for_ws(websocket, db)
@@ -1366,11 +1070,26 @@ async def server_console_ws(websocket: WebSocket, server_id: int) -> None:
                 await websocket.close(code=1008)
                 return
             require_server_permission(user, server_id, db, "server.console.read")
+            # Ein Eintrag je Verbindungsaufbau (10-min-Dedupe im Helfer) —
+            # nicht je Frame: der Stream liefe sonst als Schreiblast weiter.
+            audit_service.record_read_access(
+                db, user_id=user.id, server_id=server_id, action="server.console.read"
+            )
             # Eager-load node before session closes (avoid DetachedInstanceError)
             node = server.node
             if node is not None:
                 # Touch attributes while session is open
                 _ = (node.id, node.host, node.is_local, node.auth_token_enc)
+            plugin = get_plugin(server.game_type)
+            blueprint = plugin.get_blueprint() if plugin and hasattr(plugin, "get_blueprint") else None
+            logs = getattr(blueprint, "logs", None)
+            if logs is not None:
+                declared_logs = DeclaredLogConfig(
+                    root=server.install_dir,
+                    sources=tuple(logs.sources),
+                    redactors=tuple(logs.redact),
+                    max_tail_bytes=logs.max_tail_bytes,
+                )
         except HTTPException:
             await websocket.close(code=1008)
             return
@@ -1394,6 +1113,7 @@ async def server_console_ws(websocket: WebSocket, server_id: int) -> None:
             log_path=log_path,
             last_id=last_id,
             node=node,
+            declared_logs=declared_logs,
         )
     finally:
         if db.is_active:
@@ -1542,6 +1262,9 @@ def server_logs(server_id: int, lines: int = 100, db: Session = Depends(get_db),
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    audit_service.record_read_access(
+        db, user_id=user.id, server_id=server_id, action="server.logs.read"
+    )
     plugin = get_plugin(server.game_type)
     if plugin:
         logs = plugin.get_logs(server, lines=lines)

@@ -275,67 +275,6 @@
       "user": "Pengguna"
     }
   },
-  "permissions": {
-    "users": {
-      "read": "Lihat daftar pengguna",
-      "manage": "Buat, edit, hapus pengguna",
-      "permissions": {
-        "manage": "Kelola peran pengguna dan izin server"
-      }
-    },
-    "roles": {
-      "manage": "Buat, edit, hapus peran"
-    },
-    "panel": {
-      "settings": {
-        "read": "Baca pengaturan panel",
-        "write": "Ubah pengaturan panel (Steam, email, ...)"
-      }
-    },
-    "servers": {
-      "create": "Buat server baru",
-      "delete": "Hapus server (global, tidak dapat didelegasikan)"
-    },
-    "system": {
-      "view": "Lihat sumber daya sistem, antarmuka, versi"
-    },
-    "server": {
-      "view": "Lihat server dalam daftar dan detail",
-      "start": "Mulai server",
-      "stop": "Hentikan server",
-      "restart": "Mulai ulang server",
-      "install": "Instal atau instal ulang server",
-      "config": {
-        "write": "Edit pengaturan server (nama, mulai ulang otomatis, jadwal pencadangan)"
-      },
-      "network": {
-        "manage": "Ubah port dan ikat IP"
-      },
-      "resources": {
-        "manage": "Ubah batas CPU/RAM/disk"
-      },
-      "console": {
-        "read": "Baca konsol dan log",
-        "write": "Kirim perintah ke konsol"
-      },
-      "files": {
-        "read": "Membaca dan mengunduh file",
-        "write": "Unggah, buat, edit, ekstrak file",
-        "delete": "Hapus file"
-      },
-      "backups": {
-        "read": "Daftar cadangan",
-        "create": "Buat cadangan",
-        "restore": "Pulihkan cadangan",
-        "delete": "Hapus cadangan"
-      },
-      "mods": {
-        "read": "Daftar mod, cari bengkel",
-        "write": "Berlangganan, hapus, susun ulang mod",
-        "toggle": "Mengaktifkan atau menonaktifkan mod"
-      }
-    }
-  },
   "serverPermissions": {
     "title": "Izin",
     "subtitle": "Siapa yang dapat melakukan apa di server ini",
@@ -683,7 +622,8 @@
     "providerSmtp": "SMTP",
     "providerResend": "Kirim ulang",
     "tabs": {
-      "backup": "Cadangan"
+      "backup": "Cadangan",
+      "cloudflare": "Cloudflare"
     },
     "backup": {
       "statusTitle": "Status cadangan",
@@ -711,7 +651,34 @@
       "passwordHint": "Disimpan terenkripsi. Kata sandi tidak pernah dikembalikan dan diperlukan untuk mengenkripsi/mendekripsi cadangan.",
       "savePassword": "Simpan kata sandi",
       "passwordSaved": "Kata sandi cadangan disimpan"
-    }
+    },
+    "testConnection": "Uji koneksi",
+    "cloudflare": {
+      "title": "Cloudflare DNS",
+      "description": "Kelola Cloudflare DNS untuk subdomain otomatis.",
+      "configured": "Dikonfigurasi",
+      "notConfigured": "Belum dikonfigurasi",
+      "currentKey": "Token API saat ini",
+      "newToken": "Token API baru",
+      "tokenLabel": "Token API",
+      "tokenHint": "Token Bearer dengan izin Zone:Read dan DNS:Edit. Disimpan terenkripsi dengan aman via DIS Sidecar.",
+      "tokenPlaceholder": "Bearer Token...",
+      "deleteToken": "Hapus token",
+      "deleteConfirm": "Apakah Anda yakin ingin menghapus token Cloudflare API yang disimpan?",
+      "deleted": "Token Cloudflare API dihapus",
+      "defaultZoneLabel": "Zona default (Domain)",
+      "zonePlaceholder": "Pilih zona...",
+      "zoneHint": "Digunakan untuk subdomain otomatis: {game}-{name}.{zone}",
+      "disabledHint": "Cloudflare DNS dinonaktifkan di Pengaturan Umum.",
+      "enabled": "Cloudflare DNS",
+      "enabledHint": "Mengaktifkan pengelolaan Cloudflare DNS dan subdomain otomatis.",
+      "test": "Uji koneksi",
+      "testSuccess": "Token Cloudflare API valid",
+      "save": "Simpan pengaturan",
+      "saved": "Pengaturan Cloudflare disimpan"
+    },
+    "cloudflareEnabled": "Cloudflare DNS",
+    "cloudflareEnabledHint": "Mengaktifkan pengelolaan Cloudflare DNS dan subdomain otomatis."
   },
   "profile": {
     "title": "Profil",
@@ -746,13 +713,12 @@
     "regenerateBackupCodes": "Buat ulang kode cadangan",
     "regenerateBackupCodesConfirm": "Kode cadangan lama akan dihapus sepenuhnya dan diganti dengan kode baru. Lanjutkan?",
     "backupCodesRegenerated": "Kode cadangan baru telah dibuat. Unduh sekarang sebagai file.",
-    "backupCodesFileTitle": "Maunting Server Manager - Kode Cadangan",
+    "backupCodesFileTitle": "Maunting Service Manager - Kode Cadangan",
     "backupCodesFileIntro": "Kode cadangan ini adalah login darurat jika kode 2FA Anda tidak tersedia.",
     "backupCodesFileUser": "Akun",
     "backupCodesFileGeneratedAt": "Dibuat pada",
     "otpRequired": "Diperlukan kode 2FA",
     "notVerified": "Tidak terverifikasi",
-    "2faQrCode": "Kode QR 2FA",
     "deleteAccountTitle": "Hapus Akun",
     "deleteAccountSubtitle": "Hapus akun pribadi Anda dan semua data terkait secara permanen.",
     "ownerCannotDelete": "Sebagai pemilik sistem, Anda tidak dapat menghapus akun Anda untuk mencegah penguncian total.",
@@ -783,7 +749,12 @@
     "modUpdateAvailable": "Pembaruan mod tersedia untuk {{mod}} di server {{server}}",
     "activeLabel": "Notifikasi email: aktif",
     "inactiveLabel": "Notifikasi email: dinonaktifkan",
-    "updateFailed": "Tidak dapat menyimpan setelan notifikasi."
+    "updateFailed": "Tidak dapat menyimpan setelan notifikasi.",
+    "title": "Notifikasi",
+    "emailLabel": "Notifikasi email",
+    "emailHint": "Login, peristiwa server, pembaruan.",
+    "aiLabel": "Pemberitahuan AI di panel",
+    "aiHint": "Pemberitahuan saat tugas selesai atau menunggu. Tanpa email."
   },
   "updater": {
     "manualConfigsRestored": "File konfigurasi manual dipulihkan secara otomatis.",
@@ -880,5 +851,28 @@
     "s3ItemPassword": "Dekripsi hanya dimungkinkan dengan kata sandi backup yang ditetapkan pada instansi ini",
     "s3ItemLocalOnly": "Tanpa konfigurasi: backup tetap lokal — tidak ada data yang dikirim ke pihak ketiga",
     "section4Updated": "Tidak ada data pribadi yang dibagikan dengan pihak ketiga. Karena alasan teknis, data backup terenkripsi mungkin disimpan di penyimpanan eksternal yang kompatibel dengan S3 jika administrator mengonfigurasinya (lihat bagian 6). Dalam kasus tersebut, penyedia penyimpanan hanya menerima data terenkripsi."
+  },
+  "ai": {
+    "memoryNotice": {
+      "title": "AI dapat mengingat hal-hal tentang Anda",
+      "body": "Jika Anda mengizinkan, asisten menyimpan catatan tetap tentang preferensi dan kebiasaan Anda — termasuk yang bersifat pribadi. Catatan ini dikirim ke penyedia AI pada setiap permintaan. Perhatikan apa yang Anda bagikan. Memori saat ini nonaktif.",
+      "enable": "Aktifkan",
+      "later": "Nanti",
+      "never": "Jangan tanya lagi",
+      "hint": "Anda dapat mengubahnya kapan saja di Profil → AI, tempat entri juga bisa dilihat dan dihapus.",
+      "enabled": "Memori diaktifkan.",
+      "failed": "Jawaban Anda tidak dapat disimpan."
+    },
+    "notice": {
+      "completed": "AI telah menyelesaikan tugasmu.",
+      "waitingConfirmation": "AI menunggu konfirmasimu.",
+      "waitingUser": "AI punya pertanyaan untukmu.",
+      "failed": "Tugas AI gagal.",
+      "open": "Buka asisten"
+    },
+    "profile": {
+      "title": "Asisten AI",
+      "description": "Kunci API, model, dan penyedia ditetapkan oleh operator panel. Di sini kamu mengelola apa yang diketahui asisten tentang kamu."
+    }
   }
 }

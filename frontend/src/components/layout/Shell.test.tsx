@@ -55,6 +55,22 @@ describe('Shell', () => {
     expect(screen.queryByRole('link', { name: /Powered by DIS/i })).toBeNull()
   })
 
+  // jsdom rechnet kein Layout, deshalb prüft diese Probe die Ursache statt der
+  // Wirkung: Sobald die Wurzel oder `main` wieder einen Scroll-Container
+  // aufmacht, richten sich `.msm-topbar` und die Klebeelemente der Seiten an
+  // einem Kasten aus, der sich nie bewegt — sie kleben dann nirgends mehr.
+  it('macht weder die Wurzel noch main zum Scroll-Container', () => {
+    renderShell()
+
+    const wurzel = document.querySelector('div.min-h-screen')
+    expect(wurzel).not.toBeNull()
+    expect(wurzel).toHaveClass('overflow-x-clip')
+    expect(wurzel).not.toHaveClass('overflow-x-hidden')
+
+    const inhalt = screen.getByRole('main')
+    expect(inhalt.className).not.toMatch(/\boverflow-(auto|scroll|hidden|x-auto|y-auto)\b/)
+  })
+
   it('opens the mobile drawer, closes with Escape and returns focus', async () => {
     useAuthStore.setState({ user: { username: 'owner', email: 'owner@example.invalid', is_owner: true } as never })
     usePermissionsStore.setState({ me: { is_owner: true, role_id: null, role_name: null, global_keys: [], server_keys: {} }, isLoading: false, error: null })

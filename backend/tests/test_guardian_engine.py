@@ -232,7 +232,26 @@ def _agent_incident(server_id: int, incident_uuid: str | None = None, status: st
     }
 
 
-def test_incident_ingestion_is_uuid_idempotent_and_acks_after_commit(db: Session) -> None:
+def test_incident_ingestion_is_uuid_idempotent_and_acks_after_commit(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Dieselbe Absicherung wie im Test darunter, und aus demselben Grund.
+    # `_notify_guardian_incident` startet einen Daemon-Thread, der sich ueber
+    # `SessionLocal()` eine eigene Sitzung holt — im Betrieb eine eigene
+    # Verbindung zu PostgreSQL, in der Testsuite dieselbe StaticPool-Verbindung,
+    # auf der dieser Test gerade arbeitet. Sein `db.close()` verwirft dann die
+    # noch offene Transaktion der zweiten Aufnahme, und der Status bleibt auf
+    # 'open' stehen.
+    #
+    # Das war latent, solange die Suite schnell genug war, dass der Thread vor
+    # der zweiten Aufnahme fertig wurde. Unter Last verschob sich das Fenster,
+    # und der Fehlschlag hing plotzlich davon ab, wie viele Tests nebenher
+    # liefen. Was hier geprueft wird — UUID-Idempotenz und ACK nach dem Commit —
+    # hat mit der Zustellung nichts zu tun; der echte ACK-Pfad bleibt drin.
+    monkeypatch.setattr(
+        "services.guardian_incident_service._notify_guardian_incident",
+        lambda *_args, **_kwargs: None,
+    )
     server = _server()
     server.id = None
     db.add(server)

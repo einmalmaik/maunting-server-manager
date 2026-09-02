@@ -226,3 +226,21 @@ def test_sudoers_policy_is_consistent_across_ssot_installer_and_updater() -> Non
     assert "Defaults:msm !authenticate" in installer
     assert "Defaults:msm !authenticate" in updater
 
+
+
+def test_caddy_erlaubt_dem_panel_das_mikrofon() -> None:
+    # Der Realtime-Sprachmodus lebt von getUserMedia. Eine Permissions-Policy
+    # mit microphone=() schaltet ihn auf jeder Installation vollstaendig ab —
+    # der Browser fragt dann nicht einmal nach der Freigabe. Genau das stand
+    # hier, und der Befund aus dem Betrieb war "Verbindung zum Sprachmodus
+    # verloren" ohne jede Mikrofonabfrage. (self) laesst nur die eigene
+    # Herkunft ans Mikrofon; fremde iframes bleiben ausgesperrt.
+    installer = _installer()
+    template = (ROOT / "Caddyfile.template").read_text(encoding="utf-8")
+
+    for quelle, name in ((installer, "install.sh"), (template, "Caddyfile.template")):
+        for zeile in quelle.splitlines():
+            if "Permissions-Policy" not in zeile:
+                continue
+            assert "microphone=(self)" in zeile, f"{name}: {zeile.strip()}"
+            assert "microphone=()" not in zeile, f"{name}: {zeile.strip()}"

@@ -1,199 +1,37 @@
 import { useState, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Search, Info, Check, X } from 'lucide-react'
 import type { PermissionDef } from '@/types/permissions'
 
-const PERMISSION_DETAILS: Record<string, { title: string; desc: string }> = {
-  'users.read': {
-    title: 'Benutzerliste einsehen',
-    desc: 'Erlaubt das Auflisten und Betrachten aller registrierten Benutzer im System.',
-  },
-  'users.manage': {
-    title: 'Benutzer verwalten',
-    desc: 'Erlaubt das Erstellen, Bearbeiten und Löschen von Benutzern im Panel.',
-  },
-  'users.permissions.manage': {
-    title: 'Berechtigungen zuweisen',
-    desc: 'Erlaubt das Zuweisen von Rollen an Benutzer sowie das Delegieren von Server-Rechten.',
-  },
-  'roles.manage': {
-    title: 'Rollen verwalten',
-    desc: 'Erlaubt das Erstellen, Ändern und Löschen von Berechtigungsrollen.',
-  },
-  'panel.settings.read': {
-    title: 'Einstellungen lesen',
-    desc: 'Erlaubt das Einsehen der allgemeinen Panel-Konfiguration.',
-  },
-  'panel.settings.write': {
-    title: 'Einstellungen bearbeiten',
-    desc: 'Erlaubt das Ändern globaler Panel-Einstellungen (z.B. SMTP, Steam, Backups).',
-  },
-  'panel.database.read': {
-    title: 'Panel-Datenbank lesen',
-    desc: 'Erlaubt das Einsehen von Systemdatenbank-Tabellen (nur für Diagnose).',
-  },
-  'panel.database.admin': {
-    title: 'Panel-Datenbank verwalten',
-    desc: 'Erlaubt administrative Aufgaben und direkte Änderungen an der Panel-Datenbank.',
-  },
-  'servers.create': {
-    title: 'Server erstellen',
-    desc: 'Erlaubt das Erstellen neuer Gameserver auf verfügbaren Nodes.',
-  },
-  'servers.delete': {
-    title: 'Server löschen',
-    desc: 'Erlaubt das dauerhafte Löschen von Gameservern aus dem System (global, destruktiv).',
-  },
-  'system.view': {
-    title: 'Systemstatus anzeigen',
-    desc: 'Erlaubt das Betrachten der Systemauslastung, Log-Dateien und Netzwerkschnittstellen des Host-Systems.',
-  },
-  'nodes.read': {
-    title: 'Nodes anzeigen',
-    desc: 'Erlaubt das Auflisten der Nodes (Infrastruktur-Server) und deren Systemauslastung.',
-  },
-  'nodes.manage': {
-    title: 'Nodes verwalten',
-    desc: 'Erlaubt das Hinzufügen, Editieren, Löschen und Registrieren von Nodes.',
-  },
-  'panel.oauth.read': {
-    title: 'OAuth-Anbieter anzeigen',
-    desc: 'Erlaubt das Einsehen der konfigurierten OAuth/Social-Login-Anbieter.',
-  },
-  'panel.oauth.create': {
-    title: 'OAuth-Anbieter erstellen',
-    desc: 'Erlaubt das Hinzufügen neuer OAuth2-Identitätsprovider.',
-  },
-  'panel.oauth.update': {
-    title: 'OAuth-Anbieter bearbeiten',
-    desc: 'Erlaubt das Ändern von Client-IDs und Endpunkten der Login-Provider.',
-  },
-  'panel.oauth.delete': {
-    title: 'OAuth-Anbieter löschen',
-    desc: 'Erlaubt das Löschen von Social-Login-Anbietern.',
-  },
-  'panel.oauth.secret_update': {
-    title: 'OAuth Client-Secret ändern',
-    desc: 'Erlaubt das Rotieren und Aktualisieren des OAuth Client-Secrets.',
-  },
-  'panel.oauth.test': {
-    title: 'OAuth-Verbindung testen',
-    desc: 'Erlaubt das Testen der Authentifizierungsverbindung zum OAuth-Provider.',
-  },
-  'server.view': {
-    title: 'Server anzeigen',
-    desc: 'Erlaubt das Betrachten des Servers in der Liste und das Öffnen der Detail-Seiten.',
-  },
-  'server.start': {
-    title: 'Server starten',
-    desc: 'Erlaubt das Starten des Spieleservers.',
-  },
-  'server.stop': {
-    title: 'Server stoppen',
-    desc: 'Erlaubt das Herunterfahren des Spieleservers.',
-  },
-  'server.restart': {
-    title: 'Server neustarten',
-    desc: 'Erlaubt den Neustart des Spieleservers.',
-  },
-  'server.kill': {
-    title: 'Server stoppen erzwingen',
-    desc: 'Erlaubt das sofortige Beenden (SIGKILL) des Containers bei Hängern.',
-  },
-  'server.install': {
-    title: 'Server installieren',
-    desc: 'Erlaubt das (Neu-)Installieren des Servers über das Installationsskript.',
-  },
-  'server.update': {
-    title: 'Server aktualisieren',
-    desc: 'Erlaubt das Aktualisieren der Spieldateien und Outbound-Webhooks.',
-  },
-  'server.config.write': {
-    title: 'Einstellungen anpassen',
-    desc: 'Erlaubt das Ändern von Servername, Auto-Restart und Startparametern.',
-  },
-  'server.network.manage': {
-    title: 'Netzwerk bearbeiten',
-    desc: 'Erlaubt das Zuweisen von Ports und Ändern der Bind-IP.',
-  },
-  'server.resources.manage': {
-    title: 'Ressourcen anpassen',
-    desc: 'Erlaubt das Festlegen von CPU-, RAM- und Festplatten-Limits.',
-  },
-  'server.console.read': {
-    title: 'Konsole mitlesen',
-    desc: 'Erlaubt das Betrachten der Live-Konsole und Logs.',
-  },
-  'server.console.write': {
-    title: 'Befehle senden',
-    desc: 'Erlaubt das Senden von Spielbefehlen an die Server-Konsole.',
-  },
-  'server.console.exec': {
-    title: 'Exec ausführen',
-    desc: 'Erlaubt das Ausführen beliebiger Befehle im Server-Container.',
-  },
-  'server.files.read': {
-    title: 'Dateien anzeigen',
-    desc: 'Erlaubt das Browsen und Herunterladen von Spieldateien.',
-  },
-  'server.files.write': {
-    title: 'Dateien hochladen/ändern',
-    desc: 'Erlaubt das Erstellen, Editieren, Hochladen und Entpacken von Dateien.',
-  },
-  'server.files.delete': {
-    title: 'Dateien löschen',
-    desc: 'Erlaubt das Löschen von Dateien aus dem Dateisystem des Servers.',
-  },
-  'server.backups.read': {
-    title: 'Backups anzeigen',
-    desc: 'Erlaubt das Auflisten der Backups.',
-  },
-  'server.backups.create': {
-    title: 'Backups erstellen',
-    desc: 'Erlaubt das Erstellen von Server-Sicherungen.',
-  },
-  'server.backups.restore': {
-    title: 'Backups einspielen',
-    desc: 'Erlaubt das Wiederherstellen von Spieldateien aus einem Backup.',
-  },
-  'server.backups.delete': {
-    title: 'Backups löschen',
-    desc: 'Erlaubt das dauerhafte Löschen von Server-Sicherungen.',
-  },
-  'server.mods.read': {
-    title: 'Mods anzeigen',
-    desc: 'Erlaubt das Auflisten installierter Mods und das Durchsuchen des Steam Workshops.',
-  },
-  'server.mods.write': {
-    title: 'Mods verwalten',
-    desc: 'Erlaubt das Abonnieren, Sortieren und Deinstallieren von Workshop-Mods.',
-  },
-  'server.mods.toggle': {
-    title: 'Mods ein/ausschalten',
-    desc: 'Erlaubt das temporäre Aktivieren oder Deaktivieren installierter Mods.',
-  },
-  'server.databases.read': {
-    title: 'PostgreSQL lesen',
-    desc: 'Erlaubt das Betrachten der PostgreSQL-Datenbanken des Servers.',
-  },
-  'server.databases.write': {
-    title: 'PostgreSQL bearbeiten',
-    desc: 'Erlaubt das Ändern von Tabellen und Daten der Server-Datenbank.',
-  },
-  'server.databases.admin': {
-    title: 'PostgreSQL verwalten',
-    desc: 'Erlaubt das Hinzufügen, Löschen und Konfigurieren von PostgreSQL-Datenbanken und Usern.',
-  },
+type Uebersetzer = ReturnType<typeof useTranslation>['t']
+
+/**
+ * Rechteschlüssel tragen Punkte ('server.files.read'), und i18next liest den
+ * Punkt als Ebenentrenner. Der Unterstrich hält den Übersetzungsschlüssel
+ * deshalb flach: 'permissionDetails.server_files_read.title'.
+ */
+const detailSchluessel = (key: string) => `permissionDetails.${key.replace(/\./g, '_')}`
+
+/**
+ * Kennt die Sprachdatei ein Recht nicht, bleibt der deutsche Text aus dem
+ * Backend-Katalog stehen. Das ist der Fall für Rechte, die nach dieser Datei
+ * dazugekommen sind — lieber ein deutscher Satz als ein roher Schlüssel.
+ */
+function titelVon(t: Uebersetzer, def: PermissionDef) {
+  return t(`${detailSchluessel(def.key)}.title`, { defaultValue: def.label })
+}
+
+function beschreibungVon(t: Uebersetzer, def: PermissionDef) {
+  return t(`${detailSchluessel(def.key)}.desc`, { defaultValue: def.label })
 }
 
 const SUBGROUPS = [
   {
     id: 'users',
-    title: 'Benutzer & Rollen',
-    keys: ['users.read', 'users.manage', 'users.permissions.manage', 'roles.manage'],
+    keys: ['users.read', 'users.manage', 'users.permissions.manage', 'roles.manage', 'teams.create'],
   },
   {
     id: 'panel',
-    title: 'Panel-Einstellungen',
     keys: [
       'panel.settings.read',
       'panel.settings.write',
@@ -205,16 +43,55 @@ const SUBGROUPS = [
       'panel.oauth.delete',
       'panel.oauth.secret_update',
       'panel.oauth.test',
+      'panel.hoster.read',
+      'panel.hoster.write',
+      'panel.popups.manage',
+    ],
+  },
+  {
+    id: 'ai',
+    keys: [
+      'ai.chat.use',
+      'ai.voice.use',
+      'ai.attachments.use',
+      'ai.memory.use',
+      'ai.skills.use',
+      'ai.skills.manage',
+      'ai.web_search.use',
+      'ai.satellite.use',
+      'ai.autonomous.use',
+      'ai.tasks.manage',
+      'ai.background.use',
+      'ai.desktop.use',
+      'ai.desktop.install',
+      'ai.mailbox.use',
+      'ai.calendar.use',
+      'ai.notes.use',
+      'ai.popups.manage',
+      'ai.usage.read.all',
     ],
   },
   {
     id: 'infrastructure',
-    title: 'Infrastruktur & System',
-    keys: ['servers.create', 'servers.delete', 'nodes.read', 'nodes.manage', 'system.view'],
+    keys: [
+      'servers.create',
+      'servers.delete',
+      'servers.hoster_customers.view',
+      'blueprints.manage',
+      'nodes.read',
+      'nodes.manage',
+      'system.view',
+      'system.audit.read',
+      'system.secrets.rotate',
+      'cloudflare.manage',
+    ],
   },
   {
     id: 'server_basic',
-    title: 'Server-Basisrechte',
+    // 'server.update' heißt in der Anzeige „Outbound-Webhooks verwalten": geprüft
+    // wird das Recht nur in routers/webhooks_outbound.py. Wer die Spieldateien neu
+    // holen darf, entscheidet 'server.install'. Der Schlüssel behält seinen
+    // historischen Namen, weil er in bereits vergebenen Rollen steckt.
     keys: [
       'server.view',
       'server.start',
@@ -227,17 +104,19 @@ const SUBGROUPS = [
   },
   {
     id: 'server_config',
-    title: 'Server-Konfiguration & Ressourcen',
-    keys: ['server.config.write', 'server.network.manage', 'server.resources.manage'],
+    keys: [
+      'server.config.write',
+      'server.network.manage',
+      'server.resources.manage',
+      'server.credentials.manage',
+    ],
   },
   {
     id: 'server_console',
-    title: 'Server-Konsole',
     keys: ['server.console.read', 'server.console.write', 'server.console.exec'],
   },
   {
     id: 'server_files',
-    title: 'Dateien & Backups',
     keys: [
       'server.files.read',
       'server.files.write',
@@ -250,7 +129,6 @@ const SUBGROUPS = [
   },
   {
     id: 'server_features',
-    title: 'Server-Erweiterungen (Mods & DBs)',
     keys: [
       'server.mods.read',
       'server.mods.write',
@@ -275,6 +153,7 @@ export function PermissionEditor({
   onChange,
   disabled = false,
 }: PermissionEditorProps) {
+  const { t } = useTranslation()
   const [search, setSearch] = useState('')
   const [hoveredKey, setHoveredKey] = useState<string | null>(null)
 
@@ -288,21 +167,18 @@ export function PermissionEditor({
     if (!search.trim()) return permissions
     const query = search.toLowerCase()
     return permissions.filter((p) => {
-      const details = PERMISSION_DETAILS[p.key]
-      const title = details ? details.title : p.label
-      const desc = details ? details.desc : ''
       return (
         p.key.toLowerCase().includes(query) ||
-        title.toLowerCase().includes(query) ||
-        desc.toLowerCase().includes(query) ||
+        titelVon(t, p).toLowerCase().includes(query) ||
+        beschreibungVon(t, p).toLowerCase().includes(query) ||
         p.label.toLowerCase().includes(query)
       )
     })
-  }, [permissions, search])
+  }, [permissions, search, t])
 
   // Group filtered definitions
   const groupedData = useMemo(() => {
-    const groups: { title: string; defs: PermissionDef[] }[] = []
+    const groups: { id: string; defs: PermissionDef[] }[] = []
     const mappedKeys = new Set<string>()
 
     // Predefined groups
@@ -310,7 +186,7 @@ export function PermissionEditor({
       const defsInGroup = filteredDefs.filter((p) => group.keys.includes(p.key))
       if (defsInGroup.length > 0) {
         groups.push({
-          title: group.title,
+          id: group.id,
           defs: defsInGroup,
         })
         defsInGroup.forEach((p) => mappedKeys.add(p.key))
@@ -321,7 +197,7 @@ export function PermissionEditor({
     const remainingDefs = filteredDefs.filter((p) => !mappedKeys.has(p.key))
     if (remainingDefs.length > 0) {
       groups.push({
-        title: 'Andere Berechtigungen',
+        id: 'other',
         defs: remainingDefs,
       })
     }
@@ -357,16 +233,14 @@ export function PermissionEditor({
   // Get description for hovered or first selected permission
   const getInfoDisplay = () => {
     const activeKey = hoveredKey
-    if (activeKey) {
-      const details = PERMISSION_DETAILS[activeKey]
-      const def = permissionMap.get(activeKey)
-      return {
-        key: activeKey,
-        title: details ? details.title : (def ? def.label : activeKey),
-        desc: details ? details.desc : (def ? def.label : ''),
-      }
+    if (!activeKey) return null
+    const def = permissionMap.get(activeKey)
+    if (!def) return { key: activeKey, title: activeKey, desc: '' }
+    return {
+      key: activeKey,
+      title: titelVon(t, def),
+      desc: beschreibungVon(t, def),
     }
-    return null
   }
 
   const info = getInfoDisplay()
@@ -381,7 +255,7 @@ export function PermissionEditor({
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Berechtigung suchen..."
+            placeholder={t('permissionEditor.searchPlaceholder')}
             className="msm-input pl-9 py-1.5 text-xs font-label-md"
             disabled={disabled && permissions.length === 0}
           />
@@ -403,14 +277,14 @@ export function PermissionEditor({
               onClick={handleSelectVisible}
               className="msm-btn-secondary text-xs px-3 py-1.5"
             >
-              Alle auswählen
+              {t('permissionEditor.selectAll')}
             </button>
             <button
               type="button"
               onClick={handleDeselectVisible}
               className="msm-btn-secondary text-xs px-3 py-1.5"
             >
-              Auswahl aufheben
+              {t('permissionEditor.deselectAll')}
             </button>
           </div>
         )}
@@ -420,18 +294,17 @@ export function PermissionEditor({
       <div className="space-y-6 max-h-[380px] overflow-y-auto pr-1">
         {groupedData.length === 0 ? (
           <div className="p-8 text-center text-on-surface-variant bg-surface-container-low/40 rounded-lg border border-outline-variant/30 font-body-md text-sm">
-            Keine Berechtigungen gefunden
+            {t('permissionEditor.empty')}
           </div>
         ) : (
           groupedData.map((group) => (
-            <div key={group.title} className="space-y-2.5">
+            <div key={group.id} className="space-y-2.5">
               <h4 className="font-label-md text-xs text-on-surface-variant uppercase tracking-wider pl-1">
-                {group.title}
+                {t(`permissionEditor.groups.${group.id}`)}
               </h4>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                 {group.defs.map((def) => {
-                  const details = PERMISSION_DETAILS[def.key]
-                  const title = details ? details.title : def.label
+                  const title = titelVon(t, def)
                   const isChecked = selected.has(def.key)
                   const id = `perm-editor-${def.key}`
 
@@ -459,17 +332,34 @@ export function PermissionEditor({
                         >
                           {isChecked && <Check className="w-3 h-3 stroke-[3]" />}
                         </div>
+                        {/*
+                          Der zugängliche Name hängt an aria-labelledby und bewusst nicht an
+                          einem <label htmlFor>: Den Umschalter trägt das umschließende <div>
+                          mit onClick. Ein Label würde beim Klick auf den Titel zusätzlich
+                          einen Klick auf das Eingabefeld auslösen, sodass derselbe Handler
+                          zweimal liefe (nachgemessen: zwei Aufrufe pro Klick) — heute
+                          unauffällig, weil React beide aus demselben Zustand berechnet, aber
+                          eine Falle, die wir uns für einen bloßen Namen nicht einhandeln.
+                          aria-labelledby vergibt den Namen, ohne den Klickweg anzufassen.
+                          Ohne ihn meldet ein Screenreader für jedes der rund 90 Rechte nur
+                          "Kontrollkästchen, nicht aktiviert", weil sr-only clip ist und die
+                          Checkbox damit im Fokus bleibt, aber namenlos.
+                        */}
                         <input
                           id={id}
                           type="checkbox"
                           checked={isChecked}
                           onChange={() => {}} // handled by click container
                           disabled={disabled}
+                          aria-labelledby={`${id}-title`}
                           className="sr-only"
                         />
                       </div>
                       <div className="flex flex-col gap-0.5 min-w-0">
-                        <span className="font-label-md text-xs font-semibold text-on-surface group-hover:text-primary transition-colors truncate">
+                        <span
+                          id={`${id}-title`}
+                          className="font-label-md text-xs font-semibold text-on-surface group-hover:text-primary transition-colors truncate"
+                        >
                           {title}
                         </span>
                         <span className="font-mono text-[10px] text-on-surface-variant/80 truncate">
@@ -505,7 +395,7 @@ export function PermissionEditor({
         ) : (
           <div className="flex items-center gap-2 text-on-surface-variant/60 italic text-xs">
             <Info className="w-3.5 h-3.5" />
-            <span>Fahre mit der Maus über eine Berechtigung, um eine Beschreibung anzuzeigen.</span>
+            <span>{t('permissionEditor.hoverHint')}</span>
           </div>
         )}
       </div>

@@ -53,12 +53,12 @@ export function DangerZoneTab() {
 
   return (
     <div className="msm-card p-6 border border-status-error/35">
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-full bg-status-error/10 flex items-center justify-center">
-          <AlertTriangle className="w-5 h-5 text-status-error" />
-        </div>
+      <div className="flex items-center gap-2 mb-6">
+        <AlertTriangle className="h-5 w-5 text-status-error" aria-hidden="true" />
         <div className="flex-1">
-          <h2 className="font-headline text-headline-sm text-status-error">{t('profile.deleteAccountTitle')}</h2>
+          {/* Die Warnfarbe bleibt: sie unterscheidet die Gefahrenzone von den
+              übrigen Karten. Nur Größe und Bauweise ziehen mit. */}
+          <h2 className="font-headline text-lg font-semibold text-status-error">{t('profile.deleteAccountTitle')}</h2>
           <p className="font-body-md text-sm text-on-surface-variant mt-1">
             {t('profile.deleteAccountSubtitle')}
           </p>

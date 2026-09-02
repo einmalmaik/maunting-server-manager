@@ -275,67 +275,6 @@
       "user": "Usuário"
     }
   },
-  "permissions": {
-    "users": {
-      "read": "Ver lista de usuários",
-      "manage": "Criar, editar, excluir usuários",
-      "permissions": {
-        "manage": "Gerenciar funções de usuário e permissões de servidor"
-      }
-    },
-    "roles": {
-      "manage": "Criar, editar, excluir funções"
-    },
-    "panel": {
-      "settings": {
-        "read": "Leia as configurações do painel",
-        "write": "Alterar as configurações do painel (Steam, email, ...)"
-      }
-    },
-    "servers": {
-      "create": "Crie um novo servidor",
-      "delete": "Excluir servidores (globais, não delegáveis)"
-    },
-    "system": {
-      "view": "Ver recursos do sistema, interfaces, versão"
-    },
-    "server": {
-      "view": "Veja o servidor em lista e detalhes",
-      "start": "Iniciar servidor",
-      "stop": "Parar servidor",
-      "restart": "Reiniciar servidor",
-      "install": "Instalar ou reinstalar o servidor",
-      "config": {
-        "write": "Editar configurações do servidor (nome, reinicialização automática, agendamento de backup)"
-      },
-      "network": {
-        "manage": "Alterar portas e vincular IP"
-      },
-      "resources": {
-        "manage": "Alterar limites de CPU/RAM/disco"
-      },
-      "console": {
-        "read": "Leia o console e os registros",
-        "write": "Envie comandos para o console"
-      },
-      "files": {
-        "read": "Ler e baixar arquivos",
-        "write": "Carregar, criar, editar, extrair arquivos",
-        "delete": "Excluir arquivos"
-      },
-      "backups": {
-        "read": "Listar backups",
-        "create": "Criar backup",
-        "restore": "Restaurar cópia de segurança",
-        "delete": "Excluir backup"
-      },
-      "mods": {
-        "read": "Listar mods, oficina de pesquisa",
-        "write": "Assine, remova, reordene mods",
-        "toggle": "Habilitar ou desabilitar mods"
-      }
-    }
-  },
   "serverPermissions": {
     "title": "Permissões",
     "subtitle": "Quem pode fazer o quê neste servidor",
@@ -376,7 +315,7 @@
   },
   "auth": {
     "login": "Entrar",
-    "loginDescription": "Faça login no seu Gerenciador de Servidores",
+    "loginDescription": "Faça login no seu Gerenciador de Serviços",
     "register": "Cadastre-se",
     "registerDescription": "Crie uma nova conta",
     "username": "Nome de usuário",
@@ -408,10 +347,10 @@
   },
   "setup": {
     "welcome": "Bem-vindo ao MSM",
-    "welcomeDesc": "O Maunting Server Manager está pronto. Crie a conta de proprietário agora para gerenciar seus servidores de jogo.",
+    "welcomeDesc": "O Maunting Service Manager está pronto. Crie a conta de proprietário agora para gerenciar seus servidores de jogo.",
     "start": "Comece",
     "title": "Configuração inicial",
-    "description": "Crie a conta de proprietário para o seu Gerenciador de Servidores",
+    "description": "Crie a conta de proprietário para o seu Gerenciador de Serviços",
     "createOwner": "Criar proprietário",
     "error": "Falha na configuração.",
     "verifyEmail": "Verificar e-mail",
@@ -683,7 +622,8 @@
     "providerSmtp": "SMTP",
     "providerResend": "Reenviar",
     "tabs": {
-      "backup": "Backup"
+      "backup": "Backup",
+      "cloudflare": "Cloudflare"
     },
     "backup": {
       "statusTitle": "Status do backup",
@@ -711,7 +651,34 @@
       "passwordHint": "Armazenada criptografada. A senha nunca é retornada e é necessária para criptografar/descriptografar backups.",
       "savePassword": "Salvar senha",
       "passwordSaved": "Senha de backup salva"
-    }
+    },
+    "testConnection": "Testar conexão",
+    "cloudflare": {
+      "title": "Cloudflare DNS",
+      "description": "Gerencie o Cloudflare DNS para subdomínios automáticos.",
+      "configured": "Configurado",
+      "notConfigured": "Não configurado",
+      "currentKey": "Token de API atual",
+      "newToken": "Novo token de API",
+      "tokenLabel": "Token de API",
+      "tokenHint": "Token Bearer com permissões de Zone:Read e DNS:Edit. Armazenado com criptografia segura via DIS Sidecar.",
+      "tokenPlaceholder": "Bearer Token...",
+      "deleteToken": "Remover token",
+      "deleteConfirm": "Deseja realmente remover o token de API da Cloudflare salvo?",
+      "deleted": "Token de API da Cloudflare removido",
+      "defaultZoneLabel": "Zona padrão (Domínio)",
+      "zonePlaceholder": "Selecionar zona...",
+      "zoneHint": "Usado para subdomínios automáticos: {game}-{name}.{zone}",
+      "disabledHint": "O Cloudflare DNS está desativado em Geral.",
+      "enabled": "Cloudflare DNS",
+      "enabledHint": "Ativa o gerenciamento do Cloudflare DNS e subdomínios automáticos.",
+      "test": "Testar conexão",
+      "testSuccess": "O token da API Cloudflare é válido",
+      "save": "Salvar configurações",
+      "saved": "Configurações da Cloudflare salvas"
+    },
+    "cloudflareEnabled": "Cloudflare DNS",
+    "cloudflareEnabledHint": "Ativa o gerenciamento do Cloudflare DNS e subdomínios automáticos."
   },
   "profile": {
     "title": "Perfil",
@@ -746,13 +713,12 @@
     "regenerateBackupCodes": "Gerar novos códigos de backup",
     "regenerateBackupCodesConfirm": "Os códigos de backup antigos serão excluídos completamente e substituídos por novos códigos. Continuar?",
     "backupCodesRegenerated": "Novos códigos de backup foram gerados. Baixe-os agora como arquivo.",
-    "backupCodesFileTitle": "Maunting Server Manager - Códigos de backup",
+    "backupCodesFileTitle": "Maunting Service Manager - Códigos de backup",
     "backupCodesFileIntro": "Estes códigos de backup servem como login de emergência se seu código 2FA não estiver disponível.",
     "backupCodesFileUser": "Conta",
     "backupCodesFileGeneratedAt": "Gerado em",
     "otpRequired": "Código 2FA necessário",
     "notVerified": "Não verificado",
-    "2faQrCode": "Código QR 2FA",
     "deleteAccountTitle": "Excluir conta",
     "deleteAccountSubtitle": "Exclua permanentemente sua conta pessoal e todos os dados associados.",
     "ownerCannotDelete": "Como proprietário do sistema, você não pode excluir sua conta para evitar um bloqueio total.",
@@ -783,7 +749,12 @@
     "modUpdateAvailable": "Atualização de mod disponível para {{mod}} no servidor {{server}}",
     "activeLabel": "Notificações por e-mail: ativas",
     "inactiveLabel": "Notificações por e-mail: desabilitadas",
-    "updateFailed": "Não foi possível salvar a configuração de notificação."
+    "updateFailed": "Não foi possível salvar a configuração de notificação.",
+    "title": "Notificações",
+    "emailLabel": "Notificações por e-mail",
+    "emailHint": "Inícios de sessão, eventos do servidor, atualizações.",
+    "aiLabel": "Avisos da IA no painel",
+    "aiHint": "Um aviso quando uma tarefa termina ou fica à espera. Sem e-mails."
   },
   "updater": {
     "manualConfigsRestored": "Os arquivos de configuração manual foram restaurados automaticamente.",
@@ -880,5 +851,28 @@
     "s3ItemPassword": "A descriptografia só é possível com a senha de backup definida nesta instância",
     "s3ItemLocalOnly": "Sem configuração: os backups permanecem locais — nenhum dado é transmitido a terceiros",
     "section4Updated": "Nenhum dado pessoal é compartilhado com terceiros. Por razões técnicas, dados criptografados de backup podem ser armazenados em armazenamento externo compatível com S3 se o administrador o configurar (ver seção 6). Nesse caso, o provedor de armazenamento recebe apenas dados criptografados."
+  },
+  "ai": {
+    "memoryNotice": {
+      "title": "A IA pode lembrar coisas sobre você",
+      "body": "Se você permitir, o assistente guarda de forma duradoura preferências e particularidades — inclusive pessoais. Essas notas são enviadas ao provedor de IA em cada solicitação. Tenha cuidado com o que compartilha. A memória está desativada no momento.",
+      "enable": "Ativar",
+      "later": "Mais tarde",
+      "never": "Não perguntar mais",
+      "hint": "Você pode alterar isso a qualquer momento em Perfil → IA, onde também pode ver e excluir entradas.",
+      "enabled": "Memória ativada.",
+      "failed": "Não foi possível salvar sua resposta."
+    },
+    "notice": {
+      "completed": "A IA terminou a tua tarefa.",
+      "waitingConfirmation": "A IA aguarda a tua confirmação.",
+      "waitingUser": "A IA tem uma pergunta para ti.",
+      "failed": "A tarefa da IA falhou.",
+      "open": "Abrir assistente"
+    },
+    "profile": {
+      "title": "Assistente de IA",
+      "description": "O operador do painel fornece a chave de API, o modelo e os provedores. Aqui voce gerencia o que o assistente sabe sobre voce."
+    }
   }
 }

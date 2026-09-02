@@ -41,9 +41,10 @@ class TestGetServer:
         assert response.status_code == 200
 
     def test_user_without_permission_blocked(self, client: TestClient, regular_user: User, user_cookies: dict, test_server: Server):
-        # No permission granted
+        # No permission granted: 404, nicht 403 — wer den Server nicht sehen
+        # darf, erfaehrt auch nicht, dass es ihn gibt (kein Existenzorakel).
         response = client.get(f"/api/servers/{test_server.id}", cookies=user_cookies)
-        assert response.status_code == 403
+        assert response.status_code == 404
 
 
 class TestCreateServer:
@@ -51,12 +52,12 @@ class TestCreateServer:
         # docker_service.is_available() darf False sein — der Endpunkt lebt
         # auch ohne lokales Docker (install() schl\u00e4gt nur fehl). Wir mocken
         # nichts; install_dir landet unter /tmp/msm-test/.
-        with patch("routers.servers.os.makedirs"), \
-             patch("routers.servers.os.chmod"), \
-             patch("routers.servers.os.path.exists", return_value=False), \
-             patch("routers.servers.allocate_ports", return_value=(27015, 27016, 27017)), \
+        with patch("services.server_provisioning_service.os.makedirs"), \
+             patch("services.server_provisioning_service.os.chmod"), \
+             patch("services.server_provisioning_service.os.path.exists", return_value=False), \
+             patch("services.server_provisioning_service.allocate_ports", return_value=(27015, 27016, 27017)), \
              patch("routers.servers.open_ports"), \
-             patch("routers.servers.get_plugin", return_value=None):
+             patch("services.server_provisioning_service.get_plugin", return_value=None):
             response = client.post(
                 "/api/servers",
                 json={"name": "New Server", "game_type": "dayz"},
@@ -92,12 +93,12 @@ class TestCreateServer:
         nicht mehr aus Count()+1. Auch mit gemockten FS-Calls können wir prüfen,
         dass der Name im Response die ID enthält (kein Reuse nach DELETEs möglich).
         """
-        with patch("routers.servers.os.makedirs"), \
-             patch("routers.servers.os.chmod"), \
-             patch("routers.servers.os.path.exists", return_value=False), \
-             patch("routers.servers.allocate_ports", return_value=(27015, 27016, 27017)), \
+        with patch("services.server_provisioning_service.os.makedirs"), \
+             patch("services.server_provisioning_service.os.chmod"), \
+             patch("services.server_provisioning_service.os.path.exists", return_value=False), \
+             patch("services.server_provisioning_service.allocate_ports", return_value=(27015, 27016, 27017)), \
              patch("routers.servers.open_ports"), \
-             patch("routers.servers.get_plugin", return_value=None):
+             patch("services.server_provisioning_service.get_plugin", return_value=None):
             response = client.post(
                 "/api/servers",
                 json={"name": "Id-Based Server", "game_type": "dayz"},
@@ -119,12 +120,12 @@ class TestCreateServer:
         # Wir patchen nur den exists-Guard. Der Rest (ports etc.) läuft normal.
         # create_server berechnet den Pfad intern aus der frischen id.
         conflicting_path = "/opt/msm/servers/dayz_999999"  # kann nicht existieren
-        with patch("routers.servers.os.path.exists", return_value=True) as mock_exists, \
-             patch("routers.servers.os.makedirs"), \
-             patch("routers.servers.os.chmod"), \
-             patch("routers.servers.allocate_ports", return_value=(27015, 27016, 27017)), \
+        with patch("services.server_provisioning_service.os.path.exists", return_value=True) as mock_exists, \
+             patch("services.server_provisioning_service.os.makedirs"), \
+             patch("services.server_provisioning_service.os.chmod"), \
+             patch("services.server_provisioning_service.allocate_ports", return_value=(27015, 27016, 27017)), \
              patch("routers.servers.open_ports"), \
-             patch("routers.servers.get_plugin", return_value=None):
+             patch("services.server_provisioning_service.get_plugin", return_value=None):
             response = client.post(
                 "/api/servers",
                 json={"name": "Collision Test", "game_type": "dayz"},
@@ -132,7 +133,10 @@ class TestCreateServer:
                 headers={"X-CSRF-Token": csrf_token},
             )
             assert response.status_code == 409
-            assert "existierte bereits" in response.json()["detail"].lower() or "existier" in response.json()["detail"].lower()
+            assert response.json()["detail"] == {
+                "code": "install_directory_exists",
+                "message": "errors.install_directory_exists",
+            }
             # Wichtig: die Placeholder-Row wurde aufgeräumt (keine Server mit Pending-Pfad).
             # (Der genaue Check über DB ist in Integration-Tests abgedeckt; hier reicht 409.)
 
@@ -149,12 +153,12 @@ class TestCreateServer:
             "port": 5432,
             "is_power_user": False,
         }]
-        with patch("routers.servers.os.makedirs"), \
-             patch("routers.servers.os.chmod"), \
-             patch("routers.servers.os.path.exists", return_value=False), \
-             patch("routers.servers.allocate_ports", return_value=(27015, 27016, 27017)), \
-             patch("routers.servers.get_plugin", return_value=None), \
-             patch("routers.servers.postgres_service.provision_server_databases", return_value=credentials):
+        with patch("services.server_provisioning_service.os.makedirs"), \
+             patch("services.server_provisioning_service.os.chmod"), \
+             patch("services.server_provisioning_service.os.path.exists", return_value=False), \
+             patch("services.server_provisioning_service.allocate_ports", return_value=(27015, 27016, 27017)), \
+             patch("services.server_provisioning_service.get_plugin", return_value=None), \
+             patch("services.server_provisioning_service.postgres_service.provision_server_databases", return_value=credentials):
             response = client.post(
                 "/api/servers",
                 json={
@@ -171,14 +175,14 @@ class TestCreateServer:
         assert data["postgres_credentials"] == credentials
 
     def test_create_aborts_when_postgres_provisioning_fails(self, client: TestClient, owner_user: User, owner_cookies: dict, csrf_token: str, db: Session):
-        with patch("routers.servers.os.makedirs"), \
-             patch("routers.servers.os.chmod"), \
-             patch("routers.servers.os.path.exists", return_value=False), \
-             patch("routers.servers.shutil.rmtree"), \
-             patch("routers.servers.allocate_ports", return_value=(27015, 27016, 27017)), \
-             patch("routers.servers.get_plugin", return_value=None), \
-             patch("routers.servers.postgres_service.provision_server_databases", side_effect=RuntimeError("pg down")), \
-             patch("routers.servers.postgres_service.drop_server_resources") as drop_resources:
+        with patch("services.server_provisioning_service.os.makedirs"), \
+             patch("services.server_provisioning_service.os.chmod"), \
+             patch("services.server_provisioning_service.os.path.exists", return_value=False), \
+             patch("services.server_provisioning_service.shutil.rmtree"), \
+             patch("services.server_provisioning_service.allocate_ports", return_value=(27015, 27016, 27017)), \
+             patch("services.server_provisioning_service.get_plugin", return_value=None), \
+             patch("services.server_provisioning_service.postgres_service.provision_server_databases", side_effect=RuntimeError("pg down")), \
+             patch("services.server_provisioning_service.postgres_service.drop_server_resources") as drop_resources:
             response = client.post(
                 "/api/servers",
                 json={
@@ -196,21 +200,31 @@ class TestCreateServer:
 
 
 class TestDeleteServer:
-    def test_owner_can_delete(self, client: TestClient, owner_user: User, owner_cookies: dict, test_server: Server, csrf_token: str):
+    def test_owner_can_delete(self, client: TestClient, owner_user: User, owner_cookies: dict, test_server: Server, csrf_token: str, db: Session):
+        server_id = test_server.id
         response = client.delete(
-            f"/api/servers/{test_server.id}",
+            f"/api/servers/{server_id}",
             cookies=owner_cookies,
             headers={"X-CSRF-Token": csrf_token},
         )
         assert response.status_code == 200
+        # Die 200 ist nicht die Zusage — gelöscht heißt: die Zeile ist weg.
+        db.expire_all()
+        assert db.query(Server).filter(Server.id == server_id).first() is None
+        # Und der Endpunkt bestätigt das Aufräumen, statt nur still 200 zu sagen.
+        assert "cleanup" in response.json()
 
-    def test_regular_user_cannot_delete(self, client: TestClient, regular_user: User, user_cookies: dict, test_server: Server, user_csrf_token: str):
+    def test_regular_user_cannot_delete(self, client: TestClient, regular_user: User, user_cookies: dict, test_server: Server, user_csrf_token: str, db: Session):
+        server_id = test_server.id
         response = client.delete(
-            f"/api/servers/{test_server.id}",
+            f"/api/servers/{server_id}",
             cookies=user_cookies,
             headers={"X-CSRF-Token": user_csrf_token},
         )
         assert response.status_code == 403
+        # Die Abweisung muss folgenlos bleiben: kein halb gelöschter Server.
+        db.expire_all()
+        assert db.query(Server).filter(Server.id == server_id).first() is not None
 
 
 class TestStartServer:
@@ -348,7 +362,7 @@ class TestManualUploadStartPreCheck:
         test_server.public_bind_ip = "127.0.0.1"
         db.commit()
 
-        with patch("routers.servers.get_plugin") as mock_get_plugin:
+        with patch("services.server_action_service.get_plugin") as mock_get_plugin:
             mock_plugin = mock_get_plugin.return_value
             mock_plugin.get_blueprint.return_value = bp
             response = client.post(
@@ -381,7 +395,7 @@ class TestManualUploadStartPreCheck:
         db.commit()
         (tmp_path / "server.jar").write_text("fake", encoding="utf-8")
 
-        with patch("routers.servers.get_plugin") as mock_get_plugin, \
+        with patch("services.server_action_service.get_plugin") as mock_get_plugin, \
              patch("services.server_lifecycle_service._start_lifecycle_thread") as mock_thread:
             mock_plugin = mock_get_plugin.return_value
             mock_plugin.get_blueprint.return_value = bp
@@ -417,7 +431,7 @@ class TestManualUploadStartPreCheck:
         (tmp_path / "real.jar").write_text("fake", encoding="utf-8")
         (tmp_path / "server.jar").symlink_to(tmp_path / "real.jar")
 
-        with patch("routers.servers.get_plugin") as mock_get_plugin:
+        with patch("services.server_action_service.get_plugin") as mock_get_plugin:
             mock_plugin = mock_get_plugin.return_value
             mock_plugin.get_blueprint.return_value = bp
             response = client.post(
@@ -556,17 +570,17 @@ class TestServerPortsRouter:
             "source": {"type": "manualUpload", "manual": {"requiredFiles": ["server.jar"], "instructions": "test"}},
         })
 
-        with patch("routers.servers.os.makedirs"), \
-             patch("routers.servers.os.chmod"), \
-             patch("routers.servers.os.path.exists", return_value=False), \
+        with patch("services.server_provisioning_service.os.makedirs"), \
+             patch("services.server_provisioning_service.os.chmod"), \
+             patch("services.server_provisioning_service.os.path.exists", return_value=False), \
              patch("routers.servers.open_ports"), \
-             patch("routers.servers.allocate_ports", return_value=[
+             patch("services.server_provisioning_service.allocate_ports", return_value=[
                  ("game", 27015, "udp"),
                  ("query", 27016, "udp"),
                  ("rcon", 27017, "tcp"),
                  ("custom_1", 29000, "udp"),
              ]), \
-             patch("routers.servers.get_plugin") as mock_get_plugin:
+             patch("services.server_provisioning_service.get_plugin") as mock_get_plugin:
             
             mock_plugin = mock_get_plugin.return_value
             mock_plugin.get_blueprint.return_value = bp
@@ -606,11 +620,11 @@ class TestServerPortsRouter:
             "source": {"type": "manualUpload", "manual": {"requiredFiles": ["server.jar"], "instructions": "test"}},
         })
 
-        with patch("routers.servers.os.makedirs"), \
-             patch("routers.servers.os.chmod"), \
-             patch("routers.servers.os.path.exists", return_value=False), \
+        with patch("services.server_provisioning_service.os.makedirs"), \
+             patch("services.server_provisioning_service.os.chmod"), \
+             patch("services.server_provisioning_service.os.path.exists", return_value=False), \
              patch("services.port_allocation_service.is_port_available", return_value=True), \
-             patch("routers.servers.get_plugin") as mock_get_plugin:
+             patch("services.server_provisioning_service.get_plugin") as mock_get_plugin:
 
             mock_plugin = mock_get_plugin.return_value
             mock_plugin.get_blueprint.return_value = bp
@@ -985,7 +999,8 @@ class TestResourcePatchPermissions:
         self, client: TestClient, regular_user: User, user_cookies: dict, user_csrf_token: str,
         test_server: Server, db: Session,
     ):
-        # Gar keine Permissions auf diesen Server
+        # Gar keine Permissions auf diesen Server: 404 statt 403 — ohne
+        # Sichtbarkeit kein Existenzorakel per ID-Iteration.
         test_server.cpu_limit_percent = 100
         db.commit()
         response = client.patch(
@@ -994,7 +1009,7 @@ class TestResourcePatchPermissions:
             cookies=user_cookies,
             headers={"X-CSRF-Token": user_csrf_token},
         )
-        assert response.status_code == 403
+        assert response.status_code == 404
         db.refresh(test_server)
         assert test_server.cpu_limit_percent == 100
 
@@ -3618,3 +3633,43 @@ class TestNetworkFieldPresenceDetection:
         assert response.status_code == 409
         db.refresh(test_server)
         assert test_server.cpu_limit_percent == 100
+
+    # ── Network modification requires stopped server ──
+
+    def test_network_change_when_running_returns_409(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """A running server must reject port/bind IP changes with 409."""
+        test_server.status = "running"
+        test_server.public_bind_ip = "127.0.0.1"
+        db.commit()
+
+        response = client.patch(
+            f"/api/servers/{test_server.id}",
+            json={"public_bind_ip": "192.168.1.50"},
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        assert response.status_code == 409
+        assert "gestoppt" in response.json()["detail"]
+        db.refresh(test_server)
+        assert test_server.public_bind_ip == "127.0.0.1"
+
+    def test_port_change_when_running_returns_409(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """A running server must reject port changes with 409."""
+        test_server.status = "running"
+        db.commit()
+
+        response = client.patch(
+            f"/api/servers/{test_server.id}",
+            json={"game_port": 27015},
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        assert response.status_code == 409
+        assert "gestoppt" in response.json()["detail"]
+

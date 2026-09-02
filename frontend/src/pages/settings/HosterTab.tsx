@@ -1,0 +1,1282 @@
+/**
+ * Hoster-Anbindung (Phase 6).
+ *
+ * Die Ansicht ist reine Konfiguration. Jede Entscheidung — welcher Blueprint,
+ * welche Ressourcen, welcher Kunde welchen Server sehen darf — trifft das
+ * Backend. Ein frisch erzeugter API-Key oder Webhook-Secret wird genau einmal
+ * angezeigt und danach verworfen; es gibt keinen Lesepfad dafuer.
+ */
+import { useCallback, useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router-dom'
+import {
+  Check,
+  CheckCircle2,
+  Copy,
+  ExternalLink,
+  FlaskConical,
+  KeyRound,
+  Pause,
+  Pencil,
+  Play,
+  Plug,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Save,
+  Send,
+  Sparkles,
+  Trash2,
+  XCircle,
+} from 'lucide-react'
+
+import {
+  hosterApi,
+  type HosterDelivery,
+  type HosterIntegration,
+  type HosterProduct,
+  type HosterProductWrite,
+  type HosterService,
+  type HosterSimulationResponse,
+} from '@/api/hoster'
+import { credentialsApi } from '@/api/credentials'
+import { rbacApi } from '@/api/rbac'
+import { api, SanitizedApiError } from '@/api/client'
+import { Button, NumberStepper, Switch } from '@/Singra/UI'
+import { Dropdown } from '@/components/ui/Dropdown'
+import { SecretOnce } from '@/components/ui/SecretOnce'
+import { confirm } from '@/stores/confirmStore'
+import { toast } from '@/stores/toastStore'
+import type { Role } from '@/types/permissions'
+import type { GameInfo, User } from '@/types'
+
+/**
+ * Handoff-Link same-origin oeffnen: der absolute Link wird aus MSM_PANEL_URL
+ * gebaut und zeigt in der Dev-Umgebung am Frontend vorbei. Der Pfad ueber die
+ * eigene Origin laeuft durch den Vite-Proxy, und der mitgesendete Referer
+ * (deshalb `rel="noopener"` ohne `noreferrer`) laesst das Backend auf diese
+ * Origin zurueckleiten — nur bei exaktem Treffer in der CORS-Allowlist.
+ */
+function handoffPath(url: string): string {
+  try {
+    return new URL(url).pathname
+  } catch {
+    return url
+  }
+}
+
+const EMPTY_PRODUCT: HosterProductWrite = {
+  external_product_key: '',
+  game_type: '',
+  ram_limit_mb: null,
+  cpu_limit_percent: null,
+  disk_limit_gb: null,
+  node_id: null,
+  backup_interval_hours: null,
+  role_id: null,
+  enabled: true,
+}
+
+export function HosterTab({ canWrite }: { canWrite: boolean }) {
+  const { t } = useTranslation()
+  const [integrations, setIntegrations] = useState<HosterIntegration[]>([])
+  const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [editing, setEditing] = useState(false)
+  // Ein einmalig angezeigtes Geheimnis. Bewusst nur im Komponentenzustand und
+  // nie in localStorage: es soll den Reload nicht ueberleben.
+  const [revealed, setRevealed] = useState<{ label: string; value: string } | null>(null)
+
+  const load = useCallback(async () => {
+    try {
+      const rows = await hosterApi.listIntegrations()
+      setIntegrations(rows)
+      setSelectedId((current) => current ?? rows[0]?.id ?? null)
+    } catch (error: unknown) {
+      toast.error(error instanceof SanitizedApiError ? error.message : t('hoster.errors.load'))
+    } finally {
+      setLoading(false)
+    }
+  }, [t])
+
+  useEffect(() => {
+    let active = true
+    void load().then(() => { if (!active) setIntegrations([]) })
+    return () => { active = false }
+  }, [load])
+
+  const selected = integrations.find((row) => row.id === selectedId) ?? null
+
+  const rotate = async (kind: 'api-key' | 'webhook-secret') => {
+    if (!selected || !canWrite || busy) return
+    setBusy(true)
+    try {
+      const secret = kind === 'api-key'
+        ? await hosterApi.rotateApiKey(selected.id)
+        : await hosterApi.rotateWebhookSecret(selected.id)
+      setRevealed({
+        label: kind === 'api-key' ? t('hoster.apiKey') : t('hoster.webhookSecret'),
+        value: secret.value,
+      })
+      await load()
+      toast.success(t('hoster.rotated'))
+    } catch (error: unknown) {
+      toast.error(error instanceof SanitizedApiError ? error.message : t('hoster.errors.rotate'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const removeIntegration = async () => {
+    if (!selected || !canWrite || busy) return
+    const accepted = await confirm({
+      title: t('hoster.deleteTitle'),
+      message: t('hoster.deleteConfirm', { name: selected.name }),
+      confirmText: t('common.delete'),
+      danger: true,
+    })
+    if (!accepted) return
+    setBusy(true)
+    try {
+      await hosterApi.deleteIntegration(selected.id)
+      setSelectedId(null)
+      await load()
+      toast.success(t('hoster.deleted'))
+    } catch (error: unknown) {
+      toast.error(error instanceof SanitizedApiError ? error.message : t('hoster.errors.delete'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex h-32 items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      </div>
+    )
+  }
+
+  return (
+    <section className="space-y-6" aria-labelledby="hoster-title">
+      <div className="msm-card flex flex-wrap items-start justify-between gap-4 p-6">
+        <div className="max-w-3xl">
+          <div className="flex items-center gap-2">
+            <Plug className="h-5 w-5 text-secondary" aria-hidden="true" />
+            <h3 id="hoster-title" className="font-headline text-lg font-semibold text-on-surface">
+              {t('hoster.title')}
+            </h3>
+          </div>
+          <p className="mt-2 text-sm text-on-surface-variant">{t('hoster.description')}</p>
+          {/* Wer den Shop tatsaechlich anbindet, braucht die Endpunkt- und
+              Webhook-Referenz — dieser Reiter erklaert nur die Konfiguration. */}
+          <Link
+            to="/docs/hoster-api"
+            className="msm-btn-secondary mt-4 inline-flex items-center gap-2 px-4 py-2 text-sm"
+          >
+            <Plug className="h-4 w-4" aria-hidden="true" />
+            {t('hoster.docsLink')}
+          </Link>
+        </div>
+        {canWrite && !creating && (
+          <Button type="button" variant="secondary" onClick={() => setCreating(true)}>
+            <Plus className="h-4 w-4" aria-hidden="true" />{t('hoster.add')}
+          </Button>
+        )}
+      </div>
+
+      {revealed && (
+        <SecretOnce
+          label={revealed.label}
+          value={revealed.value}
+          onDismiss={() => setRevealed(null)}
+        />
+      )}
+
+      {creating && (
+        <IntegrationForm
+          disabled={busy}
+          onCancel={() => setCreating(false)}
+          onCreated={async (secret) => {
+            setCreating(false)
+            setRevealed({ label: t('hoster.apiKey'), value: secret })
+            await load()
+          }}
+        />
+      )}
+
+      {integrations.length === 0 && !creating && (
+        <div className="msm-card p-6 text-sm text-on-surface-variant">{t('hoster.empty')}</div>
+      )}
+
+      {integrations.length > 0 && (
+        <div className="msm-card space-y-4 p-6">
+          <label className="space-y-1.5 block">
+            <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+              {t('hoster.integration')}
+            </span>
+            <Dropdown
+              value={selectedId === null ? null : String(selectedId)}
+              onChange={(value) => setSelectedId(Number(value))}
+              options={integrations.map((row) => ({
+                value: String(row.id),
+                label: `${row.name} (${row.slug})`,
+                hint: row.is_sandbox ? t('hoster.sandboxBadge') : t('hoster.liveBadge'),
+              }))}
+              aria-label={t('hoster.integration')}
+              data-testid="hoster-integration-select"
+            />
+          </label>
+
+          {selected && (
+            <>
+              <div className="flex items-center gap-2">
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                    selected.is_sandbox
+                      ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                      : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                  }`}
+                >
+                  {selected.is_sandbox ? (
+                    <>
+                      <FlaskConical className="h-3.5 w-3.5" aria-hidden="true" />
+                      {t('hoster.sandboxBadge')}
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      {t('hoster.liveBadge')}
+                    </>
+                  )}
+                </span>
+                <span className="text-xs text-on-surface-variant">
+                  {selected.is_sandbox ? t('hoster.isSandboxHint') : t('hoster.enabled')}
+                </span>
+              </div>
+
+              <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+                <Fact
+                  label={t('hoster.environment')}
+                  value={selected.is_sandbox ? t('hoster.sandboxBadge') : t('hoster.liveBadge')}
+                  hint={selected.is_sandbox ? t('hoster.sandboxEnvHint') : t('hoster.liveEnvHint')}
+                />
+                <Fact
+                  label={t('hoster.apiKey')}
+                  value={selected.api_key_hint ?? '—'}
+                  hint={t('hoster.apiKeyHint')}
+                />
+                <Fact
+                  label={t('hoster.webhookSecret')}
+                  value={selected.webhook_secret_configured ? (selected.webhook_secret_hint ?? '••••') : t('hoster.notConfigured')}
+                  hint={t('hoster.webhookSecretHint')}
+                />
+                <Fact label={t('hoster.webhookUrl')} value={selected.webhook_url ?? t('hoster.notConfigured')} />
+                <Fact label={t('hoster.graceDays')} value={String(selected.terminate_grace_days)} />
+              </dl>
+              {canWrite && !editing && (
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="secondary" disabled={busy} onClick={() => setEditing(true)}>
+                    <Pencil className="h-4 w-4" aria-hidden="true" />{t('common.edit')}
+                  </Button>
+                  <Button type="button" variant="secondary" disabled={busy} onClick={() => void rotate('api-key')}>
+                    <RefreshCw className="h-4 w-4" aria-hidden="true" />{t('hoster.rotateApiKey')}
+                  </Button>
+                  <Button type="button" variant="secondary" disabled={busy} onClick={() => void rotate('webhook-secret')}>
+                    <KeyRound className="h-4 w-4" aria-hidden="true" />{t('hoster.rotateWebhookSecret')}
+                  </Button>
+                  <Button type="button" variant="destructive" disabled={busy} onClick={() => void removeIntegration()}>
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />{t('common.delete')}
+                  </Button>
+                </div>
+              )}
+              {canWrite && editing && (
+                <IntegrationEditForm
+                  key={selected.id}
+                  integration={selected}
+                  disabled={busy}
+                  onCancel={() => setEditing(false)}
+                  onSaved={async () => {
+                    setEditing(false)
+                    await load()
+                  }}
+                />
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      <PanelFallbackSection canWrite={canWrite} />
+
+      {selected && <ProductSection integrationId={selected.id} canWrite={canWrite} />}
+      {selected && selected.is_sandbox && (
+        <SimulatorSection integration={selected} canWrite={canWrite} onRefresh={load} />
+      )}
+      {selected && <ServiceSection integrationId={selected.id} />}
+      {selected && <DeliverySection integrationId={selected.id} canWrite={canWrite} />}
+    </section>
+  )
+}
+
+function Fact({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div>
+      <dt className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{label}</dt>
+      <dd className="mt-0.5 break-all text-on-surface">{value}</dd>
+      {hint && <dd className="mt-0.5 text-xs text-on-surface-variant">{hint}</dd>}
+    </div>
+  )
+}
+
+function IntegrationForm({
+  disabled,
+  onCancel,
+  onCreated,
+}: {
+  disabled: boolean
+  onCancel: () => void
+  onCreated: (apiKey: string) => Promise<void>
+}) {
+  const { t } = useTranslation()
+  const [name, setName] = useState('')
+  const [slug, setSlug] = useState('')
+  const [serviceUserId, setServiceUserId] = useState('')
+  const [webhookUrl, setWebhookUrl] = useState('')
+  const [graceDays, setGraceDays] = useState('7')
+  const [isSandbox, setIsSandbox] = useState(false)
+  const [users, setUsers] = useState<User[]>([])
+  const [loadingUsers, setLoadingUsers] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    api<User[]>('/admin/users')
+      .then((rows) => {
+        if (active) {
+          setUsers(rows)
+          // Default to first active owner or first user
+          const defaultUser = rows.find((u) => u.is_owner && u.is_active) ?? rows.find((u) => u.is_active)
+          if (defaultUser) {
+            setServiceUserId(String(defaultUser.id))
+          }
+        }
+      })
+      .catch(() => {
+        if (active) setUsers([])
+      })
+      .finally(() => {
+        if (active) setLoadingUsers(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const valid = Boolean(name.trim() && slug.trim() && /^\d+$/.test(serviceUserId))
+
+  return (
+    <form
+      className="msm-card space-y-5 p-6"
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (!valid || saving) return
+        setSaving(true)
+        hosterApi
+          .createIntegration({
+            name: name.trim(),
+            slug: slug.trim(),
+            enabled: true,
+            is_sandbox: isSandbox,
+            service_user_id: Number(serviceUserId),
+            webhook_url: webhookUrl.trim() || null,
+            terminate_grace_days: Number(graceDays) || 0,
+          })
+          .then((secret) => onCreated(secret.value))
+          .catch((error: unknown) => {
+            toast.error(error instanceof SanitizedApiError ? error.message : t('hoster.errors.save'))
+          })
+          .finally(() => setSaving(false))
+      }}
+    >
+      <fieldset disabled={disabled || saving} className="grid grid-cols-1 gap-4 border-0 p-0 md:grid-cols-2">
+        <Field label={t('hoster.name')} value={name} onChange={setName} hint={t('hoster.nameHint')} />
+        <Field label={t('hoster.slug')} value={slug} onChange={setSlug} hint={t('hoster.slugHint')} />
+        <label className="space-y-1.5 block">
+          <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+            {t('hoster.serviceUserId')}
+          </span>
+          <Dropdown
+            value={serviceUserId || null}
+            onChange={setServiceUserId}
+            disabled={loadingUsers}
+            searchable
+            placeholder={loadingUsers ? t('common.loading') : t('hoster.noUsersFound')}
+            options={users
+              .filter((u) => u.is_active)
+              .map((u) => ({
+                value: String(u.id),
+                label: `${u.username} (#${u.id})`,
+                hint: u.is_owner ? 'Owner' : undefined,
+              }))}
+            aria-label={t('hoster.serviceUserId')}
+            data-testid="hoster-service-user-select"
+          />
+          <p className="text-xs text-on-surface-variant">{t('hoster.serviceUserHint')}</p>
+        </label>
+        <Field
+          label={t('hoster.webhookUrl')}
+          value={webhookUrl}
+          onChange={setWebhookUrl}
+          type="url"
+          placeholder="https://shop.example/hooks/msm"
+          hint={t('hoster.webhookUrlHint')}
+        />
+        <label className="space-y-1.5">
+          <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+            {t('hoster.graceDays')}
+          </span>
+          <NumberStepper value={graceDays} onValueChange={setGraceDays} min={0} max={365} step={1} />
+          <p className="text-xs text-on-surface-variant">{t('hoster.graceDaysHint')}</p>
+        </label>
+        <div className="flex items-center justify-between rounded-xl border border-outline-variant/40 bg-surface-container-low/40 p-4 md:col-span-2">
+          <div className="space-y-0.5">
+            <span className="block text-sm font-medium text-on-surface">{t('hoster.isSandbox')}</span>
+            <p className="text-xs text-on-surface-variant">{t('hoster.isSandboxHint')}</p>
+          </div>
+          <Switch checked={isSandbox} onCheckedChange={setIsSandbox} />
+        </div>
+      </fieldset>
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button type="button" variant="ghost" disabled={saving} onClick={onCancel}>{t('common.cancel')}</Button>
+        <Button type="submit" disabled={disabled || saving || !valid}>
+          <Save className="h-4 w-4" aria-hidden="true" />{saving ? t('common.loading') : t('settings.save')}
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+/**
+ * Nachtraegliches Aendern einer bestehenden Anbindung.
+ *
+ * Ohne diesen Weg war ein Tippfehler in der Webhook-Adresse endgueltig: das
+ * Loeschen lehnt das Backend ab, solange noch ein Vertrag laeuft
+ * (hoster_admin.delete_integration antwortet mit 409), und ein Neuanlegen
+ * erzeugt zwangslaeufig einen neuen API-Key — den kennt der Shop nicht, die
+ * Anbindung waere danach tot.
+ *
+ * Bewusst nur die drei Felder, die sich im Betrieb wirklich aendern. Name,
+ * Slug und Dienstbenutzer bleiben aussen vor: der Slug steckt in den Adressen
+ * des Shops, und ein Wechsel des Dienstbenutzers wuerde die Rechte aller
+ * bereits erzeugten Server stillschweigend verschieben.
+ */
+function IntegrationEditForm({
+  integration,
+  disabled,
+  onCancel,
+  onSaved,
+}: {
+  integration: HosterIntegration
+  disabled: boolean
+  onCancel: () => void
+  onSaved: () => Promise<void>
+}) {
+  const { t } = useTranslation()
+  const [webhookUrl, setWebhookUrl] = useState(integration.webhook_url ?? '')
+  const [graceDays, setGraceDays] = useState(String(integration.terminate_grace_days))
+  const [enabled, setEnabled] = useState(integration.enabled)
+  const [isSandbox, setIsSandbox] = useState(integration.is_sandbox ?? false)
+  const [saving, setSaving] = useState(false)
+
+  return (
+    <form
+      className="space-y-5 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4"
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (saving) return
+        setSaving(true)
+        hosterApi
+          .updateIntegration(integration.id, {
+            webhook_url: webhookUrl.trim() || null,
+            terminate_grace_days: Number(graceDays) || 0,
+            enabled,
+            is_sandbox: isSandbox,
+          })
+          .then(async () => {
+            toast.success(t('hoster.updated'))
+            await onSaved()
+          })
+          .catch((error: unknown) => {
+            toast.error(error instanceof SanitizedApiError ? error.message : t('hoster.errors.save'))
+          })
+          .finally(() => setSaving(false))
+      }}
+    >
+      <fieldset disabled={disabled || saving} className="grid grid-cols-1 gap-4 border-0 p-0 md:grid-cols-2">
+        <Field
+          label={t('hoster.webhookUrl')}
+          value={webhookUrl}
+          onChange={setWebhookUrl}
+          type="url"
+          placeholder="https://shop.example/hooks/msm"
+          hint={t('hoster.webhookUrlHint')}
+        />
+        <label className="space-y-1.5">
+          <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+            {t('hoster.graceDays')}
+          </span>
+          <NumberStepper value={graceDays} onValueChange={setGraceDays} min={0} max={365} step={1} />
+          <p className="text-xs text-on-surface-variant">{t('hoster.graceDaysHint')}</p>
+        </label>
+        {/* Der Dienstbenutzer laesst sich hier nicht wechseln — was an ihm
+            haengt, gehoert trotzdem sichtbar erklaert. */}
+        <div className="md:col-span-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
+          <p className="text-xs text-on-surface-variant">{t('hoster.serviceUserHint')}</p>
+        </div>
+        <div className="flex items-center justify-between rounded-xl border border-outline-variant/40 bg-surface-container-low/40 p-4 md:col-span-2">
+          <div className="space-y-0.5">
+            <span className="block text-sm font-medium text-on-surface">{t('hoster.isSandbox')}</span>
+            <p className="text-xs text-on-surface-variant">{t('hoster.isSandboxHint')}</p>
+          </div>
+          <Switch checked={isSandbox} onCheckedChange={setIsSandbox} />
+        </div>
+        <label className="flex min-h-10 items-center justify-between gap-4 text-sm text-on-surface md:col-span-2">
+          <span>{t('hoster.enabled')}</span>
+          <Switch checked={enabled} onCheckedChange={setEnabled} />
+        </label>
+      </fieldset>
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button type="button" variant="ghost" disabled={saving} onClick={onCancel}>{t('common.cancel')}</Button>
+        <Button type="submit" disabled={disabled || saving}>
+          <Save className="h-4 w-4" aria-hidden="true" />{saving ? t('common.loading') : t('settings.save')}
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+/**
+ * Betreiberentscheidung: darf ein Server ohne eigene Zuordnung den panelweiten
+ * Zugang mitbenutzen? Fuer Self-Hosted ist das der sinnvolle Default, fuer
+ * einen Hoster in der Regel nicht — sonst liefe jeder Kundenserver mit den
+ * zentralen Zugangsdaten des Betreibers.
+ */
+function PanelFallbackSection({ canWrite }: { canWrite: boolean }) {
+  const { t } = useTranslation()
+  const [allowed, setAllowed] = useState<boolean | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    credentialsApi
+      .readPolicy()
+      .then((policy) => { if (active) setAllowed(policy.allow_panel_fallback) })
+      .catch(() => { if (active) setAllowed(null) })
+    return () => { active = false }
+  }, [])
+
+  if (allowed === null) return null
+
+  return (
+    <div className="msm-card space-y-3 p-6">
+      <h4 className="font-headline text-base font-semibold text-on-surface">
+        {t('credentials.policy.title')}
+      </h4>
+      <p className="text-sm text-on-surface-variant">{t('credentials.policy.description')}</p>
+      <label className="flex min-h-10 items-center justify-between gap-4 text-sm text-on-surface">
+        <span>{t('credentials.policy.label')}</span>
+        <Switch
+          checked={allowed}
+          disabled={!canWrite || busy}
+          onCheckedChange={(next) => {
+            if (!canWrite || busy) return
+            setBusy(true)
+            credentialsApi
+              .updatePolicy(next)
+              .then((policy) => {
+                setAllowed(policy.allow_panel_fallback)
+                toast.success(t('credentials.policy.saved'))
+              })
+              .catch((error: unknown) => {
+                toast.error(
+                  error instanceof SanitizedApiError
+                    ? error.message
+                    : t('credentials.errors.save'),
+                )
+              })
+              .finally(() => setBusy(false))
+          }}
+        />
+      </label>
+    </div>
+  )
+}
+
+function ProductSection({ integrationId, canWrite }: { integrationId: number; canWrite: boolean }) {
+  const { t } = useTranslation()
+  const [products, setProducts] = useState<HosterProduct[]>([])
+  const [roles, setRoles] = useState<Role[]>([])
+  const [games, setGames] = useState<GameInfo[]>([])
+  const [draft, setDraft] = useState<HosterProductWrite>(EMPTY_PRODUCT)
+  const [busy, setBusy] = useState(false)
+
+  // Derselbe Katalog, gegen den die Server-Erstellung validiert
+  // (`product.game_type` wird 1:1 zu `ServerCreate.game_type`). Einmal holen
+  // reicht; faellt der Load aus, bleibt unten die Texteingabe als Rueckfall.
+  useEffect(() => {
+    let active = true
+    api<GameInfo[]>('/system/games')
+      .then((rows) => { if (active) setGames(Array.isArray(rows) ? rows : []) })
+      .catch(() => { if (active) setGames([]) })
+    return () => { active = false }
+  }, [])
+
+  const load = useCallback(() => {
+    hosterApi
+      .listProducts(integrationId)
+      .then(setProducts)
+      .catch((error: unknown) => {
+        toast.error(error instanceof SanitizedApiError ? error.message : t('hoster.errors.load'))
+      })
+  }, [integrationId, t])
+
+  useEffect(load, [load])
+
+  // Die Rollenliste ist Beiwerk: sie fuellt ein optionales Feld. Faellt sie aus,
+  // bleibt der Rest der Sektion bedienbar — deshalb hier kein Toast, sondern
+  // eine leere Auswahl.
+  useEffect(() => {
+    let active = true
+    rbacApi
+      .listRoles()
+      .then((rows) => { if (active) setRoles(rows) })
+      .catch(() => { if (active) setRoles([]) })
+    return () => { active = false }
+  }, [])
+
+  const sortedRoles = [...roles].sort((a, b) => a.name.localeCompare(b.name))
+
+  // Ohne geladene Liste bleibt die Kennung stehen: "keine Rolle" waere an der
+  // Stelle eine Falschaussage.
+  const roleLabel = (roleId: number | null) => {
+    if (roleId === null) return t('hoster.products.roleNone')
+    return roles.find((role) => role.id === roleId)?.name ?? `#${roleId}`
+  }
+
+  const save = async () => {
+    if (!canWrite || busy) return
+    setBusy(true)
+    try {
+      await hosterApi.saveProduct(integrationId, draft)
+      setDraft(EMPTY_PRODUCT)
+      load()
+      toast.success(t('hoster.products.saved'))
+    } catch (error: unknown) {
+      toast.error(error instanceof SanitizedApiError ? error.message : t('hoster.errors.save'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="msm-card space-y-4 p-6">
+      <h4 className="font-headline text-base font-semibold text-on-surface">{t('hoster.products.title')}</h4>
+      <p className="text-sm text-on-surface-variant">{t('hoster.products.description')}</p>
+
+      {products.length === 0 && (
+        <p className="text-sm text-on-surface-variant">{t('hoster.products.empty')}</p>
+      )}
+      <ul className="space-y-2">
+        {products.map((product) => (
+          <li
+            key={product.id}
+            className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-outline-variant/40 p-3 text-sm"
+          >
+            <span className="font-medium text-on-surface">{product.external_product_key}</span>
+            <span className="text-on-surface-variant">
+              {product.game_type} · {product.ram_limit_mb ?? '—'} MB · {product.cpu_limit_percent ?? '—'} %
+              {' · '}{roleLabel(product.role_id)}
+            </span>
+            {canWrite && (
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => {
+                  setBusy(true)
+                  hosterApi
+                    .deleteProduct(integrationId, product.id)
+                    .then(() => { load(); toast.success(t('hoster.products.deleted')) })
+                    .catch((error: unknown) => {
+                      toast.error(error instanceof SanitizedApiError ? error.message : t('hoster.errors.delete'))
+                    })
+                    .finally(() => setBusy(false))
+                }}
+              >
+                <Trash2 className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            )}
+          </li>
+        ))}
+      </ul>
+
+      {canWrite && (
+        <form
+          className="grid grid-cols-1 gap-4 md:grid-cols-2"
+          onSubmit={(event) => { event.preventDefault(); void save() }}
+        >
+          <Field
+            label={t('hoster.products.key')}
+            value={draft.external_product_key}
+            onChange={(external_product_key) => setDraft({ ...draft, external_product_key })}
+            hint={t('hoster.products.keyHint')}
+          />
+          {games.length > 0 ? (
+            <label className="space-y-1.5">
+              <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                {t('hoster.products.gameType')}
+              </span>
+              <Dropdown
+                value={draft.game_type || null}
+                onChange={(game_type) => setDraft({ ...draft, game_type })}
+                searchable
+                placeholder={t('hoster.products.gameType')}
+                options={games.map((g) => ({ value: g.id, label: g.name, hint: g.id }))}
+                aria-label={t('hoster.products.gameType')}
+                data-testid="hoster-product-game-select"
+              />
+              <p className="text-xs text-on-surface-variant">{t('hoster.products.gameTypeHint')}</p>
+            </label>
+          ) : (
+            <Field
+              label={t('hoster.products.gameType')}
+              value={draft.game_type}
+              onChange={(game_type) => setDraft({ ...draft, game_type })}
+              hint={t('hoster.products.gameTypeHint')}
+            />
+          )}
+          {/* Eine Erklaerung fuer alle drei Grenzen: dreimal derselbe Satz waere
+              nur laenger, nicht klarer. */}
+          <p className="text-xs text-on-surface-variant md:col-span-2">{t('hoster.products.limitsHint')}</p>
+          <label className="space-y-1.5">
+            <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+              {t('hoster.products.ram')}
+            </span>
+            <NumberStepper
+              value={draft.ram_limit_mb === null ? '' : String(draft.ram_limit_mb)}
+              onValueChange={(value) => setDraft({ ...draft, ram_limit_mb: value ? Number(value) : null })}
+              min={512}
+              max={4194304}
+              step={512}
+            />
+          </label>
+          <label className="space-y-1.5">
+            <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+              {t('hoster.products.cpu')}
+            </span>
+            <NumberStepper
+              value={draft.cpu_limit_percent === null ? '' : String(draft.cpu_limit_percent)}
+              onValueChange={(value) => setDraft({ ...draft, cpu_limit_percent: value ? Number(value) : null })}
+              min={10}
+              max={3200}
+              step={10}
+            />
+          </label>
+          <label className="space-y-1.5">
+            <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+              {t('hoster.products.disk')}
+            </span>
+            <NumberStepper
+              value={draft.disk_limit_gb === null ? '' : String(draft.disk_limit_gb)}
+              onValueChange={(value) => setDraft({ ...draft, disk_limit_gb: value ? Number(value) : null })}
+              min={1}
+              max={1048576}
+              step={1}
+            />
+          </label>
+          <label className="space-y-1.5">
+            <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+              {t('hoster.products.backupInterval')}
+            </span>
+            <NumberStepper
+              value={draft.backup_interval_hours === null ? '' : String(draft.backup_interval_hours)}
+              onValueChange={(value) => setDraft({ ...draft, backup_interval_hours: value ? Number(value) : null })}
+              min={1}
+              max={8760}
+              step={1}
+            />
+            <p className="text-xs text-on-surface-variant">{t('hoster.products.backupIntervalHint')}</p>
+          </label>
+          <label className="space-y-1.5">
+            <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+              {t('hoster.products.role')}
+            </span>
+            <Dropdown
+              value={draft.role_id === null ? '' : String(draft.role_id)}
+              onChange={(value) => setDraft({
+                ...draft,
+                role_id: value ? Number(value) : null,
+              })}
+              options={[
+                { value: '', label: t('hoster.products.roleNone') },
+                ...sortedRoles.map((role) => ({ value: String(role.id), label: role.name })),
+              ]}
+              aria-label={t('hoster.products.role')}
+              data-testid="hoster-product-role-select"
+            />
+            <p className="text-xs text-on-surface-variant">{t('hoster.products.roleHint')}</p>
+          </label>
+          <div className="md:col-span-2 flex items-center justify-between gap-4">
+            <label className="flex items-center gap-3 text-sm text-on-surface">
+              <span>{t('hoster.products.enabled')}</span>
+              <Switch
+                checked={draft.enabled}
+                onCheckedChange={(enabled) => setDraft({ ...draft, enabled })}
+              />
+            </label>
+            <Button
+              type="submit"
+              disabled={busy || !draft.external_product_key.trim() || !draft.game_type.trim()}
+            >
+              <Save className="h-4 w-4" aria-hidden="true" />{t('hoster.products.save')}
+            </Button>
+          </div>
+        </form>
+      )}
+    </div>
+  )
+}
+
+function ServiceSection({ integrationId }: { integrationId: number }) {
+  const { t } = useTranslation()
+  const [services, setServices] = useState<HosterService[]>([])
+
+  useEffect(() => {
+    let active = true
+    hosterApi
+      .listServices(integrationId)
+      .then((rows) => { if (active) setServices(rows) })
+      .catch((error: unknown) => {
+        if (active) toast.error(error instanceof SanitizedApiError ? error.message : t('hoster.errors.load'))
+      })
+    return () => { active = false }
+  }, [integrationId, t])
+
+  return (
+    <div className="msm-card space-y-3 p-6">
+      <h4 className="font-headline text-base font-semibold text-on-surface">{t('hoster.services.title')}</h4>
+      {services.length === 0 && (
+        <p className="text-sm text-on-surface-variant">{t('hoster.services.empty')}</p>
+      )}
+      <ul className="space-y-2">
+        {services.map((service) => (
+          <li
+            key={service.external_service_id}
+            className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-outline-variant/40 p-3 text-sm"
+          >
+            <span className="font-medium text-on-surface">{service.external_service_id}</span>
+            <span className="text-on-surface-variant">
+              {t(`hoster.states.${service.desired_state}`, service.desired_state)} → {service.status}
+              {service.status_code ? ` (${service.status_code})` : ''}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function DeliverySection({ integrationId, canWrite }: { integrationId: number; canWrite: boolean }) {
+  const { t } = useTranslation()
+  const [deliveries, setDeliveries] = useState<HosterDelivery[]>([])
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(() => {
+    hosterApi
+      .listDeliveries(integrationId)
+      .then(setDeliveries)
+      .catch((error: unknown) => {
+        toast.error(error instanceof SanitizedApiError ? error.message : t('hoster.errors.load'))
+      })
+  }, [integrationId, t])
+
+  useEffect(load, [load])
+
+  return (
+    <div className="msm-card space-y-3 p-6">
+      <h4 className="font-headline text-base font-semibold text-on-surface">{t('hoster.deliveries.title')}</h4>
+      {deliveries.length === 0 && (
+        <p className="text-sm text-on-surface-variant">{t('hoster.deliveries.empty')}</p>
+      )}
+      <ul className="space-y-2">
+        {deliveries.map((delivery) => (
+          <li
+            key={delivery.id}
+            className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-outline-variant/40 p-3 text-sm"
+          >
+            <span className="font-medium text-on-surface">{delivery.event_type}</span>
+            <span className="text-on-surface-variant">
+              {delivery.status} · {t('hoster.deliveries.attempt', { count: delivery.attempt })}
+              {delivery.response_code ? ` · HTTP ${delivery.response_code}` : ''}
+            </span>
+            {canWrite && delivery.status === 'failed' && (
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => {
+                  setBusy(true)
+                  hosterApi
+                    .retryDelivery(integrationId, delivery.id)
+                    .then(() => { load(); toast.success(t('hoster.deliveries.retried')) })
+                    .catch((error: unknown) => {
+                      toast.error(error instanceof SanitizedApiError ? error.message : t('hoster.errors.save'))
+                    })
+                    .finally(() => setBusy(false))
+                }}
+              >
+                <RefreshCw className="h-4 w-4" aria-hidden="true" />{t('hoster.deliveries.retry')}
+              </Button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function SimulatorSection({
+  integration,
+  canWrite,
+  onRefresh,
+}: {
+  integration: HosterIntegration
+  canWrite: boolean
+  onRefresh: () => Promise<void>
+}) {
+  const { t } = useTranslation()
+  const [products, setProducts] = useState<HosterProduct[]>([])
+  const [services, setServices] = useState<HosterService[]>([])
+  const [selectedProductKey, setSelectedProductKey] = useState<string>('')
+  const [selectedServiceId, setSelectedServiceId] = useState<string>('')
+  const [busyAction, setBusyAction] = useState<string | null>(null)
+  const [simResult, setSimResult] = useState<HosterSimulationResponse | null>(null)
+  const [copiedPrompt, setCopiedPrompt] = useState(false)
+  const [showAiModal, setShowAiModal] = useState(false)
+
+  const reloadData = useCallback(async () => {
+    try {
+      const [pList, sList] = await Promise.all([
+        hosterApi.listProducts(integration.id),
+        hosterApi.listServices(integration.id),
+      ])
+      setProducts(pList)
+      setServices(sList)
+      if (pList.length > 0 && !selectedProductKey) {
+        setSelectedProductKey(pList[0].external_product_key)
+      }
+      if (sList.length > 0 && !selectedServiceId) {
+        setSelectedServiceId(sList[0].external_service_id)
+      }
+    } catch {
+      // Ignored in simulator
+    }
+  }, [integration.id, selectedProductKey, selectedServiceId])
+
+  useEffect(() => {
+    void reloadData()
+  }, [reloadData])
+
+  const runSimulation = async (
+    action: 'order' | 'suspend' | 'reactivate' | 'terminate' | 'test_webhook'
+  ) => {
+    if (!canWrite || busyAction) return
+    setBusyAction(action)
+    try {
+      const res = await hosterApi.simulate(integration.id, {
+        action,
+        product_key: selectedProductKey || undefined,
+        external_service_id: selectedServiceId || undefined,
+      })
+      setSimResult(res)
+      toast.success(res.message)
+      await reloadData()
+      await onRefresh()
+    } catch (error: unknown) {
+      toast.error(error instanceof SanitizedApiError ? error.message : t('hoster.errors.save'))
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  const cleanSandbox = async () => {
+    if (!canWrite || busyAction) return
+    const accepted = await confirm({
+      title: t('hoster.simulator.cleanSandbox'),
+      message: t('hoster.simulator.cleanSandboxConfirm'),
+      confirmText: t('common.delete'),
+      danger: true,
+    })
+    if (!accepted) return
+    setBusyAction('clean')
+    try {
+      const res = await hosterApi.cleanSandboxData(integration.id)
+      setSimResult(null)
+      toast.success(
+        t('hoster.simulator.cleanSuccess', {
+          services: res.deleted_services_count,
+          servers: res.deleted_handoffs_count,
+        })
+      )
+      await reloadData()
+      await onRefresh()
+    } catch (error: unknown) {
+      toast.error(error instanceof SanitizedApiError ? error.message : t('hoster.errors.delete'))
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  const panelOrigin = window.location.origin
+  const exampleProductKey = products[0]?.external_product_key || 'mc-8gb'
+
+  const aiStripePrompt = `Hier sind die technischen Eckdaten meines MSM (Maunting Server Manager) Backends für meine Shop-Anbindung:
+- Panel Host API: ${panelOrigin}/api/hoster/v1
+- Integration Slug: "${integration.slug}"
+- API-Key Header: X-MSM-Hoster-Key (im MSM-Panel generiert)
+- Webhook Secret Header: X-MSM-Signature (HMAC-SHA256 mit X-MSM-Timestamp)
+- Beispiel-Produktkennung: "${exampleProductKey}"
+
+Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe Webhook Handler (in Node.js mit Express oder Python mit FastAPI), der:
+1. Das Stripe Event 'checkout.session.completed' abfängt und via PUT ${panelOrigin}/api/hoster/v1/services/{subscription_or_session_id} mit dem Header "X-MSM-Hoster-Key: <MEIN_KEY>" und Body {"desired_state": "active", "external_subject": customer_id, "product_key": "${exampleProductKey}", "email": customer_email} den Gameserver im Panel anlegt.
+2. Einen Einmal-Login-Link via POST ${panelOrigin}/api/hoster/v1/handoffs mit {"external_service_id": "{subscription_or_session_id}"} erzeugt und dem Kunden anzeigt.
+3. Bei 'customer.subscription.deleted' den Status via PUT ${panelOrigin}/api/hoster/v1/services/{subscription_id} auf {"desired_state": "terminated"} setzt.
+4. Bei 'invoice.payment_failed' den Status auf {"desired_state": "suspended"} setzt.`
+
+  const copyAiPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(aiStripePrompt)
+      setCopiedPrompt(true)
+      toast.success(t('hoster.simulator.copiedAiPrompt'))
+      setTimeout(() => setCopiedPrompt(false), 3000)
+    } catch {
+      toast.error(t('common.clipboardError', 'Zwischenablage nicht verfügbar'))
+    }
+  }
+
+  return (
+    <div className="msm-card space-y-5 p-6 border-amber-500/25 bg-surface-container-low/20">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-2.5">
+          <div className="rounded-lg bg-amber-500/15 p-2 text-amber-400 border border-amber-500/30">
+            <FlaskConical className="h-5 w-5" aria-hidden="true" />
+          </div>
+          <div>
+            <h4 className="font-headline text-base font-semibold text-on-surface">
+              {t('hoster.simulator.title')}
+            </h4>
+            <p className="text-xs text-on-surface-variant">
+              {t('hoster.simulator.description')}
+            </p>
+          </div>
+        </div>
+        <Button
+          type="button"
+          variant="secondary"
+          className="gap-2 text-xs"
+          onClick={() => setShowAiModal((v) => !v)}
+        >
+          <Sparkles className="h-4 w-4 text-amber-400" aria-hidden="true" />
+          {t('hoster.simulator.aiDocsTitle')}
+        </Button>
+      </div>
+
+      {showAiModal && (
+        <div className="rounded-xl border border-outline-variant/50 bg-surface-container p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wider text-on-surface">
+              {t('hoster.simulator.aiDocsTitle')}
+            </span>
+            <Button
+              type="button"
+              variant="secondary"
+              className="gap-1.5 text-xs py-1 px-3"
+              onClick={() => void copyAiPrompt()}
+            >
+              {copiedPrompt ? (
+                <>
+                  <Check className="h-3.5 w-3.5 text-emerald-400" />
+                  {t('hoster.copied', 'Kopiert')}
+                </>
+              ) : (
+                <>
+                  <Copy className="h-3.5 w-3.5" />
+                  {t('hoster.simulator.copyAiPrompt')}
+                </>
+              )}
+            </Button>
+          </div>
+          <p className="text-xs text-on-surface-variant">
+            {t('hoster.simulator.aiDocsDesc')}
+          </p>
+          <pre className="rounded-lg bg-surface-container-lowest p-3 text-xs text-on-surface-variant font-mono whitespace-pre-wrap break-all select-all">
+            {aiStripePrompt}
+          </pre>
+        </div>
+      )}
+
+      {products.length === 0 && (
+        <div className="rounded-lg border border-outline-variant/30 bg-surface-container-low/50 p-3 text-xs text-amber-300/90">
+          {t('hoster.simulator.noProductsHint')}
+        </div>
+      )}
+
+      {/* Mathematisch saubere Button-Leiste / Grid */}
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={!canWrite || Boolean(busyAction) || products.length === 0}
+          onClick={() => void runSimulation('order')}
+          className="h-11 justify-center gap-2 text-xs font-medium border-emerald-500/20 hover:border-emerald-500/50 hover:bg-emerald-500/10"
+        >
+          <Play className="h-4 w-4 text-emerald-400" aria-hidden="true" />
+          {busyAction === 'order' ? t('common.loading') : t('hoster.simulator.simulateOrder')}
+        </Button>
+
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={!canWrite || Boolean(busyAction) || services.length === 0}
+          onClick={() => void runSimulation('suspend')}
+          className="h-11 justify-center gap-2 text-xs font-medium border-amber-500/20 hover:border-amber-500/50 hover:bg-amber-500/10"
+        >
+          <Pause className="h-4 w-4 text-amber-400" aria-hidden="true" />
+          {busyAction === 'suspend' ? t('common.loading') : t('hoster.simulator.simulateSuspend')}
+        </Button>
+
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={!canWrite || Boolean(busyAction) || services.length === 0}
+          onClick={() => void runSimulation('reactivate')}
+          className="h-11 justify-center gap-2 text-xs font-medium border-cyan-500/20 hover:border-cyan-500/50 hover:bg-cyan-500/10"
+        >
+          <RotateCcw className="h-4 w-4 text-cyan-400" aria-hidden="true" />
+          {busyAction === 'reactivate' ? t('common.loading') : t('hoster.simulator.simulateReactivate')}
+        </Button>
+
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={!canWrite || Boolean(busyAction) || services.length === 0}
+          onClick={() => void runSimulation('terminate')}
+          className="h-11 justify-center gap-2 text-xs font-medium border-rose-500/20 hover:border-rose-500/50 hover:bg-rose-500/10"
+        >
+          <XCircle className="h-4 w-4 text-rose-400" aria-hidden="true" />
+          {busyAction === 'terminate' ? t('common.loading') : t('hoster.simulator.simulateTerminate')}
+        </Button>
+
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={!canWrite || Boolean(busyAction) || !integration.webhook_url}
+          onClick={() => void runSimulation('test_webhook')}
+          className="h-11 justify-center gap-2 text-xs font-medium"
+        >
+          <Send className="h-4 w-4 text-primary" aria-hidden="true" />
+          {busyAction === 'test_webhook' ? t('common.loading') : t('hoster.simulator.simulateWebhook')}
+        </Button>
+
+        <Button
+          type="button"
+          variant="destructive"
+          disabled={!canWrite || Boolean(busyAction)}
+          onClick={() => void cleanSandbox()}
+          className="h-11 justify-center gap-2 text-xs font-medium"
+        >
+          <Trash2 className="h-4 w-4" aria-hidden="true" />
+          {busyAction === 'clean' ? t('common.loading') : t('hoster.simulator.cleanSandbox')}
+        </Button>
+      </div>
+
+      {simResult && (
+        <div className="rounded-xl border border-outline-variant/40 bg-surface-container-low/60 p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-400 border border-emerald-500/30">
+                {simResult.action.toUpperCase()}
+              </span>
+              <span className="text-sm font-medium text-on-surface">{simResult.message}</span>
+            </div>
+            {simResult.handoff_url && (
+              <a
+                href={handoffPath(simResult.handoff_url)}
+                target="_blank"
+                rel="noopener"
+                className="msm-btn-primary inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium"
+              >
+                <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                {t('hoster.simulator.loginAsCustomer')}
+              </a>
+            )}
+          </div>
+          {simResult.service && (
+            <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 pt-1">
+              <div>
+                <span className="text-on-surface-variant">Service-ID: </span>
+                <span className="font-mono text-on-surface">{simResult.service.external_service_id}</span>
+              </div>
+              <div>
+                <span className="text-on-surface-variant">Status: </span>
+                <span className="text-on-surface font-semibold">{simResult.service.status}</span>
+              </div>
+              <div>
+                <span className="text-on-surface-variant">Desired State: </span>
+                <span className="text-on-surface">{simResult.service.desired_state}</span>
+              </div>
+              <div>
+                <span className="text-on-surface-variant">Server-ID: </span>
+                <span className="font-mono text-on-surface">{simResult.service.server_id ?? '—'}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Eingabefeld mit optionaler Erklaerung.
+ *
+ * Der Hinweis steht als eigene Zeile unter dem Feld und bewusst nicht in einem
+ * Tooltip: ein Hover-Hinweis existiert auf Touch-Geraeten nicht und bleibt fuer
+ * Screenreader unerreichbar. Weil er im <label> steht, liest der Screenreader
+ * ihn zusammen mit der Beschriftung vor.
+ */
+function Field({
+  label,
+  value,
+  onChange,
+  hint,
+  className = '',
+  ...props
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  hint?: string
+  className?: string
+} & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'>) {
+  return (
+    <label className={`space-y-1.5 ${className}`}>
+      <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{label}</span>
+      <input className="msm-input" value={value} onChange={(event) => onChange(event.target.value)} {...props} />
+      {hint && <p className="text-xs text-on-surface-variant">{hint}</p>}
+    </label>
+  )
+}

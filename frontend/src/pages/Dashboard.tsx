@@ -171,8 +171,8 @@ function NodeCapacityCard() {
 
                   const segments: Segment[] = [
                     { value: panelUsedMb, colorClass: 'bg-primary' },
-                    { value: systemUsedMb, colorClass: 'bg-neutral-500' },
-                    { value: freeMb, colorClass: 'bg-emerald-500' },
+                    { value: systemUsedMb, colorClass: 'bg-outline' },
+                    { value: freeMb, colorClass: 'bg-status-success' },
                   ]
 
                   return (
@@ -281,6 +281,9 @@ export function Dashboard() {
   const [servers, setServers] = useState<Server[]>([])
   const [games, setGames] = useState<GameInfo[]>([])
   const [loading, setLoading] = useState(true)
+  // Ohne dieses Flag wird aus einem fehlgeschlagenen Laden die Aussage
+  // "Noch keine Server" — auf der ersten Seite nach dem Login.
+  const [loadError, setLoadError] = useState(false)
 
   useEffect(() => {
     Promise.all([
@@ -290,8 +293,9 @@ export function Dashboard() {
       .then(([srvs, gms]) => {
         setServers(srvs)
         setGames(gms)
+        setLoadError(false)
       })
-      .catch(() => {})
+      .catch(() => setLoadError(true))
       .finally(() => setLoading(false))
   }, [])
 
@@ -361,8 +365,18 @@ export function Dashboard() {
       {/* Node capacity Top-N (nodes.read only) — never the full inventory */}
       <NodeCapacityCard />
 
+      {/* Ladefehler — nicht als Leerzustand ausgeben */}
+      {loadError && (
+        <div className="msm-card p-12 text-center border-dashed border-2 border-outline-variant">
+          <AlertTriangle className="w-10 h-10 text-status-error mx-auto mb-4" />
+          <h3 className="font-headline text-body-lg text-on-surface mb-1">
+            {t('dashboard.loadFailed')}
+          </h3>
+        </div>
+      )}
+
       {/* Empty State */}
-      {servers.length === 0 && (
+      {!loadError && servers.length === 0 && (
         <div className="msm-card p-12 text-center border-dashed border-2 border-outline-variant">
           <ServerIcon className="w-10 h-10 text-on-surface-variant mx-auto mb-4" />
           <h3 className="font-headline text-body-lg text-on-surface mb-1">

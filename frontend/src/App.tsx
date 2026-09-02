@@ -4,6 +4,7 @@ import { Shell } from './components/layout/Shell'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { PublicOnlyRoute } from './components/PublicOnlyRoute'
 import { RequirePermission } from './components/RequirePermission'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { ToastContainer } from './components/ui/ToastContainer'
 import { ConfirmDialog } from './components/ui/ConfirmDialog'
 import { PromptDialog } from './components/ui/PromptDialog'
@@ -14,8 +15,10 @@ const Login = lazy(() => import('./pages/Login').then(module => ({ default: modu
 const Register = lazy(() => import('./pages/Register').then(module => ({ default: module.Register })))
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword').then(module => ({ default: module.ForgotPassword })))
 const ResetPassword = lazy(() => import('./pages/ResetPassword').then(module => ({ default: module.ResetPassword })))
+const AiFreigabe = lazy(() => import('./pages/AiFreigabe').then(module => ({ default: module.AiFreigabe })))
 const Dashboard = lazy(() => import('./pages/Dashboard').then(module => ({ default: module.Dashboard })))
 const Servers = lazy(() => import('./pages/Servers').then(module => ({ default: module.Servers })))
+const Teams = lazy(() => import('./pages/Teams').then(module => ({ default: module.Teams })))
 const ServerDetail = lazy(() => import('./pages/ServerDetail').then(module => ({ default: module.ServerDetail })))
 const Users = lazy(() => import('./pages/Users').then(module => ({ default: module.Users })))
 const Roles = lazy(() => import('./pages/Roles').then(module => ({ default: module.Roles })))
@@ -25,23 +28,32 @@ const Docs = lazy(() => import('./pages/Docs').then(module => ({ default: module
 const BlueprintsDocs = lazy(() => import('./pages/docs/BlueprintsDocs').then(module => ({ default: module.BlueprintsDocs })))
 const OAuthDocs = lazy(() => import('./pages/docs/OAuthDocs').then(module => ({ default: module.OAuthDocs })))
 const SelfHostingDocs = lazy(() => import('./pages/docs/SelfHostingDocs').then(module => ({ default: module.SelfHostingDocs })))
+const HosterApiDocs = lazy(() => import('./pages/docs/HosterApiDocs').then(module => ({ default: module.HosterApiDocs })))
 const Blueprints = lazy(() => import('./pages/Blueprints').then(module => ({ default: module.Blueprints })))
 const PanelBackups = lazy(() => import('./pages/PanelBackups').then(module => ({ default: module.PanelBackups })))
 const PanelDatabase = lazy(() => import('./pages/PanelDatabase').then(module => ({ default: module.PanelDatabase })))
 const AdminNodes = lazy(() => import('./pages/AdminNodes').then(module => ({ default: module.AdminNodes })))
 const AdminAudit = lazy(() => import('./pages/AdminAudit').then(module => ({ default: module.AdminAudit })))
 const Privacy = lazy(() => import('./pages/Privacy').then(module => ({ default: module.Privacy })))
+const Ai = lazy(() => import('./pages/Ai').then(module => ({ default: module.Ai })))
+const Calendar = lazy(() => import('./pages/Calendar').then(module => ({ default: module.Calendar })))
+const Notes = lazy(() => import('./pages/Notes').then(module => ({ default: module.Notes })))
 import { apiUrl } from '@/config/api'
 import { useAuthStore } from '@/stores/authStore'
 import { PrivacyAcknowledgementNotice } from './components/ui/PrivacyAcknowledgementNotice'
 import { PrivacyNoticeVisibilityContext } from './components/ui/PrivacyNoticeVisibility'
 import { SupportWidgetLoader } from './components/SupportWidgetLoader'
+import { initOfflineSync } from './lib/offlineSync'
 
 function App() {
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null)
   const [setupEmailConfigured, setSetupEmailConfigured] = useState(false)
   const [privacyNoticeVisible, setPrivacyNoticeVisible] = useState(true)
   const { isAuthenticated } = useAuthStore()
+
+  useEffect(() => {
+    return initOfflineSync()
+  }, [])
 
   useEffect(() => {
     fetch(apiUrl('/auth/setup-status'), { credentials: 'include' })
@@ -53,14 +65,21 @@ function App() {
       .catch(() => setSetupRequired(false))
   }, [])
 
+  // Den Anmeldezustand einmal beim Start klären. Ohne das bliebe isAuthenticated bei
+  // einem harten Reload auf /privacy dauerhaft false — die Route gewinnt gegen /*,
+  // ProtectedRoute mountet nie und ein angemeldeter Benutzer sähe die Seite ohne Panel.
+  useEffect(() => {
+    void useAuthStore.getState().checkAuth()
+  }, [])
+
   if (setupRequired === null) {
-    return <Loader fullScreen label="Maunting Server Manager" />
+    return <Loader fullScreen label="Maunting Service Manager" />
   }
 
   if (setupRequired) {
     return (
       <Suspense fallback={
-        <Loader fullScreen label="Maunting Server Manager" />
+        <Loader fullScreen label="Maunting Service Manager" />
       }>
         <SetupWizard
           onComplete={() => setSetupRequired(false)}
@@ -72,14 +91,20 @@ function App() {
 
   return (
     <PrivacyNoticeVisibilityContext.Provider value={privacyNoticeVisible}>
+      <ErrorBoundary>
       <Suspense fallback={
-        <Loader fullScreen label="Maunting Server Manager" />
+        <Loader fullScreen label="Maunting Service Manager" />
       }>
         <Routes>
         {/* Oeffentliche Auth-Routen — nur fuer nicht-eingeloggte User */}
         <Route path="/login" element={<PublicOnlyRoute><Login /></PublicOnlyRoute>} />
         <Route path="/register" element={<PublicOnlyRoute><Register /></PublicOnlyRoute>} />
         <Route path="/reset-password" element={<ResetPassword />} />
+        {/* Ohne Anmeldung, und ohne `PublicOnlyRoute`: der Link kommt per
+            Mail und muss auch dann funktionieren, wenn im selben Browser
+            noch eine Sitzung offen ist. Das Token im Pfad ist die ganze
+            Berechtigung. */}
+        <Route path="/ai/freigabe/:token" element={<AiFreigabe />} />
         <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPassword /></PublicOnlyRoute>} />
         
         {/* Oeffentliche Datenschutz-Route, wenn nicht eingeloggt */}
@@ -115,10 +140,15 @@ function App() {
             }
           />
           <Route path="profile" element={<Profile />} />
+          <Route path="calendar" element={<Calendar />} />
+          <Route path="notes" element={<Notes />} />
+          <Route path="ai" element={<RequirePermission routeKey="ai"><Ai /></RequirePermission>} />
+          <Route path="teams" element={<Teams />} />
           <Route path="docs" element={<Docs />} />
           <Route path="docs/blueprints" element={<BlueprintsDocs />} />
           <Route path="docs/oauth" element={<OAuthDocs />} />
           <Route path="docs/self-hosting" element={<SelfHostingDocs />} />
+          <Route path="docs/hoster-api" element={<HosterApiDocs />} />
           <Route path="privacy" element={<Privacy />} />
           <Route
             path="blueprints"
@@ -164,6 +194,7 @@ function App() {
         </Route>
       </Routes>
       </Suspense>
+      </ErrorBoundary>
       <PrivacyAcknowledgementNotice onVisibilityChange={setPrivacyNoticeVisible} />
       <SupportWidgetLoader enabled={!privacyNoticeVisible} />
       <ToastContainer />

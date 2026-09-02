@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event as sa_event
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -35,6 +35,25 @@ db_module.engine = create_engine(
 db_module.SessionLocal = db_module.sessionmaker(
     autocommit=False, autoflush=False, bind=db_module.engine
 )
+
+
+@sa_event.listens_for(db_module.engine, "connect")
+def _fremdschluessel_scharfstellen(dbapi_connection, _record) -> None:
+    """SQLite prueft Fremdschluessel nur, wenn man es ausdruecklich verlangt.
+
+    Ohne diese drei Zeilen konnte die Testsuite **kein einziges**
+    ``ON DELETE CASCADE`` beobachten, waehrend PostgreSQL im Betrieb jedes
+    erzwingt. Genau in dieser Luecke lebte der Fehler, wegen dem das hier steht:
+    ``ai_action_proposals.server_id`` kaskadierte auf ``servers.id``, das Loeschen
+    eines Servers vernichtete den Vorschlag, der es angeordnet hatte — und das
+    Panel meldete den gelungenen Vorgang als "Aktionsvorschlag nicht gefunden".
+    2519 gruene Tests konnten das nicht sehen.
+
+    Dieselbe Technik benutzt ``scripts/migrate_sqlite_to_postgres.py`` bereits,
+    dort aus demselben Grund: eine SQLite-Datei, deren Fremdschluessel nie
+    geprueft wurden, laesst sich nicht ohne Weiteres nach PostgreSQL heben.
+    """
+    dbapi_connection.execute("PRAGMA foreign_keys=ON")
 
 # ── DIS Sidecar mock (tests use local crypto, no Node required) ────────
 # Production code calls DisClient for all crypto. In tests we patch the
@@ -262,6 +281,34 @@ def _reset_dis_streaming_keys():
     yield
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _versionsspeicher_umlenken(tmp_path_factory):
+    """Der Dateiversionsspeicher darf nie im Arbeitsverzeichnis landen.
+
+    `file_history_service._root()` baut seinen Pfad aus
+    `settings.panel_config_dir`, und der zeigt im Test auf `backend/`. Jeder
+    Test, der ueber `write_server_text`/`delete_server_text` oder ueber einen
+    ausgefuehrten KI-Vorschlag einen Schnappschuss anlegt, schrieb damit nach
+    `backend/.msm-file-history/` — in **echte, versionierte** Daten hinein.
+    Beobachtet: ein Testlauf legte drei Versionen zu Server 1 an und
+    verdraengte dabei die eine, die im Repository liegt (`git status` meldete
+    sie danach als geloescht).
+
+    Einzeln gefahren faellt das niemandem auf. Der Schaden entsteht still und
+    wird erst beim naechsten Commit sichtbar — oder gar nicht.
+
+    Deshalb sitzt die Umlenkung hier und nicht in den einzelnen Dateien: sie
+    muss auch fuer Tests gelten, die von diesem Weg gar nichts wissen. Wer
+    den Speicher selbst pruefen will, lenkt in seiner eigenen Fixture erneut
+    um (`test_file_history_service.py` tut das) — das gewinnt, weil es spaeter
+    greift.
+    """
+    from config import settings as _settings
+
+    _settings.panel_config_dir = str(tmp_path_factory.mktemp("panel-config"))
+    yield
+
+
 from main import app
 from models import User, RefreshToken, Server, Role, ServerPermission
 from services.auth_service import AuthService
@@ -285,8 +332,12 @@ def clean_db():
     from services.install_update_lock_service import reset_install_update_lock_for_tests
     from services.server_lifecycle_service import reset_lifecycle_jobs_for_tests
     from services.panel_settings_service import PanelSettingsService
+    from services.port_check_service import reset_port_cache_for_tests
     reset_install_update_lock_for_tests()
     reset_lifecycle_jobs_for_tests()
+    # Der Listener-Schnappschuss lebt eine Sekunde — laenger als mancher Test.
+    # Ohne das Verwerfen entschiede die Laufzeit des vorigen Tests mit.
+    reset_port_cache_for_tests()
     # PanelSettingsService hat einen In-Memory-Cache — ohne invalidate_cache
     # leaken Werte zwischen Tests (z. B. oauth.allow_registration=true aus
     # einem frueheren Test).

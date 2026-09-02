@@ -16,6 +16,7 @@ import {
 import { api } from '@/api/client';
 import { toast } from '@/stores/toastStore';
 import { confirm } from '@/stores/confirmStore';
+import { Dropdown } from '@/components/ui/Dropdown';
 
 interface WebhookSub {
   id: number;
@@ -63,6 +64,7 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
   const [showCreate, setShowCreate] = useState(false);
   const [revealedSecrets, setRevealedSecrets] = useState<Record<number, string>>({});
   const [testPending, setTestPending] = useState<number | null>(null);
+  const [createEventFilter, setCreateEventFilter] = useState('');
 
   const refresh = useCallback(async () => {
     try {
@@ -81,7 +83,11 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
 
   useEffect(() => {
     void refresh();
-    const h = setInterval(refresh, 5000);
+    const h = setInterval(() => {
+      // Im Hintergrundtab schaut niemand hin: kein Takt, keine Anfragen.
+      if (document.visibilityState !== 'visible') return;
+      void refresh();
+    }, 5000);
     return () => clearInterval(h);
   }, [refresh]);
 
@@ -95,7 +101,7 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
     const fd = new FormData(e.currentTarget);
     const targetUrl = String(fd.get('target_url') || '');
     const label = String(fd.get('label') || '') || null;
-    const eventFilter = String(fd.get('event_filter') || '') || null;
+    const eventFilter = createEventFilter || null;
     setBusy('create');
     try {
       const r = await api<WebhookSubWithSecret>(`/servers/${serverId}/webhooks`, {
@@ -104,6 +110,7 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
       });
       setRevealedSecrets((p) => ({ ...p, [r.id]: r.secret }));
       setShowCreate(false);
+      setCreateEventFilter('');
       toast.success(t('webhook.created', { defaultValue: 'Webhook angelegt' }));
       await refresh();
     } catch (err: unknown) {
@@ -276,16 +283,18 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
                   defaultValue: 'Event-Filter (leer = alle)',
                 })}
               </label>
-              <select name="event_filter" className="msm-input w-full">
-                <option value="">
-                  {t('webhook.filterAll', { defaultValue: 'Alle Events' })}
-                </option>
-                {KNOWN_EVENT_TYPES.map((ev) => (
-                  <option key={ev.value} value={ev.value}>
-                    {ev.label}
-                  </option>
-                ))}
-              </select>
+              <Dropdown
+                value={createEventFilter}
+                onChange={setCreateEventFilter}
+                options={[
+                  { value: '', label: t('webhook.filterAll', { defaultValue: 'Alle Events' }) },
+                  ...KNOWN_EVENT_TYPES.map((ev) => ({
+                    value: ev.value,
+                    label: ev.label,
+                  })),
+                ]}
+                aria-label={t('webhook.filter', { defaultValue: 'Event-Filter' })}
+              />
             </div>
             <div className="flex gap-2 justify-end pt-2">
               <button

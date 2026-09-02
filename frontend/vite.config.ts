@@ -2,8 +2,10 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
 
+import { fontsourceWoff2Only } from './vite.fontsource'
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [fontsourceWoff2Only(), react()],
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
@@ -26,6 +28,18 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: true,
     chunkSizeWarningLimit: 600,
+    /*
+     * Schriften niemals als data:-URI in die CSS legen.
+     *
+     * Vites Standard bettet Assets unter 4 KB ein. Bei Schriften kehrt das den
+     * Sinn von `unicode-range` um: eingebettet steckt das Zeichen-Set im
+     * Stylesheet, und das lädt jeder Besucher vollständig — die deutsche
+     * Oberfläche zöge sich die vietnamesischen und kyrillischen Schnitte als
+     * Base64 mit, obwohl sie kein Zeichen daraus zeigt. Als eigene Datei lädt
+     * der Browser sie erst, wenn ein Zeichen sie verlangt.
+     */
+    assetsInlineLimit: (filePath: string) =>
+      /\.(woff2?|ttf|otf|eot)$/i.test(filePath) ? false : undefined,
     rollupOptions: {
       output: {
         entryFileNames: 'assets/[name].[hash].js',

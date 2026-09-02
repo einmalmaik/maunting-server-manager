@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { api } from '@/api/client'
@@ -8,10 +8,11 @@ import { useHostInterfaces } from '@/hooks/useHostInterfaces'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import type { Server, GameInfo, PostgresCredential, ServerCreateResult, Node } from '@/types'
 import { labelRole, mapBlueprintPorts } from '@/utils/portRoles'
-import { Server as ServerIcon, Plus, Activity, Cpu, HardDrive, Database, Network } from 'lucide-react'
+import { Server as ServerIcon, Plus, Activity, AlertTriangle, Cpu, HardDrive, Database, Network, Store } from 'lucide-react'
 import { PostgresCredentialsDialog } from '@/components/server/PostgresCredentialsDialog'
 import { Badge } from '@/components/ui/Badge'
 import { Dropdown } from '@/components/ui/Dropdown'
+import { TabBar } from '@/components/ui/TabBar'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 
 export function Servers() {
@@ -21,7 +22,11 @@ export function Servers() {
   const [servers, setServers] = useState<Server[]>([])
   const [games, setGames] = useState<GameInfo[]>([])
   const [nodes, setNodes] = useState<Node[]>([])
+  const [activeTab, setActiveTab] = useState<'own' | 'customers'>('own')
   const [loading, setLoading] = useState(true)
+  // Ohne dieses Flag wird aus einem fehlgeschlagenen Laden die Aussage
+  // "Keine Server vorhanden" — der Betreiber liest, seine Server seien weg.
+  const [loadError, setLoadError] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
   const [creating, setCreating] = useState(false)
   const [nodesLoading, setNodesLoading] = useState(false)
@@ -54,14 +59,10 @@ export function Servers() {
 
   const fetchServers = async () => {
     try {
-      const [srvs, gms] = await Promise.all([
-        api<Server[]>('/servers'),
-        api<GameInfo[]>('/system/games'),
-      ])
-      setServers(srvs)
-      setGames(gms)
+      setServers(await api<Server[]>('/servers'))
+      setLoadError(false)
     } catch {
-      // silent
+      setLoadError(true)
     } finally {
       setLoading(false)
     }
@@ -91,9 +92,19 @@ export function Servers() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canCreateServer])
 
+  // Der Spielekatalog ist statisch — er ändert sich nur, wenn ein Blueprint
+  // dazukommt. Einmal holen reicht, er gehört nicht in den 5-Sekunden-Takt.
+  useEffect(() => {
+    api<GameInfo[]>('/system/games').then(setGames).catch(() => {})
+  }, [])
+
   useEffect(() => {
     fetchServers()
-    const interval = setInterval(fetchServers, 5000)
+    const interval = setInterval(() => {
+      // Im Hintergrundtab schaut niemand hin: kein Takt, keine Anfragen.
+      if (document.visibilityState !== 'visible') return
+      fetchServers()
+    }, 5000)
     return () => clearInterval(interval)
   }, [])
 
@@ -239,6 +250,7 @@ export function Servers() {
 
       const created = await api<ServerCreateResult>('/servers', {
         method: 'POST',
+        headers: { 'Idempotency-Key': crypto.randomUUID() },
         body: JSON.stringify(body),
       })
       if (created.postgres_credentials?.length) {
@@ -294,6 +306,31 @@ export function Servers() {
 
   const gameName = (id: string) => (Array.isArray(games) ? games : []).find((g) => g.id === id)?.name || id
 
+  // Datengetrieben statt rechtegetrieben: das Backend liefert Kundenserver nur
+  // an Berechtigte — wer keine bekommt, sieht auch keine Tabs. Eine eigene
+  // Permission-Abfrage hier waere eine zweite, driftende Wahrheit.
+  const ownServers = servers.filter((s) => !s.is_hoster_managed)
+  const customerServers = servers.filter((s) => s.is_hoster_managed)
+  const hasCustomerServers = customerServers.length > 0
+  const shownServers = hasCustomerServers
+    ? activeTab === 'customers'
+      ? customerServers
+      : ownServers
+    : servers
+
+  // Der Shop-Kunde besitzt oft nur seinen Vertragsserver — auch fuer ihn traegt
+  // der eigene Server das Flag. Er soll nach dem Login nicht vor einem leeren
+  // "Eigene Server"-Tab stehen; die Erstauswahl folgt einmalig den Daten,
+  // danach gehoert der Tab dem Nutzer.
+  const tabInitialized = useRef(false)
+  useEffect(() => {
+    if (loading || tabInitialized.current) return
+    tabInitialized.current = true
+    if (hasCustomerServers && ownServers.length === 0) {
+      setActiveTab('customers')
+    }
+  }, [loading, hasCustomerServers, ownServers.length])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -316,7 +353,16 @@ export function Servers() {
             {t('servers.create')}
           </button>) : undefined} />
 
-      {servers.length === 0 && (
+      {loadError && (
+        <div className="msm-card p-12 text-center border-dashed border-2 border-outline-variant">
+          <AlertTriangle className="w-10 h-10 text-status-error mx-auto mb-4" />
+          <h3 className="font-headline text-body-lg text-on-surface mb-1">
+            {t('servers.loadFailed')}
+          </h3>
+        </div>
+      )}
+
+      {!loadError && servers.length === 0 && (
         <div className="msm-card p-12 text-center border-dashed border-2 border-outline-variant">
           <ServerIcon className="w-10 h-10 text-on-surface-variant mx-auto mb-4" />
           <h3 className="font-headline text-body-lg text-on-surface mb-1">
@@ -328,8 +374,31 @@ export function Servers() {
         </div>
       )}
 
+      {hasCustomerServers && (
+        <TabBar
+          tabs={[
+            { id: 'own' as const, labelKey: 'servers.tabs.own', icon: ServerIcon },
+            { id: 'customers' as const, labelKey: 'servers.tabs.customers', icon: Store },
+          ]}
+          active={activeTab}
+          onChange={setActiveTab}
+          ariaLabel={t('nav.servers')}
+        />
+      )}
+
+      {/* Ein leergefilterter Tab braucht seinen eigenen Leerzustand — eine
+          Tab-Leiste ueber leerer Flaeche liest sich als "Server weg". */}
+      {!loadError && servers.length > 0 && shownServers.length === 0 && (
+        <div className="msm-card p-12 text-center border-dashed border-2 border-outline-variant">
+          <ServerIcon className="w-10 h-10 text-on-surface-variant mx-auto mb-4" />
+          <h3 className="font-headline text-body-lg text-on-surface mb-1">
+            {t('servers.noServers')}
+          </h3>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {servers.map((server) => (
+        {shownServers.map((server) => (
           <div
             key={server.id}
             className="msm-card p-5 cursor-pointer hover:border-mint-accent/40 transition-all"
@@ -343,6 +412,12 @@ export function Servers() {
                   <Badge variant="info" className="shrink-0" title={t('servers.node')}>
                     <Network className="w-3 h-3 mr-1 inline" />
                     {server.node_name}
+                  </Badge>
+                )}
+                {server.is_hoster_managed && (
+                  <Badge variant="info" className="shrink-0" title={t('servers.customerBadge')}>
+                    <Store className="w-3 h-3 mr-1 inline" />
+                    {t('servers.customerBadge')}
                   </Badge>
                 )}
               </div>
@@ -404,15 +479,18 @@ export function Servers() {
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                   {t('servers.game')}
                 </label>
-                <select
-                  className="msm-input"
-                  value={form.game_type}
-                  onChange={(e) => setForm({ ...form, game_type: e.target.value })}
-                >
-                  {games.map((g) => (
-                    <option key={g.id} value={g.id}>{g.name}</option>
-                  ))}
-                </select>
+                <Dropdown
+                  value={form.game_type || null}
+                  onChange={(value) => setForm({ ...form, game_type: value })}
+                  options={games.map((g) => ({
+                    value: g.id,
+                    label: g.name,
+                  }))}
+                  searchable={games.length > 5}
+                  placeholder={t('servers.game')}
+                  aria-label={t('servers.game')}
+                  data-testid="create-server-game"
+                />
               </div>
               {/* Ziel-Node: sichtbar sobald Nodes geladen; Pflichtfeld bei Anzeige */}
               {showNodePicker && (
@@ -485,24 +563,32 @@ export function Servers() {
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                   {t('servers.publicBindIp')}
                 </label>
-                <select
-                  className="msm-input"
-                  value={form.public_bind_ip}
-                  onChange={(e) => setForm({ ...form, public_bind_ip: e.target.value })}
+                <Dropdown
+                  value={form.public_bind_ip || null}
+                  onChange={(value) => setForm({ ...form, public_bind_ip: value })}
+                  options={interfaces.map((iface) => {
+                    const tag = iface.is_loopback
+                      ? ` (${t('servers.bindIp.loopback')})`
+                      : iface.is_private
+                      ? ` (${t('servers.bindIp.private')})`
+                      : ''
+                    return {
+                      value: iface.ip,
+                      label: `${iface.ip} · ${iface.interface}${tag}`,
+                      hint: iface.interface,
+                    }
+                  })}
                   disabled={interfacesLoading}
-                >
-                  {interfacesLoading && <option value="">{t('servers.bindIp.loading')}</option>}
-                  {interfaces.length === 0 && (
-                    <option value="">{t('servers.bindIp.noneAvailable')}</option>
-                  )}
-                  {interfaces.map((iface) => (
-                    <option key={`${iface.interface}-${iface.ip}`} value={iface.ip}>
-                      {iface.ip} · {iface.interface}
-                      {iface.is_loopback ? ` (${t('servers.bindIp.loopback')})` : ''}
-                      {iface.is_private && !iface.is_loopback ? ` (${t('servers.bindIp.private')})` : ''}
-                    </option>
-                  ))}
-                </select>
+                  placeholder={
+                    interfacesLoading
+                      ? t('servers.bindIp.loading')
+                      : interfaces.length === 0
+                      ? t('servers.bindIp.noneAvailable')
+                      : t('servers.bindIp.choose', 'Bind-IP auswählen')
+                  }
+                  aria-label={t('servers.publicBindIp')}
+                  data-testid="create-server-bind-ip"
+                />
                 <p className="font-body-md text-xs text-on-surface-variant mt-1">
                   {t('servers.bindIp.hint')}
                 </p>

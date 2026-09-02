@@ -240,7 +240,14 @@ def write_text_if_revision(
         if expected_revision is not None and current_revision != expected_revision:
             raise RevisionConflictError(current_revision)
 
-        previous_mode = stat_module.S_IMODE(target.stat().st_mode) if target.exists() else 0o644
+        # Bestandsdateien behalten ihren Modus. Neue Dateien bekommen 0660 —
+        # das Gruppenmodell des Panels: Panel und Spielprozess teilen sich die
+        # Dateien ueber die Gruppe des Serververzeichnisses (setgid vererbt
+        # sie), "andere" bleiben aussen vor. Hier stand 0644: die Gruppe
+        # durfte nicht schreiben (der Spielprozess konnte eine vom Panel
+        # angelegte Konfiguration nicht aendern), dafuer durfte jeder
+        # Host-Prozess mitlesen.
+        previous_mode = stat_module.S_IMODE(target.stat().st_mode) if target.exists() else 0o660
         temp_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(
@@ -411,16 +418,39 @@ def workshop_files(
     }
 
 
-def delete_path(server_id: str | int, rel_path: str) -> None:
+def delete_path(
+    server_id: str | int, rel_path: str, expected_revision: str | None = None
+) -> None:
+    """Löscht eine Datei oder einen Baum; mit Revision nur den erwarteten Inhalt.
+
+    Das Panel liest eine Datei, legt daraus einen Versionsschnappschuss an und
+    löscht sie erst danach. Zwischen Lesen und Löschen kann der Spielprozess
+    sie neu geschrieben haben — dann zeigt der Rückweg auf den alten Inhalt
+    und der neue ist ersatzlos weg. Nennt das Panel die Revision, die es
+    gesichert hat, wird hier gegen den Inhalt auf der Platte geprüft und bei
+    Abweichung `RevisionConflictError` geworfen; der Router bildet sie wie
+    beim Schreiben auf 409 ab.
+
+    Ohne Revision bleibt es beim bedingungslosen Löschen — das brauchen die
+    Aufräumpfade (Manifeste, `.bak`-Reste), die gar keinen Inhalt gelesen
+    haben.
+    """
     if not rel_path or rel_path.strip() in {".", ""}:
         raise PathValidationError("Cannot delete server root")
     target = safe_path(server_id, rel_path)
     if not target.exists():
         raise FileNotFoundError("Path not found")
-    if target.is_dir():
-        shutil.rmtree(target)
-    else:
-        target.unlink()
+    # Dieselbe Sperre wie beim Schreiben: `write_text_if_revision` darf nicht
+    # zwischen der Prüfung und dem Löschen dazwischenkommen.
+    with _write_lock(target):
+        if expected_revision is not None:
+            current = _content_revision(target.read_bytes()) if target.is_file() else None
+            if current != expected_revision:
+                raise RevisionConflictError(current)
+        if target.is_dir():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
 
 
 def rename_path(server_id: str | int, old_path: str, new_path: str) -> None:
@@ -826,14 +856,6 @@ def clear_config_cache(server_id: str | int) -> None:
     cache_dir = safe_path(server_id, ".msm-config-cache")
     if cache_dir.exists():
         shutil.rmtree(cache_dir)
-
-
-def write_upload(server_id: str | int, rel_path: str, data: bytes) -> None:
-    if len(data) > settings.max_upload_size:
-        raise ValueError(f"Upload exceeds max size ({settings.max_upload_size} bytes)")
-    target = safe_path(server_id, rel_path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(data)
 
 
 def ensure_servers_dir() -> None:

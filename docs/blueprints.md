@@ -20,6 +20,26 @@ Blueprints sind Daten, keine Skripte:
 
 Erlaubt sind nur whitelisted Runtime-Fähigkeiten.
 
+### Unprivilegierte User-Namespaces
+
+`runtime.allowUnprivilegedUserNamespaces` ist standardmäßig `false`. Das Feld
+ist nur für Container-Runtimes wie UMU/pressure-vessel gedacht, die innerhalb
+des bereits rootless laufenden Game-Containers einen eigenen unprivilegierten
+User-Namespace erzeugen müssen. Bei `true` ergänzt MSM ausschließlich
+`seccomp=unconfined`.
+
+Die übrigen Grenzen bleiben hart: `cap-drop=ALL`, `no-new-privileges`, ein
+numerischer Nicht-root-User sowie die Verbote für `privileged` und Host-Netz.
+Das Opt-in darf nicht als allgemeiner Kompatibilitäts-Fallback verwendet werden.
+
+Die ASA-Runtime unter `containers/asa-runtime` pinnt beide Basisimages per
+Digest, UMU 1.4.0 per SHA-256 und GE-Proton10-34 per im Basisimage geprüfter
+Versionsdatei. Das Image enthält keine Server-Credentials und kapselt nur den
+Kompatibilitäts-Layer, Steam-SDK-Bibliotheken und den ASA-Preflight. UMU ist
+GPL-3.0; der Build veröffentlicht SBOM und Provenance. Ein Versionswechsel
+erfordert erneut einen vollständigen ASA-Kaltstart bis Weltdatei, gebundenen
+Ports und `advertising for join`.
+
 ## Für Einsteiger: Was trägst du wo ein?
 
 Eine Blueprint beschreibt einen Server-Typ, nicht einen einzelnen Server. Der
@@ -230,10 +250,11 @@ starten kann. Deshalb ist `source.type=dockerOnly` ausreichend.
   hat wahrscheinlich keinen Zugriff, der Code ist abgelaufen oder die lokal
   gespeicherten Hytale-Downloader-Credentials müssen erneuert werden.
 
-## Workshop-Mods
+## Workshop- und CurseForge-Mods
 
-Steam Workshop wird über `mods` aktiviert:
+Steam Workshop und CurseForge werden über `mods` im Blueprint konfiguriert:
 
+### Steam Workshop
 ```json
 {
   "supportsMods": true,
@@ -242,21 +263,41 @@ Steam Workshop wird über `mods` aktiviert:
   "filterTags": ["Enhanced"],
   "modInjection": "startupArg",
   "modStartupArgumentFormat": "-mod={mods};",
+  "modStartupArgumentSeparator": ";",
   "modListFilePath": null,
   "modListContent": "workshopIds",
   "postInstall": []
 }
 ```
 
+### CurseForge
+```json
+{
+  "supportsMods": true,
+  "supportsCurseForge": true,
+  "curseforgeGameId": "83374",
+  "curseforgeClassId": null,
+  "curseforgeInstallPath": "mods",
+  "modInjection": "startupArg",
+  "modStartupArgumentFormat": "-mods={mods}",
+  "modStartupArgumentSeparator": ","
+}
+```
+
+`curseforgeGameId` ist die offizielle CurseForge Game-ID (z. B. `83374` für ARK: Survival Ascended, `432` für Minecraft).
+`curseforgeClassId` (optional) filtert auf bestimmte Kategorien (z. B. `6` für Minecraft Mods, `4552` für Bukkit Plugins).
+`curseforgeInstallPath` (optional) definiert das relative Zielverzeichnis für heruntergeladene .jar/.zip-Dateien (z. B. `mods` oder `plugins`).
+`modStartupArgumentSeparator` (optional, default `;`) steuert das Trennzeichen zwischen Mod-IDs in `{MOD_ARG}` (z. B. `,` für ARK: Survival Ascended).
+
 `filterTags` (optional, Liste von Strings, max. 10 Tags) definiert Tags, nach denen die Mod-Suche und -Auflistung im Steam Workshop gefiltert wird. Das Feld verhindert, dass inkompatible Versionen gemischt angezeigt werden (z. B. Legacy- und Enhanced-Mods bei Conan Exiles). Erlaubte Zeichen in Tags sind Alphanumerisch, Leerzeichen, `_`, `-` und `+` (max. 64 Zeichen pro Tag).
 
-`modInjection=startupArg` setzt aktive Workshop-IDs in `{MOD_ARG}` ein.
+`modInjection=startupArg` setzt aktive Mod-IDs in `{MOD_ARG}` ein.
 
 `modInjection=file` schreibt eine Modliste nach `modListFilePath`.
 
 `modListContent` steuert den Inhalt der Modliste:
 
-- `workshopIds`: eine Workshop-ID pro Zeile
+- `workshopIds`: eine Workshop-/CurseForge-ID pro Zeile
 - `postInstallTargetBasenames`: Dateinamen der Ziele aus `postInstall`
 
 ## Runtime-Startup
@@ -274,6 +315,7 @@ Erlaubte Platzhalter:
 - `{CUSTOM_PORT_1}`, `{CUSTOM_PORT_2}`, ... `{CUSTOM_PORT_<N>}` (für zusätzliche custom Ports in Blueprints)
 - `{INSTALL_DIR}`
 - `{MOD_ARG}`
+- `{SERVER_NAME}` für den individuellen Namen des MSM-Servers
 - `{ENV.<KEY>}` für eigene Werte aus `runtime.env`, z. B. `{ENV.SERVER_NAME}`
 
 `runtime.env`-Werte dürfen nur Port-Platzhalter nutzen:
@@ -690,12 +732,20 @@ können weder über JSON noch über den Webeditor aktiviert werden.
 
 `logs.sources` enthält maximal 16 Einträge: `stdout` oder sichere relative Pfade
 mit höchstens einem einfachen Dateinamen-Wildcard, beispielsweise
-`logs/*.log`. `max_tail_bytes` liegt zwischen 1.024 und 1.048.576.
+`logs/*.log`. `stdout` bleibt der Docker-/Container-Stream. Relative Dateipfade
+werden zusätzlich live in der Server-Konsole angezeigt und weiterhin vom
+Guardian für Diagnose und Recovery genutzt. `max_tail_bytes` liegt zwischen
+1.024 und 1.048.576.
 
 Vor Persistierung oder Übertragung werden die in `logs.redact` gewählten
 Redactoren angewendet. Erlaubt sind `discord_token`, `api_key`,
 `authorization_header`, `database_url`, `jwt` sowie geprüfte Einträge mit dem
 Präfix `regex:`.
+
+Unabhängig von der Blueprint-Liste redigiert die sichtbare Konsole bekannte
+Passwort-, Token-, Secret-, API-Key- und Authorization-Zuweisungen. So darf eine
+Game-Logzeile mit vollständiger Startzeile keine Zugangsdaten an den Browser
+ausliefern.
 
 `diagnostics.parsers` erlaubt ausschließlich `linux-oom`, `java-stacktrace`,
 `nodejs-stacktrace`, `port-conflict`, `missing-runtime`, `corrupted-config` und
@@ -750,6 +800,60 @@ jede vorhandene deklarierte Lockdatei vor dem Löschen bytegenau unter
 über 1 MiB werden abgelehnt; pro Server bleiben die zehn neuesten Snapshots.
 Die Verzeichnisse sind nur für den Agent-Betreiber lesbar. Wiederherstellung
 erfolgt bewusst manuell nach Prüfung des Incidents.
+
+### Übersteuerung je Server
+
+Ein Blueprint gilt für **jeden** Server seines Spiels. Er kann nicht wissen,
+dass auf einer bestimmten Node zwölf Instanzen um acht Gigabyte streiten und
+deshalb keine davon in dreißig Sekunden hochkommt — Guardian sieht dort einen
+Server, der die Startfrist reißt, startet ihn neu, sieht es wieder, und nach
+drei Anläufen steht er in Quarantäne, obwohl nichts kaputt ist außer der
+Erwartung.
+
+Für genau diesen Fall lässt sich eine Handvoll Zahlen **je Server** übersteuern.
+Sie werden **nach** der Ableitung aus dem Blueprint darübergelegt; alles, was
+nicht genannt ist, bleibt wie der Blueprint es sagt. Ein Nachtrag, keine zweite
+Konfiguration.
+
+Erlaubt ist eine geschlossene Menge von Skalaren mit Ober- und Untergrenze:
+
+Die Bereiche sind die des **Agent-Vertrags** (`msm-agent/services/guardian_contract.py`):
+der Agent klemmt nicht, er lehnt eine Nutzlast außerhalb seiner Grenzen komplett
+ab. Ein Vertragstest (`test_guardian_stellschrauben_vertrag.py`) hält beide
+Mengen aneinander.
+
+| Feld | Bereich | Wirkung |
+| --- | --- | --- |
+| `startup_grace_period_seconds` | 1–600 | Ruhe nach dem Start, bevor Proben zählen |
+| `startup_timeout_seconds` | 10–3600 | Wann ein Start als gescheitert gilt; muss über der Ruhezeit liegen, sonst rückt er automatisch mit |
+| `probe_interval_seconds` | 1–600 | Abstand zwischen zwei Proben |
+| `probe_timeout_seconds` | 1–30 | Geduld einer Probe (nicht für `process`) |
+| `probe_failure_threshold` | 1–20 | Fehlschläge bis zum Alarm |
+| `probe_success_threshold` | 1–20 | Erfolge bis zur Entwarnung |
+| `recovery_max_attempts` | 0–10 | Guardians eigene Leiter; `0` heißt „nur melden" (übersetzt in eine leere Policy-Liste) |
+| `recovery_attempt_window_seconds` | 60–86400 | Zeitfenster für die Versuche |
+| `recovery_cooldown_seconds` | 1–3600 | Pause zwischen zwei Versuchen |
+| `verification_min_healthy_seconds` | 0–600 | Mindestdauer gesund nach einer Heilung |
+| `verification_required_successes` | 1–20 | Nötige Erfolge in Folge |
+| `verification_timeout_seconds` | 10–3600 | Frist der Verifikation |
+
+Keine Listen, keine Regexe, keine Probentypen — dieselbe Begründung, aus der der
+Blueprint-Editor listenwertige Pfade ausschließt: was sich in einer Zahl mit
+Deckel ausdrücken lässt, kann keine Struktur zerstören. Eine übersteuerte
+Probenliste dagegen könnte Guardian für diesen Server blind machen, ohne dass es
+irgendwo als „abgeschaltet" stünde.
+
+Geklemmt wird beim Lesen, unabhängig davon, wie der Wert in die Zeile kam.
+Unbekannte Schlüssel fallen weg, unlesbares JSON gilt als „keine
+Übersteuerung" — diese Funktion läuft in jedem Reconcile-Takt über jeden Server
+und darf die Synchronisation einer ganzen Node nicht anhalten.
+
+Gesetzt wird sie im Autopilot-Reiter des Servers oder von der KI während einer
+Reparatur (`propose_guardian_tuning`, Recht `server.config.write`). Was gilt,
+steht sichtbar im Reiter samt Herkunft; ein Knopf setzt auf den Blueprint
+zurück. Die Übersteuerung geht in den Konfigurations-Hash ein und bewegt damit
+die `desired_state_generation` — ohne das stünde sie in der Datenbank und wirkte
+nie.
 
 ### Beispiele und Webeditor-Parität
 

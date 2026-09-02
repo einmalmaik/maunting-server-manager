@@ -21,7 +21,7 @@ export function ToastContainer() {
   }
 
   return (
-    <div className="fixed top-4 right-4 z-[9999] flex max-h-[calc(100vh-2rem)] w-[min(calc(100vw-2rem),42rem)] flex-col gap-2 overflow-y-auto pointer-events-none">
+    <div className="fixed top-[max(1rem,calc(env(safe-area-inset-top,0px)+1rem))] right-[max(1rem,calc(env(safe-area-inset-right,0px)+1rem))] left-[max(1rem,calc(env(safe-area-inset-left,0px)+1rem))] sm:left-auto z-[9999] flex max-h-[calc(100dvh-2rem-env(safe-area-inset-top,0px)-env(safe-area-inset-bottom,0px))] w-auto max-w-[min(calc(100vw-2rem),36rem)] flex-col gap-2 overflow-y-auto pointer-events-none">
       {toasts.map((toast) => (
         <div
           key={toast.id}

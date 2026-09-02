@@ -18,6 +18,9 @@ class PanelSettingsResponse(BaseModel):
     steam_api_key: str = ""
     steam_api_configured: bool = False
     steam_api_source: str = "none"  # "env" | "panel" | "none"
+    curseforge_api_key: str = ""
+    curseforge_api_configured: bool = False
+    curseforge_api_source: str = "none"  # "env" | "panel" | "none"
     steam_account_username: str = ""
     steam_account_configured: bool = False
     github_token_configured: bool = False
@@ -35,10 +38,19 @@ class PanelSettingsResponse(BaseModel):
     singra_webhook_secret_configured: bool = False
     singra_webhook_secret_source: str = "none"
     updates_automatic: bool = False
+    desktop_app_download_enabled: bool = True
+    calendar_enabled: bool = True
+    notes_enabled: bool = True
     captcha_enabled: bool = False
     captcha_provider: str = "none"
     captcha_site_key: str = ""
     captcha_secret_key: str = ""
+    cloudflare_enabled: bool = True
+    cloudflare_api_token: str = ""
+    cloudflare_api_configured: bool = False
+    cloudflare_api_source: str = "none"
+    cloudflare_default_zone: str = ""
+    proactive_enabled: bool = True
     # Rate-Limits (Anfragen pro Minute pro IP); Defaults = Runtime-Fallback
     rate_limit_auth: int = 10
     rate_limit_global: int = 100
@@ -48,6 +60,8 @@ class PanelSettingsUpdate(BaseModel):
     panel_url: str | None = None
     imprint_enabled: bool | None = None
     imprint_url: str | None = None
+    calendar_enabled: bool | None = None
+    notes_enabled: bool | None = None
     smtp_host: str | None = None
     smtp_port: str | None = None
     smtp_user: str | None = None
@@ -64,10 +78,14 @@ class PanelSettingsUpdate(BaseModel):
     support_widget_tawk_widget_id: str | None = None
     support_widget_custom_snippet: str | None = None
     updates_automatic: bool | None = None
+    desktop_app_download_enabled: bool | None = None
     captcha_enabled: bool | None = None
     captcha_provider: str | None = None
     captcha_site_key: str | None = None
     captcha_secret_key: str | None = None
+    cloudflare_enabled: bool | None = None
+    cloudflare_default_zone: str | None = None
+    proactive_enabled: bool | None = None
     # Optional: nur mitsenden wenn der Security-Tab speichert
     rate_limit_auth: int | None = None
     rate_limit_global: int | None = None
@@ -83,6 +101,14 @@ class ResendKeyRequest(BaseModel):
 
 class SteamApiKeyRequest(BaseModel):
     steam_api_key: str
+
+
+class CurseForgeApiKeyRequest(BaseModel):
+    curseforge_api_key: str
+
+
+class CloudflareApiTokenRequest(BaseModel):
+    cloudflare_api_token: str
 
 
 class SteamAccountRequest(BaseModel):

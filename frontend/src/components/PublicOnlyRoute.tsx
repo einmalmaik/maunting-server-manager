@@ -13,7 +13,7 @@ export function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
   }, [isAuthenticated, isLoading, checkAuth])
 
   if (isLoading) {
-    return <Loader fullScreen label="Maunting Server Manager" />
+    return <Loader fullScreen label="Maunting Service Manager" />
   }
 
   if (isAuthenticated) {

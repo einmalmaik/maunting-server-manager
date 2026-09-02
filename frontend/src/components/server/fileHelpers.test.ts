@@ -88,6 +88,14 @@ describe('editor file details', () => {
     expect(fileName('config/server.ini')).toBe('server.ini')
   })
 
+  it('erkennt Einzug auch bei CRLF und meldet fehlenden Einzug', () => {
+    expect(detectIndentation('root\r\n  child\r\n')).toBe('Leerzeichen: 2')
+    expect(detectIndentation('root\r\n\tchild\r\n')).toBe('Tabs')
+    expect(detectIndentation('a\nb\nc')).toBe('Einzug: –')
+    // Eine Leerzeile aus Leerzeichen ist kein Einzug — erst Zeichen dahinter zählen.
+    expect(detectIndentation('a\n   \nb')).toBe('Einzug: –')
+  })
+
   it('keeps newer keystrokes dirty after an older save response', () => {
     expect(reconcileSavedContent('submitted', 'submitted')).toEqual({
       savedContent: 'submitted',
@@ -102,11 +110,21 @@ describe('editor file details', () => {
 
 describe('formatBytes', () => {
   it('rendert sinnvolle Einheiten', () => {
-    expect(formatBytes(0)).toBe('-')
     expect(formatBytes(512)).toBe('512 B')
     expect(formatBytes(2048)).toBe('2.0 KB')
     expect(formatBytes(5 * 1024 * 1024)).toBe('5.0 MB')
     expect(formatBytes(3 * 1024 * 1024 * 1024)).toBe('3.00 GB')
+    // Ein Backup-Archiv erreicht das: vorher stand hier '2048.00 GB'.
+    expect(formatBytes(2 * 1024 * 1024 * 1024 * 1024)).toBe('2.00 TB')
+  })
+
+  it('unterscheidet die bekannte Null von der unbekannten Groesse', () => {
+    // Eine leere Datei hat eine Groesse, und zwar null. Der Strich gehoert dem
+    // Fall, in dem gar keine Zahl vorliegt — sonst liest der Benutzer bei jeder
+    // frisch angelegten Datei "unbekannt".
+    expect(formatBytes(0)).toBe('0 B')
+    expect(formatBytes(Number.NaN)).toBe('-')
+    expect(formatBytes(-1)).toBe('-')
   })
 })
 

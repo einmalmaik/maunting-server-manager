@@ -169,9 +169,10 @@ def write_file(
 def delete_file(
     server_id: str = Query(...),
     path: str = Query(...),
+    expected_revision: str | None = Query(None),
 ) -> dict[str, bool]:
     try:
-        file_service.delete_path(server_id, path)
+        file_service.delete_path(server_id, path, expected_revision)
         return {"ok": True}
     except Exception as exc:
         raise _map_path_errors(exc) from exc
@@ -201,7 +202,15 @@ def upload_file(
         if target == file_service.server_root(server_id):
             raise PathValidationError("Upload path must name a file")
         target.parent.mkdir(parents=True, exist_ok=True)
-        destination_mode = target.stat().st_mode & 0o777 if target.is_file() else 0o644
+        # Bestandsdateien behalten ihren Modus. Neue Dateien bekommen 0660 —
+        # das Gruppenmodell des Panels: Panel und Spielprozess teilen sich die
+        # Dateien über die Gruppe des Serververzeichnisses (setgid vererbt
+        # sie), "andere" bleiben aussen vor. Hier stand 0644: die Gruppe
+        # durfte nicht schreiben (der Spielprozess konnte eine hochgeladene
+        # Konfiguration nicht ändern), dafür durfte jeder Host-Prozess
+        # mitlesen — genau die Weltrechte, die `docker_service` beim Start mit
+        # `o-rwx` wieder wegnimmt.
+        destination_mode = target.stat().st_mode & 0o777 if target.is_file() else 0o660
         limit = min(settings.max_upload_size, MAX_SINGLE_UPLOAD_SIZE)
         total = 0
         with tempfile.NamedTemporaryFile(

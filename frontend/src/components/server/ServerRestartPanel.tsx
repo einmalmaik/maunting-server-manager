@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { CalendarClock, CheckCircle2, Plus, Save, Trash2, XCircle } from 'lucide-react'
+import { Bot, CalendarClock, CheckCircle2, Plus, Save, Trash2, XCircle } from 'lucide-react'
 import { api } from '@/api/client'
 import { useHasPermission } from '@/hooks/useHasPermission'
+import { Dropdown, Switch } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 import type { Server } from '@/types'
 import { formatPanelDateTime, formatPanelTime, type PanelTimeFormat } from '@/utils/timeFormat'
@@ -43,6 +44,30 @@ export function ServerRestartPanel({ server, serverId, onSaved }: Props) {
 
   const sortedTimes = useMemo(() => [...new Set(times)].sort(), [times])
 
+  // Optionen fuer die Dropdown-Bausteine (Design-DNA: kein natives <select>).
+  // DropdownOption.value ist strikt string — Zahlen werden an der Nahtstelle
+  // gewandelt. Die Uhrzeit-Labels haengen am Panel-Zeitformat und duerfen
+  // deshalb keine Modul-Konstante sein. Der gespeicherte Wert kann ausserhalb
+  // des Rasters liegen (die KI darf z. B. 5 Stunden oder 04:17 setzen) und
+  // wird deshalb als Option eingespeist — sonst zeigte der Trigger statt des
+  // gesetzten Werts nur den Platzhalter.
+  const intervalOptionen = useMemo(() => {
+    const stunden = INTERVAL_OPTIONS.includes(intervalHours)
+      ? INTERVAL_OPTIONS
+      : [...INTERVAL_OPTIONS, intervalHours].sort((a, b) => a - b)
+    return stunden.map((hours) => ({
+      value: String(hours),
+      label: t('restarts.everyHours', { count: hours }),
+    }))
+  }, [t, intervalHours])
+  const zeitOptionen = useMemo(() => {
+    const werte = [...new Set([...TIME_OPTIONS, ...times])].sort()
+    return werte.map((option) => ({
+      value: option,
+      label: formatPanelTime(option, timeFormat),
+    }))
+  }, [timeFormat, times])
+
   const save = async () => {
     setSaving(true)
     const fixedTimes = sortedTimes.length ? sortedTimes.join(',') : '04:00'
@@ -74,7 +99,18 @@ export function ServerRestartPanel({ server, serverId, onSaved }: Props) {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <p className="font-body-md text-body-md text-on-surface-variant">{t('restarts.subtitle')}</p>
+        <div className="flex items-center gap-3 flex-wrap">
+          <p className="font-body-md text-body-md text-on-surface-variant">{t('restarts.subtitle')}</p>
+          {server.restart_ai_managed && (
+            <span
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border border-primary/40 bg-primary/10 text-primary"
+              title={t('restarts.aiManagedHint')}
+            >
+              <Bot className="w-3.5 h-3.5" />
+              {t('restarts.aiManaged')}
+            </span>
+          )}
+        </div>
         <button
           onClick={save}
           disabled={saving || !canWrite}
@@ -118,17 +154,28 @@ export function ServerRestartPanel({ server, serverId, onSaved }: Props) {
           </div>
         </div>
 
-        <label className="inline-flex items-center gap-3 cursor-pointer">
-          <span className={`relative w-10 h-6 rounded-full transition-colors ${enabled ? 'bg-secondary' : 'bg-surface-container-highest'}`}>
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={(e) => setEnabled(e.target.checked)}
-              disabled={!canWrite}
-              className="sr-only"
-            />
-            <span className={`absolute top-1 left-1 w-4 h-4 rounded-full transition-transform ${enabled ? 'translate-x-4 bg-on-secondary' : 'bg-on-surface'}`} />
-          </span>
+        {/* Hier stand ein von Hand nachgebauter Umschalter: eine sr-only-Checkbox
+            mit zwei <span> als Optik. Das `disabled` saß dabei nur auf der
+            unsichtbaren Checkbox — die sichtbare Bahn, der Knubbel und das
+            `cursor-pointer` des Labels blieben unverändert. Ohne
+            `server.config.write` sah der Schalter also voll bedienbar aus, der
+            Mauszeiger versprach es, und der Klick verpuffte wortlos; das darunter
+            liegende <fieldset> dimmt zwar, den Schalter selbst erreicht es nicht,
+            denn er steht außerhalb.
+
+            `Switch` aus @/Singra/UI trägt `disabled:opacity-50` und
+            `disabled:cursor-not-allowed` und meldet sich als `role="switch"` mit
+            `aria-checked`. Der gesperrte Zustand ist damit sichtbar UND für
+            Bedienungshilfen lesbar — beides hat der Nachbau nicht geleistet.
+            Das `cursor-pointer` am Label fällt weg: es hätte weiter Bedienbarkeit
+            versprochen, die es bei Lesezugriff nicht gibt. */}
+        <label className="inline-flex items-center gap-3">
+          <Switch
+            checked={enabled}
+            onCheckedChange={setEnabled}
+            disabled={!canWrite}
+            aria-label={t('restarts.enabled')}
+          />
           <span className="font-body-md text-sm text-on-surface">{t('restarts.enabled')}</span>
         </label>
 
@@ -165,17 +212,21 @@ export function ServerRestartPanel({ server, serverId, onSaved }: Props) {
               <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                 {t('restarts.interval')}
               </label>
-              <select
-                value={intervalHours}
-                onChange={(e) => setIntervalHours(Number(e.target.value))}
-                className="msm-input max-w-xs"
-              >
-                {INTERVAL_OPTIONS.map((hours) => (
-                  <option key={hours} value={hours}>
-                    {t('restarts.everyHours', { count: hours })}
-                  </option>
-                ))}
-              </select>
+              {/* Das Fieldset sperrt den Trigger-Button auch nativ; das
+                  explizite disabled haelt zusaetzlich den internen Guard der
+                  Komponente und macht den Zustand ohne Fieldset-Wissen
+                  testbar. Die eigene Dimmung des Triggers ist hier abgeschaltet,
+                  weil das Fieldset schon dimmt — sonst stapeln sich 60 % und
+                  50 % zu einem kaum lesbaren Wert. */}
+              <Dropdown
+                value={String(intervalHours)}
+                onChange={(wert) => setIntervalHours(Number(wert))}
+                options={intervalOptionen}
+                disabled={!enabled || !canWrite}
+                className="max-w-xs"
+                buttonClassName="disabled:opacity-100"
+                aria-label={t('restarts.interval')}
+              />
             </div>
           ) : (
             <div className="space-y-3">
@@ -199,21 +250,18 @@ export function ServerRestartPanel({ server, serverId, onSaved }: Props) {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {times.map((time, index) => (
                   <div key={`${time}-${index}`} className="flex gap-2">
-                    <select
+                    <Dropdown
                       value={time}
-                      onChange={(e) => {
+                      onChange={(wert) => {
                         const next = [...times]
-                        next[index] = e.target.value
+                        next[index] = wert
                         setTimes(next)
                       }}
-                      className="msm-input"
-                    >
-                      {TIME_OPTIONS.map((option) => (
-                        <option key={option} value={option}>
-                          {formatPanelTime(option, timeFormat)}
-                        </option>
-                      ))}
-                    </select>
+                      options={zeitOptionen}
+                      disabled={!enabled || !canWrite}
+                      buttonClassName="disabled:opacity-100"
+                      aria-label={t('restarts.fixedTimes')}
+                    />
                     <button
                       type="button"
                       onClick={() => setTimes(times.filter((_, i) => i !== index))}

@@ -351,7 +351,8 @@ class TestUploadToCloud:
                     cookies=user_cookies,
                     headers={"X-CSRF-Token": csrf},
                 )
-                assert resp.status_code == 403
+                # Ohne jedes Server-Recht (auch kein view): 404 statt 403.
+                assert resp.status_code == 404
         finally:
             app.dependency_overrides.clear()
 
@@ -405,6 +406,12 @@ class TestUploadToCloud:
                     mock_crypto.init_key.return_value = "upload-key-id"
                     mock_crypto.encrypt_file_stream.return_value = iter([b"enc"])
                     mock_s3.upload_stream = MagicMock()
+                    # Seit der Upload nachgesehen wird, gehoert `object_size`
+                    # zum Vertrag: ohne bestaetigtes Objekt bleibt `s3_key` leer.
+                    # Ein blosser MagicMock liefe hier in einen TypeError beim
+                    # Groessenvergleich — die Attrappe muss die Zusage
+                    # nachbilden, nicht nur den Aufruf schlucken.
+                    mock_s3.object_size = MagicMock(return_value=1024)
 
                     resp = client.post(
                         f"/api/backups/{test_server.id}/{backup.id}/upload-to-cloud",

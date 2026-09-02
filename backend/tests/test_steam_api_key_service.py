@@ -34,13 +34,17 @@ def test_resolve_from_panel_encrypted(monkeypatch):
     assert svc.current_source() == "panel"
 
 
-def test_env_wins_over_panel(monkeypatch):
+def test_panel_wins_over_env_and_env_is_fallback(monkeypatch):
     from config import settings
 
     svc.set_panel_key("panel_key_only_here")
-    monkeypatch.setenv("MSM_STEAM_API_KEY", "env_key_wins_here")
+    monkeypatch.setenv("MSM_STEAM_API_KEY", "env_key_fallback_here")
     settings.__dict__["steam_api_key"] = ""
-    assert svc.resolve_key() == "env_key_wins_here"
+    assert svc.resolve_key() == "panel_key_only_here"
+    assert svc.current_source() == "panel"
+
+    svc.clear_panel_key()
+    assert svc.resolve_key() == "env_key_fallback_here"
     assert svc.current_source() == "env"
 
 

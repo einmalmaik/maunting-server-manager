@@ -1,3 +1,4 @@
+import html
 import logging
 import httpx
 import aiosmtplib
@@ -104,6 +105,25 @@ class EmailService:
 
     @staticmethod
     async def _send_smtp(to: str, subject: str, body: str, html: str | None = None) -> bool:
+        """Der SMTP-Weg.
+
+        **Umlaute sind hier unbedenklich, in Text wie in Betreff.** Das steht
+        da, weil es einmal anders geglaubt wurde: die KI-Mails schrieben
+        "faellig" und "vollstaendig" in Ersatzschreibung, waehrend die aelteren
+        Vorlagen derselben Datei "durchgeführt" schrieben. In einer Mail standen
+        beide Schreibweisen nebeneinander, und es sah aus wie ein Notbehelf
+        gegen eine kaputte Kodierung.
+
+        Ist es nicht. ``EmailMessage`` waehlt fuer ``set_content`` selbst den
+        passenden Zeichensatz und die passende Transferkodierung, und beim
+        Serialisieren kodiert es einen Betreff mit Nicht-ASCII nach RFC 2047.
+        Der Resend-Weg daneben schickt ohnehin JSON ueber HTTPS, also UTF-8.
+
+        Wer hier kuenftig Ersatzschreibungen einfuegt, macht die Mail nicht
+        sicherer, sondern nur schlechter zu lesen. (Fuer Quelltextkommentare
+        gilt weiter die Projektschreibweise — nur nicht fuer Text, den ein
+        Mensch in seinem Postfach liest.)
+        """
         msg = EmailMessage()
         msg["From"] = EmailService._get_setting("smtp_from") or settings.smtp_from
         msg["To"] = to
@@ -201,7 +221,7 @@ class EmailService:
           <tr>
             <td style="padding:24px 32px;text-align:center;border-top:1px solid {cls.BORDER_COLOR};">
               <p style="margin:0;font-family:'Courier New',monospace;font-size:11px;color:{cls.MUTED_COLOR};line-height:1.5;">
-                Maunting Server Manager<br>
+                Maunting Service Manager<br>
                 Diese Nachricht wurde automatisch versendet.
               </p>
             </td>
@@ -264,7 +284,7 @@ class EmailService:
     @staticmethod
     async def send_password_reset_email(to: str, username: str, token: str) -> bool:
         url = f"{settings.panel_url}/reset-password?token={token}"
-        subject = "Maunting Server Manager — Passwort zurücksetzen"
+        subject = "Maunting Service Manager — Passwort zurücksetzen"
         body = f"""Hallo {username},
 
 setze dein Passwort zurück:
@@ -272,14 +292,14 @@ setze dein Passwort zurück:
 
 Dieser Link ist 1 Stunde gültig.
 
-Maunting Server Manager
+Maunting Service Manager
 """
         html = EmailService._password_reset_email_html(username, url)
         return await EmailService.send_email(to, subject, body, html)
 
     @staticmethod
     async def send_verification_code_email(to: str, username: str, code: str) -> bool:
-        subject = "Maunting Server Manager — Verifizierungscode"
+        subject = "Maunting Service Manager — Verifizierungscode"
         body = f"""Hallo,
 
 Dein Verifizierungscode lautet:
@@ -288,7 +308,7 @@ Dein Verifizierungscode lautet:
 
 Gültig für 10 Minuten.
 
-Maunting Server Manager
+Maunting Service Manager
 """
         html = EmailService._verification_code_email_html(username, code)
         return await EmailService.send_email(to, subject, body, html)
@@ -297,8 +317,42 @@ Maunting Server Manager
     # Security notification emails
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def html_text(value: object) -> str:
+        """Fremdtext, der in eine Mail soll — maskiert, mit erhaltenen Umbruechen.
+
+        Das Grundgeruest dieser Datei setzt seine Bausteine als **rohes HTML**
+        zusammen, und mehrere Aufrufer nutzen das absichtlich (`<strong>` um
+        einen Statuswert). Solange dort nur Literale aus dem Code stehen, ist
+        das harmlos.
+
+        Sobald aber ein Servername, ein Benutzername, eine Vorfallbeschreibung
+        oder — neu — ein von einem Modell geschriebener Bericht hineinfliesst,
+        ist es eine Injection: der Name eines Servers stammt aus einem Formular
+        oder aus einer Shop-Bestellung, die Vorfallbeschreibung aus einer
+        Logzeile auf einem Server, auf dem Fremde spielen, und der Modelltext
+        aus beidem.
+
+        `<a href="...">Hier klicken</a>` in einer Mail, die aussieht, als kaeme
+        sie vom Panel, ist ein brauchbarer Phishing-Traeger. Deshalb geht
+        Fremdtext durch diese Funktion, bevor er in eine Vorlage kommt — und
+        nicht die Vorlage durch eine Maskierung, die die gewollten Auszeichnungen
+        mit zerstoeren wuerde.
+
+        Umbrueche bleiben erhalten: ein Bericht ueber mehrere Absaetze waere
+        sonst eine einzige Zeile.
+        """
+        return html.escape(str(value or ""), quote=True).replace("\n", "<br>")
+
     @classmethod
     def _notification_email_html(cls, username: str, title: str, message: str, detail: str = "") -> str:
+        # `username` und `title` werden **hier** maskiert: kein Aufrufer gibt
+        # dort Auszeichnung mit, und der Benutzername ist frei waehlbar.
+        # `message` und `detail` bleiben roh — mehrere Aufrufer bauen dort
+        # bewusst `<strong>` ein und maskieren ihre Fremdanteile selbst mit
+        # `html_text`.
+        username = cls.html_text(username)
+        title = cls.html_text(title)
         detail_html = f'<p style="margin:12px 0 0 0;font-size:13px;color:{cls.MUTED_COLOR};line-height:1.5;">{detail}</p>' if detail else ""
         content = f"""<h1 class="headline" style="margin:0 0 12px 0;font-size:24px;font-weight:700;color:{cls.CYAN_ACCENT};line-height:1.3;">{title}</h1>
 <p style="margin:0 0 8px 0;font-size:15px;color:{cls.PRIMARY_TEXT};line-height:1.6;">Hallo <strong>{username}</strong>,</p>
@@ -307,12 +361,173 @@ Maunting Server Manager
 <p style="margin:20px 0 0 0;font-size:13px;color:{cls.MUTED_COLOR};line-height:1.5;text-align:center;">Falls du diese Aktion nicht durchgeführt hast, ändere sofort dein Passwort und kontaktiere den Administrator.</p>"""
         return cls._base_template(title, content)
 
+    @classmethod
+    def _ai_report_email_html(
+        cls,
+        username: str,
+        titel: str,
+        absaetze: list[str],
+        punkte: list[str] | None = None,
+        schluss: str | None = None,
+        fusszeile: str | None = None,
+        cta: tuple[str, str] | None = None,
+    ) -> str:
+        """Die Vorlage fuer Berichte der KI. Neben `_notification_email_html`, nicht darin.
+
+        Zwei Unterschiede, und beide sind der Grund fuer die eigene Vorlage.
+
+        **Kein Sicherheitshinweis.** `_notification_email_html` haengt
+        unbedingt „Falls du diese Aktion nicht durchgeführt hast, ändere sofort
+        dein Passwort“ an. Fuer einen neuen Login ist das richtig. Unter einem
+        Serverstatusbericht ist es falsch: der Benutzer hat nichts durchgefuehrt,
+        die KI hat — er hat sie ja darum gebeten. Der Betreiber hat den Satz
+        genau dort vorgefunden und sich zu Recht gewundert. Nebenbei war es
+        schon vorher widerspruechlich, denn die Textfassung derselben Mail
+        enthielt ihn nie.
+
+        **Alles wird hier maskiert.** Die andere Vorlage laesst `message` und
+        `detail` roh durch, weil ihre Aufrufer dort absichtlich `<strong>`
+        einbauen und ihre Fremdanteile selbst behandeln. Hier gilt das
+        Gegenteil: **jedes** Feld stammt aus einem Modell, und ein Modell, das
+        ueber einen praeparierten Servernamen oder eine Logzeile dazu gebracht
+        wurde, `<a href="...">` zu schreiben, haette sonst einen
+        Phishing-Traeger in einer Mail, die aussieht, als kaeme sie vom Panel.
+        Deshalb liefert das Modell **nur Text und nie Auszeichnung**, und die
+        Struktur — Absaetze, Aufzaehlung — kommt aus den Feldern statt aus
+        Markdown. Das erspart zugleich einen Markdown-Leser, den es hier nicht
+        gibt: `**Laufend:**` stand deshalb woertlich in der Mail.
+
+        `titel` und `fusszeile` stammen ausdruecklich **nicht** vom Modell,
+        sondern vom Panel — siehe `send_ai_task_report`.
+
+        `cta` ist der einzige Weg, auf dem in eine KI-Mail ein Link kommt, und
+        er geht durch `_pruefe_cta`: alles, was nicht mit der Paneladresse aus
+        den Einstellungen beginnt, faellt weg. Ohne diese Pruefung waere die
+        eine maskierungsfreie Stelle dieser Vorlage der Traeger, nach dem eine
+        Prompt-Injection sucht.
+        """
+        username = cls.html_text(username)
+        titel_sicher = cls.html_text(titel)
+
+        teile = [
+            f'<h1 class="headline" style="margin:0 0 12px 0;font-size:24px;'
+            f'font-weight:700;color:{cls.CYAN_ACCENT};line-height:1.3;">{titel_sicher}</h1>',
+            f'<p style="margin:0 0 8px 0;font-size:15px;color:{cls.PRIMARY_TEXT};'
+            f'line-height:1.6;">Hallo <strong>{username}</strong>,</p>',
+        ]
+        for absatz in absaetze:
+            if not str(absatz or "").strip():
+                continue
+            teile.append(
+                f'<p style="margin:0 0 14px 0;font-size:15px;color:{cls.SECONDARY_TEXT};'
+                f'line-height:1.6;">{cls.html_text(absatz)}</p>'
+            )
+        if punkte:
+            zeilen = "".join(
+                f'<li style="margin:0 0 6px 0;">{cls.html_text(punkt)}</li>'
+                for punkt in punkte
+                if str(punkt or "").strip()
+            )
+            if zeilen:
+                teile.append(
+                    f'<ul style="margin:0 0 16px 0;padding-left:20px;font-size:15px;'
+                    f'color:{cls.SECONDARY_TEXT};line-height:1.6;">{zeilen}</ul>'
+                )
+        if schluss and str(schluss).strip():
+            teile.append(
+                f'<p style="margin:0 0 8px 0;font-size:15px;color:{cls.SECONDARY_TEXT};'
+                f'line-height:1.6;">{cls.html_text(schluss)}</p>'
+            )
+        geprueft = cls._pruefe_cta(cta)
+        if geprueft is not None:
+            url, label = geprueft
+            teile.append(cls._cta_button(url, cls.html_text(label)))
+        if fusszeile and str(fusszeile).strip():
+            teile.append(
+                f'<p style="margin:20px 0 0 0;font-size:13px;color:{cls.MUTED_COLOR};'
+                f'line-height:1.5;">{cls.html_text(fusszeile)}</p>'
+            )
+        # Der **maskierte** Titel auch hier hinein: `_base_template` setzt ihn
+        # roh in `<title>`, genau wie es `_notification_email_html` vormacht
+        # (dort wird `title` einmal oben maskiert und danach nur noch das
+        # Ergebnis weitergereicht). Mit dem Rohwert stuende die Auszeichnung im
+        # Kopf des Dokuments statt im Text — dieselbe Luecke, nur woanders.
+        return cls._base_template(titel_sicher, "\n".join(teile))
+
+    @classmethod
+    def _pruefe_cta(cls, cta: tuple[str, str] | None) -> tuple[str, str] | None:
+        """Laesst genau die Links durch, die auf das eigene Panel zeigen.
+
+        Der Rahmen einer KI-Mail geht als JSON durch die Datenbank und wird vom
+        Postausgang wieder eingelesen — moeglicherweise Tage spaeter, aus einer
+        Zeile, die inzwischen jemand angefasst hat. Der Knopf ist die einzige
+        Stelle dieser Vorlage, die nicht maskiert wird; ohne Pruefung waere er
+        der Traeger, auf den es jede Prompt-Injection abgesehen hat.
+
+        Geprueft wird gegen `settings.panel_url` und nicht gegen ein Muster wie
+        "beginnt mit https": ein fremdes HTTPS-Ziel ist genau der Fall, den
+        diese Zeile verhindern soll.
+        """
+        if not cta:
+            return None
+        url, label = cta
+        url = str(url or "").strip()
+        label = str(label or "").strip()
+        if not url or not label:
+            return None
+        basis = str(settings.panel_url or "").rstrip("/")
+        if not basis or not url.startswith(basis + "/"):
+            _log.warning("CTA-Link verworfen: zeigt nicht auf das Panel")
+            return None
+        return url, label
+
+    @staticmethod
+    def _ai_report_email_text(
+        username: str,
+        absaetze: list[str],
+        punkte: list[str] | None = None,
+        schluss: str | None = None,
+        fusszeile: str | None = None,
+        cta: tuple[str, str] | None = None,
+    ) -> str:
+        """Dieselben Felder als reiner Text.
+
+        Aus **derselben** Quelle wie die HTML-Fassung, und das ist der Punkt:
+        vorher wurden Text- und HTML-Fassung getrennt zusammengesetzt und gingen
+        auseinander — die eine trug den Sicherheitshinweis, die andere nicht.
+        Wer beides aus einem Satz Felder baut, kann sie nicht mehr auseinander
+        laufen lassen.
+        """
+        zeilen = [f"Hallo {username},", ""]
+        for absatz in absaetze:
+            if str(absatz or "").strip():
+                zeilen.extend([str(absatz).strip(), ""])
+        for punkt in punkte or []:
+            if str(punkt or "").strip():
+                zeilen.append(f"- {str(punkt).strip()}")
+        if punkte:
+            zeilen.append("")
+        if schluss and str(schluss).strip():
+            zeilen.extend([str(schluss).strip(), ""])
+        # Der Link **auch** in der Textfassung, und als nackte Adresse. Ein
+        # Knopf, den es nur im HTML gibt, fehlt genau denen, die ihr Postfach
+        # auf Textdarstellung stehen haben — und die Mail waere dann eine Frage
+        # ohne Antwortmoeglichkeit.
+        geprueft = EmailService._pruefe_cta(cta)
+        if geprueft is not None:
+            url, label = geprueft
+            zeilen.extend([f"{label}: {url}", ""])
+        if fusszeile and str(fusszeile).strip():
+            zeilen.extend([str(fusszeile).strip(), ""])
+        zeilen.append("Maunting Service Manager")
+        return "\n".join(zeilen) + "\n"
+
     @staticmethod
     async def send_security_notification(to: str, username: str, title: str, message: str, detail: str = "") -> bool:
         """Zentrale Funktion für Security-/Login-bezogene Benachrichtigungen (neuer Login, OAuth-Link, Passwort-Änderung etc.).
         Nutzt _notification_email_html + send_email. Alle Security-Events gehen hier durch (KISS + zentrale Wartung).
         """
-        subject = f"Maunting Server Manager — {title}"
+        subject = f"Maunting Service Manager — {title}"
         body = f"""Hallo {username},
 
 {message}
@@ -321,21 +536,21 @@ Maunting Server Manager
 
 Falls du diese Aktion nicht durchgeführt hast, ändere sofort dein Passwort und kontaktiere den Administrator.
 
-Maunting Server Manager
+Maunting Service Manager
 """
         html = EmailService._notification_email_html(username, title, message, detail)
         return await EmailService.send_email(to, subject, body, html)
 
     @staticmethod
     async def send_password_changed_notification(to: str, username: str) -> bool:
-        subject = "Maunting Server Manager — Passwort geändert"
+        subject = "Maunting Service Manager — Passwort geändert"
         body = f"""Hallo {username},
 
 Dein Passwort wurde soeben geändert.
 
 Falls du diese Änderung nicht vorgenommen hast, ändere sofort dein Passwort und kontaktiere den Administrator.
 
-Maunting Server Manager
+Maunting Service Manager
 """
         html = EmailService._notification_email_html(username, "Passwort geändert", "Dein Passwort wurde soeben geändert.")
         return await EmailService.send_email(to, subject, body, html)
@@ -353,35 +568,39 @@ Maunting Server Manager
     @staticmethod
     async def send_2fa_status_notification(to: str, username: str, enabled: bool) -> bool:
         action = "aktiviert" if enabled else "deaktiviert"
-        subject = f"Maunting Server Manager — 2FA {action}"
+        subject = f"Maunting Service Manager — 2FA {action}"
         body = f"""Hallo {username},
 
 Die Zwei-Faktor-Authentifizierung (2FA) wurde {action}.
 
 Falls du diese Änderung nicht vorgenommen hast, ändere sofort dein Passwort und kontaktiere den Administrator.
 
-Maunting Server Manager
+Maunting Service Manager
 """
         html = EmailService._notification_email_html(username, f"2FA {action}", f"Die Zwei-Faktor-Authentifizierung wurde {action}.")
         return await EmailService.send_email(to, subject, body, html)
 
     @staticmethod
     async def send_server_status_notification(to: str, username: str, server_name: str, status: str) -> bool:
-        subject = f"Maunting Server Manager — Server-Status: {server_name}"
+        subject = f"Maunting Service Manager — Server-Status: {server_name}"
         body = f"""Hallo {username},
 
 Der Server "{server_name}" hat seinen Status geändert: {status}
 
-Maunting Server Manager
+Maunting Service Manager
 """
-        html = EmailService._notification_email_html(username, "Server-Status geändert", f'Der Server "{server_name}" hat seinen Status geändert: <strong>{status}</strong>.')
+        html = EmailService._notification_email_html(
+            username, "Server-Status geändert",
+            f'Der Server "{EmailService.html_text(server_name)}" hat seinen Status '
+            f'geändert: <strong>{EmailService.html_text(status)}</strong>.',
+        )
         return await EmailService.send_email(to, subject, body, html)
 
     @staticmethod
     async def send_guardian_incident_notification(
         to: str, username: str, server_name: str, incident_type: str, status: str, details: str = ""
     ) -> bool:
-        subject = f"Maunting Server Manager — Guardian Alert: {server_name}"
+        subject = f"Maunting Service Manager — Guardian Alert: {server_name}"
         body = f"""Hallo {username},
 
 Die Guardian Engine hat ein Ereignis beim Server "{server_name}" registriert.
@@ -392,42 +611,458 @@ Details: {details}
 
 Bitte überprüfe den Server im Dashboard.
 
-Maunting Server Manager — Guardian Engine
+Maunting Service Manager — Guardian Engine
 """
-        html_details = f"<p><strong>Details:</strong> {details}</p>" if details else ""
+        # Alle vier Werte sind Fremdtext: der Servername kommt aus einem
+        # Formular oder aus einer Shop-Bestellung, Art und Stand aus dem Agenten,
+        # die Beschreibung aus einer Logzeile eines Servers, auf dem Fremde
+        # spielen. Unmaskiert waren sie ein Phishing-Traeger in einer Mail, die
+        # aussieht, als kaeme sie vom Panel.
+        sicherer_name = EmailService.html_text(server_name)
+        sichere_details = EmailService.html_text(details)
+        html_details = f"<p><strong>Details:</strong> {sichere_details}</p>" if details else ""
         html = EmailService._notification_email_html(
             username,
             "Guardian Engine Alert",
-            f'Die Guardian Engine hat ein Ereignis beim Server <strong>"{server_name}"</strong> registriert.<br/><br/>'
-            f'<strong>Vorfall:</strong> {incident_type}<br/>'
-            f'<strong>Status:</strong> {status}<br/>'
+            f'Die Guardian Engine hat ein Ereignis beim Server <strong>"{sicherer_name}"</strong> registriert.<br/><br/>'
+            f'<strong>Vorfall:</strong> {EmailService.html_text(incident_type)}<br/>'
+            f'<strong>Status:</strong> {EmailService.html_text(status)}<br/>'
             f'{html_details}'
         )
         return await EmailService.send_email(to, subject, body, html)
 
 
     @staticmethod
+    def _ai_betreff_praefix(titel: str) -> str:
+        """Der Anteil der Betreffzeile, der **nie** vom Modell kommt.
+
+        Eigene Funktion, seit der Betreff zweimal entsteht: einmal beim
+        Einreihen in den Ausgangskorb (mit dem festen Text) und einmal im
+        Arbeiter (mit der verfassten Fassung). Der Praefix wandert dazwischen
+        als Teil des Rahmens durch die Datenbank — es muss also einen Ort geben,
+        an dem er gebildet wird, und genau einen.
+        """
+        return f"Maunting Service Manager — {titel}"
+
+    @staticmethod
+    def _ai_betreffzeile_aus_praefix(praefix: str, zusatz: str) -> str:
+        """Setzt die Betreffzeile zusammen und macht sie zustellbar.
+
+        Zwei Dinge in einer Funktion, weil sie zusammengehoeren.
+
+        Die **Reihenfolge** haelt die Zusage fest: vorne die Kennung des Panels
+        und das Zustandswort — beides Tatsachen aus dem Lauf und beide im
+        Praefix —, dahinter erst das, was das Modell beisteuert. Ein Modell, das
+        beschoenigt, kann den Betreff faerben, aber nie das Ergebnis darin
+        umschreiben.
+
+        Die **Bereinigung** verhindert einen Vorfall, der die ganze Mail kostete
+        und dabei Erfolg meldete: `send_email` setzt ``msg["Subject"]`` vor dem
+        ``try``. Ein Zeilenumbruch darin wirft `ValueError`, die an der
+        Fehlerbehandlung des Versands vorbei bis zum Aufrufer durchlaeuft und
+        dort als Warnung endet — gruener Lauf, keine Mail. Bereinigt wird die
+        **fertige** Zeile und nicht nur der Modellteil: Servername und
+        Aufgabentitel kommen aus Formularen und aus einem Chat und koennen
+        denselben Umbruch tragen.
+
+        Der Ersatz ``"Maunting Service Manager"`` fuer einen fehlenden Praefix
+        ist kein Schoenheitsfehler: der Praefix kann aus einem Rahmen kommen,
+        der eine Prozessgrenze und ein JSON-Feld hinter sich hat. Ein leerer
+        Betreff waere dort keine Mail mehr.
+        """
+        from services.ai_mail_text import (
+            MAX_BETREFFZEILE_ZEICHEN,
+            betreff_bereinigen,
+        )
+
+        zeile = str(praefix or "Maunting Service Manager")
+        if zusatz:
+            zeile += f": {zusatz}"
+        return betreff_bereinigen(zeile, grenze=MAX_BETREFFZEILE_ZEICHEN)
+
+    @staticmethod
+    def _ai_mailtext(mailtext, *, fakt: str, rueckfall: str) -> tuple[str, list[str], list[str], str | None]:
+        """Betreff, Absaetze, Punkte und Schluss — vom Modell oder aus dem Code.
+
+        ``mailtext`` ist ein `ai_mail_text.Mailtext` oder ``None``. ``None``
+        heisst „das Modell konnte nicht“ und ist kein Fehler: dann steht der
+        feste Text in der Mail, und verschickt wird trotzdem. Der Verfassungs-
+        schritt darf den Versand verschoenern, aber niemals verhindern.
+
+        ``fakt`` ist der Satz des Panels und steht **immer** an erster Stelle,
+        auch wenn das Modell geschrieben hat. Er traegt das Ergebnis, und das
+        Ergebnis stammt aus dem Endzustand des Laufs, nicht aus der
+        Selbsteinschaetzung des Modells.
+        """
+        if mailtext is not None and getattr(mailtext, "absaetze", None):
+            return (
+                str(getattr(mailtext, "betreff", "") or ""),
+                [fakt] + list(mailtext.absaetze),
+                list(getattr(mailtext, "punkte", None) or []),
+                getattr(mailtext, "schluss", None),
+            )
+        return "", [fakt, rueckfall], [], None
+
+    # ── Rahmen und Rendern ────────────────────────────────────────────────
+    #
+    # Bis hierher rendern und senden die `send_ai_*`-Funktionen in einem Zug.
+    # Das ging, solange der Verfassungsschritt unmittelbar davor lag. Seit der
+    # Ausgangskorb die Angaben speichert und der Arbeiter daraus verfasst,
+    # entsteht **dieselbe** Mail an zwei Stellen: einmal beim Einreihen als
+    # Rueckfall und einmal im Arbeiter mit dem Modelltext. Zwei Stellen, die
+    # dasselbe zusammensetzen, laufen auseinander — die Textfassung dieser Mail
+    # trug einmal einen Sicherheitshinweis, den die HTML-Fassung nicht hatte,
+    # und niemand sah es.
+    #
+    # Deshalb ist es hier zerlegt: `ai_rahmen_*` sammelt je Anlass das, was das
+    # Panel beitraegt (und nur das — reine Funktionen, keine Datenbank, kein
+    # Versand), `ai_mail_rendern` macht daraus mit oder ohne Modelltext das
+    # fertige Tripel. Der Rahmen ist ein `dict`, weil er als JSON durch die
+    # Datenbank geht.
+
+    @staticmethod
+    def ai_rahmen_task(
+        username: str, *, task_title: str, plan_text: str, geschafft: bool
+    ) -> dict:
+        """Der Panelanteil des Aufgabenberichts.
+
+        `geschafft` ist der Endzustand des Laufs und bestimmt Ueberschrift und
+        Zustandswort. Ein Modell, das sich irrt oder beschoenigt, faerbt
+        hoechstens den Zusatz dahinter.
+        """
+        titel = (
+            "KI-Aufgabe erledigt" if geschafft else "KI-Aufgabe nicht abgeschlossen"
+        )
+        zustand = "erledigt" if geschafft else "nicht abgeschlossen"
+        return {
+            "username": str(username or ""),
+            "titel": titel,
+            "betreff_praefix": EmailService._ai_betreff_praefix(titel),
+            # Wonach der Betreff greift, wenn das Modell nichts geliefert hat.
+            "betreff_ersatz": str(task_title or ""),
+            "fakt": (
+                f'Deine KI-Aufgabe "{task_title}" ({plan_text}) war fällig. '
+                f"Ergebnis: {zustand}."
+            ),
+            "fusszeile": "Den vollständigen Verlauf findest du im KI-Chat des Panels.",
+        }
+
+    @staticmethod
+    def ai_rahmen_healing(
+        username: str,
+        *,
+        server_name: str,
+        incident_type: str,
+        geheilt: bool,
+        backup_name: str | None = None,
+    ) -> dict:
+        """Der Panelanteil des Heilungsberichts.
+
+        `geheilt` ist die Und-Verknuepfung aus Laufzustand und Vorfallzustand
+        (siehe `ai_guardian_report`) — eine Tatsache, keine Selbsteinschaetzung.
+        """
+        titel = (
+            "Guardian: Problem behoben" if geheilt
+            else "Guardian: Problem nicht behoben"
+        )
+        zustand = "behoben" if geheilt else "nicht behoben"
+        return {
+            "username": str(username or ""),
+            "titel": titel,
+            "betreff_praefix": EmailService._ai_betreff_praefix(titel),
+            "betreff_ersatz": str(server_name or ""),
+            "fakt": (
+                f'Auf dem Server "{server_name}" gab es eine Störung '
+                f"({incident_type}). Der KI-Assistent hat sie eigenständig "
+                f"bearbeitet. Ergebnis: {zustand}."
+            ),
+            "fusszeile": (
+                f"Vor dem Eingriff wurde ein Backup angelegt: {backup_name}"
+                if backup_name else None
+            ),
+        }
+
+    @staticmethod
+    def ai_rahmen_freigabe(
+        username: str,
+        *,
+        tool_name: str,
+        server_name: str,
+        token: str,
+        stunden: int,
+    ) -> dict:
+        """Der Panelanteil der Freigabemail — samt Link.
+
+        **Der Link wird hier gebaut, nicht vom Modell geschrieben.** Der
+        Systemprompt verbietet dem Modell Links, und `_ai_report_email_html`
+        maskiert jedes Modellfeld; ein Modell, das ueber eine praeparierte
+        Logzeile dazu gebracht wurde, eine Adresse zu nennen, koennte sonst
+        einen Phishing-Traeger in eine Mail setzen, die aussieht, als kaeme sie
+        vom Panel. Deshalb steht die Adresse im Rahmen, wird ueber `_cta_button`
+        gerendert und stammt aus `settings.panel_url`.
+
+        **Und sie zeigt auf eine Seite, nicht auf eine Aktion.** ``GET`` zeigt,
+        was ansteht; erst ein ``POST`` von dieser Seite entscheidet. Mailscanner
+        und Vorschaudienste klicken Links — ein GET, das ausfuehrt, waere ein
+        Servereingriff durch einen Virenscanner.
+
+        Der Werkzeugname bleibt roh stehen (``propose_file_delete`` und nicht
+        "Datei loeschen"): der Rahmen kennt keine Uebersetzungen, und ein hier
+        erfundener deutscher Name koennte von dem abweichen, was auf der
+        Freigabeseite steht. Die Seite loest ihn auf.
+        """
+        titel = "KI wartet auf deine Freigabe"
+        ziel = f' auf "{server_name}"' if server_name else ""
+        url = f"{settings.panel_url.rstrip('/')}/ai/freigabe/{token}"
+        return {
+            "username": str(username or ""),
+            "titel": titel,
+            "betreff_praefix": EmailService._ai_betreff_praefix(titel),
+            "betreff_ersatz": str(server_name or ""),
+            "fakt": (
+                f"Der KI-Assistent bearbeitet gerade eine Störung{ziel} und "
+                f'braucht dafür deine Zustimmung zu "{tool_name}". Der autonome '
+                "Modus führt diesen Schritt nicht von selbst aus."
+            ),
+            # Der Rueckfalltext, der beim Einreihen gerendert wird. Ab dem
+            # zweiten Zustellversuch ruft der Postausgang das Modell nicht mehr,
+            # und eine Freigabemail ohne diesen Satz waere eine Frage ohne
+            # Antwortmoeglichkeit.
+            "rueckfall": (
+                "Öffne den Link unten, dort siehst du den Vorgang und "
+                "entscheidest. Tust du nichts, passiert nichts: der Vorschlag "
+                f"verfällt nach {stunden} Stunden."
+            ),
+            "cta_url": url,
+            "cta_label": "Vorgang ansehen",
+            "fusszeile": (
+                f"Dieser Link gilt {stunden} Stunden und lässt sich genau "
+                "einmal verwenden. Gib ihn nicht weiter."
+            ),
+        }
+
+    @staticmethod
+    def ai_rahmen_worker(username: str, *, auftrag_titel: str, frage: bool) -> dict:
+        """Der Panelanteil einer Worker-Meldung (docs/agentic-framework.md).
+
+        Bewusst ohne Zustandswort im Titel: ob der Auftrag gelang, steht im
+        geschwaerzten Meldungstext, den das Modell verfasst — die Meldestelle
+        weiss es nicht, und ein geratenes "erledigt" im Betreff waere eine
+        Behauptung des Panels ueber etwas, das nur der Bericht selbst sagt.
+        """
+        titel = (
+            "Dein KI-Auftrag hat eine Frage" if frage
+            else "Dein KI-Auftrag hat berichtet"
+        )
+        return {
+            "username": str(username or ""),
+            "titel": titel,
+            "betreff_praefix": EmailService._ai_betreff_praefix(titel),
+            "betreff_ersatz": str(auftrag_titel or ""),
+            "fakt": (
+                f'Dein Auftrag "{auftrag_titel}" an den KI-Assistenten hat '
+                + ("eine Rückfrage gestellt." if frage else "ein Ergebnis gemeldet.")
+            ),
+            "fusszeile": "Den vollständigen Verlauf findest du im KI-Chat des Panels.",
+        }
+
+    #: Der feste Text der Testmail. Steht als Konstante da, seit ihn zwei
+    #: Stellen brauchen: `send_ai_test_email` und der Werkzeughandler, der die
+    #: Mail in den Ausgangskorb legt und dabei den Rueckfall gleich mitrendert.
+    #: Bei genau dieser Mail ist der Rueckfall wichtiger als bei den anderen
+    #: beiden — sie ist das Messgeraet fuer den Versandweg und darf nicht
+    #: ausgerechnet dann ausbleiben, wenn das Modell klemmt.
+    AI_TESTMAIL_RUECKFALL = (
+        "Wenn du sie liest, funktioniert der im Panel eingerichtete "
+        "Versandweg — und damit auch die Berichte, die dir die KI künftig "
+        "zu deinen Aufgaben und zu behobenen Störungen schickt."
+    )
+
+    @staticmethod
+    def ai_rahmen_test(username: str) -> dict:
+        """Der Panelanteil der Testmail.
+
+        Ohne Zustandswort und ohne Ersatzbetreff: hier gibt es kein Ergebnis zu
+        melden, die Mail beweist sich selbst, indem sie ankommt.
+        """
+        titel = "Testmail vom KI-Assistenten"
+        return {
+            "username": str(username or ""),
+            "titel": titel,
+            "betreff_praefix": EmailService._ai_betreff_praefix(titel),
+            "betreff_ersatz": "",
+            "fakt": "Diese Mail hat der KI-Assistent auf deine Bitte hin verschickt.",
+            "fusszeile": None,
+        }
+
+    @staticmethod
+    def ai_mail_rendern(
+        rahmen: dict, *, mailtext=None, rueckfall: str = ""
+    ) -> tuple[str, str, str]:
+        """Aus Rahmen und (optionalem) Modelltext die fertige Mail: Betreff, Text, HTML.
+
+        Rein: kein Versand, keine Datenbank, kein Modellaufruf. Genau deshalb ist
+        sie zweimal benutzbar — beim Einreihen in den Ausgangskorb, wo
+        ``mailtext`` ``None`` ist und der feste ``rueckfall`` traegt, und im
+        Arbeiter, wo der verfasste Text vorliegt und ``rueckfall`` nicht mehr
+        gebraucht wird.
+
+        ``rahmen`` kommt im zweiten Fall aus einem JSON-Feld der Datenbank und
+        kann deshalb alt, unvollstaendig oder von einer aelteren Fassung des
+        Codes sein. Jeder Zugriff ist entsprechend nachsichtig: ein fehlender
+        Schluessel kostet einen Satz, nie die Mail.
+        """
+        betreff, absaetze, punkte, schluss = EmailService._ai_mailtext(
+            mailtext, fakt=str(rahmen.get("fakt") or ""), rueckfall=rueckfall
+        )
+        zusatz = betreff or str(rahmen.get("betreff_ersatz") or "")
+        subject = EmailService._ai_betreffzeile_aus_praefix(
+            str(rahmen.get("betreff_praefix") or ""), zusatz
+        )
+        username = str(rahmen.get("username") or "")
+        titel = str(rahmen.get("titel") or "")
+        fusszeile = rahmen.get("fusszeile") or None
+        cta = None
+        if rahmen.get("cta_url"):
+            cta = (str(rahmen.get("cta_url")), str(rahmen.get("cta_label") or "Öffnen"))
+        body = EmailService._ai_report_email_text(
+            username, absaetze, punkte, schluss, fusszeile, cta
+        )
+        html_body = EmailService._ai_report_email_html(
+            username, titel, absaetze, punkte, schluss, fusszeile, cta
+        )
+        return subject, body, html_body
+
+    @staticmethod
+    async def send_ai_healing_report(
+        to: str,
+        username: str,
+        *,
+        server_name: str,
+        incident_type: str,
+        geheilt: bool,
+        bericht: str,
+        backup_name: str | None = None,
+        mailtext=None,
+    ) -> bool:
+        """Der Bericht der KI ueber eine Heilung, die ohne den Benutzer lief.
+
+        Anders als jede andere Mail dieser Datei steht der Fliesstext hier nicht
+        im Code: er stammt vom Modell — seit `ai_mail_text` sogar der Betreff.
+        Das hat zwei Folgen, und beide sind beruecksichtigt.
+
+        Erstens die Maskierung. Modelltext ist unvertrauenswuerdige Eingabe,
+        unabhaengig davon, was im Systemprompt steht — ein Modell, das ueber
+        eine praeparierte Logzeile dazu gebracht wurde, `<a href="...">` zu
+        schreiben, haette sonst einen Phishing-Traeger in einer Mail, die
+        aussieht, als kaeme sie vom Panel. Deshalb geht diese Mail durch
+        `_ai_report_email_html`, das **jedes** Feld maskiert, und nicht mehr
+        durch die Sicherheitsvorlage, die Fliesstext roh durchlaesst.
+
+        Zweitens die Ueberschrift. Sie kommt **nicht** vom Modell, sondern aus
+        `geheilt` — einer Tatsache des Panels. Ein Modell, das sich irrt oder
+        beschoenigt, soll nicht auch noch die Betreffzeile bestimmen; es darf
+        sie nur ergaenzen.
+        """
+        rahmen = EmailService.ai_rahmen_healing(
+            username,
+            server_name=server_name,
+            incident_type=incident_type,
+            geheilt=geheilt,
+            backup_name=backup_name,
+        )
+        subject, body, html_body = EmailService.ai_mail_rendern(
+            rahmen, mailtext=mailtext, rueckfall=bericht
+        )
+        return await EmailService.send_email(to, subject, body, html_body)
+
+    @staticmethod
+    async def send_ai_task_report(
+        to: str,
+        username: str,
+        *,
+        task_title: str,
+        plan_text: str,
+        geschafft: bool,
+        bericht: str,
+        mailtext=None,
+    ) -> bool:
+        """Der Bericht ueber einen stehenden Auftrag, der faellig war.
+
+        Dieselben zwei Regeln wie beim Heilungsbericht, aus denselben Gruenden:
+
+        Jedes Feld ist unvertrauenswuerdige Eingabe und wird maskiert. Das gilt
+        hier fuer **mehr** Felder als dort: auch der Name der Aufgabe und der
+        Plantext gehen letztlich auf etwas zurueck, das ein Mensch in einen Chat
+        getippt und ein Modell umformuliert hat.
+
+        Und die Ueberschrift kommt aus `geschafft`, einer Tatsache des Panels
+        (dem Endzustand des Laufs), nicht aus der Selbsteinschaetzung des
+        Modells. Ein Auftrag, der still gescheitert ist, ist die wichtigere
+        Nachricht von beiden — niemand sass davor.
+        """
+        rahmen = EmailService.ai_rahmen_task(
+            username,
+            task_title=task_title,
+            plan_text=plan_text,
+            geschafft=geschafft,
+        )
+        subject, body, html_body = EmailService.ai_mail_rendern(
+            rahmen, mailtext=mailtext, rueckfall=bericht
+        )
+        return await EmailService.send_email(to, subject, body, html_body)
+
+    @staticmethod
+    async def send_ai_test_email(to: str, username: str, *, mailtext=None) -> bool:
+        """Die Mail, mit der sich der eingerichtete Versandweg nachpruefen laesst.
+
+        Auch sie schreibt die KI selbst — der Betreiber hat ausdruecklich
+        verlangt, dass hier nichts Vorgefertigtes mehr steht. Der feste Text
+        bleibt trotzdem im Code, und das ist bei dieser Mail wichtiger als bei
+        den anderen beiden: sie ist das Messgeraet fuer den Versandweg. Eine
+        Testmail, die ausgerechnet dann ausbleibt, wenn das Modell klemmt,
+        misst das Falsche und laesst den Betreiber am Mailversand zweifeln.
+
+        Sie geht ueber `send_email` und damit ueber genau den Weg, den auch ein
+        Aufgaben- oder Heilungsbericht nimmt. Das ist der Zweck: getestet wird
+        nicht irgendein Versand, sondern der, auf den es spaeter ankommt.
+        """
+        subject, body, html_body = EmailService.ai_mail_rendern(
+            EmailService.ai_rahmen_test(username),
+            mailtext=mailtext,
+            rueckfall=EmailService.AI_TESTMAIL_RUECKFALL,
+        )
+        return await EmailService.send_email(to, subject, body, html_body)
+
+    @staticmethod
     async def send_server_installed_notification(to: str, username: str, server_name: str) -> bool:
-        subject = f"Maunting Server Manager — Server installiert: {server_name}"
+        subject = f"Maunting Service Manager — Server installiert: {server_name}"
         body = f"""Hallo {username},
 
 Der Server "{server_name}" wurde erfolgreich installiert und ist bereit.
 
-Maunting Server Manager
+Maunting Service Manager
 """
-        html = EmailService._notification_email_html(username, "Server installiert", f'Der Server "{server_name}" wurde erfolgreich installiert.')
+        html = EmailService._notification_email_html(
+            username, "Server installiert",
+            f'Der Server "{EmailService.html_text(server_name)}" wurde erfolgreich installiert.',
+        )
         return await EmailService.send_email(to, subject, body, html)
 
     @staticmethod
     async def send_user_added_to_server_notification(to: str, username: str, server_name: str, added_by: str) -> bool:
-        subject = f"Maunting Server Manager — Zu Server hinzugefügt: {server_name}"
+        subject = f"Maunting Service Manager — Zu Server hinzugefügt: {server_name}"
         body = f"""Hallo {username},
 
 Du wurdest von {added_by} zum Server "{server_name}" hinzugefügt.
 
-Maunting Server Manager
+Maunting Service Manager
 """
-        html = EmailService._notification_email_html(username, "Zu Server hinzugefügt", f'Du wurdest von <strong>{added_by}</strong> zum Server "{server_name}" hinzugefügt.')
+        html = EmailService._notification_email_html(
+            username, "Zu Server hinzugefügt",
+            f'Du wurdest von <strong>{EmailService.html_text(added_by)}</strong> '
+            f'zum Server "{EmailService.html_text(server_name)}" hinzugefügt.',
+        )
         return await EmailService.send_email(to, subject, body, html)
 
     # ------------------------------------------------------------------
@@ -493,7 +1128,7 @@ Maunting Server Manager
         passive Check einen Hinweis meldet. Für Steam blockiert dieser Hinweis
         keinen Start/Restart; SteamCMD-Validate läuft dort ohnehin.
         """
-        subject = f"Maunting Server Manager — Server-Update verfügbar: {server_name}"
+        subject = f"Maunting Service Manager — Server-Update verfügbar: {server_name}"
         body = f"""Hallo {username},
 
 [DE] Ein Update für die Server-Dateien von "{server_name}" ist verfügbar.
@@ -502,7 +1137,7 @@ Maunting Server Manager
 [EN] A server file update is available for "{server_name}".
      The update will be considered on the next restart.
 
-Maunting Server Manager
+Maunting Service Manager
 """
         html = EmailService._notification_email_html(
             username,
@@ -518,14 +1153,14 @@ Maunting Server Manager
         Typischer Aufruf aus Hintergrund-Check-Job (Scheduler), nachdem
         check_for_mod_updates() relevante Einträge geliefert hat.
         """
-        subject = f"Maunting Server Manager — Mod-Update verfügbar: {mod_name}"
+        subject = f"Maunting Service Manager — Mod-Update verfügbar: {mod_name}"
         body = f"""Hallo {username},
 
 [DE] Ein Update für den Mod "{mod_name}" auf Server "{server_name}" ist verfügbar.
 
 [EN] An update for the mod "{mod_name}" on server "{server_name}" is available.
 
-Maunting Server Manager
+Maunting Service Manager
 """
         html = EmailService._notification_email_html(
             username,
@@ -533,3 +1168,41 @@ Maunting Server Manager
             f'Ein Update für den Mod <strong>"{mod_name}"</strong> auf Server "{server_name}" ist verfügbar.'
         )
         return await EmailService.send_email(to, subject, body, html)
+
+    @staticmethod
+    async def send_calendar_reminder_notification(
+        to: str,
+        username: str,
+        title: str,
+        start_str: str,
+        location_str: str = "",
+        time_hint: str = "in 2 Tagen",
+    ) -> bool:
+        """Sendet E-Mail-Erinnerung für anstehende Kalendertermine (z. B. 2 Tage oder 1 Tag vorab)."""
+        subject = f"Terminerinnerung: {title} ({time_hint})"
+        loc_line = f"\nOrt: {location_str}" if location_str else ""
+        body = f"""Hallo {username},
+
+Erinnerung an deinen bevorstehenden Termin {time_hint}:
+
+Termin: {title}
+Zeitpunkt: {start_str}{loc_line}
+
+Maunting Studios Zeitmanagement
+"""
+        loc_html = f"<p><strong>Ort:</strong> {html.escape(location_str)}</p>" if location_str else ""
+        content_html = f"""
+<p>Erinnerung an deinen bevorstehenden Termin <strong>{time_hint}</strong>:</p>
+<div style="background: rgba(255,255,255,0.05); padding: 12px 16px; border-radius: 8px; margin: 12px 0; border: 1px solid rgba(255,255,255,0.1);">
+  <p style="margin: 0 0 6px 0; font-size: 16px; font-weight: bold; color: #fff;">{html.escape(title)}</p>
+  <p style="margin: 0; color: #cbd5e1;"><strong>Zeitpunkt:</strong> {html.escape(start_str)}</p>
+  {loc_html}
+</div>
+"""
+        email_html = EmailService._notification_email_html(
+            username,
+            f"Terminerinnerung ({time_hint})",
+            content_html,
+        )
+        return await EmailService.send_email(to, subject, body, email_html)
+
