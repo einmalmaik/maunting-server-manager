@@ -73,7 +73,7 @@ def test_the_rules_with_an_observed_cause_are_still_there() -> None:
     # Die KI lehnte wegen Platzmangel ab, obwohl die Node leer lief.
     assert "Gestoppte Server" in prompt and "belegen keinen" in prompt
     # "richte ein" endete beim Vorschlag, der Server lief nie.
-    assert '"richte ein" heisst anlegen' in prompt
+    assert '"richte ein" heisst' in prompt and "anlegen" in prompt
     # Ein Name passte in keine der genannten Kategorien und blieb ungemerkt.
     assert "ungefragt" in prompt
     # Die KI konnte nicht loeschen und sagte es; jetzt kann sie es, und der

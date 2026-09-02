@@ -336,18 +336,25 @@ class TestGitHubTokenEndpoints:
         assert body["github_token_source"] == "none"
         clear_panel_token()
 
-    def test_env_token_wins_over_panel(
+    def test_panel_token_wins_over_env_and_env_fallback(
         self, client: TestClient, owner_cookies: dict, csrf_token: str, monkeypatch: pytest.MonkeyPatch
     ):
         from services.github_token_service import clear_panel_token, set_panel_token
 
-        set_panel_token("ghp_panel")
         monkeypatch.setenv("MSM_GITHUB_CLONE_TOKEN", "ghp_env_wins")
+        set_panel_token("ghp_panel")
         res = client.get("/api/settings/github-token", cookies=owner_cookies)
         assert res.status_code == 200
         body = res.json()
-        assert body["source"] == "env"
+        assert body["source"] == "panel"
         assert body["configured"] is True
+
+        clear_panel_token()
+        res_fallback = client.get("/api/settings/github-token", cookies=owner_cookies)
+        assert res_fallback.status_code == 200
+        body_fallback = res_fallback.json()
+        assert body_fallback["source"] == "env"
+        assert body_fallback["configured"] is True
         clear_panel_token()
 
     def test_get_full_settings_includes_github_token_fields(

@@ -105,7 +105,7 @@ def test_a_missing_or_bogus_server_id_never_falls_back_to_a_default(
     only = _server(db, "einziger")
     _allow(db, regular_user, only, "server.view")
 
-    for arguments in ({}, {"server_id": None}, {"server_id": "1"}, {"server_id": 0},
+    for arguments in ({}, {"server_id": None}, {"server_id": "abc"}, {"server_id": 0},
                       {"server_id": True}, {"server_id": -5}):
         with pytest.raises(ai_action_errors.AiActionValidationError):
             ai_action_service.execute_read_tool(

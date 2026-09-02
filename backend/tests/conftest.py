@@ -374,6 +374,9 @@ def client(db: Session) -> TestClient:
 
 @pytest.fixture
 def owner_user(db: Session) -> User:
+    existing = db.query(User).filter(User.username == "owner").first()
+    if existing:
+        return existing
     user = AuthService.create_owner(db, "owner", "owner@test.de", "OwnerPass123!")
     db.refresh(user)
     return user
@@ -381,6 +384,9 @@ def owner_user(db: Session) -> User:
 
 @pytest.fixture
 def regular_user(db: Session) -> User:
+    existing = db.query(User).filter(User.username == "user1").first()
+    if existing:
+        return existing
     user = AuthService.create_user(db, "user1", "user1@test.de", "UserPass123!")
     user.email_verified = True
     db.commit()
@@ -390,6 +396,9 @@ def regular_user(db: Session) -> User:
 
 @pytest.fixture
 def inactive_user(db: Session) -> User:
+    existing = db.query(User).filter(User.username == "inactive").first()
+    if existing:
+        return existing
     user = AuthService.create_user(db, "inactive", "inactive@test.de", "Inactive123!")
     user.is_active = False
     db.commit()

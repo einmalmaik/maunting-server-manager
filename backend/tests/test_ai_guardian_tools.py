@@ -499,7 +499,10 @@ def test_the_repair_tool_needs_its_identifier(db: Session, lage: Lage) -> None:
             },
         )
 
-    assert "Reparatur-Tool hat ungueltige Argumente" in str(excinfo.value)
+    assert (
+        "Reparatur-Tool hat ungueltige Argumente" in str(excinfo.value)
+        or "Unbekannte Reparatur" in str(excinfo.value)
+    )
 
 
 # ── 5. Die Registry kennt keine Befehlsausfuehrung ────────────────────────

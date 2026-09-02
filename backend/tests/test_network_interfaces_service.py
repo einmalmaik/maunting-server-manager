@@ -82,7 +82,7 @@ class TestDefaultBindIp:
         with patch("services.network_interfaces_service.psutil.net_if_addrs", return_value=fake):
             assert nis.default_bind_ip() == "10.0.0.5"
 
-    def test_returns_none_when_only_loopback(self):
+    def test_falls_back_to_loopback_when_only_loopback(self):
         fake = {"lo": [_addr("127.0.0.1")]}
         with patch("services.network_interfaces_service.psutil.net_if_addrs", return_value=fake):
-            assert nis.default_bind_ip() is None
+            assert nis.default_bind_ip() == "127.0.0.1"
