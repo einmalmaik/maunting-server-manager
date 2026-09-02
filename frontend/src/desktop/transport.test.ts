@@ -98,4 +98,27 @@ describe('native Sitzung', () => {
     // Das verbrannte Token fliegt aus dem Tresor — Aufheben waere riskant.
     expect(invokeMock).toHaveBeenCalledWith('refresh_token_loeschen')
   })
+
+  it('ein Netzwerkfehler/Timeout beim Refresh loescht das Tresor-Token NICHT (Offline-Resilienz)', async () => {
+    invokeMock.mockImplementation((befehl: string) => {
+      if (befehl === 'refresh_token_laden') return Promise.resolve('gueltiges-tresor-token')
+      return Promise.resolve(null)
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((eingabe: RequestInfo | URL) => {
+        const url = String(eingabe)
+        if (url.endsWith('/auth/refresh')) {
+          return Promise.reject(new TypeError('Failed to fetch (Offline / Flugmodus)'))
+        }
+        return Promise.resolve(antwort(401, {}))
+      }),
+    )
+
+    const { stillAnmeldenDetail } = await import('./transport')
+    const ergebnis = await stillAnmeldenDetail(500)
+    expect(ergebnis.status).toBe('offline')
+    // WICHTIG: Das Tresor-Token darf bei Offline-Fehlern NICHT gelöscht werden!
+    expect(invokeMock).not.toHaveBeenCalledWith('refresh_token_loeschen')
+  })
 })

@@ -257,4 +257,24 @@ describe('DesktopApp', () => {
       expect(screen.getByRole('button', { name: i18n.t('mss.einstellungen.banner.computerUseLink') })).toBeInTheDocument()
     })
   })
+
+  it('beim Start ohne Internet/Server erreichbar oeffnet die App direkt den Offline-Modus', async () => {
+    konfigMock({
+      backend_url: 'https://api.example.com',
+      sandbox_pfad: 'C:\\Users\\tester\\MSS-Sandbox',
+      eingerichtet: true,
+    })
+    // Server antwortet gar nicht / Offline
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new TypeError('Failed to fetch (Offline / Flugmodus)'))),
+    )
+
+    render(<DesktopApp />)
+    // Landet direkt in der Hauptansicht (bereit), nicht im Wizard
+    await waitFor(() => {
+      expect(screen.getByTestId('ki-seite')).toBeInTheDocument()
+    })
+    expect(screen.queryByText(i18n.t('mss.wizard.codeLabel'))).not.toBeInTheDocument()
+  })
 })

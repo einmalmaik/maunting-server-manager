@@ -29,6 +29,7 @@ import {
   loadCalendarEventsOfflineFirst,
   saveCalendarEventOffline,
   deleteCalendarEventOffline,
+  useEntitySync,
 } from '@/lib/offlineSync'
 
 export type EventCategoryType = 'personal' | 'team' | 'server' | 'node'
@@ -193,35 +194,23 @@ export function Calendar() {
       .catch(() => {})
   }, [])
 
+  const { isOnline, isLive, outboxCount } = useEntitySync('calendar', () => {
+    fetchEvents()
+  })
+
   useEffect(() => {
     fetchEvents()
 
-    // Automatische Aktualisierung in Echtzeit alle 10 Sekunden (still im Hintergrund)
-    const interval = setInterval(() => {
-      loadCalendarEventsOfflineFirst(rangeStart, rangeEnd, selectedCategory)
-        .then(({ events: data }) => {
-          if (Array.isArray(data)) setEvents(data)
-        })
-        .catch(() => {})
-    }, 10_000)
-
-    const handleFocusOrUpdate = () => {
-      loadCalendarEventsOfflineFirst(rangeStart, rangeEnd, selectedCategory)
-        .then(({ events: data }) => {
-          if (Array.isArray(data)) setEvents(data)
-        })
-        .catch(() => {})
+    const handleFocus = () => {
+      fetchEvents()
     }
 
-    window.addEventListener('focus', handleFocusOrUpdate)
-    window.addEventListener('msm:calendar-updated', handleFocusOrUpdate)
+    window.addEventListener('focus', handleFocus)
 
     return () => {
-      clearInterval(interval)
-      window.removeEventListener('focus', handleFocusOrUpdate)
-      window.removeEventListener('msm:calendar-updated', handleFocusOrUpdate)
+      window.removeEventListener('focus', handleFocus)
     }
-  }, [rangeStart, rangeEnd, selectedCategory, fetchEvents])
+  }, [fetchEvents])
 
   const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(null)
   const [animationClass, setAnimationClass] = useState('')

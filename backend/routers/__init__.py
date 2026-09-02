@@ -43,6 +43,7 @@ from .user_integrations import router as user_integrations_router
 from .popups import router as popups_router
 from .calendar import router as calendar_router
 from .notes import router as notes_router
+from .sync_events import router as sync_events_router, sync_alias_router
 
 __all__ = [
     "auth_router",
@@ -91,4 +92,6 @@ __all__ = [
     "popups_router",
     "calendar_router",
     "notes_router",
+    "sync_events_router",
+    "sync_alias_router",
 ]  # noqa: E501

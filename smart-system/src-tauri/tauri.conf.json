@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Maunting Smart System",
   "mainBinaryName": "MauntingSmartSystem",
-  "version": "0.1.0",
+  "version": "4.0.0",
   "identifier": "com.mauntingstudios.smart-system",
   "build": {
     "beforeDevCommand": "npm --prefix ../frontend run dev:desktop",
@@ -57,7 +57,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQyODVGRUU0NUFGRjdCNTkKUldSWmUvOWE1UDZGUWxySngrT0pPcERHU21lamxjUHlRS3dTSnpFRnlucHIzK3hGcDFVN1o3blEK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE1QjEzNDY1RDUxNjEzNTIKUldSU0V4YlZaVFN4RldBU3BTdmZxVWc2bXkzYUloYmxBWGl0czUrTk9ESFhiclp1U2pEYkNBWFoK",
       "endpoints": [
         "https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/latest.json"
       ]
