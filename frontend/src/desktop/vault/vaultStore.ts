@@ -143,6 +143,8 @@ interface VaultState {
   syncWithServer: () => Promise<void>
   saveHint: (hint: string) => Promise<void>
   requestHintEmail: () => Promise<{ ok: boolean; message: string }>
+  hasHint: boolean | null
+  checkHintStatus: () => Promise<boolean>
 }
 
 export const useVaultStore = create<VaultState>((set, get) => ({
@@ -157,6 +159,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   searchQuery: '',
   syncStatus: 'synced',
   lastSyncTime: null,
+  hasHint: null,
 
   autoLockMinutes: typeof localStorage !== 'undefined'
     ? parseInt(localStorage.getItem(VAULT_AUTOLOCK_MINUTES_KEY) || '15', 10)
@@ -449,8 +452,9 @@ export const useVaultStore = create<VaultState>((set, get) => ({
         selectedItemId: decryptedItems.length > 0 ? decryptedItems[0].id : null,
       })
 
-      // Hintergrund-Sync anstoßen
+      // Hintergrund-Sync & Hinweis-Status anstoßen
       void get().syncWithServer()
+      void get().checkHintStatus()
 
       return true
     } catch (err: unknown) {
@@ -729,8 +733,20 @@ export const useVaultStore = create<VaultState>((set, get) => ({
         method: 'POST',
         body: JSON.stringify({ hint: hint.trim() }),
       })
+      set({ hasHint: true })
     } catch {
       // Offline / Fehler leise ignorieren oder später syncen
+    }
+  },
+
+  checkHintStatus: async () => {
+    try {
+      const res = await api<{ has_hint: boolean }>('/api/vault/hint-status')
+      const has = !!res.has_hint
+      set({ hasHint: has })
+      return has
+    } catch {
+      return false
     }
   },
 

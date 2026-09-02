@@ -11,6 +11,7 @@ import {
   HelpCircle,
   KeyRound,
   Lock,
+  Mail,
   Plus,
   QrCode,
   RefreshCw,
@@ -95,6 +96,24 @@ export function VaultView() {
       document.removeEventListener('visibilitychange', handleVis)
     }
   }, [isUnlocked])
+
+  const hasHint = useVaultStore((s) => s.hasHint)
+  const checkHintStatus = useVaultStore((s) => s.checkHintStatus)
+
+  // Ersteinrichtung
+  const [skipHintSetup, setSkipHintSetup] = useState(false)
+
+  // Nachträglicher Hinweis-Modal & Banner
+  const [isHintModalOpen, setIsHintModalOpen] = useState(false)
+  const [editHintInput, setEditHintInput] = useState('')
+  const [isSavingHint, setIsSavingHint] = useState(false)
+  const [dismissedHintReminder, setDismissedHintReminder] = useState(false)
+
+  useEffect(() => {
+    if (isUnlocked) {
+      void checkHintStatus()
+    }
+  }, [isUnlocked, checkHintStatus])
 
   // UI-Zustände für Sperre & Ersteinrichtung
   const [isSetupMode, setIsSetupMode] = useState(!isInitialized)
@@ -345,6 +364,7 @@ export function VaultView() {
     const canSubmitSetup =
       masterPasswordInput.length >= 8 &&
       masterPasswordInput === confirmPasswordInput &&
+      (hintInput.trim().length > 0 || skipHintSetup) &&
       !isUnlocking
 
     return (
@@ -374,6 +394,7 @@ export function VaultView() {
                 setMasterPasswordInput('')
                 setConfirmPasswordInput('')
                 setHintInput('')
+                setSkipHintSetup(false)
                 setIsSetupMode(false)
                 toast.success('Passwort-Manager eingerichtet')
               }
@@ -439,18 +460,37 @@ export function VaultView() {
               )}
             </div>
 
-            {/* Optionaler Passwort-Hinweis */}
-            <div>
-              <label className="block text-[11px] font-medium text-on-surface-variant mb-1">
-                Passwort-Hinweis (optional)
-              </label>
+            {/* Passwort-Hinweis (Pflicht / Optionale Ablehnung) */}
+            <div className="space-y-1.5 pt-1 border-t border-outline-variant/20">
+              <div className="flex items-center justify-between">
+                <label className="block text-[11px] font-medium text-on-surface">
+                  Passwort-Hinweis {!skipHintSetup && <span className="text-primary font-bold">*</span>}
+                </label>
+                <span className="text-[10px] text-on-surface-variant">
+                  Wird bei Verlust per E-Mail gesendet
+                </span>
+              </div>
               <input
                 type="text"
-                value={hintInput}
+                disabled={skipHintSetup}
+                value={skipHintSetup ? '' : hintInput}
                 onChange={(e) => setHintInput(e.target.value)}
-                placeholder="Erinnerungshilfe, z. B. erste Schule"
-                className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary"
+                placeholder={skipHintSetup ? 'Kein Hinweis (bewusst abgelehnt)' : 'z. B. Name der ersten Grundschule'}
+                className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary disabled:opacity-50"
               />
+
+              <label className="flex items-center gap-2 cursor-pointer pt-0.5 text-[11px] text-on-surface-variant hover:text-on-surface">
+                <input
+                  type="checkbox"
+                  checked={skipHintSetup}
+                  onChange={(e) => {
+                    setSkipHintSetup(e.target.checked)
+                    if (e.target.checked) setHintInput('')
+                  }}
+                  className="rounded border-outline-variant/40 text-primary focus:ring-primary h-3.5 w-3.5"
+                />
+                <span>Ohne Notfall-Hinweis fortfahren (nicht empfohlen)</span>
+              </label>
             </div>
 
             {unlockError && (
@@ -462,9 +502,13 @@ export function VaultView() {
             <Button
               type="submit"
               disabled={!canSubmitSetup}
-              className="w-full bg-primary text-on-primary hover:bg-primary-hover py-2 text-xs"
+              className="w-full bg-primary text-on-primary hover:bg-primary-hover py-2 text-xs font-medium"
             >
-              {isUnlocking ? 'Richte ein...' : 'Einrichten'}
+              {isUnlocking
+                ? 'Richte ein...'
+                : !hintInput.trim() && !skipHintSetup && masterPasswordInput.length >= 8 && masterPasswordInput === confirmPasswordInput
+                  ? 'Hinweis angeben oder ablehnen'
+                  : 'Einrichten'}
             </Button>
           </form>
 
@@ -796,6 +840,19 @@ export function VaultView() {
           <Button
             size="sm"
             variant="ghost"
+            onClick={() => {
+              setEditHintInput('')
+              setIsHintModalOpen(true)
+            }}
+            title="Passwort-Hinweis verwalten"
+            className={`p-1.5 ${hasHint === false ? 'text-amber-400 hover:text-amber-300' : 'text-on-surface-variant hover:text-on-surface'}`}
+          >
+            <KeyRound className="h-3.5 w-3.5" />
+          </Button>
+
+          <Button
+            size="sm"
+            variant="ghost"
             onClick={lock}
             title="Sperren"
             className="text-on-surface-variant hover:text-status-error p-1.5"
@@ -818,6 +875,76 @@ export function VaultView() {
           />
         </div>
       </div>
+
+      {/* HINWEIS-ERINNERUNG: Wenn nach dem Entsperren noch kein Hinweis hinterlegt ist */}
+      {hasHint === false && !dismissedHintReminder && (
+        <div className="mx-4 mt-2.5 p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-on-surface shadow-xs">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-amber-500/20 text-amber-400">
+                <KeyRound className="h-4 w-4" />
+              </div>
+              <div>
+                <h3 className="text-xs font-bold text-on-surface">Kein Notfall-Passwort-Hinweis hinterlegt</h3>
+                <p className="text-[11px] text-on-surface-variant mt-0.5">
+                  Falls du dein Master-Passwort vergisst, kann dir dieser Hinweis per E-Mail gesendet werden.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDismissedHintReminder(true)}
+              className="text-on-surface-variant hover:text-on-surface p-1 rounded-lg"
+              title="Schließen"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault()
+              if (!editHintInput.trim() || isSavingHint) return
+              setIsSavingHint(true)
+              try {
+                await saveHint(editHintInput.trim())
+                toast.success('Passwort-Hinweis erfolgreich hinterlegt')
+                setEditHintInput('')
+              } catch {
+                toast.error('Fehler beim Speichern des Hinweises')
+              } finally {
+                setIsSavingHint(false)
+              }
+            }}
+            className="mt-2.5 flex items-center gap-2"
+          >
+            <input
+              type="text"
+              value={editHintInput}
+              onChange={(e) => setEditHintInput(e.target.value)}
+              placeholder="z. B. Name der ersten Grundschule..."
+              className="flex-1 rounded-xl bg-surface border border-outline-variant/30 px-3 py-1.5 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-amber-500"
+            />
+            <Button
+              type="submit"
+              disabled={!editHintInput.trim() || isSavingHint}
+              size="sm"
+              className="bg-amber-500 hover:bg-amber-600 text-black font-semibold text-xs px-3 py-1.5 shrink-0"
+            >
+              {isSavingHint ? 'Speichert...' : 'Hinweis speichern'}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setDismissedHintReminder(true)}
+              className="text-xs text-on-surface-variant hover:text-on-surface px-2.5 py-1.5 shrink-0"
+            >
+              Später
+            </Button>
+          </form>
+        </div>
+      )}
 
       {/* LISTE / TABELLE */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
@@ -1076,6 +1203,113 @@ export function VaultView() {
         onClose={() => setShowQrScanner(false)}
         onDetected={handleQrDetected}
       />
+
+      {/* Modal: Passwort-Hinweis verwalten */}
+      {isHintModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="w-full max-w-sm rounded-2xl bg-surface-container border border-outline-variant/30 p-5 space-y-4 shadow-xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <KeyRound className="h-4 w-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold text-on-surface">Passwort-Hinweis</h3>
+                  <p className="text-[10px] text-on-surface-variant">
+                    {hasHint ? 'Aktuell ist ein Hinweis hinterlegt' : 'Noch kein Hinweis hinterlegt'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsHintModalOpen(false)}
+                className="text-on-surface-variant hover:text-on-surface p-1 rounded-lg"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault()
+                if (!editHintInput.trim() || isSavingHint) return
+                setIsSavingHint(true)
+                try {
+                  await saveHint(editHintInput.trim())
+                  toast.success('Passwort-Hinweis erfolgreich gespeichert')
+                  setEditHintInput('')
+                  setIsHintModalOpen(false)
+                } catch {
+                  toast.error('Fehler beim Speichern des Hinweises')
+                } finally {
+                  setIsSavingHint(false)
+                }
+              }}
+              className="space-y-3"
+            >
+              <div>
+                <label className="block text-[11px] font-medium text-on-surface mb-1">
+                  {hasHint ? 'Hinweis aktualisieren / neu setzen' : 'Neuen Hinweis hinterlegen'}
+                </label>
+                <input
+                  type="text"
+                  value={editHintInput}
+                  onChange={(e) => setEditHintInput(e.target.value)}
+                  placeholder="z. B. Name der ersten Grundschule..."
+                  className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary"
+                  autoFocus
+                />
+                <p className="text-[10px] text-on-surface-variant/80 mt-1 leading-relaxed">
+                  Dieser Hinweis wird verschlüsselt gespeichert und kann dir per E-Mail gesendet werden, falls du dein Master-Passwort vergisst.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between pt-1">
+                {hasHint && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={isRequestingHint}
+                    onClick={async () => {
+                      setIsRequestingHint(true)
+                      const res = await requestHintEmail()
+                      setIsRequestingHint(false)
+                      if (res.ok) {
+                        toast.success(res.message)
+                      } else {
+                        toast.error(res.message)
+                      }
+                    }}
+                    className="text-[11px] py-1.5 px-2.5 flex items-center gap-1.5"
+                  >
+                    <Mail className="h-3.5 w-3.5" />
+                    <span>{isRequestingHint ? 'Sende...' : 'Per E-Mail testen'}</span>
+                  </Button>
+                )}
+                {!hasHint && <div />}
+
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setIsHintModalOpen(false)}
+                    className="text-xs text-on-surface-variant px-2.5 py-1.5"
+                  >
+                    Schließen
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={!editHintInput.trim() || isSavingHint}
+                    className="bg-primary text-on-primary hover:bg-primary-hover text-xs px-3 py-1.5"
+                  >
+                    {isSavingHint ? 'Speichert...' : 'Speichern'}
+                  </Button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
