@@ -67,7 +67,7 @@ describe('buildNavigation', () => {
     expect(nav.some((i) => i.to === '/admin/audit')).toBe(true)
   })
 
-  it('shows AI only for AI chat, skill management, or owner', () => {
+  it('shows AI only for AI chat, skill management, or owner under Infrastructure', () => {
     const access = {
       owner: false,
       canManageUsers: false,
@@ -80,7 +80,10 @@ describe('buildNavigation', () => {
       canUseAi: true,
       canUseSkills: false,
     }
-    expect(buildNavigation(labels, access).some((item) => item.to === '/ai')).toBe(true)
+    const items = buildNavigation(labels, access)
+    const aiItem = items.find((item) => item.to === '/ai')
+    expect(aiItem).toBeDefined()
+    expect(aiItem?.group).toBe('Infrastructure')
     expect(buildNavigation(labels, { ...access, canUseAi: false }).some((item) => item.to === '/ai')).toBe(false)
   })
 

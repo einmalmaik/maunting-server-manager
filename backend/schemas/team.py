@@ -34,6 +34,7 @@ class TeamServerGrantWrite(BaseModel):
 class TeamMemberResponse(BaseModel):
     user_id: int
     username: str
+    avatar_url: str | None = None
     role: Literal["owner", "member"]
     can_manage_skills: bool
     can_manage_memory: bool
@@ -52,6 +53,7 @@ class TeamInvitationResponse(BaseModel):
     team_name: str
     user_id: int
     username: str
+    avatar_url: str | None = None
     invited_by_username: str | None
     can_manage_skills: bool
     can_manage_memory: bool

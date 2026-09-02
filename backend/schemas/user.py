@@ -112,6 +112,7 @@ class UserResponse(BaseModel):
     ai_provider_id: int | None = None
     role_id: int | None = None
     role_ids: list[int] = Field(default_factory=list)
+    avatar_url: str | None = None
     created_at: datetime
 
     class Config:

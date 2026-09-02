@@ -13,6 +13,7 @@ import type { Server, User } from '@/types'
 import type { Role } from '@/types/permissions'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 import { MultiSelect } from '@/Singra/UI/MultiSelect'
+import { Avatar } from '@/Singra/UI'
 
 export function Users() {
   const { t } = useTranslation()
@@ -384,12 +385,11 @@ export function Users() {
                   className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-3 px-4 py-4 transition-colors last:rounded-b-lg hover:bg-surface-container-high/30 md:grid-cols-[minmax(9rem,1fr)_minmax(12rem,1.35fr)_7rem_minmax(10rem,12rem)_2.75rem] md:items-center md:gap-4 md:px-5"
                 >
                   <div className="flex min-w-0 items-center gap-3">
-                    <span
-                      aria-hidden="true"
-                      className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-outline-variant/50 bg-surface-container-high font-label-md text-xs font-semibold text-primary"
-                    >
-                      {user.username.slice(0, 2).toLocaleUpperCase()}
-                    </span>
+                    <Avatar
+                      src={user.avatar_url}
+                      name={user.username}
+                      size="sm"
+                    />
                     <span className="min-w-0">
                       <span className="flex items-center gap-1.5 break-words font-body-md text-sm font-semibold text-on-surface">
                         {user.is_owner && <Shield aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-status-warning" />}

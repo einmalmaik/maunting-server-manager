@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { AudioLines, CalendarClock, Check, ListPlus, Loader2, Mic, Paperclip, Pencil, Send, ShieldAlert, Sparkles, Square, Trash2, User, X, Zap } from 'lucide-react'
+import { AudioLines, CalendarClock, Check, ListPlus, Loader2, Mic, Paperclip, Pencil, Send, ShieldAlert, Sparkles, Square, Trash2, X, Zap } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 
@@ -13,7 +13,7 @@ import {
   type AiRunInfo,
 } from '@/api/ai'
 import { api, SanitizedApiError } from '@/api/client'
-import { Button, Dropdown } from '@/Singra/UI'
+import { Button, Dropdown, Avatar } from '@/Singra/UI'
 import {
   aiChatPreferenceKeys,
   readClosedGeoAnalysis,
@@ -140,8 +140,8 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
   const canUseVoice = useHasPermission('ai.voice.use')
   // Modell und Denkstufe merkt sich der Browser — je Benutzer, begruendet in
   // `aiChatPreferences`. Die Kennung kommt aus dem Auth-Store statt aus einer
-  // Prop, damit keine Einbindung sie vergessen kann.
-  const userId = useAuthStore((state) => state.user?.id ?? 'anonym')
+  const currentUser = useAuthStore((state) => state.user)
+  const userId = currentUser?.id ?? 'anonym'
   const merkSchluessel = useMemo(() => aiChatPreferenceKeys(userId), [userId])
 
   const [skillsModalOpen, setSkillsModalOpen] = useState(false)
@@ -1324,9 +1324,12 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
                         </div>
                       </>
                     )}
-                    <span className="mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-surface-container-high text-on-surface-variant">
-                      <User className="h-3.5 w-3.5" aria-hidden="true" />
-                    </span>
+                    <Avatar
+                      src={currentUser?.avatar_url}
+                      name={currentUser?.username}
+                      size="xs"
+                      className="mt-1 shrink-0"
+                    />
                   </article>
                 )
               }

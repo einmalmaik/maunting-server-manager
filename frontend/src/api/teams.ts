@@ -10,6 +10,7 @@ import { api } from './client'
 export interface TeamMember {
   user_id: number
   username: string
+  avatar_url?: string | null
   role: 'owner' | 'member'
   can_manage_skills: boolean
   can_manage_memory: boolean
@@ -30,6 +31,7 @@ export interface TeamInvitation {
   team_name: string
   user_id: number
   username: string
+  avatar_url?: string | null
   invited_by_username: string | null
   can_manage_skills: boolean
   can_manage_memory: boolean

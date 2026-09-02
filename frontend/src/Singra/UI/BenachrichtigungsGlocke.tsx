@@ -9,9 +9,10 @@ import { Switch } from '@/components/ui/Switch'
 interface BenachrichtigungsGlockeProps {
   className?: string
   align?: 'left' | 'right'
+  placement?: 'top' | 'bottom'
 }
 
-export function BenachrichtigungsGlocke({ className = '', align = 'right' }: BenachrichtigungsGlockeProps) {
+export function BenachrichtigungsGlocke({ className = '', align = 'right', placement = 'top' }: BenachrichtigungsGlockeProps) {
   const { t } = useTranslation()
   const { user, updateUser } = useAuthStore()
 
@@ -82,6 +83,7 @@ export function BenachrichtigungsGlocke({ className = '', align = 'right' }: Ben
   }
 
   const alignClass = align === 'left' ? 'left-0' : 'right-0'
+  const placementClass = placement === 'top' ? 'bottom-full mb-2' : 'top-full mt-2'
 
   return (
     <div className={`relative ${className}`} ref={bellRef}>
@@ -107,7 +109,7 @@ export function BenachrichtigungsGlocke({ className = '', align = 'right' }: Ben
       {bellOpen && (
         <div
           role="menu"
-          className={`absolute ${alignClass} top-full mt-2 w-80 bg-surface-container-high border border-outline-variant rounded-lg shadow-lg z-50 overflow-hidden`}
+          className={`absolute ${alignClass} ${placementClass} w-72 sm:w-80 max-w-[calc(100vw-2rem)] bg-surface-container-high border border-outline-variant rounded-lg shadow-xl z-50 overflow-hidden`}
         >
           <div className="p-3 border-b border-outline-variant/30">
             <p className="font-label-md text-sm text-on-surface font-medium">

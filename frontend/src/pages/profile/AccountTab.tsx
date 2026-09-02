@@ -1,19 +1,66 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
-import { Mail, AlertTriangle, Clock, Globe, MapPin, Save, ShieldCheck } from 'lucide-react'
-import { Button, Dropdown, type DropdownOption } from '@/Singra/UI'
+import { Mail, AlertTriangle, Clock, Globe, MapPin, Save, ShieldCheck, Trash2, Camera, Loader2 } from 'lucide-react'
+import { Avatar, Button, Dropdown, type DropdownOption } from '@/Singra/UI'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 
 import { getAvailableTimezones } from '@/utils/timeFormat'
 
 /**
- * Tab: Account-Info (Username, E-Mail, Verify-Status) & Zeitzonen-Einstellung.
+ * Tab: Account-Info (Username, E-Mail, Verify-Status, Profilbild) & Zeitzonen-Einstellung.
  */
 export function AccountTab() {
   const { t } = useTranslation()
   const { user, updateUser } = useAuthStore()
+
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [uploadingAvatar, setUploadingAvatar] = useState(false)
+
+  const handleAvatarChange = async (file?: File | null) => {
+    if (!file) return
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error(t('profile.avatarSizeLimit', 'Das Profilbild darf maximal 5 MB groß sein.'))
+      return
+    }
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+    if (!allowedTypes.includes(file.type)) {
+      toast.error(t('profile.avatarInvalidType', 'Erlaubte Formate sind JPEG, PNG, WebP und GIF.'))
+      return
+    }
+
+    setUploadingAvatar(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await api<any>('/auth/me/avatar', {
+        method: 'POST',
+        body: formData,
+      })
+      updateUser({ avatar_url: res.avatar_url })
+      toast.success(t('profile.avatarUpdated', 'Profilbild erfolgreich aktualisiert.'))
+    } catch (err: any) {
+      toast.error(err?.detail || t('profile.avatarUpdateFailed', 'Profilbild konnte nicht hochgeladen werden.'))
+    } finally {
+      setUploadingAvatar(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  const handleDeleteAvatar = async () => {
+    if (!user?.avatar_url) return
+    setUploadingAvatar(true)
+    try {
+      await api<any>('/auth/me/avatar', { method: 'DELETE' })
+      updateUser({ avatar_url: null })
+      toast.success(t('profile.avatarRemoved', 'Profilbild wurde entfernt.'))
+    } catch (err: any) {
+      toast.error(err?.detail || t('profile.avatarRemoveFailed', 'Profilbild konnte nicht entfernt werden.'))
+    } finally {
+      setUploadingAvatar(false)
+    }
+  }
 
   const browserZone = typeof Intl !== 'undefined' && typeof Intl.DateTimeFormat === 'function'
     ? Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -38,29 +85,28 @@ export function AccountTab() {
   const timezoneOptions: DropdownOption[] = useMemo(() => {
     const zones = getAvailableTimezones()
     const allZones = [...new Set([...(user?.time_zone ? [user.time_zone] : []), ...zones])].sort()
-    return allZones.map((tz) => ({ value: tz, label: tz }))
+    return allZones.map((z) => ({ value: z, label: z }))
   }, [user?.time_zone])
 
-  const showBrowserHint =
-    !dismissedBrowserHint &&
-    Boolean(browserZone) &&
-    Boolean(user?.time_zone) &&
-    user?.time_zone !== browserZone
+  const showBrowserHint = !dismissedBrowserHint
+    && browserZone
+    && user?.time_zone
+    && user.time_zone !== browserZone
 
   const handleSaveTimezone = async (zoneToSave?: string) => {
-    const tz = zoneToSave || selectedZone
+    const zone = zoneToSave || selectedZone
     setSaving(true)
     try {
-      await api('/auth/me/timezone', {
+      const res = await api<{ time_zone: string | null }>('/auth/me/timezone', {
         method: 'PATCH',
-        body: JSON.stringify({ time_zone: tz }),
+        body: JSON.stringify({ time_zone: zone }),
       })
-      updateUser({ time_zone: tz })
-      setSelectedZone(tz)
+      updateUser({ time_zone: res.time_zone })
+      setSelectedZone(res.time_zone || 'UTC')
       setDismissedBrowserHint(true)
-      toast.success(t('profile.timezoneSaved', 'Zeitzone gespeichert'))
-    } catch (err: any) {
-      toast.error(err.message || t('common.error'))
+      toast.success(t('profile.timezoneSaved', 'Zeitzone gespeichert.'))
+    } catch {
+      toast.error(t('profile.timezoneSaveFailed', 'Zeitzone konnte nicht gespeichert werden.'))
     } finally {
       setSaving(false)
     }
@@ -90,11 +136,11 @@ export function AccountTab() {
         await requestBrowserLocationPermission()
       }
 
-      await api<{ location_sharing_enabled: boolean }>('/auth/me/location-sharing', {
+      const res = await api<{ location_sharing_enabled: boolean }>('/auth/me/location-sharing', {
         method: 'PATCH',
         body: JSON.stringify({ enabled }),
       })
-      updateUser({ location_sharing_enabled: enabled })
+      updateUser({ location_sharing_enabled: res.location_sharing_enabled })
     } catch (error) {
       const geolocationErrorCode = (error as { code?: unknown } | null)?.code
       if (
@@ -114,25 +160,79 @@ export function AccountTab() {
 
   return (
     <div className="space-y-6">
-      {/* Account Info */}
+      {/* Account Info & Profilbild */}
       <div className="msm-card p-6">
         <div className="flex items-center gap-2 mb-6">
           <Mail className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 className="font-headline text-lg font-semibold text-on-surface">{t('auth.email')}</h2>
+          <h2 className="font-headline text-lg font-semibold text-on-surface">{t('auth.email', 'Konto & Profilbild')}</h2>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center text-lg font-bold text-primary border border-outline-variant">
-            {user?.username.charAt(0).toUpperCase()}
-          </div>
-          <div>
-            <p className="font-label-md text-sm text-on-surface font-medium">{user?.username}</p>
-            <p className="font-body-md text-sm text-on-surface-variant">{user?.email}</p>
-            {user?.email_verified === false && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-status-error/10 text-status-error border border-status-error/30 mt-1">
-                <AlertTriangle className="w-3 h-3" />
-                {t('profile.notVerified', 'Nicht verifiziert')}
-              </span>
+
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
+          {/* Avatar with Upload Hover / Button */}
+          <div className="relative group">
+            <Avatar
+              src={user?.avatar_url}
+              name={user?.username}
+              size="xl"
+            />
+            {uploadingAvatar && (
+              <div className="absolute inset-0 rounded-full bg-black/60 flex items-center justify-center">
+                <Loader2 className="w-6 h-6 text-primary animate-spin" />
+              </div>
             )}
+          </div>
+
+          <div className="space-y-3 flex-1">
+            <div>
+              <p className="font-label-md text-base text-on-surface font-semibold">{user?.username}</p>
+              <p className="font-body-md text-sm text-on-surface-variant">{user?.email}</p>
+              {user?.email_verified === false && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-status-error/10 text-status-error border border-status-error/30 mt-1.5">
+                  <AlertTriangle className="w-3 h-3" />
+                  {t('profile.notVerified', 'Nicht verifiziert')}
+                </span>
+              )}
+            </div>
+
+            {/* Avatar Action Buttons */}
+            <div className="flex flex-wrap items-center gap-2.5 pt-1">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                className="sr-only"
+                disabled={uploadingAvatar}
+                onChange={(e) => void handleAvatarChange(e.target.files?.[0])}
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={uploadingAvatar}
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-1.5"
+              >
+                <Camera className="w-4 h-4 text-primary" aria-hidden="true" />
+                {user?.avatar_url ? t('profile.changeAvatar', 'Profilbild ändern') : t('profile.uploadAvatar', 'Profilbild hochladen')}
+              </Button>
+
+              {user?.avatar_url && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={uploadingAvatar}
+                  onClick={() => void handleDeleteAvatar()}
+                  className="flex items-center gap-1.5 text-status-error hover:text-status-error hover:bg-error-container/20"
+                >
+                  <Trash2 className="w-4 h-4" aria-hidden="true" />
+                  {t('profile.removeAvatar', 'Entfernen')}
+                </Button>
+              )}
+            </div>
+            <p className="text-xs text-on-surface-variant/70">
+              {t('profile.avatarHint', 'PNG, JPG, WebP oder GIF (max. 5 MB).')}
+            </p>
           </div>
         </div>
       </div>

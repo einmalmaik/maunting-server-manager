@@ -56,6 +56,7 @@ def _invitation(db: Session, einladung: TeamInvitation, team: Team) -> TeamInvit
         team_name=team.name,
         user_id=einladung.user_id,
         username=eingeladener.username if eingeladener is not None else "",
+        avatar_url=eingeladener.avatar_url if eingeladener is not None else None,
         invited_by_username=einlader.username if einlader is not None else None,
         can_manage_skills=einladung.can_manage_skills,
         can_manage_memory=einladung.can_manage_memory,
@@ -65,7 +66,7 @@ def _invitation(db: Session, einladung: TeamInvitation, team: Team) -> TeamInvit
 
 def _detail(db: Session, team: Team, user: User) -> TeamDetailResponse:
     rows = (
-        db.query(TeamMember, User.username)
+        db.query(TeamMember, User.username, User.avatar_url)
         .join(User, User.id == TeamMember.user_id)
         .filter(TeamMember.team_id == team.id)
         .order_by(TeamMember.role.desc(), User.username)
@@ -73,12 +74,12 @@ def _detail(db: Session, team: Team, user: User) -> TeamDetailResponse:
     )
     members = [
         TeamMemberResponse(
-            user_id=member.user_id, username=username, role=member.role,
+            user_id=member.user_id, username=username, avatar_url=avatar_url, role=member.role,
             can_manage_skills=member.can_manage_skills,
             can_manage_memory=member.can_manage_memory,
             joined_at=member.joined_at,
         )
-        for member, username in rows
+        for member, username, avatar_url in rows
     ]
     servers: list[TeamServerResponse] = []
     for server_id in team_service.team_server_ids(db, team.id):

@@ -1,8 +1,11 @@
+import os
+import re
 from datetime import datetime, timedelta, timezone
 import uuid
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, Response, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -728,6 +731,120 @@ def update_ai_provider(
     user.ai_provider_id = req.provider_id
     db.commit()
     return {"ai_provider_id": user.ai_provider_id}
+
+
+# ── Profilbild (Avatar) ──────────────────────────────────────────────────
+
+MAX_AVATAR_BYTES = 5 * 1024 * 1024  # 5 MB
+ALLOWED_AVATAR_TYPES = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+}
+
+
+def _get_avatars_dir() -> str:
+    base = settings.panel_config_dir if settings.panel_config_dir else "."
+    avatars_dir = os.path.join(base, "data", "avatars")
+    os.makedirs(avatars_dir, exist_ok=True)
+    return avatars_dir
+
+
+def _validate_image_bytes(content: bytes, mime_type: str) -> bool:
+    if len(content) > MAX_AVATAR_BYTES or len(content) < 8:
+        return False
+    # Magic number checks
+    if mime_type == "image/jpeg" and content.startswith(b"\xff\xd8\xff"):
+        return True
+    if mime_type == "image/png" and content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return True
+    if mime_type == "image/gif" and (content.startswith(b"GIF87a") or content.startswith(b"GIF89a")):
+        return True
+    if mime_type == "image/webp" and content.startswith(b"RIFF") and b"WEBP" in content[8:16]:
+        return True
+    return False
+
+
+@router.post("/me/avatar", response_model=UserResponse)
+async def upload_avatar(
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> User:
+    """Lädt ein eigenes Profilbild hoch (max. 5 MB)."""
+    content_type = (file.content_type or "").lower().split(";")[0].strip()
+    if content_type not in ALLOWED_AVATAR_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="Ungültiges Bildformat. Erlaubt sind JPEG, PNG, WebP und GIF.",
+        )
+    content = await file.read()
+    if len(content) > MAX_AVATAR_BYTES:
+        raise HTTPException(status_code=400, detail="Bild darf maximal 5 MB groß sein.")
+    if not _validate_image_bytes(content, content_type):
+        raise HTTPException(status_code=400, detail="Ungültige oder beschädigte Bilddatei.")
+
+    avatars_dir = _get_avatars_dir()
+    if user.avatar_url:
+        old_filename = user.avatar_url.split("/")[-1]
+        if old_filename and re.match(r"^[a-zA-Z0-9_\-\.]+$", old_filename):
+            old_path = os.path.join(avatars_dir, old_filename)
+            if os.path.isfile(old_path):
+                try:
+                    os.remove(old_path)
+                except OSError:
+                    pass
+
+    ext = ALLOWED_AVATAR_TYPES[content_type]
+    filename = f"avatar_{user.id}_{uuid.uuid4().hex[:12]}{ext}"
+    file_path = os.path.join(avatars_dir, filename)
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    user.avatar_url = f"/api/auth/avatar/{filename}"
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@router.delete("/me/avatar", response_model=UserResponse)
+def delete_avatar(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> User:
+    """Entfernt das eigene Profilbild."""
+    if user.avatar_url:
+        avatars_dir = _get_avatars_dir()
+        old_filename = user.avatar_url.split("/")[-1]
+        if old_filename and re.match(r"^[a-zA-Z0-9_\-\.]+$", old_filename):
+            old_path = os.path.join(avatars_dir, old_filename)
+            if os.path.isfile(old_path):
+                try:
+                    os.remove(old_path)
+                except OSError:
+                    pass
+        user.avatar_url = None
+        db.commit()
+        db.refresh(user)
+    return user
+
+
+@router.get("/avatar/{filename}")
+def get_avatar(filename: str):
+    """Liefert ein gespeichertes Profilbild aus."""
+    if not re.match(r"^avatar_\d+_[a-zA-Z0-9]+\.(jpg|jpeg|png|webp|gif)$", filename):
+        raise HTTPException(status_code=404, detail="Profilbild nicht gefunden")
+    avatars_dir = _get_avatars_dir()
+    file_path = os.path.join(avatars_dir, filename)
+    if not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail="Profilbild nicht gefunden")
+    return FileResponse(
+        file_path,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 

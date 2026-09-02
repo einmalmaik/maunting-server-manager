@@ -22,6 +22,8 @@ export interface User {
   role_id: number | null
   /** Alle globalen Rollen; role_id bleibt kompatible Primärrolle. */
   role_ids?: number[]
+  /** URL zum hochgeladenen Profilbild */
+  avatar_url?: string | null
   created_at: string
 }
 

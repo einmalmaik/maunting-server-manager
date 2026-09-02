@@ -16,7 +16,7 @@ import { AiMemoryManager } from '@/components/ai/AiMemoryManager'
 import { AiSkillManager } from '@/components/ai/AiSkillManager'
 import type { AiKnowledgeScope, AiSkillScope } from '@/components/ai/knowledgeScope'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
-import { Button, Dropdown, MultiSelect, Switch } from '@/Singra/UI'
+import { Avatar, Button, Dropdown, MultiSelect, Switch } from '@/Singra/UI'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { useAuthStore } from '@/stores/authStore'
@@ -529,12 +529,15 @@ export function Teams() {
                   key={member.user_id}
                   className="flex flex-wrap items-center gap-4 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4"
                 >
-                  <span className="min-w-[8rem] flex-1 text-sm font-medium text-on-surface">
-                    {member.username}
-                    {member.role === 'owner' && (
-                      <span className="ml-2 text-xs text-on-surface-variant">{t('teams.founder')}</span>
-                    )}
-                  </span>
+                  <div className="flex min-w-[8rem] flex-1 items-center gap-3">
+                    <Avatar src={member.avatar_url} name={member.username} size="sm" />
+                    <span className="text-sm font-medium text-on-surface">
+                      {member.username}
+                      {member.role === 'owner' && (
+                        <span className="ml-2 text-xs text-on-surface-variant">{t('teams.founder')}</span>
+                      )}
+                    </span>
+                  </div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-on-surface-variant">{t('teams.manageSkills')}</span>
                     <Switch
@@ -799,9 +802,12 @@ function OffeneGruppe({
             key={invitation.user_id}
             className="flex flex-wrap items-center gap-4 rounded-xl border border-dashed border-outline-variant/50 p-4"
           >
-            <span className="min-w-[8rem] flex-1 text-sm font-medium text-on-surface">
-              {invitation.username}
-            </span>
+            <div className="flex min-w-[8rem] flex-1 items-center gap-3">
+              <Avatar src={invitation.avatar_url} name={invitation.username} size="sm" />
+              <span className="text-sm font-medium text-on-surface">
+                {invitation.username}
+              </span>
+            </div>
             <AngeboteneSchalter invitation={invitation} />
             <span className="text-xs text-on-surface-variant">{status}</span>
           </li>
