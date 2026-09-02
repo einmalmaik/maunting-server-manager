@@ -685,14 +685,17 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
     return () => ro.disconnect()
   }, [scrolleNachUnten])
 
+  const initialScrollDoneRef = useRef(false)
+
   useLayoutEffect(() => {
-    if (!loading && entries.length > 0) {
+    if (!loading && entries.length > 0 && !initialScrollDoneRef.current) {
       scrolleNachUnten(true)
     }
   }, [loading, entries.length, scrolleNachUnten])
 
   useEffect(() => {
-    if (!loading && entries.length > 0) {
+    if (!loading && entries.length > 0 && !initialScrollDoneRef.current) {
+      initialScrollDoneRef.current = true
       userScrolledUpRef.current = false
       setAmEnde(true)
       scrolleNachUnten(true)
@@ -829,6 +832,7 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
     if (!accepted) return
     try {
       await aiApi.clearHistory()
+      initialScrollDoneRef.current = false
       userScrolledUpRef.current = false
       setEntries([])
       setAttachments([])
