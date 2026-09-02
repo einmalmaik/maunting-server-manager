@@ -33,6 +33,7 @@ import { checkPasswordLeak, type LeakCheckResult } from './leakChecker'
 import { QrScannerModal } from './QrScannerModal'
 import { setzeTresorSchutz } from '../tauri'
 import { useVaultStore, type VaultItem } from './vaultStore'
+import { DisBadge } from '@/components/DisBadge'
 
 export function VaultView() {
   const {
@@ -356,6 +357,9 @@ export function VaultView() {
             <h2 className="text-base font-bold text-on-surface">
               Passwort-Manager einrichten
             </h2>
+            <div className="flex justify-center pt-0.5">
+              <DisBadge size={16} />
+            </div>
           </div>
 
           <form
@@ -496,6 +500,9 @@ export function VaultView() {
             <h2 className="text-base font-bold text-on-surface">
               Passwort-Manager
             </h2>
+            <div className="flex justify-center pt-0.5">
+              <DisBadge size={16} />
+            </div>
           </div>
 
           <form
@@ -762,6 +769,7 @@ export function VaultView() {
               <span className="text-[10px] text-on-surface-variant">
                 ({items.length})
               </span>
+              <DisBadge size={14} className="hidden sm:inline-flex py-0.5 px-2" />
             </div>
           </div>
         </div>
