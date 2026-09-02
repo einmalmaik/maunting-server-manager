@@ -182,15 +182,19 @@ jobs:
           echo "tag=${RAW_TAG}" >> "$GITHUB_OUTPUT"
           echo "clean_version=${TAG}" >> "$GITHUB_OUTPUT"
 
-          # Version in tauri.conf.json und Cargo.toml angleichen
+          # Version in tauri.conf.json und Cargo.toml angleichen (nur [package], keine Dependencies!)
           node -e "
             const fs = require('fs');
             const confPath = 'smart-system/src-tauri/tauri.conf.json';
             const conf = JSON.parse(fs.readFileSync(confPath, 'utf8'));
             conf.version = '${TAG}';
             fs.writeFileSync(confPath, JSON.stringify(conf, null, 2));
+
+            const cargoPath = 'smart-system/src-tauri/Cargo.toml';
+            let cargo = fs.readFileSync(cargoPath, 'utf8');
+            cargo = cargo.replace(/^(\\[package\\][\\s\\S]*?^version\\s*=\\s*)\"[^\"]+\"/m, \`\$1\"\${TAG}\"\`);
+            fs.writeFileSync(cargoPath, cargo);
           "
-          sed -i 's/^version = ".*"/version = "'${TAG}'"/' smart-system/src-tauri/Cargo.toml
 
       - name: Build Tauri app
         working-directory: smart-system
@@ -309,14 +313,19 @@ jobs:
             RAW_TAG="v4.0.0"
           fi
           TAG="${RAW_TAG#v}"
+          # Version in tauri.conf.json und Cargo.toml angleichen (nur [package], keine Dependencies!)
           node -e "
             const fs = require('fs');
             const confPath = 'smart-system/src-tauri/tauri.conf.json';
             const conf = JSON.parse(fs.readFileSync(confPath, 'utf8'));
             conf.version = '${TAG}';
             fs.writeFileSync(confPath, JSON.stringify(conf, null, 2));
+
+            const cargoPath = 'smart-system/src-tauri/Cargo.toml';
+            let cargo = fs.readFileSync(cargoPath, 'utf8');
+            cargo = cargo.replace(/^(\\[package\\][\\s\\S]*?^version\\s*=\\s*)\"[^\"]+\"/m, \`\$1\"\${TAG}\"\`);
+            fs.writeFileSync(cargoPath, cargo);
           "
-          sed -i 's/^version = ".*"/version = "'${TAG}'"/' smart-system/src-tauri/Cargo.toml
 
       - name: Build Android APK
         working-directory: smart-system
