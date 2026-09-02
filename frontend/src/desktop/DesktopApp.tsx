@@ -675,13 +675,13 @@ function Hauptseite({
           </div>
         </div>
       )}
-      <main className="p-margin-mobile md:p-margin-desktop relative flex flex-1 min-h-0 flex-col overflow-hidden">
+      <main className={`relative flex flex-1 min-h-0 flex-col overflow-hidden ${bereich === 'ki' ? 'p-0 bg-surface' : 'p-margin-mobile md:p-margin-desktop'}`}>
         <div className="relative z-10 flex h-full w-full flex-1 min-h-0 flex-col overflow-hidden">
           {bereich === 'ki' ? (
             darfChatten ? (
-              <div className="flex h-full w-full flex-1 min-h-0 flex-col overflow-hidden">
+              <div className="flex h-full w-full flex-1 min-h-0 flex-col overflow-hidden bg-surface">
                 {konfig && !isAndroid && !konfig.computer_use_aktiv && (
-                  <div className="mb-3 shrink-0 flex items-center justify-between rounded-lg border border-outline-variant/40 bg-surface-container-low/60 p-3 text-xs">
+                  <div className="m-2 sm:m-3 mb-0 shrink-0 flex items-center justify-between rounded-lg border border-outline-variant/40 bg-surface-container-low/60 p-3 text-xs">
                     <div className="flex items-center gap-2 text-on-surface-variant">
                       <ShieldAlert className="h-4 w-4 shrink-0 text-status-warning" aria-hidden="true" />
                       <span>{t('mss.einstellungen.banner.computerUseHinweis')}</span>

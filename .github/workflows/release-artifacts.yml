@@ -225,13 +225,25 @@ jobs:
         working-directory: smart-system
         run: |
           npx tauri android init || true
-          npx tauri android build --apk
+          npx tauri android build --apk --target aarch64,armv7,x86_64
 
       - name: Collect Android APK
         shell: bash
         run: |
           mkdir -p android-release
-          find smart-system/src-tauri/gen/android/app/build/outputs/apk -type f -name "*.apk" | head -n 1 | xargs -I {} cp -v {} android-release/MauntingSmartSystem.apk || true
+          APK_FILE=$(find smart-system/src-tauri/gen/android/app/build/outputs/apk -type f -name "*universal*.apk" | head -n 1)
+          if [ -z "$APK_FILE" ]; then
+            APK_FILE=$(find smart-system/src-tauri/gen/android/app/build/outputs/apk -type f -name "*arm64*.apk" | head -n 1)
+          fi
+          if [ -z "$APK_FILE" ]; then
+            APK_FILE=$(find smart-system/src-tauri/gen/android/app/build/outputs/apk -type f -name "*.apk" | head -n 1)
+          fi
+          if [ -n "$APK_FILE" ]; then
+            cp -v "$APK_FILE" android-release/MauntingSmartSystem.apk
+          fi
+          for f in $(find smart-system/src-tauri/gen/android/app/build/outputs/apk -type f -name "*.apk"); do
+            cp -v "$f" "android-release/$(basename "$f")" || true
+          done
           ls -la android-release/
 
       - uses: actions/upload-artifact@v4

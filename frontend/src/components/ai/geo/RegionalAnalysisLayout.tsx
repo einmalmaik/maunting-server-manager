@@ -143,7 +143,7 @@ export function RegionalAnalysisLayout({
       <div className="flex h-full min-h-0 w-full flex-1 gap-3 overflow-hidden flex-col lg:flex-row">
         {/* Linke Spalte: Chat- / Sprachtranskript (Mobil bei Tab 'chat', Desktop dauerhaft links) */}
         <div
-          className={`h-full min-h-0 shrink-0 flex-col overflow-hidden rounded-2xl border border-outline-variant/30 bg-surface-container-lowest/50 ${
+          className={`h-full min-h-0 shrink-0 flex-col overflow-hidden rounded-2xl border border-outline-variant/30 bg-surface ${
             mobileTab === 'chat' ? 'flex' : 'hidden'
           } lg:flex lg:w-[380px] xl:w-[420px]`}
         >

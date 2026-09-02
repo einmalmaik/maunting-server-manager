@@ -1058,7 +1058,7 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
       }}
     >
       {/* ── Kopfzeile: Provider, Denkschritte, Autonomie, Skills ───────── */}
-      <header className="flex flex-wrap items-center gap-1.5 sm:gap-2 border-b border-outline-variant/30 bg-surface-container-low/90 px-2.5 py-2 sm:px-5 sm:py-2.5 backdrop-blur-md shrink-0 sticky top-0 z-20">
+      <header className="flex flex-wrap items-center gap-1.5 sm:gap-2 border-b border-outline-variant/30 bg-surface-container-low px-2.5 py-2 sm:px-5 sm:py-2.5 shrink-0 sticky top-0 z-20">
         <div className="w-48 sm:w-60 max-w-[260px] shrink-0">
           <Dropdown
             value={providerId ? String(providerId) : null}
@@ -1166,7 +1166,7 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
       {/* ── Verlauf ───────────────────────────────────────────────────── */}
       <div
         ref={verlaufRef}
-        className="relative min-h-0 flex-1 overflow-y-auto"
+        className="relative min-h-0 flex-1 overflow-y-auto bg-surface"
         aria-live="polite"
         onScroll={(event) => {
           const { scrollTop, scrollHeight, clientHeight } = event.currentTarget
