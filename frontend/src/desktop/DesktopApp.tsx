@@ -117,11 +117,13 @@ export function DesktopApp() {
     document.addEventListener('visibilitychange', handleVisibilityChange)
 
     let unlistenTauriBlur: (() => void) | undefined
-    listen('tauri://blur', handleWindowBlur)
-      .then((unlisten) => {
-        unlistenTauriBlur = unlisten
-      })
-      .catch(() => {})
+    if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+      listen('tauri://blur', handleWindowBlur)
+        .then((unlisten) => {
+          unlistenTauriBlur = unlisten
+        })
+        .catch(() => {})
+    }
 
     return () => {
       events.forEach((evt) => window.removeEventListener(evt, handleActivity))

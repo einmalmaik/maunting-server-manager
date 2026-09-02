@@ -72,6 +72,29 @@ export function VaultView() {
     }
   }, [isUnlocked])
 
+  // Sofortige Sperre beim Verlassen des Fensters (Minimieren, Alt+Tab, Klick auf anderes Fenster)
+  useEffect(() => {
+    if (!isUnlocked) return
+
+    const handleBlurLock = () => {
+      const state = useVaultStore.getState()
+      if (state.lockOnWindowBlur && state.isUnlocked && !state.isUnlocking) {
+        state.lock()
+      }
+    }
+
+    window.addEventListener('blur', handleBlurLock)
+    const handleVis = () => {
+      if (document.hidden) handleBlurLock()
+    }
+    document.addEventListener('visibilitychange', handleVis)
+
+    return () => {
+      window.removeEventListener('blur', handleBlurLock)
+      document.removeEventListener('visibilitychange', handleVis)
+    }
+  }, [isUnlocked])
+
   // UI-Zustände für Sperre & Ersteinrichtung
   const [isSetupMode, setIsSetupMode] = useState(!isInitialized)
   const [masterPasswordInput, setMasterPasswordInput] = useState('')

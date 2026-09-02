@@ -106,9 +106,6 @@ export function Einstellungen({ onKonfigAenderung }: { onKonfigAenderung?: () =>
       {tab === 'audio' && <AudioEinstellungen />}
       {tab === 'rechtliches' && <RechtlichesEinstellungen />}
       {tab === 'gefahr' && <Gefahrenzone />}
-      <p className="text-center text-xs text-on-surface-variant/60">
-        {t('mss.einstellungen.fussnote')}
-      </p>
     </div>
   )
 }

@@ -754,4 +754,27 @@ if (typeof window !== 'undefined') {
   setTimeout(() => {
     void useVaultStore.getState().checkBiometricsSupport()
   }, 50)
+
+  const triggerBlurLock = () => {
+    const s = useVaultStore.getState()
+    if (s.lockOnWindowBlur && s.isUnlocked && !s.isUnlocking) {
+      s.lock()
+    }
+  }
+
+  window.addEventListener('blur', triggerBlurLock)
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) triggerBlurLock()
+  })
+
+  if ('__TAURI_INTERNALS__' in window) {
+    try {
+      import('@tauri-apps/api/event')
+        .then(({ listen }) => {
+          void listen('mss:fenster-blur', triggerBlurLock)
+          void listen('tauri://blur', triggerBlurLock)
+        })
+        .catch(() => {})
+    } catch {}
+  }
 }

@@ -829,11 +829,19 @@ pub fn run() {
         // ein Companion, der beim Wegklicken stirbt, waere keiner) oder
         // wirklich beenden (`app_beenden`).
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" {
-                    api.prevent_close();
-                    let _ = window.emit("mss:schliessen-angefragt", ());
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    if window.label() == "main" {
+                        api.prevent_close();
+                        let _ = window.emit("mss:schliessen-angefragt", ());
+                    }
                 }
+                tauri::WindowEvent::Focused(false) => {
+                    if window.label() == "main" {
+                        let _ = window.emit("mss:fenster-blur", ());
+                    }
+                }
+                _ => {}
             }
         })
         .run(tauri::generate_context!())
