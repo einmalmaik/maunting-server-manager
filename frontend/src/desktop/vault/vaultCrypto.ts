@@ -11,11 +11,9 @@
  * - Biometrie: Echte hardware-gestützte OS-Schlüssel / Keyrings (kein reversibles Master-Passwort in localStorage).
  */
 
-import {
-  argon2idRaw,
-  SecureBuffer,
-  sha256Hex,
-} from '@msdis/shield'
+import { argon2idRaw } from '@msdis/shield/kdf'
+import { SecureBuffer } from '@msdis/shield/secure-memory'
+import { sha256Hex } from '@msdis/shield/integrity'
 import { pruefeBiometrieVerfuegbar, verifiziereBiometrie } from '../tauri'
 
 export { SecureBuffer }

@@ -1,0 +1,119 @@
+{
+  "name": "@msdis/shield",
+  "version": "0.2.1",
+  "description": "DIS — Defensive Integration Shield. Central, framework-agnostic cryptographic security platform (KDF, AEAD, vault & file encryption, key management, versioned formats, migrations). Powered by DIS — Defensive Integration Shield.",
+  "license": "SEE LICENSE IN LICENSE",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js"
+    },
+    "./random": {
+      "types": "./dist/random/index.d.ts",
+      "import": "./dist/random/index.js"
+    },
+    "./secure-memory": {
+      "types": "./dist/secure-memory/index.d.ts",
+      "import": "./dist/secure-memory/index.js"
+    },
+    "./kdf": {
+      "types": "./dist/kdf/index.d.ts",
+      "import": "./dist/kdf/index.js"
+    },
+    "./aead": {
+      "types": "./dist/aead/index.d.ts",
+      "import": "./dist/aead/index.js"
+    },
+    "./format-versioning": {
+      "types": "./dist/format-versioning/index.d.ts",
+      "import": "./dist/format-versioning/index.js"
+    },
+    "./vault-encryption": {
+      "types": "./dist/vault-encryption/index.d.ts",
+      "import": "./dist/vault-encryption/index.js"
+    },
+    "./file-encryption": {
+      "types": "./dist/file-encryption/index.d.ts",
+      "import": "./dist/file-encryption/index.js"
+    },
+    "./key-management": {
+      "types": "./dist/key-management/index.d.ts",
+      "import": "./dist/key-management/index.js"
+    },
+    "./asymmetric": {
+      "types": "./dist/asymmetric/index.d.ts",
+      "import": "./dist/asymmetric/index.js"
+    },
+    "./post-quantum": {
+      "types": "./dist/post-quantum/index.d.ts",
+      "import": "./dist/post-quantum/index.js"
+    },
+    "./vault-crypto": {
+      "types": "./dist/vault-crypto/index.d.ts",
+      "import": "./dist/vault-crypto/index.js"
+    },
+    "./integrity": {
+      "types": "./dist/integrity/index.d.ts",
+      "import": "./dist/integrity/index.js"
+    },
+    "./signing": {
+      "types": "./dist/signing/index.d.ts",
+      "import": "./dist/signing/index.js"
+    },
+    "./totp": {
+      "types": "./dist/totp/index.d.ts",
+      "import": "./dist/totp/index.js"
+    },
+    "./migrations": {
+      "types": "./dist/migrations/index.d.ts",
+      "import": "./dist/migrations/index.js"
+    }
+  },
+  "dependencies": {
+    "hash-wasm": "4.12.0",
+    "otpauth": "^9.5.1"
+  },
+  "peerDependencies": {
+    "@noble/post-quantum": "^0.5.0"
+  },
+  "peerDependenciesMeta": {
+    "@noble/post-quantum": {
+      "optional": true
+    }
+  },
+  "keywords": [
+    "cryptography",
+    "encryption",
+    "aead",
+    "aes-gcm",
+    "argon2id",
+    "kdf",
+    "key-management",
+    "zero-knowledge",
+    "vault",
+    "password-manager",
+    "post-quantum",
+    "ml-kem",
+    "security"
+  ],
+  "overrides": {
+    "esbuild": "^0.28.1"
+  }
+}
