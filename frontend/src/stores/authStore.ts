@@ -6,6 +6,7 @@ import { useToastStore } from '@/stores/toastStore'
 import { useConfirmStore } from '@/stores/confirmStore'
 import { usePromptStore } from '@/stores/promptStore'
 import { clearSqlConsoleHistory } from '@/lib/sqlConsoleStorage'
+import { useVaultStore } from '@/desktop/vault/vaultStore'
 import type { User } from '@/types'
 
 interface AuthState {
@@ -77,6 +78,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // nächsten Benutzers — deshalb fällt er hier zusammen mit dem CSRF-Speicher.
     clearSqlConsoleHistory()
     usePermissionsStore.getState().reset()
+    // Tresor sperren und alle Klartext-Einträge sowie CryptoKeys aus dem RAM entfernen (SEC-05)
+    useVaultStore.getState().lock()
     // Die Knotenliste hält Name, Adresse und Port des Agenten sowie den
     // TLS-Fingerabdruck. Ohne dieses clear() bliebe sie bis zum nächsten
     // Neuladen der Seite im Speicher des Tabs liegen.

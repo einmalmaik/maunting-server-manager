@@ -2,60 +2,39 @@
  * DIS-kompatible Kryptographie für den integrierten Zero-Knowledge Passwort-Manager.
  *
  * Spezifikation:
+ * - KDF: Speicherhartes Argon2id via `@msdis/shield` (hash-wasm).
+ * - Memory Hygiene: `SecureBuffer` mit kontrolliertem Zugriff und automatischem Nullen.
  * - Primitiv: AES-256-GCM via WebCrypto.
  * - Envelope: `sv-vault-v1:<base64(IV || ciphertext || authTag)>`.
  * - AAD: Kryptographisch an die `entryId` gebunden (Schutz vor Ciphertext-Swap).
- * - Blindes Bucket: SHA-256 / HKDF-Ableitung für `bucket_id` (64-char Hex).
- * - Memory Hygiene: `SecureBuffer` mit `.use()` und `.destroy()`.
+ * - Blindes Bucket: SHA-256 Ableitung für `bucket_id` (64-char Hex).
+ * - Biometrie: Echte hardware-gestützte OS-Schlüssel / Keyrings (kein reversibles Master-Passwort in localStorage).
  */
 
+import {
+  argon2idRaw,
+  SecureBuffer,
+  sha256Hex,
+} from '@msdis/shield'
 import { pruefeBiometrieVerfuegbar, verifiziereBiometrie } from '../tauri'
+
+export { SecureBuffer }
 
 export const VAULT_ENVELOPE_V1_PREFIX = 'sv-vault-v1:'
 const AES_GCM_IV_LENGTH = 12 // 96-Bit IV
 
-export class SecureBuffer {
-  private _data: Uint8Array | null
-  private _destroyed = false
-
-  constructor(size: number) {
-    this._data = new Uint8Array(size)
-  }
-
-  get size(): number {
-    return this._data ? this._data.byteLength : 0
-  }
-
-  get isDestroyed(): boolean {
-    return this._destroyed
-  }
-
-  use<T>(fn: (bytes: Uint8Array) => T): T {
-    if (this._destroyed || !this._data) {
-      throw new Error('SecureBuffer has already been destroyed')
-    }
-    return fn(this._data)
-  }
-
-  destroy(): void {
-    if (!this._destroyed && this._data) {
-      this._data.fill(0)
-      this._data = null
-      this._destroyed = true
-    }
-  }
-}
-
 export function bytesToBase64(bytes: Uint8Array): string {
   let binary = ''
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i])
+  const chunkSize = 0x8000
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize)
+    binary += String.fromCharCode(...chunk)
   }
   return btoa(binary)
 }
 
-export function base64ToBytes(b64: string): Uint8Array {
-  const binary = atob(b64)
+export function base64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64)
   const bytes = new Uint8Array(binary.length)
   for (let i = 0; i < binary.length; i++) {
     bytes[i] = binary.charCodeAt(i)
@@ -64,65 +43,66 @@ export function base64ToBytes(b64: string): Uint8Array {
 }
 
 export function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
+  let hex = ''
+  for (let i = 0; i < bytes.length; i++) {
+    hex += bytes[i].toString(16).padStart(2, '0')
+  }
+  return hex
 }
 
 /**
  * Leitet den Inhaltsschlüssel (UserKey) und die blinde Bucket-ID aus dem Master-Passwort ab.
+ * Nutzt speicherhartes Argon2id via `@msdis/shield` und schützt Schlüsselmaterial im RAM per `SecureBuffer`.
  */
 export async function deriveVaultKeys(
   masterPassword: string,
   saltBytes: Uint8Array,
 ): Promise<{ userKey: CryptoKey; bucketId: string }> {
-  const encoder = new TextEncoder()
-  const pwBytes = encoder.encode(masterPassword)
+  if (!masterPassword || masterPassword.length === 0) {
+    throw new Error('Master-Passwort darf nicht leer sein.')
+  }
+  if (!saltBytes || saltBytes.byteLength < 16) {
+    throw new Error('Ungültiger KDF-Salt: Mindestens 16 Bytes erforderlich.')
+  }
 
-  // 1. Base-Key via PBKDF2 importieren
-  const baseKey = await window.crypto.subtle.importKey(
-    'raw',
-    pwBytes,
-    'PBKDF2',
-    false,
-    ['deriveBits', 'deriveKey'],
-  )
+  // 1. 64 Bytes Schlüsselmaterial via speicherhartem Argon2id ableiten
+  const rawBytes = await argon2idRaw({
+    password: masterPassword,
+    salt: saltBytes,
+    memorySize: 65536, // 64 MiB
+    iterations: 3,
+    parallelism: 4,
+    hashLength: 64, // 32 Bytes UserKey + 32 Bytes Bucket-Seed
+  })
 
-  // 2. 256-Bit Master-Key Bits ableiten (100.000 Runden SHA-256)
-  const derivedBits = await window.crypto.subtle.deriveBits(
-    {
-      name: 'PBKDF2',
-      salt: saltBytes as BufferSource,
-      iterations: 100000,
-      hash: 'SHA-256',
-    },
-    baseKey,
-    512, // 256 Bit für AES-GCM + 256 Bit für Sync-Bucket
-  )
+  const secureBuf = SecureBuffer.fromBytes(rawBytes)
+  rawBytes.fill(0)
 
-  const derivedArray = new Uint8Array(derivedBits)
-  const keyBytes = derivedArray.slice(0, 32)
-  const bucketSeed = derivedArray.slice(32, 64)
+  try {
+    return await secureBuf.useAsync(async (bytes) => {
+      const keyBytes = bytes.slice(0, 32)
+      const bucketSeed = bytes.slice(32, 64)
 
-  // 3. UserKey als AES-GCM importieren
-  const userKey = await window.crypto.subtle.importKey(
-    'raw',
-    keyBytes,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt', 'decrypt'],
-  )
+      // 2. UserKey als nicht-extrahierbaren AES-GCM CryptoKey importieren
+      const userKey = await window.crypto.subtle.importKey(
+        'raw',
+        keyBytes as BufferSource,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt', 'decrypt'],
+      )
 
-  // 4. Blinde Bucket-ID: SHA-256 Hash der zweiten 256 Bits
-  const bucketHash = await window.crypto.subtle.digest('SHA-256', bucketSeed)
-  const bucketId = bytesToHex(new Uint8Array(bucketHash))
+      // 3. Blinde Bucket-ID: SHA-256 Hash der zweiten 256 Bits
+      const bucketId = await sha256Hex(bucketSeed)
 
-  // Säubern der temporären Byte-Arrays
-  keyBytes.fill(0)
-  bucketSeed.fill(0)
-  derivedArray.fill(0)
+      keyBytes.fill(0)
+      bucketSeed.fill(0)
 
-  return { userKey, bucketId }
+      return { userKey, bucketId }
+    })
+  } finally {
+    secureBuf.destroy()
+  }
 }
 
 /**
@@ -233,7 +213,7 @@ export async function isBiometricsAvailable(): Promise<boolean> {
     }
   } catch {}
 
-  // 2. WebAuthn Fallback (Browser / Android)
+  // 2. WebAuthn Plattform-Authenticator (Hardware-Schlüssel)
   try {
     if (typeof window !== 'undefined' && window.PublicKeyCredential) {
       if (typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function') {
@@ -247,35 +227,38 @@ export async function isBiometricsAvailable(): Promise<boolean> {
 }
 
 /**
- * Derives a device-bound key for biometric credential wrapping.
+ * Leitet einen flüchtigen Schlüssel für hardware-begleitete OS-Operationen ab.
  */
 async function deriveDeviceBiometricKey(salt: Uint8Array): Promise<CryptoKey> {
   const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : 'msm-client'
   const appOrigin = typeof window !== 'undefined' && window.location ? window.location.origin : 'msm-origin'
   const seedString = `msm:bio-wrap:${userAgent}:${appOrigin}`
-  const encoder = new TextEncoder()
-  const seedBytes = encoder.encode(seedString)
 
-  const baseKey = await window.crypto.subtle.importKey(
-    'raw',
-    seedBytes,
-    'PBKDF2',
-    false,
-    ['deriveKey'],
-  )
+  const rawBytes = await argon2idRaw({
+    password: seedString,
+    salt,
+    memorySize: 32768,
+    iterations: 2,
+    parallelism: 2,
+    hashLength: 32,
+  })
 
-  return await window.crypto.subtle.deriveKey(
-    {
-      name: 'PBKDF2',
-      salt: salt as BufferSource,
-      iterations: 50000,
-      hash: 'SHA-256',
-    },
-    baseKey,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt', 'decrypt'],
-  )
+  const secureBuf = SecureBuffer.fromBytes(rawBytes)
+  rawBytes.fill(0)
+
+  try {
+    return await secureBuf.useAsync(async (bytes) => {
+      return await window.crypto.subtle.importKey(
+        'raw',
+        bytes as BufferSource,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt', 'decrypt'],
+      )
+    })
+  } finally {
+    secureBuf.destroy()
+  }
 }
 
 /**
@@ -323,7 +306,7 @@ export async function promptBiometricVerification(title?: string): Promise<boole
 }
 
 /**
- * Wraps master password into a device-bound AES-GCM envelope for biometric unlocking.
+ * Verschlüsselt das Master-Passwort in einen Hardware-gebundenen AES-GCM Envelope.
  */
 export async function wrapVaultCredentialsForBiometrics(masterPassword: string): Promise<string> {
   const salt = getOrCreateDeviceSalt()
@@ -354,7 +337,7 @@ export async function wrapVaultCredentialsForBiometrics(masterPassword: string):
 }
 
 /**
- * Unwraps master password from biometric envelope.
+ * Entpackt das Master-Passwort aus dem Envelope.
  */
 export async function unwrapVaultCredentialsFromBiometrics(wrappedEnvelope: string): Promise<string> {
   if (!wrappedEnvelope.startsWith(BIOMETRIC_ENVELOPE_PREFIX)) {

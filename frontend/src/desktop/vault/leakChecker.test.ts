@@ -1,15 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { checkPasswordLeak } from './leakChecker'
+import { checkPasswordLeak, createDebouncedLeakChecker } from './leakChecker'
 
 describe('leakChecker', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
   })
 
-  it('gibt false für leere Passwörter zurück', async () => {
-    const result = await checkPasswordLeak('')
-    expect(result.isLeaked).toBe(false)
-    expect(result.checked).toBe(false)
+  it('gibt false für kurze Passwörter (< 6 Zeichen) ohne Netzwerkaufruf zurück (SEC-10)', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+
+    const resEmpty = await checkPasswordLeak('')
+    expect(resEmpty.isLeaked).toBe(false)
+    expect(resEmpty.checked).toBe(false)
+
+    const resShort = await checkPasswordLeak('12345')
+    expect(resShort.isLeaked).toBe(false)
+    expect(resShort.checked).toBe(false)
+
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 
   it('erkennt ein geleaktes Passwort anhand des SHA-1 Suffixes', async () => {
@@ -26,6 +34,34 @@ describe('leakChecker', () => {
     expect(result.isLeaked).toBe(true)
     expect(result.count).toBe(3861493)
     expect(result.checked).toBe(true)
+  })
+
+  it('debounced leak checker wartet 400 ms Inaktivität vor Netzwerkaufruf (SEC-10)', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => `00000000000000000000000000000000000:0\r\n`,
+    } as Response)
+
+    let callCount = 0
+    const checker = createDebouncedLeakChecker(() => {
+      callCount++
+    }, 400)
+
+    // Schnell hintereinander tippen: 'secret1', 'secret12', 'secret123'
+    checker('secret1')
+    checker('secret12')
+    checker('secret123')
+
+    // Sofort: Noch kein Fetch aufgerufen
+    expect(fetchSpy).not.toHaveBeenCalled()
+
+    // 100 ms vergehen: immer noch nicht
+    await new Promise((r) => setTimeout(r, 100))
+    expect(fetchSpy).not.toHaveBeenCalled()
+
+    // Nach Ablauf des 400ms Debounce-Intervalls: Fetch wird genau 1x aufgerufen
+    await new Promise((r) => setTimeout(r, 350))
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
   })
 
   it('gibt false zurück, wenn der Suffix nicht in der Liste vorkommt', async () => {

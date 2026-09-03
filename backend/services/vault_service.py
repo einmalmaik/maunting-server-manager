@@ -10,11 +10,13 @@ from models.panel_setting import PanelSetting
 from models.user import User
 from models.vault_entry import VaultEntry
 from models.vault_hint import VaultHint
+from models.vault_user_setting import VaultUserSetting
 from schemas.vault import (
     VaultEntryOut,
     VaultHintStatusResponse,
     VaultMutation,
     VaultNodeAssignment,
+    VaultSaltResponse,
     VaultSyncRequest,
     VaultSyncResponse,
 )
@@ -27,16 +29,48 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def sync_vault(db: Session, request: VaultSyncRequest) -> VaultSyncResponse:
+class VaultBucketAccessDenied(Exception):
+    """Raised when a user attempts to access a bucket not belonging to them."""
+
+
+def sync_vault(db: Session, user: User, request: VaultSyncRequest) -> VaultSyncResponse:
     """Führt einen deterministischen Revisions-Sync für einen blinden Tresor-Bucket durch.
 
     Sicherheits-Invariante:
     - Der Server kennt keine Benutzernamen, Klartexte oder Passwörter.
-    - `bucket_id` trennt fremde Tresore kryptographisch.
-    - Die Revision entscheidet konfliktfrei über den neueren Zustand.
+    - Bucket-Autorisierung: Jeder Benutzer darf ausschließlich seinen eigenen Bucket syncen.
+    - Monotone Revision: Jede serverseitige Mutation erhält eine aufsteigende Revisionsnummer.
     """
     bucket_id = request.bucket_id.lower()
 
+    # 1. Bucket-Autorisierung (SEC-02: IDOR-Schutz)
+    # Prüfe, ob dieser Bucket bereits einem ANDEREN Benutzer gehört
+    other_owner_stmt = select(VaultUserSetting).where(
+        VaultUserSetting.bucket_id == bucket_id,
+        VaultUserSetting.user_id != user.id,
+    )
+    if db.scalar(other_owner_stmt) is not None:
+        raise VaultBucketAccessDenied("Zugriff auf fremden Tresor-Bucket verweigert.")
+
+    user_setting = db.get(VaultUserSetting, user.id)
+    if user_setting:
+        if user_setting.bucket_id and user_setting.bucket_id != bucket_id:
+            raise VaultBucketAccessDenied("Nicht autorisierter Tresor-Bucket für dieses Benutzerkonto.")
+        if not user_setting.bucket_id:
+            user_setting.bucket_id = bucket_id
+            user_setting.updated_at = _now()
+            db.commit()
+    else:
+        new_setting = VaultUserSetting(
+            user_id=user.id,
+            bucket_id=bucket_id,
+            created_at=_now(),
+            updated_at=_now(),
+        )
+        db.add(new_setting)
+        db.commit()
+
+    # 2. Monotone Mutation & Revisions-Zuweisung (SEC-03)
     if request.mutations:
         # Aktuell zugewiesenen Node ermitteln
         assigned_setting = db.get(PanelSetting, PANEL_SETTING_VAULT_NODE)
@@ -45,6 +79,11 @@ def sync_vault(db: Session, request: VaultSyncRequest) -> VaultSyncResponse:
             if assigned_setting and assigned_setting.value
             else None
         )
+
+        max_rev_db = db.scalar(
+            select(func.max(VaultEntry.revision)).where(VaultEntry.bucket_id == bucket_id)
+        ) or 0
+        current_rev = max(int(max_rev_db), int(request.since_revision))
 
         mutation_ids = [m.id for m in request.mutations]
         existing_stmt = select(VaultEntry).where(
@@ -55,21 +94,21 @@ def sync_vault(db: Session, request: VaultSyncRequest) -> VaultSyncResponse:
 
         for m in request.mutations:
             existing = existing_map.get(m.id)
+            current_rev += 1
             if existing:
-                if m.revision > existing.revision:
-                    existing.ciphertext = m.ciphertext
-                    existing.revision = m.revision
-                    existing.is_deleted = m.is_deleted
-                    existing.updated_at = _now()
-                    if current_node_id and existing.node_id != current_node_id:
-                        existing.node_id = current_node_id
+                existing.ciphertext = m.ciphertext
+                existing.revision = current_rev
+                existing.is_deleted = m.is_deleted
+                existing.updated_at = _now()
+                if current_node_id and existing.node_id != current_node_id:
+                    existing.node_id = current_node_id
             else:
                 new_entry = VaultEntry(
                     id=m.id,
                     bucket_id=bucket_id,
                     node_id=current_node_id,
                     ciphertext=m.ciphertext,
-                    revision=m.revision,
+                    revision=current_rev,
                     is_deleted=m.is_deleted,
                     created_at=_now(),
                     updated_at=_now(),
@@ -109,6 +148,58 @@ def sync_vault(db: Session, request: VaultSyncRequest) -> VaultSyncResponse:
     return VaultSyncResponse(
         server_revision=int(max_rev),
         entries=entries_out,
+    )
+
+
+def get_vault_salt(db: Session, user_id: int) -> VaultSaltResponse:
+    """Liest den hinterlegten KDF-Salt und Bucket-Status des Benutzers."""
+    setting = db.get(VaultUserSetting, user_id)
+    if not setting:
+        return VaultSaltResponse(kdf_salt=None, bucket_id=None, has_vault=False)
+    return VaultSaltResponse(
+        kdf_salt=setting.kdf_salt,
+        bucket_id=setting.bucket_id,
+        has_vault=bool(setting.bucket_id or setting.kdf_salt),
+    )
+
+
+def set_vault_salt(db: Session, user_id: int, kdf_salt: str, bucket_id: str) -> VaultSaltResponse:
+    """Hinterlegt den initialen KDF-Salt und Bucket-ID für Multi-Device Synchronisation."""
+    clean_bucket = bucket_id.strip().lower()
+    clean_salt = kdf_salt.strip()
+
+    # Prüfe ob Bucket bereits fremd vergeben ist
+    other_owner = db.scalar(
+        select(VaultUserSetting).where(
+            VaultUserSetting.bucket_id == clean_bucket,
+            VaultUserSetting.user_id != user_id,
+        )
+    )
+    if other_owner is not None:
+        raise VaultBucketAccessDenied("Der angegebene Tresor-Bucket ist bereits vergeben.")
+
+    setting = db.get(VaultUserSetting, user_id)
+    if not setting:
+        setting = VaultUserSetting(
+            user_id=user_id,
+            bucket_id=clean_bucket,
+            kdf_salt=clean_salt,
+            created_at=_now(),
+            updated_at=_now(),
+        )
+        db.add(setting)
+    else:
+        if setting.bucket_id and setting.bucket_id != clean_bucket:
+            raise VaultBucketAccessDenied("Der Tresor-Bucket kann nicht nachträglich geändert werden.")
+        setting.bucket_id = clean_bucket
+        setting.kdf_salt = clean_salt
+        setting.updated_at = _now()
+
+    db.commit()
+    return VaultSaltResponse(
+        kdf_salt=setting.kdf_salt,
+        bucket_id=setting.bucket_id,
+        has_vault=True,
     )
 
 
@@ -290,4 +381,3 @@ Maunting Service Manager
     hint_obj.last_requested_at = now
     db.commit()
     return True, "Dein Passwort-Hinweis wurde erfolgreich an deine E-Mail-Adresse gesendet."
-

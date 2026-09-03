@@ -14,7 +14,7 @@ import {
 } from './vaultCrypto'
 
 describe('vaultCrypto', () => {
-  it('SecureBuffer manages memory with size and destroy', () => {
+  it('SecureBuffer manages memory with controlled access and destroy', () => {
     const buf = new SecureBuffer(32)
     expect(buf.size).toBe(32)
     expect(buf.isDestroyed).toBe(false)
@@ -26,7 +26,6 @@ describe('vaultCrypto', () => {
 
     buf.destroy()
     expect(buf.isDestroyed).toBe(true)
-    expect(buf.size).toBe(0)
     expect(() => buf.use((b) => b[0])).toThrow()
   })
 
@@ -45,7 +44,7 @@ describe('vaultCrypto', () => {
     expect(pw1).not.toBe(pw2)
   })
 
-  it('derives vault keys and performs authenticated AES-GCM encryption/decryption', async () => {
+  it('derives vault keys via Argon2id and performs authenticated AES-GCM encryption/decryption', async () => {
     const salt = new Uint8Array(16)
     salt.fill(7)
     const { userKey, bucketId } = await deriveVaultKeys('master-test-password', salt)

@@ -31,7 +31,7 @@ import { confirm } from '@/stores/confirmStore'
 import { getBrandIcon } from './brandCatalog'
 import { generateTotpCode, getTotpSecondsRemaining } from './totpEngine'
 import { generateSecurePassword } from './vaultCrypto'
-import { checkPasswordLeak, type LeakCheckResult } from './leakChecker'
+import { createDebouncedLeakChecker, type LeakCheckResult } from './leakChecker'
 import { QrScannerModal } from './QrScannerModal'
 import { setzeTresorSchutz } from '../tauri'
 import { useVaultStore, type VaultItem } from './vaultStore'
@@ -207,6 +207,13 @@ export function VaultView() {
     }
   }
 
+  // Gedebounceter Leak-Check im Modal (mind. 400ms & >=6 Zeichen, SEC-10)
+  const debouncedLeakCheck = useMemo(() => {
+    return createDebouncedLeakChecker((res) => {
+      setLeakCheckResult(res)
+    }, 400)
+  }, [])
+
   // Modal öffnen für neuen Eintrag
   const openNewEntryModal = () => {
     setEditingItemId(null)
@@ -220,7 +227,7 @@ export function VaultView() {
     setShowModalPassword(false)
     setLeakCheckResult(null)
     setIsModalOpen(true)
-    void runLeakCheck(newPwd)
+    debouncedLeakCheck(newPwd)
   }
 
   // Modal öffnen für bestehenden Eintrag
@@ -236,21 +243,7 @@ export function VaultView() {
     setLeakCheckResult(null)
     setIsModalOpen(true)
     if (item.password) {
-      void runLeakCheck(item.password)
-    }
-  }
-
-  // Leak-Check im Modal
-  const runLeakCheck = async (pwd: string) => {
-    if (!pwd || pwd.length < 3) {
-      setLeakCheckResult(null)
-      return
-    }
-    try {
-      const res = await checkPasswordLeak(pwd)
-      setLeakCheckResult(res)
-    } catch {
-      setLeakCheckResult(null)
+      debouncedLeakCheck(item.password)
     }
   }
 
@@ -756,25 +749,32 @@ export function VaultView() {
           )}
 
           {item.totpSecret && itemTotp && (
-            <div className="flex items-center rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 gap-1 font-mono text-xs">
-              <span className="text-[10px] text-emerald-400 font-semibold">2FA</span>
-              <span className="text-emerald-400 font-bold tracking-wider">
-                {itemTotp.slice(0, 3)} {itemTotp.slice(3)}
-              </span>
-              <span className="text-[10px] text-emerald-400/70">({totpRemaining}s)</span>
-              <button
-                type="button"
-                onClick={() => void handleCopy(itemTotp, `totp-${item.id}`, item.id)}
-                className="text-emerald-400 hover:text-emerald-300 p-0.5 transition-colors"
-                title="Code kopieren"
-              >
-                {copiedIdField === `totp-${item.id}` ? (
-                  <Check className="h-3.5 w-3.5 text-status-success" />
-                ) : (
-                  <Copy className="h-3.5 w-3.5" />
-                )}
-              </button>
-            </div>
+            itemTotp === 'FEHLER' ? (
+              <div className="flex items-center rounded-lg bg-status-error/10 border border-status-error/20 px-2 py-0.5 gap-1 font-mono text-xs">
+                <span className="text-[10px] text-status-error font-semibold">2FA</span>
+                <span className="text-status-error font-medium text-[11px]">Ungültiges Secret</span>
+              </div>
+            ) : (
+              <div className="flex items-center rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 gap-1 font-mono text-xs">
+                <span className="text-[10px] text-emerald-400 font-semibold">2FA</span>
+                <span className="text-emerald-400 font-bold tracking-wider">
+                  {itemTotp.length === 6 ? `${itemTotp.slice(0, 3)} ${itemTotp.slice(3)}` : itemTotp}
+                </span>
+                <span className="text-[10px] text-emerald-400/70">({totpRemaining}s)</span>
+                <button
+                  type="button"
+                  onClick={() => void handleCopy(itemTotp, `totp-${item.id}`, item.id)}
+                  className="text-emerald-400 hover:text-emerald-300 p-0.5 transition-colors"
+                  title="Code kopieren"
+                >
+                  {copiedIdField === `totp-${item.id}` ? (
+                    <Check className="h-3.5 w-3.5 text-status-success" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" />
+                  )}
+                </button>
+              </div>
+            )
           )}
 
           {/* Favorit & Edit */}
@@ -1075,7 +1075,7 @@ export function VaultView() {
                     onClick={() => {
                       const newP = generateSecurePassword(20, true)
                       setModalPassword(newP)
-                      void runLeakCheck(newP)
+                      debouncedLeakCheck(newP)
                     }}
                     className="text-[11px] text-primary hover:underline flex items-center gap-0.5"
                   >
@@ -1090,7 +1090,7 @@ export function VaultView() {
                     value={modalPassword}
                     onChange={(e) => {
                       setModalPassword(e.target.value)
-                      void runLeakCheck(e.target.value)
+                      debouncedLeakCheck(e.target.value)
                     }}
                     placeholder="Passwort"
                     className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-1.5 text-xs text-on-surface font-mono placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary pr-9 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden [&::-webkit-credentials-auto-fill-button]:hidden"

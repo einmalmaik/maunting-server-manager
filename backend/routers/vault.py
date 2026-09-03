@@ -6,12 +6,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from database import get_db
-from dependencies import get_current_owner, get_current_user
+from dependencies import get_current_user, require_global, verify_csrf
 from models.user import User
 from schemas.vault import (
     VaultHintSetRequest,
     VaultHintStatusResponse,
     VaultNodeAssignment,
+    VaultSaltResponse,
+    VaultSaltSetRequest,
     VaultSyncRequest,
     VaultSyncResponse,
 )
@@ -34,21 +36,66 @@ def sync_vault_entries(
     payload: VaultSyncRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    __=Depends(verify_csrf),
 ) -> VaultSyncResponse:
     """Synchronisiert verschlüsselte Tresor-Einträge mit dem Server.
 
     CRITICAL SECURITY INVARIANTS:
     - Der Server verarbeitet ausschließlich Ciphertext (`sv-vault-v1:`).
     - Es werden keine Klardaten, URLs, Passwörter oder Tags übertragen.
-    - Die `bucket_id` ist blind und wird clientseitig berechnet.
+    - Die `bucket_id` ist an das autorisierte Benutzerkonto gebunden (SEC-02).
+    - Double-Submit CSRF-Schutz via `verify_csrf` (SEC-09).
     """
     _check_vault_enabled()
     try:
-        return vault_service.sync_vault(db, payload)
+        return vault_service.sync_vault(db, current_user, payload)
+    except vault_service.VaultBucketAccessDenied as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Fehler bei der Tresor-Synchronisation: {str(exc)}",
+        ) from exc
+
+
+@router.get("/salt", response_model=VaultSaltResponse)
+def get_vault_salt(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> VaultSaltResponse:
+    """Ruft den am Benutzerkonto hinterlegten KDF-Salt für Multi-Device-Sync ab (SEC-04)."""
+    _check_vault_enabled()
+    return vault_service.get_vault_salt(db, current_user.id)
+
+
+@router.post("/salt", response_model=VaultSaltResponse)
+def set_vault_salt(
+    payload: VaultSaltSetRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    __=Depends(verify_csrf),
+) -> VaultSaltResponse:
+    """Hinterlegt den KDF-Salt des Benutzers beim initialen Setup (SEC-04, SEC-09)."""
+    _check_vault_enabled()
+    try:
+        return vault_service.set_vault_salt(
+            db,
+            current_user.id,
+            payload.kdf_salt,
+            payload.bucket_id,
+        )
+    except vault_service.VaultBucketAccessDenied as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
         ) from exc
 
 
@@ -65,9 +112,10 @@ def get_node_assignment(
 def set_node_assignment(
     payload: VaultNodeAssignment,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_owner),
+    _: User = Depends(require_global("panel.settings.write")),
+    __=Depends(verify_csrf),
 ) -> VaultNodeAssignment:
-    """Weist den Passwort-Manager einem dedizierten Node zu (nur Owner)."""
+    """Weist den Passwort-Manager einem dedizierten Node zu (RBAC harmonisiert: SEC-11, SEC-09)."""
     try:
         return vault_service.set_vault_node_assignment(db, payload.node_id)
     except ValueError as exc:
@@ -82,6 +130,7 @@ def save_vault_hint(
     payload: VaultHintSetRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    __=Depends(verify_csrf),
 ) -> dict[str, str]:
     """Hinterlegt einen Passwort-Hinweis für den Passwort-Manager."""
     _check_vault_enabled()
@@ -103,6 +152,7 @@ def get_vault_hint_status(
 async def send_vault_hint(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    __=Depends(verify_csrf),
 ) -> dict[str, str]:
     """Sendet den hinterlegten Passwort-Hinweis an die E-Mail des Benutzers (max. 1x alle 10 Minuten)."""
     _check_vault_enabled()
@@ -113,4 +163,3 @@ async def send_vault_hint(
             raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=msg)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg)
     return {"status": "ok", "message": msg}
-

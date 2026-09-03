@@ -59,3 +59,22 @@ class VaultHintStatusResponse(BaseModel):
     can_request: bool = True
     cooldown_seconds_remaining: int = 0
 
+
+class VaultSaltResponse(BaseModel):
+    kdf_salt: str | None = None
+    bucket_id: str | None = None
+    has_vault: bool = False
+
+
+class VaultSaltSetRequest(BaseModel):
+    kdf_salt: str = Field(..., min_length=16, max_length=128, description="Base64- oder Hex-kodierter KDF-Salt")
+    bucket_id: str = Field(..., min_length=64, max_length=64, description="64-Hex Bucket-ID")
+
+    @field_validator("bucket_id")
+    @classmethod
+    def validate_bucket_id(cls, v: str) -> str:
+        if not HEX_64_REGEX.match(v):
+            raise ValueError("bucket_id must be a 64-character hex string")
+        return v.lower()
+
+

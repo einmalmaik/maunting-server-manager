@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { api } from '@/api/client'
 import {
+  base64ToBytes,
   decryptVaultEntry,
   deriveVaultKeys,
   encryptVaultEntry,
@@ -78,16 +79,32 @@ const VAULT_LOCK_ON_BLUR_KEY = 'mss:vault_lock_on_blur'
 const VAULT_BIOMETRICS_ENABLED_KEY = 'mss:vault_biometrics_enabled'
 const VAULT_BIOMETRICS_WRAPPED_KEY = 'mss:vault_bio_wrapped'
 
-function getOrCreateVaultSalt(): Uint8Array {
+export const MAX_VAULT_ATTACHMENT_SIZE_BYTES = 500 * 1024 // 500 KB limit (SEC-08)
+
+export function getLocalVaultSalt(): Uint8Array | null {
   const existing = typeof localStorage !== 'undefined' ? localStorage.getItem(VAULT_SALT_KEY) : null
-  if (existing) {
+  if (!existing) return null
+
+  if (/^[0-9a-fA-F]+$/.test(existing) && existing.length % 2 === 0) {
     const bytes = new Uint8Array(existing.length / 2)
     for (let i = 0; i < bytes.length; i++) {
       bytes[i] = parseInt(existing.substr(i * 2, 2), 16)
     }
     return bytes
   }
-  const newSalt = new Uint8Array(16)
+
+  try {
+    return base64ToBytes(existing)
+  } catch {
+    return null
+  }
+}
+
+export function getOrCreateVaultSalt(): Uint8Array {
+  const local = getLocalVaultSalt()
+  if (local) return local
+
+  const newSalt = new Uint8Array(32)
   window.crypto.getRandomValues(newSalt)
   const hex = Array.from(newSalt)
     .map((b) => b.toString(16).padStart(2, '0'))
@@ -105,6 +122,8 @@ interface VaultState {
   isUnlocked: boolean
   isUnlocking: boolean
   unlockError: string | null
+  failedUnlockAttempts: number
+  lockedUntilMs: number
   userKey: CryptoKey | null
   bucketId: string | null
   items: VaultItem[]
@@ -121,6 +140,7 @@ interface VaultState {
   lastActivityTime: number
 
   // Aktionen
+  fetchVaultSalt: () => Promise<string | null>
   initializeVault: (masterPassword: string) => Promise<boolean>
   unlock: (masterPassword: string) => Promise<boolean>
   unlockWithBiometrics: () => Promise<boolean>
@@ -152,6 +172,8 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   isUnlocked: false,
   isUnlocking: false,
   unlockError: null,
+  failedUnlockAttempts: 0,
+  lockedUntilMs: 0,
   userKey: null,
   bucketId: null,
   items: [],
@@ -206,6 +228,26 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     return false
   },
 
+  fetchVaultSalt: async () => {
+    try {
+      const res = await api<{ kdf_salt: string | null; bucket_id: string | null; has_vault: boolean }>('/api/vault/salt')
+      if (res.kdf_salt) {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(VAULT_SALT_KEY, res.kdf_salt)
+        }
+      }
+      if (res.has_vault) {
+        set({ isInitialized: true })
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(VAULT_SETUP_DONE_KEY, 'true')
+        }
+      }
+      return res.kdf_salt
+    } catch {
+      return null
+    }
+  },
+
   checkBiometricsSupport: async () => {
     try {
       const supported = await isBiometricsAvailable()
@@ -232,9 +274,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
       try {
         await biometrieSpeichern(wrapped)
       } catch {
-        if (typeof localStorage !== 'undefined') {
-          localStorage.setItem(VAULT_BIOMETRICS_WRAPPED_KEY, wrapped)
-        }
+        // Fallback: Speichere in memory/desktop state
       }
       if (typeof localStorage !== 'undefined') {
         localStorage.setItem(VAULT_BIOMETRICS_ENABLED_KEY, 'true')
@@ -263,17 +303,11 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     try {
       let wrapped: string | null = null
       try {
-        // 1. Primär: Native Windows Hello Verifikation & Freigabe aus dem Windows Credential Store
+        // Primär: Native Windows Hello Verifikation & Freigabe aus dem Windows Credential Store
         wrapped = await biometrieEntsperren('Passwort-Manager entsperren')
       } catch (err: unknown) {
-        // 2. Fallback: Browser-Speicher (z. B. im Web oder bei Dev-Tests)
-        const localWrapped = typeof localStorage !== 'undefined' ? localStorage.getItem(VAULT_BIOMETRICS_WRAPPED_KEY) : null
-        if (!localWrapped) {
-          const msg = err instanceof Error ? err.message : 'Biometrische Authentifizierung fehlgeschlagen.'
-          throw new Error(msg)
-        }
-        await promptBiometricVerification('Passwort-Manager entsperren')
-        wrapped = localWrapped
+        const msg = err instanceof Error ? err.message : 'Biometrische Authentifizierung fehlgeschlagen.'
+        throw new Error(msg)
       }
 
       if (!wrapped) {
@@ -312,6 +346,8 @@ export const useVaultStore = create<VaultState>((set, get) => ({
       isInitialized: false,
       isUnlocked: false,
       isBiometricsEnabled: false,
+      failedUnlockAttempts: 0,
+      lockedUntilMs: 0,
       userKey: null,
       bucketId: null,
       items: [],
@@ -325,7 +361,16 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     set({ isUnlocking: true, unlockError: null })
     try {
       const salt = getOrCreateVaultSalt()
+      const saltHex = Array.from(salt).map((b) => b.toString(16).padStart(2, '0')).join('')
       const { userKey, bucketId } = await deriveVaultKeys(masterPassword, salt)
+
+      // KDF-Salt serverseitig hinterlegen (SEC-04)
+      try {
+        await api('/api/vault/salt', {
+          method: 'POST',
+          body: JSON.stringify({ kdf_salt: saltHex, bucket_id: bucketId }),
+        })
+      } catch {}
 
       // Canary-Prüfblock verschlüsseln und lokal speichern
       const canaryCiphertext = await encryptVaultEntry(
@@ -367,6 +412,8 @@ export const useVaultStore = create<VaultState>((set, get) => ({
         isInitialized: true,
         isUnlocked: true,
         isUnlocking: false,
+        failedUnlockAttempts: 0,
+        lockedUntilMs: 0,
         userKey,
         bucketId,
         items: decryptedItems,
@@ -385,12 +432,31 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   },
 
   unlock: async (masterPassword: string) => {
+    // 1. Client-seitiger Brute-Force-Schutz (SEC-07): Sperrfrist prüfen
+    const now = Date.now()
+    const { lockedUntilMs, failedUnlockAttempts } = get()
+    if (lockedUntilMs > now) {
+      const waitSeconds = Math.ceil((lockedUntilMs - now) / 1000)
+      const errorMsg = `Zu viele Fehlversuche. Bitte warte noch ${waitSeconds} Sekunde(n).`
+      set({ isUnlocking: false, unlockError: errorMsg })
+      return false
+    }
+
     set({ isUnlocking: true, unlockError: null })
     try {
-      const salt = getOrCreateVaultSalt()
+      // 2. Salt ermitteln (lokal oder von Backend abrufen)
+      let salt = getLocalVaultSalt()
+      if (!salt) {
+        await get().fetchVaultSalt()
+        salt = getLocalVaultSalt()
+      }
+      if (!salt) {
+        salt = getOrCreateVaultSalt()
+      }
+
       const { userKey, bucketId } = await deriveVaultKeys(masterPassword, salt)
 
-      // 1. Canary prüfen falls vorhanden
+      // 3. Canary prüfen falls vorhanden
       const canaryCiphertext = localStorage.getItem(`${VAULT_CANARY_PREFIX}${bucketId}`)
       if (canaryCiphertext) {
         try {
@@ -400,7 +466,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
         }
       }
 
-      // 2. Lokale verschlüsselte Blobs aus dem Cache laden
+      // 4. Lokale verschlüsselte Blobs aus dem Cache laden
       const cachedRaw = localStorage.getItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`)
       const cachedBlobs: StoredEncryptedEntry[] = cachedRaw ? JSON.parse(cachedRaw) : []
 
@@ -442,10 +508,13 @@ export const useVaultStore = create<VaultState>((set, get) => ({
       }
       localStorage.setItem(VAULT_SETUP_DONE_KEY, 'true')
 
+      // Erfolg: Fehlversuche zurücksetzen
       set({
         isInitialized: true,
         isUnlocked: true,
         isUnlocking: false,
+        failedUnlockAttempts: 0,
+        lockedUntilMs: 0,
         userKey,
         bucketId,
         items: decryptedItems,
@@ -458,8 +527,20 @@ export const useVaultStore = create<VaultState>((set, get) => ({
 
       return true
     } catch (err: unknown) {
+      // Fehlversuchszähler mit exponentiellem Backoff (SEC-07)
+      const attempts = failedUnlockAttempts + 1
+      let backoffMs = 0
+      if (attempts >= 3) {
+        backoffMs = Math.min(60000, Math.pow(2, attempts - 3) * 1000)
+      }
+
       const msg = err instanceof Error ? err.message : 'Entsperren fehlgeschlagen'
-      set({ isUnlocking: false, unlockError: msg })
+      set({
+        isUnlocking: false,
+        failedUnlockAttempts: attempts,
+        lockedUntilMs: Date.now() + backoffMs,
+        unlockError: msg,
+      })
       return false
     }
   },
@@ -524,6 +605,20 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   saveItem: async (itemData) => {
     const { userKey, bucketId, items } = get()
     if (!userKey || !bucketId) throw new Error('Tresor ist gesperrt')
+
+    // Payload-Guardrail (SEC-08): Dateianhänge begrenzen (<500 KB)
+    if (itemData.attachments && itemData.attachments.length > 0) {
+      let totalSize = 0
+      for (const att of itemData.attachments) {
+        if (att.size > MAX_VAULT_ATTACHMENT_SIZE_BYTES || (att.dataBase64 && att.dataBase64.length > MAX_VAULT_ATTACHMENT_SIZE_BYTES * 1.4)) {
+          throw new Error(`Dateianhang "${att.name}" überschreitet das Limit von 500 KB.`)
+        }
+        totalSize += att.size
+      }
+      if (totalSize > MAX_VAULT_ATTACHMENT_SIZE_BYTES) {
+        throw new Error('Die Gesamtgröße aller Dateianhänge überschreitet das Limit von 500 KB.')
+      }
+    }
 
     const id = itemData.id || window.crypto.randomUUID()
     const existing = items.find((i) => i.id === id)
@@ -660,7 +755,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
         body: JSON.stringify(payload),
       })
 
-      // Server-Antwort verarbeiten
+      // Server-Antwort verarbeiten (SEC-03: Monotone Revisionsverarbeitung)
       const cachedRaw = localStorage.getItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`)
       let cachedBlobs: StoredEncryptedEntry[] = cachedRaw ? JSON.parse(cachedRaw) : []
       let currentItems = [...items]

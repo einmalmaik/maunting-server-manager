@@ -14,10 +14,34 @@ describe('totpEngine', () => {
     expect(decoded.length).toBe(10)
   })
 
-  it('generates 6-digit TOTP codes for standard secret', async () => {
+  it('generates 6-digit TOTP codes for standard secret with SHA-1', async () => {
     const secret = 'JBSWY3DPEHPK3PXP'
     const code = await generateTotpCode(secret, 30, 1600000000000)
     expect(code).toMatch(/^\d{6}$/)
+  })
+
+  it('supports SHA-256 and SHA-512 algorithms (SEC-12)', async () => {
+    const secret = 'JBSWY3DPEHPK3PXP'
+    const codeSha256 = await generateTotpCode(secret, {
+      algorithm: 'SHA-256',
+      digits: 6,
+      period: 30,
+      timestampMs: 1600000000000,
+    })
+    expect(codeSha256).toMatch(/^\d{6}$/)
+
+    const codeSha512 = await generateTotpCode(secret, {
+      algorithm: 'SHA-512',
+      digits: 8,
+      period: 60,
+      timestampMs: 1600000000000,
+    })
+    expect(codeSha512).toMatch(/^\d{8}$/)
+  })
+
+  it('fails cleanly on malformed Base32 secret without pseudo-codes (SEC-12)', async () => {
+    await expect(generateTotpCode('INVALID_BASE32_1890')).rejects.toThrow()
+    await expect(generateTotpCode('')).rejects.toThrow()
   })
 
   it('calculates remaining seconds within 30s window', () => {
@@ -26,13 +50,16 @@ describe('totpEngine', () => {
     expect(rem).toBeLessThanOrEqual(30)
   })
 
-  it('parses otpauth URIs and extracts secret, issuer, and label', () => {
-    const uri = 'otpauth://totp/GitHub:einmalmaik?secret=JBSWY3DPEHPK3PXP&issuer=GitHub'
+  it('parses otpauth URIs and extracts secret, issuer, label, algorithm, and digits', () => {
+    const uri = 'otpauth://totp/GitHub:einmalmaik?secret=JBSWY3DPEHPK3PXP&issuer=GitHub&algorithm=SHA256&digits=8&period=60'
     const parsed = parseOtpauthUri(uri)
     expect(parsed).not.toBeNull()
     expect(parsed?.secret).toBe('JBSWY3DPEHPK3PXP')
     expect(parsed?.issuer).toBe('GitHub')
     expect(parsed?.label).toBe('einmalmaik')
+    expect(parsed?.algorithm).toBe('SHA-256')
+    expect(parsed?.digits).toBe(8)
+    expect(parsed?.period).toBe(60)
   })
 
   it('handles raw secret input directly', () => {

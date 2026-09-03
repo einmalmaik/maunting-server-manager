@@ -1,8 +1,10 @@
 /**
  * Datenschutzfreundliche Passwort-Prüfung gegen bekannte Datenlecks.
  * Verwendet das K-Anonymitäts-Modell (Have I Been Pwned API):
- * Nur die ersten 5 Hex-Zeichen des SHA-1 Hashes verlassen das Endgerät.
- * Das Klartext-Passwort und der vollständige Hash bleiben zu 100 % lokal.
+ * - Nur die ersten 5 Hex-Zeichen des SHA-1 Hashes verlassen das Endgerät.
+ * - Minimum 6 Zeichen vor Netzwerkaufruf (SEC-10).
+ * - Debouncing von mind. 400 ms gegen Keystroke-Leaks (SEC-10).
+ * - Das Klartext-Passwort und der vollständige Hash bleiben zu 100 % lokal.
  */
 
 export interface LeakCheckResult {
@@ -14,8 +16,15 @@ export interface LeakCheckResult {
 // In-Memory Cache für bereits geprüfte Hashes innerhalb der Sitzung
 const prefixCache = new Map<string, string>()
 
+export const MIN_LEAK_CHECK_PASSWORD_LENGTH = 6
+export const DEFAULT_LEAK_CHECK_DEBOUNCE_MS = 400
+
+/**
+ * Führt eine direkte K-Anonymitätsprüfung gegen die HIBP Range-API aus.
+ * Gibt sofort { isLeaked: false, count: 0, checked: false } zurück, falls das Passwort < 6 Zeichen ist.
+ */
 export async function checkPasswordLeak(password: string): Promise<LeakCheckResult> {
-  if (!password || password.length === 0) {
+  if (!password || password.length < MIN_LEAK_CHECK_PASSWORD_LENGTH) {
     return { isLeaked: false, count: 0, checked: false }
   }
 
@@ -70,5 +79,32 @@ export async function checkPasswordLeak(password: string): Promise<LeakCheckResu
   } catch {
     // Offline oder Netzwerk-Fehler -> Leise fehlschlagen, Benutzer nicht blockieren
     return { isLeaked: false, count: 0, checked: false }
+  }
+}
+
+/**
+ * Erzeugt eine gedebouncte Leak-Check Funktion für Eingabefelder (mind. 400ms Inaktivität).
+ */
+export function createDebouncedLeakChecker(
+  onResult: (res: LeakCheckResult | null) => void,
+  delayMs = DEFAULT_LEAK_CHECK_DEBOUNCE_MS,
+): (password: string) => void {
+  let timerId: ReturnType<typeof setTimeout> | null = null
+
+  return (password: string) => {
+    if (timerId) {
+      clearTimeout(timerId)
+      timerId = null
+    }
+
+    if (!password || password.length < MIN_LEAK_CHECK_PASSWORD_LENGTH) {
+      onResult(null)
+      return
+    }
+
+    timerId = setTimeout(async () => {
+      const result = await checkPasswordLeak(password)
+      onResult(result)
+    }, Math.max(delayMs, DEFAULT_LEAK_CHECK_DEBOUNCE_MS))
   }
 }

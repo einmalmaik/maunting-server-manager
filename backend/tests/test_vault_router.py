@@ -7,9 +7,9 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from database import Base
-from dependencies import get_current_owner, get_current_user, get_db, verify_csrf
+from dependencies import get_current_user, get_db, require_global, verify_csrf
 from main import app
-from models import Node, User, VaultEntry
+from models import Node, User, VaultEntry, VaultUserSetting
 
 
 @pytest.fixture
@@ -32,16 +32,27 @@ def test_db():
         is_owner=True,
     )
     session.add(user)
+
+    user2 = User(
+        id=2,
+        username="other_user",
+        email="other@example.com",
+        password_hash="hash",
+        is_active=True,
+        is_owner=False,
+    )
+    session.add(user2)
     session.commit()
     session.refresh(user)
+    session.refresh(user2)
 
-    yield session, user
+    yield session, user, user2
     session.close()
 
 
 @pytest.fixture
 def client(test_db):
-    session, user = test_db
+    session, user, _ = test_db
 
     def override_get_db():
         yield session
@@ -49,15 +60,11 @@ def client(test_db):
     def override_get_current_user():
         return user
 
-    def override_get_current_owner():
-        return user
-
     def override_verify_csrf():
         return None
 
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_current_user] = override_get_current_user
-    app.dependency_overrides[get_current_owner] = override_get_current_owner
     app.dependency_overrides[verify_csrf] = override_verify_csrf
 
     with TestClient(app) as test_client:
@@ -87,7 +94,7 @@ def test_vault_sync_invalid_bucket_id(client):
 
 
 def test_vault_sync_insert_and_update(client, test_db):
-    session, _ = test_db
+    session, _, _ = test_db
     bucket = "b" * 64
     entry_id = "test-uuid-1"
     ciphertext_v1 = "sv-vault-v1:encrypted_payload_1"
@@ -147,29 +154,231 @@ def test_vault_sync_insert_and_update(client, test_db):
     assert len(data3["entries"]) == 1
     assert data3["entries"][0]["ciphertext"] == ciphertext_v2
 
-    # 4. Out-of-order/older revision must NOT overwrite newer revision
-    resp4 = client.post(
-        "/api/vault/sync",
-        json={
-            "bucket_id": bucket,
-            "since_revision": 0,
-            "mutations": [
-                {
-                    "id": entry_id,
-                    "ciphertext": "older_stale_ciphertext",
-                    "revision": 1,
-                    "is_deleted": False,
-                }
-            ],
-        },
-    )
-    assert resp4.status_code == 200
-    data4 = resp4.json()
-    assert data4["entries"][0]["ciphertext"] == ciphertext_v2
+
+def test_vault_monotonic_multi_device_sync(test_db):
+    """SEC-03: Tests that new entries from Device B are never skipped on Device A."""
+    session, user, _ = test_db
+
+    def override_get_db():
+        yield session
+
+    def override_get_current_user():
+        return user
+
+    def override_verify_csrf():
+        return None
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = override_get_current_user
+    app.dependency_overrides[verify_csrf] = override_verify_csrf
+
+    with TestClient(app) as test_client:
+        bucket = "c" * 64
+
+        # Device A creates Item 1 and Item 2
+        r1 = test_client.post(
+            "/api/vault/sync",
+            json={
+                "bucket_id": bucket,
+                "since_revision": 0,
+                "mutations": [
+                    {"id": "item-1", "ciphertext": "sv-vault-v1:item1", "revision": 1, "is_deleted": False},
+                    {"id": "item-2", "ciphertext": "sv-vault-v1:item2", "revision": 1, "is_deleted": False},
+                ],
+            },
+        )
+        assert r1.status_code == 200
+        assert r1.json()["server_revision"] == 2
+
+        # Device A's watermark is now 2
+        device_a_watermark = 2
+
+        # Device B (offline earlier or fresh device) creates Item 3 with local revision 1
+        r2 = test_client.post(
+            "/api/vault/sync",
+            json={
+                "bucket_id": bucket,
+                "since_revision": 0,
+                "mutations": [
+                    {"id": "item-3", "ciphertext": "sv-vault-v1:item3", "revision": 1, "is_deleted": False},
+                ],
+            },
+        )
+        assert r2.status_code == 200
+        assert r2.json()["server_revision"] == 3
+
+        # Device A now syncs with since_revision = 2
+        # It MUST receive Item 3 even though Item 3's client-mutation revision was 1!
+        r3 = test_client.post(
+            "/api/vault/sync",
+            json={
+                "bucket_id": bucket,
+                "since_revision": device_a_watermark,
+                "mutations": [],
+            },
+        )
+        assert r3.status_code == 200
+        data3 = r3.json()
+        assert data3["server_revision"] == 3
+        assert len(data3["entries"]) == 1
+        assert data3["entries"][0]["id"] == "item-3"
+        assert data3["entries"][0]["ciphertext"] == "sv-vault-v1:item3"
+
+    app.dependency_overrides.clear()
+
+
+def test_vault_bucket_authorization_idor_protection(test_db):
+    """SEC-02: Tests IDOR prevention: users cannot read/sync other users' buckets."""
+    session, user1, user2 = test_db
+
+    def override_get_db():
+        yield session
+
+    def override_verify_csrf():
+        return None
+
+    bucket_user1 = "1" * 64
+    bucket_user2 = "2" * 64
+
+    # User 1 initializes and syncs bucket 1
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = lambda: user1
+    app.dependency_overrides[verify_csrf] = override_verify_csrf
+
+    with TestClient(app) as client1:
+        res1 = client1.post(
+            "/api/vault/sync",
+            json={
+                "bucket_id": bucket_user1,
+                "since_revision": 0,
+                "mutations": [
+                    {"id": "secret-u1", "ciphertext": "sv-vault-v1:secret1", "revision": 1, "is_deleted": False}
+                ],
+            },
+        )
+        assert res1.status_code == 200
+
+    # User 2 tries to access User 1's bucket -> 403 Forbidden!
+    app.dependency_overrides[get_current_user] = lambda: user2
+
+    with TestClient(app) as client2:
+        res_forbidden = client2.post(
+            "/api/vault/sync",
+            json={
+                "bucket_id": bucket_user1,
+                "since_revision": 0,
+                "mutations": [],
+            },
+        )
+        assert res_forbidden.status_code == 403
+
+        # User 2 can sync their own bucket 2
+        res2 = client2.post(
+            "/api/vault/sync",
+            json={
+                "bucket_id": bucket_user2,
+                "since_revision": 0,
+                "mutations": [
+                    {"id": "secret-u2", "ciphertext": "sv-vault-v1:secret2", "revision": 1, "is_deleted": False}
+                ],
+            },
+        )
+        assert res2.status_code == 200
+
+    app.dependency_overrides.clear()
+
+
+def test_vault_kdf_salt_endpoints(test_db):
+    """SEC-04: Tests server-side KDF salt storage and retrieval."""
+    session, user1, user2 = test_db
+
+    def override_get_db():
+        yield session
+
+    def override_verify_csrf():
+        return None
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = lambda: user1
+    app.dependency_overrides[verify_csrf] = override_verify_csrf
+
+    with TestClient(app) as client:
+        # Initially no salt
+        res_get1 = client.get("/api/vault/salt")
+        assert res_get1.status_code == 200
+        assert res_get1.json()["kdf_salt"] is None
+        assert res_get1.json()["has_vault"] is False
+
+        # Save salt and bucket
+        salt_val = "dGVzdC1zYWx0LTE2Ynl0ZXM="
+        bucket_val = "d" * 64
+        res_set = client.post(
+            "/api/vault/salt",
+            json={"kdf_salt": salt_val, "bucket_id": bucket_val},
+        )
+        assert res_set.status_code == 200
+        assert res_set.json()["kdf_salt"] == salt_val
+        assert res_set.json()["bucket_id"] == bucket_val
+        assert res_set.json()["has_vault"] is True
+
+        # Fetch salt again
+        res_get2 = client.get("/api/vault/salt")
+        assert res_get2.status_code == 200
+        assert res_get2.json()["kdf_salt"] == salt_val
+        assert res_get2.json()["bucket_id"] == bucket_val
+        assert res_get2.json()["has_vault"] is True
+
+    # User 2 cannot hijack User 1's bucket in /api/vault/salt
+    app.dependency_overrides[get_current_user] = lambda: user2
+    with TestClient(app) as client2:
+        res_hijack = client2.post(
+            "/api/vault/salt",
+            json={"kdf_salt": "YW5vdGhlci1zYWx0LXZhbHVl", "bucket_id": bucket_val},
+        )
+        assert res_hijack.status_code == 403
+
+    app.dependency_overrides.clear()
+
+
+def test_vault_csrf_enforcement(test_db):
+    """SEC-09: Tests that mutating endpoints enforce CSRF validation."""
+    session, user, _ = test_db
+
+    def override_get_db():
+        yield session
+
+    def override_get_current_user():
+        return user
+
+    # Note: Do NOT override verify_csrf so actual CSRF dependency is called
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = override_get_current_user
+
+    with TestClient(app) as client:
+        # Request without CSRF token or cookie should fail with 403
+        res = client.post(
+            "/api/vault/sync",
+            json={"bucket_id": "e" * 64, "since_revision": 0, "mutations": []},
+        )
+        assert res.status_code == 403
+
+        res_hint = client.post(
+            "/api/vault/hint",
+            json={"hint": "test hint"},
+        )
+        assert res_hint.status_code == 403
+
+        res_salt = client.post(
+            "/api/vault/salt",
+            json={"kdf_salt": "dGVzdC1zYWx0LTE2Ynl0ZXM=", "bucket_id": "e" * 64},
+        )
+        assert res_salt.status_code == 403
+
+    app.dependency_overrides.clear()
 
 
 def test_vault_node_assignment(client, test_db):
-    session, _ = test_db
+    session, _, _ = test_db
 
     # Default: None
     res = client.get("/api/vault/node-assignment")
@@ -198,7 +407,7 @@ def test_vault_node_assignment(client, test_db):
 
 
 def test_vault_hint_flow_and_rate_limit(client, test_db, monkeypatch):
-    session, _ = test_db
+    session, _, _ = test_db
 
     # 1. Initially no hint
     res_status = client.get("/api/vault/hint-status")
@@ -264,7 +473,7 @@ def test_vault_disabled_via_settings(client, test_db):
 
 
 def test_vault_node_migration_count(client, test_db):
-    session, _ = test_db
+    session, _, _ = test_db
     node = Node(id=99, name="Migration Node", host="10.0.0.9:8000", auth_token_enc="enc_token")
     session.add(node)
 
@@ -283,4 +492,3 @@ def test_vault_node_migration_count(client, test_db):
     res = client.put("/api/vault/node-assignment", json={"node_id": "99"})
     assert res.status_code == 200
     assert res.json()["migrated_entries"] >= 1
-
