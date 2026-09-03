@@ -32,6 +32,7 @@
     "@msdis/shield": "file:packages/dis",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-autostart": "^2.5.0",
+    "@tauri-apps/plugin-biometric": "~2.3.0",
     "@tauri-apps/plugin-dialog": "^2.4.0",
     "@types/qrcode": "^1.5.6",
     "@uiw/react-codemirror": "^4.25.10",

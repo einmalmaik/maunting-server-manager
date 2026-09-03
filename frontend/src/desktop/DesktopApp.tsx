@@ -109,12 +109,27 @@ export function DesktopApp() {
 
     const handleVisibilityChange = () => {
       const state = useVaultStore.getState()
-      if (document.hidden && state.lockOnWindowBlur && state.isUnlocked && !state.isUnlocking) {
-        state.lock()
+      if (document.hidden) {
+        if (state.lockOnWindowBlur && state.isUnlocked && !state.isUnlocking) {
+          state.lock()
+        }
+      } else {
+        if (state.isUnlocked) {
+          state.checkAutoLock()
+        }
+      }
+    }
+
+    const handleFocus = () => {
+      const state = useVaultStore.getState()
+      if (state.isUnlocked) {
+        state.checkAutoLock()
       }
     }
 
     window.addEventListener('blur', handleWindowBlur)
+    window.addEventListener('pagehide', handleWindowBlur)
+    window.addEventListener('focus', handleFocus)
     document.addEventListener('visibilitychange', handleVisibilityChange)
 
     let unlistenTauriBlur: (() => void) | undefined
@@ -130,6 +145,8 @@ export function DesktopApp() {
       events.forEach((evt) => window.removeEventListener(evt, handleActivity))
       clearInterval(interval)
       window.removeEventListener('blur', handleWindowBlur)
+      window.removeEventListener('pagehide', handleWindowBlur)
+      window.removeEventListener('focus', handleFocus)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       if (unlistenTauriBlur) unlistenTauriBlur()
     }

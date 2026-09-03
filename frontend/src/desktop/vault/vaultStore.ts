@@ -214,6 +214,14 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   },
 
   recordActivity: () => {
+    const { isUnlocked, autoLockMinutes, lastActivityTime, lock } = get()
+    if (isUnlocked && autoLockMinutes > 0) {
+      const now = Date.now()
+      if (now - lastActivityTime >= autoLockMinutes * 60 * 1000) {
+        lock()
+        return
+      }
+    }
     set({ lastActivityTime: Date.now() })
   },
 
@@ -277,15 +285,16 @@ export const useVaultStore = create<VaultState>((set, get) => ({
         await decryptVaultEntry(canary, userKey, 'vault-canary')
       }
 
-      await promptBiometricVerification('Windows Hello für Passwort-Manager aktivieren')
+      await promptBiometricVerification('Biometrischen Schnelleinstieg aktivieren')
 
       const wrapped = await wrapVaultCredentialsForBiometrics(masterPassword)
       try {
         await biometrieSpeichern(wrapped)
       } catch {
-        // Fallback: Speichere in memory/desktop state
+        // Fallback: Auf Plattformen ohne Windows Credential Store
       }
       if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(VAULT_BIOMETRICS_WRAPPED_KEY, wrapped)
         localStorage.setItem(VAULT_BIOMETRICS_ENABLED_KEY, 'true')
       }
       set({ isBiometricsEnabled: true })
@@ -315,8 +324,15 @@ export const useVaultStore = create<VaultState>((set, get) => ({
         // Primär: Native Windows Hello Verifikation & Freigabe aus dem Windows Credential Store
         wrapped = await biometrieEntsperren('Passwort-Manager entsperren')
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : 'Biometrische Authentifizierung fehlgeschlagen.'
-        throw new Error(msg)
+        const msg = err instanceof Error ? err.message : String(err)
+        if (msg.includes('abgebrochen') || msg.includes('Canceled')) {
+          throw new Error('Biometrische Authentifizierung abgebrochen.')
+        }
+
+        // Fallback (z. B. auf Android oder wenn Credential Store nicht verfügbar ist):
+        // Frage native Biometrie über promptBiometricVerification ab
+        await promptBiometricVerification('Tresor per Fingerabdruck entsperren')
+        wrapped = typeof localStorage !== 'undefined' ? localStorage.getItem(VAULT_BIOMETRICS_WRAPPED_KEY) : null
       }
 
       if (!wrapped) {
@@ -895,8 +911,23 @@ if (typeof window !== 'undefined') {
   }
 
   window.addEventListener('blur', triggerBlurLock)
+  window.addEventListener('pagehide', triggerBlurLock)
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) triggerBlurLock()
+    if (document.hidden) {
+      triggerBlurLock()
+    } else {
+      const s = useVaultStore.getState()
+      if (s.isUnlocked) {
+        s.checkAutoLock()
+      }
+    }
+  })
+
+  window.addEventListener('focus', () => {
+    const s = useVaultStore.getState()
+    if (s.isUnlocked) {
+      s.checkAutoLock()
+    }
   })
 
   if ('__TAURI_INTERNALS__' in window) {

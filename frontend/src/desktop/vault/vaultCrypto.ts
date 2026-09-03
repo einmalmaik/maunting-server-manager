@@ -202,6 +202,38 @@ export function getOrCreateDeviceSalt(): Uint8Array {
   return newSalt
 }
 
+async function checkAndroidBiometric(): Promise<boolean> {
+  try {
+    const { checkStatus } = await import('@tauri-apps/plugin-biometric')
+    const status = await checkStatus()
+    return !!status.isAvailable
+  } catch {
+    return false
+  }
+}
+
+async function promptAndroidBiometric(title?: string): Promise<boolean> {
+  try {
+    const { authenticate } = await import('@tauri-apps/plugin-biometric')
+    await authenticate(title || 'Tresor entsperren', {
+      allowDeviceCredential: true,
+    })
+    return true
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (
+      msg.includes('cancel') ||
+      msg.includes('Cancel') ||
+      msg.includes('abgebrochen') ||
+      msg.includes('User canceled') ||
+      msg.includes('NegativeButton')
+    ) {
+      throw new Error('Biometrische Authentifizierung abgebrochen.')
+    }
+    return false
+  }
+}
+
 export async function isBiometricsAvailable(): Promise<boolean> {
   // 1. In Tauri / Desktop: Prüfe native Windows Hello / OS Biometrie über Rust
   try {
@@ -211,7 +243,15 @@ export async function isBiometricsAvailable(): Promise<boolean> {
     }
   } catch {}
 
-  // 2. WebAuthn Plattform-Authenticator (Hardware-Schlüssel)
+  // 2. In Tauri / Mobile (Android): Prüfe Biometrie über tauri-plugin-biometric
+  try {
+    const androidAvailable = await checkAndroidBiometric()
+    if (androidAvailable) {
+      return true
+    }
+  } catch {}
+
+  // 3. WebAuthn Plattform-Authenticator (Hardware-Schlüssel)
   try {
     if (typeof window !== 'undefined' && window.PublicKeyCredential) {
       if (typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function') {
@@ -276,7 +316,17 @@ export async function promptBiometricVerification(title?: string): Promise<boole
     }
   }
 
-  // 2. WebAuthn Fallback
+  // 2. In Tauri / Mobile (Android): Nutze BiometricPrompt
+  try {
+    const androidVerified = await promptAndroidBiometric(title)
+    if (androidVerified) {
+      return true
+    }
+  } catch (err: unknown) {
+    throw err
+  }
+
+  // 3. WebAuthn Fallback
   if (typeof window === 'undefined' || !window.PublicKeyCredential || !navigator.credentials) {
     return true
   }

@@ -320,9 +320,9 @@ function ProfilEinstellungen() {
 
           <div className="flex items-center justify-between gap-4 pt-2 border-t border-outline-variant/20">
             <div>
-              <span className="text-xs font-medium text-on-surface">Beim Fenster-Wechsel sperren</span>
+              <span className="text-xs font-medium text-on-surface">Beim Fensterwechsel / App-Verlassen sperren</span>
               <p className="text-[11px] text-on-surface-variant">
-                Sperrt den Passwort-Manager sofort, sobald das Fenster minimiert oder gewechselt wird.
+                Sperrt den Passwort-Manager sofort, sobald das Fenster verlassen oder die App in den Hintergrund gelegt wird.
               </p>
             </div>
             <Switch
@@ -342,7 +342,7 @@ function ProfilEinstellungen() {
           <div>
             <h2 className="text-sm font-semibold text-on-surface">Biometrischer Schnelleinstieg</h2>
             <p className="text-xs text-on-surface-variant">
-              Windows Hello oder Fingerabdruck zum schnellen und sicheren Entsperren des Tresors nutzen.
+              Fingerabdruck oder Windows Hello zum schnellen und sicheren Entsperren des Tresors nutzen.
             </p>
           </div>
         </div>
@@ -364,7 +364,7 @@ function ProfilEinstellungen() {
                 Biometrische Authentifizierung aktivieren
               </span>
               <p className="text-[11px] text-on-surface-variant">
-                Schlüssel wird gerätegebunden per Hardware-Schutz (TPM / Keystore) geschützt.
+                Schlüssel wird gerätegebunden per Hardware-Schutz (Android Keystore / TPM) geschützt.
               </p>
             </div>
             <Switch
@@ -376,7 +376,7 @@ function ProfilEinstellungen() {
 
           {!isBiometricsSupported && (
             <div className="p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-xs text-on-surface-variant">
-              Auf diesem Gerät ist aktuell kein biometrischer Sensor (Windows Hello / Fingerabdruck) verfügbar.
+              Auf diesem Gerät ist aktuell kein biometrischer Sensor (Fingerabdruck / Windows Hello) verfügbar.
             </div>
           )}
         </div>
