@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { User as UserIcon } from 'lucide-react'
+import { apiUrl } from '@/config/api'
 
 export interface AvatarProps {
   src?: string | null
@@ -60,7 +61,8 @@ export function Avatar({
     ? name.trim().slice(0, 2).toUpperCase()
     : ''
 
-  const showImage = Boolean(src) && !hasError
+  const resolvedSrc = src ? apiUrl(src) : undefined
+  const showImage = Boolean(resolvedSrc) && !hasError
 
   return (
     <div className={`relative inline-flex shrink-0 select-none ${className}`}>
@@ -69,7 +71,7 @@ export function Avatar({
       >
         {showImage ? (
           <img
-            src={src!}
+            src={resolvedSrc!}
             alt={alt || name || 'Avatar'}
             onError={() => setHasError(true)}
             className="h-full w-full object-cover"

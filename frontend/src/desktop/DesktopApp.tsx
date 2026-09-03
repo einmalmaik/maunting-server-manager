@@ -22,7 +22,6 @@ import { api } from '@/api/client'
 import { AiMemoryManager } from '@/components/ai/AiMemoryManager'
 import { AiRunNotice } from '@/components/ai/AiRunNotice'
 import { ServerIncidentNotifier } from '@/components/notifications/ServerIncidentNotifier'
-import { MobileAiControls } from '@/components/ai/MobileAiControls'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { PromptDialog } from '@/components/ui/PromptDialog'
 import { ToastContainer } from '@/components/ui/ToastContainer'
@@ -110,12 +109,27 @@ export function DesktopApp() {
 
     const handleVisibilityChange = () => {
       const state = useVaultStore.getState()
-      if (document.hidden && state.lockOnWindowBlur && state.isUnlocked && !state.isUnlocking) {
-        state.lock()
+      if (document.hidden) {
+        if (state.lockOnWindowBlur && state.isUnlocked && !state.isUnlocking) {
+          state.lock()
+        }
+      } else {
+        if (state.isUnlocked) {
+          state.checkAutoLock()
+        }
+      }
+    }
+
+    const handleFocus = () => {
+      const state = useVaultStore.getState()
+      if (state.isUnlocked) {
+        state.checkAutoLock()
       }
     }
 
     window.addEventListener('blur', handleWindowBlur)
+    window.addEventListener('pagehide', handleWindowBlur)
+    window.addEventListener('focus', handleFocus)
     document.addEventListener('visibilitychange', handleVisibilityChange)
 
     let unlistenTauriBlur: (() => void) | undefined
@@ -131,6 +145,8 @@ export function DesktopApp() {
       events.forEach((evt) => window.removeEventListener(evt, handleActivity))
       clearInterval(interval)
       window.removeEventListener('blur', handleWindowBlur)
+      window.removeEventListener('pagehide', handleWindowBlur)
+      window.removeEventListener('focus', handleFocus)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       if (unlistenTauriBlur) unlistenTauriBlur()
     }
@@ -804,12 +820,6 @@ function Hauptseite({
                 <span>{t('mss.app.einstellungen')}</span>
               </button>
             </nav>
-
-            {bereich === 'ki' && darfChatten && (
-              <div className="pt-2 border-t border-outline-variant/40">
-                <MobileAiControls onActionDone={() => setMobileMenuOffen(false)} />
-              </div>
-            )}
 
             <div className="pt-2 border-t border-outline-variant/40">
               <button

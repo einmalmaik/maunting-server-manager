@@ -734,6 +734,11 @@ pub fn run() {
             .plugin(tauri_plugin_updater::Builder::new().build());
     }
 
+    #[cfg(target_os = "android")]
+    {
+        builder = builder.plugin(tauri_plugin_biometric::init());
+    }
+
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -830,6 +835,7 @@ pub fn run() {
         // wirklich beenden (`app_beenden`).
         .on_window_event(|window, event| {
             match event {
+                #[cfg(not(target_os = "android"))]
                 tauri::WindowEvent::CloseRequested { api, .. } => {
                     if window.label() == "main" {
                         api.prevent_close();

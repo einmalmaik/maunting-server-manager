@@ -1,6 +1,6 @@
 [package]
 name = "maunting-smart-system"
-version = "4.1.0"
+version = "4.2.0"
 description = "MSS - Maunting Smart System, Desktop Companion fuer das MSM-Panel"
 edition = "2021"
 # Die Zahl muss stimmen, sonst ist sie schaedlich: hier stand 1.77, und ein
@@ -36,6 +36,7 @@ tauri = { version = "2", features = [
 ] }
 # Plattformuebergreifende System-Benachrichtigungen (Windows & Android)
 tauri-plugin-notification = "2"
+tauri-plugin-biometric = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

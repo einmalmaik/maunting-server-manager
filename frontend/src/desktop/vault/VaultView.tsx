@@ -60,7 +60,13 @@ export function VaultView() {
     saveHint,
     requestHintEmail,
     checkBiometricsSupport,
+    fetchVaultSalt,
   } = useVaultStore()
+
+  // Beim Laden Server-Status und Salt prüfen (ermöglicht nahtlose Multi-Device Anmeldung)
+  useEffect(() => {
+    void fetchVaultSalt()
+  }, [fetchVaultSalt])
 
   // Biometrie-Verfügbarkeit (Windows Hello / Fingerabdruck) beim Laden abfragen
   useEffect(() => {
@@ -75,7 +81,7 @@ export function VaultView() {
     }
   }, [isUnlocked])
 
-  // Sofortige Sperre beim Verlassen des Fensters (Minimieren, Alt+Tab, Klick auf anderes Fenster)
+  // Sofortige Sperre beim Verlassen des Fensters / der App (Minimieren, Alt+Tab, App-Wechsel)
   useEffect(() => {
     if (!isUnlocked) return
 
@@ -86,14 +92,29 @@ export function VaultView() {
       }
     }
 
-    window.addEventListener('blur', handleBlurLock)
     const handleVis = () => {
-      if (document.hidden) handleBlurLock()
+      if (document.hidden) {
+        handleBlurLock()
+      } else {
+        const state = useVaultStore.getState()
+        if (state.isUnlocked) state.checkAutoLock()
+      }
     }
+
+    const handleFocus = () => {
+      const state = useVaultStore.getState()
+      if (state.isUnlocked) state.checkAutoLock()
+    }
+
+    window.addEventListener('blur', handleBlurLock)
+    window.addEventListener('pagehide', handleBlurLock)
+    window.addEventListener('focus', handleFocus)
     document.addEventListener('visibilitychange', handleVis)
 
     return () => {
       window.removeEventListener('blur', handleBlurLock)
+      window.removeEventListener('pagehide', handleBlurLock)
+      window.removeEventListener('focus', handleFocus)
       document.removeEventListener('visibilitychange', handleVis)
     }
   }, [isUnlocked])
@@ -118,6 +139,12 @@ export function VaultView() {
 
   // UI-Zustände für Sperre & Ersteinrichtung
   const [isSetupMode, setIsSetupMode] = useState(!isInitialized)
+
+  useEffect(() => {
+    if (isInitialized) {
+      setIsSetupMode(false)
+    }
+  }, [isInitialized])
   const [masterPasswordInput, setMasterPasswordInput] = useState('')
   const [confirmPasswordInput, setConfirmPasswordInput] = useState('')
   const [hintInput, setHintInput] = useState('')
@@ -358,8 +385,8 @@ export function VaultView() {
 
   const ModalBrandIcon = getBrandIcon(modalService, modalUrl)
 
-  // ── 1. ERSTEINRICHTUNG (NUR wenn noch NIE eingerichtet) ──
-  if (!isUnlocked && (!isInitialized || isSetupMode)) {
+  // ── 1. ERSTEINRICHTUNG (NUR wenn Ersteinrichtungs-Modus aktiv) ──
+  if (!isUnlocked && isSetupMode) {
     const canSubmitSetup =
       masterPasswordInput.length >= 8 &&
       masterPasswordInput === confirmPasswordInput &&
@@ -511,21 +538,19 @@ export function VaultView() {
             </Button>
           </form>
 
-          {isInitialized && (
-            <div className="text-center">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsSetupMode(false)
-                  setMasterPasswordInput('')
-                  setConfirmPasswordInput('')
-                }}
-                className="text-xs text-primary hover:underline"
-              >
-                Abbrechen
-              </button>
-            </div>
-          )}
+          <div className="text-center pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setIsSetupMode(false)
+                setMasterPasswordInput('')
+                setConfirmPasswordInput('')
+              }}
+              className="text-xs text-primary hover:underline"
+            >
+              Bereits eingerichtet? Hier mit Master-Passwort anmelden
+            </button>
+          </div>
         </div>
       </div>
     )
@@ -575,7 +600,7 @@ export function VaultView() {
                   className="w-full flex items-center justify-center gap-2 py-2 text-xs border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20"
                 >
                   <Fingerprint className="h-4 w-4" />
-                  <span>Mit Windows Hello / Fingerabdruck</span>
+                  <span>Mit Fingerabdruck / Windows Hello</span>
                 </Button>
                 <div className="relative flex items-center justify-center">
                   <div className="border-t border-outline-variant/30 w-full" />
@@ -642,21 +667,18 @@ export function VaultView() {
               <span>{isRequestingHint ? 'Sende E-Mail...' : 'Hinweis per E-Mail anfordern'}</span>
             </button>
 
-            {/* Link zum Einrichten NUR WENN noch gar nicht eingerichtet */}
-            {!isInitialized && (
-              <div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsSetupMode(true)
-                    setMasterPasswordInput('')
-                  }}
-                  className="text-xs text-primary hover:underline"
-                >
-                  Jetzt neu einrichten
-                </button>
-              </div>
-            )}
+            <div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsSetupMode(true)
+                  setMasterPasswordInput('')
+                }}
+                className="text-xs text-on-surface-variant/70 hover:text-primary hover:underline transition-colors"
+              >
+                Neuen Tresor einrichten
+              </button>
+            </div>
           </div>
         </div>
       </div>

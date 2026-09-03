@@ -148,4 +148,32 @@ describe('useVaultStore - Security & Operations', () => {
     expect(localStorage.getItem('mss:vault_bio_wrapped')).toBeNull()
     expect(localStorage.getItem('mss:vault_biometrics_enabled')).toBe('false')
   })
+
+  it('resetLocalVaultState removes all sensitive keys and resets initialized status', () => {
+    localStorage.setItem('mss:vault_setup_done', 'true')
+    localStorage.setItem('mss:vault_salt', '0123456789abcdef')
+    localStorage.setItem('mss:vault_server_bucket', 'bucket-123')
+    localStorage.setItem('mss:vault_biometrics_enabled', 'true')
+    localStorage.setItem('mss:vault_bio_wrapped', 'envelope-xyz')
+
+    useVaultStore.setState({ isInitialized: true, isUnlocked: true })
+    useVaultStore.getState().resetLocalVaultState()
+
+    expect(useVaultStore.getState().isInitialized).toBe(false)
+    expect(useVaultStore.getState().isUnlocked).toBe(false)
+    expect(localStorage.getItem('mss:vault_setup_done')).toBeNull()
+    expect(localStorage.getItem('mss:vault_salt')).toBeNull()
+    expect(localStorage.getItem('mss:vault_server_bucket')).toBeNull()
+    expect(localStorage.getItem('mss:vault_biometrics_enabled')).toBeNull()
+    expect(localStorage.getItem('mss:vault_bio_wrapped')).toBeNull()
+  })
+
+  it('rejects unlock when derived bucket does not match server bucket (ZKP validation)', async () => {
+    localStorage.setItem('mss:vault_salt', '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff')
+    localStorage.setItem('mss:vault_server_bucket', 'different-server-bucket-id')
+
+    const success = await useVaultStore.getState().unlock('master-password-123')
+    expect(success).toBe(false)
+    expect(useVaultStore.getState().unlockError).toMatch(/Falsches Master-Passwort/)
+  })
 })
