@@ -56,4 +56,26 @@ describe('central UI components', () => {
     expect(abzeichen.className).toContain('bg-status-warning/10')
     expect(abzeichen.className).toContain('border-status-warning/30')
   })
+
+  it('Avatar löst relative URLs über Backend-Origin oder Custom-Resolver auf', async () => {
+    const { Avatar } = await import('@/Singra/UI/Avatar')
+    const { rerender } = render(
+      <Avatar src="/api/auth/avatar/test.png" name="Max Mustermann" alt="Profil" />,
+    )
+
+    const img = screen.getByAltText('Profil') as HTMLImageElement
+    expect(img.src).toContain('/api/auth/avatar/test.png')
+
+    // Mit custom resolver
+    rerender(
+      <Avatar
+        src="/api/auth/avatar/test.png"
+        name="Max Mustermann"
+        alt="Profil"
+        resolveUrl={(url) => `https://custom.example.com${url}`}
+      />,
+    )
+    const customImg = screen.getByAltText('Profil') as HTMLImageElement
+    expect(customImg.src).toBe('https://custom.example.com/api/auth/avatar/test.png')
+  })
 })

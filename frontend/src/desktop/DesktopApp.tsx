@@ -176,7 +176,7 @@ export function DesktopApp() {
     const handleOnline = () => {
       setIsOffline(false)
       void (async () => {
-        const res = await stillAnmeldenDetail(2500)
+        const res = await stillAnmeldenDetail(5000)
         if (res.status === 'erfolg') {
           void useAuthStore.getState().checkAuth()
         }
@@ -209,8 +209,8 @@ export function DesktopApp() {
           return
         }
 
-        // Stille Anmeldung mit kurzem Timeout (2.5s)
-        const anmeldung = await stillAnmeldenDetail(2500)
+        // Stille Anmeldung über OS-Tresor mit 5s Timeout
+        const anmeldung = await stillAnmeldenDetail(5000)
         if (anmeldung.status === 'abgelehnt') {
           setPhase('kopplung')
           return
@@ -226,19 +226,14 @@ export function DesktopApp() {
           return
         }
 
-        // Bei 'erfolg': checkAuth mit Timeout (2.5s) absichern
+        // Bei 'erfolg': checkAuth mit Timeout absichern
         try {
           await Promise.race([
             useAuthStore.getState().checkAuth(),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2500)),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
           ])
         } catch {
           setIsOffline(true)
-        }
-
-        if (!useAuthStore.getState().isAuthenticated && anmeldung.status !== 'erfolg') {
-          setPhase('kopplung')
-          return
         }
 
         if (!isAndroid && !geladen.sandbox_pfad) {
@@ -254,7 +249,18 @@ export function DesktopApp() {
 
   useEffect(() => {
     if (phase === 'bereit' && !angemeldet && !isOffline) {
-      setPhase('kopplung')
+      // Wenn das authStore-Flag nicht gesetzt ist, noch einmal prüfen, ob das
+      // Tresor-Token tatsächlich abgelehnt wurde, bevor zur Neukopplung gezwungen wird.
+      void (async () => {
+        const pruefung = await stillAnmeldenDetail(3000)
+        if (pruefung.status === 'abgelehnt') {
+          setPhase('kopplung')
+        } else if (pruefung.status === 'offline') {
+          setIsOffline(true)
+        } else if (pruefung.status === 'erfolg') {
+          void useAuthStore.getState().checkAuth()
+        }
+      })()
     }
   }, [phase, angemeldet, isOffline])
 

@@ -1,6 +1,6 @@
 [package]
 name = "maunting-smart-system"
-version = "4.2.3"
+version = "4.2.4"
 description = "MSS - Maunting Smart System, Desktop Companion fuer das MSM-Panel"
 edition = "2021"
 # Die Zahl muss stimmen, sonst ist sie schaedlich: hier stand 1.77, und ein

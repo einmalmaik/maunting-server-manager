@@ -9,6 +9,7 @@ export interface AvatarProps {
   status?: 'online' | 'offline' | 'idle' | 'dnd' | null
   className?: string
   alt?: string
+  resolveUrl?: (url: string) => string
 }
 
 const sizeClasses = {
@@ -49,6 +50,7 @@ export function Avatar({
   status,
   className = '',
   alt,
+  resolveUrl,
 }: AvatarProps) {
   const [hasError, setHasError] = useState(false)
 
@@ -61,7 +63,7 @@ export function Avatar({
     ? name.trim().slice(0, 2).toUpperCase()
     : ''
 
-  const resolvedSrc = src ? apiUrl(src) : undefined
+  const resolvedSrc = src ? (resolveUrl ? resolveUrl(src) : apiUrl(src)) : undefined
   const showImage = Boolean(resolvedSrc) && !hasError
 
   return (

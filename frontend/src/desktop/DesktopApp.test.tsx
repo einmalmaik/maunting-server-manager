@@ -226,7 +226,7 @@ describe('DesktopApp', () => {
       'fetch',
       vi.fn((input: RequestInfo | URL) => {
         const url = String(input)
-        if (url.includes('/auth/desktop-refresh')) {
+        if (url.includes('/auth/refresh')) {
           return Promise.resolve(
             new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r' }), {
               status: 200,
@@ -272,6 +272,37 @@ describe('DesktopApp', () => {
 
     render(<DesktopApp />)
     // Landet direkt in der Hauptansicht (bereit), nicht im Wizard
+    await waitFor(() => {
+      expect(screen.getByTestId('ki-seite')).toBeInTheDocument()
+    })
+    expect(screen.queryByText(i18n.t('mss.wizard.codeLabel'))).not.toBeInTheDocument()
+  })
+
+  it('erfolgreicher Refresh mit verzoegertem/fehlgeschlagenem checkAuth faellt nicht in Kopplung', async () => {
+    konfigMock({
+      backend_url: 'https://api.example.com',
+      sandbox_pfad: 'C:\\Users\\tester\\MSS-Sandbox',
+      eingerichtet: true,
+    })
+    // Refresh gelingt (Token im Tresor gueltig), aber /auth/me scheitert (z.B. Timeout/Netzwerkabbruch)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((eingabe: RequestInfo | URL) => {
+        const url = String(eingabe)
+        if (url.includes('/auth/refresh')) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ access_token: 'valid-a', refresh_token: 'valid-r' }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            }),
+          )
+        }
+        return Promise.reject(new TypeError('Network dropped after token refresh'))
+      }),
+    )
+
+    render(<DesktopApp />)
+    // Bleibt in bereit (Offline-Modus), keine Kopplungs-Maske
     await waitFor(() => {
       expect(screen.getByTestId('ki-seite')).toBeInTheDocument()
     })

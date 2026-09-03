@@ -43,7 +43,7 @@ export type AnmeldeErgebnis = {
  *   Das Token im Tresor bleibt erhalten, damit die App offline starten und bei
  *   Wiederverbindung nahtlos synchronisieren kann.
  */
-export async function stillAnmeldenDetail(timeoutMs = 2500): Promise<AnmeldeErgebnis> {
+export async function stillAnmeldenDetail(timeoutMs = 5000): Promise<AnmeldeErgebnis> {
   let refresh: string | null = null
   try {
     refresh = await invoke<string | null>('refresh_token_laden')
@@ -102,7 +102,7 @@ export async function stillAnmeldenDetail(timeoutMs = 2500): Promise<AnmeldeErge
  * Rotation zurück.
  */
 export async function stillAnmelden(): Promise<boolean> {
-  const res = await stillAnmeldenDetail(2500)
+  const res = await stillAnmeldenDetail(5000)
   return res.status === 'erfolg'
 }
 
