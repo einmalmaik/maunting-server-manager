@@ -192,7 +192,7 @@ mod aufnahme_impl {
 mod aufnahme_impl {
     use serde_json::Value;
 
-    pub fn aufnehmen(_app: &tauri::AppHandle) -> Result<Value, String> {
+    pub fn aufnehmen(_app: Option<&tauri::AppHandle>) -> Result<Value, String> {
         Err("Bildschirmfotos gibt es bisher nur unter Windows.".into())
     }
 

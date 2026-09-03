@@ -26,7 +26,9 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use serde_json::{json, Value};
+use serde_json::Value;
+#[cfg(windows)]
+use serde_json::json;
 
 /// Bis wann die Freigabe gilt. `None` heisst: keine.
 static FREIGABE: Mutex<Option<Instant>> = Mutex::new(None);

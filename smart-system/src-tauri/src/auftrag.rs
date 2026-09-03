@@ -22,6 +22,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
 use crate::aufraeumen;
+#[cfg(any(windows, test))]
 use crate::konfig;
 use crate::sandbox;
 use crate::system;
