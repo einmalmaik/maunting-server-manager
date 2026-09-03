@@ -58,7 +58,7 @@ export function apiUrl(path: string): string {
   const base = effective ? `${effective}/api` : '/api'
 
   if (!path) return base
-  if (/^https?:\/\//i.test(path)) return path
+  if (/^(https?:|blob:|data:)/i.test(path)) return path
 
   if (path.startsWith('/api/') || path === '/api') {
     if (!effective) return path

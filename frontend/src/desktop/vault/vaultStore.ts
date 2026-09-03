@@ -78,6 +78,7 @@ const VAULT_AUTOLOCK_MINUTES_KEY = 'mss:vault_autolock_minutes'
 const VAULT_LOCK_ON_BLUR_KEY = 'mss:vault_lock_on_blur'
 const VAULT_BIOMETRICS_ENABLED_KEY = 'mss:vault_biometrics_enabled'
 const VAULT_BIOMETRICS_WRAPPED_KEY = 'mss:vault_bio_wrapped'
+const VAULT_SERVER_BUCKET_KEY = 'mss:vault_server_bucket'
 
 export const MAX_VAULT_ATTACHMENT_SIZE_BYTES = 500 * 1024 // 500 KB limit (SEC-08)
 
@@ -231,16 +232,24 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   fetchVaultSalt: async () => {
     try {
       const res = await api<{ kdf_salt: string | null; bucket_id: string | null; has_vault: boolean }>('/api/vault/salt')
-      if (res.kdf_salt) {
-        if (typeof localStorage !== 'undefined') {
-          localStorage.setItem(VAULT_SALT_KEY, res.kdf_salt)
-        }
+      if (res.kdf_salt && typeof localStorage !== 'undefined') {
+        localStorage.setItem(VAULT_SALT_KEY, res.kdf_salt)
+      }
+      if (res.bucket_id && typeof localStorage !== 'undefined') {
+        localStorage.setItem(VAULT_SERVER_BUCKET_KEY, res.bucket_id)
       }
       if (res.has_vault) {
         set({ isInitialized: true })
         if (typeof localStorage !== 'undefined') {
           localStorage.setItem(VAULT_SETUP_DONE_KEY, 'true')
         }
+      } else if (res.has_vault === false) {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.removeItem(VAULT_SETUP_DONE_KEY)
+          localStorage.removeItem(VAULT_SERVER_BUCKET_KEY)
+          localStorage.removeItem(VAULT_SALT_KEY)
+        }
+        set({ isInitialized: false })
       }
       return res.kdf_salt
     } catch {
@@ -341,6 +350,8 @@ export const useVaultStore = create<VaultState>((set, get) => ({
       localStorage.removeItem(VAULT_SETUP_DONE_KEY)
       localStorage.removeItem(VAULT_BIOMETRICS_WRAPPED_KEY)
       localStorage.removeItem(VAULT_BIOMETRICS_ENABLED_KEY)
+      localStorage.removeItem(VAULT_SERVER_BUCKET_KEY)
+      localStorage.removeItem(VAULT_SALT_KEY)
     }
     set({
       isInitialized: false,
@@ -370,6 +381,9 @@ export const useVaultStore = create<VaultState>((set, get) => ({
           method: 'POST',
           body: JSON.stringify({ kdf_salt: saltHex, bucket_id: bucketId }),
         })
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(VAULT_SERVER_BUCKET_KEY, bucketId)
+        }
       } catch {}
 
       // Canary-Prüfblock verschlüsseln und lokal speichern
@@ -455,6 +469,12 @@ export const useVaultStore = create<VaultState>((set, get) => ({
       }
 
       const { userKey, bucketId } = await deriveVaultKeys(masterPassword, salt)
+
+      // Bei Multi-Device Login: Wenn ein Server-Bucket hinterlegt ist, muss der abgeleitete Bucket exakt übereinstimmen
+      const serverBucket = typeof localStorage !== 'undefined' ? localStorage.getItem(VAULT_SERVER_BUCKET_KEY) : null
+      if (serverBucket && bucketId !== serverBucket) {
+        throw new Error('Falsches Master-Passwort. Bitte überprüfe deine Eingabe.')
+      }
 
       // 3. Canary prüfen falls vorhanden
       const canaryCiphertext = localStorage.getItem(`${VAULT_CANARY_PREFIX}${bucketId}`)
@@ -864,6 +884,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
 if (typeof window !== 'undefined') {
   setTimeout(() => {
     void useVaultStore.getState().checkBiometricsSupport()
+    void useVaultStore.getState().fetchVaultSalt()
   }, 50)
 
   const triggerBlurLock = () => {

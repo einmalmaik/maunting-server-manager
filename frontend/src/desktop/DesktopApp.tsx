@@ -22,7 +22,6 @@ import { api } from '@/api/client'
 import { AiMemoryManager } from '@/components/ai/AiMemoryManager'
 import { AiRunNotice } from '@/components/ai/AiRunNotice'
 import { ServerIncidentNotifier } from '@/components/notifications/ServerIncidentNotifier'
-import { MobileAiControls } from '@/components/ai/MobileAiControls'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { PromptDialog } from '@/components/ui/PromptDialog'
 import { ToastContainer } from '@/components/ui/ToastContainer'
@@ -804,12 +803,6 @@ function Hauptseite({
                 <span>{t('mss.app.einstellungen')}</span>
               </button>
             </nav>
-
-            {bereich === 'ki' && darfChatten && (
-              <div className="pt-2 border-t border-outline-variant/40">
-                <MobileAiControls onActionDone={() => setMobileMenuOffen(false)} />
-              </div>
-            )}
 
             <div className="pt-2 border-t border-outline-variant/40">
               <button

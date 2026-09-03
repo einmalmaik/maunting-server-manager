@@ -830,6 +830,7 @@ pub fn run() {
         // wirklich beenden (`app_beenden`).
         .on_window_event(|window, event| {
             match event {
+                #[cfg(not(target_os = "android"))]
                 tauri::WindowEvent::CloseRequested { api, .. } => {
                     if window.label() == "main" {
                         api.prevent_close();
