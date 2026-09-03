@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from models.note import Note
 from models.user import User
 from services import team_service
+from services.sync_event_service import SyncEventService
 
 _log = logging.getLogger("msm.notes")
 
@@ -188,7 +189,21 @@ class NotesService:
         db.add(note)
         db.commit()
         db.refresh(note)
-        return cls._format_note(note, user)
+        formatted = cls._format_note(note, user)
+        SyncEventService.publish(
+            {
+                "entity": "notes",
+                "action": "created",
+                "id": note.note_uid,
+                "note_uid": note.note_uid,
+                "team_id": note.team_id,
+                "user_id": user.id,
+                "data": formatted,
+            },
+            user_id=user.id,
+            team_id=note.team_id,
+        )
+        return formatted
 
     @classmethod
     def update_note(
@@ -252,7 +267,21 @@ class NotesService:
 
         db.commit()
         db.refresh(note)
-        return cls._format_note(note, user)
+        formatted = cls._format_note(note, user)
+        SyncEventService.publish(
+            {
+                "entity": "notes",
+                "action": "updated",
+                "id": note.note_uid,
+                "note_uid": note.note_uid,
+                "team_id": note.team_id,
+                "user_id": note.user_id,
+                "data": formatted,
+            },
+            user_id=note.user_id,
+            team_id=note.team_id,
+        )
+        return formatted
 
     @classmethod
     def delete_note(cls, db: Session, user: User, note_id_or_uid: str | int) -> dict[str, Any]:
@@ -269,8 +298,22 @@ class NotesService:
             raise ValueError("Keine Berechtigung zum Löschen dieser Notiz.")
 
         note_uid = note.note_uid
+        team_id = note.team_id
+        note_user_id = note.user_id
         db.delete(note)
         db.commit()
+        SyncEventService.publish(
+            {
+                "entity": "notes",
+                "action": "deleted",
+                "id": note_uid,
+                "note_uid": note_uid,
+                "team_id": team_id,
+                "user_id": note_user_id,
+            },
+            user_id=note_user_id,
+            team_id=team_id,
+        )
         return {"status": "deleted", "note_uid": note_uid, "id": note.id}
 
     @classmethod
@@ -290,7 +333,21 @@ class NotesService:
         note.is_pinned = not note.is_pinned
         db.commit()
         db.refresh(note)
-        return cls._format_note(note, user)
+        formatted = cls._format_note(note, user)
+        SyncEventService.publish(
+            {
+                "entity": "notes",
+                "action": "updated",
+                "id": note.note_uid,
+                "note_uid": note.note_uid,
+                "team_id": note.team_id,
+                "user_id": note.user_id,
+                "data": formatted,
+            },
+            user_id=note.user_id,
+            team_id=note.team_id,
+        )
+        return formatted
 
     @classmethod
     def toggle_archive(cls, db: Session, user: User, note_id_or_uid: str | int) -> dict[str, Any]:
@@ -309,4 +366,18 @@ class NotesService:
         note.is_archived = not note.is_archived
         db.commit()
         db.refresh(note)
-        return cls._format_note(note, user)
+        formatted = cls._format_note(note, user)
+        SyncEventService.publish(
+            {
+                "entity": "notes",
+                "action": "updated",
+                "id": note.note_uid,
+                "note_uid": note.note_uid,
+                "team_id": note.team_id,
+                "user_id": note.user_id,
+                "data": formatted,
+            },
+            user_id=note.user_id,
+            team_id=note.team_id,
+        )
+        return formatted

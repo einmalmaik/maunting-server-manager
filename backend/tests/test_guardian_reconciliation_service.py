@@ -73,17 +73,19 @@ async def test_slow_node_does_not_block_other_servers(db: Session) -> None:
     db.add_all([n1, n2, s1, s2])
     db.commit()
     
+    import threading
     events = []
-    
+    s2_finished = threading.Event()
+
     def mock_reconcile(session, server, node_client):
-        import time
         if server.id == 10:
             events.append("s1_start")
-            time.sleep(0.1)
+            s2_finished.wait(timeout=2.0)
             events.append("s1_end")
         else:
             events.append("s2_start")
             events.append("s2_end")
+            s2_finished.set()
 
     # Worker threads must not share ORM-bound objects from the test session.
     # Detached value objects model what each independent worker session loads.

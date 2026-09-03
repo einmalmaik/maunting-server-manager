@@ -64,6 +64,8 @@ from routers import (
     calendar_router,
     notes_router,
     vault_router,
+    sync_events_router,
+    sync_alias_router,
 )
 from middleware.rate_limit import limiter, auth_rate_limit
 from services.steam_service import close_steam_service
@@ -883,6 +885,8 @@ app.include_router(calendar_router)
 app.include_router(notes_router)
 # Zero-Knowledge Passwort-Manager & Authenticator (strikt isoliert von KI-Endpunkten).
 app.include_router(vault_router)
+app.include_router(sync_events_router)
+app.include_router(sync_alias_router)
 
 
 

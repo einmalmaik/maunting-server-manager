@@ -1012,6 +1012,7 @@ async def test_a_failed_action_still_lets_the_run_speak(
     )
     assert antwort.status_code == 409, antwort.text
 
+    db.rollback()
     db.expire_all()
     assert db.query(AiActionProposal).one().status == "failed"
     # **Der Kern:** der Lauf steht nicht mehr auf "wartet auf einen Menschen".

@@ -44,6 +44,7 @@ from .popups import router as popups_router
 from .calendar import router as calendar_router
 from .notes import router as notes_router
 from .vault import router as vault_router
+from .sync_events import router as sync_events_router, sync_alias_router
 
 __all__ = [
     "auth_router",
@@ -93,4 +94,6 @@ __all__ = [
     "calendar_router",
     "notes_router",
     "vault_router",
+    "sync_events_router",
+    "sync_alias_router",
 ]  # noqa: E501

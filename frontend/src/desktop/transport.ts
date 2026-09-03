@@ -28,43 +28,82 @@ export async function sitzungVerwerfen(): Promise<void> {
   await invoke('refresh_token_loeschen')
 }
 
+export type AnmeldeErgebnis = {
+  status: 'erfolg' | 'abgelehnt' | 'offline'
+}
+
 /**
- * Holt über das Tresor-Refresh-Token neue Tokens. `false`, wenn keines
- * hinterlegt ist oder das Backend die Rotation ablehnt — der Aufrufer schickt
- * den Benutzer dann zur Kopplung.
+ * Holt über das Tresor-Refresh-Token neue Tokens mit kurzem Timeout (z. B. 2.5s).
  *
- * Bewusst `fetch` statt `api()`: dieses Modul ist der Refresh-Weg des
- * Clients, und ein Refresh, der bei 401 selbst einen Refresh anstößt, wäre
- * eine Schleife.
+ * Unterscheidet sauber zwischen:
+ * - 'erfolg': Neue Tokens erhalten und im Tresor hinterlegt.
+ * - 'abgelehnt': Backend lehnte das Token explizit ab (HTTP 401/403) -> Token verbrannt,
+ *   wird gelöscht, Benutzer muss zur Kopplung.
+ * - 'offline': Server nicht erreichbar, Timeout, Flugmodus oder Verbindungsabbruch.
+ *   Das Token im Tresor bleibt erhalten, damit die App offline starten und bei
+ *   Wiederverbindung nahtlos synchronisieren kann.
+ */
+export async function stillAnmeldenDetail(timeoutMs = 2500): Promise<AnmeldeErgebnis> {
+  let refresh: string | null = null
+  try {
+    refresh = await invoke<string | null>('refresh_token_laden')
+  } catch {
+    return { status: 'abgelehnt' }
+  }
+
+  if (!refresh) {
+    return { status: 'abgelehnt' }
+  }
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    const antwort = await fetch(apiUrl('/auth/refresh'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refresh }),
+      signal: controller.signal,
+    })
+    clearTimeout(timer)
+
+    if (antwort.status === 401 || antwort.status === 403) {
+      // Abgelehnte Rotation heißt: das Token ist verbrannt (Widerruf oder
+      // Wiederverwendungserkennung). Aufheben wäre sinnlos und riskant.
+      await invoke('refresh_token_loeschen').catch(() => {})
+      return { status: 'abgelehnt' }
+    }
+
+    if (!antwort.ok) {
+      // 502/503/504 Proxy-Fehler oder Backend temporär down: Token im Tresor lassen!
+      return { status: 'offline' }
+    }
+
+    let tokens: { access_token: string; refresh_token: string }
+    try {
+      tokens = (await antwort.json()) as { access_token: string; refresh_token: string }
+    } catch {
+      // Falsche Antwort oder Captive Portal -> offline werten
+      return { status: 'offline' }
+    }
+
+    accessToken = tokens.access_token
+    await invoke('refresh_token_speichern', { token: tokens.refresh_token })
+    return { status: 'erfolg' }
+  } catch {
+    clearTimeout(timer)
+    // Netzwerkfehler, DNS-Fehler oder Timeout -> offline
+    return { status: 'offline' }
+  }
+}
+
+/**
+ * Standard-Signatur für den Panel-API-Client: Gibt true bei erfolgreicher
+ * Rotation zurück.
  */
 export async function stillAnmelden(): Promise<boolean> {
-  const refresh = await invoke<string | null>('refresh_token_laden')
-  if (!refresh) {
-    return false
-  }
-  const antwort = await fetch(apiUrl('/auth/refresh'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refresh_token: refresh }),
-  })
-  if (!antwort.ok) {
-    // Abgelehnte Rotation heißt: das Token ist verbrannt (Widerruf oder
-    // Wiederverwendungserkennung). Aufheben wäre sinnlos und riskant.
-    await invoke('refresh_token_loeschen')
-    return false
-  }
-  let tokens: { access_token: string; refresh_token: string }
-  try {
-    tokens = (await antwort.json()) as { access_token: string; refresh_token: string }
-  } catch {
-    // Keine Daten, sondern eine Webseite (falsche Adresse). Das Token im
-    // Tresor ist deswegen nicht verbrannt — es bleibt liegen, damit die
-    // Anmeldung nach korrigierter Adresse noch still gelingen kann.
-    return false
-  }
-  accessToken = tokens.access_token
-  await invoke('refresh_token_speichern', { token: tokens.refresh_token })
-  return true
+  const res = await stillAnmeldenDetail(2500)
+  return res.status === 'erfolg'
 }
 
 /** Einmal beim Start: den Panel-API-Client auf Bearer umstellen. */

@@ -30,6 +30,7 @@ import {
   toggleNotePinOffline,
   toggleNoteArchiveOffline,
   toggleCheckItemOffline,
+  useEntitySync,
 } from '@/lib/offlineSync'
 
 export interface NoteItem {
@@ -134,17 +135,13 @@ export function Notes() {
     }
   }, [])
 
+  useEntitySync('notes', () => {
+    void loadNotes()
+  })
+
   useEffect(() => {
     void loadNotes()
     void loadTeams()
-
-    const handleNotesUpdated = () => {
-      void loadNotes()
-    }
-    window.addEventListener('msm:notes-updated', handleNotesUpdated)
-    return () => {
-      window.removeEventListener('msm:notes-updated', handleNotesUpdated)
-    }
   }, [loadNotes, loadTeams])
 
   const openCreateModal = () => {

@@ -1,16 +1,18 @@
 /**
- * Offline-First Local Storage & Near Real-Time Background Synchronization
+ * Unified Offline-First Local Storage & Real-Time SSE Synchronization
  * for Notes & Calendar in Maunting Server Manager (Web / APK / Desktop).
  *
- * Adheres strictly to the KISS principle and Data Minimization:
+ * Adheres strictly to KISS and Data Minimization:
  * - Persistent local cache (localStorage) for Notes and Calendar entries.
  * - Persistent Outbox mutation queue surviving app restarts and reloads.
  * - Deterministic Last-Write-Wins (LWW) conflict resolution using ISO timestamps.
- * - Automatic outbox replay on network reconnection ('online' event) and polling triggers.
- * - Zero tracking, zero telemetry, zero superfluous metadata stored.
+ * - Real-Time Server-Sent-Events (SSE) stream (/api/events/live) updating views in < 1s.
+ * - Adaptive fallback polling (10s) during disconnections with exponential reconnect.
+ * - Immediate Outbox replay and UI event dispatching upon network reconnection.
  */
 
-import { api } from '@/api/client'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { api, apiStream } from '@/api/client'
 import type { NoteItem } from '@/pages/Notes'
 import type { CalendarEventItem } from '@/pages/Calendar'
 
@@ -29,6 +31,16 @@ export interface OutboxMutation {
   payload?: any
   timestamp: string
   retryCount: number
+}
+
+export interface SyncEventPayload {
+  entity: 'notes' | 'note' | 'calendar'
+  action: 'created' | 'updated' | 'deleted' | string
+  id: string
+  timestamp?: string
+  team_id?: number | null
+  user_id?: number
+  data?: any
 }
 
 // In-memory fallback if localStorage is unavailable
@@ -227,22 +239,23 @@ export function mergeCalendarWithServer(serverEvents: CalendarEventItem[]): Cale
   const localEvents = getOfflineCalendarEvents()
   const outbox = getOutbox().filter((m) => m.entity === 'calendar')
 
+  // Start with existing cached local events so events outside current view range aren't lost
   const eventMap = new Map<string, CalendarEventItem>()
-
-  for (const se of serverEvents) {
-    eventMap.set(se.event_id, se)
+  for (const le of localEvents) {
+    eventMap.set(le.event_id, le)
   }
 
-  for (const le of localEvents) {
-    const hasPendingMutation = outbox.some((m) => m.entityId === le.event_id)
-    if (hasPendingMutation) {
-      const serverEvent = eventMap.get(le.event_id)
-      if (!serverEvent) {
-        // Created locally and not yet synced
-        eventMap.set(le.event_id, le)
+  // Update or insert server events
+  for (const se of serverEvents) {
+    const hasPendingMutation = outbox.some((m) => m.entityId === se.event_id)
+    if (!hasPendingMutation) {
+      eventMap.set(se.event_id, se)
+    } else {
+      const le = eventMap.get(se.event_id)
+      if (le) {
+        eventMap.set(se.event_id, { ...se, ...le })
       } else {
-        // Local mutation wins for active edits
-        eventMap.set(le.event_id, { ...serverEvent, ...le })
+        eventMap.set(se.event_id, se)
       }
     }
   }
@@ -286,11 +299,22 @@ export async function replayOutbox(): Promise<{ processed: number; failed: numbe
               body: JSON.stringify(mutation.payload),
             })
             if (res && res.note_uid) {
+              const oldUid = mutation.entityId
+              const newUid = res.note_uid
               const notes = getOfflineNotes()
               const updated = notes.map((n) =>
-                n.note_uid === mutation.entityId ? { ...n, ...res } : n
+                n.note_uid === oldUid ? { ...n, ...res, note_uid: newUid } : n
               )
               setOfflineNotes(updated)
+
+              // Update any subsequent queued mutations that referenced the temporary UID
+              if (oldUid !== newUid) {
+                for (let j = i + 1; j < outbox.length; j++) {
+                  if (outbox[j].entity === 'note' && outbox[j].entityId === oldUid) {
+                    outbox[j].entityId = newUid
+                  }
+                }
+              }
             }
           } else if (mutation.action === 'update') {
             await api('/notes/' + encodeURIComponent(mutation.entityId), {
@@ -317,11 +341,22 @@ export async function replayOutbox(): Promise<{ processed: number; failed: numbe
               body: JSON.stringify(mutation.payload),
             })
             if (res && res.event_id) {
+              const oldUid = mutation.entityId
+              const newUid = res.event_id
               const events = getOfflineCalendarEvents()
               const updated = events.map((e) =>
-                e.event_id === mutation.entityId ? { ...e, ...res } : e
+                e.event_id === oldUid ? { ...e, ...res, event_id: newUid } : e
               )
               setOfflineCalendarEvents(updated)
+
+              // Update any subsequent queued mutations that referenced the temporary UID
+              if (oldUid !== newUid) {
+                for (let j = i + 1; j < outbox.length; j++) {
+                  if (outbox[j].entity === 'calendar' && outbox[j].entityId === oldUid) {
+                    outbox[j].entityId = newUid
+                  }
+                }
+              }
             }
           } else if (mutation.action === 'update') {
             await api('/calendar/events/' + encodeURIComponent(mutation.entityId), {
@@ -363,9 +398,13 @@ export async function replayOutbox(): Promise<{ processed: number; failed: numbe
     isReplaying = false
 
     if (typeof window !== 'undefined') {
+      if (processed > 0) {
+        window.dispatchEvent(new CustomEvent('msm:notes-updated'))
+        window.dispatchEvent(new CustomEvent('msm:calendar-updated'))
+      }
       window.dispatchEvent(
         new CustomEvent('msm:sync-status', {
-          detail: { processed, remaining: remainingMutations.length },
+          detail: { processed, failed, remaining: remainingMutations.length },
         })
       )
     }
@@ -471,7 +510,7 @@ export async function saveNoteOffline(
   }
 
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new Event('msm:notes-updated'))
+    window.dispatchEvent(new CustomEvent('msm:notes-updated'))
   }
 
   return { note: resultNote, queued: true }
@@ -502,7 +541,7 @@ export async function deleteNoteOffline(note: NoteItem): Promise<{ queued: boole
   }
 
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new Event('msm:notes-updated'))
+    window.dispatchEvent(new CustomEvent('msm:notes-updated'))
   }
 
   return { queued: true }
@@ -530,7 +569,7 @@ export async function toggleNotePinOffline(note: NoteItem): Promise<{ note: Note
   }
 
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new Event('msm:notes-updated'))
+    window.dispatchEvent(new CustomEvent('msm:notes-updated'))
   }
 
   return { note: updatedNote, queued: true }
@@ -558,7 +597,7 @@ export async function toggleNoteArchiveOffline(note: NoteItem): Promise<{ note: 
   }
 
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new Event('msm:notes-updated'))
+    window.dispatchEvent(new CustomEvent('msm:notes-updated'))
   }
 
   return { note: updatedNote, queued: true }
@@ -571,15 +610,15 @@ export async function toggleCheckItemOffline(
   const lines = (note.content || '').split('\n')
   let currentCheckIdx = 0
   const newLines = lines.map((line) => {
-    const isUnchecked = line.trimStart().startsWith('- [ ]')
-    const isChecked = line.trimStart().startsWith('- [x]') || line.trimStart().startsWith('- [X]')
+    const isUnchecked = /^[ \t]*- \[[ ]\]/.test(line)
+    const isChecked = /^[ \t]*- \[[xX]\]/.test(line)
     if (isUnchecked || isChecked) {
       if (currentCheckIdx === itemIndex) {
         currentCheckIdx++
         if (isUnchecked) {
-          return line.replace('- [ ]', '- [x]')
+          return line.replace(/^([ \t]*- )\[ \]/, '$1[x]')
         } else {
-          return line.replace(/- \[[xX]\]/, '- [ ]')
+          return line.replace(/^([ \t]*- )\[[xX]\]/, '$1[ ]')
         }
       }
       currentCheckIdx++
@@ -610,7 +649,7 @@ export async function toggleCheckItemOffline(
   }
 
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new Event('msm:notes-updated'))
+    window.dispatchEvent(new CustomEvent('msm:notes-updated'))
   }
 
   return { note: updatedNote, updatedContent, queued: true }
@@ -646,8 +685,10 @@ export async function loadCalendarEventsOfflineFirst(
       return false
     }
     const evStart = new Date(ev.start).getTime()
-    const evEnd = new Date(ev.end).getTime()
-    return evStart <= endDt && evEnd >= startDt
+    const rawEnd = ev.end ? new Date(ev.end).getTime() : NaN
+    const evEnd = isNaN(rawEnd) ? evStart : rawEnd
+    const validStart = isNaN(evStart) ? 0 : evStart
+    return validStart <= endDt && evEnd >= startDt
   })
 
   if (!isOffline && getOutbox().length > 0) {
@@ -740,7 +781,7 @@ export async function saveCalendarEventOffline(
   }
 
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new Event('msm:calendar-updated'))
+    window.dispatchEvent(new CustomEvent('msm:calendar-updated'))
   }
 
   return { event: resultEvent, queued: true }
@@ -771,15 +812,231 @@ export async function deleteCalendarEventOffline(eventId: string): Promise<{ que
   }
 
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new Event('msm:calendar-updated'))
+    window.dispatchEvent(new CustomEvent('msm:calendar-updated'))
   }
 
   return { queued: true }
 }
 
-// ── Global Network & Sync Lifecycle Initialization ──
+// ── Real-Time SSE Stream & Adaptive Polling Manager ──
 
+let isLiveConnected = false
+let abortLiveSync: (() => void) | null = null
+let reconnectTimer: any = null
+let fallbackPollingTimer: any = null
 let isInitialized = false
+
+export function getIsLiveConnected(): boolean {
+  return isLiveConnected
+}
+
+/**
+ * Startet den langlebigen SSE-Echtzeitkanal (/api/events/live).
+ * Bei Verbindungsabbruch schaltet das Subsystem automatisch auf adaptives Polling (10s) um
+ * und verbindet sich im Hintergrund per Exponential Backoff wieder neu.
+ */
+export function startLiveSync(): () => void {
+  if (abortLiveSync) {
+    return abortLiveSync
+  }
+
+  let isCancelled = false
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
+
+  const stop = () => {
+    isCancelled = true
+    isLiveConnected = false
+    if (controller) {
+      try {
+        controller.abort()
+      } catch {}
+    }
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    if (fallbackPollingTimer) {
+      clearInterval(fallbackPollingTimer)
+      fallbackPollingTimer = null
+    }
+    abortLiveSync = null
+  }
+
+  abortLiveSync = stop
+
+  const startFallbackPolling = () => {
+    if (fallbackPollingTimer) return
+    fallbackPollingTimer = setInterval(() => {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return
+      void replayOutbox()
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('msm:notes-updated'))
+        window.dispatchEvent(new CustomEvent('msm:calendar-updated'))
+      }
+    }, 10_000)
+  }
+
+  const stopFallbackPolling = () => {
+    if (fallbackPollingTimer) {
+      clearInterval(fallbackPollingTimer)
+      fallbackPollingTimer = null
+    }
+  }
+
+  const scheduleReconnect = (delayMs = 3000) => {
+    if (isCancelled || reconnectTimer) return
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null
+      if (!isCancelled) {
+        void connectStream()
+      }
+    }, delayMs)
+  }
+
+  const connectStream = async () => {
+    if (isCancelled) return
+
+    try {
+      const res = await apiStream('/events/live', {
+        method: 'GET',
+        signal: controller?.signal,
+      })
+
+      if (!res.ok || !res.body) {
+        isLiveConnected = false
+        startFallbackPolling()
+        scheduleReconnect(5000)
+        return
+      }
+
+      isLiveConnected = true
+      stopFallbackPolling()
+
+      // Bei gelungener Verbindung sofort Outbox abspielen
+      void replayOutbox()
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('msm:sync-status', { detail: { connected: true } }))
+      }
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder('utf-8')
+      let buffer = ''
+      let currentEvent = 'message'
+
+      while (!isCancelled) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed) {
+            currentEvent = 'message'
+            continue
+          }
+          if (trimmed.startsWith('event:')) {
+            currentEvent = trimmed.slice(6).trim()
+          } else if (trimmed.startsWith('data:')) {
+            const dataStr = trimmed.slice(5).trim()
+            try {
+              const data = JSON.parse(dataStr) as SyncEventPayload
+              handleIncomingSyncEvent(currentEvent, data)
+            } catch {
+              // Non-JSON or keepalive
+            }
+          }
+        }
+      }
+    } catch {
+      // Stream error or disconnection
+    } finally {
+      isLiveConnected = false
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('msm:sync-status', { detail: { connected: false } }))
+      }
+      startFallbackPolling()
+      scheduleReconnect(4000)
+    }
+  }
+
+  void connectStream()
+  return stop
+}
+
+/**
+ * Verarbeitet eingehende SSE-Ereignisse in unter 1s und aktualisiert das UI.
+ */
+export function handleIncomingSyncEvent(eventName: string, data: SyncEventPayload): void {
+  if (typeof window === 'undefined') return
+
+  if (eventName === 'sync' || data.entity) {
+    const entity = data.entity
+    const id = data.id || (data as any).note_uid || (data as any).event_id
+    const outbox = getOutbox()
+    const hasPendingLocal = id ? outbox.some((m) => m.entityId === id) : false
+
+    if (entity === 'notes' || entity === 'note') {
+      if (!hasPendingLocal && id) {
+        if (data.action === 'deleted') {
+          const current = getOfflineNotes()
+          setOfflineNotes(current.filter((n) => n.note_uid !== id))
+        } else if (data.data && typeof data.data === 'object') {
+          const current = getOfflineNotes()
+          if (data.action === 'created') {
+            if (!current.some((n) => n.note_uid === id)) {
+              setOfflineNotes([data.data, ...current])
+            }
+          } else if (data.action === 'updated') {
+            setOfflineNotes(current.map((n) => (n.note_uid === id ? { ...n, ...data.data } : n)))
+          }
+        }
+      }
+      window.dispatchEvent(new CustomEvent('msm:notes-updated', { detail: data }))
+    } else if (entity === 'calendar') {
+      if (!hasPendingLocal && id) {
+        if (data.action === 'deleted') {
+          const current = getOfflineCalendarEvents()
+          setOfflineCalendarEvents(current.filter((e) => e.event_id !== id))
+        } else if (data.data && typeof data.data === 'object') {
+          const current = getOfflineCalendarEvents()
+          if (data.action === 'created') {
+            if (!current.some((e) => e.event_id === id)) {
+              setOfflineCalendarEvents([...current, data.data])
+            }
+          } else if (data.action === 'updated') {
+            setOfflineCalendarEvents(current.map((e) => (e.event_id === id ? { ...e, ...data.data } : e)))
+          }
+        }
+      }
+      window.dispatchEvent(new CustomEvent('msm:calendar-updated', { detail: data }))
+    }
+    window.dispatchEvent(new CustomEvent('msm:sync-event', { detail: data }))
+  }
+}
+
+export function reconnectLiveSyncNow(): void {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = null
+  }
+  if (!isLiveConnected) {
+    if (abortLiveSync) {
+      abortLiveSync()
+    }
+    void startLiveSync()
+  }
+}
+
+export function ensureLiveSyncRunning(): () => void {
+  if (typeof window === 'undefined') return () => {}
+  return startLiveSync()
+}
+
+// ── Global Network & Sync Lifecycle Initialization ──
 
 export function initOfflineSync(): () => void {
   if (typeof window === 'undefined' || isInitialized) {
@@ -787,14 +1044,17 @@ export function initOfflineSync(): () => void {
   }
 
   isInitialized = true
+  const stopStream = startLiveSync()
 
   const handleOnline = () => {
     void replayOutbox()
+    reconnectLiveSyncNow()
   }
 
   const handleVisibilityChange = () => {
     if (document.visibilityState === 'visible') {
       void replayOutbox()
+      reconnectLiveSyncNow()
     }
   }
 
@@ -808,6 +1068,88 @@ export function initOfflineSync(): () => void {
   return () => {
     window.removeEventListener('online', handleOnline)
     document.removeEventListener('visibilitychange', handleVisibilityChange)
+    stopStream()
     isInitialized = false
+  }
+}
+
+// ── Unified React Hook for Entities (Notes / Calendar) ──
+
+export function useEntitySync(
+  entity: 'notes' | 'calendar' | 'all' = 'all',
+  onRefresh?: (eventData?: any) => void
+) {
+  const [isOnline, setIsOnline] = useState(() => (typeof navigator !== 'undefined' ? navigator.onLine : true))
+  const [isLive, setIsLive] = useState(() => getIsLiveConnected())
+  const [outboxCount, setOutboxCount] = useState(() => getOutbox().length)
+  const refreshCallbackRef = useRef(onRefresh)
+  refreshCallbackRef.current = onRefresh
+
+  useEffect(() => {
+    const triggerRefresh = (detail?: any) => {
+      refreshCallbackRef.current?.(detail)
+    }
+
+    const handleNotes = (e: any) => {
+      if (entity === 'notes' || entity === 'all') {
+        triggerRefresh(e?.detail)
+      }
+    }
+
+    const handleCalendar = (e: any) => {
+      if (entity === 'calendar' || entity === 'all') {
+        triggerRefresh(e?.detail)
+      }
+    }
+
+    const handleSyncStatus = () => {
+      setOutboxCount(getOutbox().length)
+      setIsLive(getIsLiveConnected())
+      if (typeof navigator !== 'undefined') {
+        setIsOnline(navigator.onLine)
+      }
+    }
+
+    const handleOnlineEvent = () => {
+      setIsOnline(true)
+      reconnectLiveSyncNow()
+      void replayOutbox().then(() => {
+        triggerRefresh()
+      })
+    }
+
+    const handleOfflineEvent = () => {
+      setIsOnline(false)
+      setIsLive(false)
+    }
+
+    window.addEventListener('msm:notes-updated', handleNotes)
+    window.addEventListener('msm:calendar-updated', handleCalendar)
+    window.addEventListener('msm:sync-status', handleSyncStatus)
+    window.addEventListener('online', handleOnlineEvent)
+    window.addEventListener('offline', handleOfflineEvent)
+
+    // Ensure SSE is active
+    ensureLiveSyncRunning()
+
+    return () => {
+      window.removeEventListener('msm:notes-updated', handleNotes)
+      window.removeEventListener('msm:calendar-updated', handleCalendar)
+      window.removeEventListener('msm:sync-status', handleSyncStatus)
+      window.removeEventListener('online', handleOnlineEvent)
+      window.removeEventListener('offline', handleOfflineEvent)
+    }
+  }, [entity])
+
+  const syncNow = useCallback(async () => {
+    await replayOutbox()
+    refreshCallbackRef.current?.()
+  }, [])
+
+  return {
+    isOnline,
+    isLive,
+    outboxCount,
+    syncNow,
   }
 }

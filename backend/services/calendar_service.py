@@ -31,6 +31,7 @@ from services.dis_client import DisClient, DisDecryptionError
 from services.email_service import EmailService
 from services import permission_service, team_service
 from services.ai_latency_metrics import measure
+from services.sync_event_service import SyncEventService
 
 _log = logging.getLogger("msm.calendar")
 
@@ -523,7 +524,7 @@ class CalendarService:
             db.add(ev)
             db.commit()
             db.refresh(ev)
-            return {
+            res = {
                 "status": "created",
                 "event_id": ev.event_uid,
                 "id": ev.id,
@@ -544,6 +545,20 @@ class CalendarService:
                 "can_edit": True,
                 "calendar": calendar.name,
             }
+            SyncEventService.publish(
+                {
+                    "entity": "calendar",
+                    "action": "created",
+                    "id": ev.event_uid,
+                    "event_id": ev.event_uid,
+                    "team_id": ev.team_id,
+                    "user_id": user.id,
+                    "data": res,
+                },
+                user_id=user.id,
+                team_id=ev.team_id,
+            )
+            return res
 
         # 2. Externer CalDAV-Kalender
         if not calendar.caldav_url:
@@ -588,7 +603,7 @@ class CalendarService:
                 raise RuntimeError(f"CalDAV Erstellung fehlgeschlagen (HTTP {resp.status_code})")
         _invalidate_caldav_cache(calendar.id)
 
-        return {
+        res = {
             "status": "created",
             "event_id": event_uid,
             "title": title,
@@ -596,6 +611,18 @@ class CalendarService:
             "end": end_time,
             "calendar": calendar.name,
         }
+        SyncEventService.publish(
+            {
+                "entity": "calendar",
+                "action": "created",
+                "id": event_uid,
+                "event_id": event_uid,
+                "user_id": user.id,
+                "data": res,
+            },
+            user_id=user.id,
+        )
+        return res
 
     @classmethod
     def update_event(
@@ -695,7 +722,7 @@ class CalendarService:
 
             db.commit()
             db.refresh(ev)
-            return {
+            res = {
                 "status": "updated",
                 "event_id": ev.event_uid,
                 "id": ev.id,
@@ -716,6 +743,20 @@ class CalendarService:
                 "can_edit": True,
                 "calendar": calendar.name,
             }
+            SyncEventService.publish(
+                {
+                    "entity": "calendar",
+                    "action": "updated",
+                    "id": ev.event_uid,
+                    "event_id": ev.event_uid,
+                    "team_id": ev.team_id,
+                    "user_id": ev.user_id,
+                    "data": res,
+                },
+                user_id=ev.user_id,
+                team_id=ev.team_id,
+            )
+            return res
 
         # 2. Externer CalDAV-Kalender
         if not calendar.caldav_url:
@@ -759,7 +800,7 @@ class CalendarService:
                 raise RuntimeError(f"CalDAV Aktualisierung fehlgeschlagen (HTTP {resp.status_code})")
         _invalidate_caldav_cache(calendar.id)
 
-        return {
+        res = {
             "status": "updated",
             "event_id": event_id,
             "title": title or "Termin",
@@ -767,6 +808,18 @@ class CalendarService:
             "end": end_time or "",
             "calendar": calendar.name,
         }
+        SyncEventService.publish(
+            {
+                "entity": "calendar",
+                "action": "updated",
+                "id": event_id,
+                "event_id": event_id,
+                "user_id": user.id,
+                "data": res,
+            },
+            user_id=user.id,
+        )
+        return res
 
     @classmethod
     def delete_event(
@@ -791,6 +844,8 @@ class CalendarService:
                 query = select(CalendarEvent).where(CalendarEvent.event_uid == event_id)
 
             ev = db.scalar(query)
+            team_id = None
+            event_user_id = user.id
             if ev:
                 can_delete = (ev.user_id == user.id) or user.is_owner
                 if ev.event_type == "team" and ev.team and ev.team.owner_user_id == user.id:
@@ -799,12 +854,30 @@ class CalendarService:
                 if not can_delete:
                     raise ValueError("Keine Berechtigung zum Löschen dieses Termins.")
 
+                team_id = ev.team_id
+                event_uid = ev.event_uid
+                event_user_id = ev.user_id
                 db.delete(ev)
                 db.commit()
+            else:
+                event_uid = event_id
+
+            SyncEventService.publish(
+                {
+                    "entity": "calendar",
+                    "action": "deleted",
+                    "id": event_uid,
+                    "event_id": event_uid,
+                    "team_id": team_id,
+                    "user_id": event_user_id,
+                },
+                user_id=event_user_id,
+                team_id=team_id,
+            )
 
             return {
                 "status": "deleted",
-                "event_id": event_id,
+                "event_id": event_uid,
                 "calendar": calendar.name,
             }
 
@@ -829,6 +902,17 @@ class CalendarService:
             if resp.status_code not in (200, 204, 404):
                 raise RuntimeError(f"CalDAV Löschung fehlgeschlagen (HTTP {resp.status_code})")
         _invalidate_caldav_cache(calendar.id)
+
+        SyncEventService.publish(
+            {
+                "entity": "calendar",
+                "action": "deleted",
+                "id": event_id,
+                "event_id": event_id,
+                "user_id": user.id,
+            },
+            user_id=user.id,
+        )
 
         return {
             "status": "deleted",

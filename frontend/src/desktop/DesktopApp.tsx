@@ -57,7 +57,7 @@ import {
   wakewordStand,
   type AppKonfig,
 } from './tauri'
-import { stillAnmelden } from './transport'
+import { stillAnmeldenDetail } from './transport'
 import { useAuftragsschleife } from './useAuftragsschleife'
 
 type Phase = 'laedt' | 'einrichtung' | 'kopplung' | 'sandbox' | 'bereit'
@@ -68,6 +68,7 @@ const SPLASH_GESEHEN_KEY = 'mss:splash_gesehen'
 export function DesktopApp() {
   const [phase, setPhase] = useState<Phase>('laedt')
   const [konfig, setKonfig] = useState<AppKonfig | null>(null)
+  const [isOffline, setIsOffline] = useState(false)
   const [splash, setSplash] = useState(() => {
     try {
       return localStorage.getItem(SPLASH_GESEHEN_KEY) !== 'true'
@@ -155,6 +156,27 @@ export function DesktopApp() {
   }, [])
 
   useEffect(() => {
+    const handleOnline = () => {
+      setIsOffline(false)
+      void (async () => {
+        const res = await stillAnmeldenDetail(2500)
+        if (res.status === 'erfolg') {
+          void useAuthStore.getState().checkAuth()
+        }
+      })()
+    }
+    const handleOffline = () => {
+      setIsOffline(true)
+    }
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
+
+  useEffect(() => {
     void (async () => {
       try {
         const geladen = await konfigLaden()
@@ -169,15 +191,39 @@ export function DesktopApp() {
           setPhase('einrichtung')
           return
         }
-        if (!(await stillAnmelden())) {
+
+        // Stille Anmeldung mit kurzem Timeout (2.5s)
+        const anmeldung = await stillAnmeldenDetail(2500)
+        if (anmeldung.status === 'abgelehnt') {
           setPhase('kopplung')
           return
         }
-        await useAuthStore.getState().checkAuth()
-        if (!useAuthStore.getState().isAuthenticated) {
+
+        if (anmeldung.status === 'offline') {
+          setIsOffline(true)
+          if (!isAndroid && !geladen.sandbox_pfad) {
+            setPhase('sandbox')
+            return
+          }
+          setPhase('bereit')
+          return
+        }
+
+        // Bei 'erfolg': checkAuth mit Timeout (2.5s) absichern
+        try {
+          await Promise.race([
+            useAuthStore.getState().checkAuth(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2500)),
+          ])
+        } catch {
+          setIsOffline(true)
+        }
+
+        if (!useAuthStore.getState().isAuthenticated && anmeldung.status !== 'erfolg') {
           setPhase('kopplung')
           return
         }
+
         if (!isAndroid && !geladen.sandbox_pfad) {
           setPhase('sandbox')
           return
@@ -190,10 +236,10 @@ export function DesktopApp() {
   }, [])
 
   useEffect(() => {
-    if (phase === 'bereit' && !angemeldet) {
+    if (phase === 'bereit' && !angemeldet && !isOffline) {
       setPhase('kopplung')
     }
-  }, [phase, angemeldet])
+  }, [phase, angemeldet, isOffline])
 
   useEffect(() => {
     if (!sitzungSteht) return
