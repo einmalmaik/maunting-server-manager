@@ -96,7 +96,7 @@ mod aufnahme_impl {
             .ok_or_else(|| "Kein Hauptbildschirm gefunden".to_string())
     }
 
-    pub fn aufnehmen(app: &tauri::AppHandle) -> Result<Value, String> {
+    pub fn aufnehmen(app: Option<&tauri::AppHandle>) -> Result<Value, String> {
         let monitor = hauptbildschirm()?;
         let mut bild = monitor
             .capture_image()
@@ -105,9 +105,10 @@ mod aufnahme_impl {
         // Human Error Guard: Wenn der Passwort-Manager aktiv ist,
         // wird der Bereich des App-Fensters im Bildschirmfoto geschwärzt.
         if super::ist_tresor_schutz_aktiv() {
-            use tauri::Manager;
-            if let Some(main_window) = app.get_webview_window("main") {
-                if let (Ok(pos), Ok(size)) = (main_window.outer_position(), main_window.outer_size()) {
+            if let Some(app) = app {
+                use tauri::Manager;
+                if let Some(main_window) = app.get_webview_window("main") {
+                    if let (Ok(pos), Ok(size)) = (main_window.outer_position(), main_window.outer_size()) {
                     let win_x = pos.x.max(0) as u32;
                     let win_y = pos.y.max(0) as u32;
                     let win_w = size.width;
@@ -119,9 +120,10 @@ mod aufnahme_impl {
                     let end_x = (win_x + win_w).min(img_w);
                     let end_y = (win_y + win_h).min(img_h);
 
-                    for y in win_y..end_y {
-                        for x in win_x..end_x {
-                            bild.put_pixel(x, y, image::Rgba([0, 0, 0, 255]));
+                        for y in win_y..end_y {
+                            for x in win_x..end_x {
+                                bild.put_pixel(x, y, image::Rgba([0, 0, 0, 255]));
+                            }
                         }
                     }
                 }
@@ -214,7 +216,7 @@ mod aufnahme_impl {
 /// Wer diesen Parameter spaeter entfernt, entfernt die Zusage.
 pub fn aufnehmen(app: &AppHandle) -> Result<Value, String> {
     crate::sichtfeld::zeigen(app);
-    aufnahme_impl::aufnehmen(app)
+    aufnahme_impl::aufnehmen(Some(app))
 }
 
 /// Rechnet Bildkoordinaten in echte Bildschirmpunkte zurueck — der Gegenweg
@@ -242,7 +244,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn ein_echtes_foto_passt_durch_die_bruecke() {
-        let Ok(ergebnis) = aufnahme_impl::aufnehmen() else {
+        let Ok(ergebnis) = aufnahme_impl::aufnehmen(None) else {
             return;
         };
         let bild = ergebnis["bild_jpeg_base64"].as_str().unwrap();
