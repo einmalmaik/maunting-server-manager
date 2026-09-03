@@ -271,14 +271,15 @@ jobs:
         shell: bash
         run: |
           mkdir -p android-release
-          APK_FILE=$(find smart-system/src-tauri/gen/android/app/build/outputs/apk -type f -name "*universal*.apk" | head -n 1)
+          APK_FILE=$(find smart-system/src-tauri/gen/android/app/build/outputs/apk -type f -name "*universal-release.apk" -o -name "*universal-universal*.apk" | head -n 1)
           if [ -z "$APK_FILE" ]; then
             APK_FILE=$(find smart-system/src-tauri/gen/android/app/build/outputs/apk -type f -name "*arm64*.apk" | head -n 1)
           fi
           if [ -z "$APK_FILE" ]; then
-            APK_FILE=$(find smart-system/src-tauri/gen/android/app/build/outputs/apk -type f -name "*.apk" | head -n 1)
+            APK_FILE=$(find smart-system/src-tauri/gen/android/app/build/outputs/apk -type f -name "*.apk" ! -name "*x86*" | head -n 1)
           fi
           if [ -n "$APK_FILE" ]; then
+            echo "Packaging selected APK for MauntingSmartSystem.apk: $APK_FILE"
             cp -v "$APK_FILE" android-release/MauntingSmartSystem.apk
           fi
           for f in $(find smart-system/src-tauri/gen/android/app/build/outputs/apk -type f -name "*.apk"); do
