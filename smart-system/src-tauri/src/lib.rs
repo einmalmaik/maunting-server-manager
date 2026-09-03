@@ -782,7 +782,10 @@ pub fn run() {
             biometrie_verifizieren,
             biometrie_speichern,
             biometrie_entsperren,
-            biometrie_loeschen
+            biometrie_loeschen,
+            updater::update_pruefen,
+            updater::update_installieren,
+            updater::app_neu_starten
         ])
         .setup(|app| {
             tray::erstellen(app.handle())?;

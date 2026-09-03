@@ -61,9 +61,10 @@ if not latest_json_path.exists():
         sig_content = sig_files[0].read_text(encoding="utf-8").strip()
         target_url_file = "MauntingSmartSystem-Setup.exe"
 
+    clean_version = tag.lstrip("v")
     if sig_content:
         manifest = {
-            "version": tag,
+            "version": clean_version,
             "notes": f"MSS Update {tag}",
             "pub_date": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "platforms": {
@@ -74,9 +75,20 @@ if not latest_json_path.exists():
             }
         }
         latest_json_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-        print(f"Generated manifest latest.json pointing to {target_url_file}")
+        print(f"Generated manifest latest.json pointing to {target_url_file} (version: {clean_version})")
     else:
         print("Warning: No signature found to create latest.json")
+
+# 5. Falls latest.json existiert (egal ob von Tauri oder generiert), fuehrendes 'v' strikt entfernen
+if latest_json_path.exists():
+    try:
+        latest_data = json.loads(latest_json_path.read_text(encoding="utf-8"))
+        if "version" in latest_data and isinstance(latest_data["version"], str) and latest_data["version"].startswith("v"):
+            latest_data["version"] = latest_data["version"].lstrip("v")
+            latest_json_path.write_text(json.dumps(latest_data, indent=2), encoding="utf-8")
+            print(f"Sanitized latest.json version to SemVer: {latest_data['version']}")
+    except Exception as e:
+        print(f"Warning sanitizing latest.json: {e}")
 
 print("\n--- Inhalt von desktop-release: ---")
 for item in desktop_dir.iterdir():

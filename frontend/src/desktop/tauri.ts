@@ -379,3 +379,33 @@ export async function biometrieLoeschen(): Promise<void> {
     await invoke('biometrie_loeschen')
   } catch {}
 }
+
+// ── Automatischer Updater ────────────────────────────────────────────────
+
+export interface UpdateInfo {
+  verfuegbar: boolean
+  aktuelle_version: string
+  neue_version: string | null
+  download_url: string | null
+  notizen: string | null
+  ist_android: boolean
+}
+
+export interface UpdateStatusEvent {
+  status: 'laedt' | 'bereit' | 'installiert_android' | 'fehler'
+  prozent?: number
+  fehler?: string
+}
+
+export async function updatePruefen(): Promise<UpdateInfo> {
+  return await invoke<UpdateInfo>('update_pruefen')
+}
+
+export async function updateInstallieren(): Promise<void> {
+  await invoke('update_installieren')
+}
+
+export async function appNeuStarten(): Promise<void> {
+  await invoke('app_neu_starten')
+}
+

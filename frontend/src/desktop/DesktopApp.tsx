@@ -40,6 +40,7 @@ import { OverlayFenster } from './OverlayFenster'
 import { Aufraeumkarte } from './Aufraeumkarte'
 import { DesktopAktionKarte } from './DesktopAktionKarte'
 import { Uebernahmekarte } from './Uebernahmekarte'
+import { UpdateModal } from './UpdateModal'
 import { Wizard } from './Wizard'
 import { VaultView } from './vault/VaultView'
 import { useVaultStore } from './vault/vaultStore'
@@ -884,6 +885,7 @@ function Hauptseite({
           )}
         </div>
       </main>
+      <UpdateModal />
     </>
   )
 }

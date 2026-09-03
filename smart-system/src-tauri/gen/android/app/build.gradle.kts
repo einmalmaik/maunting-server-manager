@@ -32,9 +32,27 @@ android {
             isUniversalApk = true
         }
     }
+    signingConfigs {
+        create("release") {
+            val keystorePath = file("../keystore/mss-release.keystore")
+            if (keystorePath.exists()) {
+                storeFile = keystorePath
+                storePassword = "mauntingstudios"
+                keyAlias = "mss-release"
+                keyPassword = "mauntingstudios"
+            } else {
+                val debugKeystore = signingConfigs.getByName("debug")
+                storeFile = debugKeystore.storeFile
+                storePassword = debugKeystore.storePassword
+                keyAlias = debugKeystore.keyAlias
+                keyPassword = debugKeystore.keyPassword
+            }
+        }
+    }
     buildTypes {
         getByName("debug") {
             manifestPlaceholders["usesCleartextTraffic"] = "true"
+            signingConfig = signingConfigs.getByName("release")
             isDebuggable = true
             isJniDebuggable = true
             isMinifyEnabled = false
@@ -46,7 +64,7 @@ android {
             }
         }
         getByName("release") {
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }

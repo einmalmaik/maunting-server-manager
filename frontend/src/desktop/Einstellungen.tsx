@@ -46,6 +46,7 @@ import {
   overlayTesten,
   sandboxVerfuegbar,
   setzeStatus,
+  updatePruefen,
   wakewordLauschen,
   type AgentStatus,
   type AppKonfig,
@@ -434,6 +435,7 @@ function DesktopIntegration({ onKonfigAenderung }: { onKonfigAenderung?: () => v
   const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
   const [autostart, setAutostart] = useState<boolean | null>(null)
   const [status, setStatus] = useState<AgentStatus>('bereit')
+  const [prueftUpdate, setPrueftUpdate] = useState(false)
 
   useEffect(() => {
     if (isAndroid) {
@@ -558,6 +560,41 @@ function DesktopIntegration({ onKonfigAenderung }: { onKonfigAenderung?: () => v
           <p className="mt-1 text-xs text-on-surface-variant">
             {t('mss.einstellungen.overlayTestenHinweis')}
           </p>
+        </div>
+      </div>
+
+      <div className="border-t border-outline-variant/40 pt-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-on-surface">System-Updates</p>
+            <p className="text-xs text-on-surface-variant">
+              Automatische Hintergrundaktualisierungen sind aktiv.
+            </p>
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={prueftUpdate}
+            onClick={() => {
+              void (async () => {
+                setPrueftUpdate(true)
+                try {
+                  const res = await updatePruefen()
+                  if (res.verfuegbar) {
+                    toast.success(`Version v${res.neue_version} ist verfügbar.`)
+                  } else {
+                    toast.success('Maunting Smart System ist auf dem neuesten Stand.')
+                  }
+                } catch {
+                  toast.error('Konnte nicht nach Updates suchen.')
+                } finally {
+                  setPrueftUpdate(false)
+                }
+              })()
+            }}
+          >
+            {prueftUpdate ? 'Prüft...' : 'Auf Updates prüfen'}
+          </Button>
         </div>
       </div>
     </section>
