@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import maximalGuardianBlueprint from '../../../../tests/fixtures/guardian_blueprint_maximal.json'
+import maximalGuardianBlueprint from './fixtures/guardian_blueprint_maximal.json'
 import type { BlueprintDraft } from './contract'
 import { changeBlueprintSource, createBlueprintDraft, getBlueprintCollision, normalizeBlueprintDraft, validateBlueprintDraft } from './contract'
 

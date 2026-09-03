@@ -3035,7 +3035,7 @@ dependencies = [
 
 [[package]]
 name = "maunting-smart-system"
-version = "4.2.1"
+version = "4.2.2"
 dependencies = [
  "base64 0.22.1",
  "cpal",

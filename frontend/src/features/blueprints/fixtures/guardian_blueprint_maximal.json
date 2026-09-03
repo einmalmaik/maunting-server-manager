@@ -1,0 +1,147 @@
+{
+  "version": 1,
+  "meta": {
+    "id": "guardian_maximal",
+    "name": "Guardian Maximal Contract",
+    "category": "bot",
+    "author": "MSM",
+    "description": "Shared JSON and Web Editor parity fixture."
+  },
+  "runtime": {
+    "image": "node:22-bookworm-slim",
+    "workdir": "/data",
+    "user": "1000:1000",
+    "env": {
+      "NODE_ENV": "production"
+    },
+    "startup": "node index.js",
+    "startupProfiles": [],
+    "ensureDirs": [],
+    "requiredFiles": [],
+    "seedFiles": [],
+    "configPatches": [],
+    "stopGracePeriodSeconds": 30,
+    "startupCheckSeconds": 5,
+    "allowUnprivilegedUserNamespaces": false,
+    "enableExec": false,
+    "execTimeoutSeconds": 60
+  },
+  "ports": [
+    {
+      "name": "game",
+      "protocol": "tcp"
+    },
+    {
+      "name": "query",
+      "protocol": "udp"
+    }
+  ],
+  "source": {
+    "type": "dockerOnly",
+    "updateStrategy": "none"
+  },
+  "health": {
+    "process": {
+      "required": true,
+      "id": "process",
+      "interval": "15s",
+      "failure_threshold": 2,
+      "success_threshold": 2,
+      "required_for_startup": true,
+      "required_for_verification": true
+    },
+    "port": {
+      "protocol": "tcp",
+      "port": "{{PORT:game}}",
+      "timeout": "3s",
+      "id": "game-port",
+      "interval": "20s",
+      "failure_threshold": 3,
+      "success_threshold": 2,
+      "required_for_startup": true,
+      "required_for_verification": true
+    },
+    "application": {
+      "type": "minecraft-query",
+      "interval": "30s",
+      "timeout": "5s",
+      "failure_threshold": 4,
+      "success_threshold": 2,
+      "id": "query-probe",
+      "port": "{{PORT:query}}",
+      "expected_statuses": [
+        200,
+        204
+      ],
+      "follow_redirects": false,
+      "max_response_bytes": 8192,
+      "required_for_startup": false,
+      "required_for_verification": true
+    },
+    "startup": {
+      "grace_period_seconds": 45,
+      "timeout_seconds": 360,
+      "success_patterns": [
+        "Server ready"
+      ],
+      "failure_patterns": [
+        "Failed to bind"
+      ]
+    }
+  },
+  "logs": {
+    "sources": [
+      "stdout",
+      "logs/*.log"
+    ],
+    "redact": [
+      "authorization_header",
+      "regex:secret=[^ ]+"
+    ],
+    "max_tail_bytes": 131072
+  },
+  "diagnostics": {
+    "parsers": [
+      "linux-oom",
+      "port-conflict",
+      "startup-pattern"
+    ]
+  },
+  "recovery": {
+    "policies": [
+      {
+        "match": "port-conflict",
+        "action": "clear_declared_lock_files"
+      },
+      {
+        "match": "linux-oom",
+        "action": "graceful_restart"
+      },
+      {
+        "match": "startup-pattern",
+        "action": "quarantine"
+      }
+    ],
+    "safe_lock_files": [
+      {
+        "path": "runtime/server.lock",
+        "reason": "Known application lock that is safe to recreate."
+      }
+    ],
+    "max_attempts": 5,
+    "attempt_window_seconds": 2400,
+    "cooldown_seconds": 420,
+    "verification": {
+      "minimum_healthy_duration_seconds": 45,
+      "required_consecutive_successes": 4,
+      "verification_timeout_seconds": 240
+    }
+  },
+  "backups": {
+    "before_risky_action": true,
+    "protected_paths": [
+      "config/",
+      "saves/"
+    ]
+  }
+}
