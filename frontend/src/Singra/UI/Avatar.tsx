@@ -52,18 +52,18 @@ export function Avatar({
   alt,
   resolveUrl,
 }: AvatarProps) {
+  const resolvedSrc = src ? (resolveUrl ? resolveUrl(src) : apiUrl(src)) : undefined
   const [hasError, setHasError] = useState(false)
 
-  // Reset error when src changes
+  // Reset error when resolvedSrc changes (e.g. backend URL hydrated or avatar updated)
   useEffect(() => {
     setHasError(false)
-  }, [src])
+  }, [resolvedSrc])
 
   const initials = name
     ? name.trim().slice(0, 2).toUpperCase()
     : ''
 
-  const resolvedSrc = src ? (resolveUrl ? resolveUrl(src) : apiUrl(src)) : undefined
   const showImage = Boolean(resolvedSrc) && !hasError
 
   return (

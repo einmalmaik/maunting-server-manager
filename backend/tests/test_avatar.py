@@ -21,6 +21,7 @@ def test_avatar_upload_and_delete(client: TestClient, owner_user: User, owner_co
     get_res = client.get(avatar_path)
     assert get_res.status_code == 200
     assert get_res.content == png_bytes
+    assert get_res.headers.get("access-control-allow-origin") == "*"
 
     # Delete avatar
     del_res = client.delete("/api/auth/me/avatar", headers=headers, cookies=owner_cookies)

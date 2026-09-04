@@ -843,7 +843,10 @@ def get_avatar(filename: str):
         raise HTTPException(status_code=404, detail="Profilbild nicht gefunden")
     return FileResponse(
         file_path,
-        headers={"Cache-Control": "public, max-age=86400"},
+        headers={
+            "Cache-Control": "public, max-age=86400",
+            "Access-Control-Allow-Origin": "*",
+        },
     )
 
 
