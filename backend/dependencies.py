@@ -264,13 +264,17 @@ def verify_csrf(request: Request) -> None:
     """
     bearer = _bearer_token(request)
     if bearer:
-        payload = AuthService.decode_token(bearer)
+        payload = AuthService.decode_token(bearer, verify_exp=False)
         if payload and payload.get("type") == "access" and payload.get("jti"):
             return
     csrf_header = request.headers.get("x-csrf-token")
     cookie_values = _all_cookie_values(request, "__Secure-csrf_token")
     path = request.url.path
     if not csrf_header and not cookie_values:
+        # Reiner nativer Client ohne jegliche Cookies: kein CSRF-Angriffsvektor moeglich
+        auth_cookies = request.cookies.get("__Secure-access_token") or request.cookies.get("__Secure-refresh_token")
+        if not auth_cookies and path == "/api/auth/logout":
+            return
         _log.warning("CSRF check failed on %s: header and cookie both missing", path)
         raise HTTPException(status_code=403, detail="CSRF-Header und -Cookie fehlen")
     if not csrf_header:

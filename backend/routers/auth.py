@@ -554,7 +554,7 @@ def logout(
 
     access_value = _bearer_token(request) or request.cookies.get("__Secure-access_token")
     if access_value:
-        payload = AuthService.decode_token(access_value)
+        payload = AuthService.decode_token(access_value, verify_exp=False)
         if payload:
             if user_id_to_revoke is None:
                 user_id_to_revoke = payload.get("user_id")
@@ -566,12 +566,13 @@ def logout(
                 expires_dt = datetime.fromtimestamp(expires, tz=timezone.utc) if expires else None
                 blacklist_jwt(db, payload["jti"], user_id_to_revoke, expires_dt)
 
-    # Wenn Access-Token abgelaufen/ungueltig ist, versuche den User ueber den
-    # Refresh-Token zu identifizieren, falls oben noch nicht geschehen.
-    if user_id_to_revoke is None and refresh_value:
+    # Wenn Access-Token abgelaufen/ungueltig ist oder Familie nicht enthaelt,
+    # versuche den User und die Familie ueber den Refresh-Token zu ermitteln.
+    if (user_id_to_revoke is None or not family_to_revoke) and refresh_value:
         rt_fallback = AuthService.find_any_refresh_token(db, refresh_value)
         if rt_fallback:
-            user_id_to_revoke = rt_fallback.user_id
+            if user_id_to_revoke is None:
+                user_id_to_revoke = rt_fallback.user_id
             if not family_to_revoke:
                 family_to_revoke = rt_fallback.family
 

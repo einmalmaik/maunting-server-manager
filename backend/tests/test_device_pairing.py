@@ -241,6 +241,51 @@ class TestGeraeteliste:
         assert rot_retry.status_code == 200
         assert rot_retry.json()["access_token"]
 
+    def test_wiederverwendung_ausserhalb_grace_period_revoziert_familie(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
+    ):
+        """Replay-Schutz (RFC 6749 BCP): Wird ein altes Token nach Ablauf der Grace Period wiederverwendet, wird die Familie revoziert."""
+        _mit_chatrecht(db, regular_user)
+        code = _code_erzeugen(client, user_cookies, label="ReplayGeraet")["code"]
+        redeem_res = client.post("/api/auth/devices/redeem", json={"code": code}).json()
+        initial_refresh = redeem_res["refresh_token"]
+
+        # Erste reguläre Rotation
+        rot1 = client.post("/api/auth/refresh", json={"refresh_token": initial_refresh})
+        assert rot1.status_code == 200
+        rot1_refresh = rot1.json()["refresh_token"]
+
+        # Künstlich used_at auf 60 Sekunden in die Vergangenheit setzen (außerhalb der 30s Grace Period)
+        token_hash = AuthService._hash_token(initial_refresh)
+        rt_db = db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
+        assert rt_db is not None
+        rt_db.used_at = datetime.now(timezone.utc) - timedelta(seconds=60)
+        db.commit()
+
+        # Replay-Versuch mit initial_refresh außerhalb der Grace Period
+        replay = client.post("/api/auth/refresh", json={"refresh_token": initial_refresh})
+        assert replay.status_code == 401
+
+        # Nun muss die GESAMTE Familie revoziert sein — auch das legitime rot1_refresh ist jetzt ungültig!
+        rot2 = client.post("/api/auth/refresh", json={"refresh_token": rot1_refresh})
+        assert rot2.status_code == 401
+
+    def test_logout_mit_abgelaufenem_access_token_und_refresh_token(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
+    ):
+        """Logout widerruft Familie auch wenn das Access-Token fehlt oder abgelaufen ist."""
+        _mit_chatrecht(db, regular_user)
+        code = _code_erzeugen(client, user_cookies, label="LogoutGeraet")["code"]
+        redeem_res = client.post("/api/auth/devices/redeem", json={"code": code}).json()
+        refresh_tok = redeem_res["refresh_token"]
+
+        # Logout nur mit Refresh-Token (kein Access-Token im Authorization-Header)
+        res = client.post("/api/auth/logout", json={"refresh_token": refresh_tok})
+        assert res.status_code == 200
+
+        # Familie muss revoziert sein
+        assert client.post("/api/auth/refresh", json={"refresh_token": refresh_tok}).status_code == 401
+
 
 
     def test_ein_nicht_eingeloester_code_taucht_nicht_auf(

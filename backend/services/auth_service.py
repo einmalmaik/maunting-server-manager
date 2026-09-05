@@ -67,9 +67,14 @@ class AuthService:
         return jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
 
     @staticmethod
-    def decode_token(token: str) -> dict | None:
+    def decode_token(token: str, verify_exp: bool = True) -> dict | None:
         try:
-            return jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+            return jwt.decode(
+                token,
+                settings.secret_key,
+                algorithms=[settings.algorithm],
+                options={"verify_exp": verify_exp},
+            )
         except JWTError:
             return None
 
