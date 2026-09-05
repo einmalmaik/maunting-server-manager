@@ -2,11 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import List
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from models.node import Node
-from models.panel_setting import PanelSetting
 from models.user import User
 from models.vault_entry import VaultEntry
 from models.vault_hint import VaultHint
@@ -15,14 +13,11 @@ from schemas.vault import (
     VaultEntryOut,
     VaultHintStatusResponse,
     VaultMutation,
-    VaultNodeAssignment,
     VaultSaltResponse,
     VaultSyncRequest,
     VaultSyncResponse,
 )
 from services.auth_service import AuthService
-
-PANEL_SETTING_VAULT_NODE = "vault_assigned_node_id"
 
 
 def _now() -> datetime:
@@ -72,14 +67,6 @@ def sync_vault(db: Session, user: User, request: VaultSyncRequest) -> VaultSyncR
 
     # 2. Monotone Mutation & Revisions-Zuweisung (SEC-03)
     if request.mutations:
-        # Aktuell zugewiesenen Node ermitteln
-        assigned_setting = db.get(PanelSetting, PANEL_SETTING_VAULT_NODE)
-        current_node_id = (
-            assigned_setting.value.strip()
-            if assigned_setting and assigned_setting.value
-            else None
-        )
-
         max_rev_db = db.scalar(
             select(func.max(VaultEntry.revision)).where(VaultEntry.bucket_id == bucket_id)
         ) or 0
@@ -100,13 +87,10 @@ def sync_vault(db: Session, user: User, request: VaultSyncRequest) -> VaultSyncR
                 existing.revision = current_rev
                 existing.is_deleted = m.is_deleted
                 existing.updated_at = _now()
-                if current_node_id and existing.node_id != current_node_id:
-                    existing.node_id = current_node_id
             else:
                 new_entry = VaultEntry(
                     id=m.id,
                     bucket_id=bucket_id,
-                    node_id=current_node_id,
                     ciphertext=m.ciphertext,
                     revision=current_rev,
                     is_deleted=m.is_deleted,
@@ -201,74 +185,6 @@ def set_vault_salt(db: Session, user_id: int, kdf_salt: str, bucket_id: str) -> 
         bucket_id=setting.bucket_id,
         has_vault=True,
     )
-
-
-def get_vault_node_assignment(db: Session) -> VaultNodeAssignment:
-    """Ermittelt den im Panel zugewiesenen Multi-Node für den Passwort-Manager."""
-    setting = db.get(PanelSetting, PANEL_SETTING_VAULT_NODE)
-    node_id_str = setting.value.strip() if setting and setting.value else None
-
-    assigned_name = None
-    node_id = None
-    if node_id_str:
-        try:
-            node_int = int(node_id_str)
-            node = db.get(Node, node_int)
-            if node:
-                assigned_name = node.name
-                node_id = str(node.id)
-        except (ValueError, TypeError):
-            pass
-
-    # Zählen, ob überhaupt Nodes registriert sind
-    node_count = db.scalar(select(func.count(Node.id))) or 0
-
-    return VaultNodeAssignment(
-        node_id=node_id,
-        assigned_node_name=assigned_name,
-        is_multi_node_active=(node_count > 0),
-    )
-
-
-def set_vault_node_assignment(db: Session, node_id: str | None) -> VaultNodeAssignment:
-    """Aktualisiert die Zuweisung des Passwort-Managers an einen dedizierten Node und migriert Daten nahtlos."""
-    clean_id = str(node_id).strip() if node_id and str(node_id).strip() else ""
-
-    if clean_id:
-        try:
-            node_int = int(clean_id)
-            node = db.get(Node, node_int)
-        except (ValueError, TypeError):
-            node = None
-        if not node:
-            raise ValueError(f"Node with ID '{clean_id}' does not exist")
-        clean_id = str(node.id)
-
-    setting = db.get(PanelSetting, PANEL_SETTING_VAULT_NODE)
-    old_node_id = setting.value.strip() if setting and setting.value else None
-    target_node_id = clean_id if clean_id else None
-
-    # Automatische nahtlose Migration aller verschlüsselten Tresor-Datensätze
-    migrated_count = 0
-    if old_node_id != target_node_id:
-        mig_stmt = (
-            update(VaultEntry)
-            .values(node_id=target_node_id, updated_at=_now())
-        )
-        res = db.execute(mig_stmt)
-        migrated_count = int(res.rowcount or 0)
-
-    if not setting:
-        setting = PanelSetting(key=PANEL_SETTING_VAULT_NODE, value=clean_id)
-        db.add(setting)
-    else:
-        setting.value = clean_id
-        setting.updated_at = _now()
-
-    db.commit()
-    assignment = get_vault_node_assignment(db)
-    assignment.migrated_entries = migrated_count
-    return assignment
 
 
 HINT_RATE_LIMIT_SECONDS = 600  # 10 Minuten Cooldown

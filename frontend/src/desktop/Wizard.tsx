@@ -56,11 +56,13 @@ export function Wizard({
   const [stand, setStand] = useState<AppKonfig>(konfig)
 
   async function weiter(neuerStand?: AppKonfig) {
-    const k = neuerStand ?? stand
-    if (neuerStand) setStand(neuerStand)
+    const k = { ...(neuerStand ?? stand), eingerichtet: true }
+    setStand(k)
 
     if (nurDieserSchritt) {
-      onFertig(k)
+      const fertig = { ...k, eingerichtet: true }
+      await konfigSpeichern(fertig)
+      onFertig(fertig)
       return
     }
     const index = REIHENFOLGE.indexOf(schritt)
@@ -114,7 +116,13 @@ export function Wizard({
         </header>
         <div className="msm-card p-6">
           {schritt === 'backend' && <SchrittBackend stand={stand} />}
-          {schritt === 'kopplung' && <SchrittKopplung onWeiter={weiter} />}
+          {schritt === 'kopplung' && (
+            <SchrittKopplung
+              stand={stand}
+              onWeiter={weiter}
+              onZurueck={() => setSchritt('backend')}
+            />
+          )}
           {schritt === 'personalisierung' && <SchrittPersonalisierung onWeiter={weiter} />}
           {schritt === 'sandbox' && <SchrittSandbox stand={stand} onWeiter={weiter} />}
           {schritt === 'wakeword' && (
@@ -166,15 +174,26 @@ function adresseErlaubt(url: string): boolean {
 
 function SchrittBackend({ stand }: { stand: AppKonfig }) {
   const { t } = useTranslation()
-  const [url, setUrl] = useState(stand.backend_url ?? '')
+  const [url, setUrl] = useState(() => (stand.backend_url ? stand.backend_url.replace(/^https:\/\//i, '') : ''))
   const [fehler, setFehler] = useState<string | null>(null)
   const [prueft, setPrueft] = useState(false)
+
+  const hatHttp = url.trim().startsWith('http://')
+  const prefix = hatHttp ? undefined : 'https://'
+
+  function onUrlChange(neuerWert: string) {
+    // Falls der Nutzer eine vollständige URL mit https:// einfügt oder tippt, führendes https:// entfernen
+    // (http:// bleibt für localhost/lokale Entwicklung erhalten)
+    const bereinigt = neuerWert.trimStart().replace(/^https:\/\//i, '')
+    setUrl(bereinigt)
+  }
 
   async function verbinden() {
     setFehler(null)
     setPrueft(true)
     try {
-      const bereinigt = url.trim().replace(/\/+$/, '')
+      const getrimmt = url.trim()
+      const bereinigt = (getrimmt.startsWith('http://') ? getrimmt : `https://${getrimmt.replace(/^https?:\/\//i, '')}`).replace(/\/+$/, '')
       if (!adresseErlaubt(bereinigt)) {
         throw new Error(t('mss.wizard.adresseSchema'))
       }
@@ -207,9 +226,10 @@ function SchrittBackend({ stand }: { stand: AppKonfig }) {
         <Input
           id="mss-adresse"
           label={t('mss.wizard.adresseLabel')}
-          placeholder="https://panel.example.com"
+          prefix={prefix}
+          placeholder="panel.example.com"
           value={url}
-          onChange={(e) => setUrl(e.target.value)}
+          onChange={(e) => onUrlChange(e.target.value)}
           autoFocus
         />
         <p className="msm-field-help">{t('mss.wizard.adresseHinweis')}</p>
@@ -226,7 +246,15 @@ function SchrittBackend({ stand }: { stand: AppKonfig }) {
 
 // ── Schritt 2: Kopplung ──────────────────────────────────────────────────
 
-function SchrittKopplung({ onWeiter }: { onWeiter: () => Promise<void> }) {
+function SchrittKopplung({
+  stand,
+  onWeiter,
+  onZurueck,
+}: {
+  stand?: AppKonfig
+  onWeiter: (neuerStand?: AppKonfig) => Promise<void>
+  onZurueck?: () => void
+}) {
   const { t } = useTranslation()
   const [code, setCode] = useState('')
   const [name, setName] = useState('')
@@ -241,7 +269,8 @@ function SchrittKopplung({ onWeiter }: { onWeiter: () => Promise<void> }) {
     setLaeuft(true)
     try {
       await koppeln(zielCode, name.trim())
-      await onWeiter()
+      const frischerStand = { ...(stand ?? {}), eingerichtet: true }
+      await onWeiter(frischerStand as AppKonfig)
     } catch (e) {
       setFehler(e instanceof Error ? e.message : String(e))
     } finally {
@@ -265,6 +294,25 @@ function SchrittKopplung({ onWeiter }: { onWeiter: () => Promise<void> }) {
         }}
       >
         <p className="text-sm text-on-surface-variant">{t('mss.wizard.kopplungErklaerung')}</p>
+
+        {stand?.backend_url && (
+          <div className="flex items-center justify-between rounded-lg bg-surface-container-high/40 p-2.5 px-3 border border-outline-variant/30 text-xs">
+            <div className="flex flex-col min-w-0 pr-2">
+              <span className="text-on-surface-variant text-[11px]">{t('mss.wizard.verbundenesPanel', 'Panel-Server')}:</span>
+              <span className="font-mono text-on-surface truncate font-medium">{stand.backend_url}</span>
+            </div>
+            {onZurueck && (
+              <Button
+                type="button"
+                variant="secondary"
+                className="px-2.5 py-1 text-xs shrink-0 h-auto"
+                onClick={onZurueck}
+              >
+                {t('mss.wizard.adresseAendern', 'Ändern')}
+              </Button>
+            )}
+          </div>
+        )}
         <div>
           <label htmlFor="mss-kopplungscode" className="text-sm font-medium text-foreground mb-1.5 block">
             {t('mss.wizard.codeLabel')}
@@ -438,7 +486,7 @@ function SchrittSandbox({
   async function speichern() {
     setFehler(null)
     try {
-      const neu = { ...stand, sandbox_pfad: pfad || null }
+      const neu = { ...stand, sandbox_pfad: pfad || null, eingerichtet: true }
       await konfigSpeichern(neu)
       await onWeiter(neu)
     } catch (e) {
@@ -465,7 +513,7 @@ function SchrittSandbox({
       </div>
       <Fehlerzeile text={fehler} />
       <div className="flex justify-end gap-2">
-        <Button variant="secondary" onClick={() => void onWeiter(stand)}>
+        <Button variant="secondary" onClick={() => void onWeiter({ ...stand, eingerichtet: true })}>
           {t('mss.wizard.spaeterFestlegen')}
         </Button>
         <Button onClick={() => void speichern()} disabled={pfad === ''}>

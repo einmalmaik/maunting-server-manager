@@ -204,7 +204,7 @@ export function DesktopApp() {
             localStorage.setItem(SPLASH_GESEHEN_KEY, 'true')
           } catch {}
         }
-        if (!geladen.backend_url || !geladen.eingerichtet) {
+        if (!geladen.backend_url) {
           setPhase('einrichtung')
           return
         }
@@ -226,7 +226,14 @@ export function DesktopApp() {
           return
         }
 
-        // Bei 'erfolg': checkAuth mit Timeout absichern
+        // Bei 'erfolg': Konfiguration als eingerichtet absichern
+        if (!geladen.eingerichtet) {
+          const aktualisiert = { ...geladen, eingerichtet: true }
+          setKonfig(aktualisiert)
+          void konfigSpeichern(aktualisiert)
+        }
+
+        // checkAuth mit Timeout absichern
         try {
           await Promise.race([
             useAuthStore.getState().checkAuth(),
@@ -246,6 +253,15 @@ export function DesktopApp() {
       }
     })()
   }, [])
+
+  // Regelmäßiges Lebenszeichen des gekoppelten Geräts an das Backend
+  useEffect(() => {
+    if (!sitzungSteht || isOffline) return
+    const interval = setInterval(() => {
+      api('/auth/devices/heartbeat', { method: 'POST' }).catch(() => {})
+    }, 45000)
+    return () => clearInterval(interval)
+  }, [sitzungSteht, isOffline])
 
   useEffect(() => {
     if (phase === 'bereit' && !angemeldet && !isOffline) {
@@ -397,6 +413,7 @@ export function DesktopApp() {
         <DesktopAktionKarte offenerAuftragId={offeneUebernahme} />
         <Uebernahmekarte offenerAuftragId={offeneUebernahme} />
         <Aufraeumkarte offenerAuftragId={offeneUebernahme} />
+        <UpdateModal />
         <SchliessenDialog />
         <ToastContainer />
         <ConfirmDialog />
@@ -425,8 +442,9 @@ function NavigationEmpfaenger() {
 function Startbild() {
   const { t } = useTranslation()
   return (
-    <main className="flex flex-1 items-center justify-center text-on-surface-variant">
-      <p className="text-sm">{t('mss.app.startet')}</p>
+    <main className="flex flex-1 flex-col items-center justify-center gap-3 text-on-surface-variant">
+      <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      <p className="text-sm font-medium text-on-surface">{t('mss.app.startet')}</p>
     </main>
   )
 }
@@ -891,7 +909,6 @@ function Hauptseite({
           )}
         </div>
       </main>
-      <UpdateModal />
     </>
   )
 }

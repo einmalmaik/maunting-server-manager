@@ -93,22 +93,24 @@ Gemäß den Sicherheitsprinzipien von Maunting Studios („Schutz braucht Vertra
 
 ---
 
-## 4. Multi-Node Konfiguration im Panel Manager
+## 4. Zentrale Panel-Verwaltung & KISS-Architektur
 
-- Im Panel unter **Einstellungen → Passwort-Manager** können Administratoren festlegen, welcher Node aus dem Multi-Node-Cluster für die Verwaltung und Speicherung der Tresor-Blobs zuständig ist.
-- Die Auswahl erfolgt barrierefrei über die MauntingStudios Design-DNA Dropdown-Komponente (keine nativen HTML-Selects).
+- Der Passwort-Manager arbeitet nach dem **KISS-Prinzip (Keep It Simple, Stupid)**: Anstatt unnötiger Multi-Node-Verbindungsüberbauten läuft der verschlüsselte Zero-Knowledge-Sync direkt, stabil und schlank über die zentrale Panel-Datenbank.
+- Im Panel unter **Einstellungen → Allgemein** können Administratoren den Passwort-Manager panelweit aktivieren oder deaktivieren (`vault_enabled`).
+- Dadurch werden sämtliche Tresor-Datensätze automatisch von den regulären Panel-Backups erfasst – ohne Datenverlustrisiko oder verwaiste Node-Tabellen.
 
 ---
 
 ## 5. Geänderte und neue Dateien
 
 ### Backend
-- `backend/models/vault_entry.py`: PostgreSQL-Datenmodell für anonyme Tresoreinträge.
+- `backend/models/vault_entry.py`: Schlankes PostgreSQL-Datenmodell für anonyme Tresoreinträge (ohne Node-Spalten).
 - `backend/models/__init__.py`: Registrierung des Modells.
 - `backend/migrations/versions/20260902_02_vault_entries.py`: Alembic-Migration für `vault_entries` und Indizes.
+- `backend/migrations/versions/20260905_01_drop_vault_entries_node_id.py`: Bereinigungs-Migration zur Entfernung verwaister Node-Spalten.
 - `backend/schemas/vault.py`: Pydantic-Validierungs- und Datenübertragungsmodelle.
-- `backend/services/vault_service.py`: Revisionsverwaltung, Synchronisationslogik und Node-Zuweisung.
-- `backend/routers/vault.py`: REST-Endpunkte `/api/vault/sync` und `/api/vault/node-assignment`.
+- `backend/services/vault_service.py`: Revisionsverwaltung und deterministische Synchronisationslogik.
+- `backend/routers/vault.py`: REST-Endpunkt `/api/vault/sync`.
 - `backend/routers/__init__.py`: Router-Export.
 - `backend/main.py`: Einbindung des Vault-Routers unter `/api/vault`.
 - `backend/tests/test_vault_router.py`: Pytest-Suite für Authentifizierung, Validierung und Synchronisation.
@@ -122,6 +124,5 @@ Gemäß den Sicherheitsprinzipien von Maunting Studios („Schutz braucht Vertra
 - `frontend/src/desktop/vault/vaultStore.ts`: Zustand Offline-First Store mit Revisionsabgleich.
 - `frontend/src/desktop/vault/VaultView.tsx`: Tresor-Oberfläche mit Master-Passwort-Schutz und 2FA-Ring.
 - `frontend/src/desktop/DesktopApp.tsx`: Navigation, Route `/tresor` und Drawer-Integration.
-- `frontend/src/pages/settings/VaultSettingsTab.tsx`: Multi-Node-Konfiguration im Admin-Panel.
-- `frontend/src/pages/Settings.tsx`: Neuer Tab „Passwort-Manager“.
+- `frontend/src/pages/settings/GeneralTab.tsx`: Panelweiter Aktivierungs-Schalter (`vault_enabled`).
 - `frontend/src/locales/de.json` & `frontend/src/locales/en.json`: Übersetzungen.

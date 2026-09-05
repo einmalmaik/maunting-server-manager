@@ -308,4 +308,54 @@ describe('DesktopApp', () => {
     })
     expect(screen.queryByText(i18n.t('mss.wizard.codeLabel'))).not.toBeInTheDocument()
   })
+
+  it('blockiert den Kaltstart nicht mit Zwangs-Updates oder automatischem Neustart', async () => {
+    invokeMock.mockImplementation((befehl: string) => {
+      if (befehl === 'konfig_laden') {
+        return Promise.resolve({
+          backend_url: 'https://api.example.com',
+          sandbox_pfad: 'C:\\Users\\tester\\MSS-Sandbox',
+          eingerichtet: true,
+        })
+      }
+      if (befehl === 'refresh_token_laden') return Promise.resolve('tresor-token')
+      return Promise.resolve(null)
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((eingabe: RequestInfo | URL) => {
+        const url = String(eingabe)
+        if (url.includes('/auth/refresh')) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r' }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            }),
+          )
+        }
+        if (url.includes('/auth/me')) {
+          return Promise.resolve(
+            new Response(JSON.stringify(BENUTZER), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            }),
+          )
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ global_permissions: [], server_permissions: {} }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        )
+      }),
+    )
+
+    render(<DesktopApp />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('ki-seite')).toBeInTheDocument()
+    })
+    expect(invokeMock).not.toHaveBeenCalledWith('update_installieren')
+    expect(invokeMock).not.toHaveBeenCalledWith('app_neu_starten')
+  })
 })

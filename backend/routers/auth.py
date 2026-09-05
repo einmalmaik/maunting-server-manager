@@ -21,6 +21,7 @@ from dependencies import (
     require_global,
     verify_csrf,
     _bearer_token,
+    session_familie,
 )
 from models import User, EmailVerification
 from services.dis_client import DisClient
@@ -482,7 +483,19 @@ def redeem_device_pairing(
         if req.label.strip():
             einladung.label = req.label.strip()[: device_pairing_service.MAX_BEZEICHNUNG]
         device_pairing_service.familie_vermerken(db, einladung, rt.family)
+        device_pairing_service.aktivitaet_vermerken(rt.family)
     return _native_token_body(tokens)
+
+
+@router.post("/devices/heartbeat")
+def device_heartbeat(
+    user: User = Depends(get_current_user),
+    familie: str | None = Depends(session_familie),
+) -> dict:
+    """Aktualisiert die letzte Aktivitaet eines gekoppelten Geraets."""
+    if familie:
+        device_pairing_service.aktivitaet_vermerken(familie)
+    return {"status": "ok"}
 
 
 @router.get("/devices", response_model=list[PairedDevice])
@@ -490,15 +503,8 @@ def list_devices(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[dict]:
-    """Die gekoppelten Geraete dieses Benutzers — Name und Familie, sonst nichts."""
-    return [
-        {
-            "family": eintrag.family,
-            "label": eintrag.label,
-            "paired_at": eintrag.redeemed_at,
-        }
-        for eintrag in device_pairing_service.geraete(db, user)
-    ]
+    """Die gekoppelten Geraete dieses Benutzers samt Aktivitaetsstatus und letztem Login."""
+    return device_pairing_service.geraete_details(db, user)
 
 
 @router.delete("/devices/{family}")
@@ -537,17 +543,23 @@ def logout(
     Blacklist, alle Refresh-Tokens der Familie revozieren.
     """
     refresh_value = (req.refresh_token if req else None) or request.cookies.get("__Secure-refresh_token")
+    family_to_revoke: str | None = None
+    user_id_to_revoke: int | None = None
     if refresh_value:
         rt = AuthService.validate_refresh_token(db, refresh_value)
         if rt:
+            user_id_to_revoke = rt.user_id
+            family_to_revoke = rt.family
             AuthService.revoke_refresh_token(db, rt)
 
     access_value = _bearer_token(request) or request.cookies.get("__Secure-access_token")
-    user_id_to_revoke: int | None = None
     if access_value:
         payload = AuthService.decode_token(access_value)
         if payload:
-            user_id_to_revoke = payload.get("user_id")
+            if user_id_to_revoke is None:
+                user_id_to_revoke = payload.get("user_id")
+            if not family_to_revoke and payload.get("familie"):
+                family_to_revoke = payload.get("familie")
             if payload.get("jti"):
                 expires = payload.get("exp")
                 from datetime import datetime
@@ -555,14 +567,19 @@ def logout(
                 blacklist_jwt(db, payload["jti"], user_id_to_revoke, expires_dt)
 
     # Wenn Access-Token abgelaufen/ungueltig ist, versuche den User ueber den
-    # Refresh-Token zu identifizieren, damit alle Sessions beendet werden.
+    # Refresh-Token zu identifizieren, falls oben noch nicht geschehen.
     if user_id_to_revoke is None and refresh_value:
-        rt_fallback = AuthService.validate_refresh_token(db, refresh_value)
+        rt_fallback = AuthService.find_any_refresh_token(db, refresh_value)
         if rt_fallback:
             user_id_to_revoke = rt_fallback.user_id
+            if not family_to_revoke:
+                family_to_revoke = rt_fallback.family
 
     if user_id_to_revoke is not None:
-        AuthService.revoke_all_user_refresh_tokens(db, user_id_to_revoke)
+        if family_to_revoke:
+            AuthService.revoke_refresh_family(db, user_id_to_revoke, family_to_revoke)
+        else:
+            AuthService.revoke_all_user_refresh_tokens(db, user_id_to_revoke)
 
     _clear_auth_cookies(response)
     return {"message": "Abgemeldet"}
@@ -588,8 +605,26 @@ def refresh(
         raise HTTPException(status_code=401, detail="Kein Refresh-Token")
     rt = AuthService.validate_refresh_token(db, refresh_value)
     if not rt:
+        recent_rt = AuthService.find_recently_used_refresh_token(db, refresh_value, max_age_seconds=30)
+        if recent_rt:
+            user = AuthService.get_user_by_id(db, recent_rt.user_id)
+            if user and user.is_active:
+                family = recent_rt.family
+                device_pairing_service.aktivitaet_vermerken(family)
+                tokens = issue_session(response, db, user, family=family, geraet=recent_rt.geraet)
+                if body_token:
+                    return _native_token_body(tokens)
+                return {"message": "Token refreshed"}
+
+        # Replay-Schutz: Wurde das Token bereits verwendet oder widerrufen,
+        # wird die gesamte Familie unverzüglich revoziert (RFC 6749 BCP).
+        used_rt = AuthService.find_any_refresh_token(db, refresh_value)
+        if used_rt and (used_rt.used_at is not None or used_rt.revoked_at is not None):
+            AuthService.revoke_refresh_family(db, used_rt.user_id, used_rt.family)
+
         raise HTTPException(status_code=401, detail="Ungültiges Refresh-Token")
     family = rt.family
+    device_pairing_service.aktivitaet_vermerken(family)
     AuthService.mark_refresh_token_used(db, rt)
     user = AuthService.get_user_by_id(db, rt.user_id)
     if not user or not user.is_active:

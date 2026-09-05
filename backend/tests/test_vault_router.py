@@ -7,9 +7,9 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from database import Base
-from dependencies import get_current_user, get_db, require_global, verify_csrf
+from dependencies import get_current_user, get_db, verify_csrf
 from main import app
-from models import Node, User, VaultEntry, VaultUserSetting
+from models import User, VaultEntry, VaultUserSetting
 
 
 @pytest.fixture
@@ -377,35 +377,6 @@ def test_vault_csrf_enforcement(test_db):
     app.dependency_overrides.clear()
 
 
-def test_vault_node_assignment(client, test_db):
-    session, _, _ = test_db
-
-    # Default: None
-    res = client.get("/api/vault/node-assignment")
-    assert res.status_code == 200
-    assert res.json()["node_id"] is None
-
-    # Invalid node id fails with 400
-    res_err = client.put("/api/vault/node-assignment", json={"node_id": "non-existent-node"})
-    assert res_err.status_code == 400
-
-    # Create a node
-    node = Node(id=42, name="Dedicated Vault Node", host="10.0.0.5:8000", auth_token_enc="enc_token")
-    session.add(node)
-    session.commit()
-
-    # Assign node
-    res_ok = client.put("/api/vault/node-assignment", json={"node_id": "42"})
-    assert res_ok.status_code == 200
-    assert res_ok.json()["node_id"] == "42"
-    assert res_ok.json()["assigned_node_name"] == "Dedicated Vault Node"
-
-    # Reset assignment to None
-    res_reset = client.put("/api/vault/node-assignment", json={"node_id": None})
-    assert res_reset.status_code == 200
-    assert res_reset.json()["node_id"] is None
-
-
 def test_vault_hint_flow_and_rate_limit(client, test_db, monkeypatch):
     session, _, _ = test_db
 
@@ -471,24 +442,3 @@ def test_vault_disabled_via_settings(client, test_db):
     finally:
         PanelSettingsService.set("vault_enabled", "true")
 
-
-def test_vault_node_migration_count(client, test_db):
-    session, _, _ = test_db
-    node = Node(id=99, name="Migration Node", host="10.0.0.9:8000", auth_token_enc="enc_token")
-    session.add(node)
-
-    # Create an entry
-    e = VaultEntry(
-        id="item-mig-1",
-        bucket_id="f" * 64,
-        ciphertext="sv-vault-v1:test",
-        revision=1,
-        node_id=None,
-    )
-    session.add(e)
-    session.commit()
-
-    # Assign node 99 -> 1 entry should be migrated
-    res = client.put("/api/vault/node-assignment", json={"node_id": "99"})
-    assert res.status_code == 200
-    assert res.json()["migrated_entries"] >= 1

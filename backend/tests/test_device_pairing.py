@@ -182,7 +182,66 @@ class TestGeraeteliste:
         assert liste[0]["label"] == "Arbeitsrechner"
         assert liste[0]["family"]
         # Kein Token, kein Code — die Liste ist eine Anzeige, kein Tresor.
-        assert set(liste[0]) == {"family", "label", "paired_at"}
+        assert set(liste[0]) == {"family", "label", "paired_at", "is_active", "last_active_at"}
+        assert liste[0]["is_active"] is True
+        assert liste[0]["last_active_at"] is not None
+
+    def test_inaktives_geraet_wird_als_inaktiv_erkannt(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
+    ):
+        _mit_chatrecht(db, regular_user)
+        code = _code_erzeugen(client, user_cookies, label="AltesGeraet")["code"]
+        client.post("/api/auth/devices/redeem", json={"code": code})
+
+        # Token revoken
+        from models import RefreshToken
+        db.query(RefreshToken).filter(RefreshToken.user_id == regular_user.id).update(
+            {"revoked_at": datetime.now(timezone.utc)}
+        )
+        db.commit()
+
+        liste = client.get("/api/auth/devices", cookies=user_cookies).json()
+        assert len(liste) == 1
+        assert liste[0]["is_active"] is False
+
+    def test_device_heartbeat_aktualisiert_aktivitaet(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
+    ):
+        _mit_chatrecht(db, regular_user)
+        code = _code_erzeugen(client, user_cookies, label="HeartbeatGeraet")["code"]
+        redeem_res = client.post("/api/auth/devices/redeem", json={"code": code}).json()
+        token = redeem_res["access_token"]
+
+        hb = client.post("/api/auth/devices/heartbeat", headers={"Authorization": f"Bearer {token}"})
+        assert hb.status_code == 200
+        assert hb.json() == {"status": "ok"}
+
+        liste = client.get("/api/auth/devices", cookies=user_cookies).json()
+        assert len(liste) == 1
+        assert liste[0]["is_active"] is True
+
+    def test_refresh_grace_period_schuetzt_vor_rotationsabbruch(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
+    ):
+        """Wenn ein Client direkt nach einer Rotation das alte Token erneut sendet (z. B. Verbindungsabbruch), greift die Grace Period."""
+        _mit_chatrecht(db, regular_user)
+        code = _code_erzeugen(client, user_cookies, label="GracePeriodGeraet")["code"]
+        redeem_res = client.post("/api/auth/devices/redeem", json={"code": code}).json()
+        initial_refresh = redeem_res["refresh_token"]
+
+        # Erste reguläre Rotation
+        rot1 = client.post("/api/auth/refresh", json={"refresh_token": initial_refresh})
+        assert rot1.status_code == 200
+        rot1_data = rot1.json()
+        assert rot1_data["access_token"]
+        assert rot1_data["refresh_token"]
+
+        # Erneute Anfrage mit initial_refresh innerhalb der 30s Grace Period muss gelingen
+        rot_retry = client.post("/api/auth/refresh", json={"refresh_token": initial_refresh})
+        assert rot_retry.status_code == 200
+        assert rot_retry.json()["access_token"]
+
+
 
     def test_ein_nicht_eingeloester_code_taucht_nicht_auf(
         self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
@@ -242,6 +301,26 @@ class TestGeraeteliste:
         assert client.post(
             "/api/auth/refresh", json={"refresh_token": eigene["refresh_token"]}
         ).status_code == 200
+
+    def test_browser_logout_laesst_gekoppelte_geraete_aktiv(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
+    ):
+        _mit_chatrecht(db, regular_user)
+        code = _code_erzeugen(client, user_cookies)["code"]
+        geraet = client.post("/api/auth/devices/redeem", json={"code": code}).json()
+
+        # Browser meldet sich ab
+        logout_res = client.post(
+            "/api/auth/logout", cookies=user_cookies, headers=_kopf(user_cookies)
+        )
+        assert logout_res.status_code == 200
+
+        # Gekoppeltes Companion-Gerät kann sein Refresh-Token weiterhin erneuern
+        refresh_res = client.post(
+            "/api/auth/refresh", json={"refresh_token": geraet["refresh_token"]}
+        )
+        assert refresh_res.status_code == 200
+        assert "access_token" in refresh_res.json()
 
 
 class TestAufraeumen:

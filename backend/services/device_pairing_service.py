@@ -146,6 +146,61 @@ def geraete(db: Session, user: User) -> list[DevicePairing]:
     )
 
 
+_letzte_aktivitaet: dict[str, datetime] = {}
+
+
+def aktivitaet_vermerken(family: str | None) -> None:
+    """Vermerkt ein Lebenszeichen eines gekoppelten Geräts (Heartbeat, Job-Abfrage, Token-Refresh)."""
+    if family:
+        _letzte_aktivitaet[family] = datetime.now(timezone.utc)
+
+
+def geraete_details(db: Session, user: User) -> list[dict]:
+    """Die gekoppelten Geraete dieses Benutzers samt Aktivitaetsstatus und letztem Login."""
+    from models import RefreshToken
+
+    pairings = geraete(db, user)
+    ergebnis = []
+    jetzt = datetime.now(timezone.utc)
+    for eintrag in pairings:
+        family = eintrag.family
+        tokens = (
+            db.query(RefreshToken)
+            .filter(RefreshToken.user_id == user.id, RefreshToken.family == family)
+            .all()
+        )
+        hat_gueltiges_token = any(
+            t.revoked_at is None and t.expires_at > _jetzt(t.expires_at)
+            for t in tokens
+        )
+        zeitpunkte = []
+        for dt in [*(t.used_at for t in tokens if t.used_at), *(t.created_at for t in tokens if t.created_at), eintrag.redeemed_at]:
+            if dt is not None:
+                if dt.tzinfo is None:
+                    zeitpunkte.append(dt.replace(tzinfo=timezone.utc))
+                else:
+                    zeitpunkte.append(dt.astimezone(timezone.utc))
+        if family and family in _letzte_aktivitaet:
+            zeitpunkte.append(_letzte_aktivitaet[family])
+        last_active_at = max(zeitpunkte) if zeitpunkte else None
+
+        # Ein Gerät gilt als "gerade aktiv" (online), wenn sein Refresh-Token gültig ist
+        # UND es in den letzten 2 Minuten (120s) ein Lebenszeichen gegeben hat (oder frisch gekoppelt wurde).
+        ist_online = False
+        if hat_gueltiges_token and last_active_at is not None:
+            differenz_sekunden = (jetzt - last_active_at).total_seconds()
+            ist_online = differenz_sekunden <= 120
+
+        ergebnis.append({
+            "family": family,
+            "label": eintrag.label,
+            "paired_at": eintrag.redeemed_at,
+            "is_active": ist_online,
+            "last_active_at": last_active_at,
+        })
+    return ergebnis
+
+
 def vergessen(db: Session, user: User, family: str) -> DevicePairing | None:
     """Entfernt den Eintrag zu einer Familie — **nur** aus dem eigenen Bestand.
 
@@ -154,6 +209,7 @@ def vergessen(db: Session, user: User, family: str) -> DevicePairing | None:
     Schranke: ohne ihn koennte man fremde Familien mit geratener Kennung
     treffen.
     """
+    _letzte_aktivitaet.pop(family, None)
     einladung = (
         db.query(DevicePairing)
         .filter(DevicePairing.user_id == user.id, DevicePairing.family == family)

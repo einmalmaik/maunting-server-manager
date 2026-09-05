@@ -122,6 +122,35 @@ class AuthService:
         return rt
 
     @staticmethod
+    def find_recently_used_refresh_token(
+        db: Session, plain_token: str, max_age_seconds: int = 30
+    ) -> RefreshToken | None:
+        """Findet ein vor kurzem rotiertes Token eines gekoppelten Geräts innerhalb der Grace Period.
+
+        Schuetzt mobile Apps und Desktop-Clients vor Verbindungsabbruechen
+        waehrend der Token-Rotation, ohne die Wiederverwendungserkennung fuer
+        tatsaechlich gestohlene Tokens aufzugeben (RFC 6749 BCP).
+        """
+        token_hash = AuthService._hash_token(plain_token)
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=max_age_seconds)
+        return (
+            db.query(RefreshToken)
+            .filter(
+                RefreshToken.token_hash == token_hash,
+                RefreshToken.revoked_at.is_(None),
+                RefreshToken.used_at >= cutoff,
+                RefreshToken.geraet.isnot(None),
+            )
+            .first()
+        )
+
+    @staticmethod
+    def find_any_refresh_token(db: Session, plain_token: str) -> RefreshToken | None:
+        """Findet ein Refresh-Token unabhängig vom Status (für Replay-Erkennung und Logout-Fallback)."""
+        token_hash = AuthService._hash_token(plain_token)
+        return db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
+
+    @staticmethod
     def mark_refresh_token_used(db: Session, rt: RefreshToken) -> None:
         """Markiert ein Refresh-Token als verwendet (bei Rotation)."""
         rt.used_at = datetime.now(timezone.utc)

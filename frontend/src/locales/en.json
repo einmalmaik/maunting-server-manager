@@ -436,7 +436,7 @@
       "devicesTitle": "Pair devices",
       "devicesDescription": "The desktop app does not sign in with a password but with a code you create here. It is valid for ten minutes and exactly once. A paired device joins the same conversation as the panel, and the AI can additionally work on your computer there.",
       "devicesApiAddress": "Enter this address in the app",
-      "devicesApiAddressHint": "The address of the API, not of the web interface. Enter the web interface and it answers with a web page instead of data.",
+      "devicesApiAddressHint": "The https:// prefix is added automatically in the app. Entering the domain is sufficient (e.g. panel.example.com).",
       "devicesNameLabel": "Device name",
       "devicesNamePlaceholder": "Work computer",
       "devicesPair": "Create code",
@@ -447,7 +447,14 @@
       "deviceRevoked": "Access revoked.",
       "devicePairSuccess": "Device successfully paired!",
       "devicePairExpired": "Pairing code has expired.",
-      "devicesUnnamed": "Unnamed device"
+      "devicesUnnamed": "Unnamed device",
+      "deviceActive": "Online",
+      "deviceInactive": "Offline",
+      "deviceActiveNow": "Active just now",
+      "deviceMinutesAgo": "{{count}}m ago",
+      "deviceHoursAgo": "{{count}}h ago",
+      "deviceLastActive": "Last activity",
+      "devicePairedAt": "Paired on"
     },
     "memory": {
       "enabled": "Use memory in AI context",
@@ -3035,8 +3042,7 @@
       "backup": "Backup",
       "security": "Security",
       "ai": "AI",
-      "hoster": "Hoster",
-      "vault": "Password Manager"
+      "hoster": "Hoster"
     },
     "imprint": {
       "title": "Imprint",
@@ -5469,6 +5475,11 @@
   "mss": {
     "app": {
       "startet": "Starting …",
+      "sucheNachUpdates": "Checking for updates …",
+      "updateGefunden": "Update v{{version}} found. Installing …",
+      "updateBereitNeustart": "Update v{{version}} installed. Restarting …",
+      "updateAndroidGestartet": "Downloading update v{{version}} …",
+      "updateDownloadProzent": "Download: {{prozent}}%",
       "angemeldetAls": "Signed in as {{name}}",
       "bereiche": "View",
       "chat": "Chat",
@@ -5549,6 +5560,8 @@
       "antwortIstWebseite": "This address serves the panel's interface, not its data. We need the address where the API answers — with split hosting that is the backend, locally usually http://localhost:8000.",
       "prueft": "Checking …",
       "verbinden": "Connect",
+      "verbundenesPanel": "Panel Server",
+      "adresseAendern": "Change",
       "kopplungErklaerung": "Sign in to your panel in the browser and open Profile → Pair device. The code or QR code there is valid for ten minutes and exactly once.",
       "codeLabel": "Pairing code",
       "codeHinweis": "Case does not matter, and you can leave out the dashes.",

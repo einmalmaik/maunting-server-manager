@@ -12,6 +12,7 @@ import { invoke } from '@tauri-apps/api/core'
 
 import { api } from '@/api/client'
 import { useAuthStore } from '@/stores/authStore'
+import { konfigLaden, konfigSpeichern } from './tauri'
 import { setzeAccessToken, sitzungVerwerfen } from './transport'
 
 interface TokenAntwort {
@@ -52,6 +53,10 @@ export async function koppeln(code: string, bezeichnung: string): Promise<void> 
   })
   setzeAccessToken(antwort.access_token)
   await invoke('refresh_token_speichern', { token: antwort.refresh_token })
+  try {
+    const k = await konfigLaden()
+    await konfigSpeichern({ ...k, eingerichtet: true })
+  } catch {}
   await useAuthStore.getState().checkAuth()
 }
 

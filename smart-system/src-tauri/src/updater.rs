@@ -9,6 +9,9 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
+#[cfg(target_os = "android")]
+use tauri::Manager;
+
 #[cfg(not(target_os = "android"))]
 use tauri_plugin_updater::UpdaterExt;
 
@@ -142,10 +145,89 @@ pub async fn update_installieren(app: AppHandle) -> Result<(), String> {
         let current_version = app.package_info().version.to_string();
         let info = pruefe_android_update(&app, &current_version).await?;
         if let Some(url) = info.download_url {
+            let app_handle = app.clone();
+            let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+            std::fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
+            let apk_pfad = cache_dir.join("MauntingSmartSystem.apk");
+            let version_pfad = cache_dir.join("MauntingSmartSystem.apk.version");
+            let ziel_version = info.neue_version.clone().unwrap_or_default();
+
+            let bereits_im_cache = if apk_pfad.exists() && !ziel_version.is_empty() {
+                std::fs::read_to_string(&version_pfad)
+                    .map(|v| v.trim() == ziel_version)
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+
+            if bereits_im_cache {
+                println!("[MSS Android Updater] APK v{ziel_version} bereits im Cache. Starte Installation …");
+                let _ = app_handle.emit("mss:update-status", serde_json::json!({
+                    "status": "bereit",
+                    "prozent": 100
+                }));
+                let pfad_str = apk_pfad.to_string_lossy().to_string();
+                app.opener().open_path(&pfad_str, None::<&str>)
+                    .map_err(|e| format!("APK-Installation konnte nicht gestartet werden: {e}"))?;
+                let _ = app_handle.emit("mss:update-status", serde_json::json!({
+                    "status": "installiert_android"
+                }));
+                return Ok(());
+            }
+
             let _ = app.emit("mss:update-status", serde_json::json!({
+                "status": "laedt",
+                "prozent": 0
+            }));
+
+            let client = reqwest::Client::builder()
+                .user_agent("MauntingSmartSystem-Android")
+                .build()
+                .map_err(|e| e.to_string())?;
+
+            let mut resp = client.get(&url).send().await.map_err(|e| format!("Download fehlgeschlagen: {e}"))?;
+            if !resp.status().is_success() {
+                return Err(format!("Download-Server antwortete mit Status: {}", resp.status()));
+            }
+
+            let gesamt_len = resp.content_length();
+            let mut heruntergeladen: u64 = 0;
+            let tmp_apk = cache_dir.join("MauntingSmartSystem.apk.tmp");
+            let mut file = std::fs::File::create(&tmp_apk)
+                .map_err(|e| format!("Konnte temporäre APK nicht anlegen: {e}"))?;
+
+            use std::io::Write;
+            while let Ok(Some(chunk)) = resp.chunk().await {
+                file.write_all(&chunk)
+                    .map_err(|e| format!("Fehler beim Schreiben der APK: {e}"))?;
+                heruntergeladen += chunk.len() as u64;
+                if let Some(gesamt) = gesamt_len {
+                    if gesamt > 0 {
+                        let prozent = (heruntergeladen as f64 / gesamt as f64 * 100.0) as u32;
+                        let _ = app_handle.emit("mss:update-status", serde_json::json!({
+                            "status": "laedt",
+                            "prozent": prozent
+                        }));
+                    }
+                }
+            }
+            drop(file);
+
+            std::fs::rename(&tmp_apk, &apk_pfad)
+                .map_err(|e| format!("Konnte APK nicht finalisieren: {e}"))?;
+            let _ = std::fs::write(&version_pfad, &ziel_version);
+
+            let _ = app_handle.emit("mss:update-status", serde_json::json!({
+                "status": "bereit",
+                "prozent": 100
+            }));
+
+            let pfad_str = apk_pfad.to_string_lossy().to_string();
+            app.opener().open_path(&pfad_str, None::<&str>)
+                .map_err(|e| format!("APK-Installation konnte nicht gestartet werden: {e}"))?;
+            let _ = app_handle.emit("mss:update-status", serde_json::json!({
                 "status": "installiert_android"
             }));
-            app.opener().open_url(&url, None::<&str>).map_err(|e| format!("APK konnte nicht geöffnet werden: {e}"))?;
             Ok(())
         } else {
             Err("Keine APK-Download-URL gefunden".to_string())
@@ -170,54 +252,55 @@ async fn pruefe_android_update(_app: &AppHandle, current_version: &str) -> Resul
     let mut download_url = "https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingSmartSystem.apk".to_string();
     let mut notizen: Option<String> = None;
 
-    // 1. Primär: GitHub Releases API
+    // 1. Primär: latest.json (Release Asset, direkt erreichbar, kein GitHub API Rate-Limit)
     if let Ok(resp) = client
-        .get("https://api.github.com/repos/einmalmaik/maunting-server-manager/releases/latest")
-        .header("Accept", "application/vnd.github+json")
+        .get("https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/latest.json")
         .send()
         .await
     {
         if resp.status().is_success() {
             if let Ok(text) = resp.text().await {
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
-                    if let Some(tag) = parsed.get("tag_name").and_then(|v| v.as_str()) {
-                        latest_version = Some(tag.trim_start_matches('v').to_string());
+                    if let Some(v) = parsed.get("version").and_then(|v| v.as_str()) {
+                        latest_version = Some(v.trim_start_matches('v').to_string());
                     }
-                    if let Some(body) = parsed.get("body").and_then(|b| b.as_str()) {
-                        notizen = Some(body.to_string());
-                    }
-                    if let Some(assets) = parsed.get("assets").and_then(|a| a.as_array()) {
-                        for asset in assets {
-                            if let Some(name) = asset.get("name").and_then(|n| n.as_str()) {
-                                if name == "MauntingSmartSystem.apk" {
-                                    if let Some(url) = asset.get("browser_download_url").and_then(|u| u.as_str()) {
-                                        download_url = url.to_string();
-                                    }
-                                    break;
-                                }
-                            }
-                        }
+                    if let Some(notes) = parsed.get("notes").and_then(|n| n.as_str()) {
+                        notizen = Some(notes.to_string());
                     }
                 }
             }
         }
     }
 
-    // 2. Fallback: latest.json
+    // 2. Sekundär: GitHub Releases API
     if latest_version.is_none() {
         if let Ok(resp) = client
-            .get("https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/latest.json")
+            .get("https://api.github.com/repos/einmalmaik/maunting-server-manager/releases/latest")
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "MauntingServerManager")
             .send()
             .await
         {
             if resp.status().is_success() {
                 if let Ok(text) = resp.text().await {
                     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if let Some(v) = parsed.get("version").and_then(|v| v.as_str()) {
-                            latest_version = Some(v.trim_start_matches('v').to_string());
+                        if let Some(tag) = parsed.get("tag_name").and_then(|v| v.as_str()) {
+                            latest_version = Some(tag.trim_start_matches('v').to_string());
                         }
-                        if let Some(notes) = parsed.get("notes").and_then(|n| n.as_str()) {
-                            notizen = Some(notes.to_string());
+                        if let Some(body) = parsed.get("body").and_then(|b| b.as_str()) {
+                            notizen = Some(body.to_string());
+                        }
+                        if let Some(assets) = parsed.get("assets").and_then(|a| a.as_array()) {
+                            for asset in assets {
+                                if let Some(name) = asset.get("name").and_then(|n| n.as_str()) {
+                                    if name == "MauntingSmartSystem.apk" {
+                                        if let Some(url) = asset.get("browser_download_url").and_then(|u| u.as_str()) {
+                                            download_url = url.to_string();
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -243,85 +326,101 @@ async fn pruefe_android_update(_app: &AppHandle, current_version: &str) -> Resul
 #[allow(unused_variables)]
 pub fn pruefe_und_installiere_update_hintergrund(app_handle: AppHandle) {
     std::thread::spawn(move || {
-        // 4 Sekunden Pause nach dem Start, damit die Oberfläche sofort
-        // reagiert und der Render-Thread nicht behindert wird.
-        std::thread::sleep(std::time::Duration::from_secs(4));
+        // Erst nach 60 Sekunden Laufzeit im Hintergrund prüfen, damit der
+        // Kaltstart beim Öffnen vollkommen ungestört bleibt und die UI flüssig läuft.
+        std::thread::sleep(std::time::Duration::from_secs(60));
 
-        tauri::async_runtime::block_on(async move {
-            #[cfg(not(target_os = "android"))]
-            {
-                let updater = match app_handle.updater() {
-                    Ok(u) => u,
-                    Err(e) => {
-                        eprintln!("[MSS Updater] Plugin nicht verfügbar: {e}");
-                        return;
-                    }
-                };
+        loop {
+            let handle = app_handle.clone();
+            tauri::async_runtime::block_on(async move {
+                #[cfg(not(target_os = "android"))]
+                {
+                    let updater = match handle.updater() {
+                        Ok(u) => u,
+                        Err(e) => {
+                            eprintln!("[MSS Updater] Plugin nicht verfügbar: {e}");
+                            return;
+                        }
+                    };
 
-                match updater.check().await {
-                    Ok(Some(update)) => {
-                        let ziel_version = update.version.trim_start_matches('v').to_string();
-                        println!("[MSS Updater] Hintergrund: Neues Release gefunden: v{ziel_version}. Starte Download...");
+                    match updater.check().await {
+                        Ok(Some(update)) => {
+                            let ziel_version = update.version.trim_start_matches('v').to_string();
+                            println!("[MSS Updater] Hintergrund: Neues Release gefunden: v{ziel_version}. Lade im Hintergrund herunter …");
 
-                        let _ = app_handle.emit("mss:update-verfuegbar", serde_json::json!({
-                            "version": ziel_version,
-                            "notizen": update.body.clone()
-                        }));
-
-                        let ergebnis = update
-                            .download_and_install(
-                                |_, _| {},
-                                || {
-                                    println!("[MSS Updater] Download abgeschlossen. Vorbereitet für Neustart...");
-                                },
-                            )
-                            .await;
-
-                        match ergebnis {
-                            Ok(()) => {
-                                println!("[MSS Updater] Update v{ziel_version} erfolgreich installiert. Bereit für Neustart.");
-                                let _ = app_handle.emit("mss:update-bereit", serde_json::json!({
-                                    "version": ziel_version
-                                }));
-                            }
-                            Err(e) => {
-                                eprintln!("[MSS Updater] Fehler bei Hintergrund-Download: {e}");
+                            // Im laufenden Betrieb still herunterladen und bereitstellen,
+                            // OHNE unvorhergesehene Unterbrechung oder Neustart während der Arbeit.
+                            match update.download_and_install(|_, _| {}, || {}).await {
+                                Ok(()) => {
+                                    println!("[MSS Updater] Hintergrund: Update v{ziel_version} erfolgreich geladen und bereitgestellt.");
+                                    let _ = handle.emit("mss:update-bereit", serde_json::json!({
+                                        "version": ziel_version,
+                                        "notizen": update.body.clone()
+                                    }));
+                                }
+                                Err(e) => {
+                                    eprintln!("[MSS Updater] Fehler beim stillen Hintergrund-Download: {e}");
+                                }
                             }
                         }
-                    }
-                    Ok(None) => {
-                        println!("[MSS Updater] MSS ist auf dem aktuellen Stand.");
-                    }
-                    Err(e) => {
-                        eprintln!("[MSS Updater] Fehler bei der Hintergrund-Update-Prüfung: {e}");
-                    }
-                }
-            }
-
-            #[cfg(target_os = "android")]
-            {
-                let current_version = app_handle.package_info().version.to_string();
-                if let Ok(info) = pruefe_android_update(&app_handle, &current_version).await {
-                    if info.verfuegbar {
-                        let ziel_version = info.neue_version.unwrap_or_default();
-                        println!("[MSS Android Updater] Neues Release gefunden: v{ziel_version}");
-
-                        let _ = app_handle.notification().builder()
-                            .title("MSS Update verfügbar")
-                            .body(format!("Version v{ziel_version} ist verfügbar. Tippe zum Aktualisieren."))
-                            .show();
-
-                        let _ = app_handle.emit("mss:update-verfuegbar", serde_json::json!({
-                            "version": ziel_version,
-                            "apk_url": info.download_url,
-                            "notizen": info.notizen
-                        }));
-                    } else {
-                        println!("[MSS Android Updater] MSS APK ist auf dem aktuellen Stand (v{current_version}).");
+                        Ok(None) => {
+                            println!("[MSS Updater] MSS ist auf dem aktuellen Stand.");
+                        }
+                        Err(e) => {
+                            eprintln!("[MSS Updater] Fehler bei der Hintergrund-Update-Prüfung: {e}");
+                        }
                     }
                 }
-            }
-        });
+
+                #[cfg(target_os = "android")]
+                {
+                    let current_version = handle.package_info().version.to_string();
+                    if let Ok(info) = pruefe_android_update(&handle, &current_version).await {
+                        if info.verfuegbar {
+                            let ziel_version = info.neue_version.clone().unwrap_or_default();
+                            println!("[MSS Android Updater] Neues Release gefunden: v{ziel_version}. Lade APK im Hintergrund …");
+
+                            if let Some(download_url) = info.download_url {
+                                if let Ok(client) = reqwest::Client::builder()
+                                    .user_agent("MauntingSmartSystem-Android")
+                                    .build()
+                                {
+                                    if let Ok(resp) = client.get(&download_url).send().await {
+                                        if resp.status().is_success() {
+                                            if let Ok(bytes) = resp.bytes().await {
+                                                if let Ok(cache_dir) = handle.path().app_cache_dir() {
+                                                    let _ = std::fs::create_dir_all(&cache_dir);
+                                                    let apk_pfad = cache_dir.join("MauntingSmartSystem.apk");
+                                                    let _ = std::fs::write(&apk_pfad, &bytes);
+                                                    let _ = std::fs::write(cache_dir.join("MauntingSmartSystem.apk.version"), &ziel_version);
+                                                    println!("[MSS Android Updater] APK v{ziel_version} im Hintergrund heruntergeladen.");
+
+                                                    let _ = handle.notification().builder()
+                                                        .title("MSS Update bereit")
+                                                        .body(format!("Version v{ziel_version} ist bereit. Tippe zum Installieren."))
+                                                        .show();
+
+                                                    let _ = handle.emit("mss:update-bereit", serde_json::json!({
+                                                        "version": ziel_version,
+                                                        "apk_pfad": apk_pfad.to_string_lossy().to_string(),
+                                                        "notizen": info.notizen
+                                                    }));
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            println!("[MSS Android Updater] MSS APK ist auf dem aktuellen Stand (v{current_version}).");
+                        }
+                    }
+                }
+            });
+
+            // Alle 2 Stunden erneut im Hintergrund prüfen
+            std::thread::sleep(std::time::Duration::from_secs(2 * 3600));
+        }
     });
 }
 

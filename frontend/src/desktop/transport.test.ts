@@ -121,4 +121,44 @@ describe('native Sitzung', () => {
     // WICHTIG: Das Tresor-Token darf bei Offline-Fehlern NICHT gelöscht werden!
     expect(invokeMock).not.toHaveBeenCalledWith('refresh_token_loeschen')
   })
+
+  it('parallele stillAnmeldenDetail Aufrufe teilen sich denselben Refresh-Request (Single Flight)', async () => {
+    invokeMock.mockImplementation((befehl: string) => {
+      if (befehl === 'refresh_token_laden') return Promise.resolve('mein-token')
+      return Promise.resolve(null)
+    })
+    let fetchCount = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((eingabe: RequestInfo | URL) => {
+        const url = String(eingabe)
+        if (url.endsWith('/auth/refresh')) {
+          fetchCount++
+          return new Promise((resolve) =>
+            setTimeout(
+              () =>
+                resolve(
+                  antwort(200, { access_token: 'neu', refresh_token: 'neu-ref' }),
+                ),
+              50,
+            ),
+          )
+        }
+        return Promise.resolve(antwort(200, {}))
+      }),
+    )
+
+    const { stillAnmeldenDetail } = await import('./transport')
+    const [res1, res2, res3] = await Promise.all([
+      stillAnmeldenDetail(1000),
+      stillAnmeldenDetail(1000),
+      stillAnmeldenDetail(1000),
+    ])
+
+    expect(res1.status).toBe('erfolg')
+    expect(res2.status).toBe('erfolg')
+    expect(res3.status).toBe('erfolg')
+    // Nur ein einziger HTTP-Refresh-Request darf ausgelöst werden!
+    expect(fetchCount).toBe(1)
+  })
 })

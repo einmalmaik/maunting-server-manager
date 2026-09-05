@@ -12,6 +12,8 @@ interface Geraet {
   family: string
   label: string
   paired_at: string | null
+  is_active?: boolean
+  last_active_at?: string | null
 }
 
 /**
@@ -104,6 +106,14 @@ export function AiDevicePairingCard() {
     }
   }
 
+  const hostOnly = (() => {
+    try {
+      return API_ORIGIN.replace(/^https:\/\//i, '').replace(/\/+$/, '')
+    } catch {
+      return API_ORIGIN
+    }
+  })()
+
   return (
     <section className="msm-card space-y-4 p-6" aria-labelledby="ai-devices-title">
       <div className="flex items-center gap-2">
@@ -129,13 +139,13 @@ export function AiDevicePairingCard() {
           <input
             id="mss-api-adresse"
             className="msm-input flex-1 cursor-not-allowed opacity-70"
-            value={API_ORIGIN}
+            value={hostOnly}
             readOnly
           />
           <Button
             variant="secondary"
             onClick={() => {
-              void navigator.clipboard?.writeText(API_ORIGIN)
+              void navigator.clipboard?.writeText(hostOnly)
               toast.success(t('hoster.copied'))
             }}
           >
@@ -181,18 +191,53 @@ export function AiDevicePairingCard() {
       {geraete.length > 0 && (
         <ul className="divide-y divide-outline-variant/30 border-t border-outline-variant/30 pt-2">
           {geraete.map((geraet) => (
-            <li key={geraet.family} className="flex items-center justify-between gap-4 py-3">
-              <span className="min-w-0">
-                <span className="block truncate text-sm text-on-surface">
-                  {geraet.label || t('ai.profile.devicesUnnamed', 'Unbenanntes Gerät')}
-                </span>
-                {geraet.paired_at && (
-                  <span className="block text-xs text-on-surface-variant">
-                    {new Date(geraet.paired_at).toLocaleString()}
+            <li key={geraet.family} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 py-3">
+              <div className="min-w-0 flex-1 space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="truncate text-sm font-medium text-on-surface">
+                    {geraet.label || t('ai.profile.devicesUnnamed', 'Unbenanntes Gerät')}
                   </span>
-                )}
-              </span>
-              <Button variant="secondary" onClick={() => void entziehen(geraet)}>
+                  {geraet.is_active !== false ? (
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-500 border border-emerald-500/20">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      {t('ai.profile.deviceActive', 'Online')}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-container-high px-2 py-0.5 text-xs font-medium text-on-surface-variant border border-outline-variant/30">
+                      <span className="h-1.5 w-1.5 rounded-full bg-on-surface-variant/50" />
+                      {t('ai.profile.deviceInactive', 'Offline')}
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-on-surface-variant">
+                  {geraet.last_active_at && (
+                    <span>
+                      {t('ai.profile.deviceLastActive', 'Letzte Aktivität')}:{' '}
+                      {(() => {
+                        const datum = new Date(geraet.last_active_at)
+                        const diffSekunden = Math.floor((Date.now() - datum.getTime()) / 1000)
+                        if (diffSekunden < 60) return t('ai.profile.deviceActiveNow', 'Gerade aktiv')
+                        const diffMin = Math.floor(diffSekunden / 60)
+                        if (diffMin < 60) return t('ai.profile.deviceMinutesAgo', { count: diffMin, defaultValue: `vor ${diffMin} Min.` })
+                        const diffStd = Math.floor(diffMin / 60)
+                        if (diffStd < 24) return t('ai.profile.deviceHoursAgo', { count: diffStd, defaultValue: `vor ${diffStd} Std.` })
+                        return datum.toLocaleString()
+                      })()}
+                    </span>
+                  )}
+                  {geraet.paired_at && (
+                    <span>
+                      {t('ai.profile.devicePairedAt', 'Gekoppelt am')}:{' '}
+                      {new Date(geraet.paired_at).toLocaleDateString()}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <Button
+                variant="secondary"
+                onClick={() => void entziehen(geraet)}
+                className="self-start sm:self-auto text-error hover:text-error hover:bg-error/10"
+              >
                 <Trash2 className="h-4 w-4" aria-hidden="true" />
                 {t('ai.profile.devicesRevoke', 'Zugang entziehen')}
               </Button>

@@ -436,7 +436,7 @@
       "devicesTitle": "Geräte koppeln",
       "devicesDescription": "Die Desktop-App meldet sich nicht mit Passwort an, sondern mit einem Code, den du hier erzeugst. Er gilt zehn Minuten und genau einmal. Ein gekoppeltes Gerät führt dieselbe Unterhaltung wie das Panel, und die KI kann dort zusätzlich auf deinem Rechner arbeiten.",
       "devicesApiAddress": "Diese Adresse in der App eintragen",
-      "devicesApiAddressHint": "Die Adresse der API, nicht die der Oberfläche. Trägst du die Adresse der Weboberfläche ein, antwortet sie mit einer Webseite statt mit Daten.",
+      "devicesApiAddressHint": "Das führende https:// wird in der App automatisch ergänzt. Es genügt, die Domain anzugeben (z. B. panel.example.com).",
       "devicesNameLabel": "Name des Geräts",
       "devicesNamePlaceholder": "Arbeitsrechner",
       "devicesPair": "Code erzeugen",
@@ -447,7 +447,14 @@
       "deviceRevoked": "Zugang entzogen.",
       "devicePairSuccess": "Gerät erfolgreich gekoppelt!",
       "devicePairExpired": "Kopplungscode abgelaufen.",
-      "devicesUnnamed": "Unbenanntes Gerät"
+      "devicesUnnamed": "Unbenanntes Gerät",
+      "deviceActive": "Online",
+      "deviceInactive": "Offline",
+      "deviceActiveNow": "Gerade aktiv",
+      "deviceMinutesAgo": "vor {{count}} Min.",
+      "deviceHoursAgo": "vor {{count}} Std.",
+      "deviceLastActive": "Letzte Aktivität",
+      "devicePairedAt": "Gekoppelt am"
     },
     "memory": {
       "enabled": "Memory im KI-Kontext verwenden",
@@ -3035,8 +3042,7 @@
       "security": "Sicherheit",
       "ai": "KI",
       "popup": "Pop-up",
-      "hoster": "Hoster",
-      "vault": "Passwort-Manager"
+      "hoster": "Hoster"
     },
     "imprint": {
       "title": "Impressum",
@@ -5469,6 +5475,11 @@
   "mss": {
     "app": {
       "startet": "Startet …",
+      "sucheNachUpdates": "Suche nach Updates …",
+      "updateGefunden": "Update v{{version}} gefunden. Wird installiert …",
+      "updateBereitNeustart": "Update v{{version}} installiert. Neustart …",
+      "updateAndroidGestartet": "Update v{{version}} wird heruntergeladen …",
+      "updateDownloadProzent": "Download: {{prozent}}%",
       "angemeldetAls": "Angemeldet als {{name}}",
       "bereiche": "Ansicht",
       "chat": "Chat",
@@ -5549,6 +5560,8 @@
       "antwortIstWebseite": "Diese Adresse liefert die Oberfläche des Panels, nicht seine Daten. Gesucht ist die Adresse, unter der die API antwortet — bei getrenntem Hosting die des Backends, lokal meist http://localhost:8000.",
       "prueft": "Prüfe …",
       "verbinden": "Verbinden",
+      "verbundenesPanel": "Panel-Server",
+      "adresseAendern": "Ändern",
       "kopplungErklaerung": "Melde dich im Browser bei deinem Panel an und öffne Profil → Gerät koppeln. Der Code bzw. QR-Code dort gilt zehn Minuten und genau einmal.",
       "codeLabel": "Kopplungscode",
       "codeHinweis": "Groß- und Kleinschreibung sind egal, die Striche kannst du weglassen.",

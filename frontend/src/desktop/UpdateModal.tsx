@@ -1,9 +1,8 @@
-﻿import { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { Download, RefreshCw, CheckCircle2, AlertCircle, X, Sparkles } from 'lucide-react'
 import { Button } from '@/Singra/UI'
 import {
-  updatePruefen,
   updateInstallieren,
   appNeuStarten,
   type UpdateInfo,
@@ -18,23 +17,6 @@ export function UpdateModal() {
   const [fehlerText, setFehlerText] = useState<string | null>(null)
 
   useEffect(() => {
-    // 1. Beim App-Start sofort prüfen
-    const timer = setTimeout(() => {
-      void (async () => {
-        try {
-          const res = await updatePruefen()
-          if (res.verfuegbar) {
-            setInfo(res)
-            setStatus('verfuegbar')
-            setSichtbar(true)
-          }
-        } catch {
-          // Im Offline-Modus oder bei Verbindungsfehler unaufdringlich schweigen
-        }
-      })()
-    }, 2000)
-
-    // 2. Event-Listener für Hintergrund-Prüfungen
     let unlistenVerfuegbar: (() => void) | undefined
     let unlistenBereit: (() => void) | undefined
     let unlistenStatus: (() => void) | undefined
@@ -43,13 +25,14 @@ export function UpdateModal() {
       unlistenVerfuegbar = await listen<{ version: string; apk_url?: string; notizen?: string }>(
         'mss:update-verfuegbar',
         (event) => {
+          const istAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
           setInfo((prev) => ({
             verfuegbar: true,
             aktuelle_version: prev?.aktuelle_version ?? '',
             neue_version: event.payload.version,
             download_url: event.payload.apk_url ?? null,
             notizen: event.payload.notizen ?? null,
-            ist_android: typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent),
+            ist_android: istAndroid,
           }))
           setStatus('verfuegbar')
           setSichtbar(true)
@@ -57,7 +40,14 @@ export function UpdateModal() {
       )
 
       unlistenBereit = await listen<{ version: string }>('mss:update-bereit', (event) => {
-        setInfo((prev) => prev ? { ...prev, neue_version: event.payload.version } : null)
+        setInfo((prev) => prev ? { ...prev, neue_version: event.payload.version } : {
+          verfuegbar: true,
+          aktuelle_version: '',
+          neue_version: event.payload.version,
+          download_url: null,
+          notizen: null,
+          ist_android: false,
+        })
         setStatus('bereit')
         setSichtbar(true)
       })
@@ -80,7 +70,6 @@ export function UpdateModal() {
     })()
 
     return () => {
-      clearTimeout(timer)
       if (unlistenVerfuegbar) unlistenVerfuegbar()
       if (unlistenBereit) unlistenBereit()
       if (unlistenStatus) unlistenStatus()

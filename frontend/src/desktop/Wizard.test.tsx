@@ -174,4 +174,28 @@ describe('Wizard: Adresse', () => {
     })
     expect(screen.queryByText(i18n.t('mss.wizard.adresseSchema'))).not.toBeInTheDocument()
   })
+
+  it('ergaenzt https:// automatisch, wenn nur die Domain eingegeben wird', async () => {
+    const holen = vi.fn(() => Promise.resolve(json(200, { setup_required: false })))
+    vi.stubGlobal('fetch', holen)
+
+    adresseEintragen('panel.example.com')
+
+    await waitFor(() => {
+      expect(holen).toHaveBeenCalledWith('https://panel.example.com/api/auth/setup-status')
+    })
+    expect(screen.queryByText(i18n.t('mss.wizard.adresseSchema'))).not.toBeInTheDocument()
+  })
+
+  it('faengt fuehrendes https:// beim Einfuegen ab und doppelt nicht', async () => {
+    const holen = vi.fn(() => Promise.resolve(json(200, { setup_required: false })))
+    vi.stubGlobal('fetch', holen)
+
+    adresseEintragen('https://panel.example.com')
+
+    await waitFor(() => {
+      expect(holen).toHaveBeenCalledWith('https://panel.example.com/api/auth/setup-status')
+    })
+    expect(screen.queryByText(i18n.t('mss.wizard.adresseSchema'))).not.toBeInTheDocument()
+  })
 })

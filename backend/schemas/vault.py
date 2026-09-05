@@ -42,13 +42,6 @@ class VaultSyncResponse(BaseModel):
     entries: List[VaultEntryOut]
 
 
-class VaultNodeAssignment(BaseModel):
-    node_id: str | None = Field(None, description="ID des dedizierten Nodes fuer den Passwort-Manager oder None fuer zentral")
-    assigned_node_name: str | None = None
-    is_multi_node_active: bool = False
-    migrated_entries: int = 0
-
-
 class VaultHintSetRequest(BaseModel):
     hint: str = Field(..., min_length=1, max_length=512, description="Passwort-Hinweis fuer das Master-Passwort")
 

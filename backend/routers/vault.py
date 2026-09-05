@@ -6,12 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from database import get_db
-from dependencies import get_current_user, require_global, verify_csrf
+from dependencies import get_current_user, verify_csrf
 from models.user import User
 from schemas.vault import (
     VaultHintSetRequest,
     VaultHintStatusResponse,
-    VaultNodeAssignment,
     VaultSaltResponse,
     VaultSaltSetRequest,
     VaultSyncRequest,
@@ -92,32 +91,6 @@ def set_vault_salt(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=str(exc),
         ) from exc
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from exc
-
-
-@router.get("/node-assignment", response_model=VaultNodeAssignment)
-def get_node_assignment(
-    db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
-) -> VaultNodeAssignment:
-    """Liefert die Multi-Node Zuweisung für den Passwort-Manager."""
-    return vault_service.get_vault_node_assignment(db)
-
-
-@router.put("/node-assignment", response_model=VaultNodeAssignment)
-def set_node_assignment(
-    payload: VaultNodeAssignment,
-    db: Session = Depends(get_db),
-    _: User = Depends(require_global("panel.settings.write")),
-    __=Depends(verify_csrf),
-) -> VaultNodeAssignment:
-    """Weist den Passwort-Manager einem dedizierten Node zu (RBAC harmonisiert: SEC-11, SEC-09)."""
-    try:
-        return vault_service.set_vault_node_assignment(db, payload.node_id)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

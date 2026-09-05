@@ -41,17 +41,23 @@ pub fn speichern(app: &AppHandle, token: &str) -> Result<(), String> {
         if let Ok(eintrag) = Entry::new(DIENST, KONTO) {
             if eintrag.set_password(token).is_ok() {
                 if let Ok(pfad) = dateipfad(app) {
-                    let _ = std::fs::remove_file(pfad);
+                    if pfad.exists() {
+                        let _ = std::fs::remove_file(pfad);
+                    }
                 }
                 return Ok(());
+            } else {
+                // Bei Keyring-Schreibfehler eventuellen Alt-Eintrag leeren, damit kein veraltetes Token gelesen wird
+                let _ = eintrag.delete_credential();
             }
         }
     }
 
-    // Android oder Fallback bei Systemen ohne Desktop-Keyring
+    // Android oder Fallback bei Systemen ohne Desktop-Keyring / bei Keyring-Fehlern
     let pfad = dateipfad(app)?;
     std::fs::write(&pfad, token.as_bytes())
         .map_err(|e| format!("Token konnte nicht gespeichert werden: {e}"))?;
+
     Ok(())
 }
 
@@ -63,7 +69,14 @@ pub fn laden(app: &AppHandle) -> Result<Option<String>, String> {
             match eintrag.get_password() {
                 Ok(token) => return Ok(Some(token)),
                 Err(keyring::Error::NoEntry) => {}
-                Err(_) => {} // Fallback auf privaten App-Speicher
+                Err(_) => {} // Fallback auf früheren Eintrag oder privaten App-Speicher
+            }
+        }
+        if let Ok(eintrag_frueher) = Entry::new(DIENST_FRUEHER, KONTO) {
+            match eintrag_frueher.get_password() {
+                Ok(token) => return Ok(Some(token)),
+                Err(keyring::Error::NoEntry) => {}
+                Err(_) => {}
             }
         }
     }

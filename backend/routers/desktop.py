@@ -42,7 +42,7 @@ from dependencies import (
 )
 from models import DesktopJob, User
 from schemas.desktop import DesktopJobResponse, DesktopJobResultRequest
-from services import ai_run_service, desktop_job_service
+from services import ai_run_service, desktop_job_service, device_pairing_service
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +135,8 @@ def naechster_auftrag(
     fragte.
     """
     _nur_aus_der_app(herkunft)
+    if familie:
+        device_pairing_service.aktivitaet_vermerken(familie)
     job = desktop_job_service.naechster(db, user_id=user.id, familie=familie)
     if job is None:
         response.status_code = 204
@@ -176,6 +178,8 @@ def ergebnis_melden(
 ) -> Response:
     """Nimmt das Ergebnis entgegen und weckt den wartenden Lauf."""
     _nur_aus_der_app(herkunft)
+    if familie:
+        device_pairing_service.aktivitaet_vermerken(familie)
     job = db.get(DesktopJob, job_id)
     if job is None or job.user_id != user.id:
         raise HTTPException(status_code=404, detail="ai.errors.codes.DESKTOP_JOB_NOT_FOUND")

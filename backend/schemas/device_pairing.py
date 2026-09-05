@@ -44,3 +44,5 @@ class PairedDevice(BaseModel):
     family: str
     label: str
     paired_at: datetime | None = None
+    is_active: bool = True
+    last_active_at: datetime | None = None
