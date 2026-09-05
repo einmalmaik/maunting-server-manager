@@ -21,6 +21,52 @@ use tauri_plugin_notification::NotificationExt;
 #[cfg(target_os = "android")]
 use tauri_plugin_opener::OpenerExt;
 
+#[cfg(target_os = "android")]
+pub struct AndroidInstallerState(pub tauri::plugin::PluginHandle<tauri::Wry>);
+
+#[cfg(target_os = "android")]
+pub fn init_android_installer<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri::plugin::Builder::new("apkinstaller")
+        .setup(|app, api| {
+            let handle = api.register_android_plugin("com.mauntingstudios.smart_system", "ApkInstallerPlugin")?;
+            app.manage(AndroidInstallerState(handle));
+            Ok(())
+        })
+        .build()
+}
+
+#[cfg(target_os = "android")]
+pub fn erstelle_android_client() -> Result<reqwest::Client, String> {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let mut root_store = rustls::RootCertStore::empty();
+    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let tls_config = rustls::ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+
+    reqwest::Client::builder()
+        .user_agent("MauntingSmartSystem-Android")
+        .timeout(std::time::Duration::from_secs(15))
+        .use_preconfigured_tls(tls_config)
+        .build()
+        .map_err(|e| format!("Konnte Android-HTTP-Client nicht erstellen: {e}"))
+}
+
+#[cfg(target_os = "android")]
+pub fn installiere_android_apk(app: &AppHandle, apk_pfad: &std::path::Path) -> Result<(), String> {
+    let pfad_str = apk_pfad.to_string_lossy().to_string();
+    if let Some(installer) = app.try_state::<AndroidInstallerState>() {
+        installer.0.run_mobile_plugin::<()>("installApk", serde_json::json!({
+            "apkPath": pfad_str
+        })).map_err(|e| format!("APK-Installation über Android-Installer fehlgeschlagen: {e}"))?;
+        Ok(())
+    } else {
+        app.opener().open_path(&pfad_str, None::<&str>)
+            .map_err(|e| format!("APK-Installation via Opener-Fallback fehlgeschlagen: {e}"))?;
+        Ok(())
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct UpdateInfo {
     pub verfuegbar: bool,
@@ -166,9 +212,7 @@ pub async fn update_installieren(app: AppHandle) -> Result<(), String> {
                     "status": "bereit",
                     "prozent": 100
                 }));
-                let pfad_str = apk_pfad.to_string_lossy().to_string();
-                app.opener().open_path(&pfad_str, None::<&str>)
-                    .map_err(|e| format!("APK-Installation konnte nicht gestartet werden: {e}"))?;
+                installiere_android_apk(&app_handle, &apk_pfad)?;
                 let _ = app_handle.emit("mss:update-status", serde_json::json!({
                     "status": "installiert_android"
                 }));
@@ -180,10 +224,7 @@ pub async fn update_installieren(app: AppHandle) -> Result<(), String> {
                 "prozent": 0
             }));
 
-            let client = reqwest::Client::builder()
-                .user_agent("MauntingSmartSystem-Android")
-                .build()
-                .map_err(|e| e.to_string())?;
+            let client = erstelle_android_client()?;
 
             let mut resp = client.get(&url).send().await.map_err(|e| format!("Download fehlgeschlagen: {e}"))?;
             if !resp.status().is_success() {
@@ -222,9 +263,7 @@ pub async fn update_installieren(app: AppHandle) -> Result<(), String> {
                 "prozent": 100
             }));
 
-            let pfad_str = apk_pfad.to_string_lossy().to_string();
-            app.opener().open_path(&pfad_str, None::<&str>)
-                .map_err(|e| format!("APK-Installation konnte nicht gestartet werden: {e}"))?;
+            installiere_android_apk(&app_handle, &apk_pfad)?;
             let _ = app_handle.emit("mss:update-status", serde_json::json!({
                 "status": "installiert_android"
             }));
@@ -242,11 +281,7 @@ pub fn app_neu_starten(app: AppHandle) {
 
 #[cfg(target_os = "android")]
 async fn pruefe_android_update(_app: &AppHandle, current_version: &str) -> Result<UpdateInfo, String> {
-    let client = reqwest::Client::builder()
-        .user_agent("MauntingSmartSystem-Android")
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = erstelle_android_client()?;
 
     let mut latest_version: Option<String> = None;
     let mut download_url = "https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingSmartSystem.apk".to_string();
@@ -381,30 +416,50 @@ pub fn pruefe_und_installiere_update_hintergrund(app_handle: AppHandle) {
                             println!("[MSS Android Updater] Neues Release gefunden: v{ziel_version}. Lade APK im Hintergrund …");
 
                             if let Some(download_url) = info.download_url {
-                                if let Ok(client) = reqwest::Client::builder()
-                                    .user_agent("MauntingSmartSystem-Android")
-                                    .build()
-                                {
-                                    if let Ok(resp) = client.get(&download_url).send().await {
-                                        if resp.status().is_success() {
-                                            if let Ok(bytes) = resp.bytes().await {
-                                                if let Ok(cache_dir) = handle.path().app_cache_dir() {
-                                                    let _ = std::fs::create_dir_all(&cache_dir);
-                                                    let apk_pfad = cache_dir.join("MauntingSmartSystem.apk");
-                                                    let _ = std::fs::write(&apk_pfad, &bytes);
-                                                    let _ = std::fs::write(cache_dir.join("MauntingSmartSystem.apk.version"), &ziel_version);
-                                                    println!("[MSS Android Updater] APK v{ziel_version} im Hintergrund heruntergeladen.");
+                                if let Ok(cache_dir) = handle.path().app_cache_dir() {
+                                    let _ = std::fs::create_dir_all(&cache_dir);
+                                    let apk_pfad = cache_dir.join("MauntingSmartSystem.apk");
+                                    let version_pfad = cache_dir.join("MauntingSmartSystem.apk.version");
 
-                                                    let _ = handle.notification().builder()
-                                                        .title("MSS Update bereit")
-                                                        .body(format!("Version v{ziel_version} ist bereit. Tippe zum Installieren."))
-                                                        .show();
+                                    let bereits_im_cache = if apk_pfad.exists() && !ziel_version.is_empty() {
+                                        std::fs::read_to_string(&version_pfad)
+                                            .map(|v| v.trim() == ziel_version)
+                                            .unwrap_or(false)
+                                    } else {
+                                        false
+                                    };
 
-                                                    let _ = handle.emit("mss:update-bereit", serde_json::json!({
-                                                        "version": ziel_version,
-                                                        "apk_pfad": apk_pfad.to_string_lossy().to_string(),
-                                                        "notizen": info.notizen
-                                                    }));
+                                    if bereits_im_cache {
+                                        println!("[MSS Android Updater] APK v{ziel_version} bereits im Cache. Starte automatische Installation …");
+                                        if let Err(err) = installiere_android_apk(&handle, &apk_pfad) {
+                                            eprintln!("[MSS Android Updater] Automatische Installation: {err}");
+                                        }
+                                    } else if let Ok(client) = erstelle_android_client() {
+                                        if let Ok(resp) = client.get(&download_url).send().await {
+                                            if resp.status().is_success() {
+                                                if let Ok(bytes) = resp.bytes().await {
+                                                    let tmp_apk = cache_dir.join("MauntingSmartSystem.apk.tmp");
+                                                    if std::fs::write(&tmp_apk, &bytes).is_ok() {
+                                                        let _ = std::fs::rename(&tmp_apk, &apk_pfad);
+                                                        let _ = std::fs::write(&version_pfad, &ziel_version);
+                                                        println!("[MSS Android Updater] APK v{ziel_version} im Hintergrund heruntergeladen. Starte automatische Installation …");
+
+                                                        // Vollautomatisches Hintergrund-Update ohne Klick anstossen:
+                                                        if let Err(err) = installiere_android_apk(&handle, &apk_pfad) {
+                                                            eprintln!("[MSS Android Updater] Automatische Installation: {err}");
+                                                        }
+
+                                                        let _ = handle.notification().builder()
+                                                            .title("MSS Update")
+                                                            .body(format!("Version v{ziel_version} wird automatisch im Hintergrund aktualisiert."))
+                                                            .show();
+
+                                                        let _ = handle.emit("mss:update-bereit", serde_json::json!({
+                                                            "version": ziel_version,
+                                                            "apk_pfad": apk_pfad.to_string_lossy().to_string(),
+                                                            "notizen": info.notizen
+                                                        }));
+                                                    }
                                                 }
                                             }
                                         }
@@ -437,5 +492,20 @@ mod tests {
         assert!(!ist_neuer("0.1.9", "0.1.9"));
         assert!(!ist_neuer("0.1.8", "0.1.9"));
         assert!(!ist_neuer("0.1.0", "1.0.0"));
+    }
+
+    #[test]
+    fn webpki_roots_laesst_sich_in_root_store_laden_und_reqwest_nutzen() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let mut root_store = rustls::RootCertStore::empty();
+        root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        assert!(!root_store.is_empty());
+        let tls_config = rustls::ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
+        let client = reqwest::Client::builder()
+            .use_preconfigured_tls(tls_config)
+            .build();
+        assert!(client.is_ok());
     }
 }

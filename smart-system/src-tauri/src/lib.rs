@@ -736,7 +736,9 @@ pub fn run() {
 
     #[cfg(target_os = "android")]
     {
-        builder = builder.plugin(tauri_plugin_biometric::init());
+        builder = builder
+            .plugin(tauri_plugin_biometric::init())
+            .plugin(updater::init_android_installer());
     }
 
     builder

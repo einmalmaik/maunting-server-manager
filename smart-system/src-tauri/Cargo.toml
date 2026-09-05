@@ -1,6 +1,6 @@
 [package]
 name = "maunting-smart-system"
-version = "4.3.0"
+version = "4.3.1"
 description = "MSS - Maunting Smart System, Desktop Companion fuer das MSM-Panel"
 edition = "2021"
 # Die Zahl muss stimmen, sonst ist sie schaedlich: hier stand 1.77, und ein
@@ -51,6 +51,8 @@ tauri-plugin-dialog = "2"
 sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "blocking"] }
+webpki-roots = "1"
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs"] }
 
 # Lokales Wake-Word (Phase 3): rustpotter erkennt ein aus eigenen Aufnahmen
 # gebautes Referenz-Wakeword komplett offline (Apache-2.0, kein Netzwerk).

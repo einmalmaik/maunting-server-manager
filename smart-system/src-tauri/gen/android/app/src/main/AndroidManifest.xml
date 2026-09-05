@@ -12,6 +12,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
@@ -41,21 +42,32 @@
             </intent-filter>
         </activity>
 
-        <!-- Hintergrunddienst für Server- und Kalender-Benachrichtigungen -->
+        <!-- Hintergrunddienst für Server- und Kalender-Benachrichtigungen (in separatem Prozess isoliert) -->
         <service
             android:name=".MsmBackgroundAlertService"
             android:exported="false"
+            android:process=":alert_service"
             android:foregroundServiceType="dataSync" />
 
-        <!-- Autostart nach Geräteneustart -->
+        <!-- Autostart nach Geräteneustart oder App-Update -->
         <receiver
             android:name=".BootReceiver"
             android:enabled="true"
-            android:exported="true">
+            android:exported="true"
+            android:process=":alert_service">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Status-Receiver für geräuschlose Hintergrund-Installationen via PackageInstaller -->
+        <receiver
+            android:name=".InstallStatusReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.mauntingstudios.smart_system.INSTALL_STATUS" />
             </intent-filter>
         </receiver>
 

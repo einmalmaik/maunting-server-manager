@@ -3045,6 +3045,7 @@ dependencies = [
  "image",
  "keyring",
  "reqwest",
+ "rustls",
  "rustpotter",
  "serde",
  "serde_json",
@@ -3060,6 +3061,7 @@ dependencies = [
  "tauri-plugin-updater",
  "trash",
  "uuid",
+ "webpki-roots",
  "webview2-com",
  "windows 0.62.2",
  "windows-strings 0.4.2",
@@ -6575,6 +6577,15 @@ name = "webpki-root-certs"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f31141ce3fc3e300ae89b78c0dd67f9708061d1d2eda54b8209346fd6be9a92c"
+dependencies = [
+ "rustls-pki-types",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "1.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7dcd9d09a39985f5344844e66b0c530a33843579125f23e21e9f0f220850f22a"
 dependencies = [
  "rustls-pki-types",
 ]

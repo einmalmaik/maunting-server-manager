@@ -18,6 +18,16 @@ class MainActivity : TauriActivity() {
     MsmBackgroundAlertService.start(this)
   }
 
+  override fun onDestroy() {
+    super.onDestroy()
+    // Wenn die UI-Activity zerstört wird (z. B. Beenden oder Wegwischen aus Recents),
+    // beenden wir den UI-Prozess vollständig. Da der MsmBackgroundAlertService
+    // im separaten Prozess ":alert_service" läuft, bleibt der Hintergrund-Alarmdienst
+    // davon unberührt aktiv, während die native Tauri/Rust-Umgebung beim nächsten Start
+    // in einem sauberen, frischen Prozess ohne Deadlock startet.
+    android.os.Process.killProcess(android.os.Process.myPid())
+  }
+
   private fun createNotificationChannels() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
