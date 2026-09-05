@@ -408,6 +408,10 @@ pub fn cleanup_temp_dir(dir_path: String) -> Result<(), String> {
                     untrack_temp_dir(&dir_path);
                     return Ok(());
                 }
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                    untrack_temp_dir(&dir_path);
+                    return Ok(());
+                }
                 Err(e) => {
                     last_err = Some(e);
                     if attempt < 2 {
@@ -415,6 +419,10 @@ pub fn cleanup_temp_dir(dir_path: String) -> Result<(), String> {
                     }
                 }
             }
+        }
+        if !path.exists() {
+            untrack_temp_dir(&dir_path);
+            return Ok(());
         }
         return Err(format!("Löschen fehlgeschlagen: {}", last_err.unwrap()));
     }
@@ -806,8 +814,11 @@ mod tests {
     // Temp-file management tests (VAL-CROSS-004)
     // -----------------------------------------------------------------------
 
+    static TEST_TEMP_LOCK: Mutex<()> = Mutex::new(());
+
     #[test]
     fn test_create_temp_dir_creates_and_tracks() {
+        let _guard = TEST_TEMP_LOCK.lock().unwrap();
         let path = create_temp_dir().expect("create_temp_dir should succeed");
         assert!(Path::new(&path).exists(), "temp dir must exist on disk");
         assert!(Path::new(&path).is_dir());
@@ -822,6 +833,7 @@ mod tests {
 
     #[test]
     fn test_write_temp_file_writes_bytes() {
+        let _guard = TEST_TEMP_LOCK.lock().unwrap();
         let dir = create_temp_dir().expect("create_temp_dir should succeed");
         let data = vec![0x1fu8, 0x8b, 0x00, 0x01];
         let file_path =
@@ -839,6 +851,7 @@ mod tests {
 
     #[test]
     fn test_cleanup_temp_dir_deletes_directory() {
+        let _guard = TEST_TEMP_LOCK.lock().unwrap();
         let dir = create_temp_dir().expect("create_temp_dir should succeed");
         fs::write(Path::new(&dir).join("nested.txt"), b"data").unwrap();
         fs::create_dir_all(Path::new(&dir).join("sub")).unwrap();
@@ -854,6 +867,7 @@ mod tests {
 
     #[test]
     fn test_cleanup_temp_dir_missing_path_is_ok() {
+        let _guard = TEST_TEMP_LOCK.lock().unwrap();
         // Cleaning up a non-existent path should not error (idempotent).
         let result = cleanup_temp_dir("/nonexistent/path/abc123".into());
         assert!(result.is_ok());
@@ -861,6 +875,7 @@ mod tests {
 
     #[test]
     fn test_cleanup_all_temp_dirs_removes_everything() {
+        let _guard = TEST_TEMP_LOCK.lock().unwrap();
         let dir1 = create_temp_dir().unwrap();
         let dir2 = create_temp_dir().unwrap();
         fs::write(Path::new(&dir1).join("a.txt"), b"a").unwrap();
