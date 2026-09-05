@@ -1,6 +1,6 @@
 [package]
 name = "msm-backup-recovery"
-version = "0.1.0"
+version = "4.3.0"
 description = "MSM Backup Recovery - Standalone Tauri Desktop-App"
 edition = "2021"
 rust-version = "1.77"

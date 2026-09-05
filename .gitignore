@@ -19,6 +19,7 @@ postgres/
 /backups/
 /servers/
 /postgres/
+frontend/scripts/simple-icons-cache.json
 
 # Release notes live next to the GitHub release, not in the repo tree
 RELEASE_NOTES_*.md
