@@ -22,11 +22,11 @@ use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 
 #[cfg(target_os = "android")]
-pub struct AndroidInstallerState(pub tauri::plugin::PluginHandle<tauri::Wry>);
+pub struct AndroidInstallerState<R: tauri::Runtime>(pub tauri::plugin::PluginHandle<R>);
 
 #[cfg(target_os = "android")]
 pub fn init_android_installer<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
-    tauri::plugin::Builder::new("apkinstaller")
+    tauri::plugin::Builder::<R>::new("apkinstaller")
         .setup(|app, api| {
             let handle = api.register_android_plugin("com.mauntingstudios.smart_system", "ApkInstallerPlugin")?;
             app.manage(AndroidInstallerState(handle));
@@ -55,7 +55,7 @@ pub fn erstelle_android_client() -> Result<reqwest::Client, String> {
 #[cfg(target_os = "android")]
 pub fn installiere_android_apk(app: &AppHandle, apk_pfad: &std::path::Path) -> Result<(), String> {
     let pfad_str = apk_pfad.to_string_lossy().to_string();
-    if let Some(installer) = app.try_state::<AndroidInstallerState>() {
+    if let Some(installer) = app.try_state::<AndroidInstallerState<tauri::Wry>>() {
         installer.0.run_mobile_plugin::<()>("installApk", serde_json::json!({
             "apkPath": pfad_str
         })).map_err(|e| format!("APK-Installation über Android-Installer fehlgeschlagen: {e}"))?;

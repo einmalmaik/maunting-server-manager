@@ -322,9 +322,12 @@ db_module.Base.metadata.create_all(bind=db_module.engine)
 @pytest.fixture(scope="function", autouse=True)
 def clean_db():
     """Clean all tables and rate limit store before each test."""
+    from sqlalchemy import text as _text
     with db_module.engine.begin() as conn:
+        conn.execute(_text("PRAGMA foreign_keys=OFF"))
         for table in reversed(db_module.Base.metadata.sorted_tables):
             conn.execute(table.delete())
+        conn.execute(_text("PRAGMA foreign_keys=ON"))
     # Reset slowapi in-memory storage between tests
     from middleware.rate_limit import limiter
     limiter.reset()
