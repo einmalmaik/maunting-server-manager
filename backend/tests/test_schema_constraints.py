@@ -1572,11 +1572,17 @@ def test_vault_entries_node_id_migration(tmp_path: Path) -> None:
         cols_before = {c["name"] for c in inspector.get_columns("vault_entries")}
         assert "node_id" not in cols_before
 
-        # Upgrade auf head fuehrt 20260903_01 aus
+        # Upgrade auf Stand mit node_id (20260903_01)
+        command.upgrade(config, "20260903_01")
+        inspector = _frisch(engine)
+        cols_intermediate = {c["name"] for c in inspector.get_columns("vault_entries")}
+        assert "node_id" in cols_intermediate
+
+        # Upgrade auf head fuehrt 20260905_01 aus (node_id wird wieder gedroppt)
         command.upgrade(config, "head")
         inspector = _frisch(engine)
         cols_after = {c["name"] for c in inspector.get_columns("vault_entries")}
-        assert "node_id" in cols_after
+        assert "node_id" not in cols_after
 
         # Pruefe, dass schema_manager keine fehlenden Spalten mehr meldet
         status = initialize_or_upgrade_schema(engine)
