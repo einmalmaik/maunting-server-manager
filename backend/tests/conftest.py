@@ -322,12 +322,18 @@ db_module.Base.metadata.create_all(bind=db_module.engine)
 @pytest.fixture(scope="function", autouse=True)
 def clean_db():
     """Clean all tables and rate limit store before each test."""
-    from sqlalchemy import text as _text
-    with db_module.engine.begin() as conn:
-        conn.execute(_text("PRAGMA foreign_keys=OFF"))
+    # SQLite erfordert, dass PRAGMA foreign_keys ausserhalb einer Transaktion gesetzt wird.
+    # Ueber driver_connection direkt am raw DBAPI Connection Objekt ausfuehren.
+    raw_conn = db_module.engine.raw_connection()
+    try:
+        raw_dbapi = getattr(raw_conn, "driver_connection", getattr(raw_conn, "connection", raw_conn))
+        raw_dbapi.execute("PRAGMA foreign_keys=OFF")
         for table in reversed(db_module.Base.metadata.sorted_tables):
-            conn.execute(table.delete())
-        conn.execute(_text("PRAGMA foreign_keys=ON"))
+            raw_dbapi.execute(f"DELETE FROM {table.name}")
+        raw_dbapi.commit()
+        raw_dbapi.execute("PRAGMA foreign_keys=ON")
+    finally:
+        raw_conn.close()
     # Reset slowapi in-memory storage between tests
     from middleware.rate_limit import limiter
     limiter.reset()
