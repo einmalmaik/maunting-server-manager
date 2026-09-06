@@ -239,15 +239,12 @@ export function AccountTab() {
 
       {/* Zeitzonen-Einstellung */}
       <div className="msm-card p-6">
-        <div className="flex items-center gap-2 mb-2">
+        <div className="flex items-center gap-2 mb-6">
           <Clock className="h-5 w-5 text-secondary" aria-hidden="true" />
           <h2 className="font-headline text-lg font-semibold text-on-surface">
             {t('profile.timezoneTitle', 'Zeitzone')}
           </h2>
         </div>
-        <p className="font-body-md text-sm text-on-surface-variant mb-6">
-          {t('profile.timezoneSubtitle', 'Kanonische Zeitzone für die KI, den Lagebericht und alle zeitgesteuerten Aufgaben.')}
-        </p>
 
         {showBrowserHint && browserZone && (
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/30 bg-primary/10 p-3 text-sm text-on-surface">
@@ -288,7 +285,7 @@ export function AccountTab() {
               htmlFor="profile-timezone"
               className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider"
             >
-              {t('profile.timezoneLabel', 'Zeitzone (IANA)')}
+              {t('profile.timezoneLabel', 'Zeitzone')}
             </label>
             <Dropdown
               id="profile-timezone"
@@ -300,9 +297,6 @@ export function AccountTab() {
               placeholder={t('profile.timezonePlaceholder', 'Zeitzone auswählen')}
               aria-label={t('profile.timezoneLabel', 'Zeitzone')}
             />
-            <p className="msm-field-help mt-1.5">
-              {t('profile.timezoneHelp', 'Wähle deine regionale IANA-Zeitzone für exakte Uhrzeiten.')}
-            </p>
           </div>
 
           <div>
@@ -334,7 +328,7 @@ export function AccountTab() {
                 {t('profile.locationSharingTitle', 'Standort für KI-Anfragen')}
               </h2>
               <p className="mt-1 max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant">
-                {t('profile.locationSharingDescription', 'Gib deinen Standort nur frei, wenn eine ortsbezogene KI-Anfrage ihn braucht. Die Einwilligung gilt für dein Konto.')}
+                {t('profile.locationSharingDescription', 'Wird nur bei ortsbezogenen KI-Anfragen verwendet.')}
               </p>
             </div>
           </div>
@@ -350,9 +344,9 @@ export function AccountTab() {
           </span>
         </div>
 
-        <div className="mt-5 border-l-2 border-primary/40 pl-3">
-          <p className="font-body-md text-sm leading-6 text-on-surface">
-            {t('profile.locationSharingPrivacy', 'Deine Koordinaten werden nicht im Konto gespeichert. Wenn du sie bei einer Anfrage freigibst, werden sie nur für diesen einzelnen KI-Lauf verwendet.')}
+        <div className="mt-4 border-l-2 border-primary/40 pl-3">
+          <p className="font-body-md text-xs leading-5 text-on-surface-variant">
+            {t('profile.locationSharingPrivacy', 'Keine dauerhafte Speicherung von Koordinaten im Konto.')}
           </p>
         </div>
 

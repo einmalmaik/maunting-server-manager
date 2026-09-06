@@ -231,9 +231,6 @@ function ProfilEinstellungen() {
           </div>
           <div>
             <h2 className="text-sm font-semibold text-on-surface">Benutzerprofil</h2>
-            <p className="text-xs text-on-surface-variant">
-              Verwalte dein Profilbild und deine Kontodaten für diese Desktop-App.
-            </p>
           </div>
         </div>
 
@@ -296,9 +293,6 @@ function ProfilEinstellungen() {
           </div>
           <div>
             <h2 className="text-sm font-semibold text-on-surface">Tresor-Sicherheit & Auto-Lock</h2>
-            <p className="text-xs text-on-surface-variant">
-              Automatische Speichersperre nach Inaktivität zum Schutz vor unbefugtem Zugriff.
-            </p>
           </div>
         </div>
 
@@ -306,9 +300,6 @@ function ProfilEinstellungen() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
               <label className="text-xs font-medium text-on-surface">Automatische Sperre</label>
-              <p className="text-[11px] text-on-surface-variant">
-                Nach wie vielen Minuten Inaktivität der Tresor gesperrt wird.
-              </p>
             </div>
             <div className="w-full sm:w-56">
               <Dropdown
@@ -342,20 +333,17 @@ function ProfilEinstellungen() {
           </div>
           <div>
             <h2 className="text-sm font-semibold text-on-surface">Biometrischer Schnelleinstieg</h2>
-            <p className="text-xs text-on-surface-variant">
-              Fingerabdruck oder Windows Hello zum schnellen und sicheren Entsperren des Tresors nutzen.
-            </p>
           </div>
         </div>
 
         <div className="pt-2 border-t border-outline-variant/30 space-y-3">
           {!isInitialized ? (
             <div className="p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-xs text-on-surface-variant">
-              Der Passwort-Manager wurde auf diesem Gerät noch nicht eingerichtet. Richte ihn zuerst ein, um den biometrischen Schnelleinstieg zu nutzen.
+              Passwort-Manager ist auf diesem Gerät noch nicht eingerichtet.
             </div>
           ) : !isUnlocked ? (
             <div className="p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-xs text-on-surface-variant">
-              Der Tresor ist aktuell gesperrt. Bitte entsperre ihn zuerst im Passwort-Manager, um den biometrischen Schnelleinstieg zu verwalten.
+              Tresor ist gesperrt. Bitte zuerst entsperren.
             </div>
           ) : null}
 
@@ -364,9 +352,6 @@ function ProfilEinstellungen() {
               <span className="text-xs font-medium text-on-surface">
                 Biometrische Authentifizierung aktivieren
               </span>
-              <p className="text-[11px] text-on-surface-variant">
-                Schlüssel wird gerätegebunden per Hardware-Schutz (Android Keystore / TPM) geschützt.
-              </p>
             </div>
             <Switch
               checked={isBiometricsEnabled}
@@ -377,7 +362,7 @@ function ProfilEinstellungen() {
 
           {!isBiometricsSupported && (
             <div className="p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-xs text-on-surface-variant">
-              Auf diesem Gerät ist aktuell kein biometrischer Sensor (Fingerabdruck / Windows Hello) verfügbar.
+              Kein biometrischer Sensor auf diesem Gerät verfügbar.
             </div>
           )}
         </div>
@@ -394,7 +379,7 @@ function ProfilEinstellungen() {
               <h3 className="text-sm font-semibold text-on-surface">Biometrie einrichten</h3>
             </div>
             <p className="text-xs text-on-surface-variant">
-              Bitte gib dein Master-Passwort ein, um den biometrischen Schnelleinstieg auf diesem Gerät zu autorisieren.
+              Master-Passwort zur Bestätigung eingeben.
             </p>
             <form onSubmit={handleConfirmBiometrics} className="space-y-3">
               <input
@@ -496,20 +481,13 @@ function DesktopIntegration({ onKonfigAenderung }: { onKonfigAenderung?: () => v
   return (
     <section className="msm-card flex flex-col gap-4 p-5">
       <h2 className="text-sm font-medium text-on-surface">
-        {isAndroid ? 'Geräteintegration & App-Status' : t('mss.einstellungen.desktopIntegration')}
+        {isAndroid ? t('mss.einstellungen.tab.app', 'App-Status') : t('mss.einstellungen.desktopIntegration')}
       </h2>
 
       <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="text-sm text-on-surface">
-            {isAndroid ? 'Beim Handystart ausführen' : t('mss.einstellungen.autostart')}
-          </p>
-          <p className="text-xs text-on-surface-variant">
-            {isAndroid
-              ? 'Startet die Hintergrundüberwachung für Server-Alarme und Terminerinnerungen automatisch beim Einschalten des Smartphones.'
-              : t('mss.einstellungen.autostartHinweis')}
-          </p>
-        </div>
+        <p className="text-sm text-on-surface">
+          {isAndroid ? 'Beim Handystart ausführen' : t('mss.einstellungen.autostart')}
+        </p>
         <Switch
           checked={autostart === true}
           disabled={autostart === null}
@@ -531,10 +509,7 @@ function DesktopIntegration({ onKonfigAenderung }: { onKonfigAenderung?: () => v
       <ComputerUseSektion onKonfigAenderung={onKonfigAenderung} />
 
       <div className={isAndroid ? '' : 'border-t border-outline-variant/40 pt-4'}>
-        <p className="text-sm text-on-surface">{t('mss.einstellungen.diagnose')}</p>
-        <p className="mb-3 text-xs text-on-surface-variant">
-          {t('mss.einstellungen.diagnoseHinweis')}
-        </p>
+        <p className="mb-3 text-sm text-on-surface">{t('mss.einstellungen.diagnose')}</p>
         <div className="flex flex-wrap gap-2">
           {STATUS_REIHE.map((s) => (
             <button
@@ -551,15 +526,9 @@ function DesktopIntegration({ onKonfigAenderung }: { onKonfigAenderung?: () => v
           ))}
         </div>
         <div className="mt-3">
-          {/* Das Schaufenster: zeigt das Overlay ohne Mikrofon und ohne
-              Sitzung — die Diagnose-Knöpfe oben färben dann die Blase.
-              Zweiter Druck (oder X/ESC am Fenster) schließt wieder. */}
           <Button variant="secondary" onClick={() => void overlayTesten().catch(() => {})}>
             {t('mss.einstellungen.overlayTesten')}
           </Button>
-          <p className="mt-1 text-xs text-on-surface-variant">
-            {t('mss.einstellungen.overlayTestenHinweis')}
-          </p>
         </div>
       </div>
 
@@ -567,9 +536,6 @@ function DesktopIntegration({ onKonfigAenderung }: { onKonfigAenderung?: () => v
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="text-sm font-medium text-on-surface">System-Updates</p>
-            <p className="text-xs text-on-surface-variant">
-              Automatische Hintergrundaktualisierungen sind aktiv.
-            </p>
           </div>
           <Button
             variant="secondary"
@@ -653,11 +619,11 @@ function ComputerUseSektion({ onKonfigAenderung }: { onKonfigAenderung?: () => v
               </Badge>
             )}
           </div>
-          <p className="text-xs text-on-surface-variant">
-            {isAndroid
-              ? t('mss.einstellungen.computerUse.androidHinweis')
-              : t('mss.einstellungen.computerUse.beschreibung')}
-          </p>
+          {isAndroid && (
+            <p className="text-xs text-on-surface-variant">
+              {t('mss.einstellungen.computerUse.androidHinweis')}
+            </p>
+          )}
         </div>
         <Switch
           checked={!isAndroid && konfig?.computer_use_aktiv === true}
@@ -782,9 +748,6 @@ function ArtefaktInstallationSektion({ onKonfigAenderung }: { onKonfigAenderung?
                 </Badge>
               )}
             </div>
-            <p className="text-xs text-on-surface-variant">
-              {t('mss.einstellungen.artefakte.beschreibung', 'Erlaubt der KI das Herunterladen, Prüfen (Defender & Sandbox), Deployen und Rollbacken von Software, Mods und Installern.')}
-            </p>
           </div>
           <Switch
             checked={konfig?.artifact_install_aktiv === true}
@@ -798,14 +761,7 @@ function ArtefaktInstallationSektion({ onKonfigAenderung }: { onKonfigAenderung?
           <div className="mt-2 flex flex-col gap-4 rounded-xl border border-outline-variant/30 bg-surface-container-low/30 p-4">
             {/* Windows Sandbox Status */}
             <div className="flex items-center justify-between gap-2">
-              <div>
-                <p className="text-xs font-medium text-on-surface">{t('mss.einstellungen.artefakte.sandboxTitel', 'Windows Sandbox Isolation')}</p>
-                <p className="text-xs text-on-surface-variant">
-                  {sandboxOk
-                    ? t('mss.einstellungen.artefakte.sandboxVerfuegbar', 'Flüchtige Windows Sandbox ist auf diesem Rechner verfügbar und aktiv.')
-                    : t('mss.einstellungen.artefakte.sandboxNichtVerfuegbar', 'Windows Sandbox ist nicht aktiviert oder nicht unterstützt (Hyper-V / BIOS Virtualisierung nötig).')}
-                </p>
-              </div>
+              <p className="text-xs font-medium text-on-surface">{t('mss.einstellungen.artefakte.sandboxTitel', 'Windows Sandbox')}</p>
               <Badge variant={sandboxOk ? 'success' : 'warning'}>
                 {sandboxOk ? t('mss.einstellungen.artefakte.sandboxBereit', 'Bereit') : t('mss.einstellungen.artefakte.sandboxFehlt', 'Nicht verfügbar')}
               </Badge>
@@ -825,22 +781,19 @@ function ArtefaktInstallationSektion({ onKonfigAenderung }: { onKonfigAenderung?
                 onValueChange={(val) => void downloadLimitAendern(val)}
                 ariaLabel={t('mss.einstellungen.artefakte.downloadLimitTitel', 'Download-Limit')}
               />
-              <p className="text-xs text-on-surface-variant">
-                {t('mss.einstellungen.artefakte.downloadLimitHinweis', 'Standard 10 GiB, konfigurierbar bis 100 GiB. Größere Downloads werden aus Sicherheitsgründen sofort abgebrochen.')}
-              </p>
             </div>
 
             {/* Freigegebene Suchwurzeln */}
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between">
-                <p className="text-xs font-medium text-on-surface">{t('mss.einstellungen.artefakte.suchwurzelnTitel', 'Freigegebene Suchbereiche für Spiele & Software')}</p>
+                <p className="text-xs font-medium text-on-surface">{t('mss.einstellungen.artefakte.suchwurzelnTitel', 'Suchbereiche')}</p>
                 <Button variant="secondary" size="sm" onClick={() => void suchwurzelHinzufuegen()}>
                   {t('mss.einstellungen.artefakte.suchwurzelHinzufuegen', '+ Ordner freigeben')}
                 </Button>
               </div>
               {konfig.search_roots.length === 0 ? (
                 <p className="text-xs italic text-on-surface-variant/70">
-                  {t('mss.einstellungen.artefakte.keineSuchwurzeln', 'Keine benutzerdefinierten Suchordner hinzugefügt. Standard-Steam-Bibliotheken werden automatisch erkannt.')}
+                  {t('mss.einstellungen.artefakte.keineSuchwurzeln', 'Keine Ordner hinterlegt. Standard-Pfade werden automatisch erkannt.')}
                 </p>
               ) : (
                 <ul className="flex flex-col gap-1">
@@ -876,7 +829,7 @@ function ArtefaktInstallationSektion({ onKonfigAenderung }: { onKonfigAenderung?
             <p className="text-xs leading-relaxed text-on-surface-variant">
               {t(
                 'mss.einstellungen.artefakte.aktivierenWarnung',
-                'Wenn du diese Funktion aktivierst, kann die KI auf deinen Wunsch hin Dateien (z. B. Spiel-Mods oder Software-Installer) herunterladen. Alle Downloads durchlaufen eine isolierte Quarantäne, SHA-256-Prüfung, Microsoft Defender Scan und eine flüchtige Windows Sandbox vor der eigentlichen Installation.',
+                'Downloads durchlaufen Quarantäne, Defender-Prüfung und Sandbox vor der Ausführung.',
               )}
             </p>
             <div className="flex items-center justify-end gap-2 pt-2">
@@ -948,10 +901,7 @@ function Systembereich() {
 
   return (
     <div className="border-t border-outline-variant/40 pt-4">
-      <p className="text-sm text-on-surface">{t('mss.systembereich.titel')}</p>
-      <p className="mb-3 text-xs text-on-surface-variant">
-        {t('mss.systembereich.hinweis')}
-      </p>
+      <p className="mb-3 text-sm text-on-surface">{t('mss.systembereich.titel')}</p>
       <div className="flex flex-wrap gap-2">
         {SYSTEMBEREICHE.map((stufe) => (
           <button
@@ -968,9 +918,6 @@ function Systembereich() {
           </button>
         ))}
       </div>
-      <p className="mt-2 text-xs text-on-surface-variant">
-        {t(`mss.systembereich.erklaerung.${wert}`)}
-      </p>
     </div>
   )
 }
@@ -1121,10 +1068,7 @@ function AudioEinstellungen() {
     const kurz = feld.slice('audio_'.length)
     return (
       <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm text-on-surface">{t(`mss.audio.${kurz}`)}</p>
-          <p className="text-xs text-on-surface-variant">{t(`mss.audio.${kurz}Hinweis`)}</p>
-        </div>
+        <p className="text-sm text-on-surface">{t(`mss.audio.${kurz}`)}</p>
         <Switch
           checked={konfig?.[feld] ?? true}
           disabled={konfig === null}
@@ -1138,24 +1082,20 @@ function AudioEinstellungen() {
   return (
     <section className="msm-card flex flex-col gap-4 p-5">
       <h2 className="text-sm font-medium text-on-surface">{t('mss.audio.titel')}</h2>
-      <p className="text-xs text-on-surface-variant">{t('mss.audio.hinweis')}</p>
 
       <div className="flex flex-col gap-1.5">
         <label className="text-sm text-on-surface">{t('mss.audio.eingabe')}</label>
         {auswahl('audio_eingabe', geraete?.eingaenge ?? [], geraete?.standard_eingang ?? null)}
-        <p className="text-xs text-on-surface-variant">{t('mss.audio.eingabeHinweis')}</p>
       </div>
 
       <div className="flex flex-col gap-1.5">
         <label className="text-sm text-on-surface">{t('mss.audio.ausgabe')}</label>
         {auswahl('audio_ausgabe', geraete?.ausgaenge ?? [], geraete?.standard_ausgang ?? null)}
-        <p className="text-xs text-on-surface-variant">{t('mss.audio.ausgabeHinweis')}</p>
       </div>
 
       <div className="flex flex-col gap-3 border-t border-outline-variant/40 pt-4">
         <div>
           <p className="text-sm text-on-surface">{t('mss.audio.verarbeitung')}</p>
-          <p className="text-xs text-on-surface-variant">{t('mss.audio.verarbeitungHinweis')}</p>
         </div>
         {verarbeitungsZeile('audio_echo')}
         {verarbeitungsZeile('audio_rauschen')}
@@ -1170,9 +1110,6 @@ function AudioEinstellungen() {
           label={t('mss.audio.verstaerkung')}
           hint={`${Math.round((konfig?.audio_verstaerkung ?? 1) * 100)} %`}
         />
-        <p className="-mt-2 text-xs text-on-surface-variant">
-          {t('mss.audio.verstaerkungHinweis')}
-        </p>
       </div>
 
       <Testhoeren
@@ -1185,9 +1122,8 @@ function AudioEinstellungen() {
       />
 
       {!isAndroidClient && (
-        <div className="border-t border-outline-variant/40 pt-4">
+        <div className="flex items-center justify-between gap-3 border-t border-outline-variant/40 pt-4">
           <p className="text-sm text-on-surface">{t('mss.audio.ducking')}</p>
-          <p className="mb-3 text-xs text-on-surface-variant">{t('mss.audio.duckingHinweis')}</p>
           <Button variant="secondary" onClick={() => void duckingTesten()} disabled={duckt}>
             {duckt
               ? t('mss.einstellungen.duckingLaeuft')
@@ -1327,10 +1263,7 @@ function Testhoeren({ verarbeitung }: { verarbeitung: AudioVerarbeitung }) {
 
   return (
     <div className="flex flex-col gap-3 border-t border-outline-variant/40 pt-4">
-      <div>
-        <p className="text-sm text-on-surface">{t('mss.audio.testhoeren')}</p>
-        <p className="text-xs text-on-surface-variant">{t('mss.audio.testhoerenHinweis')}</p>
-      </div>
+      <p className="text-sm text-on-surface">{t('mss.audio.testhoeren')}</p>
       <div className="flex items-center gap-3">
         <Button
           variant="secondary"
@@ -1471,9 +1404,6 @@ function Hotkeys() {
     <div className="flex flex-col gap-3 border-t border-outline-variant/40 pt-4">
       <div>
         <p className="text-sm text-on-surface">{t('mss.einstellungen.hotkey.titel')}</p>
-        <p className="text-xs text-on-surface-variant">
-          {t('mss.einstellungen.hotkey.hinweis')}
-        </p>
       </div>
       {zeile('fenster')}
       {zeile('sprache')}
@@ -1516,18 +1446,13 @@ function RechtlichesEinstellungen() {
       {/* Datenschutzerklärung */}
       <section className="msm-card flex flex-col gap-4 p-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-medium text-on-surface">
-                {t('mss.einstellungen.rechtliches.datenschutzTitel', 'Datenschutzerklärung')}
-              </h3>
-              <Badge variant="default">
-                {t('mss.einstellungen.rechtliches.datenschutzVersion', { version: 'v2.7' })}
-              </Badge>
-            </div>
-            <p className="mt-1 text-xs text-on-surface-variant max-w-xl">
-              {t('mss.einstellungen.rechtliches.datenschutzDesc', 'Erfahren Sie im Detail, wie Ihre Daten, Einstellungen und Sitzungen geschützt und minimiert verarbeitet werden.')}
-            </p>
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-medium text-on-surface">
+              {t('mss.einstellungen.rechtliches.datenschutzTitel', 'Datenschutzerklärung')}
+            </h3>
+            <Badge variant="default">
+              {t('mss.einstellungen.rechtliches.datenschutzVersion', { version: 'v2.7' })}
+            </Badge>
           </div>
           <Button
             variant="secondary"
@@ -1556,16 +1481,9 @@ function RechtlichesEinstellungen() {
                   : t('mss.einstellungen.rechtliches.impressumInaktiv', 'Nicht konfiguriert')}
               </Badge>
             </div>
-            <p className="mt-1 text-xs text-on-surface-variant">
-              {t('mss.einstellungen.rechtliches.impressumDesc', 'Rechtliche Angaben und Kontaktinformationen des Betreibers dieser Server-Manager-Instanz.')}
-            </p>
-            {legal.imprint_enabled && legal.imprint_url ? (
+            {legal.imprint_enabled && legal.imprint_url && (
               <p className="mt-2 text-xs font-mono text-primary truncate max-w-md">
                 {legal.imprint_url}
-              </p>
-            ) : (
-              <p className="mt-2 text-xs italic text-on-surface-variant/70">
-                {t('mss.einstellungen.rechtliches.impressumKeinHinweis', 'Für diese Instanz wurde kein externes Betreiber-Impressum hinterlegt.')}
               </p>
             )}
           </div>

@@ -175,14 +175,9 @@ export function ConnectedMailboxesSection() {
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <Mail className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <div>
-            <h2 className="font-headline text-lg font-semibold text-on-surface">
-              {t('profile.mailboxes.title', 'Verknüpfte Postfächer (E-Mail)')}
-            </h2>
-            <p className="font-body-md text-sm text-on-surface-variant mt-0.5">
-              {t('profile.mailboxes.subtitle', 'E-Mail-Konten für KI-Assistenten zum sicheren Lesen und Vorbereiten von E-Mails.')}
-            </p>
-          </div>
+          <h2 className="font-headline text-lg font-semibold text-on-surface">
+            {t('profile.mailboxes.title', 'Verknüpfte Postfächer (E-Mail)')}
+          </h2>
         </div>
         <button
           type="button"

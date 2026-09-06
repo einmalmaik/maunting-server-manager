@@ -243,10 +243,11 @@ export function WakewordEinrichtung() {
         </p>
       )}
 
-      {/* Kein Wortfeld: das Wake-Word ist immer der Name des Assistenten. */}
-      <p className="text-sm text-on-surface">
-        {t('mss.wakeword.wortIstName', { name: agentName })}
-      </p>
+      {/* Assistent-Name als Rufname */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-on-surface-variant">{t('mss.wakeword.rufname', 'Rufname:')}</span>
+        <span className="text-sm font-medium text-on-surface">{agentName}</span>
+      </div>
 
       {/* Der Name hat sich seit dem Training geändert — anbieten, nie
           erzwingen: das Modell hört bis zur Neukalibrierung auf den alten. */}
@@ -305,9 +306,6 @@ export function WakewordEinrichtung() {
       <div className="flex items-center justify-between gap-3 border-t border-outline-variant/40 pt-4">
         <div className="min-w-0">
           <p className="text-sm text-on-surface">{t('mss.wakeword.aktiv')}</p>
-          <p className="text-xs text-on-surface-variant">
-            {t('mss.wakeword.aktivHinweis', { name: stand.wort ?? agentName })}
-          </p>
         </div>
         <Switch
           checked={stand.aktiv ?? stand.lauscht}
@@ -333,7 +331,6 @@ export function WakewordEinrichtung() {
           label={t('mss.wakeword.schwelle')}
           hint={(konfig?.wakeword_schwelle ?? 0.45).toFixed(2)}
         />
-        <p className="text-xs text-on-surface-variant">{t('mss.wakeword.schwelleHinweis')}</p>
         {/* Nur solange wirklich gelauscht wird — ein eingefrorener Balken
             sähe aus wie ein hängendes Mikrofon. */}
         {stand.lauscht && pegel && (

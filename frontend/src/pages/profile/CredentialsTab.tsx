@@ -114,7 +114,6 @@ export function CredentialsTab() {
             {t('credentials.title')}
           </h3>
         </div>
-        <p className="mt-2 text-sm text-on-surface-variant">{t('credentials.description')}</p>
       </div>
 
       {credentials.length === 0 && (

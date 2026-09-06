@@ -107,14 +107,9 @@ export function ConnectedCalendarsSection() {
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <Calendar className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <div>
-            <h2 className="font-headline text-lg font-semibold text-on-surface">
-              {t('profile.calendars.title', 'Verknüpfte Kalender (CalDAV)')}
-            </h2>
-            <p className="font-body-md text-sm text-on-surface-variant mt-0.5">
-              {t('profile.calendars.subtitle', 'Kalender-Integration für KI-Terminprüfungen und Entwürfe von Terminen.')}
-            </p>
-          </div>
+          <h2 className="font-headline text-lg font-semibold text-on-surface">
+            {t('profile.calendars.title', 'Verknüpfte Kalender (CalDAV)')}
+          </h2>
         </div>
         <button
           type="button"
@@ -253,7 +248,7 @@ export function ConnectedCalendarsSection() {
                     className="msm-input w-full text-sm font-mono"
                   />
                   <p className="text-[11px] text-on-surface-variant mt-1">
-                    {t('profile.calendars.caldavHelp', 'Vollständige CalDAV-URL deines Kalenders (z. B. Nextcloud, Baïkal, mailbox.org oder Google CalDAV).')}
+                    {t('profile.calendars.caldavHelp', 'CalDAV-URL deines Kalenders (z. B. Nextcloud, Google CalDAV).')}
                   </p>
                 </div>
 
