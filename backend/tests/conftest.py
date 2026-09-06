@@ -322,6 +322,8 @@ db_module.Base.metadata.create_all(bind=db_module.engine)
 @pytest.fixture(scope="function", autouse=True)
 def clean_db():
     """Clean all tables and rate limit store before each test."""
+    from sqlalchemy.orm import close_all_sessions
+    close_all_sessions()
     # SQLite erfordert, dass PRAGMA foreign_keys ausserhalb einer Transaktion gesetzt wird.
     # Ueber driver_connection direkt am raw DBAPI Connection Objekt ausfuehren.
     raw_conn = db_module.engine.raw_connection()
@@ -357,6 +359,7 @@ def clean_db():
     finally:
         session.close()
     yield
+    close_all_sessions()
 
 
 @pytest.fixture
