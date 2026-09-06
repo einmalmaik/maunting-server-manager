@@ -495,4 +495,9 @@ def user_permission(db: Session, regular_user: User, test_server: Server) -> lis
     db.commit()
     for p in perms:
         db.refresh(p)
-    return perms
+    try:
+        yield perms
+    finally:
+        for p in perms:
+            db.delete(p)
+        db.commit()

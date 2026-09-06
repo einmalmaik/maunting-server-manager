@@ -229,21 +229,23 @@ class TestDeleteServer:
 
 class TestStartServer:
     def test_owner_can_start(self, client: TestClient, owner_user: User, owner_cookies: dict, test_server: Server, csrf_token: str):
-        response = client.post(
-            f"/api/servers/{test_server.id}/start",
-            cookies=owner_cookies,
-            headers={"X-CSRF-Token": csrf_token},
-        )
-        # May fail because plugin isn't available in test env, but must not be 401/403
-        assert response.status_code not in (401, 403)
+        with patch("services.server_lifecycle_service._start_lifecycle_thread"):
+            response = client.post(
+                f"/api/servers/{test_server.id}/start",
+                cookies=owner_cookies,
+                headers={"X-CSRF-Token": csrf_token},
+            )
+            # May fail because plugin isn't available in test env, but must not be 401/403
+            assert response.status_code not in (401, 403)
 
     def test_user_with_permission_can_start(self, client: TestClient, regular_user: User, user_cookies: dict, test_server: Server, user_permission: list[ServerPermission], user_csrf_token: str):
-        response = client.post(
-            f"/api/servers/{test_server.id}/start",
-            cookies=user_cookies,
-            headers={"X-CSRF-Token": user_csrf_token},
-        )
-        assert response.status_code not in (401, 403)
+        with patch("services.server_lifecycle_service._start_lifecycle_thread"):
+            response = client.post(
+                f"/api/servers/{test_server.id}/start",
+                cookies=user_cookies,
+                headers={"X-CSRF-Token": user_csrf_token},
+            )
+            assert response.status_code not in (401, 403)
 
     def test_user_without_permission_blocked(self, client: TestClient, regular_user: User, user_cookies: dict, test_server: Server, user_csrf_token: str):
         response = client.post(
