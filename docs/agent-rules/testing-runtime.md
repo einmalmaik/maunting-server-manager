@@ -43,6 +43,14 @@ Bei Änderungen an Vault/Auth/DeviceKey/Passkey/Recovery/Quarantäne/Integrity z
 - keine Secrets in serialisierten Fehlern
 - keine Secrets in Logs, Toasts, URLs oder Fixtures
 
+Bei Datenbank- und Backend-Tests (SQLite StaticPool):
+- In `clean_db` zwingend vor und nach dem Tabellen-Truncate `from sqlalchemy.orm import close_all_sessions; close_all_sessions()` ausführen, um Leaks und `InvalidRequestError` zu vermeiden.
+- In-Memory-Caches von Singletons/Services (`PanelSettingsService.invalidate_cache()`, `reset_port_cache_for_tests()`, etc.) vor jedem Test explizit zurücksetzen.
+
+Bei Desktop-/Tauri- und UI-Popover-Komponenten:
+- Unit-Tests für Randlagen (Kollisionsprüfung an Fenstergrenzen) bereitstellen.
+- In Headless-/JSDOM-Umgebungen (ohne echte Layout-Engine, BoundingRect 0x0) muss deterministisch auf Fallback-Props ausgewichen werden, ohne Exception.
+
 ---
 
 ## 3. Gute Tests
