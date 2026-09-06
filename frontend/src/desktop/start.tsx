@@ -24,10 +24,12 @@ import '@/i18n'
 import '@/index.css'
 
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { initOfflineSync } from '@/lib/offlineSync'
 import { transportEinrichten } from './transport'
 import { DesktopRoot } from './DesktopRoot'
 
 transportEinrichten()
+initOfflineSync()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

@@ -7,10 +7,14 @@ import { useConfirmStore } from './confirmStore'
 import { usePromptStore } from './promptStore'
 import * as client from '@/api/client'
 
-vi.mock('@/api/client', () => ({
-  api: vi.fn(),
-  clearCsrfTokenMemory: vi.fn(),
-}))
+vi.mock('@/api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/client')>()
+  return {
+    ...actual,
+    api: vi.fn(),
+    clearCsrfTokenMemory: vi.fn(),
+  }
+})
 
 describe('authStore', () => {
   beforeEach(() => {
@@ -72,6 +76,100 @@ describe('authStore', () => {
       expect(useAuthStore.getState().user).toBeNull()
       expect(useAuthStore.getState().isLoading).toBe(false)
       expect(useNodeStore.getState().nodes).toEqual([])
+    })
+
+    it('should keep cached user and remain authenticated on network/offline error during checkAuth', async () => {
+      const mockUser = { id: 1, username: 'test', is_owner: true }
+      localStorage.setItem('msm_cached_user', JSON.stringify(mockUser))
+      useAuthStore.setState({ user: mockUser as any, isAuthenticated: true })
+
+      vi.mocked(client.api).mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+      const store = useAuthStore.getState()
+      await store.checkAuth()
+
+      expect(useAuthStore.getState().isAuthenticated).toBe(true)
+      expect(useAuthStore.getState().user).toEqual(mockUser)
+      expect(useAuthStore.getState().isLoading).toBe(false)
+      expect(localStorage.getItem('msm_cached_user')).toBe(JSON.stringify(mockUser))
+    })
+
+    it('Negativtest: beschädigter/manipulierter Cache bringt authStore bei Offline-Fehler nicht zum Absturz', async () => {
+      localStorage.setItem('msm_cached_user', '{"invalid_json": true, "corrupted"')
+      useAuthStore.setState({ user: null, isAuthenticated: false })
+
+      vi.mocked(client.api).mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+      const store = useAuthStore.getState()
+      await store.checkAuth()
+
+      // Darf nicht abstürzen, isAuthenticated bleibt false und isLoading false
+      expect(useAuthStore.getState().isAuthenticated).toBe(false)
+      expect(useAuthStore.getState().user).toBeNull()
+      expect(useAuthStore.getState().isLoading).toBe(false)
+    })
+
+    it('Negativtest: Server antwortet mit 401 Unauthorized (kein Netzwerkfehler) -> Session wird sofort geräumt', async () => {
+      const mockUser = { id: 1, username: 'test', is_owner: true }
+      localStorage.setItem('msm_cached_user', JSON.stringify(mockUser))
+      useAuthStore.setState({ user: mockUser as any, isAuthenticated: true })
+
+      const authError = new Error('HTTP 401 Unauthorized')
+      vi.mocked(client.api).mockRejectedValueOnce(authError)
+
+      const store = useAuthStore.getState()
+      await store.checkAuth()
+
+      // Bei 401 darf die Session nicht offline-gecacht weiterleben!
+      expect(useAuthStore.getState().isAuthenticated).toBe(false)
+      expect(useAuthStore.getState().user).toBeNull()
+      expect(localStorage.getItem('msm_cached_user')).toBeNull()
+    })
+
+    it('Negativtest: Schema-Manipulationen (Primitive, Arrays, falsche Typen) werden sicher abgewiesen', async () => {
+      const manipulierungen = [
+        '12345',
+        '"ein_string"',
+        'true',
+        '[]',
+        '{"id": "keine_zahl", "username": "admin"}',
+        '{"id": 1}', // username fehlt
+        '{"username": "admin"}', // id fehlt
+        'null',
+      ]
+
+      for (const badPayload of manipulierungen) {
+        localStorage.setItem('msm_cached_user', badPayload)
+        useAuthStore.setState({ user: null, isAuthenticated: false })
+        vi.mocked(client.api).mockRejectedValueOnce(new TypeError('Failed to fetch (Offline)'))
+
+        await useAuthStore.getState().checkAuth()
+
+        expect(useAuthStore.getState().isAuthenticated).toBe(false)
+        expect(useAuthStore.getState().user).toBeNull()
+      }
+    })
+
+    it('Negativtest: Ausnahme im LocalStorage (z.B. SecurityError / Storage deaktiviert) bringt Store nicht zum Absturz', async () => {
+      const originalGetItem = localStorage.getItem
+      const originalSetItem = localStorage.setItem
+      try {
+        localStorage.getItem = vi.fn(() => {
+          throw new DOMException('The operation is insecure.', 'SecurityError')
+        })
+        localStorage.setItem = vi.fn(() => {
+          throw new DOMException('QuotaExceededError', 'QuotaExceededError')
+        })
+
+        useAuthStore.setState({ user: null, isAuthenticated: false })
+        vi.mocked(client.api).mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+        await expect(useAuthStore.getState().checkAuth()).resolves.not.toThrow()
+        expect(useAuthStore.getState().isAuthenticated).toBe(false)
+      } finally {
+        localStorage.getItem = originalGetItem
+        localStorage.setItem = originalSetItem
+      }
     })
   })
 

@@ -15,10 +15,10 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { MemoryRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { listen } from '@tauri-apps/api/event'
-import { BrainCircuit, Calendar as CalendarIcon, Eye, KeyRound, LogOut, Menu, MessageSquare, Settings as SettingsIcon, ShieldAlert, StickyNote, X } from 'lucide-react'
+import { BrainCircuit, Calendar as CalendarIcon, Eye, KeyRound, LogOut, Menu, MessageSquare, Settings as SettingsIcon, ShieldAlert, StickyNote, WifiOff, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { api } from '@/api/client'
+import { api, isNetworkOrOfflineError } from '@/api/client'
 import { AiMemoryManager } from '@/components/ai/AiMemoryManager'
 import { AiRunNotice } from '@/components/ai/AiRunNotice'
 import { ServerIncidentNotifier } from '@/components/notifications/ServerIncidentNotifier'
@@ -71,14 +71,19 @@ const SPLASH_GESEHEN_KEY = 'mss:splash_gesehen'
 const LETZTE_ROUTE_KEY = 'mss:letzte_route'
 const ERLAUBTE_ROUTEN = ['/ai', '/kalender', '/notizen', '/gedaechtnis', '/tresor', '/einstellungen']
 
-function getInitialRoute(): string {
+const OFFLINE_ERLAUBTE_ROUTEN = ['/tresor', '/kalender', '/notizen']
+
+function getInitialRoute(offline = false): string {
   try {
     const gespeichert = localStorage.getItem(LETZTE_ROUTE_KEY)
     if (gespeichert && ERLAUBTE_ROUTEN.includes(gespeichert)) {
+      if (offline) {
+        return OFFLINE_ERLAUBTE_ROUTEN.includes(gespeichert) ? gespeichert : '/tresor'
+      }
       return gespeichert
     }
   } catch {}
-  return '/ai'
+  return offline ? '/tresor' : '/ai'
 }
 
 export function DesktopApp() {
@@ -87,7 +92,7 @@ export function DesktopApp() {
   const [startText, setStartText] = useState<string | null>(null)
   const [updateProgress, setUpdateProgress] = useState<number | null>(null)
   const [konfig, setKonfig] = useState<AppKonfig | null>(null)
-  const [isOffline, setIsOffline] = useState(false)
+  const [isOffline, setIsOffline] = useState(() => (typeof navigator !== 'undefined' ? !navigator.onLine : false))
   const [splash, setSplash] = useState(() => {
     try {
       return localStorage.getItem(SPLASH_GESEHEN_KEY) !== 'true'
@@ -193,22 +198,29 @@ export function DesktopApp() {
 
   useEffect(() => {
     const handleOnline = () => {
-      setIsOffline(false)
-      void (async () => {
-        const res = await stillAnmeldenDetail(5000)
-        if (res.status === 'erfolg') {
-          void useAuthStore.getState().checkAuth()
-        }
-      })()
+      setIsOffline((prev) => {
+        if (!prev) return false
+        void (async () => {
+          const res = await stillAnmeldenDetail(5000)
+          if (res.status === 'erfolg') {
+            void useAuthStore.getState().checkAuth()
+          }
+        })()
+        return false
+      })
     }
     const handleOffline = () => {
       setIsOffline(true)
     }
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
+    window.addEventListener('msm:network-online', handleOnline)
+    window.addEventListener('msm:network-offline', handleOffline)
     return () => {
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
+      window.removeEventListener('msm:network-online', handleOnline)
+      window.removeEventListener('msm:network-offline', handleOffline)
     }
   }, [])
 
@@ -323,7 +335,11 @@ export function DesktopApp() {
   useEffect(() => {
     if (!sitzungSteht || isOffline) return
     const interval = setInterval(() => {
-      api('/auth/devices/heartbeat', { method: 'POST' }).catch(() => {})
+      api('/auth/devices/heartbeat', { method: 'POST' }).catch((err) => {
+        if (isNetworkOrOfflineError(err)) {
+          setIsOffline(true)
+        }
+      })
     }, 45000)
     return () => clearInterval(interval)
   }, [sitzungSteht, isOffline])
@@ -465,8 +481,8 @@ export function DesktopApp() {
   }
 
   return (
-    <MemoryRouter initialEntries={[getInitialRoute()]}>
-      <NavigationEmpfaenger />
+    <MemoryRouter initialEntries={[getInitialRoute(isOffline)]}>
+      <NavigationEmpfaenger isOffline={isOffline} />
       <div className="relative h-[100dvh] max-h-[100dvh] w-full overflow-hidden bg-background text-on-surface pb-[env(safe-area-inset-bottom,0px)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)] flex flex-col">
         <div className="msm-deep-grid pointer-events-none absolute inset-0 opacity-30" />
         <div className="relative z-10 flex h-full max-h-full min-h-0 flex-1 flex-col overflow-hidden">{inhalt}</div>
@@ -495,7 +511,7 @@ export function DesktopApp() {
   )
 }
 
-function NavigationEmpfaenger() {
+function NavigationEmpfaenger({ isOffline }: { isOffline: boolean }) {
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -510,13 +526,17 @@ function NavigationEmpfaenger() {
   useEffect(() => {
     const unlisten = listen<string>('mss:navigiere-zu', (event) => {
       if (event.payload) {
+        if (isOffline && !OFFLINE_ERLAUBTE_ROUTEN.includes(event.payload)) {
+          navigate('/tresor')
+          return
+        }
         navigate(event.payload)
       }
     })
     return () => {
       void unlisten.then((u) => u())
     }
-  }, [navigate])
+  }, [navigate, isOffline])
   return null
 }
 
@@ -694,8 +714,10 @@ function Hauptseite({
   const location = useLocation()
   const user = useAuthStore((s) => s.user)
   const darfChatten = useHasPermission('ai.chat.use')
-  const darfKalender = useHasPermission('ai.calendar.use')
-  const darfNotizen = useHasPermission('ai.notes.use')
+  const hasPermissionKalender = useHasPermission('ai.calendar.use')
+  const hasPermissionNotizen = useHasPermission('ai.notes.use')
+  const darfKalender = isOffline ? true : hasPermissionKalender
+  const darfNotizen = isOffline ? true : hasPermissionNotizen
   const darfGedaechtnis = useHasPermission('ai.memory.use')
   const [darfTresor, setDarfTresor] = useState(true)
   const [mobileMenuOffen, setMobileMenuOffen] = useState(false)
@@ -718,23 +740,27 @@ function Hauptseite({
     }
   }, [darfTresor, bereich, navigate, isOffline])
 
-  // Offline: Online-only Bereiche (KI-Chat, Gedächtnis) → Tresor
+  // Offline: Nur Tresor, Kalender und Notizen erlaubt -> redirect zu Tresor
   useEffect(() => {
-    if (isOffline && (bereich === 'ki' || bereich === 'gedaechtnis')) {
+    if (isOffline && !OFFLINE_ERLAUBTE_ROUTEN.includes(location.pathname)) {
       navigate('/tresor', { replace: true })
     }
-  }, [isOffline, bereich, navigate])
+  }, [isOffline, location.pathname, navigate])
 
   const agentName = user?.agent_name?.trim() || 'Assistent'
   const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
 
   const profileItems: ProfileDropdownItem[] = [
-    {
-      key: 'settings',
-      label: t('mss.app.einstellungen', 'Einstellungen'),
-      icon: <SettingsIcon className="h-4 w-4" />,
-      onClick: () => navigate('/einstellungen'),
-    },
+    ...(!isOffline
+      ? [
+          {
+            key: 'settings',
+            label: t('mss.app.einstellungen', 'Einstellungen'),
+            icon: <SettingsIcon className="h-4 w-4" />,
+            onClick: () => navigate('/einstellungen'),
+          },
+        ]
+      : []),
     {
       key: 'logout',
       label: t('mss.app.abmelden', 'Abmelden'),
@@ -756,7 +782,13 @@ function Hauptseite({
           <div className="min-w-0">
             <h1 className="truncate font-headline text-base sm:text-title-lg font-bold text-on-surface">{agentName}</h1>
           </div>
-          {offeneUebernahme && (
+          {isOffline && (
+            <div className="flex items-center gap-1 rounded-full border border-outline-variant/50 bg-surface-container-high/60 px-2 py-0.5 text-[11px] font-medium text-on-surface-variant">
+              <WifiOff className="h-3 w-3" aria-hidden="true" />
+              <span>{t('common.offline', 'Offline')}</span>
+            </div>
+          )}
+          {offeneUebernahme && !isOffline && (
             <div className="flex items-center gap-1 rounded-full border border-status-warning/40 bg-status-warning/10 px-2 py-0.5 text-[11px] font-medium text-status-warning animate-pulse">
               <Eye className="h-3 w-3" aria-hidden="true" />
               <span>{t('mss.einstellungen.banner.aktivitaetLaeuft')}</span>
@@ -934,18 +966,20 @@ function Hauptseite({
                 </button>
               )}
 
-              <button
-                type="button"
-                onClick={() => { navigate('/einstellungen'); setMobileMenuOffen(false); }}
-                className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors ${
-                  bereich === 'einstellungen'
-                    ? 'bg-primary/15 text-primary border border-primary/30'
-                    : 'text-on-surface hover:bg-surface-container-high'
-                }`}
-              >
-                <SettingsIcon className="h-4 w-4" />
-                <span>{t('mss.app.einstellungen')}</span>
-              </button>
+              {!isOffline && (
+                <button
+                  type="button"
+                  onClick={() => { navigate('/einstellungen'); setMobileMenuOffen(false); }}
+                  className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors ${
+                    bereich === 'einstellungen'
+                      ? 'bg-primary/15 text-primary border border-primary/30'
+                      : 'text-on-surface hover:bg-surface-container-high'
+                  }`}
+                >
+                  <SettingsIcon className="h-4 w-4" />
+                  <span>{t('mss.app.einstellungen')}</span>
+                </button>
+              )}
             </nav>
 
             <div className="pt-2 border-t border-outline-variant/40">

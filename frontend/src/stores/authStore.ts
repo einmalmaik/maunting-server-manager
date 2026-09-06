@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { api, clearCsrfTokenMemory } from '@/api/client'
+import { isNetworkOrOfflineError } from '@/lib/networkErrors'
 import { usePermissionsStore } from '@/stores/permissionsStore'
 import { useNodeStore } from '@/stores/nodeStore'
 import { useToastStore } from '@/stores/toastStore'
@@ -8,6 +9,32 @@ import { usePromptStore } from '@/stores/promptStore'
 import { clearSqlConsoleHistory } from '@/lib/sqlConsoleStorage'
 import { useVaultStore } from '@/desktop/vault/vaultStore'
 import type { User } from '@/types'
+
+const CACHED_USER_KEY = 'msm_cached_user'
+
+function loadCachedUser(): User | null {
+  try {
+    const raw = localStorage.getItem(CACHED_USER_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object' && typeof parsed.id === 'number' && typeof parsed.username === 'string') {
+      return parsed as User
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+function saveCachedUser(user: User | null): void {
+  try {
+    if (user) {
+      localStorage.setItem(CACHED_USER_KEY, JSON.stringify(user))
+    } else {
+      localStorage.removeItem(CACHED_USER_KEY)
+    }
+  } catch {}
+}
 
 interface AuthState {
   user: User | null
@@ -33,21 +60,29 @@ interface AuthState {
  */
 let raeumungen = 0
 
-export const useAuthStore = create<AuthState>((set, get) => ({
-  user: null,
-  isLoading: true,
-  isAuthenticated: false,
+const initialCachedUser = loadCachedUser()
 
-  setUser: (user) => set({ user }),
+export const useAuthStore = create<AuthState>((set, get) => ({
+  user: initialCachedUser,
+  isLoading: true,
+  isAuthenticated: Boolean(initialCachedUser),
+
+  setUser: (user) => {
+    saveCachedUser(user)
+    set({ user })
+  },
 
   finishLogin: async (user) => {
+    saveCachedUser(user)
     set({ user, isAuthenticated: true, isLoading: false })
     await usePermissionsStore.getState().refresh()
   },
 
-  updateUser: (patch) => set((state) => ({
-    user: state.user ? { ...state.user, ...patch } : null,
-  })),
+  updateUser: (patch) => set((state) => {
+    const updated = state.user ? { ...state.user, ...patch } : null
+    saveCachedUser(updated)
+    return { user: updated }
+  }),
 
   /**
    * Räumt den gesamten lokalen Zustand einer Sitzung ab.
@@ -72,6 +107,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
    */
   clearSession: () => {
     raeumungen += 1
+    saveCachedUser(null)
     clearCsrfTokenMemory()
     // Der Abfrageverlauf der SQL-Konsole liegt im localStorage und überlebt das
     // Abmelden. Auf einem geteilten Rechner läge er sonst im Browser des
@@ -112,13 +148,26 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // Ist die Sitzung während der Abfrage geräumt worden, gehört ihre
       // Antwort nicht mehr in den Speicher — sie beschriebe ihn sonst neu.
       if (stand !== raeumungen) return
+      saveCachedUser(user)
       set({ user, isAuthenticated: true, isLoading: false })
       // Permissions parallel laden — Frontend-Permission-Checks wissen damit Bescheid.
       void usePermissionsStore.getState().refresh()
-    } catch {
+    } catch (err) {
       // Wurde inzwischen geräumt, ist nichts mehr zu tun: ein zweiter Griff
       // würde nur eine danach begonnene Anmeldung wieder abräumen.
       if (stand !== raeumungen) return
+      if (isNetworkOrOfflineError(err)) {
+        const cached = loadCachedUser()
+        if (cached) {
+          set({ user: cached, isAuthenticated: true, isLoading: false })
+        } else {
+          set({ isLoading: false })
+        }
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('msm:network-offline'))
+        }
+        return
+      }
       get().clearSession()
     }
   },

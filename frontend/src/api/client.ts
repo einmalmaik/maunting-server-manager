@@ -29,6 +29,9 @@ export class SanitizedApiError extends Error {
   }
 }
 
+import { isNetworkOrOfflineError } from '@/lib/networkErrors'
+export { isNetworkOrOfflineError }
+
 /**
  * Die native Sitzung der Desktop-App (MSS) — im Panel immer `null`.
  *
@@ -112,6 +115,7 @@ function nativesToken(): string | null {
  * Populated from `X-CSRF-Token` response headers (login, refresh, /me).
  */
 let csrfTokenMemory: string | null = null
+let isCurrentlyOffline = false
 
 export function getCsrfToken(): string | null {
   if (csrfTokenMemory) return csrfTokenMemory
@@ -257,7 +261,22 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
     return fetch(url, fetchOptions)
   }
 
-  let res = await makeRequest()
+  let res: Response
+  try {
+    res = await makeRequest()
+    if (isCurrentlyOffline) {
+      isCurrentlyOffline = false
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('msm:network-online'))
+      }
+    }
+  } catch (fetchErr) {
+    if (!isCurrentlyOffline && typeof window !== 'undefined' && isNetworkOrOfflineError(fetchErr)) {
+      isCurrentlyOffline = true
+      window.dispatchEvent(new CustomEvent('msm:network-offline'))
+    }
+    throw fetchErr
+  }
   captureCsrfFromResponse(res)
 
   // Token-Refresh bei 401 (ausser bei Login/Refresh selbst)
