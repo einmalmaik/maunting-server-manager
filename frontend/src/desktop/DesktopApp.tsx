@@ -384,6 +384,7 @@ export function DesktopApp() {
               konfig={konfig}
               offeneUebernahme={offeneUebernahme}
               onKonfigAenderung={ladeKonfigNeu}
+              isOffline={isOffline}
             />
           }
         />
@@ -395,6 +396,7 @@ export function DesktopApp() {
               konfig={konfig}
               offeneUebernahme={offeneUebernahme}
               onKonfigAenderung={ladeKonfigNeu}
+              isOffline={isOffline}
             />
           }
         />
@@ -407,6 +409,7 @@ export function DesktopApp() {
               konfig={konfig}
               offeneUebernahme={offeneUebernahme}
               onKonfigAenderung={ladeKonfigNeu}
+              isOffline={isOffline}
             />
           }
         />
@@ -419,6 +422,7 @@ export function DesktopApp() {
               konfig={konfig}
               offeneUebernahme={offeneUebernahme}
               onKonfigAenderung={ladeKonfigNeu}
+              isOffline={isOffline}
             />
           }
         />
@@ -430,6 +434,7 @@ export function DesktopApp() {
               konfig={konfig}
               offeneUebernahme={offeneUebernahme}
               onKonfigAenderung={ladeKonfigNeu}
+              isOffline={isOffline}
             />
           }
         />
@@ -441,6 +446,7 @@ export function DesktopApp() {
               konfig={konfig}
               offeneUebernahme={offeneUebernahme}
               onKonfigAenderung={ladeKonfigNeu}
+              isOffline={isOffline}
             />
           }
         />
@@ -453,7 +459,7 @@ export function DesktopApp() {
             </div>
           }
         />
-        <Route path="*" element={<Navigate to="/ai" replace />} />
+        <Route path="*" element={<Navigate to={isOffline ? '/tresor' : '/ai'} replace />} />
       </Routes>
     )
   }
@@ -675,11 +681,13 @@ function Hauptseite({
   konfig,
   offeneUebernahme,
   onKonfigAenderung,
+  isOffline = false,
 }: {
   bereich: 'ki' | 'kalender' | 'notizen' | 'gedaechtnis' | 'tresor' | 'einstellungen'
   konfig: AppKonfig | null
   offeneUebernahme: string | null
   onKonfigAenderung?: () => void
+  isOffline?: boolean
 }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -706,9 +714,16 @@ function Hauptseite({
 
   useEffect(() => {
     if (!darfTresor && bereich === 'tresor') {
-      navigate('/ai')
+      navigate(isOffline ? '/kalender' : '/ai')
     }
-  }, [darfTresor, bereich, navigate])
+  }, [darfTresor, bereich, navigate, isOffline])
+
+  // Offline: Online-only Bereiche (KI-Chat, Gedächtnis) → Tresor
+  useEffect(() => {
+    if (isOffline && (bereich === 'ki' || bereich === 'gedaechtnis')) {
+      navigate('/tresor', { replace: true })
+    }
+  }, [isOffline, bereich, navigate])
 
   const agentName = user?.agent_name?.trim() || 'Assistent'
   const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
@@ -751,12 +766,14 @@ function Hauptseite({
 
         {/* Desktop-Navigation mit Schnellzugriff */}
         <nav className="hidden md:flex items-center gap-1.5" aria-label={t('mss.app.bereiche')}>
-          <Reiter
-            aktiv={bereich === 'ki'}
-            onClick={() => navigate('/ai')}
-            icon={<MessageSquare className="h-4 w-4" />}
-            label={t('mss.app.chat')}
-          />
+          {!isOffline && (
+            <Reiter
+              aktiv={bereich === 'ki'}
+              onClick={() => navigate('/ai')}
+              icon={<MessageSquare className="h-4 w-4" />}
+              label={t('mss.app.chat')}
+            />
+          )}
           {darfKalender && (
             <Reiter
               aktiv={bereich === 'kalender'}
@@ -773,7 +790,7 @@ function Hauptseite({
               label={t('mss.app.notizen', 'Notizen')}
             />
           )}
-          {darfGedaechtnis && (
+          {!isOffline && darfGedaechtnis && (
             <Reiter
               aktiv={bereich === 'gedaechtnis'}
               onClick={() => navigate('/gedaechtnis')}
@@ -842,18 +859,20 @@ function Hauptseite({
             </div>
 
             <nav className="flex flex-col gap-1 pt-1" aria-label={t('mss.app.bereiche')}>
-              <button
-                type="button"
-                onClick={() => { navigate('/ai'); setMobileMenuOffen(false); }}
-                className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors ${
-                  bereich === 'ki'
-                    ? 'bg-primary/15 text-primary border border-primary/30'
-                    : 'text-on-surface hover:bg-surface-container-high'
-                }`}
-              >
-                <MessageSquare className="h-4 w-4" />
-                <span>{t('mss.app.chat')}</span>
-              </button>
+              {!isOffline && (
+                <button
+                  type="button"
+                  onClick={() => { navigate('/ai'); setMobileMenuOffen(false); }}
+                  className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors ${
+                    bereich === 'ki'
+                      ? 'bg-primary/15 text-primary border border-primary/30'
+                      : 'text-on-surface hover:bg-surface-container-high'
+                  }`}
+                >
+                  <MessageSquare className="h-4 w-4" />
+                  <span>{t('mss.app.chat')}</span>
+                </button>
+              )}
 
               {darfKalender && (
                 <button
@@ -885,7 +904,7 @@ function Hauptseite({
                 </button>
               )}
 
-              {darfGedaechtnis && (
+              {!isOffline && darfGedaechtnis && (
                 <button
                   type="button"
                   onClick={() => { navigate('/gedaechtnis'); setMobileMenuOffen(false); }}

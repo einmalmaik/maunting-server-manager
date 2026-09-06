@@ -18,13 +18,36 @@ const prefixCache = new Map<string, string>()
 
 export const MIN_LEAK_CHECK_PASSWORD_LENGTH = 6
 export const DEFAULT_LEAK_CHECK_DEBOUNCE_MS = 400
+export const VAULT_LEAK_CHECK_ENABLED_KEY = 'mss:vault_leak_check_enabled'
+
+/**
+ * Prüft, ob der Online-Leak-Check aktiv ist (nicht offline und nicht in den Einstellungen deaktiviert).
+ */
+export function isLeakCheckEnabled(): boolean {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return false
+  }
+  if (typeof localStorage !== 'undefined') {
+    const val = localStorage.getItem(VAULT_LEAK_CHECK_ENABLED_KEY)
+    if (val === 'false') {
+      return false
+    }
+  }
+  return true
+}
+
+export function setLeakCheckEnabled(enabled: boolean): void {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(VAULT_LEAK_CHECK_ENABLED_KEY, enabled ? 'true' : 'false')
+  }
+}
 
 /**
  * Führt eine direkte K-Anonymitätsprüfung gegen die HIBP Range-API aus.
- * Gibt sofort { isLeaked: false, count: 0, checked: false } zurück, falls das Passwort < 6 Zeichen ist.
+ * Gibt sofort { isLeaked: false, count: 0, checked: false } zurück, falls offline, deaktiviert oder < 6 Zeichen.
  */
 export async function checkPasswordLeak(password: string): Promise<LeakCheckResult> {
-  if (!password || password.length < MIN_LEAK_CHECK_PASSWORD_LENGTH) {
+  if (!password || password.length < MIN_LEAK_CHECK_PASSWORD_LENGTH || !isLeakCheckEnabled()) {
     return { isLeaked: false, count: 0, checked: false }
   }
 
@@ -97,7 +120,7 @@ export function createDebouncedLeakChecker(
       timerId = null
     }
 
-    if (!password || password.length < MIN_LEAK_CHECK_PASSWORD_LENGTH) {
+    if (!password || password.length < MIN_LEAK_CHECK_PASSWORD_LENGTH || !isLeakCheckEnabled()) {
       onResult(null)
       return
     }

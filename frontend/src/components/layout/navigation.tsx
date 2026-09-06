@@ -25,6 +25,12 @@ interface NavigationAccess {
   canUseSkills: boolean
   calendarEnabled?: boolean
   notesEnabled?: boolean
+  /**
+   * Ist das Gerät offline, werden nur offline-fähige Bereiche angezeigt:
+   * Dashboard, Kalender und Notizen. Alle anderen Einträge (Server, KI,
+   * Teams, Administration, Panel, Docs) werden ausgeblendet.
+   */
+  isOnline?: boolean
 }
 
 /**
@@ -32,23 +38,25 @@ interface NavigationAccess {
  * Keine Secrets, keine Fachlogik — reine Sichtbarkeitsregeln.
  */
 export function buildNavigation(labels: Record<string, string>, access: NavigationAccess): NavigationItem[] {
+  const online = access.isOnline !== false
+
   return [
     { to: '/', icon: LayoutDashboard, label: labels.dashboard, group: 'Overview' },
     ...(access.calendarEnabled !== false ? [{ to: '/calendar', icon: CalendarIcon, label: labels.calendar || 'Kalender', group: 'Overview' as const }] : []),
     ...(access.notesEnabled !== false ? [{ to: '/notes', icon: StickyNote, label: labels.notes || 'Notizen', group: 'Overview' as const }] : []),
-    { to: '/servers', icon: Server, label: labels.servers, group: 'Infrastructure' },
-    ...(access.owner || access.canViewNodes ? [{ to: '/admin/nodes', icon: Network, label: labels.nodes, group: 'Infrastructure' as const }] : []),
-    ...(access.owner || access.canUseAi ? [{ to: '/ai', icon: Bot, label: labels.ai, group: 'Infrastructure' as const }] : []),
-    ...(access.owner || access.canUseAi || access.canUseSkills ? [{ to: '/teams', icon: UsersRound, label: labels.teams, group: 'Infrastructure' as const }] : []),
-    ...(access.owner || access.canManageUsers ? [{ to: '/users', icon: Users, label: labels.users, group: 'Administration' as const }] : []),
-    ...(access.owner || access.canManageRoles ? [{ to: '/roles', icon: Shield, label: labels.roles, group: 'Administration' as const }] : []),
-    ...(access.owner || access.canViewAudit ? [{ to: '/admin/audit', icon: History, label: labels.audit, group: 'Administration' as const }] : []),
-    ...(access.owner || access.canViewSettings ? [
+    ...(online ? [{ to: '/servers', icon: Server, label: labels.servers, group: 'Infrastructure' as const }] : []),
+    ...(online && (access.owner || access.canViewNodes) ? [{ to: '/admin/nodes', icon: Network, label: labels.nodes, group: 'Infrastructure' as const }] : []),
+    ...(online && (access.owner || access.canUseAi) ? [{ to: '/ai', icon: Bot, label: labels.ai, group: 'Infrastructure' as const }] : []),
+    ...(online && (access.owner || access.canUseAi || access.canUseSkills) ? [{ to: '/teams', icon: UsersRound, label: labels.teams, group: 'Infrastructure' as const }] : []),
+    ...(online && (access.owner || access.canManageUsers) ? [{ to: '/users', icon: Users, label: labels.users, group: 'Administration' as const }] : []),
+    ...(online && (access.owner || access.canManageRoles) ? [{ to: '/roles', icon: Shield, label: labels.roles, group: 'Administration' as const }] : []),
+    ...(online && (access.owner || access.canViewAudit) ? [{ to: '/admin/audit', icon: History, label: labels.audit, group: 'Administration' as const }] : []),
+    ...(online && (access.owner || access.canViewSettings) ? [
       { to: '/settings', icon: Settings, label: labels.settings, group: 'Panel' as const },
       { to: '/blueprints', icon: Boxes, label: labels.blueprints, group: 'Panel' as const },
     ] : []),
-    ...(access.owner || access.canManagePanelBackups ? [{ to: '/panel-backups', icon: Archive, label: labels.panelBackups, group: 'Panel' as const }] : []),
-    ...(access.owner || access.canReadPanelDatabase ? [{ to: '/panel-database', icon: Database, label: labels.panelDatabase, group: 'Panel' as const }] : []),
-    { to: '/docs', icon: BookOpen, label: labels.docs, group: 'Help' },
+    ...(online && (access.owner || access.canManagePanelBackups) ? [{ to: '/panel-backups', icon: Archive, label: labels.panelBackups, group: 'Panel' as const }] : []),
+    ...(online && (access.owner || access.canReadPanelDatabase) ? [{ to: '/panel-database', icon: Database, label: labels.panelDatabase, group: 'Panel' as const }] : []),
+    ...(online ? [{ to: '/docs', icon: BookOpen, label: labels.docs, group: 'Help' as const }] : []),
   ]
 }

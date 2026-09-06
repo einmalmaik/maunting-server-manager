@@ -48,14 +48,79 @@ export function bytesToHex(bytes: Uint8Array): string {
   return hex
 }
 
+export function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
+  const c = new Uint8Array(a.length + b.length)
+  c.set(a, 0)
+  c.set(b, a.length)
+  return c
+}
+
+const PAD_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+
 /**
- * Leitet den Inhaltsschlüssel (UserKey) und die blinde Bucket-ID aus dem Master-Passwort ab.
+ * Normalisiert Nutzlasten vor der Verschlüsselung auf ein Vielfaches von targetBlockSize (Standard 4.096 Bytes),
+ * um Traffic-Analyse und Ciphertext-Längen-Lecks im Netzwerk zu verhindern.
+ */
+export function padPayload(payload: string, targetBlockSize = 4096): string {
+  const safePayload = payload ?? ''
+  const prefix = `${safePayload.length}:`
+  const minLength = prefix.length + safePayload.length
+  const blockSize = Math.max(1, targetBlockSize || 4096)
+  const targetLength = Math.max(
+    blockSize,
+    Math.ceil(minLength / blockSize) * blockSize,
+  )
+  const paddingNeeded = targetLength - minLength
+
+  if (paddingNeeded <= 0) {
+    return `${prefix}${safePayload}`
+  }
+
+  const randomBytes = new Uint8Array(paddingNeeded)
+  if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
+    window.crypto.getRandomValues(randomBytes)
+  } else if (typeof globalThis !== 'undefined' && globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(randomBytes)
+  } else {
+    for (let i = 0; i < paddingNeeded; i++) {
+      randomBytes[i] = Math.floor(Math.random() * 256)
+    }
+  }
+
+  let padding = ''
+  for (let i = 0; i < paddingNeeded; i++) {
+    padding += PAD_CHARS[randomBytes[i] % PAD_CHARS.length]
+  }
+
+  return `${prefix}${safePayload}${padding}`
+}
+
+/**
+ * Entfernt das Padding einer entschlüsselten Nutzlast.
+ * Falls die Nutzlast unpadded ist (z. B. bestehende Altdaten mit reinem JSON), wird sie direkt zurückgegeben.
+ */
+export function unpadPayload(padded: string): string {
+  if (!padded) return ''
+  const match = padded.match(/^(\d+):/)
+  if (match) {
+    const lenStr = match[1]
+    const len = parseInt(lenStr, 10)
+    const start = lenStr.length + 1
+    if (Number.isSafeInteger(len) && len >= 0 && padded.length >= start + len) {
+      return padded.slice(start, start + len)
+    }
+  }
+  return padded
+}
+
+/**
+ * Leitet den Inhaltsschlüssel (UserKey), die blinde Bucket-ID und den blinden Besitznachweis aus dem Master-Passwort ab.
  * Nutzt speicherhartes Argon2id via `@msdis/shield` und schützt Schlüsselmaterial im RAM per `SecureBuffer`.
  */
 export async function deriveVaultKeys(
   masterPassword: string,
   saltBytes: Uint8Array,
-): Promise<{ userKey: CryptoKey; bucketId: string }> {
+): Promise<{ userKey: CryptoKey; bucketId: string; bucketAuthToken: string }> {
   if (!masterPassword || masterPassword.length === 0) {
     throw new Error('Master-Passwort darf nicht leer sein.')
   }
@@ -93,10 +158,16 @@ export async function deriveVaultKeys(
       // 3. Blinde Bucket-ID: SHA-256 Hash der zweiten 256 Bits
       const bucketId = await sha256Hex(bucketSeed)
 
+      // 4. Blinder Besitznachweis (bucketAuthToken): Deterministisch aus bucketSeed abgeleitet
+      const authSuffix = new TextEncoder().encode(':msm-vault-auth-v1')
+      const authMaterial = concatBytes(bucketSeed, authSuffix)
+      const bucketAuthToken = await sha256Hex(authMaterial)
+
       keyBytes.fill(0)
+      authMaterial.fill(0)
       bucketSeed.fill(0)
 
-      return { userKey, bucketId }
+      return { userKey, bucketId, bucketAuthToken }
     })
   } finally {
     secureBuf.destroy()
@@ -105,6 +176,7 @@ export async function deriveVaultKeys(
 
 /**
  * Verschlüsselt eine Tresor-Nutzlast gebunden an `entryId` als AAD.
+ * Verwendet padPayload zur Normalisierung der Ciphertext-Länge gegen Traffic-Analyse.
  */
 export async function encryptVaultEntry(
   data: Record<string, unknown>,
@@ -116,7 +188,9 @@ export async function encryptVaultEntry(
   }
 
   const encoder = new TextEncoder()
-  const plaintext = encoder.encode(JSON.stringify(data))
+  const rawJson = JSON.stringify(data)
+  const padded = padPayload(rawJson)
+  const plaintext = encoder.encode(padded)
   const aad = encoder.encode(entryId)
 
   const iv = new Uint8Array(AES_GCM_IV_LENGTH)
@@ -146,6 +220,7 @@ export async function encryptVaultEntry(
 
 /**
  * Entschlüsselt eine Tresor-Nutzlast gebunden an `entryId` als AAD.
+ * Unterstützt sowohl gepaddete als auch historische ungepaddete Datensätze (Zero-Breakage).
  */
 export async function decryptVaultEntry(
   envelope: string,
@@ -179,7 +254,8 @@ export async function decryptVaultEntry(
     )
 
     const decoder = new TextDecoder()
-    const jsonStr = decoder.decode(decryptedBuffer)
+    const rawStr = decoder.decode(decryptedBuffer)
+    const jsonStr = unpadPayload(rawStr)
     return JSON.parse(jsonStr) as Record<string, unknown>
   } catch {
     throw new Error('Tresor-Eintrag konnte nicht entschlüsselt werden (Authentifizierungsfehler oder falscher Schlüssel)')

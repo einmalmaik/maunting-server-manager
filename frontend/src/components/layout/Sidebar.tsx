@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
+import { useIsOnline } from '@/hooks/useIsOnline'
 import { Logo } from '@/components/Logo'
 import { LogOut, Plus, User as UserIcon, X } from 'lucide-react'
 import { buildNavigation, type NavGroupName } from './navigation'
@@ -37,6 +38,7 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
   const canManageAiSkills = useHasPermission('ai.skills.manage')
   const canUseSkills = useHasPermission('ai.skills.use')
   const canUseAi = canChatWithAi || canManageAiSkills
+  const isOnline = useIsOnline()
   
   const asideRef = useRef<HTMLElement>(null)
 
@@ -109,7 +111,7 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
   }, {
     owner: Boolean(user?.is_owner), canManageUsers, canManageRoles, canViewAudit, canViewSettings,
     canManagePanelBackups, canReadPanelDatabase, canViewNodes: canReadNodes || canManageNodes, canUseAi, canUseSkills,
-    calendarEnabled, notesEnabled,
+    calendarEnabled, notesEnabled, isOnline,
   })
   const groupLabels: Record<NavGroupName, string> = {
     Overview: t('navGroups.overview', 'Overview'), Infrastructure: t('navGroups.infrastructure', 'Infrastructure'),
@@ -136,8 +138,8 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
         {mobile && <button type="button" onClick={onNavigate} className="ml-auto grid min-h-11 min-w-11 place-items-center rounded-lg hover:bg-surface-container-high" aria-label={t('shell.closeNavigation', 'Close navigation')}><X className="h-5 w-5" /></button>}
       </div>
 
-      {/* Create Server Button — nur wenn `servers.create` (Owner-Bypass via Hook). */}
-      {canCreateServer && (
+      {/* Create Server Button — nur wenn `servers.create` (Owner-Bypass via Hook) und online. */}
+      {canCreateServer && isOnline && (
         <div className="px-4 mb-6">
           <NavLink
             to="/servers"

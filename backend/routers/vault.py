@@ -1,14 +1,16 @@
 """REST-Router für den blinden, verschlüsselten Zero-Knowledge Passwort-Manager."""
 
-from __future__ import annotations
+import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from database import get_db
 from dependencies import get_current_user, verify_csrf
+from middleware.rate_limit import limiter
 from models.user import User
 from schemas.vault import (
+    VaultBlindSyncRequest,
     VaultHintSetRequest,
     VaultHintStatusResponse,
     VaultSaltResponse,
@@ -20,6 +22,7 @@ from services import vault_service
 from services.panel_settings_service import PanelSettingsService
 
 router = APIRouter(prefix="/api/vault", tags=["vault"])
+logger = logging.getLogger(__name__)
 
 
 def _check_vault_enabled() -> None:
@@ -28,6 +31,41 @@ def _check_vault_enabled() -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Der Passwort-Manager ist in den Panel-Einstellungen deaktiviert.",
         )
+
+
+@router.post("/blind-sync", response_model=VaultSyncResponse)
+@limiter.limit("60/minute")
+def sync_vault_blind(
+    payload: VaultBlindSyncRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> VaultSyncResponse:
+    """Synchronisiert verschlüsselte Tresor-Einträge ohne Session-Cookies oder User-Metadaten.
+
+    CRITICAL PRIVACY & SECURITY INVARIANTS:
+    - Keine User-Cookies, keine Authorization-Header, keine CSRF-Tokens erforderlich (credentials: 'omit').
+    - Authentifizierung erfolgt ausschließlich über den blinden Besitznachweis (auth_token).
+    - Rate-limitiert gegen Brute-Force.
+    """
+    _check_vault_enabled()
+    try:
+        return vault_service.sync_vault_blind(db, payload)
+    except vault_service.VaultBucketUnauthorized as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        logger.error("Fehler bei der blinden Tresor-Synchronisation: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Interner Fehler bei der blinden Tresor-Synchronisation.",
+        ) from exc
 
 
 @router.post("/sync", response_model=VaultSyncResponse)
@@ -53,10 +91,16 @@ def sync_vault_entries(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=str(exc),
         ) from exc
-    except Exception as exc:
+    except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Fehler bei der Tresor-Synchronisation: {str(exc)}",
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        logger.error("Fehler bei der Tresor-Synchronisation: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Interner Fehler bei der Tresor-Synchronisation.",
         ) from exc
 
 

@@ -34,7 +34,7 @@ import { generateSecurePassword } from './vaultCrypto'
 import { createDebouncedLeakChecker, type LeakCheckResult } from './leakChecker'
 import { QrScannerModal } from './QrScannerModal'
 import { setzeTresorSchutz } from '../tauri'
-import { useVaultStore, type VaultItem } from './vaultStore'
+import { useVaultStore, getLocalVaultSalt, type VaultItem } from './vaultStore'
 import { DisBadge } from '@/components/DisBadge'
 
 export function VaultView() {
@@ -63,9 +63,11 @@ export function VaultView() {
     fetchVaultSalt,
   } = useVaultStore()
 
-  // Beim Laden Server-Status und Salt prüfen (ermöglicht nahtlose Multi-Device Anmeldung)
+  // Beim Laden Server-Status und Salt nur prüfen, falls lokal noch kein Salt vorliegt (Leck-2-Schutz)
   useEffect(() => {
-    void fetchVaultSalt()
+    if (!getLocalVaultSalt()) {
+      void fetchVaultSalt()
+    }
   }, [fetchVaultSalt])
 
   // Biometrie-Verfügbarkeit (Windows Hello / Fingerabdruck) beim Laden abfragen
@@ -130,12 +132,6 @@ export function VaultView() {
   const [editHintInput, setEditHintInput] = useState('')
   const [isSavingHint, setIsSavingHint] = useState(false)
   const [dismissedHintReminder, setDismissedHintReminder] = useState(false)
-
-  useEffect(() => {
-    if (isUnlocked) {
-      void checkHintStatus()
-    }
-  }, [isUnlocked, checkHintStatus])
 
   // UI-Zustände für Sperre & Ersteinrichtung
   const [isSetupMode, setIsSetupMode] = useState(!isInitialized)
@@ -868,6 +864,7 @@ export function VaultView() {
             onClick={() => {
               setEditHintInput('')
               setIsHintModalOpen(true)
+              void checkHintStatus()
             }}
             title="Passwort-Hinweis verwalten"
             className={`p-1.5 ${hasHint === false ? 'text-amber-400 hover:text-amber-300' : 'text-on-surface-variant hover:text-on-surface'}`}

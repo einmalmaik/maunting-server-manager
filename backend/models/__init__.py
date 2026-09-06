@@ -56,6 +56,7 @@ from .panel_popup import PanelPopup, UserPopupState
 from .vault_entry import VaultEntry
 from .vault_hint import VaultHint
 from .vault_user_setting import VaultUserSetting
+from .vault_blind_bucket import VaultBlindBucket
 from .credential import (
     CREDENTIAL_KINDS,
     KIND_GITHUB_TOKEN,
@@ -93,5 +94,5 @@ __all__ = [
     "CREDENTIAL_KINDS", "KIND_GITHUB_TOKEN", "KIND_STEAM_ACCOUNT",
     "UserMailbox", "UserCalendar", "CalendarEvent", "Note",
     "PanelPopup", "UserPopupState",
-    "VaultEntry", "VaultHint", "VaultUserSetting",
+    "VaultEntry", "VaultHint", "VaultUserSetting", "VaultBlindBucket",
 ]  # noqa: E501

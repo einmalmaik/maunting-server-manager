@@ -18,14 +18,35 @@ class VaultMutation(BaseModel):
 
 class VaultSyncRequest(BaseModel):
     bucket_id: str = Field(..., min_length=64, max_length=64, description="Blinde 64-Hex Bucket-ID, abgeleitet aus dem Client-Master-Secret")
-    since_revision: int = Field(default=0, ge=0, description="Revisions-Wasserzeichen des Clients")
-    mutations: List[VaultMutation] = Field(default_factory=list, description="Neue oder aktualisierte verschluesselte Eintraege")
+    since_revision: int = Field(default=0, ge=0, le=9007199254740991, description="Revisions-Wasserzeichen des Clients")
+    mutations: List[VaultMutation] = Field(default_factory=list, max_length=100, description="Neue oder aktualisierte verschluesselte Eintraege")
 
     @field_validator("bucket_id")
     @classmethod
     def validate_bucket_id(cls, v: str) -> str:
         if not HEX_64_REGEX.match(v):
             raise ValueError("bucket_id must be a 64-character hex string")
+        return v.lower()
+
+
+class VaultBlindSyncRequest(BaseModel):
+    bucket_id: str = Field(..., min_length=64, max_length=64, description="Blinde 64-Hex Bucket-ID")
+    auth_token: str = Field(..., min_length=64, max_length=64, description="Blinder Besitznachweis (SHA-256 Hex)")
+    since_revision: int = Field(default=0, ge=0, le=9007199254740991, description="Revisions-Wasserzeichen des Clients")
+    mutations: List[VaultMutation] = Field(default_factory=list, max_length=100, description="Neue oder aktualisierte verschluesselte Eintraege")
+
+    @field_validator("bucket_id")
+    @classmethod
+    def validate_bucket_id(cls, v: str) -> str:
+        if not HEX_64_REGEX.match(v):
+            raise ValueError("bucket_id must be a 64-character hex string")
+        return v.lower()
+
+    @field_validator("auth_token")
+    @classmethod
+    def validate_auth_token(cls, v: str) -> str:
+        if not HEX_64_REGEX.match(v):
+            raise ValueError("auth_token must be a 64-character hex string")
         return v.lower()
 
 

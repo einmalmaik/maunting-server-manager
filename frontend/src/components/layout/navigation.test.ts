@@ -4,6 +4,7 @@ import { buildNavigation } from './navigation'
 const labels = {
   dashboard: 'Dashboard',
   calendar: 'Calendar',
+  notes: 'Notes',
   servers: 'Servers',
   users: 'Users',
   roles: 'Roles',
@@ -15,6 +16,7 @@ const labels = {
   nodes: 'Nodes',
   docs: 'Docs',
   ai: 'AI',
+  teams: 'Teams',
 }
 
 describe('buildNavigation', () => {
@@ -127,5 +129,91 @@ describe('buildNavigation', () => {
     expect(buildNavigation(labels, access).some((item) => item.to === '/calendar')).toBe(true)
     expect(buildNavigation(labels, { ...access, calendarEnabled: true }).some((item) => item.to === '/calendar')).toBe(true)
     expect(buildNavigation(labels, { ...access, calendarEnabled: false }).some((item) => item.to === '/calendar')).toBe(false)
+  })
+
+  it('zeigt offline nur Dashboard, Kalender und Notizen', () => {
+    const access = {
+      owner: true,
+      canManageUsers: true,
+      canManageRoles: true,
+      canViewAudit: true,
+      canViewSettings: true,
+      canManagePanelBackups: true,
+      canReadPanelDatabase: true,
+      canViewNodes: true,
+      canUseAi: true,
+      canUseSkills: true,
+      isOnline: false,
+    }
+    const items = buildNavigation(labels, access)
+    const routes = items.map((i) => i.to)
+
+    // Offline-fähige Bereiche bleiben sichtbar
+    expect(routes).toContain('/')
+    expect(routes).toContain('/calendar')
+    expect(routes).toContain('/notes')
+
+    // Online-only Bereiche sind ausgeblendet
+    expect(routes).not.toContain('/servers')
+    expect(routes).not.toContain('/ai')
+    expect(routes).not.toContain('/teams')
+    expect(routes).not.toContain('/admin/nodes')
+    expect(routes).not.toContain('/users')
+    expect(routes).not.toContain('/roles')
+    expect(routes).not.toContain('/admin/audit')
+    expect(routes).not.toContain('/settings')
+    expect(routes).not.toContain('/blueprints')
+    expect(routes).not.toContain('/panel-backups')
+    expect(routes).not.toContain('/panel-database')
+    expect(routes).not.toContain('/docs')
+  })
+
+  it('zeigt online alle Bereiche wie bisher (isOnline=true)', () => {
+    const access = {
+      owner: true,
+      canManageUsers: true,
+      canManageRoles: true,
+      canViewAudit: true,
+      canViewSettings: true,
+      canManagePanelBackups: true,
+      canReadPanelDatabase: true,
+      canViewNodes: true,
+      canUseAi: true,
+      canUseSkills: true,
+      isOnline: true,
+    }
+    const items = buildNavigation(labels, access)
+    const routes = items.map((i) => i.to)
+
+    expect(routes).toContain('/')
+    expect(routes).toContain('/calendar')
+    expect(routes).toContain('/notes')
+    expect(routes).toContain('/servers')
+    expect(routes).toContain('/ai')
+    expect(routes).toContain('/teams')
+    expect(routes).toContain('/docs')
+  })
+
+  it('behandelt fehlendes isOnline als online (Abwärtskompatibilität)', () => {
+    const access = {
+      owner: true,
+      canManageUsers: true,
+      canManageRoles: true,
+      canViewAudit: true,
+      canViewSettings: true,
+      canManagePanelBackups: true,
+      canReadPanelDatabase: true,
+      canViewNodes: true,
+      canUseAi: true,
+      canUseSkills: true,
+      // isOnline absichtlich weggelassen
+    }
+    const items = buildNavigation(labels, access)
+    const routes = items.map((i) => i.to)
+
+    // Alle Bereiche sichtbar, weil isOnline undefined => online
+    expect(routes).toContain('/servers')
+    expect(routes).toContain('/ai')
+    expect(routes).toContain('/docs')
   })
 })

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import uuid
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Index, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, Index, PrimaryKeyConstraint, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -33,7 +33,7 @@ class VaultEntry(Base):
 
     __tablename__ = "vault_entries"
 
-    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=_gen_uuid)
+    id: Mapped[str] = mapped_column(String(64), default=_gen_uuid)
     bucket_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     ciphertext: Mapped[Text] = mapped_column(Text, default="", nullable=False)
     revision: Mapped[int] = mapped_column(BigInteger, default=1, nullable=False, index=True)
@@ -42,5 +42,6 @@ class VaultEntry(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
 
     __table_args__ = (
+        PrimaryKeyConstraint("bucket_id", "id"),
         Index("ix_vault_entries_bucket_revision", "bucket_id", "revision"),
     )

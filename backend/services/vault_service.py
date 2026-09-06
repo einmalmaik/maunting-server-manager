@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
+import secrets
 from typing import List
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from models.user import User
 from models.vault_entry import VaultEntry
 from models.vault_hint import VaultHint
 from models.vault_user_setting import VaultUserSetting
+from models.vault_blind_bucket import VaultBlindBucket
 from schemas.vault import (
+    VaultBlindSyncRequest,
     VaultEntryOut,
     VaultHintStatusResponse,
     VaultMutation,
@@ -26,6 +31,10 @@ def _now() -> datetime:
 
 class VaultBucketAccessDenied(Exception):
     """Raised when a user attempts to access a bucket not belonging to them."""
+
+
+class VaultBucketUnauthorized(Exception):
+    """Raised when an invalid auth_token is supplied for a blind vault bucket."""
 
 
 def sync_vault(db: Session, user: User, request: VaultSyncRequest) -> VaultSyncResponse:
@@ -98,6 +107,124 @@ def sync_vault(db: Session, user: User, request: VaultSyncRequest) -> VaultSyncR
                     updated_at=_now(),
                 )
                 db.add(new_entry)
+                existing_map[m.id] = new_entry
+
+        db.commit()
+
+    # Alle Datensätze abfragen, die neuer als der Client-Stand sind
+    sync_stmt = (
+        select(VaultEntry)
+        .where(
+            VaultEntry.bucket_id == bucket_id,
+            VaultEntry.revision > request.since_revision,
+        )
+        .order_by(VaultEntry.revision.asc())
+    )
+    entries_db = db.scalars(sync_stmt).all()
+
+    # Maximale Server-Revision für diesen Bucket ermitteln
+    max_rev_stmt = select(func.max(VaultEntry.revision)).where(
+        VaultEntry.bucket_id == bucket_id
+    )
+    max_rev = db.scalar(max_rev_stmt) or request.since_revision
+
+    entries_out = [
+        VaultEntryOut(
+            id=e.id,
+            ciphertext=e.ciphertext,
+            revision=e.revision,
+            is_deleted=e.is_deleted,
+            updated_at=e.updated_at,
+        )
+        for e in entries_db
+    ]
+
+    return VaultSyncResponse(
+        server_revision=int(max_rev),
+        entries=entries_out,
+    )
+
+
+def sync_vault_blind(db: Session, request: VaultBlindSyncRequest) -> VaultSyncResponse:
+    """Führt einen blinden, Cookie- und User-unabhängigen Revisions-Sync durch.
+
+    Sicherheits- und Privacy-Invarianten:
+    - Der Endpunkt erfordert und kennt kein Benutzerkonto, keine Session-Cookies und keine CSRF-Tokens.
+    - Die Autorisierung erfolgt ausschließlich über den blinden Besitznachweis (auth_token).
+    - Der Server speichert nur sha256(auth_token) als auth_verifier in konstanter Zeit geprüft.
+    - Sanfte Zero-Breakage-Migration: Falls der Bucket bisher in vault_user_settings an einen Benutzer
+      gekoppelt war, wird diese Kopplung bei der ersten blinden Registrierung getrennt.
+    """
+    bucket_id = request.bucket_id.lower()
+    auth_token = request.auth_token.lower()
+    computed_verifier = hashlib.sha256(auth_token.encode("utf-8")).hexdigest()
+
+    # 1. Blind Bucket lookup
+    blind_bucket = db.get(VaultBlindBucket, bucket_id)
+    if not blind_bucket:
+        # Erster blinder Sync für diesen Bucket -> registrieren
+        blind_bucket = VaultBlindBucket(
+            bucket_id=bucket_id,
+            auth_verifier=computed_verifier,
+            created_at=_now(),
+            updated_at=_now(),
+        )
+        db.add(blind_bucket)
+
+        # Sanfte Zero-Breakage Migration: Metadaten-Entkopplung von vault_user_settings
+        existing_user_settings = db.scalars(
+            select(VaultUserSetting).where(VaultUserSetting.bucket_id == bucket_id)
+        ).all()
+        for s in existing_user_settings:
+            s.bucket_id = None
+            s.updated_at = _now()
+
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            blind_bucket = db.get(VaultBlindBucket, bucket_id)
+            if not blind_bucket or not secrets.compare_digest(blind_bucket.auth_verifier, computed_verifier):
+                raise VaultBucketUnauthorized("Ungültiges Authentifizierungs-Token für diesen Tresor-Bucket.")
+    else:
+        # Bestehender blinder Bucket -> auth_verifier prüfen (Timing-sicher)
+        if not secrets.compare_digest(blind_bucket.auth_verifier, computed_verifier):
+            raise VaultBucketUnauthorized("Ungültiges Authentifizierungs-Token für diesen Tresor-Bucket.")
+
+    # 2. Monotone Mutation & Revisions-Zuweisung (SEC-03)
+    if request.mutations:
+        max_rev_db = db.scalar(
+            select(func.max(VaultEntry.revision)).where(VaultEntry.bucket_id == bucket_id)
+        ) or 0
+        current_rev = max(int(max_rev_db), int(request.since_revision))
+
+        mutation_ids = [m.id for m in request.mutations]
+        existing_stmt = select(VaultEntry).where(
+            VaultEntry.bucket_id == bucket_id,
+            VaultEntry.id.in_(mutation_ids),
+        )
+        existing_map = {row.id: row for row in db.scalars(existing_stmt).all()}
+
+        for m in request.mutations:
+            existing = existing_map.get(m.id)
+            current_rev += 1
+            if existing:
+                existing.ciphertext = m.ciphertext
+                existing.revision = current_rev
+                existing.is_deleted = m.is_deleted
+                existing.updated_at = _now()
+            else:
+                new_entry = VaultEntry(
+                    id=m.id,
+                    bucket_id=bucket_id,
+                    ciphertext=m.ciphertext,
+                    revision=current_rev,
+                    is_deleted=m.is_deleted,
+                    created_at=_now(),
+                    updated_at=_now(),
+                )
+                db.add(new_entry)
+                existing_map[m.id] = new_entry
 
         db.commit()
 

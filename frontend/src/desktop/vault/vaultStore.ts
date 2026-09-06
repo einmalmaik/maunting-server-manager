@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { api } from '@/api/client'
+import { api, apiUrl } from '@/api/client'
 import {
   base64ToBytes,
   decryptVaultEntry,
@@ -68,6 +68,41 @@ interface VaultSyncResponse {
   }[]
 }
 
+export interface VaultBlindSyncPayload {
+  bucket_id: string
+  auth_token: string
+  since_revision: number
+  mutations: {
+    id: string
+    ciphertext: string
+    revision: number
+    is_deleted: boolean
+  }[]
+}
+
+/**
+ * Führt einen anonymen Tresor-Sync über credentials: 'omit' ohne Session-Cookies oder User-Header durch.
+ */
+export async function blindVaultSync(
+  payload: VaultBlindSyncPayload,
+): Promise<VaultSyncResponse> {
+  const url = apiUrl('/api/vault/blind-sync')
+  const res = await fetch(url, {
+    method: 'POST',
+    credentials: 'omit',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+
+  if (!res.ok) {
+    throw new Error(`Blind vault sync failed with status ${res.status}`)
+  }
+
+  return (await res.json()) as VaultSyncResponse
+}
+
 const VAULT_SALT_KEY = 'mss:vault_salt'
 const VAULT_SETUP_DONE_KEY = 'mss:vault_setup_done'
 const VAULT_CANARY_PREFIX = 'mss:vault_canary_'
@@ -101,6 +136,33 @@ export function getLocalVaultSalt(): Uint8Array | null {
   }
 }
 
+export function getStoredBlobs(bucketId: string): StoredEncryptedEntry[] {
+  if (typeof localStorage === 'undefined') return []
+  const raw = localStorage.getItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`)
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch (err) {
+    console.warn('Beschädigter lokaler Tresor-Cache konnte nicht geparst werden:', err)
+    return []
+  }
+}
+
+export function getPendingQueue(bucketId: string): StoredEncryptedEntry[] {
+  if (typeof localStorage === 'undefined') return []
+  const raw = localStorage.getItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`)
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch (err) {
+    console.warn('Beschädigte Tresor-Warteschlange konnte nicht geparst werden:', err)
+    return []
+  }
+}
+
+
 export function getOrCreateVaultSalt(): Uint8Array {
   const local = getLocalVaultSalt()
   if (local) return local
@@ -127,6 +189,7 @@ interface VaultState {
   lockedUntilMs: number
   userKey: CryptoKey | null
   bucketId: string | null
+  bucketAuthToken: string | null
   items: VaultItem[]
   selectedItemId: string | null
   searchQuery: string
@@ -177,6 +240,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   lockedUntilMs: 0,
   userKey: null,
   bucketId: null,
+  bucketAuthToken: null,
   items: [],
   selectedItemId: null,
   searchQuery: '',
@@ -354,6 +418,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
       isUnlocked: false,
       userKey: null,
       bucketId: null,
+      bucketAuthToken: null,
       items: [],
       selectedItemId: null,
       unlockError: null,
@@ -377,6 +442,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
       lockedUntilMs: 0,
       userKey: null,
       bucketId: null,
+      bucketAuthToken: null,
       items: [],
       selectedItemId: null,
       unlockError: null,
@@ -389,7 +455,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     try {
       const salt = getOrCreateVaultSalt()
       const saltHex = Array.from(salt).map((b) => b.toString(16).padStart(2, '0')).join('')
-      const { userKey, bucketId } = await deriveVaultKeys(masterPassword, salt)
+      const { userKey, bucketId, bucketAuthToken } = await deriveVaultKeys(masterPassword, salt)
 
       // KDF-Salt serverseitig hinterlegen (SEC-04)
       try {
@@ -412,8 +478,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
       localStorage.setItem(VAULT_SETUP_DONE_KEY, 'true')
 
       // Falls bereits gecachte Einträge existieren, entschlüsseln
-      const cachedRaw = localStorage.getItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`)
-      const cachedBlobs: StoredEncryptedEntry[] = cachedRaw ? JSON.parse(cachedRaw) : []
+      const cachedBlobs = getStoredBlobs(bucketId)
       const decryptedItems: VaultItem[] = []
 
       for (const blob of cachedBlobs) {
@@ -446,6 +511,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
         lockedUntilMs: 0,
         userKey,
         bucketId,
+        bucketAuthToken,
         items: decryptedItems,
         selectedItemId: decryptedItems.length > 0 ? decryptedItems[0].id : null,
       })
@@ -484,7 +550,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
         salt = getOrCreateVaultSalt()
       }
 
-      const { userKey, bucketId } = await deriveVaultKeys(masterPassword, salt)
+      const { userKey, bucketId, bucketAuthToken } = await deriveVaultKeys(masterPassword, salt)
 
       // Bei Multi-Device Login: Wenn ein Server-Bucket hinterlegt ist, muss der abgeleitete Bucket exakt übereinstimmen
       const serverBucket = typeof localStorage !== 'undefined' ? localStorage.getItem(VAULT_SERVER_BUCKET_KEY) : null
@@ -503,8 +569,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
       }
 
       // 4. Lokale verschlüsselte Blobs aus dem Cache laden
-      const cachedRaw = localStorage.getItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`)
-      const cachedBlobs: StoredEncryptedEntry[] = cachedRaw ? JSON.parse(cachedRaw) : []
+      const cachedBlobs = getStoredBlobs(bucketId)
 
       const decryptedItems: VaultItem[] = []
       for (const blob of cachedBlobs) {
@@ -528,8 +593,8 @@ export const useVaultStore = create<VaultState>((set, get) => ({
             updatedAt: Number(payload.updatedAt || Date.now()),
             revision: blob.revision,
           })
-        } catch {
-          throw new Error('Falsches Master-Passwort. Bitte überprüfe deine Eingabe.')
+        } catch (err) {
+          console.warn(`Gecachter Tresor-Eintrag ${blob.id} konnte nicht entschlüsselt werden (übersprungen):`, err)
         }
       }
 
@@ -553,13 +618,13 @@ export const useVaultStore = create<VaultState>((set, get) => ({
         lockedUntilMs: 0,
         userKey,
         bucketId,
+        bucketAuthToken,
         items: decryptedItems,
         selectedItemId: decryptedItems.length > 0 ? decryptedItems[0].id : null,
       })
 
-      // Hintergrund-Sync & Hinweis-Status anstoßen
+      // Hintergrund-Sync anstoßen (kein verräterischer Vorab-Ping an hint-status im fremden Netz)
       void get().syncWithServer()
-      void get().checkHintStatus()
 
       return true
     } catch (err: unknown) {
@@ -617,13 +682,11 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     )
 
     // In Cache und Warteschlange ablegen
-    const cachedRaw = localStorage.getItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`)
-    const cachedBlobs: StoredEncryptedEntry[] = cachedRaw ? JSON.parse(cachedRaw) : []
+    const cachedBlobs = getStoredBlobs(bucketId)
     cachedBlobs.push({ id: newId, ciphertext, revision: 1, is_deleted: false })
     localStorage.setItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`, JSON.stringify(cachedBlobs))
 
-    const pendingRaw = localStorage.getItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`)
-    const pendingQueue: StoredEncryptedEntry[] = pendingRaw ? JSON.parse(pendingRaw) : []
+    const pendingQueue = getPendingQueue(bucketId)
     pendingQueue.push({ id: newId, ciphertext, revision: 1, is_deleted: false })
     localStorage.setItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`, JSON.stringify(pendingQueue))
 
@@ -698,16 +761,13 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     const ciphertext = await encryptVaultEntry(payload, userKey, id)
 
     // Lokalen Cache aktualisieren
-    const cachedRaw = localStorage.getItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`)
-    let cachedBlobs: StoredEncryptedEntry[] = cachedRaw ? JSON.parse(cachedRaw) : []
+    let cachedBlobs = getStoredBlobs(bucketId)
     cachedBlobs = cachedBlobs.filter((b) => b.id !== id)
     cachedBlobs.push({ id, ciphertext, revision, is_deleted: false })
     localStorage.setItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`, JSON.stringify(cachedBlobs))
 
     // Pending Queue aktualisieren
-    const pendingRaw = localStorage.getItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`)
-    let pendingQueue: StoredEncryptedEntry[] = pendingRaw ? JSON.parse(pendingRaw) : []
-    pendingQueue = pendingQueue.filter((b) => b.id !== id)
+    const pendingQueue = getPendingQueue(bucketId).filter((b) => b.id !== id)
     pendingQueue.push({ id, ciphertext, revision, is_deleted: false })
     localStorage.setItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`, JSON.stringify(pendingQueue))
 
@@ -727,15 +787,12 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     const revision = (existing?.revision || 0) + 1
 
     // Lokalen Cache bereinigen
-    const cachedRaw = localStorage.getItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`)
-    let cachedBlobs: StoredEncryptedEntry[] = cachedRaw ? JSON.parse(cachedRaw) : []
+    let cachedBlobs = getStoredBlobs(bucketId)
     cachedBlobs = cachedBlobs.filter((b) => b.id !== id)
     localStorage.setItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`, JSON.stringify(cachedBlobs))
 
     // Tombstone in Pending Queue
-    const pendingRaw = localStorage.getItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`)
-    let pendingQueue: StoredEncryptedEntry[] = pendingRaw ? JSON.parse(pendingRaw) : []
-    pendingQueue = pendingQueue.filter((b) => b.id !== id)
+    const pendingQueue = getPendingQueue(bucketId).filter((b) => b.id !== id)
     pendingQueue.push({ id, ciphertext: '', revision, is_deleted: true })
     localStorage.setItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`, JSON.stringify(pendingQueue))
 
@@ -763,37 +820,46 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   },
 
   syncWithServer: async () => {
-    const { userKey, bucketId, syncStatus, items } = get()
+    const { userKey, bucketId, bucketAuthToken, syncStatus, items } = get()
     if (!userKey || !bucketId || syncStatus === 'syncing') return
 
     set({ syncStatus: 'syncing' })
 
     try {
-      const pendingRaw = localStorage.getItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`)
-      const pendingQueue: StoredEncryptedEntry[] = pendingRaw ? JSON.parse(pendingRaw) : []
+      const pendingQueue = getPendingQueue(bucketId)
 
       const storedRev = localStorage.getItem(`${VAULT_REVISION_PREFIX}${bucketId}`)
       const sinceRevision = storedRev ? parseInt(storedRev, 10) : 0
 
-      const payload: VaultSyncPayload = {
-        bucket_id: bucketId,
-        since_revision: sinceRevision,
-        mutations: pendingQueue.map((m) => ({
-          id: m.id,
-          ciphertext: m.ciphertext,
-          revision: m.revision,
-          is_deleted: m.is_deleted,
-        })),
+      const mutations = pendingQueue.map((m) => ({
+        id: m.id,
+        ciphertext: m.ciphertext,
+        revision: m.revision,
+        is_deleted: m.is_deleted,
+      }))
+
+      let data: VaultSyncResponse
+      if (bucketAuthToken) {
+        data = await blindVaultSync({
+          bucket_id: bucketId,
+          auth_token: bucketAuthToken,
+          since_revision: sinceRevision,
+          mutations,
+        })
+      } else {
+        const payload: VaultSyncPayload = {
+          bucket_id: bucketId,
+          since_revision: sinceRevision,
+          mutations,
+        }
+        data = await api<VaultSyncResponse>('/api/vault/sync', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        })
       }
 
-      const data = await api<VaultSyncResponse>('/api/vault/sync', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      })
-
       // Server-Antwort verarbeiten (SEC-03: Monotone Revisionsverarbeitung)
-      const cachedRaw = localStorage.getItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`)
-      let cachedBlobs: StoredEncryptedEntry[] = cachedRaw ? JSON.parse(cachedRaw) : []
+      let cachedBlobs = getStoredBlobs(bucketId)
       let currentItems = [...items]
 
       for (const entry of data.entries) {
@@ -841,19 +907,38 @@ export const useVaultStore = create<VaultState>((set, get) => ({
         }
       }
 
-      // Warteschlange leeren und neue Revision speichern
+      // Nur erfolgreich synchronisierte Mutationen aus der Warteschlange austragen
+      const syncedIds = new Set(mutations.map((m) => m.id))
+      let latestPending = getPendingQueue(bucketId).filter((m) => !syncedIds.has(m.id))
+      if (latestPending.length > 0) {
+        localStorage.setItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`, JSON.stringify(latestPending))
+      } else {
+        localStorage.removeItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`)
+      }
       localStorage.setItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`, JSON.stringify(cachedBlobs))
-      localStorage.removeItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`)
       localStorage.setItem(`${VAULT_REVISION_PREFIX}${bucketId}`, String(data.server_revision))
+
+      // Falls lokal noch kein Canary existiert (z. B. Multi-Device Login), jetzt absichern
+      if (typeof localStorage !== 'undefined' && !localStorage.getItem(`${VAULT_CANARY_PREFIX}${bucketId}`)) {
+        try {
+          const canary = await encryptVaultEntry(
+            { canary: 'mss-vault-initialized-v1', createdAt: Date.now() },
+            userKey,
+            'vault-canary',
+          )
+          localStorage.setItem(`${VAULT_CANARY_PREFIX}${bucketId}`, canary)
+        } catch {}
+      }
 
       set({
         items: currentItems,
         syncStatus: 'synced',
         lastSyncTime: Date.now(),
       })
-    } catch {
-      // Bei Netzwerk- oder Serverfehler: Im Offline-Modus bleiben
-      set({ syncStatus: 'offline' })
+    } catch (err: unknown) {
+      // Bei 401 Unauthorized: Auth-Fehler anzeigen, sonst im Offline-Modus bleiben
+      const isAuthError = err instanceof Error && err.message.includes('401')
+      set({ syncStatus: isAuthError ? 'error' : 'offline' })
     }
   },
 
@@ -900,7 +985,9 @@ export const useVaultStore = create<VaultState>((set, get) => ({
 if (typeof window !== 'undefined') {
   setTimeout(() => {
     void useVaultStore.getState().checkBiometricsSupport()
-    void useVaultStore.getState().fetchVaultSalt()
+    if (!getLocalVaultSalt()) {
+      void useVaultStore.getState().fetchVaultSalt()
+    }
   }, 50)
 
   const triggerBlurLock = () => {

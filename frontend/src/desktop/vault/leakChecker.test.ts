@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { checkPasswordLeak, createDebouncedLeakChecker } from './leakChecker'
+import { checkPasswordLeak, createDebouncedLeakChecker, setLeakCheckEnabled } from './leakChecker'
 
 describe('leakChecker', () => {
   beforeEach(() => {
@@ -84,5 +84,38 @@ describe('leakChecker', () => {
     const result = await checkPasswordLeak('irgendein-passwort-offline')
     expect(result.isLeaked).toBe(false)
     expect(result.checked).toBe(false)
+  })
+
+  it('führt keinen Netzwerk-Ping aus, wenn offline oder deaktiviert', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+
+    // 1. Deaktiviert über Konfiguration
+    setLeakCheckEnabled(false)
+    const resDisabled = await checkPasswordLeak('password123')
+    expect(resDisabled.isLeaked).toBe(false)
+    expect(resDisabled.checked).toBe(false)
+    expect(fetchSpy).not.toHaveBeenCalled()
+
+    // Zurücksetzen
+    setLeakCheckEnabled(true)
+
+    // 2. Offline via navigator.onLine
+    const originalNavigator = globalThis.navigator
+    try {
+      Object.defineProperty(globalThis, 'navigator', {
+        value: { ...originalNavigator, onLine: false },
+        configurable: true,
+      })
+
+      const resOffline = await checkPasswordLeak('password123')
+      expect(resOffline.isLeaked).toBe(false)
+      expect(resOffline.checked).toBe(false)
+      expect(fetchSpy).not.toHaveBeenCalled()
+    } finally {
+      Object.defineProperty(globalThis, 'navigator', {
+        value: originalNavigator,
+        configurable: true,
+      })
+    }
   })
 })

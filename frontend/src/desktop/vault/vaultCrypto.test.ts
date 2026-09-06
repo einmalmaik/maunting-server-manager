@@ -11,6 +11,9 @@ import {
   BIOMETRIC_ENVELOPE_PREFIX,
   wrapVaultCredentialsForBiometrics,
   unwrapVaultCredentialsFromBiometrics,
+  padPayload,
+  unpadPayload,
+  concatBytes,
 } from './vaultCrypto'
 
 describe('vaultCrypto', () => {
@@ -81,5 +84,86 @@ describe('vaultCrypto', () => {
 
     // Invalid prefix / corrupted envelope must throw
     await expect(unwrapVaultCredentialsFromBiometrics('invalid-prefix:12345')).rejects.toThrow()
+  })
+
+  it('derives deterministic bucketAuthToken distinct from bucketId', async () => {
+    const salt = new Uint8Array(16)
+    salt.fill(42)
+    const res1 = await deriveVaultKeys('super-secret-pw', salt)
+    const res2 = await deriveVaultKeys('super-secret-pw', salt)
+
+    expect(res1.bucketAuthToken).toBeDefined()
+    expect(res1.bucketAuthToken.length).toBe(64)
+    // Deterministic
+    expect(res1.bucketAuthToken).toBe(res2.bucketAuthToken)
+    expect(res1.bucketId).toBe(res2.bucketId)
+    // Must be completely distinct from bucketId
+    expect(res1.bucketAuthToken).not.toBe(res1.bucketId)
+  })
+
+  it('padPayload and unpadPayload normalize payload size and roundtrip cleanly', () => {
+    const payload = JSON.stringify({ service: 'GitHub', token: 'ghp_123456789' })
+    const padded = padPayload(payload, 4096)
+
+    expect(padded.length).toBe(4096)
+    expect(unpadPayload(padded)).toBe(payload)
+
+    // Empty payload
+    const emptyPadded = padPayload('', 4096)
+    expect(emptyPadded.length).toBe(4096)
+    expect(unpadPayload(emptyPadded)).toBe('')
+
+    // Payload with multi-byte unicode and emojis
+    const unicodePayload = JSON.stringify({ note: 'Tresor-Notiz mit Emojis 🔑🔒🛡️ und Umlauten äöüß' })
+    const unicodePadded = padPayload(unicodePayload, 4096)
+    expect(unicodePadded.length).toBe(4096)
+    expect(unpadPayload(unicodePadded)).toBe(unicodePayload)
+
+    // Large payload exceeding 4096 pads to 8192
+    const largePayload = 'A'.repeat(5000)
+    const largePadded = padPayload(largePayload, 4096)
+    expect(largePadded.length).toBe(8192)
+    expect(unpadPayload(largePadded)).toBe(largePayload)
+
+    // Edge cases: targetBlockSize <= 0 or invalid falls back safely to >= 1 byte
+    const smallPadded = padPayload('test', 0)
+    expect(unpadPayload(smallPadded)).toBe('test')
+
+    // Edge cases: unpadPayload with truncated or invalid length prefix returns raw
+    expect(unpadPayload('99999:short')).toBe('99999:short')
+    expect(unpadPayload('')).toBe('')
+    expect(unpadPayload('not-padded-string')).toBe('not-padded-string')
+
+    // Zero-Breakage: Unpadded raw JSON string is returned untouched
+    const rawLegacyJson = '{"service":"LegacyService","password":"plain"}'
+    expect(unpadPayload(rawLegacyJson)).toBe(rawLegacyJson)
+  })
+
+  it('decryptVaultEntry supports legacy unpadded ciphertext seamlessly (Zero-Breakage)', async () => {
+    const salt = new Uint8Array(16)
+    salt.fill(9)
+    const { userKey } = await deriveVaultKeys('legacy-user-password', salt)
+    const entryId = 'legacy-entry-001'
+
+    // Manually encrypt unpadded JSON (simulating legacy entry created before padding)
+    const encoder = new TextEncoder()
+    const legacyPlaintext = encoder.encode(JSON.stringify({ service: 'OldService', password: 'old-password' }))
+    const aad = encoder.encode(entryId)
+    const iv = new Uint8Array(12)
+    window.crypto.getRandomValues(iv)
+    const encryptedBuf = await window.crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv, additionalData: aad, tagLength: 128 },
+      userKey,
+      legacyPlaintext,
+    )
+    const combined = new Uint8Array(iv.length + encryptedBuf.byteLength)
+    combined.set(iv, 0)
+    combined.set(new Uint8Array(encryptedBuf), iv.length)
+    const legacyEnvelope = `${VAULT_ENVELOPE_V1_PREFIX}${bytesToBase64(combined)}`
+
+    // decryptVaultEntry MUST be able to decrypt it without error
+    const decrypted = await decryptVaultEntry(legacyEnvelope, userKey, entryId)
+    expect(decrypted.service).toBe('OldService')
+    expect(decrypted.password).toBe('old-password')
   })
 })
