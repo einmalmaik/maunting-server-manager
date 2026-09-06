@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from uuid import uuid4
+from typing import Any
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -209,7 +210,8 @@ def _global_tool_definitions() -> list[dict]:
         optional.append(_function("cloudflare_list_dns_records", "Listet alle DNS Records, Subdomains, Hostnames und EintrÃ¤ge einer Zone/Domain auf (z.B. zone_id oder Domain wie 'mauntingstudios.de' oder leer fuer Standardzone). Vor create auf Kollision pruefen.", {"zone_id": {"type": "string", "maxLength": 128}}, []))
 
     optional.append(_function("advise_node_placement", "Empfiehlt einen Host fuer einen neuen Server. Nutze vor propose_server_create um RAM/Disk bewusst zu waehlen. Unterscheidet gebucht vs wirklich belegt.", {"ram_need_mb": {"type": "integer", "minimum": 512}, "disk_need_gb": {"type": "integer", "minimum": 1}}, ["ram_need_mb"]))
-    optional.append(_function("search_curseforge_modpacks", "Sucht Modpacks auf CurseForge nach einer numerischen Game-ID (z. B. via web_search ermittelt). Liefert id, name, downloads.", {"query": {"type": "string", "maxLength": 128}, "game_id": {"type": "string", "maxLength": 32, "description": "Numerische CurseForge Game-ID"}}, ["query"]))
+    optional.append(_function("search_curseforge_modpacks", "Sucht Modpacks auf CurseForge für ein beliebiges Spiel oder einen Server nach Begriff, Thema oder Richtung (z. B. 'Tech', 'Magic', 'Adventure', 'Quest', 'Wirtschaft', 'Dinos'). Liefert id, name, downloads.", {"query": {"type": "string", "maxLength": 128, "description": "Suchbegriff, Name, Thema oder Richtung"}, "game_id": {"type": "string", "maxLength": 64, "description": "Optional: Game-ID oder Spielname/Slug (z. B. 'minecraft', 'ark', '83374')"}, "game": {"type": "string", "maxLength": 64, "description": "Optional: Spielname oder Slug"}, "server_id": {"type": "integer", "description": "Optional: Server-ID, um das Spiel automatisch zu bestimmen"}, "page": {"type": "integer", "minimum": 1, "maximum": 50, "description": "Seitennummer"}}, ["query"]))
+    optional.append(_function("search_curseforge_mods", "Sucht Einzelmods auf CurseForge für ein beliebiges Spiel oder einen Server nach Begriff, Thema oder Richtung (z. B. 'Minimap', 'Storage', 'Optimization', 'Dinosaurs'). Liefert id, name, downloads, author.", {"query": {"type": "string", "maxLength": 128, "description": "Suchbegriff, Modname oder Richtung"}, "game_id": {"type": "string", "maxLength": 64, "description": "Optional: Game-ID oder Spielname/Slug (z. B. 'minecraft', 'ark', '83374')"}, "game": {"type": "string", "maxLength": 64, "description": "Optional: Spielname oder Slug"}, "server_id": {"type": "integer", "description": "Optional: Server-ID, um das Spiel automatisch zu bestimmen"}, "class_id": {"type": "string", "maxLength": 32, "description": "Optional: Klassen-ID oder 'mods' / 'modpacks'"}, "page": {"type": "integer", "minimum": 1, "maximum": 50, "description": "Seitennummer"}}, ["query"]))
 
     return optional + [
         _function(
@@ -1325,7 +1327,8 @@ def provider_tool_definitions() -> list[dict]:
             "Schlaegt Installation, Aktualisierung oder Neuinstallation einer Workshop- oder CurseForge-Mod vor. "
             "Der Download laeuft ueber den vorhandenen MSM-Installationspfad.",
             {
-                "workshop_id": {"type": "string", "maxLength": 20},
+                "workshop_id": {"type": "string", "maxLength": 20, "description": "Workshop-ID oder CurseForge Mod-ID (aus search_curseforge_mods oder search_workshop_mods)"},
+                "mod_id": {"type": "string", "maxLength": 20, "description": "Alias für workshop_id: CurseForge Mod-ID"},
                 "action": {"type": "string", "enum": ["install", "update", "reinstall"]},
                 "name": {"type": "string", "maxLength": 256, "description": "Lesbarer Mod-Titel"},
                 **_RATIONALE_SCHEMA,
@@ -1586,6 +1589,103 @@ def angebotene_werkzeuge(db: Session, user: User) -> frozenset[str]:
     if not is_guardian_ai_enabled():
         verfuegbar -= GUARDIAN_TOOLS
     return frozenset(verfuegbar)
+
+
+async def _resolve_curseforge_game_and_class_for_ai(
+    db: Session,
+    s: Any,
+    query: str,
+    raw_game: Any = None,
+    server_id: Any = None,
+    class_id: Any = None,
+) -> tuple[int | None, str | None]:
+    import re
+    from services.curseforge_service import KNOWN_CURSEFORGE_GAMES
+
+    resolved_gid = None
+    resolved_cls = class_id
+
+    # 1. Wenn server_id übergeben wurde: Game-ID und Default-Klasse vom Server holen
+    if server_id:
+        try:
+            srv = db.get(Server, int(server_id))
+            if srv:
+                from games import get_plugin
+                pl = get_plugin(srv.game_type)
+                if pl:
+                    ms = pl.get_mod_support() or {}
+                    resolved_gid = ms.get("curseforge_game_id")
+                    if not resolved_cls:
+                        resolved_cls = ms.get("curseforge_class_id")
+        except Exception:
+            pass
+
+    # 2. Wenn explizites game oder game_id übergeben wurde
+    if not resolved_gid and raw_game:
+        resolved_gid = await s.resolve_game_id(raw_game)
+
+    lower_q = query.lower()
+
+    # 3. Wortgrenzen-Prüfung auf bekannte CurseForge-Spiele im Suchtext (keine falschen Substring-Treffer wie ark in dark)
+    if not resolved_gid:
+        for alias, alias_gid in KNOWN_CURSEFORGE_GAMES.items():
+            pattern = r"\b" + re.escape(alias.replace("-", " ")) + r"\b"
+            if re.search(pattern, lower_q.replace("-", " ")):
+                resolved_gid = alias_gid
+                break
+
+    # 4. Dynamische Wortgrenzen-Prüfung auf Spiele via CurseForge API /v1/games
+    if not resolved_gid:
+        try:
+            cf_games = await s.get_games()
+            for g in cf_games:
+                g_slug = str(g.get("slug") or "").lower()
+                g_name = str(g.get("name") or "").lower()
+                if g_slug and re.search(r"\b" + re.escape(g_slug.replace("-", " ")) + r"\b", lower_q.replace("-", " ")):
+                    resolved_gid = g.get("id")
+                    if resolved_gid:
+                        break
+                if g_name and re.search(r"\b" + re.escape(g_name) + r"\b", lower_q):
+                    resolved_gid = g.get("id")
+                    if resolved_gid:
+                        break
+        except Exception:
+            pass
+
+    # 5. Prüfung gegen registrierte Server in der Datenbank
+    if not resolved_gid:
+        try:
+            servers = db.query(Server).all()
+            candidate_servers = []
+            for srv in servers:
+                from games import get_plugin
+                pl = get_plugin(srv.game_type)
+                if pl:
+                    ms = pl.get_mod_support() or {}
+                    cgid = ms.get("curseforge_game_id")
+                    if cgid:
+                        candidate_servers.append((srv, cgid, ms.get("curseforge_class_id")))
+
+            # 5a. Prüfung: Nennt der Suchtext den Server-Namen?
+            for srv, cgid, ccls in candidate_servers:
+                if srv.name and re.search(r"\b" + re.escape(srv.name.lower()) + r"\b", lower_q):
+                    resolved_gid = cgid
+                    if not resolved_cls:
+                        resolved_cls = ccls
+                    break
+
+            # 5b. Wenn genau ein eindeutiges Spiel über alle Server existiert
+            if not resolved_gid and candidate_servers:
+                distinct_gids = {cgid for _, cgid, _ in candidate_servers}
+                if len(distinct_gids) == 1:
+                    resolved_gid = candidate_servers[0][1]
+                    if not resolved_cls:
+                        resolved_cls = candidate_servers[0][2]
+        except Exception:
+            pass
+
+    return (int(resolved_gid) if resolved_gid else None, resolved_cls)
+
 
 def _execute_global_read_tool(
     db: Session, *, user: User, tool_name: str, arguments: dict,
@@ -1950,7 +2050,10 @@ def _execute_global_read_tool(
         if not _cf_resolve():
             return {"error": "curseforge_api_key_missing", "hint": "CurseForge API-Key in Einstellungen hinterlegen"}
         query = str(arguments.get("query", "") or "")[:128]
-        game_id = str(arguments.get("game_id", "432") or "432")
+        raw_game = arguments.get("game_id") or arguments.get("game")
+        server_id = arguments.get("server_id")
+        page = max(1, min(50, int(arguments.get("page", 1) or 1)))
+
         try:
             import concurrent.futures
 
@@ -1961,7 +2064,17 @@ def _execute_global_read_tool(
                     from services.curseforge_service import get_curseforge_service
 
                     s = await get_curseforge_service()
-                    return await s.search_modpacks(game_id=game_id, query=query, per_page=12)
+                    gid, _ = await _resolve_curseforge_game_and_class_for_ai(
+                        db, s, query, raw_game=raw_game, server_id=server_id
+                    )
+                    if not gid:
+                        return {
+                            "error": "game_required",
+                            "hint": "Bitte gib ein Spiel (game oder game_id) oder eine server_id an, da CurseForge spielspezifisch sucht.",
+                            "query": query,
+                        }
+
+                    return await s.search_modpacks(game_id=gid, query=query, page=page, per_page=12)
 
                 try:
                     return _aio.run(_do())
@@ -1971,6 +2084,8 @@ def _execute_global_read_tool(
                         return fut.result(timeout=20)
 
             mods = _sync_search()
+            if isinstance(mods, dict) and "error" in mods:
+                return mods
             return {
                 "mods": [
                     {
@@ -1987,6 +2102,74 @@ def _execute_global_read_tool(
             }
         except Exception as exc:
             logger.warning("CurseForge modpack search failed for query=%s error=%s", query, exc)
+            return {"error": "curseforge_search_failed", "detail": f"CurseForge-Suche fehlgeschlagen: {exc}", "query": query}
+
+    if tool_name == "search_curseforge_mods":
+        from services.curseforge_api_key_service import resolve_key as _cf_resolve
+
+        if not _cf_resolve():
+            return {"error": "curseforge_api_key_missing", "hint": "CurseForge API-Key in Einstellungen hinterlegen"}
+        query = str(arguments.get("query", "") or "")[:128]
+        raw_game = arguments.get("game_id") or arguments.get("game")
+        server_id = arguments.get("server_id")
+        class_id = arguments.get("class_id")
+        page = max(1, min(50, int(arguments.get("page", 1) or 1)))
+
+        try:
+            import concurrent.futures
+
+            def _sync_search():
+                import asyncio as _aio
+
+                async def _do():
+                    from services.curseforge_service import get_curseforge_service
+
+                    s = await get_curseforge_service()
+                    gid, resolved_cls = await _resolve_curseforge_game_and_class_for_ai(
+                        db, s, query, raw_game=raw_game, server_id=server_id, class_id=class_id
+                    )
+                    if not gid:
+                        return {
+                            "error": "game_required",
+                            "hint": "Bitte gib ein Spiel (game oder game_id) oder eine server_id an, da CurseForge spielspezifisch sucht.",
+                            "query": query,
+                        }
+
+                    return await s.search_mods(
+                        game_id=gid,
+                        query=query,
+                        class_id=resolved_cls,
+                        page=page,
+                        per_page=15,
+                    )
+
+                try:
+                    return _aio.run(_do())
+                except RuntimeError:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                        fut = ex.submit(lambda: _aio.run(_do()))
+                        return fut.result(timeout=20)
+
+            mods = _sync_search()
+            if isinstance(mods, dict) and "error" in mods:
+                return mods
+            return {
+                "mods": [
+                    {
+                        "id": m.publishedfileid,
+                        "name": m.title,
+                        "downloads": m.subscriptions,
+                        "author": m.creator,
+                        "summary": (m.description or "")[:180],
+                        "updated": m.updated.strftime("%Y-%m-%d") if m.updated else None,
+                        "tags": m.tags[:5] if m.tags else [],
+                    }
+                    for m in mods
+                ],
+                "query": query,
+            }
+        except Exception as exc:
+            logger.warning("CurseForge mods search failed for query=%s error=%s", query, exc)
             return {"error": "curseforge_search_failed", "detail": f"CurseForge-Suche fehlgeschlagen: {exc}", "query": query}
 
     if tool_name == "cloudflare_list_zones":
@@ -2275,26 +2458,13 @@ def _execute_mod_tool(db: Session, *, server: Server, tool_name: str, arguments:
     # 1. CurseForge Provider
     if mod_support.get("provider") == "curseforge" or mod_support.get("curseforge_game_id"):
         cf_game_id = str(mod_support.get("curseforge_game_id") or "")
-        cf_mod_loader = None
-        cf_game_version = None
-        if cf_game_id == "432":
-            gt = (server.game_type or "").lower()
-            if "fabric" in gt:
-                cf_mod_loader = 4
-            elif "neoforge" in gt:
-                cf_mod_loader = 6
-            elif "forge" in gt:
-                cf_mod_loader = 1
-            elif "quilt" in gt:
-                cf_mod_loader = 5
-            elif any(k in gt for k in ("paper", "spigot", "purpur", "bukkit")):
-                cf_class_id = "12"
-
-            bp = getattr(plugin, "blueprint", None)
-            if bp and hasattr(bp, "runtime") and hasattr(bp.runtime, "env"):
-                v = str(bp.runtime.env.get("VERSION", "")).strip()
-                if v and v.upper() != "LATEST":
-                    cf_game_version = v
+        from routers.curseforge import _detect_game_modloader_and_version
+        auto_loader, auto_ver, auto_class = _detect_game_modloader_and_version(server, plugin, cf_game_id)
+        cf_mod_loader = auto_loader
+        cf_game_version = auto_ver
+        cf_class_id = mod_support.get("curseforge_class_id") or auto_class
+        if "modpack" in sichere_anfrage.lower():
+            cf_class_id = "modpacks"
 
         try:
             import asyncio

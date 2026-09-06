@@ -944,7 +944,8 @@
       "cloudflare_list_dns_records": "Read DNS records",
       "cloudflare_list_zones": "Read Cloudflare zones",
       "execute_server_action": "Executed server action",
-      "search_curseforge_modpacks": "Searched CurseForge modpacks"
+      "search_curseforge_modpacks": "Searched CurseForge modpacks",
+      "search_curseforge_mods": "Searched CurseForge mods"
     },
     "toolsRunning": {
       "ask_user": "Asking a quick question",
@@ -1039,6 +1040,7 @@
       "cloudflare_list_zones": "Reading Cloudflare zones",
       "execute_server_action": "Executing server action",
       "search_curseforge_modpacks": "Searching CurseForge for modpacks",
+      "search_curseforge_mods": "Searching CurseForge for mods",
       "propose_cloudflare_dns_delete": "Preparing DNS record deletion",
       "propose_cloudflare_dns_record": "Preparing DNS record",
       "propose_modpack_install": "Preparing modpack installation"
@@ -2654,6 +2656,7 @@
     "searchPlaceholder": "Search mods...",
     "curseforgeSearch": "CurseForge Browser",
     "searchPlaceholderCurseForge": "Search CurseForge mods & modpacks...",
+    "searchPlaceholderCurseForgeModsOnly": "Search CurseForge mods...",
     "curseforgeModId": "CurseForge Mod or Modpack ID",
     "typeAll": "All",
     "typeMods": "Mods",

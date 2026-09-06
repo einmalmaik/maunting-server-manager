@@ -944,7 +944,8 @@
       "cloudflare_list_dns_records": "DNS-Einträge gelesen",
       "cloudflare_list_zones": "Cloudflare-Zonen gelesen",
       "execute_server_action": "Serveraktion ausgeführt",
-      "search_curseforge_modpacks": "CurseForge-Modpacks durchsucht"
+      "search_curseforge_modpacks": "CurseForge-Modpacks durchsucht",
+      "search_curseforge_mods": "CurseForge-Mods durchsucht"
     },
     "toolsRunning": {
       "ask_user": "Ich frage kurz nach",
@@ -1039,6 +1040,7 @@
       "cloudflare_list_zones": "Ich lese die Zonen bei Cloudflare",
       "execute_server_action": "Ich führe die Serveraktion aus",
       "search_curseforge_modpacks": "Ich suche bei CurseForge nach Modpacks",
+      "search_curseforge_mods": "Ich suche bei CurseForge nach Mods",
       "propose_cloudflare_dns_delete": "Ich bereite die Löschung des DNS-Eintrags vor",
       "propose_cloudflare_dns_record": "Ich bereite den DNS-Eintrag vor",
       "propose_modpack_install": "Ich bereite die Modpack-Installation vor"
@@ -2654,6 +2656,7 @@
     "searchPlaceholder": "Mods durchsuchen...",
     "curseforgeSearch": "CurseForge Browser",
     "searchPlaceholderCurseForge": "CurseForge Mods & Modpacks suchen...",
+    "searchPlaceholderCurseForgeModsOnly": "CurseForge-Mods suchen...",
     "curseforgeModId": "CurseForge Mod- oder Modpack-ID",
     "typeAll": "Alle",
     "typeMods": "Mods",

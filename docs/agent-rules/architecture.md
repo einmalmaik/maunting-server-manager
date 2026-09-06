@@ -481,3 +481,14 @@ Das ist Best-Practice für Rootless-Setups (live auf singra bestätigt: nur msm-
 Die Panel-API darf nur an `127.0.0.1` binden. Container-Port-Publishes dürfen `0.0.0.0` nutzen (Docker-Default), wenn die Game-Spielebene das benötigt. Optional pro Server: `server.public_bind_ip` setzt einen explizit gebundenen Host-Interface — empfohlen bei Multi-IP-Hosts.
 
 Phase-2-Port-Manager wird das absichern (UFW-Regeln nur öffnen, wenn Container läuft).
+
+### 12.10 Generische Multi-Game-Architektur (CurseForge, Steam Workshop, Modpacks)
+
+- **Verbot von Single-Game-Hardcodings**: Es dürfen niemals hardcodierte IDs oder Logiken für einzelne Spiele (wie z. B. Minecraft Game-ID `432`, Modpack-Klasse `4471`, Mod-Klasse `6`) in Services, Routern oder im Frontend verankert werden.
+- **Dynamische Plattform-Auflösung**:
+  - Spiel-IDs (`game_id`), Klassen-IDs (`class_id` für Mods, Modpacks etc.) und Kategorien müssen dynamisch über die Plattform-APIs (z. B. CurseForge `/v1/games`, `/v1/categories`) ermittelt werden.
+  - Modpack-Support existiert für alle Spiele auf Plattformen, die Modpacks anbieten (z. B. Ark, Palworld, Terraria, Minecraft etc.).
+- **KI-Werkzeuge & Semantische Suche**:
+  - Alle KI-Werkzeuge (`search_curseforge_mods`, `search_curseforge_modpacks`, `search_workshop_mods`) müssen für jedes Spiel flexibel und generisch funktionieren.
+  - Thematische Suchbegriffe (z. B. "Wirtschaft", "Dinos", "Optimierung", "Minimap") werden per Synonym-Mapping und flexibler Filterung generisch auf das jeweilige Spiel angewendet.
+

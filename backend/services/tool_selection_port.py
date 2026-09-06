@@ -24,6 +24,7 @@ HOTSET = frozenset({
     "propose_cloudflare_dns_record",
     "propose_cloudflare_dns_delete",
     "search_curseforge_modpacks",
+    "search_curseforge_mods",
     "advise_node_placement",
 })
 

@@ -71,6 +71,9 @@ interface ModManagerProps {
     supports_steam_workshop?: boolean
     supports_curseforge?: boolean
     mod_provider?: 'steam' | 'curseforge' | null
+    curseforge_game_id?: string | null
+    curseforge_class_id?: string | null
+    supports_modpacks?: boolean
   }
 }
 
@@ -88,6 +91,7 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
   const [reinstallingAll, setReinstallingAll] = useState(false)
 
   const isCurseForge = Boolean(gameInfo?.supports_curseforge || gameInfo?.mod_provider === 'curseforge')
+  const supportsModpacks = isCurseForge && Boolean(gameInfo?.supports_modpacks ?? true)
   const providerLabel = isCurseForge ? 'CurseForge' : 'Steam Workshop'
 
   // Workshop / CurseForge Browser (inline section)
@@ -151,10 +155,11 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
   ) => {
     setBrowserLoading(true)
     try {
-      const classParam =
-        isCurseForge && typeFilter !== 'all'
-          ? `&class_id=${typeFilter === 'modpacks' ? '4471' : '6'}`
-          : ''
+      const classParam = isCurseForge
+        ? supportsModpacks
+          ? `&class_id=${typeFilter === 'modpacks' ? 'modpacks' : typeFilter === 'all' ? 'all' : (gameInfo?.curseforge_class_id || 'mods')}`
+          : (gameInfo?.curseforge_class_id ? `&class_id=${gameInfo.curseforge_class_id}` : '')
+        : ''
       const endpoint = isCurseForge
         ? `/curseforge/popular?server_id=${serverId}&sort=${tab}&limit=${BROWSER_PAGE_SIZE}&page=${page}${classParam}`
         : `/steam/workshop/popular?server_id=${serverId}&sort=${tab}&limit=${BROWSER_PAGE_SIZE}&page=${page}`
@@ -212,10 +217,11 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
     setSteamLoading(true)
     try {
       const q = encodeURIComponent(steamQuery.trim())
-      const classParam =
-        isCurseForge && typeFilter !== 'all'
-          ? `&class_id=${typeFilter === 'modpacks' ? '4471' : '6'}`
-          : ''
+      const classParam = isCurseForge
+        ? supportsModpacks
+          ? `&class_id=${typeFilter === 'modpacks' ? 'modpacks' : typeFilter === 'all' ? 'all' : (gameInfo?.curseforge_class_id || 'mods')}`
+          : (gameInfo?.curseforge_class_id ? `&class_id=${gameInfo.curseforge_class_id}` : '')
+        : ''
       const endpoint = isCurseForge
         ? `/curseforge/search?server_id=${serverId}&query=${q}&per_page=${BROWSER_PAGE_SIZE}&page=${page}${classParam}`
         : `/steam/workshop/search?server_id=${serverId}&query=${q}&per_page=${BROWSER_PAGE_SIZE}&page=${page}`
@@ -716,7 +722,7 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
             {isCurseForge ? t('mods.curseforgeSearch', { defaultValue: 'CurseForge Browser' }) : t('mods.steamSearch')}
           </h2>
 
-          {isCurseForge && (
+          {supportsModpacks && (
             <div className="flex gap-1 bg-surface-container rounded-lg p-1">
               <button
                 onClick={() => handleContentTypeChange('all')}
@@ -757,7 +763,13 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant" />
             <input
               type="search"
-              placeholder={isCurseForge ? t('mods.searchPlaceholderCurseForge', { defaultValue: 'CurseForge Mods & Modpacks suchen...' }) : t('mods.searchPlaceholder')}
+              placeholder={
+                isCurseForge
+                  ? supportsModpacks
+                    ? t('mods.searchPlaceholderCurseForge', { defaultValue: 'CurseForge Mods & Modpacks suchen...' })
+                    : t('mods.searchPlaceholderCurseForgeModsOnly', { defaultValue: 'CurseForge Mods suchen...' })
+                  : t('mods.searchPlaceholder')
+              }
               value={steamQuery}
               onChange={(e) => setSteamQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && runSearch()}

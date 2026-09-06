@@ -319,6 +319,9 @@ export interface GameInfo {
   mod_support: boolean
   supports_steam_workshop: boolean
   supports_curseforge?: boolean
+  curseforge_game_id?: string | null
+  curseforge_class_id?: string | null
+  supports_modpacks?: boolean
   mod_provider?: 'curseforge' | 'steam' | null
   supports_server_file_updates?: boolean
   // v1.4.7+: Exec-Tab-Opt-in aus dem Blueprint (runtime.enableExec).

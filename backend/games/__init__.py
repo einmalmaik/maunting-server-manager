@@ -73,6 +73,9 @@ def list_game_info() -> list[dict]:
             "mod_support": bp_mods.supportsMods,
             "supports_steam_workshop": bp_mods.supportsSteamWorkshop,
             "supports_curseforge": bp_mods.supportsCurseForge,
+            "curseforge_game_id": bp_mods.curseforgeGameId if bp_mods.supportsCurseForge else None,
+            "curseforge_class_id": bp_mods.curseforgeClassId if bp_mods.supportsCurseForge else None,
+            "supports_modpacks": bool(bp_mods.supportsCurseForge),
             "mod_provider": "curseforge" if bp_mods.supportsCurseForge else ("steam" if bp_mods.supportsSteamWorkshop else None),
             "supports_server_file_updates": supports_file_updates,
             # v1.4.7+: Exec-Tab-Opt-in pro Blueprint. UI nutzt das, um den

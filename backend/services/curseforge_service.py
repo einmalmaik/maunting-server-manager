@@ -6,11 +6,10 @@ Cacht Antworten zur Entlastung von Rate-Limits.
 
 from __future__ import annotations
 
-import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -24,16 +23,122 @@ class CurseForgeApiUnavailable(RuntimeError):
         self.code = code
 
 
-def normalize_game_id(game_id: int | str | None) -> int:
-    """Parst numerische Game-IDs sicher. Fallback auf 432 wenn leer oder nicht-numerisch."""
+KNOWN_CURSEFORGE_GAMES: dict[str, int] = {
+    "minecraft": 432,
+    "ark": 83374,
+    "ark-survival-ascended": 83374,
+    "ark: survival ascended": 83374,
+    "ark survival ascended": 83374,
+    "asa": 83374,
+    "ark-survival-evolved": 449,
+    "palworld": 83262,
+    "lethal-company": 83146,
+    "baldurs-gate-3": 82956,
+    "baldur's gate 3": 82956,
+    "bg3": 82956,
+    "terraria": 431,
+    "world-of-warcraft": 1,
+    "wow": 1,
+    "valheim": 69288,
+    "rust": 69287,
+    "stardew-valley": 69289,
+    "kerbal-space-program": 4401,
+    "sims4": 70322,
+    "the-sims-4": 70322,
+}
+
+GERMAN_THEMATIC_TERMS: dict[str, str] = {
+    # Wirtschaft & Handel
+    "wirtschaft": "economy",
+    "handel": "trade",
+    "geld": "money currency",
+    # Kreaturen & Monster
+    "dinos": "dinosaur",
+    "dinosaurier": "dinosaur",
+    "kreaturen": "creatures",
+    "tiere": "animals",
+    "monster": "monsters",
+    # Magie & Fantasy
+    "magie": "magic",
+    "zauberei": "magic",
+    "magisch": "magic",
+    "hexen": "witchcraft",
+    # Technik & Automatisierung
+    "technik": "tech",
+    "technologie": "tech",
+    "energie": "energy power",
+    "strom": "energy power",
+    "automation": "automation",
+    "automatisierung": "automation",
+    "maschinen": "machines",
+    # Abenteuer, RPG & Erkundung
+    "abenteuer": "adventure",
+    "erkundung": "exploration",
+    "quest": "quests",
+    "quests": "quests",
+    "rpg": "rpg",
+    "rollenspiel": "rpg",
+    "weltall": "space",
+    "raumfahrt": "space",
+    "mittelalter": "medieval",
+    # Inventar, Rucksäcke & Lagerung
+    "rucksack": "backpack",
+    "rucksäcke": "backpack",
+    "truhen": "storage",
+    "lager": "storage",
+    "lagerung": "storage",
+    "inventar": "inventory",
+    # Karten & Navigation
+    "minimap": "minimap map",
+    "karte": "map",
+    "weltkarte": "map",
+    "kompass": "compass navigation",
+    # Bauen & Dekoration
+    "bauen": "building",
+    "bau": "building",
+    "moebel": "furniture decoration",
+    "möbel": "furniture decoration",
+    "deko": "decoration",
+    "dekoration": "decoration",
+    # Kampf & Waffen
+    "waffen": "weapons",
+    "pistolen": "guns weapons",
+    "schwerter": "swords weapons",
+    "ruestung": "armor",
+    "rüstung": "armor",
+    # Optimierung & Performance
+    "optimierung": "optimization performance",
+    "leistung": "performance",
+    "fps": "performance fps",
+    # Welten, Biome & Dimensionen
+    "biome": "biomes",
+    "welten": "dimensions worlds",
+    "dimensionen": "dimensions",
+    # Visuelles & Audio
+    "shader": "shaders visual",
+    "texturen": "textures",
+    "sound": "audio sounds",
+}
+
+CONVERSATIONAL_FILLERS: tuple[str, ...] = (
+    "suche mods für", "such mir mods für", "suche mod für", "such mods für",
+    "suche modpack für", "suche modpacks für", "such modpacks für",
+    "mods für", "mod für", "modpack für", "modpacks für",
+    "etwas mit", "etwas für", "ich will", "ich brauche",
+    "suche nach", "suche", "such mir", "such", "finde",
+)
+
+
+def normalize_game_id(game_id: int | str | None, default: int | None = None) -> Optional[int]:
+    """Parst numerische Game-IDs sicher. Liefert default (Standard: None) wenn leer oder nicht-numerisch."""
     if not game_id:
-        return 432
+        return default
     if isinstance(game_id, int):
         return game_id
     raw = str(game_id).strip()
     if raw.isdigit():
         return int(raw)
-    return 432
+    return default
 
 
 @dataclass
@@ -55,6 +160,7 @@ class CurseForgeModInfo:
     has_server_pack: bool = False
     server_pack_file_id: Optional[int] = None
     allow_mod_distribution: bool = True
+    game_id: Optional[str] = None
 
 
 class CurseForgeService:
@@ -149,7 +255,7 @@ class CurseForgeService:
         preview_url = logo.get("thumbnailUrl") or logo.get("url") or None
 
         links = item.get("links") or {}
-        direct_url = links.get("websiteUrl") or f"https://www.curseforge.com"
+        direct_url = links.get("websiteUrl") or "https://www.curseforge.com"
 
         subscriptions = int(item.get("downloadCount") or 0)
         favorites = int(item.get("thumbsUpCount") or 0)
@@ -182,6 +288,9 @@ class CurseForgeService:
         raw_allow = item.get("allowModDistribution")
         allow_dist = True if raw_allow is None else bool(raw_allow)
 
+        raw_game_id = item.get("gameId")
+        game_id_str = str(raw_game_id) if raw_game_id is not None else None
+
         return CurseForgeModInfo(
             publishedfileid=mod_id,
             title=title,
@@ -200,7 +309,203 @@ class CurseForgeService:
             has_server_pack=has_server_pack,
             server_pack_file_id=server_pack_file_id,
             allow_mod_distribution=allow_dist,
+            game_id=game_id_str,
         )
+
+    async def get_games(self) -> List[Dict[str, Any]]:
+        """Liefert die Liste aller auf CurseForge verfügbaren Spiele über GET /v1/games."""
+        if not self.api_key:
+            raise CurseForgeApiUnavailable("curseforge_api_key_missing")
+
+        cache_key = "cf_games_list"
+        cached = self._get_cache(cache_key)
+        if cached:
+            return cached
+
+        try:
+            response = await self.client.get(f"{self.API_BASE}/games", params={"pageSize": 50})
+            response.raise_for_status()
+            data = response.json()
+            games = data.get("data") or []
+            self._set_cache(cache_key, games)
+            return games
+        except Exception as e:
+            logger.warning("CurseForge get_games failed: %s", type(e).__name__)
+            return []
+
+    async def resolve_game_id(self, game_or_slug_or_id: int | str | None) -> Optional[int]:
+        """Löst beliebige Spielbezeichnungen (Name, Slug, numerische ID) dynamisch in eine CurseForge Game-ID auf."""
+        if not game_or_slug_or_id:
+            return None
+        if isinstance(game_or_slug_or_id, int):
+            return game_or_slug_or_id
+        raw = str(game_or_slug_or_id).strip()
+        if raw.isdigit():
+            return int(raw)
+
+        norm = re.sub(r"[^a-z0-9]+", "-", raw.lower()).strip("-")
+        if norm in KNOWN_CURSEFORGE_GAMES:
+            return KNOWN_CURSEFORGE_GAMES[norm]
+        tokens = set(norm.split("-"))
+        for alias, gid in KNOWN_CURSEFORGE_GAMES.items():
+            alias_tokens = set(alias.split("-"))
+            if alias == norm or alias in tokens or (alias_tokens and alias_tokens.issubset(tokens)):
+                return gid
+
+        try:
+            games = await self.get_games()
+            for g in games:
+                slug = str(g.get("slug") or "").lower()
+                name = str(g.get("name") or "").lower()
+                gid = g.get("id")
+                if not gid:
+                    continue
+                if slug == norm or name == raw.lower():
+                    return int(gid)
+                g_tokens = set(re.findall(r"[a-z0-9]+", f"{slug} {name}"))
+                if norm in g_tokens or (tokens and tokens.issubset(g_tokens)):
+                    return int(gid)
+        except Exception:
+            pass
+
+        return None
+
+    async def get_categories(
+        self,
+        game_id: int | str,
+        class_only: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Liefert Kategorien und Klassen für ein Spiel via GET /v1/categories?gameId={gameId}."""
+        if not self.api_key:
+            raise CurseForgeApiUnavailable("curseforge_api_key_missing")
+
+        norm_game_id = await self.resolve_game_id(game_id)
+        if not norm_game_id:
+            norm_game_id = normalize_game_id(game_id)
+        if not norm_game_id:
+            return []
+
+        cache_key = f"cf_categories_{norm_game_id}"
+        cached = self._get_cache(cache_key)
+        if cached is None:
+            try:
+                response = await self.client.get(
+                    f"{self.API_BASE}/categories",
+                    params={"gameId": norm_game_id},
+                )
+                response.raise_for_status()
+                data = response.json()
+                cats = data.get("data") or []
+                self._set_cache(cache_key, cats)
+                cached = cats
+            except Exception as e:
+                logger.warning("CurseForge get_categories failed for game %s: %s", norm_game_id, type(e).__name__)
+                cached = []
+
+        if class_only:
+            return [
+                c for c in cached
+                if c.get("isClass") is True or c.get("classId") is None or c.get("parentCategoryId") is None
+            ]
+        return cached
+
+    async def find_class_id(self, game_id: int | str, class_type: str = "modpacks") -> Optional[int]:
+        """Ermittelt die passende class_id für ein Spiel (z. B. 'modpacks' oder 'mods') dynamisch aus den Kategorien."""
+        norm_type = str(class_type or "").lower().strip()
+        if norm_type.isdigit():
+            return int(norm_type)
+
+        norm_game_id = await self.resolve_game_id(game_id)
+        if not norm_game_id:
+            norm_game_id = normalize_game_id(game_id)
+        if not norm_game_id:
+            return None
+
+        try:
+            categories = await self.get_categories(norm_game_id, class_only=False)
+        except Exception:
+            return None
+
+        if not categories or not isinstance(categories, list):
+            return None
+
+        if norm_type in ("modpacks", "modpack", "packs"):
+            for c in categories:
+                slug = str(c.get("slug") or "").lower()
+                name = str(c.get("name") or "").lower()
+                is_class = bool(c.get("isClass") or c.get("classId") is None)
+                if ("modpack" in slug or "modpack" in name or slug in ("modpacks", "packs")) and is_class:
+                    return int(c["id"])
+            for c in categories:
+                slug = str(c.get("slug") or "").lower()
+                name = str(c.get("name") or "").lower()
+                if "modpack" in slug or "modpack" in name:
+                    return int(c["id"])
+
+        if norm_type in ("mods", "mod", "addons"):
+            for c in categories:
+                slug = str(c.get("slug") or "").lower()
+                name = str(c.get("name") or "").lower()
+                if "modpack" in slug or "modpack" in name:
+                    continue
+                is_class = bool(c.get("isClass") or c.get("classId") is None)
+                if slug in ("mods", "mc-mods", "addons") and is_class:
+                    return int(c["id"])
+            for c in categories:
+                slug = str(c.get("slug") or "").lower()
+                name = str(c.get("name") or "").lower()
+                if "modpack" in slug or "modpack" in name:
+                    continue
+                is_class = bool(c.get("isClass") or c.get("classId") is None)
+                if (slug == "mods" or name == "mods" or "mod" in slug or "mod" in name) and is_class:
+                    return int(c["id"])
+            for c in categories:
+                slug = str(c.get("slug") or "").lower()
+                name = str(c.get("name") or "").lower()
+                if "modpack" in slug or "modpack" in name:
+                    continue
+                if slug in ("mods", "mc-mods", "addons") or "mod" in slug:
+                    return int(c["id"])
+
+        if norm_type in ("plugins", "bukkit", "plugin"):
+            for c in categories:
+                slug = str(c.get("slug") or "").lower()
+                name = str(c.get("name") or "").lower()
+                is_class = bool(c.get("isClass") or c.get("classId") is None)
+                if ("plugin" in slug or "plugin" in name or "bukkit" in slug) and is_class:
+                    return int(c["id"])
+            for c in categories:
+                slug = str(c.get("slug") or "").lower()
+                name = str(c.get("name") or "").lower()
+                if "plugin" in slug or "plugin" in name:
+                    return int(c["id"])
+
+        if norm_type in ("customization", "resourcepacks", "texturepacks", "textures"):
+            for c in categories:
+                slug = str(c.get("slug") or "").lower()
+                name = str(c.get("name") or "").lower()
+                is_class = bool(c.get("isClass") or c.get("classId") is None)
+                if ("customization" in slug or "resource" in slug or "texture" in slug) and is_class:
+                    return int(c["id"])
+            for c in categories:
+                slug = str(c.get("slug") or "").lower()
+                name = str(c.get("name") or "").lower()
+                if "customization" in slug or "resource" in slug or "texture" in slug:
+                    return int(c["id"])
+
+        for c in categories:
+            slug = str(c.get("slug") or "").lower()
+            name = str(c.get("name") or "").lower()
+            is_class = bool(c.get("isClass") or c.get("classId") is None)
+            if (norm_type == slug or norm_type == name or norm_type in slug or norm_type in name) and is_class:
+                return int(c["id"])
+        for c in categories:
+            slug = str(c.get("slug") or "").lower()
+            name = str(c.get("name") or "").lower()
+            if norm_type == slug or norm_type == name or norm_type in slug or norm_type in name:
+                return int(c["id"])
+
+        return None
 
     async def search_mods(
         self,
@@ -215,9 +520,9 @@ class CurseForgeService:
         mod_loader_type: int | None = None,
         game_version: str | None = None,
         slug: str | None = None,
-        only_distributable: bool = True,
+        only_distributable: bool = False,
     ) -> List[CurseForgeModInfo]:
-        """Sucht Mods über GET /v1/mods/search."""
+        """Sucht Mods über GET /v1/mods/search mit Unterstützung dynamischer Klassen- und Spielauflösung."""
         if not self.api_key:
             raise CurseForgeApiUnavailable("curseforge_api_key_missing")
 
@@ -225,8 +530,30 @@ class CurseForgeService:
         per_page = max(1, min(50, per_page))
         index = (page - 1) * per_page
 
-        norm_game_id = normalize_game_id(game_id)
-        cache_key = f"cf_search_{norm_game_id}_{query}_{slug}_{page}_{per_page}_{class_id}_{category_id}_{sort_field}_{sort_order}_{mod_loader_type}_{game_version}_{only_distributable}"
+        if isinstance(game_id, str) and not game_id.strip().isdigit():
+            resolved_gid = await self.resolve_game_id(game_id)
+            norm_game_id = resolved_gid if resolved_gid else normalize_game_id(game_id)
+        else:
+            norm_game_id = normalize_game_id(game_id)
+
+        if norm_game_id is None:
+            logger.warning("CurseForge search_mods aufgerufen ohne auflösbare game_id: %r", game_id)
+            return []
+
+        # Dynamische Auflösung von class_id falls semantischer String
+        resolved_class_id: int | None = None
+        if class_id is not None:
+            raw_cls = str(class_id).strip().lower()
+            if raw_cls.isdigit():
+                resolved_class_id = int(raw_cls)
+            elif raw_cls in ("modpacks", "modpack", "packs"):
+                resolved_class_id = await self.find_class_id(norm_game_id, "modpacks")
+            elif raw_cls in ("mods", "mod", "addons"):
+                resolved_class_id = await self.find_class_id(norm_game_id, "mods")
+            elif raw_cls not in ("all", "0", "none", ""):
+                resolved_class_id = await self.find_class_id(norm_game_id, raw_cls)
+
+        cache_key = f"cf_search_{norm_game_id}_{query}_{slug}_{page}_{per_page}_{resolved_class_id}_{category_id}_{sort_field}_{sort_order}_{mod_loader_type}_{game_version}_{only_distributable}"
         cached = self._get_cache(cache_key)
         if cached:
             return cached
@@ -241,8 +568,8 @@ class CurseForgeService:
             params["searchFilter"] = query
         if slug:
             params["slug"] = slug
-        if class_id is not None and str(class_id).strip():
-            params["classId"] = int(class_id)
+        if resolved_class_id is not None:
+            params["classId"] = resolved_class_id
         if category_id is not None and str(category_id).strip():
             params["categoryId"] = int(category_id)
         if sort_field is not None:
@@ -263,6 +590,36 @@ class CurseForgeService:
             mods = [self._parse_mod_data(item) for item in items]
             if only_distributable:
                 mods = [m for m in mods if m.allow_mod_distribution]
+
+            # Thematischer Richtungs-Fallback, wenn keine Treffer und deutscher Begriff
+            if not mods and query and not slug:
+                lower_q = query.lower()
+                cleaned_theme = lower_q
+                for filler in CONVERSATIONAL_FILLERS:
+                    if filler in cleaned_theme:
+                        cleaned_theme = cleaned_theme.replace(filler, "").strip()
+
+                alt_query = None
+                for de_term, en_term in GERMAN_THEMATIC_TERMS.items():
+                    if de_term in cleaned_theme or de_term in lower_q:
+                        alt_query = en_term
+                        break
+                if alt_query and alt_query != query:
+                    fallback_params = dict(params)
+                    fallback_params["searchFilter"] = alt_query
+                    fb_resp = await self.client.get(
+                        f"{self.API_BASE}/mods/search",
+                        params=fallback_params,
+                    )
+                    if fb_resp.status_code == 200:
+                        fb_data = fb_resp.json()
+                        fb_items = fb_data.get("data") or []
+                        fb_mods = [self._parse_mod_data(it) for it in fb_items]
+                        if only_distributable:
+                            fb_mods = [m for m in fb_mods if m.allow_mod_distribution]
+                        if fb_mods:
+                            mods = fb_mods
+
             self._set_cache(cache_key, mods)
             return mods
         except httpx.HTTPStatusError as e:
@@ -284,6 +641,7 @@ class CurseForgeService:
         category_id: int | str | None = None,
         mod_loader_type: int | None = None,
         game_version: str | None = None,
+        only_distributable: bool = False,
     ) -> List[CurseForgeModInfo]:
         """Liefert Mods nach Sortierkriterium (trending, popular, newest, updated)."""
         sort_map = {
@@ -304,6 +662,7 @@ class CurseForgeService:
             sort_order="desc",
             mod_loader_type=mod_loader_type,
             game_version=game_version,
+            only_distributable=only_distributable,
         )
 
     async def get_mod_details(self, mod_id: int | str) -> Optional[CurseForgeModInfo]:
@@ -396,7 +755,7 @@ class CurseForgeService:
         page: int = 1,
         per_page: int = 24,
     ) -> List[CurseForgeModInfo]:
-        """Sucht Modpacks (classId 4471 bei Minecraft oder Fallback auf Suche ohne Class-Filter)."""
+        """Sucht Modpacks für ein beliebiges Spiel über CurseForge (dynamische Klassenermittlung und thematische Suche)."""
         clean_query = str(query or "").strip()
         slug: str | None = None
         if "curseforge.com" in clean_query:
@@ -406,29 +765,38 @@ class CurseForgeService:
                 clean_query = parts[-1]
                 slug = clean_query
 
-        norm_game_id = normalize_game_id(game_id)
-        # 1. Versuch mit classId=4471 (Minecraft Modpacks)
+        norm_game_id = await self.resolve_game_id(game_id)
+        if not norm_game_id:
+            norm_game_id = normalize_game_id(game_id)
+        if not norm_game_id:
+            logger.warning("CurseForge search_modpacks aufgerufen ohne auflösbare game_id: %r", game_id)
+            return []
+
+        # 1. Dynamische Ermittlung der Modpack-Klasse für dieses Spiel
+        modpack_class_id = await self.find_class_id(norm_game_id, "modpacks")
+
+        # 2. Suche mit Modpack-Class-Filter (falls vorhanden)
         res = await self.search_mods(
             game_id=norm_game_id,
             query=clean_query if not slug else "",
             slug=slug,
             page=page,
             per_page=per_page,
-            class_id=4471 if norm_game_id == 432 else None,
+            class_id=modpack_class_id,
             sort_field=self.SORT_POPULAR,
         )
-        if not res and clean_query:
-            # Fallback 2: Volltext-Suche mit Filter
+        if not res and slug and clean_query:
+            # Fallback 2: Volltext-Suche mit Filter falls Slug-Suche leer war
             res = await self.search_mods(
                 game_id=norm_game_id,
                 query=clean_query,
                 page=page,
                 per_page=per_page,
-                class_id=4471 if norm_game_id == 432 else None,
+                class_id=modpack_class_id,
                 sort_field=self.SORT_POPULAR,
             )
-        if not res and clean_query:
-            # Fallback 3: Ohne class_id Filter
+        if not res and clean_query and modpack_class_id is not None:
+            # Fallback 3: Ohne class_id Filter falls Modpacks nicht als eigene Klasse separiert sind
             res = await self.search_mods(
                 game_id=norm_game_id,
                 query=clean_query,

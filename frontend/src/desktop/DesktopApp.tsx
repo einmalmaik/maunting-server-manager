@@ -710,7 +710,7 @@ function Hauptseite({
 
         {/* Rechte Seite: Glocke + Profil-Avatar mit Dropdown-Menü */}
         <div className="flex items-center gap-2">
-          <BenachrichtigungsGlocke />
+          <BenachrichtigungsGlocke placement="bottom" align="right" />
 
           {/* Profil-Avatar Dropdown */}
           <ProfileDropdown

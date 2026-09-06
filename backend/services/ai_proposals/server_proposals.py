@@ -1222,10 +1222,11 @@ def _mod_install_payload(db: Session, server: Server, arguments: dict) -> tuple[
     from games import get_plugin
     from models import Mod
 
-    allowed_keys = {"workshop_id", "action", "name"}
-    if not (set(arguments).issubset(allowed_keys) and {"workshop_id", "action"}.issubset(set(arguments))):
+    allowed_keys = {"workshop_id", "mod_id", "action", "name"}
+    if not (set(arguments).issubset(allowed_keys) and "action" in arguments and ("workshop_id" in arguments or "mod_id" in arguments)):
         raise AiActionValidationError("Mod-Tool hat ungueltige Argumente")
-    workshop_id = arguments["workshop_id"]
+    raw_wid = arguments.get("workshop_id") or arguments.get("mod_id")
+    workshop_id = str(raw_wid or "").strip()
     if not isinstance(workshop_id, str) or not workshop_id.isdigit() or len(workshop_id) > 20:
         raise AiActionValidationError("Ungueltige Workshop-Kennung")
     action = arguments["action"]

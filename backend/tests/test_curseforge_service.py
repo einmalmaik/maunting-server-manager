@@ -199,12 +199,14 @@ async def test_test_connection_invalid_key():
 def test_normalize_game_id():
     from services.curseforge_service import normalize_game_id
 
-    assert normalize_game_id(None) == 432
-    assert normalize_game_id("") == 432
+    assert normalize_game_id(None) is None
+    assert normalize_game_id("") is None
     assert normalize_game_id("432") == 432
     assert normalize_game_id(432) == 432
     assert normalize_game_id("83262") == 83262
-    assert normalize_game_id("invalid_text") == 432
+    assert normalize_game_id("invalid_text") is None
+    assert normalize_game_id(None, default=83374) == 83374
+    assert normalize_game_id("invalid_text", default=83374) == 83374
 
 
 @pytest.mark.asyncio
@@ -237,6 +239,35 @@ async def test_search_mods_filters_non_distributable_mods():
         assert len(mods) == 2
         assert [m.publishedfileid for m in mods] == ["100", "300"]
         await svc.close()
+
+
+@pytest.mark.asyncio
+async def test_search_mods_defaults_to_allowing_all_mods():
+    mock_payload = {
+        "data": [
+            {
+                "id": 100,
+                "name": "Allowed Mod",
+                "allowModDistribution": True,
+            },
+            {
+                "id": 200,
+                "name": "Blocked Mod",
+                "allowModDistribution": False,
+            },
+        ]
+    }
+    mock_resp = httpx.Response(status_code=200, json=mock_payload, request=httpx.Request("GET", "https://api.curseforge.com/v1/mods/search"))
+
+    with patch("services.curseforge_api_key_service.resolve_key", return_value="TEST_API_KEY"):
+        svc = CurseForgeService()
+        with patch.object(svc.client, "get", new=AsyncMock(return_value=mock_resp)):
+            mods = await svc.search_mods(game_id="83374", query="test")
+
+        assert len(mods) == 2
+        assert [m.publishedfileid for m in mods] == ["100", "200"]
+        await svc.close()
+
 
 
 @pytest.mark.asyncio
@@ -294,4 +325,132 @@ def test_detect_minecraft_modloader_and_version():
     server.game_type = "minecraft_paper"
     loader, ver, cls = _detect_minecraft_modloader_and_version(server, plugin)
     assert cls == "12"
+
+
+@pytest.mark.asyncio
+async def test_resolve_game_id_known_and_numeric():
+    svc = CurseForgeService()
+    assert await svc.resolve_game_id("minecraft") == 432
+    assert await svc.resolve_game_id("Minecraft") == 432
+    assert await svc.resolve_game_id("palworld") == 83262
+    assert await svc.resolve_game_id("ark") == 83374
+    assert await svc.resolve_game_id("83374") == 83374
+    assert await svc.resolve_game_id(432) == 432
+    await svc.close()
+
+
+@pytest.mark.asyncio
+async def test_get_categories_and_find_class_id():
+    mock_payload = {
+        "data": [
+            {"id": 4471, "gameId": 432, "name": "Modpacks", "slug": "modpacks", "isClass": True},
+            {"id": 6, "gameId": 432, "name": "Mods", "slug": "mc-mods", "isClass": True},
+            {"id": 412, "gameId": 432, "name": "Technology", "slug": "technology", "classId": 6},
+        ]
+    }
+    mock_resp = httpx.Response(200, json=mock_payload, request=httpx.Request("GET", "https://api.curseforge.com/v1/categories?gameId=432"))
+
+    with patch("services.curseforge_api_key_service.resolve_key", return_value="TEST_KEY"):
+        svc = CurseForgeService()
+        with patch.object(svc.client, "get", new=AsyncMock(return_value=mock_resp)):
+            categories = await svc.get_categories(432)
+            assert len(categories) == 3
+            modpack_class = await svc.find_class_id(432, "modpacks")
+            assert modpack_class == 4471
+            mods_class = await svc.find_class_id(432, "mods")
+            assert mods_class == 6
+        await svc.close()
+
+
+@pytest.mark.asyncio
+async def test_search_modpacks_generic_with_resolved_class():
+    mock_cats_resp = httpx.Response(
+        200,
+        json={"data": [{"id": 9999, "gameId": 83374, "name": "Modpacks", "slug": "ark-modpacks", "isClass": True}]},
+        request=httpx.Request("GET", "https://api.curseforge.com/v1/categories?gameId=83374"),
+    )
+    mock_search_resp = httpx.Response(
+        200,
+        json={"data": [{"id": 12345, "name": "ARK Overhaul Pack", "summary": "Mega Pack"}]},
+        request=httpx.Request("GET", "https://api.curseforge.com/v1/mods/search"),
+    )
+
+    with patch("services.curseforge_api_key_service.resolve_key", return_value="TEST_KEY"):
+        svc = CurseForgeService()
+
+        async def _mock_get(url, params=None, **kwargs):
+            if "categories" in url:
+                return mock_cats_resp
+            return mock_search_resp
+
+        with patch.object(svc.client, "get", side_effect=_mock_get) as mock_get:
+            res = await svc.search_modpacks(game_id="83374", query="overhaul")
+            assert len(res) == 1
+            assert res[0].title == "ARK Overhaul Pack"
+            # Verify classId 9999 was passed
+            call_params = mock_get.call_args[1]["params"]
+            assert call_params["classId"] == 9999
+            assert call_params["gameId"] == 83374
+        await svc.close()
+
+
+@pytest.mark.asyncio
+async def test_find_class_id_non_minecraft():
+    mock_payload = {
+        "data": [
+            {"id": 8888, "gameId": 83262, "name": "Palworld Mods", "slug": "pal-mods", "isClass": True},
+            {"id": 8889, "gameId": 83262, "name": "Palworld Modpacks", "slug": "palworld-modpacks", "isClass": True},
+        ]
+    }
+    mock_resp = httpx.Response(200, json=mock_payload, request=httpx.Request("GET", "https://api.curseforge.com/v1/categories?gameId=83262"))
+
+    with patch("services.curseforge_api_key_service.resolve_key", return_value="TEST_KEY"):
+        svc = CurseForgeService()
+        with patch.object(svc.client, "get", new=AsyncMock(return_value=mock_resp)):
+            mods_cls = await svc.find_class_id(83262, "mods")
+            assert mods_cls == 8888
+            packs_cls = await svc.find_class_id(83262, "modpacks")
+            assert packs_cls == 8889
+        await svc.close()
+
+
+@pytest.mark.asyncio
+async def test_search_mods_thematic_filler_cleaning():
+    mock_first_empty = httpx.Response(200, json={"data": []}, request=httpx.Request("GET", "https://api.curseforge.com/v1/mods/search"))
+    mock_second_hit = httpx.Response(
+        200,
+        json={"data": [{"id": 555, "name": "Global Economy Mod", "summary": "Economy for players"}]},
+        request=httpx.Request("GET", "https://api.curseforge.com/v1/mods/search"),
+    )
+
+    with patch("services.curseforge_api_key_service.resolve_key", return_value="TEST_KEY"):
+        svc = CurseForgeService()
+        responses = [mock_first_empty, mock_second_hit]
+        call_count = 0
+
+        async def _mock_get(url, params=None, **kwargs):
+            nonlocal call_count
+            resp = responses[call_count]
+            call_count += 1
+            return resp
+
+        with patch.object(svc.client, "get", side_effect=_mock_get) as mock_get:
+            res = await svc.search_mods(game_id=83374, query="Mods für Wirtschaft")
+            assert len(res) == 1
+            assert res[0].title == "Global Economy Mod"
+            # Verify fallback searched for thematic English term "economy"
+            assert mock_get.call_count == 2
+            second_params = mock_get.call_args_list[1][1]["params"]
+            assert second_params["searchFilter"] == "economy"
+        await svc.close()
+
+
+@pytest.mark.asyncio
+async def test_search_mods_unresolvable_game_returns_empty():
+    with patch("services.curseforge_api_key_service.resolve_key", return_value="TEST_KEY"):
+        svc = CurseForgeService()
+        res = await svc.search_mods(game_id="unknown_nonexistent_game_xyz", query="something")
+        assert res == []
+        await svc.close()
+
 

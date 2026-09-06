@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Bell, Bot, Mail, Smartphone } from 'lucide-react'
 import { useAuthStore } from '@/stores/authStore'
@@ -82,18 +82,72 @@ export function BenachrichtigungsGlocke({ className = '', align = 'sidebar', pla
     }
   }
 
-  const alignClass =
-    align === 'sidebar'
-      ? 'right-0 lg:left-0 lg:right-auto'
-      : align === 'left'
-      ? 'left-0'
-      : 'right-0'
-  const placementClass = placement === 'top' ? 'bottom-full mb-2' : 'top-full mt-2'
+  const [computedPlacement, setComputedPlacement] = useState<'top' | 'bottom'>(placement)
+  const [computedAlign, setComputedAlign] = useState<'left' | 'right'>(() => {
+    if (align === 'left') return 'left'
+    if (align === 'right') return 'right'
+    return align === 'sidebar' && typeof window !== 'undefined' && window.innerWidth >= 1024 ? 'left' : 'right'
+  })
+
+  const updatePosition = useCallback(() => {
+    if (!bellRef.current) return
+    const rect = bellRef.current.getBoundingClientRect()
+    // In Test-Umgebungen ohne Layout-Engine (jsdom) Props respektieren
+    if (rect.width === 0 && rect.height === 0 && rect.top === 0 && rect.bottom === 0) {
+      setComputedPlacement(placement)
+      setComputedAlign(align === 'sidebar' ? (typeof window !== 'undefined' && window.innerWidth >= 1024 ? 'left' : 'right') : align)
+      return
+    }
+
+    const spaceBelow = window.innerHeight - rect.bottom
+    const spaceAbove = rect.top
+    const spaceRight = window.innerWidth - rect.right
+    const spaceLeft = rect.left
+
+    // Vertikal: Wenn oben nicht genug Platz ist (< 320px) oder explizit placement="bottom"
+    if (placement === 'bottom' || (spaceAbove < 320 && spaceBelow >= spaceAbove)) {
+      setComputedPlacement('bottom')
+    } else {
+      setComputedPlacement('top')
+    }
+
+    // Horizontal: Wenn rechts nicht genug Platz ist (< 320px) oder explizit align="right"
+    if (align === 'right' || (spaceRight < 320 && spaceLeft >= spaceRight)) {
+      setComputedAlign('right')
+    } else if (align === 'left') {
+      setComputedAlign('left')
+    } else if (align === 'sidebar') {
+      setComputedAlign(spaceRight >= 320 ? 'left' : 'right')
+    } else {
+      setComputedAlign(spaceRight >= 320 ? 'left' : 'right')
+    }
+  }, [placement, align])
+
+  useEffect(() => {
+    if (!bellOpen) return
+    updatePosition()
+    window.addEventListener('resize', updatePosition)
+    window.addEventListener('scroll', updatePosition, true)
+    return () => {
+      window.removeEventListener('resize', updatePosition)
+      window.removeEventListener('scroll', updatePosition, true)
+    }
+  }, [bellOpen, updatePosition])
+
+  const toggleBell = () => {
+    if (!bellOpen) {
+      updatePosition()
+    }
+    setBellOpen((offen) => !offen)
+  }
+
+  const alignClass = computedAlign === 'right' ? 'right-0 left-auto' : 'left-0 right-auto'
+  const placementClass = computedPlacement === 'top' ? 'bottom-full mb-2' : 'top-full mt-2'
 
   return (
     <div className={`relative ${className}`} ref={bellRef}>
       <button
-        onClick={() => setBellOpen((offen) => !offen)}
+        onClick={toggleBell}
         aria-expanded={bellOpen}
         aria-haspopup="menu"
         title={irgendwasAn ? t('notifications.activeLabel', 'Benachrichtigungen aktiv') : t('notifications.inactiveLabel', 'Benachrichtigungen stummgeschaltet')}

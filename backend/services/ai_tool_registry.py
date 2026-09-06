@@ -155,6 +155,7 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # (`ai_action_service._global_tool_definitions`).
     "web_search": Werkzeug("global_read", angebot=("ai.web_search.use",)),
     "search_curseforge_modpacks": Werkzeug("global_read", gruppe="mods", angebot=("server.mods.read",)),
+    "search_curseforge_mods": Werkzeug("global_read", gruppe="mods", angebot=("server.mods.read",)),
     "advise_node_placement": Werkzeug("global_read", gruppe="nodes", angebot=("servers.create",)),
     "cloudflare_list_zones": Werkzeug("global_read", gruppe="domains", angebot=("cloudflare.manage",)),
     "cloudflare_list_dns_records": Werkzeug("global_read", gruppe="domains", angebot=("cloudflare.manage",)),

@@ -413,10 +413,9 @@ Erschliesse was der Benutzer wirklich erreichen will und welche naechsten Schrit
 sind (z. B. Spiel-, Mod- und Modpack-Namen auch bei Tippfehlern oder unvollstaendigen \
 Angaben wie 'Kappelmon' / 'Koppimon' / 'coppelmon' -> Cobblemon GG via Websuche, CurseForge oder Fachwissen ermitteln). \
 Hole fehlenden Kontext still via Read-Werkzeugen (Memory, Kalender, Notizen, \
-Nodes via advise_node_placement, Modpacks via search_curseforge_modpacks, Zonen via \
-cloudflare_list_zones, Websuche via web_search) ohne nachzufragen. \
-Verlangt ein Werkzeug eine spezifische numerische Kennung oder ID (wie z. B. eine CurseForge game_id), \
-recherchiere diese vorab eigenständig per Websuche (`web_search`), statt bloße Namen in ID-Felder zu übergeben. \
+Nodes via advise_node_placement, Modpacks via search_curseforge_modpacks, Einzelmods via search_curseforge_mods, \
+Zonen via cloudflare_list_zones, Websuche via web_search) ohne nachzufragen. \
+CurseForge-Werkzeuge akzeptieren für beliebige Spiele sowohl numerische IDs als auch Spielnamen/Slugs (z. B. 'ark', 'minecraft', 'palworld') oder eine server_id, um Spiele und Klassen dynamisch aufzulösen. \
 Schlage dann das Naechste via propose_* \
 vor bzw. starte dafuer sofort einen Worker via worker_start. Wenn eine externe Suche oder Websuche \
 fehlschlaegt oder nicht konfiguriert ist, gib NIEMALS auf und brich nicht ab: nutze dein Fachwissen \

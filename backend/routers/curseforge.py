@@ -52,22 +52,25 @@ def _mod_to_dict(mod: CurseForgeModInfo) -> dict:
     }
 
 
-def _detect_minecraft_modloader_and_version(server: Server, plugin: Any) -> tuple[int | None, str | None, str | None]:
-    """Ermittelt mod_loader_type (1=Forge, 4=Fabric, 5=Quilt, 6=NeoForge), game_version und ggf. class_id."""
+def _detect_game_modloader_and_version(server: Server, plugin: Any, game_id: str | int) -> tuple[int | None, str | None, str | None]:
+    """Ermittelt mod_loader_type, game_version und ggf. class_id aus Blueprint/Server-Umgebung."""
     gt = (server.game_type or "").lower()
     mod_loader_type: int | None = None
     override_class_id: str | None = None
 
-    if "fabric" in gt:
-        mod_loader_type = 4
-    elif "neoforge" in gt:
-        mod_loader_type = 6
-    elif "forge" in gt:
-        mod_loader_type = 1
-    elif "quilt" in gt:
-        mod_loader_type = 5
-    elif any(k in gt for k in ("paper", "spigot", "purpur", "bukkit")):
-        override_class_id = "12"
+    # Minecraft-spezifische Loader-Typen nur anwenden, wenn das Spiel Minecraft ist
+    is_minecraft = str(game_id) == "432" or "minecraft" in gt
+    if is_minecraft:
+        if "fabric" in gt:
+            mod_loader_type = 4
+        elif "neoforge" in gt:
+            mod_loader_type = 6
+        elif "forge" in gt:
+            mod_loader_type = 1
+        elif "quilt" in gt:
+            mod_loader_type = 5
+        elif any(k in gt for k in ("paper", "spigot", "purpur", "bukkit")):
+            override_class_id = "12"
 
     game_version: str | None = None
     bp = getattr(plugin, "blueprint", None)
@@ -79,13 +82,89 @@ def _detect_minecraft_modloader_and_version(server: Server, plugin: Any) -> tupl
     return mod_loader_type, game_version, override_class_id
 
 
+def _detect_minecraft_modloader_and_version(server: Server, plugin: Any) -> tuple[int | None, str | None, str | None]:
+    """Kompatibilitäts-Funktion für bestehende Aufrufer."""
+    return _detect_game_modloader_and_version(server, plugin, 432)
+
+
+async def _resolve_curseforge_class_id(
+    cf_service: Any,
+    game_id: str | int,
+    class_id: Optional[str],
+    mod_support: dict,
+) -> Optional[int | str]:
+    blueprint_class_id = mod_support.get("curseforge_class_id")
+    if class_id is None:
+        return blueprint_class_id
+
+    raw = class_id.strip().lower()
+    if raw in ("all", "0", "none", ""):
+        return None
+
+    if raw in ("modpacks", "modpack", "packs"):
+        resolved = await cf_service.find_class_id(game_id, "modpacks")
+        return resolved
+
+    if raw in ("mods", "mod"):
+        resolved = await cf_service.find_class_id(game_id, "mods")
+        return resolved or blueprint_class_id
+
+    if raw.isdigit():
+        target_id = int(raw)
+        try:
+            cats = await cf_service.get_categories(game_id, class_only=False)
+            if isinstance(cats, list) and cats:
+                valid_ids = {int(c["id"]) for c in cats if isinstance(c, dict) and "id" in c}
+                if target_id in valid_ids:
+                    return target_id
+                # Die übergebene ID gehört nicht zu diesem Spiel -> Fallback auf Blueprint-Klasse
+                return blueprint_class_id
+        except Exception:
+            pass
+        return target_id
+
+    return raw
+
+
+@router.get("/categories")
+async def get_curseforge_categories(
+    server_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> List[dict]:
+    """Liefert die CurseForge-Kategorien und -Klassen für das Spiel dieses Servers."""
+    require_server_permission(user, server_id, db, "server.mods.read")
+
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server nicht gefunden")
+
+    plugin = get_plugin(server.game_type)
+    if not plugin or not plugin.supports_mods:
+        raise HTTPException(status_code=400, detail="Spiel unterstützt keine Mods")
+
+    mod_support = plugin.get_mod_support()
+    if not mod_support or not mod_support.get("curseforge_game_id"):
+        raise HTTPException(status_code=400, detail="CurseForge für dieses Spiel nicht konfiguriert")
+
+    game_id = mod_support["curseforge_game_id"]
+    try:
+        cf_service = await get_curseforge_service()
+        return await cf_service.get_categories(game_id)
+    except CurseForgeApiUnavailable as e:
+        raise _curseforge_api_error(e)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="errors.curseforge_load_failed") from e
+
+
 @router.get("/search")
 async def search_curseforge_mods(
     server_id: int,
     query: str = Query("", description="Suchbegriff"),
     page: int = Query(1, ge=1, description="Seitennummer"),
     per_page: int = Query(24, ge=1, le=50, description="Ergebnisse pro Seite"),
-    class_id: Optional[str] = Query(None, description="Optionaler CurseForge class_id Filter (z. B. '6' für Mods, '4471' für Modpacks)"),
+    class_id: Optional[str] = Query(None, description="Optionaler CurseForge class_id Filter (z. B. '6', '4471' oder 'mods', 'modpacks')"),
+    only_distributable: bool = Query(False, description="Nur Mods mit erlaubter Drittanbieter-Dateidistribution"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> List[dict]:
@@ -105,22 +184,17 @@ async def search_curseforge_mods(
         raise HTTPException(status_code=400, detail="CurseForge für dieses Spiel nicht konfiguriert")
 
     game_id = mod_support["curseforge_game_id"]
-    if class_id is not None:
-        resolved_class_id = None if class_id.strip().lower() in ("all", "0", "none", "") else class_id.strip()
-    else:
-        resolved_class_id = mod_support.get("curseforge_class_id")
-
-    mod_loader_type = None
-    game_version = None
-    if str(game_id) == "432":
-        auto_loader, auto_ver, auto_class = _detect_minecraft_modloader_and_version(server, plugin)
-        mod_loader_type = auto_loader
-        game_version = auto_ver
-        if auto_class and resolved_class_id in (None, "6"):
-            resolved_class_id = auto_class
 
     try:
         cf_service = await get_curseforge_service()
+        resolved_class_id = await _resolve_curseforge_class_id(cf_service, game_id, class_id, mod_support)
+
+        auto_loader, auto_ver, auto_class = _detect_game_modloader_and_version(server, plugin, game_id)
+        mod_loader_type = auto_loader
+        game_version = auto_ver
+        if auto_class and resolved_class_id is None:
+            resolved_class_id = await cf_service.find_class_id(game_id, auto_class) or resolved_class_id
+
         mods = await cf_service.search_mods(
             game_id=game_id,
             query=query,
@@ -129,7 +203,15 @@ async def search_curseforge_mods(
             class_id=resolved_class_id,
             mod_loader_type=mod_loader_type,
             game_version=game_version,
+            only_distributable=only_distributable,
         )
+        if not mods and query.strip().isdigit() and page == 1:
+            try:
+                mod_detail = await cf_service.get_mod_details(query.strip())
+                if mod_detail and (not mod_detail.game_id or str(mod_detail.game_id) == str(game_id)):
+                    mods = [mod_detail]
+            except Exception:
+                pass
         return [_mod_to_dict(mod) for mod in mods]
     except CurseForgeApiUnavailable as e:
         raise _curseforge_api_error(e)
@@ -143,7 +225,8 @@ async def get_popular_mods(
     limit: int = Query(24, ge=1, le=50, description="Anzahl der Mods"),
     page: int = Query(1, ge=1, description="Seitennummer (Pagination)"),
     sort: str = Query("trending", description="Sortierung: trending | popular | newest | updated"),
-    class_id: Optional[str] = Query(None, description="Optionaler CurseForge class_id Filter (z. B. '6' für Mods, '4471' für Modpacks)"),
+    class_id: Optional[str] = Query(None, description="Optionaler CurseForge class_id Filter (z. B. '6', '4471' oder 'mods', 'modpacks')"),
+    only_distributable: bool = Query(False, description="Nur Mods mit erlaubter Drittanbieter-Dateidistribution"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> List[dict]:
@@ -163,25 +246,19 @@ async def get_popular_mods(
         raise HTTPException(status_code=400, detail="CurseForge für dieses Spiel nicht konfiguriert")
 
     game_id = mod_support["curseforge_game_id"]
-    if class_id is not None:
-        resolved_class_id = None if class_id.strip().lower() in ("all", "0", "none", "") else class_id.strip()
-    else:
-        resolved_class_id = mod_support.get("curseforge_class_id")
-
-    mod_loader_type = None
-    game_version = None
-    if str(game_id) == "432":
-        auto_loader, auto_ver, auto_class = _detect_minecraft_modloader_and_version(server, plugin)
-        mod_loader_type = auto_loader
-        game_version = auto_ver
-        if auto_class and resolved_class_id in (None, "6"):
-            resolved_class_id = auto_class
-
     if sort not in ("trending", "popular", "newest", "updated"):
         sort = "trending"
 
     try:
         cf_service = await get_curseforge_service()
+        resolved_class_id = await _resolve_curseforge_class_id(cf_service, game_id, class_id, mod_support)
+
+        auto_loader, auto_ver, auto_class = _detect_game_modloader_and_version(server, plugin, game_id)
+        mod_loader_type = auto_loader
+        game_version = auto_ver
+        if auto_class and resolved_class_id is None:
+            resolved_class_id = await cf_service.find_class_id(game_id, auto_class) or resolved_class_id
+
         mods = await cf_service.get_popular_mods(
             game_id=game_id,
             limit=limit,
@@ -190,6 +267,7 @@ async def get_popular_mods(
             class_id=resolved_class_id,
             mod_loader_type=mod_loader_type,
             game_version=game_version,
+            only_distributable=only_distributable,
         )
         return [_mod_to_dict(mod) for mod in mods]
     except CurseForgeApiUnavailable as e:

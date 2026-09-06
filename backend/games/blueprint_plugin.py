@@ -883,7 +883,7 @@ class BlueprintPlugin(GamePlugin):
                         errors.append(f"{mod_info.title}: Direkter API-Download vom Mod-Autor deaktiviert oder keine URL")
                         items[wid] = {"ok": False, "error": "Keine Download-URL verfuegbar"}
                         continue
-                    file_name = file_obj.get("fileName") or f"mod_{wid}.jar"
+                    file_name = file_obj.get("fileName") or f"mod_{wid}"
                     safe_name = Path(file_name).name
                     dest_file_name = safe_name if str(wid) in safe_name else f"cf_{wid}_{safe_name}"
                     dest_file = (target_dir / dest_file_name).resolve()
@@ -939,7 +939,7 @@ class BlueprintPlugin(GamePlugin):
                                             server.id,
                                             f"[MSM] Modpack Manifest erkannt ({len(manifest_files)} Mods) — lade Mod-Dateien nach...\n",
                                         )
-                                        mods_dir = (base / "mods").resolve()
+                                        mods_dir = (base / target_dir_rel).resolve()
                                         mods_dir.mkdir(parents=True, exist_ok=True)
                                         async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as mc_client:
                                             for idx, fentry in enumerate(manifest_files, 1):
@@ -952,10 +952,15 @@ class BlueprintPlugin(GamePlugin):
                                                     if m_url:
                                                         m_resp = await mc_client.get(m_url, headers={"x-api-key": cf_key})
                                                         if m_resp.status_code == 200:
-                                                            m_name = Path(m_url.split("?")[0]).name or f"mod_{pid}_{fid}.jar"
-                                                            m_target = (mods_dir / m_name).resolve()
-                                                            m_target.write_bytes(m_resp.content)
-                                                            self._try_chown_install_path(server, m_target)
+                                                            m_name = Path(m_url.split("?")[0]).name or f"mod_{pid}_{fid}"
+                                                            safe_m_name = Path(m_name).name
+                                                            m_target = (mods_dir / safe_m_name).resolve()
+                                                            try:
+                                                                m_target.relative_to(base)
+                                                                m_target.write_bytes(m_resp.content)
+                                                                self._try_chown_install_path(server, m_target)
+                                                            except (ValueError, Exception) as write_err:
+                                                                logger.warning("Fehler beim Schreiben von Mod %s (%s): %s", pid, safe_m_name, write_err)
                                                 except Exception:
                                                     pass
                                                 if idx % 10 == 0 or idx == len(manifest_files):
