@@ -40,4 +40,17 @@ if prop_path.exists():
     prop_path.write_text("\n".join(prop_lines), encoding="utf-8")
     print(f"Synchronized Android tauri.properties: versionName={tag}, versionCode={version_code}")
 
-print(f"Synchronized smart-system version to {tag}")
+# Recovery App synchronisieren
+rec_conf = Path("recovery/src-tauri/tauri.conf.json")
+if rec_conf.exists():
+    rec_data = json.loads(rec_conf.read_text(encoding="utf-8"))
+    rec_data["version"] = tag
+    rec_conf.write_text(json.dumps(rec_data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+rec_cargo = Path("recovery/src-tauri/Cargo.toml")
+if rec_cargo.exists():
+    rec_content = rec_cargo.read_text(encoding="utf-8")
+    rec_content = re.sub(r'(^\[package\][\s\S]*?^version\s*=\s*)"[^"]+"', rf'\g<1>"{tag}"', rec_content, flags=re.MULTILINE)
+    rec_cargo.write_text(rec_content, encoding="utf-8")
+
+print(f"Synchronized all application versions to {tag}")
