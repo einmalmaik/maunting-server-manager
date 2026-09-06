@@ -20,14 +20,20 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        "vault_blind_buckets",
-        sa.Column("bucket_id", sa.String(length=64), primary_key=True, nullable=False),
-        sa.Column("auth_verifier", sa.String(length=128), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-    )
+    bind = op.get_bind()
+    tables = set(sa.inspect(bind).get_table_names())
+    if "vault_blind_buckets" not in tables:
+        op.create_table(
+            "vault_blind_buckets",
+            sa.Column("bucket_id", sa.String(length=64), primary_key=True, nullable=False),
+            sa.Column("auth_verifier", sa.String(length=128), nullable=False),
+            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        )
 
 
 def downgrade() -> None:
-    op.drop_table("vault_blind_buckets")
+    bind = op.get_bind()
+    tables = set(sa.inspect(bind).get_table_names())
+    if "vault_blind_buckets" in tables:
+        op.drop_table("vault_blind_buckets")

@@ -53,4 +53,17 @@ if rec_cargo.exists():
     rec_content = re.sub(r'(^\[package\][\s\S]*?^version\s*=\s*)"[^"]+"', rf'\g<1>"{tag}"', rec_content, flags=re.MULTILINE)
     rec_cargo.write_text(rec_content, encoding="utf-8")
 
+# Backend /api/version synchronisieren
+backend_main = Path("backend/main.py")
+if backend_main.exists():
+    main_content = backend_main.read_text(encoding="utf-8")
+    main_content = re.sub(r'("version":\s*)"[^"]+"', rf'\g<1>"{tag}"', main_content)
+    backend_main.write_text(main_content, encoding="utf-8")
+
+backend_test_version = Path("backend/tests/test_app_version.py")
+if backend_test_version.exists():
+    test_content = backend_test_version.read_text(encoding="utf-8")
+    test_content = re.sub(r'(assert res\["version"\] ==\s*)"[^"]+"', rf'\g<1>"{tag}"', test_content)
+    backend_test_version.write_text(test_content, encoding="utf-8")
+
 print(f"Synchronized all application versions to {tag}")

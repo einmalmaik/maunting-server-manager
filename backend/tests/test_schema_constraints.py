@@ -1591,3 +1591,42 @@ def test_vault_entries_node_id_migration(tmp_path: Path) -> None:
         engine.dispose()
         settings.database_url = vorher
 
+
+def test_vault_blind_buckets_and_composite_pk_migration(tmp_path: Path) -> None:
+    """Migrationen 20260906_01 und 20260906_02 sind vollstaendig idempotent.
+    
+    Verifiziert:
+    1. Wenn Base.metadata.create_all(engine) die Tabelle vault_blind_buckets vorab
+       erstellt hat (wie bei prepare_phase8_schema.py), bricht Migration 20260906_01
+       nicht mit DuplicateTable ab.
+    2. Die composite primary key Migration 20260906_02 setzt (bucket_id, id) korrekt um.
+    3. initialize_or_upgrade_schema laeuft fehlerfrei durch.
+    """
+    from services.schema_manager import initialize_or_upgrade_schema
+
+    db_url = f"sqlite:///{tmp_path / 'vault_blind_buckets.db'}"
+    vorher = settings.database_url
+    settings.database_url = db_url
+    backend_dir = Path(__file__).resolve().parent.parent
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "migrations"))
+    engine = create_engine(db_url)
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "20260905_01")
+
+        # Tabelle vault_blind_buckets existiert bereits durch create_all.
+        # Migration auf head fuehrt 20260906_01 und 20260906_02 aus, ohne abzustuerzen.
+        command.upgrade(config, "head")
+        inspector = _frisch(engine)
+        assert "vault_blind_buckets" in inspector.get_table_names()
+
+        pk = inspector.get_pk_constraint("vault_entries")
+        assert set(pk.get("constrained_columns", [])) == {"bucket_id", "id"}
+
+        status = initialize_or_upgrade_schema(engine)
+        assert status == "upgraded"
+    finally:
+        engine.dispose()
+        settings.database_url = vorher
+
