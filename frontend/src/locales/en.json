@@ -1299,6 +1299,9 @@
       }
     },
     "geo": {
+      "button": "3D Globe",
+      "showMap": "Open globe",
+      "hideMap": "Close globe",
       "panelTitle": "Regional information overview",
       "region": "Region",
       "close": "Close panel",
@@ -5504,6 +5507,28 @@
       "keinChatrecht": "Your account lacks permission for AI chat (ai.chat.use). Contact your administrator to grant access.",
       "gedaechtnis": "Memory",
       "tresor": "Password Manager"
+    },
+    "updateModal": {
+      "titelVerfuegbar": "Update available",
+      "titelLaedt": "Downloading update",
+      "titelBereit": "Update ready",
+      "titelAndroid": "Installation started",
+      "versionInfo": "Version v{{neu}} (current: v{{alt}})",
+      "textDesktop": "An update is ready and will be applied on next launch.",
+      "textAndroid": "An update is ready and can be installed directly.",
+      "textLaedt": "Downloading update …",
+      "textBereit": "Version v{{version}} is ready. Restart the app to finish updating.",
+      "textAndroidGestartet": "The Android package manager opened. Please confirm the installation in the system dialog.",
+      "fehlerStandard": "Failed to download update.",
+      "spaeter": "Later",
+      "jetztAktualisieren": "Update now",
+      "ladenUndInstallieren": "Download & install",
+      "neuStarten": "Restart now",
+      "beimNaechstenStart": "On next launch",
+      "erneutOeffnen": "Open again",
+      "schliessen": "Close",
+      "erneutVersuchen": "Try again",
+      "spaeterErinnern": "Remind me later"
     },
     "vault": {
       "autolock": {

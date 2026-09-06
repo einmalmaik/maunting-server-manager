@@ -22,7 +22,7 @@ class ApkInstallerPlugin(private val activity: Activity) : Plugin(activity) {
     fun installApk(invoke: Invoke) {
         try {
             val args = invoke.parseArgs(InstallApkArgs::class.java)
-            val success = ApkInstaller.installApk(activity.applicationContext, args.apkPath)
+            val success = ApkInstaller.installApk(activity, args.apkPath)
             if (success) {
                 invoke.resolve()
             } else {

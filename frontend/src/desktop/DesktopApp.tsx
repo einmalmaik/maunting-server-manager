@@ -51,11 +51,15 @@ import {
 } from './sprachKoordination'
 import {
   appBeenden,
+  appNeuStarten,
   hauptfensterVerstecken,
   konfigLaden,
   konfigSpeichern,
+  updateInstallieren,
+  updatePruefen,
   wakewordStand,
   type AppKonfig,
+  type UpdateStatusEvent,
 } from './tauri'
 import { stillAnmeldenDetail } from './transport'
 import { useAuftragsschleife } from './useAuftragsschleife'
@@ -64,9 +68,24 @@ type Phase = 'laedt' | 'einrichtung' | 'kopplung' | 'sandbox' | 'bereit'
 
 const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
 const SPLASH_GESEHEN_KEY = 'mss:splash_gesehen'
+const LETZTE_ROUTE_KEY = 'mss:letzte_route'
+const ERLAUBTE_ROUTEN = ['/ai', '/kalender', '/notizen', '/gedaechtnis', '/tresor', '/einstellungen']
+
+function getInitialRoute(): string {
+  try {
+    const gespeichert = localStorage.getItem(LETZTE_ROUTE_KEY)
+    if (gespeichert && ERLAUBTE_ROUTEN.includes(gespeichert)) {
+      return gespeichert
+    }
+  } catch {}
+  return '/ai'
+}
 
 export function DesktopApp() {
+  const { t } = useTranslation()
   const [phase, setPhase] = useState<Phase>('laedt')
+  const [startText, setStartText] = useState<string | null>(null)
+  const [updateProgress, setUpdateProgress] = useState<number | null>(null)
   const [konfig, setKonfig] = useState<AppKonfig | null>(null)
   const [isOffline, setIsOffline] = useState(false)
   const [splash, setSplash] = useState(() => {
@@ -243,6 +262,52 @@ export function DesktopApp() {
           setIsOffline(true)
         }
 
+        // Sichtbare Startup-Update-Prüfung
+        try {
+          setStartText(t('mss.app.sucheNachUpdates'))
+          const updateCheck = updatePruefen().catch(() => null)
+          const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000))
+          const info = await Promise.race([updateCheck, timeout])
+
+          if (info && info.verfuegbar && info.neue_version) {
+            setStartText(t('mss.app.updateGefunden', { version: info.neue_version }))
+            setUpdateProgress(0)
+
+            let unlistenStatus: (() => void) | undefined
+            let neustartGeplant = false
+            try {
+              unlistenStatus = await listen<UpdateStatusEvent>('mss:update-status', (event) => {
+                if (event.payload.status === 'laedt' && event.payload.prozent !== undefined) {
+                  setUpdateProgress(event.payload.prozent)
+                  setStartText(t('mss.app.updateDownloadProzent', { prozent: event.payload.prozent }))
+                } else if (event.payload.status === 'bereit') {
+                  setUpdateProgress(100)
+                  setStartText(t('mss.app.updateBereitNeustart', { version: info.neue_version }))
+                  if (!isAndroid) {
+                    neustartGeplant = true
+                    setTimeout(() => void appNeuStarten(), 1200)
+                  }
+                } else if (event.payload.status === 'installiert_android') {
+                  setUpdateProgress(100)
+                  setStartText(t('mss.app.updateBereitNeustart', { version: info.neue_version }))
+                }
+              })
+
+              await updateInstallieren()
+            } catch {
+              // Bei Installationsfehler normal zur App fortfahren
+            } finally {
+              if (unlistenStatus) unlistenStatus()
+            }
+
+            if (neustartGeplant) {
+              return
+            }
+          }
+        } catch {
+          // Stiller Übergang bei Offline / Fehlern
+        }
+
         if (!isAndroid && !geladen.sandbox_pfad) {
           setPhase('sandbox')
           return
@@ -252,7 +317,7 @@ export function DesktopApp() {
         setPhase('einrichtung')
       }
     })()
-  }, [])
+  }, [t])
 
   // Regelmäßiges Lebenszeichen des gekoppelten Geräts an das Backend
   useEffect(() => {
@@ -292,7 +357,7 @@ export function DesktopApp() {
 
   let inhalt: ReactNode
   if (phase === 'laedt' || konfig === null) {
-    inhalt = <Startbild />
+    inhalt = <Startbild text={startText} progress={updateProgress} />
   } else if (phase === 'einrichtung' || phase === 'kopplung' || phase === 'sandbox') {
     inhalt = (
       <Wizard
@@ -394,7 +459,7 @@ export function DesktopApp() {
   }
 
   return (
-    <MemoryRouter initialEntries={['/ai']}>
+    <MemoryRouter initialEntries={[getInitialRoute()]}>
       <NavigationEmpfaenger />
       <div className="relative h-[100dvh] max-h-[100dvh] w-full overflow-hidden bg-background text-on-surface pb-[env(safe-area-inset-bottom,0px)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)] flex flex-col">
         <div className="msm-deep-grid pointer-events-none absolute inset-0 opacity-30" />
@@ -426,6 +491,16 @@ export function DesktopApp() {
 
 function NavigationEmpfaenger() {
   const navigate = useNavigate()
+  const location = useLocation()
+
+  useEffect(() => {
+    if (ERLAUBTE_ROUTEN.includes(location.pathname)) {
+      try {
+        localStorage.setItem(LETZTE_ROUTE_KEY, location.pathname)
+      } catch {}
+    }
+  }, [location.pathname])
+
   useEffect(() => {
     const unlisten = listen<string>('mss:navigiere-zu', (event) => {
       if (event.payload) {
@@ -439,12 +514,20 @@ function NavigationEmpfaenger() {
   return null
 }
 
-function Startbild() {
+function Startbild({ text, progress }: { text?: string | null; progress?: number | null }) {
   const { t } = useTranslation()
   return (
-    <main className="flex flex-1 flex-col items-center justify-center gap-3 text-on-surface-variant">
-      <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-      <p className="text-sm font-medium text-on-surface">{t('mss.app.startet')}</p>
+    <main className="flex flex-1 flex-col items-center justify-center gap-4 text-on-surface-variant px-6 max-w-sm mx-auto text-center animate-fade-in">
+      <div className="h-7 w-7 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      <p className="text-sm font-medium text-on-surface">{text || t('mss.app.startet')}</p>
+      {typeof progress === 'number' && (
+        <div className="w-full bg-surface-container-high rounded-full h-2 overflow-hidden mt-1 border border-outline-variant/30">
+          <div
+            className="bg-primary h-2 rounded-full transition-all duration-300 ease-out"
+            style={{ width: `${Math.max(5, Math.min(100, progress))}%` }}
+          />
+        </div>
+      )}
     </main>
   )
 }

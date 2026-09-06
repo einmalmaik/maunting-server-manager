@@ -32,12 +32,6 @@ object ApkInstaller {
             return false
         }
 
-        // Falls die Berechtigung zur Paketinstallation fehlt, sofort FileProvider-Weg nutzen,
-        // da dieser den System-Berechtigungsdialog zuverlässig anstößt.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !context.packageManager.canRequestPackageInstalls()) {
-            Log.i(TAG, "Berechtigung für unbekannte Quellen noch nicht erteilt. Verwende FileProvider-Fallback...")
-            return installViaFileProvider(context, apkFile)
-        }
 
         // 1. Primär: PackageInstaller.Session
         try {
@@ -105,6 +99,7 @@ object ApkInstaller {
                 setDataAndType(contentUri, "application/vnd.android.package-archive")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
             }
 
             try {

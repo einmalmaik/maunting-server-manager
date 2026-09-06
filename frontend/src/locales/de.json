@@ -1299,6 +1299,9 @@
       }
     },
     "geo": {
+      "button": "3D-Globus",
+      "showMap": "Globus öffnen",
+      "hideMap": "Globus schließen",
       "panelTitle": "Regionale Informationsübersicht",
       "region": "Region",
       "close": "Panel schließen",
@@ -5504,6 +5507,28 @@
       "keinChatrecht": "Dein Konto besitzt kein Recht für den KI-Chat (ai.chat.use). Wende dich an deinen Administrator, um die Berechtigung zu erhalten.",
       "gedaechtnis": "Gedächtnis",
       "tresor": "Passwort-Manager"
+    },
+    "updateModal": {
+      "titelVerfuegbar": "Update verfügbar",
+      "titelLaedt": "Update wird geladen",
+      "titelBereit": "Update bereit",
+      "titelAndroid": "Installation gestartet",
+      "versionInfo": "Version v{{neu}} (aktuell: v{{alt}})",
+      "textDesktop": "Eine Aktualisierung steht bereit und wird beim nächsten Start aktiv.",
+      "textAndroid": "Eine Aktualisierung steht bereit und kann direkt installiert werden.",
+      "textLaedt": "Paket wird geladen …",
+      "textBereit": "Version v{{version}} ist vorbereitet. Starte die App neu, um das Update abzuschließen.",
+      "textAndroidGestartet": "Der Android-Paketmanager wurde geöffnet. Bitte bestätige die Aktualisierung im System-Dialog.",
+      "fehlerStandard": "Das Update konnte nicht geladen werden.",
+      "spaeter": "Später",
+      "jetztAktualisieren": "Jetzt aktualisieren",
+      "ladenUndInstallieren": "Herunterladen & Installieren",
+      "neuStarten": "Jetzt neu starten",
+      "beimNaechstenStart": "Beim nächsten Start",
+      "erneutOeffnen": "Erneut öffnen",
+      "schliessen": "Schließen",
+      "erneutVersuchen": "Erneut versuchen",
+      "spaeterErinnern": "Später erinnern"
     },
     "vault": {
       "autolock": {

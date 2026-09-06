@@ -358,4 +358,107 @@ describe('DesktopApp', () => {
     expect(invokeMock).not.toHaveBeenCalledWith('update_installieren')
     expect(invokeMock).not.toHaveBeenCalledWith('app_neu_starten')
   })
+
+  it('stellt die gemerkte letzte Ansicht aus dem localStorage wieder her', async () => {
+    localStorage.setItem('mss:letzte_route', '/kalender')
+    konfigMock({
+      backend_url: 'https://api.example.com',
+      sandbox_pfad: 'C:\\Users\\tester\\MSS-Sandbox',
+      eingerichtet: true,
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((eingabe: RequestInfo | URL) => {
+        const url = String(eingabe)
+        if (url.includes('/auth/refresh')) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r' }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            }),
+          )
+        }
+        if (url.includes('/auth/me')) {
+          return Promise.resolve(
+            new Response(JSON.stringify(BENUTZER), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            }),
+          )
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ global_permissions: ['ai.calendar.use'], server_permissions: {} }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        )
+      }),
+    )
+
+    render(<DesktopApp />)
+
+    await waitFor(() => {
+      // In der Kalenderansicht wird nicht die KI-Seite gerendert
+      expect(screen.queryByTestId('ki-seite')).not.toBeInTheDocument()
+    })
+  })
+
+  it('führt bei verfügbarem Update die Installation beim Start aus', async () => {
+    invokeMock.mockImplementation((befehl: string) => {
+      if (befehl === 'konfig_laden') {
+        return Promise.resolve({
+          backend_url: 'https://api.example.com',
+          sandbox_pfad: 'C:\\Users\\tester\\MSS-Sandbox',
+          eingerichtet: true,
+        })
+      }
+      if (befehl === 'refresh_token_laden') return Promise.resolve('tresor-token')
+      if (befehl === 'update_pruefen') {
+        return Promise.resolve({
+          verfuegbar: true,
+          neue_version: '4.3.4',
+          aktuelle_version: '4.3.3',
+          download_url: null,
+          notizen: null,
+          ist_android: false,
+        })
+      }
+      if (befehl === 'update_installieren') return Promise.resolve()
+      return Promise.resolve(null)
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((eingabe: RequestInfo | URL) => {
+        const url = String(eingabe)
+        if (url.includes('/auth/refresh')) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r' }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            }),
+          )
+        }
+        if (url.includes('/auth/me')) {
+          return Promise.resolve(
+            new Response(JSON.stringify(BENUTZER), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            }),
+          )
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ global_permissions: [], server_permissions: {} }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        )
+      }),
+    )
+
+    render(<DesktopApp />)
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('update_installieren')
+    })
+  })
 })
