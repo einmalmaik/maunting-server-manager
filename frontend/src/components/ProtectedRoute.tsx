@@ -18,9 +18,14 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!isAuthenticated) {
-    // Mit den Suchparametern, damit nach der Anmeldung auch der Reiter
-    // aus /servers/7?tab=console wieder stimmt.
-    return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />
+    const target = location.pathname + location.search
+    return (
+      <Navigate
+        to={`/login?redirect=${encodeURIComponent(target)}`}
+        replace
+        state={{ from: target }}
+      />
+    )
   }
 
   return <>{children}</>

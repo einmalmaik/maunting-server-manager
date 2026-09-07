@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import { useAuthStore } from '@/stores/authStore'
@@ -14,7 +14,15 @@ import { Shield, ArrowRight, Check, Mail } from 'lucide-react'
 export function Register() {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const location = useLocation()
+  const [searchParams] = useSearchParams()
   const { finishLogin } = useAuthStore()
+
+  const redirectParam = searchParams.get('redirect')
+  const gemerktesZiel = (location.state as { from?: string } | null)?.from || redirectParam
+  const zielNachLogin =
+    gemerktesZiel?.startsWith('/') && !gemerktesZiel.startsWith('//') ? gemerktesZiel : '/'
+
   const [error, setError] = useState('')
   const [captchaToken, setCaptchaToken] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
@@ -100,7 +108,7 @@ export function Register() {
               type="button"
               onClick={() => {
                 if (!pendingUser) return
-                void finishLogin(pendingUser).then(() => navigate('/'))
+                void finishLogin(pendingUser).then(() => navigate(zielNachLogin))
               }}
               className="msm-btn-primary px-8 py-3 inline-flex items-center gap-2"
             >
@@ -271,7 +279,11 @@ export function Register() {
           </form>
 
           <div className="mt-6 text-center font-body-md text-sm">
-            <Link to="/login" className="text-secondary hover:text-mint-accent transition-colors">
+            <Link
+              to={gemerktesZiel ? `/login?redirect=${encodeURIComponent(gemerktesZiel)}` : '/login'}
+              state={{ from: gemerktesZiel }}
+              className="text-secondary hover:text-mint-accent transition-colors"
+            >
               {t('auth.hasAccount')}
             </Link>
           </div>

@@ -148,6 +148,20 @@ export async function deriveTeamBlindMailboxId(teamId: number, teamSalt: string 
 }
 
 /**
+ * Derives the deterministic blind mailbox identifier for a chat group / community.
+ */
+export async function deriveGroupBlindMailboxId(groupId: number, groupSalt: string = ''): Promise<string> {
+  const payload = `msm:group:${groupId}${groupSalt ? `:${groupSalt}` : ''}`
+  const seed = new TextEncoder().encode(payload)
+  try {
+    return await sha256Hex(seed)
+  } finally {
+    seed.fill(0)
+  }
+}
+
+
+/**
  * Derives a symmetric AES-256-GCM CryptoKey for the team channel.
  */
 export async function deriveTeamChannelKey(teamId: number, teamPassphraseOrKey?: string): Promise<CryptoKey> {
@@ -195,6 +209,57 @@ export async function decryptTeamE2eeMessage(
     return await decryptString(parsed.payload, key, aad)
   } catch {
     throw new DisDecryptionError('Team-E2EE-Entschlüsselung fehlgeschlagen')
+  }
+}
+
+/**
+ * Derives a symmetric AES-256-GCM CryptoKey for a chat group / community.
+ */
+export async function deriveGroupChannelKey(groupId: number, groupPassphraseOrKey?: string): Promise<CryptoKey> {
+  const payload = `msm:group:key:${groupId}${groupPassphraseOrKey ? `:${groupPassphraseOrKey}` : ''}`
+  const seed = new TextEncoder().encode(payload)
+  const keyBytes = await sha256Bytes(seed)
+  seed.fill(0)
+  const secureKey = SecureBuffer.fromBytes(keyBytes)
+  keyBytes.fill(0)
+  try {
+    return await secureKey.useAsync(async (bytes) => {
+      return await importAesGcmRawKey(bytes, ['encrypt', 'decrypt'])
+    })
+  } finally {
+    secureKey.destroy()
+  }
+}
+
+/**
+ * Encrypts a chat group message using DIS AES-256-GCM.
+ */
+export async function encryptGroupE2eeMessage(
+  message: string,
+  groupId: number,
+  groupPassphraseOrKey?: string
+): Promise<string> {
+  const aad = `msm:group:aad:${groupId}`
+  const key = await deriveGroupChannelKey(groupId, groupPassphraseOrKey)
+  const ciphertext = await encryptString(message, key, aad)
+  return formatEnvelope(E2EE_TEAM_ENVELOPE_SPEC, ciphertext)
+}
+
+/**
+ * Decrypts a chat group message using DIS AES-256-GCM.
+ */
+export async function decryptGroupE2eeMessage(
+  envelopeString: string,
+  groupId: number,
+  groupPassphraseOrKey?: string
+): Promise<string> {
+  try {
+    const parsed = parseEnvelope(E2EE_TEAM_ENVELOPE_SPEC, envelopeString)
+    const aad = `msm:group:aad:${groupId}`
+    const key = await deriveGroupChannelKey(groupId, groupPassphraseOrKey)
+    return await decryptString(parsed.payload, key, aad)
+  } catch {
+    throw new DisDecryptionError('Gruppen-E2EE-Entschlüsselung fehlgeschlagen')
   }
 }
 

@@ -183,10 +183,40 @@ export async function setE2eePublicKey(publicKey: string): Promise<{ ok: boolean
   })
 }
 
+export interface ChatGroupMemberItem {
+  user_id: number
+  username: string
+  avatar_url?: string | null
+  role: string
+  joined_at: string
+}
+
+export interface ChatGroupItem {
+  id: number
+  name: string
+  description?: string | null
+  avatar_url?: string | null
+  invite_code: string
+  owner_user_id: number
+  member_count: number
+  role: string
+  created_at: string
+  members: ChatGroupMemberItem[]
+}
+
+export interface ChatGroupInvitePublic {
+  group_id: number
+  name: string
+  description?: string | null
+  avatar_url?: string | null
+  member_count: number
+}
+
 export async function relayE2eeEnvelope(payload: {
   blind_mailbox_id: string
   ciphertext_envelope: string
   recipient_user_id?: number
+  group_id?: number
 }): Promise<BlindEnvelopeItem> {
   return api<BlindEnvelopeItem>('/social/e2ee/relay', {
     method: 'POST',
@@ -202,9 +232,41 @@ export async function fetchE2eeEnvelopes(
   return api<BlindEnvelopeItem[]>(`/social/e2ee/mailbox/${blindMailboxId}${query}`)
 }
 
+export async function getGroups(): Promise<ChatGroupItem[]> {
+  return api<ChatGroupItem[]>('/social/groups')
+}
+
+export async function createGroup(payload: {
+  name: string
+  description?: string
+  avatar_url?: string
+}): Promise<ChatGroupItem> {
+  return api<ChatGroupItem>('/social/groups', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function getGroupInviteInfo(inviteCode: string): Promise<ChatGroupInvitePublic> {
+  return api<ChatGroupInvitePublic>(`/social/groups/invite/${inviteCode}`)
+}
+
+export async function joinGroupByInvite(inviteCode: string): Promise<ChatGroupItem> {
+  return api<ChatGroupItem>(`/social/groups/join/${inviteCode}`, {
+    method: 'POST',
+  })
+}
+
+export async function leaveGroup(groupId: number): Promise<{ success: boolean; message: string }> {
+  return api<{ success: boolean; message: string }>(`/social/groups/${groupId}/leave`, {
+    method: 'POST',
+  })
+}
+
 export async function recordActivityTime(category: string, seconds: number): Promise<{ success: boolean }> {
   return api<{ success: boolean }>('/social/activity/ping', {
     method: 'POST',
     body: JSON.stringify({ category, seconds }),
   })
 }
+

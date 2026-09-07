@@ -145,6 +145,7 @@ function App() {
           <Route path="notes" element={<Notes />} />
           <Route path="social" element={<Navigate to="/profile" replace />} />
           <Route path="chat" element={<Messenger />} />
+          <Route path="chat/join/:inviteCode" element={<Messenger />} />
           <Route path="ai" element={<RequirePermission routeKey="ai"><Ai /></RequirePermission>} />
           <Route path="teams" element={<Teams />} />
           <Route path="docs" element={<Docs />} />

@@ -8,6 +8,10 @@ import { useAuthStore } from '@/stores/authStore'
 
 vi.mock('@/api/social', () => ({
   getFriends: vi.fn(),
+  getGroups: vi.fn().mockResolvedValue([]),
+  createGroup: vi.fn(),
+  joinGroupByInvite: vi.fn(),
+  leaveGroup: vi.fn(),
   getE2eePublicKey: vi.fn(),
   setE2eePublicKey: vi.fn(),
   relayE2eeEnvelope: vi.fn(),
@@ -23,10 +27,13 @@ vi.mock('@/api/teams', () => ({
 
 vi.mock('@/services/e2eeCrypto', () => ({
   deriveBlindMailboxId: vi.fn().mockResolvedValue('test-blind-mailbox'),
+  deriveGroupBlindMailboxId: vi.fn().mockResolvedValue('test-group-blind-mailbox'),
   encryptE2eeMessage: vi.fn().mockResolvedValue('ciphertext'),
   decryptE2eeMessage: vi.fn().mockResolvedValue('Hallo Welt'),
   encryptE2eeHybrid: vi.fn().mockResolvedValue('sv-e2ee-hybrid-v1:...'),
   decryptE2eeHybrid: vi.fn().mockResolvedValue('Hallo Hybrid'),
+  encryptGroupE2eeMessage: vi.fn().mockResolvedValue('group-ciphertext'),
+  decryptGroupE2eeMessage: vi.fn().mockResolvedValue('Hallo Gruppe'),
   getOrGenerateLocalKeyPair: vi.fn().mockResolvedValue({
     publicKeyJwk: '{"kty":"oct"}',
     privateKeyJwk: '{"kty":"oct"}',
@@ -108,6 +115,7 @@ describe('Messenger (Allround Chat)', () => {
       ],
     } as any)
 
+    vi.mocked(socialApi.getGroups).mockResolvedValue([])
     vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([])
     vi.mocked(socialApi.getE2eePublicKey).mockResolvedValue({ user_id: 101, username: 'alice', public_key: null })
   })
@@ -182,5 +190,195 @@ describe('Messenger (Allround Chat)', () => {
         })
       )
     })
+  })
+
+  it('rendert Gruppen, filtert nach Gruppen und öffnet Gruppenchat mit Verschlüsselungsanzeige', async () => {
+    vi.mocked(socialApi.getGroups).mockResolvedValue([
+      {
+        id: 77,
+        name: 'Dev Community',
+        description: 'Offizielle Entwicklergruppe',
+        avatar_url: null,
+        invite_code: 'dev-invite-123',
+        owner_user_id: 1,
+        member_count: 5,
+        role: 'admin',
+        created_at: '2026-09-07T00:00:00Z',
+        members: [],
+      },
+    ])
+
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('Dev Community')).toBeInTheDocument()
+      expect(screen.getByText('Offizielle Entwicklergruppe')).toBeInTheDocument()
+      expect(screen.getByText('5 M.')).toBeInTheDocument()
+    })
+
+    // Click on group to open group chat
+    fireEvent.click(screen.getByText('Dev Community'))
+
+    await waitFor(() => {
+      expect(screen.getByText('Gruppen-E2EE verschlüsselt')).toBeInTheDocument()
+      expect(screen.getByText('5 Mitglieder')).toBeInTheDocument()
+      expect(screen.getByText('Einladen')).toBeInTheDocument()
+    })
+  })
+
+  it('erlaubt das Erstellen einer neuen Gruppe über den Dialog', async () => {
+    vi.mocked(socialApi.createGroup).mockResolvedValueOnce({
+      id: 88,
+      name: 'Neue Supergruppe',
+      description: 'Testbeschreibung',
+      avatar_url: null,
+      invite_code: 'super-invite-code',
+      owner_user_id: 1,
+      member_count: 1,
+      role: 'admin',
+      created_at: '2026-09-07T00:00:00Z',
+      members: [],
+    })
+
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    // Open create group dialog
+    const createBtn = screen.getAllByLabelText('Neue Gruppe erstellen')[0]
+    fireEvent.click(createBtn)
+
+    await waitFor(() => {
+      expect(screen.getByText('Neue Gruppe erstellen')).toBeInTheDocument()
+    })
+
+    const nameInput = screen.getByPlaceholderText('z. B. Server-Admins oder Gaming')
+    fireEvent.change(nameInput, { target: { value: 'Neue Supergruppe' } })
+
+    const submitBtn = screen.getByRole('button', { name: 'Gruppe erstellen' })
+    fireEvent.click(submitBtn)
+
+    await waitFor(() => {
+      expect(socialApi.createGroup).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'Neue Supergruppe',
+        })
+      )
+    })
+  })
+
+  it('zeigt WhatsApp-typischen Sprachnachricht-Button bei leerem Textfeld und Senden-Button bei Eingabe', async () => {
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('alice')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByText('alice'))
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Sprachnachricht aufnehmen')).toBeInTheDocument()
+    })
+
+    // Typing text replaces Mic button with Send button
+    const input = screen.getByPlaceholderText('Nachricht schreiben …')
+    fireEvent.change(input, { target: { value: 'Hey!' } })
+
+    expect(screen.queryByLabelText('Sprachnachricht aufnehmen')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Senden/i })).toBeInTheDocument()
+
+    // Clearing input restores Mic button
+    fireEvent.change(input, { target: { value: '' } })
+    expect(screen.getByLabelText('Sprachnachricht aufnehmen')).toBeInTheDocument()
+  })
+
+  it('öffnet den Sticker- und Emoji-Wähler im Chat', async () => {
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('alice')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByText('alice'))
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Sticker auswählen')).toBeInTheDocument()
+    })
+
+    // Click sticker toggle button
+    fireEvent.click(screen.getByLabelText('Sticker auswählen'))
+
+    // Expect sticker and emoji tab buttons
+    expect(screen.getByRole('button', { name: 'Sticker' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Emojis' })).toBeInTheDocument()
+
+    // Switch to Emojis tab
+    fireEvent.click(screen.getByRole('button', { name: 'Emojis' }))
+    expect(screen.getByText('👍')).toBeInTheDocument()
+
+    // Switch back to Stickers tab
+    fireEvent.click(screen.getByRole('button', { name: 'Sticker' }))
+    expect(screen.getByText('Feuer')).toBeInTheDocument()
+  })
+
+  it('schaltet zwischen den WhatsApp-typischen Reitern auf Mobilgeräten um', async () => {
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('alice')).toBeInTheDocument()
+    })
+
+    // Click Aktuelles tab
+    const updatesTab = screen.getByRole('button', { name: 'Aktuelles' })
+    fireEvent.click(updatesTab)
+    expect(screen.getByText('Aktuelles & Status deiner Kontakte')).toBeInTheDocument()
+
+    // Click Community tab
+    const communityTab = screen.getByRole('button', { name: 'Community' })
+    fireEvent.click(communityTab)
+    expect(screen.getByText('Communities & Gruppen')).toBeInTheDocument()
+
+    // Click Audio tab
+    const audioTab = screen.getByRole('button', { name: 'Audio' })
+    fireEvent.click(audioTab)
+    expect(screen.getByText('Sprachnachrichten & Audio')).toBeInTheDocument()
+
+    // Switch back to Chats tab
+    const chatsTab = screen.getByRole('button', { name: 'Chats' })
+    fireEvent.click(chatsTab)
+    expect(screen.getByText('alice')).toBeInTheDocument()
+  })
+
+  it('bietet eine Schnellkamera-Schaltfläche in der Kopfzeile an', async () => {
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('alice')).toBeInTheDocument()
+    })
+
+    const cameraBtn = screen.getByLabelText('Foto aufnehmen')
+    expect(cameraBtn).toBeInTheDocument()
   })
 })

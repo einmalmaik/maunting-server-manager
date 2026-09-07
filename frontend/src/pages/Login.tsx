@@ -34,9 +34,11 @@ export function Login() {
 
   // ProtectedRoute legt die ursprünglich angefragte Seite in location.state ab.
   // Nach der Anmeldung geht es dorthin zurück statt immer auf das Dashboard.
-  const gemerktesZiel = (location.state as { from?: string } | null)?.from
+  const redirectParam = searchParams.get('redirect')
+  const gemerktesZiel = (location.state as { from?: string } | null)?.from || redirectParam
   const zielNachLogin =
     gemerktesZiel?.startsWith('/') && !gemerktesZiel.startsWith('//') ? gemerktesZiel : '/'
+
 
   const oauthStep = searchParams.get('step')
   const oauthChallenge = searchParams.get('challenge') || ''
@@ -390,7 +392,8 @@ export function Login() {
 
             <div className="mt-6 pt-6 border-t border-outline-variant/30 flex justify-between font-body-md text-sm">
               <Link
-                to="/register"
+                to={gemerktesZiel ? `/register?redirect=${encodeURIComponent(gemerktesZiel)}` : '/register'}
+                state={{ from: gemerktesZiel }}
                 className="text-secondary hover:text-mint-accent transition-colors"
               >
                 {t('auth.noAccount')}
