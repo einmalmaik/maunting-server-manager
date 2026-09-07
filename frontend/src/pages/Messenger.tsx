@@ -252,9 +252,26 @@ export function Messenger() {
 
   // Camera & Attachments
   const [isCameraModalOpen, setIsCameraModalOpen] = useState(false)
+  const [isAttachMenuOpen, setIsAttachMenuOpen] = useState(false)
+  const attachMenuRef = useRef<HTMLDivElement>(null)
   const [isDragOver, setIsDragOver] = useState(false)
   const [stagedFile, setStagedFile] = useState<FileAttachment | null>(null)
   const docInputRef = useRef<HTMLInputElement>(null)
+
+  // Close attachment menu on outside click
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (attachMenuRef.current && !attachMenuRef.current.contains(e.target as Node)) {
+        setIsAttachMenuOpen(false)
+      }
+    }
+    if (isAttachMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [isAttachMenuOpen])
 
   // Read receipts setting from profile
   const readReceiptsEnabled = useMemo(() => {
@@ -1288,17 +1305,19 @@ export function Messenger() {
             </>
           )}
 
-          {/* Quick Camera Button in Header (opens CameraSnapshotModal) */}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setIsCameraModalOpen(true)}
-            className="h-8 w-8 text-on-surface-variant hover:text-primary"
-            title="Foto aufnehmen"
-            aria-label="Foto aufnehmen"
-          >
-            <Camera className="w-4 h-4" />
-          </Button>
+          {/* Quick Camera Button in Header - only in list view, removed in chat to avoid duplicate */}
+          {!isChatOpen && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setIsCameraModalOpen(true)}
+              className="h-8 w-8 text-on-surface-variant hover:text-primary"
+              title="Foto aufnehmen"
+              aria-label="Foto aufnehmen"
+            >
+              <Camera className="w-4 h-4" />
+            </Button>
+          )}
 
           <Button
             variant="ghost"
@@ -2494,53 +2513,97 @@ export function Messenger() {
                         <Smile className="w-4 h-4" />
                       </Button>
 
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setIsCameraModalOpen(true)}
-                        className="h-8 w-8 p-0 text-on-surface-variant hover:text-primary"
-                        title="Foto aufnehmen"
-                        aria-label="Foto anhängen"
-                      >
-                        <Camera className="w-4 h-4" />
-                      </Button>
+                      {/* Unified Attachment Button with sleek Popover */}
+                      <div className="relative shrink-0" ref={attachMenuRef}>
+                        <Button
+                          type="button"
+                          variant={isAttachMenuOpen ? 'secondary' : 'ghost'}
+                          size="icon"
+                          onClick={() => setIsAttachMenuOpen((prev) => !prev)}
+                          className="h-8 w-8 p-0 text-on-surface-variant hover:text-primary transition-all"
+                          title="Anhang hinzufügen"
+                          aria-label="Anhang hinzufügen"
+                        >
+                          <Plus className={`w-4 h-4 transition-transform duration-200 ${isAttachMenuOpen ? 'rotate-45 text-primary' : ''}`} />
+                        </Button>
 
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => docInputRef.current?.click()}
-                        className="h-8 w-8 p-0 text-on-surface-variant hover:text-primary"
-                        title="Datei oder Dokument anhängen"
-                        aria-label="Datei anhängen"
-                      >
-                        <Paperclip className="w-4 h-4" />
-                      </Button>
+                        {/* Attachment Popover Menu */}
+                        {isAttachMenuOpen && (
+                          <div className="absolute bottom-10 left-0 z-30 min-w-[210px] p-1.5 rounded-2xl bg-surface-container-high/95 backdrop-blur-md border border-outline-variant/30 shadow-xl space-y-1 animate-in fade-in slide-in-from-bottom-2 duration-150">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsAttachMenuOpen(false)
+                                setIsCameraModalOpen(true)
+                              }}
+                              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
+                              aria-label="Foto anhängen"
+                            >
+                              <div className="w-7 h-7 rounded-lg bg-pink-500/15 text-pink-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                                <Camera className="w-4 h-4" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="text-xs font-semibold text-primary">Foto aufnehmen</div>
+                                <div className="text-[10px] text-on-surface-variant/70">Kamera Snapshot</div>
+                              </div>
+                            </button>
 
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={handleOpenNotePicker}
-                        className="h-8 w-8 p-0 text-on-surface-variant hover:text-amber-400"
-                        title="Notiz teilen (ohne Synchronisation)"
-                        aria-label="Notiz teilen"
-                      >
-                        <StickyNote className="w-4 h-4" />
-                      </Button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsAttachMenuOpen(false)
+                                docInputRef.current?.click()
+                              }}
+                              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
+                              aria-label="Datei anhängen"
+                            >
+                              <div className="w-7 h-7 rounded-lg bg-indigo-500/15 text-indigo-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                                <Paperclip className="w-4 h-4" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="text-xs font-semibold text-primary">Dokument & Datei</div>
+                                <div className="text-[10px] text-on-surface-variant/70">Verschlüsselt senden</div>
+                              </div>
+                            </button>
 
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={handleOpenCalendarPicker}
-                        className="h-8 w-8 p-0 text-on-surface-variant hover:text-cyan-400"
-                        title="Kalendereintrag teilen (ohne Synchronisation)"
-                        aria-label="Kalendereintrag teilen"
-                      >
-                        <CalendarIcon className="w-4 h-4" />
-                      </Button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsAttachMenuOpen(false)
+                                handleOpenNotePicker()
+                              }}
+                              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
+                              aria-label="Notiz teilen"
+                            >
+                              <div className="w-7 h-7 rounded-lg bg-amber-500/15 text-amber-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                                <StickyNote className="w-4 h-4" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="text-xs font-semibold text-primary">Notiz anhängen</div>
+                                <div className="text-[10px] text-on-surface-variant/70">Aus Notizen wählen</div>
+                              </div>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsAttachMenuOpen(false)
+                                handleOpenCalendarPicker()
+                              }}
+                              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
+                              aria-label="Kalendereintrag teilen"
+                            >
+                              <div className="w-7 h-7 rounded-lg bg-cyan-500/15 text-cyan-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                                <CalendarIcon className="w-4 h-4" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="text-xs font-semibold text-primary">Termin anhängen</div>
+                                <div className="text-[10px] text-on-surface-variant/70">Aus Kalender wählen</div>
+                              </div>
+                            </button>
+                          </div>
+                        )}
+                      </div>
 
                       <Input
                         value={inputText}

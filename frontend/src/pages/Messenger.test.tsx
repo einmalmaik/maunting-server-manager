@@ -162,6 +162,8 @@ describe('Messenger (Allround Chat)', () => {
     })
 
     expect(screen.getByPlaceholderText('Nachricht schreiben …')).toBeInTheDocument()
+    // Open unified attachment menu
+    fireEvent.click(screen.getByLabelText('Anhang hinzufügen'))
     expect(screen.getByLabelText('Foto anhängen')).toBeInTheDocument()
     expect(screen.getByLabelText('Notiz teilen')).toBeInTheDocument()
     expect(screen.getByLabelText('Kalendereintrag teilen')).toBeInTheDocument()
