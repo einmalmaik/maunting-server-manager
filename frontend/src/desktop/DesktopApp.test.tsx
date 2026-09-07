@@ -523,17 +523,16 @@ describe('DesktopApp', () => {
     await waitFor(() => {
       expect(screen.getByText('Jarvis')).toBeInTheDocument()
       expect(screen.getByText('Offline')).toBeInTheDocument()
+      // Nur Passwort-Manager, Notizen und Kalender werden angezeigt
+      expect(screen.getByText(i18n.t('mss.app.tresor'))).toBeInTheDocument()
+      expect(screen.getByText(i18n.t('mss.app.kalender'))).toBeInTheDocument()
+      expect(screen.getByText(i18n.t('mss.app.notizen', 'Notizen'))).toBeInTheDocument()
+
+      // KI-Chat und Gedächtnis sind offline ausgeblendet
+      expect(screen.queryByText(i18n.t('mss.app.chat'))).not.toBeInTheDocument()
+      expect(screen.queryByText(i18n.t('mss.app.gedaechtnis'))).not.toBeInTheDocument()
+      expect(screen.queryByTestId('ki-seite')).not.toBeInTheDocument()
     })
-
-    // Nur Passwort-Manager, Notizen und Kalender werden angezeigt
-    expect(screen.getByText(i18n.t('mss.app.tresor'))).toBeInTheDocument()
-    expect(screen.getByText(i18n.t('mss.app.kalender'))).toBeInTheDocument()
-    expect(screen.getByText(i18n.t('mss.app.notizen', 'Notizen'))).toBeInTheDocument()
-
-    // KI-Chat und Gedächtnis sind offline ausgeblendet
-    expect(screen.queryByText(i18n.t('mss.app.chat'))).not.toBeInTheDocument()
-    expect(screen.queryByText(i18n.t('mss.app.gedaechtnis'))).not.toBeInTheDocument()
-    expect(screen.queryByTestId('ki-seite')).not.toBeInTheDocument()
   })
 
   describe('Negativtests & Missbrauchsschutz im Offline-Modus', () => {
