@@ -188,6 +188,7 @@ export interface ChatGroupMemberItem {
   username: string
   avatar_url?: string | null
   role: string
+  permissions?: string | null
   joined_at: string
 }
 
@@ -200,6 +201,7 @@ export interface ChatGroupItem {
   owner_user_id: number
   member_count: number
   role: string
+  default_permissions?: string | null
   created_at: string
   members: ChatGroupMemberItem[]
 }
@@ -266,6 +268,41 @@ export async function leaveGroup(groupId: number): Promise<{ success: boolean; m
 export async function deleteGroup(groupId: number): Promise<{ success: boolean; message: string }> {
   return api<{ success: boolean; message: string }>(`/social/groups/${groupId}`, {
     method: 'DELETE',
+  })
+}
+
+export async function getGroupMembers(groupId: number): Promise<ChatGroupMemberItem[]> {
+  return api<ChatGroupMemberItem[]>(`/social/groups/${groupId}/members`)
+}
+
+export async function updateGroupMemberRole(
+  groupId: number,
+  targetUserId: number,
+  role: 'admin' | 'moderator' | 'member',
+  permissions?: string
+): Promise<ChatGroupMemberItem> {
+  return api<ChatGroupMemberItem>(`/social/groups/${groupId}/members/${targetUserId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ role, permissions: permissions || null }),
+  })
+}
+
+export async function kickGroupMember(
+  groupId: number,
+  targetUserId: number
+): Promise<{ success: boolean; message: string }> {
+  return api<{ success: boolean; message: string }>(`/social/groups/${groupId}/members/${targetUserId}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function updateGroupPermissions(
+  groupId: number,
+  defaultPermissions: string
+): Promise<ChatGroupItem> {
+  return api<ChatGroupItem>(`/social/groups/${groupId}/permissions`, {
+    method: 'PATCH',
+    body: JSON.stringify({ default_permissions: defaultPermissions }),
   })
 }
 

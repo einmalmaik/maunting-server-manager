@@ -142,24 +142,30 @@ export function CameraSnapshotModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md p-4 bg-surface border-outline-variant/30 flex flex-col">
-        <div className="flex items-center justify-between pb-2 border-b border-outline-variant/20 mb-3">
+      <DialogContent
+        showCloseButton={false}
+        className="max-w-md w-full p-0 overflow-hidden bg-zinc-950 text-white border border-zinc-800 shadow-2xl flex flex-col"
+      >
+        {/* Top Header Bar */}
+        <div className="px-4 py-3 bg-zinc-900/80 backdrop-blur border-b border-zinc-800 flex items-center justify-between z-10">
           <div className="flex items-center gap-2">
-            <Camera className="w-4 h-4 text-primary" />
-            <span className="font-headline text-body-sm font-bold text-primary">Foto aufnehmen</span>
+            <Camera className="w-4 h-4 text-emerald-400" />
+            <span className="font-headline text-body-sm font-semibold text-white">
+              {capturedPhoto ? 'Foto-Vorschau' : 'Foto aufnehmen'}
+            </span>
           </div>
           <button
             type="button"
             onClick={() => onOpenChange(false)}
-            className="p-1 rounded-md text-on-surface-variant hover:text-on-surface"
+            className="p-1.5 rounded-full text-zinc-400 hover:text-white hover:bg-zinc-800/80 transition-colors"
             aria-label="Schließen"
           >
-            <X className="w-4 h-4" />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Video / Snapshot Area */}
-        <div className="relative aspect-4/3 w-full bg-black/90 rounded-xl overflow-hidden flex items-center justify-center border border-outline-variant/20">
+        {/* Video / Snapshot Viewfinder Area */}
+        <div className="relative aspect-[3/4] w-full bg-black flex items-center justify-center overflow-hidden select-none">
           {capturedPhoto ? (
             <img src={capturedPhoto} alt="Snapshot" className="w-full h-full object-cover" />
           ) : stream ? (
@@ -171,24 +177,24 @@ export function CameraSnapshotModal({
               className={`w-full h-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
             />
           ) : error ? (
-            <div className="p-4 text-center space-y-2">
-              <AlertCircle className="w-8 h-8 text-amber-400 mx-auto" />
-              <p className="text-xs text-white/90">{error}</p>
+            <div className="p-6 text-center space-y-3 max-w-xs">
+              <AlertCircle className="w-10 h-10 text-amber-400 mx-auto" />
+              <p className="text-xs text-zinc-300 leading-relaxed">{error}</p>
               <Button
                 type="button"
                 variant="secondary"
                 size="sm"
                 onClick={() => fallbackFileInputRef.current?.click()}
-                className="mt-2 text-xs gap-1.5"
+                className="mt-2 text-xs gap-1.5 w-full justify-center"
               >
-                <Upload className="w-3.5 h-3.5" />
+                <Upload className="w-4 h-4" />
                 <span>Foto aus Datei wählen</span>
               </Button>
             </div>
           ) : (
-            <div className="flex flex-col items-center gap-2 text-white/70">
-              <RefreshCw className="w-6 h-6 animate-spin text-primary" />
-              <span className="text-xs">Kamera wird initialisiert …</span>
+            <div className="flex flex-col items-center gap-2.5 text-zinc-400">
+              <RefreshCw className="w-7 h-7 animate-spin text-emerald-400" />
+              <span className="text-xs">Kamera wird gestartet …</span>
             </div>
           )}
 
@@ -206,18 +212,18 @@ export function CameraSnapshotModal({
           />
         </div>
 
-        {/* Action Controls */}
-        <div className="flex items-center justify-between mt-3 pt-2">
+        {/* WhatsApp-Style Bottom Controls Bar */}
+        <div className="px-6 py-5 bg-zinc-900 border-t border-zinc-800 flex items-center justify-between">
           {capturedPhoto ? (
-            <>
+            <div className="flex items-center justify-between w-full gap-3">
               <Button
                 type="button"
-                variant="ghost"
+                variant="secondary"
                 size="sm"
                 onClick={handleRetake}
-                className="text-xs gap-1.5"
+                className="text-xs gap-1.5 flex-1 justify-center py-2.5"
               >
-                <RefreshCw className="w-3.5 h-3.5" />
+                <RefreshCw className="w-4 h-4" />
                 <span>Wiederholen</span>
               </Button>
               <Button
@@ -225,54 +231,58 @@ export function CameraSnapshotModal({
                 variant="primary"
                 size="sm"
                 onClick={handleUsePhoto}
-                className="text-xs gap-1.5 px-4"
+                className="text-xs gap-1.5 flex-1 justify-center py-2.5 font-semibold shadow-lg"
               >
-                <Check className="w-3.5 h-3.5" />
+                <Check className="w-4 h-4" />
                 <span>Foto verwenden</span>
               </Button>
-            </>
+            </div>
           ) : (
-            <>
-              <div className="flex items-center gap-1.5">
-                {hasMultipleCameras && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleFlipCamera}
-                    className="text-xs gap-1 text-on-surface-variant hover:text-primary"
-                    title="Kamera wechseln"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    <span>Wechseln</span>
-                  </Button>
-                )}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => fallbackFileInputRef.current?.click()}
-                  className="text-xs gap-1 text-on-surface-variant hover:text-primary"
-                  title="Aus Datei wählen"
-                >
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>Datei</span>
-                </Button>
-              </div>
+            <div className="flex items-center justify-around w-full">
+              {/* Left: Gallery / Upload */}
+              <button
+                type="button"
+                onClick={() => fallbackFileInputRef.current?.click()}
+                className="flex flex-col items-center gap-1 p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800/60 transition-colors"
+                title="Aus Datei wählen"
+                aria-label="Aus Datei wählen"
+              >
+                <div className="w-10 h-10 rounded-xl bg-zinc-800 flex items-center justify-center border border-zinc-700">
+                  <Upload className="w-5 h-5" />
+                </div>
+                <span className="text-[10px]">Galerie</span>
+              </button>
 
-              {stream && (
-                <Button
+              {/* Center: Big WhatsApp Shutter Button */}
+              {stream ? (
+                <button
                   type="button"
-                  variant="primary"
-                  size="sm"
                   onClick={handleTakePhoto}
-                  className="text-xs gap-1.5 px-5 font-semibold"
+                  className="w-18 h-18 rounded-full border-4 border-white flex items-center justify-center p-1 bg-white/20 active:scale-90 hover:bg-white/30 transition-all shadow-2xl cursor-pointer"
+                  title="Foto aufnehmen"
+                  aria-label="Foto auslösen"
                 >
-                  <Camera className="w-3.5 h-3.5" />
-                  <span>Auslösen</span>
-                </Button>
+                  <div className="w-14 h-14 rounded-full bg-white shadow-inner" />
+                </button>
+              ) : (
+                <div className="w-18 h-18" />
               )}
-            </>
+
+              {/* Right: Flip Camera */}
+              <button
+                type="button"
+                onClick={handleFlipCamera}
+                disabled={!stream || !hasMultipleCameras}
+                className="flex flex-col items-center gap-1 p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800/60 transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                title="Kamera wechseln"
+                aria-label="Kamera wechseln"
+              >
+                <div className="w-10 h-10 rounded-xl bg-zinc-800 flex items-center justify-center border border-zinc-700">
+                  <RefreshCw className="w-5 h-5" />
+                </div>
+                <span className="text-[10px]">Wechseln</span>
+              </button>
+            </div>
           )}
         </div>
       </DialogContent>

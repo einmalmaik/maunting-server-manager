@@ -16,6 +16,10 @@ vi.mock('@/api/social', () => ({
   getStories: vi.fn().mockResolvedValue([]),
   createStory: vi.fn(),
   deleteStory: vi.fn(),
+  getGroupMembers: vi.fn().mockResolvedValue([]),
+  updateGroupMemberRole: vi.fn(),
+  kickGroupMember: vi.fn(),
+  updateGroupPermissions: vi.fn(),
   getE2eePublicKey: vi.fn(),
   setE2eePublicKey: vi.fn(),
   relayE2eeEnvelope: vi.fn(),
@@ -400,7 +404,6 @@ describe('Messenger (Allround Chat)', () => {
       },
     ])
     vi.mocked(socialApi.deleteGroup).mockResolvedValueOnce({ success: true } as any)
-    window.confirm = vi.fn().mockReturnValue(true)
 
     render(
       <MemoryRouter>
@@ -420,8 +423,53 @@ describe('Messenger (Allround Chat)', () => {
 
     fireEvent.click(screen.getByLabelText('Gruppe löschen'))
 
+    // Design-DNA Modal confirms deletion
+    await waitFor(() => {
+      expect(screen.getByText('Endgültig löschen')).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByText('Endgültig löschen'))
+
     await waitFor(() => {
       expect(socialApi.deleteGroup).toHaveBeenCalledWith(77)
+    })
+  })
+
+  it('öffnet Gruppenrollen & Rechte Modal über den Shield-Button im Header', async () => {
+    vi.mocked(socialApi.getGroups).mockResolvedValue([
+      {
+        id: 88,
+        name: 'Admin Tribe',
+        description: null,
+        avatar_url: null,
+        invite_code: 'tribe88',
+        owner_user_id: 1, // current user is owner
+        member_count: 2,
+        role: 'owner',
+        created_at: '2026-09-02T00:00:00Z',
+        members: [],
+      },
+    ])
+
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('Admin Tribe')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByText('Admin Tribe'))
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Gruppenrollen & Rechte verwalten')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByLabelText('Gruppenrollen & Rechte verwalten'))
+
+    await waitFor(() => {
+      expect(screen.getByText('Gruppen-Rollen & Rechte')).toBeInTheDocument()
     })
   })
 

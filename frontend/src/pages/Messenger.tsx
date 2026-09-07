@@ -6,6 +6,10 @@ import {
   Badge,
   Dialog,
   DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
   Avatar,
 } from '@/Singra/UI'
 import {
@@ -37,6 +41,7 @@ import {
   CheckCheck,
   Download,
   Upload,
+  Shield,
 } from 'lucide-react'
 import { DeviceBadge } from '@/components/social/DeviceBadge'
 import { StatusDot, type PresenceStatus } from '@/components/social/StatusIndicator'
@@ -77,6 +82,8 @@ import { IN_HOUSE_STICKERS, CATEGORIZED_EMOJIS } from '@/services/stickerCatalog
 import { CameraSnapshotModal } from '@/components/social/CameraSnapshotModal'
 import { CreateStoryModal } from '@/components/social/CreateStoryModal'
 import { StoryViewerModal } from '@/components/social/StoryViewerModal'
+import { GroupPermissionsModal } from '@/components/social/GroupPermissionsModal'
+import { sendeGeraeteBenachrichtigung } from '@/lib/benachrichtigung'
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
 
@@ -198,6 +205,45 @@ export function Messenger() {
   const [isViewerStoryOpen, setIsViewerStoryOpen] = useState(false)
   const [viewerStoryIndex, setViewerStoryIndex] = useState(0)
   const [activeViewerStories, setActiveViewerStories] = useState<ChatStoryItem[]>([])
+
+  // Seen stories persistence
+  const SEEN_STORIES_KEY = 'msm_seen_story_ids'
+  const [seenStoryIds, setSeenStoryIds] = useState<Set<number>>(() => {
+    if (typeof window === 'undefined') return new Set()
+    try {
+      const raw = localStorage.getItem(SEEN_STORIES_KEY)
+      return raw ? new Set(JSON.parse(raw)) : new Set()
+    } catch {
+      return new Set()
+    }
+  })
+
+  const markStoriesAsSeen = (storiesToMark: ChatStoryItem[]) => {
+    setSeenStoryIds((prev) => {
+      const next = new Set(prev)
+      let changed = false
+      for (const s of storiesToMark) {
+        if (!next.has(s.id)) {
+          next.add(s.id)
+          changed = true
+        }
+      }
+      if (changed && typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(SEEN_STORIES_KEY, JSON.stringify(Array.from(next)))
+        } catch {}
+      }
+      return next
+    })
+  }
+
+  // Group Permissions & Delete Modal State
+  const [isGroupPermissionsOpen, setIsGroupPermissionsOpen] = useState(false)
+  const [groupToDelete, setGroupToDelete] = useState<ChatGroupItem | null>(null)
+  const [isDeletingGroup, setIsDeletingGroup] = useState(false)
+
+  // Notification deduplication ref
+  const lastNotifiedMessageIdRef = useRef<number>(0)
 
   // Camera & Attachments
   const [isCameraModalOpen, setIsCameraModalOpen] = useState(false)
@@ -457,23 +503,31 @@ export function Messenger() {
       list.push(story)
       map.set(story.user_id, list)
     }
-    return Array.from(map.entries()).map(([userId, userStories]) => {
+    const grouped = Array.from(map.entries()).map(([userId, userStories]) => {
       const contact = contactsList.find((c) => c.userId === userId)
       const first = userStories[0]
+      const hasUnseen = userStories.some((s) => !seenStoryIds.has(s.id))
       return {
         userId,
         username: contact?.username || first?.username || 'Freund',
         avatarUrl: contact?.avatarUrl || first?.avatar_url,
         stories: userStories,
         latestStory: userStories[userStories.length - 1],
+        hasUnseen,
       }
     })
-  }, [stories, currentUserId, contactsList])
+    return grouped.sort((a, b) => {
+      if (a.hasUnseen && !b.hasUnseen) return -1
+      if (!a.hasUnseen && b.hasUnseen) return 1
+      return 0
+    })
+  }, [stories, currentUserId, contactsList, seenStoryIds])
 
   const openStoryViewerForUser = (userStories: ChatStoryItem[], startIndex = 0) => {
     setActiveViewerStories(userStories)
     setViewerStoryIndex(startIndex)
     setIsViewerStoryOpen(true)
+    markStoriesAsSeen(userStories)
   }
 
   // Auto-select contact if userId query parameter is present
@@ -522,10 +576,12 @@ export function Messenger() {
     }
   }, [activeContact, activeGroup, currentUserId])
 
-  // 5. Load and decrypt messages
-  const loadMessages = async () => {
+  // 5. Load and decrypt messages (non-flickering background sync + real-time)
+  const loadMessages = async (isInitial = false) => {
     if (!blindMailboxId || !currentUserId) return
-    setLoadingMessages(true)
+    if (isInitial && messages.length === 0) {
+      setLoadingMessages(true)
+    }
     try {
       const envelopes = await fetchE2eeEnvelopes(blindMailboxId)
       const decryptedList: ChatMessage[] = []
@@ -606,18 +662,64 @@ export function Messenger() {
         }
       }
 
+      // Check for incoming messages to trigger device notifications
+      if (decryptedList.length > 0) {
+        const lastMsg = decryptedList[decryptedList.length - 1]
+        if (
+          lastMsg &&
+          !lastMsg.isSelf &&
+          lastMsg.id > lastNotifiedMessageIdRef.current
+        ) {
+          lastNotifiedMessageIdRef.current = lastMsg.id
+          if (!isInitial) {
+            void sendeGeraeteBenachrichtigung({
+              titel: lastMsg.senderName ? `Neue Nachricht von ${lastMsg.senderName}` : 'Neue Nachricht',
+              text:
+                lastMsg.text ||
+                (lastMsg.imageAttachment
+                  ? '📷 Foto'
+                  : lastMsg.audioAttachment
+                  ? '🎙️ Sprachnachricht'
+                  : lastMsg.fileAttachment
+                  ? `📎 ${lastMsg.fileAttachment.name}`
+                  : 'Neue Nachricht'),
+            })
+          }
+        }
+      }
+
       setMessages(decryptedList)
     } catch {
       // Offline fallback
     } finally {
-      setLoadingMessages(false)
+      if (isInitial) {
+        setLoadingMessages(false)
+      }
     }
   }
 
+  // Real-time SSE event listener for zero-latency incoming messages
+  useEffect(() => {
+    const handleSync = (e: Event) => {
+      const ce = e as CustomEvent<any>
+      const detail = ce.detail
+      if (detail?.type === 'e2ee_blind_message') {
+        if (detail.blind_mailbox_id === blindMailboxId) {
+          void loadMessages(false)
+        } else if (user?.device_notifications !== false) {
+          toast.success('Neue verschlüsselte Nachricht empfangen.')
+        }
+      }
+    }
+
+    window.addEventListener('msm:sync-event', handleSync)
+    return () => window.removeEventListener('msm:sync-event', handleSync)
+  }, [blindMailboxId, user?.device_notifications])
+
   useEffect(() => {
     if (blindMailboxId && (activeContact || activeGroup)) {
-      loadMessages()
-      const interval = setInterval(loadMessages, 4000)
+      void loadMessages(true)
+      const interval = setInterval(() => void loadMessages(false), 5000)
       return () => clearInterval(interval)
     }
   }, [blindMailboxId, activeContact, activeGroup, localKeyPair])
@@ -950,18 +1052,24 @@ export function Messenger() {
     }
   }
 
-  // Delete Group
-  const handleDeleteGroup = async (group: ChatGroupItem) => {
-    if (!confirm(`Möchtest du die Gruppe "${group.name}" wirklich unwiderruflich löschen?`)) {
-      return
-    }
+  // Delete Group (triggered via Design-DNA Confirmation Dialog)
+  const handleDeleteGroup = (group: ChatGroupItem) => {
+    setGroupToDelete(group)
+  }
+
+  const handleConfirmDeleteGroup = async () => {
+    if (!groupToDelete) return
+    setIsDeletingGroup(true)
     try {
-      await deleteGroup(group.id)
-      toast.success(`Gruppe "${group.name}" gelöscht.`)
+      await deleteGroup(groupToDelete.id)
+      toast.success(`Gruppe "${groupToDelete.name}" gelöscht.`)
       setActiveGroup(null)
+      setGroupToDelete(null)
       await loadData()
     } catch {
       toast.error('Gruppe konnte nicht gelöscht werden.')
+    } finally {
+      setIsDeletingGroup(false)
     }
   }
 
@@ -1097,6 +1205,20 @@ export function Messenger() {
                 <Share2 className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Einladen</span>
               </Button>
+
+              {/* Group Permissions / Roles settings button (Owner or Admin) */}
+              {(activeGroup.owner_user_id === currentUserId || activeGroup.role === 'admin') && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setIsGroupPermissionsOpen(true)}
+                  className="h-8 w-8 text-on-surface-variant hover:text-primary"
+                  title="Gruppenrollen & Rechte verwalten"
+                  aria-label="Gruppenrollen & Rechte verwalten"
+                >
+                  <Shield className="w-4 h-4" />
+                </Button>
+              )}
 
               {activeGroup.owner_user_id === currentUserId ? (
                 <Button
@@ -1322,7 +1444,13 @@ export function Messenger() {
                     onClick={() => openStoryViewerForUser(group.stories, 0)}
                   >
                     <div className="relative">
-                      <div className="p-0.5 rounded-full bg-gradient-to-tr from-sky-400 via-indigo-500 to-purple-600 transition-transform group-hover:scale-105 ring-2 ring-indigo-500/20 shadow-xs">
+                      <div
+                        className={`p-0.5 rounded-full transition-all duration-300 group-hover:scale-105 ${
+                          group.hasUnseen
+                            ? 'bg-gradient-to-tr from-cyan-400 via-indigo-500 to-fuchsia-500 ring-2 ring-primary shadow-[0_0_14px_rgba(99,102,241,0.65)] animate-pulse'
+                            : 'bg-surface-container-highest ring-1 ring-outline-variant/50 opacity-85'
+                        }`}
+                      >
                         <Avatar
                           src={group.avatarUrl}
                           name={group.username}
@@ -1335,7 +1463,11 @@ export function Messenger() {
                         </span>
                       )}
                     </div>
-                    <span className="text-[10px] text-primary font-medium truncate w-full text-center">
+                    <span
+                      className={`text-[10px] truncate w-full text-center ${
+                        group.hasUnseen ? 'text-primary font-bold' : 'text-on-surface-variant font-normal'
+                      }`}
+                    >
                       {group.username}
                     </span>
                   </div>
@@ -1584,7 +1716,13 @@ export function Messenger() {
                           className="flex items-center gap-3 p-2.5 rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60 hover:bg-surface-container-high/50 cursor-pointer transition-colors"
                         >
                           <div className="relative shrink-0">
-                            <div className="p-0.5 rounded-full bg-gradient-to-tr from-sky-400 via-indigo-500 to-purple-600">
+                            <div
+                              className={`p-0.5 rounded-full transition-all duration-300 ${
+                                grp.hasUnseen
+                                  ? 'bg-gradient-to-tr from-cyan-400 via-indigo-500 to-fuchsia-500 ring-2 ring-primary shadow-[0_0_14px_rgba(99,102,241,0.65)] animate-pulse'
+                                  : 'bg-surface-container-highest ring-1 ring-outline-variant/50 opacity-85'
+                              }`}
+                            >
                               <Avatar
                                 src={grp.avatarUrl}
                                 name={grp.username}
@@ -1754,18 +1892,7 @@ export function Messenger() {
             )}
           </div>
 
-          {/* Floating Action Button for Mobile: Positioned cleanly above bottom bar */}
-          {!isChatOpen && (
-            <button
-              type="button"
-              onClick={() => setIsCreateGroupOpen(true)}
-              className="fixed bottom-20 right-5 md:hidden z-20 w-14 h-14 rounded-full bg-primary text-on-primary shadow-xl flex items-center justify-center hover:scale-105 active:scale-95 transition-transform"
-              aria-label="Neue Gruppe erstellen"
-              title="Neue Gruppe erstellen"
-            >
-              <UsersRound className="w-6 h-6" />
-            </button>
-          )}
+
 
           {/* Mobile WhatsApp-Style Bottom Navigation Bar (Chats, Aktuelles, Community) */}
           {!isChatOpen && (
@@ -1986,10 +2113,10 @@ export function Messenger() {
                       {/* Note Attachment Card */}
                       {msg.noteAttachment && (
                         <div
-                          className={`p-2.5 rounded-xl border text-xs ${
+                          className={`p-2.5 rounded-xl border text-xs shadow-xs ${
                             msg.isSelf
                               ? 'bg-white/10 border-white/20 text-white'
-                              : 'bg-surface-container-low border-outline-variant/30 text-on-surface'
+                              : 'bg-surface-container-highest/95 border-outline-variant/40 text-on-surface'
                           }`}
                         >
                           <div className="flex items-center gap-1.5 font-bold mb-1 text-[11px]">
@@ -2005,10 +2132,10 @@ export function Messenger() {
                       {/* Calendar Attachment Card */}
                       {msg.calendarAttachment && (
                         <div
-                          className={`p-2.5 rounded-xl border text-xs ${
+                          className={`p-2.5 rounded-xl border text-xs shadow-xs ${
                             msg.isSelf
                               ? 'bg-white/10 border-white/20 text-white'
-                              : 'bg-surface-container-low border-outline-variant/30 text-on-surface'
+                              : 'bg-surface-container-highest/95 border-outline-variant/40 text-on-surface'
                           }`}
                         >
                           <div className="flex items-center gap-1.5 font-bold mb-1 text-[11px]">
@@ -2713,6 +2840,55 @@ export function Messenger() {
           }
         }}
       />
+
+      {/* Group Permissions & Roles Management Modal */}
+      <GroupPermissionsModal
+        open={isGroupPermissionsOpen}
+        onOpenChange={setIsGroupPermissionsOpen}
+        group={activeGroup}
+        currentUserId={currentUserId || 0}
+        onGroupUpdated={(updatedGroup) => {
+          setActiveGroup(updatedGroup)
+          setGroups((prev) => prev.map((g) => (g.id === updatedGroup.id ? updatedGroup : g)))
+        }}
+      />
+
+      {/* Design-DNA Confirmation Dialog for Deleting Group */}
+      <Dialog open={Boolean(groupToDelete)} onOpenChange={(open) => !open && setGroupToDelete(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-error flex items-center gap-2">
+              <Trash2 className="w-5 h-5 text-error" />
+              <span>Gruppe löschen?</span>
+            </DialogTitle>
+            <DialogDescription>
+              Möchtest du die Gruppe <strong>"{groupToDelete?.name}"</strong> wirklich unwiderruflich löschen?
+              Alle Mitglieder werden entfernt und der Chatverlauf kann nicht wiederhergestellt werden.
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setGroupToDelete(null)}
+              disabled={isDeletingGroup}
+            >
+              Abbrechen
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handleConfirmDeleteGroup}
+              disabled={isDeletingGroup}
+              className="gap-1.5"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>{isDeletingGroup ? 'Wird gelöscht …' : 'Endgültig löschen'}</span>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
