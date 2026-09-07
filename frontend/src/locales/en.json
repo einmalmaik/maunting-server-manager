@@ -3276,6 +3276,7 @@
     "tabs": {
       "account": "Account",
       "social": "Friends & Milestones",
+      "audio": "Microphone & Audio",
       "password": "Password",
       "2fa": "Two-Factor",
       "linked": "Linked Accounts",

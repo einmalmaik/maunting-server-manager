@@ -62,7 +62,12 @@ import {
   setE2eePublicKey,
 } from '@/api/social'
 import { teamsApi, type TeamMember } from '@/api/teams'
-import { loadNotesOfflineFirst, loadCalendarEventsOfflineFirst } from '@/lib/offlineSync'
+import {
+  loadNotesOfflineFirst,
+  loadCalendarEventsOfflineFirst,
+  saveNoteOffline,
+  saveCalendarEventOffline,
+} from '@/lib/offlineSync'
 import type { NoteItem } from '@/pages/Notes'
 import type { CalendarEventItem } from '@/pages/Calendar'
 import {
@@ -1102,6 +1107,43 @@ export function Messenger() {
     reader.readAsDataURL(file)
   }
 
+  const handleImportNote = async (note: NoteAttachment) => {
+    try {
+      await saveNoteOffline({
+        title: note.title || 'Geteilte Notiz',
+        content: note.content || '',
+        category: note.category || 'personal',
+        color: note.color || 'primary',
+        is_pinned: false,
+        note_type: 'personal',
+        team_id: null,
+      })
+      toast.success(`Notiz "${note.title || 'Geteilte Notiz'}" in Notizen gespeichert!`)
+    } catch {
+      toast.error('Notiz konnte nicht gespeichert werden.')
+    }
+  }
+
+  const handleImportCalendar = async (cal: CalendarAttachment) => {
+    try {
+      await saveCalendarEventOffline({
+        title: cal.title || 'Geteilter Termin',
+        start_time: cal.start,
+        end_time: cal.end,
+        description: cal.description || null,
+        location: cal.location || null,
+        all_day: false,
+        color: 'primary',
+        event_type: 'personal',
+        team_id: null,
+        server_id: null,
+      })
+      toast.success(`Termin "${cal.title || 'Geteilter Termin'}" im Kalender eingetragen!`)
+    } catch {
+      toast.error('Termin konnte nicht im Kalender gespeichert werden.')
+    }
+  }
+
   const isChatOpen = Boolean(activeContact || activeGroup)
 
   return (
@@ -1256,17 +1298,6 @@ export function Messenger() {
             aria-label="Foto aufnehmen"
           >
             <Camera className="w-4 h-4" />
-          </Button>
-
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => setIsCreateGroupOpen(true)}
-            className="h-7 text-xs gap-1 px-2.5 border-outline-variant/40 hover:border-primary"
-            aria-label="Neue Gruppe erstellen"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Gruppe</span>
           </Button>
 
           <Button
@@ -1482,11 +1513,22 @@ export function Messenger() {
             {mobileNavTab === 'chats' && (
               <>
                 {/* Groups Section */}
-                {filteredGroups.length > 0 && (
+                {(filteredGroups.length > 0 || filterTab === 'all' || filterTab === 'groups') && (
                   <div className="space-y-1 mb-2">
                     <div className="px-2 py-1 text-[11px] font-semibold text-on-surface-variant/70 uppercase tracking-wider flex items-center justify-between">
                       <span>Gruppen</span>
-                      <span className="text-[10px]">{filteredGroups.length}</span>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px]">{filteredGroups.length}</span>
+                        <button
+                          type="button"
+                          onClick={() => setIsCreateGroupOpen(true)}
+                          className="p-0.5 rounded text-on-surface-variant hover:text-primary transition-colors"
+                          aria-label="Neue Gruppe erstellen"
+                          title="Neue Gruppe erstellen"
+                        >
+                          <Plus className="w-3 h-3" />
+                        </button>
+                      </div>
                     </div>
                     {filteredGroups.map((g) => {
                       const isSelected = activeGroup?.id === g.id
@@ -1809,40 +1851,32 @@ export function Messenger() {
             {/* View 3: Community (Groups & public invite links) */}
             {mobileNavTab === 'community' && (
               <div className="space-y-3 p-1">
-                <div className="p-3.5 rounded-xl bg-primary/10 border border-primary/20 space-y-2">
-                  <div className="flex items-center gap-2 font-semibold text-xs text-primary">
-                    <UsersRound className="w-4 h-4" />
-                    <span>Communities & Gruppen</span>
+                <div className="flex items-center justify-between px-1 pt-1">
+                  <div>
+                    <div className="text-xs font-headline font-bold text-primary flex items-center gap-1.5">
+                      <UsersRound className="w-3.5 h-3.5" />
+                      <span>Communities & Gruppen</span>
+                      <span className="text-[10px] text-on-surface-variant/70">({groups.length})</span>
+                    </div>
+                    <p className="text-[11px] text-on-surface-variant/80">
+                      Öffentliche und private Gruppen mit Einladungslink
+                    </p>
                   </div>
-                  <p className="text-[11px] text-on-surface-variant">
-                    Erstelle Gruppen mit öffentlichen Einladungslinks und teile sie mit Freunden oder Teams.
-                  </p>
                   <Button
                     type="button"
                     variant="primary"
                     size="sm"
                     onClick={() => setIsCreateGroupOpen(true)}
-                    className="w-full text-xs h-8 gap-1.5"
+                    className="h-7 text-xs gap-1 px-2.5 rounded-full"
+                    aria-label="Neue Gruppe erstellen"
+                    title="Neue Gruppe erstellen"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>Neue Gruppe erstellen</span>
+                    <span>Gruppe erstellen</span>
                   </Button>
                 </div>
 
-                <div className="space-y-1.5">
-                  <div className="px-1 text-[11px] font-semibold text-on-surface-variant/70 uppercase tracking-wider flex items-center justify-between">
-                    <span>Deine Gruppen ({groups.length})</span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setIsCreateGroupOpen(true)}
-                      className="h-6 px-2 text-[10px] gap-1 text-primary"
-                    >
-                      <Plus className="w-3 h-3" />
-                      <span>Gruppe</span>
-                    </Button>
-                  </div>
+                <div className="space-y-1.5 pt-1">
                   {groups.length === 0 ? (
                     <p className="py-6 text-center text-xs text-on-surface-variant/70">
                       Noch keine Gruppen beigetreten.
@@ -2113,17 +2147,30 @@ export function Messenger() {
                       {/* Note Attachment Card */}
                       {msg.noteAttachment && (
                         <div
-                          className={`p-2.5 rounded-xl border text-xs shadow-xs ${
+                          className={`p-3 rounded-xl border text-xs shadow-xs space-y-2 ${
                             msg.isSelf
-                              ? 'bg-white/10 border-white/20 text-white'
-                              : 'bg-surface-container-highest/95 border-outline-variant/40 text-on-surface'
+                              ? 'bg-white/15 border-white/20 text-white'
+                              : 'bg-surface-container-high/90 border-outline-variant/40 text-on-surface'
                           }`}
                         >
-                          <div className="flex items-center gap-1.5 font-bold mb-1 text-[11px]">
-                            <StickyNote className="w-3.5 h-3.5 text-amber-400" />
-                            <span>{msg.noteAttachment.title || 'Notiz'}</span>
+                          <div className="flex items-center justify-between gap-2 border-b border-white/10 pb-1.5">
+                            <div className="flex items-center gap-1.5 font-bold text-[11px] truncate">
+                              <StickyNote className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                              <span className="truncate">{msg.noteAttachment.title || 'Notiz'}</span>
+                            </div>
+                            <Button
+                              type="button"
+                              variant={msg.isSelf ? 'secondary' : 'primary'}
+                              size="sm"
+                              onClick={() => void handleImportNote(msg.noteAttachment!)}
+                              className="h-6 px-2 text-[10px] gap-1 shrink-0 rounded-full"
+                              title="In eigene Notizen übernehmen"
+                            >
+                              <Download className="w-3 h-3" />
+                              <span>Übernehmen</span>
+                            </Button>
                           </div>
-                          <p className="whitespace-pre-wrap text-[11px] opacity-90 line-clamp-4">
+                          <p className="whitespace-pre-wrap text-[11px] opacity-90 line-clamp-4 leading-relaxed">
                             {msg.noteAttachment.content}
                           </p>
                         </div>
@@ -2132,17 +2179,30 @@ export function Messenger() {
                       {/* Calendar Attachment Card */}
                       {msg.calendarAttachment && (
                         <div
-                          className={`p-2.5 rounded-xl border text-xs shadow-xs ${
+                          className={`p-3 rounded-xl border text-xs shadow-xs space-y-2 ${
                             msg.isSelf
-                              ? 'bg-white/10 border-white/20 text-white'
-                              : 'bg-surface-container-highest/95 border-outline-variant/40 text-on-surface'
+                              ? 'bg-white/15 border-white/20 text-white'
+                              : 'bg-surface-container-high/90 border-outline-variant/40 text-on-surface'
                           }`}
                         >
-                          <div className="flex items-center gap-1.5 font-bold mb-1 text-[11px]">
-                            <CalendarIcon className="w-3.5 h-3.5 text-cyan-400" />
-                            <span>{msg.calendarAttachment.title || 'Termin'}</span>
+                          <div className="flex items-center justify-between gap-2 border-b border-white/10 pb-1.5">
+                            <div className="flex items-center gap-1.5 font-bold text-[11px] truncate">
+                              <CalendarIcon className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                              <span className="truncate">{msg.calendarAttachment.title || 'Termin'}</span>
+                            </div>
+                            <Button
+                              type="button"
+                              variant={msg.isSelf ? 'secondary' : 'primary'}
+                              size="sm"
+                              onClick={() => void handleImportCalendar(msg.calendarAttachment!)}
+                              className="h-6 px-2 text-[10px] gap-1 shrink-0 rounded-full"
+                              title="In eigenen Kalender eintragen"
+                            >
+                              <Plus className="w-3 h-3" />
+                              <span>Eintragen</span>
+                            </Button>
                           </div>
-                          <div className="text-[10px] opacity-80 flex items-center gap-1">
+                          <div className="text-[10px] opacity-85 flex items-center gap-1">
                             <Clock className="w-3 h-3" />
                             <span>
                               {new Date(msg.calendarAttachment.start).toLocaleString([], {
@@ -2152,13 +2212,13 @@ export function Messenger() {
                             </span>
                           </div>
                           {msg.calendarAttachment.location && (
-                            <div className="text-[10px] opacity-80 flex items-center gap-1 mt-0.5">
+                            <div className="text-[10px] opacity-85 flex items-center gap-1">
                               <MapPin className="w-3 h-3" />
                               <span>{msg.calendarAttachment.location}</span>
                             </div>
                           )}
                           {msg.calendarAttachment.description && (
-                            <p className="whitespace-pre-wrap text-[11px] opacity-90 mt-1 line-clamp-3">
+                            <p className="whitespace-pre-wrap text-[11px] opacity-90 line-clamp-3 leading-relaxed">
                               {msg.calendarAttachment.description}
                             </p>
                           )}

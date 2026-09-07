@@ -23,6 +23,9 @@ export const STORY_GRADIENTS: Record<string, { label: string; class: string }> =
   'gradient-3': { label: 'Smaragd', class: 'bg-gradient-to-tr from-emerald-600 via-teal-700 to-emerald-900 text-white' },
   'gradient-4': { label: 'Sonnenuntergang', class: 'bg-gradient-to-tr from-amber-500 via-orange-600 to-rose-700 text-white' },
   'gradient-5': { label: 'Cyber', class: 'bg-gradient-to-tr from-pink-600 via-purple-700 to-indigo-900 text-white' },
+  'gradient-6': { label: 'Mitternacht', class: 'bg-gradient-to-tr from-slate-900 via-indigo-950 to-neutral-900 text-white' },
+  'gradient-7': { label: 'Vulkan', class: 'bg-gradient-to-tr from-rose-700 via-red-600 to-amber-700 text-white' },
+  'gradient-8': { label: 'Neon-Wald', class: 'bg-gradient-to-tr from-teal-500 via-emerald-600 to-cyan-800 text-white' },
 }
 
 interface CreateStoryModalProps {
@@ -170,18 +173,21 @@ export function CreateStoryModal({
 
             {/* Gradient Selector (if no photo) */}
             {!photoDataUrl && (
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-semibold text-on-surface-variant/80 shrink-0">Farbe:</span>
-                <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
+              <div className="flex items-center gap-2.5 p-2 rounded-xl bg-surface-container-high/40 border border-outline-variant/20">
+                <span className="text-[11px] font-semibold text-on-surface-variant/90 shrink-0">Farbe:</span>
+                <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5">
                   {Object.entries(STORY_GRADIENTS).map(([k, grad]) => (
                     <button
                       key={k}
                       type="button"
                       onClick={() => setSelectedGradient(k)}
-                      className={`w-6 h-6 rounded-full ${grad.class} transition-transform ${
-                        selectedGradient === k ? 'ring-2 ring-primary ring-offset-2 scale-110' : 'opacity-80 hover:opacity-100'
+                      className={`w-7 h-7 rounded-full shrink-0 ${grad.class} transition-all duration-200 border-2 ${
+                        selectedGradient === k
+                          ? 'border-white scale-110 shadow-[0_0_10px_rgba(255,255,255,0.4)] ring-2 ring-primary ring-offset-1'
+                          : 'border-transparent opacity-75 hover:opacity-100 hover:scale-105'
                       }`}
                       title={grad.label}
+                      aria-label={`Farbverlauf ${grad.label}`}
                     />
                   ))}
                 </div>
