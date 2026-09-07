@@ -64,6 +64,7 @@ const SCHREIBWERKZEUGE = [
   'propose_restart_schedule_set',
   'propose_backup_schedule_set',
   'propose_email_send',
+  'propose_message_friend',
   'propose_calendar_event_create',
   'propose_calendar_event_update',
   'propose_calendar_event_delete',

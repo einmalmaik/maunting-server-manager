@@ -18,7 +18,8 @@
     "nodes": "Nodes",
     "audit": "Audit",
     "ai": "AI Assistant",
-    "teams": "Teams"
+    "teams": "Teams",
+    "social": "Social & Hub"
   },
   "navGroups": {
     "overview": "Overview",
@@ -711,6 +712,7 @@
         "propose_restart_schedule_set": "Configure server auto-restart",
         "propose_backup_schedule_set": "Configure server auto-backup",
         "propose_email_send": "Send email",
+        "propose_message_friend": "Send friend message",
         "propose_calendar_event_create": "Create calendar event",
         "propose_calendar_event_update": "Update calendar event",
         "propose_calendar_event_delete": "Delete calendar event",
@@ -779,6 +781,7 @@
         "propose_restart_schedule_set": "Configure auto-restart for this server? The schedule appears in the server restart section and remains manually editable.",
         "propose_backup_schedule_set": "Configure auto-backups for this server? The schedule appears in the server backup section and remains manually editable.",
         "propose_email_send": "Send drafted email to “{{recipient}}” with subject “{{subject}}” now?",
+        "propose_message_friend": "Send message to “{{friend_username}}” now?",
         "propose_calendar_event_create": "Create event “{{title}}” in your calendar now?",
         "propose_calendar_event_update": "Update this calendar event with the new details now?",
         "propose_calendar_event_delete": "Delete this event from your calendar? This cannot be undone.",
@@ -2329,6 +2332,10 @@
       "title": "Use satellite & regional analysis",
       "desc": "Allows the assistant to query Sentinel-2 satellite data, geodata, and weather analysis."
     },
+    "ai_social_message_friend": {
+      "title": "Send friend messages",
+      "desc": "Allows the AI to draft and send messages to confirmed friends."
+    },
     "ai_autonomous_use": {
       "title": "Use autonomous mode",
       "desc": "Allow the AI to execute approved read and standard tools directly."
@@ -3028,7 +3035,9 @@
     "notesEnabled": "Integrated Notes",
     "notesEnabledHint": "Enables the notes module in the panel and allows AI note management.",
     "vaultEnabled": "Password Manager & Authenticator",
-    "vaultEnabledHint": "Enables the integrated Zero-Knowledge vault for native apps. When disabled, hides it across panel and app.",
+    "vaultEnabledHint": "Enables the built-in zero-knowledge vault for native apps. Disabled hides it across panel and app.",
+    "socialEnabled": "Social, Friends & E2EE Chat Hub",
+    "socialEnabledHint": "Enables the global community, friends, and achievement system as well as E2EE direct messages. Disabled hides all social features.",
     "cloudflareEnabled": "Cloudflare DNS",
     "cloudflareEnabledHint": "Enables Cloudflare DNS management and automatic subdomains. When disabled it is hidden for AI and UI.",
     "testConnection": "Test connection",
@@ -3691,6 +3700,7 @@
     "en": "EN"
   },
   "common": {
+    "offline": "Offline",
     "unlimited": "unlimited",
     "save": "Save",
     "saving": "Saving …",

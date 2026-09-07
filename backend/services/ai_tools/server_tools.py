@@ -95,6 +95,9 @@ from services.ai_tools.personal_tools import (
     _notes_tool_definitions,
     _execute_send_test_email,
 )
+from services.ai_tools.social_tools import (
+    _social_tool_definitions,
+)
 from services.ai_tools.geo_tools import (
     _voice_tool_definitions,
     voice_control_tool_definitions,
@@ -982,6 +985,7 @@ def _global_tool_definitions() -> list[dict]:
         *_worker_tool_definitions(),
         *_mailbox_and_calendar_tool_definitions(),
         *_notes_tool_definitions(),
+        *_social_tool_definitions(),
     ]
 
 def provider_tool_definitions() -> list[dict]:

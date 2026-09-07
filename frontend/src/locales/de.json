@@ -18,7 +18,8 @@
     "nodes": "Nodes",
     "audit": "Audit",
     "ai": "KI-Assistent",
-    "teams": "Teams"
+    "teams": "Teams",
+    "social": "Social & Hub"
   },
   "navGroups": {
     "overview": "Überblick",
@@ -711,6 +712,7 @@
         "propose_restart_schedule_set": "Auto-Neustart des Servers einstellen",
         "propose_backup_schedule_set": "Auto-Backup des Servers einstellen",
         "propose_email_send": "E-Mail versenden",
+        "propose_message_friend": "Freundesnachricht senden",
         "propose_calendar_event_create": "Kalendertermin anlegen",
         "propose_calendar_event_update": "Kalendertermin ändern",
         "propose_calendar_event_delete": "Kalendertermin löschen",
@@ -779,6 +781,7 @@
         "propose_restart_schedule_set": "Automatischen Neustart für diesen Server einrichten? Der Zeitplan ist im Reiter „Automatische Neustarts“ jederzeit manuell anpassbar.",
         "propose_backup_schedule_set": "Automatische Backups für diesen Server einrichten? Die Einstellungen sind im Reiter „Backups“ jederzeit manuell anpassbar.",
         "propose_email_send": "Entwurf als E-Mail an „{{recipient}}“ mit dem Betreff „{{subject}}“ senden?",
+        "propose_message_friend": "Nachricht an „{{friend_username}}“ wirklich senden?",
         "propose_calendar_event_create": "Termin „{{title}}“ im Kalender anlegen?",
         "propose_calendar_event_update": "Termin im Kalender mit den neuen Details aktualisieren?",
         "propose_calendar_event_delete": "Diesen Termin aus dem Kalender löschen? Das lässt sich nicht rückgängig machen.",
@@ -2329,6 +2332,10 @@
       "title": "Satelliten- & Regionsanalyse nutzen",
       "desc": "Ermöglicht der KI den Abruf von Sentinel-2-Satellitenbildern, Geodaten und Wetteranalysen."
     },
+    "ai_social_message_friend": {
+      "title": "Freundesnachrichten senden",
+      "desc": "Erlaubt der KI, Nachrichten an bestätigte Freunde zu verfassen und zu senden."
+    },
     "ai_autonomous_use": {
       "title": "Autonomen Modus nutzen",
       "desc": "Erlaubt der KI die direkte Ausführung freigegebener Lese- und Standardwerkzeuge."
@@ -3029,6 +3036,8 @@
     "notesEnabledHint": "Aktiviert das Notizmodul im Panel und ermöglicht der KI die Notizverwaltung.",
     "vaultEnabled": "Passwort-Manager & Authenticator",
     "vaultEnabledHint": "Aktiviert den integrierten Zero-Knowledge Tresor für native Apps. Deaktiviert verbirgt ihn im gesamten Panel und in der App.",
+    "socialEnabled": "Social-, Freundes- & E2EE-Chat-Hub",
+    "socialEnabledHint": "Aktiviert das weltweite Community-, Freundes- und Achievement-System sowie E2EE-Direktnachrichten. Deaktiviert verbirgt alle Social-Funktionen.",
     "cloudflareEnabled": "Cloudflare DNS",
     "cloudflareEnabledHint": "Aktiviert die Cloudflare DNS Verwaltung und automatische Subdomains. Deaktiviert verbirgt sie für KI und UI.",
     "testConnection": "Verbindung testen",
@@ -3691,6 +3700,7 @@
     "en": "EN"
   },
   "common": {
+    "offline": "Offline",
     "unlimited": "unbegrenzt",
     "save": "Speichern",
     "saving": "Speichern …",

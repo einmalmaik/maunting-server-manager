@@ -39,6 +39,37 @@ def _email_send_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict
     }
     return payload, preview
 
+def _message_friend_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
+    friend_username = str(rest.get("friend_username", "")).strip()
+    message_text = str(rest.get("message_text", "")).strip()
+    if not friend_username or not message_text:
+        raise AiActionValidationError("Freundesnachricht erfordert friend_username und message_text")
+
+    from services.social_service import SocialService
+
+    target = db.query(User).filter(User.username.ilike(friend_username)).first()
+    if not target or not target.is_active:
+        raise AiActionValidationError(f"Benutzer '{friend_username}' existiert nicht oder ist inaktiv.")
+
+    # HARTE FREUNDESLISTEN-BINDUNG: Ausschließlich bestätigte Freunde
+    if not SocialService.is_confirmed_friend(db, user.id, target.id):
+        raise AiActionValidationError(
+            f"Sicherheitsblockade: '{friend_username}' ist kein bestätigter Freund. "
+            "Die KI darf Nachrichten ausschließlich an bereits bestätigte Freunde senden."
+        )
+
+    payload = {
+        "friend_id": target.id,
+        "friend_username": target.username,
+        "message_text": redact_sensitive_text(message_text),
+    }
+    preview = {
+        "operation": "message_friend",
+        "friend_username": target.username,
+        "message_preview": redact_sensitive_text(message_text)[:200],
+    }
+    return payload, preview
+
 def _calendar_event_create_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
     title = str(rest.get("title", "")).strip()
     start_time = str(rest.get("start_time", "")).strip()
@@ -338,3 +369,40 @@ def _ausfuehren_note_delete(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgef
         note_id_or_uid=str(p["note_id"]),
     )
     return _Ausgefuehrt(result=result)
+
+def _ausfuehren_message_friend(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    import hashlib
+    from services.social_service import SocialService
+    from services.dis_client import DisClient
+
+    SocialService.assert_social_enabled(db)
+
+    p = rahmen.payload
+    friend_id = int(p["friend_id"])
+    friend_username = str(p["friend_username"])
+    message_text = str(p["message_text"])
+
+    if not SocialService.is_confirmed_friend(db, rahmen.active_user.id, friend_id):
+        raise AiActionValidationError("Freundschaft ist nicht mehr bestätigt.")
+
+    ids = sorted([rahmen.active_user.id, friend_id])
+    blind_mailbox_id = hashlib.sha256(f"msm:dm:{ids[0]}:{ids[1]}".encode()).hexdigest()
+
+    envelope_payload = json.dumps({
+        "sender_id": rahmen.active_user.id,
+        "sender_username": rahmen.active_user.username,
+        "text": message_text,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+    ciphertext = DisClient.encrypt(
+        envelope_payload,
+        aad=f"msm:e2ee:blind:{blind_mailbox_id}",
+    )
+    SocialService.relay_blind_envelope(
+        db,
+        blind_mailbox_id=blind_mailbox_id,
+        ciphertext_envelope=f"sv-e2ee-v1:{ciphertext}",
+        sender_user_id=rahmen.active_user.id,
+    )
+
+    return _Ausgefuehrt(result={"sent": True, "friend": friend_username})

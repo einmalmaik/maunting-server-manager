@@ -68,6 +68,7 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     # Durchgesetzt in ai_action_service._execute_analyze_region. Ohne hinterlegte
     # Copernicus-Zugangsdaten wird das Werkzeug dem Modell nicht angeboten.
     PermissionDef("ai.satellite.use",          "ai",      "Satelliten- und Regionsanalyse über die KI verwenden"),
+    PermissionDef("ai.social.message_friend",  "ai",      "Nachrichten an bestätigte Freunde über die KI senden"),
     # Durchgesetzt in routers/ai_settings.py::get_usage_overview. Bewusst nicht
     # an `panel.settings.read` gehaengt: wer Verbraeuche sieht, sieht das
     # Nutzungsverhalten fremder Kunden. Den *eigenen* Verbrauch zeigt
