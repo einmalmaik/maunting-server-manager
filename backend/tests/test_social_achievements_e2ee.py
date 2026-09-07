@@ -302,3 +302,49 @@ def test_presence_offline_timeout(db: Session, owner_user: User):
     assert missing_pres["status"] == "offline"
     assert missing_pres["updated_at"] is None
 
+
+def test_chat_group_create_join_invite(db: Session, owner_user: User, regular_user: User) -> None:
+    # 1. Gruppe erstellen
+    group = SocialService.create_group(
+        db,
+        user=owner_user,
+        name="Singra Vault Community",
+        description="Offizielle Community-Gruppe",
+    )
+    assert group.id is not None
+    assert group.name == "Singra Vault Community"
+    assert len(group.invite_code) >= 16
+    assert group.owner_user_id == owner_user.id
+
+    # 2. Öffentliche Einladung abrufen (ohne Auth)
+    invite_info = SocialService.get_group_by_invite_code(db, group.invite_code)
+    assert invite_info.id == group.id
+    assert invite_info.name == "Singra Vault Community"
+
+    # 3. Zweiter Nutzer tritt über Einladungslink bei
+    joined_group = SocialService.join_group_by_invite_code(db, regular_user, group.invite_code)
+    assert joined_group.id == group.id
+
+    # Gruppen auflisten
+    owner_groups = SocialService.list_user_groups(db, owner_user.id)
+    assert len(owner_groups) == 1
+    assert owner_groups[0]["member_count"] == 2
+    assert owner_groups[0]["role"] == "owner"
+
+    regular_groups = SocialService.list_user_groups(db, regular_user.id)
+    assert len(regular_groups) == 1
+    assert regular_groups[0]["role"] == "member"
+
+    # 4. Blinder E2EE Relay mit group_id
+    blind_mailbox = "b" * 64
+    env = SocialService.relay_blind_envelope(
+        db,
+        blind_mailbox_id=blind_mailbox,
+        ciphertext_envelope="sv-e2ee-team-v1:testpayload",
+        sender_user_id=owner_user.id,
+        group_id=group.id,
+    )
+    assert env.id is not None
+    assert env.blind_mailbox_id == blind_mailbox
+
+

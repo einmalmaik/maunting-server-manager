@@ -89,6 +89,7 @@ class E2eeBlindEnvelopeCreate(BaseModel):
     blind_mailbox_id: str = Field(..., min_length=16, max_length=64)
     ciphertext_envelope: str = Field(..., min_length=10)
     recipient_user_id: int | None = None
+    group_id: int | None = None
 
 
 class E2eeBlindEnvelopeResponse(BaseModel):
@@ -117,3 +118,39 @@ class SocialProfileResponse(BaseModel):
     presence: PresenceInfo | None = None
     stats: UserStatsResponse | None = None
     achievements: list[AchievementResponse] | None = None
+
+
+class ChatGroupCreate(BaseModel):
+    name: str = Field(..., min_length=2, max_length=64)
+    description: str | None = Field(None, max_length=256)
+    avatar_url: str | None = None
+
+
+class ChatGroupMemberResponse(BaseModel):
+    user_id: int
+    username: str
+    avatar_url: str | None = None
+    role: str
+    joined_at: datetime
+
+
+class ChatGroupResponse(BaseModel):
+    id: int
+    name: str
+    description: str | None = None
+    avatar_url: str | None = None
+    invite_code: str
+    owner_user_id: int
+    member_count: int
+    role: str
+    created_at: datetime
+    members: list[ChatGroupMemberResponse] = []
+
+
+class ChatGroupInvitePublicResponse(BaseModel):
+    group_id: int
+    name: str
+    description: str | None = None
+    avatar_url: str | None = None
+    member_count: int
+

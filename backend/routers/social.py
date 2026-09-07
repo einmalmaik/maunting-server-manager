@@ -21,6 +21,9 @@ from schemas.social import (
     PrivacyUpdateRequest,
     SocialProfileResponse,
     UserStatsResponse,
+    ChatGroupCreate,
+    ChatGroupResponse,
+    ChatGroupInvitePublicResponse,
 )
 from services.achievement_service import AchievementService
 from services.social_service import SocialService
@@ -232,6 +235,7 @@ def relay_e2ee_message(
         ciphertext_envelope=req.ciphertext_envelope,
         sender_user_id=user.id,
         recipient_user_id=req.recipient_user_id,
+        group_id=req.group_id,
     )
     return {
         "id": envelope.id,
@@ -262,3 +266,105 @@ def fetch_blind_mailbox_envelopes(
         }
         for env in envelopes
     ]
+
+
+# --- Chat-Gruppen & Öffentliche Einladungslinks ---
+
+@router.get("/groups", response_model=list[ChatGroupResponse], dependencies=[Depends(_check_social_enabled)])
+def list_my_groups(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[dict]:
+    return SocialService.list_user_groups(db, user.id)
+
+
+@router.post("/groups", response_model=ChatGroupResponse, dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
+def create_chat_group(
+    req: ChatGroupCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    group = SocialService.create_group(
+        db,
+        user=user,
+        name=req.name,
+        description=req.description,
+        avatar_url=req.avatar_url,
+    )
+    groups = SocialService.list_user_groups(db, user.id)
+    match = next((g for g in groups if g["id"] == group.id), None)
+    if match:
+        return match
+    return {
+        "id": group.id,
+        "name": group.name,
+        "description": group.description,
+        "avatar_url": group.avatar_url,
+        "invite_code": group.invite_code,
+        "owner_user_id": group.owner_user_id,
+        "member_count": 1,
+        "role": "owner",
+        "created_at": group.created_at,
+        "members": [
+            {
+                "user_id": user.id,
+                "username": user.username,
+                "avatar_url": user.avatar_url,
+                "role": "owner",
+                "joined_at": group.created_at,
+            }
+        ],
+    }
+
+
+@router.get("/groups/invite/{invite_code}", response_model=ChatGroupInvitePublicResponse)
+def get_group_invite_info(
+    invite_code: str,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Öffentlicher Endpunkt für Einladungslinks (ohne Login-Pflicht)."""
+    group = SocialService.get_group_by_invite_code(db, invite_code)
+    member_count = len(group.members) if group.members else 1
+    return {
+        "group_id": group.id,
+        "name": group.name,
+        "description": group.description,
+        "avatar_url": group.avatar_url,
+        "member_count": member_count,
+    }
+
+
+@router.post("/groups/join/{invite_code}", response_model=ChatGroupResponse, dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
+def join_group_by_invite(
+    invite_code: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    group = SocialService.join_group_by_invite_code(db, user, invite_code)
+    groups = SocialService.list_user_groups(db, user.id)
+    match = next((g for g in groups if g["id"] == group.id), None)
+    if match:
+        return match
+    return {
+        "id": group.id,
+        "name": group.name,
+        "description": group.description,
+        "avatar_url": group.avatar_url,
+        "invite_code": group.invite_code,
+        "owner_user_id": group.owner_user_id,
+        "member_count": len(group.members) if group.members else 1,
+        "role": "member",
+        "created_at": group.created_at,
+        "members": [],
+    }
+
+
+@router.post("/groups/{group_id}/leave", dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
+def leave_chat_group(
+    group_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    SocialService.leave_group(db, user, group_id)
+    return {"success": True, "message": "Gruppe verlassen"}
+

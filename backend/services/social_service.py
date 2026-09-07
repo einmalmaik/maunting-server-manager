@@ -12,6 +12,8 @@ from models import (
     UserFriend,
     UserPresence,
     E2eeBlindEnvelope,
+    ChatGroup,
+    ChatGroupMember,
 )
 from services.panel_settings_service import PanelSettingsService
 from services.sync_event_service import SyncEventService
@@ -496,6 +498,7 @@ class SocialService:
         ciphertext_envelope: str,
         sender_user_id: int | None = None,
         recipient_user_id: int | None = None,
+        group_id: int | None = None,
     ) -> E2eeBlindEnvelope:
         """Speichert einen blinden E2EE-Umschlag ohne jegliche Nutzerverknüpfung."""
         clean_mailbox = blind_mailbox_id.strip()
@@ -518,6 +521,14 @@ class SocialService:
             targets.add(sender_user_id)
         if recipient_user_id:
             targets.add(recipient_user_id)
+        if group_id:
+            group_members = (
+                db.query(ChatGroupMember.user_id)
+                .filter(ChatGroupMember.group_id == group_id)
+                .all()
+            )
+            for gm in group_members:
+                targets.add(gm[0])
 
         for target_id in targets:
             SyncEventService.publish(
@@ -526,6 +537,7 @@ class SocialService:
                     "blind_mailbox_id": clean_mailbox,
                     "id": envelope.id,
                     "created_at": envelope.created_at.isoformat(),
+                    "group_id": group_id,
                 },
                 user_id=target_id,
             )
@@ -543,3 +555,166 @@ class SocialService:
         if since_id > 0:
             query = query.filter(E2eeBlindEnvelope.id > since_id)
         return query.order_by(E2eeBlindEnvelope.id.asc()).limit(min(limit, 100)).all()
+
+    # --- Chat-Gruppen & Öffentliche Einladungslinks ---
+
+    @classmethod
+    def create_group(
+        cls,
+        db: Session,
+        user: User,
+        name: str,
+        description: str | None = None,
+        avatar_url: str | None = None,
+    ) -> ChatGroup:
+        cls.assert_social_enabled(db)
+        clean_name = name.strip()
+        if not 2 <= len(clean_name) <= 64:
+            raise HTTPException(status_code=422, detail="Gruppenname muss zwischen 2 und 64 Zeichen lang sein.")
+
+        import secrets
+        invite_code = secrets.token_urlsafe(16)
+
+        group = ChatGroup(
+            name=clean_name,
+            description=description.strip() if description else None,
+            avatar_url=avatar_url,
+            invite_code=invite_code,
+            owner_user_id=user.id,
+            created_at=_now(),
+        )
+        db.add(group)
+        db.flush()
+
+        member = ChatGroupMember(
+            group_id=group.id,
+            user_id=user.id,
+            role="owner",
+            joined_at=_now(),
+        )
+        db.add(member)
+        db.commit()
+        db.refresh(group)
+        return group
+
+    @classmethod
+    def list_user_groups(cls, db: Session, user_id: int) -> list[dict[str, Any]]:
+        cls.assert_social_enabled(db)
+        memberships = (
+            db.query(ChatGroupMember)
+            .filter(ChatGroupMember.user_id == user_id)
+            .all()
+        )
+        if not memberships:
+            return []
+
+        group_ids = [m.group_id for m in memberships]
+        groups = db.query(ChatGroup).filter(ChatGroup.id.in_(group_ids)).all()
+        all_members = (
+            db.query(ChatGroupMember, User.username, User.avatar_url)
+            .join(User, User.id == ChatGroupMember.user_id)
+            .filter(ChatGroupMember.group_id.in_(group_ids))
+            .all()
+        )
+
+        members_by_group: dict[int, list[dict[str, Any]]] = {}
+        for mem, uname, uavatar in all_members:
+            members_by_group.setdefault(mem.group_id, []).append({
+                "user_id": mem.user_id,
+                "username": uname,
+                "avatar_url": uavatar,
+                "role": mem.role,
+                "joined_at": mem.joined_at,
+            })
+
+        user_role_by_group = {m.group_id: m.role for m in memberships}
+
+        results = []
+        for g in groups:
+            mems = members_by_group.get(g.id, [])
+            results.append({
+                "id": g.id,
+                "name": g.name,
+                "description": g.description,
+                "avatar_url": g.avatar_url,
+                "invite_code": g.invite_code,
+                "owner_user_id": g.owner_user_id,
+                "member_count": len(mems),
+                "role": user_role_by_group.get(g.id, "member"),
+                "created_at": g.created_at,
+                "members": mems,
+            })
+
+        return sorted(results, key=lambda x: x["name"].casefold())
+
+    @classmethod
+    def get_group_by_invite_code(cls, db: Session, invite_code: str) -> ChatGroup:
+        cls.assert_social_enabled(db)
+        clean_code = invite_code.strip()
+        group = db.query(ChatGroup).filter(ChatGroup.invite_code == clean_code).first()
+        if not group:
+            raise HTTPException(status_code=404, detail="Einladungslink ist ungültig oder abgelaufen.")
+        return group
+
+    @classmethod
+    def join_group_by_invite_code(cls, db: Session, user: User, invite_code: str) -> ChatGroup:
+        cls.assert_social_enabled(db)
+        group = cls.get_group_by_invite_code(db, invite_code)
+        existing = (
+            db.query(ChatGroupMember)
+            .filter(ChatGroupMember.group_id == group.id, ChatGroupMember.user_id == user.id)
+            .first()
+        )
+        if not existing:
+            new_member = ChatGroupMember(
+                group_id=group.id,
+                user_id=user.id,
+                role="member",
+                joined_at=_now(),
+            )
+            db.add(new_member)
+            db.commit()
+            db.refresh(group)
+
+            SyncEventService.publish(
+                {
+                    "type": "chat_group_joined",
+                    "group_id": group.id,
+                    "user_id": user.id,
+                    "username": user.username,
+                },
+                user_id=user.id,
+            )
+
+        return group
+
+    @classmethod
+    def leave_group(cls, db: Session, user: User, group_id: int) -> None:
+        cls.assert_social_enabled(db)
+        member = (
+            db.query(ChatGroupMember)
+            .filter(ChatGroupMember.group_id == group_id, ChatGroupMember.user_id == user.id)
+            .first()
+        )
+        if not member:
+            return
+
+        was_owner = member.role == "owner"
+        db.delete(member)
+        db.flush()
+
+        # Wenn keine Mitglieder mehr da sind, Gruppe entfernen
+        remaining = db.query(ChatGroupMember).filter(ChatGroupMember.group_id == group_id).all()
+        if not remaining:
+            group = db.query(ChatGroup).filter(ChatGroup.id == group_id).first()
+            if group:
+                db.delete(group)
+        elif was_owner:
+            # Nachfolge für Eigentümer bestimmen
+            new_owner = remaining[0]
+            new_owner.role = "owner"
+            group = db.query(ChatGroup).filter(ChatGroup.id == group_id).first()
+            if group:
+                group.owner_user_id = new_owner.user_id
+        db.commit()
+

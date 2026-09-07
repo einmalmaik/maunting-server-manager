@@ -78,6 +78,8 @@ from .hoster import (
     HosterWebhookDelivery,
 )
 
+from .chat_group import ChatGroup, ChatGroupMember
+
 __all__ = [
     "User", "UserRole", "RoleAiLimit", "AiUsageEvent", "OperationTask",
     "AiProvider", "AiConversation", "AiMessage", "AiActionProposal",
@@ -101,4 +103,5 @@ __all__ = [
     "PanelPopup", "UserPopupState",
     "VaultEntry", "VaultHint", "VaultUserSetting", "VaultBlindBucket",
     "UserAchievement", "UserActivityTime", "UserFriend", "UserPresence", "E2eeBlindEnvelope",
+    "ChatGroup", "ChatGroupMember",
 ]  # noqa: E501
