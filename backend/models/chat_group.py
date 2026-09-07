@@ -31,6 +31,9 @@ class ChatGroup(Base):
     owner_user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    default_permissions: Mapped[str | None] = mapped_column(
+        String(256), nullable=True, default="send_messages,invite_members"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False
     )
@@ -56,6 +59,7 @@ class ChatGroupMember(Base):
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     role: Mapped[str] = mapped_column(String(16), default="member", nullable=False)
+    permissions: Mapped[str | None] = mapped_column(String(256), nullable=True, default=None)
     joined_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False
     )

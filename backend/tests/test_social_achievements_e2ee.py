@@ -402,3 +402,69 @@ def test_chat_stories_creation_and_expiration(db: Session, owner_user: User, reg
     assert not any(s["id"] == story.id for s in SocialService.list_active_stories(db, owner_user.id))
 
 
+def test_chat_group_roles_and_permissions(db: Session, owner_user: User, regular_user: User) -> None:
+    # 1. Gruppe erstellen
+    group = SocialService.create_group(
+        db,
+        user=owner_user,
+        name="Security & Privacy Guild",
+        description="Gilden-Chat",
+    )
+    SocialService.join_group_by_invite_code(db, regular_user, group.invite_code)
+
+    # 2. Rolle von regular_user zu Moderator befördern mit Rechten
+    updated = SocialService.update_member_role_permissions(
+        db,
+        group_id=group.id,
+        target_user_id=regular_user.id,
+        role="moderator",
+        permissions="send_messages,delete_messages,kick_members",
+        caller=owner_user,
+    )
+    assert updated["role"] == "moderator"
+    assert "kick_members" in updated["permissions"]
+
+    # 3. Standard-Gruppenrechte für @everyone anpassen
+    updated_grp = SocialService.update_group_default_permissions(
+        db,
+        group_id=group.id,
+        default_permissions="send_messages,invite_members,delete_messages",
+        caller=owner_user,
+    )
+    assert "delete_messages" in updated_grp.default_permissions
+
+    # 4. Nicht-Admin darf keine Rollen ändern
+    with pytest.raises(Exception) as exc:
+        SocialService.update_member_role_permissions(
+            db,
+            group_id=group.id,
+            target_user_id=owner_user.id,
+            role="member",
+            permissions=None,
+            caller=regular_user,
+        )
+    assert "403" in str(exc.value)
+
+    # 5. Moderator mit kick_members darf Mitglied kicken (wir fügen einen 3. Nutzer hinzu)
+    user3 = User(
+        username="third_user",
+        email="third@example.com",
+        password_hash="hashed",
+        is_active=True,
+    )
+    db.add(user3)
+    db.commit()
+    SocialService.join_group_by_invite_code(db, user3, group.invite_code)
+
+    # Regular_user kickt user3
+    SocialService.kick_group_member(
+        db,
+        group_id=group.id,
+        target_user_id=user3.id,
+        caller=regular_user,
+    )
+
+    members = SocialService.list_user_groups(db, owner_user.id)[0]["members"]
+    assert not any(m["user_id"] == user3.id for m in members)
+
+

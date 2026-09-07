@@ -625,6 +625,7 @@ class SocialService:
                 "username": uname,
                 "avatar_url": uavatar,
                 "role": mem.role,
+                "permissions": mem.permissions,
                 "joined_at": mem.joined_at,
             })
 
@@ -640,6 +641,7 @@ class SocialService:
                 "avatar_url": g.avatar_url,
                 "invite_code": g.invite_code,
                 "owner_user_id": g.owner_user_id,
+                "default_permissions": g.default_permissions or "send_messages,invite_members",
                 "member_count": len(mems),
                 "role": user_role_by_group.get(g.id, "member"),
                 "created_at": g.created_at,
@@ -739,6 +741,159 @@ class SocialService:
                 raise HTTPException(status_code=403, detail="Nur der Eigentümer kann die Gruppe löschen.")
         db.delete(group)
         db.commit()
+
+    @classmethod
+    def update_member_role_permissions(
+        cls,
+        db: Session,
+        group_id: int,
+        target_user_id: int,
+        role: str,
+        permissions: str | None,
+        caller: User,
+    ) -> dict[str, Any]:
+        cls.assert_social_enabled(db)
+        caller_mem = (
+            db.query(ChatGroupMember)
+            .filter(ChatGroupMember.group_id == group_id, ChatGroupMember.user_id == caller.id)
+            .first()
+        )
+        if not caller_mem or caller_mem.role not in ("owner", "admin"):
+            raise HTTPException(status_code=403, detail="Keine Berechtigung zum Ändern von Gruppenrollen.")
+
+        target_mem = (
+            db.query(ChatGroupMember)
+            .filter(ChatGroupMember.group_id == group_id, ChatGroupMember.user_id == target_user_id)
+            .first()
+        )
+        if not target_mem:
+            raise HTTPException(status_code=404, detail="Gruppenmitglied nicht gefunden.")
+
+        if target_mem.role == "owner" and caller.id != target_mem.user_id:
+            raise HTTPException(status_code=403, detail="Die Rolle des Gruppen-Eigentümers kann nicht geändert werden.")
+
+        if target_mem.role == "admin" and caller_mem.role != "owner" and caller.id != target_user_id:
+            raise HTTPException(status_code=403, detail="Nur der Eigentümer kann die Rolle anderer Administratoren anpassen.")
+
+        target_mem.role = role
+        target_mem.permissions = permissions.strip() if permissions else None
+        db.commit()
+        db.refresh(target_mem)
+
+        SyncEventService.publish(
+            {
+                "type": "chat_group_member_updated",
+                "group_id": group_id,
+                "user_id": target_user_id,
+                "role": target_mem.role,
+                "permissions": target_mem.permissions,
+            },
+            user_id=target_user_id,
+        )
+
+        target_user = db.query(User).filter(User.id == target_user_id).first()
+        return {
+            "user_id": target_mem.user_id,
+            "username": target_user.username if target_user else f"User #{target_mem.user_id}",
+            "avatar_url": target_user.avatar_url if target_user else None,
+            "role": target_mem.role,
+            "permissions": target_mem.permissions,
+            "joined_at": target_mem.joined_at,
+        }
+
+    @classmethod
+    def kick_group_member(
+        cls,
+        db: Session,
+        group_id: int,
+        target_user_id: int,
+        caller: User,
+    ) -> None:
+        cls.assert_social_enabled(db)
+        caller_mem = (
+            db.query(ChatGroupMember)
+            .filter(ChatGroupMember.group_id == group_id, ChatGroupMember.user_id == caller.id)
+            .first()
+        )
+        if not caller_mem:
+            raise HTTPException(status_code=403, detail="Du bist kein Mitglied dieser Gruppe.")
+
+        can_kick = (
+            caller_mem.role in ("owner", "admin")
+            or (caller_mem.permissions and "kick_members" in caller_mem.permissions)
+        )
+        if not can_kick:
+            raise HTTPException(status_code=403, detail="Keine Berechtigung zum Entfernen von Mitgliedern.")
+
+        target_mem = (
+            db.query(ChatGroupMember)
+            .filter(ChatGroupMember.group_id == group_id, ChatGroupMember.user_id == target_user_id)
+            .first()
+        )
+        if not target_mem:
+            raise HTTPException(status_code=404, detail="Gruppenmitglied nicht gefunden.")
+
+        if target_mem.role == "owner":
+            raise HTTPException(status_code=403, detail="Der Eigentümer der Gruppe kann nicht entfernt werden.")
+
+        if target_mem.role == "admin" and caller_mem.role != "owner":
+            raise HTTPException(status_code=403, detail="Nur der Eigentümer kann Administratoren entfernen.")
+
+        db.delete(target_mem)
+        db.commit()
+
+        SyncEventService.publish(
+            {
+                "type": "chat_group_member_kicked",
+                "group_id": group_id,
+                "user_id": target_user_id,
+            },
+            user_id=target_user_id,
+        )
+
+    @classmethod
+    def update_group_default_permissions(
+        cls,
+        db: Session,
+        group_id: int,
+        default_permissions: str,
+        caller: User,
+    ) -> ChatGroup:
+        cls.assert_social_enabled(db)
+        caller_mem = (
+            db.query(ChatGroupMember)
+            .filter(ChatGroupMember.group_id == group_id, ChatGroupMember.user_id == caller.id)
+            .first()
+        )
+        if not caller_mem or caller_mem.role not in ("owner", "admin"):
+            raise HTTPException(status_code=403, detail="Keine Berechtigung zum Konfigurieren der Standard-Gruppenrechte.")
+
+        group = db.query(ChatGroup).filter(ChatGroup.id == group_id).first()
+        if not group:
+            raise HTTPException(status_code=404, detail="Gruppe nicht gefunden.")
+
+        clean_perms = default_permissions.strip()
+        group.default_permissions = clean_perms
+        db.commit()
+        db.refresh(group)
+
+        # Notify all group members
+        group_members = (
+            db.query(ChatGroupMember.user_id)
+            .filter(ChatGroupMember.group_id == group_id)
+            .all()
+        )
+        for gm in group_members:
+            SyncEventService.publish(
+                {
+                    "type": "chat_group_permissions_updated",
+                    "group_id": group.id,
+                    "default_permissions": group.default_permissions,
+                },
+                user_id=gm[0],
+            )
+
+        return group
 
     # --- Stories (Temporäre Statusmeldungen, 24h) ---
 

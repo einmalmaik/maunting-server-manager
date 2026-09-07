@@ -23,6 +23,9 @@ from schemas.social import (
     UserStatsResponse,
     ChatGroupCreate,
     ChatGroupResponse,
+    ChatGroupMemberResponse,
+    ChatGroupMemberUpdate,
+    ChatGroupPermissionsUpdate,
     ChatGroupInvitePublicResponse,
     ChatStoryCreate,
     ChatStoryResponse,
@@ -379,6 +382,80 @@ def delete_chat_group(
 ) -> dict:
     SocialService.delete_group(db, user, group_id)
     return {"success": True, "message": "Gruppe gelöscht"}
+
+
+@router.get("/groups/{group_id}/members", response_model=list[ChatGroupMemberResponse], dependencies=[Depends(_check_social_enabled)])
+def get_group_members(
+    group_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[dict]:
+    groups = SocialService.list_user_groups(db, user.id)
+    match = next((g for g in groups if g["id"] == group_id), None)
+    if not match:
+        raise HTTPException(status_code=403, detail="Du bist kein Mitglied dieser Gruppe.")
+    return match.get("members", [])
+
+
+@router.patch("/groups/{group_id}/members/{target_user_id}", response_model=ChatGroupMemberResponse, dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
+def update_group_member_role(
+    group_id: int,
+    target_user_id: int,
+    req: ChatGroupMemberUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    return SocialService.update_member_role_permissions(
+        db,
+        group_id=group_id,
+        target_user_id=target_user_id,
+        role=req.role,
+        permissions=req.permissions,
+        caller=user,
+    )
+
+
+@router.delete("/groups/{group_id}/members/{target_user_id}", dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
+def kick_group_member_endpoint(
+    group_id: int,
+    target_user_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    SocialService.kick_group_member(db, group_id=group_id, target_user_id=target_user_id, caller=user)
+    return {"success": True, "message": "Mitglied aus Gruppe entfernt"}
+
+
+@router.patch("/groups/{group_id}/permissions", response_model=ChatGroupResponse, dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
+def update_group_permissions_endpoint(
+    group_id: int,
+    req: ChatGroupPermissionsUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    group = SocialService.update_group_default_permissions(
+        db,
+        group_id=group_id,
+        default_permissions=req.default_permissions,
+        caller=user,
+    )
+    groups = SocialService.list_user_groups(db, user.id)
+    match = next((g for g in groups if g["id"] == group.id), None)
+    if match:
+        return match
+    return {
+        "id": group.id,
+        "name": group.name,
+        "description": group.description,
+        "avatar_url": group.avatar_url,
+        "invite_code": group.invite_code,
+        "owner_user_id": group.owner_user_id,
+        "default_permissions": group.default_permissions,
+        "member_count": 1,
+        "role": "owner",
+        "created_at": group.created_at,
+        "members": [],
+    }
 
 
 # --- Stories (Temporäre Statusmeldungen, 24h) ---

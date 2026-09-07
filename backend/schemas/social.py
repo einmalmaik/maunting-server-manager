@@ -131,7 +131,17 @@ class ChatGroupMemberResponse(BaseModel):
     username: str
     avatar_url: str | None = None
     role: str
+    permissions: str | None = None
     joined_at: datetime
+
+
+class ChatGroupMemberUpdate(BaseModel):
+    role: str = Field(..., pattern="^(admin|moderator|member)$")
+    permissions: str | None = Field(None, max_length=256)
+
+
+class ChatGroupPermissionsUpdate(BaseModel):
+    default_permissions: str = Field(..., min_length=2, max_length=256)
 
 
 class ChatGroupResponse(BaseModel):
@@ -143,6 +153,7 @@ class ChatGroupResponse(BaseModel):
     owner_user_id: int
     member_count: int
     role: str
+    default_permissions: str | None = None
     created_at: datetime
     members: list[ChatGroupMemberResponse] = []
 
