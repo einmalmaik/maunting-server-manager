@@ -19,6 +19,7 @@
     "audit": "Audit",
     "ai": "KI-Assistent",
     "teams": "Teams",
+    "chat": "Chat",
     "social": "Social & Hub"
   },
   "navGroups": {
@@ -3274,6 +3275,7 @@
     "subtitle": "Dein Account",
     "tabs": {
       "account": "Konto",
+      "social": "Freunde & Meilensteine",
       "password": "Passwort",
       "2fa": "2-Faktor",
       "linked": "Verknüpfte Konten",
@@ -3283,6 +3285,11 @@
       "credentials": "Zugangsdaten"
     },
     "email": "E-Mail-Adresse",
+    "privacyTitle": "Privatsphäre & Sichtbarkeit",
+    "privacyDescription": "Bestimme, wer deinen Online-Status und deine Aktivitäten im System sehen kann.",
+    "privacyVisibility": "Profil-Sichtbarkeit",
+    "privacySaved": "Privatsphäre-Einstellungen gespeichert.",
+    "privacySaveFailed": "Einstellungen konnten nicht gespeichert werden.",
     "uploadAvatar": "Profilbild hochladen",
     "changeAvatar": "Profilbild ändern",
     "removeAvatar": "Entfernen",

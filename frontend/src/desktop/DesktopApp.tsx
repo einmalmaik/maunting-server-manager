@@ -33,6 +33,7 @@ import { Calendar } from '@/pages/Calendar'
 import { Notes } from '@/pages/Notes'
 import { Privacy } from '@/pages/Privacy'
 import { useAuthStore } from '@/stores/authStore'
+import { usePresenceAndActivity } from '@/hooks/usePresenceAndActivity'
 import { abmelden } from './auth'
 import { Einstellungen } from './Einstellungen'
 import { Splash } from './Splash'
@@ -749,6 +750,7 @@ function Hauptseite({
 
   const agentName = user?.agent_name?.trim() || 'Assistent'
   const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
+  const { status: presenceStatus, changeStatus: handlePresenceChange } = usePresenceAndActivity(!isOffline, !isOffline)
 
   const profileItems: ProfileDropdownItem[] = [
     ...(!isOffline
@@ -849,6 +851,8 @@ function Hauptseite({
             user={user}
             items={profileItems}
             placement="bottom-right"
+            status={!isOffline ? presenceStatus : undefined}
+            onStatusChange={!isOffline ? handlePresenceChange : undefined}
           />
 
           {/* Mobile Menü-Knopf */}

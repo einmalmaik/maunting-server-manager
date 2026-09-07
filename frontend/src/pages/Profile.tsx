@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { User, KeyRound, Shield, Link2, AlertTriangle, Bot, MonitorSmartphone } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import { User, Users, KeyRound, Shield, Link2, AlertTriangle, Bot, MonitorSmartphone } from 'lucide-react'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { AccountTab } from './profile/AccountTab'
+import { SocialTab } from './profile/SocialTab'
 import { PasswordTab } from './profile/PasswordTab'
 import { TwoFactorTab } from './profile/TwoFactorTab'
 import { LinkedAccountsTab } from './profile/LinkedAccountsTab'
@@ -13,10 +15,11 @@ import { CredentialsTab } from './profile/CredentialsTab'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 
-type TabId = 'account' | 'password' | '2fa' | 'linked' | 'credentials' | 'ai' | 'devices' | 'danger'
+type TabId = 'account' | 'social' | 'password' | '2fa' | 'linked' | 'credentials' | 'ai' | 'devices' | 'danger'
 
 const BASE_TABS: TabDef<TabId>[] = [
   { id: 'account', labelKey: 'profile.tabs.account', icon: User },
+  { id: 'social', labelKey: 'profile.tabs.social', icon: Users },
   { id: 'password', labelKey: 'profile.tabs.password', icon: KeyRound },
   { id: '2fa', labelKey: 'profile.tabs.2fa', icon: Shield },
   { id: 'linked', labelKey: 'profile.tabs.linked', icon: Link2 },
@@ -38,8 +41,18 @@ const BASE_TABS: TabDef<TabId>[] = [
  */
 export function Profile() {
   const { t } = useTranslation()
+  const [searchParams] = useSearchParams()
   const canUseAi = useHasPermission('ai.chat.use')
-  const [activeTab, setActiveTab] = useState<TabId>('account')
+  const initialTab = (searchParams.get('tab') as TabId) || 'account'
+  const [activeTab, setActiveTab] = useState<TabId>(initialTab)
+
+  useEffect(() => {
+    const tabParam = searchParams.get('tab') as TabId
+    if (tabParam && ['account', 'social', 'password', '2fa', 'linked', 'credentials', 'ai', 'devices', 'danger'].includes(tabParam)) {
+      setActiveTab(tabParam)
+    }
+  }, [searchParams])
+
   const tabs: TabDef<TabId>[] = [
     ...BASE_TABS,
     ...(canUseAi ? [{ id: 'ai' as const, labelKey: 'profile.tabs.ai', icon: Bot }] : []),
@@ -59,6 +72,7 @@ export function Profile() {
       />
 
       {activeTab === 'account' && <AccountTab />}
+      {activeTab === 'social' && <SocialTab />}
       {activeTab === 'password' && <PasswordTab />}
       {activeTab === '2fa' && <TwoFactorTab />}
       {activeTab === 'linked' && <LinkedAccountsTab />}

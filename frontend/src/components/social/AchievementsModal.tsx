@@ -68,48 +68,48 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[85vh] p-0" showCloseButton>
-        {/* Steam-Style Header */}
-        <div className="p-6 border-b border-outline-variant/30 bg-gradient-to-r from-surface-container-low via-surface-container to-surface-container-low relative">
+        {/* Header */}
+        <div className="p-6 border-b border-outline-variant/30 bg-surface-container relative">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pr-8">
             <div className="flex items-center gap-3">
-              <div className="p-3 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.2)]">
-                <Trophy className="w-8 h-8" />
+              <div className="p-2.5 rounded-xl bg-primary/10 border border-primary/20 text-primary">
+                <Trophy className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="font-headline text-title-lg font-black text-primary tracking-tight">
-                  Errungenschaften & Prestige
+                <h3 className="font-headline text-title-md font-bold text-primary tracking-tight">
+                  Meilensteine & Fortschritt
                 </h3>
                 <div className="font-body text-xs text-on-surface-variant flex items-center gap-2 mt-0.5">
-                  <span>Zentrale Kontobindung (MSM & MSS)</span>
+                  <span>Plattform-Aktivitäten</span>
                   <span>•</span>
-                  <span className="text-amber-400 font-semibold">{overview?.prestige_score || 0} Prestige-Punkte</span>
+                  <span className="text-primary font-semibold">{overview?.prestige_score || 0} Punkte</span>
                 </div>
               </div>
             </div>
 
-            {/* Quick Level / Progress Badge */}
+            {/* Progress Badge */}
             <div className="flex flex-col items-end">
-              <div className="text-xs font-bold text-primary mb-1">
-                {overview?.total_unlocked || 0} / {overview?.total_available || 0} ({progressPercent}%)
+              <div className="text-xs font-semibold text-primary mb-1">
+                {overview?.total_unlocked || 0} von {overview?.total_available || 0} ({progressPercent}%)
               </div>
-              <div className="w-32 h-2.5 bg-surface-container-high rounded-full overflow-hidden border border-outline-variant/30">
+              <div className="w-32 h-2 bg-surface-container-high rounded-full overflow-hidden border border-outline-variant/30">
                 <div
-                  className="h-full bg-gradient-to-r from-amber-500 to-amber-300 transition-all duration-500 rounded-full"
+                  className="h-full bg-primary transition-all duration-500 rounded-full"
                   style={{ width: `${progressPercent}%` }}
                 />
               </div>
             </div>
           </div>
 
-          {/* Activity Time Counter Bar */}
+          {/* Activity Overview */}
           {stats && (
-            <div className="mt-5 pt-4 border-t border-outline-variant/20 grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="mt-4 pt-3 border-t border-outline-variant/20 grid grid-cols-2 sm:grid-cols-4 gap-2">
               <div className="bg-surface-container-high/40 p-2 rounded-lg border border-outline-variant/20 text-center">
                 <div className="flex items-center justify-center gap-1 text-[11px] text-on-surface-variant mb-0.5">
                   <Clock className="w-3 h-3 text-primary" />
-                  <span>Aktive Spielzeit</span>
+                  <span>Aktivitätszeit</span>
                 </div>
-                <div className="text-xs font-bold text-primary font-mono">
+                <div className="text-xs font-semibold text-primary font-mono">
                   {formatHours(stats.total_activity_seconds || stats.active_time_seconds || 0)}
                 </div>
               </div>
@@ -118,25 +118,25 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
                   <Sparkles className="w-3 h-3 text-cyan-400" />
                   <span>KI-Dialoge</span>
                 </div>
-                <div className="text-xs font-bold text-primary font-mono">
+                <div className="text-xs font-semibold text-primary font-mono">
                   {formatHours(stats.categories?.ai_chat || stats.active_time_by_category?.ai_chat || 0)}
                 </div>
               </div>
               <div className="bg-surface-container-high/40 p-2 rounded-lg border border-outline-variant/20 text-center">
                 <div className="flex items-center justify-center gap-1 text-[11px] text-on-surface-variant mb-0.5">
                   <Award className="w-3 h-3 text-amber-400" />
-                  <span>Server-Admin</span>
+                  <span>Administration</span>
                 </div>
-                <div className="text-xs font-bold text-primary font-mono">
+                <div className="text-xs font-semibold text-primary font-mono">
                   {formatHours(stats.categories?.server_admin || stats.active_time_by_category?.server_admin || 0)}
                 </div>
               </div>
               <div className="bg-surface-container-high/40 p-2 rounded-lg border border-outline-variant/20 text-center">
                 <div className="flex items-center justify-center gap-1 text-[11px] text-on-surface-variant mb-0.5">
                   <Flame className="w-3 h-3 text-rose-400" />
-                  <span>Terminal / Befehle</span>
+                  <span>Befehle</span>
                 </div>
-                <div className="text-xs font-bold text-primary font-mono">
+                <div className="text-xs font-semibold text-primary font-mono">
                   {formatHours(stats.categories?.command_exec || stats.active_time_by_category?.command_exec || 0)}
                 </div>
               </div>
@@ -212,7 +212,7 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
                     </span>
                     {isRare && (
                       <Badge variant="warning" className="text-[10px] uppercase tracking-wider py-0 px-1.5 font-bold">
-                        💎 Selten
+                        Selten
                       </Badge>
                     )}
                   </div>

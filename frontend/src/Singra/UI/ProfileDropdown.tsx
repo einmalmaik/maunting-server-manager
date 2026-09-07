@@ -50,6 +50,7 @@ export function ProfileDropdown({
   const initialAlign = placement.endsWith('right') ? 'right' : 'left'
   const [computedPlacement, setComputedPlacement] = useState<'top' | 'bottom'>(initialPlacement)
   const [computedAlign, setComputedAlign] = useState<'left' | 'right'>(initialAlign)
+  const [computedMaxHeight, setComputedMaxHeight] = useState<number>(480)
 
   const updatePosition = useCallback(() => {
     if (!containerRef.current) return
@@ -58,32 +59,52 @@ export function ProfileDropdown({
     if (rect.width === 0 && rect.height === 0 && rect.top === 0 && rect.bottom === 0) {
       setComputedPlacement(initialPlacement)
       setComputedAlign(initialAlign)
+      setComputedMaxHeight(480)
       return
     }
 
     const spaceBelow = window.innerHeight - rect.bottom
     const spaceAbove = rect.top
-    const spaceRight = window.innerWidth - rect.right
-    const spaceLeft = rect.left
+    const totalSpaceToRightFromLeft = window.innerWidth - rect.left
+    const totalSpaceToLeftFromRight = rect.right
 
-    // Vertical collision detection (dropdown height ~320px)
-    if (placement.startsWith('top') || (spaceAbove >= 320 && spaceBelow < 320)) {
-      setComputedPlacement('top')
-    } else if (spaceBelow < 320 && spaceAbove > spaceBelow) {
-      setComputedPlacement('top')
+    // Vertical collision detection (dropdown height ~300px)
+    let chosenPlacement: 'top' | 'bottom' = 'bottom'
+    if (placement.startsWith('top')) {
+      if (spaceAbove >= 200 || spaceAbove >= spaceBelow) {
+        chosenPlacement = 'top'
+      } else {
+        chosenPlacement = 'bottom'
+      }
     } else {
-      setComputedPlacement('bottom')
+      if (spaceBelow >= 200 || spaceBelow >= spaceAbove) {
+        chosenPlacement = 'bottom'
+      } else {
+        chosenPlacement = 'top'
+      }
     }
+    setComputedPlacement(chosenPlacement)
+
+    const availableHeight = chosenPlacement === 'top' ? spaceAbove - 16 : spaceBelow - 16
+    setComputedMaxHeight(Math.max(120, Math.min(Math.floor(availableHeight), window.innerHeight - 32)))
 
     // Horizontal collision detection (dropdown width ~260px)
-    if (placement.endsWith('left') && spaceLeft >= 260) {
-      setComputedAlign('left')
-    } else if (placement.endsWith('right') && spaceRight >= 260) {
-      setComputedAlign('right')
-    } else if (spaceRight < 260 && spaceLeft >= spaceRight) {
-      setComputedAlign('right')
+    if (placement.endsWith('right')) {
+      // Default: align right edge of dropdown with right edge of trigger (right-0).
+      // Needs space to the left of trigger's right edge.
+      if (totalSpaceToLeftFromRight >= 260 || totalSpaceToLeftFromRight >= totalSpaceToRightFromLeft) {
+        setComputedAlign('right')
+      } else {
+        setComputedAlign('left')
+      }
     } else {
-      setComputedAlign('left')
+      // Default: align left edge of dropdown with left edge of trigger (left-0).
+      // Needs space to the right of trigger's left edge.
+      if (totalSpaceToRightFromLeft >= 260 || totalSpaceToRightFromLeft >= totalSpaceToLeftFromRight) {
+        setComputedAlign('left')
+      } else {
+        setComputedAlign('right')
+      }
     }
   }, [placement, initialPlacement, initialAlign])
 
@@ -145,7 +166,7 @@ export function ProfileDropdown({
 
   return (
     <div
-      className={`relative inline-block text-left ${triggerVariant === 'full' ? 'w-full flex-1 min-w-0' : ''} ${className}`}
+      className={`relative inline-block text-left shrink-0 ${triggerVariant === 'full' ? 'w-full flex-1 min-w-0' : ''} ${className}`}
       ref={containerRef}
     >
       {/* Trigger Button */}
@@ -203,7 +224,8 @@ export function ProfileDropdown({
       {isOpen && (
         <div
           role="menu"
-          className={`absolute w-64 overflow-hidden rounded-2xl border border-outline-variant bg-surface-container-high shadow-2xl z-50 animate-fade-in ${placementClass} ${alignClass}`}
+          style={{ maxHeight: `${computedMaxHeight}px` }}
+          className={`absolute w-64 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-2xl border border-outline-variant bg-surface-container-high shadow-2xl z-50 animate-fade-in ${placementClass} ${alignClass}`}
         >
           {/* Header mit Avatar & Benutzername & Statusumschalter */}
           <div className="border-b border-outline-variant/30 p-3.5 bg-surface-container">

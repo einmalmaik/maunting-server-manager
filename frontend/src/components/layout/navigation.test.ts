@@ -218,7 +218,7 @@ describe('buildNavigation', () => {
     expect(routes).toContain('/docs')
   })
 
-  it('blendet Social & Hub aus, wenn socialEnabled false ist', () => {
+  it('zeigt Social & Hub nicht mehr, sondern den neuen Chat in der primären Sidebar-Navigation', () => {
     const access = {
       owner: true,
       canManageUsers: true,
@@ -230,12 +230,15 @@ describe('buildNavigation', () => {
       canViewNodes: true,
       canUseAi: true,
       canUseSkills: true,
-      socialEnabled: false,
+      socialEnabled: true,
     }
     const items = buildNavigation(labels, access)
+    // Social Hub ist aus der Haupt-Sidebar entfernt und in Profil/Dock verlegt
     expect(items.some((i) => i.to === '/social')).toBe(false)
+    // /chat ersetzt die alte Route in der Navigation
+    expect(items.some((i) => i.to === '/chat')).toBe(true)
 
-    const enabledItems = buildNavigation(labels, { ...access, socialEnabled: true })
-    expect(enabledItems.some((i) => i.to === '/social')).toBe(true)
+    const disabledItems = buildNavigation(labels, { ...access, socialEnabled: false })
+    expect(disabledItems.some((i) => i.to === '/chat')).toBe(false)
   })
 })

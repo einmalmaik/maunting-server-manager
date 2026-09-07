@@ -6,18 +6,20 @@ import { useAuthStore } from '@/stores/authStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { useIsOnline } from '@/hooks/useIsOnline'
 import { Logo } from '@/components/Logo'
-import { LogOut, Plus, Trophy, User as UserIcon, X } from 'lucide-react'
+import { LogOut, Plus, User as UserIcon, X } from 'lucide-react'
 import { buildNavigation, type NavGroupName } from './navigation'
 import { DesktopAppDownloadBadge } from './DesktopAppDownloadBadge'
 import { BenachrichtigungsGlocke, ProfileDropdown, type ProfileDropdownItem } from '@/Singra/UI'
-import { usePresenceAndActivity } from '@/hooks/usePresenceAndActivity'
+import { usePresenceAndActivity, type PresenceStatus } from '@/hooks/usePresenceAndActivity'
 
 interface SidebarProps {
   mobile?: boolean
   onNavigate?: () => void
+  presenceStatus?: PresenceStatus
+  onPresenceChange?: (status: PresenceStatus) => void
 }
 
-export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
+export function Sidebar({ mobile = false, onNavigate, presenceStatus: propPresenceStatus, onPresenceChange }: SidebarProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { user, logout } = useAuthStore()
@@ -63,7 +65,9 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
   const [calendarEnabled, setCalendarEnabled] = useState(true)
   const [notesEnabled, setNotesEnabled] = useState(true)
   const [socialEnabled, setSocialEnabled] = useState(true)
-  const { status: presenceStatus, changeStatus: handlePresenceChange } = usePresenceAndActivity(socialEnabled, !mobile)
+  const localPresence = usePresenceAndActivity(socialEnabled, !propPresenceStatus && !mobile)
+  const presenceStatus = propPresenceStatus ?? localPresence.status
+  const handlePresenceChange = onPresenceChange ?? localPresence.changeStatus
 
   useEffect(() => {
     api<{ calendar_enabled?: boolean; notes_enabled?: boolean; social_enabled?: boolean }>('/settings/public')
@@ -99,15 +103,6 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
       icon: <UserIcon className="h-4 w-4" />,
       onClick: handleNavigateProfile,
     },
-    ...(socialEnabled ? [{
-      key: 'social',
-      label: t('nav.social', 'Social & Hub'),
-      icon: <Trophy className="h-4 w-4 text-amber-400" />,
-      onClick: () => {
-        if (onNavigate) onNavigate()
-        navigate('/social')
-      },
-    }] : []),
     {
       key: 'logout',
       label: t('nav.logout', 'Abmelden'),
@@ -119,7 +114,7 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
 
   const navItems = buildNavigation({
     dashboard: t('nav.dashboard'), calendar: t('nav.calendar', 'Kalender'), notes: t('nav.notes', 'Notizen'),
-    social: t('nav.social', 'Social & Hub'),
+    chat: t('nav.chat', 'Chat'),
     servers: t('nav.servers'), users: t('nav.users'), roles: t('nav.roles'),
     teams: t('nav.teams'),
     audit: t('nav.audit', 'Audit'),
@@ -145,7 +140,7 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
       className={`msm-sidebar fixed left-0 top-0 z-40 flex flex-col ${mobile ? 'h-[100dvh] w-full !bg-surface-container-low animate-[slideIn_.18s_ease-out]' : 'hidden h-screen w-64 lg:flex'}`}
     >
       {/* Brand */}
-      <div className="px-5 pt-5 pb-6 flex items-center gap-3">
+      <div className="px-5 pt-5 pb-6 flex items-center gap-3 shrink-0">
         <Logo size="md" />
         <div>
           <h1 className="font-headline text-body-lg font-extrabold text-primary leading-tight">
@@ -157,7 +152,7 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
 
       {/* Create Server Button — nur wenn `servers.create` (Owner-Bypass via Hook) und online. */}
       {canCreateServer && isOnline && (
-        <div className="px-4 mb-6">
+        <div className="px-4 mb-6 shrink-0">
           <NavLink
             to="/servers"
             onClick={onNavigate}
@@ -185,10 +180,12 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
       </nav>
 
       {/* Desktop App Download Badge */}
-      <DesktopAppDownloadBadge />
+      <div className="shrink-0">
+        <DesktopAppDownloadBadge />
+      </div>
 
       {/* Discord-style Footer: User Profile & Notification Bell */}
-      <div className="relative mt-auto border-t border-outline-variant/30 bg-surface-container-low/80 p-2">
+      <div className="relative mt-auto border-t border-outline-variant/30 bg-surface-container-low/80 p-2 shrink-0">
         <div className="flex items-center justify-between gap-1.5">
           <ProfileDropdown
             user={user}

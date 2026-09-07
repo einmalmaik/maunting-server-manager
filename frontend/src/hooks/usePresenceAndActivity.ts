@@ -33,8 +33,8 @@ function getPresenceForRoute(pathname: string): { label: string; detail: string;
   if (pathname.startsWith('/servers')) {
     return { label: 'Server-Übersicht', detail: 'Infrastruktur', category: 'server_admin' }
   }
-  if (pathname.startsWith('/social')) {
-    return { label: 'Im Social Hub', detail: 'Errungenschaften & Freunde', category: 'general' }
+  if (pathname.startsWith('/chat') || pathname.startsWith('/social')) {
+    return { label: 'Im Chat', detail: 'Messenger', category: 'general' }
   }
   if (pathname.startsWith('/calendar')) {
     return { label: 'Im Kalender', detail: 'Termine & Aufgaben', category: 'general' }
@@ -61,9 +61,19 @@ export function usePresenceAndActivity(
   const activeCategoryRef = useRef<string>('general')
   const lastInteractionTimeRef = useRef<number>(Date.now())
 
+  const manualStatusRef = useRef<PresenceStatus>('online')
+  const isAutoAwayRef = useRef<boolean>(false)
+  const pathnameRef = useRef<string>(location.pathname)
+
+  useEffect(() => {
+    pathnameRef.current = location.pathname
+  }, [location.pathname])
+
   // Presence status updater
   const changeStatus = useCallback(
     async (newStatus: PresenceStatus) => {
+      manualStatusRef.current = newStatus
+      isAutoAwayRef.current = false
       setStatus(newStatus)
       if (!socialEnabled || !user) return
       try {
@@ -99,23 +109,90 @@ export function usePresenceAndActivity(
     }
   }, [location.pathname, socialEnabled, user, status])
 
-  // Active interaction tracker (Playtime)
+  // Active interaction tracker & Automatic Inactivity (Away) Detection
   useEffect(() => {
     if (!socialEnabled || !enableActivityTracking || !user) return
 
+    const INACTIVITY_TIMEOUT_MS = 300000 // 5 minutes idle
+
     const registerActivity = () => {
-      lastInteractionTimeRef.current = Date.now()
+      const now = Date.now()
+      lastInteractionTimeRef.current = now
+
+      // If user was set to 'away' due to automatic inactivity, restore to 'online'
+      if (isAutoAwayRef.current && manualStatusRef.current === 'online') {
+        isAutoAwayRef.current = false
+        setStatus('online')
+        const routeInfo = getPresenceForRoute(pathnameRef.current)
+        updatePresence({
+          status: 'online',
+          device_type: deviceTypeRef.current,
+          activity_label: routeInfo.label,
+          activity_detail: routeInfo.detail,
+        }).catch(() => {})
+      }
+    }
+
+    let lastMoveTime = 0
+    const handlePointerMove = () => {
+      const now = Date.now()
+      if (now - lastMoveTime > 3000) {
+        lastMoveTime = now
+        registerActivity()
+      }
     }
 
     window.addEventListener('pointerdown', registerActivity, { passive: true })
     window.addEventListener('keydown', registerActivity, { passive: true })
     window.addEventListener('wheel', registerActivity, { passive: true })
+    window.addEventListener('touchstart', registerActivity, { passive: true })
+    window.addEventListener('pointermove', handlePointerMove, { passive: true })
 
-    // Accumulate seconds when user was active within last 45 seconds
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        // Tab / window hidden: trigger away if user was online
+        if (manualStatusRef.current === 'online' && !isAutoAwayRef.current) {
+          isAutoAwayRef.current = true
+          setStatus('away')
+          const routeInfo = getPresenceForRoute(pathnameRef.current)
+          updatePresence({
+            status: 'away',
+            device_type: deviceTypeRef.current,
+            activity_label: routeInfo.label,
+            activity_detail: routeInfo.detail,
+          }).catch(() => {})
+        }
+      } else {
+        registerActivity()
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    // Ticker to check inactivity and accumulate active seconds
     const ticker = setInterval(() => {
-      if (document.hidden) return
       const now = Date.now()
-      const isRecentlyActive = now - lastInteractionTimeRef.current < 45000
+      const idleTime = now - lastInteractionTimeRef.current
+
+      // Check auto-away condition (5 minutes of no user input)
+      if (
+        idleTime >= INACTIVITY_TIMEOUT_MS &&
+        manualStatusRef.current === 'online' &&
+        !isAutoAwayRef.current
+      ) {
+        isAutoAwayRef.current = true
+        setStatus('away')
+        const routeInfo = getPresenceForRoute(pathnameRef.current)
+        updatePresence({
+          status: 'away',
+          device_type: deviceTypeRef.current,
+          activity_label: routeInfo.label,
+          activity_detail: routeInfo.detail,
+        }).catch(() => {})
+      }
+
+      if (document.hidden) return
+      const isRecentlyActive = idleTime < 45000
 
       if (isRecentlyActive) {
         activeSecondsRef.current += 1
@@ -134,6 +211,9 @@ export function usePresenceAndActivity(
       window.removeEventListener('pointerdown', registerActivity)
       window.removeEventListener('keydown', registerActivity)
       window.removeEventListener('wheel', registerActivity)
+      window.removeEventListener('touchstart', registerActivity)
+      window.removeEventListener('pointermove', handlePointerMove)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
       clearInterval(ticker)
       // Flush remaining active seconds
       if (activeSecondsRef.current >= 10) {

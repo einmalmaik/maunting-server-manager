@@ -1,9 +1,10 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
-import { Mail, AlertTriangle, Clock, Globe, MapPin, Save, ShieldCheck, Trash2, Camera, Loader2 } from 'lucide-react'
+import { Mail, AlertTriangle, Clock, Globe, MapPin, Save, ShieldCheck, Trash2, Camera, Loader2, Shield } from 'lucide-react'
 import { Avatar, Button, Dropdown, type DropdownOption } from '@/Singra/UI'
 import { api } from '@/api/client'
+import { updatePrivacy } from '@/api/social'
 import { toast } from '@/stores/toastStore'
 
 import { getAvailableTimezones } from '@/utils/timeFormat'
@@ -73,6 +74,41 @@ export function AccountTab() {
   const [dismissedBrowserHint, setDismissedBrowserHint] = useState(false)
   const [savingLocationSharing, setSavingLocationSharing] = useState(false)
   const [locationSharingError, setLocationSharingError] = useState<string | null>(null)
+
+  const [privacyLevel, setPrivacyLevel] = useState<'public' | 'friends' | 'private'>(
+    (user?.social_privacy as 'public' | 'friends' | 'private') || 'friends'
+  )
+  const [savingPrivacy, setSavingPrivacy] = useState(false)
+
+  useEffect(() => {
+    if (user?.social_privacy) {
+      setPrivacyLevel(user.social_privacy as 'public' | 'friends' | 'private')
+    }
+  }, [user?.social_privacy])
+
+  const handleSavePrivacy = async (levelToSave?: 'public' | 'friends' | 'private') => {
+    const level = levelToSave || privacyLevel
+    setSavingPrivacy(true)
+    try {
+      const res = await updatePrivacy({ privacy: level })
+      const validPrivacy = (res.social_privacy === 'public' || res.social_privacy === 'friends' || res.social_privacy === 'private')
+        ? res.social_privacy
+        : level
+      updateUser({ social_privacy: validPrivacy })
+      setPrivacyLevel(validPrivacy)
+      toast.success(t('profile.privacySaved', 'Privatsphäre-Einstellungen gespeichert.'))
+    } catch {
+      toast.error(t('profile.privacySaveFailed', 'Einstellungen konnten nicht gespeichert werden.'))
+    } finally {
+      setSavingPrivacy(false)
+    }
+  }
+
+  const privacyOptions: DropdownOption[] = [
+    { value: 'friends', label: 'Nur Freunde (Status für Kontakte)' },
+    { value: 'public', label: 'Öffentlich (Status für alle Panel-Benutzer)' },
+    { value: 'private', label: 'Privat (Unsichtbar / Status verborgen)' },
+  ]
 
   useEffect(() => {
     if (user?.time_zone) {
@@ -369,6 +405,49 @@ export function AccountTab() {
                 ? t('profile.locationSharingDisable', 'Standortfreigabe deaktivieren')
                 : t('profile.locationSharingEnable', 'Standortfreigabe aktivieren')}
           </Button>
+        </div>
+      </section>
+
+      {/* Privatsphäre & Sichtbarkeit */}
+      <section className="msm-card p-6" aria-labelledby="privacy-settings-title">
+        <div className="flex items-center gap-2 mb-4">
+          <Shield className="h-5 w-5 text-secondary" aria-hidden="true" />
+          <h2 id="privacy-settings-title" className="font-headline text-lg font-semibold text-on-surface">
+            {t('profile.privacyTitle', 'Privatsphäre & Sichtbarkeit')}
+          </h2>
+        </div>
+        <p className="max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant mb-4">
+          {t('profile.privacyDescription', 'Bestimme, wer deinen Online-Status und deine Aktivitäten im System sehen kann.')}
+        </p>
+
+        <div className="max-w-md space-y-4">
+          <div>
+            <label
+              htmlFor="profile-privacy-dropdown"
+              className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider"
+            >
+              {t('profile.privacyVisibility', 'Profil-Sichtbarkeit')}
+            </label>
+            <Dropdown
+              id="profile-privacy-dropdown"
+              value={privacyLevel}
+              onChange={(val: string) => {
+                const next = val as 'public' | 'friends' | 'private'
+                setPrivacyLevel(next)
+                void handleSavePrivacy(next)
+              }}
+              options={privacyOptions}
+              disabled={savingPrivacy}
+              aria-label={t('profile.privacyVisibility', 'Profil-Sichtbarkeit')}
+            />
+          </div>
+          <p className="text-xs text-on-surface-variant/70">
+            {privacyLevel === 'private'
+              ? 'Im privaten Modus wird dein Status für andere als offline angezeigt.'
+              : privacyLevel === 'friends'
+              ? 'Nur bestätigte Freunde sehen dein Gerät und deinen aktuellen Status.'
+              : 'Jedes Mitglied im Panel kann deinen Status sehen.'}
+          </p>
         </div>
       </section>
     </div>

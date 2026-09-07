@@ -1,12 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Button,
   Input,
-  Badge,
   Dialog,
   DialogContent,
+  Avatar,
 } from '@/Singra/UI'
-import { ShieldCheck, Send, RefreshCw, Lock } from 'lucide-react'
+import {
+  Send,
+  RefreshCw,
+  Lock,
+  Camera,
+  StickyNote,
+  Calendar as CalendarIcon,
+  ExternalLink,
+  X,
+  Clock,
+  MapPin,
+} from 'lucide-react'
 import { DeviceBadge } from './DeviceBadge'
 import { StatusDot } from './StatusIndicator'
 import {
@@ -16,6 +28,9 @@ import {
   getE2eePublicKey,
   setE2eePublicKey,
 } from '@/api/social'
+import { loadNotesOfflineFirst, loadCalendarEventsOfflineFirst } from '@/lib/offlineSync'
+import type { NoteItem } from '@/pages/Notes'
+import type { CalendarEventItem } from '@/pages/Calendar'
 import {
   deriveBlindMailboxId,
   encryptE2eeMessage,
@@ -34,14 +49,38 @@ interface E2EEChatModalProps {
   friend: FriendItem | null
 }
 
+interface NoteAttachment {
+  title: string
+  content: string
+  color?: string
+  category?: string
+}
+
+interface CalendarAttachment {
+  title: string
+  start: string
+  end: string
+  description?: string
+  location?: string
+}
+
+interface ImageAttachment {
+  dataUrl: string
+  name?: string
+}
+
 interface DecryptedMessage {
   id: number
   text: string
   createdAt: string
   isSelf: boolean
+  noteAttachment?: NoteAttachment
+  calendarAttachment?: CalendarAttachment
+  imageAttachment?: ImageAttachment
 }
 
 export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2EEChatModalProps) {
+  const navigate = useNavigate()
   const [messages, setMessages] = useState<DecryptedMessage[]>([])
   const [inputText, setInputText] = useState('')
   const [loading, setLoading] = useState(false)
@@ -50,6 +89,14 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
   const [localKeyPair, setLocalKeyPair] = useState<LocalE2eeKeyPair | null>(null)
   const [recipientPublicKeyJwk, setRecipientPublicKeyJwk] = useState<string | null>(null)
 
+  // Attachments
+  const [isNotePickerOpen, setIsNotePickerOpen] = useState(false)
+  const [userNotes, setUserNotes] = useState<NoteItem[]>([])
+  const [isCalendarPickerOpen, setIsCalendarPickerOpen] = useState(false)
+  const [userEvents, setUserEvents] = useState<CalendarEventItem[]>([])
+  const [selectedImage, setSelectedImage] = useState<ImageAttachment | null>(null)
+
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const justSentRef = useRef<boolean>(false)
@@ -131,15 +178,20 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
 
           let text = plain
           let isSelf = false
+          let noteAttachment: NoteAttachment | undefined = undefined
+          let calendarAttachment: CalendarAttachment | undefined = undefined
+          let imageAttachment: ImageAttachment | undefined = undefined
 
           try {
             const parsed = JSON.parse(plain)
-            if (typeof parsed === 'object' && parsed !== null && 'text' in parsed) {
-              text = parsed.text
+            if (typeof parsed === 'object' && parsed !== null) {
+              text = parsed.text || ''
               isSelf = parsed.sender_id === currentUserId
+              if (parsed.note_attachment) noteAttachment = parsed.note_attachment
+              if (parsed.calendar_attachment) calendarAttachment = parsed.calendar_attachment
+              if (parsed.image_attachment) imageAttachment = parsed.image_attachment
             }
           } catch {
-            // Backward-compatibility: legacy tagged messages
             if (plain.startsWith('[ME]:')) {
               text = plain.replace('[ME]:', '')
               isSelf = true
@@ -151,12 +203,14 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
             text,
             createdAt: env.created_at,
             isSelf,
+            noteAttachment,
+            calendarAttachment,
+            imageAttachment,
           })
         } catch {
-          // If decryption fails, maintain zero-knowledge and render protected placeholder
           decryptedList.push({
             id: env.id,
-            text: '🔒 [Verschlüsselte Nachricht]',
+            text: '[Verschlüsselte Nachricht]',
             createdAt: env.created_at,
             isSelf: false,
           })
@@ -165,7 +219,7 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
 
       setMessages(decryptedList)
     } catch {
-      // Offline / network error
+      // Offline fallback
     } finally {
       setLoading(false)
     }
@@ -174,35 +228,54 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
   useEffect(() => {
     if (open && blindMailboxId) {
       loadMessages()
-      const interval = setInterval(loadMessages, 5000)
+      const interval = setInterval(loadMessages, 4000)
       return () => clearInterval(interval)
     }
   }, [open, blindMailboxId, localKeyPair])
 
-  // Autoscroll: only scroll down if just sent or already scrolled near bottom (<100px)
+  // Autoscroll
   useEffect(() => {
     const container = scrollContainerRef.current
     if (!container) return
 
     const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100
     if (justSentRef.current || isNearBottom) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+      messagesEndRef.current?.scrollIntoView?.({ behavior: 'smooth' })
       justSentRef.current = false
     }
   }, [messages])
 
-  const handleSend = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    if (!inputText.trim() || !friend || !blindMailboxId || !currentUserId || !targetUserId || sending) return
+  const handleSend = async (
+    customText?: string,
+    note?: NoteAttachment,
+    cal?: CalendarAttachment,
+    img?: ImageAttachment
+  ) => {
+    const rawMessage = customText !== undefined ? customText : inputText.trim()
+    if (
+      (!rawMessage && !note && !cal && !img) ||
+      !friend ||
+      !blindMailboxId ||
+      !currentUserId ||
+      !targetUserId ||
+      sending
+    ) {
+      return
+    }
 
-    const rawMessage = inputText.trim()
     setSending(true)
     try {
-      const payload = JSON.stringify({
+      const payloadObj: Record<string, unknown> = {
         sender_id: currentUserId,
         text: rawMessage,
         timestamp: new Date().toISOString(),
-      })
+      }
+
+      if (note) payloadObj.note_attachment = note
+      if (cal) payloadObj.calendar_attachment = cal
+      if (img) payloadObj.image_attachment = img
+
+      const payload = JSON.stringify(payloadObj)
 
       let ciphertext: string
       if (recipientPublicKeyJwk && localKeyPair) {
@@ -218,6 +291,7 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
       })
 
       setInputText('')
+      setSelectedImage(null)
       justSentRef.current = true
       await loadMessages()
     } catch (err: unknown) {
@@ -228,48 +302,97 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
     }
   }
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      toast.error('Bitte ein Bild auswählen.')
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string
+      if (dataUrl) {
+        setSelectedImage({ dataUrl, name: file.name })
+      }
+    }
+    reader.readAsDataURL(file)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const handleOpenNotes = async () => {
+    try {
+      const res = await loadNotesOfflineFirst()
+      setUserNotes(res.notes.filter((n) => !n.is_archived))
+      setIsNotePickerOpen(true)
+    } catch {
+      toast.error('Notizen konnten nicht geladen werden.')
+    }
+  }
+
+  const handleOpenCalendar = async () => {
+    try {
+      const now = new Date()
+      const start = new Date(now.getTime() - 30 * 86400000).toISOString()
+      const end = new Date(now.getTime() + 90 * 86400000).toISOString()
+      const res = await loadCalendarEventsOfflineFirst(start, end)
+      setUserEvents(res.events)
+      setIsCalendarPickerOpen(true)
+    } catch {
+      toast.error('Kalendereinträge konnten nicht geladen werden.')
+    }
+  }
+
   if (!friend) return null
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl h-[600px] p-0 flex flex-col" showCloseButton>
         {/* Header */}
-        <div className="p-4 border-b border-outline-variant/30 bg-surface-container flex items-center justify-between pr-12">
-          <div className="flex items-center gap-3">
-            <div className="relative">
-              <div className="w-10 h-10 rounded-full bg-primary/15 flex items-center justify-center font-bold text-primary">
-                {friend.username.slice(0, 2).toUpperCase()}
-              </div>
+        <div className="p-3.5 border-b border-outline-variant/30 bg-surface-container flex items-center justify-between pr-12">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="relative shrink-0">
+              <Avatar src={friend.avatar_url} name={friend.username} size="sm" />
               <StatusDot
                 status={friend.presence?.status || 'invisible'}
                 size="sm"
                 className="absolute bottom-0 right-0"
               />
             </div>
-            <div>
-              <div className="font-headline text-body-md font-bold text-primary flex items-center gap-2">
+            <div className="min-w-0">
+              <div className="font-headline text-body-sm font-bold text-primary flex items-center gap-2 truncate">
                 <span>{friend.username}</span>
                 <DeviceBadge deviceType={friend.presence?.device_type} />
               </div>
-              <div className="font-body text-xs text-on-surface-variant flex items-center gap-1.5 mt-0.5">
+              <div className="font-body text-[11px] text-on-surface-variant flex items-center gap-1 mt-0.5">
                 <Lock className="w-3 h-3 text-emerald-400" />
-                <span>Zero-Knowledge E2EE (@msdis/shield)</span>
+                <span>Ende-zu-Ende verschlüsselt</span>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Badge variant="success" className="text-[10px] uppercase tracking-wider gap-1 hidden sm:flex">
-              <ShieldCheck className="w-3 h-3" />
-              DIS Verifiziert
-            </Badge>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                onOpenChange(false)
+                navigate(`/chat?userId=${targetUserId}`)
+              }}
+              title="Im großen Chatraum öffnen"
+              aria-label="Im großen Chatraum öffnen"
+              className="p-1 h-7 w-7 text-on-surface-variant hover:text-primary"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+            </Button>
             <Button
               variant="ghost"
               size="icon"
               onClick={() => void loadMessages()}
               disabled={loading}
               aria-label="Nachrichten aktualisieren"
-              className="p-1.5 h-8 w-8"
+              className="p-1 h-7 w-7"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             </Button>
@@ -279,18 +402,19 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
         {/* Message Thread */}
         <div
           ref={scrollContainerRef}
-          className="flex-1 overflow-y-auto p-4 space-y-3 bg-surface-container-lowest/50"
+          className="flex-1 overflow-y-auto p-4 space-y-3 bg-surface-container-lowest/40"
         >
-          <div className="p-2.5 rounded-lg bg-surface-container-high/40 border border-outline-variant/20 text-center">
-            <p className="text-[11px] text-on-surface-variant/90 leading-relaxed">
-              🛡️ <strong>Ende-zu-Ende verschlüsselt:</strong> Nachrichten werden auf Ihrem Gerät mit modernster
-              DIS-Kryptographie versiegelt. Der MSM-Server fungiert als blinder Relais und hat keinen Zugriff auf Klartexte oder private Schlüssel.
-            </p>
+          {/* Subtle WhatsApp-style encryption indicator */}
+          <div className="py-1 text-center">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high/60 border border-outline-variant/30 text-[11px] text-on-surface-variant">
+              <Lock className="w-3 h-3 text-emerald-400" />
+              <span>Nachrichten in diesem Chat sind Ende-zu-Ende verschlüsselt.</span>
+            </div>
           </div>
 
           {messages.length === 0 && !loading && (
             <div className="py-16 text-center text-on-surface-variant/70 text-xs">
-              Keine Nachrichten im Tresor. Schreiben Sie die erste verschlüsselte Nachricht!
+              Keine Nachrichten. Schreibe die erste Nachricht!
             </div>
           )}
 
@@ -300,14 +424,74 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
               className={`flex flex-col ${msg.isSelf ? 'items-end' : 'items-start'}`}
             >
               <div
-                className={`max-w-[75%] px-3.5 py-2.5 rounded-2xl text-xs break-words shadow-sm ${
+                className={`max-w-[75%] px-3.5 py-2.5 rounded-2xl text-xs break-words shadow-sm space-y-1.5 ${
                   msg.isSelf
                     ? 'bg-primary text-on-primary rounded-br-xs'
                     : 'bg-surface-container-high text-on-surface rounded-bl-xs border border-outline-variant/20'
                 }`}
               >
-                {msg.text}
+                {/* Image */}
+                {msg.imageAttachment && (
+                  <img
+                    src={msg.imageAttachment.dataUrl}
+                    alt="Anhang"
+                    className="max-h-48 w-auto object-cover rounded-lg my-1"
+                  />
+                )}
+
+                {/* Note Attachment */}
+                {msg.noteAttachment && (
+                  <div
+                    className={`p-2 rounded-lg border text-xs ${
+                      msg.isSelf
+                        ? 'bg-white/10 border-white/20 text-white'
+                        : 'bg-surface-container-low border-outline-variant/30 text-on-surface'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 font-bold mb-0.5 text-[11px]">
+                      <StickyNote className="w-3.5 h-3.5 text-amber-400" />
+                      <span>{msg.noteAttachment.title}</span>
+                    </div>
+                    <p className="whitespace-pre-wrap text-[11px] opacity-90 line-clamp-3">
+                      {msg.noteAttachment.content}
+                    </p>
+                  </div>
+                )}
+
+                {/* Calendar Attachment */}
+                {msg.calendarAttachment && (
+                  <div
+                    className={`p-2 rounded-lg border text-xs ${
+                      msg.isSelf
+                        ? 'bg-white/10 border-white/20 text-white'
+                        : 'bg-surface-container-low border-outline-variant/30 text-on-surface'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 font-bold mb-0.5 text-[11px]">
+                      <CalendarIcon className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>{msg.calendarAttachment.title}</span>
+                    </div>
+                    <div className="text-[10px] opacity-80 flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      <span>
+                        {new Date(msg.calendarAttachment.start).toLocaleString([], {
+                          dateStyle: 'short',
+                          timeStyle: 'short',
+                        })}
+                      </span>
+                    </div>
+                    {msg.calendarAttachment.location && (
+                      <div className="text-[10px] opacity-80 flex items-center gap-1 mt-0.5">
+                        <MapPin className="w-3 h-3" />
+                        <span>{msg.calendarAttachment.location}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {msg.text && <p className="leading-relaxed">{msg.text}</p>}
               </div>
+
               <span className="text-[10px] text-on-surface-variant/50 mt-1 px-1">
                 {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </span>
@@ -316,26 +500,157 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
           <div ref={messagesEndRef} />
         </div>
 
+        {/* Staged Image */}
+        {selectedImage && (
+          <div className="px-3 py-1.5 border-t border-outline-variant/20 bg-surface-container flex items-center gap-2">
+            <img src={selectedImage.dataUrl} alt="Vorschau" className="w-8 h-8 object-cover rounded" />
+            <span className="text-xs text-on-surface-variant truncate flex-1">Foto angehängt</span>
+            <button
+              type="button"
+              onClick={() => setSelectedImage(null)}
+              className="p-1 text-on-surface-variant hover:text-on-surface"
+              aria-label="Entfernen"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
         {/* Footer Input */}
-        <form onSubmit={handleSend} className="p-3 border-t border-outline-variant/30 bg-surface-container-low flex items-center gap-2">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            handleSend(inputText, undefined, undefined, selectedImage || undefined)
+          }}
+          className="p-2.5 border-t border-outline-variant/30 bg-surface-container-low flex items-center gap-1.5"
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={handleFileChange}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => fileInputRef.current?.click()}
+            className="h-7 w-7 p-0 text-on-surface-variant hover:text-primary"
+            title="Foto / Kamera"
+            aria-label="Foto / Kamera"
+          >
+            <Camera className="w-4 h-4" />
+          </Button>
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={handleOpenNotes}
+            className="h-7 w-7 p-0 text-on-surface-variant hover:text-amber-400"
+            title="Notiz teilen"
+            aria-label="Notiz teilen"
+          >
+            <StickyNote className="w-4 h-4" />
+          </Button>
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={handleOpenCalendar}
+            className="h-7 w-7 p-0 text-on-surface-variant hover:text-cyan-400"
+            title="Termin teilen"
+            aria-label="Termin teilen"
+          >
+            <CalendarIcon className="w-4 h-4" />
+          </Button>
+
           <Input
             value={inputText}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInputText(e.target.value)}
-            placeholder="Verschlüsselte Nachricht senden …"
-            className="flex-1 text-xs"
+            placeholder="Nachricht schreiben …"
+            className="flex-1 text-xs h-7.5"
             disabled={sending}
           />
+
           <Button
             type="submit"
-            disabled={!inputText.trim() || sending}
+            disabled={(!inputText.trim() && !selectedImage) || sending}
             size="sm"
-            className="gap-1.5 px-3.5"
+            className="gap-1 px-3 h-7.5 text-xs"
           >
             <Send className="w-3.5 h-3.5" />
             <span>Senden</span>
           </Button>
         </form>
       </DialogContent>
+
+      {/* Note Picker */}
+      <Dialog open={isNotePickerOpen} onOpenChange={setIsNotePickerOpen}>
+        <DialogContent className="max-w-md max-h-[60vh] flex flex-col p-4">
+          <div className="font-headline text-body-sm font-bold text-primary mb-2">
+            Notiz auswählen
+          </div>
+          <div className="flex-1 overflow-y-auto space-y-2">
+            {userNotes.length === 0 ? (
+              <p className="text-xs text-on-surface-variant/70 py-4 text-center">Keine Notizen.</p>
+            ) : (
+              userNotes.map((n) => (
+                <div
+                  key={n.id}
+                  onClick={() => {
+                    setIsNotePickerOpen(false)
+                    handleSend('', { title: n.title, content: n.content, color: n.color, category: n.category })
+                  }}
+                  className="p-2.5 rounded-lg border border-outline-variant/30 hover:border-primary/50 cursor-pointer text-xs"
+                >
+                  <div className="font-semibold text-primary">{n.title}</div>
+                  <p className="text-[11px] text-on-surface-variant line-clamp-2 mt-0.5">{n.content}</p>
+                </div>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Calendar Picker */}
+      <Dialog open={isCalendarPickerOpen} onOpenChange={setIsCalendarPickerOpen}>
+        <DialogContent className="max-w-md max-h-[60vh] flex flex-col p-4">
+          <div className="font-headline text-body-sm font-bold text-primary mb-2">
+            Termin auswählen
+          </div>
+          <div className="flex-1 overflow-y-auto space-y-2">
+            {userEvents.length === 0 ? (
+              <p className="text-xs text-on-surface-variant/70 py-4 text-center">Keine Termine.</p>
+            ) : (
+              userEvents.map((ev) => (
+                <div
+                  key={ev.event_id || ev.id}
+                  onClick={() => {
+                    setIsCalendarPickerOpen(false)
+                    handleSend('', undefined, {
+                      title: ev.title,
+                      start: ev.start,
+                      end: ev.end,
+                      description: ev.description,
+                      location: ev.location,
+                    })
+                  }}
+                  className="p-2.5 rounded-lg border border-outline-variant/30 hover:border-primary/50 cursor-pointer text-xs"
+                >
+                  <div className="font-semibold text-primary">{ev.title}</div>
+                  <div className="text-[10px] text-on-surface-variant mt-0.5">
+                    {new Date(ev.start).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   )
 }

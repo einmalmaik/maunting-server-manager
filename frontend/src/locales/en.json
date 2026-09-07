@@ -19,6 +19,7 @@
     "audit": "Audit",
     "ai": "AI Assistant",
     "teams": "Teams",
+    "chat": "Chat",
     "social": "Social & Hub"
   },
   "navGroups": {
@@ -3274,6 +3275,7 @@
     "subtitle": "Your Account",
     "tabs": {
       "account": "Account",
+      "social": "Friends & Milestones",
       "password": "Password",
       "2fa": "Two-Factor",
       "linked": "Linked Accounts",
@@ -3283,6 +3285,11 @@
       "credentials": "Credentials"
     },
     "email": "Email Address",
+    "privacyTitle": "Privacy & Visibility",
+    "privacyDescription": "Control who can see your online presence and activities in the system.",
+    "privacyVisibility": "Profile Visibility",
+    "privacySaved": "Privacy settings saved.",
+    "privacySaveFailed": "Failed to save privacy settings.",
     "uploadAvatar": "Upload profile picture",
     "changeAvatar": "Change profile picture",
     "removeAvatar": "Remove",

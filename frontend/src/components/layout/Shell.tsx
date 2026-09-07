@@ -7,13 +7,18 @@ import { AiRunNotice } from '@/components/ai/AiRunNotice'
 import { ServerIncidentNotifier } from '@/components/notifications/ServerIncidentNotifier'
 import { PanelPopupModal } from '@/components/popups/PanelPopupModal'
 import { FriendsListDock } from '@/components/social/FriendsListDock'
+import { Users } from 'lucide-react'
 import { api } from '@/api/client'
+import { usePresenceAndActivity } from '@/hooks/usePresenceAndActivity'
 
 export function Shell() {
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false)
   const [sidebarHidden, setSidebarHidden] = useState(false)
   const [socialEnabled, setSocialEnabled] = useState(true)
+  const [mobileDockOpen, setMobileDockOpen] = useState(false)
   const mobileNavigationTriggerRef = useRef<HTMLButtonElement>(null)
+
+  const { status: presenceStatus, changeStatus: handlePresenceChange } = usePresenceAndActivity(socialEnabled, true)
 
   useEffect(() => {
     api<{ social_enabled?: boolean }>('/settings/public')
@@ -62,6 +67,8 @@ export function Shell() {
 
   const location = useLocation()
   const isAiPage = location.pathname === '/ai' || location.pathname.startsWith('/ai')
+  const isChatPage = location.pathname === '/chat' || location.pathname.startsWith('/chat')
+  const isFullHeightPage = isAiPage || isChatPage
 
   return (
     // `overflow-x-clip` statt `overflow-x-hidden`: `hidden` auf einer Achse
@@ -70,12 +77,17 @@ export function Shell() {
     // — und jedes `position: sticky` darunter, allen voran `.msm-topbar`,
     // bekommt dadurch nie einen Versatz. `clip` klemmt den waagerechten
     // Überlauf genauso ab, erzeugt aber keinen Scroll-Container.
-    <div className={`bg-background text-on-surface flex relative overflow-x-clip ${isAiPage ? 'h-screen max-h-screen overflow-hidden' : 'min-h-screen'}`}>
+    <div className={`bg-background text-on-surface flex relative overflow-x-clip ${isFullHeightPage ? 'h-screen max-h-screen overflow-hidden' : 'min-h-screen'}`}>
       {/* Deep Grid Background */}
       <div className="absolute inset-0 msm-deep-grid opacity-30 pointer-events-none" />
 
       {/* Sidebar */}
-      {!sidebarHidden && <Sidebar />}
+      {!sidebarHidden && (
+        <Sidebar
+          presenceStatus={presenceStatus}
+          onPresenceChange={handlePresenceChange}
+        />
+      )}
 
       {mobileNavigationOpen && (
         <div className="fixed inset-0 z-50 h-[100dvh] w-screen overflow-hidden lg:hidden" role="presentation" data-testid="mobile-navigation-layer">
@@ -84,12 +96,17 @@ export function Shell() {
             aria-hidden="true"
             onClick={closeMobileNavigation}
           />
-          <Sidebar mobile onNavigate={closeMobileNavigation} />
+          <Sidebar
+            mobile
+            onNavigate={closeMobileNavigation}
+            presenceStatus={presenceStatus}
+            onPresenceChange={handlePresenceChange}
+          />
         </div>
       )}
 
       {/* Main Content Area */}
-      <div className={`flex-1 ${sidebarHidden ? 'ml-0' : 'lg:ml-64'} flex flex-col min-w-0 relative z-10 transition-all duration-300 ${isAiPage ? 'h-screen max-h-screen overflow-hidden' : ''}`}>
+      <div className={`flex-1 ${sidebarHidden ? 'ml-0' : 'lg:ml-64'} flex flex-col min-w-0 relative z-10 transition-all duration-300 ${isFullHeightPage ? 'h-screen max-h-screen overflow-hidden' : ''}`}>
         <Topbar menuButtonRef={mobileNavigationTriggerRef} onOpenNavigation={() => setMobileNavigationOpen(true)} />
         {/* Ohne `overflow-auto`: `main` hat als `flex-1` in einer Spalte ohne
             feste Höhe immer genau seine Inhaltshöhe, lief also nie über. Die
@@ -97,12 +114,12 @@ export function Shell() {
             Klebeelemente der Seiten (Reiterleiste, Inhaltsverzeichnisse)
             vergeblich ausgerichtet haben. Breite Inhalte bringen ihr eigenes
             `overflow-x-auto` mit. */}
-        <main className={`flex-1 relative flex flex-col min-h-0 ${isAiPage ? 'p-0 overflow-hidden h-[calc(100dvh-3rem)] max-h-[calc(100dvh-3rem)] lg:h-[100dvh] lg:max-h-[100dvh]' : 'p-margin-mobile md:p-margin-desktop'}`}>
-          <div className={`relative z-10 flex-1 w-full flex flex-col min-h-0 ${isAiPage ? 'h-full overflow-hidden' : ''}`}>
+        <main className={`flex-1 relative flex flex-col min-h-0 ${isFullHeightPage ? 'p-0 overflow-hidden h-[calc(100dvh-3rem)] max-h-[calc(100dvh-3rem)] lg:h-[100dvh] lg:max-h-[100dvh]' : 'p-margin-mobile md:p-margin-desktop'}`}>
+          <div className={`relative z-10 flex-1 w-full flex flex-col min-h-0 ${isFullHeightPage ? 'h-full overflow-hidden' : ''}`}>
             <Outlet />
           </div>
 
-          {!isAiPage && <VersionFooter />}
+          {!isFullHeightPage && <VersionFooter />}
         </main>
       </div>
 
@@ -112,11 +129,46 @@ export function Shell() {
           das tun, was nicht mehr noetig sein soll. */}
       <AiRunNotice />
 
-      {/* Floating Friends & Social Dock */}
-      {socialEnabled && !isAiPage && (
-        <div className="fixed bottom-4 right-6 z-30 hidden lg:block">
-          <FriendsListDock collapsedDefault={true} className="w-80 shadow-2xl" />
-        </div>
+      {/* Floating Friends & Social Dock (Desktop + Mobile) */}
+      {socialEnabled && !isFullHeightPage && (
+        <>
+          {/* Desktop Dock */}
+          <div className="fixed bottom-4 right-6 z-30 hidden lg:block">
+            <FriendsListDock collapsedDefault={true} className="w-80 shadow-2xl" />
+          </div>
+
+          {/* Mobile FAB Trigger */}
+          <div className="fixed bottom-4 right-4 z-30 lg:hidden">
+            {!mobileDockOpen && (
+              <button
+                type="button"
+                onClick={() => setMobileDockOpen(true)}
+                className="w-11 h-11 rounded-full bg-primary text-on-primary shadow-lg flex items-center justify-center hover:bg-primary/90 transition-transform active:scale-95"
+                aria-label="Kontakte & Chat öffnen"
+              >
+                <Users className="w-5 h-5" />
+              </button>
+            )}
+          </div>
+
+          {/* Mobile Dock Drawer / Layer */}
+          {mobileDockOpen && (
+            <div className="fixed inset-0 z-50 lg:hidden flex flex-col justify-end" role="dialog" aria-label="Kontakte & Chat">
+              <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-xs"
+                onClick={() => setMobileDockOpen(false)}
+                aria-hidden="true"
+              />
+              <div className="relative z-10 w-full max-h-[85dvh] p-2">
+                <FriendsListDock
+                  collapsedDefault={false}
+                  className="w-full shadow-2xl"
+                  onClose={() => setMobileDockOpen(false)}
+                />
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* Push- & Pop-up-Benachrichtigungen bei Server-Vorfällen & Kalender-Erinnerungen */}
