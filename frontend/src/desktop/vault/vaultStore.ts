@@ -399,9 +399,28 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
       const salt = getOrCreateVaultSalt()
       const { userKey, bucketId } = await deriveVaultKeys(masterPassword, salt)
+
+      const currentBucketId = get().bucketId
+      const serverBucket = typeof localStorage !== 'undefined' ? localStorage.getItem(VAULT_SERVER_BUCKET_KEY) : null
+      if (currentBucketId && bucketId !== currentBucketId) {
+        throw new Error('Falsches Master-Passwort. Bitte überprüfe deine Eingabe.')
+      }
+      if (serverBucket && bucketId !== serverBucket) {
+        throw new Error('Falsches Master-Passwort. Bitte überprüfe deine Eingabe.')
+      }
+
       const canary = typeof localStorage !== 'undefined' ? localStorage.getItem(`${VAULT_CANARY_PREFIX}${bucketId}`) : null
       if (canary) {
         await decryptVaultEntry(canary, userKey, 'vault-canary')
+      } else {
+        const canaryCiphertext = await encryptVaultEntry(
+          { canary: 'mss-vault-initialized-v1', createdAt: Date.now() },
+          userKey,
+          'vault-canary',
+        )
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(`${VAULT_CANARY_PREFIX}${bucketId}`, canaryCiphertext)
+        }
       }
 
       const verified = await promptBiometricVerification('Biometrischen Schnelleinstieg aktivieren')

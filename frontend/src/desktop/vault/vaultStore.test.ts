@@ -262,6 +262,21 @@ describe('useVaultStore - Security & Operations', () => {
     }
   })
 
+  it('enableBiometrics rejects wrong password even when canary is missing from localStorage', async () => {
+    const store = useVaultStore.getState()
+    await store.initializeVault('correct-password-123')
+
+    const currentBucket = useVaultStore.getState().bucketId
+    expect(currentBucket).toBeTruthy()
+
+    // Simulate missing canary (e.g. storage clear or sync from another device)
+    localStorage.removeItem(`mss:vault_canary_${currentBucket}`)
+
+    // Attempting to enable biometrics with wrong password must throw and not save to keyring
+    await expect(store.enableBiometrics('wrong-password-456')).rejects.toThrow(/Falsches Master-Passwort/)
+    expect(useVaultStore.getState().isBiometricsEnabled).toBe(false)
+  })
+
   it('unlockWithBiometrics unlocks using OS Credential Store without reading from localStorage (SEC-CRIT-01)', async () => {
     const masterPassword = 'super-strong-master-password-2026'
     await useVaultStore.getState().initializeVault(masterPassword)
