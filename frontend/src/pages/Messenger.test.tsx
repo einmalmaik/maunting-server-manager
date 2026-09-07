@@ -10,8 +10,12 @@ vi.mock('@/api/social', () => ({
   getFriends: vi.fn(),
   getGroups: vi.fn().mockResolvedValue([]),
   createGroup: vi.fn(),
+  deleteGroup: vi.fn(),
   joinGroupByInvite: vi.fn(),
   leaveGroup: vi.fn(),
+  getStories: vi.fn().mockResolvedValue([]),
+  createStory: vi.fn(),
+  deleteStory: vi.fn(),
   getE2eePublicKey: vi.fn(),
   setE2eePublicKey: vi.fn(),
   relayE2eeEnvelope: vi.fn(),
@@ -356,10 +360,8 @@ describe('Messenger (Allround Chat)', () => {
     fireEvent.click(communityTab)
     expect(screen.getByText('Communities & Gruppen')).toBeInTheDocument()
 
-    // Click Audio tab
-    const audioTab = screen.getByRole('button', { name: 'Audio' })
-    fireEvent.click(audioTab)
-    expect(screen.getByText('Sprachnachrichten & Audio')).toBeInTheDocument()
+    // Audio tab should be removed
+    expect(screen.queryByRole('button', { name: 'Audio' })).not.toBeInTheDocument()
 
     // Switch back to Chats tab
     const chatsTab = screen.getByRole('button', { name: 'Chats' })
@@ -380,5 +382,86 @@ describe('Messenger (Allround Chat)', () => {
 
     const cameraBtn = screen.getByLabelText('Foto aufnehmen')
     expect(cameraBtn).toBeInTheDocument()
+  })
+
+  it('erlaubt dem Gruppen-Eigentümer das Löschen der Gruppe', async () => {
+    vi.mocked(socialApi.getGroups).mockResolvedValue([
+      {
+        id: 77,
+        name: 'Dev Community',
+        description: 'Offizielle Entwicklergruppe',
+        avatar_url: null,
+        invite_code: 'dev-invite-123',
+        owner_user_id: 1, // User 1 is owner
+        member_count: 5,
+        role: 'admin',
+        created_at: '2026-09-07T00:00:00Z',
+        members: [],
+      },
+    ])
+    vi.mocked(socialApi.deleteGroup).mockResolvedValueOnce({ success: true } as any)
+    window.confirm = vi.fn().mockReturnValue(true)
+
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('Dev Community')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByText('Dev Community'))
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Gruppe löschen')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByLabelText('Gruppe löschen'))
+
+    await waitFor(() => {
+      expect(socialApi.deleteGroup).toHaveBeenCalledWith(77)
+    })
+  })
+
+  it('rendert Status-Stories unter Aktuelles und öffnet den Erstellungs-Dialog', async () => {
+    vi.mocked(socialApi.getStories).mockResolvedValue([
+      {
+        id: 1,
+        user_id: 101,
+        username: 'alice',
+        user_avatar: null,
+        content: 'Mein cooler Status',
+        media_url: null,
+        background: 'gradient-1',
+        created_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + 86400000).toISOString(),
+      },
+    ])
+
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('alice')).toBeInTheDocument()
+    })
+
+    const updatesTab = screen.getByRole('button', { name: 'Aktuelles' })
+    fireEvent.click(updatesTab)
+
+    await waitFor(() => {
+      expect(screen.getByText('Mein Status')).toBeInTheDocument()
+      expect(screen.getByText('Status hinzufügen')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByText('Status hinzufügen'))
+
+    await waitFor(() => {
+      expect(screen.getByText('Story / Status erstellen')).toBeInTheDocument()
+    })
   })
 })

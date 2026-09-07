@@ -16,7 +16,6 @@ import {
   UserPlus,
   X,
   ChevronDown,
-  ChevronUp,
   UserMinus,
   Search,
   ExternalLink,
@@ -151,53 +150,73 @@ export function FriendsListDock({
     setIsChatOpen(true)
   }
 
+  if (collapsed) {
+    return (
+      <div className="relative inline-block">
+        <button
+          type="button"
+          onClick={() => setCollapsed(false)}
+          className="w-12 h-12 rounded-full bg-primary text-on-primary shadow-xl flex items-center justify-center hover:scale-105 active:scale-95 transition-all"
+          aria-label="Kontakte & Chat öffnen"
+          title="Kontakte & Chat öffnen"
+        >
+          <Users className="w-5 h-5" />
+          {incomingRequests.length > 0 && (
+            <span className="absolute -top-1 -right-1 px-1.5 py-0.5 rounded-full bg-amber-500 text-[10px] text-white font-bold leading-none shadow">
+              {incomingRequests.length}
+            </span>
+          )}
+        </button>
+      </div>
+    )
+  }
+
   return (
     <>
       <Card
         className={`friends-list-dock border border-outline-variant/30 bg-surface-container-low/95 backdrop-blur-md shadow-2xl transition-all duration-200 overflow-hidden ${className}`}
       >
-        {/* Header */}
-        <CardHeader className="p-3 border-b border-outline-variant/20 bg-surface-container flex flex-row items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Users className="w-4 h-4 text-primary" />
-            <CardTitle className="font-headline text-body-sm font-bold text-primary">
+        {/* Slim, Compact Header */}
+        <CardHeader className="py-1.5 px-3 border-b border-outline-variant/20 bg-surface-container flex flex-row items-center justify-between">
+          <div className="flex items-center gap-2 min-w-0">
+            <Users className="w-3.5 h-3.5 text-primary shrink-0" />
+            <CardTitle className="font-headline text-xs font-bold text-primary truncate">
               Kontakte & Chat
             </CardTitle>
             {incomingRequests.length > 0 && (
-              <Badge variant="warning" className="text-[10px] px-1.5 py-0">
+              <Badge variant="warning" className="text-[9px] px-1.5 py-0">
                 {incomingRequests.length}
               </Badge>
             )}
           </div>
 
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5 shrink-0">
             {onClose && (
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={onClose}
-                className="h-7 w-7 p-0 text-on-surface-variant hover:text-primary"
+                className="h-6 w-6 p-0 text-on-surface-variant hover:text-primary"
                 aria-label="Schließen"
               >
-                <X className="w-4 h-4" />
+                <X className="w-3.5 h-3.5" />
               </Button>
             )}
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => setCollapsed(!collapsed)}
-              className="h-7 w-7 p-0 text-on-surface-variant hover:text-primary"
-              aria-label={collapsed ? 'Ausklappen' : 'Einklappen'}
+              onClick={() => setCollapsed(true)}
+              className="h-6 w-6 p-0 text-on-surface-variant hover:text-primary"
+              aria-label="Einklappen"
             >
-              {collapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+              <ChevronDown className="w-3.5 h-3.5" />
             </Button>
           </div>
         </CardHeader>
 
-        {!collapsed && (
-          <CardContent className="p-3 space-y-2.5">
-            {/* 2 Primary Tabs: Freunde vs Chats */}
-            <div className="grid grid-cols-2 gap-1 bg-surface-container-high/60 p-1 rounded-xl border border-outline-variant/20">
+        <CardContent className="p-3 space-y-2.5">
+          {/* 2 Primary Tabs: Freunde vs Chats */}
+          <div className="grid grid-cols-2 gap-1 bg-surface-container-high/60 p-1 rounded-xl border border-outline-variant/20">
               <button
                 type="button"
                 onClick={() => setPrimaryTab('friends')}
@@ -240,7 +259,7 @@ export function FriendsListDock({
                     value={searchQuery}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
                     placeholder="Freunde suchen …"
-                    className="text-xs pl-8 h-7"
+                    className="text-xs pl-8 h-7 bg-surface-container-high/60 border-outline-variant/30 focus:border-primary"
                   />
                 </div>
 
@@ -424,7 +443,6 @@ export function FriendsListDock({
               </div>
             )}
           </CardContent>
-        )}
       </Card>
 
       {/* E2EE Chat Modal */}

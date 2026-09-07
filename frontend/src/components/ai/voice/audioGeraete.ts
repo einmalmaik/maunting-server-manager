@@ -14,6 +14,8 @@
  * ein fehlendes USB-Mikrofon soll den Sprachmodus nicht lahmlegen.
  */
 
+import { getAudioSettings } from '@/lib/audioSettings'
+
 let eingabeName: string | null = null
 let ausgabeName: string | null = null
 
@@ -61,9 +63,15 @@ export function registriereAudioVerarbeitung(neu: Partial<AudioVerarbeitung>): v
 
 /** Die aktuelle Verarbeitung, Verstärkung bereits geklemmt. */
 export function aktuelleVerarbeitung(): AudioVerarbeitung {
+  const stored = getAudioSettings()
   const roh = verarbeitung.verstaerkung
   const wert = Number.isFinite(roh) ? Math.min(4, Math.max(0.25, roh)) : 1
-  return { ...verarbeitung, verstaerkung: wert }
+  return {
+    echo: verarbeitung.echo && stored.echoCancellation,
+    rauschen: verarbeitung.rauschen && stored.noiseSuppression,
+    autogain: verarbeitung.autogain && stored.autoGainControl,
+    verstaerkung: wert,
+  }
 }
 
 async function deviceIdZuLabel(
@@ -80,6 +88,8 @@ async function deviceIdZuLabel(
 
 /** Die deviceId des gewünschten Mikrofons — `null` heißt Standard. */
 export async function eingabeGeraetId(): Promise<string | null> {
+  const stored = getAudioSettings()
+  if (stored.preferredMicId) return stored.preferredMicId
   if (!eingabeName) return null
   return deviceIdZuLabel('audioinput', eingabeName)
 }

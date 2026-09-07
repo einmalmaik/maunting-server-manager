@@ -31,17 +31,26 @@ import {
   LogOut,
   Sparkles,
   Smile,
+  Paperclip,
+  FileText,
+  Check,
+  CheckCheck,
+  Download,
+  Upload,
 } from 'lucide-react'
 import { DeviceBadge } from '@/components/social/DeviceBadge'
 import { StatusDot, type PresenceStatus } from '@/components/social/StatusIndicator'
 import {
   type FriendItem,
   type ChatGroupItem,
+  type ChatStoryItem,
   getFriends,
   getGroups,
   createGroup,
   joinGroupByInvite,
   leaveGroup,
+  deleteGroup,
+  getStories,
   relayE2eeEnvelope,
   fetchE2eeEnvelopes,
   getE2eePublicKey,
@@ -63,6 +72,11 @@ import {
   getOrGenerateLocalKeyPair,
   type LocalE2eeKeyPair,
 } from '@/services/e2eeCrypto'
+import { getAudioTrackConstraints } from '@/lib/audioSettings'
+import { IN_HOUSE_STICKERS, CATEGORIZED_EMOJIS } from '@/services/stickerCatalog'
+import { CameraSnapshotModal } from '@/components/social/CameraSnapshotModal'
+import { CreateStoryModal } from '@/components/social/CreateStoryModal'
+import { StoryViewerModal } from '@/components/social/StoryViewerModal'
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
 
@@ -104,6 +118,19 @@ export interface AudioAttachment {
   mimeType: string
 }
 
+export interface FileAttachment {
+  name: string
+  sizeBytes: number
+  mimeType: string
+  dataUrl: string
+}
+
+export interface StickerAttachment {
+  id: string
+  label: string
+  svg: string
+}
+
 export interface ChatMessage {
   id: number
   senderId: number
@@ -115,33 +142,21 @@ export interface ChatMessage {
   calendarAttachment?: CalendarAttachment
   imageAttachment?: ImageAttachment
   audioAttachment?: AudioAttachment
+  fileAttachment?: FileAttachment
+  stickerAttachment?: StickerAttachment
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
 }
 
 function formatDuration(sec: number): string {
   const m = Math.floor(sec / 60)
   const s = Math.floor(sec % 60)
   return `${m}:${s < 10 ? '0' : ''}${s}`
-}
-
-function getStoredAudioConstraints(): MediaTrackConstraints {
-  try {
-    const micId = localStorage.getItem('msm_preferred_mic_id')
-    const noiseSuppression = localStorage.getItem('msm_audio_noise_suppression') !== 'false'
-    const echoCancellation = localStorage.getItem('msm_audio_echo_cancellation') !== 'false'
-    const autoGainControl = localStorage.getItem('msm_audio_auto_gain') !== 'false'
-    return {
-      ...(micId ? { deviceId: { exact: micId } } : {}),
-      echoCancellation,
-      noiseSuppression,
-      autoGainControl,
-    }
-  } catch {
-    return {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-    }
-  }
 }
 
 function getSupportedAudioMimeType(): string {
@@ -157,31 +172,6 @@ function getSupportedAudioMimeType(): string {
   ]
   return candidates.find((c) => MediaRecorder.isTypeSupported(c)) || ''
 }
-
-const STICKERS = [
-  { emoji: '🛡️', label: 'Singra Shield' },
-  { emoji: '🔐', label: 'Vault E2EE' },
-  { emoji: '🔑', label: 'Master Key' },
-  { emoji: '⚡', label: 'Turbo' },
-  { emoji: '🔥', label: 'Feuer' },
-  { emoji: '🚀', label: 'Rocket' },
-  { emoji: '🎉', label: 'Party' },
-  { emoji: '❤️', label: 'Liebe' },
-  { emoji: '👍', label: 'Daumen hoch' },
-  { emoji: '💯', label: '100%' },
-  { emoji: '☕', label: 'Kaffee' },
-  { emoji: '🎮', label: 'Gaming' },
-  { emoji: '🤖', label: 'KI-Assistent' },
-  { emoji: '⭐', label: 'Stern' },
-  { emoji: '👏', label: 'Applaus' },
-  { emoji: '🥳', label: 'Feier' },
-]
-
-const QUICK_EMOJIS = [
-  '😀', '😂', '😍', '😎', '🤔', '😴', '🥳', '😇',
-  '👍', '👎', '👏', '🙌', '🤝', '❤️', '🔥', '🚀',
-  '💡', '🛡️', '🔒', '🔑', '🎮', '☕', '✨', '💯',
-]
 
 export function Messenger() {
   const { user } = useAuthStore()
@@ -199,7 +189,28 @@ export function Messenger() {
   const [activeGroup, setActiveGroup] = useState<ChatGroupItem | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [filterTab, setFilterTab] = useState<'all' | 'groups' | 'friends' | 'teams'>('all')
-  const [mobileNavTab, setMobileNavTab] = useState<'chats' | 'updates' | 'community' | 'calls'>('chats')
+  const [mobileNavTab, setMobileNavTab] = useState<'chats' | 'updates' | 'community'>('chats')
+
+  // Stories (Aktuelles)
+  const [stories, setStories] = useState<ChatStoryItem[]>([])
+  const [isCreateStoryOpen, setIsCreateStoryOpen] = useState(false)
+  const [isViewerStoryOpen, setIsViewerStoryOpen] = useState(false)
+  const [viewerStoryIndex, setViewerStoryIndex] = useState(0)
+
+  // Camera & Attachments
+  const [isCameraModalOpen, setIsCameraModalOpen] = useState(false)
+  const [isDragOver, setIsDragOver] = useState(false)
+  const [stagedFile, setStagedFile] = useState<FileAttachment | null>(null)
+  const docInputRef = useRef<HTMLInputElement>(null)
+
+  // Read receipts setting from profile
+  const readReceiptsEnabled = useMemo(() => {
+    try {
+      return localStorage.getItem('msm_read_receipts_enabled') !== 'false'
+    } catch {
+      return true
+    }
+  }, [])
 
   // Conversation state
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -248,7 +259,6 @@ export function Messenger() {
   const audioInstanceRef = useRef<HTMLAudioElement | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const headerFileInputRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const justSentRef = useRef<boolean>(false)
@@ -275,16 +285,18 @@ export function Messenger() {
     }
   }, [currentUserId])
 
-  // 2. Load Friends, Groups, and Team Members
+  // 2. Load Friends, Groups, Team Members, and Stories
   const loadData = async () => {
     try {
-      const [friendsData, groupsData, teamsData] = await Promise.all([
+      const [friendsData, groupsData, teamsData, storiesData] = await Promise.all([
         getFriends().catch(() => []),
         getGroups().catch(() => []),
         teamsApi.list().catch(() => []),
+        getStories().catch(() => []),
       ])
       setFriends(friendsData)
       setGroups(groupsData)
+      setStories(storiesData)
 
       const membersList: Array<{ member: TeamMember; teamName: string }> = []
       for (const t of teamsData) {
@@ -305,6 +317,16 @@ export function Messenger() {
     } catch {
       // Offline fallback
     }
+  }
+
+  const handleStoryCreated = (story: ChatStoryItem) => {
+    setStories((prev) => [story, ...prev])
+    toast.success('Status-Story erfolgreich veröffentlicht!')
+  }
+
+  const handleStoryDeleted = (storyId: number) => {
+    setStories((prev) => prev.filter((s) => s.id !== storyId))
+    toast.success('Status-Story gelöscht.')
   }
 
   useEffect(() => {
@@ -500,6 +522,8 @@ export function Messenger() {
           let calendarAttachment: CalendarAttachment | undefined = undefined
           let imageAttachment: ImageAttachment | undefined = undefined
           let audioAttachment: AudioAttachment | undefined = undefined
+          let fileAttachment: FileAttachment | undefined = undefined
+          let stickerAttachment: StickerAttachment | undefined = undefined
 
           try {
             const parsed = JSON.parse(plain)
@@ -512,6 +536,8 @@ export function Messenger() {
               if (parsed.calendar_attachment) calendarAttachment = parsed.calendar_attachment
               if (parsed.image_attachment) imageAttachment = parsed.image_attachment
               if (parsed.audio_attachment) audioAttachment = parsed.audio_attachment
+              if (parsed.file_attachment) fileAttachment = parsed.file_attachment
+              if (parsed.sticker_attachment) stickerAttachment = parsed.sticker_attachment
             }
           } catch {
             if (plain.startsWith('[ME]:')) {
@@ -532,6 +558,8 @@ export function Messenger() {
             calendarAttachment,
             imageAttachment,
             audioAttachment,
+            fileAttachment,
+            stickerAttachment,
           })
         } catch {
           decryptedList.push({
@@ -571,17 +599,19 @@ export function Messenger() {
     }
   }, [messages])
 
-  // 6. Send message (text, note, cal, img, audio)
+  // 6. Send message (text, note, cal, img, audio, file, sticker)
   const handleSendMessage = async (
     customText?: string,
     note?: NoteAttachment,
     cal?: CalendarAttachment,
     img?: ImageAttachment,
-    audio?: AudioAttachment
+    audio?: AudioAttachment,
+    file?: FileAttachment,
+    sticker?: StickerAttachment
   ) => {
     const rawText = customText !== undefined ? customText : inputText.trim()
     if (
-      (!rawText && !note && !cal && !img && !audio) ||
+      (!rawText && !note && !cal && !img && !audio && !file && !sticker) ||
       (!activeContact && !activeGroup) ||
       !blindMailboxId ||
       !currentUserId ||
@@ -603,6 +633,8 @@ export function Messenger() {
       if (cal) payloadObj.calendar_attachment = cal
       if (img) payloadObj.image_attachment = img
       if (audio) payloadObj.audio_attachment = audio
+      if (file) payloadObj.file_attachment = file
+      if (sticker) payloadObj.sticker_attachment = sticker
 
       const payload = JSON.stringify(payloadObj)
       let ciphertext: string
@@ -630,6 +662,7 @@ export function Messenger() {
 
       setInputText('')
       setSelectedImage(null)
+      setStagedFile(null)
       justSentRef.current = true
       await loadMessages()
     } catch (err: unknown) {
@@ -648,7 +681,7 @@ export function Messenger() {
     }
 
     try {
-      const constraints = getStoredAudioConstraints()
+      const constraints = getAudioTrackConstraints()
       let stream: MediaStream
       try {
         stream = await navigator.mediaDevices.getUserMedia({ audio: constraints })
@@ -795,32 +828,6 @@ export function Messenger() {
     }
   }, [])
 
-  // Header quick photo capture
-  const handleHeaderFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    if (!file.type.startsWith('image/')) {
-      toast.error('Bitte ein gültiges Bild auswählen.')
-      return
-    }
-
-    const reader = new FileReader()
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string
-      if (dataUrl) {
-        const img: ImageAttachment = { dataUrl, name: file.name }
-        if (activeContact || activeGroup) {
-          setSelectedImage(img)
-        } else {
-          setPendingPhotoToSend(img)
-          setIsSendPhotoOpen(true)
-        }
-      }
-    }
-    reader.readAsDataURL(file)
-    if (headerFileInputRef.current) headerFileInputRef.current.value = ''
-  }
-
   // Handle Photo / Camera capture
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -907,6 +914,50 @@ export function Messenger() {
     } catch {
       toast.error('Gruppe konnte nicht verlassen werden.')
     }
+  }
+
+  // Delete Group
+  const handleDeleteGroup = async (group: ChatGroupItem) => {
+    if (!confirm(`Möchtest du die Gruppe "${group.name}" wirklich unwiderruflich löschen?`)) {
+      return
+    }
+    try {
+      await deleteGroup(group.id)
+      toast.success(`Gruppe "${group.name}" gelöscht.`)
+      setActiveGroup(null)
+      await loadData()
+    } catch {
+      toast.error('Gruppe konnte nicht gelöscht werden.')
+    }
+  }
+
+  // File Attachment Helper (for drag-and-drop and document input)
+  const handleFileAttachment = (file: File) => {
+    if (file.type.startsWith('image/')) {
+      const reader = new FileReader()
+      reader.onload = (event) => {
+        const dataUrl = event.target?.result as string
+        if (dataUrl) {
+          setSelectedImage({ dataUrl, name: file.name })
+        }
+      }
+      reader.readAsDataURL(file)
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string
+      if (dataUrl) {
+        setStagedFile({
+          name: file.name,
+          sizeBytes: file.size,
+          mimeType: file.type || 'application/octet-stream',
+          dataUrl,
+        })
+      }
+    }
+    reader.readAsDataURL(file)
   }
 
   const isChatOpen = Boolean(activeContact || activeGroup)
@@ -1013,13 +1064,25 @@ export function Messenger() {
                 <span className="hidden sm:inline">Einladen</span>
               </Button>
 
-              {activeGroup.owner_user_id !== currentUserId && (
+              {activeGroup.owner_user_id === currentUserId ? (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => handleDeleteGroup(activeGroup)}
+                  className="h-8 w-8 text-on-surface-variant hover:text-error"
+                  title="Gruppe löschen"
+                  aria-label="Gruppe löschen"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </Button>
+              ) : (
                 <Button
                   variant="ghost"
                   size="icon"
                   onClick={() => handleLeaveGroup(activeGroup)}
                   className="h-8 w-8 text-on-surface-variant hover:text-error"
                   title="Gruppe verlassen"
+                  aria-label="Gruppe verlassen"
                 >
                   <LogOut className="w-4 h-4" />
                 </Button>
@@ -1027,38 +1090,28 @@ export function Messenger() {
             </>
           )}
 
-          {/* Quick Camera Button in Header (WhatsApp Style) */}
+          {/* Quick Camera Button in Header (opens CameraSnapshotModal) */}
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => headerFileInputRef.current?.click()}
+            onClick={() => setIsCameraModalOpen(true)}
             className="h-8 w-8 text-on-surface-variant hover:text-primary"
             title="Foto aufnehmen"
             aria-label="Foto aufnehmen"
           >
             <Camera className="w-4 h-4" />
           </Button>
-          <input
-            ref={headerFileInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={handleHeaderFileChange}
-          />
 
-          {!isChatOpen && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setIsCreateGroupOpen(true)}
-              className="h-7 text-xs gap-1 px-2.5 border-outline-variant/40 hover:border-primary"
-              aria-label="Neue Gruppe erstellen"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Gruppe</span>
-            </Button>
-          )}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setIsCreateGroupOpen(true)}
+            className="h-7 text-xs gap-1 px-2.5 border-outline-variant/40 hover:border-primary"
+            aria-label="Neue Gruppe erstellen"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Gruppe</span>
+          </Button>
 
           <Button
             variant="ghost"
@@ -1093,7 +1146,7 @@ export function Messenger() {
                 value={searchQuery}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
                 placeholder="Freunde oder Teammitglieder suchen …"
-                className="text-xs pl-8 h-8 bg-surface-container-lowest/80 border-outline-variant/30"
+                className="text-xs pl-8 h-8 bg-surface-container-high/60 border-outline-variant/30 focus:border-primary/50 text-on-surface"
               />
             </div>
 
@@ -1256,55 +1309,184 @@ export function Messenger() {
               </>
             )}
 
-            {/* View 2: Aktuelles (Status / Presence of contacts) */}
+            {/* View 2: Aktuelles (Stories / 24h Status Updates & Contacts Presence) */}
             {mobileNavTab === 'updates' && (
-              <div className="space-y-3 p-1">
+              <div className="space-y-4 p-1">
+                {/* Header Banner */}
                 <div className="p-3 rounded-xl bg-surface-container/60 border border-outline-variant/30 text-xs">
                   <div className="flex items-center gap-2 font-semibold text-primary mb-1">
                     <Sparkles className="w-4 h-4" />
                     <span>Aktuelles & Status deiner Kontakte</span>
                   </div>
                   <p className="text-[11px] text-on-surface-variant">
-                    Hier siehst du, wer gerade im Panel, in Gameservern oder auf Desktop/Mobile aktiv ist.
+                    24h Status-Stories deiner Kontakte und Live-Präsenz.
                   </p>
                 </div>
 
-                <div className="space-y-1">
-                  {contactsList.map((c) => (
-                    <div
-                      key={`update-${c.userId}`}
-                      className="flex items-center justify-between p-2.5 rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60"
+                {/* My Status Card */}
+                <div className="p-3 rounded-2xl bg-surface-container-lowest/80 border border-outline-variant/30 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-headline font-bold text-primary">Status</span>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setIsCreateStoryOpen(true)}
+                      className="h-7 text-xs gap-1 px-2.5 rounded-full"
                     >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="relative shrink-0">
-                          <Avatar src={c.avatarUrl} name={c.username} size="sm" />
-                          <StatusDot status={c.status} size="sm" className="absolute bottom-0 right-0" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="text-xs font-semibold text-primary truncate flex items-center gap-1.5">
-                            <span>{c.username}</span>
-                            <DeviceBadge deviceType={c.deviceType} />
-                          </div>
-                          <div className="text-[10px] text-on-surface-variant/80 truncate">
-                            {c.activityLabel || (c.status === 'online' ? 'Online' : c.status === 'away' ? 'Abwesend' : 'Offline')}
-                          </div>
-                        </div>
-                      </div>
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Status hinzufügen</span>
+                    </Button>
+                  </div>
 
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setActiveContact(c)
-                          setActiveGroup(null)
-                        }}
-                        className="text-xs h-7 px-2 text-primary"
-                      >
-                        Chat
-                      </Button>
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="relative cursor-pointer"
+                      onClick={() => {
+                        const myIdx = stories.findIndex((s) => s.user_id === currentUserId)
+                        if (myIdx !== -1) {
+                          setViewerStoryIndex(myIdx)
+                          setIsViewerStoryOpen(true)
+                        } else {
+                          setIsCreateStoryOpen(true)
+                        }
+                      }}
+                    >
+                      <div className={`p-0.5 rounded-full ${
+                        stories.some((s) => s.user_id === currentUserId)
+                          ? 'bg-gradient-to-tr from-cyan-400 via-sky-500 to-indigo-500'
+                          : 'border-2 border-dashed border-outline-variant/60'
+                      }`}>
+                        <Avatar
+                          src={user?.avatar_url}
+                          name={user?.username || 'Ich'}
+                          size="md"
+                        />
+                      </div>
+                      <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-primary text-on-primary flex items-center justify-center text-xs shadow-md border-2 border-surface">
+                        <Plus className="w-3 h-3" />
+                      </div>
                     </div>
-                  ))}
+                    <div
+                      className="min-w-0 flex-1 cursor-pointer"
+                      onClick={() => {
+                        const myIdx = stories.findIndex((s) => s.user_id === currentUserId)
+                        if (myIdx !== -1) {
+                          setViewerStoryIndex(myIdx)
+                          setIsViewerStoryOpen(true)
+                        } else {
+                          setIsCreateStoryOpen(true)
+                        }
+                      }}
+                    >
+                      <div className="text-xs font-semibold text-primary truncate">Mein Status</div>
+                      <p className="text-[11px] text-on-surface-variant/80 truncate">
+                        {stories.some((s) => s.user_id === currentUserId)
+                          ? 'Tippen, um dein Status-Update anzusehen'
+                          : 'Tippe, um ein 24h Status-Update zu teilen'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Friends' Stories Section */}
+                <div className="space-y-2">
+                  <div className="px-1 text-[11px] font-semibold text-on-surface-variant/70 uppercase tracking-wider flex items-center justify-between">
+                    <span>Kürzliche Updates</span>
+                    <span className="text-[10px]">
+                      {stories.filter((s) => s.user_id !== currentUserId).length}
+                    </span>
+                  </div>
+
+                  {stories.filter((s) => s.user_id !== currentUserId).length === 0 ? (
+                    <div className="p-4 rounded-xl bg-surface-container-lowest/50 border border-outline-variant/20 text-center text-xs text-on-surface-variant/70">
+                      Noch keine Status-Updates von Freunden.
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {stories
+                        .filter((s) => s.user_id !== currentUserId)
+                        .map((story) => {
+                          const storyIdx = stories.findIndex((st) => st.id === story.id)
+                          return (
+                            <div
+                              key={`story-${story.id}`}
+                              onClick={() => {
+                                setViewerStoryIndex(storyIdx)
+                                setIsViewerStoryOpen(true)
+                              }}
+                              className="flex items-center gap-3 p-2.5 rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60 hover:bg-surface-container-high/50 cursor-pointer transition-colors"
+                            >
+                              <div className="p-0.5 rounded-full bg-gradient-to-tr from-sky-400 via-indigo-500 to-purple-600 shrink-0">
+                                <Avatar
+                                  src={story.avatar_url}
+                                  name={story.username}
+                                  size="md"
+                                />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="text-xs font-semibold text-primary truncate">
+                                  {story.username}
+                                </div>
+                                <div className="text-[10px] text-on-surface-variant/80 flex items-center gap-1">
+                                  <Clock className="w-3 h-3" />
+                                  <span>
+                                    {new Date(story.created_at).toLocaleTimeString([], {
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                    })}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Contacts Activity Section */}
+                <div className="space-y-2 pt-2 border-t border-outline-variant/20">
+                  <div className="px-1 text-[11px] font-semibold text-on-surface-variant/70 uppercase tracking-wider">
+                    Aktivität deiner Kontakte
+                  </div>
+                  <div className="space-y-1">
+                    {contactsList.map((c) => (
+                      <div
+                        key={`update-${c.userId}`}
+                        className="flex items-center justify-between p-2.5 rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="relative shrink-0">
+                            <Avatar src={c.avatarUrl} name={c.username} size="sm" />
+                            <StatusDot status={c.status} size="sm" className="absolute bottom-0 right-0" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-xs font-semibold text-primary truncate flex items-center gap-1.5">
+                              <span>{c.username}</span>
+                              <DeviceBadge deviceType={c.deviceType} />
+                            </div>
+                            <div className="text-[10px] text-on-surface-variant/80 truncate">
+                              {c.activityLabel || (c.status === 'online' ? 'Online' : c.status === 'away' ? 'Abwesend' : 'Offline')}
+                            </div>
+                          </div>
+                        </div>
+
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setActiveContact(c)
+                            setActiveGroup(null)
+                          }}
+                          className="text-xs h-7 px-2 text-primary"
+                        >
+                          Chat
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
@@ -1333,8 +1515,18 @@ export function Messenger() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <div className="px-1 text-[11px] font-semibold text-on-surface-variant/70 uppercase tracking-wider">
-                    Deine Gruppen ({groups.length})
+                  <div className="px-1 text-[11px] font-semibold text-on-surface-variant/70 uppercase tracking-wider flex items-center justify-between">
+                    <span>Deine Gruppen ({groups.length})</span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setIsCreateGroupOpen(true)}
+                      className="h-6 px-2 text-[10px] gap-1 text-primary"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>Gruppe</span>
+                    </Button>
                   </div>
                   {groups.length === 0 ? (
                     <p className="py-6 text-center text-xs text-on-surface-variant/70">
@@ -1383,31 +1575,6 @@ export function Messenger() {
                 </div>
               </div>
             )}
-
-            {/* View 4: Audio / Calls Info */}
-            {mobileNavTab === 'calls' && (
-              <div className="space-y-3 p-1">
-                <div className="p-3.5 rounded-xl bg-surface-container/60 border border-outline-variant/30 space-y-2 text-xs">
-                  <div className="flex items-center gap-2 font-semibold text-primary">
-                    <Mic className="w-4 h-4" />
-                    <span>Sprachnachrichten & Audio</span>
-                  </div>
-                  <p className="text-[11px] text-on-surface-variant">
-                    Sprachnachrichten werden in DIS AES-256-GCM verschlüsselt übertragen. Mit Noise Cancelling und Echounterdrückung für glasklare Audioqualität.
-                  </p>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => navigate('/profile')}
-                    className="w-full text-xs h-8 gap-1.5 mt-1 border-outline-variant/40 hover:border-primary"
-                  >
-                    <Mic className="w-3.5 h-3.5" />
-                    <span>Mikrofon-Test im Profil öffnen</span>
-                  </Button>
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Floating Action Button for Mobile: Positioned cleanly above bottom bar */}
@@ -1423,7 +1590,7 @@ export function Messenger() {
             </button>
           )}
 
-          {/* Mobile WhatsApp-Style Bottom Navigation Bar */}
+          {/* Mobile WhatsApp-Style Bottom Navigation Bar (Chats, Aktuelles, Community) */}
           {!isChatOpen && (
             <nav className="md:hidden shrink-0 h-14 border-t border-outline-variant/20 bg-surface-container/95 backdrop-blur flex items-center justify-around px-2 z-10">
               <button
@@ -1467,30 +1634,44 @@ export function Messenger() {
                 </div>
                 <span className="text-[10px] mt-0.5">Community</span>
               </button>
-
-              <button
-                type="button"
-                onClick={() => setMobileNavTab('calls')}
-                className={`flex flex-col items-center justify-center flex-1 py-1 transition-colors ${
-                  mobileNavTab === 'calls' ? 'text-primary font-semibold' : 'text-on-surface-variant/70 hover:text-on-surface'
-                }`}
-                aria-label="Audio"
-              >
-                <div className={`p-1 rounded-full ${mobileNavTab === 'calls' ? 'bg-primary/15' : ''}`}>
-                  <Mic className="w-4 h-4" />
-                </div>
-                <span className="text-[10px] mt-0.5">Audio</span>
-              </button>
             </nav>
           )}
         </div>
 
         {/* Right Column: Chat Thread & Input Area */}
         <div
-          className={`flex-1 flex flex-col min-h-0 bg-surface-container-lowest/30 ${
+          className={`flex-1 flex flex-col min-h-0 bg-surface-container-lowest/30 relative ${
             !isChatOpen ? 'hidden md:flex' : 'flex'
           }`}
+          onDragOver={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            setIsDragOver(true)
+          }}
+          onDragLeave={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+              setIsDragOver(false)
+            }
+          }}
+          onDrop={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            setIsDragOver(false)
+            const file = e.dataTransfer.files?.[0]
+            if (file) handleFileAttachment(file)
+          }}
         >
+          {/* Drag and Drop Visual Dropzone Overlay */}
+          {isDragOver && (
+            <div className="absolute inset-0 z-40 bg-surface/85 backdrop-blur-xs border-2 border-dashed border-primary flex flex-col items-center justify-center p-6 text-center pointer-events-none">
+              <Upload className="w-12 h-12 text-primary animate-bounce mb-2" />
+              <p className="font-headline font-bold text-sm text-primary">Datei hier ablegen</p>
+              <p className="text-xs text-on-surface-variant">Wird Ende-zu-Ende verschlüsselt an die Konversation angehängt</p>
+            </div>
+          )}
+
           {isChatOpen ? (
             <>
               {/* Message Thread Scroll Area */}
@@ -1543,9 +1724,45 @@ export function Messenger() {
                         </div>
                       )}
 
-                      {/* Audio / Voice Message Attachment */}
+                      {/* File Attachment Card */}
+                      {msg.fileAttachment && (
+                        <a
+                          href={msg.fileAttachment.dataUrl}
+                          download={msg.fileAttachment.name}
+                          className={`flex items-center gap-2.5 p-2.5 rounded-xl border transition-colors ${
+                            msg.isSelf
+                              ? 'bg-black/15 border-white/20 text-white hover:bg-black/25'
+                              : 'bg-surface-container-low border-outline-variant/30 text-on-surface hover:bg-surface-container'
+                          }`}
+                        >
+                          <div className="p-2 rounded-lg bg-primary/20 text-primary shrink-0">
+                            <FileText className="w-4 h-4" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="font-semibold text-xs truncate">{msg.fileAttachment.name}</p>
+                            <p className="text-[10px] opacity-75">{formatFileSize(msg.fileAttachment.sizeBytes)}</p>
+                          </div>
+                          <Download className="w-3.5 h-3.5 opacity-75 shrink-0" />
+                        </a>
+                      )}
+
+                      {/* Sticker Attachment */}
+                      {msg.stickerAttachment && (
+                        <div className="py-1">
+                          <div
+                            className="w-24 h-24 sm:w-28 sm:h-28 drop-shadow-md"
+                            dangerouslySetInnerHTML={{ __html: msg.stickerAttachment.svg }}
+                            title={msg.stickerAttachment.label}
+                          />
+                          <div className="text-[10px] opacity-60 text-center mt-1">{msg.stickerAttachment.label}</div>
+                        </div>
+                      )}
+
+                      {/* Audio / Voice Message Attachment (Sleek Darker Design-DNA) */}
                       {msg.audioAttachment && (
-                        <div className="flex items-center gap-3 py-1 min-w-[200px] max-w-[280px]">
+                        <div className={`flex items-center gap-3 p-2 rounded-xl min-w-[200px] max-w-[280px] ${
+                          msg.isSelf ? 'bg-black/20 text-white' : 'bg-surface-container-high/90 text-on-surface'
+                        }`}>
                           <button
                             type="button"
                             onClick={() => togglePlayAudio(msg.id, msg.audioAttachment!.dataUrl)}
@@ -1563,7 +1780,7 @@ export function Messenger() {
                             )}
                           </button>
                           <div className="flex-1 min-w-0 space-y-1">
-                            <div className="relative h-2 w-full bg-black/10 rounded-full overflow-hidden">
+                            <div className="relative h-2 w-full bg-black/15 rounded-full overflow-hidden">
                               <div
                                 className={`h-full transition-all ${msg.isSelf ? 'bg-white' : 'bg-primary'}`}
                                 style={{
@@ -1648,12 +1865,25 @@ export function Messenger() {
                       {msg.text && <p className="leading-relaxed">{msg.text}</p>}
                     </div>
 
-                    <span className="text-[10px] text-on-surface-variant/50 mt-1 px-1">
-                      {new Date(msg.createdAt).toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </span>
+                    <div className="flex items-center justify-end gap-1 text-[10px] text-on-surface-variant/60 mt-1 px-1">
+                      <span>
+                        {new Date(msg.createdAt).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                      {msg.isSelf && (
+                        readReceiptsEnabled ? (
+                          <span title="Gelesen" className="inline-flex items-center">
+                            <CheckCheck className="w-3.5 h-3.5 text-cyan-400" />
+                          </span>
+                        ) : (
+                          <span title="Gesendet" className="inline-flex items-center">
+                            <Check className="w-3.5 h-3.5 opacity-60" />
+                          </span>
+                        )
+                      )}
+                    </div>
                   </div>
                 ))}
                 <div ref={messagesEndRef} />
@@ -1680,6 +1910,29 @@ export function Messenger() {
                   <span className="text-xs text-on-surface-variant truncate">
                     Foto angehängt: {selectedImage.name || 'image.png'}
                   </span>
+                </div>
+              )}
+
+              {/* Staged Document / File Preview Bar */}
+              {stagedFile && (
+                <div className="px-4 py-2 border-t border-outline-variant/20 bg-surface-container flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="p-1.5 rounded-lg bg-primary/10 text-primary shrink-0">
+                      <FileText className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-primary truncate">{stagedFile.name}</p>
+                      <p className="text-[10px] text-on-surface-variant">{formatFileSize(stagedFile.sizeBytes)}</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setStagedFile(null)}
+                    className="p-1 rounded-full hover:bg-surface-container-highest text-on-surface-variant"
+                    aria-label="Datei entfernen"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               )}
 
@@ -1728,175 +1981,226 @@ export function Messenger() {
                   <>
                     {/* WhatsApp-Style Sticker & Emoji Picker Popover */}
                     {isStickerPickerOpen && (
-                  <div className="mb-2 p-2.5 rounded-xl bg-surface-container border border-outline-variant/30 shadow-lg animate-in fade-in slide-in-from-bottom-2">
-                    <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-outline-variant/20">
-                      <div className="flex items-center gap-1.5">
-                        <Button
-                          type="button"
-                          variant={stickerTab === 'stickers' ? 'primary' : 'ghost'}
-                          size="sm"
-                          onClick={() => setStickerTab('stickers')}
-                          className="h-6 px-2.5 text-xs rounded-full"
-                        >
-                          Sticker
-                        </Button>
-                        <Button
-                          type="button"
-                          variant={stickerTab === 'emojis' ? 'primary' : 'ghost'}
-                          size="sm"
-                          onClick={() => setStickerTab('emojis')}
-                          className="h-6 px-2.5 text-xs rounded-full"
-                        >
-                          Emojis
-                        </Button>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setIsStickerPickerOpen(false)}
-                        className="p-1 rounded-md text-on-surface-variant hover:text-on-surface"
-                        aria-label="Schließen"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+                      <div className="mb-2 p-2.5 rounded-xl bg-surface-container border border-outline-variant/30 shadow-lg animate-in fade-in slide-in-from-bottom-2">
+                        <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-outline-variant/20">
+                          <div className="flex items-center gap-1.5">
+                            <Button
+                              type="button"
+                              variant={stickerTab === 'stickers' ? 'primary' : 'ghost'}
+                              size="sm"
+                              onClick={() => setStickerTab('stickers')}
+                              className="h-6 px-2.5 text-xs rounded-full"
+                            >
+                              Sticker
+                            </Button>
+                            <Button
+                              type="button"
+                              variant={stickerTab === 'emojis' ? 'primary' : 'ghost'}
+                              size="sm"
+                              onClick={() => setStickerTab('emojis')}
+                              className="h-6 px-2.5 text-xs rounded-full"
+                            >
+                              Emojis
+                            </Button>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setIsStickerPickerOpen(false)}
+                            className="p-1 rounded-md text-on-surface-variant hover:text-on-surface"
+                            aria-label="Schließen"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
 
-                    {stickerTab === 'stickers' ? (
-                      <div className="grid grid-cols-4 sm:grid-cols-8 gap-1.5 max-h-36 overflow-y-auto p-1">
-                        {STICKERS.map((stk) => (
-                          <button
-                            key={stk.label}
-                            type="button"
-                            onClick={() => {
-                              void handleSendMessage(stk.emoji)
-                              setIsStickerPickerOpen(false)
-                            }}
-                            className="flex flex-col items-center justify-center p-1.5 rounded-lg hover:bg-surface-container-high transition-transform hover:scale-110"
-                            title={stk.label}
-                          >
-                            <span className="text-2xl">{stk.emoji}</span>
-                            <span className="text-[9px] text-on-surface-variant/70 truncate w-full text-center mt-0.5">{stk.label}</span>
-                          </button>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-8 sm:grid-cols-12 gap-1 max-h-36 overflow-y-auto p-1">
-                        {QUICK_EMOJIS.map((emoji) => (
-                          <button
-                            key={emoji}
-                            type="button"
-                            onClick={() => {
-                              setInputText((prev) => prev + emoji)
-                            }}
-                            className="p-1.5 text-lg rounded-lg hover:bg-surface-container-high transition-transform hover:scale-125 flex items-center justify-center"
-                          >
-                            {emoji}
-                          </button>
-                        ))}
+                        {stickerTab === 'stickers' ? (
+                          <div className="grid grid-cols-4 sm:grid-cols-8 gap-2 max-h-48 overflow-y-auto p-1.5">
+                            {IN_HOUSE_STICKERS.map((stk) => (
+                              <button
+                                key={stk.id}
+                                type="button"
+                                onClick={() => {
+                                  void handleSendMessage(
+                                    undefined,
+                                    undefined,
+                                    undefined,
+                                    undefined,
+                                    undefined,
+                                    undefined,
+                                    stk
+                                  )
+                                  setIsStickerPickerOpen(false)
+                                }}
+                                className="flex flex-col items-center justify-center p-1.5 rounded-xl hover:bg-surface-container-high transition-transform hover:scale-105"
+                                title={stk.label}
+                              >
+                                <div
+                                  className="w-11 h-11 flex items-center justify-center"
+                                  dangerouslySetInnerHTML={{ __html: stk.svg }}
+                                />
+                                <span className="text-[9px] text-on-surface-variant/80 truncate w-full text-center mt-1 font-medium">
+                                  {stk.label}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="space-y-3 max-h-52 overflow-y-auto p-1.5">
+                            {CATEGORIZED_EMOJIS.map((cat) => (
+                              <div key={cat.category} className="space-y-1">
+                                <div className="text-[10px] font-bold text-on-surface-variant/70 uppercase tracking-wider px-1">
+                                  {cat.category}
+                                </div>
+                                <div className="grid grid-cols-8 sm:grid-cols-12 gap-1">
+                                  {cat.emojis.map((emoji) => (
+                                    <button
+                                      key={emoji}
+                                      type="button"
+                                      onClick={() => setInputText((prev) => prev + emoji)}
+                                      className="p-1 text-lg rounded-lg hover:bg-surface-container-high transition-transform hover:scale-125 flex items-center justify-center"
+                                    >
+                                      {emoji}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
-                  </div>
-                )}
 
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault()
-                    handleSendMessage(inputText, undefined, undefined, selectedImage || undefined)
-                  }}
-                  className="flex items-center gap-1.5 sm:gap-2"
-                >
-                  {/* Hidden Image Input */}
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    className="hidden"
-                    onChange={handleFileChange}
-                  />
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault()
+                        handleSendMessage(
+                          inputText,
+                          undefined,
+                          undefined,
+                          selectedImage || undefined,
+                          undefined,
+                          stagedFile || undefined
+                        )
+                      }}
+                      className="flex items-center gap-1.5 sm:gap-2"
+                    >
+                      {/* Hidden Image Input */}
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        className="hidden"
+                        onChange={handleFileChange}
+                      />
 
-                  <Button
-                    type="button"
-                    variant={isStickerPickerOpen ? 'secondary' : 'ghost'}
-                    size="icon"
-                    onClick={() => setIsStickerPickerOpen((prev) => !prev)}
-                    className="h-8 w-8 p-0 text-on-surface-variant hover:text-amber-400"
-                    title="Sticker & Emojis"
-                    aria-label="Sticker auswählen"
-                  >
-                    <Smile className="w-4 h-4" />
-                  </Button>
+                      {/* Hidden Doc/File Input */}
+                      <input
+                        ref={docInputRef}
+                        type="file"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          if (file) handleFileAttachment(file)
+                          if (docInputRef.current) docInputRef.current.value = ''
+                        }}
+                      />
 
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="h-8 w-8 p-0 text-on-surface-variant hover:text-primary"
-                    title="Foto aufnehmen oder Bild hochladen"
-                    aria-label="Foto anhängen"
-                  >
-                    <Camera className="w-4 h-4" />
-                  </Button>
-
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={handleOpenNotePicker}
-                    className="h-8 w-8 p-0 text-on-surface-variant hover:text-amber-400"
-                    title="Notiz teilen (ohne Synchronisation)"
-                    aria-label="Notiz teilen"
-                  >
-                    <StickyNote className="w-4 h-4" />
-                  </Button>
-
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={handleOpenCalendarPicker}
-                    className="h-8 w-8 p-0 text-on-surface-variant hover:text-cyan-400"
-                    title="Kalendereintrag teilen (ohne Synchronisation)"
-                    aria-label="Kalendereintrag teilen"
-                  >
-                    <CalendarIcon className="w-4 h-4" />
-                  </Button>
-
-                  <Input
-                    value={inputText}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInputText(e.target.value)}
-                    placeholder="Nachricht schreiben …"
-                    className="flex-1 text-xs h-8 bg-surface-container-lowest/80 border-outline-variant/30"
-                    disabled={sending}
-                  />
-
-                    {/* WhatsApp-style dynamic Mic / Send button */}
-                    {inputText.trim() || selectedImage ? (
                       <Button
-                        type="submit"
-                        disabled={sending}
-                        size="sm"
-                        className="gap-1.5 px-3 h-8 text-xs"
+                        type="button"
+                        variant={isStickerPickerOpen ? 'secondary' : 'ghost'}
+                        size="icon"
+                        onClick={() => setIsStickerPickerOpen((prev) => !prev)}
+                        className="h-8 w-8 p-0 text-on-surface-variant hover:text-amber-400"
+                        title="Sticker & Emojis"
+                        aria-label="Sticker auswählen"
                       >
-                        <Send className="w-3.5 h-3.5" />
-                        <span>Senden</span>
+                        <Smile className="w-4 h-4" />
                       </Button>
-                    ) : (
+
                       <Button
                         type="button"
                         variant="ghost"
                         size="icon"
-                        onClick={startRecording}
-                        className="h-8 w-8 p-0 text-on-surface-variant hover:text-primary hover:bg-primary/10 rounded-full"
-                        title="Sprachnachricht aufnehmen"
-                        aria-label="Sprachnachricht aufnehmen"
+                        onClick={() => setIsCameraModalOpen(true)}
+                        className="h-8 w-8 p-0 text-on-surface-variant hover:text-primary"
+                        title="Foto aufnehmen"
+                        aria-label="Foto anhängen"
                       >
-                        <Mic className="w-4 h-4" />
+                        <Camera className="w-4 h-4" />
                       </Button>
-                    )}
-                  </form>
-                </>
-              )}
+
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => docInputRef.current?.click()}
+                        className="h-8 w-8 p-0 text-on-surface-variant hover:text-primary"
+                        title="Datei oder Dokument anhängen"
+                        aria-label="Datei anhängen"
+                      >
+                        <Paperclip className="w-4 h-4" />
+                      </Button>
+
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={handleOpenNotePicker}
+                        className="h-8 w-8 p-0 text-on-surface-variant hover:text-amber-400"
+                        title="Notiz teilen (ohne Synchronisation)"
+                        aria-label="Notiz teilen"
+                      >
+                        <StickyNote className="w-4 h-4" />
+                      </Button>
+
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={handleOpenCalendarPicker}
+                        className="h-8 w-8 p-0 text-on-surface-variant hover:text-cyan-400"
+                        title="Kalendereintrag teilen (ohne Synchronisation)"
+                        aria-label="Kalendereintrag teilen"
+                      >
+                        <CalendarIcon className="w-4 h-4" />
+                      </Button>
+
+                      <Input
+                        value={inputText}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInputText(e.target.value)}
+                        placeholder="Nachricht schreiben …"
+                        className="flex-1 text-xs h-8 bg-surface-container-high/60 border-outline-variant/30 text-on-surface focus:border-primary/50"
+                        disabled={sending}
+                      />
+
+                      {/* WhatsApp-style dynamic Mic / Send button */}
+                      {inputText.trim() || selectedImage || stagedFile ? (
+                        <Button
+                          type="submit"
+                          disabled={sending}
+                          size="sm"
+                          className="gap-1.5 px-3 h-8 text-xs"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                          <span>Senden</span>
+                        </Button>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={startRecording}
+                          className="h-8 w-8 p-0 text-on-surface-variant hover:text-primary hover:bg-primary/10 rounded-full"
+                          title="Sprachnachricht aufnehmen"
+                          aria-label="Sprachnachricht aufnehmen"
+                        >
+                          <Mic className="w-4 h-4" />
+                        </Button>
+                      )}
+                    </form>
+                  </>
+                )}
               </div>
             </>
           ) : (
@@ -2189,6 +2493,37 @@ export function Messenger() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Create Story Modal */}
+      <CreateStoryModal
+        open={isCreateStoryOpen}
+        onOpenChange={setIsCreateStoryOpen}
+        onCreated={handleStoryCreated}
+      />
+
+      {/* Story Viewer Modal */}
+      <StoryViewerModal
+        open={isViewerStoryOpen}
+        onOpenChange={setIsViewerStoryOpen}
+        stories={stories}
+        initialIndex={viewerStoryIndex}
+        onDeleted={handleStoryDeleted}
+      />
+
+      {/* Live Camera Snapshot Modal */}
+      <CameraSnapshotModal
+        open={isCameraModalOpen}
+        onOpenChange={setIsCameraModalOpen}
+        onCapture={(dataUrl) => {
+          const img: ImageAttachment = { dataUrl, name: 'kamera-aufnahme.jpg' }
+          if (activeContact || activeGroup) {
+            setSelectedImage(img)
+          } else {
+            setPendingPhotoToSend(img)
+            setIsSendPhotoOpen(true)
+          }
+        }}
+      />
     </div>
   )
 }

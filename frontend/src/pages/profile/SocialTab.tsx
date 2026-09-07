@@ -143,9 +143,68 @@ export function SocialTab() {
     ? Math.round((overview.total_unlocked / Math.max(overview.total_available, 1)) * 100)
     : 0
 
+  const [readReceiptsEnabled, setReadReceiptsEnabled] = useState(() => {
+    try {
+      return localStorage.getItem('msm_read_receipts_enabled') !== 'false'
+    } catch {
+      return true
+    }
+  })
+
+  const handleToggleReadReceipts = () => {
+    const nextVal = !readReceiptsEnabled
+    setReadReceiptsEnabled(nextVal)
+    try {
+      localStorage.setItem('msm_read_receipts_enabled', String(nextVal))
+      toast.success(nextVal ? 'Lesebestätigungen aktiviert' : 'Lesebestätigungen deaktiviert')
+    } catch {
+      // Non-blocking
+    }
+  }
+
   return (
     <div className="space-y-6">
-      {/* 1. Freunde & Kontaktanfragen */}
+      {/* 1. Chat-Privatsphäre & Lesebestätigungen */}
+      <section className="msm-card p-6" aria-labelledby="chat-privacy-title">
+        <div className="flex items-center gap-2 mb-2">
+          <Lock className="h-5 w-5 text-secondary" aria-hidden="true" />
+          <h2 id="chat-privacy-title" className="font-headline text-lg font-semibold text-on-surface">
+            Chat-Privatsphäre
+          </h2>
+        </div>
+        <p className="max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant mb-4">
+          Steuere deine Privatsphäre im Messenger und bei Ende-zu-Ende verschlüsselten Konversationen.
+        </p>
+
+        <div className="flex items-center justify-between p-4 rounded-xl bg-surface-container-high/40 border border-outline-variant/30">
+          <div className="space-y-0.5 max-w-md">
+            <span className="text-xs font-bold text-on-surface">
+              Lesebestätigungen (Gelesen-Häkchen ✓✓)
+            </span>
+            <p className="text-[11px] text-on-surface-variant">
+              Wenn aktiviert, wird deinen Kontakten mit zwei blauen Häkchen signalisiert, sobald eine Nachricht gelesen wurde.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            role="switch"
+            aria-checked={readReceiptsEnabled}
+            onClick={handleToggleReadReceipts}
+            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+              readReceiptsEnabled ? 'bg-primary' : 'bg-surface-container-highest'
+            }`}
+          >
+            <span
+              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                readReceiptsEnabled ? 'translate-x-5' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
+      </section>
+
+      {/* 2. Freunde & Kontaktanfragen */}
       <section className="msm-card p-6" aria-labelledby="social-contacts-title">
         <div className="flex items-center gap-2 mb-4">
           <Users className="h-5 w-5 text-secondary" aria-hidden="true" />

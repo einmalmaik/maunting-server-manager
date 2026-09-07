@@ -263,6 +263,46 @@ export async function leaveGroup(groupId: number): Promise<{ success: boolean; m
   })
 }
 
+export async function deleteGroup(groupId: number): Promise<{ success: boolean; message: string }> {
+  return api<{ success: boolean; message: string }>(`/social/groups/${groupId}`, {
+    method: 'DELETE',
+  })
+}
+
+export interface ChatStoryItem {
+  id: number
+  user_id: number
+  username: string
+  avatar_url?: string | null
+  content: string
+  media_url?: string | null
+  background: string
+  created_at: string
+  expires_at: string
+  is_self: boolean
+}
+
+export async function getStories(): Promise<ChatStoryItem[]> {
+  return api<ChatStoryItem[]>('/social/stories')
+}
+
+export async function createStory(payload: {
+  content: string
+  media_url?: string
+  background?: string
+}): Promise<ChatStoryItem> {
+  return api<ChatStoryItem>('/social/stories', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function deleteStory(storyId: number): Promise<{ success: boolean; message: string }> {
+  return api<{ success: boolean; message: string }>(`/social/stories/${storyId}`, {
+    method: 'DELETE',
+  })
+}
+
 export async function recordActivityTime(category: string, seconds: number): Promise<{ success: boolean }> {
   return api<{ success: boolean }>('/social/activity/ping', {
     method: 'POST',
