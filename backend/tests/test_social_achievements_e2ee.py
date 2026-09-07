@@ -347,4 +347,58 @@ def test_chat_group_create_join_invite(db: Session, owner_user: User, regular_us
     assert env.id is not None
     assert env.blind_mailbox_id == blind_mailbox
 
+    # 5. Zweite Gruppe erstellen (unbegrenzt)
+    group2 = SocialService.create_group(
+        db,
+        user=owner_user,
+        name="Zweite Gruppe",
+    )
+    all_groups = SocialService.list_user_groups(db, owner_user.id)
+    assert len(all_groups) == 2
+
+    # 6. Nicht-Eigentümer darf nicht löschen
+    with pytest.raises(Exception) as excinfo:
+        SocialService.delete_group(db, regular_user, group.id)
+    assert "403" in str(excinfo.value) or "Eigentümer" in str(excinfo.value)
+
+    # 7. Eigentümer löscht Gruppe
+    SocialService.delete_group(db, owner_user, group.id)
+    after_delete = SocialService.list_user_groups(db, owner_user.id)
+    assert len(after_delete) == 1
+    assert after_delete[0]["id"] == group2.id
+
+
+def test_chat_stories_creation_and_expiration(db: Session, owner_user: User, regular_user: User) -> None:
+    # 1. Beiden Nutzern Freundschaft geben
+    req = SocialService.send_friend_request(db, owner_user.id, regular_user.username)
+    SocialService.accept_friend_request(db, regular_user.id, req["id"])
+
+    # 2. Story anlegen
+    story = SocialService.create_story(
+        db,
+        user=owner_user,
+        content="Guten Morgen Panel!",
+        media_url=None,
+        background="gradient-1",
+    )
+    assert story.id is not None
+    assert story.expires_at > story.created_at
+
+    # 3. Freund sieht die aktive Story
+    stories = SocialService.list_active_stories(db, regular_user.id)
+    assert len(stories) >= 1
+    my_story = next(s for s in stories if s["id"] == story.id)
+    assert my_story["content"] == "Guten Morgen Panel!"
+    assert my_story["username"] == owner_user.username
+    assert my_story["is_self"] is False
+
+    # 4. Ersteller sieht sie mit is_self=True
+    owner_stories = SocialService.list_active_stories(db, owner_user.id)
+    own = next(s for s in owner_stories if s["id"] == story.id)
+    assert own["is_self"] is True
+
+    # 5. Story löschen
+    SocialService.delete_story(db, owner_user, story.id)
+    assert not any(s["id"] == story.id for s in SocialService.list_active_stories(db, owner_user.id))
+
 

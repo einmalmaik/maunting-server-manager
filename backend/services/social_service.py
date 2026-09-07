@@ -14,6 +14,7 @@ from models import (
     E2eeBlindEnvelope,
     ChatGroup,
     ChatGroupMember,
+    ChatStory,
 )
 from services.panel_settings_service import PanelSettingsService
 from services.sync_event_service import SyncEventService
@@ -716,5 +717,111 @@ class SocialService:
             group = db.query(ChatGroup).filter(ChatGroup.id == group_id).first()
             if group:
                 group.owner_user_id = new_owner.user_id
+        db.commit()
+
+    @classmethod
+    def delete_group(cls, db: Session, user: User, group_id: int) -> None:
+        cls.assert_social_enabled(db)
+        group = db.query(ChatGroup).filter(ChatGroup.id == group_id).first()
+        if not group:
+            raise HTTPException(status_code=404, detail="Gruppe nicht gefunden.")
+        if group.owner_user_id != user.id:
+            mem = (
+                db.query(ChatGroupMember)
+                .filter(
+                    ChatGroupMember.group_id == group_id,
+                    ChatGroupMember.user_id == user.id,
+                    ChatGroupMember.role == "owner",
+                )
+                .first()
+            )
+            if not mem:
+                raise HTTPException(status_code=403, detail="Nur der Eigentümer kann die Gruppe löschen.")
+        db.delete(group)
+        db.commit()
+
+    # --- Stories (Temporäre Statusmeldungen, 24h) ---
+
+    @classmethod
+    def create_story(
+        cls,
+        db: Session,
+        user: User,
+        content: str,
+        media_url: str | None = None,
+        background: str = "gradient-1",
+    ) -> ChatStory:
+        cls.assert_social_enabled(db)
+        from datetime import timedelta
+        clean_content = content.strip()
+        if not clean_content:
+            raise HTTPException(status_code=422, detail="Story-Inhalt darf nicht leer sein.")
+
+        now = _now()
+        story = ChatStory(
+            user_id=user.id,
+            content=clean_content,
+            media_url=media_url,
+            background=background or "gradient-1",
+            created_at=now,
+            expires_at=now + timedelta(hours=24),
+        )
+        db.add(story)
+        db.commit()
+        db.refresh(story)
+        return story
+
+    @classmethod
+    def list_active_stories(cls, db: Session, user_id: int) -> list[dict[str, Any]]:
+        cls.assert_social_enabled(db)
+        now = _now()
+        friend_ids = {user_id}
+        friends = (
+            db.query(UserFriend)
+            .filter(
+                (UserFriend.user_id == user_id) | (UserFriend.friend_id == user_id),
+                UserFriend.status == "accepted",
+            )
+            .all()
+        )
+        for f in friends:
+            friend_ids.add(f.friend_id if f.user_id == user_id else f.user_id)
+
+        stories = (
+            db.query(ChatStory, User.username, User.avatar_url)
+            .join(User, User.id == ChatStory.user_id)
+            .filter(
+                ChatStory.user_id.in_(friend_ids),
+                ChatStory.expires_at > now,
+            )
+            .order_by(ChatStory.created_at.desc())
+            .all()
+        )
+
+        return [
+            {
+                "id": s.id,
+                "user_id": s.user_id,
+                "username": uname,
+                "avatar_url": uavatar,
+                "content": s.content,
+                "media_url": s.media_url,
+                "background": s.background,
+                "created_at": s.created_at,
+                "expires_at": s.expires_at,
+                "is_self": s.user_id == user_id,
+            }
+            for s, uname, uavatar in stories
+        ]
+
+    @classmethod
+    def delete_story(cls, db: Session, user: User, story_id: int) -> None:
+        cls.assert_social_enabled(db)
+        story = db.query(ChatStory).filter(ChatStory.id == story_id).first()
+        if not story:
+            return
+        if story.user_id != user.id:
+            raise HTTPException(status_code=403, detail="Keine Berechtigung zum Löschen dieser Story.")
+        db.delete(story)
         db.commit()
 

@@ -154,3 +154,22 @@ class ChatGroupInvitePublicResponse(BaseModel):
     avatar_url: str | None = None
     member_count: int
 
+
+class ChatStoryCreate(BaseModel):
+    content: str = Field(..., min_length=1, max_length=1000)
+    media_url: str | None = None
+    background: str = Field("gradient-1", max_length=64)
+
+
+class ChatStoryResponse(BaseModel):
+    id: int
+    user_id: int
+    username: str
+    avatar_url: str | None = None
+    content: str
+    media_url: str | None = None
+    background: str
+    created_at: datetime
+    expires_at: datetime
+    is_self: bool = False
+
