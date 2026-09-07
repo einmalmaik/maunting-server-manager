@@ -467,19 +467,19 @@ export function GroupPermissionsModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="max-w-3xl p-0 overflow-hidden bg-surface border-outline-variant/30 flex flex-col max-h-[90vh]"
+        className="w-[96vw] max-w-5xl xl:max-w-6xl p-0 overflow-hidden bg-surface border-outline-variant/30 flex flex-col max-h-[92vh] sm:max-h-[88vh] shadow-2xl rounded-2xl"
       >
         {/* Header with generous vertical padding */}
-        <div className="px-6 py-5 border-b border-outline-variant/20 bg-surface-container/70 flex items-center justify-between shrink-0">
+        <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-outline-variant/20 bg-surface-container/70 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center shadow-xs">
+            <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shadow-xs shrink-0">
               <ShieldCheck className="w-5 h-5" />
             </div>
-            <div>
-              <h2 className="font-headline text-body-lg font-bold text-primary">
+            <div className="min-w-0">
+              <h2 className="font-headline text-body-lg font-bold text-primary truncate">
                 Gruppen-Rollen & Rechte
               </h2>
-              <p className="text-xs text-on-surface-variant">
+              <p className="text-xs text-on-surface-variant truncate">
                 {group?.name || 'Gruppe'} • {members.length} Mitglieder • Rollenbasiertes Rechtesystem
               </p>
             </div>
@@ -487,15 +487,15 @@ export function GroupPermissionsModal({
           <button
             type="button"
             onClick={() => onOpenChange(false)}
-            className="p-1.5 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors"
+            className="p-2 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors shrink-0"
             aria-label="Schließen"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Tab Switcher with generous spacing */}
-        <div className="flex border-b border-outline-variant/15 px-6 pt-3.5 pb-0 bg-surface-container-low/50 gap-4 shrink-0">
+        {/* Tab Switcher with generous spacing & horizontal scroll */}
+        <div className="flex border-b border-outline-variant/15 px-4 sm:px-6 pt-3.5 pb-0 bg-surface-container-low/50 gap-2 sm:gap-6 shrink-0 overflow-x-auto no-scrollbar">
           <button
             type="button"
             onClick={() => {
@@ -503,7 +503,7 @@ export function GroupPermissionsModal({
               setIsCreatingRole(false)
               setEditingRole(null)
             }}
-            className={`pb-3.5 px-2 text-xs font-semibold flex items-center gap-2 border-b-2 transition-colors ${
+            className={`pb-3.5 px-2 sm:px-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
               activeTab === 'members'
                 ? 'border-primary text-primary'
                 : 'border-transparent text-on-surface-variant hover:text-on-surface'
@@ -520,7 +520,7 @@ export function GroupPermissionsModal({
               setIsCreatingRole(false)
               setEditingRole(null)
             }}
-            className={`pb-3.5 px-2 text-xs font-semibold flex items-center gap-2 border-b-2 transition-colors ${
+            className={`pb-3.5 px-2 sm:px-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
               activeTab === 'roles'
                 ? 'border-primary text-primary'
                 : 'border-transparent text-on-surface-variant hover:text-on-surface'
@@ -537,7 +537,7 @@ export function GroupPermissionsModal({
               setIsCreatingRole(false)
               setEditingRole(null)
             }}
-            className={`pb-3.5 px-2 text-xs font-semibold flex items-center gap-2 border-b-2 transition-colors ${
+            className={`pb-3.5 px-2 sm:px-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
               activeTab === 'permissions'
                 ? 'border-primary text-primary'
                 : 'border-transparent text-on-surface-variant hover:text-on-surface'
@@ -548,12 +548,12 @@ export function GroupPermissionsModal({
           </button>
         </div>
 
-        {/* Scrollable Tab Content with generous vertical spacing (py-6) */}
-        <div className="p-6 flex-1 overflow-y-auto space-y-6">
+        {/* Scrollable Tab Content with generous vertical spacing */}
+        <div className="p-4 sm:p-6 flex-1 overflow-y-auto space-y-6">
           {/* TAB 1: MEMBERS */}
           {activeTab === 'members' && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div>
                   <h3 className="font-headline text-body-sm font-bold text-primary">
                     Gruppenmitglieder verwalten
@@ -584,13 +584,13 @@ export function GroupPermissionsModal({
                     return (
                       <div
                         key={`grp-mem-${member.user_id}`}
-                        className="p-4 flex items-center justify-between gap-4 hover:bg-surface-container-high/30 transition-colors"
+                        className="p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 hover:bg-surface-container-high/30 transition-colors"
                       >
                         <div className="flex items-center gap-3.5 min-w-0">
                           <Avatar src={member.avatar_url} name={member.username} size="md" />
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-bold text-primary truncate">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs sm:text-sm font-bold text-primary truncate">
                                 {member.username}
                               </span>
                               {isSelf && (
@@ -599,7 +599,7 @@ export function GroupPermissionsModal({
                                 </span>
                               )}
                             </div>
-                            <div className="flex items-center gap-2 mt-1">
+                            <div className="flex items-center gap-2 mt-1 flex-wrap">
                               <Badge
                                 variant={
                                   isMemberOwner
@@ -624,11 +624,11 @@ export function GroupPermissionsModal({
                           </div>
                         </div>
 
-                        {/* Controls */}
-                        <div className="flex items-center gap-3 shrink-0">
+                        {/* Controls - always visible and touch-friendly */}
+                        <div className="flex items-center gap-2.5 justify-end w-full sm:w-auto shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-outline-variant/10">
                           {canEditThisMember && (
                             <>
-                              <div className="w-40">
+                              <div className="flex-1 sm:w-48 sm:flex-none">
                                 <Dropdown
                                   value={member.role}
                                   onChange={(val) => void handleRoleChange(member, val)}
@@ -640,7 +640,7 @@ export function GroupPermissionsModal({
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => void handleKickMember(member)}
-                                className="h-9 w-9 p-0 text-error hover:bg-error/10 rounded-xl"
+                                className="h-9 w-9 p-0 text-error hover:bg-error/10 rounded-xl shrink-0"
                                 title="Aus Gruppe entfernen"
                                 aria-label={`${member.username} aus Gruppe entfernen`}
                               >
@@ -649,7 +649,7 @@ export function GroupPermissionsModal({
                             </>
                           )}
                           {!canEditThisMember && isMemberOwner && (
-                            <span className="text-xs text-on-surface-variant/70 font-medium px-3">
+                            <span className="text-xs text-on-surface-variant/70 font-medium px-3 py-1 bg-surface-container rounded-lg">
                               Gruppenleiter
                             </span>
                           )}
@@ -665,7 +665,7 @@ export function GroupPermissionsModal({
           {/* TAB 2: ROLES MANAGEMENT (Roles.tsx style table & forms) */}
           {activeTab === 'roles' && (
             <div className="space-y-5">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div>
                   <h3 className="font-headline text-body-sm font-bold text-primary">
                     Gruppenrollen & Zugriffsrechte
@@ -706,21 +706,21 @@ export function GroupPermissionsModal({
                 />
               )}
 
-              {/* Roles Table (Matches Roles.tsx styling) */}
-              <div className="rounded-2xl border border-outline-variant/20 bg-surface-container-lowest/80 overflow-hidden shadow-xs">
+              {/* Roles Table (Desktop & Tablet) */}
+              <div className="hidden md:block rounded-2xl border border-outline-variant/20 bg-surface-container-lowest/80 overflow-hidden shadow-xs">
                 <table className="w-full text-left">
                   <thead>
                     <tr className="border-b border-outline-variant/30 bg-surface-container-low/60">
-                      <th className="p-3.5 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">
+                      <th className="p-4 text-xs font-semibold text-on-surface-variant uppercase tracking-wider w-1/4">
                         Rolle
                       </th>
-                      <th className="p-3.5 text-xs font-semibold text-on-surface-variant uppercase tracking-wider hidden sm:table-cell">
+                      <th className="p-4 text-xs font-semibold text-on-surface-variant uppercase tracking-wider w-1/3">
                         Beschreibung
                       </th>
-                      <th className="p-3.5 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">
+                      <th className="p-4 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">
                         Rechte
                       </th>
-                      <th className="p-3.5 text-right text-xs font-semibold text-on-surface-variant uppercase tracking-wider">
+                      <th className="p-4 text-right text-xs font-semibold text-on-surface-variant uppercase tracking-wider w-24">
                         Aktionen
                       </th>
                     </tr>
@@ -728,67 +728,158 @@ export function GroupPermissionsModal({
                   <tbody className="divide-y divide-outline-variant/15">
                     {roles.map((r) => (
                       <tr
-                        key={`role-${r.id}`}
+                        key={`role-desktop-${r.id}`}
                         className="hover:bg-surface-container-high/40 transition-colors"
                       >
-                        <td className="p-3.5">
-                          <div className="flex items-center gap-2">
+                        <td className="p-4 align-middle">
+                          <div className="flex items-center gap-2.5">
                             {r.is_system ? (
                               <Shield className="w-4 h-4 text-status-warning shrink-0" />
                             ) : (
                               <Shield className="w-4 h-4 text-primary shrink-0" />
                             )}
-                            <span className="text-xs font-bold text-primary">{r.name}</span>
+                            <span className="text-xs sm:text-sm font-bold text-primary">{r.name}</span>
                             {r.is_system ? (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-warning/10 text-status-warning border border-status-warning/30 font-medium">
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-warning/10 text-status-warning border border-status-warning/30 font-medium shrink-0">
                                 System
                               </span>
                             ) : (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-info/10 text-status-info border border-status-info/30 font-medium">
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-info/10 text-status-info border border-status-info/30 font-medium shrink-0">
                                 Eigene
                               </span>
                             )}
                           </div>
                         </td>
-                        <td className="p-3.5 text-xs text-on-surface-variant hidden sm:table-cell">
+                        <td className="p-4 text-xs text-on-surface-variant align-middle">
                           {r.description || '—'}
                         </td>
-                        <td className="p-3.5">
-                          <Badge variant="default" className="text-[10px] px-2 py-0.5">
-                            {r.permissions.length} Rechte
-                          </Badge>
+                        <td className="p-4 align-middle">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <Badge variant="default" className="text-[10px] px-2 py-0.5 font-medium shrink-0">
+                              {r.permissions.length} Rechte
+                            </Badge>
+                            {r.permissions.slice(0, 3).map((pk) => {
+                              const def = GROUP_PERMISSION_DEFINITIONS.find((p) => p.key === pk)
+                              return (
+                                <span
+                                  key={`role-chip-${r.id}-${pk}`}
+                                  className="text-[10px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant border border-outline-variant/30 hidden lg:inline"
+                                >
+                                  {def?.title || pk}
+                                </span>
+                              )
+                            })}
+                            {r.permissions.length > 3 && (
+                              <span className="text-[10px] text-on-surface-variant/70 hidden lg:inline">
+                                +{r.permissions.length - 3} weitere
+                              </span>
+                            )}
+                          </div>
                         </td>
-                        <td className="p-3.5 text-right space-x-2">
-                          {canManage && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setIsCreatingRole(false)
-                                setEditingRole(r)
-                              }}
-                              className="text-primary hover:text-primary/80 transition-colors p-1"
-                              title="Rolle bearbeiten"
-                              aria-label={`${r.name} bearbeiten`}
-                            >
-                              <Pencil className="w-3.5 h-3.5 inline" />
-                            </button>
-                          )}
-                          {canManage && !r.is_system && (
-                            <button
-                              type="button"
-                              onClick={() => void handleDeleteRole(r)}
-                              className="text-error hover:text-error/80 transition-colors p-1"
-                              title="Rolle löschen"
-                              aria-label={`${r.name} löschen`}
-                            >
-                              <Trash2 className="w-3.5 h-3.5 inline" />
-                            </button>
-                          )}
+                        <td className="p-4 text-right align-middle whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {canManage && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setIsCreatingRole(false)
+                                  setEditingRole(r)
+                                }}
+                                className="p-1.5 rounded-lg text-primary hover:bg-primary/10 transition-colors"
+                                title="Rolle bearbeiten"
+                                aria-label={`${r.name} bearbeiten`}
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </button>
+                            )}
+                            {canManage && !r.is_system && (
+                              <button
+                                type="button"
+                                onClick={() => void handleDeleteRole(r)}
+                                className="p-1.5 rounded-lg text-error hover:bg-error/10 transition-colors"
+                                title="Rolle löschen"
+                                aria-label={`${r.name} löschen`}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+              </div>
+
+              {/* Roles Responsive Cards (Mobile & Narrow Viewports) */}
+              <div className="md:hidden space-y-3">
+                {roles.map((r) => (
+                  <div
+                    key={`role-card-${r.id}`}
+                    className="p-4 rounded-2xl border border-outline-variant/20 bg-surface-container-lowest/80 space-y-2.5 shadow-xs"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        {r.is_system ? (
+                          <Shield className="w-4 h-4 text-status-warning shrink-0" />
+                        ) : (
+                          <Shield className="w-4 h-4 text-primary shrink-0" />
+                        )}
+                        <span className="text-xs font-bold text-primary truncate">{r.name}</span>
+                        {r.is_system ? (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-warning/10 text-status-warning border border-status-warning/30 font-medium shrink-0">
+                            System
+                          </span>
+                        ) : (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-info/10 text-status-info border border-status-info/30 font-medium shrink-0">
+                            Eigene
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Prominent, accessible Action Buttons */}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {canManage && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsCreatingRole(false)
+                              setEditingRole(r)
+                            }}
+                            className="p-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-primary transition-colors"
+                            title="Rolle bearbeiten"
+                            aria-label={`${r.name} bearbeiten`}
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                        )}
+                        {canManage && !r.is_system && (
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteRole(r)}
+                            className="p-1.5 rounded-lg bg-surface-container hover:bg-error/15 text-error transition-colors"
+                            title="Rolle löschen"
+                            aria-label={`${r.name} löschen`}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {r.description && (
+                      <p className="text-xs text-on-surface-variant/90 leading-relaxed">
+                        {r.description}
+                      </p>
+                    )}
+
+                    <div className="pt-2 border-t border-outline-variant/10 flex items-center justify-between text-[11px]">
+                      <Badge variant="default" className="text-[10px] px-2 py-0.5 font-medium">
+                        {r.permissions.length} Rechte zugewiesen
+                      </Badge>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -805,90 +896,92 @@ export function GroupPermissionsModal({
                 </p>
               </div>
 
-              <div className="space-y-4 rounded-2xl border border-outline-variant/20 p-5 bg-surface-container-lowest/80 shadow-xs">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <span className="text-xs font-bold text-primary block">
-                      Nachrichten senden
-                    </span>
-                    <span className="text-[11px] text-on-surface-variant">
-                      Erlaubt regulären Mitgliedern das Schreiben und Versenden von Chatnachrichten.
-                    </span>
+              <div className="rounded-2xl border border-outline-variant/20 p-4 sm:p-6 bg-surface-container-lowest/80 shadow-xs">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
+                  <div className="p-3.5 rounded-xl bg-surface-container/40 border border-outline-variant/20 flex items-center justify-between gap-4">
+                    <div className="min-w-0 flex-1">
+                      <span className="text-xs font-bold text-primary block">
+                        Nachrichten senden
+                      </span>
+                      <span className="text-[11px] text-on-surface-variant leading-snug">
+                        Erlaubt regulären Mitgliedern das Schreiben und Versenden von Chatnachrichten.
+                      </span>
+                    </div>
+                    <Switch
+                      checked={canSendMessages}
+                      onCheckedChange={setCanSendMessages}
+                      disabled={!canManage}
+                      aria-label="Nachrichten senden erlauben"
+                    />
                   </div>
-                  <Switch
-                    checked={canSendMessages}
-                    onCheckedChange={setCanSendMessages}
-                    disabled={!canManage}
-                    aria-label="Nachrichten senden erlauben"
-                  />
-                </div>
 
-                <div className="flex items-center justify-between gap-4 pt-3.5 border-t border-outline-variant/15">
-                  <div>
-                    <span className="text-xs font-bold text-primary block">
-                      Medien, Notizen & Termine teilen
-                    </span>
-                    <span className="text-[11px] text-on-surface-variant">
-                      Erlaubt das Anhängen von Fotos, Dokumenten, Notizen und Kalendereinträgen.
-                    </span>
+                  <div className="p-3.5 rounded-xl bg-surface-container/40 border border-outline-variant/20 flex items-center justify-between gap-4">
+                    <div className="min-w-0 flex-1">
+                      <span className="text-xs font-bold text-primary block">
+                        Medien, Notizen & Termine teilen
+                      </span>
+                      <span className="text-[11px] text-on-surface-variant leading-snug">
+                        Erlaubt das Anhängen von Fotos, Dokumenten, Notizen und Kalendereinträgen.
+                      </span>
+                    </div>
+                    <Switch
+                      checked={canAttachMedia}
+                      onCheckedChange={setCanAttachMedia}
+                      disabled={!canManage}
+                      aria-label="Medien teilen erlauben"
+                    />
                   </div>
-                  <Switch
-                    checked={canAttachMedia}
-                    onCheckedChange={setCanAttachMedia}
-                    disabled={!canManage}
-                    aria-label="Medien teilen erlauben"
-                  />
-                </div>
 
-                <div className="flex items-center justify-between gap-4 pt-3.5 border-t border-outline-variant/15">
-                  <div>
-                    <span className="text-xs font-bold text-primary block">
-                      Neue Mitglieder einladen
-                    </span>
-                    <span className="text-[11px] text-on-surface-variant">
-                      Erlaubt das Teilen und Verwenden des öffentlichen Gruppen-Einladungslinks.
-                    </span>
+                  <div className="p-3.5 rounded-xl bg-surface-container/40 border border-outline-variant/20 flex items-center justify-between gap-4">
+                    <div className="min-w-0 flex-1">
+                      <span className="text-xs font-bold text-primary block">
+                        Neue Mitglieder einladen
+                      </span>
+                      <span className="text-[11px] text-on-surface-variant leading-snug">
+                        Erlaubt das Teilen und Verwenden des öffentlichen Gruppen-Einladungslinks.
+                      </span>
+                    </div>
+                    <Switch
+                      checked={canInviteMembers}
+                      onCheckedChange={setCanInviteMembers}
+                      disabled={!canManage}
+                      aria-label="Mitglieder einladen erlauben"
+                    />
                   </div>
-                  <Switch
-                    checked={canInviteMembers}
-                    onCheckedChange={setCanInviteMembers}
-                    disabled={!canManage}
-                    aria-label="Mitglieder einladen erlauben"
-                  />
-                </div>
 
-                <div className="flex items-center justify-between gap-4 pt-3.5 border-t border-outline-variant/15">
-                  <div>
-                    <span className="text-xs font-bold text-primary block">
-                      Nachrichten löschen & moderieren
-                    </span>
-                    <span className="text-[11px] text-on-surface-variant">
-                      Erlaubt Mitgliedern das Löschen fremder Chatnachrichten.
-                    </span>
+                  <div className="p-3.5 rounded-xl bg-surface-container/40 border border-outline-variant/20 flex items-center justify-between gap-4">
+                    <div className="min-w-0 flex-1">
+                      <span className="text-xs font-bold text-primary block">
+                        Nachrichten löschen & moderieren
+                      </span>
+                      <span className="text-[11px] text-on-surface-variant leading-snug">
+                        Erlaubt Mitgliedern das Löschen fremder Chatnachrichten.
+                      </span>
+                    </div>
+                    <Switch
+                      checked={canDeleteMessages}
+                      onCheckedChange={setCanDeleteMessages}
+                      disabled={!canManage}
+                      aria-label="Nachrichten löschen erlauben"
+                    />
                   </div>
-                  <Switch
-                    checked={canDeleteMessages}
-                    onCheckedChange={setCanDeleteMessages}
-                    disabled={!canManage}
-                    aria-label="Nachrichten löschen erlauben"
-                  />
-                </div>
 
-                <div className="flex items-center justify-between gap-4 pt-3.5 border-t border-outline-variant/15">
-                  <div>
-                    <span className="text-xs font-bold text-primary block">
-                      Mitglieder entfernen (Kicken)
-                    </span>
-                    <span className="text-[11px] text-on-surface-variant">
-                      Erlaubt regulären Mitgliedern das Kicken anderer regulärer Teilnehmer.
-                    </span>
+                  <div className="p-3.5 rounded-xl bg-surface-container/40 border border-outline-variant/20 flex items-center justify-between gap-4 lg:col-span-2">
+                    <div className="min-w-0 flex-1">
+                      <span className="text-xs font-bold text-primary block">
+                        Mitglieder entfernen (Kicken)
+                      </span>
+                      <span className="text-[11px] text-on-surface-variant leading-snug">
+                        Erlaubt regulären Mitgliedern das Kicken anderer regulärer Teilnehmer.
+                      </span>
+                    </div>
+                    <Switch
+                      checked={canKickMembers}
+                      onCheckedChange={setCanKickMembers}
+                      disabled={!canManage}
+                      aria-label="Mitglieder kicken erlauben"
+                    />
                   </div>
-                  <Switch
-                    checked={canKickMembers}
-                    onCheckedChange={setCanKickMembers}
-                    disabled={!canManage}
-                    aria-label="Mitglieder kicken erlauben"
-                  />
                 </div>
               </div>
 

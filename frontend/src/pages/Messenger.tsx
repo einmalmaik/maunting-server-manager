@@ -2149,11 +2149,15 @@ export function Messenger() {
                         <div
                           className={`p-3 rounded-xl border text-xs shadow-xs space-y-2 ${
                             msg.isSelf
-                              ? 'bg-white/15 border-white/20 text-white'
-                              : 'bg-surface-container-high/90 border-outline-variant/40 text-on-surface'
+                              ? 'bg-black/25 border-white/15 text-white'
+                              : 'bg-surface-container-lowest/95 border-outline-variant/30 text-on-surface'
                           }`}
                         >
-                          <div className="flex items-center justify-between gap-2 border-b border-white/10 pb-1.5">
+                          <div
+                            className={`flex items-center justify-between gap-2 border-b pb-1.5 ${
+                              msg.isSelf ? 'border-white/10' : 'border-outline-variant/20'
+                            }`}
+                          >
                             <div className="flex items-center gap-1.5 font-bold text-[11px] truncate">
                               <StickyNote className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                               <span className="truncate">{msg.noteAttachment.title || 'Notiz'}</span>
@@ -2163,14 +2167,16 @@ export function Messenger() {
                               variant={msg.isSelf ? 'secondary' : 'primary'}
                               size="sm"
                               onClick={() => void handleImportNote(msg.noteAttachment!)}
-                              className="h-6 px-2 text-[10px] gap-1 shrink-0 rounded-full"
+                              className={`h-6 px-2 text-[10px] gap-1 shrink-0 rounded-full ${
+                                msg.isSelf ? 'bg-white/20 hover:bg-white/30 text-white border-none' : ''
+                              }`}
                               title="In eigene Notizen übernehmen"
                             >
                               <Download className="w-3 h-3" />
                               <span>Übernehmen</span>
                             </Button>
                           </div>
-                          <p className="whitespace-pre-wrap text-[11px] opacity-90 line-clamp-4 leading-relaxed">
+                          <p className="whitespace-pre-wrap text-[11px] opacity-85 line-clamp-4 leading-relaxed">
                             {msg.noteAttachment.content}
                           </p>
                         </div>
@@ -2181,11 +2187,15 @@ export function Messenger() {
                         <div
                           className={`p-3 rounded-xl border text-xs shadow-xs space-y-2 ${
                             msg.isSelf
-                              ? 'bg-white/15 border-white/20 text-white'
-                              : 'bg-surface-container-high/90 border-outline-variant/40 text-on-surface'
+                              ? 'bg-black/25 border-white/15 text-white'
+                              : 'bg-surface-container-lowest/95 border-outline-variant/30 text-on-surface'
                           }`}
                         >
-                          <div className="flex items-center justify-between gap-2 border-b border-white/10 pb-1.5">
+                          <div
+                            className={`flex items-center justify-between gap-2 border-b pb-1.5 ${
+                              msg.isSelf ? 'border-white/10' : 'border-outline-variant/20'
+                            }`}
+                          >
                             <div className="flex items-center gap-1.5 font-bold text-[11px] truncate">
                               <CalendarIcon className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
                               <span className="truncate">{msg.calendarAttachment.title || 'Termin'}</span>
@@ -2195,14 +2205,16 @@ export function Messenger() {
                               variant={msg.isSelf ? 'secondary' : 'primary'}
                               size="sm"
                               onClick={() => void handleImportCalendar(msg.calendarAttachment!)}
-                              className="h-6 px-2 text-[10px] gap-1 shrink-0 rounded-full"
+                              className={`h-6 px-2 text-[10px] gap-1 shrink-0 rounded-full ${
+                                msg.isSelf ? 'bg-white/20 hover:bg-white/30 text-white border-none' : ''
+                              }`}
                               title="In eigenen Kalender eintragen"
                             >
                               <Plus className="w-3 h-3" />
                               <span>Eintragen</span>
                             </Button>
                           </div>
-                          <div className="text-[10px] opacity-85 flex items-center gap-1">
+                          <div className="text-[10px] opacity-80 flex items-center gap-1">
                             <Clock className="w-3 h-3" />
                             <span>
                               {new Date(msg.calendarAttachment.start).toLocaleString([], {
@@ -2212,13 +2224,13 @@ export function Messenger() {
                             </span>
                           </div>
                           {msg.calendarAttachment.location && (
-                            <div className="text-[10px] opacity-85 flex items-center gap-1">
+                            <div className="text-[10px] opacity-80 flex items-center gap-1">
                               <MapPin className="w-3 h-3" />
                               <span>{msg.calendarAttachment.location}</span>
                             </div>
                           )}
                           {msg.calendarAttachment.description && (
-                            <p className="whitespace-pre-wrap text-[11px] opacity-90 line-clamp-3 leading-relaxed">
+                            <p className="whitespace-pre-wrap text-[11px] opacity-85 line-clamp-3 leading-relaxed">
                               {msg.calendarAttachment.description}
                             </p>
                           )}
