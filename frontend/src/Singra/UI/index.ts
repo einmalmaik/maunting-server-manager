@@ -1,5 +1,6 @@
 export { Button } from '@/components/ui/Button'
 export { Badge } from '@/components/ui/Badge'
+export { Input } from '@/components/ui/Input'
 export { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
 export { Dropdown, type DropdownOption } from '@/components/ui/Dropdown'
 export { DateTimePicker, type DateTimePickerProps } from '@/components/ui/DateTimePicker'

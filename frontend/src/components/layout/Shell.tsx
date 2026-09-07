@@ -6,11 +6,24 @@ import { VersionFooter } from '@/components/VersionFooter'
 import { AiRunNotice } from '@/components/ai/AiRunNotice'
 import { ServerIncidentNotifier } from '@/components/notifications/ServerIncidentNotifier'
 import { PanelPopupModal } from '@/components/popups/PanelPopupModal'
+import { FriendsListDock } from '@/components/social/FriendsListDock'
+import { api } from '@/api/client'
 
 export function Shell() {
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false)
   const [sidebarHidden, setSidebarHidden] = useState(false)
+  const [socialEnabled, setSocialEnabled] = useState(true)
   const mobileNavigationTriggerRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    api<{ social_enabled?: boolean }>('/settings/public')
+      .then((res) => {
+        if (typeof res.social_enabled === 'boolean') {
+          setSocialEnabled(res.social_enabled)
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     const handleToggle = (e: Event) => {
@@ -98,6 +111,13 @@ export function Shell() {
           weiterarbeitet: sonst muesste man den Chat offen lassen, also genau
           das tun, was nicht mehr noetig sein soll. */}
       <AiRunNotice />
+
+      {/* Floating Friends & Social Dock */}
+      {socialEnabled && !isAiPage && (
+        <div className="fixed bottom-4 right-6 z-30 hidden lg:block">
+          <FriendsListDock collapsedDefault={true} className="w-80 shadow-2xl" />
+        </div>
+      )}
 
       {/* Push- & Pop-up-Benachrichtigungen bei Server-Vorfällen & Kalender-Erinnerungen */}
       <ServerIncidentNotifier />

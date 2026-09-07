@@ -246,6 +246,24 @@ export function GeneralTab() {
               <label className="flex items-center justify-between gap-4">
                 <span className="block">
                   <span className="block font-headline text-body-md text-primary font-semibold">
+                    {t('settings.socialEnabled', 'Social-, Freundes- & E2EE-Chat-Hub')}
+                  </span>
+                  <span className="block font-body text-xs text-on-surface-variant">
+                    {t('settings.socialEnabledHint', 'Aktiviert das weltweite Community-, Freundes- und Achievement-System sowie E2EE-Direktnachrichten. Deaktiviert verbirgt alle Social-Funktionen.')}
+                  </span>
+                </span>
+                <Switch
+                  checked={settings.social_enabled}
+                  onCheckedChange={(checked) => setSettings({ ...settings, social_enabled: checked })}
+                  disabled={!canWrite}
+                  aria-label={t('settings.socialEnabled', 'Social-, Freundes- & E2EE-Chat-Hub')}
+                />
+              </label>
+            </div>
+            <div className="md:col-span-2 border-t border-outline-variant/30 pt-6">
+              <label className="flex items-center justify-between gap-4">
+                <span className="block">
+                  <span className="block font-headline text-body-md text-primary font-semibold">
                     {t('settings.cloudflareEnabled', 'Cloudflare DNS')}
                   </span>
                   <span className="block font-body text-xs text-on-surface-variant">

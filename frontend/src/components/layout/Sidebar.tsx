@@ -6,10 +6,11 @@ import { useAuthStore } from '@/stores/authStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { useIsOnline } from '@/hooks/useIsOnline'
 import { Logo } from '@/components/Logo'
-import { LogOut, Plus, User as UserIcon, X } from 'lucide-react'
+import { LogOut, Plus, Trophy, User as UserIcon, X } from 'lucide-react'
 import { buildNavigation, type NavGroupName } from './navigation'
 import { DesktopAppDownloadBadge } from './DesktopAppDownloadBadge'
 import { BenachrichtigungsGlocke, ProfileDropdown, type ProfileDropdownItem } from '@/Singra/UI'
+import { usePresenceAndActivity } from '@/hooks/usePresenceAndActivity'
 
 interface SidebarProps {
   mobile?: boolean
@@ -61,15 +62,20 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
 
   const [calendarEnabled, setCalendarEnabled] = useState(true)
   const [notesEnabled, setNotesEnabled] = useState(true)
+  const [socialEnabled, setSocialEnabled] = useState(true)
+  const { status: presenceStatus, changeStatus: handlePresenceChange } = usePresenceAndActivity(socialEnabled)
 
   useEffect(() => {
-    api<{ calendar_enabled?: boolean; notes_enabled?: boolean }>('/settings/public')
+    api<{ calendar_enabled?: boolean; notes_enabled?: boolean; social_enabled?: boolean }>('/settings/public')
       .then((res) => {
         if (typeof res.calendar_enabled === 'boolean') {
           setCalendarEnabled(res.calendar_enabled)
         }
         if (typeof res.notes_enabled === 'boolean') {
           setNotesEnabled(res.notes_enabled)
+        }
+        if (typeof res.social_enabled === 'boolean') {
+          setSocialEnabled(res.social_enabled)
         }
       })
       .catch(() => {})
@@ -93,6 +99,15 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
       icon: <UserIcon className="h-4 w-4" />,
       onClick: handleNavigateProfile,
     },
+    ...(socialEnabled ? [{
+      key: 'social',
+      label: t('nav.social', 'Social & Hub'),
+      icon: <Trophy className="h-4 w-4 text-amber-400" />,
+      onClick: () => {
+        if (onNavigate) onNavigate()
+        navigate('/social')
+      },
+    }] : []),
     {
       key: 'logout',
       label: t('nav.logout', 'Abmelden'),
@@ -103,7 +118,9 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
   ]
 
   const navItems = buildNavigation({
-    dashboard: t('nav.dashboard'), calendar: t('nav.calendar', 'Kalender'), notes: t('nav.notes', 'Notizen'), servers: t('nav.servers'), users: t('nav.users'), roles: t('nav.roles'),
+    dashboard: t('nav.dashboard'), calendar: t('nav.calendar', 'Kalender'), notes: t('nav.notes', 'Notizen'),
+    social: t('nav.social', 'Social & Hub'),
+    servers: t('nav.servers'), users: t('nav.users'), roles: t('nav.roles'),
     teams: t('nav.teams'),
     audit: t('nav.audit', 'Audit'),
     settings: t('nav.settings'), blueprints: t('nav.blueprints'), panelBackups: t('nav.panelBackups'),
@@ -111,7 +128,7 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
   }, {
     owner: Boolean(user?.is_owner), canManageUsers, canManageRoles, canViewAudit, canViewSettings,
     canManagePanelBackups, canReadPanelDatabase, canViewNodes: canReadNodes || canManageNodes, canUseAi, canUseSkills,
-    calendarEnabled, notesEnabled, isOnline,
+    calendarEnabled, notesEnabled, socialEnabled, isOnline,
   })
   const groupLabels: Record<NavGroupName, string> = {
     Overview: t('navGroups.overview', 'Overview'), Infrastructure: t('navGroups.infrastructure', 'Infrastructure'),
@@ -178,6 +195,8 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
             items={profileMenuItems}
             placement="top-left"
             triggerVariant="full"
+            status={socialEnabled ? presenceStatus : undefined}
+            onStatusChange={socialEnabled ? handlePresenceChange : undefined}
           />
 
           {/* Notification Bell */}

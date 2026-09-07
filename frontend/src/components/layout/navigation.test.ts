@@ -5,6 +5,7 @@ const labels = {
   dashboard: 'Dashboard',
   calendar: 'Calendar',
   notes: 'Notes',
+  social: 'Social & Hub',
   servers: 'Servers',
   users: 'Users',
   roles: 'Roles',
@@ -215,5 +216,26 @@ describe('buildNavigation', () => {
     expect(routes).toContain('/servers')
     expect(routes).toContain('/ai')
     expect(routes).toContain('/docs')
+  })
+
+  it('blendet Social & Hub aus, wenn socialEnabled false ist', () => {
+    const access = {
+      owner: true,
+      canManageUsers: true,
+      canManageRoles: true,
+      canViewAudit: true,
+      canViewSettings: true,
+      canManagePanelBackups: true,
+      canReadPanelDatabase: true,
+      canViewNodes: true,
+      canUseAi: true,
+      canUseSkills: true,
+      socialEnabled: false,
+    }
+    const items = buildNavigation(labels, access)
+    expect(items.some((i) => i.to === '/social')).toBe(false)
+
+    const enabledItems = buildNavigation(labels, { ...access, socialEnabled: true })
+    expect(enabledItems.some((i) => i.to === '/social')).toBe(true)
   })
 })

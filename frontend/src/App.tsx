@@ -38,6 +38,7 @@ const Privacy = lazy(() => import('./pages/Privacy').then(module => ({ default: 
 const Ai = lazy(() => import('./pages/Ai').then(module => ({ default: module.Ai })))
 const Calendar = lazy(() => import('./pages/Calendar').then(module => ({ default: module.Calendar })))
 const Notes = lazy(() => import('./pages/Notes').then(module => ({ default: module.Notes })))
+const SocialHub = lazy(() => import('./pages/SocialHub').then(module => ({ default: module.SocialHub })))
 import { apiUrl } from '@/config/api'
 import { useAuthStore } from '@/stores/authStore'
 import { PrivacyAcknowledgementNotice } from './components/ui/PrivacyAcknowledgementNotice'
@@ -142,6 +143,7 @@ function App() {
           <Route path="profile" element={<Profile />} />
           <Route path="calendar" element={<Calendar />} />
           <Route path="notes" element={<Notes />} />
+          <Route path="social" element={<SocialHub />} />
           <Route path="ai" element={<RequirePermission routeKey="ai"><Ai /></RequirePermission>} />
           <Route path="teams" element={<Teams />} />
           <Route path="docs" element={<Docs />} />

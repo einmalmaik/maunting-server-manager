@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { Archive, BookOpen, Bot, Boxes, Calendar as CalendarIcon, Database, History, LayoutDashboard, Network, Server, Settings, Shield, StickyNote, Users, UsersRound } from 'lucide-react'
+import { Archive, BookOpen, Bot, Boxes, Calendar as CalendarIcon, Database, History, LayoutDashboard, Network, Server, Settings, Shield, StickyNote, Trophy, Users, UsersRound } from 'lucide-react'
 
 export type NavGroupName = 'Overview' | 'Infrastructure' | 'Administration' | 'Panel' | 'Help'
 export interface NavigationItem { to: string; icon: LucideIcon; label: string; group: NavGroupName }
@@ -25,6 +25,7 @@ interface NavigationAccess {
   canUseSkills: boolean
   calendarEnabled?: boolean
   notesEnabled?: boolean
+  socialEnabled?: boolean
   /**
    * Ist das Gerät offline, werden nur offline-fähige Bereiche angezeigt:
    * Dashboard, Kalender und Notizen. Alle anderen Einträge (Server, KI,
@@ -44,6 +45,7 @@ export function buildNavigation(labels: Record<string, string>, access: Navigati
     { to: '/', icon: LayoutDashboard, label: labels.dashboard, group: 'Overview' },
     ...(access.calendarEnabled !== false ? [{ to: '/calendar', icon: CalendarIcon, label: labels.calendar || 'Kalender', group: 'Overview' as const }] : []),
     ...(access.notesEnabled !== false ? [{ to: '/notes', icon: StickyNote, label: labels.notes || 'Notizen', group: 'Overview' as const }] : []),
+    ...(online && access.socialEnabled !== false ? [{ to: '/social', icon: Trophy, label: labels.social || 'Social & Hub', group: 'Overview' as const }] : []),
     ...(online ? [{ to: '/servers', icon: Server, label: labels.servers, group: 'Infrastructure' as const }] : []),
     ...(online && (access.owner || access.canViewNodes) ? [{ to: '/admin/nodes', icon: Network, label: labels.nodes, group: 'Infrastructure' as const }] : []),
     ...(online && (access.owner || access.canUseAi) ? [{ to: '/ai', icon: Bot, label: labels.ai, group: 'Infrastructure' as const }] : []),
