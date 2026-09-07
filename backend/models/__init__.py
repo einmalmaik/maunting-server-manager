@@ -57,6 +57,11 @@ from .vault_entry import VaultEntry
 from .vault_hint import VaultHint
 from .vault_user_setting import VaultUserSetting
 from .vault_blind_bucket import VaultBlindBucket
+from .user_achievement import UserAchievement
+from .user_activity_time import UserActivityTime
+from .user_friend import UserFriend
+from .user_presence import UserPresence
+from .e2ee_blind_envelope import E2eeBlindEnvelope
 from .credential import (
     CREDENTIAL_KINDS,
     KIND_GITHUB_TOKEN,
@@ -95,4 +100,5 @@ __all__ = [
     "UserMailbox", "UserCalendar", "CalendarEvent", "Note",
     "PanelPopup", "UserPopupState",
     "VaultEntry", "VaultHint", "VaultUserSetting", "VaultBlindBucket",
+    "UserAchievement", "UserActivityTime", "UserFriend", "UserPresence", "E2eeBlindEnvelope",
 ]  # noqa: E501

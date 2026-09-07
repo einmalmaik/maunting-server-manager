@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 import hashlib
 
-from sqlalchemy import Boolean, CheckConstraint, String, DateTime, ForeignKey, Integer, text, true, false
+from sqlalchemy import Boolean, CheckConstraint, String, DateTime, ForeignKey, Integer, text, true, false, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -144,6 +144,16 @@ class User(Base):
 
     password_reset_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
     password_reset_expires: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # 3-Stufen Privatsphäre: "private" | "friends" | "public"
+    social_privacy: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="friends",
+        server_default="friends",
+    )
+    # E2EE Public Key (JWK / base64) für Ende-zu-Ende verschlüsselte Direkt- & Team-Chats
+    social_e2ee_public_key: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     avatar_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
