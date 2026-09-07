@@ -27,12 +27,14 @@ import { AchievementsModal } from './AchievementsModal'
 import {
   type FriendItem,
   getFriends,
+  getFriendRequests,
   sendFriendRequest,
   acceptFriendRequest,
   declineFriendRequest,
   removeFriend,
   updatePresence,
 } from '@/api/social'
+import { detectDeviceType } from '@/hooks/usePresenceAndActivity'
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
 
@@ -44,6 +46,7 @@ interface FriendsListDockProps {
 export function FriendsListDock({ collapsedDefault = false, className = '' }: FriendsListDockProps) {
   const { user } = useAuthStore()
   const [friends, setFriends] = useState<FriendItem[]>([])
+  const [incomingRequests, setIncomingRequests] = useState<FriendItem[]>([])
   const [collapsed, setCollapsed] = useState(collapsedDefault)
   const [loading, setLoading] = useState(false)
   const [addUsername, setAddUsername] = useState('')
@@ -57,8 +60,12 @@ export function FriendsListDock({ collapsedDefault = false, className = '' }: Fr
 
   const loadFriends = async () => {
     try {
-      const data = await getFriends()
-      setFriends(data)
+      const [friendsData, reqsData] = await Promise.all([
+        getFriends(),
+        getFriendRequests().catch(() => ({ incoming: [], outgoing: [] })),
+      ])
+      setFriends(friendsData)
+      setIncomingRequests(reqsData.incoming)
     } catch {
       // Offline / network fallback
     }
@@ -75,7 +82,7 @@ export function FriendsListDock({ collapsedDefault = false, className = '' }: Fr
     try {
       await updatePresence({
         status: newStatus,
-        device_type: 'web',
+        device_type: detectDeviceType(),
       })
     } catch {
       // Non-blocking
@@ -134,7 +141,6 @@ export function FriendsListDock({ collapsedDefault = false, className = '' }: Fr
   }
 
   const acceptedFriends = friends.filter((f) => f.status === 'accepted')
-  const incomingRequests = friends.filter((f) => f.status === 'pending' && !f.is_requester)
 
   return (
     <>
@@ -156,19 +162,19 @@ export function FriendsListDock({ collapsedDefault = false, className = '' }: Fr
           <div className="flex items-center gap-1">
             <Button
               variant="ghost"
-              size="sm"
+              size="icon"
               onClick={() => setIsAchievementsOpen(true)}
               className="h-7 w-7 p-0 text-amber-400 hover:text-amber-300"
-              title="Errungenschaften & Prestige"
+              aria-label="Errungenschaften & Prestige"
             >
               <Trophy className="w-3.5 h-3.5" />
             </Button>
             <Button
               variant="ghost"
-              size="sm"
+              size="icon"
               onClick={() => setCollapsed(!collapsed)}
               className="h-7 w-7 p-0 text-on-surface-variant hover:text-primary"
-              title={collapsed ? 'Ausklappen' : 'Einklappen'}
+              aria-label={collapsed ? 'Ausklappen' : 'Einklappen'}
             >
               {collapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
             </Button>
@@ -211,10 +217,10 @@ export function FriendsListDock({ collapsedDefault = false, className = '' }: Fr
               </Button>
               <Button
                 variant={activeTab === 'add' ? 'primary' : 'ghost'}
-                size="sm"
+                size="icon"
                 onClick={() => setActiveTab('add')}
-                className="text-xs h-6 px-2.5 ml-auto"
-                title="Freund hinzufügen"
+                className="text-xs h-6 w-6 p-0 ml-auto"
+                aria-label="Freund hinzufügen"
               >
                 <UserPlus className="w-3 h-3" />
               </Button>
@@ -263,22 +269,22 @@ export function FriendsListDock({ collapsedDefault = false, className = '' }: Fr
                       <div className="flex items-center gap-1 shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
                         <Button
                           variant="ghost"
-                          size="sm"
+                          size="icon"
                           onClick={() => {
                             setChatFriend(f)
                             setIsChatOpen(true)
                           }}
                           className="h-7 w-7 p-0 text-primary hover:bg-primary/15"
-                          title="E2EE Direktnachricht"
+                          aria-label="E2EE Direktnachricht"
                         >
                           <MessageSquare className="w-3.5 h-3.5" />
                         </Button>
                         <Button
                           variant="ghost"
-                          size="sm"
+                          size="icon"
                           onClick={() => void handleRemove(f.user_id ?? f.id)}
                           className="h-7 w-7 p-0 text-on-surface-variant hover:text-rose-400 hover:bg-rose-500/10"
-                          title="Freund entfernen"
+                          aria-label="Freund entfernen"
                         >
                           <UserMinus className="w-3 h-3" />
                         </Button>
@@ -308,19 +314,19 @@ export function FriendsListDock({ collapsedDefault = false, className = '' }: Fr
                       <div className="flex items-center gap-1">
                         <Button
                           variant="primary"
-                          size="sm"
+                          size="icon"
                           onClick={() => void handleAccept(req.id)}
                           className="h-6 w-6 p-0"
-                          title="Annehmen"
+                          aria-label="Annehmen"
                         >
                           <Check className="w-3 h-3" />
                         </Button>
                         <Button
                           variant="ghost"
-                          size="sm"
+                          size="icon"
                           onClick={() => void handleDecline(req.id)}
                           className="h-6 w-6 p-0 text-rose-400 hover:bg-rose-500/10"
-                          title="Ablehnen"
+                          aria-label="Ablehnen"
                         >
                           <X className="w-3 h-3" />
                         </Button>

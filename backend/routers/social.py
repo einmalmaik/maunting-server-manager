@@ -231,6 +231,7 @@ def relay_e2ee_message(
         blind_mailbox_id=req.blind_mailbox_id,
         ciphertext_envelope=req.ciphertext_envelope,
         sender_user_id=user.id,
+        recipient_user_id=req.recipient_user_id,
     )
     return {
         "id": envelope.id,

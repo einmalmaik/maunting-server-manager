@@ -20,6 +20,7 @@ export function StatusDot({ status = 'invisible', className = '', size = 'md' }:
       <span
         className={`inline-block rounded-full bg-emerald-500 ring-2 ring-surface shadow-[0_0_8px_rgba(16,185,129,0.5)] ${sizeClasses} ${className}`}
         title="Online"
+        aria-label="Online"
       />
     )
   }
@@ -29,6 +30,7 @@ export function StatusDot({ status = 'invisible', className = '', size = 'md' }:
       <span
         className={`inline-block rounded-full bg-amber-500 ring-2 ring-surface shadow-[0_0_8px_rgba(245,158,11,0.5)] ${sizeClasses} ${className}`}
         title="Abwesend"
+        aria-label="Abwesend"
       />
     )
   }
@@ -38,6 +40,7 @@ export function StatusDot({ status = 'invisible', className = '', size = 'md' }:
     <span
       className={`inline-block rounded-full bg-on-surface-variant/40 ring-2 ring-surface ${sizeClasses} ${className}`}
       title="Unsichtbar / Offline"
+      aria-label="Unsichtbar / Offline"
     />
   )
 }

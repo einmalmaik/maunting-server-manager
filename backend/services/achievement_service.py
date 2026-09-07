@@ -385,7 +385,7 @@ class AchievementService:
         if getattr(user, "is_owner", False):
             server_count = db.query(func.count(Server.id)).scalar() or 0
         else:
-            server_count = db.query(func.count(ServerPermission.id)).filter_by(user_id=user_id).scalar() or 0
+            server_count = db.query(func.count(func.distinct(ServerPermission.server_id))).filter_by(user_id=user_id).scalar() or 0
 
         if server_count >= 1:
             cls.unlock_achievement(db, user_id, "server_architect", commit=False)
@@ -397,7 +397,7 @@ class AchievementService:
             backup_count = db.query(func.count(Backup.id)).scalar() or 0
         else:
             backup_count = (
-                db.query(func.count(Backup.id))
+                db.query(func.count(func.distinct(Backup.id)))
                 .join(ServerPermission, Backup.server_id == ServerPermission.server_id)
                 .filter(ServerPermission.user_id == user_id)
                 .scalar()

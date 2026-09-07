@@ -18,6 +18,7 @@ export function DeviceBadge({ deviceType = 'web', className = '', showLabel = fa
       <span
         className={`inline-flex items-center gap-1.5 text-xs text-primary/90 font-medium ${className}`}
         title="Desktop-App (MSS)"
+        aria-label="Desktop-App (MSS)"
       >
         <svg
           className="w-3.5 h-3.5 shrink-0"
@@ -43,6 +44,7 @@ export function DeviceBadge({ deviceType = 'web', className = '', showLabel = fa
       <span
         className={`inline-flex items-center gap-1.5 text-xs text-tertiary/90 font-medium ${className}`}
         title="Mobile App"
+        aria-label="Mobile App"
       >
         <svg
           className="w-3.5 h-3.5 shrink-0"
@@ -67,6 +69,7 @@ export function DeviceBadge({ deviceType = 'web', className = '', showLabel = fa
     <span
       className={`inline-flex items-center gap-1.5 text-xs text-on-surface-variant/80 font-medium ${className}`}
       title="Web-Panel"
+      aria-label="Web-Panel"
     >
       <svg
         className="w-3.5 h-3.5 shrink-0"

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { Avatar } from './Avatar'
 
 export interface ProfileDropdownItem {
@@ -27,13 +27,6 @@ export interface ProfileDropdownProps {
   onStatusChange?: (status: 'online' | 'away' | 'invisible') => void
 }
 
-const placementClasses = {
-  'bottom-right': 'top-full right-0 mt-2',
-  'bottom-left': 'top-full left-0 mt-2',
-  'top-right': 'bottom-full right-0 mb-2',
-  'top-left': 'bottom-full left-0 mb-2',
-}
-
 /**
  * Barrierefreies, reduziertes Profil-Dropdown der MauntingStudios Design-DNA.
  * Zeigt Profilbild mit Statusleuchte, den Benutzernamen (und dezent die E-Mail)
@@ -53,6 +46,54 @@ export function ProfileDropdown({
   const [isOpen, setIsOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
 
+  const initialPlacement = placement.startsWith('top') ? 'top' : 'bottom'
+  const initialAlign = placement.endsWith('right') ? 'right' : 'left'
+  const [computedPlacement, setComputedPlacement] = useState<'top' | 'bottom'>(initialPlacement)
+  const [computedAlign, setComputedAlign] = useState<'left' | 'right'>(initialAlign)
+
+  const updatePosition = useCallback(() => {
+    if (!containerRef.current) return
+    const rect = containerRef.current.getBoundingClientRect()
+    // Test environments without layout engine (jsdom)
+    if (rect.width === 0 && rect.height === 0 && rect.top === 0 && rect.bottom === 0) {
+      setComputedPlacement(initialPlacement)
+      setComputedAlign(initialAlign)
+      return
+    }
+
+    const spaceBelow = window.innerHeight - rect.bottom
+    const spaceAbove = rect.top
+    const spaceRight = window.innerWidth - rect.right
+    const spaceLeft = rect.left
+
+    // Vertical collision detection (dropdown height ~320px)
+    if (placement.startsWith('top') || (spaceAbove >= 320 && spaceBelow < 320)) {
+      setComputedPlacement('top')
+    } else if (spaceBelow < 320 && spaceAbove > spaceBelow) {
+      setComputedPlacement('top')
+    } else {
+      setComputedPlacement('bottom')
+    }
+
+    // Horizontal collision detection (dropdown width ~260px)
+    if (placement.endsWith('left') && spaceLeft >= 260) {
+      setComputedAlign('left')
+    } else if (placement.endsWith('right') && spaceRight >= 260) {
+      setComputedAlign('right')
+    } else if (spaceRight < 260 && spaceLeft >= spaceRight) {
+      setComputedAlign('right')
+    } else {
+      setComputedAlign('left')
+    }
+  }, [placement, initialPlacement, initialAlign])
+
+  const toggleDropdown = () => {
+    if (!isOpen) {
+      updatePosition()
+    }
+    setIsOpen((prev) => !prev)
+  }
+
   const renderStatusDot = (size: 'xs' | 'sm' | 'md') => {
     if (!status) return null
     const sizeClasses = size === 'xs' ? 'w-1.5 h-1.5' : size === 'sm' ? 'w-2 h-2' : 'w-2.5 h-2.5'
@@ -66,7 +107,7 @@ export function ProfileDropdown({
     return (
       <span
         className={`absolute bottom-0 right-0 inline-block rounded-full ring-2 ring-surface ${sizeClasses} ${colorClasses}`}
-        title={status === 'online' ? 'Online' : status === 'away' ? 'Abwesend' : 'Unsichtbar'}
+        aria-label={status === 'online' ? 'Online' : status === 'away' ? 'Abwesend' : 'Unsichtbar'}
       />
     )
   }
@@ -86,13 +127,21 @@ export function ProfileDropdown({
     if (isOpen) {
       document.addEventListener('mousedown', handleClickOutside)
       document.addEventListener('keydown', handleKeyDown)
+      updatePosition()
+      window.addEventListener('resize', updatePosition)
+      window.addEventListener('scroll', updatePosition, true)
     }
 
     return () => {
       document.removeEventListener('mousedown', handleClickOutside)
       document.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('resize', updatePosition)
+      window.removeEventListener('scroll', updatePosition, true)
     }
-  }, [isOpen])
+  }, [isOpen, updatePosition])
+
+  const placementClass = computedPlacement === 'top' ? 'bottom-full mb-2' : 'top-full mt-2'
+  const alignClass = computedAlign === 'right' ? 'right-0 left-auto' : 'left-0 right-auto'
 
   return (
     <div
@@ -103,7 +152,7 @@ export function ProfileDropdown({
       {triggerVariant === 'avatar' ? (
         <button
           type="button"
-          onClick={() => setIsOpen((prev) => !prev)}
+          onClick={toggleDropdown}
           aria-expanded={isOpen}
           aria-haspopup="menu"
           aria-label={triggerAriaLabel}
@@ -121,7 +170,7 @@ export function ProfileDropdown({
       ) : (
         <button
           type="button"
-          onClick={() => setIsOpen((prev) => !prev)}
+          onClick={toggleDropdown}
           aria-expanded={isOpen}
           aria-haspopup="menu"
           aria-label={triggerAriaLabel}
@@ -154,7 +203,7 @@ export function ProfileDropdown({
       {isOpen && (
         <div
           role="menu"
-          className={`absolute w-64 overflow-hidden rounded-2xl border border-outline-variant bg-surface-container-high shadow-2xl z-50 animate-fade-in ${placementClasses[placement]}`}
+          className={`absolute w-64 overflow-hidden rounded-2xl border border-outline-variant bg-surface-container-high shadow-2xl z-50 animate-fade-in ${placementClass} ${alignClass}`}
         >
           {/* Header mit Avatar & Benutzername & Statusumschalter */}
           <div className="border-b border-outline-variant/30 p-3.5 bg-surface-container">

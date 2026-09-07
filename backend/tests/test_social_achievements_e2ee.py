@@ -110,28 +110,34 @@ def test_privacy_three_tier_model(db: Session):
     prof_friend = SocialService.get_profile(db, friend.id, owner)
     assert prof_friend["restricted"] is True
     assert prof_friend["stats"] is None
+    assert prof_friend["presence"] is None
 
     prof_stranger = SocialService.get_profile(db, stranger.id, owner)
     assert prof_stranger["restricted"] is True
+    assert prof_stranger["presence"] is None
 
     prof_self = SocialService.get_profile(db, owner.id, owner)
     assert prof_self["restricted"] is False
     assert prof_self["stats"] is not None
+    assert prof_self["presence"] is not None
 
     # 2. Friends: Freund darf sehen, Fremder nicht
     SocialService.update_privacy(db, owner.id, "friends")
     prof_friend_2 = SocialService.get_profile(db, friend.id, owner)
     assert prof_friend_2["restricted"] is False
     assert prof_friend_2["stats"] is not None
+    assert prof_friend_2["presence"] is not None
 
     prof_stranger_2 = SocialService.get_profile(db, stranger.id, owner)
     assert prof_stranger_2["restricted"] is True
+    assert prof_stranger_2["presence"] is None  # Kein Presence-Leak an Fremde!
 
     # 3. Public: Jeder darf sehen
     SocialService.update_privacy(db, owner.id, "public")
     prof_stranger_3 = SocialService.get_profile(db, stranger.id, owner)
     assert prof_stranger_3["restricted"] is False
     assert prof_stranger_3["stats"] is not None
+    assert prof_stranger_3["presence"] is not None
 
 
 def test_operator_master_toggle_disables_social(db: Session, client: TestClient, owner_user: User):
@@ -237,3 +243,62 @@ def test_ai_tool_hard_friend_binding_and_zero_leakage(db: Session, owner_user: U
     # Das Achievement 'social_zero_knowledge' wurde freigeschaltet
     ach = db.query(UserAchievement).filter_by(user_id=owner_user.id, achievement_id="social_zero_knowledge").first()
     assert ach is not None
+
+    # Entschlüsselungsprüfung des DIS-Umschlags
+    import base64
+    import json
+    import hashlib
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    env = envelopes[-1]
+    assert env.ciphertext_envelope.startswith("sv-e2ee-v1:")
+    ct_b64 = env.ciphertext_envelope[len("sv-e2ee-v1:"):]
+    raw_bytes = base64.b64decode(ct_b64)
+    iv = raw_bytes[:12]
+    ciphertext_and_tag = raw_bytes[12:]
+    ids = sorted([owner_user.id, friend.id])
+    key_bytes = hashlib.sha256(f"msm:dm:key:{ids[0]}:{ids[1]}".encode("utf-8")).digest()
+    aad = f"msm:dm:aad:{ids[0]}:{ids[1]}".encode("utf-8")
+    aesgcm = AESGCM(key_bytes)
+    decrypted_bytes = aesgcm.decrypt(iv, ciphertext_and_tag, aad)
+    msg_obj = json.loads(decrypted_bytes.decode("utf-8"))
+    assert msg_obj["sender_id"] == owner_user.id
+    assert msg_obj["text"] == "Treffen wir uns auf dem Server?"
+    assert "timestamp" in msg_obj
+
+
+def test_presence_offline_timeout(db: Session, owner_user: User):
+    """Prüft, dass Präsenz nach 120s Inaktivität automatisch als offline gewertet wird."""
+    from datetime import datetime, timezone, timedelta
+    from models import UserPresence
+
+    # 1. Frische Präsenz -> online
+    SocialService.update_presence(db, owner_user.id, {"status": "online", "device_type": "desktop"})
+    pres = SocialService.get_presence(db, owner_user.id)
+    assert pres["status"] == "online"
+    assert pres["device_type"] == "desktop"
+
+    # 2. Veralteter Zeitstempel (200 Sekunden in der Vergangenheit) -> offline
+    db_pres = db.query(UserPresence).filter_by(user_id=owner_user.id).first()
+    db_pres.updated_at = datetime.now(timezone.utc) - timedelta(seconds=200)
+    db.commit()
+
+    pres_after = SocialService.get_presence(db, owner_user.id)
+    assert pres_after["status"] == "offline"
+    # device_type bleibt erhalten
+    assert pres_after["device_type"] == "desktop"
+
+    # 3. Fehlender Zeitstempel (updated_at = None) -> offline
+    from unittest.mock import MagicMock
+    mock_db = MagicMock()
+    mock_db.query.return_value.filter_by.return_value.first.return_value = UserPresence(
+        user_id=owner_user.id, status="online", device_type="desktop", updated_at=None
+    )
+    pres_none = SocialService.get_presence(mock_db, owner_user.id)
+    assert pres_none["status"] == "offline"
+    assert pres_none["device_type"] == "desktop"
+
+    # 4. Nicht existierender Benutzer -> offline
+    missing_pres = SocialService.get_presence(db, user_id=999999)
+    assert missing_pres["status"] == "offline"
+    assert missing_pres["updated_at"] is None
+

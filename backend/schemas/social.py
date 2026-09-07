@@ -70,7 +70,7 @@ class FriendRequestCreate(BaseModel):
 
 class PresenceUpdateRequest(BaseModel):
     status: str = Field("online", pattern="^(online|away|invisible)$")
-    device_type: str = Field("web", pattern="^(web|desktop|mobile)$")
+    device_type: str | None = Field(None, pattern="^(web|desktop|mobile)$")
     custom_status: str | None = Field(None, max_length=128)
     activity_label: str | None = Field(None, max_length=128)
     activity_detail: str | None = Field(None, max_length=128)
@@ -88,6 +88,7 @@ class PrivacyUpdateRequest(BaseModel):
 class E2eeBlindEnvelopeCreate(BaseModel):
     blind_mailbox_id: str = Field(..., min_length=16, max_length=64)
     ciphertext_envelope: str = Field(..., min_length=10)
+    recipient_user_id: int | None = None
 
 
 class E2eeBlindEnvelopeResponse(BaseModel):

@@ -371,9 +371,11 @@ def _ausfuehren_note_delete(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgef
     return _Ausgefuehrt(result=result)
 
 def _ausfuehren_message_friend(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    import base64
     import hashlib
+    import os
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     from services.social_service import SocialService
-    from services.dis_client import DisClient
 
     SocialService.assert_social_enabled(db)
 
@@ -386,23 +388,31 @@ def _ausfuehren_message_friend(db: Session, rahmen: _AusfuehrungsRahmen) -> _Aus
         raise AiActionValidationError("Freundschaft ist nicht mehr bestätigt.")
 
     ids = sorted([rahmen.active_user.id, friend_id])
-    blind_mailbox_id = hashlib.sha256(f"msm:dm:{ids[0]}:{ids[1]}".encode()).hexdigest()
+    blind_mailbox_id = hashlib.sha256(f"msm:dm:{ids[0]}:{ids[1]}".encode("utf-8")).hexdigest()
+
+    # DIS-kompatible direkte AES-256-GCM Kanalverschlüsselung
+    channel_key_bytes = hashlib.sha256(f"msm:dm:key:{ids[0]}:{ids[1]}".encode("utf-8")).digest()
+    aad = f"msm:dm:aad:{ids[0]}:{ids[1]}".encode("utf-8")
 
     envelope_payload = json.dumps({
         "sender_id": rahmen.active_user.id,
         "sender_username": rahmen.active_user.username,
         "text": message_text,
         "timestamp": datetime.now(timezone.utc).isoformat(),
-    })
-    ciphertext = DisClient.encrypt(
-        envelope_payload,
-        aad=f"msm:e2ee:blind:{blind_mailbox_id}",
-    )
+    }).encode("utf-8")
+
+    aesgcm = AESGCM(channel_key_bytes)
+    iv = os.urandom(12)
+    # DIS Wire-Format: base64(IV(12) || ciphertext || authTag(16))
+    encrypted = aesgcm.encrypt(iv, envelope_payload, aad)
+    ciphertext_b64 = base64.b64encode(iv + encrypted).decode("ascii")
+
     SocialService.relay_blind_envelope(
         db,
         blind_mailbox_id=blind_mailbox_id,
-        ciphertext_envelope=f"sv-e2ee-v1:{ciphertext}",
+        ciphertext_envelope=f"sv-e2ee-v1:{ciphertext_b64}",
         sender_user_id=rahmen.active_user.id,
+        recipient_user_id=friend_id,
     )
 
     return _Ausgefuehrt(result={"sent": True, "friend": friend_username})

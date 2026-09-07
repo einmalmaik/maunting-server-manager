@@ -1,10 +1,31 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Button, Input, Badge } from '@/Singra/UI'
-import { ShieldCheck, Send, RefreshCw, Lock, X } from 'lucide-react'
+import {
+  Button,
+  Input,
+  Badge,
+  Dialog,
+  DialogContent,
+} from '@/Singra/UI'
+import { ShieldCheck, Send, RefreshCw, Lock } from 'lucide-react'
 import { DeviceBadge } from './DeviceBadge'
 import { StatusDot } from './StatusIndicator'
-import { type FriendItem, relayE2eeEnvelope, fetchE2eeEnvelopes } from '@/api/social'
-import { deriveBlindMailboxId, encryptE2eeMessage, decryptE2eeMessage } from '@/services/e2eeCrypto'
+import {
+  type FriendItem,
+  relayE2eeEnvelope,
+  fetchE2eeEnvelopes,
+  getE2eePublicKey,
+  setE2eePublicKey,
+} from '@/api/social'
+import {
+  deriveBlindMailboxId,
+  encryptE2eeMessage,
+  decryptE2eeMessage,
+  encryptE2eeHybrid,
+  decryptE2eeHybrid,
+  getOrGenerateLocalKeyPair,
+  type LocalE2eeKeyPair,
+} from '@/services/e2eeCrypto'
+import { toast } from '@/stores/toastStore'
 
 interface E2EEChatModalProps {
   open: boolean
@@ -26,9 +47,50 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
   const [loading, setLoading] = useState(false)
   const [sending, setSending] = useState(false)
   const [blindMailboxId, setBlindMailboxId] = useState<string>('')
+  const [localKeyPair, setLocalKeyPair] = useState<LocalE2eeKeyPair | null>(null)
+  const [recipientPublicKeyJwk, setRecipientPublicKeyJwk] = useState<string | null>(null)
+
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const justSentRef = useRef<boolean>(false)
 
   const targetUserId = friend?.user_id ?? friend?.id ?? 0
+
+  // Initialize local key pair and upload public key to server
+  useEffect(() => {
+    if (!open || !currentUserId) return
+    let active = true
+
+    getOrGenerateLocalKeyPair(currentUserId).then(async (kp) => {
+      if (!active) return
+      setLocalKeyPair(kp)
+      try {
+        await setE2eePublicKey(kp.publicKeyJwk)
+      } catch {
+        // Non-blocking key registration
+      }
+    }).catch(() => {})
+
+    return () => {
+      active = false
+    }
+  }, [open, currentUserId])
+
+  // Fetch target user's public key for hybrid asymmetric encryption
+  useEffect(() => {
+    if (!open || !targetUserId) return
+    let active = true
+
+    getE2eePublicKey(targetUserId).then((res) => {
+      if (active && res?.public_key) {
+        setRecipientPublicKeyJwk(res.public_key)
+      }
+    }).catch(() => {})
+
+    return () => {
+      active = false
+    }
+  }, [open, targetUserId])
 
   // Derive deterministic blind mailbox ID when friend changes
   useEffect(() => {
@@ -56,17 +118,42 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
 
       for (const env of envelopes) {
         try {
-          const plain = await decryptE2eeMessage(env.ciphertext_envelope, currentUserId, targetUserId)
-          const isSelf = plain.startsWith('[ME]:')
-          const display = isSelf ? plain.replace('[ME]:', '') : plain
+          let plain = ''
+          if (env.ciphertext_envelope.startsWith('sv-e2ee-hybrid-v1:')) {
+            if (localKeyPair) {
+              plain = await decryptE2eeHybrid(env.ciphertext_envelope, localKeyPair.privateKeyJwk)
+            } else {
+              throw new Error('Local key not ready')
+            }
+          } else {
+            plain = await decryptE2eeMessage(env.ciphertext_envelope, currentUserId, targetUserId)
+          }
+
+          let text = plain
+          let isSelf = false
+
+          try {
+            const parsed = JSON.parse(plain)
+            if (typeof parsed === 'object' && parsed !== null && 'text' in parsed) {
+              text = parsed.text
+              isSelf = parsed.sender_id === currentUserId
+            }
+          } catch {
+            // Backward-compatibility: legacy tagged messages
+            if (plain.startsWith('[ME]:')) {
+              text = plain.replace('[ME]:', '')
+              isSelf = true
+            }
+          }
+
           decryptedList.push({
             id: env.id,
-            text: display,
+            text,
             createdAt: env.created_at,
             isSelf,
           })
         } catch {
-          // If decryption fails, keep zero-knowledge and don't crash
+          // If decryption fails, maintain zero-knowledge and render protected placeholder
           decryptedList.push({
             id: env.id,
             text: '🔒 [Verschlüsselte Nachricht]',
@@ -90,10 +177,18 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
       const interval = setInterval(loadMessages, 5000)
       return () => clearInterval(interval)
     }
-  }, [open, blindMailboxId])
+  }, [open, blindMailboxId, localKeyPair])
 
+  // Autoscroll: only scroll down if just sent or already scrolled near bottom (<100px)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const container = scrollContainerRef.current
+    if (!container) return
+
+    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100
+    if (justSentRef.current || isNearBottom) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+      justSentRef.current = false
+    }
   }, [messages])
 
   const handleSend = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -103,33 +198,43 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
     const rawMessage = inputText.trim()
     setSending(true)
     try {
-      const tagged = `[ME]:${rawMessage}`
-      const ciphertext = await encryptE2eeMessage(tagged, currentUserId, targetUserId)
+      const payload = JSON.stringify({
+        sender_id: currentUserId,
+        text: rawMessage,
+        timestamp: new Date().toISOString(),
+      })
+
+      let ciphertext: string
+      if (recipientPublicKeyJwk && localKeyPair) {
+        ciphertext = await encryptE2eeHybrid(payload, recipientPublicKeyJwk, localKeyPair.publicKeyJwk)
+      } else {
+        ciphertext = await encryptE2eeMessage(payload, currentUserId, targetUserId)
+      }
 
       await relayE2eeEnvelope({
         blind_mailbox_id: blindMailboxId,
         ciphertext_envelope: ciphertext,
+        recipient_user_id: targetUserId,
       })
 
       setInputText('')
+      justSentRef.current = true
       await loadMessages()
-    } catch {
-      // Error handling
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Fehler beim Senden der Nachricht'
+      toast.error(msg)
     } finally {
       setSending(false)
     }
   }
 
-  if (!open || !friend) return null
+  if (!friend) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-[fadeIn_.15s_ease-out]">
-      <div
-        className="w-full max-w-xl h-[600px] bg-surface-container-low border border-outline-variant/30 rounded-2xl shadow-2xl overflow-hidden flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-xl h-[600px] p-0 flex flex-col" showCloseButton>
         {/* Header */}
-        <div className="p-4 border-b border-outline-variant/30 bg-surface-container flex items-center justify-between">
+        <div className="p-4 border-b border-outline-variant/30 bg-surface-container flex items-center justify-between pr-12">
           <div className="flex items-center gap-3">
             <div className="relative">
               <div className="w-10 h-10 rounded-full bg-primary/15 flex items-center justify-center font-bold text-primary">
@@ -160,31 +265,26 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
             </Badge>
             <Button
               variant="ghost"
-              size="sm"
+              size="icon"
               onClick={() => void loadMessages()}
               disabled={loading}
-              title="Nachrichten aktualisieren"
+              aria-label="Nachrichten aktualisieren"
               className="p-1.5 h-8 w-8"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             </Button>
-            <button
-              type="button"
-              onClick={() => onOpenChange(false)}
-              className="p-1.5 text-on-surface-variant hover:text-on-surface rounded-xl hover:bg-surface-container-high transition-colors"
-              title="Schließen"
-            >
-              <X className="w-5 h-5" />
-            </button>
           </div>
         </div>
 
         {/* Message Thread */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-surface-container-lowest/50">
+        <div
+          ref={scrollContainerRef}
+          className="flex-1 overflow-y-auto p-4 space-y-3 bg-surface-container-lowest/50"
+        >
           <div className="p-2.5 rounded-lg bg-surface-container-high/40 border border-outline-variant/20 text-center">
             <p className="text-[11px] text-on-surface-variant/90 leading-relaxed">
-              🛡️ <strong>Ende-zu-Ende verschlüsselt:</strong> Nachrichten werden auf Ihrem Gerät mit AES-256-GCM
-              versiegelt. Der MSM-Server fungiert als blinder Relais und hat keinen Zugriff auf Klartexte oder Schlüssel.
+              🛡️ <strong>Ende-zu-Ende verschlüsselt:</strong> Nachrichten werden auf Ihrem Gerät mit modernster
+              DIS-Kryptographie versiegelt. Der MSM-Server fungiert als blinder Relais und hat keinen Zugriff auf Klartexte oder private Schlüssel.
             </p>
           </div>
 
@@ -235,7 +335,7 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
             <span>Senden</span>
           </Button>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }

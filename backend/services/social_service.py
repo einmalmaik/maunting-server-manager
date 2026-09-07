@@ -91,8 +91,16 @@ class SocialService:
             pres = presences.get(fid)
             presence_dict = None
             if pres and pres.status != "invisible":
+                st = pres.status
+                if st != "offline":
+                    if not pres.updated_at:
+                        st = "offline"
+                    else:
+                        updated_dt = pres.updated_at if pres.updated_at.tzinfo else pres.updated_at.replace(tzinfo=timezone.utc)
+                        if (_now() - updated_dt).total_seconds() > 120:
+                            st = "offline"
                 presence_dict = {
-                    "status": pres.status,
+                    "status": st,
                     "device_type": pres.device_type,
                     "custom_status": pres.custom_status,
                     "activity_label": pres.activity_label,
@@ -102,7 +110,7 @@ class SocialService:
             else:
                 presence_dict = {
                     "status": "offline",
-                    "device_type": "web",
+                    "device_type": pres.device_type if pres else "web",
                     "custom_status": None,
                     "activity_label": None,
                     "activity_detail": None,
@@ -323,7 +331,7 @@ class SocialService:
     def update_presence(cls, db: Session, user_id: int, data: dict[str, Any]) -> dict[str, Any]:
         """Aktualisiert Online-Status, Gerätetyp und Rich Presence des Nutzers."""
         status = data.get("status", "online")
-        device_type = data.get("device_type", "web")
+        device_type = data.get("device_type")
         custom_status = data.get("custom_status")
         activity_label = data.get("activity_label")
         activity_detail = data.get("activity_detail")
@@ -333,7 +341,7 @@ class SocialService:
             pres = UserPresence(
                 user_id=user_id,
                 status=status,
-                device_type=device_type,
+                device_type=device_type or "web",
                 custom_status=custom_status,
                 activity_label=activity_label,
                 activity_detail=activity_detail,
@@ -342,7 +350,8 @@ class SocialService:
             db.add(pres)
         else:
             pres.status = status
-            pres.device_type = device_type
+            if device_type:
+                pres.device_type = device_type
             pres.custom_status = custom_status
             pres.activity_label = activity_label
             pres.activity_detail = activity_detail
@@ -357,7 +366,7 @@ class SocialService:
             "friend_id": user_id,
             "presence": {
                 "status": "offline" if status == "invisible" else status,
-                "device_type": device_type,
+                "device_type": pres.device_type,
                 "custom_status": custom_status,
                 "activity_label": activity_label,
                 "activity_detail": activity_detail,
@@ -381,15 +390,24 @@ class SocialService:
         pres = db.query(UserPresence).filter_by(user_id=user_id).first()
         if not pres:
             return {
-                "status": "online",
+                "status": "offline",
                 "device_type": "web",
                 "custom_status": None,
                 "activity_label": None,
                 "activity_detail": None,
                 "updated_at": None,
             }
+        status = pres.status
+        if status not in ("offline", "invisible"):
+            if not pres.updated_at:
+                status = "offline"
+            else:
+                updated_dt = pres.updated_at if pres.updated_at.tzinfo else pres.updated_at.replace(tzinfo=timezone.utc)
+                if (_now() - updated_dt).total_seconds() > 120:
+                    status = "offline"
+
         return {
-            "status": pres.status,
+            "status": status,
             "device_type": pres.device_type,
             "custom_status": pres.custom_status,
             "activity_label": pres.activity_label,
@@ -423,10 +441,6 @@ class SocialService:
         elif privacy == "friends" and viewer_user_id:
             allowed = cls.is_confirmed_friend(db, viewer_user_id, target_user.id)
 
-        pres_data = cls.get_presence(db, target_user.id)
-        if pres_data["status"] == "invisible" and not is_self:
-            pres_data["status"] = "offline"
-
         if not allowed:
             return {
                 "user_id": target_user.id,
@@ -434,10 +448,14 @@ class SocialService:
                 "avatar_url": target_user.avatar_url,
                 "privacy": privacy,
                 "restricted": True,
-                "presence": pres_data if privacy == "friends" else None,
+                "presence": None,
                 "stats": None,
                 "achievements": None,
             }
+
+        pres_data = cls.get_presence(db, target_user.id)
+        if pres_data["status"] == "invisible" and not is_self:
+            pres_data["status"] = "offline"
 
         stats = AchievementService.get_user_stats(db, target_user.id)
         achievements = AchievementService.get_user_achievements(db, target_user.id)
@@ -477,6 +495,7 @@ class SocialService:
         blind_mailbox_id: str,
         ciphertext_envelope: str,
         sender_user_id: int | None = None,
+        recipient_user_id: int | None = None,
     ) -> E2eeBlindEnvelope:
         """Speichert einen blinden E2EE-Umschlag ohne jegliche Nutzerverknüpfung."""
         clean_mailbox = blind_mailbox_id.strip()
@@ -493,13 +512,23 @@ class SocialService:
         if sender_user_id:
             AchievementService.unlock_achievement(db, sender_user_id, "social_zero_knowledge")
 
-        # Verteile anonymes Signal an alle SSE-Empfänger (ohne Angabe von Absender oder Inhalt)
-        SyncEventService.publish({
-            "type": "e2ee_blind_message",
-            "blind_mailbox_id": clean_mailbox,
-            "id": envelope.id,
-            "created_at": envelope.created_at.isoformat(),
-        })
+        # Gezielt nur an die teilnehmenden Benutzer versenden (kein globaler Broadcast)
+        targets: set[int] = set()
+        if sender_user_id:
+            targets.add(sender_user_id)
+        if recipient_user_id:
+            targets.add(recipient_user_id)
+
+        for target_id in targets:
+            SyncEventService.publish(
+                {
+                    "type": "e2ee_blind_message",
+                    "blind_mailbox_id": clean_mailbox,
+                    "id": envelope.id,
+                    "created_at": envelope.created_at.isoformat(),
+                },
+                user_id=target_id,
+            )
 
         return envelope
 

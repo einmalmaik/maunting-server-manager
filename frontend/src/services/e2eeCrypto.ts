@@ -26,8 +26,8 @@ import {
   rsaOaepEncrypt,
   rsaOaepDecrypt,
 } from '@msdis/shield/asymmetric'
-import { randomBytes } from '@msdis/shield/random'
-import { DisDecryptionError } from '@msdis/shield/core'
+import { SecureBuffer } from '@msdis/shield/secure-memory'
+import { DisDecryptionError, base64ToBytes, bytesToBase64 } from '@msdis/shield/core'
 
 export const E2EE_ENVELOPE_SPEC: VersionedCipherEnvelopeSpec = {
   currentPrefix: 'sv-e2ee-v1:',
@@ -60,7 +60,11 @@ export async function deriveBlindMailboxId(userAId: number, userBId: number, sal
   const maxId = Math.max(userAId, userBId)
   const payload = `msm:dm:${minId}:${maxId}${salt ? `:${salt}` : ''}`
   const seed = new TextEncoder().encode(payload)
-  return await sha256Hex(seed)
+  try {
+    return await sha256Hex(seed)
+  } finally {
+    seed.fill(0)
+  }
 }
 
 /**
@@ -76,7 +80,16 @@ export async function deriveDirectChannelKey(
   const payload = `msm:dm:key:${minId}:${maxId}${sharedSecret ? `:${sharedSecret}` : ''}`
   const seed = new TextEncoder().encode(payload)
   const keyBytes = await sha256Bytes(seed)
-  return await importAesGcmRawKey(keyBytes, ['encrypt', 'decrypt'])
+  seed.fill(0)
+  const secureKey = SecureBuffer.fromBytes(keyBytes)
+  keyBytes.fill(0)
+  try {
+    return await secureKey.useAsync(async (bytes) => {
+      return await importAesGcmRawKey(bytes, ['encrypt', 'decrypt'])
+    })
+  } finally {
+    secureKey.destroy()
+  }
 }
 
 /**
@@ -127,7 +140,11 @@ export async function decryptE2eeMessage(
 export async function deriveTeamBlindMailboxId(teamId: number, teamSalt: string = ''): Promise<string> {
   const payload = `msm:team:${teamId}${teamSalt ? `:${teamSalt}` : ''}`
   const seed = new TextEncoder().encode(payload)
-  return await sha256Hex(seed)
+  try {
+    return await sha256Hex(seed)
+  } finally {
+    seed.fill(0)
+  }
 }
 
 /**
@@ -137,7 +154,16 @@ export async function deriveTeamChannelKey(teamId: number, teamPassphraseOrKey?:
   const payload = `msm:team:key:${teamId}${teamPassphraseOrKey ? `:${teamPassphraseOrKey}` : ''}`
   const seed = new TextEncoder().encode(payload)
   const keyBytes = await sha256Bytes(seed)
-  return await importAesGcmRawKey(keyBytes, ['encrypt', 'decrypt'])
+  seed.fill(0)
+  const secureKey = SecureBuffer.fromBytes(keyBytes)
+  keyBytes.fill(0)
+  try {
+    return await secureKey.useAsync(async (bytes) => {
+      return await importAesGcmRawKey(bytes, ['encrypt', 'decrypt'])
+    })
+  } finally {
+    secureKey.destroy()
+  }
 }
 
 /**
@@ -194,69 +220,218 @@ export async function generateLocalE2eeKeyPair(): Promise<LocalE2eeKeyPair> {
   }
 }
 
-const LOCAL_STORAGE_KEY_PREFIX = 'msm_e2ee_identity_'
+// Memory-hygiene KeyStore (in-memory cache backed by IndexedDB)
+const memoryKeyStore = new Map<number, LocalE2eeKeyPair>()
+const IDB_DB_NAME = 'msm_e2ee_keystore'
+const IDB_STORE_NAME = 'keys'
 
-export function getStoredLocalPrivateKey(userId: number): string | null {
+function openKeyDatabase(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') {
+      return reject(new Error('IndexedDB not available'))
+    }
+    const req = indexedDB.open(IDB_DB_NAME, 1)
+    req.onupgradeneeded = () => {
+      const db = req.result
+      if (!db.objectStoreNames.contains(IDB_STORE_NAME)) {
+        db.createObjectStore(IDB_STORE_NAME, { keyPath: 'userId' })
+      }
+    }
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+}
+
+export async function storeLocalKeyPair(userId: number, keyPair: LocalE2eeKeyPair): Promise<void> {
+  memoryKeyStore.set(userId, keyPair)
   try {
-    return localStorage.getItem(`${LOCAL_STORAGE_KEY_PREFIX}${userId}_priv`)
+    localStorage.removeItem(`msm_e2ee_identity_${userId}_priv`)
+  } catch {}
+
+  try {
+    const db = await openKeyDatabase()
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE_NAME, 'readwrite')
+      const store = tx.objectStore(IDB_STORE_NAME)
+      const req = store.put({ userId, ...keyPair })
+      req.onsuccess = () => resolve()
+      req.onerror = () => reject(req.error)
+    })
   } catch {
-    return null
+    // Non-fatal fallback to in-memory store
   }
 }
 
-export function storeLocalPrivateKey(userId: number, privateKeyJwk: string): void {
+export async function getLocalKeyPair(userId: number): Promise<LocalE2eeKeyPair | null> {
+  const cached = memoryKeyStore.get(userId)
+  if (cached) return cached
+
   try {
-    localStorage.setItem(`${LOCAL_STORAGE_KEY_PREFIX}${userId}_priv`, privateKeyJwk)
+    const db = await openKeyDatabase()
+    const result = await new Promise<LocalE2eeKeyPair | null>((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE_NAME, 'readonly')
+      const store = tx.objectStore(IDB_STORE_NAME)
+      const req = store.get(userId)
+      req.onsuccess = () => {
+        if (req.result) {
+          resolve({
+            publicKeyJwk: req.result.publicKeyJwk,
+            privateKeyJwk: req.result.privateKeyJwk,
+          })
+        } else {
+          resolve(null)
+        }
+      }
+      req.onerror = () => reject(req.error)
+    })
+    if (result) {
+      memoryKeyStore.set(userId, result)
+      return result
+    }
   } catch {
-    // LocalStorage unavailable
+    // IndexedDB unavailable
   }
+
+  return null
+}
+
+export async function getOrGenerateLocalKeyPair(userId: number): Promise<LocalE2eeKeyPair> {
+  const existing = await getLocalKeyPair(userId)
+  if (existing) return existing
+
+  const fresh = await generateLocalE2eeKeyPair()
+  await storeLocalKeyPair(userId, fresh)
+  return fresh
+}
+
+export function clearMemoryKeyStore(): void {
+  memoryKeyStore.clear()
+}
+
+// Backward compatibility helpers (no plain private keys in localStorage)
+export function getStoredLocalPrivateKey(userId: number): string | null {
+  const cached = memoryKeyStore.get(userId)
+  if (cached) return cached.privateKeyJwk
+  try {
+    const legacy = localStorage.getItem(`msm_e2ee_identity_${userId}_priv`)
+    if (legacy) {
+      localStorage.removeItem(`msm_e2ee_identity_${userId}_priv`)
+      storeLocalPrivateKey(userId, legacy)
+      return legacy
+    }
+  } catch {}
+  return null
+}
+
+export function storeLocalPrivateKey(userId: number, privateKeyJwk: string): void {
+  const existing = memoryKeyStore.get(userId)
+  if (existing) {
+    memoryKeyStore.set(userId, { ...existing, privateKeyJwk })
+  } else {
+    memoryKeyStore.set(userId, { publicKeyJwk: '', privateKeyJwk })
+  }
+  try {
+    localStorage.removeItem(`msm_e2ee_identity_${userId}_priv`)
+  } catch {}
 }
 
 /**
  * Hybrid-encrypts a message under a recipient's RSA-OAEP public key.
- * 1. Generates ephemeral 256-bit symmetric key bytes using CSPRNG.
- * 2. Encrypts message under the ephemeral key with AES-256-GCM.
- * 3. Wraps ephemeral key under recipient's RSA-OAEP public key.
- * 4. Combines into payload: base64(wrappedKey) + '.' + ciphertext.
+ * If senderPublicKeyJwk is provided, also wraps the ephemeral key for the sender,
+ * allowing both parties to decrypt from the blind mailbox.
+ *
+ * Uses DIS SecureBuffer for memory hygiene of the ephemeral symmetric key.
  */
-export async function encryptE2eeHybrid(message: string, recipientPublicKeyJwk: string): Promise<string> {
+export async function encryptE2eeHybrid(
+  message: string,
+  recipientPublicKeyJwk: string,
+  senderPublicKeyJwk?: string
+): Promise<string> {
   const pubKeyObj: JsonWebKey = JSON.parse(recipientPublicKeyJwk)
-  const rsaPubKey = await importRsaOaepPublicKey(pubKeyObj)
+  const rsaRecipientPubKey = await importRsaOaepPublicKey(pubKeyObj)
 
-  const rawSymKeyBytes = randomBytes(32)
+  const secureSymKey = SecureBuffer.random(32)
   try {
-    const wrappedKeyBase64 = await rsaOaepEncrypt(JSON.stringify(Array.from(rawSymKeyBytes)), rsaPubKey)
-    const symKey = await importAesGcmRawKey(rawSymKeyBytes, ['encrypt'])
-    const ciphertext = await encryptString(message, symKey, 'msm:hybrid:aad')
-    const payload = `${wrappedKeyBase64}.${ciphertext}`
-    return formatEnvelope(E2EE_HYBRID_ENVELOPE_SPEC, payload)
+    return await secureSymKey.useAsync(async (rawSymKeyBytes) => {
+      const symKeyString = bytesToBase64(rawSymKeyBytes)
+      const wrappedRecipientKey = await rsaOaepEncrypt(
+        symKeyString,
+        rsaRecipientPubKey
+      )
+
+      let wrappedKeys = wrappedRecipientKey
+      if (senderPublicKeyJwk) {
+        const senderPubKeyObj: JsonWebKey = JSON.parse(senderPublicKeyJwk)
+        const rsaSenderPubKey = await importRsaOaepPublicKey(senderPubKeyObj)
+        const wrappedSenderKey = await rsaOaepEncrypt(
+          symKeyString,
+          rsaSenderPubKey
+        )
+        wrappedKeys = `${wrappedRecipientKey}:${wrappedSenderKey}`
+      }
+
+      const symKey = await importAesGcmRawKey(rawSymKeyBytes, ['encrypt'])
+      const ciphertext = await encryptString(message, symKey, 'msm:hybrid:aad')
+      const payload = `${wrappedKeys}.${ciphertext}`
+      return formatEnvelope(E2EE_HYBRID_ENVELOPE_SPEC, payload)
+    })
   } finally {
-    rawSymKeyBytes.fill(0)
+    secureSymKey.destroy()
   }
 }
 
 /**
- * Hybrid-decrypts a message using the recipient's RSA-OAEP private key.
+ * Hybrid-decrypts a message using a participant's RSA-OAEP private key.
+ * Supports both single-key envelopes and dual-wrapped (recipient:sender) envelopes.
+ * Protects ephemeral symmetric key in DIS SecureBuffer before destroying.
  */
-export async function decryptE2eeHybrid(envelopeString: string, recipientPrivateKeyJwk: string): Promise<string> {
+export async function decryptE2eeHybrid(
+  envelopeString: string,
+  participantPrivateKeyJwk: string
+): Promise<string> {
   try {
     const parsed = parseEnvelope(E2EE_HYBRID_ENVELOPE_SPEC, envelopeString)
     const dotIdx = parsed.payload.indexOf('.')
     if (dotIdx === -1) {
       throw new DisDecryptionError('Ungültiges Hybrid-Payload-Format')
     }
-    const wrappedKeyBase64 = parsed.payload.slice(0, dotIdx)
+    const wrappedKeysPart = parsed.payload.slice(0, dotIdx)
     const ciphertext = parsed.payload.slice(dotIdx + 1)
 
-    const privKeyObj: JsonWebKey = JSON.parse(recipientPrivateKeyJwk)
+    const keyList = wrappedKeysPart.split(':')
+    const privKeyObj: JsonWebKey = JSON.parse(participantPrivateKeyJwk)
     const rsaPrivKey = await importRsaOaepPrivateKey(privKeyObj)
-    const rawKeyJson = await rsaOaepDecrypt(wrappedKeyBase64, rsaPrivKey)
-    const rawBytes = new Uint8Array(JSON.parse(rawKeyJson))
+
+    let rawBytes: Uint8Array | null = null
+    for (const wrappedKey of keyList) {
+      try {
+        const rawKeyPlain = await rsaOaepDecrypt(wrappedKey, rsaPrivKey)
+        if (rawKeyPlain.startsWith('[')) {
+          // Backward-compatibility: JSON array format
+          rawBytes = new Uint8Array(JSON.parse(rawKeyPlain))
+        } else {
+          // Standard DIS format: base64 encoded raw key bytes
+          rawBytes = base64ToBytes(rawKeyPlain)
+        }
+        break
+      } catch {
+        // Try next key if dual-wrapped
+      }
+    }
+
+    if (!rawBytes) {
+      throw new DisDecryptionError('Kein passender RSA-Schlüssel im Hybrid-Umschlag')
+    }
+
+    const secureKey = SecureBuffer.fromBytes(rawBytes)
+    rawBytes.fill(0)
     try {
-      const symKey = await importAesGcmRawKey(rawBytes, ['decrypt'])
-      return await decryptString(ciphertext, symKey, 'msm:hybrid:aad')
+      return await secureKey.useAsync(async (keyBytes) => {
+        const symKey = await importAesGcmRawKey(keyBytes, ['decrypt'])
+        return await decryptString(ciphertext, symKey, 'msm:hybrid:aad')
+      })
     } finally {
-      rawBytes.fill(0)
+      secureKey.destroy()
     }
   } catch {
     throw new DisDecryptionError('Hybrid-Entschlüsselung fehlgeschlagen')

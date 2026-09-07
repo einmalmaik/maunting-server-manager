@@ -21,3 +21,14 @@ export {
   type ProfileDropdownItem,
   type ProfileDropdownUser,
 } from './ProfileDropdown'
+export {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  type DialogProps,
+  type DialogContentProps,
+} from './Dialog'
+

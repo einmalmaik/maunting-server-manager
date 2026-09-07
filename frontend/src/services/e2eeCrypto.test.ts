@@ -148,5 +148,76 @@ describe('e2eeCrypto (@msdis/shield Zero-Knowledge)', () => {
       // Bob tries to decrypt with his private key
       await expect(decryptE2eeHybrid(envelope, bobKeys.privateKeyJwk)).rejects.toThrow()
     }, 30_000)
+
+    it('supports dual-wrapped hybrid messages for both recipient and sender', async () => {
+      const bobKeys = await generateLocalE2eeKeyPair()
+      const message = 'Nachricht zwischen Alice und Bob'
+
+      // Alice sends to Bob with both keys
+      const envelope = await encryptE2eeHybrid(message, bobKeys.publicKeyJwk, aliceKeys.publicKeyJwk)
+      expect(envelope.startsWith('sv-e2ee-hybrid-v1:')).toBe(true)
+
+      // Bob decrypts as recipient
+      const decryptedByBob = await decryptE2eeHybrid(envelope, bobKeys.privateKeyJwk)
+      expect(decryptedByBob).toBe(message)
+
+      // Alice decrypts as sender
+      const decryptedByAlice = await decryptE2eeHybrid(envelope, aliceKeys.privateKeyJwk)
+      expect(decryptedByAlice).toBe(message)
+    }, 30_000)
+
+    it('manages key pairs via KeyStore without plaintext private keys in localStorage', async () => {
+      const { storeLocalKeyPair, getLocalKeyPair, getOrGenerateLocalKeyPair } = await import('./e2eeCrypto')
+      const userId = 777
+
+      const keyPair = await getOrGenerateLocalKeyPair(userId)
+      expect(keyPair).toBeDefined()
+      expect(keyPair.publicKeyJwk).toContain('"kty":"RSA"')
+
+      // localStorage should NOT contain plaintext private key
+      expect(localStorage.getItem(`msm_e2ee_identity_${userId}_priv`)).toBeNull()
+
+      const retrieved = await getLocalKeyPair(userId)
+      expect(retrieved?.publicKeyJwk).toBe(keyPair.publicKeyJwk)
+      expect(retrieved?.privateKeyJwk).toBe(keyPair.privateKeyJwk)
+    }, 30_000)
+
+    it('clears in-memory keys on clearMemoryKeyStore (logout hygiene)', async () => {
+      const { storeLocalKeyPair, clearMemoryKeyStore, getStoredLocalPrivateKey } = await import('./e2eeCrypto')
+      const userId = 888
+      storeLocalKeyPair(userId, {
+        publicKeyJwk: '{"mock": true}',
+        privateKeyJwk: '{"priv": true}',
+      })
+      expect(getStoredLocalPrivateKey(userId)).toBe('{"priv": true}')
+
+      clearMemoryKeyStore()
+      expect(getStoredLocalPrivateKey(userId)).toBeNull()
+    })
+
+    it('decrypts legacy hybrid envelopes where symmetric key was wrapped as JSON array', async () => {
+      const { rsaOaepEncrypt, importRsaOaepPublicKey } = await import('@msdis/shield/asymmetric')
+      const { formatEnvelope } = await import('@msdis/shield/format-versioning')
+      const { encryptString, importAesGcmRawKey } = await import('@msdis/shield/aead')
+      const { E2EE_HYBRID_ENVELOPE_SPEC } = await import('./e2eeCrypto')
+
+      // Ephemeral symmetric key
+      const symBytes = new Uint8Array(32)
+      crypto.getRandomValues(symBytes)
+      const symKey = await importAesGcmRawKey(symBytes, ['encrypt'])
+      const ciphertext = await encryptString('Legacy Format Test', symKey, 'msm:hybrid:aad')
+
+      // Legacy format: JSON array string of numbers
+      const legacyKeyString = JSON.stringify(Array.from(symBytes))
+      const pubKey = await importRsaOaepPublicKey(JSON.parse(aliceKeys.publicKeyJwk))
+      const wrappedKey = await rsaOaepEncrypt(legacyKeyString, pubKey)
+
+      const legacyPayload = `${wrappedKey}.${ciphertext}`
+      const legacyEnvelope = formatEnvelope(E2EE_HYBRID_ENVELOPE_SPEC, legacyPayload)
+
+      // Decrypt using decryptE2eeHybrid
+      const decrypted = await decryptE2eeHybrid(legacyEnvelope, aliceKeys.privateKeyJwk)
+      expect(decrypted).toBe('Legacy Format Test')
+    }, 30_000)
   })
 })

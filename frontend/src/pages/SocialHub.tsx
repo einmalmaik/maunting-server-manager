@@ -36,6 +36,7 @@ import {
   type AchievementsOverview,
   type UserStatsResponse,
   getFriends,
+  getFriendRequests,
   sendFriendRequest,
   acceptFriendRequest,
   declineFriendRequest,
@@ -45,8 +46,10 @@ import {
   getStats,
   updatePrivacy,
 } from '@/api/social'
+import { detectDeviceType } from '@/hooks/usePresenceAndActivity'
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
+import { renderAchievementIcon } from '@/components/social/achievementIcons'
 
 export function SocialHub() {
   const { user } = useAuthStore()
@@ -54,6 +57,7 @@ export function SocialHub() {
 
   // Friends state
   const [friends, setFriends] = useState<FriendItem[]>([])
+  const [incomingRequests, setIncomingRequests] = useState<FriendItem[]>([])
   const [addUsername, setAddUsername] = useState('')
   const [loadingAction, setLoadingAction] = useState(false)
   const [myStatus, setMyStatus] = useState<PresenceStatus>('online')
@@ -71,14 +75,22 @@ export function SocialHub() {
   const [privacyLevel, setPrivacyLevel] = useState<'private' | 'friends' | 'public'>('friends')
   const [savingPrivacy, setSavingPrivacy] = useState(false)
 
+  useEffect(() => {
+    if (user?.social_privacy) {
+      setPrivacyLevel(user.social_privacy as 'private' | 'friends' | 'public')
+    }
+  }, [user?.social_privacy])
+
   const loadData = async () => {
     try {
-      const [fData, achData, stData] = await Promise.all([
+      const [fData, reqData, achData, stData] = await Promise.all([
         getFriends(),
+        getFriendRequests().catch(() => ({ incoming: [], outgoing: [] })),
         getAchievements(),
         getStats(),
       ])
       setFriends(fData)
+      setIncomingRequests(reqData.incoming)
       setOverview(achData)
       setStats(stData)
     } catch {
@@ -97,7 +109,7 @@ export function SocialHub() {
     try {
       await updatePresence({
         status: newStatus,
-        device_type: 'web',
+        device_type: detectDeviceType(),
       })
       toast.success(`Status auf "${newStatus}" gesetzt`)
     } catch {
@@ -109,7 +121,7 @@ export function SocialHub() {
     setPrivacyLevel(newPrivacy)
     setSavingPrivacy(true)
     try {
-      await updatePrivacy({ social_privacy: newPrivacy })
+      await updatePrivacy({ privacy: newPrivacy })
       toast.success('Privatsphäre-Einstellung aktualisiert')
     } catch {
       toast.error('Fehler beim Speichern der Privatsphäre')
@@ -173,7 +185,6 @@ export function SocialHub() {
   }
 
   const acceptedFriends = friends.filter((f) => f.status === 'accepted')
-  const incomingRequests = friends.filter((f) => f.status === 'pending' && !f.is_requester)
 
   const filteredAchievements = (overview?.achievements || []).filter((item) => {
     if (achFilter === 'unlocked') return item.unlocked
@@ -390,7 +401,7 @@ export function SocialHub() {
                       key={a.id}
                       className="p-2 rounded-lg bg-surface-container-high/40 border border-outline-variant/20 flex items-center gap-2.5"
                     >
-                      <span className="text-lg">{a.icon || '🏆'}</span>
+                      <span className="text-primary">{renderAchievementIcon(a.icon, 'w-5 h-5')}</span>
                       <div className="min-w-0 flex-1">
                         <div className="text-xs font-bold text-primary truncate">{a.title}</div>
                         <div className="text-[10px] text-on-surface-variant truncate">{a.rarity_text}</div>
@@ -448,13 +459,13 @@ export function SocialHub() {
                     </div>
                     <Button
                       variant="ghost"
-                      size="sm"
+                      size="icon"
                       onClick={() => {
                         setChatFriend(f)
                         setIsChatOpen(true)
                       }}
                       className="h-7 w-7 p-0 text-primary"
-                      title="E2EE Chat"
+                      aria-label="E2EE Chat"
                     >
                       <MessageSquare className="w-3.5 h-3.5" />
                     </Button>
@@ -532,10 +543,10 @@ export function SocialHub() {
                         </Button>
                         <Button
                           variant="ghost"
-                          size="sm"
+                          size="icon"
                           onClick={() => void handleRemoveFriend(f.user_id ?? f.id)}
                           className="text-on-surface-variant hover:text-rose-400 hover:bg-rose-500/10 h-8 w-8 p-0"
-                          title="Freund entfernen"
+                          aria-label="Freund entfernen"
                         >
                           <UserMinus className="w-4 h-4" />
                         </Button>
@@ -688,7 +699,7 @@ export function SocialHub() {
                         : 'bg-surface-container-high/50 border-outline-variant/20 text-on-surface-variant/40'
                     }`}
                   >
-                    {a.unlocked ? a.icon || '🏆' : <Lock className="w-5 h-5" />}
+                    {a.unlocked ? renderAchievementIcon(a.icon) : <Lock className="w-5 h-5" />}
                   </div>
 
                   <div className="flex-1 min-w-0">

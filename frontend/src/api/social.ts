@@ -148,23 +148,45 @@ export async function getStats(): Promise<UserStatsResponse> {
   return api<UserStatsResponse>('/social/stats')
 }
 
+export interface FriendRequestsResponse {
+  incoming: FriendItem[]
+  outgoing: FriendItem[]
+}
+
+export async function getFriendRequests(): Promise<FriendRequestsResponse> {
+  return api<FriendRequestsResponse>('/social/friends/requests')
+}
+
 export async function getProfile(userId: number): Promise<PublicProfileResponse> {
   return api<PublicProfileResponse>(`/social/profile/user/${userId}`)
 }
 
 export async function updatePrivacy(payload: {
+  privacy?: 'private' | 'friends' | 'public'
   social_privacy?: 'private' | 'friends' | 'public'
-  social_e2ee_public_key?: string
-}): Promise<{ success: boolean }> {
-  return api<{ success: boolean }>('/social/privacy', {
+}): Promise<{ success: boolean; social_privacy?: string }> {
+  const privacyVal = payload.privacy ?? payload.social_privacy ?? 'friends'
+  return api<{ success: boolean; social_privacy?: string }>('/social/privacy', {
     method: 'PATCH',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ privacy: privacyVal }),
+  })
+}
+
+export async function getE2eePublicKey(userId: number): Promise<{ user_id: number; username: string; public_key: string | null }> {
+  return api<{ user_id: number; username: string; public_key: string | null }>(`/social/e2ee/public-key/${userId}`)
+}
+
+export async function setE2eePublicKey(publicKey: string): Promise<{ ok: boolean; message: string }> {
+  return api<{ ok: boolean; message: string }>('/social/e2ee/public-key', {
+    method: 'POST',
+    body: JSON.stringify({ public_key: publicKey }),
   })
 }
 
 export async function relayE2eeEnvelope(payload: {
   blind_mailbox_id: string
   ciphertext_envelope: string
+  recipient_user_id?: number
 }): Promise<BlindEnvelopeItem> {
   return api<BlindEnvelopeItem>('/social/e2ee/relay', {
     method: 'POST',

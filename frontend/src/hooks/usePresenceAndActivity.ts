@@ -6,7 +6,7 @@ import { updatePresence, recordActivityTime } from '@/api/social'
 export type PresenceStatus = 'online' | 'away' | 'invisible'
 export type DeviceType = 'web' | 'desktop' | 'mobile'
 
-function detectDeviceType(): DeviceType {
+export function detectDeviceType(): DeviceType {
   if (typeof window === 'undefined') return 'web'
   const isDesktop =
     '__TAURI__' in window ||
@@ -48,7 +48,10 @@ function getPresenceForRoute(pathname: string): { label: string; detail: string;
   return { label: 'Im Panel', detail: 'Control Center', category: 'general' }
 }
 
-export function usePresenceAndActivity(socialEnabled: boolean = true) {
+export function usePresenceAndActivity(
+  socialEnabled: boolean = true,
+  enableActivityTracking: boolean = true
+) {
   const { user } = useAuthStore()
   const location = useLocation()
   const [status, setStatus] = useState<PresenceStatus>('online')
@@ -98,7 +101,7 @@ export function usePresenceAndActivity(socialEnabled: boolean = true) {
 
   // Active interaction tracker (Playtime)
   useEffect(() => {
-    if (!socialEnabled || !user) return
+    if (!socialEnabled || !enableActivityTracking || !user) return
 
     const registerActivity = () => {
       lastInteractionTimeRef.current = Date.now()
@@ -138,7 +141,7 @@ export function usePresenceAndActivity(socialEnabled: boolean = true) {
         activeSecondsRef.current = 0
       }
     }
-  }, [socialEnabled, user])
+  }, [socialEnabled, enableActivityTracking, user])
 
   return {
     status,

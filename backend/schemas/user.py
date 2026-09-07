@@ -113,6 +113,7 @@ class UserResponse(BaseModel):
     role_id: int | None = None
     role_ids: list[int] = Field(default_factory=list)
     avatar_url: str | None = None
+    social_privacy: str = "friends"
     created_at: datetime
 
     class Config:

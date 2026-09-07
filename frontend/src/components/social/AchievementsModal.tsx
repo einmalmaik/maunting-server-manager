@@ -1,12 +1,26 @@
 import { useState, useEffect } from 'react'
-import { Button, Badge } from '@/Singra/UI'
-import { Trophy, Award, Clock, Sparkles, CheckCircle2, Lock, Flame, X } from 'lucide-react'
+import {
+  Button,
+  Badge,
+  Dialog,
+  DialogContent,
+} from '@/Singra/UI'
+import {
+  Trophy,
+  Award,
+  Clock,
+  Sparkles,
+  CheckCircle2,
+  Lock,
+  Flame,
+} from 'lucide-react'
 import {
   type AchievementsOverview,
   type UserStatsResponse,
   getAchievements,
   getStats,
 } from '@/api/social'
+import { renderAchievementIcon } from './achievementIcons'
 
 interface AchievementsModalProps {
   open: boolean
@@ -51,25 +65,11 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
     ? Math.round((overview.total_unlocked / Math.max(overview.total_available, 1)) * 100)
     : 0
 
-  if (!open) return null
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-[fadeIn_.15s_ease-out]">
-      <div
-        className="w-full max-w-2xl bg-surface-container-low border border-outline-variant/30 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[85vh] p-0" showCloseButton>
         {/* Steam-Style Header */}
         <div className="p-6 border-b border-outline-variant/30 bg-gradient-to-r from-surface-container-low via-surface-container to-surface-container-low relative">
-          <button
-            type="button"
-            onClick={() => onOpenChange(false)}
-            className="absolute top-4 right-4 p-1.5 text-on-surface-variant hover:text-on-surface rounded-xl hover:bg-surface-container-high transition-colors"
-            title="Schließen"
-          >
-            <X className="w-5 h-5" />
-          </button>
-
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pr-8">
             <div className="flex items-center gap-3">
               <div className="p-3 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.2)]">
@@ -198,7 +198,7 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
                       : 'bg-surface-container-high/50 border-outline-variant/20 text-on-surface-variant/40'
                   }`}
                 >
-                  {item.unlocked ? item.icon || '🏆' : <Lock className="w-5 h-5" />}
+                  {item.unlocked ? renderAchievementIcon(item.icon) : <Lock className="w-5 h-5" />}
                 </div>
 
                 {/* Details */}
@@ -237,7 +237,7 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
             )
           })}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }

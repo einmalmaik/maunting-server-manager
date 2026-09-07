@@ -24,6 +24,7 @@ export interface User {
   role_ids?: number[]
   /** URL zum hochgeladenen Profilbild */
   avatar_url?: string | null
+  social_privacy?: 'private' | 'friends' | 'public'
   created_at: string
 }
 

@@ -63,7 +63,7 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
   const [calendarEnabled, setCalendarEnabled] = useState(true)
   const [notesEnabled, setNotesEnabled] = useState(true)
   const [socialEnabled, setSocialEnabled] = useState(true)
-  const { status: presenceStatus, changeStatus: handlePresenceChange } = usePresenceAndActivity(socialEnabled)
+  const { status: presenceStatus, changeStatus: handlePresenceChange } = usePresenceAndActivity(socialEnabled, !mobile)
 
   useEffect(() => {
     api<{ calendar_enabled?: boolean; notes_enabled?: boolean; social_enabled?: boolean }>('/settings/public')
