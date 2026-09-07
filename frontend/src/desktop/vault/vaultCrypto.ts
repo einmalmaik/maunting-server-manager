@@ -262,22 +262,6 @@ export async function decryptVaultEntry(
   }
 }
 
-export const BIOMETRIC_ENVELOPE_PREFIX = 'sv-bio-v1:'
-const DEVICE_SALT_KEY = 'mss:vault_device_salt'
-
-export function getOrCreateDeviceSalt(): Uint8Array {
-  const existing = typeof localStorage !== 'undefined' ? localStorage.getItem(DEVICE_SALT_KEY) : null
-  if (existing) {
-    return base64ToBytes(existing)
-  }
-  const newSalt = new Uint8Array(32)
-  window.crypto.getRandomValues(newSalt)
-  if (typeof localStorage !== 'undefined') {
-    localStorage.setItem(DEVICE_SALT_KEY, bytesToBase64(newSalt))
-  }
-  return newSalt
-}
-
 async function checkAndroidBiometric(): Promise<boolean> {
   try {
     const { checkStatus } = await import('@tauri-apps/plugin-biometric')
@@ -327,84 +311,44 @@ export async function isBiometricsAvailable(): Promise<boolean> {
     }
   } catch {}
 
-  // 3. WebAuthn Plattform-Authenticator (Hardware-Schlüssel)
-  try {
-    if (typeof window !== 'undefined' && window.PublicKeyCredential) {
-      if (typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function') {
-        const webAvailable = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
-        if (webAvailable) return true
-      }
-    }
-  } catch {}
-
+  // 3. Im Web-Browser existiert kein hardware-geschützter OS-Keyring zur sicheren Passwort-Verwahrung.
+  // WebAuthn ohne hardwaregestützten Credential Store wird abgewiesen (SEC-CRIT-01).
   return false
 }
 
 /**
- * Leitet einen flüchtigen Schlüssel für hardware-begleitete OS-Operationen ab.
- */
-async function deriveDeviceBiometricKey(salt: Uint8Array): Promise<CryptoKey> {
-  const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : 'msm-client'
-  const appOrigin = typeof window !== 'undefined' && window.location ? window.location.origin : 'msm-origin'
-  const seedString = `msm:bio-wrap:${userAgent}:${appOrigin}`
-
-  const rawBytes = await argon2idRaw({
-    password: seedString,
-    salt,
-    memorySize: 32768,
-    iterations: 2,
-    parallelism: 2,
-    hashLength: 32,
-  })
-
-  const secureBuf = SecureBuffer.fromBytes(rawBytes)
-  rawBytes.fill(0)
-
-  try {
-    return await secureBuf.useAsync(async (bytes) => {
-      return await window.crypto.subtle.importKey(
-        'raw',
-        bytes as BufferSource,
-        { name: 'AES-GCM', length: 256 },
-        false,
-        ['encrypt', 'decrypt'],
-      )
-    })
-  } finally {
-    secureBuf.destroy()
-  }
-}
-
-/**
- * Requests user verification from platform authenticator (Windows Hello, BiometricPrompt on Android).
+ * Fordert Benutzer-Verifikation über den nativen Plattform-Authenticator an (Windows Hello, BiometricPrompt).
+ * Schlägt bei Nicht-Verifikation oder unzureichenden Rechten fehl (Fail-Closed).
  */
 export async function promptBiometricVerification(title?: string): Promise<boolean> {
-  // 1. In Tauri / Desktop: Nutze native Windows Hello API
+  // 1. In Tauri / Desktop: Nutze native Windows Hello API falls auf diesem System verfügbar
   try {
-    const verified = await verifiziereBiometrie(title || 'Tresor entsperren')
-    if (verified) {
-      return true
+    const isWindowsHelloAvailable = await pruefeBiometrieVerfuegbar()
+    if (isWindowsHelloAvailable) {
+      const verified = await verifiziereBiometrie(title || 'Tresor entsperren')
+      return verified
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
     if (msg.includes('abgebrochen') || msg.includes('Canceled') || msg.includes('Fehler')) {
       throw new Error('Biometrische Authentifizierung abgebrochen.')
     }
+    return false
   }
 
-  // 2. In Tauri / Mobile (Android): Nutze BiometricPrompt
+  // 2. In Tauri / Mobile (Android): Nutze BiometricPrompt falls auf Android verfügbar
   try {
-    const androidVerified = await promptAndroidBiometric(title)
-    if (androidVerified) {
-      return true
+    const isAndroidAvailable = await checkAndroidBiometric()
+    if (isAndroidAvailable) {
+      return await promptAndroidBiometric(title)
     }
   } catch (err: unknown) {
     throw err
   }
 
-  // 3. WebAuthn Fallback
+  // 3. WebAuthn Plattform-Authenticator: Fail-Closed (SEC-CRIT-01)
   if (typeof window === 'undefined' || !window.PublicKeyCredential || !navigator.credentials) {
-    return true
+    return false
   }
 
   try {
@@ -415,84 +359,25 @@ export async function promptBiometricVerification(title?: string): Promise<boole
       publicKey: {
         challenge,
         timeout: 60000,
-        userVerification: 'preferred',
+        userVerification: 'required',
         rpId: window.location.hostname || undefined,
       },
     })
     return !!credential
   } catch (err) {
+    const errorName = (err && typeof err === 'object' && 'name' in err) ? String(err.name) : ''
     const errorMsg = err instanceof Error ? err.message : String(err)
-    if (errorMsg.includes('NotAllowedError') || errorMsg.includes('cancel') || errorMsg.includes('abort')) {
+    if (
+      errorName === 'NotAllowedError' ||
+      errorName === 'AbortError' ||
+      errorMsg.includes('NotAllowedError') ||
+      errorMsg.toLowerCase().includes('cancel') ||
+      errorMsg.toLowerCase().includes('abort')
+    ) {
       throw new Error('Biometrische Authentifizierung abgebrochen.')
     }
-    return true
+    return false
   }
-}
-
-/**
- * Verschlüsselt das Master-Passwort in einen Hardware-gebundenen AES-GCM Envelope.
- */
-export async function wrapVaultCredentialsForBiometrics(masterPassword: string): Promise<string> {
-  const salt = getOrCreateDeviceSalt()
-  const key = await deriveDeviceBiometricKey(salt)
-  const encoder = new TextEncoder()
-  const plaintext = encoder.encode(masterPassword)
-  const iv = new Uint8Array(AES_GCM_IV_LENGTH)
-  window.crypto.getRandomValues(iv)
-
-  const encrypted = await window.crypto.subtle.encrypt(
-    {
-      name: 'AES-GCM',
-      iv,
-      additionalData: encoder.encode('msm-biometric-aad-v1'),
-      tagLength: 128,
-    },
-    key,
-    plaintext,
-  )
-
-  const encryptedBytes = new Uint8Array(encrypted)
-  const combined = new Uint8Array(iv.length + encryptedBytes.byteLength)
-  combined.set(iv, 0)
-  combined.set(encryptedBytes, iv.length)
-  plaintext.fill(0)
-
-  return `${BIOMETRIC_ENVELOPE_PREFIX}${bytesToBase64(combined)}`
-}
-
-/**
- * Entpackt das Master-Passwort aus dem Envelope.
- */
-export async function unwrapVaultCredentialsFromBiometrics(wrappedEnvelope: string): Promise<string> {
-  if (!wrappedEnvelope.startsWith(BIOMETRIC_ENVELOPE_PREFIX)) {
-    throw new Error('Ungültiges Biometrie-Paket')
-  }
-
-  const salt = getOrCreateDeviceSalt()
-  const key = await deriveDeviceBiometricKey(salt)
-  const b64 = wrappedEnvelope.slice(BIOMETRIC_ENVELOPE_PREFIX.length)
-  const combined = base64ToBytes(b64)
-  if (combined.byteLength < AES_GCM_IV_LENGTH + 16) {
-    throw new Error('Biometrie-Daten beschädigt')
-  }
-
-  const iv = combined.slice(0, AES_GCM_IV_LENGTH)
-  const ciphertext = combined.slice(AES_GCM_IV_LENGTH)
-  const aad = new TextEncoder().encode('msm-biometric-aad-v1')
-
-  const decrypted = await window.crypto.subtle.decrypt(
-    {
-      name: 'AES-GCM',
-      iv,
-      additionalData: aad,
-      tagLength: 128,
-    },
-    key,
-    ciphertext,
-  )
-
-  const decoder = new TextDecoder()
-  return decoder.decode(decrypted)
 }
 
 /**

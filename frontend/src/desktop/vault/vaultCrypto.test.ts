@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   SecureBuffer,
   bytesToBase64,
@@ -8,13 +8,18 @@ import {
   decryptVaultEntry,
   generateSecurePassword,
   VAULT_ENVELOPE_V1_PREFIX,
-  BIOMETRIC_ENVELOPE_PREFIX,
-  wrapVaultCredentialsForBiometrics,
-  unwrapVaultCredentialsFromBiometrics,
+  isBiometricsAvailable,
+  promptBiometricVerification,
   padPayload,
   unpadPayload,
   concatBytes,
 } from './vaultCrypto'
+import { pruefeBiometrieVerfuegbar, verifiziereBiometrie } from '../tauri'
+
+vi.mock('../tauri', () => ({
+  pruefeBiometrieVerfuegbar: vi.fn().mockResolvedValue(false),
+  verifiziereBiometrie: vi.fn().mockResolvedValue(false),
+}))
 
 describe('vaultCrypto', () => {
   it('SecureBuffer manages memory with controlled access and destroy', () => {
@@ -74,16 +79,112 @@ describe('vaultCrypto', () => {
     await expect(decryptVaultEntry(envelope, userKey, 'wrong-entry-id')).rejects.toThrow()
   })
 
-  it('wraps and unwraps credentials for biometric quick unlock', async () => {
-    const masterPw = 'my-super-strong-master-password-2026'
-    const wrapped = await wrapVaultCredentialsForBiometrics(masterPw)
-    expect(wrapped.startsWith(BIOMETRIC_ENVELOPE_PREFIX)).toBe(true)
+  it('fails closed in promptBiometricVerification when credentials are missing or unauthenticated (SEC-CRIT-01)', async () => {
+    const originalCredentials = navigator.credentials
+    const originalPKC = (window as unknown as { PublicKeyCredential?: unknown }).PublicKeyCredential
+    try {
+      // 1. Without credentials API -> must return false (fail closed)
+      Object.defineProperty(navigator, 'credentials', {
+        value: undefined,
+        configurable: true,
+      })
+      const resWithoutCreds = await promptBiometricVerification('Test')
+      expect(resWithoutCreds).toBe(false)
 
-    const unwrapped = await unwrapVaultCredentialsFromBiometrics(wrapped)
-    expect(unwrapped).toBe(masterPw)
+      // Set mock PublicKeyCredential so web branch executes
+      ;(window as unknown as { PublicKeyCredential: unknown }).PublicKeyCredential = class PublicKeyCredential {}
 
-    // Invalid prefix / corrupted envelope must throw
-    await expect(unwrapVaultCredentialsFromBiometrics('invalid-prefix:12345')).rejects.toThrow()
+      // 2. With mock credentials API returning null -> must return false (not true!)
+      Object.defineProperty(navigator, 'credentials', {
+        value: {
+          get: vi.fn().mockResolvedValue(null),
+        },
+        configurable: true,
+      })
+      const resNull = await promptBiometricVerification('Test')
+      expect(resNull).toBe(false)
+
+      // 3. User cancel or abort -> throws cancellation error
+      Object.defineProperty(navigator, 'credentials', {
+        value: {
+          get: vi.fn().mockRejectedValue(new DOMException('User cancelled', 'NotAllowedError')),
+        },
+        configurable: true,
+      })
+      await expect(promptBiometricVerification('Test')).rejects.toThrow(/abgebrochen/)
+
+      // 4. Other unexpected errors -> fails closed (returns false, not true!)
+      Object.defineProperty(navigator, 'credentials', {
+        value: {
+          get: vi.fn().mockRejectedValue(new Error('Unknown hardware error')),
+        },
+        configurable: true,
+      })
+      const resErr = await promptBiometricVerification('Test')
+      expect(resErr).toBe(false)
+    } finally {
+      Object.defineProperty(navigator, 'credentials', {
+        value: originalCredentials,
+        configurable: true,
+      })
+      if (originalPKC !== undefined) {
+        ;(window as unknown as { PublicKeyCredential?: unknown }).PublicKeyCredential = originalPKC
+      } else {
+        delete (window as unknown as { PublicKeyCredential?: unknown }).PublicKeyCredential
+      }
+    }
+  })
+
+  it('delegates to native Windows Hello and does not fall through to WebAuthn when cancelled (SEC-CRIT-01)', async () => {
+    vi.mocked(pruefeBiometrieVerfuegbar).mockResolvedValueOnce(true)
+    vi.mocked(verifiziereBiometrie).mockResolvedValueOnce(false)
+
+    // Even if WebAuthn is present and would succeed:
+    const mockGet = vi.fn().mockResolvedValue({ id: 'fido-token' })
+    const origCreds = navigator.credentials
+    Object.defineProperty(navigator, 'credentials', {
+      value: { get: mockGet },
+      configurable: true,
+    })
+    const origPKC = (window as unknown as { PublicKeyCredential?: unknown }).PublicKeyCredential
+    ;(window as unknown as { PublicKeyCredential: unknown }).PublicKeyCredential = class PublicKeyCredential {}
+
+    try {
+      const res = await promptBiometricVerification('Tresor entsperren')
+      expect(res).toBe(false)
+      expect(verifiziereBiometrie).toHaveBeenCalledWith('Tresor entsperren')
+      expect(mockGet).not.toHaveBeenCalled()
+    } finally {
+      Object.defineProperty(navigator, 'credentials', {
+        value: origCreds,
+        configurable: true,
+      })
+      if (origPKC !== undefined) {
+        ;(window as unknown as { PublicKeyCredential?: unknown }).PublicKeyCredential = origPKC
+      } else {
+        delete (window as unknown as { PublicKeyCredential?: unknown }).PublicKeyCredential
+      }
+    }
+  })
+
+  it('returns true when native Windows Hello verification succeeds', async () => {
+    vi.mocked(pruefeBiometrieVerfuegbar).mockResolvedValueOnce(true)
+    vi.mocked(verifiziereBiometrie).mockResolvedValueOnce(true)
+
+    const res = await promptBiometricVerification('Tresor entsperren')
+    expect(res).toBe(true)
+    expect(verifiziereBiometrie).toHaveBeenCalledWith('Tresor entsperren')
+  })
+
+  it('rejects web biometrics in isBiometricsAvailable as browser lacks hardware keyring (SEC-CRIT-01)', async () => {
+    const available = await isBiometricsAvailable()
+    expect(available).toBe(false)
+  })
+
+  it('does not persist device salt or reversible keys in localStorage during vault operations', () => {
+    localStorage.clear()
+    expect(localStorage.getItem('mss:vault_device_salt')).toBeNull()
+    expect(localStorage.getItem('mss:vault_bio_wrapped')).toBeNull()
   })
 
   it('derives deterministic bucketAuthToken distinct from bucketId', async () => {

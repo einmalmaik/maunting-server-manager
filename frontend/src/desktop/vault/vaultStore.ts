@@ -8,8 +8,6 @@ import {
   generateSecurePassword,
   isBiometricsAvailable,
   promptBiometricVerification,
-  unwrapVaultCredentialsFromBiometrics,
-  wrapVaultCredentialsForBiometrics,
 } from './vaultCrypto'
 import { biometrieEntsperren, biometrieLoeschen, biometrieSpeichern } from '../tauri'
 
@@ -112,8 +110,53 @@ const VAULT_REVISION_PREFIX = 'mss:vault_rev_'
 const VAULT_AUTOLOCK_MINUTES_KEY = 'mss:vault_autolock_minutes'
 const VAULT_LOCK_ON_BLUR_KEY = 'mss:vault_lock_on_blur'
 const VAULT_BIOMETRICS_ENABLED_KEY = 'mss:vault_biometrics_enabled'
-const VAULT_BIOMETRICS_WRAPPED_KEY = 'mss:vault_bio_wrapped'
 const VAULT_SERVER_BUCKET_KEY = 'mss:vault_server_bucket'
+const VAULT_BIO_MIGRATED_KEY = 'mss:vault_bio_migrated_v2'
+
+/**
+ * Aktive Migration & Bereinigung vulnerabler Altdaten (SEC-CRIT-01):
+ * Entfernt bedingungslos unsichere Schlüssel und Salts aus dem localStorage
+ * und reinigt alte Schlüssel aus dem OS-Keyring.
+ */
+export async function cleanseVulnerableBiometricData(): Promise<void> {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.removeItem('mss:vault_bio_wrapped')
+    localStorage.removeItem('mss:vault_device_salt')
+  }
+  try {
+    await biometrieLoeschen()
+  } catch {}
+}
+
+/**
+ * Führt die aktive Migration bei Store-Initialisierung durch (SEC-CRIT-01):
+ * - Entfernt bedingungslos veraltete mss:vault_bio_wrapped und mss:vault_device_salt
+ * - Bereinigt bestehende vulnerable Keyring-Schlüssel via biometrieLoeschen()
+ * - Setzt biometrics_enabled zurück falls Altdaten vorhanden waren
+ */
+export function runBiometricsMigration(): void {
+  if (typeof localStorage === 'undefined') {
+    void cleanseVulnerableBiometricData()
+    return
+  }
+
+  const hadLegacyWrapped = !!localStorage.getItem('mss:vault_bio_wrapped')
+  const hadLegacySalt = !!localStorage.getItem('mss:vault_device_salt')
+  const notMigrated = !localStorage.getItem(VAULT_BIO_MIGRATED_KEY)
+
+  // Bedingungsloses Entfernen vulnerabler Schlüssel aus dem localStorage
+  localStorage.removeItem('mss:vault_bio_wrapped')
+  localStorage.removeItem('mss:vault_device_salt')
+
+  if (notMigrated || hadLegacyWrapped || hadLegacySalt) {
+    void cleanseVulnerableBiometricData()
+    localStorage.removeItem(VAULT_BIOMETRICS_ENABLED_KEY)
+    localStorage.setItem(VAULT_BIO_MIGRATED_KEY, 'true')
+  }
+}
+
+// Aktive Migration/Bereinigung bei Modul-Initialisierung (SEC-CRIT-01)
+runBiometricsMigration()
 
 export const MAX_VAULT_ATTACHMENT_SIZE_BYTES = 500 * 1024 // 500 KB limit (SEC-08)
 
@@ -231,7 +274,10 @@ interface VaultState {
   checkHintStatus: () => Promise<boolean>
 }
 
-export const useVaultStore = create<VaultState>((set, get) => ({
+export const useVaultStore = create<VaultState>((set, get) => {
+  runBiometricsMigration()
+
+  return {
   isInitialized: typeof localStorage !== 'undefined' ? !!localStorage.getItem(VAULT_SETUP_DONE_KEY) : false,
   isUnlocked: false,
   isUnlocking: false,
@@ -330,18 +376,27 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   },
 
   checkBiometricsSupport: async () => {
+    runBiometricsMigration()
     try {
       const supported = await isBiometricsAvailable()
-      set({ isBiometricsSupported: supported })
+      set({
+        isBiometricsSupported: supported,
+        isBiometricsEnabled: supported && (typeof localStorage !== 'undefined' ? localStorage.getItem(VAULT_BIOMETRICS_ENABLED_KEY) === 'true' : false),
+      })
       return supported
     } catch {
-      set({ isBiometricsSupported: false })
+      set({ isBiometricsSupported: false, isBiometricsEnabled: false })
       return false
     }
   },
 
   enableBiometrics: async (masterPassword: string) => {
     try {
+      const isAvailable = await isBiometricsAvailable()
+      if (!isAvailable) {
+        throw new Error('Biometrische Authentifizierung wird auf diesem Gerät oder Browser nicht unterstützt.')
+      }
+
       const salt = getOrCreateVaultSalt()
       const { userKey, bucketId } = await deriveVaultKeys(masterPassword, salt)
       const canary = typeof localStorage !== 'undefined' ? localStorage.getItem(`${VAULT_CANARY_PREFIX}${bucketId}`) : null
@@ -349,16 +404,17 @@ export const useVaultStore = create<VaultState>((set, get) => ({
         await decryptVaultEntry(canary, userKey, 'vault-canary')
       }
 
-      await promptBiometricVerification('Biometrischen Schnelleinstieg aktivieren')
-
-      const wrapped = await wrapVaultCredentialsForBiometrics(masterPassword)
-      try {
-        await biometrieSpeichern(wrapped)
-      } catch {
-        // Fallback: Auf Plattformen ohne Windows Credential Store
+      const verified = await promptBiometricVerification('Biometrischen Schnelleinstieg aktivieren')
+      if (!verified) {
+        throw new Error('Biometrische Authentifizierung fehlgeschlagen.')
       }
+
+      // Speichere ausschließlich im hardware-/OS-geschützten Credential Store (kein localStorage!)
+      await biometrieSpeichern(masterPassword)
+
       if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(VAULT_BIOMETRICS_WRAPPED_KEY, wrapped)
+        localStorage.removeItem('mss:vault_bio_wrapped')
+        localStorage.removeItem('mss:vault_device_salt')
         localStorage.setItem(VAULT_BIOMETRICS_ENABLED_KEY, 'true')
       }
       set({ isBiometricsEnabled: true })
@@ -370,11 +426,8 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   },
 
   disableBiometrics: async () => {
-    try {
-      await biometrieLoeschen()
-    } catch {}
+    await cleanseVulnerableBiometricData()
     if (typeof localStorage !== 'undefined') {
-      localStorage.removeItem(VAULT_BIOMETRICS_WRAPPED_KEY)
       localStorage.setItem(VAULT_BIOMETRICS_ENABLED_KEY, 'false')
     }
     set({ isBiometricsEnabled: false })
@@ -383,27 +436,17 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   unlockWithBiometrics: async () => {
     set({ isUnlocking: true, unlockError: null })
     try {
-      let wrapped: string | null = null
-      try {
-        // Primär: Native Windows Hello Verifikation & Freigabe aus dem Windows Credential Store
-        wrapped = await biometrieEntsperren('Passwort-Manager entsperren')
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err)
-        if (msg.includes('abgebrochen') || msg.includes('Canceled')) {
-          throw new Error('Biometrische Authentifizierung abgebrochen.')
-        }
-
-        // Fallback (z. B. auf Android oder wenn Credential Store nicht verfügbar ist):
-        // Frage native Biometrie über promptBiometricVerification ab
-        await promptBiometricVerification('Tresor per Fingerabdruck entsperren')
-        wrapped = typeof localStorage !== 'undefined' ? localStorage.getItem(VAULT_BIOMETRICS_WRAPPED_KEY) : null
+      const isAvailable = await isBiometricsAvailable()
+      if (!isAvailable) {
+        throw new Error('Biometrie wird auf diesem Gerät oder Browser nicht unterstützt.')
       }
 
-      if (!wrapped) {
+      // Primär: Native Windows Hello Verifikation & Freigabe aus dem geschützten Credential Store
+      const masterPassword = await biometrieEntsperren('Passwort-Manager entsperren')
+      if (!masterPassword) {
         throw new Error('Biometrischer Schlüssel konnte nicht geladen werden.')
       }
 
-      const masterPassword = await unwrapVaultCredentialsFromBiometrics(wrapped)
       const success = await get().unlock(masterPassword)
       return success
     } catch (err: unknown) {
@@ -427,9 +470,9 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   },
 
   resetLocalVaultState: () => {
+    void cleanseVulnerableBiometricData()
     if (typeof localStorage !== 'undefined') {
       localStorage.removeItem(VAULT_SETUP_DONE_KEY)
-      localStorage.removeItem(VAULT_BIOMETRICS_WRAPPED_KEY)
       localStorage.removeItem(VAULT_BIOMETRICS_ENABLED_KEY)
       localStorage.removeItem(VAULT_SERVER_BUCKET_KEY)
       localStorage.removeItem(VAULT_SALT_KEY)
@@ -451,6 +494,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   },
 
   initializeVault: async (masterPassword: string) => {
+    runBiometricsMigration()
     set({ isUnlocking: true, unlockError: null })
     try {
       const salt = getOrCreateVaultSalt()
@@ -980,7 +1024,8 @@ export const useVaultStore = create<VaultState>((set, get) => ({
       return { ok: false, message: msg }
     }
   },
-}))
+  }
+})
 
 if (typeof window !== 'undefined') {
   setTimeout(() => {

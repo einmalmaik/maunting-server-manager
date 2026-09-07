@@ -216,6 +216,9 @@ function ProfilEinstellungen() {
       } else {
         toast.error('Konnte Biometrie nicht aktivieren. Prüfe das Master-Passwort.')
       }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Konnte Biometrie nicht aktivieren. Prüfe das Master-Passwort.'
+      toast.error(msg)
     } finally {
       setBiometricsLoading(false)
     }
@@ -352,9 +355,12 @@ function ProfilEinstellungen() {
               <span className="text-xs font-medium text-on-surface">
                 Biometrische Authentifizierung aktivieren
               </span>
+              <p className="text-[11px] text-on-surface-variant">
+                Windows Hello / nativer Hardware-Schlüsselspeicher. Schlüssel werden niemals im Browser oder ungesichert gespeichert.
+              </p>
             </div>
             <Switch
-              checked={isBiometricsEnabled}
+              checked={isBiometricsEnabled && isBiometricsSupported}
               onCheckedChange={(checked: boolean) => void handleBiometricsToggle(checked)}
               disabled={!isBiometricsSupported || !isInitialized || !isUnlocked}
             />
@@ -362,7 +368,7 @@ function ProfilEinstellungen() {
 
           {!isBiometricsSupported && (
             <div className="p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-xs text-on-surface-variant">
-              Kein biometrischer Sensor auf diesem Gerät verfügbar.
+              Kein biometrischer Sensor oder nativer Hardware-Tresor auf diesem Gerät verfügbar.
             </div>
           )}
         </div>

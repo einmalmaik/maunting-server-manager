@@ -1,5 +1,21 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { useVaultStore, blindVaultSync, getPendingQueue } from './vaultStore'
+import {
+  useVaultStore,
+  blindVaultSync,
+  getPendingQueue,
+  cleanseVulnerableBiometricData,
+  runBiometricsMigration,
+} from './vaultStore'
+import { biometrieLoeschen, pruefeBiometrieVerfuegbar } from '../tauri'
+
+vi.mock('../tauri', () => ({
+  biometrieSpeichern: vi.fn().mockResolvedValue(undefined),
+  biometrieEntsperren: vi.fn().mockImplementation(async () => 'super-strong-master-password-2026'),
+  biometrieLoeschen: vi.fn().mockResolvedValue(undefined),
+  pruefeBiometrieVerfuegbar: vi.fn().mockResolvedValue(true),
+  verifiziereBiometrie: vi.fn().mockResolvedValue(true),
+  setzeTresorSchutz: vi.fn().mockResolvedValue(undefined),
+}))
 
 describe('useVaultStore - Security & Operations', () => {
   beforeEach(() => {
@@ -137,7 +153,7 @@ describe('useVaultStore - Security & Operations', () => {
     expect(useVaultStore.getState().unlockError).toMatch(/Zu viele Fehlversuche/)
   })
 
-  it('disables biometrics and removes local envelope', async () => {
+  it('disables biometrics, clears enabled flag, and cleanses biometric data from keyring', async () => {
     localStorage.setItem('mss:vault_bio_wrapped', 'some_envelope')
     localStorage.setItem('mss:vault_biometrics_enabled', 'true')
     useVaultStore.setState({ isBiometricsEnabled: true })
@@ -149,12 +165,126 @@ describe('useVaultStore - Security & Operations', () => {
     expect(localStorage.getItem('mss:vault_biometrics_enabled')).toBe('false')
   })
 
-  it('resetLocalVaultState removes all sensitive keys and resets initialized status', () => {
+  it('cleanseVulnerableBiometricData unconditionally removes mss:vault_bio_wrapped and mss:vault_device_salt (SEC-CRIT-01)', async () => {
+    localStorage.setItem('mss:vault_bio_wrapped', 'bad_legacy_envelope')
+    localStorage.setItem('mss:vault_device_salt', 'bad_legacy_salt')
+
+    await cleanseVulnerableBiometricData()
+
+    expect(localStorage.getItem('mss:vault_bio_wrapped')).toBeNull()
+    expect(localStorage.getItem('mss:vault_device_salt')).toBeNull()
+    expect(biometrieLoeschen).toHaveBeenCalled()
+  })
+
+  it('runBiometricsMigration cleanses legacy envelopes, resets biometrics_enabled flag, and marks migrated (SEC-CRIT-01)', () => {
+    localStorage.setItem('mss:vault_bio_wrapped', 'bad_legacy_envelope')
+    localStorage.setItem('mss:vault_device_salt', 'bad_legacy_salt')
+    localStorage.setItem('mss:vault_biometrics_enabled', 'true')
+    localStorage.removeItem('mss:vault_bio_migrated_v2')
+
+    runBiometricsMigration()
+
+    expect(localStorage.getItem('mss:vault_bio_wrapped')).toBeNull()
+    expect(localStorage.getItem('mss:vault_device_salt')).toBeNull()
+    expect(localStorage.getItem('mss:vault_biometrics_enabled')).toBeNull()
+    expect(localStorage.getItem('mss:vault_bio_migrated_v2')).toBe('true')
+  })
+
+  it('runBiometricsMigration cleanses re-introduced legacy keys even if VAULT_BIO_MIGRATED_KEY is present (SEC-CRIT-01)', () => {
+    localStorage.setItem('mss:vault_bio_migrated_v2', 'true')
+    localStorage.setItem('mss:vault_bio_wrapped', 'bad_legacy_envelope')
+    localStorage.setItem('mss:vault_device_salt', 'bad_legacy_salt')
+    localStorage.setItem('mss:vault_biometrics_enabled', 'true')
+
+    runBiometricsMigration()
+
+    expect(localStorage.getItem('mss:vault_bio_wrapped')).toBeNull()
+    expect(localStorage.getItem('mss:vault_device_salt')).toBeNull()
+    expect(localStorage.getItem('mss:vault_biometrics_enabled')).toBeNull()
+  })
+
+  it('enableBiometrics rejects when biometrics is not supported (SEC-CRIT-01)', async () => {
+    vi.mocked(pruefeBiometrieVerfuegbar).mockResolvedValue(false)
+    try {
+      const store = useVaultStore.getState()
+      await store.initializeVault('master-password-123')
+
+      await expect(store.enableBiometrics('master-password-123')).rejects.toThrow(/nicht unterstützt/)
+    } finally {
+      vi.mocked(pruefeBiometrieVerfuegbar).mockResolvedValue(true)
+    }
+  })
+
+  it('unlockWithBiometrics fails safely when biometrics is not supported on the device (SEC-CRIT-01)', async () => {
+    vi.mocked(pruefeBiometrieVerfuegbar).mockResolvedValue(false)
+    try {
+      const store = useVaultStore.getState()
+
+      const ok = await store.unlockWithBiometrics()
+      expect(ok).toBe(false)
+      expect(useVaultStore.getState().unlockError).toMatch(/nicht unterstützt/)
+    } finally {
+      vi.mocked(pruefeBiometrieVerfuegbar).mockResolvedValue(true)
+    }
+  })
+
+  it('checkBiometricsSupport synchronizes isBiometricsEnabled with platform support', async () => {
+    localStorage.setItem('mss:vault_biometrics_enabled', 'true')
+    vi.mocked(pruefeBiometrieVerfuegbar).mockResolvedValue(false)
+    try {
+      const supported = await useVaultStore.getState().checkBiometricsSupport()
+      expect(supported).toBe(false)
+      expect(useVaultStore.getState().isBiometricsSupported).toBe(false)
+      expect(useVaultStore.getState().isBiometricsEnabled).toBe(false)
+    } finally {
+      vi.mocked(pruefeBiometrieVerfuegbar).mockResolvedValue(true)
+    }
+  })
+
+  it('enableBiometrics persists secrets exclusively in hardware Credential Store, never in localStorage (SEC-CRIT-01)', async () => {
+    const masterPassword = 'super-strong-master-password-2026'
+    const store = useVaultStore.getState()
+    await store.initializeVault(masterPassword)
+
+    await store.enableBiometrics(masterPassword)
+
+    expect(useVaultStore.getState().isBiometricsEnabled).toBe(true)
+    expect(localStorage.getItem('mss:vault_biometrics_enabled')).toBe('true')
+    // Crucial: master password or wrapped envelopes MUST NOT exist in localStorage
+    expect(localStorage.getItem('mss:vault_bio_wrapped')).toBeNull()
+    expect(localStorage.getItem('mss:vault_device_salt')).toBeNull()
+
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      const val = localStorage.getItem(key!)
+      expect(val).not.toContain(masterPassword)
+      expect(val).not.toContain('sv-bio-v1:')
+    }
+  })
+
+  it('unlockWithBiometrics unlocks using OS Credential Store without reading from localStorage (SEC-CRIT-01)', async () => {
+    const masterPassword = 'super-strong-master-password-2026'
+    await useVaultStore.getState().initializeVault(masterPassword)
+    useVaultStore.getState().lock()
+    expect(useVaultStore.getState().isUnlocked).toBe(false)
+
+    // Ensure localStorage contains no biometric secret
+    expect(localStorage.getItem('mss:vault_bio_wrapped')).toBeNull()
+    expect(localStorage.getItem('mss:vault_device_salt')).toBeNull()
+
+    // Unlock via biometrics
+    const success = await useVaultStore.getState().unlockWithBiometrics()
+    expect(success).toBe(true)
+    expect(useVaultStore.getState().isUnlocked).toBe(true)
+  })
+
+  it('resetLocalVaultState removes all sensitive keys including legacy salts and resets initialized status', () => {
     localStorage.setItem('mss:vault_setup_done', 'true')
     localStorage.setItem('mss:vault_salt', '0123456789abcdef')
     localStorage.setItem('mss:vault_server_bucket', 'bucket-123')
     localStorage.setItem('mss:vault_biometrics_enabled', 'true')
     localStorage.setItem('mss:vault_bio_wrapped', 'envelope-xyz')
+    localStorage.setItem('mss:vault_device_salt', 'salt-xyz')
 
     useVaultStore.setState({ isInitialized: true, isUnlocked: true })
     useVaultStore.getState().resetLocalVaultState()
@@ -166,6 +296,7 @@ describe('useVaultStore - Security & Operations', () => {
     expect(localStorage.getItem('mss:vault_server_bucket')).toBeNull()
     expect(localStorage.getItem('mss:vault_biometrics_enabled')).toBeNull()
     expect(localStorage.getItem('mss:vault_bio_wrapped')).toBeNull()
+    expect(localStorage.getItem('mss:vault_device_salt')).toBeNull()
   })
 
   it('rejects unlock when derived bucket does not match server bucket (ZKP validation)', async () => {

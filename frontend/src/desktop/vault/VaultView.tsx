@@ -44,6 +44,7 @@ export function VaultView() {
     isUnlocking,
     unlockError,
     isBiometricsEnabled,
+    isBiometricsSupported,
     items,
     searchQuery,
     syncStatus,
@@ -581,7 +582,7 @@ export function VaultView() {
             }}
             className="space-y-3.5"
           >
-            {isBiometricsEnabled && (
+            {isBiometricsEnabled && isBiometricsSupported && (
               <div className="space-y-2 pb-1">
                 <Button
                   type="button"
@@ -614,7 +615,7 @@ export function VaultView() {
                 onChange={(e) => setMasterPasswordInput(e.target.value)}
                 placeholder="Master-Passwort"
                 className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary pr-9 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden [&::-webkit-credentials-auto-fill-button]:hidden"
-                autoFocus={!isBiometricsEnabled}
+                autoFocus={!(isBiometricsEnabled && isBiometricsSupported)}
               />
               <button
                 type="button"

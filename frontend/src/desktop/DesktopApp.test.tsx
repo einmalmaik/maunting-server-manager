@@ -312,9 +312,9 @@ describe('DesktopApp', () => {
     // Landet direkt in der Hauptansicht (bereit), nicht im Wizard, und öffnet den Passwort-Manager
     await waitFor(() => {
       expect(screen.getByText(i18n.t('mss.app.tresor'))).toBeInTheDocument()
+      expect(screen.queryByTestId('ki-seite')).not.toBeInTheDocument()
+      expect(screen.queryByText(i18n.t('mss.wizard.codeLabel'))).not.toBeInTheDocument()
     })
-    expect(screen.queryByTestId('ki-seite')).not.toBeInTheDocument()
-    expect(screen.queryByText(i18n.t('mss.wizard.codeLabel'))).not.toBeInTheDocument()
   })
 
   it('erfolgreicher Refresh mit verzoegertem/fehlgeschlagenem checkAuth faellt nicht in Kopplung', async () => {
