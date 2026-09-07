@@ -627,7 +627,7 @@ export function Messenger() {
           }
 
           let text = plain
-          let senderId = activeContact?.userId ?? 0
+          let senderId = activeContact ? activeContact.userId : 0
           let senderName: string | undefined = undefined
           let isSelf = false
           let noteAttachment: NoteAttachment | undefined = undefined
@@ -676,7 +676,7 @@ export function Messenger() {
         } catch {
           decryptedList.push({
             id: env.id,
-            senderId: activeContact?.userId ?? 0,
+            senderId: activeContact ? activeContact.userId : 0,
             text: 'Verschlüsselte Nachricht',
             createdAt: env.created_at,
             isSelf: false,

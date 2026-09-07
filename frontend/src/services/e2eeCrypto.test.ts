@@ -122,6 +122,37 @@ describe('e2eeCrypto (@msdis/shield Zero-Knowledge)', () => {
     })
   })
 
+  describe('Chat Group / Community E2EE', () => {
+    it('derives deterministic group blind mailbox IDs', async () => {
+      const { deriveGroupBlindMailboxId } = await import('./e2eeCrypto')
+      const boxA = await deriveGroupBlindMailboxId(10)
+      const boxB = await deriveGroupBlindMailboxId(10)
+      const boxOther = await deriveGroupBlindMailboxId(20)
+
+      expect(boxA).toBe(boxB)
+      expect(boxA).toHaveLength(64)
+      expect(boxA).not.toBe(boxOther)
+    })
+
+    it('encrypts and decrypts group messages with sv-e2ee-team-v1: envelope', async () => {
+      const { encryptGroupE2eeMessage, decryptGroupE2eeMessage } = await import('./e2eeCrypto')
+      const groupId = 55
+      const message = 'Community Ankündigung: Event startet heute!'
+
+      const envelope = await encryptGroupE2eeMessage(message, groupId)
+      expect(envelope.startsWith('sv-e2ee-team-v1:')).toBe(true)
+
+      const decrypted = await decryptGroupE2eeMessage(envelope, groupId)
+      expect(decrypted).toBe(message)
+    })
+
+    it('rejects group message decryption for mismatched group IDs', async () => {
+      const { encryptGroupE2eeMessage, decryptGroupE2eeMessage } = await import('./e2eeCrypto')
+      const envelope = await encryptGroupE2eeMessage('Geheime Gruppen-Info', 77)
+      await expect(decryptGroupE2eeMessage(envelope, 88)).rejects.toThrow()
+    })
+  })
+
   describe('Asymmetric Hybrid E2EE (RSA-OAEP)', () => {
     let aliceKeys: { publicKeyJwk: string; privateKeyJwk: string }
 
