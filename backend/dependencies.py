@@ -63,6 +63,17 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     return _user_from_token(token, db)
 
 
+def get_optional_user(request: Request, db: Session = Depends(get_db)) -> User | None:
+    """Liefert den authentifizierten Benutzer oder None, wenn keine gültige Sitzung vorliegt."""
+    token = _bearer_token(request) or request.cookies.get("__Secure-access_token")
+    if not token:
+        return None
+    try:
+        return _user_from_token(token, db)
+    except HTTPException:
+        return None
+
+
 #: Das Subprotokoll, unter dem ein nativer Client sein Access-Token in den
 #: WS-Handshake legt: ``Sec-WebSocket-Protocol: msm.bearer, <token>``.
 #:

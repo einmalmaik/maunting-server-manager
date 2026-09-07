@@ -127,6 +127,7 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
         "calendar_enabled": all_db.get("calendar_enabled", "true") != "false",
         "notes_enabled": all_db.get("notes_enabled", "true") != "false",
         "vault_enabled": all_db.get("vault_enabled", "true") != "false",
+        "social_enabled": all_db.get("social_enabled", "true") != "false",
         "captcha_enabled": all_db.get("captcha_enabled", "false") == "true",
         "captcha_provider": all_db.get("captcha_provider", "none"),
         "captcha_site_key": all_db.get("captcha_site_key", ""),
@@ -159,6 +160,7 @@ def get_public_settings() -> dict:
         "calendar_enabled": all_db.get("calendar_enabled", "true") != "false",
         "notes_enabled": all_db.get("notes_enabled", "true") != "false",
         "vault_enabled": all_db.get("vault_enabled", "true") != "false",
+        "social_enabled": all_db.get("social_enabled", "true") != "false",
     }
 
 
@@ -219,6 +221,8 @@ def update_settings(
         if key == "notes_enabled":
             value = "true" if bool(value) else "false"
         if key == "vault_enabled":
+            value = "true" if bool(value) else "false"
+        if key == "social_enabled":
             value = "true" if bool(value) else "false"
         if key == "captcha_enabled":
             value = "true" if bool(value) else "false"

@@ -42,6 +42,7 @@ class PanelSettingsResponse(BaseModel):
     calendar_enabled: bool = True
     notes_enabled: bool = True
     vault_enabled: bool = True
+    social_enabled: bool = True
     captcha_enabled: bool = False
     captcha_provider: str = "none"
     captcha_site_key: str = ""
@@ -64,6 +65,7 @@ class PanelSettingsUpdate(BaseModel):
     calendar_enabled: bool | None = None
     notes_enabled: bool | None = None
     vault_enabled: bool | None = None
+    social_enabled: bool | None = None
     smtp_host: str | None = None
     smtp_port: str | None = None
     smtp_user: str | None = None

@@ -66,6 +66,7 @@ from routers import (
     vault_router,
     sync_events_router,
     sync_alias_router,
+    social_router,
 )
 from middleware.rate_limit import limiter, auth_rate_limit
 from services.steam_service import close_steam_service
@@ -887,6 +888,7 @@ app.include_router(notes_router)
 app.include_router(vault_router)
 app.include_router(sync_events_router)
 app.include_router(sync_alias_router)
+app.include_router(social_router)
 
 
 
