@@ -29,18 +29,26 @@ interface CreateStoryModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onCreated: (story: ChatStoryItem) => void
+  initialMode?: 'text' | 'photo'
 }
 
 export function CreateStoryModal({
   open,
   onOpenChange,
   onCreated,
+  initialMode = 'text',
 }: CreateStoryModalProps) {
   const [content, setContent] = useState('')
   const [selectedGradient, setSelectedGradient] = useState<string>('gradient-1')
   const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null)
   const [isCameraOpen, setIsCameraOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+
+  React.useEffect(() => {
+    if (open && initialMode === 'photo' && !photoDataUrl) {
+      setIsCameraOpen(true)
+    }
+  }, [open, initialMode, photoDataUrl])
 
   const fileInputRef = React.useRef<HTMLInputElement>(null)
 

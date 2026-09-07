@@ -194,8 +194,10 @@ export function Messenger() {
   // Stories (Aktuelles)
   const [stories, setStories] = useState<ChatStoryItem[]>([])
   const [isCreateStoryOpen, setIsCreateStoryOpen] = useState(false)
+  const [createStoryInitialMode, setCreateStoryInitialMode] = useState<'text' | 'photo'>('text')
   const [isViewerStoryOpen, setIsViewerStoryOpen] = useState(false)
   const [viewerStoryIndex, setViewerStoryIndex] = useState(0)
+  const [activeViewerStories, setActiveViewerStories] = useState<ChatStoryItem[]>([])
 
   // Camera & Attachments
   const [isCameraModalOpen, setIsCameraModalOpen] = useState(false)
@@ -441,6 +443,38 @@ export function Messenger() {
       return true
     })
   }, [groups, filterTab, searchQuery])
+
+  // Stories grouped for Tray and Status views
+  const myStories = useMemo(() => {
+    return stories.filter((s) => s.user_id === currentUserId)
+  }, [stories, currentUserId])
+
+  const friendsStoriesGrouped = useMemo(() => {
+    const map = new Map<number, ChatStoryItem[]>()
+    for (const story of stories) {
+      if (story.user_id === currentUserId) continue
+      const list = map.get(story.user_id) || []
+      list.push(story)
+      map.set(story.user_id, list)
+    }
+    return Array.from(map.entries()).map(([userId, userStories]) => {
+      const contact = contactsList.find((c) => c.userId === userId)
+      const first = userStories[0]
+      return {
+        userId,
+        username: contact?.username || first?.username || 'Freund',
+        avatarUrl: contact?.avatarUrl || first?.avatar_url,
+        stories: userStories,
+        latestStory: userStories[userStories.length - 1],
+      }
+    })
+  }, [stories, currentUserId, contactsList])
+
+  const openStoryViewerForUser = (userStories: ChatStoryItem[], startIndex = 0) => {
+    setActiveViewerStories(userStories)
+    setViewerStoryIndex(startIndex)
+    setIsViewerStoryOpen(true)
+  }
 
   // Auto-select contact if userId query parameter is present
   useEffect(() => {
@@ -1138,6 +1172,52 @@ export function Messenger() {
             isChatOpen ? 'hidden md:flex' : 'flex'
           }`}
         >
+          {/* Mode Navigation (Chats | Aktuelles | Gruppen) - Available on desktop */}
+          <div className="hidden md:flex px-2.5 pt-2 pb-1 border-b border-outline-variant/15 items-center gap-1 bg-surface-container/60">
+            <button
+              type="button"
+              onClick={() => setMobileNavTab('chats')}
+              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition-colors ${
+                mobileNavTab === 'chats'
+                  ? 'bg-primary text-on-primary shadow-xs font-semibold'
+                  : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60'
+              }`}
+              aria-label="Desktop-Chats"
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              <span>Chats</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobileNavTab('updates')}
+              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition-colors relative ${
+                mobileNavTab === 'updates'
+                  ? 'bg-primary text-on-primary shadow-xs font-semibold'
+                  : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60'
+              }`}
+              aria-label="Desktop-Aktuelles"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Aktuelles</span>
+              {stories.length > 0 && (
+                <span className={`w-2 h-2 rounded-full ${mobileNavTab === 'updates' ? 'bg-white' : 'bg-emerald-500 animate-pulse'}`} />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobileNavTab('community')}
+              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition-colors ${
+                mobileNavTab === 'community'
+                  ? 'bg-primary text-on-primary shadow-xs font-semibold'
+                  : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60'
+              }`}
+              aria-label="Desktop-Gruppen"
+            >
+              <UsersRound className="w-3.5 h-3.5" />
+              <span>Gruppen</span>
+            </button>
+          </div>
+
           {/* Top Search & Category Tabs */}
           <div className="p-2.5 border-b border-outline-variant/15 space-y-2 bg-surface-container/40">
             <div className="relative">
@@ -1188,6 +1268,81 @@ export function Messenger() {
               </div>
             )}
           </div>
+
+          {/* Instagram/WhatsApp Stories Tray (Visible in Chats Mode) */}
+          {mobileNavTab === 'chats' && !searchQuery.trim() && (
+            <div className="px-2.5 py-2 border-b border-outline-variant/15 bg-surface-container/20">
+              <div className="flex items-center gap-3 overflow-x-auto no-scrollbar py-1">
+                {/* Dein Status Circle */}
+                <div className="flex flex-col items-center gap-1 shrink-0 w-14">
+                  <div
+                    className="relative cursor-pointer group"
+                    onClick={() => {
+                      if (myStories.length > 0) {
+                        openStoryViewerForUser(myStories, 0)
+                      } else {
+                        setCreateStoryInitialMode('text')
+                        setIsCreateStoryOpen(true)
+                      }
+                    }}
+                  >
+                    <div
+                      className={`p-0.5 rounded-full transition-transform group-hover:scale-105 ${
+                        myStories.length > 0
+                          ? 'bg-gradient-to-tr from-cyan-400 via-sky-500 to-indigo-500 ring-2 ring-primary/30'
+                          : 'border-2 border-dashed border-outline-variant/70'
+                      }`}
+                    >
+                      <Avatar
+                        src={user?.avatar_url}
+                        name={user?.username || 'Ich'}
+                        size="md"
+                      />
+                    </div>
+                    {myStories.length === 0 ? (
+                      <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-primary text-on-primary flex items-center justify-center text-[10px] shadow-sm border-2 border-surface">
+                        <Plus className="w-2.5 h-2.5" />
+                      </div>
+                    ) : (
+                      <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-emerald-500 text-white text-[9px] font-bold flex items-center justify-center border-2 border-surface">
+                        {myStories.length}
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[10px] text-on-surface-variant truncate w-full text-center">
+                    {myStories.length > 0 ? 'Dein Status' : 'Neu'}
+                  </span>
+                </div>
+
+                {/* Friends' Stories Circles */}
+                {friendsStoriesGrouped.map((group) => (
+                  <div
+                    key={`tray-user-${group.userId}`}
+                    className="flex flex-col items-center gap-1 shrink-0 w-14 cursor-pointer group"
+                    onClick={() => openStoryViewerForUser(group.stories, 0)}
+                  >
+                    <div className="relative">
+                      <div className="p-0.5 rounded-full bg-gradient-to-tr from-sky-400 via-indigo-500 to-purple-600 transition-transform group-hover:scale-105 ring-2 ring-indigo-500/20 shadow-xs">
+                        <Avatar
+                          src={group.avatarUrl}
+                          name={group.username}
+                          size="md"
+                        />
+                      </div>
+                      {group.stories.length > 1 && (
+                        <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-indigo-600 text-white text-[9px] font-bold flex items-center justify-center border-2 border-surface">
+                          {group.stories.length}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-primary font-medium truncate w-full text-center">
+                      {group.username}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* List Scroll Area */}
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
@@ -1319,42 +1474,61 @@ export function Messenger() {
                     <span>Aktuelles & Status deiner Kontakte</span>
                   </div>
                   <p className="text-[11px] text-on-surface-variant">
-                    24h Status-Stories deiner Kontakte und Live-Präsenz.
+                    24h Status-Stories deiner Kontakte – Ende-zu-Ende verschlüsselt und nach 24 Stunden automatisch gelöscht.
                   </p>
                 </div>
 
                 {/* My Status Card */}
                 <div className="p-3 rounded-2xl bg-surface-container-lowest/80 border border-outline-variant/30 space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-headline font-bold text-primary">Status</span>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => setIsCreateStoryOpen(true)}
-                      className="h-7 text-xs gap-1 px-2.5 rounded-full"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Status hinzufügen</span>
-                    </Button>
+                    <span className="text-xs font-headline font-bold text-primary">Mein Status</span>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => {
+                          setCreateStoryInitialMode('text')
+                          setIsCreateStoryOpen(true)
+                        }}
+                        className="h-7 text-xs gap-1 px-2.5 rounded-full"
+                        title="Status hinzufügen"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Status hinzufügen</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setCreateStoryInitialMode('photo')
+                          setIsCreateStoryOpen(true)
+                        }}
+                        className="h-7 text-xs gap-1 px-2 text-primary"
+                        title="Foto-Status erstellen"
+                      >
+                        <Camera className="w-3.5 h-3.5" />
+                        <span>Foto</span>
+                      </Button>
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-3">
                     <div
                       className="relative cursor-pointer"
                       onClick={() => {
-                        const myIdx = stories.findIndex((s) => s.user_id === currentUserId)
-                        if (myIdx !== -1) {
-                          setViewerStoryIndex(myIdx)
-                          setIsViewerStoryOpen(true)
+                        if (myStories.length > 0) {
+                          openStoryViewerForUser(myStories, 0)
                         } else {
+                          setCreateStoryInitialMode('text')
                           setIsCreateStoryOpen(true)
                         }
                       }}
                     >
                       <div className={`p-0.5 rounded-full ${
-                        stories.some((s) => s.user_id === currentUserId)
-                          ? 'bg-gradient-to-tr from-cyan-400 via-sky-500 to-indigo-500'
+                        myStories.length > 0
+                          ? 'bg-gradient-to-tr from-cyan-400 via-sky-500 to-indigo-500 ring-2 ring-primary/20'
                           : 'border-2 border-dashed border-outline-variant/60'
                       }`}>
                         <Avatar
@@ -1370,19 +1544,18 @@ export function Messenger() {
                     <div
                       className="min-w-0 flex-1 cursor-pointer"
                       onClick={() => {
-                        const myIdx = stories.findIndex((s) => s.user_id === currentUserId)
-                        if (myIdx !== -1) {
-                          setViewerStoryIndex(myIdx)
-                          setIsViewerStoryOpen(true)
+                        if (myStories.length > 0) {
+                          openStoryViewerForUser(myStories, 0)
                         } else {
+                          setCreateStoryInitialMode('text')
                           setIsCreateStoryOpen(true)
                         }
                       }}
                     >
                       <div className="text-xs font-semibold text-primary truncate">Mein Status</div>
                       <p className="text-[11px] text-on-surface-variant/80 truncate">
-                        {stories.some((s) => s.user_id === currentUserId)
-                          ? 'Tippen, um dein Status-Update anzusehen'
+                        {myStories.length > 0
+                          ? `${myStories.length} aktive Story${myStories.length === 1 ? '' : 's'} • Tippen zum Ansehen`
                           : 'Tippe, um ein 24h Status-Update zu teilen'}
                       </p>
                     </div>
@@ -1394,53 +1567,57 @@ export function Messenger() {
                   <div className="px-1 text-[11px] font-semibold text-on-surface-variant/70 uppercase tracking-wider flex items-center justify-between">
                     <span>Kürzliche Updates</span>
                     <span className="text-[10px]">
-                      {stories.filter((s) => s.user_id !== currentUserId).length}
+                      {friendsStoriesGrouped.length}
                     </span>
                   </div>
 
-                  {stories.filter((s) => s.user_id !== currentUserId).length === 0 ? (
+                  {friendsStoriesGrouped.length === 0 ? (
                     <div className="p-4 rounded-xl bg-surface-container-lowest/50 border border-outline-variant/20 text-center text-xs text-on-surface-variant/70">
-                      Noch keine Status-Updates von Freunden.
+                      Noch keine Status-Updates von Freunden vorhanden.
                     </div>
                   ) : (
                     <div className="space-y-1.5">
-                      {stories
-                        .filter((s) => s.user_id !== currentUserId)
-                        .map((story) => {
-                          const storyIdx = stories.findIndex((st) => st.id === story.id)
-                          return (
-                            <div
-                              key={`story-${story.id}`}
-                              onClick={() => {
-                                setViewerStoryIndex(storyIdx)
-                                setIsViewerStoryOpen(true)
-                              }}
-                              className="flex items-center gap-3 p-2.5 rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60 hover:bg-surface-container-high/50 cursor-pointer transition-colors"
-                            >
-                              <div className="p-0.5 rounded-full bg-gradient-to-tr from-sky-400 via-indigo-500 to-purple-600 shrink-0">
-                                <Avatar
-                                  src={story.avatar_url}
-                                  name={story.username}
-                                  size="md"
-                                />
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="text-xs font-semibold text-primary truncate">
-                                  {story.username}
-                                </div>
-                                <div className="text-[10px] text-on-surface-variant/80 flex items-center gap-1">
-                                  <Clock className="w-3 h-3" />
-                                  <span>
-                                    {new Date(story.created_at).toLocaleTimeString([], {
+                      {friendsStoriesGrouped.map((grp) => (
+                        <div
+                          key={`story-grp-${grp.userId}`}
+                          onClick={() => openStoryViewerForUser(grp.stories, 0)}
+                          className="flex items-center gap-3 p-2.5 rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60 hover:bg-surface-container-high/50 cursor-pointer transition-colors"
+                        >
+                          <div className="relative shrink-0">
+                            <div className="p-0.5 rounded-full bg-gradient-to-tr from-sky-400 via-indigo-500 to-purple-600">
+                              <Avatar
+                                src={grp.avatarUrl}
+                                name={grp.username}
+                                size="md"
+                              />
+                            </div>
+                            {grp.stories.length > 1 && (
+                              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-indigo-600 text-white text-[9px] font-bold flex items-center justify-center border border-surface">
+                                {grp.stories.length}
+                              </span>
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-xs font-semibold text-primary truncate">
+                              {grp.username}
+                            </div>
+                            <div className="text-[10px] text-on-surface-variant/80 flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              <span>
+                                {grp.latestStory
+                                  ? new Date(grp.latestStory.created_at).toLocaleTimeString([], {
                                       hour: '2-digit',
                                       minute: '2-digit',
-                                    })}
-                                  </span>
-                                </div>
-                              </div>
+                                    })
+                                  : ''}
+                              </span>
+                              {grp.stories.length > 1 && (
+                                <span className="text-on-surface-variant/60">• {grp.stories.length} Updates</span>
+                              )}
                             </div>
-                          )
-                        })}
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -2499,15 +2676,27 @@ export function Messenger() {
         open={isCreateStoryOpen}
         onOpenChange={setIsCreateStoryOpen}
         onCreated={handleStoryCreated}
+        initialMode={createStoryInitialMode}
       />
 
       {/* Story Viewer Modal */}
       <StoryViewerModal
         open={isViewerStoryOpen}
         onOpenChange={setIsViewerStoryOpen}
-        stories={stories}
+        stories={activeViewerStories.length > 0 ? activeViewerStories : stories}
         initialIndex={viewerStoryIndex}
         onDeleted={handleStoryDeleted}
+        onReply={(targetUserId, _targetUsername, text) => {
+          const contact = contactsList.find((c) => c.userId === targetUserId)
+          if (contact) {
+            setActiveContact(contact)
+            setActiveGroup(null)
+            setIsViewerStoryOpen(false)
+            void handleSendMessage(`[Antwort auf Status]: "${text}"`)
+          } else {
+            toast.error('Kontakt für direkte Antwort nicht gefunden.')
+          }
+        }}
       />
 
       {/* Live Camera Snapshot Modal */}

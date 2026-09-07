@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Clock,
   Lock,
+  Send,
 } from 'lucide-react'
 import { type ChatStoryItem, deleteStory } from '@/api/social'
 import { STORY_GRADIENTS } from './CreateStoryModal'
@@ -21,6 +22,7 @@ interface StoryViewerModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onDeleted?: (storyId: number) => void
+  onReply?: (targetUserId: number, targetUsername: string, text: string) => void
 }
 
 export function StoryViewerModal({
@@ -29,11 +31,13 @@ export function StoryViewerModal({
   open,
   onOpenChange,
   onDeleted,
+  onReply,
 }: StoryViewerModalProps) {
   const [currentIndex, setCurrentIndex] = useState(initialIndex)
   const [progress, setProgress] = useState(0)
   const [isPaused, setIsPaused] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [replyText, setReplyText] = useState('')
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -259,9 +263,42 @@ export function StoryViewerModal({
           </div>
         </div>
 
-        {/* Bottom Expiration Footer */}
-        <div className="relative z-10 text-[10px] text-white/70 text-center drop-shadow">
-          Gültig bis {new Date(currentStory.expires_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} Uhr
+        {/* Bottom Actions & Reply */}
+        <div className="relative z-10 pt-2 border-t border-white/15">
+          {!currentStory.is_self && onReply ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                if (!replyText.trim()) return
+                onReply(currentStory.user_id, currentStory.username, replyText.trim())
+                setReplyText('')
+                onOpenChange(false)
+              }}
+              className="flex items-center gap-2"
+            >
+              <input
+                type="text"
+                value={replyText}
+                onChange={(e) => setReplyText(e.target.value)}
+                onFocus={() => setIsPaused(true)}
+                onBlur={() => setIsPaused(false)}
+                placeholder="Auf Status antworten …"
+                className="flex-1 bg-black/40 border border-white/25 rounded-full px-3.5 py-1.5 text-xs text-white placeholder:text-white/60 focus:outline-none focus:border-primary backdrop-blur-xs"
+              />
+              <button
+                type="submit"
+                disabled={!replyText.trim()}
+                className="p-2 rounded-full bg-primary text-on-primary disabled:opacity-40 hover:scale-105 transition-transform"
+                aria-label="Antwort senden"
+              >
+                <Send className="w-3.5 h-3.5" />
+              </button>
+            </form>
+          ) : (
+            <div className="text-[10px] text-white/70 text-center drop-shadow">
+              Gültig bis {new Date(currentStory.expires_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} Uhr
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -447,14 +447,14 @@ describe('Messenger (Allround Chat)', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByText('alice')).toBeInTheDocument()
+      expect(screen.getAllByText('alice')[0]).toBeInTheDocument()
     })
 
     const updatesTab = screen.getByRole('button', { name: 'Aktuelles' })
     fireEvent.click(updatesTab)
 
     await waitFor(() => {
-      expect(screen.getByText('Mein Status')).toBeInTheDocument()
+      expect(screen.getAllByText('Mein Status')[0]).toBeInTheDocument()
       expect(screen.getByText('Status hinzufügen')).toBeInTheDocument()
     })
 
