@@ -347,12 +347,17 @@ export function Messenger() {
   // Voice playback state
   const [playingAudioId, setPlayingAudioId] = useState<number | null>(null)
   const [audioCurrentTime, setAudioCurrentTime] = useState<number>(0)
+  const [audioPlaybackRate, setAudioPlaybackRate] = useState<number>(1)
   const audioInstanceRef = useRef<HTMLAudioElement | null>(null)
+
+  // Double-import prevention state for shared notes & calendar entries
+  const [importedAttachmentIds, setImportedAttachmentIds] = useState<Set<string>>(() => new Set())
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const justSentRef = useRef<boolean>(false)
+  const activeMailboxIdRef = useRef<string>('')
 
   // Message Editing & Opferschutz (Beweissicherung) State
   const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null)
@@ -617,16 +622,26 @@ export function Messenger() {
     if (activeGroup) {
       setRecipientPublicKeyJwk(null)
       setMessages([])
+      setBlindMailboxId('')
+      activeMailboxIdRef.current = ''
       deriveGroupBlindMailboxId(activeGroup.id).then((mid) => {
-        if (active) setBlindMailboxId(mid)
+        if (active) {
+          activeMailboxIdRef.current = mid
+          setBlindMailboxId(mid)
+        }
       })
     } else if (activeContact && currentUserId) {
       const targetUserId = activeContact.userId
       setRecipientPublicKeyJwk(null)
       setMessages([])
+      setBlindMailboxId('')
+      activeMailboxIdRef.current = ''
 
       deriveBlindMailboxId(currentUserId, targetUserId).then((mid) => {
-        if (active) setBlindMailboxId(mid)
+        if (active) {
+          activeMailboxIdRef.current = mid
+          setBlindMailboxId(mid)
+        }
       })
 
       getE2eePublicKey(targetUserId).then((res) => {
@@ -635,6 +650,7 @@ export function Messenger() {
         }
       }).catch(() => {})
     } else {
+      activeMailboxIdRef.current = ''
       setBlindMailboxId('')
       setRecipientPublicKeyJwk(null)
       setMessages([])
@@ -642,6 +658,7 @@ export function Messenger() {
 
     return () => {
       active = false
+      activeMailboxIdRef.current = ''
     }
   }, [activeContact, activeGroup, currentUserId])
 
@@ -678,12 +695,15 @@ export function Messenger() {
 
   // 5. Load and decrypt messages (non-flickering background sync + real-time)
   const loadMessages = async (isInitial = false) => {
-    if (!blindMailboxId || !currentUserId) return
+    const currentMid = blindMailboxId
+    if (!currentMid || !currentUserId) return
+    if (activeMailboxIdRef.current && activeMailboxIdRef.current !== currentMid) return
     if (isInitial && messages.length === 0) {
       setLoadingMessages(true)
     }
     try {
-      const envelopes = await fetchE2eeEnvelopes(blindMailboxId)
+      const envelopes = await fetchE2eeEnvelopes(currentMid)
+      if (activeMailboxIdRef.current && activeMailboxIdRef.current !== currentMid) return
       const decryptedList: ChatMessage[] = []
 
       // Dictionaries to track edits, deletions, and read receipts across envelopes
@@ -869,6 +889,9 @@ export function Messenger() {
           }
         }
       }
+
+      // Abort if the user has navigated to another chat in the meantime
+      if (activeMailboxIdRef.current && activeMailboxIdRef.current !== currentMid) return
 
       setMessages(processedList)
 
@@ -1165,6 +1188,7 @@ export function Messenger() {
         audioInstanceRef.current = null
       }
       const audio = new Audio(dataUrl)
+      audio.playbackRate = audioPlaybackRate
       audioInstanceRef.current = audio
       setPlayingAudioId(messageId)
       setAudioCurrentTime(0)
@@ -1186,6 +1210,17 @@ export function Messenger() {
       audio.play().catch(() => {
         setPlayingAudioId(null)
       })
+    }
+  }
+
+  // Cycle playback speed between 1x, 1.5x, and 2x (WhatsApp style)
+  const cycleAudioPlaybackRate = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    const rates = [1, 1.5, 2]
+    const nextRate = rates[(rates.indexOf(audioPlaybackRate) + 1) % rates.length] || 1
+    setAudioPlaybackRate(nextRate)
+    if (audioInstanceRef.current) {
+      audioInstanceRef.current.playbackRate = nextRate
     }
   }
 
@@ -1344,7 +1379,12 @@ export function Messenger() {
     reader.readAsDataURL(file)
   }
 
-  const handleImportNote = async (note: NoteAttachment) => {
+  const handleImportNote = async (note: NoteAttachment, itemKey?: string) => {
+    const key = itemKey || `${note.title}_${note.content?.slice(0, 30)}`
+    if (importedAttachmentIds.has(key)) {
+      toast.success('Diese Notiz wurde bereits in deine Notizen übernommen.')
+      return
+    }
     try {
       await saveNoteOffline({
         title: note.title || 'Geteilte Notiz',
@@ -1355,13 +1395,19 @@ export function Messenger() {
         note_type: 'personal',
         team_id: null,
       })
+      setImportedAttachmentIds((prev) => new Set([...prev, key]))
       toast.success(`Notiz "${note.title || 'Geteilte Notiz'}" in Notizen gespeichert!`)
     } catch {
       toast.error('Notiz konnte nicht gespeichert werden.')
     }
   }
 
-  const handleImportCalendar = async (cal: CalendarAttachment) => {
+  const handleImportCalendar = async (cal: CalendarAttachment, itemKey?: string) => {
+    const key = itemKey || `${cal.title}_${cal.start}`
+    if (importedAttachmentIds.has(key)) {
+      toast.success('Dieser Termin wurde bereits in deinen Kalender eingetragen.')
+      return
+    }
     try {
       await saveCalendarEventOffline({
         title: cal.title || 'Geteilter Termin',
@@ -1375,6 +1421,7 @@ export function Messenger() {
         team_id: null,
         server_id: null,
       })
+      setImportedAttachmentIds((prev) => new Set([...prev, key]))
       toast.success(`Termin "${cal.title || 'Geteilter Termin'}" im Kalender eingetragen!`)
     } catch {
       toast.error('Termin konnte nicht im Kalender gespeichert werden.')
@@ -2365,7 +2412,7 @@ export function Messenger() {
                 {messages.map((msg) => (
                   <div
                     key={msg.id}
-                    className={`flex flex-col ${msg.isSelf ? 'items-end' : 'items-start'}`}
+                    className={`group flex flex-col ${msg.isSelf ? 'items-end' : 'items-start'}`}
                   >
                     <div
                       className={`max-w-[85%] md:max-w-[70%] px-3.5 py-2 rounded-2xl text-xs break-words shadow-xs space-y-2 ${
@@ -2382,7 +2429,7 @@ export function Messenger() {
                       )}
 
                       {/* Image Attachment */}
-                      {msg.imageAttachment && (
+                      {!msg.isDeleted && msg.imageAttachment && (
                         <div className="rounded-xl overflow-hidden border border-black/10 my-1 cursor-pointer">
                           <img
                             src={msg.imageAttachment.dataUrl}
@@ -2394,7 +2441,7 @@ export function Messenger() {
                       )}
 
                       {/* File Attachment Card */}
-                      {msg.fileAttachment && (
+                      {!msg.isDeleted && msg.fileAttachment && (
                         <a
                           href={msg.fileAttachment.dataUrl}
                           download={msg.fileAttachment.name}
@@ -2416,7 +2463,7 @@ export function Messenger() {
                       )}
 
                       {/* Sticker Attachment */}
-                      {msg.stickerAttachment && (
+                      {!msg.isDeleted && msg.stickerAttachment && (
                         <div className="py-1">
                           <div
                             className="w-24 h-24 sm:w-28 sm:h-28 drop-shadow-md"
@@ -2428,7 +2475,7 @@ export function Messenger() {
                       )}
 
                       {/* Audio / Voice Message Attachment (Sleek Darker Design-DNA) */}
-                      {msg.audioAttachment && (
+                      {!msg.isDeleted && msg.audioAttachment && (
                         <div className={`flex items-center gap-3 p-2 rounded-xl min-w-[200px] max-w-[280px] ${
                           msg.isSelf ? 'bg-black/20 text-white' : 'bg-surface-container-high/90 text-on-surface'
                         }`}>
@@ -2465,18 +2512,28 @@ export function Messenger() {
                                 <Mic className="w-2.5 h-2.5" />
                                 <span>Sprachnachricht</span>
                               </span>
-                              <span>
-                                {playingAudioId === msg.id
-                                  ? formatDuration(audioCurrentTime)
-                                  : formatDuration(msg.audioAttachment.durationSeconds)}
-                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={cycleAudioPlaybackRate}
+                                  className="px-1.5 py-0.5 rounded-md font-semibold text-[10px] bg-white/20 hover:bg-white/30 text-current transition-colors"
+                                  title="Wiedergabegeschwindigkeit ändern (1x / 1.5x / 2x)"
+                                >
+                                  {audioPlaybackRate}x
+                                </button>
+                                <span>
+                                  {playingAudioId === msg.id
+                                    ? formatDuration(audioCurrentTime)
+                                    : formatDuration(msg.audioAttachment.durationSeconds)}
+                                </span>
+                              </div>
                             </div>
                           </div>
                         </div>
                       )}
 
                       {/* Note Attachment Card */}
-                      {msg.noteAttachment && (
+                      {!msg.isDeleted && msg.noteAttachment && (
                         <div
                           className={`p-3 rounded-xl border text-xs shadow-sm space-y-2.5 ${
                             msg.isSelf
@@ -2493,21 +2550,30 @@ export function Messenger() {
                               <StickyNote className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                               <span className="truncate text-white font-medium">{msg.noteAttachment.title || 'Notiz'}</span>
                             </div>
-                            <Button
-                              type="button"
-                              variant={msg.isSelf ? 'secondary' : 'primary'}
-                              size="sm"
-                              onClick={() => void handleImportNote(msg.noteAttachment!)}
-                              className={`h-6 px-2.5 text-[10px] gap-1 shrink-0 rounded-full font-medium ${
-                                msg.isSelf
-                                  ? 'bg-white/20 hover:bg-white/30 text-white border-none'
-                                  : 'bg-primary text-on-primary hover:bg-primary/90'
-                              }`}
-                              title="In eigene Notizen übernehmen"
-                            >
-                              <Download className="w-3 h-3" />
-                              <span>Übernehmen</span>
-                            </Button>
+                            {(() => {
+                              const noteKey = `note_${msg.id}_${msg.noteAttachment.title}`
+                              const isImported = importedAttachmentIds.has(noteKey)
+                              return (
+                                <Button
+                                  type="button"
+                                  variant={msg.isSelf ? 'secondary' : 'primary'}
+                                  size="sm"
+                                  disabled={isImported}
+                                  onClick={() => void handleImportNote(msg.noteAttachment!, noteKey)}
+                                  className={`h-6 px-2.5 text-[10px] gap-1 shrink-0 rounded-full font-medium ${
+                                    isImported
+                                      ? 'opacity-60 cursor-default bg-white/10 text-white border-none'
+                                      : msg.isSelf
+                                      ? 'bg-white/20 hover:bg-white/30 text-white border-none'
+                                      : 'bg-primary text-on-primary hover:bg-primary/90'
+                                  }`}
+                                  title={isImported ? 'Bereits in eigene Notizen übernommen' : 'In eigene Notizen übernehmen'}
+                                >
+                                  {isImported ? <Check className="w-3 h-3 text-emerald-400" /> : <Download className="w-3 h-3" />}
+                                  <span>{isImported ? 'Übernommen' : 'Übernehmen'}</span>
+                                </Button>
+                              )
+                            })()}
                           </div>
                           <p className="whitespace-pre-wrap text-[11px] text-white/90 line-clamp-4 leading-relaxed font-sans">
                             {msg.noteAttachment.content}
@@ -2516,7 +2582,7 @@ export function Messenger() {
                       )}
 
                       {/* Calendar Attachment Card */}
-                      {msg.calendarAttachment && (
+                      {!msg.isDeleted && msg.calendarAttachment && (
                         <div
                           className={`p-3 rounded-xl border text-xs shadow-sm space-y-2.5 ${
                             msg.isSelf
@@ -2535,21 +2601,30 @@ export function Messenger() {
                               </div>
                               <span className="truncate text-white font-medium">{msg.calendarAttachment.title || 'Termin'}</span>
                             </div>
-                            <Button
-                              type="button"
-                              variant={msg.isSelf ? 'secondary' : 'primary'}
-                              size="sm"
-                              onClick={() => void handleImportCalendar(msg.calendarAttachment!)}
-                              className={`h-6 px-2.5 text-[10px] gap-1 shrink-0 rounded-full font-medium ${
-                                msg.isSelf
-                                  ? 'bg-white/20 hover:bg-white/30 text-white border-none'
-                                  : 'bg-primary text-on-primary hover:bg-primary/90'
-                              }`}
-                              title="In eigenen Kalender eintragen"
-                            >
-                              <Plus className="w-3 h-3" />
-                              <span>Eintragen</span>
-                            </Button>
+                            {(() => {
+                              const calKey = `cal_${msg.id}_${msg.calendarAttachment.title}`
+                              const isImported = importedAttachmentIds.has(calKey)
+                              return (
+                                <Button
+                                  type="button"
+                                  variant={msg.isSelf ? 'secondary' : 'primary'}
+                                  size="sm"
+                                  disabled={isImported}
+                                  onClick={() => void handleImportCalendar(msg.calendarAttachment!, calKey)}
+                                  className={`h-6 px-2.5 text-[10px] gap-1 shrink-0 rounded-full font-medium ${
+                                    isImported
+                                      ? 'opacity-60 cursor-default bg-white/10 text-white border-none'
+                                      : msg.isSelf
+                                      ? 'bg-white/20 hover:bg-white/30 text-white border-none'
+                                      : 'bg-primary text-on-primary hover:bg-primary/90'
+                                  }`}
+                                  title={isImported ? 'Bereits in eigenen Kalender eingetragen' : 'In eigenen Kalender eintragen'}
+                                >
+                                  {isImported ? <Check className="w-3 h-3 text-emerald-400" /> : <Plus className="w-3 h-3" />}
+                                  <span>{isImported ? 'Eingetragen' : 'Eintragen'}</span>
+                                </Button>
+                              )
+                            })()}
                           </div>
                           <div className="text-[11px] text-white/90 flex items-center gap-1.5 font-medium">
                             <Clock className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
@@ -2607,10 +2682,10 @@ export function Messenger() {
                     </div>
 
                     <div className="flex items-center justify-end gap-1.5 text-[10px] text-on-surface-variant/60 mt-1 px-1">
-                      {/* Message Actions Menu (Edit & Delete for self, Victim Proof for recipient) */}
+                      {/* Message Actions Menu (Edit & Delete for self) */}
                       {!msg.isDeleted && msg.isSelf && (
-                        <div className="opacity-0 hover:opacity-100 focus-within:opacity-100 transition-opacity flex items-center gap-1 mr-1">
-                          {msg.text && !msg.noteAttachment && !msg.calendarAttachment && (
+                        <div className="opacity-0 group-hover:opacity-100 hover:opacity-100 focus-within:opacity-100 transition-opacity flex items-center gap-1 mr-1">
+                          {msg.text && (
                             <button
                               type="button"
                               onClick={() => {

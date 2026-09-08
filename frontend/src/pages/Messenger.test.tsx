@@ -53,6 +53,8 @@ vi.mock('@/services/e2eeCrypto', () => ({
 vi.mock('@/lib/offlineSync', () => ({
   loadNotesOfflineFirst: vi.fn().mockResolvedValue({ notes: [] }),
   loadCalendarEventsOfflineFirst: vi.fn().mockResolvedValue({ events: [] }),
+  saveNoteOffline: vi.fn().mockResolvedValue({ id: 1, title: 'Mock' }),
+  saveCalendarEventOffline: vi.fn().mockResolvedValue({ id: 1, title: 'Mock' }),
 }))
 
 function setupUser() {
@@ -700,5 +702,120 @@ describe('Messenger (Allround Chat)', () => {
         })
       )
     })
+  })
+
+  it('unterstützt WhatsApp-ähnliche Audiogeschwindigkeit und verhindert doppelte Kalender- & Notizeinträge', async () => {
+    const { saveNoteOffline, saveCalendarEventOffline } = await import('@/lib/offlineSync')
+
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([
+      {
+        id: 20,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: 'ciphertext-voice',
+        created_at: '2026-09-08T14:00:00Z',
+      },
+      {
+        id: 21,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: 'ciphertext-note',
+        created_at: '2026-09-08T14:01:00Z',
+      },
+      {
+        id: 22,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: 'ciphertext-calendar',
+        created_at: '2026-09-08T14:02:00Z',
+      },
+    ])
+
+    const { decryptE2eeMessage } = await import('@/services/e2eeCrypto')
+    vi.mocked(decryptE2eeMessage).mockImplementation(async (envelope) => {
+      if (envelope === 'ciphertext-voice') {
+        return JSON.stringify({
+          sender_id: 101,
+          audio_attachment: {
+            dataUrl: 'data:audio/webm;base64,GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQRChYECGFOAZwE=',
+            durationSeconds: 15,
+            mimeType: 'audio/webm',
+          },
+        })
+      }
+      if (envelope === 'ciphertext-note') {
+        return JSON.stringify({
+          sender_id: 101,
+          note_attachment: {
+            title: 'Wichtige Notiz',
+            content: 'Notizinhalt für den Test',
+          },
+        })
+      }
+      if (envelope === 'ciphertext-calendar') {
+        return JSON.stringify({
+          sender_id: 101,
+          calendar_attachment: {
+            title: 'Strategiemeeting',
+            start: '2026-09-10T10:00:00Z',
+            end: '2026-09-10T11:00:00Z',
+            description: 'Vorbereitung',
+          },
+        })
+      }
+      return '{}'
+    })
+
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /alice/i })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole('button', { name: /alice/i }))
+
+    // 1. Audio Playback Speed Toggle
+    await waitFor(() => {
+      expect(screen.getByText('1x')).toBeInTheDocument()
+    })
+
+    const speedBtn = screen.getByText('1x')
+    fireEvent.click(speedBtn)
+    expect(screen.getByText('1.5x')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('1.5x'))
+    expect(screen.getByText('2x')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('2x'))
+    expect(screen.getByText('1x')).toBeInTheDocument()
+
+    // 2. Note Import (Double-click prevention)
+    const importNoteBtn = screen.getByTitle('In eigene Notizen übernehmen')
+    fireEvent.click(importNoteBtn)
+
+    await waitFor(() => {
+      expect(saveNoteOffline).toHaveBeenCalledTimes(1)
+      expect(screen.getByText('Übernommen')).toBeInTheDocument()
+    })
+
+    // Clicking again should not trigger saveNoteOffline again
+    const importedNoteBtn = screen.getByTitle('Bereits in eigene Notizen übernommen')
+    expect(importedNoteBtn).toBeDisabled()
+    fireEvent.click(importedNoteBtn)
+    expect(saveNoteOffline).toHaveBeenCalledTimes(1)
+
+    // 3. Calendar Import (Double-click prevention)
+    const importCalBtn = screen.getByTitle('In eigenen Kalender eintragen')
+    fireEvent.click(importCalBtn)
+
+    await waitFor(() => {
+      expect(saveCalendarEventOffline).toHaveBeenCalledTimes(1)
+      expect(screen.getByText('Eingetragen')).toBeInTheDocument()
+    })
+
+    const importedCalBtn = screen.getByTitle('Bereits in eigenen Kalender eingetragen')
+    expect(importedCalBtn).toBeDisabled()
+    fireEvent.click(importedCalBtn)
+    expect(saveCalendarEventOffline).toHaveBeenCalledTimes(1)
   })
 })
