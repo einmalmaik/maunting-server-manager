@@ -2595,8 +2595,8 @@ export function Messenger() {
                     <div
                       className={`max-w-[85%] md:max-w-[70%] px-3.5 py-2 rounded-2xl text-xs break-words shadow-xs space-y-2 ${
                         msg.isSelf
-                          ? 'bg-primary text-on-primary rounded-br-xs'
-                          : 'bg-surface-container-high text-on-surface rounded-bl-xs border border-outline-variant/20'
+                          ? 'bg-[#005c4b] text-white rounded-br-xs border border-emerald-800/40 shadow-sm'
+                          : 'bg-surface-container-high text-on-surface rounded-bl-xs border border-outline-variant/20 shadow-xs'
                       }`}
                     >
                       {/* Group sender name if in group and not self */}
@@ -2666,7 +2666,7 @@ export function Messenger() {
                               onClick={cycleAudioPlaybackRate}
                               className={`w-10 h-10 rounded-full font-bold text-xs shadow-sm flex items-center justify-center shrink-0 hover:scale-105 active:scale-95 transition-all ${
                                 msg.isSelf
-                                  ? 'bg-white text-primary hover:bg-white/90'
+                                  ? 'bg-white text-[#005c4b] hover:bg-white/90'
                                   : 'bg-primary text-on-primary hover:opacity-90'
                               }`}
                               title="Wiedergabegeschwindigkeit ändern (1x / 1.5x / 2x)"
@@ -2676,7 +2676,7 @@ export function Messenger() {
                             </button>
                           ) : (
                             <div
-                              className="relative shrink-0 w-10 h-10 cursor-pointer"
+                              className="relative shrink-0 w-10 h-10 rounded-full cursor-pointer"
                               onClick={cycleAudioPlaybackRate}
                               title="Wiedergabegeschwindigkeit ändern (1x / 1.5x / 2x)"
                             >
@@ -2684,14 +2684,14 @@ export function Messenger() {
                                 src={msg.isSelf ? user?.avatar_url : (activeContact?.avatarUrl || null)}
                                 name={msg.isSelf ? (user?.username || 'Ich') : (msg.senderName || activeContact?.username || 'Benutzer')}
                                 size="md"
-                                className="w-10 h-10 ring-1 ring-outline-variant/30"
+                                className="w-10 h-10"
                               />
                               <button
                                 type="button"
                                 onClick={cycleAudioPlaybackRate}
                                 className={`absolute -bottom-1 -right-1 px-1 py-0.5 rounded-full font-bold text-[9px] shadow-xs border border-surface leading-none hover:scale-110 transition-transform ${
                                   msg.isSelf
-                                    ? 'bg-white text-primary'
+                                    ? 'bg-white text-[#005c4b]'
                                     : 'bg-primary text-on-primary'
                                 }`}
                                 title="Wiedergabegeschwindigkeit ändern (1x / 1.5x / 2x)"
@@ -2708,7 +2708,7 @@ export function Messenger() {
                             onClick={() => togglePlayAudio(msg.id, msg.audioAttachment!.dataUrl)}
                             className={`w-8 h-8 rounded-full shrink-0 shadow-xs flex items-center justify-center transition-all ${
                               msg.isSelf
-                                ? 'bg-white text-primary hover:bg-white/90'
+                                ? 'bg-white text-[#005c4b] hover:bg-white/90'
                                 : 'bg-primary text-on-primary hover:opacity-90'
                             }`}
                             aria-label={playingAudioId === msg.id ? 'Pause' : 'Abspielen'}
