@@ -3059,7 +3059,7 @@ export function Messenger() {
               )}
 
               {/* Footer Input Area */}
-              <div className="p-2.5 border-t border-outline-variant/20 bg-surface-container-low">
+              <div className="p-2.5 border-t border-outline-variant/20 bg-surface-container-low relative z-1">
                 {isRecording ? (
                   <VoiceRecordingBar
                     durationSeconds={recordingDuration}

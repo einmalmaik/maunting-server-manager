@@ -86,7 +86,7 @@ export const ChatInputBar = forwardRef<ChatInputBarRef, ChatInputBarProps>(
 
     return (
       <div
-        className={`flex items-end gap-2 rounded-2xl border border-outline-variant/50 bg-surface-container-low/50 p-2 transition-all focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20 ${
+        className={`flex items-end gap-2 rounded-2xl border border-outline-variant/50 bg-surface-container-low p-2 transition-all focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20 ${
           disabled ? 'opacity-60 pointer-events-none' : ''
         } ${className}`}
       >
