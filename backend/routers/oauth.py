@@ -132,6 +132,30 @@ def _set_login_session(response: Response, db: Session, user: User) -> None:
     issue_session(response, db, user)
 
 
+def _extract_all_state_cookies(request: Request) -> list[str]:
+    """Extrahiert alle Werte des State-Cookies aus allen Cookie-Headern.
+
+    Browser koennen mehrere gleichnamige Cookies senden (z. B. ein host-only
+    und ein domain-spezifisches Geister-Cookie), teils auch verteilt auf
+    mehrere Cookie-Header.
+    """
+    raw_headers = request.headers.getlist("cookie")
+    if not raw_headers:
+        return []
+    values: list[str] = []
+    target = oauth_service.STATE_COOKIE_NAME + "="
+    for raw_cookie in raw_headers:
+        for part in raw_cookie.split(";"):
+            part = part.strip()
+            if part.startswith(target):
+                val = part[len(target):].strip()
+                if val.startswith('"') and val.endswith('"') and len(val) >= 2:
+                    val = val[1:-1]
+                if val and val not in values:
+                    values.append(val)
+    return values
+
+
 def _set_oauth_state_cookie(response: Response, encrypted: str) -> None:
     # SameSite=None + Secure: der State-Cookie MUSS den IdP-Cross-Site-
     # Roundtrip (z. B. Google → msm.mauntingstudios.de) zuverlaessig
@@ -142,6 +166,24 @@ def _set_oauth_state_cookie(response: Response, encrypted: str) -> None:
     # JS-Zugriff. Domain-Attribut wird weiterhin aus get_effective_cookie_domain()
     # abgeleitet, damit Subdomain-Setups (z. B. app.X.example.com) korrekt
     # funktionieren.
+    cookie_domain = get_effective_cookie_domain()
+    # Wenn eine Domain gesetzt wird, loeschen wir vorab defensiv ein evtl.
+    # vorhandenes host-only-Cookie, damit keine zwei Cookies im Browser kollidieren.
+    if cookie_domain:
+        response.delete_cookie(
+            key=oauth_service.STATE_COOKIE_NAME,
+            path="/",
+            secure=True,
+            samesite="none",
+            httponly=True,
+        )
+        response.delete_cookie(
+            key=oauth_service.STATE_COOKIE_NAME,
+            path="/",
+            secure=True,
+            samesite="lax",
+            httponly=True,
+        )
     cookie_kwargs: dict[str, Any] = {
         "key": oauth_service.STATE_COOKIE_NAME,
         "value": encrypted,
@@ -151,27 +193,61 @@ def _set_oauth_state_cookie(response: Response, encrypted: str) -> None:
         "path": "/",
         "max_age": oauth_service.STATE_TTL_SECONDS,
     }
-    cookie_domain = get_effective_cookie_domain()
     if cookie_domain:
         cookie_kwargs["domain"] = cookie_domain
     response.set_cookie(**cookie_kwargs)
 
 
 def _clear_oauth_state_cookie(response: Response) -> None:
-    # Gleiche Domain/Path/SameSite-Attribute wie beim Setzen → Cookie wird
-    # zuverlaessig geloescht (auch bei Mismatch-Fehlern oder nach erfolgreichem
-    # Login). SameSite=None beim Delete ist zulaessig — Browser matchen das
-    # gegen das urspruenglich gesetzte Cookie.
-    delete_kwargs: dict[str, Any] = {
-        "key": oauth_service.STATE_COOKIE_NAME,
-        "path": "/",
-        "secure": True,
-        "samesite": "none",
-    }
+    """Loescht das OAuth-State-Cookie defensiv ueber alle moeglichen Domain- und SameSite-Scopes.
+
+    Hintergrund (Geister-Cookies):
+    Wurde ein Cookie zuvor host-only (ohne Domain) oder mit Domain (.example.com / example.com)
+    gesetzt, loescht ein einzelner delete_cookie()-Aufruf mit Domain das host-only-Cookie NICHT
+    (und umgekehrt). Das fuehrt dazu, dass im Browser zwei gleichnamige Cookies existieren
+    und beim naechsten Login ein alter 'Geister-State' an den Server gesendet wird.
+    Hier wird das Cookie daher defensiv auf allen relevanten Pfaden/Scopes invalidiert.
+    """
     cookie_domain = get_effective_cookie_domain()
+
+    # 1. Mit konfigurierter/abgeleiteter Domain loeschen (falls vorhanden)
     if cookie_domain:
-        delete_kwargs["domain"] = cookie_domain
-    response.delete_cookie(**delete_kwargs)
+        response.delete_cookie(
+            key=oauth_service.STATE_COOKIE_NAME,
+            path="/",
+            domain=cookie_domain,
+            secure=True,
+            samesite="none",
+            httponly=True,
+        )
+        stripped_domain = cookie_domain.lstrip(".")
+        if stripped_domain and stripped_domain != cookie_domain:
+            response.delete_cookie(
+                key=oauth_service.STATE_COOKIE_NAME,
+                path="/",
+                domain=stripped_domain,
+                secure=True,
+                samesite="none",
+                httponly=True,
+            )
+
+    # 2. Host-only loeschen (kein Domain-Attribut) mit SameSite=none
+    response.delete_cookie(
+        key=oauth_service.STATE_COOKIE_NAME,
+        path="/",
+        secure=True,
+        samesite="none",
+        httponly=True,
+    )
+
+    # 3. Host-only loeschen mit SameSite=lax (fuer aeltere Browser/Dev-Umgebungen)
+    response.delete_cookie(
+        key=oauth_service.STATE_COOKIE_NAME,
+        path="/",
+        secure=True,
+        samesite="lax",
+        httponly=True,
+    )
 
 
 # ── Public: Public-Provider-Listing fuer Login-UI ─────────────────────
@@ -423,6 +499,24 @@ def oauth_callback(
 
     state_cookie = request.cookies.get(oauth_service.STATE_COOKIE_NAME)
     payload = oauth_service.unpack_state_cookie(state_cookie)
+
+    # Defensives Geister-Cookie-Handling: Falls request.cookies den 'falschen'
+    # von mehreren gleichnamigen Cookies gewaehlt hat (z. B. ein altes Host-Only-Cookie
+    # statt des neuen Domain-Cookies), pruefen wir alle State-Cookies im Request-Header.
+    if payload is None or payload.get("state") != state:
+        all_candidates = _extract_all_state_cookies(request)
+        for cand in all_candidates:
+            if cand != state_cookie:
+                cand_payload = oauth_service.unpack_state_cookie(cand)
+                if cand_payload and cand_payload.get("state") == state:
+                    payload = cand_payload
+                    state_cookie = cand
+                    _log.info(
+                        "OAuth callback (slug=%s): matching state successfully recovered from alternate cookie",
+                        slug,
+                    )
+                    break
+
     # WICHTIG: Mode ZUERST lesen, BEVOR wir auf Mismatch prüfen — sonst landet
     # ein Link-Mode-Fehler auf /login (was PublicOnlyRoute für eingeloggte User
     # auf / redirected → der User sieht nie die Fehlermeldung in /profile).

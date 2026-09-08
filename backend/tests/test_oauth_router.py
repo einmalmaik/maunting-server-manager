@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from tests._totp import totp_now, random_totp_secret
 import pytest
+from fastapi import Response
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -905,6 +906,100 @@ class TestTruncateForLog:
         assert "AAAAAAAAAAAAAAAA" in log_blob  # 16 As aus 10000
         assert huge_state not in log_blob  # nicht voll geleakt
         assert len(log_blob) < 500  # hart: Log-Eintrag bleibt klein
+
+
+
+# ── Ghost-Cookie & Defensive Clearing Tests ───────────────────────────
+
+class TestGhostCookieHandling:
+    def test_extract_all_state_cookies_multiple(self):
+        from fastapi import Request
+        from routers.oauth import _extract_all_state_cookies
+
+        req = Request({
+            "type": "http",
+            "headers": [
+                (b"cookie", b'__Secure-oauth_state="stale1"; other=123'),
+                (b"cookie", b"__Secure-oauth_state=valid2; __Secure-oauth_state=valid2"),
+            ],
+        })
+        cookies = _extract_all_state_cookies(req)
+        assert cookies == ["stale1", "valid2"]
+
+    def test_defensive_cookie_clearing_emits_multiple_delete_headers(self, monkeypatch):
+        from routers.oauth import _clear_oauth_state_cookie, _set_oauth_state_cookie
+        import config
+
+        monkeypatch.setattr(config.settings, "panel_url", "https://panel.example.com", raising=False)
+        monkeypatch.setattr(config.settings, "cookie_domain", "", raising=False)
+
+        resp = Response()
+        _clear_oauth_state_cookie(resp)
+
+        set_cookie_headers = [
+            v.decode() for k, v in resp.headers.raw
+            if k.lower() == b"set-cookie" and b"__Secure-oauth_state" in v
+        ]
+        # Must contain domain-scoped delete (.example.com and example.com)
+        assert any("Domain=.example.com" in h for h in set_cookie_headers)
+        assert any("Domain=example.com" in h for h in set_cookie_headers)
+        # Must contain host-only deletes (with SameSite=none and SameSite=lax)
+        host_only = [h for h in set_cookie_headers if "Domain=" not in h]
+        assert len(host_only) >= 2
+        assert any("samesite=none" in h.lower() for h in host_only)
+        assert any("samesite=lax" in h.lower() for h in host_only)
+        # All delete headers MUST enforce HttpOnly and Secure
+        for h in set_cookie_headers:
+            assert "httponly" in h.lower(), f"Delete header missing httponly: {h}"
+            assert "secure" in h.lower(), f"Delete header missing secure: {h}"
+
+        # Also test _set_oauth_state_cookie defensive clearing when domain is active
+        resp2 = Response()
+        _set_oauth_state_cookie(resp2, "test_enc")
+        set_cookie_headers2 = [
+            v.decode() for k, v in resp2.headers.raw
+            if k.lower() == b"set-cookie" and b"__Secure-oauth_state" in v
+        ]
+        # Must have host-only delete with httponly
+        assert any("max-age=0" in h.lower() and "httponly" in h.lower() for h in set_cookie_headers2)
+        # Must have actual set cookie with domain
+        assert any("Domain=.example.com" in h and "test_enc" in h for h in set_cookie_headers2)
+
+    def test_callback_recovers_matching_state_from_alternate_cookie(
+        self, client: TestClient, db: Session, monkeypatch
+    ):
+        """Wenn der Browser zwei State-Cookies sendet (z. B. altes Host-Only-Cookie
+        und neues Domain-Cookie), muss der Callback den passenden State auswerten."""
+        _create_provider(db, slug="gh-multi", preset="github", enabled=True, client_secret="secret")
+
+        stale_encrypted = oauth_service.pack_state_cookie(
+            {"state": "old_stale_state", "code_verifier": "ver1", "mode": "login", "redirect_uri": "http://localhost/api/oauth/gh-multi/callback"}
+        )
+        valid_encrypted = oauth_service.pack_state_cookie(
+            {"state": "new_valid_state", "code_verifier": "ver2", "mode": "login", "redirect_uri": "http://localhost/api/oauth/gh-multi/callback"}
+        )
+
+        def _fake_exchange(db, provider, code, code_verifier, redirect_uri):
+            assert code_verifier == "ver2"
+            return {"access_token": "gho_test"}
+
+        def _fake_profile(db, provider, tokens):
+            return {"id": "12345", "login": "octocat", "email": "octo@github.com"}
+
+        monkeypatch.setattr(oauth_service, "exchange_code", _fake_exchange)
+        monkeypatch.setattr(oauth_service, "fetch_user_profile", _fake_profile)
+
+        # Simuliere Browser-Header mit altem Cookie zuerst und neuem Cookie danach
+        cookie_header = f"__Secure-oauth_state={stale_encrypted}; __Secure-oauth_state={valid_encrypted}"
+        res = client.get(
+            "/api/oauth/gh-multi/callback",
+            params={"code": "valid_code", "state": "new_valid_state"},
+            headers={"Cookie": cookie_header},
+            follow_redirects=False,
+        )
+        # Sollte nicht mit state_mismatch fehlschlagen, sondern weiter zum Login/Link kommen!
+        assert res.status_code == 302
+        assert "oauth_state_mismatch" not in res.headers["location"]
 
 
 # ── Helpers (lokal) ───────────────────────────────────────────────────

@@ -694,12 +694,14 @@ async def lifespan(app: FastAPI):
     from services.ai_geo_service import shutdown_http_client as shutdown_geo_http_client
     from services.ai_regional_connectors_service import shutdown_http_client as shutdown_regional_connectors_http_client
     from services.ai_satellite_service import shutdown_http_client as shutdown_satellite_http_client
+    from services.oauth_service import close_http_client as shutdown_oauth_http_client
 
     shutdown_caldav_client()
     shutdown_http_client()
     shutdown_geo_http_client()
     shutdown_regional_connectors_http_client()
     shutdown_satellite_http_client()
+    shutdown_oauth_http_client()
     stop_scheduler()
     await close_steam_service()
 

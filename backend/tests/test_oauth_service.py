@@ -677,6 +677,120 @@ class TestPublicListing:
             assert "client_secret_encrypted" not in p
 
 
+
+# ── OIDC Discovery Caching & Client-Pooling Tests ─────────────────────
+
+class TestOidcDiscoveryCachingAndPooling:
+    def test_state_ttl_is_reduced_to_300(self):
+        assert oauth_service.STATE_TTL_SECONDS == 300
+
+    def test_discovery_caching(self, monkeypatch):
+        oauth_service.clear_oidc_discovery_cache()
+        call_count = 0
+
+        def fake_get(url, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            class FakeResp:
+                def raise_for_status(self):
+                    pass
+                def json(self):
+                    return {
+                        "authorization_endpoint": "https://auth.example.com/oauth/authorize",
+                        "token_endpoint": "https://auth.example.com/oauth/token",
+                        "userinfo_endpoint": "https://auth.example.com/oauth/userinfo",
+                    }
+            return FakeResp()
+
+        client = oauth_service.get_http_client()
+        monkeypatch.setattr(client, "get", fake_get)
+
+        # 1. First call: fetches via client.get
+        data1 = oauth_service._fetch_oidc_discovery("https://auth.example.com")
+        assert call_count == 1
+        assert data1["authorization_endpoint"] == "https://auth.example.com/oauth/authorize"
+
+        # 2. Second call: served from cache (no extra HTTP call)
+        data2 = oauth_service._fetch_oidc_discovery("https://auth.example.com")
+        assert call_count == 1
+        assert data2 == data1
+
+        # 3. Clear cache and call again: fetches again
+        oauth_service.clear_oidc_discovery_cache("https://auth.example.com")
+        data3 = oauth_service._fetch_oidc_discovery("https://auth.example.com")
+        assert call_count == 2
+        assert data3 == data1
+
+    def test_discovery_fallback_to_stale_cache_on_error(self, monkeypatch):
+        oauth_service.clear_oidc_discovery_cache()
+        client = oauth_service.get_http_client()
+
+        # Initial successful fetch to populate cache
+        class FakeSuccessResp:
+            def raise_for_status(self):
+                pass
+            def json(self):
+                return {"authorization_endpoint": "https://auth.example.com/auth"}
+
+        monkeypatch.setattr(client, "get", lambda url, **kwargs: FakeSuccessResp())
+        data = oauth_service._fetch_oidc_discovery("https://auth.example.com")
+        assert data["authorization_endpoint"] == "https://auth.example.com/auth"
+
+        # Now simulate network failure
+        import httpx
+        def failing_get(url, **kwargs):
+            raise httpx.ConnectTimeout("Network unreachable")
+
+        monkeypatch.setattr(client, "get", failing_get)
+
+        # Stale cache is used as resilient fallback
+        fallback_data = oauth_service._fetch_oidc_discovery("https://auth.example.com")
+        assert fallback_data["authorization_endpoint"] == "https://auth.example.com/auth"
+
+    def test_http_client_pooling(self):
+        c1 = oauth_service.get_http_client()
+        c2 = oauth_service.get_http_client()
+        assert c1 is c2
+        oauth_service.close_http_client()
+        c3 = oauth_service.get_http_client()
+        assert c3 is not c1
+        oauth_service.close_http_client()
+
+    def test_provider_creation_clears_discovery_cache(self, db: Session, monkeypatch):
+        # Pre-seed cache
+        oauth_service.clear_oidc_discovery_cache()
+        with oauth_service._discovery_cache_lock:
+            oauth_service._discovery_cache["https://auth.example.com"] = (100.0, {"authorization_endpoint": "https://auth.example.com/old"})
+
+        # Creating provider with that issuer clears cache
+        oauth_service.create_provider(
+            db,
+            slug="test-oidc-cache",
+            name="Test OIDC",
+            preset="custom_oidc",
+            enabled=True,
+            client_id="cid",
+            client_secret="sec",
+            issuer="https://auth.example.com",
+            authorization_endpoint=None,
+            token_endpoint=None,
+            userinfo_endpoint=None,
+            scope=None,
+            claims_mapping_json=None,
+            position=0,
+        )
+        with oauth_service._discovery_cache_lock:
+            assert "https://auth.example.com" not in oauth_service._discovery_cache
+
+    def test_fetch_userinfo_handles_exceptions_gracefully(self, monkeypatch):
+        client = oauth_service.get_http_client()
+        def crash_get(url, **kwargs):
+            raise OSError("Socket error")
+        monkeypatch.setattr(client, "get", crash_get)
+        assert oauth_service._fetch_userinfo("https://example.com/userinfo", "token") is None
+
+
+
 # ── Helpers (lokal, NICHT in conftest) ────────────────────────────────
 
 def _make_provider(

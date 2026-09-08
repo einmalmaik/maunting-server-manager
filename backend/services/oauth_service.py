@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import json
 import secrets
+import threading
+import time
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
@@ -47,7 +49,7 @@ DEFAULT_REQUIRE_VERIFIED_EMAIL = "true"
 # ── State-Cookie ───────────────────────────────────────────────────────
 
 STATE_COOKIE_NAME = "__Secure-oauth_state"
-STATE_TTL_SECONDS = 600  # 10 Minuten
+STATE_TTL_SECONDS = 300  # 5 Minuten (reduziert von 10 Minuten gegen langanhaltende Stale-Lockouts)
 
 
 # ── Public-DTOs ────────────────────────────────────────────────────────
@@ -251,14 +253,76 @@ def _effective_endpoints(provider: OAuthProvider) -> tuple[OAuthPreset, dict[str
     return preset, {k: v for k, v in endpoints.items() if v}  # type: ignore[misc]
 
 
+# ── HTTP-Client Connection-Pooling & OIDC-Discovery Caching ───────────
+
+_HTTP_CLIENT: httpx.Client | None = None
+_HTTP_CLIENT_LOCK = threading.Lock()
+
+_DISCOVERY_CACHE_TTL = 3600.0  # 1 Stunde TTL fuer OIDC Discovery-Dokumente
+_discovery_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_discovery_cache_lock = threading.Lock()
+
+
+def get_http_client() -> httpx.Client:
+    """Wiederverwendbarer httpx.Client mit Connection-Pooling fuer OIDC & OAuth."""
+    global _HTTP_CLIENT
+    if _HTTP_CLIENT is None or _HTTP_CLIENT.is_closed:
+        with _HTTP_CLIENT_LOCK:
+            if _HTTP_CLIENT is None or _HTTP_CLIENT.is_closed:
+                _HTTP_CLIENT = httpx.Client(
+                    timeout=httpx.Timeout(10.0, connect=3.0),
+                    follow_redirects=True,
+                    limits=httpx.Limits(max_keepalive_connections=20, max_connections=50, keepalive_expiry=30.0),
+                )
+    return _HTTP_CLIENT
+
+
+def close_http_client() -> None:
+    """Schliesst den gepoolten Client (fuer Shutdown/Tests)."""
+    global _HTTP_CLIENT
+    with _HTTP_CLIENT_LOCK:
+        if _HTTP_CLIENT is not None and not _HTTP_CLIENT.is_closed:
+            _HTTP_CLIENT.close()
+            _HTTP_CLIENT = None
+
+
+def clear_oidc_discovery_cache(issuer: str | None = None) -> None:
+    """Leert den OIDC-Discovery-Cache (fuer Tests und Provider-Updates)."""
+    with _discovery_cache_lock:
+        if issuer:
+            _discovery_cache.pop(issuer.rstrip("/"), None)
+        else:
+            _discovery_cache.clear()
+
+
 def _fetch_oidc_discovery(issuer: str) -> dict[str, Any]:
-    """Holt das OIDC-Discovery-Dokument. Wirft ValueError bei Fehlern."""
-    url = issuer.rstrip("/") + "/.well-known/openid-configuration"
+    """Holt das OIDC-Discovery-Dokument mit Thread-sicherem Caching. Wirft ValueError bei Fehlern."""
+    norm_issuer = issuer.rstrip("/")
+    now = time.monotonic()
+
+    with _discovery_cache_lock:
+        cached = _discovery_cache.get(norm_issuer)
+        if cached is not None:
+            cached_at, data = cached
+            if (now - cached_at) < _DISCOVERY_CACHE_TTL:
+                return dict(data)
+
+    url = norm_issuer + "/.well-known/openid-configuration"
     try:
-        resp = httpx.get(url, timeout=5.0)
+        client = get_http_client()
+        resp = client.get(url, timeout=httpx.Timeout(5.0, connect=3.0))
         resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+        if not isinstance(data, dict):
+            raise ValueError("OIDC-Discovery lieferte kein JSON-Objekt")
+        with _discovery_cache_lock:
+            _discovery_cache[norm_issuer] = (now, data)
+        return dict(data)
     except Exception as e:
+        with _discovery_cache_lock:
+            cached = _discovery_cache.get(norm_issuer)
+            if cached is not None:
+                return dict(cached[1])
         raise ValueError(f"OIDC-Discovery fehlgeschlagen fuer '{issuer}': {e}") from e
 
 
@@ -363,6 +427,8 @@ def create_provider(
         position=position,
     )
     _validate_custom_endpoints(preset, provider)
+    if provider.issuer:
+        clear_oidc_discovery_cache(provider.issuer)
     db.add(provider)
     db.commit()
     db.refresh(provider)
@@ -410,7 +476,12 @@ def update_provider(
             provider.client_secret_encrypted = encrypt_secret(client_secret)
             provider.client_secret_mask = mask_secret(client_secret)
     if issuer is not None:
-        provider.issuer = issuer or None
+        new_issuer_val = issuer or None
+        if provider.issuer and provider.issuer != new_issuer_val:
+            clear_oidc_discovery_cache(provider.issuer)
+        provider.issuer = new_issuer_val
+        if provider.issuer:
+            clear_oidc_discovery_cache(provider.issuer)
     if authorization_endpoint is not None:
         provider.authorization_endpoint = authorization_endpoint or None
     if token_endpoint is not None:
@@ -429,6 +500,8 @@ def update_provider(
 
 
 def delete_provider(db: Session, provider: OAuthProvider) -> None:
+    if provider.issuer:
+        clear_oidc_discovery_cache(provider.issuer)
     db.delete(provider)
     db.commit()
 
@@ -587,13 +660,14 @@ def exchange_code(
     if secret:
         data["client_secret"] = secret
     try:
-        resp = httpx.post(
+        client = get_http_client()
+        resp = client.post(
             str(endpoints["token_endpoint"]),
             data=data,
             headers={"Accept": "application/json"},
-            timeout=10.0,
+            timeout=httpx.Timeout(8.0, connect=3.0),
         )
-    except httpx.HTTPError as e:
+    except (httpx.HTTPError, TimeoutError, OSError) as e:
         raise ValueError(f"Token-Endpoint nicht erreichbar: {e}") from e
     if resp.status_code != 200:
         # Wir geben bewusst NICHT den IdP-Body zurück (kann Stacktraces
@@ -625,11 +699,11 @@ def fetch_user_profile(
     if id_token and preset.is_oidc:
         claims = _decode_jwt_payload(id_token)
         if claims and claims.get("sub"):
-            # 2) Wenn /userinfo verfuegbar, mergen (id_token darf aber Vorrang haben)
+            # 2) Wenn /userinfo verfuegbar, mergen (schneller Timeout 2.5s, da ID-Token bereits vorliegt)
             userinfo_url = endpoints.get("userinfo_endpoint")
             if userinfo_url:
                 try:
-                    userinfo = _fetch_userinfo(str(userinfo_url), tokens.get("access_token", ""))
+                    userinfo = _fetch_userinfo(str(userinfo_url), tokens.get("access_token", ""), timeout=2.5)
                     if userinfo:
                         # Behaupte vom IdP: sub MUSS gleich sein (OpenID-Spec)
                         if not userinfo.get("sub") or userinfo.get("sub") == claims.get("sub"):
@@ -639,11 +713,11 @@ def fetch_user_profile(
                     pass
             return claims
 
-    # 3) Fallback: /userinfo
+    # 3) Fallback: /userinfo (wenn kein ID-Token vorhanden ist, z. B. reines OAuth2)
     userinfo_url = endpoints.get("userinfo_endpoint")
     if not userinfo_url:
         raise ValueError("Provider liefert weder ID-Token noch /userinfo-Endpoint")
-    userinfo = _fetch_userinfo(str(userinfo_url), tokens.get("access_token", ""))
+    userinfo = _fetch_userinfo(str(userinfo_url), tokens.get("access_token", ""), timeout=5.0)
     if not userinfo:
         raise ValueError("userinfo-Endpoint lieferte leeres Profil")
     return userinfo
@@ -672,16 +746,17 @@ def _decode_jwt_payload(jwt: str) -> dict[str, Any] | None:
         return None
 
 
-def _fetch_userinfo(url: str, access_token: str) -> dict[str, Any] | None:
+def _fetch_userinfo(url: str, access_token: str, timeout: float = 4.0) -> dict[str, Any] | None:
     if not access_token:
         return None
     try:
-        resp = httpx.get(
+        client = get_http_client()
+        resp = client.get(
             url,
             headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
-            timeout=10.0,
+            timeout=httpx.Timeout(timeout, connect=2.5),
         )
-    except httpx.HTTPError:
+    except Exception:
         return None
     if resp.status_code != 200:
         return None
@@ -952,4 +1027,7 @@ __all__ = [
     "list_user_links",
     "create_2fa_challenge",
     "complete_2fa_challenge",
+    "clear_oidc_discovery_cache",
+    "get_http_client",
+    "close_http_client",
 ]
