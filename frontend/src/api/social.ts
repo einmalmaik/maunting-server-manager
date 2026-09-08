@@ -161,6 +161,11 @@ export async function getProfile(userId: number): Promise<PublicProfileResponse>
   return api<PublicProfileResponse>(`/social/profile/user/${userId}`)
 }
 
+export async function getPublicProfiles(search?: string): Promise<PublicProfileResponse[]> {
+  const q = search && search.trim() ? `?search=${encodeURIComponent(search.trim())}` : ''
+  return api<PublicProfileResponse[]>(`/social/profiles/public${q}`)
+}
+
 export async function updatePrivacy(payload: {
   privacy?: 'private' | 'friends' | 'public'
   social_privacy?: 'private' | 'friends' | 'public'

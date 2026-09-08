@@ -48,6 +48,18 @@ function getPresenceForRoute(pathname: string): { label: string; detail: string;
   return { label: 'Im Panel', detail: 'Control Center', category: 'general' }
 }
 
+export const ACTIVITY_CATEGORY_LABELS: Record<string, string> = {
+  ai_chat: 'KI-Chat',
+  general: 'Allgemein',
+  server_admin: 'Server-Verwaltung',
+  command_exec: 'Befehlsausführung',
+}
+
+export function formatActivityCategory(category: string): string {
+  const norm = category.toLowerCase().trim()
+  return ACTIVITY_CATEGORY_LABELS[norm] || norm.replace(/_/g, ' ')
+}
+
 export function usePresenceAndActivity(
   socialEnabled: boolean = true,
   enableActivityTracking: boolean = true
@@ -60,6 +72,7 @@ export function usePresenceAndActivity(
   const activeSecondsRef = useRef<number>(0)
   const activeCategoryRef = useRef<string>('general')
   const lastInteractionTimeRef = useRef<number>(Date.now())
+  const lastAiInteractionTimeRef = useRef<number>(0)
 
   const manualStatusRef = useRef<PresenceStatus>('online')
   const isAutoAwayRef = useRef<boolean>(false)
@@ -142,11 +155,18 @@ export function usePresenceAndActivity(
       }
     }
 
+    const handleAiInteraction = () => {
+      lastAiInteractionTimeRef.current = Date.now()
+      registerActivity()
+    }
+
     window.addEventListener('pointerdown', registerActivity, { passive: true })
     window.addEventListener('keydown', registerActivity, { passive: true })
     window.addEventListener('wheel', registerActivity, { passive: true })
     window.addEventListener('touchstart', registerActivity, { passive: true })
     window.addEventListener('pointermove', handlePointerMove, { passive: true })
+    window.addEventListener('msm:ai-user-typing', handleAiInteraction)
+    window.addEventListener('msm:ai-message-sent', handleAiInteraction)
 
     const handleVisibilityChange = () => {
       if (document.hidden) {
@@ -195,14 +215,29 @@ export function usePresenceAndActivity(
       const isRecentlyActive = idleTime < 45000
 
       if (isRecentlyActive) {
-        activeSecondsRef.current += 1
+        // Exploit-Schutz für KI-Chat:
+        // Befindet sich der Nutzer im KI-Chat, muss innerhalb der letzten 60 Sekunden
+        // aktiv im Chat interagiert worden sein (tippen, senden, Button klicken).
+        // Bloßes Offenlassen der Seite ohne Interaktion zählt nicht als KI-Spielzeit.
+        const currentCat = activeCategoryRef.current
+        let canCountTime = true
+        if (currentCat === 'ai_chat') {
+          const aiIdleTime = now - lastAiInteractionTimeRef.current
+          // Wenn keine spezifische KI-Interaktion in den letzten 60s vorlag:
+          if (aiIdleTime > 60000) {
+            canCountTime = false
+          }
+        }
 
-        // Every 30 active seconds, flush to backend
-        if (activeSecondsRef.current >= 30) {
-          const secs = activeSecondsRef.current
-          const cat = activeCategoryRef.current
-          activeSecondsRef.current = 0
-          recordActivityTime(cat, secs).catch(() => {})
+        if (canCountTime) {
+          activeSecondsRef.current += 1
+
+          // Every 30 active seconds, flush to backend
+          if (activeSecondsRef.current >= 30) {
+            const secs = activeSecondsRef.current
+            activeSecondsRef.current = 0
+            recordActivityTime(currentCat, secs).catch(() => {})
+          }
         }
       }
     }, 1000)
@@ -213,6 +248,8 @@ export function usePresenceAndActivity(
       window.removeEventListener('wheel', registerActivity)
       window.removeEventListener('touchstart', registerActivity)
       window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('msm:ai-user-typing', handleAiInteraction)
+      window.removeEventListener('msm:ai-message-sent', handleAiInteraction)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       clearInterval(ticker)
       // Flush remaining active seconds

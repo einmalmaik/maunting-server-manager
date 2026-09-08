@@ -24,6 +24,8 @@ vi.mock('@/api/social', () => ({
   setE2eePublicKey: vi.fn(),
   relayE2eeEnvelope: vi.fn(),
   fetchE2eeEnvelopes: vi.fn(),
+  getPublicProfiles: vi.fn().mockResolvedValue([]),
+  sendFriendRequest: vi.fn().mockResolvedValue({ success: true, message: 'Anfrage gesendet' }),
 }))
 
 vi.mock('@/api/teams', () => ({
@@ -190,7 +192,7 @@ describe('Messenger (Allround Chat)', () => {
     const input = screen.getByPlaceholderText('Nachricht schreiben …')
     fireEvent.change(input, { target: { value: 'Hallo Teammate!' } })
 
-    const sendBtn = screen.getByRole('button', { name: /Senden/i })
+    const sendBtn = screen.getByTitle('Senden')
     fireEvent.click(sendBtn)
 
     await waitFor(() => {
@@ -506,5 +508,53 @@ describe('Messenger (Allround Chat)', () => {
     await waitFor(() => {
       expect(screen.getByText('Status erstellen')).toBeInTheDocument()
     })
+  })
+
+  it('entdeckt öffentliche Profile im Messenger und erlaubt Direktchats sowie Freundschaftsanfragen', async () => {
+    vi.mocked(socialApi.getPublicProfiles).mockResolvedValue([
+      {
+        user_id: 303,
+        username: 'bob_public',
+        social_privacy: 'public',
+        is_friend: false,
+        presence: {
+          user_id: 303,
+          username: 'bob_public',
+          status: 'online',
+          device_type: 'desktop',
+          activity_label: 'Online',
+          last_seen_at: null,
+          updated_at: null,
+        },
+      },
+    ])
+
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('bob_public')).toBeInTheDocument()
+    })
+
+    // Filter by public tab
+    const publicTab = screen.getByTitle(/Öffentlich/i)
+    fireEvent.click(publicTab)
+
+    expect(screen.getByRole('button', { name: /bob_public/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /alice/i })).not.toBeInTheDocument()
+
+    // Click on public contact to open chat
+    fireEvent.click(screen.getByRole('button', { name: /bob_public/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Anfrage senden')).toBeInTheDocument()
+    })
+
+    // Send friend request
+    fireEvent.click(screen.getByText('Anfrage senden'))
+    expect(socialApi.sendFriendRequest).toHaveBeenCalledWith('bob_public')
   })
 })

@@ -18,9 +18,10 @@ from services import ai_proposal_service
 def test_achievement_catalog_and_dynamic_rarity(db: Session, owner_user: User):
     """Prüft den Meilenstein-Katalog und die dynamische Seltenheitsberechnung."""
     catalog = AchievementService.get_catalog()
-    assert len(catalog) >= 10
+    assert len(catalog) == 100
     assert any(a["id"] == "starter_first_step" for a in catalog)
     assert any(a["id"] == "social_zero_knowledge" for a in catalog)
+    assert any(a["id"] == "activity_hour_500" for a in catalog)
 
     # Schalte Meilenstein frei
     unlocked = AchievementService.unlock_achievement(db, owner_user.id, "starter_first_step")
@@ -466,5 +467,34 @@ def test_chat_group_roles_and_permissions(db: Session, owner_user: User, regular
 
     members = SocialService.list_user_groups(db, owner_user.id)[0]["members"]
     assert not any(m["user_id"] == user3.id for m in members)
+
+
+def test_public_profiles_discovery(db: Session, owner_user: User, regular_user: User) -> None:
+    """Prüft die Auffindbarkeit von Benutzern mit öffentlicher Privatsphäre."""
+    owner_user.social_privacy = "public"
+    regular_user.social_privacy = "friends"
+
+    user_pub = User(
+        username="public_sam",
+        email="sam@example.com",
+        password_hash="hash_sam",
+        is_active=True,
+        social_privacy="public",
+    )
+    db.add(user_pub)
+    db.commit()
+
+    # Aus Sicht von owner_user
+    profiles = SocialService.get_public_profiles(db, viewer_user_id=owner_user.id)
+    usernames = [p["username"] for p in profiles]
+    assert "public_sam" in usernames
+    assert regular_user.username not in usernames  # Da nur friends
+    assert owner_user.username not in usernames   # Da viewer_id gefiltert
+
+    # Suche mit Filter
+    filtered = SocialService.get_public_profiles(db, viewer_user_id=owner_user.id, search="sam")
+    assert len(filtered) == 1
+    assert filtered[0]["username"] == "public_sam"
+
 
 

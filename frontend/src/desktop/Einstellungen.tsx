@@ -69,6 +69,7 @@ import {
 } from '@/api/social'
 import { renderAchievementIcon } from '@/components/social/achievementIcons'
 import { StatusDot } from '@/components/social/StatusIndicator'
+import { formatActivityCategory } from '@/hooks/usePresenceAndActivity'
 import { usePublicLegalSettings } from '@/hooks/usePublicLegalSettings'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { Avatar, Badge, Button, Dropdown, type DropdownOption, Input, ProgressBar, Slider, Switch } from '@/Singra/UI'
@@ -910,8 +911,8 @@ function SocialEinstellungen() {
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 pt-2 border-t border-outline-variant/30">
             {Object.entries(stats.active_time_by_category).map(([cat, secs]) => (
               <div key={cat} className="p-2.5 rounded-xl bg-surface-container-low border border-outline-variant/30">
-                <span className="text-[10px] uppercase font-bold text-on-surface-variant tracking-wider block truncate capitalize">
-                  {cat}
+                <span className="text-[10px] font-bold text-on-surface-variant tracking-wider block truncate">
+                  {formatActivityCategory(cat)}
                 </span>
                 <span className="text-xs font-semibold text-on-surface font-mono">
                   {formatHours(secs)}

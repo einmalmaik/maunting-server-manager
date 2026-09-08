@@ -474,6 +474,33 @@ class SocialService:
             "achievements": achievements,
         }
 
+    @classmethod
+    def get_public_profiles(
+        cls,
+        db: Session,
+        viewer_user_id: int | None,
+        search: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Ermittelt alle aktiven Benutzer mit öffentlichem Profil ('public') für die Discovery."""
+        query = db.query(User).filter(
+            User.is_active == True,
+            User.social_privacy == "public",
+        )
+        if viewer_user_id:
+            query = query.filter(User.id != viewer_user_id)
+
+        if search and search.strip():
+            term = f"%{search.strip()}%"
+            query = query.filter(User.username.ilike(term))
+
+        users = query.order_by(User.username.asc()).offset(offset).limit(limit).all()
+        results = []
+        for u in users:
+            results.append(cls.get_profile(db, viewer_user_id, u))
+        return results
+
     # --- DIS Zero-Knowledge E2EE Blind Relay ---
 
     @classmethod

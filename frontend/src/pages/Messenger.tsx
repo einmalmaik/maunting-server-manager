@@ -47,6 +47,8 @@ import {
   UserCheck,
   Briefcase,
   LayoutGrid,
+  Globe,
+  UserPlus,
 } from 'lucide-react'
 import { DeviceBadge } from '@/components/social/DeviceBadge'
 import { StatusDot, type PresenceStatus } from '@/components/social/StatusIndicator'
@@ -54,10 +56,13 @@ import {
   type FriendItem,
   type ChatGroupItem,
   type ChatStoryItem,
+  type PublicProfileResponse,
   getFriends,
   getGroups,
   createGroup,
   joinGroupByInvite,
+  sendFriendRequest,
+  getPublicProfiles,
   leaveGroup,
   deleteGroup,
   getStories,
@@ -107,6 +112,7 @@ export interface ChatContact {
   activityLabel?: string | null
   isFriend: boolean
   teamName?: string | null
+  isPublicUser?: boolean
 }
 
 export interface NoteAttachment {
@@ -200,12 +206,13 @@ export function Messenger() {
   const [friends, setFriends] = useState<FriendItem[]>([])
   const [groups, setGroups] = useState<ChatGroupItem[]>([])
   const [teamMembers, setTeamMembers] = useState<Array<{ member: TeamMember; teamName: string }>>([])
+  const [publicUsers, setPublicUsers] = useState<PublicProfileResponse[]>([])
   
   // Selection
   const [activeContact, setActiveContact] = useState<ChatContact | null>(null)
   const [activeGroup, setActiveGroup] = useState<ChatGroupItem | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
-  const [filterTab, setFilterTab] = useState<'all' | 'groups' | 'friends' | 'teams'>('all')
+  const [filterTab, setFilterTab] = useState<'all' | 'groups' | 'friends' | 'teams' | 'public'>('all')
   const [mobileNavTab, setMobileNavTab] = useState<'chats' | 'updates' | 'community'>('chats')
 
   // Stories (Aktuelles)
@@ -361,18 +368,20 @@ export function Messenger() {
     }
   }, [currentUserId])
 
-  // 2. Load Friends, Groups, Team Members, and Stories
+  // 2. Load Friends, Groups, Team Members, Public Users, and Stories
   const loadData = async () => {
     try {
-      const [friendsData, groupsData, teamsData, storiesData] = await Promise.all([
+      const [friendsData, groupsData, teamsData, storiesData, publicData] = await Promise.all([
         getFriends().catch(() => []),
         getGroups().catch(() => []),
         teamsApi.list().catch(() => []),
         getStories().catch(() => []),
+        getPublicProfiles().catch(() => []),
       ])
       setFriends(friendsData)
       setGroups(groupsData)
       setStories(storiesData)
+      setPublicUsers(publicData)
 
       const membersList: Array<{ member: TeamMember; teamName: string }> = []
       for (const t of teamsData) {
@@ -480,19 +489,38 @@ export function Messenger() {
       }
     }
 
+    for (const p of publicUsers) {
+      if (!seenUserIds.has(p.user_id)) {
+        seenUserIds.add(p.user_id)
+        list.push({
+          id: p.user_id,
+          userId: p.user_id,
+          username: p.username,
+          avatarUrl: null,
+          status: (p.presence?.status as PresenceStatus) || 'invisible',
+          deviceType: p.presence?.device_type,
+          activityLabel: p.presence?.activity_label,
+          isFriend: Boolean(p.is_friend),
+          teamName: null,
+          isPublicUser: true,
+        })
+      }
+    }
+
     return list.sort((a, b) => {
       const statusOrder: Record<string, number> = { online: 0, away: 1, invisible: 2 }
       const diff = (statusOrder[a.status] ?? 3) - (statusOrder[b.status] ?? 3)
       if (diff !== 0) return diff
       return a.username.localeCompare(b.username)
     })
-  }, [friends, teamMembers])
+  }, [friends, teamMembers, publicUsers])
 
   const filteredContacts = useMemo(() => {
     return contactsList.filter((c) => {
       if (filterTab === 'groups') return false
       if (filterTab === 'friends' && !c.isFriend) return false
       if (filterTab === 'teams' && !c.teamName) return false
+      if (filterTab === 'public' && !c.isPublicUser) return false
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase()
         return (
@@ -505,7 +533,7 @@ export function Messenger() {
   }, [contactsList, filterTab, searchQuery])
 
   const filteredGroups = useMemo(() => {
-    if (filterTab === 'friends' || filterTab === 'teams') return []
+    if (filterTab === 'friends' || filterTab === 'teams' || filterTab === 'public') return []
     return groups.filter((g) => {
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase()
@@ -1311,6 +1339,26 @@ export function Messenger() {
             </>
           )}
 
+          {activeContact && !activeContact.isFriend && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={async () => {
+                try {
+                  await sendFriendRequest(activeContact.username)
+                  toast.success(`Freundschaftsanfrage an ${activeContact.username} gesendet!`)
+                } catch (err: any) {
+                  toast.error(err?.message || 'Konnte keine Anfrage senden.')
+                }
+              }}
+              className="h-8 gap-1.5 text-xs px-2.5 text-primary hover:bg-primary/10"
+              title="Freundschaftsanfrage senden"
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Anfrage senden</span>
+            </Button>
+          )}
+
           {/* Quick Camera Button in Header - only in list view, removed in chat to avoid duplicate */}
           {!isChatOpen && (
             <Button
@@ -1410,11 +1458,11 @@ export function Messenger() {
 
             {/* WhatsApp Filter Tabs (Chats Mode) - Clean Segmented Control with clear intuitive icons & counts */}
             {mobileNavTab === 'chats' && (
-              <div className="grid grid-cols-4 gap-1 p-1 rounded-xl bg-surface-container-high/50 border border-outline-variant/15 w-full">
+              <div className="grid grid-cols-5 gap-0.5 sm:gap-1 p-1 rounded-xl bg-surface-container-high/50 border border-outline-variant/15 w-full">
                 <button
                   type="button"
                   onClick={() => setFilterTab('all')}
-                  className={`h-7 rounded-lg flex items-center justify-center gap-1.5 transition-all text-xs font-semibold ${
+                  className={`h-7 rounded-lg flex items-center justify-center gap-1 transition-all text-xs font-semibold ${
                     filterTab === 'all'
                       ? 'bg-primary text-on-primary shadow-xs'
                       : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
@@ -1423,13 +1471,13 @@ export function Messenger() {
                   aria-label="Alle Chats"
                 >
                   <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
-                  <span className="text-[11px] leading-none">Alle</span>
+                  <span className="text-[10px] leading-none hidden xs:inline">Alle</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setFilterTab('groups')}
-                  className={`h-7 rounded-lg flex items-center justify-center gap-1 transition-all text-xs font-semibold ${
+                  className={`h-7 rounded-lg flex items-center justify-center gap-0.5 sm:gap-1 transition-all text-xs font-semibold ${
                     filterTab === 'groups'
                       ? 'bg-primary text-on-primary shadow-xs'
                       : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
@@ -1440,7 +1488,7 @@ export function Messenger() {
                   <UsersRound className="w-3.5 h-3.5 shrink-0" />
                   {groups.length > 0 && (
                     <span
-                      className={`text-[10px] px-1 py-0.2 rounded-full font-bold leading-none ${
+                      className={`text-[9px] px-1 py-0.2 rounded-full font-bold leading-none ${
                         filterTab === 'groups' ? 'bg-white/20 text-white' : 'bg-surface-container-highest text-on-surface-variant'
                       }`}
                     >
@@ -1452,7 +1500,7 @@ export function Messenger() {
                 <button
                   type="button"
                   onClick={() => setFilterTab('friends')}
-                  className={`h-7 rounded-lg flex items-center justify-center gap-1 transition-all text-xs font-semibold ${
+                  className={`h-7 rounded-lg flex items-center justify-center gap-0.5 sm:gap-1 transition-all text-xs font-semibold ${
                     filterTab === 'friends'
                       ? 'bg-primary text-on-primary shadow-xs'
                       : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
@@ -1463,7 +1511,7 @@ export function Messenger() {
                   <UserCheck className="w-3.5 h-3.5 shrink-0" />
                   {contactsList.some((c) => c.isFriend) && (
                     <span
-                      className={`text-[10px] px-1 py-0.2 rounded-full font-bold leading-none ${
+                      className={`text-[9px] px-1 py-0.2 rounded-full font-bold leading-none ${
                         filterTab === 'friends' ? 'bg-white/20 text-white' : 'bg-surface-container-highest text-on-surface-variant'
                       }`}
                     >
@@ -1475,7 +1523,7 @@ export function Messenger() {
                 <button
                   type="button"
                   onClick={() => setFilterTab('teams')}
-                  className={`h-7 rounded-lg flex items-center justify-center gap-1 transition-all text-xs font-semibold ${
+                  className={`h-7 rounded-lg flex items-center justify-center gap-0.5 sm:gap-1 transition-all text-xs font-semibold ${
                     filterTab === 'teams'
                       ? 'bg-primary text-on-primary shadow-xs'
                       : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
@@ -1486,11 +1534,34 @@ export function Messenger() {
                   <Briefcase className="w-3.5 h-3.5 shrink-0" />
                   {contactsList.some((c) => c.teamName) && (
                     <span
-                      className={`text-[10px] px-1 py-0.2 rounded-full font-bold leading-none ${
+                      className={`text-[9px] px-1 py-0.2 rounded-full font-bold leading-none ${
                         filterTab === 'teams' ? 'bg-white/20 text-white' : 'bg-surface-container-highest text-on-surface-variant'
                       }`}
                     >
                       {contactsList.filter((c) => c.teamName).length}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setFilterTab('public')}
+                  className={`h-7 rounded-lg flex items-center justify-center gap-0.5 sm:gap-1 transition-all text-xs font-semibold ${
+                    filterTab === 'public'
+                      ? 'bg-primary text-on-primary shadow-xs'
+                      : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
+                  }`}
+                  title={`Öffentlich (${contactsList.filter((c) => c.isPublicUser).length})`}
+                  aria-label={`Öffentlich (${contactsList.filter((c) => c.isPublicUser).length})`}
+                >
+                  <Globe className="w-3.5 h-3.5 shrink-0" />
+                  {contactsList.some((c) => c.isPublicUser) && (
+                    <span
+                      className={`text-[9px] px-1 py-0.2 rounded-full font-bold leading-none ${
+                        filterTab === 'public' ? 'bg-white/20 text-white' : 'bg-surface-container-highest text-on-surface-variant'
+                      }`}
+                    >
+                      {contactsList.filter((c) => c.isPublicUser).length}
                     </span>
                   )}
                 </button>
@@ -1685,6 +1756,12 @@ export function Messenger() {
                                 <span className="text-xs font-semibold text-primary truncate">
                                   {c.username}
                                 </span>
+                                {c.isPublicUser && !c.isFriend && !c.teamName && (
+                                  <span className="text-[9px] px-1.5 py-0.2 rounded-md bg-primary/10 text-primary font-medium flex items-center gap-0.5">
+                                    <Globe className="w-2.5 h-2.5" />
+                                    <span>Öffentlich</span>
+                                  </span>
+                                )}
                                 <DeviceBadge deviceType={c.deviceType} />
                               </div>
                               {c.teamName && (
@@ -1693,7 +1770,12 @@ export function Messenger() {
                                   <span>{c.teamName}</span>
                                 </p>
                               )}
-                              {c.activityLabel && !c.teamName && (
+                              {c.isPublicUser && !c.isFriend && !c.teamName && (
+                                <p className="text-[10px] text-on-surface-variant/70 truncate flex items-center gap-1">
+                                  <span>E2EE Chat bereit</span>
+                                </p>
+                              )}
+                              {c.activityLabel && !c.teamName && (!c.isPublicUser || c.isFriend) && (
                                 <p className="text-[10px] text-on-surface-variant/80 truncate">
                                   {c.activityLabel}
                                 </p>

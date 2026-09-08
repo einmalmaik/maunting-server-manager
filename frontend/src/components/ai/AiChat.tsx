@@ -887,6 +887,7 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
   const sendImmediatelyAndInterrupt = useCallback(async (content: string) => {
     const text = content.trim()
     if (!text || !providerId) return
+    window.dispatchEvent(new CustomEvent('msm:ai-message-sent'))
     manuallyClosedGeoRef.current = false
     setInput('')
     userScrolledUpRef.current = false
@@ -902,6 +903,7 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
     event.preventDefault()
     const content = input.trim()
     if (!content || !providerId) return
+    window.dispatchEvent(new CustomEvent('msm:ai-message-sent'))
     manuallyClosedGeoRef.current = false
     if (streaming) {
       enqueueMessage(content)
@@ -1020,6 +1022,7 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
    */
   const tippSignal = useCallback(() => {
     const jetzt = Date.now()
+    window.dispatchEvent(new CustomEvent('msm:ai-user-typing'))
     if (jetzt - letztesTippSignalRef.current < TIPP_TAKT_MS) return
     letztesTippSignalRef.current = jetzt
     void aiApi.typing().catch(() => undefined)

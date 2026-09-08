@@ -586,7 +586,7 @@ export function GroupPermissionsModal({
                   Mitglieder werden geladen …
                 </div>
               ) : (
-                <div className="divide-y divide-outline-variant/15 rounded-2xl border border-outline-variant/20 bg-surface-container/40 overflow-hidden shadow-xs">
+                <div className="divide-y divide-outline-variant/20 rounded-2xl border border-outline-variant/30 bg-surface-container/70 overflow-hidden shadow-xs">
                   {members.map((member) => {
                     const isMemberOwner = member.role === 'owner' || member.user_id === group?.owner_user_id
                     const isSelf = member.user_id === currentUserId
@@ -598,7 +598,7 @@ export function GroupPermissionsModal({
                     return (
                       <div
                         key={`grp-mem-${member.user_id}`}
-                        className="p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 hover:bg-surface-container-high/30 transition-colors"
+                        className="p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 hover:bg-surface-container-high/50 transition-colors"
                       >
                         <div className="flex items-center gap-3.5 min-w-0">
                           <Avatar src={member.avatar_url} name={member.username} size="md" />
@@ -727,7 +727,7 @@ export function GroupPermissionsModal({
                   return (
                     <div
                       key={`role-item-${r.id}`}
-                      className="p-3.5 sm:p-4 rounded-2xl border border-outline-variant/30 bg-surface-container/60 hover:bg-surface-container/80 transition-colors shadow-xs space-y-2.5"
+                      className="p-3.5 sm:p-4 rounded-2xl border border-outline-variant/35 bg-surface-container/75 hover:bg-surface-container/95 transition-colors shadow-xs space-y-2.5"
                     >
                       {/* Top Row: Role Name & Badges + Action Buttons */}
                       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -851,7 +851,7 @@ export function GroupPermissionsModal({
           {/* TAB 3: DEFAULT PERMISSIONS (@everyone) */}
           {activeTab === 'permissions' && (
             <div className="space-y-5">
-              <div className="p-4 rounded-2xl bg-surface-container/60 border border-outline-variant/25 text-xs text-on-surface-variant space-y-1.5">
+              <div className="p-4 rounded-2xl bg-surface-container/75 border border-outline-variant/35 text-xs text-on-surface-variant space-y-1.5">
                 <span className="font-bold text-primary block text-body-sm">
                   Standardrechte für alle Gruppenmitglieder (@everyone)
                 </span>
@@ -860,9 +860,9 @@ export function GroupPermissionsModal({
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-outline-variant/20 p-4 sm:p-6 bg-surface-container/40 shadow-xs">
+              <div className="rounded-2xl border border-outline-variant/30 p-4 sm:p-6 bg-surface-container/60 shadow-xs">
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
-                  <div className="p-3.5 rounded-xl bg-surface-container/40 border border-outline-variant/20 flex items-center justify-between gap-4">
+                  <div className="p-3.5 rounded-xl bg-surface-container-high/60 border border-outline-variant/30 flex items-center justify-between gap-4">
                     <div className="min-w-0 flex-1">
                       <span className="text-xs font-bold text-primary block">
                         Nachrichten senden
@@ -879,7 +879,7 @@ export function GroupPermissionsModal({
                     />
                   </div>
 
-                  <div className="p-3.5 rounded-xl bg-surface-container/40 border border-outline-variant/20 flex items-center justify-between gap-4">
+                  <div className="p-3.5 rounded-xl bg-surface-container-high/60 border border-outline-variant/30 flex items-center justify-between gap-4">
                     <div className="min-w-0 flex-1">
                       <span className="text-xs font-bold text-primary block">
                         Medien, Notizen & Termine teilen
@@ -896,7 +896,7 @@ export function GroupPermissionsModal({
                     />
                   </div>
 
-                  <div className="p-3.5 rounded-xl bg-surface-container/40 border border-outline-variant/20 flex items-center justify-between gap-4">
+                  <div className="p-3.5 rounded-xl bg-surface-container-high/60 border border-outline-variant/30 flex items-center justify-between gap-4">
                     <div className="min-w-0 flex-1">
                       <span className="text-xs font-bold text-primary block">
                         Neue Mitglieder einladen
@@ -913,7 +913,7 @@ export function GroupPermissionsModal({
                     />
                   </div>
 
-                  <div className="p-3.5 rounded-xl bg-surface-container/40 border border-outline-variant/20 flex items-center justify-between gap-4">
+                  <div className="p-3.5 rounded-xl bg-surface-container-high/60 border border-outline-variant/30 flex items-center justify-between gap-4">
                     <div className="min-w-0 flex-1">
                       <span className="text-xs font-bold text-primary block">
                         Nachrichten löschen & moderieren
@@ -930,7 +930,7 @@ export function GroupPermissionsModal({
                     />
                   </div>
 
-                  <div className="p-3.5 rounded-xl bg-surface-container/40 border border-outline-variant/20 flex items-center justify-between gap-4 lg:col-span-2">
+                  <div className="p-3.5 rounded-xl bg-surface-container-high/60 border border-outline-variant/30 flex items-center justify-between gap-4 lg:col-span-2">
                     <div className="min-w-0 flex-1">
                       <span className="text-xs font-bold text-primary block">
                         Mitglieder entfernen (Kicken)

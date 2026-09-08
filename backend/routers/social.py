@@ -186,6 +186,20 @@ def get_user_profile(
     return SocialService.get_profile(db, viewer_id, target)
 
 
+@router.get("/profiles/public", response_model=list[SocialProfileResponse], dependencies=[Depends(_check_social_enabled)])
+def list_public_profiles(
+    search: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_user),
+) -> list[dict]:
+    viewer_id = current_user.id if current_user else None
+    return SocialService.get_public_profiles(
+        db, viewer_user_id=viewer_id, search=search, limit=min(max(limit, 1), 100), offset=max(offset, 0)
+    )
+
+
 @router.get("/profile/public/{username}", response_model=SocialProfileResponse, dependencies=[Depends(_check_social_enabled)])
 def get_public_profile(
     username: str,
