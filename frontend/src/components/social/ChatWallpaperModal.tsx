@@ -101,7 +101,7 @@ export function ChatWallpaperModal({
             <span>Chat-Hintergrund anpassen</span>
           </DialogTitle>
           <DialogDescription className="text-xs text-on-surface-variant">
-            Wähle einen atmosphärischen Hintergrund für deine Unterhaltungen. Der heimische Standardhintergrund schützt die Lesbarkeit und passt perfekt zu MSM.
+            Wähle einen atmosphärischen Hintergrund für deine Unterhaltungen. Das Cyber-Grid-Raster ist standardmäßig aktiv und sorgt für optimalen Kontrast.
           </DialogDescription>
         </DialogHeader>
 
@@ -113,7 +113,43 @@ export function ChatWallpaperModal({
           </label>
 
           <div className="grid grid-cols-2 gap-2.5">
-            {/* 1. MSM Heimisch (Standard) */}
+            {/* 1. Cyber Matrix Grid (Standard) */}
+            <button
+              type="button"
+              onClick={() => setSelectedPreset('cyber')}
+              className={`group relative p-3 rounded-xl border text-left flex flex-col justify-between h-24 overflow-hidden transition-all ${
+                selectedPreset === 'cyber'
+                  ? 'border-primary ring-2 ring-primary/40 bg-primary/10'
+                  : 'border-outline-variant/30 bg-surface-container-low hover:border-outline-variant/60'
+              }`}
+            >
+              <div
+                className="absolute inset-0 opacity-20 pointer-events-none"
+                style={{
+                  backgroundImage: 'radial-gradient(#06b6d4 1.2px, transparent 1.2px)',
+                  backgroundSize: '16px 16px',
+                }}
+              />
+              <div className="relative z-10 flex items-center justify-between w-full">
+                <div className="p-1 rounded-md bg-cyan-500/20 text-cyan-400">
+                  <Layers className="w-3.5 h-3.5" />
+                </div>
+                {selectedPreset === 'cyber' && (
+                  <div className="w-4 h-4 rounded-full bg-primary text-on-primary flex items-center justify-center">
+                    <Check className="w-2.5 h-2.5 stroke-[3]" />
+                  </div>
+                )}
+              </div>
+              <div className="relative z-10">
+                <p className="text-xs font-bold text-on-surface flex items-center gap-1">
+                  <span>Cyber Grid</span>
+                  <span className="text-[9px] px-1 py-0.2 rounded bg-primary/20 text-primary font-mono">Standard</span>
+                </p>
+                <p className="text-[10px] text-on-surface-variant/80">Subtiles Daten-Raster</p>
+              </div>
+            </button>
+
+            {/* 2. MSM Heimisch */}
             <button
               type="button"
               onClick={() => setSelectedPreset('heimisch')}
@@ -141,15 +177,12 @@ export function ChatWallpaperModal({
                 )}
               </div>
               <div className="relative z-10">
-                <p className="text-xs font-bold text-on-surface flex items-center gap-1">
-                  <span>MSM Heimisch</span>
-                  <span className="text-[9px] px-1 py-0.2 rounded bg-primary/20 text-primary font-mono">Standard</span>
-                </p>
+                <p className="text-xs font-bold text-on-surface">MSM Heimisch</p>
                 <p className="text-[10px] text-on-surface-variant/80">Maunting & Singra Tech-Doodle</p>
               </div>
             </button>
 
-            {/* 2. Midnight Deep Space */}
+            {/* 3. Midnight Deep Space */}
             <button
               type="button"
               onClick={() => setSelectedPreset('midnight')}
@@ -173,39 +206,6 @@ export function ChatWallpaperModal({
               <div className="relative z-10">
                 <p className="text-xs font-bold text-on-surface">Mitternacht</p>
                 <p className="text-[10px] text-on-surface-variant/80">Tiefblaues Weltall</p>
-              </div>
-            </button>
-
-            {/* 3. Cyber Matrix Grid */}
-            <button
-              type="button"
-              onClick={() => setSelectedPreset('cyber')}
-              className={`group relative p-3 rounded-xl border text-left flex flex-col justify-between h-24 overflow-hidden transition-all ${
-                selectedPreset === 'cyber'
-                  ? 'border-primary ring-2 ring-primary/40 bg-primary/10'
-                  : 'border-outline-variant/30 bg-surface-container-low hover:border-outline-variant/60'
-              }`}
-            >
-              <div
-                className="absolute inset-0 opacity-15 pointer-events-none"
-                style={{
-                  backgroundImage: 'radial-gradient(#6366f1 1px, transparent 1px)',
-                  backgroundSize: '16px 16px',
-                }}
-              />
-              <div className="relative z-10 flex items-center justify-between w-full">
-                <div className="p-1 rounded-md bg-cyan-500/20 text-cyan-400">
-                  <Layers className="w-3.5 h-3.5" />
-                </div>
-                {selectedPreset === 'cyber' && (
-                  <div className="w-4 h-4 rounded-full bg-primary text-on-primary flex items-center justify-center">
-                    <Check className="w-2.5 h-2.5 stroke-[3]" />
-                  </div>
-                )}
-              </div>
-              <div className="relative z-10">
-                <p className="text-xs font-bold text-on-surface">Cyber Grid</p>
-                <p className="text-[10px] text-on-surface-variant/80">Subtiles Daten-Raster</p>
               </div>
             </button>
 
@@ -331,35 +331,33 @@ export function ChatWallpaperModal({
           </div>
         </div>
 
-        <DialogFooter className="flex items-center justify-between pt-2 border-t border-outline-variant/20">
+        <DialogFooter className="flex items-center justify-between pt-3 pb-1 border-t border-outline-variant/30 bg-surface-container-low/40 -mx-5 -mb-5 px-5 rounded-b-2xl">
           <Button
             type="button"
             variant="ghost"
             size="sm"
             onClick={handleResetDefault}
-            className="text-xs h-8 text-on-surface-variant hover:text-on-surface gap-1"
-            title="Auf Standard 'MSM Heimisch' zurücksetzen"
+            className="text-xs h-8 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high gap-1 px-2.5"
+            title="Auf Standard 'Cyber Grid' zurücksetzen"
           >
-            <RotateCcw className="w-3 h-3" />
+            <RotateCcw className="w-3.5 h-3.5" />
             <span>Zurücksetzen</span>
           </Button>
 
           <div className="flex items-center gap-2">
-            <Button
+            <button
               type="button"
-              variant="secondary"
-              size="sm"
               onClick={() => onOpenChange(false)}
-              className="text-xs h-8"
+              className="inline-flex items-center justify-center h-8 px-3.5 text-xs font-medium rounded-lg border border-outline-variant/50 bg-surface-container-high hover:bg-surface-container-highest text-on-surface hover:border-outline transition-all active:scale-[0.98]"
             >
               Abbrechen
-            </Button>
+            </button>
             <Button
               type="button"
               variant="primary"
               size="sm"
               onClick={handleApply}
-              className="text-xs h-8"
+              className="text-xs h-8 px-4 font-semibold"
             >
               Übernehmen
             </Button>

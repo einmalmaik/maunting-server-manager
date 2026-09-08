@@ -9,7 +9,7 @@ export interface ChatWallpaperConfig {
 export const WALLPAPER_STORAGE_KEY = 'msm_chat_wallpaper_config'
 
 export const DEFAULT_WALLPAPER_CONFIG: ChatWallpaperConfig = {
-  preset: 'heimisch',
+  preset: 'cyber',
   dimLevel: 25,
 }
 
@@ -19,7 +19,7 @@ export function loadChatWallpaperConfig(): ChatWallpaperConfig {
     if (!raw) return DEFAULT_WALLPAPER_CONFIG
     const parsed = JSON.parse(raw) as Partial<ChatWallpaperConfig>
     return {
-      preset: parsed.preset || 'heimisch',
+      preset: parsed.preset || 'cyber',
       customDataUrl: parsed.customDataUrl,
       dimLevel: typeof parsed.dimLevel === 'number' ? parsed.dimLevel : 25,
     }
