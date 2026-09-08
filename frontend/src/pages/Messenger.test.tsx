@@ -557,4 +557,148 @@ describe('Messenger (Allround Chat)', () => {
     fireEvent.click(screen.getByText('Anfrage senden'))
     expect(socialApi.sendFriendRequest).toHaveBeenCalledWith('bob_public')
   })
+
+  it('unterstützt dynamische Lesebestätigungen und das Bearbeiten & Löschen von Nachrichten mit Opferschutz', async () => {
+    // 1. Setup existing chat envelopes (E2EE)
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([
+      {
+        id: 10,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: 'ciphertext-10',
+        created_at: '2026-09-08T12:00:00Z',
+      },
+      {
+        id: 11,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: 'ciphertext-11',
+        created_at: '2026-09-08T12:01:00Z',
+      },
+    ])
+
+    const { decryptE2eeMessage } = await import('@/services/e2eeCrypto')
+    vi.mocked(decryptE2eeMessage).mockImplementation(async (envelope) => {
+      if (envelope === 'ciphertext-10') {
+        return JSON.stringify({
+          sender_id: 1, // Self
+          text: 'Meine ursprüngliche Nachricht',
+          timestamp: '2026-09-08T12:00:00Z',
+        })
+      }
+      if (envelope === 'ciphertext-11') {
+        return JSON.stringify({
+          sender_id: 101, // Alice
+          text: 'Hallo von Alice!',
+          timestamp: '2026-09-08T12:01:00Z',
+        })
+      }
+      return 'Unbekannt'
+    })
+
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    // Open chat with Alice
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /alice/i })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole('button', { name: /alice/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Meine ursprüngliche Nachricht')).toBeInTheDocument()
+      expect(screen.getByText('Hallo von Alice!')).toBeInTheDocument()
+      // Initial status before acknowledgement is "Zugestellt / Noch nicht gelesen"
+      expect(screen.getByTitle('Zugestellt / Noch nicht gelesen')).toBeInTheDocument()
+    })
+
+    // 2. Simulate incoming read receipt envelope from Alice for message 10
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([
+      {
+        id: 10,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: 'ciphertext-10',
+        created_at: '2026-09-08T12:00:00Z',
+      },
+      {
+        id: 11,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: 'ciphertext-11',
+        created_at: '2026-09-08T12:01:00Z',
+      },
+      {
+        id: 12,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: 'ciphertext-read-receipt',
+        created_at: '2026-09-08T12:02:00Z',
+      },
+    ])
+    vi.mocked(decryptE2eeMessage).mockImplementation(async (envelope) => {
+      if (envelope === 'ciphertext-10') {
+        return JSON.stringify({
+          sender_id: 1,
+          text: 'Meine ursprüngliche Nachricht',
+          timestamp: '2026-09-08T12:00:00Z',
+        })
+      }
+      if (envelope === 'ciphertext-11') {
+        return JSON.stringify({
+          sender_id: 101,
+          text: 'Hallo von Alice!',
+          timestamp: '2026-09-08T12:01:00Z',
+        })
+      }
+      if (envelope === 'ciphertext-read-receipt') {
+        return JSON.stringify({
+          type: 'read_receipt',
+          read_up_to_id: 10,
+          reader_id: 101, // Alice read our message
+        })
+      }
+      return 'Unbekannt'
+    })
+
+    // Trigger sync event
+    window.dispatchEvent(
+      new CustomEvent('msm:sync-event', {
+        detail: { type: 'e2ee_blind_message', blind_mailbox_id: 'test-blind-mailbox' },
+      })
+    )
+
+    await waitFor(() => {
+      expect(screen.getByTitle('Gelesen vom Gesprächspartner')).toBeInTheDocument()
+    })
+
+    // 3. Test Editing Message
+    const editBtn = screen.getByTitle('Nachricht bearbeiten')
+    fireEvent.click(editBtn)
+
+    expect(screen.getByText('Nachricht bearbeiten')).toBeInTheDocument()
+    const input = screen.getByPlaceholderText('Nachricht bearbeiten …')
+    fireEvent.change(input, { target: { value: 'Meine korrigierte Nachricht' } })
+
+    const sendBtn = screen.getByTitle('Senden')
+    fireEvent.click(sendBtn)
+
+    await waitFor(() => {
+      expect(socialApi.relayE2eeEnvelope).toHaveBeenCalledWith(
+        expect.objectContaining({
+          blind_mailbox_id: 'test-blind-mailbox',
+        })
+      )
+    })
+
+    // 4. Test Deleting Message with Opferschutz / Beweissicherung
+    const deleteBtn = screen.getByTitle('Nachricht für alle löschen')
+    fireEvent.click(deleteBtn)
+
+    await waitFor(() => {
+      expect(socialApi.relayE2eeEnvelope).toHaveBeenCalledWith(
+        expect.objectContaining({
+          blind_mailbox_id: 'test-blind-mailbox',
+        })
+      )
+    })
+  })
 })

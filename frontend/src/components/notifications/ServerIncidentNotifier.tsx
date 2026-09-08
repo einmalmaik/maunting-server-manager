@@ -138,8 +138,25 @@ export function ServerIncidentNotifier() {
       void checkAlerts()
     }, POLL_INTERVAL_MS)
 
+    // Sofortige Echtzeit-Push-Benachrichtigung für Freundschaftsanfragen
+    const handleSyncEvent = (e: Event) => {
+      const ce = e as CustomEvent<any>
+      const detail = ce.detail
+      if (detail?.type === 'friend_request_received') {
+        const senderName = detail.from_username || 'Ein Benutzer'
+        void sendeGeraeteBenachrichtigung({
+          titel: 'Neue Freundschaftsanfrage',
+          text: `${senderName} hat dir eine Freundschaftsanfrage gesendet.`,
+        })
+        toast.success(`👋 Freundschaftsanfrage von ${senderName} erhalten`)
+      }
+    }
+
+    window.addEventListener('msm:sync-event', handleSyncEvent)
+
     return () => {
       clearInterval(interval)
+      window.removeEventListener('msm:sync-event', handleSyncEvent)
     }
   }, [isAuthenticated, user?.id, user?.device_notifications])
 

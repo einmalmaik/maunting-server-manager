@@ -218,9 +218,16 @@ class SocialService:
         db.add(req)
         db.commit()
 
+        sender = db.query(User).filter_by(id=user_id).first()
+        sender_name = sender.username if sender else "Jemand"
+
         # Benachrichtigung via SSE
         SyncEventService.publish(
-            {"type": "friend_request_received", "from_user_id": user_id},
+            {
+                "type": "friend_request_received",
+                "from_user_id": user_id,
+                "from_username": sender_name,
+            },
             user_id=target.id,
         )
         return {"id": req.id, "status": "pending", "message": "Freundschaftsanfrage erfolgreich gesendet"}

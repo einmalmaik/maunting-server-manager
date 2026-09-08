@@ -49,6 +49,8 @@ import {
   LayoutGrid,
   Globe,
   UserPlus,
+  Pencil,
+  ShieldAlert,
 } from 'lucide-react'
 import { DeviceBadge } from '@/components/social/DeviceBadge'
 import { StatusDot, type PresenceStatus } from '@/components/social/StatusIndicator'
@@ -161,6 +163,12 @@ export interface ChatMessage {
   text: string
   createdAt: string
   isSelf: boolean
+  isRead?: boolean
+  isEdited?: boolean
+  editedAt?: string
+  isDeleted?: boolean
+  deletedAt?: string
+  originalText?: string
   noteAttachment?: NoteAttachment
   calendarAttachment?: CalendarAttachment
   imageAttachment?: ImageAttachment
@@ -345,6 +353,11 @@ export function Messenger() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const justSentRef = useRef<boolean>(false)
+
+  // Message Editing & Opferschutz (Beweissicherung) State
+  const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null)
+  const [victimProofMessage, setVictimProofMessage] = useState<ChatMessage | null>(null)
+  const highestIncomingIdAcknowledgedRef = useRef<number>(0)
 
   const currentUserId = user?.id || 0
 
@@ -632,6 +645,37 @@ export function Messenger() {
     }
   }, [activeContact, activeGroup, currentUserId])
 
+  // Helper: send an E2EE control envelope (e.g. read_receipt, edit_message, delete_message)
+  const sendE2eeControlMessage = async (payloadObj: Record<string, unknown>) => {
+    if (!blindMailboxId || !currentUserId || (!activeContact && !activeGroup)) return
+    try {
+      const payload = JSON.stringify(payloadObj)
+      let ciphertext: string
+      if (activeGroup) {
+        ciphertext = await encryptGroupE2eeMessage(payload, activeGroup.id)
+        await relayE2eeEnvelope({
+          blind_mailbox_id: blindMailboxId,
+          ciphertext_envelope: ciphertext,
+          group_id: activeGroup.id,
+        })
+      } else if (activeContact) {
+        const targetUserId = activeContact.userId
+        if (recipientPublicKeyJwk && localKeyPair) {
+          ciphertext = await encryptE2eeHybrid(payload, recipientPublicKeyJwk, localKeyPair.publicKeyJwk)
+        } else {
+          ciphertext = await encryptE2eeMessage(payload, currentUserId, targetUserId)
+        }
+        await relayE2eeEnvelope({
+          blind_mailbox_id: blindMailboxId,
+          ciphertext_envelope: ciphertext,
+          recipient_user_id: targetUserId,
+        })
+      }
+    } catch {
+      // Control message failure is non-fatal
+    }
+  }
+
   // 5. Load and decrypt messages (non-flickering background sync + real-time)
   const loadMessages = async (isInitial = false) => {
     if (!blindMailboxId || !currentUserId) return
@@ -641,6 +685,12 @@ export function Messenger() {
     try {
       const envelopes = await fetchE2eeEnvelopes(blindMailboxId)
       const decryptedList: ChatMessage[] = []
+
+      // Dictionaries to track edits, deletions, and read receipts across envelopes
+      const editMap = new Map<number, { newText: string; editedAt: string }>()
+      const deleteMap = new Map<number, { deletedAt: string }>()
+      let maxPartnerReadId = 0
+      let maxIncomingId = 0
 
       for (const env of envelopes) {
         try {
@@ -660,53 +710,88 @@ export function Messenger() {
             }
           }
 
-          let text = plain
-          let senderId = activeContact ? activeContact.userId : 0
-          let senderName: string | undefined = undefined
-          let isSelf = false
-          let noteAttachment: NoteAttachment | undefined = undefined
-          let calendarAttachment: CalendarAttachment | undefined = undefined
-          let imageAttachment: ImageAttachment | undefined = undefined
-          let audioAttachment: AudioAttachment | undefined = undefined
-          let fileAttachment: FileAttachment | undefined = undefined
-          let stickerAttachment: StickerAttachment | undefined = undefined
-
           try {
             const parsed = JSON.parse(plain)
             if (typeof parsed === 'object' && parsed !== null) {
-              text = parsed.text || ''
-              senderId = parsed.sender_id || senderId
-              senderName = parsed.sender_name
-              isSelf = senderId === currentUserId
-              if (parsed.note_attachment) noteAttachment = parsed.note_attachment
-              if (parsed.calendar_attachment) calendarAttachment = parsed.calendar_attachment
-              if (parsed.image_attachment) imageAttachment = parsed.image_attachment
-              if (parsed.audio_attachment) audioAttachment = parsed.audio_attachment
-              if (parsed.file_attachment) fileAttachment = parsed.file_attachment
-              if (parsed.sticker_attachment) stickerAttachment = parsed.sticker_attachment
+              // 1. Read receipt control packet
+              if (parsed.type === 'read_receipt') {
+                const readUpTo = Number(parsed.read_up_to_id || 0)
+                const readerId = Number(parsed.reader_id || 0)
+                if (readerId !== currentUserId && readUpTo > maxPartnerReadId) {
+                  maxPartnerReadId = readUpTo
+                }
+                continue
+              }
+
+              // 2. Edit message control packet
+              if (parsed.type === 'edit_message') {
+                const targetId = Number(parsed.target_id || 0)
+                if (targetId && parsed.new_text) {
+                  editMap.set(targetId, {
+                    newText: String(parsed.new_text),
+                    editedAt: String(parsed.edited_at || env.created_at),
+                  })
+                }
+                continue
+              }
+
+              // 3. Delete message control packet
+              if (parsed.type === 'delete_message') {
+                const targetId = Number(parsed.target_id || 0)
+                if (targetId) {
+                  deleteMap.set(targetId, {
+                    deletedAt: String(parsed.deleted_at || env.created_at),
+                  })
+                }
+                continue
+              }
+
+              // Normal Chat Message
+              let senderId = parsed.sender_id || (activeContact ? activeContact.userId : 0)
+              let senderName = parsed.sender_name
+              let isSelf = senderId === currentUserId
+
+              if (!isSelf && env.id > maxIncomingId) {
+                maxIncomingId = env.id
+              }
+
+              decryptedList.push({
+                id: env.id,
+                senderId,
+                senderName,
+                text: parsed.text || '',
+                createdAt: env.created_at,
+                isSelf,
+                noteAttachment: parsed.note_attachment,
+                calendarAttachment: parsed.calendar_attachment,
+                imageAttachment: parsed.image_attachment,
+                audioAttachment: parsed.audio_attachment,
+                fileAttachment: parsed.file_attachment,
+                stickerAttachment: parsed.sticker_attachment,
+              })
+              continue
             }
           } catch {
+            // Legacy / simple text fallback
+            let text = plain
+            let isSelf = false
+            let senderId = activeContact ? activeContact.userId : 0
             if (plain.startsWith('[ME]:')) {
               text = plain.replace('[ME]:', '')
               isSelf = true
               senderId = currentUserId
             }
+            if (!isSelf && env.id > maxIncomingId) {
+              maxIncomingId = env.id
+            }
+            decryptedList.push({
+              id: env.id,
+              senderId,
+              text,
+              createdAt: env.created_at,
+              isSelf,
+            })
           }
-
-          decryptedList.push({
-            id: env.id,
-            senderId,
-            senderName,
-            text,
-            createdAt: env.created_at,
-            isSelf,
-            noteAttachment,
-            calendarAttachment,
-            imageAttachment,
-            audioAttachment,
-            fileAttachment,
-            stickerAttachment,
-          })
         } catch {
           decryptedList.push({
             id: env.id,
@@ -718,9 +803,50 @@ export function Messenger() {
         }
       }
 
+      // Apply Edits, Deletions (with victim evidence retention), and Read Status
+      const processedList: ChatMessage[] = decryptedList.map((msg) => {
+        let text = msg.text
+        let isEdited = false
+        let editedAt: string | undefined = undefined
+        let isDeleted = false
+        let deletedAt: string | undefined = undefined
+        let originalText: string | undefined = undefined
+
+        if (editMap.has(msg.id)) {
+          const editInfo = editMap.get(msg.id)!
+          originalText = text
+          text = editInfo.newText
+          isEdited = true
+          editedAt = editInfo.editedAt
+        }
+
+        if (deleteMap.has(msg.id)) {
+          const delInfo = deleteMap.get(msg.id)!
+          originalText = text
+          isDeleted = true
+          deletedAt = delInfo.deletedAt
+        }
+
+        // Dynamisches blaues Häkchen:
+        // Ein gesendeter Chat gilt genau dann als gelesen, wenn der Gesprächspartner ihn
+        // quittiert hat (maxPartnerReadId >= msg.id)
+        const isRead = msg.isSelf && maxPartnerReadId >= msg.id
+
+        return {
+          ...msg,
+          text,
+          isEdited,
+          editedAt,
+          isDeleted,
+          deletedAt,
+          originalText: originalText || (isDeleted || isEdited ? msg.text : undefined),
+          isRead,
+        }
+      })
+
       // Check for incoming messages to trigger device notifications
-      if (decryptedList.length > 0) {
-        const lastMsg = decryptedList[decryptedList.length - 1]
+      if (processedList.length > 0) {
+        const lastMsg = processedList[processedList.length - 1]
         if (
           lastMsg &&
           !lastMsg.isSelf &&
@@ -744,13 +870,66 @@ export function Messenger() {
         }
       }
 
-      setMessages(decryptedList)
+      setMessages(processedList)
+
+      // Send read receipt if there are new incoming unacknowledged messages
+      if (
+        maxIncomingId > 0 &&
+        maxIncomingId > highestIncomingIdAcknowledgedRef.current &&
+        readReceiptsEnabled
+      ) {
+        highestIncomingIdAcknowledgedRef.current = maxIncomingId
+        void sendE2eeControlMessage({
+          type: 'read_receipt',
+          read_up_to_id: maxIncomingId,
+          reader_id: currentUserId,
+          timestamp: new Date().toISOString(),
+        })
+      }
     } catch {
       // Offline fallback
     } finally {
       if (isInitial) {
         setLoadingMessages(false)
       }
+    }
+  }
+
+  // Action: Edit existing message
+  const handleEditMessage = async (msg: ChatMessage, newText: string) => {
+    const cleanText = newText.trim()
+    if (!cleanText || cleanText === msg.text) {
+      setEditingMessage(null)
+      return
+    }
+    try {
+      await sendE2eeControlMessage({
+        type: 'edit_message',
+        target_id: msg.id,
+        new_text: cleanText,
+        edited_at: new Date().toISOString(),
+      })
+      toast.success('Nachricht bearbeitet.')
+      setEditingMessage(null)
+      setInputText('')
+      await loadMessages(false)
+    } catch {
+      toast.error('Fehler beim Bearbeiten der Nachricht.')
+    }
+  }
+
+  // Action: Delete message with victim protection preserved
+  const handleDeleteMessage = async (msg: ChatMessage) => {
+    try {
+      await sendE2eeControlMessage({
+        type: 'delete_message',
+        target_id: msg.id,
+        deleted_at: new Date().toISOString(),
+      })
+      toast.success('Nachricht für alle gelöscht.')
+      await loadMessages(false)
+    } catch {
+      toast.error('Fehler beim Löschen der Nachricht.')
     }
   }
 
@@ -801,6 +980,13 @@ export function Messenger() {
     file?: FileAttachment,
     sticker?: StickerAttachment
   ) => {
+    // If currently editing a message, redirect to edit handler
+    if (editingMessage) {
+      const textToSave = customText !== undefined ? customText : inputText
+      await handleEditMessage(editingMessage, textToSave)
+      return
+    }
+
     const rawText = customText !== undefined ? customText : inputText.trim()
     if (
       (!rawText && !note && !cal && !img && !audio && !file && !sticker) ||
@@ -2388,11 +2574,68 @@ export function Messenger() {
                         </div>
                       )}
 
-                      {/* Text content */}
-                      {msg.text && <p className="leading-relaxed">{msg.text}</p>}
+                      {/* Text content or Deleted indicator */}
+                      {msg.isDeleted ? (
+                        <div className="flex items-center gap-2 py-0.5 italic opacity-85">
+                          <Trash2 className="w-3.5 h-3.5 shrink-0 opacity-70" />
+                          <span>Diese Nachricht wurde gelöscht.</span>
+                          {!msg.isSelf && msg.originalText && (
+                            <button
+                              type="button"
+                              onClick={() => setVictimProofMessage(msg)}
+                              className="ml-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 text-[10px] not-italic font-medium transition-colors"
+                              title="Beweissicherung (Opferschutz): Ursprüngliche E2EE-Nachricht anzeigen"
+                            >
+                              <ShieldAlert className="w-3 h-3 text-amber-400" />
+                              <span>Original</span>
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        msg.text && (
+                          <div className="space-y-1">
+                            <p className="leading-relaxed">{msg.text}</p>
+                            {msg.isEdited && (
+                              <span className="text-[9px] opacity-70 italic inline-flex items-center gap-1">
+                                <Pencil className="w-2.5 h-2.5" />
+                                <span>bearbeitet</span>
+                              </span>
+                            )}
+                          </div>
+                        )
+                      )}
                     </div>
 
-                    <div className="flex items-center justify-end gap-1 text-[10px] text-on-surface-variant/60 mt-1 px-1">
+                    <div className="flex items-center justify-end gap-1.5 text-[10px] text-on-surface-variant/60 mt-1 px-1">
+                      {/* Message Actions Menu (Edit & Delete for self, Victim Proof for recipient) */}
+                      {!msg.isDeleted && msg.isSelf && (
+                        <div className="opacity-0 hover:opacity-100 focus-within:opacity-100 transition-opacity flex items-center gap-1 mr-1">
+                          {msg.text && !msg.noteAttachment && !msg.calendarAttachment && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingMessage(msg)
+                                setInputText(msg.text)
+                              }}
+                              className="p-1 rounded-md hover:bg-surface-container-highest text-on-surface-variant hover:text-primary transition-colors"
+                              title="Nachricht bearbeiten"
+                              aria-label="Nachricht bearbeiten"
+                            >
+                              <Pencil className="w-3 h-3" />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteMessage(msg)}
+                            className="p-1 rounded-md hover:bg-surface-container-highest text-on-surface-variant hover:text-destructive transition-colors"
+                            title="Nachricht für alle löschen"
+                            aria-label="Nachricht für alle löschen"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      )}
+
                       <span>
                         {new Date(msg.createdAt).toLocaleTimeString([], {
                           hour: '2-digit',
@@ -2401,9 +2644,15 @@ export function Messenger() {
                       </span>
                       {msg.isSelf && (
                         readReceiptsEnabled ? (
-                          <span title="Gelesen" className="inline-flex items-center">
-                            <CheckCheck className="w-3.5 h-3.5 text-cyan-400" />
-                          </span>
+                          msg.isRead ? (
+                            <span title="Gelesen vom Gesprächspartner" className="inline-flex items-center">
+                              <CheckCheck className="w-3.5 h-3.5 text-cyan-400" />
+                            </span>
+                          ) : (
+                            <span title="Zugestellt / Noch nicht gelesen" className="inline-flex items-center">
+                              <CheckCheck className="w-3.5 h-3.5 opacity-60" />
+                            </span>
+                          )
                         ) : (
                           <span title="Gesendet" className="inline-flex items-center">
                             <Check className="w-3.5 h-3.5 opacity-60" />
@@ -2457,6 +2706,35 @@ export function Messenger() {
                     onClick={() => setStagedFile(null)}
                     className="p-1 rounded-full hover:bg-surface-container-highest text-on-surface-variant"
                     aria-label="Datei entfernen"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
+              {/* Editing Mode Banner */}
+              {editingMessage && (
+                <div className="px-4 py-2 border-t border-outline-variant/20 bg-primary/10 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="p-1.5 rounded-lg bg-primary/20 text-primary shrink-0">
+                      <Pencil className="w-3.5 h-3.5" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-primary">Nachricht bearbeiten</p>
+                      <p className="text-[10px] text-on-surface-variant truncate max-w-md">
+                        {editingMessage.text}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingMessage(null)
+                      setInputText('')
+                    }}
+                    className="p-1 rounded-full hover:bg-surface-container-highest text-on-surface-variant"
+                    aria-label="Bearbeiten abbrechen"
+                    title="Abbrechen"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
@@ -2620,7 +2898,7 @@ export function Messenger() {
                           )
                         }}
                         disabled={sending}
-                        placeholder="Nachricht schreiben …"
+                        placeholder={editingMessage ? 'Nachricht bearbeiten …' : 'Nachricht schreiben …'}
                         leftActions={
                           <>
                             <Button
@@ -3152,6 +3430,67 @@ export function Messenger() {
             >
               <Trash2 className="w-4 h-4" />
               <span>{isDeletingGroup ? 'Wird gelöscht …' : 'Endgültig löschen'}</span>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Opferschutz / Beweissicherung Modal für gelöschte Nachrichten */}
+      <Dialog
+        open={Boolean(victimProofMessage)}
+        onOpenChange={(open) => !open && setVictimProofMessage(null)}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-400">
+              <ShieldAlert className="w-5 h-5 text-amber-400" />
+              <span>Beweissicherung (Opferschutz)</span>
+            </DialogTitle>
+            <DialogDescription>
+              Der Absender hat diese Nachricht nachträglich gelöscht. Zu deinem Schutz und zur
+              Beweissicherung bei Belästigung, Straftaten oder Missbrauch wurde die kryptographische
+              Originalnachricht lokal auf deinem Gerät gesichert.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="my-3 p-3.5 rounded-xl bg-surface-container-high border border-outline-variant/30 space-y-2">
+            <div className="flex items-center justify-between text-[11px] text-on-surface-variant/70 border-b border-outline-variant/20 pb-1.5">
+              <span>Ursprünglicher Text</span>
+              <span>
+                {victimProofMessage &&
+                  new Date(victimProofMessage.createdAt).toLocaleString([], {
+                    dateStyle: 'short',
+                    timeStyle: 'medium',
+                  })}
+              </span>
+            </div>
+            <p className="text-sm font-sans text-on-surface select-text whitespace-pre-wrap leading-relaxed">
+              {victimProofMessage?.originalText || 'Kein Textinhalt verfügbar.'}
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setVictimProofMessage(null)}
+            >
+              Schließen
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                if (victimProofMessage?.originalText) {
+                  navigator.clipboard?.writeText(
+                    `[Beweis-Protokoll MSM Messenger]\nDatum: ${victimProofMessage.createdAt}\nNachricht: ${victimProofMessage.originalText}`
+                  )
+                  toast.success('Beweis in die Zwischenablage kopiert.')
+                }
+              }}
+              className="gap-1.5"
+            >
+              <Shield className="w-3.5 h-3.5" />
+              <span>Beweis kopieren</span>
             </Button>
           </DialogFooter>
         </DialogContent>
