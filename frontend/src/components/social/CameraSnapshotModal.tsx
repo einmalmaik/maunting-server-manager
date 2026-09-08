@@ -144,10 +144,10 @@ export function CameraSnapshotModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="max-w-md w-full p-0 overflow-hidden bg-zinc-950 text-white border border-zinc-800 shadow-2xl flex flex-col"
+        className="max-w-md w-full max-h-[90dvh] p-0 overflow-hidden bg-zinc-950 text-white border border-zinc-800 shadow-2xl flex flex-col my-auto"
       >
         {/* Top Header Bar */}
-        <div className="px-4 py-3 bg-zinc-900/80 backdrop-blur border-b border-zinc-800 flex items-center justify-between z-10">
+        <div className="px-4 py-2.5 sm:py-3 bg-zinc-900/80 backdrop-blur border-b border-zinc-800 flex items-center justify-between shrink-0 z-10">
           <div className="flex items-center gap-2">
             <Camera className="w-4 h-4 text-emerald-400" />
             <span className="font-headline text-body-sm font-semibold text-white">
@@ -165,7 +165,7 @@ export function CameraSnapshotModal({
         </div>
 
         {/* Video / Snapshot Viewfinder Area */}
-        <div className="relative aspect-[3/4] w-full bg-black flex items-center justify-center overflow-hidden select-none">
+        <div className="relative flex-1 min-h-0 w-full max-h-[60dvh] sm:aspect-[3/4] bg-black flex items-center justify-center overflow-hidden select-none">
           {capturedPhoto ? (
             <img src={capturedPhoto} alt="Snapshot" className="w-full h-full object-cover" />
           ) : stream ? (
@@ -213,7 +213,7 @@ export function CameraSnapshotModal({
         </div>
 
         {/* WhatsApp-Style Bottom Controls Bar */}
-        <div className="px-6 py-5 bg-zinc-900 border-t border-zinc-800 flex items-center justify-between">
+        <div className="px-6 py-3.5 sm:py-5 bg-zinc-900 border-t border-zinc-800 flex items-center justify-between shrink-0">
           {capturedPhoto ? (
             <div className="flex items-center justify-between w-full gap-3">
               <Button

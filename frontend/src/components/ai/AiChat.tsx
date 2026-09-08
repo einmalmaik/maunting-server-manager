@@ -13,7 +13,7 @@ import {
   type AiRunInfo,
 } from '@/api/ai'
 import { api, SanitizedApiError } from '@/api/client'
-import { Button, Dropdown, Avatar } from '@/Singra/UI'
+import { Button, Dropdown, Avatar, VoiceRecordingBar } from '@/Singra/UI'
 import {
   aiChatPreferenceKeys,
   readClosedGeoAnalysis,
@@ -47,13 +47,6 @@ import { applyGeoCameraCommand, normalizeGeoCameraCommand, normalizeRegionalAnal
 import { AI_ZUSTELLUNG_EVENT } from '@/lib/aiZustellung'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { starteAufnahme, type Aufnahme } from './voice/audioAufnahme'
-import { DictationWaveform } from './voice/DictationWaveform'
-
-function formatDiktatTimer(sekunden: number): string {
-  const m = Math.floor(sekunden / 60)
-  const s = sekunden % 60
-  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
-}
 
 interface ServerOption {
   id: number
@@ -175,6 +168,7 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
     remaining_seconds: number | null
   } | null>(null)
   const [dictationElapsed, setDictationElapsed] = useState(0)
+  const [dictationAudioLevel, setDictationAudioLevel] = useState(0)
   // Welche eigene Nachricht gerade umformuliert wird, und womit.
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState('')
@@ -322,6 +316,7 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
   useEffect(() => {
     if (!dictating) {
       setDictationElapsed(0)
+      setDictationAudioLevel(0)
       return
     }
     const timer = setInterval(() => {
@@ -337,7 +332,23 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
         return next
       })
     }, 1000)
-    return () => clearInterval(timer)
+
+    let animId = 0
+    let running = true
+    const pollLevel = () => {
+      if (!running) return
+      if (dictationRef.current) {
+        setDictationAudioLevel(dictationRef.current.pegel())
+      }
+      animId = requestAnimationFrame(pollLevel)
+    }
+    animId = requestAnimationFrame(pollLevel)
+
+    return () => {
+      clearInterval(timer)
+      running = false
+      cancelAnimationFrame(animId)
+    }
   }, [dictating, dictationQuota, diktatUmschalten])
 
   useEffect(() => () => dictationRef.current?.beenden(), [])
@@ -1071,8 +1082,8 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
       }}
     >
       {/* ── Kopfzeile: Provider, Denkschritte, Autonomie, Skills ───────── */}
-      <header className="flex flex-wrap items-center gap-1.5 sm:gap-2 border-b border-outline-variant/30 bg-surface-container-low px-2.5 py-2 sm:px-5 sm:py-2.5 shrink-0 sticky top-0 z-20">
-        <div className="w-48 sm:w-60 max-w-[260px] shrink-0">
+      <header className="flex flex-nowrap items-center gap-1.5 sm:gap-2 border-b border-outline-variant/30 bg-surface-container-low px-2.5 py-2 sm:px-4 sm:py-2.5 shrink-0 sticky top-0 z-20 overflow-x-auto no-scrollbar">
+        <div className="w-40 sm:w-56 max-w-[240px] shrink-0">
           <Dropdown
             value={providerId ? String(providerId) : null}
             onChange={waehleProvider}
@@ -1087,14 +1098,20 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
           />
         </div>
 
-        <ReasoningPicker
-          provider={aktiverProvider}
-          wahl={denken}
-          onChange={waehleDenken}
-          disabled={busy}
-        />
+        <div className="shrink-0">
+          <ReasoningPicker
+            provider={aktiverProvider}
+            wahl={denken}
+            onChange={waehleDenken}
+            disabled={busy}
+          />
+        </div>
 
-        {canUseAutonomy && <AiAutonomyButton servers={servers} disabled={busy} />}
+        {canUseAutonomy && (
+          <div className="shrink-0">
+            <AiAutonomyButton servers={servers} disabled={busy} />
+          </div>
+        )}
 
         {canUseSkills && (
           <Button
@@ -1102,52 +1119,56 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
             variant="ghost"
             size="sm"
             onClick={() => setSkillsModalOpen(true)}
-            className="h-8 px-2.5 text-xs flex items-center gap-1.5 border border-outline-variant/30 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 rounded-lg transition-colors"
+            className="h-8 px-2 text-xs flex items-center gap-1.5 border border-outline-variant/30 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 rounded-lg transition-colors shrink-0"
             title={t('ai.skills.directoryTitle', 'Assistenten-Skills')}
             aria-label={t('ai.skills.directoryTitle', 'Assistenten-Skills')}
           >
             <Sparkles className="h-3.5 w-3.5 text-primary shrink-0" aria-hidden="true" />
-            <span className="hidden md:inline">{t('ai.skills.directoryTitle', 'Skills')}</span>
+            <span className="hidden xl:inline">{t('ai.skills.directoryTitle', 'Skills')}</span>
           </Button>
         )}
 
-        <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
-          {canTasks && onSwitchMode && (
-            <button
-              type="button"
-              onClick={() => onSwitchMode('aufgaben')}
-              className="inline-flex items-center gap-1.5 rounded-full border border-outline-variant/40 bg-surface-container-high/40 px-2.5 py-1 text-xs font-medium text-on-surface-variant hover:text-on-surface hover:border-outline-variant transition-colors"
-              aria-label={t('ai.tasks.toTasks')}
-              title={t('ai.tasks.toTasks')}
-            >
-              <CalendarClock className="h-4 w-4 shrink-0 text-secondary" aria-hidden="true" />
-              <span className="hidden md:inline">Aufgaben</span>
-            </button>
-          )}
+        <div className="ml-auto flex items-center gap-1 sm:gap-1.5 shrink-0">
+          {(canTasks || onSwitchMode) && (
+            <div className="flex items-center rounded-lg border border-outline-variant/30 bg-surface-container/50 p-0.5">
+              {canTasks && onSwitchMode && (
+                <button
+                  type="button"
+                  onClick={() => onSwitchMode('aufgaben')}
+                  className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 transition-colors"
+                  aria-label={t('ai.tasks.toTasks')}
+                  title={t('ai.tasks.toTasks')}
+                >
+                  <CalendarClock className="h-3.5 w-3.5 shrink-0 text-on-surface-variant" aria-hidden="true" />
+                  <span className="hidden xl:inline">Aufgaben</span>
+                </button>
+              )}
 
-          {onSwitchMode && (
-            <button
-              type="button"
-              onClick={() => onSwitchMode('guardian')}
-              className="inline-flex items-center gap-1.5 rounded-full border border-outline-variant/40 bg-surface-container-high/40 px-2.5 py-1 text-xs font-medium text-on-surface-variant hover:text-on-surface hover:border-outline-variant transition-colors"
-              aria-label={t('ai.guardian.toGuardianMode')}
-              title={t('ai.guardian.toGuardianMode')}
-            >
-              <ShieldAlert className="h-4 w-4 shrink-0 text-tertiary" aria-hidden="true" />
-              <span className="hidden md:inline">Guardian</span>
-            </button>
+              {onSwitchMode && (
+                <button
+                  type="button"
+                  onClick={() => onSwitchMode('guardian')}
+                  className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 transition-colors"
+                  aria-label={t('ai.guardian.toGuardianMode')}
+                  title={t('ai.guardian.toGuardianMode')}
+                >
+                  <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-on-surface-variant" aria-hidden="true" />
+                  <span className="hidden xl:inline">Guardian</span>
+                </button>
+              )}
+            </div>
           )}
 
           {hasVoice && onSwitchMode && (
             <button
               type="button"
               onClick={() => onSwitchMode('sprache')}
-              className="inline-flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/20 transition-colors shrink-0"
               aria-label={t('ai.voice.toVoiceMode')}
               title={t('ai.voice.toVoiceMode')}
             >
-              <AudioLines className="h-4 w-4 shrink-0" aria-hidden="true" />
-              <span className="hidden md:inline">Realtime</span>
+              <AudioLines className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span className="hidden sm:inline">Realtime</span>
             </button>
           )}
 
@@ -1159,9 +1180,9 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
             onClick={() => void clearHistory()}
             aria-label={t('ai.chat.clear')}
             title={t('ai.chat.clear')}
-            className="h-9 w-9 p-0 text-on-surface-variant hover:text-status-danger transition-colors flex items-center justify-center rounded-lg"
+            className="h-8 w-8 p-0 text-on-surface-variant hover:text-status-danger transition-colors flex items-center justify-center rounded-lg shrink-0"
           >
-            <Trash2 className="h-5 w-5" aria-hidden="true" />
+            <Trash2 className="h-4 w-4" aria-hidden="true" />
           </Button>
         </div>
       </header>
@@ -1446,73 +1467,42 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
 
           <div className="flex items-end gap-2 rounded-2xl border border-outline-variant/50 bg-surface-container-low/50 p-2 focus-within:border-primary/50">
             {dictating ? (
-              <div className="flex flex-1 items-center gap-2 sm:gap-3 py-0.5 min-w-0">
-                {/* Status-Badge mit pulsierendem Punkt & Laufzeit-Timer */}
-                <div className="flex items-center gap-1.5 shrink-0 rounded-lg border border-status-danger/30 bg-status-danger/10 px-2.5 py-1 text-xs font-medium text-status-danger">
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-status-danger opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-status-danger" />
-                  </span>
-                  <span className="tabular-nums font-semibold tracking-wider">
-                    {formatDiktatTimer(dictationElapsed)}
-                  </span>
-                </div>
-
-                {/* Restkontingent-Badge */}
-                <div
-                  className="hidden xs:flex items-center gap-1 shrink-0 rounded-lg border border-outline-variant/40 bg-surface-container-low/60 px-2 py-1 text-xs text-on-surface-variant"
-                  title={
-                    dictationQuota?.monthly_limit_minutes != null
-                      ? `Monatliches Limit: ${dictationQuota.monthly_limit_minutes} Min.`
-                      : 'Unbegrenztes Diktierkontingent'
-                  }
-                >
-                  <span className="tabular-nums font-medium text-on-surface">
-                    {dictationQuota?.monthly_limit_minutes != null
-                      ? t('ai.chat.dictationRemaining', {
-                          min: Math.max(
-                            0,
-                            Math.ceil(
-                              ((dictationQuota.remaining_seconds ?? 0) - dictationElapsed) / 60,
+              <VoiceRecordingBar
+                durationSeconds={dictationElapsed}
+                statusLabel="Jetzt sprechen …"
+                variant="danger"
+                className="flex-1 border-0 bg-transparent p-0"
+                extraInfo={
+                  <div
+                    className="hidden xs:flex items-center gap-1 shrink-0 rounded-lg border border-outline-variant/40 bg-surface-container-low/60 px-2 py-0.5 text-xs text-on-surface-variant"
+                    title={
+                      dictationQuota?.monthly_limit_minutes != null
+                        ? `Monatliches Limit: ${dictationQuota.monthly_limit_minutes} Min.`
+                        : 'Unbegrenztes Diktierkontingent'
+                    }
+                  >
+                    <span className="tabular-nums font-medium text-on-surface">
+                      {dictationQuota?.monthly_limit_minutes != null
+                        ? t('ai.chat.dictationRemaining', {
+                            min: Math.max(
+                              0,
+                              Math.ceil(
+                                ((dictationQuota.remaining_seconds ?? 0) - dictationElapsed) / 60,
+                              ),
                             ),
-                          ),
-                        })
-                      : t('ai.chat.dictationUnlimited')}
-                  </span>
-                </div>
-
-                {/* Stimmreaktive Wellenform */}
-                <div className="flex-1 h-9 min-w-[50px] max-w-full overflow-hidden rounded-md">
-                  <DictationWaveform aufnahme={dictationRef.current} className="h-full w-full" />
-                </div>
-
-                {/* Aktionen: Verwerfen & Beenden/Einfügen */}
-                <div className="flex items-center gap-1 shrink-0">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="h-8 w-8 rounded-full p-0 text-on-surface-variant hover:text-status-danger hover:bg-status-danger/10"
-                    onClick={diktatAbbrechen}
-                    aria-label={t('ai.chat.dictationCancel')}
-                    title={t('ai.chat.dictationCancel')}
-                  >
-                    <X className="h-4 w-4" aria-hidden="true" />
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    className="h-8 shrink-0 rounded-full px-2.5 text-xs flex items-center gap-1 bg-primary/15 text-primary hover:bg-primary/25 border border-primary/30"
-                    onClick={() => void diktatUmschalten()}
-                    aria-label={t('ai.chat.dictationStop')}
-                    title={t('ai.chat.dictationStop')}
-                  >
-                    <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                    <span className="hidden sm:inline">{t('ai.chat.dictationStop')}</span>
-                  </Button>
-                </div>
-              </div>
+                          })
+                        : t('ai.chat.dictationUnlimited')}
+                    </span>
+                  </div>
+                }
+                onCancel={diktatAbbrechen}
+                onConfirm={() => void diktatUmschalten()}
+                audioLevel={dictationAudioLevel}
+                cancelLabel={t('ai.chat.dictationCancel')}
+                confirmLabel={t('ai.chat.dictationStop')}
+                cancelIcon={<X className="h-4 w-4" aria-hidden="true" />}
+                confirmIcon={<Check className="h-3.5 w-3.5" aria-hidden="true" />}
+              />
             ) : (
               <>
                 {canAttach && (

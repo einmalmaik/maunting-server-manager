@@ -359,7 +359,7 @@ describe('Messenger (Allround Chat)', () => {
     // Click Aktuelles tab
     const updatesTab = screen.getByRole('button', { name: 'Aktuelles' })
     fireEvent.click(updatesTab)
-    expect(screen.getByText('Aktuelles & Status deiner Kontakte')).toBeInTheDocument()
+    expect(screen.getByText('Status')).toBeInTheDocument()
 
     // Click Community tab
     const communityTab = screen.getByRole('button', { name: 'Community' })
@@ -375,18 +375,14 @@ describe('Messenger (Allround Chat)', () => {
     expect(screen.getByText('alice')).toBeInTheDocument()
   })
 
-  it('bietet eine Schnellkamera-Schaltfläche in der Kopfzeile an', async () => {
+  it('bietet eine Schnellkamera-Schaltfläche in der Kopfzeile an', () => {
     render(
       <MemoryRouter>
         <Messenger />
       </MemoryRouter>
     )
 
-    await waitFor(() => {
-      expect(screen.getByText('alice')).toBeInTheDocument()
-    })
-
-    const cameraBtn = screen.getByLabelText('Foto aufnehmen')
+    const cameraBtn = screen.getByRole('button', { name: 'Foto aufnehmen' })
     expect(cameraBtn).toBeInTheDocument()
   })
 
@@ -394,16 +390,15 @@ describe('Messenger (Allround Chat)', () => {
     vi.mocked(socialApi.getGroups).mockResolvedValue([
       {
         id: 77,
-        name: 'Dev Community',
-        description: 'Offizielle Entwicklergruppe',
-        avatar_url: null,
-        invite_code: 'dev-invite-123',
-        owner_user_id: 1, // User 1 is owner
-        member_count: 5,
+        name: 'Delete Me Clan',
+        description: 'Temporary group',
+        invite_code: 'temp-123',
+        owner_user_id: 1,
+        member_count: 3,
         role: 'admin',
-        created_at: '2026-09-07T00:00:00Z',
+        created_at: '2026-09-02T00:00:00Z',
         members: [],
-      },
+      } as any,
     ])
     vi.mocked(socialApi.deleteGroup).mockResolvedValueOnce({ success: true } as any)
 
@@ -414,10 +409,10 @@ describe('Messenger (Allround Chat)', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByText('Dev Community')).toBeInTheDocument()
+      expect(screen.getByText('Delete Me Clan')).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByText('Dev Community'))
+    fireEvent.click(screen.getByText('Delete Me Clan'))
 
     await waitFor(() => {
       expect(screen.getByLabelText('Gruppe löschen')).toBeInTheDocument()
@@ -425,7 +420,6 @@ describe('Messenger (Allround Chat)', () => {
 
     fireEvent.click(screen.getByLabelText('Gruppe löschen'))
 
-    // Design-DNA Modal confirms deletion
     await waitFor(() => {
       expect(screen.getByText('Endgültig löschen')).toBeInTheDocument()
     })
@@ -441,15 +435,14 @@ describe('Messenger (Allround Chat)', () => {
       {
         id: 88,
         name: 'Admin Tribe',
-        description: null,
-        avatar_url: null,
-        invite_code: 'tribe88',
-        owner_user_id: 1, // current user is owner
+        description: 'Protected group',
+        invite_code: 'admin-123',
+        owner_user_id: 1,
         member_count: 2,
         role: 'owner',
         created_at: '2026-09-02T00:00:00Z',
         members: [],
-      },
+      } as any,
     ])
 
     render(
@@ -505,13 +498,13 @@ describe('Messenger (Allround Chat)', () => {
 
     await waitFor(() => {
       expect(screen.getAllByText('Mein Status')[0]).toBeInTheDocument()
-      expect(screen.getByText('Status hinzufügen')).toBeInTheDocument()
+      expect(screen.getByText('Hinzufügen')).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByText('Status hinzufügen'))
+    fireEvent.click(screen.getByText('Hinzufügen'))
 
     await waitFor(() => {
-      expect(screen.getByText('Story / Status erstellen')).toBeInTheDocument()
+      expect(screen.getByText('Status erstellen')).toBeInTheDocument()
     })
   })
 })

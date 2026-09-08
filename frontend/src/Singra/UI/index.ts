@@ -31,4 +31,13 @@ export {
   type DialogProps,
   type DialogContentProps,
 } from './Dialog'
+export {
+  ChatInputBar,
+  type ChatInputBarProps,
+  type ChatInputBarRef,
+} from './ChatInputBar'
+export {
+  VoiceRecordingBar,
+  type VoiceRecordingBarProps,
+} from './VoiceRecordingBar'
 

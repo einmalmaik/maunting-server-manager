@@ -833,13 +833,16 @@ function Hauptseite({
           )}
         </div>
 
-        {/* Desktop-Navigation mit Schnellzugriff */}
-        <nav className="hidden md:flex items-center gap-1.5" aria-label={t('mss.app.bereiche')}>
+        {/* Desktop-Navigation mit ruhiger, zusammenhängender Segment-Leiste */}
+        <nav
+          className="hidden md:flex items-center rounded-xl border border-outline-variant/30 bg-surface-container-low/60 p-1 backdrop-blur-sm"
+          aria-label={t('mss.app.bereiche')}
+        >
           {!isOffline && (
             <Reiter
               aktiv={bereich === 'ki'}
               onClick={() => navigate('/ai')}
-              icon={<Bot className="h-4 w-4" />}
+              icon={<Bot className="h-4 w-4 shrink-0" />}
               label={t('mss.app.ki', t('nav.ai', 'KI-Assistent'))}
             />
           )}
@@ -847,7 +850,7 @@ function Hauptseite({
             <Reiter
               aktiv={bereich === 'chat'}
               onClick={() => navigate('/chat')}
-              icon={<MessageSquare className="h-4 w-4" />}
+              icon={<MessageSquare className="h-4 w-4 shrink-0" />}
               label={t('mss.app.messenger', t('nav.chat', 'Messenger'))}
             />
           )}
@@ -855,7 +858,7 @@ function Hauptseite({
             <Reiter
               aktiv={bereich === 'kalender'}
               onClick={() => navigate('/kalender')}
-              icon={<CalendarIcon className="h-4 w-4" />}
+              icon={<CalendarIcon className="h-4 w-4 shrink-0" />}
               label={t('mss.app.kalender')}
             />
           )}
@@ -863,7 +866,7 @@ function Hauptseite({
             <Reiter
               aktiv={bereich === 'notizen'}
               onClick={() => navigate('/notizen')}
-              icon={<StickyNote className="h-4 w-4" />}
+              icon={<StickyNote className="h-4 w-4 shrink-0" />}
               label={t('mss.app.notizen', 'Notizen')}
             />
           )}
@@ -871,7 +874,7 @@ function Hauptseite({
             <Reiter
               aktiv={bereich === 'gedaechtnis'}
               onClick={() => navigate('/gedaechtnis')}
-              icon={<BrainCircuit className="h-4 w-4" />}
+              icon={<BrainCircuit className="h-4 w-4 shrink-0" />}
               label={t('mss.app.gedaechtnis')}
             />
           )}
@@ -879,7 +882,7 @@ function Hauptseite({
             <Reiter
               aktiv={bereich === 'tresor'}
               onClick={() => navigate('/tresor')}
-              icon={<KeyRound className="h-4 w-4" />}
+              icon={<KeyRound className="h-4 w-4 shrink-0" />}
               label={t('mss.app.tresor', 'Passwort-Manager')}
             />
           )}
@@ -1115,20 +1118,23 @@ function Hauptseite({
   )
 }
 
-/** Pill-Optik mit Icon und Label. */
+/** Segmented Reiter mit ruhiger Optik: Aktiver Tab hebt sich soft ab, Inaktive bleiben dezent */
 function Reiter({ aktiv, onClick, label, icon }: { aktiv: boolean; onClick: () => void; label: string; icon?: ReactNode }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       aria-pressed={aktiv}
-      className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+      title={label}
+      aria-label={label}
+      className={`group relative flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all ${
         aktiv
-          ? 'border-primary/40 bg-primary/10 text-primary'
-          : 'border-outline-variant/40 bg-surface-container-low/40 text-on-surface-variant hover:text-on-surface'
+          ? 'bg-surface-container-high text-primary shadow-xs font-semibold'
+          : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/40'
       }`}
     >
       {icon}
-      <span>{label}</span>
+      <span className={aktiv ? 'inline' : 'hidden xl:inline'}>{label}</span>
     </button>
   )
 }

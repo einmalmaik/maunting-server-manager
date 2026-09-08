@@ -11,6 +11,8 @@ import {
   DialogDescription,
   DialogFooter,
   Avatar,
+  ChatInputBar,
+  VoiceRecordingBar,
 } from '@/Singra/UI'
 import {
   MessageSquare,
@@ -42,6 +44,9 @@ import {
   Download,
   Upload,
   Shield,
+  UserCheck,
+  Briefcase,
+  LayoutGrid,
 } from 'lucide-react'
 import { DeviceBadge } from '@/components/social/DeviceBadge'
 import { StatusDot, type PresenceStatus } from '@/components/social/StatusIndicator'
@@ -207,6 +212,7 @@ export function Messenger() {
   const [stories, setStories] = useState<ChatStoryItem[]>([])
   const [isCreateStoryOpen, setIsCreateStoryOpen] = useState(false)
   const [createStoryInitialMode, setCreateStoryInitialMode] = useState<'text' | 'photo'>('text')
+  const [pendingStoryPhotoUrl, setPendingStoryPhotoUrl] = useState<string | null>(null)
   const [isViewerStoryOpen, setIsViewerStoryOpen] = useState(false)
   const [viewerStoryIndex, setViewerStoryIndex] = useState(0)
   const [activeViewerStories, setActiveViewerStories] = useState<ChatStoryItem[]>([])
@@ -1402,41 +1408,92 @@ export function Messenger() {
               />
             </div>
 
-            {/* WhatsApp Filter Tabs (Chats Mode) */}
+            {/* WhatsApp Filter Tabs (Chats Mode) - Clean Segmented Control with clear intuitive icons & counts */}
             {mobileNavTab === 'chats' && (
-              <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
-                <Button
-                  variant={filterTab === 'all' ? 'primary' : 'ghost'}
-                  size="sm"
+              <div className="grid grid-cols-4 gap-1 p-1 rounded-xl bg-surface-container-high/50 border border-outline-variant/15 w-full">
+                <button
+                  type="button"
                   onClick={() => setFilterTab('all')}
-                  className="text-xs h-6 px-2.5 rounded-full"
+                  className={`h-7 rounded-lg flex items-center justify-center gap-1.5 transition-all text-xs font-semibold ${
+                    filterTab === 'all'
+                      ? 'bg-primary text-on-primary shadow-xs'
+                      : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
+                  }`}
+                  title="Alle Chats"
+                  aria-label="Alle Chats"
                 >
-                  Alle
-                </Button>
-                <Button
-                  variant={filterTab === 'groups' ? 'primary' : 'ghost'}
-                  size="sm"
+                  <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
+                  <span className="text-[11px] leading-none">Alle</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => setFilterTab('groups')}
-                  className="text-xs h-6 px-2.5 rounded-full"
+                  className={`h-7 rounded-lg flex items-center justify-center gap-1 transition-all text-xs font-semibold ${
+                    filterTab === 'groups'
+                      ? 'bg-primary text-on-primary shadow-xs'
+                      : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
+                  }`}
+                  title={`Gruppen (${groups.length})`}
+                  aria-label={`Gruppen (${groups.length})`}
                 >
-                  Gruppen ({groups.length})
-                </Button>
-                <Button
-                  variant={filterTab === 'friends' ? 'primary' : 'ghost'}
-                  size="sm"
+                  <UsersRound className="w-3.5 h-3.5 shrink-0" />
+                  {groups.length > 0 && (
+                    <span
+                      className={`text-[10px] px-1 py-0.2 rounded-full font-bold leading-none ${
+                        filterTab === 'groups' ? 'bg-white/20 text-white' : 'bg-surface-container-highest text-on-surface-variant'
+                      }`}
+                    >
+                      {groups.length}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => setFilterTab('friends')}
-                  className="text-xs h-6 px-2.5 rounded-full"
+                  className={`h-7 rounded-lg flex items-center justify-center gap-1 transition-all text-xs font-semibold ${
+                    filterTab === 'friends'
+                      ? 'bg-primary text-on-primary shadow-xs'
+                      : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
+                  }`}
+                  title={`Freunde (${contactsList.filter((c) => c.isFriend).length})`}
+                  aria-label={`Freunde (${contactsList.filter((c) => c.isFriend).length})`}
                 >
-                  Freunde ({contactsList.filter((c) => c.isFriend).length})
-                </Button>
-                <Button
-                  variant={filterTab === 'teams' ? 'primary' : 'ghost'}
-                  size="sm"
+                  <UserCheck className="w-3.5 h-3.5 shrink-0" />
+                  {contactsList.some((c) => c.isFriend) && (
+                    <span
+                      className={`text-[10px] px-1 py-0.2 rounded-full font-bold leading-none ${
+                        filterTab === 'friends' ? 'bg-white/20 text-white' : 'bg-surface-container-highest text-on-surface-variant'
+                      }`}
+                    >
+                      {contactsList.filter((c) => c.isFriend).length}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => setFilterTab('teams')}
-                  className="text-xs h-6 px-2.5 rounded-full"
+                  className={`h-7 rounded-lg flex items-center justify-center gap-1 transition-all text-xs font-semibold ${
+                    filterTab === 'teams'
+                      ? 'bg-primary text-on-primary shadow-xs'
+                      : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
+                  }`}
+                  title={`Teams (${contactsList.filter((c) => c.teamName).length})`}
+                  aria-label={`Teams (${contactsList.filter((c) => c.teamName).length})`}
                 >
-                  Teams ({contactsList.filter((c) => c.teamName).length})
-                </Button>
+                  <Briefcase className="w-3.5 h-3.5 shrink-0" />
+                  {contactsList.some((c) => c.teamName) && (
+                    <span
+                      className={`text-[10px] px-1 py-0.2 rounded-full font-bold leading-none ${
+                        filterTab === 'teams' ? 'bg-white/20 text-white' : 'bg-surface-container-highest text-on-surface-variant'
+                      }`}
+                    >
+                      {contactsList.filter((c) => c.teamName).length}
+                    </span>
+                  )}
+                </button>
               </div>
             )}
           </div>
@@ -1459,9 +1516,9 @@ export function Messenger() {
                     }}
                   >
                     <div
-                      className={`p-0.5 rounded-full transition-transform group-hover:scale-105 ${
+                      className={`w-12 h-12 rounded-full p-0.5 shrink-0 transition-transform group-hover:scale-105 flex items-center justify-center ${
                         myStories.length > 0
-                          ? 'bg-gradient-to-tr from-cyan-400 via-sky-500 to-indigo-500 ring-2 ring-primary/30'
+                          ? 'bg-gradient-to-tr from-cyan-400 via-sky-500 to-indigo-500 ring-2 ring-primary/30 ring-offset-2 ring-offset-surface'
                           : 'border-2 border-dashed border-outline-variant/70'
                       }`}
                     >
@@ -1493,11 +1550,11 @@ export function Messenger() {
                     className="flex flex-col items-center gap-1 shrink-0 w-14 cursor-pointer group"
                     onClick={() => openStoryViewerForUser(group.stories, 0)}
                   >
-                    <div className="relative">
+                    <div className="relative shrink-0">
                       <div
-                        className={`p-0.5 rounded-full transition-all duration-300 group-hover:scale-105 ${
+                        className={`w-12 h-12 rounded-full p-0.5 shrink-0 transition-all duration-300 group-hover:scale-105 flex items-center justify-center ${
                           group.hasUnseen
-                            ? 'bg-gradient-to-tr from-cyan-400 via-indigo-500 to-fuchsia-500 ring-2 ring-primary shadow-[0_0_14px_rgba(99,102,241,0.65)] animate-pulse'
+                            ? 'bg-gradient-to-tr from-cyan-400 via-indigo-500 to-fuchsia-500 ring-2 ring-primary ring-offset-2 ring-offset-surface shadow-[0_0_14px_rgba(99,102,241,0.65)] animate-pulse'
                             : 'bg-surface-container-highest ring-1 ring-outline-variant/50 opacity-85'
                         }`}
                       >
@@ -1660,69 +1717,53 @@ export function Messenger() {
             {/* View 2: Aktuelles (Stories / 24h Status Updates & Contacts Presence) */}
             {mobileNavTab === 'updates' && (
               <div className="space-y-4 p-1">
-                {/* Header Banner */}
-                <div className="p-3 rounded-xl bg-surface-container/60 border border-outline-variant/30 text-xs">
-                  <div className="flex items-center gap-2 font-semibold text-primary mb-1">
-                    <Sparkles className="w-4 h-4" />
-                    <span>Aktuelles & Status deiner Kontakte</span>
+                {/* Clean Top Bar: Title & Direct Add Action */}
+                <div className="flex items-center justify-between px-1">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-primary" />
+                    <span className="text-sm font-headline font-bold text-on-surface">Status</span>
                   </div>
-                  <p className="text-[11px] text-on-surface-variant">
-                    24h Status-Stories deiner Kontakte – Ende-zu-Ende verschlüsselt und nach 24 Stunden automatisch gelöscht.
-                  </p>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    onClick={() => {
+                      setCreateStoryInitialMode('text')
+                      setPendingStoryPhotoUrl(null)
+                      setIsCreateStoryOpen(true)
+                    }}
+                    className="h-8 text-xs gap-1.5 px-3 rounded-xl font-medium"
+                    title="Status hinzufügen"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Hinzufügen</span>
+                  </Button>
                 </div>
 
-                {/* My Status Card */}
-                <div className="p-3 rounded-2xl bg-surface-container-lowest/80 border border-outline-variant/30 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-headline font-bold text-primary">Mein Status</span>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => {
-                          setCreateStoryInitialMode('text')
-                          setIsCreateStoryOpen(true)
-                        }}
-                        className="h-7 text-xs gap-1 px-2.5 rounded-full"
-                        title="Status hinzufügen"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>Status hinzufügen</span>
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setCreateStoryInitialMode('photo')
-                          setIsCreateStoryOpen(true)
-                        }}
-                        className="h-7 text-xs gap-1 px-2 text-primary"
-                        title="Foto-Status erstellen"
-                      >
-                        <Camera className="w-3.5 h-3.5" />
-                        <span>Foto</span>
-                      </Button>
-                    </div>
+                {/* My Status Card with crisp contrast and clear visual identity */}
+                <div className="p-3.5 rounded-2xl bg-surface-container/70 border border-outline-variant/35 shadow-xs transition-colors hover:bg-surface-container/90">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-headline font-bold text-on-surface">Mein Status</span>
+                    <span className="text-[11px] text-on-surface-variant font-medium">24h sichtbar</span>
                   </div>
 
                   <div className="flex items-center gap-3">
                     <div
-                      className="relative cursor-pointer"
+                      className="relative cursor-pointer shrink-0"
                       onClick={() => {
                         if (myStories.length > 0) {
                           openStoryViewerForUser(myStories, 0)
                         } else {
                           setCreateStoryInitialMode('text')
+                          setPendingStoryPhotoUrl(null)
                           setIsCreateStoryOpen(true)
                         }
                       }}
                     >
-                      <div className={`p-0.5 rounded-full ${
+                      <div className={`w-12 h-12 rounded-full p-0.5 shrink-0 flex items-center justify-center ${
                         myStories.length > 0
-                          ? 'bg-gradient-to-tr from-cyan-400 via-sky-500 to-indigo-500 ring-2 ring-primary/20'
-                          : 'border-2 border-dashed border-outline-variant/60'
+                          ? 'bg-gradient-to-tr from-cyan-400 via-sky-500 to-indigo-500 ring-2 ring-primary/40 ring-offset-2 ring-offset-surface'
+                          : 'border-2 border-dashed border-outline-variant/80'
                       }`}>
                         <Avatar
                           src={user?.avatar_url}
@@ -1741,15 +1782,18 @@ export function Messenger() {
                           openStoryViewerForUser(myStories, 0)
                         } else {
                           setCreateStoryInitialMode('text')
+                          setPendingStoryPhotoUrl(null)
                           setIsCreateStoryOpen(true)
                         }
                       }}
                     >
-                      <div className="text-xs font-semibold text-primary truncate">Mein Status</div>
-                      <p className="text-[11px] text-on-surface-variant/80 truncate">
+                      <div className="text-xs font-semibold text-on-surface truncate">
+                        {myStories.length > 0 ? 'Status ansehen' : 'Status teilen'}
+                      </div>
+                      <p className="text-[11px] text-on-surface-variant truncate">
                         {myStories.length > 0
-                          ? `${myStories.length} aktive Story${myStories.length === 1 ? '' : 's'} • Tippen zum Ansehen`
-                          : 'Tippe, um ein 24h Status-Update zu teilen'}
+                          ? `${myStories.length} aktive Story${myStories.length === 1 ? '' : 's'} • Tippen zum Abspielen`
+                          : 'Foto aufnehmen oder Text teilen'}
                       </p>
                     </div>
                   </div>
@@ -1757,15 +1801,15 @@ export function Messenger() {
 
                 {/* Friends' Stories Section */}
                 <div className="space-y-2">
-                  <div className="px-1 text-[11px] font-semibold text-on-surface-variant/70 uppercase tracking-wider flex items-center justify-between">
+                  <div className="px-1 text-[11px] font-semibold text-on-surface-variant/80 uppercase tracking-wider flex items-center justify-between">
                     <span>Kürzliche Updates</span>
-                    <span className="text-[10px]">
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-surface-container font-mono text-on-surface-variant">
                       {friendsStoriesGrouped.length}
                     </span>
                   </div>
 
                   {friendsStoriesGrouped.length === 0 ? (
-                    <div className="p-4 rounded-xl bg-surface-container-lowest/50 border border-outline-variant/20 text-center text-xs text-on-surface-variant/70">
+                    <div className="p-4 rounded-xl bg-surface-container/40 border border-outline-variant/25 text-center text-xs text-on-surface-variant">
                       Noch keine Status-Updates von Freunden vorhanden.
                     </div>
                   ) : (
@@ -1774,13 +1818,13 @@ export function Messenger() {
                         <div
                           key={`story-grp-${grp.userId}`}
                           onClick={() => openStoryViewerForUser(grp.stories, 0)}
-                          className="flex items-center gap-3 p-2.5 rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60 hover:bg-surface-container-high/50 cursor-pointer transition-colors"
+                          className="flex items-center gap-3 p-2.5 rounded-xl border border-outline-variant/30 bg-surface-container/60 hover:bg-surface-container-high/80 cursor-pointer transition-colors"
                         >
                           <div className="relative shrink-0">
                             <div
-                              className={`p-0.5 rounded-full transition-all duration-300 ${
+                              className={`w-12 h-12 rounded-full p-0.5 shrink-0 transition-all duration-300 flex items-center justify-center ${
                                 grp.hasUnseen
-                                  ? 'bg-gradient-to-tr from-cyan-400 via-indigo-500 to-fuchsia-500 ring-2 ring-primary shadow-[0_0_14px_rgba(99,102,241,0.65)] animate-pulse'
+                                  ? 'bg-gradient-to-tr from-cyan-400 via-indigo-500 to-fuchsia-500 ring-2 ring-primary ring-offset-2 ring-offset-surface shadow-[0_0_14px_rgba(99,102,241,0.65)] animate-pulse'
                                   : 'bg-surface-container-highest ring-1 ring-outline-variant/50 opacity-85'
                               }`}
                             >
@@ -1797,10 +1841,10 @@ export function Messenger() {
                             )}
                           </div>
                           <div className="min-w-0 flex-1">
-                            <div className="text-xs font-semibold text-primary truncate">
+                            <div className="text-xs font-semibold text-on-surface truncate">
                               {grp.username}
                             </div>
-                            <div className="text-[10px] text-on-surface-variant/80 flex items-center gap-1">
+                            <div className="text-[10px] text-on-surface-variant flex items-center gap-1">
                               <Clock className="w-3 h-3" />
                               <span>
                                 {grp.latestStory
@@ -1811,7 +1855,7 @@ export function Messenger() {
                                   : ''}
                               </span>
                               {grp.stories.length > 1 && (
-                                <span className="text-on-surface-variant/60">• {grp.stories.length} Updates</span>
+                                <span className="text-on-surface-variant/70">• {grp.stories.length} Updates</span>
                               )}
                             </div>
                           </div>
@@ -2166,28 +2210,30 @@ export function Messenger() {
                       {/* Note Attachment Card */}
                       {msg.noteAttachment && (
                         <div
-                          className={`p-3 rounded-xl border text-xs shadow-xs space-y-2 ${
+                          className={`p-3 rounded-xl border text-xs shadow-sm space-y-2.5 ${
                             msg.isSelf
-                              ? 'bg-black/25 border-white/15 text-white'
-                              : 'bg-surface-container-lowest/95 border-outline-variant/30 text-on-surface'
+                              ? 'bg-slate-950/80 border-white/20 text-white'
+                              : 'bg-surface-container-lowest border-outline-variant/50 text-on-surface'
                           }`}
                         >
                           <div
-                            className={`flex items-center justify-between gap-2 border-b pb-1.5 ${
-                              msg.isSelf ? 'border-white/10' : 'border-outline-variant/20'
+                            className={`flex items-center justify-between gap-2 border-b pb-2 ${
+                              msg.isSelf ? 'border-white/15' : 'border-outline-variant/30'
                             }`}
                           >
-                            <div className="flex items-center gap-1.5 font-bold text-[11px] truncate">
+                            <div className="flex items-center gap-1.5 font-bold text-xs truncate">
                               <StickyNote className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                              <span className="truncate">{msg.noteAttachment.title || 'Notiz'}</span>
+                              <span className="truncate text-white font-medium">{msg.noteAttachment.title || 'Notiz'}</span>
                             </div>
                             <Button
                               type="button"
                               variant={msg.isSelf ? 'secondary' : 'primary'}
                               size="sm"
                               onClick={() => void handleImportNote(msg.noteAttachment!)}
-                              className={`h-6 px-2 text-[10px] gap-1 shrink-0 rounded-full ${
-                                msg.isSelf ? 'bg-white/20 hover:bg-white/30 text-white border-none' : ''
+                              className={`h-6 px-2.5 text-[10px] gap-1 shrink-0 rounded-full font-medium ${
+                                msg.isSelf
+                                  ? 'bg-white/20 hover:bg-white/30 text-white border-none'
+                                  : 'bg-primary text-on-primary hover:bg-primary/90'
                               }`}
                               title="In eigene Notizen übernehmen"
                             >
@@ -2195,7 +2241,7 @@ export function Messenger() {
                               <span>Übernehmen</span>
                             </Button>
                           </div>
-                          <p className="whitespace-pre-wrap text-[11px] opacity-85 line-clamp-4 leading-relaxed">
+                          <p className="whitespace-pre-wrap text-[11px] text-white/90 line-clamp-4 leading-relaxed font-sans">
                             {msg.noteAttachment.content}
                           </p>
                         </div>
@@ -2204,28 +2250,32 @@ export function Messenger() {
                       {/* Calendar Attachment Card */}
                       {msg.calendarAttachment && (
                         <div
-                          className={`p-3 rounded-xl border text-xs shadow-xs space-y-2 ${
+                          className={`p-3 rounded-xl border text-xs shadow-sm space-y-2.5 ${
                             msg.isSelf
-                              ? 'bg-black/25 border-white/15 text-white'
-                              : 'bg-surface-container-lowest/95 border-outline-variant/30 text-on-surface'
+                              ? 'bg-slate-950/80 border-white/20 text-white'
+                              : 'bg-surface-container-lowest border-outline-variant/50 text-on-surface'
                           }`}
                         >
                           <div
-                            className={`flex items-center justify-between gap-2 border-b pb-1.5 ${
-                              msg.isSelf ? 'border-white/10' : 'border-outline-variant/20'
+                            className={`flex items-center justify-between gap-2 border-b pb-2 ${
+                              msg.isSelf ? 'border-white/15' : 'border-outline-variant/30'
                             }`}
                           >
-                            <div className="flex items-center gap-1.5 font-bold text-[11px] truncate">
-                              <CalendarIcon className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                              <span className="truncate">{msg.calendarAttachment.title || 'Termin'}</span>
+                            <div className="flex items-center gap-1.5 font-bold text-xs truncate">
+                              <div className="w-5 h-5 rounded-md bg-cyan-500/20 flex items-center justify-center shrink-0">
+                                <CalendarIcon className="w-3.5 h-3.5 text-cyan-300" />
+                              </div>
+                              <span className="truncate text-white font-medium">{msg.calendarAttachment.title || 'Termin'}</span>
                             </div>
                             <Button
                               type="button"
                               variant={msg.isSelf ? 'secondary' : 'primary'}
                               size="sm"
                               onClick={() => void handleImportCalendar(msg.calendarAttachment!)}
-                              className={`h-6 px-2 text-[10px] gap-1 shrink-0 rounded-full ${
-                                msg.isSelf ? 'bg-white/20 hover:bg-white/30 text-white border-none' : ''
+                              className={`h-6 px-2.5 text-[10px] gap-1 shrink-0 rounded-full font-medium ${
+                                msg.isSelf
+                                  ? 'bg-white/20 hover:bg-white/30 text-white border-none'
+                                  : 'bg-primary text-on-primary hover:bg-primary/90'
                               }`}
                               title="In eigenen Kalender eintragen"
                             >
@@ -2233,8 +2283,8 @@ export function Messenger() {
                               <span>Eintragen</span>
                             </Button>
                           </div>
-                          <div className="text-[10px] opacity-80 flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
+                          <div className="text-[11px] text-white/90 flex items-center gap-1.5 font-medium">
+                            <Clock className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
                             <span>
                               {new Date(msg.calendarAttachment.start).toLocaleString([], {
                                 dateStyle: 'short',
@@ -2243,13 +2293,13 @@ export function Messenger() {
                             </span>
                           </div>
                           {msg.calendarAttachment.location && (
-                            <div className="text-[10px] opacity-80 flex items-center gap-1">
-                              <MapPin className="w-3 h-3" />
+                            <div className="text-[11px] text-white/80 flex items-center gap-1.5">
+                              <MapPin className="w-3.5 h-3.5 text-rose-400 shrink-0" />
                               <span>{msg.calendarAttachment.location}</span>
                             </div>
                           )}
                           {msg.calendarAttachment.description && (
-                            <p className="whitespace-pre-wrap text-[11px] opacity-85 line-clamp-3 leading-relaxed">
+                            <p className="whitespace-pre-wrap text-[11px] text-white/90 line-clamp-3 leading-relaxed font-sans pt-0.5">
                               {msg.calendarAttachment.description}
                             </p>
                           )}
@@ -2334,44 +2384,18 @@ export function Messenger() {
               {/* Footer Input Area */}
               <div className="p-2.5 border-t border-outline-variant/20 bg-surface-container-low">
                 {isRecording ? (
-                  /* WhatsApp-style Voice Recording Banner */
-                  <div className="flex items-center justify-between gap-3 px-3 py-1.5 bg-error/10 border border-error/30 rounded-xl">
-                    <div className="flex items-center gap-2">
-                      <span className="relative flex h-3 w-3">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-error opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-3 w-3 bg-error"></span>
-                      </span>
-                      <span className="text-xs font-semibold text-error">
-                        {formatDuration(recordingDuration)}
-                      </span>
-                      <span className="text-xs text-on-surface-variant ml-2 hidden sm:inline">
-                        Sprachaufnahme läuft …
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => stopRecording(false)}
-                        className="h-7 px-2 text-xs text-error hover:bg-error/20 gap-1"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>Abbrechen</span>
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="primary"
-                        size="sm"
-                        onClick={() => stopRecording(true)}
-                        className="h-7 px-3 text-xs gap-1"
-                      >
-                        <Send className="w-3.5 h-3.5" />
-                        <span>Senden</span>
-                      </Button>
-                    </div>
-                  </div>
+                  <VoiceRecordingBar
+                    durationSeconds={recordingDuration}
+                    statusLabel="Sprachaufnahme läuft …"
+                    stream={mediaStreamRef.current}
+                    variant="danger"
+                    onCancel={() => stopRecording(false)}
+                    onConfirm={() => stopRecording(true)}
+                    cancelLabel="Abbrechen"
+                    confirmLabel="Senden"
+                    cancelIcon={<Trash2 className="w-3.5 h-3.5" />}
+                    confirmIcon={<Send className="w-3.5 h-3.5" />}
+                  />
                 ) : (
                   <>
                     {/* WhatsApp-Style Sticker & Emoji Picker Popover */}
@@ -2477,7 +2501,6 @@ export function Messenger() {
                           stagedFile || undefined
                         )
                       }}
-                      className="flex items-center gap-1.5 sm:gap-2"
                     >
                       {/* Hidden Image Input */}
                       <input
@@ -2501,142 +2524,155 @@ export function Messenger() {
                         }}
                       />
 
-                      <Button
-                        type="button"
-                        variant={isStickerPickerOpen ? 'secondary' : 'ghost'}
-                        size="icon"
-                        onClick={() => setIsStickerPickerOpen((prev) => !prev)}
-                        className="h-8 w-8 p-0 text-on-surface-variant hover:text-amber-400"
-                        title="Sticker & Emojis"
-                        aria-label="Sticker auswählen"
-                      >
-                        <Smile className="w-4 h-4" />
-                      </Button>
-
-                      {/* Unified Attachment Button with sleek Popover */}
-                      <div className="relative shrink-0" ref={attachMenuRef}>
-                        <Button
-                          type="button"
-                          variant={isAttachMenuOpen ? 'secondary' : 'ghost'}
-                          size="icon"
-                          onClick={() => setIsAttachMenuOpen((prev) => !prev)}
-                          className="h-8 w-8 p-0 text-on-surface-variant hover:text-primary transition-all"
-                          title="Anhang hinzufügen"
-                          aria-label="Anhang hinzufügen"
-                        >
-                          <Plus className={`w-4 h-4 transition-transform duration-200 ${isAttachMenuOpen ? 'rotate-45 text-primary' : ''}`} />
-                        </Button>
-
-                        {/* Attachment Popover Menu */}
-                        {isAttachMenuOpen && (
-                          <div className="absolute bottom-10 left-0 z-30 min-w-[210px] p-1.5 rounded-2xl bg-surface-container-high/95 backdrop-blur-md border border-outline-variant/30 shadow-xl space-y-1 animate-in fade-in slide-in-from-bottom-2 duration-150">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setIsAttachMenuOpen(false)
-                                setIsCameraModalOpen(true)
-                              }}
-                              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
-                              aria-label="Foto anhängen"
-                            >
-                              <div className="w-7 h-7 rounded-lg bg-pink-500/15 text-pink-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                                <Camera className="w-4 h-4" />
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="text-xs font-semibold text-primary">Foto aufnehmen</div>
-                                <div className="text-[10px] text-on-surface-variant/70">Kamera Snapshot</div>
-                              </div>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setIsAttachMenuOpen(false)
-                                docInputRef.current?.click()
-                              }}
-                              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
-                              aria-label="Datei anhängen"
-                            >
-                              <div className="w-7 h-7 rounded-lg bg-indigo-500/15 text-indigo-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                                <Paperclip className="w-4 h-4" />
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="text-xs font-semibold text-primary">Dokument & Datei</div>
-                                <div className="text-[10px] text-on-surface-variant/70">Verschlüsselt senden</div>
-                              </div>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setIsAttachMenuOpen(false)
-                                handleOpenNotePicker()
-                              }}
-                              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
-                              aria-label="Notiz teilen"
-                            >
-                              <div className="w-7 h-7 rounded-lg bg-amber-500/15 text-amber-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                                <StickyNote className="w-4 h-4" />
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="text-xs font-semibold text-primary">Notiz anhängen</div>
-                                <div className="text-[10px] text-on-surface-variant/70">Aus Notizen wählen</div>
-                              </div>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setIsAttachMenuOpen(false)
-                                handleOpenCalendarPicker()
-                              }}
-                              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
-                              aria-label="Kalendereintrag teilen"
-                            >
-                              <div className="w-7 h-7 rounded-lg bg-cyan-500/15 text-cyan-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                                <CalendarIcon className="w-4 h-4" />
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="text-xs font-semibold text-primary">Termin anhängen</div>
-                                <div className="text-[10px] text-on-surface-variant/70">Aus Kalender wählen</div>
-                              </div>
-                            </button>
-                          </div>
-                        )}
-                      </div>
-
-                      <Input
+                      <ChatInputBar
                         value={inputText}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInputText(e.target.value)}
-                        placeholder="Nachricht schreiben …"
-                        className="flex-1 text-xs h-8 bg-surface-container-high/60 border-outline-variant/30 text-on-surface focus:border-primary/50"
+                        onChange={setInputText}
+                        onSubmit={() => {
+                          handleSendMessage(
+                            inputText,
+                            undefined,
+                            undefined,
+                            selectedImage || undefined,
+                            undefined,
+                            stagedFile || undefined
+                          )
+                        }}
                         disabled={sending}
-                      />
+                        placeholder="Nachricht schreiben …"
+                        leftActions={
+                          <>
+                            <Button
+                              type="button"
+                              variant={isStickerPickerOpen ? 'secondary' : 'ghost'}
+                              size="icon"
+                              onClick={() => setIsStickerPickerOpen((prev) => !prev)}
+                              className="h-8 w-8 rounded-full p-0 text-on-surface-variant hover:text-amber-400"
+                              title="Sticker & Emojis"
+                              aria-label="Sticker auswählen"
+                            >
+                              <Smile className="w-4 h-4" />
+                            </Button>
 
-                      {/* WhatsApp-style dynamic Mic / Send button */}
-                      {inputText.trim() || selectedImage || stagedFile ? (
-                        <Button
-                          type="submit"
-                          disabled={sending}
-                          size="sm"
-                          className="gap-1.5 px-3 h-8 text-xs"
-                        >
-                          <Send className="w-3.5 h-3.5" />
-                          <span>Senden</span>
-                        </Button>
-                      ) : (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          onClick={startRecording}
-                          className="h-8 w-8 p-0 text-on-surface-variant hover:text-primary hover:bg-primary/10 rounded-full"
-                          title="Sprachnachricht aufnehmen"
-                          aria-label="Sprachnachricht aufnehmen"
-                        >
-                          <Mic className="w-4 h-4" />
-                        </Button>
-                      )}
+                            {/* Unified Attachment Button with sleek Popover */}
+                            <div className="relative shrink-0" ref={attachMenuRef}>
+                              <Button
+                                type="button"
+                                variant={isAttachMenuOpen ? 'secondary' : 'ghost'}
+                                size="icon"
+                                onClick={() => setIsAttachMenuOpen((prev) => !prev)}
+                                className="h-8 w-8 rounded-full p-0 text-on-surface-variant hover:text-primary transition-all"
+                                title="Anhang hinzufügen"
+                                aria-label="Anhang hinzufügen"
+                              >
+                                <Plus className={`w-4 h-4 transition-transform duration-200 ${isAttachMenuOpen ? 'rotate-45 text-primary' : ''}`} />
+                              </Button>
+
+                              {/* Attachment Popover Menu */}
+                              {isAttachMenuOpen && (
+                                <div className="absolute bottom-10 left-0 z-30 min-w-[210px] p-1.5 rounded-2xl bg-surface-container-high/95 backdrop-blur-md border border-outline-variant/30 shadow-xl space-y-1 animate-in fade-in slide-in-from-bottom-2 duration-150">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setIsAttachMenuOpen(false)
+                                      setIsCameraModalOpen(true)
+                                    }}
+                                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
+                                    aria-label="Foto anhängen"
+                                  >
+                                    <div className="w-7 h-7 rounded-lg bg-pink-500/15 text-pink-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                                      <Camera className="w-4 h-4" />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="text-xs font-semibold text-primary">Foto aufnehmen</div>
+                                      <div className="text-[10px] text-on-surface-variant/70">Kamera Snapshot</div>
+                                    </div>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setIsAttachMenuOpen(false)
+                                      docInputRef.current?.click()
+                                    }}
+                                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
+                                    aria-label="Datei anhängen"
+                                  >
+                                    <div className="w-7 h-7 rounded-lg bg-indigo-500/15 text-indigo-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                                      <Paperclip className="w-4 h-4" />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="text-xs font-semibold text-primary">Dokument & Datei</div>
+                                      <div className="text-[10px] text-on-surface-variant/70">Verschlüsselt senden</div>
+                                    </div>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setIsAttachMenuOpen(false)
+                                      handleOpenNotePicker()
+                                    }}
+                                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
+                                    aria-label="Notiz teilen"
+                                  >
+                                    <div className="w-7 h-7 rounded-lg bg-amber-500/15 text-amber-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                                      <StickyNote className="w-4 h-4" />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="text-xs font-semibold text-primary">Notiz anhängen</div>
+                                      <div className="text-[10px] text-on-surface-variant/70">Aus Notizen wählen</div>
+                                    </div>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setIsAttachMenuOpen(false)
+                                      handleOpenCalendarPicker()
+                                    }}
+                                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
+                                    aria-label="Kalendereintrag teilen"
+                                  >
+                                    <div className="w-7 h-7 rounded-lg bg-cyan-500/15 text-cyan-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                                      <CalendarIcon className="w-4 h-4" />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="text-xs font-semibold text-primary">Termin anhängen</div>
+                                      <div className="text-[10px] text-on-surface-variant/70">Aus Kalender wählen</div>
+                                    </div>
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </>
+                        }
+                        rightActions={
+                          inputText.trim() || selectedImage || stagedFile ? (
+                            <Button
+                              type="submit"
+                              disabled={sending}
+                              size="sm"
+                              className="h-8 w-8 rounded-full p-0 flex items-center justify-center"
+                              title="Senden"
+                              aria-label="Senden"
+                            >
+                              <Send className="w-3.5 h-3.5" />
+                            </Button>
+                          ) : (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={startRecording}
+                              className="h-8 w-8 p-0 text-on-surface-variant hover:text-primary hover:bg-primary/10 rounded-full"
+                              title="Sprachnachricht aufnehmen"
+                              aria-label="Sprachnachricht aufnehmen"
+                            >
+                              <Mic className="w-4 h-4" />
+                            </Button>
+                          )
+                        }
+                      />
                     </form>
                   </>
                 )}
@@ -2936,9 +2972,15 @@ export function Messenger() {
       {/* Create Story Modal */}
       <CreateStoryModal
         open={isCreateStoryOpen}
-        onOpenChange={setIsCreateStoryOpen}
+        onOpenChange={(open) => {
+          setIsCreateStoryOpen(open)
+          if (!open) {
+            setPendingStoryPhotoUrl(null)
+          }
+        }}
         onCreated={handleStoryCreated}
         initialMode={createStoryInitialMode}
+        initialPhotoUrl={pendingStoryPhotoUrl}
       />
 
       {/* Story Viewer Modal */}
@@ -2966,6 +3008,14 @@ export function Messenger() {
         open={isCameraModalOpen}
         onOpenChange={setIsCameraModalOpen}
         onCapture={(dataUrl) => {
+          // If the user took a photo while on the "Aktuelles" (updates) tab, directly open the Story Creator with the photo!
+          if (mobileNavTab === 'updates') {
+            setPendingStoryPhotoUrl(dataUrl)
+            setCreateStoryInitialMode('photo')
+            setIsCreateStoryOpen(true)
+            return
+          }
+
           const img: ImageAttachment = { dataUrl, name: 'kamera-aufnahme.jpg' }
           if (activeContact || activeGroup) {
             setSelectedImage(img)

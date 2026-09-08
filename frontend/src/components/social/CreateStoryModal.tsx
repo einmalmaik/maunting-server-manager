@@ -33,6 +33,7 @@ interface CreateStoryModalProps {
   onOpenChange: (open: boolean) => void
   onCreated: (story: ChatStoryItem) => void
   initialMode?: 'text' | 'photo'
+  initialPhotoUrl?: string | null
 }
 
 export function CreateStoryModal({
@@ -40,18 +41,25 @@ export function CreateStoryModal({
   onOpenChange,
   onCreated,
   initialMode = 'text',
+  initialPhotoUrl = null,
 }: CreateStoryModalProps) {
   const [content, setContent] = useState('')
   const [selectedGradient, setSelectedGradient] = useState<string>('gradient-1')
-  const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null)
+  const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(initialPhotoUrl)
   const [isCameraOpen, setIsCameraOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
   React.useEffect(() => {
-    if (open && initialMode === 'photo' && !photoDataUrl) {
+    if (initialPhotoUrl) {
+      setPhotoDataUrl(initialPhotoUrl)
+    }
+  }, [initialPhotoUrl])
+
+  React.useEffect(() => {
+    if (open && initialMode === 'photo' && !photoDataUrl && !initialPhotoUrl) {
       setIsCameraOpen(true)
     }
-  }, [open, initialMode, photoDataUrl])
+  }, [open, initialMode, photoDataUrl, initialPhotoUrl])
 
   const fileInputRef = React.useRef<HTMLInputElement>(null)
 
@@ -97,67 +105,102 @@ export function CreateStoryModal({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-md p-4 bg-surface border-outline-variant/30 flex flex-col">
+        <DialogContent showCloseButton={false} className="max-w-md p-4 bg-surface border-outline-variant/30 flex flex-col">
           <div className="flex items-center justify-between pb-2 border-b border-outline-variant/20 mb-3">
             <div className="flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-primary" />
-              <span className="font-headline text-body-sm font-bold text-primary">Story / Status erstellen</span>
+              <span className="font-headline text-body-sm font-bold text-primary">Status erstellen</span>
             </div>
             <button
               type="button"
               onClick={() => onOpenChange(false)}
-              className="p-1 rounded-md text-on-surface-variant hover:text-on-surface"
+              className="p-1 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors"
               aria-label="Schließen"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-3.5">
-            {/* Live Story Preview Card */}
-            <div
-              className={`relative aspect-4/5 w-full rounded-2xl p-5 flex flex-col justify-between shadow-xl overflow-hidden transition-all ${
-                photoDataUrl ? 'bg-black text-white' : STORY_GRADIENTS[selectedGradient]?.class || 'bg-slate-900 text-white'
-              }`}
-            >
-              {photoDataUrl && (
-                <img
-                  src={photoDataUrl}
-                  alt="Story Preview"
-                  className="absolute inset-0 w-full h-full object-cover opacity-90"
-                />
-              )}
-
-              {/* Top watermark / expiry tag */}
-              <div className="relative z-10 flex items-center justify-between text-[11px] font-semibold opacity-90">
-                <span className="flex items-center gap-1 bg-black/40 px-2 py-0.5 rounded-full backdrop-blur-xs">
-                  <Clock className="w-3 h-3" />
-                  <span>24 Stunden sichtbar</span>
-                </span>
+          <form onSubmit={handleSubmit} className="space-y-3">
+            {/* Live Story Preview Card in 9:16 Mobile Smartphone Format */}
+            <div className="flex justify-center w-full">
+              <div
+                className={`relative aspect-9/16 w-full max-w-[260px] sm:max-w-[280px] max-h-[52dvh] rounded-2xl p-4 flex flex-col justify-between shadow-2xl overflow-hidden transition-all border border-outline-variant/30 ${
+                  photoDataUrl ? 'bg-black text-white' : STORY_GRADIENTS[selectedGradient]?.class || 'bg-slate-900 text-white'
+                }`}
+              >
                 {photoDataUrl && (
-                  <button
-                    type="button"
-                    onClick={() => setPhotoDataUrl(null)}
-                    className="p-1 rounded-full bg-black/60 text-white hover:bg-black/80"
-                    title="Foto entfernen"
-                    aria-label="Foto entfernen"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
+                  <img
+                    src={photoDataUrl}
+                    alt="Story Preview"
+                    className="absolute inset-0 w-full h-full object-cover"
+                  />
                 )}
-              </div>
 
-              {/* Story Text */}
-              <div className="relative z-10 flex-1 flex items-center justify-center text-center p-3">
-                <p className="font-headline text-lg sm:text-xl font-bold break-words drop-shadow-md max-h-48 overflow-y-auto no-scrollbar">
-                  {content || (photoDataUrl ? '' : 'Schreibe deinen Gedanken …')}
-                </p>
-              </div>
+                {/* Top watermark / expiry tag */}
+                <div className="relative z-10 flex items-center justify-between text-[11px] font-semibold opacity-95">
+                  <span className="flex items-center gap-1 bg-black/50 px-2 py-0.5 rounded-full backdrop-blur-md shadow-xs">
+                    <Clock className="w-3 h-3 text-primary-fixed" />
+                    <span>24h Status</span>
+                  </span>
+                  {photoDataUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setPhotoDataUrl(null)}
+                      className="p-1 rounded-full bg-black/60 text-white hover:bg-black/90 transition-colors shadow-xs"
+                      title="Foto entfernen"
+                      aria-label="Foto entfernen"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
 
-              {/* Bottom tag */}
-              <div className="relative z-10 text-[10px] opacity-75 text-center">
-                Verschlüsselt für deine Freunde freigegeben
+                {/* Story Text */}
+                <div className="relative z-10 flex-1 flex items-center justify-center text-center px-2 py-4">
+                  <p className="font-headline text-base sm:text-lg font-bold break-words drop-shadow-md max-h-40 overflow-y-auto no-scrollbar">
+                    {content || (photoDataUrl ? '' : 'Tippe unten, um Text hinzuzufügen')}
+                  </p>
+                </div>
+
+                {/* Bottom tag */}
+                <div className="relative z-10 text-[10px] opacity-75 text-center truncate">
+                  Ende-zu-Ende verschlüsselt
+                </div>
               </div>
+            </div>
+
+            {/* Quick Action Selector: Kamera & Bild hochladen */}
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setIsCameraOpen(true)}
+                className="h-9 text-xs gap-2 font-medium justify-center bg-surface-container hover:bg-surface-container-high border border-outline-variant/30"
+              >
+                <Camera className="w-4 h-4 text-primary" />
+                <span>Kamera</span>
+              </Button>
+
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => fileInputRef.current?.click()}
+                className="h-9 text-xs gap-2 font-medium justify-center bg-surface-container hover:bg-surface-container-high border border-outline-variant/30"
+              >
+                <Upload className="w-4 h-4 text-primary" />
+                <span>Bild wählen</span>
+              </Button>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleFileChange}
+              />
             </div>
 
             {/* Content Input */}
@@ -171,20 +214,20 @@ export function CreateStoryModal({
               />
             </div>
 
-            {/* Gradient Selector (if no photo) */}
+            {/* Color / Gradient Selector (if no photo) */}
             {!photoDataUrl && (
-              <div className="flex items-center gap-2.5 p-2 rounded-xl bg-surface-container-high/40 border border-outline-variant/20">
+              <div className="flex items-center gap-2.5 py-1 px-1">
                 <span className="text-[11px] font-semibold text-on-surface-variant/90 shrink-0">Farbe:</span>
-                <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5">
+                <div className="flex items-center gap-2.5 overflow-x-auto no-scrollbar py-1">
                   {Object.entries(STORY_GRADIENTS).map(([k, grad]) => (
                     <button
                       key={k}
                       type="button"
                       onClick={() => setSelectedGradient(k)}
-                      className={`w-7 h-7 rounded-full shrink-0 ${grad.class} transition-all duration-200 border-2 ${
+                      className={`w-7 h-7 rounded-full shrink-0 ${grad.class} transition-all duration-200 shadow-xs cursor-pointer ${
                         selectedGradient === k
-                          ? 'border-white scale-110 shadow-[0_0_10px_rgba(255,255,255,0.4)] ring-2 ring-primary ring-offset-1'
-                          : 'border-transparent opacity-75 hover:opacity-100 hover:scale-105'
+                          ? 'ring-2 ring-primary ring-offset-2 ring-offset-surface scale-110'
+                          : 'opacity-80 hover:opacity-100 hover:scale-105'
                       }`}
                       title={grad.label}
                       aria-label={`Farbverlauf ${grad.label}`}
@@ -194,49 +237,17 @@ export function CreateStoryModal({
               </div>
             )}
 
-            {/* Media Add Buttons */}
-            <div className="flex items-center justify-between pt-1">
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setIsCameraOpen(true)}
-                  className="h-8 text-xs gap-1.5 text-on-surface-variant hover:text-primary"
-                >
-                  <Camera className="w-3.5 h-3.5" />
-                  <span>Kamera</span>
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="h-8 text-xs gap-1.5 text-on-surface-variant hover:text-primary"
-                >
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>Bild hochladen</span>
-                </Button>
-
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={handleFileChange}
-                />
-              </div>
-
+            {/* Submit Button */}
+            <div className="flex items-center justify-end pt-1">
               <Button
                 type="submit"
                 variant="primary"
                 size="sm"
                 disabled={(!content.trim() && !photoDataUrl) || submitting}
-                className="h-8 px-4 text-xs gap-1.5 font-semibold"
+                className="w-full sm:w-auto h-9 px-5 text-xs gap-1.5 font-semibold"
               >
                 <Send className="w-3.5 h-3.5" />
-                <span>{submitting ? 'Teile…' : 'Teilen'}</span>
+                <span>{submitting ? 'Teile Status…' : 'Status teilen'}</span>
               </Button>
             </div>
           </form>

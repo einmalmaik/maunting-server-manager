@@ -9,12 +9,38 @@
  * Gefahrenzone. `?tab=wakeword` wählt einen Reiter vor — der Weg des
  * Neukalibrierungs-Hinweises nach einer Umbenennung.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { emit } from '@tauri-apps/api/event'
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
 import { open as ordnerDialog } from '@tauri-apps/plugin-dialog'
-import { AlertTriangle, Camera, ExternalLink, FileSignature, Fingerprint, Mic, MonitorCog, ShieldCheck, Trash2, User, Volume2 } from 'lucide-react'
+import {
+  AlertTriangle,
+  Camera,
+  Check,
+  CheckCircle2,
+  Clock,
+  ExternalLink,
+  FileSignature,
+  Fingerprint,
+  Globe,
+  Lock,
+  MapPin,
+  Mic,
+  MonitorCog,
+  Radio,
+  Save,
+  ShieldAlert,
+  ShieldCheck,
+  Sliders,
+  Trash2,
+  Trophy,
+  User,
+  UserMinus,
+  UserPlus,
+  Users,
+  Volume2,
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 
@@ -27,11 +53,28 @@ import {
   type AudioVerarbeitung,
 } from '@/components/ai/voice/audioGeraete'
 import { api } from '@/api/client'
+import {
+  getAchievements,
+  getFriends,
+  getFriendRequests,
+  getStats,
+  sendFriendRequest,
+  acceptFriendRequest,
+  declineFriendRequest,
+  removeFriend,
+  updatePrivacy,
+  type AchievementsOverview,
+  type FriendItem,
+  type UserStatsResponse,
+} from '@/api/social'
+import { renderAchievementIcon } from '@/components/social/achievementIcons'
+import { StatusDot } from '@/components/social/StatusIndicator'
 import { usePublicLegalSettings } from '@/hooks/usePublicLegalSettings'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
-import { Avatar, Badge, Button, Dropdown, type DropdownOption, ProgressBar, Slider, Switch } from '@/Singra/UI'
+import { Avatar, Badge, Button, Dropdown, type DropdownOption, Input, ProgressBar, Slider, Switch } from '@/Singra/UI'
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
+import { getAvailableTimezones } from '@/utils/timeFormat'
 import { Gefahrenzone } from './Gefahrenzone'
 import { OVERLAY_ZUSTAND_TEST } from './sprachKoordination'
 import { WakewordEinrichtung } from './WakewordEinrichtung'
@@ -62,12 +105,13 @@ const STATUS_REIHE: AgentStatus[] = ['bereit', 'hoert', 'denkt', 'spricht']
  */
 const VERARBEITUNG_SPEICHERN_MS = 400
 
-type EinstellungsTab = 'profil' | 'desktop' | 'wakeword' | 'audio' | 'rechtliches' | 'gefahr'
+type EinstellungsTab = 'konto' | 'social' | 'desktop' | 'wakeword' | 'audio' | 'rechtliches' | 'gefahr'
 
 const isAndroidClient = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
 
 const TABS: TabDef<EinstellungsTab>[] = [
-  { id: 'profil', labelKey: 'profile.title', icon: User },
+  { id: 'konto', labelKey: 'profile.tabs.account', icon: User },
+  { id: 'social', labelKey: 'profile.tabs.social', icon: Users },
   {
     id: 'desktop',
     labelKey: isAndroidClient ? 'mss.einstellungen.tab.app' : 'mss.einstellungen.tab.desktop',
@@ -81,6 +125,7 @@ const TABS: TabDef<EinstellungsTab>[] = [
 
 function tabAusSuche(suche: string): EinstellungsTab {
   const wunsch = new URLSearchParams(suche).get('tab')
+  if (wunsch === 'profil' || wunsch === 'account') return 'konto'
   return TABS.some((tab) => tab.id === wunsch) ? (wunsch as EinstellungsTab) : 'desktop'
 }
 
@@ -101,7 +146,8 @@ export function Einstellungen({ onKonfigAenderung }: { onKonfigAenderung?: () =>
         onChange={setTab}
         ariaLabel={t('mss.app.einstellungen')}
       />
-      {tab === 'profil' && <ProfilEinstellungen />}
+      {tab === 'konto' && <KontoEinstellungen />}
+      {tab === 'social' && <SocialEinstellungen />}
       {tab === 'desktop' && <DesktopIntegration onKonfigAenderung={onKonfigAenderung} />}
       {tab === 'wakeword' && <WakewordEinrichtung />}
       {tab === 'audio' && <AudioEinstellungen />}
@@ -111,13 +157,28 @@ export function Einstellungen({ onKonfigAenderung }: { onKonfigAenderung?: () =>
   )
 }
 
-function ProfilEinstellungen() {
+function KontoEinstellungen() {
   const { t } = useTranslation()
   const user = useAuthStore((s) => s.user)
   const updateUser = useAuthStore((s) => s.updateUser)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
 
+  // Zeitzone State
+  const browserZone = typeof Intl !== 'undefined' && typeof Intl.DateTimeFormat === 'function'
+    ? Intl.DateTimeFormat().resolvedOptions().timeZone
+    : null
+  const [selectedZone, setSelectedZone] = useState<string>(
+    user?.time_zone || browserZone || 'UTC',
+  )
+  const [savingZone, setSavingZone] = useState(false)
+  const [dismissedBrowserHint, setDismissedBrowserHint] = useState(false)
+
+  // Standort für KI State
+  const [savingLocationSharing, setSavingLocationSharing] = useState(false)
+  const [locationSharingError, setLocationSharingError] = useState<string | null>(null)
+
+  // Tresor & Biometrie
   const {
     isInitialized,
     isUnlocked,
@@ -135,6 +196,85 @@ function ProfilEinstellungen() {
   useEffect(() => {
     void checkBiometricsSupport()
   }, [checkBiometricsSupport])
+
+  useEffect(() => {
+    if (user?.time_zone) {
+      setSelectedZone(user.time_zone)
+    } else if (browserZone) {
+      setSelectedZone(browserZone)
+    }
+  }, [user?.time_zone, browserZone])
+
+  const timezoneOptions: DropdownOption[] = useMemo(() => {
+    const zones = getAvailableTimezones()
+    const allZones = [...new Set([...(user?.time_zone ? [user.time_zone] : []), ...zones])].sort()
+    return allZones.map((z) => ({ value: z, label: z }))
+  }, [user?.time_zone])
+
+  const showBrowserHint = !dismissedBrowserHint
+    && browserZone
+    && user?.time_zone
+    && user.time_zone !== browserZone
+
+  const handleSaveTimezone = async (zoneToSave?: string) => {
+    const zone = zoneToSave || selectedZone
+    setSavingZone(true)
+    try {
+      const res = await api<{ time_zone: string | null }>('/auth/me/timezone', {
+        method: 'PATCH',
+        body: JSON.stringify({ time_zone: zone }),
+      })
+      updateUser({ time_zone: res.time_zone })
+      setSelectedZone(res.time_zone || 'UTC')
+      setDismissedBrowserHint(true)
+      toast.success(t('profile.timezoneSaved', 'Zeitzone gespeichert.'))
+    } catch {
+      toast.error(t('profile.timezoneSaveFailed', 'Zeitzone konnte nicht gespeichert werden.'))
+    } finally {
+      setSavingZone(false)
+    }
+  }
+
+  const requestBrowserLocationPermission = () => new Promise<void>((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error('UNSUPPORTED'))
+      return
+    }
+    navigator.geolocation.getCurrentPosition(
+      () => resolve(),
+      (error) => reject(error),
+      { enableHighAccuracy: false, maximumAge: 0, timeout: 10_000 },
+    )
+  })
+
+  const handleLocationSharingChange = async (enabled: boolean) => {
+    setLocationSharingError(null)
+    setSavingLocationSharing(true)
+    try {
+      if (enabled) {
+        await requestBrowserLocationPermission()
+      }
+      const res = await api<{ location_sharing_enabled: boolean }>('/auth/me/location-sharing', {
+        method: 'PATCH',
+        body: JSON.stringify({ enabled }),
+      })
+      updateUser({ location_sharing_enabled: res.location_sharing_enabled })
+    } catch (error) {
+      const geolocationErrorCode = (error as { code?: unknown } | null)?.code
+      if (
+        (typeof geolocationErrorCode === 'number' && geolocationErrorCode >= 1 && geolocationErrorCode <= 3) ||
+        (error as Error)?.message === 'UNSUPPORTED'
+      ) {
+        setLocationSharingError(
+          t('profile.locationSharingPermissionError', 'Der Standortzugriff wurde nicht freigegeben. Du kannst ihn in den Systemeinstellungen erlauben.'),
+        )
+      } else {
+        setLocationSharingError(t('profile.locationSharingSaveError', 'Die Standortfreigabe konnte nicht gespeichert werden.'))
+      }
+    } finally {
+      setSavingLocationSharing(false)
+    }
+  }
 
   const [biometricsModalOpen, setBiometricsModalOpen] = useState(false)
   const [masterPasswordInput, setMasterPasswordInput] = useState('')
@@ -226,14 +366,14 @@ function ProfilEinstellungen() {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* 1. Profil & Avatar */}
+      {/* 1. Konto & Profilbild */}
       <div className="msm-card p-5 space-y-4">
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
             <User className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="text-sm font-semibold text-on-surface">Benutzerprofil</h2>
+            <h2 className="text-sm font-semibold text-on-surface">{t('profile.tabs.account', 'Konto & Profilbild')}</h2>
           </div>
         </div>
 
@@ -268,7 +408,7 @@ function ProfilEinstellungen() {
                 onClick={() => fileInputRef.current?.click()}
               >
                 <Camera className="h-3.5 w-3.5 mr-1.5" />
-                {user?.avatar_url ? 'Bild ändern' : 'Bild hochladen'}
+                {user?.avatar_url ? t('profile.changeAvatar', 'Bild ändern') : t('profile.uploadAvatar', 'Bild hochladen')}
               </Button>
 
               {user?.avatar_url && (
@@ -280,7 +420,7 @@ function ProfilEinstellungen() {
                   className="text-status-error hover:bg-status-error/10"
                 >
                   <Trash2 className="h-3.5 w-3.5 mr-1.5" />
-                  Entfernen
+                  {t('profile.removeAvatar', 'Entfernen')}
                 </Button>
               )}
             </div>
@@ -288,7 +428,112 @@ function ProfilEinstellungen() {
         </div>
       </div>
 
-      {/* 2. Passwort-Manager & Automatische Sperre (Auto-Lock) */}
+      {/* 2. Zeitzone */}
+      <div className="msm-card p-5 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <Clock className="h-5 w-5" />
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold text-on-surface">{t('profile.timezoneTitle', 'Zeitzone')}</h2>
+          </div>
+        </div>
+
+        {showBrowserHint && browserZone && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/10 p-3 text-xs text-on-surface">
+            <div className="flex items-center gap-2">
+              <Globe className="h-4 w-4 text-primary shrink-0" aria-hidden="true" />
+              <span>
+                {t('profile.timezoneBrowserHint', 'System nutzt {{zone}}, im Konto ist {{current}} gespeichert.', {
+                  zone: browserZone,
+                  current: user?.time_zone,
+                })}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                disabled={savingZone}
+                onClick={() => void handleSaveTimezone(browserZone)}
+              >
+                {t('profile.timezoneAdopt', 'Übernehmen')}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setDismissedBrowserHint(true)}
+              >
+                {t('profile.timezoneDismiss', 'Ausblenden')}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <div className="space-y-3 pt-2 border-t border-outline-variant/30 max-w-md">
+          <Dropdown
+            id="desktop-timezone"
+            value={selectedZone}
+            onChange={setSelectedZone}
+            options={timezoneOptions}
+            searchable={true}
+            searchPlaceholder={t('profile.timezoneSearch', 'Zeitzone suchen …')}
+            placeholder={t('profile.timezonePlaceholder', 'Zeitzone auswählen')}
+            aria-label={t('profile.timezoneLabel', 'Zeitzone')}
+          />
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            disabled={savingZone || (selectedZone === user?.time_zone && Boolean(user?.time_zone))}
+            onClick={() => void handleSaveTimezone()}
+          >
+            <Save className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+            {savingZone ? t('common.saving', 'Speichern …') : t('profile.timezoneSave', 'Zeitzone speichern')}
+          </Button>
+        </div>
+      </div>
+
+      {/* 3. Standort für KI-Anfragen */}
+      <div className="msm-card p-5 space-y-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className={`flex h-9 w-9 items-center justify-center rounded-xl border ${
+              user?.location_sharing_enabled
+                ? 'border-primary/30 bg-primary/10 text-primary'
+                : 'border-outline-variant bg-surface-container text-on-surface-variant'
+            }`}>
+              <MapPin className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold text-on-surface">
+                {t('profile.locationSharingTitle', 'Standort für KI-Anfragen')}
+              </h2>
+              <p className="text-xs text-on-surface-variant">
+                {t('profile.locationSharingDescription', 'Wird nur bei ortsbezogenen KI-Anfragen verwendet.')}
+              </p>
+            </div>
+          </div>
+
+          <Switch
+            checked={Boolean(user?.location_sharing_enabled)}
+            disabled={savingLocationSharing}
+            onCheckedChange={(checked) => void handleLocationSharingChange(checked)}
+            aria-label={t('profile.locationSharingTitle', 'Standort für KI-Anfragen')}
+          />
+        </div>
+
+        {locationSharingError && (
+          <div className="rounded-xl border border-status-error/30 bg-status-error/10 p-3 text-xs text-status-error flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            <span>{locationSharingError}</span>
+          </div>
+        )}
+      </div>
+
+      {/* 4. Passwort-Manager & Automatische Sperre (Auto-Lock) */}
       <div className="msm-card p-5 space-y-4">
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -328,7 +573,7 @@ function ProfilEinstellungen() {
         </div>
       </div>
 
-      {/* 3. Biometrischer Schnelleinstieg */}
+      {/* 5. Biometrischer Schnelleinstieg */}
       <div className="msm-card p-5 space-y-4">
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -417,6 +662,510 @@ function ProfilEinstellungen() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function SocialEinstellungen() {
+  const { t } = useTranslation()
+  const user = useAuthStore((s) => s.user)
+  const updateUser = useAuthStore((s) => s.updateUser)
+
+  // 1. Privatsphäre & Sichtbarkeit
+  const [privacyLevel, setPrivacyLevel] = useState<'public' | 'friends' | 'private'>(
+    (user?.social_privacy as 'public' | 'friends' | 'private') || 'friends',
+  )
+  const [savingPrivacy, setSavingPrivacy] = useState(false)
+
+  const [readReceiptsEnabled, setReadReceiptsEnabled] = useState(() => {
+    try {
+      return localStorage.getItem('msm_read_receipts_enabled') !== 'false'
+    } catch {
+      return true
+    }
+  })
+
+  useEffect(() => {
+    if (user?.social_privacy) {
+      setPrivacyLevel(user.social_privacy as 'public' | 'friends' | 'private')
+    }
+  }, [user?.social_privacy])
+
+  const handleSavePrivacy = async (level: 'public' | 'friends' | 'private') => {
+    setSavingPrivacy(true)
+    try {
+      const res = await updatePrivacy({ privacy: level })
+      const valid = res.social_privacy === 'public' || res.social_privacy === 'friends' || res.social_privacy === 'private'
+        ? res.social_privacy
+        : level
+      updateUser({ social_privacy: valid })
+      setPrivacyLevel(valid)
+      toast.success(t('profile.privacySaved', 'Privatsphäre gespeichert.'))
+    } catch {
+      toast.error(t('profile.privacySaveFailed', 'Fehler beim Speichern.'))
+    } finally {
+      setSavingPrivacy(false)
+    }
+  }
+
+  const handleToggleReadReceipts = () => {
+    const nextVal = !readReceiptsEnabled
+    setReadReceiptsEnabled(nextVal)
+    try {
+      localStorage.setItem('msm_read_receipts_enabled', String(nextVal))
+      toast.success(nextVal ? 'Lesebestätigungen aktiv' : 'Lesebestätigungen aus')
+    } catch {}
+  }
+
+  const privacyOptions: DropdownOption[] = [
+    { value: 'friends', label: 'Freunde (Status sichtbar für Kontakte)' },
+    { value: 'public', label: 'Öffentlich (Für alle sichtbar)' },
+    { value: 'private', label: 'Privat (Unsichtbar / verborgen)' },
+  ]
+
+  // 2. Spielzeit & Aktivität
+  const [stats, setStats] = useState<UserStatsResponse | null>(null)
+
+  // 3. Meilensteine
+  const [overview, setOverview] = useState<AchievementsOverview | null>(null)
+  const [milestoneFilter, setMilestoneFilter] = useState<'all' | 'unlocked' | 'locked'>('all')
+
+  // 4. Freunde
+  const [friends, setFriends] = useState<FriendItem[]>([])
+  const [incomingRequests, setIncomingRequests] = useState<FriendItem[]>([])
+  const [addUsername, setAddUsername] = useState('')
+  const [searchFriend, setSearchFriend] = useState('')
+  const [sendingRequest, setSendingRequest] = useState(false)
+
+  const loadData = useCallback(async () => {
+    try {
+      const [statsData, achData, friendsData, reqsData] = await Promise.all([
+        getStats().catch(() => null),
+        getAchievements().catch(() => null),
+        getFriends().catch(() => []),
+        getFriendRequests().catch(() => ({ incoming: [], outgoing: [] })),
+      ])
+      setStats(statsData)
+      setOverview(achData)
+      setFriends(friendsData)
+      setIncomingRequests(reqsData.incoming)
+    } catch {
+      // Best-effort load
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadData()
+  }, [loadData])
+
+  const handleSendFriendRequest = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const target = addUsername.trim()
+    if (!target) return
+    setSendingRequest(true)
+    try {
+      const res = await sendFriendRequest(target)
+      toast.success(res.message || 'Anfrage gesendet.')
+      setAddUsername('')
+      const [fData, rData] = await Promise.all([getFriends(), getFriendRequests()])
+      setFriends(fData)
+      setIncomingRequests(rData.incoming)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Fehler beim Senden.')
+    } finally {
+      setSendingRequest(false)
+    }
+  }
+
+  const handleAcceptRequest = async (reqId: number) => {
+    try {
+      await acceptFriendRequest(reqId)
+      toast.success('Anfrage angenommen.')
+      const [fData, rData] = await Promise.all([getFriends(), getFriendRequests()])
+      setFriends(fData)
+      setIncomingRequests(rData.incoming)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Fehler beim Annehmen.')
+    }
+  }
+
+  const handleDeclineRequest = async (reqId: number) => {
+    try {
+      await declineFriendRequest(reqId)
+      toast.success('Anfrage abgelehnt.')
+      const rData = await getFriendRequests()
+      setIncomingRequests(rData.incoming)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Fehler beim Ablehnen.')
+    }
+  }
+
+  const handleRemoveFriend = async (friendId: number) => {
+    try {
+      await removeFriend(friendId)
+      toast.success('Kontakt entfernt.')
+      const fData = await getFriends()
+      setFriends(fData)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Fehler beim Entfernen.')
+    }
+  }
+
+  const acceptedFriends = useMemo(() => {
+    return friends.filter((f) => f.status === 'accepted')
+  }, [friends])
+
+  const filteredFriends = useMemo(() => {
+    const q = searchFriend.toLowerCase().trim()
+    return acceptedFriends.filter((f) => !q || f.username.toLowerCase().includes(q))
+  }, [acceptedFriends, searchFriend])
+
+  const filteredMilestones = useMemo(() => {
+    const list = overview?.achievements || []
+    if (milestoneFilter === 'unlocked') return list.filter((m) => m.unlocked)
+    if (milestoneFilter === 'locked') return list.filter((m) => !m.unlocked)
+    return list
+  }, [overview?.achievements, milestoneFilter])
+
+  const progressPercent = overview
+    ? Math.round((overview.total_unlocked / Math.max(overview.total_available, 1)) * 100)
+    : 0
+
+  const formatHours = (seconds?: number) => {
+    if (!seconds || seconds <= 0) return '0 Std.'
+    const h = Math.floor(seconds / 3600)
+    const m = Math.floor((seconds % 3600) / 60)
+    if (h === 0) return `${m} Min.`
+    return `${h} Std. ${m} Min.`
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      {/* 1. Privatsphäre & Sichtbarkeit */}
+      <section className="msm-card p-5 space-y-4" aria-labelledby="social-privacy-title">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <Lock className="h-5 w-5" />
+          </div>
+          <div>
+            <h2 id="social-privacy-title" className="text-sm font-semibold text-on-surface">
+              Privatsphäre & Sichtbarkeit
+            </h2>
+          </div>
+        </div>
+
+        <div className="space-y-4 pt-2 border-t border-outline-variant/30">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <span className="text-xs font-medium text-on-surface">Profil-Sichtbarkeit & Status</span>
+              <p className="text-[11px] text-on-surface-variant">Wer darf deine Präsenz und Aktivitäten sehen?</p>
+            </div>
+            <div className="w-full sm:w-64">
+              <Dropdown
+                options={privacyOptions}
+                value={privacyLevel}
+                disabled={savingPrivacy}
+                onChange={(val) => void handleSavePrivacy(val as 'public' | 'friends' | 'private')}
+                aria-label="Profil-Sichtbarkeit"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 pt-2 border-t border-outline-variant/20">
+            <div>
+              <span className="text-xs font-medium text-on-surface">Lesebestätigungen (Gelesen-Häkchen)</span>
+              <p className="text-[11px] text-on-surface-variant">Zeigt Kontakten, sobald Nachrichten gelesen wurden.</p>
+            </div>
+            <Switch
+              checked={readReceiptsEnabled}
+              onCheckedChange={handleToggleReadReceipts}
+              aria-label="Lesebestätigungen"
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* 2. Spielzeit / Nutzungszeit */}
+      <section className="msm-card p-5 space-y-4" aria-labelledby="social-time-title">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Clock className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 id="social-time-title" className="text-sm font-semibold text-on-surface">
+                Nutzungs- & Spielzeit
+              </h2>
+            </div>
+          </div>
+          <div className="text-right">
+            <span className="text-xs font-bold text-primary font-mono block">
+              {formatHours(stats?.active_time_seconds ?? stats?.total_activity_seconds)}
+            </span>
+            <span className="text-[10px] text-on-surface-variant">Gesamtaktivität</span>
+          </div>
+        </div>
+
+        {stats?.active_time_by_category && Object.keys(stats.active_time_by_category).length > 0 && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 pt-2 border-t border-outline-variant/30">
+            {Object.entries(stats.active_time_by_category).map(([cat, secs]) => (
+              <div key={cat} className="p-2.5 rounded-xl bg-surface-container-low border border-outline-variant/30">
+                <span className="text-[10px] uppercase font-bold text-on-surface-variant tracking-wider block truncate capitalize">
+                  {cat}
+                </span>
+                <span className="text-xs font-semibold text-on-surface font-mono">
+                  {formatHours(secs)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* 3. Meilensteine & Erfolge */}
+      <section className="msm-card p-5 space-y-4" aria-labelledby="social-milestones-title">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Trophy className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 id="social-milestones-title" className="text-sm font-semibold text-on-surface">
+                Meilensteine & Erfolge
+              </h2>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-start sm:self-auto">
+            <div className="text-right">
+              <span className="text-xs font-bold text-primary font-mono block">
+                {overview?.total_unlocked || 0} / {overview?.total_available || 0}
+              </span>
+              <span className="text-[10px] text-on-surface-variant font-mono">
+                {overview?.prestige_score || 0} Pkt
+              </span>
+            </div>
+            <div className="w-20 h-2 bg-surface-container-high rounded-full overflow-hidden border border-outline-variant/30">
+              <div
+                className="h-full bg-primary transition-all duration-500 rounded-full"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Filter Pills */}
+        <div className="flex items-center gap-1.5 pt-2 border-t border-outline-variant/20">
+          <Button
+            variant={milestoneFilter === 'all' ? 'primary' : 'ghost'}
+            size="sm"
+            onClick={() => setMilestoneFilter('all')}
+            className="text-xs h-7 px-2.5"
+          >
+            Alle ({overview?.achievements.length || 0})
+          </Button>
+          <Button
+            variant={milestoneFilter === 'unlocked' ? 'primary' : 'ghost'}
+            size="sm"
+            onClick={() => setMilestoneFilter('unlocked')}
+            className="text-xs h-7 px-2.5"
+          >
+            Freigeschaltet ({overview?.total_unlocked || 0})
+          </Button>
+          <Button
+            variant={milestoneFilter === 'locked' ? 'primary' : 'ghost'}
+            size="sm"
+            onClick={() => setMilestoneFilter('locked')}
+            className="text-xs h-7 px-2.5"
+          >
+            Gesperrt ({(overview?.total_available || 0) - (overview?.total_unlocked || 0)})
+          </Button>
+        </div>
+
+        {/* Milestones Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          {filteredMilestones.map((m) => {
+            const rarity = m.rarity_percent ?? m.global_unlocked_percentage ?? 0
+            const isRare = rarity > 0 && rarity <= 10
+            return (
+              <div
+                key={m.id}
+                className={`flex items-start gap-3 p-3 rounded-xl border transition-all ${
+                  m.unlocked
+                    ? 'bg-surface-container-low border-outline-variant/40 shadow-xs'
+                    : 'bg-surface-container-lowest/40 border-outline-variant/20 opacity-55'
+                }`}
+              >
+                <div
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
+                    m.unlocked
+                      ? isRare
+                        ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                        : 'bg-primary/15 border-primary/30 text-primary'
+                      : 'bg-surface-container-high/50 border-outline-variant/20 text-on-surface-variant/40'
+                  }`}
+                >
+                  {m.unlocked ? renderAchievementIcon(m.icon, 'w-4 h-4') : <Lock className="w-3.5 h-3.5" />}
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs font-bold text-on-surface truncate">{m.title}</span>
+                    <span className="text-[10px] font-mono text-amber-400 font-semibold">+{m.points}</span>
+                    {isRare && (
+                      <Badge variant="warning" className="text-[9px] px-1 py-0 uppercase font-bold">
+                        Selten
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-on-surface-variant mt-0.5 line-clamp-2">
+                    {m.description}
+                  </p>
+                  {m.unlocked && m.unlocked_at && (
+                    <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 mt-1">
+                      <CheckCircle2 className="w-3 h-3" />
+                      <span>{new Date(m.unlocked_at).toLocaleDateString()}</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </section>
+
+      {/* 4. Freunde & Kontakte */}
+      <section className="msm-card p-5 space-y-4" aria-labelledby="social-friends-title">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <Users className="h-5 w-5" />
+          </div>
+          <div>
+            <h2 id="social-friends-title" className="text-sm font-semibold text-on-surface">
+              Freunde & Kontakte
+            </h2>
+          </div>
+        </div>
+
+        {/* Add Friend */}
+        <form onSubmit={handleSendFriendRequest} className="flex gap-2 pt-2 border-t border-outline-variant/30">
+          <Input
+            value={addUsername}
+            onChange={(e) => setAddUsername(e.target.value)}
+            placeholder="Benutzername für Freundschaftsanfrage …"
+            className="text-xs h-8 flex-1"
+            disabled={sendingRequest}
+          />
+          <Button
+            type="submit"
+            size="sm"
+            disabled={!addUsername.trim() || sendingRequest}
+            className="gap-1.5 h-8 text-xs shrink-0"
+          >
+            <UserPlus className="w-3.5 h-3.5" />
+            <span>Anfrage</span>
+          </Button>
+        </form>
+
+        {/* Incoming Requests */}
+        {incomingRequests.length > 0 && (
+          <div className="space-y-2">
+            <span className="text-xs font-bold text-amber-400 block">
+              Ausstehende Anfragen ({incomingRequests.length})
+            </span>
+            <div className="space-y-1.5">
+              {incomingRequests.map((req) => (
+                <div
+                  key={req.id}
+                  className="flex items-center justify-between p-2.5 rounded-xl bg-surface-container-high/50 border border-amber-500/30"
+                >
+                  <div className="flex items-center gap-2">
+                    <Avatar src={req.avatar_url} name={req.username} size="sm" />
+                    <span className="text-xs font-semibold text-primary">{req.username}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      onClick={() => void handleAcceptRequest(req.id)}
+                      className="h-7 px-2 text-xs gap-1"
+                    >
+                      <Check className="w-3 h-3" />
+                      <span>Annehmen</span>
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => void handleDeclineRequest(req.id)}
+                      className="h-7 px-2 text-xs text-on-surface-variant hover:text-status-error"
+                    >
+                      Ablehnen
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Friend List */}
+        <div className="space-y-2">
+          {acceptedFriends.length > 3 && (
+            <Input
+              value={searchFriend}
+              onChange={(e) => setSearchFriend(e.target.value)}
+              placeholder="Kontakte filtern …"
+              className="text-xs h-7"
+            />
+          )}
+
+          {filteredFriends.length === 0 ? (
+            <p className="text-xs text-on-surface-variant py-2">
+              {searchFriend ? 'Keine Treffer.' : 'Noch keine Kontakte hinzugefügt.'}
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {filteredFriends.map((f) => (
+                <div
+                  key={f.id}
+                  className="flex items-center justify-between p-2.5 rounded-xl bg-surface-container-low border border-outline-variant/30"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="relative shrink-0">
+                      <Avatar src={f.avatar_url} name={f.username} size="sm" />
+                      <StatusDot
+                        status={f.presence?.status || 'invisible'}
+                        size="sm"
+                        className="absolute bottom-0 right-0"
+                      />
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-xs font-semibold text-primary truncate block">
+                        {f.username}
+                      </span>
+                      {f.presence?.activity_label && (
+                        <p className="text-[10px] text-on-surface-variant truncate">
+                          {f.presence.activity_label}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => void handleRemoveFriend(f.user_id ?? f.id)}
+                    className="h-7 w-7 p-0 text-on-surface-variant hover:text-status-error shrink-0"
+                    title="Kontakt entfernen"
+                    aria-label="Kontakt entfernen"
+                  >
+                    <UserMinus className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
     </div>
   )
 }
@@ -940,6 +1689,7 @@ function AudioEinstellungen() {
   const [geraete, setGeraete] = useState<AudioGeraete | null>(null)
   const [konfig, setKonfig] = useState<AppKonfig | null>(null)
   const [duckt, setDuckt] = useState(false)
+  const [istAmTesten, setIstAmTesten] = useState(false)
   // Bündelt das Speichern der Verarbeitung. Beim Unmount bewusst NICHT
   // geräumt: die Timeout-Schließung ist in sich geschlossen (frisches Laden,
   // Speichern, kein React-State) — räumen hieße, die letzte Änderung des
@@ -1023,18 +1773,6 @@ function AudioEinstellungen() {
     }
   }
 
-  /**
-   * Ein Verarbeitungsfeld stellen: sofort registrieren (wirkt live in Sitzung
-   * und Testhören), gebündelt speichern — der Verstärkungsregler feuert je
-   * Tick, und jeder Tick wäre sonst ein Dateischreiben. Alles lokal —
-   * Chromiums eigene Kette, kein Ton verlässt dafür den Rechner. Das
-   * Wake-Word ist nicht betroffen (eigene Rust-Kette), darum kein Neustart.
-   *
-   * Gespeichert wird über einen frischen Konfigurationsstand, in den nur die
-   * vier eigenen Felder gemischt werden: der React-State stammt vom Mount,
-   * und der Wake-Word-Neustart beim Gerätewechsel schreibt `wakeword_aktiv`
-   * parallel in dieselbe Datei.
-   */
   function verarbeitungSetzen(
     feld: 'audio_echo' | 'audio_rauschen' | 'audio_autogain' | 'audio_verstaerkung',
     wert: boolean | number,
@@ -1068,56 +1806,151 @@ function AudioEinstellungen() {
     }, VERARBEITUNG_SPEICHERN_MS)
   }
 
-  const verarbeitungsZeile = (
-    feld: 'audio_echo' | 'audio_rauschen' | 'audio_autogain',
-  ) => {
-    const kurz = feld.slice('audio_'.length)
-    return (
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-on-surface">{t(`mss.audio.${kurz}`)}</p>
-        <Switch
-          checked={konfig?.[feld] ?? true}
-          disabled={konfig === null}
-          onCheckedChange={(an) => void verarbeitungSetzen(feld, an)}
-          aria-label={t(`mss.audio.${kurz}`)}
-        />
-      </div>
-    )
-  }
+  const gainPercent = Math.round((konfig?.audio_verstaerkung ?? 1) * 100)
 
   return (
-    <section className="msm-card flex flex-col gap-4 p-5">
-      <h2 className="text-sm font-medium text-on-surface">{t('mss.audio.titel')}</h2>
-
-      <div className="flex flex-col gap-1.5">
-        <label className="text-sm text-on-surface">{t('mss.audio.eingabe')}</label>
-        {auswahl('audio_eingabe', geraete?.eingaenge ?? [], geraete?.standard_eingang ?? null)}
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <label className="text-sm text-on-surface">{t('mss.audio.ausgabe')}</label>
-        {auswahl('audio_ausgabe', geraete?.ausgaenge ?? [], geraete?.standard_ausgang ?? null)}
-      </div>
-
-      <div className="flex flex-col gap-3 border-t border-outline-variant/40 pt-4">
-        <div>
-          <p className="text-sm text-on-surface">{t('mss.audio.verarbeitung')}</p>
+    <div className="space-y-6">
+      {/* 1. Geräte-Auswahl Karte */}
+      <section className="msm-card p-6" aria-labelledby="audio-devices-heading">
+        <div className="flex items-center justify-between gap-4 mb-4">
+          <div className="flex items-center gap-2">
+            <Mic className="h-5 w-5 text-secondary" aria-hidden="true" />
+            <h2 id="audio-devices-heading" className="font-headline text-lg font-semibold text-on-surface">
+              {t('profile.audioTitle', 'Mikrofon & Audio')}
+            </h2>
+          </div>
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium ${
+              istAmTesten
+                ? 'border-status-success/30 bg-status-success/10 text-status-success animate-pulse'
+                : 'border-outline-variant bg-surface-container text-on-surface-variant'
+            }`}
+          >
+            <Radio className="h-3.5 w-3.5" aria-hidden="true" />
+            {istAmTesten ? t('profile.audioActive', 'Test aktiv') : t('profile.audioInactive', 'Bereit')}
+          </span>
         </div>
-        {verarbeitungsZeile('audio_echo')}
-        {verarbeitungsZeile('audio_rauschen')}
-        {verarbeitungsZeile('audio_autogain')}
-        <Slider
-          value={Math.round((konfig?.audio_verstaerkung ?? 1) * 100)}
-          min={25}
-          max={400}
-          step={5}
-          disabled={konfig === null}
-          onValueChange={(prozent) => void verarbeitungSetzen('audio_verstaerkung', prozent / 100)}
-          label={t('mss.audio.verstaerkung')}
-          hint={`${Math.round((konfig?.audio_verstaerkung ?? 1) * 100)} %`}
-        />
-      </div>
 
+        <p className="max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant mb-6">
+          {t(
+            'profile.audioDescription',
+            'Konfiguriere deine Audio-Geräte für Sprachnachrichten, den KI-Sprachmodus und das Wake-Word. Änderungen werden einheitlich im gesamten System angewendet.'
+          )}
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl">
+          <div className="space-y-1.5">
+            <label className="block font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">
+              {t('profile.audioDeviceLabel', 'Eingabegerät (Mikrofon)')}
+            </label>
+            {auswahl('audio_eingabe', geraete?.eingaenge ?? [], geraete?.standard_eingang ?? null)}
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="block font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">
+              {t('mss.audio.ausgabe', 'Ausgabegerät (Lautsprecher)')}
+            </label>
+            {auswahl('audio_ausgabe', geraete?.ausgaenge ?? [], geraete?.standard_ausgang ?? null)}
+          </div>
+        </div>
+
+        {!isAndroidClient && (
+          <div className="flex items-center justify-between gap-3 border-t border-outline-variant/30 pt-4 mt-6 max-w-2xl">
+            <div>
+              <span className="text-xs font-medium text-on-surface block">{t('mss.audio.ducking', 'Audio-Ducking')}</span>
+              <span className="text-[11px] text-on-surface-variant">
+                Senkt Hintergrundgeräusche und Musik ab, während die KI spricht.
+              </span>
+            </div>
+            <Button variant="secondary" size="sm" onClick={() => void duckingTesten()} disabled={duckt}>
+              {duckt
+                ? t('mss.einstellungen.duckingLaeuft', 'Ducking aktiv …')
+                : t('mss.einstellungen.duckingTesten', 'Ducking testen')}
+            </Button>
+          </div>
+        )}
+      </section>
+
+      {/* 2. Signalverarbeitung & Filter */}
+      <section className="msm-card p-6" aria-labelledby="audio-processing-heading">
+        <div className="flex items-center gap-2 mb-4">
+          <Sliders className="h-5 w-5 text-secondary" aria-hidden="true" />
+          <h2 id="audio-processing-heading" className="font-headline text-lg font-semibold text-on-surface">
+            {t('mss.audio.verarbeitung', 'Signalverarbeitung & Filter')}
+          </h2>
+        </div>
+        <p className="max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant mb-5">
+          Chromiums integrierte WebRTC-Filterreihe zur Beseitigung von Störgeräuschen und Hall in Sprachräumen und Sprachaufnahmen.
+        </p>
+
+        <div className="max-w-xl space-y-4">
+          <div className="flex items-center justify-between gap-3 p-3 rounded-xl border border-outline-variant/30 bg-surface-container-low/40">
+            <div>
+              <span className="text-sm font-medium text-on-surface block">
+                {t('profile.audioNoiseSuppression', 'Rauschunterdrückung (Noise Suppression)')}
+              </span>
+              <span className="text-xs text-on-surface-variant">
+                Filtert Hintergrundgeräusche wie Lüfter oder Tastaturanschläge heraus.
+              </span>
+            </div>
+            <Switch
+              checked={konfig?.audio_rauschen ?? true}
+              disabled={konfig === null}
+              onCheckedChange={(an) => void verarbeitungSetzen('audio_rauschen', an)}
+              aria-label={t('profile.audioNoiseSuppression', 'Rauschunterdrückung')}
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-3 p-3 rounded-xl border border-outline-variant/30 bg-surface-container-low/40">
+            <div>
+              <span className="text-sm font-medium text-on-surface block">
+                {t('profile.audioEchoCancellation', 'Echounterdrückung (Echo Cancellation)')}
+              </span>
+              <span className="text-xs text-on-surface-variant">
+                Verhindert akustische Rückkopplungen bei Lautsprechern ohne Kopfhörer.
+              </span>
+            </div>
+            <Switch
+              checked={konfig?.audio_echo ?? true}
+              disabled={konfig === null}
+              onCheckedChange={(an) => void verarbeitungSetzen('audio_echo', an)}
+              aria-label={t('profile.audioEchoCancellation', 'Echounterdrückung')}
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-3 p-3 rounded-xl border border-outline-variant/30 bg-surface-container-low/40">
+            <div>
+              <span className="text-sm font-medium text-on-surface block">
+                {t('profile.audioAutoGain', 'Automatische Pegelanpassung (Auto Gain)')}
+              </span>
+              <span className="text-xs text-on-surface-variant">
+                Gleicht leise und laute Sprachpassagen automatisch an ein gesundes Niveau an.
+              </span>
+            </div>
+            <Switch
+              checked={konfig?.audio_autogain ?? true}
+              disabled={konfig === null}
+              onCheckedChange={(an) => void verarbeitungSetzen('audio_autogain', an)}
+              aria-label={t('profile.audioAutoGain', 'Automatische Pegelanpassung')}
+            />
+          </div>
+
+          <div className="pt-2">
+            <Slider
+              value={gainPercent}
+              min={25}
+              max={400}
+              step={5}
+              disabled={konfig === null}
+              onValueChange={(prozent) => void verarbeitungSetzen('audio_verstaerkung', prozent / 100)}
+              label={t('mss.audio.verstaerkung', 'Software-Eingangsverstärkung')}
+              hint={`${gainPercent} %`}
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* 3. Testhören & Mikrofon-Pegel */}
       <Testhoeren
         verarbeitung={{
           echo: konfig?.audio_echo ?? true,
@@ -1125,19 +1958,9 @@ function AudioEinstellungen() {
           autogain: konfig?.audio_autogain ?? true,
           verstaerkung: konfig?.audio_verstaerkung ?? 1,
         }}
+        onTestZustand={setIstAmTesten}
       />
-
-      {!isAndroidClient && (
-        <div className="flex items-center justify-between gap-3 border-t border-outline-variant/40 pt-4">
-          <p className="text-sm text-on-surface">{t('mss.audio.ducking')}</p>
-          <Button variant="secondary" onClick={() => void duckingTesten()} disabled={duckt}>
-            {duckt
-              ? t('mss.einstellungen.duckingLaeuft')
-              : t('mss.einstellungen.duckingTesten')}
-          </Button>
-        </div>
-      )}
-    </section>
+    </div>
   )
 }
 
@@ -1149,22 +1972,20 @@ function AudioEinstellungen() {
  * man hörte sich leiser werden, je länger man spricht. Alles bleibt im
  * Chromium-Prozess, nichts davon geht ins Netz.
  */
-function Testhoeren({ verarbeitung }: { verarbeitung: AudioVerarbeitung }) {
+function Testhoeren({
+  verarbeitung,
+  onTestZustand,
+}: {
+  verarbeitung: AudioVerarbeitung
+  onTestZustand?: (aktiv: boolean) => void
+}) {
   const { t } = useTranslation()
   const [laeuft, setLaeuft] = useState(false)
   const [pegel, setPegel] = useState(0)
   const [fehler, setFehler] = useState<string | null>(null)
   const aufraeumen = useRef<(() => void) | null>(null)
   const gainKnoten = useRef<GainNode | null>(null)
-  // Ob die Komponente noch lebt: `starten` hat zwei awaits, bevor es sein
-  // Aufräumen hinterlegt. Wer in diesem Fenster den Reiter wechselt, träfe
-  // ein Unmount-Cleanup auf `null` — und das Mikrofon bliebe offen, ohne
-  // dass irgendetwas es noch schließen könnte.
   const verlassen = useRef(false)
-  // Laufende Nummer des jüngsten Starts. Zwei schnelle Klicks (oder Klick +
-  // Schalter-Neustart) liefen sonst nebeneinander durch getUserMedia, und der
-  // langsamere überschriebe das Aufräumen des schnelleren — dessen Mikrofon
-  // bliebe offen und wäre durch nichts mehr stoppbar.
   const startNummer = useRef(0)
 
   const stoppen = useCallback(() => {
@@ -1174,7 +1995,8 @@ function Testhoeren({ verarbeitung }: { verarbeitung: AudioVerarbeitung }) {
     gainKnoten.current = null
     setLaeuft(false)
     setPegel(0)
-  }, [])
+    onTestZustand?.(false)
+  }, [onTestZustand])
 
   const starten = useCallback(async () => {
     const nummer = startNummer.current + 1
@@ -1201,9 +2023,6 @@ function Testhoeren({ verarbeitung }: { verarbeitung: AudioVerarbeitung }) {
       if (kontext.state === 'suspended') {
         await kontext.resume().catch(() => {})
       }
-      // Dieselbe Gerätewahl wie die Stimme der KI (`audioWiedergabe`):
-      // `setSinkId` gibt es erst seit Chromium 110; wo es fehlt, bleibt der
-      // Systemstandard — Ton geht vor Gerätetreue.
       void ausgabeGeraetId()
         .then((sink) => {
           const mitSink = kontext as AudioContext & {
@@ -1216,8 +2035,6 @@ function Testhoeren({ verarbeitung }: { verarbeitung: AudioVerarbeitung }) {
       const gain = kontext.createGain()
       gain.gain.value = aktuelleVerarbeitung().verstaerkung
       gainKnoten.current = gain
-      // Der Analyser hängt als Abgriff hinter der Verstärkung: der Balken
-      // zeigt, was am Lautsprecher ankommt, nicht das rohe Mikrofon.
       const analyser = kontext.createAnalyser()
       quelle.connect(gain)
       gain.connect(analyser)
@@ -1227,8 +2044,6 @@ function Testhoeren({ verarbeitung }: { verarbeitung: AudioVerarbeitung }) {
         analyser.getFloatTimeDomainData(puffer)
         let summe = 0
         for (let i = 0; i < puffer.length; i += 1) summe += puffer[i] * puffer[i]
-        // Dieselbe Skalierung wie der Sitzungspegel (`audioAufnahme`): RMS ×4
-        // holt gesprochene Sprache in einen sichtbaren Bereich.
         setPegel(Math.min(1, Math.sqrt(summe / puffer.length) * 4))
       }, 100)
       aufraeumen.current = () => {
@@ -1240,51 +2055,78 @@ function Testhoeren({ verarbeitung }: { verarbeitung: AudioVerarbeitung }) {
         void kontext.close().catch(() => undefined)
       }
       setLaeuft(true)
+      onTestZustand?.(true)
     } catch {
-      setFehler(t('mss.audio.testhoerenFehler'))
+      setFehler(t('mss.audio.testhoerenFehler', 'Mikrofon konnte für den Test nicht gestartet werden.'))
       setLaeuft(false)
+      onTestZustand?.(false)
     }
-  }, [verarbeitung.rauschen, verarbeitung.autogain, t])
+  }, [verarbeitung.rauschen, verarbeitung.autogain, t, onTestZustand])
 
-  // Die Verstärkung wirkt live in den laufenden Test — der Regler daneben
-  // soll hörbar sein, ohne neu zu starten.
   useEffect(() => {
     if (gainKnoten.current) gainKnoten.current.gain.value = aktuelleVerarbeitung().verstaerkung
   }, [verarbeitung.verstaerkung])
 
-  // Die Schalter dagegen sind getUserMedia-Constraints: ein laufender Test
-  // startet neu, damit man hört, was man umgelegt hat.
   useEffect(() => {
     if (aufraeumen.current) void starten()
   }, [starten])
 
-  // Beim Verlassen des Reiters geht das Mikrofon zu — ein Testton, der ohne
-  // sichtbaren Ursprung weiterläuft, wäre genau das falsche Gefühl für eine
-  // App, die mithören kann. `verlassen` fängt den Fall, dass `starten` noch
-  // in seinen awaits steckt und sein Aufräumen erst danach hinterlegte.
   useEffect(() => () => {
     verlassen.current = true
     aufraeumen.current?.()
   }, [])
 
   return (
-    <div className="flex flex-col gap-3 border-t border-outline-variant/40 pt-4">
-      <p className="text-sm text-on-surface">{t('mss.audio.testhoeren')}</p>
-      <div className="flex items-center gap-3">
-        <Button
-          variant="secondary"
-          onClick={() => (laeuft ? stoppen() : void starten())}
-        >
-          {laeuft ? t('mss.audio.testhoerenStopp') : t('mss.audio.testhoerenStart')}
-        </Button>
-        <ProgressBar
-          value={laeuft ? Math.round(pegel * 100) : null}
-          ariaLabel={t('mss.audio.testhoerenPegel')}
-          className="flex-1"
-        />
+    <section className="msm-card p-6" aria-labelledby="audio-test-heading">
+      <div className="flex items-center gap-2 mb-4">
+        <Volume2 className="h-5 w-5 text-secondary" aria-hidden="true" />
+        <h2 id="audio-test-heading" className="font-headline text-lg font-semibold text-on-surface">
+          {t('mss.audio.testhoeren', 'Testhören & Mikrofon-Pegel')}
+        </h2>
       </div>
-      {fehler && <p className="msm-alert-warning">{fehler}</p>}
-    </div>
+      <p className="max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant mb-5">
+        {t(
+          'profile.audioTestDescription',
+          'Höre deine Stimme live über den gewählten Lautsprecher ab, um Klangqualität und Pegel zu kontrollieren. Die Echounterdrückung ist im Testlauf deaktiviert, damit deine Stimme nicht ausgefiltert wird.'
+        )}
+      </p>
+
+      <div className="max-w-xl space-y-4">
+        <div className="flex items-center gap-3">
+          <Button
+            type="button"
+            variant={laeuft ? 'secondary' : 'primary'}
+            onClick={() => (laeuft ? stoppen() : void starten())}
+            className="gap-2 shrink-0"
+          >
+            <Mic className="w-4 h-4" />
+            <span>{laeuft ? t('profile.audioTestStop', 'Test beenden') : t('profile.audioTestStart', 'Testhören starten')}</span>
+          </Button>
+
+          <ProgressBar
+            value={laeuft ? Math.round(pegel * 100) : null}
+            ariaLabel={t('mss.audio.testhoerenPegel', 'Mikrofonpegel')}
+            className="flex-1"
+          />
+        </div>
+
+        {laeuft && (
+          <div className="flex items-center justify-between text-xs px-1 text-on-surface-variant">
+            <span>Pegel: {Math.round(pegel * 100)}%</span>
+            <span className={pegel > 0.05 ? 'text-emerald-400 font-semibold' : 'text-on-surface-variant/60'}>
+              {pegel > 0.05 ? t('profile.audioSignalDetected', 'Signal erkannt') : 'Kein Signal'}
+            </span>
+          </div>
+        )}
+
+        {fehler && (
+          <div className="p-3 rounded-xl bg-error/10 border border-error/30 text-error text-xs flex items-center gap-2">
+            <ShieldAlert className="w-4 h-4 shrink-0" />
+            <span>{fehler}</span>
+          </div>
+        )}
+      </div>
+    </section>
   )
 }
 

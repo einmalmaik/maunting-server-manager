@@ -442,17 +442,17 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
                 {/* Note Attachment */}
                 {msg.noteAttachment && (
                   <div
-                    className={`p-2 rounded-lg border text-xs ${
+                    className={`p-2.5 rounded-xl border text-xs shadow-sm space-y-1.5 ${
                       msg.isSelf
-                        ? 'bg-white/10 border-white/20 text-white'
-                        : 'bg-surface-container-low border-outline-variant/30 text-on-surface'
+                        ? 'bg-slate-950/80 border-white/20 text-white'
+                        : 'bg-surface-container-lowest border-outline-variant/50 text-on-surface'
                     }`}
                   >
-                    <div className="flex items-center gap-1.5 font-bold mb-0.5 text-[11px]">
+                    <div className="flex items-center gap-1.5 font-semibold text-xs text-white">
                       <StickyNote className="w-3.5 h-3.5 text-amber-400" />
                       <span>{msg.noteAttachment.title}</span>
                     </div>
-                    <p className="whitespace-pre-wrap text-[11px] opacity-90 line-clamp-3">
+                    <p className="whitespace-pre-wrap text-[11px] text-white/90 line-clamp-3 leading-relaxed">
                       {msg.noteAttachment.content}
                     </p>
                   </div>
@@ -461,18 +461,20 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
                 {/* Calendar Attachment */}
                 {msg.calendarAttachment && (
                   <div
-                    className={`p-2 rounded-lg border text-xs ${
+                    className={`p-2.5 rounded-xl border text-xs shadow-sm space-y-1.5 ${
                       msg.isSelf
-                        ? 'bg-white/10 border-white/20 text-white'
-                        : 'bg-surface-container-low border-outline-variant/30 text-on-surface'
+                        ? 'bg-slate-950/80 border-white/20 text-white'
+                        : 'bg-surface-container-lowest border-outline-variant/50 text-on-surface'
                     }`}
                   >
-                    <div className="flex items-center gap-1.5 font-bold mb-0.5 text-[11px]">
-                      <CalendarIcon className="w-3.5 h-3.5 text-cyan-400" />
+                    <div className="flex items-center gap-1.5 font-semibold text-xs text-white">
+                      <div className="w-4 h-4 rounded-md bg-cyan-500/20 flex items-center justify-center shrink-0">
+                        <CalendarIcon className="w-3 h-3 text-cyan-300" />
+                      </div>
                       <span>{msg.calendarAttachment.title}</span>
                     </div>
-                    <div className="text-[10px] opacity-80 flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
+                    <div className="text-[11px] text-white/90 flex items-center gap-1.5 font-medium">
+                      <Clock className="w-3 h-3 text-cyan-400" />
                       <span>
                         {new Date(msg.calendarAttachment.start).toLocaleString([], {
                           dateStyle: 'short',
@@ -481,8 +483,8 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
                       </span>
                     </div>
                     {msg.calendarAttachment.location && (
-                      <div className="text-[10px] opacity-80 flex items-center gap-1 mt-0.5">
-                        <MapPin className="w-3 h-3" />
+                      <div className="text-[11px] text-white/80 flex items-center gap-1.5">
+                        <MapPin className="w-3 h-3 text-rose-400" />
                         <span>{msg.calendarAttachment.location}</span>
                       </div>
                     )}

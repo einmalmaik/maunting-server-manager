@@ -76,7 +76,8 @@ describe('Einstellungen Component', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText(/profile\.title/i)).toBeInTheDocument()
+    expect(await screen.findByText(/profile\.tabs\.account/i)).toBeInTheDocument()
+    expect(screen.getByText(/profile\.tabs\.social/i)).toBeInTheDocument()
     expect(screen.getByText(/mss\.einstellungen\.tab\.desktop/i)).toBeInTheDocument()
     expect(screen.getByText(/mss\.einstellungen\.tab\.wakeword/i)).toBeInTheDocument()
     expect(screen.getByText(/mss\.einstellungen\.tab\.audio/i)).toBeInTheDocument()

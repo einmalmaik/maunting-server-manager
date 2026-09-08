@@ -21,6 +21,8 @@ import {
   Trash2,
   ShieldCheck,
   Sliders,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
 import {
   type ChatGroupItem,
@@ -323,6 +325,7 @@ export function GroupPermissionsModal({
   const [roles, setRoles] = useState<GroupRoleDefinition[]>(SYSTEM_GROUP_ROLES)
   const [editingRole, setEditingRole] = useState<GroupRoleDefinition | null>(null)
   const [isCreatingRole, setIsCreatingRole] = useState(false)
+  const [expandedRoleDescriptions, setExpandedRoleDescriptions] = useState<Record<string, boolean>>({})
 
   // Standard permissions (@everyone)
   const [canSendMessages, setCanSendMessages] = useState(true)
@@ -494,58 +497,69 @@ export function GroupPermissionsModal({
           </button>
         </div>
 
-        {/* Tab Switcher with generous spacing & horizontal scroll */}
-        <div className="flex border-b border-outline-variant/15 px-4 sm:px-6 pt-3.5 pb-0 bg-surface-container-low/50 gap-2 sm:gap-6 shrink-0 overflow-x-auto no-scrollbar">
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('members')
-              setIsCreatingRole(false)
-              setEditingRole(null)
-            }}
-            className={`pb-3.5 px-2 sm:px-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
-              activeTab === 'members'
-                ? 'border-primary text-primary'
-                : 'border-transparent text-on-surface-variant hover:text-on-surface'
-            }`}
-          >
-            <Users className="w-4 h-4" />
-            <span>Mitglieder ({members.length})</span>
-          </button>
+        {/* Tab Switcher - Responsive Segmented Controls on Mobile, Classic Tabs on Desktop */}
+        <div className="border-b border-outline-variant/15 px-2.5 sm:px-6 pt-2 sm:pt-3.5 pb-2 sm:pb-0 bg-surface-container-low/60 shrink-0">
+          <div className="grid grid-cols-3 sm:flex gap-1 sm:gap-6 w-full p-1 sm:p-0 rounded-xl sm:rounded-none bg-surface-container-high/40 sm:bg-transparent">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('members')
+                setIsCreatingRole(false)
+                setEditingRole(null)
+              }}
+              className={`py-2 sm:pb-3.5 px-1 sm:px-3 text-[11px] sm:text-sm font-semibold flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 transition-all rounded-lg sm:rounded-none sm:border-b-2 text-center select-none ${
+                activeTab === 'members'
+                  ? 'bg-primary/15 sm:bg-transparent text-primary sm:border-primary shadow-xs sm:shadow-none'
+                  : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 sm:hover:bg-transparent sm:border-transparent'
+              }`}
+            >
+              <Users className="w-4 h-4 shrink-0" />
+              <span className="leading-tight">
+                <span className="sm:hidden">Mitglieder</span>
+                <span className="hidden sm:inline">Mitglieder ({members.length})</span>
+              </span>
+            </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('roles')
-              setIsCreatingRole(false)
-              setEditingRole(null)
-            }}
-            className={`pb-3.5 px-2 sm:px-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
-              activeTab === 'roles'
-                ? 'border-primary text-primary'
-                : 'border-transparent text-on-surface-variant hover:text-on-surface'
-            }`}
-          >
-            <Shield className="w-4 h-4" />
-            <span>Rollen & Vorlagen ({roles.length})</span>
-          </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('roles')
+                setIsCreatingRole(false)
+                setEditingRole(null)
+              }}
+              className={`py-2 sm:pb-3.5 px-1 sm:px-3 text-[11px] sm:text-sm font-semibold flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 transition-all rounded-lg sm:rounded-none sm:border-b-2 text-center select-none ${
+                activeTab === 'roles'
+                  ? 'bg-primary/15 sm:bg-transparent text-primary sm:border-primary shadow-xs sm:shadow-none'
+                  : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 sm:hover:bg-transparent sm:border-transparent'
+              }`}
+            >
+              <Shield className="w-4 h-4 shrink-0" />
+              <span className="leading-tight">
+                <span className="sm:hidden">Rollen</span>
+                <span className="hidden sm:inline">Rollen & Vorlagen ({roles.length})</span>
+              </span>
+            </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('permissions')
-              setIsCreatingRole(false)
-              setEditingRole(null)
-            }}
-            className={`pb-3.5 px-2 sm:px-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
-              activeTab === 'permissions'
-                ? 'border-primary text-primary'
-                : 'border-transparent text-on-surface-variant hover:text-on-surface'
-            }`}
-          >
-            <Sliders className="w-4 h-4" />
-            <span>Standardrechte (@everyone)</span>
-          </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('permissions')
+                setIsCreatingRole(false)
+                setEditingRole(null)
+              }}
+              className={`py-2 sm:pb-3.5 px-1 sm:px-3 text-[11px] sm:text-sm font-semibold flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 transition-all rounded-lg sm:rounded-none sm:border-b-2 text-center select-none ${
+                activeTab === 'permissions'
+                  ? 'bg-primary/15 sm:bg-transparent text-primary sm:border-primary shadow-xs sm:shadow-none'
+                  : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 sm:hover:bg-transparent sm:border-transparent'
+              }`}
+            >
+              <Sliders className="w-4 h-4 shrink-0" />
+              <span className="leading-tight">
+                <span className="sm:hidden">Standard</span>
+                <span className="hidden sm:inline">Standardrechte (@everyone)</span>
+              </span>
+            </button>
+          </div>
         </div>
 
         {/* Scrollable Tab Content with generous vertical spacing */}
@@ -572,7 +586,7 @@ export function GroupPermissionsModal({
                   Mitglieder werden geladen …
                 </div>
               ) : (
-                <div className="divide-y divide-outline-variant/15 rounded-2xl border border-outline-variant/20 bg-surface-container-lowest/80 overflow-hidden shadow-xs">
+                <div className="divide-y divide-outline-variant/15 rounded-2xl border border-outline-variant/20 bg-surface-container/40 overflow-hidden shadow-xs">
                   {members.map((member) => {
                     const isMemberOwner = member.role === 'owner' || member.user_id === group?.owner_user_id
                     const isSelf = member.user_id === currentUserId
@@ -706,180 +720,130 @@ export function GroupPermissionsModal({
                 />
               )}
 
-              {/* Roles Table (Desktop & Tablet) */}
-              <div className="hidden md:block rounded-2xl border border-outline-variant/20 bg-surface-container-lowest/80 overflow-hidden shadow-xs">
-                <table className="w-full text-left">
-                  <thead>
-                    <tr className="border-b border-outline-variant/30 bg-surface-container-low/60">
-                      <th className="p-4 text-xs font-semibold text-on-surface-variant uppercase tracking-wider w-1/4">
-                        Rolle
-                      </th>
-                      <th className="p-4 text-xs font-semibold text-on-surface-variant uppercase tracking-wider w-1/3">
-                        Beschreibung
-                      </th>
-                      <th className="p-4 text-xs font-semibold text-on-surface-variant uppercase tracking-wider">
-                        Rechte
-                      </th>
-                      <th className="p-4 text-right text-xs font-semibold text-on-surface-variant uppercase tracking-wider w-24">
-                        Aktionen
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-outline-variant/15">
-                    {roles.map((r) => (
-                      <tr
-                        key={`role-desktop-${r.id}`}
-                        className="hover:bg-surface-container-high/40 transition-colors"
-                      >
-                        <td className="p-4 align-middle">
-                          <div className="flex items-center gap-2.5">
-                            {r.is_system ? (
-                              <Shield className="w-4 h-4 text-status-warning shrink-0" />
-                            ) : (
-                              <Shield className="w-4 h-4 text-primary shrink-0" />
-                            )}
-                            <span className="text-xs sm:text-sm font-bold text-primary">{r.name}</span>
-                            {r.is_system ? (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-warning/10 text-status-warning border border-status-warning/30 font-medium shrink-0">
-                                System
-                              </span>
-                            ) : (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-info/10 text-status-info border border-status-info/30 font-medium shrink-0">
-                                Eigene
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="p-4 text-xs text-on-surface-variant align-middle">
-                          {r.description || '—'}
-                        </td>
-                        <td className="p-4 align-middle">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <Badge variant="default" className="text-[10px] px-2 py-0.5 font-medium shrink-0">
-                              {r.permissions.length} Rechte
-                            </Badge>
-                            {r.permissions.slice(0, 3).map((pk) => {
-                              const def = GROUP_PERMISSION_DEFINITIONS.find((p) => p.key === pk)
-                              return (
-                                <span
-                                  key={`role-chip-${r.id}-${pk}`}
-                                  className="text-[10px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant border border-outline-variant/30 hidden lg:inline"
-                                >
-                                  {def?.title || pk}
-                                </span>
-                              )
-                            })}
-                            {r.permissions.length > 3 && (
-                              <span className="text-[10px] text-on-surface-variant/70 hidden lg:inline">
-                                +{r.permissions.length - 3} weitere
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="p-4 text-right align-middle whitespace-nowrap">
-                          <div className="flex items-center justify-end gap-1.5">
-                            {canManage && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setIsCreatingRole(false)
-                                  setEditingRole(r)
-                                }}
-                                className="p-1.5 rounded-lg text-primary hover:bg-primary/10 transition-colors"
-                                title="Rolle bearbeiten"
-                                aria-label={`${r.name} bearbeiten`}
-                              >
-                                <Pencil className="w-4 h-4" />
-                              </button>
-                            )}
-                            {canManage && !r.is_system && (
+              {/* Roles List - Fully responsive card rows that work seamlessly on small windows and mobile */}
+              <div className="space-y-3">
+                {roles.map((r) => {
+                  const isExpanded = Boolean(expandedRoleDescriptions[r.id])
+                  return (
+                    <div
+                      key={`role-item-${r.id}`}
+                      className="p-3.5 sm:p-4 rounded-2xl border border-outline-variant/30 bg-surface-container/60 hover:bg-surface-container/80 transition-colors shadow-xs space-y-2.5"
+                    >
+                      {/* Top Row: Role Name & Badges + Action Buttons */}
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div className="flex items-center gap-2.5 min-w-0 flex-wrap">
+                          {r.is_system ? (
+                            <Shield className="w-4 h-4 text-status-warning shrink-0" />
+                          ) : (
+                            <Shield className="w-4 h-4 text-primary shrink-0" />
+                          )}
+                          <span className="text-xs sm:text-sm font-bold text-on-surface truncate">
+                            {r.name}
+                          </span>
+                          {r.is_system ? (
+                            <span className="text-[10px] px-2 py-0.5 rounded-md bg-status-warning/15 text-status-warning font-semibold shrink-0">
+                              System
+                            </span>
+                          ) : (
+                            <span className="text-[10px] px-2 py-0.5 rounded-md bg-status-info/15 text-status-info font-semibold shrink-0">
+                              Eigene
+                            </span>
+                          )}
+                          <Badge variant="default" className="text-[10px] px-2 py-0.5 font-medium shrink-0">
+                            {r.permissions.length} Rechte
+                          </Badge>
+                        </div>
+
+                        {/* Always visible, prominent Action Buttons */}
+                        {canManage && (
+                          <div className="flex items-center gap-1.5 shrink-0 ml-auto">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsCreatingRole(false)
+                                setEditingRole(r)
+                              }}
+                              className="px-2.5 py-1.5 rounded-xl bg-surface-container-high hover:bg-primary/15 text-primary text-xs font-medium flex items-center gap-1.5 transition-colors"
+                              title="Rolle bearbeiten"
+                              aria-label={`${r.name} bearbeiten`}
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                              <span className="hidden xs:inline">Bearbeiten</span>
+                            </button>
+                            {!r.is_system && (
                               <button
                                 type="button"
                                 onClick={() => void handleDeleteRole(r)}
-                                className="p-1.5 rounded-lg text-error hover:bg-error/10 transition-colors"
+                                className="p-1.5 rounded-xl bg-surface-container-high hover:bg-error/15 text-error transition-colors"
                                 title="Rolle löschen"
                                 aria-label={`${r.name} löschen`}
                               >
-                                <Trash2 className="w-4 h-4" />
+                                <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             )}
                           </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Roles Responsive Cards (Mobile & Narrow Viewports) */}
-              <div className="md:hidden space-y-3">
-                {roles.map((r) => (
-                  <div
-                    key={`role-card-${r.id}`}
-                    className="p-4 rounded-2xl border border-outline-variant/20 bg-surface-container-lowest/80 space-y-2.5 shadow-xs"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        {r.is_system ? (
-                          <Shield className="w-4 h-4 text-status-warning shrink-0" />
-                        ) : (
-                          <Shield className="w-4 h-4 text-primary shrink-0" />
-                        )}
-                        <span className="text-xs font-bold text-primary truncate">{r.name}</span>
-                        {r.is_system ? (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-warning/10 text-status-warning border border-status-warning/30 font-medium shrink-0">
-                            System
-                          </span>
-                        ) : (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-info/10 text-status-info border border-status-info/30 font-medium shrink-0">
-                            Eigene
-                          </span>
                         )}
                       </div>
 
-                      {/* Prominent, accessible Action Buttons */}
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {canManage && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setIsCreatingRole(false)
-                              setEditingRole(r)
-                            }}
-                            className="p-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-primary transition-colors"
-                            title="Rolle bearbeiten"
-                            aria-label={`${r.name} bearbeiten`}
+                      {/* Middle: Description (collapsible on small text / short by default) */}
+                      {r.description && (
+                        <div>
+                          <p
+                            className={`text-xs text-on-surface-variant leading-relaxed ${
+                              isExpanded ? '' : 'line-clamp-2 sm:line-clamp-none'
+                            }`}
                           >
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                        )}
-                        {canManage && !r.is_system && (
-                          <button
-                            type="button"
-                            onClick={() => void handleDeleteRole(r)}
-                            className="p-1.5 rounded-lg bg-surface-container hover:bg-error/15 text-error transition-colors"
-                            title="Rolle löschen"
-                            aria-label={`${r.name} löschen`}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                            {r.description}
+                          </p>
+                          {r.description.length > 70 && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setExpandedRoleDescriptions((prev) => ({
+                                  ...prev,
+                                  [r.id]: !isExpanded,
+                                }))
+                              }
+                              className="sm:hidden text-[11px] font-medium text-primary hover:underline mt-1 flex items-center gap-1"
+                            >
+                              {isExpanded ? (
+                                <>
+                                  <span>Weniger anzeigen</span>
+                                  <ChevronUp className="w-3 h-3" />
+                                </>
+                              ) : (
+                                <>
+                                  <span>Beschreibung anzeigen</span>
+                                  <ChevronDown className="w-3 h-3" />
+                                </>
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Permission Chips Preview */}
+                      <div className="pt-2 border-t border-outline-variant/15 flex items-center gap-1.5 flex-wrap">
+                        {r.permissions.slice(0, 4).map((pk) => {
+                          const def = GROUP_PERMISSION_DEFINITIONS.find((p) => p.key === pk)
+                          return (
+                            <span
+                              key={`role-chip-${r.id}-${pk}`}
+                              className="text-[10px] px-2 py-0.5 rounded-md bg-surface-container-high text-on-surface-variant border border-outline-variant/20 font-medium"
+                            >
+                              {def?.title || pk}
+                            </span>
+                          )
+                        })}
+                        {r.permissions.length > 4 && (
+                          <span className="text-[10px] text-on-surface-variant/80 font-medium px-1">
+                            +{r.permissions.length - 4} weitere
+                          </span>
                         )}
                       </div>
                     </div>
-
-                    {r.description && (
-                      <p className="text-xs text-on-surface-variant/90 leading-relaxed">
-                        {r.description}
-                      </p>
-                    )}
-
-                    <div className="pt-2 border-t border-outline-variant/10 flex items-center justify-between text-[11px]">
-                      <Badge variant="default" className="text-[10px] px-2 py-0.5 font-medium">
-                        {r.permissions.length} Rechte zugewiesen
-                      </Badge>
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}
@@ -896,7 +860,7 @@ export function GroupPermissionsModal({
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-outline-variant/20 p-4 sm:p-6 bg-surface-container-lowest/80 shadow-xs">
+              <div className="rounded-2xl border border-outline-variant/20 p-4 sm:p-6 bg-surface-container/40 shadow-xs">
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
                   <div className="p-3.5 rounded-xl bg-surface-container/40 border border-outline-variant/20 flex items-center justify-between gap-4">
                     <div className="min-w-0 flex-1">
