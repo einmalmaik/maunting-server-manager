@@ -51,6 +51,9 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
 vi.mock('@/pages/Ai', () => ({
   Ai: () => <div data-testid="ki-seite" />,
 }))
+vi.mock('@/pages/Messenger', () => ({
+  Messenger: () => <div data-testid="messenger-seite" />,
+}))
 vi.mock('./vault/VaultView', () => ({
   VaultView: () => <div data-testid="tresor-seite" />,
 }))
@@ -110,6 +113,7 @@ function konfigMock(konfig: Record<string, unknown>) {
 describe('DesktopApp', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
     invokeMock.mockReset()
     eventListeners.clear()
     schleifeAktiv.length = 0
@@ -528,10 +532,55 @@ describe('DesktopApp', () => {
       expect(screen.getByText(i18n.t('mss.app.kalender'))).toBeInTheDocument()
       expect(screen.getByText(i18n.t('mss.app.notizen', 'Notizen'))).toBeInTheDocument()
 
-      // KI-Chat und Gedächtnis sind offline ausgeblendet
-      expect(screen.queryByText(i18n.t('mss.app.chat'))).not.toBeInTheDocument()
+      // KI-Assistent, Messenger und Gedächtnis sind offline ausgeblendet
+      expect(screen.queryByText(i18n.t('mss.app.ki'))).not.toBeInTheDocument()
+      expect(screen.queryByText(i18n.t('mss.app.messenger'))).not.toBeInTheDocument()
       expect(screen.queryByText(i18n.t('mss.app.gedaechtnis'))).not.toBeInTheDocument()
       expect(screen.queryByTestId('ki-seite')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('messenger-seite')).not.toBeInTheDocument()
+    })
+  })
+
+  it('zeigt den Messenger-Reiter online und rendert die Messenger-Seite beim Navigieren zu /chat', async () => {
+    localStorage.setItem(LETZTE_ROUTE_KEY, '/chat')
+    localStorage.setItem('msm_cached_user', JSON.stringify(BENUTZER))
+    useAuthStore.setState({ user: BENUTZER, isAuthenticated: true })
+
+    konfigMock({
+      backend_url: 'https://api.example.com',
+      sandbox_pfad: 'C:\\Users\\tester\\MSS-Sandbox',
+      eingerichtet: true,
+    })
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((eingabe: RequestInfo | URL) => {
+        const url = String(eingabe)
+        if (url.includes('/auth/refresh')) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r' }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            }),
+          )
+        }
+        if (url.includes('/auth/me')) {
+          return Promise.resolve(
+            new Response(JSON.stringify(BENUTZER), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            }),
+          )
+        }
+        return Promise.resolve(new Response('{}', { status: 200 }))
+      }),
+    )
+
+    render(<DesktopApp />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('messenger-seite')).toBeInTheDocument()
+      expect(screen.getByText(i18n.t('mss.app.messenger'))).toBeInTheDocument()
     })
   })
 

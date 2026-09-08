@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { MemoryRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { listen } from '@tauri-apps/api/event'
-import { BrainCircuit, Calendar as CalendarIcon, Eye, KeyRound, LogOut, Menu, MessageSquare, Settings as SettingsIcon, ShieldAlert, StickyNote, WifiOff, X } from 'lucide-react'
+import { Bot, BrainCircuit, Calendar as CalendarIcon, Eye, KeyRound, LogOut, Menu, MessageSquare, Settings as SettingsIcon, ShieldAlert, StickyNote, WifiOff, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { api, isNetworkOrOfflineError } from '@/api/client'
@@ -29,6 +29,7 @@ import { PanelPopupModal } from '@/components/popups/PanelPopupModal'
 import { Avatar, BenachrichtigungsGlocke, Button, ProfileDropdown, type ProfileDropdownItem } from '@/Singra/UI'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { Ai } from '@/pages/Ai'
+import { Messenger } from '@/pages/Messenger'
 import { Calendar } from '@/pages/Calendar'
 import { Notes } from '@/pages/Notes'
 import { Privacy } from '@/pages/Privacy'
@@ -70,7 +71,7 @@ type Phase = 'laedt' | 'einrichtung' | 'kopplung' | 'sandbox' | 'bereit'
 const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
 const SPLASH_GESEHEN_KEY = 'mss:splash_gesehen'
 const LETZTE_ROUTE_KEY = 'mss:letzte_route'
-const ERLAUBTE_ROUTEN = ['/ai', '/kalender', '/notizen', '/gedaechtnis', '/tresor', '/einstellungen']
+const ERLAUBTE_ROUTEN = ['/ai', '/chat', '/kalender', '/notizen', '/gedaechtnis', '/tresor', '/einstellungen']
 
 const OFFLINE_ERLAUBTE_ROUTEN = ['/tresor', '/kalender', '/notizen']
 
@@ -406,6 +407,31 @@ export function DesktopApp() {
           }
         />
         <Route
+          path="/chat"
+          element={
+            <Hauptseite
+              bereich="chat"
+              konfig={konfig}
+              offeneUebernahme={offeneUebernahme}
+              onKonfigAenderung={ladeKonfigNeu}
+              isOffline={isOffline}
+            />
+          }
+        />
+        <Route
+          path="/chat/join/:inviteCode"
+          element={
+            <Hauptseite
+              bereich="chat"
+              konfig={konfig}
+              offeneUebernahme={offeneUebernahme}
+              onKonfigAenderung={ladeKonfigNeu}
+              isOffline={isOffline}
+            />
+          }
+        />
+        <Route path="/messenger" element={<Navigate to="/chat" replace />} />
+        <Route
           path="/kalender"
           element={
             <Hauptseite
@@ -704,7 +730,7 @@ function Hauptseite({
   onKonfigAenderung,
   isOffline = false,
 }: {
-  bereich: 'ki' | 'kalender' | 'notizen' | 'gedaechtnis' | 'tresor' | 'einstellungen'
+  bereich: 'ki' | 'chat' | 'kalender' | 'notizen' | 'gedaechtnis' | 'tresor' | 'einstellungen'
   konfig: AppKonfig | null
   offeneUebernahme: string | null
   onKonfigAenderung?: () => void
@@ -721,14 +747,20 @@ function Hauptseite({
   const darfNotizen = isOffline ? true : hasPermissionNotizen
   const darfGedaechtnis = useHasPermission('ai.memory.use')
   const [darfTresor, setDarfTresor] = useState(true)
+  const [darfMessenger, setDarfMessenger] = useState(true)
   const [mobileMenuOffen, setMobileMenuOffen] = useState(false)
 
   useEffect(() => {
     let active = true
-    api<{ vault_enabled?: boolean }>('/api/panel/settings/public')
+    api<{ vault_enabled?: boolean; social_enabled?: boolean }>('/api/panel/settings/public')
       .then((res) => {
-        if (active && res && typeof res.vault_enabled === 'boolean') {
-          setDarfTresor(res.vault_enabled)
+        if (active && res) {
+          if (typeof res.vault_enabled === 'boolean') {
+            setDarfTresor(res.vault_enabled)
+          }
+          if (typeof res.social_enabled === 'boolean') {
+            setDarfMessenger(res.social_enabled)
+          }
         }
       })
       .catch(() => {})
@@ -739,7 +771,10 @@ function Hauptseite({
     if (!darfTresor && bereich === 'tresor') {
       navigate(isOffline ? '/kalender' : '/ai')
     }
-  }, [darfTresor, bereich, navigate, isOffline])
+    if (!darfMessenger && bereich === 'chat') {
+      navigate(isOffline ? '/kalender' : '/ai')
+    }
+  }, [darfTresor, darfMessenger, bereich, navigate, isOffline])
 
   // Offline: Nur Tresor, Kalender und Notizen erlaubt -> redirect zu Tresor
   useEffect(() => {
@@ -804,8 +839,16 @@ function Hauptseite({
             <Reiter
               aktiv={bereich === 'ki'}
               onClick={() => navigate('/ai')}
+              icon={<Bot className="h-4 w-4" />}
+              label={t('mss.app.ki', t('nav.ai', 'KI-Assistent'))}
+            />
+          )}
+          {!isOffline && darfMessenger && (
+            <Reiter
+              aktiv={bereich === 'chat'}
+              onClick={() => navigate('/chat')}
               icon={<MessageSquare className="h-4 w-4" />}
-              label={t('mss.app.chat')}
+              label={t('mss.app.messenger', t('nav.chat', 'Messenger'))}
             />
           )}
           {darfKalender && (
@@ -905,8 +948,23 @@ function Hauptseite({
                       : 'text-on-surface hover:bg-surface-container-high'
                   }`}
                 >
+                  <Bot className="h-4 w-4" />
+                  <span>{t('mss.app.ki', t('nav.ai', 'KI-Assistent'))}</span>
+                </button>
+              )}
+
+              {!isOffline && darfMessenger && (
+                <button
+                  type="button"
+                  onClick={() => { navigate('/chat'); setMobileMenuOffen(false); }}
+                  className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors ${
+                    bereich === 'chat'
+                      ? 'bg-primary/15 text-primary border border-primary/30'
+                      : 'text-on-surface hover:bg-surface-container-high'
+                  }`}
+                >
                   <MessageSquare className="h-4 w-4" />
-                  <span>{t('mss.app.chat')}</span>
+                  <span>{t('mss.app.messenger', t('nav.chat', 'Messenger'))}</span>
                 </button>
               )}
 
@@ -999,7 +1057,7 @@ function Hauptseite({
           </div>
         </div>
       )}
-      <main className={`relative flex flex-1 min-h-0 flex-col overflow-hidden ${bereich === 'ki' || bereich === 'tresor' ? 'p-0 bg-surface' : 'p-margin-mobile md:p-margin-desktop'}`}>
+      <main className={`relative flex flex-1 min-h-0 flex-col overflow-hidden ${bereich === 'ki' || bereich === 'tresor' || bereich === 'chat' ? 'p-0 bg-surface' : 'p-margin-mobile md:p-margin-desktop'}`}>
         <div className="relative z-10 flex h-full w-full flex-1 min-h-0 flex-col overflow-hidden">
           {bereich === 'ki' ? (
             darfChatten ? (
@@ -1026,6 +1084,10 @@ function Hauptseite({
             ) : (
               <KeinChatrecht />
             )
+          ) : bereich === 'chat' ? (
+            <div className="flex h-full w-full flex-1 min-h-0 flex-col overflow-hidden bg-surface">
+              <Messenger />
+            </div>
           ) : bereich === 'kalender' ? (
             <div className="mx-auto w-full max-w-6xl flex-1 min-h-0 overflow-y-auto pb-8">
               <Calendar />

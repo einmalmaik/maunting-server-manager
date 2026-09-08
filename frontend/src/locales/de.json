@@ -19,7 +19,7 @@
     "audit": "Audit",
     "ai": "KI-Assistent",
     "teams": "Teams",
-    "chat": "Chat",
+    "chat": "Messenger",
     "social": "Social & Hub"
   },
   "navGroups": {
@@ -5530,7 +5530,9 @@
       "updateDownloadProzent": "Download: {{prozent}}%",
       "angemeldetAls": "Angemeldet als {{name}}",
       "bereiche": "Ansicht",
-      "chat": "Chat",
+      "chat": "Messenger",
+      "ki": "KI-Assistent",
+      "messenger": "Messenger",
       "kalender": "Kalender",
       "notizen": "Notizen",
       "einstellungen": "Einstellungen",

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { AudioLines, CalendarClock, Check, Globe, ListPlus, Loader2, Mic, Paperclip, Pencil, Send, ShieldAlert, Sparkles, Square, Trash2, X, Zap } from 'lucide-react'
+import { AudioLines, CalendarClock, Check, ListPlus, Loader2, Mic, Paperclip, Pencil, Send, ShieldAlert, Sparkles, Square, Trash2, X, Zap } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 
@@ -1148,35 +1148,6 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
             >
               <AudioLines className="h-4 w-4 shrink-0" aria-hidden="true" />
               <span className="hidden md:inline">Realtime</span>
-            </button>
-          )}
-
-          {geoData && (
-            <button
-              type="button"
-              onClick={() => {
-                if (geoOpen) {
-                  manuallyClosedGeoRef.current = true
-                  if (lastSeenGeoIdRef.current) {
-                    closedGeoIdRef.current = lastSeenGeoIdRef.current
-                    writeClosedGeoAnalysis(merkSchluessel.closedGeoAnalysis, lastSeenGeoIdRef.current)
-                  }
-                  setGeoOpen(false)
-                } else {
-                  manuallyClosedGeoRef.current = false
-                  setGeoOpen(true)
-                }
-              }}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-                geoOpen
-                  ? 'border-primary bg-primary/20 text-primary'
-                  : 'border-outline-variant/40 bg-surface-container-high/40 text-on-surface-variant hover:text-on-surface hover:border-outline-variant'
-              }`}
-              aria-label={geoOpen ? t('ai.geo.hideMap', 'Globus schließen') : t('ai.geo.showMap', 'Globus öffnen')}
-              title={geoOpen ? t('ai.geo.hideMap', 'Globus schließen') : t('ai.geo.showMap', 'Globus öffnen')}
-            >
-              <Globe className="h-4 w-4 shrink-0" aria-hidden="true" />
-              <span className="hidden md:inline">{t('ai.geo.button', '3D-Globus')}</span>
             </button>
           )}
 
