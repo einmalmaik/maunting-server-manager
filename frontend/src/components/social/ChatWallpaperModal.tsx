@@ -171,7 +171,7 @@ export function ChatWallpaperModal({
               </div>
               <div className="relative z-10">
                 <p className="text-xs font-bold text-on-surface">Deep Petrol</p>
-                <p className="text-[10px] text-on-surface-variant/80">Singra Brand Gradient</p>
+                <p className="text-[10px] text-on-surface-variant/80">Maunting Studios Farbverlauf</p>
               </div>
             </button>
 
