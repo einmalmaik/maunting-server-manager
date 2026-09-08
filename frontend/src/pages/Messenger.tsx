@@ -51,6 +51,7 @@ import {
   UserPlus,
   Pencil,
   ShieldAlert,
+  Image as ImageIcon,
 } from 'lucide-react'
 import { DeviceBadge } from '@/components/social/DeviceBadge'
 import { StatusDot, type PresenceStatus } from '@/components/social/StatusIndicator'
@@ -100,9 +101,61 @@ import { CameraSnapshotModal } from '@/components/social/CameraSnapshotModal'
 import { CreateStoryModal } from '@/components/social/CreateStoryModal'
 import { StoryViewerModal } from '@/components/social/StoryViewerModal'
 import { GroupPermissionsModal } from '@/components/social/GroupPermissionsModal'
+import {
+  type ChatWallpaperConfig,
+  loadChatWallpaperConfig,
+  HEIMISCH_PATTERN_DATA_URI,
+} from '@/components/social/ChatWallpaper'
+import { ChatWallpaperModal } from '@/components/social/ChatWallpaperModal'
 import { sendeGeraeteBenachrichtigung } from '@/lib/benachrichtigung'
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
+
+function formatChatDateBadge(isoDateString: string): string {
+  try {
+    const d = new Date(isoDateString)
+    if (isNaN(d.getTime())) return ''
+    const now = new Date()
+
+    const isToday =
+      d.getDate() === now.getDate() &&
+      d.getMonth() === now.getMonth() &&
+      d.getFullYear() === now.getFullYear()
+    if (isToday) return 'Heute'
+
+    const yesterday = new Date(now)
+    yesterday.setDate(now.getDate() - 1)
+    const isYesterday =
+      d.getDate() === yesterday.getDate() &&
+      d.getMonth() === yesterday.getMonth() &&
+      d.getFullYear() === yesterday.getFullYear()
+    if (isYesterday) return 'Gestern'
+
+    const isSameYear = d.getFullYear() === now.getFullYear()
+    return d.toLocaleDateString('de-DE', {
+      day: 'numeric',
+      month: 'long',
+      ...(isSameYear ? {} : { year: 'numeric' }),
+    })
+  } catch {
+    return ''
+  }
+}
+
+function getWaveformBars(msgId: number, count = 28): number[] {
+  const bars: number[] = []
+  let seed = (Math.abs(msgId) || 1) * 9301 + 49297
+  for (let i = 0; i < count; i++) {
+    seed = (seed * 9301 + 49297) % 233280
+    const rand = seed / 233280
+    // Natural audio envelope: quieter at start & end, natural speech peaks in between
+    const pos = i / (count - 1)
+    const envelope = Math.sin(pos * Math.PI) * 0.45 + 0.55
+    const height = Math.max(0.2, Math.min(1.0, (0.2 + rand * 0.8) * envelope))
+    bars.push(height)
+  }
+  return bars
+}
 
 export interface ChatContact {
   id: number
@@ -352,6 +405,10 @@ export function Messenger() {
 
   // Double-import prevention state for shared notes & calendar entries
   const [importedAttachmentIds, setImportedAttachmentIds] = useState<Set<string>>(() => new Set())
+
+  // Chat Wallpaper state (MSM Heimisch default or custom)
+  const [wallpaperConfig, setWallpaperConfig] = useState<ChatWallpaperConfig>(() => loadChatWallpaperConfig())
+  const [isWallpaperModalOpen, setIsWallpaperModalOpen] = useState(false)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -1224,6 +1281,56 @@ export function Messenger() {
     }
   }
 
+  // Seek audio playback when clicking anywhere on the waveform
+  const handleWaveformSeek = (
+    messageId: number,
+    dataUrl: string,
+    durationSeconds: number,
+    e: React.MouseEvent<HTMLDivElement>
+  ) => {
+    e.stopPropagation()
+    const rect = e.currentTarget.getBoundingClientRect()
+    if (rect.width <= 0 || durationSeconds <= 0) return
+    const clickX = Math.max(0, Math.min(e.clientX - rect.left, rect.width))
+    const seekFrac = clickX / rect.width
+    const targetTime = seekFrac * durationSeconds
+
+    if (playingAudioId === messageId && audioInstanceRef.current) {
+      audioInstanceRef.current.currentTime = targetTime
+      setAudioCurrentTime(targetTime)
+    } else {
+      if (audioInstanceRef.current) {
+        audioInstanceRef.current.pause()
+        audioInstanceRef.current.ontimeupdate = null
+        audioInstanceRef.current.onended = null
+        audioInstanceRef.current.onerror = null
+        audioInstanceRef.current = null
+      }
+      const audio = new Audio(dataUrl)
+      audio.playbackRate = audioPlaybackRate
+      audio.currentTime = targetTime
+      audioInstanceRef.current = audio
+      setPlayingAudioId(messageId)
+      setAudioCurrentTime(targetTime)
+
+      audio.ontimeupdate = () => {
+        setAudioCurrentTime(audio.currentTime)
+      }
+      audio.onended = () => {
+        setPlayingAudioId(null)
+        setAudioCurrentTime(0)
+        audioInstanceRef.current = null
+      }
+      audio.onerror = () => {
+        setPlayingAudioId(null)
+        toast.error('Sprachnachricht konnte nicht abgespielt werden.')
+      }
+      audio.play().catch(() => {
+        setPlayingAudioId(null)
+      })
+    }
+  }
+
   // Cleanup audio playback on unmount
   useEffect(() => {
     return () => {
@@ -1589,6 +1696,20 @@ export function Messenger() {
             >
               <UserPlus className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Anfrage senden</span>
+            </Button>
+          )}
+
+          {/* Wallpaper Settings Button in Chat View */}
+          {isChatOpen && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setIsWallpaperModalOpen(true)}
+              className="h-8 w-8 text-on-surface-variant hover:text-primary"
+              title="Chat-Hintergrund anpassen"
+              aria-label="Chat-Hintergrund anpassen"
+            >
+              <ImageIcon className="w-4 h-4" />
             </Button>
           )}
 
@@ -2388,12 +2509,56 @@ export function Messenger() {
             </div>
           )}
 
+          {/* Chat Wallpaper Background Layer (MSM Heimisch / Custom / Presets) */}
+          <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
+            {wallpaperConfig.preset === 'heimisch' && (
+              <div
+                className="absolute inset-0 opacity-15"
+                style={{
+                  backgroundImage: `url("${HEIMISCH_PATTERN_DATA_URI}")`,
+                  backgroundSize: '160px 160px',
+                  backgroundRepeat: 'repeat',
+                }}
+              />
+            )}
+            {wallpaperConfig.preset === 'midnight' && (
+              <div className="absolute inset-0 bg-gradient-to-br from-[#0c1322] via-[#090e1a] to-[#040810]" />
+            )}
+            {wallpaperConfig.preset === 'cyber' && (
+              <div
+                className="absolute inset-0 opacity-15"
+                style={{
+                  backgroundImage: 'radial-gradient(#6366f1 1px, transparent 1px)',
+                  backgroundSize: '16px 16px',
+                }}
+              />
+            )}
+            {wallpaperConfig.preset === 'minimal' && (
+              <div className="absolute inset-0 bg-surface-container-lowest" />
+            )}
+            {wallpaperConfig.preset === 'custom' && wallpaperConfig.customDataUrl && (
+              <img
+                src={wallpaperConfig.customDataUrl}
+                alt=""
+                className="w-full h-full object-cover"
+              />
+            )}
+
+            {/* Configurable Dimming Layer for Text Readability */}
+            {wallpaperConfig.dimLevel > 0 && (
+              <div
+                className="absolute inset-0 bg-black"
+                style={{ opacity: wallpaperConfig.dimLevel / 100 }}
+              />
+            )}
+          </div>
+
           {isChatOpen ? (
             <>
               {/* Message Thread Scroll Area */}
               <div
                 ref={scrollContainerRef}
-                className="flex-1 overflow-y-auto p-4 space-y-3"
+                className="flex-1 overflow-y-auto p-4 space-y-3 relative z-1"
               >
                 {/* WhatsApp-style encryption notice banner */}
                 <div className="py-1 text-center">
@@ -2409,11 +2574,24 @@ export function Messenger() {
                   </div>
                 )}
 
-                {messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`group flex flex-col ${msg.isSelf ? 'items-end' : 'items-start'}`}
-                  >
+                {messages.map((msg, idx) => {
+                  const currentDateBadge = formatChatDateBadge(msg.createdAt)
+                  const prevDateBadge = idx > 0 ? formatChatDateBadge(messages[idx - 1].createdAt) : null
+                  const showDateSeparator = Boolean(currentDateBadge && currentDateBadge !== prevDateBadge)
+
+                  return (
+                    <React.Fragment key={msg.id}>
+                      {showDateSeparator && (
+                        <div className="flex justify-center my-3 sticky top-2 z-10 pointer-events-none">
+                          <span className="px-3.5 py-1 rounded-full text-[11px] font-semibold bg-surface-container/90 text-on-surface-variant backdrop-blur-md border border-outline-variant/30 shadow-xs">
+                            {currentDateBadge}
+                          </span>
+                        </div>
+                      )}
+
+                      <div
+                        className={`group flex flex-col ${msg.isSelf ? 'items-end' : 'items-start'}`}
+                      >
                     <div
                       className={`max-w-[85%] md:max-w-[70%] px-3.5 py-2 rounded-2xl text-xs break-words shadow-xs space-y-2 ${
                         msg.isSelf
@@ -2474,15 +2652,61 @@ export function Messenger() {
                         </div>
                       )}
 
-                      {/* Audio / Voice Message Attachment (Sleek Darker Design-DNA) */}
+                      {/* Audio / Voice Message Attachment (WhatsApp Style) */}
                       {!msg.isDeleted && msg.audioAttachment && (
-                        <div className={`flex items-center gap-3 p-2 rounded-xl min-w-[200px] max-w-[280px] ${
-                          msg.isSelf ? 'bg-black/20 text-white' : 'bg-surface-container-high/90 text-on-surface'
-                        }`}>
+                        <div
+                          className={`flex items-center gap-2.5 p-2 rounded-2xl min-w-[240px] max-w-[320px] ${
+                            msg.isSelf ? 'bg-black/20 text-white' : 'bg-surface-container-high/90 text-on-surface'
+                          }`}
+                        >
+                          {/* Sender Profile Picture on Left (WhatsApp-style: transitions to speed toggle button when playing) */}
+                          {playingAudioId === msg.id ? (
+                            <button
+                              type="button"
+                              onClick={cycleAudioPlaybackRate}
+                              className={`w-10 h-10 rounded-full font-bold text-xs shadow-sm flex items-center justify-center shrink-0 hover:scale-105 active:scale-95 transition-all ${
+                                msg.isSelf
+                                  ? 'bg-white text-primary hover:bg-white/90'
+                                  : 'bg-primary text-on-primary hover:opacity-90'
+                              }`}
+                              title="Wiedergabegeschwindigkeit ändern (1x / 1.5x / 2x)"
+                              aria-label="Wiedergabegeschwindigkeit ändern"
+                            >
+                              {audioPlaybackRate}x
+                            </button>
+                          ) : (
+                            <div
+                              className="relative shrink-0 w-10 h-10 cursor-pointer"
+                              onClick={cycleAudioPlaybackRate}
+                              title="Wiedergabegeschwindigkeit ändern (1x / 1.5x / 2x)"
+                            >
+                              <Avatar
+                                src={msg.isSelf ? user?.avatar_url : (activeContact?.avatarUrl || null)}
+                                name={msg.isSelf ? (user?.username || 'Ich') : (msg.senderName || activeContact?.username || 'Benutzer')}
+                                size="md"
+                                className="w-10 h-10 ring-1 ring-outline-variant/30"
+                              />
+                              <button
+                                type="button"
+                                onClick={cycleAudioPlaybackRate}
+                                className={`absolute -bottom-1 -right-1 px-1 py-0.5 rounded-full font-bold text-[9px] shadow-xs border border-surface leading-none hover:scale-110 transition-transform ${
+                                  msg.isSelf
+                                    ? 'bg-white text-primary'
+                                    : 'bg-primary text-on-primary'
+                                }`}
+                                title="Wiedergabegeschwindigkeit ändern (1x / 1.5x / 2x)"
+                                aria-label="Wiedergabegeschwindigkeit ändern"
+                              >
+                                {audioPlaybackRate}x
+                              </button>
+                            </div>
+                          )}
+
+                          {/* Play / Pause Button */}
                           <button
                             type="button"
                             onClick={() => togglePlayAudio(msg.id, msg.audioAttachment!.dataUrl)}
-                            className={`p-2.5 rounded-full shrink-0 shadow-xs transition-all ${
+                            className={`w-8 h-8 rounded-full shrink-0 shadow-xs flex items-center justify-center transition-all ${
                               msg.isSelf
                                 ? 'bg-white text-primary hover:bg-white/90'
                                 : 'bg-primary text-on-primary hover:opacity-90'
@@ -2490,43 +2714,67 @@ export function Messenger() {
                             aria-label={playingAudioId === msg.id ? 'Pause' : 'Abspielen'}
                           >
                             {playingAudioId === msg.id ? (
-                              <Pause className="w-4 h-4" />
+                              <Pause className="w-3.5 h-3.5" />
                             ) : (
-                              <Play className="w-4 h-4 translate-x-0.5" />
+                              <Play className="w-3.5 h-3.5 translate-x-0.5" />
                             )}
                           </button>
-                          <div className="flex-1 min-w-0 space-y-1">
-                            <div className="relative h-2 w-full bg-black/15 rounded-full overflow-hidden">
-                              <div
-                                className={`h-full transition-all ${msg.isSelf ? 'bg-white' : 'bg-primary'}`}
-                                style={{
-                                  width:
-                                    playingAudioId === msg.id && msg.audioAttachment.durationSeconds > 0
-                                      ? `${Math.min(100, (audioCurrentTime / msg.audioAttachment.durationSeconds) * 100)}%`
-                                      : '0%',
-                                }}
-                              />
+
+                          {/* Dynamic Audio Waveform with Click-to-Seek */}
+                          <div
+                            className="flex-1 min-w-[130px] space-y-1 cursor-pointer select-none"
+                            onClick={(e) =>
+                              handleWaveformSeek(
+                                msg.id,
+                                msg.audioAttachment!.dataUrl,
+                                msg.audioAttachment!.durationSeconds,
+                                e
+                              )
+                            }
+                            title="Klicken zum Spulen"
+                          >
+                            <div className="flex items-center gap-[2.5px] h-7 px-0.5">
+                              {getWaveformBars(msg.id).map((barH, bIdx) => {
+                                const count = 28
+                                const progress =
+                                  playingAudioId === msg.id && msg.audioAttachment!.durationSeconds > 0
+                                    ? audioCurrentTime / msg.audioAttachment!.durationSeconds
+                                    : 0
+                                const barProgress = bIdx / count
+                                const isPlayed = barProgress <= progress
+
+                                return (
+                                  <div
+                                    key={bIdx}
+                                    className={`flex-1 rounded-full transition-colors ${
+                                      isPlayed
+                                        ? msg.isSelf
+                                          ? 'bg-white'
+                                          : 'bg-primary'
+                                        : msg.isSelf
+                                        ? 'bg-white/35'
+                                        : 'bg-on-surface-variant/35'
+                                    }`}
+                                    style={{
+                                      height: `${Math.max(4, Math.round(barH * 24))}px`,
+                                      minWidth: '2px',
+                                      maxWidth: '4px',
+                                    }}
+                                  />
+                                )
+                              })}
                             </div>
-                            <div className="flex justify-between items-center text-[10px] opacity-80">
-                              <span className="flex items-center gap-1">
+
+                            <div className="flex justify-between items-center text-[10px] opacity-80 px-0.5">
+                              <span>
+                                {playingAudioId === msg.id
+                                  ? formatDuration(audioCurrentTime)
+                                  : formatDuration(msg.audioAttachment.durationSeconds)}
+                              </span>
+                              <span className="flex items-center gap-1 opacity-70">
                                 <Mic className="w-2.5 h-2.5" />
                                 <span>Sprachnachricht</span>
                               </span>
-                              <div className="flex items-center gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={cycleAudioPlaybackRate}
-                                  className="px-1.5 py-0.5 rounded-md font-semibold text-[10px] bg-white/20 hover:bg-white/30 text-current transition-colors"
-                                  title="Wiedergabegeschwindigkeit ändern (1x / 1.5x / 2x)"
-                                >
-                                  {audioPlaybackRate}x
-                                </button>
-                                <span>
-                                  {playingAudioId === msg.id
-                                    ? formatDuration(audioCurrentTime)
-                                    : formatDuration(msg.audioAttachment.durationSeconds)}
-                                </span>
-                              </div>
                             </div>
                           </div>
                         </div>
@@ -2734,9 +2982,11 @@ export function Messenger() {
                           </span>
                         )
                       )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  </React.Fragment>
+                )
+              })}
                 <div ref={messagesEndRef} />
               </div>
 
@@ -3570,6 +3820,14 @@ export function Messenger() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Chat Wallpaper Customization Modal */}
+      <ChatWallpaperModal
+        open={isWallpaperModalOpen}
+        onOpenChange={setIsWallpaperModalOpen}
+        currentConfig={wallpaperConfig}
+        onSaveConfig={(newCfg) => setWallpaperConfig(newCfg)}
+      />
     </div>
   )
 }

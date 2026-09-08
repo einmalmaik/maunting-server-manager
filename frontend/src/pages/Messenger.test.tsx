@@ -818,4 +818,120 @@ describe('Messenger (Allround Chat)', () => {
     fireEvent.click(importedCalBtn)
     expect(saveCalendarEventOffline).toHaveBeenCalledTimes(1)
   })
+
+  it('rendert Datumstrenner zwischen Nachrichten unterschiedlicher Tage', async () => {
+    vi.mocked(socialApi.getFriends).mockResolvedValue([
+      {
+        id: 1,
+        friend_user_id: 102,
+        username: 'bob',
+        avatar_url: null,
+        presence: { status: 'online' },
+      } as any,
+    ])
+
+    const todayIso = new Date().toISOString()
+    const yesterday = new Date()
+    yesterday.setDate(yesterday.getDate() - 1)
+    const yesterdayIso = yesterday.toISOString()
+
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([
+      {
+        id: 1,
+        blind_mailbox_id: 'mailbox-102',
+        ciphertext_envelope: 'ciphertext-yesterday',
+        created_at: yesterdayIso,
+      },
+      {
+        id: 2,
+        blind_mailbox_id: 'mailbox-102',
+        ciphertext_envelope: 'ciphertext-today',
+        created_at: todayIso,
+      },
+    ])
+
+    const { decryptE2eeMessage } = await import('@/services/e2eeCrypto')
+    vi.mocked(decryptE2eeMessage).mockImplementation(async (envelope) => {
+      if (envelope === 'ciphertext-yesterday') {
+        return JSON.stringify({
+          sender_id: 102,
+          text: 'Hallo von gestern!',
+        })
+      }
+      if (envelope === 'ciphertext-today') {
+        return JSON.stringify({
+          sender_id: 102,
+          text: 'Hallo von heute!',
+        })
+      }
+      return '{}'
+    })
+
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /bob/i })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole('button', { name: /bob/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Hallo von gestern!')).toBeInTheDocument()
+      expect(screen.getByText('Hallo von heute!')).toBeInTheDocument()
+    })
+
+    // Both date badges should be present
+    expect(screen.getByText('Gestern')).toBeInTheDocument()
+    expect(screen.getByText('Heute')).toBeInTheDocument()
+  })
+
+  it('öffnet das Chat-Hintergrund-Modal und erlaubt die Auswahl von Presets', async () => {
+    vi.mocked(socialApi.getFriends).mockResolvedValue([
+      {
+        id: 1,
+        friend_user_id: 103,
+        username: 'charlie',
+        avatar_url: null,
+        presence: { status: 'online' },
+      } as any,
+    ])
+
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /charlie/i })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole('button', { name: /charlie/i }))
+
+    // Wallpaper button in chat header
+    await waitFor(() => {
+      expect(screen.getByLabelText('Chat-Hintergrund anpassen')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByLabelText('Chat-Hintergrund anpassen'))
+
+    // Modal opens
+    await waitFor(() => {
+      expect(screen.getByText('Chat-Hintergrund anpassen')).toBeInTheDocument()
+      expect(screen.getByText('MSM Heimisch')).toBeInTheDocument()
+      expect(screen.getByText('Mitternacht')).toBeInTheDocument()
+      expect(screen.getByText('Cyber Grid')).toBeInTheDocument()
+      expect(screen.getByText('Schlicht Dunkel')).toBeInTheDocument()
+    })
+
+    // Select Midnight preset and apply
+    fireEvent.click(screen.getByText('Mitternacht'))
+    fireEvent.click(screen.getByRole('button', { name: 'Übernehmen' }))
+
+    await waitFor(() => {
+      expect(screen.queryByText('Design-Hintergründe')).not.toBeInTheDocument()
+    })
+  })
 })
