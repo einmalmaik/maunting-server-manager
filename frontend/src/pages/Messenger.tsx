@@ -104,7 +104,6 @@ import { GroupPermissionsModal } from '@/components/social/GroupPermissionsModal
 import {
   type ChatWallpaperConfig,
   loadChatWallpaperConfig,
-  HEIMISCH_PATTERN_DATA_URI,
 } from '@/components/social/ChatWallpaper'
 import { ChatWallpaperModal } from '@/components/social/ChatWallpaperModal'
 import { sendeGeraeteBenachrichtigung } from '@/lib/benachrichtigung'
@@ -2509,29 +2508,22 @@ export function Messenger() {
             </div>
           )}
 
-          {/* Chat Wallpaper Background Layer (MSM Heimisch / Custom / Presets) */}
+          {/* Chat Wallpaper Background Layer (Cyber / Petrol / Midnight / Minimal / Custom) */}
           <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
-            {wallpaperConfig.preset === 'heimisch' && (
-              <div
-                className="absolute inset-0 opacity-15"
-                style={{
-                  backgroundImage: `url("${HEIMISCH_PATTERN_DATA_URI}")`,
-                  backgroundSize: '160px 160px',
-                  backgroundRepeat: 'repeat',
-                }}
-              />
-            )}
-            {wallpaperConfig.preset === 'midnight' && (
-              <div className="absolute inset-0 bg-gradient-to-br from-[#0c1322] via-[#090e1a] to-[#040810]" />
-            )}
             {wallpaperConfig.preset === 'cyber' && (
               <div
-                className="absolute inset-0 opacity-15"
+                className="absolute inset-0 opacity-20"
                 style={{
-                  backgroundImage: 'radial-gradient(#6366f1 1px, transparent 1px)',
+                  backgroundImage: 'radial-gradient(#06b6d4 1.2px, transparent 1.2px)',
                   backgroundSize: '16px 16px',
                 }}
               />
+            )}
+            {wallpaperConfig.preset === 'petrol' && (
+              <div className="absolute inset-0 bg-gradient-to-br from-[#06181d] via-[#092228] to-[#040e11]" />
+            )}
+            {wallpaperConfig.preset === 'midnight' && (
+              <div className="absolute inset-0 bg-gradient-to-br from-[#0c1322] via-[#090e1a] to-[#040810]" />
             )}
             {wallpaperConfig.preset === 'minimal' && (
               <div className="absolute inset-0 bg-surface-container-lowest" />

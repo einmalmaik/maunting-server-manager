@@ -15,7 +15,7 @@ import {
   RotateCcw,
   Sliders,
   Image as ImageIcon,
-  Shield,
+  Compass,
   Layers,
 } from 'lucide-react'
 import {
@@ -23,7 +23,6 @@ import {
   type ChatWallpaperConfig,
   DEFAULT_WALLPAPER_CONFIG,
   saveChatWallpaperConfig,
-  HEIMISCH_PATTERN_DATA_URI,
 } from './ChatWallpaper'
 
 interface ChatWallpaperModalProps {
@@ -149,36 +148,30 @@ export function ChatWallpaperModal({
               </div>
             </button>
 
-            {/* 2. MSM Heimisch */}
+            {/* 2. Deep Petrol (MSM Gradient) */}
             <button
               type="button"
-              onClick={() => setSelectedPreset('heimisch')}
+              onClick={() => setSelectedPreset('petrol')}
               className={`group relative p-3 rounded-xl border text-left flex flex-col justify-between h-24 overflow-hidden transition-all ${
-                selectedPreset === 'heimisch'
+                selectedPreset === 'petrol'
                   ? 'border-primary ring-2 ring-primary/40 bg-primary/10'
                   : 'border-outline-variant/30 bg-surface-container-low hover:border-outline-variant/60'
               }`}
             >
-              <div
-                className="absolute inset-0 opacity-20 pointer-events-none"
-                style={{
-                  backgroundImage: `url("${HEIMISCH_PATTERN_DATA_URI}")`,
-                  backgroundSize: '120px 120px',
-                }}
-              />
+              <div className="absolute inset-0 bg-gradient-to-br from-[#06181d] via-[#092228] to-[#040e11] pointer-events-none" />
               <div className="relative z-10 flex items-center justify-between w-full">
-                <div className="p-1 rounded-md bg-primary/20 text-primary">
-                  <Shield className="w-3.5 h-3.5" />
+                <div className="p-1 rounded-md bg-teal-500/20 text-teal-300">
+                  <Compass className="w-3.5 h-3.5" />
                 </div>
-                {selectedPreset === 'heimisch' && (
+                {selectedPreset === 'petrol' && (
                   <div className="w-4 h-4 rounded-full bg-primary text-on-primary flex items-center justify-center">
                     <Check className="w-2.5 h-2.5 stroke-[3]" />
                   </div>
                 )}
               </div>
               <div className="relative z-10">
-                <p className="text-xs font-bold text-on-surface">MSM Heimisch</p>
-                <p className="text-[10px] text-on-surface-variant/80">Maunting & Singra Tech-Doodle</p>
+                <p className="text-xs font-bold text-on-surface">Deep Petrol</p>
+                <p className="text-[10px] text-on-surface-variant/80">Singra Brand Gradient</p>
               </div>
             </button>
 
@@ -331,7 +324,7 @@ export function ChatWallpaperModal({
           </div>
         </div>
 
-        <DialogFooter className="flex items-center justify-between pt-3 pb-1 border-t border-outline-variant/30 bg-surface-container-low/40 -mx-5 -mb-5 px-5 rounded-b-2xl">
+        <DialogFooter className="flex items-center justify-between pt-3 border-t border-outline-variant/20 bg-transparent">
           <Button
             type="button"
             variant="ghost"

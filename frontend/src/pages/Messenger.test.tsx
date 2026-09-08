@@ -920,9 +920,9 @@ describe('Messenger (Allround Chat)', () => {
     // Modal opens
     await waitFor(() => {
       expect(screen.getByText('Chat-Hintergrund anpassen')).toBeInTheDocument()
-      expect(screen.getByText('MSM Heimisch')).toBeInTheDocument()
-      expect(screen.getByText('Mitternacht')).toBeInTheDocument()
       expect(screen.getByText('Cyber Grid')).toBeInTheDocument()
+      expect(screen.getByText('Deep Petrol')).toBeInTheDocument()
+      expect(screen.getByText('Mitternacht')).toBeInTheDocument()
       expect(screen.getByText('Schlicht Dunkel')).toBeInTheDocument()
     })
 
