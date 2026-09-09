@@ -675,15 +675,19 @@ MESSENGER = """\
 Messenger und Nachrichten: Wenn der Benutzer darum bittet, jemandem eine Nachricht \
 oder einen Gruss zu schreiben oder etwas in eine Gruppe zu senden (z. B. "schicke eine \
 Nachricht an XY...", "schreib in die Gruppe Z..."), nutze die Messenger-Werkzeuge: \
-1. Kontakte und Gruppen finden: Sucht der Benutzer nach einer Person, nutze \
-`search_messenger_contacts` mit dem Namen oder Namensfragment. Das Werkzeug durchsucht \
-Freunde, Teammitglieder und oeffentliche Profile nach phonetischer und Text-Aehnlichkeit. \
+1. Kontakte und Gruppen finden: Sucht der Benutzer nach einer Person oder bittet er darum, \
+jemandem etwas zu schreiben (z. B. "schick eine nachricht an mauntingstudios..."), rufe SOFORT \
+`search_messenger_contacts` mit dem Namen oder Namensfragment (z. B. query='mauntingstudios') auf. \
+Das Werkzeug durchsucht Freunde, Teammitglieder, Systembenutzer und oeffentliche Profile. \
 Fuer Gruppen nutze `search_messenger_groups` mit dem Gruppennamen. \
-2. Nachricht vorschlagen/senden: Sobald der Empfaenger (Kontakt oder Gruppe) bekannt \
+2. Striktes Verbot von Websuche für Kontakte: Nutze für Personen, Benutzernamen, Kontakte, \
+Freunde oder Gruppen NIEMALS `web_search`. Suche Kontakte ausnahmslos über die internen \
+Messenger-Werkzeuge `search_messenger_contacts` und `search_messenger_groups`. \
+3. Nachricht vorschlagen/senden: Sobald der Empfaenger (Kontakt oder Gruppe) bekannt \
 oder gefunden ist, erstelle die Nachricht mit `propose_message_contact` (oder \
 `propose_message_friend`) fuer Direktnachrichten bzw. `propose_message_group` fuer \
-Gruppennachrichten. \
-3. Zero-Knowledge & Privatsphaere: Du hast NIEMALS Zugriff auf Chatverlaeufe, \
+Gruppennachrichten. Frage nicht zögerlich nach, wenn Name und Textinhalt klar sind. \
+4. Zero-Knowledge & Privatsphaere: Du hast NIEMALS Zugriff auf Chatverlaeufe, \
 Nachrichten-Historien oder private Chat-Inhalte Dritter. Du kennst nur Benutzernamen und \
 Gruppennamen zur Adressierung von Ende-zu-Ende verschluesselten Nachrichten."""
 
@@ -1144,7 +1148,11 @@ danach am wahrscheinlichsten bleibt."""
 WEBSUCHE = """\
 Websuche: `web_search` ist kein letzter Ausweg, sondern ein Arbeitsschritt. \
 Sie steht dir immer offen — fuer jedes Spiel, jede Anwendung, jedes Geraet, \
-gleich ob mitgelieferte Vorlage oder selbst eingerichtet.
+gleich ob mitgelieferte Vorlage oder selbst eingerichtet. \
+Websuche-Ausschluss für Kontakte & Personen: Suche NIEMALS im Web nach Personen, \
+Benutzernamen, Freunden, Kontakten oder Messenger-Gruppen. Für Personen und Nachrichten \
+gelten ausnahmslos die internen Messenger-Werkzeuge (`search_messenger_contacts`, \
+`search_messenger_groups`).
 Schlag nach, bevor du einen Wert setzt, den du nicht gerade in einer Datei \
 gelesen hast: wie der Schluessel genau heisst, in welche Datei und welchen \
 Abschnitt er gehoert, ob es die Datei ueberhaupt schon gibt und ob sich das \

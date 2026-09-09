@@ -1962,6 +1962,22 @@ def _execute_global_read_tool(
                     "relationship": "public_user",
                 })
 
+        # 4. Aktive Systembenutzer (für direkte Namensübereinstimmung)
+        direct_users = (
+            db.query(User)
+            .filter(User.username.ilike(f"%{query}%"), User.id != user.id, User.is_active.is_(True))
+            .limit(10)
+            .all()
+        )
+        for du in direct_users:
+            if du.id not in seen_user_ids:
+                seen_user_ids.add(du.id)
+                results.append({
+                    "user_id": du.id,
+                    "username": du.username,
+                    "relationship": "user",
+                })
+
         return {"contacts": results, "count": len(results)}
 
     if tool_name == "search_messenger_groups":

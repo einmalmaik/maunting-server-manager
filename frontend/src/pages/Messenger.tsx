@@ -50,6 +50,9 @@ import {
   UserPlus,
   Pencil,
   Image as ImageIcon,
+  Bell,
+  BellOff,
+  Ban,
 } from 'lucide-react'
 import { DeviceBadge } from '@/components/social/DeviceBadge'
 import { StatusDot, type PresenceStatus } from '@/components/social/StatusIndicator'
@@ -108,6 +111,7 @@ import { ChatWallpaperModal } from '@/components/social/ChatWallpaperModal'
 import { sendeGeraeteBenachrichtigung } from '@/lib/benachrichtigung'
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
+import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
 
 function formatChatDateBadge(isoDateString: string): string {
   try {
@@ -264,6 +268,35 @@ function getSupportedAudioMimeType(): string {
   return candidates.find((c) => MediaRecorder.isTypeSupported(c)) || ''
 }
 
+const CONTACTS_CACHE_KEY = 'msm:chat_contacts_cache'
+const getChatCacheKey = (mid: string) => `msm:chat_cache:${mid}`
+
+function loadInitialContactsCache(): {
+  friends: FriendItem[]
+  groups: ChatGroupItem[]
+  teamMembers: Array<{ member: TeamMember; teamName: string }>
+  publicUsers: PublicProfileResponse[]
+  stories: ChatStoryItem[]
+} {
+  if (typeof window === 'undefined') {
+    return { friends: [], groups: [], teamMembers: [], publicUsers: [], stories: [] }
+  }
+  try {
+    const raw = localStorage.getItem(CONTACTS_CACHE_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      return {
+        friends: Array.isArray(parsed.friends) ? parsed.friends : [],
+        groups: Array.isArray(parsed.groups) ? parsed.groups : [],
+        teamMembers: Array.isArray(parsed.teamMembers) ? parsed.teamMembers : [],
+        publicUsers: Array.isArray(parsed.publicUsers) ? parsed.publicUsers : [],
+        stories: Array.isArray(parsed.stories) ? parsed.stories : [],
+      }
+    }
+  } catch {}
+  return { friends: [], groups: [], teamMembers: [], publicUsers: [], stories: [] }
+}
+
 export function Messenger() {
   const { user } = useAuthStore()
   const [searchParams] = useSearchParams()
@@ -271,10 +304,30 @@ export function Messenger() {
   const navigate = useNavigate()
   const queryUserId = searchParams.get('userId')
 
-  const [friends, setFriends] = useState<FriendItem[]>([])
-  const [groups, setGroups] = useState<ChatGroupItem[]>([])
-  const [teamMembers, setTeamMembers] = useState<Array<{ member: TeamMember; teamName: string }>>([])
-  const [publicUsers, setPublicUsers] = useState<PublicProfileResponse[]>([])
+  const initialCache = useMemo(() => loadInitialContactsCache(), [])
+  const [friends, setFriends] = useState<FriendItem[]>(initialCache.friends)
+  const [groups, setGroups] = useState<ChatGroupItem[]>(initialCache.groups)
+  const [teamMembers, setTeamMembers] = useState<Array<{ member: TeamMember; teamName: string }>>(initialCache.teamMembers)
+  const [publicUsers, setPublicUsers] = useState<PublicProfileResponse[]>(initialCache.publicUsers)
+  const [stories, setStories] = useState<ChatStoryItem[]>(initialCache.stories)
+
+  // Notification & Mute/Block Store
+  const unreadCounts = useMessengerNotificationStore((s) => s.unreadCounts)
+  const isChatMuted = useMessengerNotificationStore((s) => s.isMuted)
+  const muteChat = useMessengerNotificationStore((s) => s.muteChat)
+  const unmuteChat = useMessengerNotificationStore((s) => s.unmuteChat)
+  const isBlocked = useMessengerNotificationStore((s) => s.isBlocked)
+  const blockUser = useMessengerNotificationStore((s) => s.blockUser)
+  const unblockUser = useMessengerNotificationStore((s) => s.unblockUser)
+  const markAsRead = useMessengerNotificationStore((s) => s.markAsRead)
+
+  // Mute & Block modals
+  const [isMuteModalOpen, setIsMuteModalOpen] = useState(false)
+  const [isBlockConfirmOpen, setIsBlockConfirmOpen] = useState(false)
+
+  // Pre-computed mailbox IDs
+  const [contactMailboxMap, setContactMailboxMap] = useState<Record<number, string>>({})
+  const [groupMailboxMap, setGroupMailboxMap] = useState<Record<number, string>>({})
   
   // Selection
   const [activeContact, setActiveContact] = useState<ChatContact | null>(null)
@@ -284,7 +337,6 @@ export function Messenger() {
   const [mobileNavTab, setMobileNavTab] = useState<'chats' | 'updates' | 'community'>('chats')
 
   // Stories (Aktuelles)
-  const [stories, setStories] = useState<ChatStoryItem[]>([])
   const [isCreateStoryOpen, setIsCreateStoryOpen] = useState(false)
   const [createStoryInitialMode, setCreateStoryInitialMode] = useState<'text' | 'photo'>('text')
   const [pendingStoryPhotoUrl, setPendingStoryPhotoUrl] = useState<string | null>(null)
@@ -486,22 +538,42 @@ export function Messenger() {
       setStories(storiesData)
       setPublicUsers(publicData)
 
+      const teamDetails = await Promise.all(
+        teamsData.map(async (t) => {
+          try {
+            const detail = await teamsApi.get(t.id)
+            return { team: t, detail }
+          } catch {
+            return { team: t, detail: null }
+          }
+        })
+      )
+
       const membersList: Array<{ member: TeamMember; teamName: string }> = []
-      for (const t of teamsData) {
-        try {
-          const detail = await teamsApi.get(t.id)
-          if (detail && detail.members) {
-            for (const m of detail.members) {
-              if (m.user_id !== currentUserId) {
-                membersList.push({ member: m, teamName: t.name })
-              }
+      for (const { team, detail } of teamDetails) {
+        if (detail && detail.members) {
+          for (const m of detail.members) {
+            if (m.user_id !== currentUserId) {
+              membersList.push({ member: m, teamName: team.name })
             }
           }
-        } catch {
-          // Ignore
         }
       }
       setTeamMembers(membersList)
+
+      // Lokalen Cache für sofortiges 0ms-Laden beim nächsten Aufruf speichern
+      try {
+        localStorage.setItem(
+          CONTACTS_CACHE_KEY,
+          JSON.stringify({
+            friends: friendsData,
+            groups: groupsData,
+            teamMembers: membersList,
+            publicUsers: publicData,
+            stories: storiesData,
+          })
+        )
+      } catch {}
     } catch {
       // Offline fallback
     }
@@ -649,6 +721,43 @@ export function Messenger() {
     })
   }, [groups, filterTab, searchQuery])
 
+  // Mailbox-Verzeichnis und Zuordnungen im Benachrichtigungs-Store registrieren
+  useEffect(() => {
+    if (!currentUserId) return
+    let active = true
+    const store = useMessengerNotificationStore.getState()
+
+    for (const c of contactsList) {
+      deriveBlindMailboxId(currentUserId, c.userId).then((mid) => {
+        if (!active) return
+        setContactMailboxMap((prev) => (prev[c.userId] === mid ? prev : { ...prev, [c.userId]: mid }))
+        store.registerMailbox(mid, {
+          name: c.username,
+          avatarUrl: c.avatarUrl,
+          isGroup: false,
+          userId: c.userId,
+        })
+      }).catch(() => {})
+    }
+
+    for (const g of groups) {
+      deriveGroupBlindMailboxId(g.id).then((mid) => {
+        if (!active) return
+        setGroupMailboxMap((prev) => (prev[g.id] === mid ? prev : { ...prev, [g.id]: mid }))
+        store.registerMailbox(mid, {
+          name: g.name,
+          avatarUrl: g.avatar_url,
+          isGroup: true,
+          groupId: g.id,
+        })
+      }).catch(() => {})
+    }
+
+    return () => {
+      active = false
+    }
+  }, [contactsList, groups, currentUserId])
+
   // Stories grouped for Tray and Status views
   const myStories = useMemo(() => {
     return stories.filter((s) => s.user_id === currentUserId)
@@ -713,6 +822,17 @@ export function Messenger() {
         if (active) {
           activeMailboxIdRef.current = mid
           setBlindMailboxId(mid)
+          // Sofort aus lokalem Cache laden (0ms Ladezeit)
+          try {
+            const raw = localStorage.getItem(getChatCacheKey(mid))
+            if (raw) {
+              const parsed = JSON.parse(raw)
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                setMessages(parsed)
+              }
+            }
+          } catch {}
+          useMessengerNotificationStore.getState().setActiveMailboxId(mid)
         }
       })
     } else if (activeContact && currentUserId) {
@@ -726,6 +846,17 @@ export function Messenger() {
         if (active) {
           activeMailboxIdRef.current = mid
           setBlindMailboxId(mid)
+          // Sofort aus lokalem Cache laden (0ms Ladezeit)
+          try {
+            const raw = localStorage.getItem(getChatCacheKey(mid))
+            if (raw) {
+              const parsed = JSON.parse(raw)
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                setMessages(parsed)
+              }
+            }
+          } catch {}
+          useMessengerNotificationStore.getState().setActiveMailboxId(mid)
         }
       })
 
@@ -739,11 +870,13 @@ export function Messenger() {
       setBlindMailboxId('')
       setRecipientPublicKeyJwk(null)
       setMessages([])
+      useMessengerNotificationStore.getState().setActiveMailboxId(null)
     }
 
     return () => {
       active = false
       activeMailboxIdRef.current = ''
+      useMessengerNotificationStore.getState().setActiveMailboxId(null)
     }
   }, [activeContact, activeGroup, currentUserId])
 
@@ -795,114 +928,124 @@ export function Messenger() {
       let maxPartnerReadId = 0
       let maxIncomingId = 0
 
-      for (const env of envelopes) {
-        try {
-          let plain = ''
-          if (activeGroup) {
-            plain = await decryptGroupE2eeMessage(env.ciphertext_envelope, activeGroup.id)
-          } else if (activeContact) {
-            const targetUserId = activeContact.userId
-            if (env.ciphertext_envelope.startsWith('sv-e2ee-hybrid-v1:')) {
-              if (localKeyPair) {
-                plain = await decryptE2eeHybrid(env.ciphertext_envelope, localKeyPair.privateKeyJwk)
-              } else {
-                throw new Error('Local key not ready')
-              }
-            } else {
-              plain = await decryptE2eeMessage(env.ciphertext_envelope, currentUserId, targetUserId)
-            }
-          }
-
+      const decryptedEnvelopes = await Promise.all(
+        envelopes.map(async (env) => {
           try {
-            const parsed = JSON.parse(plain)
-            if (typeof parsed === 'object' && parsed !== null) {
-              // 1. Read receipt control packet
-              if (parsed.type === 'read_receipt') {
-                const readUpTo = Number(parsed.read_up_to_id || 0)
-                const readerId = Number(parsed.reader_id || 0)
-                if (readerId !== currentUserId && readUpTo > maxPartnerReadId) {
-                  maxPartnerReadId = readUpTo
+            let plain = ''
+            if (activeGroup) {
+              plain = await decryptGroupE2eeMessage(env.ciphertext_envelope, activeGroup.id)
+            } else if (activeContact) {
+              const targetUserId = activeContact.userId
+              if (env.ciphertext_envelope.startsWith('sv-e2ee-hybrid-v1:')) {
+                if (localKeyPair) {
+                  plain = await decryptE2eeHybrid(env.ciphertext_envelope, localKeyPair.privateKeyJwk)
+                } else {
+                  throw new Error('Local key not ready')
                 }
-                continue
+              } else {
+                plain = await decryptE2eeMessage(env.ciphertext_envelope, currentUserId, targetUserId)
               }
-
-              // 2. Edit message control packet
-              if (parsed.type === 'edit_message') {
-                const targetId = Number(parsed.target_id || 0)
-                if (targetId && parsed.new_text) {
-                  editMap.set(targetId, {
-                    newText: String(parsed.new_text),
-                    editedAt: String(parsed.edited_at || env.created_at),
-                  })
-                }
-                continue
-              }
-
-              // 3. Delete message control packet
-              if (parsed.type === 'delete_message') {
-                const targetId = Number(parsed.target_id || 0)
-                if (targetId) {
-                  deleteMap.set(targetId, {
-                    deletedAt: String(parsed.deleted_at || env.created_at),
-                  })
-                }
-                continue
-              }
-
-              // Normal Chat Message
-              let senderId = parsed.sender_id || (activeContact ? activeContact.userId : 0)
-              let senderName = parsed.sender_name
-              let isSelf = senderId === currentUserId
-
-              if (!isSelf && env.id > maxIncomingId) {
-                maxIncomingId = env.id
-              }
-
-              decryptedList.push({
-                id: env.id,
-                senderId,
-                senderName,
-                text: parsed.text || '',
-                createdAt: env.created_at,
-                isSelf,
-                noteAttachment: parsed.note_attachment,
-                calendarAttachment: parsed.calendar_attachment,
-                imageAttachment: parsed.image_attachment,
-                audioAttachment: parsed.audio_attachment,
-                fileAttachment: parsed.file_attachment,
-                stickerAttachment: parsed.sticker_attachment,
-                storyReply: parsed.story_reply,
-              })
-              continue
             }
+            return { env, plain, ok: true }
           } catch {
-            // Legacy / simple text fallback
-            let text = plain
-            let isSelf = false
-            let senderId = activeContact ? activeContact.userId : 0
-            if (plain.startsWith('[ME]:')) {
-              text = plain.replace('[ME]:', '')
-              isSelf = true
-              senderId = currentUserId
-            }
-            if (!isSelf && env.id > maxIncomingId) {
-              maxIncomingId = env.id
-            }
-            decryptedList.push({
-              id: env.id,
-              senderId,
-              text,
-              createdAt: env.created_at,
-              isSelf,
-            })
+            return { env, plain: '', ok: false }
           }
-        } catch {
+        })
+      )
+
+      for (const { env, plain, ok } of decryptedEnvelopes) {
+        if (!ok || !plain) {
           decryptedList.push({
             id: env.id,
             senderId: activeContact ? activeContact.userId : 0,
             text: 'Verschlüsselte Nachricht',
             createdAt: env.created_at,
             isSelf: false,
+          })
+          continue
+        }
+
+        try {
+          const parsed = JSON.parse(plain)
+          if (typeof parsed === 'object' && parsed !== null) {
+            // 1. Read receipt control packet
+            if (parsed.type === 'read_receipt') {
+              const readUpTo = Number(parsed.read_up_to_id || 0)
+              const readerId = Number(parsed.reader_id || 0)
+              if (readerId !== currentUserId && readUpTo > maxPartnerReadId) {
+                maxPartnerReadId = readUpTo
+              }
+              continue
+            }
+
+            // 2. Edit message control packet
+            if (parsed.type === 'edit_message') {
+              const targetId = Number(parsed.target_id || 0)
+              if (targetId && parsed.new_text) {
+                editMap.set(targetId, {
+                  newText: String(parsed.new_text),
+                  editedAt: String(parsed.edited_at || env.created_at),
+                })
+              }
+              continue
+            }
+
+            // 3. Delete message control packet
+            if (parsed.type === 'delete_message') {
+              const targetId = Number(parsed.target_id || 0)
+              if (targetId) {
+                deleteMap.set(targetId, {
+                  deletedAt: String(parsed.deleted_at || env.created_at),
+                })
+              }
+              continue
+            }
+
+            // Normal Chat Message
+            let senderId = parsed.sender_id || (activeContact ? activeContact.userId : 0)
+            let senderName = parsed.sender_name
+            let isSelf = senderId === currentUserId
+
+            if (!isSelf && env.id > maxIncomingId) {
+              maxIncomingId = env.id
+            }
+
+            decryptedList.push({
+              id: env.id,
+              senderId,
+              senderName,
+              text: parsed.text || '',
+              createdAt: env.created_at,
+              isSelf,
+              noteAttachment: parsed.note_attachment,
+              calendarAttachment: parsed.calendar_attachment,
+              imageAttachment: parsed.image_attachment,
+              audioAttachment: parsed.audio_attachment,
+              fileAttachment: parsed.file_attachment,
+              stickerAttachment: parsed.sticker_attachment,
+              storyReply: parsed.story_reply,
+            })
+            continue
+          }
+        } catch {
+          // Legacy / simple text fallback
+          let text = plain
+          let isSelf = false
+          let senderId = activeContact ? activeContact.userId : 0
+          if (plain.startsWith('[ME]:')) {
+            text = plain.replace('[ME]:', '')
+            isSelf = true
+            senderId = currentUserId
+          }
+          if (!isSelf && env.id > maxIncomingId) {
+            maxIncomingId = env.id
+          }
+          decryptedList.push({
+            id: env.id,
+            senderId,
+            text,
+            createdAt: env.created_at,
+            isSelf,
           })
         }
       }
@@ -980,6 +1123,13 @@ export function Messenger() {
       if (activeMailboxIdRef.current && activeMailboxIdRef.current !== currentMid) return
 
       setMessages(processedList)
+
+      // Kürzliche Nachrichten lokal cachen für 0ms Sofort-Laden beim nächsten Aufruf
+      try {
+        localStorage.setItem(getChatCacheKey(currentMid), JSON.stringify(processedList.slice(-80)))
+      } catch {}
+      // Ungelesen-Zähler zurücksetzen
+      markAsRead(currentMid)
 
       // Send read receipt if there are new incoming unacknowledged messages
       if (
@@ -1934,6 +2084,9 @@ export function Messenger() {
                     </div>
                     {filteredGroups.map((g) => {
                       const isSelected = activeGroup?.id === g.id
+                      const gmid = groupMailboxMap[g.id]
+                      const unread = gmid ? (unreadCounts[gmid] || 0) : 0
+                      const isMuted = gmid ? isChatMuted(gmid) : false
                       return (
                         <button
                           key={`g-${g.id}`}
@@ -1941,6 +2094,7 @@ export function Messenger() {
                           onClick={() => {
                             setActiveGroup(g)
                             setActiveContact(null)
+                            if (gmid) markAsRead(gmid)
                           }}
                           className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all ${
                             isSelected
@@ -1948,7 +2102,7 @@ export function Messenger() {
                               : 'hover:bg-surface-container-high/60 border border-transparent'
                           }`}
                         >
-                          <div className="flex items-center gap-3 min-w-0">
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
                             <div className="w-9 h-9 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs shrink-0">
                               {g.avatar_url ? (
                                 <img src={g.avatar_url} alt="" className="w-full h-full rounded-full object-cover" />
@@ -1970,6 +2124,16 @@ export function Messenger() {
                               </p>
                             </div>
                           </div>
+                          <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                            {isMuted && (
+                              <BellOff className="w-3.5 h-3.5 text-on-surface-variant/50" />
+                            )}
+                            {unread > 0 && (
+                              <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-primary text-on-primary min-w-[18px]">
+                                {unread > 99 ? '99+' : unread}
+                              </span>
+                            )}
+                          </div>
                         </button>
                       )
                     })}
@@ -1987,6 +2151,10 @@ export function Messenger() {
                     )}
                     {filteredContacts.map((c) => {
                       const isSelected = activeContact?.userId === c.userId
+                      const cmid = contactMailboxMap[c.userId]
+                      const unread = cmid ? (unreadCounts[cmid] || 0) : 0
+                      const isMuted = cmid ? isChatMuted(cmid) : false
+                      const isUserBlocked = isBlocked(c.userId)
                       return (
                         <button
                           key={`${c.isFriend ? 'f' : 't'}-${c.userId}`}
@@ -1994,6 +2162,7 @@ export function Messenger() {
                           onClick={() => {
                             setActiveContact(c)
                             setActiveGroup(null)
+                            if (cmid) markAsRead(cmid)
                           }}
                           className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all ${
                             isSelected
@@ -2001,7 +2170,7 @@ export function Messenger() {
                               : 'hover:bg-surface-container-high/60 border border-transparent'
                           }`}
                         >
-                          <div className="flex items-center gap-3 min-w-0">
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
                             <div className="relative shrink-0">
                               <Avatar src={c.avatarUrl} name={c.username} size="sm" />
                               <StatusDot status={c.status} size="sm" className="absolute bottom-0 right-0" />
@@ -2011,7 +2180,12 @@ export function Messenger() {
                                 <span className="text-xs font-semibold text-primary truncate">
                                   {c.username}
                                 </span>
-                                {c.isPublicUser && !c.isFriend && !c.teamName && (
+                                {isUserBlocked && (
+                                  <span className="text-[9px] px-1 rounded bg-status-error/15 text-status-error font-medium">
+                                    Blockiert
+                                  </span>
+                                )}
+                                {c.isPublicUser && !c.isFriend && !c.teamName && !isUserBlocked && (
                                   <span className="text-[9px] px-1.5 py-0.2 rounded-md bg-primary/10 text-primary font-medium flex items-center gap-0.5">
                                     <Globe className="w-2.5 h-2.5" />
                                     <span>Öffentlich</span>
@@ -2036,6 +2210,16 @@ export function Messenger() {
                                 </p>
                               )}
                             </div>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                            {isMuted && (
+                              <BellOff className="w-3.5 h-3.5 text-on-surface-variant/50" />
+                            )}
+                            {unread > 0 && (
+                              <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-primary text-on-primary min-w-[18px]">
+                                {unread > 99 ? '99+' : unread}
+                              </span>
+                            )}
                           </div>
                         </button>
                       )
@@ -2465,6 +2649,23 @@ export function Messenger() {
                   >
                     <ChevronLeft className="w-4 h-4" />
                   </button>
+
+                  {/* Header Title Badge with Mute & Block Indicators */}
+                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-container-high/85 backdrop-blur-md border border-outline-variant/30 shadow-xs">
+                    <span className="text-xs font-bold text-on-surface truncate max-w-[130px] sm:max-w-xs">
+                      {activeGroup ? activeGroup.name : activeContact?.username}
+                    </span>
+                    {blindMailboxId && isChatMuted(blindMailboxId) && (
+                      <span title="Stummgeschaltet" className="inline-flex items-center text-status-warning">
+                        <BellOff className="w-3.5 h-3.5" />
+                      </span>
+                    )}
+                    {activeContact && isBlocked(activeContact.userId) && (
+                      <span className="px-1.5 py-0.2 rounded-md bg-status-error/15 text-status-error text-[9px] font-semibold">
+                        Blockiert
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-1.5 pointer-events-auto">
@@ -2537,6 +2738,54 @@ export function Messenger() {
                     >
                       <UserPlus className="w-3.5 h-3.5" />
                       <span className="hidden sm:inline">Anfrage senden</span>
+                    </Button>
+                  )}
+
+                  {/* Stummschalten Button */}
+                  {blindMailboxId && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setIsMuteModalOpen(true)}
+                      className={`h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 shadow-xs ${
+                        isChatMuted(blindMailboxId)
+                          ? 'text-status-warning'
+                          : 'text-on-surface-variant hover:text-primary'
+                      }`}
+                      title={
+                        isChatMuted(blindMailboxId)
+                          ? 'Stummschaltung aktiv (Klicken zum Ändern)'
+                          : 'Benachrichtigungen stummschalten'
+                      }
+                      aria-label="Benachrichtigungen stummschalten"
+                    >
+                      {isChatMuted(blindMailboxId) ? (
+                        <BellOff className="w-4 h-4" />
+                      ) : (
+                        <Bell className="w-4 h-4" />
+                      )}
+                    </Button>
+                  )}
+
+                  {/* Kontakt Blockieren Button */}
+                  {activeContact && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setIsBlockConfirmOpen(true)}
+                      className={`h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 shadow-xs ${
+                        isBlocked(activeContact.userId)
+                          ? 'text-status-error'
+                          : 'text-on-surface-variant hover:text-status-error'
+                      }`}
+                      title={
+                        isBlocked(activeContact.userId)
+                          ? 'Kontakt blockiert (Klicken zum Aufheben)'
+                          : 'Kontakt blockieren'
+                      }
+                      aria-label="Kontakt blockieren"
+                    >
+                      <Ban className="w-4 h-4" />
                     </Button>
                   )}
 
@@ -3133,7 +3382,22 @@ export function Messenger() {
 
               {/* Footer Input Area */}
               <div className="p-2.5 border-t border-outline-variant/20 bg-surface-container-low relative z-1">
-                {isRecording ? (
+                {activeContact && isBlocked(activeContact.userId) ? (
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3 rounded-xl bg-status-error/10 border border-status-error/30 text-xs text-status-error">
+                    <div className="flex items-center gap-2">
+                      <Ban className="w-4 h-4 shrink-0" />
+                      <span>Du hast diesen Kontakt blockiert.</span>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => void unblockUser(activeContact.userId)}
+                      className="h-7 text-xs px-3 border border-status-error/30 hover:bg-status-error/20 text-status-error font-medium"
+                    >
+                      Blockierung aufheben
+                    </Button>
+                  </div>
+                ) : isRecording ? (
                   <VoiceRecordingBar
                     durationSeconds={recordingDuration}
                     statusLabel="Sprachaufnahme läuft …"
@@ -3840,6 +4104,169 @@ export function Messenger() {
         currentConfig={wallpaperConfig}
         onSaveConfig={(newCfg) => setWallpaperConfig(newCfg)}
       />
+
+      {/* Design-DNA Mute Dialog */}
+      <Dialog open={isMuteModalOpen} onOpenChange={setIsMuteModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <BellOff className="w-5 h-5 text-primary" />
+              <span>Benachrichtigungen stummschalten</span>
+            </DialogTitle>
+            <DialogDescription>
+              Wähle, wie lange Benachrichtigungen für {activeGroup ? `"${activeGroup.name}"` : activeContact ? `"${activeContact.username}"` : 'diesen Chat'} stummgeschaltet werden sollen.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-2 py-3">
+            <Button
+              variant="secondary"
+              className="w-full justify-start text-left text-xs py-2.5 h-auto"
+              onClick={() => {
+                if (blindMailboxId) {
+                  muteChat(blindMailboxId, 480)
+                  toast.success('Für 8 Stunden stummgeschaltet')
+                }
+                setIsMuteModalOpen(false)
+              }}
+            >
+              <Clock className="w-4 h-4 mr-2.5 text-on-surface-variant" />
+              <div>
+                <div className="font-semibold">8 Stunden</div>
+                <div className="text-[10px] text-on-surface-variant/70">Bis morgen stummschalten</div>
+              </div>
+            </Button>
+
+            <Button
+              variant="secondary"
+              className="w-full justify-start text-left text-xs py-2.5 h-auto"
+              onClick={() => {
+                if (blindMailboxId) {
+                  muteChat(blindMailboxId, 10080)
+                  toast.success('Für 1 Woche stummgeschaltet')
+                }
+                setIsMuteModalOpen(false)
+              }}
+            >
+              <Clock className="w-4 h-4 mr-2.5 text-on-surface-variant" />
+              <div>
+                <div className="font-semibold">1 Woche</div>
+                <div className="text-[10px] text-on-surface-variant/70">7 Tage lang keine Töne oder Popups</div>
+              </div>
+            </Button>
+
+            <Button
+              variant="secondary"
+              className="w-full justify-start text-left text-xs py-2.5 h-auto"
+              onClick={() => {
+                if (blindMailboxId) {
+                  muteChat(blindMailboxId, 0)
+                  toast.success('Dauerhaft stummgeschaltet')
+                }
+                setIsMuteModalOpen(false)
+              }}
+            >
+              <BellOff className="w-4 h-4 mr-2.5 text-on-surface-variant" />
+              <div>
+                <div className="font-semibold">Immer</div>
+                <div className="text-[10px] text-on-surface-variant/70">Bis du es manuell wieder einschaltest</div>
+              </div>
+            </Button>
+
+            {blindMailboxId && isChatMuted(blindMailboxId) && (
+              <Button
+                variant="ghost"
+                className="w-full justify-start text-left text-xs py-2.5 h-auto text-primary hover:bg-primary/10 mt-1 border border-primary/20"
+                onClick={() => {
+                  unmuteChat(blindMailboxId)
+                  toast.success('Stummschaltung aufgehoben')
+                  setIsMuteModalOpen(false)
+                }}
+              >
+                <Bell className="w-4 h-4 mr-2.5 text-primary" />
+                <div>
+                  <div className="font-semibold">Stummschaltung aufheben</div>
+                  <div className="text-[10px] text-on-surface-variant/70">Wieder Töne und Banner empfangen</div>
+                </div>
+              </Button>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setIsMuteModalOpen(false)}
+            >
+              Abbrechen
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Design-DNA Block / Unblock Confirmation Dialog */}
+      <Dialog open={isBlockConfirmOpen} onOpenChange={setIsBlockConfirmOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className={`flex items-center gap-2 ${activeContact && isBlocked(activeContact.userId) ? 'text-primary' : 'text-status-error'}`}>
+              <Ban className="w-5 h-5" />
+              <span>
+                {activeContact && isBlocked(activeContact.userId)
+                  ? 'Blockierung aufheben?'
+                  : 'Kontakt blockieren?'}
+              </span>
+            </DialogTitle>
+            <DialogDescription>
+              {activeContact && isBlocked(activeContact.userId) ? (
+                <>
+                  Möchtest du <strong>"{activeContact.username}"</strong> wieder entsperren? Ihr könnt euch danach wieder gegenseitig Nachrichten schreiben.
+                </>
+              ) : (
+                <>
+                  Möchtest du <strong>"{activeContact?.username}"</strong> wirklich blockieren? Du erhältst keine Nachrichten, Töne oder Benachrichtigungen mehr von diesem Kontakt.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setIsBlockConfirmOpen(false)}
+            >
+              Abbrechen
+            </Button>
+            {activeContact && isBlocked(activeContact.userId) ? (
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={async () => {
+                  await unblockUser(activeContact.userId)
+                  toast.success(`Blockierung von ${activeContact.username} aufgehoben`)
+                  setIsBlockConfirmOpen(false)
+                }}
+              >
+                Blockierung aufheben
+              </Button>
+            ) : (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={async () => {
+                  if (activeContact) {
+                    await blockUser(activeContact.userId)
+                    toast.success(`${activeContact.username} blockiert`)
+                  }
+                  setIsBlockConfirmOpen(false)
+                }}
+              >
+                Blockieren
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

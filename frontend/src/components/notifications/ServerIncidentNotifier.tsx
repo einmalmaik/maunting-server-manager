@@ -14,6 +14,7 @@ import { api } from '@/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
 import { sendeGeraeteBenachrichtigung, pruefeUndFrageGeraeteBerechtigung } from '@/lib/benachrichtigung'
+import { useMessengerNotificationStore, playNotificationChime } from '@/stores/messengerNotificationStore'
 
 interface IncidentAlert {
   id: number
@@ -138,7 +139,7 @@ export function ServerIncidentNotifier() {
       void checkAlerts()
     }, POLL_INTERVAL_MS)
 
-    // Sofortige Echtzeit-Push-Benachrichtigung für Freundschaftsanfragen
+    // Sofortige Echtzeit-Push-Benachrichtigung für Freundschaftsanfragen & Messenger-Nachrichten
     const handleSyncEvent = (e: Event) => {
       const ce = e as CustomEvent<any>
       const detail = ce.detail
@@ -149,6 +150,42 @@ export function ServerIncidentNotifier() {
           text: `${senderName} hat dir eine Freundschaftsanfrage gesendet.`,
         })
         toast.success(`👋 Freundschaftsanfrage von ${senderName} erhalten`)
+      } else if (detail?.type === 'e2ee_blind_message') {
+        const mid = detail.blind_mailbox_id
+        if (!mid) return
+
+        const store = useMessengerNotificationStore.getState()
+        if (store.isMuted(mid)) return
+
+        // Wenn der Chat im aktuellen Tab/Fenster aktiv geöffnet und fokussiert ist -> kein störendes Banner/Ton
+        const isCurrentActive = store.activeMailboxId === mid
+        if (isCurrentActive && typeof document !== 'undefined' && document.visibilityState === 'visible') {
+          return
+        }
+
+        const meta = store.mailboxDirectory[mid]
+        if (meta?.userId && store.isBlocked(meta.userId)) {
+          return
+        }
+
+        const senderOrChat = meta?.name || (meta?.isGroup ? 'Chat-Gruppe' : 'Messenger')
+        const title = `Neue Nachricht: ${senderOrChat}`
+        const text = meta?.isGroup
+          ? `Neue Nachricht in Gruppe „${meta.name}“`
+          : `Du hast eine neue Nachricht von ${senderOrChat} erhalten.`
+
+        // Ungelesen-Zähler im Store erhöhen
+        store.incrementUnread(mid)
+
+        // Nur akustisch signalisieren und benachrichtigen, wenn Gerätebenachrichtigung aktiv ist
+        if (user?.device_notifications !== false) {
+          playNotificationChime()
+          toast.success(meta?.isGroup ? `💬 Neue Nachricht in „${meta.name}“` : `💬 Neue Nachricht von ${senderOrChat}`)
+          void sendeGeraeteBenachrichtigung({
+            titel: title,
+            text: text,
+          })
+        }
       }
     }
 

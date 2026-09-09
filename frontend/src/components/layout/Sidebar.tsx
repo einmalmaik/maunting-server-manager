@@ -11,6 +11,7 @@ import { buildNavigation, type NavGroupName } from './navigation'
 import { DesktopAppDownloadBadge } from './DesktopAppDownloadBadge'
 import { BenachrichtigungsGlocke, ProfileDropdown, type ProfileDropdownItem } from '@/Singra/UI'
 import { usePresenceAndActivity, type PresenceStatus } from '@/hooks/usePresenceAndActivity'
+import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
 
 interface SidebarProps {
   mobile?: boolean
@@ -42,6 +43,7 @@ export function Sidebar({ mobile = false, onNavigate, presenceStatus: propPresen
   const canUseSkills = useHasPermission('ai.skills.use')
   const canUseAi = canChatWithAi || canManageAiSkills
   const isOnline = useIsOnline()
+  const totalMessengerUnread = useMessengerNotificationStore((s) => s.totalUnreadCount)
   
   const asideRef = useRef<HTMLElement>(null)
 
@@ -169,12 +171,41 @@ export function Sidebar({ mobile = false, onNavigate, presenceStatus: propPresen
         {groups.map(({ group, items }) => (
           <section key={group} className="mb-3" aria-labelledby={`nav-${group}`}>
             <h2 id={`nav-${group}`} className="px-4 pb-1 pt-2 font-label-md text-[10px] font-semibold uppercase tracking-[.16em] text-on-surface-variant/55">{groupLabels[group]}</h2>
-            {items.map((item) => (
-              <NavLink key={item.to} to={item.to} onClick={onNavigate} className={({ isActive }) => isActive ? 'msm-nav-link-active' : 'msm-nav-link'} end={item.to === '/'}>
-                <item.icon className="w-[18px] h-[18px]" aria-hidden="true" />
-                <span className="font-label-md text-label-md">{item.label}</span>
-              </NavLink>
-            ))}
+            {items.map((item) => {
+              const isChat = item.to === '/chat'
+              const showChatBadge = isChat && totalMessengerUnread > 0
+              return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  onClick={onNavigate}
+                  className={({ isActive }) =>
+                    isActive
+                      ? 'msm-nav-link-active'
+                      : showChatBadge
+                      ? 'msm-nav-link text-primary'
+                      : 'msm-nav-link'
+                  }
+                  end={item.to === '/'}
+                >
+                  <div className="relative flex items-center justify-center">
+                    <item.icon className="w-[18px] h-[18px]" aria-hidden="true" />
+                    {showChatBadge && (
+                      <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+                      </span>
+                    )}
+                  </div>
+                  <span className="font-label-md text-label-md flex-1">{item.label}</span>
+                  {showChatBadge && (
+                    <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-primary text-on-primary">
+                      {totalMessengerUnread > 99 ? '99+' : totalMessengerUnread}
+                    </span>
+                  )}
+                </NavLink>
+              )
+            })}
           </section>
         ))}
       </nav>

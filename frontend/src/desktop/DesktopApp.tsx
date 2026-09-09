@@ -35,6 +35,7 @@ import { Notes } from '@/pages/Notes'
 import { Privacy } from '@/pages/Privacy'
 import { useAuthStore } from '@/stores/authStore'
 import { usePresenceAndActivity } from '@/hooks/usePresenceAndActivity'
+import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
 import { abmelden } from './auth'
 import { Einstellungen } from './Einstellungen'
 import { Splash } from './Splash'
@@ -749,6 +750,7 @@ function Hauptseite({
   const [darfTresor, setDarfTresor] = useState(true)
   const [darfMessenger, setDarfMessenger] = useState(true)
   const [mobileMenuOffen, setMobileMenuOffen] = useState(false)
+  const totalMessengerUnread = useMessengerNotificationStore((s) => s.totalUnreadCount)
 
   useEffect(() => {
     let active = true
@@ -852,6 +854,8 @@ function Hauptseite({
               onClick={() => navigate('/chat')}
               icon={<MessageSquare className="h-4 w-4 shrink-0" />}
               label={t('mss.app.messenger', t('nav.chat', 'Messenger'))}
+              badge={totalMessengerUnread}
+              pulse={totalMessengerUnread > 0}
             />
           )}
           {darfKalender && (
@@ -967,7 +971,12 @@ function Hauptseite({
                   }`}
                 >
                   <MessageSquare className="h-4 w-4" />
-                  <span>{t('mss.app.messenger', t('nav.chat', 'Messenger'))}</span>
+                  <span className="flex-1">{t('mss.app.messenger', t('nav.chat', 'Messenger'))}</span>
+                  {totalMessengerUnread > 0 && (
+                    <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-primary text-on-primary">
+                      {totalMessengerUnread > 99 ? '99+' : totalMessengerUnread}
+                    </span>
+                  )}
                 </button>
               )}
 
@@ -1119,7 +1128,21 @@ function Hauptseite({
 }
 
 /** Segmented Reiter mit ruhiger Optik: Aktiver Tab hebt sich soft ab, Inaktive bleiben dezent */
-function Reiter({ aktiv, onClick, label, icon }: { aktiv: boolean; onClick: () => void; label: string; icon?: ReactNode }) {
+function Reiter({
+  aktiv,
+  onClick,
+  label,
+  icon,
+  badge,
+  pulse,
+}: {
+  aktiv: boolean
+  onClick: () => void
+  label: string
+  icon?: ReactNode
+  badge?: number
+  pulse?: boolean
+}) {
   return (
     <button
       type="button"
@@ -1133,8 +1156,21 @@ function Reiter({ aktiv, onClick, label, icon }: { aktiv: boolean; onClick: () =
           : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/40'
       }`}
     >
-      {icon}
+      <div className="relative flex items-center justify-center">
+        {icon}
+        {pulse && (
+          <span className="absolute -top-1 -right-1 flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+          </span>
+        )}
+      </div>
       <span className={aktiv ? 'inline' : 'hidden xl:inline'}>{label}</span>
+      {badge !== undefined && badge > 0 && (
+        <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-[9px] font-bold rounded-full bg-primary text-on-primary ml-0.5">
+          {badge > 99 ? '99+' : badge}
+        </span>
+      )}
     </button>
   )
 }

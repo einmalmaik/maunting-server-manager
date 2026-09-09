@@ -100,6 +100,26 @@ def remove_friend(
     return {"ok": True, "message": "Freund entfernt"}
 
 
+@router.post("/friends/{target_user_id}/block", dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
+def block_user(
+    target_user_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    SocialService.block_user(db, user.id, target_user_id)
+    return {"ok": True, "message": "Benutzer blockiert"}
+
+
+@router.post("/friends/{target_user_id}/unblock", dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
+def unblock_user(
+    target_user_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    SocialService.unblock_user(db, user.id, target_user_id)
+    return {"ok": True, "message": "Blockierung aufgehoben"}
+
+
 # --- Status, Geräte & Rich Presence ---
 
 @router.get("/presence/me", response_model=PresenceInfo, dependencies=[Depends(_check_social_enabled)])
