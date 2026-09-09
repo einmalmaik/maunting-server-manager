@@ -222,8 +222,6 @@ export interface ChatGroupInvitePublic {
 export async function relayE2eeEnvelope(payload: {
   blind_mailbox_id: string
   ciphertext_envelope: string
-  recipient_user_id?: number
-  group_id?: number
 }): Promise<BlindEnvelopeItem> {
   return api<BlindEnvelopeItem>('/social/e2ee/relay', {
     method: 'POST',

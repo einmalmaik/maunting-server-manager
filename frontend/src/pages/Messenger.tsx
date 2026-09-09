@@ -50,7 +50,6 @@ import {
   Globe,
   UserPlus,
   Pencil,
-  ShieldAlert,
   Image as ImageIcon,
 } from 'lucide-react'
 import { DeviceBadge } from '@/components/social/DeviceBadge'
@@ -415,9 +414,8 @@ export function Messenger() {
   const justSentRef = useRef<boolean>(false)
   const activeMailboxIdRef = useRef<string>('')
 
-  // Message Editing & Opferschutz (Beweissicherung) State
+  // Message Editing State
   const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null)
-  const [victimProofMessage, setVictimProofMessage] = useState<ChatMessage | null>(null)
   const highestIncomingIdAcknowledgedRef = useRef<number>(0)
 
   const currentUserId = user?.id || 0
@@ -729,7 +727,6 @@ export function Messenger() {
         await relayE2eeEnvelope({
           blind_mailbox_id: blindMailboxId,
           ciphertext_envelope: ciphertext,
-          group_id: activeGroup.id,
         })
       } else if (activeContact) {
         const targetUserId = activeContact.userId
@@ -741,7 +738,6 @@ export function Messenger() {
         await relayE2eeEnvelope({
           blind_mailbox_id: blindMailboxId,
           ciphertext_envelope: ciphertext,
-          recipient_user_id: targetUserId,
         })
       }
     } catch {
@@ -879,7 +875,8 @@ export function Messenger() {
         }
       }
 
-      // Apply Edits, Deletions (with victim evidence retention), and Read Status
+      // Apply Edits, Deletions, and Read Status
+      // Gelöscht = gelöscht. Kein Originaltext wird aufbewahrt (Zero Knowledge).
       const processedList: ChatMessage[] = decryptedList.map((msg) => {
         let text = msg.text
         let isEdited = false
@@ -898,9 +895,10 @@ export function Messenger() {
 
         if (deleteMap.has(msg.id)) {
           const delInfo = deleteMap.get(msg.id)!
-          originalText = text
           isDeleted = true
           deletedAt = delInfo.deletedAt
+          // Kein originalText bei Löschung — gelöscht ist gelöscht.
+          originalText = undefined
         }
 
         // Dynamisches blaues Häkchen:
@@ -915,7 +913,7 @@ export function Messenger() {
           editedAt,
           isDeleted,
           deletedAt,
-          originalText: originalText || (isDeleted || isEdited ? msg.text : undefined),
+          originalText,
           isRead,
         }
       })
@@ -1101,7 +1099,6 @@ export function Messenger() {
         await relayE2eeEnvelope({
           blind_mailbox_id: blindMailboxId,
           ciphertext_envelope: ciphertext,
-          group_id: activeGroup.id,
         })
       } else if (activeContact) {
         const targetUserId = activeContact.userId
@@ -1113,7 +1110,6 @@ export function Messenger() {
         await relayE2eeEnvelope({
           blind_mailbox_id: blindMailboxId,
           ciphertext_envelope: ciphertext,
-          recipient_user_id: targetUserId,
         })
       }
 
@@ -2894,17 +2890,6 @@ export function Messenger() {
                         <div className="flex items-center gap-2 py-0.5 italic opacity-85">
                           <Trash2 className="w-3.5 h-3.5 shrink-0 opacity-70" />
                           <span>Diese Nachricht wurde gelöscht.</span>
-                          {!msg.isSelf && msg.originalText && (
-                            <button
-                              type="button"
-                              onClick={() => setVictimProofMessage(msg)}
-                              className="ml-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 text-[10px] not-italic font-medium transition-colors"
-                              title="Beweissicherung (Opferschutz): Ursprüngliche E2EE-Nachricht anzeigen"
-                            >
-                              <ShieldAlert className="w-3 h-3 text-amber-400" />
-                              <span>Original</span>
-                            </button>
-                          )}
                         </div>
                       ) : (
                         msg.text && (
@@ -3751,68 +3736,6 @@ export function Messenger() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      {/* Opferschutz / Beweissicherung Modal für gelöschte Nachrichten */}
-      <Dialog
-        open={Boolean(victimProofMessage)}
-        onOpenChange={(open) => !open && setVictimProofMessage(null)}
-      >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-amber-400">
-              <ShieldAlert className="w-5 h-5 text-amber-400" />
-              <span>Beweissicherung (Opferschutz)</span>
-            </DialogTitle>
-            <DialogDescription>
-              Der Absender hat diese Nachricht nachträglich gelöscht. Zu deinem Schutz und zur
-              Beweissicherung bei Belästigung, Straftaten oder Missbrauch wurde die kryptographische
-              Originalnachricht lokal auf deinem Gerät gesichert.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="my-3 p-3.5 rounded-xl bg-surface-container-high border border-outline-variant/30 space-y-2">
-            <div className="flex items-center justify-between text-[11px] text-on-surface-variant/70 border-b border-outline-variant/20 pb-1.5">
-              <span>Ursprünglicher Text</span>
-              <span>
-                {victimProofMessage &&
-                  new Date(victimProofMessage.createdAt).toLocaleString([], {
-                    dateStyle: 'short',
-                    timeStyle: 'medium',
-                  })}
-              </span>
-            </div>
-            <p className="text-sm font-sans text-on-surface select-text whitespace-pre-wrap leading-relaxed">
-              {victimProofMessage?.originalText || 'Kein Textinhalt verfügbar.'}
-            </p>
-          </div>
-
-          <DialogFooter>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setVictimProofMessage(null)}
-            >
-              Schließen
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => {
-                if (victimProofMessage?.originalText) {
-                  navigator.clipboard?.writeText(
-                    `[Beweis-Protokoll MSM Messenger]\nDatum: ${victimProofMessage.createdAt}\nNachricht: ${victimProofMessage.originalText}`
-                  )
-                  toast.success('Beweis in die Zwischenablage kopiert.')
-                }
-              }}
-              className="gap-1.5"
-            >
-              <Shield className="w-3.5 h-3.5" />
-              <span>Beweis kopieren</span>
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Chat Wallpaper Customization Modal */}
       <ChatWallpaperModal
         open={isWallpaperModalOpen}

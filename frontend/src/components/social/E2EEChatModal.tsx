@@ -287,7 +287,6 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
       await relayE2eeEnvelope({
         blind_mailbox_id: blindMailboxId,
         ciphertext_envelope: ciphertext,
-        recipient_user_id: targetUserId,
       })
 
       setInputText('')

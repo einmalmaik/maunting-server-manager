@@ -246,15 +246,12 @@ def get_e2ee_public_key(
 def relay_e2ee_message(
     req: E2eeBlindEnvelopeCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ) -> dict:
     envelope = SocialService.relay_blind_envelope(
         db,
         blind_mailbox_id=req.blind_mailbox_id,
         ciphertext_envelope=req.ciphertext_envelope,
-        sender_user_id=user.id,
-        recipient_user_id=req.recipient_user_id,
-        group_id=req.group_id,
     )
     return {
         "id": envelope.id,

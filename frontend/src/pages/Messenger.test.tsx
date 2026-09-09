@@ -199,8 +199,14 @@ describe('Messenger (Allround Chat)', () => {
 
     await waitFor(() => {
       expect(socialApi.relayE2eeEnvelope).toHaveBeenCalledWith(
+        expect.not.objectContaining({
+          recipient_user_id: expect.anything(),
+        })
+      )
+      expect(socialApi.relayE2eeEnvelope).toHaveBeenCalledWith(
         expect.objectContaining({
-          recipient_user_id: 202,
+          blind_mailbox_id: expect.any(String),
+          ciphertext_envelope: expect.any(String),
         })
       )
     })
@@ -560,7 +566,7 @@ describe('Messenger (Allround Chat)', () => {
     expect(socialApi.sendFriendRequest).toHaveBeenCalledWith('bob_public')
   })
 
-  it('unterstützt dynamische Lesebestätigungen und das Bearbeiten & Löschen von Nachrichten mit Opferschutz', async () => {
+  it('unterstützt dynamische Lesebestätigungen und das Bearbeiten & Löschen von Nachrichten (Zero Knowledge)', async () => {
     // 1. Setup existing chat envelopes (E2EE)
     vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([
       {

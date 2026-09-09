@@ -166,7 +166,6 @@ def test_e2ee_zero_knowledge_blind_relay(db: Session):
         db,
         blind_mailbox_id=blind_mailbox,
         ciphertext_envelope=envelope,
-        sender_user_id=None,
     )
     assert relayed.id is not None
     assert relayed.blind_mailbox_id == blind_mailbox
@@ -336,14 +335,12 @@ def test_chat_group_create_join_invite(db: Session, owner_user: User, regular_us
     assert len(regular_groups) == 1
     assert regular_groups[0]["role"] == "member"
 
-    # 4. Blinder E2EE Relay mit group_id
+    # 4. Blinder E2EE Relay
     blind_mailbox = "b" * 64
     env = SocialService.relay_blind_envelope(
         db,
         blind_mailbox_id=blind_mailbox,
         ciphertext_envelope="sv-e2ee-team-v1:testpayload",
-        sender_user_id=owner_user.id,
-        group_id=group.id,
     )
     assert env.id is not None
     assert env.blind_mailbox_id == blind_mailbox

@@ -11,6 +11,8 @@ from services.ai_action_errors import AiActionValidationError
 from services.ai_redaction import redact_sensitive_text
 from services.ai_proposals.base import _AusfuehrungsRahmen, _Ausgefuehrt
 
+from services.achievement_service import AchievementService
+
 logger = logging.getLogger(__name__)
 
 def _email_send_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
@@ -411,8 +413,7 @@ def _ausfuehren_message_friend(db: Session, rahmen: _AusfuehrungsRahmen) -> _Aus
         db,
         blind_mailbox_id=blind_mailbox_id,
         ciphertext_envelope=f"sv-e2ee-v1:{ciphertext_b64}",
-        sender_user_id=rahmen.active_user.id,
-        recipient_user_id=friend_id,
     )
+    AchievementService.unlock_achievement(db, rahmen.active_user.id, "social_zero_knowledge")
 
     return _Ausgefuehrt(result={"sent": True, "friend": friend_username})

@@ -88,8 +88,6 @@ class PrivacyUpdateRequest(BaseModel):
 class E2eeBlindEnvelopeCreate(BaseModel):
     blind_mailbox_id: str = Field(..., min_length=16, max_length=64)
     ciphertext_envelope: str = Field(..., min_length=10)
-    recipient_user_id: int | None = None
-    group_id: int | None = None
 
 
 class E2eeBlindEnvelopeResponse(BaseModel):
