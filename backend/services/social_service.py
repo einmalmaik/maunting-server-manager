@@ -558,14 +558,15 @@ class SocialService:
         blind_mailbox_id: str,
         ciphertext_envelope: str,
         sender_user_id: int | None = None,
+        recipient_id: int | None = None,
     ) -> E2eeBlindEnvelope:
         """Speichert einen blinden E2EE-Umschlag ohne jegliche Nutzerverknüpfung.
 
         Zero-Knowledge-Invariante: Der Server lernt weder Absender, Empfänger,
         noch Gruppenzugehörigkeit. Die Benachrichtigung erfolgt als blinder
         Broadcast an alle verbundenen Sessions — jeder Client filtert selbst.
-        sender_user_id wird im SSE-Event mitgeliefert, damit der sendende Client
-        keine Benachrichtigung über seine eigene Nachricht auslöst.
+        sender_user_id und recipient_id werden im SSE-Event mitgeliefert, damit
+        Outgoing Echo Prevention und striktes Empfänger-Filtering greifen.
         """
         clean_mailbox = blind_mailbox_id.strip()
         clean_envelope = ciphertext_envelope.strip()
@@ -587,6 +588,7 @@ class SocialService:
             "id": envelope.id,
             "created_at": envelope.created_at.isoformat(),
             "sender_user_id": sender_user_id,
+            "recipient_id": recipient_id,
         })
 
         return envelope

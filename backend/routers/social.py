@@ -282,6 +282,7 @@ def relay_e2ee_message(
         blind_mailbox_id=req.blind_mailbox_id,
         ciphertext_envelope=req.ciphertext_envelope,
         sender_user_id=current_user.id,
+        recipient_id=getattr(req, "recipient_id", None),
     )
     return {
         "id": envelope.id,

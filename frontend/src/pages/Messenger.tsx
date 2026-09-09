@@ -908,6 +908,7 @@ export function Messenger() {
         await relayE2eeEnvelope({
           blind_mailbox_id: blindMailboxId,
           ciphertext_envelope: ciphertext,
+          recipient_id: targetUserId,
         })
       }
     } catch {
@@ -1243,10 +1244,20 @@ export function Messenger() {
       const ce = e as CustomEvent<any>
       const detail = ce.detail
       if (detail?.type === 'e2ee_blind_message') {
-        if (detail.blind_mailbox_id === blindMailboxId) {
+        const isCurrentActive = detail.blind_mailbox_id === blindMailboxId
+        // Outgoing Echo Prevention: Sender niemals benachrichtigen
+        if (detail.sender_user_id && currentUserId && Number(detail.sender_user_id) === Number(currentUserId)) {
+          if (isCurrentActive) {
+            void loadMessages(false)
+          }
+          return
+        }
+        // Empfänger-Filterung: Nur Empfänger verarbeitet Nachricht
+        if (detail.recipient_id && currentUserId && Number(detail.recipient_id) !== Number(currentUserId)) {
+          return
+        }
+        if (isCurrentActive) {
           void loadMessages(false)
-        } else if (user?.device_notifications !== false) {
-          toast.success('Neue verschlüsselte Nachricht empfangen.')
         }
       } else if (detail?.type === 'e2ee_typing_signal') {
         if (detail.blind_mailbox_id === blindMailboxId && detail.sender_id !== currentUserId) {
@@ -1367,6 +1378,7 @@ export function Messenger() {
         await relayE2eeEnvelope({
           blind_mailbox_id: blindMailboxId,
           ciphertext_envelope: ciphertext,
+          recipient_id: targetUserId,
         })
       }
 

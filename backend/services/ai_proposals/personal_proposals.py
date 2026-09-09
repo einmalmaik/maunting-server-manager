@@ -48,8 +48,14 @@ def _message_friend_payload(db: Session, user: User, rest: dict) -> tuple[dict, 
         raise AiActionValidationError("Freundesnachricht erfordert friend_username und message_text")
 
     from services.social_service import SocialService
+    from services.social_matching_service import SocialMatchingService
 
     target = db.query(User).filter(User.username.ilike(friend_username)).first()
+    if not target or not target.is_active or not SocialService.is_confirmed_friend(db, user.id, target.id):
+        resolved = SocialMatchingService.resolve_contact(db, user, friend_username, friend_only=True)
+        if resolved:
+            target = resolved
+
     if not target or not target.is_active:
         raise AiActionValidationError(f"Benutzer '{friend_username}' existiert nicht oder ist inaktiv.")
 
@@ -79,9 +85,20 @@ def _message_contact_payload(db: Session, user: User, rest: dict) -> tuple[dict,
         raise AiActionValidationError("Messenger-Nachricht erfordert recipient_username und message_text")
 
     from services.social_service import SocialService
+    from services.social_matching_service import SocialMatchingService
     from models import TeamMember
 
-    target = db.query(User).filter(User.username.ilike(recipient_username)).first()
+    target = None
+    direct = db.query(User).filter(User.username.ilike(recipient_username), User.is_active.is_(True)).first()
+    if direct and direct.id != user.id and SocialService.is_confirmed_friend(db, user.id, direct.id):
+        target = direct
+    else:
+        resolved = SocialMatchingService.resolve_contact(db, user, recipient_username, friend_only=False)
+        if resolved:
+            target = resolved
+        elif direct:
+            target = direct
+
     if not target or not target.is_active:
         raise AiActionValidationError(f"Benutzer '{recipient_username}' existiert nicht oder ist inaktiv.")
 
@@ -498,6 +515,7 @@ def _ausfuehren_message_friend(db: Session, rahmen: _AusfuehrungsRahmen) -> _Aus
         blind_mailbox_id=blind_mailbox_id,
         ciphertext_envelope=f"sv-e2ee-v1:{ciphertext_b64}",
         sender_user_id=rahmen.active_user.id,
+        recipient_id=friend_id,
     )
     AchievementService.unlock_achievement(db, rahmen.active_user.id, "social_zero_knowledge")
 
@@ -542,6 +560,7 @@ def _ausfuehren_message_contact(db: Session, rahmen: _AusfuehrungsRahmen) -> _Au
         blind_mailbox_id=blind_mailbox_id,
         ciphertext_envelope=f"sv-e2ee-v1:{ciphertext_b64}",
         sender_user_id=rahmen.active_user.id,
+        recipient_id=recipient_id,
     )
     AchievementService.unlock_achievement(db, rahmen.active_user.id, "social_zero_knowledge")
 
