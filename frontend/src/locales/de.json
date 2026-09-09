@@ -475,7 +475,7 @@
       "saved": "Memory-Eintrag gespeichert.",
       "delete": "Memory-Eintrag löschen",
       "deleteConfirm": "Den Memory-Eintrag „{{key}}“ wirklich löschen?",
-      "secretHint": "Keine Passwörter, API-Keys, Tokens oder anderen Zugangsdaten speichern. Memory-Inhalte können an den gewählten externen KI-Provider übertragen werden.",
+      "secretHint": "Keine Passwörter oder API-Keys hinterlegen (Übertragung an KI-Provider).",
       "errors": {
         "load": "KI-Memory konnte nicht geladen werden.",
         "save": "KI-Memory konnte nicht gespeichert werden.",
@@ -500,7 +500,7 @@
       "clearTitle": "Gesamtes Gedächtnis löschen?",
       "clearConfirm": "Wirklich alle {{count}} Einträge löschen? Das lässt sich nicht rückgängig machen.",
       "cleared": "{{count}} Einträge gelöscht.",
-      "enabledScopeHint": "Gilt für dein persönliches Gedächtnis und serverspezifische Notizen. Teamwissen und Serverwissen bleiben davon unberührt.",
+      "enabledScopeHint": "Gilt nur für persönliche und serverspezifische Notizen.",
       "titles": {
         "user": "Persönliches KI-Memory",
         "server_shared": "Wissen dieses Servers",
@@ -508,18 +508,29 @@
         "panel": "Panelweites KI-Gedächtnis"
       },
       "descriptions": {
-        "user": "Persönliche Notizen des Assistenten (allgemein und zu einzelnen Servern). Nur für dich sichtbar.",
-        "server_shared": "Was der Assistent über diese Anlage weiß. Jeder, der den Server sehen darf, liest es mit; ändern darf es, wer die Konfiguration ändern darf. Es bleibt bestehen, wenn ein Kollege geht, und verschwindet mit dem Server.",
-        "team": "Was der Assistent für dieses Team weiß. Alle Mitglieder sehen es; ändern darf es, wer den Schalter „Wissen pflegen“ hat.",
-        "panel": "Panelweites Wissen für alle Benutzer in jedem Gespräch. Nicht für persönliche Daten geeignet."
+        "user": "Persönliche Notizen des Assistenten – nur für dich sichtbar.",
+        "server_shared": "Geteiltes Serverwissen: Für alle mit Serverzugriff sichtbar und nutzbar.",
+        "team": "Geteiltes Teamwissen: Für alle Teammitglieder einsehbar.",
+        "panel": "Panelweites Wissen für alle Benutzer in allen Unterhaltungen."
       },
       "forServer": "Server: {{name}}",
-      "serverSharedHint": "Das hier ist geteilt: alle Kollegen, die diesen Server sehen dürfen, lesen es mit. Was nur dich betrifft, gehört in dein persönliches Gedächtnis im Profil.",
+      "serverSharedHint": "Geteilt: Alle Kollegen mit Serverzugriff können diese Einträge nutzen.",
       "searchPage": "Diese Seite durchsuchen",
       "total": "{{count}} Eintrag insgesamt",
       "total_one": "{{count}} Eintrag insgesamt",
       "total_other": "{{count}} Einträge insgesamt",
-      "countPage": "{{shown}} von {{total}} auf dieser Seite"
+      "countPage": "{{shown}} von {{total}} auf dieser Seite",
+      "rememberedAt": "Gemerkt: {{date}}",
+      "lastUsedAt": "Zuletzt genutzt: {{date}}",
+      "expandAll": "Alle aufklappen",
+      "collapseAll": "Alle einklappen",
+      "rawKey": "Schlüssel: {{key}}",
+      "loadMore": "Mehr laden",
+      "showingCount": "{{shown}} von {{total}} geladen",
+      "newEntry": "Neuer Eintrag",
+      "editEntry": "Eintrag bearbeiten",
+      "keyPlaceholder": "z. B. vorliebe-getraenke",
+      "valuePlaceholder": "Wert oder Präferenz eingeben..."
     },
     "skills": {
       "title": "Skills",
@@ -3335,6 +3346,7 @@
     "audioEchoCancellation": "Echounterdrückung (Echo Cancellation)",
     "audioAutoGain": "Automatische Pegelanpassung (AGC)",
     "audioTestStart": "Mikrofon testen",
+    "audioTestDescription": "Sprich kurz etwas ein. Wenn der Pegel ausschlägt, funktioniert dein Mikrofon.",
     "audioTestStop": "Test beenden",
     "audioActive": "Aufnahme aktiv",
     "audioInactive": "Nicht aktiv",
