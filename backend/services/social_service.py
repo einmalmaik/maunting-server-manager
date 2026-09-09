@@ -943,6 +943,11 @@ class SocialService:
                         if cls.derive_blind_mailbox_id(sender_user_id, cand_id) == clean_mailbox:
                             found_target = cand_id
                             break
+                        min_i, max_i = min(sender_user_id, cand_id), max(sender_user_id, cand_id)
+                        legacy_mailbox = hashlib.sha256(f"msm-e2ee-box:{min_i}:{max_i}:".encode("utf-8")).hexdigest()
+                        if clean_mailbox == legacy_mailbox:
+                            found_target = cand_id
+                            break
                     if found_target:
                         cls.ensure_direct_chat(db, sender_user_id, found_target)
                         target_recipient_id = found_target
@@ -1003,6 +1008,17 @@ class SocialService:
                 chat = db.query(DirectChat).filter_by(blind_mailbox_id=clean_mailbox).first()
                 if chat and sender_id in (chat.user_a_id, chat.user_b_id):
                     target_recipient_id = chat.get_other_user_id(sender_id)
+                else:
+                    candidates = db.query(User.id).filter(User.is_active == True, User.id != sender_id).all()
+                    for (cand_id,) in candidates:
+                        if cls.derive_blind_mailbox_id(sender_id, cand_id) == clean_mailbox:
+                            target_recipient_id = cand_id
+                            break
+                        min_i, max_i = min(sender_id, cand_id), max(sender_id, cand_id)
+                        legacy_mailbox = hashlib.sha256(f"msm-e2ee-box:{min_i}:{max_i}:".encode("utf-8")).hexdigest()
+                        if clean_mailbox == legacy_mailbox:
+                            target_recipient_id = cand_id
+                            break
 
             if target_recipient_id:
                 blocked = (

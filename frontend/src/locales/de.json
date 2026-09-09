@@ -964,7 +964,9 @@
       "cloudflare_list_zones": "Cloudflare-Zonen gelesen",
       "execute_server_action": "Serveraktion ausgeführt",
       "search_curseforge_modpacks": "CurseForge-Modpacks durchsucht",
-      "search_curseforge_mods": "CurseForge-Mods durchsucht"
+      "search_curseforge_mods": "CurseForge-Mods durchsucht",
+      "search_messenger_contacts": "Kontakte im Messenger gesucht",
+      "search_messenger_groups": "Messenger-Gruppen gesucht"
     },
     "toolsRunning": {
       "ask_user": "Ich frage kurz nach",
@@ -1062,7 +1064,12 @@
       "search_curseforge_mods": "Ich suche bei CurseForge nach Mods",
       "propose_cloudflare_dns_delete": "Ich bereite die Löschung des DNS-Eintrags vor",
       "propose_cloudflare_dns_record": "Ich bereite den DNS-Eintrag vor",
-      "propose_modpack_install": "Ich bereite die Modpack-Installation vor"
+      "propose_modpack_install": "Ich bereite die Modpack-Installation vor",
+      "search_messenger_contacts": "Ich durchsuche deine Messenger-Kontakte",
+      "search_messenger_groups": "Ich durchsuche deine Messenger-Gruppen",
+      "propose_message_contact": "Ich bereite die Nachricht an den Kontakt vor",
+      "propose_message_friend": "Ich bereite die Nachricht an deinen Freund vor",
+      "propose_message_group": "Ich bereite die Gruppennachricht vor"
     },
     "errors": {
       "codes": {

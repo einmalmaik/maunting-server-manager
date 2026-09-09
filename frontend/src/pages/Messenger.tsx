@@ -496,12 +496,20 @@ export function Messenger() {
     if (text.trim()) {
       if (now - lastTypingSentRef.current > 2500) {
         lastTypingSentRef.current = now
-        void sendTypingSignal({ blind_mailbox_id: blindMailboxId, status: 'typing' }).catch(() => {})
+        void sendTypingSignal({
+          blind_mailbox_id: blindMailboxId,
+          status: 'typing',
+          recipient_id: activeContact?.id ?? null,
+        }).catch(() => {})
       }
     } else {
       if (lastTypingSentRef.current > 0) {
         lastTypingSentRef.current = 0
-        void sendTypingSignal({ blind_mailbox_id: blindMailboxId, status: 'idle' }).catch(() => {})
+        void sendTypingSignal({
+          blind_mailbox_id: blindMailboxId,
+          status: 'idle',
+          recipient_id: activeContact?.id ?? null,
+        }).catch(() => {})
       }
     }
   }
@@ -1417,7 +1425,11 @@ export function Messenger() {
       justSentRef.current = true
       lastTypingSentRef.current = 0
       if (blindMailboxId) {
-        void sendTypingSignal({ blind_mailbox_id: blindMailboxId, status: 'idle' }).catch(() => {})
+        void sendTypingSignal({
+          blind_mailbox_id: blindMailboxId,
+          status: 'idle',
+          recipient_id: activeContact?.id ?? null,
+        }).catch(() => {})
       }
       await loadMessages()
     } catch (err: unknown) {
@@ -1469,7 +1481,11 @@ export function Messenger() {
       setRecordingDuration(0)
 
       if (blindMailboxId) {
-        void sendTypingSignal({ blind_mailbox_id: blindMailboxId, status: 'recording' }).catch(() => {})
+        void sendTypingSignal({
+          blind_mailbox_id: blindMailboxId,
+          status: 'recording',
+          recipient_id: activeContact?.id ?? null,
+        }).catch(() => {})
       }
 
       timerIntervalRef.current = setInterval(() => {
@@ -1482,7 +1498,11 @@ export function Messenger() {
 
   const stopRecording = (shouldSend: boolean) => {
     if (blindMailboxId) {
-      void sendTypingSignal({ blind_mailbox_id: blindMailboxId, status: 'idle' }).catch(() => {})
+      void sendTypingSignal({
+        blind_mailbox_id: blindMailboxId,
+        status: 'idle',
+        recipient_id: activeContact?.id ?? null,
+      }).catch(() => {})
     }
 
     if (timerIntervalRef.current) {

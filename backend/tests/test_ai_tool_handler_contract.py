@@ -275,6 +275,13 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
     **Nachtrag 01.09.2026 / 02.09.2026: Installer- & System-Werkzeuge** —
     aus der App rund **88.044** Zeichen, aus dem Panel **82.500**.
     Die Grenze steht deshalb bei **92.000**.
+
+    **Nachtrag 09.09.2026: Messenger- und Social-Werkzeuge** —
+    aus der App rund **93.312** Zeichen, aus dem Panel rund **87.800**.
+    Die fünf Werkzeuge (`search_messenger_contacts`, `search_messenger_groups`,
+    `propose_message_contact`, `propose_message_friend`, `propose_message_group`)
+    bringen zusammen rund 5.300 Zeichen.
+    Die Grenze steht deshalb bei **96.000**.
      """
     for herkunft in ("panel", "desktop"):
         erlaubt = herkunft_schnitt(
@@ -288,7 +295,7 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
             ],
             ensure_ascii=False,
         )
-        assert len(katalog) < 92_000, (
+        assert len(katalog) < 96_000, (
             f"Der Werkzeugkatalog der Herkunft '{herkunft}' ist auf "
             f"{len(katalog)} Zeichen gewachsen. Er geht in jeder Runde mit und "
             "taucht in keiner Budgetrechnung auf."

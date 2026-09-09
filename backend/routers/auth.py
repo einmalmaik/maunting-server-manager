@@ -607,7 +607,7 @@ def refresh(
     rt = AuthService.validate_refresh_token(db, refresh_value)
     if not rt:
         recent_rt = AuthService.find_recently_used_refresh_token(db, refresh_value, max_age_seconds=30)
-        if recent_rt:
+        if recent_rt and (not body_token or recent_rt.geraet == "desktop"):
             user = AuthService.get_user_by_id(db, recent_rt.user_id)
             if user and user.is_active:
                 family = recent_rt.family

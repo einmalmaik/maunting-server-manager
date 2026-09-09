@@ -680,23 +680,16 @@ jemandem etwas zu schreiben (z. B. "schick eine nachricht an mauntingstudios..."
 `search_messenger_contacts` mit dem Namen oder Namensfragment (z. B. query='mauntingstudios') auf. \
 Das Werkzeug durchsucht Freunde, Teammitglieder, Systembenutzer und oeffentliche Profile. \
 Fuer Gruppen nutze `search_messenger_groups` mit dem Gruppennamen. \
-2. Semantisches User-Matching & Beziehungs-Aliase via Memory: \
-Nennt der Benutzer Beziehungen ("meinen besten Freund", "Freundin", "Kollege", "Chef") oder \
-Spitznamen ("Sag [Spitzname], dass..."), darf der Tool-Call nicht fehlschlagen. \
-Gleiche vor dem Aufruf die Memory-Einträge des Users nach Beziehungs-Aliasen (z. B. "bester Freund = Raik") \
-oder hinterlegten Spitznamen ab. Bei Schreibfehlern im Nutzernamen greift eine fehlertolerante \
-Fuzzy-Suche über die Kontaktliste. Sowohl `search_messenger_contacts` als auch `propose_message_contact` \
-und `propose_message_friend` lösen Beziehungs-Aliase und Tippfehler automatisch auf. \
-3. Striktes Verbot von Websuche für Kontakte: Nutze für Personen, Benutzernamen, Kontakte, \
-Freunde oder Gruppen NIEMALS `web_search`. Suche Kontakte ausnahmslos über die internen \
-Messenger-Werkzeuge `search_messenger_contacts` und `search_messenger_groups`. \
-4. Nachricht vorschlagen/senden: Sobald der Empfaenger (Kontakt oder Gruppe) bekannt \
-oder gefunden ist, erstelle die Nachricht mit `propose_message_contact` (oder \
-`propose_message_friend`) fuer Direktnachrichten bzw. `propose_message_group` fuer \
-Gruppennachrichten. Frage nicht zögerlich nach, wenn Name und Textinhalt klar sind. \
-5. Zero-Knowledge & Privatsphaere: Du hast NIEMALS Zugriff auf Chatverlaeufe, \
-Nachrichten-Historien oder private Chat-Inhalte Dritter. Du kennst nur Benutzernamen und \
-Gruppennamen zur Adressierung von Ende-zu-Ende verschluesselten Nachrichten."""
+2. Semantisches Matching & Memory-Aliase: Bei Beziehungsbezeichnungen (wie bester Freund oder Kollege) \
+oder Spitznamen gleiche vorab Memory-Eintraege ab (z. B. bester Freund = Raik). Bei Tippfehlern greift \
+eine fehlertolerante Fuzzy-Suche. `search_messenger_contacts`, `propose_message_contact` und \
+`propose_message_friend` loesen Beziehungs-Aliase und Tippfehler automatisch auf. \
+3. Kein Web-Search fuer Kontakte: Nutze fuer Personen, Kontakte oder Gruppen NIEMALS `web_search`, \
+sondern ausschliesslich `search_messenger_contacts` und `search_messenger_groups`. \
+4. Nachricht vorschlagen: Sobald der Empfaenger bekannt ist, erstelle die Nachricht mit `propose_message_contact` \
+(oder `propose_message_friend`) bzw. `propose_message_group`. \
+5. Zero-Knowledge: Du hast NIEMALS Zugriff auf Chatverlaeufe oder private Nachrichten Dritter, \
+nur auf Benutzernamen und Gruppennamen zur Adressierung Ende-zu-Ende verschluesselter Nachrichten."""
 
 
 CLOUDFLARE = """\

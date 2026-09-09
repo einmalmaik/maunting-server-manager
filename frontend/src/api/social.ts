@@ -292,6 +292,7 @@ export async function fetchE2eeEnvelopes(
 export async function sendTypingSignal(payload: {
   blind_mailbox_id: string
   status: 'typing' | 'recording' | 'idle'
+  recipient_id?: number | null
 }): Promise<{ ok: boolean }> {
   return api<{ ok: boolean }>('/social/e2ee/typing', {
     method: 'POST',
