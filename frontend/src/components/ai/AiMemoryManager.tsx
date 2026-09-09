@@ -1,5 +1,20 @@
-import { Brain, BrainCircuit, Pencil, Plus, Save, Trash2, X } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import {
+  BookOpen,
+  Brain,
+  BrainCircuit,
+  Calendar,
+  ChevronDown,
+  ChevronRight,
+  ChevronsUpDown,
+  Flame,
+  Pencil,
+  Plus,
+  Save,
+  ShieldAlert,
+  Trash2,
+  X,
+} from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { aiApi, type AiMemoryEntry, type AiMemoryPage } from '@/api/ai'
@@ -17,6 +32,7 @@ import {
   scopeServerId,
   scopeTeamId,
 } from './knowledgeScope'
+import { formatMemoryDate, formatMemoryKey } from './memoryFormatters'
 
 type Herkunft = 'all' | 'user' | 'ai'
 
@@ -30,33 +46,24 @@ interface Props {
   scope?: AiKnowledgeScope
 }
 
+const CHUNK_SIZE = 30
+
 /**
- * Erinnerungen einsehen und pflegen — eigene oder die eines Teams.
+ * Erinnerungen einsehen und pflegen im kompakten Logbuch-Stil.
  *
- * Vorher war das eine flache Liste mit einem Formular darunter. Das trägt, bis
- * die KI zwanzig Einträge abgeleitet hat; danach findet man nichts mehr und
- * kann nur noch einzeln löschen. Deshalb: Suche, Herkunftsfilter, Bearbeiten an
- * Ort und Stelle und ein „alles löschen" für den Fall, dass man wirklich
- * aufräumen will.
- *
- * Die Herkunft ist der wichtigste Filter, nicht ein hübsches Extra: „was hat
- * sich die KI über mich gemerkt?" ist eine andere Frage als „was habe ich ihr
- * gesagt?", und nur die erste beantwortet niemand sonst.
+ * Zeigt Einträge standardmäßig eingeklappt als Notizbuch-Zeilen mit
+ * formatierten Titeln, diskreten Metadaten (Gemerkt am, Häufigkeit)
+ * und progressivem Lazy-Scrolling für optimale Performance auch bei
+ * Hunderten Einträgen über Web, Desktop (Tauri) und Mobile hinweg.
  */
 export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const allowed = useHasPermission('ai.memory.use')
   const darfAendern = scopeCanManage(scope)
   const teamId = scopeTeamId(scope)
   const serverId = scopeServerId(scope)
 
   const [entries, setEntries] = useState<AiMemoryEntry[]>([])
-  // Die angezeigte Seite und die drei Zahlen, die nur der Server kennt. Der
-  // persönliche Bereich wie das Wissen eines Teams dürfen 5.000 Einträge
-  // fassen, und jeder davon kostet beim Öffnen einen eigenen Aufruf an den
-  // DIS-Sidecar — gemessen rund zehn Sekunden für alle. Beide kommen deshalb
-  // seitenweise. `seitengroesse` ist 0, solange nichts geladen wurde; daraus
-  // wird eine Seite, und die Blätterleiste bleibt weg.
   const [seite, setSeite] = useState(1)
   const [gesamt, setGesamt] = useState(0)
   const [loeschbar, setLoeschbar] = useState(0)
@@ -66,26 +73,19 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
   const [herkunft, setHerkunft] = useState<Herkunft>('all')
   const [key, setKey] = useState('')
   const [value, setValue] = useState('')
-  // Nicht nur die id, sondern der ganze Eintrag: beim Speichern zählt der
-  // Bereich des Eintrags, nicht der der Ansicht. Der persönliche Bereich listet
-  // bewusst auch die Notizen zu einzelnen Servern mit — wer davon nur die id
-  // festhält, schickt sie beim Ändern als `scope: 'user'` zurück und legt damit
-  // eine Kopie an, statt sie zu ändern.
   const [bearbeitet, setBearbeitet] = useState<AiMemoryEntry | null>(null)
   const [serverNamen, setServerNamen] = useState<Map<number, string>>(new Map())
   const [busy, setBusy] = useState(false)
 
-  // Zwei Aufrufe, eine Form. Der persönliche Bereich hat keine Kennung, über
-  // die man ihn abfragen könnte: er spannt die allgemeinen Einträge und die
-  // Notizen zu einzelnen Servern (`server:{id}:user:{uid}`) und geht deshalb
-  // über den Besitzer. Die serverbezogenen waren lange nirgends sichtbar, weil
-  // `listMemory('server', …)` je Aufruf einen konkreten Server verlangt.
-  //
-  // Geblättert wird in beiden Fällen, und beide liefern dieselbe Seite samt
-  // Gesamtzahl — deshalb steht hier kein Zwischentyp mehr. Panel und
-  // Serverwissen sind bei hundert Einträgen fest gedeckelt und melden schlicht
-  // eine Seite; das Teamwissen darf 5.000 fassen und braucht das Blättern
-  // wirklich.
+  // Accordion-Zustand: Standardmäßig alle eingeklappt
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
+
+  // Lazy Loading / Progressiver Nachlademechanismus für flüssiges Scrollen
+  const [renderedLimit, setRenderedLimit] = useState(CHUNK_SIZE)
+  const sentinelRef = useRef<HTMLDivElement | null>(null)
+  const formRef = useRef<HTMLFormElement | null>(null)
+  const valueInputRef = useRef<HTMLInputElement | null>(null)
+
   const holen = (offset: number): Promise<AiMemoryPage> => (
     scope.kind === 'user'
       ? aiApi.listPersonalMemory(offset)
@@ -103,10 +103,6 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
   const laden = async (zielSeite = seite, groesse = seitengroesse) => {
     const ladung = await holen(Math.max(0, zielSeite - 1) * groesse)
     const letzte = Math.max(1, Math.ceil(ladung.total / ladung.limit))
-    // Wer die letzte Zeile der letzten Seite löscht, stünde sonst vor „Seite 25
-    // von 24" und einer leeren Liste, die aussieht wie ein leeres Gedächtnis.
-    // Statt dessen rutscht die Ansicht auf die letzte Seite, die es noch gibt.
-    // Nur ein Nachschlag, denn `letzte` ist danach gültig.
     if (zielSeite > letzte) return laden(letzte, ladung.limit)
     uebernehmen(ladung, zielSeite)
   }
@@ -115,14 +111,10 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
     if (!allowed) return
     let active = true
     setSuche(''); setHerkunft('all'); setKey(''); setValue(''); setBearbeitet(null)
+    setExpandedIds(new Set())
     Promise.all([
       holen(0),
-      // Der Schalter ist eine Einstellung des Benutzers, kein Merkmal des
-      // Bereichs — er wird auch in der Teamansicht geladen, aber nur in der
-      // persönlichen angezeigt.
       aiApi.getMemoryPreference(),
-      // Nur für die Beschriftung der Servernotizen. Fällt sie aus, steht dort
-      // die Nummer statt des Namens — kein Grund, die Liste scheitern zu lassen.
       scope.kind === 'user'
         ? api<ServerOption[]>('/servers').catch(() => [] as ServerOption[])
         : Promise.resolve([] as ServerOption[]),
@@ -144,16 +136,8 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
       .filter((entry) => herkunft === 'all' || entry.origin === herkunft)
       .filter((entry) => !nadel
         || entry.key.toLowerCase().includes(nadel)
+        || formatMemoryKey(entry.key).toLowerCase().includes(nadel)
         || entry.value.toLowerCase().includes(nadel))
-      // Zuletzt genutzt zuerst: was die KI gerade heranzieht, ist das, was man
-      // prüfen will. Nie genutzte Einträge stehen hinten, nach Schlüssel sortiert.
-      //
-      // Das Backend schneidet die Seiten in genau dieser Reihenfolge
-      // (`_SEITENORDNUNG` in ai_memory_service.py), und dort ist sie keine
-      // Anzeigefrage mehr, sondern die Schnittkante. Diese Sortierung hier ist
-      // deshalb ein Nachziehen, kein Umsortieren — wer sie ändert, muss die
-      // dortige mitändern, sonst kommt eine Seite in einer anderen Reihenfolge
-      // an, als sie geschnitten wurde.
       .sort((a, b) => {
         const links = a.last_used_at ? Date.parse(a.last_used_at) : 0
         const rechts = b.last_used_at ? Date.parse(b.last_used_at) : 0
@@ -161,18 +145,52 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
       })
   }, [entries, herkunft, suche])
 
-  // Suche, Herkunftsfilter und Zähler erscheinen erst, wenn die Liste lang genug
-  // ist, um sie zu brauchen — aber sie verschwinden nicht, solange sie noch
-  // etwas bewirken. Genau das war der Fehler: löschte man aus vier Einträgen den
-  // einzigen Suchtreffer, hängte die Schranke das Suchfeld ab, während `sichtbar`
-  // weiter nach dem alten Wort filterte. Übrig blieb „Kein Eintrag passt zur
-  // Suche" ohne ein Bedienelement, mit dem man da wieder herauskommt — half nur
-  // ein Bereichswechsel oder Neuladen. Eine Bedingung für alle drei, damit sie
-  // nicht wieder auseinanderlaufen.
-  const werkzeugleiste = entries.length > 3 || suche !== '' || herkunft !== 'all'
+  // Zurücksetzen des Lazy-Loading-Limits beim Filtern
+  useEffect(() => {
+    setRenderedLimit(CHUNK_SIZE)
+  }, [suche, herkunft, seite])
 
-  // Die Null steht für „noch nichts geladen" — bis die erste Antwort da ist,
-  // gibt es eine Seite und keine Leiste. Danach kommt die Größe vom Server.
+  // Progressive Anzeige limitieren
+  const displayEntries = useMemo(() => {
+    return sichtbar.slice(0, renderedLimit)
+  }, [sichtbar, renderedLimit])
+
+  // Automatische IntersectionObserver-Anbindung für Lazy Loading
+  useEffect(() => {
+    if (displayEntries.length >= sichtbar.length) return
+    const sentinel = sentinelRef.current
+    if (!sentinel || typeof IntersectionObserver === 'undefined') return
+
+    const observer = new IntersectionObserver((entriesList) => {
+      if (entriesList[0]?.isIntersecting) {
+        setRenderedLimit((prev) => Math.min(prev + CHUNK_SIZE, sichtbar.length))
+      }
+    }, { rootMargin: '200px' })
+
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [displayEntries.length, sichtbar.length])
+
+  const toggleExpand = (id: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const allExpanded = sichtbar.length > 0 && sichtbar.every((e) => expandedIds.has(e.id))
+
+  const toggleAllExpanded = () => {
+    if (allExpanded) {
+      setExpandedIds(new Set())
+    } else {
+      setExpandedIds(new Set(sichtbar.map((e) => e.id)))
+    }
+  }
+
+  const werkzeugleiste = entries.length > 3 || suche !== '' || herkunft !== 'all'
   const seitenzahl = seitengroesse > 0 ? Math.max(1, Math.ceil(gesamt / seitengroesse)) : 1
 
   if (!allowed) return null
@@ -189,20 +207,6 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
     if (!key.trim() || !value.trim() || busy) return
     setBusy(true)
     try {
-      // Beim Ändern gilt der Bereich des Eintrags, beim Anlegen der der Ansicht.
-      //
-      // Der persönliche Bereich zeigt auch die Notizen zu einzelnen Servern; die
-      // liegen unter `server:{sid}:user:{uid}`. Ging eine Korrektur daran als
-      // `scope: 'user'` hinaus, suchte das Backend unter `user:{uid}`, fand dort
-      // nichts und legte eine zweite Zeile mit demselben Schlüssel an: die alte
-      // Notiz wirkte unverändert weiter, und ab da gingen beide Werte gemeinsam
-      // ins Gespräch über diesen Server. Dass eine Änderung an Ort und Stelle
-      // gemeint ist, sagt schon das gesperrte Schlüsselfeld weiter unten.
-      //
-      // Von Hand angelegt wird dagegen immer im Bereich selbst, nie
-      // serverbezogen: eine Notiz „zu diesem Server" entsteht im Gespräch über
-      // ihn, und ein Serverfeld im Formular wäre ein zweiter Weg mit eigenen
-      // Fehlerquellen.
       const feld = { key: key.trim(), value: value.trim() }
       await aiApi.saveMemory(
         bearbeitet?.scope === 'server' && bearbeitet.server_id !== null
@@ -235,19 +239,6 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
   }
 
   const allesEntfernen = async () => {
-    // Die Anzahl steht in der Frage: „alles löschen" ist bei drei Einträgen
-    // etwas anderes als bei achtzig, und nur der Benutzer weiß, welches er
-    // gerade meint.
-    //
-    // Gezählt wird, was der Knopf danach wirklich trifft — nicht, was die Liste
-    // zeigt. Der persönliche Bereich listet auch die Notizen zu einzelnen
-    // Servern mit, gelöscht werden aber nur die allgemeinen Einträge (siehe
-    // unten). Mit `entries.length` fragte die Bestätigung nach „alle 12" und
-    // meldete danach „8 gelöscht".
-    //
-    // Seit die Ansicht blättert, kann sie das nicht mehr selbst zählen: sie
-    // sieht 200 von 5.000. `loeschbar` kommt deshalb vom Server, der beides
-    // kennt — den Bestand und die Kennung, über die gelöscht wird.
     if (!await confirm({
       title: t('ai.memory.clearTitle'),
       message: t('ai.memory.clearConfirm', { count: loeschbar }),
@@ -255,15 +246,8 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
     })) return
     setBusy(true)
     try {
-      // Bewusst nur der Bereich selbst: „alles löschen" im Profil räumt die
-      // allgemeinen Einträge, nicht die Notizen zu einzelnen Servern. Die
-      // stehen sichtbar daneben und lassen sich einzeln entfernen — ein Knopf,
-      // der beides mitnimmt, wäre weiter, als er aussieht.
       const { removed } = await aiApi.clearMemory(memoryScopeName(scope), teamId, serverId)
       setKey(''); setValue(''); setBearbeitet(null)
-      // Zurück auf Seite 1: im Profil bleiben höchstens die Servernotizen
-      // übrig, in einem Bereich gar nichts. Beides passt auf eine Seite, und
-      // wer auf Seite 12 stehenbliebe, sähe eine leere Liste.
       await laden(1)
       toast.success(t('ai.memory.cleared', { count: removed }))
     } catch (error: unknown) {
@@ -272,7 +256,17 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
   }
 
   const bearbeiten = (entry: AiMemoryEntry) => {
-    setKey(entry.key); setValue(entry.value); setBearbeitet(entry)
+    setKey(entry.key)
+    setValue(entry.value)
+    setBearbeitet(entry)
+    // Beim Bearbeiten den Eintrag aufklappen
+    setExpandedIds((prev) => new Set(prev).add(entry.id))
+    setTimeout(() => {
+      if (typeof formRef.current?.scrollIntoView === 'function') {
+        formRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      }
+      valueInputRef.current?.focus()
+    }, 50)
   }
 
   const herkunftsFilter = (
@@ -283,10 +277,10 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
           type="button"
           aria-pressed={herkunft === wert}
           onClick={() => setHerkunft(wert)}
-          className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
+          className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
             herkunft === wert
-              ? 'border-primary/60 bg-primary/15 text-primary'
-              : 'border-outline-variant/50 text-on-surface-variant hover:text-on-surface'
+              ? 'border-primary/60 bg-primary/15 text-primary font-medium'
+              : 'border-outline-variant/40 text-on-surface-variant hover:text-on-surface'
           }`}
         >
           {t(`ai.memory.origins.${wert}`)}
@@ -298,13 +292,10 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
   return (
     <AiKnowledgeShell
       icon={Brain}
-      // Die Überschrift folgt dem Bereich. Sie lautete auch über dem Wissen
-      // eines Teams „Persönliches KI-Memory" — genau die Verwechslung, die
-      // persönlich und geteilt zusammenrühren lässt.
       title={t(`ai.memory.titles.${scope.kind}`)}
       description={t(`ai.memory.descriptions.${scope.kind}`)}
       headerAction={scope.kind === 'user' ? (
-        <label className="flex min-h-10 items-center gap-3 text-sm text-on-surface-variant">
+        <label className="flex min-h-10 items-center gap-2.5 text-sm text-on-surface-variant">
           <span>{t('ai.memory.enabled')}</span>
           <Switch
             checked={enabled}
@@ -320,23 +311,11 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
           />
         </label>
       ) : undefined}
-      // Der Schalter regiert nur diesen Bereich. Das stand nirgends und war
-      // auch nicht so — bis eben nahm er dem Assistenten auch das Teamwissen.
-      //
-      // Beim Serverwissen steht dafür eine andere Ansage: dass es geteilt ist.
-      // Wer hier etwas hinschreibt, soll vorher wissen, dass die Kollegen es
-      // lesen — und nicht erst, wenn es jemand zitiert.
       note={scope.kind === 'user'
         ? t('ai.memory.enabledScopeHint')
         : scope.kind === 'server_shared'
           ? t('ai.memory.serverSharedHint')
           : undefined}
-      // Die Suche liest, was geladen ist — und geladen ist bei mehreren Seiten
-      // nur diese eine. Sie könnte es auch gar nicht anders: der Wert liegt
-      // verschlüsselt in der Datenbank, eine Suche über den ganzen Bestand
-      // hieße, alle 5.000 Zeilen zu öffnen, also genau das, wogegen die
-      // Seitenweise gebaut ist. Statt so zu tun, als suchte sie überall, sagt
-      // die Beschriftung, worin sie sucht.
       search={werkzeugleiste
         ? {
           value: suche,
@@ -347,6 +326,21 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
       filters={(
         <>
           {werkzeugleiste && herkunftsFilter}
+          {sichtbar.length > 1 && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={toggleAllExpanded}
+              title={allExpanded ? t('ai.memory.collapseAll') : t('ai.memory.expandAll')}
+              aria-label={allExpanded ? t('ai.memory.collapseAll') : t('ai.memory.expandAll')}
+            >
+              <ChevronsUpDown className="h-4 w-4" aria-hidden="true" />
+              <span className="hidden sm:inline">
+                {allExpanded ? t('ai.memory.collapseAll') : t('ai.memory.expandAll')}
+              </span>
+            </Button>
+          )}
           {darfAendern && entries.length > 0 && (
             <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => void allesEntfernen()}>
               <Trash2 className="h-4 w-4" aria-hidden="true" />
@@ -355,87 +349,263 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
           )}
         </>
       )}
-      // Der Zähler zählt, was der Filter von der geladenen Liste übrig lässt —
-      // und die ist bei mehreren Seiten nur ein Ausschnitt. „3 von 4 angezeigt"
-      // neben „5.000 Einträge insgesamt" läse sich wie ein Widerspruch, also
-      // sagt er dann dazu, worauf er sich bezieht.
       count={werkzeugleiste
         ? (seitenzahl > 1
           ? t('ai.memory.countPage', { shown: sichtbar.length, total: entries.length })
           : t('ai.memory.count', { shown: sichtbar.length, total: entries.length }))
         : undefined}
     >
-      <div className="space-y-2">
-        {sichtbar.map((entry) => (
-          <div
-            key={entry.id}
-            className={`flex items-start gap-3 rounded-xl border p-3 transition-colors ${
-              bearbeitet?.id === entry.id
-                ? 'border-primary/50 bg-primary/5'
-                : 'border-outline-variant/40 bg-surface-container-low/35'
-            }`}
-          >
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="font-mono text-xs font-semibold text-primary">{entry.key}</p>
-                {/* Zu welchem Server die Notiz gehört. Ohne diese Angabe stünde
-                    „startet nur mit erhöhtem Timeout" ohne Bezug zwischen den
-                    allgemeinen Einträgen — dieselbe Verwechslungsgefahr, die
-                    beim Modell die Server-ID in der Zeile verhindert. */}
-                {entry.scope === 'server' && entry.server_id !== null && (
-                  <span className="rounded-full border border-outline-variant/50 px-2 py-0.5 text-[10px] text-on-surface-variant">
-                    {t('ai.memory.forServer', {
-                      name: serverNamen.get(entry.server_id) ?? `#${entry.server_id}`,
-                    })}
-                  </span>
-                )}
-                {/* Herkunft sichtbar machen: niemand soll raten müssen, ob er
-                    das selbst hinterlegt hat oder ob die KI es abgeleitet hat. */}
-                {entry.origin === 'ai' && (
-                  <span className="inline-flex items-center gap-1 rounded-full border border-outline-variant/50 px-2 py-0.5 text-[10px] text-on-surface-variant">
-                    <BrainCircuit className="h-3 w-3" aria-hidden="true" />
-                    {t('ai.memory.originAi')}
-                  </span>
-                )}
-                {entry.use_count > 0 && (
-                  <span className="text-[10px] text-on-surface-variant/70">
-                    {t('ai.memory.usedCount', { count: entry.use_count })}
-                  </span>
-                )}
-              </div>
-              <p className="mt-1 whitespace-pre-wrap break-words text-sm text-on-surface-variant">{entry.value}</p>
-            </div>
-            {darfAendern && (
-              <div className="flex shrink-0 gap-1">
-                <Button
-                  type="button" size="sm" variant="ghost" disabled={busy}
-                  onClick={() => bearbeiten(entry)}
-                  aria-label={`${t('ai.memory.edit')}: ${entry.key}`}
-                >
-                  <Pencil className="h-4 w-4" aria-hidden="true" />
-                </Button>
-                <Button
-                  type="button" size="sm" variant="ghost" disabled={busy}
-                  onClick={() => void entfernen(entry)}
-                  aria-label={`${t('ai.memory.delete')}: ${entry.key}`}
-                >
-                  <Trash2 className="h-4 w-4" aria-hidden="true" />
-                </Button>
-              </div>
-            )}
+      {/* Schneller, kompakter Logbuch-Eingabebereich direkt oben greifbar */}
+      {darfAendern && (
+        <form
+          ref={formRef}
+          className="rounded-xl border border-outline-variant/40 bg-surface-container-low/40 p-3 sm:p-4 space-y-3"
+          onSubmit={speichern}
+        >
+          <div className="flex items-center gap-2 text-xs font-semibold text-on-surface-variant">
+            <BookOpen className="h-4 w-4 text-primary" aria-hidden="true" />
+            <span>{bearbeitet !== null ? t('ai.memory.editEntry') : t('ai.memory.newEntry')}</span>
           </div>
-        ))}
+
+          <div className="grid gap-2.5 sm:grid-cols-[14rem_minmax(0,1fr)]">
+            <label className="space-y-1">
+              <span className="sr-only">{t('ai.memory.key')}</span>
+              <input
+                className="msm-input text-xs sm:text-sm"
+                pattern="[A-Za-z0-9_.-]+"
+                maxLength={64}
+                value={key}
+                disabled={busy || bearbeitet !== null}
+                onChange={(event) => setKey(event.target.value)}
+                placeholder={t('ai.memory.keyPlaceholder')}
+                aria-label={t('ai.memory.key')}
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="sr-only">{t('ai.memory.value')}</span>
+              <input
+                ref={valueInputRef}
+                className="msm-input text-xs sm:text-sm"
+                maxLength={2000}
+                value={value}
+                disabled={busy}
+                onChange={(event) => setValue(event.target.value)}
+                placeholder={t('ai.memory.valuePlaceholder')}
+                aria-label={t('ai.memory.value')}
+              />
+            </label>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+            <div className="flex items-center gap-2">
+              <Button type="submit" size="sm" disabled={busy || !key.trim() || !value.trim()}>
+                {bearbeitet === null ? (
+                  <Plus className="h-4 w-4" aria-hidden="true" />
+                ) : (
+                  <Save className="h-4 w-4" aria-hidden="true" />
+                )}
+                {bearbeitet === null ? t('ai.memory.add') : t('settings.save')}
+              </Button>
+              {bearbeitet !== null && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => { setKey(''); setValue(''); setBearbeitet(null) }}
+                >
+                  <X className="h-4 w-4" aria-hidden="true" />
+                  {t('common.cancel')}
+                </Button>
+              )}
+            </div>
+
+            <span className="inline-flex items-center gap-1.5 text-[11px] text-on-surface-variant/80">
+              <ShieldAlert className="h-3.5 w-3.5 text-secondary shrink-0" aria-hidden="true" />
+              {t('ai.memory.secretHint')}
+            </span>
+          </div>
+        </form>
+      )}
+
+      {/* Logbuch-Einträge Liste mit Accordion & Virtual/Lazy Scrolling */}
+      <div className="space-y-2">
+        {displayEntries.map((entry) => {
+          const isExpanded = expandedIds.has(entry.id)
+          const isEditing = bearbeitet?.id === entry.id
+          const formattedTitle = formatMemoryKey(entry.key)
+
+          return (
+            <article
+              key={entry.id}
+              className={`rounded-xl border transition-all duration-150 overflow-hidden ${
+                isEditing
+                  ? 'border-primary/60 bg-primary/5 shadow-xs'
+                  : isExpanded
+                    ? 'border-outline-variant/60 bg-surface-container-low/50 shadow-xs'
+                    : 'border-outline-variant/30 bg-surface-container-lowest/60 hover:border-outline-variant/60 hover:bg-surface-container-low/30'
+              } ${
+                entry.origin === 'ai' ? 'border-l-4 border-l-primary/70' : 'border-l-4 border-l-secondary/70'
+              }`}
+            >
+              {/* Kompakte Kopfzeile / Eingeklappte Notiz-Zeile */}
+              <div className="flex items-center justify-between gap-2 p-3">
+                <button
+                  type="button"
+                  aria-expanded={isExpanded}
+                  onClick={() => toggleExpand(entry.id)}
+                  className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer select-none group focus:outline-none"
+                >
+                  <span className="text-on-surface-variant/70 shrink-0 group-hover:text-primary transition-colors">
+                    {isExpanded ? (
+                      <ChevronDown className="h-4 w-4 text-primary" aria-hidden="true" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                    )}
+                  </span>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs sm:text-sm font-medium text-on-surface group-hover:text-primary transition-colors">
+                        {formattedTitle}
+                      </span>
+
+                      {/* Server-Zugehörigkeit */}
+                      {entry.scope === 'server' && entry.server_id !== null && (
+                        <span className="rounded-full border border-outline-variant/40 bg-surface-container px-2 py-0.5 text-[10px] text-on-surface-variant">
+                          {t('ai.memory.forServer', {
+                            name: serverNamen.get(entry.server_id) ?? `#${entry.server_id}`,
+                          })}
+                        </span>
+                      )}
+
+                      {/* KI-Herkunftsbadge */}
+                      {entry.origin === 'ai' && (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] text-primary">
+                          <BrainCircuit className="h-3 w-3" aria-hidden="true" />
+                          {t('ai.memory.originAi')}
+                        </span>
+                      )}
+
+                      {/* Häufigkeitszähler */}
+                      {entry.use_count > 0 && (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full border border-outline-variant/40 bg-surface-container-high px-2 py-0.5 text-[10px] text-on-surface-variant font-medium"
+                          title={t('ai.memory.usedCount', { count: entry.use_count })}
+                        >
+                          <Flame className="h-3 w-3 text-amber-500 shrink-0" aria-hidden="true" />
+                          {t('ai.memory.usedCount', { count: entry.use_count })}
+                        </span>
+                      )}
+
+                      {/* Gemerkt-Datum (dezent) */}
+                      {entry.created_at && (
+                        <span className="hidden md:inline-flex items-center gap-1 text-[10px] text-on-surface-variant/70">
+                          <Calendar className="h-3 w-3 shrink-0" aria-hidden="true" />
+                          {formatMemoryDate(entry.created_at, i18n.language)}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Auszug / Vorschau des Werts im eingeklappten Zustand */}
+                    {!isExpanded && (
+                      <p className="mt-0.5 truncate text-xs text-on-surface-variant max-w-md sm:max-w-xl">
+                        {entry.value}
+                      </p>
+                    )}
+                  </div>
+                </button>
+
+                {/* Aktionen (Bearbeiten / Löschen) */}
+                {darfAendern && (
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      onClick={() => bearbeiten(entry)}
+                      aria-label={`${t('ai.memory.edit')}: ${entry.key}`}
+                    >
+                      <Pencil className="h-4 w-4" aria-hidden="true" />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      onClick={() => void entfernen(entry)}
+                      aria-label={`${t('ai.memory.delete')}: ${entry.key}`}
+                    >
+                      <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              {/* Ausgeklappte Logbuch-Ansicht */}
+              {isExpanded && (
+                <div className="border-t border-outline-variant/20 bg-surface-container-low/30 px-3.5 pb-3.5 pt-2 space-y-3">
+                  <div className="rounded-lg border border-outline-variant/30 bg-surface-container-lowest/90 p-3 text-sm text-on-surface whitespace-pre-wrap break-words leading-relaxed">
+                    {entry.value}
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-on-surface-variant border-t border-outline-variant/20 pt-2">
+                    <span className="font-mono text-[11px] text-on-surface-variant/80">
+                      {t('ai.memory.rawKey', { key: entry.key })}
+                    </span>
+
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                      {entry.created_at && (
+                        <span>
+                          {t('ai.memory.rememberedAt', { date: formatMemoryDate(entry.created_at, i18n.language) })}
+                        </span>
+                      )}
+                      {entry.last_used_at && (
+                        <span>
+                          {t('ai.memory.lastUsedAt', { date: formatMemoryDate(entry.last_used_at, i18n.language) })}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </article>
+          )
+        })}
+
+        {/* Sentinel für Lazy Loading */}
+        {displayEntries.length < sichtbar.length && (
+          <div ref={sentinelRef} className="h-2 w-full" aria-hidden="true" />
+        )}
+
+        {/* Virtuelles/Lazy Nachladen: Fortschritt und Schaltfläche */}
+        {displayEntries.length < sichtbar.length && (
+          <div className="flex items-center justify-between rounded-lg border border-dashed border-outline-variant/40 px-3 py-2 text-xs text-on-surface-variant">
+            <span>
+              {t('ai.memory.showingCount', {
+                shown: displayEntries.length,
+                total: sichtbar.length,
+              })}
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setRenderedLimit((prev) => Math.min(prev + CHUNK_SIZE, sichtbar.length))}
+            >
+              {t('ai.memory.loadMore')}
+            </Button>
+          </div>
+        )}
+
         {sichtbar.length === 0 && (
-          <p className="rounded-xl border border-dashed border-outline-variant/50 px-4 py-5 text-sm text-on-surface-variant">
+          <p className="rounded-xl border border-dashed border-outline-variant/50 px-4 py-5 text-sm text-on-surface-variant text-center">
             {entries.length === 0 ? t('ai.memory.empty') : t('ai.memory.noMatches')}
           </p>
         )}
       </div>
 
-      {/* Die Gesamtzahl steht links daneben und nicht im Zähler über der Liste:
-          der zählt, was der Filter von dieser Seite übrig lässt, und beides in
-          einem Satz läse sich wie ein Widerspruch. Hier gehört sie hin, weil sie
-          erklärt, wozu die Knöpfe daneben da sind. */}
       <Pagination
         page={seite}
         pageCount={seitenzahl}
@@ -443,53 +613,6 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
         disabled={busy}
         onChange={blaettern}
       />
-
-      {darfAendern && (
-        <form className="space-y-3 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4" onSubmit={speichern}>
-          <div className="grid gap-3 md:grid-cols-[14rem_minmax(0,1fr)]">
-            <label className="space-y-1.5">
-              <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                {t('ai.memory.key')}
-              </span>
-              <input
-                className="msm-input" pattern="[A-Za-z0-9_.-]+" maxLength={64}
-                value={key} disabled={busy || bearbeitet !== null}
-                onChange={(event) => setKey(event.target.value)}
-                placeholder="ram-praeferenz"
-                aria-label={t('ai.memory.key')}
-              />
-            </label>
-            <label className="space-y-1.5">
-              <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                {t('ai.memory.value')}
-              </span>
-              <input
-                className="msm-input" maxLength={2000} value={value} disabled={busy}
-                onChange={(event) => setValue(event.target.value)}
-                aria-label={t('ai.memory.value')}
-              />
-            </label>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button type="submit" disabled={busy || !key.trim() || !value.trim()}>
-              {bearbeitet === null
-                ? <Plus className="h-4 w-4" aria-hidden="true" />
-                : <Save className="h-4 w-4" aria-hidden="true" />}
-              {bearbeitet === null ? t('ai.memory.add') : t('settings.save')}
-            </Button>
-            {bearbeitet !== null && (
-              <Button
-                type="button" variant="secondary" disabled={busy}
-                onClick={() => { setKey(''); setValue(''); setBearbeitet(null) }}
-              >
-                <X className="h-4 w-4" aria-hidden="true" />
-                {t('common.cancel')}
-              </Button>
-            )}
-            <span className="text-xs text-on-surface-variant">{t('ai.memory.secretHint')}</span>
-          </div>
-        </form>
-      )}
     </AiKnowledgeShell>
   )
 }

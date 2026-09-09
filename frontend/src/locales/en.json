@@ -475,7 +475,7 @@
       "saved": "Memory entry saved.",
       "delete": "Delete memory entry",
       "deleteConfirm": "Really delete the memory entry “{{key}}”?",
-      "secretHint": "Do not store passwords, API keys, tokens, or other credentials. Memory content may be sent to the selected external AI provider.",
+      "secretHint": "Do not store passwords or API keys (sent to AI provider).",
       "errors": {
         "load": "AI memory could not be loaded.",
         "save": "AI memory could not be saved.",
@@ -500,7 +500,7 @@
       "clearTitle": "Delete the entire memory?",
       "clearConfirm": "Really delete all {{count}} entries? This cannot be undone.",
       "cleared": "Deleted {{count}} entries.",
-      "enabledScopeHint": "Applies to your personal memory and per-server notes. Team knowledge and server knowledge remain unaffected.",
+      "enabledScopeHint": "Applies only to personal and per-server notes.",
       "titles": {
         "user": "Personal AI memory",
         "server_shared": "This server's knowledge",
@@ -508,18 +508,29 @@
         "panel": "Panel-wide AI memory"
       },
       "descriptions": {
-        "user": "Personal notes saved by the assistant (general and per server). Visible only to you.",
-        "server_shared": "What the assistant knows about this machine. Everyone who may see the server reads it; changing it requires permission to change its configuration. It stays when a colleague leaves and disappears with the server.",
-        "team": "What the assistant knows for this team. Every member can read it; changing it requires the “maintain knowledge” switch.",
-        "panel": "Panel-wide knowledge available to all users across chats. Not for personal data."
+        "user": "Personal assistant notes – visible only to you.",
+        "server_shared": "Shared server knowledge – visible to all users with server access.",
+        "team": "Shared team knowledge – visible to all team members.",
+        "panel": "Panel-wide knowledge available to all users in chats."
       },
       "forServer": "Server: {{name}}",
-      "serverSharedHint": "This is shared: every colleague who may see this server reads it too. Anything that concerns only you belongs in your personal memory under your profile.",
+      "serverSharedHint": "Shared: All colleagues with server access can view these entries.",
       "searchPage": "Search this page",
       "total": "{{count}} entry in total",
       "total_one": "{{count}} entry in total",
       "total_other": "{{count}} entries in total",
-      "countPage": "Showing {{shown}} of {{total}} on this page"
+      "countPage": "Showing {{shown}} of {{total}} on this page",
+      "rememberedAt": "Remembered: {{date}}",
+      "lastUsedAt": "Last used: {{date}}",
+      "expandAll": "Expand all",
+      "collapseAll": "Collapse all",
+      "rawKey": "Key: {{key}}",
+      "loadMore": "Load more",
+      "showingCount": "{{shown}} of {{total}} loaded",
+      "newEntry": "New entry",
+      "editEntry": "Edit entry",
+      "keyPlaceholder": "e.g. response.language",
+      "valuePlaceholder": "Enter value or preference..."
     },
     "skills": {
       "title": "Skills",
@@ -3335,6 +3346,7 @@
     "audioEchoCancellation": "Echo Cancellation",
     "audioAutoGain": "Automatic Gain Control (AGC)",
     "audioTestStart": "Test Microphone",
+    "audioTestDescription": "Speak into your microphone. If the audio meter reacts, your microphone is working.",
     "audioTestStop": "Stop Test",
     "audioActive": "Recording active",
     "audioInactive": "Inactive",

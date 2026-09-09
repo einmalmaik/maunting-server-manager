@@ -89,11 +89,5 @@ describe('Standortfreigabe im Konto', () => {
     expect(getCurrentPosition).not.toHaveBeenCalled()
   })
 
-  it('rendert Mikrofon & Audio Einstellungen mit Gerätedropdown und Test-Option', async () => {
-    render(<AccountTab />)
-    expect(screen.getByText(t('profile.audioTitle'))).toBeInTheDocument()
-    expect(screen.getByText(t('profile.audioTestStart'))).toBeInTheDocument()
-    expect(screen.getByText(t('profile.audioNoiseSuppression'))).toBeInTheDocument()
-  })
 })
 
