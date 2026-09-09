@@ -11,10 +11,13 @@
 
 import { create } from 'zustand'
 import { api } from '@/api/client'
+import { deriveBlindMailboxId, deriveGroupBlindMailboxId } from '@/services/e2eeCrypto'
 
 const STORAGE_MUTES_KEY = 'msm:chat_mutes'
 const STORAGE_BLOCKS_KEY = 'msm:chat_blocks'
+const STORAGE_BLOCKED_PROFILES_KEY = 'msm:chat_blocked_profiles'
 const STORAGE_UNREAD_KEY = 'msm:chat_unread'
+const STORAGE_MAILBOX_DIR_KEY = 'msm:chat_mailbox_dir'
 
 export interface MailboxMeta {
   name: string
@@ -24,11 +27,18 @@ export interface MailboxMeta {
   groupId?: number
 }
 
+export interface BlockedProfile {
+  userId: number
+  username: string
+  avatarUrl?: string | null
+}
+
 interface MessengerNotificationState {
   unreadCounts: Record<string, number>
   totalUnreadCount: number
   mutedChats: Record<string, number> // mailboxId -> expiryTimestamp (0 = permanent)
   blockedUserIds: number[]
+  blockedProfiles: Record<number, { username: string; avatarUrl?: string | null }>
   mailboxDirectory: Record<string, MailboxMeta>
   activeMailboxId: string | null
 
@@ -47,8 +57,18 @@ interface MessengerNotificationState {
 
   // Block
   isBlocked: (userId: number) => boolean
-  blockUser: (userId: number) => Promise<void>
+  blockUser: (userId: number, username?: string, avatarUrl?: string | null) => Promise<void>
   unblockUser: (userId: number) => Promise<void>
+  syncBlockedFromBackend: () => Promise<void>
+  syncMailboxDirectoryFromBackend: (currentUserId: number) => Promise<void>
+}
+
+function loadMailboxDirectory(): Record<string, MailboxMeta> {
+  try {
+    const raw = localStorage.getItem(STORAGE_MAILBOX_DIR_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch {}
+  return {}
 }
 
 function loadMutes(): Record<string, number> {
@@ -65,6 +85,14 @@ function loadBlocks(): number[] {
     if (raw) return JSON.parse(raw)
   } catch {}
   return []
+}
+
+function loadBlockedProfiles(): Record<number, { username: string; avatarUrl?: string | null }> {
+  try {
+    const raw = localStorage.getItem(STORAGE_BLOCKED_PROFILES_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch {}
+  return {}
 }
 
 function loadUnread(): Record<string, number> {
@@ -133,6 +161,7 @@ export function playNotificationChime() {
 export const useMessengerNotificationStore = create<MessengerNotificationState>((set, get) => {
   const initialMutes = loadMutes()
   const initialBlocks = loadBlocks()
+  const initialProfiles = loadBlockedProfiles()
   const initialUnread = loadUnread()
 
   return {
@@ -140,7 +169,8 @@ export const useMessengerNotificationStore = create<MessengerNotificationState>(
     totalUnreadCount: calcTotal(initialUnread, initialMutes),
     mutedChats: initialMutes,
     blockedUserIds: initialBlocks,
-    mailboxDirectory: {},
+    blockedProfiles: initialProfiles,
+    mailboxDirectory: loadMailboxDirectory(),
     activeMailboxId: null,
 
     setActiveMailboxId: (id) => {
@@ -151,21 +181,29 @@ export const useMessengerNotificationStore = create<MessengerNotificationState>(
     },
 
     registerMailbox: (mailboxId, meta) => {
-      set((state) => ({
-        mailboxDirectory: {
+      set((state) => {
+        const updated = {
           ...state.mailboxDirectory,
           [mailboxId]: meta,
-        },
-      }))
+        }
+        try {
+          localStorage.setItem(STORAGE_MAILBOX_DIR_KEY, JSON.stringify(updated))
+        } catch {}
+        return { mailboxDirectory: updated }
+      })
     },
 
     registerMailboxes: (map) => {
-      set((state) => ({
-        mailboxDirectory: {
+      set((state) => {
+        const updated = {
           ...state.mailboxDirectory,
           ...map,
-        },
-      }))
+        }
+        try {
+          localStorage.setItem(STORAGE_MAILBOX_DIR_KEY, JSON.stringify(updated))
+        } catch {}
+        return { mailboxDirectory: updated }
+      })
     },
 
     incrementUnread: (mailboxId) => {
@@ -246,14 +284,20 @@ export const useMessengerNotificationStore = create<MessengerNotificationState>(
       return get().blockedUserIds.includes(userId)
     },
 
-    blockUser: async (userId) => {
+    blockUser: async (userId, username, avatarUrl) => {
       set((state) => {
-        if (state.blockedUserIds.includes(userId)) return state
-        const updated = [...state.blockedUserIds, userId]
+        const nextIds = state.blockedUserIds.includes(userId)
+          ? state.blockedUserIds
+          : [...state.blockedUserIds, userId]
+        const nextProfiles = { ...state.blockedProfiles }
+        if (username) {
+          nextProfiles[userId] = { username, avatarUrl: avatarUrl ?? null }
+        }
         try {
-          localStorage.setItem(STORAGE_BLOCKS_KEY, JSON.stringify(updated))
+          localStorage.setItem(STORAGE_BLOCKS_KEY, JSON.stringify(nextIds))
+          localStorage.setItem(STORAGE_BLOCKED_PROFILES_KEY, JSON.stringify(nextProfiles))
         } catch {}
-        return { blockedUserIds: updated }
+        return { blockedUserIds: nextIds, blockedProfiles: nextProfiles }
       })
       try {
         await api(`/social/friends/${userId}/block`, { method: 'POST' })
@@ -264,16 +308,112 @@ export const useMessengerNotificationStore = create<MessengerNotificationState>(
 
     unblockUser: async (userId) => {
       set((state) => {
-        const updated = state.blockedUserIds.filter((id) => id !== userId)
+        const nextIds = state.blockedUserIds.filter((id) => id !== userId)
+        const nextProfiles = { ...state.blockedProfiles }
+        delete nextProfiles[userId]
         try {
-          localStorage.setItem(STORAGE_BLOCKS_KEY, JSON.stringify(updated))
+          localStorage.setItem(STORAGE_BLOCKS_KEY, JSON.stringify(nextIds))
+          localStorage.setItem(STORAGE_BLOCKED_PROFILES_KEY, JSON.stringify(nextProfiles))
         } catch {}
-        return { blockedUserIds: updated }
+        return { blockedUserIds: nextIds, blockedProfiles: nextProfiles }
       })
       try {
         await api(`/social/friends/${userId}/unblock`, { method: 'POST' })
       } catch {
         // Lokaler Fallback bleibt aktiv
+      }
+    },
+
+    syncBlockedFromBackend: async () => {
+      try {
+        const list = await api<Array<{ user_id: number; username: string; avatar_url?: string | null }>>(
+          '/social/friends/blocked'
+        )
+        if (Array.isArray(list)) {
+          const ids = list.map((item) => item.user_id)
+          const profiles: Record<number, { username: string; avatarUrl?: string | null }> = {}
+          for (const item of list) {
+            profiles[item.user_id] = { username: item.username, avatarUrl: item.avatar_url }
+          }
+          set({ blockedUserIds: ids, blockedProfiles: profiles })
+          try {
+            localStorage.setItem(STORAGE_BLOCKS_KEY, JSON.stringify(ids))
+            localStorage.setItem(STORAGE_BLOCKED_PROFILES_KEY, JSON.stringify(profiles))
+          } catch {}
+        }
+      } catch {
+        // Stiller Fallback auf lokalen Cache
+      }
+    },
+
+    syncMailboxDirectoryFromBackend: async (currentUserId: number) => {
+      if (!currentUserId) return
+      try {
+        const [friends, groups, publicProfiles] = await Promise.all([
+          api<Array<{ user_id: number; username: string; avatar_url?: string | null; status: string }>>(
+            '/social/friends'
+          ).catch(() => []),
+          api<Array<{ id: number; name: string; avatar_url?: string | null }>>('/social/groups').catch(() => []),
+          api<Array<{ user_id: number; username: string }>>('/social/profiles/public').catch(() => []),
+        ])
+
+        const dirUpdates: Record<string, MailboxMeta> = {}
+
+        if (Array.isArray(friends)) {
+          for (const f of friends) {
+            if (f.user_id && f.status === 'accepted') {
+              try {
+                const mid = await deriveBlindMailboxId(currentUserId, f.user_id)
+                dirUpdates[mid] = {
+                  name: f.username,
+                  avatarUrl: f.avatar_url,
+                  isGroup: false,
+                  userId: f.user_id,
+                }
+              } catch {}
+            }
+          }
+        }
+
+        if (Array.isArray(groups)) {
+          for (const g of groups) {
+            if (g.id) {
+              try {
+                const mid = await deriveGroupBlindMailboxId(g.id)
+                dirUpdates[mid] = {
+                  name: g.name,
+                  avatarUrl: g.avatar_url,
+                  isGroup: true,
+                  groupId: g.id,
+                }
+              } catch {}
+            }
+          }
+        }
+
+        if (Array.isArray(publicProfiles)) {
+          for (const p of publicProfiles) {
+            if (p.user_id && p.user_id !== currentUserId) {
+              try {
+                const mid = await deriveBlindMailboxId(currentUserId, p.user_id)
+                if (!dirUpdates[mid]) {
+                  dirUpdates[mid] = {
+                    name: p.username,
+                    avatarUrl: null,
+                    isGroup: false,
+                    userId: p.user_id,
+                  }
+                }
+              } catch {}
+            }
+          }
+        }
+
+        if (Object.keys(dirUpdates).length > 0) {
+          get().registerMailboxes(dirUpdates)
+        }
+      } catch {
+        // Stiller Fallback
       }
     },
   }

@@ -15,6 +15,9 @@ import {
   Search,
   Lock,
   CheckCircle2,
+  Ban,
+  BellOff,
+  Clock,
 } from 'lucide-react'
 import { DeviceBadge } from '@/components/social/DeviceBadge'
 import { StatusDot } from '@/components/social/StatusIndicator'
@@ -31,6 +34,7 @@ import {
   getAchievements,
 } from '@/api/social'
 import { toast } from '@/stores/toastStore'
+import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
 
 export function SocialTab() {
   // Friends state
@@ -39,10 +43,22 @@ export function SocialTab() {
   const [addUsername, setAddUsername] = useState('')
   const [searchFriend, setSearchFriend] = useState('')
   const [sendingRequest, setSendingRequest] = useState(false)
+  const [contactSubTab, setContactSubTab] = useState<'friends' | 'blocked' | 'muted'>('friends')
+  const [visibleFriendsCount, setVisibleFriendsCount] = useState(12)
 
   // Milestones state
   const [overview, setOverview] = useState<AchievementsOverview | null>(null)
   const [milestoneFilter, setMilestoneFilter] = useState<'all' | 'unlocked' | 'locked'>('all')
+  const [visibleMilestonesCount, setVisibleMilestonesCount] = useState(12)
+
+  // Notification Store for Mute & Block
+  const blockedUserIds = useMessengerNotificationStore((s) => s.blockedUserIds)
+  const blockedProfiles = useMessengerNotificationStore((s) => s.blockedProfiles)
+  const unblockUser = useMessengerNotificationStore((s) => s.unblockUser)
+  const mutedChats = useMessengerNotificationStore((s) => s.mutedChats)
+  const unmuteChat = useMessengerNotificationStore((s) => s.unmuteChat)
+  const mailboxDirectory = useMessengerNotificationStore((s) => s.mailboxDirectory)
+  const syncBlockedFromBackend = useMessengerNotificationStore((s) => s.syncBlockedFromBackend)
 
   const loadFriendsData = async () => {
     try {
@@ -67,8 +83,9 @@ export function SocialTab() {
   }
 
   useEffect(() => {
-    loadFriendsData()
-    loadMilestonesData()
+    void loadFriendsData()
+    void loadMilestonesData()
+    void syncBlockedFromBackend()
   }, [])
 
   const handleSendFriendRequest = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -132,6 +149,53 @@ export function SocialTab() {
     return acceptedFriends.filter((f) => !q || f.username.toLowerCase().includes(q))
   }, [acceptedFriends, searchFriend])
 
+  const blockedList = useMemo(() => {
+    return blockedUserIds.map((uid) => {
+      const profile = blockedProfiles[uid]
+      const fromFriends = friends.find((f) => (f.user_id ?? f.id) === uid)
+      return {
+        userId: uid,
+        username: profile?.username || fromFriends?.username || `Benutzer #${uid}`,
+        avatarUrl: profile?.avatarUrl || fromFriends?.avatar_url || null,
+      }
+    })
+  }, [blockedUserIds, blockedProfiles, friends])
+
+  const mutedList = useMemo(() => {
+    const now = Date.now()
+    const list: Array<{
+      mailboxId: string
+      name: string
+      avatarUrl?: string | null
+      expiry: number
+      remainingLabel: string
+    }> = []
+    for (const [mid, expiry] of Object.entries(mutedChats)) {
+      if (expiry === 0 || expiry > now) {
+        const meta = mailboxDirectory[mid]
+        let remainingLabel = 'Dauerhaft'
+        if (expiry > 0) {
+          const diffMin = Math.round((expiry - now) / (60 * 1000))
+          if (diffMin < 60) {
+            remainingLabel = `Noch ${diffMin} Min.`
+          } else if (diffMin < 24 * 60) {
+            remainingLabel = `Noch ${Math.round(diffMin / 60)} Std.`
+          } else {
+            remainingLabel = `Noch ${Math.round(diffMin / (24 * 60))} Tage`
+          }
+        }
+        list.push({
+          mailboxId: mid,
+          name: meta?.name || `Chat (${mid.slice(0, 8)})`,
+          avatarUrl: meta?.avatarUrl,
+          expiry,
+          remainingLabel,
+        })
+      }
+    }
+    return list
+  }, [mutedChats, mailboxDirectory])
+
   const filteredMilestones = useMemo(() => {
     const list = overview?.achievements || []
     if (milestoneFilter === 'unlocked') return list.filter((m) => m.unlocked)
@@ -164,56 +228,16 @@ export function SocialTab() {
 
   return (
     <div className="space-y-6">
-      {/* 1. Chat-Privatsphäre & Lesebestätigungen */}
-      <section className="msm-card p-6" aria-labelledby="chat-privacy-title">
-        <div className="flex items-center gap-2 mb-2">
-          <Lock className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 id="chat-privacy-title" className="font-headline text-lg font-semibold text-on-surface">
-            Chat-Privatsphäre
-          </h2>
-        </div>
-        <p className="max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant mb-4">
-          Steuere deine Privatsphäre im Messenger und bei Ende-zu-Ende verschlüsselten Konversationen.
-        </p>
-
-        <div className="flex items-center justify-between p-4 rounded-xl bg-surface-container-high/40 border border-outline-variant/30">
-          <div className="space-y-0.5 max-w-md">
-            <span className="text-xs font-bold text-on-surface">
-              Lesebestätigungen (Gelesen-Häkchen ✓✓)
-            </span>
-            <p className="text-[11px] text-on-surface-variant">
-              Wenn aktiviert, wird deinen Kontakten mit zwei blauen Häkchen signalisiert, sobald eine Nachricht gelesen wurde.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            role="switch"
-            aria-checked={readReceiptsEnabled}
-            onClick={handleToggleReadReceipts}
-            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-              readReceiptsEnabled ? 'bg-primary' : 'bg-surface-container-highest'
-            }`}
-          >
-            <span
-              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
-                readReceiptsEnabled ? 'translate-x-5' : 'translate-x-0'
-              }`}
-            />
-          </button>
-        </div>
-      </section>
-
-      {/* 2. Freunde & Kontaktanfragen */}
+      {/* 1. Freunde & Kontakte (Ganz oben) */}
       <section className="msm-card p-6" aria-labelledby="social-contacts-title">
-        <div className="flex items-center gap-2 mb-4">
+        <div className="flex items-center gap-2 mb-2">
           <Users className="h-5 w-5 text-secondary" aria-hidden="true" />
           <h2 id="social-contacts-title" className="font-headline text-lg font-semibold text-on-surface">
             Freunde & Kontakte
           </h2>
         </div>
         <p className="max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant mb-5">
-          Verwalte deine bestätigten Kontakte und reagiere auf offene Freundschaftsanfragen.
+          Verwalte deine bestätigten Kontakte, blockierte Personen und stummgeschaltete Unterhaltungen.
         </p>
 
         {/* Freund hinzufügen Formular */}
@@ -283,80 +307,271 @@ export function SocialTab() {
           </div>
         )}
 
-        {/* Meine Freunde Liste */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-3 max-w-xl">
+        {/* Sub-Navigation: Deine Freunde, Blockierte, Stummgeschaltete */}
+        <div className="flex items-center gap-2 mb-4 border-b border-outline-variant/30 pb-3 flex-wrap">
+          <Button
+            variant={contactSubTab === 'friends' ? 'primary' : 'ghost'}
+            size="sm"
+            onClick={() => setContactSubTab('friends')}
+            className="text-xs h-7 px-3 gap-1.5"
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>Deine Freunde ({acceptedFriends.length})</span>
+          </Button>
+
+          <Button
+            variant={contactSubTab === 'blocked' ? 'primary' : 'ghost'}
+            size="sm"
+            onClick={() => setContactSubTab('blocked')}
+            className="text-xs h-7 px-3 gap-1.5"
+          >
+            <Ban className="w-3.5 h-3.5" />
+            <span>Blockiert ({blockedList.length})</span>
+          </Button>
+
+          <Button
+            variant={contactSubTab === 'muted' ? 'primary' : 'ghost'}
+            size="sm"
+            onClick={() => setContactSubTab('muted')}
+            className="text-xs h-7 px-3 gap-1.5"
+          >
+            <BellOff className="w-3.5 h-3.5" />
+            <span>Stummgeschaltet ({mutedList.length})</span>
+          </Button>
+        </div>
+
+        {/* 1A. Tab: Deine Freunde */}
+        {contactSubTab === 'friends' && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3 max-w-xl">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-on-surface-variant">
+                Meine Kontakte ({acceptedFriends.length})
+              </h3>
+              {acceptedFriends.length > 3 && (
+                <div className="relative w-48">
+                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant/60" />
+                  <Input
+                    value={searchFriend}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                      setSearchFriend(e.target.value)
+                      setVisibleFriendsCount(12)
+                    }}
+                    placeholder="Suchen …"
+                    className="text-xs pl-8 h-7"
+                  />
+                </div>
+              )}
+            </div>
+
+            {filteredFriends.length === 0 ? (
+              <p className="text-xs text-on-surface-variant/70 py-6">
+                {searchFriend
+                  ? 'Keine Treffer für die Suche.'
+                  : 'Noch keine Kontakte hinzugefügt. Sende oben eine Anfrage, um Kontakte zu verbinden.'}
+              </p>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {filteredFriends.slice(0, visibleFriendsCount).map((f) => (
+                    <div
+                      key={f.id}
+                      className="flex items-center justify-between p-3 rounded-xl bg-surface-container-low border border-outline-variant/30 hover:border-outline-variant/60 transition-colors"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="relative shrink-0">
+                          <Avatar src={f.avatar_url} name={f.username} size="sm" />
+                          <StatusDot
+                            status={f.presence?.status || 'invisible'}
+                            size="sm"
+                            className="absolute bottom-0 right-0"
+                          />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-semibold text-primary truncate">
+                              {f.username}
+                            </span>
+                            <DeviceBadge deviceType={f.presence?.device_type} />
+                          </div>
+                          {f.presence?.activity_label && (
+                            <p className="text-[10px] text-on-surface-variant/80 truncate">
+                              {f.presence.activity_label}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => void handleRemoveFriend(f.user_id ?? f.id)}
+                        className="h-7 w-7 p-0 text-on-surface-variant hover:text-rose-400 hover:bg-rose-500/10 shrink-0 ml-2"
+                        title="Kontakt entfernen"
+                        aria-label="Kontakt entfernen"
+                      >
+                        <UserMinus className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Lazy Load Button für Freunde */}
+                {filteredFriends.length > visibleFriendsCount && (
+                  <div className="pt-2 flex justify-center">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setVisibleFriendsCount((prev) => prev + 12)}
+                      className="text-xs gap-1.5 px-4"
+                    >
+                      <span>Weitere Kontakte laden ({filteredFriends.length - visibleFriendsCount} verbleibend)</span>
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* 1B. Tab: Blockierte Kontakte */}
+        {contactSubTab === 'blocked' && (
+          <div className="space-y-3">
             <h3 className="text-xs font-bold uppercase tracking-wider text-on-surface-variant">
-              Meine Kontakte ({acceptedFriends.length})
+              Blockierte Personen ({blockedList.length})
             </h3>
-            {acceptedFriends.length > 3 && (
-              <div className="relative w-48">
-                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant/60" />
-                <Input
-                  value={searchFriend}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchFriend(e.target.value)}
-                  placeholder="Suchen …"
-                  className="text-xs pl-8 h-7"
-                />
+            {blockedList.length === 0 ? (
+              <p className="text-xs text-on-surface-variant/70 py-6">
+                Keine blockierten Kontakte vorhanden.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {blockedList.map((b) => (
+                  <div
+                    key={b.userId}
+                    className="flex items-center justify-between p-3 rounded-xl bg-surface-container-low border border-status-error/30"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <Avatar src={b.avatarUrl} name={b.username} size="sm" />
+                      <div className="min-w-0">
+                        <span className="text-xs font-semibold text-primary truncate block">
+                          {b.username}
+                        </span>
+                        <span className="text-[10px] text-status-error font-medium">
+                          Blockiert
+                        </span>
+                      </div>
+                    </div>
+
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={async () => {
+                        await unblockUser(b.userId)
+                        toast.success(`Blockierung von ${b.username} aufgehoben`)
+                      }}
+                      className="h-7 text-xs px-2.5 border border-status-error/30 text-status-error hover:bg-status-error/15 shrink-0"
+                    >
+                      Entblocken
+                    </Button>
+                  </div>
+                ))}
               </div>
             )}
           </div>
+        )}
 
-          {filteredFriends.length === 0 ? (
-            <p className="text-xs text-on-surface-variant/70 py-6">
-              {searchFriend
-                ? 'Keine Treffer für die Suche.'
-                : 'Noch keine Kontakte hinzugefügt. Sende oben eine Anfrage, um Kontakte zu verbinden.'}
-            </p>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {filteredFriends.map((f) => (
-                <div
-                  key={f.id}
-                  className="flex items-center justify-between p-3 rounded-xl bg-surface-container-low border border-outline-variant/30 hover:border-outline-variant/60 transition-colors"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="relative shrink-0">
-                      <Avatar src={f.avatar_url} name={f.username} size="sm" />
-                      <StatusDot
-                        status={f.presence?.status || 'invisible'}
-                        size="sm"
-                        className="absolute bottom-0 right-0"
-                      />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs font-semibold text-primary truncate">
-                          {f.username}
-                        </span>
-                        <DeviceBadge deviceType={f.presence?.device_type} />
-                      </div>
-                      {f.presence?.activity_label && (
-                        <p className="text-[10px] text-on-surface-variant/80 truncate">
-                          {f.presence.activity_label}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => void handleRemoveFriend(f.user_id ?? f.id)}
-                    className="h-7 w-7 p-0 text-on-surface-variant hover:text-rose-400 hover:bg-rose-500/10 shrink-0 ml-2"
-                    title="Kontakt entfernen"
-                    aria-label="Kontakt entfernen"
+        {/* 1C. Tab: Stummgeschaltete Chats */}
+        {contactSubTab === 'muted' && (
+          <div className="space-y-3">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-on-surface-variant">
+              Stummgeschaltete Unterhaltungen ({mutedList.length})
+            </h3>
+            {mutedList.length === 0 ? (
+              <p className="text-xs text-on-surface-variant/70 py-6">
+                Keine stummgeschalteten Chats vorhanden.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {mutedList.map((m) => (
+                  <div
+                    key={m.mailboxId}
+                    className="flex items-center justify-between p-3 rounded-xl bg-surface-container-low border border-outline-variant/30"
                   >
-                    <UserMinus className="w-3.5 h-3.5" />
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-8 h-8 rounded-full bg-surface-container-highest flex items-center justify-center text-status-warning shrink-0">
+                        <BellOff className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-xs font-semibold text-primary truncate block">
+                          {m.name}
+                        </span>
+                        <span className="text-[10px] text-on-surface-variant/80 flex items-center gap-1">
+                          <Clock className="w-3 h-3 text-status-warning" />
+                          <span>{m.remainingLabel}</span>
+                        </span>
+                      </div>
+                    </div>
+
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        unmuteChat(m.mailboxId)
+                        toast.success('Stummschaltung aufgehoben')
+                      }}
+                      className="h-7 text-xs px-2.5 text-on-surface-variant hover:text-primary shrink-0"
+                    >
+                      Einschalten
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* 2. Chat-Privatsphäre & Lesebestätigungen */}
+      <section className="msm-card p-6" aria-labelledby="chat-privacy-title">
+        <div className="flex items-center gap-2 mb-2">
+          <Lock className="h-5 w-5 text-secondary" aria-hidden="true" />
+          <h2 id="chat-privacy-title" className="font-headline text-lg font-semibold text-on-surface">
+            Chat-Privatsphäre
+          </h2>
+        </div>
+        <p className="max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant mb-4">
+          Steuere deine Privatsphäre im Messenger und bei Ende-zu-Ende verschlüsselten Konversationen.
+        </p>
+
+        <div className="flex items-center justify-between p-4 rounded-xl bg-surface-container-high/40 border border-outline-variant/30">
+          <div className="space-y-0.5 max-w-md">
+            <span className="text-xs font-bold text-on-surface">
+              Lesebestätigungen (Gelesen-Häkchen ✓✓)
+            </span>
+            <p className="text-[11px] text-on-surface-variant">
+              Wenn aktiviert, wird deinen Kontakten mit zwei blauen Häkchen signalisiert, sobald eine Nachricht gelesen wurde.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            role="switch"
+            aria-checked={readReceiptsEnabled}
+            onClick={handleToggleReadReceipts}
+            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+              readReceiptsEnabled ? 'bg-primary' : 'bg-surface-container-highest'
+            }`}
+          >
+            <span
+              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                readReceiptsEnabled ? 'translate-x-5' : 'translate-x-0'
+              }`}
+            />
+          </button>
         </div>
       </section>
 
-      {/* 2. Meilensteine & Fortschritt */}
+      {/* 3. Meilensteine & Fortschritt (Mit Lazy-Load) */}
       <section className="msm-card p-6" aria-labelledby="milestones-title">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
           <div className="flex items-center gap-2">
@@ -394,7 +609,10 @@ export function SocialTab() {
           <Button
             variant={milestoneFilter === 'all' ? 'primary' : 'ghost'}
             size="sm"
-            onClick={() => setMilestoneFilter('all')}
+            onClick={() => {
+              setMilestoneFilter('all')
+              setVisibleMilestonesCount(12)
+            }}
             className="text-xs h-7 px-3"
           >
             Alle ({overview?.achievements.length || 0})
@@ -402,7 +620,10 @@ export function SocialTab() {
           <Button
             variant={milestoneFilter === 'unlocked' ? 'primary' : 'ghost'}
             size="sm"
-            onClick={() => setMilestoneFilter('unlocked')}
+            onClick={() => {
+              setMilestoneFilter('unlocked')
+              setVisibleMilestonesCount(12)
+            }}
             className="text-xs h-7 px-3"
           >
             Freigeschaltet ({overview?.total_unlocked || 0})
@@ -410,16 +631,19 @@ export function SocialTab() {
           <Button
             variant={milestoneFilter === 'locked' ? 'primary' : 'ghost'}
             size="sm"
-            onClick={() => setMilestoneFilter('locked')}
+            onClick={() => {
+              setMilestoneFilter('locked')
+              setVisibleMilestonesCount(12)
+            }}
             className="text-xs h-7 px-3"
           >
             Gesperrt ({(overview?.total_available || 0) - (overview?.total_unlocked || 0)})
           </Button>
         </div>
 
-        {/* Milestones Grid */}
+        {/* Milestones Grid mit Lazy-Load */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {filteredMilestones.map((m) => {
+          {filteredMilestones.slice(0, visibleMilestonesCount).map((m) => {
             const rarity = m.rarity_percent ?? m.global_unlocked_percentage ?? 0
             const isRare = rarity > 0 && rarity <= 10
 
@@ -475,6 +699,20 @@ export function SocialTab() {
             )
           })}
         </div>
+
+        {/* Lazy-Load Button für Erfolge */}
+        {filteredMilestones.length > visibleMilestonesCount && (
+          <div className="pt-3 flex justify-center">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setVisibleMilestonesCount((prev) => prev + 12)}
+              className="text-xs gap-1.5 px-4"
+            >
+              <span>Weitere Erfolge anzeigen ({filteredMilestones.length - visibleMilestonesCount} verbleibend)</span>
+            </Button>
+          </div>
+        )}
       </section>
     </div>
   )

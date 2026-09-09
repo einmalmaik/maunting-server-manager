@@ -129,6 +129,22 @@ export async function removeFriend(friendUserId: number): Promise<{ success: boo
   })
 }
 
+export async function getBlockedUsers(): Promise<FriendItem[]> {
+  return api<FriendItem[]>('/social/friends/blocked')
+}
+
+export async function blockUserApi(targetUserId: number): Promise<{ ok: boolean; message: string }> {
+  return api<{ ok: boolean; message: string }>(`/social/friends/${targetUserId}/block`, {
+    method: 'POST',
+  })
+}
+
+export async function unblockUserApi(targetUserId: number): Promise<{ ok: boolean; message: string }> {
+  return api<{ ok: boolean; message: string }>(`/social/friends/${targetUserId}/unblock`, {
+    method: 'POST',
+  })
+}
+
 export async function getPresence(): Promise<PresenceItem[]> {
   return api<PresenceItem[]>('/social/presence')
 }

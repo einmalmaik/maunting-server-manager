@@ -338,6 +338,32 @@ class SocialService:
         return True
 
     @classmethod
+    def get_blocked_users(cls, db: Session, user_id: int) -> list[dict[str, Any]]:
+        """Liefert alle von diesem Benutzer blockierten Kontakte."""
+        rels = (
+            db.query(UserFriend)
+            .filter_by(user_id=user_id, status="blocked")
+            .all()
+        )
+        if not rels:
+            return []
+        blocked_ids = [r.friend_id for r in rels]
+        users = {u.id: u for u in db.query(User).filter(User.id.in_(blocked_ids)).all()}
+        results = []
+        for r in rels:
+            u = users.get(r.friend_id)
+            if u and u.is_active:
+                results.append({
+                    "id": r.id,
+                    "user_id": u.id,
+                    "username": u.username,
+                    "avatar_url": u.avatar_url,
+                    "status": "blocked",
+                    "created_at": r.created_at,
+                })
+        return results
+
+    @classmethod
     def update_presence(cls, db: Session, user_id: int, data: dict[str, Any]) -> dict[str, Any]:
         """Aktualisiert Online-Status, Gerätetyp und Rich Presence des Nutzers."""
         status = data.get("status", "online")
@@ -531,12 +557,15 @@ class SocialService:
         db: Session,
         blind_mailbox_id: str,
         ciphertext_envelope: str,
+        sender_user_id: int | None = None,
     ) -> E2eeBlindEnvelope:
         """Speichert einen blinden E2EE-Umschlag ohne jegliche Nutzerverknüpfung.
 
         Zero-Knowledge-Invariante: Der Server lernt weder Absender, Empfänger,
         noch Gruppenzugehörigkeit. Die Benachrichtigung erfolgt als blinder
         Broadcast an alle verbundenen Sessions — jeder Client filtert selbst.
+        sender_user_id wird im SSE-Event mitgeliefert, damit der sendende Client
+        keine Benachrichtigung über seine eigene Nachricht auslöst.
         """
         clean_mailbox = blind_mailbox_id.strip()
         clean_envelope = ciphertext_envelope.strip()
@@ -557,6 +586,7 @@ class SocialService:
             "blind_mailbox_id": clean_mailbox,
             "id": envelope.id,
             "created_at": envelope.created_at.isoformat(),
+            "sender_user_id": sender_user_id,
         })
 
         return envelope

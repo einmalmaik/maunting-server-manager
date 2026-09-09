@@ -497,6 +497,7 @@ def _ausfuehren_message_friend(db: Session, rahmen: _AusfuehrungsRahmen) -> _Aus
         db,
         blind_mailbox_id=blind_mailbox_id,
         ciphertext_envelope=f"sv-e2ee-v1:{ciphertext_b64}",
+        sender_user_id=rahmen.active_user.id,
     )
     AchievementService.unlock_achievement(db, rahmen.active_user.id, "social_zero_knowledge")
 
@@ -540,6 +541,7 @@ def _ausfuehren_message_contact(db: Session, rahmen: _AusfuehrungsRahmen) -> _Au
         db,
         blind_mailbox_id=blind_mailbox_id,
         ciphertext_envelope=f"sv-e2ee-v1:{ciphertext_b64}",
+        sender_user_id=rahmen.active_user.id,
     )
     AchievementService.unlock_achievement(db, rahmen.active_user.id, "social_zero_knowledge")
 
@@ -585,6 +587,7 @@ def _ausfuehren_message_group(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausg
         db,
         blind_mailbox_id=blind_mailbox_id,
         ciphertext_envelope=f"sv-e2ee-group-v1:{ciphertext_b64}",
+        sender_user_id=rahmen.active_user.id,
     )
     AchievementService.unlock_achievement(db, rahmen.active_user.id, "social_zero_knowledge")
 

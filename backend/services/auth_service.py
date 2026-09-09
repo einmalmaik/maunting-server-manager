@@ -130,11 +130,11 @@ class AuthService:
     def find_recently_used_refresh_token(
         db: Session, plain_token: str, max_age_seconds: int = 30
     ) -> RefreshToken | None:
-        """Findet ein vor kurzem rotiertes Token eines gekoppelten Geräts innerhalb der Grace Period.
+        """Findet ein vor kurzem rotiertes Token innerhalb der Grace Period.
 
-        Schuetzt mobile Apps und Desktop-Clients vor Verbindungsabbruechen
-        waehrend der Token-Rotation, ohne die Wiederverwendungserkennung fuer
-        tatsaechlich gestohlene Tokens aufzugeben (RFC 6749 BCP).
+        Schuetzt Web-Sessions, mobile Apps und Desktop-Clients vor Verbindungsabbruechen
+        und parallelen Fetch-Races waehrend der Token-Rotation, ohne die Wiederverwendungserkennung
+        fuer tatsaechlich gestohlene Tokens aufzugeben (RFC 6749 BCP).
         """
         token_hash = AuthService._hash_token(plain_token)
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=max_age_seconds)
@@ -144,7 +144,6 @@ class AuthService:
                 RefreshToken.token_hash == token_hash,
                 RefreshToken.revoked_at.is_(None),
                 RefreshToken.used_at >= cutoff,
-                RefreshToken.geraet.isnot(None),
             )
             .first()
         )

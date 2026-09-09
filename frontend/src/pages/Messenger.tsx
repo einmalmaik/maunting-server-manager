@@ -226,6 +226,7 @@ export interface ChatMessage {
   text: string
   createdAt: string
   isSelf: boolean
+  isDelivered?: boolean
   isRead?: boolean
   isEdited?: boolean
   editedAt?: string
@@ -478,6 +479,7 @@ export function Messenger() {
   // Message Editing State
   const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null)
   const highestIncomingIdAcknowledgedRef = useRef<number>(0)
+  const highestIncomingIdDeliveredRef = useRef<number>(0)
 
   // Real-time typing & voice recording indicator state
   const [partnerActivity, setPartnerActivity] = useState<{ status: 'typing' | 'recording'; username?: string } | null>(null)
@@ -867,6 +869,8 @@ export function Messenger() {
       }).catch(() => {})
     } else {
       activeMailboxIdRef.current = ''
+      highestIncomingIdAcknowledgedRef.current = 0
+      highestIncomingIdDeliveredRef.current = 0
       setBlindMailboxId('')
       setRecipientPublicKeyJwk(null)
       setMessages([])
@@ -876,6 +880,8 @@ export function Messenger() {
     return () => {
       active = false
       activeMailboxIdRef.current = ''
+      highestIncomingIdAcknowledgedRef.current = 0
+      highestIncomingIdDeliveredRef.current = 0
       useMessengerNotificationStore.getState().setActiveMailboxId(null)
     }
   }, [activeContact, activeGroup, currentUserId])
@@ -926,6 +932,7 @@ export function Messenger() {
       const editMap = new Map<number, { newText: string; editedAt: string }>()
       const deleteMap = new Map<number, { deletedAt: string }>()
       let maxPartnerReadId = 0
+      let maxPartnerDeliveredId = 0
       let maxIncomingId = 0
 
       const decryptedEnvelopes = await Promise.all(
@@ -972,8 +979,23 @@ export function Messenger() {
             if (parsed.type === 'read_receipt') {
               const readUpTo = Number(parsed.read_up_to_id || 0)
               const readerId = Number(parsed.reader_id || 0)
-              if (readerId !== currentUserId && readUpTo > maxPartnerReadId) {
-                maxPartnerReadId = readUpTo
+              if (readerId !== currentUserId) {
+                if (readUpTo > maxPartnerReadId) {
+                  maxPartnerReadId = readUpTo
+                }
+                if (readUpTo > maxPartnerDeliveredId) {
+                  maxPartnerDeliveredId = readUpTo
+                }
+              }
+              continue
+            }
+
+            // 1b. Delivery receipt control packet
+            if (parsed.type === 'delivery_receipt') {
+              const deliveredUpTo = Number(parsed.delivered_up_to_id || 0)
+              const receiverId = Number(parsed.receiver_id || 0)
+              if (receiverId !== currentUserId && deliveredUpTo > maxPartnerDeliveredId) {
+                maxPartnerDeliveredId = deliveredUpTo
               }
               continue
             }
@@ -1003,7 +1025,7 @@ export function Messenger() {
 
             // Normal Chat Message
             let senderId = parsed.sender_id || (activeContact ? activeContact.userId : 0)
-            let senderName = parsed.sender_name
+            let senderName = parsed.sender_name || parsed.sender_username
             let isSelf = senderId === currentUserId
 
             if (!isSelf && env.id > maxIncomingId) {
@@ -1076,10 +1098,11 @@ export function Messenger() {
           originalText = undefined
         }
 
-        // Dynamisches blaues Häkchen:
-        // Ein gesendeter Chat gilt genau dann als gelesen, wenn der Gesprächspartner ihn
-        // quittiert hat (maxPartnerReadId >= msg.id)
+        // Dynamisches Häkchen-System (WhatsApp-Style):
+        // 1. Gelesen: Gesprächspartner hat die Nachricht quittiert (maxPartnerReadId >= msg.id)
+        // 2. Zugestellt: Gesprächspartner hat die Nachricht empfangen (maxPartnerDeliveredId >= msg.id oder bereits gelesen)
         const isRead = msg.isSelf && maxPartnerReadId >= msg.id
+        const isDelivered = msg.isSelf && (isRead || maxPartnerDeliveredId >= msg.id)
 
         return {
           ...msg,
@@ -1089,6 +1112,7 @@ export function Messenger() {
           isDeleted,
           deletedAt,
           originalText,
+          isDelivered,
           isRead,
         }
       })
@@ -1131,11 +1155,32 @@ export function Messenger() {
       // Ungelesen-Zähler zurücksetzen
       markAsRead(currentMid)
 
+      // Prüfen, ob der Ziel-Kontakt blockiert ist: Wenn blockiert, werden keinerlei
+      // Zustell- oder Lesequittungen (delivery_receipt, read_receipt) an die Mailbox gesendet!
+      // Dadurch verbleibt die Nachricht beim blockierten Absender dauerhaft auf genau 1 grauem Häkchen (✓).
+      const isTargetBlocked = activeContact ? isBlocked(activeContact.userId) : false
+
+      // Sende Zustellbestätigung (delivery_receipt), sobald neue Nachrichten empfangen wurden
+      if (
+        maxIncomingId > 0 &&
+        maxIncomingId > highestIncomingIdDeliveredRef.current &&
+        !isTargetBlocked
+      ) {
+        highestIncomingIdDeliveredRef.current = maxIncomingId
+        void sendE2eeControlMessage({
+          type: 'delivery_receipt',
+          delivered_up_to_id: maxIncomingId,
+          receiver_id: currentUserId,
+          timestamp: new Date().toISOString(),
+        })
+      }
+
       // Send read receipt if there are new incoming unacknowledged messages
       if (
         maxIncomingId > 0 &&
         maxIncomingId > highestIncomingIdAcknowledgedRef.current &&
-        readReceiptsEnabled
+        readReceiptsEnabled &&
+        !isTargetBlocked
       ) {
         highestIncomingIdAcknowledgedRef.current = maxIncomingId
         void sendE2eeControlMessage({
@@ -3256,16 +3301,14 @@ export function Messenger() {
                         })}
                       </span>
                       {msg.isSelf && (
-                        readReceiptsEnabled ? (
-                          msg.isRead ? (
-                            <span title="Gelesen vom Gesprächspartner" className="inline-flex items-center">
-                              <CheckCheck className="w-3.5 h-3.5 text-cyan-400" />
-                            </span>
-                          ) : (
-                            <span title="Zugestellt / Noch nicht gelesen" className="inline-flex items-center">
-                              <CheckCheck className="w-3.5 h-3.5 opacity-60" />
-                            </span>
-                          )
+                        msg.isRead && readReceiptsEnabled ? (
+                          <span title="Gelesen vom Gesprächspartner" className="inline-flex items-center">
+                            <CheckCheck className="w-3.5 h-3.5 text-cyan-400" />
+                          </span>
+                        ) : msg.isDelivered ? (
+                          <span title="Zugestellt / Vom Gesprächspartner empfangen" className="inline-flex items-center">
+                            <CheckCheck className="w-3.5 h-3.5 opacity-60" />
+                          </span>
                         ) : (
                           <span title="Gesendet" className="inline-flex items-center">
                             <Check className="w-3.5 h-3.5 opacity-60" />
@@ -4118,7 +4161,7 @@ export function Messenger() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex flex-col gap-2 py-3">
+          <div className="flex flex-col gap-2 px-6 py-4">
             <Button
               variant="secondary"
               className="w-full justify-start text-left text-xs py-2.5 h-auto"
@@ -4255,7 +4298,7 @@ export function Messenger() {
                 size="sm"
                 onClick={async () => {
                   if (activeContact) {
-                    await blockUser(activeContact.userId)
+                    await blockUser(activeContact.userId, activeContact.username, activeContact.avatarUrl)
                     toast.success(`${activeContact.username} blockiert`)
                   }
                   setIsBlockConfirmOpen(false)

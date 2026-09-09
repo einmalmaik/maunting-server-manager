@@ -120,6 +120,14 @@ def unblock_user(
     return {"ok": True, "message": "Blockierung aufgehoben"}
 
 
+@router.get("/friends/blocked", dependencies=[Depends(_check_social_enabled)])
+def get_blocked_users(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[dict]:
+    return SocialService.get_blocked_users(db, user.id)
+
+
 # --- Status, Geräte & Rich Presence ---
 
 @router.get("/presence/me", response_model=PresenceInfo, dependencies=[Depends(_check_social_enabled)])
@@ -267,12 +275,13 @@ def get_e2ee_public_key(
 def relay_e2ee_message(
     req: E2eeBlindEnvelopeCreate,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
     envelope = SocialService.relay_blind_envelope(
         db,
         blind_mailbox_id=req.blind_mailbox_id,
         ciphertext_envelope=req.ciphertext_envelope,
+        sender_user_id=current_user.id,
     )
     return {
         "id": envelope.id,

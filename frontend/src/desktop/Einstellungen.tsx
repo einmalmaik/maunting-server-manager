@@ -40,9 +40,12 @@ import {
   UserPlus,
   Users,
   Volume2,
+  Ban,
+  BellOff,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
+import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
 
 import {
   aktuelleVerarbeitung,
@@ -726,17 +729,28 @@ function SocialEinstellungen() {
 
   // 2. Spielzeit & Aktivität
   const [stats, setStats] = useState<UserStatsResponse | null>(null)
-
-  // 3. Meilensteine
+      {/* 3. Meilensteine */}
   const [overview, setOverview] = useState<AchievementsOverview | null>(null)
   const [milestoneFilter, setMilestoneFilter] = useState<'all' | 'unlocked' | 'locked'>('all')
 
-  // 4. Freunde
+  // 4. Freunde & Kontakte State
   const [friends, setFriends] = useState<FriendItem[]>([])
   const [incomingRequests, setIncomingRequests] = useState<FriendItem[]>([])
   const [addUsername, setAddUsername] = useState('')
   const [searchFriend, setSearchFriend] = useState('')
   const [sendingRequest, setSendingRequest] = useState(false)
+  const [contactSubTab, setContactSubTab] = useState<'friends' | 'blocked' | 'muted'>('friends')
+  const [visibleFriendsCount, setVisibleFriendsCount] = useState(12)
+  const [visibleMilestonesCount, setVisibleMilestonesCount] = useState(12)
+
+  // Notification Store for Mute & Block
+  const blockedUserIds = useMessengerNotificationStore((s) => s.blockedUserIds)
+  const blockedProfiles = useMessengerNotificationStore((s) => s.blockedProfiles)
+  const unblockUser = useMessengerNotificationStore((s) => s.unblockUser)
+  const mutedChats = useMessengerNotificationStore((s) => s.mutedChats)
+  const unmuteChat = useMessengerNotificationStore((s) => s.unmuteChat)
+  const mailboxDirectory = useMessengerNotificationStore((s) => s.mailboxDirectory)
+  const syncBlockedFromBackend = useMessengerNotificationStore((s) => s.syncBlockedFromBackend)
 
   const loadData = useCallback(async () => {
     try {
@@ -757,7 +771,8 @@ function SocialEinstellungen() {
 
   useEffect(() => {
     void loadData()
-  }, [loadData])
+    void syncBlockedFromBackend()
+  }, [loadData, syncBlockedFromBackend])
 
   const handleSendFriendRequest = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -821,6 +836,53 @@ function SocialEinstellungen() {
     return acceptedFriends.filter((f) => !q || f.username.toLowerCase().includes(q))
   }, [acceptedFriends, searchFriend])
 
+  const blockedList = useMemo(() => {
+    return blockedUserIds.map((uid) => {
+      const profile = blockedProfiles[uid]
+      const fromFriends = friends.find((f) => (f.user_id ?? f.id) === uid)
+      return {
+        userId: uid,
+        username: profile?.username || fromFriends?.username || `Benutzer #${uid}`,
+        avatarUrl: profile?.avatarUrl || fromFriends?.avatar_url || null,
+      }
+    })
+  }, [blockedUserIds, blockedProfiles, friends])
+
+  const mutedList = useMemo(() => {
+    const now = Date.now()
+    const list: Array<{
+      mailboxId: string
+      name: string
+      avatarUrl?: string | null
+      expiry: number
+      remainingLabel: string
+    }> = []
+    for (const [mid, expiry] of Object.entries(mutedChats)) {
+      if (expiry === 0 || expiry > now) {
+        const meta = mailboxDirectory[mid]
+        let remainingLabel = 'Dauerhaft'
+        if (expiry > 0) {
+          const diffMin = Math.round((expiry - now) / (60 * 1000))
+          if (diffMin < 60) {
+            remainingLabel = `Noch ${diffMin} Min.`
+          } else if (diffMin < 24 * 60) {
+            remainingLabel = `Noch ${Math.round(diffMin / 60)} Std.`
+          } else {
+            remainingLabel = `Noch ${Math.round(diffMin / (24 * 60))} Tage`
+          }
+        }
+        list.push({
+          mailboxId: mid,
+          name: meta?.name || `Chat (${mid.slice(0, 8)})`,
+          avatarUrl: meta?.avatarUrl,
+          expiry,
+          remainingLabel,
+        })
+      }
+    }
+    return list
+  }, [mutedChats, mailboxDirectory])
+
   const filteredMilestones = useMemo(() => {
     const list = overview?.achievements || []
     if (milestoneFilter === 'unlocked') return list.filter((m) => m.unlocked)
@@ -842,200 +904,7 @@ function SocialEinstellungen() {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* 1. Privatsphäre & Sichtbarkeit */}
-      <section className="msm-card p-5 space-y-4" aria-labelledby="social-privacy-title">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <Lock className="h-5 w-5" />
-          </div>
-          <div>
-            <h2 id="social-privacy-title" className="text-sm font-semibold text-on-surface">
-              Privatsphäre & Sichtbarkeit
-            </h2>
-          </div>
-        </div>
-
-        <div className="space-y-4 pt-2 border-t border-outline-variant/30">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <span className="text-xs font-medium text-on-surface">Profil-Sichtbarkeit & Status</span>
-              <p className="text-[11px] text-on-surface-variant">Wer darf deine Präsenz und Aktivitäten sehen?</p>
-            </div>
-            <div className="w-full sm:w-64">
-              <Dropdown
-                options={privacyOptions}
-                value={privacyLevel}
-                disabled={savingPrivacy}
-                onChange={(val) => void handleSavePrivacy(val as 'public' | 'friends' | 'private')}
-                aria-label="Profil-Sichtbarkeit"
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between gap-3 pt-2 border-t border-outline-variant/20">
-            <div>
-              <span className="text-xs font-medium text-on-surface">Lesebestätigungen (Gelesen-Häkchen)</span>
-              <p className="text-[11px] text-on-surface-variant">Zeigt Kontakten, sobald Nachrichten gelesen wurden.</p>
-            </div>
-            <Switch
-              checked={readReceiptsEnabled}
-              onCheckedChange={handleToggleReadReceipts}
-              aria-label="Lesebestätigungen"
-            />
-          </div>
-        </div>
-      </section>
-
-      {/* 2. Spielzeit / Nutzungszeit */}
-      <section className="msm-card p-5 space-y-4" aria-labelledby="social-time-title">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
-              <Clock className="h-5 w-5" />
-            </div>
-            <div>
-              <h2 id="social-time-title" className="text-sm font-semibold text-on-surface">
-                Nutzungs- & Spielzeit
-              </h2>
-            </div>
-          </div>
-          <div className="text-right">
-            <span className="text-xs font-bold text-primary font-mono block">
-              {formatHours(stats?.active_time_seconds ?? stats?.total_activity_seconds)}
-            </span>
-            <span className="text-[10px] text-on-surface-variant">Gesamtaktivität</span>
-          </div>
-        </div>
-
-        {stats?.active_time_by_category && Object.keys(stats.active_time_by_category).length > 0 && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 pt-2 border-t border-outline-variant/30">
-            {Object.entries(stats.active_time_by_category).map(([cat, secs]) => (
-              <div key={cat} className="p-2.5 rounded-xl bg-surface-container-low border border-outline-variant/30">
-                <span className="text-[10px] font-bold text-on-surface-variant tracking-wider block truncate">
-                  {formatActivityCategory(cat)}
-                </span>
-                <span className="text-xs font-semibold text-on-surface font-mono">
-                  {formatHours(secs)}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* 3. Meilensteine & Erfolge */}
-      <section className="msm-card p-5 space-y-4" aria-labelledby="social-milestones-title">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
-              <Trophy className="h-5 w-5" />
-            </div>
-            <div>
-              <h2 id="social-milestones-title" className="text-sm font-semibold text-on-surface">
-                Meilensteine & Erfolge
-              </h2>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 self-start sm:self-auto">
-            <div className="text-right">
-              <span className="text-xs font-bold text-primary font-mono block">
-                {overview?.total_unlocked || 0} / {overview?.total_available || 0}
-              </span>
-              <span className="text-[10px] text-on-surface-variant font-mono">
-                {overview?.prestige_score || 0} Pkt
-              </span>
-            </div>
-            <div className="w-20 h-2 bg-surface-container-high rounded-full overflow-hidden border border-outline-variant/30">
-              <div
-                className="h-full bg-primary transition-all duration-500 rounded-full"
-                style={{ width: `${progressPercent}%` }}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Filter Pills */}
-        <div className="flex items-center gap-1.5 pt-2 border-t border-outline-variant/20">
-          <Button
-            variant={milestoneFilter === 'all' ? 'primary' : 'ghost'}
-            size="sm"
-            onClick={() => setMilestoneFilter('all')}
-            className="text-xs h-7 px-2.5"
-          >
-            Alle ({overview?.achievements.length || 0})
-          </Button>
-          <Button
-            variant={milestoneFilter === 'unlocked' ? 'primary' : 'ghost'}
-            size="sm"
-            onClick={() => setMilestoneFilter('unlocked')}
-            className="text-xs h-7 px-2.5"
-          >
-            Freigeschaltet ({overview?.total_unlocked || 0})
-          </Button>
-          <Button
-            variant={milestoneFilter === 'locked' ? 'primary' : 'ghost'}
-            size="sm"
-            onClick={() => setMilestoneFilter('locked')}
-            className="text-xs h-7 px-2.5"
-          >
-            Gesperrt ({(overview?.total_available || 0) - (overview?.total_unlocked || 0)})
-          </Button>
-        </div>
-
-        {/* Milestones Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-          {filteredMilestones.map((m) => {
-            const rarity = m.rarity_percent ?? m.global_unlocked_percentage ?? 0
-            const isRare = rarity > 0 && rarity <= 10
-            return (
-              <div
-                key={m.id}
-                className={`flex items-start gap-3 p-3 rounded-xl border transition-all ${
-                  m.unlocked
-                    ? 'bg-surface-container-low border-outline-variant/40 shadow-xs'
-                    : 'bg-surface-container-lowest/40 border-outline-variant/20 opacity-55'
-                }`}
-              >
-                <div
-                  className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
-                    m.unlocked
-                      ? isRare
-                        ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
-                        : 'bg-primary/15 border-primary/30 text-primary'
-                      : 'bg-surface-container-high/50 border-outline-variant/20 text-on-surface-variant/40'
-                  }`}
-                >
-                  {m.unlocked ? renderAchievementIcon(m.icon, 'w-4 h-4') : <Lock className="w-3.5 h-3.5" />}
-                </div>
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-xs font-bold text-on-surface truncate">{m.title}</span>
-                    <span className="text-[10px] font-mono text-amber-400 font-semibold">+{m.points}</span>
-                    {isRare && (
-                      <Badge variant="warning" className="text-[9px] px-1 py-0 uppercase font-bold">
-                        Selten
-                      </Badge>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-on-surface-variant mt-0.5 line-clamp-2">
-                    {m.description}
-                  </p>
-                  {m.unlocked && m.unlocked_at && (
-                    <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 mt-1">
-                      <CheckCircle2 className="w-3 h-3" />
-                      <span>{new Date(m.unlocked_at).toLocaleDateString()}</span>
-                    </span>
-                  )}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </section>
-
-      {/* 4. Freunde & Kontakte */}
+      {/* 1. Freunde & Kontakte (Direkt ganz oben!) */}
       <section className="msm-card p-5 space-y-4" aria-labelledby="social-friends-title">
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -1045,6 +914,9 @@ function SocialEinstellungen() {
             <h2 id="social-friends-title" className="text-sm font-semibold text-on-surface">
               Freunde & Kontakte
             </h2>
+            <p className="text-[11px] text-on-surface-variant mt-0.5">
+              Verwalte deine Kontakte, blockierte Personen und stummgeschaltete Unterhaltungen.
+            </p>
           </div>
         </div>
 
@@ -1109,63 +981,422 @@ function SocialEinstellungen() {
           </div>
         )}
 
-        {/* Friend List */}
-        <div className="space-y-2">
-          {acceptedFriends.length > 3 && (
-            <Input
-              value={searchFriend}
-              onChange={(e) => setSearchFriend(e.target.value)}
-              placeholder="Kontakte filtern …"
-              className="text-xs h-7"
-            />
-          )}
+        {/* Sub-Navigation: Deine Freunde, Blockierte, Stummgeschaltete */}
+        <div className="flex items-center gap-2 border-b border-outline-variant/30 pb-2.5 flex-wrap">
+          <Button
+            variant={contactSubTab === 'friends' ? 'primary' : 'ghost'}
+            size="sm"
+            onClick={() => setContactSubTab('friends')}
+            className="text-xs h-7 px-3 gap-1.5"
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>Deine Freunde ({acceptedFriends.length})</span>
+          </Button>
 
-          {filteredFriends.length === 0 ? (
-            <p className="text-xs text-on-surface-variant py-2">
-              {searchFriend ? 'Keine Treffer.' : 'Noch keine Kontakte hinzugefügt.'}
-            </p>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {filteredFriends.map((f) => (
-                <div
-                  key={f.id}
-                  className="flex items-center justify-between p-2.5 rounded-xl bg-surface-container-low border border-outline-variant/30"
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="relative shrink-0">
-                      <Avatar src={f.avatar_url} name={f.username} size="sm" />
-                      <StatusDot
-                        status={f.presence?.status || 'invisible'}
-                        size="sm"
-                        className="absolute bottom-0 right-0"
-                      />
-                    </div>
-                    <div className="min-w-0">
-                      <span className="text-xs font-semibold text-primary truncate block">
-                        {f.username}
-                      </span>
-                      {f.presence?.activity_label && (
-                        <p className="text-[10px] text-on-surface-variant truncate">
-                          {f.presence.activity_label}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => void handleRemoveFriend(f.user_id ?? f.id)}
-                    className="h-7 w-7 p-0 text-on-surface-variant hover:text-status-error shrink-0"
-                    title="Kontakt entfernen"
-                    aria-label="Kontakt entfernen"
-                  >
-                    <UserMinus className="w-3.5 h-3.5" />
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
+          <Button
+            variant={contactSubTab === 'blocked' ? 'primary' : 'ghost'}
+            size="sm"
+            onClick={() => setContactSubTab('blocked')}
+            className="text-xs h-7 px-3 gap-1.5"
+          >
+            <Ban className="w-3.5 h-3.5" />
+            <span>Blockiert ({blockedList.length})</span>
+          </Button>
+
+          <Button
+            variant={contactSubTab === 'muted' ? 'primary' : 'ghost'}
+            size="sm"
+            onClick={() => setContactSubTab('muted')}
+            className="text-xs h-7 px-3 gap-1.5"
+          >
+            <BellOff className="w-3.5 h-3.5" />
+            <span>Stummgeschaltet ({mutedList.length})</span>
+          </Button>
         </div>
+
+        {/* Tab 1: Deine Freunde */}
+        {contactSubTab === 'friends' && (
+          <div className="space-y-2">
+            {acceptedFriends.length > 3 && (
+              <Input
+                value={searchFriend}
+                onChange={(e) => {
+                  setSearchFriend(e.target.value)
+                  setVisibleFriendsCount(12)
+                }}
+                placeholder="Kontakte filtern …"
+                className="text-xs h-7"
+              />
+            )}
+
+            {filteredFriends.length === 0 ? (
+              <p className="text-xs text-on-surface-variant py-2">
+                {searchFriend ? 'Keine Treffer.' : 'Noch keine Kontakte hinzugefügt.'}
+              </p>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {filteredFriends.slice(0, visibleFriendsCount).map((f) => (
+                    <div
+                      key={f.id}
+                      className="flex items-center justify-between p-2.5 rounded-xl bg-surface-container-low border border-outline-variant/30"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="relative shrink-0">
+                          <Avatar src={f.avatar_url} name={f.username} size="sm" />
+                          <StatusDot
+                            status={f.presence?.status || 'invisible'}
+                            size="sm"
+                            className="absolute bottom-0 right-0"
+                          />
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-xs font-semibold text-primary truncate block">
+                            {f.username}
+                          </span>
+                          {f.presence?.activity_label && (
+                            <p className="text-[10px] text-on-surface-variant truncate">
+                              {f.presence.activity_label}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => void handleRemoveFriend(f.user_id ?? f.id)}
+                        className="h-7 w-7 p-0 text-on-surface-variant hover:text-status-error shrink-0"
+                        title="Kontakt entfernen"
+                        aria-label="Kontakt entfernen"
+                      >
+                        <UserMinus className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Lazy Load Button */}
+                {filteredFriends.length > visibleFriendsCount && (
+                  <div className="pt-2 flex justify-center">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setVisibleFriendsCount((prev) => prev + 12)}
+                      className="text-xs gap-1.5 px-4"
+                    >
+                      <span>Weitere Kontakte laden ({filteredFriends.length - visibleFriendsCount} verbleibend)</span>
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Tab 2: Blockierte Kontakte */}
+        {contactSubTab === 'blocked' && (
+          <div className="space-y-2">
+            {blockedList.length === 0 ? (
+              <p className="text-xs text-on-surface-variant py-2">
+                Keine blockierten Kontakte vorhanden.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {blockedList.map((b) => (
+                  <div
+                    key={b.userId}
+                    className="flex items-center justify-between p-2.5 rounded-xl bg-surface-container-low border border-status-error/30"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <Avatar src={b.avatarUrl} name={b.username} size="sm" />
+                      <div className="min-w-0">
+                        <span className="text-xs font-semibold text-primary truncate block">
+                          {b.username}
+                        </span>
+                        <span className="text-[10px] text-status-error font-medium">
+                          Blockiert
+                        </span>
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={async () => {
+                        await unblockUser(b.userId)
+                        toast.success(`Blockierung von ${b.username} aufgehoben`)
+                      }}
+                      className="h-7 text-xs px-2.5 border border-status-error/30 text-status-error hover:bg-status-error/15 shrink-0"
+                    >
+                      Entblocken
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tab 3: Stummgeschaltete Chats */}
+        {contactSubTab === 'muted' && (
+          <div className="space-y-2">
+            {mutedList.length === 0 ? (
+              <p className="text-xs text-on-surface-variant py-2">
+                Keine stummgeschalteten Chats vorhanden.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {mutedList.map((m) => (
+                  <div
+                    key={m.mailboxId}
+                    className="flex items-center justify-between p-2.5 rounded-xl bg-surface-container-low border border-outline-variant/30"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-7 h-7 rounded-full bg-surface-container-highest flex items-center justify-center text-status-warning shrink-0">
+                        <BellOff className="w-3.5 h-3.5" />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-xs font-semibold text-primary truncate block">
+                          {m.name}
+                        </span>
+                        <span className="text-[10px] text-on-surface-variant flex items-center gap-1">
+                          <Clock className="w-3 h-3 text-status-warning" />
+                          <span>{m.remainingLabel}</span>
+                        </span>
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        unmuteChat(m.mailboxId)
+                        toast.success('Stummschaltung aufgehoben')
+                      }}
+                      className="h-7 text-xs px-2.5 text-on-surface-variant hover:text-primary shrink-0"
+                    >
+                      Einschalten
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* 2. Privatsphäre & Sichtbarkeit */}
+      <section className="msm-card p-5 space-y-4" aria-labelledby="social-privacy-title">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <Lock className="h-5 w-5" />
+          </div>
+          <div>
+            <h2 id="social-privacy-title" className="text-sm font-semibold text-on-surface">
+              Privatsphäre & Sichtbarkeit
+            </h2>
+          </div>
+        </div>
+
+        <div className="space-y-4 pt-2 border-t border-outline-variant/30">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <span className="text-xs font-medium text-on-surface">Profil-Sichtbarkeit & Status</span>
+              <p className="text-[11px] text-on-surface-variant">Wer darf deine Präsenz und Aktivitäten sehen?</p>
+            </div>
+            <div className="w-full sm:w-64">
+              <Dropdown
+                options={privacyOptions}
+                value={privacyLevel}
+                disabled={savingPrivacy}
+                onChange={(val) => void handleSavePrivacy(val as 'public' | 'friends' | 'private')}
+                aria-label="Profil-Sichtbarkeit"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 pt-2 border-t border-outline-variant/20">
+            <div>
+              <span className="text-xs font-medium text-on-surface">Lesebestätigungen (Gelesen-Häkchen)</span>
+              <p className="text-[11px] text-on-surface-variant">Zeigt Kontakten, sobald Nachrichten gelesen wurden.</p>
+            </div>
+            <Switch
+              checked={readReceiptsEnabled}
+              onCheckedChange={handleToggleReadReceipts}
+              aria-label="Lesebestätigungen"
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* 3. Spielzeit / Nutzungszeit */}
+      <section className="msm-card p-5 space-y-4" aria-labelledby="social-time-title">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Clock className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 id="social-time-title" className="text-sm font-semibold text-on-surface">
+                Nutzungs- & Spielzeit
+              </h2>
+            </div>
+          </div>
+          <div className="text-right">
+            <span className="text-xs font-bold text-primary font-mono block">
+              {formatHours(stats?.active_time_seconds ?? stats?.total_activity_seconds)}
+            </span>
+            <span className="text-[10px] text-on-surface-variant">Gesamtaktivität</span>
+          </div>
+        </div>
+
+        {stats?.active_time_by_category && Object.keys(stats.active_time_by_category).length > 0 && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 pt-2 border-t border-outline-variant/30">
+            {Object.entries(stats.active_time_by_category).map(([cat, secs]) => (
+              <div key={cat} className="p-2.5 rounded-xl bg-surface-container-low border border-outline-variant/30">
+                <span className="text-[10px] font-bold text-on-surface-variant tracking-wider block truncate">
+                  {formatActivityCategory(cat)}
+                </span>
+                <span className="text-xs font-semibold text-on-surface font-mono">
+                  {formatHours(secs)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* 4. Meilensteine & Erfolge (Mit Lazy-Load) */}
+      <section className="msm-card p-5 space-y-4" aria-labelledby="social-milestones-title">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Trophy className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 id="social-milestones-title" className="text-sm font-semibold text-on-surface">
+                Meilensteine & Erfolge
+              </h2>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-start sm:self-auto">
+            <div className="text-right">
+              <span className="text-xs font-bold text-primary font-mono block">
+                {overview?.total_unlocked || 0} / {overview?.total_available || 0}
+              </span>
+              <span className="text-[10px] text-on-surface-variant font-mono">
+                {overview?.prestige_score || 0} Pkt
+              </span>
+            </div>
+            <div className="w-20 h-2 bg-surface-container-high rounded-full overflow-hidden border border-outline-variant/30">
+              <div
+                className="h-full bg-primary transition-all duration-500 rounded-full"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Filter Pills */}
+        <div className="flex items-center gap-1.5 pt-2 border-t border-outline-variant/20">
+          <Button
+            variant={milestoneFilter === 'all' ? 'primary' : 'ghost'}
+            size="sm"
+            onClick={() => {
+              setMilestoneFilter('all')
+              setVisibleMilestonesCount(12)
+            }}
+            className="text-xs h-7 px-2.5"
+          >
+            Alle ({overview?.achievements.length || 0})
+          </Button>
+          <Button
+            variant={milestoneFilter === 'unlocked' ? 'primary' : 'ghost'}
+            size="sm"
+            onClick={() => {
+              setMilestoneFilter('unlocked')
+              setVisibleMilestonesCount(12)
+            }}
+            className="text-xs h-7 px-2.5"
+          >
+            Freigeschaltet ({overview?.total_unlocked || 0})
+          </Button>
+          <Button
+            variant={milestoneFilter === 'locked' ? 'primary' : 'ghost'}
+            size="sm"
+            onClick={() => {
+              setMilestoneFilter('locked')
+              setVisibleMilestonesCount(12)
+            }}
+            className="text-xs h-7 px-2.5"
+          >
+            Gesperrt ({(overview?.total_available || 0) - (overview?.total_unlocked || 0)})
+          </Button>
+        </div>
+
+        {/* Milestones Grid mit Lazy-Load */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          {filteredMilestones.slice(0, visibleMilestonesCount).map((m) => {
+            const rarity = m.rarity_percent ?? m.global_unlocked_percentage ?? 0
+            const isRare = rarity > 0 && rarity <= 10
+            return (
+              <div
+                key={m.id}
+                className={`flex items-start gap-3 p-3 rounded-xl border transition-all ${
+                  m.unlocked
+                    ? 'bg-surface-container-low border-outline-variant/40 shadow-xs'
+                    : 'bg-surface-container-lowest/40 border-outline-variant/20 opacity-55'
+                }`}
+              >
+                <div
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
+                    m.unlocked
+                      ? isRare
+                        ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                        : 'bg-primary/15 border-primary/30 text-primary'
+                      : 'bg-surface-container-high/50 border-outline-variant/20 text-on-surface-variant/40'
+                  }`}
+                >
+                  {m.unlocked ? renderAchievementIcon(m.icon, 'w-4 h-4') : <Lock className="w-3.5 h-3.5" />}
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs font-bold text-on-surface truncate">{m.title}</span>
+                    <span className="text-[10px] font-mono text-amber-400 font-semibold">+{m.points}</span>
+                    {isRare && (
+                      <Badge variant="warning" className="text-[9px] px-1 py-0 uppercase font-bold">
+                        Selten
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-on-surface-variant mt-0.5 line-clamp-2">
+                    {m.description}
+                  </p>
+                  {m.unlocked && m.unlocked_at && (
+                    <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 mt-1">
+                      <CheckCircle2 className="w-3 h-3" />
+                      <span>{new Date(m.unlocked_at).toLocaleDateString()}</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Lazy Load Button für Erfolge */}
+        {filteredMilestones.length > visibleMilestonesCount && (
+          <div className="pt-2 flex justify-center">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setVisibleMilestonesCount((prev) => prev + 12)}
+              className="text-xs gap-1.5 px-4"
+            >
+              <span>Weitere Erfolge anzeigen ({filteredMilestones.length - visibleMilestonesCount} verbleibend)</span>
+            </Button>
+          </div>
+        )}
       </section>
     </div>
   )

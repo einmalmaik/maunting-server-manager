@@ -617,8 +617,8 @@ describe('Messenger (Allround Chat)', () => {
     await waitFor(() => {
       expect(screen.getByText('Meine ursprüngliche Nachricht')).toBeInTheDocument()
       expect(screen.getByText('Hallo von Alice!')).toBeInTheDocument()
-      // Initial status before acknowledgement is "Zugestellt / Noch nicht gelesen"
-      expect(screen.getByTitle('Zugestellt / Noch nicht gelesen')).toBeInTheDocument()
+      // Initial status before acknowledgement is "Gesendet" or "Zugestellt"
+      expect(screen.getByTitle(/Gesendet|Zugestellt/)).toBeInTheDocument()
     })
 
     // 2. Simulate incoming read receipt envelope from Alice for message 10

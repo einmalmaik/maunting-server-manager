@@ -132,6 +132,12 @@ export function ServerIncidentNotifier() {
       }
     }
 
+    // Hintergrund-Synchronisierung für Blockierungen und bekannte Mailboxen
+    void useMessengerNotificationStore.getState().syncBlockedFromBackend()
+    if (user?.id) {
+      void useMessengerNotificationStore.getState().syncMailboxDirectoryFromBackend(user.id)
+    }
+
     // Sofortiger initialer Check nach Login
     void checkAlerts()
 
@@ -154,23 +160,35 @@ export function ServerIncidentNotifier() {
         const mid = detail.blind_mailbox_id
         if (!mid) return
 
-        const store = useMessengerNotificationStore.getState()
-        if (store.isMuted(mid)) return
+        // 1. Eigene Nachricht (oder per KI im eigenen Namen versendet) -> Absender nicht selbst benachrichtigen!
+        if (detail.sender_user_id && user?.id && detail.sender_user_id === user.id) {
+          return
+        }
 
-        // Wenn der Chat im aktuellen Tab/Fenster aktiv geöffnet und fokussiert ist -> kein störendes Banner/Ton
+        const store = useMessengerNotificationStore.getState()
+
+        // 2. Nur Mailboxen benachrichtigen, die dem Benutzer auch tatsächlich zugeordnet sind!
+        // Niemals Geister-Benachrichtigungen („Messenger“) für fremde Mailboxen unbeteiligter Nutzer auslösen!
+        const meta = store.mailboxDirectory[mid]
+        if (!meta) {
+          return
+        }
+
+        // 3. Stummschaltung und Blockierung prüfen
+        if (store.isMuted(mid)) return
+        if (meta.userId && store.isBlocked(meta.userId)) {
+          return
+        }
+
+        // 4. Wenn der Chat im aktuellen Tab/Fenster aktiv geöffnet und fokussiert ist -> kein störendes Banner/Ton
         const isCurrentActive = store.activeMailboxId === mid
         if (isCurrentActive && typeof document !== 'undefined' && document.visibilityState === 'visible') {
           return
         }
 
-        const meta = store.mailboxDirectory[mid]
-        if (meta?.userId && store.isBlocked(meta.userId)) {
-          return
-        }
-
-        const senderOrChat = meta?.name || (meta?.isGroup ? 'Chat-Gruppe' : 'Messenger')
+        const senderOrChat = meta.name
         const title = `Neue Nachricht: ${senderOrChat}`
-        const text = meta?.isGroup
+        const text = meta.isGroup
           ? `Neue Nachricht in Gruppe „${meta.name}“`
           : `Du hast eine neue Nachricht von ${senderOrChat} erhalten.`
 
@@ -180,7 +198,7 @@ export function ServerIncidentNotifier() {
         // Nur akustisch signalisieren und benachrichtigen, wenn Gerätebenachrichtigung aktiv ist
         if (user?.device_notifications !== false) {
           playNotificationChime()
-          toast.success(meta?.isGroup ? `💬 Neue Nachricht in „${meta.name}“` : `💬 Neue Nachricht von ${senderOrChat}`)
+          toast.success(meta.isGroup ? `💬 Neue Nachricht in „${meta.name}“` : `💬 Neue Nachricht von ${senderOrChat}`)
           void sendeGeraeteBenachrichtigung({
             titel: title,
             text: text,
