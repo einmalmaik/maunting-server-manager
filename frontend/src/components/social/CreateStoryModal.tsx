@@ -122,10 +122,10 @@ export function CreateStoryModal({
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-3">
-            {/* Live Story Preview Card in 9:16 Mobile Smartphone Format */}
+            {/* Live Story Preview Card in 16:9 Format */}
             <div className="flex justify-center w-full">
               <div
-                className={`relative aspect-9/16 w-full max-w-[260px] sm:max-w-[280px] max-h-[52dvh] rounded-2xl p-4 flex flex-col justify-between shadow-2xl overflow-hidden transition-all border border-outline-variant/30 ${
+                className={`relative aspect-16/9 w-full max-w-sm sm:max-w-md max-h-[45dvh] rounded-2xl p-4 flex flex-col justify-between shadow-2xl overflow-hidden transition-all border border-outline-variant/30 ${
                   photoDataUrl ? 'bg-black text-white' : STORY_GRADIENTS[selectedGradient]?.class || 'bg-slate-900 text-white'
                 }`}
               >

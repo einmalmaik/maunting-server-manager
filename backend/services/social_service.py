@@ -573,6 +573,24 @@ class SocialService:
             query = query.filter(E2eeBlindEnvelope.id > since_id)
         return query.order_by(E2eeBlindEnvelope.id.asc()).limit(min(limit, 100)).all()
 
+    @classmethod
+    def broadcast_typing_signal(
+        cls,
+        blind_mailbox_id: str,
+        status: str,
+        sender_id: int,
+        sender_username: str,
+    ) -> None:
+        """Verteilt ein flüchtiges Tipp- oder Sprachaufnahme-Signal ohne Speicherung."""
+        clean_mailbox = blind_mailbox_id.strip()
+        SyncEventService.publish({
+            "type": "e2ee_typing_signal",
+            "blind_mailbox_id": clean_mailbox,
+            "status": status,
+            "sender_id": sender_id,
+            "sender_username": sender_username,
+        })
+
     # --- Chat-Gruppen & Öffentliche Einladungslinks ---
 
     @classmethod

@@ -114,8 +114,12 @@ from services.ai_proposals.personal_proposals import (
     _note_update_payload,
     _note_delete_payload,
     _message_friend_payload,
+    _message_contact_payload,
+    _message_group_payload,
     _ausfuehren_email_send,
     _ausfuehren_message_friend,
+    _ausfuehren_message_contact,
+    _ausfuehren_message_group,
     _ausfuehren_calendar_event_create,
     _ausfuehren_calendar_event_update,
     _ausfuehren_calendar_event_delete,
@@ -233,6 +237,12 @@ _GLOBALE_PAYLOADS: dict = {
     ),
     "propose_message_friend": lambda db, user, rest, arguments, guardian: (
         _message_friend_payload(db, user, rest)
+    ),
+    "propose_message_contact": lambda db, user, rest, arguments, guardian: (
+        _message_contact_payload(db, user, rest)
+    ),
+    "propose_message_group": lambda db, user, rest, arguments, guardian: (
+        _message_group_payload(db, user, rest)
     ),
     "propose_calendar_event_create": lambda db, user, rest, arguments, guardian: (
         _calendar_event_create_payload(db, user, rest)
@@ -802,6 +812,8 @@ _AUSFUEHRUNGEN: dict[str, Callable[[Session, _AusfuehrungsRahmen], _Ausgefuehrt]
     "propose_task_delete": _ausfuehren_task_delete,
     "propose_email_send": _ausfuehren_email_send,
     "propose_message_friend": _ausfuehren_message_friend,
+    "propose_message_contact": _ausfuehren_message_contact,
+    "propose_message_group": _ausfuehren_message_group,
     "propose_calendar_event_create": _ausfuehren_calendar_event_create,
     "propose_calendar_event_update": _ausfuehren_calendar_event_update,
     "propose_calendar_event_delete": _ausfuehren_calendar_event_delete,

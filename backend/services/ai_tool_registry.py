@@ -653,6 +653,26 @@ WERKZEUGE: dict[str, Werkzeug] = {
         recht="ai.social.message_friend",
         recht_global=True,
     ),
+    "propose_message_contact": Werkzeug(
+        "global_write",
+        gruppe="social",
+        recht="ai.social.message_friend",
+        recht_global=True,
+    ),
+    "propose_message_group": Werkzeug(
+        "global_write",
+        gruppe="social",
+        recht="ai.social.message_friend",
+        recht_global=True,
+    ),
+    "search_messenger_contacts": Werkzeug(
+        "global_read",
+        gruppe="social",
+    ),
+    "search_messenger_groups": Werkzeug(
+        "global_read",
+        gruppe="social",
+    ),
     "propose_calendar_event_create": Werkzeug(
         "global_write",
         gruppe="calendar",
@@ -857,8 +877,9 @@ CALENDAR_TOOLS = _mit_gruppe("calendar")
 POPUP_TOOLS = _mit_gruppe("popup")
 TASK_TOOLS = _mit_gruppe("tasks")
 NOTES_TOOLS = _mit_gruppe("notes")
+SOCIAL_TOOLS = _mit_gruppe("social")
 CHAT_INTERACTION_TOOLS = (
-    MAIL_TOOLS | CALENDAR_TOOLS | POPUP_TOOLS | TASK_TOOLS | NOTES_TOOLS
+    MAIL_TOOLS | CALENDAR_TOOLS | POPUP_TOOLS | TASK_TOOLS | NOTES_TOOLS | SOCIAL_TOOLS
 )
 ASK_TOOLS = _mit_art("ask")
 DELEGATION_TOOLS = _mit_art("delegation")
@@ -1200,6 +1221,8 @@ AUFGABEN_HANDELN = frozenset({
     # steht wie Server/Backups in ALWAYS_CONFIRM_TOOLS und bleibt draussen.
     "propose_email_send",
     "propose_message_friend",
+    "propose_message_contact",
+    "propose_message_group",
     "propose_calendar_event_create",
     "propose_calendar_event_update",
 })

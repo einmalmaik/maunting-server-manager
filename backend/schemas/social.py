@@ -97,6 +97,11 @@ class E2eeBlindEnvelopeResponse(BaseModel):
     created_at: datetime
 
 
+class E2eeTypingSignalCreate(BaseModel):
+    blind_mailbox_id: str = Field(..., min_length=16, max_length=64)
+    status: str = Field(..., pattern="^(typing|recording|idle)$")
+
+
 class E2eePublicKeyUpdate(BaseModel):
     public_key: str = Field(..., min_length=10, max_length=8192)
 

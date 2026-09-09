@@ -671,6 +671,23 @@ und `propose_hoster_*` dienen ausschließlich der Server-Hosting- und WHMCS-API-
 Einkaufslisten, Supermärkte oder Lebensmittel-Besorgungen aufgerufen werden."""
 
 
+MESSENGER = """\
+Messenger und Nachrichten: Wenn der Benutzer darum bittet, jemandem eine Nachricht \
+oder einen Gruss zu schreiben oder etwas in eine Gruppe zu senden (z. B. "schicke eine \
+Nachricht an XY...", "schreib in die Gruppe Z..."), nutze die Messenger-Werkzeuge: \
+1. Kontakte und Gruppen finden: Sucht der Benutzer nach einer Person, nutze \
+`search_messenger_contacts` mit dem Namen oder Namensfragment. Das Werkzeug durchsucht \
+Freunde, Teammitglieder und oeffentliche Profile nach phonetischer und Text-Aehnlichkeit. \
+Fuer Gruppen nutze `search_messenger_groups` mit dem Gruppennamen. \
+2. Nachricht vorschlagen/senden: Sobald der Empfaenger (Kontakt oder Gruppe) bekannt \
+oder gefunden ist, erstelle die Nachricht mit `propose_message_contact` (oder \
+`propose_message_friend`) fuer Direktnachrichten bzw. `propose_message_group` fuer \
+Gruppennachrichten. \
+3. Zero-Knowledge & Privatsphaere: Du hast NIEMALS Zugriff auf Chatverlaeufe, \
+Nachrichten-Historien oder private Chat-Inhalte Dritter. Du kennst nur Benutzernamen und \
+Gruppennamen zur Adressierung von Ende-zu-Ende verschluesselten Nachrichten."""
+
+
 CLOUDFLARE = """\
 Cloudflare DNS & Domains: Nutze für Domain- und DNS-Verwaltung immer die \
 integrierten Werkzeuge (`cloudflare_list_zones`, `cloudflare_list_dns_records`, \
@@ -1453,6 +1470,7 @@ BLOECKE = (
     POSTFACH_UND_KALENDER,
     POPUPS_UND_ANKUENDIGUNGEN,
     NOTIZEN,
+    MESSENGER,
     CLOUDFLARE,
     GEDAECHTNIS,
     # Direkt hinter dem Gedaechtnis, weil die Sprechweise dort landet: was
@@ -1500,6 +1518,7 @@ GEHIRN_BLOECKE = (
     POSTFACH_UND_KALENDER,
     POPUPS_UND_ANKUENDIGUNGEN,
     NOTIZEN,
+    MESSENGER,
     CLOUDFLARE,
     AUFGABEN,
     GEDAECHTNIS,
@@ -1669,6 +1688,7 @@ REALTIME_BLOECKE = (
     REGIONSANALYSE,
     POSTFACH_UND_KALENDER,
     NOTIZEN,
+    MESSENGER,
     CLOUDFLARE,
     AUFGABEN,
     GEDAECHTNIS,

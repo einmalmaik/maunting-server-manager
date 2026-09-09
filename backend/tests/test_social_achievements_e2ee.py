@@ -494,4 +494,118 @@ def test_public_profiles_discovery(db: Session, owner_user: User, regular_user: 
     assert filtered[0]["username"] == "public_sam"
 
 
+def test_e2ee_typing_signal(owner_user: User) -> None:
+    """Prueft das fluechtige Senden von Typing- und Recording-Signalen ohne DB-Persistenz."""
+    mailbox_id = "test-blind-mailbox-123"
+    SocialService.broadcast_typing_signal(
+        blind_mailbox_id=mailbox_id,
+        status="typing",
+        sender_id=owner_user.id,
+        sender_username=owner_user.username,
+    )
+    SocialService.broadcast_typing_signal(
+        blind_mailbox_id=mailbox_id,
+        status="recording",
+        sender_id=owner_user.id,
+        sender_username=owner_user.username,
+    )
+
+
+def test_ai_messenger_search_and_e2ee(db: Session, owner_user: User) -> None:
+    """Prüft die neuen KI-Werkzeuge: search_messenger_contacts, search_messenger_groups,
+    propose_message_contact und propose_message_group mit Zero-Knowledge E2EE Relay."""
+    from services.ai_action_service import _execute_global_read_tool
+    from models import ChatGroup, ChatGroupMember
+
+    # 1. Kontakt und Gruppe anlegen
+    alice = User(username="alice_wonder", password_hash="hasha", is_active=True)
+    db.add(alice)
+    db.commit()
+
+    # Alice als Freund hinzufügen
+    f_rel = UserFriend(user_id=owner_user.id, friend_id=alice.id, status="accepted")
+    db.add(f_rel)
+
+    # Gruppe anlegen
+    group = ChatGroup(name="Gamer Community", owner_user_id=owner_user.id, invite_code="testinv123")
+    db.add(group)
+    db.commit()
+    member1 = ChatGroupMember(group_id=group.id, user_id=owner_user.id, role="admin")
+    member2 = ChatGroupMember(group_id=group.id, user_id=alice.id, role="member")
+    db.add_all([member1, member2])
+    db.commit()
+
+    # 2. search_messenger_contacts testen
+    res_contacts = _execute_global_read_tool(
+        db, user=owner_user, tool_name="search_messenger_contacts", arguments={"query": "alice"}
+    )
+    assert res_contacts["count"] >= 1
+    found_names = [c["username"] for c in res_contacts["contacts"]]
+    assert "alice_wonder" in found_names
+
+    # 3. search_messenger_groups testen
+    res_groups = _execute_global_read_tool(
+        db, user=owner_user, tool_name="search_messenger_groups", arguments={"query": "Gamer"}
+    )
+    assert res_groups["count"] >= 1
+    assert any(g["name"] == "Gamer Community" for g in res_groups["groups"])
+
+    # 4. propose_message_contact vorschlagen und ausführen
+    conv = AiConversation(id=str(uuid4()), user_id=owner_user.id, title="Test Chat", kind="primary")
+    db.add(conv)
+    db.commit()
+
+    proposal_dm = create_proposal(
+        db,
+        user=owner_user,
+        conversation=conv,
+        correlation_id=str(uuid4()),
+        tool_name="propose_message_contact",
+        arguments={
+            "recipient_username": "alice_wonder",
+            "message_text": "Alles Gute zum Geburtstag!",
+            "rationale": "Geburtstagsglückwunsch",
+        },
+    )
+    assert proposal_dm.tool_name == "propose_message_contact"
+    _, token_dm = ai_proposal_service.confirm_proposal(db, proposal_id=proposal_dm.id, user=owner_user)
+    exec_prop_dm, _ = ai_proposal_service.execute_proposal(
+        db,
+        proposal_id=proposal_dm.id,
+        user=owner_user,
+        confirmation_token=token_dm,
+    )
+    assert exec_prop_dm.status == "succeeded"
+
+    # 5. propose_message_group vorschlagen und ausführen
+    proposal_grp = create_proposal(
+        db,
+        user=owner_user,
+        conversation=conv,
+        correlation_id=str(uuid4()),
+        tool_name="propose_message_group",
+        arguments={
+            "group_name": "Gamer Community",
+            "message_text": "Hallo zusammen in der Gruppe!",
+            "rationale": "Gruppenankündigung",
+        },
+    )
+    assert proposal_grp.tool_name == "propose_message_group"
+    _, token_grp = ai_proposal_service.confirm_proposal(db, proposal_id=proposal_grp.id, user=owner_user)
+    exec_prop_grp, _ = ai_proposal_service.execute_proposal(
+        db,
+        proposal_id=proposal_grp.id,
+        user=owner_user,
+        confirmation_token=token_grp,
+    )
+    assert exec_prop_grp.status == "succeeded"
+
+    # 6. Verifiziere E2EE Blind Envelopes in der DB
+    envelopes = db.query(E2eeBlindEnvelope).all()
+    assert len(envelopes) >= 2
+    wire_types = {e.ciphertext_envelope[:15] for e in envelopes}
+    assert any("sv-e2ee-v1:" in wt for wt in wire_types)
+    assert any("sv-e2ee-group-v" in wt for wt in wire_types)
+
+
 

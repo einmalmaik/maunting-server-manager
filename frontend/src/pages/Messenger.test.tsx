@@ -26,6 +26,7 @@ vi.mock('@/api/social', () => ({
   fetchE2eeEnvelopes: vi.fn(),
   getPublicProfiles: vi.fn().mockResolvedValue([]),
   sendFriendRequest: vi.fn().mockResolvedValue({ success: true, message: 'Anfrage gesendet' }),
+  sendTypingSignal: vi.fn().mockResolvedValue({ ok: true }),
 }))
 
 vi.mock('@/api/teams', () => ({
@@ -244,9 +245,8 @@ describe('Messenger (Allround Chat)', () => {
     fireEvent.click(screen.getByText('Dev Community'))
 
     await waitFor(() => {
-      expect(screen.getByText('Gruppen-E2EE verschlüsselt')).toBeInTheDocument()
-      expect(screen.getByText('5 Mitglieder')).toBeInTheDocument()
       expect(screen.getByText('Einladen')).toBeInTheDocument()
+      expect(screen.getByPlaceholderText('Nachricht schreiben …')).toBeInTheDocument()
     })
   })
 
@@ -938,6 +938,77 @@ describe('Messenger (Allround Chat)', () => {
 
     await waitFor(() => {
       expect(screen.queryByText('Design-Hintergründe')).not.toBeInTheDocument()
+    })
+  })
+
+  it('rendert Story-Antworten mit reichhaltiger Vorschau und sendet Typing-Signale beim Tippen', async () => {
+    vi.mocked(socialApi.getFriends).mockResolvedValue([
+      {
+        id: 104,
+        user_id: 104,
+        friend_user_id: 104,
+        username: 'diana',
+        status: 'accepted',
+        is_requester: false,
+        avatar_url: null,
+        presence: { status: 'online' },
+      } as any,
+    ])
+
+    const nowIso = new Date().toISOString()
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([
+      {
+        id: 1,
+        blind_mailbox_id: 'mailbox-104',
+        ciphertext_envelope: 'ciphertext-story-reply',
+        created_at: nowIso,
+      },
+    ])
+
+    const { decryptE2eeMessage } = await import('@/services/e2eeCrypto')
+    vi.mocked(decryptE2eeMessage).mockImplementation(async (envelope) => {
+      if (envelope === 'ciphertext-story-reply') {
+        return JSON.stringify({
+          sender_id: 104,
+          text: 'Tolles Bild!',
+          story_reply: {
+            storyId: 42,
+            storyContent: 'Urlaubsausblick 2026',
+            storyUsername: 'me',
+          },
+        })
+      }
+      return '{}'
+    })
+
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /diana/i })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole('button', { name: /diana/i }))
+
+    // Story reply preview card should render
+    await waitFor(() => {
+      expect(screen.getByText('Status von me')).toBeInTheDocument()
+      expect(screen.getByText('Urlaubsausblick 2026')).toBeInTheDocument()
+      expect(screen.getByText('Tolles Bild!')).toBeInTheDocument()
+    })
+
+    // Typing sends typing signal
+    const input = screen.getByPlaceholderText('Nachricht schreiben …')
+    fireEvent.change(input, { target: { value: 'Ich schreibe gerade' } })
+
+    await waitFor(() => {
+      expect(socialApi.sendTypingSignal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'typing',
+        })
+      )
     })
   })
 })

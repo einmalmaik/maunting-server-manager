@@ -16,13 +16,26 @@ import { type ChatStoryItem, deleteStory } from '@/api/social'
 import { STORY_GRADIENTS } from './CreateStoryModal'
 import { toast } from '@/stores/toastStore'
 
+export interface StoryReplyContext {
+  storyId: number
+  storyContent: string
+  storyMediaUrl?: string | null
+  storyBackground?: string
+  storyUsername?: string
+}
+
 interface StoryViewerModalProps {
   stories: ChatStoryItem[]
   initialIndex?: number
   open: boolean
   onOpenChange: (open: boolean) => void
   onDeleted?: (storyId: number) => void
-  onReply?: (targetUserId: number, targetUsername: string, text: string) => void
+  onReply?: (
+    targetUserId: number,
+    targetUsername: string,
+    text: string,
+    context: StoryReplyContext
+  ) => void
 }
 
 export function StoryViewerModal({
@@ -143,7 +156,7 @@ export function StoryViewerModal({
       onClick={() => onOpenChange(false)}
     >
       <div
-        className={`relative w-full max-w-sm sm:max-w-md aspect-9/16 max-h-[92vh] rounded-2xl overflow-hidden shadow-2xl flex flex-col justify-between p-4 sm:p-5 transition-all ${backgroundClass}`}
+        className={`relative w-full max-w-xl sm:max-w-2xl aspect-16/9 max-h-[85vh] rounded-2xl overflow-hidden shadow-2xl flex flex-col justify-between p-4 sm:p-5 transition-all ${backgroundClass}`}
         onClick={(e) => e.stopPropagation()}
         onMouseDown={() => setIsPaused(true)}
         onMouseUp={() => setIsPaused(false)}
@@ -234,8 +247,8 @@ export function StoryViewerModal({
         </div>
 
         {/* Story Text Content */}
-        <div className="relative z-10 flex-1 flex items-center justify-center p-4 text-center">
-          <p className="font-headline text-xl sm:text-2xl font-bold text-white drop-shadow-lg leading-snug break-words max-h-72 overflow-y-auto no-scrollbar">
+        <div className="relative z-10 flex-1 flex items-center justify-center p-3 sm:p-4 text-center">
+          <p className="font-headline text-lg sm:text-xl md:text-2xl font-bold text-white drop-shadow-lg leading-snug break-words max-h-44 sm:max-h-60 overflow-y-auto no-scrollbar">
             {currentStory.content}
           </p>
         </div>
@@ -270,7 +283,13 @@ export function StoryViewerModal({
               onSubmit={(e) => {
                 e.preventDefault()
                 if (!replyText.trim()) return
-                onReply(currentStory.user_id, currentStory.username, replyText.trim())
+                onReply(currentStory.user_id, currentStory.username, replyText.trim(), {
+                  storyId: currentStory.id,
+                  storyContent: currentStory.content,
+                  storyMediaUrl: currentStory.media_url,
+                  storyBackground: currentStory.background,
+                  storyUsername: currentStory.username,
+                })
                 setReplyText('')
                 onOpenChange(false)
               }}

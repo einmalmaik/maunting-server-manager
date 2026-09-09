@@ -72,6 +72,90 @@ def _message_friend_payload(db: Session, user: User, rest: dict) -> tuple[dict, 
     }
     return payload, preview
 
+def _message_contact_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
+    recipient_username = str(rest.get("recipient_username", "")).strip()
+    message_text = str(rest.get("message_text", "")).strip()
+    if not recipient_username or not message_text:
+        raise AiActionValidationError("Messenger-Nachricht erfordert recipient_username und message_text")
+
+    from services.social_service import SocialService
+    from models import TeamMember
+
+    target = db.query(User).filter(User.username.ilike(recipient_username)).first()
+    if not target or not target.is_active:
+        raise AiActionValidationError(f"Benutzer '{recipient_username}' existiert nicht oder ist inaktiv.")
+
+    if target.id == user.id:
+        raise AiActionValidationError("Man kann sich selbst keine Direktnachricht senden.")
+
+    is_friend = SocialService.is_confirmed_friend(db, user.id, target.id)
+    is_team_colleague = False
+    if not is_friend:
+        user_teams = [tm.team_id for tm in db.query(TeamMember.team_id).filter(TeamMember.user_id == user.id).all()]
+        if user_teams:
+            is_team_colleague = db.query(TeamMember).filter(
+                TeamMember.team_id.in_(user_teams),
+                TeamMember.user_id == target.id,
+            ).first() is not None
+
+    is_public = getattr(target, "social_privacy", "friends") == "public"
+
+    if not (is_friend or is_team_colleague or is_public):
+        raise AiActionValidationError(
+            f"Sicherheitsblockade: '{recipient_username}' ist weder Freund, noch Teamkollege, noch öffentlich erreichbar."
+        )
+
+    payload = {
+        "recipient_id": target.id,
+        "recipient_username": target.username,
+        "message_text": redact_sensitive_text(message_text),
+    }
+    preview = {
+        "operation": "message_contact",
+        "recipient_username": target.username,
+        "message_preview": redact_sensitive_text(message_text)[:200],
+    }
+    return payload, preview
+
+def _message_group_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
+    group_name_or_id = str(rest.get("group_name_or_id") or rest.get("group_name", "")).strip()
+    message_text = str(rest.get("message_text", "")).strip()
+    if not group_name_or_id or not message_text:
+        raise AiActionValidationError("Gruppennachricht erfordert group_name_or_id und message_text")
+
+    from services.social_service import SocialService
+    from models import ChatGroup, ChatGroupMember
+
+    group = None
+    if group_name_or_id.isdigit():
+        group = db.query(ChatGroup).filter(ChatGroup.id == int(group_name_or_id)).first()
+
+    if not group:
+        groups = SocialService.list_user_groups(db, user.id)
+        matching = [g for g in groups if group_name_or_id.lower() in g["name"].lower()]
+        if not matching:
+            raise AiActionValidationError(f"Gruppe '{group_name_or_id}' nicht gefunden oder du bist kein Mitglied.")
+        group = db.query(ChatGroup).filter(ChatGroup.id == matching[0]["id"]).first()
+
+    if not group:
+        raise AiActionValidationError(f"Gruppe '{group_name_or_id}' nicht gefunden.")
+
+    member = db.query(ChatGroupMember).filter_by(group_id=group.id, user_id=user.id).first()
+    if not member:
+        raise AiActionValidationError(f"Du bist kein Mitglied der Gruppe '{group.name}'.")
+
+    payload = {
+        "group_id": group.id,
+        "group_name": group.name,
+        "message_text": redact_sensitive_text(message_text),
+    }
+    preview = {
+        "operation": "message_group",
+        "group_name": group.name,
+        "message_preview": redact_sensitive_text(message_text)[:200],
+    }
+    return payload, preview
+
 def _calendar_event_create_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
     title = str(rest.get("title", "")).strip()
     start_time = str(rest.get("start_time", "")).strip()
@@ -417,3 +501,91 @@ def _ausfuehren_message_friend(db: Session, rahmen: _AusfuehrungsRahmen) -> _Aus
     AchievementService.unlock_achievement(db, rahmen.active_user.id, "social_zero_knowledge")
 
     return _Ausgefuehrt(result={"sent": True, "friend": friend_username})
+
+
+def _ausfuehren_message_contact(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    import base64
+    import hashlib
+    import os
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from services.social_service import SocialService
+
+    SocialService.assert_social_enabled(db)
+
+    p = rahmen.payload
+    recipient_id = int(p["recipient_id"])
+    recipient_username = str(p["recipient_username"])
+    message_text = str(p["message_text"])
+
+    ids = sorted([rahmen.active_user.id, recipient_id])
+    blind_mailbox_id = hashlib.sha256(f"msm:dm:{ids[0]}:{ids[1]}".encode("utf-8")).hexdigest()
+
+    # DIS AES-256-GCM Direct Channel Key
+    channel_key_bytes = hashlib.sha256(f"msm:dm:key:{ids[0]}:{ids[1]}".encode("utf-8")).digest()
+    aad = f"msm:dm:aad:{ids[0]}:{ids[1]}".encode("utf-8")
+
+    envelope_payload = json.dumps({
+        "sender_id": rahmen.active_user.id,
+        "sender_username": rahmen.active_user.username,
+        "text": message_text,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }).encode("utf-8")
+
+    aesgcm = AESGCM(channel_key_bytes)
+    iv = os.urandom(12)
+    encrypted = aesgcm.encrypt(iv, envelope_payload, aad)
+    ciphertext_b64 = base64.b64encode(iv + encrypted).decode("ascii")
+
+    SocialService.relay_blind_envelope(
+        db,
+        blind_mailbox_id=blind_mailbox_id,
+        ciphertext_envelope=f"sv-e2ee-v1:{ciphertext_b64}",
+    )
+    AchievementService.unlock_achievement(db, rahmen.active_user.id, "social_zero_knowledge")
+
+    return _Ausgefuehrt(result={"sent": True, "recipient": recipient_username})
+
+
+def _ausfuehren_message_group(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    import base64
+    import hashlib
+    import os
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from services.social_service import SocialService
+    from models import ChatGroupMember
+
+    SocialService.assert_social_enabled(db)
+
+    p = rahmen.payload
+    group_id = int(p["group_id"])
+    group_name = str(p["group_name"])
+    message_text = str(p["message_text"])
+
+    member = db.query(ChatGroupMember).filter_by(group_id=group_id, user_id=rahmen.active_user.id).first()
+    if not member:
+        raise AiActionValidationError(f"Nicht mehr Mitglied der Gruppe '{group_name}'.")
+
+    blind_mailbox_id = hashlib.sha256(f"msm:group:{group_id}".encode("utf-8")).hexdigest()
+    channel_key_bytes = hashlib.sha256(f"msm:group:key:{group_id}".encode("utf-8")).digest()
+    aad = f"msm:group:aad:{group_id}".encode("utf-8")
+
+    envelope_payload = json.dumps({
+        "sender_id": rahmen.active_user.id,
+        "sender_username": rahmen.active_user.username,
+        "text": message_text,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }).encode("utf-8")
+
+    aesgcm = AESGCM(channel_key_bytes)
+    iv = os.urandom(12)
+    encrypted = aesgcm.encrypt(iv, envelope_payload, aad)
+    ciphertext_b64 = base64.b64encode(iv + encrypted).decode("ascii")
+
+    SocialService.relay_blind_envelope(
+        db,
+        blind_mailbox_id=blind_mailbox_id,
+        ciphertext_envelope=f"sv-e2ee-group-v1:{ciphertext_b64}",
+    )
+    AchievementService.unlock_achievement(db, rahmen.active_user.id, "social_zero_knowledge")
+
+    return _Ausgefuehrt(result={"sent": True, "group": group_name})

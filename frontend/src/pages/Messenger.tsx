@@ -3,7 +3,6 @@ import { useSearchParams, useParams, useNavigate } from 'react-router-dom'
 import {
   Button,
   Input,
-  Badge,
   Dialog,
   DialogContent,
   DialogHeader,
@@ -70,6 +69,7 @@ import {
   getStories,
   relayE2eeEnvelope,
   fetchE2eeEnvelopes,
+  sendTypingSignal,
   getE2eePublicKey,
   setE2eePublicKey,
 } from '@/api/social'
@@ -97,8 +97,8 @@ import {
 import { getAudioTrackConstraints } from '@/lib/audioSettings'
 import { IN_HOUSE_STICKERS, CATEGORIZED_EMOJIS } from '@/services/stickerCatalog'
 import { CameraSnapshotModal } from '@/components/social/CameraSnapshotModal'
-import { CreateStoryModal } from '@/components/social/CreateStoryModal'
-import { StoryViewerModal } from '@/components/social/StoryViewerModal'
+import { CreateStoryModal, STORY_GRADIENTS } from '@/components/social/CreateStoryModal'
+import { StoryViewerModal, type StoryReplyContext } from '@/components/social/StoryViewerModal'
 import { GroupPermissionsModal } from '@/components/social/GroupPermissionsModal'
 import {
   type ChatWallpaperConfig,
@@ -207,6 +207,14 @@ export interface StickerAttachment {
   svg: string
 }
 
+export interface StoryReplyAttachment {
+  storyId?: number
+  storyContent: string
+  storyMediaUrl?: string | null
+  storyBackground?: string
+  storyUsername?: string
+}
+
 export interface ChatMessage {
   id: number
   senderId: number
@@ -226,6 +234,7 @@ export interface ChatMessage {
   audioAttachment?: AudioAttachment
   fileAttachment?: FileAttachment
   stickerAttachment?: StickerAttachment
+  storyReply?: StoryReplyAttachment
 }
 
 function formatFileSize(bytes: number): string {
@@ -417,6 +426,28 @@ export function Messenger() {
   // Message Editing State
   const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null)
   const highestIncomingIdAcknowledgedRef = useRef<number>(0)
+
+  // Real-time typing & voice recording indicator state
+  const [partnerActivity, setPartnerActivity] = useState<{ status: 'typing' | 'recording'; username?: string } | null>(null)
+  const partnerActivityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastTypingSentRef = useRef<number>(0)
+
+  const handleInputChange = (text: string) => {
+    setInputText(text)
+    if (!blindMailboxId) return
+    const now = Date.now()
+    if (text.trim()) {
+      if (now - lastTypingSentRef.current > 2500) {
+        lastTypingSentRef.current = now
+        void sendTypingSignal({ blind_mailbox_id: blindMailboxId, status: 'typing' }).catch(() => {})
+      }
+    } else {
+      if (lastTypingSentRef.current > 0) {
+        lastTypingSentRef.current = 0
+        void sendTypingSignal({ blind_mailbox_id: blindMailboxId, status: 'idle' }).catch(() => {})
+      }
+    }
+  }
 
   const currentUserId = user?.id || 0
 
@@ -840,6 +871,7 @@ export function Messenger() {
                 audioAttachment: parsed.audio_attachment,
                 fileAttachment: parsed.file_attachment,
                 stickerAttachment: parsed.sticker_attachment,
+                storyReply: parsed.story_reply,
               })
               continue
             }
@@ -1010,7 +1042,7 @@ export function Messenger() {
     }
   }
 
-  // Real-time SSE event listener for zero-latency incoming messages
+  // Real-time SSE event listener for zero-latency incoming messages & typing signals
   useEffect(() => {
     const handleSync = (e: Event) => {
       const ce = e as CustomEvent<any>
@@ -1021,12 +1053,40 @@ export function Messenger() {
         } else if (user?.device_notifications !== false) {
           toast.success('Neue verschlüsselte Nachricht empfangen.')
         }
+      } else if (detail?.type === 'e2ee_typing_signal') {
+        if (detail.blind_mailbox_id === blindMailboxId && detail.sender_id !== currentUserId) {
+          if (partnerActivityTimeoutRef.current) {
+            clearTimeout(partnerActivityTimeoutRef.current)
+            partnerActivityTimeoutRef.current = null
+          }
+          if (detail.status === 'idle') {
+            setPartnerActivity(null)
+          } else if (detail.status === 'typing' || detail.status === 'recording') {
+            setPartnerActivity({ status: detail.status, username: detail.sender_username })
+            partnerActivityTimeoutRef.current = setTimeout(() => {
+              setPartnerActivity(null)
+            }, 4500)
+          }
+        }
       }
     }
 
     window.addEventListener('msm:sync-event', handleSync)
-    return () => window.removeEventListener('msm:sync-event', handleSync)
-  }, [blindMailboxId, user?.device_notifications])
+    return () => {
+      window.removeEventListener('msm:sync-event', handleSync)
+      if (partnerActivityTimeoutRef.current) {
+        clearTimeout(partnerActivityTimeoutRef.current)
+      }
+    }
+  }, [blindMailboxId, currentUserId, user?.device_notifications])
+
+  useEffect(() => {
+    setPartnerActivity(null)
+    if (partnerActivityTimeoutRef.current) {
+      clearTimeout(partnerActivityTimeoutRef.current)
+      partnerActivityTimeoutRef.current = null
+    }
+  }, [blindMailboxId])
 
   useEffect(() => {
     if (blindMailboxId && (activeContact || activeGroup)) {
@@ -1055,7 +1115,8 @@ export function Messenger() {
     img?: ImageAttachment,
     audio?: AudioAttachment,
     file?: FileAttachment,
-    sticker?: StickerAttachment
+    sticker?: StickerAttachment,
+    storyReply?: StoryReplyAttachment
   ) => {
     // If currently editing a message, redirect to edit handler
     if (editingMessage) {
@@ -1066,7 +1127,7 @@ export function Messenger() {
 
     const rawText = customText !== undefined ? customText : inputText.trim()
     if (
-      (!rawText && !note && !cal && !img && !audio && !file && !sticker) ||
+      (!rawText && !note && !cal && !img && !audio && !file && !sticker && !storyReply) ||
       (!activeContact && !activeGroup) ||
       !blindMailboxId ||
       !currentUserId ||
@@ -1090,6 +1151,7 @@ export function Messenger() {
       if (audio) payloadObj.audio_attachment = audio
       if (file) payloadObj.file_attachment = file
       if (sticker) payloadObj.sticker_attachment = sticker
+      if (storyReply) payloadObj.story_reply = storyReply
 
       const payload = JSON.stringify(payloadObj)
       let ciphertext: string
@@ -1117,6 +1179,10 @@ export function Messenger() {
       setSelectedImage(null)
       setStagedFile(null)
       justSentRef.current = true
+      lastTypingSentRef.current = 0
+      if (blindMailboxId) {
+        void sendTypingSignal({ blind_mailbox_id: blindMailboxId, status: 'idle' }).catch(() => {})
+      }
       await loadMessages()
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Fehler beim Senden'
@@ -1166,6 +1232,10 @@ export function Messenger() {
       setIsRecording(true)
       setRecordingDuration(0)
 
+      if (blindMailboxId) {
+        void sendTypingSignal({ blind_mailbox_id: blindMailboxId, status: 'recording' }).catch(() => {})
+      }
+
       timerIntervalRef.current = setInterval(() => {
         setRecordingDuration((prev) => prev + 1)
       }, 1000)
@@ -1175,6 +1245,10 @@ export function Messenger() {
   }
 
   const stopRecording = (shouldSend: boolean) => {
+    if (blindMailboxId) {
+      void sendTypingSignal({ blind_mailbox_id: blindMailboxId, status: 'idle' }).catch(() => {})
+    }
+
     if (timerIntervalRef.current) {
       clearInterval(timerIntervalRef.current)
       timerIntervalRef.current = null
@@ -1534,182 +1608,18 @@ export function Messenger() {
 
   return (
     <div className="flex h-full w-full min-h-0 flex-1 flex-col overflow-hidden bg-surface">
-      {/* Slim, Compact Header (Matches AiChat header height) */}
-      <header className="h-12 shrink-0 border-b border-outline-variant/20 bg-surface-container/70 backdrop-blur px-3 sm:px-4 flex items-center justify-between z-10">
-        <div className="flex items-center gap-2.5 min-w-0">
-          {/* Mobile Back Button when inside a chat */}
-          {isChatOpen && (
-            <button
-              type="button"
-              onClick={() => {
-                setActiveContact(null)
-                setActiveGroup(null)
-              }}
-              className="md:hidden p-1.5 -ml-1.5 rounded-lg hover:bg-surface-container-high text-on-surface-variant"
-              aria-label="Zurück zur Kontaktliste"
-            >
-              <ChevronLeft className="w-5 h-5" />
-            </button>
-          )}
-
-          {isChatOpen ? (
-            <div className="flex items-center gap-2.5 min-w-0">
-              {activeContact ? (
-                <>
-                  <div className="relative shrink-0">
-                    <Avatar src={activeContact.avatarUrl} name={activeContact.username} size="sm" />
-                    <StatusDot
-                      status={activeContact.status}
-                      size="sm"
-                      className="absolute bottom-0 right-0"
-                    />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-headline text-body-sm font-bold text-primary truncate">
-                        {activeContact.username}
-                      </span>
-                      {activeContact.teamName && (
-                        <Badge variant="info" className="text-[9px] px-1.5 py-0">
-                          {activeContact.teamName}
-                        </Badge>
-                      )}
-                      <DeviceBadge deviceType={activeContact.deviceType} />
-                    </div>
-                    <div className="text-[10px] text-on-surface-variant/80 flex items-center gap-1">
-                      <Lock className="w-2.5 h-2.5 text-emerald-400 shrink-0" />
-                      <span className="truncate">Ende-zu-Ende verschlüsselt</span>
-                    </div>
-                  </div>
-                </>
-              ) : activeGroup ? (
-                <>
-                  <div className="w-8 h-8 rounded-full bg-primary/15 text-primary flex items-center justify-center font-bold text-xs shrink-0">
-                    {activeGroup.avatar_url ? (
-                      <img src={activeGroup.avatar_url} alt="" className="w-full h-full rounded-full object-cover" />
-                    ) : (
-                      <UsersRound className="w-4 h-4" />
-                    )}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-headline text-body-sm font-bold text-primary truncate">
-                        {activeGroup.name}
-                      </span>
-                      <Badge variant="default" className="text-[9px] px-1.5 py-0">
-                        {activeGroup.member_count} {activeGroup.member_count === 1 ? 'Mitglied' : 'Mitglieder'}
-                      </Badge>
-                    </div>
-                    <div className="text-[10px] text-on-surface-variant/80 flex items-center gap-1">
-                      <Lock className="w-2.5 h-2.5 text-emerald-400 shrink-0" />
-                      <span className="truncate">Gruppen-E2EE verschlüsselt</span>
-                    </div>
-                  </div>
-                </>
-              ) : null}
+      {/* Slim, Compact Header - Only shown in overview mode when no chat is open, maximizing chat space */}
+      {!isChatOpen && (
+        <header className="h-12 shrink-0 border-b border-outline-variant/20 bg-surface-container/70 backdrop-blur px-3 sm:px-4 flex items-center justify-between z-10">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+              <MessageSquare className="w-4 h-4" />
             </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-                <MessageSquare className="w-4 h-4" />
-              </div>
-              <span className="font-headline text-body-md font-bold text-primary">Messenger</span>
-              <span className="text-[11px] text-on-surface-variant/60 hidden sm:inline">• Chats & Gruppen</span>
-            </div>
-          )}
-        </div>
+            <span className="font-headline text-body-md font-bold text-primary">Messenger</span>
+            <span className="text-[11px] text-on-surface-variant/60 hidden sm:inline">• Chats & Gruppen</span>
+          </div>
 
-        {/* Header Right Actions */}
-        <div className="flex items-center gap-1">
-          {activeGroup && (
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => handleCopyInviteLink(activeGroup)}
-                className="h-8 gap-1.5 text-xs px-2.5 text-primary hover:bg-primary/10"
-                title="Einladungslink kopieren"
-              >
-                <Share2 className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Einladen</span>
-              </Button>
-
-              {/* Group Permissions / Roles settings button (Owner or Admin) */}
-              {(activeGroup.owner_user_id === currentUserId || activeGroup.role === 'admin') && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setIsGroupPermissionsOpen(true)}
-                  className="h-8 w-8 text-on-surface-variant hover:text-primary"
-                  title="Gruppenrollen & Rechte verwalten"
-                  aria-label="Gruppenrollen & Rechte verwalten"
-                >
-                  <Shield className="w-4 h-4" />
-                </Button>
-              )}
-
-              {activeGroup.owner_user_id === currentUserId ? (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => handleDeleteGroup(activeGroup)}
-                  className="h-8 w-8 text-on-surface-variant hover:text-error"
-                  title="Gruppe löschen"
-                  aria-label="Gruppe löschen"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </Button>
-              ) : (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => handleLeaveGroup(activeGroup)}
-                  className="h-8 w-8 text-on-surface-variant hover:text-error"
-                  title="Gruppe verlassen"
-                  aria-label="Gruppe verlassen"
-                >
-                  <LogOut className="w-4 h-4" />
-                </Button>
-              )}
-            </>
-          )}
-
-          {activeContact && !activeContact.isFriend && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={async () => {
-                try {
-                  await sendFriendRequest(activeContact.username)
-                  toast.success(`Freundschaftsanfrage an ${activeContact.username} gesendet!`)
-                } catch (err: any) {
-                  toast.error(err?.message || 'Konnte keine Anfrage senden.')
-                }
-              }}
-              className="h-8 gap-1.5 text-xs px-2.5 text-primary hover:bg-primary/10"
-              title="Freundschaftsanfrage senden"
-            >
-              <UserPlus className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Anfrage senden</span>
-            </Button>
-          )}
-
-          {/* Wallpaper Settings Button in Chat View */}
-          {isChatOpen && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setIsWallpaperModalOpen(true)}
-              className="h-8 w-8 text-on-surface-variant hover:text-primary"
-              title="Chat-Hintergrund anpassen"
-              aria-label="Chat-Hintergrund anpassen"
-            >
-              <ImageIcon className="w-4 h-4" />
-            </Button>
-          )}
-
-          {/* Quick Camera Button in Header - only in list view, removed in chat to avoid duplicate */}
-          {!isChatOpen && (
+          <div className="flex items-center gap-1">
             <Button
               variant="ghost"
               size="icon"
@@ -1720,24 +1630,20 @@ export function Messenger() {
             >
               <Camera className="w-4 h-4" />
             </Button>
-          )}
 
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => {
-              loadData()
-              if (isChatOpen) void loadMessages()
-            }}
-            disabled={loadingMessages}
-            className="h-8 w-8 text-on-surface-variant"
-            aria-label="Aktualisieren"
-            title="Aktualisieren"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loadingMessages ? 'animate-spin' : ''}`} />
-          </Button>
-        </div>
-      </header>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => loadData()}
+              className="h-8 w-8 text-on-surface-variant"
+              aria-label="Aktualisieren"
+              title="Aktualisieren"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        </header>
+      )}
 
       {/* Main Split Layout: Left Contact/Group List, Right Chat Area */}
       <div className="flex-1 flex min-h-0 overflow-hidden">
@@ -2543,10 +2449,114 @@ export function Messenger() {
 
           {isChatOpen ? (
             <>
+              {/* Floating Chat Controls (Header-free, maximal chat space) */}
+              <div className="absolute top-2.5 left-3 right-3 z-30 flex items-center justify-between pointer-events-none">
+                <div className="flex items-center gap-2 pointer-events-auto">
+                  {/* Mobile Back Button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveContact(null)
+                      setActiveGroup(null)
+                    }}
+                    className="md:hidden p-2 rounded-full bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant shadow-xs transition-colors"
+                    aria-label="Zurück zur Kontaktliste"
+                    title="Zurück zur Kontaktliste"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-1.5 pointer-events-auto">
+                  {activeGroup && (
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleCopyInviteLink(activeGroup)}
+                        className="h-8 gap-1.5 text-xs px-2.5 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary shadow-xs"
+                        title="Einladungslink kopieren"
+                      >
+                        <Share2 className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Einladen</span>
+                      </Button>
+
+                      {(activeGroup.owner_user_id === currentUserId || activeGroup.role === 'admin') && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setIsGroupPermissionsOpen(true)}
+                          className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-primary shadow-xs"
+                          title="Gruppenrollen & Rechte verwalten"
+                          aria-label="Gruppenrollen & Rechte verwalten"
+                        >
+                          <Shield className="w-4 h-4" />
+                        </Button>
+                      )}
+
+                      {activeGroup.owner_user_id === currentUserId ? (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDeleteGroup(activeGroup)}
+                          className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-error shadow-xs"
+                          title="Gruppe löschen"
+                          aria-label="Gruppe löschen"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleLeaveGroup(activeGroup)}
+                          className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-error shadow-xs"
+                          title="Gruppe verlassen"
+                          aria-label="Gruppe verlassen"
+                        >
+                          <LogOut className="w-4 h-4" />
+                        </Button>
+                      )}
+                    </>
+                  )}
+
+                  {activeContact && !activeContact.isFriend && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={async () => {
+                        try {
+                          await sendFriendRequest(activeContact.username)
+                          toast.success(`Freundschaftsanfrage an ${activeContact.username} gesendet!`)
+                        } catch (err: any) {
+                          toast.error(err?.message || 'Konnte keine Anfrage senden.')
+                        }
+                      }}
+                      className="h-8 gap-1.5 text-xs px-2.5 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary shadow-xs"
+                      title="Freundschaftsanfrage senden"
+                    >
+                      <UserPlus className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Anfrage senden</span>
+                    </Button>
+                  )}
+
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setIsWallpaperModalOpen(true)}
+                    className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-primary shadow-xs"
+                    title="Chat-Hintergrund anpassen"
+                    aria-label="Chat-Hintergrund anpassen"
+                  >
+                    <ImageIcon className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+
               {/* Message Thread Scroll Area */}
               <div
                 ref={scrollContainerRef}
-                className="flex-1 overflow-y-auto p-4 space-y-3 relative z-1"
+                className="flex-1 overflow-y-auto p-4 pt-12 space-y-3 relative z-1"
               >
                 {/* WhatsApp-style encryption notice banner */}
                 <div className="py-1 text-center">
@@ -2885,6 +2895,56 @@ export function Messenger() {
                         </div>
                       )}
 
+                      {/* Quoted Story Reply Preview */}
+                      {!msg.isDeleted && msg.storyReply && (
+                        <div
+                          className={`mb-2 p-2 rounded-xl border flex items-center justify-between gap-2.5 overflow-hidden text-xs select-none transition-all ${
+                            msg.isSelf
+                              ? 'bg-black/25 border-white/20 text-white'
+                              : 'bg-surface-container-highest border-outline-variant/30 text-on-surface'
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1 space-y-0.5">
+                            <div className="flex items-center gap-1.5 text-[10px] font-semibold text-primary">
+                              <Sparkles className="w-3 h-3 text-primary shrink-0" />
+                              <span className="truncate">Status von {msg.storyReply.storyUsername || 'Kontakt'}</span>
+                            </div>
+                            <p className="line-clamp-2 text-[11px] opacity-85 leading-snug">
+                              {msg.storyReply.storyContent || 'Status-Update'}
+                            </p>
+                          </div>
+                          {msg.storyReply.storyMediaUrl ? (
+                            <img
+                              src={msg.storyReply.storyMediaUrl}
+                              alt="Status"
+                              className="w-11 h-11 rounded-lg object-cover shrink-0 border border-white/10"
+                            />
+                          ) : (
+                            <div
+                              className={`w-11 h-11 rounded-lg shrink-0 flex items-center justify-center text-[8px] font-bold text-white shadow-xs ${
+                                STORY_GRADIENTS[msg.storyReply.storyBackground || 'gradient-1']?.class || 'bg-slate-800'
+                              }`}
+                            >
+                              Status
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Fallback preview for legacy [Antwort auf Status]: messages */}
+                      {!msg.isDeleted && !msg.storyReply && msg.text.startsWith('[Antwort auf Status]:') && (
+                        <div
+                          className={`mb-1.5 p-1.5 px-2 rounded-lg border flex items-center gap-1.5 overflow-hidden text-[11px] select-none ${
+                            msg.isSelf
+                              ? 'bg-black/25 border-white/20 text-white'
+                              : 'bg-surface-container-highest border-outline-variant/30 text-on-surface'
+                          }`}
+                        >
+                          <Sparkles className="w-3 h-3 text-primary shrink-0" />
+                          <span className="font-semibold text-primary truncate">Antwort auf Status</span>
+                        </div>
+                      )}
+
                       {/* Text content or Deleted indicator */}
                       {msg.isDeleted ? (
                         <div className="flex items-center gap-2 py-0.5 italic opacity-85">
@@ -2894,7 +2954,11 @@ export function Messenger() {
                       ) : (
                         msg.text && (
                           <div className="space-y-1">
-                            <p className="leading-relaxed">{msg.text}</p>
+                            <p className="leading-relaxed">
+                              {msg.text.startsWith('[Antwort auf Status]:')
+                                ? msg.text.replace(/^\[Antwort auf Status\]:\s*"?/, '').replace(/"?$/, '')
+                                : msg.text}
+                            </p>
                             {msg.isEdited && (
                               <span className="text-[9px] opacity-70 italic inline-flex items-center gap-1">
                                 <Pencil className="w-2.5 h-2.5" />
@@ -2964,6 +3028,30 @@ export function Messenger() {
                   </React.Fragment>
                 )
               })}
+                {/* Floating Typing / Audio Recording Activity Indicator */}
+                {partnerActivity && (
+                  <div className="flex items-center gap-2 text-xs py-1.5 px-3 rounded-full bg-surface-container-high/90 border border-outline-variant/30 text-on-surface w-fit shadow-xs animate-in fade-in slide-in-from-bottom-2">
+                    {partnerActivity.status === 'recording' ? (
+                      <>
+                        <Mic className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
+                        <span className="text-[11px] text-rose-400 font-medium">
+                          {activeGroup ? `${partnerActivity.username || 'Jemand'} nimmt Audio auf …` : 'Nimmt eine Sprachnachricht auf …'}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="flex gap-1 items-center px-0.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:-0.3s]" />
+                          <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:-0.15s]" />
+                          <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" />
+                        </span>
+                        <span className="text-[11px] text-primary font-medium">
+                          {activeGroup ? `${partnerActivity.username || 'Jemand'} schreibt …` : 'Schreibt …'}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                )}
                 <div ref={messagesEndRef} />
               </div>
 
@@ -3188,7 +3276,7 @@ export function Messenger() {
 
                       <ChatInputBar
                         value={inputText}
-                        onChange={setInputText}
+                        onChange={handleInputChange}
                         onSubmit={() => {
                           handleSendMessage(
                             inputText,
@@ -3652,13 +3740,22 @@ export function Messenger() {
         stories={activeViewerStories.length > 0 ? activeViewerStories : stories}
         initialIndex={viewerStoryIndex}
         onDeleted={handleStoryDeleted}
-        onReply={(targetUserId, _targetUsername, text) => {
+        onReply={(targetUserId, _targetUsername, text, storyContext: StoryReplyContext) => {
           const contact = contactsList.find((c) => c.userId === targetUserId)
           if (contact) {
             setActiveContact(contact)
             setActiveGroup(null)
             setIsViewerStoryOpen(false)
-            void handleSendMessage(`[Antwort auf Status]: "${text}"`)
+            void handleSendMessage(
+              text,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              storyContext
+            )
           } else {
             toast.error('Kontakt für direkte Antwort nicht gefunden.')
           }

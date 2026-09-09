@@ -237,6 +237,16 @@ export async function fetchE2eeEnvelopes(
   return api<BlindEnvelopeItem[]>(`/social/e2ee/mailbox/${blindMailboxId}${query}`)
 }
 
+export async function sendTypingSignal(payload: {
+  blind_mailbox_id: string
+  status: 'typing' | 'recording' | 'idle'
+}): Promise<{ ok: boolean }> {
+  return api<{ ok: boolean }>('/social/e2ee/typing', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export async function getGroups(): Promise<ChatGroupItem[]> {
   return api<ChatGroupItem[]>('/social/groups')
 }

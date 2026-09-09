@@ -12,6 +12,7 @@ from schemas.social import (
     ActivityPingRequest,
     E2eeBlindEnvelopeCreate,
     E2eeBlindEnvelopeResponse,
+    E2eeTypingSignalCreate,
     E2eePublicKeyResponse,
     E2eePublicKeyUpdate,
     FriendRequestCreate,
@@ -282,6 +283,20 @@ def fetch_blind_mailbox_envelopes(
         }
         for env in envelopes
     ]
+
+
+@router.post("/e2ee/typing", dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
+def send_e2ee_typing_signal(
+    req: E2eeTypingSignalCreate,
+    user: User = Depends(get_current_user),
+) -> dict:
+    SocialService.broadcast_typing_signal(
+        blind_mailbox_id=req.blind_mailbox_id,
+        status=req.status,
+        sender_id=user.id,
+        sender_username=user.username,
+    )
+    return {"ok": True}
 
 
 # --- Chat-Gruppen & Öffentliche Einladungslinks ---
