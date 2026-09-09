@@ -235,9 +235,44 @@ export interface ChatGroupInvitePublic {
   member_count: number
 }
 
+export interface DirectChatItem {
+  id: number
+  other_user_id: number
+  other_username: string
+  other_avatar_url?: string | null
+  blind_mailbox_id: string
+  is_friend: boolean
+  is_blocked?: boolean
+  other_privacy: 'private' | 'friends' | 'public'
+  presence?: PresenceItem | null
+  created_at: string
+  updated_at: string
+}
+
+export async function getDirectChats(): Promise<DirectChatItem[]> {
+  return api<DirectChatItem[]>('/social/direct-chats')
+}
+
+export async function checkCanMessage(targetUserId: number): Promise<{
+  can_message: boolean
+  reason?: string | null
+  blind_mailbox_id?: string | null
+}> {
+  return api<{ can_message: boolean; reason?: string | null; blind_mailbox_id?: string | null }>(
+    `/social/chat/can-message/${targetUserId}`
+  )
+}
+
+export async function startDirectChat(targetUserId: number): Promise<DirectChatItem> {
+  return api<DirectChatItem>(`/social/chat/start/${targetUserId}`, {
+    method: 'POST',
+  })
+}
+
 export async function relayE2eeEnvelope(payload: {
   blind_mailbox_id: string
   ciphertext_envelope: string
+  recipient_id?: number
 }): Promise<BlindEnvelopeItem> {
   return api<BlindEnvelopeItem>('/social/e2ee/relay', {
     method: 'POST',

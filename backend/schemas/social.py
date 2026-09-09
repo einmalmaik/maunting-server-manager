@@ -88,6 +88,7 @@ class PrivacyUpdateRequest(BaseModel):
 class E2eeBlindEnvelopeCreate(BaseModel):
     blind_mailbox_id: str = Field(..., min_length=16, max_length=64)
     ciphertext_envelope: str = Field(..., min_length=10)
+    recipient_id: int | None = None
 
 
 class E2eeBlindEnvelopeResponse(BaseModel):
@@ -100,6 +101,27 @@ class E2eeBlindEnvelopeResponse(BaseModel):
 class E2eeTypingSignalCreate(BaseModel):
     blind_mailbox_id: str = Field(..., min_length=16, max_length=64)
     status: str = Field(..., pattern="^(typing|recording|idle)$")
+    recipient_id: int | None = None
+
+
+class DirectChatResponse(BaseModel):
+    id: int
+    other_user_id: int
+    other_username: str
+    other_avatar_url: str | None = None
+    blind_mailbox_id: str
+    is_friend: bool = False
+    is_blocked: bool = False
+    other_privacy: str = "friends"
+    presence: PresenceInfo | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class CanMessageResponse(BaseModel):
+    can_message: bool
+    reason: str | None = None
+    blind_mailbox_id: str | None = None
 
 
 class E2eePublicKeyUpdate(BaseModel):
@@ -118,6 +140,7 @@ class SocialProfileResponse(BaseModel):
     avatar_url: str | None = None
     privacy: str
     restricted: bool = False
+    is_friend: bool = False
     presence: PresenceInfo | None = None
     stats: UserStatsResponse | None = None
     achievements: list[AchievementResponse] | None = None

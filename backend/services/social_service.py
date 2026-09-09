@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy import or_, and_
 from sqlalchemy.orm import Session
 
+import hashlib
 from models import (
     User,
     UserFriend,
@@ -15,6 +16,7 @@ from models import (
     ChatGroup,
     ChatGroupMember,
     ChatStory,
+    DirectChat,
 )
 from services.panel_settings_service import PanelSettingsService
 from services.sync_event_service import SyncEventService
@@ -364,6 +366,297 @@ class SocialService:
         return results
 
     @classmethod
+    def derive_blind_mailbox_id(cls, user_a_id: int, user_b_id: int, salt: str = "") -> str:
+        """Deterministische Hash-Berechnung der blinden E2EE-Mailbox-ID für zwei Benutzer."""
+        min_id = min(user_a_id, user_b_id)
+        max_id = max(user_a_id, user_b_id)
+        raw = f"msm-e2ee-box:{min_id}:{max_id}:{salt}"
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def can_message_user(cls, db: Session, sender_id: int, target_user_id: int) -> tuple[bool, str | None]:
+        """Prüft Berechtigung zum Senden von Direktnachrichten zwischen zwei Benutzern.
+
+        Regeln:
+        1. Selbstgespräche nicht erlaubt.
+        2. Blockierung verbietet jegliche Kommunikation.
+        3. Existiert bereits ein Chat, darf geantwortet/weitergeschrieben werden (in beide Richtungen).
+        4. Bestätigte Freunde dürfen sich immer schreiben.
+        5. Nicht-Freunde dürfen schreiben, wenn der Empfänger ein öffentliches Profil hat.
+        6. Ansonsten (Empfänger ist 'private' oder 'friends' ohne bestehenden Chat) verboten.
+        """
+        if sender_id == target_user_id:
+            return False, "Selbstgespräche werden nicht unterstützt."
+
+        # Prüfe auf Blockierung
+        blocked = (
+            db.query(UserFriend)
+            .filter(
+                or_(
+                    and_(UserFriend.user_id == sender_id, UserFriend.friend_id == target_user_id),
+                    and_(UserFriend.user_id == target_user_id, UserFriend.friend_id == sender_id),
+                ),
+                UserFriend.status == "blocked",
+            )
+            .first()
+        )
+        if blocked:
+            return False, "Kommunikation nicht möglich: Benutzer ist blockiert."
+
+        # Prüfe ob bereits ein DirectChat existiert (Antwort-Erlaubnis in beide Richtungen)
+        min_id, max_id = min(sender_id, target_user_id), max(sender_id, target_user_id)
+        existing_chat = (
+            db.query(DirectChat)
+            .filter(DirectChat.user_a_id == min_id, DirectChat.user_b_id == max_id)
+            .first()
+        )
+        if existing_chat:
+            return True, None
+
+        # Prüfe auch, ob schon Umschläge in der abgeleiteten Mailbox existieren
+        derived_mid = cls.derive_blind_mailbox_id(sender_id, target_user_id)
+        existing_envelope = (
+            db.query(E2eeBlindEnvelope)
+            .filter(E2eeBlindEnvelope.blind_mailbox_id == derived_mid)
+            .first()
+        )
+        if existing_envelope:
+            return True, None
+
+        # Prüfe ob Freunde
+        if cls.is_confirmed_friend(db, sender_id, target_user_id):
+            return True, None
+
+        # Empfänger laden
+        target = db.query(User).filter_by(id=target_user_id).first()
+        if not target or not target.is_active:
+            return False, "Empfänger nicht gefunden oder inaktiv."
+
+        target_privacy = getattr(target, "social_privacy", "friends")
+        if target_privacy == "public":
+            return True, None
+
+        return False, "Dieser Benutzer nimmt Nachrichten nur von bestätigten Freunden an."
+
+    @classmethod
+    def ensure_direct_chat(cls, db: Session, sender_id: int, target_user_id: int) -> DirectChat:
+        """Stellt sicher, dass ein DirectChat-Eintrag existiert, sofern die Berechtigung vorliegt."""
+        can_msg, reason = cls.can_message_user(db, sender_id, target_user_id)
+        if not can_msg:
+            raise HTTPException(status_code=403, detail=reason or "Keine Berechtigung zum Senden einer Nachricht.")
+
+        min_id, max_id = min(sender_id, target_user_id), max(sender_id, target_user_id)
+        chat = (
+            db.query(DirectChat)
+            .filter(DirectChat.user_a_id == min_id, DirectChat.user_b_id == max_id)
+            .first()
+        )
+        if not chat:
+            blind_mid = cls.derive_blind_mailbox_id(sender_id, target_user_id)
+            chat = DirectChat(
+                user_a_id=min_id,
+                user_b_id=max_id,
+                blind_mailbox_id=blind_mid,
+                initiated_by_user_id=sender_id,
+                created_at=_now(),
+                updated_at=_now(),
+            )
+            try:
+                db.add(chat)
+                db.commit()
+                db.refresh(chat)
+            except Exception:
+                db.rollback()
+                chat = (
+                    db.query(DirectChat)
+                    .filter(DirectChat.user_a_id == min_id, DirectChat.user_b_id == max_id)
+                    .first()
+                )
+                if not chat:
+                    raise
+        else:
+            chat.updated_at = _now()
+            db.commit()
+        return chat
+
+    @classmethod
+    def list_direct_chats(cls, db: Session, user_id: int) -> list[dict[str, Any]]:
+        """Liefert alle aktiven 1:1-Chats des Benutzers samt Präsenz und Freundesstatus."""
+        cls.assert_social_enabled(db)
+        chats = (
+            db.query(DirectChat)
+            .filter(or_(DirectChat.user_a_id == user_id, DirectChat.user_b_id == user_id))
+            .order_by(DirectChat.updated_at.desc())
+            .all()
+        )
+        if not chats:
+            return []
+
+        other_ids = [c.get_other_user_id(user_id) for c in chats]
+        users = {u.id: u for u in db.query(User).filter(User.id.in_(other_ids)).all()}
+
+        blocked_rels = (
+            db.query(UserFriend)
+            .filter(
+                or_(UserFriend.user_id == user_id, UserFriend.friend_id == user_id),
+                UserFriend.status == "blocked",
+            )
+            .all()
+        )
+        blocked_user_ids = {r.friend_id if r.user_id == user_id else r.user_id for r in blocked_rels}
+
+        results = []
+        for c in chats:
+            oid = c.get_other_user_id(user_id)
+            other = users.get(oid)
+            if not other or not other.is_active:
+                continue
+
+            is_friend = cls.is_confirmed_friend(db, user_id, oid)
+            is_blocked = oid in blocked_user_ids
+            pres = cls.get_presence_for_viewer(db, user_id, other)
+
+            results.append({
+                "id": c.id,
+                "other_user_id": other.id,
+                "other_username": other.username,
+                "other_avatar_url": other.avatar_url,
+                "blind_mailbox_id": c.blind_mailbox_id,
+                "is_friend": is_friend,
+                "is_blocked": is_blocked,
+                "other_privacy": getattr(other, "social_privacy", "friends"),
+                "presence": pres,
+                "created_at": c.created_at,
+                "updated_at": c.updated_at,
+            })
+        return results
+
+    @classmethod
+    def get_presence(cls, db: Session, user_id: int) -> dict[str, Any]:
+        pres = db.query(UserPresence).filter_by(user_id=user_id).first()
+        if not pres:
+            return {
+                "status": "offline",
+                "device_type": "web",
+                "custom_status": None,
+                "activity_label": None,
+                "activity_detail": None,
+                "updated_at": None,
+            }
+
+        raw_status = pres.status
+        if raw_status not in ("offline", "invisible"):
+            if not pres.updated_at:
+                raw_status = "offline"
+            else:
+                updated_dt = pres.updated_at if pres.updated_at.tzinfo else pres.updated_at.replace(tzinfo=timezone.utc)
+                if (_now() - updated_dt).total_seconds() > 120:
+                    raw_status = "offline"
+
+        return {
+            "status": raw_status,
+            "device_type": pres.device_type,
+            "custom_status": pres.custom_status,
+            "activity_label": pres.activity_label,
+            "activity_detail": pres.activity_detail,
+            "updated_at": pres.updated_at,
+        }
+
+    @classmethod
+    def get_presence_for_viewer(
+        cls, db: Session, viewer_user_id: int | None, target_user: User | int
+    ) -> dict[str, Any] | None:
+        """Ermittelt den Präsenzstatus unter strikter Einhaltung der 3-Stufen- und Maskierungsregeln:
+        - Unsichtbar: Unabhängig von Öffentlich/Freunde/Privat komplett als 'offline' maskiert (keine Aktivitäten).
+        - Öffentlich: Jeder sieht Online-Status und Aktivitäten.
+        - Freunde: Nur bestätigte Freunde sehen Details wie Stories und Aktivitäten. Für Fremde komplett verborgen.
+        - Privat: Nutzer wird als 'Online' angezeigt (falls nicht unsichtbar), aber Aktivitäten
+          und Profilinhalte sind für Nicht-Freunde strikt verborgen (nur reiner Online-Indikator).
+        """
+        if isinstance(target_user, int):
+            user = db.query(User).filter_by(id=target_user).first()
+            if not user:
+                return {
+                    "status": "offline",
+                    "device_type": "web",
+                    "custom_status": None,
+                    "activity_label": None,
+                    "activity_detail": None,
+                    "updated_at": None,
+                }
+        else:
+            user = target_user
+
+        pres = cls.get_presence(db, user.id)
+        is_self = viewer_user_id is not None and viewer_user_id == user.id
+        raw_status = pres["status"]
+
+        # 1. Unsichtbar-Modus: Unabhängig von Öffentlich/Freunde/Privat komplett als Offline maskieren
+        if raw_status == "invisible":
+            if is_self:
+                return pres
+            return {
+                "status": "offline",
+                "device_type": "web",
+                "custom_status": None,
+                "activity_label": None,
+                "activity_detail": None,
+                "updated_at": None,
+            }
+
+        if is_self:
+            return pres
+
+        # Blockierte Benutzer sehen niemals Präsenz- oder Statusdaten
+        if viewer_user_id and viewer_user_id != user.id:
+            blocked = (
+                db.query(UserFriend)
+                .filter(
+                    or_(
+                        and_(UserFriend.user_id == viewer_user_id, UserFriend.friend_id == user.id),
+                        and_(UserFriend.user_id == user.id, UserFriend.friend_id == viewer_user_id),
+                    ),
+                    UserFriend.status == "blocked",
+                )
+                .first()
+            )
+            if blocked:
+                return None
+
+        privacy = getattr(user, "social_privacy", "friends")
+        is_friend = cls.is_confirmed_friend(db, viewer_user_id, user.id) if viewer_user_id else False
+
+        # 2. Öffentlich: Jeder sieht den Online-Status und aktuelle Aktivitäten
+        if privacy == "public":
+            return pres
+
+        # 3. Freunde: Nur bestätigte Freunde sehen Details wie Stories und Aktivitäten.
+        # Für Fremde wird dies komplett ausgeblendet.
+        if privacy == "friends":
+            if is_friend:
+                return pres
+            # Für Fremde komplett ausgeblendet
+            return None
+
+        # 4. Privat: Der Nutzer wird zwar als "Online" angezeigt (sofern nicht unsichtbar),
+        # aber Details wie Stories, Profilinhalte und aktuelle Aktivitäten ("was der User macht")
+        # sind für alle Nicht-Freunde strikt verborgen. Man sieht lediglich den reinen Online-Indikator, mehr nicht.
+        if privacy == "private":
+            if is_friend:
+                return pres
+            # Reiner Online-Indikator für Nicht-Freunde (keine Aktivitäten, kein custom_status)
+            return {
+                "status": raw_status,
+                "device_type": "web",
+                "custom_status": None,
+                "activity_label": None,
+                "activity_detail": None,
+                "updated_at": None,
+            }
+
+        return None
+
+    @classmethod
     def update_presence(cls, db: Session, user_id: int, data: dict[str, Any]) -> dict[str, Any]:
         """Aktualisiert Online-Status, Gerätetyp und Rich Presence des Nutzers."""
         status = data.get("status", "online")
@@ -395,55 +688,52 @@ class SocialService:
 
         db.commit()
 
-        # Freunde über Statusänderung per SSE informieren (falls nicht unsichtbar)
-        friends = cls.get_friends(db, user_id)
-        presence_payload = {
-            "type": "friend_presence_updated",
-            "friend_id": user_id,
-            "presence": {
-                "status": "offline" if status == "invisible" else status,
-                "device_type": pres.device_type,
-                "custom_status": custom_status,
-                "activity_label": activity_label,
-                "activity_detail": activity_detail,
-                "updated_at": pres.updated_at.isoformat(),
-            },
-        }
-        for f in friends:
-            SyncEventService.publish(presence_payload, user_id=f["user_id"])
+        # Rezipienten ermitteln: Freunde, Chat-Partner und alle aktiven SSE/WS-Abonnenten
+        subscriber_user_ids = {sub.user_id for sub in SyncEventService._subscribers.values()}
+
+        friend_rels = (
+            db.query(UserFriend)
+            .filter(
+                or_(UserFriend.user_id == user_id, UserFriend.friend_id == user_id),
+                UserFriend.status == "accepted",
+            )
+            .all()
+        )
+        relevant_viewer_ids = {r.friend_id if r.user_id == user_id else r.user_id for r in friend_rels}
+
+        direct_chats = (
+            db.query(DirectChat)
+            .filter(or_(DirectChat.user_a_id == user_id, DirectChat.user_b_id == user_id))
+            .all()
+        )
+        for dc in direct_chats:
+            relevant_viewer_ids.add(dc.get_other_user_id(user_id))
+
+        user_obj = db.query(User).filter_by(id=user_id).first()
+        if user_obj and getattr(user_obj, "social_privacy", "friends") == "public":
+            relevant_viewer_ids |= subscriber_user_ids
+
+        # Für jeden relevanten Betrachter serverseitig gefiltertes Event publizieren
+        for viewer_id in relevant_viewer_ids:
+            if viewer_id == user_id:
+                continue
+            pres_for_viewer = cls.get_presence_for_viewer(db, viewer_id, user_obj or user_id)
+            if pres_for_viewer is not None:
+                pres_payload = dict(pres_for_viewer)
+                if pres_payload.get("updated_at") and hasattr(pres_payload["updated_at"], "isoformat"):
+                    pres_payload["updated_at"] = pres_payload["updated_at"].isoformat()
+                SyncEventService.publish(
+                    {
+                        "type": "friend_presence_updated",
+                        "friend_id": user_id,
+                        "user_id": user_id,
+                        "presence": pres_payload,
+                    },
+                    user_id=viewer_id,
+                )
 
         return {
             "status": pres.status,
-            "device_type": pres.device_type,
-            "custom_status": pres.custom_status,
-            "activity_label": pres.activity_label,
-            "activity_detail": pres.activity_detail,
-            "updated_at": pres.updated_at,
-        }
-
-    @classmethod
-    def get_presence(cls, db: Session, user_id: int) -> dict[str, Any]:
-        pres = db.query(UserPresence).filter_by(user_id=user_id).first()
-        if not pres:
-            return {
-                "status": "offline",
-                "device_type": "web",
-                "custom_status": None,
-                "activity_label": None,
-                "activity_detail": None,
-                "updated_at": None,
-            }
-        status = pres.status
-        if status not in ("offline", "invisible"):
-            if not pres.updated_at:
-                status = "offline"
-            else:
-                updated_dt = pres.updated_at if pres.updated_at.tzinfo else pres.updated_at.replace(tzinfo=timezone.utc)
-                if (_now() - updated_dt).total_seconds() > 120:
-                    status = "offline"
-
-        return {
-            "status": status,
             "device_type": pres.device_type,
             "custom_status": pres.custom_status,
             "activity_label": pres.activity_label,
@@ -470,12 +760,39 @@ class SocialService:
         """Liefert das Benutzerprofil unter Berücksichtigung des 3-Stufen-Modells."""
         is_self = viewer_user_id is not None and viewer_user_id == target_user.id
         privacy = getattr(target_user, "social_privacy", "friends")
+        is_friend = cls.is_confirmed_friend(db, viewer_user_id, target_user.id) if viewer_user_id else False
+
+        # Blockierung prüfen
+        if viewer_user_id and viewer_user_id != target_user.id:
+            blocked = (
+                db.query(UserFriend)
+                .filter(
+                    or_(
+                        and_(UserFriend.user_id == viewer_user_id, UserFriend.friend_id == target_user.id),
+                        and_(UserFriend.user_id == target_user.id, UserFriend.friend_id == viewer_user_id),
+                    ),
+                    UserFriend.status == "blocked",
+                )
+                .first()
+            )
+            if blocked:
+                return {
+                    "user_id": target_user.id,
+                    "username": target_user.username,
+                    "avatar_url": None,
+                    "privacy": privacy,
+                    "restricted": True,
+                    "is_friend": False,
+                    "presence": None,
+                    "stats": None,
+                    "achievements": None,
+                }
 
         allowed = False
         if is_self or privacy == "public":
             allowed = True
         elif privacy == "friends" and viewer_user_id:
-            allowed = cls.is_confirmed_friend(db, viewer_user_id, target_user.id)
+            allowed = is_friend
 
         if not allowed:
             return {
@@ -484,15 +801,13 @@ class SocialService:
                 "avatar_url": target_user.avatar_url,
                 "privacy": privacy,
                 "restricted": True,
+                "is_friend": is_friend,
                 "presence": None,
                 "stats": None,
                 "achievements": None,
             }
 
-        pres_data = cls.get_presence(db, target_user.id)
-        if pres_data["status"] == "invisible" and not is_self:
-            pres_data["status"] = "offline"
-
+        pres_data = cls.get_presence_for_viewer(db, viewer_user_id, target_user)
         stats = AchievementService.get_user_stats(db, target_user.id)
         achievements = AchievementService.get_user_achievements(db, target_user.id)
 
@@ -502,6 +817,7 @@ class SocialService:
             "avatar_url": target_user.avatar_url,
             "privacy": privacy,
             "restricted": False,
+            "is_friend": is_friend,
             "presence": pres_data,
             "stats": stats,
             "achievements": achievements,
@@ -516,13 +832,27 @@ class SocialService:
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        """Ermittelt alle aktiven Benutzer mit öffentlichem Profil ('public') für die Discovery."""
+        """Ermittelt alle aktiven Benutzer mit öffentlichem Profil ('public') für die Discovery.
+
+        Zwingend auf DB-/Query-Ebene: Profile mit 'friends' oder 'private' tauchen NIEMALS auf.
+        """
         query = db.query(User).filter(
             User.is_active == True,
             User.social_privacy == "public",
         )
         if viewer_user_id:
             query = query.filter(User.id != viewer_user_id)
+            blocked_rels = (
+                db.query(UserFriend)
+                .filter(
+                    or_(UserFriend.user_id == viewer_user_id, UserFriend.friend_id == viewer_user_id),
+                    UserFriend.status == "blocked",
+                )
+                .all()
+            )
+            blocked_ids = {r.friend_id if r.user_id == viewer_user_id else r.user_id for r in blocked_rels}
+            if blocked_ids:
+                query = query.filter(User.id.notin_(blocked_ids))
 
         if search and search.strip():
             term = f"%{search.strip()}%"
@@ -558,17 +888,55 @@ class SocialService:
         blind_mailbox_id: str,
         ciphertext_envelope: str,
         sender_user_id: int | None = None,
+        recipient_id: int | None = None,
     ) -> E2eeBlindEnvelope:
-        """Speichert einen blinden E2EE-Umschlag ohne jegliche Nutzerverknüpfung.
-
-        Zero-Knowledge-Invariante: Der Server lernt weder Absender, Empfänger,
-        noch Gruppenzugehörigkeit. Die Benachrichtigung erfolgt als blinder
-        Broadcast an alle verbundenen Sessions — jeder Client filtert selbst.
-        sender_user_id wird im SSE-Event mitgeliefert, damit der sendende Client
-        keine Benachrichtigung über seine eigene Nachricht auslöst.
-        """
+        """Speichert einen blinden E2EE-Umschlag mit serverseitiger Berechtigungsprüfung."""
         clean_mailbox = blind_mailbox_id.strip()
         clean_envelope = ciphertext_envelope.strip()
+        target_recipient_id: int | None = None
+
+        if sender_user_id:
+            cls.assert_social_enabled(db)
+            if recipient_id:
+                expected_mailbox = cls.derive_blind_mailbox_id(sender_user_id, recipient_id)
+                if clean_mailbox != expected_mailbox:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Mailbox-ID stimmt nicht mit dem angegebenen Empfänger überein.",
+                    )
+                cls.ensure_direct_chat(db, sender_user_id, recipient_id)
+                target_recipient_id = recipient_id
+            else:
+                chat = db.query(DirectChat).filter_by(blind_mailbox_id=clean_mailbox).first()
+                if chat:
+                    if sender_user_id not in (chat.user_a_id, chat.user_b_id):
+                        raise HTTPException(status_code=403, detail="Keine Berechtigung für diesen Chat.")
+                    blocked = (
+                        db.query(UserFriend)
+                        .filter(
+                            or_(
+                                and_(UserFriend.user_id == chat.user_a_id, UserFriend.friend_id == chat.user_b_id),
+                                and_(UserFriend.user_id == chat.user_b_id, UserFriend.friend_id == chat.user_a_id),
+                            ),
+                            UserFriend.status == "blocked",
+                        )
+                        .first()
+                    )
+                    if blocked:
+                        raise HTTPException(status_code=403, detail="Benutzer ist blockiert.")
+                    chat.updated_at = _now()
+                    db.commit()
+                    target_recipient_id = chat.get_other_user_id(sender_user_id)
+                else:
+                    candidates = db.query(User.id).filter(User.is_active == True, User.id != sender_user_id).all()
+                    found_target = None
+                    for (cand_id,) in candidates:
+                        if cls.derive_blind_mailbox_id(sender_user_id, cand_id) == clean_mailbox:
+                            found_target = cand_id
+                            break
+                    if found_target:
+                        cls.ensure_direct_chat(db, sender_user_id, found_target)
+                        target_recipient_id = found_target
 
         envelope = E2eeBlindEnvelope(
             blind_mailbox_id=clean_mailbox,
@@ -578,16 +946,19 @@ class SocialService:
         db.add(envelope)
         db.commit()
 
-        # Zero-Knowledge Broadcast: Nachricht an alle verbundenen Sessions senden.
-        # Jeder Client prüft selbst, ob die blind_mailbox_id für ihn relevant ist.
-        # publish() ohne user_id/team_id = systemweiter Broadcast an alle SSE-Clients.
-        SyncEventService.publish({
+        msg_payload = {
             "type": "e2ee_blind_message",
             "blind_mailbox_id": clean_mailbox,
             "id": envelope.id,
             "created_at": envelope.created_at.isoformat(),
             "sender_user_id": sender_user_id,
-        })
+        }
+
+        if target_recipient_id and sender_user_id:
+            SyncEventService.publish(msg_payload, user_id=target_recipient_id)
+            SyncEventService.publish(msg_payload, user_id=sender_user_id)
+        else:
+            SyncEventService.publish(msg_payload)
 
         return envelope
 
@@ -610,16 +981,46 @@ class SocialService:
         status: str,
         sender_id: int,
         sender_username: str,
+        db: Session | None = None,
+        recipient_id: int | None = None,
     ) -> None:
         """Verteilt ein flüchtiges Tipp- oder Sprachaufnahme-Signal ohne Speicherung."""
         clean_mailbox = blind_mailbox_id.strip()
-        SyncEventService.publish({
+
+        target_recipient_id: int | None = recipient_id
+        if db:
+            if not target_recipient_id:
+                chat = db.query(DirectChat).filter_by(blind_mailbox_id=clean_mailbox).first()
+                if chat and sender_id in (chat.user_a_id, chat.user_b_id):
+                    target_recipient_id = chat.get_other_user_id(sender_id)
+
+            if target_recipient_id:
+                blocked = (
+                    db.query(UserFriend)
+                    .filter(
+                        or_(
+                            and_(UserFriend.user_id == sender_id, UserFriend.friend_id == target_recipient_id),
+                            and_(UserFriend.user_id == target_recipient_id, UserFriend.friend_id == sender_id),
+                        ),
+                        UserFriend.status == "blocked",
+                    )
+                    .first()
+                )
+                if blocked:
+                    return
+
+        payload = {
             "type": "e2ee_typing_signal",
             "blind_mailbox_id": clean_mailbox,
             "status": status,
             "sender_id": sender_id,
             "sender_username": sender_username,
-        })
+        }
+
+        if target_recipient_id:
+            SyncEventService.publish(payload, user_id=target_recipient_id)
+        else:
+            SyncEventService.publish(payload)
 
     # --- Chat-Gruppen & Öffentliche Einladungslinks ---
 
@@ -1006,16 +1407,33 @@ class SocialService:
         for f in friends:
             friend_ids.add(f.friend_id if f.user_id == user_id else f.user_id)
 
-        stories = (
-            db.query(ChatStory, User.username, User.avatar_url)
-            .join(User, User.id == ChatStory.user_id)
+        # Blockierte Benutzer ermitteln
+        blocked_rels = (
+            db.query(UserFriend)
             .filter(
-                ChatStory.user_id.in_(friend_ids),
-                ChatStory.expires_at > now,
+                or_(UserFriend.user_id == user_id, UserFriend.friend_id == user_id),
+                UserFriend.status == "blocked",
             )
-            .order_by(ChatStory.created_at.desc())
             .all()
         )
+        blocked_ids = {r.friend_id if r.user_id == user_id else r.user_id for r in blocked_rels}
+
+        # Sichtbar: Eigene Stories + Stories von bestätigten Freunden + Stories von Profilen mit "public"
+        stories_query = (
+            db.query(ChatStory, User.username, User.avatar_url, User.social_privacy)
+            .join(User, User.id == ChatStory.user_id)
+            .filter(
+                ChatStory.expires_at > now,
+                or_(
+                    ChatStory.user_id.in_(friend_ids),
+                    User.social_privacy == "public",
+                ),
+            )
+        )
+        if blocked_ids:
+            stories_query = stories_query.filter(ChatStory.user_id.notin_(blocked_ids))
+
+        stories = stories_query.order_by(ChatStory.created_at.desc()).all()
 
         return [
             {
@@ -1030,7 +1448,7 @@ class SocialService:
                 "expires_at": s.expires_at,
                 "is_self": s.user_id == user_id,
             }
-            for s, uname, uavatar in stories
+            for s, uname, uavatar, _ in stories
         ]
 
     @classmethod
@@ -1043,4 +1461,3 @@ class SocialService:
             raise HTTPException(status_code=403, detail="Keine Berechtigung zum Löschen dieser Story.")
         db.delete(story)
         db.commit()
-

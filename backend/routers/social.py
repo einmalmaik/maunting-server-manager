@@ -1,10 +1,11 @@
-from __future__ import annotations
-
-from fastapi import APIRouter, Depends, HTTPException, Query
+import asyncio
+import logging
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket
+from starlette.websockets import WebSocketDisconnect
 from sqlalchemy.orm import Session
 
 from database import get_db
-from dependencies import get_current_user, get_optional_user, verify_csrf
+from dependencies import get_current_user, get_optional_user, verify_csrf, get_current_user_for_ws, ws_subprotokoll
 from models import User
 from schemas.social import (
     AchievementResponse,
@@ -30,9 +31,14 @@ from schemas.social import (
     ChatGroupInvitePublicResponse,
     ChatStoryCreate,
     ChatStoryResponse,
+    DirectChatResponse,
+    CanMessageResponse,
 )
 from services.achievement_service import AchievementService
 from services.social_service import SocialService
+from services.sync_event_service import SyncEventService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/social", tags=["social"])
 
@@ -282,12 +288,68 @@ def relay_e2ee_message(
         blind_mailbox_id=req.blind_mailbox_id,
         ciphertext_envelope=req.ciphertext_envelope,
         sender_user_id=current_user.id,
+        recipient_id=req.recipient_id,
     )
     return {
         "id": envelope.id,
         "blind_mailbox_id": envelope.blind_mailbox_id,
         "ciphertext_envelope": envelope.ciphertext_envelope,
         "created_at": envelope.created_at,
+    }
+
+
+# --- Direkte Chats (1:1 Unterhaltungen & Berechtigungsprüfung) ---
+
+@router.get("/chats", response_model=list[DirectChatResponse], dependencies=[Depends(_check_social_enabled)])
+@router.get("/direct-chats", response_model=list[DirectChatResponse], dependencies=[Depends(_check_social_enabled)])
+def list_my_direct_chats(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[dict]:
+    """Liefert alle aktiven 1:1-Chats des authentifizierten Benutzers."""
+    return SocialService.list_direct_chats(db, user.id)
+
+
+@router.get("/chat/can-message/{target_user_id}", response_model=CanMessageResponse, dependencies=[Depends(_check_social_enabled)])
+def check_can_message_user(
+    target_user_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Prüft, ob der angemeldete Nutzer den Zielnutzer direkt anschreiben darf."""
+    can_msg, reason = SocialService.can_message_user(db, user.id, target_user_id)
+    mid = SocialService.derive_blind_mailbox_id(user.id, target_user_id) if can_msg else None
+    return {
+        "can_message": can_msg,
+        "reason": reason,
+        "blind_mailbox_id": mid,
+    }
+
+
+@router.post("/chat/start/{target_user_id}", response_model=DirectChatResponse, dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
+def start_or_get_direct_chat(
+    target_user_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Initiiert oder holt einen direkten Chatkanal mit dem Zielnutzer."""
+    chat = SocialService.ensure_direct_chat(db, user.id, target_user_id)
+    other = db.query(User).filter_by(id=target_user_id).first()
+    if not other:
+        raise HTTPException(status_code=404, detail="Zielnutzer nicht gefunden")
+    is_friend = SocialService.is_confirmed_friend(db, user.id, target_user_id)
+    pres = SocialService.get_presence_for_viewer(db, user.id, other)
+    return {
+        "id": chat.id,
+        "other_user_id": other.id,
+        "other_username": other.username,
+        "other_avatar_url": other.avatar_url,
+        "blind_mailbox_id": chat.blind_mailbox_id,
+        "is_friend": is_friend,
+        "other_privacy": getattr(other, "social_privacy", "friends"),
+        "presence": pres,
+        "created_at": chat.created_at,
+        "updated_at": chat.updated_at,
     }
 
 
@@ -317,6 +379,7 @@ def fetch_blind_mailbox_envelopes(
 @router.post("/e2ee/typing", dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
 def send_e2ee_typing_signal(
     req: E2eeTypingSignalCreate,
+    db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
     SocialService.broadcast_typing_signal(
@@ -324,6 +387,8 @@ def send_e2ee_typing_signal(
         status=req.status,
         sender_id=user.id,
         sender_username=user.username,
+        db=db,
+        recipient_id=req.recipient_id,
     )
     return {"ok": True}
 
@@ -558,4 +623,74 @@ def delete_story(
 ) -> dict:
     SocialService.delete_story(db, user, story_id)
     return {"success": True, "message": "Story gelöscht"}
+
+
+# --- WebSocket Handler für Echtzeit-Präsenz und Messaging ---
+
+@router.websocket("/ws")
+async def social_websocket(
+    websocket: WebSocket,
+    db: Session = Depends(get_db),
+) -> None:
+    """Echtzeit-WebSocket für Social Presence, Messaging und Live-Benachrichtigungen."""
+    user = None
+    try:
+        user = get_current_user_for_ws(websocket, db)
+    except Exception:
+        await websocket.close(code=1008)
+        return
+
+    subprotocol = ws_subprotokoll(websocket)
+    await websocket.accept(subprotocol=subprotocol)
+
+    conn_id, queue = SyncEventService.subscribe(user_id=user.id)
+
+    async def _send_loop():
+        try:
+            while True:
+                event = await queue.get()
+                await websocket.send_json(event)
+        except Exception:
+            pass
+
+    send_task = asyncio.create_task(_send_loop())
+
+    try:
+        while True:
+            data = await websocket.receive_json()
+            msg_type = data.get("type")
+            if msg_type == "ping":
+                await websocket.send_json({"type": "pong"})
+            elif msg_type == "presence":
+                SocialService.update_presence(db, user.id, data)
+            elif msg_type == "typing":
+                blind_mailbox_id = data.get("blind_mailbox_id", "")
+                status = data.get("status", "idle")
+                recipient_id = data.get("recipient_id")
+                SocialService.broadcast_typing_signal(
+                    blind_mailbox_id=blind_mailbox_id,
+                    status=status,
+                    sender_id=user.id,
+                    sender_username=user.username,
+                    db=db,
+                    recipient_id=recipient_id,
+                )
+            elif msg_type == "relay":
+                blind_mailbox_id = data.get("blind_mailbox_id", "")
+                ciphertext_envelope = data.get("ciphertext_envelope", "")
+                recipient_id = data.get("recipient_id")
+                SocialService.relay_blind_envelope(
+                    db,
+                    blind_mailbox_id=blind_mailbox_id,
+                    ciphertext_envelope=ciphertext_envelope,
+                    sender_user_id=user.id,
+                    recipient_id=recipient_id,
+                )
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.debug("Social WebSocket getrennt: %s", e)
+    finally:
+        send_task.cancel()
+        SyncEventService.unsubscribe(conn_id)
 

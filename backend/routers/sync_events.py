@@ -11,12 +11,13 @@ import json
 import logging
 from typing import AsyncIterator
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, WebSocket
 from fastapi.responses import StreamingResponse
+from starlette.websockets import WebSocketDisconnect
 from sqlalchemy.orm import Session
 
 from database import get_db
-from dependencies import get_current_user
+from dependencies import get_current_user, get_current_user_for_ws, ws_subprotokoll
 from models.user import User
 from services import team_service
 from services.sync_event_service import SyncEventService
@@ -104,3 +105,62 @@ async def sync_events_alias(
 ) -> StreamingResponse:
     """Alias für den SSE-Live-Event-Kanal."""
     return await live_events(request=request, db=db, user=user)
+
+
+@router.websocket("/ws")
+@router.websocket("/live/ws")
+@sync_alias_router.websocket("/ws")
+@sync_alias_router.websocket("/events/ws")
+async def sync_events_ws(
+    websocket: WebSocket,
+    db: Session = Depends(get_db),
+) -> None:
+    """WebSocket-Endpunkt für autorisierte Live-Synchronisation."""
+    try:
+        user = get_current_user_for_ws(websocket, db)
+    except Exception:
+        await websocket.close(code=1008)
+        return
+
+    subprotocol = ws_subprotokoll(websocket)
+    await websocket.accept(subprotocol=subprotocol)
+
+    user_teams = team_service.list_user_teams(db, user)
+    team_ids = [t.id for t in user_teams]
+    is_admin = bool(user.is_owner)
+
+    conn_id, queue = SyncEventService.subscribe(
+        user_id=user.id,
+        team_ids=team_ids,
+        is_admin=is_admin,
+    )
+
+    async def _send_loop():
+        try:
+            while True:
+                event = await queue.get()
+                await websocket.send_json(event)
+        except Exception:
+            pass
+
+    send_task = asyncio.create_task(_send_loop())
+
+    try:
+        # Initial Ready Signal
+        await websocket.send_json({
+            "type": "ready",
+            "status": "connected",
+            "user_id": user.id,
+            "conn_id": conn_id,
+        })
+        while True:
+            data = await websocket.receive_json()
+            if data.get("type") == "ping":
+                await websocket.send_json({"type": "pong"})
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        _log.debug("Sync WebSocket getrennt für %s: %s", conn_id, e)
+    finally:
+        send_task.cancel()
+        SyncEventService.unsubscribe(conn_id)

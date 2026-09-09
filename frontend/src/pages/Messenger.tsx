@@ -61,8 +61,10 @@ import {
   type ChatGroupItem,
   type ChatStoryItem,
   type PublicProfileResponse,
+  type DirectChatItem,
   getFriends,
   getGroups,
+  getDirectChats,
   createGroup,
   joinGroupByInvite,
   sendFriendRequest,
@@ -310,6 +312,7 @@ export function Messenger() {
   const [groups, setGroups] = useState<ChatGroupItem[]>(initialCache.groups)
   const [teamMembers, setTeamMembers] = useState<Array<{ member: TeamMember; teamName: string }>>(initialCache.teamMembers)
   const [publicUsers, setPublicUsers] = useState<PublicProfileResponse[]>(initialCache.publicUsers)
+  const [directChats, setDirectChats] = useState<DirectChatItem[]>([])
   const [stories, setStories] = useState<ChatStoryItem[]>(initialCache.stories)
 
   // Notification & Mute/Block Store
@@ -525,20 +528,22 @@ export function Messenger() {
     }
   }, [currentUserId])
 
-  // 2. Load Friends, Groups, Team Members, Public Users, and Stories
+  // 2. Load Friends, Groups, Team Members, Public Users, Direct Chats, and Stories
   const loadData = async () => {
     try {
-      const [friendsData, groupsData, teamsData, storiesData, publicData] = await Promise.all([
+      const [friendsData, groupsData, teamsData, storiesData, publicData, directChatsData] = await Promise.all([
         getFriends().catch(() => []),
         getGroups().catch(() => []),
         teamsApi.list().catch(() => []),
         getStories().catch(() => []),
         getPublicProfiles().catch(() => []),
+        getDirectChats().catch(() => []),
       ])
       setFriends(friendsData)
       setGroups(groupsData)
       setStories(storiesData)
       setPublicUsers(publicData)
+      setDirectChats(directChatsData)
 
       const teamDetails = await Promise.all(
         teamsData.map(async (t) => {
@@ -666,6 +671,24 @@ export function Messenger() {
       }
     }
 
+    for (const dc of directChats) {
+      if (!seenUserIds.has(dc.other_user_id)) {
+        seenUserIds.add(dc.other_user_id)
+        list.push({
+          id: dc.other_user_id,
+          userId: dc.other_user_id,
+          username: dc.other_username,
+          avatarUrl: dc.other_avatar_url || null,
+          status: (dc.presence?.status as PresenceStatus) || 'invisible',
+          deviceType: dc.presence?.device_type,
+          activityLabel: dc.presence?.activity_label,
+          isFriend: dc.is_friend,
+          teamName: null,
+          isPublicUser: dc.other_privacy === 'public',
+        })
+      }
+    }
+
     for (const p of publicUsers) {
       if (!seenUserIds.has(p.user_id)) {
         seenUserIds.add(p.user_id)
@@ -673,7 +696,7 @@ export function Messenger() {
           id: p.user_id,
           userId: p.user_id,
           username: p.username,
-          avatarUrl: null,
+          avatarUrl: p.avatar_url || null,
           status: (p.presence?.status as PresenceStatus) || 'invisible',
           deviceType: p.presence?.device_type,
           activityLabel: p.presence?.activity_label,
@@ -681,6 +704,12 @@ export function Messenger() {
           teamName: null,
           isPublicUser: true,
         })
+      } else {
+        const existing = list.find((c) => c.userId === p.user_id)
+        if (existing) {
+          existing.isPublicUser = true
+          if (p.avatar_url && !existing.avatarUrl) existing.avatarUrl = p.avatar_url
+        }
       }
     }
 
@@ -690,7 +719,7 @@ export function Messenger() {
       if (diff !== 0) return diff
       return a.username.localeCompare(b.username)
     })
-  }, [friends, teamMembers, publicUsers])
+  }, [friends, teamMembers, publicUsers, directChats])
 
   const filteredContacts = useMemo(() => {
     return contactsList.filter((c) => {
@@ -908,6 +937,7 @@ export function Messenger() {
         await relayE2eeEnvelope({
           blind_mailbox_id: blindMailboxId,
           ciphertext_envelope: ciphertext,
+          recipient_id: targetUserId,
         })
       }
     } catch {
@@ -1367,6 +1397,7 @@ export function Messenger() {
         await relayE2eeEnvelope({
           blind_mailbox_id: blindMailboxId,
           ciphertext_envelope: ciphertext,
+          recipient_id: targetUserId,
         })
       }
 
@@ -2001,10 +2032,11 @@ export function Messenger() {
                       ? 'bg-primary text-on-primary shadow-xs'
                       : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
                   }`}
-                  title={`Öffentlich (${contactsList.filter((c) => c.isPublicUser).length})`}
-                  aria-label={`Öffentlich (${contactsList.filter((c) => c.isPublicUser).length})`}
+                  title={`Entdecken (${contactsList.filter((c) => c.isPublicUser).length})`}
+                  aria-label={`Entdecken (${contactsList.filter((c) => c.isPublicUser).length})`}
                 >
                   <Globe className="w-3.5 h-3.5 shrink-0" />
+                  <span className="text-[10px] leading-none hidden xs:inline">Entdecken</span>
                   {contactsList.some((c) => c.isPublicUser) && (
                     <span
                       className={`text-[9px] px-1 py-0.2 rounded-full font-bold leading-none ${
@@ -2249,7 +2281,7 @@ export function Messenger() {
                                   <span>E2EE Chat bereit</span>
                                 </p>
                               )}
-                              {c.activityLabel && !c.teamName && (!c.isPublicUser || c.isFriend) && (
+                              {c.activityLabel && !c.teamName && (
                                 <p className="text-[10px] text-on-surface-variant/80 truncate">
                                   {c.activityLabel}
                                 </p>
