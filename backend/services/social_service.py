@@ -367,10 +367,13 @@ class SocialService:
 
     @classmethod
     def derive_blind_mailbox_id(cls, user_a_id: int, user_b_id: int, salt: str = "") -> str:
-        """Deterministische Hash-Berechnung der blinden E2EE-Mailbox-ID für zwei Benutzer."""
+        """Deterministische Hash-Berechnung der blinden E2EE-Mailbox-ID für zwei Benutzer.
+
+        Identisch zur Formatdefinition in frontend/src/services/e2eeCrypto.ts und personal_proposals.py.
+        """
         min_id = min(user_a_id, user_b_id)
         max_id = max(user_a_id, user_b_id)
-        raw = f"msm-e2ee-box:{min_id}:{max_id}:{salt}"
+        raw = f"msm:dm:{min_id}:{max_id}{f':{salt}' if salt else ''}"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     @classmethod
@@ -890,7 +893,11 @@ class SocialService:
         sender_user_id: int | None = None,
         recipient_id: int | None = None,
     ) -> E2eeBlindEnvelope:
-        """Speichert einen blinden E2EE-Umschlag mit serverseitiger Berechtigungsprüfung."""
+        """Speichert einen blinden E2EE-Umschlag mit serverseitiger Berechtigungsprüfung.
+
+        sender_user_id und recipient_id werden im SSE-Event mitgeliefert, damit
+        Outgoing Echo Prevention und striktes Empfänger-Filtering greifen.
+        """
         clean_mailbox = blind_mailbox_id.strip()
         clean_envelope = ciphertext_envelope.strip()
         target_recipient_id: int | None = None
@@ -899,7 +906,9 @@ class SocialService:
             cls.assert_social_enabled(db)
             if recipient_id:
                 expected_mailbox = cls.derive_blind_mailbox_id(sender_user_id, recipient_id)
-                if clean_mailbox != expected_mailbox:
+                min_i, max_i = min(sender_user_id, recipient_id), max(sender_user_id, recipient_id)
+                legacy_mailbox = hashlib.sha256(f"msm-e2ee-box:{min_i}:{max_i}:".encode("utf-8")).hexdigest()
+                if clean_mailbox != expected_mailbox and clean_mailbox != legacy_mailbox:
                     raise HTTPException(
                         status_code=400,
                         detail="Mailbox-ID stimmt nicht mit dem angegebenen Empfänger überein.",
@@ -952,6 +961,7 @@ class SocialService:
             "id": envelope.id,
             "created_at": envelope.created_at.isoformat(),
             "sender_user_id": sender_user_id,
+            "recipient_id": recipient_id if recipient_id is not None else target_recipient_id,
         }
 
         if target_recipient_id and sender_user_id:

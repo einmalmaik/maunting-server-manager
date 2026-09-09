@@ -85,6 +85,7 @@ export interface UserStatsResponse {
 export interface PublicProfileResponse {
   user_id: number
   username: string
+  avatar_url?: string | null
   social_privacy: 'private' | 'friends' | 'public'
   is_friend?: boolean
   presence?: PresenceItem | null
@@ -272,7 +273,7 @@ export async function startDirectChat(targetUserId: number): Promise<DirectChatI
 export async function relayE2eeEnvelope(payload: {
   blind_mailbox_id: string
   ciphertext_envelope: string
-  recipient_id?: number
+  recipient_id?: number | null
 }): Promise<BlindEnvelopeItem> {
   return api<BlindEnvelopeItem>('/social/e2ee/relay', {
     method: 'POST',

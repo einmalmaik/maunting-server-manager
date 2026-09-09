@@ -15,6 +15,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
 import { sendeGeraeteBenachrichtigung, pruefeUndFrageGeraeteBerechtigung } from '@/lib/benachrichtigung'
 import { useMessengerNotificationStore, playNotificationChime } from '@/stores/messengerNotificationStore'
+import { NotificationService } from '@/services/notificationService'
 
 interface IncidentAlert {
   id: number
@@ -160,29 +161,32 @@ export function ServerIncidentNotifier() {
         const mid = detail.blind_mailbox_id
         if (!mid) return
 
-        // 1. Eigene Nachricht (oder per KI im eigenen Namen versendet) -> Absender nicht selbst benachrichtigen!
-        if (detail.sender_user_id && user?.id && detail.sender_user_id === user.id) {
-          return
-        }
-
         const store = useMessengerNotificationStore.getState()
-
-        // 2. Nur Mailboxen benachrichtigen, die dem Benutzer auch tatsächlich zugeordnet sind!
+        // 1. Nur Mailboxen benachrichtigen, die dem Benutzer auch tatsächlich zugeordnet sind!
         // Niemals Geister-Benachrichtigungen („Messenger“) für fremde Mailboxen unbeteiligter Nutzer auslösen!
         const meta = store.mailboxDirectory[mid]
         if (!meta) {
           return
         }
 
-        // 3. Stummschaltung und Blockierung prüfen
-        if (store.isMuted(mid)) return
-        if (meta.userId && store.isBlocked(meta.userId)) {
+        const isCurrentActive = store.activeMailboxId === mid
+        const isRead = Boolean(isCurrentActive && typeof document !== 'undefined' && document.visibilityState === 'visible')
+
+        // Strikte Outgoing Echo Prevention & Empfänger-Filterung (recipient_id == current_user && !is_read)
+        const shouldNotify = NotificationService.shouldNotify({
+          recipientId: detail.recipient_id,
+          currentUserId: user?.id,
+          isRead: isRead,
+          senderUserId: detail.sender_user_id,
+          isGroup: Boolean(meta.isGroup),
+        })
+        if (!shouldNotify) {
           return
         }
 
-        // 4. Wenn der Chat im aktuellen Tab/Fenster aktiv geöffnet und fokussiert ist -> kein störendes Banner/Ton
-        const isCurrentActive = store.activeMailboxId === mid
-        if (isCurrentActive && typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        // 3. Stummschaltung und Blockierung prüfen
+        if (store.isMuted(mid)) return
+        if (meta.userId && store.isBlocked(meta.userId)) {
           return
         }
 

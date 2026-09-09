@@ -1907,77 +1907,13 @@ def _execute_global_read_tool(
         return {"notes": notes, "count": len(notes)}
 
     if tool_name == "search_messenger_contacts":
-        from services.social_service import SocialService
-        from models import User, TeamMember
+        from services.social_matching_service import SocialMatchingService
 
-        query = str(arguments.get("query", "")).strip().lower()
+        query = str(arguments.get("query", "")).strip()
         if not query:
             raise AiActionValidationError("Suchbegriff (query) erforderlich")
 
-        results = []
-        seen_user_ids = set()
-
-        # 1. Bestätigte Freunde
-        friends = SocialService.get_friends(db, user.id)
-        for f in friends:
-            uname = str(f.get("username", ""))
-            if query in uname.lower():
-                uid = int(f.get("user_id") or f.get("id") or 0)
-                if uid and uid not in seen_user_ids:
-                    seen_user_ids.add(uid)
-                    results.append({
-                        "user_id": uid,
-                        "username": uname,
-                        "relationship": "friend",
-                    })
-
-        # 2. Teammitglieder
-        user_team_ids = [tm.team_id for tm in db.query(TeamMember.team_id).filter(TeamMember.user_id == user.id).all()]
-        if user_team_ids:
-            colleagues = (
-                db.query(User)
-                .join(TeamMember, TeamMember.user_id == User.id)
-                .filter(TeamMember.team_id.in_(user_team_ids), User.id != user.id, User.is_active.is_(True))
-                .all()
-            )
-            for c in colleagues:
-                if query in c.username.lower() and c.id not in seen_user_ids:
-                    seen_user_ids.add(c.id)
-                    results.append({
-                        "user_id": c.id,
-                        "username": c.username,
-                        "relationship": "team_member",
-                    })
-
-        # 3. Öffentliche Profile
-        public_profiles = SocialService.get_public_profiles(db, viewer_user_id=user.id, search=query)
-        for p in public_profiles:
-            uid = int(p.get("user_id") or p.get("id") or 0)
-            uname = str(p.get("username", ""))
-            if uid and uid not in seen_user_ids:
-                seen_user_ids.add(uid)
-                results.append({
-                    "user_id": uid,
-                    "username": uname,
-                    "relationship": "public_user",
-                })
-
-        # 4. Aktive Systembenutzer (für direkte Namensübereinstimmung)
-        direct_users = (
-            db.query(User)
-            .filter(User.username.ilike(f"%{query}%"), User.id != user.id, User.is_active.is_(True))
-            .limit(10)
-            .all()
-        )
-        for du in direct_users:
-            if du.id not in seen_user_ids:
-                seen_user_ids.add(du.id)
-                results.append({
-                    "user_id": du.id,
-                    "username": du.username,
-                    "relationship": "user",
-                })
-
+        results = SocialMatchingService.search_contacts(db, user, query)
         return {"contacts": results, "count": len(results)}
 
     if tool_name == "search_messenger_groups":

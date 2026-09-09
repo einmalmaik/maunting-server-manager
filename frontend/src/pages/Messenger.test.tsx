@@ -9,6 +9,7 @@ import { useAuthStore } from '@/stores/authStore'
 vi.mock('@/api/social', () => ({
   getFriends: vi.fn(),
   getGroups: vi.fn().mockResolvedValue([]),
+  getDirectChats: vi.fn().mockResolvedValue([]),
   createGroup: vi.fn(),
   deleteGroup: vi.fn(),
   joinGroupByInvite: vi.fn(),
