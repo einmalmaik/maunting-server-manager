@@ -81,6 +81,7 @@ from .hoster import (
 from .chat_group import ChatGroup, ChatGroupMember
 from .chat_story import ChatStory
 from .direct_chat import DirectChat
+from .chat_media import ChatMedia
 
 __all__ = [
     "User", "UserRole", "RoleAiLimit", "AiUsageEvent", "OperationTask",
@@ -105,5 +106,6 @@ __all__ = [
     "PanelPopup", "UserPopupState",
     "VaultEntry", "VaultHint", "VaultUserSetting", "VaultBlindBucket",
     "UserAchievement", "UserActivityTime", "UserFriend", "UserPresence", "E2eeBlindEnvelope",
-    "ChatGroup", "ChatGroupMember", "ChatStory", "DirectChat",
+    "ChatGroup", "ChatGroupMember", "ChatStory", "DirectChat", "ChatMedia",
 ]  # noqa: E501
+

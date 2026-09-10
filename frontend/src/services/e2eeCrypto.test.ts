@@ -11,6 +11,8 @@ import {
   generateLocalE2eeKeyPair,
   encryptE2eeHybrid,
   decryptE2eeHybrid,
+  encryptE2eeAttachmentBlob,
+  decryptE2eeAttachmentBlob,
 } from './e2eeCrypto'
 
 describe('e2eeCrypto (@msdis/shield Zero-Knowledge)', () => {
@@ -250,5 +252,65 @@ describe('e2eeCrypto (@msdis/shield Zero-Knowledge)', () => {
       const decrypted = await decryptE2eeHybrid(legacyEnvelope, aliceKeys.privateKeyJwk)
       expect(decrypted).toBe('Legacy Format Test')
     }, 30_000)
+  })
+
+  describe('E2EE Media & Attachment Blobs', () => {
+    it('encrypts and decrypts direct 1:1 attachment blobs with sv-blob-v1: envelope', async () => {
+      const attachmentData = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+      const context = { userAId: 10, userBId: 20 }
+
+      const envelope = await encryptE2eeAttachmentBlob(attachmentData, context)
+      expect(envelope.startsWith('sv-blob-v1:')).toBe(true)
+
+      // Recipient decrypts
+      const decrypted = await decryptE2eeAttachmentBlob(envelope, { userAId: 20, userBId: 10 })
+      expect(decrypted).toBe(attachmentData)
+
+      // Sender can also decrypt
+      const senderDecrypted = await decryptE2eeAttachmentBlob(envelope, context)
+      expect(senderDecrypted).toBe(attachmentData)
+    })
+
+    it('encrypts and decrypts group chat attachment blobs', async () => {
+      const documentPayload = 'Verschlüsseltes PDF Dokument im Gruppenchat'
+      const context = { groupId: 42 }
+
+      const envelope = await encryptE2eeAttachmentBlob(documentPayload, context)
+      expect(envelope.startsWith('sv-blob-v1:')).toBe(true)
+
+      const decrypted = await decryptE2eeAttachmentBlob(envelope, context)
+      expect(decrypted).toBe(documentPayload)
+
+      // Mismatched group ID fails cleanly
+      await expect(decryptE2eeAttachmentBlob(envelope, { groupId: 99 })).rejects.toThrow()
+    })
+
+    it('encrypts and decrypts team chat attachment blobs', async () => {
+      const teamSecret = 'Backup-Log-Datei für Team'
+      const context = { teamId: 7 }
+
+      const envelope = await encryptE2eeAttachmentBlob(teamSecret, context)
+      expect(envelope.startsWith('sv-blob-v1:')).toBe(true)
+
+      const decrypted = await decryptE2eeAttachmentBlob(envelope, context)
+      expect(decrypted).toBe(teamSecret)
+
+      // Mismatched team ID fails cleanly
+      await expect(decryptE2eeAttachmentBlob(envelope, { teamId: 8 })).rejects.toThrow()
+    })
+
+    it('fails decryption on tampered attachment blob payload', async () => {
+      const payload = 'Wichtige Daten'
+      const context = { userAId: 5, userBId: 6 }
+      const envelope = await encryptE2eeAttachmentBlob(payload, context)
+
+      const tampered = envelope.slice(0, -6) + 'XXXXXX'
+      await expect(decryptE2eeAttachmentBlob(tampered, context)).rejects.toThrow()
+    })
+
+    it('rejects invalid crypto context with missing IDs', async () => {
+      await expect(encryptE2eeAttachmentBlob('test', {})).rejects.toThrow('Ungültiger Verschlüsselungskontext')
+      await expect(decryptE2eeAttachmentBlob('sv-blob-v1:fake', {})).rejects.toThrow()
+    })
   })
 })
