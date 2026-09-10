@@ -62,6 +62,19 @@ describe('ToastContainer', () => {
     expect(screen.queryByRole('status')).toBeNull()
   })
 
+  it('auto-dismisses info toasts after 5 seconds', () => {
+    act(() => {
+      toast.info('Info message')
+    })
+    render(<ToastContainer />)
+
+    expect(screen.getByRole('status')).toBeInTheDocument()
+    act(() => {
+      vi.advanceTimersByTime(5000)
+    })
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
   it('zeigt dieselbe Fehlermeldung nur einmal', () => {
     act(() => {
       toast.error('Knoten nicht erreichbar')
@@ -92,14 +105,16 @@ describe('ToastContainer', () => {
     expect(screen.getByText('Fehler 7')).toBeInTheDocument()
   })
 
-  it('copies error toast text', () => {
+  it('copies error toast text', async () => {
     const message = 'failed to extract layer to overlayfs'
     act(() => {
       toast.error(message)
     })
     render(<ToastContainer />)
 
-    fireEvent.click(screen.getByLabelText('Copy'))
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('Copy'))
+    })
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(message)
   })
 })

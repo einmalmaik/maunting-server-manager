@@ -1,12 +1,17 @@
 import asyncio
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, WebSocket
 from starlette.websockets import WebSocketDisconnect
 from sqlalchemy.orm import Session
 
-from database import get_db
+from database import SessionLocal, get_db
 from dependencies import get_current_user, get_optional_user, verify_csrf, get_current_user_for_ws, ws_subprotokoll
 from models import User
+from schemas.chat_media import (
+    ChatMediaUploadRequest,
+    ChatMediaUploadResponse,
+    ChatMediaSignedUrlResponse,
+)
 from schemas.social import (
     AchievementResponse,
     AchievementsOverviewResponse,
@@ -35,6 +40,8 @@ from schemas.social import (
     CanMessageResponse,
 )
 from services.achievement_service import AchievementService
+from services.chat_media_service import ChatMediaService
+from services.chat_media_validator import sanitize_attachment_filename
 from services.social_service import SocialService
 from services.sync_event_service import SyncEventService
 
@@ -289,15 +296,111 @@ def relay_e2ee_message(
         ciphertext_envelope=req.ciphertext_envelope,
         sender_user_id=current_user.id,
         recipient_id=req.recipient_id,
+        client_uuid=req.client_uuid,
         is_control=req.is_control,
         control_type=req.control_type,
     )
+
     return {
         "id": envelope.id,
         "blind_mailbox_id": envelope.blind_mailbox_id,
         "ciphertext_envelope": envelope.ciphertext_envelope,
+        "client_uuid": envelope.client_uuid,
         "created_at": envelope.created_at,
     }
+
+
+# --- Chat-Medien & E2EE Anhaenge ---
+
+@router.post(
+    "/media/upload",
+    response_model=ChatMediaUploadResponse,
+    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
+)
+def upload_chat_media(
+    req: ChatMediaUploadRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Laedt einen clientseitig verschluesselten E2EE-Medienblob hoch.
+
+    Der Server nimmt ausschliesslich verschluesselte Blobs entgegen (Zero-Knowledge).
+    """
+    media = ChatMediaService.upload_encrypted_media(
+        db,
+        uploader=current_user,
+        blind_mailbox_id=req.blind_mailbox_id,
+        ciphertext_blob=req.ciphertext_blob,
+        file_name=req.file_name,
+        media_type=req.media_type,
+        group_id=req.group_id,
+        recipient_id=req.recipient_id,
+    )
+    return {
+        "id": media.id,
+        "blind_mailbox_id": media.blind_mailbox_id,
+        "file_name": media.file_name,
+        "media_type": media.media_type,
+        "size_bytes": media.size_bytes,
+        "sha256": media.sha256,
+        "created_at": media.created_at,
+    }
+
+
+@router.get(
+    "/media/{media_id}/signed-url",
+    response_model=ChatMediaSignedUrlResponse,
+    dependencies=[Depends(_check_social_enabled)],
+)
+def get_chat_media_signed_url(
+    media_id: str,
+    ttl: int = Query(900, ge=60, le=86400),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Erzeugt eine zeitlich begrenzte signierte URL fuer einen Medienblob.
+
+    Fremde ohne Chat-Mitgliedschaft werden mit 403 Forbidden abgewiesen.
+    """
+    signed_url, expires_at = ChatMediaService.generate_signed_url(
+        db, user=current_user, media_id=media_id, ttl_seconds=ttl
+    )
+    return {
+        "media_id": media_id,
+        "signed_url": signed_url,
+        "expires_at": expires_at,
+    }
+
+
+@router.get(
+    "/media/{media_id}/download",
+    dependencies=[Depends(_check_social_enabled)],
+)
+def download_chat_media_blob(
+    media_id: str,
+    token: str = Query(...),
+    expires: int = Query(...),
+    user_id: int = Query(...),
+    db: Session = Depends(get_db),
+) -> Response:
+    """Liefert den verschluesselten Medienblob anhand einer signierten URL aus.
+
+    Validiert Signatur, Ablaufzeit und Chat-Mitgliedschaft.
+    """
+    media = ChatMediaService.get_media_by_signed_url(
+        db, media_id=media_id, token=token, expires=expires, user_id=user_id
+    )
+    safe_name = sanitize_attachment_filename(media.file_name)
+    return Response(
+        content=media.ciphertext_blob,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}.e2ee"',
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'",
+            "Cache-Control": "private, no-cache, no-store",
+        },
+    )
 
 
 # --- Direkte Chats (1:1 Unterhaltungen & Berechtigungsprüfung) ---
@@ -632,71 +735,152 @@ def delete_story(
 @router.websocket("/ws")
 async def social_websocket(
     websocket: WebSocket,
-    db: Session = Depends(get_db),
 ) -> None:
-    """Echtzeit-WebSocket für Social Presence, Messaging und Live-Benachrichtigungen."""
-    user = None
-    try:
-        user = get_current_user_for_ws(websocket, db)
-    except Exception:
-        await websocket.close(code=1008)
-        return
+    """Echtzeit-WebSocket für Social Presence, Messaging und Live-Benachrichtigungen.
+
+    Stabilitäts-Invariante:
+    - Verhindert DB-Session-Leaks & Pool-Erschöpfung: DB-Sitzungen werden nur bedarfsgerecht
+      je Aktion kurzzeitig geöffnet und direkt freigegeben.
+    - Robuste Nebenläufigkeit: Sende- und Empfangs-Loops sind gekoppelt; bricht eine Seite
+      ab, wird die andere unmittelbar gecancelt und alle Ressourcen freigegeben.
+    - Ghost-Mode Schutz: 'invisible' und 'private' Status lecken niemals über Join-Events
+      an Nicht-Freunde.
+    - Nachrichten-Deduplizierung: Client-UUIDs werden bei Relays verarbeitet und quittiert.
+    """
+    with SessionLocal() as db:
+        try:
+            user = get_current_user_for_ws(websocket, db)
+            user_id = user.id
+            user_username = user.username
+        except Exception:
+            await websocket.close(code=1008)
+            return
 
     subprotocol = ws_subprotokoll(websocket)
     await websocket.accept(subprotocol=subprotocol)
 
-    conn_id, queue = SyncEventService.subscribe(user_id=user.id)
+    conn_id, queue = SyncEventService.subscribe(user_id=user_id)
+    ws_lock = asyncio.Lock()
 
     async def _send_loop():
         try:
             while True:
                 event = await queue.get()
-                await websocket.send_json(event)
+                async with ws_lock:
+                    await websocket.send_json(event)
+        except (asyncio.CancelledError, WebSocketDisconnect):
+            raise
         except Exception:
             pass
 
-    send_task = asyncio.create_task(_send_loop())
-
-    try:
+    async def _recv_loop():
         while True:
             data = await websocket.receive_json()
             msg_type = data.get("type")
             if msg_type == "ping":
-                await websocket.send_json({"type": "pong"})
+                # Heartbeat Pong - strikt isoliert, keine Präsenz-Leaks an Dritte
+                async with ws_lock:
+                    await websocket.send_json({"type": "pong"})
+            elif msg_type == "join":
+                # WebSocket Join Event:
+                # Ghost-Mode & Privacy-Schutz delegiert an SocialService
+                try:
+                    with SessionLocal() as db:
+                        SocialService.broadcast_user_joined(db, user_id, user_username)
+                    async with ws_lock:
+                        await websocket.send_json({"type": "joined", "status": "ok", "user_id": user_id})
+                except Exception as exc:
+                    logger.debug("Fehler bei broadcast_user_joined: %s", exc)
             elif msg_type == "presence":
-                SocialService.update_presence(db, user.id, data)
+                try:
+                    with SessionLocal() as db:
+                        SocialService.update_presence(db, user_id, data)
+                except Exception as exc:
+                    logger.debug("Fehler bei update_presence: %s", exc)
             elif msg_type == "typing":
                 blind_mailbox_id = data.get("blind_mailbox_id", "")
                 status = data.get("status", "idle")
                 recipient_id = data.get("recipient_id")
-                SocialService.broadcast_typing_signal(
-                    blind_mailbox_id=blind_mailbox_id,
-                    status=status,
-                    sender_id=user.id,
-                    sender_username=user.username,
-                    db=db,
-                    recipient_id=recipient_id,
-                )
+                try:
+                    with SessionLocal() as db:
+                        SocialService.broadcast_typing_signal(
+                            blind_mailbox_id=blind_mailbox_id,
+                            status=status,
+                            sender_id=user_id,
+                            sender_username=user_username,
+                            db=db,
+                            recipient_id=recipient_id,
+                        )
+                except Exception as exc:
+                    logger.debug("Fehler bei broadcast_typing_signal: %s", exc)
             elif msg_type == "relay":
                 blind_mailbox_id = data.get("blind_mailbox_id", "")
                 ciphertext_envelope = data.get("ciphertext_envelope", "")
                 recipient_id = data.get("recipient_id")
                 is_control = bool(data.get("is_control", False))
                 control_type = data.get("control_type")
-                SocialService.relay_blind_envelope(
-                    db,
-                    blind_mailbox_id=blind_mailbox_id,
-                    ciphertext_envelope=ciphertext_envelope,
-                    sender_user_id=user.id,
-                    recipient_id=recipient_id,
-                    is_control=is_control,
-                    control_type=control_type,
-                )
-    except WebSocketDisconnect:
-        pass
+                client_uuid = data.get("client_uuid")
+                try:
+                    with SessionLocal() as db:
+                        envelope = SocialService.relay_blind_envelope(
+                            db,
+                            blind_mailbox_id=blind_mailbox_id,
+                            ciphertext_envelope=ciphertext_envelope,
+                            sender_user_id=user_id,
+                            recipient_id=recipient_id,
+                            client_uuid=client_uuid,
+                            is_control=is_control,
+                            control_type=control_type,
+                        )
+                    # Sofortige Bestätigung an den WebSocket-Sender (Acknowledge zur Queue-Bereinigung)
+                    async with ws_lock:
+                        await websocket.send_json({
+                            "type": "relay_ack",
+                            "client_uuid": envelope.client_uuid or client_uuid,
+                            "id": envelope.id,
+                            "blind_mailbox_id": envelope.blind_mailbox_id,
+                            "created_at": envelope.created_at.isoformat() if hasattr(envelope.created_at, "isoformat") else str(envelope.created_at),
+                        })
+                except HTTPException as he:
+                    logger.debug("HTTPException bei WebSocket Relay für User %s: %s", user_id, he.detail)
+                    async with ws_lock:
+                        await websocket.send_json({
+                            "type": "error",
+                            "error": "relay_failed",
+                            "status_code": he.status_code,
+                            "detail": he.detail,
+                            "client_uuid": client_uuid,
+                        })
+                except Exception as exc:
+                    logger.warning("Unerwarteter Fehler bei WebSocket Relay für User %s: %s", user_id, exc)
+                    async with ws_lock:
+                        await websocket.send_json({
+                            "type": "error",
+                            "error": "relay_failed",
+                            "status_code": 500,
+                            "detail": "Interner Fehler beim Verarbeiten der Nachricht.",
+                            "client_uuid": client_uuid,
+                        })
+
+    send_task = asyncio.create_task(_send_loop())
+    recv_task = asyncio.create_task(_recv_loop())
+
+    try:
+        # Sobald eine Task endet (z.B. Disconnect beim Lesen oder Schreiben),
+        # wird die andere Task sauber gecancelt.
+        done, pending = await asyncio.wait(
+            [send_task, recv_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+
     except Exception as e:
         logger.debug("Social WebSocket getrennt: %s", e)
     finally:
         send_task.cancel()
+        recv_task.cancel()
+        await asyncio.gather(send_task, recv_task, return_exceptions=True)
         SyncEventService.unsubscribe(conn_id)
 

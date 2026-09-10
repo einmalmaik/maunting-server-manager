@@ -22,6 +22,8 @@ import {
   initOfflineSync,
   handleIncomingSyncEvent,
   useEntitySync,
+  enqueueMessageMutation,
+  startLiveSync,
 } from './offlineSync'
 import * as client from '@/api/client'
 
@@ -457,6 +459,89 @@ describe('Offline Storage & Unified Real-Time SSE Sync Engine', () => {
       expect(finalNotes[0].note_uid).toBe(serverUid)
     })
 
+    it('preserves and replays mutations enqueued concurrently while replayOutbox is in flight without data loss', async () => {
+      // 1. Initial mutation in outbox
+      setOutbox([
+        {
+          id: 'mut-first',
+          entity: 'note',
+          action: 'create',
+          entityId: 'note-first',
+          payload: { title: 'First Note' },
+          timestamp: new Date().toISOString(),
+          retryCount: 0,
+        },
+      ])
+
+      // 2. Mock API: When 'mut-first' is being handled, another mutation is concurrently added
+      vi.mocked(client.api).mockImplementation(async (path: string, options?: any) => {
+        if (path === '/notes') {
+          // Concurrently enqueue a message while the first HTTP request is in-flight
+          enqueueMessageMutation({
+            blind_mailbox_id: 'mailbox-concurrent-1',
+            ciphertext_envelope: 'cipher-concurrent-1',
+            client_uuid: 'uuid-concurrent-1',
+          })
+          return {
+            id: 101,
+            note_uid: 'server-first',
+            title: 'First Note',
+          }
+        }
+        if (path === '/social/e2ee/relay') {
+          return {
+            id: 202,
+            blind_mailbox_id: 'mailbox-concurrent-1',
+          }
+        }
+        return {}
+      })
+
+      const res = await replayOutbox()
+      // Both the first mutation and the concurrent second mutation must be processed
+      expect(res.processed).toBe(2)
+      expect(res.failed).toBe(0)
+      expect(res.remaining).toBe(0)
+      expect(getOutbox()).toHaveLength(0)
+      expect(client.api).toHaveBeenCalledWith('/social/e2ee/relay', expect.anything())
+    })
+
+    it('replays offline message mutations and dispatches msm:message-confirmed', async () => {
+      const confirmedListener = vi.fn()
+      window.addEventListener('msm:message-confirmed', confirmedListener)
+
+      enqueueMessageMutation({
+        blind_mailbox_id: 'test-mailbox-msg',
+        ciphertext_envelope: 'cipher-offline-envelope',
+        recipient_id: 42,
+        client_uuid: 'uuid-offline-msg-42',
+      })
+
+      expect(getOutbox()).toHaveLength(1)
+      expect(getOutbox()[0].entity).toBe('message')
+
+      vi.mocked(client.api).mockResolvedValueOnce({
+        id: 777,
+        blind_mailbox_id: 'test-mailbox-msg',
+      })
+
+      const res = await replayOutbox()
+      expect(res.processed).toBe(1)
+      expect(res.failed).toBe(0)
+      expect(getOutbox()).toHaveLength(0)
+      expect(confirmedListener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          detail: expect.objectContaining({
+            client_uuid: 'uuid-offline-msg-42',
+            envelope_id: 777,
+            blind_mailbox_id: 'test-mailbox-msg',
+          }),
+        })
+      )
+
+      window.removeEventListener('msm:message-confirmed', confirmedListener)
+    })
+
     it('instantly updates local storage cache when handleIncomingSyncEvent receives notes/calendar payloads', () => {
       // 1. Incoming note create
       handleIncomingSyncEvent('sync', {
@@ -588,6 +673,136 @@ describe('Offline Storage & Unified Real-Time SSE Sync Engine', () => {
       )
       expect(events).toHaveLength(1)
       expect(events[0].event_id).toBe('point-evt')
+    })
+  })
+
+  describe('R7. Offline Message Outbox & Replay Confirmation', () => {
+    it('enqueues offline message mutations with deduplication via client_uuid', () => {
+      const mut1 = enqueueMessageMutation({
+        blind_mailbox_id: 'mailbox-abc',
+        ciphertext_envelope: 'cipher-1',
+        recipient_id: 42,
+        client_uuid: 'uuid-msg-101',
+      })
+
+      expect(mut1.id).toBe('uuid-msg-101')
+      expect(mut1.entity).toBe('message')
+      expect(mut1.action).toBe('relay')
+      expect(getOutbox()).toHaveLength(1)
+
+      // Duplicate enqueue with same client_uuid should not duplicate
+      const mut2 = enqueueMessageMutation({
+        blind_mailbox_id: 'mailbox-abc',
+        ciphertext_envelope: 'cipher-1',
+        recipient_id: 42,
+        client_uuid: 'uuid-msg-101',
+      })
+
+      expect(getOutbox()).toHaveLength(1)
+      expect(mut2.id).toBe('uuid-msg-101')
+    })
+
+    it('replays queued message mutations in FIFO order and dispatches confirmation events', async () => {
+      enqueueMessageMutation({
+        blind_mailbox_id: 'mailbox-abc',
+        ciphertext_envelope: 'cipher-1',
+        recipient_id: 42,
+        client_uuid: 'uuid-msg-1',
+      })
+      enqueueMessageMutation({
+        blind_mailbox_id: 'mailbox-abc',
+        ciphertext_envelope: 'cipher-2',
+        recipient_id: 42,
+        client_uuid: 'uuid-msg-2',
+      })
+
+      expect(getOutbox()).toHaveLength(2)
+
+      const confirmedEvents: any[] = []
+      const messagesUpdatedEvents: any[] = []
+
+      const onConfirmed = (e: any) => confirmedEvents.push(e.detail)
+      const onUpdated = () => messagesUpdatedEvents.push(true)
+
+      window.addEventListener('msm:message-confirmed', onConfirmed)
+      window.addEventListener('msm:messages-updated', onUpdated)
+
+      vi.mocked(client.api)
+        .mockResolvedValueOnce({ id: 1001, blind_mailbox_id: 'mailbox-abc' })
+        .mockResolvedValueOnce({ id: 1002, blind_mailbox_id: 'mailbox-abc' })
+
+      const result = await replayOutbox()
+
+      expect(result.processed).toBe(2)
+      expect(result.remaining).toBe(0)
+      expect(getOutbox()).toHaveLength(0)
+
+      expect(confirmedEvents).toHaveLength(2)
+      expect(confirmedEvents[0]).toEqual({
+        client_uuid: 'uuid-msg-1',
+        envelope_id: 1001,
+        blind_mailbox_id: 'mailbox-abc',
+      })
+      expect(confirmedEvents[1]).toEqual({
+        client_uuid: 'uuid-msg-2',
+        envelope_id: 1002,
+        blind_mailbox_id: 'mailbox-abc',
+      })
+
+      expect(messagesUpdatedEvents.length).toBeGreaterThan(0)
+
+      window.removeEventListener('msm:message-confirmed', onConfirmed)
+      window.removeEventListener('msm:messages-updated', onUpdated)
+    })
+  })
+
+  describe('R8. LiveSync Lifecycle, Flapping Protection & Timer Cleanups', () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('stops cleanly and does not trigger fallback polling or reconnect timers after cancellation', async () => {
+      vi.mocked(client.apiStream).mockRejectedValue(new Error('Network offline'))
+
+      const stop = startLiveSync()
+
+      // Disconnect occurs immediately
+      await vi.advanceTimersByTimeAsync(10)
+
+      // Stop sync
+      stop()
+
+      // Clear any call counts
+      vi.mocked(client.apiStream).mockClear()
+
+      // Fast forward 30 seconds into the future
+      await vi.advanceTimersByTimeAsync(30_000)
+
+      // No additional reconnect calls or fallback polling calls should have fired
+      expect(client.apiStream).not.toHaveBeenCalled()
+    })
+
+    it('reconnects with exponential backoff and jitter under repeated failures', async () => {
+      vi.mocked(client.apiStream).mockRejectedValue(new Error('Connection dropped'))
+
+      const stop = startLiveSync()
+
+      // Initial connect call
+      expect(client.apiStream).toHaveBeenCalledTimes(1)
+
+      // 1st backoff base: 1000ms (jittered 850-1000ms)
+      await vi.advanceTimersByTimeAsync(1100)
+      expect(client.apiStream).toHaveBeenCalledTimes(2)
+
+      // 2nd backoff base: 2000ms (jittered 1700-2000ms)
+      await vi.advanceTimersByTimeAsync(2100)
+      expect(client.apiStream).toHaveBeenCalledTimes(3)
+
+      stop()
     })
   })
 })

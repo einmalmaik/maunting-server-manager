@@ -57,6 +57,7 @@ vi.mock('@/lib/offlineSync', () => ({
   loadCalendarEventsOfflineFirst: vi.fn().mockResolvedValue({ events: [] }),
   saveNoteOffline: vi.fn().mockResolvedValue({ id: 1, title: 'Mock' }),
   saveCalendarEventOffline: vi.fn().mockResolvedValue({ id: 1, title: 'Mock' }),
+  enqueueMessageMutation: vi.fn().mockReturnValue({ id: 'mock-mutation' }),
 }))
 
 function setupUser() {
@@ -1153,6 +1154,121 @@ describe('Messenger (Allround Chat)', () => {
       expect(screen.getByText('Nachricht aus Web auf Tauri lesbar')).toBeInTheDocument()
       expect(screen.getByText('Verschlüsselte Nachricht')).toBeInTheDocument()
     })
+  })
+
+  it('dedupliziert eingehende Envelopes mit identischer client_uuid in der UI', async () => {
+    const { decryptE2eeMessage } = await import('@/services/e2eeCrypto')
+    vi.mocked(socialApi.getFriends).mockResolvedValue([
+      {
+        id: 1,
+        user_id: 301,
+        username: 'dedup_user',
+        avatar_url: null,
+        status: 'accepted',
+        presence: { status: 'online', device_type: 'web' },
+      },
+    ])
+
+    // Server liefert 2 Envelopes mit derselben client_uuid (Retry-Szenario)
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([
+      {
+        id: 701,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: 'cipher-msg-1',
+        client_uuid: 'unique-client-uuid-777',
+        created_at: '2026-09-10T14:00:00Z',
+      },
+      {
+        id: 702,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: 'cipher-msg-1-retry',
+        client_uuid: 'unique-client-uuid-777',
+        created_at: '2026-09-10T14:00:05Z',
+      },
+    ])
+
+    vi.mocked(decryptE2eeMessage).mockResolvedValue(
+      JSON.stringify({
+        sender_id: 301,
+        client_uuid: 'unique-client-uuid-777',
+        text: 'Einmalige Nachricht trotz Retry',
+        timestamp: '2026-09-10T14:00:00Z',
+      })
+    )
+
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /dedup_user/i })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole('button', { name: /dedup_user/i }))
+
+    await waitFor(() => {
+      const messages = screen.getAllByText('Einmalige Nachricht trotz Retry')
+      expect(messages).toHaveLength(1)
+    })
+  })
+
+  it('queues message offline and displays it optimistically when network is offline', async () => {
+    const { enqueueMessageMutation } = await import('@/lib/offlineSync')
+    vi.stubGlobal('navigator', {
+      ...window.navigator,
+      onLine: false,
+    })
+
+    vi.mocked(socialApi.getFriends).mockResolvedValue([
+      {
+        id: 1,
+        user_id: 302,
+        username: 'offline_partner',
+        avatar_url: null,
+        status: 'accepted',
+        presence: { status: 'offline', device_type: 'web' },
+      },
+    ])
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([])
+
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /offline_partner/i })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole('button', { name: /offline_partner/i }))
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/Nachricht schreiben/i)).toBeInTheDocument()
+    })
+
+    const input = screen.getByPlaceholderText(/Nachricht schreiben/i)
+    fireEvent.change(input, { target: { value: 'Offline gesendete Nachricht' } })
+
+    const sendBtn = screen.getByRole('button', { name: 'Senden' })
+    fireEvent.click(sendBtn)
+
+    await waitFor(() => {
+      expect(enqueueMessageMutation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          blind_mailbox_id: 'test-blind-mailbox',
+          ciphertext_envelope: expect.any(String),
+          client_uuid: expect.stringMatching(/^msg-|[0-9a-f-]+$/),
+        })
+      )
+    })
+
+    // Optimistische Anzeige muss sofort im Chat sichtbar sein
+    await waitFor(() => {
+      expect(screen.getByText('Offline gesendete Nachricht')).toBeInTheDocument()
+    })
+
+    vi.unstubAllGlobals()
   })
 })
 

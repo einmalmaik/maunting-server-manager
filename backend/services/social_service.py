@@ -5,6 +5,7 @@ import logging
 from typing import Any
 from fastapi import HTTPException
 from sqlalchemy import or_, and_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import hashlib
@@ -692,9 +693,10 @@ class SocialService:
 
         db.commit()
 
-        # Rezipienten ermitteln: Freunde, Chat-Partner und alle aktiven SSE/WS-Abonnenten
-        subscriber_user_ids = {sub.user_id for sub in SyncEventService._subscribers.values()}
+        user_obj = db.query(User).filter_by(id=user_id).first()
+        privacy = getattr(user_obj, "social_privacy", "friends") if user_obj else "friends"
 
+        subscriber_user_ids = {sub.user_id for sub in SyncEventService._subscribers.values()}
         friend_rels = (
             db.query(UserFriend)
             .filter(
@@ -703,19 +705,25 @@ class SocialService:
             )
             .all()
         )
-        relevant_viewer_ids = {r.friend_id if r.user_id == user_id else r.user_id for r in friend_rels}
 
-        direct_chats = (
-            db.query(DirectChat)
-            .filter(or_(DirectChat.user_a_id == user_id, DirectChat.user_b_id == user_id))
-            .all()
-        )
-        for dc in direct_chats:
-            relevant_viewer_ids.add(dc.get_other_user_id(user_id))
-
-        user_obj = db.query(User).filter_by(id=user_id).first()
-        if user_obj and getattr(user_obj, "social_privacy", "friends") == "public":
-            relevant_viewer_ids |= subscriber_user_ids
+        # Ghost-Mode & Privacy: Wenn status == 'invisible' oder privacy == 'private'/'friends',
+        # darf der Status NIEMALS an Nicht-Freunde (Fremde, passive Subscriber, fremde Chatpartner)
+        # durch Echtzeit-Events oder Joins geleakt werden.
+        if pres.status == "invisible" or privacy in ("private", "friends"):
+            # Nur bestätigte Freunde erhalten gefilterte Updates (bei invisible strikt als offline maskiert)
+            relevant_viewer_ids = {r.friend_id if r.user_id == user_id else r.user_id for r in friend_rels}
+        else:
+            # Öffentlich & nicht unsichtbar: Chat-Partner und autorisierte Abonnenten einbeziehen
+            relevant_viewer_ids = {r.friend_id if r.user_id == user_id else r.user_id for r in friend_rels}
+            direct_chats = (
+                db.query(DirectChat)
+                .filter(or_(DirectChat.user_a_id == user_id, DirectChat.user_b_id == user_id))
+                .all()
+            )
+            for dc in direct_chats:
+                relevant_viewer_ids.add(dc.get_other_user_id(user_id))
+            if user_obj and getattr(user_obj, "social_privacy", "friends") == "public":
+                relevant_viewer_ids |= subscriber_user_ids
 
         # Für jeden relevanten Betrachter serverseitig gefiltertes Event publizieren
         for viewer_id in relevant_viewer_ids:
@@ -744,6 +752,59 @@ class SocialService:
             "activity_detail": pres.activity_detail,
             "updated_at": pres.updated_at,
         }
+
+    @classmethod
+    def broadcast_user_joined(cls, db: Session, user_id: int, user_username: str) -> None:
+        """Broadcastet ein user_joined Event unter strikter Einhaltung des Ghost-Mode und der Privatsphäre."""
+        u = db.query(User).filter_by(id=user_id).first()
+        pres = cls.get_presence(db, user_id)
+        is_invisible = pres.get("status") == "invisible"
+        privacy = getattr(u, "social_privacy", "friends") if u else "friends"
+
+        # Ghost-Mode: Wenn unsichtbar, niemals an irgendwen broadcasten!
+        if is_invisible:
+            return
+
+        rels = (
+            db.query(UserFriend)
+            .filter(
+                or_(UserFriend.user_id == user_id, UserFriend.friend_id == user_id),
+                UserFriend.status == "accepted",
+            )
+            .all()
+        )
+        target_user_ids = {r.friend_id if r.user_id == user_id else r.user_id for r in rels}
+
+        if privacy == "public":
+            direct_chats = (
+                db.query(DirectChat)
+                .filter(or_(DirectChat.user_a_id == user_id, DirectChat.user_b_id == user_id))
+                .all()
+            )
+            for dc in direct_chats:
+                target_user_ids.add(dc.get_other_user_id(user_id))
+
+        # Blockierte Benutzer niemals benachrichtigen (Datenschutz-Invariante)
+        blocked_rels = (
+            db.query(UserFriend)
+            .filter(
+                or_(UserFriend.user_id == user_id, UserFriend.friend_id == user_id),
+                UserFriend.status == "blocked",
+            )
+            .all()
+        )
+        blocked_user_ids = {r.friend_id if r.user_id == user_id else r.user_id for r in blocked_rels}
+        target_user_ids -= blocked_user_ids
+
+        for target_id in target_user_ids:
+            SyncEventService.publish(
+                {
+                    "type": "user_joined",
+                    "user_id": user_id,
+                    "username": user_username,
+                },
+                user_id=target_id,
+            )
 
     @classmethod
     def update_privacy(cls, db: Session, user_id: int, privacy: str) -> str:
@@ -893,16 +954,20 @@ class SocialService:
         ciphertext_envelope: str,
         sender_user_id: int | None = None,
         recipient_id: int | None = None,
+        client_uuid: str | None = None,
         is_control: bool = False,
         control_type: str | None = None,
     ) -> E2eeBlindEnvelope:
+
         """Speichert einen blinden E2EE-Umschlag mit serverseitiger Berechtigungsprüfung.
 
         sender_user_id und recipient_id werden im SSE-Event mitgeliefert, damit
         Outgoing Echo Prevention und striktes Empfänger-Filtering greifen.
+        client_uuid garantiert Idempotenz bei Netzwerk-Schwankungen und Retries.
         """
         clean_mailbox = blind_mailbox_id.strip()
         clean_envelope = ciphertext_envelope.strip()
+        clean_client_uuid = client_uuid.strip() if client_uuid and client_uuid.strip() else None
         target_recipient_id: int | None = None
         group_member_ids: list[int] = []
 
@@ -979,18 +1044,49 @@ class SocialService:
                                 ]
                                 break
 
+        # Idempotenz-Prüfung: Erst NACH erfolgreicher Autorisierung prüfen,
+        # ob dieser Umschlag bereits mit dieser client_uuid existiert.
+        if clean_client_uuid:
+            existing = (
+                db.query(E2eeBlindEnvelope)
+                .filter(
+                    E2eeBlindEnvelope.blind_mailbox_id == clean_mailbox,
+                    E2eeBlindEnvelope.client_uuid == clean_client_uuid,
+                )
+                .first()
+            )
+            if existing:
+                return existing
+
         envelope = E2eeBlindEnvelope(
             blind_mailbox_id=clean_mailbox,
             ciphertext_envelope=clean_envelope,
+            client_uuid=clean_client_uuid,
             created_at=_now(),
         )
         db.add(envelope)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            if clean_client_uuid:
+                existing = (
+                    db.query(E2eeBlindEnvelope)
+                    .filter(
+                        E2eeBlindEnvelope.blind_mailbox_id == clean_mailbox,
+                        E2eeBlindEnvelope.client_uuid == clean_client_uuid,
+                    )
+                    .first()
+                )
+                if existing:
+                    return existing
+            raise
 
         msg_payload = {
             "type": "e2ee_blind_message",
             "blind_mailbox_id": clean_mailbox,
             "id": envelope.id,
+            "client_uuid": envelope.client_uuid,
             "created_at": envelope.created_at.isoformat(),
             "sender_user_id": sender_user_id,
             "recipient_id": recipient_id if recipient_id is not None else target_recipient_id,
@@ -1476,6 +1572,13 @@ class SocialService:
         clean_content = content.strip()
         if not clean_content:
             raise HTTPException(status_code=422, detail="Story-Inhalt darf nicht leer sein.")
+
+        if media_url:
+            from services.chat_media_validator import validate_story_media_url, ChatMediaSecurityError
+            try:
+                media_url = validate_story_media_url(media_url)
+            except ChatMediaSecurityError as e:
+                raise HTTPException(status_code=422, detail=e.detail)
 
         now = _now()
         story = ChatStory(

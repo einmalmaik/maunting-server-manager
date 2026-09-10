@@ -1,5 +1,5 @@
 import { useToastStore } from '@/stores/toastStore'
-import { X, CheckCircle, AlertCircle, Copy, Check } from 'lucide-react'
+import { X, CheckCircle, AlertCircle, Info, Copy, Check } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -28,12 +28,16 @@ export function ToastContainer() {
           className={`pointer-events-auto flex items-start gap-3 rounded-lg border p-4 font-body-md text-sm shadow-panel backdrop-blur-xl ${
             toast.type === 'error'
               ? 'bg-surface-container-high/95 border-status-destructive/40 text-status-destructive'
+              : toast.type === 'info'
+              ? 'bg-surface-container-high/95 border-primary/40 text-primary'
               : 'bg-surface-container-high/95 border-status-success/40 text-status-success'
           }`}
           role={toast.type === 'error' ? 'alert' : 'status'}
         >
           {toast.type === 'error' ? (
             <AlertCircle className="w-5 h-5 text-status-destructive shrink-0 mt-0.5" />
+          ) : toast.type === 'info' ? (
+            <Info className="w-5 h-5 text-primary shrink-0 mt-0.5" />
           ) : (
             <CheckCircle className="w-5 h-5 text-status-success shrink-0 mt-0.5" />
           )}

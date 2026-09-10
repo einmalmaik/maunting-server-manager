@@ -511,3 +511,84 @@ export async function decryptE2eeHybrid(
     throw new DisDecryptionError('Hybrid-Entschlüsselung fehlgeschlagen')
   }
 }
+
+// ==========================================
+// 4. E2EE Media & Attachment Blobs
+// ==========================================
+
+export const E2EE_BLOB_SPEC: VersionedCipherEnvelopeSpec = {
+  currentPrefix: 'sv-blob-v1:',
+  familyPrefix: 'sv-blob-',
+  subject: 'e2ee media blob envelope',
+}
+
+export interface AttachmentCryptoContext {
+  userAId?: number
+  userBId?: number
+  groupId?: number
+  teamId?: number
+  sharedSecret?: string
+}
+
+/**
+ * Encrypts an attachment data string client-side before upload to server / bucket.
+ * The server only ever sees the encrypted blob (E2EE invariant).
+ */
+export async function encryptE2eeAttachmentBlob(
+  data: string,
+  context: AttachmentCryptoContext
+): Promise<string> {
+  let key: CryptoKey
+  let aad: string
+
+  if (context.groupId) {
+    key = await deriveGroupChannelKey(context.groupId, context.sharedSecret)
+    aad = `msm:group:blob:aad:${context.groupId}`
+  } else if (context.teamId) {
+    key = await deriveTeamChannelKey(context.teamId, context.sharedSecret)
+    aad = `msm:team:blob:aad:${context.teamId}`
+  } else if (context.userAId && context.userBId) {
+    const minId = Math.min(context.userAId, context.userBId)
+    const maxId = Math.max(context.userAId, context.userBId)
+    key = await deriveDirectChannelKey(context.userAId, context.userBId, context.sharedSecret)
+    aad = `msm:dm:blob:aad:${minId}:${maxId}`
+  } else {
+    throw new Error('Ungültiger Verschlüsselungskontext für Medienanhang')
+  }
+
+  const ciphertext = await encryptString(data, key, aad)
+  return formatEnvelope(E2EE_BLOB_SPEC, ciphertext)
+}
+
+/**
+ * Decrypts an attachment blob client-side after download from signed media URL.
+ */
+export async function decryptE2eeAttachmentBlob(
+  envelopeString: string,
+  context: AttachmentCryptoContext
+): Promise<string> {
+  try {
+    const parsed = parseEnvelope(E2EE_BLOB_SPEC, envelopeString)
+    let key: CryptoKey
+    let aad: string
+
+    if (context.groupId) {
+      key = await deriveGroupChannelKey(context.groupId, context.sharedSecret)
+      aad = `msm:group:blob:aad:${context.groupId}`
+    } else if (context.teamId) {
+      key = await deriveTeamChannelKey(context.teamId, context.sharedSecret)
+      aad = `msm:team:blob:aad:${context.teamId}`
+    } else if (context.userAId && context.userBId) {
+      const minId = Math.min(context.userAId, context.userBId)
+      const maxId = Math.max(context.userAId, context.userBId)
+      key = await deriveDirectChannelKey(context.userAId, context.userBId, context.sharedSecret)
+      aad = `msm:dm:blob:aad:${minId}:${maxId}`
+    } else {
+      throw new Error('Ungültiger Entschlüsselungskontext für Medienanhang')
+    }
+
+    return await decryptString(parsed.payload, key, aad)
+  } catch {
+    throw new DisDecryptionError('Entschlüsselung des Medienanhangs fehlgeschlagen oder manipuliert')
+  }
+}

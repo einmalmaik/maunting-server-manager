@@ -77,6 +77,9 @@ import {
   sendTypingSignal,
   getE2eePublicKey,
   setE2eePublicKey,
+  uploadEncryptedChatAttachment,
+  getChatMediaSignedUrl,
+  downloadAndDecryptChatAttachment,
 } from '@/api/social'
 import { teamsApi, type TeamMember } from '@/api/teams'
 import {
@@ -84,6 +87,7 @@ import {
   loadCalendarEventsOfflineFirst,
   saveNoteOffline,
   saveCalendarEventOffline,
+  enqueueMessageMutation,
 } from '@/lib/offlineSync'
 import type { NoteItem } from '@/pages/Notes'
 import type { CalendarEventItem } from '@/pages/Calendar'
@@ -97,6 +101,7 @@ import {
   decryptGroupE2eeMessage,
   getOrGenerateLocalKeyPair,
   type LocalE2eeKeyPair,
+  type AttachmentCryptoContext,
 } from '@/services/e2eeCrypto'
 import { getAudioTrackConstraints } from '@/lib/audioSettings'
 import { IN_HOUSE_STICKERS, CATEGORIZED_EMOJIS } from '@/services/stickerCatalog'
@@ -112,6 +117,7 @@ import { ChatWallpaperModal } from '@/components/social/ChatWallpaperModal'
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
+import { sanitizeSvg, getSafeAttachmentUrl } from '@/lib/sanitizeSvg'
 
 function formatChatDateBadge(isoDateString: string): string {
   try {
@@ -190,6 +196,7 @@ export interface CalendarAttachment {
 export interface ImageAttachment {
   dataUrl: string
   name?: string
+  mediaId?: string
 }
 
 export interface AudioAttachment {
@@ -203,6 +210,7 @@ export interface FileAttachment {
   sizeBytes: number
   mimeType: string
   dataUrl: string
+  mediaId?: string
 }
 
 export interface StickerAttachment {
@@ -221,6 +229,7 @@ export interface StoryReplyAttachment {
 
 export interface ChatMessage {
   id: number
+  clientUuid?: string
   senderId: number
   senderName?: string
   text: string
@@ -248,6 +257,8 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
 }
+
+export { getSafeAttachmentUrl }
 
 function formatDuration(sec: number): string {
   const m = Math.floor(sec / 60)
@@ -894,7 +905,6 @@ export function Messenger() {
           useMessengerNotificationStore.getState().setActiveMailboxId(mid)
         }
       })
-
     } else {
       activeMailboxIdRef.current = ''
       highestIncomingIdAcknowledgedRef.current = 0
@@ -917,13 +927,18 @@ export function Messenger() {
   const sendE2eeControlMessage = async (payloadObj: Record<string, unknown>) => {
     if (!blindMailboxId || !currentUserId || (!activeContact && !activeGroup)) return
     try {
-      const payload = JSON.stringify(payloadObj)
+      const clientUuid =
+        typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : 'ctrl-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9)
+      const payload = JSON.stringify({ ...payloadObj, client_uuid: clientUuid })
       let ciphertext: string
       if (activeGroup) {
         ciphertext = await encryptGroupE2eeMessage(payload, activeGroup.id)
         await relayE2eeEnvelope({
           blind_mailbox_id: blindMailboxId,
           ciphertext_envelope: ciphertext,
+          client_uuid: clientUuid,
           is_control: true,
           control_type: String(payloadObj.type || 'control'),
         })
@@ -934,10 +949,12 @@ export function Messenger() {
           blind_mailbox_id: blindMailboxId,
           ciphertext_envelope: ciphertext,
           recipient_id: targetUserId,
+          client_uuid: clientUuid,
           is_control: true,
           control_type: String(payloadObj.type || 'control'),
         })
       }
+
     } catch {
       // Control message failure is non-fatal
     }
@@ -955,6 +972,8 @@ export function Messenger() {
       const envelopes = await fetchE2eeEnvelopes(currentMid)
       if (activeMailboxIdRef.current && activeMailboxIdRef.current !== currentMid) return
       const decryptedList: ChatMessage[] = []
+      const seenEnvelopeIds = new Set<number>()
+      const seenClientUuids = new Set<string>()
 
       // Dictionaries to track edits, deletions, and read receipts across envelopes
       const editMap = new Map<number, { newText: string; editedAt: string }>()
@@ -989,9 +1008,13 @@ export function Messenger() {
       )
 
       for (const { env, plain, ok } of decryptedEnvelopes) {
+        if (seenEnvelopeIds.has(env.id)) continue
+        seenEnvelopeIds.add(env.id)
+
         if (!ok || !plain) {
           decryptedList.push({
             id: env.id,
+            clientUuid: env.client_uuid || undefined,
             senderId: activeContact ? activeContact.userId : 0,
             text: 'Verschlüsselte Nachricht',
             createdAt: env.created_at,
@@ -1055,6 +1078,14 @@ export function Messenger() {
             }
 
             // Normal Chat Message
+            const clientUuid = (parsed.client_uuid as string) || env.client_uuid || undefined
+            if (clientUuid && seenClientUuids.has(clientUuid)) {
+              continue
+            }
+            if (clientUuid) {
+              seenClientUuids.add(clientUuid)
+            }
+
             let senderId = parsed.sender_id || (activeContact ? activeContact.userId : 0)
             let senderName = parsed.sender_name || parsed.sender_username
             let isSelf = senderId === currentUserId
@@ -1065,6 +1096,7 @@ export function Messenger() {
 
             decryptedList.push({
               id: env.id,
+              clientUuid,
               senderId,
               senderName,
               text: parsed.text || '',
@@ -1082,6 +1114,14 @@ export function Messenger() {
           }
         } catch {
           // Legacy / simple text fallback
+          const clientUuid = env.client_uuid || undefined
+          if (clientUuid && seenClientUuids.has(clientUuid)) {
+            continue
+          }
+          if (clientUuid) {
+            seenClientUuids.add(clientUuid)
+          }
+
           let text = plain
           let isSelf = false
           let senderId = activeContact ? activeContact.userId : 0
@@ -1095,6 +1135,7 @@ export function Messenger() {
           }
           decryptedList.push({
             id: env.id,
+            clientUuid,
             senderId,
             text,
             createdAt: env.created_at,
@@ -1151,7 +1192,19 @@ export function Messenger() {
       // Abort if the user has navigated to another chat in the meantime
       if (activeMailboxIdRef.current && activeMailboxIdRef.current !== currentMid) return
 
-      setMessages(processedList)
+      setMessages((prev) => {
+        const processedClientUuids = new Set<string>()
+        for (const m of processedList) {
+          if (m.clientUuid) processedClientUuids.add(m.clientUuid)
+        }
+        const pendingOptimistic = prev.filter(
+          (m) => m.isSelf && m.clientUuid && !processedClientUuids.has(m.clientUuid)
+        )
+        if (pendingOptimistic.length === 0) {
+          return processedList
+        }
+        return [...processedList, ...pendingOptimistic]
+      })
 
       // Kürzliche Nachrichten lokal cachen für 0ms Sofort-Laden beim nächsten Aufruf
       try {
@@ -1281,9 +1334,17 @@ export function Messenger() {
       }
     }
 
+    const handleMessagesUpdated = () => {
+      void loadMessages(false)
+    }
+
     window.addEventListener('msm:sync-event', handleSync)
+    window.addEventListener('msm:messages-updated', handleMessagesUpdated)
+    window.addEventListener('msm:message-confirmed', handleMessagesUpdated)
     return () => {
       window.removeEventListener('msm:sync-event', handleSync)
+      window.removeEventListener('msm:messages-updated', handleMessagesUpdated)
+      window.removeEventListener('msm:message-confirmed', handleMessagesUpdated)
       if (partnerActivityTimeoutRef.current) {
         clearTimeout(partnerActivityTimeoutRef.current)
       }
@@ -1348,18 +1409,69 @@ export function Messenger() {
 
     setSending(true)
     try {
+      const clientUuid =
+        typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : 'msg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9)
+
       const payloadObj: Record<string, unknown> = {
+        client_uuid: clientUuid,
         sender_id: currentUserId,
         sender_name: user?.username || 'Ich',
         text: rawText,
         timestamp: new Date().toISOString(),
       }
 
+      let finalImg = img
+      let finalFile = file
+
+      const cryptoContext: AttachmentCryptoContext = activeGroup
+        ? { groupId: activeGroup.id }
+        : { userAId: currentUserId, userBId: activeContact?.userId }
+
+      if (img && img.dataUrl && !img.mediaId) {
+        try {
+          const uploaded = await uploadEncryptedChatAttachment(
+            img.dataUrl,
+            img.name || 'image.png',
+            blindMailboxId,
+            cryptoContext,
+            'image/png',
+            { groupId: activeGroup?.id, recipientId: activeContact?.userId }
+          )
+          finalImg = {
+            ...img,
+            mediaId: uploaded.id,
+          }
+        } catch {
+          // Fallback if media upload fails
+        }
+      }
+
+      if (file && file.dataUrl && !file.mediaId) {
+        try {
+          const uploaded = await uploadEncryptedChatAttachment(
+            file.dataUrl,
+            file.name || 'attachment.bin',
+            blindMailboxId,
+            cryptoContext,
+            file.mimeType || 'application/octet-stream',
+            { groupId: activeGroup?.id, recipientId: activeContact?.userId }
+          )
+          finalFile = {
+            ...file,
+            mediaId: uploaded.id,
+          }
+        } catch {
+          // Fallback if media upload fails
+        }
+      }
+
       if (note) payloadObj.note_attachment = note
       if (cal) payloadObj.calendar_attachment = cal
-      if (img) payloadObj.image_attachment = img
+      if (finalImg) payloadObj.image_attachment = finalImg
       if (audio) payloadObj.audio_attachment = audio
-      if (file) payloadObj.file_attachment = file
+      if (finalFile) payloadObj.file_attachment = finalFile
       if (sticker) payloadObj.sticker_attachment = sticker
       if (storyReply) payloadObj.story_reply = storyReply
 
@@ -1368,18 +1480,106 @@ export function Messenger() {
 
       if (activeGroup) {
         ciphertext = await encryptGroupE2eeMessage(payload, activeGroup.id)
-        await relayE2eeEnvelope({
-          blind_mailbox_id: blindMailboxId,
-          ciphertext_envelope: ciphertext,
-        })
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          enqueueMessageMutation({
+            blind_mailbox_id: blindMailboxId,
+            ciphertext_envelope: ciphertext,
+            client_uuid: clientUuid,
+          })
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: Date.now(),
+              clientUuid,
+              senderId: currentUserId,
+              senderName: user?.username || 'Ich',
+              text: rawText,
+              createdAt: new Date().toISOString(),
+              isSelf: true,
+            },
+          ])
+          toast.info('Nachricht offline in Warteschlange eingereiht.')
+        } else {
+          try {
+            await relayE2eeEnvelope({
+              blind_mailbox_id: blindMailboxId,
+              ciphertext_envelope: ciphertext,
+              client_uuid: clientUuid,
+            })
+          } catch {
+            enqueueMessageMutation({
+              blind_mailbox_id: blindMailboxId,
+              ciphertext_envelope: ciphertext,
+              client_uuid: clientUuid,
+            })
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: Date.now(),
+                clientUuid,
+                senderId: currentUserId,
+                senderName: user?.username || 'Ich',
+                text: rawText,
+                createdAt: new Date().toISOString(),
+                isSelf: true,
+              },
+            ])
+            toast.info('Nachricht offline in Warteschlange eingereiht (Verbindungsfehler).')
+          }
+        }
       } else if (activeContact) {
         const targetUserId = activeContact.userId
         ciphertext = await encryptE2eeMessage(payload, currentUserId, targetUserId)
-        await relayE2eeEnvelope({
-          blind_mailbox_id: blindMailboxId,
-          ciphertext_envelope: ciphertext,
-          recipient_id: targetUserId,
-        })
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          enqueueMessageMutation({
+            blind_mailbox_id: blindMailboxId,
+            ciphertext_envelope: ciphertext,
+            recipient_id: targetUserId,
+            client_uuid: clientUuid,
+          })
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: Date.now(),
+              clientUuid,
+              senderId: currentUserId,
+              senderName: user?.username || 'Ich',
+              text: rawText,
+              createdAt: new Date().toISOString(),
+              isSelf: true,
+            },
+          ])
+          toast.info('Nachricht offline in Warteschlange eingereiht.')
+        } else {
+          try {
+            await relayE2eeEnvelope({
+              blind_mailbox_id: blindMailboxId,
+              ciphertext_envelope: ciphertext,
+              recipient_id: targetUserId,
+              client_uuid: clientUuid,
+            })
+          } catch {
+            enqueueMessageMutation({
+              blind_mailbox_id: blindMailboxId,
+              ciphertext_envelope: ciphertext,
+              recipient_id: targetUserId,
+              client_uuid: clientUuid,
+            })
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: Date.now(),
+                clientUuid,
+                senderId: currentUserId,
+                senderName: user?.username || 'Ich',
+                text: rawText,
+                createdAt: new Date().toISOString(),
+                isSelf: true,
+              },
+            ])
+            toast.info('Nachricht offline in Warteschlange eingereiht (Verbindungsfehler).')
+          }
+        }
       }
 
       setInputText('')
@@ -1747,7 +1947,26 @@ export function Messenger() {
 
   // File Attachment Helper (for drag-and-drop and document input)
   const handleFileAttachment = (file: File) => {
-    if (file.type.startsWith('image/')) {
+    // 1. Storage-Limits vor FileReader-Aufruf prüfen (Schutz vor Riesen-Dateien und Abstürzen)
+    const MAX_FILE_BYTES = 25 * 1024 * 1024 // 25 MB Limit
+    const MAX_IMAGE_BYTES = 8 * 1024 * 1024 // 8 MB Limit für Bilder
+
+    const isImage = file.type.startsWith('image/')
+    const limit = isImage ? MAX_IMAGE_BYTES : MAX_FILE_BYTES
+    if (file.size > limit) {
+      toast.error(`Datei ist zu groß (maximal ${limit / (1024 * 1024)} MB erlaubt).`)
+      return
+    }
+
+    // 2. Blockiere ausfuehrbare Dateien clientseitig vorab
+    const lowerName = file.name.toLowerCase()
+    const blockedExtensions = ['.exe', '.dll', '.bat', '.cmd', '.sh', '.msi', '.vbs', '.ps1', '.elf', '.com', '.scr', '.pif']
+    if (blockedExtensions.some((ext) => lowerName.endsWith(ext))) {
+      toast.error('Ausführbare Dateien sind aus Sicherheitsgründen im Chat strikt untersagt.')
+      return
+    }
+
+    if (isImage) {
       const reader = new FileReader()
       reader.onload = (event) => {
         const dataUrl = event.target?.result as string
@@ -2924,45 +3143,96 @@ export function Messenger() {
                       )}
 
                       {/* Image Attachment */}
-                      {!msg.isDeleted && msg.imageAttachment && (
-                        <div className="rounded-xl overflow-hidden border border-black/10 my-1 cursor-pointer">
-                          <img
-                            src={msg.imageAttachment.dataUrl}
-                            alt="Chat Anhang"
-                            onClick={() => setViewingImage(msg.imageAttachment?.dataUrl || null)}
-                            className="max-h-60 w-auto object-cover rounded-lg hover:opacity-95 transition-opacity"
-                          />
-                        </div>
-                      )}
+                      {!msg.isDeleted && msg.imageAttachment && (() => {
+                        const safeUrl = getSafeAttachmentUrl(msg.imageAttachment.dataUrl)
+                        if (!safeUrl && !msg.imageAttachment.mediaId) return null
+                        return (
+                          <div className="rounded-xl overflow-hidden border border-black/10 my-1 cursor-pointer">
+                            <img
+                              src={safeUrl || undefined}
+                              alt="Chat Anhang"
+                              onClick={async () => {
+                                if (msg.imageAttachment?.mediaId && !msg.imageAttachment.dataUrl) {
+                                  try {
+                                    const { signed_url } = await getChatMediaSignedUrl(msg.imageAttachment.mediaId)
+                                    const context: AttachmentCryptoContext = activeGroup
+                                      ? { groupId: activeGroup.id }
+                                      : { userAId: currentUserId, userBId: activeContact?.userId }
+                                    const decrypted = await downloadAndDecryptChatAttachment(signed_url, context)
+                                    setViewingImage(decrypted)
+                                    return
+                                  } catch {
+                                    toast.error('Bild konnte nicht entschlüsselt werden.')
+                                    return
+                                  }
+                                }
+                                if (safeUrl) setViewingImage(safeUrl)
+                              }}
+                              className="max-h-60 w-auto object-cover rounded-lg hover:opacity-95 transition-opacity"
+                            />
+                          </div>
+                        )
+                      })()}
 
                       {/* File Attachment Card */}
-                      {!msg.isDeleted && msg.fileAttachment && (
-                        <a
-                          href={msg.fileAttachment.dataUrl}
-                          download={msg.fileAttachment.name}
-                          className={`flex items-center gap-2.5 p-2.5 rounded-xl border transition-colors ${
-                            msg.isSelf
-                              ? 'bg-black/15 border-white/20 text-white hover:bg-black/25'
-                              : 'bg-surface-container-low border-outline-variant/30 text-on-surface hover:bg-surface-container'
-                          }`}
-                        >
-                          <div className="p-2 rounded-lg bg-primary/20 text-primary shrink-0">
-                            <FileText className="w-4 h-4" />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="font-semibold text-xs truncate">{msg.fileAttachment.name}</p>
-                            <p className="text-[10px] opacity-75">{formatFileSize(msg.fileAttachment.sizeBytes)}</p>
-                          </div>
-                          <Download className="w-3.5 h-3.5 opacity-75 shrink-0" />
-                        </a>
-                      )}
+                      {!msg.isDeleted && msg.fileAttachment && (() => {
+                        const safeHref = getSafeAttachmentUrl(msg.fileAttachment.dataUrl)
+                        const safeName = msg.fileAttachment.name?.replace(/[\r\n"']/g, '') || 'attachment'
+                        return (
+                          <a
+                            href={safeHref || '#'}
+                            download={safeName}
+                            target={safeHref && !safeHref.startsWith('data:') ? '_blank' : undefined}
+                            rel="noopener noreferrer"
+                            onClick={async (e) => {
+                              if (msg.fileAttachment?.mediaId && (!safeHref || safeHref === '#')) {
+                                e.preventDefault()
+                                try {
+                                  const { signed_url } = await getChatMediaSignedUrl(msg.fileAttachment.mediaId)
+                                  const context: AttachmentCryptoContext = activeGroup
+                                    ? { groupId: activeGroup.id }
+                                    : { userAId: currentUserId, userBId: activeContact?.userId }
+                                  const decrypted = await downloadAndDecryptChatAttachment(signed_url, context)
+                                  const downloadLink = document.createElement('a')
+                                  downloadLink.href = decrypted
+                                  downloadLink.download = safeName
+                                  document.body.appendChild(downloadLink)
+                                  downloadLink.click()
+                                  document.body.removeChild(downloadLink)
+                                } catch {
+                                  toast.error('Entschlüsselung des Dateianhangs fehlgeschlagen.')
+                                }
+                                return
+                              }
+                              if (!safeHref) {
+                                e.preventDefault()
+                                toast.error('Unsicherer oder ungültiger Dateianhang blockiert.')
+                              }
+                            }}
+                            className={`flex items-center gap-2.5 p-2.5 rounded-xl border transition-colors ${
+                              msg.isSelf
+                                ? 'bg-black/15 border-white/20 text-white hover:bg-black/25'
+                                : 'bg-surface-container-low border-outline-variant/30 text-on-surface hover:bg-surface-container'
+                            }`}
+                          >
+                            <div className="p-2 rounded-lg bg-primary/20 text-primary shrink-0">
+                              <FileText className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="font-semibold text-xs truncate">{safeName}</p>
+                              <p className="text-[10px] opacity-75">{formatFileSize(msg.fileAttachment.sizeBytes)}</p>
+                            </div>
+                            <Download className="w-3.5 h-3.5 opacity-75 shrink-0" />
+                          </a>
+                        )
+                      })()}
 
                       {/* Sticker Attachment */}
                       {!msg.isDeleted && msg.stickerAttachment && (
                         <div className="py-1">
                           <div
                             className="w-24 h-24 sm:w-28 sm:h-28 drop-shadow-md"
-                            dangerouslySetInnerHTML={{ __html: msg.stickerAttachment.svg }}
+                            dangerouslySetInnerHTML={{ __html: sanitizeSvg(msg.stickerAttachment.svg) }}
                             title={msg.stickerAttachment.label}
                           />
                           <div className="text-[10px] opacity-60 text-center mt-1">{msg.stickerAttachment.label}</div>
@@ -3537,7 +3807,7 @@ export function Messenger() {
                               >
                                 <div
                                   className="w-11 h-11 flex items-center justify-center"
-                                  dangerouslySetInnerHTML={{ __html: stk.svg }}
+                                  dangerouslySetInnerHTML={{ __html: sanitizeSvg(stk.svg) }}
                                 />
                                 <span className="text-[9px] text-on-surface-variant/80 truncate w-full text-center mt-1 font-medium">
                                   {stk.label}

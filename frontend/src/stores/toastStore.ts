@@ -3,12 +3,12 @@ import { create } from 'zustand'
 export interface Toast {
   id: number
   message: string
-  type: 'error' | 'success'
+  type: 'error' | 'success' | 'info'
 }
 
 interface ToastState {
   toasts: Toast[]
-  addToast: (message: string, type?: 'error' | 'success') => void
+  addToast: (message: string, type?: 'error' | 'success' | 'info') => void
   removeToast: (id: number) => void
   clearAll: () => void
 }
@@ -17,6 +17,7 @@ let _nextId = 0
 export const MAX_TOASTS = 5
 export const AUTO_DISMISS_SUCCESS_MS = 5000
 export const AUTO_DISMISS_ERROR_MS = 20000
+export const AUTO_DISMISS_INFO_MS = 5000
 
 export const useToastStore = create<ToastState>((set, get) => ({
   toasts: [],
@@ -31,7 +32,7 @@ export const useToastStore = create<ToastState>((set, get) => ({
       return { toasts: [...base, { id, message, type }] }
     })
 
-    const timeout = type === 'success' ? AUTO_DISMISS_SUCCESS_MS : AUTO_DISMISS_ERROR_MS
+    const timeout = type === 'error' ? AUTO_DISMISS_ERROR_MS : AUTO_DISMISS_SUCCESS_MS
     setTimeout(() => {
       set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }))
     }, timeout)
@@ -47,4 +48,5 @@ export const useToastStore = create<ToastState>((set, get) => ({
 export const toast = {
   error: (msg: string) => useToastStore.getState().addToast(msg, 'error'),
   success: (msg: string) => useToastStore.getState().addToast(msg, 'success'),
+  info: (msg: string) => useToastStore.getState().addToast(msg, 'info'),
 }
