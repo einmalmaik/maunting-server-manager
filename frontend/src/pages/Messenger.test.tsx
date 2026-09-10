@@ -1008,8 +1008,151 @@ describe('Messenger (Allround Chat)', () => {
       expect(socialApi.sendTypingSignal).toHaveBeenCalledWith(
         expect.objectContaining({
           status: 'typing',
+          recipient_id: 104,
         })
       )
     })
   })
+
+  it('synchronisiert Nachrichten plattformuebergreifend (Tauri <-> Web) per deterministischer Kanalverschluesselung', async () => {
+    const { encryptE2eeMessage } = await import('@/services/e2eeCrypto')
+    vi.mocked(socialApi.getFriends).mockResolvedValue([
+      {
+        id: 99, // Friendship table ID
+        user_id: 205, // Actual user ID
+        username: 'bob_desktop',
+        avatar_url: null,
+        status: 'accepted',
+        presence: { status: 'online', device_type: 'desktop' },
+      },
+    ])
+    // Both users have registered public keys (e.g. from Tauri or Web)
+    vi.mocked(socialApi.getE2eePublicKey).mockResolvedValue({
+      user_id: 205,
+      username: 'bob_desktop',
+      public_key: '{"kty":"RSA","n":"pub_bob"}',
+    })
+    vi.mocked(encryptE2eeMessage).mockResolvedValue('sv-e2ee-v1:cross-platform-sync-envelope')
+
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /bob_desktop/i })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole('button', { name: /bob_desktop/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Nachrichten in diesem Chat sind Ende-zu-Ende verschlüsselt.')).toBeInTheDocument()
+    })
+
+    const input = screen.getByPlaceholderText('Nachricht schreiben …')
+    fireEvent.change(input, { target: { value: 'Nachricht aus Tauri' } })
+
+    // Typing signal uses actual userId (205), not friendship id (99)
+    await waitFor(() => {
+      expect(socialApi.sendTypingSignal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'typing',
+          recipient_id: 205,
+        })
+      )
+    })
+
+    const sendBtn = screen.getByTitle('Senden')
+    fireEvent.click(sendBtn)
+
+    // Message is encrypted via deterministic channel key and relayed with recipient_id = 205
+    await waitFor(() => {
+      expect(encryptE2eeMessage).toHaveBeenCalledWith(
+        expect.stringContaining('Nachricht aus Tauri'),
+        1,
+        205
+      )
+      expect(socialApi.relayE2eeEnvelope).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recipient_id: 205,
+          ciphertext_envelope: 'sv-e2ee-v1:cross-platform-sync-envelope',
+        })
+      )
+    })
+  })
+
+  it('entschluesselt empfangene Nachrichten aus Tauri/Web zuverlaessig ueber den synchronisierten Direktkanal', async () => {
+    const { decryptE2eeMessage, decryptE2eeHybrid } = await import('@/services/e2eeCrypto')
+    vi.mocked(socialApi.getFriends).mockResolvedValue([
+      {
+        id: 1,
+        user_id: 206,
+        username: 'charlie_e2ee',
+        avatar_url: null,
+        status: 'accepted',
+        presence: { status: 'online' },
+      },
+    ])
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([
+      {
+        id: 501,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: 'sv-e2ee-v1:message-from-tauri',
+        created_at: '2026-09-10T12:00:00Z',
+      },
+      {
+        id: 502,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: 'sv-e2ee-v1:message-from-web',
+        created_at: '2026-09-10T12:01:00Z',
+      },
+      {
+        id: 503,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: 'sv-e2ee-hybrid-v1:unmatched-device-key',
+        created_at: '2026-09-10T12:02:00Z',
+      },
+    ])
+
+    // Direct channel decryption succeeds for cross-platform messages
+    vi.mocked(decryptE2eeMessage).mockImplementation(async (env) => {
+      if (env.includes('message-from-tauri')) {
+        return JSON.stringify({
+          sender_id: 206,
+          text: 'Nachricht aus Tauri auf Web lesbar',
+          timestamp: '2026-09-10T12:00:00Z',
+        })
+      }
+      if (env.includes('message-from-web')) {
+        return JSON.stringify({
+          sender_id: 206,
+          text: 'Nachricht aus Web auf Tauri lesbar',
+          timestamp: '2026-09-10T12:01:00Z',
+        })
+      }
+      return ''
+    })
+
+    // Unmatched legacy hybrid envelope throws
+    vi.mocked(decryptE2eeHybrid).mockRejectedValue(new Error('Kein passender RSA-Schluessel'))
+
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /charlie_e2ee/i })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole('button', { name: /charlie_e2ee/i }))
+
+    // Cross-platform messages must be decoded and readable, and unmatched legacy hybrid safely shows encrypted notice
+    await waitFor(() => {
+      expect(screen.getByText('Nachricht aus Tauri auf Web lesbar')).toBeInTheDocument()
+      expect(screen.getByText('Nachricht aus Web auf Tauri lesbar')).toBeInTheDocument()
+      expect(screen.getByText('Verschlüsselte Nachricht')).toBeInTheDocument()
+    })
+  })
 })
+

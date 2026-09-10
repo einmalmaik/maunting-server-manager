@@ -35,7 +35,6 @@ import {
   deriveBlindMailboxId,
   encryptE2eeMessage,
   decryptE2eeMessage,
-  encryptE2eeHybrid,
   decryptE2eeHybrid,
   getOrGenerateLocalKeyPair,
   type LocalE2eeKeyPair,
@@ -87,7 +86,6 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
   const [sending, setSending] = useState(false)
   const [blindMailboxId, setBlindMailboxId] = useState<string>('')
   const [localKeyPair, setLocalKeyPair] = useState<LocalE2eeKeyPair | null>(null)
-  const [recipientPublicKeyJwk, setRecipientPublicKeyJwk] = useState<string | null>(null)
 
   // Attachments
   const [isNotePickerOpen, setIsNotePickerOpen] = useState(false)
@@ -112,7 +110,10 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
       if (!active) return
       setLocalKeyPair(kp)
       try {
-        await setE2eePublicKey(kp.publicKeyJwk)
+        const existing = await getE2eePublicKey(currentUserId)
+        if (!existing?.public_key) {
+          await setE2eePublicKey(kp.publicKeyJwk)
+        }
       } catch {
         // Non-blocking key registration
       }
@@ -123,21 +124,6 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
     }
   }, [open, currentUserId])
 
-  // Fetch target user's public key for hybrid asymmetric encryption
-  useEffect(() => {
-    if (!open || !targetUserId) return
-    let active = true
-
-    getE2eePublicKey(targetUserId).then((res) => {
-      if (active && res?.public_key) {
-        setRecipientPublicKeyJwk(res.public_key)
-      }
-    }).catch(() => {})
-
-    return () => {
-      active = false
-    }
-  }, [open, targetUserId])
 
   // Derive deterministic blind mailbox ID when friend changes
   useEffect(() => {
@@ -277,12 +263,7 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
 
       const payload = JSON.stringify(payloadObj)
 
-      let ciphertext: string
-      if (recipientPublicKeyJwk && localKeyPair) {
-        ciphertext = await encryptE2eeHybrid(payload, recipientPublicKeyJwk, localKeyPair.publicKeyJwk)
-      } else {
-        ciphertext = await encryptE2eeMessage(payload, currentUserId, targetUserId)
-      }
+      const ciphertext = await encryptE2eeMessage(payload, currentUserId, targetUserId)
 
       await relayE2eeEnvelope({
         blind_mailbox_id: blindMailboxId,

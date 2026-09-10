@@ -92,7 +92,6 @@ import {
   deriveGroupBlindMailboxId,
   encryptE2eeMessage,
   decryptE2eeMessage,
-  encryptE2eeHybrid,
   decryptE2eeHybrid,
   encryptGroupE2eeMessage,
   decryptGroupE2eeMessage,
@@ -426,7 +425,6 @@ export function Messenger() {
   const [sending, setSending] = useState(false)
   const [blindMailboxId, setBlindMailboxId] = useState<string>('')
   const [localKeyPair, setLocalKeyPair] = useState<LocalE2eeKeyPair | null>(null)
-  const [recipientPublicKeyJwk, setRecipientPublicKeyJwk] = useState<string | null>(null)
 
   // Attachments
   const [isNotePickerOpen, setIsNotePickerOpen] = useState(false)
@@ -499,7 +497,7 @@ export function Messenger() {
         void sendTypingSignal({
           blind_mailbox_id: blindMailboxId,
           status: 'typing',
-          recipient_id: activeContact?.id ?? null,
+          recipient_id: activeContact?.userId ?? null,
         }).catch(() => {})
       }
     } else {
@@ -508,7 +506,7 @@ export function Messenger() {
         void sendTypingSignal({
           blind_mailbox_id: blindMailboxId,
           status: 'idle',
-          recipient_id: activeContact?.id ?? null,
+          recipient_id: activeContact?.userId ?? null,
         }).catch(() => {})
       }
     }
@@ -525,7 +523,10 @@ export function Messenger() {
       if (!active) return
       setLocalKeyPair(kp)
       try {
-        await setE2eePublicKey(kp.publicKeyJwk)
+        const existing = await getE2eePublicKey(currentUserId)
+        if (!existing?.public_key) {
+          await setE2eePublicKey(kp.publicKeyJwk)
+        }
       } catch {
         // Non-blocking
       }
@@ -853,7 +854,6 @@ export function Messenger() {
     let active = true
 
     if (activeGroup) {
-      setRecipientPublicKeyJwk(null)
       setMessages([])
       setBlindMailboxId('')
       activeMailboxIdRef.current = ''
@@ -876,7 +876,6 @@ export function Messenger() {
       })
     } else if (activeContact && currentUserId) {
       const targetUserId = activeContact.userId
-      setRecipientPublicKeyJwk(null)
       setMessages([])
       setBlindMailboxId('')
       activeMailboxIdRef.current = ''
@@ -899,17 +898,11 @@ export function Messenger() {
         }
       })
 
-      getE2eePublicKey(targetUserId).then((res) => {
-        if (active && res?.public_key) {
-          setRecipientPublicKeyJwk(res.public_key)
-        }
-      }).catch(() => {})
     } else {
       activeMailboxIdRef.current = ''
       highestIncomingIdAcknowledgedRef.current = 0
       highestIncomingIdDeliveredRef.current = 0
       setBlindMailboxId('')
-      setRecipientPublicKeyJwk(null)
       setMessages([])
       useMessengerNotificationStore.getState().setActiveMailboxId(null)
     }
@@ -937,11 +930,7 @@ export function Messenger() {
         })
       } else if (activeContact) {
         const targetUserId = activeContact.userId
-        if (recipientPublicKeyJwk && localKeyPair) {
-          ciphertext = await encryptE2eeHybrid(payload, recipientPublicKeyJwk, localKeyPair.publicKeyJwk)
-        } else {
-          ciphertext = await encryptE2eeMessage(payload, currentUserId, targetUserId)
-        }
+        ciphertext = await encryptE2eeMessage(payload, currentUserId, targetUserId)
         await relayE2eeEnvelope({
           blind_mailbox_id: blindMailboxId,
           ciphertext_envelope: ciphertext,
@@ -1407,11 +1396,7 @@ export function Messenger() {
         })
       } else if (activeContact) {
         const targetUserId = activeContact.userId
-        if (recipientPublicKeyJwk && localKeyPair) {
-          ciphertext = await encryptE2eeHybrid(payload, recipientPublicKeyJwk, localKeyPair.publicKeyJwk)
-        } else {
-          ciphertext = await encryptE2eeMessage(payload, currentUserId, targetUserId)
-        }
+        ciphertext = await encryptE2eeMessage(payload, currentUserId, targetUserId)
         await relayE2eeEnvelope({
           blind_mailbox_id: blindMailboxId,
           ciphertext_envelope: ciphertext,
@@ -1428,7 +1413,7 @@ export function Messenger() {
         void sendTypingSignal({
           blind_mailbox_id: blindMailboxId,
           status: 'idle',
-          recipient_id: activeContact?.id ?? null,
+          recipient_id: activeContact?.userId ?? null,
         }).catch(() => {})
       }
       await loadMessages()
@@ -1484,7 +1469,7 @@ export function Messenger() {
         void sendTypingSignal({
           blind_mailbox_id: blindMailboxId,
           status: 'recording',
-          recipient_id: activeContact?.id ?? null,
+          recipient_id: activeContact?.userId ?? null,
         }).catch(() => {})
       }
 
@@ -1501,7 +1486,7 @@ export function Messenger() {
       void sendTypingSignal({
         blind_mailbox_id: blindMailboxId,
         status: 'idle',
-        recipient_id: activeContact?.id ?? null,
+        recipient_id: activeContact?.userId ?? null,
       }).catch(() => {})
     }
 

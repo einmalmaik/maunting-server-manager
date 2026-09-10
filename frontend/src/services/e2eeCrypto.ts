@@ -41,6 +41,12 @@ export const E2EE_TEAM_ENVELOPE_SPEC: VersionedCipherEnvelopeSpec = {
   subject: 'e2ee team chat envelope',
 }
 
+export const E2EE_GROUP_ENVELOPE_SPEC: VersionedCipherEnvelopeSpec = {
+  currentPrefix: 'sv-e2ee-group-v1:',
+  familyPrefix: 'sv-e2ee-group-',
+  subject: 'e2ee group chat envelope',
+}
+
 export const E2EE_HYBRID_ENVELOPE_SPEC: VersionedCipherEnvelopeSpec = {
   currentPrefix: 'sv-e2ee-hybrid-v1:',
   familyPrefix: 'sv-e2ee-hybrid-',
@@ -254,7 +260,10 @@ export async function decryptGroupE2eeMessage(
   groupPassphraseOrKey?: string
 ): Promise<string> {
   try {
-    const parsed = parseEnvelope(E2EE_TEAM_ENVELOPE_SPEC, envelopeString)
+    const spec = envelopeString.startsWith('sv-e2ee-group-')
+      ? E2EE_GROUP_ENVELOPE_SPEC
+      : E2EE_TEAM_ENVELOPE_SPEC
+    const parsed = parseEnvelope(spec, envelopeString)
     const aad = `msm:group:aad:${groupId}`
     const key = await deriveGroupChannelKey(groupId, groupPassphraseOrKey)
     return await decryptString(parsed.payload, key, aad)
