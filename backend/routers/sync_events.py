@@ -16,7 +16,7 @@ from fastapi.responses import StreamingResponse
 from starlette.websockets import WebSocketDisconnect
 from sqlalchemy.orm import Session
 
-from database import get_db
+from database import SessionLocal, get_db
 from dependencies import get_current_user, get_current_user_for_ws, ws_subprotokoll
 from models.user import User
 from services import team_service
@@ -113,54 +113,79 @@ async def sync_events_alias(
 @sync_alias_router.websocket("/events/ws")
 async def sync_events_ws(
     websocket: WebSocket,
-    db: Session = Depends(get_db),
 ) -> None:
-    """WebSocket-Endpunkt für autorisierte Live-Synchronisation."""
-    try:
-        user = get_current_user_for_ws(websocket, db)
-    except Exception:
-        await websocket.close(code=1008)
-        return
+    """WebSocket-Endpunkt für autorisierte Live-Synchronisation.
+
+    Stabilitäts-Invariante:
+    - Keine DB-Session-Leaks: Auth und Team-Auflösung erfolgen in einem kurzlebigen Session-Scope,
+      sodass während der potenziell stundenlangen WS-Verbindung keine DB-Verbindung blockiert wird.
+    - Robuste Nebenläufigkeit: Sende- und Empfangs-Schleifen sind gekoppelt; bricht eine Seite
+      ab, wird die andere unmittelbar gecancelt und das Abo atomar entfernt.
+    """
+    with SessionLocal() as db:
+        try:
+            user = get_current_user_for_ws(websocket, db)
+            user_id = user.id
+            is_admin = bool(user.is_owner)
+            user_teams = team_service.list_user_teams(db, user)
+            team_ids = [t.id for t in user_teams]
+        except Exception:
+            await websocket.close(code=1008)
+            return
 
     subprotocol = ws_subprotokoll(websocket)
     await websocket.accept(subprotocol=subprotocol)
 
-    user_teams = team_service.list_user_teams(db, user)
-    team_ids = [t.id for t in user_teams]
-    is_admin = bool(user.is_owner)
-
     conn_id, queue = SyncEventService.subscribe(
-        user_id=user.id,
+        user_id=user_id,
         team_ids=team_ids,
         is_admin=is_admin,
     )
+    ws_lock = asyncio.Lock()
 
     async def _send_loop():
         try:
             while True:
                 event = await queue.get()
-                await websocket.send_json(event)
+                async with ws_lock:
+                    await websocket.send_json(event)
+        except (asyncio.CancelledError, WebSocketDisconnect):
+            raise
         except Exception:
             pass
 
-    send_task = asyncio.create_task(_send_loop())
-
-    try:
+    async def _recv_loop():
         # Initial Ready Signal
-        await websocket.send_json({
-            "type": "ready",
-            "status": "connected",
-            "user_id": user.id,
-            "conn_id": conn_id,
-        })
+        async with ws_lock:
+            await websocket.send_json({
+                "type": "ready",
+                "status": "connected",
+                "user_id": user_id,
+                "conn_id": conn_id,
+            })
         while True:
             data = await websocket.receive_json()
             if data.get("type") == "ping":
-                await websocket.send_json({"type": "pong"})
+                async with ws_lock:
+                    await websocket.send_json({"type": "pong"})
+
+    send_task = asyncio.create_task(_send_loop())
+    recv_task = asyncio.create_task(_recv_loop())
+
+    try:
+        done, pending = await asyncio.wait(
+            [send_task, recv_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
     except WebSocketDisconnect:
         pass
     except Exception as e:
         _log.debug("Sync WebSocket getrennt für %s: %s", conn_id, e)
     finally:
         send_task.cancel()
+        recv_task.cancel()
+        await asyncio.gather(send_task, recv_task, return_exceptions=True)
         SyncEventService.unsubscribe(conn_id)

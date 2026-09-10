@@ -25,8 +25,8 @@ export const STORAGE_KEYS = {
 
 export interface OutboxMutation {
   id: string
-  entity: 'note' | 'calendar'
-  action: 'create' | 'update' | 'delete' | 'toggle_pin' | 'toggle_archive'
+  entity: 'note' | 'calendar' | 'message'
+  action: 'create' | 'update' | 'delete' | 'toggle_pin' | 'toggle_archive' | 'relay'
   entityId: string
   payload?: any
   timestamp: string
@@ -71,12 +71,14 @@ function setStorageItem(key: string, value: string): void {
 
 export function clearMemoryStoreForTesting(): void {
   memoryStore = {}
+  isReplaying = false
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
       window.localStorage.removeItem(STORAGE_KEYS.NOTES)
       window.localStorage.removeItem(STORAGE_KEYS.CALENDAR)
       window.localStorage.removeItem(STORAGE_KEYS.OUTBOX)
       window.localStorage.removeItem(STORAGE_KEYS.LAST_SYNC)
+      window.localStorage.removeItem('msm_outbox_replay_lease')
     }
   } catch {
     // ignore
@@ -180,17 +182,41 @@ export function setOutbox(mutations: OutboxMutation[]): void {
   }
 }
 
-export function enqueueMutation(mutation: Omit<OutboxMutation, 'id' | 'timestamp' | 'retryCount'>): OutboxMutation {
+export function enqueueMutation(
+  mutation: Omit<OutboxMutation, 'id' | 'timestamp' | 'retryCount'> & { id?: string }
+): OutboxMutation {
   const fullMutation: OutboxMutation = {
     ...mutation,
-    id: 'mut-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
+    id: mutation.id || ('mut-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7)),
     timestamp: new Date().toISOString(),
     retryCount: 0,
   }
   const current = getOutbox()
-  current.push(fullMutation)
-  setOutbox(current)
+  // Deduplizierung in der lokalen Warteschlange nach Mutation-ID
+  if (!current.some((m) => m.id === fullMutation.id)) {
+    current.push(fullMutation)
+    setOutbox(current)
+  }
   return fullMutation
+}
+
+/**
+ * Reiht eine E2EE-Nachricht in die persistente Offline-Outbox ein.
+ * Garantiert strikte FIFO-Reihenfolge und Idempotenz via Client-UUID nach Reconnect.
+ */
+export function enqueueMessageMutation(payload: {
+  blind_mailbox_id: string
+  ciphertext_envelope: string
+  recipient_id?: number | null
+  client_uuid: string
+}): OutboxMutation {
+  return enqueueMutation({
+    id: payload.client_uuid,
+    entity: 'message',
+    action: 'relay',
+    entityId: payload.blind_mailbox_id,
+    payload,
+  })
 }
 
 // ── Last-Write-Wins (LWW) Merge Functions ──
@@ -278,19 +304,21 @@ export async function replayOutbox(): Promise<{ processed: number; failed: numbe
     return { processed: 0, failed: 0, remaining: getOutbox().length }
   }
 
-  const outbox = getOutbox()
-  if (outbox.length === 0) {
+  const initialOutbox = getOutbox()
+  if (initialOutbox.length === 0) {
     return { processed: 0, failed: 0, remaining: 0 }
   }
 
   isReplaying = true
   let processed = 0
   let failed = 0
-  const remainingMutations: OutboxMutation[] = []
 
   try {
-    for (let i = 0; i < outbox.length; i++) {
-      const mutation = outbox[i]
+    while (true) {
+      const currentOutbox = getOutbox()
+      if (currentOutbox.length === 0) break
+
+      const mutation = currentOutbox[0]
       try {
         if (mutation.entity === 'note') {
           if (mutation.action === 'create') {
@@ -309,11 +337,13 @@ export async function replayOutbox(): Promise<{ processed: number; failed: numbe
 
               // Update any subsequent queued mutations that referenced the temporary UID
               if (oldUid !== newUid) {
-                for (let j = i + 1; j < outbox.length; j++) {
-                  if (outbox[j].entity === 'note' && outbox[j].entityId === oldUid) {
-                    outbox[j].entityId = newUid
+                const liveOutbox = getOutbox()
+                for (const m of liveOutbox) {
+                  if (m.entity === 'note' && m.entityId === oldUid) {
+                    m.entityId = newUid
                   }
                 }
+                setOutbox(liveOutbox)
               }
             }
           } else if (mutation.action === 'update') {
@@ -351,11 +381,13 @@ export async function replayOutbox(): Promise<{ processed: number; failed: numbe
 
               // Update any subsequent queued mutations that referenced the temporary UID
               if (oldUid !== newUid) {
-                for (let j = i + 1; j < outbox.length; j++) {
-                  if (outbox[j].entity === 'calendar' && outbox[j].entityId === oldUid) {
-                    outbox[j].entityId = newUid
+                const liveOutbox = getOutbox()
+                for (const m of liveOutbox) {
+                  if (m.entity === 'calendar' && m.entityId === oldUid) {
+                    m.entityId = newUid
                   }
                 }
+                setOutbox(liveOutbox)
               }
             }
           } else if (mutation.action === 'update') {
@@ -368,7 +400,31 @@ export async function replayOutbox(): Promise<{ processed: number; failed: numbe
               method: 'DELETE',
             })
           }
+        } else if (mutation.entity === 'message') {
+          if (mutation.action === 'relay' || mutation.action === 'create') {
+            const res = await api<any>('/social/e2ee/relay', {
+              method: 'POST',
+              body: JSON.stringify(mutation.payload),
+            })
+            if (res && res.id) {
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(
+                  new CustomEvent('msm:message-confirmed', {
+                    detail: {
+                      client_uuid: mutation.payload?.client_uuid || mutation.id,
+                      envelope_id: res.id,
+                      blind_mailbox_id: res.blind_mailbox_id,
+                    },
+                  })
+                )
+              }
+            }
+          }
         }
+
+        // Successfully processed: remove from outbox atomically
+        const afterSuccessOutbox = getOutbox()
+        setOutbox(afterSuccessOutbox.filter((m) => m.id !== mutation.id))
         processed++
       } catch (err: any) {
         const isNetworkErr =
@@ -379,38 +435,47 @@ export async function replayOutbox(): Promise<{ processed: number; failed: numbe
           (typeof navigator !== 'undefined' && !navigator.onLine)
 
         if (isNetworkErr) {
-          remainingMutations.push(mutation, ...outbox.slice(i + 1))
           break
         } else if (err?.status === 404 || err?.status === 400) {
+          const afterErrOutbox = getOutbox()
+          setOutbox(afterErrOutbox.filter((m) => m.id !== mutation.id))
           failed++
         } else {
-          mutation.retryCount = (mutation.retryCount || 0) + 1
-          if (mutation.retryCount > 5) {
-            failed++
-          } else {
-            remainingMutations.push(mutation)
+          const afterErrOutbox = getOutbox()
+          const idx = afterErrOutbox.findIndex((m) => m.id === mutation.id)
+          if (idx >= 0) {
+            const retryCount = (afterErrOutbox[idx].retryCount || 0) + 1
+            if (retryCount > 5) {
+              afterErrOutbox.splice(idx, 1)
+              failed++
+            } else {
+              afterErrOutbox[idx].retryCount = retryCount
+            }
+            setOutbox(afterErrOutbox)
           }
+          break
         }
       }
     }
   } finally {
-    setOutbox(remainingMutations)
     isReplaying = false
 
+    const remaining = getOutbox().length
     if (typeof window !== 'undefined') {
       if (processed > 0) {
         window.dispatchEvent(new CustomEvent('msm:notes-updated'))
         window.dispatchEvent(new CustomEvent('msm:calendar-updated'))
+        window.dispatchEvent(new CustomEvent('msm:messages-updated'))
       }
       window.dispatchEvent(
         new CustomEvent('msm:sync-status', {
-          detail: { processed, failed, remaining: remainingMutations.length },
+          detail: { processed, failed, remaining },
         })
       )
     }
   }
 
-  return { processed, failed, remaining: remainingMutations.length }
+  return { processed, failed, remaining: getOutbox().length }
 }
 
 // ── Public Offline-First Notes API ──
@@ -841,11 +906,18 @@ export function startLiveSync(): () => void {
   }
 
   let isCancelled = false
+  let stableTimer: ReturnType<typeof setTimeout> | null = null
+  let reconnectAttempts = 0
+  const RECONNECT_DELAYS = [1000, 2000, 5000, 10000, 20000]
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
 
   const stop = () => {
     isCancelled = true
     isLiveConnected = false
+    if (stableTimer) {
+      clearTimeout(stableTimer)
+      stableTimer = null
+    }
     if (controller) {
       try {
         controller.abort()
@@ -865,8 +937,12 @@ export function startLiveSync(): () => void {
   abortLiveSync = stop
 
   const startFallbackPolling = () => {
-    if (fallbackPollingTimer) return
+    if (isCancelled || fallbackPollingTimer) return
     fallbackPollingTimer = setInterval(() => {
+      if (isCancelled) {
+        stopFallbackPolling()
+        return
+      }
       if (typeof navigator !== 'undefined' && !navigator.onLine) return
       void replayOutbox()
       if (typeof window !== 'undefined') {
@@ -883,14 +959,19 @@ export function startLiveSync(): () => void {
     }
   }
 
-  const scheduleReconnect = (delayMs = 3000) => {
+  const scheduleReconnect = () => {
     if (isCancelled || reconnectTimer) return
+    const baseDelay = RECONNECT_DELAYS[Math.min(reconnectAttempts, RECONNECT_DELAYS.length - 1)]
+    reconnectAttempts++
+    // Jitter: Streuung zwischen 85% und 100% des Base-Delays
+    const minDelay = Math.floor(baseDelay * 0.85)
+    const jitteredDelay = minDelay + Math.floor(Math.random() * (baseDelay - minDelay + 1))
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null
       if (!isCancelled) {
         void connectStream()
       }
-    }, delayMs)
+    }, jitteredDelay)
   }
 
   const connectStream = async () => {
@@ -903,14 +984,20 @@ export function startLiveSync(): () => void {
       })
 
       if (!res.ok || !res.body) {
-        isLiveConnected = false
-        startFallbackPolling()
-        scheduleReconnect(5000)
         return
       }
 
       isLiveConnected = true
       stopFallbackPolling()
+
+      // Flapping-Schutz: reconnectAttempts erst nach 2000ms stabiler Verbindung zurücksetzen
+      if (stableTimer) clearTimeout(stableTimer)
+      stableTimer = setTimeout(() => {
+        if (!isCancelled && isLiveConnected) {
+          reconnectAttempts = 0
+        }
+        stableTimer = null
+      }, 2000)
 
       // Bei gelungener Verbindung sofort Outbox abspielen
       void replayOutbox()
@@ -954,12 +1041,18 @@ export function startLiveSync(): () => void {
     } catch {
       // Stream error or disconnection
     } finally {
+      if (stableTimer) {
+        clearTimeout(stableTimer)
+        stableTimer = null
+      }
       isLiveConnected = false
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('msm:sync-status', { detail: { connected: false } }))
       }
-      startFallbackPolling()
-      scheduleReconnect(4000)
+      if (!isCancelled) {
+        startFallbackPolling()
+        scheduleReconnect()
+      }
     }
   }
 

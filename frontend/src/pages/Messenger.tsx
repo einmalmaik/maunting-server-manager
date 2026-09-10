@@ -84,6 +84,7 @@ import {
   loadCalendarEventsOfflineFirst,
   saveNoteOffline,
   saveCalendarEventOffline,
+  enqueueMessageMutation,
 } from '@/lib/offlineSync'
 import type { NoteItem } from '@/pages/Notes'
 import type { CalendarEventItem } from '@/pages/Calendar'
@@ -222,6 +223,7 @@ export interface StoryReplyAttachment {
 
 export interface ChatMessage {
   id: number
+  clientUuid?: string
   senderId: number
   senderName?: string
   text: string
@@ -897,7 +899,6 @@ export function Messenger() {
           useMessengerNotificationStore.getState().setActiveMailboxId(mid)
         }
       })
-
     } else {
       activeMailboxIdRef.current = ''
       highestIncomingIdAcknowledgedRef.current = 0
@@ -920,13 +921,18 @@ export function Messenger() {
   const sendE2eeControlMessage = async (payloadObj: Record<string, unknown>) => {
     if (!blindMailboxId || !currentUserId || (!activeContact && !activeGroup)) return
     try {
-      const payload = JSON.stringify(payloadObj)
+      const clientUuid =
+        typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : 'ctrl-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9)
+      const payload = JSON.stringify({ ...payloadObj, client_uuid: clientUuid })
       let ciphertext: string
       if (activeGroup) {
         ciphertext = await encryptGroupE2eeMessage(payload, activeGroup.id)
         await relayE2eeEnvelope({
           blind_mailbox_id: blindMailboxId,
           ciphertext_envelope: ciphertext,
+          client_uuid: clientUuid,
         })
       } else if (activeContact) {
         const targetUserId = activeContact.userId
@@ -935,6 +941,7 @@ export function Messenger() {
           blind_mailbox_id: blindMailboxId,
           ciphertext_envelope: ciphertext,
           recipient_id: targetUserId,
+          client_uuid: clientUuid,
         })
       }
     } catch {
@@ -954,6 +961,8 @@ export function Messenger() {
       const envelopes = await fetchE2eeEnvelopes(currentMid)
       if (activeMailboxIdRef.current && activeMailboxIdRef.current !== currentMid) return
       const decryptedList: ChatMessage[] = []
+      const seenEnvelopeIds = new Set<number>()
+      const seenClientUuids = new Set<string>()
 
       // Dictionaries to track edits, deletions, and read receipts across envelopes
       const editMap = new Map<number, { newText: string; editedAt: string }>()
@@ -988,9 +997,13 @@ export function Messenger() {
       )
 
       for (const { env, plain, ok } of decryptedEnvelopes) {
+        if (seenEnvelopeIds.has(env.id)) continue
+        seenEnvelopeIds.add(env.id)
+
         if (!ok || !plain) {
           decryptedList.push({
             id: env.id,
+            clientUuid: env.client_uuid || undefined,
             senderId: activeContact ? activeContact.userId : 0,
             text: 'Verschlüsselte Nachricht',
             createdAt: env.created_at,
@@ -1051,6 +1064,14 @@ export function Messenger() {
             }
 
             // Normal Chat Message
+            const clientUuid = (parsed.client_uuid as string) || env.client_uuid || undefined
+            if (clientUuid && seenClientUuids.has(clientUuid)) {
+              continue
+            }
+            if (clientUuid) {
+              seenClientUuids.add(clientUuid)
+            }
+
             let senderId = parsed.sender_id || (activeContact ? activeContact.userId : 0)
             let senderName = parsed.sender_name || parsed.sender_username
             let isSelf = senderId === currentUserId
@@ -1061,6 +1082,7 @@ export function Messenger() {
 
             decryptedList.push({
               id: env.id,
+              clientUuid,
               senderId,
               senderName,
               text: parsed.text || '',
@@ -1078,6 +1100,14 @@ export function Messenger() {
           }
         } catch {
           // Legacy / simple text fallback
+          const clientUuid = env.client_uuid || undefined
+          if (clientUuid && seenClientUuids.has(clientUuid)) {
+            continue
+          }
+          if (clientUuid) {
+            seenClientUuids.add(clientUuid)
+          }
+
           let text = plain
           let isSelf = false
           let senderId = activeContact ? activeContact.userId : 0
@@ -1091,6 +1121,7 @@ export function Messenger() {
           }
           decryptedList.push({
             id: env.id,
+            clientUuid,
             senderId,
             text,
             createdAt: env.created_at,
@@ -1173,7 +1204,19 @@ export function Messenger() {
       // Abort if the user has navigated to another chat in the meantime
       if (activeMailboxIdRef.current && activeMailboxIdRef.current !== currentMid) return
 
-      setMessages(processedList)
+      setMessages((prev) => {
+        const processedClientUuids = new Set<string>()
+        for (const m of processedList) {
+          if (m.clientUuid) processedClientUuids.add(m.clientUuid)
+        }
+        const pendingOptimistic = prev.filter(
+          (m) => m.isSelf && m.clientUuid && !processedClientUuids.has(m.clientUuid)
+        )
+        if (pendingOptimistic.length === 0) {
+          return processedList
+        }
+        return [...processedList, ...pendingOptimistic]
+      })
 
       // Kürzliche Nachrichten lokal cachen für 0ms Sofort-Laden beim nächsten Aufruf
       try {
@@ -1303,9 +1346,17 @@ export function Messenger() {
       }
     }
 
+    const handleMessagesUpdated = () => {
+      void loadMessages(false)
+    }
+
     window.addEventListener('msm:sync-event', handleSync)
+    window.addEventListener('msm:messages-updated', handleMessagesUpdated)
+    window.addEventListener('msm:message-confirmed', handleMessagesUpdated)
     return () => {
       window.removeEventListener('msm:sync-event', handleSync)
+      window.removeEventListener('msm:messages-updated', handleMessagesUpdated)
+      window.removeEventListener('msm:message-confirmed', handleMessagesUpdated)
       if (partnerActivityTimeoutRef.current) {
         clearTimeout(partnerActivityTimeoutRef.current)
       }
@@ -1370,7 +1421,13 @@ export function Messenger() {
 
     setSending(true)
     try {
+      const clientUuid =
+        typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : 'msg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9)
+
       const payloadObj: Record<string, unknown> = {
+        client_uuid: clientUuid,
         sender_id: currentUserId,
         sender_name: user?.username || 'Ich',
         text: rawText,
@@ -1390,18 +1447,106 @@ export function Messenger() {
 
       if (activeGroup) {
         ciphertext = await encryptGroupE2eeMessage(payload, activeGroup.id)
-        await relayE2eeEnvelope({
-          blind_mailbox_id: blindMailboxId,
-          ciphertext_envelope: ciphertext,
-        })
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          enqueueMessageMutation({
+            blind_mailbox_id: blindMailboxId,
+            ciphertext_envelope: ciphertext,
+            client_uuid: clientUuid,
+          })
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: Date.now(),
+              clientUuid,
+              senderId: currentUserId,
+              senderName: user?.username || 'Ich',
+              text: rawText,
+              createdAt: new Date().toISOString(),
+              isSelf: true,
+            },
+          ])
+          toast.info('Nachricht offline in Warteschlange eingereiht.')
+        } else {
+          try {
+            await relayE2eeEnvelope({
+              blind_mailbox_id: blindMailboxId,
+              ciphertext_envelope: ciphertext,
+              client_uuid: clientUuid,
+            })
+          } catch {
+            enqueueMessageMutation({
+              blind_mailbox_id: blindMailboxId,
+              ciphertext_envelope: ciphertext,
+              client_uuid: clientUuid,
+            })
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: Date.now(),
+                clientUuid,
+                senderId: currentUserId,
+                senderName: user?.username || 'Ich',
+                text: rawText,
+                createdAt: new Date().toISOString(),
+                isSelf: true,
+              },
+            ])
+            toast.info('Nachricht offline in Warteschlange eingereiht (Verbindungsfehler).')
+          }
+        }
       } else if (activeContact) {
         const targetUserId = activeContact.userId
         ciphertext = await encryptE2eeMessage(payload, currentUserId, targetUserId)
-        await relayE2eeEnvelope({
-          blind_mailbox_id: blindMailboxId,
-          ciphertext_envelope: ciphertext,
-          recipient_id: targetUserId,
-        })
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          enqueueMessageMutation({
+            blind_mailbox_id: blindMailboxId,
+            ciphertext_envelope: ciphertext,
+            recipient_id: targetUserId,
+            client_uuid: clientUuid,
+          })
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: Date.now(),
+              clientUuid,
+              senderId: currentUserId,
+              senderName: user?.username || 'Ich',
+              text: rawText,
+              createdAt: new Date().toISOString(),
+              isSelf: true,
+            },
+          ])
+          toast.info('Nachricht offline in Warteschlange eingereiht.')
+        } else {
+          try {
+            await relayE2eeEnvelope({
+              blind_mailbox_id: blindMailboxId,
+              ciphertext_envelope: ciphertext,
+              recipient_id: targetUserId,
+              client_uuid: clientUuid,
+            })
+          } catch {
+            enqueueMessageMutation({
+              blind_mailbox_id: blindMailboxId,
+              ciphertext_envelope: ciphertext,
+              recipient_id: targetUserId,
+              client_uuid: clientUuid,
+            })
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: Date.now(),
+                clientUuid,
+                senderId: currentUserId,
+                senderName: user?.username || 'Ich',
+                text: rawText,
+                createdAt: new Date().toISOString(),
+                isSelf: true,
+              },
+            ])
+            toast.info('Nachricht offline in Warteschlange eingereiht (Verbindungsfehler).')
+          }
+        }
       }
 
       setInputText('')

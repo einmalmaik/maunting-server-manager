@@ -98,6 +98,7 @@ export interface BlindEnvelopeItem {
   id: number
   blind_mailbox_id: string
   ciphertext_envelope: string
+  client_uuid?: string | null
   created_at: string
 }
 
@@ -274,6 +275,7 @@ export async function relayE2eeEnvelope(payload: {
   blind_mailbox_id: string
   ciphertext_envelope: string
   recipient_id?: number | null
+  client_uuid?: string | null
 }): Promise<BlindEnvelopeItem> {
   return api<BlindEnvelopeItem>('/social/e2ee/relay', {
     method: 'POST',
