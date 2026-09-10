@@ -109,7 +109,6 @@ import {
   loadChatWallpaperConfig,
 } from '@/components/social/ChatWallpaper'
 import { ChatWallpaperModal } from '@/components/social/ChatWallpaperModal'
-import { sendeGeraeteBenachrichtigung } from '@/lib/benachrichtigung'
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
@@ -383,8 +382,6 @@ export function Messenger() {
   const [groupToDelete, setGroupToDelete] = useState<ChatGroupItem | null>(null)
   const [isDeletingGroup, setIsDeletingGroup] = useState(false)
 
-  // Notification deduplication ref
-  const lastNotifiedMessageIdRef = useRef<number>(0)
 
   // Camera & Attachments
   const [isCameraModalOpen, setIsCameraModalOpen] = useState(false)
@@ -927,6 +924,8 @@ export function Messenger() {
         await relayE2eeEnvelope({
           blind_mailbox_id: blindMailboxId,
           ciphertext_envelope: ciphertext,
+          is_control: true,
+          control_type: String(payloadObj.type || 'control'),
         })
       } else if (activeContact) {
         const targetUserId = activeContact.userId
@@ -935,6 +934,8 @@ export function Messenger() {
           blind_mailbox_id: blindMailboxId,
           ciphertext_envelope: ciphertext,
           recipient_id: targetUserId,
+          is_control: true,
+          control_type: String(payloadObj.type || 'control'),
         })
       }
     } catch {
@@ -1013,6 +1014,9 @@ export function Messenger() {
                 if (readUpTo > maxPartnerDeliveredId) {
                   maxPartnerDeliveredId = readUpTo
                 }
+              } else {
+                // Multi-Device: Vom aktuellen Benutzer auf anderem Gerät gelesen
+                markAsRead(currentMid)
               }
               continue
             }
@@ -1143,32 +1147,6 @@ export function Messenger() {
           isRead,
         }
       })
-
-      // Check for incoming messages to trigger device notifications
-      if (processedList.length > 0) {
-        const lastMsg = processedList[processedList.length - 1]
-        if (
-          lastMsg &&
-          !lastMsg.isSelf &&
-          lastMsg.id > lastNotifiedMessageIdRef.current
-        ) {
-          lastNotifiedMessageIdRef.current = lastMsg.id
-          if (!isInitial) {
-            void sendeGeraeteBenachrichtigung({
-              titel: lastMsg.senderName ? `Neue Nachricht von ${lastMsg.senderName}` : 'Neue Nachricht',
-              text:
-                lastMsg.text ||
-                (lastMsg.imageAttachment
-                  ? '📷 Foto'
-                  : lastMsg.audioAttachment
-                  ? '🎙️ Sprachnachricht'
-                  : lastMsg.fileAttachment
-                  ? `📎 ${lastMsg.fileAttachment.name}`
-                  : 'Neue Nachricht'),
-            })
-          }
-        }
-      }
 
       // Abort if the user has navigated to another chat in the meantime
       if (activeMailboxIdRef.current && activeMailboxIdRef.current !== currentMid) return

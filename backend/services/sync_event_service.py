@@ -163,6 +163,18 @@ class SyncEventService:
         return len(cls._subscribers)
 
     @classmethod
+    def has_active_subscribers(cls, user_id: int | str | None) -> bool:
+        """Prüft, ob für den Benutzer aktuell mindestens ein aktiver SSE-Client verbunden ist."""
+        if user_id is None:
+            return False
+        try:
+            uid = int(user_id)
+        except (ValueError, TypeError):
+            return False
+        return any(sub.user_id == uid for sub in cls._subscribers.values())
+
+    @classmethod
     def clear_all_for_testing(cls) -> None:
         """Setzt den Abonnenten-Speicher zurück (für automatisierte Tests)."""
         cls._subscribers.clear()
+

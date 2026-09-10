@@ -289,6 +289,8 @@ def relay_e2ee_message(
         ciphertext_envelope=req.ciphertext_envelope,
         sender_user_id=current_user.id,
         recipient_id=req.recipient_id,
+        is_control=req.is_control,
+        control_type=req.control_type,
     )
     return {
         "id": envelope.id,
@@ -679,12 +681,16 @@ async def social_websocket(
                 blind_mailbox_id = data.get("blind_mailbox_id", "")
                 ciphertext_envelope = data.get("ciphertext_envelope", "")
                 recipient_id = data.get("recipient_id")
+                is_control = bool(data.get("is_control", False))
+                control_type = data.get("control_type")
                 SocialService.relay_blind_envelope(
                     db,
                     blind_mailbox_id=blind_mailbox_id,
                     ciphertext_envelope=ciphertext_envelope,
                     sender_user_id=user.id,
                     recipient_id=recipient_id,
+                    is_control=is_control,
+                    control_type=control_type,
                 )
     except WebSocketDisconnect:
         pass

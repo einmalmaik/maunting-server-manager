@@ -162,29 +162,70 @@ export function ServerIncidentNotifier() {
         if (!mid) return
 
         const store = useMessengerNotificationStore.getState()
-        // 1. Nur Mailboxen benachrichtigen, die dem Benutzer auch tatsächlich zugeordnet sind!
-        // Niemals Geister-Benachrichtigungen („Messenger“) für fremde Mailboxen unbeteiligter Nutzer auslösen!
-        const meta = store.mailboxDirectory[mid]
-        if (!meta) {
+
+        // 1. Multi-Device Read Receipt Sync:
+        // Wenn der Benutzer den Chat auf einem anderen Gerät gelesen hat,
+        // wird der Zähler auf diesem Gerät unmittelbar zurückgesetzt
+        const senderId = detail.sender_user_id ?? detail.sender_id
+        if (
+          detail.control_type === 'read_receipt' &&
+          NotificationService.isOutgoingEcho(senderId, user?.id)
+        ) {
+          store.markAsRead(mid)
           return
         }
 
+        // 2. Outgoing Echo Prevention:
+        // Der Sender darf NIEMALS eine Notification oder einen Unread-Count für seine eigenen
+        // Aktionen erhalten (auch nicht bei Aktionen via KI/Worker im Namen des Nutzers).
+        if (NotificationService.isOutgoingEcho(senderId, user?.id)) {
+          return
+        }
+
+        // 3. Interne Steuernachrichten (Read Receipts, Delivery Receipts, Edits) ausschließen
+        const isControl = Boolean(
+          detail.is_control ||
+          (detail.control_type && detail.control_type !== 'message' && detail.control_type !== 'normal')
+        )
+        if (isControl) {
+          return
+        }
+
+        // 4. Mailbox-Metadaten abrufen oder bei Bedarf nachsynchronisieren
+        let meta = store.mailboxDirectory[mid]
+        if (!meta) {
+          if (user?.id) {
+            void store.syncMailboxDirectoryFromBackend(user.id)
+          }
+          meta = {
+            name: 'Neue Nachricht',
+            isGroup: Boolean(detail.is_group),
+          }
+        }
+
+
+        // Chat-Fokus und Vordergrund-Erkennung
         const isCurrentActive = store.activeMailboxId === mid
-        const isRead = Boolean(isCurrentActive && typeof document !== 'undefined' && document.visibilityState === 'visible')
+        const isDocVisible = typeof document !== 'undefined' && document.visibilityState === 'visible'
+        const isWindowFocused = typeof document !== 'undefined' && (typeof document.hasFocus !== 'function' || document.hasFocus())
+        const isChatFocused = isCurrentActive && isDocVisible && isWindowFocused
+        const isForeground = isDocVisible && isWindowFocused
 
         // Strikte Outgoing Echo Prevention & Empfänger-Filterung (recipient_id == current_user && !is_read)
         const shouldNotify = NotificationService.shouldNotify({
           recipientId: detail.recipient_id,
           currentUserId: user?.id,
-          isRead: isRead,
+          isRead: isChatFocused,
           senderUserId: detail.sender_user_id,
           isGroup: Boolean(meta.isGroup),
+          isControl,
+          controlType: detail.control_type,
         })
         if (!shouldNotify) {
           return
         }
 
-        // 3. Stummschaltung und Blockierung prüfen
+        // 5. Stummschaltung und Blockierung prüfen
         if (store.isMuted(mid)) return
         if (meta.userId && store.isBlocked(meta.userId)) {
           return
@@ -203,10 +244,15 @@ export function ServerIncidentNotifier() {
         if (user?.device_notifications !== false) {
           playNotificationChime()
           toast.success(meta.isGroup ? `💬 Neue Nachricht in „${meta.name}“` : `💬 Neue Nachricht von ${senderOrChat}`)
-          void sendeGeraeteBenachrichtigung({
-            titel: title,
-            text: text,
-          })
+
+          // Background vs. Foreground Push: Bei aktiver WebSocket-Verbindung im Vordergrund
+          // dürfen keine doppelten OS-Pushes getriggert werden!
+          if (!isForeground) {
+            void sendeGeraeteBenachrichtigung({
+              titel: title,
+              text: text,
+            })
+          }
         }
       }
     }

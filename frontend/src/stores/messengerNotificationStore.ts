@@ -47,6 +47,7 @@ interface MessengerNotificationState {
   registerMailbox: (mailboxId: string, meta: MailboxMeta) => void
   registerMailboxes: (map: Record<string, MailboxMeta>) => void
   incrementUnread: (mailboxId: string) => void
+  decrementUnread: (mailboxId: string, count?: number) => void
   markAsRead: (mailboxId: string) => void
   clearAllUnread: () => void
 
@@ -207,6 +208,15 @@ export const useMessengerNotificationStore = create<MessengerNotificationState>(
     },
 
     incrementUnread: (mailboxId) => {
+      const state = get()
+      const isFocused =
+        state.activeMailboxId === mailboxId &&
+        typeof document !== 'undefined' &&
+        document.visibilityState === 'visible' &&
+        (typeof document.hasFocus !== 'function' || document.hasFocus())
+      if (isFocused) {
+        return
+      }
       set((state) => {
         const current = state.unreadCounts[mailboxId] || 0
         const updated = { ...state.unreadCounts, [mailboxId]: current + 1 }
@@ -219,6 +229,22 @@ export const useMessengerNotificationStore = create<MessengerNotificationState>(
         }
       })
     },
+
+    decrementUnread: (mailboxId, count = 1) => {
+      set((state) => {
+        const current = state.unreadCounts[mailboxId] || 0
+        const newCount = Math.max(0, current - count)
+        const updated = { ...state.unreadCounts, [mailboxId]: newCount }
+        try {
+          localStorage.setItem(STORAGE_UNREAD_KEY, JSON.stringify(updated))
+        } catch {}
+        return {
+          unreadCounts: updated,
+          totalUnreadCount: calcTotal(updated, state.mutedChats),
+        }
+      })
+    },
+
 
     markAsRead: (mailboxId) => {
       set((state) => {
@@ -418,3 +444,51 @@ export const useMessengerNotificationStore = create<MessengerNotificationState>(
     },
   }
 })
+
+// Multi-Tab & Multi-Device Synchronisation über das `storage`-Event
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key === STORAGE_UNREAD_KEY) {
+      const updated = loadUnread()
+      const mutes = useMessengerNotificationStore.getState().mutedChats
+      useMessengerNotificationStore.setState({
+        unreadCounts: updated,
+        totalUnreadCount: calcTotal(updated, mutes),
+      })
+    } else if (e.key === STORAGE_MUTES_KEY) {
+      const mutes = loadMutes()
+      const unread = useMessengerNotificationStore.getState().unreadCounts
+      useMessengerNotificationStore.setState({
+        mutedChats: mutes,
+        totalUnreadCount: calcTotal(unread, mutes),
+      })
+    } else if (e.key === STORAGE_BLOCKS_KEY) {
+      useMessengerNotificationStore.setState({
+        blockedUserIds: loadBlocks(),
+      })
+    } else if (e.key === STORAGE_BLOCKED_PROFILES_KEY) {
+      useMessengerNotificationStore.setState({
+        blockedProfiles: loadBlockedProfiles(),
+      })
+    } else if (e.key === STORAGE_MAILBOX_DIR_KEY) {
+      useMessengerNotificationStore.setState({
+        mailboxDirectory: loadMailboxDirectory(),
+      })
+    }
+  })
+
+  // Chat-Fokus: Sobald das Browser-Fenster oder der Tab wieder aktiv wird,
+  // werden ungelesene Zähler des aktiven Chats unmittelbar genullt
+  const handleFocusOrVisible = () => {
+    const store = useMessengerNotificationStore.getState()
+    if (store.activeMailboxId && (typeof document === 'undefined' || document.visibilityState === 'visible')) {
+      store.markAsRead(store.activeMailboxId)
+    }
+  }
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', handleFocusOrVisible)
+  }
+  window.addEventListener('focus', handleFocusOrVisible)
+}
+

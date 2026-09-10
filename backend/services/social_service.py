@@ -21,6 +21,7 @@ from models import (
 from services.panel_settings_service import PanelSettingsService
 from services.sync_event_service import SyncEventService
 from services.achievement_service import AchievementService
+from services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -892,6 +893,8 @@ class SocialService:
         ciphertext_envelope: str,
         sender_user_id: int | None = None,
         recipient_id: int | None = None,
+        is_control: bool = False,
+        control_type: str | None = None,
     ) -> E2eeBlindEnvelope:
         """Speichert einen blinden E2EE-Umschlag mit serverseitiger Berechtigungsprüfung.
 
@@ -901,6 +904,7 @@ class SocialService:
         clean_mailbox = blind_mailbox_id.strip()
         clean_envelope = ciphertext_envelope.strip()
         target_recipient_id: int | None = None
+        group_member_ids: list[int] = []
 
         if sender_user_id:
             cls.assert_social_enabled(db)
@@ -951,6 +955,29 @@ class SocialService:
                     if found_target:
                         cls.ensure_direct_chat(db, sender_user_id, found_target)
                         target_recipient_id = found_target
+                    else:
+                        # Prüfen, ob clean_mailbox zu einer ChatGroup gehört
+                        groups = db.query(ChatGroup).all()
+                        for g in groups:
+                            g_mid = hashlib.sha256(f"msm:group:{g.id}".encode("utf-8")).hexdigest()
+                            if g_mid == clean_mailbox:
+                                mem = (
+                                    db.query(ChatGroupMember)
+                                    .filter_by(group_id=g.id, user_id=sender_user_id)
+                                    .first()
+                                )
+                                if not mem:
+                                    raise HTTPException(
+                                        status_code=403,
+                                        detail="Keine Berechtigung für diese Gruppe.",
+                                    )
+                                group_member_ids = [
+                                    m.user_id
+                                    for m in db.query(ChatGroupMember.user_id)
+                                    .filter_by(group_id=g.id)
+                                    .all()
+                                ]
+                                break
 
         envelope = E2eeBlindEnvelope(
             blind_mailbox_id=clean_mailbox,
@@ -967,15 +994,45 @@ class SocialService:
             "created_at": envelope.created_at.isoformat(),
             "sender_user_id": sender_user_id,
             "recipient_id": recipient_id if recipient_id is not None else target_recipient_id,
+            "is_control": is_control,
+            "control_type": control_type,
         }
 
         if target_recipient_id and sender_user_id:
             SyncEventService.publish(msg_payload, user_id=target_recipient_id)
             SyncEventService.publish(msg_payload, user_id=sender_user_id)
+            # Push-Dispatching für Offline-Empfänger vorbereiten (strikte Echo- & Foreground-Prüfung)
+            NotificationService.prepare_push_dispatch(
+                target_user_id=target_recipient_id,
+                sender_user_id=sender_user_id,
+                title="Neue Nachricht",
+                is_e2ee=True,
+                is_control=is_control,
+                control_type=control_type,
+                has_active_foreground_connection=SyncEventService.has_active_subscribers(target_recipient_id),
+            )
+        elif group_member_ids:
+            # Gruppen-Nachrichten zielgerichtet nur an Mitglieder ausliefern (Zero Privacy Leak)
+            for g_uid in group_member_ids:
+                SyncEventService.publish(msg_payload, user_id=g_uid)
+                if sender_user_id and not NotificationService.is_outgoing_echo(
+                    sender_user_id=sender_user_id, current_user_id=g_uid
+                ):
+                    NotificationService.prepare_push_dispatch(
+                        target_user_id=g_uid,
+                        sender_user_id=sender_user_id,
+                        title="Neue Gruppennachricht",
+                        is_e2ee=True,
+                        is_control=is_control,
+                        control_type=control_type,
+                        has_active_foreground_connection=SyncEventService.has_active_subscribers(g_uid),
+                        extra_data={"is_group": True},
+                    )
         else:
             SyncEventService.publish(msg_payload)
 
         return envelope
+
 
     @classmethod
     def get_blind_envelopes(
@@ -1003,6 +1060,7 @@ class SocialService:
         clean_mailbox = blind_mailbox_id.strip()
 
         target_recipient_id: int | None = recipient_id
+        group_member_ids: list[int] = []
         if db:
             if not target_recipient_id:
                 chat = db.query(DirectChat).filter_by(blind_mailbox_id=clean_mailbox).first()
@@ -1019,6 +1077,19 @@ class SocialService:
                         if clean_mailbox == legacy_mailbox:
                             target_recipient_id = cand_id
                             break
+
+                    if not target_recipient_id:
+                        for g in db.query(ChatGroup).all():
+                            g_mid = hashlib.sha256(f"msm:group:{g.id}".encode("utf-8")).hexdigest()
+                            if g_mid == clean_mailbox:
+                                group_member_ids = [
+                                    m.user_id
+                                    for m in db.query(ChatGroupMember.user_id)
+                                    .filter_by(group_id=g.id)
+                                    .all()
+                                    if m.user_id != sender_id
+                                ]
+                                break
 
             if target_recipient_id:
                 blocked = (
@@ -1045,6 +1116,9 @@ class SocialService:
 
         if target_recipient_id:
             SyncEventService.publish(payload, user_id=target_recipient_id)
+        elif group_member_ids:
+            for g_uid in group_member_ids:
+                SyncEventService.publish(payload, user_id=g_uid)
         else:
             SyncEventService.publish(payload)
 
