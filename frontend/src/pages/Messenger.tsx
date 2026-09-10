@@ -102,7 +102,6 @@ import {
   decryptGroupE2eeMessage,
   getOrGenerateLocalKeyPair,
   scrubPlaintextStorage,
-  createReplayDetector,
   type LocalE2eeKeyPair,
   type AttachmentCryptoContext,
 } from '@/services/e2eeCrypto'
@@ -438,7 +437,6 @@ export function Messenger() {
   const [blindMailboxId, setBlindMailboxId] = useState<string>('')
   const [localKeyPair, setLocalKeyPair] = useState<LocalE2eeKeyPair | null>(null)
   const recipientKeyCache = useRef(new Map<number, string>())
-  const replayDetectorRef = useRef(createReplayDetector(2000))
 
   const getOrFetchRecipientPublicKey = async (targetUserId: number): Promise<string | null> => {
     const cached = recipientKeyCache.current.get(targetUserId)

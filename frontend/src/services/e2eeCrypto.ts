@@ -1099,8 +1099,7 @@ export async function decryptRatchetMessage(
   userAId: number,
   userBId: number,
   sessionOrKey: E2eeRatchetSession | CryptoKey,
-  explicitEpoch?: number,
-  sharedSecret?: string
+  explicitEpoch?: number
 ): Promise<string> {
   const integrity = validateEnvelopeIntegrity(envelopeString)
   if (!integrity.valid) {

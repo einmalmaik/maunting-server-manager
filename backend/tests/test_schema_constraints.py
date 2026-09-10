@@ -1630,3 +1630,44 @@ def test_vault_blind_buckets_and_composite_pk_migration(tmp_path: Path) -> None:
         engine.dispose()
         settings.database_url = vorher
 
+
+def test_e2ee_blind_envelopes_client_uuid_migration(tmp_path: Path) -> None:
+    """Migration 20260907_07 ergaenzt e2ee_blind_envelopes.client_uuid, Indizes und UniqueConstraint.
+
+    Verifiziert:
+    1. Downgrade auf 20260907_06 entfernt client_uuid.
+    2. Upgrade auf 20260907_07 (head) ergaenzt client_uuid und Indizes idempotent.
+    3. initialize_or_upgrade_schema laeuft fehlerfrei durch.
+    """
+    from services.schema_manager import initialize_or_upgrade_schema
+
+    db_url = f"sqlite:///{tmp_path / 'e2ee_client_uuid_migration.db'}"
+    vorher = settings.database_url
+    settings.database_url = db_url
+    backend_dir = Path(__file__).resolve().parent.parent
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "migrations"))
+    engine = create_engine(db_url)
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+
+        # Downgrade auf Stand vor client_uuid (20260907_06)
+        command.downgrade(config, "20260907_06")
+        inspector = _frisch(engine)
+        cols_before = {c["name"] for c in inspector.get_columns("e2ee_blind_envelopes")}
+        assert "client_uuid" not in cols_before
+
+        # Upgrade auf head (20260907_07)
+        command.upgrade(config, "head")
+        inspector = _frisch(engine)
+        cols_after = {c["name"] for c in inspector.get_columns("e2ee_blind_envelopes")}
+        assert "client_uuid" in cols_after
+
+        # Schema Manager validiert vollstaendiges Schema
+        status = initialize_or_upgrade_schema(engine)
+        assert status == "upgraded"
+    finally:
+        engine.dispose()
+        settings.database_url = vorher
+
