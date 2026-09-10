@@ -96,10 +96,13 @@ import {
   deriveGroupBlindMailboxId,
   encryptE2eeMessage,
   decryptE2eeMessage,
+  encryptE2eeHybrid,
   decryptE2eeHybrid,
   encryptGroupE2eeMessage,
   decryptGroupE2eeMessage,
   getOrGenerateLocalKeyPair,
+  scrubPlaintextStorage,
+  createReplayDetector,
   type LocalE2eeKeyPair,
   type AttachmentCryptoContext,
 } from '@/services/e2eeCrypto'
@@ -281,7 +284,8 @@ function getSupportedAudioMimeType(): string {
 }
 
 const CONTACTS_CACHE_KEY = 'msm:chat_contacts_cache'
-const getChatCacheKey = (mid: string) => `msm:chat_cache:${mid}`
+// Zero-Knowledge In-Memory Session Cache: verhindert das unverschlüsselte Speichern von Plaintext-Nachrichten im LocalStorage
+const sessionChatCache = new Map<string, ChatMessage[]>()
 
 function loadInitialContactsCache(): {
   friends: FriendItem[]
@@ -433,6 +437,21 @@ export function Messenger() {
   const [sending, setSending] = useState(false)
   const [blindMailboxId, setBlindMailboxId] = useState<string>('')
   const [localKeyPair, setLocalKeyPair] = useState<LocalE2eeKeyPair | null>(null)
+  const recipientKeyCache = useRef(new Map<number, string>())
+  const replayDetectorRef = useRef(createReplayDetector(2000))
+
+  const getOrFetchRecipientPublicKey = async (targetUserId: number): Promise<string | null> => {
+    const cached = recipientKeyCache.current.get(targetUserId)
+    if (cached) return cached
+    try {
+      const info = await getE2eePublicKey(targetUserId)
+      if (info?.public_key) {
+        recipientKeyCache.current.set(targetUserId, info.public_key)
+        return info.public_key
+      }
+    } catch {}
+    return null
+  }
 
   // Attachments
   const [isNotePickerOpen, setIsNotePickerOpen] = useState(false)
@@ -522,8 +541,9 @@ export function Messenger() {
 
   const currentUserId = user?.id || 0
 
-  // 1. Initialize local key pair
+  // 1. Initialize local key pair and scrub legacy plaintext storage
   useEffect(() => {
+    scrubPlaintextStorage()
     if (!currentUserId) return
     let active = true
 
@@ -869,16 +889,11 @@ export function Messenger() {
         if (active) {
           activeMailboxIdRef.current = mid
           setBlindMailboxId(mid)
-          // Sofort aus lokalem Cache laden (0ms Ladezeit)
-          try {
-            const raw = localStorage.getItem(getChatCacheKey(mid))
-            if (raw) {
-              const parsed = JSON.parse(raw)
-              if (Array.isArray(parsed) && parsed.length > 0) {
-                setMessages(parsed)
-              }
-            }
-          } catch {}
+          // Sofort aus In-Memory Cache laden (0ms Ladezeit, kein LocalStorage-Leak)
+          const cached = sessionChatCache.get(mid)
+          if (cached && cached.length > 0) {
+            setMessages(cached)
+          }
           useMessengerNotificationStore.getState().setActiveMailboxId(mid)
         }
       })
@@ -892,16 +907,11 @@ export function Messenger() {
         if (active) {
           activeMailboxIdRef.current = mid
           setBlindMailboxId(mid)
-          // Sofort aus lokalem Cache laden (0ms Ladezeit)
-          try {
-            const raw = localStorage.getItem(getChatCacheKey(mid))
-            if (raw) {
-              const parsed = JSON.parse(raw)
-              if (Array.isArray(parsed) && parsed.length > 0) {
-                setMessages(parsed)
-              }
-            }
-          } catch {}
+          // Sofort aus In-Memory Cache laden (0ms Ladezeit, kein LocalStorage-Leak)
+          const cached = sessionChatCache.get(mid)
+          if (cached && cached.length > 0) {
+            setMessages(cached)
+          }
           useMessengerNotificationStore.getState().setActiveMailboxId(mid)
         }
       })
@@ -944,7 +954,12 @@ export function Messenger() {
         })
       } else if (activeContact) {
         const targetUserId = activeContact.userId
-        ciphertext = await encryptE2eeMessage(payload, currentUserId, targetUserId)
+        const recipientPubKey = await getOrFetchRecipientPublicKey(targetUserId)
+        if (recipientPubKey && localKeyPair?.publicKeyJwk) {
+          ciphertext = await encryptE2eeHybrid(payload, recipientPubKey, localKeyPair.publicKeyJwk)
+        } else {
+          ciphertext = await encryptE2eeMessage(payload, currentUserId, targetUserId)
+        }
         await relayE2eeEnvelope({
           blind_mailbox_id: blindMailboxId,
           ciphertext_envelope: ciphertext,
@@ -1206,10 +1221,8 @@ export function Messenger() {
         return [...processedList, ...pendingOptimistic]
       })
 
-      // Kürzliche Nachrichten lokal cachen für 0ms Sofort-Laden beim nächsten Aufruf
-      try {
-        localStorage.setItem(getChatCacheKey(currentMid), JSON.stringify(processedList.slice(-80)))
-      } catch {}
+      // Kürzliche Nachrichten sicher in-Memory cachen (Zero-Knowledge, kein LocalStorage-Leak)
+      sessionChatCache.set(currentMid, processedList.slice(-80))
       // Ungelesen-Zähler zurücksetzen
       markAsRead(currentMid)
 
@@ -1529,7 +1542,12 @@ export function Messenger() {
         }
       } else if (activeContact) {
         const targetUserId = activeContact.userId
-        ciphertext = await encryptE2eeMessage(payload, currentUserId, targetUserId)
+        const recipientPubKey = await getOrFetchRecipientPublicKey(targetUserId)
+        if (recipientPubKey && localKeyPair?.publicKeyJwk) {
+          ciphertext = await encryptE2eeHybrid(payload, recipientPubKey, localKeyPair.publicKeyJwk)
+        } else {
+          ciphertext = await encryptE2eeMessage(payload, currentUserId, targetUserId)
+        }
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
           enqueueMessageMutation({
             blind_mailbox_id: blindMailboxId,

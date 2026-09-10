@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class AchievementResponse(BaseModel):
@@ -85,6 +85,147 @@ class PrivacyUpdateRequest(BaseModel):
     privacy: str = Field(..., pattern="^(private|friends|public)$")
 
 
+import json
+
+VALID_E2EE_PREFIXES = (
+    "sv-e2ee-v1:",
+    "sv-e2ee-team-v1:",
+    "sv-e2ee-group-v1:",
+    "sv-e2ee-hybrid-v1:",
+    "sv-e2ee-ratchet-v1:",
+)
+
+
+def validate_rsa_public_key_jwk(key_str: str) -> dict:
+    """Validiert, dass ein übergebener String ein sicherer RSA-OAEP Public Key im JWK-Format ist."""
+    if not isinstance(key_str, str) or not key_str.strip():
+        raise ValueError("Public Key darf nicht leer sein.")
+    try:
+        data = json.loads(key_str)
+    except Exception as exc:
+        raise ValueError("Public Key ist kein gültiges JSON.") from exc
+
+    if not isinstance(data, dict):
+        raise ValueError("Public Key JWK muss ein JSON-Objekt sein.")
+
+    if data.get("kty") != "RSA":
+        raise ValueError(f"Ungültiger Schlüsseltyp: erwartet 'RSA', erhalten '{data.get('kty')}'.")
+
+    # RFC 7517 / RFC 3447 private key components
+    forbidden_private_keys = {"d", "p", "q", "dp", "dq", "qi", "dmp1", "dmq1", "coeff", "oth"}
+    present_forbidden = forbidden_private_keys.intersection(data.keys())
+    if present_forbidden:
+        raise ValueError(
+            f"Sicherheitsverletzung: Private Schlüsselparameter ({', '.join(sorted(present_forbidden))}) dürfen nicht im Public Key enthalten sein."
+        )
+
+    modulus = data.get("n")
+    exponent = data.get("e")
+    if not modulus or not isinstance(modulus, str) or not exponent or not isinstance(exponent, str):
+        raise ValueError("Unvollständiger RSA-Schlüssel: 'n' (Modulus) und 'e' (Exponent) sind erforderlich.")
+
+    if len(modulus) < 300:
+        raise ValueError("Unsichere Schlüssellänge: Mindestens RSA-2048 erforderlich.")
+
+    # Algorithm confusion and key misuse prevention
+    if "alg" in data and data["alg"]:
+        valid_algs = {"RSA-OAEP", "RSA-OAEP-256", "RSA-OAEP-384", "RSA-OAEP-512"}
+        if data["alg"] not in valid_algs:
+            raise ValueError(
+                f"Sicherheitsverletzung: Nicht unterstützter oder unsicherer Algorithmus '{data['alg']}' für E2EE Public Key."
+            )
+
+    if "use" in data and data["use"]:
+        if data["use"] != "enc":
+            raise ValueError(
+                f"Sicherheitsverletzung: Ungültige Schlüsselverwendung '{data['use']}' für E2EE Verschlüsselungsschlüssel (erwartet 'enc')."
+            )
+
+    if "key_ops" in data and isinstance(data["key_ops"], list):
+        forbidden_ops = {"sign", "verify"}
+        if forbidden_ops.intersection(data["key_ops"]):
+            raise ValueError("Sicherheitsverletzung: Signatur-Operationen sind in E2EE Public Keys verboten.")
+
+    return data
+
+
+def validate_e2ee_envelope_format(envelope_str: str) -> None:
+    """Validiert, dass ein Umschlag ein gültiges DIS E2EE-Format besitzt und kein Plaintext ist."""
+    import base64
+
+    if not isinstance(envelope_str, str) or not envelope_str.strip():
+        raise ValueError("Umschlag darf nicht leer sein.")
+
+    trimmed = envelope_str.strip()
+    matched_prefix = None
+    for prefix in VALID_E2EE_PREFIXES:
+        if trimmed.startswith(prefix):
+            matched_prefix = prefix
+            break
+
+    if not matched_prefix:
+        raise ValueError(
+            "Ungültiges E2EE-Umschlagformat: Nur versionierte DIS-Umschläge (sv-e2ee-v1:, sv-e2ee-team-v1:, sv-e2ee-group-v1:, sv-e2ee-hybrid-v1:, sv-e2ee-ratchet-v1:) werden akzeptiert. Plaintext ist verboten."
+        )
+
+    payload = trimmed[len(matched_prefix):].strip()
+    if not payload:
+        raise ValueError("Umschlag-Payload darf nicht leer sein.")
+
+    # Plaintext-Leak-Erkennung
+    if (
+        payload.startswith("{")
+        or payload.startswith("[")
+        or '"text":' in payload
+        or '"sender_id":' in payload
+        or '"ciphertext":' in payload
+    ):
+        raise ValueError("Sicherheitsverletzung: Unverschlüsselter Klartext-Payload im E2EE-Umschlag erkannt.")
+
+    if any(c in payload for c in "\r\n\t"):
+        raise ValueError("Ungültige Steuerzeichen im E2EE-Umschlag erkannt.")
+
+    if matched_prefix == "sv-e2ee-hybrid-v1:":
+        if "." not in payload:
+            raise ValueError("Ungültiges Hybrid-Payload-Format: Punkt-Trennzeichen zwischen Schlüssel und Chiffretext fehlt.")
+        wrapped_part, ct = payload.split(".", 1)
+        if not wrapped_part.strip():
+            raise ValueError("Schlüsselkomponente im Hybrid-Umschlag fehlt.")
+        for wk in wrapped_part.split(":"):
+            cleaned_wk = wk.strip()
+            if len(cleaned_wk) < 50:
+                raise ValueError("Ungültige RSA-Schlüsselkomponente im Hybrid-Umschlag.")
+            try:
+                base64.b64decode(cleaned_wk, validate=True)
+            except Exception as exc:
+                raise ValueError("Ungültige Base64-Kodierung der Schlüsselkomponente im Hybrid-Umschlag.") from exc
+        ct_to_check = ct.strip()
+    elif matched_prefix == "sv-e2ee-ratchet-v1:":
+        if "." not in payload:
+            raise ValueError("Ungültiges Ratchet-Payload-Format: Punkt-Trennzeichen zwischen Epoche und Chiffretext fehlt.")
+        epoch_str, ct = payload.split(".", 1)
+        if not epoch_str.isdigit():
+            raise ValueError("Ungültige Epochen-Nummer im Ratchet-Umschlag.")
+        ct_to_check = ct.strip()
+    else:
+        ct_to_check = payload
+
+    if len(ct_to_check) < 38:
+        raise ValueError("Chiffretext zu kurz für gültigen IV und AEAD-Tag (mindestens 38 Zeichen / 28 Bytes erforderlich).")
+
+    try:
+        raw_bytes = base64.b64decode(ct_to_check, validate=True)
+    except Exception as exc:
+        raise ValueError("Ungültige Base64-Kodierung im E2EE-Chiffretext.") from exc
+
+    if len(raw_bytes) < 28:
+        raise ValueError("Dekodierter Chiffretext zu kurz (mindestens 28 Bytes für 12-Byte-IV und 16-Byte-Tag).")
+
+    iv = raw_bytes[:12]
+    if all(b == 0 for b in iv):
+        raise ValueError("Sicherheitsverletzung: Schwacher/ungültiger Null-IV (Nonce) im E2EE-Umschlag erkannt.")
+
+
 class E2eeBlindEnvelopeCreate(BaseModel):
     blind_mailbox_id: str = Field(..., min_length=16, max_length=64)
     ciphertext_envelope: str = Field(..., min_length=10)
@@ -93,6 +234,12 @@ class E2eeBlindEnvelopeCreate(BaseModel):
     is_control: bool = Field(False, description="Markiert interne Steuernachrichten (z. B. Lesequittungen, Quittungen)")
     control_type: str | None = Field(None, description="Typ des Steuersignals (read_receipt, delivery_receipt, edit, delete)")
 
+
+    @field_validator("ciphertext_envelope")
+    @classmethod
+    def validate_ciphertext(cls, v: str) -> str:
+        validate_e2ee_envelope_format(v)
+        return v
 
 
 class E2eeBlindEnvelopeResponse(BaseModel):
@@ -131,6 +278,12 @@ class CanMessageResponse(BaseModel):
 
 class E2eePublicKeyUpdate(BaseModel):
     public_key: str = Field(..., min_length=10, max_length=8192)
+
+    @field_validator("public_key")
+    @classmethod
+    def validate_key(cls, v: str) -> str:
+        validate_rsa_public_key_jwk(v)
+        return v
 
 
 class E2eePublicKeyResponse(BaseModel):

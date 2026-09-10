@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from datetime import datetime, timezone
 import pytest
 from sqlalchemy.orm import Session
@@ -160,7 +161,9 @@ def test_operator_master_toggle_disables_social(db: Session, client: TestClient,
 def test_e2ee_zero_knowledge_blind_relay(db: Session):
     """Prüft, dass der Server als blinde Relais-Mailbox ohne Nutzerverknüpfung fungiert."""
     blind_mailbox = "a" * 64
-    envelope = "sv-e2ee-v1:test-ciphertext-blob"
+    import base64
+    b64_ct = base64.b64encode(b"N" * 12 + b"test-ciphertext-blob" + b"T" * 16).decode("ascii")
+    envelope = f"sv-e2ee-v1:{b64_ct}"
 
     relayed = SocialService.relay_blind_envelope(
         db,
@@ -337,10 +340,11 @@ def test_chat_group_create_join_invite(db: Session, owner_user: User, regular_us
 
     # 4. Blinder E2EE Relay
     blind_mailbox = "b" * 64
+    b64_team = base64.b64encode(b"N" * 12 + b"team-ciphertext-payload" + b"T" * 16).decode("ascii")
     env = SocialService.relay_blind_envelope(
         db,
         blind_mailbox_id=blind_mailbox,
-        ciphertext_envelope="sv-e2ee-team-v1:testpayload",
+        ciphertext_envelope=f"sv-e2ee-team-v1:{b64_team}",
     )
     assert env.id is not None
     assert env.blind_mailbox_id == blind_mailbox
@@ -606,6 +610,159 @@ def test_ai_messenger_search_and_e2ee(db: Session, owner_user: User) -> None:
     wire_types = {e.ciphertext_envelope[:15] for e in envelopes}
     assert any("sv-e2ee-v1:" in wt for wt in wire_types)
     assert any("sv-e2ee-group-v" in wt for wt in wire_types)
+
+
+def test_e2ee_security_replay_attack_prevention(db: Session, owner_user: User):
+    """Prüft die Replay-Attack-Erkennung: identische Ciphertexte dürfen weder in derselben noch in fremden Mailboxen wiederholt werden."""
+    import base64
+    import os
+    from fastapi import HTTPException
+
+    valid_ct = base64.b64encode(os.urandom(12) + b"ciphertext-bytes-here" + os.urandom(16)).decode("ascii")
+    envelope = f"sv-e2ee-v1:{valid_ct}"
+    box_a = "1" * 64
+    box_b = "2" * 64
+
+    # 1. Erster Versand ist frisch und erfolgreich
+    relayed = SocialService.relay_blind_envelope(db, blind_mailbox_id=box_a, ciphertext_envelope=envelope)
+    assert relayed.id is not None
+
+    # 2. Replay-Versuch in derselben Mailbox -> 409 Conflict
+    with pytest.raises(HTTPException) as exc_same:
+        SocialService.relay_blind_envelope(db, blind_mailbox_id=box_a, ciphertext_envelope=envelope)
+    assert exc_same.value.status_code == 409
+    assert "Replay-Angriff" in exc_same.value.detail
+
+    # 3. Cross-Mailbox Replay-Versuch in fremder Mailbox -> ebenfalls 409 Conflict
+    with pytest.raises(HTTPException) as exc_cross:
+        SocialService.relay_blind_envelope(db, blind_mailbox_id=box_b, ciphertext_envelope=envelope)
+    assert exc_cross.value.status_code == 409
+    assert "Replay-Angriff" in exc_cross.value.detail
+
+
+def test_e2ee_security_envelope_format_and_tampering(db: Session):
+    """Prüft die Validierung von Umschlägen: Plaintext-Leaks, Null-IVs und manipulierte Formate werden abgewiesen."""
+    import base64
+    import json
+    from fastapi import HTTPException
+    from schemas.social import validate_e2ee_envelope_format
+
+    # 1. Plaintext-Payload-Leak
+    leaked_payload = json.dumps({"text": "Klartext-Geheimnis", "sender_id": 1})
+    with pytest.raises(ValueError) as exc_leak:
+        validate_e2ee_envelope_format(f"sv-e2ee-v1:{leaked_payload}")
+    assert "Sicherheitsverletzung" in str(exc_leak.value)
+
+    # 2. Unbekanntes oder fehlendes Prefix
+    with pytest.raises(ValueError) as exc_prefix:
+        validate_e2ee_envelope_format("plain-message-without-dis-prefix")
+    assert "Ungültiges E2EE-Umschlagformat" in str(exc_prefix.value)
+
+    # 3. Schwacher / ungültiger Null-IV (12 Null-Bytes)
+    zero_iv_raw = b"\x00" * 12 + b"ciphertext-bytes-here" + b"\x01" * 16
+    zero_iv_b64 = base64.b64encode(zero_iv_raw).decode("ascii")
+    with pytest.raises(ValueError) as exc_iv:
+        validate_e2ee_envelope_format(f"sv-e2ee-v1:{zero_iv_b64}")
+    assert "Null-IV" in str(exc_iv.value)
+
+    # 4. Steuerzeichen im Umschlag
+    with pytest.raises(ValueError) as exc_ctrl:
+        validate_e2ee_envelope_format("sv-e2ee-v1:payload\nwith\rnewlines")
+    assert "Steuerzeichen" in str(exc_ctrl.value)
+
+    # 5. Zu kurzer Ciphertext (< 38 Zeichen / 28 Bytes)
+    short_ct = base64.b64encode(b"\x01" * 10).decode("ascii")
+    with pytest.raises(ValueError) as exc_short:
+        validate_e2ee_envelope_format(f"sv-e2ee-v1:{short_ct}")
+    assert "zu kurz" in str(exc_short.value).lower()
+
+    # 6. Ratchet-Umschlag (sv-e2ee-ratchet-v1:) gültig und ungültig
+    valid_bytes = b"\x01" * 12 + b"ratchet-payload-ciphertext" + b"\x02" * 16
+    valid_b64 = base64.b64encode(valid_bytes).decode("ascii")
+    valid_ratchet = f"sv-e2ee-ratchet-v1:0.{valid_b64}"
+    validate_e2ee_envelope_format(valid_ratchet)  # darf keine Exception werfen
+
+    # Ungültige Epoche im Ratchet-Umschlag
+    with pytest.raises(ValueError) as exc_ratchet_ep:
+        validate_e2ee_envelope_format(f"sv-e2ee-ratchet-v1:invalid.{valid_b64}")
+    assert "Epoche" in str(exc_ratchet_ep.value)
+
+
+def test_e2ee_security_public_key_validation(db: Session, owner_user: User):
+    """Prüft die Validierung von Public Keys: Private Parameter, zu kurze Schlüssel und falsche Typen werden abgewiesen."""
+    import json
+    from fastapi import HTTPException
+    from schemas.social import validate_rsa_public_key_jwk
+
+    # 1. Privater Parameter 'd' im Public Key -> Sicherheitsverletzung
+    leak_d = json.dumps({
+        "kty": "RSA",
+        "n": "A" * 350,
+        "e": "AQAB",
+        "d": "private-key-exponent-leak",
+    })
+    with pytest.raises(ValueError) as exc_d:
+        validate_rsa_public_key_jwk(leak_d)
+    assert "Sicherheitsverletzung" in str(exc_d.value)
+    assert "(d)" in str(exc_d.value)
+
+    # 2. RFC 7517 private Parameter 'dmp1' / 'dmq1' -> abgewiesen
+    leak_crt = json.dumps({
+        "kty": "RSA",
+        "n": "A" * 350,
+        "e": "AQAB",
+        "dmp1": "crt-exponent",
+    })
+    with pytest.raises(ValueError) as exc_crt:
+        validate_rsa_public_key_jwk(leak_crt)
+    assert "Sicherheitsverletzung" in str(exc_crt.value)
+
+    # 3. Zu kleiner Modulus (< 2048 Bit) -> abgewiesen
+    weak_key = json.dumps({
+        "kty": "RSA",
+        "n": "A" * 100,
+        "e": "AQAB",
+    })
+    with pytest.raises(ValueError) as exc_weak:
+        validate_rsa_public_key_jwk(weak_key)
+    assert "Unsichere Schlüssellänge" in str(exc_weak.value)
+
+    # 4. Nicht-RSA Schlüssel (z. B. oct) -> abgewiesen
+    oct_key = json.dumps({
+        "kty": "oct",
+        "k": "shared-secret",
+    })
+    with pytest.raises(ValueError) as exc_oct:
+        validate_rsa_public_key_jwk(oct_key)
+    assert "Ungültiger Schlüsseltyp" in str(exc_oct.value)
+
+    # 5. Algorithm Confusion: alg='none' oder Signatur-Algorithmen
+    alg_none = json.dumps({
+        "kty": "RSA",
+        "n": "A" * 350,
+        "e": "AQAB",
+        "alg": "none",
+    })
+    with pytest.raises(ValueError) as exc_none:
+        validate_rsa_public_key_jwk(alg_none)
+    assert "Sicherheitsverletzung" in str(exc_none.value)
+    assert "none" in str(exc_none.value)
+
+    # 6. Unzulässiger Key-Einsatz: use='sig' oder key_ops mit signieren
+    sig_use = json.dumps({
+        "kty": "RSA",
+        "n": "A" * 350,
+        "e": "AQAB",
+        "use": "sig",
+    })
+    with pytest.raises(ValueError) as exc_sig:
+        validate_rsa_public_key_jwk(sig_use)
+    assert "Schlüsselverwendung" in str(exc_sig.value)
+
+    # 7. Speichern über SocialService blockiert fehlerhafte Keys mit HTTP 400
+    with pytest.raises(HTTPException) as exc_svc:
+        SocialService.save_e2ee_public_key(db, owner_user.id, leak_d)
+    assert exc_svc.value.status_code == 400
 
 
 

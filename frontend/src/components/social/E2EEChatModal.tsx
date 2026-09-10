@@ -35,6 +35,7 @@ import {
   deriveBlindMailboxId,
   encryptE2eeMessage,
   decryptE2eeMessage,
+  encryptE2eeHybrid,
   decryptE2eeHybrid,
   getOrGenerateLocalKeyPair,
   type LocalE2eeKeyPair,
@@ -87,6 +88,7 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
   const [sending, setSending] = useState(false)
   const [blindMailboxId, setBlindMailboxId] = useState<string>('')
   const [localKeyPair, setLocalKeyPair] = useState<LocalE2eeKeyPair | null>(null)
+  const [recipientPublicKey, setRecipientPublicKey] = useState<string | null>(null)
 
   // Attachments
   const [isNotePickerOpen, setIsNotePickerOpen] = useState(false)
@@ -125,6 +127,21 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
     }
   }, [open, currentUserId])
 
+  // Fetch recipient public key for hybrid E2EE
+  useEffect(() => {
+    if (!open || !targetUserId) return
+    let active = true
+
+    getE2eePublicKey(targetUserId).then((info) => {
+      if (active && info?.public_key) {
+        setRecipientPublicKey(info.public_key)
+      }
+    }).catch(() => {})
+
+    return () => {
+      active = false
+    }
+  }, [open, targetUserId])
 
   // Derive deterministic blind mailbox ID when friend changes
   useEffect(() => {
@@ -263,8 +280,12 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
       if (img) payloadObj.image_attachment = img
 
       const payload = JSON.stringify(payloadObj)
-
-      const ciphertext = await encryptE2eeMessage(payload, currentUserId, targetUserId)
+      let ciphertext: string
+      if (recipientPublicKey && localKeyPair?.publicKeyJwk) {
+        ciphertext = await encryptE2eeHybrid(payload, recipientPublicKey, localKeyPair.publicKeyJwk)
+      } else {
+        ciphertext = await encryptE2eeMessage(payload, currentUserId, targetUserId)
+      }
 
       await relayE2eeEnvelope({
         blind_mailbox_id: blindMailboxId,

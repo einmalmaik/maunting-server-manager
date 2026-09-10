@@ -50,6 +50,11 @@ vi.mock('@/services/e2eeCrypto', () => ({
     publicKeyJwk: '{"kty":"oct"}',
     privateKeyJwk: '{"kty":"oct"}',
   }),
+  scrubPlaintextStorage: vi.fn(),
+  createReplayDetector: vi.fn().mockReturnValue({
+    checkAndRecord: vi.fn().mockResolvedValue(true),
+    clear: vi.fn(),
+  }),
 }))
 
 vi.mock('@/lib/offlineSync', () => ({
@@ -1016,7 +1021,7 @@ describe('Messenger (Allround Chat)', () => {
   })
 
   it('synchronisiert Nachrichten plattformuebergreifend (Tauri <-> Web) per deterministischer Kanalverschluesselung', async () => {
-    const { encryptE2eeMessage } = await import('@/services/e2eeCrypto')
+    const { encryptE2eeHybrid } = await import('@/services/e2eeCrypto')
     vi.mocked(socialApi.getFriends).mockResolvedValue([
       {
         id: 99, // Friendship table ID
@@ -1033,7 +1038,7 @@ describe('Messenger (Allround Chat)', () => {
       username: 'bob_desktop',
       public_key: '{"kty":"RSA","n":"pub_bob"}',
     })
-    vi.mocked(encryptE2eeMessage).mockResolvedValue('sv-e2ee-v1:cross-platform-sync-envelope')
+    vi.mocked(encryptE2eeHybrid).mockResolvedValue('sv-e2ee-hybrid-v1:cross-platform-sync-envelope')
 
     render(
       <MemoryRouter>
@@ -1066,17 +1071,17 @@ describe('Messenger (Allround Chat)', () => {
     const sendBtn = screen.getByTitle('Senden')
     fireEvent.click(sendBtn)
 
-    // Message is encrypted via deterministic channel key and relayed with recipient_id = 205
+    // Message is encrypted via hybrid key exchange and relayed with recipient_id = 205
     await waitFor(() => {
-      expect(encryptE2eeMessage).toHaveBeenCalledWith(
+      expect(encryptE2eeHybrid).toHaveBeenCalledWith(
         expect.stringContaining('Nachricht aus Tauri'),
-        1,
-        205
+        '{"kty":"RSA","n":"pub_bob"}',
+        '{"kty":"oct"}'
       )
       expect(socialApi.relayE2eeEnvelope).toHaveBeenCalledWith(
         expect.objectContaining({
           recipient_id: 205,
-          ciphertext_envelope: 'sv-e2ee-v1:cross-platform-sync-envelope',
+          ciphertext_envelope: 'sv-e2ee-hybrid-v1:cross-platform-sync-envelope',
         })
       )
     })

@@ -1,3 +1,4 @@
+import base64
 import pytest
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
@@ -5,6 +6,11 @@ from fastapi import HTTPException
 from models import User, UserFriend, DirectChat
 from services.social_service import SocialService
 from services.sync_event_service import SyncEventService
+
+
+def _valid_test_envelope(prefix: str = "sv-e2ee-v1:", payload_tag: str = "test-payload") -> str:
+    raw = b"N" * 12 + payload_tag.encode("utf-8") + b"T" * 16
+    return f"{prefix}{base64.b64encode(raw).decode('ascii')}"
 
 
 def _create_user(db: Session, username: str, privacy: str = "friends") -> User:
@@ -270,7 +276,7 @@ def test_messaging_non_friend_to_public_user_and_reply_rule(db: Session):
     env1 = SocialService.relay_blind_envelope(
         db,
         blind_mailbox_id=mid,
-        ciphertext_envelope="sv-e2ee-v1:first_message_from_a",
+        ciphertext_envelope=_valid_test_envelope(payload_tag="first_message_from_a"),
         sender_user_id=user_a.id,
         recipient_id=user_b.id,
     )
@@ -290,7 +296,7 @@ def test_messaging_non_friend_to_public_user_and_reply_rule(db: Session):
     env2 = SocialService.relay_blind_envelope(
         db,
         blind_mailbox_id=mid,
-        ciphertext_envelope="sv-e2ee-v1:reply_message_from_b",
+        ciphertext_envelope=_valid_test_envelope(payload_tag="reply_message_from_b"),
         sender_user_id=user_b.id,
         recipient_id=user_a.id,
     )
@@ -324,7 +330,7 @@ def test_messaging_forbidden_for_private_non_friend_without_existing_chat(db: Se
         SocialService.relay_blind_envelope(
             db,
             blind_mailbox_id=SocialService.derive_blind_mailbox_id(sender.id, target_private.id),
-            ciphertext_envelope="sv-e2ee-v1:unauthorized_attempt",
+            ciphertext_envelope=_valid_test_envelope(payload_tag="unauthorized_attempt"),
             sender_user_id=sender.id,
             recipient_id=target_private.id,
         )
@@ -447,7 +453,7 @@ def test_messaging_relay_mailbox_mismatch_rejected(db: Session):
         SocialService.relay_blind_envelope(
             db,
             blind_mailbox_id=fake_mailbox,
-            ciphertext_envelope="sv-e2ee-v1:spoofed_payload",
+            ciphertext_envelope=_valid_test_envelope(payload_tag="spoofed_payload"),
             sender_user_id=sender.id,
             recipient_id=target.id,
         )
@@ -488,7 +494,7 @@ def test_blocked_user_gets_no_presence_and_cannot_message(db: Session):
         SocialService.relay_blind_envelope(
             db,
             blind_mailbox_id=mid,
-            ciphertext_envelope="sv-e2ee-v1:blocked_attempt",
+            ciphertext_envelope=_valid_test_envelope(payload_tag="blocked_attempt"),
             sender_user_id=user_b.id,
             recipient_id=user_a.id,
         )
@@ -575,7 +581,7 @@ async def test_message_relay_targeted_to_chat_participants_only(db: Session):
         SocialService.relay_blind_envelope(
             db,
             blind_mailbox_id=mid,
-            ciphertext_envelope="sv-e2ee-v1:private_message",
+            ciphertext_envelope=_valid_test_envelope(payload_tag="private_message"),
             sender_user_id=sender.id,
             recipient_id=recipient.id,
         )

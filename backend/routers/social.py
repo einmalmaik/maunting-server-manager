@@ -875,7 +875,8 @@ async def social_websocket(
         for task in pending:
             task.cancel()
         await asyncio.gather(*pending, return_exceptions=True)
-
+    except WebSocketDisconnect:
+        pass
     except Exception as e:
         logger.debug("Social WebSocket getrennt: %s", e)
     finally:
