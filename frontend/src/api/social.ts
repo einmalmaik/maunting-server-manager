@@ -281,6 +281,84 @@ export async function relayE2eeEnvelope(payload: {
   })
 }
 
+export interface ChatMediaItem {
+  id: string
+  blind_mailbox_id: string
+  file_name: string
+  media_type: string
+  size_bytes: number
+  sha256: string
+  created_at: string
+}
+
+export async function uploadChatMedia(payload: {
+  blind_mailbox_id: string
+  ciphertext_blob: string
+  file_name: string
+  media_type?: string
+  group_id?: number | null
+  recipient_id?: number | null
+}): Promise<ChatMediaItem> {
+  return api<ChatMediaItem>('/social/media/upload', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function getChatMediaSignedUrl(
+  mediaId: string,
+  ttl: number = 900
+): Promise<{ media_id: string; signed_url: string; expires_at: string }> {
+  return api<{ media_id: string; signed_url: string; expires_at: string }>(
+    `/social/media/${mediaId}/signed-url?ttl=${ttl}`
+  )
+}
+
+export async function downloadChatMedia(signedUrl: string): Promise<string> {
+  const res = await fetch(signedUrl, { credentials: 'include' })
+  if (!res.ok) {
+    throw new Error(`Medien-Download fehlgeschlagen: ${res.status}`)
+  }
+  return await res.text()
+}
+
+/**
+ * Laedt einen Dateianhang nach strikter E2EE-Verschluesselung hoch.
+ * Der Server erhaelt ausschliesslich den verschluesselten Ciphertext-Blob.
+ */
+export async function uploadEncryptedChatAttachment(
+  data: string,
+  fileName: string,
+  blindMailboxId: string,
+  context: import('@/services/e2eeCrypto').AttachmentCryptoContext,
+  mediaType: string = 'application/octet-stream',
+  options?: { groupId?: number | null; recipientId?: number | null }
+): Promise<ChatMediaItem> {
+  const { encryptE2eeAttachmentBlob } = await import('@/services/e2eeCrypto')
+  const ciphertextBlob = await encryptE2eeAttachmentBlob(data, context)
+  return uploadChatMedia({
+    blind_mailbox_id: blindMailboxId,
+    ciphertext_blob: ciphertextBlob,
+    file_name: fileName,
+    media_type: mediaType,
+    group_id: options?.groupId,
+    recipient_id: options?.recipientId,
+  })
+}
+
+/**
+ * Ruft einen verschluesselten Anhang ueber eine signierte URL ab und
+ * entschluesselt ihn clientseitig im Zielkontext.
+ */
+export async function downloadAndDecryptChatAttachment(
+  signedUrl: string,
+  context: import('@/services/e2eeCrypto').AttachmentCryptoContext
+): Promise<string> {
+  const { decryptE2eeAttachmentBlob } = await import('@/services/e2eeCrypto')
+  const ciphertextBlob = await downloadChatMedia(signedUrl)
+  return decryptE2eeAttachmentBlob(ciphertextBlob, context)
+}
+
 export async function fetchE2eeEnvelopes(
   blindMailboxId: string,
   sinceId?: number

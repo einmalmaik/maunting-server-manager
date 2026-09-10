@@ -40,6 +40,7 @@ import {
   type LocalE2eeKeyPair,
 } from '@/services/e2eeCrypto'
 import { toast } from '@/stores/toastStore'
+import { getSafeAttachmentUrl } from '@/lib/sanitizeSvg'
 
 interface E2EEChatModalProps {
   open: boolean
@@ -290,6 +291,15 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
       toast.error('Bitte ein Bild auswählen.')
       return
     }
+    if (file.size > 8 * 1024 * 1024) {
+      toast.error('Bild darf maximal 8 MB groß sein.')
+      return
+    }
+    const lowerName = file.name.toLowerCase()
+    if (['.exe', '.dll', '.bat', '.cmd', '.sh', '.msi', '.vbs', '.ps1'].some((ext) => lowerName.endsWith(ext))) {
+      toast.error('Ausführbare Dateien sind nicht erlaubt.')
+      return
+    }
 
     const reader = new FileReader()
     reader.onload = (event) => {
@@ -412,13 +422,17 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
                 }`}
               >
                 {/* Image */}
-                {msg.imageAttachment && (
-                  <img
-                    src={msg.imageAttachment.dataUrl}
-                    alt="Anhang"
-                    className="max-h-48 w-auto object-cover rounded-lg my-1"
-                  />
-                )}
+                {msg.imageAttachment && (() => {
+                  const safeUrl = getSafeAttachmentUrl(msg.imageAttachment.dataUrl)
+                  if (!safeUrl) return null
+                  return (
+                    <img
+                      src={safeUrl}
+                      alt="Anhang"
+                      className="max-h-48 w-auto object-cover rounded-lg my-1"
+                    />
+                  )
+                })()}
 
                 {/* Note Attachment */}
                 {msg.noteAttachment && (

@@ -1403,6 +1403,13 @@ class SocialService:
         if not clean_content:
             raise HTTPException(status_code=422, detail="Story-Inhalt darf nicht leer sein.")
 
+        if media_url:
+            from services.chat_media_validator import validate_story_media_url, ChatMediaSecurityError
+            try:
+                media_url = validate_story_media_url(media_url)
+            except ChatMediaSecurityError as e:
+                raise HTTPException(status_code=422, detail=e.detail)
+
         now = _now()
         story = ChatStory(
             user_id=user.id,
