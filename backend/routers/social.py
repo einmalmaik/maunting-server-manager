@@ -679,13 +679,21 @@ async def social_websocket(
                 blind_mailbox_id = data.get("blind_mailbox_id", "")
                 ciphertext_envelope = data.get("ciphertext_envelope", "")
                 recipient_id = data.get("recipient_id")
-                SocialService.relay_blind_envelope(
-                    db,
-                    blind_mailbox_id=blind_mailbox_id,
-                    ciphertext_envelope=ciphertext_envelope,
-                    sender_user_id=user.id,
-                    recipient_id=recipient_id,
-                )
+                try:
+                    SocialService.relay_blind_envelope(
+                        db,
+                        blind_mailbox_id=blind_mailbox_id,
+                        ciphertext_envelope=ciphertext_envelope,
+                        sender_user_id=user.id,
+                        recipient_id=recipient_id,
+                    )
+                except HTTPException as exc:
+                    logger.warning("E2EE Relay-Fehler über WebSocket: %s", exc.detail)
+                    await websocket.send_json({
+                        "type": "error",
+                        "status_code": exc.status_code,
+                        "detail": exc.detail,
+                    })
     except WebSocketDisconnect:
         pass
     except Exception as e:

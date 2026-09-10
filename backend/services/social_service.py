@@ -874,6 +874,11 @@ class SocialService:
         user = db.query(User).filter_by(id=user_id).first()
         if not user:
             raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
+        from schemas.social import validate_rsa_public_key_jwk
+        try:
+            validate_rsa_public_key_jwk(public_key)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         user.social_e2ee_public_key = public_key
         db.commit()
 
@@ -900,6 +905,27 @@ class SocialService:
         """
         clean_mailbox = blind_mailbox_id.strip()
         clean_envelope = ciphertext_envelope.strip()
+
+        from schemas.social import validate_e2ee_envelope_format
+        try:
+            validate_e2ee_envelope_format(clean_envelope)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+        # Replay Attack Prevention (global: random IV ensures every valid ciphertext is globally unique)
+        existing_dup = (
+            db.query(E2eeBlindEnvelope.id)
+            .filter(
+                E2eeBlindEnvelope.ciphertext_envelope == clean_envelope,
+            )
+            .first()
+        )
+        if existing_dup:
+            raise HTTPException(
+                status_code=409,
+                detail="Replay-Angriff erkannt: Dieser verschlüsselte Umschlag wurde bereits übertragen.",
+            )
+
         target_recipient_id: int | None = None
 
         if sender_user_id:

@@ -27,7 +27,7 @@ import {
   rsaOaepDecrypt,
 } from '@msdis/shield/asymmetric'
 import { SecureBuffer } from '@msdis/shield/secure-memory'
-import { DisDecryptionError, base64ToBytes, bytesToBase64 } from '@msdis/shield/core'
+import { DisDecryptionError, DisInvalidArgumentError, base64ToBytes, bytesToBase64 } from '@msdis/shield/core'
 
 export const E2EE_ENVELOPE_SPEC: VersionedCipherEnvelopeSpec = {
   currentPrefix: 'sv-e2ee-v1:',
@@ -52,6 +52,13 @@ export const E2EE_HYBRID_ENVELOPE_SPEC: VersionedCipherEnvelopeSpec = {
   familyPrefix: 'sv-e2ee-hybrid-',
   subject: 'e2ee hybrid envelope',
 }
+
+export const E2EE_RATCHET_ENVELOPE_SPEC: VersionedCipherEnvelopeSpec = {
+  currentPrefix: 'sv-e2ee-ratchet-v1:',
+  familyPrefix: 'sv-e2ee-ratchet-',
+  subject: 'e2ee ratchet message envelope',
+}
+
 
 // ==========================================
 // 1. Direct 1:1 Chat E2EE
@@ -124,6 +131,10 @@ export async function decryptE2eeMessage(
   userBId: number,
   sharedSecret?: string
 ): Promise<string> {
+  const integrity = validateEnvelopeIntegrity(envelopeString)
+  if (!integrity.valid) {
+    throw new DisDecryptionError(integrity.error || 'Ungültige Umschlag-Integrität')
+  }
   try {
     const parsed = parseEnvelope(E2EE_ENVELOPE_SPEC, envelopeString)
     const minId = Math.min(userAId, userBId)
@@ -208,6 +219,10 @@ export async function decryptTeamE2eeMessage(
   teamId: number,
   teamPassphraseOrKey?: string
 ): Promise<string> {
+  const integrity = validateEnvelopeIntegrity(envelopeString)
+  if (!integrity.valid) {
+    throw new DisDecryptionError(integrity.error || 'Ungültige Team-E2EE-Umschlag-Integrität')
+  }
   try {
     const parsed = parseEnvelope(E2EE_TEAM_ENVELOPE_SPEC, envelopeString)
     const aad = `msm:team:aad:${teamId}`
@@ -259,6 +274,10 @@ export async function decryptGroupE2eeMessage(
   groupId: number,
   groupPassphraseOrKey?: string
 ): Promise<string> {
+  const integrity = validateEnvelopeIntegrity(envelopeString)
+  if (!integrity.valid) {
+    throw new DisDecryptionError(integrity.error || 'Ungültige Gruppen-E2EE-Umschlag-Integrität')
+  }
   try {
     const spec = envelopeString.startsWith('sv-e2ee-group-')
       ? E2EE_GROUP_ENVELOPE_SPEC
@@ -378,8 +397,43 @@ export async function getOrGenerateLocalKeyPair(userId: number): Promise<LocalE2
   return fresh
 }
 
+/**
+ * Zero-Knowledge Plaintext Storage Scrubbing:
+ * Scrubs any legacy plaintext chat cache or leaked keys from localStorage and sessionStorage.
+ */
+export function scrubPlaintextStorage(): void {
+  const scrubStore = (store: Storage | undefined) => {
+    if (!store) return
+    try {
+      const keysToRemove: string[] = []
+      for (let i = 0; i < store.length; i++) {
+        const key = store.key(i)
+        if (
+          key &&
+          (key.startsWith('msm:chat_cache:') ||
+            key.startsWith('msm_e2ee_identity_') ||
+            key.startsWith('msm_chat_') ||
+            key.includes('_priv') ||
+            key.includes('privateKey'))
+        ) {
+          keysToRemove.push(key)
+        }
+      }
+      keysToRemove.forEach((k) => store.removeItem(k))
+    } catch {}
+  }
+
+  if (typeof localStorage !== 'undefined') {
+    scrubStore(localStorage)
+  }
+  if (typeof sessionStorage !== 'undefined') {
+    scrubStore(sessionStorage)
+  }
+}
+
 export function clearMemoryKeyStore(): void {
   memoryKeyStore.clear()
+  scrubPlaintextStorage()
 }
 
 // Backward compatibility helpers (no plain private keys in localStorage)
@@ -399,14 +453,236 @@ export function getStoredLocalPrivateKey(userId: number): string | null {
 
 export function storeLocalPrivateKey(userId: number, privateKeyJwk: string): void {
   const existing = memoryKeyStore.get(userId)
-  if (existing) {
-    memoryKeyStore.set(userId, { ...existing, privateKeyJwk })
-  } else {
-    memoryKeyStore.set(userId, { publicKeyJwk: '', privateKeyJwk })
-  }
+  const updated: LocalE2eeKeyPair = existing
+    ? { ...existing, privateKeyJwk }
+    : { publicKeyJwk: '', privateKeyJwk }
+  memoryKeyStore.set(userId, updated)
   try {
     localStorage.removeItem(`msm_e2ee_identity_${userId}_priv`)
   } catch {}
+  void (async () => {
+    try {
+      const db = await openKeyDatabase()
+      const tx = db.transaction(IDB_STORE_NAME, 'readwrite')
+      const store = tx.objectStore(IDB_STORE_NAME)
+      store.put({ userId, ...updated })
+    } catch {}
+  })()
+}
+
+/**
+ * Securely deletes a user's key pair from both memory cache and IndexedDB.
+ */
+export async function deleteLocalKeyPair(userId: number): Promise<void> {
+  memoryKeyStore.delete(userId)
+  try {
+    localStorage.removeItem(`msm_e2ee_identity_${userId}_priv`)
+  } catch {}
+  try {
+    const db = await openKeyDatabase()
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE_NAME, 'readwrite')
+      const store = tx.objectStore(IDB_STORE_NAME)
+      const req = store.delete(userId)
+      req.onsuccess = () => resolve()
+      req.onerror = () => reject(req.error)
+    })
+  } catch {}
+}
+
+/**
+ * Validates whether a given string is a safe, well-formed RSA-OAEP public key in JWK format.
+ * Strict check: prevents uploading private parameters (d, p, q, etc.), weak key sizes,
+ * and algorithm-confusion / key-misuse attacks (e.g. alg: "none", alg: "RS256", use: "sig").
+ */
+export function validatePublicKeyJwk(publicKeyJwk: string): {
+  valid: boolean
+  error?: string
+  jwk?: JsonWebKey
+} {
+  if (!publicKeyJwk || typeof publicKeyJwk !== 'string') {
+    return { valid: false, error: 'Public key must be a non-empty string' }
+  }
+  let jwk: JsonWebKey
+  try {
+    jwk = JSON.parse(publicKeyJwk)
+  } catch {
+    return { valid: false, error: 'Public key is not valid JSON' }
+  }
+  if (!jwk || typeof jwk !== 'object' || Array.isArray(jwk)) {
+    return { valid: false, error: 'Public key JWK must be a JSON object' }
+  }
+  if (jwk.kty !== 'RSA') {
+    return { valid: false, error: `Invalid key type: expected 'RSA', got '${jwk.kty}'` }
+  }
+  if (!jwk.n || typeof jwk.n !== 'string') {
+    return { valid: false, error: 'Missing or invalid RSA modulus (n)' }
+  }
+  if (!jwk.e || typeof jwk.e !== 'string') {
+    return { valid: false, error: 'Missing or invalid RSA public exponent (e)' }
+  }
+  // Zero private parameter leak: verify no private parameters are exposed in public key
+  const privateFields = ['d', 'p', 'q', 'dp', 'dq', 'qi', 'dmp1', 'dmq1', 'coeff', 'oth']
+  for (const f of privateFields) {
+    if (f in jwk) {
+      return { valid: false, error: `Security violation: private key component '${f}' detected in public key JWK` }
+    }
+  }
+  // Check modulus length (minimum RSA-2048, modulus base64 string must be at least ~300 chars)
+  if (jwk.n.length < 300) {
+    return { valid: false, error: 'RSA modulus length is too small: minimum 2048-bit key required' }
+  }
+
+  // Algorithm-confusion & key misuse prevention:
+  if (jwk.alg) {
+    const validAlgs = ['RSA-OAEP', 'RSA-OAEP-256', 'RSA-OAEP-384', 'RSA-OAEP-512']
+    if (!validAlgs.includes(jwk.alg)) {
+      return {
+        valid: false,
+        error: `Security violation: unsupported or malicious algorithm '${jwk.alg}' for E2EE public key (expected RSA-OAEP)`,
+      }
+    }
+  }
+
+  if (jwk.use && jwk.use !== 'enc') {
+    return {
+      valid: false,
+      error: `Security violation: invalid key use '${jwk.use}' for E2EE encryption key (expected 'enc')`,
+    }
+  }
+
+  if (jwk.key_ops) {
+    const forbiddenOps = ['sign', 'verify']
+    const hasForbidden = jwk.key_ops.some((op) => forbiddenOps.includes(op))
+    if (hasForbidden) {
+      return {
+        valid: false,
+        error: 'Security violation: signature operations forbidden in E2EE encryption public key',
+      }
+    }
+  }
+
+  return { valid: true, jwk }
+}
+
+/**
+ * Validates ciphertext envelope integrity, format, and non-trivial nonce/IV.
+ */
+export function validateEnvelopeIntegrity(envelopeString: string): {
+  valid: boolean
+  prefix: string
+  payloadLength: number
+  error?: string
+} {
+  if (!envelopeString || typeof envelopeString !== 'string') {
+    return { valid: false, prefix: '', payloadLength: 0, error: 'Envelope must be a non-empty string' }
+  }
+
+  const validPrefixes = [
+    E2EE_ENVELOPE_SPEC.currentPrefix,
+    E2EE_TEAM_ENVELOPE_SPEC.currentPrefix,
+    E2EE_GROUP_ENVELOPE_SPEC.currentPrefix,
+    E2EE_HYBRID_ENVELOPE_SPEC.currentPrefix,
+    E2EE_RATCHET_ENVELOPE_SPEC.currentPrefix,
+  ]
+
+  const matchedPrefix = validPrefixes.find((p) => envelopeString.startsWith(p))
+  if (!matchedPrefix) {
+    return { valid: false, prefix: '', payloadLength: 0, error: 'Missing or unknown envelope version prefix' }
+  }
+
+  const payload = envelopeString.slice(matchedPrefix.length)
+  if (!payload || payload.length === 0) {
+    return { valid: false, prefix: matchedPrefix, payloadLength: 0, error: 'Empty envelope payload' }
+  }
+
+  // Check for plain JSON leaks
+  const trimmed = payload.trim()
+  if (
+    trimmed.startsWith('{') ||
+    trimmed.startsWith('[') ||
+    trimmed.includes('"text":') ||
+    trimmed.includes('"sender_id":') ||
+    trimmed.includes('"ciphertext":')
+  ) {
+    return {
+      valid: false,
+      prefix: matchedPrefix,
+      payloadLength: payload.length,
+      error: 'Security violation: unencrypted plaintext payload detected in envelope',
+    }
+  }
+
+  if (matchedPrefix === E2EE_HYBRID_ENVELOPE_SPEC.currentPrefix) {
+    const dotIdx = payload.indexOf('.')
+    if (dotIdx === -1) {
+      return { valid: false, prefix: matchedPrefix, payloadLength: payload.length, error: 'Malformed hybrid envelope structure' }
+    }
+    const wrappedKeys = payload.slice(0, dotIdx)
+    if (!wrappedKeys.trim()) {
+      return { valid: false, prefix: matchedPrefix, payloadLength: payload.length, error: 'Missing wrapped keys component in hybrid envelope' }
+    }
+    const ct = payload.slice(dotIdx + 1)
+    if (ct.length < 38) {
+      return { valid: false, prefix: matchedPrefix, payloadLength: payload.length, error: 'Hybrid ciphertext too short for valid IV and AEAD tag' }
+    }
+    try {
+      const bytes = base64ToBytes(ct)
+      if (bytes.length < 28) {
+        return { valid: false, prefix: matchedPrefix, payloadLength: payload.length, error: 'Decoded hybrid ciphertext length must be at least 28 bytes' }
+      }
+      const iv = bytes.slice(0, 12)
+      if (iv.every((b) => b === 0)) {
+        return { valid: false, prefix: matchedPrefix, payloadLength: payload.length, error: 'Weak/zero nonce/IV detected in hybrid envelope' }
+      }
+    } catch {
+      return { valid: false, prefix: matchedPrefix, payloadLength: payload.length, error: 'Invalid base64 encoding in hybrid ciphertext' }
+    }
+  } else if (matchedPrefix === E2EE_RATCHET_ENVELOPE_SPEC.currentPrefix) {
+    const dotIdx = payload.indexOf('.')
+    if (dotIdx === -1) {
+      return { valid: false, prefix: matchedPrefix, payloadLength: payload.length, error: 'Malformed ratchet envelope structure: expected epoch.ciphertext' }
+    }
+    const epochStr = payload.slice(0, dotIdx)
+    const epochNum = parseInt(epochStr, 10)
+    if (isNaN(epochNum) || epochNum < 0 || String(epochNum) !== epochStr) {
+      return { valid: false, prefix: matchedPrefix, payloadLength: payload.length, error: 'Invalid epoch number in ratchet envelope' }
+    }
+    const ct = payload.slice(dotIdx + 1)
+    if (ct.length < 38) {
+      return { valid: false, prefix: matchedPrefix, payloadLength: payload.length, error: 'Ratchet ciphertext too short for valid IV and AEAD tag' }
+    }
+    try {
+      const bytes = base64ToBytes(ct)
+      if (bytes.length < 28) {
+        return { valid: false, prefix: matchedPrefix, payloadLength: payload.length, error: 'Decoded ratchet ciphertext length must be at least 28 bytes' }
+      }
+      const iv = bytes.slice(0, 12)
+      if (iv.every((b) => b === 0)) {
+        return { valid: false, prefix: matchedPrefix, payloadLength: payload.length, error: 'Weak/zero nonce/IV detected in ratchet envelope' }
+      }
+    } catch {
+      return { valid: false, prefix: matchedPrefix, payloadLength: payload.length, error: 'Invalid base64 encoding in ratchet ciphertext' }
+    }
+  } else {
+    if (payload.length < 38) {
+      return { valid: false, prefix: matchedPrefix, payloadLength: payload.length, error: 'Ciphertext payload too short for valid IV and AEAD tag' }
+    }
+    try {
+      const bytes = base64ToBytes(payload)
+      if (bytes.length < 28) {
+        return { valid: false, prefix: matchedPrefix, payloadLength: payload.length, error: 'Decoded ciphertext payload length must be at least 28 bytes' }
+      }
+      const iv = bytes.slice(0, 12)
+      if (iv.every((b) => b === 0)) {
+        return { valid: false, prefix: matchedPrefix, payloadLength: payload.length, error: 'Weak/zero nonce/IV detected' }
+      }
+    } catch {
+      return { valid: false, prefix: matchedPrefix, payloadLength: payload.length, error: 'Invalid base64 encoding in ciphertext' }
+    }
+  }
+
+  return { valid: true, prefix: matchedPrefix, payloadLength: payload.length }
 }
 
 /**
@@ -415,14 +691,27 @@ export function storeLocalPrivateKey(userId: number, privateKeyJwk: string): voi
  * allowing both parties to decrypt from the blind mailbox.
  *
  * Uses DIS SecureBuffer for memory hygiene of the ephemeral symmetric key.
+ * Cryptographically binds wrappedKeys in AAD to prevent ciphertext transposition / session swaps.
  */
 export async function encryptE2eeHybrid(
   message: string,
   recipientPublicKeyJwk: string,
   senderPublicKeyJwk?: string
 ): Promise<string> {
-  const pubKeyObj: JsonWebKey = JSON.parse(recipientPublicKeyJwk)
-  const rsaRecipientPubKey = await importRsaOaepPublicKey(pubKeyObj)
+  const recipientCheck = validatePublicKeyJwk(recipientPublicKeyJwk)
+  if (!recipientCheck.valid || !recipientCheck.jwk) {
+    throw new DisInvalidArgumentError(recipientCheck.error || 'Ungültiger Recipient Public Key')
+  }
+  const rsaRecipientPubKey = await importRsaOaepPublicKey(recipientCheck.jwk)
+
+  let rsaSenderPubKey: CryptoKey | null = null
+  if (senderPublicKeyJwk) {
+    const senderCheck = validatePublicKeyJwk(senderPublicKeyJwk)
+    if (!senderCheck.valid || !senderCheck.jwk) {
+      throw new DisInvalidArgumentError(senderCheck.error || 'Ungültiger Sender Public Key')
+    }
+    rsaSenderPubKey = await importRsaOaepPublicKey(senderCheck.jwk)
+  }
 
   const secureSymKey = SecureBuffer.random(32)
   try {
@@ -434,9 +723,7 @@ export async function encryptE2eeHybrid(
       )
 
       let wrappedKeys = wrappedRecipientKey
-      if (senderPublicKeyJwk) {
-        const senderPubKeyObj: JsonWebKey = JSON.parse(senderPublicKeyJwk)
-        const rsaSenderPubKey = await importRsaOaepPublicKey(senderPubKeyObj)
+      if (rsaSenderPubKey) {
         const wrappedSenderKey = await rsaOaepEncrypt(
           symKeyString,
           rsaSenderPubKey
@@ -445,7 +732,9 @@ export async function encryptE2eeHybrid(
       }
 
       const symKey = await importAesGcmRawKey(rawSymKeyBytes, ['encrypt'])
-      const ciphertext = await encryptString(message, symKey, 'msm:hybrid:aad')
+      // Cryptographically bind wrappedKeys in AAD to prevent ciphertext transposition / session swaps
+      const aad = `msm:hybrid:aad:${wrappedKeys}`
+      const ciphertext = await encryptString(message, symKey, aad)
       const payload = `${wrappedKeys}.${ciphertext}`
       return formatEnvelope(E2EE_HYBRID_ENVELOPE_SPEC, payload)
     })
@@ -458,11 +747,16 @@ export async function encryptE2eeHybrid(
  * Hybrid-decrypts a message using a participant's RSA-OAEP private key.
  * Supports both single-key envelopes and dual-wrapped (recipient:sender) envelopes.
  * Protects ephemeral symmetric key in DIS SecureBuffer before destroying.
+ * Verifies AAD bound to wrappedKeys with backwards-compatible legacy fallback.
  */
 export async function decryptE2eeHybrid(
   envelopeString: string,
   participantPrivateKeyJwk: string
 ): Promise<string> {
+  const integrity = validateEnvelopeIntegrity(envelopeString)
+  if (!integrity.valid) {
+    throw new DisDecryptionError(integrity.error || 'Ungültige Hybrid-Umschlag-Integrität')
+  }
   try {
     const parsed = parseEnvelope(E2EE_HYBRID_ENVELOPE_SPEC, envelopeString)
     const dotIdx = parsed.payload.indexOf('.')
@@ -502,7 +796,13 @@ export async function decryptE2eeHybrid(
     try {
       return await secureKey.useAsync(async (keyBytes) => {
         const symKey = await importAesGcmRawKey(keyBytes, ['decrypt'])
-        return await decryptString(ciphertext, symKey, 'msm:hybrid:aad')
+        // Attempt decryption with wrappedKeys bound in AAD (anti-tamper / anti-session-swap)
+        try {
+          return await decryptString(ciphertext, symKey, `msm:hybrid:aad:${wrappedKeysPart}`)
+        } catch {
+          // Fallback to legacy static AAD for backwards compatibility with pre-fix envelopes
+          return await decryptString(ciphertext, symKey, 'msm:hybrid:aad')
+        }
       })
     } finally {
       secureKey.destroy()
@@ -511,3 +811,357 @@ export async function decryptE2eeHybrid(
     throw new DisDecryptionError('Hybrid-Entschlüsselung fehlgeschlagen')
   }
 }
+
+// ==========================================
+// 4. Ratchet Sessions & Key Rotation (Forward Secrecy)
+// ==========================================
+
+/**
+ * Ratchet Session for Forward Secrecy:
+ * Derives ephemeral message keys from a ratchet chain.
+ * Advancing the ratchet forward overwrites and destroys previous chain keys in memory.
+ */
+export class E2eeRatchetSession {
+  private chainKeyBuffer: SecureBuffer | null = null
+  private currentEpoch: number = 0
+  private readonly maxSkippedSteps: number = 100
+  private spentEpochs: Set<number> = new Set()
+
+  constructor(initialChainKeyBytes: Uint8Array, startEpoch: number = 0) {
+    this.chainKeyBuffer = SecureBuffer.fromBytes(initialChainKeyBytes)
+    this.currentEpoch = startEpoch
+  }
+
+  public static async create(
+    userAId: number,
+    userBId: number,
+    sessionSalt: string = ''
+  ): Promise<E2eeRatchetSession> {
+    const minId = Math.min(userAId, userBId)
+    const maxId = Math.max(userAId, userBId)
+    const payload = `msm:dm:ratchet:root:${minId}:${maxId}${sessionSalt ? `:${sessionSalt}` : ''}`
+    const seed = new TextEncoder().encode(payload)
+    const initialBytes = await sha256Bytes(seed)
+    seed.fill(0)
+    try {
+      return new E2eeRatchetSession(initialBytes)
+    } finally {
+      initialBytes.fill(0)
+    }
+  }
+
+  public get epoch(): number {
+    return this.currentEpoch
+  }
+
+  /**
+   * Advances the ratchet chain by one step, securely destroying the previous chain key
+   * and deriving the next ephemeral AES-256-GCM message CryptoKey.
+   * Exception-safe: Epoch increment is only committed after key derivation succeeds.
+   */
+  public async stepForward(): Promise<{ messageKey: CryptoKey; epoch: number }> {
+    if (!this.chainKeyBuffer) {
+      throw new DisDecryptionError('Ratchet-Session ist zerstört oder geschlossen')
+    }
+
+    const epochToUse = this.currentEpoch
+
+    const nextChainBytes = await this.chainKeyBuffer.useAsync(async (currentBytes) => {
+      const stepSeed = new TextEncoder().encode(`step:${epochToUse}:chain`)
+      const combined = new Uint8Array(currentBytes.length + stepSeed.length)
+      combined.set(currentBytes, 0)
+      combined.set(stepSeed, currentBytes.length)
+      const nextChain = await sha256Bytes(combined)
+      combined.fill(0)
+      stepSeed.fill(0)
+      return nextChain
+    })
+
+    let messageKey: CryptoKey
+    try {
+      messageKey = await this.chainKeyBuffer.useAsync(async (currentBytes) => {
+        const msgSeed = new TextEncoder().encode(`step:${epochToUse}:msg`)
+        const combined = new Uint8Array(currentBytes.length + msgSeed.length)
+        combined.set(currentBytes, 0)
+        combined.set(msgSeed, currentBytes.length)
+        const msgKeyBytes = await sha256Bytes(combined)
+        combined.fill(0)
+        msgSeed.fill(0)
+        const secMsgKey = SecureBuffer.fromBytes(msgKeyBytes)
+        msgKeyBytes.fill(0)
+        try {
+          return await secMsgKey.useAsync(async (bytes) => {
+            return await importAesGcmRawKey(bytes, ['encrypt', 'decrypt'])
+          })
+        } finally {
+          secMsgKey.destroy()
+        }
+      })
+    } catch (err) {
+      nextChainBytes.fill(0)
+      throw err
+    }
+
+    // Commit epoch progression only after both cryptographic steps succeeded
+    this.currentEpoch++
+    this.spentEpochs.add(epochToUse)
+
+    // Securely overwrite old chain key
+    this.chainKeyBuffer.destroy()
+    this.chainKeyBuffer = SecureBuffer.fromBytes(nextChainBytes)
+    nextChainBytes.fill(0)
+
+    return { messageKey, epoch: epochToUse }
+  }
+
+  /**
+   * Marks a specific epoch as consumed to prevent replay attacks.
+   */
+  public markEpochSpent(epoch: number): void {
+    this.spentEpochs.add(epoch)
+  }
+
+  /**
+   * Fast-forwards the ratchet chain to reach targetEpoch (up to maxSkippedSteps),
+   * destroying intermediate chain keys and returning the target epoch message key.
+   */
+  public async advanceToEpoch(targetEpoch: number): Promise<{ messageKey: CryptoKey; epoch: number }> {
+    const val = this.validateEpoch(targetEpoch)
+    if (!val.ok) {
+      throw new DisDecryptionError(val.reason || 'Ungültige Ziel-Epoche für Ratchet-Sprung')
+    }
+
+    while (this.currentEpoch < targetEpoch) {
+      const skipped = await this.stepForward()
+      // Mark skipped message key as spent
+      this.spentEpochs.add(skipped.epoch)
+    }
+
+    return await this.stepForward()
+  }
+
+  /**
+   * Validates whether an incoming epoch is acceptable (not already spent, within window).
+   */
+  public validateEpoch(epoch: number): { ok: boolean; reason?: string } {
+    if (this.spentEpochs.has(epoch)) {
+      return { ok: false, reason: `Replay-Attacke oder veraltete Nachricht: Epoche ${epoch} wurde bereits verbraucht` }
+    }
+    if (epoch < this.currentEpoch - 1) {
+      return { ok: false, reason: `Veraltete Epoche: ${epoch} < aktuelle Epoche ${this.currentEpoch}` }
+    }
+    if (epoch > this.currentEpoch + this.maxSkippedSteps) {
+      return { ok: false, reason: `Epochen-Sprung zu groß: ${epoch} überschreitet maximales Fenster (+${this.maxSkippedSteps})` }
+    }
+    return { ok: true }
+  }
+
+  public destroy(): void {
+    if (this.chainKeyBuffer) {
+      this.chainKeyBuffer.destroy()
+      this.chainKeyBuffer = null
+    }
+    this.spentEpochs.clear()
+  }
+}
+
+/**
+ * Derives a symmetric AES-256-GCM CryptoKey for an explicit ratchet epoch.
+ */
+export async function deriveRatchetChannelKey(
+  userAId: number,
+  userBId: number,
+  epoch: number,
+  sharedSecret?: string
+): Promise<CryptoKey> {
+  const minId = Math.min(userAId, userBId)
+  const maxId = Math.max(userAId, userBId)
+  const payload = `msm:dm:key:${minId}:${maxId}:epoch:${epoch}${sharedSecret ? `:${sharedSecret}` : ''}`
+  const seed = new TextEncoder().encode(payload)
+  const keyBytes = await sha256Bytes(seed)
+  seed.fill(0)
+  const secureKey = SecureBuffer.fromBytes(keyBytes)
+  keyBytes.fill(0)
+  try {
+    return await secureKey.useAsync(async (bytes) => {
+      return await importAesGcmRawKey(bytes, ['encrypt', 'decrypt'])
+    })
+  } finally {
+    secureKey.destroy()
+  }
+}
+
+/**
+ * Encrypts a message using the current ratchet session step with forward secrecy.
+ * Cryptographically binds user identifiers and ratchet epoch into AAD.
+ */
+export async function encryptRatchetMessage(
+  message: string,
+  userAId: number,
+  userBId: number,
+  session: E2eeRatchetSession
+): Promise<string> {
+  const minId = Math.min(userAId, userBId)
+  const maxId = Math.max(userAId, userBId)
+  const { messageKey, epoch } = await session.stepForward()
+  const aad = `msm:dm:ratchet:aad:${minId}:${maxId}:${epoch}`
+  const ciphertext = await encryptString(message, messageKey, aad)
+  const payload = `${epoch}.${ciphertext}`
+  return formatEnvelope(E2EE_RATCHET_ENVELOPE_SPEC, payload)
+}
+
+/**
+ * Decrypts a ratcheted message envelope with forward secrecy and AAD verification.
+ */
+export async function decryptRatchetMessage(
+  envelopeString: string,
+  userAId: number,
+  userBId: number,
+  sessionOrKey: E2eeRatchetSession | CryptoKey,
+  explicitEpoch?: number,
+  sharedSecret?: string
+): Promise<string> {
+  const integrity = validateEnvelopeIntegrity(envelopeString)
+  if (!integrity.valid) {
+    throw new DisDecryptionError(integrity.error || 'Ungültige Ratchet-Umschlag-Integrität')
+  }
+
+  const parsed = parseEnvelope(E2EE_RATCHET_ENVELOPE_SPEC, envelopeString)
+  const dotIdx = parsed.payload.indexOf('.')
+  if (dotIdx === -1) {
+    throw new DisDecryptionError('Ungültiges Ratchet-Payload-Format')
+  }
+
+  const epochStr = parsed.payload.slice(0, dotIdx)
+  const ciphertext = parsed.payload.slice(dotIdx + 1)
+  const epoch = parseInt(epochStr, 10)
+  if (isNaN(epoch) || epoch < 0) {
+    throw new DisDecryptionError('Ungültige Epochen-Nummer im Ratchet-Umschlag')
+  }
+
+  const minId = Math.min(userAId, userBId)
+  const maxId = Math.max(userAId, userBId)
+  const aad = `msm:dm:ratchet:aad:${minId}:${maxId}:${epoch}`
+
+  let key: CryptoKey
+  if (sessionOrKey instanceof E2eeRatchetSession) {
+    const epochCheck = sessionOrKey.validateEpoch(epoch)
+    if (!epochCheck.ok) {
+      throw new DisDecryptionError(epochCheck.reason || 'Ungültige Ratchet-Epoche')
+    }
+    if (epoch < sessionOrKey.epoch) {
+      throw new DisDecryptionError(`Replay-Attacke oder veraltete Nachricht: Epoche ${epoch} wurde bereits verbraucht`)
+    }
+    let stepResult: { messageKey: CryptoKey; epoch: number }
+    if (epoch === sessionOrKey.epoch) {
+      stepResult = await sessionOrKey.stepForward()
+    } else {
+      stepResult = await sessionOrKey.advanceToEpoch(epoch)
+    }
+    key = stepResult.messageKey
+  } else {
+    if (explicitEpoch !== undefined && explicitEpoch !== epoch) {
+      throw new DisDecryptionError('Epochen-Konflikt zwischen Schlüssel und Umschlag')
+    }
+    key = sessionOrKey
+  }
+
+  try {
+    return await decryptString(ciphertext, key, aad)
+  } catch {
+    throw new DisDecryptionError('Ratchet-Entschlüsselung fehlgeschlagen oder AAD manipuliert')
+  }
+}
+
+/**
+ * Rotates a channel key by hashing the current secret together with a rotation seed/epoch.
+ */
+export async function rotateChannelKey(
+  currentSecret: string,
+  rotationEpoch: number | string = Date.now()
+): Promise<string> {
+  if (!currentSecret || typeof currentSecret !== 'string' || !currentSecret.trim()) {
+    throw new DisInvalidArgumentError('currentSecret darf für Key-Rotation nicht leer sein')
+  }
+  const seed = new TextEncoder().encode(`msm:rotate:${rotationEpoch}:${currentSecret.trim()}`)
+  try {
+    return await sha256Hex(seed)
+  } finally {
+    seed.fill(0)
+  }
+}
+
+/**
+ * Rotates the team channel symmetric key.
+ */
+export async function rotateTeamChannelKey(
+  teamId: number,
+  currentKeyOrPassphrase: string,
+  newSalt: string = ''
+): Promise<string> {
+  if (!currentKeyOrPassphrase || typeof currentKeyOrPassphrase !== 'string' || !currentKeyOrPassphrase.trim()) {
+    throw new DisInvalidArgumentError('currentKeyOrPassphrase darf für Team-Key-Rotation nicht leer sein')
+  }
+  const seed = new TextEncoder().encode(`msm:team:rotate:${teamId}:${newSalt}:${currentKeyOrPassphrase.trim()}`)
+  try {
+    return await sha256Hex(seed)
+  } finally {
+    seed.fill(0)
+  }
+}
+
+/**
+ * Rotates local RSA-OAEP key pair for a user:
+ * Generates fresh 4096-bit key pair, replaces in KeyStore, and returns the new pair.
+ */
+export async function rotateLocalKeyPair(userId: number): Promise<LocalE2eeKeyPair> {
+  const fresh = await generateLocalE2eeKeyPair()
+  await storeLocalKeyPair(userId, fresh)
+  return fresh
+}
+
+/**
+ * Memory-bounded Replay Detector with sliding window / hash ring.
+ * Protects against duplicate envelopes and replayed ciphertexts.
+ */
+export class ReplayDetector {
+  private seenHashes: Set<string> = new Set()
+  private hashQueue: string[] = []
+  private readonly maxEntries: number
+
+  constructor(maxEntries = 1000) {
+    this.maxEntries = maxEntries
+  }
+
+  public async checkAndRecord(envelope: string): Promise<boolean> {
+    const raw = new TextEncoder().encode(envelope)
+    const hash = await sha256Hex(raw)
+    raw.fill(0)
+
+    if (this.seenHashes.has(hash)) {
+      return false // Replay detected!
+    }
+
+    this.seenHashes.add(hash)
+    this.hashQueue.push(hash)
+
+    if (this.hashQueue.length > this.maxEntries) {
+      const oldest = this.hashQueue.shift()
+      if (oldest) {
+        this.seenHashes.delete(oldest)
+      }
+    }
+
+    return true // Fresh!
+  }
+
+  public clear(): void {
+    this.seenHashes.clear()
+    this.hashQueue = []
+  }
+}
+
+export function createReplayDetector(maxEntries?: number): ReplayDetector {
+  return new ReplayDetector(maxEntries)
+}
+
