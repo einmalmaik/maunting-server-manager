@@ -100,6 +100,7 @@ import {
   decryptE2eeHybrid,
   encryptGroupE2eeMessage,
   decryptGroupE2eeMessage,
+  getLocalKeyPair,
   getOrGenerateLocalKeyPair,
   scrubPlaintextStorage,
   type LocalE2eeKeyPair,
@@ -953,8 +954,15 @@ export function Messenger() {
       } else if (activeContact) {
         const targetUserId = activeContact.userId
         const recipientPubKey = await getOrFetchRecipientPublicKey(targetUserId)
-        if (recipientPubKey && localKeyPair?.publicKeyJwk) {
-          ciphertext = await encryptE2eeHybrid(payload, recipientPubKey, localKeyPair.publicKeyJwk)
+        let resolvedKeyPair = localKeyPair
+        if (!resolvedKeyPair && currentUserId) {
+          resolvedKeyPair = await getLocalKeyPair(currentUserId)
+          if (!resolvedKeyPair) {
+            resolvedKeyPair = await getOrGenerateLocalKeyPair(currentUserId)
+          }
+        }
+        if (recipientPubKey && resolvedKeyPair?.publicKeyJwk) {
+          ciphertext = await encryptE2eeHybrid(payload, recipientPubKey, resolvedKeyPair.publicKeyJwk)
         } else {
           ciphertext = await encryptE2eeMessage(payload, currentUserId, targetUserId)
         }
@@ -995,6 +1003,17 @@ export function Messenger() {
       let maxPartnerDeliveredId = 0
       let maxIncomingId = 0
 
+      let resolvedKeyPair = localKeyPair
+      if (!resolvedKeyPair && currentUserId) {
+        resolvedKeyPair = await getLocalKeyPair(currentUserId)
+        if (!resolvedKeyPair) {
+          resolvedKeyPair = await getOrGenerateLocalKeyPair(currentUserId)
+        }
+        if (resolvedKeyPair) {
+          setLocalKeyPair(resolvedKeyPair)
+        }
+      }
+
       const decryptedEnvelopes = await Promise.all(
         envelopes.map(async (env) => {
           try {
@@ -1004,8 +1023,8 @@ export function Messenger() {
             } else if (activeContact) {
               const targetUserId = activeContact.userId
               if (env.ciphertext_envelope.startsWith('sv-e2ee-hybrid-v1:')) {
-                if (localKeyPair) {
-                  plain = await decryptE2eeHybrid(env.ciphertext_envelope, localKeyPair.privateKeyJwk)
+                if (resolvedKeyPair) {
+                  plain = await decryptE2eeHybrid(env.ciphertext_envelope, resolvedKeyPair.privateKeyJwk)
                 } else {
                   throw new Error('Local key not ready')
                 }
@@ -1033,6 +1052,9 @@ export function Messenger() {
             createdAt: env.created_at,
             isSelf: false,
           })
+          if (env.id > maxIncomingId) {
+            maxIncomingId = env.id
+          }
           continue
         }
 
@@ -1043,7 +1065,7 @@ export function Messenger() {
             if (parsed.type === 'read_receipt') {
               const readUpTo = Number(parsed.read_up_to_id || 0)
               const readerId = Number(parsed.reader_id || 0)
-              if (readerId !== currentUserId) {
+              if (Number(readerId) !== Number(currentUserId)) {
                 if (readUpTo > maxPartnerReadId) {
                   maxPartnerReadId = readUpTo
                 }
@@ -1061,7 +1083,7 @@ export function Messenger() {
             if (parsed.type === 'delivery_receipt') {
               const deliveredUpTo = Number(parsed.delivered_up_to_id || 0)
               const receiverId = Number(parsed.receiver_id || 0)
-              if (receiverId !== currentUserId && deliveredUpTo > maxPartnerDeliveredId) {
+              if (Number(receiverId) !== Number(currentUserId) && deliveredUpTo > maxPartnerDeliveredId) {
                 maxPartnerDeliveredId = deliveredUpTo
               }
               continue
@@ -1101,7 +1123,7 @@ export function Messenger() {
 
             let senderId = parsed.sender_id || (activeContact ? activeContact.userId : 0)
             let senderName = parsed.sender_name || parsed.sender_username
-            let isSelf = senderId === currentUserId
+            let isSelf = Number(senderId) === Number(currentUserId)
 
             if (!isSelf && env.id > maxIncomingId) {
               maxIncomingId = env.id
@@ -1228,36 +1250,56 @@ export function Messenger() {
       // Zustell- oder Lesequittungen (delivery_receipt, read_receipt) an die Mailbox gesendet!
       // Dadurch verbleibt die Nachricht beim blockierten Absender dauerhaft auf genau 1 grauem Häkchen (✓).
       const isTargetBlocked = activeContact ? isBlocked(activeContact.userId) : false
+      const isDocVisible = typeof document === 'undefined' || document.visibilityState === 'visible'
 
       // Sende Zustellbestätigung (delivery_receipt), sobald neue Nachrichten empfangen wurden
-      if (
+      const needsDelivery =
         maxIncomingId > 0 &&
         maxIncomingId > highestIncomingIdDeliveredRef.current &&
         !isTargetBlocked
-      ) {
-        highestIncomingIdDeliveredRef.current = maxIncomingId
-        void sendE2eeControlMessage({
+
+      if (needsDelivery) {
+        const idToDeliver = maxIncomingId
+        sendE2eeControlMessage({
           type: 'delivery_receipt',
-          delivered_up_to_id: maxIncomingId,
+          delivered_up_to_id: idToDeliver,
           receiver_id: currentUserId,
           timestamp: new Date().toISOString(),
         })
+          .then(() => {
+            highestIncomingIdDeliveredRef.current = Math.max(highestIncomingIdDeliveredRef.current, idToDeliver)
+          })
+          .catch(() => {})
       }
 
-      // Send read receipt if there are new incoming unacknowledged messages
-      if (
+      // Send read receipt if there are new incoming unacknowledged messages and document is visible
+      const needsRead =
         maxIncomingId > 0 &&
         maxIncomingId > highestIncomingIdAcknowledgedRef.current &&
         readReceiptsEnabled &&
+        isDocVisible &&
         !isTargetBlocked
-      ) {
-        highestIncomingIdAcknowledgedRef.current = maxIncomingId
-        void sendE2eeControlMessage({
-          type: 'read_receipt',
-          read_up_to_id: maxIncomingId,
-          reader_id: currentUserId,
-          timestamp: new Date().toISOString(),
-        })
+
+      if (needsRead) {
+        const idToAck = maxIncomingId
+        const dispatchReadReceipt = () => {
+          sendE2eeControlMessage({
+            type: 'read_receipt',
+            read_up_to_id: idToAck,
+            reader_id: currentUserId,
+            timestamp: new Date().toISOString(),
+          })
+            .then(() => {
+              highestIncomingIdAcknowledgedRef.current = Math.max(highestIncomingIdAcknowledgedRef.current, idToAck)
+            })
+            .catch(() => {})
+        }
+
+        if (needsDelivery) {
+          setTimeout(dispatchReadReceipt, 350)
+        } else {
+          dispatchReadReceipt()
+        }
       }
     } catch {
       // Offline fallback
@@ -1349,13 +1391,25 @@ export function Messenger() {
       void loadMessages(false)
     }
 
+    const handleVisibilityChange = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        void loadMessages(false)
+      }
+    }
+
     window.addEventListener('msm:sync-event', handleSync)
     window.addEventListener('msm:messages-updated', handleMessagesUpdated)
     window.addEventListener('msm:message-confirmed', handleMessagesUpdated)
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange)
+    }
     return () => {
       window.removeEventListener('msm:sync-event', handleSync)
       window.removeEventListener('msm:messages-updated', handleMessagesUpdated)
       window.removeEventListener('msm:message-confirmed', handleMessagesUpdated)
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange)
+      }
       if (partnerActivityTimeoutRef.current) {
         clearTimeout(partnerActivityTimeoutRef.current)
       }
@@ -3621,7 +3675,7 @@ export function Messenger() {
                             <CheckCheck className="w-3.5 h-3.5 opacity-60" />
                           </span>
                         ) : (
-                          <span title="Gesendet" className="inline-flex items-center">
+                          <span title="Nicht zugestellt (noch nicht beim Empfänger angekommen)" className="inline-flex items-center">
                             <Check className="w-3.5 h-3.5 opacity-60" />
                           </span>
                         )

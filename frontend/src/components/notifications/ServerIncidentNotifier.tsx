@@ -16,6 +16,7 @@ import { toast } from '@/stores/toastStore'
 import { sendeGeraeteBenachrichtigung, pruefeUndFrageGeraeteBerechtigung } from '@/lib/benachrichtigung'
 import { useMessengerNotificationStore, playNotificationChime } from '@/stores/messengerNotificationStore'
 import { NotificationService } from '@/services/notificationService'
+import { sendE2eeDeliveryReceipt, checkAndDispatchPendingDeliveryReceipts } from '@/services/deliveryReceiptService'
 
 interface IncidentAlert {
   id: number
@@ -136,7 +137,9 @@ export function ServerIncidentNotifier() {
     // Hintergrund-Synchronisierung für Blockierungen und bekannte Mailboxen
     void useMessengerNotificationStore.getState().syncBlockedFromBackend()
     if (user?.id) {
-      void useMessengerNotificationStore.getState().syncMailboxDirectoryFromBackend(user.id)
+      void useMessengerNotificationStore.getState().syncMailboxDirectoryFromBackend(user.id).then(() => {
+        void checkAndDispatchPendingDeliveryReceipts(user.id)
+      })
     }
 
     // Sofortiger initialer Check nach Login
@@ -189,6 +192,29 @@ export function ServerIncidentNotifier() {
         )
         if (isControl) {
           return
+        }
+
+        // Automatische Zustellbestätigung (2 graue Häkchen beim Absender):
+        // Sobald das Gerät des Empfängers die Nachricht via SSE erhalten hat (Empfänger hat Internet/Online-Status),
+        // wird unmittelbar eine Zustellquittung (delivery_receipt) an die Mailbox übermittelt — auch wenn der
+        // Chat noch nicht geöffnet wurde!
+        const incomingSenderId = Number(senderId)
+        const recipientUserId = Number(user?.id)
+        const isGroup = Boolean(detail.is_group || store.mailboxDirectory[mid]?.isGroup)
+        if (
+          !isGroup &&
+          incomingSenderId &&
+          recipientUserId &&
+          incomingSenderId !== recipientUserId &&
+          detail.id &&
+          !store.isBlocked(incomingSenderId)
+        ) {
+          void sendE2eeDeliveryReceipt({
+            blindMailboxId: mid,
+            envelopeId: Number(detail.id),
+            senderUserId: incomingSenderId,
+            currentUserId: recipientUserId,
+          })
         }
 
         // 4. Mailbox-Metadaten abrufen oder bei Bedarf nachsynchronisieren

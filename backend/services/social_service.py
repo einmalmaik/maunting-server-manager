@@ -1179,7 +1179,20 @@ class SocialService:
         )
         if since_id > 0:
             query = query.filter(E2eeBlindEnvelope.id > since_id)
-        return query.order_by(E2eeBlindEnvelope.id.asc()).limit(min(limit, 100)).all()
+            return query.order_by(E2eeBlindEnvelope.id.asc()).limit(min(limit, 200)).all()
+
+        total = query.count()
+        fetch_limit = min(limit, 200)
+        if total > fetch_limit:
+            sub = query.order_by(E2eeBlindEnvelope.id.desc()).limit(fetch_limit).subquery()
+            from sqlalchemy import select
+            return (
+                db.query(E2eeBlindEnvelope)
+                .filter(E2eeBlindEnvelope.id.in_(select(sub.c.id)))
+                .order_by(E2eeBlindEnvelope.id.asc())
+                .all()
+            )
+        return query.order_by(E2eeBlindEnvelope.id.asc()).limit(fetch_limit).all()
 
     @classmethod
     def broadcast_typing_signal(

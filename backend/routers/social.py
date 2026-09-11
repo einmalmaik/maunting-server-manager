@@ -463,7 +463,7 @@ def start_or_get_direct_chat(
 def fetch_blind_mailbox_envelopes(
     blind_mailbox_id: str,
     since_id: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=100),
+    limit: int = Query(100, ge=1, le=200),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> list[dict]:
@@ -475,6 +475,7 @@ def fetch_blind_mailbox_envelopes(
             "id": env.id,
             "blind_mailbox_id": env.blind_mailbox_id,
             "ciphertext_envelope": env.ciphertext_envelope,
+            "client_uuid": env.client_uuid,
             "created_at": env.created_at,
         }
         for env in envelopes

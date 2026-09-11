@@ -46,6 +46,7 @@ vi.mock('@/services/e2eeCrypto', () => ({
   decryptE2eeHybrid: vi.fn().mockResolvedValue('Hallo Hybrid'),
   encryptGroupE2eeMessage: vi.fn().mockResolvedValue('group-ciphertext'),
   decryptGroupE2eeMessage: vi.fn().mockResolvedValue('Hallo Gruppe'),
+  getLocalKeyPair: vi.fn().mockResolvedValue(null),
   getOrGenerateLocalKeyPair: vi.fn().mockResolvedValue({
     publicKeyJwk: '{"kty":"oct"}',
     privateKeyJwk: '{"kty":"oct"}',
@@ -624,8 +625,8 @@ describe('Messenger (Allround Chat)', () => {
     await waitFor(() => {
       expect(screen.getByText('Meine ursprüngliche Nachricht')).toBeInTheDocument()
       expect(screen.getByText('Hallo von Alice!')).toBeInTheDocument()
-      // Initial status before acknowledgement is "Gesendet" or "Zugestellt"
-      expect(screen.getByTitle(/Gesendet|Zugestellt/)).toBeInTheDocument()
+      // Initial status before acknowledgement is "Nicht zugestellt", "Gesendet" or "Zugestellt"
+      expect(screen.getByTitle(/Gesendet|Zugestellt/i)).toBeInTheDocument()
     })
 
     // 2. Simulate incoming read receipt envelope from Alice for message 10
@@ -1274,6 +1275,129 @@ describe('Messenger (Allround Chat)', () => {
     })
 
     vi.unstubAllGlobals()
+  })
+
+  it('zeigt exakte Drei-Stufen-Zustellung: 1 Strich (nicht angekommen), 2 graue Striche (zugestellt), 2 blaue Striche (gelesen)', async () => {
+    // Initial message from current user (id: 1), not yet acknowledged
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValueOnce([
+      {
+        id: 50,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: 'ciphertext-msg-50',
+        created_at: '2026-09-08T14:00:00Z',
+      },
+    ])
+
+    const { decryptE2eeMessage } = await import('@/services/e2eeCrypto')
+    vi.mocked(decryptE2eeMessage).mockImplementation(async (envelope) => {
+      if (envelope === 'ciphertext-msg-50') {
+        return JSON.stringify({
+          sender_id: 1,
+          text: 'Hallo Alice, ist das angekommen?',
+          timestamp: '2026-09-08T14:00:00Z',
+        })
+      }
+      if (envelope === 'ciphertext-delivery-receipt') {
+        return JSON.stringify({
+          type: 'delivery_receipt',
+          delivered_up_to_id: 50,
+          receiver_id: 101,
+        })
+      }
+      if (envelope === 'ciphertext-read-receipt') {
+        return JSON.stringify({
+          type: 'read_receipt',
+          read_up_to_id: 50,
+          reader_id: 101,
+        })
+      }
+      return 'Unknown'
+    })
+
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /alice/i })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole('button', { name: /alice/i }))
+
+    // 1. Initialer Zustand: 1 grauer Strich (noch nicht beim Empfänger angekommen)
+    await waitFor(() => {
+      expect(screen.getByText('Hallo Alice, ist das angekommen?')).toBeInTheDocument()
+      expect(screen.getByTitle('Nicht zugestellt (noch nicht beim Empfänger angekommen)')).toBeInTheDocument()
+    })
+
+    // 2. Zwischensprung: Bob empfängt Nachricht (Zustellbestätigung -> 2 graue Striche)
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValueOnce([
+      {
+        id: 50,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: 'ciphertext-msg-50',
+        created_at: '2026-09-08T14:00:00Z',
+      },
+      {
+        id: 51,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: 'ciphertext-delivery-receipt',
+        created_at: '2026-09-08T14:00:05Z',
+      },
+    ])
+
+    window.dispatchEvent(
+      new CustomEvent('msm:sync-event', {
+        detail: {
+          type: 'e2ee_blind_message',
+          blind_mailbox_id: 'test-blind-mailbox',
+          is_control: true,
+          control_type: 'delivery_receipt',
+        },
+      })
+    )
+
+    await waitFor(() => {
+      expect(screen.getByTitle('Zugestellt / Vom Gesprächspartner empfangen')).toBeInTheDocument()
+    })
+
+    // 3. Gelesen: Bob öffnet den Chat (Lesebestätigung -> 2 blaue Striche)
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValueOnce([
+      {
+        id: 50,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: 'ciphertext-msg-50',
+        created_at: '2026-09-08T14:00:00Z',
+      },
+      {
+        id: 51,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: 'ciphertext-delivery-receipt',
+        created_at: '2026-09-08T14:00:05Z',
+      },
+      {
+        id: 52,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: 'ciphertext-read-receipt',
+        created_at: '2026-09-08T14:00:10Z',
+      },
+    ])
+
+    window.dispatchEvent(
+      new CustomEvent('msm:sync-event', {
+        detail: {
+          type: 'e2ee_blind_message',
+          blind_mailbox_id: 'test-blind-mailbox',
+          is_control: true,
+          control_type: 'read_receipt',
+        },
+      })
+    )
+
+    await waitFor(() => {
+      expect(screen.getByTitle('Gelesen vom Gesprächspartner')).toBeInTheDocument()
+    })
   })
 })
 

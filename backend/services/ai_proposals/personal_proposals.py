@@ -497,11 +497,13 @@ def _ausfuehren_message_friend(db: Session, rahmen: _AusfuehrungsRahmen) -> _Aus
     channel_key_bytes = hashlib.sha256(f"msm:dm:key:{ids[0]}:{ids[1]}".encode("utf-8")).digest()
     aad = f"msm:dm:aad:{ids[0]}:{ids[1]}".encode("utf-8")
 
+    client_uuid = f"ai-{int(datetime.now(timezone.utc).timestamp() * 1000)}-{os.urandom(6).hex()}"
     envelope_payload = json.dumps({
         "sender_id": rahmen.active_user.id,
         "sender_username": rahmen.active_user.username,
         "text": message_text,
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "client_uuid": client_uuid,
     }).encode("utf-8")
 
     aesgcm = AESGCM(channel_key_bytes)
@@ -516,6 +518,7 @@ def _ausfuehren_message_friend(db: Session, rahmen: _AusfuehrungsRahmen) -> _Aus
         ciphertext_envelope=f"sv-e2ee-v1:{ciphertext_b64}",
         sender_user_id=rahmen.active_user.id,
         recipient_id=friend_id,
+        client_uuid=client_uuid,
     )
     AchievementService.unlock_achievement(db, rahmen.active_user.id, "social_zero_knowledge")
 
@@ -543,11 +546,13 @@ def _ausfuehren_message_contact(db: Session, rahmen: _AusfuehrungsRahmen) -> _Au
     channel_key_bytes = hashlib.sha256(f"msm:dm:key:{ids[0]}:{ids[1]}".encode("utf-8")).digest()
     aad = f"msm:dm:aad:{ids[0]}:{ids[1]}".encode("utf-8")
 
+    client_uuid = f"ai-{int(datetime.now(timezone.utc).timestamp() * 1000)}-{os.urandom(6).hex()}"
     envelope_payload = json.dumps({
         "sender_id": rahmen.active_user.id,
         "sender_username": rahmen.active_user.username,
         "text": message_text,
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "client_uuid": client_uuid,
     }).encode("utf-8")
 
     aesgcm = AESGCM(channel_key_bytes)
@@ -561,6 +566,7 @@ def _ausfuehren_message_contact(db: Session, rahmen: _AusfuehrungsRahmen) -> _Au
         ciphertext_envelope=f"sv-e2ee-v1:{ciphertext_b64}",
         sender_user_id=rahmen.active_user.id,
         recipient_id=recipient_id,
+        client_uuid=client_uuid,
     )
     AchievementService.unlock_achievement(db, rahmen.active_user.id, "social_zero_knowledge")
 
@@ -590,11 +596,13 @@ def _ausfuehren_message_group(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausg
     channel_key_bytes = hashlib.sha256(f"msm:group:key:{group_id}".encode("utf-8")).digest()
     aad = f"msm:group:aad:{group_id}".encode("utf-8")
 
+    client_uuid = f"ai-{int(datetime.now(timezone.utc).timestamp() * 1000)}-{os.urandom(6).hex()}"
     envelope_payload = json.dumps({
         "sender_id": rahmen.active_user.id,
         "sender_username": rahmen.active_user.username,
         "text": message_text,
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "client_uuid": client_uuid,
     }).encode("utf-8")
 
     aesgcm = AESGCM(channel_key_bytes)
@@ -607,6 +615,7 @@ def _ausfuehren_message_group(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausg
         blind_mailbox_id=blind_mailbox_id,
         ciphertext_envelope=f"sv-e2ee-group-v1:{ciphertext_b64}",
         sender_user_id=rahmen.active_user.id,
+        client_uuid=client_uuid,
     )
     AchievementService.unlock_achievement(db, rahmen.active_user.id, "social_zero_knowledge")
 
