@@ -78,9 +78,12 @@ import {
   getE2eePublicKey,
   setE2eePublicKey,
   uploadEncryptedChatAttachment,
-  getChatMediaSignedUrl,
-  downloadAndDecryptChatAttachment,
 } from '@/api/social'
+import {
+  ChatMediaImage,
+  ChatMediaFile,
+  chatMediaBlobCache,
+} from '@/components/social/ChatMediaAttachments'
 import { teamsApi, type TeamMember } from '@/api/teams'
 import {
   loadNotesOfflineFirst,
@@ -1496,14 +1499,18 @@ export function Messenger() {
 
       if (img && img.dataUrl && !img.mediaId) {
         try {
+          const mimeType = img.dataUrl.split(';')[0]?.replace('data:', '') || 'image/png'
           const uploaded = await uploadEncryptedChatAttachment(
             img.dataUrl,
             img.name || 'image.png',
             blindMailboxId,
             cryptoContext,
-            'image/png',
+            mimeType,
             { groupId: activeGroup?.id, recipientId: activeContact?.userId }
           )
+          if (uploaded?.id) {
+            chatMediaBlobCache.set(uploaded.id, img.dataUrl)
+          }
           finalImg = {
             ...img,
             mediaId: uploaded.id,
@@ -1523,6 +1530,9 @@ export function Messenger() {
             file.mimeType || 'application/octet-stream',
             { groupId: activeGroup?.id, recipientId: activeContact?.userId }
           )
+          if (uploaded?.id) {
+            chatMediaBlobCache.set(uploaded.id, file.dataUrl)
+          }
           finalFile = {
             ...file,
             mediaId: uploaded.id,
@@ -1561,6 +1571,13 @@ export function Messenger() {
               text: rawText,
               createdAt: new Date().toISOString(),
               isSelf: true,
+              imageAttachment: finalImg,
+              fileAttachment: finalFile,
+              noteAttachment: note,
+              calendarAttachment: cal,
+              audioAttachment: audio,
+              stickerAttachment: sticker,
+              storyReply,
             },
           ])
           toast.info('Nachricht offline in Warteschlange eingereiht.')
@@ -1587,6 +1604,13 @@ export function Messenger() {
                 text: rawText,
                 createdAt: new Date().toISOString(),
                 isSelf: true,
+                imageAttachment: finalImg,
+                fileAttachment: finalFile,
+                noteAttachment: note,
+                calendarAttachment: cal,
+                audioAttachment: audio,
+                stickerAttachment: sticker,
+                storyReply,
               },
             ])
             toast.info('Nachricht offline in Warteschlange eingereiht (Verbindungsfehler).')
@@ -1617,6 +1641,13 @@ export function Messenger() {
               text: rawText,
               createdAt: new Date().toISOString(),
               isSelf: true,
+              imageAttachment: finalImg,
+              fileAttachment: finalFile,
+              noteAttachment: note,
+              calendarAttachment: cal,
+              audioAttachment: audio,
+              stickerAttachment: sticker,
+              storyReply,
             },
           ])
           toast.info('Nachricht offline in Warteschlange eingereiht.')
@@ -1645,6 +1676,13 @@ export function Messenger() {
                 text: rawText,
                 createdAt: new Date().toISOString(),
                 isSelf: true,
+                imageAttachment: finalImg,
+                fileAttachment: finalFile,
+                noteAttachment: note,
+                calendarAttachment: cal,
+                audioAttachment: audio,
+                stickerAttachment: sticker,
+                storyReply,
               },
             ])
             toast.info('Nachricht offline in Warteschlange eingereiht (Verbindungsfehler).')
@@ -3213,89 +3251,37 @@ export function Messenger() {
                       )}
 
                       {/* Image Attachment */}
-                      {!msg.isDeleted && msg.imageAttachment && (() => {
-                        const safeUrl = getSafeAttachmentUrl(msg.imageAttachment.dataUrl)
-                        if (!safeUrl && !msg.imageAttachment.mediaId) return null
-                        return (
-                          <div className="rounded-xl overflow-hidden border border-black/10 my-1 cursor-pointer">
-                            <img
-                              src={safeUrl || undefined}
-                              alt="Chat Anhang"
-                              onClick={async () => {
-                                if (msg.imageAttachment?.mediaId && !msg.imageAttachment.dataUrl) {
-                                  try {
-                                    const { signed_url } = await getChatMediaSignedUrl(msg.imageAttachment.mediaId)
-                                    const context: AttachmentCryptoContext = activeGroup
-                                      ? { groupId: activeGroup.id }
-                                      : { userAId: currentUserId, userBId: activeContact?.userId }
-                                    const decrypted = await downloadAndDecryptChatAttachment(signed_url, context)
-                                    setViewingImage(decrypted)
-                                    return
-                                  } catch {
-                                    toast.error('Bild konnte nicht entschlüsselt werden.')
-                                    return
-                                  }
+                      {!msg.isDeleted && msg.imageAttachment && (
+                        <ChatMediaImage
+                          attachment={msg.imageAttachment}
+                          cryptoContext={
+                            activeGroup
+                              ? { groupId: activeGroup.id }
+                              : {
+                                  userAId: currentUserId,
+                                  userBId: activeContact?.userId || (!msg.isSelf ? msg.senderId : 0),
                                 }
-                                if (safeUrl) setViewingImage(safeUrl)
-                              }}
-                              className="max-h-60 w-auto object-cover rounded-lg hover:opacity-95 transition-opacity"
-                            />
-                          </div>
-                        )
-                      })()}
+                          }
+                          onViewImage={setViewingImage}
+                          isSelf={msg.isSelf}
+                        />
+                      )}
 
                       {/* File Attachment Card */}
-                      {!msg.isDeleted && msg.fileAttachment && (() => {
-                        const safeHref = getSafeAttachmentUrl(msg.fileAttachment.dataUrl)
-                        const safeName = msg.fileAttachment.name?.replace(/[\r\n"']/g, '') || 'attachment'
-                        return (
-                          <a
-                            href={safeHref || '#'}
-                            download={safeName}
-                            target={safeHref && !safeHref.startsWith('data:') ? '_blank' : undefined}
-                            rel="noopener noreferrer"
-                            onClick={async (e) => {
-                              if (msg.fileAttachment?.mediaId && (!safeHref || safeHref === '#')) {
-                                e.preventDefault()
-                                try {
-                                  const { signed_url } = await getChatMediaSignedUrl(msg.fileAttachment.mediaId)
-                                  const context: AttachmentCryptoContext = activeGroup
-                                    ? { groupId: activeGroup.id }
-                                    : { userAId: currentUserId, userBId: activeContact?.userId }
-                                  const decrypted = await downloadAndDecryptChatAttachment(signed_url, context)
-                                  const downloadLink = document.createElement('a')
-                                  downloadLink.href = decrypted
-                                  downloadLink.download = safeName
-                                  document.body.appendChild(downloadLink)
-                                  downloadLink.click()
-                                  document.body.removeChild(downloadLink)
-                                } catch {
-                                  toast.error('Entschlüsselung des Dateianhangs fehlgeschlagen.')
+                      {!msg.isDeleted && msg.fileAttachment && (
+                        <ChatMediaFile
+                          attachment={msg.fileAttachment}
+                          cryptoContext={
+                            activeGroup
+                              ? { groupId: activeGroup.id }
+                              : {
+                                  userAId: currentUserId,
+                                  userBId: activeContact?.userId || (!msg.isSelf ? msg.senderId : 0),
                                 }
-                                return
-                              }
-                              if (!safeHref) {
-                                e.preventDefault()
-                                toast.error('Unsicherer oder ungültiger Dateianhang blockiert.')
-                              }
-                            }}
-                            className={`flex items-center gap-2.5 p-2.5 rounded-xl border transition-colors ${
-                              msg.isSelf
-                                ? 'bg-black/15 border-white/20 text-white hover:bg-black/25'
-                                : 'bg-surface-container-low border-outline-variant/30 text-on-surface hover:bg-surface-container'
-                            }`}
-                          >
-                            <div className="p-2 rounded-lg bg-primary/20 text-primary shrink-0">
-                              <FileText className="w-4 h-4" />
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <p className="font-semibold text-xs truncate">{safeName}</p>
-                              <p className="text-[10px] opacity-75">{formatFileSize(msg.fileAttachment.sizeBytes)}</p>
-                            </div>
-                            <Download className="w-3.5 h-3.5 opacity-75 shrink-0" />
-                          </a>
-                        )
-                      })()}
+                          }
+                          isSelf={msg.isSelf}
+                        />
+                      )}
 
                       {/* Sticker Attachment */}
                       {!msg.isDeleted && msg.stickerAttachment && (
@@ -3929,7 +3915,6 @@ export function Messenger() {
                         ref={fileInputRef}
                         type="file"
                         accept="image/*"
-                        capture="environment"
                         className="hidden"
                         onChange={handleFileChange}
                       />
@@ -4007,6 +3992,24 @@ export function Messenger() {
                                     <div className="min-w-0 flex-1">
                                       <div className="text-xs font-semibold text-primary">Foto aufnehmen</div>
                                       <div className="text-[10px] text-on-surface-variant/70">Kamera Snapshot</div>
+                                    </div>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setIsAttachMenuOpen(false)
+                                      fileInputRef.current?.click()
+                                    }}
+                                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
+                                    aria-label="Foto & Bild auswählen"
+                                  >
+                                    <div className="w-7 h-7 rounded-lg bg-purple-500/15 text-purple-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                                      <ImageIcon className="w-4 h-4" />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="text-xs font-semibold text-primary">Foto & Bild</div>
+                                      <div className="text-[10px] text-on-surface-variant/70">Aus Galerie / Dateien</div>
                                     </div>
                                   </button>
 

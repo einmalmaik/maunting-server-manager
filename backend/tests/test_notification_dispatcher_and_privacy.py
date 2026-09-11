@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from uuid import uuid4
 import pytest
@@ -377,11 +378,14 @@ async def test_group_relay_targeted_to_members_only_no_leak_to_strangers(db: Ses
     conn_bob, q_bob = SyncEventService.subscribe(user_id=bob.id)
     conn_stranger, q_stranger = SyncEventService.subscribe(user_id=charlie_stranger.id)
 
+    valid_env = "sv-e2ee-group-v1:" + base64.b64encode(b"N" * 12 + b"group_payload_test" + b"T" * 16).decode("ascii")
+    illegal_env = "sv-e2ee-group-v1:" + base64.b64encode(b"N" * 12 + b"illegal_payload_test" + b"T" * 16).decode("ascii")
+
     try:
         SocialService.relay_blind_envelope(
             db,
             blind_mailbox_id=g_mid,
-            ciphertext_envelope="sv-e2ee-group-v1:cipherpayload",
+            ciphertext_envelope=valid_env,
             sender_user_id=alice.id,
         )
 
@@ -404,7 +408,7 @@ async def test_group_relay_targeted_to_members_only_no_leak_to_strangers(db: Ses
             SocialService.relay_blind_envelope(
                 db,
                 blind_mailbox_id=g_mid,
-                ciphertext_envelope="sv-e2ee-group-v1:illegal_payload",
+                ciphertext_envelope=illegal_env,
                 sender_user_id=charlie_stranger.id,
             )
         assert exc.value.status_code == 403

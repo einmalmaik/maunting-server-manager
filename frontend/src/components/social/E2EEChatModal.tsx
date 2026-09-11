@@ -41,7 +41,12 @@ import {
   type LocalE2eeKeyPair,
 } from '@/services/e2eeCrypto'
 import { toast } from '@/stores/toastStore'
-import { getSafeAttachmentUrl } from '@/lib/sanitizeSvg'
+import {
+  ChatMediaImage,
+  ChatMediaFile,
+  type ImageAttachment,
+  type FileAttachment,
+} from './ChatMediaAttachments'
 
 interface E2EEChatModalProps {
   open: boolean
@@ -60,14 +65,9 @@ interface NoteAttachment {
 interface CalendarAttachment {
   title: string
   start: string
-  end: string
+  end?: string
   description?: string
   location?: string
-}
-
-interface ImageAttachment {
-  dataUrl: string
-  name?: string
 }
 
 interface DecryptedMessage {
@@ -78,6 +78,7 @@ interface DecryptedMessage {
   noteAttachment?: NoteAttachment
   calendarAttachment?: CalendarAttachment
   imageAttachment?: ImageAttachment
+  fileAttachment?: FileAttachment
 }
 
 export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2EEChatModalProps) {
@@ -96,6 +97,7 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
   const [isCalendarPickerOpen, setIsCalendarPickerOpen] = useState(false)
   const [userEvents, setUserEvents] = useState<CalendarEventItem[]>([])
   const [selectedImage, setSelectedImage] = useState<ImageAttachment | null>(null)
+  const [viewingImage, setViewingImage] = useState<string | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -185,6 +187,7 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
           let noteAttachment: NoteAttachment | undefined = undefined
           let calendarAttachment: CalendarAttachment | undefined = undefined
           let imageAttachment: ImageAttachment | undefined = undefined
+          let fileAttachment: FileAttachment | undefined = undefined
 
           try {
             const parsed = JSON.parse(plain)
@@ -194,6 +197,7 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
               if (parsed.note_attachment) noteAttachment = parsed.note_attachment
               if (parsed.calendar_attachment) calendarAttachment = parsed.calendar_attachment
               if (parsed.image_attachment) imageAttachment = parsed.image_attachment
+              if (parsed.file_attachment) fileAttachment = parsed.file_attachment
             }
           } catch {
             if (plain.startsWith('[ME]:')) {
@@ -210,6 +214,7 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
             noteAttachment,
             calendarAttachment,
             imageAttachment,
+            fileAttachment,
           })
         } catch {
           decryptedList.push({
@@ -443,17 +448,29 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
                 }`}
               >
                 {/* Image */}
-                {msg.imageAttachment && (() => {
-                  const safeUrl = getSafeAttachmentUrl(msg.imageAttachment.dataUrl)
-                  if (!safeUrl) return null
-                  return (
-                    <img
-                      src={safeUrl}
-                      alt="Anhang"
-                      className="max-h-48 w-auto object-cover rounded-lg my-1"
-                    />
-                  )
-                })()}
+                {msg.imageAttachment && (
+                  <ChatMediaImage
+                    attachment={msg.imageAttachment}
+                    cryptoContext={{
+                      userAId: currentUserId,
+                      userBId: targetUserId,
+                    }}
+                    onViewImage={setViewingImage}
+                    isSelf={msg.isSelf}
+                  />
+                )}
+
+                {/* File Attachment Card */}
+                {msg.fileAttachment && (
+                  <ChatMediaFile
+                    attachment={msg.fileAttachment}
+                    cryptoContext={{
+                      userAId: currentUserId,
+                      userBId: targetUserId,
+                    }}
+                    isSelf={msg.isSelf}
+                  />
+                )}
 
                 {/* Note Attachment */}
                 {msg.noteAttachment && (
@@ -669,6 +686,30 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Full-size Image Viewer */}
+      {viewingImage && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setViewingImage(null)}
+        >
+          <div className="relative max-w-4xl max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+            <img
+              src={viewingImage}
+              alt="Großansicht"
+              className="max-h-[85vh] max-w-full rounded-xl object-contain shadow-2xl"
+            />
+            <button
+              type="button"
+              onClick={() => setViewingImage(null)}
+              className="absolute -top-3 -right-3 p-1.5 rounded-full bg-surface-container-highest text-on-surface shadow-md cursor-pointer hover:opacity-90"
+              aria-label="Schließen"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
     </Dialog>
   )
 }
