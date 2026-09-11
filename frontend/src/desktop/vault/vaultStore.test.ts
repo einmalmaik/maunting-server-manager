@@ -441,12 +441,10 @@ describe('useVaultStore - Security & Operations', () => {
   })
 
   it('unlock succeeds and does not lock out user when canary is valid but a cached blob is corrupted', async () => {
-    const salt = '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff'
-    localStorage.setItem('mss:vault_salt', salt)
     const masterPassword = 'correct-master-password-123'
 
-    // First unlock initializes canary and derives bucketId
-    await useVaultStore.getState().unlock(masterPassword)
+    // Initialize vault with canary and derives bucketId
+    await useVaultStore.getState().initializeVault(masterPassword)
     const bucketId = useVaultStore.getState().bucketId!
     expect(useVaultStore.getState().isUnlocked).toBe(true)
 
@@ -476,11 +474,9 @@ describe('useVaultStore - Security & Operations', () => {
   })
 
   it('unlock succeeds when cached blobs contain corrupted non-JSON data', async () => {
-    const salt = '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff'
-    localStorage.setItem('mss:vault_salt', salt)
     const masterPassword = 'correct-master-password-456'
 
-    await useVaultStore.getState().unlock(masterPassword)
+    await useVaultStore.getState().initializeVault(masterPassword)
     const bucketId = useVaultStore.getState().bucketId!
     useVaultStore.getState().lock()
 
@@ -499,5 +495,138 @@ describe('useVaultStore - Security & Operations', () => {
     const queue = getPendingQueue(bucketId)
     expect(queue).toEqual([])
   })
+
+  it('rejects unlock with wrong password and does not open empty vault after initializeVault', async () => {
+    const store = useVaultStore.getState()
+    const initialized = await store.initializeVault('my-correct-master-password')
+    expect(initialized).toBe(true)
+
+    await store.saveItem({ service: 'RealService', username: 'realuser', password: 'realpassword' })
+    expect(useVaultStore.getState().items).toHaveLength(1)
+
+    // Lock the vault
+    store.lock()
+    expect(useVaultStore.getState().isUnlocked).toBe(false)
+    expect(useVaultStore.getState().items).toHaveLength(0)
+
+    // Attempting unlock with wrong password (e.g. 1 2 3) must be rejected and MUST NOT open empty vault!
+    const wrongSuccess = await store.unlock('123')
+    expect(wrongSuccess).toBe(false)
+    expect(useVaultStore.getState().isUnlocked).toBe(false)
+    expect(useVaultStore.getState().items).toHaveLength(0)
+    expect(useVaultStore.getState().unlockError).toMatch(/Falsches Master-Passwort/)
+
+    // Also misspellings must be rejected
+    const typoSuccess = await store.unlock('my-correct-master-passwrd')
+    expect(typoSuccess).toBe(false)
+    expect(useVaultStore.getState().isUnlocked).toBe(false)
+    expect(useVaultStore.getState().items).toHaveLength(0)
+    expect(useVaultStore.getState().unlockError).toMatch(/Falsches Master-Passwort/)
+
+    // Unlocking with the actual correct password must succeed and restore items
+    const correctSuccess = await store.unlock('my-correct-master-password')
+    expect(correctSuccess).toBe(true)
+    expect(useVaultStore.getState().isUnlocked).toBe(true)
+    expect(useVaultStore.getState().items).toHaveLength(1)
+    expect(useVaultStore.getState().items[0].service).toBe('RealService')
+  })
+
+  it('rejects unlock when vault has not been initialized yet and does not create phantom vault', async () => {
+    const store = useVaultStore.getState()
+    expect(store.isInitialized).toBe(false)
+    expect(localStorage.getItem('mss:vault_setup_done')).toBeNull()
+    expect(localStorage.getItem('mss:vault_salt')).toBeNull()
+
+    const success = await store.unlock('123')
+    expect(success).toBe(false)
+    expect(useVaultStore.getState().isUnlocked).toBe(false)
+    expect(useVaultStore.getState().unlockError).toMatch(/Es wurde noch kein Tresor eingerichtet/)
+
+    // Crucial: unlock must NOT have created a salt or marked vault as set up
+    expect(localStorage.getItem('mss:vault_setup_done')).toBeNull()
+    expect(localStorage.getItem('mss:vault_salt')).toBeNull()
+    expect(localStorage.getItem('mss:vault_canary')).toBeNull()
+  })
+
+  it('rejects wrong password on legacy canary and migrates on correct password', async () => {
+    const { deriveVaultKeys, encryptVaultEntry } = await import('./vaultCrypto')
+    const salt = new Uint8Array(32).fill(9)
+    const saltHex = Array.from(salt).map((b) => b.toString(16).padStart(2, '0')).join('')
+    localStorage.setItem('mss:vault_salt', saltHex)
+    localStorage.setItem('mss:vault_setup_done', 'true')
+
+    const { userKey, bucketId } = await deriveVaultKeys('legacy-correct-password', salt)
+    const legacyCanary = await encryptVaultEntry(
+      { canary: 'mss-vault-initialized-v1', createdAt: Date.now() },
+      userKey,
+      'vault-canary',
+    )
+    localStorage.setItem(`mss:vault_canary_${bucketId}`, legacyCanary)
+    localStorage.setItem('mss:vault_server_bucket', bucketId)
+
+    const store = useVaultStore.getState()
+
+    // Wrong password must be rejected
+    const wrongSuccess = await store.unlock('wrong-master-password')
+    expect(wrongSuccess).toBe(false)
+    expect(useVaultStore.getState().isUnlocked).toBe(false)
+    expect(useVaultStore.getState().unlockError).toMatch(/Falsches Master-Passwort/)
+    expect(localStorage.getItem('mss:vault_canary')).toBeNull()
+
+    // Correct password must unlock and migrate canary
+    const correctSuccess = await store.unlock('legacy-correct-password')
+    expect(correctSuccess).toBe(true)
+    expect(useVaultStore.getState().isUnlocked).toBe(true)
+    expect(localStorage.getItem('mss:vault_canary')).toBe(legacyCanary)
+  })
+
+  it('rejects unlock when salt exists in localStorage but vault is not initialized', async () => {
+    // Simulate leftover or pre-seeded salt without initialized vault
+    localStorage.setItem('mss:vault_salt', 'aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899')
+    const store = useVaultStore.getState()
+    expect(store.isInitialized).toBe(false)
+    expect(localStorage.getItem('mss:vault_setup_done')).toBeNull()
+
+    const success = await store.unlock('123')
+    expect(success).toBe(false)
+    expect(useVaultStore.getState().isUnlocked).toBe(false)
+    expect(useVaultStore.getState().unlockError).toMatch(/Es wurde noch kein Tresor eingerichtet/)
+    expect(localStorage.getItem('mss:vault_setup_done')).toBeNull()
+    expect(localStorage.getItem('mss:vault_canary')).toBeNull()
+  })
+
+  it('rejects wrong password on newly initialized vault with 0 items and keeps canary intact', async () => {
+    const store = useVaultStore.getState()
+    const initialized = await store.initializeVault('real-master-password-123')
+    expect(initialized).toBe(true)
+    expect(store.items).toHaveLength(0)
+
+    const originalCanary = localStorage.getItem('mss:vault_canary')
+    expect(originalCanary).not.toBeNull()
+
+    store.lock()
+    expect(useVaultStore.getState().isUnlocked).toBe(false)
+
+    // Entering 123 when vault has 0 items must NOT unlock an empty vault
+    const wrongSuccess = await store.unlock('123')
+    expect(wrongSuccess).toBe(false)
+    expect(useVaultStore.getState().isUnlocked).toBe(false)
+    expect(useVaultStore.getState().unlockError).toMatch(/Falsches Master-Passwort/)
+    expect(localStorage.getItem('mss:vault_canary')).toBe(originalCanary)
+  })
+
+  it('queues vault-canary in pendingQueue upon initializeVault for server sync', async () => {
+    const store = useVaultStore.getState()
+    const initialized = await store.initializeVault('sync-canary-password-999')
+    expect(initialized).toBe(true)
+
+    const bucketId = useVaultStore.getState().bucketId
+    expect(bucketId).toBeTruthy()
+
+    const { getPendingQueue } = await import('./vaultStore')
+    const queue = getPendingQueue(bucketId!)
+    expect(queue.some((entry) => entry.id === 'vault-canary')).toBe(true)
+  })
 })
+
 
