@@ -166,26 +166,30 @@ export function sanitizeSvg(rawSvg: string): string {
 export function getSafeAttachmentUrl(url?: string | null): string | null {
   if (!url) return null
   const trimmed = url.trim()
-  const lower = trimmed.toLowerCase().replace(/[\s\x00-\x1f\x7f-\x9f]/g, '')
+  const lowerHeader = trimmed.slice(0, 128).toLowerCase().replace(/[\s\x00-\x1f\x7f-\x9f]/g, '')
   if (
-    lower.startsWith('javascript:') ||
-    lower.startsWith('vbscript:') ||
-    lower.startsWith('data:text/html') ||
-    lower.startsWith('data:text/javascript') ||
-    lower.startsWith('data:application/javascript')
+    lowerHeader.startsWith('javascript:') ||
+    lowerHeader.startsWith('vbscript:') ||
+    lowerHeader.startsWith('data:text/html') ||
+    lowerHeader.startsWith('data:text/javascript') ||
+    lowerHeader.startsWith('data:application/javascript') ||
+    lowerHeader.startsWith('data:application/xhtml') ||
+    lowerHeader.startsWith('data:text/xml')
   ) {
     return null
   }
   if (
-    lower.startsWith('data:image/') ||
-    lower.startsWith('data:audio/') ||
-    lower.startsWith('data:video/') ||
-    lower.startsWith('data:application/') ||
-    lower.startsWith('data:text/plain') ||
-    lower.startsWith('blob:') ||
-    lower.startsWith('/api/') ||
-    lower.startsWith('http://') ||
-    lower.startsWith('https://')
+    lowerHeader.startsWith('data:image/') ||
+    lowerHeader.startsWith('data:audio/') ||
+    lowerHeader.startsWith('data:video/') ||
+    lowerHeader.startsWith('data:application/') ||
+    lowerHeader.startsWith('data:text/') ||
+    lowerHeader.startsWith('data:;base64,') ||
+    lowerHeader.startsWith('data:base64,') ||
+    lowerHeader.startsWith('blob:') ||
+    lowerHeader.startsWith('/api/') ||
+    lowerHeader.startsWith('http://') ||
+    lowerHeader.startsWith('https://')
   ) {
     return trimmed
   }

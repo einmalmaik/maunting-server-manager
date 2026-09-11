@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { sanitizeSvg } from './sanitizeSvg'
+import { sanitizeSvg, getSafeAttachmentUrl } from './sanitizeSvg'
 
 describe('sanitizeSvg', () => {
   it('allows safe, well-formed SVGs', () => {
@@ -89,3 +89,52 @@ describe('sanitizeSvg', () => {
     expect(sanitizeSvg(null)).toBe('')
   })
 })
+
+describe('getSafeAttachmentUrl', () => {
+  it('returns null for empty, null, or undefined URLs', () => {
+    expect(getSafeAttachmentUrl(null)).toBeNull()
+    expect(getSafeAttachmentUrl(undefined)).toBeNull()
+    expect(getSafeAttachmentUrl('')).toBeNull()
+    expect(getSafeAttachmentUrl('   ')).toBeNull()
+  })
+
+  it('allows safe data URLs for images, audio, video, applications, and plain/csv text', () => {
+    expect(getSafeAttachmentUrl('data:image/png;base64,iVBORw0KGgo=')).toBe('data:image/png;base64,iVBORw0KGgo=')
+    expect(getSafeAttachmentUrl('data:image/jpeg;base64,/9j/4AAQSkZJRg==')).toBe('data:image/jpeg;base64,/9j/4AAQSkZJRg==')
+    expect(getSafeAttachmentUrl('data:application/pdf;base64,JVBERi0xLjQK')).toBe('data:application/pdf;base64,JVBERi0xLjQK')
+    expect(getSafeAttachmentUrl('data:text/plain;base64,SGFsbG8=')).toBe('data:text/plain;base64,SGFsbG8=')
+    expect(getSafeAttachmentUrl('data:text/csv;base64,YSwx')).toBe('data:text/csv;base64,YSwx')
+    expect(getSafeAttachmentUrl('data:audio/mp3;base64,SUQzBA==')).toBe('data:audio/mp3;base64,SUQzBA==')
+    expect(getSafeAttachmentUrl('data:video/mp4;base64,AAAA')).toBe('data:video/mp4;base64,AAAA')
+  })
+
+  it('allows data URIs with missing MIME or empty MIME (e.g. data:;base64, or data:base64,)', () => {
+    expect(getSafeAttachmentUrl('data:;base64,SGVsbG8=')).toBe('data:;base64,SGVsbG8=')
+    expect(getSafeAttachmentUrl('data:base64,SGVsbG8=')).toBe('data:base64,SGVsbG8=')
+  })
+
+  it('allows blob, api, and https URLs', () => {
+    expect(getSafeAttachmentUrl('blob:http://localhost:5173/uuid-123')).toBe('blob:http://localhost:5173/uuid-123')
+    expect(getSafeAttachmentUrl('/api/social/media/media-1/download')).toBe('/api/social/media/media-1/download')
+    expect(getSafeAttachmentUrl('https://example.com/file.pdf')).toBe('https://example.com/file.pdf')
+    expect(getSafeAttachmentUrl('http://example.com/file.pdf')).toBe('http://example.com/file.pdf')
+  })
+
+  it('blocks dangerous executable, script, and HTML URL schemes', () => {
+    expect(getSafeAttachmentUrl('javascript:alert(1)')).toBeNull()
+    expect(getSafeAttachmentUrl('  java\tscript:alert(1)')).toBeNull()
+    expect(getSafeAttachmentUrl('vbscript:msgbox(1)')).toBeNull()
+    expect(getSafeAttachmentUrl('data:text/html,<script>alert(1)</script>')).toBeNull()
+    expect(getSafeAttachmentUrl('data:text/javascript,alert(1)')).toBeNull()
+    expect(getSafeAttachmentUrl('data:application/javascript,alert(1)')).toBeNull()
+    expect(getSafeAttachmentUrl('data:application/xhtml+xml,<html/>')).toBeNull()
+    expect(getSafeAttachmentUrl('data:text/xml,<xml/>')).toBeNull()
+  })
+
+  it('blocks unknown / unsupported URI schemes', () => {
+    expect(getSafeAttachmentUrl('ftp://example.com/file.txt')).toBeNull()
+    expect(getSafeAttachmentUrl('file:///etc/passwd')).toBeNull()
+    expect(getSafeAttachmentUrl('chrome-extension://xyz')).toBeNull()
+  })
+})
+
