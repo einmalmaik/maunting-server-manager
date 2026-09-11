@@ -664,18 +664,20 @@ export function VaultView() {
               <span>{isRequestingHint ? 'Sende E-Mail...' : 'Hinweis per E-Mail anfordern'}</span>
             </button>
 
-            <div>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsSetupMode(true)
-                  setMasterPasswordInput('')
-                }}
-                className="text-xs text-on-surface-variant/70 hover:text-primary hover:underline transition-colors"
-              >
-                Neuen Tresor einrichten
-              </button>
-            </div>
+            {!isInitialized && (
+              <div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsSetupMode(true)
+                    setMasterPasswordInput('')
+                  }}
+                  className="text-xs text-on-surface-variant/70 hover:text-primary hover:underline transition-colors"
+                >
+                  Neuen Tresor einrichten
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
