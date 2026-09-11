@@ -64,6 +64,35 @@ export const E2EE_RATCHET_ENVELOPE_SPEC: VersionedCipherEnvelopeSpec = {
 // 1. Direct 1:1 Chat E2EE
 // ==========================================
 
+const blindMailboxIdCache = new Map<string, string>()
+const groupBlindMailboxIdCache = new Map<string, string>()
+
+/**
+ * Returns the synchronously cached blind mailbox identifier if previously computed.
+ */
+export function getCachedBlindMailboxId(userAId: number, userBId: number, salt: string = ''): string | undefined {
+  const minId = Math.min(userAId, userBId)
+  const maxId = Math.max(userAId, userBId)
+  const cacheKey = `${minId}:${maxId}:${salt}`
+  return blindMailboxIdCache.get(cacheKey)
+}
+
+/**
+ * Returns the synchronously cached group blind mailbox identifier if previously computed.
+ */
+export function getCachedGroupBlindMailboxId(groupId: number, groupSalt: string = ''): string | undefined {
+  const cacheKey = `${groupId}:${groupSalt}`
+  return groupBlindMailboxIdCache.get(cacheKey)
+}
+
+/**
+ * Clears the in-memory blind mailbox identifier cache.
+ */
+export function clearBlindMailboxIdCache(): void {
+  blindMailboxIdCache.clear()
+  groupBlindMailboxIdCache.clear()
+}
+
 /**
  * Derives the deterministic blind mailbox identifier for two participants.
  * Zero-Knowledge: This mailbox ID contains no user identifiers or relational data on the wire.
@@ -71,10 +100,16 @@ export const E2EE_RATCHET_ENVELOPE_SPEC: VersionedCipherEnvelopeSpec = {
 export async function deriveBlindMailboxId(userAId: number, userBId: number, salt: string = ''): Promise<string> {
   const minId = Math.min(userAId, userBId)
   const maxId = Math.max(userAId, userBId)
+  const cacheKey = `${minId}:${maxId}:${salt}`
+  const cached = blindMailboxIdCache.get(cacheKey)
+  if (cached) return cached
+
   const payload = `msm:dm:${minId}:${maxId}${salt ? `:${salt}` : ''}`
   const seed = new TextEncoder().encode(payload)
   try {
-    return await sha256Hex(seed)
+    const res = await sha256Hex(seed)
+    blindMailboxIdCache.set(cacheKey, res)
+    return res
   } finally {
     seed.fill(0)
   }
@@ -168,10 +203,16 @@ export async function deriveTeamBlindMailboxId(teamId: number, teamSalt: string 
  * Derives the deterministic blind mailbox identifier for a chat group / community.
  */
 export async function deriveGroupBlindMailboxId(groupId: number, groupSalt: string = ''): Promise<string> {
+  const cacheKey = `${groupId}:${groupSalt}`
+  const cached = groupBlindMailboxIdCache.get(cacheKey)
+  if (cached) return cached
+
   const payload = `msm:group:${groupId}${groupSalt ? `:${groupSalt}` : ''}`
   const seed = new TextEncoder().encode(payload)
   try {
-    return await sha256Hex(seed)
+    const res = await sha256Hex(seed)
+    groupBlindMailboxIdCache.set(cacheKey, res)
+    return res
   } finally {
     seed.fill(0)
   }
@@ -433,6 +474,9 @@ export function scrubPlaintextStorage(): void {
 
 export function clearMemoryKeyStore(): void {
   memoryKeyStore.clear()
+  clearBlindMailboxIdCache()
+  clearRsaPrivateKeyCache()
+  clearEnvelopePlaintextCache()
   scrubPlaintextStorage()
 }
 
@@ -743,6 +787,24 @@ export async function encryptE2eeHybrid(
   }
 }
 
+export const envelopePlaintextCache = new Map<number, { plain: string; ok: boolean }>()
+
+/**
+ * Clears the in-memory decrypted envelope plaintext cache.
+ */
+export function clearEnvelopePlaintextCache(): void {
+  envelopePlaintextCache.clear()
+}
+
+const rsaPrivateKeyCache = new Map<string, CryptoKey>()
+
+/**
+ * Clears the in-memory RSA private key cache.
+ */
+export function clearRsaPrivateKeyCache(): void {
+  rsaPrivateKeyCache.clear()
+}
+
 /**
  * Hybrid-decrypts a message using a participant's RSA-OAEP private key.
  * Supports both single-key envelopes and dual-wrapped (recipient:sender) envelopes.
@@ -767,8 +829,12 @@ export async function decryptE2eeHybrid(
     const ciphertext = parsed.payload.slice(dotIdx + 1)
 
     const keyList = wrappedKeysPart.split(':')
-    const privKeyObj: JsonWebKey = JSON.parse(participantPrivateKeyJwk)
-    const rsaPrivKey = await importRsaOaepPrivateKey(privKeyObj)
+    let rsaPrivKey = rsaPrivateKeyCache.get(participantPrivateKeyJwk)
+    if (!rsaPrivKey) {
+      const privKeyObj: JsonWebKey = JSON.parse(participantPrivateKeyJwk)
+      rsaPrivKey = await importRsaOaepPrivateKey(privKeyObj)
+      rsaPrivateKeyCache.set(participantPrivateKeyJwk, rsaPrivKey)
+    }
 
     let rawBytes: Uint8Array | null = null
     for (const wrappedKey of keyList) {

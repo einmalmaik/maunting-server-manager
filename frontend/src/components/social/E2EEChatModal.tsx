@@ -38,9 +38,11 @@ import {
   encryptE2eeHybrid,
   decryptE2eeHybrid,
   getOrGenerateLocalKeyPair,
+  envelopePlaintextCache,
   type LocalE2eeKeyPair,
 } from '@/services/e2eeCrypto'
 import { toast } from '@/stores/toastStore'
+import { compressImageFile } from '@/lib/imageCompression'
 import {
   ChatMediaImage,
   ChatMediaFile,
@@ -161,10 +163,12 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
     }
   }, [open, friend, currentUserId, targetUserId])
 
-  // Load and decrypt messages from blind mailbox
-  const loadMessages = async () => {
+  // Load and decrypt messages from blind mailbox (cached, non-flickering)
+  const loadMessages = async (isInitial = false) => {
     if (!friend || !blindMailboxId || !currentUserId || !targetUserId) return
-    setLoading(true)
+    if (isInitial && messages.length === 0) {
+      setLoading(true)
+    }
     try {
       const envelopes = await fetchE2eeEnvelopes(blindMailboxId)
       const decryptedList: DecryptedMessage[] = []
@@ -172,14 +176,20 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
       for (const env of envelopes) {
         try {
           let plain = ''
-          if (env.ciphertext_envelope.startsWith('sv-e2ee-hybrid-v1:')) {
-            if (localKeyPair) {
-              plain = await decryptE2eeHybrid(env.ciphertext_envelope, localKeyPair.privateKeyJwk)
-            } else {
-              throw new Error('Local key not ready')
-            }
+          const cached = envelopePlaintextCache.get(env.id)
+          if (cached && cached.ok) {
+            plain = cached.plain
           } else {
-            plain = await decryptE2eeMessage(env.ciphertext_envelope, currentUserId, targetUserId)
+            if (env.ciphertext_envelope.startsWith('sv-e2ee-hybrid-v1:')) {
+              if (localKeyPair) {
+                plain = await decryptE2eeHybrid(env.ciphertext_envelope, localKeyPair.privateKeyJwk)
+              } else {
+                throw new Error('Local key not ready')
+              }
+            } else {
+              plain = await decryptE2eeMessage(env.ciphertext_envelope, currentUserId, targetUserId)
+            }
+            envelopePlaintextCache.set(env.id, { plain, ok: true })
           }
 
           let text = plain
@@ -230,14 +240,16 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
     } catch {
       // Offline fallback
     } finally {
-      setLoading(false)
+      if (isInitial) {
+        setLoading(false)
+      }
     }
   }
 
   useEffect(() => {
     if (open && blindMailboxId) {
-      loadMessages()
-      const interval = setInterval(loadMessages, 4000)
+      void loadMessages(true)
+      const interval = setInterval(() => void loadMessages(false), 4000)
       return () => clearInterval(interval)
     }
   }, [open, blindMailboxId, localKeyPair])
@@ -327,14 +339,20 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
       return
     }
 
-    const reader = new FileReader()
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string
-      if (dataUrl) {
-        setSelectedImage({ dataUrl, name: file.name })
-      }
-    }
-    reader.readAsDataURL(file)
+    compressImageFile(file)
+      .then((compressed) => {
+        setSelectedImage({ dataUrl: compressed.dataUrl, name: compressed.name })
+      })
+      .catch(() => {
+        const reader = new FileReader()
+        reader.onload = (event) => {
+          const dataUrl = event.target?.result as string
+          if (dataUrl) {
+            setSelectedImage({ dataUrl, name: file.name })
+          }
+        }
+        reader.readAsDataURL(file)
+      })
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 

@@ -97,6 +97,8 @@ import type { CalendarEventItem } from '@/pages/Calendar'
 import {
   deriveBlindMailboxId,
   deriveGroupBlindMailboxId,
+  getCachedBlindMailboxId,
+  getCachedGroupBlindMailboxId,
   encryptE2eeMessage,
   decryptE2eeMessage,
   encryptE2eeHybrid,
@@ -106,9 +108,12 @@ import {
   getLocalKeyPair,
   getOrGenerateLocalKeyPair,
   scrubPlaintextStorage,
+  envelopePlaintextCache,
+  clearEnvelopePlaintextCache,
   type LocalE2eeKeyPair,
   type AttachmentCryptoContext,
 } from '@/services/e2eeCrypto'
+import { compressImageFile } from '@/lib/imageCompression'
 import { getAudioTrackConstraints } from '@/lib/audioSettings'
 import { IN_HOUSE_STICKERS, CATEGORIZED_EMOJIS } from '@/services/stickerCatalog'
 import { CameraSnapshotModal } from '@/components/social/CameraSnapshotModal'
@@ -200,7 +205,7 @@ export interface CalendarAttachment {
 }
 
 export interface ImageAttachment {
-  dataUrl: string
+  dataUrl?: string
   name?: string
   mediaId?: string
 }
@@ -215,7 +220,7 @@ export interface FileAttachment {
   name: string
   sizeBytes: number
   mimeType: string
-  dataUrl: string
+  dataUrl?: string
   mediaId?: string
 }
 
@@ -288,7 +293,13 @@ function getSupportedAudioMimeType(): string {
 
 const CONTACTS_CACHE_KEY = 'msm:chat_contacts_cache'
 // Zero-Knowledge In-Memory Session Cache: verhindert das unverschlüsselte Speichern von Plaintext-Nachrichten im LocalStorage
-const sessionChatCache = new Map<string, ChatMessage[]>()
+export const sessionChatCache = new Map<string, ChatMessage[]>()
+
+export function clearSessionChatCache(): void {
+  sessionChatCache.clear()
+}
+
+export { envelopePlaintextCache, clearEnvelopePlaintextCache }
 
 function loadInitialContactsCache(): {
   friends: FriendItem[]
@@ -296,9 +307,10 @@ function loadInitialContactsCache(): {
   teamMembers: Array<{ member: TeamMember; teamName: string }>
   publicUsers: PublicProfileResponse[]
   stories: ChatStoryItem[]
+  directChats: DirectChatItem[]
 } {
   if (typeof window === 'undefined') {
-    return { friends: [], groups: [], teamMembers: [], publicUsers: [], stories: [] }
+    return { friends: [], groups: [], teamMembers: [], publicUsers: [], stories: [], directChats: [] }
   }
   try {
     const raw = localStorage.getItem(CONTACTS_CACHE_KEY)
@@ -310,10 +322,11 @@ function loadInitialContactsCache(): {
         teamMembers: Array.isArray(parsed.teamMembers) ? parsed.teamMembers : [],
         publicUsers: Array.isArray(parsed.publicUsers) ? parsed.publicUsers : [],
         stories: Array.isArray(parsed.stories) ? parsed.stories : [],
+        directChats: Array.isArray(parsed.directChats) ? parsed.directChats : [],
       }
     }
   } catch {}
-  return { friends: [], groups: [], teamMembers: [], publicUsers: [], stories: [] }
+  return { friends: [], groups: [], teamMembers: [], publicUsers: [], stories: [], directChats: [] }
 }
 
 export function Messenger() {
@@ -328,7 +341,7 @@ export function Messenger() {
   const [groups, setGroups] = useState<ChatGroupItem[]>(initialCache.groups)
   const [teamMembers, setTeamMembers] = useState<Array<{ member: TeamMember; teamName: string }>>(initialCache.teamMembers)
   const [publicUsers, setPublicUsers] = useState<PublicProfileResponse[]>(initialCache.publicUsers)
-  const [directChats, setDirectChats] = useState<DirectChatItem[]>([])
+  const [directChats, setDirectChats] = useState<DirectChatItem[]>(initialCache.directChats)
   const [stories, setStories] = useState<ChatStoryItem[]>(initialCache.stories)
 
   // Notification & Mute/Block Store
@@ -505,6 +518,7 @@ export function Messenger() {
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const justSentRef = useRef<boolean>(false)
   const activeMailboxIdRef = useRef<string>('')
+  const currentLoadSeqRef = useRef<number>(0)
 
   // Message Editing State
   const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null)
@@ -617,6 +631,7 @@ export function Messenger() {
             teamMembers: membersList,
             publicUsers: publicData,
             stories: storiesData,
+            directChats: directChatsData,
           })
         )
       } catch {}
@@ -884,35 +899,68 @@ export function Messenger() {
     let active = true
 
     if (activeGroup) {
-      setMessages([])
-      setBlindMailboxId('')
-      activeMailboxIdRef.current = ''
+      const syncMid = getCachedGroupBlindMailboxId(activeGroup.id)
+      if (syncMid) {
+        activeMailboxIdRef.current = syncMid
+        setBlindMailboxId(syncMid)
+        const cached = sessionChatCache.get(syncMid)
+        if (cached && cached.length > 0) {
+          setMessages(cached)
+          setLoadingMessages(false)
+        } else {
+          setMessages([])
+          setLoadingMessages(true)
+        }
+        useMessengerNotificationStore.getState().setActiveMailboxId(syncMid)
+      } else {
+        activeMailboxIdRef.current = ''
+        setBlindMailboxId('')
+        setMessages([])
+        setLoadingMessages(true)
+      }
+
       deriveGroupBlindMailboxId(activeGroup.id).then((mid) => {
         if (active) {
           activeMailboxIdRef.current = mid
           setBlindMailboxId(mid)
-          // Sofort aus In-Memory Cache laden (0ms Ladezeit, kein LocalStorage-Leak)
           const cached = sessionChatCache.get(mid)
           if (cached && cached.length > 0) {
             setMessages(cached)
+            setLoadingMessages(false)
           }
           useMessengerNotificationStore.getState().setActiveMailboxId(mid)
         }
       })
     } else if (activeContact && currentUserId) {
       const targetUserId = activeContact.userId
-      setMessages([])
-      setBlindMailboxId('')
-      activeMailboxIdRef.current = ''
+      const syncMid = getCachedBlindMailboxId(currentUserId, targetUserId)
+      if (syncMid) {
+        activeMailboxIdRef.current = syncMid
+        setBlindMailboxId(syncMid)
+        const cached = sessionChatCache.get(syncMid)
+        if (cached && cached.length > 0) {
+          setMessages(cached)
+          setLoadingMessages(false)
+        } else {
+          setMessages([])
+          setLoadingMessages(true)
+        }
+        useMessengerNotificationStore.getState().setActiveMailboxId(syncMid)
+      } else {
+        activeMailboxIdRef.current = ''
+        setBlindMailboxId('')
+        setMessages([])
+        setLoadingMessages(true)
+      }
 
       deriveBlindMailboxId(currentUserId, targetUserId).then((mid) => {
         if (active) {
           activeMailboxIdRef.current = mid
           setBlindMailboxId(mid)
-          // Sofort aus In-Memory Cache laden (0ms Ladezeit, kein LocalStorage-Leak)
           const cached = sessionChatCache.get(mid)
           if (cached && cached.length > 0) {
             setMessages(cached)
+            setLoadingMessages(false)
           }
           useMessengerNotificationStore.getState().setActiveMailboxId(mid)
         }
@@ -923,6 +971,7 @@ export function Messenger() {
       highestIncomingIdDeliveredRef.current = 0
       setBlindMailboxId('')
       setMessages([])
+      setLoadingMessages(false)
       useMessengerNotificationStore.getState().setActiveMailboxId(null)
     }
 
@@ -988,13 +1037,15 @@ export function Messenger() {
   const loadMessages = async (isInitial = false) => {
     const currentMid = blindMailboxId
     if (!currentMid || !currentUserId) return
-    if (activeMailboxIdRef.current && activeMailboxIdRef.current !== currentMid) return
+    if (activeMailboxIdRef.current !== currentMid) return
+    const seq = ++currentLoadSeqRef.current
+
     if (isInitial && messages.length === 0) {
       setLoadingMessages(true)
     }
     try {
       const envelopes = await fetchE2eeEnvelopes(currentMid)
-      if (activeMailboxIdRef.current && activeMailboxIdRef.current !== currentMid) return
+      if (activeMailboxIdRef.current !== currentMid || currentLoadSeqRef.current !== seq) return
       const decryptedList: ChatMessage[] = []
       const seenEnvelopeIds = new Set<number>()
       const seenClientUuids = new Set<string>()
@@ -1019,6 +1070,10 @@ export function Messenger() {
 
       const decryptedEnvelopes = await Promise.all(
         envelopes.map(async (env) => {
+          const cached = envelopePlaintextCache.get(env.id)
+          if (cached && cached.ok) {
+            return { env, plain: cached.plain, ok: true }
+          }
           try {
             let plain = ''
             if (activeGroup) {
@@ -1035,6 +1090,7 @@ export function Messenger() {
                 plain = await decryptE2eeMessage(env.ciphertext_envelope, currentUserId, targetUserId)
               }
             }
+            envelopePlaintextCache.set(env.id, { plain, ok: true })
             return { env, plain, ok: true }
           } catch {
             return { env, plain: '', ok: false }
@@ -1042,14 +1098,23 @@ export function Messenger() {
         })
       )
 
+      if (activeMailboxIdRef.current !== currentMid || currentLoadSeqRef.current !== seq) return
+
       for (const { env, plain, ok } of decryptedEnvelopes) {
         if (seenEnvelopeIds.has(env.id)) continue
         seenEnvelopeIds.add(env.id)
 
         if (!ok || !plain) {
+          const clientUuid = env.client_uuid || undefined
+          if (clientUuid && seenClientUuids.has(clientUuid)) {
+            continue
+          }
+          if (clientUuid) {
+            seenClientUuids.add(clientUuid)
+          }
           decryptedList.push({
             id: env.id,
-            clientUuid: env.client_uuid || undefined,
+            clientUuid,
             senderId: activeContact ? activeContact.userId : 0,
             text: 'Verschlüsselte Nachricht',
             createdAt: env.created_at,
@@ -1227,8 +1292,8 @@ export function Messenger() {
         }
       })
 
-      // Abort if the user has navigated to another chat in the meantime
-      if (activeMailboxIdRef.current && activeMailboxIdRef.current !== currentMid) return
+      // Abort if the user has navigated to another chat in the meantime or a newer load completed
+      if (activeMailboxIdRef.current !== currentMid || currentLoadSeqRef.current !== seq) return
 
       setMessages((prev) => {
         const processedClientUuids = new Set<string>()
@@ -1238,14 +1303,10 @@ export function Messenger() {
         const pendingOptimistic = prev.filter(
           (m) => m.isSelf && m.clientUuid && !processedClientUuids.has(m.clientUuid)
         )
-        if (pendingOptimistic.length === 0) {
-          return processedList
-        }
-        return [...processedList, ...pendingOptimistic]
+        const combined = pendingOptimistic.length === 0 ? processedList : [...processedList, ...pendingOptimistic]
+        sessionChatCache.set(currentMid, combined.slice(-80))
+        return combined
       })
-
-      // Kürzliche Nachrichten sicher in-Memory cachen (Zero-Knowledge, kein LocalStorage-Leak)
-      sessionChatCache.set(currentMid, processedList.slice(-80))
       // Ungelesen-Zähler zurücksetzen
       markAsRead(currentMid)
 
@@ -1307,7 +1368,7 @@ export function Messenger() {
     } catch {
       // Offline fallback
     } finally {
-      if (isInitial) {
+      if (isInitial && activeMailboxIdRef.current === currentMid) {
         setLoadingMessages(false)
       }
     }
@@ -1469,19 +1530,61 @@ export function Messenger() {
       (!rawText && !note && !cal && !img && !audio && !file && !sticker && !storyReply) ||
       (!activeContact && !activeGroup) ||
       !blindMailboxId ||
-      !currentUserId ||
-      sending
+      !currentUserId
     ) {
       return
     }
 
+    const clientUuid =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : 'msg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9)
+
+    const targetBlindMailboxId = blindMailboxId
+    const targetUserId = activeContact?.userId
+    const currentGroupId = activeGroup?.id
+
+    // Instant optimistic update (<5ms, non-blocking UI)
+    const optimisticMessage: ChatMessage = {
+      id: Date.now(),
+      clientUuid,
+      senderId: currentUserId,
+      senderName: user?.username || 'Ich',
+      text: rawText,
+      createdAt: new Date().toISOString(),
+      isSelf: true,
+      imageAttachment: img, // keeps local dataUrl for instant sender rendering
+      fileAttachment: file,
+      noteAttachment: note,
+      calendarAttachment: cal,
+      audioAttachment: audio,
+      stickerAttachment: sticker,
+      storyReply,
+      isDelivered: false,
+      isRead: false,
+    }
+
+    setMessages((prev) => {
+      const updated = [...prev, optimisticMessage]
+      sessionChatCache.set(targetBlindMailboxId, updated.slice(-80))
+      return updated
+    })
+    setInputText('')
+    setSelectedImage(null)
+    setStagedFile(null)
+    justSentRef.current = true
+    lastTypingSentRef.current = 0
+
+    if (targetBlindMailboxId) {
+      void sendTypingSignal({
+        blind_mailbox_id: targetBlindMailboxId,
+        status: 'idle',
+        recipient_id: targetUserId ?? null,
+      }).catch(() => {})
+    }
+
     setSending(true)
     try {
-      const clientUuid =
-        typeof crypto !== 'undefined' && crypto.randomUUID
-          ? crypto.randomUUID()
-          : 'msg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9)
-
       const payloadObj: Record<string, unknown> = {
         client_uuid: clientUuid,
         sender_id: currentUserId,
@@ -1490,55 +1593,57 @@ export function Messenger() {
         timestamp: new Date().toISOString(),
       }
 
-      let finalImg = img
-      let finalFile = file
+      let finalImg: ImageAttachment | undefined = undefined
+      let finalFile: FileAttachment | undefined = undefined
 
-      const cryptoContext: AttachmentCryptoContext = activeGroup
-        ? { groupId: activeGroup.id }
-        : { userAId: currentUserId, userBId: activeContact?.userId }
+      const cryptoContext: AttachmentCryptoContext = currentGroupId
+        ? { groupId: currentGroupId }
+        : { userAId: currentUserId, userBId: targetUserId }
 
-      if (img && img.dataUrl && !img.mediaId) {
-        try {
-          const mimeType = img.dataUrl.split(';')[0]?.replace('data:', '') || 'image/png'
-          const uploaded = await uploadEncryptedChatAttachment(
-            img.dataUrl,
-            img.name || 'image.png',
-            blindMailboxId,
-            cryptoContext,
-            mimeType,
-            { groupId: activeGroup?.id, recipientId: activeContact?.userId }
-          )
-          if (uploaded?.id) {
-            chatMediaBlobCache.set(uploaded.id, img.dataUrl)
+      if (img) {
+        if (img.mediaId) {
+          finalImg = { mediaId: img.mediaId, name: img.name }
+        } else if (img.dataUrl) {
+          try {
+            const mimeType = img.dataUrl.split(';')[0]?.replace('data:', '') || 'image/png'
+            const uploaded = await uploadEncryptedChatAttachment(
+              img.dataUrl,
+              img.name || 'image.png',
+              targetBlindMailboxId,
+              cryptoContext,
+              mimeType,
+              { groupId: currentGroupId, recipientId: targetUserId }
+            )
+            if (uploaded?.id) {
+              chatMediaBlobCache.set(uploaded.id, img.dataUrl)
+              finalImg = { mediaId: uploaded.id, name: img.name }
+            }
+          } catch {
+            finalImg = { name: img.name }
           }
-          finalImg = {
-            ...img,
-            mediaId: uploaded.id,
-          }
-        } catch {
-          // Fallback if media upload fails
         }
       }
 
-      if (file && file.dataUrl && !file.mediaId) {
-        try {
-          const uploaded = await uploadEncryptedChatAttachment(
-            file.dataUrl,
-            file.name || 'attachment.bin',
-            blindMailboxId,
-            cryptoContext,
-            file.mimeType || 'application/octet-stream',
-            { groupId: activeGroup?.id, recipientId: activeContact?.userId }
-          )
-          if (uploaded?.id) {
-            chatMediaBlobCache.set(uploaded.id, file.dataUrl)
+      if (file) {
+        if (file.mediaId) {
+          finalFile = { mediaId: file.mediaId, name: file.name, sizeBytes: file.sizeBytes, mimeType: file.mimeType }
+        } else if (file.dataUrl) {
+          try {
+            const uploaded = await uploadEncryptedChatAttachment(
+              file.dataUrl,
+              file.name || 'attachment.bin',
+              targetBlindMailboxId,
+              cryptoContext,
+              file.mimeType || 'application/octet-stream',
+              { groupId: currentGroupId, recipientId: targetUserId }
+            )
+            if (uploaded?.id) {
+              chatMediaBlobCache.set(uploaded.id, file.dataUrl)
+              finalFile = { mediaId: uploaded.id, name: file.name, sizeBytes: file.sizeBytes, mimeType: file.mimeType }
+            }
+          } catch {
+            finalFile = { name: file.name, sizeBytes: file.sizeBytes, mimeType: file.mimeType }
           }
-          finalFile = {
-            ...file,
-            mediaId: uploaded.id,
-          }
-        } catch {
-          // Fallback if media upload fails
         }
       }
 
@@ -1553,71 +1658,32 @@ export function Messenger() {
       const payload = JSON.stringify(payloadObj)
       let ciphertext: string
 
-      if (activeGroup) {
-        ciphertext = await encryptGroupE2eeMessage(payload, activeGroup.id)
+      if (currentGroupId) {
+        ciphertext = await encryptGroupE2eeMessage(payload, currentGroupId)
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
           enqueueMessageMutation({
-            blind_mailbox_id: blindMailboxId,
+            blind_mailbox_id: targetBlindMailboxId,
             ciphertext_envelope: ciphertext,
             client_uuid: clientUuid,
           })
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: Date.now(),
-              clientUuid,
-              senderId: currentUserId,
-              senderName: user?.username || 'Ich',
-              text: rawText,
-              createdAt: new Date().toISOString(),
-              isSelf: true,
-              imageAttachment: finalImg,
-              fileAttachment: finalFile,
-              noteAttachment: note,
-              calendarAttachment: cal,
-              audioAttachment: audio,
-              stickerAttachment: sticker,
-              storyReply,
-            },
-          ])
           toast.info('Nachricht offline in Warteschlange eingereiht.')
         } else {
           try {
             await relayE2eeEnvelope({
-              blind_mailbox_id: blindMailboxId,
+              blind_mailbox_id: targetBlindMailboxId,
               ciphertext_envelope: ciphertext,
               client_uuid: clientUuid,
             })
           } catch {
             enqueueMessageMutation({
-              blind_mailbox_id: blindMailboxId,
+              blind_mailbox_id: targetBlindMailboxId,
               ciphertext_envelope: ciphertext,
               client_uuid: clientUuid,
             })
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: Date.now(),
-                clientUuid,
-                senderId: currentUserId,
-                senderName: user?.username || 'Ich',
-                text: rawText,
-                createdAt: new Date().toISOString(),
-                isSelf: true,
-                imageAttachment: finalImg,
-                fileAttachment: finalFile,
-                noteAttachment: note,
-                calendarAttachment: cal,
-                audioAttachment: audio,
-                stickerAttachment: sticker,
-                storyReply,
-              },
-            ])
             toast.info('Nachricht offline in Warteschlange eingereiht (Verbindungsfehler).')
           }
         }
-      } else if (activeContact) {
-        const targetUserId = activeContact.userId
+      } else if (targetUserId) {
         const recipientPubKey = await getOrFetchRecipientPublicKey(targetUserId)
         if (recipientPubKey && localKeyPair?.publicKeyJwk) {
           ciphertext = await encryptE2eeHybrid(payload, recipientPubKey, localKeyPair.publicKeyJwk)
@@ -1626,82 +1692,32 @@ export function Messenger() {
         }
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
           enqueueMessageMutation({
-            blind_mailbox_id: blindMailboxId,
+            blind_mailbox_id: targetBlindMailboxId,
             ciphertext_envelope: ciphertext,
             recipient_id: targetUserId,
             client_uuid: clientUuid,
           })
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: Date.now(),
-              clientUuid,
-              senderId: currentUserId,
-              senderName: user?.username || 'Ich',
-              text: rawText,
-              createdAt: new Date().toISOString(),
-              isSelf: true,
-              imageAttachment: finalImg,
-              fileAttachment: finalFile,
-              noteAttachment: note,
-              calendarAttachment: cal,
-              audioAttachment: audio,
-              stickerAttachment: sticker,
-              storyReply,
-            },
-          ])
           toast.info('Nachricht offline in Warteschlange eingereiht.')
         } else {
           try {
             await relayE2eeEnvelope({
-              blind_mailbox_id: blindMailboxId,
+              blind_mailbox_id: targetBlindMailboxId,
               ciphertext_envelope: ciphertext,
               recipient_id: targetUserId,
               client_uuid: clientUuid,
             })
           } catch {
             enqueueMessageMutation({
-              blind_mailbox_id: blindMailboxId,
+              blind_mailbox_id: targetBlindMailboxId,
               ciphertext_envelope: ciphertext,
               recipient_id: targetUserId,
               client_uuid: clientUuid,
             })
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: Date.now(),
-                clientUuid,
-                senderId: currentUserId,
-                senderName: user?.username || 'Ich',
-                text: rawText,
-                createdAt: new Date().toISOString(),
-                isSelf: true,
-                imageAttachment: finalImg,
-                fileAttachment: finalFile,
-                noteAttachment: note,
-                calendarAttachment: cal,
-                audioAttachment: audio,
-                stickerAttachment: sticker,
-                storyReply,
-              },
-            ])
             toast.info('Nachricht offline in Warteschlange eingereiht (Verbindungsfehler).')
           }
         }
       }
 
-      setInputText('')
-      setSelectedImage(null)
-      setStagedFile(null)
-      justSentRef.current = true
-      lastTypingSentRef.current = 0
-      if (blindMailboxId) {
-        void sendTypingSignal({
-          blind_mailbox_id: blindMailboxId,
-          status: 'idle',
-          recipient_id: activeContact?.userId ?? null,
-        }).catch(() => {})
-      }
       await loadMessages()
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Fehler beim Senden'
@@ -1945,7 +1961,7 @@ export function Messenger() {
   }, [])
 
   // Handle Photo / Camera capture
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
     if (!file.type.startsWith('image/')) {
@@ -1953,14 +1969,19 @@ export function Messenger() {
       return
     }
 
-    const reader = new FileReader()
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string
-      if (dataUrl) {
-        setSelectedImage({ dataUrl, name: file.name })
+    try {
+      const compressed = await compressImageFile(file)
+      setSelectedImage({ dataUrl: compressed.dataUrl, name: compressed.name })
+    } catch {
+      const reader = new FileReader()
+      reader.onload = (event) => {
+        const dataUrl = event.target?.result as string
+        if (dataUrl) {
+          setSelectedImage({ dataUrl, name: file.name })
+        }
       }
+      reader.readAsDataURL(file)
     }
-    reader.readAsDataURL(file)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -2075,14 +2096,20 @@ export function Messenger() {
     }
 
     if (isImage) {
-      const reader = new FileReader()
-      reader.onload = (event) => {
-        const dataUrl = event.target?.result as string
-        if (dataUrl) {
-          setSelectedImage({ dataUrl, name: file.name })
-        }
-      }
-      reader.readAsDataURL(file)
+      compressImageFile(file)
+        .then((compressed) => {
+          setSelectedImage({ dataUrl: compressed.dataUrl, name: compressed.name })
+        })
+        .catch(() => {
+          const reader = new FileReader()
+          reader.onload = (event) => {
+            const dataUrl = event.target?.result as string
+            if (dataUrl) {
+              setSelectedImage({ dataUrl, name: file.name })
+            }
+          }
+          reader.readAsDataURL(file)
+        })
       return
     }
 
@@ -3944,7 +3971,7 @@ export function Messenger() {
                             stagedFile || undefined
                           )
                         }}
-                        disabled={sending}
+                        disabled={false}
                         placeholder={editingMessage ? 'Nachricht bearbeiten …' : 'Nachricht schreiben …'}
                         leftActions={
                           <>

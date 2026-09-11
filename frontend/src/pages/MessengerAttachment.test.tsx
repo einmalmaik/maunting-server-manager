@@ -43,6 +43,10 @@ vi.mock('@/api/teams', () => ({
 vi.mock('@/services/e2eeCrypto', () => ({
   deriveBlindMailboxId: vi.fn().mockResolvedValue('test-blind-mailbox'),
   deriveGroupBlindMailboxId: vi.fn().mockResolvedValue('test-group-blind-mailbox'),
+  getCachedBlindMailboxId: vi.fn().mockReturnValue('test-blind-mailbox'),
+  getCachedGroupBlindMailboxId: vi.fn().mockReturnValue('test-group-blind-mailbox'),
+  envelopePlaintextCache: new Map(),
+  clearEnvelopePlaintextCache: vi.fn(),
   encryptE2eeMessage: vi.fn().mockResolvedValue('ciphertext'),
   decryptE2eeMessage: vi.fn().mockResolvedValue('Hallo Welt'),
   encryptE2eeHybrid: vi.fn().mockImplementation(async (payload) => `sv-e2ee-hybrid-v1:mock.${payload}`),

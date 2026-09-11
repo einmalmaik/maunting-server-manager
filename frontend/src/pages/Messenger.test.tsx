@@ -1,10 +1,14 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
-import { Messenger } from './Messenger'
+import { Messenger, clearSessionChatCache } from './Messenger'
 import * as socialApi from '@/api/social'
 import { teamsApi } from '@/api/teams'
 import { useAuthStore } from '@/stores/authStore'
+
+const { mockEnvelopeCache } = vi.hoisted(() => ({
+  mockEnvelopeCache: new Map<number, { plain: string; ok: boolean }>(),
+}))
 
 vi.mock('@/api/social', () => ({
   getFriends: vi.fn(),
@@ -40,6 +44,10 @@ vi.mock('@/api/teams', () => ({
 vi.mock('@/services/e2eeCrypto', () => ({
   deriveBlindMailboxId: vi.fn().mockResolvedValue('test-blind-mailbox'),
   deriveGroupBlindMailboxId: vi.fn().mockResolvedValue('test-group-blind-mailbox'),
+  getCachedBlindMailboxId: vi.fn().mockReturnValue(undefined),
+  getCachedGroupBlindMailboxId: vi.fn().mockReturnValue(undefined),
+  envelopePlaintextCache: mockEnvelopeCache,
+  clearEnvelopePlaintextCache: vi.fn(() => mockEnvelopeCache.clear()),
   encryptE2eeMessage: vi.fn().mockResolvedValue('ciphertext'),
   decryptE2eeMessage: vi.fn().mockResolvedValue('Hallo Welt'),
   encryptE2eeHybrid: vi.fn().mockResolvedValue('sv-e2ee-hybrid-v1:...'),
@@ -89,6 +97,8 @@ function setupUser() {
 describe('Messenger (Allround Chat)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    clearSessionChatCache()
+    mockEnvelopeCache.clear()
     setupUser()
 
     vi.mocked(socialApi.getFriends).mockResolvedValue([
@@ -1398,6 +1408,59 @@ describe('Messenger (Allround Chat)', () => {
     await waitFor(() => {
       expect(screen.getByTitle('Gelesen vom Gesprächspartner')).toBeInTheDocument()
     })
+  })
+
+  it('renders outgoing messages optimistically and clears input immediately without blocking', async () => {
+    let resolveRelay: (value: any) => void
+    const relayPromise = new Promise((resolve) => {
+      resolveRelay = resolve
+    })
+    vi.mocked(socialApi.relayE2eeEnvelope).mockReturnValue(relayPromise as any)
+
+    render(
+      <MemoryRouter initialEntries={['/chat?userId=101']}>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    const input = await screen.findByPlaceholderText('Nachricht schreiben …')
+    fireEvent.change(input, { target: { value: 'Sofortige optimistische Nachricht' } })
+
+    const sendButton = screen.getByTitle('Senden')
+    fireEvent.click(sendButton)
+
+    // Input must be cleared synchronously / immediately
+    expect((input as HTMLTextAreaElement).value).toBe('')
+    // Message bubble must appear optimistically before relay resolves
+    expect(screen.getByText('Sofortige optimistische Nachricht')).toBeInTheDocument()
+
+    // Resolve backend relay cleanly
+    resolveRelay!({ success: true, id: 999 })
+  })
+
+  it('synchronously hydrates conversation messages from cache on switch without flashing empty state', async () => {
+    render(
+      <MemoryRouter initialEntries={['/chat?userId=101']}>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    const input = await screen.findByPlaceholderText('Nachricht schreiben …')
+    vi.mocked(socialApi.relayE2eeEnvelope).mockResolvedValue({ success: true, id: 1001 } as any)
+
+    fireEvent.change(input, { target: { value: 'Nachricht vor Wechsel' } })
+    fireEvent.click(screen.getByTitle('Senden'))
+
+    await waitFor(() => {
+      expect(screen.getByText('Nachricht vor Wechsel')).toBeInTheDocument()
+    })
+
+    // Now re-click / switch back to Alice: sessionChatCache is populated, false empty state should never appear
+    const contactItems = await screen.findAllByText('alice')
+    fireEvent.click(contactItems[0])
+
+    expect(screen.queryByText('Noch keine Nachrichten. Schreibe die erste Nachricht!')).not.toBeInTheDocument()
+    expect(screen.getByText('Nachricht vor Wechsel')).toBeInTheDocument()
   })
 })
 
