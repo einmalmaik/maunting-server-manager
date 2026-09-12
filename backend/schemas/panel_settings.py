@@ -39,6 +39,7 @@ class PanelSettingsResponse(BaseModel):
     singra_webhook_secret_source: str = "none"
     updates_automatic: bool = False
     desktop_app_download_enabled: bool = True
+    story_fable_download_enabled: bool = False
     calendar_enabled: bool = True
     notes_enabled: bool = True
     vault_enabled: bool = True
@@ -83,6 +84,7 @@ class PanelSettingsUpdate(BaseModel):
     support_widget_custom_snippet: str | None = None
     updates_automatic: bool | None = None
     desktop_app_download_enabled: bool | None = None
+    story_fable_download_enabled: bool | None = None
     captcha_enabled: bool | None = None
     captcha_provider: str | None = None
     captcha_site_key: str | None = None

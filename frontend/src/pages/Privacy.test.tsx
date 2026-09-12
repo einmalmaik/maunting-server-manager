@@ -136,19 +136,34 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die zur Desktop-App und Postfächern gehoerende Fassung 3.0 vom 2026-09-02 aus', () => {
+  it('weist die um die Download-Hinweise ergaenzte Fassung 3.1 vom 2026-09-12 aus', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.0`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.1`)),
     ).toBeInTheDocument();
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();
     // Maschinenlesbar und sichtbar muessen dasselbe Datum tragen: ein Leser
     // vergleicht den Text, ein Archiv das Attribut.
-    expect(stand).toHaveAttribute('datetime', '2026-09-02');
-    expect(stand).toHaveTextContent('2026-09-02');
+    expect(stand).toHaveAttribute('datetime', '2026-09-12');
+    expect(stand).toHaveTextContent('2026-09-12');
+  });
+
+  /**
+   * Die Download-Hinweise in der Seitenleiste sind der einzige Ort, an dem das Panel auf
+   * einen Fremdserver verweist, den der Betreiber nicht selbst eingetragen hat. Wer darauf
+   * klickt, gibt GitHub seine IP-Adresse — das gehoert benannt, und zwar bevor jemand klickt.
+   */
+  it('benennt, dass ein Klick auf die Download-Hinweise GitHub erreicht', () => {
+    renderPrivacy();
+
+    const punkt = i18n.t('privacyPolicy.sections.providers.items.downloads');
+    expect(punkt).not.toBe('privacyPolicy.sections.providers.items.downloads');
+    expect(punkt).toMatch(/GitHub/);
+    expect(punkt).toMatch(/IP-Adresse/);
+    expect(screen.getByText(punkt)).toBeInTheDocument();
   });
 
   /**

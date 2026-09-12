@@ -3290,7 +3290,9 @@
       "savePassword": "Passwort speichern",
       "passwordSaved": "Backup-Passwort gespeichert"
     },
-    "loadFailed": "Laden fehlgeschlagen"
+    "loadFailed": "Laden fehlgeschlagen",
+    "storyFablePromo": "Story-Fable-Hinweis anzeigen",
+    "storyFablePromoHint": "Blendet in der Seitenleiste über dem MSS-Download einen Hinweis auf Maunting Story Fable ein. Erst einschalten, wenn eine APK veröffentlicht ist — sonst führt der Link ins Leere."
   },
   "profile": {
     "title": "Profil",
@@ -4303,7 +4305,8 @@
           "captcha": "CAPTCHA: Browser-, Netzwerk- und Challenge-Daten nach den Regeln des Anbieters",
           "oauth": "OAuth: Account-Kennung, vom Anbieter freigegebene Profildaten und Anmeldemetadaten",
           "support": "Support-Widget: Verbindungsmetadaten und vom Nutzer eingegebene Inhalte; das Widget wartet auf die Bestätigung dieses Hinweises",
-          "s3": "S3-kompatibler Speicher: verschlüsselte Backup-Objekte sowie technische Objekt-, Account-, Zeit- und Übertragungsmetadaten"
+          "s3": "S3-kompatibler Speicher: verschlüsselte Backup-Objekte sowie technische Objekt-, Account-, Zeit- und Übertragungsmetadaten",
+          "downloads": "Download-Hinweise (GitHub): Der Betreiber kann in der Seitenleiste Hinweise auf die Maunting-Apps einblenden — das Maunting Smart System und Maunting Story Fable. Das sind gewöhnliche Links; solange du sie nicht anklickst, geht keine Anfrage hinaus. Klickst du einen an, lädt dein Browser die Datei direkt von GitHub, und GitHub erfährt dabei deine IP-Adresse, den Zeitpunkt und die angeforderte Datei. Das Panel ist daran nicht beteiligt und erfährt nicht, ob du geladen hast. Beide Hinweise lassen sich in den Panel-Einstellungen unter „Allgemein“ abschalten."
         }
       },
       "ai": {
@@ -5907,5 +5910,9 @@
     "label": "Desktop-App für Windows",
     "androidTooltip": "Maunting Smart System Android-App herunterladen",
     "androidLabel": "App für Android (.apk)"
+  },
+  "storyFableBadge": {
+    "label": "Die Geschichte vergisst nichts.",
+    "tooltip": "Maunting Story Fable als Android-App laden (APK, Sideload)"
   }
 }

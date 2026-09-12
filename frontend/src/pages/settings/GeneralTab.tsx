@@ -48,6 +48,7 @@ export function GeneralTab() {
           time_format: settings.time_format,
           updates_automatic: settings.updates_automatic,
           desktop_app_download_enabled: settings.desktop_app_download_enabled,
+          story_fable_download_enabled: settings.story_fable_download_enabled,
           calendar_enabled: settings.calendar_enabled,
           notes_enabled: settings.notes_enabled,
           vault_enabled: settings.vault_enabled,
@@ -185,6 +186,24 @@ export function GeneralTab() {
                   onCheckedChange={(checked) => setSettings({ ...settings, desktop_app_download_enabled: checked })}
                   disabled={!canWrite}
                   aria-label={t('settings.desktopDownloadPromo', 'Desktop-App Download-Banner anzeigen')}
+                />
+              </label>
+            </div>
+            <div className="md:col-span-2 border-t border-outline-variant/30 pt-6">
+              <label className="flex items-center justify-between gap-4">
+                <span className="block">
+                  <span className="block font-headline text-body-md text-primary font-semibold">
+                    {t('settings.storyFablePromo', 'Story-Fable-Hinweis anzeigen')}
+                  </span>
+                  <span className="block font-body text-xs text-on-surface-variant">
+                    {t('settings.storyFablePromoHint', 'Blendet in der Seitenleiste über dem MSS-Download einen Hinweis auf Maunting Story Fable ein. Erst einschalten, wenn eine APK veröffentlicht ist — sonst führt der Link ins Leere.')}
+                  </span>
+                </span>
+                <Switch
+                  checked={settings.story_fable_download_enabled}
+                  onCheckedChange={(checked) => setSettings({ ...settings, story_fable_download_enabled: checked })}
+                  disabled={!canWrite}
+                  aria-label={t('settings.storyFablePromo', 'Story-Fable-Hinweis anzeigen')}
                 />
               </label>
             </div>

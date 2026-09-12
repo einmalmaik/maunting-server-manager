@@ -9,6 +9,7 @@ import { Logo } from '@/components/Logo'
 import { LogOut, Plus, User as UserIcon, X } from 'lucide-react'
 import { buildNavigation, type NavGroupName } from './navigation'
 import { DesktopAppDownloadBadge } from './DesktopAppDownloadBadge'
+import { StoryFableBadge } from './StoryFableBadge'
 import { BenachrichtigungsGlocke, ProfileDropdown, type ProfileDropdownItem } from '@/Singra/UI'
 import { usePresenceAndActivity, type PresenceStatus } from '@/hooks/usePresenceAndActivity'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
@@ -210,8 +211,9 @@ export function Sidebar({ mobile = false, onNavigate, presenceStatus: propPresen
         ))}
       </nav>
 
-      {/* Desktop App Download Badge */}
+      {/* Produkt-Hinweise: Story Fable ueber dem MSS-Download */}
       <div className="shrink-0">
+        <StoryFableBadge />
         <DesktopAppDownloadBadge />
       </div>
 

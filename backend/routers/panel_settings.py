@@ -124,6 +124,8 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
         "singra_webhook_secret_source": singra_secret.current_source(),
         "updates_automatic": all_db.get("updates_automatic", "false") == "true",
         "desktop_app_download_enabled": all_db.get("desktop_app_download_enabled", "true") != "false",
+        # Vorgabe aus: Der Download zeigt auf ein GitHub-Release, das erst existieren muss.
+        "story_fable_download_enabled": all_db.get("story_fable_download_enabled", "false") == "true",
         "calendar_enabled": all_db.get("calendar_enabled", "true") != "false",
         "notes_enabled": all_db.get("notes_enabled", "true") != "false",
         "vault_enabled": all_db.get("vault_enabled", "true") != "false",
@@ -155,6 +157,8 @@ def get_public_settings() -> dict:
     all_db = PanelSettingsService.get_all()
     return {
         "desktop_app_download_enabled": all_db.get("desktop_app_download_enabled", "true") != "false",
+        # Vorgabe aus: Der Download zeigt auf ein GitHub-Release, das erst existieren muss.
+        "story_fable_download_enabled": all_db.get("story_fable_download_enabled", "false") == "true",
         "imprint_enabled": all_db.get("imprint_enabled", "false") == "true",
         "imprint_url": all_db.get("imprint_url", ""),
         "calendar_enabled": all_db.get("calendar_enabled", "true") != "false",
@@ -223,6 +227,13 @@ def update_settings(
         if key == "vault_enabled":
             value = "true" if bool(value) else "false"
         if key == "social_enabled":
+            value = "true" if bool(value) else "false"
+        # Ohne diese Normalisierung landet ein abgeschaltetes Banner als str(False) == "False"
+        # in der Datenbank und wird beim Lesen gegen "false" verglichen — der Schalter liess
+        # sich also gar nicht ausschalten.
+        if key == "desktop_app_download_enabled":
+            value = "true" if bool(value) else "false"
+        if key == "story_fable_download_enabled":
             value = "true" if bool(value) else "false"
         if key == "captcha_enabled":
             value = "true" if bool(value) else "false"

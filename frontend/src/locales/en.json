@@ -3290,7 +3290,9 @@
       "savePassword": "Save password",
       "passwordSaved": "Backup password saved"
     },
-    "loadFailed": "Loading failed"
+    "loadFailed": "Loading failed",
+    "storyFablePromo": "Show Story Fable notice",
+    "storyFablePromoHint": "Displays a notice about Maunting Story Fable above the MSS download in the sidebar. Only enable this once an APK has been published — otherwise the link leads nowhere."
   },
   "profile": {
     "title": "Profile",
@@ -4303,7 +4305,8 @@
           "captcha": "CAPTCHA provider: browser, network, and challenge data according to that provider’s policy",
           "oauth": "OAuth provider: account identifier, profile data released by the provider, and authentication metadata",
           "support": "Support-widget provider: connection metadata and content users submit to the widget; the widget is held until this notice is acknowledged",
-          "s3": "S3-compatible provider: encrypted backup objects plus technical object, account, timing, and transfer metadata"
+          "s3": "S3-compatible provider: encrypted backup objects plus technical object, account, timing, and transfer metadata",
+          "downloads": "Download notices (GitHub): The operator may show notices about the Maunting apps in the sidebar — Maunting Smart System and Maunting Story Fable. These are ordinary links; as long as you do not click them, no request leaves your browser. If you do click one, your browser downloads the file directly from GitHub, and GitHub learns your IP address, the time and the file requested. The panel is not involved and does not learn whether you downloaded anything. Both notices can be turned off in the panel settings under \"General\"."
         }
       },
       "ai": {
@@ -5907,5 +5910,9 @@
     "label": "Desktop App for Windows",
     "androidTooltip": "Download Maunting Smart System Android App",
     "androidLabel": "App for Android (.apk)"
+  },
+  "storyFableBadge": {
+    "label": "The story forgets nothing.",
+    "tooltip": "Get Maunting Story Fable as an Android app (APK, sideload)"
   }
 }

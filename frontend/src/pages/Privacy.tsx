@@ -10,8 +10,8 @@ export function Privacy() {
     title: t('privacyPolicy.title'),
     intro: t('privacyPolicy.intro'),
     callout: t('privacyPolicy.callout'),
-    lastUpdated: '2026-09-02',
-    version: '3.0',
+    lastUpdated: '2026-09-12',
+    version: '3.1',
     meta: 'Maunting Studios — Sicherheit braucht Vertrauen',
     sections: [
       { heading: t('privacyPolicy.sections.scope.heading'), body: t('privacyPolicy.sections.scope.body') },
@@ -52,6 +52,9 @@ export function Privacy() {
           t('privacyPolicy.sections.providers.items.oauth'),
           t('privacyPolicy.sections.providers.items.support'),
           t('privacyPolicy.sections.providers.items.s3'),
+          // Die Download-Hinweise in der Seitenleiste sind der einzige Ort, an dem das Panel
+          // auf einen Fremdserver verweist, ohne dass der Betreiber ihn konfiguriert hat.
+          t('privacyPolicy.sections.providers.items.downloads'),
         ],
       },
       {
