@@ -118,7 +118,21 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
       setLocalKeyPair(kp)
       try {
         const existing = await getE2eePublicKey(currentUserId)
-        if (!existing?.public_key) {
+        let isMatch = false
+        if (existing?.public_key) {
+          if (existing.public_key.trim() === kp.publicKeyJwk.trim()) {
+            isMatch = true
+          } else {
+            try {
+              const serverParsed = JSON.parse(existing.public_key)
+              const localParsed = JSON.parse(kp.publicKeyJwk)
+              if (serverParsed.n && localParsed.n && serverParsed.n === localParsed.n) {
+                isMatch = true
+              }
+            } catch {}
+          }
+        }
+        if (!isMatch) {
           await setE2eePublicKey(kp.publicKeyJwk)
         }
       } catch {

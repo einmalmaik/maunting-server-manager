@@ -97,6 +97,8 @@ function setupUser() {
 describe('Messenger (Allround Chat)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    if (typeof sessionStorage !== 'undefined') sessionStorage.clear()
+    if (typeof localStorage !== 'undefined') localStorage.clear()
     clearSessionChatCache()
     mockEnvelopeCache.clear()
     setupUser()
@@ -147,6 +149,9 @@ describe('Messenger (Allround Chat)', () => {
     } as any)
 
     vi.mocked(socialApi.getGroups).mockResolvedValue([])
+    vi.mocked(socialApi.getPublicProfiles).mockResolvedValue([])
+    vi.mocked(socialApi.getDirectChats).mockResolvedValue([])
+    vi.mocked(socialApi.getStories).mockResolvedValue([])
     vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([])
     vi.mocked(socialApi.getE2eePublicKey).mockResolvedValue({ user_id: 101, username: 'alice', public_key: null })
   })
@@ -898,9 +903,9 @@ describe('Messenger (Allround Chat)', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /bob/i })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /bob(?!_)/i })).toBeInTheDocument()
     })
-    fireEvent.click(screen.getByRole('button', { name: /bob/i }))
+    fireEvent.click(screen.getByRole('button', { name: /bob(?!_)/i }))
 
     await waitFor(() => {
       expect(screen.getByText('Hallo von gestern!')).toBeInTheDocument()
@@ -930,9 +935,9 @@ describe('Messenger (Allround Chat)', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /charlie/i })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /charlie(?!_)/i })).toBeInTheDocument()
     })
-    fireEvent.click(screen.getByRole('button', { name: /charlie/i }))
+    fireEvent.click(screen.getByRole('button', { name: /charlie(?!_)/i }))
 
     // Wallpaper button in chat header
     await waitFor(() => {

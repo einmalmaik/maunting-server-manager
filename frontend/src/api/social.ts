@@ -2,7 +2,7 @@
  * Social, Friends, Achievements & E2EE API Client
  */
 
-import { api, apiUrl } from './client'
+import { api, apiStream } from './client'
 
 export interface FriendItem {
   id: number
@@ -320,8 +320,10 @@ export async function getChatMediaSignedUrl(
 }
 
 export async function downloadChatMedia(signedUrl: string): Promise<string> {
-  const targetUrl = apiUrl(signedUrl)
-  const res = await fetch(targetUrl, { credentials: 'include' })
+  const res = await apiStream(signedUrl, {
+    method: 'GET',
+    headers: { Accept: '*/*' },
+  })
   if (!res.ok) {
     throw new Error(`Medien-Download fehlgeschlagen: ${res.status}`)
   }

@@ -331,10 +331,10 @@ function loadInitialContactsCache(): {
 
 export function Messenger() {
   const { user } = useAuthStore()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { inviteCode } = useParams<{ inviteCode?: string }>()
   const navigate = useNavigate()
-  const queryUserId = searchParams.get('userId')
+  const queryUserId = searchParams.get('userId') || searchParams.get('contact')
 
   const initialCache = useMemo(() => loadInitialContactsCache(), [])
   const [friends, setFriends] = useState<FriendItem[]>(initialCache.friends)
@@ -524,6 +524,8 @@ export function Messenger() {
   const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null)
   const highestIncomingIdAcknowledgedRef = useRef<number>(0)
   const highestIncomingIdDeliveredRef = useRef<number>(0)
+  const maxPartnerReadIdRef = useRef<number>(0)
+  const maxPartnerDeliveredIdRef = useRef<number>(0)
 
   // Real-time typing & voice recording indicator state
   const [partnerActivity, setPartnerActivity] = useState<{ status: 'typing' | 'recording'; username?: string } | null>(null)
@@ -568,7 +570,21 @@ export function Messenger() {
       setLocalKeyPair(kp)
       try {
         const existing = await getE2eePublicKey(currentUserId)
-        if (!existing?.public_key) {
+        let isMatch = false
+        if (existing?.public_key) {
+          if (existing.public_key.trim() === kp.publicKeyJwk.trim()) {
+            isMatch = true
+          } else {
+            try {
+              const serverParsed = JSON.parse(existing.public_key)
+              const localParsed = JSON.parse(kp.publicKeyJwk)
+              if (serverParsed.n && localParsed.n && serverParsed.n === localParsed.n) {
+                isMatch = true
+              }
+            } catch {}
+          }
+        }
+        if (!isMatch) {
           await setE2eePublicKey(kp.publicKeyJwk)
         }
       } catch {
@@ -686,8 +702,8 @@ export function Messenger() {
     const seenUserIds = new Set<number>()
 
     for (const f of friends) {
-      if (f.status === 'accepted') {
-        const uid = f.user_id ?? f.id
+      if (f.status === 'accepted' || (f as any).friend_user_id) {
+        const uid = f.user_id ?? (f as any).friend_user_id ?? f.id
         seenUserIds.add(uid)
         list.push({
           id: f.id,
@@ -883,16 +899,65 @@ export function Messenger() {
     markStoriesAsSeen(userStories)
   }
 
-  // Auto-select contact if userId query parameter is present
+  // Auto-select contact if userId query parameter or storage is present
   useEffect(() => {
-    if (queryUserId && contactsList.length > 0) {
-      const match = contactsList.find((c) => c.userId === Number(queryUserId))
-      if (match && activeContact?.userId !== match.userId) {
-        setActiveContact(match)
-        setActiveGroup(null)
+    if (queryUserId && !activeGroup) {
+      const targetId = Number(queryUserId)
+      if (targetId) {
+        const match = contactsList.find((c) => c.userId === targetId)
+        if (match) {
+          setActiveContact((prev) => {
+            if (prev?.userId === match.userId && prev.username === match.username && prev.avatarUrl === match.avatarUrl) {
+              return prev
+            }
+            return match
+          })
+          setActiveGroup(null)
+        } else {
+          setActiveContact((prev) => {
+            if (prev?.userId === targetId) return prev
+            return {
+              id: targetId,
+              userId: targetId,
+              username: `User #${targetId}`,
+              avatarUrl: null,
+              status: 'invisible',
+              deviceType: null,
+              activityLabel: null,
+              isFriend: false,
+              teamName: null,
+            }
+          })
+          setActiveGroup(null)
+        }
       }
     }
-  }, [queryUserId, contactsList, activeContact])
+  }, [queryUserId, contactsList, activeGroup])
+
+  // Synchronize active conversation with search params and sessionStorage
+  useEffect(() => {
+    if (activeContact) {
+      try {
+        sessionStorage.setItem('msm:active_messenger_user_id', String(activeContact.userId))
+      } catch {}
+      const cur = searchParams.get('userId') || searchParams.get('contact')
+      if (cur !== String(activeContact.userId)) {
+        const next = new URLSearchParams(searchParams)
+        next.set('userId', String(activeContact.userId))
+        setSearchParams(next, { replace: true })
+      }
+    } else if (activeGroup) {
+      try {
+        sessionStorage.removeItem('msm:active_messenger_user_id')
+      } catch {}
+      if (searchParams.has('userId') || searchParams.has('contact')) {
+        const next = new URLSearchParams(searchParams)
+        next.delete('userId')
+        next.delete('contact')
+        setSearchParams(next, { replace: true })
+      }
+    }
+  }, [activeContact, activeGroup, searchParams, setSearchParams])
 
   // 4. When active contact or active group changes, derive mailbox ID
   useEffect(() => {
@@ -901,18 +966,20 @@ export function Messenger() {
     if (activeGroup) {
       const syncMid = getCachedGroupBlindMailboxId(activeGroup.id)
       if (syncMid) {
-        activeMailboxIdRef.current = syncMid
-        setBlindMailboxId(syncMid)
-        const cached = sessionChatCache.get(syncMid)
-        if (cached && cached.length > 0) {
-          setMessages(cached)
-          setLoadingMessages(false)
-        } else {
-          setMessages([])
-          setLoadingMessages(true)
+        if (activeMailboxIdRef.current !== syncMid) {
+          activeMailboxIdRef.current = syncMid
+          setBlindMailboxId(syncMid)
+          const cached = sessionChatCache.get(syncMid)
+          if (cached && cached.length > 0) {
+            setMessages(cached)
+            setLoadingMessages(false)
+          } else {
+            setMessages([])
+            setLoadingMessages(true)
+          }
+          useMessengerNotificationStore.getState().setActiveMailboxId(syncMid)
         }
-        useMessengerNotificationStore.getState().setActiveMailboxId(syncMid)
-      } else {
+      } else if (activeMailboxIdRef.current !== '') {
         activeMailboxIdRef.current = ''
         setBlindMailboxId('')
         setMessages([])
@@ -920,7 +987,7 @@ export function Messenger() {
       }
 
       deriveGroupBlindMailboxId(activeGroup.id).then((mid) => {
-        if (active) {
+        if (active && activeMailboxIdRef.current !== mid) {
           activeMailboxIdRef.current = mid
           setBlindMailboxId(mid)
           const cached = sessionChatCache.get(mid)
@@ -935,18 +1002,20 @@ export function Messenger() {
       const targetUserId = activeContact.userId
       const syncMid = getCachedBlindMailboxId(currentUserId, targetUserId)
       if (syncMid) {
-        activeMailboxIdRef.current = syncMid
-        setBlindMailboxId(syncMid)
-        const cached = sessionChatCache.get(syncMid)
-        if (cached && cached.length > 0) {
-          setMessages(cached)
-          setLoadingMessages(false)
-        } else {
-          setMessages([])
-          setLoadingMessages(true)
+        if (activeMailboxIdRef.current !== syncMid) {
+          activeMailboxIdRef.current = syncMid
+          setBlindMailboxId(syncMid)
+          const cached = sessionChatCache.get(syncMid)
+          if (cached && cached.length > 0) {
+            setMessages(cached)
+            setLoadingMessages(false)
+          } else {
+            setMessages([])
+            setLoadingMessages(true)
+          }
+          useMessengerNotificationStore.getState().setActiveMailboxId(syncMid)
         }
-        useMessengerNotificationStore.getState().setActiveMailboxId(syncMid)
-      } else {
+      } else if (activeMailboxIdRef.current !== '') {
         activeMailboxIdRef.current = ''
         setBlindMailboxId('')
         setMessages([])
@@ -954,7 +1023,7 @@ export function Messenger() {
       }
 
       deriveBlindMailboxId(currentUserId, targetUserId).then((mid) => {
-        if (active) {
+        if (active && activeMailboxIdRef.current !== mid) {
           activeMailboxIdRef.current = mid
           setBlindMailboxId(mid)
           const cached = sessionChatCache.get(mid)
@@ -969,6 +1038,8 @@ export function Messenger() {
       activeMailboxIdRef.current = ''
       highestIncomingIdAcknowledgedRef.current = 0
       highestIncomingIdDeliveredRef.current = 0
+      maxPartnerReadIdRef.current = 0
+      maxPartnerDeliveredIdRef.current = 0
       setBlindMailboxId('')
       setMessages([])
       setLoadingMessages(false)
@@ -977,12 +1048,8 @@ export function Messenger() {
 
     return () => {
       active = false
-      activeMailboxIdRef.current = ''
-      highestIncomingIdAcknowledgedRef.current = 0
-      highestIncomingIdDeliveredRef.current = 0
-      useMessengerNotificationStore.getState().setActiveMailboxId(null)
     }
-  }, [activeContact, activeGroup, currentUserId])
+  }, [activeContact?.userId, activeGroup?.id, currentUserId])
 
   // Helper: send an E2EE control envelope (e.g. read_receipt, edit_message, delete_message)
   const sendE2eeControlMessage = async (payloadObj: Record<string, unknown>) => {
@@ -1059,8 +1126,10 @@ export function Messenger() {
 
       let resolvedKeyPair = localKeyPair
       if (!resolvedKeyPair && currentUserId) {
-        resolvedKeyPair = await getLocalKeyPair(currentUserId)
-        if (!resolvedKeyPair) {
+        if (typeof getLocalKeyPair === 'function') {
+          resolvedKeyPair = await getLocalKeyPair(currentUserId)
+        }
+        if (!resolvedKeyPair && typeof getOrGenerateLocalKeyPair === 'function') {
           resolvedKeyPair = await getOrGenerateLocalKeyPair(currentUserId)
         }
         if (resolvedKeyPair) {
@@ -1081,10 +1150,17 @@ export function Messenger() {
             } else if (activeContact) {
               const targetUserId = activeContact.userId
               if (env.ciphertext_envelope.startsWith('sv-e2ee-hybrid-v1:')) {
+                let hybridSuccess = false
                 if (resolvedKeyPair) {
-                  plain = await decryptE2eeHybrid(env.ciphertext_envelope, resolvedKeyPair.privateKeyJwk)
-                } else {
-                  throw new Error('Local key not ready')
+                  try {
+                    plain = await decryptE2eeHybrid(env.ciphertext_envelope, resolvedKeyPair.privateKeyJwk)
+                    hybridSuccess = true
+                  } catch {
+                    // Fallback to symmetric direct channel decryption
+                  }
+                }
+                if (!hybridSuccess) {
+                  plain = await decryptE2eeMessage(env.ciphertext_envelope, currentUserId, targetUserId)
                 }
               } else {
                 plain = await decryptE2eeMessage(env.ciphertext_envelope, currentUserId, targetUserId)
@@ -1093,6 +1169,15 @@ export function Messenger() {
             envelopePlaintextCache.set(env.id, { plain, ok: true })
             return { env, plain, ok: true }
           } catch {
+            if (activeContact) {
+              try {
+                const plain = await decryptE2eeMessage(env.ciphertext_envelope, currentUserId, activeContact.userId)
+                if (plain) {
+                  envelopePlaintextCache.set(env.id, { plain, ok: true })
+                  return { env, plain, ok: true }
+                }
+              } catch {}
+            }
             return { env, plain: '', ok: false }
           }
         })
@@ -1105,6 +1190,23 @@ export function Messenger() {
         seenEnvelopeIds.add(env.id)
 
         if (!ok || !plain) {
+          const isControl =
+            Boolean((env as any).is_control) ||
+            Boolean((env as any).control_type) ||
+            Boolean(
+              env.client_uuid &&
+                (env.client_uuid.startsWith('receipt:') ||
+                  env.client_uuid.startsWith('ctrl-') ||
+                  env.client_uuid.startsWith('deliv-') ||
+                  env.client_uuid.toLowerCase().includes('control') ||
+                  env.client_uuid.toLowerCase().includes('receipt'))
+            )
+
+          if (isControl) {
+            // Silence un-decryptable control envelopes; never render in chat timeline
+            continue
+          }
+
           const clientUuid = env.client_uuid || undefined
           if (clientUuid && seenClientUuids.has(clientUuid)) {
             continue
@@ -1136,9 +1238,11 @@ export function Messenger() {
               if (Number(readerId) !== Number(currentUserId)) {
                 if (readUpTo > maxPartnerReadId) {
                   maxPartnerReadId = readUpTo
+                  maxPartnerReadIdRef.current = Math.max(maxPartnerReadIdRef.current, readUpTo)
                 }
                 if (readUpTo > maxPartnerDeliveredId) {
                   maxPartnerDeliveredId = readUpTo
+                  maxPartnerDeliveredIdRef.current = Math.max(maxPartnerDeliveredIdRef.current, readUpTo)
                 }
               } else {
                 // Multi-Device: Vom aktuellen Benutzer auf anderem Gerät gelesen
@@ -1153,6 +1257,7 @@ export function Messenger() {
               const receiverId = Number(parsed.receiver_id || 0)
               if (Number(receiverId) !== Number(currentUserId) && deliveredUpTo > maxPartnerDeliveredId) {
                 maxPartnerDeliveredId = deliveredUpTo
+                maxPartnerDeliveredIdRef.current = Math.max(maxPartnerDeliveredIdRef.current, deliveredUpTo)
               }
               continue
             }
@@ -1300,9 +1405,13 @@ export function Messenger() {
         for (const m of processedList) {
           if (m.clientUuid) processedClientUuids.add(m.clientUuid)
         }
-        const pendingOptimistic = prev.filter(
-          (m) => m.isSelf && m.clientUuid && !processedClientUuids.has(m.clientUuid)
-        )
+        const pendingOptimistic = prev
+          .filter((m) => m.isSelf && m.clientUuid && !processedClientUuids.has(m.clientUuid))
+          .map((m) => {
+            const isRead = m.isSelf && maxPartnerReadId >= m.id
+            const isDelivered = m.isSelf && (isRead || maxPartnerDeliveredId >= m.id)
+            return { ...m, isRead, isDelivered }
+          })
         const combined = pendingOptimistic.length === 0 ? processedList : [...processedList, ...pendingOptimistic]
         sessionChatCache.set(currentMid, combined.slice(-80))
         return combined
@@ -1486,6 +1595,10 @@ export function Messenger() {
       clearTimeout(partnerActivityTimeoutRef.current)
       partnerActivityTimeoutRef.current = null
     }
+    highestIncomingIdAcknowledgedRef.current = 0
+    highestIncomingIdDeliveredRef.current = 0
+    maxPartnerReadIdRef.current = 0
+    maxPartnerDeliveredIdRef.current = 0
   }, [blindMailboxId])
 
   useEffect(() => {
@@ -1494,7 +1607,7 @@ export function Messenger() {
       const interval = setInterval(() => void loadMessages(false), 5000)
       return () => clearInterval(interval)
     }
-  }, [blindMailboxId, activeContact, activeGroup, localKeyPair])
+  }, [blindMailboxId, activeContact?.userId, activeGroup?.id, localKeyPair])
 
   // Autoscroll
   useEffect(() => {
@@ -1656,7 +1769,7 @@ export function Messenger() {
       if (storyReply) payloadObj.story_reply = storyReply
 
       const payload = JSON.stringify(payloadObj)
-      let ciphertext: string
+      let ciphertext = ''
 
       if (currentGroupId) {
         ciphertext = await encryptGroupE2eeMessage(payload, currentGroupId)
@@ -1669,11 +1782,44 @@ export function Messenger() {
           toast.info('Nachricht offline in Warteschlange eingereiht.')
         } else {
           try {
-            await relayE2eeEnvelope({
+            const result = await relayE2eeEnvelope({
               blind_mailbox_id: targetBlindMailboxId,
               ciphertext_envelope: ciphertext,
               client_uuid: clientUuid,
             })
+            if (result && typeof result.id === 'number') {
+              const serverId = result.id
+              const isRead = maxPartnerReadIdRef.current >= serverId
+              const isDelivered = isRead || maxPartnerDeliveredIdRef.current >= serverId
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.clientUuid === clientUuid
+                    ? {
+                        ...m,
+                        id: serverId,
+                        isRead: m.isRead || isRead,
+                        isDelivered: m.isDelivered || isDelivered,
+                      }
+                    : m
+                )
+              )
+              const cached = sessionChatCache.get(targetBlindMailboxId)
+              if (cached) {
+                sessionChatCache.set(
+                  targetBlindMailboxId,
+                  cached.map((m) =>
+                    m.clientUuid === clientUuid
+                      ? {
+                          ...m,
+                          id: serverId,
+                          isRead: m.isRead || isRead,
+                          isDelivered: m.isDelivered || isDelivered,
+                        }
+                      : m
+                  )
+                )
+              }
+            }
           } catch {
             enqueueMessageMutation({
               blind_mailbox_id: targetBlindMailboxId,
@@ -1685,9 +1831,16 @@ export function Messenger() {
         }
       } else if (targetUserId) {
         const recipientPubKey = await getOrFetchRecipientPublicKey(targetUserId)
+        let hybridSuccess = false
         if (recipientPubKey && localKeyPair?.publicKeyJwk) {
-          ciphertext = await encryptE2eeHybrid(payload, recipientPubKey, localKeyPair.publicKeyJwk)
-        } else {
+          try {
+            ciphertext = await encryptE2eeHybrid(payload, recipientPubKey, localKeyPair.publicKeyJwk)
+            hybridSuccess = true
+          } catch {
+            // Fallback to symmetric direct channel encryption if hybrid encryption fails
+          }
+        }
+        if (!hybridSuccess) {
           ciphertext = await encryptE2eeMessage(payload, currentUserId, targetUserId)
         }
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
@@ -1700,12 +1853,45 @@ export function Messenger() {
           toast.info('Nachricht offline in Warteschlange eingereiht.')
         } else {
           try {
-            await relayE2eeEnvelope({
+            const result = await relayE2eeEnvelope({
               blind_mailbox_id: targetBlindMailboxId,
               ciphertext_envelope: ciphertext,
               recipient_id: targetUserId,
               client_uuid: clientUuid,
             })
+            if (result && typeof result.id === 'number') {
+              const serverId = result.id
+              const isRead = maxPartnerReadIdRef.current >= serverId
+              const isDelivered = isRead || maxPartnerDeliveredIdRef.current >= serverId
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.clientUuid === clientUuid
+                    ? {
+                        ...m,
+                        id: serverId,
+                        isRead: m.isRead || isRead,
+                        isDelivered: m.isDelivered || isDelivered,
+                      }
+                    : m
+                )
+              )
+              const cached = sessionChatCache.get(targetBlindMailboxId)
+              if (cached) {
+                sessionChatCache.set(
+                  targetBlindMailboxId,
+                  cached.map((m) =>
+                    m.clientUuid === clientUuid
+                      ? {
+                          ...m,
+                          id: serverId,
+                          isRead: m.isRead || isRead,
+                          isDelivered: m.isDelivered || isDelivered,
+                        }
+                      : m
+                  )
+                )
+              }
+            }
           } catch {
             enqueueMessageMutation({
               blind_mailbox_id: targetBlindMailboxId,
@@ -3286,7 +3472,11 @@ export function Messenger() {
                               ? { groupId: activeGroup.id }
                               : {
                                   userAId: currentUserId,
-                                  userBId: activeContact?.userId || (!msg.isSelf ? msg.senderId : 0),
+                                  userBId: activeContact
+                                    ? activeContact.userId
+                                    : (msg.isSelf
+                                        ? (Number(queryUserId) || 0)
+                                        : (msg.senderId || Number(queryUserId) || 0)),
                                 }
                           }
                           onViewImage={setViewingImage}
@@ -3303,7 +3493,11 @@ export function Messenger() {
                               ? { groupId: activeGroup.id }
                               : {
                                   userAId: currentUserId,
-                                  userBId: activeContact?.userId || (!msg.isSelf ? msg.senderId : 0),
+                                  userBId: activeContact
+                                    ? activeContact.userId
+                                    : (msg.isSelf
+                                        ? (Number(queryUserId) || 0)
+                                        : (msg.senderId || Number(queryUserId) || 0)),
                                 }
                           }
                           isSelf={msg.isSelf}

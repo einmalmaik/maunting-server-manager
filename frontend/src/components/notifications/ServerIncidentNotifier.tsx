@@ -68,12 +68,14 @@ export function ServerIncidentNotifier() {
   const isPollingRef = useRef(false)
 
   useEffect(() => {
-    if (!isAuthenticated || !user || user.device_notifications === false) {
+    if (!isAuthenticated || !user) {
       return
     }
 
     // Bei aktivem Dienst Berechtigungen prüfen & abfragen
-    void pruefeUndFrageGeraeteBerechtigung()
+    if (user.device_notifications !== false) {
+      void pruefeUndFrageGeraeteBerechtigung()
+    }
 
     const checkAlerts = async () => {
       if (isPollingRef.current) return
@@ -143,10 +145,14 @@ export function ServerIncidentNotifier() {
     }
 
     // Sofortiger initialer Check nach Login
-    void checkAlerts()
+    if (user.device_notifications !== false) {
+      void checkAlerts()
+    }
 
     const interval = setInterval(() => {
-      void checkAlerts()
+      if (user.device_notifications !== false) {
+        void checkAlerts()
+      }
     }, POLL_INTERVAL_MS)
 
     // Sofortige Echtzeit-Push-Benachrichtigung für Freundschaftsanfragen & Messenger-Nachrichten
@@ -155,11 +161,13 @@ export function ServerIncidentNotifier() {
       const detail = ce.detail
       if (detail?.type === 'friend_request_received') {
         const senderName = detail.from_username || 'Ein Benutzer'
-        void sendeGeraeteBenachrichtigung({
-          titel: 'Neue Freundschaftsanfrage',
-          text: `${senderName} hat dir eine Freundschaftsanfrage gesendet.`,
-        })
-        toast.success(`👋 Freundschaftsanfrage von ${senderName} erhalten`)
+        if (user.device_notifications !== false) {
+          void sendeGeraeteBenachrichtigung({
+            titel: 'Neue Freundschaftsanfrage',
+            text: `${senderName} hat dir eine Freundschaftsanfrage gesendet.`,
+          })
+          toast.success(`👋 Freundschaftsanfrage von ${senderName} erhalten`)
+        }
       } else if (detail?.type === 'e2ee_blind_message') {
         const mid = detail.blind_mailbox_id
         if (!mid) return
@@ -191,6 +199,13 @@ export function ServerIncidentNotifier() {
           (detail.control_type && detail.control_type !== 'message' && detail.control_type !== 'normal')
         )
         if (isControl) {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(
+              new CustomEvent('msm:messages-updated', {
+                detail: { blind_mailbox_id: mid, is_control: true, control_type: detail.control_type },
+              })
+            )
+          }
           return
         }
 

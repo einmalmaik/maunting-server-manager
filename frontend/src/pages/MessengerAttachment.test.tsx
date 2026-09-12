@@ -55,6 +55,7 @@ vi.mock('@/services/e2eeCrypto', () => ({
   }),
   encryptGroupE2eeMessage: vi.fn().mockResolvedValue('group-ciphertext'),
   decryptGroupE2eeMessage: vi.fn().mockResolvedValue('Hallo Gruppe'),
+  getLocalKeyPair: vi.fn().mockResolvedValue(null),
   getOrGenerateLocalKeyPair: vi.fn().mockResolvedValue({
     publicKeyJwk: '{"kty":"oct"}',
     privateKeyJwk: '{"kty":"oct"}',
