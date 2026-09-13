@@ -315,7 +315,7 @@ export async function resolveIdentity(userId: number): Promise<E2eeIdentity> {
   if (!userId) return LOCKED_IDENTITY
 
   const local = await readStoredKeyring(userId)
-  if (local) return toIdentity(local)
+  if (local) return toIdentity(local.content)
 
   let remote: E2eeKeyringPayload
   try {
@@ -331,6 +331,28 @@ export async function resolveIdentity(userId: number): Promise<E2eeIdentity> {
     return { state: 'needs-setup', sendPair: null, decryptionKeys: [] }
   }
   return LOCKED_IDENTITY
+}
+
+/**
+ * Meldet, ob beim Server ein neuerer Schlüsselbund liegt als der hier geöffnete.
+ *
+ * Das ist der Rettungsfall über zwei Geräte: richtet der Browser ein und
+ * adoptiert dabei seinen alten Gerätesschlüssel, erfährt die Desktop-App davon
+ * erst, wenn sie den Bund neu öffnet — und umgekehrt. Der aktuelle Verlauf
+ * bleibt derweil lesbar; es fehlen nur die Altschlüssel des anderen Geräts.
+ *
+ * Bewusst nicht Teil von `resolveIdentity`: das läuft auch je Zustellquittung,
+ * und daraus würde ein Anfragensturm. Der Messenger fragt einmal beim Öffnen.
+ */
+export async function hasNewerRemoteKeyring(userId: number): Promise<boolean> {
+  const local = await readStoredKeyring(userId)
+  if (!local) return false
+  try {
+    const remote = await getE2eeKeyring()
+    return Boolean(remote?.wrapped_keyring) && (remote.version ?? 0) > local.version
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -368,7 +390,7 @@ export async function createIdentity(userId: number): Promise<{ recoveryKey: str
   // des Gerätesschlüssels aus der Zeit davor und die einzige Quelle für den
   // Verlauf, der damals entstanden ist. Der Kontoschlüssel lebt im Store
   // `keyring`, nicht dort.
-  await writeStoredKeyring(userId, content)
+  await writeStoredKeyring(userId, content, (remote?.version ?? 0) + 1)
   return { recoveryKey }
 }
 
@@ -391,8 +413,14 @@ export async function unlockWithRecoveryKey(userId: number, recoveryKey: string)
   // Er hält den Gerätesschlüssel von vor der Umstellung; würde der
   // Kontoschlüssel dort hineingeschrieben, wäre das einzige Material, das den
   // alten Verlauf noch öffnen kann, unwiederbringlich überschrieben.
-  const adopted = await adoptLocalDeviceKey(userId, content, recoveryKey, remote.version ?? 0)
-  await writeStoredKeyring(userId, adopted)
+  const serverStand = remote.version ?? 0
+  const { content: adopted, version } = await adoptLocalDeviceKey(
+    userId,
+    content,
+    recoveryKey,
+    serverStand
+  )
+  await writeStoredKeyring(userId, adopted, version)
   return toIdentity(adopted)
 }
 
@@ -406,20 +434,20 @@ async function adoptLocalDeviceKey(
   content: KeyringContent,
   recoveryKey: string,
   version: number
-): Promise<KeyringContent> {
+): Promise<{ content: KeyringContent; version: number }> {
   let deviceKey: LocalE2eeKeyPair | null = null
   try {
     deviceKey = await readLegacyDeviceKey(userId)
   } catch {
-    return content
+    return { content, version }
   }
-  if (!deviceKey?.privateKeyJwk || !deviceKey.publicKeyJwk) return content
+  if (!deviceKey?.privateKeyJwk || !deviceKey.publicKeyJwk) return { content, version }
 
   const known = new Set([
     content.account.publicKeyJwk,
     ...content.legacy.map((e) => e.publicKeyJwk),
   ])
-  if (known.has(deviceKey.publicKeyJwk)) return content
+  if (known.has(deviceKey.publicKeyJwk)) return { content, version }
 
   const next: KeyringContent = {
     ...content,
@@ -435,14 +463,13 @@ async function adoptLocalDeviceKey(
     })
   } catch {
     // 409: ein anderes Gerät war schneller. Lokal gilt trotzdem der erweiterte
-    // Bund, damit dieses Gerät seinen eigenen Altbestand lesen kann; beim
-    // nächsten Entsperren wird erneut versucht, ihn abzulegen.
-    await writeStoredKeyring(userId, next)
-    return next
+    // Bund, damit dieses Gerät seinen eigenen Altbestand lesen kann. Die
+    // Version bleibt die alte, damit `hasNewerRemoteKeyring` den Nachholbedarf
+    // erkennt und erneut zum Entsperren auffordert.
+    return { content: next, version }
   }
 
-  await writeStoredKeyring(userId, next)
-  return next
+  return { content: next, version: version + 1 }
 }
 
 /**
@@ -473,17 +500,21 @@ async function readLegacyDeviceKey(userId: number): Promise<LocalE2eeKeyPair | n
  * Passwort davor wechselt.
  */
 export async function rotateRecoveryKey(userId: number): Promise<{ recoveryKey: string }> {
-  const content = await readStoredKeyring(userId)
-  if (!content) throw new E2eeLockedError()
+  const local = await readStoredKeyring(userId)
+  if (!local) throw new E2eeLockedError()
 
   const remote = await getE2eeKeyring()
+  const serverStand = remote?.version ?? 0
   const recoveryKey = generateRecoveryKey()
-  const wrapped = await wrapKeyring(content, recoveryKey)
+  const wrapped = await wrapKeyring(local.content, recoveryKey)
   await putE2eeKeyring({
     wrappedKeyring: wrapped,
-    publicKey: content.account.publicKeyJwk,
-    expectedVersion: remote?.version ?? 0,
+    publicKey: local.content.account.publicKeyJwk,
+    expectedVersion: serverStand,
   })
+  // Der Inhalt ist unverändert, nur der Stand wächst. Ohne dieses Nachziehen
+  // hielte `hasNewerRemoteKeyring` den eigenen Schreibvorgang für fremd.
+  await writeStoredKeyring(userId, local.content, serverStand + 1)
   return { recoveryKey }
 }
 

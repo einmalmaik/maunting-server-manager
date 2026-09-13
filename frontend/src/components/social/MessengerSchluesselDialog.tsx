@@ -33,6 +33,12 @@ interface MessengerSchluesselDialogProps {
   onOpenChange: (open: boolean) => void
   currentUserId: number
   state: IdentityState
+  /**
+   * Erzwingt die Eingabemaske, obwohl das Gerät entsperrt ist. Gebraucht, wenn
+   * ein anderes Gerät Altschlüssel nachgereicht hat: die liegen nur im neuen
+   * Bund, und der öffnet sich ausschließlich mit dem Wiederherstellungsschlüssel.
+   */
+  forceUnlock?: boolean
   /** Läuft, sobald sich der Zustand geändert hat, damit der Messenger neu lädt. */
   onIdentityChanged: () => void
 }
@@ -44,6 +50,7 @@ export function MessengerSchluesselDialog({
   onOpenChange,
   currentUserId,
   state,
+  forceUnlock = false,
   onIdentityChanged,
 }: MessengerSchluesselDialogProps) {
   const [phase, setPhase] = useState<Phase>('intro')
@@ -128,7 +135,8 @@ export function MessengerSchluesselDialog({
     schliessen(false)
   }
 
-  const zeigeEntsperren = phase === 'entsperren' || (phase === 'intro' && state === 'locked')
+  const zeigeEntsperren =
+    phase === 'entsperren' || (phase === 'intro' && (state === 'locked' || forceUnlock))
 
   return (
     <Dialog open={open} onOpenChange={schliessen}>
@@ -199,8 +207,9 @@ export function MessengerSchluesselDialog({
             <div className="flex items-start gap-2 p-3 rounded-xl bg-surface-container-high border border-outline-variant">
               <LockKeyhole className="w-4 h-4 text-primary shrink-0 mt-0.5" />
               <p className="text-xs text-on-surface-variant">
-                Dieses Gerät kennt deinen Schlüssel noch nicht. Gib ihn einmal ein, danach bleibt er
-                hier gespeichert.
+                {forceUnlock && state === 'ready'
+                  ? 'Gib deinen Wiederherstellungsschlüssel ein, um die auf einem anderen Gerät ergänzten älteren Schlüssel hier zu übernehmen.'
+                  : 'Dieses Gerät kennt deinen Schlüssel noch nicht. Gib ihn einmal ein, danach bleibt er hier gespeichert.'}
               </p>
             </div>
 

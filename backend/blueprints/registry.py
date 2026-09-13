@@ -220,13 +220,14 @@ def community_blueprint_path(blueprint_id: str) -> Path:
 
 
 def ensure_community_dir() -> Path:
-    """Legt das Community-Verzeichnis an, falls noetig (mode 750)."""
+    """Legt das Community-Verzeichnis an, falls noetig (mode 775)."""
     target = _community_dir()
     target.mkdir(parents=True, exist_ok=True)
-    try:
-        os.chmod(target, 0o750)
-    except OSError as exc:
-        logger.warning("chmod 0750 fuer %s fehlgeschlagen: %s", target, exc)
+    for p in (target.parent, target):
+        try:
+            os.chmod(p, 0o775)
+        except OSError as exc:
+            logger.debug("chmod 0775 fuer %s fehlgeschlagen: %s", p, exc)
     return target
 
 

@@ -44,6 +44,7 @@ set -euo pipefail
 
 PANEL_USER="${PANEL_USER:-msm}"
 SERVERS_DIR="${SERVERS_DIR:-/opt/msm/servers}"
+BLUEPRINTS_DIR="${BLUEPRINTS_DIR:-/opt/msm/blueprints}"
 TROCKEN=0
 ZIELE=()
 
@@ -151,5 +152,14 @@ if [[ ${#NEUE_GRUPPEN[@]} -gt 0 && $TROCKEN -eq 0 ]]; then
     echo "neuen Gruppen nicht (Zusatzgruppen werden beim Start geerbt):"
     echo
     echo "    systemctl restart msm-panel"
+fi
+if [[ ! -d "$BLUEPRINTS_DIR/community" ]]; then
+    mkdir -p "$BLUEPRINTS_DIR/community" 2>/dev/null || true
+fi
+if [[ -d "$BLUEPRINTS_DIR" ]]; then
+    echo "Pruefe Blueprint-Verzeichnis: $BLUEPRINTS_DIR"
+    lauf chown -R "$PANEL_USER:$PANEL_USER" "$BLUEPRINTS_DIR"
+    lauf find "$BLUEPRINTS_DIR" -type d -exec chmod u+rwx,g+rwx,o-rwx {} +
+    lauf find "$BLUEPRINTS_DIR" -type f -exec chmod u+rw,g+rw,o-rwx {} +
 fi
 echo "Fertig."

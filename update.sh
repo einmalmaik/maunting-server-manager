@@ -63,12 +63,16 @@ restore_panel_ownership() {
     # git clean loescht untracked Dirs. Die .gitignore schuetzt jetzt die Daten-Pfade,
     # aber manuelle "Sauberkeit" Befehle sind riskant. Immer --dry-run zuerst.
     # Es gibt helper-scripts/recover-docker-storage.sh als Recovery (für den Docker-Store-Corruption-Fall).
-    for sub in backend frontend docs dis-sidecar searxng-sidecar msm-agent scripts helper-scripts; do
+    mkdir -p "$MSM_DIR/blueprints/community" 2>/dev/null || true
+    for sub in backend frontend docs dis-sidecar searxng-sidecar msm-agent scripts helper-scripts blueprints; do
         if [[ -d "$MSM_DIR/$sub" ]]; then
             # Hard fail for code trees used by venv setup — silent || true left
             # root-owned msm-agent after git pull and caused PEP 668 cascades.
             chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/$sub" \
                 || err "chown $MSM_USER:$MSM_USER auf $MSM_DIR/$sub fehlgeschlagen"
+            if [[ "$sub" == "blueprints" ]]; then
+                chmod -R u+rwX,g+rwX "$MSM_DIR/$sub" 2>/dev/null || true
+            fi
         fi
     done
     # npm-Cache des msm-Users (HOME=/opt/msm). Falls ein frueherer fehlge-

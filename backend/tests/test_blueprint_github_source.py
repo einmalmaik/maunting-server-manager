@@ -549,3 +549,146 @@ def test_pull_tolerates_local_branch_already_exists_race(tmp_path, monkeypatch):
     assert head == upstream_head, (
         f"Lokaler HEAD ({head[:12]}) != upstream HEAD ({upstream_head[:12]})"
     )
+
+
+def test_remote_branch_sha_with_explicit_token(monkeypatch):
+    """Prüft, dass remote_branch_sha einen übergebenen Token in der Clone-URL nutzt."""
+    from blueprints.github_source import remote_branch_sha
+    import subprocess
+
+    captured_url = []
+
+    def mock_run(cmd, *args, **kwargs):
+        captured_url.append(cmd[2])
+        return _FakeProc(0, stdout="abcdef1234567890\trefs/heads/main\n")
+
+    monkeypatch.setattr(subprocess, "run", mock_run)
+    sha = remote_branch_sha("test/repo", "main", token="my_secret_token_123")
+    assert sha == "abcdef1234567890"
+    assert len(captured_url) == 1
+    assert "https://x-access-token:my_secret_token_123@github.com/test/repo.git" in captured_url[0]
+
+
+def test_pull_switches_branch_and_updates_working_tree(tmp_path, monkeypatch):
+    """Testet, dass install_github_source den Branch wechselt (z. B. main -> dev),
+    origin/<branch> sauber aktualisiert und den Working Tree auf den Stand des neuen Branch bringt."""
+    import subprocess
+    from blueprints.github_source import install_github_source
+    from blueprints.schema import load_blueprint_dict
+
+    upstream, clone = _build_minimal_repo(tmp_path)
+    src = tmp_path / "src"
+
+    # Branch dev in upstream anlegen und commit pushen
+    subprocess.run(["git", "-C", str(src), "checkout", "-b", "dev"], check=True)
+    (src / "dev_file.txt").write_text("dev content\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(src), "add", "dev_file.txt"], check=True)
+    subprocess.run(["git", "-C", str(src), "commit", "-m", "dev commit"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(src), "push", "origin", "dev"], check=True, capture_output=True)
+
+    monkeypatch.setattr(
+        "blueprints.github_source._clone_url",
+        lambda repo, token=None: str(upstream),
+    )
+
+    bp = load_blueprint_dict({
+        "version": 1,
+        "meta": {"id": "t", "name": "T", "category": "bot"},
+        "runtime": {"image": "node:22", "startup": "node index.js"},
+        "ports": [],
+        "source": {
+            "type": "github",
+            "github": {"repo": "fake/repo", "branch": "dev"},
+        },
+    })
+
+    result = install_github_source(bp, str(clone))
+    assert result["ok"] is True
+    assert (clone / "dev_file.txt").exists()
+    assert (clone / "dev_file.txt").read_text(encoding="utf-8") == "dev content\n"
+    current_branch = subprocess.run(
+        ["git", "-C", str(clone), "branch", "--show-current"],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    assert current_branch == "dev"
+
+
+def test_check_server_file_update_uses_server_token(monkeypatch, tmp_path):
+    """Testet, dass check_server_file_update bei GitHub-Quellen den serverbezogenen Token an remote_branch_sha übergibt."""
+    from blueprints.schema import load_blueprint_dict
+    from games.updater import check_server_file_update
+    from unittest.mock import MagicMock
+
+    (tmp_path / "dummy.txt").write_text("ok")
+    server = MagicMock()
+    server.id = 42
+    server.node = None
+    server.install_dir = str(tmp_path)
+
+    bp = load_blueprint_dict({
+        "version": 1,
+        "meta": {"id": "t", "name": "T", "category": "bot"},
+        "runtime": {"image": "node:22", "startup": "node index.js"},
+        "ports": [],
+        "source": {
+            "type": "github",
+            "github": {"repo": "private/bot", "branch": "main"},
+        },
+    })
+
+    captured_token = []
+
+    def mock_remote_branch_sha(repo, branch, token=None):
+        captured_token.append(token)
+        return "remote_commit_sha_123"
+
+    monkeypatch.setattr("blueprints.github_source.remote_branch_sha", mock_remote_branch_sha)
+    monkeypatch.setattr("blueprints.github_source.local_repo_sha", lambda path: "local_commit_sha_000")
+    monkeypatch.setattr("games.blueprint_plugin._resolve_github_token_for_server", lambda sid: "server_specific_token")
+
+    res = check_server_file_update(server, bp)
+    assert res["action"] == "update"
+    assert res["reason"] == "new_version_available"
+    assert captured_token == ["server_specific_token"]
+
+
+def test_clone_url_and_remote_branch_sha_token_stripping(monkeypatch):
+    from blueprints.github_source import _clone_url, remote_branch_sha
+
+    # Whitespace token gets stripped
+    assert _clone_url("owner/repo", "  ghp_token123  ") == "https://x-access-token:ghp_token123@github.com/owner/repo.git"
+    # Empty token falls back to public url
+    assert _clone_url("owner/repo", "") == "https://github.com/owner/repo.git"
+    assert _clone_url("owner/repo", "   ") == "https://github.com/owner/repo.git"
+
+    captured_urls = []
+    def mock_run(cmd, **kwargs):
+        captured_urls.append(cmd[2])
+        m = MagicMock()
+        m.returncode = 0
+        m.stdout = "sha123 refs/heads/main\n"
+        return m
+
+    from unittest.mock import MagicMock
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", mock_run)
+
+    remote_branch_sha("owner/repo", "main", token="  ghp_token123  ")
+    assert "ghp_token123" in captured_urls[0]
+    assert " " not in captured_urls[0]
+
+
+def test_run_git_timeout_sanitizes_token(monkeypatch):
+    import subprocess
+    from blueprints.github_source import _run_git, GithubSourceError
+
+    def mock_run_timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=["git"], timeout=10)
+
+    monkeypatch.setattr(subprocess, "run", mock_run_timeout)
+
+    with pytest.raises(GithubSourceError) as exc_info:
+        _run_git(["remote", "set-url", "origin", "https://x-access-token:secret123@github.com/owner/repo.git"])
+
+    assert "secret123" not in str(exc_info.value)
+    assert "***" in str(exc_info.value)

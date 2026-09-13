@@ -821,11 +821,13 @@ def check_server_file_update(server: Any, blueprint: Blueprint) -> dict[str, Any
     # ── GitHub Source: ls-remote vs. lokaler HEAD ─────────────────────────────
     if src_type == "github" and bp_source.github:
         from blueprints.github_source import local_repo_sha, remote_branch_sha
+        from games.blueprint_plugin import _resolve_github_token_for_server
 
         gh = bp_source.github
         repo = gh.repo.strip()
         branch = (gh.branch or "main").strip() or "main"
-        remote_sha = remote_branch_sha(repo, branch)
+        token = _resolve_github_token_for_server(server_id) if server_id else None
+        remote_sha = remote_branch_sha(repo, branch, token=token)
         local_sha = local_repo_sha(install_dir)
 
         result["remote_commit"] = remote_sha

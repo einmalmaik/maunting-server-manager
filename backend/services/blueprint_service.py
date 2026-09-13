@@ -33,6 +33,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import os
 import re
 from typing import Any
 
@@ -80,6 +81,11 @@ AENDERBARE_PFADE = (
     "runtime.image",
     "runtime.env",
     "runtime.startup",
+    "source.github.branch",
+    "source.github.repo",
+    "source.github.subPath",
+    "source.steam.branch",
+    "source.http.url",
 )
 
 
@@ -140,16 +146,72 @@ def save_community_blueprint(raw: dict[str, Any]) -> str:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     nutzlast = blueprint.model_dump(mode="json", by_alias=True)
+    content = json.dumps(nutzlast, indent=2, ensure_ascii=False) + "\n"
+    if ziel.exists():
+        try:
+            ziel.chmod(0o666)
+        except OSError:
+            pass
+
+    temp_ziel = ziel.parent / f".{ziel.name}.{os.getpid()}.tmp"
     try:
-        ziel.write_text(
-            json.dumps(nutzlast, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
+        try:
+            temp_ziel.write_text(content, encoding="utf-8")
+        except PermissionError:
+            try:
+                ziel.parent.chmod(0o775)
+            except OSError:
+                pass
+            try:
+                ziel.parent.parent.chmod(0o775)
+            except OSError:
+                pass
+            temp_ziel.write_text(content, encoding="utf-8")
+
+        try:
+            temp_ziel.chmod(0o664)
+        except OSError:
+            pass
+
+        try:
+            temp_ziel.replace(ziel)
+        except PermissionError:
+            try:
+                if ziel.exists():
+                    try:
+                        ziel.chmod(0o666)
+                    except OSError:
+                        pass
+                    ziel.unlink(missing_ok=True)
+                temp_ziel.replace(ziel)
+            except Exception:
+                ziel.write_text(content, encoding="utf-8")
+    except PermissionError as exc:
+        logger.error(
+            "Konnte Blueprint %s nicht schreiben (Permission denied): %s. "
+            "Besitz oder Schreibrechte des Verzeichnisses '%s' fehlerhaft.",
+            ziel.name,
+            exc,
+            ziel.parent,
         )
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Blueprint-Datei '{ziel.name}' konnte wegen fehlender Dateirechte nicht gespeichert werden (Permission denied). "
+                f"Bitte Dateibesitz von '{ziel.parent}' für den Panel-Benutzer prüfen oder 'scripts/fix-server-permissions.sh' ausführen."
+            ),
+        ) from exc
     except OSError as exc:
         logger.error("Konnte Blueprint %s nicht schreiben: %s", ziel.name, exc)
         raise HTTPException(
             status_code=500, detail="Blueprint konnte nicht gespeichert werden."
         ) from exc
+    finally:
+        if temp_ziel.exists():
+            try:
+                temp_ziel.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     reload_registry()
     return blueprint.meta.id
@@ -224,7 +286,25 @@ def delete_community_blueprint(blueprint_id: str, db: Session) -> None:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
+        if ziel.exists():
+            try:
+                ziel.chmod(0o666)
+            except OSError:
+                pass
         ziel.unlink(missing_ok=True)
+    except PermissionError as exc:
+        try:
+            ziel.parent.chmod(0o775)
+            ziel.unlink(missing_ok=True)
+        except Exception:
+            logger.error("Konnte Blueprint %s nicht loeschen (Permission denied): %s", ziel.name, exc)
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Blueprint-Datei '{ziel.name}' konnte wegen fehlender Dateirechte nicht gelöscht werden (Permission denied). "
+                    f"Bitte Dateibesitz von '{ziel.parent}' für den Panel-Benutzer prüfen oder 'scripts/fix-server-permissions.sh' ausführen."
+                ),
+            ) from exc
     except OSError as exc:
         logger.error("Konnte Blueprint %s nicht loeschen: %s", ziel.name, exc)
         raise HTTPException(

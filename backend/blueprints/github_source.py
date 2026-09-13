@@ -64,7 +64,7 @@ def _clone_url(repo: str, token: str | None = None) -> str:
     Ohne `token` gilt weiterhin der panelweite Zugang — bestehende Aufrufer
     verhalten sich unveraendert.
     """
-    effective = token if token is not None else _resolve_github_token()
+    effective = (token.strip() if token is not None else _resolve_github_token()) or None
     if effective:
         return f"https://x-access-token:{effective}@github.com/{repo}.git"
     return f"https://github.com/{repo}.git"
@@ -200,7 +200,8 @@ def _run_git(args: list[str], *, cwd: Path | None = None, timeout: int = 600) ->
             env=env,
         )
     except subprocess.TimeoutExpired as exc:
-        raise GithubSourceError(f"git timeout: {' '.join(args[:4])}…") from exc
+        args_sanitized = [re.sub(r"x-access-token:[^@\s]+@", "x-access-token:***@", a) for a in args]
+        raise GithubSourceError(f"git timeout: {' '.join(args_sanitized[:4])}…") from exc
     if proc.returncode != 0:
         err = (proc.stderr or proc.stdout or "").strip()
         # Token niemals leaken
@@ -208,11 +209,11 @@ def _run_git(args: list[str], *, cwd: Path | None = None, timeout: int = 600) ->
         raise GithubSourceError(f"git fehlgeschlagen ({proc.returncode}): {err[:500]}")
 
 
-def remote_branch_sha(repo: str, branch: str) -> str | None:
+def remote_branch_sha(repo: str, branch: str, token: str | None = None) -> str | None:
     """Liefert Commit-SHA von ``refs/heads/<branch>`` via ls-remote."""
-    token = _resolve_github_token()
-    if token:
-        url = f"https://x-access-token:{token}@github.com/{repo}.git"
+    effective_token = (token.strip() if token is not None else _resolve_github_token()) or None
+    if effective_token:
+        url = f"https://x-access-token:{effective_token}@github.com/{repo}.git"
     else:
         url = f"https://github.com/{repo}.git"
     ref = f"refs/heads/{branch}"
@@ -541,51 +542,27 @@ def install_github_source(
     has_git = (target / ".git").is_dir()
     try:
         if has_git:
-            # Frischer HEAD -- erst fetch (origin/<branch> aktualisieren),
-            # dann Working Tree exakt auf das entfernte HEAD zwingen.
-            #
-            # Frueher stand hier ``git checkout -B <branch> origin/<branch>``
-            # VOR dem ``git reset --hard``. Das war ein Bug: ``git checkout``
-            # bricht ab, sobald der Working Tree lokale Mutationen hat
-            # (typisch nach SetupCommands wie ``npm ci``, die Files anlegen
-            # oder wenn ein Admin-User per Panel-Console manuell editiert
-            # hat). Der Checkout-Fehler eskalierte als ``GithubSourceError``,
-            # BEVOR das nachfolgende ``git reset --hard`` lief -- mit dem
-            # Effekt, dass ``origin/<branch>`` zwar auf den neuen SHA
-            # upgedated wurde, der Working-Tree aber auf dem alten Commit
-            # stehen blieb. Genau das war der "pullt die neuste Version
-            # nicht"-Bug (z. B. auf Singra-Discord-bot: HEAD blieb auf
-            # PR #15 statt auf den frischen PR #17 zu springen).
-            #
-            # Loesung: ``checkout -B`` weg, da redundant. ``reset --hard``
-            # setzt HEAD und Working Tree atomar auf ``origin/<branch>`` und
-            # ueberschreibt dabei Working-Tree-Mutationen ohne Schutz --
-            # exakt was wir wollen.
-            #
-            # Frueher gab es hier zusaetzlich ein ``show-ref --verify`` +
-            # konditional ``git branch <name> origin/<name>``. Das wurde
-            # mittlerweile entfernt, weil der Branch-Befehl ohnehin idempotent
-            # den Exit-Code 128 mit "fatal: a branch named '<branch>' already
-            # exists" liefern kann, sobald zwischen der Existenz-Pruefung
-            # und dem Branch-Befehl ein externer Prozess (Cron, paralleler
-            # Restart, manueller Pull-Request) denselben Branch angelegt
-            # hat. Das Race-Window ist klein, aber auf Servern mit
-            # mehreren kurz aufeinanderfolgenden Restart-Versuchen (z. B.
-            # nach Blueprint-Aenderungen) reproduzierbar beobachtbar.
-            #
-            # Stattdessen: Branch IMMER anlegen und den "already exists"-
-            # Fehler schlucken -- alles andere macht der nachfolgende
-            # ``reset --hard``. ``git branch -f`` waere keine Alternative
-            # (scheitert auf Git >=2.40 mit "cannot force update the
-            # branch ... used by worktree", sobald der Branch bereits
-            # der currently-checked-out-Branch irgendeiner Worktree ist).
-            _run_git(["fetch", "origin", branch, "--depth", "1", "--prune"], cwd=target)
-            _create_local_branch_if_missing(target, branch)
-            _run_git(["reset", "--hard", f"origin/{branch}"], cwd=target)
-            # Belt-and-suspenders: nochmaliger reset --hard. Falls zwischen den
-            # Befehlen ein externer Prozess (cron, anderes Skript) Commits macht
-            # oder Working-Tree-Files anlegt, wird der zweite reset das wieder
-            # einfangen. Idempotent und billig (ein no-op, wenn nichts passiert ist).
+            # 1. Remote-URL immer mit aktueller clone_url abgleichen (Token-Rotation / Wechsel privat-oeffentlich)
+            _run_git(["remote", "set-url", "origin", clone_url], cwd=target)
+
+            # 2. Fetch mit explizitem Refspec: Zwingt Git, origin/<branch> atomar zu aktualisieren.
+            # Ohne expliziten Refspec schreibt `git fetch origin <branch>` nur nach FETCH_HEAD
+            # und laesst origin/<branch> unveraendert auf dem alten Commit stehen.
+            refspec = f"+refs/heads/{branch}:refs/remotes/origin/{branch}"
+            _run_git(["fetch", "origin", refspec, "--depth", "1", "--prune"], cwd=target)
+
+            # 3. Lokale Modifikationen getrackter Dateien verwerfen, bevor der Branch gewechselt/aktualisiert wird
+            try:
+                _run_git(["reset", "--hard", "HEAD"], cwd=target)
+            except GithubSourceError:
+                pass
+
+            # 4. Branch anlegen oder forciert auf origin/<branch> binden und auschecken.
+            # `-B` mit `--force` switcht auch bei Branch-Wechseln sauber und verhindert
+            # Konflikte mit ungetrackten Dateien im Arbeitsverzeichnis.
+            _run_git(["checkout", "-B", branch, f"origin/{branch}", "--force"], cwd=target)
+
+            # 5. Working Tree atomar auf origin/<branch> zwingen
             _run_git(["reset", "--hard", f"origin/{branch}"], cwd=target)
             # Falls das Repo Submodule hat: ebenfalls auf Origin-SHA syncen.
             # Wir nutzen ``--init --recursive --force``, damit sowohl fehlende

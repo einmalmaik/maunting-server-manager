@@ -53,6 +53,7 @@ import {
   wrapKeyring,
   unwrapKeyring,
   requireRecipientPublicKey,
+  hasNewerRemoteKeyring,
   E2eeRecipientKeyMissingError,
   E2EE_KEYRING_PREFIX,
 } from './e2eeIdentity'
@@ -239,8 +240,10 @@ describe('Sendepfad', () => {
  * öffnen, Stores anlegen, lesen, schreiben. Bewusst im Test statt als neue
  * Abhängigkeit — der Umfang rechtfertigt kein zusätzliches Paket.
  */
-function installiereIndexedDbErsatz(): { stores: Map<string, Map<number, any>> } {
-  const stores = new Map<string, Map<number, any>>()
+function installiereIndexedDbErsatz(
+  vorbelegt?: Map<string, Map<number, any>>
+): { stores: Map<string, Map<number, any>> } {
+  const stores = vorbelegt ?? new Map<string, Map<number, any>>()
 
   const machObjectStore = (name: string) => ({
     get(key: number) {
@@ -322,4 +325,66 @@ describe('Rettung des Altbestands über den Gerätespeicher', () => {
     expect(server.wrapped_keyring).not.toBeNull()
     expect(server.version).toBe(2)
   }, 120000)
+})
+
+/** Kopiert den Gerätespeicher, damit sich ein Gerät später wiederherstellen lässt. */
+function speicherKopie(stores: Map<string, Map<number, any>>): Map<string, Map<number, any>> {
+  const kopie = new Map<string, Map<number, any>>()
+  for (const [name, inhalt] of stores) {
+    kopie.set(name, new Map(JSON.parse(JSON.stringify([...inhalt]))))
+  }
+  return kopie
+}
+
+describe('Rettung über zwei Geräte', () => {
+  it('meldet dem ersten Gerät, dass das zweite ältere Schlüssel nachgereicht hat', async () => {
+    // Gerät A: richtet ein, hat selbst keinen Altschlüssel.
+    const a = installiereIndexedDbErsatz()
+    a.stores.set('keys', new Map())
+    const { recoveryKey } = await createIdentity(USER_ID)
+    expect(await hasNewerRemoteKeyring(USER_ID)).toBe(false)
+    const standVonA = speicherKopie(a.stores)
+
+    // Gerät B: eigener Speicher, darin ein Altschlüssel und eine nur damit
+    // lesbare Nachricht aus der Zeit vor der Umstellung.
+    const altesGeraetepaar = await generateLocalE2eeKeyPair()
+    const alteNachricht = 'Nur mit dem Altschlüssel von Gerät B zu öffnen'
+    const alterUmschlag = await encryptE2eeHybrid(
+      alteNachricht,
+      altesGeraetepaar.publicKeyJwk,
+      altesGeraetepaar.publicKeyJwk
+    )
+
+    neuesGeraet()
+    installiereIndexedDbErsatz(
+      new Map([['keys', new Map([[USER_ID, { userId: USER_ID, ...altesGeraetepaar }]])]])
+    )
+    const geraetB = await unlockWithRecoveryKey(USER_ID, recoveryKey)
+    await expect(decryptE2eeHybridWithKeyring(alterUmschlag, geraetB.decryptionKeys)).resolves.toBe(
+      alteNachricht
+    )
+    expect(server.version).toBe(2)
+
+    // Zurück auf Gerät A mit dessen altem Stand: entsperrt, aber die Nachricht
+    // von B bleibt stumm — ihm fehlt der dort adoptierte Altschlüssel.
+    neuesGeraet()
+    installiereIndexedDbErsatz(standVonA)
+    const geraetA = await resolveIdentity(USER_ID)
+    expect(geraetA.state).toBe('ready')
+    await expect(
+      decryptE2eeHybridWithKeyring(alterUmschlag, geraetA.decryptionKeys)
+    ).rejects.toThrow()
+
+    // Genau dafür der Hinweis. Ohne ihn bliebe die Rettung auf Gerät B liegen
+    // und der Betreiber sähe dort weiter „Verschlüsselte Nachricht".
+    expect(await hasNewerRemoteKeyring(USER_ID)).toBe(true)
+
+    // Nach dem Übernehmen liest auch Gerät A den Verlauf von B.
+    neuesGeraet()
+    const geraetANachher = await unlockWithRecoveryKey(USER_ID, recoveryKey)
+    await expect(
+      decryptE2eeHybridWithKeyring(alterUmschlag, geraetANachher.decryptionKeys)
+    ).resolves.toBe(alteNachricht)
+    expect(await hasNewerRemoteKeyring(USER_ID)).toBe(false)
+  }, 180000)
 })

@@ -248,3 +248,128 @@ def test_delete_requires_owner_perm(
         headers={"X-CSRF-Token": user_csrf_token},
     )
     assert response.status_code == 403
+
+
+def test_import_handles_permission_denied_cleanly(
+    client: TestClient,
+    owner_cookies: dict,
+    csrf_token: str,
+    patched_blueprints_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pathlib import Path
+    orig_write = Path.write_text
+
+    def mock_write(self, *args, **kwargs):
+        if "perm_fail" in str(self):
+            raise PermissionError(13, "Permission denied")
+        return orig_write(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", mock_write)
+    payload = {
+        "version": 1,
+        "meta": {"id": "perm_fail", "name": "Perm Fail", "category": "bot"},
+        "runtime": {"image": "alpine:latest", "startup": "echo 1"},
+        "ports": [],
+        "source": {"type": "dockerOnly"},
+    }
+    resp = client.post(
+        "/api/blueprints/import",
+        json=payload,
+        cookies=owner_cookies,
+        headers={"X-CSRF-Token": csrf_token},
+    )
+    assert resp.status_code == 500
+    assert "Permission denied" in resp.json()["detail"]
+
+
+def test_delete_handles_permission_denied_cleanly(
+    client: TestClient,
+    owner_cookies: dict,
+    csrf_token: str,
+    patched_blueprints_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # First write a normal blueprint
+    ziel = patched_blueprints_dir / "perm_del.blueprint.json"
+    ziel.write_text('{"version": 1, "meta": {"id": "perm_del", "name": "Perm Del", "category": "bot"}, "runtime": {"image": "alpine", "startup": "echo 1"}, "ports": [], "source": {"type": "dockerOnly"}}', encoding="utf-8")
+    from blueprints.registry import reload_registry
+    reload_registry()
+
+    from pathlib import Path
+    def mock_unlink(self, *args, **kwargs):
+        if "perm_del" in str(self):
+            raise PermissionError(13, "Permission denied")
+        return None
+
+    monkeypatch.setattr(Path, "unlink", mock_unlink)
+    resp = client.delete(
+        "/api/blueprints/perm_del",
+        cookies=owner_cookies,
+        headers={"X-CSRF-Token": csrf_token},
+    )
+    assert resp.status_code == 500
+    assert "Permission denied" in resp.json()["detail"]
+
+
+def test_derive_payload_allows_github_and_steam_branch(
+    client: TestClient,
+    patched_blueprints_dir: Path,
+    db: Session,
+) -> None:
+    from blueprints.registry import reload_registry
+    from services.blueprint_service import derived_payload
+
+    # Create base GitHub blueprint
+    ziel = patched_blueprints_dir / "base_gh.blueprint.json"
+    ziel.write_text(
+        '{"version": 1, "meta": {"id": "base_gh", "name": "Base GH", "category": "bot"}, "runtime": {"image": "node:22", "startup": "node index.js"}, "ports": [], "source": {"type": "github", "github": {"repo": "owner/repo", "branch": "main", "setupCommands": []}}}',
+        encoding="utf-8",
+    )
+    reload_registry()
+
+    derived = derived_payload(
+        "base_gh",
+        new_id="derived_gh",
+        changes={
+            "source.github.branch": "dev",
+            "source.github.repo": "owner/repo2",
+            "source.github.subPath": "src",
+        },
+        db=db,
+    )
+    assert derived["meta"]["id"] == "derived_gh"
+    assert derived["source"]["github"]["branch"] == "dev"
+    assert derived["source"]["github"]["repo"] == "owner/repo2"
+    assert derived["source"]["github"]["subPath"] == "src"
+
+
+def test_import_overwrites_readonly_existing_blueprint(
+    client: TestClient,
+    owner_cookies: dict,
+    csrf_token: str,
+    patched_blueprints_dir: Path,
+) -> None:
+    ziel = patched_blueprints_dir / "readonly_bp.blueprint.json"
+    ziel.write_text(
+        '{"version": 1, "meta": {"id": "readonly_bp", "name": "Readonly Old", "category": "bot"}, "runtime": {"image": "alpine:latest", "startup": "echo 1"}, "ports": [], "source": {"type": "dockerOnly"}}',
+        encoding="utf-8",
+    )
+    ziel.chmod(0o444)
+
+    payload = {
+        "version": 1,
+        "meta": {"id": "readonly_bp", "name": "Readonly Updated", "category": "bot"},
+        "runtime": {"image": "alpine:latest", "startup": "echo 2"},
+        "ports": [],
+        "source": {"type": "dockerOnly"},
+    }
+    resp = client.post(
+        "/api/blueprints/import",
+        json=payload,
+        cookies=owner_cookies,
+        headers={"X-CSRF-Token": csrf_token},
+    )
+    assert resp.status_code == 201
+    assert "Readonly Updated" in ziel.read_text(encoding="utf-8")
+

@@ -113,6 +113,7 @@ import {
 } from '@/services/e2eeCrypto'
 import {
   resolveIdentity,
+  hasNewerRemoteKeyring,
   requireRecipientPublicKey,
   forgetRecipientPublicKey,
   E2eeRecipientKeyMissingError,
@@ -479,6 +480,8 @@ export function Messenger() {
   identityRef.current = identity
   const [isSchluesselDialogOpen, setIsSchluesselDialogOpen] = useState(false)
   const [identityReloadToken, setIdentityReloadToken] = useState(0)
+  // Ein anderes Gerät hat Altschlüssel nachgereicht, die hier noch fehlen.
+  const [hatNeuereSchluessel, setHatNeuereSchluessel] = useState(false)
   // Nur Direktchats hängen am Kontoschlüssel; Gruppen laufen über den
   // Gruppenschlüssel und bleiben auch auf einem gesperrten Gerät schreibbar.
   const istSchreibenGesperrt =
@@ -588,8 +591,18 @@ export function Messenger() {
     let active = true
 
     resolveIdentity(currentUserId)
-      .then((next) => {
-        if (active) setIdentity(next)
+      .then(async (next) => {
+        if (!active) return
+        setIdentity(next)
+        // Hat ein anderes Gerät seinen alten Gerätesschlüssel nachgereicht,
+        // fehlt er hier noch. Der Verlauf bleibt lesbar, nur der Teil von dort
+        // nicht — deshalb ein Hinweis und keine Sperre.
+        if (next.state === 'ready') {
+          const neuer = await hasNewerRemoteKeyring(currentUserId).catch(() => false)
+          if (active) setHatNeuereSchluessel(neuer)
+        } else if (active) {
+          setHatNeuereSchluessel(false)
+        }
       })
       .catch(() => {})
 
@@ -3466,6 +3479,27 @@ export function Messenger() {
                   </div>
                 </div>
 
+                {identity.state === 'ready' && hatNeuereSchluessel && (
+                  <div className="py-2 px-1">
+                    <div className="flex items-start gap-2.5 p-3 rounded-xl bg-surface-container-high border border-outline-variant">
+                      <KeyRound className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+                      <div className="flex-1 min-w-0 space-y-2">
+                        <p className="text-xs text-on-surface-variant">
+                          Auf einem anderen Gerät sind ältere Schlüssel dazugekommen. Übernimm sie
+                          hier, damit auch der Verlauf von dort lesbar wird.
+                        </p>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => setIsSchluesselDialogOpen(true)}
+                        >
+                          Schlüssel übernehmen
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {(identity.state === 'needs-setup' || identity.state === 'locked') && (
                   <div className="py-2 px-1">
                     <div className="flex items-start gap-2.5 p-3 rounded-xl bg-status-warning/10 border border-status-warning/30">
@@ -4816,6 +4850,7 @@ export function Messenger() {
         onOpenChange={setIsSchluesselDialogOpen}
         currentUserId={currentUserId}
         state={identity.state}
+        forceUnlock={hatNeuereSchluessel}
         onIdentityChanged={() => {
           // Zwischenergebnisse verwerfen: was vorher nicht zu entschlüsseln war,
           // liegt als Fehlschlag im Cache und bliebe sonst „Verschlüsselte

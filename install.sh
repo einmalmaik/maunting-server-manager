@@ -727,6 +727,9 @@ mkdir -p /opt/msm/servers
 chown "$MSM_USER:$MSM_USER" /opt/msm/servers
 mkdir -p /opt/msm/backups
 chown "$MSM_USER:$MSM_USER" /opt/msm/backups
+mkdir -p /opt/msm/blueprints/community
+chown -R "$MSM_USER:$MSM_USER" /opt/msm/blueprints
+chmod -R u+rwX,g+rwX /opt/msm/blueprints
 
 MSM_DOCKER_HOST=""
 if $INSTALL_LOCAL_AGENT; then
@@ -801,7 +804,7 @@ if $SHOULD_COPY_FILES; then
         2>/dev/null || true
     # In-place Install (git checkout as root) leaves trees root-owned. Backend +
     # agent venvs are created as $MSM_USER and need write access to their dirs.
-    for _msm_tree in backend frontend dis-sidecar searxng-sidecar msm-agent docs scripts helper-scripts; do
+    for _msm_tree in backend frontend dis-sidecar searxng-sidecar msm-agent docs scripts helper-scripts blueprints; do
         if [[ -d "$MSM_DIR/$_msm_tree" ]]; then
             chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/$_msm_tree" 2>/dev/null || true
         fi
@@ -818,7 +821,7 @@ fi
 # Always re-own code trees before Python venv work — even when SHOULD_COPY_FILES
 # is false (e.g. git checkout as root left msm-agent root:root).
 if id "$MSM_USER" &>/dev/null; then
-    for _msm_tree in backend frontend dis-sidecar searxng-sidecar msm-agent docs scripts helper-scripts; do
+    for _msm_tree in backend frontend dis-sidecar searxng-sidecar msm-agent docs scripts helper-scripts blueprints; do
         if [[ -d "$MSM_DIR/$_msm_tree" ]]; then
             chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/$_msm_tree" \
                 || err "chown $MSM_USER:$MSM_USER auf $MSM_DIR/$_msm_tree fehlgeschlagen"
