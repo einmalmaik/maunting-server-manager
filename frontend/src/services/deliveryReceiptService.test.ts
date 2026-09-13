@@ -1,32 +1,37 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { sendE2eeDeliveryReceipt } from './deliveryReceiptService'
+import { sendE2eeDeliveryReceipt, deliveredEnvelopeIds } from './deliveryReceiptService'
 import * as socialApi from '@/api/social'
-import * as e2eeCrypto from '@/services/e2eeCrypto'
+import * as e2eeIdentity from '@/services/e2eeIdentity'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
 
 vi.mock('@/api/social', () => ({
   relayE2eeEnvelope: vi.fn().mockResolvedValue({ id: 999, blind_mailbox_id: 'box-1' }),
-  getE2eePublicKey: vi.fn().mockResolvedValue({ user_id: 2, username: 'bob', public_key: 'bob-pub-key' }),
+  fetchE2eeEnvelopes: vi.fn().mockResolvedValue([]),
 }))
 
 vi.mock('@/services/e2eeCrypto', () => ({
-  getLocalKeyPair: vi.fn().mockResolvedValue({
-    publicKeyJwk: '{"kty":"RSA","n":"test"}',
-    privateKeyJwk: '{"kty":"RSA","d":"test"}',
-  }),
-  getOrGenerateLocalKeyPair: vi.fn().mockResolvedValue({
-    publicKeyJwk: '{"kty":"RSA","n":"test"}',
-    privateKeyJwk: '{"kty":"RSA","d":"test"}',
-  }),
   encryptE2eeHybrid: vi.fn().mockResolvedValue('sv-e2ee-hybrid-v1:mock-hybrid-delivery'),
-  encryptE2eeMessage: vi.fn().mockResolvedValue('sv-e2ee-v1:mock-symmetric-delivery'),
+}))
+
+vi.mock('@/services/e2eeIdentity', () => ({
+  resolveIdentity: vi.fn().mockResolvedValue({
+    state: 'ready',
+    sendPair: {
+      publicKeyJwk: '{"kty":"RSA","n":"test"}',
+      privateKeyJwk: '{"kty":"RSA","d":"test"}',
+    },
+    decryptionKeys: ['{"kty":"RSA","d":"test"}'],
+  }),
+  getRecipientPublicKey: vi.fn().mockResolvedValue('bob-pub-key'),
 }))
 
 describe('deliveryReceiptService', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    deliveredEnvelopeIds.clear()
     useMessengerNotificationStore.setState({
       blockedUserIds: [],
+      mailboxDirectory: {},
     })
   })
 
@@ -95,8 +100,12 @@ describe('deliveryReceiptService', () => {
     expect(socialApi.relayE2eeEnvelope).not.toHaveBeenCalled()
   })
 
-  it('falls back to symmetric encryptE2eeMessage when recipient has no public key', async () => {
-    vi.mocked(socialApi.getE2eePublicKey).mockRejectedValueOnce(new Error('No key'))
+  it('sendet keine Quittung, wenn der Empfänger keinen Schlüssel hinterlegt hat', async () => {
+    // Früher fiel der Dienst hier auf `encryptE2eeMessage` zurück. Dessen
+    // Schlüssel ergibt sich allein aus den beiden Benutzerkennungen, die das
+    // Backend beim Relais ohnehin kennt — die Quittung wäre für den Server
+    // lesbar gewesen. Ein fehlendes graues Häkchen ist der bessere Preis.
+    vi.mocked(e2eeIdentity.getRecipientPublicKey).mockResolvedValueOnce(null)
 
     const success = await sendE2eeDeliveryReceipt({
       blindMailboxId: 'mailbox-sym',
@@ -105,19 +114,29 @@ describe('deliveryReceiptService', () => {
       currentUserId: 1,
     })
 
-    expect(success).toBe(true)
-    expect(e2eeCrypto.encryptE2eeMessage).toHaveBeenCalledWith(
-      expect.stringContaining('"type":"delivery_receipt"'),
-      1,
-      9
-    )
-    expect(socialApi.relayE2eeEnvelope).toHaveBeenCalledWith(
-      expect.objectContaining({
-        blind_mailbox_id: 'mailbox-sym',
-        recipient_id: 9,
-        ciphertext_envelope: 'sv-e2ee-v1:mock-symmetric-delivery',
-      })
-    )
+    expect(success).toBe(false)
+    expect(socialApi.relayE2eeEnvelope).not.toHaveBeenCalled()
+    // Nicht als zugestellt vermerken, damit ein späterer Versuch nachziehen kann.
+    expect(deliveredEnvelopeIds.has(104)).toBe(false)
+  })
+
+  it('sendet keine Quittung, solange der Schlüsselbund auf diesem Gerät gesperrt ist', async () => {
+    vi.mocked(e2eeIdentity.resolveIdentity).mockResolvedValueOnce({
+      state: 'locked',
+      sendPair: null,
+      decryptionKeys: [],
+    })
+
+    const success = await sendE2eeDeliveryReceipt({
+      blindMailboxId: 'mailbox-locked',
+      envelopeId: 105,
+      senderUserId: 9,
+      currentUserId: 1,
+    })
+
+    expect(success).toBe(false)
+    expect(socialApi.relayE2eeEnvelope).not.toHaveBeenCalled()
+    expect(deliveredEnvelopeIds.has(105)).toBe(false)
   })
 
   it('does not send delivery receipt for group mailboxes', async () => {

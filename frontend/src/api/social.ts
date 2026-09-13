@@ -206,6 +206,37 @@ export async function setE2eePublicKey(publicKey: string): Promise<{ ok: boolean
   })
 }
 
+export interface E2eeKeyringPayload {
+  wrapped_keyring: string | null
+  public_key: string | null
+  version: number
+}
+
+/** Der verpackte Schlüsselbund des angemeldeten Kontos. Ohne Parameter: es gibt keinen fremden. */
+export async function getE2eeKeyring(): Promise<E2eeKeyringPayload> {
+  return api<E2eeKeyringPayload>('/social/e2ee/keyring')
+}
+
+/**
+ * Legt Schlüsselbund und Public Key gemeinsam ab.
+ * `expectedVersion` ist der Stand, den dieses Gerät gelesen hat — stimmt er
+ * nicht mehr, antwortet das Backend mit 409 und der Bund bleibt unangetastet.
+ */
+export async function putE2eeKeyring(payload: {
+  wrappedKeyring: string
+  publicKey: string
+  expectedVersion: number
+}): Promise<E2eeKeyringPayload> {
+  return api<E2eeKeyringPayload>('/social/e2ee/keyring', {
+    method: 'PUT',
+    body: JSON.stringify({
+      wrapped_keyring: payload.wrappedKeyring,
+      public_key: payload.publicKey,
+      expected_version: payload.expectedVersion,
+    }),
+  })
+}
+
 export interface ChatGroupMemberItem {
   user_id: number
   username: string

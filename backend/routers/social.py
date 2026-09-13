@@ -19,6 +19,8 @@ from schemas.social import (
     E2eeBlindEnvelopeCreate,
     E2eeBlindEnvelopeResponse,
     E2eeTypingSignalCreate,
+    E2eeKeyringResponse,
+    E2eeKeyringUpdate,
     E2eePublicKeyResponse,
     E2eePublicKeyUpdate,
     FriendRequestCreate,
@@ -282,6 +284,34 @@ def get_e2ee_public_key(
         "username": target.username,
         "public_key": pub_key,
     }
+
+
+@router.get("/e2ee/keyring", response_model=E2eeKeyringResponse, dependencies=[Depends(_check_social_enabled)])
+def get_e2ee_keyring(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Der verpackte Schlüsselbund des angemeldeten Benutzers.
+
+    Bewusst ohne Parameter: es gibt keinen Weg, den Bund eines anderen Kontos
+    anzufordern. Auch der eigene ist ohne Wiederherstellungsschlüssel wertlos.
+    """
+    return SocialService.get_e2ee_keyring(db, user.id)
+
+
+@router.put("/e2ee/keyring", response_model=E2eeKeyringResponse, dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
+def put_e2ee_keyring(
+    req: E2eeKeyringUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    return SocialService.save_e2ee_keyring(
+        db,
+        user.id,
+        wrapped_keyring=req.wrapped_keyring,
+        public_key=req.public_key,
+        expected_version=req.expected_version,
+    )
 
 
 @router.post("/e2ee/relay", response_model=E2eeBlindEnvelopeResponse, dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])

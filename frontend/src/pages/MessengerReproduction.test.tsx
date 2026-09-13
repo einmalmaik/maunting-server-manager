@@ -1,6 +1,6 @@
 import React from 'react'
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react'
-import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import { Messenger, clearSessionChatCache } from './Messenger'
 import { ChatMediaImage, chatMediaBlobCache } from '@/components/social/ChatMediaAttachments'
@@ -42,6 +42,8 @@ vi.mock('@/api/social', () => ({
   updateGroupPermissions: vi.fn(),
   getE2eePublicKey: vi.fn(),
   setE2eePublicKey: vi.fn(),
+  getE2eeKeyring: vi.fn().mockResolvedValue({ wrapped_keyring: null, public_key: null, version: 0 }),
+  putE2eeKeyring: vi.fn(),
   relayE2eeEnvelope: vi.fn(),
   fetchE2eeEnvelopes: vi.fn(),
   getPublicProfiles: vi.fn().mockResolvedValue([]),
@@ -51,6 +53,47 @@ vi.mock('@/api/social', () => ({
   downloadChatMedia: vi.fn(),
   downloadAndDecryptChatAttachment: vi.fn(),
   uploadEncryptedChatAttachment: vi.fn(),
+}))
+
+/**
+ * Die Identität des Kontos wird gestellt, damit die Tests den Zustand des
+ * Geräts direkt setzen können ('ready' oder 'locked') statt jedes Mal einen
+ * Schlüsselbund per Argon2id zu öffnen.
+ */
+const { identitaet, MockRecipientKeyMissingError } = vi.hoisted(() => ({
+  identitaet: {
+    state: 'ready' as 'needs-setup' | 'locked' | 'ready',
+    sendPair: null as { publicKeyJwk: string; privateKeyJwk: string } | null,
+    decryptionKeys: [] as string[],
+    empfaengerSchluessel: null as string | null,
+  },
+  MockRecipientKeyMissingError: class extends Error {
+    constructor(public readonly userId: number) {
+      super('Für diesen Empfänger liegt kein Schlüssel vor')
+      this.name = 'E2eeRecipientKeyMissingError'
+    }
+  },
+}))
+
+vi.mock('@/services/e2eeIdentity', () => ({
+  IDENTITY_LOADING: { state: 'loading', sendPair: null, decryptionKeys: [] },
+  resolveIdentity: vi.fn(async () => ({
+    state: identitaet.state,
+    sendPair: identitaet.sendPair,
+    decryptionKeys: identitaet.decryptionKeys,
+  })),
+  getRecipientPublicKey: vi.fn(async () => identitaet.empfaengerSchluessel),
+  requireRecipientPublicKey: vi.fn(async (userId: number) => {
+    if (!identitaet.empfaengerSchluessel) throw new MockRecipientKeyMissingError(userId)
+    return identitaet.empfaengerSchluessel
+  }),
+  forgetRecipientPublicKey: vi.fn(),
+  createIdentity: vi.fn(),
+  unlockWithRecoveryKey: vi.fn(),
+  rotateRecoveryKey: vi.fn(),
+  clearIdentityMemory: vi.fn(),
+  E2eeRecipientKeyMissingError: MockRecipientKeyMissingError,
+  E2eeLockedError: class extends Error {},
 }))
 
 vi.mock('@/api/teams', () => ({
@@ -89,6 +132,14 @@ function setupAuthUser(userId: number = 2, username: string = 'user_b') {
 }
 
 describe('Requirement R1 Reproduction: E2EE Messenger Failure Modes', () => {
+  // Ein echtes Schlüsselpaar für alle Tests. Die Krypto ist hier nicht
+  // gemockt, und RSA-4096 je Test wäre die teuerste Zeile der Datei.
+  let kontoSchluessel: { publicKeyJwk: string; privateKeyJwk: string }
+
+  beforeAll(async () => {
+    kontoSchluessel = await generateLocalE2eeKeyPair()
+  }, 60_000)
+
   afterEach(() => {
     cleanup()
     clearBlindMailboxIdCache()
@@ -106,6 +157,11 @@ describe('Requirement R1 Reproduction: E2EE Messenger Failure Modes', () => {
     clearBlindMailboxIdCache()
     chatMediaBlobCache.clear()
     vi.mocked(socialApi.getE2eePublicKey).mockResolvedValue(undefined as any)
+    // Standardlage: Gerät entsperrt, Gegenseite hat einen Schlüssel.
+    identitaet.state = 'ready'
+    identitaet.sendPair = kontoSchluessel
+    identitaet.decryptionKeys = [kontoSchluessel.privateKeyJwk]
+    identitaet.empfaengerSchluessel = kontoSchluessel.publicKeyJwk
   })
 
   // =========================================================================
@@ -140,40 +196,41 @@ describe('Requirement R1 Reproduction: E2EE Messenger Failure Modes', () => {
       ).rejects.toThrow(/Kein passender RSA-Schlüssel im Hybrid-Umschlag|Hybrid-Entschlüsselung fehlgeschlagen/)
     }, 30_000)
 
-    it('key registration fix: Client 2 publishes its public key when existing key on server differs', async () => {
-      const currentUserId = 2
-      const bobTauriKeys = await generateLocalE2eeKeyPair()
+    it('Client 2 veröffentlicht keinen eigenen Schlüssel mehr, wenn der Server schon einen kennt', async () => {
+      // Diese Zusage steht auf dem Kopf der alten. Früher glich der Messenger
+      // beim Öffnen den Servereintrag mit dem lokalen Schlüssel ab und lud bei
+      // Abweichung den lokalen hoch — also überschrieb jedes zweite Gerät die
+      // Identität des ersten, und danach war der Verlauf auf beiden Seiten
+      // unlesbar. Der Abgleich existiert nicht mehr; ein Gerät ohne Bund meldet
+      // 'locked' und wartet auf den Wiederherstellungsschlüssel.
+      const bobId = 2
+      setupAuthUser(bobId, 'bob')
 
-      // Server already holds Web client's public key
-      vi.mocked(socialApi.getE2eePublicKey).mockResolvedValue({
-        user_id: currentUserId,
-        username: 'bob',
+      vi.mocked(socialApi.getE2eeKeyring).mockResolvedValue({
+        wrapped_keyring: 'sv-e2ee-keyring-v1:bund-von-geraet-eins',
         public_key: '{"kty":"RSA","mock_web_key":true}',
+        version: 1,
+      })
+      identitaet.state = 'locked'
+      identitaet.sendPair = null
+      identitaet.decryptionKeys = []
+
+      vi.mocked(socialApi.getFriends).mockResolvedValue([])
+      vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([])
+
+      render(
+        <MemoryRouter initialEntries={['/chat']}>
+          <Messenger />
+        </MemoryRouter>
+      )
+
+      await waitFor(() => {
+        expect(socialApi.getFriends).toHaveBeenCalled()
       })
 
-      // Logic in Messenger.tsx:570-574:
-      const existing = await socialApi.getE2eePublicKey(currentUserId)
-      let isMatch = false
-      if (existing?.public_key) {
-        if (existing.public_key.trim() === bobTauriKeys.publicKeyJwk.trim()) {
-          isMatch = true
-        } else {
-          try {
-            const serverParsed = JSON.parse(existing.public_key)
-            const localParsed = JSON.parse(bobTauriKeys.publicKeyJwk)
-            if (serverParsed.n && localParsed.n && serverParsed.n === localParsed.n) {
-              isMatch = true
-            }
-          } catch {}
-        }
-      }
-      if (!isMatch) {
-        await socialApi.setE2eePublicKey(bobTauriKeys.publicKeyJwk)
-      }
-
-      // setE2eePublicKey IS called because existing.public_key differs!
-      expect(socialApi.setE2eePublicKey).toHaveBeenCalledWith(bobTauriKeys.publicKeyJwk)
-    })
+      expect(socialApi.setE2eePublicKey).not.toHaveBeenCalled()
+      expect(socialApi.putE2eeKeyring).not.toHaveBeenCalled()
+    }, 30_000)
 
     it('UI layer: Messenger renders "Verschlüsselte Nachricht" placeholder when hybrid decryption fails', async () => {
       const aliceId = 101

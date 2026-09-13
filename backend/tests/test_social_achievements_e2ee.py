@@ -766,3 +766,186 @@ def test_e2ee_security_public_key_validation(db: Session, owner_user: User):
 
 
 
+
+# --- Kontoweiter Schlüsselbund (ersetzt den Schlüssel pro Gerät) ---
+
+
+def _gueltiger_public_key(kennung: str = "A") -> str:
+    """Ein formal gültiger RSA-OAEP-Public-Key im JWK-Format."""
+    import json
+    return json.dumps({"kty": "RSA", "n": kennung * 350, "e": "AQAB", "alg": "RSA-OAEP"})
+
+
+def _gueltiger_schluesselbund(fuellung: bytes = b"verpackter-schluesselbund-inhalt") -> str:
+    """Ein Umschlag mit Salt, IV und genug Bytes für den AEAD-Tag."""
+    rohdaten = b"\x11" * 16 + b"\x22" * 12 + fuellung + b"\x33" * 16
+    return "sv-e2ee-keyring-v1:" + base64.b64encode(rohdaten).decode("ascii")
+
+
+def test_schluesselbund_speichern_und_lesen(db: Session, owner_user: User):
+    """Der Bund wird zusammen mit dem Public Key abgelegt und die Version wächst."""
+    vorher = SocialService.get_e2ee_keyring(db, owner_user.id)
+    assert vorher["wrapped_keyring"] is None
+    assert vorher["version"] == 0
+
+    ergebnis = SocialService.save_e2ee_keyring(
+        db,
+        owner_user.id,
+        wrapped_keyring=_gueltiger_schluesselbund(),
+        public_key=_gueltiger_public_key(),
+        expected_version=0,
+    )
+    assert ergebnis["version"] == 1
+
+    nachher = SocialService.get_e2ee_keyring(db, owner_user.id)
+    assert nachher["wrapped_keyring"] == _gueltiger_schluesselbund()
+    assert nachher["public_key"] == _gueltiger_public_key()
+    assert nachher["version"] == 1
+
+
+def test_schluesselbund_veraltete_version_wird_abgewiesen(db: Session, owner_user: User):
+    """Die Schranke gegen verlorene Rettungen: der zweite Schreibvorgang fällt auf.
+
+    Zwei Geräte holen denselben Stand, adoptieren je ihren alten
+    Gerätesschlüssel und schreiben zurück. Ohne diese Prüfung gewänne der
+    letzte und der gerettete Schlüssel des anderen wäre weg.
+    """
+    from fastapi import HTTPException
+
+    erster = _gueltiger_schluesselbund(b"bund-von-geraet-eins-mit-altschluessel")
+    SocialService.save_e2ee_keyring(
+        db,
+        owner_user.id,
+        wrapped_keyring=erster,
+        public_key=_gueltiger_public_key(),
+        expected_version=0,
+    )
+
+    with pytest.raises(HTTPException) as fehler:
+        SocialService.save_e2ee_keyring(
+            db,
+            owner_user.id,
+            wrapped_keyring=_gueltiger_schluesselbund(b"bund-von-geraet-zwei-ueberschreibt"),
+            public_key=_gueltiger_public_key("B"),
+            expected_version=0,
+        )
+    assert fehler.value.status_code == 409
+
+    # Der abgewiesene Schreibvorgang hat nichts verändert.
+    stand = SocialService.get_e2ee_keyring(db, owner_user.id)
+    assert stand["wrapped_keyring"] == erster
+    assert stand["public_key"] == _gueltiger_public_key()
+    assert stand["version"] == 1
+
+
+def test_schluesselbund_mit_klartext_schluessel_wird_abgewiesen(db: Session, owner_user: User):
+    """Der Server kann nicht beweisen, dass der Bund verschlüsselt ist — aber das Naheliegende ausschließen."""
+    import json
+    from fastapi import HTTPException
+    from schemas.social import validate_e2ee_keyring_envelope
+
+    klartext = "sv-e2ee-keyring-v1:" + json.dumps(
+        {"v": 1, "account": {"privateKeyJwk": "{\"kty\":\"RSA\",\"d\":\"geheim\"}"}}
+    )
+    with pytest.raises(ValueError) as fehler:
+        validate_e2ee_keyring_envelope(klartext)
+    assert "Sicherheitsverletzung" in str(fehler.value)
+
+    with pytest.raises(HTTPException) as dienst_fehler:
+        SocialService.save_e2ee_keyring(
+            db,
+            owner_user.id,
+            wrapped_keyring=klartext,
+            public_key=_gueltiger_public_key(),
+            expected_version=0,
+        )
+    assert dienst_fehler.value.status_code == 400
+
+
+def test_schluesselbund_umschlagpruefung(db: Session):
+    """Falsches Präfix, Null-Salt und zu kurze Umschläge kommen nicht durch."""
+    from schemas.social import validate_e2ee_keyring_envelope
+
+    with pytest.raises(ValueError) as ohne_praefix:
+        validate_e2ee_keyring_envelope(base64.b64encode(b"\x11" * 60).decode("ascii"))
+    assert "Präfix" in str(ohne_praefix.value)
+
+    zu_kurz = "sv-e2ee-keyring-v1:" + base64.b64encode(b"\x11" * 20).decode("ascii")
+    with pytest.raises(ValueError) as kurz:
+        validate_e2ee_keyring_envelope(zu_kurz)
+    assert "zu kurz" in str(kurz.value)
+
+    null_salt = "sv-e2ee-keyring-v1:" + base64.b64encode(
+        b"\x00" * 16 + b"\x22" * 12 + b"inhalt" + b"\x33" * 16
+    ).decode("ascii")
+    with pytest.raises(ValueError) as salt:
+        validate_e2ee_keyring_envelope(null_salt)
+    assert "Null-Salt" in str(salt.value)
+
+    # Ein formal korrekter Umschlag darf nicht anschlagen.
+    validate_e2ee_keyring_envelope(_gueltiger_schluesselbund())
+
+
+def test_alter_public_key_weg_gesperrt_sobald_bund_existiert(db: Session, owner_user: User):
+    """Der Riegel gegen die Ursache des Datenverlusts.
+
+    Ein noch nicht aktualisierter Tab, der den Bund nicht kennt, kennt auch den
+    privaten Teil nicht. Dürfte er den Public Key überschreiben, wäre jede
+    darauf folgende Nachricht für den Benutzer unlesbar — genau so ging der
+    Verlauf verloren.
+    """
+    from fastapi import HTTPException
+
+    # Ohne Bund ist der alte Weg erlaubt (Erstkontakt, Altclients).
+    SocialService.save_e2ee_public_key(db, owner_user.id, _gueltiger_public_key())
+    assert SocialService.get_e2ee_public_key(db, owner_user.id) == _gueltiger_public_key()
+
+    SocialService.save_e2ee_keyring(
+        db,
+        owner_user.id,
+        wrapped_keyring=_gueltiger_schluesselbund(),
+        public_key=_gueltiger_public_key(),
+        expected_version=0,
+    )
+
+    with pytest.raises(HTTPException) as fehler:
+        SocialService.save_e2ee_public_key(db, owner_user.id, _gueltiger_public_key("B"))
+    assert fehler.value.status_code == 409
+
+    # Der Kontoschlüssel steht unverändert.
+    assert SocialService.get_e2ee_public_key(db, owner_user.id) == _gueltiger_public_key()
+
+
+def test_schluesselbund_route_liefert_nur_den_eigenen(client: TestClient, db: Session, owner_user: User):
+    """Es gibt keinen Parameter, über den ein fremder Bund anzufordern wäre."""
+    from main import app
+    from routers.auth import get_current_user
+
+    fremder = User(
+        username="bund-fremder",
+        email="bund-fremder@test.de",
+        password_hash="x",
+        is_active=True,
+    )
+    db.add(fremder)
+    db.commit()
+    db.refresh(fremder)
+
+    fremder_bund = _gueltiger_schluesselbund(b"gehoert-dem-fremden-konto-allein")
+    SocialService.save_e2ee_keyring(
+        db,
+        fremder.id,
+        wrapped_keyring=fremder_bund,
+        public_key=_gueltiger_public_key("C"),
+        expected_version=0,
+    )
+
+    app.dependency_overrides[get_current_user] = lambda: owner_user
+    try:
+        antwort = client.get("/api/social/e2ee/keyring")
+        assert antwort.status_code == 200
+        # Der Eigentümer hat keinen Bund; der des Fremden taucht nirgends auf.
+        assert antwort.json()["wrapped_keyring"] is None
+        assert fremder_bund not in antwort.text
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)

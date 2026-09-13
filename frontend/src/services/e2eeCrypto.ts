@@ -141,7 +141,16 @@ export async function deriveDirectChannelKey(
 }
 
 /**
- * Encrypts a message using DIS AES-256-GCM and wraps it in a versioned direct envelope.
+ * NUR NOCH FÜR TESTS UND ALTBESTAND — nicht im Sendepfad verwenden.
+ *
+ * `deriveDirectChannelKey` leitet ohne `sharedSecret` allein aus den beiden
+ * Benutzerkennungen ab: `sha256("msm:dm:key:<min>:<max>")`. Das Backend kennt
+ * beim Relais Absender und Empfänger und kann denselben Schlüssel bilden — eine
+ * so verschlüsselte Nachricht ist damit nicht Ende-zu-Ende geschützt.
+ *
+ * Gegenstück `decryptE2eeMessage` bleibt bestehen, damit Nachrichten aus der
+ * Zeit vor dem Kontoschlüssel weiter lesbar sind. Gesendet wird ausschließlich
+ * hybrid gegen den veröffentlichten Empfängerschlüssel.
  */
 export async function encryptE2eeMessage(
   message: string,
@@ -876,6 +885,33 @@ export async function decryptE2eeHybrid(
   } catch {
     throw new DisDecryptionError('Hybrid-Entschlüsselung fehlgeschlagen')
   }
+}
+
+/**
+ * Entschlüsselt einen Hybrid-Umschlag gegen einen ganzen Schlüsselbund.
+ *
+ * Ein Konto kann mehrere private Schlüssel besitzen: den aktuellen und die
+ * Gerätesschlüssel aus der Zeit, als jedes Endgerät noch seinen eigenen hatte.
+ * Nachrichten aus dieser Zeit lassen sich nur mit dem damaligen Schlüssel
+ * öffnen. Die Schleife steht hier und nicht in der Komponente, damit
+ * ausnahmslos jeder Lesepfad denselben Bund durchprobiert.
+ */
+export async function decryptE2eeHybridWithKeyring(
+  envelopeString: string,
+  privateKeyJwks: readonly string[]
+): Promise<string> {
+  if (!privateKeyJwks || privateKeyJwks.length === 0) {
+    throw new DisDecryptionError('Kein Schlüssel zum Entschlüsseln vorhanden')
+  }
+  for (const privateKeyJwk of privateKeyJwks) {
+    if (!privateKeyJwk) continue
+    try {
+      return await decryptE2eeHybrid(envelopeString, privateKeyJwk)
+    } catch {
+      // Nächster Schlüssel im Bund
+    }
+  }
+  throw new DisDecryptionError('Kein passender Schlüssel im Bund für diesen Umschlag')
 }
 
 // ==========================================

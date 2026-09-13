@@ -226,6 +226,68 @@ def validate_e2ee_envelope_format(envelope_str: str) -> None:
         raise ValueError("Sicherheitsverletzung: Schwacher/ungültiger Null-IV (Nonce) im E2EE-Umschlag erkannt.")
 
 
+E2EE_KEYRING_PREFIX = "sv-e2ee-keyring-v1:"
+
+#: 16 Bytes Salt + 12 Bytes IV + 16 Bytes AEAD-Tag. Alles darunter kann kein
+#: vollständiger Umschlag sein, egal was drinsteht.
+_KEYRING_MIN_BYTES = 16 + 12 + 16
+
+
+def validate_e2ee_keyring_envelope(envelope_str: str) -> None:
+    """Prüft den verpackten Schlüsselbund, bevor er in die Datenbank geht.
+
+    Der Server kann den Inhalt nicht lesen, also kann er auch nicht beweisen,
+    dass er verschlüsselt ist. Er kann aber das Naheliegende ausschließen: ein
+    Client, der aus Versehen den privaten Schlüssel im Klartext hochlädt, wird
+    hier abgewiesen statt stillschweigend gespeichert.
+    """
+    import base64
+
+    if not isinstance(envelope_str, str) or not envelope_str.strip():
+        raise ValueError("Schlüsselbund darf nicht leer sein.")
+
+    trimmed = envelope_str.strip()
+    if not trimmed.startswith(E2EE_KEYRING_PREFIX):
+        raise ValueError(
+            f"Ungültiges Schlüsselbund-Format: erwartet wird das Präfix {E2EE_KEYRING_PREFIX}."
+        )
+
+    payload = trimmed[len(E2EE_KEYRING_PREFIX):].strip()
+    if not payload:
+        raise ValueError("Schlüsselbund-Payload darf nicht leer sein.")
+
+    if any(c in payload for c in "\r\n\t"):
+        raise ValueError("Ungültige Steuerzeichen im Schlüsselbund erkannt.")
+
+    lowered = payload.lower()
+    if (
+        payload.startswith("{")
+        or payload.startswith("[")
+        or "privatekeyjwk" in lowered
+        or '"d":' in lowered
+        or '"kty"' in lowered
+    ):
+        raise ValueError(
+            "Sicherheitsverletzung: Unverschlüsseltes Schlüsselmaterial im Schlüsselbund erkannt."
+        )
+
+    try:
+        raw_bytes = base64.b64decode(payload, validate=True)
+    except Exception as exc:
+        raise ValueError("Ungültige Base64-Kodierung im Schlüsselbund.") from exc
+
+    if len(raw_bytes) < _KEYRING_MIN_BYTES:
+        raise ValueError(
+            f"Schlüsselbund zu kurz: mindestens {_KEYRING_MIN_BYTES} Bytes für Salt, IV und AEAD-Tag erforderlich."
+        )
+
+    if all(b == 0 for b in raw_bytes[:16]):
+        raise ValueError("Sicherheitsverletzung: Null-Salt im Schlüsselbund erkannt.")
+
+    if all(b == 0 for b in raw_bytes[16:28]):
+        raise ValueError("Sicherheitsverletzung: Null-IV (Nonce) im Schlüsselbund erkannt.")
+
+
 class E2eeBlindEnvelopeCreate(BaseModel):
     blind_mailbox_id: str = Field(..., min_length=16, max_length=64)
     ciphertext_envelope: str = Field(..., min_length=10)
@@ -290,6 +352,40 @@ class E2eePublicKeyResponse(BaseModel):
     user_id: int
     username: str
     public_key: str | None = None
+
+
+class E2eeKeyringUpdate(BaseModel):
+    """Schlüsselbund und zugehöriger Public Key — immer gemeinsam.
+
+    Getrennt geschrieben könnten sie auseinanderlaufen: ein veröffentlichter
+    Public Key, dessen privater Teil in keinem gespeicherten Bund steckt, macht
+    jede daraufhin eingehende Nachricht unlesbar. Genau das war der Fehler, den
+    dieser Weg ablöst.
+    """
+
+    wrapped_keyring: str = Field(..., min_length=60, max_length=16384)
+    public_key: str = Field(..., min_length=10, max_length=8192)
+    #: Stand, den der Client gelesen hat. Weicht er vom gespeicherten ab, hat
+    #: inzwischen ein anderes Gerät geschrieben und der Schreibvorgang fällt auf.
+    expected_version: int = Field(..., ge=0)
+
+    @field_validator("wrapped_keyring")
+    @classmethod
+    def validate_keyring(cls, v: str) -> str:
+        validate_e2ee_keyring_envelope(v)
+        return v
+
+    @field_validator("public_key")
+    @classmethod
+    def validate_key(cls, v: str) -> str:
+        validate_rsa_public_key_jwk(v)
+        return v
+
+
+class E2eeKeyringResponse(BaseModel):
+    wrapped_keyring: str | None = None
+    public_key: str | None = None
+    version: int = 0
 
 
 class SocialProfileResponse(BaseModel):

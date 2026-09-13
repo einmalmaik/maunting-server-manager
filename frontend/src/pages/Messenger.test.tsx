@@ -27,6 +27,8 @@ vi.mock('@/api/social', () => ({
   updateGroupPermissions: vi.fn(),
   getE2eePublicKey: vi.fn(),
   setE2eePublicKey: vi.fn(),
+  getE2eeKeyring: vi.fn().mockResolvedValue({ wrapped_keyring: null, public_key: null, version: 0 }),
+  putE2eeKeyring: vi.fn(),
   relayE2eeEnvelope: vi.fn(),
   fetchE2eeEnvelopes: vi.fn(),
   getPublicProfiles: vi.fn().mockResolvedValue([]),
@@ -52,18 +54,54 @@ vi.mock('@/services/e2eeCrypto', () => ({
   decryptE2eeMessage: vi.fn().mockResolvedValue('Hallo Welt'),
   encryptE2eeHybrid: vi.fn().mockResolvedValue('sv-e2ee-hybrid-v1:...'),
   decryptE2eeHybrid: vi.fn().mockResolvedValue('Hallo Hybrid'),
+  // Produktivpfad: gegen alle Schlüssel des Kontos, nicht gegen einen Gerätesschlüssel.
+  decryptE2eeHybridWithKeyring: vi.fn().mockResolvedValue('Hallo Hybrid'),
   encryptGroupE2eeMessage: vi.fn().mockResolvedValue('group-ciphertext'),
   decryptGroupE2eeMessage: vi.fn().mockResolvedValue('Hallo Gruppe'),
-  getLocalKeyPair: vi.fn().mockResolvedValue(null),
-  getOrGenerateLocalKeyPair: vi.fn().mockResolvedValue({
-    publicKeyJwk: '{"kty":"oct"}',
-    privateKeyJwk: '{"kty":"oct"}',
-  }),
   scrubPlaintextStorage: vi.fn(),
   createReplayDetector: vi.fn().mockReturnValue({
     checkAndRecord: vi.fn().mockResolvedValue(true),
     clear: vi.fn(),
   }),
+}))
+
+/** Zustand des Geräts direkt setzbar, statt je Test einen Bund zu öffnen. */
+const { identitaet, MockRecipientKeyMissingError } = vi.hoisted(() => ({
+  identitaet: {
+    state: 'ready' as 'needs-setup' | 'locked' | 'ready',
+    sendPair: { publicKeyJwk: '{"kty":"oct"}', privateKeyJwk: '{"kty":"oct"}' } as
+      | { publicKeyJwk: string; privateKeyJwk: string }
+      | null,
+    decryptionKeys: ['{"kty":"oct"}'] as string[],
+    empfaengerSchluessel: 'mock-empfaenger-pub-key' as string | null,
+  },
+  MockRecipientKeyMissingError: class extends Error {
+    constructor(public readonly userId: number) {
+      super('Für diesen Empfänger liegt kein Schlüssel vor')
+      this.name = 'E2eeRecipientKeyMissingError'
+    }
+  },
+}))
+
+vi.mock('@/services/e2eeIdentity', () => ({
+  IDENTITY_LOADING: { state: 'loading', sendPair: null, decryptionKeys: [] },
+  resolveIdentity: vi.fn(async () => ({
+    state: identitaet.state,
+    sendPair: identitaet.sendPair,
+    decryptionKeys: identitaet.decryptionKeys,
+  })),
+  getRecipientPublicKey: vi.fn(async () => identitaet.empfaengerSchluessel),
+  requireRecipientPublicKey: vi.fn(async (userId: number) => {
+    if (!identitaet.empfaengerSchluessel) throw new MockRecipientKeyMissingError(userId)
+    return identitaet.empfaengerSchluessel
+  }),
+  forgetRecipientPublicKey: vi.fn(),
+  createIdentity: vi.fn(),
+  unlockWithRecoveryKey: vi.fn(),
+  rotateRecoveryKey: vi.fn(),
+  clearIdentityMemory: vi.fn(),
+  E2eeRecipientKeyMissingError: MockRecipientKeyMissingError,
+  E2eeLockedError: class extends Error {},
 }))
 
 vi.mock('@/lib/offlineSync', () => ({
@@ -102,6 +140,12 @@ describe('Messenger (Allround Chat)', () => {
     clearSessionChatCache()
     mockEnvelopeCache.clear()
     setupUser()
+
+    // Standardlage: Geraet entsperrt, Gegenseite hat einen Schluessel.
+    identitaet.state = 'ready'
+    identitaet.sendPair = { publicKeyJwk: '{"kty":"oct"}', privateKeyJwk: '{"kty":"oct"}' }
+    identitaet.decryptionKeys = ['{"kty":"oct"}']
+    identitaet.empfaengerSchluessel = 'mock-empfaenger-pub-key'
 
     vi.mocked(socialApi.getFriends).mockResolvedValue([
       {
@@ -1036,7 +1080,11 @@ describe('Messenger (Allround Chat)', () => {
     })
   })
 
-  it('synchronisiert Nachrichten plattformuebergreifend (Tauri <-> Web) per deterministischer Kanalverschluesselung', async () => {
+  it('sendet plattformuebergreifend (Tauri <-> Web) ausschliesslich hybrid gegen den Kontoschluessel', async () => {
+    // Der Titel hiess frueher „deterministische Kanalverschluesselung". Dieser
+    // Weg ist weg: sein Schluessel ergab sich allein aus den beiden
+    // Benutzerkennungen, die das Backend beim Relais ohnehin kennt. Geblieben
+    // ist der hybride Umschlag gegen den veroeffentlichten Empfaengerschluessel.
     const { encryptE2eeHybrid } = await import('@/services/e2eeCrypto')
     vi.mocked(socialApi.getFriends).mockResolvedValue([
       {
@@ -1049,11 +1097,7 @@ describe('Messenger (Allround Chat)', () => {
       },
     ])
     // Both users have registered public keys (e.g. from Tauri or Web)
-    vi.mocked(socialApi.getE2eePublicKey).mockResolvedValue({
-      user_id: 205,
-      username: 'bob_desktop',
-      public_key: '{"kty":"RSA","n":"pub_bob"}',
-    })
+    identitaet.empfaengerSchluessel = '{"kty":"RSA","n":"pub_bob"}'
     vi.mocked(encryptE2eeHybrid).mockResolvedValue('sv-e2ee-hybrid-v1:cross-platform-sync-envelope')
 
     render(
@@ -1104,7 +1148,7 @@ describe('Messenger (Allround Chat)', () => {
   })
 
   it('entschluesselt empfangene Nachrichten aus Tauri/Web zuverlaessig ueber den synchronisierten Direktkanal', async () => {
-    const { decryptE2eeMessage, decryptE2eeHybrid } = await import('@/services/e2eeCrypto')
+    const { decryptE2eeMessage, decryptE2eeHybridWithKeyring } = await import('@/services/e2eeCrypto')
     vi.mocked(socialApi.getFriends).mockResolvedValue([
       {
         id: 1,
@@ -1156,7 +1200,9 @@ describe('Messenger (Allround Chat)', () => {
     })
 
     // Unmatched legacy hybrid envelope throws
-    vi.mocked(decryptE2eeHybrid).mockRejectedValue(new Error('Kein passender RSA-Schluessel'))
+    vi.mocked(decryptE2eeHybridWithKeyring).mockRejectedValue(
+      new Error('Kein passender Schlüssel im Bund für diesen Umschlag')
+    )
 
     render(
       <MemoryRouter>

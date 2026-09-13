@@ -17,6 +17,7 @@ import {
   MessageSquare,
   Send,
   Lock,
+  KeyRound,
   Camera,
   StickyNote,
   Calendar as CalendarIcon,
@@ -75,8 +76,6 @@ import {
   relayE2eeEnvelope,
   fetchE2eeEnvelopes,
   sendTypingSignal,
-  getE2eePublicKey,
-  setE2eePublicKey,
   uploadEncryptedChatAttachment,
 } from '@/api/social'
 import {
@@ -99,20 +98,36 @@ import {
   deriveGroupBlindMailboxId,
   getCachedBlindMailboxId,
   getCachedGroupBlindMailboxId,
-  encryptE2eeMessage,
+  // Nur zum Lesen von Altnachrichten: der Schlüssel dieses Umschlags ergibt
+  // sich allein aus den beiden Benutzerkennungen und ist damit für das Backend
+  // nachbaubar. Gesendet wird ausschließlich hybrid.
   decryptE2eeMessage,
   encryptE2eeHybrid,
-  decryptE2eeHybrid,
+  decryptE2eeHybridWithKeyring,
   encryptGroupE2eeMessage,
   decryptGroupE2eeMessage,
-  getLocalKeyPair,
-  getOrGenerateLocalKeyPair,
   scrubPlaintextStorage,
   envelopePlaintextCache,
   clearEnvelopePlaintextCache,
-  type LocalE2eeKeyPair,
   type AttachmentCryptoContext,
 } from '@/services/e2eeCrypto'
+import {
+  resolveIdentity,
+  requireRecipientPublicKey,
+  forgetRecipientPublicKey,
+  E2eeRecipientKeyMissingError,
+  IDENTITY_LOADING,
+  type E2eeIdentity,
+} from '@/services/e2eeIdentity'
+import { MessengerSchluesselDialog } from '@/components/social/MessengerSchluesselDialog'
+
+/** Der Kontoschlüssel ist auf diesem Gerät nicht zu öffnen — nicht gesendet. */
+class E2eeIdentityLockedError extends Error {
+  constructor() {
+    super('Der Schlüssel dieses Kontos ist auf diesem Gerät gesperrt.')
+    this.name = 'E2eeIdentityLockedError'
+  }
+}
 import { compressImageFile } from '@/lib/imageCompression'
 import { getAudioTrackConstraints } from '@/lib/audioSettings'
 import { IN_HOUSE_STICKERS, CATEGORIZED_EMOJIS } from '@/services/stickerCatalog'
@@ -452,21 +467,22 @@ export function Messenger() {
   const [loadingMessages, setLoadingMessages] = useState(false)
   const [sending, setSending] = useState(false)
   const [blindMailboxId, setBlindMailboxId] = useState<string>('')
-  const [localKeyPair, setLocalKeyPair] = useState<LocalE2eeKeyPair | null>(null)
-  const recipientKeyCache = useRef(new Map<number, string>())
-
-  const getOrFetchRecipientPublicKey = async (targetUserId: number): Promise<string | null> => {
-    const cached = recipientKeyCache.current.get(targetUserId)
-    if (cached) return cached
-    try {
-      const info = await getE2eePublicKey(targetUserId)
-      if (info?.public_key) {
-        recipientKeyCache.current.set(targetUserId, info.public_key)
-        return info.public_key
-      }
-    } catch {}
-    return null
-  }
+  // Der Identitätsschlüssel gehört dem Konto. `state` sagt, ob dieses Gerät ihn
+  // gerade öffnen kann; `decryptionKeys` enthält zusätzlich die alten
+  // Gerätesschlüssel, ohne die der Verlauf von vor der Umstellung stumm bliebe.
+  const [identity, setIdentity] = useState<E2eeIdentity>(IDENTITY_LOADING)
+  // `loadMessages` läuft auch aus Listenern, die nur an `blindMailboxId`
+  // hängen. Läse es die Identität aus der Closure, bliebe dort für immer der
+  // Stand vom Zeitpunkt der Registrierung stehen — und wäre das `loading`,
+  // käme über diesen Weg nie wieder eine Nachricht an.
+  const identityRef = useRef<E2eeIdentity>(IDENTITY_LOADING)
+  identityRef.current = identity
+  const [isSchluesselDialogOpen, setIsSchluesselDialogOpen] = useState(false)
+  const [identityReloadToken, setIdentityReloadToken] = useState(0)
+  // Nur Direktchats hängen am Kontoschlüssel; Gruppen laufen über den
+  // Gruppenschlüssel und bleiben auch auf einem gesperrten Gerät schreibbar.
+  const istSchreibenGesperrt =
+    Boolean(activeContact) && (identity.state === 'needs-setup' || identity.state === 'locked')
 
   // Attachments
   const [isNotePickerOpen, setIsNotePickerOpen] = useState(false)
@@ -559,43 +575,28 @@ export function Messenger() {
 
   const currentUserId = user?.id || 0
 
-  // 1. Initialize local key pair and scrub legacy plaintext storage
+  // 1. Identität des Kontos auflösen und Klartextreste aus der Altzeit entfernen.
+  //
+  // Hier wird bewusst nichts erzeugt und nichts veröffentlicht. Vorher stand an
+  // dieser Stelle `getOrGenerateLocalKeyPair` plus Upload: jedes Gerät schrieb
+  // seinen eigenen Schlüssel auf das Konto, überschrieb den des vorigen, und ab
+  // da war der ganze Verlauf auf beiden Seiten unlesbar. Fehlt der Schlüssel
+  // hier, lautet die Antwort `locked` und der Benutzer entsperrt ihn selbst.
   useEffect(() => {
     scrubPlaintextStorage()
     if (!currentUserId) return
     let active = true
 
-    getOrGenerateLocalKeyPair(currentUserId).then(async (kp) => {
-      if (!active) return
-      setLocalKeyPair(kp)
-      try {
-        const existing = await getE2eePublicKey(currentUserId)
-        let isMatch = false
-        if (existing?.public_key) {
-          if (existing.public_key.trim() === kp.publicKeyJwk.trim()) {
-            isMatch = true
-          } else {
-            try {
-              const serverParsed = JSON.parse(existing.public_key)
-              const localParsed = JSON.parse(kp.publicKeyJwk)
-              if (serverParsed.n && localParsed.n && serverParsed.n === localParsed.n) {
-                isMatch = true
-              }
-            } catch {}
-          }
-        }
-        if (!isMatch) {
-          await setE2eePublicKey(kp.publicKeyJwk)
-        }
-      } catch {
-        // Non-blocking
-      }
-    }).catch(() => {})
+    resolveIdentity(currentUserId)
+      .then((next) => {
+        if (active) setIdentity(next)
+      })
+      .catch(() => {})
 
     return () => {
       active = false
     }
-  }, [currentUserId])
+  }, [currentUserId, identityReloadToken])
 
   // 2. Load Friends, Groups, Team Members, Public Users, Direct Chats, and Stories
   const loadData = async () => {
@@ -1072,19 +1073,15 @@ export function Messenger() {
         })
       } else if (activeContact) {
         const targetUserId = activeContact.userId
-        const recipientPubKey = await getOrFetchRecipientPublicKey(targetUserId)
-        let resolvedKeyPair = localKeyPair
-        if (!resolvedKeyPair && currentUserId) {
-          resolvedKeyPair = await getLocalKeyPair(currentUserId)
-          if (!resolvedKeyPair) {
-            resolvedKeyPair = await getOrGenerateLocalKeyPair(currentUserId)
-          }
-        }
-        if (recipientPubKey && resolvedKeyPair?.publicKeyJwk) {
-          ciphertext = await encryptE2eeHybrid(payload, recipientPubKey, resolvedKeyPair.publicKeyJwk)
-        } else {
-          ciphertext = await encryptE2eeMessage(payload, currentUserId, targetUserId)
-        }
+        // Über die Ref, weil Quittungen auch aus Listenern kommen, die den
+        // Stand von ihrer Registrierung festhalten würden.
+        const sendPair = identityRef.current.sendPair
+        if (!sendPair) return
+        // Ohne Empfängerschlüssel gibt es keinen zweiten Weg mehr. Eine nicht
+        // gesendete Quittung kostet ein Häkchen, die alte Ersatzverschlüsselung
+        // hätte den Server mitlesen lassen.
+        const recipientPubKey = await requireRecipientPublicKey(targetUserId)
+        ciphertext = await encryptE2eeHybrid(payload, recipientPubKey, sendPair.publicKeyJwk)
         await relayE2eeEnvelope({
           blind_mailbox_id: blindMailboxId,
           ciphertext_envelope: ciphertext,
@@ -1105,6 +1102,12 @@ export function Messenger() {
     const currentMid = blindMailboxId
     if (!currentMid || !currentUserId) return
     if (activeMailboxIdRef.current !== currentMid) return
+    // Erst entschlüsseln, wenn feststeht, welche Schlüssel dieses Gerät hat.
+    // Ein Durchlauf während `loading` hätte keine, würde auf den Altpfad fallen
+    // und dessen Ergebnis im Zwischenspeicher festschreiben — der richtige
+    // Klartext käme danach nicht mehr durch.
+    const aktuelleIdentitaet = identityRef.current
+    if (activeContact && aktuelleIdentitaet.state === 'loading') return
     const seq = ++currentLoadSeqRef.current
 
     if (isInitial && messages.length === 0) {
@@ -1124,18 +1127,9 @@ export function Messenger() {
       let maxPartnerDeliveredId = 0
       let maxIncomingId = 0
 
-      let resolvedKeyPair = localKeyPair
-      if (!resolvedKeyPair && currentUserId) {
-        if (typeof getLocalKeyPair === 'function') {
-          resolvedKeyPair = await getLocalKeyPair(currentUserId)
-        }
-        if (!resolvedKeyPair && typeof getOrGenerateLocalKeyPair === 'function') {
-          resolvedKeyPair = await getOrGenerateLocalKeyPair(currentUserId)
-        }
-        if (resolvedKeyPair) {
-          setLocalKeyPair(resolvedKeyPair)
-        }
-      }
+      // Alle privaten Schlüssel des Kontos: der aktuelle zuerst, danach die
+      // Gerätesschlüssel aus der Zeit, als noch jedes Gerät seinen eigenen hatte.
+      const decryptionKeys = aktuelleIdentitaet.decryptionKeys
 
       const decryptedEnvelopes = await Promise.all(
         envelopes.map(async (env) => {
@@ -1151,12 +1145,12 @@ export function Messenger() {
               const targetUserId = activeContact.userId
               if (env.ciphertext_envelope.startsWith('sv-e2ee-hybrid-v1:')) {
                 let hybridSuccess = false
-                if (resolvedKeyPair) {
+                if (decryptionKeys.length > 0) {
                   try {
-                    plain = await decryptE2eeHybrid(env.ciphertext_envelope, resolvedKeyPair.privateKeyJwk)
+                    plain = await decryptE2eeHybridWithKeyring(env.ciphertext_envelope, decryptionKeys)
                     hybridSuccess = true
                   } catch {
-                    // Fallback to symmetric direct channel decryption
+                    // Kein Schlüssel des Bunds passt — unten der Altweg.
                   }
                 }
                 if (!hybridSuccess) {
@@ -1607,7 +1601,10 @@ export function Messenger() {
       const interval = setInterval(() => void loadMessages(false), 5000)
       return () => clearInterval(interval)
     }
-  }, [blindMailboxId, activeContact?.userId, activeGroup?.id, localKeyPair])
+    // `identity.state` gehört in die Abhängigkeiten: nach dem Entsperren muss
+    // derselbe Chat noch einmal durchlaufen, sonst bleibt der eben lesbar
+    // gewordene Verlauf bis zum nächsten Wechsel stumm.
+  }, [blindMailboxId, activeContact?.userId, activeGroup?.id, identity.state])
 
   // Autoscroll
   useEffect(() => {
@@ -1648,14 +1645,14 @@ export function Messenger() {
       return
     }
 
+    const targetBlindMailboxId = blindMailboxId
+    const targetUserId = activeContact?.userId
+    const currentGroupId = activeGroup?.id
+
     const clientUuid =
       typeof crypto !== 'undefined' && crypto.randomUUID
         ? crypto.randomUUID()
         : 'msg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9)
-
-    const targetBlindMailboxId = blindMailboxId
-    const targetUserId = activeContact?.userId
-    const currentGroupId = activeGroup?.id
 
     // Instant optimistic update (<5ms, non-blocking UI)
     const optimisticMessage: ChatMessage = {
@@ -1698,6 +1695,23 @@ export function Messenger() {
 
     setSending(true)
     try {
+      // Die Schlüsselprüfung steht hinter dem optimistischen Einfügen, damit die
+      // Eingabe sofort leer ist. Scheitert sie, nimmt der catch-Zweig die
+      // Nachricht wieder aus dem Verlauf.
+      let aktiveIdentitaet = identityRef.current
+      if (targetUserId) {
+        // Kurz nach dem Öffnen kann die Antwort noch ausstehen. Dann hier
+        // warten, statt abzulehnen — gesperrt und „noch unbekannt" sind zwei
+        // verschiedene Dinge.
+        if (aktiveIdentitaet.state === 'loading') {
+          aktiveIdentitaet = await resolveIdentity(currentUserId)
+          setIdentity(aktiveIdentitaet)
+        }
+        if (aktiveIdentitaet.state !== 'ready' || !aktiveIdentitaet.sendPair) {
+          throw new E2eeIdentityLockedError()
+        }
+      }
+
       const payloadObj: Record<string, unknown> = {
         client_uuid: clientUuid,
         sender_id: currentUserId,
@@ -1830,19 +1844,18 @@ export function Messenger() {
           }
         }
       } else if (targetUserId) {
-        const recipientPubKey = await getOrFetchRecipientPublicKey(targetUserId)
-        let hybridSuccess = false
-        if (recipientPubKey && localKeyPair?.publicKeyJwk) {
-          try {
-            ciphertext = await encryptE2eeHybrid(payload, recipientPubKey, localKeyPair.publicKeyJwk)
-            hybridSuccess = true
-          } catch {
-            // Fallback to symmetric direct channel encryption if hybrid encryption fails
-          }
+        // Nur hybrid. Schlägt das fehl, geht die Nachricht nicht raus — früher
+        // fiel sie hier auf einen Schlüssel zurück, den das Backend aus den
+        // beiden Benutzerkennungen selbst bilden kann.
+        const recipientPubKey = await requireRecipientPublicKey(targetUserId)
+        if (!aktiveIdentitaet.sendPair) {
+          throw new Error('Der Schlüssel dieses Kontos ist auf diesem Gerät gesperrt.')
         }
-        if (!hybridSuccess) {
-          ciphertext = await encryptE2eeMessage(payload, currentUserId, targetUserId)
-        }
+        ciphertext = await encryptE2eeHybrid(
+          payload,
+          recipientPubKey,
+          aktiveIdentitaet.sendPair.publicKeyJwk
+        )
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
           enqueueMessageMutation({
             blind_mailbox_id: targetBlindMailboxId,
@@ -1906,8 +1919,36 @@ export function Messenger() {
 
       await loadMessages()
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Fehler beim Senden'
-      toast.error(msg)
+      const istSchluesselProblem =
+        err instanceof E2eeRecipientKeyMissingError || err instanceof E2eeIdentityLockedError
+
+      if (istSchluesselProblem) {
+        // Konnte nicht verschlüsselt werden: die optimistisch eingefügte
+        // Nachricht wieder herausnehmen, sonst stünde im Verlauf etwas, das nie
+        // gesendet wurde. Der Text kommt in die Eingabe zurück, damit er nicht
+        // verloren geht.
+        if (err instanceof E2eeRecipientKeyMissingError && targetUserId) {
+          forgetRecipientPublicKey(targetUserId)
+        }
+        setMessages((prev) => {
+          const updated = prev.filter((m) => m.clientUuid !== clientUuid)
+          sessionChatCache.set(targetBlindMailboxId, updated.slice(-80))
+          return updated
+        })
+        if (rawText) setInputText(rawText)
+
+        if (err instanceof E2eeIdentityLockedError) {
+          toast.error('Der Schlüssel dieses Kontos ist auf diesem Gerät gesperrt.')
+          setIsSchluesselDialogOpen(true)
+        } else {
+          toast.error(
+            `${activeContact?.username ?? 'Dieser Kontakt'} hat noch keinen Schlüssel hinterlegt. Die Nachricht wurde nicht gesendet.`
+          )
+        }
+      } else {
+        const msg = err instanceof Error ? err.message : 'Fehler beim Senden'
+        toast.error(msg)
+      }
     } finally {
       setSending(false)
     }
@@ -3425,6 +3466,28 @@ export function Messenger() {
                   </div>
                 </div>
 
+                {(identity.state === 'needs-setup' || identity.state === 'locked') && (
+                  <div className="py-2 px-1">
+                    <div className="flex items-start gap-2.5 p-3 rounded-xl bg-status-warning/10 border border-status-warning/30">
+                      <KeyRound className="w-4 h-4 text-status-warning shrink-0 mt-0.5" />
+                      <div className="flex-1 min-w-0 space-y-2">
+                        <p className="text-xs text-on-surface">
+                          {identity.state === 'needs-setup'
+                            ? 'Dein Messenger-Schlüssel ist noch nicht eingerichtet. Danach kannst du deinen Verlauf auf jedem Gerät lesen.'
+                            : 'Dieser Verlauf ist auf diesem Gerät gesperrt. Zum Lesen brauchst du deinen Wiederherstellungsschlüssel.'}
+                        </p>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => setIsSchluesselDialogOpen(true)}
+                        >
+                          {identity.state === 'needs-setup' ? 'Schlüssel einrichten' : 'Entsperren'}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {messages.length === 0 && !loadingMessages && (
                   <div className="py-16 text-center text-xs text-on-surface-variant/70">
                     Noch keine Nachrichten. Schreibe die erste Nachricht!
@@ -4165,8 +4228,19 @@ export function Messenger() {
                             stagedFile || undefined
                           )
                         }}
-                        disabled={false}
-                        placeholder={editingMessage ? 'Nachricht bearbeiten …' : 'Nachricht schreiben …'}
+                        // Gesperrt heißt gesperrt: unter einer Identität, die
+                        // dieses Gerät nicht öffnen kann, wird nicht gesendet.
+                        // Während `loading` bleibt die Leiste offen, sonst
+                        // flackerte sie bei jedem Öffnen kurz tot.
+                        // Gruppenchats laufen über den Gruppenschlüssel weiter.
+                        disabled={istSchreibenGesperrt}
+                        placeholder={
+                          istSchreibenGesperrt
+                            ? 'Zum Schreiben zuerst den Schlüssel entsperren'
+                            : editingMessage
+                              ? 'Nachricht bearbeiten …'
+                              : 'Nachricht schreiben …'
+                        }
                         leftActions={
                           <>
                             <Button
@@ -4735,6 +4809,20 @@ export function Messenger() {
         onOpenChange={setIsWallpaperModalOpen}
         currentConfig={wallpaperConfig}
         onSaveConfig={(newCfg) => setWallpaperConfig(newCfg)}
+      />
+
+      <MessengerSchluesselDialog
+        open={isSchluesselDialogOpen}
+        onOpenChange={setIsSchluesselDialogOpen}
+        currentUserId={currentUserId}
+        state={identity.state}
+        onIdentityChanged={() => {
+          // Zwischenergebnisse verwerfen: was vorher nicht zu entschlüsseln war,
+          // liegt als Fehlschlag im Cache und bliebe sonst „Verschlüsselte
+          // Nachricht", obwohl der Schlüssel jetzt da ist.
+          clearEnvelopePlaintextCache()
+          setIdentityReloadToken((n) => n + 1)
+        }}
       />
 
       {/* Design-DNA Mute Dialog */}

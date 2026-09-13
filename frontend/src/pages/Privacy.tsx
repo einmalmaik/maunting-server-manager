@@ -10,8 +10,8 @@ export function Privacy() {
     title: t('privacyPolicy.title'),
     intro: t('privacyPolicy.intro'),
     callout: t('privacyPolicy.callout'),
-    lastUpdated: '2026-09-12',
-    version: '3.1',
+    lastUpdated: '2026-09-13',
+    version: '3.2',
     meta: 'Maunting Studios — Sicherheit braucht Vertrauen',
     sections: [
       { heading: t('privacyPolicy.sections.scope.heading'), body: t('privacyPolicy.sections.scope.body') },
@@ -41,6 +41,22 @@ export function Privacy() {
           t('privacyPolicy.sections.protection.items.dis'),
           t('privacyPolicy.sections.protection.items.backups'),
           t('privacyPolicy.sections.protection.items.metadata'),
+        ],
+      },
+      {
+        // Der Messenger ist der einzige Bereich, in dem die Instanz Inhalte
+        // weiterleitet, die sie selbst nicht lesen kann. Dazu gehoert auch die
+        // Kehrseite: ein verlorener Wiederherstellungsschluessel laesst sich von
+        // niemandem ersetzen, auch vom Betreiber nicht.
+        heading: t('privacyPolicy.sections.messenger.heading'),
+        body: t('privacyPolicy.sections.messenger.body'),
+        items: [
+          t('privacyPolicy.sections.messenger.items.envelopes'),
+          t('privacyPolicy.sections.messenger.items.accountKey'),
+          t('privacyPolicy.sections.messenger.items.keyring'),
+          t('privacyPolicy.sections.messenger.items.recoveryKey'),
+          t('privacyPolicy.sections.messenger.items.attachments'),
+          t('privacyPolicy.sections.messenger.items.receipts'),
         ],
       },
       {

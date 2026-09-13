@@ -23,6 +23,8 @@ vi.mock('@/api/social', () => ({
   updateGroupPermissions: vi.fn(),
   getE2eePublicKey: vi.fn(),
   setE2eePublicKey: vi.fn(),
+  getE2eeKeyring: vi.fn().mockResolvedValue({ wrapped_keyring: null, public_key: null, version: 0 }),
+  putE2eeKeyring: vi.fn(),
   relayE2eeEnvelope: vi.fn(),
   fetchE2eeEnvelopes: vi.fn(),
   getPublicProfiles: vi.fn().mockResolvedValue([]),
@@ -53,14 +55,52 @@ vi.mock('@/services/e2eeCrypto', () => ({
   decryptE2eeHybrid: vi.fn().mockImplementation(async (envelope) => {
     return envelope.replace('sv-e2ee-hybrid-v1:mock.', '')
   }),
+  // Produktivpfad: gegen alle Schlüssel des Kontos, nicht gegen einen Gerätesschlüssel.
+  decryptE2eeHybridWithKeyring: vi.fn().mockImplementation(async (envelope) => {
+    return envelope.replace('sv-e2ee-hybrid-v1:mock.', '')
+  }),
   encryptGroupE2eeMessage: vi.fn().mockResolvedValue('group-ciphertext'),
   decryptGroupE2eeMessage: vi.fn().mockResolvedValue('Hallo Gruppe'),
-  getLocalKeyPair: vi.fn().mockResolvedValue(null),
-  getOrGenerateLocalKeyPair: vi.fn().mockResolvedValue({
-    publicKeyJwk: '{"kty":"oct"}',
-    privateKeyJwk: '{"kty":"oct"}',
-  }),
   scrubPlaintextStorage: vi.fn(),
+}))
+
+/** Zustand des Geräts direkt setzbar, statt je Test einen Bund zu öffnen. */
+const { identitaet, MockRecipientKeyMissingError } = vi.hoisted(() => ({
+  identitaet: {
+    state: 'ready' as 'needs-setup' | 'locked' | 'ready',
+    sendPair: { publicKeyJwk: '{"kty":"oct"}', privateKeyJwk: '{"kty":"oct"}' } as
+      | { publicKeyJwk: string; privateKeyJwk: string }
+      | null,
+    decryptionKeys: ['{"kty":"oct"}'] as string[],
+    empfaengerSchluessel: 'mock-empfaenger-pub-key' as string | null,
+  },
+  MockRecipientKeyMissingError: class extends Error {
+    constructor(public readonly userId: number) {
+      super('Für diesen Empfänger liegt kein Schlüssel vor')
+      this.name = 'E2eeRecipientKeyMissingError'
+    }
+  },
+}))
+
+vi.mock('@/services/e2eeIdentity', () => ({
+  IDENTITY_LOADING: { state: 'loading', sendPair: null, decryptionKeys: [] },
+  resolveIdentity: vi.fn(async () => ({
+    state: identitaet.state,
+    sendPair: identitaet.sendPair,
+    decryptionKeys: identitaet.decryptionKeys,
+  })),
+  getRecipientPublicKey: vi.fn(async () => identitaet.empfaengerSchluessel),
+  requireRecipientPublicKey: vi.fn(async (userId: number) => {
+    if (!identitaet.empfaengerSchluessel) throw new MockRecipientKeyMissingError(userId)
+    return identitaet.empfaengerSchluessel
+  }),
+  forgetRecipientPublicKey: vi.fn(),
+  createIdentity: vi.fn(),
+  unlockWithRecoveryKey: vi.fn(),
+  rotateRecoveryKey: vi.fn(),
+  clearIdentityMemory: vi.fn(),
+  E2eeRecipientKeyMissingError: MockRecipientKeyMissingError,
+  E2eeLockedError: class extends Error {},
 }))
 
 vi.mock('@/lib/offlineSync', () => ({
@@ -95,6 +135,12 @@ describe('Messenger Attachment Flow', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     setupUser()
+
+    // Standardlage: Geraet entsperrt, Gegenseite hat einen Schluessel.
+    identitaet.state = 'ready'
+    identitaet.sendPair = { publicKeyJwk: '{"kty":"oct"}', privateKeyJwk: '{"kty":"oct"}' }
+    identitaet.decryptionKeys = ['{"kty":"oct"}']
+    identitaet.empfaengerSchluessel = 'mock-empfaenger-pub-key'
 
     vi.mocked(socialApi.getFriends).mockResolvedValue([
       {

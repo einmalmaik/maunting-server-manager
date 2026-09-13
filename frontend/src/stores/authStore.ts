@@ -9,6 +9,7 @@ import { usePromptStore } from '@/stores/promptStore'
 import { clearSqlConsoleHistory } from '@/lib/sqlConsoleStorage'
 import { useVaultStore } from '@/desktop/vault/vaultStore'
 import { clearMemoryKeyStore } from '@/services/e2eeCrypto'
+import { clearIdentityMemory } from '@/services/e2eeIdentity'
 import type { User } from '@/types'
 
 const CACHED_USER_KEY = 'msm_cached_user'
@@ -117,8 +118,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     usePermissionsStore.getState().reset()
     // Tresor sperren und alle Klartext-Einträge sowie CryptoKeys aus dem RAM entfernen (SEC-05)
     useVaultStore.getState().lock()
-    // E2EE In-Memory-Schlüssel aus dem RAM leeren
+    // E2EE In-Memory-Schlüssel aus dem RAM leeren. Der Schlüsselbund in der
+    // IndexedDB bleibt wie bisher liegen — er ist an das Gerät gebunden, nicht
+    // an die Sitzung, und ein erneutes Anmelden soll nicht wieder nach dem
+    // Wiederherstellungsschlüssel fragen.
     clearMemoryKeyStore()
+    clearIdentityMemory()
     // Die Knotenliste hält Name, Adresse und Port des Agenten sowie den
     // TLS-Fingerabdruck. Ohne dieses clear() bliebe sie bis zum nächsten
     // Neuladen der Seite im Speicher des Tabs liegen.

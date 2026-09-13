@@ -136,19 +136,19 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die um die Download-Hinweise ergaenzte Fassung 3.1 vom 2026-09-12 aus', () => {
+  it('weist die um den Messenger-Abschnitt ergaenzte Fassung 3.2 vom 2026-09-13 aus', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.1`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.2`)),
     ).toBeInTheDocument();
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();
     // Maschinenlesbar und sichtbar muessen dasselbe Datum tragen: ein Leser
     // vergleicht den Text, ein Archiv das Attribut.
-    expect(stand).toHaveAttribute('datetime', '2026-09-12');
-    expect(stand).toHaveTextContent('2026-09-12');
+    expect(stand).toHaveAttribute('datetime', '2026-09-13');
+    expect(stand).toHaveTextContent('2026-09-13');
   });
 
   /**

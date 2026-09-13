@@ -4297,6 +4297,18 @@
           "metadata": "Für Auswahl, Wiederherstellung und Audit notwendige Betriebsmetadaten bleiben für die berechtigte Instanz und den konfigurierten Speicheranbieter sichtbar"
         }
       },
+      "messenger": {
+        "heading": "Messenger und Ende-zu-Ende-Verschlüsselung",
+        "body": "Nachrichten im Messenger werden auf deinem Gerät verschlüsselt und erst auf dem Gerät der Gegenseite wieder geöffnet. Die Instanz leitet nur Chiffretext weiter.",
+        "items": {
+          "envelopes": "Gespeichert wird der verschlüsselte Umschlag, sein Eingangszeitpunkt und eine aus den Beteiligten abgeleitete Postfachkennung. Der Klartext einer Nachricht liegt zu keinem Zeitpunkt auf dem Server.",
+          "accountKey": "Der Schlüssel gehört deinem Konto, nicht einem einzelnen Gerät. Nur so liest du denselben Verlauf im Browser, in der Desktop-App und in der Android-App.",
+          "keyring": "Der private Teil dieses Schlüssels wird auf deinem Gerät mit einem aus deinem Wiederherstellungsschlüssel abgeleiteten Schlüssel (Argon2id) verpackt und in dieser Form bei der Instanz hinterlegt. Ohne deinen Wiederherstellungsschlüssel ist dieses Paket für den Betreiber wertlos.",
+          "recoveryKey": "Der Wiederherstellungsschlüssel wird dir genau einmal angezeigt und nirgends gespeichert. Verlierst du ihn, bleibt dein bisheriger Verlauf auf neuen Geräten dauerhaft unlesbar; bereits entsperrte Geräte behalten ihn.",
+          "attachments": "Bilder, Sprachnachrichten und Dateien werden vor dem Hochladen auf demselben Weg verschlüsselt. Der Speicher sieht nur den verschlüsselten Block, seine Größe und seinen Zeitpunkt.",
+          "receipts": "Zustell- und Lesebestätigungen laufen als verschlüsselte Steuernachrichten über denselben Weg. Kann eine Bestätigung nicht verschlüsselt werden, unterbleibt sie, statt ungeschützt zu gehen."
+        }
+      },
       "providers": {
         "heading": "5. Optionale externe Anbieter",
         "body": "Kein optionaler Anbieter ist für das Basispanel erforderlich. Aktiviert der Betreiber einen Anbieter, erhält er die für diese Integration erforderlichen Daten.",

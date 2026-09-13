@@ -4297,6 +4297,18 @@
           "metadata": "Operational metadata needed to select, restore, and audit backups remains visible to the authorized instance and configured storage provider"
         }
       },
+      "messenger": {
+        "heading": "Messenger and end-to-end encryption",
+        "body": "Messenger messages are encrypted on your device and only opened again on the other side. The instance relays ciphertext and nothing else.",
+        "items": {
+          "envelopes": "What is stored is the encrypted envelope, the time it arrived, and a mailbox identifier derived from the participants. Message plaintext never resides on the server.",
+          "accountKey": "The key belongs to your account, not to a single device. That is what lets you read the same history in the browser, in the desktop app, and in the Android app.",
+          "keyring": "The private part of that key is wrapped on your device with a key derived from your recovery key (Argon2id) and deposited with the instance in that form only. Without your recovery key the package is worthless to the operator.",
+          "recoveryKey": "The recovery key is shown to you exactly once and stored nowhere. If you lose it, your existing history stays permanently unreadable on new devices; devices already unlocked keep it.",
+          "attachments": "Images, voice messages, and files are encrypted the same way before upload. Storage only ever sees the encrypted block, its size, and its timestamp.",
+          "receipts": "Delivery and read receipts travel as encrypted control messages over the same path. If a receipt cannot be encrypted, it is not sent rather than sent unprotected."
+        }
+      },
       "providers": {
         "heading": "5. Optional external providers",
         "body": "No optional provider is required by the base panel. When the operator enables one, the provider receives the data needed for that integration.",

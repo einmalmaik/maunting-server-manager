@@ -6,22 +6,16 @@
  * before the user has necessarily opened the chat.
  */
 
-import { relayE2eeEnvelope, getE2eePublicKey, fetchE2eeEnvelopes } from '@/api/social'
-import {
-  getLocalKeyPair,
-  getOrGenerateLocalKeyPair,
-  encryptE2eeHybrid,
-  encryptE2eeMessage,
-} from '@/services/e2eeCrypto'
+import { relayE2eeEnvelope, fetchE2eeEnvelopes } from '@/api/social'
+import { encryptE2eeHybrid } from '@/services/e2eeCrypto'
+import { resolveIdentity, getRecipientPublicKey } from '@/services/e2eeIdentity'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
 
 // Cache acknowledged envelope IDs in memory to avoid duplicate receipt storms
 export const deliveredEnvelopeIds = new Set<number>()
-const recipientPublicKeyCache = new Map<number, { key: string | null; fetchedAt: number }>()
 
 export function resetDeliveredEnvelopeCache(): void {
   deliveredEnvelopeIds.clear()
-  recipientPublicKeyCache.clear()
 }
 
 export async function sendE2eeDeliveryReceipt({
@@ -76,33 +70,27 @@ export async function sendE2eeDeliveryReceipt({
     }
     const payload = JSON.stringify(payloadObj)
 
-    let localKeyPair = await getLocalKeyPair(currentUserId)
-    if (!localKeyPair) {
-      localKeyPair = await getOrGenerateLocalKeyPair(currentUserId)
+    // Ist der Schlüsselbund auf diesem Gerät gesperrt, gibt es keine Quittung.
+    // Der Ersatzweg von früher hätte den Schlüssel allein aus den beiden
+    // Benutzerkennungen abgeleitet und damit für den Server lesbar gemacht;
+    // ein fehlendes graues Häkchen wiegt leichter als eine gebrochene Zusage.
+    const identity = await resolveIdentity(currentUserId)
+    if (identity.state !== 'ready' || !identity.sendPair) {
+      deliveredEnvelopeIds.delete(envelopeId)
+      return false
     }
 
-    // Cache public keys for 10 minutes to minimize network latency on delivery acknowledgments
-    let recipientPubKey: string | null = null
-    const cachedPubKey = recipientPublicKeyCache.get(senderUserId)
-    const now = Date.now()
-    if (cachedPubKey && now - cachedPubKey.fetchedAt < 600000) {
-      recipientPubKey = cachedPubKey.key
-    } else {
-      try {
-        const info = await getE2eePublicKey(senderUserId)
-        recipientPubKey = info?.public_key || null
-        recipientPublicKeyCache.set(senderUserId, { key: recipientPubKey, fetchedAt: now })
-      } catch {
-        recipientPubKey = null
-      }
+    const recipientPubKey = await getRecipientPublicKey(senderUserId)
+    if (!recipientPubKey) {
+      deliveredEnvelopeIds.delete(envelopeId)
+      return false
     }
 
-    let ciphertext: string
-    if (recipientPubKey && localKeyPair?.publicKeyJwk) {
-      ciphertext = await encryptE2eeHybrid(payload, recipientPubKey, localKeyPair.publicKeyJwk)
-    } else {
-      ciphertext = await encryptE2eeMessage(payload, currentUserId, senderUserId)
-    }
+    const ciphertext = await encryptE2eeHybrid(
+      payload,
+      recipientPubKey,
+      identity.sendPair.publicKeyJwk
+    )
 
     await relayE2eeEnvelope({
       blind_mailbox_id: blindMailboxId,

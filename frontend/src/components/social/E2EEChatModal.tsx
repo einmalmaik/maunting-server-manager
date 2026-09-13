@@ -25,22 +25,25 @@ import {
   type FriendItem,
   relayE2eeEnvelope,
   fetchE2eeEnvelopes,
-  getE2eePublicKey,
-  setE2eePublicKey,
 } from '@/api/social'
 import { loadNotesOfflineFirst, loadCalendarEventsOfflineFirst } from '@/lib/offlineSync'
 import type { NoteItem } from '@/pages/Notes'
 import type { CalendarEventItem } from '@/pages/Calendar'
 import {
   deriveBlindMailboxId,
-  encryptE2eeMessage,
+  // Nur zum Lesen von Altnachrichten — siehe Hinweis an der Funktion.
   decryptE2eeMessage,
   encryptE2eeHybrid,
-  decryptE2eeHybrid,
-  getOrGenerateLocalKeyPair,
+  decryptE2eeHybridWithKeyring,
   envelopePlaintextCache,
-  type LocalE2eeKeyPair,
 } from '@/services/e2eeCrypto'
+import {
+  resolveIdentity,
+  getRecipientPublicKey,
+  requireRecipientPublicKey,
+  IDENTITY_LOADING,
+  type E2eeIdentity,
+} from '@/services/e2eeIdentity'
 import { toast } from '@/stores/toastStore'
 import { compressImageFile } from '@/lib/imageCompression'
 import {
@@ -90,7 +93,7 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
   const [loading, setLoading] = useState(false)
   const [sending, setSending] = useState(false)
   const [blindMailboxId, setBlindMailboxId] = useState<string>('')
-  const [localKeyPair, setLocalKeyPair] = useState<LocalE2eeKeyPair | null>(null)
+  const [identity, setIdentity] = useState<E2eeIdentity>(IDENTITY_LOADING)
   const [recipientPublicKey, setRecipientPublicKey] = useState<string | null>(null)
 
   // Attachments
@@ -108,37 +111,18 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
 
   const targetUserId = friend?.user_id ?? friend?.id ?? 0
 
-  // Initialize local key pair and upload public key to server
+  // Identität des Kontos auflösen. Erzeugt und veröffentlicht nichts: die
+  // Einrichtung läuft ausschließlich über den Messenger und den dortigen
+  // Schlüsseldialog, damit es nur eine Stelle gibt, die den Schlüssel setzt.
   useEffect(() => {
     if (!open || !currentUserId) return
     let active = true
 
-    getOrGenerateLocalKeyPair(currentUserId).then(async (kp) => {
-      if (!active) return
-      setLocalKeyPair(kp)
-      try {
-        const existing = await getE2eePublicKey(currentUserId)
-        let isMatch = false
-        if (existing?.public_key) {
-          if (existing.public_key.trim() === kp.publicKeyJwk.trim()) {
-            isMatch = true
-          } else {
-            try {
-              const serverParsed = JSON.parse(existing.public_key)
-              const localParsed = JSON.parse(kp.publicKeyJwk)
-              if (serverParsed.n && localParsed.n && serverParsed.n === localParsed.n) {
-                isMatch = true
-              }
-            } catch {}
-          }
-        }
-        if (!isMatch) {
-          await setE2eePublicKey(kp.publicKeyJwk)
-        }
-      } catch {
-        // Non-blocking key registration
-      }
-    }).catch(() => {})
+    resolveIdentity(currentUserId)
+      .then((next) => {
+        if (active) setIdentity(next)
+      })
+      .catch(() => {})
 
     return () => {
       active = false
@@ -150,11 +134,11 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
     if (!open || !targetUserId) return
     let active = true
 
-    getE2eePublicKey(targetUserId).then((info) => {
-      if (active && info?.public_key) {
-        setRecipientPublicKey(info.public_key)
-      }
-    }).catch(() => {})
+    getRecipientPublicKey(targetUserId)
+      .then((key) => {
+        if (active && key) setRecipientPublicKey(key)
+      })
+      .catch(() => {})
 
     return () => {
       active = false
@@ -195,8 +179,11 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
             plain = cached.plain
           } else {
             if (env.ciphertext_envelope.startsWith('sv-e2ee-hybrid-v1:')) {
-              if (localKeyPair) {
-                plain = await decryptE2eeHybrid(env.ciphertext_envelope, localKeyPair.privateKeyJwk)
+              if (identity.decryptionKeys.length > 0) {
+                plain = await decryptE2eeHybridWithKeyring(
+                  env.ciphertext_envelope,
+                  identity.decryptionKeys
+                )
               } else {
                 throw new Error('Local key not ready')
               }
@@ -266,7 +253,7 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
       const interval = setInterval(() => void loadMessages(false), 4000)
       return () => clearInterval(interval)
     }
-  }, [open, blindMailboxId, localKeyPair])
+  }, [open, blindMailboxId, identity.state])
 
   // Autoscroll
   useEffect(() => {
@@ -311,12 +298,17 @@ export function E2EEChatModal({ open, onOpenChange, currentUserId, friend }: E2E
       if (img) payloadObj.image_attachment = img
 
       const payload = JSON.stringify(payloadObj)
-      let ciphertext: string
-      if (recipientPublicKey && localKeyPair?.publicKeyJwk) {
-        ciphertext = await encryptE2eeHybrid(payload, recipientPublicKey, localKeyPair.publicKeyJwk)
-      } else {
-        ciphertext = await encryptE2eeMessage(payload, currentUserId, targetUserId)
+      if (!identity.sendPair) {
+        throw new Error('Der Schlüssel dieses Kontos ist auf diesem Gerät gesperrt.')
       }
+      // Nur hybrid. Ohne Empfängerschlüssel geht nichts raus — der frühere
+      // Ersatzweg war für das Backend nachrechenbar.
+      const recipientKey = recipientPublicKey ?? (await requireRecipientPublicKey(targetUserId))
+      const ciphertext = await encryptE2eeHybrid(
+        payload,
+        recipientKey,
+        identity.sendPair.publicKeyJwk
+      )
 
       await relayE2eeEnvelope({
         blind_mailbox_id: blindMailboxId,

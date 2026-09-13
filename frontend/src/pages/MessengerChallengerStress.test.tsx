@@ -1,6 +1,6 @@
 import React from 'react'
 import { render, screen, waitFor, fireEvent, cleanup, act } from '@testing-library/react'
-import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import { Messenger, clearSessionChatCache } from './Messenger'
 import * as socialApi from '@/api/social'
@@ -36,6 +36,8 @@ vi.mock('@/api/social', () => ({
   updateGroupPermissions: vi.fn(),
   getE2eePublicKey: vi.fn(),
   setE2eePublicKey: vi.fn(),
+  getE2eeKeyring: vi.fn().mockResolvedValue({ wrapped_keyring: null, public_key: null, version: 0 }),
+  putE2eeKeyring: vi.fn(),
   relayE2eeEnvelope: vi.fn(),
   fetchE2eeEnvelopes: vi.fn(),
   getPublicProfiles: vi.fn().mockResolvedValue([]),
@@ -45,6 +47,43 @@ vi.mock('@/api/social', () => ({
   downloadChatMedia: vi.fn(),
   downloadAndDecryptChatAttachment: vi.fn(),
   uploadEncryptedChatAttachment: vi.fn(),
+}))
+
+/** Zustand des Geräts direkt setzbar, statt je Test einen Bund zu öffnen. */
+const { identitaet, MockRecipientKeyMissingError } = vi.hoisted(() => ({
+  identitaet: {
+    state: 'ready' as 'needs-setup' | 'locked' | 'ready',
+    sendPair: null as { publicKeyJwk: string; privateKeyJwk: string } | null,
+    decryptionKeys: [] as string[],
+    empfaengerSchluessel: null as string | null,
+  },
+  MockRecipientKeyMissingError: class extends Error {
+    constructor(public readonly userId: number) {
+      super('Für diesen Empfänger liegt kein Schlüssel vor')
+      this.name = 'E2eeRecipientKeyMissingError'
+    }
+  },
+}))
+
+vi.mock('@/services/e2eeIdentity', () => ({
+  IDENTITY_LOADING: { state: 'loading', sendPair: null, decryptionKeys: [] },
+  resolveIdentity: vi.fn(async () => ({
+    state: identitaet.state,
+    sendPair: identitaet.sendPair,
+    decryptionKeys: identitaet.decryptionKeys,
+  })),
+  getRecipientPublicKey: vi.fn(async () => identitaet.empfaengerSchluessel),
+  requireRecipientPublicKey: vi.fn(async (userId: number) => {
+    if (!identitaet.empfaengerSchluessel) throw new MockRecipientKeyMissingError(userId)
+    return identitaet.empfaengerSchluessel
+  }),
+  forgetRecipientPublicKey: vi.fn(),
+  createIdentity: vi.fn(),
+  unlockWithRecoveryKey: vi.fn(),
+  rotateRecoveryKey: vi.fn(),
+  clearIdentityMemory: vi.fn(),
+  E2eeRecipientKeyMissingError: MockRecipientKeyMissingError,
+  E2eeLockedError: class extends Error {},
 }))
 
 vi.mock('@/api/teams', () => ({
@@ -97,6 +136,14 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
     clearBlindMailboxIdCache()
   })
 
+  // Ein echtes Schlüsselpaar für die ganze Datei: die Krypto ist hier nicht
+  // gemockt, und RSA-4096 je Test wäre die teuerste Zeile.
+  let kontoSchluessel: { publicKeyJwk: string; privateKeyJwk: string }
+
+  beforeAll(async () => {
+    kontoSchluessel = await generateLocalE2eeKeyPair()
+  }, 60_000)
+
   beforeEach(() => {
     cleanup()
     vi.clearAllMocks()
@@ -105,6 +152,12 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
     clearSessionChatCache()
     clearEnvelopePlaintextCache()
     setupAuthUser(myUserId, 'me')
+
+    // Standardlage: Gerät entsperrt, Gegenseite hat einen Schlüssel.
+    identitaet.state = 'ready'
+    identitaet.sendPair = kontoSchluessel
+    identitaet.decryptionKeys = [kontoSchluessel.privateKeyJwk]
+    identitaet.empfaengerSchluessel = kontoSchluessel.publicKeyJwk
 
     useMessengerNotificationStore.setState({
       blockedUserIds: [],
@@ -652,10 +705,11 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
     it('restores conversation immediately from URL query param and cleanly decrypts hybrid and legacy envelopes without placeholder spam', async () => {
       const charlieMid = await deriveBlindMailboxId(myUserId, charlieId)
 
-      // Keypair for Charlie and MyUser
-      const myKeys = await generateLocalE2eeKeyPair()
-      const charlieKeys = await generateLocalE2eeKeyPair()
-      await storeLocalKeyPair(myUserId, myKeys)
+      // Der Kontoschlüssel aus beforeAll steht für beide Seiten: der Test
+      // prüft, dass der Umschlag gelesen wird, nicht wessen Schlüssel es war.
+      const myKeys = kontoSchluessel
+      const charlieKeys = kontoSchluessel
+      identitaet.decryptionKeys = [myKeys.privateKeyJwk]
 
       // Envelope 1: Plain legacy/direct message from Charlie
       const msg1Plain = JSON.stringify({
@@ -776,7 +830,7 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
 
       // 4. Zero instances of "Verschlüsselte Nachricht" placeholder spam
       expect(screen.queryByText(/Verschlüsselte Nachricht/i)).not.toBeInTheDocument()
-    })
+    }, 30_000)
   })
 
   // =========================================================================

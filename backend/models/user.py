@@ -152,8 +152,22 @@ class User(Base):
         default="friends",
         server_default="friends",
     )
-    # E2EE Public Key (JWK / base64) für Ende-zu-Ende verschlüsselte Direkt- & Team-Chats
+    # E2EE Public Key (JWK) des Kontos — nicht des Geräts. Jedes Endgerät des
+    # Benutzers arbeitet mit demselben Schlüsselpaar, sonst kann ein Gerät nicht
+    # lesen, was ein anderes geschrieben hat.
     social_e2ee_public_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Der private Teil, verpackt mit einem Argon2id-Schlüssel aus dem
+    # Wiederherstellungsschlüssel des Benutzers (`sv-e2ee-keyring-v1:`-Umschlag).
+    # Der Server bewahrt ihn auf und kann ihn nicht öffnen.
+    social_e2ee_wrapped_keyring: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Schranke gegen verlorene Rettungen: adoptieren zwei Geräte gleichzeitig
+    # einen alten Gerätesschlüssel, fällt der zweite Schreibvorgang auf.
+    social_e2ee_keyring_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
 
     avatar_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
 

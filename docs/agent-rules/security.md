@@ -180,6 +180,39 @@ if (policy.deviceKeyRequired) {
 
 Warum gut: sichere Ablehnung, kein Fallback, Runtime-State wird bereinigt.
 
+### 5.1 Messenger-Identität (E2EE)
+
+Der Identitätsschlüssel des Messengers gehört dem **Konto**, nicht dem Gerät.
+`users.social_e2ee_public_key` hat genau einen Eintrag pro Benutzer; sein privater
+Teil liegt verpackt in `users.social_e2ee_wrapped_keyring`. Alles läuft über
+`frontend/src/services/e2eeIdentity.ts` — die einzige Stelle, die Identität auflöst.
+
+Harte Invarianten:
+
+- **Kein Schlüssel wird erzeugt oder veröffentlicht, solange serverseitig ein
+  Schlüsselbund liegt.** Ein Gerät ohne lokalen Bund meldet `locked` und wartet
+  auf den Wiederherstellungsschlüssel. Ein Gerät, das hier ein frisches Paar
+  hochlädt, macht den gesamten Verlauf des Kontos auf allen Geräten unlesbar —
+  genau das ist am 13.09.2026 passiert.
+- Ein Netzwerkfehler beim Lesen des Bunds ist `locked`, niemals `needs-setup`.
+  Sonst führt ein Klick auf „Einrichten" dieselbe Zerstörung herbei.
+- Schlüsselbund und Public Key werden nur gemeinsam und nur mit passender
+  `expected_version` geschrieben. Bei Abweichung 409, kein Überschreiben.
+- Gesendet wird ausschließlich hybrid gegen den veröffentlichten
+  Empfängerschlüssel. Fehlt er, wird **nicht gesendet**.
+- `encryptE2eeMessage` ist kein Sendeweg. Sein Schlüssel ist
+  `sha256("msm:dm:key:<min>:<max>")` — das Backend kennt beim Relais beide
+  Kennungen und kann ihn nachbilden. Die Funktion existiert nur noch, damit
+  Nachrichten von vor dem Kontoschlüssel lesbar bleiben.
+- Entschlüsselt wird gegen den ganzen Bund (`decryptE2eeHybridWithKeyring`),
+  nicht gegen einen einzelnen Schlüssel: adoptierte Gerätesschlüssel aus der
+  Altzeit sind der einzige Weg zu dem damals entstandenen Verlauf.
+- Der Wiederherstellungsschlüssel wird genau einmal angezeigt und nirgends
+  gespeichert. Er darf nicht in Logs, Toasts, URLs oder Requests erscheinen.
+
+Wer eine dieser Zusagen ändert, muss `frontend/src/pages/Privacy.tsx`
+(Abschnitt `privacyPolicy.sections.messenger`) im selben Commit mitziehen.
+
 ---
 
 ## 6. Passkey/WebAuthn
