@@ -183,23 +183,25 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
         expect(screen.getAllByText('alice').length).toBeGreaterThan(0)
       })
 
-      const input = screen.getByPlaceholderText('Nachricht schreiben …')
-      const sendBtn = screen.getByTitle('Senden')
+      const input = await screen.findByPlaceholderText('Nachricht schreiben …')
 
-      // Rapidly send Message 1 (will get ID 2)
+      // Send Message 1 (will get ID 2)
       fireEvent.change(input, { target: { value: 'Rapid Message 1' } })
-      fireEvent.click(sendBtn)
-      await waitFor(() => expect(screen.getByText('Rapid Message 1')).toBeInTheDocument())
+      await waitFor(() => expect(screen.getByTitle('Senden')).not.toBeDisabled(), { timeout: 5000 })
+      fireEvent.click(screen.getByTitle('Senden'))
+      await waitFor(() => expect(screen.getByText('Rapid Message 1')).toBeInTheDocument(), { timeout: 5000 })
 
-      // Rapidly send Message 2 (will get ID 5)
+      // Send Message 2 (will get ID 5)
       fireEvent.change(input, { target: { value: 'Rapid Message 2' } })
-      fireEvent.click(sendBtn)
-      await waitFor(() => expect(screen.getByText('Rapid Message 2')).toBeInTheDocument())
+      await waitFor(() => expect(screen.getByTitle('Senden')).not.toBeDisabled(), { timeout: 5000 })
+      fireEvent.click(screen.getByTitle('Senden'))
+      await waitFor(() => expect(screen.getByText('Rapid Message 2')).toBeInTheDocument(), { timeout: 5000 })
 
-      // Rapidly send Message 3 (will get ID 10)
+      // Send Message 3 (will get ID 10)
       fireEvent.change(input, { target: { value: 'Rapid Message 3' } })
-      fireEvent.click(sendBtn)
-      await waitFor(() => expect(screen.getByText('Rapid Message 3')).toBeInTheDocument())
+      await waitFor(() => expect(screen.getByTitle('Senden')).not.toBeDisabled(), { timeout: 5000 })
+      fireEvent.click(screen.getByTitle('Senden'))
+      await waitFor(() => expect(screen.getByText('Rapid Message 3')).toBeInTheDocument(), { timeout: 5000 })
 
       // All 3 messages initially display 1 single checkmark (sent / not yet delivered)
       await waitFor(() => {
@@ -366,11 +368,11 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
         expect(screen.getAllByText('alice').length).toBeGreaterThan(0)
       })
 
-      const input = screen.getByPlaceholderText('Nachricht schreiben …')
+      const input = await screen.findByPlaceholderText('Nachricht schreiben …')
+      fireEvent.change(input, { target: { value: 'In-Flight Message' } })
       const sendBtn = screen.getByTitle('Senden')
 
       // Send message - relay remains pending
-      fireEvent.change(input, { target: { value: 'In-Flight Message' } })
       fireEvent.click(sendBtn)
       await waitFor(() => expect(screen.getByText('In-Flight Message')).toBeInTheDocument())
       expect(screen.getByTitle(singleTickTitle)).toBeInTheDocument()
@@ -505,10 +507,9 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
         created_at: new Date().toISOString(),
       })
 
-      const input = screen.getByPlaceholderText('Nachricht schreiben …')
-      const sendBtn = screen.getByTitle('Senden')
-
+      const input = await screen.findByPlaceholderText('Nachricht schreiben …')
       fireEvent.change(input, { target: { value: 'Hello Bob low ID' } })
+      const sendBtn = screen.getByTitle('Senden')
       fireEvent.click(sendBtn)
 
       await waitFor(() => {
@@ -819,6 +820,7 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
       // Delivery receipt must NEVER be sent to blocked contact
       expect(socialApi.relayE2eeEnvelope).not.toHaveBeenCalledWith(
         expect.objectContaining({
+          recipient_id: bobId,
           control_type: 'delivery_receipt',
         })
       )

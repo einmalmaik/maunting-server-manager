@@ -51,6 +51,10 @@ export function GeneralTab() {
           story_fable_download_enabled: settings.story_fable_download_enabled,
           calendar_enabled: settings.calendar_enabled,
           notes_enabled: settings.notes_enabled,
+          // Fehlte hier, obwohl der Schalter darunter existiert und schaltet: Der Nutzer legte
+          // den Social-Hub um, bekam "Gespeichert" zu sehen und fand beim naechsten Laden alles
+          // beim Alten. Ein stummer Schalter ist schlimmer als gar keiner.
+          social_enabled: settings.social_enabled,
           vault_enabled: settings.vault_enabled,
           cloudflare_enabled: settings.cloudflare_enabled,
         }),

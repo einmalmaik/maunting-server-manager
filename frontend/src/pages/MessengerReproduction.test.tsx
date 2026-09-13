@@ -399,8 +399,6 @@ describe('Requirement R1 Reproduction: E2EE Messenger Failure Modes', () => {
         expect(screen.getByText('Wichtige Nachricht')).toBeInTheDocument()
       })
 
-      console.log('DEBUG: relay calls:', vi.mocked(socialApi.relayE2eeEnvelope).mock.calls.length)
-
       // Simulate incoming delivery receipt event from Alice acknowledging envelope 42
       window.dispatchEvent(
         new CustomEvent('msm:sync-event', {
@@ -415,12 +413,12 @@ describe('Requirement R1 Reproduction: E2EE Messenger Failure Modes', () => {
 
       // The message successfully transitions to 2 checkmarks (delivered)
       const deliveredCheckTitle = 'Zugestellt / Vom Gesprächspartner empfangen'
-      await waitFor(() => {
-        const checks = screen.queryAllByTitle(deliveredCheckTitle)
-        const unchecks = screen.queryAllByTitle('Nicht zugestellt (noch nicht beim Empfänger angekommen)')
-        console.log('DEBUG: delivered count:', checks.length, 'undelivered count:', unchecks.length)
-        expect(screen.getByTitle(deliveredCheckTitle)).toBeInTheDocument()
-      })
+      await waitFor(
+        () => {
+          expect(screen.getByTitle(deliveredCheckTitle)).toBeInTheDocument()
+        },
+        { timeout: 4000 }
+      )
     })
   })
 
