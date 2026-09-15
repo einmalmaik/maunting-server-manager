@@ -76,6 +76,8 @@ export interface UseCallState {
   callDurationSeconds: number
   localStream: MediaStream | null
   remoteStream: MediaStream | null
+  setLocalStream: (stream: MediaStream | null) => void
+  setRemoteStream: (stream: MediaStream | null) => void
 
   initiateCall: (partner: CallPartner, mode: CallMode) => Promise<string>
   startGroupCall: (group: {
@@ -90,6 +92,7 @@ export interface UseCallState {
   }) => void
   receiveCall: (partner: CallPartner, mode: CallMode, blindToken: string) => void
   acceptCall: () => Promise<void>
+  rejectCall: () => void
   endCall: () => void
   toggleMute: () => void
   toggleCamera: () => void
@@ -115,7 +118,108 @@ export interface UseCallState {
 }
 
 import { create } from 'zustand'
-import { startDirectCall } from '@/api/social'
+import { getWebRtcIceServers, rejectDirectCall, startDirectCall } from '@/api/social'
+import { wsUrl } from '@/config/api'
+
+let directSocket: WebSocket | null = null
+let directPeer: RTCPeerConnection | null = null
+let pendingCandidates: RTCIceCandidateInit[] = []
+let transportGeneration = 0
+
+function closeDirectTransport() {
+  transportGeneration += 1
+  pendingCandidates = []
+  directSocket?.close()
+  directSocket = null
+  directPeer?.close()
+  directPeer = null
+}
+
+function sendSignal(payload: Record<string, unknown>) {
+  if (directSocket?.readyState === WebSocket.OPEN) {
+    directSocket.send(JSON.stringify({ action: 'signal', data: JSON.stringify(payload) }))
+  }
+}
+
+async function connectDirectTransport(
+  token: string,
+  role: 'initiator' | 'receiver',
+  mode: CallMode,
+  set: (update: Partial<UseCallState>) => void,
+  get: () => UseCallState,
+) {
+  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === 'undefined') return
+  closeDirectTransport()
+  const generation = transportGeneration
+  const ice = await (typeof getWebRtcIceServers === 'function'
+    ? getWebRtcIceServers().catch(() => ({ ice_servers: [] as RTCIceServer[] }))
+    : Promise.resolve({ ice_servers: [] as RTCIceServer[] }))
+  if (generation !== transportGeneration) return
+  const peer = new RTCPeerConnection({ iceServers: ice.ice_servers })
+  directPeer = peer
+  const local = await navigator.mediaDevices.getUserMedia({ audio: true, video: mode === 'video' })
+  if (generation !== transportGeneration) {
+    local.getTracks().forEach((track) => track.stop())
+    peer.close()
+    return
+  }
+  set({ localStream: local })
+  local.getTracks().forEach((track) => peer.addTrack(track, local))
+  peer.ontrack = (event) => {
+    if (event.streams[0]) set({ remoteStream: event.streams[0], state: 'active' })
+  }
+  peer.onicecandidate = (event) => {
+    if (event.candidate) sendSignal({ type: 'ice-candidate', candidate: event.candidate.toJSON() })
+  }
+  peer.onconnectionstatechange = () => {
+    if (peer.connectionState === 'connected') set({ state: 'active' })
+    if (['failed', 'disconnected', 'closed'].includes(peer.connectionState) && get().state !== 'idle') get().endCall()
+  }
+
+  const socket = new WebSocket(wsUrl('/api/social/webrtc/signal'))
+  directSocket = socket
+  const sendOffer = async () => {
+    if (role !== 'initiator' || peer.signalingState !== 'stable') return
+    const offer = await peer.createOffer()
+    await peer.setLocalDescription(offer)
+    sendSignal({ type: 'offer', sdp: offer.sdp })
+  }
+  socket.onopen = () => socket.send(JSON.stringify({ action: 'join', token }))
+  socket.onmessage = async (event) => {
+    if (generation !== transportGeneration) return
+    let message: { event?: string; data?: string }
+    try { message = JSON.parse(String(event.data)) } catch { return }
+    if (message.event === 'peer_joined') {
+      await sendOffer()
+      return
+    }
+    if (message.event === 'peer_left') {
+      get().endCall()
+      return
+    }
+    if (message.event !== 'signal' || !message.data) return
+    let signal: { type?: string; sdp?: string; candidate?: RTCIceCandidateInit }
+    try { signal = JSON.parse(message.data) } catch { return }
+    if (signal.type === 'offer' && signal.sdp) {
+      await peer.setRemoteDescription({ type: 'offer', sdp: signal.sdp })
+      for (const candidate of pendingCandidates) await peer.addIceCandidate(candidate).catch(() => {})
+      pendingCandidates = []
+      const answer = await peer.createAnswer()
+      await peer.setLocalDescription(answer)
+      sendSignal({ type: 'answer', sdp: answer.sdp })
+    } else if (signal.type === 'answer' && signal.sdp) {
+      await peer.setRemoteDescription({ type: 'answer', sdp: signal.sdp })
+      for (const candidate of pendingCandidates) await peer.addIceCandidate(candidate).catch(() => {})
+      pendingCandidates = []
+    } else if (signal.type === 'ice-candidate' && signal.candidate) {
+      if (peer.remoteDescription) await peer.addIceCandidate(signal.candidate).catch(() => {})
+      else pendingCandidates.push(signal.candidate)
+    }
+  }
+  socket.onclose = () => {
+    if (generation === transportGeneration && get().state !== 'idle') get().endCall()
+  }
+}
 
 const DEFAULT_GROUP_AUDIO_MIX: GroupCallAudioMix = {
   master: 72,
@@ -139,6 +243,8 @@ export const useCallStore = create<UseCallState>((set, get) => ({
   callDurationSeconds: 0,
   localStream: null,
   remoteStream: null,
+  setLocalStream: (stream) => set({ localStream: stream }),
+  setRemoteStream: (stream) => set({ remoteStream: stream }),
 
   initiateCall: async (partner, mode) => {
     const { signaling_token: token } = await startDirectCall(partner.userId, mode)
@@ -152,6 +258,9 @@ export const useCallStore = create<UseCallState>((set, get) => ({
       isCameraOff: false,
       isScreenSharing: false,
       callDurationSeconds: 0,
+    })
+    await connectDirectTransport(token, 'initiator', mode, set, get).catch(() => {
+      if (get().state !== 'idle') get().endCall()
     })
     return token
   },
@@ -211,6 +320,7 @@ export const useCallStore = create<UseCallState>((set, get) => ({
   },
 
   receiveCall: (partner, mode, blindToken) => {
+    closeDirectTransport()
     set({
       state: 'incoming',
       partner,
@@ -222,14 +332,24 @@ export const useCallStore = create<UseCallState>((set, get) => ({
   },
 
   acceptCall: async () => {
+    const { blindToken, mode } = get()
+    if (!blindToken) return
     set({ state: 'connecting' })
+    await connectDirectTransport(blindToken, 'receiver', mode, set, get).catch(() => get().endCall())
   },
 
+  rejectCall: () => {
+    const token = get().blindToken
+    if (token) void rejectDirectCall(token).catch(() => {})
+    get().endCall()
+  },
   endCall: () => {
     const { localStream } = get()
     if (localStream) {
       localStream.getTracks().forEach((t) => t.stop())
     }
+    get().remoteStream?.getTracks().forEach((t) => t.stop())
+    closeDirectTransport()
     set({
       state: 'idle',
       partner: null,
