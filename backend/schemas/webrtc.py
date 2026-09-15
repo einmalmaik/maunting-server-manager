@@ -90,13 +90,13 @@ class WebRtcJoinedEvent(BaseModel):
     """Sent to connecting peer confirming successful join."""
     event: Literal["joined"] = "joined"
     role: Literal["initiator", "receiver"]
-    peer_count: int = Field(..., ge=1, le=2)
+    peer_count: int = Field(..., ge=1, le=16)
 
 
 class WebRtcPeerJoinedEvent(BaseModel):
     """Sent to initiator when receiver joins the room."""
     event: Literal["peer_joined"] = "peer_joined"
-    peer_count: Literal[2] = 2
+    peer_count: int = Field(..., ge=2, le=16)
 
 
 class WebRtcSignalEvent(BaseModel):
@@ -152,3 +152,11 @@ class WebRtcIceServersResponse(BaseModel):
     """Response containing ICE servers for WebRTC peer connection."""
     ice_servers: list[WebRtcIceServerConfig] = Field(default_factory=list)
     ttl: int = Field(default=86400, description="Cache TTL in seconds")
+
+
+class DirectCallResponse(BaseModel):
+    """Backend-issued invitation used for a friend-to-friend call."""
+
+    signaling_token: str = Field(..., min_length=16, max_length=128)
+    recipient_id: int
+    expires_in: int = Field(..., ge=1)

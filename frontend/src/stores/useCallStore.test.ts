@@ -1,5 +1,10 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useCallStore } from './useCallStore'
+import { startDirectCall } from '@/api/social'
+
+vi.mock('@/api/social', () => ({
+  startDirectCall: vi.fn(),
+}))
 
 describe('useCallStore group calls', () => {
   beforeEach(() => {
@@ -19,6 +24,7 @@ describe('useCallStore group calls', () => {
       localStream: null,
       remoteStream: null,
     })
+
   })
 
   it('starts a group call and selects the first share source by default', () => {
@@ -61,5 +67,29 @@ describe('useCallStore group calls', () => {
     expect(groupCall?.audioMix.master).toBe(88)
     expect(groupCall?.audioMix.perSource['share-1']).toBe(77)
     expect(groupCall?.audioMix.perParticipant[9]).toBe(41)
+  })
+})
+
+describe('useCallStore direct calls', () => {
+  beforeEach(() => {
+    vi.mocked(startDirectCall).mockReset()
+  })
+
+  it('uses the backend-issued token for a friend call', async () => {
+    vi.mocked(startDirectCall).mockResolvedValue({
+      signaling_token: 'server-token-123456',
+      recipient_id: 7,
+      expires_in: 120,
+    })
+
+    const token = await useCallStore.getState().initiateCall(
+      { userId: 7, username: 'Alice' },
+      'video',
+    )
+
+    expect(startDirectCall).toHaveBeenCalledWith(7, 'video')
+    expect(token).toBe('server-token-123456')
+    expect(useCallStore.getState().blindToken).toBe('server-token-123456')
+    expect(useCallStore.getState().state).toBe('outgoing')
   })
 })

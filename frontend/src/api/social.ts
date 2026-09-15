@@ -258,6 +258,27 @@ export interface ChatGroupItem {
   default_permissions?: string | null
   created_at: string
   members: ChatGroupMemberItem[]
+  /** Ephemeral room token supplied by a live-call invitation, when present. */
+  room_token?: string | null
+}
+
+export interface GroupCallRoom {
+  room_token: string
+  group_id: number
+  max_peers: number
+}
+
+export async function createGroupCallRoom(groupId: number): Promise<GroupCallRoom> {
+  return api<GroupCallRoom>(`/social/groups/${groupId}/calls`, {
+    method: 'POST',
+  })
+}
+
+export async function joinGroupCallRoom(groupId: number, roomToken: string): Promise<GroupCallRoom> {
+  return api<GroupCallRoom>(`/social/groups/${groupId}/calls/join`, {
+    method: 'POST',
+    body: JSON.stringify({ room_token: roomToken }),
+  })
 }
 
 export interface ChatGroupInvitePublic {
@@ -284,6 +305,18 @@ export interface DirectChatItem {
 
 export async function getDirectChats(): Promise<DirectChatItem[]> {
   return api<DirectChatItem[]>('/social/direct-chats')
+}
+
+export interface DirectCallInvitation {
+  signaling_token: string
+  recipient_id: number
+  expires_in: number
+}
+
+export async function startDirectCall(targetUserId: number, mode: 'audio' | 'video'): Promise<DirectCallInvitation> {
+  return api<DirectCallInvitation>(`/social/webrtc/call/${targetUserId}?mode=${mode}`, {
+    method: 'POST',
+  })
 }
 
 export async function checkCanMessage(targetUserId: number): Promise<{
@@ -529,4 +562,3 @@ export async function recordActivityTime(category: string, seconds: number): Pro
     body: JSON.stringify({ category, seconds }),
   })
 }
-

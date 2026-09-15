@@ -84,6 +84,8 @@ import {
   fetchE2eeEnvelopes,
   sendTypingSignal,
   uploadEncryptedChatAttachment,
+  createGroupCallRoom,
+  joinGroupCallRoom,
 } from '@/api/social'
 import {
   ChatMediaImage,
@@ -1544,7 +1546,38 @@ export function Messenger() {
     const handleSync = (e: Event) => {
       const ce = e as CustomEvent<any>
       const detail = ce.detail
-      if (detail?.type === 'e2ee_blind_message') {
+      if (detail?.type === 'group_call_started') {
+        if (!detail.group_id || !detail.room_token) return
+        const groupId = Number(detail.group_id)
+        const roomToken = String(detail.room_token)
+        setGroups((prev) =>
+          prev.map((group) =>
+            group.id === groupId ? { ...group, room_token: roomToken } : group
+          )
+        )
+        setActiveGroup((current) =>
+          current?.id === groupId ? { ...current, room_token: roomToken } : current
+        )
+      } else if (detail?.type === 'direct_call_invitation') {
+        if (
+          detail.recipient_id &&
+          currentUserId &&
+          Number(detail.recipient_id) !== Number(currentUserId)
+        ) {
+          return
+        }
+        if (detail.signaling_token && detail.caller_id && detail.caller_username) {
+          useCallStore.getState().receiveCall(
+            {
+              userId: Number(detail.caller_id),
+              username: String(detail.caller_username),
+              avatarUrl: detail.caller_avatar_url ?? null,
+            },
+            detail.mode === 'video' ? 'video' : 'audio',
+            String(detail.signaling_token),
+          )
+        }
+      } else if (detail?.type === 'e2ee_blind_message') {
         const isCurrentActive = detail.blind_mailbox_id === blindMailboxId
         // Outgoing Echo Prevention: Sender niemals benachrichtigen
         if (detail.sender_user_id && currentUserId && Number(detail.sender_user_id) === Number(currentUserId)) {
@@ -2439,20 +2472,24 @@ export function Messenger() {
 
     const granted = new Set((group.default_permissions ?? '').split(',').filter(Boolean))
     if (group.owner_user_id === userId) {
-      for (const perm of ['call_start', 'call_join', 'call_share', 'call_moderate']) {
+      for (const perm of ['call_start', 'call_join', 'call_share', 'call_moderate', 'start_group_calls', 'join_group_calls']) {
         granted.add(perm)
       }
     } else if (group.role === 'admin') {
       granted.add('call_start')
       granted.add('call_join')
+      granted.add('start_group_calls')
+      granted.add('join_group_calls')
       granted.add('call_share')
       granted.add('call_moderate')
     } else if (group.role === 'moderator') {
       granted.add('call_join')
+      granted.add('join_group_calls')
       granted.add('call_share')
       granted.add('call_moderate')
     } else {
       granted.add('call_join')
+      granted.add('join_group_calls')
     }
 
     return {
@@ -2468,7 +2505,7 @@ export function Messenger() {
     [activeGroup, currentUserId]
   )
 
-  const handleStartGroupCall = (joinExisting = false) => {
+  const handleStartGroupCall = async (joinExisting = false) => {
     if (!activeGroup) return
     if (joinExisting ? !groupCallPermissions.canJoin : !groupCallPermissions.canStart) {
       toast.error(
@@ -2506,6 +2543,29 @@ export function Messenger() {
       isLive: true,
     }))
 
+    let roomToken: string | undefined
+    try {
+      if (joinExisting) {
+        const existingToken = (activeGroup as ChatGroupItem & { room_token?: string }).room_token
+        if (!existingToken) {
+          toast.error('Für diesen Gruppenanruf ist kein Raum-Token verfügbar.')
+          return
+        }
+        const room = await joinGroupCallRoom(activeGroup.id, existingToken)
+        roomToken = room.room_token
+      } else {
+        const room = await createGroupCallRoom(activeGroup.id)
+        roomToken = room.room_token
+      }
+    } catch {
+      toast.error(
+        joinExisting
+          ? 'Der Gruppenanruf konnte nicht geöffnet werden.'
+          : 'Der Gruppenanruf konnte nicht gestartet werden.'
+      )
+      return
+    }
+
     const callDefinition = {
       id: String(activeGroup.id),
       name: activeGroup.name,
@@ -2517,11 +2577,12 @@ export function Messenger() {
         canModerate: groupCallPermissions.canModerate,
       },
       capabilities: {
-        supportsGroupSignals: false,
-        supportsScreenShare: false,
-        supportsAudioMixer: false,
-        reason: 'UI-Vorschau: echte Gruppen-Signalisierung, Screen-Share- und Mixer-Aktivitäten werden noch nicht durch das Backend unterstützt.',
+        supportsGroupSignals: true,
+        supportsScreenShare: true,
+        supportsAudioMixer: true,
+        reason: null,
       },
+      roomToken,
     }
     if (joinExisting) {
       useCallStore.getState().joinExistingGroupCall(callDefinition)
@@ -3551,21 +3612,24 @@ export function Messenger() {
                     </Button>
                   )}
 
-                  {activeContact && (
+                  {activeContact && activeContact.isFriend && (
                     <>
                       <Button
                         variant="ghost"
                         size="icon"
                         onClick={async () => {
-                          const initiate = useCallStore.getState().initiateCall
-                          await initiate(
-                            {
-                              userId: activeContact.userId,
-                              username: activeContact.username,
-                              avatarUrl: activeContact.avatarUrl,
-                            },
-                            'audio',
-                          )
+                          try {
+                            await useCallStore.getState().initiateCall(
+                              {
+                                userId: activeContact.userId,
+                                username: activeContact.username,
+                                avatarUrl: activeContact.avatarUrl,
+                              },
+                              'audio',
+                            )
+                          } catch (err: any) {
+                            toast.error(err?.message || 'Anruf konnte nicht gestartet werden.')
+                          }
                         }}
                         className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary hover:text-primary shadow-xs"
                         title="Sprachanruf starten"
@@ -3577,15 +3641,18 @@ export function Messenger() {
                         variant="ghost"
                         size="icon"
                         onClick={async () => {
-                          const initiate = useCallStore.getState().initiateCall
-                          await initiate(
-                            {
-                              userId: activeContact.userId,
-                              username: activeContact.username,
-                              avatarUrl: activeContact.avatarUrl,
-                            },
-                            'video',
-                          )
+                          try {
+                            await useCallStore.getState().initiateCall(
+                              {
+                                userId: activeContact.userId,
+                                username: activeContact.username,
+                                avatarUrl: activeContact.avatarUrl,
+                              },
+                              'video',
+                            )
+                          } catch (err: any) {
+                            toast.error(err?.message || 'Anruf konnte nicht gestartet werden.')
+                          }
                         }}
                         className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary hover:text-primary shadow-xs"
                         title="Videoanruf starten"

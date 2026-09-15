@@ -17,6 +17,7 @@ _log = logging.getLogger("msm.webrtc_rendezvous")
 
 DEFAULT_ROOM_TTL_SECONDS = 120.0
 MAX_PEERS_PER_ROOM = 2
+DEFAULT_GROUP_MAX_PEERS = 16
 MAX_PEER_QUEUE_SIZE = 128
 
 
@@ -86,16 +87,18 @@ class RendezvousPeer:
 
 
 class BlindRendezvousSession:
-    """An ephemeral 2-party rendezvous room indexed solely by blind token."""
-    __slots__ = ("token", "created_at", "expires_at", "peers", "is_closed", "closed_at")
+    """An ephemeral rendezvous room indexed solely by blind token."""
+    __slots__ = ("token", "created_at", "expires_at", "peers", "is_closed", "closed_at", "max_peers")
 
-    def __init__(self, token: str, ttl_seconds: float = DEFAULT_ROOM_TTL_SECONDS) -> None:
+    def __init__(self, token: str, ttl_seconds: float = DEFAULT_ROOM_TTL_SECONDS,
+                 max_peers: int = MAX_PEERS_PER_ROOM) -> None:
         self.token = token
         self.created_at = time.time()
         self.expires_at = self.created_at + ttl_seconds
         self.peers: dict[str, RendezvousPeer] = {}
         self.is_closed = False
         self.closed_at: float | None = None
+        self.max_peers = max_peers
 
     @property
     def peer_count(self) -> int:
@@ -140,6 +143,7 @@ class BlindRendezvousManager:
         token: str,
         peer_id: str | None = None,
         ttl_seconds: float = DEFAULT_ROOM_TTL_SECONDS,
+        max_peers: int | None = None,
     ) -> tuple[str, Literal["initiator", "receiver"], int, asyncio.Queue[dict[str, Any]]]:
         """Atomically joins or creates a rendezvous room for the given blind token.
 
@@ -163,12 +167,17 @@ class BlindRendezvousManager:
                     cls._closed_tokens[token] = now
                     raise SessionExpiredError()
 
-                if session.peer_count >= cls._max_peers and (peer_id is None or peer_id not in session.peers):
+                if session.peer_count >= session.max_peers and (peer_id is None or peer_id not in session.peers):
                     raise RoomFullError()
 
                 role: Literal["initiator", "receiver"] = "receiver"
             else:
-                session = BlindRendezvousSession(token=token, ttl_seconds=ttl_seconds)
+                room_max = max_peers if max_peers is not None else cls._max_peers
+                if room_max < 2:
+                    raise ValueError("A rendezvous room must allow at least two peers")
+                session = BlindRendezvousSession(
+                    token=token, ttl_seconds=ttl_seconds, max_peers=room_max
+                )
                 cls._sessions[token] = session
                 role = "initiator"
 
@@ -184,7 +193,7 @@ class BlindRendezvousManager:
             session.peers[actual_peer_id] = peer
             current_peer_count = session.peer_count
 
-            # 4. If this is the second peer (receiver), notify the initiator
+            # 4. Notify every existing peer when a new peer joins.
             if role == "receiver":
                 for other_id, other_peer in session.peers.items():
                     if other_id != actual_peer_id:
@@ -222,14 +231,8 @@ class BlindRendezvousManager:
             sender.last_activity = now
             session.touch(cls._ttl_seconds, now=now)
 
-            # Find recipient peer
-            recipient = None
-            for pid, peer in session.peers.items():
-                if pid != sender_peer_id:
-                    recipient = peer
-                    break
-
-            if recipient is None:
+            recipients = [peer for pid, peer in session.peers.items() if pid != sender_peer_id]
+            if not recipients:
                 return False
 
             if isinstance(data, dict):
@@ -240,8 +243,10 @@ class BlindRendezvousManager:
                     "data": str(data),
                 }
 
-            cls._safe_enqueue(recipient.queue, msg)
-            return True
+            delivered = False
+            for recipient in recipients:
+                delivered = cls._safe_enqueue(recipient.queue, msg) or delivered
+            return delivered
 
     @classmethod
     async def leave(
@@ -272,8 +277,11 @@ class BlindRendezvousManager:
             if len(remaining_peers) == 0:
                 cls._sessions.pop(token, None)
                 cls._closed_tokens[token] = now
-            else:
-                # If one peer left during a 2-party call, mark session closed so it can't be re-joined
+                registry = globals().get("GroupCallRoomRegistry")
+                if registry is not None:
+                    registry.discard(token)
+            elif session.max_peers == MAX_PEERS_PER_ROOM:
+                # Preserve direct-call anti-replay semantics.
                 session.is_closed = True
                 cls._sessions.pop(token, None)
                 cls._closed_tokens[token] = now
@@ -342,6 +350,9 @@ class BlindRendezvousManager:
         """Resets all sessions and closed tokens (for test teardown)."""
         cls._sessions.clear()
         cls._closed_tokens.clear()
+        registry = globals().get("GroupCallRoomRegistry")
+        if registry is not None:
+            registry.clear_all_for_testing()
 
     @classmethod
     async def reset_all(cls) -> None:
@@ -349,3 +360,44 @@ class BlindRendezvousManager:
         async with cls._lock:
             cls._sessions.clear()
             cls._closed_tokens.clear()
+            registry = globals().get("GroupCallRoomRegistry")
+            if registry is not None:
+                registry.clear_all_for_testing()
+
+
+class GroupCallRoomRegistry:
+    """Ephemeral server-issued group-room policy registry.
+
+    This deliberately stores only the group policy needed at WebSocket admission;
+    it is never backed by the database and contains no call history.
+    """
+
+    _rooms: dict[str, tuple[int, float, int]] = {}
+
+    @classmethod
+    def create(cls, group_id: int, ttl_seconds: float = DEFAULT_ROOM_TTL_SECONDS,
+               max_peers: int = DEFAULT_GROUP_MAX_PEERS) -> tuple[str, int]:
+        if not 2 <= max_peers <= DEFAULT_GROUP_MAX_PEERS:
+            raise ValueError("Group room capacity must be between 2 and 16")
+        token = f"grp_{uuid.uuid4().hex}"
+        cls._rooms[token] = (group_id, time.time() + ttl_seconds, max_peers)
+        return token, max_peers
+
+    @classmethod
+    def get(cls, token: str) -> tuple[int, int] | None:
+        room = cls._rooms.get(token)
+        if room is None:
+            return None
+        group_id, expires_at, max_peers = room
+        if time.time() >= expires_at:
+            cls._rooms.pop(token, None)
+            return None
+        return group_id, max_peers
+
+    @classmethod
+    def discard(cls, token: str) -> None:
+        cls._rooms.pop(token, None)
+
+    @classmethod
+    def clear_all_for_testing(cls) -> None:
+        cls._rooms.clear()

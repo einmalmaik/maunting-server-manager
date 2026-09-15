@@ -86,6 +86,7 @@ export interface UseCallState {
     selectedSourceId?: string | null
     permissions?: GroupCallPermissionState
     capabilities?: GroupCallCapabilityState
+    roomToken?: string
   }) => void
   receiveCall: (partner: CallPartner, mode: CallMode, blindToken: string) => void
   acceptCall: () => Promise<void>
@@ -108,11 +109,13 @@ export interface UseCallState {
     selectedSourceId?: string | null
     permissions?: GroupCallPermissionState
     capabilities?: GroupCallCapabilityState
+    roomToken?: string
   }) => void
   joinExistingGroupCall: UseCallState['joinGroupCall']
 }
 
 import { create } from 'zustand'
+import { startDirectCall } from '@/api/social'
 
 const DEFAULT_GROUP_AUDIO_MIX: GroupCallAudioMix = {
   master: 72,
@@ -138,7 +141,7 @@ export const useCallStore = create<UseCallState>((set, get) => ({
   remoteStream: null,
 
   initiateCall: async (partner, mode) => {
-    const token = `blind_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
+    const { signaling_token: token } = await startDirectCall(partner.userId, mode)
     set({
       state: 'outgoing',
       partner,
@@ -176,7 +179,8 @@ export const useCallStore = create<UseCallState>((set, get) => ({
       state: 'active',
       partner: null,
       mode: 'video',
-      blindToken: `group_call_${Date.now()}`,
+      // Group rooms must be created by the backend; never synthesize a token.
+      blindToken: group.roomToken ?? null,
       groupCall: {
         id: group.id,
         name: group.name,
