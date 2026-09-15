@@ -1353,6 +1353,39 @@ class SocialService:
     # --- Chat-Gruppen & Öffentliche Einladungslinks ---
 
     @classmethod
+    def get_group_member(cls, db: Session, group_id: int, user_id: int) -> ChatGroupMember | None:
+        return (
+            db.query(ChatGroupMember)
+            .filter(ChatGroupMember.group_id == group_id, ChatGroupMember.user_id == user_id)
+            .first()
+        )
+
+    @classmethod
+    def has_group_permission(cls, db: Session, group_id: int, user_id: int, permission: str) -> bool:
+        """Checks membership and effective group permission without mutating state."""
+        member = cls.get_group_member(db, group_id, user_id)
+        if not member:
+            return False
+        # Owners/admins are trusted to start calls; explicit permissions remain
+        # required for ordinary members.
+        if permission == "start_group_calls" and member.role in ("owner", "admin"):
+            return True
+        permissions = member.permissions
+        if permissions is None:
+            group = db.query(ChatGroup).filter(ChatGroup.id == group_id).first()
+            permissions = group.default_permissions if group else None
+        return permission in {p.strip() for p in (permissions or "").split(",") if p.strip()}
+
+    @classmethod
+    def assert_group_call_permission(
+        cls, db: Session, group_id: int, user_id: int, permission: str
+    ) -> ChatGroupMember:
+        member = cls.get_group_member(db, group_id, user_id)
+        if not member or not cls.has_group_permission(db, group_id, user_id, permission):
+            raise HTTPException(status_code=403, detail="Keine Berechtigung für diesen Gruppenanruf.")
+        return member
+
+    @classmethod
     def create_group(
         cls,
         db: Session,

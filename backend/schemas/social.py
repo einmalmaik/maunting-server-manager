@@ -446,6 +446,16 @@ class ChatGroupInvitePublicResponse(BaseModel):
     member_count: int
 
 
+class GroupCallRoomResponse(BaseModel):
+    room_token: str
+    group_id: int
+    max_peers: int = Field(default=16, ge=2, le=16)
+
+
+class GroupCallRoomJoinRequest(BaseModel):
+    room_token: str = Field(..., min_length=16, max_length=128)
+
+
 class ChatStoryCreate(BaseModel):
     content: str = Field(..., min_length=1, max_length=1000)
     media_url: str | None = None
@@ -463,4 +473,3 @@ class ChatStoryResponse(BaseModel):
     created_at: datetime
     expires_at: datetime
     is_self: bool = False
-
