@@ -59,6 +59,18 @@ class DirectCallInviteService:
             return True
 
     @classmethod
+    def reject(cls, token: str, user_id: int) -> int | None:
+        """Consume an invitation when the recipient declines it."""
+        with cls._lock:
+            invite = cls._invites.get(token)
+            if not invite or invite.expires_at <= time.time() or invite.recipient_id != user_id:
+                if invite and invite.expires_at <= time.time():
+                    cls._invites.pop(token, None)
+                return None
+            cls._invites.pop(token, None)
+            return invite.caller_id
+
+    @classmethod
     def clear_all_for_testing(cls) -> None:
         with cls._lock:
             cls._invites.clear()

@@ -319,6 +319,16 @@ export async function startDirectCall(targetUserId: number, mode: 'audio' | 'vid
   })
 }
 
+export async function rejectDirectCall(signalingToken: string): Promise<void> {
+  await api(`/social/webrtc/call/${encodeURIComponent(signalingToken)}/reject`, {
+    method: 'POST',
+  })
+}
+
+export async function getWebRtcIceServers(): Promise<{ ice_servers: RTCIceServer[]; ttl?: number }> {
+  return api<{ ice_servers: RTCIceServer[]; ttl?: number }>('/social/webrtc/ice-servers')
+}
+
 export async function checkCanMessage(targetUserId: number): Promise<{
   can_message: boolean
   reason?: string | null

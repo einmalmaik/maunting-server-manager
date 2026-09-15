@@ -1577,6 +1577,16 @@ export function Messenger() {
             String(detail.signaling_token),
           )
         }
+      } else if (detail?.type === 'direct_call_rejected') {
+        if (
+          detail.recipient_id &&
+          currentUserId &&
+          Number(detail.recipient_id) === Number(currentUserId) &&
+          useCallStore.getState().state === 'outgoing'
+        ) {
+          useCallStore.getState().endCall()
+          toast.info('Der Anruf wurde abgelehnt.')
+        }
       } else if (detail?.type === 'e2ee_blind_message') {
         const isCurrentActive = detail.blind_mailbox_id === blindMailboxId
         // Outgoing Echo Prevention: Sender niemals benachrichtigen

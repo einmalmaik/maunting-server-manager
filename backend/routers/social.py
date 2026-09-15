@@ -1046,6 +1046,29 @@ def create_direct_call(
         "expires_in": int(DIRECT_CALL_TOKEN_TTL_SECONDS),
     }
 
+
+@router.post(
+    "/webrtc/call/{signaling_token}/reject",
+    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
+)
+def reject_direct_call(
+    signaling_token: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    caller_id = DirectCallInviteService.reject(signaling_token, user.id)
+    if caller_id is None:
+        raise HTTPException(status_code=404, detail="Anruf nicht gefunden oder bereits abgelaufen.")
+    SyncEventService.publish(
+        {
+            "type": "direct_call_rejected",
+            "signaling_token": signaling_token,
+            "recipient_id": user.id,
+        },
+        user_id=caller_id,
+    )
+    return {"ok": True}
+
 @router.get(
     "/webrtc/ice-servers",
     response_model=WebRtcIceServersResponse,

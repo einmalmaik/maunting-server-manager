@@ -5,6 +5,7 @@ import {
   Video as VideoIcon,
   VideoOff,
   PhoneOff,
+  Phone,
   Monitor,
   Settings,
   ShieldCheck,
@@ -17,6 +18,7 @@ import { Button } from '@/Singra/UI'
 import { useCallStore } from '@/stores/useCallStore'
 import { DeviceSelectorModal } from './DeviceSelectorModal'
 import type { DropdownOption } from '@/components/ui/Dropdown'
+import { sendeGeraeteBenachrichtigung } from '@/lib/benachrichtigung'
 
 export const CallOverlay: React.FC = () => {
   const {
@@ -34,6 +36,8 @@ export const CallOverlay: React.FC = () => {
     localStream,
     remoteStream,
     endCall,
+    acceptCall,
+    rejectCall,
     toggleMute,
     toggleCamera,
     setMode,
@@ -52,6 +56,8 @@ export const CallOverlay: React.FC = () => {
 
   const localVideoRef = useRef<HTMLVideoElement | null>(null)
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null)
+  const ringtoneRef = useRef<{ context: AudioContext; timer: number } | null>(null)
+  const [ringtoneBlocked, setRingtoneBlocked] = useState(false)
 
   const isGroupCall = Boolean(groupCall)
   const selectedShareSource = useMemo(
@@ -68,6 +74,53 @@ export const CallOverlay: React.FC = () => {
     }, 1000)
     return () => window.clearInterval(interval)
   }, [state, incrementDuration])
+
+  const stopRingtone = () => {
+    const current = ringtoneRef.current
+    if (!current) return
+    window.clearInterval(current.timer)
+    current.context.close().catch(() => {})
+    ringtoneRef.current = null
+  }
+
+  const startRingtone = () => {
+    if (typeof window === 'undefined' || ringtoneRef.current) return
+    const AudioContextCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!AudioContextCtor) return
+    const context = new AudioContextCtor()
+    const play = () => {
+      if (context.state === 'suspended') {
+        setRingtoneBlocked(true)
+        return
+      }
+      const oscillator = context.createOscillator()
+      const gain = context.createGain()
+      oscillator.frequency.value = 660
+      gain.gain.setValueAtTime(0.0001, context.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.12, context.currentTime + 0.03)
+      gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.45)
+      oscillator.connect(gain).connect(context.destination)
+      oscillator.start()
+      oscillator.stop(context.currentTime + 0.5)
+    }
+    ringtoneRef.current = { context, timer: window.setInterval(play, 1100) }
+    play()
+  }
+
+  useEffect(() => {
+    if (state === 'incoming') {
+      startRingtone()
+      void sendeGeraeteBenachrichtigung({
+        titel: 'Eingehender Anruf',
+        text: `${partner?.username ?? 'Jemand'} möchte dich anrufen.`,
+      })
+    } else {
+      stopRingtone()
+    }
+    return () => stopRingtone()
+  }, [state, partner?.username])
+
+  useEffect(() => () => stopRingtone(), [])
 
   useEffect(() => {
     if (localVideoRef.current && localStream) {
@@ -169,7 +222,42 @@ export const CallOverlay: React.FC = () => {
       </div>
 
       <div className="flex-1 relative flex min-h-0 flex-col overflow-y-auto gap-3 p-3 sm:p-4 lg:flex-row lg:gap-4 lg:overflow-hidden">
-        {isGroupCall ? (
+        {state === 'incoming' && partner ? (
+          <div className="m-auto flex w-full max-w-md flex-col items-center gap-6 rounded-3xl border border-emerald-400/30 bg-slate-900/80 p-8 text-center shadow-2xl">
+            <div className="relative">
+              <div className="h-28 w-28 overflow-hidden rounded-full border-4 border-emerald-400/50 bg-emerald-500/15">
+                {partner.avatarUrl ? (
+                  <img src={partner.avatarUrl} alt={partner.username} className="h-full w-full object-cover" />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-3xl font-bold text-emerald-100">
+                    {partner.username.slice(0, 2).toUpperCase()}
+                  </div>
+                )}
+              </div>
+              <span className="absolute inset-0 rounded-full border-2 border-emerald-400/50 animate-ping" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold">{partner.username}</h2>
+              <p className="mt-1 text-sm text-white/65">Eingehender {mode === 'video' ? 'Video-' : ''}Anruf</p>
+              <div className="mt-3 flex items-center justify-center gap-2 text-xs text-emerald-200">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" /> Klingelt…
+              </div>
+            </div>
+            {ringtoneBlocked && (
+              <button type="button" onClick={() => { const context = ringtoneRef.current?.context; context?.resume().then(() => setRingtoneBlocked(false)).catch(() => {}) }} className="text-xs text-amber-200 underline">
+                Klingelton aktivieren
+              </button>
+            )}
+            <div className="flex w-full justify-center gap-4">
+              <Button variant="destructive" onClick={rejectCall} className="flex-1 rounded-full">
+                <PhoneOff className="mr-2 h-5 w-5" /> Ablehnen
+              </Button>
+              <Button onClick={() => { stopRingtone(); void acceptCall() }} className="flex-1 rounded-full bg-emerald-600 hover:bg-emerald-500">
+                <Phone className="mr-2 h-5 w-5" /> Annehmen
+              </Button>
+            </div>
+          </div>
+        ) : isGroupCall ? (
           <>
             {unsupportedGroupNotice && (
               <div className="rounded-2xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-50 shadow-inner shadow-amber-500/10">
@@ -421,7 +509,7 @@ export const CallOverlay: React.FC = () => {
         )}
       </div>
 
-      <div className="sticky bottom-0 border-t border-white/10 bg-slate-900/80 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md sm:p-4">
+      {state !== 'incoming' && <div className="sticky bottom-0 border-t border-white/10 bg-slate-900/80 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md sm:p-4">
         <div className="mx-auto flex max-w-lg flex-wrap items-center justify-center gap-2 sm:gap-4">
           <Button
             variant="ghost"
@@ -486,7 +574,7 @@ export const CallOverlay: React.FC = () => {
             <PhoneOff className="w-5 h-5" />
           </Button>
         </div>
-      </div>
+      </div>}
 
       <DeviceSelectorModal
         isOpen={isDeviceModalOpen}
