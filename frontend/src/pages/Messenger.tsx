@@ -54,7 +54,14 @@ import {
   Bell,
   BellOff,
   Ban,
+  Phone,
+  Video,
 } from 'lucide-react'
+import { CallOverlay } from '@/components/calling/CallOverlay'
+import { useCallStore } from '@/stores/useCallStore'
+import { CircularVideoNoteRecorder } from '@/components/social/CircularVideoNoteRecorder'
+import { CircularVideoNotePlayer } from '@/components/social/CircularVideoNotePlayer'
+import type { VideoNoteAttachment } from '@/services/videoNoteCrypto'
 import { DeviceBadge } from '@/components/social/DeviceBadge'
 import { StatusDot, type PresenceStatus } from '@/components/social/StatusIndicator'
 import {
@@ -276,6 +283,8 @@ export interface ChatMessage {
   fileAttachment?: FileAttachment
   stickerAttachment?: StickerAttachment
   storyReply?: StoryReplyAttachment
+  videoNoteAttachment?: VideoNoteAttachment
+  videoUrl?: string
 }
 
 function formatFileSize(bytes: number): string {
@@ -514,6 +523,7 @@ export function Messenger() {
   // Voice recording state
   const [isRecording, setIsRecording] = useState(false)
   const [recordingDuration, setRecordingDuration] = useState(0)
+  const [isVideoNoteRecording, setIsVideoNoteRecording] = useState(false)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const mediaStreamRef = useRef<MediaStream | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
@@ -1324,6 +1334,7 @@ export function Messenger() {
               fileAttachment: parsed.file_attachment,
               stickerAttachment: parsed.sticker_attachment,
               storyReply: parsed.story_reply,
+              videoNoteAttachment: parsed.video_note_attachment,
             })
             continue
           }
@@ -1639,7 +1650,9 @@ export function Messenger() {
     audio?: AudioAttachment,
     file?: FileAttachment,
     sticker?: StickerAttachment,
-    storyReply?: StoryReplyAttachment
+    storyReply?: StoryReplyAttachment,
+    videoNote?: VideoNoteAttachment,
+    videoUrl?: string
   ) => {
     // If currently editing a message, redirect to edit handler
     if (editingMessage) {
@@ -1683,6 +1696,8 @@ export function Messenger() {
       audioAttachment: audio,
       stickerAttachment: sticker,
       storyReply,
+      videoNoteAttachment: videoNote,
+      videoUrl,
       isDelivered: false,
       isRead: false,
     }
@@ -1794,6 +1809,7 @@ export function Messenger() {
       if (finalFile) payloadObj.file_attachment = finalFile
       if (sticker) payloadObj.sticker_attachment = sticker
       if (storyReply) payloadObj.story_reply = storyReply
+      if (videoNote) payloadObj.video_note_attachment = videoNote
 
       const payload = JSON.stringify(payloadObj)
       let ciphertext = ''
@@ -3405,6 +3421,51 @@ export function Messenger() {
                     </Button>
                   )}
 
+                  {activeContact && (
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={async () => {
+                          const initiate = useCallStore.getState().initiateCall
+                          await initiate(
+                            {
+                              userId: activeContact.userId,
+                              username: activeContact.username,
+                              avatarUrl: activeContact.avatarUrl,
+                            },
+                            'audio',
+                          )
+                        }}
+                        className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary hover:text-primary shadow-xs"
+                        title="Sprachanruf starten"
+                        aria-label="Sprachanruf starten"
+                      >
+                        <Phone className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={async () => {
+                          const initiate = useCallStore.getState().initiateCall
+                          await initiate(
+                            {
+                              userId: activeContact.userId,
+                              username: activeContact.username,
+                              avatarUrl: activeContact.avatarUrl,
+                            },
+                            'video',
+                          )
+                        }}
+                        className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary hover:text-primary shadow-xs"
+                        title="Videoanruf starten"
+                        aria-label="Videoanruf starten"
+                      >
+                        <Video className="w-4 h-4" />
+                      </Button>
+                    </>
+                  )}
+
                   {/* Stummschalten Button */}
                   {blindMailboxId && (
                     <Button
@@ -3738,6 +3799,16 @@ export function Messenger() {
                               </span>
                             </div>
                           </div>
+                        </div>
+                      )}
+
+                      {/* Circular Video Note Attachment */}
+                      {!msg.isDeleted && msg.videoNoteAttachment && (
+                        <div className="py-1">
+                          <CircularVideoNotePlayer
+                            attachment={msg.videoNoteAttachment}
+                            videoUrl={msg.videoUrl || ''}
+                          />
                         </div>
                       )}
 
@@ -4413,17 +4484,30 @@ export function Messenger() {
                               <Send className="w-3.5 h-3.5" />
                             </Button>
                           ) : (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              onClick={startRecording}
-                              className="h-8 w-8 p-0 text-on-surface-variant hover:text-primary hover:bg-primary/10 rounded-full"
-                              title="Sprachnachricht aufnehmen"
-                              aria-label="Sprachnachricht aufnehmen"
-                            >
-                              <Mic className="w-4 h-4" />
-                            </Button>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setIsVideoNoteRecording(true)}
+                                className="h-8 w-8 p-0 text-on-surface-variant hover:text-emerald-400 hover:bg-emerald-500/10 rounded-full"
+                                title="Videonotiz aufnehmen (Halten/Swipe)"
+                                aria-label="Videonotiz aufnehmen"
+                              >
+                                <Video className="w-4 h-4" />
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={startRecording}
+                                className="h-8 w-8 p-0 text-on-surface-variant hover:text-primary hover:bg-primary/10 rounded-full"
+                                title="Sprachnachricht aufnehmen"
+                                aria-label="Sprachnachricht aufnehmen"
+                              >
+                                <Mic className="w-4 h-4" />
+                              </Button>
+                            </div>
                           )
                         }
                       />
@@ -5022,6 +5106,32 @@ export function Messenger() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Cross-Platform Calling Overlay (R1) */}
+      <CallOverlay />
+
+      {/* Circular Video Note Recorder (R2) */}
+      {isVideoNoteRecording && (
+        <CircularVideoNoteRecorder
+          onCancel={() => setIsVideoNoteRecording(false)}
+          onComplete={async (attachment: VideoNoteAttachment, rawBlob: Blob) => {
+            setIsVideoNoteRecording(false)
+            const videoUrl = URL.createObjectURL(rawBlob)
+            await handleSendMessage(
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              attachment,
+              videoUrl,
+            )
+          }}
+        />
+      )}
     </div>
   )
 }

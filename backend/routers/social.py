@@ -44,8 +44,17 @@ from schemas.social import (
 from services.achievement_service import AchievementService
 from services.chat_media_service import ChatMediaService
 from services.chat_media_validator import sanitize_attachment_filename
+from services.panel_settings_service import PanelSettingsService
 from services.social_service import SocialService
 from services.sync_event_service import SyncEventService
+from services.webrtc_rendezvous_service import (
+    BlindRendezvousManager,
+    RoomFullError,
+    SessionExpiredError,
+    SessionTerminatedError,
+)
+from schemas.webrtc import WebRtcIceServersResponse, WebRtcJoinMessage
+from routers.servers import _ws_origin_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -915,4 +924,228 @@ async def social_websocket(
         recv_task.cancel()
         await asyncio.gather(send_task, recv_task, return_exceptions=True)
         SyncEventService.unsubscribe(conn_id)
+
+
+# --- WebRTC Blinded Signaling & Ephemeral Relay ---
+
+@router.get(
+    "/webrtc/ice-servers",
+    response_model=WebRtcIceServersResponse,
+    dependencies=[Depends(_check_social_enabled)],
+)
+def get_webrtc_ice_servers(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Liefert STUN- und TURN-Konfigurationen für WebRTC-P2P-Verbindungen.
+
+    Verwendet Betreiber-Konfigurationen oder hochverfügbare Standard-STUN-Server.
+    Speichert keinerlei Metadaten oder Teilnehmer-IDs (R4).
+    """
+    custom_stun = PanelSettingsService.get("webrtc_stun_servers", default="", db=db)
+    if custom_stun:
+        urls = [s.strip() for s in custom_stun.split(",") if s.strip()]
+        return {"ice_servers": [{"urls": urls}], "ttl": 86400}
+    return {
+        "ice_servers": [
+            {"urls": ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"]},
+        ],
+        "ttl": 86400,
+    }
+
+
+@router.websocket("/webrtc/signal")
+async def webrtc_signal_websocket(
+    websocket: WebSocket,
+) -> None:
+    """Blinded Ephemeral WebRTC Signaling WebSocket (R4).
+
+    Zero-Metadata Invarianten:
+    - Zero Persistence: Keine DB-Einträge, keine Anruf-Historie, keine AuditLog-Rows.
+    - Zero URL-Tokens: Blind-Rendezvous-Token wird ausschließlich im ersten JSON-Frame übertragen.
+    - Strict 2-Peer Cap: Maximal 2 Teilnehmer pro Rendezvous-Raum (3. Peer wird mit room_full / 1008 abgewiesen).
+    - CSWSH-Schutz: Prüfung des Origin-Headers gegen zulässige CORS-Origins.
+    - Entkoppelte Queues & Backpressure-Schutz über BlindRendezvousManager.
+    """
+    # 1. Origin-Prüfung (sofern Origin-Header vorhanden)
+    origin = websocket.headers.get("origin")
+    if origin and not _ws_origin_allowed(origin):
+        await websocket.close(code=1008)
+        return
+
+    # 2. Authentifizierung während des Upgrades (Cookie oder Sec-WebSocket-Protocol)
+    with SessionLocal() as db:
+        try:
+            SocialService.assert_social_enabled(db)
+            user = get_current_user_for_ws(websocket, db)
+            if not user or not user.is_active:
+                await websocket.close(code=1008)
+                return
+        except Exception:
+            await websocket.close(code=1008)
+            return
+
+    # 3. Upgrade akzeptieren mit gespiegeltem Subprotokoll
+    subprotocol = ws_subprotokoll(websocket)
+    await websocket.accept(subprotocol=subprotocol)
+
+    # 4. Erster Frame: Warten auf Join-Handshake mit Blind Rendezvous Token
+    try:
+        first_frame = await asyncio.wait_for(websocket.receive_json(), timeout=10.0)
+    except (asyncio.TimeoutError, WebSocketDisconnect, Exception):
+        try:
+            await websocket.close(code=1008)
+        except Exception:
+            pass
+        return
+
+    if not isinstance(first_frame, dict) or first_frame.get("action") != "join":
+        try:
+            await websocket.send_json({
+                "event": "error",
+                "error": "not_joined",
+                "code": 4001,
+                "message": "First message must be a valid join action",
+                "detail": "First message must be a valid join action",
+            })
+            await websocket.close(code=1008)
+        except Exception:
+            pass
+        return
+
+    try:
+        join_msg = WebRtcJoinMessage.model_validate(first_frame)
+        token = join_msg.token
+    except Exception as exc:
+        try:
+            await websocket.send_json({
+                "event": "error",
+                "error": "invalid_token",
+                "code": 4000,
+                "message": "Invalid rendezvous token format",
+                "detail": str(exc),
+            })
+            await websocket.close(code=1008)
+        except Exception:
+            pass
+        return
+
+    # 5. Im ephemeren Blind-Rendezvous-Manager registrieren
+    ws_lock = asyncio.Lock()
+    try:
+        peer_id, role, peer_count, peer_queue = await BlindRendezvousManager.join(token)
+    except RoomFullError as exc:
+        try:
+            async with ws_lock:
+                await websocket.send_json({
+                    "event": "error",
+                    "error": exc.error,
+                    "code": exc.code,
+                    "message": exc.message,
+                    "detail": exc.message,
+                })
+            await websocket.close(code=1008)
+        except Exception:
+            pass
+        return
+    except (SessionTerminatedError, SessionExpiredError) as exc:
+        try:
+            async with ws_lock:
+                await websocket.send_json({
+                    "event": "error",
+                    "error": exc.error,
+                    "code": exc.code,
+                    "message": exc.message,
+                    "detail": exc.message,
+                })
+            await websocket.close(code=1008)
+        except Exception:
+            pass
+        return
+    except Exception:
+        try:
+            await websocket.close(code=1008)
+        except Exception:
+            pass
+        return
+
+    # 6. Join quittieren
+    try:
+        async with ws_lock:
+            await websocket.send_json({
+                "event": "joined",
+                "role": role,
+                "peer_count": peer_count,
+            })
+    except Exception:
+        await BlindRendezvousManager.leave(token, peer_id, reason="handshake_failed")
+        return
+
+    # 7. Gekoppelte Sende- und Empfangsschleifen
+    leave_reason = "disconnected"
+
+    async def _send_loop():
+        try:
+            while True:
+                msg = await peer_queue.get()
+                async with ws_lock:
+                    await websocket.send_json(msg)
+        except (asyncio.CancelledError, WebSocketDisconnect):
+            raise
+        except Exception:
+            pass
+
+    async def _recv_loop():
+        nonlocal leave_reason
+        while True:
+            data = await websocket.receive_json()
+            if not isinstance(data, dict):
+                continue
+            action = data.get("action")
+            if action == "ping":
+                async with ws_lock:
+                    await websocket.send_json({"event": "pong"})
+            elif action == "signal":
+                signal_data = data.get("data") or data.get("payload")
+                if not signal_data or not isinstance(signal_data, str):
+                    continue
+                if len(signal_data) > 65536:
+                    async with ws_lock:
+                        await websocket.send_json({
+                            "event": "error",
+                            "error": "payload_too_large",
+                            "code": 4013,
+                            "message": "Signal payload exceeds maximum 64KB limit",
+                            "detail": "Signal payload exceeds maximum 64KB limit",
+                        })
+                    continue
+                try:
+                    await BlindRendezvousManager.relay(token, peer_id, signal_data)
+                except Exception as exc:
+                    logger.debug("Signal Relay Fehler: %s", exc)
+            elif action == "leave":
+                leave_reason = data.get("reason") or "hangup"
+                break
+
+    send_task = asyncio.create_task(_send_loop())
+    recv_task = asyncio.create_task(_recv_loop())
+
+    try:
+        done, pending = await asyncio.wait(
+            [send_task, recv_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.debug("WebRTC Signaling WS getrennt: %s", e)
+    finally:
+        send_task.cancel()
+        recv_task.cancel()
+        await asyncio.gather(send_task, recv_task, return_exceptions=True)
+        await BlindRendezvousManager.leave(token, peer_id, reason=leave_reason)
+
 

@@ -25,6 +25,20 @@ from .backup import BackupResponse
 from .panel_backup import PanelBackupCreateRequest, PanelBackupResponse, PanelRestorePrepResponse
 from .mod import ModResponse
 from .node import NodeCreate, NodeOut, NodeUpdate
+from .webrtc import (
+    WebRtcJoinMessage,
+    WebRtcSignalMessage,
+    WebRtcLeaveMessage,
+    WebRtcPingMessage,
+    WebRtcJoinedEvent,
+    WebRtcPeerJoinedEvent,
+    WebRtcSignalEvent,
+    WebRtcPeerLeftEvent,
+    WebRtcErrorEvent,
+    WebRtcPongEvent,
+    WebRtcIceServerConfig,
+    WebRtcIceServersResponse,
+)
 
 __all__ = [
     "LoginRequest", "LoginVerifyRequest", "TokenResponse", "RegistrationResponse", "PasswordResetRequest", "PasswordResetConfirm", "ChangePasswordRequest", "ChangeEmailRequest", "ResendVerificationRequest", "DeleteAccountRequest", "NativeRefreshRequest", "LogoutRequest",
@@ -35,4 +49,7 @@ __all__ = [
     "ServerPermissionsRequest", "ServerPermissionsResponse",
     "BackupResponse", "PanelBackupCreateRequest", "PanelBackupResponse", "PanelRestorePrepResponse", "ModResponse",
     "NodeCreate", "NodeOut", "NodeUpdate",
+    "WebRtcJoinMessage", "WebRtcSignalMessage", "WebRtcLeaveMessage", "WebRtcPingMessage",
+    "WebRtcJoinedEvent", "WebRtcPeerJoinedEvent", "WebRtcSignalEvent", "WebRtcPeerLeftEvent",
+    "WebRtcErrorEvent", "WebRtcPongEvent", "WebRtcIceServerConfig", "WebRtcIceServersResponse",
 ]

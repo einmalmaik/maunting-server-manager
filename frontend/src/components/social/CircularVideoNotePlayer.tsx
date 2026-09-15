@@ -1,0 +1,96 @@
+import React, { useRef, useState } from 'react'
+import { Play, Pause, Volume2, VolumeX, Maximize2 } from 'lucide-react'
+import type { VideoNoteAttachment } from '@/services/videoNoteCrypto'
+
+export interface CircularVideoNotePlayerProps {
+  attachment: VideoNoteAttachment
+  videoUrl: string
+  onExpand?: () => void
+}
+
+export const CircularVideoNotePlayer: React.FC<CircularVideoNotePlayerProps> = ({
+  attachment,
+  videoUrl,
+  onExpand,
+}) => {
+  const [isPlaying, setIsPlaying] = useState(true)
+  const [isMuted, setIsMuted] = useState(true)
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+
+  const togglePlay = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!videoRef.current) return
+    if (isPlaying) {
+      videoRef.current.pause()
+      setIsPlaying(false)
+    } else {
+      videoRef.current.play()
+      setIsPlaying(true)
+    }
+  }
+
+  const toggleMute = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!videoRef.current) return
+    const nextMuted = !isMuted
+    videoRef.current.muted = nextMuted
+    setIsMuted(nextMuted)
+  }
+
+  return (
+    <div
+      onClick={onExpand}
+      className="relative w-44 h-44 sm:w-52 sm:h-52 rounded-full overflow-hidden bg-slate-900 border-2 border-primary/40 shadow-lg cursor-pointer group select-none transition-transform hover:scale-[1.02]"
+      title="Klicken zum Vergrößern"
+    >
+      <video
+        ref={videoRef}
+        src={videoUrl}
+        autoPlay
+        loop
+        playsInline
+        muted={isMuted}
+        className="w-full h-full object-cover"
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+      />
+
+      {/* Floating control buttons */}
+      <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
+        <button
+          type="button"
+          onClick={togglePlay}
+          className="w-9 h-9 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center backdrop-blur-sm transition-transform hover:scale-110"
+        >
+          {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
+        </button>
+
+        <button
+          type="button"
+          onClick={toggleMute}
+          className="w-9 h-9 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center backdrop-blur-sm transition-transform hover:scale-110"
+        >
+          {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+        </button>
+
+        {onExpand && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onExpand()
+            }}
+            className="w-9 h-9 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center backdrop-blur-sm transition-transform hover:scale-110"
+          >
+            <Maximize2 className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+
+      {/* Duration Badge */}
+      <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/60 px-2 py-0.5 rounded-full text-[10px] font-mono text-white/90">
+        {attachment.durationSeconds}s
+      </div>
+    </div>
+  )
+}
