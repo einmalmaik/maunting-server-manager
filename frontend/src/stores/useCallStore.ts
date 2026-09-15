@@ -118,7 +118,7 @@ export interface UseCallState {
 }
 
 import { create } from 'zustand'
-import { getWebRtcIceServers, rejectDirectCall, startDirectCall } from '@/api/social'
+import { cancelDirectCall, endGroupCallRoom, getWebRtcIceServers, rejectDirectCall, startDirectCall } from '@/api/social'
 import { wsUrl } from '@/config/api'
 
 let directSocket: WebSocket | null = null
@@ -126,9 +126,14 @@ let directPeer: RTCPeerConnection | null = null
 let pendingCandidates: RTCIceCandidateInit[] = []
 let transportGeneration = 0
 
-function closeDirectTransport() {
+function closeDirectTransport(sendLeave = true) {
   transportGeneration += 1
   pendingCandidates = []
+  try {
+    if (sendLeave && directSocket?.readyState === WebSocket.OPEN) {
+      directSocket.send(JSON.stringify({ action: 'leave', reason: 'hangup' }))
+    }
+  } catch { /* ignore */ }
   directSocket?.close()
   directSocket = null
   directPeer?.close()
@@ -187,10 +192,18 @@ async function connectDirectTransport(
   socket.onopen = () => socket.send(JSON.stringify({ action: 'join', token }))
   socket.onmessage = async (event) => {
     if (generation !== transportGeneration) return
-    let message: { event?: string; data?: string }
+    let message: { event?: string; data?: string; peer_count?: number }
     try { message = JSON.parse(String(event.data)) } catch { return }
+    if (message.event === 'joined') {
+      // Initiator joined second while the receiver was already waiting:
+      // no peer_joined will arrive for us, so offer directly.
+      if (typeof message.peer_count === 'number' && message.peer_count >= 2) {
+        await sendOffer().catch(() => {})
+      }
+      return
+    }
     if (message.event === 'peer_joined') {
-      await sendOffer()
+      await sendOffer().catch(() => {})
       return
     }
     if (message.event === 'peer_left') {
@@ -344,7 +357,18 @@ export const useCallStore = create<UseCallState>((set, get) => ({
     get().endCall()
   },
   endCall: () => {
-    const { localStream } = get()
+    const { localStream, blindToken, state, groupCall } = get()
+    // Caller hangs up while ringing: notify the recipient server-side so the
+    // incoming overlay can be dismissed instead of ringing forever.
+    if (blindToken && state === 'outgoing' && !groupCall) {
+      void cancelDirectCall(blindToken).catch(() => {})
+    }
+    if (groupCall && blindToken) {
+      const groupId = Number(groupCall.id)
+      if (Number.isFinite(groupId)) {
+        void endGroupCallRoom(groupId, blindToken).catch(() => {})
+      }
+    }
     if (localStream) {
       localStream.getTracks().forEach((t) => t.stop())
     }

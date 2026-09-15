@@ -1587,6 +1587,36 @@ export function Messenger() {
           useCallStore.getState().endCall()
           toast.info('Der Anruf wurde abgelehnt.')
         }
+      } else if (detail?.type === 'direct_call_cancelled') {
+        const call = useCallStore.getState()
+        if (
+          detail.recipient_id &&
+          currentUserId &&
+          Number(detail.recipient_id) === Number(currentUserId) &&
+          (call.state === 'incoming' || call.state === 'connecting') &&
+          (!detail.signaling_token || detail.signaling_token === call.blindToken)
+        ) {
+          call.endCall()
+          toast.info('Der Anrufer hat aufgelegt.')
+        }
+      } else if (detail?.type === 'group_call_ended') {
+        if (detail.group_id && detail.room_token) {
+          const groupId = Number(detail.group_id)
+          const roomToken = String(detail.room_token)
+          setGroups((prev) =>
+            prev.map((group) =>
+              group.id === groupId ? { ...group, room_token: null } : group
+            )
+          )
+          setActiveGroup((current) =>
+            current?.id === groupId ? { ...current, room_token: null } : current
+          )
+          const call = useCallStore.getState()
+          if (call.groupCall?.id === String(groupId) && call.blindToken === roomToken) {
+            call.endCall()
+            toast.info('Der Gruppenanruf wurde beendet.')
+          }
+        }
       } else if (detail?.type === 'e2ee_blind_message') {
         const isCurrentActive = detail.blind_mailbox_id === blindMailboxId
         // Outgoing Echo Prevention: Sender niemals benachrichtigen

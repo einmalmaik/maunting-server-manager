@@ -15,6 +15,7 @@ import {
   LayoutGrid,
 } from 'lucide-react'
 import { Button } from '@/Singra/UI'
+import { apiUrl } from '@/config/api'
 import { useCallStore } from '@/stores/useCallStore'
 import { DeviceSelectorModal } from './DeviceSelectorModal'
 import type { DropdownOption } from '@/components/ui/Dropdown'
@@ -58,6 +59,11 @@ export const CallOverlay: React.FC = () => {
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null)
   const ringtoneRef = useRef<{ context: AudioContext; timer: number } | null>(null)
   const [ringtoneBlocked, setRingtoneBlocked] = useState(false)
+  const [avatarBroken, setAvatarBroken] = useState(false)
+
+  useEffect(() => {
+    setAvatarBroken(false)
+  }, [partner?.avatarUrl, partner?.userId])
 
   const isGroupCall = Boolean(groupCall)
   const selectedShareSource = useMemo(
@@ -226,8 +232,13 @@ export const CallOverlay: React.FC = () => {
           <div className="m-auto flex w-full max-w-md flex-col items-center gap-6 rounded-3xl border border-emerald-400/30 bg-slate-900/80 p-8 text-center shadow-2xl">
             <div className="relative">
               <div className="h-28 w-28 overflow-hidden rounded-full border-4 border-emerald-400/50 bg-emerald-500/15">
-                {partner.avatarUrl ? (
-                  <img src={partner.avatarUrl} alt={partner.username} className="h-full w-full object-cover" />
+                {partner.avatarUrl && !avatarBroken ? (
+                  <img
+                    src={apiUrl(partner.avatarUrl)}
+                    alt={partner.username}
+                    className="h-full w-full object-cover"
+                    onError={() => setAvatarBroken(true)}
+                  />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center text-3xl font-bold text-emerald-100">
                     {partner.username.slice(0, 2).toUpperCase()}
@@ -490,9 +501,16 @@ export const CallOverlay: React.FC = () => {
             ) : (
               <div className="flex flex-col items-center gap-4">
                 <div className="relative">
-                  <div className="w-28 h-28 sm:w-36 sm:h-36 rounded-full bg-primary/20 border-2 border-primary/40 flex items-center justify-center text-primary shadow-xl">
-                    {partner?.avatarUrl ? (
-                      <img src={partner.avatarUrl} alt={partner.username} className="w-full h-full rounded-full object-cover" />
+                  <div className="w-28 h-28 sm:w-36 sm:h-36 rounded-full bg-primary/20 border-2 border-primary/40 flex items-center justify-center text-primary shadow-xl overflow-hidden">
+                    {partner?.avatarUrl && !avatarBroken ? (
+                      <img
+                        src={apiUrl(partner.avatarUrl)}
+                        alt={partner.username}
+                        className="w-full h-full rounded-full object-cover"
+                        onError={() => setAvatarBroken(true)}
+                      />
+                    ) : partner?.username ? (
+                      <span className="text-2xl font-bold">{partner.username.slice(0, 2).toUpperCase()}</span>
                     ) : (
                       <User className="w-14 h-14 sm:w-16 sm:h-16" />
                     )}

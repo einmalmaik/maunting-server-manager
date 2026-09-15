@@ -4,6 +4,10 @@ import { startDirectCall } from '@/api/social'
 
 vi.mock('@/api/social', () => ({
   startDirectCall: vi.fn(),
+  cancelDirectCall: vi.fn(),
+  endGroupCallRoom: vi.fn(),
+  rejectDirectCall: vi.fn(),
+  getWebRtcIceServers: vi.fn(),
 }))
 
 describe('useCallStore group calls', () => {

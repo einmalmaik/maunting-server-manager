@@ -800,6 +800,45 @@ def join_group_call_room(
     return {"room_token": req.room_token, "group_id": group_id, "max_peers": room[1]}
 
 
+@router.post(
+    "/groups/{group_id}/calls/end",
+    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
+)
+def end_group_call_room(
+    group_id: int,
+    req: GroupCallRoomJoinRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Close a group call room so stale room tokens disappear for everyone.
+
+    Requires start permission so guests merely leaving do not kill the room
+    for everyone else; their local leave is silent.
+    """
+    SocialService.assert_group_call_permission(db, group_id, user.id, "start_group_calls")
+    room = GroupCallRoomRegistry.get(req.room_token)
+    if room is None or room[0] != group_id:
+        raise HTTPException(status_code=404, detail="Gruppenanruf nicht gefunden oder abgelaufen.")
+    GroupCallRoomRegistry.discard(req.room_token)
+    member_ids = [
+        member_id
+        for (member_id,) in db.query(ChatGroupMember.user_id)
+        .filter(ChatGroupMember.group_id == group_id)
+        .all()
+        if member_id == user.id
+        or SocialService.has_group_permission(db, group_id, member_id, "join_group_calls")
+    ]
+    event = {
+        "type": "group_call_ended",
+        "group_id": group_id,
+        "room_token": req.room_token,
+        "ended_by": user.id,
+    }
+    for member_id in member_ids:
+        SyncEventService.publish(event, user_id=member_id)
+    return {"ok": True}
+
+
 # --- Stories (Temporäre Statusmeldungen, 24h) ---
 
 @router.get("/stories", response_model=list[ChatStoryResponse], dependencies=[Depends(_check_social_enabled)])
@@ -1069,6 +1108,35 @@ def reject_direct_call(
     )
     return {"ok": True}
 
+
+@router.post(
+    "/webrtc/call/{signaling_token}/cancel",
+    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
+)
+def cancel_direct_call(
+    signaling_token: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Caller hangs up while the recipient has not picked up yet.
+
+    Invalidates the invitation so a late accept cannot join, and notifies
+    the recipient so a ringing overlay can be dismissed server-side.
+    """
+    recipient_id = DirectCallInviteService.cancel(signaling_token, user.id)
+    if recipient_id is None:
+        raise HTTPException(status_code=404, detail="Anruf nicht gefunden oder bereits abgelaufen.")
+    SyncEventService.publish(
+        {
+            "type": "direct_call_cancelled",
+            "signaling_token": signaling_token,
+            "caller_id": user.id,
+            "recipient_id": recipient_id,
+        },
+        user_id=recipient_id,
+    )
+    return {"ok": True}
+
 @router.get(
     "/webrtc/ice-servers",
     response_model=WebRtcIceServersResponse,
@@ -1197,15 +1265,28 @@ async def webrtc_signal_websocket(
 
     # Backend-issued direct-call tokens are bound to both users. Legacy opaque
     # tokens remain accepted for compatibility with existing signaling clients.
+    # Either side may join first: the initiator does getUserMedia before opening
+    # the socket, so a fast accept would otherwise be rejected with 1008 and the
+    # call would drop immediately after picking up.
     direct_call_role = DirectCallInviteService.authorize(token, authenticated_user_id)
     if direct_call_role is None and DirectCallInviteService.is_known(token):
         await websocket.close(code=1008)
         return
-    if direct_call_role:
-        existing_session = BlindRendezvousManager.get_session(token)
-        if (direct_call_role == "receiver") != (existing_session is not None):
+    if direct_call_role is None and DirectCallInviteService.is_consumed(token):
+        # Rejected or caller-cancelled invitation: a late accept must not
+        # create a fresh rendezvous room that would ring forever.
+        try:
+            await websocket.send_json({
+                "event": "error",
+                "error": "session_terminated",
+                "code": 4004,
+                "message": "Call has already ended",
+                "detail": "Call has already ended",
+            })
             await websocket.close(code=1008)
-            return
+        except Exception:
+            pass
+        return
 
     # 5. Im ephemeren Blind-Rendezvous-Manager registrieren
     ws_lock = asyncio.Lock()

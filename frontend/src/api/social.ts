@@ -325,6 +325,19 @@ export async function rejectDirectCall(signalingToken: string): Promise<void> {
   })
 }
 
+export async function cancelDirectCall(signalingToken: string): Promise<void> {
+  await api(`/social/webrtc/call/${encodeURIComponent(signalingToken)}/cancel`, {
+    method: 'POST',
+  })
+}
+
+export async function endGroupCallRoom(groupId: number, roomToken: string): Promise<void> {
+  await api(`/social/groups/${groupId}/calls/end`, {
+    method: 'POST',
+    body: JSON.stringify({ room_token: roomToken }),
+  })
+}
+
 export async function getWebRtcIceServers(): Promise<{ ice_servers: RTCIceServer[]; ttl?: number }> {
   return api<{ ice_servers: RTCIceServer[]; ttl?: number }>('/social/webrtc/ice-servers')
 }

@@ -4,6 +4,7 @@ import secrets
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
+from starlette.websockets import WebSocketDisconnect
 
 from models import User, UserFriend
 from services.auth_service import AuthService
@@ -86,6 +87,85 @@ def test_direct_call_requires_accepted_friend_and_publishes_invitation(
                 )
                 assert recipient_ws.receive_json()["role"] == "receiver"
                 assert caller_ws.receive_json()["event"] == "peer_joined"
+    finally:
+        SyncEventService.unsubscribe(conn_id)
+        DirectCallInviteService.clear_all_for_testing()
+
+
+def test_direct_call_receiver_may_join_first(
+    db: Session, client: TestClient
+) -> None:
+    caller = _user(db, f"caller_{secrets.token_hex(4)}")
+    recipient = _user(db, f"recipient_{secrets.token_hex(4)}")
+    caller_cookies = _login(client, caller.username)
+    recipient_cookies = _login(client, recipient.username)
+
+    db.add(UserFriend(user_id=caller.id, friend_id=recipient.id, status="accepted"))
+    db.commit()
+    try:
+        response = client.post(
+            f"/api/social/webrtc/call/{recipient.id}?mode=audio",
+            cookies=caller_cookies,
+            headers=_csrf(caller_cookies),
+        )
+        assert response.status_code == 200
+        token = response.json()["signaling_token"]
+
+        with client.websocket_connect(
+            "/api/social/webrtc/signal", cookies=recipient_cookies
+        ) as recipient_ws:
+            recipient_ws.send_json({"action": "join", "token": token})
+            assert recipient_ws.receive_json()["event"] == "joined"
+            with client.websocket_connect(
+                "/api/social/webrtc/signal", cookies=caller_cookies
+            ) as caller_ws:
+                caller_ws.send_json({"action": "join", "token": token})
+                assert caller_ws.receive_json()["event"] == "joined"
+                assert recipient_ws.receive_json()["event"] == "peer_joined"
+    finally:
+        DirectCallInviteService.clear_all_for_testing()
+
+
+def test_direct_call_cancel_notifies_recipient_and_blocks_late_join(
+    db: Session, client: TestClient
+) -> None:
+    caller = _user(db, f"caller_{secrets.token_hex(4)}")
+    recipient = _user(db, f"recipient_{secrets.token_hex(4)}")
+    caller_cookies = _login(client, caller.username)
+    recipient_cookies = _login(client, recipient.username)
+
+    db.add(UserFriend(user_id=caller.id, friend_id=recipient.id, status="accepted"))
+    db.commit()
+    conn_id, queue = SyncEventService.subscribe(recipient.id)
+    try:
+        response = client.post(
+            f"/api/social/webrtc/call/{recipient.id}?mode=audio",
+            cookies=caller_cookies,
+            headers=_csrf(caller_cookies),
+        )
+        assert response.status_code == 200
+        token = response.json()["signaling_token"]
+        queue.get_nowait()
+
+        cancel = client.post(
+            f"/api/social/webrtc/call/{token}/cancel",
+            cookies=caller_cookies,
+            headers=_csrf(caller_cookies),
+        )
+        assert cancel.status_code == 200
+        event = queue.get_nowait()
+        assert event["type"] == "direct_call_cancelled"
+        assert event["signaling_token"] == token
+
+        try:
+            with client.websocket_connect(
+                "/api/social/webrtc/signal", cookies=recipient_cookies
+            ) as recipient_ws:
+                recipient_ws.send_json({"action": "join", "token": token})
+                message = recipient_ws.receive_json()
+                assert message.get("event") == "error"
+        except WebSocketDisconnect:
+            pass
     finally:
         SyncEventService.unsubscribe(conn_id)
         DirectCallInviteService.clear_all_for_testing()

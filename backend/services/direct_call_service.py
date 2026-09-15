@@ -21,6 +21,7 @@ class DirectCallInviteService:
     """Keeps direct-call authorization ephemeral and out of the database."""
 
     _invites: dict[str, DirectCallInvite] = {}
+    _consumed: dict[str, float] = {}
     _lock = threading.Lock()
 
     @classmethod
@@ -68,12 +69,39 @@ class DirectCallInviteService:
                     cls._invites.pop(token, None)
                 return None
             cls._invites.pop(token, None)
+            cls._consumed[token] = time.time()
             return invite.caller_id
+
+    @classmethod
+    def cancel(cls, token: str, user_id: int) -> int | None:
+        """Consume an invitation when the caller hangs up before accept."""
+        with cls._lock:
+            invite = cls._invites.get(token)
+            if not invite or invite.expires_at <= time.time() or invite.caller_id != user_id:
+                if invite and invite.expires_at <= time.time():
+                    cls._invites.pop(token, None)
+                return None
+            cls._invites.pop(token, None)
+            cls._consumed[token] = time.time()
+            return invite.recipient_id
+
+    @classmethod
+    def is_consumed(cls, token: str) -> bool:
+        """True once an invitation was explicitly rejected or cancelled."""
+        with cls._lock:
+            consumed_at = cls._consumed.get(token)
+            if consumed_at is None:
+                return False
+            if time.time() - consumed_at > DIRECT_CALL_TOKEN_TTL_SECONDS * 2:
+                cls._consumed.pop(token, None)
+                return False
+            return True
 
     @classmethod
     def clear_all_for_testing(cls) -> None:
         with cls._lock:
             cls._invites.clear()
+            cls._consumed.clear()
 
     @classmethod
     def _sweep_locked(cls, now: float) -> None:
