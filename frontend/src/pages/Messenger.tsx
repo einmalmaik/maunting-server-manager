@@ -58,7 +58,7 @@ import {
   Video,
 } from 'lucide-react'
 import { CallOverlay } from '@/components/calling/CallOverlay'
-import { useCallStore } from '@/stores/useCallStore'
+import { useCallStore, type CallScreenShareSource } from '@/stores/useCallStore'
 import { CircularVideoNoteRecorder } from '@/components/social/CircularVideoNoteRecorder'
 import { CircularVideoNotePlayer } from '@/components/social/CircularVideoNotePlayer'
 import type { VideoNoteAttachment } from '@/services/videoNoteCrypto'
@@ -2433,6 +2433,103 @@ export function Messenger() {
     }
   }
 
+  const resolveGroupCallPermissions = (group: ChatGroupItem | null, userId: number) => {
+    const fallback = { canStart: false, canJoin: false, canShare: false, canModerate: false }
+    if (!group) return fallback
+
+    const granted = new Set((group.default_permissions ?? '').split(',').filter(Boolean))
+    if (group.owner_user_id === userId) {
+      for (const perm of ['call_start', 'call_join', 'call_share', 'call_moderate']) {
+        granted.add(perm)
+      }
+    } else if (group.role === 'admin') {
+      granted.add('call_start')
+      granted.add('call_join')
+      granted.add('call_share')
+      granted.add('call_moderate')
+    } else if (group.role === 'moderator') {
+      granted.add('call_join')
+      granted.add('call_share')
+      granted.add('call_moderate')
+    } else {
+      granted.add('call_join')
+    }
+
+    return {
+      canStart: granted.has('call_start'),
+      canJoin: granted.has('call_join'),
+      canShare: granted.has('call_share'),
+      canModerate: granted.has('call_moderate'),
+    }
+  }
+
+  const groupCallPermissions = useMemo(
+    () => resolveGroupCallPermissions(activeGroup, currentUserId),
+    [activeGroup, currentUserId]
+  )
+
+  const handleStartGroupCall = (joinExisting = false) => {
+    if (!activeGroup) return
+    if (joinExisting ? !groupCallPermissions.canJoin : !groupCallPermissions.canStart) {
+      toast.error(
+        joinExisting
+          ? 'Du hast in dieser Gruppe keine Berechtigung, einem Gruppenanruf beizutreten.'
+          : 'Du hast in dieser Gruppe keine Berechtigung, einen Gruppenanruf zu starten.'
+      )
+      return
+    }
+
+    const memberSource = (activeGroup.members?.length ? activeGroup.members : [{
+      user_id: currentUserId,
+      username: user?.username || 'Ich',
+      avatar_url: user?.avatar_url ?? null,
+      role: activeGroup.role || 'member',
+      joined_at: new Date().toISOString(),
+    }])
+
+    const participants = memberSource.map((member, index) => ({
+      userId: member.user_id,
+      username: member.username,
+      avatarUrl: member.avatar_url ?? null,
+      isMuted: member.user_id !== currentUserId,
+      isCameraOff: false,
+      isSpeaking: index === 0,
+      canModerate: member.role === 'admin' || member.role === 'moderator' || member.user_id === activeGroup.owner_user_id,
+    }))
+
+    const screenSources: CallScreenShareSource[] = participants.slice(0, 3).map((participant, index) => ({
+      id: `group-share-${participant.userId}-${index}`,
+      ownerId: participant.userId,
+      ownerName: participant.username,
+      label: index === 0 ? 'Desktop / Main stage' : index === 1 ? 'Browser window' : 'App share',
+      kind: index === 0 ? 'screen' : index === 1 ? 'window' : 'app',
+      isLive: true,
+    }))
+
+    const callDefinition = {
+      id: String(activeGroup.id),
+      name: activeGroup.name,
+      participants,
+      screenSources,
+      permissions: {
+        canJoin: groupCallPermissions.canJoin,
+        canShare: groupCallPermissions.canShare,
+        canModerate: groupCallPermissions.canModerate,
+      },
+      capabilities: {
+        supportsGroupSignals: false,
+        supportsScreenShare: false,
+        supportsAudioMixer: false,
+        reason: 'UI-Vorschau: echte Gruppen-Signalisierung, Screen-Share- und Mixer-Aktivitäten werden noch nicht durch das Backend unterstützt.',
+      },
+    }
+    if (joinExisting) {
+      useCallStore.getState().joinExistingGroupCall(callDefinition)
+    } else {
+      useCallStore.getState().startGroupCall(callDefinition)
+    }
+  }
+
   const isChatOpen = Boolean(activeContact || activeGroup)
 
   return (
@@ -2458,6 +2555,22 @@ export function Messenger() {
               aria-label="Foto aufnehmen"
             >
               <Camera className="w-4 h-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => handleStartGroupCall(true)}
+              disabled={!groupCallPermissions.canJoin}
+              className="h-8 gap-1.5 bg-surface-container-high/85 px-2.5 text-xs text-cyan-200 shadow-xs hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-60"
+              title={
+                groupCallPermissions.canJoin
+                  ? 'Laufendem Gruppenanruf beitreten'
+                  : 'Du hast in dieser Gruppe keine Berechtigung, einem Gruppenanruf beizutreten.'
+              }
+              aria-label="Laufendem Gruppenanruf beitreten"
+            >
+              <Phone className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Beitreten</span>
             </Button>
 
             <Button
@@ -3360,6 +3473,23 @@ export function Messenger() {
                       >
                         <Share2 className="w-3.5 h-3.5" />
                         <span className="hidden sm:inline">Einladen</span>
+                      </Button>
+
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleStartGroupCall(false)}
+                        disabled={!groupCallPermissions.canStart}
+                        className="h-8 gap-1.5 bg-surface-container-high/85 px-2.5 text-xs text-primary shadow-xs hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-60"
+                        title={
+                          groupCallPermissions.canStart
+                            ? 'Gruppenanruf starten'
+                            : 'Du hast in dieser Gruppe keine Berechtigung, einen Gruppenanruf zu starten.'
+                        }
+                        aria-label="Gruppenanruf starten"
+                      >
+                        <UsersRound className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Anruf</span>
                       </Button>
 
                       {(activeGroup.owner_user_id === currentUserId || activeGroup.role === 'admin') && (

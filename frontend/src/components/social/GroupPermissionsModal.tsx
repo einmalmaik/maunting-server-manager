@@ -71,6 +71,30 @@ export const GROUP_PERMISSION_DEFINITIONS = [
     category: 'members',
   },
   {
+    key: 'call_start',
+    title: 'Anrufe starten',
+    desc: 'Erlaubt das Starten eines Gruppenanrufs oder das Einleiten eines Live-Calls.',
+    category: 'calls',
+  },
+  {
+    key: 'call_join',
+    title: 'Anrufe beitreten',
+    desc: 'Erlaubt das Beitreten zu laufenden Gruppenanrufen und die Teilnahme am Live-Stage-Stream.',
+    category: 'calls',
+  },
+  {
+    key: 'call_share',
+    title: 'Bildschirm freigeben',
+    desc: 'Erlaubt das Freigeben eines Bildschirms, Fensters oder App-Outputs für den Gruppenraum.',
+    category: 'calls',
+  },
+  {
+    key: 'call_moderate',
+    title: 'Anrufe moderieren',
+    desc: 'Erlaubt das Steuern der Teilnehmerliste, Lautstärke und Laufzeit-Controls während eines Gruppenanrufs.',
+    category: 'moderation',
+  },
+  {
     key: 'kick_members',
     title: 'Mitglieder entfernen (Kicken)',
     desc: 'Mitglieder mit niedrigerem Rang aus der Gruppe entfernen.',
@@ -101,23 +125,23 @@ const SYSTEM_GROUP_ROLES: GroupRoleDefinition[] = [
   {
     id: 'admin',
     name: 'Administrator',
-    description: 'Kann Mitglieder kicken, Nachrichten moderieren und Rollen vergeben.',
+    description: 'Kann Mitglieder kicken, Nachrichten moderieren, Anrufe steuern und Rollen vergeben.',
     is_system: true,
-    permissions: ['send_messages', 'attach_media', 'invite_members', 'kick_members', 'delete_messages', 'manage_roles'],
+    permissions: ['send_messages', 'attach_media', 'invite_members', 'call_start', 'call_join', 'call_share', 'call_moderate', 'kick_members', 'delete_messages', 'manage_roles'],
   },
   {
     id: 'moderator',
     name: 'Moderator',
-    description: 'Kann Nachrichten entfernen, Einladungen versenden und Regelverstöße ahnden.',
+    description: 'Kann Nachrichten entfernen, Einladungen versenden und Gruppenanrufe moderieren.',
     is_system: true,
-    permissions: ['send_messages', 'attach_media', 'invite_members', 'delete_messages'],
+    permissions: ['send_messages', 'attach_media', 'invite_members', 'call_join', 'call_share', 'call_moderate', 'delete_messages'],
   },
   {
     id: 'member',
     name: 'Mitglied (@everyone)',
     description: 'Reguläres Mitglied. Berechtigungen richten sich nach den Standardrechten.',
     is_system: true,
-    permissions: ['send_messages', 'attach_media', 'invite_members'],
+    permissions: ['send_messages', 'attach_media', 'invite_members', 'call_join'],
   },
 ]
 
@@ -331,6 +355,10 @@ export function GroupPermissionsModal({
   const [canSendMessages, setCanSendMessages] = useState(true)
   const [canAttachMedia, setCanAttachMedia] = useState(true)
   const [canInviteMembers, setCanInviteMembers] = useState(true)
+  const [canStartCalls, setCanStartCalls] = useState(true)
+  const [canJoinCalls, setCanJoinCalls] = useState(true)
+  const [canShareCalls, setCanShareCalls] = useState(false)
+  const [canModerateCalls, setCanModerateCalls] = useState(false)
   const [canDeleteMessages, setCanDeleteMessages] = useState(false)
   const [canKickMembers, setCanKickMembers] = useState(false)
 
@@ -345,6 +373,10 @@ export function GroupPermissionsModal({
       setCanSendMessages(defPerms.includes('send_messages'))
       setCanAttachMedia(defPerms.includes('attach_media'))
       setCanInviteMembers(defPerms.includes('invite_members'))
+      setCanStartCalls(defPerms.includes('call_start'))
+      setCanJoinCalls(defPerms.includes('call_join'))
+      setCanShareCalls(defPerms.includes('call_share'))
+      setCanModerateCalls(defPerms.includes('call_moderate'))
       setCanDeleteMessages(defPerms.includes('delete_messages'))
       setCanKickMembers(defPerms.includes('kick_members'))
     }
@@ -407,6 +439,10 @@ export function GroupPermissionsModal({
     if (canSendMessages) perms.push('send_messages')
     if (canAttachMedia) perms.push('attach_media')
     if (canInviteMembers) perms.push('invite_members')
+    if (canStartCalls) perms.push('call_start')
+    if (canJoinCalls) perms.push('call_join')
+    if (canShareCalls) perms.push('call_share')
+    if (canModerateCalls) perms.push('call_moderate')
     if (canDeleteMessages) perms.push('delete_messages')
     if (canKickMembers) perms.push('kick_members')
 
