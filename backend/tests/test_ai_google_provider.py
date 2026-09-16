@@ -24,11 +24,15 @@ def test_google_registry_spec() -> None:
     assert spec.kind == "google"
     assert spec.label == "Google AI Studio"
     assert spec.base_url == "https://generativelanguage.googleapis.com/v1beta/openai"
-    assert spec.catalog_url == "https://generativelanguage.googleapis.com/v1beta/openai/models"
+    assert spec.catalog_url == "https://generativelanguage.googleapis.com/v1beta/models"
     assert spec.key_prefix is None
     assert spec.katalog_braucht_schluessel is True
+    assert spec.schluessel_kopf == "x-goog-api-key"
+    assert spec.schluessel_praefix == ""
+    assert spec.katalog_liste_feld == "models"
     assert spec.realtime_tauglich is True
     assert "chat" in spec.gehoer_wege
+    assert "reasoning_effort" in spec.anfrage_erweiterungen
     assert spec.empfehlung == "gemini-2.5-flash"
 
 
@@ -305,15 +309,60 @@ def test_clean_gemini_schema() -> None:
 def test_google_catalog_models_prefix_and_native_limits() -> None:
     """Prüft models/ Präfix-Bereinigung und Einlesen von Google-REST Token-Limits."""
     raw = {
-        "id": "models/gemini-2.5-flash",
+        "name": "models/gemini-2.5-flash",
+        "displayName": "Gemini 2.5 Flash",
         "inputTokenLimit": 1_000_000,
         "outputTokenLimit": 8_192,
+        "thinking": True,
     }
     m = katalog_lesen(raw)
     assert m is not None
     assert m.model_id == "gemini-2.5-flash"
+    assert m.name == "Gemini 2.5 Flash"
     assert m.kontext_tokens == 1_000_000
     assert m.max_ausgabe_tokens == 8_192
+    assert m.denkt is True
+    assert m.stufen == ("low", "medium", "high")
+    assert m.standard_stufe == "medium"
+
+
+def test_google_catalog_gemini_4_dynamic() -> None:
+    """Prüft, dass für zukünftige Modelle wie Gemini 4 Limits und Thinking dynamisch aus der API kommen."""
+    raw = {
+        "name": "models/gemini-4-flash",
+        "displayName": "Gemini 4 Flash",
+        "description": "Next generation multimodal model with deep thinking capabilities",
+        "inputTokenLimit": 2_097_152,
+        "outputTokenLimit": 65_536,
+        "supportedGenerationMethods": ["generateContent", "countTokens", "bidiGenerateContent"],
+        "thinking": True,
+    }
+    m = katalog_lesen(raw)
+    assert m is not None
+    assert m.model_id == "gemini-4-flash"
+    assert m.name == "Gemini 4 Flash"
+    assert m.kontext_tokens == 2_097_152
+    assert m.max_ausgabe_tokens == 65_536
+    assert m.denkt is True
+    assert m.stufen == ("low", "medium", "high")
+    assert m.standard_stufe == "medium"
+    assert m.sieht is True
+
+
+def test_google_catalog_explicit_thinking_false() -> None:
+    """Prüft, dass Modelle mit thinking=False kein Thinking erhalten, selbst wenn sie neu sind."""
+    raw = {
+        "name": "models/gemini-2.5-flash-lite",
+        "displayName": "Gemini 2.5 Flash Lite",
+        "inputTokenLimit": 1_048_576,
+        "outputTokenLimit": 8_192,
+        "thinking": False,
+    }
+    m = katalog_lesen(raw)
+    assert m is not None
+    assert m.denkt is False
+    assert m.stufen == ()
+    assert m.standard_stufe is None
 
 
 @pytest.mark.asyncio

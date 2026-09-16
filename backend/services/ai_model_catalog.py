@@ -438,6 +438,8 @@ async def _hole(
         rohliste = (
             nutzlast.get(spec.katalog_liste_feld) if isinstance(nutzlast, dict) else None
         )
+        if rohliste is None and isinstance(nutzlast, dict):
+            rohliste = nutzlast.get("models") or nutzlast.get("data")
     if not isinstance(rohliste, list):
         erwartet = spec.katalog_liste_feld or "eine Liste"
         raise ValueError(f"Katalog hat kein {erwartet}-Feld")
