@@ -130,22 +130,24 @@ def _api_url_aus_client_url(client_url: str) -> str:
 
 
 def _lokale_client_url() -> str:
-    """`wss://<panel-host>/livekit`, abgeleitet aus `panel_url`.
+    """`wss://<host>/livekit`, abgeleitet aus der Adresse, unter der Caddy `/api` ausliefert.
 
-    Der Browser erreicht den Sidecar nur ueber Caddy. Ein Betreiber soll dafuer
-    nichts eintragen muessen, deshalb kommt die Adresse aus der Domain, die bei
-    der Installation ohnehin gesetzt wurde.
+    Der Browser erreicht den Sidecar nur ueber Caddy, und `handle_path
+    /livekit/*` steht in derselben Site wie `handle /api/*`. Bei getrenntem
+    Frontend ist das der **API**-Host und nicht `panel_url` — sonst zeigte die
+    Adresse auf die Frontend-Domain, die den Pfad gar nicht durchreicht.
+    `MSM_LIVEKIT_URL` schlaegt beides, fuer Aufbauten, die davon abweichen.
     """
     basis = (settings.livekit_url or "").strip().rstrip("/")
     if basis:
         return basis
-    panel = (settings.panel_url or "").strip().rstrip("/")
-    if not panel:
-        return ""
-    if panel.startswith("https://"):
-        return "wss://" + panel[len("https://") :] + LOKALER_PFAD
-    if panel.startswith("http://"):
-        return "ws://" + panel[len("http://") :] + LOKALER_PFAD
+    herkunft = (settings.api_url or "").strip().rstrip("/")
+    if not herkunft:
+        herkunft = (settings.panel_url or "").strip().rstrip("/")
+    if herkunft.startswith("https://"):
+        return "wss://" + herkunft[len("https://") :] + LOKALER_PFAD
+    if herkunft.startswith("http://"):
+        return "ws://" + herkunft[len("http://") :] + LOKALER_PFAD
     return ""
 
 
@@ -381,6 +383,17 @@ def status(db: Session | None = None) -> dict[str, Any]:
     erreichbar, meldung, raeume = verbindung_pruefen(
         konf.api_url, konf.api_key, konf.api_secret
     )
+    if not erreichbar and konf.modus == "lokal":
+        # Die Adresse im Statusstreifen ist der Weg des Browsers ueber Caddy.
+        # Geprueft wurde der Dienst selbst auf dem Loopback. Ohne diesen Satz
+        # sucht ein Betreiber den Fehler bei seiner Domain statt beim Sidecar —
+        # genau das ist am 17.09.2026 passiert.
+        meldung = (
+            f"Der integrierte Medienserver antwortet nicht auf {konf.api_url}. "
+            f"Geprüft wird der Dienst auf diesem Host, nicht die Adresse "
+            f"{konf.client_url} — die ist nur der Weg des Browsers über den "
+            f"Reverse-Proxy. Zustand des Dienstes: systemctl status msm-livekit"
+        )
     return {
         "modus": konf.modus,
         "url": konf.client_url,

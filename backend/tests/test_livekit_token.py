@@ -171,6 +171,39 @@ def test_extern_ohne_schluessel_wird_abgelehnt(db: Session) -> None:
         )
 
 
+def test_extern_ignoriert_den_sidecar_vollstaendig(db: Session, monkeypatch) -> None:
+    """Im Externmodus wird der mitgelieferte Sidecar nirgends mehr angefasst.
+
+    Weder seine Adresse noch sein Schluesselpaar. Ein Betreiber, der LiveKit
+    Cloud nutzt, kann `msm-livekit` abschalten, ohne dass Anrufe leiden.
+    """
+    monkeypatch.setattr(livekit_service.settings, "livekit_api_key", "APIsidecar")
+    monkeypatch.setattr(livekit_service.settings, "livekit_api_secret", "sidecar-geheim")
+    monkeypatch.setattr(livekit_service.settings, "livekit_url", "wss://panel.test/livekit")
+
+    livekit_service.speichere_konfiguration(
+        "extern", "wss://projekt.livekit.cloud", "APIextern", "extern-geheim", db=db
+    )
+    konf = livekit_service.konfiguration(db)
+
+    assert konf.client_url == "wss://projekt.livekit.cloud"
+    assert konf.api_url == "https://projekt.livekit.cloud"
+    assert konf.api_key == "APIextern"
+    assert konf.api_secret == "extern-geheim"
+    assert "127.0.0.1" not in konf.api_url
+    assert "/livekit" not in konf.client_url
+
+    # Und die Raumabfrage geht an denselben externen Endpunkt, nicht an 7880.
+    gesehen: dict[str, str] = {}
+    monkeypatch.setattr(
+        livekit_service,
+        "_twirp",
+        lambda api_url, *a, **k: gesehen.setdefault("url", api_url) and None or {"participants": []},
+    )
+    livekit_service.raum_teilnehmer("irgendein-raum", db)
+    assert gesehen["url"] == "https://projekt.livekit.cloud"
+
+
 def test_zurueck_auf_lokal_laesst_die_externen_daten_unangetastet(db: Session) -> None:
     """Wer versehentlich umschaltet, soll nicht alles neu eintippen muessen."""
     livekit_service.speichere_konfiguration(
@@ -199,6 +232,35 @@ def test_csp_herkunft_ist_lokal_leer_und_extern_beide_schemata(db: Session) -> N
     herkunft = livekit_service.csp_origin(db)
     assert "wss://projekt.livekit.cloud" in herkunft
     assert "https://projekt.livekit.cloud" in herkunft
+
+
+def test_externe_herkunft_steht_im_ausgelieferten_connect_src(db: Session) -> None:
+    """Ohne diesen Eintrag blockiert der Browser die Verbindung stillschweigend.
+
+    Kein Fehler in der Konsole des Panels, keine Meldung im Anrufraum — der
+    Anruf klingelt und kommt nie zustande. Deshalb haengt das hier an einem
+    Test und nicht an der Aufmerksamkeit beim naechsten CSP-Umbau.
+    """
+    import main
+
+    assert "livekit" not in main._csp_connect_src()
+
+    livekit_service.speichere_konfiguration(
+        "extern", "wss://projekt.livekit.cloud", "APIkey", "geheim", db=db
+    )
+    connect_src = main._csp_connect_src()
+
+    assert "wss://projekt.livekit.cloud" in connect_src
+    assert "https://projekt.livekit.cloud" in connect_src
+    assert "'self'" in connect_src
+
+
+def test_lokaler_modus_braucht_keine_zusaetzliche_csp_herkunft(db: Session) -> None:
+    """Der Sidecar liegt hinter Caddy auf derselben Herkunft, `'self'` deckt ihn."""
+    import main
+
+    assert livekit_service.modus(db) == "lokal"
+    assert main._csp_connect_src().strip() == "'self'"
 
 
 # ── Maskierung und Status ───────────────────────────────────────────────────
@@ -233,6 +295,50 @@ def test_status_nennt_das_geheimnis_nirgends(db: Session, monkeypatch) -> None:
     assert bericht["api_key_maskiert"] == "*******efgh"
     assert "streng-geheim" not in repr(bericht)
     assert "APIabcdefgh" not in repr(bericht)
+
+
+def test_lokale_adresse_kommt_vom_api_host_nicht_vom_frontend(monkeypatch) -> None:
+    """Caddy reicht `/livekit` dort durch, wo auch `/api` liegt.
+
+    Bei getrenntem Frontend ist das der API-Host. Zeigte die Adresse auf
+    `panel_url`, verbaende der Browser gegen eine Domain, die den Pfad gar
+    nicht kennt.
+    """
+    monkeypatch.setattr(livekit_service.settings, "livekit_url", "")
+    monkeypatch.setattr(livekit_service.settings, "panel_url", "https://msm.example.de")
+    monkeypatch.setattr(livekit_service.settings, "api_url", "https://api.msm.example.de")
+
+    assert livekit_service._lokale_client_url() == "wss://api.msm.example.de/livekit"
+
+    # All-in-one: kein eigener API-Host, dann gilt panel_url.
+    monkeypatch.setattr(livekit_service.settings, "api_url", "")
+    assert livekit_service._lokale_client_url() == "wss://msm.example.de/livekit"
+
+    # Ein ausdruecklich gesetztes MSM_LIVEKIT_URL schlaegt beides.
+    monkeypatch.setattr(livekit_service.settings, "livekit_url", "wss://medien.example.de")
+    assert livekit_service._lokale_client_url() == "wss://medien.example.de"
+
+
+def test_lokale_fehlermeldung_nennt_die_wirklich_geprueft_adresse(
+    db: Session, monkeypatch
+) -> None:
+    """Sonst sucht der Betreiber den Fehler bei seiner Domain statt beim Dienst."""
+    monkeypatch.setattr(livekit_service.settings, "livekit_api_key", "APIlokal")
+    monkeypatch.setattr(livekit_service.settings, "livekit_api_secret", "lokal-geheim")
+    monkeypatch.setattr(livekit_service.settings, "livekit_url", "wss://msm.example.de/livekit")
+
+    def _kaputt(*_a, **_k):
+        raise __import__("httpx").ConnectError("connection refused")
+
+    monkeypatch.setattr(livekit_service, "_twirp", _kaputt)
+
+    bericht = livekit_service.status(db)
+
+    assert bericht["erreichbar"] is False
+    fehler = bericht["fehler"]
+    assert livekit_service.LOKALE_HTTP_URL in fehler
+    assert "msm.example.de" in fehler
+    assert "msm-livekit" in fehler
 
 
 def test_status_meldet_unerreichbar_statt_zu_scheitern(db: Session, monkeypatch) -> None:
