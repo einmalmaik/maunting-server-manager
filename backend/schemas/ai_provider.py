@@ -205,10 +205,9 @@ class AiProviderCreate(BaseModel):
     ethics_model: Modellkennung = Field(default=None, max_length=256)
     ethics_reasoning_effort: Stufenwort = Field(default=None, max_length=16)
     ethics_mode: str = Field(default="auto", max_length=32)
-    # Der Name der Azure-Ressource. Wie Stimme und Gehoer nicht gegen
-    # `provider_kind` geprueft: **ob** er noetig ist, entscheidet die Registry,
-    # und das tut der Service.
     azure_resource_name: Ressourcenname = Field(default=None, max_length=64)
+    # Deaktiviert standardmäßige Sicherheitsfilter (z. B. Google AI Studio BLOCK_NONE)
+    disable_safety: bool = False
     operator_api_key: SecretStr | None = Field(default=None, min_length=1, max_length=4096)
 
 
@@ -267,6 +266,7 @@ class AiProviderUpdate(BaseModel):
     # Unterschied zaehlt hier doppelt — ein geaenderter Ressourcenname loescht
     # den gespeicherten Schluessel, ein nicht mitgeschickter nicht.
     azure_resource_name: Ressourcenname = Field(default=None, max_length=64)
+    disable_safety: bool | None = None
     operator_api_key: SecretStr | None = Field(default=None, min_length=1, max_length=4096)
     clear_operator_api_key: bool = False
 
@@ -324,6 +324,7 @@ class AiProviderResponse(BaseModel):
     #: mitzuteilen. ``None`` heisst „nichts hinterlegt", und bei jedem Anbieter
     #: ohne ``ressource_noetig`` ist das der Normalfall.
     azure_resource_name: str | None = None
+    disable_safety: bool = False
     enabled: bool
     requires_api_key: bool
     operator_key_configured: bool

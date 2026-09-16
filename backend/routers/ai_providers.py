@@ -110,6 +110,7 @@ def _admin_response(provider: AiProvider) -> AiProviderResponse:
         ethics_reasoning_effort=provider.ethics_reasoning_effort,
         ethics_mode=provider.ethics_mode or "auto",
         azure_resource_name=provider.azure_resource_name,
+        disable_safety=bool(getattr(provider, "disable_safety", False)),
         enabled=provider.enabled,
         requires_api_key=provider.requires_api_key,
         operator_key_configured=bool(provider.operator_api_key_encrypted),
@@ -307,7 +308,11 @@ async def test_provider(
     if ai_provider_service.spricht(provider, ai_provider_registry.TTS):
         return await _stimmzugang_pruefen(provider, api_key or "")
 
-    test_model = provider.default_model or provider.transcription_model
+    test_model = (
+        provider.default_model
+        or provider.transcription_model
+        or provider.realtime_model
+    )
     usage = StreamUsage()
     try:
         received = False

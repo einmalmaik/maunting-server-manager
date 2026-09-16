@@ -42,7 +42,7 @@ export interface AiProviderAdmin {
   transcription_model: string | null
   realtime_default?: boolean
   realtime_model?: string | null
-  realtime_voice?: 'alloy' | 'ash' | 'ballad' | 'coral' | 'echo' | 'sage' | 'shimmer' | 'verse' | 'marin' | 'cedar' | null
+  realtime_voice?: string | null
   realtime_reasoning_effort?: 'low' | 'medium' | 'high' | null
   realtime_language?: 'auto' | 'de' | 'en'
   realtime_vad_eagerness?: 'auto' | 'low' | 'medium' | 'high'
@@ -86,6 +86,7 @@ export interface AiProviderAdmin {
    * nur der Bequemlichkeit halber — verbindlich prueft der Server.
    */
   azure_resource_name: string | null
+  disable_safety?: boolean
   enabled: boolean
   requires_api_key: boolean
   operator_key_configured: boolean
@@ -519,7 +520,7 @@ export interface AiProviderTestResult {
  */
 export interface AiVoiceConfig {
   available: boolean
-  mode?: 'legacy' | 'openai_realtime'
+  mode?: 'legacy' | 'openai_realtime' | 'gemini_live'
   /** Nur zur Anzeige. `null`, solange nichts eingerichtet ist. */
   model: string | null
   /**
@@ -1137,6 +1138,7 @@ export interface AiProviderWrite {
    * gespeicherten Schluessel, ein nicht mitgeschickter nicht.
    */
   azure_resource_name?: string | null
+  disable_safety?: boolean
   operator_api_key?: string
   clear_operator_api_key?: boolean
 }

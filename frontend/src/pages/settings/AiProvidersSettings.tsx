@@ -34,13 +34,17 @@ interface ProviderDraft extends AiProviderWrite {
 const KEIN_WORKER = '__aus__'
 const KEINE_ETHICS = '__aus__'
 const EMPFOHLENE_REALTIME_MODELLE = ['gpt-realtime-1.5', 'gpt-realtime-2'] as const
+const EMPFOHLENE_GOOGLE_REALTIME_MODELLE = ['gemini-2.5-flash', 'gemini-2.0-flash'] as const
+const GEMINI_LIVE_STIMMEN = ['Puck', 'Charon', 'Kore', 'Fenrir', 'Aoede', 'Zephyr', 'Leda', 'Orus'] as const
 
-function realtimeModellOptionen(models: AiCatalogModel[] | null | undefined, t: (key: string) => string) {
+function realtimeModellOptionen(models: AiCatalogModel[] | null | undefined, t: (key: string) => string, isGoogle = false) {
+  const filterWort = isGoogle ? 'gemini' : 'realtime'
   const ausKatalog = (models ?? [])
-    .filter((item) => item.model_id.toLowerCase().includes('realtime'))
+    .filter((item) => item.model_id.toLowerCase().includes(filterWort))
     .map((item) => ({ value: item.model_id, label: item.model_id, hint: modellHinweis(item, t) }))
   const vorhanden = new Set(ausKatalog.map((item) => item.value))
-  for (const model of EMPFOHLENE_REALTIME_MODELLE) {
+  const empfohlene = isGoogle ? EMPFOHLENE_GOOGLE_REALTIME_MODELLE : EMPFOHLENE_REALTIME_MODELLE
+  for (const model of empfohlene) {
     if (!vorhanden.has(model)) {
       ausKatalog.push({ value: model, label: model, hint: t('ai.providers.recommended') })
     }
@@ -162,6 +166,7 @@ function toDraft(provider: AiProviderAdmin): ProviderDraft {
     ethics_reasoning_effort: provider.ethics_reasoning_effort,
     ethics_mode: provider.ethics_mode || 'auto',
     azure_resource_name: provider.azure_resource_name,
+    disable_safety: provider.disable_safety ?? false,
     operator_api_key: '',
     operator_key_configured: provider.operator_key_configured,
     operator_key_hint: provider.operator_key_hint,
@@ -238,6 +243,7 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
       provider_kind: draft.provider_kind,
       default_model: draft.default_model?.trim() || null,
       enabled: draft.enabled,
+      disable_safety: Boolean(draft.disable_safety),
       requires_api_key: draft.requires_api_key,
       standard_input_price_micro_usd_per_million: draft.standard_input_price_micro_usd_per_million ?? null,
       standard_output_price_micro_usd_per_million: draft.standard_output_price_micro_usd_per_million ?? null,
@@ -717,6 +723,18 @@ function ProviderForm({
         </div>
 
         <Toggle label={t('ai.providers.enabled')} checked={draft.enabled} onChange={(enabled) => change({ enabled })} />
+        {draft.provider_kind === 'google' && (
+          <div className="rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4 space-y-1">
+            <Toggle
+              label="Sicherheitsfilter deaktivieren (BLOCK_NONE)"
+              checked={Boolean(draft.disable_safety)}
+              onChange={(disable_safety) => change({ disable_safety })}
+            />
+            <p className="msm-field-help text-xs text-on-surface-variant">
+              Deaktiviert alle 5 Standard-Sicherheitsfilter (Hassrede, Belästigung, gefährliche Inhalte etc.) auf BLOCK_NONE bei Gemini- und Gemma-Modellen über die Google AI Studio API.
+            </p>
+          </div>
+        )}
         {/* Modelle & Fähigkeiten */}
         {spec?.protokoll === 'chat_completions' && (
           <div className="space-y-4 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
@@ -846,7 +864,13 @@ function ProviderForm({
                   spellCheck={false}
                   value={draft.transcription_model ?? ''}
                   onChange={(ereignis) => change({ transcription_model: ereignis.target.value })}
-                  placeholder={draft.provider_kind === 'openai' ? 'whisper-1' : 'openai/gpt-transcribe'}
+                  placeholder={
+                    draft.provider_kind === 'google'
+                      ? 'gemini-2.5-flash'
+                      : draft.provider_kind === 'openai'
+                        ? 'whisper-1'
+                        : 'openai/gpt-transcribe'
+                  }
                   aria-label={t('ai.providers.transcriptionModel')}
                 />
                 <p className="msm-field-help">{t('ai.providers.transcriptionModelHint')}</p>
@@ -882,12 +906,16 @@ function ProviderForm({
                   value={draft.realtime_model || null}
                   onChange={(realtime_model) => change({
                     realtime_model,
-                    realtime_reasoning_effort: realtime_model.toLowerCase().includes('realtime-2')
+                    realtime_reasoning_effort: (
+                      draft.provider_kind === 'google'
+                        ? realtime_model.toLowerCase().includes('gemini')
+                        : realtime_model.toLowerCase().includes('realtime-2')
+                    )
                       ? draft.realtime_reasoning_effort
                       : null,
                   })}
                   placeholder={t('ai.providers.modelChoose')}
-                  options={realtimeModellOptionen(models, t)}
+                  options={realtimeModellOptionen(models, t, draft.provider_kind === 'google')}
                 />
               </div>
               <div className="space-y-1.5">
@@ -897,11 +925,19 @@ function ProviderForm({
                   value={draft.realtime_voice || null}
                   onChange={(realtime_voice) => change({ realtime_voice: realtime_voice as AiProviderAdmin['realtime_voice'] })}
                   placeholder={t('ai.providers.realtime.voiceChoose')}
-                  options={['marin', 'cedar', 'alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse'].map((voice) => ({
-                    value: voice,
-                    label: voice,
-                    hint: voice === 'marin' || voice === 'cedar' ? t('ai.providers.recommended') : undefined,
-                  }))}
+                  options={
+                    draft.provider_kind === 'google'
+                      ? GEMINI_LIVE_STIMMEN.map((voice) => ({
+                          value: voice,
+                          label: voice,
+                          hint: voice === 'Puck' || voice === 'Charon' ? t('ai.providers.recommended') : undefined,
+                        }))
+                      : ['marin', 'cedar', 'alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse'].map((voice) => ({
+                          value: voice,
+                          label: voice,
+                          hint: voice === 'marin' || voice === 'cedar' ? t('ai.providers.recommended') : undefined,
+                        }))
+                  }
                 />
               </div>
               <div className="space-y-1.5">
@@ -909,7 +945,11 @@ function ProviderForm({
                 <Dropdown
                   id={realtimeReasoningId}
                   value={draft.realtime_reasoning_effort || null}
-                  disabled={!draft.realtime_model?.toLowerCase().includes('realtime-2')}
+                  disabled={
+                    draft.provider_kind === 'google'
+                      ? !draft.realtime_model?.toLowerCase().includes('gemini')
+                      : !draft.realtime_model?.toLowerCase().includes('realtime-2')
+                  }
                   onChange={(realtime_reasoning_effort) => change({ realtime_reasoning_effort: realtime_reasoning_effort as AiProviderAdmin['realtime_reasoning_effort'] })}
                   placeholder={t('ai.providers.realtime.reasoningOff')}
                   options={['low', 'medium', 'high'].map((value) => ({ value, label: t(`ai.providers.realtime.reasoningValues.${value}`) }))}

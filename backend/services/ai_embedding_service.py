@@ -157,7 +157,24 @@ def is_ready() -> bool:
         return True
     if _fehlschlag_gilt_noch():
         return False
-    return is_available()
+    if is_available():
+        return True
+    try:
+        from database import SessionLocal
+        from models import AiProvider
+
+        with SessionLocal() as db:
+            return bool(
+                db.query(AiProvider)
+                .filter(
+                    AiProvider.provider_kind == "google",
+                    AiProvider.enabled.is_(True),
+                    AiProvider.operator_api_key_encrypted.isnot(None),
+                )
+                .first()
+            )
+    except Exception:
+        return False
 
 
 def _load():
@@ -201,6 +218,71 @@ def _load():
     return _model
 
 
+def encode_with_google(
+    texts: list[str],
+    *,
+    api_key: str,
+    base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai",
+    model: str = "text-embedding-004",
+    client: Any | None = None,
+) -> list[list[float]] | None:
+    """Berechnet 256-dimensionale normalisierte Vektoren über Google AI Studio."""
+    if not texts:
+        return []
+    clean_model = model[len("models/"):] if model.startswith("models/") else model
+    try:
+        import httpx
+        import numpy as np
+
+        url = f"{base_url.rstrip('/')}/embeddings"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": clean_model,
+            "input": texts,
+            "dimensions": EMBEDDING_DIMENSIONS,
+        }
+
+        def _send(c: Any) -> Any:
+            return c.post(url, headers=headers, json=payload, timeout=30.0)
+
+        if client is not None:
+            resp = _send(client)
+        else:
+            with httpx.Client() as temp_c:
+                resp = _send(temp_c)
+
+        if resp.status_code != 200:
+            logger.warning(
+                "Google AI Studio Embedding fehlgeschlagen: status=%s body=%s",
+                resp.status_code,
+                resp.text[:200],
+            )
+            return None
+
+        data = resp.json().get("data", [])
+        raw_vectors = []
+        for item in data:
+            vec = item.get("embedding", [])
+            vec = vec[:EMBEDDING_DIMENSIONS]
+            if len(vec) < EMBEDDING_DIMENSIONS:
+                vec = vec + [0.0] * (EMBEDDING_DIMENSIONS - len(vec))
+            raw_vectors.append(vec)
+
+        if not raw_vectors:
+            return None
+
+        matrix = np.asarray(raw_vectors, dtype="float32")
+        norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        return (matrix / norms).astype("float32").tolist()
+    except Exception as exc:
+        logger.warning("Google AI Studio Embedding fehlgeschlagen: error=%s", type(exc).__name__)
+        return None
+
+
 def encode(texts: list[str]) -> list[list[float]] | None:
     """Wandelt Texte in normalisierte Vektoren um, oder ``None`` ohne Modell.
 
@@ -211,6 +293,30 @@ def encode(texts: list[str]) -> list[list[float]] | None:
         return []
     model = _load()
     if model is None:
+        # Fallback auf konfigurierten Google AI Studio Provider, falls lokales Modell fehlt
+        try:
+            from database import SessionLocal
+            from models import AiProvider
+            from services import ai_provider_service
+
+            with SessionLocal() as db:
+                google_prov = (
+                    db.query(AiProvider)
+                    .filter(
+                        AiProvider.provider_kind == "google",
+                        AiProvider.enabled.is_(True),
+                    )
+                    .first()
+                )
+                if google_prov and google_prov.operator_api_key_encrypted:
+                    key = ai_provider_service.resolve_api_key(db, google_prov, 0)
+                    if key:
+                        emb_kw = {}
+                        if google_prov.default_model and "embedding" in google_prov.default_model.lower():
+                            emb_kw["model"] = google_prov.default_model
+                        return encode_with_google(texts, api_key=key, **emb_kw)
+        except Exception:
+            pass
         return None
     try:
         import numpy as np

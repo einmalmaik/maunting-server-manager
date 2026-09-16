@@ -343,6 +343,10 @@ ETHICS_MODI = ("off", "auto", "always", "critical")
 REALTIME_STIMMEN = frozenset(
     {"alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"}
 )
+GEMINI_LIVE_STIMMEN = frozenset(
+    {"Puck", "Charon", "Kore", "Fenrir", "Aoede", "Zephyr", "Leda", "Orus"}
+)
+GEMINI_LIVE_STIMMEN_MAP = {s.lower(): s for s in GEMINI_LIVE_STIMMEN}
 REALTIME_SPRACHEN = frozenset({"auto", "de", "en"})
 REALTIME_VAD = frozenset({"auto", "low", "medium", "high"})
 REALTIME_2_REASONING = frozenset({"low", "medium", "high"})
@@ -365,11 +369,20 @@ def _assert_realtime_werte(provider: AiProvider) -> None:
     realtime_model = (provider.realtime_model or "").strip()
     if not realtime_model:
         raise AiProviderConfigurationError("Wähle ein Realtime-Modell aus")
-    if "realtime" not in realtime_model.lower():
-        raise AiProviderConfigurationError("Das gewählte Modell ist kein OpenAI-Realtime-Modell")
-    _assert_realtime_reasoning(realtime_model, provider.realtime_reasoning_effort)
-    if provider.realtime_voice not in REALTIME_STIMMEN:
-        raise AiProviderConfigurationError("Wähle eine eingebaute OpenAI-Stimme aus")
+    is_google = provider.provider_kind == "google"
+    if is_google:
+        if "gemini" not in realtime_model.lower():
+            raise AiProviderConfigurationError("Das gewählte Modell ist kein Gemini-Live-Modell")
+        _assert_google_realtime_reasoning(realtime_model, provider.realtime_reasoning_effort)
+        voice_str = (provider.realtime_voice or "").strip()
+        if voice_str.lower() not in GEMINI_LIVE_STIMMEN_MAP:
+            raise AiProviderConfigurationError("Wähle eine eingebaute Gemini-Live-Stimme aus")
+    else:
+        if "realtime" not in realtime_model.lower():
+            raise AiProviderConfigurationError("Das gewählte Modell ist kein OpenAI-Realtime-Modell")
+        _assert_realtime_reasoning(realtime_model, provider.realtime_reasoning_effort)
+        if provider.realtime_voice not in REALTIME_STIMMEN:
+            raise AiProviderConfigurationError("Wähle eine eingebaute OpenAI-Stimme aus")
     if provider.realtime_language not in REALTIME_SPRACHEN:
         raise AiProviderConfigurationError("Unbekannte Realtime-Antwortsprache")
     if provider.realtime_vad_eagerness not in REALTIME_VAD:
@@ -389,6 +402,15 @@ def _assert_realtime_reasoning(modell: str | None, effort: str | None) -> str | 
         raise AiProviderConfigurationError(
             "Eine Realtime-Denkstufe ist nur für die OpenAI-Realtime-2-Reihe verfügbar"
         )
+    if wert not in REALTIME_2_REASONING:
+        raise AiProviderConfigurationError("Unbekannte Realtime-Denkstufe")
+    return wert
+
+
+def _assert_google_realtime_reasoning(modell: str | None, effort: str | None) -> str | None:
+    wert = (effort or "").strip().lower() or None
+    if wert is None:
+        return None
     if wert not in REALTIME_2_REASONING:
         raise AiProviderConfigurationError("Unbekannte Realtime-Denkstufe")
     return wert
@@ -420,11 +442,24 @@ def _realtime_felder_setzen(provider: AiProvider, values: dict) -> None:
         elif feld in {"realtime_language", "realtime_vad_eagerness"}:
             wert = str(wert).strip().lower()
         setattr(provider, feld, wert)
-    if provider.realtime_voice is not None and provider.realtime_voice not in REALTIME_STIMMEN:
-        raise AiProviderConfigurationError("Unbekannte OpenAI-Realtime-Stimme")
-    provider.realtime_reasoning_effort = _assert_realtime_reasoning(
-        provider.realtime_model, provider.realtime_reasoning_effort
-    )
+    is_google = provider.provider_kind == "google"
+    if provider.realtime_voice is not None:
+        if is_google:
+            v_lower = provider.realtime_voice.lower()
+            if v_lower not in GEMINI_LIVE_STIMMEN_MAP:
+                raise AiProviderConfigurationError("Unbekannte Gemini-Live-Stimme")
+            provider.realtime_voice = GEMINI_LIVE_STIMMEN_MAP[v_lower]
+        else:
+            if provider.realtime_voice not in REALTIME_STIMMEN:
+                raise AiProviderConfigurationError("Unbekannte OpenAI-Realtime-Stimme")
+    if is_google:
+        provider.realtime_reasoning_effort = _assert_google_realtime_reasoning(
+            provider.realtime_model, provider.realtime_reasoning_effort
+        )
+    else:
+        provider.realtime_reasoning_effort = _assert_realtime_reasoning(
+            provider.realtime_model, provider.realtime_reasoning_effort
+        )
     if provider.realtime_language not in REALTIME_SPRACHEN:
         raise AiProviderConfigurationError("Unbekannte Realtime-Antwortsprache")
     if provider.realtime_vad_eagerness not in REALTIME_VAD:
@@ -548,6 +583,7 @@ def create_provider(
     # ändern, und ein stillschweigend gelöschter Name wäre ärgerlicher als ein
     # ungenutzter.
     azure_resource_name: str | None = None,
+    disable_safety: bool = False,
 ) -> AiProvider:
     if not (name or "").strip():
         raise AiProviderConfigurationError("Provider-Name darf nicht leer sein")
@@ -627,6 +663,7 @@ def create_provider(
         ethics_reasoning_effort=ethikstufe,
         ethics_mode=ethikmodus,
         azure_resource_name=ressource,
+        disable_safety=bool(disable_safety),
     )
     db.add(provider)
     db.flush()
@@ -769,7 +806,7 @@ def update_provider(
             provider.realtime_enabled = False
     elif new_realtime_model is None:
         provider.realtime_enabled = False
-    for field in ("enabled", "requires_api_key"):
+    for field in ("enabled", "requires_api_key", "disable_safety"):
         # ``null`` heisst bei einer NOT-NULL-Spalte nicht „aus", sondern
         # „nichts gesagt" — es wird wie ein fehlendes Feld behandelt, statt als
         # `IntegrityError` mit irrefuehrender 409-Meldung zu enden.

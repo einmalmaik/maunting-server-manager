@@ -241,10 +241,12 @@ def voice_config(
     zugaenge = None if realtime else sprachzugang(db, user, bevorzugter_provider_id=provider_id)
     hoeren, denken, sprechen = zugaenge if zugaenge else (None, None, None)
     diktat = _hoerender_zugang(db, provider_id or user.ai_provider_id)
-    diktat_kontingent = ai_usage_service.get_user_dictation_quota(db, user)
+    mode = "legacy"
+    if realtime:
+        mode = "gemini_live" if realtime.provider_kind == "google" else "openai_realtime"
     return {
         "available": realtime is not None or zugaenge is not None,
-        "mode": "openai_realtime" if realtime else "legacy",
+        "mode": mode,
         # Das denkende Modell, nicht das hörende: danach fragt, wer wissen will,
         # wer da antwortet.
         "model": realtime.realtime_model if realtime else (denken.default_model if denken else None),
@@ -433,6 +435,26 @@ async def voice_ws(websocket: WebSocket, provider_id: int | None = None) -> None
     # laengst angenommen hat. Cookie-Clients bekommen das unveraenderte `None`.
     await websocket.accept(subprotocol=ws_subprotokoll(websocket))
     if realtime_daten is not None:
+        if realtime_daten.provider_kind == "google":
+            from services.ai_voice.gemini_live_session import GeminiLiveSitzung
+
+            sitzung = GeminiLiveSitzung(
+                websocket,
+                vorbereitung=realtime_daten,
+                user_id=benutzer_id,
+                http_client=websocket.app.state.ai_http_client,
+                herkunft=herkunft,
+                familie=familie,
+            )
+            try:
+                await sitzung.fuehren()
+            finally:
+                from starlette.websockets import WebSocketState
+
+                if websocket.client_state is WebSocketState.CONNECTED:
+                    await websocket.close()
+            return
+
         sitzung = RealtimeSitzung(
             websocket,
             vorbereitung=realtime_daten,

@@ -234,7 +234,7 @@ function adresse(providerId?: number | null): string {
 
 export function useSprachsitzung(
   providerId?: number | null,
-  modus: 'legacy' | 'openai_realtime' = 'legacy',
+  modus: 'legacy' | 'openai_realtime' | 'gemini_live' = 'legacy',
 ): Ergebnis {
   const [zustand, setZustand] = useState<Sprachzustand>('aus')
   const [zeilen, setZeilen] = useState<Sprachzeile[]>([])

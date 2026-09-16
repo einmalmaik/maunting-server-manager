@@ -409,6 +409,7 @@ def test_the_recommendation_is_a_model_id_and_nothing_else() -> None:
         "elevenlabs": lambda kennung: {
             "model_id": kennung, "can_do_text_to_speech": True
         },
+        "google": lambda kennung: {"id": kennung},
     }
 
     for kind, spec in ai_provider_registry.ANBIETER.items():

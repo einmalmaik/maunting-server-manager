@@ -211,6 +211,9 @@ class AiProvider(Base):
     worker_output_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     ethics_input_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     ethics_output_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    disable_safety: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )

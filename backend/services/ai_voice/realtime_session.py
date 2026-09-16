@@ -67,6 +67,7 @@ class RealtimeVorbereitung:
     tools: list[dict] = None  # type: ignore[assignment]
     conversation_id: str = ""
     usage_event_id: int = 0
+    disable_safety: bool = False
 
     def __post_init__(self):
         if self.tools is None:
@@ -229,6 +230,7 @@ def vorbereiten(
         tools=tools,
         conversation_id=conversation.id,
         usage_event_id=usage_event.id,
+        disable_safety=bool(getattr(provider, "disable_safety", False)),
     )
 
 
