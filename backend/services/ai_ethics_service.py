@@ -115,15 +115,38 @@ async def evaluate_decision(
     relevant_memories: list[str] | None = None,
 ) -> AiEthicsEvaluation:
     """Führt die ethische Bewertung mit dem konfigurierten Ethik-Modell durch."""
-    if not provider.ethics_model or (provider.ethics_mode or "auto") == "off":
+    target_provider = provider
+    if not (
+        target_provider.ethics_model
+        and getattr(target_provider, "ethics_enabled", True)
+        and (target_provider.ethics_mode or "auto") != "off"
+    ):
+        fallback_providers = (
+            db.query(AiProvider)
+            .filter(
+                AiProvider.enabled.is_(True),
+                AiProvider.ethics_enabled.is_(True),
+                AiProvider.ethics_model.isnot(None),
+            )
+            .order_by(AiProvider.id.asc())
+            .all()
+        )
+        for cand in fallback_providers:
+            if (cand.ethics_mode or "auto") != "off" and (
+                not cand.requires_api_key or cand.operator_api_key_encrypted
+            ):
+                target_provider = cand
+                break
+
+    if not target_provider.ethics_model or (target_provider.ethics_mode or "auto") == "off":
         return fallback_evaluation(
             context, reason="Ethics Engine ist nicht konfiguriert oder deaktiviert"
         )
 
-    api_key = ai_provider_service.resolve_api_key(db, provider, user.id)
-    if provider.requires_api_key and not api_key:
+    api_key = ai_provider_service.resolve_api_key(db, target_provider, user.id)
+    if target_provider.requires_api_key and not api_key:
         logger.warning(
-            "Ethics Engine: Kein API-Schlüssel für Provider %s hinterlegt", provider.id
+            "Ethics Engine: Kein API-Schlüssel für Provider %s hinterlegt", target_provider.id
         )
         return fallback_evaluation(
             context, reason="API-Schlüssel für Ethics Engine fehlt"
@@ -141,13 +164,13 @@ async def evaluate_decision(
     try:
         async for chunk in stream_chat_completion(
             http_client,
-            provider=provider,
+            provider=target_provider,
             api_key=api_key,
             messages=messages,
             usage=usage,
             tools=None,
-            model=provider.ethics_model,
-            reasoning_effort=provider.ethics_reasoning_effort,
+            model=target_provider.ethics_model,
+            reasoning_effort=target_provider.ethics_reasoning_effort,
         ):
             if chunk.kind == "content" and chunk.text:
                 raw_response_text += chunk.text
@@ -187,7 +210,7 @@ async def evaluate_decision(
     except (json.JSONDecodeError, ValueError) as exc:
         logger.warning(
             "Ethics Engine: Fehler beim Parsen der JSON-Antwort von %s: %s",
-            provider.ethics_model,
+            target_provider.ethics_model,
             exc,
         )
         return fallback_evaluation(
@@ -196,7 +219,7 @@ async def evaluate_decision(
     except (AiProviderRequestError, httpx.HTTPError, Exception) as exc:
         logger.warning(
             "Ethics Engine: Provider-Aufruf für Modell %s fehlgeschlagen: %s",
-            provider.ethics_model,
+            target_provider.ethics_model,
             exc,
         )
         return fallback_evaluation(

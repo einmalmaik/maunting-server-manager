@@ -60,19 +60,22 @@ def test_google_catalog_gemini_models() -> None:
 
 
 def test_google_catalog_gemma_models() -> None:
-    """Prüft, dass Gemma-Modelle als reine Textmodelle mit 8k Fenster erkannt werden."""
+    """Prüft, dass Gemma-Modelle als Textmodelle mit konfigurierbarem Thinking erkannt werden."""
     gemma27 = katalog_lesen({"id": "gemma-2-27b-it"})
     assert gemma27 is not None
     assert gemma27.model_id == "gemma-2-27b-it"
     assert gemma27.sieht is False
-    assert gemma27.denkt is False
-    assert gemma27.kontext_tokens == 8_192
-    assert gemma27.max_ausgabe_tokens == 4_096
+    assert gemma27.denkt is True
+    assert gemma27.stufen == ("low", "medium", "high")
+    assert gemma27.standard_stufe == "medium"
+    assert gemma27.kontext_tokens == 32_768
+    assert gemma27.max_ausgabe_tokens == 8_192
 
     gemma9 = katalog_lesen({"id": "gemma-2-9b-it"})
     assert gemma9 is not None
     assert gemma9.sieht is False
-    assert gemma9.kontext_tokens == 8_192
+    assert gemma9.denkt is True
+    assert gemma9.kontext_tokens == 32_768
 
 
 def test_google_catalog_embedding_models() -> None:

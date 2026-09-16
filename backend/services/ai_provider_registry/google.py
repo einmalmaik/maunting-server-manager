@@ -33,7 +33,7 @@ ANBIETER = Anbieter(
     empfehlung="gemini-2.5-flash",
     gehoer_wege=("chat",),
     gehoer_form="json",
-    anfrage_erweiterungen=frozenset({"safety_settings"}),
+    anfrage_erweiterungen=frozenset(),
     protokoll_chat="chat_completions",
     realtime_tauglich=True,
 )
@@ -84,17 +84,17 @@ def katalog_lesen(rohdaten: dict) -> Modell | None:
         or positive_zahl(rohdaten.get("outputTokenLimit"))
     )
 
-    # Gemma Open-Source-Modelle (Textmodelle, 8k Fenster)
+    # Gemma Open-Source-Modelle (Textmodelle, konfigurierbare Denkstufen, bis zu 32k Kontext)
     if "gemma" in model_lower:
         return Modell(
             model_id=model_id,
             name=model_id,
-            denkt=False,
-            stufen=(),
-            standard_stufe=None,
+            denkt=True,
+            stufen=("low", "medium", "high"),
+            standard_stufe="medium",
             zwingend=False,
-            kontext_tokens=kontext or 8_192,
-            max_ausgabe_tokens=max_ausgabe or 4_096,
+            kontext_tokens=kontext or 32_768,
+            max_ausgabe_tokens=max_ausgabe or 8_192,
             sieht=False,
         )
 

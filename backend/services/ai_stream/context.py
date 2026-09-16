@@ -251,7 +251,16 @@ def _rolle_ableiten(
     kind = str(getattr(conversation, "kind", "primary") or "primary")
     if kind == "worker":
         return "worker"
-    if kind == "primary" and not unbeaufsichtigt and provider.worker_model:
+    worker_da = bool(provider.worker_model and getattr(provider, "worker_enabled", True))
+    if not worker_da:
+        from models import AiProvider
+        worker_da = db.query(AiProvider).filter(
+            AiProvider.enabled.is_(True),
+            AiProvider.worker_enabled.is_(True),
+            AiProvider.worker_model.isnot(None),
+        ).first() is not None
+
+    if kind == "primary" and not unbeaufsichtigt and worker_da:
         from services import permission_service
 
         if permission_service.has_global_permission(db, user, "ai.background.use"):

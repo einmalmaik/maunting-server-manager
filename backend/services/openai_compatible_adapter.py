@@ -711,10 +711,6 @@ async def stream_chat_completion(
     # Anbieter nach seinem eigenen Default denkt und abrechnet.
     if cache_marke and "cache_control" in erweiterungen:
         request_body["cache_control"] = {"type": "ephemeral"}
-    if "safety_settings" in erweiterungen:
-        from services.ai_provider_registry.google import get_safety_settings
-        disable_safety = bool(getattr(provider, "disable_safety", False))
-        request_body["safety_settings"] = get_safety_settings(disable_safety)
     target = httpx.URL(provider_base_url(provider).rstrip("/") + "/chat/completions")
     deadline = time.monotonic() + MAX_STREAM_SECONDS
     frames = 0

@@ -33,6 +33,7 @@ interface ProviderDraft extends AiProviderWrite {
  */
 const KEIN_WORKER = '__aus__'
 const KEINE_ETHICS = '__aus__'
+const KEINE_TRANSKRIPTION = '__aus__'
 const EMPFOHLENE_REALTIME_MODELLE = ['gpt-realtime-1.5', 'gpt-realtime-2'] as const
 const EMPFOHLENE_GOOGLE_REALTIME_MODELLE = ['gemini-2.5-flash', 'gemini-2.0-flash'] as const
 const GEMINI_LIVE_STIMMEN = ['Puck', 'Charon', 'Kore', 'Fenrir', 'Aoede', 'Zephyr', 'Leda', 'Orus'] as const
@@ -900,23 +901,52 @@ function ProviderForm({
                     aria-label={t('ai.providers.transcriptionEnabled')}
                   />
                 </div>
-                <input
-                  id={hoerenId}
-                  type="text"
-                  className="msm-input w-full"
-                  autoComplete="off"
-                  spellCheck={false}
-                  value={draft.transcription_model ?? ''}
-                  onChange={(ereignis) => change({ transcription_model: ereignis.target.value })}
-                  placeholder={
-                    draft.provider_kind === 'google'
-                      ? 'gemini-2.5-flash'
-                      : draft.provider_kind === 'openai'
-                        ? 'whisper-1'
-                        : 'openai/gpt-transcribe'
-                  }
-                  aria-label={t('ai.providers.transcriptionModel')}
-                />
+                {models && models.length > 0 ? (
+                  <Dropdown
+                    id={hoerenId}
+                    value={draft.transcription_model || KEINE_TRANSKRIPTION}
+                    onChange={(transcription_model) => change({
+                      transcription_model: transcription_model === KEINE_TRANSKRIPTION ? null : transcription_model,
+                    })}
+                    options={[
+                      { value: KEINE_TRANSKRIPTION, label: t('ai.providers.transcriptionOff') },
+                      ...(draft.transcription_model && !models.some((m) => m.model_id === draft.transcription_model)
+                        ? [{ value: draft.transcription_model, label: draft.transcription_model }]
+                        : []),
+                      ...[...models]
+                        .filter((item) => {
+                          const lower = item.model_id.toLowerCase()
+                          if (draft.provider_kind === 'google') return lower.includes('gemini') || lower.includes('flash')
+                          if (draft.provider_kind === 'openai') return lower.includes('whisper') || lower.includes('audio') || lower.includes('gpt-4o')
+                          return true
+                        })
+                        .map((item) => ({
+                          value: item.model_id,
+                          label: item.model_id,
+                          hint: modellHinweis(item, t),
+                        })),
+                    ]}
+                    aria-label={t('ai.providers.transcriptionModel')}
+                  />
+                ) : (
+                  <input
+                    id={hoerenId}
+                    type="text"
+                    className="msm-input w-full"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={draft.transcription_model ?? ''}
+                    onChange={(ereignis) => change({ transcription_model: ereignis.target.value })}
+                    placeholder={
+                      draft.provider_kind === 'google'
+                        ? 'gemini-2.5-flash'
+                        : draft.provider_kind === 'openai'
+                          ? 'whisper-1'
+                          : 'openai/gpt-transcribe'
+                    }
+                    aria-label={t('ai.providers.transcriptionModel')}
+                  />
+                )}
                 <p className="msm-field-help">{t('ai.providers.transcriptionModelHint')}</p>
               </div>
               )}
@@ -929,9 +959,15 @@ function ProviderForm({
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h4 className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                  {t('ai.providers.realtime.title')}
+                  {draft.provider_kind === 'google'
+                    ? t('ai.providers.realtime.googleTitle')
+                    : t('ai.providers.realtime.title')}
                 </h4>
-                <p className="msm-field-help mt-1">{t('ai.providers.realtime.hint')}</p>
+                <p className="msm-field-help mt-1">
+                  {draft.provider_kind === 'google'
+                    ? t('ai.providers.realtime.googleHint')
+                    : t('ai.providers.realtime.hint')}
+                </p>
               </div>
               <Switch
                 checked={Boolean(draft.realtime_enabled || draft.realtime_default)}
@@ -963,7 +999,11 @@ function ProviderForm({
                 />
               </div>
               <div className="space-y-1.5">
-                <label htmlFor={realtimeVoiceId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{t('ai.providers.realtime.voice')}</label>
+                <label htmlFor={realtimeVoiceId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                  {draft.provider_kind === 'google'
+                    ? t('ai.providers.realtime.googleVoice')
+                    : t('ai.providers.realtime.voice')}
+                </label>
                 <Dropdown
                   id={realtimeVoiceId}
                   value={draft.realtime_voice || null}
@@ -998,7 +1038,11 @@ function ProviderForm({
                   placeholder={t('ai.providers.realtime.reasoningOff')}
                   options={['low', 'medium', 'high'].map((value) => ({ value, label: t(`ai.providers.realtime.reasoningValues.${value}`) }))}
                 />
-                <p className="msm-field-help">{t('ai.providers.realtime.reasoningHint')}</p>
+                <p className="msm-field-help">
+                  {draft.provider_kind === 'google'
+                    ? t('ai.providers.realtime.googleReasoningHint')
+                    : t('ai.providers.realtime.reasoningHint')}
+                </p>
               </div>
               <div className="space-y-1.5">
                 <label htmlFor={realtimeLanguageId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{t('ai.providers.realtime.language')}</label>

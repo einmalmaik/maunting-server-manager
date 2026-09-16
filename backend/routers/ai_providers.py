@@ -310,6 +310,13 @@ async def test_provider(
 
     test_model = (
         provider.default_model
+        or provider.worker_model
+        or provider.ethics_model
+        or (
+            ai_provider_registry.anbieter(provider.provider_kind).empfehlung
+            if provider.provider_kind in ai_provider_registry.ALLE
+            else None
+        )
         or provider.transcription_model
         or provider.realtime_model
     )
