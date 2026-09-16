@@ -24,11 +24,15 @@ def test_google_registry_spec() -> None:
     assert spec.kind == "google"
     assert spec.label == "Google AI Studio"
     assert spec.base_url == "https://generativelanguage.googleapis.com/v1beta/openai"
-    assert spec.catalog_url == "https://generativelanguage.googleapis.com/v1beta/openai/models"
+    assert spec.catalog_url == "https://generativelanguage.googleapis.com/v1beta/models"
     assert spec.key_prefix is None
     assert spec.katalog_braucht_schluessel is True
+    assert spec.schluessel_kopf == "x-goog-api-key"
+    assert spec.schluessel_praefix == ""
+    assert spec.katalog_liste_feld == "models"
     assert spec.realtime_tauglich is True
     assert "chat" in spec.gehoer_wege
+    assert "reasoning_effort" in spec.anfrage_erweiterungen
     assert spec.empfehlung == "gemini-2.5-flash"
 
 
@@ -60,19 +64,22 @@ def test_google_catalog_gemini_models() -> None:
 
 
 def test_google_catalog_gemma_models() -> None:
-    """Prüft, dass Gemma-Modelle als reine Textmodelle mit 8k Fenster erkannt werden."""
+    """Prüft, dass Gemma-Modelle als Textmodelle mit konfigurierbarem Thinking erkannt werden."""
     gemma27 = katalog_lesen({"id": "gemma-2-27b-it"})
     assert gemma27 is not None
     assert gemma27.model_id == "gemma-2-27b-it"
     assert gemma27.sieht is False
-    assert gemma27.denkt is False
-    assert gemma27.kontext_tokens == 8_192
-    assert gemma27.max_ausgabe_tokens == 4_096
+    assert gemma27.denkt is True
+    assert gemma27.stufen == ("low", "medium", "high")
+    assert gemma27.standard_stufe == "medium"
+    assert gemma27.kontext_tokens == 32_768
+    assert gemma27.max_ausgabe_tokens == 8_192
 
     gemma9 = katalog_lesen({"id": "gemma-2-9b-it"})
     assert gemma9 is not None
     assert gemma9.sieht is False
-    assert gemma9.kontext_tokens == 8_192
+    assert gemma9.denkt is True
+    assert gemma9.kontext_tokens == 32_768
 
 
 def test_google_catalog_embedding_models() -> None:
@@ -302,15 +309,60 @@ def test_clean_gemini_schema() -> None:
 def test_google_catalog_models_prefix_and_native_limits() -> None:
     """Prüft models/ Präfix-Bereinigung und Einlesen von Google-REST Token-Limits."""
     raw = {
-        "id": "models/gemini-2.5-flash",
+        "name": "models/gemini-2.5-flash",
+        "displayName": "Gemini 2.5 Flash",
         "inputTokenLimit": 1_000_000,
         "outputTokenLimit": 8_192,
+        "thinking": True,
     }
     m = katalog_lesen(raw)
     assert m is not None
     assert m.model_id == "gemini-2.5-flash"
+    assert m.name == "Gemini 2.5 Flash"
     assert m.kontext_tokens == 1_000_000
     assert m.max_ausgabe_tokens == 8_192
+    assert m.denkt is True
+    assert m.stufen == ("low", "medium", "high")
+    assert m.standard_stufe == "medium"
+
+
+def test_google_catalog_gemini_4_dynamic() -> None:
+    """Prüft, dass für zukünftige Modelle wie Gemini 4 Limits und Thinking dynamisch aus der API kommen."""
+    raw = {
+        "name": "models/gemini-4-flash",
+        "displayName": "Gemini 4 Flash",
+        "description": "Next generation multimodal model with deep thinking capabilities",
+        "inputTokenLimit": 2_097_152,
+        "outputTokenLimit": 65_536,
+        "supportedGenerationMethods": ["generateContent", "countTokens", "bidiGenerateContent"],
+        "thinking": True,
+    }
+    m = katalog_lesen(raw)
+    assert m is not None
+    assert m.model_id == "gemini-4-flash"
+    assert m.name == "Gemini 4 Flash"
+    assert m.kontext_tokens == 2_097_152
+    assert m.max_ausgabe_tokens == 65_536
+    assert m.denkt is True
+    assert m.stufen == ("low", "medium", "high")
+    assert m.standard_stufe == "medium"
+    assert m.sieht is True
+
+
+def test_google_catalog_explicit_thinking_false() -> None:
+    """Prüft, dass Modelle mit thinking=False kein Thinking erhalten, selbst wenn sie neu sind."""
+    raw = {
+        "name": "models/gemini-2.5-flash-lite",
+        "displayName": "Gemini 2.5 Flash Lite",
+        "inputTokenLimit": 1_048_576,
+        "outputTokenLimit": 8_192,
+        "thinking": False,
+    }
+    m = katalog_lesen(raw)
+    assert m is not None
+    assert m.denkt is False
+    assert m.stufen == ()
+    assert m.standard_stufe is None
 
 
 @pytest.mark.asyncio
@@ -498,6 +550,51 @@ def test_gemini_live_session_safety_settings() -> None:
     assert len(settings) == 5
     for s in settings:
         assert s["threshold"] == "BLOCK_NONE"
+
+
+def test_list_catalog_models_with_ephemeral_key(client: TestClient, owner_cookies: dict, monkeypatch) -> None:
+    """Prüft, dass der Katalog mit einem flüchtigen Schlüssel (Header oder Query) direkt abgerufen wird."""
+    from services import ai_model_catalog
+
+    aufgerufen_mit: dict[str, str | None] = {}
+
+    async def _fake_modelle(http_client, kind, erzwingen=False, schluessel=None):
+        aufgerufen_mit["kind"] = kind
+        aufgerufen_mit["schluessel"] = schluessel
+        return [
+            ai_provider_registry.Modell(
+                model_id="gemini-2.5-flash",
+                name="Gemini 2.5 Flash",
+                denkt=True,
+                stufen=("low", "medium", "high"),
+                standard_stufe="medium",
+                kontext_tokens=1_048_576,
+                sieht=True,
+            )
+        ]
+
+    monkeypatch.setattr(ai_model_catalog, "modelle", _fake_modelle)
+
+    # 1. Mit X-Provider-Api-Key Header
+    resp = client.get(
+        "/api/ai/settings/provider-kinds/google/models",
+        headers={"x-provider-api-key": "AIzaSyLiveTestKey"},
+        cookies=owner_cookies,
+    )
+    assert resp.status_code == 200
+    daten = resp.json()
+    assert len(daten) == 1
+    assert daten[0]["model_id"] == "gemini-2.5-flash"
+    assert aufgerufen_mit["schluessel"] == "AIzaSyLiveTestKey"
+
+    # 2. Mit api_key Query Parameter
+    resp2 = client.get(
+        "/api/ai/settings/provider-kinds/google/models?api_key=AIzaSyQueryTestKey",
+        cookies=owner_cookies,
+    )
+    assert resp2.status_code == 200
+    assert aufgerufen_mit["schluessel"] == "AIzaSyQueryTestKey"
+
 
 
 

@@ -179,6 +179,26 @@ def worker_start(
                 "Gespräch oder bitte den Betreiber, einen Zugang einzurichten."
             ),
         }
+
+    # Cross-Provider Fallback: Wenn der geerbte/aktive Anbieter kein Worker-Modell hat
+    # oder worker_enabled deaktiviert ist, suchen wir einen anderen aktiven Provider mit konfiguriertem Worker-Modell.
+    if not (anbieter.worker_model and getattr(anbieter, "worker_enabled", True)):
+        from models import AiProvider
+        worker_anbieter = (
+            db.query(AiProvider)
+            .filter(
+                AiProvider.enabled.is_(True),
+                AiProvider.worker_enabled.is_(True),
+                AiProvider.worker_model.isnot(None),
+            )
+            .order_by(AiProvider.id.asc())
+            .all()
+        )
+        for cand in worker_anbieter:
+            if not cand.requires_api_key or cand.operator_api_key_encrypted:
+                anbieter = cand
+                break
+
     if anbieter.requires_api_key and not anbieter.operator_api_key_encrypted:
         return {
             "started": False,

@@ -368,80 +368,84 @@ class GeminiLiveSitzung:
 
     async def _google_lesen(self) -> None:
         assert self._google_ws is not None
-        async for roh in self._google_ws:
-            if not isinstance(roh, str):
-                continue
-            try:
-                event = json.loads(roh)
-            except json.JSONDecodeError:
-                continue
+        try:
+            async for roh in self._google_ws:
+                if not isinstance(roh, str):
+                    continue
+                try:
+                    event = json.loads(roh)
+                except json.JSONDecodeError:
+                    continue
 
-            # Setup-Bestätigung
-            if "setupComplete" in event:
-                await self._panel_senden({"art": "bereit"})
-                await self._panel_senden({"art": "zustand", "zustand": "hoert"})
-                await self._debug_senden("GEMINI_LIVE_SETUP_OK", hint=f"Verbunden mit {self.v.model}")
-                continue
-
-            # Inhalte vom Modell
-            server_content = event.get("serverContent")
-            if server_content:
-                if server_content.get("interrupted"):
+                # Setup-Bestätigung
+                if "setupComplete" in event:
+                    await self._panel_senden({"art": "bereit"})
                     await self._panel_senden({"art": "zustand", "zustand": "hoert"})
+                    await self._debug_senden("GEMINI_LIVE_SETUP_OK", hint=f"Verbunden mit {self.v.model}")
+                    continue
 
-                model_turn = server_content.get("modelTurn")
-                if model_turn:
-                    for part in model_turn.get("parts", []):
-                        text = part.get("text")
-                        if text:
-                            await self._panel_senden({"art": "antworttext", "text": text})
-                        inline_data = part.get("inlineData")
-                        if inline_data and inline_data.get("data"):
-                            try:
-                                audio_bytes = base64.b64decode(inline_data["data"])
-                                async with self._senden_lock:
-                                    await self.websocket.send_bytes(audio_bytes)
-                                    self.lage.rahmen_zurueck += 1
-                                await self._panel_senden({"art": "zustand", "zustand": "spricht"})
-                            except Exception:
-                                pass
+                # Inhalte vom Modell
+                server_content = event.get("serverContent")
+                if server_content:
+                    if server_content.get("interrupted"):
+                        await self._panel_senden({"art": "zustand", "zustand": "hoert"})
 
-                if server_content.get("turnComplete"):
-                    self.lage.laeufe += 1
-                    await self._panel_senden({"art": "zustand", "zustand": "hoert"})
+                    model_turn = server_content.get("modelTurn")
+                    if model_turn:
+                        for part in model_turn.get("parts", []):
+                            text = part.get("text")
+                            if text:
+                                await self._panel_senden({"art": "antworttext", "text": text})
+                            inline_data = part.get("inlineData")
+                            if inline_data and inline_data.get("data"):
+                                try:
+                                    audio_bytes = base64.b64decode(inline_data["data"])
+                                    async with self._senden_lock:
+                                        await self.websocket.send_bytes(audio_bytes)
+                                        self.lage.rahmen_zurueck += 1
+                                    await self._panel_senden({"art": "zustand", "zustand": "spricht"})
+                                except Exception:
+                                    pass
 
-            # Werkzeugaufrufe
-            tool_call = event.get("toolCall")
-            if tool_call:
-                await self._panel_senden({"art": "zustand", "zustand": "denkt"})
-                function_calls = tool_call.get("functionCalls", [])
-                responses = []
-                for fc in function_calls:
-                    call_id = fc.get("id") or str(uuid4())
-                    name = fc.get("name") or ""
-                    args = fc.get("args") or {}
-                    res = await self._werkzeug_ausfuehren(call_id, name, args)
-                    resp_obj = {"output": res} if isinstance(res, dict) else {"result": res}
-                    responses.append({"name": name, "response": resp_obj, "id": call_id})
+                    if server_content.get("turnComplete"):
+                        self.lage.laeufe += 1
+                        await self._panel_senden({"art": "zustand", "zustand": "hoert"})
 
-                tool_response = {
-                    "toolResponse": {
-                        "functionResponses": responses
+                # Werkzeugaufrufe
+                tool_call = event.get("toolCall")
+                if tool_call:
+                    await self._panel_senden({"art": "zustand", "zustand": "denkt"})
+                    function_calls = tool_call.get("functionCalls", [])
+                    responses = []
+                    for fc in function_calls:
+                        call_id = fc.get("id") or str(uuid4())
+                        name = fc.get("name") or ""
+                        args = fc.get("args") or {}
+                        res = await self._werkzeug_ausfuehren(call_id, name, args)
+                        resp_obj = {"output": res} if isinstance(res, dict) else {"result": res}
+                        responses.append({"name": name, "response": resp_obj, "id": call_id})
+
+                    tool_response = {
+                        "toolResponse": {
+                            "functionResponses": responses
+                        }
                     }
-                }
-                try:
-                    await self._google_ws.send(json.dumps(tool_response))
-                except Exception:
-                    await self._debug_senden("GEMINI_TOOL_RESPONSE_FAILED", hint=name)
-                    break
+                    try:
+                        await self._google_ws.send(json.dumps(tool_response))
+                    except Exception:
+                        await self._debug_senden("GEMINI_TOOL_RESPONSE_FAILED", hint=name)
+                        break
 
-            # Nutzungsmetriken
-            usage_meta = event.get("usageMetadata") or (server_content.get("usageMetadata") if server_content else None)
-            if usage_meta:
-                try:
-                    await asyncio.to_thread(self._verbrauch, usage_meta)
-                except Exception:
-                    pass
+                # Nutzungsmetriken
+                usage_meta = event.get("usageMetadata") or (server_content.get("usageMetadata") if server_content else None)
+                if usage_meta:
+                    try:
+                        await asyncio.to_thread(self._verbrauch, usage_meta)
+                    except Exception:
+                        pass
+        except Exception as exc:
+            logger.warning("Gemini Live WebSocket Fehler im Lesestrom: %s", exc)
+            await self._debug_senden("GEMINI_LIVE_CLOSED", hint=str(exc))
 
     async def fuehren(self) -> Lage:
         if websockets is None:
@@ -453,7 +457,11 @@ class GeminiLiveSitzung:
         ai_meldestelle.realtime_sitzung_start(self.user_id)
         url = f"{GEMINI_LIVE_WS_BASE}?key={quote_plus(self.v.api_key)}"
 
-        model_name = self.v.model if self.v.model.startswith("models/") else f"models/{self.v.model}"
+        model_raw = (self.v.model or "").strip()
+        if not model_raw or "3.8" in model_raw or ("live" in model_raw.lower() and not any(v in model_raw.lower() for v in ("2.0", "2.5"))):
+            logger.warning("Ungültiges Gemini-Live-Modell '%s', nutze gemini-2.5-flash", model_raw)
+            model_raw = "gemini-2.5-flash"
+        model_name = model_raw if model_raw.startswith("models/") else f"models/{model_raw}"
         voice_name = self.v.voice or "Puck"
 
         gemini_tools = []
@@ -528,9 +536,10 @@ class GeminiLiveSitzung:
         except WebSocketDisconnect:
             pass
         except Exception as exc:
+            logger.exception("Gemini Live Sitzung fehlgeschlagen: %s", exc)
             voice_debug("GEMINI_INTERNAL_ERROR", hint=type(exc).__name__)
             with contextlib.suppress(Exception):
-                await self._panel_senden({"art": "fehler", "code": "GEMINI_INTERNAL_ERROR"})
+                await self._panel_senden({"art": "fehler", "code": "GEMINI_INTERNAL_ERROR", "detail": str(exc)})
         finally:
             self._beendet = True
             for task in self._tool_tasks:

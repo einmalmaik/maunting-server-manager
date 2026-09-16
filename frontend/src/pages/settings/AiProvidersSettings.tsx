@@ -33,6 +33,7 @@ interface ProviderDraft extends AiProviderWrite {
  */
 const KEIN_WORKER = '__aus__'
 const KEINE_ETHICS = '__aus__'
+const KEINE_TRANSKRIPTION = '__aus__'
 const EMPFOHLENE_REALTIME_MODELLE = ['gpt-realtime-1.5', 'gpt-realtime-2'] as const
 const EMPFOHLENE_GOOGLE_REALTIME_MODELLE = ['gemini-2.5-flash', 'gemini-2.0-flash'] as const
 const GEMINI_LIVE_STIMMEN = ['Puck', 'Charon', 'Kore', 'Fenrir', 'Aoede', 'Zephyr', 'Leda', 'Orus'] as const
@@ -462,7 +463,11 @@ function ProviderForm({
     if (spec && !spec.fuehrt_katalog) return
     setLoadingModels(true)
     try {
-      setModels(await aiApi.listCatalogModels(draft.provider_kind, refresh, draft.id))
+      const apiKey = draft.operator_api_key?.trim() || undefined
+      const rows = apiKey
+        ? await aiApi.listCatalogModels(draft.provider_kind, refresh, draft.id, apiKey)
+        : await aiApi.listCatalogModels(draft.provider_kind, refresh, draft.id)
+      setModels(rows)
     } catch {
       setModels(null)
     } finally {
@@ -478,16 +483,56 @@ function ProviderForm({
     // nicht geladen" ein Zustand, und nur der zweite darf eine Ladeanzeige
     // rechtfertigen.
     if (fuehrtKatalog === false) { setModels([]); return }
+
+    const hatEingetipptenSchluessel = Boolean(draft.operator_api_key?.trim())
+    const hatGespeichertenSchluessel = Boolean(
+      draft.id && draft.operator_key_configured && !draft.clear_operator_api_key,
+    )
+
+    // Braucht der Anbieter einen Schlüssel, aber weder im Speicher noch im Eingabefeld
+    // liegt einer vor, zeigen wir direkt die leere Liste (mit Hinweis 'catalogNeedsKey').
+    if (spec?.katalog_braucht_schluessel && !hatEingetipptenSchluessel && !hatGespeichertenSchluessel) {
+      setModels([])
+      return
+    }
+
     setLoadingModels(true)
-    // `draft.id` geht mit, weil manche Anbieter ihren Katalog nur gegen den
-    // Schlüssel herausgeben. Beim Anlegen gibt es die Kennung noch nicht — dann
-    // kommt eine leere Liste, und der Hinweis darunter erklärt die Reihenfolge.
-    aiApi.listCatalogModels(draft.provider_kind, false, draft.id)
-      .then((rows) => { if (active) setModels(rows) })
-      .catch(() => { if (active) setModels(null) })
-      .finally(() => { if (active) setLoadingModels(false) })
-    return () => { active = false }
-  }, [draft.provider_kind, draft.id, fuehrtKatalog])
+    const apiKey = draft.operator_api_key?.trim() || undefined
+    const delay = hatEingetipptenSchluessel ? 400 : 0
+
+    const timer = window.setTimeout(() => {
+      const req = apiKey
+        ? aiApi.listCatalogModels(draft.provider_kind, false, draft.id, apiKey)
+        : aiApi.listCatalogModels(draft.provider_kind, false, draft.id)
+
+      req
+        .then((rows) => {
+          if (!active) return
+          setModels(rows)
+          if (rows && rows.length > 0 && !draft.default_model) {
+            const empf = rows.find((r) => r.recommended)?.model_id || rows[0]?.model_id
+            if (empf) {
+              change({ default_model: empf })
+            }
+          }
+        })
+        .catch(() => { if (active) setModels(null) })
+        .finally(() => { if (active) setLoadingModels(false) })
+    }, delay)
+
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
+  }, [
+    draft.provider_kind,
+    draft.id,
+    draft.operator_api_key,
+    draft.operator_key_configured,
+    draft.clear_operator_api_key,
+    fuehrtKatalog,
+    spec?.katalog_braucht_schluessel,
+  ])
 
   /*
    * Anbieter ohne Katalog: die eingetippten Kennungen einzeln nachschlagen.
@@ -856,23 +901,52 @@ function ProviderForm({
                     aria-label={t('ai.providers.transcriptionEnabled')}
                   />
                 </div>
-                <input
-                  id={hoerenId}
-                  type="text"
-                  className="msm-input w-full"
-                  autoComplete="off"
-                  spellCheck={false}
-                  value={draft.transcription_model ?? ''}
-                  onChange={(ereignis) => change({ transcription_model: ereignis.target.value })}
-                  placeholder={
-                    draft.provider_kind === 'google'
-                      ? 'gemini-2.5-flash'
-                      : draft.provider_kind === 'openai'
-                        ? 'whisper-1'
-                        : 'openai/gpt-transcribe'
-                  }
-                  aria-label={t('ai.providers.transcriptionModel')}
-                />
+                {models && models.length > 0 ? (
+                  <Dropdown
+                    id={hoerenId}
+                    value={draft.transcription_model || KEINE_TRANSKRIPTION}
+                    onChange={(transcription_model) => change({
+                      transcription_model: transcription_model === KEINE_TRANSKRIPTION ? null : transcription_model,
+                    })}
+                    options={[
+                      { value: KEINE_TRANSKRIPTION, label: t('ai.providers.transcriptionOff') },
+                      ...(draft.transcription_model && !models.some((m) => m.model_id === draft.transcription_model)
+                        ? [{ value: draft.transcription_model, label: draft.transcription_model }]
+                        : []),
+                      ...[...models]
+                        .filter((item) => {
+                          const lower = item.model_id.toLowerCase()
+                          if (draft.provider_kind === 'google') return lower.includes('gemini') || lower.includes('flash')
+                          if (draft.provider_kind === 'openai') return lower.includes('whisper') || lower.includes('audio') || lower.includes('gpt-4o')
+                          return true
+                        })
+                        .map((item) => ({
+                          value: item.model_id,
+                          label: item.model_id,
+                          hint: modellHinweis(item, t),
+                        })),
+                    ]}
+                    aria-label={t('ai.providers.transcriptionModel')}
+                  />
+                ) : (
+                  <input
+                    id={hoerenId}
+                    type="text"
+                    className="msm-input w-full"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={draft.transcription_model ?? ''}
+                    onChange={(ereignis) => change({ transcription_model: ereignis.target.value })}
+                    placeholder={
+                      draft.provider_kind === 'google'
+                        ? 'gemini-2.5-flash'
+                        : draft.provider_kind === 'openai'
+                          ? 'whisper-1'
+                          : 'openai/gpt-transcribe'
+                    }
+                    aria-label={t('ai.providers.transcriptionModel')}
+                  />
+                )}
                 <p className="msm-field-help">{t('ai.providers.transcriptionModelHint')}</p>
               </div>
               )}
@@ -885,9 +959,15 @@ function ProviderForm({
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h4 className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                  {t('ai.providers.realtime.title')}
+                  {draft.provider_kind === 'google'
+                    ? t('ai.providers.realtime.googleTitle')
+                    : t('ai.providers.realtime.title')}
                 </h4>
-                <p className="msm-field-help mt-1">{t('ai.providers.realtime.hint')}</p>
+                <p className="msm-field-help mt-1">
+                  {draft.provider_kind === 'google'
+                    ? t('ai.providers.realtime.googleHint')
+                    : t('ai.providers.realtime.hint')}
+                </p>
               </div>
               <Switch
                 checked={Boolean(draft.realtime_enabled || draft.realtime_default)}
@@ -919,7 +999,11 @@ function ProviderForm({
                 />
               </div>
               <div className="space-y-1.5">
-                <label htmlFor={realtimeVoiceId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{t('ai.providers.realtime.voice')}</label>
+                <label htmlFor={realtimeVoiceId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                  {draft.provider_kind === 'google'
+                    ? t('ai.providers.realtime.googleVoice')
+                    : t('ai.providers.realtime.voice')}
+                </label>
                 <Dropdown
                   id={realtimeVoiceId}
                   value={draft.realtime_voice || null}
@@ -954,7 +1038,11 @@ function ProviderForm({
                   placeholder={t('ai.providers.realtime.reasoningOff')}
                   options={['low', 'medium', 'high'].map((value) => ({ value, label: t(`ai.providers.realtime.reasoningValues.${value}`) }))}
                 />
-                <p className="msm-field-help">{t('ai.providers.realtime.reasoningHint')}</p>
+                <p className="msm-field-help">
+                  {draft.provider_kind === 'google'
+                    ? t('ai.providers.realtime.googleReasoningHint')
+                    : t('ai.providers.realtime.reasoningHint')}
+                </p>
               </div>
               <div className="space-y-1.5">
                 <label htmlFor={realtimeLanguageId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{t('ai.providers.realtime.language')}</label>

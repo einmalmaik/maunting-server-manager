@@ -1242,13 +1242,19 @@ export const aiApi = {
    * gibt seine Liste offen heraus. Fehlt der Schlüssel, kommt eine leere
    * Liste — beim Anlegen eines Zugangs gibt es ihn noch gar nicht.
    */
-  listCatalogModels: (kind: string, refresh = false, providerId?: number) => {
+  listCatalogModels: (kind: string, refresh = false, providerId?: number, apiKey?: string) => {
     const frage = new URLSearchParams()
     if (refresh) frage.set('refresh', 'true')
     if (providerId !== undefined) frage.set('provider_id', String(providerId))
+    const headers: Record<string, string> = {}
+    if (apiKey?.trim()) {
+      headers['X-Provider-Api-Key'] = apiKey.trim()
+      frage.set('api_key', apiKey.trim())
+    }
     const anhang = frage.toString()
     return api<AiCatalogModel[]>(
       `/ai/settings/provider-kinds/${encodeURIComponent(kind)}/models${anhang ? `?${anhang}` : ''}`,
+      apiKey?.trim() ? { headers } : undefined,
     )
   },
   /**

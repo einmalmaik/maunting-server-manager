@@ -23,17 +23,17 @@ ANBIETER = Anbieter(
     kind="google",
     label="Google AI Studio",
     base_url="https://generativelanguage.googleapis.com/v1beta/openai",
-    catalog_url="https://generativelanguage.googleapis.com/v1beta/openai/models",
+    catalog_url="https://generativelanguage.googleapis.com/v1beta/models",
     key_url="https://aistudio.google.com/app/apikey",
     key_prefix=None,
     katalog_braucht_schluessel=True,
-    schluessel_kopf="Authorization",
-    schluessel_praefix="Bearer ",
-    katalog_liste_feld="data",
+    schluessel_kopf="x-goog-api-key",
+    schluessel_praefix="",
+    katalog_liste_feld="models",
     empfehlung="gemini-2.5-flash",
     gehoer_wege=("chat",),
     gehoer_form="json",
-    anfrage_erweiterungen=frozenset({"safety_settings"}),
+    anfrage_erweiterungen=frozenset({"reasoning_effort"}),
     protokoll_chat="chat_completions",
     realtime_tauglich=True,
 )
@@ -59,50 +59,87 @@ def katalog_lesen(rohdaten: dict) -> Modell | None:
     """Liest einen Modellkatalog-Eintrag von Google AI Studio.
 
     Erkennt Gemini-, Gemma- und Einbettungsmodelle und bildet deren
-    Fähigkeiten (Kontextfenster, Ausgabelimit, Bildsicht, Denkstufen) ab.
+    Fähigkeiten (Kontextfenster, Ausgabelimit, Bildsicht, Denkstufen)
+    dynamisch anhand der von Google AI Studio gelieferten Metadaten ab.
     """
-    model_id = rohdaten.get("id")
-    if not isinstance(model_id, str) or not model_id.strip():
+    raw_id = rohdaten.get("name") or rohdaten.get("id")
+    if not isinstance(raw_id, str) or not raw_id.strip():
         return None
 
     # Normalisiere models/ Präfix von Google
-    if model_id.startswith("models/"):
-        model_id = model_id[len("models/"):]
+    if raw_id.startswith("models/"):
+        model_id = raw_id[len("models/"):]
+    else:
+        model_id = raw_id
+
+    # Display Name für hübsche Darstellung im Panel
+    disp_name = rohdaten.get("displayName") or rohdaten.get("display_name")
+    name = disp_name.strip() if isinstance(disp_name, str) and disp_name.strip() else model_id
 
     model_lower = model_id.lower()
 
-    # Kontext und Ausgabetokens aus den Rohdaten, falls vorhanden
-    # Berücksichtigt sowohl OpenAI-kompatible Felder als auch native Google REST-Felder
+    # Kontext und Ausgabetokens dynamisch aus den Rohdaten
+    # Berücksichtigt sowohl native Google REST-Felder (inputTokenLimit / outputTokenLimit)
+    # als auch OpenAI-kompatible Felder
     kontext = (
-        positive_zahl(rohdaten.get("context_length"))
+        positive_zahl(rohdaten.get("inputTokenLimit"))
         or positive_zahl(rohdaten.get("input_token_limit"))
-        or positive_zahl(rohdaten.get("inputTokenLimit"))
+        or positive_zahl(rohdaten.get("context_length"))
     )
     max_ausgabe = (
-        positive_zahl(rohdaten.get("max_completion_tokens"))
+        positive_zahl(rohdaten.get("outputTokenLimit"))
         or positive_zahl(rohdaten.get("output_token_limit"))
-        or positive_zahl(rohdaten.get("outputTokenLimit"))
+        or positive_zahl(rohdaten.get("max_completion_tokens"))
     )
 
-    # Gemma Open-Source-Modelle (Textmodelle, 8k Fenster)
-    if "gemma" in model_lower:
-        return Modell(
-            model_id=model_id,
-            name=model_id,
-            denkt=False,
-            stufen=(),
-            standard_stufe=None,
-            zwingend=False,
-            kontext_tokens=kontext or 8_192,
-            max_ausgabe_tokens=max_ausgabe or 4_096,
-            sieht=False,
-        )
+    supported_methods = (
+        rohdaten.get("supportedGenerationMethods")
+        or rohdaten.get("supported_generation_methods")
+        or []
+    )
+    if not isinstance(supported_methods, (list, tuple)):
+        supported_methods = []
 
-    # Einbettungsmodelle (text-embedding-004, gemini-embedding-001)
-    if "embedding" in model_lower:
+    # Prüfe dynamisches 'thinking'-Flag von Google AI Studio
+    api_thinking = rohdaten.get("thinking")
+    if api_thinking is True:
+        ist_denkend = True
+    elif api_thinking is False:
+        ist_denkend = False
+    else:
+        # Fallback-Heuristik wenn das Flag nicht in den Rohdaten vorliegt
+        if "embedding" in model_lower:
+            ist_denkend = False
+        elif "gemma" in model_lower:
+            ist_denkend = True
+        elif "gemini" in model_lower:
+            ist_denkend = any(
+                t in model_lower for t in ("2.5", "2.0-flash-thinking", "thinking")
+            )
+        else:
+            ist_denkend = False
+
+    # Denkstufen ermitteln
+    raw_levels = (
+        rohdaten.get("thinking_levels")
+        or rohdaten.get("thinkingLevels")
+        or rohdaten.get("efforts")
+    )
+    if isinstance(raw_levels, (list, tuple)) and raw_levels:
+        stufen = tuple(str(s) for s in raw_levels if isinstance(s, (str, int)))
+        standard_stufe = "medium" if "medium" in stufen else (stufen[0] if stufen else None)
+    elif ist_denkend:
+        stufen = ("low", "medium", "high")
+        standard_stufe = "medium"
+    else:
+        stufen = ()
+        standard_stufe = None
+
+    # Einbettungsmodelle (text-embedding-004, gemini-embedding-001, etc.)
+    if "embedding" in model_lower or ("embedContent" in supported_methods and "generateContent" not in supported_methods):
         return Modell(
             model_id=model_id,
-            name=model_id,
+            name=name,
             denkt=False,
             stufen=(),
             standard_stufe=None,
@@ -112,31 +149,41 @@ def katalog_lesen(rohdaten: dict) -> Modell | None:
             sieht=False,
         )
 
-    # Gemini-Modelle (Multimodal, bis 1M+ Kontext, Thinking für neuere Versionen)
-    if "gemini" in model_lower:
-        ist_denkend = any(
-            t in model_lower for t in ("2.5", "2.0-flash-thinking", "thinking")
-        )
-        stufen = ("low", "medium", "high") if ist_denkend else ()
-
+    # Gemma Open-Source-Modelle (Textmodelle, konfigurierbare Denkstufen)
+    if "gemma" in model_lower:
         return Modell(
             model_id=model_id,
-            name=model_id,
+            name=name,
             denkt=ist_denkend,
             stufen=stufen,
-            standard_stufe="medium" if ist_denkend else None,
+            standard_stufe=standard_stufe,
+            zwingend=False,
+            kontext_tokens=kontext or 32_768,
+            max_ausgabe_tokens=max_ausgabe or 8_192,
+            sieht=False,
+        )
+
+    # Gemini-Modelle (Multimodal, bis 1M+ Kontext, dynamisches Thinking)
+    if "gemini" in model_lower:
+        return Modell(
+            model_id=model_id,
+            name=name,
+            denkt=ist_denkend,
+            stufen=stufen,
+            standard_stufe=standard_stufe,
             zwingend=False,
             kontext_tokens=kontext or 1_048_576,
             max_ausgabe_tokens=max_ausgabe or 8_192,
             sieht=True,
         )
 
-    # Generischer Rückfall für beliebige andere Google-Modelle
+    # Generischer Rückfall für beliebige andere Google-Modelle (z.B. zukünftige Modelle)
     return Modell(
         model_id=model_id,
-        name=model_id,
-        denkt=False,
-        stufen=(),
+        name=name,
+        denkt=ist_denkend,
+        stufen=stufen,
+        standard_stufe=standard_stufe,
         kontext_tokens=kontext or 32_768,
         max_ausgabe_tokens=max_ausgabe,
         sieht=None,
