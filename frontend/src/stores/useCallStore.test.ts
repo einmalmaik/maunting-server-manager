@@ -1,14 +1,50 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useCallStore } from './useCallStore'
-import { startDirectCall } from '@/api/social'
+import { getWebRtcIceServers, startDirectCall } from '@/api/social'
+import { useToastStore } from '@/stores/toastStore'
 
 vi.mock('@/api/social', () => ({
   startDirectCall: vi.fn(),
-  cancelDirectCall: vi.fn(),
-  endGroupCallRoom: vi.fn(),
-  rejectDirectCall: vi.fn(),
-  getWebRtcIceServers: vi.fn(),
+  cancelDirectCall: vi.fn().mockResolvedValue(undefined),
+  endGroupCallRoom: vi.fn().mockResolvedValue(undefined),
+  rejectDirectCall: vi.fn().mockResolvedValue(undefined),
+  getWebRtcIceServers: vi.fn().mockResolvedValue({ ice_servers: [] }),
 }))
+
+class FakeSocket {
+  static readonly OPEN = 1
+  readonly readyState = FakeSocket.OPEN
+  onopen: ((event: unknown) => void) | null = null
+  onmessage: ((event: { data: string }) => void) | null = null
+  onclose: (() => void) | null = null
+  sent: string[] = []
+  send(payload: string) { this.sent.push(payload) }
+  close() { this.onclose?.() }
+}
+
+class FakePeerConnection {
+  onconnectionstatechange: (() => void) | null = null
+  onicecandidate: ((event: { candidate: null }) => void) | null = null
+  ontrack: ((event: { streams: unknown[] }) => void) | null = null
+  connectionState = 'new'
+  signalingState = 'stable'
+  addTrack() {}
+  close() {}
+}
+
+function installFakeCallTransport() {
+  const stream = {
+    getTracks: () => [] as MediaStreamTrack[],
+    getAudioTracks: () => [] as MediaStreamTrack[],
+    getVideoTracks: () => [] as MediaStreamTrack[],
+  }
+  Object.defineProperty(window.navigator, 'mediaDevices', {
+    value: { getUserMedia: vi.fn().mockResolvedValue(stream) },
+    configurable: true,
+  })
+  vi.stubGlobal('RTCPeerConnection', FakePeerConnection)
+  vi.stubGlobal('WebSocket', FakeSocket)
+}
 
 describe('useCallStore group calls', () => {
   beforeEach(() => {
@@ -77,6 +113,14 @@ describe('useCallStore group calls', () => {
 describe('useCallStore direct calls', () => {
   beforeEach(() => {
     vi.mocked(startDirectCall).mockReset()
+    vi.mocked(getWebRtcIceServers).mockResolvedValue({ ice_servers: [] })
+    useToastStore.getState().clearAll()
+    useCallStore.getState().endCall()
+    installFakeCallTransport()
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
   it('uses the backend-issued token for a friend call', async () => {
@@ -95,5 +139,24 @@ describe('useCallStore direct calls', () => {
     expect(token).toBe('server-token-123456')
     expect(useCallStore.getState().blindToken).toBe('server-token-123456')
     expect(useCallStore.getState().state).toBe('outgoing')
+  })
+
+  it('ends the call with a visible error when the microphone is blocked', async () => {
+    vi.mocked(startDirectCall).mockResolvedValue({
+      signaling_token: 'server-token-blocked',
+      recipient_id: 7,
+      expires_in: 120,
+    })
+    const denied = Object.assign(new Error('denied'), { name: 'NotAllowedError' })
+    vi.mocked(window.navigator.mediaDevices.getUserMedia).mockRejectedValue(denied)
+
+    await useCallStore.getState().initiateCall(
+      { userId: 7, username: 'Alice' },
+      'audio',
+    )
+
+    expect(useCallStore.getState().state).toBe('idle')
+    expect(useCallStore.getState().blindToken).toBeNull()
+    expect(useToastStore.getState().toasts.some((t) => t.type === 'error')).toBe(true)
   })
 })

@@ -120,15 +120,41 @@ export interface UseCallState {
 import { create } from 'zustand'
 import { cancelDirectCall, endGroupCallRoom, getWebRtcIceServers, rejectDirectCall, startDirectCall } from '@/api/social'
 import { wsUrl } from '@/config/api'
+import { toast } from '@/stores/toastStore'
 
 let directSocket: WebSocket | null = null
 let directPeer: RTCPeerConnection | null = null
 let pendingCandidates: RTCIceCandidateInit[] = []
 let transportGeneration = 0
+let disconnectGraceTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearDisconnectGraceTimer() {
+  if (disconnectGraceTimer !== null) {
+    clearTimeout(disconnectGraceTimer)
+    disconnectGraceTimer = null
+  }
+}
+
+/** Erklärt Abbrüche beim Verbindungsaufbau, statt still aufzulegen. */
+function meldeAnrufFehler(fehler: unknown, phase: 'mikrofon' | 'server') {
+  const name = (fehler as { name?: string } | null)?.name ?? ''
+  if (phase === 'mikrofon') {
+    if (name === 'NotAllowedError' || name === 'SecurityError') {
+      toast.error('Mikrofon/Kamera blockiert. Bitte in den System- bzw. App-Einstellungen freigeben und erneut versuchen.')
+    } else if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+      toast.error('Kein Mikrofon/Kamera gefunden. Bitte Gerät prüfen und erneut versuchen.')
+    } else {
+      toast.error('Mikrofon/Kamera konnte nicht geöffnet werden. Bitte erneut versuchen.')
+    }
+  } else {
+    toast.error('Anruf-Server nicht erreichbar. Bitte Netzwerk prüfen und erneut versuchen.')
+  }
+}
 
 function closeDirectTransport(sendLeave = true) {
   transportGeneration += 1
   pendingCandidates = []
+  clearDisconnectGraceTimer()
   try {
     if (sendLeave && directSocket?.readyState === WebSocket.OPEN) {
       directSocket.send(JSON.stringify({ action: 'leave', reason: 'hangup' }))
@@ -153,7 +179,10 @@ async function connectDirectTransport(
   set: (update: Partial<UseCallState>) => void,
   get: () => UseCallState,
 ) {
-  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === 'undefined') return
+  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === 'undefined') {
+    meldeAnrufFehler({ name: 'NotFoundError' }, 'mikrofon')
+    throw new Error('media_unsupported')
+  }
   closeDirectTransport()
   const generation = transportGeneration
   const ice = await (typeof getWebRtcIceServers === 'function'
@@ -162,7 +191,14 @@ async function connectDirectTransport(
   if (generation !== transportGeneration) return
   const peer = new RTCPeerConnection({ iceServers: ice.ice_servers })
   directPeer = peer
-  const local = await navigator.mediaDevices.getUserMedia({ audio: true, video: mode === 'video' })
+  let local: MediaStream
+  try {
+    local = await navigator.mediaDevices.getUserMedia({ audio: true, video: mode === 'video' })
+  } catch (fehler) {
+    if (generation === transportGeneration) meldeAnrufFehler(fehler, 'mikrofon')
+    peer.close()
+    throw fehler
+  }
   if (generation !== transportGeneration) {
     local.getTracks().forEach((track) => track.stop())
     peer.close()
@@ -177,8 +213,32 @@ async function connectDirectTransport(
     if (event.candidate) sendSignal({ type: 'ice-candidate', candidate: event.candidate.toJSON() })
   }
   peer.onconnectionstatechange = () => {
-    if (peer.connectionState === 'connected') set({ state: 'active' })
-    if (['failed', 'disconnected', 'closed'].includes(peer.connectionState) && get().state !== 'idle') get().endCall()
+    if (generation !== transportGeneration) return
+    if (peer.connectionState === 'connected') {
+      clearDisconnectGraceTimer()
+      set({ state: 'active' })
+      return
+    }
+    // Mobilfunknetze verlieren ICE kurzzeitig — nicht sofort auflegen,
+    // sondern erst nach einer Gnadenfrist ohne Wiederverbindung.
+    if (peer.connectionState === 'disconnected') {
+      if (disconnectGraceTimer === null && get().state !== 'idle') {
+        disconnectGraceTimer = setTimeout(() => {
+          disconnectGraceTimer = null
+          if (generation === transportGeneration && get().state !== 'idle') {
+            toast.error('Verbindung abgebrochen. Bitte erneut versuchen.')
+            get().endCall()
+          }
+        }, 8000)
+      }
+      return
+    }
+    if (peer.connectionState === 'failed' && get().state !== 'idle') {
+      toast.error('Keine direkte Verbindung möglich (NAT/Firewall). Bitte erneut versuchen.')
+      get().endCall()
+      return
+    }
+    if (peer.connectionState === 'closed' && get().state !== 'idle') get().endCall()
   }
 
   const socket = new WebSocket(wsUrl('/api/social/webrtc/signal'))
@@ -229,8 +289,20 @@ async function connectDirectTransport(
       else pendingCandidates.push(signal.candidate)
     }
   }
+  let joinedOk = false
+  const prevOnMessage = socket.onmessage
+  socket.onmessage = async (event) => {
+    try {
+      if (String(event.data).includes('"joined"')) joinedOk = true
+    } catch { /* ignore */ }
+    await prevOnMessage?.call(socket, event)
+  }
   socket.onclose = () => {
-    if (generation === transportGeneration && get().state !== 'idle') get().endCall()
+    if (generation !== transportGeneration || get().state === 'idle') return
+    // Socket starb vor dem Join (z. B. Server nicht erreichbar): Grund nennen,
+    // statt das Overlay wortlos zu schließen.
+    if (!joinedOk) meldeAnrufFehler(null, 'server')
+    get().endCall()
   }
 }
 

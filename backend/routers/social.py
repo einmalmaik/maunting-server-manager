@@ -1153,14 +1153,24 @@ def get_webrtc_ice_servers(
     """
     custom_stun = PanelSettingsService.get("webrtc_stun_servers", default="", db=db)
     if custom_stun:
-        urls = [s.strip() for s in custom_stun.split(",") if s.strip()]
-        return {"ice_servers": [{"urls": urls}], "ttl": 86400}
-    return {
-        "ice_servers": [
-            {"urls": ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"]},
-        ],
-        "ttl": 86400,
-    }
+        stun_urls = [s.strip() for s in custom_stun.split(",") if s.strip()]
+    else:
+        stun_urls = ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"]
+    ice_servers: list[dict] = [{"urls": stun_urls}]
+    # Optional TURN relay for strict NATs (mobile data): without it, calls
+    # between two phones on cellular networks fail ICE and drop immediately.
+    turn_urls = [
+        s.strip()
+        for s in PanelSettingsService.get("webrtc_turn_servers", default="", db=db).split(",")
+        if s.strip()
+    ]
+    turn_username = PanelSettingsService.get("webrtc_turn_username", default="", db=db).strip()
+    turn_credential = PanelSettingsService.get("webrtc_turn_credential", default="", db=db)
+    if turn_urls and turn_username and turn_credential:
+        ice_servers.append(
+            {"urls": turn_urls, "username": turn_username, "credential": turn_credential}
+        )
+    return {"ice_servers": ice_servers, "ttl": 86400}
 
 
 @router.websocket("/webrtc/signal")

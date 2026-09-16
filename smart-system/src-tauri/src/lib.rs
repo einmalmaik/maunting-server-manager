@@ -474,19 +474,21 @@ fn ist_eigene_oberflaeche(uri: &str) -> bool {
         .any(|basis| uri == *basis || uri.starts_with(&format!("{basis}/")))
 }
 
-/// Beantwortet die Mikrofonfrage des WebViews — für genau die eigene
+/// Beantwortet die Medienfragen des WebViews — für genau die eigene
 /// Oberfläche.
 ///
 /// WebView2 zeigt für `getUserMedia` auf `tauri.localhost` keinen eigenen
 /// Freigabedialog: die Anfrage blieb unbeantwortet, der Sprachmodus meldete
 /// „Mikrofon verweigert", und nie war eine Frage zu sehen. Der Handler
-/// erlaubt **nur** das Mikrofon und **nur** der eigenen Herkunft — Kamera,
-/// Standort und fremde Adressen behalten das Standardverhalten.
+/// erlaubt **nur** Mikrofon und Kamera und **nur** der eigenen Herkunft —
+/// Standort und fremde Adressen behalten das Standardverhalten. Ohne die
+/// Kamera bliebe jeder Videoanruf sofort wieder stehen: `getUserMedia` mit
+/// Video würde nie beantwortet und der Anruf bräche direkt wieder ab.
 #[cfg(windows)]
-fn mikrofon_freigeben(app: &tauri::AppHandle) {
+fn medien_freigeben(app: &tauri::AppHandle) {
     use webview2_com::Microsoft::Web::WebView2::Win32::{
-        COREWEBVIEW2_PERMISSION_KIND, COREWEBVIEW2_PERMISSION_KIND_MICROPHONE,
-        COREWEBVIEW2_PERMISSION_STATE_ALLOW,
+        COREWEBVIEW2_PERMISSION_KIND, COREWEBVIEW2_PERMISSION_KIND_CAMERA,
+        COREWEBVIEW2_PERMISSION_KIND_MICROPHONE, COREWEBVIEW2_PERMISSION_STATE_ALLOW,
     };
     use webview2_com::{take_pwstr, PermissionRequestedEventHandler};
     // Bewusst nicht `windows::core::PWSTR`: unser `windows` (0.62, WASAPI)
@@ -507,7 +509,9 @@ fn mikrofon_freigeben(app: &tauri::AppHandle) {
                     let Some(args) = args else { return Ok(()) };
                     let mut art = COREWEBVIEW2_PERMISSION_KIND::default();
                     args.PermissionKind(&mut art)?;
-                    if art != COREWEBVIEW2_PERMISSION_KIND_MICROPHONE {
+                    if art != COREWEBVIEW2_PERMISSION_KIND_MICROPHONE
+                        && art != COREWEBVIEW2_PERMISSION_KIND_CAMERA
+                    {
                         return Ok(());
                     }
                     let mut uri = PWSTR::null();
@@ -792,9 +796,9 @@ pub fn run() {
         .setup(|app| {
             tray::erstellen(app.handle())?;
             // Ohne diesen Handler bleibt getUserMedia in WebView2 stumm —
-            // der Sprachmodus wäre in der App unbenutzbar.
+            // Sprachmodus und Anrufe wären in der App unbenutzbar.
             #[cfg(windows)]
-            mikrofon_freigeben(app.handle());
+            medien_freigeben(app.handle());
             // Ein belegter Hotkey (anderes Tool nutzt Alt+Space) darf den
             // Start nicht verhindern — die App bleibt ueber Tray erreichbar.
             let konfig = konfig::laden(app.handle()).unwrap_or_default();

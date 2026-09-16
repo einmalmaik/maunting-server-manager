@@ -6,9 +6,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 from starlette.websockets import WebSocketDisconnect
 
-from models import User, UserFriend
+from models import PanelSetting, User, UserFriend
 from services.auth_service import AuthService
 from services.direct_call_service import DirectCallInviteService
+from services.panel_settings_service import PanelSettingsService
 from services.sync_event_service import SyncEventService
 
 
@@ -169,3 +170,28 @@ def test_direct_call_cancel_notifies_recipient_and_blocks_late_join(
     finally:
         SyncEventService.unsubscribe(conn_id)
         DirectCallInviteService.clear_all_for_testing()
+
+
+def test_ice_servers_include_configured_turn(db: Session, owner_user: User) -> None:
+    from routers.social import get_webrtc_ice_servers
+
+    try:
+        PanelSettingsService.set("webrtc_turn_servers", "turn:turn.example.com:3478", db=db)
+        PanelSettingsService.set("webrtc_turn_username", "alice", db=db)
+        PanelSettingsService.set("webrtc_turn_credential", "secret", db=db)
+        result = get_webrtc_ice_servers(db=db, user=owner_user)
+        turn = [
+            server
+            for server in result["ice_servers"]
+            if any(str(url).startswith("turn") for url in server["urls"])
+        ]
+        assert turn and turn[0]["username"] == "alice"
+        assert turn[0]["credential"] == "secret"
+        assert any(
+            "stun" in str(url) for server in result["ice_servers"] for url in server["urls"]
+        )
+    finally:
+        for key in ("webrtc_turn_servers", "webrtc_turn_username", "webrtc_turn_credential"):
+            db.query(PanelSetting).filter_by(key=key).delete()
+        db.commit()
+        PanelSettingsService.invalidate_cache()
