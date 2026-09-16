@@ -227,27 +227,77 @@ class AuthService:
     def is_owner_exists(db: Session) -> bool:
         return db.query(User).filter(User.is_owner == True).first() is not None
 
-    @staticmethod
-    def create_owner(db: Session, username: str, email: str, password: str) -> User:
+    @classmethod
+    def generate_e2ee_public_key_jwk(cls) -> str:
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        import base64
+        import json
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        pn = key.public_key().public_numbers()
+        n_bytes = pn.n.to_bytes((pn.n.bit_length() + 7) // 8, 'big')
+        e_bytes = pn.e.to_bytes((pn.e.bit_length() + 7) // 8, 'big')
+        n_b64 = base64.urlsafe_b64encode(n_bytes).decode('ascii').rstrip('=')
+        e_b64 = base64.urlsafe_b64encode(e_bytes).decode('ascii').rstrip('=')
+        return json.dumps({
+            "kty": "RSA",
+            "n": n_b64,
+            "e": e_b64,
+            "alg": "RSA-OAEP",
+            "use": "enc",
+        })
+
+    @classmethod
+    def generate_e2ee_rsa_public_key_jwk(cls) -> str:
+        return cls.generate_e2ee_public_key_jwk()
+
+    @classmethod
+    def ensure_user_e2ee_key(cls, db: Session, user: User) -> bool:
+        """Stellt sicher, dass ein Benutzer einen E2EE Public Key besitzt.
+        
+        Invarianten:
+        - Bereits vorhandene Public Keys oder verschlüsselte Keyrings werden NIEMALS überschrieben!
+        """
+        if user.social_e2ee_public_key or user.social_e2ee_wrapped_keyring:
+            return False
+        user.social_e2ee_public_key = cls.generate_e2ee_public_key_jwk()
+        db.commit()
+        return True
+
+    @classmethod
+    def authenticate_user(cls, db: Session, username: str, password: str) -> User | None:
+        user = cls.get_user_by_username(db, username)
+        if not user or not cls.verify_password(password, user.password_hash):
+            return None
+        if user.social_e2ee_public_key is None and user.social_e2ee_wrapped_keyring is None:
+            user.social_e2ee_public_key = cls.generate_e2ee_public_key_jwk()
+            db.commit()
+        return user
+
+    @classmethod
+    def create_owner(cls, db: Session, username: str, email: str, password: str) -> User:
         user = User(
             username=username,
             email=email,
-            password_hash=AuthService.hash_password(password),
+            password_hash=cls.hash_password(password),
             is_owner=True,
             email_verified=True,
         )
+        if not user.social_e2ee_public_key:
+            user.social_e2ee_public_key = cls.generate_e2ee_public_key_jwk()
         db.add(user)
         db.commit()
         db.refresh(user)
         return user
 
-    @staticmethod
-    def create_user(db: Session, username: str, email: str, password: str) -> User:
+    @classmethod
+    def create_user(cls, db: Session, username: str, email: str, password: str) -> User:
         user = User(
             username=username,
             email=email,
-            password_hash=AuthService.hash_password(password),
+            password_hash=cls.hash_password(password),
         )
+        if not user.social_e2ee_public_key:
+            user.social_e2ee_public_key = cls.generate_e2ee_public_key_jwk()
         db.add(user)
         db.commit()
         db.refresh(user)

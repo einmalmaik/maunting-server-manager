@@ -454,6 +454,21 @@ export async function downloadAndDecryptChatAttachment(
   return decryptE2eeAttachmentBlob(ciphertextBlob, context)
 }
 
+export interface E2eeMailboxSyncItem {
+  blind_mailbox_id: string
+  max_envelope_id: number
+  unread_count: number
+}
+
+export interface E2eeMailboxSyncResponse {
+  mailboxes: E2eeMailboxSyncItem[]
+}
+
+export async function syncE2eeMailboxes(sinceId = 0): Promise<E2eeMailboxSyncResponse> {
+  const query = sinceId ? `?since_id=${sinceId}` : ''
+  return api<E2eeMailboxSyncResponse>(`/social/e2ee/sync${query}`)
+}
+
 export async function fetchE2eeEnvelopes(
   blindMailboxId: string,
   sinceId?: number

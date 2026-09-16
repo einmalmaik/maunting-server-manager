@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
-from pydantic import BaseModel, Field, field_validator
+from datetime import datetime, timezone
+from pydantic import BaseModel, Field, field_serializer, field_validator
 
 
 class AchievementResponse(BaseModel):
@@ -310,6 +310,25 @@ class E2eeBlindEnvelopeResponse(BaseModel):
     ciphertext_envelope: str
     client_uuid: str | None = None
     created_at: datetime
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, dt: datetime) -> str:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        iso = dt.isoformat()
+        if iso.endswith("+00:00"):
+            iso = iso[:-6] + "Z"
+        return iso
+
+
+class E2eeMailboxSyncItem(BaseModel):
+    blind_mailbox_id: str
+    max_envelope_id: int
+    unread_count: int
+
+
+class E2eeMailboxSyncResponse(BaseModel):
+    mailboxes: list[E2eeMailboxSyncItem]
 
 
 class E2eeTypingSignalCreate(BaseModel):

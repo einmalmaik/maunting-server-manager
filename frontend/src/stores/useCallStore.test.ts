@@ -11,9 +11,21 @@ vi.mock('@/api/social', () => ({
   getWebRtcIceServers: vi.fn().mockResolvedValue({ ice_servers: [] }),
 }))
 
+vi.mock('@/api/client', () => ({
+  wsProtokolle: vi.fn().mockResolvedValue(['msm.bearer', 'test-token-xyz']),
+}))
+
 class FakeSocket {
   static readonly OPEN = 1
+  static lastCreated: FakeSocket | null = null
   readonly readyState = FakeSocket.OPEN
+  url: string
+  protocols?: string | string[]
+  constructor(url: string, protocols?: string | string[]) {
+    this.url = url
+    this.protocols = protocols
+    FakeSocket.lastCreated = this
+  }
   onopen: ((event: unknown) => void) | null = null
   onmessage: ((event: { data: string }) => void) | null = null
   onclose: (() => void) | null = null
@@ -158,5 +170,19 @@ describe('useCallStore direct calls', () => {
     expect(useCallStore.getState().state).toBe('idle')
     expect(useCallStore.getState().blindToken).toBeNull()
     expect(useToastStore.getState().toasts.some((t) => t.type === 'error')).toBe(true)
+  })
+
+  it('passes authentication subprotocols to WebSocket on acceptCall for desktop / native clients', async () => {
+    useCallStore.setState({
+      blindToken: 'incoming-call-token-999',
+      partner: { userId: 42, username: 'Bob' },
+      mode: 'audio',
+      state: 'incoming',
+    })
+
+    await useCallStore.getState().acceptCall()
+
+    expect(FakeSocket.lastCreated).not.toBeNull()
+    expect(FakeSocket.lastCreated?.protocols).toEqual(['msm.bearer', 'test-token-xyz'])
   })
 })

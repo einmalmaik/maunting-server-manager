@@ -130,6 +130,12 @@ import {
   type E2eeIdentity,
 } from '@/services/e2eeIdentity'
 import { MessengerSchluesselDialog } from '@/components/social/MessengerSchluesselDialog'
+import {
+  loadLocalMessages,
+  saveLocalMessages,
+  updateMessageInLocalStore,
+  sortMessagesChronologically,
+} from '@/services/messengerLocalStore'
 
 /** Der Kontoschlüssel ist auf diesem Gerät nicht zu öffnen — nicht gesendet. */
 class E2eeIdentityLockedError extends Error {
@@ -287,6 +293,7 @@ export interface ChatMessage {
   storyReply?: StoryReplyAttachment
   videoNoteAttachment?: VideoNoteAttachment
   videoUrl?: string
+  status?: 'queued' | 'sent' | 'delivered' | 'read'
 }
 
 function formatFileSize(bytes: number): string {
@@ -361,7 +368,10 @@ export function Messenger() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { inviteCode } = useParams<{ inviteCode?: string }>()
   const navigate = useNavigate()
-  const queryUserId = searchParams.get('userId') || searchParams.get('contact')
+  const savedUserId = typeof window !== 'undefined' && window.sessionStorage ? sessionStorage.getItem('msm:active_messenger_user_id') : null
+  const queryUserId = searchParams.get('userId') || searchParams.get('contact') || savedUserId
+  const savedGroupId = typeof window !== 'undefined' && window.sessionStorage ? sessionStorage.getItem('msm:active_messenger_group_id') : null
+  const queryGroupId = searchParams.get('groupId') || savedGroupId
 
   const initialCache = useMemo(() => loadInitialContactsCache(), [])
   const [friends, setFriends] = useState<FriendItem[]>(initialCache.friends)
@@ -960,28 +970,52 @@ export function Messenger() {
     }
   }, [queryUserId, contactsList, activeGroup])
 
+  // Auto-select group if groupId query parameter or storage is present
+  useEffect(() => {
+    if (queryGroupId && !activeContact && groups.length > 0) {
+      const targetGroupId = Number(queryGroupId)
+      if (targetGroupId) {
+        const match = groups.find((g) => g.id === targetGroupId)
+        if (match) {
+          setActiveGroup((prev) => (prev?.id === match.id ? prev : match))
+          setActiveContact(null)
+        }
+      }
+    }
+  }, [queryGroupId, groups, activeContact])
+
   // Synchronize active conversation with search params and sessionStorage
   useEffect(() => {
     if (activeContact) {
       try {
         sessionStorage.setItem('msm:active_messenger_user_id', String(activeContact.userId))
+        sessionStorage.removeItem('msm:active_messenger_group_id')
       } catch {}
       const cur = searchParams.get('userId') || searchParams.get('contact')
-      if (cur !== String(activeContact.userId)) {
+      if (cur !== String(activeContact.userId) || searchParams.has('groupId')) {
         const next = new URLSearchParams(searchParams)
         next.set('userId', String(activeContact.userId))
+        next.delete('groupId')
         setSearchParams(next, { replace: true })
       }
     } else if (activeGroup) {
       try {
+        sessionStorage.setItem('msm:active_messenger_group_id', String(activeGroup.id))
         sessionStorage.removeItem('msm:active_messenger_user_id')
       } catch {}
-      if (searchParams.has('userId') || searchParams.has('contact')) {
+      const cur = searchParams.get('groupId')
+      if (cur !== String(activeGroup.id) || searchParams.has('userId') || searchParams.has('contact')) {
         const next = new URLSearchParams(searchParams)
+        next.set('groupId', String(activeGroup.id))
         next.delete('userId')
         next.delete('contact')
         setSearchParams(next, { replace: true })
       }
+    } else {
+      try {
+        sessionStorage.removeItem('msm:active_messenger_user_id')
+        sessionStorage.removeItem('msm:active_messenger_group_id')
+      } catch {}
     }
   }, [activeContact, activeGroup, searchParams, setSearchParams])
 
@@ -994,6 +1028,10 @@ export function Messenger() {
       if (syncMid) {
         if (activeMailboxIdRef.current !== syncMid) {
           activeMailboxIdRef.current = syncMid
+          highestIncomingIdAcknowledgedRef.current = 0
+          highestIncomingIdDeliveredRef.current = 0
+          maxPartnerReadIdRef.current = 0
+          maxPartnerDeliveredIdRef.current = 0
           setBlindMailboxId(syncMid)
           const cached = sessionChatCache.get(syncMid)
           if (cached && cached.length > 0) {
@@ -1002,6 +1040,13 @@ export function Messenger() {
           } else {
             setMessages([])
             setLoadingMessages(true)
+            loadLocalMessages(syncMid).then((localMsgs) => {
+              if (active && activeMailboxIdRef.current === syncMid && localMsgs.length > 0) {
+                sessionChatCache.set(syncMid, localMsgs)
+                setMessages(localMsgs)
+                setLoadingMessages(false)
+              }
+            }).catch(() => {})
           }
           useMessengerNotificationStore.getState().setActiveMailboxId(syncMid)
         }
@@ -1015,11 +1060,23 @@ export function Messenger() {
       deriveGroupBlindMailboxId(activeGroup.id).then((mid) => {
         if (active && activeMailboxIdRef.current !== mid) {
           activeMailboxIdRef.current = mid
+          highestIncomingIdAcknowledgedRef.current = 0
+          highestIncomingIdDeliveredRef.current = 0
+          maxPartnerReadIdRef.current = 0
+          maxPartnerDeliveredIdRef.current = 0
           setBlindMailboxId(mid)
           const cached = sessionChatCache.get(mid)
           if (cached && cached.length > 0) {
             setMessages(cached)
             setLoadingMessages(false)
+          } else {
+            loadLocalMessages(mid).then((localMsgs) => {
+              if (active && activeMailboxIdRef.current === mid && localMsgs.length > 0) {
+                sessionChatCache.set(mid, localMsgs)
+                setMessages(localMsgs)
+                setLoadingMessages(false)
+              }
+            }).catch(() => {})
           }
           useMessengerNotificationStore.getState().setActiveMailboxId(mid)
         }
@@ -1030,6 +1087,10 @@ export function Messenger() {
       if (syncMid) {
         if (activeMailboxIdRef.current !== syncMid) {
           activeMailboxIdRef.current = syncMid
+          highestIncomingIdAcknowledgedRef.current = 0
+          highestIncomingIdDeliveredRef.current = 0
+          maxPartnerReadIdRef.current = 0
+          maxPartnerDeliveredIdRef.current = 0
           setBlindMailboxId(syncMid)
           const cached = sessionChatCache.get(syncMid)
           if (cached && cached.length > 0) {
@@ -1038,6 +1099,13 @@ export function Messenger() {
           } else {
             setMessages([])
             setLoadingMessages(true)
+            loadLocalMessages(syncMid).then((localMsgs) => {
+              if (active && activeMailboxIdRef.current === syncMid && localMsgs.length > 0) {
+                sessionChatCache.set(syncMid, localMsgs)
+                setMessages(localMsgs)
+                setLoadingMessages(false)
+              }
+            }).catch(() => {})
           }
           useMessengerNotificationStore.getState().setActiveMailboxId(syncMid)
         }
@@ -1051,11 +1119,23 @@ export function Messenger() {
       deriveBlindMailboxId(currentUserId, targetUserId).then((mid) => {
         if (active && activeMailboxIdRef.current !== mid) {
           activeMailboxIdRef.current = mid
+          highestIncomingIdAcknowledgedRef.current = 0
+          highestIncomingIdDeliveredRef.current = 0
+          maxPartnerReadIdRef.current = 0
+          maxPartnerDeliveredIdRef.current = 0
           setBlindMailboxId(mid)
           const cached = sessionChatCache.get(mid)
           if (cached && cached.length > 0) {
             setMessages(cached)
             setLoadingMessages(false)
+          } else {
+            loadLocalMessages(mid).then((localMsgs) => {
+              if (active && activeMailboxIdRef.current === mid && localMsgs.length > 0) {
+                sessionChatCache.set(mid, localMsgs)
+                setMessages(localMsgs)
+                setLoadingMessages(false)
+              }
+            }).catch(() => {})
           }
           useMessengerNotificationStore.getState().setActiveMailboxId(mid)
         }
@@ -1403,6 +1483,13 @@ export function Messenger() {
         // 2. Zugestellt: Gesprächspartner hat die Nachricht empfangen (maxPartnerDeliveredId >= msg.id oder bereits gelesen)
         const isRead = msg.isSelf && maxPartnerReadId >= msg.id
         const isDelivered = msg.isSelf && (isRead || maxPartnerDeliveredId >= msg.id)
+        const status: 'queued' | 'sent' | 'delivered' | 'read' = isRead
+          ? 'read'
+          : isDelivered
+            ? 'delivered'
+            : msg.id > 0
+              ? 'sent'
+              : 'queued'
 
         return {
           ...msg,
@@ -1414,6 +1501,7 @@ export function Messenger() {
           originalText,
           isDelivered,
           isRead,
+          status,
         }
       })
 
@@ -1430,10 +1518,18 @@ export function Messenger() {
           .map((m) => {
             const isRead = m.isSelf && maxPartnerReadId >= m.id
             const isDelivered = m.isSelf && (isRead || maxPartnerDeliveredId >= m.id)
-            return { ...m, isRead, isDelivered }
+            return {
+              ...m,
+              isRead,
+              isDelivered,
+              status: isRead ? ('read' as const) : isDelivered ? ('delivered' as const) : m.status || ('queued' as const),
+            }
           })
-        const combined = pendingOptimistic.length === 0 ? processedList : [...processedList, ...pendingOptimistic]
+        const combined = sortMessagesChronologically(
+          pendingOptimistic.length === 0 ? processedList : [...processedList, ...pendingOptimistic]
+        )
         sessionChatCache.set(currentMid, combined.slice(-80))
+        void saveLocalMessages(currentMid, combined.slice(-200))
         return combined
       })
       // Ungelesen-Zähler zurücksetzen
@@ -1703,6 +1799,48 @@ export function Messenger() {
     // gewordene Verlauf bis zum nächsten Wechsel stumm.
   }, [blindMailboxId, activeContact?.userId, activeGroup?.id, identity.state])
 
+  // Listen for offline queue background confirmations from offlineSync
+  useEffect(() => {
+    const handleMessageConfirmed = (e: Event) => {
+      const ce = e as CustomEvent<{ client_uuid: string; envelope_id: number; blind_mailbox_id: string }>
+      const detail = ce.detail
+      if (!detail?.client_uuid || !detail?.envelope_id) return
+      const { client_uuid, envelope_id, blind_mailbox_id: confirmedMid } = detail
+
+      if (confirmedMid === blindMailboxId) {
+        setMessages((prev) =>
+          sortMessagesChronologically(
+            prev.map((m) => {
+              if (m.clientUuid === client_uuid) {
+                const isRead = maxPartnerReadIdRef.current >= envelope_id
+                const isDelivered = isRead || maxPartnerDeliveredIdRef.current >= envelope_id
+                const status: 'queued' | 'sent' | 'delivered' | 'read' = isRead ? 'read' : isDelivered ? 'delivered' : 'sent'
+                return {
+                  ...m,
+                  id: envelope_id,
+                  status,
+                  isRead: m.isRead || isRead,
+                  isDelivered: m.isDelivered || isDelivered,
+                }
+              }
+              return m
+            })
+          )
+        )
+      }
+      if (confirmedMid) {
+        void updateMessageInLocalStore(confirmedMid, client_uuid, {
+          id: envelope_id,
+          status: 'sent',
+        })
+      }
+    }
+    window.addEventListener('msm:message-confirmed', handleMessageConfirmed)
+    return () => {
+      window.removeEventListener('msm:message-confirmed', handleMessageConfirmed)
+    }
+  }, [blindMailboxId])
+
   // Autoscroll
   useEffect(() => {
     const container = scrollContainerRef.current
@@ -1773,11 +1911,13 @@ export function Messenger() {
       videoUrl,
       isDelivered: false,
       isRead: false,
+      status: 'queued',
     }
 
     setMessages((prev) => {
       const updated = [...prev, optimisticMessage]
       sessionChatCache.set(targetBlindMailboxId, updated.slice(-80))
+      void saveLocalMessages(targetBlindMailboxId, updated.slice(-200))
       return updated
     })
     setInputText('')
@@ -1907,34 +2047,47 @@ export function Messenger() {
               const serverId = result.id
               const isRead = maxPartnerReadIdRef.current >= serverId
               const isDelivered = isRead || maxPartnerDeliveredIdRef.current >= serverId
+              const status: 'queued' | 'sent' | 'delivered' | 'read' = isRead ? 'read' : isDelivered ? 'delivered' : 'sent'
               setMessages((prev) =>
-                prev.map((m) =>
-                  m.clientUuid === clientUuid
-                    ? {
-                        ...m,
-                        id: serverId,
-                        isRead: m.isRead || isRead,
-                        isDelivered: m.isDelivered || isDelivered,
-                      }
-                    : m
-                )
-              )
-              const cached = sessionChatCache.get(targetBlindMailboxId)
-              if (cached) {
-                sessionChatCache.set(
-                  targetBlindMailboxId,
-                  cached.map((m) =>
+                sortMessagesChronologically(
+                  prev.map((m) =>
                     m.clientUuid === clientUuid
                       ? {
                           ...m,
                           id: serverId,
+                          status,
                           isRead: m.isRead || isRead,
                           isDelivered: m.isDelivered || isDelivered,
                         }
                       : m
                   )
                 )
+              )
+              const cached = sessionChatCache.get(targetBlindMailboxId)
+              if (cached) {
+                sessionChatCache.set(
+                  targetBlindMailboxId,
+                  sortMessagesChronologically(
+                    cached.map((m) =>
+                      m.clientUuid === clientUuid
+                        ? {
+                            ...m,
+                            id: serverId,
+                            status,
+                            isRead: m.isRead || isRead,
+                            isDelivered: m.isDelivered || isDelivered,
+                          }
+                        : m
+                    )
+                  )
+                )
               }
+              void updateMessageInLocalStore(targetBlindMailboxId, clientUuid, {
+                id: serverId,
+                status,
+                isRead,
+                isDelivered,
+              })
             }
           } catch {
             enqueueMessageMutation({
@@ -1978,34 +2131,47 @@ export function Messenger() {
               const serverId = result.id
               const isRead = maxPartnerReadIdRef.current >= serverId
               const isDelivered = isRead || maxPartnerDeliveredIdRef.current >= serverId
+              const status: 'queued' | 'sent' | 'delivered' | 'read' = isRead ? 'read' : isDelivered ? 'delivered' : 'sent'
               setMessages((prev) =>
-                prev.map((m) =>
-                  m.clientUuid === clientUuid
-                    ? {
-                        ...m,
-                        id: serverId,
-                        isRead: m.isRead || isRead,
-                        isDelivered: m.isDelivered || isDelivered,
-                      }
-                    : m
-                )
-              )
-              const cached = sessionChatCache.get(targetBlindMailboxId)
-              if (cached) {
-                sessionChatCache.set(
-                  targetBlindMailboxId,
-                  cached.map((m) =>
+                sortMessagesChronologically(
+                  prev.map((m) =>
                     m.clientUuid === clientUuid
                       ? {
                           ...m,
                           id: serverId,
+                          status,
                           isRead: m.isRead || isRead,
                           isDelivered: m.isDelivered || isDelivered,
                         }
                       : m
                   )
                 )
+              )
+              const cached = sessionChatCache.get(targetBlindMailboxId)
+              if (cached) {
+                sessionChatCache.set(
+                  targetBlindMailboxId,
+                  sortMessagesChronologically(
+                    cached.map((m) =>
+                      m.clientUuid === clientUuid
+                        ? {
+                            ...m,
+                            id: serverId,
+                            status,
+                            isRead: m.isRead || isRead,
+                            isDelivered: m.isDelivered || isDelivered,
+                          }
+                        : m
+                    )
+                  )
+                )
               }
+              void updateMessageInLocalStore(targetBlindMailboxId, clientUuid, {
+                id: serverId,
+                status,
+                isRead,
+                isDelivered,
+              })
             }
           } catch {
             enqueueMessageMutation({
@@ -4278,7 +4444,11 @@ export function Messenger() {
                         })}
                       </span>
                       {msg.isSelf && (
-                        msg.isRead && readReceiptsEnabled ? (
+                        msg.status === 'queued' ? (
+                          <span title="In Warteschlange / Ausstehend (wird gesendet...)" className="inline-flex items-center">
+                            <Clock className="w-3.5 h-3.5 opacity-60 animate-pulse" />
+                          </span>
+                        ) : msg.isRead && readReceiptsEnabled ? (
                           <span title="Gelesen vom Gesprächspartner" className="inline-flex items-center">
                             <CheckCheck className="w-3.5 h-3.5 text-cyan-400" />
                           </span>

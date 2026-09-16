@@ -373,11 +373,14 @@ function openKeyDatabase(): Promise<IDBDatabase> {
     if (typeof indexedDB === 'undefined') {
       return reject(new Error('IndexedDB not available'))
     }
-    const req = indexedDB.open(IDB_DB_NAME, 1)
+    const req = indexedDB.open(IDB_DB_NAME, 2)
     req.onupgradeneeded = () => {
       const db = req.result
       if (!db.objectStoreNames.contains(IDB_STORE_NAME)) {
         db.createObjectStore(IDB_STORE_NAME, { keyPath: 'userId' })
+      }
+      if (!db.objectStoreNames.contains('keyring')) {
+        db.createObjectStore('keyring', { keyPath: 'userId' })
       }
     }
     req.onsuccess = () => resolve(req.result)

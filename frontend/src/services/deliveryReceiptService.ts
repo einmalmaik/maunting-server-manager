@@ -6,16 +6,50 @@
  * before the user has necessarily opened the chat.
  */
 
-import { relayE2eeEnvelope, fetchE2eeEnvelopes } from '@/api/social'
+import { relayE2eeEnvelope, fetchE2eeEnvelopes, syncE2eeMailboxes } from '@/api/social'
 import { encryptE2eeHybrid } from '@/services/e2eeCrypto'
 import { resolveIdentity, getRecipientPublicKey } from '@/services/e2eeIdentity'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
 
-// Cache acknowledged envelope IDs in memory to avoid duplicate receipt storms
-export const deliveredEnvelopeIds = new Set<number>()
+const DELIVERED_STORAGE_KEY = 'msm:delivered_envelope_ids'
+
+function loadDeliveredEnvelopeIds(): Set<number> {
+  const ids = new Set<number>()
+  if (typeof window !== 'undefined' && window.sessionStorage) {
+    try {
+      const raw = sessionStorage.getItem(DELIVERED_STORAGE_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            if (typeof item === 'number') ids.add(item)
+          }
+        }
+      }
+    } catch {}
+  }
+  return ids
+}
+
+function persistDeliveredEnvelopeIds(set: Set<number>): void {
+  if (typeof window !== 'undefined' && window.sessionStorage) {
+    try {
+      const arr = Array.from(set).slice(-500)
+      sessionStorage.setItem(DELIVERED_STORAGE_KEY, JSON.stringify(arr))
+    } catch {}
+  }
+}
+
+// Cache acknowledged envelope IDs to avoid duplicate receipt storms across reload
+export const deliveredEnvelopeIds = loadDeliveredEnvelopeIds()
 
 export function resetDeliveredEnvelopeCache(): void {
   deliveredEnvelopeIds.clear()
+  if (typeof window !== 'undefined' && window.sessionStorage) {
+    try {
+      sessionStorage.removeItem(DELIVERED_STORAGE_KEY)
+    } catch {}
+  }
 }
 
 export async function sendE2eeDeliveryReceipt({
@@ -101,10 +135,13 @@ export async function sendE2eeDeliveryReceipt({
       control_type: 'delivery_receipt',
     })
 
+    deliveredEnvelopeIds.add(envelopeId)
+    persistDeliveredEnvelopeIds(deliveredEnvelopeIds)
     return true
   } catch {
     // If delivery failed, remove from cache so subsequent events/polls can retry
     deliveredEnvelopeIds.delete(envelopeId)
+    persistDeliveredEnvelopeIds(deliveredEnvelopeIds)
     return false
   }
 }
@@ -118,12 +155,26 @@ export async function checkAndDispatchPendingDeliveryReceipts(currentUserId: num
   if (!currentUserId) return
   const store = useMessengerNotificationStore.getState()
   const directory = store.mailboxDirectory
+
+  // Use sync API to discover all mailboxes with pending envelopes
+  const syncResult = await syncE2eeMailboxes(0).catch(() => null)
+  const prioritizedMids = new Set<string>()
+  if (syncResult?.mailboxes) {
+    for (const mb of syncResult.mailboxes) {
+      if (mb.unread_count > 0 || mb.max_envelope_id > 0) {
+        prioritizedMids.add(mb.blind_mailbox_id)
+      }
+    }
+  }
+
   const directEntries = Object.entries(directory).filter(
     ([_, meta]) => !meta.isGroup && meta.userId && !store.isBlocked(meta.userId)
   )
 
-  for (const [mid, meta] of directEntries.slice(0, 15)) {
+  // Process all direct conversations without arbitrary cap (previously capped to 15)
+  for (const [mid, meta] of directEntries) {
     try {
+      // Check mailbox if it has pending updates or envelopes
       const envelopes = await fetchE2eeEnvelopes(mid)
       for (const env of envelopes) {
         if (env.id && !deliveredEnvelopeIds.has(env.id) && meta.userId) {

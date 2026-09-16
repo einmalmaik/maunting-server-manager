@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import logging
 from typing import Any
 from fastapi import HTTPException
-from sqlalchemy import or_, and_
+from sqlalchemy import or_, and_, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -1273,6 +1273,88 @@ class SocialService:
                 .all()
             )
         return query.order_by(E2eeBlindEnvelope.id.asc()).limit(fetch_limit).all()
+
+    @classmethod
+    def sync_mailboxes(
+        cls, db: Session, current_user: User, since_id: int = 0
+    ) -> list[dict[str, Any]]:
+        """Ermittelt alle blinden Mailboxen des Benutzers mit Umschlägen nach since_id.
+
+        Zero-Knowledge Invariante:
+        Es werden AUSSCHLIESSLICH Mailboxen zurückgegeben, an denen der Benutzer
+        nachweislich beteiligt ist (DirectChat, ChatGroupMember oder bestätigter UserFriend).
+        """
+        cls.assert_social_enabled(db)
+        uid = current_user.id
+        effective_since = max(0, since_id) if since_id is not None else 0
+
+        # 1. 1:1 DirectChats des Benutzers
+        direct_mids = [
+            row[0]
+            for row in db.query(DirectChat.blind_mailbox_id)
+            .filter(or_(DirectChat.user_a_id == uid, DirectChat.user_b_id == uid))
+            .all()
+            if row[0]
+        ]
+
+        # 2. Chat-Gruppen des Benutzers
+        group_ids = [
+            row[0]
+            for row in db.query(ChatGroupMember.group_id)
+            .filter(ChatGroupMember.user_id == uid)
+            .all()
+        ]
+        group_mids = [
+            hashlib.sha256(f"msm:group:{gid}".encode("utf-8")).hexdigest()
+            for gid in group_ids
+        ]
+
+        # 3. Bestätigte Freunde (zur Absicherung vor persistiertem DirectChat)
+        friends = (
+            db.query(UserFriend)
+            .filter(
+                or_(UserFriend.user_id == uid, UserFriend.friend_id == uid),
+                UserFriend.status == "accepted",
+            )
+            .all()
+        )
+        friend_ids = {f.friend_id if f.user_id == uid else f.user_id for f in friends}
+        friend_mids = [
+            cls.derive_blind_mailbox_id(uid, fid)
+            for fid in friend_ids
+        ]
+
+        all_mids = list(set(direct_mids) | set(group_mids) | set(friend_mids))
+        if not all_mids:
+            return []
+
+        # 4. Aggregiere Mailbox-Statistiken über E2eeBlindEnvelope in Batches à 500
+        results: list[dict[str, Any]] = []
+        chunk_size = 500
+        for i in range(0, len(all_mids), chunk_size):
+            chunk = all_mids[i : i + chunk_size]
+            rows = (
+                db.query(
+                    E2eeBlindEnvelope.blind_mailbox_id,
+                    func.max(E2eeBlindEnvelope.id).label("max_envelope_id"),
+                    func.count(E2eeBlindEnvelope.id).label("unread_count"),
+                )
+                .filter(
+                    E2eeBlindEnvelope.blind_mailbox_id.in_(chunk),
+                    E2eeBlindEnvelope.id > effective_since,
+                )
+                .group_by(E2eeBlindEnvelope.blind_mailbox_id)
+                .all()
+            )
+            for mid, max_id, count in rows:
+                results.append({
+                    "blind_mailbox_id": mid,
+                    "max_envelope_id": int(max_id),
+                    "unread_count": int(count),
+                })
+
+        results.sort(key=lambda item: item["max_envelope_id"], reverse=True)
+        return results
 
     @classmethod
     def broadcast_typing_signal(

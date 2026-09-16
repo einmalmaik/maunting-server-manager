@@ -19,6 +19,7 @@ from schemas.social import (
     ActivityPingRequest,
     E2eeBlindEnvelopeCreate,
     E2eeBlindEnvelopeResponse,
+    E2eeMailboxSyncResponse,
     E2eeTypingSignalCreate,
     E2eeKeyringResponse,
     E2eeKeyringUpdate,
@@ -502,6 +503,22 @@ def start_or_get_direct_chat(
         "created_at": chat.created_at,
         "updated_at": chat.updated_at,
     }
+
+
+@router.get(
+    "/e2ee/sync",
+    response_model=E2eeMailboxSyncResponse,
+    dependencies=[Depends(_check_social_enabled)],
+)
+def sync_blind_mailboxes(
+    since_id: int = Query(0, ge=0, description="Nur Mailboxen mit Umschlägen nach dieser Envelope-ID synchronisieren"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    mailboxes = SocialService.sync_mailboxes(
+        db, current_user=current_user, since_id=since_id
+    )
+    return {"mailboxes": mailboxes}
 
 
 @router.get("/e2ee/mailbox/{blind_mailbox_id}", response_model=list[E2eeBlindEnvelopeResponse], dependencies=[Depends(_check_social_enabled)])

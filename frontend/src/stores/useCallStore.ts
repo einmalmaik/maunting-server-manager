@@ -119,6 +119,7 @@ export interface UseCallState {
 
 import { create } from 'zustand'
 import { cancelDirectCall, endGroupCallRoom, getWebRtcIceServers, rejectDirectCall, startDirectCall } from '@/api/social'
+import { wsProtokolle } from '@/api/client'
 import { wsUrl } from '@/config/api'
 import { toast } from '@/stores/toastStore'
 
@@ -241,7 +242,10 @@ async function connectDirectTransport(
     if (peer.connectionState === 'closed' && get().state !== 'idle') get().endCall()
   }
 
-  const socket = new WebSocket(wsUrl('/api/social/webrtc/signal'))
+  const protocols = await wsProtokolle()
+  const socket = protocols
+    ? new WebSocket(wsUrl('/api/social/webrtc/signal'), protocols)
+    : new WebSocket(wsUrl('/api/social/webrtc/signal'))
   directSocket = socket
   const sendOffer = async () => {
     if (role !== 'initiator' || peer.signalingState !== 'stable') return
