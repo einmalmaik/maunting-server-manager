@@ -241,6 +241,7 @@ def voice_config(
     zugaenge = None if realtime else sprachzugang(db, user, bevorzugter_provider_id=provider_id)
     hoeren, denken, sprechen = zugaenge if zugaenge else (None, None, None)
     diktat = _hoerender_zugang(db, provider_id or user.ai_provider_id)
+    diktat_kontingent = ai_usage_service.get_user_dictation_quota(db, user)
     mode = "legacy"
     if realtime:
         mode = "gemini_live" if realtime.provider_kind == "google" else "openai_realtime"
