@@ -25,7 +25,7 @@ def test_google_registry_spec() -> None:
     assert spec.label == "Google AI Studio"
     assert spec.base_url == "https://generativelanguage.googleapis.com/v1beta/openai"
     assert spec.catalog_url == "https://generativelanguage.googleapis.com/v1beta/openai/models"
-    assert spec.key_prefix == "AIza"
+    assert spec.key_prefix is None
     assert spec.katalog_braucht_schluessel is True
     assert spec.realtime_tauglich is True
     assert "chat" in spec.gehoer_wege

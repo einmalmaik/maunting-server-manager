@@ -179,6 +179,10 @@ def _assert_key_passt(kind: str, api_key: str | None) -> str | None:
     dabei". Ein Schlüssel, der nur aus Leerraum bestand, ist keiner.
     """
     schluessel = (api_key or "").strip()
+    if (schluessel.startswith('"') and schluessel.endswith('"')) or (
+        schluessel.startswith("'") and schluessel.endswith("'")
+    ):
+        schluessel = schluessel[1:-1].strip()
     if not schluessel:
         return None
     praefix = ai_provider_registry.anbieter(kind).key_prefix
