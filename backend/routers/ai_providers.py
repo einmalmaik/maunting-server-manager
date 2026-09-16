@@ -415,6 +415,7 @@ async def list_catalog_models(
     request: Request,
     refresh: bool = False,
     provider_id: int | None = None,
+    api_key: str | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(require_global("panel.settings.read")),
 ) -> list[AiCatalogModelResponse]:
@@ -435,31 +436,47 @@ async def list_catalog_models(
     dort, kommt eine **leere Liste** und kein Fehler — beim Anlegen eines
     Zugangs gibt es die Zeile mit dem Schluessel naemlich noch gar nicht, und
     eine Fehlermeldung an dieser Stelle waere die Meldung eines Normalzustands.
-    Die Oberflaeche sagt dann „erst Schluessel speichern, dann Modell waehlen".
+    Wird jedoch direkt im Formular ein ``api_key`` bzw. ``X-Provider-Api-Key``
+    übergeben, wird der Katalog sofort in Echtzeit mit diesem Schlüssel abgerufen.
     """
     if not ai_provider_registry.bekannt(kind):
         raise HTTPException(status_code=404, detail="Unbekannter KI-Anbieter")
 
     schluessel: str | None = None
-    if ai_provider_registry.anbieter(kind).katalog_braucht_schluessel:
+    ephemeral_key = (request.headers.get("x-provider-api-key") or api_key or "").strip()
+    if ephemeral_key:
+        try:
+            schluessel = ai_provider_service._assert_key_passt(kind, ephemeral_key)
+        except Exception:
+            schluessel = ephemeral_key
+    elif ai_provider_registry.anbieter(kind).katalog_braucht_schluessel:
         provider = db.get(AiProvider, provider_id) if provider_id else None
         # Der genannte Zugang muss zu **diesem** Anbieter gehoeren. Sonst holte
         # eine falsch gesetzte Kennung den Schluessel eines fremden Zugangs und
         # schickte ihn an eine Adresse, fuer die er nicht ausgestellt wurde.
         if provider is None or provider.provider_kind != kind:
             return []
-        schluessel = await run_in_threadpool(
-            ai_provider_service.resolve_api_key, db, provider, user.id
-        )
+        try:
+            schluessel = await run_in_threadpool(
+                ai_provider_service.resolve_api_key, db, provider, user.id
+            )
+        except DisSidecarError as exc:
+            raise HTTPException(
+                status_code=503, detail="Provider-Key konnte nicht gelesen werden"
+            ) from exc
         if not schluessel:
             return []
 
-    modelle = await ai_model_catalog.modelle(
-        request.app.state.ai_http_client,
-        kind,
-        erzwingen=refresh,
-        schluessel=schluessel,
-    )
+    try:
+        modelle = await ai_model_catalog.modelle(
+            request.app.state.ai_http_client,
+            kind,
+            erzwingen=refresh,
+            schluessel=schluessel,
+        )
+    except Exception as exc:
+        logger.info("Katalogabruf fuer %s fehlgeschlagen: %s", kind, exc)
+        return []
     return [
         AiCatalogModelResponse(
             model_id=modell.model_id,

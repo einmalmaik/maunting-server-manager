@@ -500,4 +500,49 @@ def test_gemini_live_session_safety_settings() -> None:
         assert s["threshold"] == "BLOCK_NONE"
 
 
+def test_list_catalog_models_with_ephemeral_key(client: TestClient, owner_cookies: dict, monkeypatch) -> None:
+    """Prüft, dass der Katalog mit einem flüchtigen Schlüssel (Header oder Query) direkt abgerufen wird."""
+    from services import ai_model_catalog
+
+    aufgerufen_mit: dict[str, str | None] = {}
+
+    async def _fake_modelle(http_client, kind, erzwingen=False, schluessel=None):
+        aufgerufen_mit["kind"] = kind
+        aufgerufen_mit["schluessel"] = schluessel
+        return [
+            ai_provider_registry.Modell(
+                model_id="gemini-2.5-flash",
+                name="Gemini 2.5 Flash",
+                denkt=True,
+                stufen=("low", "medium", "high"),
+                standard_stufe="medium",
+                kontext_tokens=1_048_576,
+                sieht=True,
+            )
+        ]
+
+    monkeypatch.setattr(ai_model_catalog, "modelle", _fake_modelle)
+
+    # 1. Mit X-Provider-Api-Key Header
+    resp = client.get(
+        "/api/ai/settings/provider-kinds/google/models",
+        headers={"x-provider-api-key": "AIzaSyLiveTestKey"},
+        cookies=owner_cookies,
+    )
+    assert resp.status_code == 200
+    daten = resp.json()
+    assert len(daten) == 1
+    assert daten[0]["model_id"] == "gemini-2.5-flash"
+    assert aufgerufen_mit["schluessel"] == "AIzaSyLiveTestKey"
+
+    # 2. Mit api_key Query Parameter
+    resp2 = client.get(
+        "/api/ai/settings/provider-kinds/google/models?api_key=AIzaSyQueryTestKey",
+        cookies=owner_cookies,
+    )
+    assert resp2.status_code == 200
+    assert aufgerufen_mit["schluessel"] == "AIzaSyQueryTestKey"
+
+
+
 

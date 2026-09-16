@@ -462,7 +462,11 @@ function ProviderForm({
     if (spec && !spec.fuehrt_katalog) return
     setLoadingModels(true)
     try {
-      setModels(await aiApi.listCatalogModels(draft.provider_kind, refresh, draft.id))
+      const apiKey = draft.operator_api_key?.trim() || undefined
+      const rows = apiKey
+        ? await aiApi.listCatalogModels(draft.provider_kind, refresh, draft.id, apiKey)
+        : await aiApi.listCatalogModels(draft.provider_kind, refresh, draft.id)
+      setModels(rows)
     } catch {
       setModels(null)
     } finally {
@@ -478,16 +482,56 @@ function ProviderForm({
     // nicht geladen" ein Zustand, und nur der zweite darf eine Ladeanzeige
     // rechtfertigen.
     if (fuehrtKatalog === false) { setModels([]); return }
+
+    const hatEingetipptenSchluessel = Boolean(draft.operator_api_key?.trim())
+    const hatGespeichertenSchluessel = Boolean(
+      draft.id && draft.operator_key_configured && !draft.clear_operator_api_key,
+    )
+
+    // Braucht der Anbieter einen Schlüssel, aber weder im Speicher noch im Eingabefeld
+    // liegt einer vor, zeigen wir direkt die leere Liste (mit Hinweis 'catalogNeedsKey').
+    if (spec?.katalog_braucht_schluessel && !hatEingetipptenSchluessel && !hatGespeichertenSchluessel) {
+      setModels([])
+      return
+    }
+
     setLoadingModels(true)
-    // `draft.id` geht mit, weil manche Anbieter ihren Katalog nur gegen den
-    // Schlüssel herausgeben. Beim Anlegen gibt es die Kennung noch nicht — dann
-    // kommt eine leere Liste, und der Hinweis darunter erklärt die Reihenfolge.
-    aiApi.listCatalogModels(draft.provider_kind, false, draft.id)
-      .then((rows) => { if (active) setModels(rows) })
-      .catch(() => { if (active) setModels(null) })
-      .finally(() => { if (active) setLoadingModels(false) })
-    return () => { active = false }
-  }, [draft.provider_kind, draft.id, fuehrtKatalog])
+    const apiKey = draft.operator_api_key?.trim() || undefined
+    const delay = hatEingetipptenSchluessel ? 400 : 0
+
+    const timer = window.setTimeout(() => {
+      const req = apiKey
+        ? aiApi.listCatalogModels(draft.provider_kind, false, draft.id, apiKey)
+        : aiApi.listCatalogModels(draft.provider_kind, false, draft.id)
+
+      req
+        .then((rows) => {
+          if (!active) return
+          setModels(rows)
+          if (rows && rows.length > 0 && !draft.default_model) {
+            const empf = rows.find((r) => r.recommended)?.model_id || rows[0]?.model_id
+            if (empf) {
+              change({ default_model: empf })
+            }
+          }
+        })
+        .catch(() => { if (active) setModels(null) })
+        .finally(() => { if (active) setLoadingModels(false) })
+    }, delay)
+
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
+  }, [
+    draft.provider_kind,
+    draft.id,
+    draft.operator_api_key,
+    draft.operator_key_configured,
+    draft.clear_operator_api_key,
+    fuehrtKatalog,
+    spec?.katalog_braucht_schluessel,
+  ])
 
   /*
    * Anbieter ohne Katalog: die eingetippten Kennungen einzeln nachschlagen.

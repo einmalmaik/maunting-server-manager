@@ -739,6 +739,7 @@ app.add_middleware(
         "X-CSRF-Token",
         "Idempotency-Key",
         "X-Task-Retry-Of",
+        "X-Provider-Api-Key",
     ],
     expose_headers=["X-CSRF-Token"],
 )
