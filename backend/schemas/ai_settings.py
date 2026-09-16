@@ -95,6 +95,10 @@ class AiWebSearchStatus(BaseModel):
     configured: bool
     has_api_key: bool = False
     searxng_url: str | None = None
+    default_searxng_url: str = "http://127.0.0.1:8888"
+    is_default_searxng: bool = True
+    custom_searxng_url: str | None = None
+    sidecar_running: bool = False
 
 
 class AiSatelliteCredentialsUpdate(BaseModel):

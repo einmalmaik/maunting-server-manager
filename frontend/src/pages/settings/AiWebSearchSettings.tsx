@@ -20,6 +20,9 @@ export function AiWebSearchSettings({ canWrite }: { canWrite: boolean }) {
   const { t } = useTranslation()
   const [hasApiKey, setHasApiKey] = useState(false)
   const [currentSearxngUrl, setCurrentSearxngUrl] = useState('')
+  const [defaultSearxngUrl, setDefaultSearxngUrl] = useState('http://127.0.0.1:8888')
+  const [isDefaultSearxng, setIsDefaultSearxng] = useState(true)
+  const [sidecarRunning, setSidecarRunning] = useState(false)
   const [apiKey, setApiKey] = useState('')
   const [searxngUrl, setSearxngUrl] = useState('')
   const [loading, setLoading] = useState(true)
@@ -31,8 +34,14 @@ export function AiWebSearchSettings({ canWrite }: { canWrite: boolean }) {
       .then((status) => {
         if (active) {
           setHasApiKey(Boolean(status.has_api_key))
-          setCurrentSearxngUrl(status.searxng_url || '')
-          setSearxngUrl(status.searxng_url || '')
+          const customUrl = status.custom_searxng_url || ''
+          setCurrentSearxngUrl(customUrl)
+          setSearxngUrl(customUrl)
+          if (status.default_searxng_url) {
+            setDefaultSearxngUrl(status.default_searxng_url)
+          }
+          setIsDefaultSearxng(status.is_default_searxng ?? !customUrl)
+          setSidecarRunning(Boolean(status.sidecar_running))
         }
       })
       .catch(() => { if (active) toast.error(t('ai.webSearch.errors.load')) })
@@ -81,8 +90,14 @@ export function AiWebSearchSettings({ canWrite }: { canWrite: boolean }) {
     setBusy(true)
     try {
       const status = await aiApi.setWebSearchConfig({ searxngUrl: searxngUrl.trim() })
-      setCurrentSearxngUrl(status.searxng_url || '')
-      setSearxngUrl(status.searxng_url || '')
+      const customUrl = status.custom_searxng_url || ''
+      setCurrentSearxngUrl(customUrl)
+      setSearxngUrl(customUrl)
+      if (status.default_searxng_url) {
+        setDefaultSearxngUrl(status.default_searxng_url)
+      }
+      setIsDefaultSearxng(status.is_default_searxng ?? !customUrl)
+      setSidecarRunning(Boolean(status.sidecar_running))
       toast.success(t('ai.webSearch.saved'))
     } catch (error: unknown) {
       toast.error(error instanceof SanitizedApiError ? error.message : t('ai.webSearch.errors.save'))
@@ -100,9 +115,15 @@ export function AiWebSearchSettings({ canWrite }: { canWrite: boolean }) {
     })) return
     setBusy(true)
     try {
-      await aiApi.setWebSearchConfig({ searxngUrl: '' })
-      setCurrentSearxngUrl('')
-      setSearxngUrl('')
+      const status = await aiApi.setWebSearchConfig({ searxngUrl: '' })
+      const customUrl = status.custom_searxng_url || ''
+      setCurrentSearxngUrl(customUrl)
+      setSearxngUrl(customUrl)
+      if (status.default_searxng_url) {
+        setDefaultSearxngUrl(status.default_searxng_url)
+      }
+      setIsDefaultSearxng(status.is_default_searxng ?? true)
+      setSidecarRunning(Boolean(status.sidecar_running))
       toast.success(t('ai.webSearch.removed'))
     } catch (error: unknown) {
       toast.error(error instanceof SanitizedApiError ? error.message : t('ai.webSearch.errors.save'))
@@ -157,38 +178,88 @@ export function AiWebSearchSettings({ canWrite }: { canWrite: boolean }) {
         )}
       </form>
 
-      {/* 2. SearXNG URL (Self-Hosted) */}
-      <form className="flex flex-wrap items-end gap-3 border-t border-outline-variant/30 pt-4" onSubmit={saveSearxng}>
-        <label className="min-w-[16rem] flex-1 space-y-1.5">
-          <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-            {t('ai.webSearch.searxngUrl')}
-          </span>
-          <input
-            className="msm-input"
-            type="text"
-            maxLength={512}
-            value={searxngUrl}
-            disabled={!canWrite || busy}
-            placeholder={t('ai.webSearch.searxngPlaceholder')}
-            onChange={(event) => setSearxngUrl(event.target.value)}
-            aria-label={t('ai.webSearch.searxngUrl')}
-          />
-        </label>
-        {canWrite && (
-          <>
-            <Button type="submit" disabled={busy || searxngUrl.trim() === currentSearxngUrl}>
-              <Save className="h-4 w-4" aria-hidden="true" />
-              {t('settings.save')}
-            </Button>
-            {Boolean(currentSearxngUrl) && (
-              <Button type="button" variant="destructive" disabled={busy} onClick={() => void removeSearxng()}>
-                <Trash2 className="h-4 w-4" aria-hidden="true" />
-                {t('common.delete')}
-              </Button>
-            )}
-          </>
+      {/* 2. SearXNG URL (Self-Hosted / Sidecar) */}
+      <div className="space-y-3 border-t border-outline-variant/30 pt-4">
+        {isDefaultSearxng ? (
+          sidecarRunning ? (
+            <div
+              data-testid="searxng-sidecar-status"
+              className="flex items-center gap-2 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-xs text-success"
+            >
+              <span className="h-2 w-2 rounded-full bg-success animate-pulse" aria-hidden="true" />
+              <span>{t('ai.webSearch.sidecarActive', { url: defaultSearxngUrl })}</span>
+            </div>
+          ) : (
+            <div
+              data-testid="searxng-sidecar-status"
+              className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning"
+            >
+              <span className="h-2 w-2 rounded-full bg-warning" aria-hidden="true" />
+              <span>{t('ai.webSearch.sidecarInactive', { url: defaultSearxngUrl })}</span>
+            </div>
+          )
+        ) : (
+          <div
+            data-testid="searxng-sidecar-status"
+            className="flex items-center gap-2 rounded-lg border border-secondary/30 bg-secondary/10 px-3 py-2 text-xs text-secondary"
+          >
+            <span className="h-2 w-2 rounded-full bg-secondary" aria-hidden="true" />
+            <span>
+              {t('ai.webSearch.customEndpointActive', {
+                url: currentSearxngUrl,
+                defaultUrl: defaultSearxngUrl,
+              })}
+            </span>
+          </div>
         )}
-      </form>
+
+        <form className="flex flex-wrap items-end gap-3" onSubmit={saveSearxng}>
+          <label className="min-w-[16rem] flex-1 space-y-1.5">
+            <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+              {t('ai.webSearch.searxngUrl')}
+            </span>
+            <input
+              className="msm-input"
+              type="text"
+              maxLength={512}
+              value={searxngUrl}
+              disabled={!canWrite || busy}
+              placeholder={t('ai.webSearch.searxngDefaultPlaceholder', { url: defaultSearxngUrl })}
+              onChange={(event) => setSearxngUrl(event.target.value)}
+              aria-label={t('ai.webSearch.searxngUrl')}
+            />
+          </label>
+          {canWrite && (
+            <>
+              <Button type="submit" disabled={busy || searxngUrl.trim() === currentSearxngUrl}>
+                <Save className="h-4 w-4" aria-hidden="true" />
+                {t('settings.save')}
+              </Button>
+              {Boolean(currentSearxngUrl) && (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  disabled={busy}
+                  onClick={() => void removeSearxng()}
+                  title={t('ai.webSearch.resetToDefault')}
+                >
+                  <Trash2 className="h-4 w-4" aria-hidden="true" />
+                  {t('common.delete')}
+                </Button>
+              )}
+            </>
+          )}
+        </form>
+
+        <p className="text-xs text-on-surface-variant">
+          {isDefaultSearxng
+            ? t('ai.webSearch.searxngDefaultHint')
+            : t('ai.webSearch.customEndpointActive', {
+                url: currentSearxngUrl,
+                defaultUrl: defaultSearxngUrl,
+              })}
+        </p>
+      </div>
 
       <p className="text-xs text-on-surface-variant">{t('ai.webSearch.hint')}</p>
     </section>

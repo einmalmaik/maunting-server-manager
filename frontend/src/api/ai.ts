@@ -387,6 +387,10 @@ export interface AiWebSearchStatus {
   configured: boolean
   has_api_key?: boolean
   searxng_url?: string | null
+  default_searxng_url?: string | null
+  is_default_searxng?: boolean
+  custom_searxng_url?: string | null
+  sidecar_running?: boolean
 }
 
 /** Nur der Zustand — Satelliten-Zugangsdaten verlassen das Backend nie. */

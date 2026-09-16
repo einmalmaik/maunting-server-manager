@@ -179,6 +179,10 @@ def get_web_search_status(
         configured=ai_web_search_service.is_configured(),
         has_api_key=ai_web_search_service.api_key() is not None,
         searxng_url=ai_web_search_service.searxng_url(),
+        default_searxng_url=ai_web_search_service.default_searxng_url(),
+        is_default_searxng=ai_web_search_service.is_default_searxng(),
+        custom_searxng_url=ai_web_search_service.custom_searxng_url(),
+        sidecar_running=ai_web_search_service.is_sidecar_running(),
     )
 
 
@@ -221,6 +225,10 @@ def set_web_search_key(
         configured=configured,
         has_api_key=has_api_key,
         searxng_url=s_url,
+        default_searxng_url=ai_web_search_service.default_searxng_url(),
+        is_default_searxng=ai_web_search_service.is_default_searxng(),
+        custom_searxng_url=ai_web_search_service.custom_searxng_url(),
+        sidecar_running=ai_web_search_service.is_sidecar_running(),
     )
 
 
