@@ -35,20 +35,56 @@ const KEIN_WORKER = '__aus__'
 const KEINE_ETHICS = '__aus__'
 const KEINE_TRANSKRIPTION = '__aus__'
 const EMPFOHLENE_REALTIME_MODELLE = ['gpt-realtime-1.5', 'gpt-realtime-2'] as const
-const EMPFOHLENE_GOOGLE_REALTIME_MODELLE = ['gemini-2.5-flash', 'gemini-2.0-flash'] as const
+const EMPFOHLENE_GOOGLE_REALTIME_MODELLE = [
+  'gemini-3.8-live',
+  'gemini-3.8-live-extended-thinking',
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+] as const
 const GEMINI_LIVE_STIMMEN = ['Puck', 'Charon', 'Kore', 'Fenrir', 'Aoede', 'Zephyr', 'Leda', 'Orus'] as const
 
-function realtimeModellOptionen(models: AiCatalogModel[] | null | undefined, t: (key: string) => string, isGoogle = false) {
-  const filterWort = isGoogle ? 'gemini' : 'realtime'
-  const ausKatalog = (models ?? [])
-    .filter((item) => item.model_id.toLowerCase().includes(filterWort))
-    .map((item) => ({ value: item.model_id, label: item.model_id, hint: modellHinweis(item, t) }))
+function isGoogleLiveModel(modelId: string): boolean {
+  const m = modelId.toLowerCase()
+  return (
+    m.includes('live') ||
+    m.includes('realtime') ||
+    m.includes('2.5-flash') ||
+    m.includes('2.0-flash')
+  )
+}
+
+function realtimeModellOptionen(
+  models: AiCatalogModel[] | null | undefined,
+  t: (key: string) => string,
+  isGoogle = false,
+  currentModel?: string | null,
+) {
+  let ausKatalog: { value: string; label: string; hint?: string }[] = []
+  if (isGoogle) {
+    // Bei Google filtern wir gezielt auf Modelle, die die Live-API (WebSocket) unterstützen.
+    // Reine Text-/Chat- oder Embedding-Modelle (wie 1.5-pro, gemma) können NICHT über die Live-API laufen.
+    ausKatalog = (models ?? [])
+      .filter((item) => isGoogleLiveModel(item.model_id))
+      .map((item) => ({
+        value: item.model_id,
+        label: item.name && item.name !== item.model_id ? `${item.name} (${item.model_id})` : item.model_id,
+        hint: modellHinweis(item, t),
+      }))
+  } else {
+    ausKatalog = (models ?? [])
+      .filter((item) => item.model_id.toLowerCase().includes('realtime'))
+      .map((item) => ({ value: item.model_id, label: item.model_id, hint: modellHinweis(item, t) }))
+  }
   const vorhanden = new Set(ausKatalog.map((item) => item.value))
   const empfohlene = isGoogle ? EMPFOHLENE_GOOGLE_REALTIME_MODELLE : EMPFOHLENE_REALTIME_MODELLE
   for (const model of empfohlene) {
     if (!vorhanden.has(model)) {
       ausKatalog.push({ value: model, label: model, hint: t('ai.providers.recommended') })
+      vorhanden.add(model)
     }
+  }
+  if (currentModel && !vorhanden.has(currentModel)) {
+    ausKatalog.unshift({ value: currentModel, label: currentModel })
   }
   return ausKatalog
 }
@@ -995,7 +1031,8 @@ function ProviderForm({
                       : null,
                   })}
                   placeholder={t('ai.providers.modelChoose')}
-                  options={realtimeModellOptionen(models, t, draft.provider_kind === 'google')}
+                  options={realtimeModellOptionen(models, t, draft.provider_kind === 'google', draft.realtime_model)}
+                  searchable
                 />
               </div>
               <div className="space-y-1.5">

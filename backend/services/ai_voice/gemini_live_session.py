@@ -456,11 +456,10 @@ class GeminiLiveSitzung:
 
         ai_meldestelle.realtime_sitzung_start(self.user_id)
         url = f"{GEMINI_LIVE_WS_BASE}?key={quote_plus(self.v.api_key)}"
-
         model_raw = (self.v.model or "").strip()
-        if not model_raw or "3.8" in model_raw or ("live" in model_raw.lower() and not any(v in model_raw.lower() for v in ("2.0", "2.5"))):
-            logger.warning("Ungültiges Gemini-Live-Modell '%s', nutze gemini-2.5-flash", model_raw)
-            model_raw = "gemini-2.5-flash"
+        if not model_raw or "gemini" not in model_raw.lower():
+            logger.info("Kein gültiges Gemini-Live-Modell angegeben ('%s'), nutze gemini-3.8-live", model_raw)
+            model_raw = "gemini-3.8-live"
         model_name = model_raw if model_raw.startswith("models/") else f"models/{model_raw}"
         voice_name = self.v.voice or "Puck"
 
