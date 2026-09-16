@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, ArrowRightLeft, FileArchive, GitBranch, KeyRound, Mic, MonitorSmartphone, Network, Plug, Server, ShieldCheck, Terminal } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRightLeft, FileArchive, GitBranch, KeyRound, Mic, MonitorSmartphone, Network, PhoneCall, Plug, Server, ShieldCheck, Terminal } from 'lucide-react'
 import { CodeBlock } from '@/components/docs/CodeBlock'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 
@@ -78,6 +78,7 @@ export function SelfHostingDocs() {
           ['credentials-scoping', t('docsSelfHosting.credentials.title')],
           ['hoster-integration', t('docsSelfHosting.hoster.title')],
           ['voice-mode', t('docsSelfHosting.voice.title')],
+          ['messenger-calls', t('docsSelfHosting.calls.title')],
           ['smart-system', t('docsSelfHosting.smartSystem.title')],
         ].map(([id, label]) => (
           <a key={id} href={`#${id}`} className="msm-btn-secondary shrink-0 px-3 py-2 text-xs">{label}</a>
@@ -362,6 +363,35 @@ export function SelfHostingDocs() {
         <div className="mt-4 flex gap-3 rounded-xl border border-status-warning/30 bg-status-warning/10 p-4 text-status-warning">
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
           <p className="text-sm leading-6">{t('docsSelfHosting.voice.spokenLimit')}</p>
+        </div>
+      </section>
+
+      {/* Anrufe im Messenger. Der Betreiber hat hier genau eine Entscheidung —
+          eigener Medienserver oder fremder — und die hat eine Folge, die man
+          ihm sagen muss: wo die Raum- und Zeitdaten liegen. */}
+      <section aria-labelledby="messenger-calls" className="msm-card mb-10 p-5 sm:p-6">
+        <div className="flex items-start gap-3">
+          <PhoneCall className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+          <div>
+            <h2 id="messenger-calls" className="font-headline text-headline-md text-on-surface">
+              {t('docsSelfHosting.calls.title')}
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-on-surface-variant">
+              {t('docsSelfHosting.calls.intro')}
+            </p>
+          </div>
+        </div>
+        <dl className="mt-5 grid gap-px overflow-hidden rounded-xl border border-outline-variant bg-outline-variant md:grid-cols-2">
+          {(['mode', 'ports', 'keys', 'encryption', 'metadata', 'limits'] as const).map(item => (
+            <div key={item} className="bg-surface-container p-4">
+              <dt className="text-sm font-semibold text-on-surface">{t(`docsSelfHosting.calls.${item}.title`)}</dt>
+              <dd className="mt-1 text-sm leading-6 text-on-surface-variant">{t(`docsSelfHosting.calls.${item}.body`)}</dd>
+            </div>
+          ))}
+        </dl>
+        <div className="mt-4 flex gap-3 rounded-xl border border-status-warning/30 bg-status-warning/10 p-4 text-status-warning">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+          <p className="text-sm leading-6">{t('docsSelfHosting.calls.permissionsPolicy')}</p>
         </div>
       </section>
 

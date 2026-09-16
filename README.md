@@ -136,6 +136,7 @@ Der Installer richtet automatisch folgende Komponenten ein:
 - PostgreSQL-Datenbank und Redis-Cache
 - Rootless Docker für den `msm`-Benutzer
 - DIS-Cryptographic-Sidecar
+- LiveKit-Sidecar für Sprach-, Video- und Gruppenanrufe im Messenger
 - Lokaler Node-Agent und Guardian Engine
 - Caddy Webserver mit automatischem HTTPS-Zertifikat
 - Systemd-Dienste und Aktualisierungstimer
@@ -167,6 +168,7 @@ Der Installer richtet automatisch folgende Komponenten ein:
 │  → Port 8000 (Localhost)                │
 │  → PostgreSQL (Loopback)                │
 │  → DIS Sidecar (@msdis/shield)          │
+│  → LiveKit Sidecar (Anrufe, /livekit)   │
 └────────────┬────────────────────────────┘
              │ (mTLS / HMAC Enrollment)
 ┌────────────▼────────────────────────────┐

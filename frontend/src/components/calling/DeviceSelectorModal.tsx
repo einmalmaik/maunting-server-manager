@@ -47,6 +47,7 @@ export const DeviceSelectorModal: React.FC<DeviceSelectorModalProps> = ({
               value={selectedAudioInput}
               onChange={(val: string | number) => onSelectAudioInput(String(val))}
               className="w-full"
+              aria-label="Mikrofon"
             />
           </div>
 
@@ -60,6 +61,7 @@ export const DeviceSelectorModal: React.FC<DeviceSelectorModalProps> = ({
               value={selectedVideoInput}
               onChange={(val: string | number) => onSelectVideoInput(String(val))}
               className="w-full"
+              aria-label="Kamera"
             />
           </div>
 
@@ -74,6 +76,7 @@ export const DeviceSelectorModal: React.FC<DeviceSelectorModalProps> = ({
                 value={selectedAudioOutput}
                 onChange={(val: string | number) => onSelectAudioOutput(String(val))}
                 className="w-full"
+                aria-label="Lautsprecher"
               />
             </div>
           )}

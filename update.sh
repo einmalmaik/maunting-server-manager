@@ -64,7 +64,7 @@ restore_panel_ownership() {
     # aber manuelle "Sauberkeit" Befehle sind riskant. Immer --dry-run zuerst.
     # Es gibt helper-scripts/recover-docker-storage.sh als Recovery (für den Docker-Store-Corruption-Fall).
     mkdir -p "$MSM_DIR/blueprints/community" 2>/dev/null || true
-    for sub in backend frontend docs dis-sidecar searxng-sidecar msm-agent scripts helper-scripts blueprints; do
+    for sub in backend frontend docs dis-sidecar searxng-sidecar livekit-sidecar msm-agent scripts helper-scripts blueprints; do
         if [[ -d "$MSM_DIR/$sub" ]]; then
             # Hard fail for code trees used by venv setup — silent || true left
             # root-owned msm-agent after git pull and caused PEP 668 cascades.
@@ -610,6 +610,23 @@ fi
 if ! grep -q '^MSM_DIS_SIDECAR_URL=' "$ENV_FILE"; then
     echo 'MSM_DIS_SIDECAR_URL="http://127.0.0.1:9100"' >> "$ENV_FILE"
 fi
+
+# LiveKit (Anrufe im Messenger). Bestandsinstallationen kennen die beiden
+# Werte noch nicht; sie werden hier einmalig ergaenzt und danach nie wieder
+# angefasst. Ein Wechsel wuerde laufende Gespraeche abreissen lassen.
+LIVEKIT_API_KEY=$(grep -E '^MSM_LIVEKIT_API_KEY=' "$ENV_FILE" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+LIVEKIT_API_SECRET=$(grep -E '^MSM_LIVEKIT_API_SECRET=' "$ENV_FILE" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+LIVEKIT_API_KEY="${LIVEKIT_API_KEY:-}"
+LIVEKIT_API_SECRET="${LIVEKIT_API_SECRET:-}"
+if [[ -z "$LIVEKIT_API_KEY" ]]; then
+    LIVEKIT_API_KEY="API$(python3 -c "import secrets; print(secrets.token_hex(6))")"
+    echo "MSM_LIVEKIT_API_KEY=\"$LIVEKIT_API_KEY\"" >> "$ENV_FILE"
+fi
+if [[ -z "$LIVEKIT_API_SECRET" ]]; then
+    LIVEKIT_API_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+    echo "MSM_LIVEKIT_API_SECRET=\"$LIVEKIT_API_SECRET\"" >> "$ENV_FILE"
+fi
+
 chmod 600 "$ENV_FILE"
 chown "$MSM_USER:$MSM_USER" "$ENV_FILE"
 
@@ -637,6 +654,41 @@ SEARXNG_BASE_URL=http://127.0.0.1:8888/
 EOF
         chmod 600 "$SEARXNG_ENV_FILE"
         chown "$MSM_USER:$MSM_USER" "$SEARXNG_ENV_FILE"
+    fi
+fi
+
+# LiveKit-Sidecar Environment. Wird bei jedem Lauf neu geschrieben, damit
+# Sidecar und Backend garantiert dasselbe Schluesselpaar tragen.
+if [[ -d "$MSM_DIR/livekit-sidecar" ]]; then
+    LIVEKIT_ENV_FILE="$MSM_DIR/livekit-sidecar/.env"
+    cat > "$LIVEKIT_ENV_FILE" <<EOF
+# Automatisch generiert. Dokumentation: $MSM_DIR/livekit-sidecar/.env.example
+LIVEKIT_KEYS="$LIVEKIT_API_KEY: $LIVEKIT_API_SECRET"
+EOF
+    chmod 600 "$LIVEKIT_ENV_FILE"
+    chown "$MSM_USER:$MSM_USER" "$LIVEKIT_ENV_FILE"
+
+    # Die Caddy-Site gehoert install.sh; ein Update fasst sie nicht an. Ohne
+    # diese beiden Zeilen laeuft der Sidecar aber ins Leere: der Browser kaeme
+    # nicht an die Signalisierung und bekaeme nicht einmal eine Freigabefrage
+    # fuer Kamera und Bildschirm. Deshalb hier nachsehen und es sagen, statt
+    # eine fremde Konfiguration umzuschreiben.
+    # install.sh legt die Site je nach vorhandenem Import als .caddy oder .conf ab.
+    _msm_caddy_site=""
+    for _kandidat in /etc/caddy/conf.d/msm.caddy /etc/caddy/conf.d/msm.conf; do
+        [[ -f "$_kandidat" ]] && _msm_caddy_site="$_kandidat" && break
+    done
+    if [[ -n "$_msm_caddy_site" ]]; then
+        if ! grep -q "handle_path /livekit/\*" "$_msm_caddy_site" 2>/dev/null; then
+            warn "Caddy reicht /livekit noch nicht an den Medienserver durch — Anrufe im Messenger bleiben aus."
+            warn "  In $_msm_caddy_site neben 'handle /ws/*' ergaenzen:"
+            warn "      handle_path /livekit/* { reverse_proxy localhost:7880 }"
+        fi
+        if grep -q "camera=()" "$_msm_caddy_site" 2>/dev/null; then
+            warn "Caddy setzt noch camera=() — Kamera und Bildschirmfreigabe bleiben im Browser gesperrt."
+            warn "  In $_msm_caddy_site auf camera=(self), display-capture=(self) aendern."
+        fi
+        # Beides ohne Neustart: systemctl reload caddy genuegt.
     fi
 fi
 
@@ -708,6 +760,39 @@ WantedBy=multi-user.target
 EOF
     fi
 
+    # LiveKit Media Sidecar Service (Anrufe im Messenger)
+    if [[ -d "$MSM_DIR/livekit-sidecar" ]]; then
+        cat > /etc/systemd/system/msm-livekit.service <<EOF
+[Unit]
+Description=MSM LiveKit Media Sidecar
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=$MSM_USER
+Group=$MSM_USER
+WorkingDirectory=$MSM_DIR/livekit-sidecar
+Environment="DOCKER_HOST=$MSM_DOCKER_HOST"
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/usr/bin/docker compose up
+ExecStop=/usr/bin/docker compose down
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        # Bestandsinstallationen haben die beiden Medienports noch nicht offen.
+        # Ohne sie kommt ein Anruf zustande und bleibt stumm.
+        if command -v ufw &>/dev/null; then
+            ufw allow 7881/tcp comment 'MSM LiveKit media (TCP fallback)' 2>/dev/null || true
+            ufw allow 7882/udp comment 'MSM LiveKit media' 2>/dev/null || true
+        fi
+    fi
+
     # Panel Service
     cat > /etc/systemd/system/msm-panel.service <<EOF
 [Unit]
@@ -773,6 +858,9 @@ EOF
     systemctl enable msm-dis-sidecar.service
     if [[ -d "$MSM_DIR/searxng-sidecar" ]]; then
         systemctl enable msm-searxng.service 2>/dev/null || true
+    fi
+    if [[ -d "$MSM_DIR/livekit-sidecar" ]]; then
+        systemctl enable msm-livekit.service 2>/dev/null || true
     fi
     systemctl enable msm-panel.service
     if [[ -f /etc/systemd/system/msm-agent.service ]]; then
@@ -907,6 +995,13 @@ if $SYSTEMD_AVAILABLE; then
         systemctl restart msm-searxng.service 2>/dev/null \
             || systemctl start msm-searxng.service 2>/dev/null || true
         ok "SearXNG Sidecar bereit."
+    fi
+
+    if [[ -f /etc/systemd/system/msm-livekit.service ]]; then
+        log "Starte LiveKit Media Sidecar..."
+        systemctl restart msm-livekit.service 2>/dev/null \
+            || systemctl start msm-livekit.service 2>/dev/null || true
+        ok "LiveKit Sidecar bereit."
     fi
 
     # DIS Migration: Fernet -> DIS (einmalig, nur wenn alte Daten vorhanden)

@@ -14,7 +14,10 @@
         # getUserMedia auf der eigenen Herkunft. microphone=() blockierte ihn
         # vollstaendig — der Browser fragte nicht einmal. Fremde iframes
         # bleiben mit (self) weiterhin ausgesperrt.
-        Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()"
+        # camera=(self) und display-capture=(self) aus demselben Grund: der
+        # Messenger kann Video- und Bildschirmanrufe. Mit camera=() fragte der
+        # Browser auch hier nicht, und die Kamera blieb im Gespraech tot.
+        Permissions-Policy "accelerometer=(), camera=(self), display-capture=(self), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()"
     }
 
     handle /api/* {
@@ -24,6 +27,14 @@
 
     handle /ws/* {
         reverse_proxy localhost:8000
+    }
+
+    # LiveKit-Sidecar: Signalisierung fuer Anrufe. handle_path schneidet das
+    # Praefix ab, damit /livekit/rtc beim Medienserver als /rtc ankommt.
+    # Der Sidecar hoert nur auf 127.0.0.1; dies ist sein einziger Weg nach
+    # aussen, und er traegt damit dasselbe Zertifikat wie das Panel.
+    handle_path /livekit/* {
+        reverse_proxy localhost:7880
     }
 
     handle /assets/* {

@@ -79,6 +79,18 @@ class Settings(BaseSettings):
     # Redis (fuer verteiltes Rate-Limiting via slowapi)
     redis_url: str = ""
 
+    # LiveKit — Medienserver fuer Sprach-, Video- und Gruppenanrufe.
+    # install.sh erzeugt Schluessel und Geheimnis einmalig und schreibt sie
+    # hierher und in livekit-sidecar/.env; beide Seiten muessen dasselbe Paar
+    # kennen. Sind sie leer, meldet der Admin-Bereich den integrierten Modus als
+    # nicht eingerichtet — der Betreiber kann dann auf einen externen LiveKit
+    # umstellen. `livekit_url` ueberschreibt die aus panel_url abgeleitete
+    # Adresse und ist nur fuer Sonderaufbauten gedacht (getrennter Reverse
+    # Proxy, eigener Hostname fuer den Sidecar).
+    livekit_api_key: str = ""
+    livekit_api_secret: str = ""
+    livekit_url: str = ""
+
     # Server-Verzeichnis (Install-Dir pro Server)
     # Produktion: /opt/msm/servers  |  Dev: ./servers
     servers_dir: str = "/opt/msm/servers"

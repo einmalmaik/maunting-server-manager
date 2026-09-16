@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Globe, Mail, Gamepad2, Flame, KeyRound, Shield, Github, Cloud, FileText, LifeBuoy, ShieldAlert, Bot, Plug, Megaphone, CloudCog } from 'lucide-react'
+import { Globe, Mail, Gamepad2, Flame, KeyRound, Shield, Github, Cloud, FileText, LifeBuoy, ShieldAlert, Bot, Plug, Megaphone, CloudCog, MessageSquare } from 'lucide-react'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 import { GeneralTab } from './settings/GeneralTab'
@@ -16,6 +16,7 @@ import { CaptchaTab } from './settings/CaptchaTab'
 import { CloudflareTab } from './settings/CloudflareTab'
 import { SecurityTab } from './settings/SecurityTab'
 import { AiTab } from './settings/AiTab'
+import { MessengerTab } from './settings/MessengerTab'
 import { HosterTab } from './settings/HosterTab'
 import { PopupTab } from './settings/PopupTab'
 import { useHasPermission } from '@/hooks/useHasPermission'
@@ -34,6 +35,7 @@ type TabId =
   | 'backup'
   | 'security'
   | 'ai'
+  | 'messenger'
   | 'popup'
   | 'hoster'
 
@@ -64,6 +66,7 @@ export function Settings() {
     ...(canManageBackup ? [{ id: 'backup' as TabId, labelKey: 'settings.tabs.backup', icon: Cloud }] : []),
     { id: 'security', labelKey: 'settings.tabs.security', icon: ShieldAlert },
     { id: 'ai', labelKey: 'settings.tabs.ai', icon: Bot },
+    { id: 'messenger', labelKey: 'settings.tabs.messenger', icon: MessageSquare },
     ...(canReadHoster ? [{ id: 'hoster' as TabId, labelKey: 'settings.tabs.hoster', icon: Plug }] : []),
   ]
 
@@ -92,6 +95,7 @@ export function Settings() {
       {activeTab === 'backup' && <BackupTab />}
       {activeTab === 'security' && <SecurityTab />}
       {activeTab === 'ai' && <AiTab />}
+      {activeTab === 'messenger' && <MessengerTab />}
       {activeTab === 'hoster' && canReadHoster && <HosterTab canWrite={canWriteHoster} />}
     </div>
   )

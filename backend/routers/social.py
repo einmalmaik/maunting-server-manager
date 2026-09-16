@@ -1,13 +1,15 @@
 import asyncio
 import logging
-from typing import Literal
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, WebSocket
+import os
+import re
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, WebSocket
+from fastapi.responses import FileResponse
 from starlette.websockets import WebSocketDisconnect
 from sqlalchemy.orm import Session
 
 from database import SessionLocal, get_db
 from dependencies import get_current_user, get_optional_user, verify_csrf, get_current_user_for_ws, ws_subprotokoll
-from models import User, ChatGroupMember
+from models import ChatGroup, User
 from schemas.chat_media import (
     ChatMediaUploadRequest,
     ChatMediaUploadResponse,
@@ -42,27 +44,14 @@ from schemas.social import (
     ChatStoryResponse,
     DirectChatResponse,
     CanMessageResponse,
-    GroupCallRoomResponse,
-    GroupCallRoomJoinRequest,
 )
 from services.achievement_service import AchievementService
 from services.chat_media_service import ChatMediaService
 from services.chat_media_validator import sanitize_attachment_filename
-from services.panel_settings_service import PanelSettingsService
 from services.social_service import SocialService
 from services.sync_event_service import SyncEventService
-from services.webrtc_rendezvous_service import (
-    BlindRendezvousManager,
-    RoomFullError,
-    SessionExpiredError,
-    SessionTerminatedError,
-    GroupCallRoomRegistry,
-    DEFAULT_GROUP_MAX_PEERS,
-    MAX_PEERS_PER_ROOM,
-)
-from services.direct_call_service import DirectCallInviteService, DIRECT_CALL_TOKEN_TTL_SECONDS
-from schemas.webrtc import WebRtcIceServersResponse, WebRtcJoinMessage, DirectCallResponse
-from routers.servers import _ws_origin_allowed
+from services.call_room_service import GroupCallRoomRegistry
+from services import bild_upload, livekit_service
 
 logger = logging.getLogger(__name__)
 
@@ -616,15 +605,138 @@ def get_group_invite_info(
     invite_code: str,
     db: Session = Depends(get_db),
 ) -> dict:
-    """Öffentlicher Endpunkt für Einladungslinks (ohne Login-Pflicht)."""
+    """Öffentlicher Endpunkt für Einladungslinks (ohne Login-Pflicht).
+
+    Liefert zusätzlich, ob gerade telefoniert wird und wie viele im Raum sind.
+    Wer den Code hat, soll beitreten können und darf deshalb sehen, ob sich das
+    gerade lohnt. Mehr geht bewusst nicht hinaus: keine Namen, keine Kennungen,
+    keine Nachrichten.
+    """
     group = SocialService.get_group_by_invite_code(db, invite_code)
     member_count = len(group.members) if group.members else 1
+    raum = _offener_gruppenraum(group.id)
     return {
         "group_id": group.id,
         "name": group.name,
         "description": group.description,
         "avatar_url": group.avatar_url,
         "member_count": member_count,
+        "live_call": raum is not None,
+        "live_participants": livekit_service.raum_teilnehmer(raum, db) if raum else 0,
+    }
+
+
+def _offener_gruppenraum(group_id: int) -> str | None:
+    """Der Raumname eines laufenden Gruppenanrufs, falls es einen gibt."""
+    for token in GroupCallRoomRegistry.offene_raeume():
+        eintrag = GroupCallRoomRegistry.get(token)
+        if eintrag is not None and eintrag[0] == group_id:
+            return token
+    return None
+
+
+# --- Gruppenlogo ------------------------------------------------------------
+
+
+def _gruppenadmin_oder_fehler(db: Session, group_id: int, user_id: int) -> ChatGroup:
+    mitglied = SocialService.get_group_member(db, group_id, user_id)
+    if not mitglied or mitglied.role not in ("owner", "admin"):
+        raise HTTPException(
+            status_code=403, detail="Nur Besitzer und Admins ändern das Gruppenlogo."
+        )
+    group = db.query(ChatGroup).filter(ChatGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Gruppe nicht gefunden.")
+    return group
+
+
+@router.post(
+    "/groups/{group_id}/avatar",
+    response_model=ChatGroupResponse,
+    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
+)
+async def upload_group_avatar(
+    group_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Setzt das Gruppenlogo (max. 5 MB, JPEG/PNG/WebP/GIF)."""
+    group = _gruppenadmin_oder_fehler(db, group_id, user.id)
+    content_type = (file.content_type or "").lower().split(";")[0].strip()
+    if content_type not in bild_upload.ERLAUBTE_BILDTYPEN:
+        raise HTTPException(
+            status_code=400,
+            detail="Ungültiges Bildformat. Erlaubt sind JPEG, PNG, WebP und GIF.",
+        )
+    inhalt = await file.read()
+    if len(inhalt) > bild_upload.MAX_BILD_BYTES:
+        raise HTTPException(status_code=400, detail="Bild darf maximal 5 MB groß sein.")
+    if not bild_upload.ist_gueltiges_bild(inhalt, content_type):
+        raise HTTPException(status_code=400, detail="Ungültige oder beschädigte Bilddatei.")
+
+    bild_upload.loesche_bild(group.avatar_url)
+    dateiname = bild_upload.speichere_bild(inhalt, content_type, "group", group.id)
+    group.avatar_url = f"/api/social/groups/avatar/{dateiname}"
+    db.commit()
+    return _gruppe_antwort(db, group, user.id)
+
+
+@router.delete(
+    "/groups/{group_id}/avatar",
+    response_model=ChatGroupResponse,
+    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
+)
+def delete_group_avatar(
+    group_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    group = _gruppenadmin_oder_fehler(db, group_id, user.id)
+    bild_upload.loesche_bild(group.avatar_url)
+    group.avatar_url = None
+    db.commit()
+    return _gruppe_antwort(db, group, user.id)
+
+
+@router.get("/groups/avatar/{filename}")
+def get_group_avatar(filename: str):
+    """Liefert ein gespeichertes Gruppenlogo aus.
+
+    Ohne Anmeldung, weil eine Einladungskarte das Logo zeigt, bevor jemand
+    beigetreten ist. Der Dateiname ist zufällig und nicht erratbar.
+    """
+    if not re.match(r"^group_\d+_[a-zA-Z0-9]+\.(jpg|jpeg|png|webp|gif)$", filename):
+        raise HTTPException(status_code=404, detail="Gruppenlogo nicht gefunden")
+    pfad = os.path.join(bild_upload.bilder_verzeichnis(), filename)
+    if not os.path.isfile(pfad):
+        raise HTTPException(status_code=404, detail="Gruppenlogo nicht gefunden")
+    return FileResponse(
+        pfad,
+        headers={
+            "Cache-Control": "public, max-age=86400",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
+def _gruppe_antwort(db: Session, group: ChatGroup, user_id: int) -> dict:
+    """Die Gruppe so, wie `list_user_groups` sie liefert."""
+    groups = SocialService.list_user_groups(db, user_id)
+    treffer = next((g for g in groups if g["id"] == group.id), None)
+    if treffer:
+        return treffer
+    return {
+        "id": group.id,
+        "name": group.name,
+        "description": group.description,
+        "avatar_url": group.avatar_url,
+        "invite_code": group.invite_code,
+        "owner_user_id": group.owner_user_id,
+        "member_count": len(group.members) if group.members else 1,
+        "role": "owner",
+        "created_at": group.created_at,
+        "members": [],
     }
 
 
@@ -746,114 +858,6 @@ def update_group_permissions_endpoint(
         "members": [],
     }
 
-
-@router.post(
-    "/groups/{group_id}/calls",
-    response_model=GroupCallRoomResponse,
-    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
-)
-@router.post(
-    "/groups/{group_id}/call",
-    response_model=GroupCallRoomResponse,
-    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
-)
-def create_group_call_room(
-    group_id: int,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> dict:
-    SocialService.assert_group_call_permission(db, group_id, user.id, "start_group_calls")
-    room_token, max_peers = GroupCallRoomRegistry.create(group_id, max_peers=DEFAULT_GROUP_MAX_PEERS)
-    member_ids = []
-    for (member_id,) in (
-        db.query(ChatGroupMember.user_id)
-        .filter(ChatGroupMember.group_id == group_id)
-        .all()
-    ):
-        # Room tokens are only disclosed to members who may join this call.
-        # The creator also receives the event so clients can converge on the
-        # same ephemeral room even when start/join permissions are configured
-        # independently.
-        if member_id == user.id or SocialService.has_group_permission(
-            db, group_id, member_id, "join_group_calls"
-        ):
-            member_ids.append(member_id)
-    event = {
-        "type": "group_call_started",
-        "group_id": group_id,
-        "room_token": room_token,
-        "max_peers": max_peers,
-        "starter": {
-            "user_id": user.id,
-            "username": user.username,
-            "avatar_url": user.avatar_url,
-        },
-    }
-    for member_id in member_ids:
-        SyncEventService.publish(event, user_id=member_id)
-    return {"room_token": room_token, "group_id": group_id, "max_peers": max_peers}
-
-
-@router.post(
-    "/groups/{group_id}/calls/join",
-    response_model=GroupCallRoomResponse,
-    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
-)
-@router.post(
-    "/groups/{group_id}/call/join",
-    response_model=GroupCallRoomResponse,
-    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
-)
-def join_group_call_room(
-    group_id: int,
-    req: GroupCallRoomJoinRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> dict:
-    SocialService.assert_group_call_permission(db, group_id, user.id, "join_group_calls")
-    room = GroupCallRoomRegistry.get(req.room_token)
-    if room is None or room[0] != group_id:
-        raise HTTPException(status_code=404, detail="Gruppenanruf nicht gefunden oder abgelaufen.")
-    return {"room_token": req.room_token, "group_id": group_id, "max_peers": room[1]}
-
-
-@router.post(
-    "/groups/{group_id}/calls/end",
-    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
-)
-def end_group_call_room(
-    group_id: int,
-    req: GroupCallRoomJoinRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> dict:
-    """Close a group call room so stale room tokens disappear for everyone.
-
-    Requires start permission so guests merely leaving do not kill the room
-    for everyone else; their local leave is silent.
-    """
-    SocialService.assert_group_call_permission(db, group_id, user.id, "start_group_calls")
-    room = GroupCallRoomRegistry.get(req.room_token)
-    if room is None or room[0] != group_id:
-        raise HTTPException(status_code=404, detail="Gruppenanruf nicht gefunden oder abgelaufen.")
-    GroupCallRoomRegistry.discard(req.room_token)
-    member_ids = [
-        member_id
-        for (member_id,) in db.query(ChatGroupMember.user_id)
-        .filter(ChatGroupMember.group_id == group_id)
-        .all()
-        if member_id == user.id
-        or SocialService.has_group_permission(db, group_id, member_id, "join_group_calls")
-    ]
-    event = {
-        "type": "group_call_ended",
-        "group_id": group_id,
-        "room_token": req.room_token,
-        "ended_by": user.id,
-    }
-    for member_id in member_ids:
-        SyncEventService.publish(event, user_id=member_id)
-    return {"ok": True}
 
 
 # --- Stories (Temporäre Statusmeldungen, 24h) ---
@@ -1058,380 +1062,3 @@ async def social_websocket(
         await asyncio.gather(send_task, recv_task, return_exceptions=True)
         SyncEventService.unsubscribe(conn_id)
 
-
-# --- WebRTC Blinded Signaling & Ephemeral Relay ---
-
-@router.post(
-    "/webrtc/call/{target_user_id}",
-    response_model=DirectCallResponse,
-    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
-)
-def create_direct_call(
-    target_user_id: int,
-    mode: Literal["audio", "video"] = Query("audio"),
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> dict:
-    """Issue a short-lived signaling invitation for an accepted friend only."""
-    target = db.query(User).filter_by(id=target_user_id, is_active=True).first()
-    if not target:
-        raise HTTPException(status_code=404, detail="Zielnutzer nicht gefunden")
-    if not SocialService.is_confirmed_friend(db, user.id, target_user_id):
-        raise HTTPException(
-            status_code=403,
-            detail="Anrufe sind nur zwischen bestätigten Freunden möglich.",
-        )
-
-    token = DirectCallInviteService.issue(user.id, target_user_id)
-    SyncEventService.publish(
-        {
-            "type": "direct_call_invitation",
-            "signaling_token": token,
-            "caller_id": user.id,
-            "caller_username": user.username,
-            "caller_avatar_url": user.avatar_url,
-            "mode": mode,
-            "recipient_id": target_user_id,
-            "expires_in": int(DIRECT_CALL_TOKEN_TTL_SECONDS),
-        },
-        user_id=target_user_id,
-    )
-    return {
-        "signaling_token": token,
-        "recipient_id": target_user_id,
-        "expires_in": int(DIRECT_CALL_TOKEN_TTL_SECONDS),
-    }
-
-
-@router.post(
-    "/webrtc/call/{signaling_token}/reject",
-    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
-)
-def reject_direct_call(
-    signaling_token: str,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> dict:
-    caller_id = DirectCallInviteService.reject(signaling_token, user.id)
-    if caller_id is None:
-        raise HTTPException(status_code=404, detail="Anruf nicht gefunden oder bereits abgelaufen.")
-    SyncEventService.publish(
-        {
-            "type": "direct_call_rejected",
-            "signaling_token": signaling_token,
-            "recipient_id": user.id,
-        },
-        user_id=caller_id,
-    )
-    return {"ok": True}
-
-
-@router.post(
-    "/webrtc/call/{signaling_token}/cancel",
-    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
-)
-def cancel_direct_call(
-    signaling_token: str,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> dict:
-    """Caller hangs up while the recipient has not picked up yet.
-
-    Invalidates the invitation so a late accept cannot join, and notifies
-    the recipient so a ringing overlay can be dismissed server-side.
-    """
-    recipient_id = DirectCallInviteService.cancel(signaling_token, user.id)
-    if recipient_id is None:
-        raise HTTPException(status_code=404, detail="Anruf nicht gefunden oder bereits abgelaufen.")
-    SyncEventService.publish(
-        {
-            "type": "direct_call_cancelled",
-            "signaling_token": signaling_token,
-            "caller_id": user.id,
-            "recipient_id": recipient_id,
-        },
-        user_id=recipient_id,
-    )
-    return {"ok": True}
-
-@router.get(
-    "/webrtc/ice-servers",
-    response_model=WebRtcIceServersResponse,
-    dependencies=[Depends(_check_social_enabled)],
-)
-def get_webrtc_ice_servers(
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> dict:
-    """Liefert STUN- und TURN-Konfigurationen für WebRTC-P2P-Verbindungen.
-
-    Verwendet Betreiber-Konfigurationen oder hochverfügbare Standard-STUN-Server.
-    Speichert keinerlei Metadaten oder Teilnehmer-IDs (R4).
-    """
-    custom_stun = PanelSettingsService.get("webrtc_stun_servers", default="", db=db)
-    if custom_stun:
-        stun_urls = [s.strip() for s in custom_stun.split(",") if s.strip()]
-    else:
-        stun_urls = ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"]
-    ice_servers: list[dict] = [{"urls": stun_urls}]
-    # Optional TURN relay for strict NATs (mobile data): without it, calls
-    # between two phones on cellular networks fail ICE and drop immediately.
-    turn_urls = [
-        s.strip()
-        for s in PanelSettingsService.get("webrtc_turn_servers", default="", db=db).split(",")
-        if s.strip()
-    ]
-    turn_username = PanelSettingsService.get("webrtc_turn_username", default="", db=db).strip()
-    turn_credential = PanelSettingsService.get("webrtc_turn_credential", default="", db=db)
-    if turn_urls and turn_username and turn_credential:
-        ice_servers.append(
-            {"urls": turn_urls, "username": turn_username, "credential": turn_credential}
-        )
-    return {"ice_servers": ice_servers, "ttl": 86400}
-
-
-@router.websocket("/webrtc/signal")
-async def webrtc_signal_websocket(
-    websocket: WebSocket,
-) -> None:
-    """Blinded Ephemeral WebRTC Signaling WebSocket (R4).
-
-    Zero-Metadata Invarianten:
-    - Zero Persistence: Keine DB-Einträge, keine Anruf-Historie, keine AuditLog-Rows.
-    - Zero URL-Tokens: Blind-Rendezvous-Token wird ausschließlich im ersten JSON-Frame übertragen.
-    - Strict 2-Peer Cap: Maximal 2 Teilnehmer pro Rendezvous-Raum (3. Peer wird mit room_full / 1008 abgewiesen).
-    - CSWSH-Schutz: Prüfung des Origin-Headers gegen zulässige CORS-Origins.
-    - Entkoppelte Queues & Backpressure-Schutz über BlindRendezvousManager.
-    """
-    # 1. Origin-Prüfung (sofern Origin-Header vorhanden)
-    origin = websocket.headers.get("origin")
-    if origin and not _ws_origin_allowed(origin):
-        await websocket.close(code=1008)
-        return
-
-    # 2. Authentifizierung während des Upgrades (Cookie oder Sec-WebSocket-Protocol)
-    with SessionLocal() as db:
-        try:
-            SocialService.assert_social_enabled(db)
-            user = get_current_user_for_ws(websocket, db)
-            if not user or not user.is_active:
-                await websocket.close(code=1008)
-                return
-            authenticated_user_id = user.id
-        except Exception:
-            await websocket.close(code=1008)
-            return
-
-    # 3. Upgrade akzeptieren mit gespiegeltem Subprotokoll
-    subprotocol = ws_subprotokoll(websocket)
-    await websocket.accept(subprotocol=subprotocol)
-
-    # 4. Erster Frame: Warten auf Join-Handshake mit Blind Rendezvous Token
-    try:
-        first_frame = await asyncio.wait_for(websocket.receive_json(), timeout=10.0)
-    except (asyncio.TimeoutError, WebSocketDisconnect, Exception):
-        try:
-            await websocket.close(code=1008)
-        except Exception:
-            pass
-        return
-
-    if not isinstance(first_frame, dict) or first_frame.get("action") != "join":
-        try:
-            await websocket.send_json({
-                "event": "error",
-                "error": "not_joined",
-                "code": 4001,
-                "message": "First message must be a valid join action",
-                "detail": "First message must be a valid join action",
-            })
-            await websocket.close(code=1008)
-        except Exception:
-            pass
-        return
-
-    try:
-        join_msg = WebRtcJoinMessage.model_validate(first_frame)
-        token = join_msg.token
-    except Exception as exc:
-        try:
-            await websocket.send_json({
-                "event": "error",
-                "error": "invalid_token",
-                "code": 4000,
-                "message": "Invalid rendezvous token format",
-                "detail": str(exc),
-            })
-            await websocket.close(code=1008)
-        except Exception:
-            pass
-        return
-
-    # Group rooms carry an ephemeral policy token. Direct-call tokens remain
-    # anonymous and retain the original two-peer behavior.
-    group_room = GroupCallRoomRegistry.get(token)
-    if group_room is not None:
-        group_id, room_max_peers = group_room
-        with SessionLocal() as db:
-            try:
-                SocialService.assert_group_call_permission(
-                    db, group_id, authenticated_user_id, "join_group_calls"
-                )
-            except HTTPException as exc:
-                await websocket.send_json({
-                    "event": "error",
-                    "error": "group_call_forbidden",
-                    "code": 4003,
-                    "message": str(exc.detail),
-                    "detail": str(exc.detail),
-                })
-                await websocket.close(code=1008)
-                return
-    else:
-        room_max_peers = MAX_PEERS_PER_ROOM
-
-    # Backend-issued direct-call tokens are bound to both users. Legacy opaque
-    # tokens remain accepted for compatibility with existing signaling clients.
-    # Either side may join first: the initiator does getUserMedia before opening
-    # the socket, so a fast accept would otherwise be rejected with 1008 and the
-    # call would drop immediately after picking up.
-    direct_call_role = DirectCallInviteService.authorize(token, authenticated_user_id)
-    if direct_call_role is None and DirectCallInviteService.is_known(token):
-        await websocket.close(code=1008)
-        return
-    if direct_call_role is None and DirectCallInviteService.is_consumed(token):
-        # Rejected or caller-cancelled invitation: a late accept must not
-        # create a fresh rendezvous room that would ring forever.
-        try:
-            await websocket.send_json({
-                "event": "error",
-                "error": "session_terminated",
-                "code": 4004,
-                "message": "Call has already ended",
-                "detail": "Call has already ended",
-            })
-            await websocket.close(code=1008)
-        except Exception:
-            pass
-        return
-
-    # 5. Im ephemeren Blind-Rendezvous-Manager registrieren
-    ws_lock = asyncio.Lock()
-    try:
-        peer_id, role, peer_count, peer_queue = await BlindRendezvousManager.join(
-            token, max_peers=room_max_peers
-        )
-    except RoomFullError as exc:
-        try:
-            async with ws_lock:
-                await websocket.send_json({
-                    "event": "error",
-                    "error": exc.error,
-                    "code": exc.code,
-                    "message": exc.message,
-                    "detail": exc.message,
-                })
-            await websocket.close(code=1008)
-        except Exception:
-            pass
-        return
-
-    except (SessionTerminatedError, SessionExpiredError) as exc:
-        try:
-            async with ws_lock:
-                await websocket.send_json({
-                    "event": "error",
-                    "error": exc.error,
-                    "code": exc.code,
-                    "message": exc.message,
-                    "detail": exc.message,
-                })
-            await websocket.close(code=1008)
-        except Exception:
-            pass
-        return
-    except Exception:
-        try:
-            await websocket.close(code=1008)
-        except Exception:
-            pass
-        return
-
-    # 6. Join quittieren
-    try:
-        async with ws_lock:
-            await websocket.send_json({
-                "event": "joined",
-                "role": role,
-                "peer_count": peer_count,
-            })
-    except Exception:
-        await BlindRendezvousManager.leave(token, peer_id, reason="handshake_failed")
-        return
-
-    # 7. Gekoppelte Sende- und Empfangsschleifen
-    leave_reason = "disconnected"
-
-    async def _send_loop():
-        try:
-            while True:
-                msg = await peer_queue.get()
-                async with ws_lock:
-                    await websocket.send_json(msg)
-        except (asyncio.CancelledError, WebSocketDisconnect):
-            raise
-        except Exception:
-            pass
-
-    async def _recv_loop():
-        nonlocal leave_reason
-        while True:
-            data = await websocket.receive_json()
-            if not isinstance(data, dict):
-                continue
-            action = data.get("action")
-            if action == "ping":
-                async with ws_lock:
-                    await websocket.send_json({"event": "pong"})
-            elif action == "signal":
-                signal_data = data.get("data") or data.get("payload")
-                if not signal_data or not isinstance(signal_data, str):
-                    continue
-                if len(signal_data) > 65536:
-                    async with ws_lock:
-                        await websocket.send_json({
-                            "event": "error",
-                            "error": "payload_too_large",
-                            "code": 4013,
-                            "message": "Signal payload exceeds maximum 64KB limit",
-                            "detail": "Signal payload exceeds maximum 64KB limit",
-                        })
-                    continue
-                try:
-                    await BlindRendezvousManager.relay(token, peer_id, signal_data)
-                except Exception as exc:
-                    logger.debug("Signal Relay Fehler: %s", exc)
-            elif action == "leave":
-                leave_reason = data.get("reason") or "hangup"
-                break
-
-    send_task = asyncio.create_task(_send_loop())
-    recv_task = asyncio.create_task(_recv_loop())
-
-    try:
-        done, pending = await asyncio.wait(
-            [send_task, recv_task],
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        for task in pending:
-            task.cancel()
-        await asyncio.gather(*pending, return_exceptions=True)
-    except WebSocketDisconnect:
-        pass
-    except Exception as e:
-        logger.debug("WebRTC Signaling WS getrennt: %s", e)
-    finally:
-        send_task.cancel()
-        recv_task.cancel()
-        await asyncio.gather(send_task, recv_task, return_exceptions=True)
-        await BlindRendezvousManager.leave(token, peer_id, reason=leave_reason)

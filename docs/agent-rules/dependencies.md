@@ -809,3 +809,55 @@ Runner-/Pfad- und LiveKit-Serializer-Themen, werden über die exakte Version und
 den Verzicht auf diese Komponenten eingehalten. Ein Sicherheitsfund oder ein
 Kompatibilitätsfehler führt nicht zu einem zweiten Voice-Pfad: das vorherige
 Release-Artefakt wird wiederhergestellt. Es gibt keine Datenbankmigration.
+
+## `livekit-client` 2.22.3 — Medienserver-Client für Anrufe (16.09.2026)
+
+Problem und Notwendigkeit:
+  Der Messenger telefonierte über direktes P2P-WebRTC. Jede Verbindung hing am
+  NAT beider Gegenstellen, und drei aufeinanderfolgende Commits auf diesem
+  Zweig hießen „call drops", „TURN relay support" und wieder „call drops".
+  Gruppenanrufe gab es nur als Oberfläche: `Messenger.tsx` erfand die Liste der
+  geteilten Bildschirme, ein Schild sagte „UI preview only". Ein Selective
+  Forwarding Unit löst beides. `livekit-client` ist der Client des Servers, den
+  MSM als Sidecar mitliefert; er ersetzt eigenen Signalisierungs-, ICE- und
+  Reconnect-Code und kapselt die Ende-zu-Ende-Verschlüsselung über Insertable
+  Streams in einem Worker.
+
+Security und Datenschutz:
+  Die Bibliothek erhält ein kurzlebiges Zugangstoken für genau einen Raum und
+  den Raumschlüssel. Panel-Cookies, Serverdaten und der Schlüsselbund bleiben
+  ihr fremd. Ton und Bild werden vor dem Verlassen des Browsers verschlüsselt;
+  der Medienserver sieht Chiffrat. Kann ein Browser keine Insertable Streams,
+  lehnt `livekitRaum.ts` den Anruf ab, statt unverschlüsselt weiterzulaufen.
+  Was der Medienserver sehr wohl sieht — Räume, Kennungen, Zeiten — steht in
+  `docs/self-hosting.md` und in der Datenschutzerklärung.
+
+Wartung, Lizenz und Fläche:
+  Version 2.22.3, Apache-2.0, offizielles SDK des ausgelieferten Servers. Zehn
+  direkte Abhängigkeiten (`@livekit/protocol`, `@livekit/mutex`, `events`,
+  `jose`, `loglevel`, `machina`, `sdp-transform`, `tslib`, `typed-emitter`,
+  `webrtc-adapter`), zusammen 15 Pakete. `npm audit --omit=dev` meldet keine
+  LiveKit-Advisory; die drei vorhandenen React-Router-Advisories bleiben
+  separat offen.
+
+Kapselung und Exit:
+  `frontend/src/services/livekitRaum.ts` ist der einzige Produktionsimport.
+  Store und Komponenten kennen nur dessen Funktionen, nicht `Room`,
+  `LocalTrack` oder `VideoPreset`. Entfernen heißt: diese Datei, den Store und
+  `components/calling/` ersetzen; Backend, Sidecar und Datenbank bleiben
+  unberührt, weil dort kein Anrufzustand liegt.
+
+`@livekit/components-react` wurde bewusst **nicht** aufgenommen. Es brächte
+eine zweite Oberflächensprache neben der MauntingStudios Design-DNA, und die
+fünf Komponenten unter `components/calling/` sind aus `Singra/UI` gebaut.
+
+### Warum das Backend ohne `livekit-api` auskommt
+
+Ein LiveKit-Zugangstoken ist ein gewöhnliches HS256-JWT mit einem
+`video`-Anspruch; `python-jose` liegt seit dem ersten Tag im Baum und signiert
+bereits jede Panel-Sitzung. Die Room-API spricht Twirp über JSON, also
+gewöhnliches POST mit Bearer-Kopf, und dafür gibt es `httpx`. Das offizielle
+Python-SDK würde `aiohttp`, `protobuf` und `livekit-protocol` nachziehen — drei
+Pakete für rund vierzig Zeilen. Alles Nötige steht in
+`backend/services/livekit_service.py`; das ist zugleich der Exit-Punkt, falls
+die Entscheidung einmal kippt.

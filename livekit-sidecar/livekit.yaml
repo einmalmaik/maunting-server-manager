@@ -1,0 +1,38 @@
+# MSM LiveKit Sidecar
+# Schluessel und Geheimnis kommen aus .env (LIVEKIT_KEYS), erzeugt von
+# install.sh. Sie stehen bewusst nicht hier: diese Datei liegt im Repository.
+
+port: 7880
+
+rtc:
+  # Ein UDP-Port fuer alle Teilnehmer (Mux). Siehe Begruendung in
+  # docker-compose.yml.
+  udp_port: 7882
+  tcp_port: 7881
+  # Der Container kennt seine oeffentliche Adresse nicht. Ohne diese Zeile
+  # wuerden ICE-Kandidaten mit der Container-IP hinausgehen, und kein
+  # Gegenueber koennte sie erreichen.
+  use_external_ip: true
+
+room:
+  # Raeume raeumen sich selbst auf. Ohne das blieben Raeume nach dem letzten
+  # Auflegen bestehen und ein spaeter Beitritt landete in einem toten Raum.
+  empty_timeout: 60
+  departure_timeout: 20
+  max_participants: 16
+  # Der Sidecar nimmt keine Raeume entgegen, die das Panel nicht kennt: jedes
+  # Token wird gegen den Schluessel geprueft, und Token gibt nur das Panel aus.
+  auto_create: true
+
+# Der Sidecar hat keine eigene Aufzeichnung, keinen eigenen Egress und keinen
+# eigenen TURN-Dienst. Was er nicht hat, kann auch nicht versehentlich
+# mitschneiden.
+turn:
+  enabled: false
+
+logging:
+  level: warn
+  # Kein JSON-Log und keine Teilnehmer-Details im Klartext: der Sidecar soll
+  # nicht zur zweiten Metadatenquelle neben dem Panel werden.
+  json: false
+  pion_level: error

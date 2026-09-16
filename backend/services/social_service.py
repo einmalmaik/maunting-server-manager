@@ -1448,9 +1448,14 @@ class SocialService:
         member = cls.get_group_member(db, group_id, user_id)
         if not member:
             return False
-        # Owners/admins are trusted to start calls; explicit permissions remain
-        # required for ordinary members.
-        if permission == "start_group_calls" and member.role in ("owner", "admin"):
+        # Owners/admins are trusted with calls; explicit permissions remain
+        # required for ordinary members. Joining is included on purpose: whoever
+        # may open a room may enter it, otherwise starting a group call would
+        # hand the starter a room they are refused a token for.
+        if permission in ("start_group_calls", "join_group_calls") and member.role in (
+            "owner",
+            "admin",
+        ):
             return True
         permissions = member.permissions
         if permissions is None:
@@ -1552,6 +1557,15 @@ class SocialService:
                 "default_permissions": g.default_permissions or "send_messages,invite_members",
                 "member_count": len(mems),
                 "role": user_role_by_group.get(g.id, "member"),
+                # Dieselbe Entscheidung, die der Anruf-Endpunkt trifft. Ohne sie
+                # muesste das Frontend die Regel nachbauen und wuerde einen Knopf
+                # zeigen, den das Backend danach mit 403 beantwortet.
+                "can_start_call": cls.has_group_permission(
+                    db, g.id, user_id, "start_group_calls"
+                ),
+                "can_join_call": cls.has_group_permission(
+                    db, g.id, user_id, "join_group_calls"
+                ),
                 "created_at": g.created_at,
                 "members": mems,
             })

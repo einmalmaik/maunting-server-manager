@@ -67,6 +67,8 @@ from routers import (
     sync_events_router,
     sync_alias_router,
     social_router,
+    social_calls_router,
+    livekit_admin_router,
 )
 from middleware.rate_limit import limiter, auth_rate_limit
 from services.steam_service import close_steam_service
@@ -766,6 +768,18 @@ def _csp_connect_src() -> str:
             parts.append("wss://" + origin[len("https://") :])
         elif origin.startswith("http://"):
             parts.append("ws://" + origin[len("http://") :])
+    # Ein externer LiveKit liegt auf einer fremden Herkunft. Ohne diesen Eintrag
+    # blockiert der Browser die Verbindung, und der Anruf endet wortlos, bevor er
+    # beginnt. Im integrierten Modus faellt das weg: der Sidecar liegt hinter
+    # Caddy auf derselben Herkunft und ist von 'self' gedeckt.
+    try:
+        from services.livekit_service import csp_origin as _livekit_csp_origin
+
+        livekit = _livekit_csp_origin()
+    except Exception:
+        livekit = ""
+    if livekit:
+        parts.extend(teil for teil in livekit.split() if teil not in parts)
     return " ".join(parts)
 
 
@@ -891,6 +905,8 @@ app.include_router(vault_router)
 app.include_router(sync_events_router)
 app.include_router(sync_alias_router)
 app.include_router(social_router)
+app.include_router(social_calls_router)
+app.include_router(livekit_admin_router)
 
 
 

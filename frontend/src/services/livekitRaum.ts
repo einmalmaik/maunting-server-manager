@@ -1,0 +1,289 @@
+/**
+ * Die einzige Stelle im Frontend, die `livekit-client` kennt.
+ *
+ * Alles darüber (Store, Overlay, Modals) spricht mit dieser Datei und nie mit
+ * dem SDK. Das hält die Abhängigkeit einschätzbar: wer wissen will, was MSM
+ * von LiveKit benutzt, liest diese Datei und ist fertig.
+ *
+ * **Medien sind Ende-zu-Ende verschlüsselt.** Ein SFU sieht sonst Klartext.
+ * Hier läuft jeder Frame durch einen Worker, der ihn mit einem Raumschlüssel
+ * ver- und entschlüsselt, den der Server nie bekommt (siehe `raumSchluessel.ts`).
+ * Kann der Browser das nicht, scheitert der Anruf — er wird nicht still
+ * unverschlüsselt geführt.
+ */
+
+import {
+  ConnectionState,
+  ExternalE2EEKeyProvider,
+  Room,
+  RoomEvent,
+  Track,
+  VideoPresets,
+  isE2EESupported,
+  type RemoteParticipant,
+  type RoomOptions,
+  type ScreenShareCaptureOptions,
+  type TrackPublishOptions,
+} from 'livekit-client'
+import E2eeWorker from 'livekit-client/e2ee-worker?worker'
+
+export { ConnectionState, RoomEvent, Track }
+export type { RemoteParticipant }
+
+/** Auflösungen, die die Bildschirmfreigabe anbietet. */
+export type FreigabeAufloesung = '720p' | '1080p' | '1440p' | 'quelle'
+export type FreigabeBildrate = 30 | 60
+
+export interface FreigabeOptionen {
+  aufloesung: FreigabeAufloesung
+  bildrate: FreigabeBildrate
+  /** System- bzw. Spielton mitübertragen. Nur Chromium-Browser können das. */
+  systemton: boolean
+}
+
+export const FREIGABE_STANDARD: FreigabeOptionen = {
+  aufloesung: '1080p',
+  bildrate: 60,
+  systemton: true,
+}
+
+/**
+ * Bitraten je Auflösung. Bewusst großzügig: eine Bildschirmfreigabe zeigt oft
+ * Text oder ein Spiel, und beides verliert bei zu knapper Rate genau das, wofür
+ * man sie teilt. Bei 60 FPS wird verdoppelt.
+ */
+const BITRATE_JE_AUFLOESUNG: Record<Exclude<FreigabeAufloesung, 'quelle'>, number> = {
+  '720p': 2_500_000,
+  '1080p': 5_000_000,
+  '1440p': 9_000_000,
+}
+
+const MASSE_JE_AUFLOESUNG: Record<Exclude<FreigabeAufloesung, 'quelle'>, { width: number; height: number }> = {
+  '720p': { width: 1280, height: 720 },
+  '1080p': { width: 1920, height: 1080 },
+  '1440p': { width: 2560, height: 1440 },
+}
+
+/** Kann dieser Browser verschlüsselte Anrufe? */
+export function e2eeMoeglich(): boolean {
+  try {
+    return isE2EESupported()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Kann dieser Browser überhaupt eine Bildschirmfreigabe anbieten?
+ *
+ * In der Desktop-App (WebView2/WKWebView) fehlt `getDisplayMedia` je nach
+ * Plattform. Der Knopf soll dann sagen, warum er nichts tut, statt stumm zu
+ * bleiben.
+ */
+export function bildschirmfreigabeMoeglich(): boolean {
+  return typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getDisplayMedia === 'function'
+}
+
+/**
+ * Kann dieser Browser Systemton mit übertragen?
+ *
+ * Chromium kann es (Tab- und Systemton), Firefox und Safari nicht. Eine
+ * Checkbox, die nichts bewirkt, ist schlimmer als keine.
+ */
+export function systemtonMoeglich(): boolean {
+  if (!bildschirmfreigabeMoeglich()) return false
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
+  return /Chrome|Chromium|Edg/.test(ua) && !/Firefox/.test(ua)
+}
+
+export class E2eeNichtUnterstuetzt extends Error {
+  constructor() {
+    super(
+      'Dieser Browser kann verschlüsselte Anrufe nicht. MSM überträgt Gespräche nur ' +
+        'verschlüsselt, deshalb ist der Anruf hier nicht möglich. Aktuelles Chrome, ' +
+        'Edge, Firefox oder Safari ab 15.4 funktionieren.',
+    )
+    this.name = 'E2eeNichtUnterstuetzt'
+  }
+}
+
+export interface RaumVerbindung {
+  room: Room
+  keyProvider: ExternalE2EEKeyProvider
+}
+
+function raumOptionen(keyProvider: ExternalE2EEKeyProvider, worker: Worker): RoomOptions {
+  return {
+    adaptiveStream: true,
+    // Dynacast schaltet Ebenen ab, die niemand ansieht. In einem Gruppenanruf,
+    // in dem alle auf eine Bildschirmfreigabe schauen, spart das die
+    // Kamerabilder, die gerade niemand sieht.
+    dynacast: true,
+    e2ee: { keyProvider, worker },
+    videoCaptureDefaults: {
+      resolution: VideoPresets.h720.resolution,
+    },
+    publishDefaults: {
+      // VP8 statt VP9/AV1: die einzigen Codecs, für die LiveKit-E2EE in allen
+      // unterstützten Browsern geprüft ist. Ein hübscherer Codec, der bei
+      // einem Gegenüber schwarz bleibt, ist kein Gewinn.
+      videoCodec: 'vp8',
+      simulcast: true,
+      red: true,
+      dtx: true,
+    },
+    stopLocalTrackOnUnpublish: true,
+  }
+}
+
+/**
+ * Verbindet mit einem Raum. Der Schlüssel wird gesetzt, **bevor** verbunden
+ * wird, damit kein Frame unverschlüsselt hinausgeht.
+ */
+export async function verbinde(
+  url: string,
+  token: string,
+  raumSchluessel: ArrayBuffer,
+): Promise<RaumVerbindung> {
+  if (!e2eeMoeglich()) throw new E2eeNichtUnterstuetzt()
+
+  const keyProvider = new ExternalE2EEKeyProvider()
+  const worker = new E2eeWorker()
+  const room = new Room(raumOptionen(keyProvider, worker))
+
+  await keyProvider.setKey(raumSchluessel)
+  await room.setE2EEEnabled(true)
+  await room.connect(url, token)
+  return { room, keyProvider }
+}
+
+/** Tauscht den Raumschlüssel (z. B. wenn ein Nachzügler seinen eigenen mitbringt). */
+export async function setzeRaumSchluessel(
+  verbindung: RaumVerbindung,
+  schluessel: ArrayBuffer,
+): Promise<void> {
+  await verbindung.keyProvider.setKey(schluessel)
+}
+
+export async function trenne(room: Room): Promise<void> {
+  try {
+    await room.disconnect()
+  } catch {
+    /* Ein Trennen, das scheitert, ist immer noch ein Trennen. */
+  }
+}
+
+// ── Mikrofon, Kamera, Wiedergabe ────────────────────────────────────────────
+
+export async function setzeMikrofon(room: Room, an: boolean): Promise<void> {
+  await room.localParticipant.setMicrophoneEnabled(an)
+}
+
+export async function setzeKamera(room: Room, an: boolean): Promise<void> {
+  await room.localParticipant.setCameraEnabled(an)
+}
+
+/**
+ * Taub schalten: alles Eingehende stumm **und** das eigene Mikrofon aus.
+ *
+ * Beides zusammen, weil „ich höre euch nicht" ohne „ihr hört mich nicht" eine
+ * Einbahnstraße wäre, die die Gegenseite nicht erkennt. Discord macht es
+ * genauso, und die Erwartung ist inzwischen genau die.
+ */
+export function setzeTaub(room: Room, taub: boolean): void {
+  room.remoteParticipants.forEach((teilnehmer) => {
+    teilnehmer.setVolume(taub ? 0 : 1, Track.Source.Microphone)
+    teilnehmer.setVolume(taub ? 0 : 1, Track.Source.ScreenShareAudio)
+  })
+}
+
+/** Lautstärke einer einzelnen Gegenstelle (0..1). */
+export function setzeLautstaerke(room: Room, identity: string, wert: number): void {
+  const teilnehmer = room.remoteParticipants.get(identity)
+  if (!teilnehmer) return
+  teilnehmer.setVolume(wert, Track.Source.Microphone)
+  teilnehmer.setVolume(wert, Track.Source.ScreenShareAudio)
+}
+
+export async function wechsleGeraet(
+  room: Room,
+  art: MediaDeviceKind,
+  geraeteId: string,
+): Promise<void> {
+  if (!geraeteId || geraeteId === 'default') return
+  await room.switchActiveDevice(art, geraeteId)
+}
+
+// ── Bildschirmfreigabe ──────────────────────────────────────────────────────
+
+export function freigabeAufnahmeOptionen(optionen: FreigabeOptionen): ScreenShareCaptureOptions {
+  const aufnahme: ScreenShareCaptureOptions = {
+    audio: optionen.systemton && systemtonMoeglich(),
+    // 'motion' statt 'detail': bei 60 FPS soll der Encoder Bildrate halten und
+    // notfalls Schärfe opfern. Wer ein Spiel teilt, will flüssig; wer Text
+    // teilt, nimmt 30 FPS und bekommt die Schärfe über die Bitrate.
+    contentHint: optionen.bildrate >= 60 ? 'motion' : 'detail',
+    systemAudio: optionen.systemton ? 'include' : 'exclude',
+    selfBrowserSurface: 'exclude',
+    surfaceSwitching: 'include',
+  }
+  if (optionen.aufloesung !== 'quelle') {
+    const masse = MASSE_JE_AUFLOESUNG[optionen.aufloesung]
+    aufnahme.resolution = { ...masse, frameRate: optionen.bildrate }
+  }
+  return aufnahme
+}
+
+export function freigabeSendeOptionen(optionen: FreigabeOptionen): TrackPublishOptions {
+  const basis = optionen.aufloesung === 'quelle' ? '1440p' : optionen.aufloesung
+  const bitrate = BITRATE_JE_AUFLOESUNG[basis] * (optionen.bildrate >= 60 ? 2 : 1)
+  return {
+    // Eine einzige, volle Ebene. Simulcast würde 1440p60 in kleinere Ebenen
+    // zerlegen und damit genau die Schärfe kosten, für die die Auflösung
+    // überhaupt eingestellt wurde.
+    simulcast: false,
+    videoCodec: 'vp8',
+    screenShareEncoding: { maxBitrate: bitrate, maxFramerate: optionen.bildrate },
+    // Lieber Bildrate verlieren als Auflösung: ein unscharfer Text ist
+    // unbrauchbar, ein leicht ruckelnder lesbar.
+    degradationPreference: 'maintain-resolution',
+  }
+}
+
+/**
+ * Startet die Freigabe. Öffnet den nativen Auswahldialog des Browsers; der
+ * Einstellungsdialog von MSM läuft vorher ab.
+ */
+export async function starteBildschirmfreigabe(
+  room: Room,
+  optionen: FreigabeOptionen,
+): Promise<void> {
+  await room.localParticipant.setScreenShareEnabled(
+    true,
+    freigabeAufnahmeOptionen(optionen),
+    freigabeSendeOptionen(optionen),
+  )
+}
+
+export async function beendeBildschirmfreigabe(room: Room): Promise<void> {
+  await room.localParticipant.setScreenShareEnabled(false)
+}
+
+/**
+ * Browser lassen Ton erst zu, nachdem jemand geklickt hat. Nach dem ersten
+ * Klick im Overlay wird das hier nachgeholt, sonst bliebe der Anruf stumm,
+ * obwohl alles verbunden ist.
+ */
+export async function erlaubeWiedergabe(room: Room): Promise<void> {
+  try {
+    await room.startAudio()
+  } catch {
+    /* Ohne Nutzergeste geht es nicht; der nächste Klick versucht es erneut. */
+  }
+}
+
+/** `u42` → 42. Gibt `null`, wenn die Kennung nicht von MSM stammt. */
+export function benutzerIdAusIdentity(identity: string): number | null {
+  const treffer = /^u(\d+)$/.exec(identity)
+  return treffer ? Number(treffer[1]) : null
+}

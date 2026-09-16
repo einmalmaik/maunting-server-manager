@@ -1,7 +1,6 @@
 import os
 import re
 from datetime import datetime, timedelta, timezone
-import uuid
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, Response, UploadFile
@@ -35,6 +34,7 @@ from schemas.device_pairing import (
     PairingRedeemRequest,
 )
 from services import AuthService, EmailService, audit_service
+from services import bild_upload
 from services import device_pairing_service
 from services.email_verification_service import EmailVerificationService
 from services.jwt_blacklist_service import blacklist_jwt
@@ -772,35 +772,10 @@ def update_ai_provider(
 
 # ── Profilbild (Avatar) ──────────────────────────────────────────────────
 
-MAX_AVATAR_BYTES = 5 * 1024 * 1024  # 5 MB
-ALLOWED_AVATAR_TYPES = {
-    "image/jpeg": ".jpg",
-    "image/png": ".png",
-    "image/webp": ".webp",
-    "image/gif": ".gif",
-}
-
-
-def _get_avatars_dir() -> str:
-    base = settings.panel_config_dir if settings.panel_config_dir else "."
-    avatars_dir = os.path.join(base, "data", "avatars")
-    os.makedirs(avatars_dir, exist_ok=True)
-    return avatars_dir
-
-
-def _validate_image_bytes(content: bytes, mime_type: str) -> bool:
-    if len(content) > MAX_AVATAR_BYTES or len(content) < 8:
-        return False
-    # Magic number checks
-    if mime_type == "image/jpeg" and content.startswith(b"\xff\xd8\xff"):
-        return True
-    if mime_type == "image/png" and content.startswith(b"\x89PNG\r\n\x1a\n"):
-        return True
-    if mime_type == "image/gif" and (content.startswith(b"GIF87a") or content.startswith(b"GIF89a")):
-        return True
-    if mime_type == "image/webp" and content.startswith(b"RIFF") and b"WEBP" in content[8:16]:
-        return True
-    return False
+# Groesse, erlaubte Typen und die Magic-Byte-Pruefung liegen in
+# services/bild_upload.py, weil das Gruppenlogo dieselben Regeln braucht.
+MAX_AVATAR_BYTES = bild_upload.MAX_BILD_BYTES
+ALLOWED_AVATAR_TYPES = bild_upload.ERLAUBTE_BILDTYPEN
 
 
 @router.post("/me/avatar", response_model=UserResponse)
@@ -820,25 +795,11 @@ async def upload_avatar(
     content = await file.read()
     if len(content) > MAX_AVATAR_BYTES:
         raise HTTPException(status_code=400, detail="Bild darf maximal 5 MB groß sein.")
-    if not _validate_image_bytes(content, content_type):
+    if not bild_upload.ist_gueltiges_bild(content, content_type):
         raise HTTPException(status_code=400, detail="Ungültige oder beschädigte Bilddatei.")
 
-    avatars_dir = _get_avatars_dir()
-    if user.avatar_url:
-        old_filename = user.avatar_url.split("/")[-1]
-        if old_filename and re.match(r"^[a-zA-Z0-9_\-\.]+$", old_filename):
-            old_path = os.path.join(avatars_dir, old_filename)
-            if os.path.isfile(old_path):
-                try:
-                    os.remove(old_path)
-                except OSError:
-                    pass
-
-    ext = ALLOWED_AVATAR_TYPES[content_type]
-    filename = f"avatar_{user.id}_{uuid.uuid4().hex[:12]}{ext}"
-    file_path = os.path.join(avatars_dir, filename)
-    with open(file_path, "wb") as f:
-        f.write(content)
+    bild_upload.loesche_bild(user.avatar_url)
+    filename = bild_upload.speichere_bild(content, content_type, "avatar", user.id)
 
     user.avatar_url = f"/api/auth/avatar/{filename}"
     db.commit()
@@ -854,15 +815,7 @@ def delete_avatar(
 ) -> User:
     """Entfernt das eigene Profilbild."""
     if user.avatar_url:
-        avatars_dir = _get_avatars_dir()
-        old_filename = user.avatar_url.split("/")[-1]
-        if old_filename and re.match(r"^[a-zA-Z0-9_\-\.]+$", old_filename):
-            old_path = os.path.join(avatars_dir, old_filename)
-            if os.path.isfile(old_path):
-                try:
-                    os.remove(old_path)
-                except OSError:
-                    pass
+        bild_upload.loesche_bild(user.avatar_url)
         user.avatar_url = None
         db.commit()
         db.refresh(user)
@@ -874,8 +827,7 @@ def get_avatar(filename: str):
     """Liefert ein gespeichertes Profilbild aus."""
     if not re.match(r"^avatar_\d+_[a-zA-Z0-9]+\.(jpg|jpeg|png|webp|gif)$", filename):
         raise HTTPException(status_code=404, detail="Profilbild nicht gefunden")
-    avatars_dir = _get_avatars_dir()
-    file_path = os.path.join(avatars_dir, filename)
+    file_path = os.path.join(bild_upload.bilder_verzeichnis(), filename)
     if not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail="Profilbild nicht gefunden")
     return FileResponse(

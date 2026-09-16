@@ -453,6 +453,10 @@ class ChatGroupResponse(BaseModel):
     member_count: int
     role: str
     default_permissions: str | None = None
+    # Vom Backend entschieden, nicht von der Oberflaeche abgeleitet: was hier
+    # false ist, beantwortet der Anruf-Endpunkt mit 403.
+    can_start_call: bool = False
+    can_join_call: bool = False
     created_at: datetime
     members: list[ChatGroupMemberResponse] = []
 
@@ -463,6 +467,10 @@ class ChatGroupInvitePublicResponse(BaseModel):
     description: str | None = None
     avatar_url: str | None = None
     member_count: int
+    # Fuer die Vorschaukarte im Chat: laeuft gerade ein Gruppenanruf, und wie
+    # viele sind drin. Bewusst nur Ja/Nein und eine Zahl.
+    live_call: bool = False
+    live_participants: int = 0
 
 
 class GroupCallRoomResponse(BaseModel):

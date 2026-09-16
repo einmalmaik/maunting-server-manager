@@ -46,6 +46,7 @@ from .notes import router as notes_router
 from .vault import router as vault_router
 from .sync_events import router as sync_events_router, sync_alias_router
 from .social import router as social_router
+from .social_calls import router as social_calls_router, admin_router as livekit_admin_router
 
 __all__ = [
     "auth_router",
@@ -98,4 +99,6 @@ __all__ = [
     "sync_events_router",
     "sync_alias_router",
     "social_router",
+    "social_calls_router",
+    "livekit_admin_router",
 ]  # noqa: E501

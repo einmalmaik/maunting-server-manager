@@ -57,6 +57,12 @@ export function Privacy() {
           t('privacyPolicy.sections.messenger.items.recoveryKey'),
           t('privacyPolicy.sections.messenger.items.attachments'),
           t('privacyPolicy.sections.messenger.items.receipts'),
+          // Anrufe sind die eine Stelle, an der die Instanz mehr erfaehrt als
+          // bei Nachrichten: der Inhalt bleibt verschluesselt, aber wer wann
+          // mit wem in einem Raum war, sieht der Medienserver. Das gehoert
+          // hierher und nicht in eine Fussnote.
+          t('privacyPolicy.sections.messenger.items.calls'),
+          t('privacyPolicy.sections.messenger.items.callMetadata'),
         ],
       },
       {

@@ -1479,7 +1479,7 @@
         "output": "Output",
         "cached": "Cached",
         "cacheWritten": "Cache written",
-        "calls": "Calls",
+          "calls": "Calls",
         "source": "Source",
         "more": "There are more requests this month; these are the most recent.",
         "sources": {
@@ -3096,7 +3096,31 @@
       "backup": "Backup",
       "security": "Security",
       "ai": "AI",
+      "messenger": "Messenger",
       "hoster": "Hoster"
+    },
+    "messenger": {
+      "title": "Calls",
+      "description": "Voice, video and group calls run through a media server. The bundled one runs on this host and is already set up. Either way audio and video stay end-to-end encrypted: the media server forwards what it cannot open.",
+      "mode": "Media server",
+      "modeLocal": "Bundled (recommended)",
+      "modeLocalHint": "Runs on this host, no configuration needed",
+      "modeExternal": "External server",
+      "modeExternalHint": "LiveKit Cloud or your own LiveKit server",
+      "url": "Server URL",
+      "apiKey": "API key",
+      "apiSecret": "API secret",
+      "secretStored": "Stored. Leave empty to keep it.",
+      "test": "Test connection",
+      "reachable": "Call server reachable",
+      "unreachable": "Call server not reachable",
+      "activeRooms_one": "{{count}} active room",
+      "activeRooms_other": "{{count}} active rooms",
+      "saved": "Saved.",
+      "metadataHint": "The media server sees no call content, but it does know which identifiers were in which room and when. With an external provider, that information sits there.",
+      "errors": {
+        "load": "The call status could not be loaded."
+      }
     },
     "imprint": {
       "title": "Imprint",
@@ -4062,6 +4086,36 @@
         "body": "The manifests under deploy/kubernetes run the control plane. Game servers remain Docker containers on the connected nodes. Exactly one panel replica, and the DIS sidecar runs in the same pod. The AI run broker and AI report office are process-local too: reports from background tasks live in the database and survive a restart, only live-following breaks off briefly."
       }
     },
+
+          "calls": {
+      "title": "Messenger calls",
+      "intro": "Voice, video and group calls run through a media server that receives the streams and forwards them. The bundled one runs on the panel server and is set up during installation; an external one can be configured instead.",
+      "mode": {
+        "title": "Bundled or external",
+        "body": "The choice sits under Settings → Messenger. Bundled is the default and needs no input. External requires the address, API key and API secret of a LiveKit project; the \"Test connection\" button checks them without saving. The API secret is stored encrypted in the panel settings."
+      },
+      "ports": {
+        "title": "Ports",
+        "body": "7880/TCP bound to 127.0.0.1 for signalling, forwarded by Caddy under /livekit. 7882/UDP for media and 7881/TCP as a fallback when UDP is blocked. A single UDP port instead of a large range, because MSM runs Docker rootless."
+      },
+      "keys": {
+        "title": "Sidecar keys",
+        "body": "install.sh generates them once and writes them to livekit-sidecar/.env and the backend .env. Both places must carry the same pair. If you rotate them by hand, change both files and restart msm-livekit and msm-backend, otherwise the media server rejects every token."
+      },
+      "encryption": {
+        "title": "Audio and video stay encrypted",
+        "body": "The room key is created in the browser and delivered wrapped for each participant individually. The media server forwards what it cannot open — for the bundled one as much as for an external one. Browsers without insertable streams are refused rather than falling back to unencrypted calls."
+      },
+      "metadata": {
+        "title": "What the media server sees",
+        "body": "Rooms, participant identifiers and timings, but no call content. Bundled, that data stays on your own server; external, it sits with the provider. None of it reaches the database: MSM keeps no call history and no durations."
+      },
+      "limits": {
+        "title": "Limits",
+        "body": "A group room holds 16 participants. System audio during screen sharing only works in Chromium browsers. 2K at 60 frames is the most expensive path because every frame passes through encryption; if it stutters on the other end, 1080p or 30 frames is the better choice."
+      },
+      "permissionsPolicy": "The reverse proxy must allow camera=(self), microphone=(self) and display-capture=(self). Older installations still carry camera=(): the browser then never even asks for permission, and camera and screen sharing stay off. Change the line in the Caddy site and reload Caddy."
+    },
     "voice": {
       "title": "Voice mode",
       "intro": "Voice mode has two operating modes. OpenAI Realtime speaks directly over WebRTC; without an active Realtime selection, the existing transcription, chat model, Pipecat, and ElevenLabs flow remains in place.",
@@ -4312,7 +4366,9 @@
           "keyring": "The private part of that key is wrapped on your device with a key derived from your recovery key (Argon2id) and deposited with the instance in that form only. Without your recovery key the package is worthless to the operator.",
           "recoveryKey": "The recovery key is shown to you exactly once and stored nowhere. If you lose it, your existing history stays permanently unreadable on new devices; devices already unlocked keep it.",
           "attachments": "Images, voice messages, and files are encrypted the same way before upload. Storage only ever sees the encrypted block, its size, and its timestamp.",
-          "receipts": "Delivery and read receipts travel as encrypted control messages over the same path. If a receipt cannot be encrypted, it is not sent rather than sent unprotected."
+          "receipts": "Delivery and read receipts travel as encrypted control messages over the same path. If a receipt cannot be encrypted, it is not sent rather than sent unprotected.",
+          "calls": "Voice, video and group calls run through a media server. Audio and video are encrypted on your device and only opened again on the other end; the media server forwards what it cannot open. By default it runs on this instance. If the operator configures an external provider, the encrypted streams travel over that provider's servers.",
+          "callMetadata": "The media server does however see which account identifiers were in which room, when and for how long. That information only lives while the call is running: it is not stored, and there is no call history or call duration in the database. With an external provider it arises there and is subject to that provider's retention."
         }
       },
       "providers": {

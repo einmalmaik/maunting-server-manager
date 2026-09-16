@@ -256,29 +256,13 @@ export interface ChatGroupItem {
   member_count: number
   role: string
   default_permissions?: string | null
+  /** Vom Backend entschieden. Was hier false ist, endet dort in einem 403. */
+  can_start_call?: boolean
+  can_join_call?: boolean
   created_at: string
   members: ChatGroupMemberItem[]
   /** Ephemeral room token supplied by a live-call invitation, when present. */
   room_token?: string | null
-}
-
-export interface GroupCallRoom {
-  room_token: string
-  group_id: number
-  max_peers: number
-}
-
-export async function createGroupCallRoom(groupId: number): Promise<GroupCallRoom> {
-  return api<GroupCallRoom>(`/social/groups/${groupId}/calls`, {
-    method: 'POST',
-  })
-}
-
-export async function joinGroupCallRoom(groupId: number, roomToken: string): Promise<GroupCallRoom> {
-  return api<GroupCallRoom>(`/social/groups/${groupId}/calls/join`, {
-    method: 'POST',
-    body: JSON.stringify({ room_token: roomToken }),
-  })
 }
 
 export interface ChatGroupInvitePublic {
@@ -287,6 +271,9 @@ export interface ChatGroupInvitePublic {
   description?: string | null
   avatar_url?: string | null
   member_count: number
+  /** Läuft gerade ein Gruppenanruf? Für die Vorschaukarte im Chat. */
+  live_call: boolean
+  live_participants: number
 }
 
 export interface DirectChatItem {
@@ -307,40 +294,8 @@ export async function getDirectChats(): Promise<DirectChatItem[]> {
   return api<DirectChatItem[]>('/social/direct-chats')
 }
 
-export interface DirectCallInvitation {
-  signaling_token: string
-  recipient_id: number
-  expires_in: number
-}
-
-export async function startDirectCall(targetUserId: number, mode: 'audio' | 'video'): Promise<DirectCallInvitation> {
-  return api<DirectCallInvitation>(`/social/webrtc/call/${targetUserId}?mode=${mode}`, {
-    method: 'POST',
-  })
-}
-
-export async function rejectDirectCall(signalingToken: string): Promise<void> {
-  await api(`/social/webrtc/call/${encodeURIComponent(signalingToken)}/reject`, {
-    method: 'POST',
-  })
-}
-
-export async function cancelDirectCall(signalingToken: string): Promise<void> {
-  await api(`/social/webrtc/call/${encodeURIComponent(signalingToken)}/cancel`, {
-    method: 'POST',
-  })
-}
-
-export async function endGroupCallRoom(groupId: number, roomToken: string): Promise<void> {
-  await api(`/social/groups/${groupId}/calls/end`, {
-    method: 'POST',
-    body: JSON.stringify({ room_token: roomToken }),
-  })
-}
-
-export async function getWebRtcIceServers(): Promise<{ ice_servers: RTCIceServer[]; ttl?: number }> {
-  return api<{ ice_servers: RTCIceServer[]; ttl?: number }>('/social/webrtc/ice-servers')
-}
+// Anrufe liegen in `api/calls.ts`: Einladungen, Zugangstoken für den
+// Medienserver, Raumschlüssel und die Betreiber-Einstellungen.
 
 export async function checkCanMessage(targetUserId: number): Promise<{
   can_message: boolean
@@ -558,6 +513,20 @@ export async function updateGroupPermissions(
     method: 'PATCH',
     body: JSON.stringify({ default_permissions: defaultPermissions }),
   })
+}
+
+/** Gruppenlogo setzen. Nur Besitzer und Admins der Gruppe dürfen das. */
+export async function uploadGroupAvatar(groupId: number, file: File): Promise<ChatGroupItem> {
+  const formular = new FormData()
+  formular.append('file', file)
+  return api<ChatGroupItem>(`/social/groups/${groupId}/avatar`, {
+    method: 'POST',
+    body: formular,
+  })
+}
+
+export async function deleteGroupAvatar(groupId: number): Promise<ChatGroupItem> {
+  return api<ChatGroupItem>(`/social/groups/${groupId}/avatar`, { method: 'DELETE' })
 }
 
 export interface ChatStoryItem {

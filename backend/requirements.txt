@@ -12,6 +12,11 @@ python-multipart==0.0.9
 aiosmtplib==3.0.2
 email-validator==2.2.0
 httpx==0.27.0
+# LiveKit kommt bewusst ohne eigenes Paket aus: ein Zugangstoken ist ein
+# HS256-JWT (python-jose oben), die Room-API spricht Twirp ueber JSON (httpx).
+# `livekit-api` wuerde aiohttp, protobuf und livekit-protocol nachziehen —
+# drei Pakete fuer rund vierzig Zeilen in services/livekit_service.py.
+# Bewertung: docs/agent-rules/dependencies.md
 apscheduler==3.10.4
 psutil==6.0.0
 python-dotenv==1.0.1

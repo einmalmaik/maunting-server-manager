@@ -777,6 +777,10 @@ if $SHOULD_COPY_FILES; then
             rsync -a --chown="$MSM_USER:$MSM_USER" --delete \
                 "$SCRIPT_DIR/searxng-sidecar/" "$MSM_DIR/searxng-sidecar/"
         fi
+        if [[ -d "$SCRIPT_DIR/livekit-sidecar" ]]; then
+            rsync -a --chown="$MSM_USER:$MSM_USER" --delete --exclude '.env' \
+                "$SCRIPT_DIR/livekit-sidecar/" "$MSM_DIR/livekit-sidecar/"
+        fi
         if [[ -d "$SCRIPT_DIR/msm-agent" ]]; then
             rsync -a --chown="$MSM_USER:$MSM_USER" --delete \
                 --exclude '.env' --exclude 'venv/' --exclude 'servers/' \
@@ -804,7 +808,7 @@ if $SHOULD_COPY_FILES; then
         2>/dev/null || true
     # In-place Install (git checkout as root) leaves trees root-owned. Backend +
     # agent venvs are created as $MSM_USER and need write access to their dirs.
-    for _msm_tree in backend frontend dis-sidecar searxng-sidecar msm-agent docs scripts helper-scripts blueprints; do
+    for _msm_tree in backend frontend dis-sidecar searxng-sidecar livekit-sidecar msm-agent docs scripts helper-scripts blueprints; do
         if [[ -d "$MSM_DIR/$_msm_tree" ]]; then
             chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/$_msm_tree" 2>/dev/null || true
         fi
@@ -821,7 +825,7 @@ fi
 # Always re-own code trees before Python venv work — even when SHOULD_COPY_FILES
 # is false (e.g. git checkout as root left msm-agent root:root).
 if id "$MSM_USER" &>/dev/null; then
-    for _msm_tree in backend frontend dis-sidecar searxng-sidecar msm-agent docs scripts helper-scripts blueprints; do
+    for _msm_tree in backend frontend dis-sidecar searxng-sidecar livekit-sidecar msm-agent docs scripts helper-scripts blueprints; do
         if [[ -d "$MSM_DIR/$_msm_tree" ]]; then
             chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/$_msm_tree" \
                 || err "chown $MSM_USER:$MSM_USER auf $MSM_DIR/$_msm_tree fehlgeschlagen"
@@ -1176,6 +1180,26 @@ if [[ -z "$DIS_TOKEN" ]]; then
     DIS_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
 fi
 
+# LiveKit-Sidecar: Schluessel und Geheimnis fuer die Anruf-Zugangstoken.
+# Dasselbe Paar geht in die Backend-.env und in livekit-sidecar/.env. Weichen
+# beide Seiten voneinander ab, weist der Medienserver jedes Token ab und jeder
+# Anruf scheitert beim Verbinden — deshalb nur eine Erzeugungsstelle.
+# Bei Re-Install wird das Bestehende uebernommen; ein Wechsel wuerde laufende
+# Gespraeche abreissen lassen, ohne dass irgendwo etwas gewonnen waere.
+LIVEKIT_API_KEY=""
+LIVEKIT_API_SECRET=""
+if $REINSTALL_MODE && [[ -f "$MSM_DIR/backend/.env" ]]; then
+    LIVEKIT_API_KEY=$(grep -E '^MSM_LIVEKIT_API_KEY=' "$MSM_DIR/backend/.env" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+    LIVEKIT_API_SECRET=$(grep -E '^MSM_LIVEKIT_API_SECRET=' "$MSM_DIR/backend/.env" | cut -d'=' -f2- | sed 's/^"//;s/"$//' || true)
+fi
+if [[ -z "$LIVEKIT_API_KEY" ]]; then
+    # LiveKit erwartet einen Schluessel, der mit "API" beginnt.
+    LIVEKIT_API_KEY="API$(python3 -c "import secrets; print(secrets.token_hex(6))")"
+fi
+if [[ -z "$LIVEKIT_API_SECRET" ]]; then
+    LIVEKIT_API_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+fi
+
 PANEL_URL="http://localhost"
 API_URL="http://localhost"
 if [[ -n "$DOMAIN" ]]; then
@@ -1296,6 +1320,10 @@ MSM_STEAM_API_KEY="$STEAM_API_KEY"
 MSM_GITHUB_CLONE_TOKEN="$GITHUB_CLONE_TOKEN"
 MSM_REDIS_URL="$MSM_REDIS_URL"
 
+# Anrufe (LiveKit). Dasselbe Paar steht in livekit-sidecar/.env.
+MSM_LIVEKIT_API_KEY="$LIVEKIT_API_KEY"
+MSM_LIVEKIT_API_SECRET="$LIVEKIT_API_SECRET"
+
 # Auto-Update (GitHub Releases)
 MSM_GITHUB_OWNER="einmalmaik"
 MSM_GITHUB_REPO="maunting-server-manager"
@@ -1334,6 +1362,20 @@ EOF
         chmod 600 "$SEARXNG_ENV_FILE"
         chown "$MSM_USER:$MSM_USER" "$SEARXNG_ENV_FILE"
     fi
+fi
+
+# LiveKit-Sidecar Environment. Anders als bei SearXNG wird die Datei bei jedem
+# Lauf neu geschrieben: sie muss mit der Backend-.env uebereinstimmen, und eine
+# stehengebliebene alte Datei waere genau der Fall, in dem Anrufe scheitern,
+# ohne dass irgendwo etwas kaputt aussieht.
+if [[ -d "$MSM_DIR/livekit-sidecar" ]]; then
+    LIVEKIT_ENV_FILE="$MSM_DIR/livekit-sidecar/.env"
+    cat > "$LIVEKIT_ENV_FILE" <<EOF
+# Automatisch generiert. Dokumentation: $MSM_DIR/livekit-sidecar/.env.example
+LIVEKIT_KEYS="$LIVEKIT_API_KEY: $LIVEKIT_API_SECRET"
+EOF
+    chmod 600 "$LIVEKIT_ENV_FILE"
+    chown "$MSM_USER:$MSM_USER" "$LIVEKIT_ENV_FILE"
 fi
 
 # ═══════════════════════════════════════════════════════════════
@@ -1583,9 +1625,10 @@ $DOMAIN {
         X-Content-Type-Options nosniff
         X-Frame-Options DENY
         Referrer-Policy strict-origin-when-cross-origin
-        # microphone=(self): der Realtime-Sprachmodus braucht getUserMedia auf
-        # der eigenen Herkunft; microphone=() blockierte ihn vollstaendig.
-        Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()"
+        # =(self) statt =(): der Sprachmodus braucht getUserMedia, Anrufe im
+        # Messenger zusaetzlich Kamera und getDisplayMedia — jeweils auf der
+        # eigenen Herkunft. Mit =() fragt der Browser nicht einmal nach.
+        Permissions-Policy "accelerometer=(), camera=(self), display-capture=(self), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()"
     }
 
     handle /api/* {
@@ -1594,6 +1637,13 @@ $DOMAIN {
 
     handle /ws/* {
         reverse_proxy localhost:8000
+    }
+
+    # LiveKit-Sidecar: Signalisierung fuer Anrufe im Messenger. handle_path
+    # schneidet das Praefix ab, damit /livekit/rtc dort als /rtc ankommt. Der
+    # Sidecar hoert nur auf 127.0.0.1; dies ist sein einziger Weg nach aussen.
+    handle_path /livekit/* {
+        reverse_proxy localhost:7880
     }
 
     handle {
@@ -1614,9 +1664,10 @@ $DOMAIN {
         X-Content-Type-Options nosniff
         X-Frame-Options DENY
         Referrer-Policy strict-origin-when-cross-origin
-        # microphone=(self): der Realtime-Sprachmodus braucht getUserMedia auf
-        # der eigenen Herkunft; microphone=() blockierte ihn vollstaendig.
-        Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()"
+        # =(self) statt =(): der Sprachmodus braucht getUserMedia, Anrufe im
+        # Messenger zusaetzlich Kamera und getDisplayMedia — jeweils auf der
+        # eigenen Herkunft. Mit =() fragt der Browser nicht einmal nach.
+        Permissions-Policy "accelerometer=(), camera=(self), display-capture=(self), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()"
     }
 
     handle /api/* {
@@ -1625,6 +1676,13 @@ $DOMAIN {
 
     handle /ws/* {
         reverse_proxy localhost:8000
+    }
+
+    # LiveKit-Sidecar: Signalisierung fuer Anrufe im Messenger. handle_path
+    # schneidet das Praefix ab, damit /livekit/rtc dort als /rtc ankommt. Der
+    # Sidecar hoert nur auf 127.0.0.1; dies ist sein einziger Weg nach aussen.
+    handle_path /livekit/* {
+        reverse_proxy localhost:7880
     }
 
     handle {
@@ -1656,6 +1714,13 @@ EOF
 
     handle /ws/* {
         reverse_proxy localhost:8000
+    }
+
+    # LiveKit-Sidecar: Signalisierung fuer Anrufe im Messenger. handle_path
+    # schneidet das Praefix ab, damit /livekit/rtc dort als /rtc ankommt. Der
+    # Sidecar hoert nur auf 127.0.0.1; dies ist sein einziger Weg nach aussen.
+    handle_path /livekit/* {
+        reverse_proxy localhost:7880
     }
 
     handle {
@@ -1760,6 +1825,33 @@ WantedBy=multi-user.target
 EOF
     fi
 
+    # ── LiveKit Media Sidecar Service (Anrufe im Messenger) ──
+    if [[ -d "$MSM_DIR/livekit-sidecar" ]]; then
+        cat > /etc/systemd/system/msm-livekit.service <<EOF
+[Unit]
+Description=MSM LiveKit Media Sidecar
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=$MSM_USER
+Group=$MSM_USER
+WorkingDirectory=$MSM_DIR/livekit-sidecar
+Environment="DOCKER_HOST=$MSM_DOCKER_HOST"
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/usr/bin/docker compose up
+ExecStop=/usr/bin/docker compose down
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    fi
+
     cat > /etc/systemd/system/msm-panel.service <<EOF
 [Unit]
 Description=Maunting Service Manager Panel
@@ -1835,6 +1927,9 @@ EOF
         systemctl enable msm-dis-sidecar.service
         if [[ -d "$MSM_DIR/searxng-sidecar" ]]; then
             systemctl enable msm-searxng.service 2>/dev/null || true
+        fi
+        if [[ -d "$MSM_DIR/livekit-sidecar" ]]; then
+            systemctl enable msm-livekit.service 2>/dev/null || true
         fi
         systemctl enable msm-panel.service
         if $INSTALL_LOCAL_AGENT && [[ -f /etc/systemd/system/msm-agent.service ]]; then
@@ -1965,12 +2060,22 @@ if command -v ufw &>/dev/null; then
     if [[ -d /sys/class/net/loopback0 ]]; then
         ufw allow in on loopback0 from 127.0.0.0/8 comment 'WSL local loopback' 2>/dev/null || true
     fi
+    # Medienports des LiveKit-Sidecars. Die Signalisierung laeuft ueber 443
+    # (Caddy), die Sprach- und Videodaten nicht: sie brauchen einen eigenen
+    # Weg. 7882/udp ist der Normalfall, 7881/tcp der Rueckfall fuer Netze, die
+    # UDP sperren. Fehlen beide Regeln, kommt ein Anruf zustande und bleibt
+    # stumm — der unangenehmste aller Fehlerzustaende, weil nichts kaputt
+    # aussieht.
+    if [[ -d "$MSM_DIR/livekit-sidecar" ]]; then
+        ufw allow 7881/tcp comment 'MSM LiveKit media (TCP fallback)' 2>/dev/null || true
+        ufw allow 7882/udp comment 'MSM LiveKit media' 2>/dev/null || true
+    fi
     # Spiel-Ports werden ab Phase 2 NICHT mehr als Range freigegeben.
     # Der Port-Manager des Panels öffnet je Server nur die konkret
     # zugewiesenen Einzelports (game/udp, query/udp, rcon/tcp) und schließt
     # sie beim Stop wieder. Siehe backend/services/firewall_service.py.
     ufw --force enable 2>/dev/null || true
-    ok "Firewall aktiviert (UFW) — Ports 22, 80, 443 offen. Spiel-Ports werden zur Laufzeit vom Panel verwaltet."
+    ok "Firewall aktiviert (UFW) — Ports 22, 80, 443 offen, 7881/tcp + 7882/udp für Anrufe. Spiel-Ports werden zur Laufzeit vom Panel verwaltet."
 else
     warn "UFW nicht verfügbar. Firewall manuell konfigurieren."
 fi
@@ -2053,6 +2158,14 @@ if $SYSTEMD_AVAILABLE; then
         systemctl restart msm-searxng.service 2>/dev/null \
             || systemctl start msm-searxng.service 2>/dev/null || true
         ok "SearXNG Sidecar bereit."
+    fi
+
+    # LiveKit Sidecar starten (Anrufe im Messenger)
+    if [[ -f /etc/systemd/system/msm-livekit.service ]]; then
+        log "Starte LiveKit Media Sidecar..."
+        systemctl restart msm-livekit.service 2>/dev/null \
+            || systemctl start msm-livekit.service 2>/dev/null || true
+        ok "LiveKit Sidecar bereit."
     fi
 
     # DIS Migration: Fernet -> DIS (einmalig, nur wenn alte Daten vorhanden)

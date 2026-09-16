@@ -11,7 +11,7 @@ viele Nodes:
 
 | Rolle | Enthält | Benötigt das vollständige Repository? |
 | --- | --- | --- |
-| Panel/Control Plane | Backend, DIS-Sidecar, Panel-PostgreSQL, Frontend und lokaler Agent | Nein, das Panel-Release enthält nur die benötigten Projektteile. |
+| Panel/Control Plane | Backend, DIS-Sidecar, LiveKit-Sidecar, Panel-PostgreSQL, Frontend und lokaler Agent | Nein, das Panel-Release enthält nur die benötigten Projektteile. |
 | Separates Frontend | Fertig gebautes statisches Vite-Bundle | Nein, `msm-frontend-<VERSION>.tar.gz` genügt. |
 | Remote-Node | Agent, Rootless Docker, TLS und node-eigene Serverdaten | Nein, der Node lädt sein Agent-Paket direkt vom Panel. |
 
@@ -387,6 +387,7 @@ bewusste Sicherheitsgrenze.
 - Frontend: `frontend/.env.example`
 - Agent/Node: `msm-agent/.env.example`
 - DIS-Sidecar: `dis-sidecar/.env.example`
+- LiveKit-Sidecar (Messenger-Anrufe): `livekit-sidecar/.env.example`
 
 Jede Vorlage erklärt Status, Zweck, Herkunft und Format aller Betreiberwerte.
 Automatisch erzeugte `.env`-Dateien dürfen niemals committed werden.
@@ -1482,13 +1483,131 @@ WebSocket-Upgrades unter `/api/` durchlassen — das tut er bereits für die
 Server-Konsole.
 
 **Permissions-Policy am Reverse-Proxy:** Die von `install.sh` erzeugte
-Caddy-Site setzt `microphone=(self)` — die eigene Herkunft darf ans Mikrofon,
-fremde iframes nicht. Installationen von vor dem 22.08.2026 tragen noch
-`microphone=()`: damit blockiert der Browser `getUserMedia` vollständig
-(es erscheint nicht einmal eine Freigabefrage, der Sprachmodus meldet nur
-einen Verbindungsfehler). Wer nicht neu installieren will, ändert die Zeile
-in der eigenen Caddy-Site von Hand auf `microphone=(self)` und lädt Caddy neu
-(`systemctl reload caddy`).
+Caddy-Site setzt `microphone=(self)`, `camera=(self)` und
+`display-capture=(self)` — die eigene Herkunft darf ans Mikrofon, an die Kamera
+und an die Bildschirmaufnahme, fremde iframes nicht. Installationen von vor dem
+22.08.2026 tragen noch `microphone=()`, ältere als das Anruf-Update zusätzlich
+`camera=()`: damit blockiert der Browser `getUserMedia` bzw. `getDisplayMedia`
+vollständig — es erscheint nicht einmal eine Freigabefrage, der Sprachmodus
+meldet nur einen Verbindungsfehler und die Kamera im Messenger lässt sich nicht
+einschalten. Wer nicht neu installieren will, ändert die Zeile in der eigenen
+Caddy-Site von Hand und lädt Caddy neu (`systemctl reload caddy`).
+
+---
+
+## Messenger: Sprach-, Video- und Gruppenanrufe
+
+Anrufe im Messenger laufen über einen Medienserver (LiveKit). Er nimmt die
+Ströme entgegen und verteilt sie an die übrigen Teilnehmer, statt jedes Paar
+direkt zu verbinden. Das ist der Grund für den Umbau: eine direkte Verbindung
+hängt am NAT beider Gegenstellen und scheiterte in der Praxis zu oft; ein
+Gruppenanruf mit acht Personen bräuchte bei jedem Teilnehmer sieben getrennte
+Verbindungen.
+
+**Der Ton bleibt dabei verschlüsselt.** Der Raumschlüssel entsteht im Browser
+des Anrufenden und wird gegen den veröffentlichten Schlüssel jedes Teilnehmers
+verpackt zugestellt. Der Medienserver leitet weiter, was er nicht öffnen kann.
+Was er sehr wohl sieht, steht weiter unten unter *Was der Betreiber sieht*.
+
+### Integriert oder extern
+
+Die Auswahl liegt im Panel unter **Einstellungen → Messenger**.
+
+| | Integriert (Standard) | Externer Server |
+| --- | --- | --- |
+| Wo er läuft | `livekit-sidecar` auf dem Panel-Server | LiveKit Cloud oder eine eigene Installation |
+| Einrichtung | keine, `install.sh` erledigt sie | Adresse, API-Key und API-Secret eintragen |
+| Erreichbarkeit | über Caddy unter `/livekit` | direkt beim Anbieter |
+| Wer die Raumdaten hält | der eigene Server | der Anbieter |
+
+Der Knopf **Verbindung testen** prüft die eingetippten Werte, ohne sie zu
+speichern: ein falsches Geheimnis erreicht die Datenbank gar nicht erst. Bleiben
+Schlüssel oder Geheimnis leer, gilt der bereits gespeicherte Stand — die
+Oberfläche zeigt beide nur maskiert und schickt sie nie zurück.
+
+Das API-Secret liegt DIS-verschlüsselt in den Panel-Einstellungen und verlässt
+den Prozess nie im Klartext.
+
+### Ports und Firewall
+
+`install.sh` öffnet sie mit; bei einer Firewall vor dem Server müssen sie von
+Hand nach:
+
+| Port | Protokoll | Wofür |
+| --- | --- | --- |
+| 7880 | TCP, nur `127.0.0.1` | Signalisierung, von Caddy unter `/livekit` durchgereicht |
+| 7881 | TCP | Medien-Rückfall, wenn UDP blockiert ist |
+| 7882 | UDP | Medien (ein einziger Mux-Port) |
+
+Ein einzelner UDP-Port statt des bei LiveKit üblichen Bereichs 50000–60000:
+MSM betreibt Docker rootless, und rootless Docker veröffentlicht große
+Portbereiche nicht sinnvoll. Ist 7882/UDP zu, funktionieren Anrufe weiterhin
+über 7881/TCP, mit etwas mehr Verzögerung.
+
+Der Reverse-Proxy braucht `handle_path /livekit/*` auf `localhost:7880` und
+muss dort WebSocket-Upgrades durchlassen. Die von `install.sh` erzeugte
+Caddy-Site tut das bereits.
+
+**Bestehende Installationen:** `update.sh` richtet Sidecar, Schlüssel und
+systemd-Dienst ein, fasst die Caddy-Site aber nicht an — sie gehört
+`install.sh`. Fehlt die Weiterleitung, sagt der Updatelauf das und nennt die
+Zeile. Sie gehört neben `handle /ws/*` in `/etc/caddy/conf.d/msm.caddy`
+(je nach Installation `msm.conf`):
+
+```
+handle_path /livekit/* {
+    reverse_proxy localhost:7880
+}
+```
+
+Danach `systemctl reload caddy`. Ohne diese Zeile läuft der Sidecar, aber kein
+Browser erreicht ihn, und Anrufe scheitern mit einem Verbindungsfehler.
+
+### Schlüssel des integrierten Sidecars
+
+`install.sh` erzeugt bei der ersten Installation ein Paar und schreibt es an
+zwei Stellen, die zusammenpassen müssen:
+
+- `livekit-sidecar/.env` als `LIVEKIT_KEYS="<key>: <secret>"`
+- die Backend-`.env` als `MSM_LIVEKIT_API_KEY` und `MSM_LIVEKIT_API_SECRET`
+
+Eine Neuinstallation über eine bestehende Installation behält vorhandene Werte.
+Wer sie von Hand rotiert, muss beide Dateien ändern und
+`systemctl restart msm-livekit msm-backend` ausführen — sonst weist der
+Medienserver jedes Token ab und Anrufe brechen sofort ab.
+
+Der Dienst heißt `msm-livekit.service` und wird wie die übrigen Sidecars von
+systemd gestartet.
+
+### Was der Betreiber sieht
+
+Ehrlich gesagt, weil es gegenüber dem früheren blinden Rendezvous ein
+Rückschritt ist: der Medienserver kennt **Räume, Teilnehmerkennungen und
+Zeiten**. Er weiß, dass `u12` und `u47` um 21:40 Uhr vierzig Minuten lang im
+selben Raum waren. Gesprächsinhalte kennt er nicht.
+
+Im integrierten Modus bleiben diese Metadaten auf dem eigenen Server. Im
+externen Modus liegen sie beim Anbieter. Das ist der eigentliche Unterschied
+zwischen den beiden Optionen und der Grund, warum der integrierte Modus der
+Standard ist.
+
+In der Datenbank landet davon nichts: MSM führt keinen Anrufverlauf, keine
+Dauer und keine Gegenstelle. Die Raumzuordnung lebt im Prozess und ist nach dem
+Auflegen weg.
+
+### Grenzen
+
+- **Die Verschlüsselung schließt Browser aus.** Sie braucht Insertable Streams;
+  wo der Browser das nicht kann, lehnt MSM den Anruf mit einer Meldung ab,
+  statt unverschlüsselt weiterzulaufen. Chrome, Edge und aktuelle Firefox-
+  Versionen können es.
+- **Systemton bei der Bildschirmfreigabe** gibt es nur in Chromium-Browsern.
+  Der Auswahldialog sagt das, statt eine Möglichkeit anzubieten, die nichts
+  liefert.
+- **2K mit 60 Bildern** ist der teuerste Pfad, weil jedes Einzelbild durch die
+  Verschlüsselung läuft. Ruckelt es beim Gegenüber, sind 1080p oder 30 Bilder
+  die bessere Wahl.
+- Ein Gruppenraum fasst 16 Teilnehmer.
 
 ---
 

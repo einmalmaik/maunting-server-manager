@@ -51,6 +51,7 @@ import {
   UserPlus,
   Pencil,
   Image as ImageIcon,
+  ImagePlus,
   Bell,
   BellOff,
   Ban,
@@ -58,11 +59,17 @@ import {
   Video,
 } from 'lucide-react'
 import { CallOverlay } from '@/components/calling/CallOverlay'
-import { useCallStore, type CallScreenShareSource } from '@/stores/useCallStore'
+import { useCallStore, setzeAnrufIdentitaet } from '@/stores/useCallStore'
+import { starteGruppenanruf } from '@/api/calls'
+import { apiUrl } from '@/config/api'
 import { CircularVideoNoteRecorder } from '@/components/social/CircularVideoNoteRecorder'
 import { CircularVideoNotePlayer } from '@/components/social/CircularVideoNotePlayer'
 import type { VideoNoteAttachment } from '@/services/videoNoteCrypto'
 import { DeviceBadge } from '@/components/social/DeviceBadge'
+import {
+  GruppenEinladungsKarte,
+  findeEinladungsCode,
+} from '@/components/social/GruppenEinladungsKarte'
 import { StatusDot, type PresenceStatus } from '@/components/social/StatusIndicator'
 import {
   type FriendItem,
@@ -84,8 +91,7 @@ import {
   fetchE2eeEnvelopes,
   sendTypingSignal,
   uploadEncryptedChatAttachment,
-  createGroupCallRoom,
-  joinGroupCallRoom,
+  uploadGroupAvatar,
 } from '@/api/social'
 import {
   ChatMediaImage,
@@ -633,6 +639,22 @@ export function Messenger() {
     }
   }, [currentUserId, identityReloadToken])
 
+  // Der Anruf-Store braucht dieselbe Identität, um Raumschlüssel zu verpacken
+  // und auszupacken. Er hängt bewusst nicht selbst am Schlüsselbund: er soll
+  // nicht wissen, wie eine Identität zustande kommt, nur dass es eine gibt.
+  useEffect(() => {
+    if (!currentUserId || identity.state !== 'ready' || !identity.sendPair) {
+      setzeAnrufIdentitaet(null)
+      return
+    }
+    setzeAnrufIdentitaet({
+      userId: currentUserId,
+      publicKeyJwk: identity.sendPair.publicKeyJwk,
+      decryptionKeys: identity.decryptionKeys,
+    })
+    return () => setzeAnrufIdentitaet(null)
+  }, [currentUserId, identity])
+
   // 2. Load Friends, Groups, Team Members, Public Users, Direct Chats, and Stories
   const loadData = async () => {
     try {
@@ -731,6 +753,52 @@ export function Messenger() {
       active = false
     }
   }, [inviteCode, currentUserId, navigate])
+
+  /** Gruppenlogo: Auswahl, Prüfung, Upload. */
+  const gruppenLogoInputRef = useRef<HTMLInputElement | null>(null)
+  const [logoLaedt, setLogoLaedt] = useState(false)
+
+  const handleGruppenLogo = async (datei: File | undefined) => {
+    if (!datei || !activeGroup) return
+    // Vorabprüfung nur für die Rückmeldung; die verbindliche Prüfung samt
+    // Magic Bytes macht das Backend.
+    if (!/^image\/(jpeg|png|webp|gif)$/.test(datei.type)) {
+      toast.error('Erlaubt sind JPEG, PNG, WebP und GIF.')
+      return
+    }
+    if (datei.size > 5 * 1024 * 1024) {
+      toast.error('Das Logo darf höchstens 5 MB groß sein.')
+      return
+    }
+    setLogoLaedt(true)
+    try {
+      const aktualisiert = await uploadGroupAvatar(activeGroup.id, datei)
+      setActiveGroup((aktuell) =>
+        aktuell?.id === aktualisiert.id ? { ...aktuell, avatar_url: aktualisiert.avatar_url } : aktuell
+      )
+      setGroups((vorher) =>
+        vorher.map((g) => (g.id === aktualisiert.id ? { ...g, avatar_url: aktualisiert.avatar_url } : g))
+      )
+      toast.success('Gruppenlogo aktualisiert.')
+    } catch {
+      toast.error('Das Gruppenlogo konnte nicht gesetzt werden.')
+    } finally {
+      setLogoLaedt(false)
+    }
+  }
+
+  /** Beitritt über die Einladungskarte im Chat. */
+  const handleJoinByInviteCode = async (code: string) => {
+    try {
+      const joinedGroup = await joinGroupByInvite(code)
+      toast.success(`Gruppe "${joinedGroup.name}" erfolgreich beigetreten!`)
+      setActiveGroup(joinedGroup)
+      setActiveContact(null)
+      await loadData()
+    } catch {
+      toast.error('Der Einladungslink gilt nicht mehr.')
+    }
+  }
 
   // Combine Contacts
   const contactsList: ChatContact[] = useMemo(() => {
@@ -1690,7 +1758,7 @@ export function Messenger() {
           currentUserId &&
           Number(detail.recipient_id) === Number(currentUserId) &&
           (call.state === 'incoming' || call.state === 'connecting') &&
-          (!detail.signaling_token || detail.signaling_token === call.blindToken)
+          (!detail.signaling_token || detail.signaling_token === call.raum)
         ) {
           call.endCall()
           toast.info('Der Anrufer hat aufgelegt.')
@@ -1708,10 +1776,18 @@ export function Messenger() {
             current?.id === groupId ? { ...current, room_token: null } : current
           )
           const call = useCallStore.getState()
-          if (call.groupCall?.id === String(groupId) && call.blindToken === roomToken) {
+          if (call.group?.id === groupId && call.raum === roomToken) {
             call.endCall()
             toast.info('Der Gruppenanruf wurde beendet.')
           }
+        }
+      } else if (detail?.type === 'call_key') {
+        // Der Raumschlüssel eines Anrufs, verpackt für dieses Konto. Ohne ihn
+        // bleibt das Gespräch stumm, weil die Medien verschlüsselt ankommen.
+        if (detail.raum && detail.ciphertext) {
+          void useCallStore
+            .getState()
+            .acceptRoomKey(String(detail.raum), String(detail.ciphertext))
         }
       } else if (detail?.type === 'e2ee_blind_message') {
         const isCurrentActive = detail.blind_mailbox_id === blindMailboxId
@@ -2672,44 +2748,29 @@ export function Messenger() {
     }
   }
 
-  const resolveGroupCallPermissions = (group: ChatGroupItem | null, userId: number) => {
-    const fallback = { canStart: false, canJoin: false, canShare: false, canModerate: false }
-    if (!group) return fallback
-
-    const granted = new Set((group.default_permissions ?? '').split(',').filter(Boolean))
-    if (group.owner_user_id === userId) {
-      for (const perm of ['call_start', 'call_join', 'call_share', 'call_moderate', 'start_group_calls', 'join_group_calls']) {
-        granted.add(perm)
-      }
-    } else if (group.role === 'admin') {
-      granted.add('call_start')
-      granted.add('call_join')
-      granted.add('start_group_calls')
-      granted.add('join_group_calls')
-      granted.add('call_share')
-      granted.add('call_moderate')
-    } else if (group.role === 'moderator') {
-      granted.add('call_join')
-      granted.add('join_group_calls')
-      granted.add('call_share')
-      granted.add('call_moderate')
-    } else {
-      granted.add('call_join')
-      granted.add('join_group_calls')
+  /**
+   * Was in dieser Gruppe erlaubt ist, sagt das Backend.
+   *
+   * Vorher stand hier eine zweite Regel, die jedem Mitglied das Beitreten
+   * zusprach; das Backend verlangt dafür `join_group_calls` und antwortete
+   * danach mit 403. Ein Knopf, der sicher scheitert, ist schlimmer als keiner.
+   * Moderation und Freigabe hängen an der Gruppenrolle, nicht am Anrufrecht.
+   */
+  const groupCallPermissions = useMemo(() => {
+    if (!activeGroup) {
+      return { canStart: false, canJoin: false, canShare: false, canModerate: false }
     }
-
+    const leitend =
+      activeGroup.owner_user_id === currentUserId ||
+      activeGroup.role === 'admin' ||
+      activeGroup.role === 'moderator'
     return {
-      canStart: granted.has('call_start'),
-      canJoin: granted.has('call_join'),
-      canShare: granted.has('call_share'),
-      canModerate: granted.has('call_moderate'),
+      canStart: activeGroup.can_start_call === true,
+      canJoin: activeGroup.can_join_call === true,
+      canShare: activeGroup.can_join_call === true,
+      canModerate: leitend,
     }
-  }
-
-  const groupCallPermissions = useMemo(
-    () => resolveGroupCallPermissions(activeGroup, currentUserId),
-    [activeGroup, currentUserId]
-  )
+  }, [activeGroup, currentUserId])
 
   const handleStartGroupCall = async (joinExisting = false) => {
     if (!activeGroup) return
@@ -2722,45 +2783,21 @@ export function Messenger() {
       return
     }
 
-    const memberSource = (activeGroup.members?.length ? activeGroup.members : [{
-      user_id: currentUserId,
-      username: user?.username || 'Ich',
-      avatar_url: user?.avatar_url ?? null,
-      role: activeGroup.role || 'member',
-      joined_at: new Date().toISOString(),
-    }])
+    // Beim Start bekommt jedes Mitglied den Raumschlüssel zugestellt. Wer
+    // später dazukommt, bekommt ihn im Raum nachgereicht.
+    const mitgliederIds = (activeGroup.members ?? []).map((member) => member.user_id)
 
-    const participants = memberSource.map((member, index) => ({
-      userId: member.user_id,
-      username: member.username,
-      avatarUrl: member.avatar_url ?? null,
-      isMuted: member.user_id !== currentUserId,
-      isCameraOff: false,
-      isSpeaking: index === 0,
-      canModerate: member.role === 'admin' || member.role === 'moderator' || member.user_id === activeGroup.owner_user_id,
-    }))
-
-    const screenSources: CallScreenShareSource[] = participants.slice(0, 3).map((participant, index) => ({
-      id: `group-share-${participant.userId}-${index}`,
-      ownerId: participant.userId,
-      ownerName: participant.username,
-      label: index === 0 ? 'Desktop / Main stage' : index === 1 ? 'Browser window' : 'App share',
-      kind: index === 0 ? 'screen' : index === 1 ? 'window' : 'app',
-      isLive: true,
-    }))
-
-    let roomToken: string | undefined
+    let roomToken: string
     try {
       if (joinExisting) {
         const existingToken = (activeGroup as ChatGroupItem & { room_token?: string }).room_token
         if (!existingToken) {
-          toast.error('Für diesen Gruppenanruf ist kein Raum-Token verfügbar.')
+          toast.error('Für diesen Gruppenanruf ist kein Raum verfügbar.')
           return
         }
-        const room = await joinGroupCallRoom(activeGroup.id, existingToken)
-        roomToken = room.room_token
+        roomToken = existingToken
       } else {
-        const room = await createGroupCallRoom(activeGroup.id)
+        const room = await starteGruppenanruf(activeGroup.id)
         roomToken = room.room_token
       }
     } catch {
@@ -2772,29 +2809,19 @@ export function Messenger() {
       return
     }
 
-    const callDefinition = {
-      id: String(activeGroup.id),
-      name: activeGroup.name,
-      participants,
-      screenSources,
-      permissions: {
-        canJoin: groupCallPermissions.canJoin,
+    await useCallStore.getState().joinGroupCall(
+      {
+        id: activeGroup.id,
+        name: activeGroup.name,
+        avatarUrl: activeGroup.avatar_url ?? null,
         canShare: groupCallPermissions.canShare,
         canModerate: groupCallPermissions.canModerate,
       },
-      capabilities: {
-        supportsGroupSignals: true,
-        supportsScreenShare: true,
-        supportsAudioMixer: true,
-        reason: null,
-      },
       roomToken,
-    }
-    if (joinExisting) {
-      useCallStore.getState().joinExistingGroupCall(callDefinition)
-    } else {
-      useCallStore.getState().startGroupCall(callDefinition)
-    }
+      // Nur der Startende verteilt; ein Beitretender hat den Schlüssel noch
+      // nicht und hätte nichts zu verteilen.
+      joinExisting ? undefined : mitgliederIds
+    )
   }
 
   const isChatOpen = Boolean(activeContact || activeGroup)
@@ -3712,6 +3739,13 @@ export function Messenger() {
 
                   {/* Header Title Badge with Mute & Block Indicators */}
                   <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-container-high/85 backdrop-blur-md border border-outline-variant/30 shadow-xs">
+                    {activeGroup?.avatar_url && (
+                      <img
+                        src={apiUrl(activeGroup.avatar_url)}
+                        alt=""
+                        className="-ml-1.5 h-5 w-5 shrink-0 rounded-full object-cover"
+                      />
+                    )}
                     <span className="text-xs font-bold text-on-surface truncate max-w-[130px] sm:max-w-xs">
                       {activeGroup ? activeGroup.name : activeContact?.username}
                     </span>
@@ -3758,6 +3792,20 @@ export function Messenger() {
                         <UsersRound className="w-3.5 h-3.5" />
                         <span className="hidden sm:inline">Anruf</span>
                       </Button>
+
+                      {(activeGroup.owner_user_id === currentUserId || activeGroup.role === 'admin') && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => gruppenLogoInputRef.current?.click()}
+                          disabled={logoLaedt}
+                          className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-primary shadow-xs"
+                          title="Gruppenlogo ändern"
+                          aria-label="Gruppenlogo ändern"
+                        >
+                          <ImagePlus className="w-4 h-4" />
+                        </Button>
+                      )}
 
                       {(activeGroup.owner_user_id === currentUserId || activeGroup.role === 'admin') && (
                         <Button
@@ -4396,6 +4444,19 @@ export function Messenger() {
                                 ? msg.text.replace(/^\[Antwort auf Status\]:\s*"?/, '').replace(/"?$/, '')
                                 : msg.text}
                             </p>
+                            {(() => {
+                              // Einladungslink im Text: statt der rohen URL eine
+                              // Karte mit Logo, Name und Beitreten-Knopf.
+                              const code = findeEinladungsCode(msg.text, window.location.origin)
+                              if (!code) return null
+                              return (
+                                <GruppenEinladungsKarte
+                                  inviteCode={code}
+                                  istEigene={msg.isSelf}
+                                  onJoin={handleJoinByInviteCode}
+                                />
+                              )
+                            })()}
                             {msg.isEdited && (
                               <span className="text-[9px] opacity-70 italic inline-flex items-center gap-1">
                                 <Pencil className="w-2.5 h-2.5" />
@@ -5513,6 +5574,18 @@ export function Messenger() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Dateiauswahl für das Gruppenlogo (der sichtbare Knopf steht im Kopf) */}
+      <input
+        ref={gruppenLogoInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/gif"
+        className="hidden"
+        onChange={(e) => {
+          void handleGruppenLogo(e.target.files?.[0])
+          e.target.value = ''
+        }}
+      />
 
       {/* Cross-Platform Calling Overlay (R1) */}
       <CallOverlay />
