@@ -537,8 +537,12 @@ class GeminiLiveSitzung:
         }
 
         model_lower = model_raw.lower()
-        # Gemini 3+ und Live-Modelle (wie gemini-3.8-live) verlangen zwingend thinkingConfig mit thinkingLevel
-        if "gemini-3" in model_lower or "gemini-4" in model_lower or "live" in model_lower:
+        # Bei Google Multimodal Live:
+        # - Modelle mit 'thinking' im Namen (z. B. gemini-3.8-live-extended-thinking) verlangen
+        #   thinkingConfig mit thinkingLevel (LOW, MEDIUM, HIGH) bei Gemini 3+.
+        # - Standard-Live-Modelle (z. B. gemini-3.8-live, gemini-2.5-flash) unterstützen KEIN thinkingLevel;
+        #   wird es mitgesendet, bricht Google sofort mit Code 1007 ab ("Thinking level is not supported for this model").
+        if "thinking" in model_lower:
             lvl = "LOW"
             if self.v.reasoning_effort:
                 effort = str(self.v.reasoning_effort).strip().lower()
@@ -548,15 +552,17 @@ class GeminiLiveSitzung:
                     lvl = "MEDIUM"
                 elif effort in ("low", "min", "minimal", "fast", "none", "off"):
                     lvl = "LOW"
-            generation_config["thinkingConfig"] = {
-                "thinkingLevel": lvl,
-            }
-        elif "gemini-2.5" in model_lower and self.v.reasoning_effort:
-            effort = str(self.v.reasoning_effort).strip().lower()
-            budget = 0 if effort in ("none", "off", "min", "minimal") else 1024
-            generation_config["thinkingConfig"] = {
-                "thinkingBudget": budget,
-            }
+
+            if "gemini-3" in model_lower or "gemini-4" in model_lower or "3." in model_lower:
+                generation_config["thinkingConfig"] = {
+                    "thinkingLevel": lvl,
+                }
+            else:
+                effort_str = str(self.v.reasoning_effort or "").strip().lower()
+                budget = 0 if effort_str in ("none", "off", "min", "minimal") else 1024
+                generation_config["thinkingConfig"] = {
+                    "thinkingBudget": budget,
+                }
 
         setup_payload: dict[str, Any] = {
             "setup": {

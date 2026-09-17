@@ -822,11 +822,11 @@ async def test_google_multi_turn_tool_request_payload() -> None:
 
 
 def test_gemini_live_session_setup_payload_thinking_level() -> None:
-    """Prüft, dass Gemini Live für Gemini 3 / Live Modelle thinkingConfig mit thinkingLevel mitsendet."""
+    """Prüft, dass Gemini Live nur für Thinking-Modelle thinkingConfig mitsendet."""
     from services.ai_voice.gemini_live_session import GeminiLiveSitzung
     from services.ai_voice.realtime_session import RealtimeVorbereitung
 
-    # 1. Standardfall gemini-3.8-live: thinkingLevel="LOW"
+    # 1. Standardfall gemini-3.8-live: Kein thinkingConfig (da reines Audio-Live-Modell ohne Thinking)
     vorb = RealtimeVorbereitung(
         provider_id=1,
         provider_kind="google",
@@ -848,10 +848,31 @@ def test_gemini_live_session_setup_payload_thinking_level() -> None:
         gemini_tools=[],
     )
     gen_cfg = payload["setup"]["generationConfig"]
-    assert "thinkingConfig" in gen_cfg
-    assert gen_cfg["thinkingConfig"]["thinkingLevel"] == "LOW"
+    assert "thinkingConfig" not in gen_cfg
 
-    # 2. Modell mit expliziter Denkstufe 'high'
+    # 2. Modell mit Extended Thinking (gemini-3.8-live-extended-thinking)
+    vorb_extended = RealtimeVorbereitung(
+        provider_id=1,
+        provider_kind="google",
+        model="gemini-3.8-live-extended-thinking",
+        voice="Puck",
+        api_key="AIzaSyTestKey",
+    )
+    sitzung_extended = GeminiLiveSitzung(
+        websocket=MagicMock(),
+        vorbereitung=vorb_extended,
+        user_id=1,
+        http_client=MagicMock(),
+    )
+    payload_extended = sitzung_extended._build_setup_payload(
+        model_name="models/gemini-3.8-live-extended-thinking",
+        model_raw="gemini-3.8-live-extended-thinking",
+        voice_name="Puck",
+        gemini_tools=[],
+    )
+    assert payload_extended["setup"]["generationConfig"]["thinkingConfig"]["thinkingLevel"] == "LOW"
+
+    # 3. Extended Thinking mit expliziter Denkstufe 'high'
     vorb_high = RealtimeVorbereitung(
         provider_id=1,
         provider_kind="google",
@@ -874,30 +895,30 @@ def test_gemini_live_session_setup_payload_thinking_level() -> None:
     )
     assert payload_high["setup"]["generationConfig"]["thinkingConfig"]["thinkingLevel"] == "HIGH"
 
-    # 3. Gemini 2.5 mit Denkstufe
-    vorb_25 = RealtimeVorbereitung(
+    # 4. Gemini 2.0 Thinking Modell nutzt thinkingBudget
+    vorb_20_think = RealtimeVorbereitung(
         provider_id=1,
         provider_kind="google",
-        model="gemini-2.5-flash",
+        model="gemini-2.0-flash-thinking-exp",
         voice="Puck",
         reasoning_effort="low",
         api_key="AIzaSyTestKey",
     )
-    sitzung_25 = GeminiLiveSitzung(
+    sitzung_20_think = GeminiLiveSitzung(
         websocket=MagicMock(),
-        vorbereitung=vorb_25,
+        vorbereitung=vorb_20_think,
         user_id=1,
         http_client=MagicMock(),
     )
-    payload_25 = sitzung_25._build_setup_payload(
-        model_name="models/gemini-2.5-flash",
-        model_raw="gemini-2.5-flash",
+    payload_20_think = sitzung_20_think._build_setup_payload(
+        model_name="models/gemini-2.0-flash-thinking-exp",
+        model_raw="gemini-2.0-flash-thinking-exp",
         voice_name="Puck",
         gemini_tools=[],
     )
-    assert payload_25["setup"]["generationConfig"]["thinkingConfig"]["thinkingBudget"] == 1024
+    assert payload_20_think["setup"]["generationConfig"]["thinkingConfig"]["thinkingBudget"] == 1024
 
-    # 4. Gemini 2.5 ohne Denkstufe hat kein thinkingConfig
+    # 5. Gemini 2.5 Flash (ohne thinking im Namen) hat kein thinkingConfig
     vorb_25_plain = RealtimeVorbereitung(
         provider_id=1,
         provider_kind="google",
