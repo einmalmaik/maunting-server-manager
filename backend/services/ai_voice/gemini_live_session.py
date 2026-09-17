@@ -191,6 +191,7 @@ class GeminiLiveSitzung:
         self._last_candidates_tokens = 0
         self._gestartet: set[str] = set()
         self._beendet = False
+        self._setup_fertig = asyncio.Event()
 
     async def _panel_senden(self, daten: dict) -> None:
         async with self._senden_lock:
@@ -441,8 +442,23 @@ class GeminiLiveSitzung:
                 except json.JSONDecodeError:
                     continue
 
+                # Fehlermeldung von Google (z. B. Modell nicht unterstützt, Quota oder ungültige Parameter)
+                if "error" in event:
+                    err = event["error"]
+                    err_msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+                    logger.warning("Gemini Live Fehler vom Anbieter: %s", err_msg)
+                    await self._debug_senden("GEMINI_LIVE_ERROR", hint=err_msg)
+                    with contextlib.suppress(Exception):
+                        await self._panel_senden({
+                            "art": "fehler",
+                            "code": "GEMINI_LIVE_ERROR",
+                            "detail": err_msg,
+                        })
+                    break
+
                 # Setup-Bestätigung
                 if "setupComplete" in event:
+                    self._setup_fertig.set()
                     await self._panel_senden({"art": "bereit"})
                     await self._panel_senden({"art": "zustand", "zustand": "hoert"})
                     await self._debug_senden("GEMINI_LIVE_SETUP_OK", hint=f"Verbunden mit {self.v.model}")
@@ -537,8 +553,12 @@ class GeminiLiveSitzung:
         }
 
         model_lower = model_raw.lower()
-        # Gemini 3+ und Live-Modelle (wie gemini-3.8-live) verlangen zwingend thinkingConfig mit thinkingLevel
-        if "gemini-3" in model_lower or "gemini-4" in model_lower or "live" in model_lower:
+        # Bei Google Multimodal Live:
+        # - Modelle mit 'thinking' im Namen (z. B. gemini-3.8-live-extended-thinking) verlangen
+        #   thinkingConfig mit thinkingLevel (LOW, MEDIUM, HIGH) bei Gemini 3+.
+        # - Standard-Live-Modelle (z. B. gemini-3.8-live, gemini-2.5-flash) unterstützen KEIN thinkingLevel;
+        #   wird es mitgesendet, bricht Google sofort mit Code 1007 ab ("Thinking level is not supported for this model").
+        if "thinking" in model_lower:
             lvl = "LOW"
             if self.v.reasoning_effort:
                 effort = str(self.v.reasoning_effort).strip().lower()
@@ -548,15 +568,17 @@ class GeminiLiveSitzung:
                     lvl = "MEDIUM"
                 elif effort in ("low", "min", "minimal", "fast", "none", "off"):
                     lvl = "LOW"
-            generation_config["thinkingConfig"] = {
-                "thinkingLevel": lvl,
-            }
-        elif "gemini-2.5" in model_lower and self.v.reasoning_effort:
-            effort = str(self.v.reasoning_effort).strip().lower()
-            budget = 0 if effort in ("none", "off", "min", "minimal") else 1024
-            generation_config["thinkingConfig"] = {
-                "thinkingBudget": budget,
-            }
+
+            if "gemini-3" in model_lower or "gemini-4" in model_lower or "3." in model_lower:
+                generation_config["thinkingConfig"] = {
+                    "thinkingLevel": lvl,
+                }
+            else:
+                effort_str = str(self.v.reasoning_effort or "").strip().lower()
+                budget = 0 if effort_str in ("none", "off", "min", "minimal") else 1024
+                generation_config["thinkingConfig"] = {
+                    "thinkingBudget": budget,
+                }
 
         setup_payload: dict[str, Any] = {
             "setup": {
@@ -584,8 +606,8 @@ class GeminiLiveSitzung:
         url = f"{GEMINI_LIVE_WS_BASE}?key={quote_plus(self.v.api_key)}"
         model_raw = (self.v.model or "").strip()
         if not model_raw or "gemini" not in model_raw.lower():
-            logger.info("Kein gültiges Gemini-Live-Modell angegeben ('%s'), nutze gemini-3.8-live", model_raw)
-            model_raw = "gemini-3.8-live"
+            logger.info("Kein gültiges Gemini-Live-Modell angegeben ('%s'), nutze gemini-2.0-flash", model_raw)
+            model_raw = "gemini-2.0-flash"
         model_name = model_raw if model_raw.startswith("models/") else f"models/{model_raw}"
         voice_name = self.v.voice or "Puck"
 
@@ -622,6 +644,21 @@ class GeminiLiveSitzung:
             await self._google_ws.send(json.dumps(setup_payload))
             await self._debug_senden("GEMINI_LIVE_CONNECTED", hint=f"Handshake mit {model_name} läuft")
 
+            async def _handshake_watchdog() -> None:
+                try:
+                    await asyncio.wait_for(self._setup_fertig.wait(), timeout=12.0)
+                except asyncio.TimeoutError:
+                    if not self._beendet and not self._setup_fertig.is_set():
+                        logger.warning("Gemini Live Handshake Zeitüberschreitung für Modell %s", model_name)
+                        await self._debug_senden("GEMINI_HANDSHAKE_TIMEOUT", hint=model_name)
+                        with contextlib.suppress(Exception):
+                            await self._panel_senden({
+                                "art": "fehler",
+                                "code": "GEMINI_HANDSHAKE_TIMEOUT",
+                                "detail": f"Keine Antwort von Google für Modell '{model_name}'. Bitte prüfe das Modell in den Einstellungen (z. B. gemini-2.0-flash).",
+                            })
+
+            watchdog_task = asyncio.create_task(_handshake_watchdog())
             client_task = asyncio.create_task(self._client_lesen())
             google_task = asyncio.create_task(self._google_lesen())
 
@@ -630,6 +667,7 @@ class GeminiLiveSitzung:
                 timeout=MAX_SITZUNGSSEKUNDEN,
                 return_when=asyncio.FIRST_COMPLETED,
             )
+            watchdog_task.cancel()
             self._beendet = True
             for task in pending:
                 task.cancel()
