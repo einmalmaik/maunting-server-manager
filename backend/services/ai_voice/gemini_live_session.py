@@ -56,25 +56,89 @@ class GeminiLiveSitzungsfehler(RuntimeError):
 def _clean_gemini_schema(schema: Any) -> Any:
     """Bereinigt JSON Schema für Google Gemini Function Declarations.
 
-    Google Gemini unterstützt keine `additionalProperties` oder `$schema` in Funktionsparametern.
+    Google Gemini verwendet Protobuf-basierte Schemata. Unterstützt werden nur:
+    type, format, description, nullable, enum, properties, required, items.
+    Nicht unterstützt werden: additionalProperties, $schema, $id, title, default,
+    minimum, maximum, minLength, maxLength etc.
+    Zudem darf `type` kein Array (z. B. ["integer", "null"]) sein, sondern muss
+    ein String-Enum sein; Nullable-Typen werden zu nullable=True umgewandelt.
     """
     if not isinstance(schema, dict):
         return schema
-    cleaned: dict[str, Any] = {}
-    for k, v in schema.items():
-        if k in ("additionalProperties", "$schema", "$id", "title"):
-            continue
-        if isinstance(v, dict):
-            cleaned[k] = _clean_gemini_schema(v)
-        elif isinstance(v, list):
-            cleaned[k] = [
-                _clean_gemini_schema(item) if isinstance(item, dict) else item
-                for item in v
+
+    # Falls anyOf / oneOf vorhanden ist, z. B. [{'type': 'string'}, {'type': 'null'}]
+    for choice_key in ("anyOf", "oneOf"):
+        if choice_key in schema and isinstance(schema[choice_key], list):
+            choices = schema[choice_key]
+            is_nullable = any(
+                isinstance(c, dict) and (c.get("type") == "null" or "null" in c.get("type", []))
+                for c in choices
+            )
+            real_choices = [
+                c for c in choices
+                if isinstance(c, dict) and c.get("type") != "null" and c.get("type") != ["null"]
             ]
+            if real_choices:
+                merged = dict(real_choices[0])
+                for k, v in schema.items():
+                    if k not in (choice_key, "type", "nullable"):
+                        merged.setdefault(k, v)
+                if is_nullable:
+                    merged["nullable"] = True
+                schema = merged
+            break
+
+    cleaned: dict[str, Any] = {}
+
+    # 1. Type & Nullable behandeln
+    raw_type = schema.get("type")
+    is_nullable = bool(schema.get("nullable", False))
+
+    if isinstance(raw_type, list):
+        types = [t for t in raw_type if isinstance(t, str) and t.lower() != "null"]
+        if any(isinstance(t, str) and t.lower() == "null" for t in raw_type):
+            is_nullable = True
+        cleaned["type"] = types[0].upper() if types else "STRING"
+    elif isinstance(raw_type, str):
+        if raw_type.lower() == "null":
+            cleaned["type"] = "STRING"
+            is_nullable = True
         else:
-            cleaned[k] = v
-    if "type" not in cleaned and "properties" in cleaned:
-        cleaned["type"] = "object"
+            cleaned["type"] = raw_type.upper()
+    elif "properties" in schema:
+        cleaned["type"] = "OBJECT"
+
+    if is_nullable:
+        cleaned["nullable"] = True
+
+    # 2. Description & Format
+    if "description" in schema and isinstance(schema["description"], str):
+        cleaned["description"] = schema["description"]
+    if "format" in schema and isinstance(schema["format"], str):
+        cleaned["format"] = schema["format"]
+
+    # 3. Enum
+    if "enum" in schema and isinstance(schema["enum"], list):
+        cleaned["enum"] = [str(x) for x in schema["enum"]]
+
+    # 4. Properties (rekursiv)
+    if "properties" in schema and isinstance(schema["properties"], dict):
+        cleaned_props: dict[str, Any] = {}
+        for prop_name, prop_val in schema["properties"].items():
+            if isinstance(prop_val, dict):
+                cleaned_props[str(prop_name)] = _clean_gemini_schema(prop_val)
+            else:
+                cleaned_props[str(prop_name)] = prop_val
+        cleaned["properties"] = cleaned_props
+
+    # 5. Required
+    if "required" in schema and isinstance(schema["required"], list):
+        cleaned["required"] = [str(x) for x in schema["required"]]
+
+    # 6. Items (rekursiv für Arrays)
+    if "items" in schema and isinstance(schema["items"], dict):
+        cleaned["items"] = _clean_gemini_schema(schema["items"])
+
     return cleaned
 
 
@@ -470,7 +534,7 @@ class GeminiLiveSitzung:
                 continue
             params = t.get("parameters")
             if not isinstance(params, dict):
-                params = {"type": "object", "properties": {}}
+                params = {"type": "OBJECT", "properties": {}}
             else:
                 params = _clean_gemini_schema(params)
             fn_decl = {

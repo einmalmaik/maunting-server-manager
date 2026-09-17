@@ -411,8 +411,14 @@ async def _hole(
     # Der Schluessel geht nur mit, wenn der Anbieter ihn fuer den **Katalog**
     # verlangt. Ihn vorsorglich immer mitzuschicken waere ein Geheimnis an einer
     # Adresse, die es nicht braucht — OpenRouter gibt seine Liste offen heraus.
+    kopf_name = spec.katalog_schluessel_kopf or spec.schluessel_kopf
+    praefix = (
+        spec.katalog_schluessel_praefix
+        if spec.katalog_schluessel_praefix is not None
+        else spec.schluessel_praefix
+    )
     kopf = (
-        {spec.schluessel_kopf: f"{spec.schluessel_praefix}{schluessel}"}
+        {kopf_name: f"{praefix}{schluessel}"}
         if spec.katalog_braucht_schluessel and schluessel
         else None
     )

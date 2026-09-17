@@ -27,8 +27,10 @@ def test_google_registry_spec() -> None:
     assert spec.catalog_url == "https://generativelanguage.googleapis.com/v1beta/models"
     assert spec.key_prefix is None
     assert spec.katalog_braucht_schluessel is True
-    assert spec.schluessel_kopf == "x-goog-api-key"
-    assert spec.schluessel_praefix == ""
+    assert spec.schluessel_kopf == "Authorization"
+    assert spec.schluessel_praefix == "Bearer "
+    assert spec.katalog_schluessel_kopf == "x-goog-api-key"
+    assert spec.katalog_schluessel_praefix == ""
     assert spec.katalog_liste_feld == "models"
     assert spec.realtime_tauglich is True
     assert "chat" in spec.gehoer_wege
@@ -276,7 +278,7 @@ async def test_gemini_live_session_tool_execution() -> None:
 
 
 def test_clean_gemini_schema() -> None:
-    """Prüft, dass additionalProperties und $schema aus Tool-Parametern rekursiv entfernt werden."""
+    """Prüft, dass additionalProperties/$schema entfernt, Typen großgeschrieben und Union-Nullables sauber aufgelöst werden."""
     from services.ai_voice.gemini_live_session import _clean_gemini_schema
 
     raw_schema = {
@@ -288,12 +290,20 @@ def test_clean_gemini_schema() -> None:
                 "type": "string",
                 "description": "Suchtext",
             },
+            "server_id": {
+                "type": ["integer", "null"],
+                "description": "Server-ID oder null",
+            },
             "options": {
                 "type": "object",
                 "additionalProperties": False,
                 "properties": {
                     "limit": {"type": "integer"}
                 }
+            },
+            "filter": {
+                "anyOf": [{"type": "string"}, {"type": "null"}],
+                "description": "Optionaler Filter",
             }
         },
         "additionalProperties": False,
@@ -302,8 +312,13 @@ def test_clean_gemini_schema() -> None:
     assert "$schema" not in cleaned
     assert "title" not in cleaned
     assert "additionalProperties" not in cleaned
+    assert cleaned["type"] == "OBJECT"
     assert "additionalProperties" not in cleaned["properties"]["options"]
-    assert cleaned["properties"]["query"]["type"] == "string"
+    assert cleaned["properties"]["query"]["type"] == "STRING"
+    assert cleaned["properties"]["server_id"]["type"] == "INTEGER"
+    assert cleaned["properties"]["server_id"]["nullable"] is True
+    assert cleaned["properties"]["filter"]["type"] == "STRING"
+    assert cleaned["properties"]["filter"]["nullable"] is True
 
 
 def test_google_catalog_models_prefix_and_native_limits() -> None:

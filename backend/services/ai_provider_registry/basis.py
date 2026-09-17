@@ -152,6 +152,10 @@ class Anbieter:
     #: Kopf.
     schluessel_kopf: str = "Authorization"
     schluessel_praefix: str = "Bearer "
+    #: Abweichende Kopfzeile für den Katalogabruf, falls der Anbieter dort einen
+    #: anderen Schlüsselkopf erwartet als am Chat/Embeddings-Endpunkt (z. B. Google).
+    katalog_schluessel_kopf: str | None = None
+    katalog_schluessel_praefix: str | None = None
     #: Unter welchem Feld die Modellliste in der Antwort steht. ``None`` heißt:
     #: die Antwort **ist** die Liste. Auch das ist keine Marotte eines einzelnen
     #: Anbieters, sondern die Stelle, an der ein sonst fehlerfreier Katalogabruf
