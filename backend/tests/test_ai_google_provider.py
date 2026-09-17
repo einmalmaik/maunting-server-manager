@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
+import httpx
 import pytest
 from sqlalchemy.orm import Session
 
@@ -659,6 +660,165 @@ async def test_google_stream_chat_completion_resilience() -> None:
     assert chunks[1].tool_call.name == "list_my_servers"
     assert chunks[1].tool_call.arguments == {}
     assert chunks[1].tool_call.id.startswith("call_")
+
+
+@pytest.mark.asyncio
+async def test_google_thought_signature_streaming_and_preservation() -> None:
+    """Prüft, dass Gemini 3 thought_signature im Stream erfasst und in ProviderToolCall gespeichert wird."""
+    from services.openai_compatible_adapter import (
+        ProviderToolCall,
+        extract_thought_signature,
+        ensure_google_thought_signatures,
+        stream_chat_completion,
+        StreamUsage,
+    )
+    from services.ai_stream.read_tools import _aufrufnachricht
+
+    # 1. extract_thought_signature Direkt- und Verschachtelungstests
+    assert extract_thought_signature({"thought_signature": "sig_direct"}) == "sig_direct"
+    assert extract_thought_signature({"thoughtSignature": "sig_camel"}) == "sig_camel"
+    assert extract_thought_signature({"extra_content": {"google": {"thought_signature": "sig_nested"}}}) == "sig_nested"
+    assert extract_thought_signature({"provider_specific_fields": {"thought_signature": "sig_psf"}}) == "sig_psf"
+    assert extract_thought_signature({"function": {"thought_signature": "sig_func"}}) == "sig_func"
+    assert extract_thought_signature({}) is None
+
+    # 2. Streaming eines Tool-Calls mit thought_signature
+    provider = AiProvider(
+        id=99,
+        name="Google Test",
+        provider_kind="google",
+        default_model="gemini-3.5-flash-lite",
+        enabled=True,
+        requires_api_key=True,
+    )
+
+    fake_sig = "E4bA9xK8...encrypted_thought_signature"
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        stream = (
+            f'data: {{"choices":[{{"delta":{{"tool_calls":[{{"id":"call_abc123","function":{{"name":"read_server_status","arguments":"{{\\"server_id\\": 1}}"}},"thought_signature":"{fake_sig}"}}]}}}}]}}\n\n'
+            'data: [DONE]\n\n'
+        )
+        return httpx.Response(200, text=stream, headers={"content-type": "text/event-stream"})
+
+    usage = StreamUsage()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        chunks = [
+            chunk async for chunk in stream_chat_completion(
+                http_client,
+                provider=provider,
+                api_key="AIzaSyTest",
+                messages=[{"role": "user", "content": "status"}],
+                usage=usage,
+                tools=[{"type": "function", "function": {"name": "read_server_status"}}],
+            )
+        ]
+
+    ready_chunks = [c for c in chunks if c.kind == "tool_ready"]
+    assert len(ready_chunks) == 1
+    tool_call = ready_chunks[0].tool_call
+    assert isinstance(tool_call, ProviderToolCall)
+    assert tool_call.thought_signature == fake_sig
+
+    # 3. _aufrufnachricht behält thought_signature bei
+    aufruf_msg = _aufrufnachricht([tool_call], "Ich lese den Status...")
+    assert aufruf_msg["role"] == "assistant"
+    assert aufruf_msg["content"] == "Ich lese den Status..."
+    assert len(aufruf_msg["tool_calls"]) == 1
+    tc_entry = aufruf_msg["tool_calls"][0]
+    assert tc_entry["thought_signature"] == fake_sig
+    assert tc_entry["extra_content"]["google"]["thought_signature"] == fake_sig
+    assert tc_entry["function"]["thought_signature"] == fake_sig
+    assert aufruf_msg["extra_content"]["google"]["thought_signature"] == fake_sig
+
+    # 4. ensure_google_thought_signatures behält echte Signatur bei
+    messages_with_sig = [aufruf_msg]
+    ensured = ensure_google_thought_signatures(messages_with_sig)
+    assert ensured[0]["tool_calls"][0]["thought_signature"] == fake_sig
+
+    # 5. ensure_google_thought_signatures setzt 'skip_thought_signature_validator' ein, wenn Signatur fehlt
+    legacy_tool_call = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "call_legacy",
+                "type": "function",
+                "function": {"name": "read_logs", "arguments": "{}"},
+            }
+        ],
+    }
+    ensured_fallback = ensure_google_thought_signatures([legacy_tool_call])
+    assert ensured_fallback[0]["tool_calls"][0]["thought_signature"] == "skip_thought_signature_validator"
+    assert (
+        ensured_fallback[0]["tool_calls"][0]["extra_content"]["google"]["thought_signature"]
+        == "skip_thought_signature_validator"
+    )
+    assert (
+        ensured_fallback[0]["tool_calls"][0]["function"]["thought_signature"]
+        == "skip_thought_signature_validator"
+    )
+
+
+@pytest.mark.asyncio
+async def test_google_multi_turn_tool_request_payload() -> None:
+    """Prüft, dass stream_chat_completion ausgehende Nachrichten für Google anreichert."""
+    from services.openai_compatible_adapter import stream_chat_completion, StreamUsage
+
+    captured_request_json: dict = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal captured_request_json
+        captured_request_json = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(
+            200,
+            text='data: {"choices":[{"delta":{"content":"Server läuft einwandfrei."}}]}\n\ndata: [DONE]\n\n',
+            headers={"content-type": "text/event-stream"},
+        )
+
+    provider = AiProvider(
+        id=99,
+        name="Google Test",
+        provider_kind="google",
+        default_model="gemini-3.5-flash-lite",
+        enabled=True,
+        requires_api_key=True,
+    )
+
+    outgoing_messages = [
+        {"role": "user", "content": "Wie geht es Server 1?"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "read_server_status", "arguments": '{"server_id": 1}'},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": '{"status": "running"}'},
+    ]
+
+    usage = StreamUsage()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        async for _ in stream_chat_completion(
+            http_client,
+            provider=provider,
+            api_key="AIzaSyTest",
+            messages=outgoing_messages,
+            usage=usage,
+        ):
+            pass
+
+    sent_messages = captured_request_json["messages"]
+    sent_assistant = sent_messages[1]
+    sent_tc = sent_assistant["tool_calls"][0]
+    # Muss skip_thought_signature_validator haben, damit Google den Turn nicht als HTTP 400 abweist!
+    assert sent_tc["thought_signature"] == "skip_thought_signature_validator"
+    assert sent_tc["extra_content"]["google"]["thought_signature"] == "skip_thought_signature_validator"
+    assert sent_tc["function"]["thought_signature"] == "skip_thought_signature_validator"
 
 
 

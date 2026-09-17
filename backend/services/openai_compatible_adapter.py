@@ -150,6 +150,7 @@ class ProviderToolCall:
     id: str
     name: str
     arguments: dict
+    thought_signature: str | None = None
 
 
 def schluesselkopf(
@@ -473,6 +474,86 @@ async def _error_detail(response: httpx.Response) -> str | None:
     return _kurzfassung(message)
 
 
+def extract_thought_signature(data: Any) -> str | None:
+    """Extrahiert einen Google-Gemini thought_signature aus beliebigen Dict-Strukturen."""
+    if not isinstance(data, dict):
+        return None
+    for key in ("thought_signature", "thoughtSignature"):
+        sig = data.get(key)
+        if isinstance(sig, str) and sig.strip():
+            return sig.strip()
+    ec = data.get("extra_content")
+    if isinstance(ec, dict):
+        g = ec.get("google")
+        if isinstance(g, dict):
+            for key in ("thought_signature", "thoughtSignature"):
+                sig = g.get(key)
+                if isinstance(sig, str) and sig.strip():
+                    return sig.strip()
+        for key in ("thought_signature", "thoughtSignature"):
+            sig = ec.get(key)
+            if isinstance(sig, str) and sig.strip():
+                return sig.strip()
+    psf = data.get("provider_specific_fields")
+    if isinstance(psf, dict):
+        for key in ("thought_signature", "thoughtSignature"):
+            sig = psf.get(key)
+            if isinstance(sig, str) and sig.strip():
+                return sig.strip()
+    func = data.get("function")
+    if isinstance(func, dict):
+        for key in ("thought_signature", "thoughtSignature"):
+            sig = func.get(key)
+            if isinstance(sig, str) and sig.strip():
+                return sig.strip()
+    return None
+
+
+def ensure_google_thought_signatures(messages: list[dict]) -> list[dict]:
+    """Stellt sicher, dass Google Gemini-3-Modelle den verpflichtenden thought_signature
+    an jedem Tool-Call vorfinden. Fehlt die Signatur (z. B. Rundenuebergang, Migration),
+    wird der offizielle Google-Sentinel 'skip_thought_signature_validator' eingesetzt,
+    um HTTP 400 Bad Request zu verhindern.
+    """
+    angepasst: list[dict] = []
+    for msg in messages:
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            angepasst.append(msg)
+            continue
+        tool_calls = msg.get("tool_calls")
+        if not isinstance(tool_calls, list) or not tool_calls:
+            angepasst.append(msg)
+            continue
+
+        neue_calls: list[dict] = []
+        for tc in tool_calls:
+            if not isinstance(tc, dict):
+                neue_calls.append(tc)
+                continue
+            tc_copy = dict(tc)
+            sig = extract_thought_signature(tc_copy) or "skip_thought_signature_validator"
+            tc_copy["thought_signature"] = sig
+            if isinstance(tc_copy.get("function"), dict):
+                func_copy = dict(tc_copy["function"])
+                func_copy["thought_signature"] = sig
+                tc_copy["function"] = func_copy
+            ec = dict(tc_copy.get("extra_content")) if isinstance(tc_copy.get("extra_content"), dict) else {}
+            g = dict(ec.get("google")) if isinstance(ec.get("google"), dict) else {}
+            g["thought_signature"] = sig
+            ec["google"] = g
+            tc_copy["extra_content"] = ec
+            neue_calls.append(tc_copy)
+
+        msg_copy = dict(msg)
+        msg_copy["tool_calls"] = neue_calls
+        if neue_calls and "extra_content" not in msg_copy:
+            first_sig = neue_calls[0].get("thought_signature")
+            if first_sig:
+                msg_copy["extra_content"] = {"google": {"thought_signature": first_sig}}
+        angepasst.append(msg_copy)
+    return angepasst
+
+
 async def stream_chat_completion(
     client: httpx.AsyncClient,
     *,
@@ -670,6 +751,18 @@ async def stream_chat_completion(
 
     spec = ai_provider_registry.anbieter(provider.provider_kind)
     headers = schluesselkopf(spec, api_key)
+
+    target_base = provider_base_url(provider).lower()
+    model_name = (model or provider.default_model or "").lower()
+    is_google = (
+        provider.provider_kind == "google_ai_studio"
+        or "generativelanguage.googleapis.com" in target_base
+        or "google" in getattr(spec, "name", "").lower()
+        or "gemini-3" in model_name
+        or "gemini-2.5" in model_name
+    )
+    sende_nachrichten = ensure_google_thought_signatures(messages) if (is_google and messages) else messages
+
     request_body = {
         # ``model`` uebersteuert das Standardmodell des Zugangs. Es gibt genau
         # einen Aufrufer dafuer, und der begruendet den Parameter: das Gehoer
@@ -678,7 +771,7 @@ async def stream_chat_completion(
         # dieselbe Adresse anzulegen waere die Alternative gewesen — mit zwei
         # Schluesseln, zwei Kontingenten und zwei Stellen zum Vergessen.
         "model": model or provider.default_model,
-        "messages": messages,
+        "messages": sende_nachrichten,
         "stream": True,
     }
     if tools:
@@ -742,9 +835,10 @@ async def stream_chat_completion(
             # stirbt, hat trotzdem stattgefunden.
             usage.anfragen += 1
             saw_done = False
-            tool_buffers: dict[int, dict[str, str]] = {}
+            tool_buffers: dict[int, dict[str, Any]] = {}
             seen_tool_starts: set[int] = set()
             emitted_tool_calls: set[int] = set()
+            last_seen_thought_signature: str | None = None
 
             def fertiger_aufruf(index: int) -> ProviderToolCall:
                 item = tool_buffers[index]
@@ -768,8 +862,9 @@ async def stream_chat_completion(
                         "AI_PROVIDER_PROTOCOL_ERROR",
                         detail=f"Tool-Argumente für {name} sind kein Objekt",
                     )
+                thought_sig = item.get("thought_signature") or last_seen_thought_signature
                 return ProviderToolCall(
-                    id=call_id, name=name, arguments=arguments
+                    id=call_id, name=name, arguments=arguments, thought_signature=thought_sig
                 )
             async for line in _iter_sse_lines(response, deadline=deadline):
                 if time.monotonic() > deadline:
@@ -804,6 +899,9 @@ async def stream_chat_completion(
                         detail=f"Ungültiger SSE-Frame: {payload[:100]}",
                     ) from exc
                 usage_uebernehmen(usage, frame.get("usage"))
+                frame_sig = extract_thought_signature(frame)
+                if frame_sig:
+                    last_seen_thought_signature = frame_sig
                 # Vor `choices`, denn ein Fehlerrahmen bringt beides mit: das
                 # `error`-Feld und ein leeres Delta mit `finish_reason: "error"`.
                 # Wer zuerst auf `choices` schaut, sieht nur das leere Delta,
@@ -820,7 +918,15 @@ async def stream_chat_completion(
                 choices = frame.get("choices")
                 if not isinstance(choices, list) or not choices:
                     continue
-                delta = choices[0].get("delta") if isinstance(choices[0], dict) else None
+                c0 = choices[0] if isinstance(choices[0], dict) else {}
+                c0_sig = extract_thought_signature(c0)
+                if c0_sig:
+                    last_seen_thought_signature = c0_sig
+                delta = c0.get("delta") if isinstance(c0, dict) else None
+                if isinstance(delta, dict):
+                    delta_sig = extract_thought_signature(delta)
+                    if delta_sig:
+                        last_seen_thought_signature = delta_sig
                 tool_deltas = delta.get("tool_calls") if isinstance(delta, dict) else None
                 if isinstance(tool_deltas, list):
                     for default_idx, item in enumerate(tool_deltas):
@@ -832,8 +938,14 @@ async def stream_chat_completion(
                         raw_idx = item.get("index")
                         idx = raw_idx if isinstance(raw_idx, int) else default_idx
                         buffer = tool_buffers.setdefault(
-                            idx, {"id": "", "name": "", "arguments": ""}
+                            idx, {"id": "", "name": "", "arguments": "", "thought_signature": ""}
                         )
+                        item_sig = extract_thought_signature(item)
+                        if item_sig:
+                            buffer["thought_signature"] = item_sig
+                            last_seen_thought_signature = item_sig
+                        elif last_seen_thought_signature and not buffer.get("thought_signature"):
+                            buffer["thought_signature"] = last_seen_thought_signature
                         if isinstance(item.get("id"), str):
                             buffer["id"] += item["id"]
                         function = item.get("function")
@@ -853,8 +965,14 @@ async def stream_chat_completion(
                 legacy_call = delta.get("function_call") if isinstance(delta, dict) else None
                 if isinstance(legacy_call, dict):
                     buffer = tool_buffers.setdefault(
-                        0, {"id": "", "name": "", "arguments": ""}
+                        0, {"id": "", "name": "", "arguments": "", "thought_signature": ""}
                     )
+                    leg_sig = extract_thought_signature(legacy_call)
+                    if leg_sig:
+                        buffer["thought_signature"] = leg_sig
+                        last_seen_thought_signature = leg_sig
+                    elif last_seen_thought_signature and not buffer.get("thought_signature"):
+                        buffer["thought_signature"] = last_seen_thought_signature
                     if isinstance(legacy_call.get("name"), str):
                         buffer["name"] += legacy_call["name"]
                     raw_args = legacy_call.get("arguments")

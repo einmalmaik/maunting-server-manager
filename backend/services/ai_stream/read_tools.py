@@ -560,21 +560,36 @@ def _aufrufnachricht(calls, text: str | None = None) -> dict:
     schlüsse und Zusagen nicht und wiederholte oder widersprach ihnen. Das
     Format erlaubt Text neben ``tool_calls`` ausdrücklich.
     """
-    return {
+    tool_calls_data: list[dict] = []
+    for call in calls:
+        entry: dict[str, Any] = {
+            "id": call.id,
+            "type": "function",
+            "function": {
+                "name": call.name,
+                "arguments": (
+                    json.dumps(call.arguments, ensure_ascii=True)
+                    if isinstance(call.arguments, dict)
+                    else str(call.arguments)
+                ),
+            },
+        }
+        sig = getattr(call, "thought_signature", None)
+        if sig:
+            entry["thought_signature"] = sig
+            entry["extra_content"] = {"google": {"thought_signature": sig}}
+            if isinstance(entry.get("function"), dict):
+                entry["function"]["thought_signature"] = sig
+        tool_calls_data.append(entry)
+
+    msg: dict[str, Any] = {
         "role": "assistant",
         "content": text or None,
-        "tool_calls": [
-            {
-                "id": call.id,
-                "type": "function",
-                "function": {
-                    "name": call.name,
-                    "arguments": json.dumps(call.arguments, ensure_ascii=True),
-                },
-            }
-            for call in calls
-        ],
+        "tool_calls": tool_calls_data,
     }
+    if tool_calls_data and tool_calls_data[0].get("thought_signature"):
+        msg["extra_content"] = {"google": {"thought_signature": tool_calls_data[0]["thought_signature"]}}
+    return msg
 
 
 def _rundenfehler_nachrichten(
