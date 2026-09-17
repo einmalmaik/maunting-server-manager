@@ -133,3 +133,27 @@ class LivekitTestResponse(BaseModel):
     erreichbar: bool
     meldung: str
     raeume_aktiv: int = 0
+
+
+class PendingGroupCallInfo(BaseModel):
+    group_id: int
+    group_name: str
+    avatar_url: str | None = None
+    room_token: str
+    participant_count: int = 0
+
+
+class PendingCallInfo(BaseModel):
+    signaling_token: str
+    caller_id: int
+    caller_username: str
+    caller_avatar_url: str | None = None
+    mode: Literal["audio", "video"] = "audio"
+    expires_in: int
+
+
+class PendingCallResponse(BaseModel):
+    has_pending_call: bool
+    call: PendingCallInfo | None = None
+    group_calls: list[PendingGroupCallInfo] = []
+

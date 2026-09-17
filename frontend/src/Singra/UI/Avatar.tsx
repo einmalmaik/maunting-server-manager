@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { User as UserIcon } from 'lucide-react'
-import { apiUrl } from '@/config/api'
+import { apiUrl, getIsAbsoluteApi } from '@/config/api'
+import { apiStream } from '@/api/client'
 
 export interface AvatarProps {
   src?: string | null
@@ -43,6 +44,54 @@ const statusColors = {
   dnd: 'bg-status-danger',
 }
 
+const MAX_BLOB_CACHE = 200
+const blobCache = new Map<string, string>()
+const pendingBlobFetches = new Map<string, Promise<string | null>>()
+
+function pruneBlobCache() {
+  while (blobCache.size > MAX_BLOB_CACHE) {
+    const firstKey = blobCache.keys().next().value
+    if (firstKey) {
+      const oldUrl = blobCache.get(firstKey)
+      if (oldUrl) URL.revokeObjectURL(oldUrl)
+      blobCache.delete(firstKey)
+    } else {
+      break
+    }
+  }
+}
+
+async function fetchImageBlobUrl(url: string): Promise<string | null> {
+  if (blobCache.has(url)) return blobCache.get(url)!
+  if (pendingBlobFetches.has(url)) return pendingBlobFetches.get(url)!
+
+  const promise = (async () => {
+    try {
+      const res = await apiStream(url, { method: 'GET', headers: { Accept: 'image/*' } })
+      if (!res.ok) return null
+      const blob = await res.blob()
+      if (!blob || blob.size === 0) return null
+      const blobUrl = URL.createObjectURL(blob)
+      pruneBlobCache()
+      blobCache.set(url, blobUrl)
+      return blobUrl
+    } catch {
+      return null
+    } finally {
+      pendingBlobFetches.delete(url)
+    }
+  })()
+
+  pendingBlobFetches.set(url, promise)
+  return promise
+}
+
+function checkIsDesktopContext(): boolean {
+  if (getIsAbsoluteApi()) return true
+  if (typeof window === 'undefined') return false
+  return '__TAURI_INTERNALS__' in window || '__TAURI__' in window
+}
+
 export function Avatar({
   src,
   name,
@@ -53,18 +102,59 @@ export function Avatar({
   resolveUrl,
 }: AvatarProps) {
   const resolvedSrc = src ? (resolveUrl ? resolveUrl(src) : apiUrl(src)) : undefined
+  const [blobSrc, setBlobSrc] = useState<string | null>(() => (resolvedSrc ? blobCache.get(resolvedSrc) ?? null : null))
   const [hasError, setHasError] = useState(false)
 
-  // Reset error when resolvedSrc changes (e.g. backend URL hydrated or avatar updated)
+  // Reset error & update blobSrc when resolvedSrc changes (e.g. backend URL hydrated or avatar updated)
   useEffect(() => {
     setHasError(false)
+    if (resolvedSrc && blobCache.has(resolvedSrc)) {
+      setBlobSrc(blobCache.get(resolvedSrc)!)
+    } else {
+      setBlobSrc(null)
+      // In Desktop Tauri / WebView2, standard <img> cannot pass Bearer headers cross-origin.
+      // Eagerly fetch authenticated blob so avatars display without initial 401 delay.
+      const isDesktopContext = checkIsDesktopContext()
+      if (isDesktopContext && resolvedSrc && !resolvedSrc.startsWith('data:') && !resolvedSrc.startsWith('blob:')) {
+        void fetchImageBlobUrl(resolvedSrc).then((fallbackUrl) => {
+          if (fallbackUrl) {
+            setBlobSrc(fallbackUrl)
+          }
+        })
+      }
+    }
   }, [resolvedSrc])
+
+  const handleImageError = () => {
+    if (!resolvedSrc) {
+      setHasError(true)
+      return
+    }
+
+    if (blobSrc) {
+      setHasError(true)
+      return
+    }
+
+    // In Desktop Tauri / WebView2 or cross-origin scenarios, standard <img> fails due to mixed-content or auth.
+    // Fetching via apiStream as blob bypasses these restrictions.
+    void fetchImageBlobUrl(resolvedSrc).then((fallbackUrl) => {
+      if (fallbackUrl) {
+        setBlobSrc(fallbackUrl)
+      } else {
+        setHasError(true)
+      }
+    })
+  }
 
   const initials = name
     ? name.trim().slice(0, 2).toUpperCase()
     : ''
 
-  const showImage = Boolean(resolvedSrc) && !hasError
+  const isDesktopContext = checkIsDesktopContext()
+  const isDirectSafe = !resolvedSrc || resolvedSrc.startsWith('data:') || resolvedSrc.startsWith('blob:')
+  const currentDisplaySrc = blobSrc || (isDesktopContext && !isDirectSafe ? null : resolvedSrc)
+  const showImage = Boolean(currentDisplaySrc) && !hasError
 
   return (
     <div className={`relative inline-flex shrink-0 select-none rounded-full ${className}`}>
@@ -73,9 +163,9 @@ export function Avatar({
       >
         {showImage ? (
           <img
-            src={resolvedSrc!}
+            src={currentDisplaySrc!}
             alt={alt || name || 'Avatar'}
-            onError={() => setHasError(true)}
+            onError={handleImageError}
             className="h-full w-full object-cover"
             loading="lazy"
           />

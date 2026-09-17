@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react'
 import { Mic, MicOff, Video, VideoOff, VolumeX } from 'lucide-react'
-import { apiUrl } from '@/config/api'
+import { Avatar } from '@/Singra/UI/Avatar'
 import type { Track } from 'livekit-client'
 import type { CallParticipant } from '@/stores/useCallStore'
 
@@ -69,7 +69,7 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
         {...klickAttribute}
         className={`flex items-center gap-2.5 rounded-2xl bg-surface-container-high/70 px-2.5 py-2 ${gemeinsam}`}
       >
-        <Avatar participant={participant} groesse="h-9 w-9" />
+        <Avatar src={participant.avatarUrl} name={participant.username} size="sm" className="shrink-0" />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium text-on-surface">
             {participant.username}
@@ -110,7 +110,12 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
           className={`h-full w-full object-cover ${participant.isSelf ? '-scale-x-100' : ''}`}
         />
       ) : (
-        <Avatar participant={participant} groesse="h-16 w-16 sm:h-20 sm:w-20" />
+        <Avatar
+          src={participant.avatarUrl}
+          name={participant.username}
+          size="xl"
+          className="h-16 w-16 sm:h-20 sm:w-20 text-2xl shrink-0"
+        />
       )}
 
       <div className="pointer-events-none absolute inset-x-2 bottom-2 flex items-center justify-between gap-2">
@@ -134,32 +139,5 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
         </span>
       )}
     </Behaelter>
-  )
-}
-
-const Avatar: React.FC<{ participant: CallParticipant; groesse: string }> = ({
-  participant,
-  groesse,
-}) => {
-  const [kaputt, setKaputt] = React.useState(false)
-  React.useEffect(() => setKaputt(false), [participant.avatarUrl])
-
-  return (
-    <div
-      className={`${groesse} shrink-0 overflow-hidden rounded-full border border-outline-variant/40 bg-surface-container-highest`}
-    >
-      {participant.avatarUrl && !kaputt ? (
-        <img
-          src={apiUrl(participant.avatarUrl)}
-          alt={participant.username}
-          className="h-full w-full object-cover"
-          onError={() => setKaputt(true)}
-        />
-      ) : (
-        <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-on-surface-variant">
-          {participant.username.slice(0, 2).toUpperCase()}
-        </div>
-      )}
-    </div>
   )
 }

@@ -1,14 +1,16 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ActiveCallInfo } from '@/api/calls'
+import type { ActiveCallInfo, PendingGroupCallInfo } from '@/api/calls'
 
 const mockStore = {
   crossDeviceCall: null as ActiveCallInfo | null,
+  activeGroupCalls: [] as PendingGroupCallInfo[],
   state: 'idle',
   checkActiveCall: vi.fn(),
   transferCallToThisDevice: vi.fn().mockResolvedValue(undefined),
   terminateCrossDeviceCall: vi.fn().mockResolvedValue(undefined),
   handleCrossDeviceEvent: vi.fn(),
+  joinGroupCall: vi.fn().mockResolvedValue(undefined),
 }
 
 vi.mock('@/stores/useCallStore', () => ({
@@ -37,6 +39,7 @@ describe('CrossDeviceCallBanner', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockStore.crossDeviceCall = null
+    mockStore.activeGroupCalls = []
     mockStore.state = 'idle'
   })
 
@@ -117,5 +120,44 @@ describe('CrossDeviceCallBanner', () => {
       type: 'call_transferred',
       raum: 'raum-1',
     })
+  })
+
+  it('rendert Gruppenanruf-Banner wenn activeGroupCalls vorhanden ist', () => {
+    mockStore.activeGroupCalls = [
+      {
+        group_id: 12,
+        group_name: 'Team Alpha',
+        avatar_url: null,
+        room_token: 'grp_alpha_12',
+        participant_count: 3,
+      },
+    ]
+    render(<CrossDeviceCallBanner />)
+
+    expect(screen.getByRole('region', { name: 'Aktiver Gruppenanruf' })).toBeTruthy()
+    expect(screen.getByText('Laufender Gruppenanruf')).toBeTruthy()
+    expect(screen.getByText('Team Alpha')).toBeTruthy()
+    expect(screen.getByText('3 aktiv')).toBeTruthy()
+  })
+
+  it('führt joinGroupCall aus wenn man im Gruppen-Banner auf Anruf beitreten klickt', () => {
+    mockStore.activeGroupCalls = [
+      {
+        group_id: 12,
+        group_name: 'Team Alpha',
+        avatar_url: null,
+        room_token: 'grp_alpha_12',
+        participant_count: 3,
+      },
+    ]
+    render(<CrossDeviceCallBanner />)
+
+    const joinBtn = screen.getByRole('button', { name: /Anruf beitreten/i })
+    fireEvent.click(joinBtn)
+
+    expect(mockStore.joinGroupCall).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 12, name: 'Team Alpha' }),
+      'grp_alpha_12',
+    )
   })
 })

@@ -462,6 +462,8 @@ class ChatGroupResponse(BaseModel):
     can_kick_from_call: bool = False
     created_at: datetime
     members: list[ChatGroupMemberResponse] = []
+    room_token: str | None = None
+    live_call: bool = False
 
 
 class ChatGroupInvitePublicResponse(BaseModel):

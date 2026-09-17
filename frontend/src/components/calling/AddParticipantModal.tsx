@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { Loader2, UserPlus } from 'lucide-react'
-import { Button, Dialog, DialogContent, Input } from '@/Singra/UI'
-import { apiUrl } from '@/config/api'
+import { Button, Dialog, DialogContent, Input, Avatar } from '@/Singra/UI'
 import { getFriends, type FriendItem } from '@/api/social'
 import { toast } from '@/stores/toastStore'
 
@@ -95,19 +94,12 @@ export const AddParticipantModal: React.FC<AddParticipantModalProps> = ({
               key={freund.user_id}
               className="flex items-center gap-3 rounded-xl border border-outline-variant/25 bg-surface-container px-2.5 py-2"
             >
-              <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full bg-surface-container-highest">
-                {freund.avatar_url ? (
-                  <img
-                    src={apiUrl(freund.avatar_url)}
-                    alt={freund.username}
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center text-xs font-semibold">
-                    {freund.username.slice(0, 2).toUpperCase()}
-                  </div>
-                )}
-              </div>
+              <Avatar
+                src={freund.avatar_url}
+                name={freund.username}
+                size="sm"
+                className="shrink-0"
+              />
               <span className="min-w-0 flex-1 truncate text-sm font-medium">{freund.username}</span>
               <Button
                 size="sm"

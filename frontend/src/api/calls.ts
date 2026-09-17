@@ -42,6 +42,29 @@ export interface ActiveCallResponse {
   call: ActiveCallInfo | null
 }
 
+export interface PendingGroupCallInfo {
+  group_id: number
+  group_name: string
+  avatar_url?: string | null
+  room_token: string
+  participant_count: number
+}
+
+export interface PendingCallInfo {
+  signaling_token: string
+  caller_id: number
+  caller_username: string
+  caller_avatar_url?: string | null
+  mode: 'audio' | 'video'
+  expires_in: number
+}
+
+export interface PendingCallResponse {
+  has_pending_call: boolean
+  call: PendingCallInfo | null
+  group_calls: PendingGroupCallInfo[]
+}
+
 export interface GruppenRaum {
   room_token: string
   group_id: number
@@ -124,6 +147,10 @@ export async function holeZugang(
 
 export async function holeAktivenAnruf(): Promise<ActiveCallResponse> {
   return api<ActiveCallResponse>('/social/calls/active')
+}
+
+export async function holeAusstehendeAnrufe(): Promise<PendingCallResponse> {
+  return api<PendingCallResponse>('/social/calls/pending')
 }
 
 export async function verlasseAnruf(raum?: string, deviceId?: string): Promise<void> {

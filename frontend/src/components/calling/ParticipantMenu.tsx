@@ -12,8 +12,7 @@
 
 import { useEffect, useState } from 'react'
 import { LogOut, MicOff, Volume2, VolumeX } from 'lucide-react'
-import { Button, Dialog, DialogContent, Slider } from '@/Singra/UI'
-import { apiUrl } from '@/config/api'
+import { Button, Dialog, DialogContent, Slider, Avatar } from '@/Singra/UI'
 import { entferneAusAnruf, setzeServerStumm } from '@/api/calls'
 import { toast } from '@/stores/toastStore'
 import type { CallParticipant } from '@/stores/useCallStore'
@@ -97,19 +96,12 @@ export function ParticipantMenu({
     <Dialog open onOpenChange={(offen) => !offen && onClose()}>
       <DialogContent className="max-w-sm">
         <div className="flex items-center gap-3 border-b border-outline-variant/30 p-5">
-          <div className="h-12 w-12 shrink-0 overflow-hidden rounded-full border border-outline-variant/40 bg-surface-container-high">
-            {participant.avatarUrl ? (
-              <img
-                src={apiUrl(participant.avatarUrl)}
-                alt=""
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-on-surface-variant">
-                {participant.username.slice(0, 2).toUpperCase()}
-              </div>
-            )}
-          </div>
+          <Avatar
+            src={participant.avatarUrl}
+            name={participant.username}
+            size="lg"
+            className="shrink-0"
+          />
           <div className="min-w-0">
             <div className="truncate font-headline text-title-sm font-semibold text-on-surface">
               {participant.username}

@@ -23,6 +23,7 @@ from services.panel_settings_service import PanelSettingsService
 from services.sync_event_service import SyncEventService
 from services.achievement_service import AchievementService
 from services.notification_service import NotificationService
+from services.call_room_service import GroupCallRoomRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -1631,6 +1632,7 @@ class SocialService:
         results = []
         for g in groups:
             mems = members_by_group.get(g.id, [])
+            offener_raum = GroupCallRoomRegistry.find_for_group(g.id)
             results.append({
                 "id": g.id,
                 "name": g.name,
@@ -1663,6 +1665,8 @@ class SocialService:
                 ),
                 "created_at": g.created_at,
                 "members": mems,
+                "room_token": offener_raum,
+                "live_call": offener_raum is not None,
             })
 
         return sorted(results, key=lambda x: x["name"].casefold())

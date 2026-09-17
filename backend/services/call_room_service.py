@@ -21,7 +21,7 @@ import uuid
 from dataclasses import dataclass
 
 # Wie lange eine unbeantwortete Einladung gilt. Danach klingelt niemand mehr.
-EINLADUNG_TTL_SEKUNDEN = 120.0
+EINLADUNG_TTL_SEKUNDEN = 60.0
 # Obergrenze fuer einen laufenden Raum. Jede Tokenausgabe schiebt das Ende nach
 # hinten, aber nie ueber diese Spanne ab Raumbeginn hinaus.
 RAUM_MAX_LEBENSDAUER_SEKUNDEN = 2 * 60 * 60.0
@@ -41,6 +41,7 @@ class _Anrufraum:
     erstellt_am: float
     laeuft_ab: float = 0.0
     """Ende der Einladungsfrist bzw. des laufenden Gespraechs."""
+    mode: str = "audio"
     angenommen: bool = False
 
     def gueltig(self, jetzt: float) -> bool:
@@ -56,10 +57,10 @@ class CallRoomService:
 
     _raeume: dict[str, _Anrufraum] = {}
     _verbraucht: dict[str, float] = {}
-    _lock = threading.Lock()
+    _lock = threading.RLock()
 
     @classmethod
-    def issue(cls, caller_id: int, recipient_id: int) -> str:
+    def issue(cls, caller_id: int, recipient_id: int, mode: str = "audio") -> str:
         """Neuer Raum mit Anrufer und Angerufenem. Gibt den Raumnamen zurueck."""
         token = secrets.token_urlsafe(32)
         jetzt = time.time()
@@ -70,8 +71,32 @@ class CallRoomService:
                 berechtigte={caller_id, recipient_id},
                 erstellt_am=jetzt,
                 laeuft_ab=jetzt + EINLADUNG_TTL_SEKUNDEN,
+                mode=mode,
             )
         return token
+
+    @classmethod
+    def get_pending_invitation(cls, user_id: int) -> dict[str, Any] | None:
+        """Sucht nach einer offenen, noch nicht angenommenen Einladung für den Benutzer."""
+        jetzt = time.time()
+        with cls._lock:
+            cls._aufraeumen(jetzt)
+            for token, raum in list(cls._raeume.items()):
+                if (
+                    user_id in raum.berechtigte
+                    and user_id != raum.ersteller_id
+                    and not raum.angenommen
+                    and not cls.is_consumed(token)
+                    and raum.gueltig(jetzt)
+                ):
+                    return {
+                        "signaling_token": token,
+                        "caller_id": raum.ersteller_id,
+                        "mode": raum.mode,
+                        "expires_in": max(1, int(raum.laeuft_ab - jetzt)),
+                        "created_at": raum.erstellt_am,
+                    }
+        return None
 
     @classmethod
     def authorize(cls, token: str, user_id: int) -> bool:
@@ -88,7 +113,9 @@ class CallRoomService:
                 return False
             if user_id not in raum.berechtigte:
                 return False
-            raum.angenommen = True
+            # Nur als angenommen markieren, wenn nicht der Ersteller selbst beitritt
+            if user_id != raum.ersteller_id:
+                raum.angenommen = True
             raum.verlaengere(jetzt, EINLADUNG_TTL_SEKUNDEN)
             return True
 
@@ -109,6 +136,14 @@ class CallRoomService:
             if raum is None or not raum.gueltig(time.time()):
                 return None
             return raum.ersteller_id
+
+    @classmethod
+    def is_accepted(cls, token: str) -> bool:
+        with cls._lock:
+            raum = cls._raeume.get(token)
+            if raum is None or not raum.gueltig(time.time()):
+                return False
+            return raum.angenommen
 
     @classmethod
     def berechtigte(cls, token: str) -> set[int]:
@@ -214,7 +249,7 @@ class GroupCallRoomRegistry:
     """
 
     _raeume: dict[str, _Gruppenraum] = {}
-    _lock = threading.Lock()
+    _lock = threading.RLock()
 
     @classmethod
     def create(
@@ -255,6 +290,17 @@ class GroupCallRoomRegistry:
             return list(cls._raeume.keys())
 
     @classmethod
+    def find_for_group(cls, group_id: int) -> str | None:
+        """Findet den aktiven Raumtoken für eine Gruppe, falls vorhanden."""
+        jetzt = time.time()
+        with cls._lock:
+            cls._aufraeumen(jetzt)
+            for token, raum in list(cls._raeume.items()):
+                if raum.group_id == group_id and jetzt < raum.laeuft_ab:
+                    return token
+        return None
+
+    @classmethod
     def discard(cls, token: str) -> None:
         with cls._lock:
             cls._raeume.pop(token, None)
@@ -289,6 +335,8 @@ class _AktiverAnruf:
     partner_id: int | None = None
     partner_username: str | None = None
     partner_avatar_url: str | None = None
+    user_username: str | None = None
+    user_avatar_url: str | None = None
 
     def gueltig(self, jetzt: float) -> bool:
         return (jetzt - self.last_heartbeat) < ACTIVE_CALL_TTL_SEKUNDEN
@@ -323,7 +371,7 @@ class UserActiveCallRegistry:
     """
 
     _aktive: dict[int, _AktiverAnruf] = {}
-    _lock = threading.Lock()
+    _lock = threading.RLock()
 
     @classmethod
     def register(
@@ -340,6 +388,8 @@ class UserActiveCallRegistry:
         partner_id: int | None = None,
         partner_username: str | None = None,
         partner_avatar_url: str | None = None,
+        user_username: str | None = None,
+        user_avatar_url: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any] | None, bool]:
         """Registriert oder aktualisiert den Anruf eines Benutzers.
 
@@ -372,6 +422,8 @@ class UserActiveCallRegistry:
                 partner_id=partner_id if partner_id is not None else (vorher.partner_id if vorher else None),
                 partner_username=partner_username if partner_username is not None else (vorher.partner_username if vorher else None),
                 partner_avatar_url=partner_avatar_url if partner_avatar_url is not None else (vorher.partner_avatar_url if vorher else None),
+                user_username=user_username if user_username is not None else (vorher.user_username if vorher else None),
+                user_avatar_url=user_avatar_url if user_avatar_url is not None else (vorher.user_avatar_url if vorher else None),
             )
             cls._aktive[user_id] = neu
             return neu.to_dict(), prev_dict, is_handoff
@@ -382,10 +434,35 @@ class UserActiveCallRegistry:
         with cls._lock:
             cls._aufraeumen(jetzt)
             anruf = cls._aktive.get(user_id)
-            if anruf is None or not anruf.gueltig(jetzt):
+            if anruf is not None and anruf.gueltig(jetzt):
+                return anruf.to_dict()
+            if anruf is not None:
                 cls._aktive.pop(user_id, None)
-                return None
-            return anruf.to_dict()
+
+            # Zweite Chance: Ein Direkt-Gesprächspartner wartet noch im selben Raum
+            for partner_uid, partner_anruf in list(cls._aktive.items()):
+                if (
+                    partner_anruf.art == "direkt"
+                    and partner_anruf.partner_id == user_id
+                    and partner_anruf.gueltig(jetzt)
+                ):
+                    if CallRoomService.is_accepted(partner_anruf.raum):
+                        return {
+                            "raum": partner_anruf.raum,
+                            "art": "direkt",
+                            "group_id": None,
+                            "group_name": None,
+                            "mode": partner_anruf.mode,
+                            "device_id": None,
+                            "device_type": "web",
+                            "started_at": partner_anruf.started_at,
+                            "partner": {
+                                "user_id": partner_uid,
+                                "username": partner_anruf.user_username or "Gesprächspartner",
+                                "avatar_url": partner_anruf.user_avatar_url,
+                            },
+                        }
+            return None
 
     @classmethod
     def heartbeat(cls, user_id: int, device_id: str | None = None) -> bool:

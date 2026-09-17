@@ -18,6 +18,7 @@ import {
   beendeAktivenAnrufRemote,
   brichAnrufAb,
   holeAktivenAnruf,
+  holeAusstehendeAnrufe,
   holeInAnruf,
   holeZugang,
   ladeZuAnrufEin,
@@ -25,7 +26,9 @@ import {
   sendeAnrufHeartbeat,
   verlasseAnruf,
   type ActiveCallInfo,
+  type PendingGroupCallInfo,
 } from '@/api/calls'
+import { useAuthStore } from '@/stores/authStore'
 import { getDeviceId, getDeviceType } from '@/lib/deviceIdentity'
 import {
   E2eeNichtUnterstuetzt,
@@ -144,6 +147,8 @@ export interface UseCallState {
   hinweise: CallHinweis[]
   /** Ein auf einem anderen Gerät laufender Anruf desselben Kontos (Discord-Style). */
   crossDeviceCall: ActiveCallInfo | null
+  /** Aktive Gruppenanrufe, denen beigetreten werden kann. */
+  activeGroupCalls: PendingGroupCallInfo[]
 
   initiateCall: (partner: CallPartner, mode: CallMode) => Promise<void>
   receiveCall: (partner: CallPartner, mode: CallMode, raum: string) => void
@@ -176,6 +181,8 @@ export interface UseCallState {
   terminateCrossDeviceCall: () => Promise<void>
   /** Verarbeitet geräteübergreifende Sync-Ereignisse (Handoff, Übernahme, Beenden). */
   handleCrossDeviceEvent: (detail: unknown) => void
+  /** Verarbeitet globale Anruf-Ereignisse (Einladung, Abbruch, Gruppenstart, Schlüssel). */
+  handleCallSyncEvent: (detail: unknown) => void
 }
 
 /**
@@ -218,11 +225,28 @@ function stoppeHeartbeat() {
 
 let partnerDisconnectTimer: number | null = null
 let partnerTransferring = false
+let partnerAngenommen = false
 
 function brecheDisconnectTimerAb() {
   if (partnerDisconnectTimer !== null) {
     window.clearTimeout(partnerDisconnectTimer)
     partnerDisconnectTimer = null
+  }
+}
+
+/** Automatisches Auflegen/Verwerfen nach 1 Minute ohne Annahme. */
+const CALL_TIMEOUT_MS = 60_000
+let incomingCallTimer: number | null = null
+let outgoingCallTimer: number | null = null
+
+function brecheCallTimersAb() {
+  if (incomingCallTimer !== null) {
+    window.clearTimeout(incomingCallTimer)
+    incomingCallTimer = null
+  }
+  if (outgoingCallTimer !== null) {
+    window.clearTimeout(outgoingCallTimer)
+    outgoingCallTimer = null
   }
 }
 
@@ -295,15 +319,39 @@ type Bekannte = Map<number, { username: string; avatarUrl?: string | null }>
 
 function sammleTeilnehmer(room: Room, bekannte: Bekannte, sprechend: Set<string>): CallParticipant[] {
   const alle: Participant[] = [room.localParticipant, ...room.remoteParticipants.values()]
+  const currentUser = useAuthStore.getState().user
   return alle.map((teilnehmer) => {
-    const userId = benutzerIdAusIdentity(teilnehmer.identity) ?? 0
-    const stammdaten = bekannte.get(userId)
+    let meta: { user_id?: number; username?: string; avatar_url?: string | null } | null = null
+    if (teilnehmer.metadata) {
+      try {
+        meta = JSON.parse(teilnehmer.metadata)
+      } catch {}
+    }
+    const rawUserId = meta?.user_id ?? benutzerIdAusIdentity(teilnehmer.identity)
+    const userId = rawUserId ?? 0
+    const stammdaten = rawUserId ? bekannte.get(rawUserId) : undefined
     const istSelbst = teilnehmer.identity === room.localParticipant.identity
+
+    const resolvedUsername = istSelbst
+      ? (currentUser?.username || meta?.username || stammdaten?.username || anzeigename(teilnehmer))
+      : (meta?.username || stammdaten?.username || anzeigename(teilnehmer))
+
+    const resolvedAvatarUrl = istSelbst
+      ? (currentUser?.avatar_url ?? meta?.avatar_url ?? stammdaten?.avatarUrl ?? null)
+      : (meta?.avatar_url ?? stammdaten?.avatarUrl ?? null)
+
+    if (rawUserId) {
+      bekannte.set(rawUserId, {
+        username: resolvedUsername,
+        avatarUrl: resolvedAvatarUrl,
+      })
+    }
+
     return {
       userId,
       identity: teilnehmer.identity,
-      username: stammdaten?.username || anzeigename(teilnehmer),
-      avatarUrl: stammdaten?.avatarUrl ?? null,
+      username: resolvedUsername,
+      avatarUrl: resolvedAvatarUrl,
       isSelf: istSelbst,
       isMuted: mikrofonAus(teilnehmer),
       isCameraOff: kameraAus(teilnehmer),
@@ -380,9 +428,6 @@ export const useCallStore = create<UseCallState>((set, get) => {
     }
 
     room.on(RoomEvent.Connected, wennAktuell(() => {
-      // Sofort auf „aktiv": der Zähler soll laufen, sobald die Verbindung
-      // steht, nicht erst wenn der erste fremde Ton eintrifft. Alles andere
-      // sah aus wie ein Anruf, der nie zustande kommt.
       set({ state: 'active', reconnecting: false, errorMessage: null })
       spiegele()
     }))
@@ -398,7 +443,10 @@ export const useCallStore = create<UseCallState>((set, get) => {
     room.on(RoomEvent.ParticipantConnected, (teilnehmer) => {
       if (eigeneGeneration !== generation) return
       partnerTransferring = false
+      partnerAngenommen = true
       brecheDisconnectTimerAb()
+      brecheCallTimersAb()
+      set({ state: 'active' })
       spiegele()
       toneBeitritt()
       meldeHinweis('beitritt', `${nameVon(teilnehmer, bekannte)} ist beigetreten`)
@@ -435,6 +483,7 @@ export const useCallStore = create<UseCallState>((set, get) => {
     // Ein Moderator hat die erlaubten Quellen geändert. Ohne diese Zeile bliebe
     // der Mikrofonknopf bedienbar und täte nichts.
     room.on(RoomEvent.ParticipantPermissionsChanged, wennAktuell(spiegele))
+    room.on(RoomEvent.ParticipantMetadataChanged, wennAktuell(spiegele))
 
     // Der Browser hat die Wiedergabe freigegeben oder verweigert.
     room.on(RoomEvent.AudioPlaybackStatusChanged, wennAktuell(() => {
@@ -521,7 +570,11 @@ export const useCallStore = create<UseCallState>((set, get) => {
       meldeFehler(fehler, 'geraet')
       set({ isMuted: true })
     }
-    set({ state: 'active', isCameraOff: mode !== 'video', crossDeviceCall: null })
+    set({
+      state: 'active',
+      isCameraOff: mode !== 'video',
+      crossDeviceCall: null,
+    })
     starteHeartbeat(raum)
     spiegele()
   }
@@ -553,7 +606,9 @@ export const useCallStore = create<UseCallState>((set, get) => {
 
   const raeumeAuf = () => {
     stoppeHeartbeat()
+    brecheCallTimersAb()
     partnerTransferring = false
+    partnerAngenommen = false
     brecheDisconnectTimerAb()
     generation += 1
     const room = verbindung?.room
@@ -592,13 +647,26 @@ export const useCallStore = create<UseCallState>((set, get) => {
     serverStumm: false,
     hinweise: [],
     crossDeviceCall: null,
+    activeGroupCalls: [],
 
     initiateCall: async (partner, mode) => {
       raeumeAuf()
       bekannte.set(partner.userId, { username: partner.username, avatarUrl: partner.avatarUrl })
-      if (identitaet) {
+      const currentUser = useAuthStore.getState().user
+      if (currentUser) {
+        bekannte.set(currentUser.id, { username: currentUser.username, avatarUrl: currentUser.avatar_url })
+      } else if (identitaet) {
         bekannte.set(identitaet.userId, bekannte.get(identitaet.userId) ?? { username: 'Ich' })
       }
+      outgoingCallTimer = window.setTimeout(() => {
+        outgoingCallTimer = null
+        const hatFremde = (verbindung?.room.remoteParticipants.size ?? 0) > 0 ||
+          get().participants.some((p) => !p.isSelf)
+        if (get().state === 'outgoing' || !hatFremde) {
+          get().endCall()
+          toast.info('Niemand hat abgenommen.')
+        }
+      }, CALL_TIMEOUT_MS)
       const einladung = await ladeZuAnrufEin(partner.userId, mode)
       set({
         state: 'outgoing',
@@ -642,6 +710,17 @@ export const useCallStore = create<UseCallState>((set, get) => {
     receiveCall: (partner, mode, raum) => {
       raeumeAuf()
       bekannte.set(partner.userId, { username: partner.username, avatarUrl: partner.avatarUrl })
+      const currentUser = useAuthStore.getState().user
+      if (currentUser) {
+        bekannte.set(currentUser.id, { username: currentUser.username, avatarUrl: currentUser.avatar_url })
+      }
+      incomingCallTimer = window.setTimeout(() => {
+        incomingCallTimer = null
+        if (get().state === 'incoming') {
+          get().rejectCall()
+          toast.info('Anruf verpasst.')
+        }
+      }, CALL_TIMEOUT_MS)
       set({
         state: 'incoming',
         kind: 'direkt',
@@ -663,6 +742,8 @@ export const useCallStore = create<UseCallState>((set, get) => {
     },
 
     acceptCall: async () => {
+      brecheCallTimersAb()
+      partnerAngenommen = true
       const { raum, mode } = get()
       if (!raum) return
       set({ state: 'connecting' })
@@ -674,6 +755,7 @@ export const useCallStore = create<UseCallState>((set, get) => {
     },
 
     rejectCall: () => {
+      brecheCallTimersAb()
       const raum = get().raum
       if (raum) void lehneAnrufAb(raum).catch(() => {})
       get().endCall()
@@ -681,6 +763,10 @@ export const useCallStore = create<UseCallState>((set, get) => {
 
     joinGroupCall: async (group, raum, mitgliederIds) => {
       raeumeAuf()
+      const currentUser = useAuthStore.getState().user
+      if (currentUser) {
+        bekannte.set(currentUser.id, { username: currentUser.username, avatarUrl: currentUser.avatar_url })
+      }
       set({
         state: 'connecting',
         kind: 'gruppe',
@@ -719,11 +805,15 @@ export const useCallStore = create<UseCallState>((set, get) => {
       const { raum, state, kind, group } = get()
       // Nur wenn wirklich ein Gespräch lief: beim Wegdrücken eines eingehenden
       // Anrufs klingelt es schon, da wäre ein Auflegeton nur Lärm.
-      if (state === 'active' || state === 'connecting') toneAufgelegt()
-      if (raum && state === 'outgoing' && kind === 'direkt') {
+      if (state === 'active' || state === 'connecting' || state === 'outgoing') toneAufgelegt()
+      if (raum && kind === 'direkt') {
         // Auflegen, während es beim Gegenüber noch klingelt: die Einladung muss
         // serverseitig sterben, sonst klingelt es dort weiter.
-        void brichAnrufAb(raum).catch(() => {})
+        // Bei einem bereits verbundenen Anruf wird die Einladung nicht mehr abgebrochen,
+        // sondern der Anruf regulär über verlasseAnruf verlassen.
+        if (state === 'outgoing' || !partnerAngenommen) {
+          void brichAnrufAb(raum).catch(() => {})
+        }
       }
       if (kind === 'gruppe' && raum && group && group.canModerate) {
         void beendeGruppenanruf(group.id, raum).catch(() => {})
@@ -887,14 +977,42 @@ export const useCallStore = create<UseCallState>((set, get) => {
     checkActiveCall: async () => {
       try {
         const res = await holeAktivenAnruf()
-        if (res.has_active_call && res.call) {
-          const myId = getDeviceId()
-          if (res.call.device_id !== myId && get().state === 'idle') {
-            set({ crossDeviceCall: res.call })
-            return
-          }
+        if (res.has_active_call && res.call && get().state === 'idle') {
+          set({ crossDeviceCall: res.call })
+        } else {
+          set({ crossDeviceCall: null })
         }
-        set({ crossDeviceCall: null })
+      } catch {
+        // Nicht fatal bei Netzwerkfehlern
+      }
+
+      try {
+        const pending = await holeAusstehendeAnrufe()
+        if (pending.group_calls) {
+          set({ activeGroupCalls: pending.group_calls })
+        }
+        if (get().state === 'incoming') {
+          const isStillPending = pending.has_pending_call && pending.call && pending.call.signaling_token === get().raum
+          if (!isStillPending) {
+            brecheCallTimersAb()
+            set({
+              state: 'idle',
+              partner: null,
+              raum: null,
+            })
+          }
+        } else if (pending.has_pending_call && pending.call && get().state === 'idle') {
+          const c = pending.call
+          get().receiveCall(
+            {
+              userId: c.caller_id,
+              username: c.caller_username,
+              avatarUrl: c.caller_avatar_url ?? null,
+            },
+            c.mode === 'video' ? 'video' : 'audio',
+            c.signaling_token,
+          )
+        }
       } catch {
         // Nicht fatal bei Netzwerkfehlern
       }
@@ -905,7 +1023,13 @@ export const useCallStore = create<UseCallState>((set, get) => {
       if (!crossDeviceCall) return
       const target = crossDeviceCall
       raeumeAuf()
+      partnerAngenommen = true
       set({ crossDeviceCall: null })
+
+      const currentUser = useAuthStore.getState().user
+      if (currentUser) {
+        bekannte.set(currentUser.id, { username: currentUser.username, avatarUrl: currentUser.avatar_url })
+      }
 
       if (target.art === 'direkt' && target.partner) {
         bekannte.set(target.partner.user_id, {
@@ -937,6 +1061,10 @@ export const useCallStore = create<UseCallState>((set, get) => {
           reconnecting: false,
           errorMessage: null,
         })
+        if (!raumSchluessel) raumSchluessel = erzeugeRaumSchluessel()
+        if (identitaet) {
+          void verteileAn(target.raum, raumSchluessel, target.partner.user_id, identitaet.publicKeyJwk)
+        }
         try {
           await verbindeMitRaum('direkt', target.raum, undefined, target.mode)
           toneUebergabe()
@@ -992,9 +1120,9 @@ export const useCallStore = create<UseCallState>((set, get) => {
 
       if (ev.type === 'user_call_state_changed') {
         const active = ev.active_call as ActiveCallInfo | null | undefined
-        if (active && active.device_id !== myId && get().state === 'idle') {
+        if (active && get().state === 'idle') {
           set({ crossDeviceCall: active })
-        } else if (!active || active.device_id === myId) {
+        } else {
           set({ crossDeviceCall: null })
         }
       } else if (ev.type === 'call_transferred') {
@@ -1020,6 +1148,110 @@ export const useCallStore = create<UseCallState>((set, get) => {
         }
       }
     },
+
+    handleCallSyncEvent: (detail: unknown) => {
+      if (!detail || typeof detail !== 'object') return
+      const ev = detail as { type?: string; [key: string]: unknown }
+      const currentUserId = useAuthStore.getState().user?.id
+
+      if (ev.type === 'direct_call_invitation') {
+        if (
+          ev.recipient_id &&
+          currentUserId &&
+          Number(ev.recipient_id) !== Number(currentUserId)
+        ) {
+          return
+        }
+        if (ev.signaling_token && ev.caller_id && ev.caller_username) {
+          if (get().state === 'incoming' && get().raum === ev.signaling_token) {
+            return
+          }
+          get().receiveCall(
+            {
+              userId: Number(ev.caller_id),
+              username: String(ev.caller_username),
+              avatarUrl: (ev.caller_avatar_url as string | null | undefined) ?? null,
+            },
+            ev.mode === 'video' ? 'video' : 'audio',
+            String(ev.signaling_token),
+          )
+        }
+      } else if (ev.type === 'direct_call_rejected') {
+        if (
+          ev.recipient_id &&
+          currentUserId &&
+          Number(ev.recipient_id) === Number(currentUserId) &&
+          get().state === 'outgoing'
+        ) {
+          get().endCall()
+          toast.info('Der Anruf wurde abgelehnt.')
+        }
+      } else if (ev.type === 'direct_call_cancelled') {
+        const call = get()
+        if (
+          (!ev.recipient_id || !currentUserId || Number(ev.recipient_id) === Number(currentUserId)) &&
+          (call.state === 'incoming' || call.state === 'connecting') &&
+          (!ev.signaling_token || ev.signaling_token === call.raum)
+        ) {
+          call.endCall()
+          toast.info('Der Anrufer hat aufgelegt.')
+        }
+      } else if (ev.type === 'group_call_started') {
+        if (ev.group_id && ev.room_token) {
+          const groupId = Number(ev.group_id)
+          const roomToken = String(ev.room_token)
+          set((s) => {
+            const exists = s.activeGroupCalls.some((g) => g.group_id === groupId)
+            if (exists) {
+              return {
+                activeGroupCalls: s.activeGroupCalls.map((g) =>
+                  g.group_id === groupId ? { ...g, room_token: roomToken } : g,
+                ),
+              }
+            }
+            return {
+              activeGroupCalls: [
+                ...s.activeGroupCalls,
+                {
+                  group_id: groupId,
+                  group_name: String(ev.group_name || 'Gruppenanruf'),
+                  avatar_url: (ev.avatar_url as string | null | undefined) ?? null,
+                  room_token: roomToken,
+                  participant_count: 1,
+                },
+              ],
+            }
+          })
+        }
+      } else if (ev.type === 'group_call_ended') {
+        if (ev.group_id && ev.room_token) {
+          const groupId = Number(ev.group_id)
+          const roomToken = String(ev.room_token)
+          set((s) => ({
+            activeGroupCalls: s.activeGroupCalls.filter(
+              (g) => !(g.group_id === groupId && g.room_token === roomToken),
+            ),
+          }))
+          const call = get()
+          if (call.group?.id === groupId && call.raum === roomToken) {
+            call.endCall()
+            toast.info('Der Gruppenanruf wurde beendet.')
+          }
+        }
+      } else if (ev.type === 'call_key') {
+        if (ev.raum && ev.ciphertext) {
+          void get().acceptRoomKey(String(ev.raum), String(ev.ciphertext))
+        }
+      } else {
+        get().handleCrossDeviceEvent(detail)
+      }
+    },
+  }
+})
+
+useAuthStore.subscribe((state, prevState) => {
+  if (prevState.user && !state.user) {
+    setzeAnrufIdentitaet(null)
   }
 })
 

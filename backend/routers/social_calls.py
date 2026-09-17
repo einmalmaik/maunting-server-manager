@@ -10,6 +10,7 @@ lange der Raum lebt, und danach niemand mehr.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Literal
 
@@ -34,6 +35,9 @@ from schemas.calls import (
     LivekitStatusResponse,
     LivekitTestRequest,
     LivekitTestResponse,
+    PendingCallInfo,
+    PendingCallResponse,
+    PendingGroupCallInfo,
 )
 from schemas.social import GroupCallRoomJoinRequest, GroupCallRoomResponse
 from services import audit_service, livekit_service
@@ -98,7 +102,7 @@ def einladung_erstellen(
         )
     _konfiguration_oder_fehler(db)
 
-    raum = CallRoomService.issue(user.id, target_user_id)
+    raum = CallRoomService.issue(user.id, target_user_id, mode=mode)
     SyncEventService.publish(
         {
             "type": "direct_call_invitation",
@@ -226,6 +230,8 @@ def einladung_abbrechen(
     Entwertet die Einladung, damit ein spaetes Annehmen keinen Raum mehr
     oeffnet, und laesst das Klingeln beim Gegenueber serverseitig verstummen.
     """
+    if CallRoomService.is_accepted(signaling_token):
+        return {"ok": True}
     empfaenger_id = CallRoomService.cancel(signaling_token, user.id)
     if empfaenger_id is None:
         raise HTTPException(
@@ -276,6 +282,58 @@ def aktiver_anruf(
     return {"has_active_call": call is not None, "call": call}
 
 
+@router.get(
+    "/pending",
+    response_model=PendingCallResponse,
+    dependencies=[Depends(_check_social_enabled)],
+)
+def ausstehende_anrufe(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Prüft auf eingehende Direkt-Anrufe und aktive Gruppenanrufe des Nutzers."""
+    pending = CallRoomService.get_pending_invitation(user.id)
+    pending_call = None
+    if pending is not None:
+        caller = db.query(User).filter_by(id=pending["caller_id"], is_active=True).first()
+        if caller:
+            pending_call = {
+                "signaling_token": pending["signaling_token"],
+                "caller_id": caller.id,
+                "caller_username": caller.username,
+                "caller_avatar_url": caller.avatar_url,
+                "mode": pending.get("mode", "audio"),
+                "expires_in": pending["expires_in"],
+            }
+
+    group_calls: list[dict] = []
+    user_groups = (
+        db.query(ChatGroupMember.group_id)
+        .filter(ChatGroupMember.user_id == user.id)
+        .all()
+    )
+    group_ids = [row[0] for row in user_groups]
+    if group_ids:
+        groups = db.query(ChatGroup).filter(ChatGroup.id.in_(group_ids)).all()
+        for g in groups:
+            room_token = GroupCallRoomRegistry.find_for_group(g.id)
+            if room_token:
+                participants_count = livekit_service.raum_teilnehmer(room_token, db)
+                group_calls.append({
+                    "group_id": g.id,
+                    "group_name": g.name,
+                    "avatar_url": g.avatar_url,
+                    "room_token": room_token,
+                    "participant_count": participants_count,
+                })
+
+    return {
+        "has_pending_call": pending_call is not None,
+        "call": pending_call,
+        "group_calls": group_calls,
+    }
+
+
 @router.post(
     "/leave",
     dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
@@ -285,6 +343,29 @@ def anruf_verlassen(
     user: User = Depends(get_current_user),
 ) -> dict:
     """Meldet, dass das aktuelle Gerät den Anruf verlassen hat."""
+    if req.raum:
+        ersteller_id = CallRoomService.ersteller(req.raum)
+        if ersteller_id == user.id and not CallRoomService.is_accepted(req.raum):
+            empfaenger_id = CallRoomService.cancel(req.raum, user.id)
+            if empfaenger_id is not None:
+                UserActiveCallRegistry.remove_room(req.raum)
+                SyncEventService.publish(
+                    {
+                        "type": "direct_call_cancelled",
+                        "signaling_token": req.raum,
+                        "caller_id": user.id,
+                        "recipient_id": empfaenger_id,
+                    },
+                    user_id=empfaenger_id,
+                )
+                SyncEventService.publish(
+                    {
+                        "type": "user_call_state_changed",
+                        "user_id": empfaenger_id,
+                        "active_call": None,
+                    },
+                    user_id=empfaenger_id,
+                )
     removed = UserActiveCallRegistry.leave(user.id, raum=req.raum, device_id=req.device_id)
     if removed:
         SyncEventService.publish(
@@ -434,12 +515,18 @@ def zugangstoken(
             group_name = gruppe_obj.name
 
     identity = f"u{user.id}"
+    user_metadata = json.dumps({
+        "user_id": user.id,
+        "username": user.username,
+        "avatar_url": user.avatar_url,
+    })
     token = livekit_service.zugangstoken(
         req.raum,
         identity,
         user.username,
         api_key=konf.api_key,
         api_secret=konf.api_secret,
+        metadata=user_metadata,
     )
 
     curr_call, prev_call, is_handoff = UserActiveCallRegistry.register(
@@ -454,6 +541,8 @@ def zugangstoken(
         partner_id=partner_id,
         partner_username=partner_username,
         partner_avatar_url=partner_avatar_url,
+        user_username=user.username,
+        user_avatar_url=user.avatar_url,
     )
 
     if is_handoff and prev_call:

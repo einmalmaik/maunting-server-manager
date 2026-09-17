@@ -13,7 +13,6 @@ import {
   PhoneOff,
   Settings,
   ShieldCheck,
-  User,
   UserPlus,
   Users,
   Video as VideoIcon,
@@ -21,7 +20,7 @@ import {
   Volume2,
 } from 'lucide-react'
 import { Button } from '@/Singra/UI'
-import { apiUrl } from '@/config/api'
+import { Avatar } from '@/Singra/UI/Avatar'
 import { aktiverRaum, useCallStore, type CallParticipant } from '@/stores/useCallStore'
 import { bildschirmfreigabeMoeglich } from '@/services/livekitRaum'
 import { sendeGeraeteBenachrichtigung } from '@/lib/benachrichtigung'
@@ -128,12 +127,12 @@ export const CallOverlay: React.FC = () => {
   const [audioEingaenge, setAudioEingaenge] = useState<DropdownOption[]>([])
   const [videoEingaenge, setVideoEingaenge] = useState<DropdownOption[]>([])
   const [audioAusgaenge, setAudioAusgaenge] = useState<DropdownOption[]>([])
-  const [avatarKaputt, setAvatarKaputt] = useState(false)
 
   const klingeltonRef = useRef<{ context: AudioContext; timer: number } | null>(null)
   const [klingeltonBlockiert, setKlingeltonBlockiert] = useState(false)
 
   const istGruppe = kind === 'gruppe'
+  const partnerVerbunden = istGruppe || participants.some((p) => !p.isSelf)
   const fokussierteFreigabe = useMemo(
     () => screenShares.find((f) => f.identity === focusedShareIdentity) ?? null,
     [screenShares, focusedShareIdentity],
@@ -150,14 +149,10 @@ export const CallOverlay: React.FC = () => {
   )
 
   useEffect(() => {
-    setAvatarKaputt(false)
-  }, [partner?.avatarUrl, partner?.userId])
-
-  useEffect(() => {
-    if (state !== 'active') return
+    if (state !== 'active' || !partnerVerbunden) return
     const intervall = window.setInterval(() => incrementDuration(), 1000)
     return () => window.clearInterval(intervall)
-  }, [state, incrementDuration])
+  }, [state, partnerVerbunden, incrementDuration])
 
   // Sobald eine zweite Freigabe dazukommt oder die fokussierte verschwindet,
   // muss die Bühne etwas Sinnvolles zeigen statt ins Leere.
@@ -175,6 +170,18 @@ export const CallOverlay: React.FC = () => {
   useEffect(() => {
     if (gewaehlterTeilnehmer && !menueTeilnehmer) setGewaehlterTeilnehmer(null)
   }, [gewaehlterTeilnehmer, menueTeilnehmer])
+
+  // Globaler Empfang von Anrufereignissen über msm:sync-event (auch außerhalb des Chats)
+  useEffect(() => {
+    const onSyncEvent = (e: Event) => {
+      const custom = e as CustomEvent<{ type?: string; [key: string]: unknown }>
+      if (custom.detail) {
+        useCallStore.getState().handleCallSyncEvent(custom.detail)
+      }
+    }
+    window.addEventListener('msm:sync-event', onSyncEvent)
+    return () => window.removeEventListener('msm:sync-event', onSyncEvent)
+  }, [])
 
   const stoppeKlingelton = () => {
     const aktuell = klingeltonRef.current
@@ -253,7 +260,7 @@ export const CallOverlay: React.FC = () => {
 
   const kopfStatus = reconnecting
     ? 'Verbindung wird wiederhergestellt…'
-    : state === 'outgoing'
+    : state === 'outgoing' || (!partnerVerbunden && state !== 'incoming' && state !== 'connecting')
       ? 'Klingelt…'
       : state === 'incoming'
         ? 'Eingehender Anruf'
@@ -288,15 +295,13 @@ export const CallOverlay: React.FC = () => {
       {/* Kopf */}
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-outline-variant/40 bg-surface-container-low/60 p-3 sm:p-4">
         <div className="flex min-w-0 items-center gap-2.5">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-status-success/15 text-status-success">
-            {kopfBild ? (
-              <img src={apiUrl(kopfBild)} alt="" className="h-full w-full object-cover" />
-            ) : istGruppe ? (
-              <Users className="h-5 w-5" />
-            ) : (
-              <ShieldCheck className="h-5 w-5" />
-            )}
-          </div>
+          {kopfBild ? (
+            <Avatar src={kopfBild} name={titel} size="sm" className="shrink-0" />
+          ) : (
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-status-success/15 text-status-success">
+              {istGruppe ? <Users className="h-5 w-5" /> : <ShieldCheck className="h-5 w-5" />}
+            </div>
+          )}
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-1.5 text-sm font-semibold">
               <span className="truncate">{titel}</span>
@@ -347,20 +352,12 @@ export const CallOverlay: React.FC = () => {
         {state === 'incoming' && partner ? (
           <div className="m-auto flex w-full max-w-md flex-col items-center gap-6 rounded-3xl border border-status-success/30 bg-surface-container-low p-8 text-center shadow-2xl">
             <div className="relative">
-              <div className="h-28 w-28 overflow-hidden rounded-full border-4 border-status-success/50 bg-status-success/15">
-                {partner.avatarUrl && !avatarKaputt ? (
-                  <img
-                    src={apiUrl(partner.avatarUrl)}
-                    alt={partner.username}
-                    className="h-full w-full object-cover"
-                    onError={() => setAvatarKaputt(true)}
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center text-3xl font-bold text-status-success">
-                    {partner.username.slice(0, 2).toUpperCase()}
-                  </div>
-                )}
-              </div>
+              <Avatar
+                src={partner.avatarUrl}
+                name={partner.username}
+                size="xl"
+                className="h-28 w-28 text-3xl border-4 border-status-success/50"
+              />
               <span className="absolute inset-0 animate-ping rounded-full border-2 border-status-success/50" />
             </div>
             <div>
@@ -461,7 +458,7 @@ export const CallOverlay: React.FC = () => {
                       </button>
                     ))}
                   </div>
-                ) : participants.length > 0 ? (
+                ) : participants.length > 0 && partnerVerbunden ? (
                   <div
                     className={`grid h-full auto-rows-fr gap-2 overflow-y-auto ${rasterKlassen(
                       participants.length,
@@ -477,22 +474,16 @@ export const CallOverlay: React.FC = () => {
                   </div>
                 ) : (
                   <div className="flex h-full flex-col items-center justify-center gap-4 text-on-surface-variant">
-                    <div className="flex h-24 w-24 items-center justify-center rounded-full border-2 border-status-success/30 bg-status-success/10 sm:h-28 sm:w-28">
-                      {partner?.avatarUrl && !avatarKaputt ? (
-                        <img
-                          src={apiUrl(partner.avatarUrl)}
-                          alt={partner.username}
-                          className="h-full w-full rounded-full object-cover"
-                          onError={() => setAvatarKaputt(true)}
-                        />
-                      ) : (
-                        <User className="h-12 w-12 sm:h-14 sm:w-14" />
-                      )}
-                    </div>
+                    <Avatar
+                      src={partner?.avatarUrl}
+                      name={titel}
+                      size="xl"
+                      className="h-24 w-24 sm:h-28 sm:w-28 text-3xl border-2 border-status-success/30 bg-status-success/10"
+                    />
                     <div className="max-w-full px-4 text-center">
                       <div className="truncate text-base font-semibold text-on-surface">{titel}</div>
                       <div className="text-xs text-on-surface-variant">
-                        {state === 'outgoing' ? 'Wartet auf Annahme' : 'Verbindet…'}
+                        {!partnerVerbunden ? 'Wartet auf Annahme…' : 'Verbindet…'}
                       </div>
                     </div>
                   </div>
@@ -504,7 +495,7 @@ export const CallOverlay: React.FC = () => {
                 an dem man die Gesichter noch sieht — deshalb immer sichtbar.
                 Sie scrollt in ihrer eigenen Achse: quer auf schmalen Fenstern,
                 längs ab `lg`. Nichts darin darf breiter werden als sie selbst. */}
-            {participants.length > 0 && (
+            {participants.length > 0 && partnerVerbunden && (
               <aside className="flex w-full min-w-0 shrink-0 flex-col overflow-hidden rounded-3xl border border-outline-variant/40 bg-surface-container-low/70 p-3 lg:w-[17rem]">
                 <div className="mb-2 flex shrink-0 items-center justify-between text-[10px] uppercase tracking-[0.18em] text-on-surface-variant">
                   <span>Im Gespräch</span>

@@ -395,3 +395,127 @@ def test_leave_and_remote_terminate(client: TestClient, db: Session) -> None:
         (e for e in events_bob if e.get("type") in ("direct_call_cancelled", "call_ended_remotely")), None
     )
     assert bob_term_event is not None
+
+
+def test_leave_unaccepted_call_cancels_call(client: TestClient, db: Session) -> None:
+    alice = _user(db, "alice_unacc")
+    bob = _user(db, "bob_unacc")
+    _befreunde(db, alice, bob)
+
+    c_alice = _login(client, alice.username)
+    c_bob = _login(client, bob.username)
+
+    resp_inv = client.post(
+        f"/api/social/calls/invite/{bob.id}",
+        cookies=c_alice,
+        headers=_csrf(c_alice),
+    )
+    raum = resp_inv.json()["signaling_token"]
+
+    _, sse_queue_bob = SyncEventService.subscribe(bob.id)
+
+    # Alice legt auf bevor Bob angenommen hat
+    resp_leave = client.post(
+        "/api/social/calls/leave",
+        json={"raum": raum, "device_id": "phone-alice"},
+        cookies=c_alice,
+        headers=_csrf(c_alice),
+    )
+    assert resp_leave.status_code == 200
+
+    # Bob hat direct_call_cancelled erhalten
+    events_bob = []
+    while not sse_queue_bob.empty():
+        events_bob.append(sse_queue_bob.get_nowait())
+    cancel_ev = next((e for e in events_bob if e.get("type") == "direct_call_cancelled"), None)
+    assert cancel_ev is not None
+
+    # Für Bob gibt es keine ausstehende Einladung mehr
+    resp_pending = client.get("/api/social/calls/pending", cookies=c_bob)
+    assert resp_pending.json()["has_pending_call"] is False
+
+
+def test_leave_accepted_call_preserves_room_for_rejoining(client: TestClient, db: Session) -> None:
+    alice = _user(db, "alice_acc")
+    bob = _user(db, "bob_acc")
+    _befreunde(db, alice, bob)
+
+    c_alice = _login(client, alice.username)
+    c_bob = _login(client, bob.username)
+
+    resp_inv = client.post(
+        f"/api/social/calls/invite/{bob.id}",
+        cookies=c_alice,
+        headers=_csrf(c_alice),
+    )
+    raum = resp_inv.json()["signaling_token"]
+
+    # Alice holt Token
+    client.post(
+        "/api/social/calls/token",
+        json={"art": "direkt", "raum": raum, "device_id": "phone-alice"},
+        cookies=c_alice,
+        headers=_csrf(c_alice),
+    )
+    # Bob nimmt an (holt Token)
+    client.post(
+        "/api/social/calls/token",
+        json={"art": "direkt", "raum": raum, "device_id": "desktop-bob"},
+        cookies=c_bob,
+        headers=_csrf(c_bob),
+    )
+
+    _, sse_queue_bob = SyncEventService.subscribe(bob.id)
+
+    # Alice verlässt den Raum (z. B. versehentlicher Reload / Navigation)
+    resp_leave = client.post(
+        "/api/social/calls/leave",
+        json={"raum": raum, "device_id": "phone-alice"},
+        cookies=c_alice,
+        headers=_csrf(c_alice),
+    )
+    assert resp_leave.status_code == 200
+
+    # Weil der Anruf angenommen war, darf KEIN direct_call_cancelled gesendet werden!
+    events_bob = []
+    while not sse_queue_bob.empty():
+        events_bob.append(sse_queue_bob.get_nowait())
+    cancel_ev = next((e for e in events_bob if e.get("type") == "direct_call_cancelled"), None)
+    assert cancel_ev is None
+
+    # Raum ist im CallRoomService noch bekannt
+    assert CallRoomService.is_known(raum) is True
+
+    # Alice kann ihren aktiven Anruf (weil Bob noch wartet) über /active wieder abfragen und beitreten
+    resp_act_alice = client.get("/api/social/calls/active", cookies=c_alice)
+    assert resp_act_alice.json()["has_active_call"] is True
+    assert resp_act_alice.json()["call"]["raum"] == raum
+
+
+def test_unaccepted_call_does_not_offer_active_call_to_callee(client: TestClient, db: Session) -> None:
+    alice = _user(db, "alice_unacc_rejoin")
+    bob = _user(db, "bob_unacc_rejoin")
+    _befreunde(db, alice, bob)
+
+    c_alice = _login(client, alice.username)
+    c_bob = _login(client, bob.username)
+
+    # Alice ruft Bob an
+    resp_inv = client.post(
+        f"/api/social/calls/invite/{bob.id}",
+        cookies=c_alice,
+        headers=_csrf(c_alice),
+    )
+    raum = resp_inv.json()["signaling_token"]
+
+    # Bob hat noch NICHT angenommen!
+    # Bob darf keinen aktiven Anruf (/active) sehen, da er noch nicht angenommen hat:
+    resp_act_bob = client.get("/api/social/calls/active", cookies=c_bob)
+    assert resp_act_bob.json()["has_active_call"] is False
+
+    # Stattdessen muss Bob die ausstehende Einladung unter /pending sehen:
+    resp_pen_bob = client.get("/api/social/calls/pending", cookies=c_bob)
+    assert resp_pen_bob.json()["has_pending_call"] is True
+    assert resp_pen_bob.json()["call"]["signaling_token"] == raum
+
+

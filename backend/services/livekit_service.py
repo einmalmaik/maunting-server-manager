@@ -249,6 +249,7 @@ def zugangstoken(
     api_secret: str,
     ttl_sekunden: int = TOKEN_TTL_SEKUNDEN,
     darf_veroeffentlichen: bool = True,
+    metadata: str | None = None,
 ) -> str:
     """Erzeugt ein LiveKit-Zugangstoken (HS256-JWT mit `video`-Anspruch)."""
     jetzt = int(time.time())
@@ -267,6 +268,8 @@ def zugangstoken(
             "canUpdateOwnMetadata": True,
         },
     }
+    if metadata is not None:
+        anspruch["metadata"] = metadata
     return jwt.encode(anspruch, api_secret, algorithm="HS256")
 
 

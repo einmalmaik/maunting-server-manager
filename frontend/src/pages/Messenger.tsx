@@ -642,8 +642,11 @@ export function Messenger() {
   // und auszupacken. Er hängt bewusst nicht selbst am Schlüsselbund: er soll
   // nicht wissen, wie eine Identität zustande kommt, nur dass es eine gibt.
   useEffect(() => {
-    if (!currentUserId || identity.state !== 'ready' || !identity.sendPair) {
+    if (!currentUserId) {
       setzeAnrufIdentitaet(null)
+      return
+    }
+    if (identity.state !== 'ready' || !identity.sendPair) {
       return
     }
     setzeAnrufIdentitaet({
@@ -651,7 +654,6 @@ export function Messenger() {
       publicKeyJwk: identity.sendPair.publicKeyJwk,
       decryptionKeys: identity.decryptionKeys,
     })
-    return () => setzeAnrufIdentitaet(null)
   }, [currentUserId, identity])
 
   // 2. Load Friends, Groups, Team Members, Public Users, Direct Chats, and Stories
@@ -1721,51 +1723,10 @@ export function Messenger() {
         setActiveGroup((current) =>
           current?.id === groupId ? { ...current, room_token: roomToken } : current
         )
-      } else if (detail?.type === 'direct_call_invitation') {
-        if (
-          detail.recipient_id &&
-          currentUserId &&
-          Number(detail.recipient_id) !== Number(currentUserId)
-        ) {
-          return
-        }
-        if (detail.signaling_token && detail.caller_id && detail.caller_username) {
-          useCallStore.getState().receiveCall(
-            {
-              userId: Number(detail.caller_id),
-              username: String(detail.caller_username),
-              avatarUrl: detail.caller_avatar_url ?? null,
-            },
-            detail.mode === 'video' ? 'video' : 'audio',
-            String(detail.signaling_token),
-          )
-        }
-      } else if (detail?.type === 'direct_call_rejected') {
-        if (
-          detail.recipient_id &&
-          currentUserId &&
-          Number(detail.recipient_id) === Number(currentUserId) &&
-          useCallStore.getState().state === 'outgoing'
-        ) {
-          useCallStore.getState().endCall()
-          toast.info('Der Anruf wurde abgelehnt.')
-        }
-      } else if (detail?.type === 'direct_call_cancelled') {
-        const call = useCallStore.getState()
-        if (
-          detail.recipient_id &&
-          currentUserId &&
-          Number(detail.recipient_id) === Number(currentUserId) &&
-          (call.state === 'incoming' || call.state === 'connecting') &&
-          (!detail.signaling_token || detail.signaling_token === call.raum)
-        ) {
-          call.endCall()
-          toast.info('Der Anrufer hat aufgelegt.')
-        }
+        useCallStore.getState().handleCallSyncEvent(detail)
       } else if (detail?.type === 'group_call_ended') {
         if (detail.group_id && detail.room_token) {
           const groupId = Number(detail.group_id)
-          const roomToken = String(detail.room_token)
           setGroups((prev) =>
             prev.map((group) =>
               group.id === groupId ? { ...group, room_token: null } : group
@@ -1774,27 +1735,19 @@ export function Messenger() {
           setActiveGroup((current) =>
             current?.id === groupId ? { ...current, room_token: null } : current
           )
-          const call = useCallStore.getState()
-          if (call.group?.id === groupId && call.raum === roomToken) {
-            call.endCall()
-            toast.info('Der Gruppenanruf wurde beendet.')
-          }
-        }
-      } else if (detail?.type === 'call_key') {
-        // Der Raumschlüssel eines Anrufs, verpackt für dieses Konto. Ohne ihn
-        // bleibt das Gespräch stumm, weil die Medien verschlüsselt ankommen.
-        if (detail.raum && detail.ciphertext) {
-          void useCallStore
-            .getState()
-            .acceptRoomKey(String(detail.raum), String(detail.ciphertext))
+          useCallStore.getState().handleCallSyncEvent(detail)
         }
       } else if (
+        detail?.type === 'direct_call_invitation' ||
+        detail?.type === 'direct_call_rejected' ||
+        detail?.type === 'direct_call_cancelled' ||
+        detail?.type === 'call_key' ||
         detail?.type === 'user_call_state_changed' ||
         detail?.type === 'call_transferred' ||
         detail?.type === 'call_superseded' ||
         detail?.type === 'call_ended_remotely'
       ) {
-        useCallStore.getState().handleCrossDeviceEvent(detail)
+        useCallStore.getState().handleCallSyncEvent(detail)
       } else if (detail?.type === 'e2ee_blind_message') {
         const isCurrentActive = detail.blind_mailbox_id === blindMailboxId
         // Outgoing Echo Prevention: Sender niemals benachrichtigen

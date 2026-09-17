@@ -18,11 +18,13 @@ type Handler = (...args: unknown[]) => void
 class FakeParticipant {
   identity: string
   name: string
+  metadata: string | null = null
   private spuren = new Map<string, { isMuted: boolean; track: unknown }>()
 
-  constructor(identity: string, name = '') {
+  constructor(identity: string, name = '', metadata: string | null = null) {
     this.identity = identity
     this.name = name
+    this.metadata = metadata
   }
 
   getTrackPublication(quelle: string) {
@@ -51,8 +53,8 @@ class FakeRoom {
     for (const fn of this.handler.get(ereignis) ?? []) fn(...args)
   }
 
-  tritt_bei(identity: string, name = '') {
-    const teilnehmer = new FakeParticipant(identity, name)
+  tritt_bei(identity: string, name = '', metadata: string | null = null) {
+    const teilnehmer = new FakeParticipant(identity, name, metadata)
     this.remoteParticipants.set(identity, teilnehmer)
     this.feuere(RoomEvent.ParticipantConnected, teilnehmer)
     return teilnehmer
@@ -105,6 +107,7 @@ const api = {
   holeZugang: vi.fn(),
   beendeGruppenanruf: vi.fn().mockResolvedValue(undefined),
   holeAktivenAnruf: vi.fn().mockResolvedValue({ has_active_call: false, call: null }),
+  holeAusstehendeAnrufe: vi.fn().mockResolvedValue({ has_pending_call: false, call: null, group_calls: [] }),
   verlasseAnruf: vi.fn().mockResolvedValue(undefined),
   beendeAktivenAnrufRemote: vi.fn().mockResolvedValue(undefined),
   sendeAnrufHeartbeat: vi.fn().mockResolvedValue(undefined),
@@ -267,6 +270,24 @@ describe('Anruf aufbauen', () => {
 
     useCallStore.getState().endCall()
     expect(api.brichAnrufAb).toHaveBeenCalledWith('raum-1')
+  })
+
+  it('bricht beim Auflegen nach Connected aber vor Beitritt des Partners die Einladung ab', async () => {
+    await useCallStore.getState().initiateCall(PARTNER, 'audio')
+    aktuellerRaum.feuere(RoomEvent.Connected)
+    expect(useCallStore.getState().state).toBe('active')
+
+    useCallStore.getState().endCall()
+    expect(api.brichAnrufAb).toHaveBeenCalledWith('raum-1')
+  })
+
+  it('bricht beim Auflegen nach Annahme des Partners die Einladung NICHT ab', async () => {
+    await verbundenerAnruf()
+    aktuellerRaum.tritt_bei('u2', 'bob')
+
+    useCallStore.getState().endCall()
+    expect(api.brichAnrufAb).not.toHaveBeenCalled()
+    expect(api.verlasseAnruf).toHaveBeenCalledWith('raum-1', expect.anything())
   })
 
   it('lehnt einen eingehenden Anruf serverseitig ab', () => {
@@ -735,7 +756,7 @@ describe('Geräteübergreifendes Anruf-Handoff (Cross-Device)', () => {
     expect(useCallStore.getState().crossDeviceCall).toEqual(FREMDER_ANRUF)
   })
 
-  it('checkActiveCall: ignoriert Anruf, wenn er vom eigenen Gerät stammt', async () => {
+  it('checkActiveCall: setzt crossDeviceCall für Wiederbeitritt wenn man lokal idle ist', async () => {
     api.holeAktivenAnruf.mockResolvedValueOnce({
       has_active_call: true,
       call: { ...FREMDER_ANRUF, device_id: getDeviceId() },
@@ -743,7 +764,9 @@ describe('Geräteübergreifendes Anruf-Handoff (Cross-Device)', () => {
 
     await useCallStore.getState().checkActiveCall()
 
-    expect(useCallStore.getState().crossDeviceCall).toBeNull()
+    expect(useCallStore.getState().crossDeviceCall).toEqual(
+      expect.objectContaining({ device_id: getDeviceId() }),
+    )
   })
 
   it('checkActiveCall: ignoriert Anruf, wenn man lokal bereits telefoniert', async () => {
@@ -918,8 +941,8 @@ describe('Geräteübergreifendes Anruf-Handoff (Cross-Device)', () => {
       aktuellerRaum.tritt_bei('u2', 'bob')
       expect(useCallStore.getState().state).toBe('active')
 
-      // Nach Ablauf von 8 Sekunden bleibt der Anruf weiterhin aktiv, weil Bob wieder da ist
-      vi.advanceTimersByTime(8500)
+      // Nach Ablauf von 15 Sekunden bleibt der Anruf weiterhin aktiv, weil Bob wieder da ist
+      vi.advanceTimersByTime(15500)
       expect(useCallStore.getState().state).toBe('active')
     } finally {
       vi.useRealTimers()
@@ -944,12 +967,36 @@ describe('Geräteübergreifendes Anruf-Handoff (Cross-Device)', () => {
       aktuellerRaum.verlaesst('u2')
       expect(useCallStore.getState().state).toBe('active')
 
-      // Nach 8+ Sekunden Gnadenfrist ohne Wiederbeitritt wird der Anruf beendet
-      vi.advanceTimersByTime(8500)
+      // Nach 15+ Sekunden Gnadenfrist ohne Wiederbeitritt wird der Anruf beendet
+      vi.advanceTimersByTime(15500)
       expect(useCallStore.getState().state).toBe('idle')
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('checkActiveCall: erlaubt Wiederbeitritt auf demselben Gerät wenn noch aktiv', async () => {
+    const { getDeviceId } = await import('@/lib/deviceIdentity')
+    const myId = getDeviceId()
+    api.holeAktivenAnruf.mockResolvedValueOnce({
+      has_active_call: true,
+      call: {
+        ...FREMDER_ANRUF,
+        device_id: myId, // Selbes Gerät (z. B. nach Neuladen der Seite)
+      },
+    })
+    api.holeAusstehendeAnrufe.mockResolvedValueOnce({
+      has_pending_call: false,
+      call: null,
+      group_calls: [],
+    })
+
+    await useCallStore.getState().checkActiveCall()
+
+    // crossDeviceCall soll gesetzt sein, damit der Wiederbeitritts-Banner angezeigt wird
+    expect(useCallStore.getState().crossDeviceCall).toEqual(
+      expect.objectContaining({ device_id: myId }),
+    )
   })
 
   it('handleCrossDeviceEvent: zeigt Hinweis und spielt Ton bei call_partner_transferred', async () => {
@@ -974,5 +1021,140 @@ describe('Geräteübergreifendes Anruf-Handoff (Cross-Device)', () => {
     await useCallStore.getState().transferCallToThisDevice()
 
     expect(toene.toneUebergabe).toHaveBeenCalled()
+  })
+
+  it('automatischer Timeout: eingehender Anruf wird nach 60 Sekunden verworfen', () => {
+    vi.useFakeTimers()
+    try {
+      useCallStore.getState().receiveCall(PARTNER, 'audio', 'raum-timeout-in')
+      expect(useCallStore.getState().state).toBe('incoming')
+
+      vi.advanceTimersByTime(60000)
+      expect(useCallStore.getState().state).toBe('idle')
+      expect(toastInfo).toHaveBeenCalledWith('Anruf verpasst.')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('automatischer Timeout: ausgehender Anruf wird nach 60 Sekunden beendet', async () => {
+    vi.useFakeTimers()
+    try {
+      api.holeZugang.mockImplementation(() => new Promise(() => {}))
+      void useCallStore.getState().initiateCall(PARTNER, 'audio')
+
+      await vi.waitFor(() => expect(useCallStore.getState().state).toBe('outgoing'))
+
+      vi.advanceTimersByTime(60000)
+      expect(useCallStore.getState().state).toBe('idle')
+      expect(toastInfo).toHaveBeenCalledWith('Niemand hat abgenommen.')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('sammleTeilnehmer: liest Avatar und Benutzername aus LiveKit-Metadaten', async () => {
+    await verbundenerAnruf()
+    const meta = JSON.stringify({
+      user_id: 2,
+      username: 'Alice-Neu',
+      avatar_url: '/media/avatar-alice.jpg',
+    })
+    aktuellerRaum.tritt_bei('u2', 'Alice', meta)
+
+    const participants = useCallStore.getState().participants
+    const remote = participants.find((p) => p.userId === 2)
+    expect(remote).toBeDefined()
+    expect(remote?.avatarUrl).toBe('/media/avatar-alice.jpg')
+    expect(remote?.username).toBe('Alice-Neu')
+  })
+
+  it('handleCallSyncEvent: verarbeitet direct_call_invitation', () => {
+    useCallStore.getState().handleCallSyncEvent({
+      type: 'direct_call_invitation',
+      caller_id: 42,
+      caller_username: 'Charly',
+      caller_avatar_url: '/avatar/charly.png',
+      mode: 'video',
+      signaling_token: 'raum-sync-42',
+    })
+
+    const state = useCallStore.getState()
+    expect(state.state).toBe('incoming')
+    expect(state.partner?.username).toBe('Charly')
+    expect(state.partner?.avatarUrl).toBe('/avatar/charly.png')
+    expect(state.mode).toBe('video')
+    expect(state.raum).toBe('raum-sync-42')
+  })
+
+  it('handleCallSyncEvent: verarbeitet direct_call_cancelled und schließt den Dialog', () => {
+    useCallStore.getState().receiveCall(PARTNER, 'audio', 'raum-cancel-1')
+    expect(useCallStore.getState().state).toBe('incoming')
+
+    useCallStore.getState().handleCallSyncEvent({
+      type: 'direct_call_cancelled',
+      signaling_token: 'raum-cancel-1',
+    })
+
+    expect(useCallStore.getState().state).toBe('idle')
+    expect(toastInfo).toHaveBeenCalledWith('Der Anrufer hat aufgelegt.')
+  })
+
+  it('handleCallSyncEvent: verarbeitet group_call_started und group_call_ended', () => {
+    useCallStore.getState().handleCallSyncEvent({
+      type: 'group_call_started',
+      group_id: 10,
+      group_name: 'Entwickler',
+      room_token: 'grp_token_10',
+    })
+
+    expect(useCallStore.getState().activeGroupCalls).toEqual([
+      expect.objectContaining({
+        group_id: 10,
+        group_name: 'Entwickler',
+        room_token: 'grp_token_10',
+      }),
+    ])
+
+    useCallStore.getState().handleCallSyncEvent({
+      type: 'group_call_ended',
+      group_id: 10,
+      room_token: 'grp_token_10',
+    })
+
+    expect(useCallStore.getState().activeGroupCalls).toEqual([])
+  })
+
+  it('checkActiveCall: holt ausstehende Anrufe und aktive Gruppenanrufe', async () => {
+    api.holeAusstehendeAnrufe.mockResolvedValueOnce({
+      has_pending_call: true,
+      call: {
+        caller_id: 99,
+        caller_username: 'Dana',
+        caller_avatar_url: '/avatar/dana.png',
+        mode: 'audio',
+        signaling_token: 'raum-pending-99',
+        expires_in: 55,
+      },
+      group_calls: [
+        {
+          group_id: 7,
+          group_name: 'Support',
+          avatar_url: null,
+          room_token: 'grp_supp_7',
+          participant_count: 2,
+        },
+      ],
+    })
+
+    await useCallStore.getState().checkActiveCall()
+
+    const state = useCallStore.getState()
+    expect(state.state).toBe('incoming')
+    expect(state.partner?.username).toBe('Dana')
+    expect(state.partner?.avatarUrl).toBe('/avatar/dana.png')
+    expect(state.raum).toBe('raum-pending-99')
+    expect(state.activeGroupCalls).toHaveLength(1)
+    expect(state.activeGroupCalls[0].group_name).toBe('Support')
   })
 })

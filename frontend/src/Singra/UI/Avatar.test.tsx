@@ -15,13 +15,13 @@ describe('Avatar Component', () => {
     expect(img).toHaveAttribute('src', '/api/auth/avatar/avatar_1_test.png')
   })
 
-  it('falls back to initials when image triggers onError', () => {
+  it('falls back to initials when image triggers onError and fallback fails', async () => {
     const { rerender } = render(<Avatar src="/api/auth/avatar/broken.png" name="Max Mustermann" />)
     const img = screen.getByRole('img')
     fireEvent.error(img)
 
-    // After error, initials should be displayed
-    expect(screen.getByText('MA')).toBeInTheDocument()
+    // After error and failed fallback fetch, initials should be displayed
+    expect(await screen.findByText('MA')).toBeInTheDocument()
 
     // When src/resolvedSrc updates to a new valid source, hasError should reset
     rerender(<Avatar src="/api/auth/avatar/new_valid.png" name="Max Mustermann" />)
