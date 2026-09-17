@@ -26,6 +26,8 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { PromptDialog } from '@/components/ui/PromptDialog'
 import { ToastContainer } from '@/components/ui/ToastContainer'
 import { PanelPopupModal } from '@/components/popups/PanelPopupModal'
+import { CallOverlay } from '@/components/calling/CallOverlay'
+import { CrossDeviceCallBanner } from '@/components/calling/CrossDeviceCallBanner'
 import { Avatar, BenachrichtigungsGlocke, Button, ProfileDropdown, type ProfileDropdownItem } from '@/Singra/UI'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { Ai } from '@/pages/Ai'
@@ -513,6 +515,7 @@ export function DesktopApp() {
       <NavigationEmpfaenger isOffline={isOffline} />
       <div className="relative h-[100dvh] max-h-[100dvh] w-full overflow-hidden bg-background text-on-surface pb-[env(safe-area-inset-bottom,0px)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)] flex flex-col">
         <div className="msm-deep-grid pointer-events-none absolute inset-0 opacity-30" />
+        {phase === 'bereit' && <CrossDeviceCallBanner />}
         <div className="relative z-10 flex h-full max-h-full min-h-0 flex-1 flex-col overflow-hidden">{inhalt}</div>
 
         {phase === 'bereit' && (
@@ -522,6 +525,7 @@ export function DesktopApp() {
             <AiRunNotice />
             <ServerIncidentNotifier />
             <PanelPopupModal />
+            <CallOverlay />
             {isAndroid && <OverlayFenster inApp={true} />}
           </>
         )}

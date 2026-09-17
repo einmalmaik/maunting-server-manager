@@ -58,7 +58,6 @@ import {
   Phone,
   Video,
 } from 'lucide-react'
-import { CallOverlay } from '@/components/calling/CallOverlay'
 import { useCallStore, setzeAnrufIdentitaet } from '@/stores/useCallStore'
 import { starteGruppenanruf } from '@/api/calls'
 import { apiUrl } from '@/config/api'
@@ -1789,6 +1788,13 @@ export function Messenger() {
             .getState()
             .acceptRoomKey(String(detail.raum), String(detail.ciphertext))
         }
+      } else if (
+        detail?.type === 'user_call_state_changed' ||
+        detail?.type === 'call_transferred' ||
+        detail?.type === 'call_superseded' ||
+        detail?.type === 'call_ended_remotely'
+      ) {
+        useCallStore.getState().handleCrossDeviceEvent(detail)
       } else if (detail?.type === 'e2ee_blind_message') {
         const isCurrentActive = detail.blind_mailbox_id === blindMailboxId
         // Outgoing Echo Prevention: Sender niemals benachrichtigen
@@ -5595,9 +5601,6 @@ export function Messenger() {
           e.target.value = ''
         }}
       />
-
-      {/* Cross-Platform Calling Overlay (R1) */}
-      <CallOverlay />
 
       {/* Circular Video Note Recorder (R2) */}
       {isVideoNoteRecording && (

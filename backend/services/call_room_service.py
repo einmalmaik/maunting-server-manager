@@ -16,6 +16,7 @@ from __future__ import annotations
 import secrets
 import threading
 import time
+from typing import Any, Literal
 import uuid
 from dataclasses import dataclass
 
@@ -268,3 +269,176 @@ class GroupCallRoomRegistry:
         for token, raum in list(cls._raeume.items()):
             if jetzt >= raum.laeuft_ab:
                 cls._raeume.pop(token, None)
+
+
+ACTIVE_CALL_TTL_SEKUNDEN = 90.0
+
+
+@dataclass
+class _AktiverAnruf:
+    user_id: int
+    raum: str
+    art: Literal["direkt", "gruppe"]
+    group_id: int | None
+    group_name: str | None
+    mode: Literal["audio", "video"]
+    device_id: str | None
+    device_type: str | None
+    started_at: float
+    last_heartbeat: float
+    partner_id: int | None = None
+    partner_username: str | None = None
+    partner_avatar_url: str | None = None
+
+    def gueltig(self, jetzt: float) -> bool:
+        return (jetzt - self.last_heartbeat) < ACTIVE_CALL_TTL_SEKUNDEN
+
+    def to_dict(self) -> dict[str, Any]:
+        partner = None
+        if self.partner_id is not None and self.partner_username is not None:
+            partner = {
+                "user_id": self.partner_id,
+                "username": self.partner_username,
+                "avatar_url": self.partner_avatar_url,
+            }
+        return {
+            "raum": self.raum,
+            "art": self.art,
+            "group_id": self.group_id,
+            "group_name": self.group_name,
+            "mode": self.mode,
+            "device_id": self.device_id,
+            "device_type": self.device_type or "web",
+            "started_at": self.started_at,
+            "partner": partner,
+        }
+
+
+class UserActiveCallRegistry:
+    """Verwaltet den aktuellen aktiven Anruf je Benutzer über Plattformen hinweg.
+
+    Flüchtig im Arbeitsspeicher, ohne Datenbank. Ermöglicht geräteübergreifende
+    Anruferkennung ("Du bist bereits in einem Anruf") und nahtlose Übergabe
+    (Handoff / Transfer) von einem Gerät auf ein anderes.
+    """
+
+    _aktive: dict[int, _AktiverAnruf] = {}
+    _lock = threading.Lock()
+
+    @classmethod
+    def register(
+        cls,
+        user_id: int,
+        raum: str,
+        art: Literal["direkt", "gruppe"],
+        *,
+        group_id: int | None = None,
+        group_name: str | None = None,
+        mode: Literal["audio", "video"] = "audio",
+        device_id: str | None = None,
+        device_type: str | None = None,
+        partner_id: int | None = None,
+        partner_username: str | None = None,
+        partner_avatar_url: str | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any] | None, bool]:
+        """Registriert oder aktualisiert den Anruf eines Benutzers.
+
+        Rückgabe: (aktueller_anruf, vorheriger_anruf, ist_uebergabe).
+        `ist_uebergabe` ist True, wenn derselbe Raum von einem anderen Gerät betreten wurde.
+        """
+        jetzt = time.time()
+        with cls._lock:
+            cls._aufraeumen(jetzt)
+            vorher = cls._aktive.get(user_id)
+            prev_dict: dict[str, Any] | None = None
+            is_handoff = False
+
+            if vorher is not None and vorher.gueltig(jetzt):
+                prev_dict = vorher.to_dict()
+                if vorher.raum == raum and vorher.device_id != device_id:
+                    is_handoff = True
+
+            neu = _AktiverAnruf(
+                user_id=user_id,
+                raum=raum,
+                art=art,
+                group_id=group_id,
+                group_name=group_name,
+                mode=mode,
+                device_id=device_id,
+                device_type=device_type or "web",
+                started_at=vorher.started_at if (vorher and is_handoff) else jetzt,
+                last_heartbeat=jetzt,
+                partner_id=partner_id if partner_id is not None else (vorher.partner_id if vorher else None),
+                partner_username=partner_username if partner_username is not None else (vorher.partner_username if vorher else None),
+                partner_avatar_url=partner_avatar_url if partner_avatar_url is not None else (vorher.partner_avatar_url if vorher else None),
+            )
+            cls._aktive[user_id] = neu
+            return neu.to_dict(), prev_dict, is_handoff
+
+    @classmethod
+    def get(cls, user_id: int) -> dict[str, Any] | None:
+        jetzt = time.time()
+        with cls._lock:
+            cls._aufraeumen(jetzt)
+            anruf = cls._aktive.get(user_id)
+            if anruf is None or not anruf.gueltig(jetzt):
+                cls._aktive.pop(user_id, None)
+                return None
+            return anruf.to_dict()
+
+    @classmethod
+    def heartbeat(cls, user_id: int, device_id: str | None = None) -> bool:
+        jetzt = time.time()
+        with cls._lock:
+            anruf = cls._aktive.get(user_id)
+            if anruf is None or not anruf.gueltig(jetzt):
+                cls._aktive.pop(user_id, None)
+                return False
+            if device_id and anruf.device_id and anruf.device_id != device_id:
+                return False
+            anruf.last_heartbeat = jetzt
+            return True
+
+    @classmethod
+    def leave(
+        cls,
+        user_id: int,
+        raum: str | None = None,
+        device_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Entfernt den aktiven Anruf eines Benutzers."""
+        jetzt = time.time()
+        with cls._lock:
+            anruf = cls._aktive.get(user_id)
+            if anruf is None:
+                return None
+            if raum and anruf.raum != raum:
+                return None
+            if device_id and anruf.device_id and anruf.device_id != device_id:
+                return None
+            cls._aktive.pop(user_id, None)
+            return anruf.to_dict()
+
+    @classmethod
+    def remove_room(cls, raum: str) -> list[int]:
+        """Entfernt alle Einträge zu einem Raum (z. B. wenn Raum beendet wird)."""
+        betroffene: list[int] = []
+        with cls._lock:
+            for uid, anruf in list(cls._aktive.items()):
+                if anruf.raum == raum:
+                    cls._aktive.pop(uid, None)
+                    betroffene.append(uid)
+        return betroffene
+
+    @classmethod
+    def clear_all_for_testing(cls) -> None:
+        with cls._lock:
+            cls._aktive.clear()
+
+    @classmethod
+    def _aufraeumen(cls, jetzt: float) -> None:
+        for uid, anruf in list(cls._aktive.items()):
+            if not anruf.gueltig(jetzt):
+                cls._aktive.pop(uid, None)
+

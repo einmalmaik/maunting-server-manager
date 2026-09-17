@@ -77,6 +77,11 @@ export function toneAufgelegt(): void {
   spiele([[392, 0, 0.12], [261.63, 0.13, 0.2]], 0.1)
 }
 
+/** Angenehmer Doppelton: Anruf geräteübergreifend übertragen oder übernommen (wie bei Discord). */
+export function toneUebergabe(): void {
+  spiele([[440, 0, 0.08], [659.25, 0.08, 0.12]], 0.09)
+}
+
 /** Nur für Tests: den geteilten Kontext vergessen. */
 export function setzeToeneZurueck(): void {
   void kontext?.close().catch(() => {})

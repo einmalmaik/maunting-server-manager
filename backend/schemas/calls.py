@@ -26,6 +26,9 @@ class CallTokenRequest(BaseModel):
     art: Literal["direkt", "gruppe"]
     raum: str = Field(..., min_length=16, max_length=128, pattern=RAUM_MUSTER)
     group_id: int | None = None
+    device_id: str | None = Field(None, max_length=128)
+    device_type: str | None = Field(None, max_length=32)
+    mode: Literal["audio", "video"] | None = "audio"
 
 
 class CallTokenResponse(BaseModel):
@@ -36,6 +39,39 @@ class CallTokenResponse(BaseModel):
     raum: str
     identity: str
     ttl: int
+
+
+class ActiveCallPartner(BaseModel):
+    user_id: int
+    username: str
+    avatar_url: str | None = None
+
+
+class ActiveCallInfo(BaseModel):
+    raum: str
+    art: Literal["direkt", "gruppe"]
+    group_id: int | None = None
+    group_name: str | None = None
+    mode: Literal["audio", "video"] = "audio"
+    device_id: str | None = None
+    device_type: str | None = None
+    started_at: float
+    partner: ActiveCallPartner | None = None
+
+
+class ActiveCallResponse(BaseModel):
+    has_active_call: bool
+    call: ActiveCallInfo | None = None
+
+
+class CallLeaveRequest(BaseModel):
+    raum: str | None = None
+    device_id: str | None = None
+
+
+class CallHeartbeatRequest(BaseModel):
+    raum: str | None = None
+    device_id: str | None = None
 
 
 class CallParticipantCountResponse(BaseModel):

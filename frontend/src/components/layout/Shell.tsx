@@ -7,6 +7,8 @@ import { AiRunNotice } from '@/components/ai/AiRunNotice'
 import { ServerIncidentNotifier } from '@/components/notifications/ServerIncidentNotifier'
 import { PanelPopupModal } from '@/components/popups/PanelPopupModal'
 import { FriendsListDock } from '@/components/social/FriendsListDock'
+import { CallOverlay } from '@/components/calling/CallOverlay'
+import { CrossDeviceCallBanner } from '@/components/calling/CrossDeviceCallBanner'
 import { Users } from 'lucide-react'
 import { api } from '@/api/client'
 import { usePresenceAndActivity } from '@/hooks/usePresenceAndActivity'
@@ -108,6 +110,7 @@ export function Shell() {
       {/* Main Content Area */}
       <div className={`flex-1 ${sidebarHidden ? 'ml-0' : 'lg:ml-64'} flex flex-col min-w-0 relative z-10 transition-all duration-300 ${isFullHeightPage ? 'h-screen max-h-screen overflow-hidden' : ''}`}>
         <Topbar menuButtonRef={mobileNavigationTriggerRef} onOpenNavigation={() => setMobileNavigationOpen(true)} />
+        <CrossDeviceCallBanner />
         {/* Ohne `overflow-auto`: `main` hat als `flex-1` in einer Spalte ohne
             feste Höhe immer genau seine Inhaltshöhe, lief also nie über. Die
             Klasse hat nur einen Scroll-Container erzeugt, an dem sich die
@@ -176,6 +179,9 @@ export function Shell() {
 
       {/* Aktive Pop-ups / Ankündigungen des Panels */}
       <PanelPopupModal />
+
+      {/* Anruf-Overlay für Direkt- und Gruppenanrufe (global im Shell verfügbar) */}
+      <CallOverlay />
     </div>
   )
 }
