@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react'
-import { Phone, PhoneOff, PhoneForwarded, Smartphone, Monitor, Globe, Radio } from 'lucide-react'
+import { PhoneOff, PhoneForwarded, Smartphone, Monitor, Globe, Radio } from 'lucide-react'
 import { useCallStore } from '@/stores/useCallStore'
 import { formatDeviceLabel } from '@/lib/deviceIdentity'
 

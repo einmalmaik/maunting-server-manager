@@ -104,7 +104,7 @@ export interface GroupCallContext {
   canKick?: boolean
 }
 
-export type HinweisArt = 'beitritt' | 'abgang'
+export type HinweisArt = 'beitritt' | 'abgang' | 'info'
 
 export interface CallHinweis {
   id: number

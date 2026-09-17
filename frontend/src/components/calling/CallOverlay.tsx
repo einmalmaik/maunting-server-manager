@@ -547,10 +547,12 @@ export const CallOverlay: React.FC = () => {
                   className={`max-w-full truncate rounded-full border px-3 py-1.5 text-xs shadow-lg backdrop-blur-sm animate-in fade-in slide-in-from-bottom-2 duration-200 ${
                     hinweis.art === 'beitritt'
                       ? 'border-status-success/40 bg-status-success/15 text-status-success'
-                      : 'border-outline-variant/50 bg-surface-container-high/90 text-on-surface-variant'
+                      : hinweis.art === 'info'
+                        ? 'border-outline-variant/60 bg-surface-container-high/90 text-on-surface'
+                        : 'border-outline-variant/50 bg-surface-container-high/90 text-on-surface-variant'
                   }`}
                 >
-                  {hinweis.art === 'beitritt' ? '↳ ' : '↰ '}
+                  {hinweis.art === 'beitritt' ? '↳ ' : hinweis.art === 'abgang' ? '↰ ' : ''}
                   {hinweis.text}
                 </span>
               ))}
