@@ -111,10 +111,6 @@ import {
   deriveGroupBlindMailboxId,
   getCachedBlindMailboxId,
   getCachedGroupBlindMailboxId,
-  // Nur zum Lesen von Altnachrichten: der Schlüssel dieses Umschlags ergibt
-  // sich allein aus den beiden Benutzerkennungen und ist damit für das Backend
-  // nachbaubar. Gesendet wird ausschließlich hybrid.
-  decryptE2eeMessage,
   encryptE2eeHybrid,
   decryptE2eeHybridWithKeyring,
   encryptGroupE2eeMessage,
@@ -126,15 +122,26 @@ import {
 } from '@/services/e2eeCrypto'
 import {
   resolveIdentity,
-  requireRecipientPublicKey,
   forgetRecipientPublicKey,
   E2eeRecipientKeyMissingError,
   IDENTITY_LOADING,
   type E2eeIdentity,
 } from '@/services/e2eeIdentity'
+import { verlangeGeraeteVon } from '@/services/e2eeGeraet'
 import {
+  baueZustellungen,
+  liesDrUmschlag,
+  logischeUuid,
+  verarbeiteBootstrap,
+  verwirfDrSitzung,
+  type DrKontext,
+} from '@/services/ratchetSitzung'
+import {
+  ladeUmschlagKlartexte,
   loadLocalMessages,
+  mischeVerlauf,
   saveLocalMessages,
+  speichereUmschlagKlartext,
   updateMessageInLocalStore,
   sortMessagesChronologically,
 } from '@/services/messengerLocalStore'
@@ -296,6 +303,12 @@ export interface ChatMessage {
   videoNoteAttachment?: VideoNoteAttachment
   videoUrl?: string
   status?: 'queued' | 'sent' | 'delivered' | 'read'
+  /**
+   * Eine Zeile des Messengers selbst, kein Gesprächsbeitrag. Bisher nur für den
+   * Sitzungsbruch: sie gehört mitten in den Verlauf, weil sie genau dort
+   * hingehört, wo die Lücke ist.
+   */
+  isSystem?: boolean
 }
 
 function formatFileSize(bytes: number): string {
@@ -1237,24 +1250,74 @@ export function Messenger() {
         // Stand von ihrer Registrierung festhalten würden.
         const sendPair = identityRef.current.sendPair
         if (!sendPair) return
-        // Ohne Empfängerschlüssel gibt es keinen zweiten Weg mehr. Eine nicht
-        // gesendete Quittung kostet ein Häkchen, die alte Ersatzverschlüsselung
-        // hätte den Server mitlesen lassen.
-        const recipientPubKey = await requireRecipientPublicKey(targetUserId)
-        ciphertext = await encryptE2eeHybrid(payload, recipientPubKey, sendPair.publicKeyJwk)
-        await relayE2eeEnvelope({
-          blind_mailbox_id: blindMailboxId,
-          ciphertext_envelope: ciphertext,
-          recipient_id: targetUserId,
-          client_uuid: clientUuid,
-          is_control: true,
-          control_type: String(payloadObj.type || 'control'),
-        })
+
+        // Quittungen bleiben auf dem Hybridumschlag und laufen bewusst **nicht**
+        // durch den Ratchet. Sie sind häufig, sie sind klein, und sie dürfen den
+        // Nachrichtenfaden unter keinen Umständen stören: eine verlorene
+        // Quittung kostet ein Häkchen, eine verbrauchte Kettenposition kostet
+        // eine Nachricht. Versiegelt wird trotzdem je Gerät einzeln — ein Konto
+        // hat keinen gemeinsamen privaten Schlüssel mehr.
+        const geraete = await verlangeGeraeteVon(targetUserId)
+        const kontrolltyp = String(payloadObj.type || 'control')
+        await Promise.all(
+          geraete.map(async (geraet, i) => {
+            const umschlag = await encryptE2eeHybrid(
+              payload,
+              geraet.public_key,
+              sendPair.publicKeyJwk,
+            )
+            await relayE2eeEnvelope({
+              blind_mailbox_id: blindMailboxId,
+              ciphertext_envelope: umschlag,
+              recipient_id: targetUserId,
+              // Je Gerät eine eigene Kennung, sonst gibt das Relais beim zweiten
+              // Aufruf still den ersten Umschlag zurück und nur ein Gerät
+              // erfährt von der Quittung.
+              client_uuid: `${clientUuid}#${i}`,
+              is_control: true,
+              control_type: kontrolltyp,
+            })
+          }),
+        )
       }
 
     } catch {
       // Control message failure is non-fatal
     }
+  }
+
+  /**
+   * Wann zuletzt über ein Gerät gemeldet wurde, dass seine Sitzung neu steht.
+   *
+   * Gedrosselt auf einmal je Gerät und Minute. Ohne die Drossel schaukeln sich
+   * zwei Clients hoch, die beide gleichzeitig den Bruch bemerken, und der
+   * Verlauf füllt sich mit Systemzeilen statt mit Nachrichten.
+   */
+  const sitzungsMeldungRef = useRef<Map<string, number>>(new Map())
+
+  /**
+   * Schreibt die Systemzeile zum Sitzungsbruch in den Verlauf.
+   *
+   * Eine still neu aufgebaute Sicherheitssitzung ist genau das, was ein
+   * Angreifer sich wünscht: er ersetzt die Gegenstelle, alles läuft weiter, und
+   * niemand sieht etwas. Deshalb steht es im Verlauf, nicht in der Konsole.
+   */
+  const sitzungNeuGemeldet = (geraet: string) => {
+    const jetzt = Date.now()
+    const zuletzt = sitzungsMeldungRef.current.get(geraet) || 0
+    if (jetzt - zuletzt < 60_000) return
+    sitzungsMeldungRef.current.set(geraet, jetzt)
+
+    const zeile: ChatMessage = {
+      id: jetzt,
+      clientUuid: `sys-dr-${geraet}-${jetzt}`,
+      senderId: 0,
+      text: 'Die Sicherheitssitzung mit diesem Gerät wurde neu aufgebaut. Ältere Nachrichten dieses Geräts bleiben unlesbar.',
+      createdAt: new Date().toISOString(),
+      isSelf: false,
+      isSystem: true,
+    }
+    setMessages((prev) => sortMessagesChronologically([...prev, zeile]))
   }
 
   // 5. Load and decrypt messages (non-flickering background sync + real-time)
@@ -1287,12 +1350,30 @@ export function Messenger() {
       let maxPartnerDeliveredId = 0
       let maxIncomingId = 0
 
-      // Alle privaten Schlüssel des Kontos: der aktuelle zuerst, danach die
-      // Gerätesschlüssel aus der Zeit, als noch jedes Gerät seinen eigenen hatte.
+      // Der private Schlüssel dieses Geräts. Genau einer — es gibt keinen
+      // Kontoschlüsselbund mehr.
       const decryptionKeys = aktuelleIdentitaet.decryptionKeys
 
-      const decryptedEnvelopes = await Promise.all(
-        envelopes.map(async (env) => {
+      // Bereits geöffnete Umschläge. Unverzichtbar, nicht bloß schnell: ein
+      // Ratchet-Nachrichtenschlüssel ist nach dem ersten Öffnen verbraucht, ein
+      // zweiter Versuch am selben Umschlag muss scheitern. Was hier steht, wird
+      // gar nicht erst angefasst.
+      const bekannteKlartexte = activeContact
+        ? await ladeUmschlagKlartexte(currentMid)
+        : new Map<number, string>()
+
+      const drKontext: DrKontext | null = activeContact
+        ? { eigeneId: currentUserId, peerId: activeContact.userId }
+        : null
+      /** Umschläge, die keine Zeile im Verlauf ergeben dürfen. */
+      const stillUebergehen = new Set<number>()
+      const gebrochene: { vonKonto: number; vonGeraet: string }[] = []
+
+      const einUmschlag = async (env: (typeof envelopes)[number]) => {
+          const gespeichert = bekannteKlartexte.get(env.id)
+          if (gespeichert !== undefined) {
+            return { env, plain: gespeichert, ok: true }
+          }
           const cached = envelopePlaintextCache.get(env.id)
           if (cached && cached.ok) {
             return { env, plain: cached.plain, ok: true }
@@ -1301,47 +1382,80 @@ export function Messenger() {
             let plain = ''
             if (activeGroup) {
               plain = await decryptGroupE2eeMessage(env.ciphertext_envelope, activeGroup.id)
-            } else if (activeContact) {
-              const targetUserId = activeContact.userId
+            } else if (drKontext) {
               if (env.ciphertext_envelope.startsWith('sv-e2ee-hybrid-v1:')) {
-                let hybridSuccess = false
-                if (decryptionKeys.length > 0) {
-                  try {
-                    plain = await decryptE2eeHybridWithKeyring(env.ciphertext_envelope, decryptionKeys)
-                    hybridSuccess = true
-                  } catch {
-                    // Kein Schlüssel des Bunds passt — unten der Altweg.
+                plain = await decryptE2eeHybridWithKeyring(env.ciphertext_envelope, decryptionKeys)
+                const aufbau = await verarbeiteBootstrap(drKontext, plain)
+                if (aufbau.istAufbau) {
+                  if (aufbau.ersetzt && aufbau.vonGeraet) {
+                    sitzungNeuGemeldet(aufbau.vonGeraet)
                   }
-                }
-                if (!hybridSuccess) {
-                  plain = await decryptE2eeMessage(env.ciphertext_envelope, currentUserId, targetUserId)
+                  stillUebergehen.add(env.id)
+                  return { env, plain: '', ok: false }
                 }
               } else {
-                plain = await decryptE2eeMessage(env.ciphertext_envelope, currentUserId, targetUserId)
+                const lesung = await liesDrUmschlag(
+                  drKontext,
+                  env.ciphertext_envelope,
+                  // Erst der Klartext auf die Platte, dann der fortgeschriebene
+                  // Zustand. Schlägt das fehl, scheitert der ganze Schritt und
+                  // der Umschlag bleibt beim nächsten Mal lesbar.
+                  (text) => speichereUmschlagKlartext(currentMid, env.id, text),
+                )
+                if (lesung.art === 'klartext') {
+                  plain = lesung.text
+                } else if (lesung.art === 'bruch') {
+                  gebrochene.push({ vonKonto: lesung.vonKonto, vonGeraet: lesung.vonGeraet })
+                  stillUebergehen.add(env.id)
+                  return { env, plain: '', ok: false }
+                } else if (lesung.art === 'unbekannt' || lesung.art === 'fehler') {
+                  // 'unbekannt' — Altbestand aus der Zeit der ableitbaren
+                  // Kanalschlüssel. Der Weg dorthin ist geschlossen, auch lesend.
+                  // 'fehler' — die lokale Ablage streikte. Die Sitzung bleibt
+                  // unangetastet, der nächste Durchlauf versucht es erneut.
+                  // Beides steht solange als „Verschlüsselte Nachricht" da.
+                  throw new Error('Umschlag nicht lesbar')
+                } else {
+                  // 'eigen' — der Absender kann seine eigene Ratchet-Nachricht
+                  // nicht öffnen, das ist der Sinn der Sache; sein Gesprächs-
+                  // anteil kommt aus dem lokalen Speicher.
+                  // 'fremd' — eine der aufgefächerten Kopien für ein anderes
+                  // Gerät. Beides ist kein Fehler und darf nie als
+                  // „Verschlüsselte Nachricht" im Verlauf stehen.
+                  stillUebergehen.add(env.id)
+                  return { env, plain: '', ok: false }
+                }
               }
             }
             envelopePlaintextCache.set(env.id, { plain, ok: true })
             return { env, plain, ok: true }
           } catch {
-            if (activeContact) {
-              try {
-                const plain = await decryptE2eeMessage(env.ciphertext_envelope, currentUserId, activeContact.userId)
-                if (plain) {
-                  envelopePlaintextCache.set(env.id, { plain, ok: true })
-                  return { env, plain, ok: true }
-                }
-              } catch {}
-            }
             return { env, plain: '', ok: false }
           }
-        })
-      )
+      }
+
+      /**
+       * Direktnachrichten laufen der Reihe nach durch.
+       *
+       * Nicht aus Vorsicht, sondern weil die Reihenfolge trägt: ein
+       * Sitzungsaufbau muss verarbeitet sein, bevor die Nachricht ankommt, für
+       * die er gilt. Nebenläufig gelesen käme die Nachricht mit einer Chance von
+       * fünfzig Prozent zuerst und liefe in einen Sitzungsbruch. Gruppen kennen
+       * das Problem nicht und bleiben nebenläufig.
+       */
+      const decryptedEnvelopes: { env: (typeof envelopes)[number]; plain: string; ok: boolean }[] = []
+      if (drKontext) {
+        for (const env of envelopes) decryptedEnvelopes.push(await einUmschlag(env))
+      } else {
+        decryptedEnvelopes.push(...(await Promise.all(envelopes.map(einUmschlag))))
+      }
 
       if (activeMailboxIdRef.current !== currentMid || currentLoadSeqRef.current !== seq) return
 
       for (const { env, plain, ok } of decryptedEnvelopes) {
         if (seenEnvelopeIds.has(env.id)) continue
         seenEnvelopeIds.add(env.id)
+        if (stillUebergehen.has(env.id)) continue
 
         if (!ok || !plain) {
           const isControl =
@@ -1361,7 +1475,7 @@ export function Messenger() {
             continue
           }
 
-          const clientUuid = env.client_uuid || undefined
+          const clientUuid = logischeUuid(env.client_uuid)
           if (clientUuid && seenClientUuids.has(clientUuid)) {
             continue
           }
@@ -1440,7 +1554,9 @@ export function Messenger() {
             }
 
             // Normal Chat Message
-            const clientUuid = (parsed.client_uuid as string) || env.client_uuid || undefined
+            // Die Kennung aus dem Umschlag trägt einen Gerätezusatz je Kopie;
+            // für den Verlauf zählt die logische darunter.
+            const clientUuid = (parsed.client_uuid as string) || logischeUuid(env.client_uuid)
             if (clientUuid && seenClientUuids.has(clientUuid)) {
               continue
             }
@@ -1477,7 +1593,7 @@ export function Messenger() {
           }
         } catch {
           // Legacy / simple text fallback
-          const clientUuid = env.client_uuid || undefined
+          const clientUuid = logischeUuid(env.client_uuid)
           if (clientUuid && seenClientUuids.has(clientUuid)) {
             continue
           }
@@ -1563,6 +1679,19 @@ export function Messenger() {
       // Abort if the user has navigated to another chat in the meantime or a newer load completed
       if (activeMailboxIdRef.current !== currentMid || currentLoadSeqRef.current !== seq) return
 
+      // Gebrochene Sitzungen: wegwerfen und sichtbar melden. Der nächste
+      // Sendevorgang baut von selbst eine frische auf.
+      for (const bruch of gebrochene) {
+        await verwirfDrSitzung(bruch.vonKonto, bruch.vonGeraet).catch(() => {})
+        sitzungNeuGemeldet(bruch.vonGeraet)
+      }
+
+      // Der eigene Gesprächsanteil steht nur hier: eine Ratchet-Nachricht kann
+      // ihr Absender nicht öffnen. Ein Ersetzen statt Zusammenführen würde
+      // alles selbst Geschriebene bei jedem Abruf wegwischen.
+      const lokalerVerlauf = activeContact ? await loadLocalMessages(currentMid) : []
+      if (activeMailboxIdRef.current !== currentMid || currentLoadSeqRef.current !== seq) return
+
       setMessages((prev) => {
         const processedClientUuids = new Set<string>()
         for (const m of processedList) {
@@ -1580,9 +1709,11 @@ export function Messenger() {
               status: isRead ? ('read' as const) : isDelivered ? ('delivered' as const) : m.status || ('queued' as const),
             }
           })
-        const combined = sortMessagesChronologically(
-          pendingOptimistic.length === 0 ? processedList : [...processedList, ...pendingOptimistic]
-        )
+        const systemzeilen = prev.filter((m) => m.isSystem)
+        const frisch = [...processedList, ...pendingOptimistic, ...systemzeilen]
+        const combined = lokalerVerlauf.length
+          ? (mischeVerlauf(lokalerVerlauf, frisch) as ChatMessage[])
+          : sortMessagesChronologically(frisch)
         sessionChatCache.set(currentMid, combined.slice(-80))
         void saveLocalMessages(currentMid, combined.slice(-200))
         return combined
@@ -2120,34 +2251,73 @@ export function Messenger() {
           }
         }
       } else if (targetUserId) {
-        // Nur hybrid. Schlägt das fehl, geht die Nachricht nicht raus — früher
-        // fiel sie hier auf einen Schlüssel zurück, den das Backend aus den
-        // beiden Benutzerkennungen selbst bilden kann.
-        const recipientPubKey = await requireRecipientPublicKey(targetUserId)
+        // Double Ratchet, je Empfängergerät und je eigenem Zweitgerät ein
+        // eigener Umschlag. Schlägt das fehl, geht die Nachricht nicht raus —
+        // früher fiel sie hier auf einen Schlüssel zurück, den das Backend aus
+        // den beiden Benutzerkennungen selbst bilden kann.
         if (!aktiveIdentitaet.sendPair) {
-          throw new Error('Der Schlüssel dieses Kontos ist auf diesem Gerät gesperrt.')
+          throw new Error('Der Schlüssel dieses Geräts ist noch nicht bereit.')
         }
-        ciphertext = await encryptE2eeHybrid(
-          payload,
-          recipientPubKey,
-          aktiveIdentitaet.sendPair.publicKeyJwk
-        )
-        if (typeof navigator !== 'undefined' && !navigator.onLine) {
-          enqueueMessageMutation({
-            blind_mailbox_id: targetBlindMailboxId,
-            ciphertext_envelope: ciphertext,
-            recipient_id: targetUserId,
-            client_uuid: clientUuid,
-          })
+        const drKontext: DrKontext = { eigeneId: currentUserId, peerId: targetUserId }
+        const zustellungen = await baueZustellungen(drKontext, payload, clientUuid)
+        if (zustellungen.length === 0) {
+          throw new E2eeRecipientKeyMissingError(targetUserId)
+        }
+
+        const offline = typeof navigator !== 'undefined' && !navigator.onLine
+        /**
+         * Die niedrigste Umschlagkennung der Auffächerung gilt als Kennung
+         * dieser Nachricht. Quittungen der Gegenstelle nennen die Kennung der
+         * Kopie, die *sie* gesehen hat — also eine aus derselben Auffächerung
+         * und damit nie kleinere. Der Vergleich `quittiert >= meine` trägt
+         * deshalb weiter.
+         */
+        let niedrigsteId = 0
+        for (const z of zustellungen) {
+          // Reihenfolge ist bindend: ohne den Aufbau findet die Gegenstelle
+          // keine Sitzung und läuft in den Sitzungsbruch.
+          const auftraege = [
+            ...(z.bootstrap
+              ? [
+                  {
+                    blind_mailbox_id: targetBlindMailboxId,
+                    ciphertext_envelope: z.bootstrap,
+                    recipient_id: targetUserId,
+                    client_uuid: z.bootstrapClientUuid,
+                    is_control: true,
+                    control_type: 'dr-init',
+                  },
+                ]
+              : []),
+            {
+              blind_mailbox_id: targetBlindMailboxId,
+              ciphertext_envelope: z.nachricht,
+              recipient_id: targetUserId,
+              client_uuid: z.clientUuid,
+            },
+          ]
+
+          for (const auftrag of auftraege) {
+            if (offline) {
+              enqueueMessageMutation(auftrag)
+              continue
+            }
+            try {
+              const r = await relayE2eeEnvelope(auftrag)
+              if (!auftrag.is_control && r && typeof r.id === 'number') {
+                if (niedrigsteId === 0 || r.id < niedrigsteId) niedrigsteId = r.id
+              }
+            } catch {
+              enqueueMessageMutation(auftrag)
+            }
+          }
+        }
+
+        if (offline) {
           toast.info('Nachricht offline in Warteschlange eingereiht.')
         } else {
           try {
-            const result = await relayE2eeEnvelope({
-              blind_mailbox_id: targetBlindMailboxId,
-              ciphertext_envelope: ciphertext,
-              recipient_id: targetUserId,
-              client_uuid: clientUuid,
-            })
+            const result = niedrigsteId > 0 ? { id: niedrigsteId } : null
             if (result && typeof result.id === 'number') {
               const serverId = result.id
               const isRead = maxPartnerReadIdRef.current >= serverId
@@ -2195,13 +2365,8 @@ export function Messenger() {
               })
             }
           } catch {
-            enqueueMessageMutation({
-              blind_mailbox_id: targetBlindMailboxId,
-              ciphertext_envelope: ciphertext,
-              recipient_id: targetUserId,
-              client_uuid: clientUuid,
-            })
-            toast.info('Nachricht offline in Warteschlange eingereiht (Verbindungsfehler).')
+            // Die Umschläge liegen bereits in der Warteschlange; hier scheiterte
+            // nur das Nachziehen der Anzeige.
           }
         }
       }

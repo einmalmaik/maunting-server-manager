@@ -8,7 +8,7 @@ from services.social_service import SocialService
 from services.sync_event_service import SyncEventService
 
 
-def _valid_test_envelope(prefix: str = "sv-e2ee-v1:", payload_tag: str = "test-payload") -> str:
+def _valid_test_envelope(prefix: str = "sv-e2ee-group-v1:", payload_tag: str = "test-payload") -> str:
     raw = b"N" * 12 + payload_tag.encode("utf-8") + b"T" * 16
     return f"{prefix}{base64.b64encode(raw).decode('ascii')}"
 

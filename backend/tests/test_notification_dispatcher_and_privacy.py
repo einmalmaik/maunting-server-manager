@@ -121,35 +121,26 @@ def test_sender_id_strictly_excluded_from_group_alerts():
     ) is False
 
 
-def test_sender_id_strictly_excluded_when_ai_worker_sends_message(db: Session, owner_user: User):
-    """Wenn die KI / ein Worker im Namen des Benutzers eine Nachricht sendet,
-    darf für diesen Benutzer kein Alert oder Unread-Badge getriggert werden.
+def test_eigene_nachricht_erzeugt_keine_eigene_benachrichtigung(db: Session, owner_user: User):
+    """Wer selbst sendet, bekommt dafür kein Abzeichen und keinen Ton.
+
+    Der Test lief früher über `propose_message_contact`, also über einen
+    Umschlag, den der Server selbst verschlüsselt hat. Dieses Werkzeug ist
+    entfernt; der Umschlag kommt jetzt fertig vom Client, und geprüft wird, was
+    hier immer schon gemeint war: die Echo-Unterdrückung des Absenders.
     """
+    import base64
+
     user_sender = owner_user
     user_recipient = _create_user(db, "recipient_ai_user")
 
-    rel = UserFriend(user_id=user_sender.id, friend_id=user_recipient.id, status="accepted")
-    db.add(rel)
+    db.add(UserFriend(user_id=user_sender.id, friend_id=user_recipient.id, status="accepted"))
     db.commit()
 
-    conv = AiConversation(id=str(uuid4()), user_id=user_sender.id, title="AI Sender Chat", kind="primary")
-    db.add(conv)
-    db.commit()
-
-    prop = create_proposal(
-        db,
-        user=user_sender,
-        conversation=conv,
-        correlation_id=str(uuid4()),
-        tool_name="propose_message_contact",
-        arguments={
-            "recipient_username": user_recipient.username,
-            "message_text": "Automatische Nachricht via KI",
-            "rationale": "Terminbestätigung",
-        },
-    )
-
-    _, token = ai_proposal_service.confirm_proposal(db, proposal_id=prop.id, user=user_sender)
+    mailbox = SocialService.derive_blind_mailbox_id(user_sender.id, user_recipient.id)
+    umschlag = "sv-e2ee-group-v1:" + base64.b64encode(
+        bytes(range(1, 13)) + b"vom-client-verschluesselt" + bytes(16)
+    ).decode("ascii")
 
     published: list[dict] = []
     orig_pub = SyncEventService.publish
@@ -160,32 +151,35 @@ def test_sender_id_strictly_excluded_when_ai_worker_sends_message(db: Session, o
 
     SyncEventService.publish = mock_pub
     try:
-        exec_res, _ = ai_proposal_service.execute_proposal(
-            db, proposal_id=prop.id, user=user_sender, confirmation_token=token
+        SocialService.relay_blind_envelope(
+            db,
+            blind_mailbox_id=mailbox,
+            ciphertext_envelope=umschlag,
+            sender_user_id=user_sender.id,
+            recipient_id=user_recipient.id,
         )
-        assert exec_res.status == "succeeded"
-
-        msg_ev = next(e for e in published if e.get("type") == "e2ee_blind_message")
-        assert msg_ev["sender_user_id"] == user_sender.id
-        assert msg_ev["recipient_id"] == user_recipient.id
-
-        # Sender (user_sender) darf KEINE Benachrichtigung / Unread-Badge erhalten!
-        assert NotificationService.should_notify(
-            recipient_id=msg_ev["recipient_id"],
-            current_user_id=user_sender.id,
-            sender_user_id=msg_ev["sender_user_id"],
-            is_read=False,
-        ) is False
-
-        # Empfänger (user_recipient) MUSS benachrichtigt werden
-        assert NotificationService.should_notify(
-            recipient_id=msg_ev["recipient_id"],
-            current_user_id=user_recipient.id,
-            sender_user_id=msg_ev["sender_user_id"],
-            is_read=False,
-        ) is True
     finally:
         SyncEventService.publish = orig_pub
+
+    msg_ev = next(e for e in published if e.get("type") == "e2ee_blind_message")
+    assert msg_ev["sender_user_id"] == user_sender.id
+    assert msg_ev["recipient_id"] == user_recipient.id
+
+    # Sender darf KEINE Benachrichtigung / Unread-Badge erhalten.
+    assert NotificationService.should_notify(
+        recipient_id=msg_ev["recipient_id"],
+        current_user_id=user_sender.id,
+        sender_user_id=msg_ev["sender_user_id"],
+        is_read=False,
+    ) is False
+
+    # Empfänger MUSS benachrichtigt werden.
+    assert NotificationService.should_notify(
+        recipient_id=msg_ev["recipient_id"],
+        current_user_id=user_recipient.id,
+        sender_user_id=msg_ev["sender_user_id"],
+        is_read=False,
+    ) is True
 
 
 # ============================================================================
@@ -306,7 +300,7 @@ def test_privacy_leaks_prevented_in_push_payloads():
         "message_text": "Das Passwort lautet 123456!",
         "content": "Streng vertraulich",
         "preview": "Passwort lautet...",
-        "ciphertext_envelope": "sv-e2ee-v1:aW52YWxpZF9kYXRh",
+        "ciphertext_envelope": "sv-e2ee-group-v1:aW52YWxpZF9kYXRh",
         "secret": "master_key",
         "token": "bearer_secret",
         "key": "aes_gcm_secret",

@@ -28,7 +28,7 @@ from schemas.social import validate_rsa_public_key_jwk
 def _valid_test_envelope(payload_bytes: bytes = b"test-secret-payload-bytes-12345678") -> str:
     """Creates a format-compliant sv-e2ee-v1 envelope with random IV and tag."""
     raw = os.urandom(12) + payload_bytes + os.urandom(16)
-    return "sv-e2ee-v1:" + base64.b64encode(raw).decode("ascii")
+    return "sv-e2ee-group-v1:" + base64.b64encode(raw).decode("ascii")
 
 
 def _valid_rsa_jwk(marker: str = "A") -> str:

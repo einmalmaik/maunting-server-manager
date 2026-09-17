@@ -19,6 +19,19 @@ import {
   storeLocalKeyPair,
 } from '@/services/e2eeCrypto'
 
+/**
+ * Baut einen Umschlag im Format des Double Ratchet.
+ *
+ * Bis 09/2026 bauten diese Tests ihre Umschläge mit `encryptE2eeMessage` — dem
+ * Verfahren, dessen Schlüssel sich aus den beiden Benutzerkennungen ergab und
+ * das der Server deshalb mitlesen konnte. Es ist abgeschafft, und das Relais
+ * nimmt seine Umschläge nicht mehr an. Geprüft wird hier ohnehin die Schicht
+ * darüber: Häkchen, Verlauf, Quittungen.
+ */
+function drUmschlag(klartext: string): string {
+  return 'sv-e2ee-dr-v1:1.testgeraet.zielgeraet.' + btoa(unescape(encodeURIComponent(klartext)))
+}
+
 vi.mock('@/api/social', () => ({
   getFriends: vi.fn(),
   getGroups: vi.fn().mockResolvedValue([]),
@@ -63,6 +76,137 @@ const { identitaet, MockRecipientKeyMissingError } = vi.hoisted(() => ({
       this.name = 'E2eeRecipientKeyMissingError'
     }
   },
+}))
+
+/**
+ * Stellvertreter für den Ratchet-Pfad.
+ *
+ * Der echte Double Ratchet erzeugt je Zielgerät einen eigenen Umschlag und
+ * verbraucht seinen Nachrichtenschlüssel beim Öffnen — beides braucht dieser
+ * Test nicht nachzubilden, um Zustellung, Häkchen und Verlauf zu prüfen.
+ * Nachgebildet wird genau das, was der Messenger von der Schicht sieht: das
+ * Umschlagformat, das Auffächern in eine Liste und die Ablegefunktion, die vor
+ * dem Fortschreiben läuft. Die Krypto selbst prüft `ratchetSitzung.test.ts`.
+ */
+/**
+ * Der lokale Verlaufsspeicher im Arbeitsspeicher statt in IndexedDB.
+ *
+ * jsdom bringt keine IndexedDB mit, und der Messenger braucht sie seit dem
+ * Ratchet zwingend: ein Nachrichtenschlüssel ist nach dem Öffnen verbraucht,
+ * der Klartext muss also abgelegt sein, bevor der Zustand weiterrückt.
+ * Nachgebildet wird hier nur die Ablage; dass die Reihenfolge stimmt, prüfen
+ * `ratchetSpeicher.test.ts` und `ratchetSitzung.test.ts` gegen die echte.
+ */
+const { nachrichten, klartexte } = vi.hoisted(() => ({
+  nachrichten: new Map<string, any[]>(),
+  klartexte: new Map<string, Map<number, string>>(),
+}))
+
+/** Zwischen zwei Tests muss der Speicher leer sein, sonst leckt der Verlauf. */
+function leereTestSpeicher(): void {
+  nachrichten.clear()
+  klartexte.clear()
+}
+
+vi.mock('@/services/messengerLocalStore', async () => {
+  const echt = await vi.importActual<typeof import('@/services/messengerLocalStore')>(
+    '@/services/messengerLocalStore'
+  )
+  return {
+    ...echt,
+    loadLocalMessages: vi.fn(async (mid: string) => nachrichten.get(mid) ?? []),
+    saveLocalMessages: vi.fn(async (mid: string, msgs: any[]) => {
+      nachrichten.set(mid, msgs)
+    }),
+    updateMessageInLocalStore: vi.fn(async () => {}),
+    getLocalMailboxLastSyncedId: vi.fn(async () => 0),
+    clearLocalMessengerStore: vi.fn(async () => {
+      nachrichten.clear()
+      klartexte.clear()
+    }),
+    speichereUmschlagKlartext: vi.fn(async (mid: string, id: number, plain: string) => {
+      if (!klartexte.has(mid)) klartexte.set(mid, new Map())
+      klartexte.get(mid)!.set(id, plain)
+    }),
+    ladeUmschlagKlartexte: vi.fn(
+      async (mid: string) => new Map(klartexte.get(mid) ?? new Map())
+    ),
+  }
+})
+
+vi.mock('@/services/ratchetSitzung', () => {
+  const PREFIX = 'sv-e2ee-dr-v1:'
+  const einpacken = (t: string) => PREFIX + '1.testgeraet.zielgeraet.' + btoa(unescape(encodeURIComponent(t)))
+  const auspacken = (u: string) => decodeURIComponent(escape(atob(u.split('.').slice(3).join('.'))))
+  return {
+    DR_PREFIX: PREFIX,
+    DR_INIT_TYP: 'dr-init',
+    baueZustellungen: vi.fn(async (_kontext: any, klartext: string, basisUuid: string) => [
+      {
+        empfaengerId: 101,
+        zielGeraet: 'zielgeraet',
+        bootstrap: null,
+        nachricht: einpacken(klartext),
+        clientUuid: basisUuid,
+        bootstrapClientUuid: basisUuid + '#i',
+      },
+    ]),
+    liesDrUmschlag: vi.fn(
+      async (_kontext: any, umschlag: string, ablegen: (t: string) => Promise<void>) => {
+        // Der Klartext kommt weiterhin aus dem Stellvertreter, den die Tests
+        // ohnehin je Fall setzen. So bleibt jede bestehende Vorgabe gültig,
+        // obwohl der Messenger jetzt über den Ratchet liest.
+        const { decryptE2eeMessage } = await import('@/services/e2eeCrypto')
+        let text: string
+        try {
+          text = umschlag.startsWith(PREFIX) && umschlag.split('.').length > 3
+            ? auspacken(umschlag)
+            : await (decryptE2eeMessage as any)(umschlag, 0, 0)
+        } catch {
+          return { art: 'bruch', vonKonto: 101, vonGeraet: 'zielgeraet', grund: 'Test' }
+        }
+        if (typeof text !== 'string' || text === '') {
+          return { art: 'unbekannt' }
+        }
+        await ablegen(text)
+        return { art: 'klartext', text, vonKonto: 101, vonGeraet: 'zielgeraet' }
+      }
+    ),
+    verarbeiteBootstrap: vi.fn(async () => ({ istAufbau: false, ersetzt: false })),
+    verwirfDrSitzung: vi.fn(async () => {}),
+    logischeUuid: (u?: string | null) =>
+      !u ? undefined : u.indexOf('#') === -1 ? u : u.slice(0, u.indexOf('#')),
+  }
+})
+
+/**
+ * Ein Geraet der Gegenstelle, mit genau dem Schluessel, den der Test gesetzt hat.
+ *
+ * Wichtig fuer die Dateien, die den echten Hybridumschlag benutzen: dort muss
+ * hier ein gueltiger JWK stehen, sonst scheitert das Versiegeln der Quittungen
+ * und der Test misst etwas anderes, als er glaubt.
+ */
+const zielGeraete = () => [
+  {
+    device_id: 'zielgeraet',
+    public_key: identitaet.empfaengerSchluessel || 'mock-empfaenger-pub-key',
+    label: '',
+  },
+]
+
+vi.mock('@/services/e2eeGeraet', () => ({
+  eigenesGeraet: vi.fn(async () => ({
+    kennung: 'testgeraet',
+    paar: identitaet.sendPair ?? { publicKeyJwk: '{"kty":"oct"}', privateKeyJwk: '{"kty":"oct"}' },
+  })),
+  geraeteVon: vi.fn(async () => zielGeraete()),
+  verlangeGeraeteVon: vi.fn(async () => {
+    if (!identitaet.empfaengerSchluessel) throw new MockRecipientKeyMissingError(0)
+    return zielGeraete()
+  }),
+  vergessenGeraete: vi.fn(),
+  clearGeraeteMemory: vi.fn(),
+  E2eeKeinGeraetError: class extends Error {},
 }))
 
 vi.mock('@/services/e2eeIdentity', () => ({
@@ -145,6 +289,7 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
   }, 60_000)
 
   beforeEach(() => {
+    leereTestSpeicher()
     cleanup()
     vi.clearAllMocks()
     localStorage.clear()
@@ -268,7 +413,7 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
         delivered_up_to_id: 5,
         receiver_id: aliceId,
       })
-      const encryptedReceipt5 = await encryptE2eeMessage(receipt5Plain, myUserId, aliceId)
+      const encryptedReceipt5 = drUmschlag(receipt5Plain)
 
       vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([
         {
@@ -308,7 +453,7 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
         delivered_up_to_id: 2,
         receiver_id: aliceId,
       })
-      const encryptedReceipt2 = await encryptE2eeMessage(receipt2Plain, myUserId, aliceId)
+      const encryptedReceipt2 = drUmschlag(receipt2Plain)
 
       vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([
         {
@@ -355,7 +500,7 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
         delivered_up_to_id: 10,
         receiver_id: aliceId,
       })
-      const encryptedReceipt10 = await encryptE2eeMessage(receipt10Plain, myUserId, aliceId)
+      const encryptedReceipt10 = drUmschlag(receipt10Plain)
 
       vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([
         {
@@ -436,7 +581,7 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
         delivered_up_to_id: 25,
         receiver_id: aliceId,
       })
-      const encryptedReceipt = await encryptE2eeMessage(receiptPlain, myUserId, aliceId)
+      const encryptedReceipt = drUmschlag(receiptPlain)
 
       vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([
         {
@@ -495,14 +640,14 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
         text: 'Message to Alice with high ID',
         timestamp: new Date().toISOString(),
       })
-      const aliceCipher = await encryptE2eeMessage(aliceMsgPlain, myUserId, aliceId)
+      const aliceCipher = drUmschlag(aliceMsgPlain)
 
       const aliceReceiptPlain = JSON.stringify({
         type: 'delivery_receipt',
         delivered_up_to_id: 500,
         receiver_id: aliceId,
       })
-      const aliceReceiptCipher = await encryptE2eeMessage(aliceReceiptPlain, myUserId, aliceId)
+      const aliceReceiptCipher = drUmschlag(aliceReceiptPlain)
 
       // Configure fetch envelopes based on active mailbox
       vi.mocked(socialApi.fetchE2eeEnvelopes).mockImplementation(async (mid) => {
@@ -584,7 +729,7 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
         text: 'Bob answers with ID 3',
         timestamp: new Date().toISOString(),
       })
-      const incomingBobCipher = await encryptE2eeMessage(incomingBobPlain, myUserId, bobId)
+      const incomingBobCipher = drUmschlag(incomingBobPlain)
 
       vi.mocked(socialApi.fetchE2eeEnvelopes).mockImplementation(async (mid) => {
         if (mid === bobMid) {
@@ -645,7 +790,7 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
         delivered_up_to_id: 2,
         receiver_id: bobId,
       })
-      const bobReceiptCipher = await encryptE2eeMessage(bobReceiptPlain, myUserId, bobId)
+      const bobReceiptCipher = drUmschlag(bobReceiptPlain)
 
       vi.mocked(socialApi.fetchE2eeEnvelopes).mockImplementation(async (mid) => {
         if (mid === bobMid) {
@@ -719,7 +864,7 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
         text: 'Willkommen im Chat Charlie!',
         timestamp: new Date().toISOString(),
       })
-      const msg1Cipher = await encryptE2eeMessage(msg1Plain, myUserId, charlieId)
+      const msg1Cipher = drUmschlag(msg1Plain)
 
       // Envelope 2: Outgoing message from Me to Charlie
       const msg2Plain = JSON.stringify({
@@ -729,7 +874,7 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
         text: 'Danke Charlie, alles klar!',
         timestamp: new Date().toISOString(),
       })
-      const msg2Cipher = await encryptE2eeMessage(msg2Plain, myUserId, charlieId)
+      const msg2Cipher = drUmschlag(msg2Plain)
 
       // Envelope 3: Delivery receipt acknowledging Envelope 2
       const receiptPlain = JSON.stringify({
@@ -737,7 +882,7 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
         delivered_up_to_id: 20,
         receiver_id: charlieId,
       })
-      const receiptCipher = await encryptE2eeMessage(receiptPlain, myUserId, charlieId)
+      const receiptCipher = drUmschlag(receiptPlain)
 
       // Envelope 4: Hybrid E2EE encrypted message from Charlie to Me
       const hybridPayload = JSON.stringify({
@@ -758,7 +903,7 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
         type: 'heartbeat_signal',
         timestamp: new Date().toISOString(),
       })
-      const controlCipher = await encryptE2eeMessage(controlPlain, myUserId, charlieId)
+      const controlCipher = drUmschlag(controlPlain)
 
       vi.mocked(socialApi.fetchE2eeEnvelopes).mockImplementation(async (mid) => {
         if (mid === charlieMid) {
@@ -849,7 +994,7 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
         text: 'Spam message from blocked Bob',
         timestamp: new Date().toISOString(),
       })
-      const bobCipher = await encryptE2eeMessage(bobMsgPlain, myUserId, bobId)
+      const bobCipher = drUmschlag(bobMsgPlain)
 
       vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([
         {

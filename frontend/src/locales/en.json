@@ -729,9 +729,6 @@
         "propose_restart_schedule_set": "Configure server auto-restart",
         "propose_backup_schedule_set": "Configure server auto-backup",
         "propose_email_send": "Send email",
-        "propose_message_friend": "Send friend message",
-        "propose_message_contact": "Send message to contact",
-        "propose_message_group": "Send message to group",
         "propose_calendar_event_create": "Create calendar event",
         "propose_calendar_event_update": "Update calendar event",
         "propose_calendar_event_delete": "Delete calendar event",
@@ -800,9 +797,6 @@
         "propose_restart_schedule_set": "Configure auto-restart for this server? The schedule appears in the server restart section and remains manually editable.",
         "propose_backup_schedule_set": "Configure auto-backups for this server? The schedule appears in the server backup section and remains manually editable.",
         "propose_email_send": "Send drafted email to “{{recipient}}” with subject “{{subject}}” now?",
-        "propose_message_friend": "Send message to “{{friend_username}}” now?",
-        "propose_message_contact": "Send message to “{{recipient_username}}” now?",
-        "propose_message_group": "Send message to group “{{group_name}}” now?",
         "propose_calendar_event_create": "Create event “{{title}}” in your calendar now?",
         "propose_calendar_event_update": "Update this calendar event with the new details now?",
         "propose_calendar_event_delete": "Delete this event from your calendar? This cannot be undone.",
@@ -1071,10 +1065,7 @@
       "propose_cloudflare_dns_record": "Preparing DNS record",
       "propose_modpack_install": "Preparing modpack installation",
       "search_messenger_contacts": "I am searching your messenger contacts",
-      "search_messenger_groups": "I am searching your messenger groups",
-      "propose_message_contact": "I am preparing the message to the contact",
-      "propose_message_friend": "I am preparing the message to your friend",
-      "propose_message_group": "I am preparing the group message"
+      "search_messenger_groups": "I am searching your messenger groups"
     },
     "errors": {
       "codes": {
@@ -4378,6 +4369,7 @@
           "deviceKey": "The key belongs to this device and is created on it the first time you open the messenger. Its private half never leaves the device. The instance only holds the public half, so that others can write to you.",
           "deviceFanout": "When you write to someone, your device encrypts the message separately for each of their devices and for your own other devices. The instance sees that an account has several devices, and nothing beyond that.",
           "deviceHistory": "Each device keeps its own history. When you pair a new one, it receives the existing history encrypted from the device you already set up; it fetches nothing retroactively from the server. If you lose every device, the history is gone. The operator cannot restore it, because the operator was never able to read it.",
+          "ratchet": "Every message gets its own key, destroyed once the message has been read and impossible to derive from the keys before it. Someone who later gains access to your device can no longer open anything that came earlier. If a security session had to be rebuilt — because the other side reinstalled, for instance — that is stated in the conversation itself, not hidden away.",
           "attachments": "Images, voice messages, and files are encrypted the same way before upload. Storage only ever sees the encrypted block, its size, and its timestamp.",
           "receipts": "Delivery and read receipts travel as encrypted control messages over the same path. If a receipt cannot be encrypted, it is not sent rather than sent unprotected.",
           "calls": "Voice, video and group calls run through a media server. Audio and video are encrypted on your device and only opened again on the other end; the media server forwards what it cannot open. By default it runs on this instance. If the operator configures an external provider, the encrypted streams travel over that provider's servers.",

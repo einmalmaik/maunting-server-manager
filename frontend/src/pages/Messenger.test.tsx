@@ -83,6 +83,137 @@ const { identitaet, MockRecipientKeyMissingError } = vi.hoisted(() => ({
   },
 }))
 
+/**
+ * Stellvertreter für den Ratchet-Pfad.
+ *
+ * Der echte Double Ratchet erzeugt je Zielgerät einen eigenen Umschlag und
+ * verbraucht seinen Nachrichtenschlüssel beim Öffnen — beides braucht dieser
+ * Test nicht nachzubilden, um Zustellung, Häkchen und Verlauf zu prüfen.
+ * Nachgebildet wird genau das, was der Messenger von der Schicht sieht: das
+ * Umschlagformat, das Auffächern in eine Liste und die Ablegefunktion, die vor
+ * dem Fortschreiben läuft. Die Krypto selbst prüft `ratchetSitzung.test.ts`.
+ */
+/**
+ * Der lokale Verlaufsspeicher im Arbeitsspeicher statt in IndexedDB.
+ *
+ * jsdom bringt keine IndexedDB mit, und der Messenger braucht sie seit dem
+ * Ratchet zwingend: ein Nachrichtenschlüssel ist nach dem Öffnen verbraucht,
+ * der Klartext muss also abgelegt sein, bevor der Zustand weiterrückt.
+ * Nachgebildet wird hier nur die Ablage; dass die Reihenfolge stimmt, prüfen
+ * `ratchetSpeicher.test.ts` und `ratchetSitzung.test.ts` gegen die echte.
+ */
+const { nachrichten, klartexte } = vi.hoisted(() => ({
+  nachrichten: new Map<string, any[]>(),
+  klartexte: new Map<string, Map<number, string>>(),
+}))
+
+/** Zwischen zwei Tests muss der Speicher leer sein, sonst leckt der Verlauf. */
+function leereTestSpeicher(): void {
+  nachrichten.clear()
+  klartexte.clear()
+}
+
+vi.mock('@/services/messengerLocalStore', async () => {
+  const echt = await vi.importActual<typeof import('@/services/messengerLocalStore')>(
+    '@/services/messengerLocalStore'
+  )
+  return {
+    ...echt,
+    loadLocalMessages: vi.fn(async (mid: string) => nachrichten.get(mid) ?? []),
+    saveLocalMessages: vi.fn(async (mid: string, msgs: any[]) => {
+      nachrichten.set(mid, msgs)
+    }),
+    updateMessageInLocalStore: vi.fn(async () => {}),
+    getLocalMailboxLastSyncedId: vi.fn(async () => 0),
+    clearLocalMessengerStore: vi.fn(async () => {
+      nachrichten.clear()
+      klartexte.clear()
+    }),
+    speichereUmschlagKlartext: vi.fn(async (mid: string, id: number, plain: string) => {
+      if (!klartexte.has(mid)) klartexte.set(mid, new Map())
+      klartexte.get(mid)!.set(id, plain)
+    }),
+    ladeUmschlagKlartexte: vi.fn(
+      async (mid: string) => new Map(klartexte.get(mid) ?? new Map())
+    ),
+  }
+})
+
+vi.mock('@/services/ratchetSitzung', () => {
+  const PREFIX = 'sv-e2ee-dr-v1:'
+  const einpacken = (t: string) => PREFIX + '1.testgeraet.zielgeraet.' + btoa(unescape(encodeURIComponent(t)))
+  const auspacken = (u: string) => decodeURIComponent(escape(atob(u.split('.').slice(3).join('.'))))
+  return {
+    DR_PREFIX: PREFIX,
+    DR_INIT_TYP: 'dr-init',
+    baueZustellungen: vi.fn(async (_kontext: any, klartext: string, basisUuid: string) => [
+      {
+        empfaengerId: 101,
+        zielGeraet: 'zielgeraet',
+        bootstrap: null,
+        nachricht: einpacken(klartext),
+        clientUuid: basisUuid,
+        bootstrapClientUuid: basisUuid + '#i',
+      },
+    ]),
+    liesDrUmschlag: vi.fn(
+      async (_kontext: any, umschlag: string, ablegen: (t: string) => Promise<void>) => {
+        // Der Klartext kommt weiterhin aus dem Stellvertreter, den die Tests
+        // ohnehin je Fall setzen. So bleibt jede bestehende Vorgabe gültig,
+        // obwohl der Messenger jetzt über den Ratchet liest.
+        const { decryptE2eeMessage } = await import('@/services/e2eeCrypto')
+        let text: string
+        try {
+          text = umschlag.startsWith(PREFIX) && umschlag.split('.').length > 3
+            ? auspacken(umschlag)
+            : await (decryptE2eeMessage as any)(umschlag, 0, 0)
+        } catch {
+          return { art: 'bruch', vonKonto: 101, vonGeraet: 'zielgeraet', grund: 'Test' }
+        }
+        if (typeof text !== 'string' || text === '') {
+          return { art: 'unbekannt' }
+        }
+        await ablegen(text)
+        return { art: 'klartext', text, vonKonto: 101, vonGeraet: 'zielgeraet' }
+      }
+    ),
+    verarbeiteBootstrap: vi.fn(async () => ({ istAufbau: false, ersetzt: false })),
+    verwirfDrSitzung: vi.fn(async () => {}),
+    logischeUuid: (u?: string | null) =>
+      !u ? undefined : u.indexOf('#') === -1 ? u : u.slice(0, u.indexOf('#')),
+  }
+})
+
+/**
+ * Ein Geraet der Gegenstelle, mit genau dem Schluessel, den der Test gesetzt hat.
+ *
+ * Wichtig fuer die Dateien, die den echten Hybridumschlag benutzen: dort muss
+ * hier ein gueltiger JWK stehen, sonst scheitert das Versiegeln der Quittungen
+ * und der Test misst etwas anderes, als er glaubt.
+ */
+const zielGeraete = () => [
+  {
+    device_id: 'zielgeraet',
+    public_key: identitaet.empfaengerSchluessel || 'mock-empfaenger-pub-key',
+    label: '',
+  },
+]
+
+vi.mock('@/services/e2eeGeraet', () => ({
+  eigenesGeraet: vi.fn(async () => ({
+    kennung: 'testgeraet',
+    paar: identitaet.sendPair ?? { publicKeyJwk: '{"kty":"oct"}', privateKeyJwk: '{"kty":"oct"}' },
+  })),
+  geraeteVon: vi.fn(async () => zielGeraete()),
+  verlangeGeraeteVon: vi.fn(async () => {
+    if (!identitaet.empfaengerSchluessel) throw new MockRecipientKeyMissingError(0)
+    return zielGeraete()
+  }),
+  vergessenGeraete: vi.fn(),
+  clearGeraeteMemory: vi.fn(),
+  E2eeKeinGeraetError: class extends Error {},
+}))
+
 vi.mock('@/services/e2eeIdentity', () => ({
   IDENTITY_LOADING: { state: 'loading', sendPair: null, decryptionKeys: [] },
   resolveIdentity: vi.fn(async () => ({
@@ -134,6 +265,7 @@ function setupUser() {
 
 describe('Messenger (Allround Chat)', () => {
   beforeEach(() => {
+    leereTestSpeicher()
     vi.clearAllMocks()
     if (typeof sessionStorage !== 'undefined') sessionStorage.clear()
     if (typeof localStorage !== 'undefined') localStorage.clear()
@@ -1080,12 +1212,14 @@ describe('Messenger (Allround Chat)', () => {
     })
   })
 
-  it('sendet plattformuebergreifend (Tauri <-> Web) ausschliesslich hybrid gegen den Kontoschluessel', async () => {
-    // Der Titel hiess frueher „deterministische Kanalverschluesselung". Dieser
-    // Weg ist weg: sein Schluessel ergab sich allein aus den beiden
-    // Benutzerkennungen, die das Backend beim Relais ohnehin kennt. Geblieben
-    // ist der hybride Umschlag gegen den veroeffentlichten Empfaengerschluessel.
-    const { encryptE2eeHybrid } = await import('@/services/e2eeCrypto')
+  it('faechert plattformuebergreifend (Tauri <-> Web) je Empfaengergeraet auf', async () => {
+    // Zwei Verfahren sind hier nacheinander gestorben. Zuerst die
+    // „deterministische Kanalverschluesselung", deren Schluessel sich allein aus
+    // den beiden Benutzerkennungen ergab — die das Backend beim Relais ohnehin
+    // kennt. Danach der einzelne hybride Umschlag gegen den Kontoschluessel: ein
+    // Konto hat keinen gemeinsamen privaten Schluessel mehr, weil der Double
+    // Ratchet eine lineare Kette je Geraet ist. Geblieben ist das Auffaechern.
+    const { baueZustellungen } = await import('@/services/ratchetSitzung')
     vi.mocked(socialApi.getFriends).mockResolvedValue([
       {
         id: 99, // Friendship table ID
@@ -1098,7 +1232,6 @@ describe('Messenger (Allround Chat)', () => {
     ])
     // Both users have registered public keys (e.g. from Tauri or Web)
     identitaet.empfaengerSchluessel = '{"kty":"RSA","n":"pub_bob"}'
-    vi.mocked(encryptE2eeHybrid).mockResolvedValue('sv-e2ee-hybrid-v1:cross-platform-sync-envelope')
 
     render(
       <MemoryRouter>
@@ -1131,17 +1264,18 @@ describe('Messenger (Allround Chat)', () => {
     const sendBtn = screen.getByTitle('Senden')
     fireEvent.click(sendBtn)
 
-    // Message is encrypted via hybrid key exchange and relayed with recipient_id = 205
+    // Der Ratchet baut je Zielgeraet einen Umschlag; relayed wird mit
+    // recipient_id = 205, der echten Benutzerkennung statt der Freundschafts-ID.
     await waitFor(() => {
-      expect(encryptE2eeHybrid).toHaveBeenCalledWith(
+      expect(baueZustellungen).toHaveBeenCalledWith(
+        { eigeneId: 1, peerId: 205 },
         expect.stringContaining('Nachricht aus Tauri'),
-        '{"kty":"RSA","n":"pub_bob"}',
-        '{"kty":"oct"}'
+        expect.any(String)
       )
       expect(socialApi.relayE2eeEnvelope).toHaveBeenCalledWith(
         expect.objectContaining({
           recipient_id: 205,
-          ciphertext_envelope: 'sv-e2ee-hybrid-v1:cross-platform-sync-envelope',
+          ciphertext_envelope: expect.stringContaining('sv-e2ee-dr-v1:'),
         })
       )
     })

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from uuid import uuid4
 import pytest
@@ -167,44 +168,41 @@ def test_fuzzy_contact_matching_on_typos(db: Session, owner_user: User):
     assert any(c["username"] == "robert_speedy" for c in search_res["contacts"])
 
 
-def test_propose_message_contact_with_alias_and_echo_prevention(db: Session, owner_user: User):
-    """Prüft das Erstellen und Ausführen von propose_message_contact mit Beziehungs-Alias
-    sowie die Weitergabe von recipient_id zur Outgoing Echo Prevention."""
+def test_beziehungsalias_loest_auf_und_quittung_erreicht_nur_den_empfaenger(
+    db: Session, owner_user: User
+):
+    """Aliasauflösung und Benachrichtigungsfilter, beide ohne KI-Sendewerkzeug.
+
+    Die drei `propose_message_*`-Werkzeuge sind entfernt, weil sie serverseitig
+    verschlüsselt haben. Was sie benutzt haben, lebt weiter und wird hier direkt
+    geprüft: die semantische Kontaktauflösung und die Echo-Unterdrückung der
+    Benachrichtigungen.
+    """
+    from services.social_matching_service import SocialMatchingService
+
     charlie = User(username="charlie_chief", password_hash="hashc", is_active=True)
     db.add(charlie)
     db.commit()
 
-    f_rel = UserFriend(user_id=owner_user.id, friend_id=charlie.id, status="accepted")
-    db.add(f_rel)
+    db.add(UserFriend(user_id=owner_user.id, friend_id=charlie.id, status="accepted"))
     db.commit()
 
     _allow_memory(db, owner_user)
     _write_memory(db, owner_user, "bester_freund", "bester Freund = Charlie")
 
-    conv = AiConversation(id=str(uuid4()), user_id=owner_user.id, title="Test Chat", kind="primary")
-    db.add(conv)
-    db.commit()
-
-    # Proposal mit Alias "meinen besten Freund"
-    prop = create_proposal(
-        db,
-        user=owner_user,
-        conversation=conv,
-        correlation_id=str(uuid4()),
-        tool_name="propose_message_contact",
-        arguments={
-            "recipient_username": "meinen besten Freund",
-            "message_text": "Hey wie gehts dir?",
-            "rationale": "Freund kontaktieren",
-        },
+    # 1. Der Beziehungsalias führt zum richtigen Konto.
+    aufgeloest = SocialMatchingService.resolve_contact(
+        db, owner_user, "meinen besten Freund", friend_only=False
     )
-    assert prop.tool_name == "propose_message_contact"
-    # Wurde semantisch zu charlie_chief aufgelöst
-    preview = json.loads(prop.preview_json)
-    assert preview["recipient_username"] == "charlie_chief"
+    assert aufgeloest is not None
+    assert aufgeloest.username == "charlie_chief"
 
-    # Bestätigen & Ausführen
-    _, token = ai_proposal_service.confirm_proposal(db, proposal_id=prop.id, user=owner_user)
+    # 2. Ein Umschlag geht durch das Relais und trägt Absender und Empfänger im
+    #    Ereignis — ohne die brauchte der Filter unten raten.
+    mailbox = SocialService.derive_blind_mailbox_id(owner_user.id, charlie.id)
+    ciphertext = "sv-e2ee-group-v1:" + base64.b64encode(
+        bytes(range(1, 13)) + b"verschluesselter-rumpf" + bytes(16)
+    ).decode("ascii")
 
     published_events: list[dict] = []
     original_publish = SyncEventService.publish
@@ -215,74 +213,45 @@ def test_propose_message_contact_with_alias_and_echo_prevention(db: Session, own
 
     SyncEventService.publish = mock_publish
     try:
-        exec_prop, _ = ai_proposal_service.execute_proposal(
+        SocialService.relay_blind_envelope(
             db,
-            proposal_id=prop.id,
-            user=owner_user,
-            confirmation_token=token,
+            blind_mailbox_id=mailbox,
+            ciphertext_envelope=ciphertext,
+            sender_user_id=owner_user.id,
+            recipient_id=charlie.id,
         )
-        assert exec_prop.status == "succeeded"
-
-        # Prüfe, dass das SSE Event den sender_user_id und recipient_id korrekt trägt
-        assert len(published_events) >= 1
-        msg_event = next(e for e in published_events if e.get("type") == "e2ee_blind_message")
-        assert msg_event["sender_user_id"] == owner_user.id
-        assert msg_event["recipient_id"] == charlie.id
-
-        # NotificationService Filterung überprüfen
-        # Für den Sender (owner_user) darf KEINE Benachrichtigung getriggert werden
-        assert NotificationService.should_notify(
-            recipient_id=msg_event["recipient_id"],
-            current_user_id=owner_user.id,
-            sender_user_id=msg_event["sender_user_id"],
-            is_read=False,
-        ) is False
-
-        # Für den Empfänger (charlie) MUSS die Benachrichtigung getriggert werden
-        assert NotificationService.should_notify(
-            recipient_id=msg_event["recipient_id"],
-            current_user_id=charlie.id,
-            sender_user_id=msg_event["sender_user_id"],
-            is_read=False,
-        ) is True
-
-        # Für unbeteiligte Dritte darf KEINE Benachrichtigung getriggert werden
-        assert NotificationService.should_notify(
-            recipient_id=msg_event["recipient_id"],
-            current_user_id=99999,
-            sender_user_id=msg_event["sender_user_id"],
-            is_read=False,
-        ) is False
     finally:
         SyncEventService.publish = original_publish
 
+    msg_event = next(e for e in published_events if e.get("type") == "e2ee_blind_message")
+    assert msg_event["sender_user_id"] == owner_user.id
+    assert msg_event["recipient_id"] == charlie.id
 
-def test_propose_message_friend_with_alias_and_security_boundary(db: Session, owner_user: User):
-    """Prüft propose_message_friend mit Alias und dass Unbefugte sicher abgewiesen werden."""
+    # 3. Der Absender darf seine eigene Nachricht nicht als Benachrichtigung
+    #    zurückbekommen, der Empfänger schon, und Unbeteiligte gar nicht.
+    def benachrichtigt(wer: int) -> bool:
+        return NotificationService.should_notify(
+            recipient_id=msg_event["recipient_id"],
+            current_user_id=wer,
+            sender_user_id=msg_event["sender_user_id"],
+            is_read=False,
+        )
+
+    assert benachrichtigt(owner_user.id) is False
+    assert benachrichtigt(charlie.id) is True
+    assert benachrichtigt(99999) is False
+
+
+def test_freundesbindung_der_kontaktaufloesung(db: Session, owner_user: User):
+    """`friend_only` muss halten: ein Nicht-Freund darf nicht aufgelöst werden."""
+    from services.social_matching_service import SocialMatchingService
+
     dave = User(username="dave_dev", password_hash="hashd", is_active=True)
     db.add(dave)
     db.commit()
 
-    # Dave ist KEIN Freund!
+    # Dave ist KEIN Freund, steht aber als Alias im Gedächtnis.
     _allow_memory(db, owner_user)
     _write_memory(db, owner_user, "kollegen", "Kollege = Dave")
 
-    conv = AiConversation(id=str(uuid4()), user_id=owner_user.id, title="Test Chat 2", kind="primary")
-    db.add(conv)
-    db.commit()
-
-    # Sicherheitsgrenze: Da Dave kein bestätigter Freund ist, muss propose_message_friend abweisen!
-    with pytest.raises(AiActionValidationError) as exc:
-        create_proposal(
-            db,
-            user=owner_user,
-            conversation=conv,
-            correlation_id=str(uuid4()),
-            tool_name="propose_message_friend",
-            arguments={
-                "friend_username": "Kollege",
-                "message_text": "Hey Kollege",
-                "rationale": "Kollegen schreiben",
-            },
-        )
-    assert "Sicherheitsblockade" in str(exc.value) or "existiert nicht" in str(exc.value)
+    assert SocialMatchingService.resolve_contact(db, owner_user, "Kollege", friend_only=True) is None

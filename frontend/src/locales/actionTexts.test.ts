@@ -64,9 +64,12 @@ const SCHREIBWERKZEUGE = [
   'propose_restart_schedule_set',
   'propose_backup_schedule_set',
   'propose_email_send',
-  'propose_message_friend',
-  'propose_message_contact',
-  'propose_message_group',
+  // `propose_message_friend`, `propose_message_contact` und
+  // `propose_message_group` standen hier bis 09/2026. Sie sind entfernt, weil
+  // ihre Ausführer serverseitig verschlüsselt haben: der Schlüssel ergab sich
+  // aus den beiden Benutzerkennungen, die in der Datenbank stehen, also konnte
+  // der Server jede so verschickte Nachricht wieder öffnen. Die KI findet
+  // weiterhin Kontakte; schreiben muss der Mensch selbst, auf seinem Gerät.
   'propose_calendar_event_create',
   'propose_calendar_event_update',
   'propose_calendar_event_delete',

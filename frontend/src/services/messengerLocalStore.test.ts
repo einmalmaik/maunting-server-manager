@@ -8,6 +8,7 @@ import {
   parseMessageTimestamp,
   sortMessagesChronologically,
   isOptimisticMessage,
+  mischeVerlauf,
   type LocalStoredMessage,
 } from './messengerLocalStore'
 
@@ -359,5 +360,72 @@ describe('messengerLocalStore (IndexedDB Chat Persistence & F5 Hydration)', () =
     expect(loaded).toHaveLength(1)
     expect(loaded[0].id).toBe(88)
     expect(loaded[0].status).toBe('sent')
+  })
+})
+
+describe('mischeVerlauf', () => {
+  const nachricht = (
+    ueber: Partial<LocalStoredMessage> & { id: number }
+  ): LocalStoredMessage => ({
+    senderId: 1,
+    text: '',
+    createdAt: '2026-09-17T12:00:00Z',
+    isSelf: false,
+    ...ueber,
+  })
+
+  it('behält den eigenen Gesprächsanteil, den der Abruf nicht liefern kann', () => {
+    // Der Absender kann seine eigene Ratchet-Nachricht nicht entschlüsseln. Sie
+    // steht nur lokal, und ein Ersetzen statt Zusammenführen würde sie bei
+    // jedem Abruf wegwischen — der teuerste Fehler dieses Umbaus.
+    const lokal = [nachricht({ id: 10, clientUuid: 'a', text: 'von mir', isSelf: true })]
+    const frisch = [nachricht({ id: 11, clientUuid: 'b', text: 'von dir' })]
+
+    const zusammen = mischeVerlauf(lokal, frisch)
+    expect(zusammen.map((m) => m.text)).toEqual(['von mir', 'von dir'])
+  })
+
+  it('lässt den bestätigten Eintrag den optimistischen verdrängen', () => {
+    const lokal = [
+      nachricht({ id: 1e11 + 5, clientUuid: 'a', text: 'unterwegs', status: 'queued' }),
+    ]
+    const frisch = [nachricht({ id: 42, clientUuid: 'a', text: 'unterwegs', status: 'sent' })]
+
+    const zusammen = mischeVerlauf(lokal, frisch)
+    expect(zusammen).toHaveLength(1)
+    expect(zusammen[0].id).toBe(42)
+    expect(zusammen[0].status).toBe('sent')
+  })
+
+  it('wirft einen optimistischen Eintrag nicht über einen bestätigten', () => {
+    const lokal = [nachricht({ id: 42, clientUuid: 'a', text: 'fertig', status: 'sent' })]
+    const frisch = [nachricht({ id: 0, clientUuid: 'a', text: 'fertig', status: 'queued' })]
+
+    const zusammen = mischeVerlauf(lokal, frisch)
+    expect(zusammen).toHaveLength(1)
+    expect(zusammen[0].id).toBe(42)
+    expect(zusammen[0].status).toBe('sent')
+  })
+
+  it('bewahrt Felder, die nur die ältere Fassung kennt', () => {
+    // Ein Anhang, den dieser Durchlauf nicht mitgelesen hat, darf beim
+    // Zusammenführen nicht verschwinden.
+    const lokal = [
+      nachricht({ id: 7, clientUuid: 'a', text: 'Bild', imageAttachment: { mediaId: 3 } }),
+    ]
+    const frisch = [nachricht({ id: 7, clientUuid: 'a', text: 'Bild', isRead: true })]
+
+    const [zusammen] = mischeVerlauf(lokal, frisch)
+    expect(zusammen.imageAttachment).toEqual({ mediaId: 3 })
+    expect(zusammen.isRead).toBe(true)
+  })
+
+  it('führt über die Umschlagkennung zusammen, wenn keine Client-Kennung da ist', () => {
+    const lokal = [nachricht({ id: 7, text: 'alt' })]
+    const frisch = [nachricht({ id: 7, text: 'neu' })]
+
+    const zusammen = mischeVerlauf(lokal, frisch)
+    expect(zusammen).toHaveLength(1)
+    expect(zusammen[0].text).toBe('neu')
   })
 })

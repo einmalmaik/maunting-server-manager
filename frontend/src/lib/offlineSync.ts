@@ -209,6 +209,15 @@ export function enqueueMessageMutation(payload: {
   ciphertext_envelope: string
   recipient_id?: number | null
   client_uuid: string
+  /**
+   * Steuerumschläge müssen ihre Kennzeichnung auch über die Outbox behalten.
+   * Ein Sitzungsaufbau (`dr-init`), der sie unterwegs verliert, landet beim
+   * Empfänger als unlesbare Nachricht im Verlauf statt als das, was er ist.
+   * Die FIFO-Zusage der Outbox sorgt dafür, dass er vor der Nachricht ankommt,
+   * für die er gebraucht wird.
+   */
+  is_control?: boolean
+  control_type?: string
 }): OutboxMutation {
   return enqueueMutation({
     id: payload.client_uuid,

@@ -44,7 +44,7 @@ def test_e2ee_envelope_idempotent_deduplication(db: Session):
     """Prüft, dass wiederholtes Senden mit identischer client_uuid keine Duplikate erzeugt."""
     mailbox = "mailbox-stress-test-1"
     uuid_tag = "client-uuid-stable-12345"
-    payload = "sv-e2ee-v1:encrypted-content-1"
+    payload = "sv-e2ee-group-v1:encrypted-content-1"
 
     # Erstes Senden
     env1 = SocialService.relay_blind_envelope(
@@ -83,7 +83,7 @@ def test_e2ee_envelope_idempotent_deduplication(db: Session):
 def test_e2ee_envelope_without_uuid_creates_distinct_records(db: Session):
     """Envelopes ohne client_uuid werden standardmäßig als getrennte Nachrichten behandelt."""
     mailbox = "mailbox-stress-legacy"
-    payload = "sv-e2ee-v1:legacy-msg"
+    payload = "sv-e2ee-group-v1:legacy-msg"
 
     e1 = SocialService.relay_blind_envelope(db, blind_mailbox_id=mailbox, ciphertext_envelope=payload)
     e2 = SocialService.relay_blind_envelope(db, blind_mailbox_id=mailbox, ciphertext_envelope=payload)
@@ -107,7 +107,7 @@ def test_websocket_relay_ack_and_idempotency(db: Session, client: TestClient, ow
         ws.send_json({
             "type": "relay",
             "blind_mailbox_id": mailbox,
-            "ciphertext_envelope": "sv-e2ee-v1:ws-relay-cipher",
+            "ciphertext_envelope": "sv-e2ee-group-v1:ws-relay-cipher",
             "client_uuid": client_uuid,
         })
 
@@ -129,7 +129,7 @@ def test_websocket_relay_ack_and_idempotency(db: Session, client: TestClient, ow
         ws.send_json({
             "type": "relay",
             "blind_mailbox_id": mailbox,
-            "ciphertext_envelope": "sv-e2ee-v1:ws-relay-cipher",
+            "ciphertext_envelope": "sv-e2ee-group-v1:ws-relay-cipher",
             "client_uuid": client_uuid,
         })
 
@@ -268,7 +268,7 @@ def test_e2ee_envelope_unauthorized_user_cannot_access_existing_uuid(db: Session
     env = SocialService.relay_blind_envelope(
         db,
         blind_mailbox_id=mailbox,
-        ciphertext_envelope="sv-e2ee-v1:alice-secret",
+        ciphertext_envelope="sv-e2ee-group-v1:alice-secret",
         sender_user_id=alice.id,
         recipient_id=bob.id,
         client_uuid=uuid_tag,
@@ -280,7 +280,7 @@ def test_e2ee_envelope_unauthorized_user_cannot_access_existing_uuid(db: Session
         SocialService.relay_blind_envelope(
             db,
             blind_mailbox_id=mailbox,
-            ciphertext_envelope="sv-e2ee-v1:charlie-fake",
+            ciphertext_envelope="sv-e2ee-group-v1:charlie-fake",
             sender_user_id=charlie.id,
             recipient_id=bob.id,
             client_uuid=uuid_tag,
@@ -347,7 +347,7 @@ def test_e2ee_envelope_concurrent_duplicate_relays_race_condition(db: Session):
     lösen die IntegrityError-Behandlung sauber aus und geben die gleiche ID zurück."""
     mailbox = "concurrent-mailbox-test"
     uuid_tag = "concurrent-uuid-xyz"
-    payload = "sv-e2ee-v1:concurrent-payload"
+    payload = "sv-e2ee-group-v1:concurrent-payload"
 
     # Sequentiell und verschränkt testen
     env1 = SocialService.relay_blind_envelope(

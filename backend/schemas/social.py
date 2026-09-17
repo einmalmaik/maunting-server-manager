@@ -87,13 +87,30 @@ class PrivacyUpdateRequest(BaseModel):
 
 import json
 
+import re
+
+# Was neu in eine Mailbox geschrieben werden darf.
+#
+# Geprüft wird ausschließlich beim Schreiben: bereits abgelegte Umschläge alter
+# Formate bleiben liegen, es kann nur nichts Neues in ihnen entstehen. Damit
+# setzt der Server die Abschaffung der unsicheren Kanalableitungen durch, statt
+# sich darauf zu verlassen, dass jeder Client mitzieht.
+#
+# Gestrichen wurden `sv-e2ee-v1:` und `sv-e2ee-team-v1:` — beide leiteten ihren
+# Schlüssel aus den Benutzerkennungen ab (`sha256("msm:dm:key:<a>:<b>")`), die in
+# der Datenbank stehen. Der Server konnte sie mitlesen; das ist keine
+# Ende-zu-Ende-Verschlüsselung, sondern eine, die genau den nicht aussperrt, den
+# sie aussperren soll. `sv-e2ee-ratchet-v1:` war eine SHA-256-Kette ohne
+# DH-Schritt und hatte nie einen Aufrufer.
 VALID_E2EE_PREFIXES = (
-    "sv-e2ee-v1:",
-    "sv-e2ee-team-v1:",
     "sv-e2ee-group-v1:",
     "sv-e2ee-hybrid-v1:",
-    "sv-e2ee-ratchet-v1:",
+    "sv-e2ee-dr-v1:",
 )
+
+# Gerätekennung im Klartextkopf eines Double-Ratchet-Umschlags. Kein Punkt, der
+# trennt die Felder.
+_GERAETEKENNUNG = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 
 
 def validate_rsa_public_key_jwk(key_str: str) -> dict:
@@ -165,7 +182,9 @@ def validate_e2ee_envelope_format(envelope_str: str) -> None:
 
     if not matched_prefix:
         raise ValueError(
-            "Ungültiges E2EE-Umschlagformat: Nur versionierte DIS-Umschläge (sv-e2ee-v1:, sv-e2ee-team-v1:, sv-e2ee-group-v1:, sv-e2ee-hybrid-v1:, sv-e2ee-ratchet-v1:) werden akzeptiert. Plaintext ist verboten."
+            "Ungültiges E2EE-Umschlagformat: Nur versionierte DIS-Umschläge ("
+            + ", ".join(VALID_E2EE_PREFIXES)
+            + ") werden akzeptiert. Plaintext ist verboten."
         )
 
     payload = trimmed[len(matched_prefix):].strip()
@@ -185,6 +204,33 @@ def validate_e2ee_envelope_format(envelope_str: str) -> None:
     if any(c in payload for c in "\r\n\t"):
         raise ValueError("Ungültige Steuerzeichen im E2EE-Umschlag erkannt.")
 
+    if matched_prefix == "sv-e2ee-dr-v1:":
+        # <vonKonto>.<vonGeraet>.<fuerGeraet>.<base64(sv-dr-msg-v1:…)>
+        #
+        # Dieser Zweig kehrt eigenständig zurück. Die gemeinsame Schlussprüfung
+        # unten liest die ersten zwölf Bytes als IV und verwirft einen Null-IV —
+        # ein Double-Ratchet-Umschlag trägt aber gar keinen IV mit sich, seine
+        # Nonce leitet sich aus dem Einmal-Nachrichtenschlüssel ab. Angewandt
+        # würde sie zufällig gültige Umschläge verwerfen und nichts absichern.
+        teile = payload.split(".")
+        if len(teile) != 4:
+            raise ValueError(
+                "Ungültiges Double-Ratchet-Format: Konto, Absendergerät, Zielgerät und Rumpf erwartet."
+            )
+        konto_roh, von_geraet, fuer_geraet, rumpf = teile
+        if not konto_roh.isdigit() or int(konto_roh) <= 0:
+            raise ValueError("Ungültige Absenderkennung im Double-Ratchet-Umschlag.")
+        for kennung in (von_geraet, fuer_geraet):
+            if not _GERAETEKENNUNG.match(kennung):
+                raise ValueError("Ungültige Gerätekennung im Double-Ratchet-Umschlag.")
+        try:
+            roh = base64.b64decode(rumpf, validate=True)
+        except Exception as exc:
+            raise ValueError("Ungültige Base64-Kodierung im Double-Ratchet-Rumpf.") from exc
+        if not roh.startswith(b"sv-dr-msg-v1:"):
+            raise ValueError("Double-Ratchet-Rumpf trägt kein gültiges DIS-Nachrichtenformat.")
+        return
+
     if matched_prefix == "sv-e2ee-hybrid-v1:":
         if "." not in payload:
             raise ValueError("Ungültiges Hybrid-Payload-Format: Punkt-Trennzeichen zwischen Schlüssel und Chiffretext fehlt.")
@@ -199,13 +245,6 @@ def validate_e2ee_envelope_format(envelope_str: str) -> None:
                 base64.b64decode(cleaned_wk, validate=True)
             except Exception as exc:
                 raise ValueError("Ungültige Base64-Kodierung der Schlüsselkomponente im Hybrid-Umschlag.") from exc
-        ct_to_check = ct.strip()
-    elif matched_prefix == "sv-e2ee-ratchet-v1:":
-        if "." not in payload:
-            raise ValueError("Ungültiges Ratchet-Payload-Format: Punkt-Trennzeichen zwischen Epoche und Chiffretext fehlt.")
-        epoch_str, ct = payload.split(".", 1)
-        if not epoch_str.isdigit():
-            raise ValueError("Ungültige Epochen-Nummer im Ratchet-Umschlag.")
         ct_to_check = ct.strip()
     else:
         ct_to_check = payload

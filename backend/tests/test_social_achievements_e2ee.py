@@ -163,7 +163,7 @@ def test_e2ee_zero_knowledge_blind_relay(db: Session):
     blind_mailbox = "a" * 64
     import base64
     b64_ct = base64.b64encode(b"N" * 12 + b"test-ciphertext-blob" + b"T" * 16).decode("ascii")
-    envelope = f"sv-e2ee-v1:{b64_ct}"
+    envelope = f"sv-e2ee-group-v1:{b64_ct}"
 
     relayed = SocialService.relay_blind_envelope(
         db,
@@ -180,93 +180,69 @@ def test_e2ee_zero_knowledge_blind_relay(db: Session):
     assert messages[0].ciphertext_envelope == envelope
 
 
-def test_ai_tool_hard_friend_binding_and_zero_leakage(db: Session, owner_user: User):
-    """Prüft die harte Freundeslisten-Bindung des KI-Werkzeugs propose_message_friend."""
-    friend = User(username="frank", password_hash="hashf", is_active=True)
-    stranger = User(username="mallory", password_hash="hashm", is_active=True)
-    db.add_all([friend, stranger])
-    db.commit()
+def test_die_ki_kann_keine_nachricht_mehr_senden(db: Session, owner_user: User):
+    """Der Server erzeugt kein Chiffretext mehr — auch nicht im Auftrag der KI.
 
-    # Frank als Freund annehmen
-    f_rel = UserFriend(user_id=owner_user.id, friend_id=friend.id, status="accepted")
-    db.add(f_rel)
-    db.commit()
+    Bis 09/2026 bildete `_ausfuehren_message_friend` den Kanalschlüssel selbst
+    (`sha256("msm:dm:key:<a>:<b>")`), verschlüsselte den Nachrichtentext und legte
+    ihn in die Mailbox. Beide Zutaten kannte der Server, er konnte also jede so
+    entstandene Nachricht wieder öffnen. Das war keine
+    Ende-zu-Ende-Verschlüsselung, sondern eine, die niemanden aussperrte.
+
+    Die drei Werkzeuge sind ersatzlos entfernt. Dieser Test hält fest, dass sie
+    nicht zurückkommen, ohne dass es jemand merkt.
+    """
+    from services.ai_proposals import lifecycle
+    from services.ai_tools.social_tools import _social_tool_definitions
+    from services import ai_tool_registry
+
+    entfernt = ("propose_message_friend", "propose_message_contact", "propose_message_group")
+
+    for name in entfernt:
+        assert name not in lifecycle._AUSFUEHRUNGEN, f"{name} hat wieder einen Ausführer"
+        assert name not in ai_tool_registry.WERKZEUGE, f"{name} steht wieder im Katalog"
+
+    angeboten = {w["function"]["name"] for w in _social_tool_definitions()}
+    assert angeboten.isdisjoint(entfernt)
+    # Die Suche bleibt: sie liest nur Namen und ist kein Krypto-Pfad.
+    assert "search_messenger_contacts" in angeboten
+    assert "search_messenger_groups" in angeboten
 
     conv = AiConversation(id=str(uuid4()), user_id=owner_user.id, title="Test Chat", kind="primary")
     db.add(conv)
     db.commit()
 
-    # 1. Nachricht an Fremden (mallory) MUSS mit Sicherheitsfehler scheitern
-    with pytest.raises(AiActionValidationError) as exc:
+    with pytest.raises(AiActionValidationError):
         create_proposal(
             db,
             user=owner_user,
             conversation=conv,
             correlation_id=str(uuid4()),
             tool_name="propose_message_friend",
-            arguments={
-                "friend_username": "mallory",
-                "message_text": "Hallo Fremder!",
-                "rationale": "Kontaktaufnahme",
-            },
+            arguments={"friend_username": "frank", "message_text": "Hallo", "rationale": "Test"},
         )
-    assert "kein bestätigter Freund" in str(exc.value)
 
-    # 2. Nachricht an bestätigten Freund (frank) gelingt als Vorschlag
-    proposal = create_proposal(
-        db,
-        user=owner_user,
-        conversation=conv,
-        correlation_id=str(uuid4()),
-        tool_name="propose_message_friend",
-        arguments={
-            "friend_username": "frank",
-            "message_text": "Treffen wir uns auf dem Server?",
-            "rationale": "Server-Einladung",
-        },
-    )
-    assert proposal is not None
-    assert proposal.tool_name == "propose_message_friend"
+    # Und nichts davon hat eine Mailbox berührt.
+    assert db.query(E2eeBlindEnvelope).count() == 0
 
-    # Bestätigen und Ausführen des Vorschlags
-    _, token = ai_proposal_service.confirm_proposal(db, proposal_id=proposal.id, user=owner_user)
-    assert token is not None
 
-    exec_prop, result = ai_proposal_service.execute_proposal(
-        db,
-        proposal_id=proposal.id,
-        user=owner_user,
-        confirmation_token=token,
-    )
-    assert exec_prop.status == "succeeded"
+def test_kein_serverseitiger_kanalschluessel_mehr_im_code():
+    """Die Ableitung selbst muss aus dem Produktivcode verschwunden sein.
 
-    # Zero-Knowledge Verifikation: Eine blinde Mailbox wurde angelegt
-    envelopes = db.query(E2eeBlindEnvelope).all()
-    assert len(envelopes) >= 1
-    # Das Achievement 'social_zero_knowledge' wurde freigeschaltet
-    ach = db.query(UserAchievement).filter_by(user_id=owner_user.id, achievement_id="social_zero_knowledge").first()
-    assert ach is not None
+    Ein Test gegen die Registrierung allein genügt nicht: die Funktionen könnten
+    ohne Werkzeug weiterleben und von irgendwo sonst aufgerufen werden.
+    """
+    import pathlib
 
-    # Entschlüsselungsprüfung des DIS-Umschlags
-    import base64
-    import json
-    import hashlib
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-    env = envelopes[-1]
-    assert env.ciphertext_envelope.startswith("sv-e2ee-v1:")
-    ct_b64 = env.ciphertext_envelope[len("sv-e2ee-v1:"):]
-    raw_bytes = base64.b64decode(ct_b64)
-    iv = raw_bytes[:12]
-    ciphertext_and_tag = raw_bytes[12:]
-    ids = sorted([owner_user.id, friend.id])
-    key_bytes = hashlib.sha256(f"msm:dm:key:{ids[0]}:{ids[1]}".encode("utf-8")).digest()
-    aad = f"msm:dm:aad:{ids[0]}:{ids[1]}".encode("utf-8")
-    aesgcm = AESGCM(key_bytes)
-    decrypted_bytes = aesgcm.decrypt(iv, ciphertext_and_tag, aad)
-    msg_obj = json.loads(decrypted_bytes.decode("utf-8"))
-    assert msg_obj["sender_id"] == owner_user.id
-    assert msg_obj["text"] == "Treffen wir uns auf dem Server?"
-    assert "timestamp" in msg_obj
+    wurzel = pathlib.Path(__file__).resolve().parent.parent
+    treffer = []
+    for datei in wurzel.rglob("*.py"):
+        if "tests" in datei.parts or "migrations" in datei.parts:
+            continue
+        text = datei.read_text(encoding="utf-8", errors="ignore")
+        if 'f"msm:dm:key:' in text or 'f"msm:group:key:' in text:
+            treffer.append(str(datei.relative_to(wurzel)))
+    assert treffer == [], f"Serverseitige Kanalableitung noch vorhanden in: {treffer}"
 
 
 def test_presence_offline_timeout(db: Session, owner_user: User):
@@ -344,7 +320,7 @@ def test_chat_group_create_join_invite(db: Session, owner_user: User, regular_us
     env = SocialService.relay_blind_envelope(
         db,
         blind_mailbox_id=blind_mailbox,
-        ciphertext_envelope=f"sv-e2ee-team-v1:{b64_team}",
+        ciphertext_envelope=f"sv-e2ee-group-v1:{b64_team}",
     )
     assert env.id is not None
     assert env.blind_mailbox_id == blind_mailbox
@@ -554,62 +530,9 @@ def test_ai_messenger_search_and_e2ee(db: Session, owner_user: User) -> None:
     assert res_groups["count"] >= 1
     assert any(g["name"] == "Gamer Community" for g in res_groups["groups"])
 
-    # 4. propose_message_contact vorschlagen und ausführen
-    conv = AiConversation(id=str(uuid4()), user_id=owner_user.id, title="Test Chat", kind="primary")
-    db.add(conv)
-    db.commit()
-
-    proposal_dm = create_proposal(
-        db,
-        user=owner_user,
-        conversation=conv,
-        correlation_id=str(uuid4()),
-        tool_name="propose_message_contact",
-        arguments={
-            "recipient_username": "alice_wonder",
-            "message_text": "Alles Gute zum Geburtstag!",
-            "rationale": "Geburtstagsglückwunsch",
-        },
-    )
-    assert proposal_dm.tool_name == "propose_message_contact"
-    _, token_dm = ai_proposal_service.confirm_proposal(db, proposal_id=proposal_dm.id, user=owner_user)
-    exec_prop_dm, _ = ai_proposal_service.execute_proposal(
-        db,
-        proposal_id=proposal_dm.id,
-        user=owner_user,
-        confirmation_token=token_dm,
-    )
-    assert exec_prop_dm.status == "succeeded"
-
-    # 5. propose_message_group vorschlagen und ausführen
-    proposal_grp = create_proposal(
-        db,
-        user=owner_user,
-        conversation=conv,
-        correlation_id=str(uuid4()),
-        tool_name="propose_message_group",
-        arguments={
-            "group_name": "Gamer Community",
-            "message_text": "Hallo zusammen in der Gruppe!",
-            "rationale": "Gruppenankündigung",
-        },
-    )
-    assert proposal_grp.tool_name == "propose_message_group"
-    _, token_grp = ai_proposal_service.confirm_proposal(db, proposal_id=proposal_grp.id, user=owner_user)
-    exec_prop_grp, _ = ai_proposal_service.execute_proposal(
-        db,
-        proposal_id=proposal_grp.id,
-        user=owner_user,
-        confirmation_token=token_grp,
-    )
-    assert exec_prop_grp.status == "succeeded"
-
-    # 6. Verifiziere E2EE Blind Envelopes in der DB
-    envelopes = db.query(E2eeBlindEnvelope).all()
-    assert len(envelopes) >= 2
-    wire_types = {e.ciphertext_envelope[:15] for e in envelopes}
-    assert any("sv-e2ee-v1:" in wt for wt in wire_types)
-    assert any("sv-e2ee-group-v" in wt for wt in wire_types)
+    # 4. Senden kann die KI nicht mehr. Die Suche bleibt genau deshalb: sie
+    #    liest Namen, mehr nicht, und der Mensch schreibt selbst.
+    assert db.query(E2eeBlindEnvelope).count() == 0
 
 
 def test_e2ee_security_replay_attack_prevention(db: Session, owner_user: User):
@@ -619,7 +542,7 @@ def test_e2ee_security_replay_attack_prevention(db: Session, owner_user: User):
     from fastapi import HTTPException
 
     valid_ct = base64.b64encode(os.urandom(12) + b"ciphertext-bytes-here" + os.urandom(16)).decode("ascii")
-    envelope = f"sv-e2ee-v1:{valid_ct}"
+    envelope = f"sv-e2ee-group-v1:{valid_ct}"
     box_a = "1" * 64
     box_b = "2" * 64
 
@@ -650,7 +573,7 @@ def test_e2ee_security_envelope_format_and_tampering(db: Session):
     # 1. Plaintext-Payload-Leak
     leaked_payload = json.dumps({"text": "Klartext-Geheimnis", "sender_id": 1})
     with pytest.raises(ValueError) as exc_leak:
-        validate_e2ee_envelope_format(f"sv-e2ee-v1:{leaked_payload}")
+        validate_e2ee_envelope_format(f"sv-e2ee-group-v1:{leaked_payload}")
     assert "Sicherheitsverletzung" in str(exc_leak.value)
 
     # 2. Unbekanntes oder fehlendes Prefix
@@ -662,30 +585,69 @@ def test_e2ee_security_envelope_format_and_tampering(db: Session):
     zero_iv_raw = b"\x00" * 12 + b"ciphertext-bytes-here" + b"\x01" * 16
     zero_iv_b64 = base64.b64encode(zero_iv_raw).decode("ascii")
     with pytest.raises(ValueError) as exc_iv:
-        validate_e2ee_envelope_format(f"sv-e2ee-v1:{zero_iv_b64}")
+        validate_e2ee_envelope_format(f"sv-e2ee-group-v1:{zero_iv_b64}")
     assert "Null-IV" in str(exc_iv.value)
 
     # 4. Steuerzeichen im Umschlag
     with pytest.raises(ValueError) as exc_ctrl:
-        validate_e2ee_envelope_format("sv-e2ee-v1:payload\nwith\rnewlines")
+        validate_e2ee_envelope_format("sv-e2ee-group-v1:payload\nwith\rnewlines")
     assert "Steuerzeichen" in str(exc_ctrl.value)
 
     # 5. Zu kurzer Ciphertext (< 38 Zeichen / 28 Bytes)
     short_ct = base64.b64encode(b"\x01" * 10).decode("ascii")
     with pytest.raises(ValueError) as exc_short:
-        validate_e2ee_envelope_format(f"sv-e2ee-v1:{short_ct}")
+        validate_e2ee_envelope_format(f"sv-e2ee-group-v1:{short_ct}")
     assert "zu kurz" in str(exc_short.value).lower()
 
-    # 6. Ratchet-Umschlag (sv-e2ee-ratchet-v1:) gültig und ungültig
-    valid_bytes = b"\x01" * 12 + b"ratchet-payload-ciphertext" + b"\x02" * 16
+    # 6. Die abgeschafften Formate werden beim Schreiben nicht mehr angenommen.
+    #    Ihr Schlüssel ließ sich aus den Benutzerkennungen ableiten, die in der
+    #    Datenbank stehen — der Server konnte mitlesen. Abgelegte Altumschläge
+    #    bleiben liegen, neue dürfen nicht mehr entstehen.
+    valid_bytes = b"\x01" * 12 + b"ciphertext-bytes-here-ok" + b"\x02" * 16
     valid_b64 = base64.b64encode(valid_bytes).decode("ascii")
-    valid_ratchet = f"sv-e2ee-ratchet-v1:0.{valid_b64}"
-    validate_e2ee_envelope_format(valid_ratchet)  # darf keine Exception werfen
+    for veraltet in ("sv-e2ee-v1:", "sv-e2ee-team-v1:"):
+        with pytest.raises(ValueError) as exc_alt:
+            validate_e2ee_envelope_format(f"{veraltet}{valid_b64}")
+        assert "Ungültiges E2EE-Umschlagformat" in str(exc_alt.value)
+    with pytest.raises(ValueError):
+        validate_e2ee_envelope_format(f"sv-e2ee-ratchet-v1:0.{valid_b64}")
 
-    # Ungültige Epoche im Ratchet-Umschlag
-    with pytest.raises(ValueError) as exc_ratchet_ep:
-        validate_e2ee_envelope_format(f"sv-e2ee-ratchet-v1:invalid.{valid_b64}")
-    assert "Epoche" in str(exc_ratchet_ep.value)
+
+def test_double_ratchet_umschlag_wird_geprueft():
+    """Der Kopf eines `sv-e2ee-dr-v1:` trägt das Routing und muss stimmen."""
+    import base64
+    from schemas.social import validate_e2ee_envelope_format
+
+    rumpf = base64.b64encode(
+        b'sv-dr-msg-v1:{"header":{"v":"sv-dr-msg-v1","dh":"AA","pn":0,"n":0}}'
+    ).decode("ascii")
+    von = "a" * 32
+    fuer = "b" * 32
+
+    # Gültig: vier Felder, beide Kennungen wohlgeformt, Rumpf ist eine DIS-Nachricht.
+    validate_e2ee_envelope_format(f"sv-e2ee-dr-v1:7.{von}.{fuer}.{rumpf}")
+
+    # Der Zweig kehrt eigenständig zurück: ein Double-Ratchet-Umschlag trägt
+    # keinen IV, die gemeinsame Null-IV-Prüfung darf ihn nicht treffen. Ein
+    # Rumpf, dessen erste zwölf Bytes null wären, muss trotzdem durchgehen.
+    null_rumpf = base64.b64encode(b"sv-dr-msg-v1:" + b"\x00" * 40).decode("ascii")
+    validate_e2ee_envelope_format(f"sv-e2ee-dr-v1:7.{von}.{fuer}.{null_rumpf}")
+
+    for kaputt, erwartet in (
+        (f"sv-e2ee-dr-v1:7.{von}.{rumpf}", "Konto"),
+        (f"sv-e2ee-dr-v1:x.{von}.{fuer}.{rumpf}", "Absenderkennung"),
+        (f"sv-e2ee-dr-v1:0.{von}.{fuer}.{rumpf}", "Absenderkennung"),
+        (f"sv-e2ee-dr-v1:7.kurz.{fuer}.{rumpf}", "Gerätekennung"),
+        (f"sv-e2ee-dr-v1:7.{von}.{fuer}.keinbase64!", "Base64"),
+        (
+            f"sv-e2ee-dr-v1:7.{von}.{fuer}."
+            + base64.b64encode(b"irgendwas anderes").decode("ascii"),
+            "DIS-Nachrichtenformat",
+        ),
+    ):
+        with pytest.raises(ValueError) as exc:
+            validate_e2ee_envelope_format(kaputt)
+        assert erwartet in str(exc.value), kaputt
 
 
 def test_e2ee_security_public_key_validation(db: Session, owner_user: User):

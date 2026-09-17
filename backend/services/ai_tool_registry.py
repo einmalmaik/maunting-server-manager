@@ -647,24 +647,6 @@ WERKZEUGE: dict[str, Werkzeug] = {
         recht="ai.mailbox.use",
         recht_global=True,
     ),
-    "propose_message_friend": Werkzeug(
-        "global_write",
-        gruppe="social",
-        recht="ai.social.message_friend",
-        recht_global=True,
-    ),
-    "propose_message_contact": Werkzeug(
-        "global_write",
-        gruppe="social",
-        recht="ai.social.message_friend",
-        recht_global=True,
-    ),
-    "propose_message_group": Werkzeug(
-        "global_write",
-        gruppe="social",
-        recht="ai.social.message_friend",
-        recht_global=True,
-    ),
     "search_messenger_contacts": Werkzeug(
         "global_read",
         gruppe="social",
@@ -1220,9 +1202,6 @@ AUFGABEN_HANDELN = frozenset({
     # stehende Aufgaben (`propose_task_set` mit `kind="act"`). Termine löschen
     # steht wie Server/Backups in ALWAYS_CONFIRM_TOOLS und bleibt draussen.
     "propose_email_send",
-    "propose_message_friend",
-    "propose_message_contact",
-    "propose_message_group",
     "propose_calendar_event_create",
     "propose_calendar_event_update",
 })
