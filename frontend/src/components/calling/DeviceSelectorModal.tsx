@@ -81,6 +81,10 @@ export const DeviceSelectorModal: React.FC<DeviceSelectorModalProps> = ({
             </div>
           )}
         </div>
+        <p className="mt-4 border-t border-outline-variant/30 pt-3 text-xs leading-relaxed text-on-surface-variant">
+          Die Wahl gilt auch für Sprachnachrichten und den Sprachmodus. Rauschunterdrückung,
+          Echounterdrückung und der Mikrofontest stehen in Profil → Audio.
+        </p>
       </DialogContent>
     </Dialog>
   )

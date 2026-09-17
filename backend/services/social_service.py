@@ -27,6 +27,46 @@ from services.notification_service import NotificationService
 logger = logging.getLogger(__name__)
 
 
+#: Alle Rechte, die eine Gruppenrolle tragen kann. Wer hier nichts stehen hat,
+#: kann nicht gesetzt werden — siehe ``SocialService.assert_known_permissions``.
+GROUP_PERMISSIONS: frozenset[str] = frozenset(
+    {
+        "send_messages",
+        "attach_media",
+        "invite_members",
+        "start_group_calls",
+        "join_group_calls",
+        "share_screen",
+        "mute_in_calls",
+        "kick_from_calls",
+        "kick_members",
+        "delete_messages",
+        "manage_roles",
+    }
+)
+
+#: Rechte rund um den Gruppenanruf. Eigentümer und Administratoren haben sie
+#: ohne Eintrag — sie können sie sich ohnehin jederzeit selbst geben.
+GROUP_CALL_PERMISSIONS: frozenset[str] = frozenset(
+    {
+        "start_group_calls",
+        "join_group_calls",
+        "share_screen",
+        "mute_in_calls",
+        "kick_from_calls",
+    }
+)
+
+#: Was der Rechte-Dialog vor dem 17.09.2026 geschrieben hat. Wird beim Lesen
+#: übersetzt, damit bereits gesetzte Haken nicht verloren gehen.
+GROUP_PERMISSION_ALIASES: dict[str, tuple[str, ...]] = {
+    "call_start": ("start_group_calls",),
+    "call_join": ("join_group_calls",),
+    "call_share": ("share_screen",),
+    "call_moderate": ("mute_in_calls", "kick_from_calls"),
+}
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -1443,6 +1483,25 @@ class SocialService:
         )
 
     @classmethod
+    def expand_group_permissions(cls, raw: str | None) -> set[str]:
+        """Parst eine gespeicherte Rechteliste und löst Altbezeichnungen auf.
+
+        Der Rechte-Dialog hat eine Zeit lang eigene Schlüssel geschrieben
+        (``call_start`` statt ``start_group_calls`` und so fort), die hier nie
+        geprüft wurden — gesetzte Haken blieben wirkungslos. Statt die Daten zu
+        migrieren, werden die alten Namen beim Lesen übersetzt: bestehende
+        Gruppen behalten ihre Einstellung, und neue Daten sprechen nur noch das
+        kanonische Vokabular.
+        """
+        gesetzt: set[str] = set()
+        for teil in (raw or "").split(","):
+            name = teil.strip()
+            if not name:
+                continue
+            gesetzt.update(GROUP_PERMISSION_ALIASES.get(name, (name,)))
+        return gesetzt
+
+    @classmethod
     def has_group_permission(cls, db: Session, group_id: int, user_id: int, permission: str) -> bool:
         """Checks membership and effective group permission without mutating state."""
         member = cls.get_group_member(db, group_id, user_id)
@@ -1452,16 +1511,35 @@ class SocialService:
         # required for ordinary members. Joining is included on purpose: whoever
         # may open a room may enter it, otherwise starting a group call would
         # hand the starter a room they are refused a token for.
-        if permission in ("start_group_calls", "join_group_calls") and member.role in (
-            "owner",
-            "admin",
-        ):
+        if permission in GROUP_CALL_PERMISSIONS and member.role in ("owner", "admin"):
             return True
         permissions = member.permissions
         if permissions is None:
             group = db.query(ChatGroup).filter(ChatGroup.id == group_id).first()
             permissions = group.default_permissions if group else None
-        return permission in {p.strip() for p in (permissions or "").split(",") if p.strip()}
+        return permission in cls.expand_group_permissions(permissions)
+
+    @classmethod
+    def assert_known_permissions(cls, raw: str | None) -> str | None:
+        """Weist unbekannte Rechtenamen ab, statt sie stumm zu speichern.
+
+        Ein Tippfehler in einer Rechteliste blieb bisher folgenlos sichtbar: der
+        Haken stand im Dialog, geprüft wurde er nie. Genau so entstand die
+        Lücke zwischen ``call_start`` und ``start_group_calls``.
+        """
+        if raw is None:
+            return None
+        namen = [teil.strip() for teil in raw.split(",") if teil.strip()]
+        unbekannt = sorted(
+            n for n in namen if n not in GROUP_PERMISSIONS and n not in GROUP_PERMISSION_ALIASES
+        )
+        if unbekannt:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unbekannte Berechtigung: {', '.join(unbekannt)}",
+            )
+        # Kanonisch und ohne Dubletten zurückschreiben.
+        return ",".join(sorted(cls.expand_group_permissions(raw)))
 
     @classmethod
     def assert_group_call_permission(
@@ -1538,7 +1616,13 @@ class SocialService:
                 "username": uname,
                 "avatar_url": uavatar,
                 "role": mem.role,
-                "permissions": mem.permissions,
+                # Kanonisch nach aussen, damit die Oberflaeche nur ein
+                # Vokabular kennt. Was in der Spalte steht, kann noch alt sein.
+                "permissions": (
+                    ",".join(sorted(cls.expand_group_permissions(mem.permissions)))
+                    if mem.permissions is not None
+                    else None
+                ),
                 "joined_at": mem.joined_at,
             })
 
@@ -1554,7 +1638,13 @@ class SocialService:
                 "avatar_url": g.avatar_url,
                 "invite_code": g.invite_code,
                 "owner_user_id": g.owner_user_id,
-                "default_permissions": g.default_permissions or "send_messages,invite_members",
+                "default_permissions": ",".join(
+                    sorted(
+                        cls.expand_group_permissions(
+                            g.default_permissions or "send_messages,invite_members"
+                        )
+                    )
+                ),
                 "member_count": len(mems),
                 "role": user_role_by_group.get(g.id, "member"),
                 # Dieselbe Entscheidung, die der Anruf-Endpunkt trifft. Ohne sie
@@ -1565,6 +1655,11 @@ class SocialService:
                 ),
                 "can_join_call": cls.has_group_permission(
                     db, g.id, user_id, "join_group_calls"
+                ),
+                "can_share_screen": cls.has_group_permission(db, g.id, user_id, "share_screen"),
+                "can_mute_others": cls.has_group_permission(db, g.id, user_id, "mute_in_calls"),
+                "can_kick_from_call": cls.has_group_permission(
+                    db, g.id, user_id, "kick_from_calls"
                 ),
                 "created_at": g.created_at,
                 "members": mems,
@@ -1698,7 +1793,7 @@ class SocialService:
             raise HTTPException(status_code=403, detail="Nur der Eigentümer kann die Rolle anderer Administratoren anpassen.")
 
         target_mem.role = role
-        target_mem.permissions = permissions.strip() if permissions else None
+        target_mem.permissions = cls.assert_known_permissions(permissions) if permissions else None
         db.commit()
         db.refresh(target_mem)
 
@@ -1794,7 +1889,7 @@ class SocialService:
         if not group:
             raise HTTPException(status_code=404, detail="Gruppe nicht gefunden.")
 
-        clean_perms = default_permissions.strip()
+        clean_perms = cls.assert_known_permissions(default_permissions) or ""
         group.default_permissions = clean_perms
         db.commit()
         db.refresh(group)

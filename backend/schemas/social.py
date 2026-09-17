@@ -457,6 +457,9 @@ class ChatGroupResponse(BaseModel):
     # false ist, beantwortet der Anruf-Endpunkt mit 403.
     can_start_call: bool = False
     can_join_call: bool = False
+    can_share_screen: bool = False
+    can_mute_others: bool = False
+    can_kick_from_call: bool = False
     created_at: datetime
     members: list[ChatGroupMemberResponse] = []
 

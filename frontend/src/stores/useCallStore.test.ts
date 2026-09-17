@@ -75,7 +75,8 @@ const livekit = {
   starteBildschirmfreigabe: vi.fn().mockResolvedValue(undefined),
   beendeBildschirmfreigabe: vi.fn().mockResolvedValue(undefined),
   trenne: vi.fn().mockResolvedValue(undefined),
-  erlaubeWiedergabe: vi.fn().mockResolvedValue(undefined),
+  // Liefert, ob der Browser Ton zulässt — `true` ist der Normalfall.
+  erlaubeWiedergabe: vi.fn().mockResolvedValue(true),
   setzeRaumSchluessel: vi.fn().mockResolvedValue(undefined),
   verbinde: vi.fn(),
 }
@@ -122,6 +123,13 @@ const toastFehler = vi.fn()
 vi.mock('@/stores/toastStore', () => ({
   toast: { error: (t: string) => toastFehler(t), success: vi.fn(), info: vi.fn() },
 }))
+
+const toene = {
+  toneBeitritt: vi.fn(),
+  toneAbgang: vi.fn(),
+  toneAufgelegt: vi.fn(),
+}
+vi.mock('@/components/calling/anrufToene', () => toene)
 
 // Nach den Mocks importieren, sonst greifen sie nicht.
 const { useCallStore, setzeAnrufIdentitaet } = await import('./useCallStore')
@@ -551,5 +559,142 @@ describe('Auflegen', () => {
 
     useCallStore.getState().incrementDuration()
     expect(useCallStore.getState().callDurationSeconds).toBe(1)
+  })
+})
+
+// ── Ton, Meldungen und Moderation ───────────────────────────────────────────
+
+describe('Beitritt und Abgang', () => {
+  it('meldet einen Beitritt flüchtig und spielt einen Ton', async () => {
+    await verbundenerAnruf()
+    aktuellerRaum.tritt_bei('u2', 'bob')
+
+    expect(toene.toneBeitritt).toHaveBeenCalledTimes(1)
+    const hinweise = useCallStore.getState().hinweise
+    expect(hinweise).toHaveLength(1)
+    expect(hinweise[0].art).toBe('beitritt')
+    expect(hinweise[0].text).toContain('bob')
+  })
+
+  it('meldet einen Abgang, solange noch jemand da ist', async () => {
+    await useCallStore.getState().joinGroupCall(
+      { id: 5, name: 'Gruppe', canShare: true, canModerate: true },
+      'raum-g',
+    )
+    aktuellerRaum.feuere(RoomEvent.Connected)
+    aktuellerRaum.tritt_bei('u2', 'bob')
+    aktuellerRaum.tritt_bei('u3', 'cara')
+    useCallStore.setState({ hinweise: [] })
+
+    aktuellerRaum.verlaesst('u3')
+    expect(toene.toneAbgang).toHaveBeenCalledTimes(1)
+    expect(useCallStore.getState().hinweise[0].art).toBe('abgang')
+  })
+
+  it('meldet im Zweiergespräch keinen Abgang, nur das Auflegen', async () => {
+    // Sonst stünde „X hat verlassen" eine Zehntelsekunde im Fenster, bevor es
+    // sich schließt. Zwei Meldungen für ein Ereignis.
+    await verbundenerAnruf()
+    aktuellerRaum.tritt_bei('u2', 'bob')
+    useCallStore.setState({ hinweise: [] })
+
+    aktuellerRaum.verlaesst('u2')
+    expect(toene.toneAbgang).not.toHaveBeenCalled()
+    expect(toene.toneAufgelegt).toHaveBeenCalledTimes(1)
+    expect(useCallStore.getState().hinweise).toEqual([])
+  })
+
+  it('spielt beim Wegdrücken eines eingehenden Anrufs keinen Auflegeton', () => {
+    useCallStore.getState().receiveCall(PARTNER, 'audio', 'raum-x')
+    useCallStore.getState().rejectCall()
+    expect(toene.toneAufgelegt).not.toHaveBeenCalled()
+  })
+
+  it('verwirft eine Meldung wieder', async () => {
+    await verbundenerAnruf()
+    aktuellerRaum.tritt_bei('u2', 'bob')
+    const id = useCallStore.getState().hinweise[0].id
+
+    useCallStore.getState().verwirfHinweis(id)
+    expect(useCallStore.getState().hinweise).toEqual([])
+  })
+
+  it('räumt Meldungen beim Auflegen weg', async () => {
+    await verbundenerAnruf()
+    aktuellerRaum.tritt_bei('u2', 'bob')
+    useCallStore.getState().endCall()
+    expect(useCallStore.getState().hinweise).toEqual([])
+  })
+})
+
+describe('Serverstumm', () => {
+  it('sperrt den Mikrofonknopf, wenn die Quelle entzogen wurde', async () => {
+    await verbundenerAnruf()
+    // Ohne Mikrofon in den erlaubten Quellen: genau das, was ein Moderator
+    // über `UpdateParticipant` setzt.
+    ;(aktuellerRaum.localParticipant as unknown as { permissions: unknown }).permissions = {
+      canPublishSources: [1, 3, 4],
+    }
+    aktuellerRaum.feuere(RoomEvent.ParticipantPermissionsChanged)
+
+    expect(useCallStore.getState().serverStumm).toBe(true)
+    expect(useCallStore.getState().isMuted).toBe(true)
+
+    vi.clearAllMocks()
+    useCallStore.getState().toggleMute()
+    // Der Versuch scheitert sichtbar und ändert nichts.
+    expect(livekit.setzeMikrofon).not.toHaveBeenCalled()
+    expect(useCallStore.getState().isMuted).toBe(true)
+    expect(toastFehler).toHaveBeenCalled()
+  })
+
+  it('lässt nach dem Aufheben wieder frei, bleibt aber stumm', async () => {
+    await verbundenerAnruf()
+    const teilnehmer = aktuellerRaum.localParticipant as unknown as { permissions: unknown }
+    teilnehmer.permissions = { canPublishSources: [1, 3, 4] }
+    aktuellerRaum.feuere(RoomEvent.ParticipantPermissionsChanged)
+
+    teilnehmer.permissions = { canPublishSources: [1, 2, 3, 4] }
+    aktuellerRaum.feuere(RoomEvent.ParticipantPermissionsChanged)
+
+    expect(useCallStore.getState().serverStumm).toBe(false)
+    // Wieder zu sprechen ist eine Entscheidung, kein Automatismus.
+    expect(useCallStore.getState().isMuted).toBe(true)
+    useCallStore.getState().toggleMute()
+    expect(useCallStore.getState().isMuted).toBe(false)
+  })
+
+  it('hält eine leere Quellenliste für „alles erlaubt"', async () => {
+    // LiveKit lässt das Feld weg, wenn nichts eingeschränkt ist. Als „nichts
+    // erlaubt" gelesen wäre jeder Anruf serverstumm.
+    await verbundenerAnruf()
+    ;(aktuellerRaum.localParticipant as unknown as { permissions: unknown }).permissions = {
+      canPublishSources: [],
+    }
+    aktuellerRaum.feuere(RoomEvent.ParticipantPermissionsChanged)
+    expect(useCallStore.getState().serverStumm).toBe(false)
+  })
+})
+
+describe('Tonwiedergabe', () => {
+  it('merkt sich, wenn der Browser den Ton verweigert', async () => {
+    livekit.erlaubeWiedergabe.mockResolvedValueOnce(false)
+    await verbundenerAnruf()
+    expect(useCallStore.getState().audioBlockiert).toBe(true)
+
+    livekit.erlaubeWiedergabe.mockResolvedValueOnce(true)
+    await useCallStore.getState().erlaubeTon()
+    expect(useCallStore.getState().audioBlockiert).toBe(false)
+  })
+})
+
+describe('Geräte', () => {
+  it('schreibt die Wahl dorthin, wo auch der Mikrofontest sie sucht', async () => {
+    await verbundenerAnruf()
+    useCallStore.getState().setDevices('mic-42', undefined, 'speaker-7')
+
+    const { getAudioSettings } = await import('@/lib/audioSettings')
+    expect(getAudioSettings().preferredMicId).toBe('mic-42')
+    expect(getAudioSettings().preferredSpeakerId).toBe('speaker-7')
   })
 })

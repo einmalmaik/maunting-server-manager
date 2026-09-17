@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react'
-import { Mic, MicOff, Video, VideoOff } from 'lucide-react'
+import { Mic, MicOff, Video, VideoOff, VolumeX } from 'lucide-react'
 import { apiUrl } from '@/config/api'
 import type { Track } from 'livekit-client'
 import type { CallParticipant } from '@/stores/useCallStore'
@@ -8,6 +8,8 @@ export interface ParticipantTileProps {
   participant: CallParticipant
   /** Kompakte Darstellung für die Teilnehmerleiste statt der Bühne. */
   compact?: boolean
+  /** Klick auf die Kachel — öffnet das Teilnehmermenü. */
+  onSelect?: (participant: CallParticipant) => void
 }
 
 /** Hängt eine LiveKit-Spur an ein `<video>` und räumt beim Wechsel auf. */
@@ -24,57 +26,80 @@ function useSpur(track: Track | null) {
   return ref
 }
 
-export const ParticipantTile: React.FC<ParticipantTileProps> = ({ participant, compact = false }) => {
+function zustandstext(participant: CallParticipant): string {
+  if (participant.isPending) return 'Verbindet…'
+  if (participant.volume === 0 && !participant.isSelf) return 'Für dich stumm'
+  if (participant.isMuted) return 'Stumm'
+  if (participant.isSpeaking) return 'Spricht'
+  return 'Dabei'
+}
+
+export const ParticipantTile: React.FC<ParticipantTileProps> = ({
+  participant,
+  compact = false,
+  onSelect,
+}) => {
   const videoRef = useSpur(participant.videoTrack)
   const zeigtVideo = Boolean(participant.videoTrack) && !participant.isCameraOff
+  const lokalStumm = participant.volume === 0 && !participant.isSelf
 
-  // Der grüne Ring ist die Sprechanzeige. Er sitzt bewusst am Rahmen der
-  // ganzen Kachel und nicht nur am Avatar: in der Videoansicht gibt es keinen
-  // Avatar, und die Anzeige muss in beiden Zuständen dieselbe sein.
+  // Der Ring ist die Sprechanzeige. Er sitzt bewusst am Rahmen der ganzen
+  // Kachel und nicht nur am Avatar: in der Videoansicht gibt es keinen Avatar,
+  // und die Anzeige muss in beiden Zuständen dieselbe sein.
   const ring = participant.isSpeaking
-    ? 'ring-2 ring-emerald-400 shadow-[0_0_18px_-2px_rgba(52,211,153,0.6)]'
-    : 'ring-1 ring-white/10'
+    ? 'ring-2 ring-status-success shadow-lg shadow-status-success/40'
+    : 'ring-1 ring-outline-variant/40'
+
+  const klickbar = Boolean(onSelect)
+  const gemeinsam = `w-full min-w-0 text-left transition-shadow ${ring} ${
+    klickbar ? 'cursor-pointer hover:ring-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary' : ''
+  }`
+  const Behaelter = klickbar ? 'button' : 'div'
+  const klickAttribute = klickbar
+    ? {
+        type: 'button' as const,
+        onClick: () => onSelect?.(participant),
+        title: `Optionen für ${participant.username}`,
+      }
+    : {}
 
   if (compact) {
     return (
-      <div
-        className={`flex items-center gap-2.5 rounded-2xl bg-slate-950/50 px-2.5 py-2 transition-shadow ${ring}`}
+      <Behaelter
+        {...klickAttribute}
+        className={`flex items-center gap-2.5 rounded-2xl bg-surface-container-high/70 px-2.5 py-2 ${gemeinsam}`}
       >
         <Avatar participant={participant} groesse="h-9 w-9" />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium text-white/90">
+          <div className="truncate text-sm font-medium text-on-surface">
             {participant.username}
-            {participant.isSelf && <span className="text-white/45"> (du)</span>}
+            {participant.isSelf && <span className="text-on-surface-variant"> (du)</span>}
           </div>
-          <div className="text-[10px] text-white/50">
-            {participant.isPending
-              ? 'Verbindet…'
-              : participant.isMuted
-                ? 'Stumm'
-                : participant.isSpeaking
-                  ? 'Spricht'
-                  : 'Dabei'}
+          <div className="truncate text-[10px] text-on-surface-variant">
+            {zustandstext(participant)}
           </div>
         </div>
-        <div className="flex items-center gap-1.5 text-white/65">
+        <div className="flex shrink-0 items-center gap-1.5 text-on-surface-variant">
+          {lokalStumm && <VolumeX className="h-3.5 w-3.5 text-status-warning" aria-label="Für dich stumm" />}
           {participant.isMuted ? (
-            <MicOff className="h-3.5 w-3.5 text-rose-300" aria-label="Mikrofon aus" />
+            <MicOff className="h-3.5 w-3.5 text-status-error" aria-label="Mikrofon aus" />
           ) : (
             <Mic className="h-3.5 w-3.5" aria-label="Mikrofon an" />
           )}
           {participant.isCameraOff ? (
             <VideoOff className="h-3.5 w-3.5" aria-label="Kamera aus" />
           ) : (
-            <Video className="h-3.5 w-3.5 text-cyan-300" aria-label="Kamera an" />
+            <Video className="h-3.5 w-3.5 text-primary" aria-label="Kamera an" />
           )}
         </div>
-      </div>
+      </Behaelter>
     )
   }
 
   return (
-    <div
-      className={`relative flex min-h-[9rem] items-center justify-center overflow-hidden rounded-2xl bg-slate-900 transition-shadow ${ring}`}
+    <Behaelter
+      {...klickAttribute}
+      className={`relative flex h-full items-center justify-center overflow-hidden rounded-2xl bg-surface-container ${gemeinsam}`}
     >
       {zeigtVideo ? (
         <video
@@ -85,17 +110,18 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({ participant, c
           className={`h-full w-full object-cover ${participant.isSelf ? '-scale-x-100' : ''}`}
         />
       ) : (
-        <Avatar participant={participant} groesse="h-20 w-20 sm:h-24 sm:w-24" />
+        <Avatar participant={participant} groesse="h-16 w-16 sm:h-20 sm:w-20" />
       )}
 
-      <div className="absolute inset-x-2 bottom-2 flex items-center justify-between gap-2">
-        <span className="max-w-[70%] truncate rounded-full bg-slate-950/70 px-2 py-0.5 text-[11px] font-medium text-white/90">
+      <div className="pointer-events-none absolute inset-x-2 bottom-2 flex items-center justify-between gap-2">
+        <span className="min-w-0 truncate rounded-full bg-surface/85 px-2 py-0.5 text-[11px] font-medium text-on-surface backdrop-blur-sm">
           {participant.username}
-          {participant.isSelf && <span className="text-white/45"> (du)</span>}
+          {participant.isSelf && <span className="text-on-surface-variant"> (du)</span>}
         </span>
-        <span className="flex items-center gap-1 rounded-full bg-slate-950/70 px-2 py-0.5 text-white/75">
+        <span className="flex shrink-0 items-center gap-1 rounded-full bg-surface/85 px-2 py-0.5 text-on-surface-variant backdrop-blur-sm">
+          {lokalStumm && <VolumeX className="h-3.5 w-3.5 text-status-warning" aria-label="Für dich stumm" />}
           {participant.isMuted ? (
-            <MicOff className="h-3.5 w-3.5 text-rose-300" aria-label="Mikrofon aus" />
+            <MicOff className="h-3.5 w-3.5 text-status-error" aria-label="Mikrofon aus" />
           ) : (
             <Mic className="h-3.5 w-3.5" aria-label="Mikrofon an" />
           )}
@@ -103,11 +129,11 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({ participant, c
       </div>
 
       {participant.isPending && (
-        <span className="absolute left-2 top-2 rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] uppercase tracking-wider text-amber-100">
+        <span className="pointer-events-none absolute left-2 top-2 rounded-full bg-status-warning/20 px-2 py-0.5 text-[10px] uppercase tracking-wider text-status-warning">
           Verbindet
         </span>
       )}
-    </div>
+    </Behaelter>
   )
 }
 
@@ -120,7 +146,7 @@ const Avatar: React.FC<{ participant: CallParticipant; groesse: string }> = ({
 
   return (
     <div
-      className={`${groesse} shrink-0 overflow-hidden rounded-full border border-white/15 bg-slate-700`}
+      className={`${groesse} shrink-0 overflow-hidden rounded-full border border-outline-variant/40 bg-surface-container-highest`}
     >
       {participant.avatarUrl && !kaputt ? (
         <img
@@ -130,7 +156,7 @@ const Avatar: React.FC<{ participant: CallParticipant; groesse: string }> = ({
           onError={() => setKaputt(true)}
         />
       ) : (
-        <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-white/80">
+        <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-on-surface-variant">
           {participant.username.slice(0, 2).toUpperCase()}
         </div>
       )}

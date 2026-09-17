@@ -259,6 +259,9 @@ export interface ChatGroupItem {
   /** Vom Backend entschieden. Was hier false ist, endet dort in einem 403. */
   can_start_call?: boolean
   can_join_call?: boolean
+  can_share_screen?: boolean
+  can_mute_others?: boolean
+  can_kick_from_call?: boolean
   created_at: string
   members: ChatGroupMemberItem[]
   /** Ephemeral room token supplied by a live-call invitation, when present. */

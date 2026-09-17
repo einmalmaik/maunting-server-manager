@@ -41,6 +41,7 @@ export function AudioTab() {
     setEchoCancellation(saved.echoCancellation)
     setAutoGainControl(saved.autoGainControl)
     setSelectedInputId(saved.preferredMicId || '')
+    setSelectedOutputId(saved.preferredSpeakerId || '')
 
     const currentVerarbeitung = aktuelleVerarbeitung()
     setGainPercent(Math.round(currentVerarbeitung.verstaerkung * 100))
@@ -200,6 +201,7 @@ export function AudioTab() {
 
   const handleSelectOutput = (deviceId: string) => {
     setSelectedOutputId(deviceId)
+    saveAudioSettings({ preferredSpeakerId: deviceId || null })
     registriereAudioGeraete(selectedInputId || null, deviceId || null)
   }
 
@@ -223,6 +225,7 @@ export function AudioTab() {
 
   const handleGainChange = (percent: number) => {
     setGainPercent(percent)
+    saveAudioSettings({ micGain: percent / 100 })
     registriereAudioVerarbeitung({ verstaerkung: percent / 100 })
   }
 

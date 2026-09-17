@@ -56,6 +56,16 @@ class CallKeyRelayRequest(BaseModel):
     ciphertext: str = Field(..., min_length=16, max_length=8192)
 
 
+class CallMuteRequest(BaseModel):
+    """Mikrofon eines Teilnehmers abschalten oder wieder freigeben.
+
+    Als Feld statt als zwei Endpunkte, weil der Knopf im Anruffenster derselbe
+    ist und die Oberfläche den gewünschten Zustand kennt, nicht die Richtung.
+    """
+
+    stumm: bool
+
+
 class LivekitStatusResponse(BaseModel):
     modus: Literal["lokal", "extern"]
     url: str

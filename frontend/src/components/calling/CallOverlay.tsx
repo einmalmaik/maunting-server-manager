@@ -17,17 +17,20 @@ import {
   Users,
   Video as VideoIcon,
   VideoOff,
+  Volume2,
 } from 'lucide-react'
 import { Button } from '@/Singra/UI'
 import { apiUrl } from '@/config/api'
-import { useCallStore } from '@/stores/useCallStore'
+import { aktiverRaum, useCallStore, type CallParticipant } from '@/stores/useCallStore'
 import { bildschirmfreigabeMoeglich } from '@/services/livekitRaum'
 import { sendeGeraeteBenachrichtigung } from '@/lib/benachrichtigung'
 import type { DropdownOption } from '@/components/ui/Dropdown'
 import type { Track } from 'livekit-client'
 import { AddParticipantModal } from './AddParticipantModal'
 import { DeviceSelectorModal } from './DeviceSelectorModal'
+import { ParticipantMenu } from './ParticipantMenu'
 import { ParticipantTile } from './ParticipantTile'
+import { RemoteAudio } from './RemoteAudio'
 import { ScreenShareOptionsModal } from './ScreenShareOptionsModal'
 
 function formatiereDauer(sekunden: number): string {
@@ -35,6 +38,18 @@ function formatiereDauer(sekunden: number): string {
   const m = Math.floor(s / 60)
   const rest = s % 60
   return `${m.toString().padStart(2, '0')}:${rest.toString().padStart(2, '0')}`
+}
+
+/**
+ * Wie viele Kacheln nebeneinander passen. Feste Stufen statt `auto-fit`: so ist
+ * jede Kachel breiter als hoch und keine wird zum Streifen, wenn ein Achter
+ * dazukommt.
+ */
+function rasterKlassen(anzahl: number): string {
+  if (anzahl <= 1) return 'grid-cols-1'
+  if (anzahl <= 4) return 'grid-cols-1 sm:grid-cols-2'
+  if (anzahl <= 9) return 'grid-cols-2 lg:grid-cols-3'
+  return 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4'
 }
 
 /** Bühne für eine Bildschirmfreigabe. */
@@ -54,11 +69,11 @@ const ShareStage: React.FC<{ track: Track; ownerName: string; isSelf: boolean }>
   }, [track])
 
   return (
-    <div className="relative h-full w-full overflow-hidden rounded-2xl border border-cyan-400/20 bg-slate-950">
+    <div className="relative h-full w-full overflow-hidden rounded-2xl border border-primary/25 bg-surface-container-lowest">
       <video ref={ref} autoPlay playsInline muted={isSelf} className="h-full w-full object-contain" />
-      <span className="absolute left-3 top-3 flex items-center gap-1.5 rounded-full bg-slate-950/75 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-cyan-200">
-        <Monitor className="h-3 w-3" />
-        {isSelf ? 'Deine Freigabe' : `${ownerName} teilt`}
+      <span className="absolute left-3 top-3 flex max-w-[calc(100%-1.5rem)] items-center gap-1.5 truncate rounded-full bg-surface/85 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-primary backdrop-blur-sm">
+        <Monitor className="h-3 w-3 shrink-0" />
+        <span className="truncate">{isSelf ? 'Deine Freigabe' : `${ownerName} teilt`}</span>
       </span>
     </div>
   )
@@ -71,6 +86,7 @@ export const CallOverlay: React.FC = () => {
     mode,
     partner,
     group,
+    raum,
     participants,
     screenShares,
     focusedShareIdentity,
@@ -85,6 +101,9 @@ export const CallOverlay: React.FC = () => {
     callDurationSeconds,
     reconnecting,
     errorMessage,
+    audioBlockiert,
+    serverStumm,
+    hinweise,
     acceptCall,
     rejectCall,
     endCall,
@@ -94,14 +113,17 @@ export const CallOverlay: React.FC = () => {
     startScreenShare,
     stopScreenShare,
     setFocusedShare,
+    setParticipantVolume,
     inviteToCall,
     setDevices,
     incrementDuration,
+    erlaubeTon,
   } = useCallStore()
 
   const [geraeteDialogOffen, setGeraeteDialogOffen] = useState(false)
   const [freigabeDialogOffen, setFreigabeDialogOffen] = useState(false)
   const [einladenDialogOffen, setEinladenDialogOffen] = useState(false)
+  const [gewaehlterTeilnehmer, setGewaehlterTeilnehmer] = useState<string | null>(null)
   const [audioEingaenge, setAudioEingaenge] = useState<DropdownOption[]>([])
   const [videoEingaenge, setVideoEingaenge] = useState<DropdownOption[]>([])
   const [audioAusgaenge, setAudioAusgaenge] = useState<DropdownOption[]>([])
@@ -117,6 +139,14 @@ export const CallOverlay: React.FC = () => {
   )
   const teilnehmerIds = useMemo(() => participants.map((t) => t.userId), [participants])
   const freigabeMoeglich = useMemo(() => bildschirmfreigabeMoeglich(), [])
+  // Das LiveKit-Objekt liegt bewusst außerhalb des Stores. Es hier neu zu holen,
+  // sobald der Zustand wechselt, reicht: die Tonwiedergabe hängt sich an, sobald
+  // die Verbindung steht, und wird beim Ende wieder abgeräumt.
+  const room = useMemo(() => aktiverRaum(), [state, raum])
+  const menueTeilnehmer = useMemo(
+    () => participants.find((t) => t.identity === gewaehlterTeilnehmer) ?? null,
+    [participants, gewaehlterTeilnehmer],
+  )
 
   useEffect(() => {
     setAvatarKaputt(false)
@@ -138,6 +168,12 @@ export const CallOverlay: React.FC = () => {
       setFocusedShare(screenShares[0].identity)
     }
   }, [screenShares, focusedShareIdentity, setFocusedShare])
+
+  // Wer den Anruf verlässt, während sein Menü offen ist, soll kein leeres
+  // Fenster hinterlassen.
+  useEffect(() => {
+    if (gewaehlterTeilnehmer && !menueTeilnehmer) setGewaehlterTeilnehmer(null)
+  }, [gewaehlterTeilnehmer, menueTeilnehmer])
 
   const stoppeKlingelton = () => {
     const aktuell = klingeltonRef.current
@@ -227,12 +263,24 @@ export const CallOverlay: React.FC = () => {
   const titel = istGruppe ? group?.name || 'Gruppenanruf' : partner?.username || 'Gesprächspartner'
   const kopfBild = istGruppe ? group?.avatarUrl : partner?.avatarUrl
 
+  /** Runder Knopf der Steuerleiste. Ein Ort für Größe, Form und Zustandsfarbe. */
+  const steuerKnopf = (aktiv: boolean, ton: 'neutral' | 'warnung' | 'aktion' = 'neutral') => {
+    if (!aktiv) {
+      return 'h-11 w-11 rounded-full bg-surface-container-high text-on-surface hover:bg-surface-container-highest'
+    }
+    if (ton === 'warnung') return 'h-11 w-11 rounded-full bg-status-error/20 text-status-error hover:bg-status-error/30'
+    if (ton === 'aktion') return 'h-11 w-11 rounded-full bg-primary/20 text-primary hover:bg-primary/30'
+    return 'h-11 w-11 rounded-full bg-secondary/20 text-secondary hover:bg-secondary/30'
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex select-none flex-col justify-between bg-slate-950/95 text-white backdrop-blur-md animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex select-none flex-col justify-between overflow-hidden bg-surface/95 text-on-surface backdrop-blur-md animate-in fade-in duration-200">
+      <RemoteAudio room={room} />
+
       {/* Kopf */}
-      <div className="flex items-center justify-between border-b border-white/10 bg-slate-900/40 p-3 sm:p-4">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-outline-variant/40 bg-surface-container-low/60 p-3 sm:p-4">
         <div className="flex min-w-0 items-center gap-2.5">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-emerald-500/15 text-emerald-300">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-status-success/15 text-status-success">
             {kopfBild ? (
               <img src={apiUrl(kopfBild)} alt="" className="h-full w-full object-cover" />
             ) : istGruppe ? (
@@ -242,15 +290,15 @@ export const CallOverlay: React.FC = () => {
             )}
           </div>
           <div className="min-w-0">
-            <div className="flex items-center gap-1.5 text-sm font-semibold">
+            <div className="flex min-w-0 items-center gap-1.5 text-sm font-semibold">
               <span className="truncate">{titel}</span>
-              <span className="shrink-0 rounded-full bg-emerald-500/20 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-emerald-300">
+              <span className="shrink-0 rounded-full bg-status-success/20 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-status-success">
                 {participants.length > 0 ? `${participants.length} live` : 'E2EE'}
               </span>
             </div>
-            <div className="flex items-center gap-1.5 text-xs text-white/60">
+            <div className="flex min-w-0 items-center gap-1.5 text-xs text-on-surface-variant">
               {(state === 'connecting' || reconnecting) && (
-                <Loader2 className="h-3 w-3 animate-spin" />
+                <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
               )}
               <span className="truncate">{kopfStatus}</span>
             </div>
@@ -261,7 +309,7 @@ export const CallOverlay: React.FC = () => {
           variant="ghost"
           size="icon"
           onClick={() => setGeraeteDialogOffen(true)}
-          className="rounded-full text-white/80 hover:bg-white/10 hover:text-white"
+          className="shrink-0 rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
           title="Geräte auswählen"
           aria-label="Geräte auswählen"
         >
@@ -270,17 +318,28 @@ export const CallOverlay: React.FC = () => {
       </div>
 
       {errorMessage && (
-        <div className="mx-3 mt-3 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-50 sm:mx-4">
+        <div className="msm-alert-warning mx-3 mt-3 shrink-0 rounded-2xl px-3 py-2 text-xs leading-relaxed sm:mx-4">
           {errorMessage}
         </div>
       )}
 
+      {audioBlockiert && state !== 'incoming' && (
+        <div className="mx-3 mt-3 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-2xl border border-status-warning/40 bg-status-warning/10 px-3 py-2 sm:mx-4">
+          <span className="text-xs leading-relaxed text-on-surface">
+            Dein Browser lässt den Ton erst nach einem Klick zu.
+          </span>
+          <Button size="sm" onClick={() => void erlaubeTon()} className="gap-1.5">
+            <Volume2 className="h-4 w-4" /> Ton aktivieren
+          </Button>
+        </div>
+      )}
+
       {/* Bühne */}
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3 sm:p-4 lg:flex-row lg:gap-4 lg:overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden p-3 sm:p-4 lg:flex-row lg:gap-4">
         {state === 'incoming' && partner ? (
-          <div className="m-auto flex w-full max-w-md flex-col items-center gap-6 rounded-3xl border border-emerald-400/30 bg-slate-900/80 p-8 text-center shadow-2xl">
+          <div className="m-auto flex w-full max-w-md flex-col items-center gap-6 rounded-3xl border border-status-success/30 bg-surface-container-low p-8 text-center shadow-2xl">
             <div className="relative">
-              <div className="h-28 w-28 overflow-hidden rounded-full border-4 border-emerald-400/50 bg-emerald-500/15">
+              <div className="h-28 w-28 overflow-hidden rounded-full border-4 border-status-success/50 bg-status-success/15">
                 {partner.avatarUrl && !avatarKaputt ? (
                   <img
                     src={apiUrl(partner.avatarUrl)}
@@ -289,16 +348,16 @@ export const CallOverlay: React.FC = () => {
                     onError={() => setAvatarKaputt(true)}
                   />
                 ) : (
-                  <div className="flex h-full w-full items-center justify-center text-3xl font-bold text-emerald-100">
+                  <div className="flex h-full w-full items-center justify-center text-3xl font-bold text-status-success">
                     {partner.username.slice(0, 2).toUpperCase()}
                   </div>
                 )}
               </div>
-              <span className="absolute inset-0 animate-ping rounded-full border-2 border-emerald-400/50" />
+              <span className="absolute inset-0 animate-ping rounded-full border-2 border-status-success/50" />
             </div>
             <div>
-              <h2 className="text-2xl font-bold">{partner.username}</h2>
-              <p className="mt-1 text-sm text-white/65">
+              <h2 className="font-headline text-2xl font-bold text-on-surface">{partner.username}</h2>
+              <p className="mt-1 text-sm text-on-surface-variant">
                 Eingehender {mode === 'video' ? 'Video-' : ''}Anruf
               </p>
             </div>
@@ -311,7 +370,7 @@ export const CallOverlay: React.FC = () => {
                     .then(() => setKlingeltonBlockiert(false))
                     .catch(() => {})
                 }}
-                className="text-xs text-amber-200 underline"
+                className="text-xs text-status-warning underline"
               >
                 Klingelton aktivieren
               </button>
@@ -325,7 +384,7 @@ export const CallOverlay: React.FC = () => {
                   stoppeKlingelton()
                   void acceptCall()
                 }}
-                className="flex-1 rounded-full bg-emerald-600 hover:bg-emerald-500"
+                className="flex-1 rounded-full bg-status-success text-surface hover:bg-status-success/90"
               >
                 <Phone className="mr-2 h-5 w-5" /> Annehmen
               </Button>
@@ -333,16 +392,16 @@ export const CallOverlay: React.FC = () => {
           </div>
         ) : (
           <>
-            <div className="flex min-h-[min(48vh,32rem)] min-w-0 flex-1 flex-col gap-3 lg:min-h-0">
+            <div className="flex min-h-[14rem] min-w-0 flex-1 flex-col gap-3 overflow-hidden lg:min-h-0">
               {screenShares.length > 1 && (
-                <div className="flex shrink-0 items-center gap-2 overflow-x-auto pb-1">
+                <div className="flex min-w-0 shrink-0 items-center gap-2 overflow-x-auto pb-1">
                   <button
                     type="button"
                     onClick={() => setFocusedShare(null)}
                     className={`shrink-0 rounded-xl border px-3 py-1.5 text-xs transition ${
                       focusedShareIdentity === null
-                        ? 'border-cyan-400/60 bg-cyan-500/15 text-cyan-100'
-                        : 'border-white/10 bg-slate-900/60 text-white/70 hover:bg-slate-800'
+                        ? 'border-primary/60 bg-primary/15 text-primary'
+                        : 'border-outline-variant/40 bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high'
                     }`}
                     aria-pressed={focusedShareIdentity === null}
                   >
@@ -353,20 +412,20 @@ export const CallOverlay: React.FC = () => {
                       key={freigabe.identity}
                       type="button"
                       onClick={() => setFocusedShare(freigabe.identity)}
-                      className={`flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs transition ${
+                      className={`flex max-w-[12rem] shrink-0 items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs transition ${
                         freigabe.identity === focusedShareIdentity
-                          ? 'border-cyan-400/60 bg-cyan-500/15 text-cyan-100'
-                          : 'border-white/10 bg-slate-900/60 text-white/70 hover:bg-slate-800'
+                          ? 'border-primary/60 bg-primary/15 text-primary'
+                          : 'border-outline-variant/40 bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high'
                       }`}
                     >
-                      <Maximize2 className="h-3 w-3" />
-                      {freigabe.ownerName}
+                      <Maximize2 className="h-3 w-3 shrink-0" />
+                      <span className="truncate">{freigabe.ownerName}</span>
                     </button>
                   ))}
                 </div>
               )}
 
-              <div className="min-h-0 flex-1">
+              <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
                 {fokussierteFreigabe ? (
                   <ShareStage
                     track={fokussierteFreigabe.track}
@@ -382,7 +441,7 @@ export const CallOverlay: React.FC = () => {
                         key={freigabe.identity}
                         type="button"
                         onClick={() => setFocusedShare(freigabe.identity)}
-                        className="min-h-32 overflow-hidden rounded-2xl text-left"
+                        className="min-w-0 overflow-hidden rounded-2xl text-left"
                       >
                         <ShareStage
                           track={freigabe.track}
@@ -396,19 +455,21 @@ export const CallOverlay: React.FC = () => {
                   </div>
                 ) : participants.length > 0 ? (
                   <div
-                    className={`grid h-full auto-rows-fr gap-2 ${
-                      participants.length <= 2
-                        ? 'grid-cols-1 sm:grid-cols-2'
-                        : 'grid-cols-2 lg:grid-cols-3'
-                    }`}
+                    className={`grid h-full auto-rows-fr gap-2 overflow-y-auto ${rasterKlassen(
+                      participants.length,
+                    )}`}
                   >
                     {participants.map((teilnehmer) => (
-                      <ParticipantTile key={teilnehmer.identity} participant={teilnehmer} />
+                      <ParticipantTile
+                        key={teilnehmer.identity}
+                        participant={teilnehmer}
+                        onSelect={(t: CallParticipant) => setGewaehlterTeilnehmer(t.identity)}
+                      />
                     ))}
                   </div>
                 ) : (
-                  <div className="flex h-full flex-col items-center justify-center gap-4 text-white/60">
-                    <div className="flex h-24 w-24 items-center justify-center rounded-full border-2 border-emerald-400/30 bg-emerald-500/10 sm:h-28 sm:w-28">
+                  <div className="flex h-full flex-col items-center justify-center gap-4 text-on-surface-variant">
+                    <div className="flex h-24 w-24 items-center justify-center rounded-full border-2 border-status-success/30 bg-status-success/10 sm:h-28 sm:w-28">
                       {partner?.avatarUrl && !avatarKaputt ? (
                         <img
                           src={apiUrl(partner.avatarUrl)}
@@ -420,9 +481,9 @@ export const CallOverlay: React.FC = () => {
                         <User className="h-12 w-12 sm:h-14 sm:w-14" />
                       )}
                     </div>
-                    <div className="text-center">
-                      <div className="text-base font-semibold">{titel}</div>
-                      <div className="text-xs text-white/50">
+                    <div className="max-w-full px-4 text-center">
+                      <div className="truncate text-base font-semibold text-on-surface">{titel}</div>
+                      <div className="text-xs text-on-surface-variant">
                         {state === 'outgoing' ? 'Wartet auf Annahme' : 'Verbindet…'}
                       </div>
                     </div>
@@ -432,17 +493,26 @@ export const CallOverlay: React.FC = () => {
             </div>
 
             {/* Teilnehmerleiste. Bei Bildschirmfreigabe ist sie der einzige Ort,
-                an dem man die Gesichter noch sieht — deshalb immer sichtbar. */}
+                an dem man die Gesichter noch sieht — deshalb immer sichtbar.
+                Sie scrollt in ihrer eigenen Achse: quer auf schmalen Fenstern,
+                längs ab `lg`. Nichts darin darf breiter werden als sie selbst. */}
             {participants.length > 0 && (
-              <aside className="w-full shrink-0 rounded-3xl border border-white/10 bg-slate-900/70 p-3 lg:w-[280px] lg:min-w-[280px]">
-                <div className="mb-2 flex items-center justify-between text-[10px] uppercase tracking-[0.18em] text-white/55">
+              <aside className="flex w-full min-w-0 shrink-0 flex-col overflow-hidden rounded-3xl border border-outline-variant/40 bg-surface-container-low/70 p-3 lg:w-[17rem]">
+                <div className="mb-2 flex shrink-0 items-center justify-between text-[10px] uppercase tracking-[0.18em] text-on-surface-variant">
                   <span>Im Gespräch</span>
                   <span>{participants.length}</span>
                 </div>
-                <div className="flex gap-2 overflow-x-auto pb-1 lg:block lg:space-y-2 lg:overflow-visible">
+                <div className="flex min-h-0 min-w-0 gap-2 overflow-x-auto overflow-y-hidden pb-1 lg:flex-col lg:overflow-x-hidden lg:overflow-y-auto lg:pb-0">
                   {participants.map((teilnehmer) => (
-                    <div key={teilnehmer.identity} className="min-w-[210px] lg:min-w-0">
-                      <ParticipantTile participant={teilnehmer} compact />
+                    <div
+                      key={teilnehmer.identity}
+                      className="w-[13rem] shrink-0 lg:w-full lg:shrink"
+                    >
+                      <ParticipantTile
+                        participant={teilnehmer}
+                        compact
+                        onSelect={(t: CallParticipant) => setGewaehlterTeilnehmer(t.identity)}
+                      />
                     </div>
                   ))}
                 </div>
@@ -454,16 +524,43 @@ export const CallOverlay: React.FC = () => {
 
       {/* Steuerleiste */}
       {state !== 'incoming' && (
-        <div className="sticky bottom-0 border-t border-white/10 bg-slate-900/80 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md sm:p-4">
-          <div className="mx-auto flex max-w-xl flex-wrap items-center justify-center gap-2 sm:gap-3">
+        <div className="relative shrink-0 border-t border-outline-variant/40 bg-surface-container-low/90 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md sm:p-4">
+          {/* Flüchtige Meldungen, direkt über der Steuerleiste statt in der
+              Bühne: dort verdeckten sie auf schmalen Fenstern die Gesichter.
+              Nichts davon landet im Chatverlauf. */}
+          {hinweise.length > 0 && (
+            <div
+              className="pointer-events-none absolute bottom-full left-1/2 mb-2 flex w-full max-w-sm -translate-x-1/2 flex-col items-center gap-1.5 px-4"
+              aria-live="polite"
+            >
+              {hinweise.map((hinweis) => (
+                <span
+                  key={hinweis.id}
+                  className={`max-w-full truncate rounded-full border px-3 py-1.5 text-xs shadow-lg backdrop-blur-sm animate-in fade-in slide-in-from-bottom-2 duration-200 ${
+                    hinweis.art === 'beitritt'
+                      ? 'border-status-success/40 bg-status-success/15 text-status-success'
+                      : 'border-outline-variant/50 bg-surface-container-high/90 text-on-surface-variant'
+                  }`}
+                >
+                  {hinweis.art === 'beitritt' ? '↳ ' : '↰ '}
+                  {hinweis.text}
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="mx-auto flex max-w-2xl flex-wrap items-center justify-center gap-2 sm:gap-3">
             <Button
               variant="ghost"
               size="icon"
               onClick={toggleMute}
-              className={`h-11 w-11 rounded-full ${
-                isMuted ? 'bg-rose-500/20 text-rose-300 hover:bg-rose-500/30' : 'bg-white/10 text-white hover:bg-white/20'
-              }`}
-              title={isMuted ? 'Mikrofon einschalten' : 'Mikrofon stummschalten'}
+              className={steuerKnopf(isMuted, 'warnung')}
+              title={
+                serverStumm
+                  ? 'Ein Moderator hat dich stummgeschaltet'
+                  : isMuted
+                    ? 'Mikrofon einschalten'
+                    : 'Mikrofon stummschalten'
+              }
               aria-label={isMuted ? 'Mikrofon einschalten' : 'Mikrofon stummschalten'}
               aria-pressed={isMuted}
             >
@@ -474,9 +571,7 @@ export const CallOverlay: React.FC = () => {
               variant="ghost"
               size="icon"
               onClick={toggleDeafen}
-              className={`h-11 w-11 rounded-full ${
-                isDeafened ? 'bg-rose-500/20 text-rose-300 hover:bg-rose-500/30' : 'bg-white/10 text-white hover:bg-white/20'
-              }`}
+              className={steuerKnopf(isDeafened, 'warnung')}
               title={isDeafened ? 'Wiedergabe einschalten' : 'Wiedergabe stummschalten (auch das eigene Mikrofon)'}
               aria-label={isDeafened ? 'Wiedergabe einschalten' : 'Wiedergabe stummschalten'}
               aria-pressed={isDeafened}
@@ -488,9 +583,7 @@ export const CallOverlay: React.FC = () => {
               variant="ghost"
               size="icon"
               onClick={toggleCamera}
-              className={`h-11 w-11 rounded-full ${
-                isCameraOff ? 'bg-white/10 text-white/60 hover:bg-white/20' : 'bg-primary text-white hover:bg-primary/90'
-              }`}
+              className={steuerKnopf(!isCameraOff, 'aktion')}
               title={isCameraOff ? 'Kamera einschalten' : 'Kamera ausschalten'}
               aria-label={isCameraOff ? 'Kamera einschalten' : 'Kamera ausschalten'}
               aria-pressed={!isCameraOff}
@@ -506,9 +599,7 @@ export const CallOverlay: React.FC = () => {
                 else setFreigabeDialogOffen(true)
               }}
               disabled={!freigabeMoeglich}
-              className={`h-11 w-11 rounded-full ${
-                isScreenSharing ? 'bg-cyan-500/20 text-cyan-300 hover:bg-cyan-500/30' : 'bg-white/10 text-white hover:bg-white/20'
-              } ${freigabeMoeglich ? '' : 'opacity-50'}`}
+              className={`${steuerKnopf(isScreenSharing, 'aktion')} ${freigabeMoeglich ? '' : 'opacity-50'}`}
               title={
                 freigabeMoeglich
                   ? isScreenSharing
@@ -527,7 +618,7 @@ export const CallOverlay: React.FC = () => {
                 variant="ghost"
                 size="icon"
                 onClick={() => setEinladenDialogOffen(true)}
-                className="h-11 w-11 rounded-full bg-white/10 text-white hover:bg-white/20"
+                className={steuerKnopf(false)}
                 title="Teilnehmer hinzufügen"
                 aria-label="Teilnehmer hinzufügen"
               >
@@ -535,19 +626,31 @@ export const CallOverlay: React.FC = () => {
               </Button>
             )}
 
+            {/* Auflegen steht abgesetzt und beschriftet: der eine Knopf, den man
+                im Zweifel sofort finden muss. */}
+            <span className="mx-1 hidden h-8 w-px bg-outline-variant/50 sm:block" aria-hidden="true" />
             <Button
               variant="destructive"
-              size="icon"
               onClick={endCall}
-              className="h-11 w-11 rounded-full bg-rose-600 text-white shadow-lg shadow-rose-600/30 hover:bg-rose-700"
+              className="h-11 gap-2 rounded-full px-4 sm:px-5"
               title="Anruf beenden"
               aria-label="Anruf beenden"
             >
               <PhoneOff className="h-5 w-5" />
+              <span className="hidden sm:inline">Auflegen</span>
             </Button>
           </div>
         </div>
       )}
+
+      <ParticipantMenu
+        participant={menueTeilnehmer}
+        onClose={() => setGewaehlterTeilnehmer(null)}
+        onVolumeChange={setParticipantVolume}
+        raum={istGruppe ? raum : null}
+        darfStummschalten={istGruppe && group?.canMute === true}
+        darfEntfernen={istGruppe && group?.canKick === true}
+      />
 
       <DeviceSelectorModal
         isOpen={geraeteDialogOffen}

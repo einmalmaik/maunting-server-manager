@@ -21,6 +21,7 @@ import {
   Trash2,
   ShieldCheck,
   Sliders,
+  Phone,
   ChevronDown,
   ChevronUp,
 } from 'lucide-react'
@@ -71,27 +72,33 @@ export const GROUP_PERMISSION_DEFINITIONS = [
     category: 'members',
   },
   {
-    key: 'call_start',
+    key: 'start_group_calls',
     title: 'Anrufe starten',
-    desc: 'Erlaubt das Starten eines Gruppenanrufs oder das Einleiten eines Live-Calls.',
+    desc: 'Öffnet einen Gruppenanruf. Alle, die beitreten dürfen, bekommen den Anruf angezeigt.',
     category: 'calls',
   },
   {
-    key: 'call_join',
-    title: 'Anrufe beitreten',
-    desc: 'Erlaubt das Beitreten zu laufenden Gruppenanrufen und die Teilnahme am Live-Stage-Stream.',
+    key: 'join_group_calls',
+    title: 'Anrufen beitreten',
+    desc: 'Erlaubt die Teilnahme an laufenden Gruppenanrufen. Ohne dieses Recht bleibt ein Anruf unsichtbar.',
     category: 'calls',
   },
   {
-    key: 'call_share',
+    key: 'share_screen',
     title: 'Bildschirm freigeben',
-    desc: 'Erlaubt das Freigeben eines Bildschirms, Fensters oder App-Outputs für den Gruppenraum.',
+    desc: 'Teilt einen Bildschirm oder ein Fenster im Gruppenanruf.',
     category: 'calls',
   },
   {
-    key: 'call_moderate',
-    title: 'Anrufe moderieren',
-    desc: 'Erlaubt das Steuern der Teilnehmerliste, Lautstärke und Laufzeit-Controls während eines Gruppenanrufs.',
+    key: 'mute_in_calls',
+    title: 'Im Anruf stummschalten',
+    desc: 'Nimmt anderen im Gruppenanruf das Mikrofon. Der Betroffene kann es nicht selbst wieder einschalten, Kamera und Bildschirmfreigabe bleiben ihm.',
+    category: 'moderation',
+  },
+  {
+    key: 'kick_from_calls',
+    title: 'Aus dem Anruf entfernen',
+    desc: 'Wirft jemanden aus dem laufenden Gruppenanruf. Die Mitgliedschaft bleibt bestehen — wer beitreten darf, kann sofort wiederkommen.',
     category: 'moderation',
   },
   {
@@ -127,21 +134,21 @@ const SYSTEM_GROUP_ROLES: GroupRoleDefinition[] = [
     name: 'Administrator',
     description: 'Kann Mitglieder kicken, Nachrichten moderieren, Anrufe steuern und Rollen vergeben.',
     is_system: true,
-    permissions: ['send_messages', 'attach_media', 'invite_members', 'call_start', 'call_join', 'call_share', 'call_moderate', 'kick_members', 'delete_messages', 'manage_roles'],
+    permissions: ['send_messages', 'attach_media', 'invite_members', 'start_group_calls', 'join_group_calls', 'share_screen', 'mute_in_calls', 'kick_from_calls', 'kick_members', 'delete_messages', 'manage_roles'],
   },
   {
     id: 'moderator',
     name: 'Moderator',
     description: 'Kann Nachrichten entfernen, Einladungen versenden und Gruppenanrufe moderieren.',
     is_system: true,
-    permissions: ['send_messages', 'attach_media', 'invite_members', 'call_join', 'call_share', 'call_moderate', 'delete_messages'],
+    permissions: ['send_messages', 'attach_media', 'invite_members', 'join_group_calls', 'share_screen', 'mute_in_calls', 'kick_from_calls', 'delete_messages'],
   },
   {
     id: 'member',
     name: 'Mitglied (@everyone)',
     description: 'Reguläres Mitglied. Berechtigungen richten sich nach den Standardrechten.',
     is_system: true,
-    permissions: ['send_messages', 'attach_media', 'invite_members', 'call_join'],
+    permissions: ['send_messages', 'attach_media', 'invite_members', 'join_group_calls'],
   },
 ]
 
@@ -357,8 +364,9 @@ export function GroupPermissionsModal({
   const [canInviteMembers, setCanInviteMembers] = useState(true)
   const [canStartCalls, setCanStartCalls] = useState(true)
   const [canJoinCalls, setCanJoinCalls] = useState(true)
-  const [canShareCalls, setCanShareCalls] = useState(false)
-  const [canModerateCalls, setCanModerateCalls] = useState(false)
+  const [canShareScreen, setCanShareScreen] = useState(false)
+  const [canMuteInCalls, setCanMuteInCalls] = useState(false)
+  const [canKickFromCalls, setCanKickFromCalls] = useState(false)
   const [canDeleteMessages, setCanDeleteMessages] = useState(false)
   const [canKickMembers, setCanKickMembers] = useState(false)
 
@@ -373,10 +381,11 @@ export function GroupPermissionsModal({
       setCanSendMessages(defPerms.includes('send_messages'))
       setCanAttachMedia(defPerms.includes('attach_media'))
       setCanInviteMembers(defPerms.includes('invite_members'))
-      setCanStartCalls(defPerms.includes('call_start'))
-      setCanJoinCalls(defPerms.includes('call_join'))
-      setCanShareCalls(defPerms.includes('call_share'))
-      setCanModerateCalls(defPerms.includes('call_moderate'))
+      setCanStartCalls(defPerms.includes('start_group_calls'))
+      setCanJoinCalls(defPerms.includes('join_group_calls'))
+      setCanShareScreen(defPerms.includes('share_screen'))
+      setCanMuteInCalls(defPerms.includes('mute_in_calls'))
+      setCanKickFromCalls(defPerms.includes('kick_from_calls'))
       setCanDeleteMessages(defPerms.includes('delete_messages'))
       setCanKickMembers(defPerms.includes('kick_members'))
     }
@@ -439,10 +448,11 @@ export function GroupPermissionsModal({
     if (canSendMessages) perms.push('send_messages')
     if (canAttachMedia) perms.push('attach_media')
     if (canInviteMembers) perms.push('invite_members')
-    if (canStartCalls) perms.push('call_start')
-    if (canJoinCalls) perms.push('call_join')
-    if (canShareCalls) perms.push('call_share')
-    if (canModerateCalls) perms.push('call_moderate')
+    if (canStartCalls) perms.push('start_group_calls')
+    if (canJoinCalls) perms.push('join_group_calls')
+    if (canShareScreen) perms.push('share_screen')
+    if (canMuteInCalls) perms.push('mute_in_calls')
+    if (canKickFromCalls) perms.push('kick_from_calls')
     if (canDeleteMessages) perms.push('delete_messages')
     if (canKickMembers) perms.push('kick_members')
 
@@ -981,6 +991,68 @@ export function GroupPermissionsModal({
                       disabled={!canManage}
                       aria-label="Mitglieder kicken erlauben"
                     />
+                  </div>
+                </div>
+
+                <div className="mt-5 border-t border-outline-variant/30 pt-5">
+                  <div className="mb-3 flex items-center gap-2">
+                    <Phone className="h-4 w-4 text-primary" />
+                    <span className="text-body-sm font-bold text-primary">Sprach- und Videoanrufe</span>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
+                    {([
+                      {
+                        checked: canStartCalls,
+                        set: setCanStartCalls,
+                        titel: 'Anrufe starten',
+                        text: 'Öffnet einen Gruppenanruf. Alle mit Beitrittsrecht sehen ihn.',
+                      },
+                      {
+                        checked: canJoinCalls,
+                        set: setCanJoinCalls,
+                        titel: 'Anrufen beitreten',
+                        text: 'Ohne dieses Recht bleibt ein laufender Anruf unsichtbar.',
+                      },
+                      {
+                        checked: canShareScreen,
+                        set: setCanShareScreen,
+                        titel: 'Bildschirm freigeben',
+                        text: 'Teilt einen Bildschirm oder ein Fenster im Anruf.',
+                      },
+                      {
+                        checked: canMuteInCalls,
+                        set: setCanMuteInCalls,
+                        titel: 'Im Anruf stummschalten',
+                        text: 'Nimmt anderen das Mikrofon. Der Betroffene kann es nicht selbst wieder einschalten.',
+                      },
+                      {
+                        checked: canKickFromCalls,
+                        set: setCanKickFromCalls,
+                        titel: 'Aus dem Anruf entfernen',
+                        text: 'Wirft jemanden aus dem Anruf. Die Gruppenmitgliedschaft bleibt bestehen.',
+                        breit: true,
+                      },
+                    ] as const).map((eintrag) => (
+                      <div
+                        key={eintrag.titel}
+                        className={`flex items-center justify-between gap-4 rounded-xl border border-outline-variant/30 bg-surface-container-high/60 p-3.5 ${
+                          'breit' in eintrag && eintrag.breit ? 'lg:col-span-2' : ''
+                        }`}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <span className="block text-xs font-bold text-primary">{eintrag.titel}</span>
+                          <span className="text-[11px] leading-snug text-on-surface-variant">
+                            {eintrag.text}
+                          </span>
+                        </div>
+                        <Switch
+                          checked={eintrag.checked}
+                          onCheckedChange={eintrag.set}
+                          disabled={!canManage}
+                          aria-label={`${eintrag.titel} erlauben`}
+                        />
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>

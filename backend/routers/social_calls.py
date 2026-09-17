@@ -21,6 +21,7 @@ from dependencies import get_current_user, require_global, verify_csrf
 from models import ChatGroupMember, User
 from schemas.calls import (
     CallKeyRelayRequest,
+    CallMuteRequest,
     CallParticipantCountResponse,
     CallTokenRequest,
     CallTokenResponse,
@@ -346,6 +347,118 @@ def teilnehmerzahl(
     elif user.id not in CallRoomService.berechtigte(raum):
         raise HTTPException(status_code=404, detail="Anruf nicht gefunden.")
     return {"raum": raum, "teilnehmer": livekit_service.raum_teilnehmer(raum, db)}
+
+
+# ── Moderation im Raum ──────────────────────────────────────────────────────
+
+
+def _moderationsziel(
+    db: Session, raum: str, akteur: User, ziel_id: int, recht: str
+) -> tuple[int, ChatGroupMember]:
+    """Prueft, ob `akteur` gegen `ziel_id` in diesem Raum moderieren darf.
+
+    Vier Schranken, jede aus einem eigenen Grund:
+
+    * Nur Gruppenraeume. Im Zweiergespraech gibt es keine Moderation, sonst
+      koennte jeder sein Gegenueber im eigenen Anruf stummschalten.
+    * Das Recht selbst, beim Ausfuehren geprueft — nicht beim Anzeigen des
+      Knopfes. Die Flags in der Gruppenliste sagen nur, was sichtbar ist.
+    * Nicht gegen sich selbst: dafuer gibt es den Mikrofonknopf.
+    * Rang: dieselbe Regel wie beim Entfernen aus der Gruppe. Wer den
+      Eigentuemer nicht rauswerfen darf, darf ihm auch nicht das Wort nehmen.
+    """
+    gruppe = GroupCallRoomRegistry.get(raum)
+    if gruppe is None:
+        raise HTTPException(
+            status_code=404, detail="Gruppenanruf nicht gefunden oder abgelaufen."
+        )
+    group_id = gruppe[0]
+    akteur_mem = SocialService.assert_group_call_permission(db, group_id, akteur.id, recht)
+    if ziel_id == akteur.id:
+        raise HTTPException(status_code=400, detail="Das geht nicht gegen dich selbst.")
+
+    ziel_mem = SocialService.get_group_member(db, group_id, ziel_id)
+    if not ziel_mem:
+        raise HTTPException(status_code=404, detail="Gruppenmitglied nicht gefunden.")
+    if ziel_mem.role == "owner":
+        raise HTTPException(
+            status_code=403, detail="Der Eigentümer der Gruppe lässt sich nicht moderieren."
+        )
+    if ziel_mem.role == "admin" and akteur_mem.role != "owner":
+        raise HTTPException(
+            status_code=403, detail="Nur der Eigentümer kann Administratoren moderieren."
+        )
+    return group_id, ziel_mem
+
+
+@router.post(
+    "/{raum}/teilnehmer/{target_user_id}/stumm",
+    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
+)
+def teilnehmer_stummschalten(
+    raum: str,
+    target_user_id: int,
+    req: CallMuteRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Nimmt einem Teilnehmer im Gruppenanruf das Mikrofon oder gibt es zurueck.
+
+    Der Entzug wirkt am Medienserver: der Betroffene kann sich nicht selbst
+    wieder freischalten. Kamera und Bildschirmfreigabe bleiben unberuehrt.
+    """
+    group_id, _ziel = _moderationsziel(db, raum, user, target_user_id, "mute_in_calls")
+    try:
+        livekit_service.setze_mikrofonrecht(raum, f"u{target_user_id}", not req.stumm, db)
+    except livekit_service.LivekitNichtErreichbar as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    audit_service.record_privileged_action(
+        db,
+        user_id=user.id,
+        action="social.call.mute" if req.stumm else "social.call.unmute",
+        target_type="chat_group",
+        target_id=str(group_id),
+        # Ohne Raumnamen und ohne Gespraechsinhalt: der Eintrag haelt fest, wer
+        # wem das Wort genommen hat, nicht worueber gesprochen wurde.
+        details={"target_user_id": target_user_id},
+        commit=True,
+    )
+    return {"ok": True, "stumm": req.stumm}
+
+
+@router.post(
+    "/{raum}/teilnehmer/{target_user_id}/entfernen",
+    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
+)
+def teilnehmer_entfernen(
+    raum: str,
+    target_user_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Wirft jemanden aus dem Gruppenanruf.
+
+    Die Gruppenmitgliedschaft bleibt bestehen: wer das Beitrittsrecht hat, kann
+    sofort wiederkommen. Ein dauerhafter Ausschluss ist eine Sache der
+    Gruppenrechte, nicht eines Klicks im Anruffenster.
+    """
+    group_id, _ziel = _moderationsziel(db, raum, user, target_user_id, "kick_from_calls")
+    try:
+        livekit_service.entferne_teilnehmer(raum, f"u{target_user_id}", db)
+    except livekit_service.LivekitNichtErreichbar as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    audit_service.record_privileged_action(
+        db,
+        user_id=user.id,
+        action="social.call.kick",
+        target_type="chat_group",
+        target_id=str(group_id),
+        details={"target_user_id": target_user_id},
+        commit=True,
+    )
+    return {"ok": True}
 
 
 # ── Gruppenraeume ───────────────────────────────────────────────────────────

@@ -104,6 +104,34 @@ export async function holeTeilnehmerzahl(raum: string): Promise<number> {
   return antwort.teilnehmer
 }
 
+// ── Moderation im Anruf ─────────────────────────────────────────────────────
+
+/**
+ * Nimmt einem Teilnehmer das Mikrofon oder gibt es zurück.
+ *
+ * Der Entzug wirkt am Medienserver, nicht in dessen Browser: der Betroffene
+ * kann sich nicht selbst wieder freischalten. Kamera und Bildschirmfreigabe
+ * bleiben unberührt.
+ */
+export async function setzeServerStumm(
+  raum: string,
+  zielBenutzerId: number,
+  stumm: boolean,
+): Promise<void> {
+  await api(
+    `/social/calls/${encodeURIComponent(raum)}/teilnehmer/${zielBenutzerId}/stumm`,
+    { method: 'POST', body: JSON.stringify({ stumm }) },
+  )
+}
+
+/** Wirft jemanden aus dem Anruf. Wer beitreten darf, kann danach wiederkommen. */
+export async function entferneAusAnruf(raum: string, zielBenutzerId: number): Promise<void> {
+  await api(
+    `/social/calls/${encodeURIComponent(raum)}/teilnehmer/${zielBenutzerId}/entfernen`,
+    { method: 'POST' },
+  )
+}
+
 // ── Gruppenanrufe ───────────────────────────────────────────────────────────
 
 export async function starteGruppenanruf(gruppenId: number): Promise<GruppenRaum> {

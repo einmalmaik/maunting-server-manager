@@ -1595,6 +1595,49 @@ In der Datenbank landet davon nichts: MSM führt keinen Anrufverlauf, keine
 Dauer und keine Gegenstelle. Die Raumzuordnung lebt im Prozess und ist nach dem
 Auflegen weg.
 
+Eine Ausnahme gibt es: eine Moderationshandlung im Gruppenanruf schreibt einen
+Eintrag ins Prüfprotokoll (`social.call.mute`, `social.call.unmute`,
+`social.call.kick`). Er nennt den Handelnden, den Betroffenen und die Gruppe —
+nicht den Raum und nichts Gesprochenes. Wer anderen das Wort nehmen kann, soll
+dafür nachvollziehbar sein.
+
+### Rechte im Gruppenanruf
+
+Fünf Gruppenrechte steuern, wer was darf. Sie stehen im Rechte-Dialog einer
+Gruppe unter „Standardrechte" und je Rolle:
+
+| Recht | Wirkung |
+| --- | --- |
+| `start_group_calls` | Öffnet einen Gruppenanruf und darf ihn für alle beenden |
+| `join_group_calls` | Tritt bei. Ohne dieses Recht bleibt ein laufender Anruf unsichtbar |
+| `share_screen` | Gibt einen Bildschirm frei |
+| `mute_in_calls` | Nimmt anderen im Anruf das Mikrofon |
+| `kick_from_calls` | Wirft andere aus dem Anruf |
+
+Eigentümer und Administratoren haben alle fünf ohne Eintrag — sie könnten sie
+sich ohnehin jederzeit selbst geben.
+
+Zwei Regeln, die dem Verhalten von Discord folgen und bewusst so gewählt sind:
+
+- **Serverstumm hebt nur die Moderation auf.** Der Entzug wirkt am Medienserver
+  über die erlaubten Quellen des Teilnehmers, nicht in dessen Browser. Kamera
+  und Bildschirmfreigabe bleiben ihm — ein Wortentzug bricht keine laufende
+  Präsentation ab.
+- **Ein Rauswurf ist kein Ausschluss.** Die Gruppenmitgliedschaft bleibt
+  bestehen; wer `join_group_calls` hat, kann sofort wiederkommen. Dauerhaft
+  ausschließen lässt sich nur über die Gruppenrechte.
+
+Gegen den Eigentümer greift keine der beiden Handlungen, und gegen einen
+Administrator nur der Eigentümer — dieselbe Rangregel wie beim Entfernen aus
+der Gruppe.
+
+Ältere Installationen haben unter Umständen `call_start`, `call_join`,
+`call_share` oder `call_moderate` gespeichert. Diese Namen werden beim Lesen
+übersetzt (`call_moderate` ergibt `mute_in_calls` **und** `kick_from_calls`);
+eine Datenmigration ist nicht nötig. Gespeichert wird ab sofort nur noch das
+neue Vokabular, und ein unbekannter Name wird mit HTTP 422 abgewiesen, statt
+wirkungslos in der Datenbank zu landen.
+
 ### Grenzen
 
 - **Die Verschlüsselung schließt Browser aus.** Sie braucht Insertable Streams;

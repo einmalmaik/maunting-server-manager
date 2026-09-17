@@ -20,12 +20,15 @@ import {
   Track,
   VideoPresets,
   isE2EESupported,
+  type AudioCaptureOptions,
   type RemoteParticipant,
   type RoomOptions,
   type ScreenShareCaptureOptions,
   type TrackPublishOptions,
 } from 'livekit-client'
 import E2eeWorker from 'livekit-client/e2ee-worker?worker'
+import { ausgabeGeraetId } from '@/components/ai/voice/audioGeraete'
+import { getAudioTrackConstraints } from '@/lib/audioSettings'
 
 export { ConnectionState, RoomEvent, Track }
 export type { RemoteParticipant }
@@ -175,8 +178,48 @@ export async function trenne(room: Room): Promise<void> {
 
 // ── Mikrofon, Kamera, Wiedergabe ────────────────────────────────────────────
 
+/**
+ * Die Aufnahmeeinstellungen des Anrufs — dieselben, die Sprachnachricht und
+ * Wake-Word benutzen. `getAudioTrackConstraints` ist die eine Stelle, an der
+ * Gerätewahl und Chromiums Filterkette zusammenkommen; ein Anruf, der sie
+ * umgeht, nähme ein anderes Mikrofon als der Mikrofontest im Profil.
+ *
+ * LiveKit wertet die Einstellungen nur beim ersten Veröffentlichen aus.
+ * Danach schaltet `setMicrophoneEnabled` dieselbe Spur stumm und wieder frei —
+ * gewollt, denn ein Gerätewechsel mitten im Gespräch läuft über
+ * `wechsleGeraet`.
+ */
+function mikrofonAufnahme(): AudioCaptureOptions {
+  const c = getAudioTrackConstraints()
+  return {
+    deviceId: c.deviceId,
+    echoCancellation: c.echoCancellation as boolean,
+    noiseSuppression: c.noiseSuppression as boolean,
+    autoGainControl: c.autoGainControl as boolean,
+    channelCount: c.channelCount as number,
+  }
+}
+
 export async function setzeMikrofon(room: Room, an: boolean): Promise<void> {
-  await room.localParticipant.setMicrophoneEnabled(an)
+  await room.localParticipant.setMicrophoneEnabled(an, an ? mikrofonAufnahme() : undefined)
+}
+
+/**
+ * Legt die Wiedergabe auf den im Profil gewählten Lautsprecher.
+ *
+ * Muss laufen, **nachdem** Elemente angehängt sind: `switchActiveDevice` setzt
+ * `setSinkId` auf genau diesen Elementen. Ohne Wahl bleibt es beim Standard des
+ * Systems, und ein Browser ohne `setSinkId` (Firefox ohne Flag) tut nichts —
+ * beides ist kein Fehler, nur kein Wechsel.
+ */
+export async function setzeLautsprecher(room: Room): Promise<void> {
+  try {
+    const geraet = await ausgabeGeraetId()
+    if (!geraet) return
+    await room.switchActiveDevice('audiooutput', geraet)
+  } catch {
+    /* Kein Lautsprecherwechsel ist besser als ein abgebrochener Anruf. */
+  }
 }
 
 export async function setzeKamera(room: Room, an: boolean): Promise<void> {
@@ -273,12 +316,16 @@ export async function beendeBildschirmfreigabe(room: Room): Promise<void> {
  * Browser lassen Ton erst zu, nachdem jemand geklickt hat. Nach dem ersten
  * Klick im Overlay wird das hier nachgeholt, sonst bliebe der Anruf stumm,
  * obwohl alles verbunden ist.
+ *
+ * Gibt zurück, ob gespielt werden darf. Scheitert es, zeigt das Overlay einen
+ * Knopf — ein Anruf, der ohne Erklärung still bleibt, sieht aus wie ein Defekt.
  */
-export async function erlaubeWiedergabe(room: Room): Promise<void> {
+export async function erlaubeWiedergabe(room: Room): Promise<boolean> {
   try {
     await room.startAudio()
+    return room.canPlaybackAudio
   } catch {
-    /* Ohne Nutzergeste geht es nicht; der nächste Klick versucht es erneut. */
+    return false
   }
 }
 

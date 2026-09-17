@@ -4111,6 +4111,14 @@
         "title": "Ton und Bild bleiben verschlüsselt",
         "body": "Der Raumschlüssel entsteht im Browser und wird für jeden Teilnehmer einzeln verpackt zugestellt. Der Medienserver leitet weiter, was er nicht öffnen kann — das gilt für den integrierten wie für einen externen. Browser ohne Insertable Streams lehnt MSM ab, statt unverschlüsselt weiterzulaufen."
       },
+      "rights": {
+        "title": "Rechte im Gruppenanruf",
+        "body": "Fünf Rechte je Rolle: Anruf starten, beitreten, Bildschirm freigeben, im Anruf stummschalten, aus dem Anruf entfernen. Eigentümer und Administratoren haben alle fünf ohne Eintrag. Ältere Einträge wie call_moderate werden beim Lesen übersetzt; ein unbekannter Name wird abgewiesen, statt wirkungslos gespeichert zu werden."
+      },
+      "moderation": {
+        "title": "Stummschalten und Rauswurf",
+        "body": "Der Wortentzug wirkt am Medienserver: der Betroffene kann ihn nicht selbst aufheben, behält aber Kamera und Bildschirmfreigabe. Ein Rauswurf beendet nur die Teilnahme — wer beitreten darf, kann sofort wiederkommen. Gegen den Eigentümer greift beides nicht, gegen Administratoren nur durch den Eigentümer. Jede Handlung steht im Prüfprotokoll."
+      },
       "metadata": {
         "title": "Was der Medienserver sieht",
         "body": "Räume, Teilnehmerkennungen und Zeiten, aber keine Gesprächsinhalte. Integriert bleiben diese Daten auf dem eigenen Server, extern liegen sie beim Anbieter. In der Datenbank landet nichts davon: MSM führt keinen Anrufverlauf und keine Dauer."
@@ -4373,7 +4381,8 @@
           "attachments": "Bilder, Sprachnachrichten und Dateien werden vor dem Hochladen auf demselben Weg verschlüsselt. Der Speicher sieht nur den verschlüsselten Block, seine Größe und seinen Zeitpunkt.",
           "receipts": "Zustell- und Lesebestätigungen laufen als verschlüsselte Steuernachrichten über denselben Weg. Kann eine Bestätigung nicht verschlüsselt werden, unterbleibt sie, statt ungeschützt zu gehen.",
           "calls": "Sprach-, Video- und Gruppenanrufe laufen über einen Medienserver. Ton und Bild werden auf deinem Gerät verschlüsselt und erst beim Gegenüber wieder geöffnet; der Medienserver leitet weiter, was er nicht öffnen kann. Standardmäßig läuft er auf dieser Instanz. Trägt der Betreiber einen externen Anbieter ein, laufen die verschlüsselten Ströme über dessen Server.",
-          "callMetadata": "Der Medienserver sieht allerdings, welche Kontokennungen wann und wie lange in welchem Raum waren. Diese Angaben leben nur, solange der Anruf läuft: gespeichert werden sie nicht, es gibt keinen Anrufverlauf und keine Gesprächsdauer in der Datenbank. Bei einem externen Anbieter entstehen sie dort und unterliegen dessen Aufbewahrung."
+          "callMetadata": "Der Medienserver sieht allerdings, welche Kontokennungen wann und wie lange in welchem Raum waren. Diese Angaben leben nur, solange der Anruf läuft: gespeichert werden sie nicht, es gibt keinen Anrufverlauf und keine Gesprächsdauer in der Datenbank. Bei einem externen Anbieter entstehen sie dort und unterliegen dessen Aufbewahrung.",
+          "callModeration": "Schaltet ein Moderator jemanden im Gruppenanruf stumm oder entfernt ihn, wird das im Prüfprotokoll festgehalten: wer die Handlung ausgelöst hat, gegen wen sie ging und in welcher Gruppe. Der Raum und alles Gesprochene bleiben außen vor. Das ist die einzige Spur, die ein Anruf hinterlässt."
         }
       },
       "providers": {

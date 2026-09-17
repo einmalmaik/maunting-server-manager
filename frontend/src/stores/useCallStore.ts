@@ -49,6 +49,8 @@ import {
   verteileAn,
   verteileAnAlle,
 } from '@/services/raumSchluessel'
+import { toneAbgang, toneAufgelegt, toneBeitritt } from '@/components/calling/anrufToene'
+import { getAudioSettings, saveAudioSettings } from '@/lib/audioSettings'
 import { toast } from '@/stores/toastStore'
 import type { Participant, Room } from 'livekit-client'
 
@@ -90,6 +92,18 @@ export interface GroupCallContext {
   avatarUrl?: string | null
   canShare: boolean
   canModerate: boolean
+  /** Darf anderen im Anruf das Mikrofon abschalten. */
+  canMute?: boolean
+  /** Darf andere aus dem Anruf entfernen. */
+  canKick?: boolean
+}
+
+export type HinweisArt = 'beitritt' | 'abgang'
+
+export interface CallHinweis {
+  id: number
+  art: HinweisArt
+  text: string
 }
 
 export interface UseCallState {
@@ -116,6 +130,12 @@ export interface UseCallState {
   callDurationSeconds: number
   reconnecting: boolean
   errorMessage: string | null
+  /** Der Browser lässt noch keinen Ton zu — das Overlay bietet einen Knopf an. */
+  audioBlockiert: boolean
+  /** Von der Moderation stummgeschaltet; selbst nicht aufhebbar. */
+  serverStumm: boolean
+  /** Flüchtige Meldungen im Anruffenster. Nichts davon geht in den Verlauf. */
+  hinweise: CallHinweis[]
 
   initiateCall: (partner: CallPartner, mode: CallMode) => Promise<void>
   receiveCall: (partner: CallPartner, mode: CallMode, raum: string) => void
@@ -134,6 +154,9 @@ export interface UseCallState {
   inviteToCall: (userId: number) => Promise<void>
   setDevices: (audioIn?: string, videoIn?: string, audioOut?: string) => void
   incrementDuration: () => void
+  /** Nach einem Klick: holt die vom Browser verweigerte Tonwiedergabe nach. */
+  erlaubeTon: () => Promise<void>
+  verwirfHinweis: (id: number) => void
   /** Ein eingehender `call_key`-Umschlag aus dem Ereignisstrom. */
   acceptRoomKey: (raum: string, ciphertext: string) => Promise<void>
   setMode: (mode: CallMode) => void
@@ -172,6 +195,13 @@ function anzeigename(teilnehmer: Participant): string {
   return teilnehmer.name || teilnehmer.identity
 }
 
+/** Der Name, den eine Meldung nennen soll — aus den Stammdaten, sonst aus LiveKit. */
+function nameVon(teilnehmer: Participant, bekannte: Bekannte): string {
+  const userId = benutzerIdAusIdentity(teilnehmer.identity)
+  const stammdaten = userId === null ? undefined : bekannte.get(userId)
+  return stammdaten?.username || anzeigename(teilnehmer)
+}
+
 function videospur(teilnehmer: Participant): Track | null {
   const veroeffentlichung = teilnehmer.getTrackPublication(Track.Source.Camera)
   return veroeffentlichung?.track ?? null
@@ -185,6 +215,39 @@ function kameraAus(teilnehmer: Participant): boolean {
 function mikrofonAus(teilnehmer: Participant): boolean {
   const veroeffentlichung = teilnehmer.getTrackPublication(Track.Source.Microphone)
   return !veroeffentlichung || veroeffentlichung.isMuted
+}
+
+/** Wie lange eine Beitritts- oder Abgangsmeldung im Anruffenster stehen bleibt. */
+const HINWEIS_DAUER_MS = 3000
+
+/**
+ * Darf dieser Teilnehmer diese Quelle senden?
+ *
+ * LiveKit führt die erlaubten Quellen je Teilnehmer. Nimmt ein Moderator das
+ * Mikrofon aus der Liste, verweigert der Server das Senden — der Betroffene
+ * kann sich dann nicht selbst wieder freischalten. Eine leere oder fehlende
+ * Liste heißt „alles erlaubt", nicht „nichts erlaubt".
+ */
+function darfSenden(teilnehmer: Participant, quelle: Track.Source): boolean {
+  const erlaubt = teilnehmer.permissions?.canPublishSources
+  if (!erlaubt || erlaubt.length === 0) return true
+  return erlaubt.includes(quellenNummer(quelle))
+}
+
+/** Die Nummern aus LiveKits `TrackSource`-Aufzählung. */
+function quellenNummer(quelle: Track.Source): number {
+  switch (quelle) {
+    case Track.Source.Camera:
+      return 1
+    case Track.Source.Microphone:
+      return 2
+    case Track.Source.ScreenShare:
+      return 3
+    case Track.Source.ScreenShareAudio:
+      return 4
+    default:
+      return 0
+  }
 }
 
 type Bekannte = Map<number, { username: string; avatarUrl?: string | null }>
@@ -238,14 +301,33 @@ export const useCallStore = create<UseCallState>((set, get) => {
   /** Stammdaten (Name, Avatar) je Benutzer, aus Einladung bzw. Gruppenliste. */
   const bekannte: Bekannte = new Map()
   let sprechend = new Set<string>()
+  let hinweisZaehler = 0
 
   const spiegele = () => {
     const room = verbindung?.room
     if (!room) return
-    set({
+    const serverStumm = !darfSenden(room.localParticipant, Track.Source.Microphone)
+    set((s) => ({
       participants: sammleTeilnehmer(room, bekannte, sprechend),
       screenShares: sammleFreigaben(room, bekannte),
-    })
+      serverStumm,
+      // Serverstumm heißt stumm — der Knopf soll das zeigen, auch wenn der
+      // Benutzer selbst nichts gedrückt hat. Beim Aufheben bleibt es stumm:
+      // wieder zu sprechen ist eine bewusste Entscheidung, kein Automatismus.
+      isMuted: serverStumm ? true : s.isMuted,
+    }))
+  }
+
+  /**
+   * Eine Meldung fürs Anruffenster, die nach ein paar Sekunden von selbst geht.
+   * Bewusst nicht in den Chatverlauf: wer wann telefoniert hat, soll dort
+   * hinterher nicht nachlesbar sein.
+   */
+  const meldeHinweis = (art: HinweisArt, text: string) => {
+    hinweisZaehler += 1
+    const id = hinweisZaehler
+    set((s) => ({ hinweise: [...s.hinweise, { id, art, text }] }))
+    window.setTimeout(() => get().verwirfHinweis(id), HINWEIS_DAUER_MS)
   }
 
   const haengeEreignisseAn = (room: Room, eigeneGeneration: number) => {
@@ -275,15 +357,31 @@ export const useCallStore = create<UseCallState>((set, get) => {
     room.on(RoomEvent.ParticipantConnected, (teilnehmer) => {
       if (eigeneGeneration !== generation) return
       spiegele()
+      toneBeitritt()
+      meldeHinweis('beitritt', `${nameVon(teilnehmer, bekannte)} ist beigetreten`)
       // Nachzügler brauchen den Raumschlüssel. Genau ein Anwesender schickt ihn.
       void schickeSchluesselNach(teilnehmer)
     })
-    room.on(RoomEvent.ParticipantDisconnected, wennAktuell(() => {
+    room.on(RoomEvent.ParticipantDisconnected, (teilnehmer) => {
+      if (eigeneGeneration !== generation) return
       spiegele()
-      // Zweiergespräch: geht der andere, ist das Gespräch vorbei.
+      // Zweiergespräch: geht der andere, ist das Gespräch vorbei. Dann sagt das
+      // der Auflegeton, nicht noch zusätzlich eine Abgangsmeldung.
       if (get().kind === 'direkt' && (verbindung?.room.remoteParticipants.size ?? 0) === 0) {
         get().endCall()
+        return
       }
+      toneAbgang()
+      meldeHinweis('abgang', `${nameVon(teilnehmer, bekannte)} hat den Anruf verlassen`)
+    })
+
+    // Ein Moderator hat die erlaubten Quellen geändert. Ohne diese Zeile bliebe
+    // der Mikrofonknopf bedienbar und täte nichts.
+    room.on(RoomEvent.ParticipantPermissionsChanged, wennAktuell(spiegele))
+
+    // Der Browser hat die Wiedergabe freigegeben oder verweigert.
+    room.on(RoomEvent.AudioPlaybackStatusChanged, wennAktuell(() => {
+      set({ audioBlockiert: !room.canPlaybackAudio })
     }))
 
     const beiSpur = wennAktuell(spiegele)
@@ -351,7 +449,7 @@ export const useCallStore = create<UseCallState>((set, get) => {
     }
 
     haengeEreignisseAn(verbindung.room, eigeneGeneration)
-    await erlaubeWiedergabe(verbindung.room)
+    set({ audioBlockiert: !(await erlaubeWiedergabe(verbindung.room)) })
 
     try {
       await setzeMikrofon(verbindung.room, true)
@@ -398,6 +496,7 @@ export const useCallStore = create<UseCallState>((set, get) => {
     raumSchluessel = null
     sprechend = new Set<string>()
     bekannte.clear()
+    set({ hinweise: [], audioBlockiert: false, serverStumm: false })
     if (room) void trenne(room)
   }
 
@@ -416,12 +515,17 @@ export const useCallStore = create<UseCallState>((set, get) => {
     isCameraOff: true,
     isScreenSharing: false,
     screenShareOptions: FREIGABE_STANDARD,
-    selectedAudioInput: 'default',
+    // Dasselbe Mikrofon, das Profil → Audio gewählt hat. Ohne das nähme der
+    // Anruf das Standardgerät, während der Mikrofontest ein anderes prüft.
+    selectedAudioInput: getAudioSettings().preferredMicId ?? 'default',
     selectedVideoInput: 'default',
-    selectedAudioOutput: 'default',
+    selectedAudioOutput: getAudioSettings().preferredSpeakerId ?? 'default',
     callDurationSeconds: 0,
     reconnecting: false,
     errorMessage: null,
+    audioBlockiert: false,
+    serverStumm: false,
+    hinweise: [],
 
     initiateCall: async (partner, mode) => {
       raeumeAuf()
@@ -547,6 +651,9 @@ export const useCallStore = create<UseCallState>((set, get) => {
 
     endCall: () => {
       const { raum, state, kind, group } = get()
+      // Nur wenn wirklich ein Gespräch lief: beim Wegdrücken eines eingehenden
+      // Anrufs klingelt es schon, da wäre ein Auflegeton nur Lärm.
+      if (state === 'active' || state === 'connecting') toneAufgelegt()
       if (raum && state === 'outgoing' && kind === 'direkt') {
         // Auflegen, während es beim Gegenüber noch klingelt: die Einladung muss
         // serverseitig sterben, sonst klingelt es dort weiter.
@@ -575,6 +682,12 @@ export const useCallStore = create<UseCallState>((set, get) => {
     },
 
     toggleMute: () => {
+      // Serverstumm hebt nur auf, wer es gesetzt hat. Der Versuch scheiterte
+      // ohnehin am Server; hier scheitert er sichtbar und ohne Zustandswechsel.
+      if (get().serverStumm) {
+        toast.error('Ein Moderator hat dich stummgeschaltet. Nur die Moderation kann das aufheben.')
+        return
+      }
       const naechster = !get().isMuted
       const room = verbindung?.room
       if (room) void setzeMikrofon(room, !naechster).catch(() => {})
@@ -661,6 +774,14 @@ export const useCallStore = create<UseCallState>((set, get) => {
         if (videoIn) void wechsleGeraet(room, 'videoinput', videoIn).catch(() => {})
         if (audioOut) void wechsleGeraet(room, 'audiooutput', audioOut).catch(() => {})
       }
+      // Dieselbe Ablage wie Profil → Audio. Ein Anruf, der sein Gerät nur für
+      // sich merkt, wäre die zweite Wahrheit neben dem Mikrofontest.
+      if (audioIn || audioOut) {
+        saveAudioSettings({
+          ...(audioIn ? { preferredMicId: audioIn } : {}),
+          ...(audioOut ? { preferredSpeakerId: audioOut } : {}),
+        })
+      }
       set((s) => ({
         selectedAudioInput: audioIn ?? s.selectedAudioInput,
         selectedVideoInput: videoIn ?? s.selectedVideoInput,
@@ -669,6 +790,14 @@ export const useCallStore = create<UseCallState>((set, get) => {
     },
 
     incrementDuration: () => set((s) => ({ callDurationSeconds: s.callDurationSeconds + 1 })),
+
+    erlaubeTon: async () => {
+      const room = verbindung?.room
+      if (!room) return
+      set({ audioBlockiert: !(await erlaubeWiedergabe(room)) })
+    },
+
+    verwirfHinweis: (id) => set((s) => ({ hinweise: s.hinweise.filter((h) => h.id !== id) })),
 
     acceptRoomKey: async (raum, ciphertext) => {
       if (!identitaet || get().raum !== raum) return
@@ -687,3 +816,10 @@ export const useCallStore = create<UseCallState>((set, get) => {
     setMode: (mode) => set({ mode }),
   }
 })
+
+// Im Entwicklungsmodus von der Konsole aus erreichbar. Ein Anruffenster mit
+// acht Teilnehmern laesst sich sonst nur mit acht Konten ansehen, und genau
+// dort faellt auf, ob eine Kachel aus ihrem Bereich laeuft.
+if (import.meta.env.DEV) {
+  ;(window as unknown as Record<string, unknown>).__msmAnruf = useCallStore
+}

@@ -4111,6 +4111,14 @@
         "title": "Audio and video stay encrypted",
         "body": "The room key is created in the browser and delivered wrapped for each participant individually. The media server forwards what it cannot open — for the bundled one as much as for an external one. Browsers without insertable streams are refused rather than falling back to unencrypted calls."
       },
+      "rights": {
+        "title": "Group call permissions",
+        "body": "Five permissions per role: start a call, join, share a screen, mute someone in the call, remove someone from the call. Owners and administrators hold all five without an entry. Older values such as call_moderate are translated on read; an unknown name is rejected instead of being stored without effect."
+      },
+      "moderation": {
+        "title": "Muting and removal",
+        "body": "Muting takes effect on the media server: the person affected cannot lift it themselves, but keeps camera and screen sharing. Removal only ends participation — anyone allowed to join can come straight back. Neither applies to the owner, and only the owner may act against administrators. Every action is recorded in the audit log."
+      },
       "metadata": {
         "title": "What the media server sees",
         "body": "Rooms, participant identifiers and timings, but no call content. Bundled, that data stays on your own server; external, it sits with the provider. None of it reaches the database: MSM keeps no call history and no durations."
@@ -4373,7 +4381,8 @@
           "attachments": "Images, voice messages, and files are encrypted the same way before upload. Storage only ever sees the encrypted block, its size, and its timestamp.",
           "receipts": "Delivery and read receipts travel as encrypted control messages over the same path. If a receipt cannot be encrypted, it is not sent rather than sent unprotected.",
           "calls": "Voice, video and group calls run through a media server. Audio and video are encrypted on your device and only opened again on the other end; the media server forwards what it cannot open. By default it runs on this instance. If the operator configures an external provider, the encrypted streams travel over that provider's servers.",
-          "callMetadata": "The media server does however see which account identifiers were in which room, when and for how long. That information only lives while the call is running: it is not stored, and there is no call history or call duration in the database. With an external provider it arises there and is subject to that provider's retention."
+          "callMetadata": "The media server does however see which account identifiers were in which room, when and for how long. That information only lives while the call is running: it is not stored, and there is no call history or call duration in the database. With an external provider it arises there and is subject to that provider's retention.",
+          "callModeration": "If a moderator mutes or removes someone during a group call, the audit log records who acted, against whom, and in which group. The room itself and anything said stay out of it. This is the only trace a call leaves behind."
         }
       },
       "providers": {

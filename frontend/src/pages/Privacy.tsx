@@ -63,6 +63,10 @@ export function Privacy() {
           // hierher und nicht in eine Fussnote.
           t('privacyPolicy.sections.messenger.items.calls'),
           t('privacyPolicy.sections.messenger.items.callMetadata'),
+          // Die eine Ausnahme von "kein Anruf wird gespeichert": eine
+          // Moderationshandlung hinterlaesst einen Eintrag. Wer anderen das
+          // Wort nehmen kann, muss dafuer nachvollziehbar sein.
+          t('privacyPolicy.sections.messenger.items.callModeration'),
         ],
       },
       {

@@ -2758,19 +2758,26 @@ export function Messenger() {
    */
   const groupCallPermissions = useMemo(() => {
     if (!activeGroup) {
-      return { canStart: false, canJoin: false, canShare: false, canModerate: false }
+      return {
+        canStart: false,
+        canJoin: false,
+        canShare: false,
+        canModerate: false,
+        canMute: false,
+        canKick: false,
+      }
     }
-    const leitend =
-      activeGroup.owner_user_id === currentUserId ||
-      activeGroup.role === 'admin' ||
-      activeGroup.role === 'moderator'
     return {
       canStart: activeGroup.can_start_call === true,
       canJoin: activeGroup.can_join_call === true,
-      canShare: activeGroup.can_join_call === true,
-      canModerate: leitend,
+      canShare: activeGroup.can_share_screen === true,
+      // „Moderieren" heisst hier nur: den Raum für alle schliessen dürfen. Das
+      // hängt am Startrecht, weil genau das der Endpunkt prüft.
+      canModerate: activeGroup.can_start_call === true,
+      canMute: activeGroup.can_mute_others === true,
+      canKick: activeGroup.can_kick_from_call === true,
     }
-  }, [activeGroup, currentUserId])
+  }, [activeGroup])
 
   const handleStartGroupCall = async (joinExisting = false) => {
     if (!activeGroup) return
@@ -2816,6 +2823,8 @@ export function Messenger() {
         avatarUrl: activeGroup.avatar_url ?? null,
         canShare: groupCallPermissions.canShare,
         canModerate: groupCallPermissions.canModerate,
+        canMute: groupCallPermissions.canMute,
+        canKick: groupCallPermissions.canKick,
       },
       roomToken,
       // Nur der Startende verteilt; ein Beitretender hat den Schlüssel noch

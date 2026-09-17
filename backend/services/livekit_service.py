@@ -358,6 +358,78 @@ def raum_teilnehmer(raum: str, db: Session | None = None) -> int:
     return len(daten.get("participants") or [])
 
 
+# ── Moderation im Raum ──────────────────────────────────────────────────────
+
+#: Die Nummern aus LiveKits `TrackSource`-Aufzaehlung.
+QUELLE_KAMERA = 1
+QUELLE_MIKROFON = 2
+QUELLE_BILDSCHIRM = 3
+QUELLE_BILDSCHIRMTON = 4
+
+_ALLE_QUELLEN = (QUELLE_KAMERA, QUELLE_MIKROFON, QUELLE_BILDSCHIRM, QUELLE_BILDSCHIRMTON)
+
+
+class LivekitNichtErreichbar(RuntimeError):
+    """Der Medienserver hat die Moderationsanweisung nicht angenommen."""
+
+
+def setze_mikrofonrecht(raum: str, identity: str, erlaubt: bool, db: Session | None = None) -> None:
+    """Nimmt einem Teilnehmer das Mikrofon oder gibt es ihm zurueck.
+
+    Umgesetzt ueber die erlaubten Quellen des Teilnehmers, nicht ueber
+    `MutePublishedTrack`: eine stummgeschaltete Spur koennte der Browser sofort
+    wieder freigeben, eine entzogene Quelle nicht — das Senden verweigert dann
+    LiveKit selbst. Kamera und Bildschirmfreigabe bleiben unberuehrt, damit ein
+    Wortentzug nicht versehentlich eine Praesentation abbricht.
+
+    Fehler werden weitergereicht statt geschluckt: wer glaubt, jemanden
+    stummgeschaltet zu haben, waehrend der weiterspricht, ist schlechter dran
+    als jemand, der eine Fehlermeldung sieht.
+    """
+    konf = konfiguration(db)
+    if not konf.konfiguriert:
+        raise LivekitNichtErreichbar("Der Anrufserver ist nicht eingerichtet.")
+    quellen = list(_ALLE_QUELLEN) if erlaubt else [q for q in _ALLE_QUELLEN if q != QUELLE_MIKROFON]
+    try:
+        _twirp(
+            konf.api_url,
+            konf.api_key,
+            konf.api_secret,
+            "UpdateParticipant",
+            {
+                "room": raum,
+                "identity": identity,
+                "permission": {
+                    "canSubscribe": True,
+                    "canPublish": True,
+                    "canPublishData": True,
+                    "canPublishSources": quellen,
+                },
+            },
+            raum=raum,
+        )
+    except Exception as exc:  # noqa: BLE001 — jede Ursache endet in derselben Meldung
+        raise LivekitNichtErreichbar("Der Anrufserver hat die Änderung nicht angenommen.") from exc
+
+
+def entferne_teilnehmer(raum: str, identity: str, db: Session | None = None) -> None:
+    """Wirft jemanden aus dem Raum. Wer beitreten darf, kann wiederkommen."""
+    konf = konfiguration(db)
+    if not konf.konfiguriert:
+        raise LivekitNichtErreichbar("Der Anrufserver ist nicht eingerichtet.")
+    try:
+        _twirp(
+            konf.api_url,
+            konf.api_key,
+            konf.api_secret,
+            "RemoveParticipant",
+            {"room": raum, "identity": identity},
+            raum=raum,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise LivekitNichtErreichbar("Der Anrufserver hat die Änderung nicht angenommen.") from exc
+
+
 def status(db: Session | None = None) -> dict[str, Any]:
     """Was der Admin-Bereich anzeigt. Enthaelt nie das Geheimnis."""
     konf = konfiguration(db)
