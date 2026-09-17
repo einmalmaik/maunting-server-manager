@@ -36,10 +36,11 @@ const KEINE_ETHICS = '__aus__'
 const KEINE_TRANSKRIPTION = '__aus__'
 const EMPFOHLENE_REALTIME_MODELLE = ['gpt-realtime-1.5', 'gpt-realtime-2'] as const
 const EMPFOHLENE_GOOGLE_REALTIME_MODELLE = [
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-exp',
+  'gemini-2.5-flash',
   'gemini-3.8-live',
   'gemini-3.8-live-extended-thinking',
-  'gemini-2.5-flash',
-  'gemini-2.0-flash',
 ] as const
 const GEMINI_LIVE_STIMMEN = ['Puck', 'Charon', 'Kore', 'Fenrir', 'Aoede', 'Zephyr', 'Leda', 'Orus'] as const
 
@@ -49,7 +50,8 @@ function isGoogleLiveModel(modelId: string): boolean {
     m.includes('live') ||
     m.includes('realtime') ||
     m.includes('2.5-flash') ||
-    m.includes('2.0-flash')
+    m.includes('2.0-flash') ||
+    m.includes('flash-exp')
   )
 }
 

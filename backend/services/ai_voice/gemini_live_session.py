@@ -191,6 +191,7 @@ class GeminiLiveSitzung:
         self._last_candidates_tokens = 0
         self._gestartet: set[str] = set()
         self._beendet = False
+        self._setup_fertig = asyncio.Event()
 
     async def _panel_senden(self, daten: dict) -> None:
         async with self._senden_lock:
@@ -441,8 +442,23 @@ class GeminiLiveSitzung:
                 except json.JSONDecodeError:
                     continue
 
+                # Fehlermeldung von Google (z. B. Modell nicht unterstützt, Quota oder ungültige Parameter)
+                if "error" in event:
+                    err = event["error"]
+                    err_msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+                    logger.warning("Gemini Live Fehler vom Anbieter: %s", err_msg)
+                    await self._debug_senden("GEMINI_LIVE_ERROR", hint=err_msg)
+                    with contextlib.suppress(Exception):
+                        await self._panel_senden({
+                            "art": "fehler",
+                            "code": "GEMINI_LIVE_ERROR",
+                            "detail": err_msg,
+                        })
+                    break
+
                 # Setup-Bestätigung
                 if "setupComplete" in event:
+                    self._setup_fertig.set()
                     await self._panel_senden({"art": "bereit"})
                     await self._panel_senden({"art": "zustand", "zustand": "hoert"})
                     await self._debug_senden("GEMINI_LIVE_SETUP_OK", hint=f"Verbunden mit {self.v.model}")
@@ -590,8 +606,8 @@ class GeminiLiveSitzung:
         url = f"{GEMINI_LIVE_WS_BASE}?key={quote_plus(self.v.api_key)}"
         model_raw = (self.v.model or "").strip()
         if not model_raw or "gemini" not in model_raw.lower():
-            logger.info("Kein gültiges Gemini-Live-Modell angegeben ('%s'), nutze gemini-3.8-live", model_raw)
-            model_raw = "gemini-3.8-live"
+            logger.info("Kein gültiges Gemini-Live-Modell angegeben ('%s'), nutze gemini-2.0-flash", model_raw)
+            model_raw = "gemini-2.0-flash"
         model_name = model_raw if model_raw.startswith("models/") else f"models/{model_raw}"
         voice_name = self.v.voice or "Puck"
 
@@ -628,6 +644,21 @@ class GeminiLiveSitzung:
             await self._google_ws.send(json.dumps(setup_payload))
             await self._debug_senden("GEMINI_LIVE_CONNECTED", hint=f"Handshake mit {model_name} läuft")
 
+            async def _handshake_watchdog() -> None:
+                try:
+                    await asyncio.wait_for(self._setup_fertig.wait(), timeout=12.0)
+                except asyncio.TimeoutError:
+                    if not self._beendet and not self._setup_fertig.is_set():
+                        logger.warning("Gemini Live Handshake Zeitüberschreitung für Modell %s", model_name)
+                        await self._debug_senden("GEMINI_HANDSHAKE_TIMEOUT", hint=model_name)
+                        with contextlib.suppress(Exception):
+                            await self._panel_senden({
+                                "art": "fehler",
+                                "code": "GEMINI_HANDSHAKE_TIMEOUT",
+                                "detail": f"Keine Antwort von Google für Modell '{model_name}'. Bitte prüfe das Modell in den Einstellungen (z. B. gemini-2.0-flash).",
+                            })
+
+            watchdog_task = asyncio.create_task(_handshake_watchdog())
             client_task = asyncio.create_task(self._client_lesen())
             google_task = asyncio.create_task(self._google_lesen())
 
@@ -636,6 +667,7 @@ class GeminiLiveSitzung:
                 timeout=MAX_SITZUNGSSEKUNDEN,
                 return_when=asyncio.FIRST_COMPLETED,
             )
+            watchdog_task.cancel()
             self._beendet = True
             for task in pending:
                 task.cancel()
