@@ -23,10 +23,8 @@ from schemas.social import (
     E2eeBlindEnvelopeResponse,
     E2eeMailboxSyncResponse,
     E2eeTypingSignalCreate,
-    E2eeKeyringResponse,
-    E2eeKeyringUpdate,
-    E2eePublicKeyResponse,
-    E2eePublicKeyUpdate,
+    E2eeDeviceItem,
+    E2eeDeviceUpdate,
     FriendRequestCreate,
     FriendResponse,
     PresenceInfo,
@@ -51,7 +49,7 @@ from services.chat_media_validator import sanitize_attachment_filename
 from services.social_service import SocialService
 from services.sync_event_service import SyncEventService
 from services.call_room_service import GroupCallRoomRegistry
-from services import bild_upload, livekit_service
+from services import bild_upload, e2ee_device_service, livekit_service
 
 logger = logging.getLogger(__name__)
 
@@ -265,59 +263,57 @@ def get_public_profile(
 
 # --- E2EE Zero-Knowledge Blind Relais Mailbox ---
 
-@router.post("/e2ee/public-key", dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
-def set_e2ee_public_key(
-    req: E2eePublicKeyUpdate,
+@router.put("/e2ee/devices/self", response_model=E2eeDeviceItem, dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
+def put_own_e2ee_device(
+    req: E2eeDeviceUpdate,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    SocialService.save_e2ee_public_key(db, user.id, req.public_key)
-    return {"ok": True, "message": "E2EE-Schlüssel aktualisiert"}
+    """Veröffentlicht den Schlüssel *dieses* Geräts.
 
-
-@router.get("/e2ee/public-key/{target_user_id}", response_model=E2eePublicKeyResponse, dependencies=[Depends(_check_social_enabled)])
-def get_e2ee_public_key(
-    target_user_id: int,
-    db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
-) -> dict:
-    target = db.query(User).filter_by(id=target_user_id).first()
-    if not target or not target.is_active:
-        raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
-    pub_key = SocialService.get_e2ee_public_key(db, target_user_id)
+    `user.id` kommt aus der Sitzung, nie aus dem Rumpf: ein Gerät schreibt
+    ausschließlich seinen eigenen Eintrag.
+    """
+    try:
+        eintrag = e2ee_device_service.veroeffentlichen(
+            db, user, device_id=req.device_id, public_key_jwk=req.public_key, label=req.label or ""
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return {
-        "user_id": target.id,
-        "username": target.username,
-        "public_key": pub_key,
+        "device_id": eintrag.device_id,
+        "public_key": eintrag.public_key_jwk,
+        "label": eintrag.label or "",
     }
 
 
-@router.get("/e2ee/keyring", response_model=E2eeKeyringResponse, dependencies=[Depends(_check_social_enabled)])
-def get_e2ee_keyring(
+@router.get("/e2ee/devices/{target_user_id}", response_model=list[E2eeDeviceItem], dependencies=[Depends(_check_social_enabled)])
+def get_e2ee_devices(
+    target_user_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> dict:
-    """Der verpackte Schlüsselbund des angemeldeten Benutzers.
+    _: User = Depends(get_current_user),
+) -> list[dict]:
+    """Die Zustelladressen eines Kontos.
 
-    Bewusst ohne Parameter: es gibt keinen Weg, den Bund eines anderen Kontos
-    anzufordern. Auch der eigene ist ohne Wiederherstellungsschlüssel wertlos.
+    Angemeldet zu sein genügt — wie zuvor beim Kontoschlüssel. Was hier
+    herauskommt, sind öffentliche Schlüssel und bedeutungsfreie Zufallskennungen;
+    beides steht ohnehin im Klartext in jedem Umschlag, den das Relais
+    weiterreicht.
     """
-    return SocialService.get_e2ee_keyring(db, user.id)
+    target = db.query(User).filter_by(id=target_user_id).first()
+    if not target or not target.is_active:
+        raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
+    return e2ee_device_service.geraete(db, target_user_id)
 
 
-@router.put("/e2ee/keyring", response_model=E2eeKeyringResponse, dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
-def put_e2ee_keyring(
-    req: E2eeKeyringUpdate,
+@router.delete("/e2ee/devices/self", dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
+def delete_own_e2ee_device(
+    device_id: str = Query(..., min_length=8, max_length=64),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    return SocialService.save_e2ee_keyring(
-        db,
-        user.id,
-        wrapped_keyring=req.wrapped_keyring,
-        public_key=req.public_key,
-        expected_version=req.expected_version,
-    )
+    entfernt = e2ee_device_service.vergessen(db, user, device_id)
+    return {"ok": entfernt}
 
 
 @router.post("/e2ee/relay", response_model=E2eeBlindEnvelopeResponse, dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])

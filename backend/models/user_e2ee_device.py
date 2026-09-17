@@ -1,0 +1,62 @@
+"""Der E2EE-Schluessel eines Geraets — der einzige Schluesselbegriff im Messenger.
+
+Vorher gab es zwei: ``users.social_e2ee_public_key`` trug den Schluessel des
+*Kontos*, dessen privater Teil mit einem abgetippten Wiederherstellungsschluessel
+verpackt beim Server lag, damit jedes Geraet ihn holen konnte. Genau das steht
+dem Double Ratchet im Weg: er ist eine lineare Kette, die pro Geraet
+weiterlaeuft. Zwei Geraete mit demselben privaten Schluessel entschluesseln
+dieselbe Nachricht, driften auseinander und verklemmen die Sitzung.
+
+Jetzt gehoert der Schluessel dem Geraet. Jeder Browser, die Tauri-App und die
+APK erzeugen sich beim ersten Oeffnen des Messengers lokal ein Paar und
+veroeffentlichen hier den oeffentlichen Teil. Der private verlaesst das Geraet
+nie — es gibt keinen Mechanismus mehr, der ihn irgendwohin verpacken koennte,
+und damit auch nichts mehr, das ein Mensch abtippen muesste.
+
+Ein Absender fragt die Liste ab und faechert seine Nachricht je Eintrag auf.
+Was hier steht, ist deshalb reine Zustelladresse: eine bedeutungsfreie
+Zufallskennung und ein oeffentlicher Schluessel. Kein Geheimnis, nichts, was
+der Server nicht ohnehin weiterreichen muss.
+"""
+
+from datetime import datetime, timezone
+
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column
+
+from database import Base
+
+
+class UserE2eeDevice(Base):
+    """Ein Geraet eines Kontos mit seinem veroeffentlichten E2EE-Schluessel."""
+
+    __tablename__ = "user_e2ee_devices"
+    __table_args__ = (
+        # Ein Geraet meldet sich bei jedem Start erneut an. Ohne diese Schranke
+        # entstuende bei jedem Start eine weitere Zeile, und der Absender
+        # faecherte gegen Karteileichen auf.
+        UniqueConstraint("user_id", "device_id", name="uq_user_e2ee_device"),
+        # Die eine Abfrage im Betrieb: "welche Geraete hat dieser Benutzer?"
+        Index("ix_user_e2ee_devices_user", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    # Clientseitig gezogene Zufallskennung (16 Bytes hex). Bedeutungsfrei und
+    # bewusst nicht aus Benutzer- oder Sitzungsdaten abgeleitet: sie steht im
+    # Klartext in jedem Umschlag und darf dort nichts verraten.
+    device_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    public_key_jwk: Mapped[str] = mapped_column(Text, nullable=False)
+    # Wiedererkennung in der Geraeteliste ("Arbeitsrechner"). Frei gewaehlt.
+    label: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    # Entscheidet, welches Geraet der Deckel verdraengt — nicht `created_at`:
+    # das aelteste Geraet ist oft das meistgenutzte.
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )

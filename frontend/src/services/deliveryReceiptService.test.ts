@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { sendE2eeDeliveryReceipt, deliveredEnvelopeIds } from './deliveryReceiptService'
 import * as socialApi from '@/api/social'
-import * as e2eeIdentity from '@/services/e2eeIdentity'
+import * as e2eeGeraet from '@/services/e2eeGeraet'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
 
 vi.mock('@/api/social', () => ({
@@ -13,16 +13,17 @@ vi.mock('@/services/e2eeCrypto', () => ({
   encryptE2eeHybrid: vi.fn().mockResolvedValue('sv-e2ee-hybrid-v1:mock-hybrid-delivery'),
 }))
 
-vi.mock('@/services/e2eeIdentity', () => ({
-  resolveIdentity: vi.fn().mockResolvedValue({
-    state: 'ready',
-    sendPair: {
+vi.mock('@/services/e2eeGeraet', () => ({
+  eigenesGeraet: vi.fn().mockResolvedValue({
+    kennung: 'a1b2c3d4e5f60718',
+    paar: {
       publicKeyJwk: '{"kty":"RSA","n":"test"}',
       privateKeyJwk: '{"kty":"RSA","d":"test"}',
     },
-    decryptionKeys: ['{"kty":"RSA","d":"test"}'],
   }),
-  getRecipientPublicKey: vi.fn().mockResolvedValue('bob-pub-key'),
+  geraeteVon: vi.fn().mockResolvedValue([
+    { device_id: 'bob-geraet-0001', public_key: 'bob-pub-key', label: '' },
+  ]),
 }))
 
 describe('deliveryReceiptService', () => {
@@ -100,12 +101,12 @@ describe('deliveryReceiptService', () => {
     expect(socialApi.relayE2eeEnvelope).not.toHaveBeenCalled()
   })
 
-  it('sendet keine Quittung, wenn der Empfänger keinen Schlüssel hinterlegt hat', async () => {
+  it('sendet keine Quittung, wenn der Empfänger mit keinem Gerät angemeldet ist', async () => {
     // Früher fiel der Dienst hier auf `encryptE2eeMessage` zurück. Dessen
     // Schlüssel ergibt sich allein aus den beiden Benutzerkennungen, die das
     // Backend beim Relais ohnehin kennt — die Quittung wäre für den Server
     // lesbar gewesen. Ein fehlendes graues Häkchen ist der bessere Preis.
-    vi.mocked(e2eeIdentity.getRecipientPublicKey).mockResolvedValueOnce(null)
+    vi.mocked(e2eeGeraet.geraeteVon).mockResolvedValueOnce([])
 
     const success = await sendE2eeDeliveryReceipt({
       blindMailboxId: 'mailbox-sym',
@@ -120,12 +121,12 @@ describe('deliveryReceiptService', () => {
     expect(deliveredEnvelopeIds.has(104)).toBe(false)
   })
 
-  it('sendet keine Quittung, solange der Schlüsselbund auf diesem Gerät gesperrt ist', async () => {
-    vi.mocked(e2eeIdentity.resolveIdentity).mockResolvedValueOnce({
-      state: 'locked',
-      sendPair: null,
-      decryptionKeys: [],
-    })
+  it('sendet keine Quittung, wenn der Schlüssel dieses Geräts nicht bereitsteht', async () => {
+    // Ohne eigenen Schlüssel gäbe es nichts, womit dieses Gerät den Umschlag
+    // für den Absender mitversiegeln könnte.
+    vi.mocked(e2eeGeraet.eigenesGeraet).mockRejectedValueOnce(
+      new Error('IndexedDB nicht verfügbar')
+    )
 
     const success = await sendE2eeDeliveryReceipt({
       blindMailboxId: 'mailbox-locked',

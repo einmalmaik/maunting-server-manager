@@ -46,15 +46,16 @@ export function Privacy() {
       {
         // Der Messenger ist der einzige Bereich, in dem die Instanz Inhalte
         // weiterleitet, die sie selbst nicht lesen kann. Dazu gehoert auch die
-        // Kehrseite: ein verlorener Wiederherstellungsschluessel laesst sich von
-        // niemandem ersetzen, auch vom Betreiber nicht.
+        // Kehrseite: der Schluessel gehoert dem Geraet, und wer alle Geraete
+        // verliert, verliert den Verlauf. Niemand kann ihn zurueckholen, auch
+        // der Betreiber nicht.
         heading: t('privacyPolicy.sections.messenger.heading'),
         body: t('privacyPolicy.sections.messenger.body'),
         items: [
           t('privacyPolicy.sections.messenger.items.envelopes'),
-          t('privacyPolicy.sections.messenger.items.accountKey'),
-          t('privacyPolicy.sections.messenger.items.keyring'),
-          t('privacyPolicy.sections.messenger.items.recoveryKey'),
+          t('privacyPolicy.sections.messenger.items.deviceKey'),
+          t('privacyPolicy.sections.messenger.items.deviceFanout'),
+          t('privacyPolicy.sections.messenger.items.deviceHistory'),
           t('privacyPolicy.sections.messenger.items.attachments'),
           t('privacyPolicy.sections.messenger.items.receipts'),
           // Anrufe sind die eine Stelle, an der die Instanz mehr erfaehrt als

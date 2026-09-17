@@ -8,7 +8,7 @@
 
 import { relayE2eeEnvelope, fetchE2eeEnvelopes, syncE2eeMailboxes } from '@/api/social'
 import { encryptE2eeHybrid } from '@/services/e2eeCrypto'
-import { resolveIdentity, getRecipientPublicKey } from '@/services/e2eeIdentity'
+import { eigenesGeraet, geraeteVon } from '@/services/e2eeGeraet'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
 
 const DELIVERED_STORAGE_KEY = 'msm:delivered_envelope_ids'
@@ -104,26 +104,24 @@ export async function sendE2eeDeliveryReceipt({
     }
     const payload = JSON.stringify(payloadObj)
 
-    // Ist der Schlüsselbund auf diesem Gerät gesperrt, gibt es keine Quittung.
-    // Der Ersatzweg von früher hätte den Schlüssel allein aus den beiden
+    // Hat der Absender kein Gerät angemeldet, gibt es keine Quittung. Der
+    // Ersatzweg von früher hätte den Schlüssel allein aus den beiden
     // Benutzerkennungen abgeleitet und damit für den Server lesbar gemacht;
     // ein fehlendes graues Häkchen wiegt leichter als eine gebrochene Zusage.
-    const identity = await resolveIdentity(currentUserId)
-    if (identity.state !== 'ready' || !identity.sendPair) {
+    const geraet = await eigenesGeraet()
+    const zielGeraete = await geraeteVon(senderUserId)
+    if (zielGeraete.length === 0) {
       deliveredEnvelopeIds.delete(envelopeId)
       return false
     }
 
-    const recipientPubKey = await getRecipientPublicKey(senderUserId)
-    if (!recipientPubKey) {
-      deliveredEnvelopeIds.delete(envelopeId)
-      return false
-    }
-
+    // Die Quittung geht an das zuletzt aktive Gerät des Absenders. Sie ist ein
+    // Häkchen, kein Gesprächsinhalt: sie an alle Geräte zu fächern kostete je
+    // empfangener Nachricht eine Runde mehr, ohne dass jemand etwas davon hat.
     const ciphertext = await encryptE2eeHybrid(
       payload,
-      recipientPubKey,
-      identity.sendPair.publicKeyJwk
+      zielGeraete[0].public_key,
+      geraet.paar.publicKeyJwk
     )
 
     await relayE2eeEnvelope({

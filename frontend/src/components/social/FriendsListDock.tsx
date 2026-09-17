@@ -23,7 +23,6 @@ import {
 } from 'lucide-react'
 import { StatusDot } from './StatusIndicator'
 import { DeviceBadge } from './DeviceBadge'
-import { E2EEChatModal } from './E2EEChatModal'
 import {
   type FriendItem,
   getFriends,
@@ -57,8 +56,6 @@ export function FriendsListDock({
   const [primaryTab, setPrimaryTab] = useState<'friends' | 'chats'>('friends')
 
   // Chat Modal
-  const [chatFriend, setChatFriend] = useState<FriendItem | null>(null)
-  const [isChatOpen, setIsChatOpen] = useState(false)
 
   const currentUserId = user?.id || 0
 
@@ -128,26 +125,20 @@ export function FriendsListDock({
     return acceptedFriends.filter((f) => !q || f.username.toLowerCase().includes(q))
   }, [acceptedFriends, searchQuery])
 
-  // Open direct chat
+  /**
+   * Öffnet das Gespräch im Messenger.
+   *
+   * Hier stand bis 09/2026 ein eigenes Chat-Fenster (`E2EEChatModal`) mit
+   * eigenem Sende-, Lese- und Entschlüsselungspfad — eine zweite, parallele
+   * Umsetzung desselben Gesprächs. Beide schrieben denselben Verlauf, und zwar
+   * unterschiedlich. Es gibt jetzt genau einen Weg in ein Gespräch.
+   */
   const handleStartChatWithFriend = (f: FriendItem) => {
-    setChatFriend(f)
-    setIsChatOpen(true)
+    navigate(`/chat?userId=${f.user_id}`)
   }
 
   const handleStartChatWithTeamMember = (member: TeamMember) => {
-    // Treat team member as friend item for E2EEChatModal
-    const fauxFriend: FriendItem = {
-      id: member.user_id,
-      user_id: member.user_id,
-      username: member.username,
-      avatar_url: member.avatar_url,
-      status: 'accepted',
-      is_requester: false,
-      created_at: member.joined_at,
-      presence: null,
-    }
-    setChatFriend(fauxFriend)
-    setIsChatOpen(true)
+    navigate(`/chat?userId=${member.user_id}`)
   }
 
   if (collapsed) {
@@ -445,15 +436,6 @@ export function FriendsListDock({
           </CardContent>
       </Card>
 
-      {/* E2EE Chat Modal */}
-      {user && (
-        <E2EEChatModal
-          open={isChatOpen}
-          onOpenChange={setIsChatOpen}
-          currentUserId={user.id}
-          friend={chatFriend}
-        />
-      )}
     </>
   )
 }

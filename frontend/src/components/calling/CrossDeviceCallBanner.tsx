@@ -3,7 +3,7 @@ import { PhoneOff, PhoneForwarded, Smartphone, Monitor, Globe, Radio, Users } fr
 import { useCallStore, setzeAnrufIdentitaet } from '@/stores/useCallStore'
 import { formatDeviceLabel, getDeviceId } from '@/lib/deviceIdentity'
 import { useAuthStore } from '@/stores/authStore'
-import { resolveIdentity } from '@/services/e2eeIdentity'
+import { eigenesGeraet, geraetVeroeffentlichen } from '@/services/e2eeGeraet'
 
 interface CrossDeviceCallBannerProps {
   className?: string
@@ -27,15 +27,19 @@ export const CrossDeviceCallBanner: React.FC<CrossDeviceCallBannerProps> = ({ cl
   useEffect(() => {
     if (!user?.id) return
     let active = true
-    resolveIdentity(user.id).then((ident) => {
-      if (active && ident.state === 'ready' && ident.sendPair) {
+    // Der Raumschlüssel wird gegen den Geräteschlüssel versiegelt, also muss
+    // dieses Gerät angemeldet sein, bevor jemand ihm etwas zustellen kann.
+    geraetVeroeffentlichen()
+      .then(() => eigenesGeraet())
+      .then((geraet) => {
+        if (!active) return
         setzeAnrufIdentitaet({
           userId: user.id,
-          publicKeyJwk: ident.sendPair.publicKeyJwk,
-          decryptionKeys: ident.decryptionKeys,
+          publicKeyJwk: geraet.paar.publicKeyJwk,
+          decryptionKeys: [geraet.paar.privateKeyJwk],
         })
-      }
-    }).catch(() => {})
+      })
+      .catch(() => {})
     return () => { active = false }
   }, [user?.id])
 

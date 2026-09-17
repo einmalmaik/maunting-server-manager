@@ -5,22 +5,23 @@
  * mithören. Dafür braucht jeder Raum einen Schlüssel, den ausschließlich die
  * Teilnehmer kennen.
  *
- * **Warum nicht `deriveGroupChannelKey` / `deriveDirectChannelKey`.** Beide
- * leiten ohne Passphrase allein aus den Benutzerkennungen ab
+ * **Warum kein abgeleiteter Schlüssel.** Die frühere `deriveDirectChannelKey`
+ * leitete ohne Passphrase allein aus den Benutzerkennungen ab
  * (`sha256("msm:dm:key:<a>:<b>")`). Das Backend kennt diese Kennungen und kann
- * denselben Schlüssel bilden — `e2eeCrypto.ts` sagt das an beiden Stellen
- * selbst. Für Medien wäre das eine Verschlüsselung, die genau den nicht
- * aussperrt, den sie aussperren soll.
+ * denselben Schlüssel bilden. Für Medien wäre das eine Verschlüsselung, die
+ * genau den nicht aussperrt, den sie aussperren soll. Sie ist inzwischen
+ * gelöscht; dieser Absatz bleibt, damit niemand sie neu erfindet.
  *
- * Stattdessen: 32 Zufallsbytes je Raum, für jeden Teilnehmer einzeln gegen
- * dessen veröffentlichten Schlüssel verpackt (`encryptE2eeHybrid`, RSA-OAEP)
- * und über `POST /social/calls/{raum}/key` zugestellt. Das Panel reicht einen
- * Umschlag durch, den es nicht öffnen kann, und speichert ihn nicht.
+ * Stattdessen: 32 Zufallsbytes je Raum, für jedes Gerät jedes Teilnehmers
+ * einzeln gegen dessen veröffentlichten Geräteschlüssel verpackt
+ * (`encryptE2eeHybrid`, RSA-OAEP) und über `POST /social/calls/{raum}/key`
+ * zugestellt. Das Panel reicht einen Umschlag durch, den es nicht öffnen kann,
+ * und speichert ihn nicht.
  */
 
 import { sendeRaumSchluessel } from '@/api/calls'
 import { decryptE2eeHybridWithKeyring, encryptE2eeHybrid } from '@/services/e2eeCrypto'
-import { requireRecipientPublicKey } from '@/services/e2eeIdentity'
+import { verlangeGeraeteVon } from '@/services/e2eeGeraet'
 
 const SCHLUESSEL_BYTES = 32
 
@@ -49,11 +50,21 @@ export function alsArrayBuffer(schluessel: Uint8Array): ArrayBuffer {
 }
 
 /**
- * Stellt den Raumschlüssel an einen Teilnehmer zu.
+ * Stellt den Raumschlüssel an einen Teilnehmer zu — an jedes seiner Geräte.
  *
- * Scheitert still, wenn der Empfänger keinen veröffentlichten Schlüssel hat.
- * Für den Anruf heißt das: die Gegenstelle hört nichts, und das Overlay meldet
- * das. Eine Ersatzverschlüsselung gäbe es hier nicht — sie wäre keine.
+ * Seit der Messenger auf Gerätesitzungen umgestellt ist, hat ein Konto keinen
+ * gemeinsamen privaten Schlüssel mehr. Ein einzelner Umschlag träfe deshalb nur
+ * das Gerät, gegen dessen Schlüssel er versiegelt wurde. Also geht je Gerät
+ * einer raus; das empfangende Gerät behält den, den es öffnen kann, und
+ * verwirft die übrigen — es ist derselbe Schlüssel, das kostet nichts.
+ *
+ * Der Endpunkt bleibt unverändert (`target_user_id` + `ciphertext`): er ist ein
+ * Durchreicher, und für ihn sind mehrere Umschläge an denselben Empfänger
+ * nichts Besonderes. LiveKit selbst wird davon gar nicht berührt.
+ *
+ * Scheitert still, wenn der Empfänger kein Gerät angemeldet hat. Für den Anruf
+ * heißt das: die Gegenstelle hört nichts, und das Overlay meldet es. Eine
+ * Ersatzverschlüsselung gäbe es hier nicht — sie wäre keine.
  */
 export async function verteileAn(
   raum: string,
@@ -62,14 +73,26 @@ export async function verteileAn(
   eigenerOeffentlicherSchluessel: string,
 ): Promise<boolean> {
   try {
-    const empfaengerSchluessel = await requireRecipientPublicKey(empfaengerId)
-    const umschlag = await encryptE2eeHybrid(
-      schluesselNachBase64(schluessel),
-      empfaengerSchluessel,
-      eigenerOeffentlicherSchluessel,
+    const geraete = await verlangeGeraeteVon(empfaengerId)
+    const base64 = schluesselNachBase64(schluessel)
+    const ergebnisse = await Promise.all(
+      geraete.map(async (geraet) => {
+        try {
+          const umschlag = await encryptE2eeHybrid(
+            base64,
+            geraet.public_key,
+            eigenerOeffentlicherSchluessel,
+          )
+          await sendeRaumSchluessel(raum, empfaengerId, umschlag)
+          return true
+        } catch {
+          return false
+        }
+      }),
     )
-    await sendeRaumSchluessel(raum, empfaengerId, umschlag)
-    return true
+    // Ein erreichtes Gerät genügt: der Mensch hört mit. Erst wenn keines
+    // erreicht wurde, ist die Zustellung gescheitert.
+    return ergebnisse.some(Boolean)
   } catch {
     return false
   }

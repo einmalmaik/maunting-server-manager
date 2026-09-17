@@ -15,6 +15,7 @@ jeweiligen Dienstes: dort wuerde es niemand vermissen, wenn es wieder verschwind
 
 import io
 from contextlib import redirect_stdout
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -1671,3 +1672,70 @@ def test_e2ee_blind_envelopes_client_uuid_migration(tmp_path: Path) -> None:
         engine.dispose()
         settings.database_url = vorher
 
+
+
+def test_ein_geraeteschluessel_verschwindet_mit_seinem_konto(db: Session, owner_user) -> None:
+    """Ein Konto loeschen heisst: seine Zustelladressen sind fort.
+
+    Bliebe die Zeile stehen, faecherte jeder Absender weiter gegen einen
+    Schluessel auf, dessen privater Teil auf einem Geraet liegt, das zu niemandem
+    mehr gehoert. `SET NULL` waere hier keine Alternative: `user_id` ist Teil der
+    Eindeutigkeit `uq_user_e2ee_device`, und ein Eintrag ohne Konto wuerde dort
+    eine Kennung belegen, die keinem mehr zuzuordnen ist.
+
+    Das steht hier und nicht bei den Geraetetests, weil es ausschliesslich die
+    Datenbank durchsetzt — im Dienst gibt es keine Zeile, die es tut.
+    """
+    inspector = inspect(db.get_bind())
+    assert _fremdschluessel(inspector, "user_e2ee_devices", "user_id")[
+        "options"
+    ] == {"ondelete": "CASCADE"}
+
+    db.execute(
+        text(
+            "INSERT INTO user_e2ee_devices"
+            " (user_id, device_id, public_key_jwk, label, created_at, last_seen_at)"
+            " VALUES (:uid, :did, :key, '', :jetzt, :jetzt)"
+        ),
+        {
+            "uid": owner_user.id,
+            "did": "a1b2c3d4e5f60718",
+            "key": '{"kty":"RSA","n":"x","e":"AQAB"}',
+            "jetzt": datetime.now(timezone.utc),
+        },
+    )
+    db.commit()
+
+    db.execute(text("DELETE FROM users WHERE id = :id"), {"id": owner_user.id})
+    db.commit()
+
+    verbleibend = db.execute(text("SELECT COUNT(*) FROM user_e2ee_devices")).scalar()
+    assert verbleibend == 0
+
+
+def test_ein_konto_hat_dieselbe_geraetekennung_nur_einmal(db: Session, owner_user) -> None:
+    """Ein Geraet meldet sich bei jedem Start erneut an.
+
+    Ohne diese Schranke entstuende dabei jedes Mal eine weitere Zeile, und ein
+    Absender faecherte seine Nachricht gegen Karteileichen auf — jede Kopie
+    kostet ihn eine Runde, und keine davon wird je gelesen. Der Dienst macht
+    daraus ein Auffrischen; dass er es muss, steht hier.
+    """
+    werte = {
+        "uid": owner_user.id,
+        "did": "0f1e2d3c4b5a6978",
+        "key": '{"kty":"RSA","n":"x","e":"AQAB"}',
+        "jetzt": datetime.now(timezone.utc),
+    }
+    einfuegen = text(
+        "INSERT INTO user_e2ee_devices"
+        " (user_id, device_id, public_key_jwk, label, created_at, last_seen_at)"
+        " VALUES (:uid, :did, :key, '', :jetzt, :jetzt)"
+    )
+    db.execute(einfuegen, werte)
+    db.commit()
+
+    with pytest.raises(IntegrityError):
+        db.execute(einfuegen, werte)
+        db.commit()
+    db.rollback()

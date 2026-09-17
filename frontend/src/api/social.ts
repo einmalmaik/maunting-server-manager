@@ -195,46 +195,43 @@ export async function updatePrivacy(payload: {
   })
 }
 
-export async function getE2eePublicKey(userId: number): Promise<{ user_id: number; username: string; public_key: string | null }> {
-  return api<{ user_id: number; username: string; public_key: string | null }>(`/social/e2ee/public-key/${userId}`)
-}
-
-export async function setE2eePublicKey(publicKey: string): Promise<{ ok: boolean; message: string }> {
-  return api<{ ok: boolean; message: string }>('/social/e2ee/public-key', {
-    method: 'POST',
-    body: JSON.stringify({ public_key: publicKey }),
-  })
-}
-
-export interface E2eeKeyringPayload {
-  wrapped_keyring: string | null
-  public_key: string | null
-  version: number
-}
-
-/** Der verpackte Schlüsselbund des angemeldeten Kontos. Ohne Parameter: es gibt keinen fremden. */
-export async function getE2eeKeyring(): Promise<E2eeKeyringPayload> {
-  return api<E2eeKeyringPayload>('/social/e2ee/keyring')
+export interface E2eeGeraetItem {
+  device_id: string
+  public_key: string
+  label: string
 }
 
 /**
- * Legt Schlüsselbund und Public Key gemeinsam ab.
- * `expectedVersion` ist der Stand, den dieses Gerät gelesen hat — stimmt er
- * nicht mehr, antwortet das Backend mit 409 und der Bund bleibt unangetastet.
+ * Veroeffentlicht den Schluessel *dieses* Geraets.
+ *
+ * Keine Benutzerkennung im Rumpf: sie kommt aus der Sitzung. Ein Geraet kann
+ * damit ausschliesslich seinen eigenen Eintrag schreiben.
  */
-export async function putE2eeKeyring(payload: {
-  wrappedKeyring: string
+export async function putEigenesGeraet(payload: {
+  deviceId: string
   publicKey: string
-  expectedVersion: number
-}): Promise<E2eeKeyringPayload> {
-  return api<E2eeKeyringPayload>('/social/e2ee/keyring', {
+  label?: string
+}): Promise<E2eeGeraetItem> {
+  return api<E2eeGeraetItem>('/social/e2ee/devices/self', {
     method: 'PUT',
     body: JSON.stringify({
-      wrapped_keyring: payload.wrappedKeyring,
+      device_id: payload.deviceId,
       public_key: payload.publicKey,
-      expected_version: payload.expectedVersion,
+      label: payload.label ?? '',
     }),
   })
+}
+
+/** Die Zustelladressen eines Kontos — je Geraet eine. */
+export async function getE2eeGeraete(userId: number): Promise<E2eeGeraetItem[]> {
+  return api<E2eeGeraetItem[]>(`/social/e2ee/devices/${userId}`)
+}
+
+export async function deleteEigenesGeraet(deviceId: string): Promise<{ ok: boolean }> {
+  return api<{ ok: boolean }>(
+    `/social/e2ee/devices/self?device_id=${encodeURIComponent(deviceId)}`,
+    { method: 'DELETE' }
+  )
 }
 
 export interface ChatGroupMemberItem {

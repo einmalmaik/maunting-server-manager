@@ -382,7 +382,8 @@ async def login(
             if not backup_valid:
                 raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code oder Backup-Code")
 
-    AuthService.ensure_user_e2ee_key(db, user)
+    # Hier legte der Server bis 09/2026 einen E2EE-Schlüssel für das Konto an.
+    # Das Gerät bringt seinen eigenen mit und veröffentlicht ihn selbst.
     tokens = _set_login_session(response, db, user)
 
     # Sicherheitsbenachrichtigung bei Login (asynchron im Hintergrund, blockiert Login-Antwort nicht)

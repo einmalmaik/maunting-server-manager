@@ -9,7 +9,7 @@ import { usePromptStore } from '@/stores/promptStore'
 import { clearSqlConsoleHistory } from '@/lib/sqlConsoleStorage'
 import { useVaultStore } from '@/desktop/vault/vaultStore'
 import { clearMemoryKeyStore } from '@/services/e2eeCrypto'
-import { clearIdentityMemory } from '@/services/e2eeIdentity'
+import { clearGeraeteMemory } from '@/services/e2eeGeraet'
 import type { User } from '@/types'
 
 const CACHED_USER_KEY = 'msm_cached_user'
@@ -123,7 +123,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // an die Sitzung, und ein erneutes Anmelden soll nicht wieder nach dem
     // Wiederherstellungsschlüssel fragen.
     clearMemoryKeyStore()
-    clearIdentityMemory()
+    clearGeraeteMemory()
     // Die Knotenliste hält Name, Adresse und Port des Agenten sowie den
     // TLS-Fingerabdruck. Ohne dieses clear() bliebe sie bis zum nächsten
     // Neuladen der Seite im Speicher des Tabs liegen.

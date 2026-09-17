@@ -21,7 +21,7 @@ SHA-256. Wer die Tabelle liest, kann sich damit nicht anmelden.
 
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -51,6 +51,16 @@ class DevicePairing(Base):
     # laesst sich ein einzelnes Geraet wieder aussperren, ohne alle anderen
     # Sitzungen des Benutzers mitzunehmen.
     family: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
+
+    # Der Verlaufs-Erstabgleich. Ein frisch gekoppeltes Geraet hat keine
+    # Ratchet-Sitzungen und liest deshalb nichts Rueckwirkendes aus der Mailbox.
+    # Das eingerichtete Geraet legt seinen Verlauf hier ab — versiegelt gegen
+    # den Geraeteschluessel des neuen, den es sich nach dem Einloesen selbst
+    # veroeffentlicht hat. Der Server reicht durch und kann nicht oeffnen.
+    verlauf_blob: Mapped[str | None] = mapped_column(Text, nullable=True)
+    verlauf_abgelegt_am: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False

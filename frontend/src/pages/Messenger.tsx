@@ -17,7 +17,6 @@ import {
   MessageSquare,
   Send,
   Lock,
-  KeyRound,
   Camera,
   StickyNote,
   Calendar as CalendarIcon,
@@ -127,14 +126,12 @@ import {
 } from '@/services/e2eeCrypto'
 import {
   resolveIdentity,
-  hasNewerRemoteKeyring,
   requireRecipientPublicKey,
   forgetRecipientPublicKey,
   E2eeRecipientKeyMissingError,
   IDENTITY_LOADING,
   type E2eeIdentity,
 } from '@/services/e2eeIdentity'
-import { MessengerSchluesselDialog } from '@/components/social/MessengerSchluesselDialog'
 import {
   loadLocalMessages,
   saveLocalMessages,
@@ -504,14 +501,10 @@ export function Messenger() {
   // käme über diesen Weg nie wieder eine Nachricht an.
   const identityRef = useRef<E2eeIdentity>(IDENTITY_LOADING)
   identityRef.current = identity
-  const [isSchluesselDialogOpen, setIsSchluesselDialogOpen] = useState(false)
-  const [identityReloadToken, setIdentityReloadToken] = useState(0)
-  // Ein anderes Gerät hat Altschlüssel nachgereicht, die hier noch fehlen.
-  const [hatNeuereSchluessel, setHatNeuereSchluessel] = useState(false)
-  // Nur Direktchats hängen am Kontoschlüssel; Gruppen laufen über den
-  // Gruppenschlüssel und bleiben auch auf einem gesperrten Gerät schreibbar.
-  const istSchreibenGesperrt =
-    Boolean(activeContact) && (identity.state === 'needs-setup' || identity.state === 'locked')
+  // Ein Gerät legt seinen Schlüssel beim ersten Öffnen selbst an. Es gibt
+  // nichts einzurichten und nichts zu entsperren, also auch keinen Zustand, in
+  // dem das Schreiben gesperrt wäre — nur die kurze Spanne bis `ready`.
+  const istSchreibenGesperrt = Boolean(activeContact) && identity.state === 'loading'
 
   // Attachments
   const [isNotePickerOpen, setIsNotePickerOpen] = useState(false)
@@ -617,26 +610,19 @@ export function Messenger() {
     if (!currentUserId) return
     let active = true
 
+    // Legt beim ersten Mal den Geräteschlüssel an und meldet ihn beim Konto.
+    // Es gibt nichts mehr zu entsperren und nichts nachzureichen: der Schlüssel
+    // gehört diesem Gerät und war noch nie woanders.
     resolveIdentity(currentUserId)
-      .then(async (next) => {
-        if (!active) return
-        setIdentity(next)
-        // Hat ein anderes Gerät seinen alten Gerätesschlüssel nachgereicht,
-        // fehlt er hier noch. Der Verlauf bleibt lesbar, nur der Teil von dort
-        // nicht — deshalb ein Hinweis und keine Sperre.
-        if (next.state === 'ready') {
-          const neuer = await hasNewerRemoteKeyring(currentUserId).catch(() => false)
-          if (active) setHatNeuereSchluessel(neuer)
-        } else if (active) {
-          setHatNeuereSchluessel(false)
-        }
+      .then((next) => {
+        if (active) setIdentity(next)
       })
       .catch(() => {})
 
     return () => {
       active = false
     }
-  }, [currentUserId, identityReloadToken])
+  }, [currentUserId])
 
   // Der Anruf-Store braucht dieselbe Identität, um Raumschlüssel zu verpacken
   // und auszupacken. Er hängt bewusst nicht selbst am Schlüsselbund: er soll
@@ -2241,11 +2227,13 @@ export function Messenger() {
         if (rawText) setInputText(rawText)
 
         if (err instanceof E2eeIdentityLockedError) {
-          toast.error('Der Schlüssel dieses Kontos ist auf diesem Gerät gesperrt.')
-          setIsSchluesselDialogOpen(true)
+          // Der Schlüssel dieses Geräts war noch nicht fertig angelegt. Beim
+          // nächsten Versuch steht er — es gibt nichts, was der Benutzer dafür
+          // tun müsste.
+          toast.error('Der Schlüssel dieses Geräts ist noch nicht bereit. Bitte kurz erneut versuchen.')
         } else {
           toast.error(
-            `${activeContact?.username ?? 'Dieser Kontakt'} hat noch keinen Schlüssel hinterlegt. Die Nachricht wurde nicht gesendet.`
+            `${activeContact?.username ?? 'Dieser Kontakt'} ist mit keinem Gerät angemeldet. Die Nachricht wurde nicht gesendet.`
           )
         }
       } else {
@@ -3959,48 +3947,6 @@ export function Messenger() {
                   </div>
                 </div>
 
-                {identity.state === 'ready' && hatNeuereSchluessel && (
-                  <div className="py-2 px-1">
-                    <div className="flex items-start gap-2.5 p-3 rounded-xl bg-surface-container-high border border-outline-variant">
-                      <KeyRound className="w-4 h-4 text-primary shrink-0 mt-0.5" />
-                      <div className="flex-1 min-w-0 space-y-2">
-                        <p className="text-xs text-on-surface-variant">
-                          Auf einem anderen Gerät sind ältere Schlüssel dazugekommen. Übernimm sie
-                          hier, damit auch der Verlauf von dort lesbar wird.
-                        </p>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => setIsSchluesselDialogOpen(true)}
-                        >
-                          Schlüssel übernehmen
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {(identity.state === 'needs-setup' || identity.state === 'locked') && (
-                  <div className="py-2 px-1">
-                    <div className="flex items-start gap-2.5 p-3 rounded-xl bg-status-warning/10 border border-status-warning/30">
-                      <KeyRound className="w-4 h-4 text-status-warning shrink-0 mt-0.5" />
-                      <div className="flex-1 min-w-0 space-y-2">
-                        <p className="text-xs text-on-surface">
-                          {identity.state === 'needs-setup'
-                            ? 'Dein Messenger-Schlüssel ist noch nicht eingerichtet. Danach kannst du deinen Verlauf auf jedem Gerät lesen.'
-                            : 'Dieser Verlauf ist auf diesem Gerät gesperrt. Zum Lesen brauchst du deinen Wiederherstellungsschlüssel.'}
-                        </p>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => setIsSchluesselDialogOpen(true)}
-                        >
-                          {identity.state === 'needs-setup' ? 'Schlüssel einrichten' : 'Entsperren'}
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                )}
 
                 {messages.length === 0 && !loadingMessages && (
                   <div className="py-16 text-center text-xs text-on-surface-variant/70">
@@ -5363,21 +5309,6 @@ export function Messenger() {
         onOpenChange={setIsWallpaperModalOpen}
         currentConfig={wallpaperConfig}
         onSaveConfig={(newCfg) => setWallpaperConfig(newCfg)}
-      />
-
-      <MessengerSchluesselDialog
-        open={isSchluesselDialogOpen}
-        onOpenChange={setIsSchluesselDialogOpen}
-        currentUserId={currentUserId}
-        state={identity.state}
-        forceUnlock={hatNeuereSchluessel}
-        onIdentityChanged={() => {
-          // Zwischenergebnisse verwerfen: was vorher nicht zu entschlüsseln war,
-          // liegt als Fehlschlag im Cache und bliebe sonst „Verschlüsselte
-          // Nachricht", obwohl der Schlüssel jetzt da ist.
-          clearEnvelopePlaintextCache()
-          setIdentityReloadToken((n) => n + 1)
-        }}
       />
 
       {/* Design-DNA Mute Dialog */}

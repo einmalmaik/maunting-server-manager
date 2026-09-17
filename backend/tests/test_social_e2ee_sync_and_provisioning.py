@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from fastapi.testclient import TestClient
 
 from main import app
-from dependencies import get_current_user
+from dependencies import get_current_user, verify_csrf
 from models import (
     User,
     DirectChat,
@@ -18,6 +18,7 @@ from models import (
     ChatGroupMember,
     E2eeBlindEnvelope,
 )
+from services import e2ee_device_service
 from services.auth_service import AuthService
 from services.social_service import SocialService
 from services.panel_settings_service import PanelSettingsService
@@ -220,80 +221,141 @@ def test_e2ee_sync_group_chat_mailbox(client: TestClient, db: Session, owner_use
         app.dependency_overrides.pop(get_current_user, None)
 
 
-# ── Test 6: Automated Key Provisioning on User Creation ──
-def test_e2ee_automated_key_provisioning_on_user_creation(db: Session):
-    """Newly created user automatically receives a valid, secure RSA-2048 E2EE public key."""
-    new_user = AuthService.create_user(db, "auto_key_user", "auto_key@test.de", "SecurePassword123!")
-    db.refresh(new_user)
+# ── Test 6: Der Server erzeugt kein Schlüsselmaterial ──
+def test_registrierung_legt_keinen_e2ee_schluessel_an(db: Session):
+    """Gegenprobe zum Fehler, den `20260917_01_e2ee_geraete` beseitigt hat.
 
-    # Public key must be non-null and valid JWK
-    assert new_user.social_e2ee_public_key is not None
-    jwk_dict = validate_rsa_public_key_jwk(new_user.social_e2ee_public_key)
-    assert jwk_dict["kty"] == "RSA"
-    assert len(jwk_dict["n"]) >= 300
-    assert jwk_dict["e"] == "AQAB"
-    assert "d" not in jwk_dict  # Absolute Zero-Leak
+    Vorher erzeugte `AuthService.generate_e2ee_public_key_jwk` bei Registrierung
+    und bei jedem Login ein RSA-Paar, warf den privaten Teil weg und
+    veröffentlichte den öffentlichen. Jedes Konto hatte damit einen Schlüssel,
+    zu dem es nirgends einen privaten gab: wer dagegen verschlüsselte, schrieb
+    in ein schwarzes Loch — die Nachricht sah gesendet aus und war für immer
+    unlesbar.
+
+    Der Test prüft die Abwesenheit, weil genau die schwer zu bemerken ist: ein
+    wieder eingeführter Kontoschlüssel fiele im Betrieb erst auf, wenn jemand
+    eine unlesbare Nachricht bekommt.
+    """
+    neuer = AuthService.create_user(db, "ohne_schluessel", "ohne@test.de", "SecurePassword123!")
+    db.refresh(neuer)
+
+    assert not hasattr(neuer, "social_e2ee_public_key")
+    assert not hasattr(neuer, "social_e2ee_wrapped_keyring")
+    assert not hasattr(AuthService, "generate_e2ee_public_key_jwk")
+    assert not hasattr(AuthService, "ensure_user_e2ee_key")
+    # Kein Gerät hat sich gemeldet, also gibt es auch keine Zustelladresse.
+    assert e2ee_device_service.geraete(db, neuer.id) == []
 
 
-# ── Test 7: Automated Key Provisioning on Login (Lazy Backfill) ──
-def test_e2ee_automated_key_provisioning_on_login_lazy(client: TestClient, db: Session):
-    """A legacy user with NULL public key gets auto-provisioned upon login."""
-    legacy_user = User(
-        username="legacy_user",
-        email="legacy@test.de",
-        password_hash=AuthService.hash_password("LegacyPass123!"),
-        is_active=True,
-        email_verified=True,
-        social_e2ee_public_key=None,
-    )
-    db.add(legacy_user)
-    db.commit()
-    db.refresh(legacy_user)
-    assert legacy_user.social_e2ee_public_key is None
-
-    # Login
-    res = client.post("/api/auth/login", json={
-        "username": "legacy_user",
-        "password": "LegacyPass123!",
-        "otp_code": None,
-    })
-    assert res.status_code == 200
-
-    db.refresh(legacy_user)
-    assert legacy_user.social_e2ee_public_key is not None
-    validate_rsa_public_key_jwk(legacy_user.social_e2ee_public_key)
-
-    # Public key lookup endpoint returns 200 with the provisioned key
-    app.dependency_overrides[get_current_user] = lambda: legacy_user
+# ── Test 7: Ein Gerät veröffentlicht seinen eigenen Schlüssel ──
+def test_geraet_veroeffentlicht_und_frischt_auf(client: TestClient, db: Session, owner_user: User):
+    """Dasselbe Gerät meldet sich bei jedem Start — und bleibt eine Zeile."""
+    app.dependency_overrides[get_current_user] = lambda: owner_user
+    app.dependency_overrides[verify_csrf] = lambda: None
     try:
-        key_res = client.get(f"/api/social/e2ee/public-key/{legacy_user.id}")
-        assert key_res.status_code == 200
-        assert key_res.json()["public_key"] == legacy_user.social_e2ee_public_key
+        erst = client.put("/api/social/e2ee/devices/self", json={
+            "device_id": "a1b2c3d4e5f60718",
+            "public_key": _valid_rsa_jwk("A"),
+            "label": "Arbeitsrechner",
+        })
+        assert erst.status_code == 200, erst.text
+        assert erst.json()["device_id"] == "a1b2c3d4e5f60718"
+
+        # Neuer Schlüssel unter derselben Kennung: das Gerät hat seine lokale
+        # Ablage verloren. Es muss sich neu melden können, sonst käme es nie
+        # wieder in ein Gespräch hinein.
+        zweit = client.put("/api/social/e2ee/devices/self", json={
+            "device_id": "a1b2c3d4e5f60718",
+            "public_key": _valid_rsa_jwk("B"),
+            "label": "Arbeitsrechner",
+        })
+        assert zweit.status_code == 200, zweit.text
+
+        liste = e2ee_device_service.geraete(db, owner_user.id)
+        assert len(liste) == 1
+        assert liste[0]["public_key"] == _valid_rsa_jwk("B")
     finally:
         app.dependency_overrides.pop(get_current_user, None)
+        app.dependency_overrides.pop(verify_csrf, None)
 
 
-# ── Test 8: Non-Regression Guarantee for Existing Keys ──
-def test_e2ee_key_provisioning_non_regression_existing_keys_preserved(client: TestClient, db: Session):
-    """Existing public keys and wrapped keyrings are NEVER overwritten by login or provisioning."""
-    existing_pub = _valid_rsa_jwk("Z")
-    existing_user = AuthService.create_user(db, "custom_key_user", "custom@test.de", "CustomPass123!")
-    existing_user.social_e2ee_public_key = existing_pub
-    existing_user.social_e2ee_wrapped_keyring = "sv-e2ee-keyring-v1:" + base64.b64encode(b"\x11" * 16 + b"\x22" * 12 + b"keyring" + b"\x33" * 16).decode("ascii")
-    existing_user.social_e2ee_keyring_version = 2
+def test_geraetekennung_mit_punkt_wird_abgewiesen(client: TestClient, owner_user: User):
+    """Der Punkt trennt die Felder in `sv-e2ee-dr-v1:<von>.<fuer>.<chiffre>`.
+
+    Eine Kennung, die ihn enthielte, zerlegte den Umschlag beim Empfänger — und
+    zwar so, dass die Nachricht nicht scheitert, sondern falsch geroutet wird.
+    """
+    app.dependency_overrides[get_current_user] = lambda: owner_user
+    app.dependency_overrides[verify_csrf] = lambda: None
+    try:
+        res = client.put("/api/social/e2ee/devices/self", json={
+            "device_id": "aaaa.bbbbcccc",
+            "public_key": _valid_rsa_jwk("C"),
+        })
+        assert res.status_code == 422
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        app.dependency_overrides.pop(verify_csrf, None)
+
+
+def test_privater_schluessel_im_geraeteeintrag_wird_abgewiesen(client: TestClient, owner_user: User):
+    """Ein Client, der versehentlich seinen privaten Teil hochlädt, wird gestoppt."""
+    app.dependency_overrides[get_current_user] = lambda: owner_user
+    app.dependency_overrides[verify_csrf] = lambda: None
+    try:
+        mit_privatteil = json.dumps({
+            "kty": "RSA", "n": "D" * 350, "e": "AQAB", "d": "geheim",
+            "alg": "RSA-OAEP", "use": "enc",
+        })
+        res = client.put("/api/social/e2ee/devices/self", json={
+            "device_id": "d1d2d3d4d5d6d7d8",
+            "public_key": mit_privatteil,
+        })
+        assert res.status_code == 422
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        app.dependency_overrides.pop(verify_csrf, None)
+
+
+def test_geraetedeckel_verdraengt_das_laengst_stille(db: Session, owner_user: User):
+    """Jedes Gerät kostet alle Gegenstellen eine Kopie je Nachricht.
+
+    Verdrängt wird nach `last_seen_at`, nicht nach Anlagedatum: das älteste
+    Gerät ist oft das meistgenutzte, das längst stille dagegen ein Browser, den
+    niemand mehr öffnet.
+    """
+    from datetime import datetime, timedelta, timezone
+    from models import UserE2eeDevice
+
+    for i in range(e2ee_device_service.MAX_GERAETE):
+        e2ee_device_service.veroeffentlichen(
+            db, owner_user, device_id=f"geraet{i:012d}", public_key_jwk=_valid_rsa_jwk("A")
+        )
+    # Das erste Gerät war zuletzt vor einem Jahr da.
+    stilles = (
+        db.query(UserE2eeDevice)
+        .filter_by(user_id=owner_user.id, device_id="geraet000000000000")
+        .first()
+    )
+    stilles.last_seen_at = datetime.now(timezone.utc) - timedelta(days=365)
     db.commit()
 
-    # Login multiple times
-    for _ in range(2):
-        res = client.post("/api/auth/login", json={
-            "username": "custom_key_user",
-            "password": "CustomPass123!",
-            "otp_code": None,
-        })
-        assert res.status_code == 200
+    e2ee_device_service.veroeffentlichen(
+        db, owner_user, device_id="neuesgeraet00000", public_key_jwk=_valid_rsa_jwk("A")
+    )
 
-    db.refresh(existing_user)
-    # The existing public key and keyring must be untouched!
-    assert existing_user.social_e2ee_public_key == existing_pub
-    assert existing_user.social_e2ee_keyring_version == 2
-    assert "keyring" in existing_user.social_e2ee_wrapped_keyring
+    kennungen = {g["device_id"] for g in e2ee_device_service.geraete(db, owner_user.id)}
+    assert len(kennungen) == e2ee_device_service.MAX_GERAETE
+    assert "neuesgeraet00000" in kennungen
+    assert "geraet000000000000" not in kennungen
+
+
+def test_fremdes_geraet_laesst_sich_nicht_vergessen(db: Session, owner_user: User, regular_user: User):
+    """Ohne den `user_id`-Filter liesse sich mit einer geratenen Kennung ein
+    fremdes Gerät aus dem Verkehr ziehen und damit ein Gespräch stilllegen."""
+    e2ee_device_service.veroeffentlichen(
+        db, regular_user, device_id="fremdgeraet00001", public_key_jwk=_valid_rsa_jwk("A")
+    )
+
+    assert e2ee_device_service.vergessen(db, owner_user, "fremdgeraet00001") is False
+    assert len(e2ee_device_service.geraete(db, regular_user.id)) == 1

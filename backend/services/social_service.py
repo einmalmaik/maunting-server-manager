@@ -972,105 +972,13 @@ class SocialService:
 
     # --- DIS Zero-Knowledge E2EE Blind Relay ---
 
-    @classmethod
-    def save_e2ee_public_key(cls, db: Session, user_id: int, public_key: str) -> None:
-        """Veröffentlicht einen Public Key ohne Schlüsselbund — nur für Erstkontakt.
-
-        Sobald ein Schlüsselbund hinterlegt ist, ist dieser Weg gesperrt. Ein
-        Client, der den Bund nicht kennt, kennt auch den privaten Teil nicht;
-        liesse man ihn den Public Key überschreiben, wäre jede darauf folgende
-        Nachricht für den Benutzer unlesbar. Genau so ging der Verlauf verloren.
-        """
-        user = db.query(User).filter_by(id=user_id).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
-        if user.social_e2ee_wrapped_keyring:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    "Für dieses Konto ist ein Schlüsselbund hinterlegt. "
-                    "Der Schlüssel wird über /social/e2ee/keyring gesetzt."
-                ),
-            )
-        from schemas.social import validate_rsa_public_key_jwk
-        try:
-            validate_rsa_public_key_jwk(public_key)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        user.social_e2ee_public_key = public_key
-        db.commit()
-
-    @classmethod
-    def get_e2ee_public_key(cls, db: Session, user_id: int) -> str | None:
-        user = db.query(User).filter_by(id=user_id).first()
-        if not user:
-            return None
-        return user.social_e2ee_public_key
-
-    @classmethod
-    def get_e2ee_keyring(cls, db: Session, user_id: int) -> dict:
-        """Liest den verpackten Schlüsselbund des eigenen Benutzers.
-
-        Der Aufrufer ist immer der Eigentümer — der Router leitet die ID aus der
-        Sitzung ab und nimmt sie nicht als Parameter entgegen.
-        """
-        user = db.query(User).filter_by(id=user_id).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
-        return {
-            "wrapped_keyring": user.social_e2ee_wrapped_keyring,
-            "public_key": user.social_e2ee_public_key,
-            "version": user.social_e2ee_keyring_version or 0,
-        }
-
-    @classmethod
-    def save_e2ee_keyring(
-        cls,
-        db: Session,
-        user_id: int,
-        wrapped_keyring: str,
-        public_key: str,
-        expected_version: int,
-    ) -> dict:
-        """Legt Schlüsselbund und Public Key gemeinsam ab.
-
-        ``expected_version`` ist die Schranke gegen verlorene Rettungen: holen
-        zwei Geräte denselben Bund, adoptieren beide ihren alten
-        Geräteschlüssel und schreiben zurück, dann gewinnt sonst der letzte und
-        der gerettete Schlüssel des anderen ist weg. Der zweite Schreibvorgang
-        fällt hier mit 409 auf und der Client liest neu.
-        """
-        user = db.query(User).filter_by(id=user_id).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
-
-        from schemas.social import validate_e2ee_keyring_envelope, validate_rsa_public_key_jwk
-        try:
-            validate_e2ee_keyring_envelope(wrapped_keyring)
-            validate_rsa_public_key_jwk(public_key)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-
-        current_version = user.social_e2ee_keyring_version or 0
-        if current_version != expected_version:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    "Der Schlüsselbund wurde zwischenzeitlich von einem anderen Gerät geändert. "
-                    "Bitte erneut laden."
-                ),
-            )
-
-        user.social_e2ee_wrapped_keyring = wrapped_keyring
-        user.social_e2ee_public_key = public_key
-        user.social_e2ee_keyring_version = current_version + 1
-        db.commit()
-
-        return {
-            "wrapped_keyring": user.social_e2ee_wrapped_keyring,
-            "public_key": user.social_e2ee_public_key,
-            "version": user.social_e2ee_keyring_version,
-        }
+    # Die E2EE-Schluessel haengen am Geraet, nicht am Konto:
+    # `services/e2ee_device_service.py`. Hier standen bis 09/2026
+    # `save_e2ee_public_key`, `get_e2ee_public_key`, `get_e2ee_keyring` und
+    # `save_e2ee_keyring` — der Kontoschluesselbund, den ein Mensch mit einem
+    # abgetippten Wiederherstellungsschluessel oeffnete. Er ist mit dem Double
+    # Ratchet unvereinbar: zwei Geraete mit demselben privaten Schluessel
+    # entschluesseln dieselbe Nachricht und driften auseinander.
 
     @classmethod
     def relay_blind_envelope(
