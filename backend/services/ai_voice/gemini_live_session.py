@@ -565,9 +565,6 @@ class GeminiLiveSitzung:
             }
         if gemini_tools:
             setup_payload["setup"]["tools"] = [{"functionDeclarations": gemini_tools}]
-        if getattr(self.v, "disable_safety", False):
-            from services.ai_provider_registry.google import get_safety_settings
-            setup_payload["setup"]["safetySettings"] = get_safety_settings(disable_safety=True)
 
         try:
             self._google_ws = await websockets.connect(

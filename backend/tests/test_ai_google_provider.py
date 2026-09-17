@@ -611,5 +611,56 @@ def test_list_catalog_models_with_ephemeral_key(client: TestClient, owner_cookie
     assert aufgerufen_mit["schluessel"] == "AIzaSyQueryTestKey"
 
 
+@pytest.mark.asyncio
+async def test_google_stream_chat_completion_resilience() -> None:
+    """Prüft, dass Google-Streaming-Antworten ohne index, ohne id oder mit leeren Datenzeilen nicht in AI_PROVIDER_PROTOCOL_ERROR laufen."""
+    import httpx
+    from services.openai_compatible_adapter import StreamUsage, stream_chat_completion
+
+    provider = AiProvider(
+        id=99,
+        name="Google Test",
+        provider_kind="google",
+        default_model="gemini-2.5-flash",
+        enabled=True,
+        requires_api_key=True,
+    )
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers.get("authorization") == "Bearer AIzaSyTest"
+        stream = (
+            # 1. Leere Datenzeile (Heartbeat/Padding)
+            "data: \n\n"
+            # 2. Tool-Call ohne index und ohne id (wie von Google AI Studio geliefert)
+            'data: {"choices":[{"delta":{"tool_calls":[{"function":{"name":"list_my_servers","arguments":"{}"}}]}}]}\n\n'
+            # 3. Stream-Ende
+            "data: [DONE]\n\n"
+        )
+        return httpx.Response(200, text=stream, headers={"content-type": "text/event-stream"})
+
+    usage = StreamUsage()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        chunks = [
+            chunk async for chunk in stream_chat_completion(
+                http_client,
+                provider=provider,
+                api_key="AIzaSyTest",
+                messages=[{"role": "user", "content": "list"}],
+                usage=usage,
+                tools=[{"type": "function", "function": {"name": "list_my_servers"}}],
+            )
+        ]
+
+    assert len(chunks) == 2
+    assert chunks[0].kind == "tool_start"
+    assert chunks[0].text == "list_my_servers"
+    assert chunks[1].kind == "tool_ready"
+    assert chunks[1].tool_call is not None
+    assert chunks[1].tool_call.name == "list_my_servers"
+    assert chunks[1].tool_call.arguments == {}
+    assert chunks[1].tool_call.id.startswith("call_")
+
+
+
 
 
