@@ -510,6 +510,68 @@ class GeminiLiveSitzung:
         except Exception as exc:
             logger.warning("Gemini Live WebSocket Fehler im Lesestrom: %s", exc)
             await self._debug_senden("GEMINI_LIVE_CLOSED", hint=str(exc))
+            with contextlib.suppress(Exception):
+                await self._panel_senden({
+                    "art": "fehler",
+                    "code": "GEMINI_LIVE_CLOSED",
+                    "detail": str(exc),
+                })
+
+    def _build_setup_payload(
+        self,
+        *,
+        model_name: str,
+        model_raw: str,
+        voice_name: str,
+        gemini_tools: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        generation_config: dict[str, Any] = {
+            "responseModalities": ["AUDIO"],
+            "speechConfig": {
+                "voiceConfig": {
+                    "prebuiltVoiceConfig": {
+                        "voiceName": voice_name,
+                    }
+                }
+            },
+        }
+
+        model_lower = model_raw.lower()
+        # Gemini 3+ und Live-Modelle (wie gemini-3.8-live) verlangen zwingend thinkingConfig mit thinkingLevel
+        if "gemini-3" in model_lower or "gemini-4" in model_lower or "live" in model_lower:
+            lvl = "LOW"
+            if self.v.reasoning_effort:
+                effort = str(self.v.reasoning_effort).strip().lower()
+                if effort in ("high", "deep", "max"):
+                    lvl = "HIGH"
+                elif effort in ("medium", "med", "default"):
+                    lvl = "MEDIUM"
+                elif effort in ("low", "min", "minimal", "fast", "none", "off"):
+                    lvl = "LOW"
+            generation_config["thinkingConfig"] = {
+                "thinkingLevel": lvl,
+            }
+        elif "gemini-2.5" in model_lower and self.v.reasoning_effort:
+            effort = str(self.v.reasoning_effort).strip().lower()
+            budget = 0 if effort in ("none", "off", "min", "minimal") else 1024
+            generation_config["thinkingConfig"] = {
+                "thinkingBudget": budget,
+            }
+
+        setup_payload: dict[str, Any] = {
+            "setup": {
+                "model": model_name,
+                "generationConfig": generation_config,
+            }
+        }
+        if self.v.instructions and self.v.instructions.strip():
+            setup_payload["setup"]["systemInstruction"] = {
+                "parts": [{"text": self.v.instructions}]
+            }
+        if gemini_tools:
+            setup_payload["setup"]["tools"] = [{"functionDeclarations": gemini_tools}]
+
+        return setup_payload
 
     async def fuehren(self) -> Lage:
         if websockets is None:
@@ -544,27 +606,12 @@ class GeminiLiveSitzung:
             }
             gemini_tools.append(fn_decl)
 
-        setup_payload: dict[str, Any] = {
-            "setup": {
-                "model": model_name,
-                "generationConfig": {
-                    "responseModalities": ["AUDIO"],
-                    "speechConfig": {
-                        "voiceConfig": {
-                            "prebuiltVoiceConfig": {
-                                "voiceName": voice_name,
-                            }
-                        }
-                    },
-                },
-            }
-        }
-        if self.v.instructions and self.v.instructions.strip():
-            setup_payload["setup"]["systemInstruction"] = {
-                "parts": [{"text": self.v.instructions}]
-            }
-        if gemini_tools:
-            setup_payload["setup"]["tools"] = [{"functionDeclarations": gemini_tools}]
+        setup_payload = self._build_setup_payload(
+            model_name=model_name,
+            model_raw=model_raw,
+            voice_name=voice_name,
+            gemini_tools=gemini_tools,
+        )
 
         try:
             self._google_ws = await websockets.connect(

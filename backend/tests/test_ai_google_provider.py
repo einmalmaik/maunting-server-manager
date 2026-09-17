@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
+import httpx
 import pytest
 from sqlalchemy.orm import Session
 
@@ -659,6 +660,264 @@ async def test_google_stream_chat_completion_resilience() -> None:
     assert chunks[1].tool_call.name == "list_my_servers"
     assert chunks[1].tool_call.arguments == {}
     assert chunks[1].tool_call.id.startswith("call_")
+
+
+@pytest.mark.asyncio
+async def test_google_thought_signature_streaming_and_preservation() -> None:
+    """Prüft, dass Gemini 3 thought_signature im Stream erfasst und in ProviderToolCall gespeichert wird."""
+    from services.openai_compatible_adapter import (
+        ProviderToolCall,
+        extract_thought_signature,
+        ensure_google_thought_signatures,
+        stream_chat_completion,
+        StreamUsage,
+    )
+    from services.ai_stream.read_tools import _aufrufnachricht
+
+    # 1. extract_thought_signature Direkt- und Verschachtelungstests
+    assert extract_thought_signature({"thought_signature": "sig_direct"}) == "sig_direct"
+    assert extract_thought_signature({"thoughtSignature": "sig_camel"}) == "sig_camel"
+    assert extract_thought_signature({"extra_content": {"google": {"thought_signature": "sig_nested"}}}) == "sig_nested"
+    assert extract_thought_signature({"provider_specific_fields": {"thought_signature": "sig_psf"}}) == "sig_psf"
+    assert extract_thought_signature({"function": {"thought_signature": "sig_func"}}) == "sig_func"
+    assert extract_thought_signature({}) is None
+
+    # 2. Streaming eines Tool-Calls mit thought_signature
+    provider = AiProvider(
+        id=99,
+        name="Google Test",
+        provider_kind="google",
+        default_model="gemini-3.5-flash-lite",
+        enabled=True,
+        requires_api_key=True,
+    )
+
+    fake_sig = "E4bA9xK8...encrypted_thought_signature"
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        stream = (
+            f'data: {{"choices":[{{"delta":{{"tool_calls":[{{"id":"call_abc123","function":{{"name":"read_server_status","arguments":"{{\\"server_id\\": 1}}"}},"thought_signature":"{fake_sig}"}}]}}}}]}}\n\n'
+            'data: [DONE]\n\n'
+        )
+        return httpx.Response(200, text=stream, headers={"content-type": "text/event-stream"})
+
+    usage = StreamUsage()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        chunks = [
+            chunk async for chunk in stream_chat_completion(
+                http_client,
+                provider=provider,
+                api_key="AIzaSyTest",
+                messages=[{"role": "user", "content": "status"}],
+                usage=usage,
+                tools=[{"type": "function", "function": {"name": "read_server_status"}}],
+            )
+        ]
+
+    ready_chunks = [c for c in chunks if c.kind == "tool_ready"]
+    assert len(ready_chunks) == 1
+    tool_call = ready_chunks[0].tool_call
+    assert isinstance(tool_call, ProviderToolCall)
+    assert tool_call.thought_signature == fake_sig
+
+    # 3. _aufrufnachricht behält thought_signature bei
+    aufruf_msg = _aufrufnachricht([tool_call], "Ich lese den Status...")
+    assert aufruf_msg["role"] == "assistant"
+    assert aufruf_msg["content"] == "Ich lese den Status..."
+    assert len(aufruf_msg["tool_calls"]) == 1
+    tc_entry = aufruf_msg["tool_calls"][0]
+    assert tc_entry["thought_signature"] == fake_sig
+    assert tc_entry["extra_content"]["google"]["thought_signature"] == fake_sig
+    assert tc_entry["function"]["thought_signature"] == fake_sig
+    assert aufruf_msg["extra_content"]["google"]["thought_signature"] == fake_sig
+
+    # 4. ensure_google_thought_signatures behält echte Signatur bei
+    messages_with_sig = [aufruf_msg]
+    ensured = ensure_google_thought_signatures(messages_with_sig)
+    assert ensured[0]["tool_calls"][0]["thought_signature"] == fake_sig
+
+    # 5. ensure_google_thought_signatures setzt 'skip_thought_signature_validator' ein, wenn Signatur fehlt
+    legacy_tool_call = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "call_legacy",
+                "type": "function",
+                "function": {"name": "read_logs", "arguments": "{}"},
+            }
+        ],
+    }
+    ensured_fallback = ensure_google_thought_signatures([legacy_tool_call])
+    assert ensured_fallback[0]["tool_calls"][0]["thought_signature"] == "skip_thought_signature_validator"
+    assert (
+        ensured_fallback[0]["tool_calls"][0]["extra_content"]["google"]["thought_signature"]
+        == "skip_thought_signature_validator"
+    )
+    assert (
+        ensured_fallback[0]["tool_calls"][0]["function"]["thought_signature"]
+        == "skip_thought_signature_validator"
+    )
+
+
+@pytest.mark.asyncio
+async def test_google_multi_turn_tool_request_payload() -> None:
+    """Prüft, dass stream_chat_completion ausgehende Nachrichten für Google anreichert."""
+    from services.openai_compatible_adapter import stream_chat_completion, StreamUsage
+
+    captured_request_json: dict = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal captured_request_json
+        captured_request_json = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(
+            200,
+            text='data: {"choices":[{"delta":{"content":"Server läuft einwandfrei."}}]}\n\ndata: [DONE]\n\n',
+            headers={"content-type": "text/event-stream"},
+        )
+
+    provider = AiProvider(
+        id=99,
+        name="Google Test",
+        provider_kind="google",
+        default_model="gemini-3.5-flash-lite",
+        enabled=True,
+        requires_api_key=True,
+    )
+
+    outgoing_messages = [
+        {"role": "user", "content": "Wie geht es Server 1?"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "read_server_status", "arguments": '{"server_id": 1}'},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": '{"status": "running"}'},
+    ]
+
+    usage = StreamUsage()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        async for _ in stream_chat_completion(
+            http_client,
+            provider=provider,
+            api_key="AIzaSyTest",
+            messages=outgoing_messages,
+            usage=usage,
+        ):
+            pass
+
+    sent_messages = captured_request_json["messages"]
+    sent_assistant = sent_messages[1]
+    sent_tc = sent_assistant["tool_calls"][0]
+    # Muss skip_thought_signature_validator haben, damit Google den Turn nicht als HTTP 400 abweist!
+    assert sent_tc["thought_signature"] == "skip_thought_signature_validator"
+    assert sent_tc["extra_content"]["google"]["thought_signature"] == "skip_thought_signature_validator"
+    assert sent_tc["function"]["thought_signature"] == "skip_thought_signature_validator"
+
+
+def test_gemini_live_session_setup_payload_thinking_level() -> None:
+    """Prüft, dass Gemini Live für Gemini 3 / Live Modelle thinkingConfig mit thinkingLevel mitsendet."""
+    from services.ai_voice.gemini_live_session import GeminiLiveSitzung
+    from services.ai_voice.realtime_session import RealtimeVorbereitung
+
+    # 1. Standardfall gemini-3.8-live: thinkingLevel="LOW"
+    vorb = RealtimeVorbereitung(
+        provider_id=1,
+        provider_kind="google",
+        model="gemini-3.8-live",
+        voice="Puck",
+        api_key="AIzaSyTestKey",
+        instructions="Sei präzise.",
+    )
+    sitzung = GeminiLiveSitzung(
+        websocket=MagicMock(),
+        vorbereitung=vorb,
+        user_id=1,
+        http_client=MagicMock(),
+    )
+    payload = sitzung._build_setup_payload(
+        model_name="models/gemini-3.8-live",
+        model_raw="gemini-3.8-live",
+        voice_name="Puck",
+        gemini_tools=[],
+    )
+    gen_cfg = payload["setup"]["generationConfig"]
+    assert "thinkingConfig" in gen_cfg
+    assert gen_cfg["thinkingConfig"]["thinkingLevel"] == "LOW"
+
+    # 2. Modell mit expliziter Denkstufe 'high'
+    vorb_high = RealtimeVorbereitung(
+        provider_id=1,
+        provider_kind="google",
+        model="gemini-3.8-live-extended-thinking",
+        voice="Puck",
+        reasoning_effort="high",
+        api_key="AIzaSyTestKey",
+    )
+    sitzung_high = GeminiLiveSitzung(
+        websocket=MagicMock(),
+        vorbereitung=vorb_high,
+        user_id=1,
+        http_client=MagicMock(),
+    )
+    payload_high = sitzung_high._build_setup_payload(
+        model_name="models/gemini-3.8-live-extended-thinking",
+        model_raw="gemini-3.8-live-extended-thinking",
+        voice_name="Puck",
+        gemini_tools=[],
+    )
+    assert payload_high["setup"]["generationConfig"]["thinkingConfig"]["thinkingLevel"] == "HIGH"
+
+    # 3. Gemini 2.5 mit Denkstufe
+    vorb_25 = RealtimeVorbereitung(
+        provider_id=1,
+        provider_kind="google",
+        model="gemini-2.5-flash",
+        voice="Puck",
+        reasoning_effort="low",
+        api_key="AIzaSyTestKey",
+    )
+    sitzung_25 = GeminiLiveSitzung(
+        websocket=MagicMock(),
+        vorbereitung=vorb_25,
+        user_id=1,
+        http_client=MagicMock(),
+    )
+    payload_25 = sitzung_25._build_setup_payload(
+        model_name="models/gemini-2.5-flash",
+        model_raw="gemini-2.5-flash",
+        voice_name="Puck",
+        gemini_tools=[],
+    )
+    assert payload_25["setup"]["generationConfig"]["thinkingConfig"]["thinkingBudget"] == 1024
+
+    # 4. Gemini 2.5 ohne Denkstufe hat kein thinkingConfig
+    vorb_25_plain = RealtimeVorbereitung(
+        provider_id=1,
+        provider_kind="google",
+        model="gemini-2.5-flash",
+        voice="Puck",
+        api_key="AIzaSyTestKey",
+    )
+    sitzung_25_plain = GeminiLiveSitzung(
+        websocket=MagicMock(),
+        vorbereitung=vorb_25_plain,
+        user_id=1,
+        http_client=MagicMock(),
+    )
+    payload_25_plain = sitzung_25_plain._build_setup_payload(
+        model_name="models/gemini-2.5-flash",
+        model_raw="gemini-2.5-flash",
+        voice_name="Puck",
+        gemini_tools=[],
+    )
+    assert "thinkingConfig" not in payload_25_plain["setup"]["generationConfig"]
 
 
 
