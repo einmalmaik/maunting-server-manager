@@ -18,9 +18,13 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from dependencies import get_current_user, require_global, verify_csrf
-from models import ChatGroupMember, User
+from models import ChatGroup, ChatGroupMember, User
 from schemas.calls import (
+    ActiveCallInfo,
+    ActiveCallResponse,
+    CallHeartbeatRequest,
     CallKeyRelayRequest,
+    CallLeaveRequest,
     CallMuteRequest,
     CallParticipantCountResponse,
     CallTokenRequest,
@@ -38,6 +42,7 @@ from services.call_room_service import (
     GRUPPE_MAX_TEILNEHMER,
     CallRoomService,
     GroupCallRoomRegistry,
+    UserActiveCallRegistry,
 )
 from services.livekit_service import LivekitZielAbgelehnt
 from services.social_service import SocialService
@@ -179,11 +184,28 @@ def einladung_ablehnen(
         raise HTTPException(
             status_code=404, detail="Anruf nicht gefunden oder bereits abgelaufen."
         )
+    UserActiveCallRegistry.remove_room(signaling_token)
     SyncEventService.publish(
         {
             "type": "direct_call_rejected",
             "signaling_token": signaling_token,
             "recipient_id": user.id,
+        },
+        user_id=anrufer_id,
+    )
+    SyncEventService.publish(
+        {
+            "type": "user_call_state_changed",
+            "user_id": user.id,
+            "active_call": None,
+        },
+        user_id=user.id,
+    )
+    SyncEventService.publish(
+        {
+            "type": "user_call_state_changed",
+            "user_id": anrufer_id,
+            "active_call": None,
         },
         user_id=anrufer_id,
     )
@@ -209,6 +231,7 @@ def einladung_abbrechen(
         raise HTTPException(
             status_code=404, detail="Anruf nicht gefunden oder bereits abgelaufen."
         )
+    UserActiveCallRegistry.remove_room(signaling_token)
     SyncEventService.publish(
         {
             "type": "direct_call_cancelled",
@@ -218,7 +241,139 @@ def einladung_abbrechen(
         },
         user_id=empfaenger_id,
     )
+    SyncEventService.publish(
+        {
+            "type": "user_call_state_changed",
+            "user_id": user.id,
+            "active_call": None,
+        },
+        user_id=user.id,
+    )
+    SyncEventService.publish(
+        {
+            "type": "user_call_state_changed",
+            "user_id": empfaenger_id,
+            "active_call": None,
+        },
+        user_id=empfaenger_id,
+    )
     return {"ok": True}
+
+
+# ── Aktiver Anruf & Cross-Device Handoff ────────────────────────────────────
+
+
+@router.get(
+    "/active",
+    response_model=ActiveCallResponse,
+    dependencies=[Depends(_check_social_enabled)],
+)
+def aktiver_anruf(
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Liefert den derzeit aktiven Anruf des Kontos über alle Geräte/Plattformen zurück."""
+    call = UserActiveCallRegistry.get(user.id)
+    return {"has_active_call": call is not None, "call": call}
+
+
+@router.post(
+    "/leave",
+    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
+)
+def anruf_verlassen(
+    req: CallLeaveRequest,
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Meldet, dass das aktuelle Gerät den Anruf verlassen hat."""
+    removed = UserActiveCallRegistry.leave(user.id, raum=req.raum, device_id=req.device_id)
+    if removed:
+        SyncEventService.publish(
+            {
+                "type": "user_call_state_changed",
+                "user_id": user.id,
+                "active_call": None,
+            },
+            user_id=user.id,
+        )
+    return {"ok": True}
+
+
+@router.post(
+    "/active/terminate",
+    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
+)
+def aktiven_anruf_beenden(
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Beendet den aktiven Anruf aus der Ferne (z. B. über den Auflegen-Knopf im Webinterface)."""
+    removed = UserActiveCallRegistry.leave(user.id)
+    if removed:
+        raum = removed.get("raum")
+        if raum and removed.get("art") == "direkt":
+            partner_data = removed.get("partner")
+            partner_id = (
+                partner_data.get("user_id") if isinstance(partner_data, dict) else None
+            )
+            empfaenger_id = (
+                CallRoomService.cancel(raum, user.id)
+                or CallRoomService.reject(raum, user.id)
+                or partner_id
+            )
+            if empfaenger_id is not None:
+                SyncEventService.publish(
+                    {
+                        "type": "direct_call_cancelled",
+                        "signaling_token": raum,
+                        "caller_id": user.id,
+                        "recipient_id": empfaenger_id,
+                    },
+                    user_id=empfaenger_id,
+                )
+                SyncEventService.publish(
+                    {
+                        "type": "call_ended_remotely",
+                        "raum": raum,
+                        "message": "Der Anruf wurde beendet.",
+                    },
+                    user_id=empfaenger_id,
+                )
+                SyncEventService.publish(
+                    {
+                        "type": "user_call_state_changed",
+                        "user_id": empfaenger_id,
+                        "active_call": None,
+                    },
+                    user_id=empfaenger_id,
+                )
+        SyncEventService.publish(
+            {
+                "type": "call_ended_remotely",
+                "raum": raum,
+                "message": "Der Anruf wurde beendet.",
+            },
+            user_id=user.id,
+        )
+        SyncEventService.publish(
+            {
+                "type": "user_call_state_changed",
+                "user_id": user.id,
+                "active_call": None,
+            },
+            user_id=user.id,
+        )
+    return {"ok": True}
+
+
+@router.post(
+    "/heartbeat",
+    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
+)
+def anruf_heartbeat(
+    req: CallHeartbeatRequest,
+    user: User = Depends(get_current_user),
+) -> dict:
+    ok = UserActiveCallRegistry.heartbeat(user.id, device_id=req.device_id)
+    return {"ok": ok}
 
 
 # ── Zugangstoken ────────────────────────────────────────────────────────────
@@ -243,6 +398,11 @@ def zugangstoken(
     """
     konf = _konfiguration_oder_fehler(db)
 
+    partner_id: int | None = None
+    partner_username: str | None = None
+    partner_avatar_url: str | None = None
+    group_name: str | None = None
+
     if req.art == "direkt":
         if CallRoomService.is_consumed(req.raum):
             raise HTTPException(status_code=410, detail="Der Anruf ist bereits beendet.")
@@ -250,6 +410,14 @@ def zugangstoken(
             raise HTTPException(
                 status_code=403, detail="Für diesen Anruf liegt keine Einladung vor."
             )
+        berechtigte = CallRoomService.berechtigte(req.raum)
+        gegenstelle_id = next((uid for uid in berechtigte if uid != user.id), None)
+        if gegenstelle_id is not None:
+            partner_user = db.query(User).filter_by(id=gegenstelle_id).first()
+            if partner_user:
+                partner_id = partner_user.id
+                partner_username = partner_user.username
+                partner_avatar_url = partner_user.avatar_url
     else:
         if req.group_id is None:
             raise HTTPException(status_code=400, detail="Gruppenkennung fehlt.")
@@ -261,6 +429,9 @@ def zugangstoken(
             raise HTTPException(
                 status_code=404, detail="Gruppenanruf nicht gefunden oder abgelaufen."
             )
+        gruppe_obj = db.query(ChatGroup).filter_by(id=req.group_id).first()
+        if gruppe_obj:
+            group_name = gruppe_obj.name
 
     identity = f"u{user.id}"
     token = livekit_service.zugangstoken(
@@ -270,6 +441,104 @@ def zugangstoken(
         api_key=konf.api_key,
         api_secret=konf.api_secret,
     )
+
+    curr_call, prev_call, is_handoff = UserActiveCallRegistry.register(
+        user.id,
+        req.raum,
+        req.art,
+        group_id=req.group_id,
+        group_name=group_name,
+        mode=req.mode or "audio",
+        device_id=req.device_id,
+        device_type=req.device_type,
+        partner_id=partner_id,
+        partner_username=partner_username,
+        partner_avatar_url=partner_avatar_url,
+    )
+
+    if is_handoff and prev_call:
+        # Cross-Device Handoff: Das alte Gerät wird sauber abgelöst
+        SyncEventService.publish(
+            {
+                "type": "call_transferred",
+                "raum": req.raum,
+                "old_device_id": prev_call.get("device_id"),
+                "new_device_id": req.device_id,
+                "new_device_type": req.device_type or "web",
+                "message": "Der Anruf wurde auf ein anderes Gerät übertragen.",
+            },
+            user_id=user.id,
+        )
+        if req.art == "direkt" and partner_id:
+            SyncEventService.publish(
+                {
+                    "type": "call_partner_transferred",
+                    "raum": req.raum,
+                    "user_id": user.id,
+                    "message": f"{user.username} wechselt das Gerät...",
+                },
+                user_id=partner_id,
+            )
+    elif prev_call and prev_call.get("raum") != req.raum:
+        # Ein anderer Anruf wurde betreten -> der alte Anruf wird verlassen (wie bei Discord)
+        old_raum = prev_call.get("raum")
+        old_art = prev_call.get("art")
+        SyncEventService.publish(
+            {
+                "type": "call_superseded",
+                "old_raum": old_raum,
+                "new_raum": req.raum,
+                "message": "Du bist auf einem anderen Gerät einem anderen Anruf beigetreten.",
+            },
+            user_id=user.id,
+        )
+        if old_art == "direkt" and old_raum:
+            old_partner = prev_call.get("partner")
+            old_partner_id = (
+                old_partner.get("user_id") if isinstance(old_partner, dict) else None
+            )
+            empfaenger_id = (
+                CallRoomService.cancel(old_raum, user.id)
+                or CallRoomService.reject(old_raum, user.id)
+                or old_partner_id
+            )
+            if empfaenger_id is not None:
+                SyncEventService.publish(
+                    {
+                        "type": "direct_call_cancelled",
+                        "signaling_token": old_raum,
+                        "caller_id": user.id,
+                        "recipient_id": empfaenger_id,
+                    },
+                    user_id=empfaenger_id,
+                )
+                SyncEventService.publish(
+                    {
+                        "type": "call_ended_remotely",
+                        "raum": old_raum,
+                        "message": "Der Gesprächspartner ist einem anderen Anruf beigetreten.",
+                    },
+                    user_id=empfaenger_id,
+                )
+                SyncEventService.publish(
+                    {
+                        "type": "user_call_state_changed",
+                        "user_id": empfaenger_id,
+                        "active_call": None,
+                    },
+                    user_id=empfaenger_id,
+                )
+
+    # Signalisiere den neuen Status an alle offenen Sitzungen des Benutzers
+    SyncEventService.publish(
+        {
+            "type": "user_call_state_changed",
+            "user_id": user.id,
+            "active_call": curr_call,
+        },
+        user_id=user.id,
+    )
+
     return {
         "url": konf.client_url,
         "token": token,
@@ -532,14 +801,24 @@ def gruppenanruf_beenden(
             status_code=404, detail="Gruppenanruf nicht gefunden oder abgelaufen."
         )
     GroupCallRoomRegistry.discard(req.room_token)
+    betroffene = UserActiveCallRegistry.remove_room(req.room_token)
     ereignis = {
         "type": "group_call_ended",
         "group_id": group_id,
         "room_token": req.room_token,
         "ended_by": user.id,
     }
-    for member_id in _gruppenmitglieder_mit_zutritt(db, group_id, user.id):
+    alle_empfaenger = set(betroffene + _gruppenmitglieder_mit_zutritt(db, group_id, user.id))
+    for member_id in alle_empfaenger:
         SyncEventService.publish(ereignis, user_id=member_id)
+        SyncEventService.publish(
+            {
+                "type": "user_call_state_changed",
+                "user_id": member_id,
+                "active_call": None,
+            },
+            user_id=member_id,
+        )
     return {"ok": True}
 
 

@@ -19,6 +19,29 @@ export interface AnrufZugang {
   ttl: number
 }
 
+export interface ActiveCallPartner {
+  user_id: number
+  username: string
+  avatar_url?: string | null
+}
+
+export interface ActiveCallInfo {
+  raum: string
+  art: 'direkt' | 'gruppe'
+  group_id?: number | null
+  group_name?: string | null
+  mode: 'audio' | 'video'
+  device_id?: string | null
+  device_type?: string | null
+  started_at: number
+  partner?: ActiveCallPartner | null
+}
+
+export interface ActiveCallResponse {
+  has_active_call: boolean
+  call: ActiveCallInfo | null
+}
+
 export interface GruppenRaum {
   room_token: string
   group_id: number
@@ -78,10 +101,46 @@ export async function holeZugang(
   art: 'direkt' | 'gruppe',
   raum: string,
   gruppenId?: number,
+  options?: {
+    device_id?: string
+    device_type?: string
+    mode?: 'audio' | 'video'
+  },
 ): Promise<AnrufZugang> {
   return api<AnrufZugang>('/social/calls/token', {
     method: 'POST',
-    body: JSON.stringify({ art, raum, group_id: gruppenId ?? null }),
+    body: JSON.stringify({
+      art,
+      raum,
+      group_id: gruppenId ?? null,
+      device_id: options?.device_id ?? null,
+      device_type: options?.device_type ?? null,
+      mode: options?.mode ?? 'audio',
+    }),
+  })
+}
+
+// ── Aktiver Anruf & Cross-Device Handoff ────────────────────────────────────
+
+export async function holeAktivenAnruf(): Promise<ActiveCallResponse> {
+  return api<ActiveCallResponse>('/social/calls/active')
+}
+
+export async function verlasseAnruf(raum?: string, deviceId?: string): Promise<void> {
+  await api('/social/calls/leave', {
+    method: 'POST',
+    body: JSON.stringify({ raum: raum ?? null, device_id: deviceId ?? null }),
+  })
+}
+
+export async function beendeAktivenAnrufRemote(): Promise<void> {
+  await api('/social/calls/active/terminate', { method: 'POST' })
+}
+
+export async function sendeAnrufHeartbeat(deviceId?: string, raum?: string): Promise<void> {
+  await api('/social/calls/heartbeat', {
+    method: 'POST',
+    body: JSON.stringify({ device_id: deviceId ?? null, raum: raum ?? null }),
   })
 }
 

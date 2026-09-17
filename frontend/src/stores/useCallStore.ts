@@ -15,12 +15,18 @@
 import { create } from 'zustand'
 import {
   beendeGruppenanruf,
+  beendeAktivenAnrufRemote,
   brichAnrufAb,
+  holeAktivenAnruf,
   holeInAnruf,
   holeZugang,
   ladeZuAnrufEin,
   lehneAnrufAb,
+  sendeAnrufHeartbeat,
+  verlasseAnruf,
+  type ActiveCallInfo,
 } from '@/api/calls'
+import { getDeviceId, getDeviceType } from '@/lib/deviceIdentity'
 import {
   E2eeNichtUnterstuetzt,
   FREIGABE_STANDARD,
@@ -49,7 +55,7 @@ import {
   verteileAn,
   verteileAnAlle,
 } from '@/services/raumSchluessel'
-import { toneAbgang, toneAufgelegt, toneBeitritt } from '@/components/calling/anrufToene'
+import { toneAbgang, toneAufgelegt, toneBeitritt, toneUebergabe } from '@/components/calling/anrufToene'
 import { getAudioSettings, saveAudioSettings } from '@/lib/audioSettings'
 import { toast } from '@/stores/toastStore'
 import type { Participant, Room } from 'livekit-client'
@@ -136,6 +142,8 @@ export interface UseCallState {
   serverStumm: boolean
   /** Flüchtige Meldungen im Anruffenster. Nichts davon geht in den Verlauf. */
   hinweise: CallHinweis[]
+  /** Ein auf einem anderen Gerät laufender Anruf desselben Kontos (Discord-Style). */
+  crossDeviceCall: ActiveCallInfo | null
 
   initiateCall: (partner: CallPartner, mode: CallMode) => Promise<void>
   receiveCall: (partner: CallPartner, mode: CallMode, raum: string) => void
@@ -160,6 +168,14 @@ export interface UseCallState {
   /** Ein eingehender `call_key`-Umschlag aus dem Ereignisstrom. */
   acceptRoomKey: (raum: string, ciphertext: string) => Promise<void>
   setMode: (mode: CallMode) => void
+  /** Prüft geräteübergreifend, ob dieses Konto auf einer anderen Plattform telefoniert. */
+  checkActiveCall: () => Promise<void>
+  /** Übergibt den laufenden Anruf nahtlos auf dieses Gerät (Handoff). */
+  transferCallToThisDevice: () => Promise<void>
+  /** Beendet den auf dem anderen Gerät laufenden Anruf aus der Ferne. */
+  terminateCrossDeviceCall: () => Promise<void>
+  /** Verarbeitet geräteübergreifende Sync-Ereignisse (Handoff, Übernahme, Beenden). */
+  handleCrossDeviceEvent: (detail: unknown) => void
 }
 
 /**
@@ -184,6 +200,31 @@ let verbindung: RaumVerbindung | null = null
 let raumSchluessel: Uint8Array | null = null
 /** Zählt Verbindungsversuche, damit späte Rückläufer aus einem alten Anruf verpuffen. */
 let generation = 0
+let heartbeatTimer: number | null = null
+
+function starteHeartbeat(raum: string) {
+  stoppeHeartbeat()
+  heartbeatTimer = window.setInterval(() => {
+    void sendeAnrufHeartbeat(getDeviceId(), raum).catch(() => {})
+  }, 25000)
+}
+
+function stoppeHeartbeat() {
+  if (heartbeatTimer !== null) {
+    window.clearInterval(heartbeatTimer)
+    heartbeatTimer = null
+  }
+}
+
+let partnerDisconnectTimer: number | null = null
+let partnerTransferring = false
+
+function brecheDisconnectTimerAb() {
+  if (partnerDisconnectTimer !== null) {
+    window.clearTimeout(partnerDisconnectTimer)
+    partnerDisconnectTimer = null
+  }
+}
 
 export function aktiverRaum(): Room | null {
   return verbindung?.room ?? null
@@ -356,6 +397,8 @@ export const useCallStore = create<UseCallState>((set, get) => {
 
     room.on(RoomEvent.ParticipantConnected, (teilnehmer) => {
       if (eigeneGeneration !== generation) return
+      partnerTransferring = false
+      brecheDisconnectTimerAb()
       spiegele()
       toneBeitritt()
       meldeHinweis('beitritt', `${nameVon(teilnehmer, bekannte)} ist beigetreten`)
@@ -365,9 +408,23 @@ export const useCallStore = create<UseCallState>((set, get) => {
     room.on(RoomEvent.ParticipantDisconnected, (teilnehmer) => {
       if (eigeneGeneration !== generation) return
       spiegele()
-      // Zweiergespräch: geht der andere, ist das Gespräch vorbei. Dann sagt das
-      // der Auflegeton, nicht noch zusätzlich eine Abgangsmeldung.
+      // Zweiergespräch: geht der andere, ist das Gespräch vorbei.
+      // Außer wenn ein Gerätewechsel (Handoff) signalisiert wurde: dann geben wir
+      // eine Gnadenfrist (8s), damit das neue Gerät die Verbindung übernehmen kann.
       if (get().kind === 'direkt' && (verbindung?.room.remoteParticipants.size ?? 0) === 0) {
+        if (partnerTransferring) {
+          meldeHinweis('info', 'Verbindung wird wiederhergestellt...')
+          brecheDisconnectTimerAb()
+          partnerDisconnectTimer = window.setTimeout(() => {
+            partnerDisconnectTimer = null
+            partnerTransferring = false
+            if (eigeneGeneration !== generation) return
+            if (get().kind === 'direkt' && (verbindung?.room.remoteParticipants.size ?? 0) === 0) {
+              get().endCall()
+            }
+          }, 8000)
+          return
+        }
         get().endCall()
         return
       }
@@ -429,7 +486,11 @@ export const useCallStore = create<UseCallState>((set, get) => {
 
     let zugang
     try {
-      zugang = await holeZugang(art, raum, gruppenId)
+      zugang = await holeZugang(art, raum, gruppenId, {
+        device_id: getDeviceId(),
+        device_type: getDeviceType(),
+        mode,
+      })
     } catch (fehler) {
       meldeFehler(fehler, 'zugang')
       throw fehler
@@ -460,7 +521,8 @@ export const useCallStore = create<UseCallState>((set, get) => {
       meldeFehler(fehler, 'geraet')
       set({ isMuted: true })
     }
-    set({ state: 'active', isCameraOff: mode !== 'video' })
+    set({ state: 'active', isCameraOff: mode !== 'video', crossDeviceCall: null })
+    starteHeartbeat(raum)
     spiegele()
   }
 
@@ -490,6 +552,9 @@ export const useCallStore = create<UseCallState>((set, get) => {
   }
 
   const raeumeAuf = () => {
+    stoppeHeartbeat()
+    partnerTransferring = false
+    brecheDisconnectTimerAb()
     generation += 1
     const room = verbindung?.room
     verbindung = null
@@ -526,6 +591,7 @@ export const useCallStore = create<UseCallState>((set, get) => {
     audioBlockiert: false,
     serverStumm: false,
     hinweise: [],
+    crossDeviceCall: null,
 
     initiateCall: async (partner, mode) => {
       raeumeAuf()
@@ -661,6 +727,9 @@ export const useCallStore = create<UseCallState>((set, get) => {
       }
       if (kind === 'gruppe' && raum && group && group.canModerate) {
         void beendeGruppenanruf(group.id, raum).catch(() => {})
+      }
+      if (raum) {
+        void verlasseAnruf(raum, getDeviceId()).catch(() => {})
       }
       raeumeAuf()
       set({
@@ -814,6 +883,143 @@ export const useCallStore = create<UseCallState>((set, get) => {
     },
 
     setMode: (mode) => set({ mode }),
+
+    checkActiveCall: async () => {
+      try {
+        const res = await holeAktivenAnruf()
+        if (res.has_active_call && res.call) {
+          const myId = getDeviceId()
+          if (res.call.device_id !== myId && get().state === 'idle') {
+            set({ crossDeviceCall: res.call })
+            return
+          }
+        }
+        set({ crossDeviceCall: null })
+      } catch {
+        // Nicht fatal bei Netzwerkfehlern
+      }
+    },
+
+    transferCallToThisDevice: async () => {
+      const { crossDeviceCall } = get()
+      if (!crossDeviceCall) return
+      const target = crossDeviceCall
+      raeumeAuf()
+      set({ crossDeviceCall: null })
+
+      if (target.art === 'direkt' && target.partner) {
+        bekannte.set(target.partner.user_id, {
+          username: target.partner.username,
+          avatarUrl: target.partner.avatar_url,
+        })
+        if (identitaet) {
+          bekannte.set(identitaet.userId, bekannte.get(identitaet.userId) ?? { username: 'Ich' })
+        }
+        set({
+          state: 'connecting',
+          kind: 'direkt',
+          mode: target.mode,
+          partner: {
+            userId: target.partner.user_id,
+            username: target.partner.username,
+            avatarUrl: target.partner.avatar_url,
+          },
+          group: null,
+          raum: target.raum,
+          participants: [],
+          screenShares: [],
+          focusedShareIdentity: null,
+          isMuted: false,
+          isDeafened: false,
+          isCameraOff: target.mode !== 'video',
+          isScreenSharing: false,
+          callDurationSeconds: 0,
+          reconnecting: false,
+          errorMessage: null,
+        })
+        try {
+          await verbindeMitRaum('direkt', target.raum, undefined, target.mode)
+          toneUebergabe()
+        } catch {
+          get().endCall()
+        }
+      } else if (target.art === 'gruppe' && target.group_id) {
+        set({
+          state: 'connecting',
+          kind: 'gruppe',
+          mode: 'audio',
+          partner: null,
+          group: {
+            id: target.group_id,
+            name: target.group_name || 'Gruppenanruf',
+            canShare: true,
+            canModerate: false,
+          },
+          raum: target.raum,
+          participants: [],
+          screenShares: [],
+          focusedShareIdentity: null,
+          isMuted: false,
+          isDeafened: false,
+          isCameraOff: true,
+          isScreenSharing: false,
+          callDurationSeconds: 0,
+          reconnecting: false,
+          errorMessage: null,
+        })
+        try {
+          await verbindeMitRaum('gruppe', target.raum, target.group_id, 'audio')
+          toneUebergabe()
+        } catch {
+          get().endCall()
+        }
+      }
+    },
+
+    terminateCrossDeviceCall: async () => {
+      set({ crossDeviceCall: null })
+      try {
+        await beendeAktivenAnrufRemote()
+      } catch {
+        // Nicht fatal
+      }
+    },
+
+    handleCrossDeviceEvent: (detail: unknown) => {
+      if (!detail || typeof detail !== 'object') return
+      const ev = detail as { type?: string; [key: string]: unknown }
+      const myId = getDeviceId()
+
+      if (ev.type === 'user_call_state_changed') {
+        const active = ev.active_call as ActiveCallInfo | null | undefined
+        if (active && active.device_id !== myId && get().state === 'idle') {
+          set({ crossDeviceCall: active })
+        } else if (!active || active.device_id === myId) {
+          set({ crossDeviceCall: null })
+        }
+      } else if (ev.type === 'call_transferred') {
+        if (ev.old_device_id === myId && get().state !== 'idle') {
+          get().endCall()
+          toast.info('Der Anruf wurde auf ein anderes Gerät übertragen.')
+        }
+      } else if (ev.type === 'call_partner_transferred') {
+        if (get().state === 'active' && (!ev.raum || get().raum === ev.raum)) {
+          partnerTransferring = true
+          meldeHinweis('info', String(ev.message || 'Gesprächspartner wechselt das Gerät...'))
+          toneUebergabe()
+        }
+      } else if (ev.type === 'call_superseded') {
+        if (get().state !== 'idle' && (!ev.old_raum || get().raum === ev.old_raum)) {
+          get().endCall()
+          toast.info('Du bist auf einem anderen Gerät einem anderen Anruf beigetreten.')
+        }
+      } else if (ev.type === 'call_ended_remotely') {
+        if (get().state !== 'idle' && (!ev.raum || get().raum === ev.raum)) {
+          get().endCall()
+          toast.info('Der Anruf wurde beendet.')
+        }
+      }
+    },
   }
 })
 

@@ -9,6 +9,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RoomEvent, Track } from 'livekit-client'
+import type { ActiveCallInfo } from '@/api/calls'
 
 // ── Gefälschter Raum ────────────────────────────────────────────────────────
 
@@ -103,6 +104,10 @@ const api = {
   brichAnrufAb: vi.fn().mockResolvedValue(undefined),
   holeZugang: vi.fn(),
   beendeGruppenanruf: vi.fn().mockResolvedValue(undefined),
+  holeAktivenAnruf: vi.fn().mockResolvedValue({ has_active_call: false, call: null }),
+  verlasseAnruf: vi.fn().mockResolvedValue(undefined),
+  beendeAktivenAnrufRemote: vi.fn().mockResolvedValue(undefined),
+  sendeAnrufHeartbeat: vi.fn().mockResolvedValue(undefined),
 }
 vi.mock('@/api/calls', () => api)
 
@@ -120,19 +125,22 @@ vi.mock('@/services/raumSchluessel', () => ({
 }))
 
 const toastFehler = vi.fn()
+const toastInfo = vi.fn()
 vi.mock('@/stores/toastStore', () => ({
-  toast: { error: (t: string) => toastFehler(t), success: vi.fn(), info: vi.fn() },
+  toast: { error: (t: string) => toastFehler(t), success: vi.fn(), info: (t: string) => toastInfo(t) },
 }))
 
 const toene = {
   toneBeitritt: vi.fn(),
   toneAbgang: vi.fn(),
   toneAufgelegt: vi.fn(),
+  toneUebergabe: vi.fn(),
 }
 vi.mock('@/components/calling/anrufToene', () => toene)
 
 // Nach den Mocks importieren, sonst greifen sie nicht.
 const { useCallStore, setzeAnrufIdentitaet } = await import('./useCallStore')
+const { getDeviceId } = await import('@/lib/deviceIdentity')
 
 const FRISCH = useCallStore.getState()
 
@@ -177,7 +185,7 @@ describe('Anruf aufbauen', () => {
     await useCallStore.getState().initiateCall(PARTNER, 'audio')
 
     expect(api.ladeZuAnrufEin).toHaveBeenCalledWith(2, 'audio')
-    expect(api.holeZugang).toHaveBeenCalledWith('direkt', 'raum-1', undefined)
+    expect(api.holeZugang).toHaveBeenCalledWith('direkt', 'raum-1', undefined, expect.objectContaining({ mode: 'audio' }))
     expect(livekit.verbinde).toHaveBeenCalledWith(
       'wss://panel.test/livekit',
       'jwt',
@@ -248,7 +256,7 @@ describe('Anruf aufbauen', () => {
     })
     await useCallStore.getState().acceptCall()
 
-    expect(api.holeZugang).toHaveBeenCalledWith('direkt', 'raum-9', undefined)
+    expect(api.holeZugang).toHaveBeenCalledWith('direkt', 'raum-9', undefined, expect.objectContaining({ mode: 'audio' }))
     expect(useCallStore.getState().state).toBe('active')
   })
 
@@ -447,7 +455,7 @@ describe('Gruppenanruf', () => {
   it('holt ein Token für den Gruppenraum und verteilt den Schlüssel an alle', async () => {
     await useCallStore.getState().joinGroupCall(GRUPPE, 'grp_abc', [1, 2, 5])
 
-    expect(api.holeZugang).toHaveBeenCalledWith('gruppe', 'grp_abc', 3)
+    expect(api.holeZugang).toHaveBeenCalledWith('gruppe', 'grp_abc', 3, expect.objectContaining({ mode: 'audio' }))
     // An alle ausser sich selbst.
     expect(schluessel.verteileAnAlle).toHaveBeenCalledWith(
       'grp_abc',
@@ -696,5 +704,275 @@ describe('Geräte', () => {
     const { getAudioSettings } = await import('@/lib/audioSettings')
     expect(getAudioSettings().preferredMicId).toBe('mic-42')
     expect(getAudioSettings().preferredSpeakerId).toBe('speaker-7')
+  })
+})
+
+describe('Geräteübergreifendes Anruf-Handoff (Cross-Device)', () => {
+  const FREMDER_ANRUF: ActiveCallInfo = {
+    raum: 'raum-fremd-1',
+    art: 'direkt',
+    mode: 'audio',
+    device_id: 'dev-fremdes-handy',
+    device_type: 'mobile',
+    group_id: null,
+    group_name: null,
+    partner: {
+      user_id: 2,
+      username: 'bob',
+      avatar_url: null,
+    },
+    started_at: '2026-09-17T12:00:00Z',
+  }
+
+  it('checkActiveCall: erkennt laufenden Anruf auf einem anderen Gerät', async () => {
+    api.holeAktivenAnruf.mockResolvedValueOnce({
+      has_active_call: true,
+      call: FREMDER_ANRUF,
+    })
+
+    await useCallStore.getState().checkActiveCall()
+
+    expect(useCallStore.getState().crossDeviceCall).toEqual(FREMDER_ANRUF)
+  })
+
+  it('checkActiveCall: ignoriert Anruf, wenn er vom eigenen Gerät stammt', async () => {
+    api.holeAktivenAnruf.mockResolvedValueOnce({
+      has_active_call: true,
+      call: { ...FREMDER_ANRUF, device_id: getDeviceId() },
+    })
+
+    await useCallStore.getState().checkActiveCall()
+
+    expect(useCallStore.getState().crossDeviceCall).toBeNull()
+  })
+
+  it('checkActiveCall: ignoriert Anruf, wenn man lokal bereits telefoniert', async () => {
+    await verbundenerAnruf()
+    api.holeAktivenAnruf.mockResolvedValueOnce({
+      has_active_call: true,
+      call: FREMDER_ANRUF,
+    })
+
+    await useCallStore.getState().checkActiveCall()
+
+    expect(useCallStore.getState().crossDeviceCall).toBeNull()
+  })
+
+  it('transferCallToThisDevice: holt einen direkten Anruf auf das lokale Gerät', async () => {
+    useCallStore.setState({ crossDeviceCall: FREMDER_ANRUF })
+
+    await useCallStore.getState().transferCallToThisDevice()
+
+    expect(api.holeZugang).toHaveBeenCalledWith(
+      'direkt',
+      'raum-fremd-1',
+      undefined,
+      expect.objectContaining({ mode: 'audio' }),
+    )
+    expect(useCallStore.getState().crossDeviceCall).toBeNull()
+    expect(useCallStore.getState().raum).toBe('raum-fremd-1')
+    expect(useCallStore.getState().partner).toEqual({
+      userId: 2,
+      username: 'bob',
+      avatarUrl: null,
+    })
+  })
+
+  it('transferCallToThisDevice: holt einen Gruppenanruf auf das lokale Gerät', async () => {
+    const FREMDER_GRUPPENANRUF: ActiveCallInfo = {
+      raum: 'grp-raum-99',
+      art: 'gruppe',
+      mode: 'audio',
+      device_id: 'dev-fremdes-handy',
+      device_type: 'mobile',
+      group_id: 10,
+      group_name: 'Entwickler',
+      partner: null,
+      started_at: '2026-09-17T12:00:00Z',
+    }
+    useCallStore.setState({ crossDeviceCall: FREMDER_GRUPPENANRUF })
+
+    await useCallStore.getState().transferCallToThisDevice()
+
+    expect(api.holeZugang).toHaveBeenCalledWith(
+      'gruppe',
+      'grp-raum-99',
+      10,
+      expect.objectContaining({ mode: 'audio' }),
+    )
+    expect(useCallStore.getState().crossDeviceCall).toBeNull()
+    expect(useCallStore.getState().raum).toBe('grp-raum-99')
+    expect(useCallStore.getState().kind).toBe('gruppe')
+    expect(useCallStore.getState().group?.name).toBe('Entwickler')
+  })
+
+  it('terminateCrossDeviceCall: beendet den Anruf auf dem anderen Gerät remote', async () => {
+    useCallStore.setState({ crossDeviceCall: FREMDER_ANRUF })
+
+    await useCallStore.getState().terminateCrossDeviceCall()
+
+    expect(api.beendeAktivenAnrufRemote).toHaveBeenCalled()
+    expect(useCallStore.getState().crossDeviceCall).toBeNull()
+  })
+
+  it('handleCrossDeviceEvent: trennt den lokalen Anruf wenn er auf anderes Gerät übertragen wurde', async () => {
+    await verbundenerAnruf()
+    expect(useCallStore.getState().state).toBe('active')
+
+    useCallStore.getState().handleCrossDeviceEvent({
+      type: 'call_transferred',
+      raum: 'raum-1',
+      old_device_id: getDeviceId(),
+      new_device_id: 'dev-anderes-geraet',
+    })
+
+    expect(useCallStore.getState().state).toBe('idle')
+    expect(toastInfo).toHaveBeenCalledWith(
+      'Der Anruf wurde auf ein anderes Gerät übertragen.',
+    )
+  })
+
+  it('handleCrossDeviceEvent: ignoriert call_transferred wenn nicht dieses Gerät abgegeben hat', async () => {
+    await verbundenerAnruf()
+    expect(useCallStore.getState().state).toBe('active')
+
+    useCallStore.getState().handleCrossDeviceEvent({
+      type: 'call_transferred',
+      raum: 'raum-1',
+      old_device_id: 'dev-jemand-anderes',
+      new_device_id: 'dev-drittes-geraet',
+    })
+
+    expect(useCallStore.getState().state).toBe('active')
+  })
+
+  it('handleCrossDeviceEvent: trennt den lokalen Anruf wenn auf anderem Gerät neuer Anruf gestartet wird (superseded)', async () => {
+    await verbundenerAnruf()
+    expect(useCallStore.getState().state).toBe('active')
+
+    useCallStore.getState().handleCrossDeviceEvent({
+      type: 'call_superseded',
+      old_raum: 'raum-1',
+      new_raum: 'raum-neu-42',
+    })
+
+    expect(useCallStore.getState().state).toBe('idle')
+    expect(toastInfo).toHaveBeenCalledWith(
+      'Du bist auf einem anderen Gerät einem anderen Anruf beigetreten.',
+    )
+  })
+
+  it('handleCrossDeviceEvent: trennt lokalen Anruf bei call_ended_remotely', async () => {
+    await verbundenerAnruf()
+    expect(useCallStore.getState().state).toBe('active')
+
+    useCallStore.getState().handleCrossDeviceEvent({
+      type: 'call_ended_remotely',
+      raum: 'raum-1',
+    })
+
+    expect(useCallStore.getState().state).toBe('idle')
+    expect(toastInfo).toHaveBeenCalledWith('Der Anruf wurde beendet.')
+  })
+
+  it('handleCrossDeviceEvent: aktualisiert crossDeviceCall bei user_call_state_changed', () => {
+    useCallStore.getState().handleCrossDeviceEvent({
+      type: 'user_call_state_changed',
+      active_call: FREMDER_ANRUF,
+    })
+
+    expect(useCallStore.getState().crossDeviceCall).toEqual(FREMDER_ANRUF)
+
+    useCallStore.getState().handleCrossDeviceEvent({
+      type: 'user_call_state_changed',
+      active_call: null,
+    })
+
+    expect(useCallStore.getState().crossDeviceCall).toBeNull()
+  })
+
+  it('direkt-Anruf: trennt nicht sofort bei ParticipantDisconnected wenn Partner Gerätewechsel signalisiert hat', async () => {
+    vi.useFakeTimers()
+    try {
+      await verbundenerAnruf()
+      aktuellerRaum.tritt_bei('u2', 'bob')
+      expect(useCallStore.getState().state).toBe('active')
+
+      // Signal vom Server: Bob wechselt das Gerät (Cross-Device Handoff)
+      useCallStore.getState().handleCrossDeviceEvent({
+        type: 'call_partner_transferred',
+        raum: 'raum-1',
+        message: 'Bob wechselt das Gerät...',
+      })
+
+      // Bobs altes Gerät verlässt den Raum
+      aktuellerRaum.verlaesst('u2')
+
+      // Soll NICHT sofort idle sein, sondern im Store aktiv bleiben mit Hinweismeldung
+      expect(useCallStore.getState().state).toBe('active')
+      expect(
+        useCallStore.getState().hinweise.some((h) => h.text.includes('Verbindung wird wiederhergestellt')),
+      ).toBe(true)
+
+      // Wenn Bob innerhalb der Gnadenfrist mit neuem Gerät beitritt
+      aktuellerRaum.tritt_bei('u2', 'bob')
+      expect(useCallStore.getState().state).toBe('active')
+
+      // Nach Ablauf von 8 Sekunden bleibt der Anruf weiterhin aktiv, weil Bob wieder da ist
+      vi.advanceTimersByTime(8500)
+      expect(useCallStore.getState().state).toBe('active')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('direkt-Anruf: beendet Gespräch nach Ablauf der Gnadenfrist wenn das neue Gerät des Partners nicht beitritt', async () => {
+    vi.useFakeTimers()
+    try {
+      await verbundenerAnruf()
+      aktuellerRaum.tritt_bei('u2', 'bob')
+      expect(useCallStore.getState().state).toBe('active')
+
+      // Signal vom Server: Bob wechselt das Gerät
+      useCallStore.getState().handleCrossDeviceEvent({
+        type: 'call_partner_transferred',
+        raum: 'raum-1',
+        message: 'Bob wechselt das Gerät...',
+      })
+
+      // Bobs altes Gerät verlässt den Raum
+      aktuellerRaum.verlaesst('u2')
+      expect(useCallStore.getState().state).toBe('active')
+
+      // Nach 8+ Sekunden Gnadenfrist ohne Wiederbeitritt wird der Anruf beendet
+      vi.advanceTimersByTime(8500)
+      expect(useCallStore.getState().state).toBe('idle')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('handleCrossDeviceEvent: zeigt Hinweis und spielt Ton bei call_partner_transferred', async () => {
+    await verbundenerAnruf()
+    expect(useCallStore.getState().state).toBe('active')
+
+    useCallStore.getState().handleCrossDeviceEvent({
+      type: 'call_partner_transferred',
+      raum: 'raum-1',
+      message: 'Bob wechselt das Gerät...',
+    })
+
+    expect(toene.toneUebergabe).toHaveBeenCalled()
+    expect(
+      useCallStore.getState().hinweise.some((h) => h.text === 'Bob wechselt das Gerät...'),
+    ).toBe(true)
+  })
+
+  it('transferCallToThisDevice: spielt toneUebergabe bei erfolgreicher Übernahme', async () => {
+    useCallStore.setState({ crossDeviceCall: FREMDER_ANRUF })
+
+    await useCallStore.getState().transferCallToThisDevice()
+
+    expect(toene.toneUebergabe).toHaveBeenCalled()
   })
 })
