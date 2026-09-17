@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Headphones,
   HeadphoneOff,
@@ -273,7 +274,14 @@ export const CallOverlay: React.FC = () => {
     return 'h-11 w-11 rounded-full bg-secondary/20 text-secondary hover:bg-secondary/30'
   }
 
-  return (
+  // Über einen Portal an `document.body`, nicht dort, wo die Messenger-Seite
+  // steht. Der Inhaltsbereich der App-Hülle liegt in zwei Stapelkontexten
+  // (`relative z-10` in `Shell.tsx`); ein `z-50` darin zählt nach außen nur als
+  // 10 und verliert gegen die Navigation (`z-40`). Die hat deshalb über den
+  // linken 256 Pixeln des Anruffensters gelegen, und der Rest sah aus, als
+  // liefe er nach rechts hinaus. Ein höherer z-Wert hilft nicht — er bliebe im
+  // selben Käfig. Der Portal nimmt das Fenster aus dem Käfig heraus.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex select-none flex-col justify-between overflow-hidden bg-surface/95 text-on-surface backdrop-blur-md animate-in fade-in duration-200">
       <RemoteAudio room={room} />
 
@@ -679,6 +687,7 @@ export const CallOverlay: React.FC = () => {
         bereitsImAnruf={teilnehmerIds}
         onInvite={inviteToCall}
       />
-    </div>
+    </div>,
+    document.body,
   )
 }
