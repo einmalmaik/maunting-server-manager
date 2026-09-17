@@ -626,6 +626,8 @@ class GeminiLiveSitzung:
                 "description": t.get("description", ""),
                 "parameters": params,
             }
+            if "thinking" in model_lower:
+                fn_decl["behavior"] = "NON_BLOCKING"
             gemini_tools.append(fn_decl)
 
         setup_payload = self._build_setup_payload(
@@ -655,7 +657,7 @@ class GeminiLiveSitzung:
                             await self._panel_senden({
                                 "art": "fehler",
                                 "code": "GEMINI_HANDSHAKE_TIMEOUT",
-                                "detail": f"Keine Antwort von Google für Modell '{model_name}'. Bitte prüfe das Modell in den Einstellungen (z. B. gemini-2.0-flash).",
+                                "detail": f"Keine Antwort von Google für Modell '{model_name}'. Bitte wechsle in den AI-Provider-Einstellungen zu 'gemini-2.0-flash' oder 'gemini-3.8-live'.",
                             })
 
             watchdog_task = asyncio.create_task(_handshake_watchdog())
