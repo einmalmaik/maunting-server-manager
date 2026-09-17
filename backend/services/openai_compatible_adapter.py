@@ -7,6 +7,7 @@ import json
 import logging
 import time
 from typing import Any, AsyncIterator
+import uuid
 
 import httpx
 
@@ -747,16 +748,28 @@ async def stream_chat_completion(
 
             def fertiger_aufruf(index: int) -> ProviderToolCall:
                 item = tool_buffers[index]
-                if not item["id"] or not item["name"]:
-                    raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR")
-                try:
-                    arguments = json.loads(item["arguments"] or "{}")
-                except json.JSONDecodeError as exc:
-                    raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR") from exc
+                name = item.get("name")
+                if not name:
+                    raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR", detail="Tool-Call ohne Namen empfangen")
+                call_id = item.get("id") or f"call_{index}_{uuid.uuid4().hex[:8]}"
+                raw_args = item.get("arguments") or "{}"
+                if isinstance(raw_args, dict):
+                    arguments = raw_args
+                else:
+                    try:
+                        arguments = json.loads(raw_args)
+                    except json.JSONDecodeError as exc:
+                        raise AiProviderRequestError(
+                            "AI_PROVIDER_PROTOCOL_ERROR",
+                            detail=f"Ungültige JSON-Argumente für {name}: {str(raw_args)[:100]}",
+                        ) from exc
                 if not isinstance(arguments, dict):
-                    raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR")
+                    raise AiProviderRequestError(
+                        "AI_PROVIDER_PROTOCOL_ERROR",
+                        detail=f"Tool-Argumente für {name} sind kein Objekt",
+                    )
                 return ProviderToolCall(
-                    id=item["id"], name=item["name"], arguments=arguments
+                    id=call_id, name=name, arguments=arguments
                 )
             async for line in _iter_sse_lines(response, deadline=deadline):
                 if time.monotonic() > deadline:
@@ -778,13 +791,18 @@ async def stream_chat_completion(
                 if frames > MAX_STREAM_FRAMES:
                     raise AiProviderRequestError("AI_PROVIDER_RESPONSE_TOO_LARGE")
                 payload = line[5:].strip()
+                if not payload:
+                    continue
                 if payload == "[DONE]":
                     saw_done = True
                     break
                 try:
                     frame = json.loads(payload)
                 except (TypeError, json.JSONDecodeError) as exc:
-                    raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR") from exc
+                    raise AiProviderRequestError(
+                        "AI_PROVIDER_PROTOCOL_ERROR",
+                        detail=f"Ungültiger SSE-Frame: {payload[:100]}",
+                    ) from exc
                 usage_uebernehmen(usage, frame.get("usage"))
                 # Vor `choices`, denn ein Fehlerrahmen bringt beides mit: das
                 # `error`-Feld und ein leeres Delta mit `finish_reason: "error"`.
@@ -805,10 +823,14 @@ async def stream_chat_completion(
                 delta = choices[0].get("delta") if isinstance(choices[0], dict) else None
                 tool_deltas = delta.get("tool_calls") if isinstance(delta, dict) else None
                 if isinstance(tool_deltas, list):
-                    for item in tool_deltas:
-                        if not isinstance(item, dict) or not isinstance(item.get("index"), int):
-                            raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR")
-                        idx = item["index"]
+                    for default_idx, item in enumerate(tool_deltas):
+                        if not isinstance(item, dict):
+                            raise AiProviderRequestError(
+                                "AI_PROVIDER_PROTOCOL_ERROR",
+                                detail=f"Tool-Call-Eintrag ist kein Objekt: {type(item).__name__}",
+                            )
+                        raw_idx = item.get("index")
+                        idx = raw_idx if isinstance(raw_idx, int) else default_idx
                         buffer = tool_buffers.setdefault(
                             idx, {"id": "", "name": "", "arguments": ""}
                         )
@@ -818,13 +840,33 @@ async def stream_chat_completion(
                         if isinstance(function, dict):
                             if isinstance(function.get("name"), str):
                                 buffer["name"] += function["name"]
-                            if isinstance(function.get("arguments"), str):
-                                buffer["arguments"] += function["arguments"]
+                            raw_args = function.get("arguments")
+                            if isinstance(raw_args, dict):
+                                buffer["arguments"] = json.dumps(raw_args)
+                            elif isinstance(raw_args, str):
+                                buffer["arguments"] += raw_args
                                 if len(buffer["arguments"]) > MAX_TOOL_ARGUMENT_CHARS:
                                     raise AiProviderRequestError("AI_PROVIDER_RESPONSE_TOO_LARGE")
                         if idx not in seen_tool_starts and buffer["name"]:
                             seen_tool_starts.add(idx)
                             yield StreamChunk("tool_start", buffer["name"])
+                legacy_call = delta.get("function_call") if isinstance(delta, dict) else None
+                if isinstance(legacy_call, dict):
+                    buffer = tool_buffers.setdefault(
+                        0, {"id": "", "name": "", "arguments": ""}
+                    )
+                    if isinstance(legacy_call.get("name"), str):
+                        buffer["name"] += legacy_call["name"]
+                    raw_args = legacy_call.get("arguments")
+                    if isinstance(raw_args, dict):
+                        buffer["arguments"] = json.dumps(raw_args)
+                    elif isinstance(raw_args, str):
+                        buffer["arguments"] += raw_args
+                        if len(buffer["arguments"]) > MAX_TOOL_ARGUMENT_CHARS:
+                            raise AiProviderRequestError("AI_PROVIDER_RESPONSE_TOO_LARGE")
+                    if 0 not in seen_tool_starts and buffer["name"]:
+                        seen_tool_starts.add(0)
+                        yield StreamChunk("tool_start", buffer["name"])
                 if isinstance(delta, dict):
                     # `reasoning` ist OpenRouter, `reasoning_content` der in
                     # OpenAI-kompatiblen Servern verbreitete Name. Beide sind
