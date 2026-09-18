@@ -128,3 +128,87 @@ def test_privacy_other_user_cannot_access(db_session, test_user, other_user):
 
     with pytest.raises(ValueError):
         NotesService.get_note(db_session, user=other_user, note_id_or_uid=note["note_uid"])
+
+
+def test_notes_stored_encrypted_in_database(db_session, test_user):
+    """Beweist, dass in der Datenbank absolut KEIN Klartext fuer title und content existiert."""
+    secret_title = "Absolutes_Geheimnis_12345"
+    secret_content = "Dies_ist_vertraulicher_Inhalt_XYZ"
+
+    note = NotesService.create_note(
+        db_session,
+        user=test_user,
+        title=secret_title,
+        content=secret_content,
+    )
+
+    # Direkte RAW SQL Abfrage der DB-Tabelle (wie ein neugieriger Admin)
+    from sqlalchemy import text
+    row = db_session.execute(
+        text("SELECT title, content FROM notes WHERE note_uid = :uid"),
+        {"uid": note["note_uid"]},
+    ).fetchone()
+
+    raw_title, raw_content = row[0], row[1]
+
+    # Der Klartext darf NIEMALS in der Datenbank stehen!
+    assert secret_title not in raw_title
+    assert secret_content not in raw_content
+    # Es muss ein Base64-DIS-Ciphertext sein
+    assert len(raw_title) > 20
+    assert len(raw_content) > 20
+
+    # Aber fuer den berechtigten Nutzer wird es sauber entschluesselt
+    fetched = NotesService.get_note(db_session, user=test_user, note_id_or_uid=note["note_uid"])
+    assert fetched["title"] == secret_title
+    assert fetched["content"] == secret_content
+
+
+def test_notes_automatic_migration_of_legacy_plaintext(db_session, test_user):
+    """Beweist, dass Altdaten im Klartext beim ersten Aufruf automatisch verschluesselt werden."""
+    from sqlalchemy import text
+    import uuid
+
+    legacy_uid = str(uuid.uuid4())
+    legacy_title = "Alte_Unverschluesselte_Notiz"
+    legacy_content = "Alter_Klartext_der_damals_gespeichert_wurde"
+
+    # Altdaten direkt unverschluesselt in die DB einschleusen
+    db_session.execute(
+        text(
+            "INSERT INTO notes (user_id, note_uid, title, content, category, color, is_pinned, is_archived, note_type, created_at, updated_at) "
+            "VALUES (:uid, :nuid, :title, :content, 'personal', 'primary', 0, 0, 'personal', datetime('now'), datetime('now'))"
+        ),
+        {
+            "uid": test_user.id,
+            "nuid": legacy_uid,
+            "title": legacy_title,
+            "content": legacy_content,
+        },
+    )
+    db_session.commit()
+
+    # Vor dem Aufruf: In der DB steht Klartext
+    before_row = db_session.execute(
+        text("SELECT title, content FROM notes WHERE note_uid = :uid"),
+        {"uid": legacy_uid},
+    ).fetchone()
+    assert before_row[0] == legacy_title
+    assert before_row[1] == legacy_content
+
+    # Nutzer ruft get_notes() auf
+    notes = NotesService.get_notes(db_session, user=test_user)
+    migrated_note = next(n for n in notes if n["note_uid"] == legacy_uid)
+    assert migrated_note["title"] == legacy_title
+    assert migrated_note["content"] == legacy_content
+
+    # Nach dem Aufruf: Die Datenbank MUSS jetzt transparent und dauerhaft verschluesselt sein!
+    after_row = db_session.execute(
+        text("SELECT title, content FROM notes WHERE note_uid = :uid"),
+        {"uid": legacy_uid},
+    ).fetchone()
+    assert after_row[0] != legacy_title
+    assert legacy_title not in after_row[0]
+    assert after_row[1] != legacy_content
+    assert legacy_content not in after_row[1]
+

@@ -125,6 +125,107 @@ def test_native_calendar_crud_and_export(db_session, test_user):
     assert len(events_after) == 0
 
 
+def test_calendar_events_stored_encrypted_in_database(db_session, test_user):
+    """Beweist, dass in der calendar_events Tabelle absolut KEIN Klartext fuer title, description, location existiert."""
+    from sqlalchemy import text
+
+    secret_title = "Geheimer_Vorstandstermin_999"
+    secret_desc = "Streng_geheime_Finanzthemen_XYZ"
+    secret_loc = "Geheimer_Bunker_Raum_42"
+
+    ev = CalendarService.create_event(
+        db=db_session,
+        user=test_user,
+        title=secret_title,
+        description=secret_desc,
+        location=secret_loc,
+        start_time="2026-08-26 10:00",
+        end_time="2026-08-26 11:00",
+    )
+
+    # Direkte RAW SQL Abfrage der DB-Tabelle
+    row = db_session.execute(
+        text("SELECT title, description, location FROM calendar_events WHERE event_uid = :uid"),
+        {"uid": ev["event_id"]},
+    ).fetchone()
+
+    raw_title, raw_desc, raw_loc = row[0], row[1], row[2]
+
+    # Der Klartext darf NIEMALS in der Datenbank stehen!
+    assert secret_title not in raw_title
+    assert secret_desc not in raw_desc
+    assert secret_loc not in raw_loc
+    # Es muessen Base64-DIS-Ciphertexte sein
+    assert len(raw_title) > 20
+    assert len(raw_desc) > 20
+    assert len(raw_loc) > 20
+
+    # Aber fuer den berechtigten Nutzer wird es sauber entschluesselt
+    events = CalendarService.get_events(db_session, test_user)
+    assert len(events) == 1
+    assert events[0]["title"] == secret_title
+    assert events[0]["description"] == secret_desc
+    assert events[0]["location"] == secret_loc
+
+
+def test_calendar_events_automatic_migration_of_legacy_plaintext(db_session, test_user):
+    """Beweist, dass unverschluesselte Altdaten beim ersten Aufruf automatisch in der DB verschluesselt werden."""
+    from sqlalchemy import text
+    import uuid
+
+    cal = CalendarService.get_calendar(db_session, test_user)
+    legacy_uid = str(uuid.uuid4())
+    legacy_title = "Alter_Unverschluesselter_Termin"
+    legacy_desc = "Alte_Terminbeschreibung_Klartext"
+    legacy_loc = "Alter_Ort_Klartext"
+
+    # Altdaten direkt unverschluesselt in die DB einschleusen
+    db_session.execute(
+        text(
+            "INSERT INTO calendar_events (calendar_id, user_id, event_uid, title, description, location, start_time, end_time, all_day, color, event_type, created_at, updated_at) "
+            "VALUES (:cal_id, :uid, :euid, :title, :desc, :loc, datetime('now'), datetime('now', '+1 hour'), 0, 'primary', 'personal', datetime('now'), datetime('now'))"
+        ),
+        {
+            "cal_id": cal.id,
+            "uid": test_user.id,
+            "euid": legacy_uid,
+            "title": legacy_title,
+            "desc": legacy_desc,
+            "loc": legacy_loc,
+        },
+    )
+    db_session.commit()
+
+    # Vor dem Aufruf: In der DB steht Klartext
+    before_row = db_session.execute(
+        text("SELECT title, description, location FROM calendar_events WHERE event_uid = :uid"),
+        {"uid": legacy_uid},
+    ).fetchone()
+    assert before_row[0] == legacy_title
+    assert before_row[1] == legacy_desc
+    assert before_row[2] == legacy_loc
+
+    # Nutzer ruft get_events() auf
+    events = CalendarService.get_events(db_session, test_user)
+    migrated_ev = next(e for e in events if e["event_id"] == legacy_uid)
+    assert migrated_ev["title"] == legacy_title
+    assert migrated_ev["description"] == legacy_desc
+    assert migrated_ev["location"] == legacy_loc
+
+    # Nach dem Aufruf: In der Datenbank MUSS jetzt Ciphertext stehen!
+    after_row = db_session.execute(
+        text("SELECT title, description, location FROM calendar_events WHERE event_uid = :uid"),
+        {"uid": legacy_uid},
+    ).fetchone()
+    assert after_row[0] != legacy_title
+    assert legacy_title not in after_row[0]
+    assert after_row[1] != legacy_desc
+    assert legacy_desc not in after_row[1]
+    assert after_row[2] != legacy_loc
+    assert legacy_loc not in after_row[2]
+
+
+
 @pytest.mark.asyncio
 async def test_calendar_reminders_and_test_dispatch(db_session, test_user):
     from datetime import datetime, timedelta, timezone

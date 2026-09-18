@@ -99,6 +99,63 @@ def _default_color_for_type(event_type: str | None) -> str:
     return "blue"
 
 
+def _cal_aad(user_id: int, event_uid: str) -> str:
+    return f"msm:cal:{user_id}:{event_uid}"
+
+
+def _decrypt_or_migrate_calendar_event(db: Session, ev: CalendarEvent) -> tuple[str, str, str]:
+    """Entschluesselt title, description und location eines nativen Termins.
+    
+    Falls einer der Werte noch im Klartext in der DB liegt, wird er sofort
+    mit DIS (AES-256-GCM) verschluesselt und in der DB persistiert.
+    """
+    aad = _cal_aad(ev.user_id, ev.event_uid)
+    needs_persist = False
+
+    # 1. Titel
+    raw_title = ev.title or ""
+    try:
+        title = DisClient.decrypt(raw_title, aad=aad)
+    except DisDecryptionError:
+        title = raw_title
+        ev.title = DisClient.encrypt(title, aad=aad)
+        needs_persist = True
+
+    # 2. Beschreibung
+    raw_desc = ev.description or ""
+    if not raw_desc:
+        desc = ""
+    else:
+        try:
+            desc = DisClient.decrypt(raw_desc, aad=aad)
+        except DisDecryptionError:
+            desc = raw_desc
+            ev.description = DisClient.encrypt(desc, aad=aad)
+            needs_persist = True
+
+    # 3. Ort
+    raw_loc = ev.location or ""
+    if not raw_loc:
+        loc = ""
+    else:
+        try:
+            loc = DisClient.decrypt(raw_loc, aad=aad)
+        except DisDecryptionError:
+            loc = raw_loc
+            ev.location = DisClient.encrypt(loc, aad=aad)
+            needs_persist = True
+
+    if needs_persist:
+        try:
+            db.commit()
+            db.refresh(ev)
+        except Exception as e:
+            _log.warning("Fehler bei Altdaten-Verschluesselung des Termins %s: %s", ev.event_uid, e)
+            db.rollback()
+
+    return title, desc, loc
+
+
 def _user_timezone(user: User | None = None, user_tz: str | None = None) -> timezone | ZoneInfo:
     """Bestimmt die Zeitzone des Benutzers oder UTC als Fallback."""
     tz_str = user_tz or (getattr(user, "time_zone", None) or "").strip()
@@ -376,14 +433,16 @@ class CalendarService:
                 if ev.event_type == "team" and ev.team and ev.team.owner_user_id == user.id:
                     can_edit = True
 
+                title, desc, loc = _decrypt_or_migrate_calendar_event(db, ev)
+
                 result.append({
                     "event_id": ev.event_uid,
                     "id": ev.id,
-                    "title": ev.title,
+                    "title": title,
                     "start": _iso_utc(ev.start_time),
                     "end": _iso_utc(ev.end_time),
-                    "description": ev.description or "",
-                    "location": ev.location or "",
+                    "description": desc,
+                    "location": loc,
                     "all_day": ev.all_day,
                     "color": ev_color,
                     "event_type": ev_type,
@@ -506,13 +565,19 @@ class CalendarService:
             final_color = color or _default_color_for_type(norm_type)
 
             event_uid = str(uuid.uuid4())
+            aad = _cal_aad(user.id, event_uid)
+
+            encrypted_title = DisClient.encrypt(title.strip(), aad=aad)
+            encrypted_desc = DisClient.encrypt(description, aad=aad) if description else None
+            encrypted_loc = DisClient.encrypt(location, aad=aad) if location else None
+
             ev = CalendarEvent(
                 calendar_id=calendar.id,
                 user_id=user.id,
                 event_uid=event_uid,
-                title=title,
-                description=description,
-                location=location,
+                title=encrypted_title,
+                description=encrypted_desc,
+                location=encrypted_loc,
                 start_time=start_dt,
                 end_time=end_dt,
                 all_day=all_day,
@@ -528,11 +593,11 @@ class CalendarService:
                 "status": "created",
                 "event_id": ev.event_uid,
                 "id": ev.id,
-                "title": ev.title,
+                "title": title.strip(),
                 "start": _iso_utc(ev.start_time),
                 "end": _iso_utc(ev.end_time),
-                "description": ev.description or "",
-                "location": ev.location or "",
+                "description": description or "",
+                "location": location or "",
                 "all_day": ev.all_day,
                 "color": ev.color or "",
                 "event_type": ev.event_type,
@@ -669,16 +734,18 @@ class CalendarService:
             if not can_edit:
                 raise ValueError("Keine Berechtigung zur Bearbeitung dieses Termins.")
 
+            aad = _cal_aad(ev.user_id, ev.event_uid)
+
             if title is not None:
-                ev.title = title
+                ev.title = DisClient.encrypt(title.strip(), aad=aad)
             if start_time is not None:
                 ev.start_time = _parse_datetime(start_time, user=user)
             if end_time is not None:
                 ev.end_time = _parse_datetime(end_time, user=user)
             if description is not None:
-                ev.description = description
+                ev.description = DisClient.encrypt(description, aad=aad) if description else None
             if location is not None:
-                ev.location = location
+                ev.location = DisClient.encrypt(location, aad=aad) if location else None
             if all_day is not None:
                 ev.all_day = all_day
 
@@ -722,15 +789,18 @@ class CalendarService:
 
             db.commit()
             db.refresh(ev)
+
+            dec_title, dec_desc, dec_loc = _decrypt_or_migrate_calendar_event(db, ev)
+
             res = {
                 "status": "updated",
                 "event_id": ev.event_uid,
                 "id": ev.id,
-                "title": ev.title,
+                "title": dec_title,
                 "start": _iso_utc(ev.start_time),
                 "end": _iso_utc(ev.end_time),
-                "description": ev.description or "",
-                "location": ev.location or "",
+                "description": dec_desc,
+                "location": dec_loc,
                 "all_day": ev.all_day,
                 "color": ev.color or _default_color_for_type(ev.event_type),
                 "event_type": ev.event_type,
