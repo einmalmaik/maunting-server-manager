@@ -10,7 +10,13 @@ from services.sync_event_service import SyncEventService
 
 def _valid_test_envelope(prefix: str = "sv-e2ee-group-v1:", payload_tag: str = "test-payload") -> str:
     raw = b"N" * 12 + payload_tag.encode("utf-8") + b"T" * 16
-    return f"{prefix}{base64.b64encode(raw).decode('ascii')}"
+    chiffre = base64.b64encode(raw).decode("ascii")
+    # Ein Gruppenumschlag nennt seit 09/2026 die Kennung seines Schlüssels vor
+    # dem Chiffretext. Ohne sie ließe sich der Schlüssel aus der Gruppenkennung
+    # ableiten, und der Server könnte mitlesen.
+    if prefix == "sv-e2ee-group-v1:":
+        return f"{prefix}00112233445566ff.{chiffre}"
+    return f"{prefix}{chiffre}"
 
 
 def _create_user(db: Session, username: str, privacy: str = "friends") -> User:

@@ -113,8 +113,6 @@ import {
   getCachedGroupBlindMailboxId,
   encryptE2eeHybrid,
   decryptE2eeHybridWithKeyring,
-  encryptGroupE2eeMessage,
-  decryptGroupE2eeMessage,
   scrubPlaintextStorage,
   envelopePlaintextCache,
   clearEnvelopePlaintextCache,
@@ -136,6 +134,14 @@ import {
   verwirfDrSitzung,
   type DrKontext,
 } from '@/services/ratchetSitzung'
+import {
+  entschluesseleGruppenUmschlag,
+  fordereGruppenSchluessel,
+  verarbeiteGruppenSteuerung,
+  verschluesseleFuerGruppe,
+  verwirfGruppenSchluessel,
+  type GruppenKontext,
+} from '@/services/gruppenSchluessel'
 import {
   ladeUmschlagKlartexte,
   loadLocalMessages,
@@ -1225,6 +1231,31 @@ export function Messenger() {
     }
   }, [activeContact?.userId, activeGroup?.id, currentUserId])
 
+  /**
+   * Alles, was der Gruppenschlüssel braucht: Mailbox, eigenes Konto und die
+   * Mitgliederliste.
+   *
+   * Die Mitglieder entscheiden über die Rotation, deshalb muss das eigene Konto
+   * verlässlich dabei sein — sonst bildet dieses Gerät eine andere Liste als
+   * alle anderen und münzt bei jedem Senden einen neuen Schlüssel.
+   */
+  const baueGruppenKontext = (group: ChatGroupItem, mailboxId: string): GruppenKontext | null => {
+    if (!currentUserId || !mailboxId) return null
+    // Eine leere Mitgliederliste heißt „noch nicht geladen", nicht „Gruppe ohne
+    // Mitglieder": einige Antworten des Backends lassen sie aus. Daraus einen
+    // Schlüssel zu münzen hieße, ihn an niemanden zu verteilen und ihn beim
+    // nächsten vollständigen Stand sofort wieder zu ersetzen.
+    if (!group.members || group.members.length === 0) return null
+    const mitglieder = group.members.map((m) => m.user_id)
+    if (!mitglieder.includes(currentUserId)) mitglieder.push(currentUserId)
+    return {
+      groupId: group.id,
+      blindMailboxId: mailboxId,
+      eigeneId: currentUserId,
+      mitglieder,
+    }
+  }
+
   // Helper: send an E2EE control envelope (e.g. read_receipt, edit_message, delete_message)
   const sendE2eeControlMessage = async (payloadObj: Record<string, unknown>) => {
     if (!blindMailboxId || !currentUserId || (!activeContact && !activeGroup)) return
@@ -1236,7 +1267,12 @@ export function Messenger() {
       const payload = JSON.stringify({ ...payloadObj, client_uuid: clientUuid })
       let ciphertext: string
       if (activeGroup) {
-        ciphertext = await encryptGroupE2eeMessage(payload, activeGroup.id)
+        // Quittungen laufen in der Gruppe über denselben Schlüssel wie die
+        // Nachrichten. Anders als beim Ratchet kostet das nichts: ein
+        // Gruppenschlüssel verbraucht sich nicht.
+        const gruppe = baueGruppenKontext(activeGroup, blindMailboxId)
+        if (!gruppe) return
+        ciphertext = await verschluesseleFuerGruppe(gruppe, payload)
         await relayE2eeEnvelope({
           blind_mailbox_id: blindMailboxId,
           ciphertext_envelope: ciphertext,
@@ -1329,8 +1365,11 @@ export function Messenger() {
     // Ein Durchlauf während `loading` hätte keine, würde auf den Altpfad fallen
     // und dessen Ergebnis im Zwischenspeicher festschreiben — der richtige
     // Klartext käme danach nicht mehr durch.
+    //
+    // Das gilt seit der Umstellung auch für Gruppen: ihr Schlüssel kommt in
+    // einem Hybridumschlag, der gegen den Geräteschlüssel versiegelt ist.
     const aktuelleIdentitaet = identityRef.current
-    if (activeContact && aktuelleIdentitaet.state === 'loading') return
+    if (aktuelleIdentitaet.state === 'loading') return
     const seq = ++currentLoadSeqRef.current
 
     if (isInitial && messages.length === 0) {
@@ -1365,9 +1404,22 @@ export function Messenger() {
       const drKontext: DrKontext | null = activeContact
         ? { eigeneId: currentUserId, peerId: activeContact.userId }
         : null
+      const gruppenKontext: GruppenKontext | null = activeGroup
+        ? baueGruppenKontext(activeGroup, currentMid)
+        : null
       /** Umschläge, die keine Zeile im Verlauf ergeben dürfen. */
       const stillUebergehen = new Set<number>()
       const gebrochene: { vonKonto: number; vonGeraet: string }[] = []
+      /**
+       * Die jüngste Nachricht, für die der Gruppenschlüssel fehlt.
+       *
+       * Nur sie löst eine Nachforderung aus. Ältere unlesbare Nachrichten
+       * stammen aus einer Zeit vor dem Beitritt oder aus einer Generation, die
+       * niemand mehr herausgibt — nach denen zu fragen brächte nichts und
+       * erzeugte bei jedem Ladevorgang neue Umschläge.
+       */
+      const fehlenderGruppenschluessel = { envId: 0, keyId: '' }
+
 
       const einUmschlag = async (env: (typeof envelopes)[number]) => {
           const gespeichert = bekannteKlartexte.get(env.id)
@@ -1380,8 +1432,43 @@ export function Messenger() {
           }
           try {
             let plain = ''
-            if (activeGroup) {
-              plain = await decryptGroupE2eeMessage(env.ciphertext_envelope, activeGroup.id)
+            if (gruppenKontext) {
+              if (env.ciphertext_envelope.startsWith('sv-e2ee-hybrid-v1:')) {
+                // In einer Gruppenmailbox ist ein Hybridumschlag immer ein
+                // Steuerumschlag: eine Schlüsselzustellung oder eine
+                // Nachforderung. Die Kopien für andere Geräte lassen sich nicht
+                // öffnen — beides darf nie als Nachricht im Verlauf landen.
+                stillUebergehen.add(env.id)
+                try {
+                  const klartext = await decryptE2eeHybridWithKeyring(
+                    env.ciphertext_envelope,
+                    decryptionKeys,
+                  )
+                  await verarbeiteGruppenSteuerung(gruppenKontext, klartext)
+                } catch {
+                  // Nicht für dieses Gerät bestimmt.
+                }
+                return { env, plain: '', ok: false }
+              }
+
+              const lesung = await entschluesseleGruppenUmschlag(
+                gruppenKontext.groupId,
+                env.ciphertext_envelope,
+              )
+              if (lesung.art === 'klartext') {
+                plain = lesung.text
+              } else {
+                if (lesung.art === 'kein-schluessel' && env.id > fehlenderGruppenschluessel.envId) {
+                  fehlenderGruppenschluessel.envId = env.id
+                  fehlenderGruppenschluessel.keyId = lesung.keyId
+                }
+                // 'unbekannt' — Altbestand aus der Zeit, als sich der
+                // Gruppenschlüssel aus der Gruppenkennung ableiten ließ. Der Weg
+                // dorthin ist geschlossen, auch lesend.
+                // 'bruch' — der Schlüssel liegt vor, der Tag stimmt nicht. Am
+                // Umschlag wurde gedreht.
+                throw new Error('Gruppenumschlag nicht lesbar')
+              }
             } else if (drKontext) {
               if (env.ciphertext_envelope.startsWith('sv-e2ee-hybrid-v1:')) {
                 plain = await decryptE2eeHybridWithKeyring(env.ciphertext_envelope, decryptionKeys)
@@ -1435,22 +1522,29 @@ export function Messenger() {
       }
 
       /**
-       * Direktnachrichten laufen der Reihe nach durch.
+       * Umschläge laufen der Reihe nach durch.
        *
-       * Nicht aus Vorsicht, sondern weil die Reihenfolge trägt: ein
-       * Sitzungsaufbau muss verarbeitet sein, bevor die Nachricht ankommt, für
-       * die er gilt. Nebenläufig gelesen käme die Nachricht mit einer Chance von
-       * fünfzig Prozent zuerst und liefe in einen Sitzungsbruch. Gruppen kennen
-       * das Problem nicht und bleiben nebenläufig.
+       * Nicht aus Vorsicht, sondern weil die Reihenfolge trägt. Im Direktchat
+       * muss ein Sitzungsaufbau verarbeitet sein, bevor die Nachricht ankommt,
+       * für die er gilt; in der Gruppe muss die Schlüsselzustellung vor der
+       * ersten Nachricht dieser Generation liegen. Beides steht in der Mailbox
+       * ohnehin in dieser Reihenfolge, weil der Absender es so hineinschreibt.
+       * Nebenläufig gelesen käme die Nachricht mit einer Chance von fünfzig
+       * Prozent zuerst — im Direktchat als Sitzungsbruch, in der Gruppe als
+       * überflüssige Nachforderung.
        */
       const decryptedEnvelopes: { env: (typeof envelopes)[number]; plain: string; ok: boolean }[] = []
-      if (drKontext) {
-        for (const env of envelopes) decryptedEnvelopes.push(await einUmschlag(env))
-      } else {
-        decryptedEnvelopes.push(...(await Promise.all(envelopes.map(einUmschlag))))
-      }
+      for (const env of envelopes) decryptedEnvelopes.push(await einUmschlag(env))
 
       if (activeMailboxIdRef.current !== currentMid || currentLoadSeqRef.current !== seq) return
+
+      if (gruppenKontext && fehlenderGruppenschluessel.keyId) {
+        // Gedrosselt und ohne Warten: die Antwort kommt als Umschlag im
+        // nächsten Durchlauf, nicht als Rückgabewert.
+        void fordereGruppenSchluessel(gruppenKontext, fehlenderGruppenschluessel.keyId).catch(
+          () => {}
+        )
+      }
 
       for (const { env, plain, ok } of decryptedEnvelopes) {
         if (seenEnvelopeIds.has(env.id)) continue
@@ -2179,8 +2273,14 @@ export function Messenger() {
       const payload = JSON.stringify(payloadObj)
       let ciphertext = ''
 
-      if (currentGroupId) {
-        ciphertext = await encryptGroupE2eeMessage(payload, currentGroupId)
+      if (currentGroupId && activeGroup) {
+        // Der Gruppenschlüssel rotiert hier, falls sich die Mitgliedschaft
+        // geändert hat — und die Zustellung an alle Geräte läuft mit. Deshalb
+        // steht das vor der Offline-Abzweigung: ohne Netz gibt es weder einen
+        // frischen Schlüssel noch einen Weg, ihn zu verteilen.
+        const gruppe = baueGruppenKontext(activeGroup, targetBlindMailboxId)
+        if (!gruppe) throw new Error('Die Gruppe ist noch nicht bereit.')
+        ciphertext = await verschluesseleFuerGruppe(gruppe, payload)
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
           enqueueMessageMutation({
             blind_mailbox_id: targetBlindMailboxId,
@@ -2728,6 +2828,10 @@ export function Messenger() {
   const handleLeaveGroup = async (group: ChatGroupItem) => {
     try {
       await leaveGroup(group.id)
+      // Wer draußen ist, braucht die Schlüssel nicht mehr — und soll sie auch
+      // nicht behalten. Der Verlauf dieser Gruppe wird damit unlesbar, was
+      // genau die Zusage ist, die ein Austritt geben soll.
+      await verwirfGruppenSchluessel(group.id).catch(() => {})
       toast.success(`Gruppe "${group.name}" verlassen.`)
       setActiveGroup(null)
       await loadData()
@@ -2746,6 +2850,7 @@ export function Messenger() {
     setIsDeletingGroup(true)
     try {
       await deleteGroup(groupToDelete.id)
+      await verwirfGruppenSchluessel(groupToDelete.id).catch(() => {})
       toast.success(`Gruppe "${groupToDelete.name}" gelöscht.`)
       setActiveGroup(null)
       setGroupToDelete(null)

@@ -1,0 +1,542 @@
+/**
+ * Der Gruppenschlüssel: erzeugen, zustellen, rotieren, nachfordern.
+ *
+ * Eine Gruppe kann keinen Double Ratchet fahren. Der Ratchet ist ein Faden
+ * zwischen genau zwei Geräten; bei zwanzig Mitgliedern mit je drei Geräten wären
+ * das je Nachricht sechzig Umschläge. Signal löst das mit Sender Keys, und genau
+ * das steht hier: ein Zufallsschlüssel je Gruppe, verschlüsselt wird einmal,
+ * zugestellt wird nur der **Schlüssel** — einzeln versiegelt gegen jedes Gerät
+ * jedes Mitglieds.
+ *
+ * **Warum nicht abgeleitet.** Vorher war der Gruppenschlüssel
+ * `sha256("msm:group:key:" + groupId)`. Die `groupId` steht in der Datenbank,
+ * also konnte das Backend jede Gruppennachricht mitlesen. Das war keine
+ * Ende-zu-Ende-Verschlüsselung, sondern eine, die genau den nicht aussperrt, den
+ * sie aussperren soll. Dieser Absatz bleibt stehen, damit niemand sie neu
+ * erfindet.
+ *
+ * **Die Kennung ist der Schlüssel.** `keyId = sha256Hex(schluessel).slice(0,16)`.
+ * Das ist nicht bloß eine Nummer: wer einen Schlüssel zustellt, kann ihn nicht
+ * unter der Kennung eines anderen unterschieben — beim Empfang wird die Kennung
+ * nachgerechnet. Eine Nachricht nennt die Kennung im Klartext, damit jedes Gerät
+ * weiß, welchen seiner Schlüssel es nehmen muss.
+ *
+ * **Zustellung über die Gruppenmailbox.** Die Umschläge sind gewöhnliche
+ * `sv-e2ee-hybrid-v1:`, relayed als Steuerumschläge in dieselbe Mailbox wie die
+ * Nachrichten. Das Backend braucht dafür nichts Neues, und es entstehen keine
+ * Direktchat-Zeilen zwischen Mitgliedern, die einander gar nicht kennen. Jeder
+ * lädt alle Umschläge, öffnen lässt sich nur der eigene.
+ *
+ * **Rotation.** Jeder Schlüssel merkt sich, für welche Mitgliedschaft er
+ * gemünzt wurde. Vor dem Senden wird das mit der heutigen Mitgliederliste
+ * verglichen; weicht sie ab, entsteht ein frischer Schlüssel. Wer die Gruppe
+ * verlassen hat, liest damit nichts Neues mehr — die Nachrichten von vorher
+ * bleiben ihm lesbar, denn seinen alten Schlüssel kann ihm niemand wegnehmen.
+ *
+ * Die Prüfung läuft beim Absender und nicht an einem zentralen Ereignis, weil
+ * ein Ereignis jemanden braucht, der es mitbekommt: wer rauswirft und danach den
+ * Tab schließt, hätte die Rotation nie ausgelöst. So entscheidet jedes Gerät für
+ * sich, aus derselben Mitgliederliste, und es heilt sich von selbst.
+ *
+ * **Nachzügler.** Ein Gerät ohne passenden Schlüssel fragt nach. Beantwortet
+ * wird nur der **aktuelle** Schlüssel, nie ein alter: sonst könnte sich jemand
+ * hinauswerfen lassen, über einen offenen Einladungslink zurückkommen und den
+ * gesamten Verlauf nachfordern.
+ */
+
+import { decryptString, encryptString, importAesGcmRawKey } from '@msdis/shield/aead'
+import { base64ToBytes, bytesToBase64 } from '@msdis/shield/core'
+import { sha256Hex } from '@msdis/shield/integrity'
+import { randomBytes } from '@msdis/shield/random'
+
+import { relayE2eeEnvelope } from '@/api/social'
+
+import { encryptE2eeHybrid } from './e2eeCrypto'
+import { eigenesGeraet, geraeteVon } from './e2eeGeraet'
+import { istSchluesselhalter } from './raumSchluessel'
+
+export const GRUPPE_PREFIX = 'sv-e2ee-group-v1:'
+export const GRUPPEN_SCHLUESSEL_TYP = 'group_key'
+export const GRUPPEN_ANFRAGE_TYP = 'group_key_request'
+
+const SCHLUESSEL_BYTES = 32
+const KEY_ID_LAENGE = 16
+const KEY_ID_MUSTER = /^[0-9a-f]{16}$/
+/** Eine Anfrage je Gruppe und Minute. Ohne Drossel fragt jeder Ladevorgang neu. */
+const ANFRAGE_DROSSEL_MS = 60_000
+
+export interface GruppenKontext {
+  groupId: number
+  /** Die Mailbox der Gruppe. Dort liegen Nachrichten und Schlüsselumschläge. */
+  blindMailboxId: string
+  eigeneId: number
+  /** Die Mitglieder, wie dieses Gerät sie gerade sieht. Quelle jeder Rotation. */
+  mitglieder: readonly number[]
+}
+
+export type GruppenLesung =
+  | { art: 'klartext'; text: string }
+  /** Kein Schlüssel zu dieser Kennung. Der Aufrufer darf nachfordern. */
+  | { art: 'kein-schluessel'; keyId: string }
+  /** Kein Umschlag dieses Verfahrens — Altbestand aus der Zeit der Ableitung. */
+  | { art: 'unbekannt' }
+  /** Schlüssel vorhanden, Tag gescheitert: am Umschlag wurde gedreht. */
+  | { art: 'bruch'; keyId: string; grund: string }
+
+export type GruppenSteuerung =
+  | { art: 'schluessel'; keyId: string }
+  | { art: 'anfrage'; vonKonto: number; beantwortet: boolean }
+  | { art: 'keine' }
+
+// ==========================================
+// Ablage
+// ==========================================
+
+export interface GruppenSchluesselEintrag {
+  groupId: number
+  keyId: string
+  /** Base64 der 32 Schlüsselbytes. */
+  schluessel: string
+  /** Die Mitgliedschaft, für die dieser Schlüssel gemünzt wurde. Sortiert. */
+  mitglieder: number[]
+  erzeugtAm: string
+}
+
+export interface GruppenAblage {
+  lies(groupId: number, keyId: string): Promise<GruppenSchluesselEintrag | null>
+  liesAktuellen(groupId: number): Promise<GruppenSchluesselEintrag | null>
+  /** Legt den Schlüssel ab und macht ihn zum aktuellen dieser Gruppe. */
+  schreibe(eintrag: GruppenSchluesselEintrag): Promise<void>
+  loescheGruppe(groupId: number): Promise<void>
+}
+
+const DB_NAME = 'msm_e2ee_gruppen'
+const DB_VERSION = 1
+const STORE_KEYS = 'keys'
+const STORE_AKTUELL = 'aktuell'
+
+function oeffneDatenbank(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') {
+      return reject(new Error('IndexedDB nicht verfügbar'))
+    }
+    const req = indexedDB.open(DB_NAME, DB_VERSION)
+    req.onupgradeneeded = () => {
+      const db = req.result
+      if (!db.objectStoreNames.contains(STORE_KEYS)) {
+        db.createObjectStore(STORE_KEYS, { keyPath: ['groupId', 'keyId'] })
+      }
+      if (!db.objectStoreNames.contains(STORE_AKTUELL)) {
+        db.createObjectStore(STORE_AKTUELL, { keyPath: 'groupId' })
+      }
+    }
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+}
+
+function hole<T>(store: string, key: IDBValidKey): Promise<T | null> {
+  return oeffneDatenbank().then(
+    (db) =>
+      new Promise<T | null>((resolve, reject) => {
+        const tx = db.transaction(store, 'readonly')
+        const req = tx.objectStore(store).get(key)
+        req.onsuccess = () => resolve((req.result as T) ?? null)
+        req.onerror = () => reject(req.error)
+      })
+  )
+}
+
+const indexedDbAblage: GruppenAblage = {
+  async lies(groupId, keyId) {
+    return hole<GruppenSchluesselEintrag>(STORE_KEYS, [groupId, keyId])
+  },
+  async liesAktuellen(groupId) {
+    const zeiger = await hole<{ groupId: number; keyId: string }>(STORE_AKTUELL, groupId)
+    if (!zeiger?.keyId) return null
+    return hole<GruppenSchluesselEintrag>(STORE_KEYS, [groupId, zeiger.keyId])
+  },
+  async schreibe(eintrag) {
+    const db = await oeffneDatenbank()
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction([STORE_KEYS, STORE_AKTUELL], 'readwrite')
+      tx.objectStore(STORE_KEYS).put(eintrag)
+      tx.objectStore(STORE_AKTUELL).put({ groupId: eintrag.groupId, keyId: eintrag.keyId })
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+      tx.onabort = () => reject(tx.error)
+    })
+  },
+  async loescheGruppe(groupId) {
+    const db = await oeffneDatenbank()
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction([STORE_KEYS, STORE_AKTUELL], 'readwrite')
+      // Der zusammengesetzte Schlüssel beginnt mit der Gruppenkennung, also
+      // trifft ein Bereich über [groupId] genau deren Schlüssel.
+      tx.objectStore(STORE_KEYS).delete(IDBKeyRange.bound([groupId], [groupId, []]))
+      tx.objectStore(STORE_AKTUELL).delete(groupId)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+      tx.onabort = () => reject(tx.error)
+    })
+  },
+}
+
+let ablage: GruppenAblage = indexedDbAblage
+
+/** Hängt eine andere Ablage ein. Nur für Tests gedacht. */
+export function setzeGruppenAblageFuerTest(neu: GruppenAblage | null): void {
+  ablage = neu ?? indexedDbAblage
+  anfrageZuletzt.clear()
+}
+
+// ==========================================
+// Format
+// ==========================================
+
+function gebundeneDaten(groupId: number, keyId: string): string {
+  return `msm:group:aad:${groupId}:${keyId}`
+}
+
+/**
+ * Führt eine Operation mit dem entpackten Schlüssel aus und nullt die Bytes
+ * danach. Der CryptoKey selbst ist nicht auslesbar; die Rohbytes wären es.
+ */
+async function mitSchluessel<T>(
+  eintrag: GruppenSchluesselEintrag,
+  arbeit: (key: CryptoKey) => Promise<T>,
+): Promise<T> {
+  const bytes = base64ToBytes(eintrag.schluessel)
+  try {
+    return await arbeit(await importAesGcmRawKey(bytes, ['encrypt', 'decrypt']))
+  } finally {
+    bytes.fill(0)
+  }
+}
+
+function lieseGruppenKopf(umschlag: string): { keyId: string; rumpf: string } | null {
+  if (!umschlag.startsWith(GRUPPE_PREFIX)) return null
+  const nutzlast = umschlag.slice(GRUPPE_PREFIX.length)
+  const punkt = nutzlast.indexOf('.')
+  if (punkt === -1) return null
+  const keyId = nutzlast.slice(0, punkt)
+  const rumpf = nutzlast.slice(punkt + 1)
+  if (!KEY_ID_MUSTER.test(keyId) || !rumpf) return null
+  return { keyId, rumpf }
+}
+
+/** Sortiert, entdoppelt, ohne Unsinn — damit zwei Geräte denselben Vergleich bilden. */
+function normalisiereMitglieder(ids: readonly unknown[]): number[] {
+  const sauber = new Set<number>()
+  for (const roh of ids) {
+    const id = Number(roh)
+    if (Number.isInteger(id) && id > 0) sauber.add(id)
+  }
+  return [...sauber].sort((a, b) => a - b)
+}
+
+function gleicheMitglieder(a: readonly number[], b: readonly number[]): boolean {
+  return a.length === b.length && a.every((id, i) => id === b[i])
+}
+
+// ==========================================
+// Schlüssel
+// ==========================================
+
+export async function erzeugeGruppenSchluessel(): Promise<{
+  keyId: string
+  schluessel: Uint8Array
+}> {
+  const schluessel = randomBytes(SCHLUESSEL_BYTES)
+  const keyId = (await sha256Hex(schluessel)).slice(0, KEY_ID_LAENGE)
+  return { keyId, schluessel }
+}
+
+/**
+ * Der Schlüssel, mit dem jetzt zu senden ist.
+ *
+ * Passt der aktuelle nicht mehr zur Mitgliedschaft, entsteht hier ein frischer
+ * und geht an alle Geräte aller Mitglieder raus. Erreicht die Zustellung nicht
+ * jedes Gerät, ist das kein Abbruch: die übergangenen Geräte sehen eine
+ * unbekannte Kennung und fordern nach.
+ */
+async function schluesselZumSenden(kontext: GruppenKontext): Promise<GruppenSchluesselEintrag> {
+  const jetzige = normalisiereMitglieder(kontext.mitglieder)
+  const vorhanden = await ablage.liesAktuellen(kontext.groupId)
+  if (vorhanden && gleicheMitglieder(vorhanden.mitglieder, jetzige)) return vorhanden
+
+  const { keyId, schluessel } = await erzeugeGruppenSchluessel()
+  const eintrag: GruppenSchluesselEintrag = {
+    groupId: kontext.groupId,
+    keyId,
+    schluessel: bytesToBase64(schluessel),
+    mitglieder: jetzige,
+    erzeugtAm: new Date().toISOString(),
+  }
+  schluessel.fill(0)
+
+  // Erst ablegen, dann verteilen: ein Schlüssel, der schon unterwegs ist und
+  // nirgends liegt, macht die eigenen Nachrichten unlesbar.
+  await ablage.schreibe(eintrag)
+  await verteileSchluessel(kontext, eintrag, jetzige)
+  return eintrag
+}
+
+/** Versiegelt eine Nutzlast für jedes Gerät der genannten Konten und relayed sie. */
+async function anJedesGeraet(
+  kontext: GruppenKontext,
+  empfaengerIds: readonly number[],
+  nutzlast: string,
+  kontrolltyp: string,
+): Promise<number> {
+  const meins = await eigenesGeraet()
+  const basis =
+    typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `gk-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+
+  let lfd = 0
+  let zugestellt = 0
+  for (const empfaengerId of empfaengerIds) {
+    const geraete = await geraeteVon(empfaengerId)
+    for (const geraet of geraete) {
+      // Das eigene Gerät hat den Schlüssel schon.
+      if (empfaengerId === kontext.eigeneId && geraet.device_id === meins.kennung) continue
+      const nummer = lfd++
+      try {
+        const umschlag = await encryptE2eeHybrid(nutzlast, geraet.public_key)
+        await relayE2eeEnvelope({
+          blind_mailbox_id: kontext.blindMailboxId,
+          ciphertext_envelope: umschlag,
+          // Je Gerät eine eigene Kennung: das Relais gibt beim zweiten Aufruf
+          // mit derselben Kennung still den ersten Umschlag zurück.
+          client_uuid: `${basis}#${nummer}`,
+          is_control: true,
+          control_type: kontrolltyp,
+        })
+        zugestellt += 1
+      } catch {
+        // Ein Gerät, das sich nicht erreichen lässt, hält die übrigen nicht auf.
+      }
+    }
+  }
+  return zugestellt
+}
+
+function schluesselNutzlast(eintrag: GruppenSchluesselEintrag): string {
+  return JSON.stringify({
+    typ: GRUPPEN_SCHLUESSEL_TYP,
+    v: 1,
+    groupId: eintrag.groupId,
+    keyId: eintrag.keyId,
+    schluessel: eintrag.schluessel,
+    mitglieder: eintrag.mitglieder,
+  })
+}
+
+async function verteileSchluessel(
+  kontext: GruppenKontext,
+  eintrag: GruppenSchluesselEintrag,
+  empfaenger: readonly number[],
+): Promise<number> {
+  return anJedesGeraet(kontext, empfaenger, schluesselNutzlast(eintrag), GRUPPEN_SCHLUESSEL_TYP)
+}
+
+// ==========================================
+// Nachrichten
+// ==========================================
+
+export async function verschluesseleFuerGruppe(
+  kontext: GruppenKontext,
+  klartext: string,
+): Promise<string> {
+  const eintrag = await schluesselZumSenden(kontext)
+  const chiffre = await mitSchluessel(eintrag, (key) =>
+    encryptString(klartext, key, gebundeneDaten(kontext.groupId, eintrag.keyId))
+  )
+  return `${GRUPPE_PREFIX}${eintrag.keyId}.${chiffre}`
+}
+
+export async function entschluesseleGruppenUmschlag(
+  groupId: number,
+  umschlag: string,
+): Promise<GruppenLesung> {
+  const kopf = lieseGruppenKopf(umschlag)
+  if (!kopf) return { art: 'unbekannt' }
+
+  const eintrag = await ablage.lies(groupId, kopf.keyId)
+  if (!eintrag) return { art: 'kein-schluessel', keyId: kopf.keyId }
+
+  try {
+    const text = await mitSchluessel(eintrag, (key) =>
+      decryptString(kopf.rumpf, key, gebundeneDaten(groupId, kopf.keyId))
+    )
+    return { art: 'klartext', text }
+  } catch (fehler) {
+    const grund = fehler instanceof Error ? fehler.name : 'unbekannt'
+    return { art: 'bruch', keyId: kopf.keyId, grund }
+  }
+}
+
+// ==========================================
+// Steuerumschläge
+// ==========================================
+
+/**
+ * Nimmt einen entschlüsselten Hybrid-Klartext aus einer Gruppenmailbox entgegen.
+ *
+ * Meldet `keine`, wenn es keiner der beiden Steuertypen war — dann gehört der
+ * Klartext in den normalen Lesepfad.
+ */
+export async function verarbeiteGruppenSteuerung(
+  kontext: GruppenKontext,
+  klartext: string,
+): Promise<GruppenSteuerung> {
+  let roh: Record<string, unknown>
+  try {
+    const geparst = JSON.parse(klartext)
+    if (!geparst || typeof geparst !== 'object') return { art: 'keine' }
+    roh = geparst as Record<string, unknown>
+  } catch {
+    return { art: 'keine' }
+  }
+
+  // Ein Umschlag aus einer fremden Gruppe darf hier nichts setzen. Ohne diese
+  // Prüfung könnte ein Mitglied von A einen Schlüssel für B unterschieben.
+  if (Number(roh.groupId) !== kontext.groupId) return { art: 'keine' }
+
+  if (roh.typ === GRUPPEN_SCHLUESSEL_TYP) {
+    return nimmSchluessel(kontext, roh)
+  }
+  if (roh.typ === GRUPPEN_ANFRAGE_TYP) {
+    return beantworteAnfrage(kontext, roh)
+  }
+  return { art: 'keine' }
+}
+
+async function nimmSchluessel(
+  kontext: GruppenKontext,
+  roh: Record<string, unknown>,
+): Promise<GruppenSteuerung> {
+  const keyId = String(roh.keyId ?? '')
+  const schluessel = String(roh.schluessel ?? '')
+  if (!KEY_ID_MUSTER.test(keyId) || !schluessel) return { art: 'keine' }
+
+  let bytes: Uint8Array
+  try {
+    bytes = base64ToBytes(schluessel)
+  } catch {
+    return { art: 'keine' }
+  }
+  try {
+    if (bytes.length !== SCHLUESSEL_BYTES) return { art: 'keine' }
+    // Die Kennung wird nachgerechnet. Sie ist der Hash des Schlüssels, also
+    // lässt sich unter einer bekannten Kennung kein anderer Schlüssel
+    // unterschieben — und ein Gerät, das denselben Schlüssel zweimal bekommt,
+    // schreibt zweimal dasselbe.
+    const gerechnet = (await sha256Hex(bytes)).slice(0, KEY_ID_LAENGE)
+    if (gerechnet !== keyId) return { art: 'keine' }
+  } finally {
+    bytes.fill(0)
+  }
+
+  // Die mitgeschickte Mitgliederliste entscheidet nur, wann *dieses* Gerät das
+  // nächste Mal rotiert. Eine falsche Angabe verzögert die Rotation bis zum
+  // nächsten eigenen Sendevorgang — mehr kann sie nicht, denn wer den Schlüssel
+  // münzt, hat ihn ohnehin.
+  await ablage.schreibe({
+    groupId: kontext.groupId,
+    keyId,
+    schluessel,
+    mitglieder: normalisiereMitglieder(Array.isArray(roh.mitglieder) ? roh.mitglieder : []),
+    erzeugtAm: new Date().toISOString(),
+  })
+  return { art: 'schluessel', keyId }
+}
+
+/**
+ * Wer einem Nachzügler antwortet, entscheidet jedes Gerät für sich aus der
+ * Mitgliederliste — dieselbe Regel wie beim Raumschlüssel eines Anrufs.
+ *
+ * Dazu kommt ein Fall, den ein Anruf nicht kennt: fragt ein **zweites Gerät
+ * desselben Kontos**, antworten die eigenen Geräte immer. `istSchluesselhalter`
+ * schließt das fragende Konto aus den Kandidaten aus, und ein frisch gekoppeltes
+ * Gerät in einer Gruppe, deren übrige Mitglieder gerade offline sind, bekäme
+ * sonst nie einen Schlüssel.
+ */
+async function beantworteAnfrage(
+  kontext: GruppenKontext,
+  roh: Record<string, unknown>,
+): Promise<GruppenSteuerung> {
+  const anfragerId = Number(roh.vonKonto)
+  if (!Number.isInteger(anfragerId) || anfragerId <= 0) return { art: 'keine' }
+  // Nur Mitglieder bekommen Schlüssel. Und die Geräteschlüssel kommen aus dem
+  // Verzeichnis, nie aus der Anfrage — sonst bestimmte der Fragende selbst,
+  // wogegen versiegelt wird.
+  if (!kontext.mitglieder.includes(anfragerId)) return { art: 'keine' }
+
+  const eigenesKonto = anfragerId === kontext.eigeneId
+  const zustaendig =
+    eigenesKonto || istSchluesselhalter(kontext.eigeneId, kontext.mitglieder, anfragerId)
+  if (!zustaendig) return { art: 'anfrage', vonKonto: anfragerId, beantwortet: false }
+
+  const eintrag = await ablage.liesAktuellen(kontext.groupId)
+  if (!eintrag) return { art: 'anfrage', vonKonto: anfragerId, beantwortet: false }
+
+  // Nur der aktuelle Schlüssel. Ältere bleiben hier, sonst holte sich ein
+  // Zurückgekehrter über eine Anfrage den ganzen Verlauf.
+  const zugestellt = await anJedesGeraet(
+    kontext,
+    [anfragerId],
+    schluesselNutzlast(eintrag),
+    GRUPPEN_SCHLUESSEL_TYP,
+  )
+  return { art: 'anfrage', vonKonto: anfragerId, beantwortet: zugestellt > 0 }
+}
+
+const anfrageZuletzt = new Map<number, number>()
+
+/**
+ * Fordert den aktuellen Gruppenschlüssel an.
+ *
+ * Gerichtet an den zuständigen Halter und an die eigenen Zweitgeräte, statt an
+ * alle Mitglieder: antworten würde ohnehin nur dieser eine Kreis, und eine
+ * Rundsendung an jedes Gerät jedes Mitglieds kostet in großen Gruppen ein
+ * Vielfaches.
+ *
+ * Gedrosselt auf eine Anfrage je Gruppe und Minute. Der Aufrufer ruft das für
+ * die **neueste** unlesbare Kennung auf; ältere unlesbare Nachrichten lösen
+ * nichts aus, sonst fragte jeder Ladevorgang nach Schlüsseln, die es nicht mehr
+ * gibt.
+ */
+export async function fordereGruppenSchluessel(
+  kontext: GruppenKontext,
+  fehlendeKeyId: string,
+): Promise<boolean> {
+  const jetzt = Date.now()
+  const zuletzt = anfrageZuletzt.get(kontext.groupId) ?? 0
+  if (jetzt - zuletzt < ANFRAGE_DROSSEL_MS) return false
+
+  const andere = kontext.mitglieder.filter((id) => id !== kontext.eigeneId)
+  const ziele = andere.length > 0 ? [Math.min(...andere), kontext.eigeneId] : [kontext.eigeneId]
+
+  const meins = await eigenesGeraet()
+  const nutzlast = JSON.stringify({
+    typ: GRUPPEN_ANFRAGE_TYP,
+    v: 1,
+    groupId: kontext.groupId,
+    vonKonto: kontext.eigeneId,
+    vonGeraet: meins.kennung,
+    keyId: fehlendeKeyId,
+  })
+
+  anfrageZuletzt.set(kontext.groupId, jetzt)
+  const zugestellt = await anJedesGeraet(kontext, ziele, nutzlast, GRUPPEN_ANFRAGE_TYP)
+  return zugestellt > 0
+}
+
+/** Wirft die Schlüssel einer Gruppe weg. Beim Verlassen und beim Löschen fällig. */
+export async function verwirfGruppenSchluessel(groupId: number): Promise<void> {
+  anfrageZuletzt.delete(groupId)
+  await ablage.loescheGruppe(groupId)
+}

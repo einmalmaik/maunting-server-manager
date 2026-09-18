@@ -112,6 +112,9 @@ VALID_E2EE_PREFIXES = (
 # trennt die Felder.
 _GERAETEKENNUNG = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 
+# Kennung des Gruppenschlüssels: die ersten 16 Hexzeichen seines SHA-256.
+_GRUPPEN_KEY_ID = re.compile(r"^[0-9a-f]{16}$")
+
 
 def validate_rsa_public_key_jwk(key_str: str) -> dict:
     """Validiert, dass ein übergebener String ein sicherer RSA-OAEP Public Key im JWK-Format ist."""
@@ -231,7 +234,22 @@ def validate_e2ee_envelope_format(envelope_str: str) -> None:
             raise ValueError("Double-Ratchet-Rumpf trägt kein gültiges DIS-Nachrichtenformat.")
         return
 
-    if matched_prefix == "sv-e2ee-hybrid-v1:":
+    if matched_prefix == "sv-e2ee-group-v1:":
+        # <keyId>.<ciphertext>
+        #
+        # Die Kennung ist der Hash des Gruppenschlüssels und steht im Klartext,
+        # weil ein Gerät mehrere Generationen hält und wissen muss, welche
+        # gemeint ist. Sie sagt dem Server nichts: sie hängt allein am
+        # Schlüssel, den er nie sieht. Der alte Gruppenumschlag trug hier
+        # ausschließlich Base64 ohne Punkt und fällt damit durch — genau so
+        # gewollt, sein Schlüssel ergab sich aus der Gruppenkennung.
+        if "." not in payload:
+            raise ValueError("Ungültiges Gruppen-Payload-Format: Schlüsselkennung vor dem Chiffretext fehlt.")
+        key_id, gruppen_ct = payload.split(".", 1)
+        if not _GRUPPEN_KEY_ID.match(key_id):
+            raise ValueError("Ungültige Schlüsselkennung im Gruppen-Umschlag.")
+        ct_to_check = gruppen_ct.strip()
+    elif matched_prefix == "sv-e2ee-hybrid-v1:":
         if "." not in payload:
             raise ValueError("Ungültiges Hybrid-Payload-Format: Punkt-Trennzeichen zwischen Schlüssel und Chiffretext fehlt.")
         wrapped_part, ct = payload.split(".", 1)

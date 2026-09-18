@@ -16,6 +16,14 @@ from services.ai_proposals.lifecycle import create_proposal
 from services import ai_proposal_service
 
 
+# Die Schlüsselkennung im Kopf eines Gruppenumschlags: seit 09/2026 trägt
+# `sv-e2ee-group-v1:` sie vor dem Chiffretext, weil ein Gerät mehrere
+# Schlüsselgenerationen hält. Ein Umschlag ohne sie stammt aus der Zeit, als
+# sich der Gruppenschlüssel aus der Gruppenkennung ableiten ließ, und wird
+# beim Schreiben abgewiesen.
+_GRUPPEN_KEY = "00112233445566ff."
+
+
 def test_achievement_catalog_and_dynamic_rarity(db: Session, owner_user: User):
     """Prüft den Meilenstein-Katalog und die dynamische Seltenheitsberechnung."""
     catalog = AchievementService.get_catalog()
@@ -163,7 +171,7 @@ def test_e2ee_zero_knowledge_blind_relay(db: Session):
     blind_mailbox = "a" * 64
     import base64
     b64_ct = base64.b64encode(b"N" * 12 + b"test-ciphertext-blob" + b"T" * 16).decode("ascii")
-    envelope = f"sv-e2ee-group-v1:{b64_ct}"
+    envelope = f"sv-e2ee-group-v1:{_GRUPPEN_KEY}{b64_ct}"
 
     relayed = SocialService.relay_blind_envelope(
         db,
@@ -320,7 +328,7 @@ def test_chat_group_create_join_invite(db: Session, owner_user: User, regular_us
     env = SocialService.relay_blind_envelope(
         db,
         blind_mailbox_id=blind_mailbox,
-        ciphertext_envelope=f"sv-e2ee-group-v1:{b64_team}",
+        ciphertext_envelope=f"sv-e2ee-group-v1:{_GRUPPEN_KEY}{b64_team}",
     )
     assert env.id is not None
     assert env.blind_mailbox_id == blind_mailbox
@@ -542,7 +550,7 @@ def test_e2ee_security_replay_attack_prevention(db: Session, owner_user: User):
     from fastapi import HTTPException
 
     valid_ct = base64.b64encode(os.urandom(12) + b"ciphertext-bytes-here" + os.urandom(16)).decode("ascii")
-    envelope = f"sv-e2ee-group-v1:{valid_ct}"
+    envelope = f"sv-e2ee-group-v1:{_GRUPPEN_KEY}{valid_ct}"
     box_a = "1" * 64
     box_b = "2" * 64
 
@@ -585,7 +593,7 @@ def test_e2ee_security_envelope_format_and_tampering(db: Session):
     zero_iv_raw = b"\x00" * 12 + b"ciphertext-bytes-here" + b"\x01" * 16
     zero_iv_b64 = base64.b64encode(zero_iv_raw).decode("ascii")
     with pytest.raises(ValueError) as exc_iv:
-        validate_e2ee_envelope_format(f"sv-e2ee-group-v1:{zero_iv_b64}")
+        validate_e2ee_envelope_format(f"sv-e2ee-group-v1:{_GRUPPEN_KEY}{zero_iv_b64}")
     assert "Null-IV" in str(exc_iv.value)
 
     # 4. Steuerzeichen im Umschlag
@@ -596,7 +604,7 @@ def test_e2ee_security_envelope_format_and_tampering(db: Session):
     # 5. Zu kurzer Ciphertext (< 38 Zeichen / 28 Bytes)
     short_ct = base64.b64encode(b"\x01" * 10).decode("ascii")
     with pytest.raises(ValueError) as exc_short:
-        validate_e2ee_envelope_format(f"sv-e2ee-group-v1:{short_ct}")
+        validate_e2ee_envelope_format(f"sv-e2ee-group-v1:{_GRUPPEN_KEY}{short_ct}")
     assert "zu kurz" in str(exc_short.value).lower()
 
     # 6. Die abgeschafften Formate werden beim Schreiben nicht mehr angenommen.
@@ -611,6 +619,40 @@ def test_e2ee_security_envelope_format_and_tampering(db: Session):
         assert "Ungültiges E2EE-Umschlagformat" in str(exc_alt.value)
     with pytest.raises(ValueError):
         validate_e2ee_envelope_format(f"sv-e2ee-ratchet-v1:0.{valid_b64}")
+
+
+def test_gruppenumschlag_braucht_eine_schluesselkennung():
+    """`sv-e2ee-group-v1:<keyId>.<chiffre>` — ohne Kennung ist es der Altbestand.
+
+    Der alte Gruppenumschlag trug hier nur Base64. Sein Schlüssel war
+    `sha256("msm:group:key:" + groupId)`, und die Gruppenkennung steht in der
+    Datenbank — der Server konnte jede Gruppennachricht öffnen. Die Kennung im
+    Kopf ist deshalb nicht bloß Formsache: sie ist das Merkmal, an dem das
+    Backend neue von alten Umschlägen unterscheidet.
+    """
+    import base64
+    from schemas.social import validate_e2ee_envelope_format
+
+    chiffre = base64.b64encode(b"N" * 12 + b"gruppen-chiffretext" + b"T" * 16).decode("ascii")
+
+    validate_e2ee_envelope_format(f"sv-e2ee-group-v1:{_GRUPPEN_KEY}{chiffre}")
+
+    for kaputt, erwartet in (
+        # Der Altbestand: reines Base64 ohne Kennung.
+        (f"sv-e2ee-group-v1:{chiffre}", "Schlüsselkennung"),
+        # Kennungen, die keine sind: zu kurz, zu lang, keine Hexzeichen.
+        (f"sv-e2ee-group-v1:00ff.{chiffre}", "Schlüsselkennung"),
+        (f"sv-e2ee-group-v1:{'a' * 32}.{chiffre}", "Schlüsselkennung"),
+        (f"sv-e2ee-group-v1:00112233445566FF.{chiffre}", "Schlüsselkennung"),
+        (f"sv-e2ee-group-v1:00112233445566gg.{chiffre}", "Schlüsselkennung"),
+        # Kennung in Ordnung, Chiffretext nicht. Lang genug, damit nicht schon
+        # die Längenprüfung davor greift.
+        (f"sv-e2ee-group-v1:{_GRUPPEN_KEY}{'!' * 44}", "Base64"),
+        (f"sv-e2ee-group-v1:{_GRUPPEN_KEY}kurz", "zu kurz"),
+    ):
+        with pytest.raises(ValueError) as exc:
+            validate_e2ee_envelope_format(kaputt)
+        assert erwartet in str(exc.value), kaputt
 
 
 def test_double_ratchet_umschlag_wird_geprueft():

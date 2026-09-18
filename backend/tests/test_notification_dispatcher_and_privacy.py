@@ -14,6 +14,14 @@ from services import ai_proposal_service
 from services.ai_proposals.lifecycle import create_proposal
 
 
+# Die Schlüsselkennung im Kopf eines Gruppenumschlags: seit 09/2026 trägt
+# `sv-e2ee-group-v1:` sie vor dem Chiffretext, weil ein Gerät mehrere
+# Schlüsselgenerationen hält. Ein Umschlag ohne sie stammt aus der Zeit, als
+# sich der Gruppenschlüssel aus der Gruppenkennung ableiten ließ, und wird
+# beim Schreiben abgewiesen.
+_GRUPPEN_KEY = "00112233445566ff."
+
+
 def _create_user(db: Session, username: str, privacy: str = "friends") -> User:
     user = User(
         username=username,
@@ -138,7 +146,7 @@ def test_eigene_nachricht_erzeugt_keine_eigene_benachrichtigung(db: Session, own
     db.commit()
 
     mailbox = SocialService.derive_blind_mailbox_id(user_sender.id, user_recipient.id)
-    umschlag = "sv-e2ee-group-v1:" + base64.b64encode(
+    umschlag = "sv-e2ee-group-v1:" + _GRUPPEN_KEY + base64.b64encode(
         bytes(range(1, 13)) + b"vom-client-verschluesselt" + bytes(16)
     ).decode("ascii")
 
@@ -372,8 +380,8 @@ async def test_group_relay_targeted_to_members_only_no_leak_to_strangers(db: Ses
     conn_bob, q_bob = SyncEventService.subscribe(user_id=bob.id)
     conn_stranger, q_stranger = SyncEventService.subscribe(user_id=charlie_stranger.id)
 
-    valid_env = "sv-e2ee-group-v1:" + base64.b64encode(b"N" * 12 + b"group_payload_test" + b"T" * 16).decode("ascii")
-    illegal_env = "sv-e2ee-group-v1:" + base64.b64encode(b"N" * 12 + b"illegal_payload_test" + b"T" * 16).decode("ascii")
+    valid_env = "sv-e2ee-group-v1:" + _GRUPPEN_KEY + base64.b64encode(b"N" * 12 + b"group_payload_test" + b"T" * 16).decode("ascii")
+    illegal_env = "sv-e2ee-group-v1:" + _GRUPPEN_KEY + base64.b64encode(b"N" * 12 + b"illegal_payload_test" + b"T" * 16).decode("ascii")
 
     try:
         SocialService.relay_blind_envelope(

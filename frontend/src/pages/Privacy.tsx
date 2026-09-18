@@ -57,6 +57,7 @@ export function Privacy() {
           t('privacyPolicy.sections.messenger.items.deviceFanout'),
           t('privacyPolicy.sections.messenger.items.deviceHistory'),
           t('privacyPolicy.sections.messenger.items.ratchet'),
+          t('privacyPolicy.sections.messenger.items.groups'),
           t('privacyPolicy.sections.messenger.items.attachments'),
           t('privacyPolicy.sections.messenger.items.receipts'),
           // Anrufe sind die eine Stelle, an der die Instanz mehr erfaehrt als

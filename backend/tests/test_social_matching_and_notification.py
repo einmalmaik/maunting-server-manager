@@ -17,6 +17,14 @@ from services.sync_event_service import SyncEventService
 from services.ai_action_errors import AiActionValidationError
 
 
+# Die Schlüsselkennung im Kopf eines Gruppenumschlags: seit 09/2026 trägt
+# `sv-e2ee-group-v1:` sie vor dem Chiffretext, weil ein Gerät mehrere
+# Schlüsselgenerationen hält. Ein Umschlag ohne sie stammt aus der Zeit, als
+# sich der Gruppenschlüssel aus der Gruppenkennung ableiten ließ, und wird
+# beim Schreiben abgewiesen.
+_GRUPPEN_KEY = "00112233445566ff."
+
+
 def _allow_memory(db: Session, user: User) -> None:
     ai_memory_service.set_preference(db, user, True)
 
@@ -200,7 +208,7 @@ def test_beziehungsalias_loest_auf_und_quittung_erreicht_nur_den_empfaenger(
     # 2. Ein Umschlag geht durch das Relais und trägt Absender und Empfänger im
     #    Ereignis — ohne die brauchte der Filter unten raten.
     mailbox = SocialService.derive_blind_mailbox_id(owner_user.id, charlie.id)
-    ciphertext = "sv-e2ee-group-v1:" + base64.b64encode(
+    ciphertext = "sv-e2ee-group-v1:" + _GRUPPEN_KEY + base64.b64encode(
         bytes(range(1, 13)) + b"verschluesselter-rumpf" + bytes(16)
     ).decode("ascii")
 
