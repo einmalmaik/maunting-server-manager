@@ -60,9 +60,11 @@ import {
 import { useCallStore, setzeAnrufIdentitaet } from '@/stores/useCallStore'
 import { starteGruppenanruf } from '@/api/calls'
 import { apiUrl } from '@/config/api'
-import { CircularVideoNoteRecorder } from '@/components/social/CircularVideoNoteRecorder'
+import {
+  CircularVideoNoteRecorder,
+  type VideoNoteAufnahme,
+} from '@/components/social/CircularVideoNoteRecorder'
 import { CircularVideoNotePlayer } from '@/components/social/CircularVideoNotePlayer'
-import type { VideoNoteAttachment } from '@/services/videoNoteCrypto'
 import { DeviceBadge } from '@/components/social/DeviceBadge'
 import {
   GruppenEinladungsKarte,
@@ -88,13 +90,20 @@ import {
   relayE2eeEnvelope,
   fetchE2eeEnvelopes,
   sendTypingSignal,
-  uploadEncryptedChatAttachment,
+  ladeAnhangHoch,
   uploadGroupAvatar,
 } from '@/api/social'
+import { maxKlartextBytes } from '@/services/medienKrypto'
 import {
   ChatMediaImage,
   ChatMediaFile,
   chatMediaBlobCache,
+  holeAnhangUrl,
+  type AudioAttachment,
+  type FileAttachment,
+  type ImageAttachment,
+  type MedienBindungsKontext,
+  type VideoNoteAttachment,
 } from '@/components/social/ChatMediaAttachments'
 import { teamsApi, type TeamMember } from '@/api/teams'
 import {
@@ -116,7 +125,6 @@ import {
   scrubPlaintextStorage,
   envelopePlaintextCache,
   clearEnvelopePlaintextCache,
-  type AttachmentCryptoContext,
 } from '@/services/e2eeCrypto'
 import {
   resolveIdentity,
@@ -250,25 +258,15 @@ export interface CalendarAttachment {
   location?: string
 }
 
-export interface ImageAttachment {
-  dataUrl?: string
-  name?: string
-  mediaId?: string
-}
-
-export interface AudioAttachment {
-  dataUrl: string
-  durationSeconds: number
-  mimeType: string
-}
-
-export interface FileAttachment {
-  name: string
-  sizeBytes: number
-  mimeType: string
-  dataUrl?: string
-  mediaId?: string
-}
+// Die Anhangstypen stehen bei den Komponenten, die sie anzeigen. Hier standen
+// bis 09/2026 zweite Fassungen davon, die auseinanderliefen, sobald sich eine
+// änderte.
+export type {
+  ImageAttachment,
+  AudioAttachment,
+  FileAttachment,
+  VideoNoteAttachment,
+} from '@/components/social/ChatMediaAttachments'
 
 export interface StickerAttachment {
   id: string
@@ -330,6 +328,16 @@ function formatDuration(sec: number): string {
   const m = Math.floor(sec / 60)
   const s = Math.floor(sec % 60)
   return `${m}:${s < 10 ? '0' : ''}${s}`
+}
+
+/** Macht aus einer Aufnahme die Zeichenkette, die `medienKrypto` verschlüsselt. */
+function blobAlsDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const leser = new FileReader()
+    leser.onload = () => resolve(String(leser.result || ''))
+    leser.onerror = () => reject(leser.error ?? new Error('Aufnahme nicht lesbar'))
+    leser.readAsDataURL(blob)
+  })
 }
 
 function getSupportedAudioMimeType(): string {
@@ -1420,7 +1428,6 @@ export function Messenger() {
        */
       const fehlenderGruppenschluessel = { envId: 0, keyId: '' }
 
-
       const einUmschlag = async (env: (typeof envelopes)[number]) => {
           const gespeichert = bekannteKlartexte.get(env.id)
           if (gespeichert !== undefined) {
@@ -2108,7 +2115,7 @@ export function Messenger() {
     file?: FileAttachment,
     sticker?: StickerAttachment,
     storyReply?: StoryReplyAttachment,
-    videoNote?: VideoNoteAttachment,
+    videoNote?: VideoNoteAufnahme,
     videoUrl?: string
   ) => {
     // If currently editing a message, redirect to edit handler
@@ -2120,7 +2127,7 @@ export function Messenger() {
 
     const rawText = customText !== undefined ? customText : inputText.trim()
     if (
-      (!rawText && !note && !cal && !img && !audio && !file && !sticker && !storyReply) ||
+      (!rawText && !note && !cal && !img && !audio && !file && !sticker && !storyReply && !videoNote) ||
       (!activeContact && !activeGroup) ||
       !blindMailboxId ||
       !currentUserId
@@ -2153,7 +2160,15 @@ export function Messenger() {
       audioAttachment: audio,
       stickerAttachment: sticker,
       storyReply,
-      videoNoteAttachment: videoNote,
+      // Der Zeiger auf den Blob wird nachgetragen, sobald der Upload durch ist.
+      videoNoteAttachment: videoNote
+        ? {
+            durationSeconds: videoNote.durationSeconds,
+            width: videoNote.width,
+            height: videoNote.height,
+            mimeType: videoNote.mimeType,
+          }
+        : undefined,
       videoUrl,
       isDelivered: false,
       isRead: false,
@@ -2209,29 +2224,42 @@ export function Messenger() {
 
       let finalImg: ImageAttachment | undefined = undefined
       let finalFile: FileAttachment | undefined = undefined
+      let finalAudio: AudioAttachment | undefined = undefined
+      let finalVideoNote: VideoNoteAttachment | undefined = undefined
 
-      const cryptoContext: AttachmentCryptoContext = currentGroupId
-        ? { groupId: currentGroupId }
-        : { userAId: currentUserId, userBId: targetUserId }
+      /**
+       * Verschlüsselt einen Anhang auf diesem Gerät und lädt ihn hoch.
+       *
+       * Mailbox und Absender gehen als Bindung mit ein: ein Blob, den jemand in
+       * ein anderes Gespräch umhängt, scheitert beim Empfänger am Tag. Deshalb
+       * steht der Upload hier und nicht schon beim Aufnehmen — dort ist noch
+       * nicht klar, wohin die Aufnahme geht.
+       */
+      const anhangHochladen = (klartext: string, dateiname: string, mimeType: string) =>
+        ladeAnhangHoch({
+          klartext,
+          dateiname,
+          mimeType,
+          blindMailboxId: targetBlindMailboxId,
+          absenderId: currentUserId,
+          groupId: currentGroupId,
+          recipientId: targetUserId,
+        })
 
       if (img) {
         if (img.mediaId) {
-          finalImg = { mediaId: img.mediaId, name: img.name }
+          finalImg = {
+            mediaId: img.mediaId,
+            paketSchluessel: img.paketSchluessel,
+            fileId: img.fileId,
+            name: img.name,
+          }
         } else if (img.dataUrl) {
           try {
             const mimeType = img.dataUrl.split(';')[0]?.replace('data:', '') || 'image/png'
-            const uploaded = await uploadEncryptedChatAttachment(
-              img.dataUrl,
-              img.name || 'image.png',
-              targetBlindMailboxId,
-              cryptoContext,
-              mimeType,
-              { groupId: currentGroupId, recipientId: targetUserId }
-            )
-            if (uploaded?.id) {
-              chatMediaBlobCache.set(uploaded.id, img.dataUrl)
-              finalImg = { mediaId: uploaded.id, name: img.name }
-            }
+            const zeiger = await anhangHochladen(img.dataUrl, img.name || 'bild.png', mimeType)
+            chatMediaBlobCache.set(zeiger.mediaId, img.dataUrl)
+            finalImg = { ...zeiger, name: img.name }
           } catch {
             finalImg = { name: img.name }
           }
@@ -2240,20 +2268,27 @@ export function Messenger() {
 
       if (file) {
         if (file.mediaId) {
-          finalFile = { mediaId: file.mediaId, name: file.name, sizeBytes: file.sizeBytes, mimeType: file.mimeType }
+          finalFile = {
+            mediaId: file.mediaId,
+            paketSchluessel: file.paketSchluessel,
+            fileId: file.fileId,
+            name: file.name,
+            sizeBytes: file.sizeBytes,
+            mimeType: file.mimeType,
+          }
         } else if (file.dataUrl) {
           try {
-            const uploaded = await uploadEncryptedChatAttachment(
+            const zeiger = await anhangHochladen(
               file.dataUrl,
-              file.name || 'attachment.bin',
-              targetBlindMailboxId,
-              cryptoContext,
-              file.mimeType || 'application/octet-stream',
-              { groupId: currentGroupId, recipientId: targetUserId }
+              file.name || 'anhang.bin',
+              file.mimeType || 'application/octet-stream'
             )
-            if (uploaded?.id) {
-              chatMediaBlobCache.set(uploaded.id, file.dataUrl)
-              finalFile = { mediaId: uploaded.id, name: file.name, sizeBytes: file.sizeBytes, mimeType: file.mimeType }
+            chatMediaBlobCache.set(zeiger.mediaId, file.dataUrl)
+            finalFile = {
+              ...zeiger,
+              name: file.name,
+              sizeBytes: file.sizeBytes,
+              mimeType: file.mimeType,
             }
           } catch {
             finalFile = { name: file.name, sizeBytes: file.sizeBytes, mimeType: file.mimeType }
@@ -2261,14 +2296,57 @@ export function Messenger() {
         }
       }
 
+      // Ton und Videonotiz haben keinen Ersatz ohne Blob: eine Sprachnachricht
+      // ohne Aufnahme wäre eine leere Zeile. Scheitert der Upload, scheitert das
+      // Senden, und der catch-Zweig nimmt die Nachricht wieder aus dem Verlauf.
+      if (audio?.dataUrl) {
+        const zeiger = await anhangHochladen(
+          audio.dataUrl,
+          'sprachnachricht.webm',
+          audio.mimeType || 'audio/webm'
+        )
+        chatMediaBlobCache.set(zeiger.mediaId, audio.dataUrl)
+        finalAudio = {
+          ...zeiger,
+          durationSeconds: audio.durationSeconds,
+          mimeType: audio.mimeType,
+        }
+      }
+
+      if (videoNote) {
+        const dataUrl = await blobAlsDataUrl(videoNote.blob)
+        const zeiger = await anhangHochladen(dataUrl, 'videonotiz.webm', videoNote.mimeType)
+        chatMediaBlobCache.set(zeiger.mediaId, dataUrl)
+        finalVideoNote = {
+          ...zeiger,
+          durationSeconds: videoNote.durationSeconds,
+          width: videoNote.width,
+          height: videoNote.height,
+          mimeType: videoNote.mimeType,
+        }
+      }
+
+      // Was hochgeladen wurde, gehört auch in die eigene Zeile: sonst zeigt sie
+      // nach einem Neuladen auf eine Blob-URL, die es nicht mehr gibt.
+      if (finalAudio || finalVideoNote) {
+        const nachtrag = {
+          ...(finalAudio ? { audioAttachment: finalAudio } : {}),
+          ...(finalVideoNote ? { videoNoteAttachment: finalVideoNote } : {}),
+        }
+        setMessages((prev) =>
+          prev.map((m) => (m.clientUuid === clientUuid ? { ...m, ...nachtrag } : m))
+        )
+        void updateMessageInLocalStore(targetBlindMailboxId, clientUuid, nachtrag)
+      }
+
       if (note) payloadObj.note_attachment = note
       if (cal) payloadObj.calendar_attachment = cal
       if (finalImg) payloadObj.image_attachment = finalImg
-      if (audio) payloadObj.audio_attachment = audio
+      if (finalAudio) payloadObj.audio_attachment = finalAudio
       if (finalFile) payloadObj.file_attachment = finalFile
       if (sticker) payloadObj.sticker_attachment = sticker
       if (storyReply) payloadObj.story_reply = storyReply
-      if (videoNote) payloadObj.video_note_attachment = videoNote
+      if (finalVideoNote) payloadObj.video_note_attachment = finalVideoNote
 
       const payload = JSON.stringify(payloadObj)
       let ciphertext = ''
@@ -2620,8 +2698,31 @@ export function Messenger() {
     }
   }
 
+  /**
+   * Woran die Anhänge einer Nachricht hängen.
+   *
+   * Absender und Mailbox kommen aus dem Gespräch, nicht aus dem Anhang. DIS
+   * bindet beides in die gebundenen Daten jedes Stücks — deshalb lässt sich ein
+   * Blob nicht in ein anderes Gespräch oder unter einen anderen Absender
+   * umhängen.
+   */
+  const medienBindung = (msg: ChatMessage): MedienBindungsKontext => ({
+    absenderId: Number(msg.senderId) || Number(currentUserId) || 0,
+    blindMailboxId,
+  })
+
+  /** Die eigene Aufnahme, solange sie lokal liegt; sonst aus dem Medienspeicher. */
+  const tonQuelle = async (
+    anhang: AudioAttachment,
+    bindung: MedienBindungsKontext
+  ): Promise<string | null> => anhang.dataUrl || (await holeAnhangUrl(anhang, bindung))
+
   // Voice playback handler
-  const togglePlayAudio = (messageId: number, dataUrl: string) => {
+  const togglePlayAudio = async (
+    messageId: number,
+    anhang: AudioAttachment,
+    bindung: MedienBindungsKontext
+  ) => {
     if (playingAudioId === messageId) {
       if (audioInstanceRef.current) {
         audioInstanceRef.current.pause()
@@ -2639,7 +2740,13 @@ export function Messenger() {
         audioInstanceRef.current.onerror = null
         audioInstanceRef.current = null
       }
-      const audio = new Audio(dataUrl)
+      const quelle = await tonQuelle(anhang, bindung)
+      if (!quelle) {
+        toast.error('Sprachnachricht konnte nicht geladen werden.')
+        return
+      }
+
+      const audio = new Audio(quelle)
       audio.playbackRate = audioPlaybackRate
       audioInstanceRef.current = audio
       setPlayingAudioId(messageId)
@@ -2677,14 +2784,17 @@ export function Messenger() {
   }
 
   // Seek audio playback when clicking anywhere on the waveform
-  const handleWaveformSeek = (
+  const handleWaveformSeek = async (
     messageId: number,
-    dataUrl: string,
-    durationSeconds: number,
+    anhang: AudioAttachment,
+    bindung: MedienBindungsKontext,
     e: React.MouseEvent<HTMLDivElement>
   ) => {
     e.stopPropagation()
+    // Die Maße des Elements müssen vor jedem `await` feststehen: React gibt das
+    // Ereignis danach frei und `currentTarget` ist null.
     const rect = e.currentTarget.getBoundingClientRect()
+    const durationSeconds = anhang.durationSeconds
     if (rect.width <= 0 || durationSeconds <= 0) return
     const clickX = Math.max(0, Math.min(e.clientX - rect.left, rect.width))
     const seekFrac = clickX / rect.width
@@ -2701,7 +2811,13 @@ export function Messenger() {
         audioInstanceRef.current.onerror = null
         audioInstanceRef.current = null
       }
-      const audio = new Audio(dataUrl)
+      const quelle = await tonQuelle(anhang, bindung)
+      if (!quelle) {
+        toast.error('Sprachnachricht konnte nicht geladen werden.')
+        return
+      }
+
+      const audio = new Audio(quelle)
       audio.playbackRate = audioPlaybackRate
       audio.currentTime = targetTime
       audioInstanceRef.current = audio
@@ -2865,13 +2981,19 @@ export function Messenger() {
   // File Attachment Helper (for drag-and-drop and document input)
   const handleFileAttachment = (file: File) => {
     // 1. Storage-Limits vor FileReader-Aufruf prüfen (Schutz vor Riesen-Dateien und Abstürzen)
-    const MAX_FILE_BYTES = 25 * 1024 * 1024 // 25 MB Limit
-    const MAX_IMAGE_BYTES = 8 * 1024 * 1024 // 8 MB Limit für Bilder
+    //
+    // Die Obergrenze rechnet sich aus dem Deckel des Backends zurück: die Datei
+    // wird als data-URL gelesen (ein Drittel mehr) und dann verschlüsselt
+    // verpackt. Hier standen früher feste 25 MB — genau der Deckel, den der
+    // fertige Blob nicht überschreiten darf. Eine 20-MB-Datei lief damit durch
+    // die ganze Verschlüsselung und scheiterte erst am Upload.
+    const MAX_FILE_BYTES = Math.floor(maxKlartextBytes() * 0.75)
+    const MAX_IMAGE_BYTES = Math.min(8 * 1024 * 1024, MAX_FILE_BYTES)
 
     const isImage = file.type.startsWith('image/')
     const limit = isImage ? MAX_IMAGE_BYTES : MAX_FILE_BYTES
     if (file.size > limit) {
-      toast.error(`Datei ist zu groß (maximal ${limit / (1024 * 1024)} MB erlaubt).`)
+      toast.error(`Datei ist zu groß (maximal ${Math.floor(limit / (1024 * 1024))} MB erlaubt).`)
       return
     }
 
@@ -4260,18 +4382,7 @@ export function Messenger() {
                       {!msg.isDeleted && msg.imageAttachment && (
                         <ChatMediaImage
                           attachment={msg.imageAttachment}
-                          cryptoContext={
-                            activeGroup
-                              ? { groupId: activeGroup.id }
-                              : {
-                                  userAId: currentUserId,
-                                  userBId: activeContact
-                                    ? activeContact.userId
-                                    : (msg.isSelf
-                                        ? (Number(queryUserId) || 0)
-                                        : (msg.senderId || Number(queryUserId) || 0)),
-                                }
-                          }
+                          bindung={medienBindung(msg)}
                           onViewImage={setViewingImage}
                           isSelf={msg.isSelf}
                         />
@@ -4281,18 +4392,7 @@ export function Messenger() {
                       {!msg.isDeleted && msg.fileAttachment && (
                         <ChatMediaFile
                           attachment={msg.fileAttachment}
-                          cryptoContext={
-                            activeGroup
-                              ? { groupId: activeGroup.id }
-                              : {
-                                  userAId: currentUserId,
-                                  userBId: activeContact
-                                    ? activeContact.userId
-                                    : (msg.isSelf
-                                        ? (Number(queryUserId) || 0)
-                                        : (msg.senderId || Number(queryUserId) || 0)),
-                                }
-                          }
+                          bindung={medienBindung(msg)}
                           isSelf={msg.isSelf}
                         />
                       )}
@@ -4362,7 +4462,7 @@ export function Messenger() {
                           {/* Play / Pause Button */}
                           <button
                             type="button"
-                            onClick={() => togglePlayAudio(msg.id, msg.audioAttachment!.dataUrl)}
+                            onClick={() => void togglePlayAudio(msg.id, msg.audioAttachment!, medienBindung(msg))}
                             className={`w-8 h-8 rounded-full shrink-0 shadow-xs flex items-center justify-center transition-all ${
                               msg.isSelf
                                 ? 'bg-white text-[#0c2e35] hover:bg-white/90'
@@ -4381,10 +4481,10 @@ export function Messenger() {
                           <div
                             className="flex-1 min-w-[130px] space-y-1 cursor-pointer select-none"
                             onClick={(e) =>
-                              handleWaveformSeek(
+                              void handleWaveformSeek(
                                 msg.id,
-                                msg.audioAttachment!.dataUrl,
-                                msg.audioAttachment!.durationSeconds,
+                                msg.audioAttachment!,
+                                medienBindung(msg),
                                 e
                               )
                             }
@@ -4442,7 +4542,8 @@ export function Messenger() {
                         <div className="py-1">
                           <CircularVideoNotePlayer
                             attachment={msg.videoNoteAttachment}
-                            videoUrl={msg.videoUrl || ''}
+                            bindung={medienBindung(msg)}
+                            videoUrl={msg.videoUrl}
                           />
                         </div>
                       )}
@@ -5760,9 +5861,8 @@ export function Messenger() {
       {isVideoNoteRecording && (
         <CircularVideoNoteRecorder
           onCancel={() => setIsVideoNoteRecording(false)}
-          onComplete={async (attachment: VideoNoteAttachment, rawBlob: Blob) => {
+          onComplete={async (aufnahme: VideoNoteAufnahme) => {
             setIsVideoNoteRecording(false)
-            const videoUrl = URL.createObjectURL(rawBlob)
             await handleSendMessage(
               undefined,
               undefined,
@@ -5772,8 +5872,8 @@ export function Messenger() {
               undefined,
               undefined,
               undefined,
-              attachment,
-              videoUrl,
+              aufnahme,
+              URL.createObjectURL(aufnahme.blob),
             )
           }}
         />

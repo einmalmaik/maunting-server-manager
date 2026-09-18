@@ -11,8 +11,16 @@ import * as socialApi from '@/api/social'
 
 vi.mock('@/api/social', () => ({
   getChatMediaSignedUrl: vi.fn(),
-  downloadAndDecryptChatAttachment: vi.fn(),
+  ladeAnhangHerunter: vi.fn(),
 }))
+
+/** Absender und Mailbox: die Bindung, gegen die DIS den Anhang geprueft hat. */
+const BINDUNG = { absenderId: 1, blindMailboxId: 'mailbox-fuer-den-test' }
+
+/** Ein vollstaendiger Zeiger auf einen Blob im Medienspeicher. */
+function zeiger(mediaId: string) {
+  return { mediaId, paketSchluessel: 'cGFrZXRzY2hsdWVzc2Vs', fileId: `anhang-${mediaId}` }
+}
 
 describe('formatFileSize', () => {
   it('formats bytes, kilobytes, and megabytes accurately', () => {
@@ -79,7 +87,7 @@ describe('ChatMediaImage Component', () => {
     render(
       <ChatMediaImage
         attachment={{ dataUrl: safeDataUrl, name: 'direct.png' }}
-        cryptoContext={{ userAId: 1, userBId: 2 }}
+        bindung={BINDUNG}
         onViewImage={onViewImage}
       />
     )
@@ -100,8 +108,8 @@ describe('ChatMediaImage Component', () => {
 
     render(
       <ChatMediaImage
-        attachment={{ mediaId: 'media-cached-1', name: 'cached.jpg' }}
-        cryptoContext={{ userAId: 1, userBId: 2 }}
+        attachment={{ ...zeiger('media-cached-1'), name: 'cached.jpg' }}
+        bindung={BINDUNG}
         onViewImage={onViewImage}
       />
     )
@@ -116,17 +124,12 @@ describe('ChatMediaImage Component', () => {
     const onViewImage = vi.fn()
     const decryptedData = 'data:image/png;base64,decrypted-content'
 
-    vi.mocked(socialApi.getChatMediaSignedUrl).mockResolvedValue({
-      media_id: 'media-remote-1',
-      signed_url: 'https://bucket.example.test/media/blob.e2ee',
-      expires_at: '2026-09-12T00:00:00Z',
-    })
-    vi.mocked(socialApi.downloadAndDecryptChatAttachment).mockResolvedValue(decryptedData)
+    vi.mocked(socialApi.ladeAnhangHerunter).mockResolvedValue(decryptedData)
 
     render(
       <ChatMediaImage
-        attachment={{ mediaId: 'media-remote-1', name: 'remote.png' }}
-        cryptoContext={{ userAId: 1, userBId: 2 }}
+        attachment={{ ...zeiger('media-remote-1'), name: 'remote.png' }}
+        bindung={BINDUNG}
         onViewImage={onViewImage}
       />
     )
@@ -134,11 +137,7 @@ describe('ChatMediaImage Component', () => {
     expect(screen.getByText('Bild wird geladen …')).toBeInTheDocument()
 
     await waitFor(() => {
-      expect(socialApi.getChatMediaSignedUrl).toHaveBeenCalledWith('media-remote-1')
-      expect(socialApi.downloadAndDecryptChatAttachment).toHaveBeenCalledWith(
-        'https://bucket.example.test/media/blob.e2ee',
-        expect.objectContaining({ userAId: 1, userBId: 2 })
-      )
+      expect(socialApi.ladeAnhangHerunter).toHaveBeenCalledWith(zeiger('media-remote-1'), BINDUNG)
     })
 
     await waitFor(() => {
@@ -153,12 +152,12 @@ describe('ChatMediaImage Component', () => {
 
   it('displays error state on failure and retries on click', async () => {
     const onViewImage = vi.fn()
-    vi.mocked(socialApi.getChatMediaSignedUrl).mockRejectedValueOnce(new Error('Network error'))
+    vi.mocked(socialApi.ladeAnhangHerunter).mockRejectedValueOnce(new Error('Network error'))
 
     render(
       <ChatMediaImage
-        attachment={{ mediaId: 'media-error-1', name: 'error.png' }}
-        cryptoContext={{ userAId: 1, userBId: 2 }}
+        attachment={{ ...zeiger('media-error-1'), name: 'error.png' }}
+        bindung={BINDUNG}
         onViewImage={onViewImage}
       />
     )
@@ -171,12 +170,7 @@ describe('ChatMediaImage Component', () => {
     expect(retryBtn).toBeInTheDocument()
 
     // Setup success for retry
-    vi.mocked(socialApi.getChatMediaSignedUrl).mockResolvedValueOnce({
-      media_id: 'media-error-1',
-      signed_url: 'https://bucket.example.test/media/retry.e2ee',
-      expires_at: '2026-09-12T00:00:00Z',
-    })
-    vi.mocked(socialApi.downloadAndDecryptChatAttachment).mockResolvedValueOnce('data:image/png;base64,retry-success')
+    vi.mocked(socialApi.ladeAnhangHerunter).mockResolvedValueOnce('data:image/png;base64,retry-success')
 
     fireEvent.click(retryBtn)
 
@@ -187,36 +181,38 @@ describe('ChatMediaImage Component', () => {
     })
   })
 
-  it('re-attempts decryption if cryptoContext updates with valid participant ID', async () => {
+  it('versucht es erneut, sobald der Paketschluessel nachkommt', async () => {
+    // Hier stand bis 09/2026 derselbe Fall mit `userBId: 0` — damals fehlte die
+    // zweite Benutzerkennung, aus der sich der Schluessel ableitete. Heute fehlt
+    // der Schluessel selbst, und ohne ihn wird gar nicht erst geladen.
     const onViewImage = vi.fn()
-    vi.mocked(socialApi.getChatMediaSignedUrl).mockResolvedValue({
-      media_id: 'media-context-update',
-      signed_url: 'https://bucket.example.test/media/context.e2ee',
-      expires_at: '2026-09-12T00:00:00Z',
-    })
-    vi.mocked(socialApi.downloadAndDecryptChatAttachment).mockResolvedValue('data:image/png;base64,context-success')
+    vi.mocked(socialApi.ladeAnhangHerunter).mockResolvedValue('data:image/png;base64,context-success')
 
     const { rerender } = render(
       <ChatMediaImage
         attachment={{ mediaId: 'media-context-update', name: 'context.png' }}
-        cryptoContext={{ userAId: 1, userBId: 0 }}
-        onViewImage={onViewImage}
-      />
-    )
-
-    // Partner ID becomes available
-    rerender(
-      <ChatMediaImage
-        attachment={{ mediaId: 'media-context-update', name: 'context.png' }}
-        cryptoContext={{ userAId: 1, userBId: 42 }}
+        bindung={BINDUNG}
         onViewImage={onViewImage}
       />
     )
 
     await waitFor(() => {
-      expect(socialApi.downloadAndDecryptChatAttachment).toHaveBeenCalledWith(
-        'https://bucket.example.test/media/context.e2ee',
-        expect.objectContaining({ userAId: 1, userBId: 42 })
+      expect(screen.getByText('Bild konnte nicht geladen werden')).toBeInTheDocument()
+    })
+    expect(socialApi.ladeAnhangHerunter).not.toHaveBeenCalled()
+
+    rerender(
+      <ChatMediaImage
+        attachment={{ ...zeiger('media-context-update'), name: 'context.png' }}
+        bindung={BINDUNG}
+        onViewImage={onViewImage}
+      />
+    )
+
+    await waitFor(() => {
+      expect(socialApi.ladeAnhangHerunter).toHaveBeenCalledWith(
+        zeiger('media-context-update'),
+        BINDUNG
       )
     })
   })
@@ -240,7 +236,7 @@ describe('ChatMediaFile Component', () => {
           mimeType: 'application/pdf',
           dataUrl: safeDataUrl,
         }}
-        cryptoContext={{ userAId: 1, userBId: 2 }}
+        bindung={BINDUNG}
       />
     )
 
@@ -256,12 +252,7 @@ describe('ChatMediaFile Component', () => {
 
   it('downloads and decrypts file when only mediaId is present', async () => {
     const decryptedData = 'data:application/pdf;base64,JVBERi0xLjQK'
-    vi.mocked(socialApi.getChatMediaSignedUrl).mockResolvedValue({
-      media_id: 'file-media-999',
-      signed_url: 'https://bucket.example.test/media/file.e2ee',
-      expires_at: '2026-09-12T00:00:00Z',
-    })
-    vi.mocked(socialApi.downloadAndDecryptChatAttachment).mockResolvedValue(decryptedData)
+    vi.mocked(socialApi.ladeAnhangHerunter).mockResolvedValue(decryptedData)
 
     render(
       <ChatMediaFile
@@ -269,9 +260,9 @@ describe('ChatMediaFile Component', () => {
           name: 'contract.pdf',
           sizeBytes: 2048,
           mimeType: 'application/pdf',
-          mediaId: 'file-media-999',
+          ...zeiger('file-media-999'),
         }}
-        cryptoContext={{ userAId: 1, userBId: 2 }}
+        bindung={BINDUNG}
       />
     )
 
@@ -281,11 +272,27 @@ describe('ChatMediaFile Component', () => {
     fireEvent.click(card!)
 
     await waitFor(() => {
-      expect(socialApi.getChatMediaSignedUrl).toHaveBeenCalledWith('file-media-999')
-      expect(socialApi.downloadAndDecryptChatAttachment).toHaveBeenCalledWith(
-        'https://bucket.example.test/media/file.e2ee',
-        expect.objectContaining({ userAId: 1, userBId: 2 })
-      )
+      expect(socialApi.ladeAnhangHerunter).toHaveBeenCalledWith(zeiger('file-media-999'), BINDUNG)
+    })
+  })
+
+  it('oeffnet einen Altbestand-Anhang ohne Paketschluessel gar nicht erst', async () => {
+    render(
+      <ChatMediaFile
+        attachment={{
+          name: 'alt.pdf',
+          sizeBytes: 2048,
+          mimeType: 'application/pdf',
+          mediaId: 'altbestand-1',
+        }}
+        bindung={BINDUNG}
+      />
+    )
+
+    fireEvent.click(screen.getByText('alt.pdf').closest('a')!)
+
+    await waitFor(() => {
+      expect(socialApi.ladeAnhangHerunter).not.toHaveBeenCalled()
     })
   })
 })

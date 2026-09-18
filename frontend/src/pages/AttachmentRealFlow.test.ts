@@ -1,67 +1,139 @@
-import { describe, it, expect } from 'vitest'
-import {
-  generateLocalE2eeKeyPair,
-  encryptE2eeHybrid,
-  decryptE2eeHybrid,
-  encryptE2eeAttachmentBlob,
-  decryptE2eeAttachmentBlob,
-  type AttachmentCryptoContext,
-} from '@/services/e2eeCrypto'
+// @vitest-environment node
+/**
+ * Der ganze Weg eines Anhangs, einmal durchgespielt: Kamerabild verschlüsseln,
+ * Zeiger in den Nachrichten-Payload legen, Payload versiegeln, und auf der
+ * anderen Seite alles wieder aufmachen.
+ *
+ * Der Test hieß früher genauso und prüfte `encryptE2eeAttachmentBlob`. Dessen
+ * Schlüssel ergab sich aus den beiden Benutzerkennungen — die stehen in der
+ * Datenbank, also konnte das Backend jeden Anhang öffnen. Seit 09/2026 bekommt
+ * jeder Anhang einen zufälligen Paketschlüssel, und der reist im
+ * verschlüsselten Nachrichten-Payload.
+ *
+ * Node-Umgebung, nicht jsdom: DIS prüft Eingaben mit `instanceof Uint8Array`.
+ */
 
-describe('End-to-end Attachment Flow Simulation', () => {
-  it('tests full lifecycle of camera photo attachment', async () => {
-    // 1. Setup Alice (sender) and Bob (recipient)
+import { describe, expect, it } from 'vitest'
+
+import {
+  decryptE2eeHybrid,
+  encryptE2eeHybrid,
+  generateLocalE2eeKeyPair,
+} from '@/services/e2eeCrypto'
+import {
+  ANHANG_PREFIX,
+  entschluesselePaket,
+  neueFileId,
+  verschluesselePaket,
+} from '@/services/medienKrypto'
+
+const ALICE = 1
+const BOB = 2
+const MAILBOX = 'test-mailbox-1234567890123456'
+
+describe('Anhang von Ende zu Ende', () => {
+  it('trägt ein Kamerabild von Alice zu Bob', async () => {
     const aliceKeys = await generateLocalE2eeKeyPair()
     const bobKeys = await generateLocalE2eeKeyPair()
 
-    // 2. Alice takes a photo with camera
-    const photoDataUrl = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA='
-    const photoName = 'kamera-aufnahme.jpg'
-    const blindMailboxId = 'test-mailbox-1234567890123456'
+    const foto =
+      'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA='
 
-    // 3. Encrypt attachment blob (as in uploadEncryptedChatAttachment)
-    const cryptoContext: AttachmentCryptoContext = {
-      userAId: 1, // Alice
-      userBId: 2, // Bob
-    }
-    const encryptedBlob = await encryptE2eeAttachmentBlob(photoDataUrl, cryptoContext)
-    expect(encryptedBlob.startsWith('sv-blob-v1:')).toBe(true)
+    // 1. Alice verschlüsselt den Anhang gegen einen frischen Paketschlüssel.
+    const fileId = neueFileId()
+    const { blob, paketSchluessel } = await verschluesselePaket(
+      foto,
+      { absenderId: ALICE, blindMailboxId: MAILBOX, fileId },
+      { name: 'kamera-aufnahme.jpg', mimeType: 'image/jpeg' },
+    )
+    expect(blob.startsWith(ANHANG_PREFIX)).toBe(true)
+    // Der Server bekommt genau das hier — und darin steht nichts vom Bild.
+    expect(blob).not.toContain('kamera-aufnahme')
 
-    // Suppose server returns mediaId: 'media-uuid-1'
-    const uploadedMediaId = 'media-uuid-1'
-
-    // What happens in handleSendMessage:
-    // Notice what handleSendMessage currently does:
-    const finalImg = {
-      dataUrl: photoDataUrl,
-      name: photoName,
-      mediaId: uploadedMediaId,
-    }
-
-    const payloadObj: Record<string, unknown> = {
+    // 2. Der Zeiger auf den hochgeladenen Blob wandert in den Payload.
+    const mediaId = 'media-uuid-1'
+    const payload = JSON.stringify({
       client_uuid: 'uuid-12345',
-      sender_id: 1,
+      sender_id: ALICE,
       sender_name: 'Alice',
-      text: '', // No text entered!
+      text: '',
       timestamp: new Date().toISOString(),
-      image_attachment: finalImg,
-    }
+      image_attachment: { mediaId, paketSchluessel, fileId, name: 'kamera-aufnahme.jpg' },
+    })
 
-    const payload = JSON.stringify(payloadObj)
+    // 3. Der Payload geht versiegelt in die Mailbox.
+    const umschlag = await encryptE2eeHybrid(payload, bobKeys.publicKeyJwk, aliceKeys.publicKeyJwk)
+    expect(umschlag).not.toContain(paketSchluessel)
 
-    // Alice encrypts for Bob
-    const ciphertext = await encryptE2eeHybrid(payload, bobKeys.publicKeyJwk, aliceKeys.publicKeyJwk)
+    // 4. Bob macht auf: erst den Umschlag, dann den Anhang.
+    const beiBob = JSON.parse(await decryptE2eeHybrid(umschlag, bobKeys.privateKeyJwk))
+    expect(beiBob.image_attachment.mediaId).toBe(mediaId)
 
-    // 4. Bob receives envelope from mailbox
-    const bobDecryptedPlain = await decryptE2eeHybrid(ciphertext, bobKeys.privateKeyJwk)
-    const bobParsed = JSON.parse(bobDecryptedPlain)
-    expect(bobParsed.image_attachment).toBeDefined()
-    expect(bobParsed.image_attachment.mediaId).toBe('media-uuid-1')
+    const gelesen = await entschluesselePaket(blob, beiBob.image_attachment.paketSchluessel, {
+      absenderId: Number(beiBob.sender_id),
+      blindMailboxId: MAILBOX,
+      fileId: beiBob.image_attachment.fileId,
+    })
+    expect(gelesen).toBe(foto)
 
-    // Alice (sender) decrypts own envelope from mailbox
-    const aliceDecryptedPlain = await decryptE2eeHybrid(ciphertext, aliceKeys.privateKeyJwk)
-    const aliceParsed = JSON.parse(aliceDecryptedPlain)
-    expect(aliceParsed.image_attachment).toBeDefined()
-    expect(aliceParsed.image_attachment.mediaId).toBe('media-uuid-1')
+    // 5. Alice liest ihre eigene Kopie genauso.
+    const beiAlice = JSON.parse(await decryptE2eeHybrid(umschlag, aliceKeys.privateKeyJwk))
+    expect(
+      await entschluesselePaket(blob, beiAlice.image_attachment.paketSchluessel, {
+        absenderId: ALICE,
+        blindMailboxId: MAILBOX,
+        fileId: beiAlice.image_attachment.fileId,
+      }),
+    ).toBe(foto)
+  })
+
+  it('nützt dem Server nichts, dass er Absender und Mailbox kennt', async () => {
+    // Genau das war die Lücke des alten Verfahrens: wer die beiden
+    // Benutzerkennungen kannte, hatte den Schlüssel. Heute kennt der Server sie
+    // weiterhin — und kommt trotzdem nicht hinein.
+    const fileId = neueFileId()
+    const geheim = 'data:text/plain;base64,' + Buffer.from('nur für Bob').toString('base64')
+    const { blob } = await verschluesselePaket(
+      geheim,
+      { absenderId: ALICE, blindMailboxId: MAILBOX, fileId },
+      { name: 'notiz.txt', mimeType: 'text/plain' },
+    )
+
+    // Der Versuch mit allem, was in der Datenbank steht, aber ohne Paketschlüssel.
+    const geraten = Buffer.alloc(32, 0).toString('base64')
+    await expect(
+      entschluesselePaket(blob, geraten, {
+        absenderId: ALICE,
+        blindMailboxId: MAILBOX,
+        fileId,
+      }),
+    ).rejects.toThrow()
+  })
+
+  it('lässt einen Anhang nicht in ein fremdes Gespräch umhängen', async () => {
+    const fileId = neueFileId()
+    const inhalt = 'data:text/plain;base64,' + Buffer.from('vertraulich').toString('base64')
+    const { blob, paketSchluessel } = await verschluesselePaket(
+      inhalt,
+      { absenderId: ALICE, blindMailboxId: MAILBOX, fileId },
+      { name: 'notiz.txt', mimeType: 'text/plain' },
+    )
+
+    // Selbst mit dem richtigen Paketschlüssel: Mailbox und Absender stehen in
+    // den gebundenen Daten jedes Stücks.
+    await expect(
+      entschluesselePaket(blob, paketSchluessel, {
+        absenderId: BOB,
+        blindMailboxId: MAILBOX,
+        fileId,
+      }),
+    ).rejects.toThrow()
+    await expect(
+      entschluesselePaket(blob, paketSchluessel, {
+        absenderId: ALICE,
+        blindMailboxId: 'eine-ganz-andere-mailbox-0000',
+        fileId,
+      }),
+    ).rejects.toThrow()
   })
 })

@@ -503,7 +503,18 @@ def validate_encrypted_blob_payload(ciphertext_blob: str, max_bytes: int = MAX_M
     # 2. Umschlagformat pruefen (sv-blob-v1:, sv-e2ee-..., JSON-Envelope)
     payload_to_inspect: str = ""
     is_prefixed = False
-    for pfx in ("sv-blob-v1:", "sv-e2ee-v1:", "sv-e2ee-group-v1:", "sv-e2ee-team-v1:", "sv-file-manifest-v1:"):
+    # `sv-msm-anhang-v1:` ist seit 09/2026 das einzige Format, das der Client
+    # noch erzeugt: ein DIS-Paket aus versiegeltem Manifest und einzeln
+    # versiegelten Stuecken, dessen Schluessel im Nachrichtenumschlag reist. Die
+    # uebrigen stehen hier fuer Altbestand, der noch im Speicher liegt.
+    for pfx in (
+        "sv-msm-anhang-v1:",
+        "sv-blob-v1:",
+        "sv-e2ee-v1:",
+        "sv-e2ee-group-v1:",
+        "sv-e2ee-team-v1:",
+        "sv-file-manifest-v1:",
+    ):
         if clean_blob.startswith(pfx):
             payload_to_inspect = clean_blob[len(pfx):].strip()
             is_prefixed = True

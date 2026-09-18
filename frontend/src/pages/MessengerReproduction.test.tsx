@@ -13,15 +13,12 @@ import {
   decryptE2eeHybrid,
   encryptE2eeMessage,
   decryptE2eeMessage,
-  encryptE2eeAttachmentBlob,
-  decryptE2eeAttachmentBlob,
   deriveBlindMailboxId,
   storeLocalKeyPair,
   clearEnvelopePlaintextCache,
   clearRsaPrivateKeyCache,
   clearMemoryKeyStore,
   clearBlindMailboxIdCache,
-  type AttachmentCryptoContext,
 } from '@/services/e2eeCrypto'
 
 // Mock social and teams API for UI tests
@@ -64,7 +61,8 @@ vi.mock('@/api/social', () => ({
   sendTypingSignal: vi.fn().mockResolvedValue({ ok: true }),
   getChatMediaSignedUrl: vi.fn(),
   downloadChatMedia: vi.fn(),
-  downloadAndDecryptChatAttachment: vi.fn(),
+  ladeAnhangHerunter: vi.fn(),
+  ladeAnhangHoch: vi.fn(),
   uploadEncryptedChatAttachment: vi.fn(),
 }))
 
@@ -627,71 +625,27 @@ describe('Requirement R1 Reproduction: E2EE Messenger Failure Modes', () => {
   // =========================================================================
   // 3. Media Attachment Context
   // =========================================================================
-  describe('3. Media Attachment Context', () => {
-    it('cryptographic layer: decryptE2eeAttachmentBlob rejects when userBId is 0', async () => {
-      // Create a valid attachment blob encrypted between User 1 and User 2
-      const sampleAttachment = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBD'
-      const validContext: AttachmentCryptoContext = {
-        userAId: 1,
-        userBId: 2,
-      }
-      const encryptedBlob = await encryptE2eeAttachmentBlob(sampleAttachment, validContext)
-      expect(encryptedBlob.startsWith('sv-blob-v1:')).toBe(true)
+  describe('3. Medienanhänge hängen am Paketschlüssel, nicht an den Kennungen', () => {
+    /*
+     * Hier standen drei Zusagen über `decryptE2eeAttachmentBlob` und die Frage,
+     * ob `userBId` beim Neuladen 0 wird. Die Frage gibt es seit 09/2026 nicht
+     * mehr: der Schlüssel eines Anhangs wird nicht aus den Benutzerkennungen
+     * abgeleitet, sondern zufällig erzeugt und im verschlüsselten
+     * Nachrichten-Payload zugestellt. Absender und Mailbox binden nur noch die
+     * gebundenen Daten — falsch geraten heißt jetzt „geht nicht auf", nicht
+     * mehr „jeder, der die beiden Kennungen kennt, kann mitlesen".
+     */
 
-      // Decrypting with valid context succeeds
-      const decrypted = await decryptE2eeAttachmentBlob(encryptedBlob, validContext)
-      expect(decrypted).toBe(sampleAttachment)
-
-      // Bug condition: Context with userBId: 0 (caused by activeContact?.userId being null/0 for own messages)
-      const invalidContext: AttachmentCryptoContext = {
-        userAId: 1,
-        userBId: 0,
-      }
-
-      // decryptE2eeAttachmentBlob fails because context.userAId && context.userBId evaluates to false
-      await expect(
-        decryptE2eeAttachmentBlob(encryptedBlob, invalidContext)
-      ).rejects.toThrow(/Ungültiger Entschlüsselungskontext für Medienanhang|Entschlüsselung des Medienanhangs fehlgeschlagen/)
-    })
-
-    it('Messenger context derivation fix: own messages with null activeContact evaluate userBId correctly via partner target ID', () => {
-      const currentUserId = 1
-      const targetUserId = 2
-      const ownMessage = {
-        id: 10,
-        isSelf: true,
-        senderId: currentUserId,
-      }
-      const activeContact = null // As happens upon page reload (F5) before contact selection
-
-      // Fixed context expression from Messenger.tsx lines 3413-3435:
-      const derivedContext: AttachmentCryptoContext = {
-        userAId: currentUserId,
-        userBId: activeContact
-          ? (activeContact as any).userId
-          : (ownMessage.isSelf ? (targetUserId || 0) : (ownMessage.senderId || targetUserId || 0)),
-      }
-
-      // For own messages, userBId evaluates to targetUserId (2) instead of 0
-      expect(derivedContext.userBId).toBe(2)
-      expect(Boolean(derivedContext.userAId && derivedContext.userBId)).toBe(true)
-    })
-
-    it('UI layer: ChatMediaImage renders successfully when valid cryptoContext is supplied', async () => {
+    it('lädt einen Anhang mit vollständigem Zeiger', async () => {
       const mediaId = 'media-attachment-123'
-      vi.mocked(socialApi.getChatMediaSignedUrl).mockResolvedValue({
-        media_id: mediaId,
-        signed_url: '/social/media/download/test.jpg',
-        expires_at: new Date(Date.now() + 60000).toISOString(),
-      })
-
       const testDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
-      vi.mocked(socialApi.downloadAndDecryptChatAttachment).mockResolvedValue(testDataUrl)
+      vi.mocked(socialApi.ladeAnhangHerunter).mockResolvedValue(testDataUrl)
 
       render(
         <ChatMediaImage
-          attachment={{ mediaId, name: 'foto.png' }}
-          cryptoContext={{ userAId: 1, userBId: 2 }}
+          attachment={{ mediaId, name: 'foto.png', paketSchluessel: 'c2NobHVlc3NlbA==', fileId: 'anhang-1' }}
+          bindung={{ absenderId: 1, blindMailboxId: 'mailbox-fuer-den-test' }}
+          onViewImage={() => {}}
         />
       )
 
@@ -702,6 +656,28 @@ describe('Requirement R1 Reproduction: E2EE Messenger Failure Modes', () => {
       })
     })
 
+    it('holt einen Anhang ohne Paketschlüssel gar nicht erst', async () => {
+      // Altbestand aus der Zeit der ableitbaren Kanalschlüssel. Früher hätte
+      // die Anzeige hier den Schlüssel aus den beiden Benutzerkennungen
+      // gebildet — genau den, den auch das Backend bilden kann.
+      vi.mocked(socialApi.ladeAnhangHerunter).mockResolvedValue('data:image/png;base64,AAAA')
+
+      render(
+        <ChatMediaImage
+          attachment={{ mediaId: 'altbestand-1', name: 'alt.png' }}
+          bindung={{ absenderId: 1, blindMailboxId: 'mailbox-fuer-den-test' }}
+          onViewImage={() => {}}
+        />
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText('Bild konnte nicht geladen werden')).toBeInTheDocument()
+      })
+      expect(socialApi.ladeAnhangHerunter).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('4. Neuladen', () => {
     it('reload hydration: Messenger restores active conversation and loads mailbox history from query param', async () => {
       const aliceId = 101
       const myUserId = 1

@@ -1,19 +1,31 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { FileText, Download, Loader2, AlertCircle, RefreshCw } from 'lucide-react'
 import { getSafeAttachmentUrl } from '@/lib/sanitizeSvg'
-import {
-  getChatMediaSignedUrl,
-  downloadAndDecryptChatAttachment,
-} from '@/api/social'
-import type { AttachmentCryptoContext } from '@/services/e2eeCrypto'
+import { ladeAnhangHerunter } from '@/api/social'
+import type { MedienZeiger } from '@/services/medienKrypto'
 import { toast } from '@/stores/toastStore'
 
 export const chatMediaBlobCache = new Map<string, string>()
+
+/**
+ * Woran ein Anhang hängt: wer ihn geschickt hat und in welche Mailbox.
+ *
+ * Beides reist **nicht** mit dem Anhang, sondern kommt aus dem Gespräch. DIS
+ * bindet es in die gebundenen Daten jedes Stücks, also scheitert ein Blob, den
+ * jemand in ein anderes Gespräch umhängt, schon am Tag. Das hier ersetzt den
+ * früheren `AttachmentCryptoContext`, aus dem sich der Schlüssel ableiten ließ.
+ */
+export interface MedienBindungsKontext {
+  absenderId: number
+  blindMailboxId: string
+}
 
 export interface ImageAttachment {
   dataUrl?: string
   name?: string
   mediaId?: string
+  paketSchluessel?: string
+  fileId?: string
 }
 
 export interface FileAttachment {
@@ -22,6 +34,83 @@ export interface FileAttachment {
   mimeType: string
   dataUrl?: string
   mediaId?: string
+  paketSchluessel?: string
+  fileId?: string
+}
+
+/**
+ * Eine Sprachnotiz. Bis 09/2026 reiste sie als data-URL **im
+ * Nachrichten-JSON** und blähte damit jeden Umschlag um ein Vielfaches auf.
+ * Jetzt liegt sie als Anhang im Medienspeicher wie jedes Bild, und im Umschlag
+ * steht nur noch, wo sie liegt und womit sie aufgeht.
+ */
+export interface AudioAttachment {
+  mediaId?: string
+  paketSchluessel?: string
+  fileId?: string
+  durationSeconds: number
+  mimeType: string
+  /**
+   * Die eigene Aufnahme, solange sie noch hochgeladen wird. Bleibt **lokal**:
+   * in den Nachrichten-Payload geht ausschließlich der Zeiger auf den Blob.
+   */
+  dataUrl?: string
+}
+
+/**
+ * Eine Videonotiz.
+ *
+ * Vorher trug sie einen `mediaKey` für ein eigenes AES-GCM — zu dem es nie
+ * einen hochgeladenen Blob gab. Die Aufnahme wurde verschlüsselt, der Umschlag
+ * verworfen und eine lokale Blob-URL verschickt, die beim Empfänger ins Leere
+ * zeigte. Jetzt geht sie denselben Weg wie jeder andere Anhang.
+ */
+export interface VideoNoteAttachment {
+  mediaId?: string
+  paketSchluessel?: string
+  fileId?: string
+  durationSeconds: number
+  width: number
+  height: number
+  mimeType: string
+  thumbnailDataUrl?: string
+}
+
+/** Liefert den Zeiger, wenn der Anhang vollständig auf einen Blob verweist. */
+export function medienZeiger(
+  anhang: { mediaId?: string; paketSchluessel?: string; fileId?: string }
+): MedienZeiger | null {
+  if (!anhang.mediaId || !anhang.paketSchluessel || !anhang.fileId) return null
+  return {
+    mediaId: anhang.mediaId,
+    paketSchluessel: anhang.paketSchluessel,
+    fileId: anhang.fileId,
+  }
+}
+
+/**
+ * Holt einen Anhang und gibt eine anzeigbare URL zurück, `null` bei Fehlschlag.
+ *
+ * Der gemeinsame Weg für Ton und Videonotiz. Das Bild hat seinen eigenen, weil
+ * es zusätzlich mit der lokalen data-URL des Absenders umgehen muss.
+ */
+export async function holeAnhangUrl(
+  anhang: { mediaId?: string; paketSchluessel?: string; fileId?: string },
+  bindung: MedienBindungsKontext
+): Promise<string | null> {
+  const zeiger = medienZeiger(anhang)
+  if (!zeiger) return null
+  const zwischengespeichert = chatMediaBlobCache.get(zeiger.mediaId)
+  if (zwischengespeichert) return zwischengespeichert
+  try {
+    const klartext = await ladeAnhangHerunter(zeiger, bindung)
+    const sicher = getSafeAttachmentUrl(klartext)
+    if (!sicher) return null
+    chatMediaBlobCache.set(zeiger.mediaId, sicher)
+    return sicher
+  } catch {
+    return null
+  }
 }
 
 export function formatFileSize(bytes?: number): string {
@@ -73,12 +162,12 @@ export function triggerDownload(url: string, filename: string): void {
 
 export interface ChatMediaImageProps {
   attachment: ImageAttachment
-  cryptoContext: AttachmentCryptoContext
+  bindung: MedienBindungsKontext
   onViewImage: (url: string) => void
   isSelf?: boolean
 }
 
-export function ChatMediaImage({ attachment, cryptoContext, onViewImage }: ChatMediaImageProps) {
+export function ChatMediaImage({ attachment, bindung, onViewImage }: ChatMediaImageProps) {
   const directSafeUrl = getSafeAttachmentUrl(attachment.dataUrl)
   const mediaId = attachment.mediaId
   const cached = mediaId ? chatMediaBlobCache.get(mediaId) : null
@@ -100,14 +189,14 @@ export function ChatMediaImage({ attachment, cryptoContext, onViewImage }: ChatM
     }
   }, [attachment.dataUrl, mediaId])
 
-  // Extract primitives to avoid infinite re-render loops from object reference recreation
-  const groupId = cryptoContext.groupId
-  const userAId = cryptoContext.userAId
-  const userBId = cryptoContext.userBId
-  const teamId = cryptoContext.teamId
-  const sharedSecret = cryptoContext.sharedSecret
+  // Einzelwerte statt des Objekts: eine bei jedem Rendern neu gebaute Referenz
+  // triebe den Effekt unten in eine Schleife.
+  const absenderId = bindung.absenderId
+  const blindMailboxId = bindung.blindMailboxId
+  const paketSchluessel = attachment.paketSchluessel
+  const fileId = attachment.fileId
 
-  const loadKey = `${mediaId || ''}:${groupId ?? ''}:${userAId ?? ''}:${userBId ?? ''}:${teamId ?? ''}`
+  const loadKey = `${mediaId || ''}:${absenderId}:${blindMailboxId}:${fileId ?? ''}`
 
   const loadMedia = useCallback(async () => {
     if (!mediaId) return
@@ -121,16 +210,17 @@ export function ChatMediaImage({ attachment, cryptoContext, onViewImage }: ChatM
         return
       }
 
-      const activeCtx: AttachmentCryptoContext = {
-        groupId,
-        userAId,
-        userBId,
-        teamId,
-        sharedSecret,
+      const zeiger = medienZeiger({ mediaId, paketSchluessel, fileId })
+      if (!zeiger) {
+        // Altbestand: ein Anhang aus der Zeit vor dem Paketschlüssel. Sein
+        // Schlüssel ließ sich aus den Benutzerkennungen ableiten, der Weg
+        // dorthin ist geschlossen — auch lesend.
+        setError(true)
+        hasLoadedRef.current = null
+        return
       }
 
-      const { signed_url } = await getChatMediaSignedUrl(mediaId)
-      const decrypted = await downloadAndDecryptChatAttachment(signed_url, activeCtx)
+      const decrypted = await ladeAnhangHerunter(zeiger, { absenderId, blindMailboxId })
       const safe = getSafeAttachmentUrl(decrypted)
       if (safe) {
         chatMediaBlobCache.set(mediaId, safe)
@@ -145,7 +235,7 @@ export function ChatMediaImage({ attachment, cryptoContext, onViewImage }: ChatM
     } finally {
       setLoading(false)
     }
-  }, [mediaId, groupId, userAId, userBId, teamId, sharedSecret])
+  }, [mediaId, absenderId, blindMailboxId, paketSchluessel, fileId])
 
   const hasLoadedRef = React.useRef<string | null>(null)
 
@@ -203,11 +293,11 @@ export function ChatMediaImage({ attachment, cryptoContext, onViewImage }: ChatM
 
 export interface ChatMediaFileProps {
   attachment: FileAttachment
-  cryptoContext: AttachmentCryptoContext
+  bindung: MedienBindungsKontext
   isSelf?: boolean
 }
 
-export function ChatMediaFile({ attachment, cryptoContext, isSelf = false }: ChatMediaFileProps) {
+export function ChatMediaFile({ attachment, bindung, isSelf = false }: ChatMediaFileProps) {
   const [isDownloading, setIsDownloading] = useState(false)
   const safeName = attachment.name?.replace(/[\r\n"']/g, '') || 'attachment'
   const directSafeHref = getSafeAttachmentUrl(attachment.dataUrl)
@@ -222,8 +312,13 @@ export function ChatMediaFile({ attachment, cryptoContext, isSelf = false }: Cha
       try {
         let decrypted = chatMediaBlobCache.get(attachment.mediaId)
         if (!decrypted) {
-          const { signed_url } = await getChatMediaSignedUrl(attachment.mediaId)
-          decrypted = await downloadAndDecryptChatAttachment(signed_url, cryptoContext)
+          const zeiger = medienZeiger(attachment)
+          if (!zeiger) {
+            // Altbestand aus der Zeit der ableitbaren Kanalschlüssel.
+            toast.error('Dieser Anhang stammt aus einem abgelösten Verfahren und lässt sich nicht mehr öffnen.')
+            return
+          }
+          decrypted = await ladeAnhangHerunter(zeiger, bindung)
           const safe = getSafeAttachmentUrl(decrypted)
           if (safe) {
             chatMediaBlobCache.set(attachment.mediaId, safe)

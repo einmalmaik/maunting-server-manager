@@ -3,15 +3,30 @@ import { X, Check, Lock } from 'lucide-react'
 import {
   evaluateSwipeGesture,
   calculateProgressRingOffset,
-  encryptVideoNoteBlob,
   MAX_VIDEO_NOTE_DURATION_SEC,
-  type VideoNoteAttachment,
-} from '@/services/videoNoteCrypto'
+} from '@/lib/videoNotizGesten'
 import { toast } from '@/stores/toastStore'
+
+/**
+ * Die fertige Aufnahme, noch ohne Anhangdaten.
+ *
+ * Verschlüsselt und hochgeladen wird erst im Sendepfad: dort steht fest, in
+ * welche Mailbox der Anhang gehört, und genau das bindet DIS in die
+ * gebundenen Daten. Der Rekorder hat diese Angaben nicht und soll sie auch
+ * nicht bekommen — vorher verschlüsselte er hier selbst und warf den Umschlag
+ * anschließend weg.
+ */
+export interface VideoNoteAufnahme {
+  blob: Blob
+  durationSeconds: number
+  width: number
+  height: number
+  mimeType: string
+}
 
 export interface CircularVideoNoteRecorderProps {
   onCancel: () => void
-  onComplete: (attachment: VideoNoteAttachment, rawBlob: Blob) => void
+  onComplete: (aufnahme: VideoNoteAufnahme) => void
 }
 
 export const CircularVideoNoteRecorder: React.FC<CircularVideoNoteRecorderProps> = ({
@@ -89,27 +104,14 @@ export const CircularVideoNoteRecorder: React.FC<CircularVideoNoteRecorderProps>
     }
 
     // Wait a brief tick for ondataavailable
-    setTimeout(async () => {
-      const fullBlob = new Blob(chunksRef.current, { type: 'video/webm' })
-      const arrayBuffer = await fullBlob.arrayBuffer()
-      const rawBytes = new Uint8Array(arrayBuffer)
-
-      // Ephemeral media key
-      const mediaKey = new Uint8Array(32)
-      crypto.getRandomValues(mediaKey)
-
-      const { mediaKeyBase64 } = await encryptVideoNoteBlob(rawBytes, mediaKey)
-
-      const attachment: VideoNoteAttachment = {
-        mediaId: Date.now(),
+    setTimeout(() => {
+      onComplete({
+        blob: new Blob(chunksRef.current, { type: 'video/webm' }),
         durationSeconds: Math.max(1, elapsedSeconds),
         width: 360,
         height: 360,
-        mediaKey: mediaKeyBase64,
         mimeType: 'video/webm',
-      }
-
-      onComplete(attachment, fullBlob)
+      })
     }, 200)
   }
 

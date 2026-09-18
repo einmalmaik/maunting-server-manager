@@ -30,9 +30,9 @@ vi.mock('@/api/social', () => ({
   getPublicProfiles: vi.fn().mockResolvedValue([]),
   sendFriendRequest: vi.fn().mockResolvedValue({ success: true, message: 'Anfrage gesendet' }),
   sendTypingSignal: vi.fn().mockResolvedValue({ ok: true }),
-  uploadEncryptedChatAttachment: vi.fn(),
+  ladeAnhangHoch: vi.fn(),
   getChatMediaSignedUrl: vi.fn(),
-  downloadAndDecryptChatAttachment: vi.fn(),
+  ladeAnhangHerunter: vi.fn(),
 }))
 
 vi.mock('@/api/teams', () => ({
@@ -295,14 +295,13 @@ describe('Messenger Attachment Flow', () => {
     vi.mocked(socialApi.getGroups).mockResolvedValue([])
     vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([])
     vi.mocked(socialApi.getE2eePublicKey).mockResolvedValue({ user_id: 101, username: 'alice', public_key: 'mock-pub-key' })
-    vi.mocked(socialApi.uploadEncryptedChatAttachment).mockResolvedValue({
-      id: 'mock-media-123',
-      blind_mailbox_id: 'test-blind-mailbox',
-      file_name: 'test.png',
-      media_type: 'image/png',
-      size_bytes: 100,
-      sha256: 'mock-hash',
-      created_at: new Date().toISOString(),
+    // Der Upload liefert jetzt den Zeiger auf den Blob: Kennung,
+    // Paketschlüssel und Anhangkennung. Der Schlüssel reist im
+    // Nachrichten-Payload, nicht mehr abgeleitet aus den Benutzerkennungen.
+    vi.mocked(socialApi.ladeAnhangHoch).mockResolvedValue({
+      mediaId: 'mock-media-123',
+      paketSchluessel: Buffer.alloc(32, 9).toString('base64'),
+      fileId: 'anhang-mock-1',
     })
   })
 
@@ -399,12 +398,7 @@ describe('Messenger Attachment Flow', () => {
   })
 
   it('downloads and decrypts an image attachment that only has mediaId', async () => {
-    vi.mocked(socialApi.getChatMediaSignedUrl).mockResolvedValue({
-      media_id: 'mock-remote-media-456',
-      signed_url: 'https://example.test/media/signed.bin',
-      expires_at: new Date(Date.now() + 60000).toISOString(),
-    })
-    vi.mocked(socialApi.downloadAndDecryptChatAttachment).mockResolvedValue(
+    vi.mocked(socialApi.ladeAnhangHerunter).mockResolvedValue(
       'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
     )
 
@@ -416,6 +410,8 @@ describe('Messenger Attachment Flow', () => {
       timestamp: new Date().toISOString(),
       image_attachment: {
         mediaId: 'mock-remote-media-456',
+        paketSchluessel: 'cGFrZXQtc2NobHVlc3NlbC1mdWVyLWRhcy1iaWxkLQ==',
+        fileId: 'anhang-bild-1',
         name: 'remote-foto.png',
       },
     })
@@ -436,10 +432,15 @@ describe('Messenger Attachment Flow', () => {
     )
 
     await waitFor(() => {
-      expect(socialApi.getChatMediaSignedUrl).toHaveBeenCalledWith('mock-remote-media-456')
-      expect(socialApi.downloadAndDecryptChatAttachment).toHaveBeenCalledWith(
-        'https://example.test/media/signed.bin',
-        expect.anything()
+      // Der Zeiger kommt aus dem Payload, die Bindung aus dem Gespräch: wer
+      // den Blob woanders einhängt, hat die falschen gebundenen Daten.
+      expect(socialApi.ladeAnhangHerunter).toHaveBeenCalledWith(
+        {
+          mediaId: 'mock-remote-media-456',
+          paketSchluessel: 'cGFrZXQtc2NobHVlc3NlbC1mdWVyLWRhcy1iaWxkLQ==',
+          fileId: 'anhang-bild-1',
+        },
+        { absenderId: 101, blindMailboxId: expect.any(String) }
       )
     })
 
@@ -450,12 +451,7 @@ describe('Messenger Attachment Flow', () => {
   })
 
   it('renders a file attachment and decrypts on click if only mediaId is present', async () => {
-    vi.mocked(socialApi.getChatMediaSignedUrl).mockResolvedValue({
-      media_id: 'mock-file-media-789',
-      signed_url: 'https://example.test/media/signed-file.bin',
-      expires_at: new Date(Date.now() + 60000).toISOString(),
-    })
-    vi.mocked(socialApi.downloadAndDecryptChatAttachment).mockResolvedValue(
+    vi.mocked(socialApi.ladeAnhangHerunter).mockResolvedValue(
       'data:application/pdf;base64,JVBERi0xLjQKJcTl8uXr...'
     )
 
@@ -467,6 +463,8 @@ describe('Messenger Attachment Flow', () => {
       timestamp: new Date().toISOString(),
       file_attachment: {
         mediaId: 'mock-file-media-789',
+        paketSchluessel: 'cGFrZXQtc2NobHVlc3NlbC1mdWVyLWRpZS1kYXRlaQ==',
+        fileId: 'anhang-datei-1',
         name: 'dokument.pdf',
         sizeBytes: 2048,
       },
@@ -499,10 +497,13 @@ describe('Messenger Attachment Flow', () => {
     }
 
     await waitFor(() => {
-      expect(socialApi.getChatMediaSignedUrl).toHaveBeenCalledWith('mock-file-media-789')
-      expect(socialApi.downloadAndDecryptChatAttachment).toHaveBeenCalledWith(
-        'https://example.test/media/signed-file.bin',
-        expect.anything()
+      expect(socialApi.ladeAnhangHerunter).toHaveBeenCalledWith(
+        {
+          mediaId: 'mock-file-media-789',
+          paketSchluessel: 'cGFrZXQtc2NobHVlc3NlbC1mdWVyLWRpZS1kYXRlaQ==',
+          fileId: 'anhang-datei-1',
+        },
+        { absenderId: 101, blindMailboxId: expect.any(String) }
       )
     })
   })

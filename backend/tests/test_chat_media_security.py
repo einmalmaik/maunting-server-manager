@@ -273,6 +273,39 @@ def test_validate_encrypted_blob_payload():
         validate_encrypted_blob_payload("This is an unencrypted secret message without any encryption")
 
 
+def test_medienpaket_wird_angenommen_und_bleibt_geprueft():
+    """`sv-msm-anhang-v1:` ist seit 09/2026 das Format jedes neuen Anhangs.
+
+    Darin steckt ein DIS-Paket aus versiegeltem Manifest und einzeln
+    versiegelten Stuecken, base64 verpackt. Die Huelle ist noetig, weil die
+    Klartext-Erkennung eine Nutzlast abweist, die mit `{` beginnt — und genau
+    diese Erkennung muss hinter dem neuen Praefix weiter greifen.
+    """
+    import json
+
+    paket = json.dumps({
+        "v": 1,
+        "manifest": base64.b64encode(b"N" * 12 + b"versiegeltes-manifest" + b"T" * 16).decode("ascii"),
+        "chunks": [base64.b64encode(b"N" * 12 + b"stueck-null" + b"T" * 16).decode("ascii")],
+    })
+    validate_encrypted_blob_payload(
+        "sv-msm-anhang-v1:" + base64.b64encode(paket.encode("utf-8")).decode("ascii")
+    )
+
+    # Rohes JSON hinter dem Praefix ist Klartext-Markup und faellt durch — das
+    # ist der Grund fuer die Base64-Huelle.
+    with pytest.raises(PlaintextBlobRejectedError):
+        validate_encrypted_blob_payload("sv-msm-anhang-v1:" + paket)
+
+    # Und was getarnt hinter dem neuen Praefix liegt, wird genauso geprueft.
+    with pytest.raises(ExecutableBlockedError):
+        validate_encrypted_blob_payload(
+            "sv-msm-anhang-v1:" + base64.b64encode(b"MZ\x90\x00ExecutableWindowsBinary").decode("ascii")
+        )
+    with pytest.raises(StorageLimitExceededError):
+        validate_encrypted_blob_payload("sv-msm-anhang-v1:" + "A" * (MAX_MEDIA_BYTES + 10))
+
+
 # ---------------------------------------------------------------------------
 # 5. Story Media URL Validierung & XSS-Schutz
 # ---------------------------------------------------------------------------

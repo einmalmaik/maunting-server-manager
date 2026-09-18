@@ -373,40 +373,64 @@ export async function downloadChatMedia(signedUrl: string): Promise<string> {
 }
 
 /**
- * Laedt einen Dateianhang nach strikter E2EE-Verschluesselung hoch.
- * Der Server erhaelt ausschliesslich den verschluesselten Ciphertext-Blob.
+ * Verschlüsselt einen Anhang auf diesem Gerät und lädt ihn hoch.
+ *
+ * Zurück kommt, was der Empfänger braucht, um wieder an ihn heranzukommen:
+ * Medienkennung, Paketschlüssel und Anhangkennung. Die drei reisen im
+ * Nachrichten-Payload, also innerhalb des Double Ratchets beziehungsweise des
+ * Gruppenschlüssels — nie am Server vorbei und nie an ihm vorbeischaubar.
+ *
+ * Dateiname und Dateityp gehen bewusst **nicht** mit. Der Server speichert
+ * beides im Klartext neben dem Blob, und ein Umschlag, den niemand öffnen kann,
+ * nützt wenig, wenn daneben „Gehaltsabrechnung.pdf" steht. Gebraucht wird es
+ * dort auch nicht: ausgeliefert wird ohnehin als `application/octet-stream`.
+ * Was die Anzeige braucht, steht im versiegelten Manifest und im
+ * verschlüsselten Nachrichten-Payload.
  */
-export async function uploadEncryptedChatAttachment(
-  data: string,
-  fileName: string,
-  blindMailboxId: string,
-  context: import('@/services/e2eeCrypto').AttachmentCryptoContext,
-  mediaType: string = 'application/octet-stream',
-  options?: { groupId?: number | null; recipientId?: number | null }
-): Promise<ChatMediaItem> {
-  const { encryptE2eeAttachmentBlob } = await import('@/services/e2eeCrypto')
-  const ciphertextBlob = await encryptE2eeAttachmentBlob(data, context)
-  return uploadChatMedia({
-    blind_mailbox_id: blindMailboxId,
-    ciphertext_blob: ciphertextBlob,
-    file_name: fileName,
-    media_type: mediaType,
-    group_id: options?.groupId,
-    recipient_id: options?.recipientId,
+export async function ladeAnhangHoch(eingabe: {
+  klartext: string
+  dateiname: string
+  mimeType: string
+  blindMailboxId: string
+  absenderId: number
+  groupId?: number | null
+  recipientId?: number | null
+}): Promise<import('@/services/medienKrypto').MedienZeiger> {
+  const { neueFileId, verschluesselePaket } = await import('@/services/medienKrypto')
+  const fileId = neueFileId()
+  const { blob, paketSchluessel } = await verschluesselePaket(
+    eingabe.klartext,
+    {
+      absenderId: eingabe.absenderId,
+      blindMailboxId: eingabe.blindMailboxId,
+      fileId,
+    },
+    { name: eingabe.dateiname, mimeType: eingabe.mimeType || null },
+  )
+  const hochgeladen = await uploadChatMedia({
+    blind_mailbox_id: eingabe.blindMailboxId,
+    ciphertext_blob: blob,
+    file_name: 'anhang.bin',
+    media_type: 'application/octet-stream',
+    group_id: eingabe.groupId,
+    recipient_id: eingabe.recipientId,
   })
+  return { mediaId: hochgeladen.id, paketSchluessel, fileId }
 }
 
-/**
- * Ruft einen verschluesselten Anhang ueber eine signierte URL ab und
- * entschluesselt ihn clientseitig im Zielkontext.
- */
-export async function downloadAndDecryptChatAttachment(
-  signedUrl: string,
-  context: import('@/services/e2eeCrypto').AttachmentCryptoContext
+/** Holt einen Anhang über seine signierte URL und öffnet ihn auf diesem Gerät. */
+export async function ladeAnhangHerunter(
+  zeiger: import('@/services/medienKrypto').MedienZeiger,
+  bindung: { absenderId: number; blindMailboxId: string }
 ): Promise<string> {
-  const { decryptE2eeAttachmentBlob } = await import('@/services/e2eeCrypto')
-  const ciphertextBlob = await downloadChatMedia(signedUrl)
-  return decryptE2eeAttachmentBlob(ciphertextBlob, context)
+  const { entschluesselePaket } = await import('@/services/medienKrypto')
+  const { signed_url } = await getChatMediaSignedUrl(zeiger.mediaId)
+  const blob = await downloadChatMedia(signed_url)
+  return entschluesselePaket(blob, zeiger.paketSchluessel, {
+    absenderId: bindung.absenderId,
+    blindMailboxId: bindung.blindMailboxId,
+    fileId: zeiger.fileId,
+  })
 }
 
 export interface E2eeMailboxSyncItem {
