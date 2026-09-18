@@ -171,6 +171,25 @@ Das gerade gültige Access-Token bleibt bis zu seinem Ablauf brauchbar —
 dieselbe Regel wie überall sonst, ein Widerruf wirkt spätestens beim nächsten
 Erneuern.
 
+**Der Messenger-Verlauf zieht über dieselbe Kopplung mit.** Ein frisch
+gekoppeltes Gerät hat keine Ratchet-Sitzungen und holt vom Server nichts
+Zurückliegendes: die Umschläge in der Mailbox sind gegen andere Geräte
+versiegelt. Es bekommt den Verlauf deshalb vom bereits eingerichteten Gerät.
+Der Ablauf läuft ohne Zutun: die App veröffentlicht nach dem Einlösen ihren
+Geräteschlüssel, das Panel sieht ihn im Status des Codes, versiegelt seinen
+lokalen Verlauf dagegen und legt ihn unter dem Code ab
+(`PUT /api/auth/devices/pairing/{code}/verlauf`); die App holt ihn einmal ab,
+der Server löscht ihn dabei. Ungeholt stirbt der Blob mit dem Code, spätestens
+nach zehn Minuten.
+
+Der Server reicht dabei nur durch — er kann den Blob nicht öffnen, und der
+Betreiber auch nicht. **Schlüssel wandern nicht mit:** übertragen wird der
+gelesene Verlauf, nicht die Fähigkeit, ihn zu lesen. Jedes Gerät behält sein
+eigenes Paar. Übergeben werden je Gespräch die jüngsten Nachrichten, begrenzt
+auf 25 MB; ist mehr da, bleibt das Älteste zurück. Schlägt der Umzug fehl,
+beginnt das neue Gerät mit einem leeren Verlauf — die Kopplung selbst steht
+davon unberührt.
+
 **Die Oberfläche der App ist die des Panels.** Seit dem 21.08.2026 gibt es
 keine zweite Chat-Implementierung mehr: die App rendert dieselbe KI-Seite wie
 der Browser (Chat, Realtime-Modus, Guardian-Fenster, Aufgabenliste,

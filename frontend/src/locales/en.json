@@ -4008,7 +4008,7 @@
       },
       "pairing": {
         "title": "Signing in by pairing",
-        "body": "The app knows neither password nor 2FA code. In the panel under Profile → AI a one-time code is generated (ten minutes, exactly once) and entered into the app; only its hash is stored. Password, 2FA, and captcha stay entirely in the browser. Paired devices can be locked out individually from the same place."
+        "body": "The app knows neither password nor 2FA code. In the panel under Profile → AI a one-time code is generated (ten minutes, exactly once) and entered into the app; only its hash is stored. Password, 2FA, and captcha stay entirely in the browser. Paired devices can be locked out individually from the same place. The messenger history travels along the same pairing: the device you already use seals it for the new device's key, and the server passes it through once and deletes it in the process. It cannot read the blob, and no key material travels with it."
       },
       "uninstall": {
         "title": "Uninstalling",

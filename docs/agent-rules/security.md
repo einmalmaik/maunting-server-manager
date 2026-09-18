@@ -220,6 +220,19 @@ Harte Invarianten:
 - Ein Sitzungsbruch wird **sichtbar gemeldet**, nie still repariert. Eine
   klammheimlich neu aufgebaute Sicherheitssitzung ist genau das, was ein
   Angreifer sich wünscht.
+- **Im Relais kommt die Berechtigung vor der Entprellung.** Die Mailbox-Kennung
+  ist `sha256("msm:dm:<min>:<max>")`, also für jeden ausrechenbar; sie ist eine
+  Adresse, kein Ausweis. In `relay_blind_envelope` stand die Prüfung auf eine
+  bekannte `client_uuid` einmal **vor** dem Berechtigungsblock und gab den
+  gespeicherten Umschlag heraus, bevor irgendwer gefragt hatte, ob der Absender
+  zu diesem Gespräch gehört. Jede Abkürzung, die früh zurückkehrt — Cache,
+  Entprellung, Idempotenz —, muss hinter der Berechtigung liegen.
+- **Der Verlauf wandert beim Koppeln, Schlüssel nicht.** Das eingerichtete Gerät
+  versiegelt seinen gelesenen Verlauf gegen den veröffentlichten
+  Geräteschlüssel des neuen (`frontend/src/services/verlaufsUebergabe.ts`), der
+  Server reicht ihn unter dem Kopplungscode einmal durch und löscht ihn dabei.
+  Übertragen wird, was gelesen wurde, nie die Fähigkeit zu lesen: zwei Geräte
+  mit demselben Material verklemmen jede Ratchet-Sitzung.
 
 Wer eine dieser Zusagen ändert, muss `frontend/src/pages/Privacy.tsx`
 (Abschnitt `privacyPolicy.sections.messenger`) im selben Commit mitziehen.

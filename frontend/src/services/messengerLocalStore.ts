@@ -383,6 +383,36 @@ export async function updateMessageInLocalStore(
 }
 
 /**
+ * Alle Mailboxen, zu denen hier Nachrichten liegen.
+ *
+ * Gelesen wird über den Index auf `blindMailboxId`, nicht über den
+ * Mailbox-Store: dessen Zeile entsteht erst, wenn eine Nachricht eine echte
+ * Umschlagkennung vom Server hat. Ein Gespräch, in dem bisher nur die eigene
+ * optimistische Zeile steht, hätte dort keinen Eintrag — und genau die soll
+ * der Erstabgleich mitnehmen.
+ */
+export async function listeLokaleMailboxen(): Promise<string[]> {
+  try {
+    const db = await openLocalDatabase()
+    return await new Promise<string[]>((resolve, reject) => {
+      const tx = db.transaction(STORE_MESSAGES, 'readonly')
+      const index = tx.objectStore(STORE_MESSAGES).index('by_mailbox')
+      const gefunden: string[] = []
+      const req = index.openKeyCursor(null, 'nextunique')
+      req.onsuccess = () => {
+        const cursor = req.result
+        if (!cursor) return resolve(gefunden)
+        if (typeof cursor.key === 'string' && cursor.key) gefunden.push(cursor.key)
+        cursor.continue()
+      }
+      req.onerror = () => reject(req.error)
+    })
+  } catch {
+    return []
+  }
+}
+
+/**
  * Retrieves the last synced envelope ID for a mailbox.
  */
 export async function getLocalMailboxLastSyncedId(blindMailboxId: string): Promise<number> {

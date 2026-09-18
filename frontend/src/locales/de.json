@@ -4008,7 +4008,7 @@
       },
       "pairing": {
         "title": "Anmelden per Kopplung",
-        "body": "Die App kennt weder Passwort noch 2FA-Code. Im Panel unter Profil → KI wird ein zehn Minuten gültiger Einmalcode erzeugt und in der App eingegeben. Gespeichert wird nur der Hash. So verbleiben Passwort, 2FA und Captcha vollständig im Browser. Gekoppelte Geräte können im Panel einzeln widerrufen werden."
+        "body": "Die App kennt weder Passwort noch 2FA-Code. Im Panel unter Profil → KI wird ein zehn Minuten gültiger Einmalcode erzeugt und in der App eingegeben. Gespeichert wird nur der Hash. So verbleiben Passwort, 2FA und Captcha vollständig im Browser. Gekoppelte Geräte können im Panel einzeln widerrufen werden. Über dieselbe Kopplung zieht der Messenger-Verlauf mit: das bereits eingerichtete Gerät versiegelt ihn gegen den Schlüssel des neuen, der Server reicht ihn einmal durch und löscht ihn dabei. Lesen kann er ihn nicht, und Schlüsselmaterial wandert nicht mit."
       },
       "uninstall": {
         "title": "Deinstallation",

@@ -10,7 +10,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from services.device_pairing_service import MAX_BEZEICHNUNG
+from services.device_pairing_service import MAX_BEZEICHNUNG, MAX_VERLAUF_BYTES
 
 
 class PairingCreateRequest(BaseModel):
@@ -46,3 +46,21 @@ class PairedDevice(BaseModel):
     paired_at: datetime | None = None
     is_active: bool = True
     last_active_at: datetime | None = None
+
+
+class VerlaufAblegen(BaseModel):
+    """Der versiegelte Verlauf fuer das frisch gekoppelte Geraet.
+
+    Ein Textblock und sonst nichts. Was drinsteht, geht den Server nichts an:
+    versiegelt wurde gegen den Geraeteschluessel des neuen Geraets, und der
+    liegt nur dort. Der Deckel ist derselbe wie bei Medien — er begrenzt eine
+    Anfrage, er schuetzt keinen Inhalt.
+    """
+
+    blob: str = Field(min_length=1, max_length=MAX_VERLAUF_BYTES)
+
+
+class VerlaufAntwort(BaseModel):
+    """Was das neue Geraet abholt. ``None`` heisst: liegt (noch) nichts."""
+
+    blob: str | None = None

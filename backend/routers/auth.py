@@ -32,6 +32,8 @@ from schemas.device_pairing import (
     PairingCreated,
     PairingCreateRequest,
     PairingRedeemRequest,
+    VerlaufAblegen,
+    VerlaufAntwort,
 )
 from services import AuthService, EmailService, audit_service
 from services import bild_upload
@@ -451,6 +453,51 @@ def get_device_pairing_status(
 ) -> dict:
     """Prueft den Einloesestatus eines erzeugten Kopplungscodes fuer das Panel."""
     return device_pairing_service.status(db, user, code)
+
+
+@router.put("/devices/pairing/{code}/verlauf")
+def put_device_pairing_verlauf(
+    code: str,
+    req: VerlaufAblegen,
+    user: User = Depends(require_global("ai.chat.use")),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Legt den versiegelten Verlauf fuer das frisch gekoppelte Geraet ab.
+
+    Der Erstabgleich laeuft ueber den Kanal, den es ohnehin gibt: das
+    einrichtende Geraet sieht am Status, dass eingeloest wurde, versiegelt
+    seinen lokalen Verlauf gegen den **Geraeteschluessel** des neuen Geraets
+    und legt ihn hier ab. Der Server reicht durch. Er kann nicht oeffnen, und
+    er soll nichts aufbewahren: der Blob stirbt mit dem Code oder beim Abholen,
+    je nachdem was zuerst kommt.
+
+    Schluessel wandern dabei **nicht** mit. Jedes Geraet hat seinen eigenen —
+    das ist der ganze Sinn der Umstellung von 09/2026, und ein Verlaufsumzug
+    darf sie nicht hintenherum wieder aufheben.
+    """
+    if not device_pairing_service.verlauf_ablegen(db, user, code, req.blob):
+        raise HTTPException(
+            status_code=400,
+            detail="Kein eingeloester Kopplungscode oder Verlauf zu gross.",
+        )
+    return {"ok": True}
+
+
+@router.get("/devices/pairing/{code}/verlauf", response_model=VerlaufAntwort)
+def get_device_pairing_verlauf(
+    code: str,
+    user: User = Depends(require_global("ai.chat.use")),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Holt den Verlauf **einmal** ab; danach ist er hier weg.
+
+    Es ist derselbe Benutzer auf beiden Seiten — nur eben ein anderes Geraet.
+    Die Schranke ist deshalb bewusst duenn: ein anderes Geraet desselben Kontos
+    koennte den Blob zwar holen, aber nicht oeffnen. Die Versiegelung traegt,
+    nicht der Endpunkt.
+    """
+    return {"blob": device_pairing_service.verlauf_abholen(db, user, code)}
 
 
 @router.post("/devices/redeem", response_model=TokenResponse, dependencies=[Depends(auth_rate_limit)])

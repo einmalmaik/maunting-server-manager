@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import pytest
 from sqlalchemy.orm import Session
 from fastapi.testclient import TestClient
@@ -9,6 +10,29 @@ from models import User, UserFriend, E2eeBlindEnvelope
 from services.auth_service import AuthService
 from services.social_service import SocialService
 from services.sync_event_service import SyncEventService
+
+
+# Die Schlüsselkennung im Kopf eines Gruppenumschlags, wie sie seit 09/2026
+# vor dem Chiffretext steht.
+_GRUPPEN_KEY = "00112233445566ff."
+
+
+def _umschlag(marke: str) -> str:
+    """Ein formal gültiger Gruppenumschlag mit wiedererkennbarem Inhalt.
+
+    Hier geht es um Zustellung, Entprellung und Reihenfolge, nicht um Krypto —
+    der Inhalt muss nur unterscheidbar sein. Die Form muss trotzdem stimmen:
+    `relay_blind_envelope` prüft sie beim Schreiben und weist alles ab, was
+    nicht wie ein Chiffretext aussieht. Die früher hier stehenden Kurzformen
+    (`sv-e2ee-group-v1:alice-secret`) stammen aus der Zeit, als sich der
+    Gruppenschlüssel aus der Gruppenkennung ableiten ließ, und fallen durch.
+
+    Aufgefüllt wird auf 32 Bytes, weil der Prüfer mindestens 28 verlangt (12
+    Byte Nonce, 16 Byte Tag), und mit einem Füllzeichen statt mit Nullen, damit
+    kurze Marken nicht an der Null-Nonce-Regel hängenbleiben.
+    """
+    roh = marke.encode("utf-8").ljust(32, b"*")[:32]
+    return f"sv-e2ee-group-v1:{_GRUPPEN_KEY}{base64.b64encode(roh).decode()}"
 
 
 def _create_user(db: Session, username: str, privacy: str = "friends") -> User:
@@ -44,7 +68,7 @@ def test_e2ee_envelope_idempotent_deduplication(db: Session):
     """Prüft, dass wiederholtes Senden mit identischer client_uuid keine Duplikate erzeugt."""
     mailbox = "mailbox-stress-test-1"
     uuid_tag = "client-uuid-stable-12345"
-    payload = "sv-e2ee-group-v1:encrypted-content-1"
+    payload = _umschlag("encrypted-content-1")
 
     # Erstes Senden
     env1 = SocialService.relay_blind_envelope(
@@ -81,12 +105,18 @@ def test_e2ee_envelope_idempotent_deduplication(db: Session):
 
 
 def test_e2ee_envelope_without_uuid_creates_distinct_records(db: Session):
-    """Envelopes ohne client_uuid werden standardmäßig als getrennte Nachrichten behandelt."""
-    mailbox = "mailbox-stress-legacy"
-    payload = "sv-e2ee-group-v1:legacy-msg"
+    """Envelopes ohne client_uuid werden standardmäßig als getrennte Nachrichten behandelt.
 
-    e1 = SocialService.relay_blind_envelope(db, blind_mailbox_id=mailbox, ciphertext_envelope=payload)
-    e2 = SocialService.relay_blind_envelope(db, blind_mailbox_id=mailbox, ciphertext_envelope=payload)
+    Zwei **verschiedene** Umschläge, nicht zweimal derselbe: entprellt wird über
+    die client_uuid, und ohne sie zählt jeder Umschlag einzeln. Denselben
+    Chiffretext zweimal zu schicken wäre etwas anderes — das ist eine
+    Wiedereinspielung und wird mit 409 abgewiesen, weil zwei echte
+    Verschlüsselungen desselben Textes nie dieselben Bytes ergeben.
+    """
+    mailbox = "mailbox-stress-legacy"
+
+    e1 = SocialService.relay_blind_envelope(db, blind_mailbox_id=mailbox, ciphertext_envelope=_umschlag("legacy-msg-1"))
+    e2 = SocialService.relay_blind_envelope(db, blind_mailbox_id=mailbox, ciphertext_envelope=_umschlag("legacy-msg-2"))
 
     assert e1.id != e2.id
     count = db.query(E2eeBlindEnvelope).filter_by(blind_mailbox_id=mailbox).count()
@@ -107,7 +137,7 @@ def test_websocket_relay_ack_and_idempotency(db: Session, client: TestClient, ow
         ws.send_json({
             "type": "relay",
             "blind_mailbox_id": mailbox,
-            "ciphertext_envelope": "sv-e2ee-group-v1:ws-relay-cipher",
+            "ciphertext_envelope": _umschlag("ws-relay-cipher"),
             "client_uuid": client_uuid,
         })
 
@@ -129,7 +159,7 @@ def test_websocket_relay_ack_and_idempotency(db: Session, client: TestClient, ow
         ws.send_json({
             "type": "relay",
             "blind_mailbox_id": mailbox,
-            "ciphertext_envelope": "sv-e2ee-group-v1:ws-relay-cipher",
+            "ciphertext_envelope": _umschlag("ws-relay-cipher"),
             "client_uuid": client_uuid,
         })
 
@@ -268,7 +298,7 @@ def test_e2ee_envelope_unauthorized_user_cannot_access_existing_uuid(db: Session
     env = SocialService.relay_blind_envelope(
         db,
         blind_mailbox_id=mailbox,
-        ciphertext_envelope="sv-e2ee-group-v1:alice-secret",
+        ciphertext_envelope=_umschlag("alice-secret"),
         sender_user_id=alice.id,
         recipient_id=bob.id,
         client_uuid=uuid_tag,
@@ -280,13 +310,48 @@ def test_e2ee_envelope_unauthorized_user_cannot_access_existing_uuid(db: Session
         SocialService.relay_blind_envelope(
             db,
             blind_mailbox_id=mailbox,
-            ciphertext_envelope="sv-e2ee-group-v1:charlie-fake",
+            ciphertext_envelope=_umschlag("charlie-fake"),
             sender_user_id=charlie.id,
             recipient_id=bob.id,
             client_uuid=uuid_tag,
         )
     # Muss mit 400 oder 403 abgewiesen werden (Berechtigungsfehler)
     assert exc_info.value.status_code in (400, 403)
+
+    # Und derselbe Versuch ohne Empfängerangabe, denn das ist der Weg, der die
+    # Berechtigung wirklich am Chat prüft statt an der Mailbox-Ableitung. Genau
+    # hier lag die Lücke: die Entprellung über die client_uuid stand einmal vor
+    # dem Berechtigungsblock und gab den fremden Umschlag heraus, bevor
+    # irgendwer gefragt hatte, ob Charlie zu diesem Gespräch gehört. Die
+    # Mailbox-Kennung ist kein Geheimnis, sie ist der Hash zweier
+    # Benutzerkennungen.
+    with pytest.raises(HTTPException) as ohne_empfaenger:
+        SocialService.relay_blind_envelope(
+            db,
+            blind_mailbox_id=mailbox,
+            ciphertext_envelope=_umschlag("charlie-zweiter-versuch"),
+            sender_user_id=charlie.id,
+            client_uuid=uuid_tag,
+        )
+    assert ohne_empfaenger.value.status_code == 403
+
+    # Der Umschlag liegt unverändert da, und es ist genau einer.
+    verbliebene = db.query(E2eeBlindEnvelope).filter_by(blind_mailbox_id=mailbox).all()
+    assert len(verbliebene) == 1
+    assert verbliebene[0].id == env.id
+
+    # Gegenprobe: Bob gehört dazu, sein Wiederholungsversuch mit derselben
+    # client_uuid bekommt weiterhin den gespeicherten Umschlag zurück statt
+    # einer Absage. Ohne das wäre die Entprellung mitrepariert worden.
+    wiederholung = SocialService.relay_blind_envelope(
+        db,
+        blind_mailbox_id=mailbox,
+        ciphertext_envelope=_umschlag("alice-secret"),
+        sender_user_id=bob.id,
+        recipient_id=alice.id,
+        client_uuid=uuid_tag,
+    )
+    assert wiederholung.id == env.id
 
 
 def test_websocket_handles_invalid_relay_without_crash_or_disconnect(db: Session, client: TestClient):
@@ -347,7 +412,7 @@ def test_e2ee_envelope_concurrent_duplicate_relays_race_condition(db: Session):
     lösen die IntegrityError-Behandlung sauber aus und geben die gleiche ID zurück."""
     mailbox = "concurrent-mailbox-test"
     uuid_tag = "concurrent-uuid-xyz"
-    payload = "sv-e2ee-group-v1:concurrent-payload"
+    payload = _umschlag("concurrent-payload")
 
     # Sequentiell und verschränkt testen
     env1 = SocialService.relay_blind_envelope(

@@ -1009,33 +1009,6 @@ class SocialService:
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
-        # Idempotenz-Prüfung: Falls dieselbe client_uuid erneut gesendet wird (Netzwerk-Retry),
-        # geben wir das bereits gespeicherte Envelope zurück.
-        if clean_client_uuid:
-            existing_idempotent = (
-                db.query(E2eeBlindEnvelope)
-                .filter(
-                    E2eeBlindEnvelope.blind_mailbox_id == clean_mailbox,
-                    E2eeBlindEnvelope.client_uuid == clean_client_uuid,
-                )
-                .first()
-            )
-            if existing_idempotent:
-                return existing_idempotent
-
-        # Replay Attack Prevention (global: random IV ensures every valid ciphertext is globally unique)
-        existing_dup = (
-            db.query(E2eeBlindEnvelope.id)
-            .filter(
-                E2eeBlindEnvelope.ciphertext_envelope == clean_envelope,
-            )
-            .first()
-        )
-        if existing_dup:
-            raise HTTPException(
-                status_code=409,
-                detail="Replay-Angriff erkannt: Dieser verschlüsselte Umschlag wurde bereits übertragen.",
-            )
         target_recipient_id: int | None = None
         group_member_ids: list[int] = []
 
@@ -1114,6 +1087,15 @@ class SocialService:
 
         # Idempotenz-Prüfung: Erst NACH erfolgreicher Autorisierung prüfen,
         # ob dieser Umschlag bereits mit dieser client_uuid existiert.
+        #
+        # Dieselbe Prüfung stand bis 09/2026 zusätzlich **vor** dem
+        # Berechtigungsblock. Damit war sie ein Weg daran vorbei: die
+        # Mailbox-Kennung ist `sha256("msm:dm:<min>:<max>")` und für jeden
+        # ausrechenbar, und wer mit einer passenden client_uuid ankam, bekam den
+        # gespeicherten Umschlag zurück, ohne dass je geprüft wurde, ob er zu
+        # diesem Gespräch gehört. Aufgefallen ist es, weil der zugehörige Test
+        # aus dem falschen Grund grün war (sein Umschlag war schon formal
+        # ungültig und flog früher raus).
         if clean_client_uuid:
             existing = (
                 db.query(E2eeBlindEnvelope)
@@ -1125,6 +1107,23 @@ class SocialService:
             )
             if existing:
                 return existing
+
+        # Wiedereinspielung: derselbe Chiffretext, irgendwo schon einmal
+        # gesehen. Zwei echte Verschlüsselungen desselben Textes ergeben nie
+        # dasselbe Byte — der Ratchet zieht je Nachricht einen neuen Schlüssel,
+        # AES-GCM eine neue Nonce. Ein Treffer ist also eine Kopie, kein Zufall.
+        #
+        # Die Reihenfolge ist wichtig: Der Wiederholungsversuch eines legitimen
+        # Absenders trägt dieselbe client_uuid und ist eine Zeile weiter oben
+        # schon beantwortet. Stünde diese Prüfung davor, bekäme jeder
+        # Netzwerk-Retry eine 409 statt der Bestätigung.
+        if db.query(E2eeBlindEnvelope.id).filter(
+            E2eeBlindEnvelope.ciphertext_envelope == clean_envelope,
+        ).first():
+            raise HTTPException(
+                status_code=409,
+                detail="Replay-Angriff erkannt: Dieser verschlüsselte Umschlag wurde bereits übertragen.",
+            )
 
         envelope = E2eeBlindEnvelope(
             blind_mailbox_id=clean_mailbox,

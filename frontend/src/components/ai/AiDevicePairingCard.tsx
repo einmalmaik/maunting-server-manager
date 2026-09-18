@@ -6,6 +6,10 @@ import { api } from '@/api/client'
 import { API_ORIGIN } from '@/config/api'
 import { SecretOnce } from '@/components/ui/SecretOnce'
 import { Button } from '@/Singra/UI'
+import {
+  uebergebeVerlauf,
+  type KopplungsStatus,
+} from '@/services/verlaufsUebergabe'
 import { toast } from '@/stores/toastStore'
 
 interface Geraet {
@@ -49,16 +53,41 @@ export function AiDevicePairingCard() {
 
   useEffect(laden, [])
 
+  /**
+   * Wartet auf das Einlösen — und übergibt dann den Verlauf.
+   *
+   * Der Code bleibt nach `redeemed` noch stehen, bis der Erstabgleich
+   * abgelegt ist. Das neue Gerät hat seinen Schlüssel erst nach dem Einlösen
+   * veröffentlicht, deshalb kann erst jetzt gegen ihn versiegelt werden. Steht
+   * nach ein paar Runden noch kein Gerät in der Antwort, gibt diese Seite auf:
+   * eine Kopplung ohne Verlaufsumzug ist unschön, eine hängende Karte wäre
+   * schlimmer.
+   */
   useEffect(() => {
     if (!code) return
     let aktiv = true
+    let versuche = 0
     const interval = setInterval(async () => {
       try {
-        const res = await api<{ exists: boolean; redeemed: boolean; expired: boolean; label?: string }>(
+        const res = await api<KopplungsStatus>(
           `/auth/devices/pairing/${encodeURIComponent(code)}/status`,
         )
         if (!aktiv) return
         if (res.redeemed) {
+          const ziele = res.neue_geraete ?? []
+          versuche += 1
+          if (ziele.length === 0 && versuche < 8 && !res.verlauf_abgelegt) {
+            // Das Gerät meldet seinen Schlüssel gleich. Noch eine Runde warten.
+            return
+          }
+          if (ziele.length > 0 && !res.verlauf_abgelegt) {
+            try {
+              await uebergebeVerlauf(code, ziele)
+            } catch {
+              // Der Verlauf bleibt beim alten Gerät. Die Kopplung selbst steht.
+            }
+          }
+          if (!aktiv) return
           toast.success(t('ai.profile.devicePairSuccess', 'Gerät erfolgreich gekoppelt!'))
           setCode(null)
           setQrDataUri(null)

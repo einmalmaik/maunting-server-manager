@@ -96,6 +96,11 @@ describe('SelfHostingDocs', () => {
     expect(document.querySelector('a[href="#smart-system"]')).toBeInTheDocument()
     expect(screen.getByText(/knows neither password nor 2FA code/i)).toBeInTheDocument()
     expect(screen.getByText(/From the browser it never gets them/i)).toBeInTheDocument()
+    // Seit dem Verlaufs-Erstabgleich traegt die Kopplung mehr als die Sitzung.
+    // Beide Zusagen stehen im sichtbaren Text, also gehoeren sie hierher: der
+    // Server reicht den Verlauf nur durch, und Schluesselmaterial bleibt am
+    // Geraet. Wer das eines Tages umdreht, muss an dieser Stelle vorbei.
+    expect(screen.getByText(/no key material travels with it/i)).toBeInTheDocument()
     // Und der unsignierte Installer, weil SmartScreen sonst wie ein Fehler
     // aussieht statt wie eine bekannte Eigenschaft.
     expect(screen.getByText(/installer is not signed/i)).toBeInTheDocument()

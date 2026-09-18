@@ -11,6 +11,8 @@
 import { invoke } from '@tauri-apps/api/core'
 
 import { api } from '@/api/client'
+import { geraetVeroeffentlichen } from '@/services/e2eeGeraet'
+import { holeVerlaufAb } from '@/services/verlaufsUebergabe'
 import { useAuthStore } from '@/stores/authStore'
 import { konfigLaden, konfigSpeichern } from './tauri'
 import { setzeAccessToken, sitzungVerwerfen } from './transport'
@@ -58,6 +60,23 @@ export async function koppeln(code: string, bezeichnung: string): Promise<void> 
     await konfigSpeichern({ ...k, eingerichtet: true })
   } catch {}
   await useAuthStore.getState().checkAuth()
+
+  // Der Verlaufs-Erstabgleich. Erst den eigenen Geräteschlüssel veröffentlichen
+  // — daran erkennt die andere Seite, für wen sie versiegeln soll —, dann
+  // warten, bis der Verlauf abgelegt ist. Beides im Hintergrund: ein Gerät, das
+  // gekoppelt ist, soll benutzbar sein, auch wenn nebenan noch ein Umzug läuft.
+  //
+  // Scheitert es, beginnt das Gerät mit einem leeren Verlauf. Das ist der
+  // Normalfall bei einem Konto ohne bisherige Nachrichten und kein Grund, die
+  // Kopplung zu verwerfen.
+  void (async () => {
+    try {
+      const geraet = await geraetVeroeffentlichen(bezeichnung)
+      await holeVerlaufAb(code, geraet.paar.privateKeyJwk)
+    } catch {
+      // Kein Verlauf. Die Kopplung selbst steht.
+    }
+  })()
 }
 
 /**
