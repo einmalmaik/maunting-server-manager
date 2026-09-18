@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from config import settings
 from database import SessionLocal, get_db
-from dependencies import get_current_user, require_global, verify_csrf
+from dependencies import get_current_user, get_optional_user, require_global, verify_csrf
 from games import list_game_info
 from models import User
 from services import network_interfaces_service
@@ -256,7 +256,7 @@ def _get_latest_release() -> dict:
 
 
 @router.get("/version")
-def system_version(user: User = Depends(get_current_user)) -> dict:
+def system_version(user: User | None = Depends(get_optional_user)) -> dict:
     """Aktuelle Version + Update-Status (GitHub Releases).
 
     Für Tauri: derselbe Endpunkt kann als Update-Quelle genutzt werden.

@@ -1,18 +1,22 @@
 /**
  * Version Service
  *
- * Fetches the latest GitHub release tag with caching and robust fallbacks.
- * Completely decoupled from UI components.
+ * Ruft die installierte bzw. aktuelle Version ausschließlich vom eigenen
+ * Backend-Server ab (/api/system/version) und puffert sie im localStorage.
+ *
+ * Datenschutz-Garantie:
+ * Der Browser sendet zu keinem Zeitpunkt eigenständige Anfragen an GitHub oder
+ * sonstige Drittanbieter. Die Versionsprüfung und eventuelle GitHub-Release-
+ * Abfragen laufen ausschließlich serverseitig und gecacht im MSM-Backend.
  */
 
-const GITHUB_OWNER = 'einmalmaik'
-const GITHUB_REPO = 'maunting-server-manager'
-const GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`
+import { api } from '@/api/client'
+import type { VersionInfo } from '@/types'
 
 const CACHE_KEY = 'msm_version_cache'
-const CACHE_TTL_MS = 60 * 60 * 1000 // 1 hour
+const CACHE_TTL_MS = 60 * 60 * 1000 // 1 Stunde
 
-/** Static fallback when GitHub is unreachable and no cache exists. */
+/** Statischer Rückfallwert, falls das Backend offline und kein Cache vorhanden ist. */
 export const DEFAULT_VERSION = 'v1.0.0'
 
 interface VersionCacheEntry {
@@ -29,7 +33,7 @@ function readCache(): VersionCacheEntry | null {
       return parsed
     }
   } catch {
-    // Ignore malformed cache
+    // Ungültigen Cache ignorieren
   }
   return null
 }
@@ -39,7 +43,7 @@ function writeCache(version: string): void {
     const entry: VersionCacheEntry = { version, fetchedAt: Date.now() }
     localStorage.setItem(CACHE_KEY, JSON.stringify(entry))
   } catch {
-    // Ignore localStorage errors (e.g. private mode quota exceeded)
+    // localStorage-Fehler (z. B. privater Modus / Quota) ignorieren
   }
 }
 
@@ -47,52 +51,28 @@ function isCacheValid(entry: VersionCacheEntry): boolean {
   return Date.now() - entry.fetchedAt < CACHE_TTL_MS
 }
 
-interface GitHubRelease {
-  tag_name?: string
-}
-
-async function fetchFromGitHub(): Promise<string | null> {
+async function fetchFromBackend(): Promise<string | null> {
   try {
-    const response = await fetch(GITHUB_API_URL, {
-      method: 'GET',
-      headers: {
-        Accept: 'application/vnd.github+json',
-      },
-    })
-
-    if (response.status === 404) {
-      // No releases published yet
-      return null
-    }
-
-    if (response.status === 403 || response.status === 429) {
-      // Rate limited — let caller fall back to cache/default
-      return null
-    }
-
-    if (!response.ok) {
-      return null
-    }
-
-    const data = (await response.json()) as GitHubRelease
-    const tag = data.tag_name?.trim()
-    if (tag && tag.length > 0) {
-      return tag
+    const info = await api<VersionInfo>('/system/version')
+    const raw = info?.current_version || info?.latest_version
+    const version = raw?.trim()
+    if (version && version !== 'unknown') {
+      return version
     }
   } catch {
-    // Network error, offline, CORS issue, etc.
+    // Backend offline oder nicht erreichbar
   }
   return null
 }
 
 /**
- * Returns the latest version string.
+ * Liefert die Versionsnummer für die Benutzeroberfläche.
  *
- * Strategy:
- * 1. Return cached value if still within TTL.
- * 2. Try fetching from GitHub API.
- * 3. On API failure, return stale cache if available.
- * 4. If nothing else works, return {@link DEFAULT_VERSION}.
+ * Strategie:
+ * 1. Gültigen Cache zurückgeben, falls vorhanden.
+ * 2. Version vom eigenen Backend abfragen und cachen.
+ * 3. Bei Backend-Ausfall: Veralteten Cache nutzen.
+ * 4. Als letzter Ausweg: statischer DEFAULT_VERSION-Rückfall.
  */
 export async function getVersion(): Promise<string> {
   const cache = readCache()
@@ -101,13 +81,12 @@ export async function getVersion(): Promise<string> {
     return cache.version
   }
 
-  const live = await fetchFromGitHub()
+  const live = await fetchFromBackend()
   if (live) {
     writeCache(live)
     return live
   }
 
-  // API failed: fall back to stale cache, then default
   if (cache) {
     return cache.version
   }
@@ -116,8 +95,7 @@ export async function getVersion(): Promise<string> {
 }
 
 /**
- * Synchronous cache-only peek. Useful for initial renders
- * where an async fetch would cause a layout shift.
+ * Synchroner Cache-Blick zur Vermeidung von Layout-Shifts beim ersten Rendern.
  */
 export function getCachedVersion(): string {
   const cache = readCache()

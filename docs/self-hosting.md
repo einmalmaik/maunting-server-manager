@@ -252,23 +252,23 @@ Prüfen lässt sich das am gebauten Frontend. Die Ausgabe muss leer bleiben:
 grep -rl "fonts.googleapis.com\|fonts.gstatic.com" frontend/dist/
 ```
 
-Was das **nicht** heißt: der Browser spricht deshalb mit niemandem sonst. Drei
-Ausnahmen bleiben, und alle drei sind sichtbar:
+Was das **nicht** heißt: der Browser spricht deshalb mit niemandem sonst. Externe
+Verbindungen existieren nur dort, wo sie technisch unvermeidbar oder bewusst vom
+Betreiber aktiviert sind:
 
 - Das **Support-Widget** (Crisp, Tawk.to oder Singra) lädt ein fremdes Skript,
   sobald ein Betreiber es unter *Einstellungen → Support-Widget* einschaltet.
   Ohne diese Einstellung wird nichts geladen; die erlaubten Herkünfte stehen im
   Code und in der CSP, nicht in einem Eingabefeld.
-- Die **Versionsanzeige** fragt `api.github.com` nach dem neuesten Release —
-  aus dem Browser, ohne Einstellung und auch auf der Loginseite, also bevor
-  jemand angemeldet ist. Wer das nicht möchte, gehört mit dieser Information in
-  die eigene Datenschutzerklärung.
-- **KI und Sprachmodus** reden mit OpenRouter, OpenAI, ElevenLabs oder Azure,
-  sobald ein Betreiber Zugänge hinterlegt. Bei Azure ist die Gegenstelle
-  `https://<deine-ressource>.services.ai.azure.com` — der einzige Fall, in dem
-  ein Stück der Zieladresse aus einer Einstellung kommt und nicht aus dem Code.
-  Was dabei übertragen wird, steht unter *Was an den Anbieter geht* weiter
-  unten.
+- Die **Detailkarte** (MapTiler / MapLibre) lädt Kartenkacheln nur dann im
+  Browser nach, wenn der Betreiber optional einen eigenen origin-beschränkten
+  MapTiler-Browser-Key hinterlegt hat. Ohne Key bleibt die Ansicht lokal.
+- Die **Versionsanzeige** fragt ausschließlich das eigene Backend
+  (`/api/system/version`) ab. Der Browser spricht niemals mit GitHub; eventuelle
+  Versionsprüfungen und Release-Caches laufen rein serverseitig.
+- **KI, Websuche und Umgebungssignale** (OpenAI, Anthropic, TomTom, Open-Meteo,
+  Copernicus, Brave Search etc.) laufen ausnahmslos über das Backend. Drittanbieter
+  sehen ausschließlich die IP-Adresse des Servers, niemals die des Endnutzers.
 
 ## Bestehende All-in-one-Installation aufteilen
 
