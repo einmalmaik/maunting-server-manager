@@ -6,19 +6,32 @@ import { apiStream } from '@/api/client'
 export interface AvatarProps {
   src?: string | null
   name?: string | null
-  size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl'
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl' | '2xl'
   status?: 'online' | 'offline' | 'idle' | 'dnd' | null
   className?: string
   alt?: string
   resolveUrl?: (url: string) => string
 }
 
+/**
+ * Die Größe sitzt am äußeren Element, und der Kreis füllt es aus.
+ *
+ * Bis 09/2026 war es umgekehrt: `className` landete außen, `size` maß den Kreis
+ * innen. Wer beides setzte — und das taten alle, die etwas Größeres als `xl`
+ * brauchten —, bekam einen Kasten in der einen und einen Kreis in der anderen
+ * Größe. Der Kreis saß dann oben links statt in der Mitte, und ein Ring, der
+ * sich am äußeren Kasten ausrichtete, lag sichtbar daneben. Im Anruf fiel das
+ * auf: der pulsierende Ring war 112 Pixel groß, das Bild darin 80.
+ *
+ * `2xl` gibt es, damit der Anruf keine eigenen Maße mehr erfinden muss.
+ */
 const sizeClasses = {
   xs: 'h-6 w-6 text-[10px]',
   sm: 'h-8 w-8 text-xs',
   md: 'h-10 w-10 text-sm',
   lg: 'h-12 w-12 text-base font-semibold',
   xl: 'h-20 w-20 text-2xl font-bold',
+  '2xl': 'h-28 w-28 text-3xl font-bold',
 }
 
 const iconSizes = {
@@ -27,6 +40,7 @@ const iconSizes = {
   md: 'h-5 w-5',
   lg: 'h-6 w-6',
   xl: 'h-10 w-10',
+  '2xl': 'h-14 w-14',
 }
 
 const statusIndicatorSizes = {
@@ -35,6 +49,7 @@ const statusIndicatorSizes = {
   md: 'h-2.5 w-2.5 bottom-0 right-0 border-2',
   lg: 'h-3.5 w-3.5 bottom-0.5 right-0.5 border-2',
   xl: 'h-5 w-5 bottom-1 right-1 border-[3px]',
+  '2xl': 'h-6 w-6 bottom-1.5 right-1.5 border-[3px]',
 }
 
 const statusColors = {
@@ -157,10 +172,10 @@ export function Avatar({
   const showImage = Boolean(currentDisplaySrc) && !hasError
 
   return (
-    <div className={`relative inline-flex shrink-0 select-none rounded-full ${className}`}>
-      <div
-        className={`rounded-full flex items-center justify-center overflow-hidden border border-outline-variant/40 bg-surface-container-high text-primary font-medium ${sizeClasses[size]}`}
-      >
+    <div
+      className={`relative inline-flex shrink-0 select-none rounded-full ${sizeClasses[size]} ${className}`}
+    >
+      <div className="h-full w-full rounded-full flex items-center justify-center overflow-hidden border border-outline-variant/40 bg-surface-container-high text-primary font-medium">
         {showImage ? (
           <img
             src={currentDisplaySrc!}

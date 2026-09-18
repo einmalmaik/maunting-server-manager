@@ -355,8 +355,8 @@ export const CallOverlay: React.FC = () => {
               <Avatar
                 src={partner.avatarUrl}
                 name={partner.username}
-                size="xl"
-                className="h-28 w-28 text-3xl border-4 border-status-success/50"
+                size="2xl"
+                className="border-4 border-status-success/50"
               />
               <span className="absolute inset-0 animate-ping rounded-full border-2 border-status-success/50" />
             </div>
@@ -477,8 +477,8 @@ export const CallOverlay: React.FC = () => {
                     <Avatar
                       src={partner?.avatarUrl}
                       name={titel}
-                      size="xl"
-                      className="h-24 w-24 sm:h-28 sm:w-28 text-3xl border-2 border-status-success/30 bg-status-success/10"
+                      size="2xl"
+                      className="border-2 border-status-success/30 bg-status-success/10"
                     />
                     <div className="max-w-full px-4 text-center">
                       <div className="truncate text-base font-semibold text-on-surface">{titel}</div>

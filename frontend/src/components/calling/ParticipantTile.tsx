@@ -114,7 +114,7 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
           src={participant.avatarUrl}
           name={participant.username}
           size="xl"
-          className="h-16 w-16 sm:h-20 sm:w-20 text-2xl shrink-0"
+          className="shrink-0"
         />
       )}
 
