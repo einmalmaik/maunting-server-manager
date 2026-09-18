@@ -240,3 +240,33 @@ export async function hatSitzung(id: string): Promise<boolean> {
 export async function verwirfSitzung(id: string): Promise<void> {
   await imSchloss(id, () => ablage.loesche(id))
 }
+
+// ==========================================
+// Schon angewandte Sitzungsaufbauten
+// ==========================================
+
+/**
+ * Neben den Sitzungen liegen in derselben Ablage Marken: „diesen Aufbau habe
+ * ich schon angewandt". Sie tragen ein Präfix aus Buchstaben und können
+ * deshalb nie mit einer `sitzungsId` (`<Konto>:<Gerätekennung>`) kollidieren.
+ */
+const AUFBAU_PRAEFIX = 'aufbau:'
+
+/**
+ * Ob dieser Sitzungsaufbau schon einmal angewandt wurde.
+ *
+ * Ein Aufbau bleibt als Umschlag in der Mailbox liegen, und der Lesepfad holt
+ * das ganze Fenster bei jedem Abruf neu — abgelegt wird nur Klartext, ein
+ * Aufbau also nie. Ohne diese Marke baute derselbe Umschlag die Sitzung bei
+ * jedem Durchlauf erneut auf: der Ratchet fiel auf den Anfangszustand zurück,
+ * und weil dabei eine Sitzung vorgefunden wurde, meldete der Verlauf einen
+ * Neuaufbau, den niemand ausgelöst hatte.
+ */
+export async function kennstAufbau(kennung: string): Promise<boolean> {
+  return (await ablage.lies(AUFBAU_PRAEFIX + kennung)) !== null
+}
+
+/** Hält fest, dass dieser Aufbau angewandt ist. Erst nach dem Anwenden rufen. */
+export async function merkeAufbau(kennung: string): Promise<void> {
+  await ablage.schreibe(AUFBAU_PRAEFIX + kennung, '1')
+}

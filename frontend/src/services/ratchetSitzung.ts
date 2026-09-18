@@ -66,7 +66,14 @@ import { base64ToBytes, bytesToBase64, bytesToUtf8, utf8ToBytes } from '@msdis/s
 
 import { encryptE2eeHybrid } from './e2eeCrypto'
 import { eigenesGeraet, geraeteVon, verlangeGeraeteVon } from './e2eeGeraet'
-import { hatSitzung, schritt, sitzungsId, verwirfSitzung } from './ratchetSpeicher'
+import {
+  hatSitzung,
+  kennstAufbau,
+  merkeAufbau,
+  schritt,
+  sitzungsId,
+  verwirfSitzung,
+} from './ratchetSpeicher'
 
 export const DR_PREFIX = 'sv-e2ee-dr-v1:'
 export const DR_INIT_TYP = 'dr-init'
@@ -280,6 +287,15 @@ export async function verarbeiteBootstrap(
     return { istAufbau: true, ersetzt: false }
   }
 
+  // Derselbe Umschlag beim nächsten Abruf ist kein Neuaufbau. Der öffentliche
+  // Teil des mitgereisten Paares wird je Aufbau frisch erzeugt und ist damit
+  // die Kennung dieses einen Aufbaus — anders als die Gerätekennung, die über
+  // alle Aufbauten hinweg dieselbe bleibt.
+  const aufbauKennung = inhalt.paar.publicKey
+  if (await kennstAufbau(aufbauKennung)) {
+    return { istAufbau: true, ersetzt: false, vonGeraet: inhalt.vonGeraet }
+  }
+
   const id = sitzungsId(inhalt.vonKonto, inhalt.vonGeraet)
   const stand = await hatSitzung(id)
 
@@ -301,6 +317,9 @@ export async function verarbeiteBootstrap(
     return { naechster: neu, ergebnis: null }
   })
   paar.privateKey.fill(0)
+  // Erst nach dem Anwenden. Scheitert `schritt`, bleibt der Aufbau ungemerkt
+  // und der nächste Abruf nimmt den Faden wieder auf.
+  await merkeAufbau(aufbauKennung)
 
   return { istAufbau: true, ersetzt: stand, vonGeraet: inhalt.vonGeraet }
 }
