@@ -182,33 +182,44 @@ Warum gut: sichere Ablehnung, kein Fallback, Runtime-State wird bereinigt.
 
 ### 5.1 Messenger-Identität (E2EE)
 
-Der Identitätsschlüssel des Messengers gehört dem **Konto**, nicht dem Gerät.
-`users.social_e2ee_public_key` hat genau einen Eintrag pro Benutzer; sein privater
-Teil liegt verpackt in `users.social_e2ee_wrapped_keyring`. Alles läuft über
-`frontend/src/services/e2eeIdentity.ts` — die einzige Stelle, die Identität auflöst.
+Der Identitätsschlüssel des Messengers gehört dem **Gerät**, nicht dem Konto.
+Er entsteht in `frontend/src/services/e2eeGeraet.ts`, bleibt dort, und
+veröffentlicht wird nur der öffentliche Teil (`user_e2ee_devices`). Es gibt
+keinen Kontoschlüsselbund und keinen Wiederherstellungsschlüssel mehr.
+
+Bis 09/2026 hing er am Konto: ein RSA-Paar je Benutzer, der private Teil
+verpackt auf dem Server, entsperrt über einen abgetippten Code. Das war selbst
+schon die zweite Reparatur eines Mehrgeräteproblems, und mit dem Double Ratchet
+ist ein geteilter privater Schlüssel nicht bloß unnötig, sondern falsch: wer
+eine Ratchet-Nachricht öffnet, vernichtet dabei ihren Schlüssel, und zwei
+Geräte mit demselben Paar verklemmen die Sitzung.
 
 Harte Invarianten:
 
-- **Kein Schlüssel wird erzeugt oder veröffentlicht, solange serverseitig ein
-  Schlüsselbund liegt.** Ein Gerät ohne lokalen Bund meldet `locked` und wartet
-  auf den Wiederherstellungsschlüssel. Ein Gerät, das hier ein frisches Paar
-  hochlädt, macht den gesamten Verlauf des Kontos auf allen Geräten unlesbar —
-  genau das ist am 13.09.2026 passiert.
-- Ein Netzwerkfehler beim Lesen des Bunds ist `locked`, niemals `needs-setup`.
-  Sonst führt ein Klick auf „Einrichten" dieselbe Zerstörung herbei.
-- Schlüsselbund und Public Key werden nur gemeinsam und nur mit passender
-  `expected_version` geschrieben. Bei Abweichung 409, kein Überschreiben.
-- Gesendet wird ausschließlich hybrid gegen den veröffentlichten
-  Empfängerschlüssel. Fehlt er, wird **nicht gesendet**.
-- `encryptE2eeMessage` ist kein Sendeweg. Sein Schlüssel ist
-  `sha256("msm:dm:key:<min>:<max>")` — das Backend kennt beim Relais beide
-  Kennungen und kann ihn nachbilden. Die Funktion existiert nur noch, damit
-  Nachrichten von vor dem Kontoschlüssel lesbar bleiben.
-- Entschlüsselt wird gegen den ganzen Bund (`decryptE2eeHybridWithKeyring`),
-  nicht gegen einen einzelnen Schlüssel: adoptierte Gerätesschlüssel aus der
-  Altzeit sind der einzige Weg zu dem damals entstandenen Verlauf.
-- Der Wiederherstellungsschlüssel wird genau einmal angezeigt und nirgends
-  gespeichert. Er darf nicht in Logs, Toasts, URLs oder Requests erscheinen.
+- **Der Server erzeugt nie Schlüsselmaterial für den Messenger.** Bis 09/2026
+  legte `AuthService` bei jeder Registrierung ein RSA-Paar an, warf den privaten
+  Teil weg und veröffentlichte den öffentlichen. Wer dagegen verschlüsselte,
+  schrieb in ein schwarzes Loch.
+- **Kein ableitbarer Kanalschlüssel, auch nicht lesend.** `sha256("msm:dm:key:…")`
+  und `sha256("msm:group:key:<id>")` benutzten Zutaten, die in der Datenbank
+  stehen; das Backend konnte jede so verschlüsselte Nachricht selbst öffnen.
+  Beide Ableitungen sind gelöscht, und `validateEnvelopeIntegrity` weist ihre
+  Präfixe (`sv-e2ee-v1:`, `sv-e2ee-team-v1:`, `sv-e2ee-ratchet-v1:`) ab.
+- Gesendet wird gegen veröffentlichte **Geräteschlüssel**, je Empfängergerät und
+  je eigenem Zweitgerät ein Umschlag. Ist kein Gerät angemeldet, wird **nicht
+  gesendet** — kein symmetrischer Notweg.
+- Die Präfixliste in `frontend/src/services/e2eeCrypto.ts` und
+  `VALID_E2EE_PREFIXES` in `backend/schemas/social.py` müssen dieselben drei
+  Formate nennen: `sv-e2ee-hybrid-v1:`, `sv-e2ee-group-v1:`, `sv-e2ee-dr-v1:`.
+  Durchgesetzt wird es im Backend beim Schreiben; der Client prüft nur mit,
+  damit er keinen Umschlag baut, den das Relais gleich darauf zurückweist.
+- **Krypto-Policy gehört nicht in Komponenten.** Welche Mailbox, welches
+  Verfahren und was ein gelesener Umschlag bedeutet, entscheidet
+  `frontend/src/hooks/useKonversation.ts`. Eine Komponente, die selbst
+  entschlüsselt, ist nicht prüfbar.
+- Ein Sitzungsbruch wird **sichtbar gemeldet**, nie still repariert. Eine
+  klammheimlich neu aufgebaute Sicherheitssitzung ist genau das, was ein
+  Angreifer sich wünscht.
 
 Wer eine dieser Zusagen ändert, muss `frontend/src/pages/Privacy.tsx`
 (Abschnitt `privacyPolicy.sections.messenger`) im selben Commit mitziehen.

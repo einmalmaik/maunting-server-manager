@@ -9,8 +9,6 @@ import { useAuthStore } from '@/stores/authStore'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
 import {
   deriveBlindMailboxId,
-  encryptE2eeMessage,
-  decryptE2eeMessage,
   encryptE2eeHybrid,
   decryptE2eeHybrid,
   clearEnvelopePlaintextCache,
@@ -153,15 +151,17 @@ vi.mock('@/services/ratchetSitzung', () => {
     ]),
     liesDrUmschlag: vi.fn(
       async (_kontext: any, umschlag: string, ablegen: (t: string) => Promise<void>) => {
-        // Der Klartext kommt weiterhin aus dem Stellvertreter, den die Tests
-        // ohnehin je Fall setzen. So bleibt jede bestehende Vorgabe gültig,
-        // obwohl der Messenger jetzt über den Ratchet liest.
-        const { decryptE2eeMessage } = await import('@/services/e2eeCrypto')
+        // Was nicht im Ratchet-Format ankommt, ist Altbestand. Der echte
+        // `liesDrUmschlag` antwortet darauf `unbekannt`, und der Messenger
+        // zeigt „Verschlüsselte Nachricht". Bis 09/2026 stand hier ein
+        // Rückfall auf `decryptE2eeMessage` — die Ableitung aus den beiden
+        // Benutzerkennungen, die es nicht mehr gibt.
+        if (!umschlag.startsWith(PREFIX) || umschlag.split('.').length <= 3) {
+          return { art: 'unbekannt' }
+        }
         let text: string
         try {
-          text = umschlag.startsWith(PREFIX) && umschlag.split('.').length > 3
-            ? auspacken(umschlag)
-            : await (decryptE2eeMessage as any)(umschlag, 0, 0)
+          text = auspacken(umschlag)
         } catch {
           return { art: 'bruch', vonKonto: 101, vonGeraet: 'zielgeraet', grund: 'Test' }
         }

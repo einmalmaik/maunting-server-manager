@@ -49,8 +49,6 @@ vi.mock('@/services/e2eeCrypto', () => ({
   getCachedGroupBlindMailboxId: vi.fn().mockReturnValue('test-group-blind-mailbox'),
   envelopePlaintextCache: new Map(),
   clearEnvelopePlaintextCache: vi.fn(),
-  encryptE2eeMessage: vi.fn().mockResolvedValue('ciphertext'),
-  decryptE2eeMessage: vi.fn().mockResolvedValue('Hallo Welt'),
   encryptE2eeHybrid: vi.fn().mockImplementation(async (payload) => `sv-e2ee-hybrid-v1:mock.${payload}`),
   decryptE2eeHybrid: vi.fn().mockImplementation(async (envelope) => {
     return envelope.replace('sv-e2ee-hybrid-v1:mock.', '')
@@ -59,13 +57,19 @@ vi.mock('@/services/e2eeCrypto', () => ({
   decryptE2eeHybridWithKeyring: vi.fn().mockImplementation(async (envelope) => {
     return envelope.replace('sv-e2ee-hybrid-v1:mock.', '')
   }),
-  encryptGroupE2eeMessage: vi.fn().mockResolvedValue('group-ciphertext'),
-  decryptGroupE2eeMessage: vi.fn().mockResolvedValue('Hallo Gruppe'),
   scrubPlaintextStorage: vi.fn(),
 }))
 
-/** Zustand des Geräts direkt setzbar, statt je Test einen Bund zu öffnen. */
-const { identitaet, MockRecipientKeyMissingError } = vi.hoisted(() => ({
+/**
+ * Was ein Umschlag im Test bedeutet.
+ *
+ * Bis 09/2026 lieh sich diese Rolle `decryptE2eeMessage` aus dem Produktivcode
+ * — die Ableitung aus den beiden Benutzerkennungen, die der Server nachbauen
+ * konnte. Sie ist gelöscht. Der Haken heißt jetzt, was er ist, und gehört dem
+ * Test.
+ */
+const { identitaet, MockRecipientKeyMissingError, testKlartext } = vi.hoisted(() => ({
+  testKlartext: vi.fn(async (_umschlag: string): Promise<string> => 'Hallo Welt'),
   identitaet: {
     state: 'ready' as 'needs-setup' | 'locked' | 'ready',
     sendPair: { publicKeyJwk: '{"kty":"oct"}', privateKeyJwk: '{"kty":"oct"}' } as
@@ -160,12 +164,11 @@ vi.mock('@/services/ratchetSitzung', () => {
         // Der Klartext kommt weiterhin aus dem Stellvertreter, den die Tests
         // ohnehin je Fall setzen. So bleibt jede bestehende Vorgabe gültig,
         // obwohl der Messenger jetzt über den Ratchet liest.
-        const { decryptE2eeMessage } = await import('@/services/e2eeCrypto')
         let text: string
         try {
           text = umschlag.startsWith(PREFIX) && umschlag.split('.').length > 3
             ? auspacken(umschlag)
-            : await (decryptE2eeMessage as any)(umschlag, 0, 0)
+            : await testKlartext(umschlag)
         } catch {
           return { art: 'bruch', vonKonto: 101, vonGeraet: 'zielgeraet', grund: 'Test' }
         }

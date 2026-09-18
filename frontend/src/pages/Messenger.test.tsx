@@ -50,23 +50,23 @@ vi.mock('@/services/e2eeCrypto', () => ({
   getCachedGroupBlindMailboxId: vi.fn().mockReturnValue(undefined),
   envelopePlaintextCache: mockEnvelopeCache,
   clearEnvelopePlaintextCache: vi.fn(() => mockEnvelopeCache.clear()),
-  encryptE2eeMessage: vi.fn().mockResolvedValue('ciphertext'),
-  decryptE2eeMessage: vi.fn().mockResolvedValue('Hallo Welt'),
   encryptE2eeHybrid: vi.fn().mockResolvedValue('sv-e2ee-hybrid-v1:...'),
   decryptE2eeHybrid: vi.fn().mockResolvedValue('Hallo Hybrid'),
   // Produktivpfad: gegen alle Schlüssel des Kontos, nicht gegen einen Gerätesschlüssel.
   decryptE2eeHybridWithKeyring: vi.fn().mockResolvedValue('Hallo Hybrid'),
-  encryptGroupE2eeMessage: vi.fn().mockResolvedValue('group-ciphertext'),
-  decryptGroupE2eeMessage: vi.fn().mockResolvedValue('Hallo Gruppe'),
   scrubPlaintextStorage: vi.fn(),
-  createReplayDetector: vi.fn().mockReturnValue({
-    checkAndRecord: vi.fn().mockResolvedValue(true),
-    clear: vi.fn(),
-  }),
 }))
 
-/** Zustand des Geräts direkt setzbar, statt je Test einen Bund zu öffnen. */
-const { identitaet, MockRecipientKeyMissingError } = vi.hoisted(() => ({
+/**
+ * Was ein Umschlag im Test bedeutet.
+ *
+ * Bis 09/2026 lieh sich diese Rolle `decryptE2eeMessage` aus dem Produktivcode
+ * — die Ableitung aus den beiden Benutzerkennungen, die der Server nachbauen
+ * konnte. Sie ist gelöscht. Der Haken heißt jetzt, was er ist, und gehört dem
+ * Test.
+ */
+const { identitaet, MockRecipientKeyMissingError, testKlartext } = vi.hoisted(() => ({
+  testKlartext: vi.fn(async (_umschlag: string): Promise<string> => 'Hallo Welt'),
   identitaet: {
     state: 'ready' as 'needs-setup' | 'locked' | 'ready',
     sendPair: { publicKeyJwk: '{"kty":"oct"}', privateKeyJwk: '{"kty":"oct"}' } as
@@ -161,12 +161,11 @@ vi.mock('@/services/ratchetSitzung', () => {
         // Der Klartext kommt weiterhin aus dem Stellvertreter, den die Tests
         // ohnehin je Fall setzen. So bleibt jede bestehende Vorgabe gültig,
         // obwohl der Messenger jetzt über den Ratchet liest.
-        const { decryptE2eeMessage } = await import('@/services/e2eeCrypto')
         let text: string
         try {
           text = umschlag.startsWith(PREFIX) && umschlag.split('.').length > 3
             ? auspacken(umschlag)
-            : await (decryptE2eeMessage as any)(umschlag, 0, 0)
+            : await testKlartext(umschlag)
         } catch {
           return { art: 'bruch', vonKonto: 101, vonGeraet: 'zielgeraet', grund: 'Test' }
         }
@@ -782,8 +781,7 @@ describe('Messenger (Allround Chat)', () => {
       },
     ])
 
-    const { decryptE2eeMessage } = await import('@/services/e2eeCrypto')
-    vi.mocked(decryptE2eeMessage).mockImplementation(async (envelope) => {
+    testKlartext.mockImplementation(async (envelope) => {
       if (envelope === 'ciphertext-10') {
         return JSON.stringify({
           sender_id: 1, // Self
@@ -841,7 +839,7 @@ describe('Messenger (Allround Chat)', () => {
         created_at: '2026-09-08T12:02:00Z',
       },
     ])
-    vi.mocked(decryptE2eeMessage).mockImplementation(async (envelope) => {
+    testKlartext.mockImplementation(async (envelope) => {
       if (envelope === 'ciphertext-10') {
         return JSON.stringify({
           sender_id: 1,
@@ -933,8 +931,7 @@ describe('Messenger (Allround Chat)', () => {
       },
     ])
 
-    const { decryptE2eeMessage } = await import('@/services/e2eeCrypto')
-    vi.mocked(decryptE2eeMessage).mockImplementation(async (envelope) => {
+    testKlartext.mockImplementation(async (envelope) => {
       if (envelope === 'ciphertext-voice') {
         return JSON.stringify({
           sender_id: 101,
@@ -1055,8 +1052,7 @@ describe('Messenger (Allround Chat)', () => {
       },
     ])
 
-    const { decryptE2eeMessage } = await import('@/services/e2eeCrypto')
-    vi.mocked(decryptE2eeMessage).mockImplementation(async (envelope) => {
+    testKlartext.mockImplementation(async (envelope) => {
       if (envelope === 'ciphertext-yesterday') {
         return JSON.stringify({
           sender_id: 102,
@@ -1164,8 +1160,7 @@ describe('Messenger (Allround Chat)', () => {
       },
     ])
 
-    const { decryptE2eeMessage } = await import('@/services/e2eeCrypto')
-    vi.mocked(decryptE2eeMessage).mockImplementation(async (envelope) => {
+    testKlartext.mockImplementation(async (envelope) => {
       if (envelope === 'ciphertext-story-reply') {
         return JSON.stringify({
           sender_id: 104,
@@ -1282,7 +1277,7 @@ describe('Messenger (Allround Chat)', () => {
   })
 
   it('entschluesselt empfangene Nachrichten aus Tauri/Web zuverlaessig ueber den synchronisierten Direktkanal', async () => {
-    const { decryptE2eeMessage, decryptE2eeHybridWithKeyring } = await import('@/services/e2eeCrypto')
+    const { decryptE2eeHybridWithKeyring } = await import('@/services/e2eeCrypto')
     vi.mocked(socialApi.getFriends).mockResolvedValue([
       {
         id: 1,
@@ -1315,7 +1310,7 @@ describe('Messenger (Allround Chat)', () => {
     ])
 
     // Direct channel decryption succeeds for cross-platform messages
-    vi.mocked(decryptE2eeMessage).mockImplementation(async (env) => {
+    testKlartext.mockImplementation(async (env) => {
       if (env.includes('message-from-tauri')) {
         return JSON.stringify({
           sender_id: 206,
@@ -1358,7 +1353,6 @@ describe('Messenger (Allround Chat)', () => {
   })
 
   it('dedupliziert eingehende Envelopes mit identischer client_uuid in der UI', async () => {
-    const { decryptE2eeMessage } = await import('@/services/e2eeCrypto')
     vi.mocked(socialApi.getFriends).mockResolvedValue([
       {
         id: 1,
@@ -1388,7 +1382,7 @@ describe('Messenger (Allround Chat)', () => {
       },
     ])
 
-    vi.mocked(decryptE2eeMessage).mockResolvedValue(
+    testKlartext.mockResolvedValue(
       JSON.stringify({
         sender_id: 301,
         client_uuid: 'unique-client-uuid-777',
@@ -1483,8 +1477,7 @@ describe('Messenger (Allround Chat)', () => {
       },
     ])
 
-    const { decryptE2eeMessage } = await import('@/services/e2eeCrypto')
-    vi.mocked(decryptE2eeMessage).mockImplementation(async (envelope) => {
+    testKlartext.mockImplementation(async (envelope) => {
       if (envelope === 'ciphertext-msg-50') {
         return JSON.stringify({
           sender_id: 1,
