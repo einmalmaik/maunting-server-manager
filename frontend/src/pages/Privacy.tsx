@@ -105,6 +105,11 @@ export function Privacy() {
           // ausloest. Das gehoert ausdruecklich in den Datenschutzhinweis.
           t('privacyPolicy.sections.ai.items.autonomy'),
           t('privacyPolicy.sections.ai.items.tools'),
+          // Die Gegenrichtung zum Punkt darueber: was die Werkzeuge erreichen,
+          // steht dort, und der Messenger gehoert seit 09/2026 ausdruecklich
+          // nicht dazu. Das ist keine Selbstverstaendlichkeit, sondern ein
+          // Rueckbau — es gab Werkzeuge dafuer.
+          t('privacyPolicy.sections.ai.items.noMessenger'),
           t('privacyPolicy.sections.ai.items.voice'),
           // Die Kopplung an die Guardian-Engine: seit ihr kann eine
           // Verarbeitung beginnen, ohne dass jemand am Panel sitzt. Das ist die

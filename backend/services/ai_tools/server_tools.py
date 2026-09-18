@@ -95,9 +95,6 @@ from services.ai_tools.personal_tools import (
     _notes_tool_definitions,
     _execute_send_test_email,
 )
-from services.ai_tools.social_tools import (
-    _social_tool_definitions,
-)
 from services.ai_tools.geo_tools import (
     _voice_tool_definitions,
     voice_control_tool_definitions,
@@ -985,7 +982,6 @@ def _global_tool_definitions() -> list[dict]:
         *_worker_tool_definitions(),
         *_mailbox_and_calendar_tool_definitions(),
         *_notes_tool_definitions(),
-        *_social_tool_definitions(),
     ]
 
 def provider_tool_definitions() -> list[dict]:
@@ -1905,32 +1901,6 @@ def _execute_global_read_tool(
             db, user=user, search=query, category=category, team_id=team_id, is_pinned=is_pinned
         )
         return {"notes": notes, "count": len(notes)}
-
-    if tool_name == "search_messenger_contacts":
-        from services.social_matching_service import SocialMatchingService
-
-        query = str(arguments.get("query", "")).strip()
-        if not query:
-            raise AiActionValidationError("Suchbegriff (query) erforderlich")
-
-        results = SocialMatchingService.search_contacts(db, user, query)
-        return {"contacts": results, "count": len(results)}
-
-    if tool_name == "search_messenger_groups":
-        from services.social_service import SocialService
-
-        query = str(arguments.get("query", "")).strip().lower()
-        groups = SocialService.list_user_groups(db, user.id)
-        matches = []
-        for g in groups:
-            name = str(g.get("name", ""))
-            if not query or query in name.lower():
-                matches.append({
-                    "group_id": g.get("id"),
-                    "name": name,
-                    "member_count": g.get("member_count", 0),
-                })
-        return {"groups": matches, "count": len(matches)}
 
     if tool_name == "read_blueprint":
         # Ein Blueprint ist eine Vorlage, kein Betriebsgeheimnis: wer Server

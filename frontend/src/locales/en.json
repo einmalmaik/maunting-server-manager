@@ -963,9 +963,7 @@
       "cloudflare_list_zones": "Read Cloudflare zones",
       "execute_server_action": "Executed server action",
       "search_curseforge_modpacks": "Searched CurseForge modpacks",
-      "search_curseforge_mods": "Searched CurseForge mods",
-      "search_messenger_contacts": "Searched messenger contacts",
-      "search_messenger_groups": "Searched messenger groups"
+      "search_curseforge_mods": "Searched CurseForge mods"
     },
     "toolsRunning": {
       "ask_user": "Asking a quick question",
@@ -1063,9 +1061,7 @@
       "search_curseforge_mods": "Searching CurseForge for mods",
       "propose_cloudflare_dns_delete": "Preparing DNS record deletion",
       "propose_cloudflare_dns_record": "Preparing DNS record",
-      "propose_modpack_install": "Preparing modpack installation",
-      "search_messenger_contacts": "I am searching your messenger contacts",
-      "search_messenger_groups": "I am searching your messenger groups"
+      "propose_modpack_install": "Preparing modpack installation"
     },
     "errors": {
       "codes": {
@@ -2356,10 +2352,6 @@
     "ai_satellite_use": {
       "title": "Use satellite & regional analysis",
       "desc": "Allows the assistant to query Sentinel-2 satellite data, geodata, and weather analysis."
-    },
-    "ai_social_message_friend": {
-      "title": "Send friend messages",
-      "desc": "Allows the AI to draft and send messages to confirmed friends."
     },
     "ai_autonomous_use": {
       "title": "Use autonomous mode",
@@ -4403,6 +4395,7 @@
           "attachments": "Approved text, configuration, log, and image attachments are size- and type-checked, stored encrypted in the panel, and transferred with the conversation to the selected model provider",
           "autonomy": "Autonomous mode is optional and must be granted explicitly, per server or panel-wide; granted actions run without a further prompt but are still checked against the user's permissions unchanged and are recorded in full in the audit log as executed automatically",
           "tools": "When tools are used, limited and redacted excerpts from server logs, configuration files, mod and backup lists and Guardian incidents may be transmitted to the model provider; these results are stored for follow-up questions in the same chat and are deleted together with the chat",
+          "noMessenger": "The messenger is out of the assistant's reach: there is no tool that reads contacts, groups, or conversations, and none that sends a message. Nothing from it goes to the model provider, because there is nothing to fetch.",
           "voice": "Voice mode: in legacy mode, microphone audio passes through the panel for transcription and reply text is additionally sent to ElevenLabs. With OpenAI Realtime enabled, microphone audio is sent directly to OpenAI over WebRTC while the panel connects in parallel for tool control and accounting. Spoken turns are not stored as chat messages in this mode. The OpenAI key and call ID remain in the backend.",
           "guardian": "With autonomy granted, a Guardian incident can trigger processing while the user is not present: the incident type, its status and the server data already shared with the assistant are transmitted; log excerpts are additionally stripped of public IP addresses and email addresses. Usage and responsibility remain with the grantor. The result report sent by email contains model-generated text.",
           "tasks": "A standing task created in chat or in the task list (“AI task”) stores its name, instruction, schedule, time zone and delivery channel, and triggers processing at the agreed time while the user is not present. It runs in the background with the permissions and quota of whoever created it; on each due run the instruction and the server data it retrieves are transmitted to the selected model provider. On request the result is additionally sent by email to the stored address and contains model-generated text. Tasks can be listed, paused and deleted from the chat and the task list at any time.",

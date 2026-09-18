@@ -282,6 +282,14 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
     `propose_message_contact`, `propose_message_friend`, `propose_message_group`)
     bringen zusammen rund 5.300 Zeichen.
     Die Grenze steht deshalb bei **96.000**.
+
+    **Nachtrag 18.09.2026: alle fünf sind wieder weg** — aus der App
+    **89.777** Zeichen, aus dem Panel **84.288**. Die KI hat keinen Zugang mehr
+    zum Messenger, und mit dem Zugang fällt auch sein Platz im Katalog.
+    **Die Grenze geht deshalb auf 92.000 zurück, nicht weiter mit.** Ein einmal
+    angehobener Deckel, den niemand wieder senkt, macht freigewordenen Platz
+    stillschweigend zum Budget des nächsten Werkzeugs — und genau dagegen steht
+    dieser Test.
      """
     for herkunft in ("panel", "desktop"):
         erlaubt = herkunft_schnitt(
@@ -295,7 +303,7 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
             ],
             ensure_ascii=False,
         )
-        assert len(katalog) < 96_000, (
+        assert len(katalog) < 92_000, (
             f"Der Werkzeugkatalog der Herkunft '{herkunft}' ist auf "
             f"{len(katalog)} Zeichen gewachsen. Er geht in jeder Runde mit und "
             "taucht in keiner Budgetrechnung auf."

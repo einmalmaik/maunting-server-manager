@@ -68,7 +68,17 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     # Durchgesetzt in ai_action_service._execute_analyze_region. Ohne hinterlegte
     # Copernicus-Zugangsdaten wird das Werkzeug dem Modell nicht angeboten.
     PermissionDef("ai.satellite.use",          "ai",      "Satelliten- und Regionsanalyse über die KI verwenden"),
-    PermissionDef("ai.social.message_friend",  "ai",      "Nachrichten an bestätigte Freunde über die KI senden"),
+    #
+    # `ai.social.message_friend` stand hier bis 09/2026 und ist ersatzlos weg.
+    # Es gewaehrte zuletzt nichts mehr: die drei Sendewerkzeuge fielen, weil sie
+    # serverseitig verschluesselt haben, die beiden Messenger-Suchen danach mit.
+    # Ein Recht ohne Abnehmer ist schlimmer als keines — der Betreiber haette im
+    # Rechteeditor weiter etwas freigegeben, das niemand mehr abfragt, und
+    # geglaubt, damit etwas erlaubt zu haben. Gespeicherte Rollen koennen den
+    # Schluessel noch tragen; `role_service` schreibt ihn beim naechsten
+    # Speichern nicht zurueck (`is_known_key`), und abgefragt wird er nirgends
+    # mehr.
+    #
     # Durchgesetzt in routers/ai_settings.py::get_usage_overview. Bewusst nicht
     # an `panel.settings.read` gehaengt: wer Verbraeuche sieht, sieht das
     # Nutzungsverhalten fremder Kunden. Den *eigenen* Verbrauch zeigt

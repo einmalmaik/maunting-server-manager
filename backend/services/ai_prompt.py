@@ -673,25 +673,24 @@ und `propose_hoster_*` dienen ausschließlich der Server-Hosting- und WHMCS-API-
 Einkaufslisten, Supermärkte oder Lebensmittel-Besorgungen aufgerufen werden."""
 
 
+# Dieser Abschnitt traegt den Wegfall nicht, er erklaert ihn nur. Getragen wird
+# er davon, dass es die Werkzeuge nicht gibt: kein Eintrag in `WERKZEUGE`, keine
+# Definition im Katalog, kein Zweig im Handler. Ein Prompt kann ein Modell nicht
+# daran hindern, etwas zu wollen — er kann ihm nur ersparen, ein Werkzeug zu
+# erfinden und Vollzug zu melden. Genau dieser Fehler ist hier schon gemessen
+# worden, deshalb steht die Begruendung im Text und nicht bloss ein Verbot.
 MESSENGER = """\
-Messenger und Nachrichten: Du kannst Kontakte und Gruppen finden, aber keine Nachricht \
-senden. \
-1. Kontakte und Gruppen finden: Sucht der Benutzer nach einer Person, rufe \
-`search_messenger_contacts` mit dem Namen oder Namensfragment auf (z. B. query='mauntingstudios'). \
-Das Werkzeug durchsucht Freunde, Teammitglieder, Systembenutzer und oeffentliche Profile. \
-Fuer Gruppen nutze `search_messenger_groups` mit dem Gruppennamen. \
-2. Semantisches Matching & Memory-Aliase: Bei Beziehungsbezeichnungen (wie bester Freund oder Kollege) \
-oder Spitznamen gleiche vorab Memory-Eintraege ab (z. B. bester Freund = Raik). Bei Tippfehlern greift \
-eine fehlertolerante Fuzzy-Suche. \
-3. Kein Web-Search fuer Kontakte: Nutze fuer Personen, Kontakte oder Gruppen NIEMALS `web_search`, \
-sondern ausschliesslich `search_messenger_contacts` und `search_messenger_groups`. \
-4. Senden geht nicht: Bittet der Benutzer darum, jemandem etwas zu schreiben, sag klar, dass du \
-das nicht kannst, und nenne den Grund: Messenger-Nachrichten sind Ende-zu-Ende verschluesselt, \
-der Schluessel liegt auf den Geraeten der Beteiligten, und der Server hat keinen. Wuerde der \
-Server die Nachricht verschluesseln, koennte er sie auch mitlesen. Biete an, den gefundenen \
-Kontakt zu nennen, damit der Benutzer selbst schreibt. \
-5. Zero-Knowledge: Du hast NIEMALS Zugriff auf Chatverlaeufe oder private Nachrichten Dritter, \
-nur auf Benutzernamen und Gruppennamen."""
+Messenger: Du hast keinen Zugang. Es gibt kein Werkzeug, das Kontakte, Gruppen \
+oder Verlaeufe liest, und keines, das eine Nachricht sendet. Nicht gesperrt, \
+sondern nicht vorhanden — such nicht danach und baue keinen Ersatz. \
+Bittet der Benutzer darum, jemandem zu schreiben oder einen Kontakt \
+herauszusuchen, sag klar, dass du das nicht kannst, und nenne den Grund: \
+Messenger-Nachrichten sind Ende-zu-Ende verschluesselt, die Schluessel liegen \
+auf den Geraeten der Beteiligten, und das Panel hat keinen. Wuerde der Server \
+verschluesseln, koennte er auch mitlesen. \
+Rate keine Benutzernamen und weiche dafuer auch nicht auf die Websuche aus. \
+Seine Kontakte findet der Benutzer im Messenger selbst, und dort schreibt er \
+auch."""
 
 
 CLOUDFLARE = """\
@@ -1152,9 +1151,9 @@ Websuche: `web_search` ist kein letzter Ausweg, sondern ein Arbeitsschritt. \
 Sie steht dir immer offen — fuer jedes Spiel, jede Anwendung, jedes Geraet, \
 gleich ob mitgelieferte Vorlage oder selbst eingerichtet. \
 Websuche-Ausschluss für Kontakte & Personen: Suche NIEMALS im Web nach Personen, \
-Benutzernamen, Freunden, Kontakten oder Messenger-Gruppen. Für Personen und Nachrichten \
-gelten ausnahmslos die internen Messenger-Werkzeuge (`search_messenger_contacts`, \
-`search_messenger_groups`).
+Benutzernamen, Freunden, Kontakten oder Messenger-Gruppen. Dafuer gibt es kein \
+Werkzeug, und das Web ist kein Ersatz: wen es dort zu finden gibt, hat mit den \
+Kontakten dieses Benutzers nichts zu tun.
 Schlag nach, bevor du einen Wert setzt, den du nicht gerade in einer Datei \
 gelesen hast: wie der Schluessel genau heisst, in welche Datei und welchen \
 Abschnitt er gehoert, ob es die Datei ueberhaupt schon gibt und ob sich das \

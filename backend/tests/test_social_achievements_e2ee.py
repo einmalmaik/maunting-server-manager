@@ -201,7 +201,6 @@ def test_die_ki_kann_keine_nachricht_mehr_senden(db: Session, owner_user: User):
     nicht zurückkommen, ohne dass es jemand merkt.
     """
     from services.ai_proposals import lifecycle
-    from services.ai_tools.social_tools import _social_tool_definitions
     from services import ai_tool_registry
 
     entfernt = ("propose_message_friend", "propose_message_contact", "propose_message_group")
@@ -209,12 +208,6 @@ def test_die_ki_kann_keine_nachricht_mehr_senden(db: Session, owner_user: User):
     for name in entfernt:
         assert name not in lifecycle._AUSFUEHRUNGEN, f"{name} hat wieder einen Ausführer"
         assert name not in ai_tool_registry.WERKZEUGE, f"{name} steht wieder im Katalog"
-
-    angeboten = {w["function"]["name"] for w in _social_tool_definitions()}
-    assert angeboten.isdisjoint(entfernt)
-    # Die Suche bleibt: sie liest nur Namen und ist kein Krypto-Pfad.
-    assert "search_messenger_contacts" in angeboten
-    assert "search_messenger_groups" in angeboten
 
     conv = AiConversation(id=str(uuid4()), user_id=owner_user.id, title="Test Chat", kind="primary")
     db.add(conv)
@@ -499,47 +492,78 @@ def test_e2ee_typing_signal(owner_user: User) -> None:
     )
 
 
-def test_ai_messenger_search_and_e2ee(db: Session, owner_user: User) -> None:
-    """Prüft die neuen KI-Werkzeuge: search_messenger_contacts, search_messenger_groups,
-    propose_message_contact und propose_message_group mit Zero-Knowledge E2EE Relay."""
-    from services.ai_action_service import _execute_global_read_tool
+def test_die_ki_hat_keinen_zugang_zum_messenger(db: Session, owner_user: User) -> None:
+    """Die KI kommt an den Messenger nicht heran — nicht per Prompt, sondern gar nicht.
+
+    Senden fiel zuerst (die drei `propose_message_*` verschlüsselten
+    serverseitig), Lesen folgte 09/2026: `search_messenger_contacts` und
+    `search_messenger_groups` sind mitsamt ihrem Kontaktauflöser entfernt. Der
+    Auflöser las dafür Gedächtniseinträge, um „bester Freund" auf ein Konto
+    abzubilden — eine Brücke zwischen zwei Bereichen, die einander nichts
+    angehen.
+
+    Geprüft wird die Abwesenheit auf allen vier Ebenen, auf denen ein Werkzeug
+    entstehen kann: Katalog, Angebot an das Modell, Handler und Recht. Ein
+    Prompt ist hier ausdrücklich **kein** Nachweis: er beschreibt nur, was der
+    Fall ist, und ein Modell kann sich über Text hinwegsetzen. Über einen
+    fehlenden Handler nicht.
+    """
+    from services import ai_tool_registry
+    from services.ai_action_service import _execute_global_read_tool, provider_tool_definitions
+    from services.ai_tools.base import AiActionValidationError
+    from services import permission_catalog
     from models import ChatGroup, ChatGroupMember
 
-    # 1. Kontakt und Gruppe anlegen
+    verboten = (
+        "search_messenger_contacts",
+        "search_messenger_groups",
+        "propose_message_friend",
+        "propose_message_contact",
+        "propose_message_group",
+    )
+
+    # 1. Katalog: kein Eintrag.
+    for name in verboten:
+        assert name not in ai_tool_registry.WERKZEUGE, f"{name} steht wieder im Katalog"
+
+    # 2. Angebot: das Modell sieht kein Werkzeug, das nach Messenger klingt.
+    angeboten = {w["function"]["name"] for w in provider_tool_definitions()}
+    assert angeboten.isdisjoint(verboten)
+    assert not [n for n in angeboten if "messenger" in n], sorted(angeboten)
+
+    # 3. Handler: es gibt echte Kontakte und eine echte Gruppe, und trotzdem
+    #    führt kein Aufruf irgendwohin. Das ist der Teil, der auch dann hält,
+    #    wenn ein Modell den Namen frei erfindet.
     alice = User(username="alice_wonder", password_hash="hasha", is_active=True)
     db.add(alice)
     db.commit()
-
-    # Alice als Freund hinzufügen
-    f_rel = UserFriend(user_id=owner_user.id, friend_id=alice.id, status="accepted")
-    db.add(f_rel)
-
-    # Gruppe anlegen
-    group = ChatGroup(name="Gamer Community", owner_user_id=owner_user.id, invite_code="testinv123")
-    db.add(group)
+    db.add(UserFriend(user_id=owner_user.id, friend_id=alice.id, status="accepted"))
+    gruppe = ChatGroup(name="Gamer Community", owner_user_id=owner_user.id, invite_code="testinv123")
+    db.add(gruppe)
     db.commit()
-    member1 = ChatGroupMember(group_id=group.id, user_id=owner_user.id, role="admin")
-    member2 = ChatGroupMember(group_id=group.id, user_id=alice.id, role="member")
-    db.add_all([member1, member2])
+    db.add_all([
+        ChatGroupMember(group_id=gruppe.id, user_id=owner_user.id, role="admin"),
+        ChatGroupMember(group_id=gruppe.id, user_id=alice.id, role="member"),
+    ])
     db.commit()
 
-    # 2. search_messenger_contacts testen
-    res_contacts = _execute_global_read_tool(
-        db, user=owner_user, tool_name="search_messenger_contacts", arguments={"query": "alice"}
-    )
-    assert res_contacts["count"] >= 1
-    found_names = [c["username"] for c in res_contacts["contacts"]]
-    assert "alice_wonder" in found_names
+    for name in ("search_messenger_contacts", "search_messenger_groups"):
+        with pytest.raises(AiActionValidationError):
+            _execute_global_read_tool(
+                db, user=owner_user, tool_name=name, arguments={"query": "alice"}
+            )
 
-    # 3. search_messenger_groups testen
-    res_groups = _execute_global_read_tool(
-        db, user=owner_user, tool_name="search_messenger_groups", arguments={"query": "Gamer"}
-    )
-    assert res_groups["count"] >= 1
-    assert any(g["name"] == "Gamer Community" for g in res_groups["groups"])
+    # 4. Recht: `ai.social.message_friend` ist aus dem Katalog raus. Ein Recht
+    #    ohne Abnehmer ist ein Versprechen, das niemand einlöst.
+    rechte = set(permission_catalog.ALL_KEYS)
+    assert "ai.social.message_friend" not in rechte
+    assert not [k for k in rechte if k.startswith("ai.social.")], sorted(rechte)
 
-    # 4. Senden kann die KI nicht mehr. Die Suche bleibt genau deshalb: sie
-    #    liest Namen, mehr nicht, und der Mensch schreibt selbst.
+    # 5. Der Kontaktauflöser ist weg, nicht bloß unbenutzt.
+    with pytest.raises(ModuleNotFoundError):
+        __import__("services.social_matching_service")
+
+    # Und nichts davon hat einen Umschlag erzeugt.
     assert db.query(E2eeBlindEnvelope).count() == 0
 
 

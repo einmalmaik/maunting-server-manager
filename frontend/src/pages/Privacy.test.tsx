@@ -48,6 +48,10 @@ const KI_PUNKTE = [
   'attachments',
   'autonomy',
   'tools',
+  // Seit 09/2026: die KI hat kein Werkzeug mehr, das den Messenger anfasst.
+  // Steht bewusst direkt hinter `tools` — der eine Punkt sagt, was die
+  // Werkzeuge erreichen, der andere, was sie ausdruecklich nicht erreichen.
+  'noMessenger',
   'voice',
   'guardian',
   'tasks',
@@ -185,8 +189,9 @@ describe('Privacy page', () => {
     );
     // Ausdruecklich als Zahl festgehalten: neun Punkte vor der
     // Guardian-Kopplung, zehn danach, elf seit den stehenden KI-Aufgaben,
-    // dreizehn seit verknüpften Postfächern und Kalendern, vierzehn mit Sprachmodus.
-    expect(gerendert).toHaveLength(14);
+    // dreizehn seit verknüpften Postfächern und Kalendern, vierzehn mit
+    // Sprachmodus, fuenfzehn seit die KI den Messenger nicht mehr erreicht.
+    expect(gerendert).toHaveLength(15);
   });
 });
 

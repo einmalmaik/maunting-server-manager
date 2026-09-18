@@ -48,6 +48,15 @@ const ABGELOESTE_SCHLUESSEL = [
   'permissions',
   'ai.providers.voices',
   'ai.providers.realtimeHint',
+  // 09/2026: die KI hat kein Werkzeug mehr, das den Messenger anfasst. Die
+  // Beschriftungen der beiden Suchen und der Text des Rechts
+  // `ai.social.message_friend` beschrieben ab da etwas, das es nicht gibt —
+  // und ein Rechtetext ist im Rechteeditor eine Zusage, keine Dekoration.
+  'ai.tools.search_messenger_contacts',
+  'ai.tools.search_messenger_groups',
+  'ai.toolsRunning.search_messenger_contacts',
+  'ai.toolsRunning.search_messenger_groups',
+  'permissionDetails.ai_social_message_friend',
 ]
 
 /** Die Nachfolger muss es geben — sonst wäre das Löschen ein Verlust. */
@@ -75,6 +84,11 @@ const NACHFOLGER = [
   'ai.providers.transcriptionModelHint',
   'ai.providers.protokoll.tts',
   'ai.providers.protokoll.chat_completions',
+  // Der Nachfolger des Wegfalls: die Datenschutzerklärung sagt jetzt
+  // ausdrücklich, dass der Messenger für die KI nicht erreichbar ist. Ohne
+  // diesen Satz wäre aus der Oberfläche nicht zu erkennen, ob der Zugriff
+  // entfernt wurde oder nur unerwähnt blieb.
+  'privacyPolicy.sections.ai.items.noMessenger',
 ]
 
 // Nur die beiden Basissprachen: die übrigen neun sind bewusst Teilmengen mit

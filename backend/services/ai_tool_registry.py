@@ -647,14 +647,6 @@ WERKZEUGE: dict[str, Werkzeug] = {
         recht="ai.mailbox.use",
         recht_global=True,
     ),
-    "search_messenger_contacts": Werkzeug(
-        "global_read",
-        gruppe="social",
-    ),
-    "search_messenger_groups": Werkzeug(
-        "global_read",
-        gruppe="social",
-    ),
     "propose_calendar_event_create": Werkzeug(
         "global_write",
         gruppe="calendar",
@@ -859,9 +851,12 @@ CALENDAR_TOOLS = _mit_gruppe("calendar")
 POPUP_TOOLS = _mit_gruppe("popup")
 TASK_TOOLS = _mit_gruppe("tasks")
 NOTES_TOOLS = _mit_gruppe("notes")
-SOCIAL_TOOLS = _mit_gruppe("social")
+# Eine Gruppe "social" gab es hier bis 09/2026. Sie trug die beiden
+# Messenger-Suchen; beide sind entfernt, und die KI hat seitdem gar kein
+# Werkzeug mehr, das den Messenger anfasst. Siehe docs/agent-rules/security.md,
+# Abschnitt 5.1.
 CHAT_INTERACTION_TOOLS = (
-    MAIL_TOOLS | CALENDAR_TOOLS | POPUP_TOOLS | TASK_TOOLS | NOTES_TOOLS | SOCIAL_TOOLS
+    MAIL_TOOLS | CALENDAR_TOOLS | POPUP_TOOLS | TASK_TOOLS | NOTES_TOOLS
 )
 ASK_TOOLS = _mit_art("ask")
 DELEGATION_TOOLS = _mit_art("delegation")

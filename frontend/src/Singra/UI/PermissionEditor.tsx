@@ -67,7 +67,6 @@ const SUBGROUPS = [
       'ai.mailbox.use',
       'ai.calendar.use',
       'ai.notes.use',
-      'ai.social.message_friend',
       'ai.popups.manage',
       'ai.usage.read.all',
     ],

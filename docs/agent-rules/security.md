@@ -220,6 +220,15 @@ Harte Invarianten:
 - Ein Sitzungsbruch wird **sichtbar gemeldet**, nie still repariert. Eine
   klammheimlich neu aufgebaute Sicherheitssitzung ist genau das, was ein
   Angreifer sich wünscht.
+- **Die KI hat kein Werkzeug, das den Messenger anfasst.** Kein Senden (die
+  drei `propose_message_*` verschlüsselten serverseitig), kein Lesen
+  (`search_messenger_contacts`, `search_messenger_groups` samt
+  `social_matching_service.py`, das dafür Gedächtniseinträge durchsuchte). Das
+  Recht `ai.social.message_friend` ist aus dem Katalog raus. Der Prompt sagt
+  das auch, aber er ist nicht der Schutz: getragen wird es davon, dass es
+  weder Katalogeintrag noch Handler gibt, und ein erfundener Werkzeugname
+  deshalb ins Leere läuft. Wer hier wieder etwas aufmacht, öffnet den Weg
+  vom Modellanbieter in den Kontaktkreis des Benutzers.
 - **Im Relais kommt die Berechtigung vor der Entprellung.** Die Mailbox-Kennung
   ist `sha256("msm:dm:<min>:<max>")`, also für jeden ausrechenbar; sie ist eine
   Adresse, kein Ausweis. In `relay_blind_envelope` stand die Prüfung auf eine
