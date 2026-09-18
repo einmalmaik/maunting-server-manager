@@ -436,12 +436,18 @@ export async function replayOutbox(): Promise<{ processed: number; failed: numbe
         setOutbox(afterSuccessOutbox.filter((m) => m.id !== mutation.id))
         processed++
       } catch (err: any) {
+        // `navigator.onLine` stand hier bis 09/2026 mit in der Bedingung. Das
+        // machte aus jedem beliebigen Fehler einen Netzwerkfehler, sobald das
+        // Betriebssystem „offline" meldete — und dann bricht die Schleife ab
+        // und der Auftrag bleibt vorn liegen. Am laufenden System hiess das:
+        // Nachrichten mit der Uhr, die nie wieder losgingen, weil ein
+        // virtueller Netzadapter die Auskunft verfälschte. Was wirklich schief
+        // ging, steht im Fehler selbst.
         const isNetworkErr =
           err?.status === 0 ||
           err?.name === 'TypeError' ||
           err?.message?.includes('Failed to fetch') ||
-          err?.message?.includes('NetworkError') ||
-          (typeof navigator !== 'undefined' && !navigator.onLine)
+          err?.message?.includes('NetworkError')
 
         if (isNetworkErr) {
           break
@@ -579,9 +585,7 @@ export async function saveNoteOffline(
     })
   }
 
-  if (typeof navigator === 'undefined' || navigator.onLine) {
-    void replayOutbox()
-  }
+  void replayOutbox()
 
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('msm:notes-updated'))
@@ -610,9 +614,7 @@ export async function deleteNoteOffline(note: NoteItem): Promise<{ queued: boole
     })
   }
 
-  if (typeof navigator === 'undefined' || navigator.onLine) {
-    void replayOutbox()
-  }
+  void replayOutbox()
 
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('msm:notes-updated'))
@@ -638,9 +640,7 @@ export async function toggleNotePinOffline(note: NoteItem): Promise<{ note: Note
     entityId: note.note_uid,
   })
 
-  if (typeof navigator === 'undefined' || navigator.onLine) {
-    void replayOutbox()
-  }
+  void replayOutbox()
 
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('msm:notes-updated'))
@@ -666,9 +666,7 @@ export async function toggleNoteArchiveOffline(note: NoteItem): Promise<{ note: 
     entityId: note.note_uid,
   })
 
-  if (typeof navigator === 'undefined' || navigator.onLine) {
-    void replayOutbox()
-  }
+  void replayOutbox()
 
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('msm:notes-updated'))
@@ -718,9 +716,7 @@ export async function toggleCheckItemOffline(
     payload: { content: updatedContent },
   })
 
-  if (typeof navigator === 'undefined' || navigator.onLine) {
-    void replayOutbox()
-  }
+  void replayOutbox()
 
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('msm:notes-updated'))
@@ -850,9 +846,7 @@ export async function saveCalendarEventOffline(
     })
   }
 
-  if (typeof navigator === 'undefined' || navigator.onLine) {
-    void replayOutbox()
-  }
+  void replayOutbox()
 
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('msm:calendar-updated'))
@@ -881,9 +875,7 @@ export async function deleteCalendarEventOffline(eventId: string): Promise<{ que
     })
   }
 
-  if (typeof navigator === 'undefined' || navigator.onLine) {
-    void replayOutbox()
-  }
+  void replayOutbox()
 
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('msm:calendar-updated'))
@@ -952,7 +944,10 @@ export function startLiveSync(): () => void {
         stopFallbackPolling()
         return
       }
-      if (typeof navigator !== 'undefined' && !navigator.onLine) return
+      // Kein Deckel auf `navigator.onLine`: das war die letzte Stelle, an der
+      // eine falsche Auskunft des Betriebssystems die Warteschlange stehen
+      // liess. `replayOutbox` bricht bei einem echten Netzwerkfehler von selbst
+      // ab, ein Versuch alle zehn Sekunden kostet dann nichts.
       void replayOutbox()
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('msm:notes-updated'))
@@ -1163,9 +1158,7 @@ export function initOfflineSync(): () => void {
   window.addEventListener('online', handleOnline)
   document.addEventListener('visibilitychange', handleVisibilityChange)
 
-  if (navigator.onLine) {
-    void replayOutbox()
-  }
+  void replayOutbox()
 
   return () => {
     window.removeEventListener('online', handleOnline)

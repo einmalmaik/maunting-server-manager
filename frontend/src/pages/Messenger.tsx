@@ -113,6 +113,8 @@ import {
   saveNoteOffline,
   saveCalendarEventOffline,
   enqueueMessageMutation,
+  getOutbox,
+  setOutbox,
 } from '@/lib/offlineSync'
 import type { NoteItem } from '@/pages/Notes'
 import type { CalendarEventItem } from '@/pages/Calendar'
@@ -1632,6 +1634,27 @@ export function Messenger() {
 
   // Action: Delete message with victim protection preserved
   const handleDeleteMessage = async (msg: ChatMessage) => {
+    // Eine Nachricht, die noch in der Warteschlange steht, gibt es nur hier.
+    // Sie „für alle" zu löschen ging ins Leere: der Steuerumschlag nannte eine
+    // Kennung, die kein anderes Gerät je gesehen hat, und die Zeile blieb
+    // stehen. Am laufenden System waren das die Nachrichten mit der Uhr, an
+    // die niemand mehr herankam. Also lokal entfernen, aus Ansicht,
+    // Warteschlange und Verlauf.
+    if (msg.status === 'queued') {
+      const uuid = msg.clientUuid
+      if (uuid) {
+        setOutbox(getOutbox().filter((m) => m.payload?.client_uuid !== uuid && m.id !== uuid))
+      }
+      setMessages((prev) => {
+        const uebrig = prev.filter((m) => m.clientUuid !== msg.clientUuid)
+        sessionChatCache.set(blindMailboxId, uebrig.slice(-80))
+        void saveLocalMessages(blindMailboxId, uebrig).catch(() => {})
+        return uebrig
+      })
+      toast.success('Ausstehende Nachricht verworfen.')
+      return
+    }
+
     try {
       await sendE2eeControlMessage({
         type: 'delete_message',

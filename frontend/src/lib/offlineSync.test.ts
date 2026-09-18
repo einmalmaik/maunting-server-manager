@@ -702,6 +702,43 @@ describe('Offline Storage & Unified Real-Time SSE Sync Engine', () => {
       expect(mut2.id).toBe('uuid-msg-101')
     })
 
+    it('bleibt nicht stehen, nur weil das System offline meldet', async () => {
+      // Am laufenden System gefunden. `navigator.onLine` zählte mit in die
+      // Erkennung eines Netzwerkfehlers. Meldete das Betriebssystem fälschlich
+      // „offline" — unter Windows reicht dafür ein virtueller Netzadapter —,
+      // wurde jeder beliebige Fehler zu einem Netzwerkfehler, die Schleife
+      // brach ab, und der Auftrag blieb vorn in der Warteschlange liegen. Im
+      // Messenger waren das die Nachrichten mit der Uhr, die nie wieder
+      // losgingen: kein Versand, kein Aufgeben, kein Weiterkommen für alles
+      // dahinter.
+      vi.stubGlobal('navigator', { ...window.navigator, onLine: false })
+
+      enqueueMessageMutation({
+        blind_mailbox_id: 'mailbox-abc',
+        ciphertext_envelope: 'cipher-kaputt',
+        recipient_id: 42,
+        client_uuid: 'uuid-haengt',
+      })
+      enqueueMessageMutation({
+        blind_mailbox_id: 'mailbox-abc',
+        ciphertext_envelope: 'cipher-danach',
+        recipient_id: 42,
+        client_uuid: 'uuid-danach',
+      })
+
+      // Kein Netzwerkfehler, sondern eine Absage des Servers.
+      vi.mocked(client.api).mockRejectedValue(
+        Object.assign(new Error('Unprocessable Entity'), { status: 422 }),
+      )
+
+      await replayOutbox()
+
+      // Der Versuch hat stattgefunden und zählt: nach fünf Fehlschlägen fliegt
+      // der Auftrag raus, statt die Warteschlange für immer zu verstopfen.
+      expect(client.api).toHaveBeenCalled()
+      expect(getOutbox()[0]?.retryCount).toBe(1)
+    })
+
     it('replays queued message mutations in FIFO order and dispatches confirmation events', async () => {
       enqueueMessageMutation({
         blind_mailbox_id: 'mailbox-abc',
