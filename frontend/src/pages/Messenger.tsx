@@ -134,6 +134,7 @@ import {
   loadLocalMessages,
   mischeVerlauf,
   saveLocalMessages,
+  sichereDauerhafteAblage,
   updateMessageInLocalStore,
   sortMessagesChronologically,
 } from '@/services/messengerLocalStore'
@@ -624,6 +625,19 @@ export function Messenger() {
     return () => {
       active = false
     }
+  }, [currentUserId])
+
+  /**
+   * Den Verlauf vor dem Aufräumen des Browsers schützen.
+   *
+   * Steht vor der Übernahme des Altbestands, und zwar mit Absicht: gleich
+   * danach wird der alte Kontoschlüssel gelöscht, und ab dann ist die lokale
+   * Ablage die einzige Stelle, an der der eigene Gesprächsanteil existiert.
+   * Erst das Dach, dann einräumen.
+   */
+  useEffect(() => {
+    if (!currentUserId) return
+    void sichereDauerhafteAblage()
   }, [currentUserId])
 
   /**

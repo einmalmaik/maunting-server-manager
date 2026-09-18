@@ -236,6 +236,16 @@ Harte Invarianten:
   gespeicherten Umschlag heraus, bevor irgendwer gefragt hatte, ob der Absender
   zu diesem Gespräch gehört. Jede Abkürzung, die früh zurückkehrt — Cache,
   Entprellung, Idempotenz —, muss hinter der Berechtigung liegen.
+- **Der lokale Verlauf ist keine Zwischenablage, sondern das Original.** Wer
+  eine Ratchet-Nachricht verschlüsselt, kann sie selbst nicht wieder öffnen,
+  und der Server hat nur den Umschlag: der **eigene** Gesprächsanteil existiert
+  ausschließlich in `msm_messenger_local`. Deshalb bittet der Messenger beim
+  Öffnen um dauerhafte Ablage (`sichereDauerhafteAblage`) und räumt beim
+  Abmelden nur Auth- und Serverzustand, nicht den Verlauf — `logout` darf ihn
+  nicht anfassen, sonst kostet jede Abmeldung das halbe Gespräch. Der Preis
+  steht in der Datenschutzerklärung (`messenger.deviceHistory`): auf einem
+  geteilten Browser bleibt der Klartext bis zum Löschen der Websitedaten
+  liegen.
 - **Der Verlauf wandert beim Koppeln, Schlüssel nicht.** Das eingerichtete Gerät
   versiegelt seinen gelesenen Verlauf gegen den veröffentlichten
   Geräteschlüssel des neuen (`frontend/src/services/verlaufsUebergabe.ts`), der

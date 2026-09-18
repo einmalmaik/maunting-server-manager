@@ -53,6 +53,37 @@ const STORE_KLARTEXTE = 'envelope_plaintexts'
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
+/**
+ * Bittet den Browser, diese Ablage zu behalten.
+ *
+ * Ohne das gilt eine IndexedDB als *best effort*: der Browser darf sie bei
+ * Speicherdruck verwerfen oder beim Aufräumen selten besuchter Seiten
+ * mitnehmen, ohne zu fragen und ohne es zu melden. Seit der Umstellung auf den
+ * Double Ratchet wiegt das schwerer als früher, denn der **eigene**
+ * Gesprächsanteil steht nirgendwo sonst: wer eine Ratchet-Nachricht
+ * verschlüsselt, kann sie selbst nicht wieder öffnen, und der Server hat nur
+ * den Umschlag. Was hier verschwindet, ist verschwunden.
+ *
+ * Erst `persisted()`, dann `persist()`: Firefox fragt den Menschen, und eine
+ * Frage, die bei jedem Öffnen wiederkommt, beantwortet irgendwann jeder mit
+ * „nein". Chrome und Safari entscheiden still anhand ihrer eigenen Kriterien.
+ *
+ * Die Antwort ist eine Auskunft, keine Zusage: `false` heißt, der Verlauf
+ * liegt weiter da, darf aber gehen. Der Aufrufer bekommt sie zurück, damit
+ * sich das später sichtbar machen lässt, statt es zu verschweigen.
+ */
+export async function sichereDauerhafteAblage(): Promise<boolean> {
+  try {
+    if (typeof navigator === 'undefined' || !navigator.storage?.persist) return false
+    if (await navigator.storage.persisted()) return true
+    return await navigator.storage.persist()
+  } catch {
+    // Ältere Browser und abgeschaltete Speicher-APIs. Kein Grund, den
+    // Messenger nicht zu starten.
+    return false
+  }
+}
+
 function openLocalDatabase(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise
   dbPromise = new Promise<IDBDatabase>((resolve, reject) => {

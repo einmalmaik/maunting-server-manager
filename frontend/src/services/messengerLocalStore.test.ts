@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   loadLocalMessages,
   saveLocalMessages,
@@ -9,6 +9,7 @@ import {
   sortMessagesChronologically,
   isOptimisticMessage,
   mischeVerlauf,
+  sichereDauerhafteAblage,
   type LocalStoredMessage,
 } from './messengerLocalStore'
 
@@ -427,5 +428,59 @@ describe('mischeVerlauf', () => {
     const zusammen = mischeVerlauf(lokal, frisch)
     expect(zusammen).toHaveLength(1)
     expect(zusammen[0].text).toBe('neu')
+  })
+})
+
+describe('sichereDauerhafteAblage', () => {
+  const echt = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+
+  function stelleSpeicher(storage: unknown) {
+    Object.defineProperty(globalThis, 'navigator', {
+      value: storage === undefined ? {} : { storage },
+      configurable: true,
+      writable: true,
+    })
+  }
+
+  afterEach(() => {
+    if (echt) Object.defineProperty(globalThis, 'navigator', echt)
+    else delete (globalThis as { navigator?: unknown }).navigator
+  })
+
+  it('fragt nicht noch einmal, wenn die Ablage schon dauerhaft ist', async () => {
+    // Firefox legt die Frage dem Menschen vor. Eine Frage, die bei jedem
+    // Öffnen wiederkommt, beantwortet irgendwann jeder mit „nein" — deshalb
+    // steht `persisted()` davor.
+    const persist = vi.fn(async () => true)
+    stelleSpeicher({ persisted: async () => true, persist })
+
+    expect(await sichereDauerhafteAblage()).toBe(true)
+    expect(persist).not.toHaveBeenCalled()
+  })
+
+  it('bittet um Dauerhaftigkeit, solange sie fehlt', async () => {
+    const persist = vi.fn(async () => true)
+    stelleSpeicher({ persisted: async () => false, persist })
+
+    expect(await sichereDauerhafteAblage()).toBe(true)
+    expect(persist).toHaveBeenCalledTimes(1)
+  })
+
+  it('meldet eine Absage als Absage, statt sie zu beschönigen', async () => {
+    // `false` heißt: der Verlauf liegt da, darf aber jederzeit gehen. Wer das
+    // in ein `true` verwandelt, nimmt dem Aufrufer die einzige Gelegenheit,
+    // es sichtbar zu machen.
+    stelleSpeicher({ persisted: async () => false, persist: async () => false })
+    expect(await sichereDauerhafteAblage()).toBe(false)
+  })
+
+  it('startet auch ohne Speicher-API', async () => {
+    // Ältere Browser und Umgebungen, in denen die API abgeschaltet ist. Der
+    // Messenger darf daran nicht hängenbleiben.
+    stelleSpeicher(undefined)
+    expect(await sichereDauerhafteAblage()).toBe(false)
+
+    stelleSpeicher({ persisted: async () => { throw new Error('verboten') }, persist: async () => true })
+    expect(await sichereDauerhafteAblage()).toBe(false)
   })
 })
