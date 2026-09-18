@@ -1,13 +1,12 @@
-\"\"\"Erweiterung der Spalten fuer DIS-Verschluesselung von Notizen und Kalender.
+"""Erweiterung der Spalten fuer DIS-Verschluesselung von Notizen und Kalender.
 
-Sorgt dafuer, dass title und content in 
-otes sowie title, description und location
+Sorgt dafuer, dass title und content in notes sowie title, description und location
 in calendar_events ausreichend Platz fuer DIS AES-256-GCM Base64-Ciphertexte haben.
 
 Revision ID: 20260918_01
 Revises: 20260917_01
 Create Date: 2026-09-18
-\"\"\"
+"""
 
 from __future__ import annotations
 
