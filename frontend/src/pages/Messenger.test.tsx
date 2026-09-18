@@ -1414,6 +1414,11 @@ describe('Messenger (Allround Chat)', () => {
       ...window.navigator,
       onLine: false,
     })
+    // Ohne Netz scheitert das Relais — daran und an nichts anderem erkennt der
+    // Sendepfad seit 09/2026, dass er einreihen muss. `navigator.onLine` allein
+    // reichte vorher und war der Grund, warum im Tauri-Fenster unter Windows
+    // Nachrichten stillschweigend liegenblieben, obwohl das Netz stand.
+    vi.mocked(socialApi.relayE2eeEnvelope).mockRejectedValue(new TypeError('Failed to fetch'))
 
     vi.mocked(socialApi.getFriends).mockResolvedValue([
       {
@@ -1463,6 +1468,60 @@ describe('Messenger (Allround Chat)', () => {
       expect(screen.getByText('Offline gesendete Nachricht')).toBeInTheDocument()
     })
 
+    vi.mocked(socialApi.relayE2eeEnvelope).mockReset()
+    vi.unstubAllGlobals()
+  })
+
+  it('sendet trotzdem, wenn das System fälschlich offline meldet', async () => {
+    // Vom Betreiber gemeldet: im Tauri-Fenster unter Windows stand die App auf
+    // offline, obwohl das Netz lief, und die Nachrichten kamen nie an. Bis
+    // 09/2026 entschied `navigator.onLine` hier, ob überhaupt ein Versuch
+    // stattfindet. Diese Auskunft stammt vom Betriebssystem und sagt nichts
+    // über die Erreichbarkeit des Backends — ein virtueller Netzadapter reicht,
+    // damit sie falsch ist. Ob es geht, weiss nur der Versuch.
+    const { enqueueMessageMutation } = await import('@/lib/offlineSync')
+    vi.mocked(enqueueMessageMutation).mockClear()
+    vi.stubGlobal('navigator', { ...window.navigator, onLine: false })
+    vi.mocked(socialApi.relayE2eeEnvelope).mockResolvedValue({ success: true, id: 4711 } as any)
+
+    vi.mocked(socialApi.getFriends).mockResolvedValue([
+      {
+        id: 1,
+        user_id: 302,
+        username: 'offline_partner',
+        avatar_url: null,
+        status: 'accepted',
+        presence: { status: 'online', device_type: 'web' },
+      },
+    ])
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([])
+
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /offline_partner/i })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole('button', { name: /offline_partner/i }))
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/Nachricht schreiben/i)).toBeInTheDocument()
+    })
+
+    fireEvent.change(screen.getByPlaceholderText(/Nachricht schreiben/i), {
+      target: { value: 'Geht trotzdem raus' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Senden' }))
+
+    await waitFor(() => {
+      expect(socialApi.relayE2eeEnvelope).toHaveBeenCalled()
+    })
+    expect(enqueueMessageMutation).not.toHaveBeenCalled()
+
+    vi.mocked(socialApi.relayE2eeEnvelope).mockReset()
     vi.unstubAllGlobals()
   })
 

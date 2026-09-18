@@ -2089,7 +2089,6 @@ export function Messenger() {
         throw new E2eeRecipientKeyMissingError(targetUserId ?? 0)
       }
 
-      const offline = typeof navigator !== 'undefined' && !navigator.onLine
       /**
        * Die niedrigste Umschlagkennung der Auffächerung gilt als Kennung dieser
        * Nachricht. Quittungen der Gegenstelle nennen die Kennung der Kopie, die
@@ -2101,10 +2100,14 @@ export function Messenger() {
       for (const auftrag of auftraege) {
         // Reihenfolge ist bindend: ohne den Sitzungsaufbau findet die
         // Gegenstelle keine Sitzung und läuft in den Sitzungsbruch.
-        if (offline) {
-          enqueueMessageMutation(auftrag)
-          continue
-        }
+        //
+        // Gesendet wird ohne Vorabfrage. Hier stand bis 09/2026
+        // `!navigator.onLine` davor und legte jeden Auftrag ungeprüft in die
+        // Warteschlange. Diese Auskunft des Systems ist keine Aussage über die
+        // Erreichbarkeit des Backends: im Tauri-Fenster unter Windows meldet
+        // sie schon dann „offline", wenn ein virtueller Netzadapter dazwischen
+        // liegt, und der Benutzer sah Nachrichten, die nie losgingen, obwohl
+        // sein Netz stand. Ob es geht, weiss nur der Versuch.
         try {
           const r = await relayE2eeEnvelope(auftrag)
           if (!auftrag.is_control && r && typeof r.id === 'number') {
@@ -2116,9 +2119,7 @@ export function Messenger() {
         }
       }
 
-      if (offline) {
-        toast.info('Nachricht offline in Warteschlange eingereiht.')
-      } else if (verbindungsfehler && niedrigsteId === 0) {
+      if (verbindungsfehler && niedrigsteId === 0) {
         toast.info('Nachricht offline in Warteschlange eingereiht (Verbindungsfehler).')
       }
 

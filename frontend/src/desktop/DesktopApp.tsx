@@ -349,6 +349,45 @@ export function DesktopApp() {
     return () => clearInterval(interval)
   }, [sitzungSteht, isOffline])
 
+  /**
+   * Aus dem Offline-Zustand von selbst wieder herausfinden.
+   *
+   * Der Zustand wird an vier Stellen gesetzt, darunter `navigator.onLine` und
+   * das `offline`-Ereignis des Fensters. Beides ist eine Auskunft des
+   * Betriebssystems über Netzadapter, keine über die Erreichbarkeit des
+   * Backends: unter Windows genügt ein virtueller Adapter, damit sie falsch
+   * ist. Herausgeführt hat bis 09/2026 nur das `online`-Ereignis oder eine
+   * geglückte Anfrage — kam beides nicht, half nur ein Neustart der App, und
+   * genau so ist es beim Betreiber aufgetreten. Die Nachprüfung darunter ist
+   * durch `!isOffline` gesperrt und griff deshalb nie.
+   *
+   * Also fragt die App selbst nach, bis es klappt. Der Takt ist bewusst träge:
+   * ein Versuch alle 20 Sekunden fällt bei stehender Verbindung nicht ins
+   * Gewicht und dreht das Refresh-Token höchstens einmal, weil der Erfolg die
+   * Schleife sofort beendet.
+   */
+  useEffect(() => {
+    if (!isOffline) return
+    let aktiv = true
+
+    const nachfragen = async () => {
+      const pruefung = await stillAnmeldenDetail(8000)
+      if (!aktiv || pruefung.status === 'offline') return
+      setIsOffline(false)
+      if (pruefung.status === 'abgelehnt') {
+        setPhase('kopplung')
+      } else {
+        void useAuthStore.getState().checkAuth()
+      }
+    }
+
+    const takt = setInterval(() => void nachfragen(), 20000)
+    return () => {
+      aktiv = false
+      clearInterval(takt)
+    }
+  }, [isOffline])
+
   useEffect(() => {
     if (phase === 'bereit' && !angemeldet && !isOffline) {
       // Wenn das authStore-Flag nicht gesetzt ist, noch einmal prüfen, ob das
