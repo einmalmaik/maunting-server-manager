@@ -17,6 +17,7 @@ from models import (
     ChatGroup,
     ChatGroupMember,
     E2eeBlindEnvelope,
+    UserE2eeDevice,
 )
 from services import e2ee_device_service
 from services.auth_service import AuthService
@@ -359,3 +360,65 @@ def test_fremdes_geraet_laesst_sich_nicht_vergessen(db: Session, owner_user: Use
 
     assert e2ee_device_service.vergessen(db, owner_user, "fremdgeraet00001") is False
     assert len(e2ee_device_service.geraete(db, regular_user.id)) == 1
+
+
+def test_gleichzeitige_veroeffentlichung_desselben_geraets(db: Session, owner_user: User):
+    """Zwei Anfragen desselben Geräts im selben Augenblick dürfen nicht kollidieren.
+
+    Am laufenden System gefunden, nicht hier: der Messenger meldet sein Gerät
+    beim Aufbau mehrfach an, alle Aufrufe finden dieselbe leere Ablage vor, und
+    `uq_user_e2ee_device` lässt nur einen durch. Die Verlierer bekamen eine 500
+    und das Gerät damit keinen veröffentlichten Schlüssel — ohne den kann ihm
+    niemand schreiben. Drei Einträge im Netzwerkprotokoll, alle rot.
+
+    Nachgestellt wird genau **eine** Sache: dass der Verlierer vor dem Commit
+    des Gewinners gelesen hat und nichts sah. Alles danach läuft echt, der
+    INSERT verletzt die Unique-Constraint wirklich. Ohne diesen Kunstgriff wäre
+    der Fall in einer Testsuite nicht zu erzeugen: sie teilt sich über
+    `StaticPool` eine einzige Verbindung, jede zweite Sitzung sieht die Zeile
+    der ersten und nimmt brav den Update-Pfad. Ein Test, der den Fehler nicht
+    auslöst, ist kein Test, sondern eine Zusage ohne Deckung.
+    """
+    kennung = "gleichzeitig00001"
+    schluessel = _valid_rsa_jwk("Z")
+
+    # Der Gewinner des Wettlaufs hat schon geschrieben.
+    e2ee_device_service.veroeffentlichen(
+        db, owner_user, device_id=kennung, public_key_jwk=_valid_rsa_jwk("A"), label="Gewinner"
+    )
+
+    class BlinderErstblick:
+        """Die Lesung des Verlierers, kurz bevor der Gewinner committet."""
+
+        def filter(self, *_a, **_k):
+            return self
+
+        def first(self):
+            return None
+
+    echte_query = db.query
+    offen = {"blind": True}
+
+    def query(modell, *rest, **kwargs):
+        if modell is UserE2eeDevice and offen["blind"]:
+            offen["blind"] = False
+            return BlinderErstblick()
+        return echte_query(modell, *rest, **kwargs)
+
+    db.query = query
+    try:
+        ergebnis = e2ee_device_service.veroeffentlichen(
+            db, owner_user, device_id=kennung, public_key_jwk=schluessel, label="Verlierer"
+        )
+    finally:
+        db.query = echte_query
+
+    # Der Verlierer bekommt eine Antwort statt einer 500, und zwar die Zeile,
+    # die es wirklich gibt — mit seinem Schlüssel darin.
+    assert ergebnis.device_id == kennung
+    assert ergebnis.public_key_jwk == schluessel
+
+    # Und es steht genau ein Gerät da, nicht zwei.
+    geraete = e2ee_device_service.geraete(db, owner_user.id)
+    assert len(geraete) == 1
+    assert geraete[0]["device_id"] == kennung

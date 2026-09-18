@@ -33,6 +33,7 @@ import {
   getCachedBlindMailboxId,
   getCachedGroupBlindMailboxId,
 } from '@/services/e2eeCrypto'
+import { QUITTUNG_PRAEFIX } from '@/services/deliveryReceiptService'
 import { verlangeGeraeteVon } from '@/services/e2eeGeraet'
 import type { E2eeIdentity } from '@/services/e2eeIdentity'
 import {
@@ -75,6 +76,32 @@ export type Lesung =
   | { art: 'klartext'; env: BlindEnvelopeItem; text: string }
   | { art: 'still'; env: BlindEnvelopeItem }
   | { art: 'unlesbar'; env: BlindEnvelopeItem }
+
+/**
+ * Ist dieser Umschlag eine Nebenkopie, also nichts, was je im Verlauf stehen soll?
+ *
+ * Die Unterscheidung muss an der `client_uuid` hängen, weil ein
+ * `sv-e2ee-hybrid-v1:` im Gegensatz zum Ratchet-Umschlag **keinen Kopf mit dem
+ * Zielgerät** trägt: von aussen sieht eine Quittung für ein fremdes Gerät
+ * genauso aus wie eine Nachricht, die für mich bestimmt war und die ich nicht
+ * öffnen kann. Beides still zu verwerfen verstecke echte Brüche; beides
+ * anzuzeigen füllt den Verlauf mit Rauschen, je Gerät und je Quittung eine
+ * Zeile.
+ *
+ * Die Marken gibt es schon, sie waren nur nicht durchgezogen: `#` trennt bei
+ * jeder Auffächerung die Gerätekennung ab (`…#<geraet>`, `…#i<geraet>` beim
+ * Sitzungsaufbau, `…#<n>` bei der Gruppenschlüsselzustellung), und eine
+ * Quittung trägt seit 09/2026 `deliv-`. Die drei Wortmarken darunter stammen
+ * aus älteren Fassungen und bleiben, damit gespeicherte Umschläge von damals
+ * weiter still bleiben.
+ */
+export function istNebenkopie(clientUuid: string | null | undefined): boolean {
+  if (!clientUuid) return false
+  if (clientUuid.startsWith(QUITTUNG_PRAEFIX)) return true
+  if (clientUuid.includes('#')) return true
+  const klein = clientUuid.toLowerCase()
+  return klein.startsWith('ctrl-') || klein.includes('control') || klein.includes('receipt')
+}
 
 /** Ein fertiger Auftrag ans blinde Relais. */
 export interface Versandauftrag {
@@ -277,7 +304,25 @@ export function useKonversation({
 
         if (drKontext) {
           if (env.ciphertext_envelope.startsWith(HYBRID_PREFIX)) {
-            const klartext = await decryptE2eeHybridWithKeyring(env.ciphertext_envelope, schluessel)
+            // In einer DM-Mailbox liegen die Kopien aller Zielgeräte
+            // nebeneinander: je Nachricht eine, dazu Sitzungsaufbauten und
+            // Quittungen. Die meisten kann dieses Gerät nicht öffnen, und das
+            // ist der Normalfall, kein Fehler. Bis 09/2026 fiel jede davon in
+            // den äusseren `catch` und wurde zu einer Zeile „Verschlüsselte
+            // Nachricht" — am laufenden System standen nach einer Stunde 99
+            // unechte Nachrichten im Verlauf.
+            //
+            // Still wird aber nur, was sich als Nebenkopie ausweist. Ein
+            // Umschlag mit gewöhnlicher Kennung war für dieses Gerät gedacht;
+            // dass er sich nicht öffnen lässt, gehört dann angezeigt und nicht
+            // verschwiegen.
+            let klartext: string
+            try {
+              klartext = await decryptE2eeHybridWithKeyring(env.ciphertext_envelope, schluessel)
+            } catch (fehler) {
+              if (istNebenkopie(env.client_uuid)) return { art: 'still', env }
+              throw fehler
+            }
             const aufbau = await verarbeiteBootstrap(drKontext, klartext)
             if (aufbau.istAufbau) {
               if (aufbau.ersetzt && aufbau.vonGeraet) meldeSitzungsbruch(aufbau.vonGeraet)

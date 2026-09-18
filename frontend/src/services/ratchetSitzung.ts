@@ -82,6 +82,20 @@ export interface DrKontext {
   peerId: number
 }
 
+/**
+ * Für kein einziges Zielgerät liess sich ein Umschlag bauen.
+ *
+ * Abzugrenzen von `E2eeKeinGeraetError`: dort ist niemand angemeldet, hier sind
+ * Geräte da und das Verschlüsseln hat versagt. Der Unterschied gehört bis in
+ * den Fehlertext, sonst sucht der Benutzer den Fehler bei der Gegenstelle.
+ */
+export class DrZustellungFehlgeschlagenError extends Error {
+  constructor(public readonly ursachen: unknown[]) {
+    super('Für kein Zielgerät liess sich ein Umschlag bauen')
+    this.name = 'DrZustellungFehlgeschlagenError'
+  }
+}
+
 /** Ein Umschlagpaar für genau ein Zielgerät. Reihenfolge beachten. */
 export interface DrZustellung {
   empfaengerId: number
@@ -322,6 +336,7 @@ export async function baueZustellungen(
   ]
 
   const zustellungen: DrZustellung[] = []
+  const gescheitert: unknown[] = []
   for (const ziel of ziele) {
     const zielGeraet = ziel.geraet.device_id
     const id = sitzungsId(ziel.konto, zielGeraet)
@@ -333,7 +348,15 @@ export async function baueZustellungen(
           let bootstrap: string | null = null
           let selbstErzeugt = false
 
-          if (!arbeitszustand) {
+          // `sendingChainKey === null` heisst: dieser Zustand hat noch nie
+          // etwas entschlüsselt und kann deshalb nicht senden — so kommt jeder
+          // Empfängerzustand aus `initReceiverState`. Im Normalfall ist das
+          // eine Momentaufnahme: die erste eingehende Nachricht dreht den
+          // Ratchet und legt die Sendekette an. Bleibt er so liegen, weil ein
+          // zweiter Sitzungsaufbau den arbeitenden Zustand ersetzt hat, wäre
+          // dieses Gerät dauerhaft stumm und käme aus eigener Kraft nie wieder
+          // heraus. Deshalb zählt er hier wie „keine Sitzung".
+          if (!arbeitszustand || arbeitszustand.sendingChainKey === null) {
             const begonnen = await beginneSitzung(
               kontext,
               meins.kennung,
@@ -377,10 +400,20 @@ export async function baueZustellungen(
         clientUuid: `${basisUuid}#${zielGeraet.slice(0, KENNUNG_KURZ)}`,
         bootstrapClientUuid: `${basisUuid}#i${zielGeraet.slice(0, KENNUNG_KURZ)}`,
       })
-    } catch {
+    } catch (fehler) {
       // Ein Gerät, für das sich kein Umschlag bauen lässt, hält die übrigen
       // nicht auf. Der Mensch bekommt seine Nachricht auf den anderen.
+      gescheitert.push(fehler)
     }
+  }
+
+  // Kein einziges Ziel hat funktioniert. Das als leere Liste zurückzugeben sähe
+  // für den Aufrufer genauso aus wie „die Gegenstelle hat kein Gerät
+  // angemeldet" — und genau das stand dann im Fehlertext, obwohl die Geräte da
+  // waren und nur das Verschlüsseln scheiterte. Eine Verschlüsselung, die
+  // stillschweigend nichts liefert, ist schlimmer als eine, die scheitert.
+  if (zustellungen.length === 0 && ziele.length > 0) {
+    throw new DrZustellungFehlgeschlagenError(gescheitert)
   }
 
   return zustellungen

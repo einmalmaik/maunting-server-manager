@@ -43,6 +43,15 @@ function persistDeliveredEnvelopeIds(set: Set<number>): void {
 // Cache acknowledged envelope IDs to avoid duplicate receipt storms across reload
 export const deliveredEnvelopeIds = loadDeliveredEnvelopeIds()
 
+/**
+ * Woran eine Quittung sich selbst erkennt.
+ *
+ * Steht in der `client_uuid`, weil das das einzige Feld ist, das den Weg durch
+ * das Relais bis in den Lesepfad übersteht. `logischeUuid` schneidet nur am
+ * `#` der Auffächerung, das Präfix bleibt also stehen.
+ */
+export const QUITTUNG_PRAEFIX = 'deliv-'
+
 export function resetDeliveredEnvelopeCache(): void {
   deliveredEnvelopeIds.clear()
   if (typeof window !== 'undefined' && window.sessionStorage) {
@@ -90,10 +99,21 @@ export async function sendE2eeDeliveryReceipt({
   deliveredEnvelopeIds.add(envelopeId)
 
   try {
+    // Das Präfix ist der einzige Marker, den eine Quittung über sich selbst
+    // trägt: `is_control`/`control_type` gehen zwar an das Relais, aber
+    // `e2ee_blind_envelopes` hat keine Spalte dafür, und der Lesepfad bekommt
+    // sie nie zu sehen. Ohne Marker ist eine Quittung von einer Nachricht nicht
+    // zu unterscheiden — und weil eine Quittung selbst ein Umschlag in
+    // derselben Mailbox ist, quittierte `checkAndDispatchPendingDeliveryReceipts`
+    // sie erneut. Am laufenden System wuchs die Mailbox dadurch bei **jedem**
+    // Ladevorgang um hundert Umschläge, ohne dass jemand etwas geschrieben
+    // hätte. Bis 09/2026 stand das Präfix nur im Notzweig für Browser ohne
+    // `crypto.randomUUID`, also praktisch nirgends.
     const clientUuid =
-      typeof crypto !== 'undefined' && crypto.randomUUID
+      QUITTUNG_PRAEFIX +
+      (typeof crypto !== 'undefined' && crypto.randomUUID
         ? crypto.randomUUID()
-        : 'deliv-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9)
+        : Date.now() + '-' + Math.random().toString(36).substring(2, 9))
 
     const payloadObj = {
       type: 'delivery_receipt',
@@ -175,6 +195,9 @@ export async function checkAndDispatchPendingDeliveryReceipts(currentUserId: num
       // Check mailbox if it has pending updates or envelopes
       const envelopes = await fetchE2eeEnvelopes(mid)
       for (const env of envelopes) {
+        // Eine Quittung braucht keine Quittung. Ohne diese Zeile wuchs die
+        // Mailbox bei jedem Ladevorgang um ihren eigenen Bestand.
+        if (env.client_uuid?.startsWith(QUITTUNG_PRAEFIX)) continue
         if (env.id && !deliveredEnvelopeIds.has(env.id) && meta.userId) {
           await sendE2eeDeliveryReceipt({
             blindMailboxId: mid,

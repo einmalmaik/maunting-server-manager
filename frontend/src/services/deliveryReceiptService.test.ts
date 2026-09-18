@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { sendE2eeDeliveryReceipt, deliveredEnvelopeIds } from './deliveryReceiptService'
+import {
+  sendE2eeDeliveryReceipt,
+  checkAndDispatchPendingDeliveryReceipts,
+  deliveredEnvelopeIds,
+  QUITTUNG_PRAEFIX,
+} from './deliveryReceiptService'
 import * as socialApi from '@/api/social'
 import * as e2eeGeraet from '@/services/e2eeGeraet'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
@@ -7,6 +12,7 @@ import { useMessengerNotificationStore } from '@/stores/messengerNotificationSto
 vi.mock('@/api/social', () => ({
   relayE2eeEnvelope: vi.fn().mockResolvedValue({ id: 999, blind_mailbox_id: 'box-1' }),
   fetchE2eeEnvelopes: vi.fn().mockResolvedValue([]),
+  syncE2eeMailboxes: vi.fn().mockResolvedValue({ mailboxes: [] }),
 }))
 
 vi.mock('@/services/e2eeCrypto', () => ({
@@ -53,6 +59,43 @@ describe('deliveryReceiptService', () => {
         control_type: 'delivery_receipt',
       })
     )
+  })
+
+  it('kennzeichnet die Quittung, damit sie sich selbst wiedererkennt', async () => {
+    await sendE2eeDeliveryReceipt({
+      blindMailboxId: 'mailbox-abc',
+      envelopeId: 42,
+      senderUserId: 2,
+      currentUserId: 1,
+    })
+
+    const auftrag = vi.mocked(socialApi.relayE2eeEnvelope).mock.calls[0][0] as { client_uuid: string }
+    expect(auftrag.client_uuid.startsWith(QUITTUNG_PRAEFIX)).toBe(true)
+    expect(auftrag.client_uuid.length).toBeLessThanOrEqual(64)
+  })
+
+  it('quittiert keine Quittungen', async () => {
+    // Eine Quittung ist selbst ein Umschlag in derselben Mailbox. Ohne diese
+    // Grenze quittierte der Nachzügler-Abgleich sie erneut, und die Mailbox
+    // wuchs bei jedem Ladevorgang um ihren eigenen Bestand — am laufenden
+    // System hundert Umschläge je Neuladen, ohne dass jemand schrieb.
+    useMessengerNotificationStore.setState({
+      blockedUserIds: [],
+      mailboxDirectory: { 'mailbox-abc': { isGroup: false, userId: 2 } as never },
+    })
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([
+      { id: 1, client_uuid: `${QUITTUNG_PRAEFIX}aaa`, ciphertext_envelope: 'x', created_at: '' },
+      { id: 2, client_uuid: 'echte-nachricht', ciphertext_envelope: 'y', created_at: '' },
+    ] as never)
+
+    await checkAndDispatchPendingDeliveryReceipts(1)
+
+    const quittierte = vi
+      .mocked(socialApi.relayE2eeEnvelope)
+      .mock.calls.map((c) => (c[0] as { client_uuid: string }).client_uuid)
+    expect(quittierte).toHaveLength(1)
+    expect(deliveredEnvelopeIds.has(2)).toBe(true)
+    expect(deliveredEnvelopeIds.has(1)).toBe(false)
   })
 
   it('deduplicates delivery receipts for the same envelopeId', async () => {

@@ -49,7 +49,7 @@ import { base64ToBytes, bytesToBase64 } from '@msdis/shield/core'
 import { sha256Hex } from '@msdis/shield/integrity'
 import { randomBytes } from '@msdis/shield/random'
 
-import { relayE2eeEnvelope } from '@/api/social'
+import { getGroupMembers, relayE2eeEnvelope } from '@/api/social'
 
 import { encryptE2eeHybrid } from './e2eeCrypto'
 import { eigenesGeraet, geraeteVon } from './e2eeGeraet'
@@ -58,6 +58,23 @@ import { istSchluesselhalter } from './raumSchluessel'
 export const GRUPPE_PREFIX = 'sv-e2ee-group-v1:'
 export const GRUPPEN_SCHLUESSEL_TYP = 'group_key'
 export const GRUPPEN_ANFRAGE_TYP = 'group_key_request'
+
+/**
+ * Der Gruppenschlüssel hat kein einziges Gerät erreicht.
+ *
+ * Nicht zu verwechseln mit einer unvollständigen Zustellung: die ist eingeplant,
+ * die übergangenen Geräte fordern nach. Erreicht aber **niemand** den Schlüssel,
+ * wäre jede folgende Nachricht für alle ausser dem Absender unlesbar.
+ */
+export class GruppenSchluesselNichtZugestelltError extends Error {
+  constructor(
+    public readonly groupId: number,
+    public readonly ziele: number,
+  ) {
+    super('Der Gruppenschlüssel erreichte kein Gerät')
+    this.name = 'GruppenSchluesselNichtZugestelltError'
+  }
+}
 
 const SCHLUESSEL_BYTES = 32
 const KEY_ID_LAENGE = 16
@@ -243,6 +260,32 @@ function gleicheMitglieder(a: readonly number[], b: readonly number[]): boolean 
 // Schlüssel
 // ==========================================
 
+/**
+ * Die Mitglieder, wie der Server sie in diesem Augenblick sieht.
+ *
+ * `kontext.mitglieder` kommt aus der Oberfläche und ist eine Momentaufnahme vom
+ * Öffnen des Gesprächs: `activeGroup` wird in `Messenger.tsx` gesetzt und
+ * danach nicht mehr aufgefrischt. Daran hingen bis 09/2026 beide Entscheidungen
+ * über den Gruppenschlüssel, und beide gingen still schief, sobald jemand nach
+ * dem Öffnen beitrat. Er stand in keiner Verteilung, und auf seine Nachfrage
+ * antwortete niemand, weil er in der Momentaufnahme nicht vorkam. Am laufenden
+ * System las ein frisch beigetretenes Mitglied dadurch überhaupt nichts.
+ *
+ * Wer über Schlüssel entscheidet, fragt deshalb den Server. Antwortet der
+ * nicht, gilt die Momentaufnahme weiter: lieber gegen eine alte Liste
+ * verteilen als gar nicht senden können.
+ */
+async function frischeMitglieder(kontext: GruppenKontext): Promise<number[]> {
+  let roh: readonly number[] = kontext.mitglieder
+  try {
+    const liste = await getGroupMembers(kontext.groupId)
+    if (liste.length > 0) roh = liste.map((m) => m.user_id)
+  } catch {
+    // Server nicht erreichbar — die Momentaufnahme muss reichen.
+  }
+  return normalisiereMitglieder([...roh, kontext.eigeneId])
+}
+
 export async function erzeugeGruppenSchluessel(): Promise<{
   keyId: string
   schluessel: Uint8Array
@@ -261,7 +304,7 @@ export async function erzeugeGruppenSchluessel(): Promise<{
  * unbekannte Kennung und fordern nach.
  */
 async function schluesselZumSenden(kontext: GruppenKontext): Promise<GruppenSchluesselEintrag> {
-  const jetzige = normalisiereMitglieder(kontext.mitglieder)
+  const jetzige = await frischeMitglieder(kontext)
   const vorhanden = await ablage.liesAktuellen(kontext.groupId)
   if (vorhanden && gleicheMitglieder(vorhanden.mitglieder, jetzige)) return vorhanden
 
@@ -297,11 +340,13 @@ async function anJedesGeraet(
 
   let lfd = 0
   let zugestellt = 0
+  let ziele = 0
   for (const empfaengerId of empfaengerIds) {
     const geraete = await geraeteVon(empfaengerId)
     for (const geraet of geraete) {
       // Das eigene Gerät hat den Schlüssel schon.
       if (empfaengerId === kontext.eigeneId && geraet.device_id === meins.kennung) continue
+      ziele += 1
       const nummer = lfd++
       try {
         const umschlag = await encryptE2eeHybrid(nutzlast, geraet.public_key)
@@ -317,8 +362,17 @@ async function anJedesGeraet(
         zugestellt += 1
       } catch {
         // Ein Gerät, das sich nicht erreichen lässt, hält die übrigen nicht auf.
+        // Es sieht später eine unbekannte Kennung und fordert nach.
       }
     }
+  }
+
+  // Kein einziges Ziel erreicht, obwohl es welche gab. Das war bis 09/2026 eine
+  // stille 0, die niemand auswertete: der Absender schrieb munter weiter mit
+  // einem Schlüssel, den ausser ihm keiner hatte, und im Verlauf der anderen
+  // stand nur „Verschlüsselte Nachricht".
+  if (ziele > 0 && zugestellt === 0) {
+    throw new GruppenSchluesselNichtZugestelltError(kontext.groupId, ziele)
   }
   return zugestellt
 }
@@ -473,11 +527,17 @@ async function beantworteAnfrage(
   // Nur Mitglieder bekommen Schlüssel. Und die Geräteschlüssel kommen aus dem
   // Verzeichnis, nie aus der Anfrage — sonst bestimmte der Fragende selbst,
   // wogegen versiegelt wird.
-  if (!kontext.mitglieder.includes(anfragerId)) return { art: 'keine' }
+  //
+  // Die Liste kommt vom Server und nicht aus `kontext.mitglieder`: wer gerade
+  // erst beigetreten ist, steht in der Momentaufnahme der Oberfläche noch
+  // nicht, und genau der fragt hier. Mit der alten Liste wurde er abgewiesen,
+  // ohne dass irgendwo etwas davon stand.
+  const mitglieder = await frischeMitglieder(kontext)
+  if (!mitglieder.includes(anfragerId)) return { art: 'keine' }
 
   const eigenesKonto = anfragerId === kontext.eigeneId
   const zustaendig =
-    eigenesKonto || istSchluesselhalter(kontext.eigeneId, kontext.mitglieder, anfragerId)
+    eigenesKonto || istSchluesselhalter(kontext.eigeneId, mitglieder, anfragerId)
   if (!zustaendig) return { art: 'anfrage', vonKonto: anfragerId, beantwortet: false }
 
   const eintrag = await ablage.liesAktuellen(kontext.groupId)
@@ -485,12 +545,21 @@ async function beantworteAnfrage(
 
   // Nur der aktuelle Schlüssel. Ältere bleiben hier, sonst holte sich ein
   // Zurückgekehrter über eine Anfrage den ganzen Verlauf.
-  const zugestellt = await anJedesGeraet(
-    kontext,
-    [anfragerId],
-    schluesselNutzlast(eintrag),
-    GRUPPEN_SCHLUESSEL_TYP,
-  )
+  //
+  // Hier darf nichts fliegen: das läuft mitten im Lesen der Mailbox, und eine
+  // gescheiterte Antwort darf nicht den Verlauf des Antwortenden abreissen. Der
+  // Fragende versucht es in einer Minute erneut.
+  let zugestellt = 0
+  try {
+    zugestellt = await anJedesGeraet(
+      kontext,
+      [anfragerId],
+      schluesselNutzlast(eintrag),
+      GRUPPEN_SCHLUESSEL_TYP,
+    )
+  } catch {
+    zugestellt = 0
+  }
   return { art: 'anfrage', vonKonto: anfragerId, beantwortet: zugestellt > 0 }
 }
 
@@ -517,7 +586,10 @@ export async function fordereGruppenSchluessel(
   const zuletzt = anfrageZuletzt.get(kontext.groupId) ?? 0
   if (jetzt - zuletzt < ANFRAGE_DROSSEL_MS) return false
 
-  const andere = kontext.mitglieder.filter((id) => id !== kontext.eigeneId)
+  // Auch hier die Liste vom Server: der Fragende ist oft gerade erst
+  // beigetreten, und wen er fragt, muss zur heutigen Gruppe passen.
+  const mitglieder = await frischeMitglieder(kontext)
+  const andere = mitglieder.filter((id) => id !== kontext.eigeneId)
   const ziele = andere.length > 0 ? [Math.min(...andere), kontext.eigeneId] : [kontext.eigeneId]
 
   const meins = await eigenesGeraet()
@@ -531,8 +603,13 @@ export async function fordereGruppenSchluessel(
   })
 
   anfrageZuletzt.set(kontext.groupId, jetzt)
-  const zugestellt = await anJedesGeraet(kontext, ziele, nutzlast, GRUPPEN_ANFRAGE_TYP)
-  return zugestellt > 0
+  try {
+    // Auch das läuft im Lesepfad: eine Nachfrage, die niemanden erreicht, ist
+    // ein „noch nicht", kein Grund, die Anzeige abzubrechen.
+    return (await anJedesGeraet(kontext, ziele, nutzlast, GRUPPEN_ANFRAGE_TYP)) > 0
+  } catch {
+    return false
+  }
 }
 
 /** Wirft die Schlüssel einer Gruppe weg. Beim Verlassen und beim Löschen fällig. */

@@ -51,6 +51,10 @@ interface Umschlag {
 
 let mailbox: Umschlag[] = []
 let naechsteId = 1
+/** Die Mitgliedschaft laut Server. `beforeEach` setzt sie je Test. */
+let serverMitglieder: number[] = []
+/** Lässt jeden Relais-Aufruf scheitern, für den Fall „erreicht niemanden". */
+let relaisKaputt = false
 
 vi.mock('@/api/social', () => ({
   relayE2eeEnvelope: async (payload: {
@@ -58,6 +62,7 @@ vi.mock('@/api/social', () => ({
     client_uuid?: string | null
     control_type?: string | null
   }) => {
+    if (relaisKaputt) throw new Error('Relais nicht erreichbar')
     const umschlag: Umschlag = {
       id: naechsteId++,
       ciphertext_envelope: payload.ciphertext_envelope,
@@ -67,6 +72,10 @@ vi.mock('@/api/social', () => ({
     mailbox.push(umschlag)
     return umschlag
   },
+  // Die Mitgliederliste, wie der Server sie sieht. Absichtlich getrennt von der
+  // Liste, die der Aufrufer im Kontext mitgibt: genau dieses Auseinanderlaufen
+  // ist der Fall, den ein Nachzügler auslöst.
+  getGroupMembers: async () => serverMitglieder.map((user_id) => ({ user_id })),
 }))
 
 vi.mock('@/api/calls', () => ({ sendeRaumSchluessel: async () => undefined }))
@@ -78,6 +87,7 @@ import {
   setzeGruppenAblageFuerTest,
   verarbeiteGruppenSteuerung,
   verschluesseleFuerGruppe,
+  GruppenSchluesselNichtZugestelltError,
   verwirfGruppenSchluessel,
   type GruppenAblage,
   type GruppenKontext,
@@ -213,6 +223,55 @@ describe('gruppenSchluessel', () => {
     bob = geraet(BOB, 'bob-handy')
     carol = geraet(CAROL, 'carol-tablet')
     alle = [ALICE, BOB, CAROL]
+    serverMitglieder = [...alle]
+    relaisKaputt = false
+  })
+
+  it('erreicht ein Mitglied, das erst nach dem Öffnen des Gesprächs beitritt', async () => {
+    // Am laufenden System gefunden, und die Frage, die dahinter steht: eine
+    // Gruppe läuft schon, jemand kommt dazu — liest der die nächsten
+    // Nachrichten? Bis 09/2026 nicht. `activeGroup` ist in `Messenger.tsx` eine
+    // Momentaufnahme vom Öffnen des Gesprächs und wird nie aufgefrischt. Alice
+    // verteilte weiter an ihre alte Liste, und als Carol nachfragte, wies Alice
+    // sie ab, weil Carol in der Momentaufnahme nicht vorkam. Still, ohne
+    // Meldung, bei jedem Versuch aufs Neue.
+    const ohneCarol = [ALICE, BOB]
+    serverMitglieder = [...ohneCarol]
+
+    await sende(alice, ohneCarol, 'vor Carols Beitritt')
+    await lies(bob, ohneCarol)
+
+    // Carol tritt bei. Der Server weiss es, Alices geöffnetes Fenster nicht.
+    serverMitglieder = [ALICE, BOB, CAROL]
+
+    const stand = naechsteId
+    await sende(alice, ohneCarol, 'nach Carols Beitritt')
+
+    // Carol liest mit der Liste, die sie beim Beitritt bekommen hat.
+    const beiCarol = await lies(carol, alle, stand - 1)
+    expect(beiCarol.texte).toEqual(['nach Carols Beitritt'])
+
+    // Und die Nachricht von vorher bleibt ihr verschlossen. Das ist die Zusage,
+    // kein Versehen: sonst holte sich ein Hinausgeworfener über einen offenen
+    // Einladungslink den ganzen Verlauf zurück.
+    const vonAnfang = await lies(carol, alle, 0)
+    expect(vonAnfang.texte).toEqual(['nach Carols Beitritt'])
+    expect(vonAnfang.unlesbar).toBe(1)
+  })
+
+  it('meldet es, wenn der Gruppenschlüssel kein einziges Gerät erreicht', async () => {
+    // Eine unvollständige Zustellung ist eingeplant, die Übergangenen fordern
+    // nach. Erreicht der Schlüssel aber niemanden, wäre jede folgende Nachricht
+    // für alle ausser dem Absender unlesbar — und das lief bis 09/2026 als
+    // stille 0 durch, die niemand auswertete.
+    relaisKaputt = true
+    try {
+      await expect(sende(alice, alle, 'hört mich jemand?')).rejects.toThrow(
+        GruppenSchluesselNichtZugestelltError
+      )
+    } finally {
+      relaisKaputt = false
+    }
   })
 
   it('stellt den Schlüssel an jedes Gerät zu, und jeder öffnet genau seinen Umschlag', async () => {
@@ -262,7 +321,10 @@ describe('gruppenSchluessel', () => {
     await lies(carol, alle)
     const standCarol = naechsteId
 
+    // Der Rauswurf passiert beim Server. Die Liste im Kontext ist nur noch die
+    // Momentaufnahme der Oberfläche; entscheidend ist, was der Server sagt.
     const ohneCarol = [ALICE, BOB]
+    serverMitglieder = [...ohneCarol]
     await sende(alice, ohneCarol, 'Nach dem Rauswurf')
 
     // Bob bekommt den frischen Schlüssel und liest beides.
@@ -328,6 +390,7 @@ describe('gruppenSchluessel', () => {
   it('weist einen Umschlag ab, dessen Kennung auf eine andere Generation zeigt', async () => {
     const ersterUmschlag = await sende(alice, alle, 'erste Generation')
     await lies(bob, alle)
+    serverMitglieder = [ALICE, BOB]
     await sende(alice, [ALICE, BOB], 'zweite Generation')
     await lies(bob, [ALICE, BOB])
 

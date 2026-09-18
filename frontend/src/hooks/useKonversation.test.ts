@@ -288,6 +288,32 @@ describe('useKonversation', () => {
       expect(gelesen![0]).toMatchObject({ art: 'klartext' })
     })
 
+    it('übergeht Hybridkopien für andere Geräte still', async () => {
+      // Am laufenden System gefunden. Eine Nachricht geht je Zielgerät einmal
+      // raus, Sitzungsaufbauten und Quittungen ebenso — alle Kopien liegen in
+      // derselben Mailbox, und die meisten kann dieses Gerät nicht öffnen. Das
+      // ist der Normalfall. Bis 09/2026 fiel jede davon in den äusseren
+      // `catch` und wurde zu einer Zeile „Verschlüsselte Nachricht": nach einer
+      // Stunde standen 98 unechte Nachrichten im Verlauf, und jeder Ladevorgang
+      // quittierte sie, was neue Umschläge erzeugte.
+      umschlaege = [
+        // Kopie des Sitzungsaufbaus für ein anderes Gerät.
+        umschlag(1, 'sv-e2ee-hybrid-v1:fremd-1', { client_uuid: 'basis-a#i9612fc45299e' }),
+        // Quittung, die an ein anderes Gerät ging.
+        umschlag(2, 'sv-e2ee-hybrid-v1:fremd-2', { client_uuid: 'deliv-2b9f' }),
+        // Eine echte Nachricht, die dieses Gerät nicht öffnen kann: die muss
+        // sichtbar bleiben, sonst verschwindet ein Schlüsselbruch lautlos.
+        umschlag(3, 'sv-e2ee-hybrid-v1:kaputt'),
+        umschlag(4, 'sv-e2ee-hybrid-v1:meins'),
+      ]
+      lesungen.set('sv-e2ee-hybrid-v1:meins', '{"type":"read_receipt","read_up_to_id":7}')
+
+      const { result } = await baueHook({ art: 'direkt', peerId: DU })
+      const gelesen = await result.current.liesUmschlaege()
+
+      expect(gelesen!.map((l) => l.art)).toEqual(['still', 'still', 'unlesbar', 'klartext'])
+    })
+
     it('liest nicht, solange der Schlüssel dieses Geräts nicht feststeht', async () => {
       // Ein Durchlauf davor schriebe sein Ergebnis in den Zwischenspeicher, und
       // der richtige Klartext käme danach nicht mehr durch.

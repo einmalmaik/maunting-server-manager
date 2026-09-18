@@ -220,6 +220,29 @@ Harte Invarianten:
 - Ein Sitzungsbruch wird **sichtbar gemeldet**, nie still repariert. Eine
   klammheimlich neu aufgebaute Sicherheitssitzung ist genau das, was ein
   Angreifer sich wünscht.
+- **Ein Sendeversuch endet mit Umschlag oder Fehler, nie mit Schweigen.** Ein
+  Empfängerzustand aus `initReceiverState` kann erst senden, nachdem er etwas
+  entschlüsselt hat (`sendingChainKey === null`); `verarbeiteBootstrap` ersetzt
+  aber jede bestehende Sitzung durch genau so einen. Traf ein zweiter Aufbau
+  ein, war das Gerät dauerhaft stumm — `encryptMessage` warf, ein leeres
+  `catch` in `baueZustellungen` schluckte es, die leere Liste sah aus wie
+  „Empfänger hat kein Gerät", und der Benutzer las eine Aussage über seine
+  Gegenstelle, die niemand geprüft hatte. Seitdem gilt: ein Zustand ohne
+  Sendekette wird neu aufgesetzt, und scheitert **jedes** Ziel, wirft
+  `DrZustellungFehlgeschlagenError`. Dasselbe eine Schicht tiefer — ein
+  misslungener Geräteabruf (`e2eeGeraet.holeGeraete`) ist keine Aussage über
+  die Gegenstelle und darf nicht zu `E2eeKeinGeraetError` werden.
+- **Der Gruppenschlüssel richtet sich nach der Mitgliederliste des Servers, nicht
+  nach der des offenen Tabs.** `activeGroup.members` ist eine Momentaufnahme vom
+  Öffnen des Gesprächs. Wer danach beitritt, steht nicht darin, bekommt keinen
+  Umschlag mit dem Schlüssel und liest kein Wort — auch nicht von Nachrichten,
+  die lange nach seinem Beitritt geschrieben wurden. Für den Absender sah alles
+  richtig aus, denn sein eigener Tab konnte alles lesen. Deshalb holt
+  `gruppenSchluessel.frischeMitglieder` die Liste vor jedem Münzen und
+  Beantworten frisch; die Momentaufnahme ist nur noch der Notbehelf, wenn der
+  Server nicht antwortet. Dazu gehört die Gegenprobe: erreicht eine Zustellung
+  **kein** Gerät, wirft `anJedesGeraet` `GruppenSchluesselNichtZugestelltError`,
+  statt eine Gruppe entstehen zu lassen, deren Schlüssel nur der Absender hat.
 - **Die KI hat kein Werkzeug, das den Messenger anfasst.** Kein Senden (die
   drei `propose_message_*` verschlüsselten serverseitig), kein Lesen
   (`search_messenger_contacts`, `search_messenger_groups` samt

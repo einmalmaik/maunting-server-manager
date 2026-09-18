@@ -17,7 +17,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { hochgeladen, fremdeGeraete } = vi.hoisted(() => ({
   hochgeladen: [] as { deviceId: string; publicKey: string; label: string }[],
-  fremdeGeraete: { liste: [] as { device_id: string; public_key: string }[], rufe: 0 },
+  fremdeGeraete: {
+    liste: [] as { device_id: string; public_key: string }[],
+    rufe: 0,
+    fehler: null as Error | null,
+  },
 }))
 
 vi.mock('@/api/social', () => ({
@@ -27,6 +31,7 @@ vi.mock('@/api/social', () => ({
   }),
   getE2eeGeraete: vi.fn(async () => {
     fremdeGeraete.rufe += 1
+    if (fremdeGeraete.fehler) throw fremdeGeraete.fehler
     return fremdeGeraete.liste
   }),
 }))
@@ -169,6 +174,43 @@ describe('e2eeGeraet', () => {
       // allein aus den Benutzerkennungen ergab — für den Server also nachbaubar.
       fremdeGeraete.liste = []
       await expect(verlangeGeraeteVon(99)).rejects.toThrow(E2eeKeinGeraetError)
+    })
+
+    it('hält einen misslungenen Abruf nicht für „niemand angemeldet"', async () => {
+      // Der Sendepfad baut auf dieser Antwort einen Satz über die Gegenstelle:
+      // „ist mit keinem Gerät angemeldet". Ohne Antwort weiss das niemand. Bis
+      // 09/2026 lieferte der Abruf bei jedem Fehler eine leere Liste, und der
+      // Benutzer las eine geprüfte Aussage, die nie geprüft worden war.
+      fremdeGeraete.liste = []
+      fremdeGeraete.fehler = new Error('Netzwerk weg')
+      try {
+        const geworfen = await verlangeGeraeteVon(1234).catch((e: unknown) => e)
+        expect(geworfen).toBeInstanceOf(Error)
+        expect(geworfen).not.toBeInstanceOf(E2eeKeinGeraetError)
+
+        // Wer nur anzeigt, kommt weiterhin mit einer leeren Liste zurecht.
+        expect(await geraeteVon(1234)).toEqual([])
+      } finally {
+        fremdeGeraete.fehler = null
+      }
+    })
+
+    it('fällt bei einem Ausfall auf den abgelaufenen Eintrag zurück', async () => {
+      // Die Geräteliste ändert sich selten, der Abruf scheitert oft nur kurz.
+      // Ein veralteter Eintrag trägt das Gespräch weiter; gar keiner bricht es ab.
+      fremdeGeraete.liste = [{ device_id: 'fremd-b', public_key: 'pub-b' }]
+      expect(await verlangeGeraeteVon(4321)).toHaveLength(1)
+
+      const echtesJetzt = Date.now
+      Date.now = () => echtesJetzt() + 3_600_000
+      fremdeGeraete.fehler = new Error('Netzwerk weg')
+      try {
+        const geraete = await verlangeGeraeteVon(4321)
+        expect(geraete.map((g) => g.device_id)).toEqual(['fremd-b'])
+      } finally {
+        fremdeGeraete.fehler = null
+        Date.now = echtesJetzt
+      }
     })
   })
 })

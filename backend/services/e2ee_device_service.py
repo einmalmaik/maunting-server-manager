@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from models import User, UserE2eeDevice
@@ -98,7 +99,35 @@ def veroeffentlichen(
         last_seen_at=_jetzt(),
     )
     db.add(eintrag)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Zwei Anfragen desselben Geraets im selben Augenblick. Das ist hier
+        # kein Ausnahmefall, sondern der Normalfall: der Messenger meldet sich
+        # beim Aufbau mehrfach, und alle Aufrufe finden dieselbe leere Ablage
+        # vor, bevor einer von ihnen geschrieben hat. Der Verlierer bekam eine
+        # 500 und das Geraet damit keinen veroeffentlichten Schluessel — ohne
+        # den kann ihm niemand schreiben. Aufgefallen ist es erst am laufenden
+        # System; die Tests fahren die drei Aufrufe nacheinander.
+        #
+        # `uq_user_e2ee_device` hat also schon entschieden. Der Gewinner hat
+        # denselben Schluessel abgelegt, den dieser Aufruf ablegen wollte, und
+        # damit ist dieselbe Antwort richtig.
+        db.rollback()
+        bestand = (
+            db.query(UserE2eeDevice)
+            .filter(UserE2eeDevice.user_id == user.id, UserE2eeDevice.device_id == kennung)
+            .first()
+        )
+        if bestand is None:
+            raise
+        bestand.public_key_jwk = public_key_jwk
+        if label:
+            bestand.label = label.strip()[:MAX_BEZEICHNUNG]
+        bestand.last_seen_at = _jetzt()
+        db.commit()
+        db.refresh(bestand)
+        return bestand
     db.refresh(eintrag)
     return eintrag
 

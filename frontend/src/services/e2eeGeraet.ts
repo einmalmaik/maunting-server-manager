@@ -203,6 +203,23 @@ const geraeteCache = new Map<number, { geraete: E2eeGeraetItem[]; geholtAm: numb
  * herausstellt, dass er nicht mehr stimmt.
  */
 export async function geraeteVon(userId: number): Promise<E2eeGeraetItem[]> {
+  try {
+    return await holeGeraete(userId)
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Derselbe Abruf, aber ohne die leere Liste als Notausgang.
+ *
+ * Wer nur anzeigt, kommt mit `geraeteVon` und einer leeren Liste zurecht. Wer
+ * verschlüsselt, darf einen misslungenen Abruf nicht für „niemand angemeldet"
+ * halten: ohne Antwort weiss niemand, ob ein Gerät da ist, und der Benutzer
+ * bekäme eine Aussage über die Gegenstelle zu lesen, die gar nicht geprüft
+ * wurde.
+ */
+async function holeGeraete(userId: number): Promise<E2eeGeraetItem[]> {
   const cached = geraeteCache.get(userId)
   if (cached && Date.now() - cached.geholtAm < CACHE_FRIST_MS) {
     return cached.geraete
@@ -211,8 +228,11 @@ export async function geraeteVon(userId: number): Promise<E2eeGeraetItem[]> {
     const geraete = await getE2eeGeraete(userId)
     geraeteCache.set(userId, { geraete, geholtAm: Date.now() })
     return geraete
-  } catch {
-    return cached?.geraete ?? []
+  } catch (fehler) {
+    // Ein abgelaufener Eintrag ist immer noch besser als gar keiner: die
+    // Geräteliste ändert sich selten, der Abruf scheitert oft nur kurz.
+    if (cached) return cached.geraete
+    throw fehler
   }
 }
 
@@ -237,7 +257,7 @@ export class E2eeKeinGeraetError extends Error {
  * und es sagen, als eine Zusage brechen, die niemand nachprüfen kann.
  */
 export async function verlangeGeraeteVon(userId: number): Promise<E2eeGeraetItem[]> {
-  const geraete = await geraeteVon(userId)
+  const geraete = await holeGeraete(userId)
   if (geraete.length === 0) throw new E2eeKeinGeraetError(userId)
   return geraete
 }

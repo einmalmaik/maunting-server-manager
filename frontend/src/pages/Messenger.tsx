@@ -128,7 +128,7 @@ import {
   IDENTITY_LOADING,
   type E2eeIdentity,
 } from '@/services/e2eeIdentity'
-import { logischeUuid } from '@/services/ratchetSitzung'
+import { logischeUuid, DrZustellungFehlgeschlagenError } from '@/services/ratchetSitzung'
 import { verwirfGruppenSchluessel } from '@/services/gruppenSchluessel'
 import {
   loadLocalMessages,
@@ -2157,7 +2157,9 @@ export function Messenger() {
       await loadMessages()
     } catch (err: unknown) {
       const istSchluesselProblem =
-        err instanceof E2eeRecipientKeyMissingError || err instanceof E2eeIdentityLockedError
+        err instanceof E2eeRecipientKeyMissingError ||
+        err instanceof E2eeIdentityLockedError ||
+        err instanceof DrZustellungFehlgeschlagenError
 
       if (istSchluesselProblem) {
         // Konnte nicht verschlüsselt werden: die optimistisch eingefügte
@@ -2179,6 +2181,11 @@ export function Messenger() {
           // nächsten Versuch steht er — es gibt nichts, was der Benutzer dafür
           // tun müsste.
           toast.error('Der Schlüssel dieses Geräts ist noch nicht bereit. Bitte kurz erneut versuchen.')
+        } else if (err instanceof DrZustellungFehlgeschlagenError) {
+          // Die Gegenstelle ist angemeldet, das Verschlüsseln hat versagt. Der
+          // nächste Versuch setzt die Sitzung neu auf, deshalb der Hinweis auf
+          // das Wiederholen statt einer Aussage über den Kontakt.
+          toast.error('Die Nachricht liess sich nicht verschlüsseln und wurde nicht gesendet. Bitte erneut versuchen.')
         } else {
           toast.error(
             `${activeContact?.username ?? 'Dieser Kontakt'} ist mit keinem Gerät angemeldet. Die Nachricht wurde nicht gesendet.`
