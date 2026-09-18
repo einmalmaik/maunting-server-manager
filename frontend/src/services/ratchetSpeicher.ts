@@ -242,31 +242,34 @@ export async function verwirfSitzung(id: string): Promise<void> {
 }
 
 // ==========================================
-// Schon angewandte Sitzungsaufbauten
+// Schon erledigte Umschläge
 // ==========================================
 
 /**
- * Neben den Sitzungen liegen in derselben Ablage Marken: „diesen Aufbau habe
- * ich schon angewandt". Sie tragen ein Präfix aus Buchstaben und können
- * deshalb nie mit einer `sitzungsId` (`<Konto>:<Gerätekennung>`) kollidieren.
- */
-const AUFBAU_PRAEFIX = 'aufbau:'
-
-/**
- * Ob dieser Sitzungsaufbau schon einmal angewandt wurde.
+ * Neben den Sitzungen liegen in derselben Ablage Marken: „das hier habe ich
+ * schon erledigt". Sie tragen ein Präfix aus Buchstaben und können deshalb nie
+ * mit einer `sitzungsId` (`<Konto>:<Gerätekennung>`) kollidieren.
  *
- * Ein Aufbau bleibt als Umschlag in der Mailbox liegen, und der Lesepfad holt
- * das ganze Fenster bei jedem Abruf neu — abgelegt wird nur Klartext, ein
- * Aufbau also nie. Ohne diese Marke baute derselbe Umschlag die Sitzung bei
- * jedem Durchlauf erneut auf: der Ratchet fiel auf den Anfangszustand zurück,
- * und weil dabei eine Sitzung vorgefunden wurde, meldete der Verlauf einen
- * Neuaufbau, den niemand ausgelöst hatte.
+ * Gebraucht werden sie, weil ein Umschlag in der Mailbox liegen bleibt und der
+ * Lesepfad bei jedem Abruf das ganze Fenster neu holt. Abgelegt wird nur
+ * Klartext — alles andere käme ohne Marke bei jedem Durchlauf wieder, und beide
+ * Fälle richten dabei Schaden an:
+ *
+ * - `aufbau`: derselbe Sitzungsaufbau baute die Sitzung erneut auf, der Ratchet
+ *   fiel auf den Anfangszustand zurück, und der Verlauf meldete einen Neuaufbau,
+ *   den niemand ausgelöst hatte.
+ * - `bruch`: ein Umschlag, der sich nicht öffnen lässt, wurde bei jedem Abruf
+ *   erneut als Sitzungsbruch gewertet — und ein Bruch wirft die Sitzung weg.
+ *   Ein einziger alter Umschlag zerstörte so bei jedem Öffnen des Messengers
+ *   die gerade funktionierende Sitzung, und ab da kam nichts mehr an.
  */
-export async function kennstAufbau(kennung: string): Promise<boolean> {
-  return (await ablage.lies(AUFBAU_PRAEFIX + kennung)) !== null
+export type Markenbereich = 'aufbau' | 'bruch'
+
+export async function kennstMarke(bereich: Markenbereich, kennung: string): Promise<boolean> {
+  return (await ablage.lies(`${bereich}:${kennung}`)) !== null
 }
 
-/** Hält fest, dass dieser Aufbau angewandt ist. Erst nach dem Anwenden rufen. */
-export async function merkeAufbau(kennung: string): Promise<void> {
-  await ablage.schreibe(AUFBAU_PRAEFIX + kennung, '1')
+/** Hält die Marke fest. Erst rufen, wenn das Erledigen geglückt ist. */
+export async function merkeMarke(bereich: Markenbereich, kennung: string): Promise<void> {
+  await ablage.schreibe(`${bereich}:${kennung}`, '1')
 }

@@ -68,8 +68,8 @@ import { encryptE2eeHybrid } from './e2eeCrypto'
 import { eigenesGeraet, geraeteVon, verlangeGeraeteVon } from './e2eeGeraet'
 import {
   hatSitzung,
-  kennstAufbau,
-  merkeAufbau,
+  kennstMarke,
+  merkeMarke,
   schritt,
   sitzungsId,
   verwirfSitzung,
@@ -128,6 +128,16 @@ export type DrLesung =
    * es sehen.
    */
   | { art: 'bruch'; vonKonto: number; vonGeraet: string; grund: string }
+  /**
+   * Dieser Umschlag ist schon einmal als Bruch gewertet worden.
+   *
+   * Anzeigen als „nicht lesbar", aber nichts mehr daraus folgern. Er bleibt bis
+   * zum Ende seiner Aufbewahrung in der Mailbox liegen, und der Lesepfad holt
+   * bei jedem Abruf das ganze Fenster — ohne diese Unterscheidung warf ein
+   * einziger alter Umschlag bei jedem Öffnen des Gesprächs die gerade
+   * funktionierende Sitzung weg.
+   */
+  | { art: 'beurteilt' }
   /**
    * Etwas anderes ging schief — meist die lokale Ablage. **Kein** Grund, eine
    * Sitzung wegzuwerfen: eine volle Platte darf nicht jeden Gesprächsfaden des
@@ -292,7 +302,7 @@ export async function verarbeiteBootstrap(
   // die Kennung dieses einen Aufbaus — anders als die Gerätekennung, die über
   // alle Aufbauten hinweg dieselbe bleibt.
   const aufbauKennung = inhalt.paar.publicKey
-  if (await kennstAufbau(aufbauKennung)) {
+  if (await kennstMarke('aufbau', aufbauKennung)) {
     return { istAufbau: true, ersetzt: false, vonGeraet: inhalt.vonGeraet }
   }
 
@@ -319,7 +329,7 @@ export async function verarbeiteBootstrap(
   paar.privateKey.fill(0)
   // Erst nach dem Anwenden. Scheitert `schritt`, bleibt der Aufbau ungemerkt
   // und der nächste Abruf nimmt den Faden wieder auf.
-  await merkeAufbau(aufbauKennung)
+  await merkeMarke('aufbau', aufbauKennung)
 
   return { istAufbau: true, ersetzt: stand, vonGeraet: inhalt.vonGeraet }
 }
@@ -466,8 +476,20 @@ export async function liesDrUmschlag(
     return { art: 'fremd' }
   }
 
+  // Ein Umschlag wird genau einmal beurteilt. Er bleibt bis zum Ende seiner
+  // Aufbewahrung in der Mailbox liegen, und der Lesepfad holt bei jedem Abruf
+  // das ganze Fenster neu; abgelegt wird nur Klartext, ein unlesbarer Umschlag
+  // also nie. Ohne diese Marke wertete ihn jeder Durchlauf erneut als Bruch —
+  // und ein Bruch wirft die Sitzung weg. Am laufenden System hiess das: bei
+  // jedem Öffnen des Gesprächs starb die gerade funktionierende Sitzung, die
+  // Systemzeile erschien wieder, und die eigenen Nachrichten kamen nicht mehr
+  // an. Erkannt wird er am Rumpf, der je Nachricht ein anderer ist.
+  const marke = `${kopf.vonKonto}:${kopf.vonGeraet}:${kopf.rumpf}`
+  if (await kennstMarke('bruch', marke)) return { art: 'beurteilt' }
+
   const id = sitzungsId(kopf.vonKonto, kopf.vonGeraet)
   if (!(await hatSitzung(id))) {
+    await merkeMarke('bruch', marke)
     return {
       art: 'bruch',
       vonKonto: kopf.vonKonto,
@@ -509,6 +531,7 @@ export async function liesDrUmschlag(
     if (!name.startsWith('Dis')) {
       return { art: 'fehler', grund: name }
     }
+    await merkeMarke('bruch', marke)
     return {
       art: 'bruch',
       vonKonto: kopf.vonKonto,

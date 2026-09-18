@@ -348,10 +348,16 @@ export function useKonversation({
             gebrochene.push({ vonKonto: lesung.vonKonto, vonGeraet: lesung.vonGeraet })
             return { art: 'still', env }
           }
-          if (lesung.art === 'unbekannt' || lesung.art === 'fehler') {
+          if (
+            lesung.art === 'unbekannt' ||
+            lesung.art === 'fehler' ||
+            lesung.art === 'beurteilt'
+          ) {
             // 'unbekannt' — Altbestand aus der Zeit der ableitbaren
             // Kanalschlüssel. 'fehler' — die lokale Ablage streikte; die Sitzung
             // bleibt unangetastet, der nächste Durchlauf versucht es erneut.
+            // 'beurteilt' — schon einmal als Bruch gewertet; sichtbar bleibt er,
+            // aber ein zweites Mal kostet er keine Sitzung mehr.
             return { art: 'unlesbar', env }
           }
           // 'eigen' — der Absender kann seine eigene Ratchet-Nachricht nicht
