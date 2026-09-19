@@ -23,12 +23,23 @@
  * verliert, verliert seinen Gesprächsfaden.** Es meldet sich mit einem neuen
  * Schlüssel, die Gegenstellen bauen neue Sitzungen auf, und alles davor bleibt
  * unlesbar. Genau dafür gibt es den Verlaufs-Erstabgleich über die Kopplung.
+ *
+ * **Ein Schlüssel je Gerät *und* Konto.** Bis 09/2026 lag hier genau ein Paar
+ * unter dem festen Namen `self`, mit der Begründung, ein Gerät sei ein Gerät,
+ * egal wer sich anmelde. Das war falsch, und zwar zweifach: der private
+ * Schlüssel öffnete danach die Post beider Konten, und weil die blinde Mailbox
+ * bewusst jedem Angemeldeten offensteht, ist er die einzige Schranke davor.
+ * Dazu stritten beide Konten um dieselben Ratchet-Sitzungen. Ein Browser, in
+ * dem sich zwei Menschen nacheinander anmelden, ist kein seltener Fall, und
+ * `clearSession` räumt die IndexedDB nicht mit ab.
  */
 
 import { randomBytes } from '@msdis/shield/random'
 import { bytesToHex } from '@msdis/shield/core'
 
+import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
 import { generateLocalE2eeKeyPair, type LocalE2eeKeyPair } from './e2eeCrypto'
+import { uebernehmeAltbestand } from './ratchetSpeicher'
 import {
   getE2eeGeraete,
   putEigenesGeraet,
@@ -50,14 +61,22 @@ export interface EigenesGeraet {
 // Lokale Ablage
 // ==========================================
 
-let geraetImRam: EigenesGeraet | null = null
+let geraetImRam: { konto: number; geraet: EigenesGeraet } | null = null
 /**
  * Ein einziger Aufbau-Lauf, auch wenn mehrere Aufrufer gleichzeitig fragen.
  * Ohne diese Klammer erzeugten zwei parallele `eigenesGeraet()` zwei Paare, und
  * das zweite überschriebe das erste — mitsamt allen Sitzungen, die schon gegen
  * das erste laufen.
+ *
+ * Das Konto steht daneben, weil ein laufender Aufbau für Konto A die Antwort
+ * für Konto B nicht sein darf.
  */
-let aufbau: Promise<EigenesGeraet> | null = null
+let aufbau: { konto: number; lauf: Promise<EigenesGeraet> } | null = null
+
+/** Der Ablageschlüssel dieses Kontos. Vor 09/2026 hieß er für alle `self`. */
+function ablageSchluessel(kontoId: number): string {
+  return `konto:${kontoId}`
+}
 
 function oeffneDatenbank(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -77,8 +96,8 @@ function oeffneDatenbank(): Promise<IDBDatabase> {
         db.createObjectStore('keyring', { keyPath: 'userId' })
       }
       if (!db.objectStoreNames.contains(IDB_GERAETE_STORE)) {
-        // Fester Schlüssel: es gibt genau ein Gerät je Installation, und das
-        // ist unabhängig davon, wer sich gerade anmeldet.
+        // Ein Eintrag je Konto, Schlüssel `konto:<id>`. Der Altbestand steht
+        // unter `self` und wird von `uebernimmAltbestand` einmalig umgehängt.
         db.createObjectStore(IDB_GERAETE_STORE, { keyPath: 'id' })
       }
     }
@@ -87,22 +106,103 @@ function oeffneDatenbank(): Promise<IDBDatabase> {
   })
 }
 
-async function lies(): Promise<EigenesGeraet | null> {
+/**
+ * Eine abgelegte Zeile.
+ *
+ * `sitzungenUebernommen` ist der Haken hinter der einmaligen Umbenennung der
+ * Ratchet-Sitzungen. Er steht hier und nicht in einer zweiten Ablage, weil er
+ * genau dann etwas bedeutet, wenn es diese Zeile gibt. Fehlt er, gilt die
+ * Umbenennung als offen: Zeilen aus der Übernahme tragen ihn erst, nachdem sie
+ * gelaufen ist, und frisch erzeugte tragen ihn sofort, weil es bei ihnen nichts
+ * zu übernehmen gibt.
+ */
+interface GeraeteZeile {
+  geraet: EigenesGeraet
+  sitzungenUebernommen: boolean
+}
+
+function ausZeile(zeile: any): GeraeteZeile | null {
+  if (!zeile?.kennung || !zeile?.publicKeyJwk || !zeile?.privateKeyJwk) return null
+  return {
+    geraet: {
+      kennung: zeile.kennung,
+      paar: { publicKeyJwk: zeile.publicKeyJwk, privateKeyJwk: zeile.privateKeyJwk },
+    },
+    sitzungenUebernommen: zeile.sitzungenUebernommen === true,
+  }
+}
+
+function zuZeile(kontoId: number, geraet: EigenesGeraet, sitzungenUebernommen: boolean) {
+  return {
+    id: ablageSchluessel(kontoId),
+    kennung: geraet.kennung,
+    publicKeyJwk: geraet.paar.publicKeyJwk,
+    privateKeyJwk: geraet.paar.privateKeyJwk,
+    sitzungenUebernommen,
+  }
+}
+
+async function lies(kontoId: number): Promise<GeraeteZeile | null> {
+  try {
+    const db = await oeffneDatenbank()
+    return await new Promise<GeraeteZeile | null>((resolve, reject) => {
+      const tx = db.transaction(IDB_GERAETE_STORE, 'readonly')
+      const req = tx.objectStore(IDB_GERAETE_STORE).get(ablageSchluessel(kontoId))
+      req.onsuccess = () => resolve(ausZeile(req.result))
+      req.onerror = () => reject(req.error)
+    })
+  } catch {
+    return null
+  }
+}
+
+async function schreibe(
+  kontoId: number,
+  geraet: EigenesGeraet,
+  sitzungenUebernommen: boolean,
+): Promise<void> {
+  const db = await oeffneDatenbank()
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(IDB_GERAETE_STORE, 'readwrite')
+    const req = tx.objectStore(IDB_GERAETE_STORE).put(zuZeile(kontoId, geraet, sitzungenUebernommen))
+    req.onsuccess = () => resolve()
+    req.onerror = () => reject(req.error)
+  })
+}
+
+/**
+ * Hängt den alten `self`-Eintrag an das Konto, das sich als erstes meldet.
+ *
+ * Ohne diesen Schritt verlöre jede bestehende Installation beim Update ihren
+ * Schlüssel und damit jede laufende Sitzung. Welchem Konto der Altbestand
+ * gehört, steht nirgends — er hat nie eines getragen. Das erste Konto nach dem
+ * Update ist die einzige verfügbare Antwort und fast immer die richtige: es ist
+ * dasselbe, das den Browser vorher benutzt hat.
+ *
+ * Lesen, Schreiben und Löschen liegen in einer Transaktion. Zwei Tabs, die
+ * gleichzeitig starten, sollen nicht beide denselben Altbestand übernehmen und
+ * anschließend verschiedene Meinungen darüber haben, wem er gehört.
+ */
+async function uebernimmAltbestand(kontoId: number): Promise<EigenesGeraet | null> {
   try {
     const db = await oeffneDatenbank()
     return await new Promise<EigenesGeraet | null>((resolve, reject) => {
-      const tx = db.transaction(IDB_GERAETE_STORE, 'readonly')
-      const req = tx.objectStore(IDB_GERAETE_STORE).get('self')
+      const tx = db.transaction(IDB_GERAETE_STORE, 'readwrite')
+      const store = tx.objectStore(IDB_GERAETE_STORE)
+      const req = store.get('self')
       req.onsuccess = () => {
-        const zeile = req.result
-        resolve(
-          zeile?.kennung && zeile?.publicKeyJwk && zeile?.privateKeyJwk
-            ? {
-                kennung: zeile.kennung,
-                paar: { publicKeyJwk: zeile.publicKeyJwk, privateKeyJwk: zeile.privateKeyJwk },
-              }
-            : null
-        )
+        const alt = ausZeile(req.result)
+        if (!alt) return resolve(null)
+        // Der Haken steht bewusst auf `false`: die Sitzungen sind noch nicht
+        // umbenannt, und wenn das gleich scheitert, muss der nächste Start es
+        // erneut versuchen dürfen.
+        const put = store.put(zuZeile(kontoId, alt.geraet, false))
+        put.onsuccess = () => {
+          const weg = store.delete('self')
+          weg.onsuccess = () => resolve(alt.geraet)
+          weg.onerror = () => reject(weg.error)
+        }
+        put.onerror = () => reject(put.error)
       }
       req.onerror = () => reject(req.error)
     })
@@ -111,52 +211,88 @@ async function lies(): Promise<EigenesGeraet | null> {
   }
 }
 
-async function schreibe(geraet: EigenesGeraet): Promise<void> {
-  const db = await oeffneDatenbank()
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(IDB_GERAETE_STORE, 'readwrite')
-    const req = tx.objectStore(IDB_GERAETE_STORE).put({
-      id: 'self',
-      kennung: geraet.kennung,
-      publicKeyJwk: geraet.paar.publicKeyJwk,
-      privateKeyJwk: geraet.paar.privateKeyJwk,
-    })
-    req.onsuccess = () => resolve()
-    req.onerror = () => reject(req.error)
-  })
+/**
+ * Das angemeldete Konto. Kommt aus `lib/angemeldetesKonto`, nicht aus dem
+ * Store: der holt sich `clearGeraeteMemory` von hier, ein Rückimport wäre ein
+ * Zyklus.
+ */
+function meinKonto(): number {
+  const id = angemeldetesKonto()
+  if (id === null) {
+    throw new Error('Kein angemeldetes Konto: dieses Gerät hat keine E2EE-Identität')
+  }
+  return id
 }
 
 /**
- * Die Identität dieses Geräts, bei Bedarf erzeugt.
+ * Die Identität dieses Geräts für das angemeldete Konto, bei Bedarf erzeugt.
  *
  * Ohne IndexedDB wirft das: ein Gerät, dessen Schlüssel jeden Neustart nicht
  * überlebt, kann keine Sitzung halten. Ein stiller Rückfall auf reinen
  * RAM-Betrieb sähe eine Minute lang aus wie ein funktionierender Messenger und
  * würde danach jedes Gespräch verlieren.
+ *
+ * Ohne angemeldetes Konto wirft es ebenfalls. Ein Rückfall auf einen über alle
+ * Konten geteilten Schlüssel ist genau der Zustand, den diese Datei seit
+ * 09/2026 nicht mehr herstellt.
  */
 export async function eigenesGeraet(): Promise<EigenesGeraet> {
-  if (geraetImRam) return geraetImRam
-  if (aufbau) return aufbau
+  const konto = meinKonto()
+  if (geraetImRam?.konto === konto) return geraetImRam.geraet
+  if (aufbau?.konto === konto) return aufbau.lauf
 
-  aufbau = (async () => {
-    const vorhanden = await lies()
-    if (vorhanden) {
-      geraetImRam = vorhanden
-      return vorhanden
+  const lauf = (async () => {
+    let zeile = await lies(konto)
+    if (!zeile) {
+      const alt = await uebernimmAltbestand(konto)
+      if (alt) zeile = { geraet: alt, sitzungenUebernommen: false }
+    }
+    if (zeile) {
+      if (!zeile.sitzungenUebernommen) await holeSitzungenNach(konto, zeile.geraet)
+      geraetImRam = { konto, geraet: zeile.geraet }
+      return zeile.geraet
     }
     const frisch: EigenesGeraet = {
       kennung: bytesToHex(randomBytes(KENNUNG_BYTES)),
       paar: await generateLocalE2eeKeyPair(),
     }
-    await schreibe(frisch)
-    geraetImRam = frisch
+    // Ein frisches Gerät hat nichts zu übernehmen: der Haken steht sofort.
+    // Wichtig für ein **zweites** Konto in diesem Browser — die Sitzungen des
+    // ersten gehören ihm nicht.
+    await schreibe(konto, frisch, true)
+    geraetImRam = { konto, geraet: frisch }
     return frisch
   })()
+  aufbau = { konto, lauf }
 
   try {
-    return await aufbau
+    return await lauf
   } finally {
     aufbau = null
+  }
+}
+
+/**
+ * Benennt die Sitzungen um, die an dem übernommenen Schlüssel hängen.
+ *
+ * Beides gehört zusammen: die Ratchet-Zustände tragen seit 09/2026 die eigene
+ * Gerätekennung im Namen, und die steht erst fest, wenn der Altbestand ein
+ * Konto gefunden hat.
+ *
+ * Der Haken fällt erst, wenn das Umbenennen geglückt ist, und genau darum geht
+ * es hier. In der Erstfassung lief die Umbenennung **einmal**, im Augenblick der
+ * Übernahme. Genau das ging am laufenden System schief: der Schlüssel war
+ * umgehängt, das Umbenennen scheiterte, `self` war weg — und damit gab es keinen
+ * zweiten Versuch mehr. Der Browser stand mit einem gültigen Schlüssel und
+ * lauter unauffindbaren Sitzungen da. Ein Fehlschlag darf einen Versuch kosten,
+ * nicht den Gesprächsfaden.
+ */
+async function holeSitzungenNach(kontoId: number, geraet: EigenesGeraet): Promise<void> {
+  try {
+    await uebernehmeAltbestand(geraet.kennung)
+    await schreibe(kontoId, geraet, true)
+  } catch {
+    // Beim nächsten Start noch einmal. `uebernehmeAltbestand` ist wiederholbar.
   }
 }
 
@@ -262,9 +398,17 @@ export async function verlangeGeraeteVon(userId: number): Promise<E2eeGeraetItem
   return geraete
 }
 
-/** Leert die RAM-Zwischenspeicher. Die IndexedDB überlebt das Abmelden. */
+/**
+ * Leert die RAM-Zwischenspeicher. Die IndexedDB überlebt das Abmelden.
+ *
+ * Der Schlüssel bleibt absichtlich liegen: wer sich wieder anmeldet, soll sein
+ * Gespräch vorfinden und nicht jedes Mal eine neue Sitzung aufbauen. Dass er
+ * dabei nicht mehr in fremde Hände gerät, regelt der Kontoschlüssel der Ablage,
+ * nicht das Aufräumen hier.
+ */
 export function clearGeraeteMemory(): void {
   geraeteCache.clear()
   geraetImRam = null
+  aufbau = null
   veroeffentlichtAls = null
 }

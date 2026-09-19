@@ -42,6 +42,16 @@
  * wird nur der **aktuelle** Schlüssel, nie ein alter: sonst könnte sich jemand
  * hinauswerfen lassen, über einen offenen Einladungslink zurückkommen und den
  * gesamten Verlauf nachfordern.
+ *
+ * Eine Nachfrage wird **einmal** beantwortet. Sie ist ein Umschlag und bleibt
+ * als solcher in der Mailbox liegen, und der Lesepfad holt bei jedem Abruf das
+ * ganze Fenster neu — ohne Gedächtnis antwortete der Zuständige deshalb alle
+ * fünf Sekunden erneut, mit einem Umschlag je Gerät des Fragenden. Am laufenden
+ * System waren danach 99 von 100 Umschlägen der Gruppenmailbox
+ * Schlüsselzustellungen: die Nachrichten fielen aus dem Fenster, und im Verlauf
+ * stand nichts mehr ausser „Verschlüsselte Nachricht". Gemerkt wird je
+ * fragendem Gerät und fehlender Schlüsselkennung — fragt dasselbe Gerät später
+ * nach einer anderen Kennung, bekommt es wieder eine Antwort.
  */
 
 import { decryptString, encryptString, importAesGcmRawKey } from '@msdis/shield/aead'
@@ -79,8 +89,6 @@ export class GruppenSchluesselNichtZugestelltError extends Error {
 const SCHLUESSEL_BYTES = 32
 const KEY_ID_LAENGE = 16
 const KEY_ID_MUSTER = /^[0-9a-f]{16}$/
-/** Eine Anfrage je Gruppe und Minute. Ohne Drossel fragt jeder Ladevorgang neu. */
-const ANFRAGE_DROSSEL_MS = 60_000
 
 export interface GruppenKontext {
   groupId: number
@@ -125,12 +133,18 @@ export interface GruppenAblage {
   /** Legt den Schlüssel ab und macht ihn zum aktuellen dieser Gruppe. */
   schreibe(eintrag: GruppenSchluesselEintrag): Promise<void>
   loescheGruppe(groupId: number): Promise<void>
+  /** Wurde diese Nachfrage schon beantwortet? Siehe Kopf der Datei. */
+  kennstAnfrage(groupId: number, kennung: string): Promise<boolean>
+  /** Erst rufen, wenn die Antwort wirklich rausging. */
+  merkeAnfrage(groupId: number, kennung: string): Promise<void>
 }
 
 const DB_NAME = 'msm_e2ee_gruppen'
-const DB_VERSION = 1
+/** Version 2: `beantwortet` kommt hinzu. */
+const DB_VERSION = 2
 const STORE_KEYS = 'keys'
 const STORE_AKTUELL = 'aktuell'
+const STORE_ANFRAGEN = 'beantwortet'
 
 function oeffneDatenbank(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -146,9 +160,23 @@ function oeffneDatenbank(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE_AKTUELL)) {
         db.createObjectStore(STORE_AKTUELL, { keyPath: 'groupId' })
       }
+      if (!db.objectStoreNames.contains(STORE_ANFRAGEN)) {
+        db.createObjectStore(STORE_ANFRAGEN, { keyPath: ['groupId', 'kennung'] })
+      }
     }
-    req.onsuccess = () => resolve(req.result)
+    req.onsuccess = () => {
+      // Ein zweiter Tab kann jederzeit eine neuere Version aufziehen. Ohne
+      // diesen Abgang liefen laufende Zugriffe danach gegen eine Verbindung,
+      // die der Browser nur noch mit Fehlern beantwortet.
+      req.result.onversionchange = () => req.result.close()
+      resolve(req.result)
+    }
     req.onerror = () => reject(req.error)
+    // Ein älterer Tab hält die Vorgängerversion offen. Ohne diesen Zweig
+    // meldet der Browser weder Erfolg noch Fehler, und das Öffnen hinge
+    // stillschweigend, bis der andere Tab zugeht.
+    req.onblocked = () =>
+      reject(new Error('Gruppenschlüssel-Datenbank blockiert: bitte andere Panel-Tabs schließen'))
   })
 }
 
@@ -187,11 +215,25 @@ const indexedDbAblage: GruppenAblage = {
   async loescheGruppe(groupId) {
     const db = await oeffneDatenbank()
     await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction([STORE_KEYS, STORE_AKTUELL], 'readwrite')
+      const tx = db.transaction([STORE_KEYS, STORE_AKTUELL, STORE_ANFRAGEN], 'readwrite')
       // Der zusammengesetzte Schlüssel beginnt mit der Gruppenkennung, also
       // trifft ein Bereich über [groupId] genau deren Schlüssel.
       tx.objectStore(STORE_KEYS).delete(IDBKeyRange.bound([groupId], [groupId, []]))
       tx.objectStore(STORE_AKTUELL).delete(groupId)
+      tx.objectStore(STORE_ANFRAGEN).delete(IDBKeyRange.bound([groupId], [groupId, []]))
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+      tx.onabort = () => reject(tx.error)
+    })
+  },
+  async kennstAnfrage(groupId, kennung) {
+    return (await hole<unknown>(STORE_ANFRAGEN, [groupId, kennung])) !== null
+  },
+  async merkeAnfrage(groupId, kennung) {
+    const db = await oeffneDatenbank()
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_ANFRAGEN, 'readwrite')
+      tx.objectStore(STORE_ANFRAGEN).put({ groupId, kennung, beantwortetAm: new Date().toISOString() })
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
       tx.onabort = () => reject(tx.error)
@@ -204,7 +246,7 @@ let ablage: GruppenAblage = indexedDbAblage
 /** Hängt eine andere Ablage ein. Nur für Tests gedacht. */
 export function setzeGruppenAblageFuerTest(neu: GruppenAblage | null): void {
   ablage = neu ?? indexedDbAblage
-  anfrageZuletzt.clear()
+  gefragt.clear()
 }
 
 // ==========================================
@@ -540,6 +582,13 @@ async function beantworteAnfrage(
     eigenesKonto || istSchluesselhalter(kontext.eigeneId, mitglieder, anfragerId)
   if (!zustaendig) return { art: 'anfrage', vonKonto: anfragerId, beantwortet: false }
 
+  // Diese Nachfrage liegt als Umschlag in der Mailbox und kommt bei jedem
+  // Abruf wieder. Einmal beantworten reicht; siehe Kopf der Datei.
+  const kennung = `${anfragerId}:${String(roh.vonGeraet ?? '')}:${String(roh.keyId ?? '')}`
+  if (await ablage.kennstAnfrage(kontext.groupId, kennung)) {
+    return { art: 'anfrage', vonKonto: anfragerId, beantwortet: false }
+  }
+
   const eintrag = await ablage.liesAktuellen(kontext.groupId)
   if (!eintrag) return { art: 'anfrage', vonKonto: anfragerId, beantwortet: false }
 
@@ -560,10 +609,17 @@ async function beantworteAnfrage(
   } catch {
     zugestellt = 0
   }
+  // Erst merken, wenn wirklich etwas rausging. Eine gescheiterte Antwort soll
+  // der nächste Durchlauf erneut versuchen — sonst bliebe der Fragende ohne
+  // Schlüssel und niemand käme je darauf zurück.
+  if (zugestellt > 0) {
+    await ablage.merkeAnfrage(kontext.groupId, kennung).catch(() => {})
+  }
   return { art: 'anfrage', vonKonto: anfragerId, beantwortet: zugestellt > 0 }
 }
 
-const anfrageZuletzt = new Map<number, number>()
+/** Wonach dieses Gerät seit dem Laden der Seite schon gefragt hat. */
+const gefragt = new Set<string>()
 
 /**
  * Fordert den aktuellen Gruppenschlüssel an.
@@ -573,47 +629,62 @@ const anfrageZuletzt = new Map<number, number>()
  * Rundsendung an jedes Gerät jedes Mitglieds kostet in großen Gruppen ein
  * Vielfaches.
  *
- * Gedrosselt auf eine Anfrage je Gruppe und Minute. Der Aufrufer ruft das für
- * die **neueste** unlesbare Kennung auf; ältere unlesbare Nachrichten lösen
- * nichts aus, sonst fragte jeder Ladevorgang nach Schlüsseln, die es nicht mehr
- * gibt.
+ * **Einmal je fehlender Kennung**, nicht einmal je Minute. Eine Nachfrage ist
+ * ein Umschlag und bleibt liegen: wer erst in einer Stunde online geht, liest
+ * sie dann und antwortet. Ein zweites Mal zu fragen bringt deshalb nichts und
+ * kostet je Frage einen Umschlag pro Gerät des Gefragten — bei einer alten
+ * Nachricht, deren Schlüssel niemand mehr herausgibt, jede Minute aufs Neue,
+ * für immer. Der Aufrufer ruft das ohnehin nur für die **neueste** unlesbare
+ * Kennung auf.
+ *
+ * Das Gedächtnis hält bis zum Neuladen. Das ist der Wiederholungsweg für den
+ * seltenen Fall, dass die Nachfrage aus dem Abruffenster gefallen ist, bevor
+ * sie jemand gesehen hat.
  */
 export async function fordereGruppenSchluessel(
   kontext: GruppenKontext,
   fehlendeKeyId: string,
 ): Promise<boolean> {
-  const jetzt = Date.now()
-  const zuletzt = anfrageZuletzt.get(kontext.groupId) ?? 0
-  if (jetzt - zuletzt < ANFRAGE_DROSSEL_MS) return false
+  const marke = `${kontext.groupId}:${fehlendeKeyId}`
+  if (gefragt.has(marke)) return false
+  // Sofort merken, damit zwei überlappende Durchläufe nicht beide fragen.
+  gefragt.add(marke)
 
-  // Auch hier die Liste vom Server: der Fragende ist oft gerade erst
-  // beigetreten, und wen er fragt, muss zur heutigen Gruppe passen.
-  const mitglieder = await frischeMitglieder(kontext)
-  const andere = mitglieder.filter((id) => id !== kontext.eigeneId)
-  const ziele = andere.length > 0 ? [Math.min(...andere), kontext.eigeneId] : [kontext.eigeneId]
-
-  const meins = await eigenesGeraet()
-  const nutzlast = JSON.stringify({
-    typ: GRUPPEN_ANFRAGE_TYP,
-    v: 1,
-    groupId: kontext.groupId,
-    vonKonto: kontext.eigeneId,
-    vonGeraet: meins.kennung,
-    keyId: fehlendeKeyId,
-  })
-
-  anfrageZuletzt.set(kontext.groupId, jetzt)
   try {
-    // Auch das läuft im Lesepfad: eine Nachfrage, die niemanden erreicht, ist
-    // ein „noch nicht", kein Grund, die Anzeige abzubrechen.
-    return (await anJedesGeraet(kontext, ziele, nutzlast, GRUPPEN_ANFRAGE_TYP)) > 0
+    // Auch hier die Liste vom Server: der Fragende ist oft gerade erst
+    // beigetreten, und wen er fragt, muss zur heutigen Gruppe passen.
+    const mitglieder = await frischeMitglieder(kontext)
+    const andere = mitglieder.filter((id) => id !== kontext.eigeneId)
+    const ziele = andere.length > 0 ? [Math.min(...andere), kontext.eigeneId] : [kontext.eigeneId]
+
+    const meins = await eigenesGeraet()
+    const nutzlast = JSON.stringify({
+      typ: GRUPPEN_ANFRAGE_TYP,
+      v: 1,
+      groupId: kontext.groupId,
+      vonKonto: kontext.eigeneId,
+      vonGeraet: meins.kennung,
+      keyId: fehlendeKeyId,
+    })
+
+    const erreicht = await anJedesGeraet(kontext, ziele, nutzlast, GRUPPEN_ANFRAGE_TYP)
+    // Nichts rausgegangen heißt: es liegt auch nichts in der Mailbox, das
+    // jemand später noch beantworten könnte. Also Marke zurück.
+    if (erreicht === 0) gefragt.delete(marke)
+    return erreicht > 0
   } catch {
+    // Auch das läuft im Lesepfad: eine Nachfrage, die niemanden erreicht, ist
+    // ein „noch nicht", kein Grund, die Anzeige abzubrechen. Ein Netzfehler
+    // darf dieses Gerät aber nicht bis zum Neuladen ohne Schlüssel lassen.
+    gefragt.delete(marke)
     return false
   }
 }
 
 /** Wirft die Schlüssel einer Gruppe weg. Beim Verlassen und beim Löschen fällig. */
 export async function verwirfGruppenSchluessel(groupId: number): Promise<void> {
-  anfrageZuletzt.delete(groupId)
+  for (const marke of gefragt) {
+    if (marke.startsWith(`${groupId}:`)) gefragt.delete(marke)
+  }
   await ablage.loescheGruppe(groupId)
 }

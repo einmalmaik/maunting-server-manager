@@ -220,6 +220,25 @@ Harte Invarianten:
 - Ein Sitzungsbruch wird **sichtbar gemeldet**, nie still repariert. Eine
   klammheimlich neu aufgebaute Sicherheitssitzung ist genau das, was ein
   Angreifer sich wünscht.
+- **Dieselbe Meldung muss aber auch etwas wert bleiben: ein Bruch darf nie
+  selbstgemacht sein.** Ein Ratchet-Nachrichtenschlüssel geht kein zweites Mal
+  auf, und ein zweiter Versuch am selben Umschlag ist von aussen von einer
+  Fälschung nicht zu unterscheiden. Der Messenger ruft seinen Lesepfad aus fünf
+  Quellen — Takt, Sync-Ereignis, Sichtbarkeitswechsel, Senden, Warteschlange —,
+  und eine einzige Nachricht löst mehrere davon gleichzeitig aus. Am laufenden
+  System hiess das: jede gesendete Nachricht wurde beim Gegenüber zur
+  Bruchmeldung. Prüfen und Verbrauchen liegen deshalb im selben `schritt()`-
+  Schloss (`liesDrUmschlag`, `verarbeiteBootstrap`); die Klammer in
+  `useKonversation` spart nur Arbeit und trägt nicht, weil zwei Tabs sich zwar
+  Ablage und Geräteschlüssel teilen, aber keine Refs. Wer einen zweiten
+  Konsumenten für `e2ee_blind_envelopes` baut — Vorschau, Suche, Export —, darf
+  nicht selbst entschlüsseln.
+- **Eine Systemzeile ist keine Nachricht.** Die Meldung über einen Sitzungsbruch
+  ist eine Aussage über *dieses* Gerät in *diesem* Moment. In einer Sprechblase
+  gerendert sah sie aus, als hätte das Gegenüber sie geschrieben — bei einer
+  Aussage über die Sicherheit des Gesprächs die schlechteste denkbare
+  Verwechslung. Sie steht deshalb zentriert als eigene Zeile, und
+  `messengerLocalStore` nimmt sie weder auf noch gibt sie sie zurück.
 - **Ein Sendeversuch endet mit Umschlag oder Fehler, nie mit Schweigen.** Ein
   Empfängerzustand aus `initReceiverState` kann erst senden, nachdem er etwas
   entschlüsselt hat (`sendingChainKey === null`); `verarbeiteBootstrap` ersetzt
@@ -232,6 +251,43 @@ Harte Invarianten:
   `DrZustellungFehlgeschlagenError`. Dasselbe eine Schicht tiefer — ein
   misslungener Geräteabruf (`e2eeGeraet.holeGeraete`) ist keine Aussage über
   die Gegenstelle und darf nicht zu `E2eeKeinGeraetError` werden.
+- **Und der Rückweg gehört dazu: eine Nachricht in der Warteschlange muss
+  entweder rausgehen oder sichtbar scheitern.** `replayOutbox` hatte bis
+  09/2026 genau einen Auslöser in der Anwendung — `getNotesOffline`. Eine
+  Nachricht, deren Versand am Ratenlimit scheiterte, lag danach in
+  `msm_offline_outbox` und wurde erst wieder angefasst, wenn der Benutzer
+  zufällig die Notizen öffnete (am laufenden System: 31 Aufträge mit
+  `retryCount: 0`, unverändert). Der Chat fasst deshalb selbst nach, im Takt
+  und bei `online`. Zwei Fallen dabei: die Outbox hält **je Zielgerät** einen
+  Auftrag und unterscheidet sie per `<uuid>#<geraet>`, `msm:message-confirmed`
+  meldet diese Kennung weiter — der Abgleich muss über `logischeUuid()` laufen,
+  sonst behält eine zugestellte Nachricht für immer ihr Uhr-Symbol. Und 429
+  oder 5xx dürfen **keinen** gezählten Versuch kosten: nach fünf wirft
+  `replayOutbox` den Auftrag stillschweigend weg, und im Takt wäre das Budget
+  in einer halben Minute verbraucht.
+- **Der Geräteschlüssel gehört dem Gerät *und* dem Konto.** Bis 09/2026 lag er in
+  der IndexedDB unter dem festen Namen `self`, begründet damit, ein Gerät sei
+  ein Gerät, egal wer sich anmelde. Das war zweifach falsch. Erstens öffnete
+  derselbe private Schlüssel danach die Post beider Konten, und weil
+  `GET /api/social/e2ee/mailbox/{id}` bewusst jedem Angemeldeten offensteht, ist
+  er die einzige Schranke davor — im Dev-Bestand standen zwei Kennungen unter
+  zwei Konten, mit identischem öffentlichen Schlüssel. Zweitens stritten beide
+  Konten um dieselben Ratchet-Sitzungen: `sitzungsId` nannte nur die
+  Gegenstelle, wer als zweiter sendete schaltete den Ratchet des ersten weiter,
+  und die Gegenstelle meldete einen Bruch. Seither ist der Ablageschlüssel
+  `konto:<id>` und die Sitzungskennung
+  `<eigenes Gerät>:<Konto>:<Gerät der Gegenstelle>`. Das Konto kommt aus
+  `lib/angemeldetesKonto`, geschrieben in `saveCachedUser` — einen zweiten
+  Schreibweg dorthin zu bauen legt Schlüssel unter der falschen Kontokennung ab.
+- **Abmelden entfernt das Gerät nicht, und das ist Absicht.** Ein Konto ohne
+  angemeldetes Gerät ist nicht erreichbar: `verlangeGeraeteVon` wirft, und der
+  Absender bekommt „Für diesen Empfänger ist kein Gerät angemeldet" statt seine
+  Nachricht loszuwerden. Das Entfernen bleibt deshalb eine bewusste Handlung in
+  der Liste unter `/profile?tab=devices`. Wer ein Gerät dauerhaft aussperren
+  will, braucht beides: die Zustelladresse entfernen **und** den Zugang
+  entziehen. `DELETE /auth/devices/{family}` rührt `user_e2ee_devices` nicht an,
+  und eine Verbindung zwischen Kopplungsfamilie und Gerätekennung gibt es nicht
+  — `device_pairing_service.neue_geraete` schliesst sie aus Zeitstempeln.
 - **Der Gruppenschlüssel richtet sich nach der Mitgliederliste des Servers, nicht
   nach der des offenen Tabs.** `activeGroup.members` ist eine Momentaufnahme vom
   Öffnen des Gesprächs. Wer danach beitritt, steht nicht darin, bekommt keinen
@@ -243,6 +299,21 @@ Harte Invarianten:
   Server nicht antwortet. Dazu gehört die Gegenprobe: erreicht eine Zustellung
   **kein** Gerät, wirft `anJedesGeraet` `GruppenSchluesselNichtZugestelltError`,
   statt eine Gruppe entstehen zu lassen, deren Schlüssel nur der Absender hat.
+- **Ein Steuerumschlag wird genau einmal beantwortet.** Die Mailbox gibt die
+  letzten hundert Umschläge zurück, und der Lesepfad holt dieses Fenster alle
+  fünf Sekunden neu. Eine Nachfrage nach dem Gruppenschlüssel bleibt darin
+  liegen — das ist Absicht, denn wer später online geht, soll sie noch finden.
+  Ohne Gedächtnis beantwortete der Zuständige sie deshalb bei jedem Abruf
+  erneut, mit einem Umschlag je Gerät des Fragenden. Am laufenden System waren
+  danach 99 von 100 Umschlägen der Gruppenmailbox Schlüsselzustellungen: die
+  echten Nachrichten waren aus dem Fenster gedrängt, im Chat stand nur noch
+  „Verschlüsselte Nachricht", und am Entschlüsseln war nichts kaputt. Seitdem
+  merkt sich `beantworteAnfrage` jede beantwortete Nachfrage je
+  `konto:geraet:keyId` in IndexedDB, und `fordereGruppenSchluessel` fragt je
+  fehlender Kennung nur einmal. Beide Marken fallen weg, wenn nichts
+  rausgegangen ist — sonst bliebe ein Gerät wegen eines Netzfehlers dauerhaft
+  ohne Schlüssel. Wer einen weiteren Steuerumschlag einführt, braucht dieselbe
+  Marke: aus „bei jedem Abruf gelesen" wird sonst „bei jedem Abruf gesendet".
 - **Die KI hat kein Werkzeug, das den Messenger anfasst.** Kein Senden (die
   drei `propose_message_*` verschlüsselten serverseitig), kein Lesen
   (`search_messenger_contacts`, `search_messenger_groups` samt

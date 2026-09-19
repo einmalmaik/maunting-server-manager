@@ -3323,7 +3323,7 @@
       "2fa": "2-Faktor",
       "linked": "Verknüpfte Konten",
       "ai": "KI",
-      "devices": "Gerät koppeln",
+      "devices": "Geräte",
       "danger": "Gefahrenzone",
       "credentials": "Zugangsdaten"
     },
@@ -3501,7 +3501,19 @@
       "protocolHelp": "Wird zum Abfragen von Terminen und Vorbereiten von Termineinträgen durch den KI-Assistenten verwendet. Termine werden erst nach deiner ausdrücklichen Bestätigung erstellt oder geändert.",
       "caldavHelp": "CalDAV-URL deines Kalenders (z. B. Nextcloud, Google CalDAV)."
     },
-    "confirmDeleteWordLabel": "Tippe delete zur Bestätigung (nicht kopierbar)"
+    "confirmDeleteWordLabel": "Tippe delete zur Bestätigung (nicht kopierbar)",
+    "e2eeDevices": {
+      "title": "Geräte mit Nachrichtenzugriff",
+      "description": "Jedes Gerät hat einen eigenen Schlüssel, der es nie verlässt. Nachrichten an Sie werden für jedes Gerät in dieser Liste einzeln verschlüsselt.",
+      "thisDevice": "Dieses Gerät",
+      "unnamed": "Unbenanntes Gerät",
+      "empty": "Kein Gerät angemeldet.",
+      "loadFailed": "Die Liste konnte nicht geladen werden.",
+      "remove": "Entfernen",
+      "removeTitle": "Gerät aus der Zustellung nehmen?",
+      "removeMessage": "Dieses Gerät bekommt danach keine neuen Nachrichten mehr. Meldet es sich mit Ihrem Konto wieder an, trägt es sich erneut ein: wer noch Zugang zum Konto hat, ist damit nicht ausgesperrt.",
+      "removed": "Gerät entfernt."
+    }
   },
   "errorBoundary": {
     "title": "Diese Ansicht konnte nicht geladen werden",

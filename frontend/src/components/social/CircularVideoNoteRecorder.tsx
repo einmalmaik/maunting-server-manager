@@ -36,6 +36,17 @@ export const CircularVideoNoteRecorder: React.FC<CircularVideoNoteRecorderProps>
   const [isLocked, setIsLocked] = useState(false)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [isRecording, setIsRecording] = useState(true)
+  /**
+   * Führt ein Finger die Aufnahme?
+   *
+   * Nur am Finger ergibt „Loslassen beendet sie" einen Sinn. Geöffnet wird der
+   * Rekorder aber per Klick, und am Rechner gibt es keine Touch-Ereignisse:
+   * `isLocked` blieb dort für immer false, die Knöpfe unten wurden nie
+   * gerendert und `handleTouchEnd` kam nie. Der einzige Ausweg aus einer
+   * versehentlich geöffneten Aufnahme waren die vollen 60 Sekunden. Ohne Geste
+   * stehen die Knöpfe deshalb von Anfang an da.
+   */
+  const [gestengefuehrt, setGestengefuehrt] = useState(false)
 
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -44,6 +55,8 @@ export const CircularVideoNoteRecorder: React.FC<CircularVideoNoteRecorderProps>
 
   // Touch coordinates
   const startCoordRef = useRef<{ x: number; y: number } | null>(null)
+  /** Einmal beenden. Zeitgeber und Knopf können sonst beide zuschlagen. */
+  const beendet = useRef(false)
 
   // Start camera and recording
   useEffect(() => {
@@ -95,6 +108,8 @@ export const CircularVideoNoteRecorder: React.FC<CircularVideoNoteRecorderProps>
   }, [onCancel])
 
   const handleStopAndFinish = async () => {
+    if (beendet.current) return
+    beendet.current = true
     setIsRecording(false)
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop()
@@ -119,21 +134,31 @@ export const CircularVideoNoteRecorder: React.FC<CircularVideoNoteRecorderProps>
   useEffect(() => {
     if (!isRecording) return
     const interval = setInterval(() => {
-      setElapsedSeconds((prev) => {
-        if (prev + 1 >= MAX_VIDEO_NOTE_DURATION_SEC) {
-          handleStopAndFinish()
-          return MAX_VIDEO_NOTE_DURATION_SEC
-        }
-        return prev + 1
-      })
+      setElapsedSeconds((prev) => Math.min(prev + 1, MAX_VIDEO_NOTE_DURATION_SEC))
     }, 1000)
     return () => clearInterval(interval)
   }, [isRecording])
+
+  /**
+   * Das Zeitlimit beendet die Aufnahme — hier, nicht im Zustandsaktualisierer.
+   *
+   * Dort stand es bis 09/2026, und das kostete zweimal: ein Aktualisierer muss
+   * rein sein, React ruft ihn in der Entwicklung bewusst doppelt auf, und so
+   * ging jede auslaufende Notiz **zweimal** raus (zwei Uploads, zwei Zeilen im
+   * Verlauf). Ausserdem sah der Intervall-Rückruf `elapsedSeconds` aus dem
+   * Render, in dem er entstand — also 0 —, und `Math.max(1, 0)` schrieb jeder
+   * so beendeten Notiz eine Dauer von **1 s** zu, egal wie lang sie war.
+   */
+  useEffect(() => {
+    if (elapsedSeconds >= MAX_VIDEO_NOTE_DURATION_SEC) void handleStopAndFinish()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [elapsedSeconds])
 
   // Touch gesture listeners
   const handleTouchStart = (e: React.TouchEvent) => {
     const t = e.touches[0]
     startCoordRef.current = { x: t.clientX, y: t.clientY }
+    setGestengefuehrt(true)
   }
 
   const handleTouchMove = (e: React.TouchEvent) => {
@@ -205,7 +230,7 @@ export const CircularVideoNoteRecorder: React.FC<CircularVideoNoteRecorderProps>
             <span>{elapsedSeconds}s / {MAX_VIDEO_NOTE_DURATION_SEC}s</span>
           </div>
 
-          {!isLocked && (
+          {!isLocked && gestengefuehrt && (
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/60 px-3 py-1 rounded-full text-[11px] text-white/80 flex items-center gap-1 animate-bounce">
               <Lock className="w-3 h-3 text-emerald-400" />
               <span>Nach oben swipen zum Sperren</span>
@@ -214,8 +239,8 @@ export const CircularVideoNoteRecorder: React.FC<CircularVideoNoteRecorderProps>
         </div>
       </div>
 
-      {/* Locked Controls */}
-      {isLocked && (
+      {/* Bedienknöpfe: gesperrt, oder wenn keine Geste die Aufnahme führt. */}
+      {(isLocked || !gestengefuehrt) && (
         <div className="mt-8 flex items-center gap-6">
           <button
             type="button"

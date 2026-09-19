@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import { Messenger, clearSessionChatCache } from './Messenger'
@@ -133,6 +133,9 @@ vi.mock('@/services/messengerLocalStore', async () => {
       if (!klartexte.has(mid)) klartexte.set(mid, new Map())
       klartexte.get(mid)!.set(id, plain)
     }),
+    leseUmschlagKlartext: vi.fn(
+      async (mid: string, id: number) => klartexte.get(mid)?.get(id) ?? null
+    ),
     ladeUmschlagKlartexte: vi.fn(
       async (mid: string) => new Map(klartexte.get(mid) ?? new Map())
     ),
@@ -157,7 +160,19 @@ vi.mock('@/services/ratchetSitzung', () => {
       },
     ]),
     liesDrUmschlag: vi.fn(
-      async (_kontext: any, umschlag: string, ablegen: (t: string) => Promise<void>) => {
+      async (
+        _kontext: any,
+        umschlag: string,
+        klartext: { lies(): Promise<string | null>; lege(t: string): Promise<void> },
+      ) => {
+        // Wie die echte Fassung: erst nachsehen, ob ein anderer Durchlauf den
+        // Umschlag schon geöffnet hat. Ein Ratchet-Nachrichtenschlüssel geht
+        // kein zweites Mal auf, und ein zweiter Versuch sähe aus wie eine
+        // Fälschung.
+        const schon = await klartext.lies()
+        if (schon !== null) {
+          return { art: 'klartext', text: schon, vonKonto: 101, vonGeraet: 'zielgeraet' }
+        }
         // Der Klartext kommt weiterhin aus dem Stellvertreter, den die Tests
         // ohnehin je Fall setzen. So bleibt jede bestehende Vorgabe gültig,
         // obwohl der Messenger jetzt über den Ratchet liest.
@@ -172,7 +187,7 @@ vi.mock('@/services/ratchetSitzung', () => {
         if (typeof text !== 'string' || text === '') {
           return { art: 'unbekannt' }
         }
-        await ablegen(text)
+        await klartext.lege(text)
         return { art: 'klartext', text, vonKonto: 101, vonGeraet: 'zielgeraet' }
       }
     ),
@@ -240,6 +255,11 @@ vi.mock('@/lib/offlineSync', () => ({
   saveNoteOffline: vi.fn().mockResolvedValue({ id: 1, title: 'Mock' }),
   saveCalendarEventOffline: vi.fn().mockResolvedValue({ id: 1, title: 'Mock' }),
   enqueueMessageMutation: vi.fn().mockReturnValue({ id: 'mock-mutation' }),
+  // Der Chat fasst die Warteschlange selbst nach; ohne diese beiden bricht
+  // schon das Einhaengen der Seite ab.
+  getOutbox: vi.fn().mockReturnValue([]),
+  setOutbox: vi.fn(),
+  replayOutbox: vi.fn().mockResolvedValue({ processed: 0, failed: 0, remaining: 0 }),
 }))
 
 function setupUser() {
@@ -1087,6 +1107,108 @@ describe('Messenger (Allround Chat)', () => {
     // Both date badges should be present
     expect(screen.getByText('Gestern')).toBeInTheDocument()
     expect(screen.getByText('Heute')).toBeInTheDocument()
+  })
+
+  // Am laufenden System gefunden: die Warteschlange meldet die Kennung **mit**
+  // Gerätesuffix (`<uuid>#<geraet>`), weil dort je Zielgerät ein Auftrag
+  // liegt. Die Zeile im Verlauf trägt die logische Kennung. Der Abgleich traf
+  // deshalb nie zu: der Umschlag ging raus, die Zeile behielt ihr Uhr-Symbol,
+  // und weil dieselbe Kennung in die Ablage ging, überlebte sie jedes
+  // Neuladen. Es waren die Nachrichten, die zugestellt waren und trotzdem für
+  // immer „in der Warteschlange" standen.
+  it('zieht eine bestätigte Nachricht nach, auch wenn die Warteschlange die Kennung mit Gerätesuffix meldet', async () => {
+    const { updateMessageInLocalStore } = await import('@/services/messengerLocalStore')
+    vi.mocked(updateMessageInLocalStore).mockClear()
+
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+    // Der Zuhörer hängt an der Seite, nicht am geöffneten Gespräch: die
+    // Bestätigung kann jede Mailbox betreffen.
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('msm:message-confirmed', {
+          detail: {
+            client_uuid: 'uuid-mit-suffix#a1b2c3d4e5f6',
+            envelope_id: 4711,
+            blind_mailbox_id: 'mailbox-102',
+          },
+        })
+      )
+    })
+
+    await waitFor(() => {
+      expect(updateMessageInLocalStore).toHaveBeenCalledWith(
+        'mailbox-102',
+        'uuid-mit-suffix',
+        expect.objectContaining({ id: 4711, status: 'sent' })
+      )
+    })
+  })
+
+  // Am laufenden System gemeldet: die Meldung über die neu aufgebaute Sitzung
+  // stand in einer Sprechblase links und sah damit aus, als hätte das
+  // Gegenüber sie geschrieben. Bei einer Aussage über die Sicherheit genau
+  // dieses Gesprächs ist das die schlechteste denkbare Verwechslung.
+  it('zeigt eine neu aufgebaute Sitzung als Systemzeile, nicht als Nachricht des Gegenübers', async () => {
+    vi.mocked(socialApi.getFriends).mockResolvedValue([
+      {
+        id: 1,
+        friend_user_id: 102,
+        username: 'bob',
+        avatar_url: null,
+        presence: { status: 'online' },
+      } as any,
+    ])
+
+    const jetzt = new Date().toISOString()
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([
+      {
+        id: 1,
+        blind_mailbox_id: 'mailbox-102',
+        ciphertext_envelope: 'ciphertext-bruch',
+        created_at: jetzt,
+      },
+      {
+        id: 2,
+        blind_mailbox_id: 'mailbox-102',
+        ciphertext_envelope: 'ciphertext-heil',
+        created_at: jetzt,
+      },
+    ] as any)
+
+    testKlartext.mockImplementation(async (envelope) => {
+      if (envelope === 'ciphertext-bruch') throw new Error('Sitzung trägt nicht mehr')
+      return JSON.stringify({ sender_id: 102, text: 'echte Nachricht von bob' })
+    })
+
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /bob(?!_)/i })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole('button', { name: /bob(?!_)/i }))
+
+    const meldung = await screen.findByText(/Sicherheitssitzung mit diesem Gerät wurde neu aufgebaut/)
+    await waitFor(() => {
+      expect(screen.getByText('echte Nachricht von bob')).toBeInTheDocument()
+    })
+
+    // `.group` ist der Rahmen einer Sprechblase samt Absender, Uhrzeit und
+    // Kontextmenü. Die Systemzeile darf darin nicht stehen, die echte
+    // Nachricht schon.
+    expect(meldung.closest('.group')).toBeNull()
+    expect(screen.getByText('echte Nachricht von bob').closest('.group')).not.toBeNull()
   })
 
   it('öffnet das Chat-Hintergrund-Modal und erlaubt die Auswahl von Presets', async () => {

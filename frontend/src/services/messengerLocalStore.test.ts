@@ -10,6 +10,9 @@ import {
   isOptimisticMessage,
   mischeVerlauf,
   sichereDauerhafteAblage,
+  ladeUmschlagKlartexte,
+  leseUmschlagKlartext,
+  speichereUmschlagKlartext,
   type LocalStoredMessage,
 } from './messengerLocalStore'
 
@@ -28,6 +31,9 @@ function installMockIndexedDb() {
         let key: string
         if (storeName === 'messages') {
           key = `${item.blindMailboxId}:${item.id}`
+        } else if (storeName === 'envelope_plaintexts') {
+          // Zusammengesetzter Schlüssel wie im Schema: `[blindMailboxId, envelopeId]`.
+          key = `${item.blindMailboxId}:${item.envelopeId}`
         } else {
           key = String(item.blindMailboxId)
         }
@@ -63,6 +69,13 @@ function installMockIndexedDb() {
       clear: () => {
         map!.clear()
         const req: any = { onsuccess: null, onerror: null }
+        queueMicrotask(() => req.onsuccess?.())
+        return req
+      },
+      getAll: (range?: any) => {
+        const mid = Array.isArray(range?.lower) ? range.lower[0] : range?.lower
+        const matched = Array.from(map!.values()).filter((i) => !mid || i.blindMailboxId === mid)
+        const req: any = { onsuccess: null, onerror: null, result: matched }
         queueMicrotask(() => req.onsuccess?.())
         return req
       },
@@ -109,6 +122,7 @@ function installMockIndexedDb() {
 
   ;(globalThis as any).IDBKeyRange = {
     only: (v: any) => v,
+    bound: (lower: any, upper: any) => ({ lower, upper }),
   }
 
   ;(globalThis as any).indexedDB = {
@@ -162,6 +176,55 @@ describe('messengerLocalStore (IndexedDB Chat Persistence & F5 Hydration)', () =
     expect(loaded[1].id).toBe(102)
     expect(loaded[1].text).toBe('Zweite Nachricht')
     expect(loaded[1].status).toBe('sent')
+  })
+
+  it('legt Systemzeilen nicht ab und gibt gespeicherte nicht wieder heraus', async () => {
+    // Eine Systemzeile ist eine Aussage über den Zustand dieses Geräts in
+    // diesem Moment, kein Gesprächsinhalt. Abgelegt blieb sie für immer stehen,
+    // und weil sie ihre Kennung aus der Uhr nimmt, sortierte sie sich hinter
+    // jede später eintreffende Nachricht.
+    const mid = 'box-systemzeilen'
+    await saveLocalMessages(mid, [
+      {
+        blindMailboxId: mid,
+        id: 500,
+        senderId: 2,
+        text: 'Echte Nachricht',
+        createdAt: '2026-09-18T10:00:00.000Z',
+        isSelf: false,
+      },
+      {
+        blindMailboxId: mid,
+        id: 1758196800000,
+        senderId: 0,
+        text: 'Die Sicherheitssitzung mit diesem Gerät wurde neu aufgebaut.',
+        createdAt: '2026-09-18T10:00:01.000Z',
+        isSelf: false,
+        isSystem: true,
+      },
+    ])
+
+    const geladen = await loadLocalMessages(mid)
+    expect(geladen.map((m) => m.text)).toEqual(['Echte Nachricht'])
+
+    // Was aus der Zeit davor schon in der Ablage liegt, kommt ebenfalls nicht
+    // mehr zurück — sonst stünde der alte Stapel weiter unter jedem Gespräch.
+    // Nur über diesen Weg lässt sich noch eine Systemzeile hineinschreiben.
+    await updateMessageInLocalStore(mid, 500, { isSystem: true })
+    expect(await loadLocalMessages(mid)).toEqual([])
+  })
+
+  it('findet einen abgelegten Umschlagklartext unter derselben Kennung wieder', async () => {
+    // Die beiden Funktionen müssen sich über den zusammengesetzten Schlüssel
+    // einig sein. Wären sie es nicht, sähe jeder Lesedurchlauf einen schon
+    // geöffneten Umschlag für ungeöffnet an, liefe ein zweites Mal über einen
+    // verbrauchten Nachrichtenschlüssel und meldete einen Sitzungsbruch.
+    await speichereUmschlagKlartext('box-klartext', 42, 'Hallo')
+
+    expect(await leseUmschlagKlartext('box-klartext', 42)).toBe('Hallo')
+    expect(await leseUmschlagKlartext('box-klartext', 43)).toBeNull()
+    expect(await leseUmschlagKlartext('box-anders', 42)).toBeNull()
+    expect((await ladeUmschlagKlartexte('box-klartext')).get(42)).toBe('Hallo')
   })
 
   it('übersteht simulierten F5-Reload und stellt Verlauf ohne Keys neu einzugeben wieder her', async () => {

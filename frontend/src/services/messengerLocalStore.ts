@@ -27,6 +27,17 @@ export interface LocalStoredMessage {
   isDeleted?: boolean
   deletedAt?: string
   originalText?: string
+  /**
+   * Eine Systemzeile im Verlauf, etwa die Meldung über einen Sitzungsbruch.
+   *
+   * Sie steht hier nur, damit `saveLocalMessages` und `loadLocalMessages` sie
+   * aussortieren können: eine solche Zeile ist eine Aussage über den Zustand
+   * **dieses** Geräts in **diesem** Moment, kein Gesprächsinhalt. Abgelegt
+   * bliebe sie für immer stehen — und weil sie ihre Kennung aus der Uhr nimmt,
+   * sortiert sie sich hinter jede später eintreffende Nachricht. Nach ein paar
+   * Tagen stünde am Ende jedes Gesprächs ein Stapel alter Meldungen.
+   */
+  isSystem?: boolean
   noteAttachment?: any
   calendarAttachment?: any
   imageAttachment?: any
@@ -217,6 +228,31 @@ export async function speichereUmschlagKlartext(
   })
 }
 
+/**
+ * Der Klartext **eines** Umschlags — und der Fehlerfall bleibt ein Fehler.
+ *
+ * `ladeUmschlagKlartexte` darf eine leere Map liefern, wenn die Ablage streikt:
+ * dort ist das Ergebnis eine Abkürzung, und wer sie nicht bekommt, entschlüsselt
+ * eben noch einmal. Hier ist es umgekehrt. Diese Abfrage läuft im
+ * Sitzungsschloss und entscheidet, ob ein Nachrichtenschlüssel verbraucht wird.
+ * Ein verschluckter Fehler sähe aus wie „noch nicht geöffnet", der Ratchet liefe
+ * ein zweites Mal über denselben Umschlag, und das Ergebnis wäre genau der
+ * Sitzungsbruch, den diese Abfrage verhindern soll.
+ */
+export async function leseUmschlagKlartext(
+  blindMailboxId: string,
+  envelopeId: number
+): Promise<string | null> {
+  if (!blindMailboxId) return null
+  const db = await openLocalDatabase()
+  return await new Promise<string | null>((resolve, reject) => {
+    const tx = db.transaction(STORE_KLARTEXTE, 'readonly')
+    const req = tx.objectStore(STORE_KLARTEXTE).get([blindMailboxId, envelopeId])
+    req.onsuccess = () => resolve(typeof req.result?.plain === 'string' ? req.result.plain : null)
+    req.onerror = () => reject(req.error)
+  })
+}
+
 /** Alle bereits geöffneten Umschläge einer Mailbox, nach Umschlagkennung. */
 export async function ladeUmschlagKlartexte(
   blindMailboxId: string
@@ -307,6 +343,10 @@ export async function loadLocalMessages(blindMailboxId: string): Promise<LocalSt
           }
         }
         const filtered = rawMsgs.filter((m) => {
+          // Systemzeilen gehören nicht in den Verlauf. Gespeicherte gibt es
+          // trotzdem: bis 09/2026 schrieb der Messenger sie mit, und bei jedem
+          // Ladevorgang kamen sie zurück.
+          if (m.isSystem) return false
           if (m.clientUuid && isOptimisticMessage(m) && confirmedUuids.has(m.clientUuid)) {
             return false
           }
@@ -339,6 +379,9 @@ export async function saveLocalMessages(
 
       let maxEnvelopeId = 0
       for (const m of messages) {
+        // Siehe `isSystem`: eine Meldung über die Sitzung dieses Geräts ist
+        // kein Gesprächsinhalt und hat in der Ablage nichts verloren.
+        if (m.isSystem) continue
         const record: LocalStoredMessage = {
           ...m,
           blindMailboxId,

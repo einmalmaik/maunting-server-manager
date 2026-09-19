@@ -43,11 +43,25 @@
  * **Was hier bewusst fehlt.** Kein Zwischenspeicher für Klartext. Ein
  * Ratchet-Nachrichtenschlüssel wird beim Entschlüsseln verbraucht; derselbe
  * Umschlag lässt sich kein zweites Mal öffnen. Deshalb nimmt `liesDrUmschlag`
- * eine Ablegefunktion entgegen und ruft sie **innerhalb** des Sitzungsschlosses
- * auf, bevor der fortgeschriebene Zustand gespeichert wird. Scheitert sie,
- * bleibt der Zustand stehen und der Umschlag beim nächsten Durchlauf lesbar.
- * Ohne diese Reihenfolge kostet ein Neuladen zur falschen Sekunde eine
+ * eine Klartextablage entgegen und benutzt sie **innerhalb** des
+ * Sitzungsschlosses: erst nachsehen, ob der Umschlag schon offen ist, dann
+ * entschlüsseln, dann ablegen, dann den Zustand fortschreiben. Scheitert das
+ * Ablegen, bleibt der Zustand stehen und der Umschlag beim nächsten Durchlauf
+ * lesbar. Ohne diese Reihenfolge kostet ein Neuladen zur falschen Sekunde eine
  * Nachricht, endgültig.
+ *
+ * **Warum die Abfrage im Schloss steht und nicht davor.** Der Messenger fragt
+ * die Mailbox aus fünf Quellen ab — Takt, Sync-Ereignis, Sichtbarkeitswechsel,
+ * Senden, Warteschlange — und eine einzige Nachricht löst mehrere davon
+ * gleichzeitig aus. Zwei überlappende Durchläufe holen denselben Umschlag, und
+ * beide halten ihn für ungeöffnet, weil der erste seinen Klartext noch nicht
+ * abgelegt hat. Der zweite Versuch trifft dann auf einen verbrauchten
+ * Nachrichtenschlüssel, und von aussen ist das von einer Fälschung nicht zu
+ * unterscheiden: die Sitzung fliegt weg, im Verlauf steht „Die
+ * Sicherheitssitzung wurde neu aufgebaut", und die Nachricht fehlt in genau dem
+ * Durchlauf, der am Ende angezeigt wird. Dasselbe gilt über Tabs hinweg, die
+ * sich Ablage und Geräteschlüssel teilen. Prüfen und Verbrauchen gehören
+ * deshalb unter dasselbe Schloss.
  */
 
 import {
@@ -302,12 +316,14 @@ export async function verarbeiteBootstrap(
   // die Kennung dieses einen Aufbaus — anders als die Gerätekennung, die über
   // alle Aufbauten hinweg dieselbe bleibt.
   const aufbauKennung = inhalt.paar.publicKey
+  // Der übliche Fall, und er soll billig bleiben: ein längst angewandter Aufbau
+  // liegt bei jedem Abruf wieder im Fenster und braucht weder Schloss noch
+  // Zustand. Die verbindliche Prüfung steht unten.
   if (await kennstMarke('aufbau', aufbauKennung)) {
     return { istAufbau: true, ersetzt: false, vonGeraet: inhalt.vonGeraet }
   }
 
-  const id = sitzungsId(inhalt.vonKonto, inhalt.vonGeraet)
-  const stand = await hatSitzung(id)
+  const id = sitzungsId(meins.kennung, inhalt.vonKonto, inhalt.vonGeraet)
 
   const paar: RatchetDhKeyPair = {
     algorithm: inhalt.paar.algorithm as RatchetDhKeyPair['algorithm'],
@@ -316,22 +332,37 @@ export async function verarbeiteBootstrap(
   }
   const geheimnis = base64ToBytes(inhalt.geheimnis)
 
-  await schritt(id, async (alterZustand) => {
+  /**
+   * Prüfen, anwenden und merken gehören unter dasselbe Schloss.
+   *
+   * Die Prüfung oben allein reicht nicht: zwei überlappende Lesedurchläufe
+   * sehen denselben Aufbau, beide finden die Marke noch nicht, und beide
+   * wenden ihn an. Der zweite setzt damit einen Zustand zurück, der
+   * inzwischen schon Nachrichten getragen hat — der Faden verliert seine
+   * Sendekette, beide Seiten bauen neu auf, und im Verlauf erscheint ein
+   * Sitzungsbruch, den niemand ausgelöst hat.
+   *
+   * Gemerkt wird **vor** dem Fortschreiben, weil nur so beides im selben
+   * Schloss liegt. Scheitert das Schreiben des Zustands danach, bleibt eine
+   * Marke ohne Sitzung zurück: die nächste Nachricht dieses Geräts meldet dann
+   * einen sichtbaren Bruch, und der nächste Sendevorgang der Gegenstelle baut
+   * mit einem neuen Aufbau — also einer neuen Marke — wieder auf. Sichtbar und
+   * selbstheilend; die umgekehrte Reihenfolge wäre still und dauerhaft.
+   */
+  const ersetzt = await schritt<boolean | null>(id, async (alterZustand) => {
+    if (await kennstMarke('aufbau', aufbauKennung)) return { ergebnis: null }
     const neu = await initReceiverState({
       sharedSecret: geheimnis,
       dhKeyPair: paar,
       associatedData: gebundeneDaten(kontext, inhalt.vonGeraet, meins.kennung),
     })
-    // `alterZustand` räumt `schritt` selbst ab.
-    void alterZustand
-    return { naechster: neu, ergebnis: null }
+    await merkeMarke('aufbau', aufbauKennung)
+    // `alterZustand` räumt `schritt` selbst ab; hier zählt nur, ob es ihn gab.
+    return { naechster: neu, ergebnis: alterZustand !== null }
   })
   paar.privateKey.fill(0)
-  // Erst nach dem Anwenden. Scheitert `schritt`, bleibt der Aufbau ungemerkt
-  // und der nächste Abruf nimmt den Faden wieder auf.
-  await merkeMarke('aufbau', aufbauKennung)
 
-  return { istAufbau: true, ersetzt: stand, vonGeraet: inhalt.vonGeraet }
+  return { istAufbau: true, ersetzt: ersetzt === true, vonGeraet: inhalt.vonGeraet }
 }
 
 // ==========================================
@@ -368,7 +399,7 @@ export async function baueZustellungen(
   const gescheitert: unknown[] = []
   for (const ziel of ziele) {
     const zielGeraet = ziel.geraet.device_id
-    const id = sitzungsId(ziel.konto, zielGeraet)
+    const id = sitzungsId(meins.kennung, ziel.konto, zielGeraet)
     try {
       const gebaut = await schritt<{ bootstrap: string | null; nachricht: string }>(
         id,
@@ -453,18 +484,33 @@ export async function baueZustellungen(
 // ==========================================
 
 /**
+ * Der Klartextspeicher genau dieses Umschlags.
+ *
+ * Beide Hälften zusammen, weil nur das Paar trägt: gelesen und geschrieben wird
+ * innerhalb des Sitzungsschlosses, und zwischen beidem darf nichts passieren.
+ * Eine `lies`, die ihren Fehler als `null` ausgibt, macht die Klammer wertlos —
+ * „Ablage kaputt" sieht dann aus wie „noch nicht geöffnet".
+ */
+export interface KlartextAblage {
+  /** Der abgelegte Klartext, oder `null`. Wirft, wenn die Ablage nicht antwortet. */
+  lies(): Promise<string | null>
+  lege(text: string): Promise<void>
+}
+
+/**
  * Öffnet einen Umschlag dieses Verfahrens.
  *
- * `ablegen` läuft innerhalb des Sitzungsschlosses, nachdem der Klartext vorliegt
- * und bevor der fortgeschriebene Zustand gespeichert wird. Wirft sie, bleibt der
- * Zustand stehen und derselbe Umschlag ist beim nächsten Durchlauf erneut
- * lesbar. Das ist der einzige Schutz gegen einen verbrauchten Nachrichten-
- * schlüssel ohne abgelegten Klartext.
+ * Alles am Zustand passiert innerhalb des Sitzungsschlosses und in dieser
+ * Reihenfolge: nachsehen, ob ein anderer Durchlauf den Umschlag schon geöffnet
+ * hat; entschlüsseln; ablegen; fortschreiben. Wirft `lege`, bleibt der Zustand
+ * stehen und derselbe Umschlag ist beim nächsten Durchlauf erneut lesbar. Das
+ * ist der einzige Schutz gegen einen verbrauchten Nachrichtenschlüssel ohne
+ * abgelegten Klartext.
  */
 export async function liesDrUmschlag(
   kontext: DrKontext,
   umschlag: string,
-  ablegen: (text: string) => Promise<void>,
+  klartext: KlartextAblage,
 ): Promise<DrLesung> {
   const kopf = lieseKopf(umschlag)
   if (!kopf) return { art: 'unbekannt' }
@@ -487,7 +533,7 @@ export async function liesDrUmschlag(
   const marke = `${kopf.vonKonto}:${kopf.vonGeraet}:${kopf.rumpf}`
   if (await kennstMarke('bruch', marke)) return { art: 'beurteilt' }
 
-  const id = sitzungsId(kopf.vonKonto, kopf.vonGeraet)
+  const id = sitzungsId(meins.kennung, kopf.vonKonto, kopf.vonGeraet)
   if (!(await hatSitzung(id))) {
     await merkeMarke('bruch', marke)
     return {
@@ -507,13 +553,20 @@ export async function liesDrUmschlag(
 
   try {
     const text = await schritt<string>(id, async (zustand) => {
+      // Hat ihn ein anderer Durchlauf in der Zwischenzeit geöffnet? Dann ist
+      // sein Nachrichtenschlüssel verbraucht, und ein zweiter Versuch wäre
+      // nicht bloß vergeblich: er sähe aus wie eine Fälschung und kostete die
+      // Sitzung. Ohne `naechster` bleibt der abgelegte Zustand unangetastet.
+      const schon = await klartext.lies()
+      if (schon !== null) return { ergebnis: schon }
+
       if (!zustand) throw new Error('Sitzung verschwunden')
       const { nextState, plaintext } = await decryptMessage(zustand, nachricht)
       const text = bytesToUtf8(plaintext)
       // Erst ablegen, dann den Zustand fortschreiben: ein verbrauchter
       // Nachrichtenschlüssel ohne abgelegten Klartext wäre eine verlorene
       // Nachricht, und zwar ohne jede Meldung.
-      await ablegen(text)
+      await klartext.lege(text)
       return { naechster: nextState, ergebnis: text }
     })
     return { art: 'klartext', text, vonKonto: kopf.vonKonto, vonGeraet: kopf.vonGeraet }
@@ -549,5 +602,6 @@ export async function liesDrUmschlag(
  * das, was ein Angreifer sich wünscht.
  */
 export async function verwirfDrSitzung(vonKonto: number, vonGeraet: string): Promise<void> {
-  await verwirfSitzung(sitzungsId(vonKonto, vonGeraet))
+  const meins = await eigenesGeraet()
+  await verwirfSitzung(sitzungsId(meins.kennung, vonKonto, vonGeraet))
 }

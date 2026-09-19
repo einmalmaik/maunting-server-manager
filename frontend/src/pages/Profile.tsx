@@ -58,7 +58,10 @@ export function Profile() {
   const tabs: TabDef<TabId>[] = [
     ...BASE_TABS,
     ...(canUseAi ? [{ id: 'ai' as const, labelKey: 'profile.tabs.ai', icon: Bot }] : []),
-    ...(canUseAi ? [{ id: 'devices' as const, labelKey: 'profile.tabs.devices', icon: MonitorSmartphone }] : []),
+    // Der Tab trägt zwei Dinge mit verschiedenen Schranken: die Kopplung
+    // (Smart System) und die Geräte mit Nachrichtenzugriff (Messenger).
+    // `DevicesTab` entscheidet, welche Karte erscheint.
+    { id: 'devices' as const, labelKey: 'profile.tabs.devices', icon: MonitorSmartphone },
     { id: 'danger', labelKey: 'profile.tabs.danger', icon: AlertTriangle, variant: 'danger' },
   ]
 
@@ -81,7 +84,7 @@ export function Profile() {
       {activeTab === 'linked' && <LinkedAccountsTab />}
       {activeTab === 'credentials' && <CredentialsTab />}
       {activeTab === 'ai' && canUseAi && <AiTab />}
-      {activeTab === 'devices' && canUseAi && <DevicesTab />}
+      {activeTab === 'devices' && <DevicesTab />}
       {activeTab === 'danger' && <DangerZoneTab />}
     </div>
   )

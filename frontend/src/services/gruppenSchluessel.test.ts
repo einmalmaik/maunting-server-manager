@@ -112,6 +112,7 @@ interface TestAblage extends GruppenAblage {
 function neueAblage(): TestAblage {
   const keys = new Map<string, GruppenSchluesselEintrag>()
   const aktuelle = new Map<number, string>()
+  const beantwortet = new Set<string>()
   return {
     async lies(groupId, keyId) {
       return keys.get(`${groupId}:${keyId}`) ?? null
@@ -124,11 +125,20 @@ function neueAblage(): TestAblage {
       keys.set(`${eintrag.groupId}:${eintrag.keyId}`, eintrag)
       aktuelle.set(eintrag.groupId, eintrag.keyId)
     },
+    async kennstAnfrage(groupId, kennung) {
+      return beantwortet.has(`${groupId}:${kennung}`)
+    },
+    async merkeAnfrage(groupId, kennung) {
+      beantwortet.add(`${groupId}:${kennung}`)
+    },
     async loescheGruppe(groupId) {
       for (const schluessel of [...keys.keys()]) {
         if (schluessel.startsWith(`${groupId}:`)) keys.delete(schluessel)
       }
       aktuelle.delete(groupId)
+      for (const marke of [...beantwortet]) {
+        if (marke.startsWith(`${groupId}:`)) beantwortet.delete(marke)
+      }
     },
     anzahl: () => keys.size,
   }
@@ -516,12 +526,85 @@ describe('gruppenSchluessel', () => {
       }
     })
 
-    it('fragt höchstens einmal je Minute', async () => {
+    it('fragt nach derselben Kennung nur einmal, nach einer anderen wieder', async () => {
       aktiviere(bob)
       expect(await fordereGruppenSchluessel(kontext(bob, alle), 'a'.repeat(16))).toBe(true)
       const nachErster = mailbox.length
       expect(await fordereGruppenSchluessel(kontext(bob, alle), 'a'.repeat(16))).toBe(false)
       expect(mailbox.length).toBe(nachErster)
+
+      expect(await fordereGruppenSchluessel(kontext(bob, alle), 'b'.repeat(16))).toBe(true)
+      expect(mailbox.length).toBeGreaterThan(nachErster)
+    })
+
+    // Gescheitert heißt: es liegt nichts in der Mailbox, das jemand später
+    // beantworten könnte. Bliebe die Marke stehen, wäre dieses Gerät wegen
+    // eines Netzfehlers bis zum Neuladen ohne Schlüssel.
+    it('fragt erneut, wenn die Nachfrage niemanden erreicht hat', async () => {
+      aktiviere(bob)
+      relaisKaputt = true
+      try {
+        expect(await fordereGruppenSchluessel(kontext(bob, alle), 'c'.repeat(16))).toBe(false)
+      } finally {
+        relaisKaputt = false
+      }
+      expect(await fordereGruppenSchluessel(kontext(bob, alle), 'c'.repeat(16))).toBe(true)
+    })
+
+    // Eine Nachfrage bleibt als Umschlag liegen und wird bei jedem Abruf wieder
+    // gelesen. Wer sie jedes Mal neu beantwortet, füllt die Mailbox mit
+    // Zustellungen, bis die echten Nachrichten aus dem Abruffenster fallen — am
+    // laufenden System waren 99 von 100 Umschlägen Schlüsselzustellungen.
+    it('beantwortet dieselbe Nachfrage nur einmal', async () => {
+      await sende(alice, alle, 'lief schon')
+      const anfrage = JSON.stringify({
+        typ: 'group_key_request',
+        v: 1,
+        groupId: GRUPPE,
+        vonKonto: BOB,
+        vonGeraet: 'x'.repeat(32),
+        keyId: '0'.repeat(16),
+      })
+
+      aktiviere(alice)
+      const vorher = mailbox.length
+      expect(await verarbeiteGruppenSteuerung(kontext(alice, alle), anfrage)).toMatchObject({
+        art: 'anfrage',
+        beantwortet: true,
+      })
+      const nachAntwort = mailbox.length
+      expect(nachAntwort).toBeGreaterThan(vorher)
+
+      for (let i = 0; i < 5; i++) {
+        expect(await verarbeiteGruppenSteuerung(kontext(alice, alle), anfrage)).toMatchObject({
+          art: 'anfrage',
+          beantwortet: false,
+        })
+      }
+      expect(mailbox.length).toBe(nachAntwort)
+    })
+
+    // Sonst bliebe ein Gerät, dem eine Rotation entgangen ist, für immer
+    // draußen: es fragt nach der neuen Kennung, und niemand antwortet.
+    it('beantwortet eine Nachfrage nach einer anderen Kennung erneut', async () => {
+      await sende(alice, alle, 'lief schon')
+      const anfrage = (keyId: string) =>
+        JSON.stringify({
+          typ: 'group_key_request',
+          v: 1,
+          groupId: GRUPPE,
+          vonKonto: BOB,
+          vonGeraet: 'x'.repeat(32),
+          keyId,
+        })
+
+      aktiviere(alice)
+      await verarbeiteGruppenSteuerung(kontext(alice, alle), anfrage('0'.repeat(16)))
+      const nachErster = mailbox.length
+      expect(
+        await verarbeiteGruppenSteuerung(kontext(alice, alle), anfrage('1'.repeat(16))),
+      ).toMatchObject({ art: 'anfrage', beantwortet: true })
+      expect(mailbox.length).toBeGreaterThan(nachErster)
     })
   })
 

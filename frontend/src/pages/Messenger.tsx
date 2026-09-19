@@ -115,6 +115,7 @@ import {
   enqueueMessageMutation,
   getOutbox,
   setOutbox,
+  replayOutbox,
 } from '@/lib/offlineSync'
 import type { NoteItem } from '@/pages/Notes'
 import type { CalendarEventItem } from '@/pages/Calendar'
@@ -1785,11 +1786,36 @@ export function Messenger() {
     maxPartnerDeliveredIdRef.current = 0
   }, [blindMailboxId])
 
+  /**
+   * Fasst die Warteschlange nach.
+   *
+   * `replayOutbox` hatte bis 09/2026 genau einen Auslöser in der Anwendung:
+   * `getNotesOffline`. Eine Nachricht, deren Versand scheiterte — ein
+   * Ratenlimit reicht —, lag danach in `msm_offline_outbox` und wurde erst
+   * wieder angefasst, wenn der Benutzer zufällig die Notizen öffnete. Am
+   * laufenden System standen so 31 Aufträge mit `retryCount: 0` und rührten
+   * sich nicht, während im Verlauf Nachrichten mit dem Uhr-Symbol hingen. Der
+   * Chat ist der Ort, an dem man diese Uhr sieht, also fasst er auch nach.
+   */
+  const fasseWarteschlangeNach = useCallback(() => {
+    if (getOutbox().length === 0) return
+    void replayOutbox().catch(() => {})
+  }, [])
+
   useEffect(() => {
     if (blindMailboxId && (activeContact || activeGroup)) {
       void loadMessages(true)
-      const interval = setInterval(() => void loadMessages(false), 5000)
-      return () => clearInterval(interval)
+      fasseWarteschlangeNach()
+      const interval = setInterval(() => {
+        void loadMessages(false)
+        fasseWarteschlangeNach()
+      }, 5000)
+      const beiNetz = () => fasseWarteschlangeNach()
+      window.addEventListener('online', beiNetz)
+      return () => {
+        clearInterval(interval)
+        window.removeEventListener('online', beiNetz)
+      }
     }
     // `identity.state` gehört in die Abhängigkeiten: nach dem Entsperren muss
     // derselbe Chat noch einmal durchlaufen, sonst bleibt der eben lesbar
@@ -1802,7 +1828,18 @@ export function Messenger() {
       const ce = e as CustomEvent<{ client_uuid: string; envelope_id: number; blind_mailbox_id: string }>
       const detail = ce.detail
       if (!detail?.client_uuid || !detail?.envelope_id) return
-      const { client_uuid, envelope_id, blind_mailbox_id: confirmedMid } = detail
+      const { envelope_id, blind_mailbox_id: confirmedMid } = detail
+      /**
+       * Die Warteschlange meldet die Kennung **mit** Gerätesuffix — ein
+       * Auftrag steht je Zielgerät darin, und `#<geraet>` hält sie
+       * auseinander. Die Zeile im Verlauf trägt die logische Kennung ohne
+       * Suffix. Der Vergleich traf deshalb nie zu: der Umschlag ging raus, die
+       * Zeile behielt ihre Uhr, und weil `updateMessageInLocalStore` dieselbe
+       * Kennung benutzte, überlebte sie auch jedes Neuladen. Am laufenden
+       * System waren das die Nachrichten, die zugestellt waren und trotzdem
+       * für immer „in der Warteschlange" standen.
+       */
+      const client_uuid = logischeUuid(detail.client_uuid) ?? detail.client_uuid
 
       if (confirmedMid === blindMailboxId) {
         setMessages((prev) =>
@@ -3983,6 +4020,22 @@ export function Messenger() {
                 )}
 
                 {messages.map((msg, idx) => {
+                  // Eine Systemzeile ist keine Nachricht: sie hat keinen
+                  // Absender, keine Quittung und kein Kontextmenü. In der
+                  // Sprechblase gerendert sah sie aus, als hätte das Gegenüber
+                  // sie geschrieben — bei einer Meldung über die Sicherheit
+                  // dieses Gesprächs die denkbar schlechteste Verwechslung.
+                  if (msg.isSystem) {
+                    return (
+                      <div key={msg.id} className="py-1 text-center">
+                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high/60 border border-outline-variant/30 text-[11px] text-on-surface-variant shadow-2xs">
+                          <Shield className="w-3 h-3 text-amber-400 shrink-0" />
+                          <span>{msg.text}</span>
+                        </div>
+                      </div>
+                    )
+                  }
+
                   const currentDateBadge = formatChatDateBadge(msg.createdAt)
                   const prevDateBadge = idx > 0 ? formatChatDateBadge(messages[idx - 1].createdAt) : null
                   const showDateSeparator = Boolean(currentDateBadge && currentDateBadge !== prevDateBadge)

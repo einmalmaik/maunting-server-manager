@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { api, clearCsrfTokenMemory } from '@/api/client'
 import { isNetworkOrOfflineError } from '@/lib/networkErrors'
+import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
 import { usePermissionsStore } from '@/stores/permissionsStore'
 import { useNodeStore } from '@/stores/nodeStore'
 import { useToastStore } from '@/stores/toastStore'
@@ -29,6 +30,10 @@ function loadCachedUser(): User | null {
 }
 
 function saveCachedUser(user: User | null): void {
+  // Der Geräteschlüssel des Messengers hängt am Konto und wird hier bekannt
+  // gegeben. Diese Zeile steht vor dem `try`: ein gesperrter localStorage darf
+  // nicht dazu führen, dass `e2eeGeraet` beim vorigen Konto bleibt.
+  setzeAngemeldetesKonto(user?.id ?? null)
   try {
     if (user) {
       localStorage.setItem(CACHED_USER_KEY, JSON.stringify(user))
@@ -63,6 +68,10 @@ interface AuthState {
 let raeumungen = 0
 
 const initialCachedUser = loadCachedUser()
+// Der Start aus dem Zwischenspeicher geht nicht durch `saveCachedUser`, also
+// hier. Ohne diese Zeile stünde der Messenger nach einem Neuladen ohne Konto da
+// und fände seinen Geräteschlüssel nicht.
+setzeAngemeldetesKonto(initialCachedUser?.id ?? null)
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: initialCachedUser,

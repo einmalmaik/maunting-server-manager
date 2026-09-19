@@ -136,6 +136,9 @@ vi.mock('@/services/messengerLocalStore', async () => {
       if (!klartexte.has(mid)) klartexte.set(mid, new Map())
       klartexte.get(mid)!.set(id, plain)
     }),
+    leseUmschlagKlartext: vi.fn(
+      async (mid: string, id: number) => klartexte.get(mid)?.get(id) ?? null
+    ),
     ladeUmschlagKlartexte: vi.fn(
       async (mid: string) => new Map(klartexte.get(mid) ?? new Map())
     ),
@@ -160,7 +163,18 @@ vi.mock('@/services/ratchetSitzung', () => {
       },
     ]),
     liesDrUmschlag: vi.fn(
-      async (_kontext: any, umschlag: string, ablegen: (t: string) => Promise<void>) => {
+      async (
+        _kontext: any,
+        umschlag: string,
+        klartext: { lies(): Promise<string | null>; lege(t: string): Promise<void> },
+      ) => {
+        // Wie die echte Fassung: erst nachsehen, ob ein anderer Durchlauf den
+        // Umschlag schon geöffnet hat. Ein Ratchet-Nachrichtenschlüssel geht
+        // kein zweites Mal auf.
+        const schon = await klartext.lies()
+        if (schon !== null) {
+          return { art: 'klartext', text: schon, vonKonto: 101, vonGeraet: 'zielgeraet' }
+        }
         // Der Klartext kommt weiterhin aus dem Stellvertreter, den die Tests
         // ohnehin je Fall setzen. So bleibt jede bestehende Vorgabe gültig,
         // obwohl der Messenger jetzt über den Ratchet liest.
@@ -175,7 +189,7 @@ vi.mock('@/services/ratchetSitzung', () => {
         if (typeof text !== 'string' || text === '') {
           return { art: 'unbekannt' }
         }
-        await ablegen(text)
+        await klartext.lege(text)
         return { art: 'klartext', text, vonKonto: 101, vonGeraet: 'zielgeraet' }
       }
     ),
@@ -243,6 +257,11 @@ vi.mock('@/lib/offlineSync', () => ({
   saveNoteOffline: vi.fn().mockResolvedValue({ id: 1, title: 'Mock' }),
   saveCalendarEventOffline: vi.fn().mockResolvedValue({ id: 1, title: 'Mock' }),
   enqueueMessageMutation: vi.fn().mockReturnValue({ id: 'mock-mutation' }),
+  // Der Chat fasst die Warteschlange selbst nach; ohne diese beiden bricht
+  // schon das Einhaengen der Seite ab.
+  getOutbox: vi.fn().mockReturnValue([]),
+  setOutbox: vi.fn(),
+  replayOutbox: vi.fn().mockResolvedValue({ processed: 0, failed: 0, remaining: 0 }),
 }))
 
 function setupUser() {

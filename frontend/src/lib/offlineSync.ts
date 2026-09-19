@@ -460,7 +460,13 @@ export async function replayOutbox(): Promise<{ processed: number; failed: numbe
           err?.message?.includes('Failed to fetch') ||
           err?.message?.includes('NetworkError')
 
-        if (isNetworkErr) {
+        // Ein Ratenlimit ist kein Fehlschlag, sondern ein „später". Es unter
+        // die gezählten Versuche zu nehmen war harmlos, solange niemand die
+        // Warteschlange nachfasste; sobald das im Takt geschieht, wären die
+        // fünf Versuche in einer halben Minute aufgebraucht und die Nachricht
+        // des Benutzers stillschweigend weg. Dasselbe gilt für einen Server,
+        // der gerade nicht kann: 5xx sagt nichts über den Auftrag aus.
+        if (isNetworkErr || err?.status === 429 || (err?.status >= 500 && err?.status < 600)) {
           break
         } else if (err?.status === 404 || err?.status === 400) {
           const afterErrOutbox = getOutbox()

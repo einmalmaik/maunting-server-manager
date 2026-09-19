@@ -57,9 +57,25 @@ const STORE = 'sessions'
  * Die Sitzungskennung. Eine Sitzung gehört einem **Gerät**, nicht einem Konto:
  * dieselbe Person an zwei Geräten sind zwei Fäden, die nichts voneinander
  * wissen.
+ *
+ * Das gilt für beide Enden, und deshalb steht seit 09/2026 auch das eigene
+ * Gerät im Namen. Vorher hieß eine Sitzung nur `<Konto>:<Gerät>` der
+ * Gegenstelle. In einem Browser, in dem sich zwei Menschen nacheinander
+ * anmelden, griffen beide auf denselben Platz: wer als zweiter sendete,
+ * schaltete den Ratchet des ersten weiter, und die Gegenstelle suchte unter
+ * einer anderen Absenderkennung, fand nichts und meldete einen Sitzungsbruch.
+ *
+ * Die eigene Gerätekennung und nicht die eigene Kontokennung, weil sie beides
+ * leistet: sie unterscheidet die Konten ohnehin, und sie wechselt zusätzlich,
+ * wenn die Schlüsselablage verloren geht. Zustände, die zu einem Schlüssel
+ * gehören, den es nicht mehr gibt, verwaisen damit von selbst.
  */
-export function sitzungsId(peerUserId: number, peerGeraeteId: string): string {
-  return `${peerUserId}:${peerGeraeteId}`
+export function sitzungsId(
+  meinGeraet: string,
+  peerUserId: number,
+  peerGeraeteId: string,
+): string {
+  return `${meinGeraet}:${peerUserId}:${peerGeraeteId}`
 }
 
 // ==========================================
@@ -70,6 +86,8 @@ export interface RatchetAblage {
   lies(id: string): Promise<string | null>
   schreibe(id: string, zustand: string): Promise<void>
   loesche(id: string): Promise<void>
+  /** Alle abgelegten Kennungen. Nur die einmalige Umbenennung braucht das. */
+  alleIds(): Promise<string[]>
 }
 
 function oeffneDatenbank(): Promise<IDBDatabase> {
@@ -119,18 +137,61 @@ const indexedDbAblage: RatchetAblage = {
       req.onerror = () => reject(req.error)
     })
   },
+  async alleIds() {
+    const db = await oeffneDatenbank()
+    return new Promise<string[]>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readonly')
+      const req = tx.objectStore(STORE).getAllKeys()
+      req.onsuccess = () => resolve((req.result ?? []).map((k) => String(k)))
+      req.onerror = () => reject(req.error)
+    })
+  },
 }
 
 let ablage: RatchetAblage = indexedDbAblage
 
 /**
  * Hängt eine andere Ablage ein. Nur für Tests gedacht — und dafür der Grund,
- * warum hier kein `fake-indexeddb` als Abhängigkeit steht: eine Schnittstelle
- * mit drei Methoden ist leichter zu fälschen als eine Datenbank nachzubauen.
+ * warum hier kein `fake-indexeddb` als Abhängigkeit steht: eine schmale
+ * Schnittstelle ist leichter zu fälschen als eine Datenbank nachzubauen.
  */
 export function setzeAblageFuerTest(neu: RatchetAblage | null): void {
   ablage = neu ?? indexedDbAblage
   schloesser.clear()
+}
+
+/**
+ * Benennt die Sitzungen aus der Zeit vor der eigenen Gerätekennung um.
+ *
+ * Aufgerufen genau einmal, aus der Übernahme des alten Geräteschlüssels in
+ * `e2eeGeraet.ts`: erst dort steht fest, welchem Gerät der Altbestand gehört.
+ * Ohne diesen Schritt fände der Messenger nach dem Update keine einzige seiner
+ * Sitzungen wieder und meldete jedem Gesprächspartner einen Bruch.
+ *
+ * Erkannt wird das alte Format an zwei Feldern, deren erstes eine Kontokennung
+ * ist. Die Zählung allein reicht nicht: in **demselben** Store liegen die
+ * Marken, und `aufbau:<base64>` hat ebenfalls zwei Felder — base64 kennt keinen
+ * Doppelpunkt. Eine umbenannte Marke wäre für immer unauffindbar, und der
+ * zugehörige Sitzungsaufbau liefe noch einmal. Ziffern am Anfang schliessen
+ * `aufbau` und `bruch` sicher aus.
+ *
+ * Bereits umbenannte Sitzungen bleiben unangetastet, und ein Platz, der im
+ * neuen Format schon belegt ist, wird nicht überschrieben.
+ */
+export async function uebernehmeAltbestand(meinGeraet: string): Promise<number> {
+  const ids = await ablage.alleIds()
+  let umbenannt = 0
+  for (const alt of ids) {
+    if (!/^\d+:[A-Za-z0-9_-]+$/.test(alt)) continue
+    const neu = `${meinGeraet}:${alt}`
+    if (await ablage.lies(neu)) continue
+    const zustand = await ablage.lies(alt)
+    if (!zustand) continue
+    await ablage.schreibe(neu, zustand)
+    await ablage.loesche(alt)
+    umbenannt += 1
+  }
+  return umbenannt
 }
 
 // ==========================================

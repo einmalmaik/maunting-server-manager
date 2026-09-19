@@ -25,6 +25,7 @@ import {
   verwirfSitzung,
   sitzungsId,
   setzeAblageFuerTest,
+  uebernehmeAltbestand,
   type RatchetAblage,
 } from './ratchetSpeicher'
 
@@ -45,6 +46,9 @@ function speicherAblage() {
     },
     async loesche(id) {
       daten.delete(id)
+    },
+    async alleIds() {
+      return [...daten.keys()]
     },
   }
   return { ablage, daten, schreibfolge }
@@ -69,10 +73,60 @@ describe('ratchetSpeicher', () => {
     setzeAblageFuerTest(umgebung.ablage)
   })
 
-  it('bildet die Sitzungskennung aus Konto und Gerät', () => {
+  it('bildet die Sitzungskennung aus beiden Geräten und dem Konto', () => {
     // Dieselbe Person an zwei Geräten sind zwei Fäden.
-    expect(sitzungsId(7, 'aaaa1111')).toBe('7:aaaa1111')
-    expect(sitzungsId(7, 'aaaa1111')).not.toBe(sitzungsId(7, 'bbbb2222'))
+    expect(sitzungsId('meins', 7, 'aaaa1111')).toBe('meins:7:aaaa1111')
+    expect(sitzungsId('meins', 7, 'aaaa1111')).not.toBe(sitzungsId('meins', 7, 'bbbb2222'))
+  })
+
+  it('trennt zwei eigene Geräte am selben Gesprächspartner', () => {
+    // Zwei Konten in einem Browser haben seit 09/2026 verschiedene
+    // Gerätekennungen. Griffen sie trotzdem auf denselben Sitzungsplatz,
+    // schaltete der eine den Ratchet des anderen weiter, und die Gegenstelle
+    // meldete einen Bruch.
+    expect(sitzungsId('geraet-a', 7, 'peer')).not.toBe(sitzungsId('geraet-b', 7, 'peer'))
+  })
+
+  it('hängt den Altbestand einmalig an das eigene Gerät', async () => {
+    umgebung.daten.set('7:peer-eins', 'zustand-eins')
+    umgebung.daten.set('9:peer-zwei', 'zustand-zwei')
+    umgebung.daten.set('meins:7:schon-neu', 'zustand-neu')
+
+    expect(await uebernehmeAltbestand('meins')).toBe(2)
+    expect(umgebung.daten.get('meins:7:peer-eins')).toBe('zustand-eins')
+    expect(umgebung.daten.get('meins:9:peer-zwei')).toBe('zustand-zwei')
+    expect(umgebung.daten.has('7:peer-eins')).toBe(false)
+    // Was schon im neuen Format lag, bleibt, wie es war.
+    expect(umgebung.daten.get('meins:7:schon-neu')).toBe('zustand-neu')
+
+    // Ein zweiter Lauf findet nichts mehr und fasst nichts an.
+    expect(await uebernehmeAltbestand('meins')).toBe(0)
+  })
+
+  it('lässt die Marken in Ruhe, die im selben Store liegen', async () => {
+    // `aufbau:<base64>` hat ebenfalls zwei Felder: base64 kennt keinen
+    // Doppelpunkt. Eine umbenannte Marke wäre für immer unauffindbar, und der
+    // zugehörige Sitzungsaufbau liefe noch einmal — mitsamt der Systemzeile,
+    // die niemand ausgelöst hat.
+    umgebung.daten.set('aufbau:QUJDZGVmZ2hpams', '1')
+    umgebung.daten.set('bruch:7:peer:QUJD', '1')
+    umgebung.daten.set('7:peer', 'echte-sitzung')
+
+    expect(await uebernehmeAltbestand('meins')).toBe(1)
+    expect(umgebung.daten.get('aufbau:QUJDZGVmZ2hpams')).toBe('1')
+    expect(umgebung.daten.get('bruch:7:peer:QUJD')).toBe('1')
+    expect(umgebung.daten.get('meins:7:peer')).toBe('echte-sitzung')
+  })
+
+  it('überschreibt beim Übernehmen keinen belegten Platz', async () => {
+    umgebung.daten.set('7:peer', 'alt')
+    umgebung.daten.set('meins:7:peer', 'neu')
+
+    expect(await uebernehmeAltbestand('meins')).toBe(0)
+    // Der neue Zustand ist der jüngere. Ihn durch den alten zu ersetzen hieße,
+    // eine laufende Sitzung um alle Schritte zurückzuwerfen, die sie seither
+    // gemacht hat.
+    expect(umgebung.daten.get('meins:7:peer')).toBe('neu')
   })
 
   it('legt einen brauchbaren Zustand ab', async () => {

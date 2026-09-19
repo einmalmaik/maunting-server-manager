@@ -3323,7 +3323,7 @@
       "2fa": "Two-Factor",
       "linked": "Linked Accounts",
       "ai": "AI",
-      "devices": "Pair device",
+      "devices": "Devices",
       "danger": "Danger Zone",
       "credentials": "Credentials"
     },
@@ -3501,7 +3501,19 @@
       "protocolHelp": "Used for querying calendar events and preparing schedule drafts by the AI assistant. Events are only created or modified after your explicit approval.",
       "caldavHelp": "CalDAV URL of your calendar (e.g. Nextcloud, Google CalDAV)."
     },
-    "confirmDeleteWordLabel": "Type delete to confirm (paste disabled)"
+    "confirmDeleteWordLabel": "Type delete to confirm (paste disabled)",
+    "e2eeDevices": {
+      "title": "Devices that can read your messages",
+      "description": "Every device has its own key and never shares it. Messages addressed to you are encrypted separately for each device in this list.",
+      "thisDevice": "This device",
+      "unnamed": "Unnamed device",
+      "empty": "No device registered.",
+      "loadFailed": "The list could not be loaded.",
+      "remove": "Remove",
+      "removeTitle": "Remove this device from delivery?",
+      "removeMessage": "This device will no longer receive new messages. If it signs in to your account again, it registers itself anew: removing it does not lock out anyone who still has access to the account.",
+      "removed": "Device removed."
+    }
   },
   "errorBoundary": {
     "title": "This view could not be loaded",

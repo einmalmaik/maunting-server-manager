@@ -554,6 +554,40 @@ describe('Offline Storage & Unified Real-Time SSE Sync Engine', () => {
       window.removeEventListener('msm:message-confirmed', confirmedListener)
     })
 
+    // Ein Ratenlimit sagt „später", nicht „geht nicht". Solange niemand die
+    // Warteschlange nachfasste, war das harmlos; seit der Chat das im
+    // Fünf-Sekunden-Takt tut, wären fünf gezählte Versuche in einer halben
+    // Minute aufgebraucht — und die Nachricht des Benutzers stillschweigend
+    // verworfen. Dasselbe gilt für einen Server, der gerade nicht kann.
+    it('verbraucht bei Ratenlimit und Serverfehler keinen Versuch und wirft nichts weg', async () => {
+      for (const status of [429, 503]) {
+        setOutbox([])
+        enqueueMessageMutation({
+          blind_mailbox_id: 'mailbox-drossel',
+          ciphertext_envelope: 'cipher-drossel',
+          recipient_id: 7,
+          client_uuid: 'uuid-drossel-' + status,
+        })
+
+        vi.mocked(client.api).mockRejectedValue(Object.assign(new Error('abgewiesen'), { status }))
+
+        for (let runde = 0; runde < 8; runde++) {
+          const res = await replayOutbox()
+          expect(res.failed).toBe(0)
+        }
+
+        const uebrig = getOutbox()
+        expect(uebrig).toHaveLength(1)
+        expect(uebrig[0].retryCount).toBe(0)
+      }
+
+      // Sobald der Server wieder kann, geht derselbe Auftrag raus.
+      vi.mocked(client.api).mockResolvedValueOnce({ id: 991, blind_mailbox_id: 'mailbox-drossel' })
+      const res = await replayOutbox()
+      expect(res.processed).toBe(1)
+      expect(getOutbox()).toHaveLength(0)
+    })
+
     it('instantly updates local storage cache when handleIncomingSyncEvent receives notes/calendar payloads', () => {
       // 1. Incoming note create
       handleIncomingSyncEvent('sync', {

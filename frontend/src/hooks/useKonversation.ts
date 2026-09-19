@@ -45,6 +45,7 @@ import {
 } from '@/services/gruppenSchluessel'
 import {
   ladeUmschlagKlartexte,
+  leseUmschlagKlartext,
   speichereUmschlagKlartext,
 } from '@/services/messengerLocalStore'
 import {
@@ -231,7 +232,7 @@ export function useKonversation({
     [ziel.art, ziel.art === 'direkt' ? ziel.peerId : 0, eigeneId],
   )
 
-  const liesUmschlaege = useCallback(async (): Promise<Lesung[] | null> => {
+  const einDurchlauf = useCallback(async (): Promise<Lesung[] | null> => {
     const mid = blindMailboxId
     if (!mid || !eigeneId) return null
     // Erst entschlüsseln, wenn feststeht, welchen Schlüssel dieses Gerät hat.
@@ -332,14 +333,17 @@ export function useKonversation({
             return { art: 'klartext', env, text: klartext }
           }
 
-          const lesung = await liesDrUmschlag(
-            drKontext,
-            env.ciphertext_envelope,
+          const lesung = await liesDrUmschlag(drKontext, env.ciphertext_envelope, {
+            // `bekannt` oben ist eine Momentaufnahme vom Beginn dieses
+            // Durchlaufs. Diese Abfrage läuft im Sitzungsschloss und sieht
+            // deshalb auch, was ein überlappender Durchlauf oder ein zweiter
+            // Tab inzwischen geöffnet hat.
+            lies: () => leseUmschlagKlartext(mid, env.id),
             // Erst der Klartext auf die Platte, dann der fortgeschriebene
             // Zustand. Schlägt das fehl, scheitert der ganze Schritt und der
             // Umschlag bleibt beim nächsten Mal lesbar.
-            (text) => speichereUmschlagKlartext(mid, env.id, text),
-          )
+            lege: (text) => speichereUmschlagKlartext(mid, env.id, text),
+          })
           if (lesung.art === 'klartext') {
             envelopePlaintextCache.set(env.id, { plain: lesung.text, ok: true })
             return { art: 'klartext', env, text: lesung.text }
@@ -403,6 +407,45 @@ export function useKonversation({
 
     return gelesen
   }, [blindMailboxId, eigeneId, gruppenKontext, drKontext, identitaetRef, meldeSitzungsbruch])
+
+  /** Der laufende Durchlauf, und der eine, der hinter ihm warten darf. */
+  const laufend = useRef<Promise<unknown>>(Promise.resolve())
+  const wartend = useRef<Promise<Lesung[] | null> | null>(null)
+
+  /**
+   * Ein Durchlauf zur Zeit, und höchstens einer wartet.
+   *
+   * Der Messenger ruft hier aus fünf Quellen herein: dem Fünf-Sekunden-Takt,
+   * jedem Sync-Ereignis, dem Sichtbarkeitswechsel, dem Senden und den
+   * Bestätigungen der Warteschlange. Eine einzige Nachricht löst mehrere davon
+   * fast gleichzeitig aus — Umschlag, Zustellquittung, Lesequittung sind drei
+   * Ereignisse. Ohne diese Klammer holen zwei Durchläufe dasselbe Fenster aus
+   * hundert Umschlägen und entschlüsseln jeden Hybridumschlag darin zweimal.
+   *
+   * Dass ein doppelt gelesener Ratchet-Umschlag keine Sitzung mehr kostet,
+   * steht in `liesDrUmschlag` und muss dort stehen: zwei Tabs teilen sich
+   * Ablage und Geräteschlüssel, aber nicht diese Refs.
+   *
+   * Warteschlange statt gemeinsamer Antwort: wer ruft, weil gerade ein
+   * Umschlag eingetroffen ist, darf nicht das Ergebnis eines Abrufs bekommen,
+   * der vor diesem Umschlag losgelaufen ist. Der Nächste wartet also, statt
+   * mitzulesen. Mehr als einen zu stapeln brächte nichts — sie fragen alle
+   * dasselbe.
+   */
+  const liesUmschlaege = useCallback((): Promise<Lesung[] | null> => {
+    if (wartend.current) return wartend.current
+    const starte = () => {
+      wartend.current = null
+      return einDurchlauf()
+    }
+    const naechster = laufend.current.then(starte, starte)
+    wartend.current = naechster
+    laufend.current = naechster.then(
+      () => undefined,
+      () => undefined,
+    )
+    return naechster
+  }, [einDurchlauf])
 
   const baueVersand = useCallback(
     async (payload: string, clientUuid: string): Promise<Versandauftrag[]> => {

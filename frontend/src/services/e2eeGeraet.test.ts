@@ -15,13 +15,23 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { hochgeladen, fremdeGeraete } = vi.hoisted(() => ({
+const { hochgeladen, fremdeGeraete, uebernommen, umbenennen } = vi.hoisted(() => ({
   hochgeladen: [] as { deviceId: string; publicKey: string; label: string }[],
   fremdeGeraete: {
     liste: [] as { device_id: string; public_key: string }[],
     rufe: 0,
     fehler: null as Error | null,
   },
+  uebernommen: [] as string[],
+  umbenennen: { fehler: null as Error | null },
+}))
+
+vi.mock('./ratchetSpeicher', () => ({
+  uebernehmeAltbestand: vi.fn(async (kennung: string) => {
+    uebernommen.push(kennung)
+    if (umbenennen.fehler) throw umbenennen.fehler
+    return 0
+  }),
 }))
 
 vi.mock('@/api/social', () => ({
@@ -53,6 +63,12 @@ function installiereIdb(platte: Map<string, any>) {
       queueMicrotask(() => req.onsuccess?.())
       return req
     },
+    delete: (schluessel: string) => {
+      platte.delete(`${name}:${schluessel}`)
+      const req: any = { onsuccess: null, onerror: null }
+      queueMicrotask(() => req.onsuccess?.())
+      return req
+    },
   })
 
   const db = {
@@ -76,6 +92,8 @@ function installiereIdb(platte: Map<string, any>) {
 /** Die Platte überlebt, der Arbeitsspeicher nicht — genau ein Neustart. */
 const platte = new Map<string, any>()
 
+const { setzeAngemeldetesKonto } = await import('@/lib/angemeldetesKonto')
+
 const { clearGeraeteMemory, eigenesGeraet, geraeteVon, geraetVeroeffentlichen, vergessenGeraete, verlangeGeraeteVon, E2eeKeinGeraetError } =
   await import('./e2eeGeraet')
 
@@ -86,6 +104,9 @@ describe('e2eeGeraet', () => {
     hochgeladen.length = 0
     fremdeGeraete.liste = []
     fremdeGeraete.rufe = 0
+    setzeAngemeldetesKonto(10)
+    uebernommen.length = 0
+    umbenennen.fehler = null
   })
 
   it('legt beim ersten Mal Kennung und Paar an', async () => {
@@ -153,6 +174,106 @@ describe('e2eeGeraet', () => {
     await geraetVeroeffentlichen()
     expect(hochgeladen).toHaveLength(1)
   }, 60_000)
+
+  describe('Ein Schlüssel je Konto', () => {
+    it('gibt zwei Konten in einem Browser verschiedene Schlüssel', async () => {
+      // Bis 09/2026 lag hier ein Paar unter dem festen Namen `self`. Wer sich
+      // nach jemand anderem in denselben Browser einloggte, bekam dessen
+      // privaten Schlüssel — und der öffnet, weil die blinde Mailbox jedem
+      // Angemeldeten offensteht, die Post beider Konten.
+      platte.clear()
+      const anna = await eigenesGeraet()
+
+      clearGeraeteMemory()
+      setzeAngemeldetesKonto(11)
+      const bert = await eigenesGeraet()
+
+      expect(bert.kennung).not.toBe(anna.kennung)
+      expect(bert.paar.privateKeyJwk).not.toBe(anna.paar.privateKeyJwk)
+      expect(bert.paar.publicKeyJwk).not.toBe(anna.paar.publicKeyJwk)
+
+      // Und beide finden beim nächsten Start ihr eigenes wieder.
+      clearGeraeteMemory()
+      setzeAngemeldetesKonto(10)
+      expect((await eigenesGeraet()).kennung).toBe(anna.kennung)
+    }, 60_000)
+
+    it('hängt den alten self-Eintrag an das erste Konto und räumt ihn weg', async () => {
+      // Ohne diese Übernahme verlöre jede bestehende Installation beim Update
+      // ihren Schlüssel und damit jede laufende Sitzung.
+      platte.clear()
+      platte.set('devices:self', {
+        id: 'self',
+        kennung: 'altbestand0000',
+        publicKeyJwk: '{"kty":"RSA","n":"alt"}',
+        privateKeyJwk: '{"kty":"RSA","d":"alt"}',
+      })
+
+      const uebernahme = await eigenesGeraet()
+      expect(uebernahme.kennung).toBe('altbestand0000')
+      expect(platte.has('devices:self')).toBe(false)
+      expect(platte.get('devices:konto:10')?.kennung).toBe('altbestand0000')
+
+      // Die Ratchet-Sitzungen hängen an diesem Schlüssel und tragen seit
+      // 09/2026 die eigene Gerätekennung im Namen. Bleiben sie unter dem alten
+      // Namen liegen, meldet der Messenger jedem Gesprächspartner einen Bruch.
+      expect(uebernommen).toEqual(['altbestand0000'])
+
+      // Das zweite Konto erbt nichts, sondern legt frisch an.
+      clearGeraeteMemory()
+      setzeAngemeldetesKonto(11)
+      const zweites = await eigenesGeraet()
+      expect(zweites.kennung).not.toBe('altbestand0000')
+    }, 60_000)
+
+    it('versucht das Umbenennen der Sitzungen erneut, wenn es scheitert', async () => {
+      // Am laufenden System schiefgegangen: der Schlüssel war umgehängt, das
+      // Umbenennen scheiterte, `self` war weg — und es gab keinen zweiten
+      // Versuch mehr. Der Browser stand mit einem gültigen Schlüssel und lauter
+      // unauffindbaren Sitzungen da.
+      platte.clear()
+      platte.set('devices:self', {
+        id: 'self',
+        kennung: 'altbestand0000',
+        publicKeyJwk: '{"kty":"RSA","n":"alt"}',
+        privateKeyJwk: '{"kty":"RSA","d":"alt"}',
+      })
+      umbenennen.fehler = new Error('Ablage weg')
+
+      await eigenesGeraet()
+      expect(uebernommen).toEqual(['altbestand0000'])
+      expect(platte.get('devices:konto:10')?.sitzungenUebernommen).toBe(false)
+
+      // Nächster Start, diesmal geht es durch.
+      umbenennen.fehler = null
+      clearGeraeteMemory()
+      await eigenesGeraet()
+      expect(uebernommen).toEqual(['altbestand0000', 'altbestand0000'])
+      expect(platte.get('devices:konto:10')?.sitzungenUebernommen).toBe(true)
+
+      // Und danach nicht noch einmal.
+      clearGeraeteMemory()
+      await eigenesGeraet()
+      expect(uebernommen).toHaveLength(2)
+    }, 60_000)
+
+    it('lässt ein frisch erzeugtes Gerät die Sitzungen nicht anfassen', async () => {
+      // Sonst zöge das **zweite** Konto in diesem Browser die verwaisten
+      // Sitzungen des ersten an sich.
+      platte.clear()
+      await eigenesGeraet()
+      expect(uebernommen).toEqual([])
+      expect(platte.get('devices:konto:10')?.sitzungenUebernommen).toBe(true)
+    }, 60_000)
+
+    it('verweigert die Auskunft ohne angemeldetes Konto', async () => {
+      // Ein stiller Rückfall auf einen kontoübergreifenden Schlüssel wäre genau
+      // der Zustand, der hier behoben wird.
+      platte.clear()
+      setzeAngemeldetesKonto(null)
+      await expect(eigenesGeraet()).rejects.toThrow(/Kein angemeldetes Konto/)
+    })
+  })
 
   describe('Gegenstellen', () => {
     it('merkt sich die Geräteliste und vergisst sie auf Zuruf', async () => {

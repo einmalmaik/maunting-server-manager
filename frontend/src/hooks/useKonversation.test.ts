@@ -14,10 +14,12 @@
 import { renderHook, waitFor, act } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { lesungen, geraete, gruppenLesungen, gerufen, klartextCache } = vi.hoisted(() => ({
+const { lesungen, geraete, gruppenLesungen, gerufen, klartextCache, abgelegt } = vi.hoisted(() => ({
   lesungen: new Map<string, any>(),
   geraete: [] as { device_id: string; public_key: string }[],
   gruppenLesungen: new Map<string, any>(),
+  /** Der dauerhafte Klartextspeicher, nach Umschlagkennung. */
+  abgelegt: new Map<number, string>(),
   /**
    * Der Zwischenspeicher schon geöffneter Umschläge, nach Umschlagkennung.
    * Die ist in der Datenbank der Primärschlüssel und damit über alle Mailboxen
@@ -60,7 +62,11 @@ vi.mock('@/services/e2eeGeraet', () => ({
 
 vi.mock('@/services/messengerLocalStore', () => ({
   ladeUmschlagKlartexte: vi.fn(async () => new Map<number, string>()),
-  speichereUmschlagKlartext: vi.fn(async () => {}),
+  /** Die Ablage, wie sie `liesDrUmschlag` im Sitzungsschloss sieht. */
+  leseUmschlagKlartext: vi.fn(async (_mid: string, envId: number) => abgelegt.get(envId) ?? null),
+  speichereUmschlagKlartext: vi.fn(async (_mid: string, envId: number, text: string) => {
+    abgelegt.set(envId, text)
+  }),
 }))
 
 vi.mock('@/services/gruppenSchluessel', () => ({
@@ -95,11 +101,17 @@ vi.mock('@/services/ratchetSitzung', () => ({
       bootstrapClientUuid: `${basisUuid}#bbbi`,
     },
   ]),
-  liesDrUmschlag: vi.fn(async (_k: any, umschlag: string, ablegen: (t: string) => Promise<void>) => {
-    const wert = lesungen.get(umschlag) ?? { art: 'unbekannt' }
-    if (wert.art === 'klartext') await ablegen(wert.text)
-    return wert
-  }),
+  liesDrUmschlag: vi.fn(
+    async (_k: any, umschlag: string, klartext: { lies(): Promise<string | null>; lege(t: string): Promise<void> }) => {
+      // Der echte Lesepfad sieht im Sitzungsschloss zuerst nach, ob ein
+      // anderer Durchlauf den Umschlag schon geöffnet hat.
+      const schon = await klartext.lies()
+      if (schon !== null) return { art: 'klartext', text: schon, vonKonto: 2, vonGeraet: 'fremd-a' }
+      const wert = lesungen.get(umschlag) ?? { art: 'unbekannt' }
+      if (wert.art === 'klartext') await klartext.lege(wert.text)
+      return wert
+    },
+  ),
   verarbeiteBootstrap: vi.fn(async (_k: any, klartext: string) =>
     klartext.startsWith('AUFBAU')
       ? { istAufbau: true, ersetzt: klartext.includes('ERSETZT'), vonGeraet: 'fremd-a' }
@@ -153,6 +165,7 @@ describe('useKonversation', () => {
     gerufen.verwirfDrSitzung.length = 0
     gerufen.verarbeiteGruppenSteuerung.length = 0
     klartextCache.clear()
+    abgelegt.clear()
     identitaetRef.current = {
       state: 'ready',
       sendPair: { publicKeyJwk: 'mein-pub', privateKeyJwk: 'mein-priv' },
@@ -312,6 +325,54 @@ describe('useKonversation', () => {
       const gelesen = await result.current.liesUmschlaege()
 
       expect(gelesen!.map((l) => l.art)).toEqual(['still', 'still', 'unlesbar', 'klartext'])
+    })
+
+    it('lässt einen Durchlauf zur Zeit laufen und stapelt höchstens einen', async () => {
+      // Der Messenger ruft aus fünf Quellen herein, und eine einzige Nachricht
+      // löst mehrere davon fast gleichzeitig aus. Zwei überlappende Durchläufe
+      // holten dasselbe Fenster aus hundert Umschlägen und entschlüsselten
+      // jeden Hybridumschlag darin zweimal.
+      //
+      // Gestapelt wird nur einer: wer ruft, weil gerade ein Umschlag
+      // eingetroffen ist, braucht einen Abruf **nach** diesem Umschlag — aber
+      // drei Anrufer brauchen zusammen nur einen.
+      umschlaege = [umschlag(1, 'dr-1')]
+      lesungen.set('dr-1', { art: 'klartext', text: 'Hallo', vonKonto: DU, vonGeraet: 'fremd-a' })
+
+      const { result } = await baueHook({ art: 'direkt', peerId: DU })
+      const { fetchE2eeEnvelopes } = await import('@/api/social')
+      const vorher = vi.mocked(fetchE2eeEnvelopes).mock.calls.length
+
+      // Der erste Durchlauf hängt am Abruf fest. Genau das ist das Fenster, in
+      // dem am laufenden System die weiteren Aufrufe hereinkommen.
+      let loslassen!: () => void
+      const bremse = new Promise<void>((aufloesen) => {
+        loslassen = aufloesen
+      })
+      vi.mocked(fetchE2eeEnvelopes).mockImplementationOnce(async () => {
+        await bremse
+        return umschlaege as any
+      })
+
+      const lauf1 = result.current.liesUmschlaege()
+      await new Promise((r) => setTimeout(r, 0))
+      const lauf2 = result.current.liesUmschlaege()
+      const lauf3 = result.current.liesUmschlaege()
+
+      // Zwei Nachzügler, ein gestapelter Durchlauf.
+      expect(lauf2).toBe(lauf3)
+      expect(lauf2).not.toBe(lauf1)
+
+      loslassen()
+      const alle = await Promise.all([lauf1, lauf2, lauf3])
+
+      expect(vi.mocked(fetchE2eeEnvelopes).mock.calls.length - vorher).toBe(2)
+      // Der Nachzügler liest denselben Umschlag ein zweites Mal — und bekommt
+      // seinen Klartext aus der Ablage, statt einen verbrauchten
+      // Nachrichtenschlüssel ein zweites Mal zu benutzen.
+      for (const gelesen of alle) {
+        expect(gelesen!.map((l) => l.art)).toEqual(['klartext'])
+      }
     })
 
     it('liest nicht, solange der Schlüssel dieses Geräts nicht feststeht', async () => {
