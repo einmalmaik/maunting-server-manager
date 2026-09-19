@@ -15,6 +15,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { api, apiStream } from '@/api/client'
 import type { NoteItem } from '@/pages/Notes'
 import type { CalendarEventItem } from '@/pages/Calendar'
+import { useAuthStore } from '@/stores/authStore'
 import {
   NOTE_CIPHERTEXT_PREFIX,
   CALENDAR_CIPHERTEXT_PREFIX,
@@ -28,6 +29,7 @@ import {
   hasUserNotesKey,
   checkAndReceiveDeviceNotesKey,
   syncNotesKeyToPairedDevices,
+  checkAndRespondToDeviceKeyRequests,
 } from '@/services/notesCalendarCrypto'
 
 export const STORAGE_KEYS = {
@@ -598,10 +600,23 @@ export async function redecryptPendingOfflineNotesAndCalendar(userId: number = 1
   return { decryptedNotesCount, decryptedEventsCount }
 }
 
+function getEffectiveUserId(explicitUserId?: number): number {
+  if (typeof explicitUserId === 'number' && explicitUserId > 0) {
+    return explicitUserId
+  }
+  try {
+    const authId = useAuthStore.getState().user?.id
+    if (typeof authId === 'number' && authId > 0) {
+      return authId
+    }
+  } catch {}
+  return 1
+}
+
 // Globaler Event-Listener für neu eingegangene oder synchronisierte Notizenschlüssel
 if (typeof window !== 'undefined') {
   window.addEventListener('msm:notes-key-updated', (e: any) => {
-    const uid = e?.detail?.userId || 1
+    const uid = e?.detail?.userId || getEffectiveUserId()
     void redecryptPendingOfflineNotesAndCalendar(uid)
   })
 }
@@ -610,9 +625,14 @@ if (typeof window !== 'undefined') {
 
 export async function loadNotesOfflineFirst(_options?: {
   includeArchived?: boolean
+  userId?: number
 }): Promise<{ notes: NoteItem[]; isOffline: boolean }> {
-  if (!hasUserNotesKey(1)) {
-    await checkAndReceiveDeviceNotesKey(1).catch(() => false)
+  const effectiveUid = getEffectiveUserId(_options?.userId)
+  if (!hasUserNotesKey(effectiveUid)) {
+    await checkAndReceiveDeviceNotesKey(effectiveUid).catch(() => false)
+  } else {
+    void syncNotesKeyToPairedDevices(effectiveUid).catch(() => {})
+    void checkAndRespondToDeviceKeyRequests(effectiveUid).catch(() => {})
   }
 
   let localNotes = getOfflineNotes()
@@ -622,11 +642,27 @@ export async function loadNotesOfflineFirst(_options?: {
     const data = await api<NoteItem[]>('/notes?include_archived=true')
     if (Array.isArray(data)) {
       const decryptedData: NoteItem[] = await Promise.all(
-        data.map(async (n) => ({
-          ...n,
-          title: await decryptNoteTitle(n.title, n.note_uid, undefined, n.user_id),
-          content: await decryptNoteContent(n.content, n.note_uid, undefined, n.user_id),
-        }))
+        data.map(async (n) => {
+          const itemUid = n.user_id || effectiveUid
+          let title = n.title
+          let content = n.content
+          try {
+            title = await decryptNoteTitle(n.title, n.note_uid, undefined, itemUid)
+          } catch {
+            // Bei fehlendem oder falschem Schlüssel Ciphertext im Offline-Cache belassen,
+            // damit nach Key-Sync redecryptPendingOfflineNotesAndCalendar greift
+          }
+          try {
+            content = await decryptNoteContent(n.content, n.note_uid, undefined, itemUid)
+          } catch {
+            // Ciphertext belassen
+          }
+          return {
+            ...n,
+            title,
+            content,
+          }
+        })
       )
       localNotes = mergeNotesWithServer(decryptedData)
     }
@@ -875,10 +911,15 @@ export async function toggleCheckItemOffline(
 export async function loadCalendarEventsOfflineFirst(
   rangeStart: string,
   rangeEnd: string,
-  eventType?: string
+  eventType?: string,
+  userId?: number
 ): Promise<{ events: CalendarEventItem[]; isOffline: boolean }> {
-  if (!hasUserNotesKey(1)) {
-    await checkAndReceiveDeviceNotesKey(1).catch(() => false)
+  const effectiveUid = getEffectiveUserId(userId)
+  if (!hasUserNotesKey(effectiveUid)) {
+    await checkAndReceiveDeviceNotesKey(effectiveUid).catch(() => false)
+  } else {
+    void syncNotesKeyToPairedDevices(effectiveUid).catch(() => {})
+    void checkAndRespondToDeviceKeyRequests(effectiveUid).catch(() => {})
   }
 
   let localEvents = getOfflineCalendarEvents()
@@ -891,12 +932,31 @@ export async function loadCalendarEventsOfflineFirst(
     )
     if (Array.isArray(data)) {
       const decryptedData: CalendarEventItem[] = await Promise.all(
-        data.map(async (ev) => ({
-          ...ev,
-          title: await decryptCalendarField(ev.title, ev.event_id, 'title'),
-          description: ev.description ? await decryptCalendarField(ev.description, ev.event_id, 'description') : '',
-          location: ev.location ? await decryptCalendarField(ev.location, ev.event_id, 'location') : '',
-        }))
+        data.map(async (ev) => {
+          const itemUid = ev.user_id || effectiveUid
+          let title = ev.title
+          let description = ev.description
+          let location = ev.location
+          try {
+            title = await decryptCalendarField(ev.title, ev.event_id, 'title', undefined, itemUid)
+          } catch {}
+          try {
+            description = ev.description
+              ? await decryptCalendarField(ev.description, ev.event_id, 'description', undefined, itemUid)
+              : ''
+          } catch {}
+          try {
+            location = ev.location
+              ? await decryptCalendarField(ev.location, ev.event_id, 'location', undefined, itemUid)
+              : ''
+          } catch {}
+          return {
+            ...ev,
+            title,
+            description,
+            location,
+          }
+        })
       )
       localEvents = mergeCalendarWithServer(decryptedData)
     }
@@ -1242,7 +1302,7 @@ export function handleIncomingSyncEvent(eventName: string, data: SyncEventPayloa
 
   if ((data as any)?.type === 'e2ee_blind_message' && (data as any)?.control_type?.startsWith('notes_key_')) {
     const cType = (data as any).control_type
-    const targetUid = (data as any).recipient_id || (data as any).sender_user_id || 1
+    const targetUid = (data as any).recipient_id || (data as any).sender_user_id || getEffectiveUserId()
     if (cType === 'notes_key_sync') {
       void checkAndReceiveDeviceNotesKey(targetUid)
     } else if (cType === 'notes_key_request') {
@@ -1270,15 +1330,23 @@ export function handleIncomingSyncEvent(eventName: string, data: SyncEventPayloa
           const isEncrypted = typeof raw.title === 'string' && raw.title.startsWith(NOTE_CIPHERTEXT_PREFIX)
           if (isEncrypted) {
             void (async () => {
+              let title = raw.title
+              let content = raw.content
+              try {
+                title = await decryptNoteTitle(raw.title, id, undefined, raw.user_id)
+              } catch {}
+              try {
+                content = await decryptNoteContent(raw.content, id, undefined, raw.user_id)
+              } catch {}
               const decryptedData: NoteItem = {
                 ...raw,
-                title: await decryptNoteTitle(raw.title, id, undefined, raw.user_id),
-                content: await decryptNoteContent(raw.content, id, undefined, raw.user_id),
+                title,
+                content,
               }
               const current = getOfflineNotes()
               if (data.action === 'created') {
                 if (!current.some((n) => n.note_uid === id)) {
-                  setOfflineNotes([decryptedData, ...current])
+                  setOfflineNotes([...current, decryptedData])
                 }
               } else if (data.action === 'updated') {
                 setOfflineNotes(current.map((n) => (n.note_uid === id ? { ...n, ...decryptedData } : n)))
@@ -1314,11 +1382,27 @@ export function handleIncomingSyncEvent(eventName: string, data: SyncEventPayloa
           const isEncrypted = typeof raw.title === 'string' && raw.title.startsWith(CALENDAR_CIPHERTEXT_PREFIX)
           if (isEncrypted) {
             void (async () => {
+              let title = raw.title
+              let description = raw.description || ''
+              let location = raw.location || ''
+              try {
+                title = await decryptCalendarField(raw.title, id, 'title', undefined, raw.user_id)
+              } catch {}
+              try {
+                if (raw.description) {
+                  description = await decryptCalendarField(raw.description, id, 'description', undefined, raw.user_id)
+                }
+              } catch {}
+              try {
+                if (raw.location) {
+                  location = await decryptCalendarField(raw.location, id, 'location', undefined, raw.user_id)
+                }
+              } catch {}
               const decryptedData: CalendarEventItem = {
                 ...raw,
-                title: await decryptCalendarField(raw.title, id, 'title'),
-                description: raw.description ? await decryptCalendarField(raw.description, id, 'description') : '',
-                location: raw.location ? await decryptCalendarField(raw.location, id, 'location') : '',
+                title,
+                description,
+                location,
               }
               const current = getOfflineCalendarEvents()
               if (data.action === 'created') {

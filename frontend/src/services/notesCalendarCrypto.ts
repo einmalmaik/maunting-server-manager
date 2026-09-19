@@ -72,6 +72,7 @@ export function generateClientEntityId(): string {
 const STORAGE_KEY_PREFIX = 'msm_e2ee_notes_key_'
 const keyCache = new Map<number, CryptoKey>()
 const rawKeyMemoryStore = new Map<number, string>()
+const syncedInSession = new Set<number>()
 
 /**
  * Leert den In-Memory-Schlüsselcache (z. B. bei Session-Wipe oder Tests).
@@ -79,6 +80,7 @@ const rawKeyMemoryStore = new Map<number, string>()
 export function clearNotesKeyCache(): void {
   keyCache.clear()
   rawKeyMemoryStore.clear()
+  syncedInSession.clear()
 }
 
 /**
@@ -98,12 +100,58 @@ export function hasUserNotesKey(userId: number = 1): boolean {
 }
 
 /**
+ * Gibt den bestehenden Schlüssel des Nutzers zurück, falls vorhanden.
+ * Versucht bei Fehlen einen Mailbox-Abruf, erzeugt aber NIEMALS selbstständig einen neuen Zufallsschlüssel.
+ */
+export async function getUserNotesKey(userId: number = 1): Promise<CryptoKey | null> {
+  const cached = keyCache.get(userId)
+  if (cached) {
+    return cached
+  }
+
+  const storageKey = `${STORAGE_KEY_PREFIX}${userId}`
+  let rawBase64: string | null = null
+
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      rawBase64 = window.localStorage.getItem(storageKey)
+    }
+  } catch {}
+
+  if (!rawBase64) {
+    rawBase64 = rawKeyMemoryStore.get(userId) ?? null
+  }
+
+  if (!rawBase64) {
+    try {
+      const received = await checkAndReceiveDeviceNotesKey(userId)
+      if (received) {
+        rawBase64 = exportUserNotesKey(userId)
+      }
+    } catch {}
+  }
+
+  if (!rawBase64) {
+    return null
+  }
+
+  const rawBytes = base64ToBytes(rawBase64)
+  const importedKey = await importAesGcmRawKey(rawBytes, ['encrypt', 'decrypt'])
+  keyCache.set(userId, importedKey)
+  return importedKey
+}
+
+/**
  * Ermittelt oder erzeugt den symmetrischen AES-256-GCM E2EE-Schlüssel für Notizen & Kalender.
  * Bleibt rein auf dem Client und wird NIEMALS an den Server übertragen.
  */
 export async function getOrCreateUserNotesKey(userId: number = 1): Promise<CryptoKey> {
   const cached = keyCache.get(userId)
   if (cached) {
+    if (!syncedInSession.has(userId)) {
+      syncedInSession.add(userId)
+      void syncNotesKeyToPairedDevices(userId).catch(() => {})
+    }
     return cached
   }
 
@@ -157,7 +205,11 @@ export async function getOrCreateUserNotesKey(userId: number = 1): Promise<Crypt
     } catch {}
     rawKeyMemoryStore.set(userId, rawBase64)
 
+    syncedInSession.add(userId)
     // Automatische Verteilung an andere bereits gekoppelte Geräte des Benutzers im Hintergrund
+    void syncNotesKeyToPairedDevices(userId).catch(() => {})
+  } else if (!syncedInSession.has(userId)) {
+    syncedInSession.add(userId)
     void syncNotesKeyToPairedDevices(userId).catch(() => {})
   }
 
@@ -369,7 +421,17 @@ export async function processNotesKeyControlEnvelope(
   if (data?.type === 'notes_key_sync') {
     if (data.notesKey && typeof data.notesKey === 'string') {
       const targetUserId = typeof data.userId === 'number' ? data.userId : userId
-      await setUserNotesKey(targetUserId, data.notesKey)
+      if (!hasUserNotesKey(targetUserId)) {
+        await setUserNotesKey(targetUserId, data.notesKey)
+        return true
+      } else {
+        const existing = exportUserNotesKey(targetUserId)
+        if (existing && existing !== data.notesKey) {
+          // Bereits ein Schlüssel vorhanden, der vom eingegangenen abweicht.
+          // Wir verteidigen unseren bestehenden Schlüssel und senden ihn zurück.
+          void syncNotesKeyToPairedDevices(targetUserId).catch(() => {})
+        }
+      }
       return true
     }
   } else if (data?.type === 'notes_key_request') {
@@ -419,7 +481,8 @@ export async function checkAndReceiveDeviceNotesKey(userId: number = 1): Promise
     const mailboxId = await deriveUserDeviceMailboxId(userId)
     const envelopes = await fetchE2eeEnvelopes(mailboxId, 0)
     if (Array.isArray(envelopes)) {
-      for (const item of envelopes) {
+      for (let i = envelopes.length - 1; i >= 0; i--) {
+        const item = envelopes[i]
         if (item?.ciphertext_envelope) {
           await processNotesKeyControlEnvelope(item.ciphertext_envelope, userId)
           if (hasUserNotesKey(userId)) {
@@ -437,6 +500,31 @@ export async function checkAndReceiveDeviceNotesKey(userId: number = 1): Promise
   }
 
   return hasUserNotesKey(userId)
+}
+
+/**
+ * Prüft die Geräte-Mailbox auf anstehende 'notes_key_request'-Anfragen anderer gekoppelter Geräte,
+ * wenn dieses Gerät bereits über den Notizenschlüssel verfügt.
+ */
+export async function checkAndRespondToDeviceKeyRequests(userId: number = 1): Promise<number> {
+  if (!hasUserNotesKey(userId)) {
+    return 0
+  }
+  let responded = 0
+  try {
+    const mailboxId = await deriveUserDeviceMailboxId(userId)
+    const envelopes = await fetchE2eeEnvelopes(mailboxId, 0)
+    if (Array.isArray(envelopes)) {
+      for (let i = envelopes.length - 1; i >= 0; i--) {
+        const item = envelopes[i]
+        if (item?.ciphertext_envelope) {
+          const handled = await processNotesKeyControlEnvelope(item.ciphertext_envelope, userId)
+          if (handled) responded++
+        }
+      }
+    }
+  } catch {}
+  return responded
 }
 
 // ── Notizen Verschlüsselung & Entschlüsselung ──
@@ -483,7 +571,11 @@ export async function decryptNoteTitle(
     return ciphertext
   }
 
-  const resolvedKey = key ?? (await getOrCreateUserNotesKey(userId))
+  const resolvedKey = key ?? (await getUserNotesKey(userId ?? 1))
+  if (!resolvedKey) {
+    throw new DisDecryptionError(`Kein Notizenschlüssel vorhanden für Entschlüsselung von ${noteUid}.`)
+  }
+
   const parsed = parseEnvelope(NOTE_ENVELOPE_SPEC, ciphertext)
   const aad = `msm:note:${noteUid}`
 
@@ -510,7 +602,11 @@ export async function decryptNoteContent(
     return ciphertext
   }
 
-  const resolvedKey = key ?? (await getOrCreateUserNotesKey(userId))
+  const resolvedKey = key ?? (await getUserNotesKey(userId ?? 1))
+  if (!resolvedKey) {
+    throw new DisDecryptionError(`Kein Notizenschlüssel vorhanden für Entschlüsselung von ${noteUid}.`)
+  }
+
   const parsed = parseEnvelope(NOTE_ENVELOPE_SPEC, ciphertext)
   const aad = `msm:note:${noteUid}:content`
 
@@ -555,7 +651,11 @@ export async function decryptCalendarField(
     return ciphertext
   }
 
-  const resolvedKey = key ?? (await getOrCreateUserNotesKey(userId))
+  const resolvedKey = key ?? (await getUserNotesKey(userId ?? 1))
+  if (!resolvedKey) {
+    throw new DisDecryptionError(`Kein Kalenderschlüssel vorhanden für Entschlüsselung von ${fieldName} (${eventUid}).`)
+  }
+
   const parsed = parseEnvelope(CALENDAR_ENVELOPE_SPEC, ciphertext)
   const aad = `msm:cal:${eventUid}:${fieldName}`
 

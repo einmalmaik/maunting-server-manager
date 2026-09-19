@@ -14,10 +14,12 @@ import {
   clearNotesKeyCache,
   generateClientEntityId,
   hasUserNotesKey,
+  getUserNotesKey,
   syncNotesKeyToPairedDevices,
   requestNotesKeyFromPairedDevices,
   processNotesKeyControlEnvelope,
   checkAndReceiveDeviceNotesKey,
+  checkAndRespondToDeviceKeyRequests,
 } from './notesCalendarCrypto'
 import * as socialApi from '@/api/social'
 import * as e2eeGeraet from './e2eeGeraet'
@@ -329,5 +331,84 @@ describe('notesCalendarCrypto E2EE', () => {
     expect(received).toBe(true)
     expect(hasUserNotesKey(userId)).toBe(true)
     expect(exportUserNotesKey(userId)).toBe(rawB64)
+  })
+
+  it('getUserNotesKey returns null without generating random key when key is absent', async () => {
+    const userId = 106
+    expect(hasUserNotesKey(userId)).toBe(false)
+    const key = await getUserNotesKey(userId)
+    expect(key).toBeNull()
+    expect(hasUserNotesKey(userId)).toBe(false)
+    expect(exportUserNotesKey(userId)).toBeNull()
+  })
+
+  it('processNotesKeyControlEnvelope protects existing key from being overwritten by divergent key', async () => {
+    const userId = 107
+    const original32 = new Uint8Array(32).fill(11)
+    const originalB64 = btoa(String.fromCharCode(...original32))
+    await setUserNotesKey(userId, originalB64)
+
+    vi.mocked(e2eeGeraet.eigenesGeraet).mockResolvedValue({
+      kennung: 'dev-self-107',
+      paar: selfPair,
+    })
+
+    const attacker32 = new Uint8Array(32).fill(99)
+    const attackerB64 = btoa(String.fromCharCode(...attacker32))
+    const payload = JSON.stringify({
+      type: 'notes_key_sync',
+      version: 1,
+      userId,
+      notesKey: attackerB64,
+      targetDeviceId: 'dev-self-107',
+      senderDeviceId: 'dev-rogue-107',
+      timestamp: Date.now(),
+    })
+    const env = await encryptE2eeHybrid(payload, selfPair.publicKeyJwk)
+
+    await processNotesKeyControlEnvelope(env, userId)
+    // Key must still be the original key
+    expect(exportUserNotesKey(userId)).toBe(originalB64)
+  })
+
+  it('checkAndRespondToDeviceKeyRequests answers pending request envelopes in mailbox', async () => {
+    const userId = 108
+    const raw32 = new Uint8Array(32).fill(55)
+    const rawB64 = btoa(String.fromCharCode(...raw32))
+    await setUserNotesKey(userId, rawB64)
+
+    vi.mocked(e2eeGeraet.eigenesGeraet).mockResolvedValue({
+      kennung: 'dev-self-108',
+      paar: selfPair,
+    })
+
+    const reqPayload = JSON.stringify({
+      type: 'notes_key_request',
+      version: 1,
+      userId,
+      requesterDeviceId: 'dev-requester-108',
+      requesterPublicKey: reqPair.publicKeyJwk,
+      timestamp: Date.now(),
+    })
+    const env = await encryptE2eeHybrid(reqPayload, selfPair.publicKeyJwk)
+
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValueOnce([
+      {
+        id: 701,
+        blind_mailbox_id: 'mailbox-108',
+        ciphertext_envelope: env,
+        created_at: new Date().toISOString(),
+      },
+    ])
+
+    const count = await checkAndRespondToDeviceKeyRequests(userId)
+    expect(count).toBe(1)
+    expect(socialApi.relayE2eeEnvelope).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipient_id: userId,
+        is_control: true,
+        control_type: 'notes_key_sync',
+      })
+    )
   })
 })

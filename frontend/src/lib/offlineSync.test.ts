@@ -25,6 +25,7 @@ import {
   enqueueMessageMutation,
   startLiveSync,
   redecryptPendingOfflineNotesAndCalendar,
+  loadNotesOfflineFirst,
 } from './offlineSync'
 import {
   NOTE_CIPHERTEXT_PREFIX,
@@ -35,6 +36,8 @@ import {
   encryptNoteContent,
   encryptCalendarField,
   getOrCreateUserNotesKey,
+  setUserNotesKey,
+  exportUserNotesKey,
   clearNotesKeyCache,
 } from '@/services/notesCalendarCrypto'
 import * as client from '@/api/client'
@@ -957,6 +960,64 @@ describe('Offline Storage & Unified Real-Time SSE Sync Engine', () => {
           sender_user_id: 1,
         } as any)
       }).not.toThrow()
+    })
+
+    it('preserves encrypted notes from server when key is absent and re-decrypts on key sync', async () => {
+      const userId = 205
+      // 1. Primärgerät verschlüsselt Note mit Schlüssel
+      const keyDevA = await getOrCreateUserNotesKey(userId)
+      const rawKeyDevA = exportUserNotesKey(userId)!
+      const noteUid = 'multi-dev-note-888'
+      const plainTitle = 'Vom Primärgerät erstellte Notiz'
+      const encTitle = await encryptNoteTitle(plainTitle, noteUid, keyDevA, userId)
+
+      // 2. Sekundärgerät hat NOCH KEINEN Schlüssel (frisch gekoppelt oder vor Update)
+      clearNotesKeyCache()
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(`msm_e2ee_notes_key_${userId}`)
+      }
+
+      // 3. Sekundärgerät ruft Notizen vom Server ab (Server liefert verschlüsselte Note)
+      vi.mocked(client.api).mockImplementation(async (url: string) => {
+        if (typeof url === 'string' && url.includes('/notes')) {
+          return [
+            {
+              id: 888,
+              note_uid: noteUid,
+              title: encTitle,
+              content: '',
+              category: 'work',
+              color: 'default',
+              is_pinned: false,
+              is_archived: false,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              user_id: userId,
+            },
+          ]
+        }
+        return []
+      })
+
+      const { notes, isOffline } = await loadNotesOfflineFirst({ userId })
+      expect(isOffline).toBe(false)
+      // Note muss im Offline-Speicher mit Ciphertext vorliegen, NICHT verworfen worden sein
+      expect(notes.length).toBe(1)
+      expect(notes[0].title).toBe(encTitle)
+      expect(notes[0].title.startsWith(NOTE_CIPHERTEXT_PREFIX)).toBe(true)
+
+      // 4. Jetzt trifft der Schlüssel vom Primärgerät ein (z. B. via SSE oder Mailbox)
+      await setUserNotesKey(userId, rawKeyDevA)
+
+      // Kurz warten auf asynchrone msm:notes-key-updated Ereignisverarbeitung
+      await new Promise((resolve) => setTimeout(resolve, 60))
+
+      // 5. Die Notiz ist nun im Offline-Cache nahtlos entschlüsselt!
+      const afterSyncNotes = getOfflineNotes()
+      const decryptedNote = afterSyncNotes.find((n) => n.note_uid === noteUid)
+      expect(decryptedNote).toBeDefined()
+      expect(decryptedNote?.title).toBe(plainTitle)
+      expect(decryptedNote?.title.startsWith(NOTE_CIPHERTEXT_PREFIX)).toBe(false)
     })
   })
 })

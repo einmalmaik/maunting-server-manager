@@ -1102,6 +1102,9 @@ class SocialService:
                                 ]
                                 break
 
+            if target_recipient_id is None and not group_member_ids:
+                raise HTTPException(status_code=403, detail="Keine Berechtigung für diese Mailbox.")
+
         # Idempotenz-Prüfung: Erst NACH erfolgreicher Autorisierung prüfen,
         # ob dieser Umschlag bereits mit dieser client_uuid existiert.
         #

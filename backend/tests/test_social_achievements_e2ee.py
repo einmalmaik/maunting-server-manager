@@ -833,7 +833,7 @@ def test_user_device_mailbox_e2ee_key_sync_and_privacy(
     mids = [m["blind_mailbox_id"] for m in synced]
     assert device_mailbox_owner in mids
 
-    # 3. Fremder Nutzer darf NICHT in die Geräte-Mailbox des Owners einliefern
+    # 3. Fremder Nutzer darf NICHT in die Geräte-Mailbox des Owners einliefern (mit recipient_id -> 400)
     ct2 = base64.b64encode(b"\x03" * 12 + b"attack-secret-payload" + b"\x04" * 16).decode("ascii")
     with pytest.raises(HTTPException) as exc:
         SocialService.relay_blind_envelope(
@@ -846,6 +846,18 @@ def test_user_device_mailbox_e2ee_key_sync_and_privacy(
         )
     assert exc.value.status_code == 400
 
+    # 3b. Fremder Nutzer darf auch OHNE recipient_id NICHT in fremde Geräte-Mailbox einliefern (403)
+    with pytest.raises(HTTPException) as exc_no_recip:
+        SocialService.relay_blind_envelope(
+            db,
+            blind_mailbox_id=device_mailbox_owner,
+            ciphertext_envelope=f"sv-e2ee-hybrid-v1:{wk}.{ct2}",
+            sender_user_id=regular_user.id,
+            recipient_id=None,
+            client_uuid="attack:124",
+        )
+    assert exc_no_recip.value.status_code == 403
+
     # 4. Owner kann seine Geräte-Mailbox abfragen
     resp_owner = client.get(f"/api/social/e2ee/mailbox/{device_mailbox_owner}", cookies=owner_cookies)
     assert resp_owner.status_code == 200
@@ -855,4 +867,12 @@ def test_user_device_mailbox_e2ee_key_sync_and_privacy(
     # 5. Fremder Nutzer wird beim Abruf der fremden Geräte-Mailbox mit 403 abgewiesen
     resp_stranger = client.get(f"/api/social/e2ee/mailbox/{device_mailbox_owner}", cookies=user_cookies)
     assert resp_stranger.status_code == 403
+
+    # 6. Auch bei deaktiviertem Benutzer darf ein Fremder dessen Geräte-Mailbox nicht abrufen (403)
+    owner_user.is_active = False
+    db.commit()
+    resp_stranger_inactive = client.get(f"/api/social/e2ee/mailbox/{device_mailbox_owner}", cookies=user_cookies)
+    assert resp_stranger_inactive.status_code == 403
+    owner_user.is_active = True
+    db.commit()
 
