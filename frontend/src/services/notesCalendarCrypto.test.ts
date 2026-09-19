@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
   NOTE_CIPHERTEXT_PREFIX,
   CALENDAR_CIPHERTEXT_PREFIX,
@@ -13,10 +13,39 @@ import {
   exportUserNotesKey,
   clearNotesKeyCache,
   generateClientEntityId,
+  hasUserNotesKey,
+  syncNotesKeyToPairedDevices,
+  requestNotesKeyFromPairedDevices,
+  processNotesKeyControlEnvelope,
+  checkAndReceiveDeviceNotesKey,
 } from './notesCalendarCrypto'
+import * as socialApi from '@/api/social'
+import * as e2eeGeraet from './e2eeGeraet'
+import { encryptE2eeHybrid, generateLocalE2eeKeyPair } from './e2eeCrypto'
+
+vi.mock('@/api/social', () => ({
+  relayE2eeEnvelope: vi.fn().mockResolvedValue({ id: 999, blind_mailbox_id: 'box-1' }),
+  fetchE2eeEnvelopes: vi.fn().mockResolvedValue([]),
+}))
+
+vi.mock('./e2eeGeraet', () => ({
+  eigenesGeraet: vi.fn(),
+  geraeteVon: vi.fn(),
+}))
 
 describe('notesCalendarCrypto E2EE', () => {
+  let selfPair: any
+  let otherPair: any
+  let reqPair: any
+
+  beforeAll(async () => {
+    selfPair = await generateLocalE2eeKeyPair()
+    otherPair = await generateLocalE2eeKeyPair()
+    reqPair = await generateLocalE2eeKeyPair()
+  }, 45000)
+
   beforeEach(() => {
+    vi.clearAllMocks()
     clearNotesKeyCache()
     if (typeof localStorage !== 'undefined') {
       localStorage.clear()
@@ -160,5 +189,145 @@ describe('notesCalendarCrypto E2EE', () => {
 
     // Attempting to decrypt with a different entity UID must be rejected by AES-GCM auth tag
     await expect(decryptNoteTitle(encTitle, noteUid2, undefined, userId)).rejects.toThrow()
+  })
+
+  it('hasUserNotesKey checks key presence accurately', async () => {
+    expect(hasUserNotesKey(101)).toBe(false)
+    const raw32 = new Uint8Array(32).fill(7)
+    const rawB64 = btoa(String.fromCharCode(...raw32))
+    await setUserNotesKey(101, rawB64)
+    expect(hasUserNotesKey(101)).toBe(true)
+
+    clearNotesKeyCache()
+    if (typeof localStorage !== 'undefined') localStorage.clear()
+    expect(hasUserNotesKey(101)).toBe(false)
+  })
+
+  it('syncNotesKeyToPairedDevices transmits encrypted notes_key_sync to other paired devices', async () => {
+    const userId = 102
+    const raw32 = new Uint8Array(32).fill(42)
+    const rawB64 = btoa(String.fromCharCode(...raw32))
+    await setUserNotesKey(userId, rawB64)
+
+    vi.mocked(e2eeGeraet.eigenesGeraet).mockResolvedValue({
+      kennung: 'dev-self-102',
+      paar: selfPair,
+    })
+    vi.mocked(e2eeGeraet.geraeteVon).mockResolvedValue([
+      { device_id: 'dev-self-102', public_key: selfPair.publicKeyJwk, label: 'Main PC' },
+      { device_id: 'dev-other-102', public_key: otherPair.publicKeyJwk, label: 'Secondary Mobile' },
+    ])
+
+    const count = await syncNotesKeyToPairedDevices(userId)
+    expect(count).toBe(1)
+    expect(socialApi.relayE2eeEnvelope).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipient_id: userId,
+        is_control: true,
+        control_type: 'notes_key_sync',
+      })
+    )
+  })
+
+  it('processNotesKeyControlEnvelope decrypts notes_key_sync, sets key, and triggers msm:notes-key-updated', async () => {
+    const userId = 103
+    vi.mocked(e2eeGeraet.eigenesGeraet).mockResolvedValue({
+      kennung: 'dev-self-103',
+      paar: selfPair,
+    })
+
+    const raw32 = new Uint8Array(32).fill(99)
+    const rawB64 = btoa(String.fromCharCode(...raw32))
+    const payload = JSON.stringify({
+      type: 'notes_key_sync',
+      version: 1,
+      userId,
+      notesKey: rawB64,
+      targetDeviceId: 'dev-self-103',
+      senderDeviceId: 'dev-paired-103',
+      timestamp: Date.now(),
+    })
+    const env = await encryptE2eeHybrid(payload, selfPair.publicKeyJwk)
+
+    const eventSpy = vi.fn()
+    window.addEventListener('msm:notes-key-updated', eventSpy)
+
+    const processed = await processNotesKeyControlEnvelope(env, userId)
+    expect(processed).toBe(true)
+    expect(hasUserNotesKey(userId)).toBe(true)
+    expect(exportUserNotesKey(userId)).toBe(rawB64)
+    expect(eventSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        detail: { userId, rawKey: rawB64 },
+      })
+    )
+    window.removeEventListener('msm:notes-key-updated', eventSpy)
+  })
+
+  it('processNotesKeyControlEnvelope answers notes_key_request by sending notes_key_sync to requester', async () => {
+    const userId = 104
+    const raw32 = new Uint8Array(32).fill(88)
+    const rawB64 = btoa(String.fromCharCode(...raw32))
+    await setUserNotesKey(userId, rawB64)
+
+    vi.mocked(e2eeGeraet.eigenesGeraet).mockResolvedValue({
+      kennung: 'dev-self-104',
+      paar: selfPair,
+    })
+
+    const reqPayload = JSON.stringify({
+      type: 'notes_key_request',
+      version: 1,
+      userId,
+      requesterDeviceId: 'dev-requester-104',
+      requesterPublicKey: reqPair.publicKeyJwk,
+      timestamp: Date.now(),
+    })
+    const env = await encryptE2eeHybrid(reqPayload, selfPair.publicKeyJwk)
+
+    const processed = await processNotesKeyControlEnvelope(env, userId)
+    expect(processed).toBe(true)
+    expect(socialApi.relayE2eeEnvelope).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipient_id: userId,
+        is_control: true,
+        control_type: 'notes_key_sync',
+      })
+    )
+  })
+
+  it('checkAndReceiveDeviceNotesKey queries device mailbox and receives key', async () => {
+    const userId = 105
+    vi.mocked(e2eeGeraet.eigenesGeraet).mockResolvedValue({
+      kennung: 'dev-self-105',
+      paar: selfPair,
+    })
+
+    const raw32 = new Uint8Array(32).fill(77)
+    const rawB64 = btoa(String.fromCharCode(...raw32))
+    const payload = JSON.stringify({
+      type: 'notes_key_sync',
+      version: 1,
+      userId,
+      notesKey: rawB64,
+      targetDeviceId: 'dev-self-105',
+      senderDeviceId: 'dev-paired-105',
+      timestamp: Date.now(),
+    })
+    const env = await encryptE2eeHybrid(payload, selfPair.publicKeyJwk)
+
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValueOnce([
+      {
+        id: 501,
+        blind_mailbox_id: 'mailbox-105',
+        ciphertext_envelope: env,
+        created_at: new Date().toISOString(),
+      },
+    ])
+
+    const received = await checkAndReceiveDeviceNotesKey(userId)
+    expect(received).toBe(true)
+    expect(hasUserNotesKey(userId)).toBe(true)
+    expect(exportUserNotesKey(userId)).toBe(rawB64)
   })
 })

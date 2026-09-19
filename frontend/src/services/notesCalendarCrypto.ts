@@ -26,6 +26,19 @@ import {
   base64ToBytes,
   bytesToBase64,
 } from '@msdis/shield/core'
+import {
+  deriveUserDeviceMailboxId,
+  encryptE2eeHybrid,
+  decryptE2eeHybrid,
+} from './e2eeCrypto'
+import {
+  eigenesGeraet,
+  geraeteVon,
+} from './e2eeGeraet'
+import {
+  relayE2eeEnvelope,
+  fetchE2eeEnvelopes,
+} from '@/api/social'
 
 export const NOTE_ENVELOPE_SPEC: VersionedCipherEnvelopeSpec = {
   currentPrefix: 'sv-note-v1:',
@@ -69,6 +82,22 @@ export function clearNotesKeyCache(): void {
 }
 
 /**
+ * Prüft synchron, ob für diesen Benutzer bereits ein lokaler Notizenschlüssel vorliegt.
+ */
+export function hasUserNotesKey(userId: number = 1): boolean {
+  if (keyCache.has(userId) || rawKeyMemoryStore.has(userId)) {
+    return true
+  }
+  const storageKey = `${STORAGE_KEY_PREFIX}${userId}`
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      return !!window.localStorage.getItem(storageKey)
+    }
+  } catch {}
+  return false
+}
+
+/**
  * Ermittelt oder erzeugt den symmetrischen AES-256-GCM E2EE-Schlüssel für Notizen & Kalender.
  * Bleibt rein auf dem Client und wird NIEMALS an den Server übertragen.
  */
@@ -93,6 +122,21 @@ export async function getOrCreateUserNotesKey(userId: number = 1): Promise<Crypt
     rawBase64 = rawKeyMemoryStore.get(userId) ?? null
   }
 
+  // Falls der Schlüssel lokal noch fehlt, versuchen wir ihn aus der Geräte-Mailbox zu empfangen
+  if (!rawBase64) {
+    try {
+      const received = await checkAndReceiveDeviceNotesKey(userId)
+      if (received) {
+        const afterReceive = exportUserNotesKey(userId)
+        if (afterReceive) {
+          rawBase64 = afterReceive
+        }
+      }
+    } catch {
+      // Fehler beim Mailbox-Abruf ignorieren
+    }
+  }
+
   if (!rawBase64) {
     // 32 Bytes kryptographischer Zufall (256-Bit)
     const randomBytes = new Uint8Array(32)
@@ -112,6 +156,9 @@ export async function getOrCreateUserNotesKey(userId: number = 1): Promise<Crypt
       }
     } catch {}
     rawKeyMemoryStore.set(userId, rawBase64)
+
+    // Automatische Verteilung an andere bereits gekoppelte Geräte des Benutzers im Hintergrund
+    void syncNotesKeyToPairedDevices(userId).catch(() => {})
   }
 
   const rawBytes = base64ToBytes(rawBase64)
@@ -122,6 +169,7 @@ export async function getOrCreateUserNotesKey(userId: number = 1): Promise<Crypt
 
 /**
  * Setzt oder importiert einen Schlüssel (z. B. nach Geräte-Kopplung oder Übernahme).
+ * Triggert bei erfolgreichem Setzen ein globales 'msm:notes-key-updated' Event zur Nach-Entschlüsselung.
  */
 export async function setUserNotesKey(userId: number, rawBase64: string): Promise<CryptoKey> {
   const storageKey = `${STORAGE_KEY_PREFIX}${userId}`
@@ -135,6 +183,13 @@ export async function setUserNotesKey(userId: number, rawBase64: string): Promis
   const rawBytes = base64ToBytes(rawBase64)
   const importedKey = await importAesGcmRawKey(rawBytes, ['encrypt', 'decrypt'])
   keyCache.set(userId, importedKey)
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('msm:notes-key-updated', { detail: { userId, rawKey: rawBase64 } })
+    )
+  }
+
   return importedKey
 }
 
@@ -150,6 +205,238 @@ export function exportUserNotesKey(userId: number = 1): string | null {
     }
   } catch {}
   return rawKeyMemoryStore.get(userId) ?? null
+}
+
+/**
+ * Synchronisiert den Notizen-/Kalenderschlüssel automatisch an alle anderen gekoppelten
+ * Geräte desselben Benutzers über die blinde Geräte-Mailbox.
+ */
+export async function syncNotesKeyToPairedDevices(userId: number = 1): Promise<number> {
+  const rawKey = exportUserNotesKey(userId)
+  if (!rawKey) return 0
+
+  let self: any = null
+  try {
+    self = await eigenesGeraet()
+  } catch {
+    return 0
+  }
+  if (!self) return 0
+
+  let pairedDevices: any[] = []
+  try {
+    pairedDevices = await geraeteVon(userId)
+  } catch {
+    return 0
+  }
+
+  const targetDevices = pairedDevices
+    .map((d) => ({
+      deviceId: d.device_id || (d as any).deviceId,
+      publicKey: d.public_key || (d as any).publicKey,
+    }))
+    .filter((d) => d.deviceId && d.deviceId !== self.kennung && d.publicKey)
+
+  if (targetDevices.length === 0) return 0
+
+  const mailboxId = await deriveUserDeviceMailboxId(userId)
+  let sentCount = 0
+
+  for (const target of targetDevices) {
+    try {
+      const payload = JSON.stringify({
+        type: 'notes_key_sync',
+        version: 1,
+        userId,
+        notesKey: rawKey,
+        targetDeviceId: target.deviceId,
+        senderDeviceId: self.kennung,
+        timestamp: Date.now(),
+      })
+      const ciphertextEnvelope = await encryptE2eeHybrid(payload, target.publicKey)
+      await relayE2eeEnvelope({
+        blind_mailbox_id: mailboxId,
+        ciphertext_envelope: ciphertextEnvelope,
+        recipient_id: userId,
+        client_uuid: `noteskeysync:${self.kennung}:${target.deviceId}:${Date.now()}`,
+        is_control: true,
+        control_type: 'notes_key_sync',
+      })
+      sentCount++
+    } catch {
+      // Best-Effort für das jeweilige Zielgerät
+    }
+  }
+
+  return sentCount
+}
+
+/**
+ * Fordert den Notizenschlüssel von anderen gekoppelten Geräten des Benutzers an,
+ * falls dieses Gerät noch keinen Schlüssel besitzt.
+ */
+export async function requestNotesKeyFromPairedDevices(userId: number = 1): Promise<boolean> {
+  if (hasUserNotesKey(userId)) {
+    return false
+  }
+
+  let self: any = null
+  try {
+    self = await eigenesGeraet()
+  } catch {
+    return false
+  }
+  if (!self) return false
+
+  let pairedDevices: any[] = []
+  try {
+    pairedDevices = await geraeteVon(userId)
+  } catch {
+    return false
+  }
+
+  const targetDevices = pairedDevices
+    .map((d) => ({
+      deviceId: d.device_id || (d as any).deviceId,
+      publicKey: d.public_key || (d as any).publicKey,
+    }))
+    .filter((d) => d.deviceId && d.deviceId !== self.kennung && d.publicKey)
+
+  if (targetDevices.length === 0) return false
+
+  const mailboxId = await deriveUserDeviceMailboxId(userId)
+  let sentCount = 0
+
+  for (const target of targetDevices) {
+    try {
+      const payload = JSON.stringify({
+        type: 'notes_key_request',
+        version: 1,
+        userId,
+        requesterDeviceId: self.kennung,
+        requesterPublicKey: self.paar.publicKeyJwk,
+        timestamp: Date.now(),
+      })
+      const ciphertextEnvelope = await encryptE2eeHybrid(payload, target.publicKey)
+      await relayE2eeEnvelope({
+        blind_mailbox_id: mailboxId,
+        ciphertext_envelope: ciphertextEnvelope,
+        recipient_id: userId,
+        client_uuid: `noteskeyreq:${self.kennung}:${target.deviceId}:${Date.now()}`,
+        is_control: true,
+        control_type: 'notes_key_request',
+      })
+      sentCount++
+    } catch {
+      // Best-Effort
+    }
+  }
+
+  return sentCount > 0
+}
+
+/**
+ * Verarbeitet einen verschlüsselten Steuerumschlag aus der Geräte-Mailbox.
+ * Erkennt 'notes_key_sync' (Schlüsselimport) und 'notes_key_request' (Beantwortung mit Schlüssel).
+ */
+export async function processNotesKeyControlEnvelope(
+  ciphertextEnvelope: string,
+  userId: number = 1
+): Promise<boolean> {
+  let self: any = null
+  try {
+    self = await eigenesGeraet()
+  } catch {
+    return false
+  }
+  if (!self?.paar?.privateKeyJwk) return false
+
+  let decrypted: string
+  try {
+    decrypted = await decryptE2eeHybrid(ciphertextEnvelope, self.paar.privateKeyJwk)
+  } catch {
+    // Umschlag ist für ein anderes Gerät bestimmt oder ungültig
+    return false
+  }
+
+  let data: any
+  try {
+    data = JSON.parse(decrypted)
+  } catch {
+    return false
+  }
+
+  if (data?.type === 'notes_key_sync') {
+    if (data.notesKey && typeof data.notesKey === 'string') {
+      const targetUserId = typeof data.userId === 'number' ? data.userId : userId
+      await setUserNotesKey(targetUserId, data.notesKey)
+      return true
+    }
+  } else if (data?.type === 'notes_key_request') {
+    const targetUserId = typeof data.userId === 'number' ? data.userId : userId
+    const existingRawKey = exportUserNotesKey(targetUserId)
+    if (existingRawKey && data.requesterPublicKey && data.requesterDeviceId) {
+      try {
+        const payload = JSON.stringify({
+          type: 'notes_key_sync',
+          version: 1,
+          userId: targetUserId,
+          notesKey: existingRawKey,
+          targetDeviceId: data.requesterDeviceId,
+          senderDeviceId: self.kennung,
+          timestamp: Date.now(),
+        })
+        const replyEnv = await encryptE2eeHybrid(payload, data.requesterPublicKey)
+        const mailboxId = await deriveUserDeviceMailboxId(targetUserId)
+        await relayE2eeEnvelope({
+          blind_mailbox_id: mailboxId,
+          ciphertext_envelope: replyEnv,
+          recipient_id: targetUserId,
+          client_uuid: `noteskeysync:${self.kennung}:${data.requesterDeviceId}:${Date.now()}`,
+          is_control: true,
+          control_type: 'notes_key_sync',
+        })
+        return true
+      } catch {
+        return false
+      }
+    }
+  }
+
+  return false
+}
+
+/**
+ * Prüft die blinde Geräte-Mailbox auf bereitliegende Schlüsselumschläge.
+ * Falls noch kein Schlüssel vorhanden ist, wird nach dem Scan ggf. eine Anforderung gesendet.
+ */
+export async function checkAndReceiveDeviceNotesKey(userId: number = 1): Promise<boolean> {
+  if (hasUserNotesKey(userId)) {
+    return true
+  }
+
+  try {
+    const mailboxId = await deriveUserDeviceMailboxId(userId)
+    const envelopes = await fetchE2eeEnvelopes(mailboxId, 0)
+    if (Array.isArray(envelopes)) {
+      for (const item of envelopes) {
+        if (item?.ciphertext_envelope) {
+          await processNotesKeyControlEnvelope(item.ciphertext_envelope, userId)
+          if (hasUserNotesKey(userId)) {
+            return true
+          }
+        }
+      }
+    }
+  } catch {
+    // Mailbox-Abruf nicht möglich oder leer
+  }
+
+  if (!hasUserNotesKey(userId)) {
+    void requestNotesKeyFromPairedDevices(userId).catch(() => {})
+  }
+
+  return hasUserNotesKey(userId)
 }
 
 // ── Notizen Verschlüsselung & Entschlüsselung ──

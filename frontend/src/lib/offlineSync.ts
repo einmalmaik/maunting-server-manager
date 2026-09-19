@@ -25,6 +25,9 @@ import {
   decryptNoteContent,
   encryptCalendarField,
   decryptCalendarField,
+  hasUserNotesKey,
+  checkAndReceiveDeviceNotesKey,
+  syncNotesKeyToPairedDevices,
 } from '@/services/notesCalendarCrypto'
 
 export const STORAGE_KEYS = {
@@ -498,11 +501,120 @@ export async function replayOutbox(): Promise<{ processed: number; failed: numbe
   return { processed, failed, remaining: getOutbox().length }
 }
 
+/**
+ * Entschlüsselt alle im Offline-Cache verbliebenen Notizen und Termine nach,
+ * sobald ein neuer oder synchronisierter Notizenschlüssel eingegangen ist.
+ */
+export async function redecryptPendingOfflineNotesAndCalendar(userId: number = 1): Promise<{
+  decryptedNotesCount: number
+  decryptedEventsCount: number
+}> {
+  let decryptedNotesCount = 0
+  let decryptedEventsCount = 0
+
+  // 1. Lokale Notizen auf verschlüsselte Altbestände prüfen
+  const notes = getOfflineNotes()
+  let notesChanged = false
+  const updatedNotes: NoteItem[] = []
+
+  for (const n of notes) {
+    const titleIsEnc = typeof n.title === 'string' && n.title.startsWith(NOTE_CIPHERTEXT_PREFIX)
+    const contentIsEnc = typeof n.content === 'string' && n.content.startsWith(NOTE_CIPHERTEXT_PREFIX)
+    if (titleIsEnc || contentIsEnc) {
+      try {
+        const decryptedTitle = titleIsEnc
+          ? await decryptNoteTitle(n.title, n.note_uid, undefined, n.user_id || userId)
+          : n.title
+        const decryptedContent = contentIsEnc
+          ? await decryptNoteContent(n.content, n.note_uid, undefined, n.user_id || userId)
+          : n.content
+        updatedNotes.push({
+          ...n,
+          title: decryptedTitle,
+          content: decryptedContent,
+        })
+        notesChanged = true
+        decryptedNotesCount++
+      } catch {
+        updatedNotes.push(n)
+      }
+    } else {
+      updatedNotes.push(n)
+    }
+  }
+
+  if (notesChanged) {
+    setOfflineNotes(updatedNotes)
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('msm:notes-updated'))
+    }
+  }
+
+  // 2. Lokale Kalendereinträge auf verschlüsselte Altbestände prüfen
+  const events = getOfflineCalendarEvents()
+  let eventsChanged = false
+  const updatedEvents: CalendarEventItem[] = []
+
+  for (const ev of events) {
+    const titleIsEnc = typeof ev.title === 'string' && ev.title.startsWith(CALENDAR_CIPHERTEXT_PREFIX)
+    const descIsEnc = typeof ev.description === 'string' && ev.description.startsWith(CALENDAR_CIPHERTEXT_PREFIX)
+    const locIsEnc = typeof ev.location === 'string' && ev.location.startsWith(CALENDAR_CIPHERTEXT_PREFIX)
+
+    if (titleIsEnc || descIsEnc || locIsEnc) {
+      try {
+        const decryptedTitle = titleIsEnc
+          ? await decryptCalendarField(ev.title, ev.event_id, 'title', undefined, userId)
+          : ev.title
+        const decryptedDesc = descIsEnc
+          ? await decryptCalendarField(ev.description, ev.event_id, 'description', undefined, userId)
+          : ev.description
+        const decryptedLoc = locIsEnc
+          ? await decryptCalendarField(ev.location, ev.event_id, 'location', undefined, userId)
+          : ev.location
+
+        updatedEvents.push({
+          ...ev,
+          title: decryptedTitle,
+          description: decryptedDesc,
+          location: decryptedLoc,
+        })
+        eventsChanged = true
+        decryptedEventsCount++
+      } catch {
+        updatedEvents.push(ev)
+      }
+    } else {
+      updatedEvents.push(ev)
+    }
+  }
+
+  if (eventsChanged) {
+    setOfflineCalendarEvents(updatedEvents)
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('msm:calendar-updated'))
+    }
+  }
+
+  return { decryptedNotesCount, decryptedEventsCount }
+}
+
+// Globaler Event-Listener für neu eingegangene oder synchronisierte Notizenschlüssel
+if (typeof window !== 'undefined') {
+  window.addEventListener('msm:notes-key-updated', (e: any) => {
+    const uid = e?.detail?.userId || 1
+    void redecryptPendingOfflineNotesAndCalendar(uid)
+  })
+}
+
 // ── Public Offline-First Notes API ──
 
 export async function loadNotesOfflineFirst(_options?: {
   includeArchived?: boolean
 }): Promise<{ notes: NoteItem[]; isOffline: boolean }> {
+  if (!hasUserNotesKey(1)) {
+    await checkAndReceiveDeviceNotesKey(1).catch(() => false)
+  }
+
   let localNotes = getOfflineNotes()
   let isOffline = false
 
@@ -765,6 +877,10 @@ export async function loadCalendarEventsOfflineFirst(
   rangeEnd: string,
   eventType?: string
 ): Promise<{ events: CalendarEventItem[]; isOffline: boolean }> {
+  if (!hasUserNotesKey(1)) {
+    await checkAndReceiveDeviceNotesKey(1).catch(() => false)
+  }
+
   let localEvents = getOfflineCalendarEvents()
   let isOffline = false
 
@@ -1123,6 +1239,19 @@ export function startLiveSync(): () => void {
  */
 export function handleIncomingSyncEvent(eventName: string, data: SyncEventPayload): void {
   if (typeof window === 'undefined') return
+
+  if ((data as any)?.type === 'e2ee_blind_message' && (data as any)?.control_type?.startsWith('notes_key_')) {
+    const cType = (data as any).control_type
+    const targetUid = (data as any).recipient_id || (data as any).sender_user_id || 1
+    if (cType === 'notes_key_sync') {
+      void checkAndReceiveDeviceNotesKey(targetUid)
+    } else if (cType === 'notes_key_request') {
+      if (hasUserNotesKey(targetUid)) {
+        void syncNotesKeyToPairedDevices(targetUid)
+      }
+    }
+    return
+  }
 
   if (eventName === 'sync' || data.entity) {
     const entity = data.entity

@@ -24,12 +24,18 @@ import {
   useEntitySync,
   enqueueMessageMutation,
   startLiveSync,
+  redecryptPendingOfflineNotesAndCalendar,
 } from './offlineSync'
 import {
   NOTE_CIPHERTEXT_PREFIX,
   CALENDAR_CIPHERTEXT_PREFIX,
   decryptNoteTitle,
   decryptCalendarField,
+  encryptNoteTitle,
+  encryptNoteContent,
+  encryptCalendarField,
+  getOrCreateUserNotesKey,
+  clearNotesKeyCache,
 } from '@/services/notesCalendarCrypto'
 import * as client from '@/api/client'
 
@@ -815,6 +821,142 @@ describe('Offline Storage & Unified Real-Time SSE Sync Engine', () => {
       expect(client.apiStream).toHaveBeenCalledTimes(3)
 
       stop()
+    })
+  })
+
+  describe('R7. Automatic Multi-Device E2EE Key Synchronization & Re-decryption', () => {
+    it('re-decrypts pending offline notes and calendar items and dispatches update events', async () => {
+      const userId = 1
+      clearNotesKeyCache()
+      const key = await getOrCreateUserNotesKey(userId)
+
+      const noteUid = 'offline-pending-note-101'
+      const plainNoteTitle = 'Geheimer Offline-Einkauf'
+      const plainNoteContent = 'Sichere Liste vor Synchronisation'
+      const encNoteTitle = await encryptNoteTitle(plainNoteTitle, noteUid, key, userId)
+      const encNoteContent = await encryptNoteContent(plainNoteContent, noteUid, key, userId)
+
+      setOfflineNotes([
+        {
+          id: 101,
+          note_uid: noteUid,
+          title: encNoteTitle,
+          content: encNoteContent,
+          category: 'personal',
+          color: 'primary',
+          is_pinned: false,
+          is_archived: false,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          user_id: userId,
+        },
+      ])
+
+      const eventUid = 'offline-pending-event-202'
+      const plainCalTitle = 'Geheimes Meeting'
+      const plainCalDesc = 'Sicherer Kalendertermin'
+      const plainCalLoc = 'Zimmer 42'
+      const encCalTitle = await encryptCalendarField(plainCalTitle, eventUid, 'title', key, userId)
+      const encCalDesc = await encryptCalendarField(plainCalDesc, eventUid, 'description', key, userId)
+      const encCalLoc = await encryptCalendarField(plainCalLoc, eventUid, 'location', key, userId)
+
+      setOfflineCalendarEvents([
+        {
+          id: 202,
+          event_id: eventUid,
+          title: encCalTitle,
+          start: new Date().toISOString(),
+          end: new Date().toISOString(),
+          description: encCalDesc,
+          location: encCalLoc,
+          all_day: false,
+          color: 'primary',
+          calendar: 'MSM Kalender',
+          event_type: 'personal',
+          user_id: userId,
+          can_edit: true,
+        },
+      ])
+
+      const notesUpdatedSpy = vi.fn()
+      const calUpdatedSpy = vi.fn()
+      window.addEventListener('msm:notes-updated', notesUpdatedSpy)
+      window.addEventListener('msm:calendar-updated', calUpdatedSpy)
+
+      const result = await redecryptPendingOfflineNotesAndCalendar(userId)
+      expect(result.decryptedNotesCount).toBe(1)
+      expect(result.decryptedEventsCount).toBe(1)
+
+      const decryptedNotes = getOfflineNotes()
+      expect(decryptedNotes[0].title).toBe(plainNoteTitle)
+      expect(decryptedNotes[0].content).toBe(plainNoteContent)
+      expect(decryptedNotes[0].title.startsWith(NOTE_CIPHERTEXT_PREFIX)).toBe(false)
+
+      const decryptedEvents = getOfflineCalendarEvents()
+      expect(decryptedEvents[0].title).toBe(plainCalTitle)
+      expect(decryptedEvents[0].description).toBe(plainCalDesc)
+      expect(decryptedEvents[0].location).toBe(plainCalLoc)
+      expect(decryptedEvents[0].title.startsWith(CALENDAR_CIPHERTEXT_PREFIX)).toBe(false)
+
+      expect(notesUpdatedSpy).toHaveBeenCalled()
+      expect(calUpdatedSpy).toHaveBeenCalled()
+
+      window.removeEventListener('msm:notes-updated', notesUpdatedSpy)
+      window.removeEventListener('msm:calendar-updated', calUpdatedSpy)
+    })
+
+    it('automatically invokes re-decryption when msm:notes-key-updated is fired', async () => {
+      const userId = 1
+      clearNotesKeyCache()
+      const key = await getOrCreateUserNotesKey(userId)
+
+      const noteUid = 'offline-event-note-303'
+      const plainTitle = 'Automatisch nach-entschlüsselt'
+      const encTitle = await encryptNoteTitle(plainTitle, noteUid, key, userId)
+
+      setOfflineNotes([
+        {
+          id: 303,
+          note_uid: noteUid,
+          title: encTitle,
+          content: '',
+          category: 'personal',
+          color: 'primary',
+          is_pinned: false,
+          is_archived: false,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          user_id: userId,
+        },
+      ])
+
+      window.dispatchEvent(
+        new CustomEvent('msm:notes-key-updated', { detail: { userId } })
+      )
+
+      // Wait a tick for async event handler
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      const current = getOfflineNotes()
+      expect(current[0].title).toBe(plainTitle)
+    })
+
+    it('handles incoming notes_key_sync and notes_key_request SSE events without crash', () => {
+      expect(() => {
+        handleIncomingSyncEvent('sync', {
+          type: 'e2ee_blind_message',
+          control_type: 'notes_key_sync',
+          recipient_id: 1,
+        } as any)
+      }).not.toThrow()
+
+      expect(() => {
+        handleIncomingSyncEvent('sync', {
+          type: 'e2ee_blind_message',
+          control_type: 'notes_key_request',
+          sender_user_id: 1,
+        } as any)
+      }).not.toThrow()
     })
   })
 })

@@ -794,3 +794,65 @@ def test_e2ee_security_public_key_validation(db: Session, owner_user: User):
         e2ee_device_service.veroeffentlichen(
             db, owner_user, device_id="a1b2c3d4e5f60718", public_key_jwk=leak_d
         )
+
+
+def test_user_device_mailbox_e2ee_key_sync_and_privacy(
+    db: Session, owner_user: User, regular_user: User, client: TestClient, owner_cookies: dict, user_cookies: dict
+):
+    """Prüft die blinde Geräte-Mailbox für Mehrgeräte-Schlüsselsynchronisation und deren Zugriffsschutz."""
+    from fastapi import HTTPException
+    from services.panel_settings_service import PanelSettingsService
+    PanelSettingsService.set("social_enabled", "true", db)
+
+    device_mailbox_owner = SocialService.derive_user_device_mailbox_id(owner_user.id)
+    assert device_mailbox_owner is not None
+    assert len(device_mailbox_owner) == 64
+
+    # Formal gültiger verschlüsselter Hybrid-Umschlag
+    import base64
+    wk = base64.b64encode(b"K" * 256).decode("ascii")
+    ct = base64.b64encode(b"\x01" * 12 + b"test-secret-payload" + b"\x02" * 16).decode("ascii")
+    envelope = f"sv-e2ee-hybrid-v1:{wk}.{ct}"
+
+    # 1. Owner synchronisiert Notizenschlüssel an die eigene Geräte-Mailbox
+    relayed = SocialService.relay_blind_envelope(
+        db,
+        blind_mailbox_id=device_mailbox_owner,
+        ciphertext_envelope=envelope,
+        sender_user_id=owner_user.id,
+        recipient_id=owner_user.id,
+        client_uuid="noteskey:devA:devB:12345",
+        is_control=True,
+        control_type="notes_key_sync",
+    )
+    assert relayed.id is not None
+    assert relayed.blind_mailbox_id == device_mailbox_owner
+
+    # 2. sync_mailboxes für den Owner enthält die Geräte-Mailbox
+    synced = SocialService.sync_mailboxes(db, current_user=owner_user)
+    mids = [m["blind_mailbox_id"] for m in synced]
+    assert device_mailbox_owner in mids
+
+    # 3. Fremder Nutzer darf NICHT in die Geräte-Mailbox des Owners einliefern
+    ct2 = base64.b64encode(b"\x03" * 12 + b"attack-secret-payload" + b"\x04" * 16).decode("ascii")
+    with pytest.raises(HTTPException) as exc:
+        SocialService.relay_blind_envelope(
+            db,
+            blind_mailbox_id=device_mailbox_owner,
+            ciphertext_envelope=f"sv-e2ee-hybrid-v1:{wk}.{ct2}",
+            sender_user_id=regular_user.id,
+            recipient_id=owner_user.id,
+            client_uuid="attack:123",
+        )
+    assert exc.value.status_code == 400
+
+    # 4. Owner kann seine Geräte-Mailbox abfragen
+    resp_owner = client.get(f"/api/social/e2ee/mailbox/{device_mailbox_owner}", cookies=owner_cookies)
+    assert resp_owner.status_code == 200
+    assert len(resp_owner.json()) >= 1
+    assert resp_owner.json()[0]["blind_mailbox_id"] == device_mailbox_owner
+
+    # 5. Fremder Nutzer wird beim Abruf der fremden Geräte-Mailbox mit 403 abgewiesen
+    resp_stranger = client.get(f"/api/social/e2ee/mailbox/{device_mailbox_owner}", cookies=user_cookies)
+    assert resp_stranger.status_code == 403
+

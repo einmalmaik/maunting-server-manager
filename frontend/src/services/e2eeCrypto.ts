@@ -72,6 +72,7 @@ export const E2EE_DR_PREFIX = 'sv-e2ee-dr-v1:'
 
 const blindMailboxIdCache = new Map<string, string>()
 const groupBlindMailboxIdCache = new Map<string, string>()
+const deviceBlindMailboxIdCache = new Map<number, string>()
 
 /**
  * Returns the synchronously cached blind mailbox identifier if previously computed.
@@ -97,6 +98,7 @@ export function getCachedGroupBlindMailboxId(groupId: number, groupSalt: string 
 export function clearBlindMailboxIdCache(): void {
   blindMailboxIdCache.clear()
   groupBlindMailboxIdCache.clear()
+  deviceBlindMailboxIdCache.clear()
 }
 
 /**
@@ -115,6 +117,25 @@ export async function deriveBlindMailboxId(userAId: number, userBId: number, sal
   try {
     const res = await sha256Hex(seed)
     blindMailboxIdCache.set(cacheKey, res)
+    return res
+  } finally {
+    seed.fill(0)
+  }
+}
+
+/**
+ * Derives the deterministic blind mailbox identifier for all devices of a user.
+ * Used for inter-device synchronization (e.g. E2EE notes/calendar key distribution).
+ */
+export async function deriveUserDeviceMailboxId(userId: number): Promise<string> {
+  const cached = deviceBlindMailboxIdCache.get(userId)
+  if (cached) return cached
+
+  const payload = `msm:devices:${userId}`
+  const seed = new TextEncoder().encode(payload)
+  try {
+    const res = await sha256Hex(seed)
+    deviceBlindMailboxIdCache.set(userId, res)
     return res
   } finally {
     seed.fill(0)
