@@ -99,31 +99,39 @@ def _default_color_for_type(event_type: str | None) -> str:
     return "blue"
 
 
+CALENDAR_CIPHERTEXT_PREFIX = "sv-cal-v1:"
+
+
 def _cal_aad(user_id: int, event_uid: str) -> str:
     return f"msm:cal:{user_id}:{event_uid}"
 
 
 def _decrypt_or_migrate_calendar_event(db: Session, ev: CalendarEvent) -> tuple[str, str, str]:
-    """Entschluesselt title, description und location eines nativen Termins.
-    
-    Falls einer der Werte noch im Klartext in der DB liegt, wird er sofort
-    mit DIS (AES-256-GCM) verschluesselt und in der DB persistiert.
-    """
+    """Entschluesselt title, description und location eines nativen Termins bei Altdaten; E2EE-Ciphertexte bleiben unangetastet."""
     aad = _cal_aad(ev.user_id, ev.event_uid)
-    needs_persist = False
 
     # 1. Titel
     raw_title = ev.title or ""
-    try:
-        title = DisClient.decrypt(raw_title, aad=aad)
-    except DisDecryptionError:
+    if raw_title.startswith(CALENDAR_CIPHERTEXT_PREFIX):
         title = raw_title
-        ev.title = DisClient.encrypt(title, aad=aad)
-        needs_persist = True
+    else:
+        try:
+            title = DisClient.decrypt(raw_title, aad=aad)
+        except DisDecryptionError:
+            title = raw_title
+            ev.title = DisClient.encrypt(title, aad=aad)
+            try:
+                db.commit()
+                db.refresh(ev)
+            except Exception as e:
+                _log.warning("Fehler bei Altdaten-Verschluesselung des Termins %s: %s", ev.event_uid, e)
+                db.rollback()
 
     # 2. Beschreibung
     raw_desc = ev.description or ""
-    if not raw_desc:
+    if raw_desc.startswith(CALENDAR_CIPHERTEXT_PREFIX):
+        desc = raw_desc
+    elif not raw_desc:
         desc = ""
     else:
         try:
@@ -131,11 +139,18 @@ def _decrypt_or_migrate_calendar_event(db: Session, ev: CalendarEvent) -> tuple[
         except DisDecryptionError:
             desc = raw_desc
             ev.description = DisClient.encrypt(desc, aad=aad)
-            needs_persist = True
+            try:
+                db.commit()
+                db.refresh(ev)
+            except Exception as e:
+                _log.warning("Fehler bei Altdaten-Verschluesselung der Beschreibung des Termins %s: %s", ev.event_uid, e)
+                db.rollback()
 
     # 3. Ort
     raw_loc = ev.location or ""
-    if not raw_loc:
+    if raw_loc.startswith(CALENDAR_CIPHERTEXT_PREFIX):
+        loc = raw_loc
+    elif not raw_loc:
         loc = ""
     else:
         try:
@@ -143,15 +158,12 @@ def _decrypt_or_migrate_calendar_event(db: Session, ev: CalendarEvent) -> tuple[
         except DisDecryptionError:
             loc = raw_loc
             ev.location = DisClient.encrypt(loc, aad=aad)
-            needs_persist = True
-
-    if needs_persist:
-        try:
-            db.commit()
-            db.refresh(ev)
-        except Exception as e:
-            _log.warning("Fehler bei Altdaten-Verschluesselung des Termins %s: %s", ev.event_uid, e)
-            db.rollback()
+            try:
+                db.commit()
+                db.refresh(ev)
+            except Exception as e:
+                _log.warning("Fehler bei Altdaten-Verschluesselung des Orts des Termins %s: %s", ev.event_uid, e)
+                db.rollback()
 
     return title, desc, loc
 
@@ -522,6 +534,7 @@ class CalendarService:
         title: str,
         start_time: str,
         end_time: str,
+        event_uid: str | None = None,
         description: str | None = None,
         location: str | None = None,
         calendar_id: int | None = None,
@@ -564,17 +577,63 @@ class CalendarService:
 
             final_color = color or _default_color_for_type(norm_type)
 
-            event_uid = str(uuid.uuid4())
-            aad = _cal_aad(user.id, event_uid)
+            if event_uid and event_uid.strip():
+                final_event_uid = event_uid.strip()
+                existing = db.scalar(select(CalendarEvent).where(CalendarEvent.event_uid == final_event_uid))
+                if existing:
+                    if existing.user_id == user.id:
+                        dec_title, dec_desc, dec_loc = _decrypt_or_migrate_calendar_event(db, existing)
+                        return {
+                            "status": "created",
+                            "event_id": existing.event_uid,
+                            "id": existing.id,
+                            "title": dec_title,
+                            "start": _iso_utc(existing.start_time),
+                            "end": _iso_utc(existing.end_time),
+                            "description": dec_desc,
+                            "location": dec_loc,
+                            "all_day": existing.all_day,
+                            "color": existing.color or "",
+                            "event_type": existing.event_type,
+                            "team_id": existing.team_id,
+                            "team_name": existing.team.name if existing.team else None,
+                            "server_id": existing.server_id,
+                            "server_name": existing.server.name if existing.server else None,
+                            "creator_name": user.username,
+                            "user_id": user.id,
+                            "can_edit": True,
+                            "calendar": calendar.name,
+                        }
+                    raise ValueError(f"Termin mit UID '{final_event_uid}' existiert bereits.")
+            else:
+                final_event_uid = str(uuid.uuid4())
 
-            encrypted_title = DisClient.encrypt(title.strip(), aad=aad)
-            encrypted_desc = DisClient.encrypt(description, aad=aad) if description else None
-            encrypted_loc = DisClient.encrypt(location, aad=aad) if location else None
+            aad = _cal_aad(user.id, final_event_uid)
+
+            clean_title = title.strip()
+            if clean_title.startswith(CALENDAR_CIPHERTEXT_PREFIX):
+                encrypted_title = clean_title
+            else:
+                encrypted_title = DisClient.encrypt(clean_title, aad=aad)
+
+            if description and description.startswith(CALENDAR_CIPHERTEXT_PREFIX):
+                encrypted_desc = description
+            elif description:
+                encrypted_desc = DisClient.encrypt(description, aad=aad)
+            else:
+                encrypted_desc = None
+
+            if location and location.startswith(CALENDAR_CIPHERTEXT_PREFIX):
+                encrypted_loc = location
+            elif location:
+                encrypted_loc = DisClient.encrypt(location, aad=aad)
+            else:
+                encrypted_loc = None
 
             ev = CalendarEvent(
                 calendar_id=calendar.id,
                 user_id=user.id,
-                event_uid=event_uid,
+                event_uid=final_event_uid,
                 title=encrypted_title,
                 description=encrypted_desc,
                 location=encrypted_loc,
@@ -593,7 +652,7 @@ class CalendarService:
                 "status": "created",
                 "event_id": ev.event_uid,
                 "id": ev.id,
-                "title": title.strip(),
+                "title": clean_title,
                 "start": _iso_utc(ev.start_time),
                 "end": _iso_utc(ev.end_time),
                 "description": description or "",
@@ -737,15 +796,29 @@ class CalendarService:
             aad = _cal_aad(ev.user_id, ev.event_uid)
 
             if title is not None:
-                ev.title = DisClient.encrypt(title.strip(), aad=aad)
+                clean_title = title.strip()
+                if clean_title.startswith(CALENDAR_CIPHERTEXT_PREFIX):
+                    ev.title = clean_title
+                else:
+                    ev.title = DisClient.encrypt(clean_title, aad=aad)
             if start_time is not None:
                 ev.start_time = _parse_datetime(start_time, user=user)
             if end_time is not None:
                 ev.end_time = _parse_datetime(end_time, user=user)
             if description is not None:
-                ev.description = DisClient.encrypt(description, aad=aad) if description else None
+                if description.startswith(CALENDAR_CIPHERTEXT_PREFIX):
+                    ev.description = description
+                elif description:
+                    ev.description = DisClient.encrypt(description, aad=aad)
+                else:
+                    ev.description = None
             if location is not None:
-                ev.location = DisClient.encrypt(location, aad=aad) if location else None
+                if location.startswith(CALENDAR_CIPHERTEXT_PREFIX):
+                    ev.location = location
+                elif location:
+                    ev.location = DisClient.encrypt(location, aad=aad)
+                else:
+                    ev.location = None
             if all_day is not None:
                 ev.all_day = all_day
 

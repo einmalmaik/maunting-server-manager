@@ -25,6 +25,7 @@
 import { api } from '@/api/client'
 
 import { decryptE2eeHybrid, encryptE2eeHybrid } from './e2eeCrypto'
+import { exportUserNotesKey, setUserNotesKey } from './notesCalendarCrypto'
 import {
   listeLokaleMailboxen,
   loadLocalMessages,
@@ -52,6 +53,7 @@ interface VerlaufPaket {
   v: number
   /** Je Mailbox die jüngsten Nachrichten, so wie sie lokal liegen. */
   mailboxen: Record<string, LocalStoredMessage[]>
+  notesKey?: string | null
 }
 
 export interface UebergabeZiel {
@@ -87,16 +89,16 @@ export async function packeUndVersiegele(ziele: readonly UebergabeZiel[]): Promi
   if (ziele.length === 0) return null
 
   const mailboxen = await listeLokaleMailboxen()
-  if (mailboxen.length === 0) return null
+  const rawNotesKey = exportUserNotesKey()
 
   const verlaeufe = await Promise.all(
     mailboxen.map(async (mid) => ({ mid, nachrichten: await loadLocalMessages(mid) })),
   )
   const belegt = verlaeufe.filter((v) => v.nachrichten.length > 0)
-  if (belegt.length === 0) return null
+  if (belegt.length === 0 && !rawNotesKey) return null
 
   for (const stufe of STUFEN) {
-    const paket: VerlaufPaket = { v: 1, mailboxen: {} }
+    const paket: VerlaufPaket = { v: 1, mailboxen: {}, notesKey: rawNotesKey }
     for (const { mid, nachrichten } of belegt) {
       paket.mailboxen[mid] = sortMessagesChronologically(nachrichten).slice(-stufe)
     }
@@ -148,6 +150,12 @@ export async function uebernimmVerlauf(blob: string, eigenerPrivateKey: string):
     }
   }
   if (!paket) return 0
+
+  if (paket.notesKey) {
+    try {
+      await setUserNotesKey(1, paket.notesKey)
+    } catch {}
+  }
 
   let uebernommen = 0
   for (const [mid, nachrichten] of Object.entries(paket.mailboxen)) {
