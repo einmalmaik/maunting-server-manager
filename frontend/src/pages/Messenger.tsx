@@ -155,6 +155,9 @@ import { getAudioTrackConstraints } from '@/lib/audioSettings'
 import { IN_HOUSE_STICKERS, CATEGORIZED_EMOJIS } from '@/services/stickerCatalog'
 import { CameraSnapshotModal } from '@/components/social/CameraSnapshotModal'
 import { CreateStoryModal, STORY_GRADIENTS } from '@/components/social/CreateStoryModal'
+import { MessengerSperrschirm } from '@/components/social/MessengerSperrschirm'
+import { siegelAktiv } from '@/services/lokaleVersiegelung'
+import { useMessengerSperre } from '@/services/messengerSperre'
 import { StoryViewerModal, type StoryReplyContext } from '@/components/social/StoryViewerModal'
 import { GroupPermissionsModal } from '@/components/social/GroupPermissionsModal'
 import {
@@ -375,6 +378,17 @@ function loadInitialContactsCache(): {
 
 export function Messenger() {
   const { user } = useAuthStore()
+  // Der Sperrzustand wird ganz oben gelesen, damit kein Effekt darunter auf
+  // eine Ablage greift, die ohne Schlüssel nichts herausgibt.
+  //
+  // `siegelAktiv()` steht daneben, weil der Store seinen Stand erst nach
+  // `initialisiere()` kennt. Ohne diesen zweiten Blick zeigte der erste
+  // Durchlauf nach jedem Neuladen einen kurz aufblitzenden, leeren Messenger,
+  // bevor der Sperrschirm ihn ablöst. Gelesen hätte er nichts — die Ablagen
+  // geben ohne Schlüssel nichts heraus —, aber es sähe kaputt aus.
+  const messengerGesperrt = useMessengerSperre(
+    (s) => !s.entsperrt && (s.eingerichtet || siegelAktiv()),
+  )
   const [searchParams, setSearchParams] = useSearchParams()
   const { inviteCode } = useParams<{ inviteCode?: string }>()
   const navigate = useNavigate()
@@ -2870,6 +2884,17 @@ export function Messenger() {
   }
 
   const isChatOpen = Boolean(activeContact || activeGroup)
+
+  // Gesperrt wird der Verlauf nicht überdeckt, sondern gar nicht erst gebaut.
+  // Er stünde auch nicht zur Verfügung: die lokalen Ablagen geben ohne
+  // Schlüssel nichts heraus (siehe `services/lokaleVersiegelung`).
+  if (messengerGesperrt) {
+    return (
+      <div className="flex h-full w-full min-h-0 flex-1 flex-col overflow-hidden bg-surface">
+        <MessengerSperrschirm />
+      </div>
+    )
+  }
 
   return (
     <div className="flex h-full w-full min-h-0 flex-1 flex-col overflow-hidden bg-surface">

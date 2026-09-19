@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
-import { User, Users, KeyRound, Shield, Link2, AlertTriangle, Bot, MonitorSmartphone, Volume2 } from 'lucide-react'
+import { User, Users, KeyRound, Shield, Link2, AlertTriangle, Bot, MonitorSmartphone, Volume2, Lock } from 'lucide-react'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { AccountTab } from './profile/AccountTab'
 import { SocialTab } from './profile/SocialTab'
@@ -13,15 +13,20 @@ import { DangerZoneTab } from './profile/DangerZoneTab'
 import { AiTab } from './profile/AiTab'
 import { DevicesTab } from './profile/DevicesTab'
 import { CredentialsTab } from './profile/CredentialsTab'
+import { MessengerSicherheitTab } from './profile/MessengerSicherheitTab'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 
-type TabId = 'account' | 'social' | 'audio' | 'password' | '2fa' | 'linked' | 'credentials' | 'ai' | 'devices' | 'danger'
+type TabId = 'account' | 'social' | 'audio' | 'messenger' | 'password' | '2fa' | 'linked' | 'credentials' | 'ai' | 'devices' | 'danger'
 
 const BASE_TABS: TabDef<TabId>[] = [
   { id: 'account', labelKey: 'profile.tabs.account', icon: User },
   { id: 'social', labelKey: 'profile.tabs.social', icon: Users },
   { id: 'audio', labelKey: 'profile.tabs.audio', icon: Volume2 },
+  // PIN und automatische Sperre des Messengers. Steht neben Social, weil es
+  // dorthin gehoert, und nicht unter Passwort: das Kontopasswort meldet an,
+  // dieser PIN schuetzt, was auf diesem Geraet liegt.
+  { id: 'messenger', labelKey: 'profile.tabs.messenger', icon: Lock },
   { id: 'password', labelKey: 'profile.tabs.password', icon: KeyRound },
   { id: '2fa', labelKey: 'profile.tabs.2fa', icon: Shield },
   { id: 'linked', labelKey: 'profile.tabs.linked', icon: Link2 },
@@ -50,7 +55,7 @@ export function Profile() {
 
   useEffect(() => {
     const tabParam = searchParams.get('tab') as TabId
-    if (tabParam && ['account', 'social', 'audio', 'password', '2fa', 'linked', 'credentials', 'ai', 'devices', 'danger'].includes(tabParam)) {
+    if (tabParam && ['account', 'social', 'audio', 'messenger', 'password', '2fa', 'linked', 'credentials', 'ai', 'devices', 'danger'].includes(tabParam)) {
       setActiveTab(tabParam)
     }
   }, [searchParams])
@@ -79,6 +84,7 @@ export function Profile() {
       {activeTab === 'account' && <AccountTab />}
       {activeTab === 'social' && <SocialTab />}
       {activeTab === 'audio' && <AudioTab />}
+      {activeTab === 'messenger' && <MessengerSicherheitTab />}
       {activeTab === 'password' && <PasswordTab />}
       {activeTab === '2fa' && <TwoFactorTab />}
       {activeTab === 'linked' && <LinkedAccountsTab />}

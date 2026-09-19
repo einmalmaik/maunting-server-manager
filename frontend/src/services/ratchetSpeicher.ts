@@ -49,6 +49,8 @@ import {
   type RatchetState,
 } from '@msdis/shield/messaging'
 
+import { entsiegleZeile, versiegleZeile } from './lokaleVersiegelung'
+
 const DB_NAME = 'msm_e2ee_ratchet'
 const DB_VERSION = 1
 const STORE = 'sessions'
@@ -107,23 +109,34 @@ function oeffneDatenbank(): Promise<IDBDatabase> {
   })
 }
 
+/** Bindet einen Sitzungszustand an seinen Platz. Siehe `versiegleZeile`. */
+function ratchetAad(id: string): string {
+  return `msm-ratchet:${id}`
+}
+
 const indexedDbAblage: RatchetAblage = {
   async lies(id) {
     const db = await oeffneDatenbank()
-    return new Promise<string | null>((resolve, reject) => {
+    const roh = await new Promise<Record<string, any> | null>((resolve, reject) => {
       const tx = db.transaction(STORE, 'readonly')
       const req = tx.objectStore(STORE).get(id)
-      req.onsuccess = () => resolve(req.result?.zustand ?? null)
+      req.onsuccess = () => resolve(req.result ?? null)
       req.onerror = () => reject(req.error)
     })
+    const zeile = await entsiegleZeile<{ zustand?: unknown }>(roh, ratchetAad(id))
+    return typeof zeile?.zustand === 'string' ? zeile.zustand : null
   },
   async schreibe(id, zustand) {
     const db = await oeffneDatenbank()
+    // Versiegeln vor der Transaktion — ein `await` mitten drin bricht sie ab.
+    const zeile = await versiegleZeile(
+      { sitzungsId: id, zustand, aktualisiertAm: new Date().toISOString() },
+      ['sitzungsId'],
+      ratchetAad(id),
+    )
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE, 'readwrite')
-      const req = tx
-        .objectStore(STORE)
-        .put({ sitzungsId: id, zustand, aktualisiertAm: new Date().toISOString() })
+      const req = tx.objectStore(STORE).put(zeile)
       req.onsuccess = () => resolve()
       req.onerror = () => reject(req.error)
     })
@@ -325,6 +338,22 @@ export async function verwirfSitzung(id: string): Promise<void> {
  *   die gerade funktionierende Sitzung, und ab da kam nichts mehr an.
  */
 export type Markenbereich = 'aufbau' | 'bruch'
+
+/**
+ * Schreibt jede Zeile dieser Ablage einmal neu — der Umstellungsdurchlauf für
+ * Sitzungen und Marken. Siehe `schreibeNachrichtenBestandNeu`.
+ */
+export async function schreibeRatchetBestandNeu(): Promise<number> {
+  const ids = await ablage.alleIds()
+  let geschrieben = 0
+  for (const id of ids) {
+    const zustand = await ablage.lies(id)
+    if (zustand === null) continue
+    await ablage.schreibe(id, zustand)
+    geschrieben++
+  }
+  return geschrieben
+}
 
 export async function kennstMarke(bereich: Markenbereich, kennung: string): Promise<boolean> {
   return (await ablage.lies(`${bereich}:${kennung}`)) !== null

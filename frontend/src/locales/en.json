@@ -1471,7 +1471,7 @@
         "output": "Output",
         "cached": "Cached",
         "cacheWritten": "Cache written",
-          "calls": "Calls",
+        "calls": "Calls",
         "source": "Source",
         "more": "There are more requests this month; these are the most recent.",
         "sources": {
@@ -3325,7 +3325,9 @@
       "ai": "AI",
       "devices": "Devices",
       "danger": "Danger Zone",
-      "credentials": "Credentials"
+      "credentials": "Credentials",
+      "messenger": "Messenger PIN",
+      "vault": "Vault"
     },
     "email": "Email Address",
     "privacyTitle": "Privacy & Visibility",
@@ -3513,6 +3515,63 @@
       "removeTitle": "Remove this device from delivery?",
       "removeMessage": "This device will no longer receive new messages. If it signs in to your account again, it registers itself anew: removing it does not lock out anyone who still has access to the account.",
       "removed": "Device removed."
+    },
+    "messengerLock": {
+      "title": "Lock the messenger",
+      "stateOn": "Set up on this device.",
+      "stateOff": "Not set up on this device.",
+      "explain": "Your history lives on this device so it survives a reload. Without a PIN it sits there readable: anyone with access to the machine gets the messages and the device identity this machine signs with. A PIN encrypts both.",
+      "boundNote": "The key is also tied to this machine's credential store. A copied disk is worthless anywhere else.",
+      "unboundNote": "This platform has no protected credential store. Protection rests on the length of your PIN alone, so longer is better.",
+      "warnLoss": "Remember this PIN. There is no backup route and no recovery key. Your own sent messages exist nowhere else, not even on the server: forget the PIN or reinstall this machine and this device's history is gone.",
+      "setUp": "Set up PIN",
+      "change": "Change PIN",
+      "turnOff": "Remove lock",
+      "newPin": "New PIN",
+      "currentPin": "Current PIN",
+      "repeat": "Repeat PIN",
+      "tooShort": "At least {{count}} characters.",
+      "mismatch": "The two entries do not match.",
+      "working": "One moment …",
+      "bioTitle": "Open with fingerprint",
+      "bioSwitch": "Unlock without typing",
+      "bioHint": "The PIN is kept in the system credential store and released only after a successful check.",
+      "bioUnavailable": "Not possible here. The shortcut needs a hardware-backed key store: the desktop app (Windows Hello) and the Android app (fingerprint) have one, the browser does not. The PIN itself works everywhere.",
+      "bioNeedsPin": "Set up a PIN first.",
+      "bioSetUp": "Store it",
+      "autoTitle": "Lock automatically",
+      "autoSubtitle": "Applies to the messenger only. The vault has its own timer.",
+      "autoNeedsPin": "Nothing to lock without a PIN. This takes effect once one is set up.",
+      "afterIdle": "When idle",
+      "never": "Never",
+      "afterHour": "After one hour",
+      "afterMinutes": "After {{count}} minutes",
+      "onBlur": "Lock when the window loses focus",
+      "onBlurHint": "Locks as soon as the window moves to the background or the tab changes.",
+      "footnote": "End-to-end encryption between you and the other side is untouched. The server never could read your messages and still cannot. The PIN protects what sits on this device.",
+      "screenTitle": "Messenger locked",
+      "screenHint": "Enter your PIN to decrypt the history on this device.",
+      "screenFootnote": "Nothing arrives while it is locked. Whatever was sent meanwhile is fetched once you unlock.",
+      "pinPlaceholder": "PIN",
+      "unlock": "Unlock",
+      "useBiometrics": "Use fingerprint",
+      "waiting": "Too many failed attempts. {{count}} seconds left.",
+      "confirmOff": {
+        "title": "Remove the lock?",
+        "message": "History, device identity and keys will sit unencrypted on this device again. Anyone with access to the machine can read them.",
+        "ok": "Remove lock"
+      },
+      "toast": {
+        "enabled": "The messenger is now protected by a PIN.",
+        "enableFailed": "The PIN could not be set up.",
+        "changed": "The PIN has been changed.",
+        "changeFailed": "The PIN could not be changed.",
+        "disabled": "The lock has been removed.",
+        "wrongPin": "That PIN is not correct.",
+        "bioOn": "The messenger now opens with your fingerprint.",
+        "bioOff": "The shortcut is switched off.",
+        "bioFailed": "The shortcut could not be set up."
+      }
     }
   },
   "errorBoundary": {
@@ -4086,8 +4145,7 @@
         "body": "The manifests under deploy/kubernetes run the control plane. Game servers remain Docker containers on the connected nodes. Exactly one panel replica, and the DIS sidecar runs in the same pod. The AI run broker and AI report office are process-local too: reports from background tasks live in the database and survive a restart, only live-following breaks off briefly."
       }
     },
-
-          "calls": {
+    "calls": {
       "title": "Messenger calls",
       "intro": "Voice, video and group calls run through a media server that receives the streams and forwards them. The bundled one runs on the panel server and is set up during installation; an external one can be configured instead.",
       "mode": {
@@ -4373,6 +4431,7 @@
           "deviceKey": "The key belongs to this device and is created on it the first time you open the messenger. Its private half never leaves the device. The instance only holds the public half, so that others can write to you.",
           "deviceFanout": "When you write to someone, your device encrypts the message separately for each of their devices and for your own other devices. The instance sees that an account has several devices, and nothing beyond that.",
           "deviceHistory": "Each device keeps its own history. When you pair a new one, it receives the existing history encrypted from the device you already set up; it fetches nothing retroactively from the server. In a browser it lives in the site's storage: MSM asks the browser to keep that storage permanently, but clearing the site data clears this device's history with it. If you lose every device, the history is gone for good, and the operator cannot restore it, because the operator was never able to read it.",
+          "devicePin": "On the device itself this history is initially readable so it survives a reload. If you set up a messenger PIN under Profile, the history, device key, session states and group keys on that device are encrypted and opened only after the PIN is entered; in the desktop app Windows Hello can hold the PIN for you, in the Android app your fingerprint. The PIN is optional, off by default and can be removed at any time. Without it, anyone with access to this device can read the history. The PIN is stored nowhere and is unknown to the operator: forget it and this device's history is lost.",
           "ratchet": "Every message gets its own key, destroyed once the message has been read and impossible to derive from the keys before it. Someone who later gains access to your device can no longer open anything that came earlier. If a security session had to be rebuilt — because the other side reinstalled, for instance — that is stated in the conversation itself, not hidden away.",
           "groups": "In a group, all members share one key. It is created on the device that writes the first message and delivered encrypted separately to every device of every member; the instance relays that too and nothing more. Any change in membership produces a new one, so nobody keeps reading after leaving. Two differences from a one-to-one chat remain: a former member can still open older messages, and a group key covers every message of its generation rather than a single one.",
           "attachments": "Images, voice messages, video notes and files each get their own random key before upload. It travels only inside the encrypted message text, so it differs per attachment and the instance never learns it. What the instance receives is the encrypted block, its size and its timestamp; the file name and file type stay inside the encrypted part. Copy such a block into another conversation and it will not open there.",

@@ -13,7 +13,20 @@
  * wie in `messengerLocalStore.test.ts`, und keine neue Abhängigkeit dafür.
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { generateAesGcmKey } from '@msdis/shield/aead'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { setzeInhaltsSchluessel, setzeSiegelAktiv } from './lokaleVersiegelung'
+
+/** Ein localStorage im Arbeitsspeicher — der Siegelschalter liegt dort. */
+function installiereLocalStorage() {
+  const daten = new Map<string, string>()
+  ;(globalThis as any).localStorage = {
+    getItem: (k: string) => daten.get(k) ?? null,
+    setItem: (k: string, v: string) => daten.set(k, v),
+    removeItem: (k: string) => daten.delete(k),
+    clear: () => daten.clear(),
+  }
+}
 
 const { hochgeladen, fremdeGeraete, uebernommen, umbenennen } = vi.hoisted(() => ({
   hochgeladen: [] as { deviceId: string; publicKey: string; label: string }[],
@@ -74,7 +87,22 @@ function installiereIdb(platte: Map<string, any>) {
   const db = {
     objectStoreNames: { contains: () => true },
     createObjectStore: () => {},
-    transaction: (name: string) => ({ objectStore: () => store(name) }),
+    /**
+     * `oncomplete` kommt per `setTimeout`, die Anfragen per `queueMicrotask`.
+     * Damit gilt hier dieselbe Reihenfolge wie in einer echten IndexedDB: erst
+     * laufen alle Anfragen samt der Anfragen, die deren Rückrufe noch stellen,
+     * dann schließt die Transaktion.
+     *
+     * Ohne das Ereignis hing `uebernimmAltbestand`: es wartet darauf, dass der
+     * Anspruch auf den Altbestand wirklich geschrieben ist, und nicht nur
+     * darauf, dass ein `put` angenommen wurde.
+     */
+    transaction: (name: string) => {
+      const tx: any = { oncomplete: null, onerror: null, onabort: null }
+      tx.objectStore = () => store(name)
+      setTimeout(() => tx.oncomplete?.(), 0)
+      return tx
+    },
   }
 
   ;(globalThis as any).indexedDB = {
@@ -107,6 +135,39 @@ describe('e2eeGeraet', () => {
     setzeAngemeldetesKonto(10)
     uebernommen.length = 0
     umbenennen.fehler = null
+  })
+
+  describe('bei gesperrtem Messenger', () => {
+    afterEach(() => {
+      setzeSiegelAktiv(false)
+      setzeInhaltsSchluessel(null)
+    })
+
+    it('erzeugt keinen frischen Ausweis, sondern weigert sich', async () => {
+      // Der gefährlichste Fall dieser Datei. Gesperrt gibt die Ablage nichts
+      // heraus — und ein `lies`, das nichts findet, heisst hier sonst „dieses
+      // Gerät hat noch keine Identität". Ohne Schranke liefe der Weg auf den
+      // Neuanlage-Zweig zu und überschriebe die bestehende Identität mitsamt
+      // allen Sitzungen.
+      installiereLocalStorage()
+      setzeAngemeldetesKonto(10)
+      setzeInhaltsSchluessel(await generateAesGcmKey())
+      setzeSiegelAktiv(true)
+
+      platte.clear()
+      const echtes = await eigenesGeraet()
+      const zeilenVorher = new Map(platte)
+
+      clearGeraeteMemory()
+      setzeInhaltsSchluessel(null)
+
+      await expect(eigenesGeraet()).rejects.toThrow(/gesperrt/)
+      expect([...platte.entries()]).toEqual([...zeilenVorher.entries()])
+
+      // Nach dem Entsperren steht dieselbe Identität wieder da, nicht eine neue.
+      setzeInhaltsSchluessel(null)
+      expect(echtes.kennung).toMatch(/^[0-9a-f]{32}$/)
+    })
   })
 
   it('legt beim ersten Mal Kennung und Paar an', async () => {

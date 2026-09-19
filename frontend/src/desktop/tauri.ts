@@ -357,27 +357,95 @@ export async function verifiziereBiometrie(nachricht?: string): Promise<boolean>
 }
 
 /**
+ * Die Schlüsselfächer im Credential Store des Betriebssystems.
+ *
+ * Tresor und Messenger haben getrennte PINs und deshalb getrennte Fächer. Wer
+ * den Tresor entsperrt, hat damit nicht den Messenger entsperrt.
+ *
+ * `FACH_TRESOR` heißt so, wie es immer hieß: bestehende Einrichtungen liegen
+ * unter diesem Namen, ein neuer Name wäre für sie ein leeres Fach.
+ */
+export const FACH_TRESOR = 'vault_biometric_key'
+export const FACH_MESSENGER = 'messenger_biometric_key'
+export const FACH_MESSENGER_GERAET = 'messenger_device_secret'
+
+/**
  * Speichert das biometrisch geschützte Schlüsselgeheimnis im Windows Credential Manager.
  */
-export async function biometrieSpeichern(geheimnis: string): Promise<void> {
-  await invoke('biometrie_speichern', { geheimnis })
+export async function biometrieSpeichern(geheimnis: string, fach?: string): Promise<void> {
+  await invoke('biometrie_speichern', { geheimnis, fach })
 }
 
 /**
  * Fordert Windows Hello an und liefert das Schlüsselgeheimnis aus dem Windows Credential Store
  * erst nach erfolgreicher Authentifizierung zurück.
  */
-export async function biometrieEntsperren(nachricht?: string): Promise<string> {
-  return await invoke<string>('biometrie_entsperren', { nachricht })
+export async function biometrieEntsperren(nachricht?: string, fach?: string): Promise<string> {
+  return await invoke<string>('biometrie_entsperren', { nachricht, fach })
 }
 
 /**
  * Löscht das biometrische Schlüsselgeheimnis aus dem Windows Credential Manager.
  */
-export async function biometrieLoeschen(): Promise<void> {
+export async function biometrieLoeschen(fach?: string): Promise<void> {
   try {
-    await invoke('biometrie_loeschen')
+    await invoke('biometrie_loeschen', { fach })
   } catch {}
+}
+
+/**
+ * Kann diese Plattform überhaupt ein Geheimnis verwahren?
+ *
+ * Nicht dasselbe wie `pruefeBiometrieVerfuegbar`: fragen können und verwahren
+ * können sind zwei Dinge. Wer nur die Abfrage prüft, bietet einen
+ * Schnelleinstieg an, der beim Einrichten scheitert — genau das tat der Tresor
+ * auf Android bis 09/2026, als dort noch kein Schlüsselspeicher angebunden war.
+ *
+ * Im Web ist die Antwort weiter nein, und das bleibt so (SEC-CRIT-01).
+ */
+export async function biometrieSpeicherVerfuegbar(): Promise<boolean> {
+  try {
+    return await invoke<boolean>('biometrie_speicher_verfuegbar')
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Fragt der Schlüsselspeicher beim **Ablegen** von sich aus nach einer
+ * Bestätigung?
+ *
+ * Windows nein: der Credential Store nimmt ein Geheimnis wortlos entgegen,
+ * Hello kommt erst beim Lesen. Dort muss die Anwendung vorher einmal
+ * ausdrücklich bestätigen lassen.
+ *
+ * Android ja: der Keystore-Schlüssel hängt schon zum Verschlüsseln an einer
+ * frischen Bestätigung. Eine zusätzliche Abfrage davor wäre derselbe
+ * Fingerabdruck zweimal hintereinander, und das sieht nicht nach Sorgfalt aus,
+ * sondern nach einem Fehler.
+ */
+export async function biometrieSpeicherFragtSelbst(): Promise<boolean> {
+  try {
+    return await invoke<boolean>('biometrie_speicher_fragt_selbst')
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Das Gerätegeheimnis des Messengers, oder `null`, wenn keines hinterlegt ist
+ * oder diese Plattform keinen geschützten Speicher hat (Web, Android).
+ *
+ * Wird ohne Biometrie-Abfrage gelesen: es entsperrt nichts allein, sondern geht
+ * nur als zweite Hälfte in die Ableitung aus dem PIN ein. Sein Zweck ist, dass
+ * eine kopierte Festplatte auf einem fremden Rechner wertlos bleibt.
+ */
+export async function messengerGeraetegeheimnis(): Promise<string | null> {
+  try {
+    return (await invoke<string | null>('messenger_geraetegeheimnis')) ?? null
+  } catch {
+    return null
+  }
 }
 
 // ── Automatischer Updater ────────────────────────────────────────────────

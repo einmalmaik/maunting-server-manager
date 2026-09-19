@@ -675,34 +675,91 @@ fn hauptfenster_verstecken(app: tauri::AppHandle) -> Result<(), String> {
 
 /// Prüft, ob Windows Hello oder biometrische Authentifizierung verfügbar ist.
 #[tauri::command(async)]
-async fn biometrie_verfuegbar() -> bool {
-    biometrie::pruefe_verfuegbarkeit().await
+async fn biometrie_verfuegbar(app: tauri::AppHandle) -> bool {
+    biometrie::pruefe_verfuegbarkeit(&app).await
 }
 
 /// Fordert den Benutzer zur biometrischen Bestätigung (Windows Hello) auf.
 #[tauri::command(async)]
-async fn biometrie_verifizieren(nachricht: Option<String>) -> Result<bool, String> {
+async fn biometrie_verifizieren(app: tauri::AppHandle, nachricht: Option<String>) -> Result<bool, String> {
     let msg = nachricht.unwrap_or_else(|| "Tresor entsperren".to_string());
-    biometrie::verifiziere_benutzer(&msg).await
+    biometrie::verifiziere_benutzer(&app, &msg).await
 }
 
-/// Speichert das biometrische Geheimnis im geschützten Windows Credential Manager.
-#[tauri::command]
-fn biometrie_speichern(geheimnis: String) -> Result<(), String> {
-    biometrie::speichere_biometrie_geheimnis(&geheimnis)
+/// Das angesprochene Schlüsselfach. Fehlt die Angabe, ist der Tresor gemeint —
+/// er war vor der Trennung von Tresor und Messenger der einzige Nutzer.
+fn fach_oder_tresor(fach: Option<String>) -> String {
+    fach.unwrap_or_else(|| biometrie::FACH_TRESOR.to_string())
 }
 
-/// Fordert Windows Hello an und liest das Geheimnis erst nach erfolgreicher Authentifizierung aus.
+/// Speichert das biometrische Geheimnis im geschützten Schlüsselspeicher des
+/// Betriebssystems.
+///
+/// `async`, weil der Android-Keystore vor dem Ablegen selbst nach einer
+/// Bestätigung fragt: auf dem Hauptthread stünde die Anwendung, solange der
+/// Fingerabdruck-Dialog offen ist — und der Dialog käme gar nicht erst.
 #[tauri::command(async)]
-async fn biometrie_entsperren(nachricht: Option<String>) -> Result<String, String> {
-    let msg = nachricht.unwrap_or_else(|| "Tresor entsperren".to_string());
-    biometrie::entsperre_mit_biometrie(&msg).await
+async fn biometrie_speichern(
+    app: tauri::AppHandle,
+    geheimnis: String,
+    fach: Option<String>,
+) -> Result<(), String> {
+    biometrie::speichere_biometrie_geheimnis(&app, &fach_oder_tresor(fach), &geheimnis)
 }
 
-/// Entfernt das biometrische Geheimnis aus dem Windows Credential Manager.
+/// Fordert die Bestätigung an und gibt das Geheimnis erst danach heraus.
+#[tauri::command(async)]
+async fn biometrie_entsperren(
+    app: tauri::AppHandle,
+    nachricht: Option<String>,
+    fach: Option<String>,
+) -> Result<String, String> {
+    let msg = nachricht.unwrap_or_else(|| "Tresor entsperren".to_string());
+    biometrie::entsperre_mit_biometrie(&app, &fach_oder_tresor(fach), &msg).await
+}
+
+/// Entfernt das biometrische Geheimnis aus dem Schlüsselspeicher.
+#[tauri::command(async)]
+async fn biometrie_loeschen(app: tauri::AppHandle, fach: Option<String>) -> Result<(), String> {
+    biometrie::loesche_biometrie_geheimnis(&app, &fach_oder_tresor(fach))
+}
+
+/// Meldet, ob diese Plattform ein Geheimnis verwahren kann.
+///
+/// Nicht dasselbe wie `biometrie_verfuegbar`: fragen können und verwahren können
+/// sind zwei Dinge. Ohne diese Unterscheidung wird ein Schnelleinstieg
+/// angeboten, der beim Einrichten scheitert.
 #[tauri::command]
-fn biometrie_loeschen() -> Result<(), String> {
-    biometrie::loesche_biometrie_geheimnis()
+fn biometrie_speicher_verfuegbar(app: tauri::AppHandle) -> bool {
+    biometrie::geheimnisspeicher_verfuegbar(&app)
+}
+
+/// Fragt der Schlüsselspeicher beim Ablegen von sich aus nach einer Bestätigung?
+///
+/// Android ja, Windows nein. Wer einen Schnelleinstieg einrichtet, soll genau
+/// einmal bestätigen: auf Windows tut das die Anwendung vorher, auf Android der
+/// Keystore selbst. Ohne diese Auskunft fragte Android zweimal hintereinander.
+#[tauri::command]
+fn biometrie_speicher_fragt_selbst() -> bool {
+    biometrie::speicher_fragt_selbst()
+}
+
+/// Das Gerätegeheimnis des Messengers, falls eines hinterlegt ist.
+///
+/// Ohne Abfrage, siehe `biometrie::lies_geraetegeheimnis`. `None` heißt „noch
+/// keines da" — dann erzeugt das Frontend eines und legt es über
+/// `biometrie_speichern` im Fach `messenger_device_secret` ab.
+///
+/// Der Zufall kommt aus dem Browser und nicht von hier. Nicht aus Bequemlichkeit:
+/// er stammt dort aus `crypto.getRandomValues`, derselben Quelle, aus der schon
+/// jeder Nachrichtenschlüssel kommt. Ein eigener Zufallsgenerator in Rust wäre
+/// eine zusätzliche Abhängigkeit für eine Aufgabe, die längst gelöst ist.
+///
+/// `async` aus demselben Grund wie `biometrie_speichern`: auf Android geht der
+/// Weg über das Kotlin-Plugin, und der hält den Faden auf.
+#[tauri::command(async)]
+async fn messenger_geraetegeheimnis(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    biometrie::lies_geraetegeheimnis(&app)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -741,7 +798,13 @@ pub fn run() {
     #[cfg(target_os = "android")]
     {
         builder = builder
+            // Die reine Bestätigung (ohne Geheimnis) — die kann das offizielle
+            // Plugin, und `biometrie::verifiziere_benutzer` greift darauf zu.
             .plugin(tauri_plugin_biometric::init())
+            // Der Schlüsselspeicher selbst. Das offizielle Plugin kann fragen,
+            // aber nichts verwahren; dieses hier hängt am Android-Keystore und
+            // ist das Gegenstück zum Credential Store auf Windows.
+            .plugin(biometrie::init_android_schluesselfach())
             .plugin(updater::init_android_installer());
     }
 
@@ -789,6 +852,9 @@ pub fn run() {
             biometrie_speichern,
             biometrie_entsperren,
             biometrie_loeschen,
+            biometrie_speicher_verfuegbar,
+            biometrie_speicher_fragt_selbst,
+            messenger_geraetegeheimnis,
             updater::update_pruefen,
             updater::update_installieren,
             updater::app_neu_starten

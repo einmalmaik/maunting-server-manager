@@ -14,7 +14,11 @@
 import { argon2idRaw } from '@msdis/shield/kdf'
 import { SecureBuffer } from '@msdis/shield/secure-memory'
 import { sha256Hex } from '@msdis/shield/integrity'
-import { pruefeBiometrieVerfuegbar, verifiziereBiometrie } from '../tauri'
+import {
+  biometrieSpeicherVerfuegbar,
+  pruefeBiometrieVerfuegbar,
+  verifiziereBiometrie,
+} from '../tauri'
 
 export { SecureBuffer }
 
@@ -295,6 +299,13 @@ async function promptAndroidBiometric(title?: string): Promise<boolean> {
 }
 
 export async function isBiometricsAvailable(): Promise<boolean> {
+  // Ein Schnelleinstieg braucht zweierlei: eine Bestätigung **und** einen Platz
+  // für das Geheimnis. Bis 09/2026 wurde hier nur das erste geprüft. Auf
+  // Android sagte `checkAndroidBiometric()` deshalb „ja", der Tresor bot den
+  // Schnelleinstieg an — und `biometrieSpeichern` scheiterte beim Einrichten am
+  // fehlenden Speicher. Fragen ohne Verwahren nützt niemandem.
+  if (!(await biometrieSpeicherVerfuegbar())) return false
+
   // 1. In Tauri / Desktop: Prüfe native Windows Hello / OS Biometrie über Rust
   try {
     const nativeAvailable = await pruefeBiometrieVerfuegbar()
