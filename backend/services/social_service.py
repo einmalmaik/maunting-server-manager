@@ -420,6 +420,15 @@ class SocialService:
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     @classmethod
+    def derive_user_device_mailbox_id(cls, user_id: int) -> str:
+        """Deterministische Hash-Berechnung der blinden Geräte-Mailbox-ID für die Geräte eines Benutzers.
+
+        Identisch zur Formatdefinition in frontend/src/services/e2eeCrypto.ts.
+        """
+        raw = f"msm:devices:{user_id}"
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    @classmethod
     def can_message_user(cls, db: Session, sender_id: int, target_user_id: int) -> tuple[bool, str | None]:
         """Prüft Berechtigung zum Senden von Direktnachrichten zwischen zwei Benutzern.
 
@@ -1014,7 +1023,15 @@ class SocialService:
 
         if sender_user_id:
             cls.assert_social_enabled(db)
-            if recipient_id:
+            user_device_box = cls.derive_user_device_mailbox_id(sender_user_id)
+            if clean_mailbox == user_device_box or (recipient_id and recipient_id == sender_user_id):
+                if clean_mailbox != user_device_box:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Mailbox-ID stimmt nicht mit der Geräte-Sync-Mailbox überein.",
+                    )
+                target_recipient_id = sender_user_id
+            elif recipient_id:
                 expected_mailbox = cls.derive_blind_mailbox_id(sender_user_id, recipient_id)
                 min_i, max_i = min(sender_user_id, recipient_id), max(sender_user_id, recipient_id)
                 legacy_mailbox = hashlib.sha256(f"msm-e2ee-box:{min_i}:{max_i}:".encode("utf-8")).hexdigest()
@@ -1084,6 +1101,9 @@ class SocialService:
                                     .all()
                                 ]
                                 break
+
+            if target_recipient_id is None and not group_member_ids:
+                raise HTTPException(status_code=403, detail="Keine Berechtigung für diese Mailbox.")
 
         # Idempotenz-Prüfung: Erst NACH erfolgreicher Autorisierung prüfen,
         # ob dieser Umschlag bereits mit dieser client_uuid existiert.
@@ -1163,17 +1183,18 @@ class SocialService:
 
         if target_recipient_id and sender_user_id:
             SyncEventService.publish(msg_payload, user_id=target_recipient_id)
-            SyncEventService.publish(msg_payload, user_id=sender_user_id)
-            # Push-Dispatching für Offline-Empfänger vorbereiten (strikte Echo- & Foreground-Prüfung)
-            NotificationService.prepare_push_dispatch(
-                target_user_id=target_recipient_id,
-                sender_user_id=sender_user_id,
-                title="Neue Nachricht",
-                is_e2ee=True,
-                is_control=is_control,
-                control_type=control_type,
-                has_active_foreground_connection=SyncEventService.has_active_subscribers(target_recipient_id),
-            )
+            if target_recipient_id != sender_user_id:
+                SyncEventService.publish(msg_payload, user_id=sender_user_id)
+                # Push-Dispatching für Offline-Empfänger vorbereiten (strikte Echo- & Foreground-Prüfung)
+                NotificationService.prepare_push_dispatch(
+                    target_user_id=target_recipient_id,
+                    sender_user_id=sender_user_id,
+                    title="Neue Nachricht",
+                    is_e2ee=True,
+                    is_control=is_control,
+                    control_type=control_type,
+                    has_active_foreground_connection=SyncEventService.has_active_subscribers(target_recipient_id),
+                )
         elif group_member_ids:
             # Gruppen-Nachrichten zielgerichtet nur an Mitglieder ausliefern (Zero Privacy Leak)
             for g_uid in group_member_ids:
@@ -1272,7 +1293,8 @@ class SocialService:
             for fid in friend_ids
         ]
 
-        all_mids = list(set(direct_mids) | set(group_mids) | set(friend_mids))
+        device_mid = cls.derive_user_device_mailbox_id(uid)
+        all_mids = list(set(direct_mids) | set(group_mids) | set(friend_mids) | {device_mid})
         if not all_mids:
             return []
 
