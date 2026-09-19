@@ -459,4 +459,56 @@ def test_calendar_categories_and_visibility(db_session, test_user):
         )
 
 
+def test_calendar_client_e2ee_opaque_storage(db_session, test_user):
+    """Beweist, dass client-seitig verschluesselte Daten (sv-cal-v1:) vom Server nicht angefasst werden."""
+    from sqlalchemy import text
+
+    client_cipher_title = "sv-cal-v1:abcdef1234567890base64title"
+    client_cipher_desc = "sv-cal-v1:fedcba0987654321base64desc"
+    client_cipher_loc = "sv-cal-v1:1122334455667788base64loc"
+
+    res = CalendarService.create_event(
+        db=db_session,
+        user=test_user,
+        title=client_cipher_title,
+        start_time="2026-08-27 10:00",
+        end_time="2026-08-27 11:00",
+        description=client_cipher_desc,
+        location=client_cipher_loc,
+    )
+
+    # In der DB muss exakt der Client-Ciphertext stehen
+    row = db_session.execute(
+        text("SELECT title, description, location FROM calendar_events WHERE event_uid = :uid"),
+        {"uid": res["event_id"]},
+    ).fetchone()
+    assert row[0] == client_cipher_title
+    assert row[1] == client_cipher_desc
+    assert row[2] == client_cipher_loc
+
+    # Beim Abruf erhaelt der Client den Ciphertext unveraendert zur client-seitigen Entschluesselung
+    events = CalendarService.get_events(db_session, test_user)
+    ev = next(e for e in events if e["event_id"] == res["event_id"])
+    assert ev["title"] == client_cipher_title
+    assert ev["description"] == client_cipher_desc
+    assert ev["location"] == client_cipher_loc
+
+    # Update mit neuem Client-Ciphertext
+    new_cipher_title = "sv-cal-v1:new9876543210title"
+    upd = CalendarService.update_event(
+        db=db_session,
+        user=test_user,
+        event_id=res["event_id"],
+        title=new_cipher_title,
+    )
+    assert upd["title"] == new_cipher_title
+
+    upd_row = db_session.execute(
+        text("SELECT title FROM calendar_events WHERE event_uid = :uid"),
+        {"uid": res["event_id"]},
+    ).fetchone()
+    assert upd_row[0] == new_cipher_title
+
+
+
 

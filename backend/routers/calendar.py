@@ -22,7 +22,7 @@ router = APIRouter(prefix="/api/calendar", tags=["calendar"])
 
 
 class CalendarEventCreate(BaseModel):
-    title: str = Field(..., min_length=1, max_length=255)
+    title: str = Field(..., min_length=1, max_length=65536)
     start_time: str
     end_time: str
     description: str | None = None
@@ -36,7 +36,7 @@ class CalendarEventCreate(BaseModel):
 
 
 class CalendarEventUpdate(BaseModel):
-    title: str | None = Field(None, min_length=1, max_length=255)
+    title: str | None = Field(None, min_length=1, max_length=65536)
     start_time: str | None = None
     end_time: str | None = None
     description: str | None = None

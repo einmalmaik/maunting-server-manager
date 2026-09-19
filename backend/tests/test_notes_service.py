@@ -212,3 +212,49 @@ def test_notes_automatic_migration_of_legacy_plaintext(db_session, test_user):
     assert after_row[1] != legacy_content
     assert legacy_content not in after_row[1]
 
+
+def test_notes_client_e2ee_opaque_storage(db_session, test_user):
+    """Beweist, dass client-seitig verschluesselte Daten (sv-note-v1:) vom Server nicht angefasst werden."""
+    from sqlalchemy import text
+
+    client_cipher_title = "sv-note-v1:abcdef1234567890base64title"
+    client_cipher_content = "sv-note-v1:fedcba0987654321base64content"
+
+    note = NotesService.create_note(
+        db_session,
+        user=test_user,
+        title=client_cipher_title,
+        content=client_cipher_content,
+        category="personal",
+    )
+
+    # In der DB muss exakt der Client-Ciphertext stehen
+    row = db_session.execute(
+        text("SELECT title, content FROM notes WHERE note_uid = :uid"),
+        {"uid": note["note_uid"]},
+    ).fetchone()
+    assert row[0] == client_cipher_title
+    assert row[1] == client_cipher_content
+
+    # Beim Abruf erhaelt der Client den Ciphertext unveraendert zur client-seitigen Entschluesselung
+    fetched = NotesService.get_note(db_session, user=test_user, note_id_or_uid=note["note_uid"])
+    assert fetched["title"] == client_cipher_title
+    assert fetched["content"] == client_cipher_content
+
+    # Update mit neuem Client-Ciphertext
+    new_cipher_title = "sv-note-v1:new9876543210title"
+    updated = NotesService.update_note(
+        db_session,
+        user=test_user,
+        note_id_or_uid=note["note_uid"],
+        title=new_cipher_title,
+    )
+    assert updated["title"] == new_cipher_title
+
+    upd_row = db_session.execute(
+        text("SELECT title FROM notes WHERE note_uid = :uid"),
+        {"uid": note["note_uid"]},
+    ).fetchone()
+    assert upd_row[0] == new_cipher_title
+
+

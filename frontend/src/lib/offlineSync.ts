@@ -15,6 +15,16 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { api, apiStream } from '@/api/client'
 import type { NoteItem } from '@/pages/Notes'
 import type { CalendarEventItem } from '@/pages/Calendar'
+import {
+  NOTE_CIPHERTEXT_PREFIX,
+  CALENDAR_CIPHERTEXT_PREFIX,
+  encryptNoteTitle,
+  encryptNoteContent,
+  decryptNoteTitle,
+  decryptNoteContent,
+  encryptCalendarField,
+  decryptCalendarField,
+} from '@/services/notesCalendarCrypto'
 
 export const STORAGE_KEYS = {
   NOTES: 'msm_offline_notes',
@@ -340,7 +350,7 @@ export async function replayOutbox(): Promise<{ processed: number; failed: numbe
               const newUid = res.note_uid
               const notes = getOfflineNotes()
               const updated = notes.map((n) =>
-                n.note_uid === oldUid ? { ...n, ...res, note_uid: newUid } : n
+                n.note_uid === oldUid ? { ...n, ...res, title: n.title, content: n.content, note_uid: newUid } : n
               )
               setOfflineNotes(updated)
 
@@ -384,7 +394,7 @@ export async function replayOutbox(): Promise<{ processed: number; failed: numbe
               const newUid = res.event_id
               const events = getOfflineCalendarEvents()
               const updated = events.map((e) =>
-                e.event_id === oldUid ? { ...e, ...res, event_id: newUid } : e
+                e.event_id === oldUid ? { ...e, ...res, title: e.title, description: e.description, location: e.location, event_id: newUid } : e
               )
               setOfflineCalendarEvents(updated)
 
@@ -498,7 +508,14 @@ export async function loadNotesOfflineFirst(_options?: {
   try {
     const data = await api<NoteItem[]>('/notes?include_archived=true')
     if (Array.isArray(data)) {
-      localNotes = mergeNotesWithServer(data)
+      const decryptedData: NoteItem[] = await Promise.all(
+        data.map(async (n) => ({
+          ...n,
+          title: await decryptNoteTitle(n.title, n.note_uid, undefined, n.user_id),
+          content: await decryptNoteContent(n.content, n.note_uid, undefined, n.user_id),
+        }))
+      )
+      localNotes = mergeNotesWithServer(decryptedData)
     }
   } catch {
     isOffline = true
@@ -527,6 +544,16 @@ export async function saveNoteOffline(
   const localNotes = getOfflineNotes()
   let resultNote: NoteItem
 
+  const targetUid = editingNote ? editingNote.note_uid : 'local-note-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7)
+  const encryptedTitle = await encryptNoteTitle(payload.title, targetUid)
+  const encryptedContent = payload.content !== undefined ? await encryptNoteContent(payload.content, targetUid) : ''
+
+  const wirePayload = {
+    ...payload,
+    title: encryptedTitle,
+    content: encryptedContent,
+  }
+
   if (editingNote) {
     resultNote = {
       ...editingNote,
@@ -551,10 +578,9 @@ export async function saveNoteOffline(
       payload,
     })
   } else {
-    const tempUid = 'local-note-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7)
     resultNote = {
       id: Date.now(),
-      note_uid: tempUid,
+      note_uid: targetUid,
       title: payload.title,
       content: payload.content || '',
       category: payload.category || 'personal',
@@ -574,7 +600,7 @@ export async function saveNoteOffline(
     enqueueMutation({
       entity: 'note',
       action: 'create',
-      entityId: tempUid,
+      entityId: targetUid,
       payload,
     })
   }
@@ -711,11 +737,12 @@ export async function toggleCheckItemOffline(
   const updated = localNotes.map((n) => (n.note_uid === note.note_uid ? updatedNote : n))
   setOfflineNotes(updated)
 
+  const encContent = await encryptNoteContent(updatedContent, note.note_uid)
   enqueueMutation({
     entity: 'note',
     action: 'update',
     entityId: note.note_uid,
-    payload: { content: updatedContent },
+    payload: { content: encContent },
   })
 
   if (typeof navigator === 'undefined' || navigator.onLine) {
@@ -745,7 +772,15 @@ export async function loadCalendarEventsOfflineFirst(
       '/calendar/events?start=' + encodeURIComponent(rangeStart) + '&end=' + encodeURIComponent(rangeEnd) + catParam
     )
     if (Array.isArray(data)) {
-      localEvents = mergeCalendarWithServer(data)
+      const decryptedData: CalendarEventItem[] = await Promise.all(
+        data.map(async (ev) => ({
+          ...ev,
+          title: await decryptCalendarField(ev.title, ev.event_id, 'title'),
+          description: ev.description ? await decryptCalendarField(ev.description, ev.event_id, 'description') : '',
+          location: ev.location ? await decryptCalendarField(ev.location, ev.event_id, 'location') : '',
+        }))
+      )
+      localEvents = mergeCalendarWithServer(decryptedData)
     }
   } catch {
     isOffline = true
@@ -790,6 +825,18 @@ export async function saveCalendarEventOffline(
   const localEvents = getOfflineCalendarEvents()
   let resultEvent: CalendarEventItem
 
+  const targetUid = formEventId || ('local-evt-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7))
+  const encryptedTitle = await encryptCalendarField(payload.title, targetUid, 'title')
+  const encryptedDesc = payload.description ? await encryptCalendarField(payload.description, targetUid, 'description') : (payload.description ?? '')
+  const encryptedLoc = payload.location ? await encryptCalendarField(payload.location, targetUid, 'location') : (payload.location ?? '')
+
+  const wirePayload = {
+    ...payload,
+    title: encryptedTitle,
+    description: encryptedDesc,
+    location: encryptedLoc,
+  }
+
   if (formEventId) {
     const existing = localEvents.find((e) => e.event_id === formEventId)
     resultEvent = {
@@ -822,10 +869,9 @@ export async function saveCalendarEventOffline(
       payload,
     })
   } else {
-    const tempUid = 'local-evt-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7)
     resultEvent = {
       id: Date.now(),
-      event_id: tempUid,
+      event_id: targetUid,
       title: payload.title,
       start: payload.start_time,
       end: payload.end_time,
@@ -845,7 +891,7 @@ export async function saveCalendarEventOffline(
     enqueueMutation({
       entity: 'calendar',
       action: 'create',
-      entityId: tempUid,
+      entityId: targetUid,
       payload,
     })
   }
@@ -1086,14 +1132,41 @@ export function handleIncomingSyncEvent(eventName: string, data: SyncEventPayloa
         if (data.action === 'deleted') {
           const current = getOfflineNotes()
           setOfflineNotes(current.filter((n) => n.note_uid !== id))
+          window.dispatchEvent(new CustomEvent('msm:notes-updated', { detail: data }))
         } else if (data.data && typeof data.data === 'object') {
-          const current = getOfflineNotes()
-          if (data.action === 'created') {
-            if (!current.some((n) => n.note_uid === id)) {
-              setOfflineNotes([data.data, ...current])
+          const raw = data.data
+          const isEncrypted = typeof raw.title === 'string' && raw.title.startsWith(NOTE_CIPHERTEXT_PREFIX)
+          if (isEncrypted) {
+            void (async () => {
+              const decryptedData: NoteItem = {
+                ...raw,
+                title: await decryptNoteTitle(raw.title, id, undefined, raw.user_id),
+                content: await decryptNoteContent(raw.content, id, undefined, raw.user_id),
+              }
+              const current = getOfflineNotes()
+              if (data.action === 'created') {
+                if (!current.some((n) => n.note_uid === id)) {
+                  setOfflineNotes([decryptedData, ...current])
+                }
+              } else if (data.action === 'updated') {
+                setOfflineNotes(current.map((n) => (n.note_uid === id ? { ...n, ...decryptedData } : n)))
+              }
+              window.dispatchEvent(new CustomEvent('msm:notes-updated', { detail: { ...data, data: decryptedData } }))
+              window.dispatchEvent(new CustomEvent('msm:sync-event', { detail: { ...data, data: decryptedData } }))
+            })()
+            return
+          } else {
+            const current = getOfflineNotes()
+            if (data.action === 'created') {
+              if (!current.some((n) => n.note_uid === id)) {
+                setOfflineNotes([raw, ...current])
+              }
+            } else if (data.action === 'updated') {
+              setOfflineNotes(current.map((n) => (n.note_uid === id ? { ...n, ...raw } : n)))
             }
-          } else if (data.action === 'updated') {
-            setOfflineNotes(current.map((n) => (n.note_uid === id ? { ...n, ...data.data } : n)))
+            window.dispatchEvent(new CustomEvent('msm:notes-updated', { detail: data }))
+            window.dispatchEvent(new CustomEvent('msm:sync-event', { detail: data }))
+            return
           }
         }
       }
@@ -1103,14 +1176,42 @@ export function handleIncomingSyncEvent(eventName: string, data: SyncEventPayloa
         if (data.action === 'deleted') {
           const current = getOfflineCalendarEvents()
           setOfflineCalendarEvents(current.filter((e) => e.event_id !== id))
+          window.dispatchEvent(new CustomEvent('msm:calendar-updated', { detail: data }))
         } else if (data.data && typeof data.data === 'object') {
-          const current = getOfflineCalendarEvents()
-          if (data.action === 'created') {
-            if (!current.some((e) => e.event_id === id)) {
-              setOfflineCalendarEvents([...current, data.data])
+          const raw = data.data
+          const isEncrypted = typeof raw.title === 'string' && raw.title.startsWith(CALENDAR_CIPHERTEXT_PREFIX)
+          if (isEncrypted) {
+            void (async () => {
+              const decryptedData: CalendarEventItem = {
+                ...raw,
+                title: await decryptCalendarField(raw.title, id, 'title'),
+                description: raw.description ? await decryptCalendarField(raw.description, id, 'description') : '',
+                location: raw.location ? await decryptCalendarField(raw.location, id, 'location') : '',
+              }
+              const current = getOfflineCalendarEvents()
+              if (data.action === 'created') {
+                if (!current.some((e) => e.event_id === id)) {
+                  setOfflineCalendarEvents([...current, decryptedData])
+                }
+              } else if (data.action === 'updated') {
+                setOfflineCalendarEvents(current.map((e) => (e.event_id === id ? { ...e, ...decryptedData } : e)))
+              }
+              window.dispatchEvent(new CustomEvent('msm:calendar-updated', { detail: { ...data, data: decryptedData } }))
+              window.dispatchEvent(new CustomEvent('msm:sync-event', { detail: { ...data, data: decryptedData } }))
+            })()
+            return
+          } else {
+            const current = getOfflineCalendarEvents()
+            if (data.action === 'created') {
+              if (!current.some((e) => e.event_id === id)) {
+                setOfflineCalendarEvents([...current, raw])
+              }
+            } else if (data.action === 'updated') {
+              setOfflineCalendarEvents(current.map((e) => (e.event_id === id ? { ...e, ...raw } : e)))
             }
-          } else if (data.action === 'updated') {
-            setOfflineCalendarEvents(current.map((e) => (e.event_id === id ? { ...e, ...data.data } : e)))
+            window.dispatchEvent(new CustomEvent('msm:calendar-updated', { detail: data }))
+            window.dispatchEvent(new CustomEvent('msm:sync-event', { detail: data }))
+            return
           }
         }
       }

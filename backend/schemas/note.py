@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class NoteCreate(BaseModel):
-    title: str = Field(min_length=1, max_length=255)
+    title: str = Field(min_length=1, max_length=65536)
     content: str = Field(default="")
     category: str = Field(default="personal", max_length=64)
     color: str | None = Field(default="primary", max_length=32)
@@ -17,7 +17,7 @@ class NoteCreate(BaseModel):
 
 
 class NoteUpdate(BaseModel):
-    title: str | None = Field(default=None, min_length=1, max_length=255)
+    title: str | None = Field(default=None, min_length=1, max_length=65536)
     content: str | None = None
     category: str | None = Field(default=None, max_length=64)
     color: str | None = Field(default=None, max_length=32)

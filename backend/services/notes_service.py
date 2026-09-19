@@ -26,6 +26,9 @@ from services.sync_event_service import SyncEventService
 _log = logging.getLogger("msm.notes")
 
 
+NOTE_CIPHERTEXT_PREFIX = "sv-note-v1:"
+
+
 def _iso_utc(dt: datetime) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
@@ -48,43 +51,45 @@ class NotesService:
 
     @classmethod
     def _decrypt_or_migrate(cls, db: Session, note: Note) -> tuple[str, str]:
-        """Entschluesselt title und content.
-        
-        Falls einer der Werte noch im Klartext in der DB liegt, wird er sofort
-        mit DIS (AES-256-GCM) verschluesselt und in der DB persistiert.
-        """
-        aad = _note_aad(note.user_id, note.note_uid)
-        needs_persist = False
-
-        # 1. Titel
+        """Entschluesselt title und content bei Altdaten; E2EE-Ciphertexte (sv-note-v1:) bleiben unangetastet."""
         raw_title = note.title or ""
-        try:
-            title = DisClient.decrypt(raw_title, aad=aad)
-        except DisDecryptionError:
-            # Klartext-Altdaten: sofort verschluesseln
-            title = raw_title
-            note.title = DisClient.encrypt(title, aad=aad)
-            needs_persist = True
-
-        # 2. Inhalt
         raw_content = note.content or ""
-        if not raw_content:
+
+        # Wenn der Datensatz bereits client-seitig verschluesselt ist, bleibt der Server blind
+        if raw_title.startswith(NOTE_CIPHERTEXT_PREFIX):
+            title = raw_title
+        else:
+            aad = _note_aad(note.user_id, note.note_uid)
+            try:
+                title = DisClient.decrypt(raw_title, aad=aad)
+            except DisDecryptionError:
+                # Klartext-Altdaten: sofort verschluesseln
+                title = raw_title
+                note.title = DisClient.encrypt(title, aad=aad)
+                try:
+                    db.commit()
+                    db.refresh(note)
+                except Exception as e:
+                    _log.warning("Fehler bei Altdaten-Verschluesselung der Notiz %s: %s", note.note_uid, e)
+                    db.rollback()
+
+        if raw_content.startswith(NOTE_CIPHERTEXT_PREFIX):
+            content = raw_content
+        elif not raw_content:
             content = ""
         else:
+            aad = _note_aad(note.user_id, note.note_uid)
             try:
                 content = DisClient.decrypt(raw_content, aad=aad)
             except DisDecryptionError:
                 content = raw_content
                 note.content = DisClient.encrypt(content, aad=aad)
-                needs_persist = True
-
-        if needs_persist:
-            try:
-                db.commit()
-                db.refresh(note)
-            except Exception as e:
-                _log.warning("Fehler bei Altdaten-Verschluesselung der Notiz %s: %s", note.note_uid, e)
-                db.rollback()
+                try:
+                    db.commit()
+                    db.refresh(note)
+                except Exception as e:
+                    _log.warning("Fehler bei Altdaten-Verschluesselung des Notiz-Inhalts %s: %s", note.note_uid, e)
+                    db.rollback()
 
         return title, content
 
@@ -98,15 +103,27 @@ class NotesService:
             title, content = cls._decrypt_or_migrate(db, note)
         else:
             # Best-effort Entschluesselung ohne DB-Persistierung
-            aad = _note_aad(note.user_id, note.note_uid)
-            try:
-                title = DisClient.decrypt(note.title, aad=aad)
-            except DisDecryptionError:
-                title = note.title
-            try:
-                content = DisClient.decrypt(note.content, aad=aad) if note.content else ""
-            except DisDecryptionError:
-                content = note.content or ""
+            raw_title = note.title or ""
+            raw_content = note.content or ""
+            if raw_title.startswith(NOTE_CIPHERTEXT_PREFIX):
+                title = raw_title
+            else:
+                aad = _note_aad(note.user_id, note.note_uid)
+                try:
+                    title = DisClient.decrypt(raw_title, aad=aad)
+                except DisDecryptionError:
+                    title = raw_title
+
+            if raw_content.startswith(NOTE_CIPHERTEXT_PREFIX):
+                content = raw_content
+            elif not raw_content:
+                content = ""
+            else:
+                aad = _note_aad(note.user_id, note.note_uid)
+                try:
+                    content = DisClient.decrypt(raw_content, aad=aad)
+                except DisDecryptionError:
+                    content = raw_content
 
         return {
             "id": note.id,
@@ -245,9 +262,18 @@ class NotesService:
         clean_content = content or ""
         aad = _note_aad(user.id, note_uid)
 
-        # Strikte DIS-Verschluesselung fuer die Datenbank
-        encrypted_title = DisClient.encrypt(clean_title, aad=aad)
-        encrypted_content = DisClient.encrypt(clean_content, aad=aad) if clean_content else ""
+        # Wenn client-seitiges E2EE verwendet wird (sv-note-v1:), speichert der Server blind
+        if clean_title.startswith(NOTE_CIPHERTEXT_PREFIX):
+            encrypted_title = clean_title
+        else:
+            encrypted_title = DisClient.encrypt(clean_title, aad=aad)
+
+        if clean_content.startswith(NOTE_CIPHERTEXT_PREFIX):
+            encrypted_content = clean_content
+        elif clean_content:
+            encrypted_content = DisClient.encrypt(clean_content, aad=aad)
+        else:
+            encrypted_content = ""
 
         note = Note(
             user_id=user.id,
@@ -311,9 +337,18 @@ class NotesService:
         aad = _note_aad(note.user_id, note.note_uid)
 
         if title is not None:
-            note.title = DisClient.encrypt(title.strip(), aad=aad)
+            clean_title = title.strip()
+            if clean_title.startswith(NOTE_CIPHERTEXT_PREFIX):
+                note.title = clean_title
+            else:
+                note.title = DisClient.encrypt(clean_title, aad=aad)
         if content is not None:
-            note.content = DisClient.encrypt(content, aad=aad) if content else ""
+            if content.startswith(NOTE_CIPHERTEXT_PREFIX):
+                note.content = content
+            elif content:
+                note.content = DisClient.encrypt(content, aad=aad)
+            else:
+                note.content = ""
         if category is not None:
             note.category = category.strip().lower()
         if color is not None:
