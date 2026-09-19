@@ -1100,6 +1100,54 @@ describe('Geräteübergreifendes Anruf-Handoff (Cross-Device)', () => {
     expect(toastInfo).toHaveBeenCalledWith('Der Anrufer hat aufgelegt.')
   })
 
+  it('handleCallSyncEvent: legt beim Anrufer auf, wenn der Angerufene ablehnt', async () => {
+    // Am laufenden System gefunden: der Anrufer sass nach der Ablehnung weiter
+    // im Raum und musste von Hand auflegen. Zwei Bedingungen trafen nie zu —
+    // `recipient_id` nennt in diesem Ereignis den Ablehnenden, und der Zustand
+    // steht längst auf `active`, weil der Anrufer den Raum schon beim Klingeln
+    // betritt.
+    await verbundenerAnruf()
+    expect(useCallStore.getState().state).toBe('active')
+
+    useCallStore.getState().handleCallSyncEvent({
+      type: 'direct_call_rejected',
+      signaling_token: 'raum-1',
+      rejected_by: 2,
+    })
+
+    expect(useCallStore.getState().state).toBe('idle')
+    expect(useCallStore.getState().raum).toBeNull()
+    expect(livekit.trenne).toHaveBeenCalled()
+    expect(toastInfo).toHaveBeenCalledWith('Der Anruf wurde abgelehnt.')
+  })
+
+  it('handleCallSyncEvent: eine Ablehnung aus einem fremden Raum lässt den Anruf stehen', async () => {
+    await verbundenerAnruf()
+
+    useCallStore.getState().handleCallSyncEvent({
+      type: 'direct_call_rejected',
+      signaling_token: 'raum-woanders',
+      rejected_by: 9,
+    })
+
+    expect(useCallStore.getState().state).toBe('active')
+  })
+
+  it('handleCallSyncEvent: eine späte Ablehnung beendet kein laufendes Gespräch', async () => {
+    // Wer nachgeholt wurde und ablehnt, während die beiden anderen sprechen,
+    // darf deren Gespräch nicht mitnehmen.
+    await verbundenerAnruf()
+    aktuellerRaum.tritt_bei('u2', 'bob')
+
+    useCallStore.getState().handleCallSyncEvent({
+      type: 'direct_call_rejected',
+      signaling_token: 'raum-1',
+      rejected_by: 3,
+    })
+
+    expect(useCallStore.getState().state).toBe('active')
+  })
+
   it('handleCallSyncEvent: verarbeitet group_call_started und group_call_ended', () => {
     useCallStore.getState().handleCallSyncEvent({
       type: 'group_call_started',

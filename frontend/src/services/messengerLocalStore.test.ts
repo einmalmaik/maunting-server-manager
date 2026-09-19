@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  entferneLokaleNachricht,
   loadLocalMessages,
   saveLocalMessages,
   updateMessageInLocalStore,
@@ -212,6 +213,44 @@ describe('messengerLocalStore (IndexedDB Chat Persistence & F5 Hydration)', () =
     // Nur über diesen Weg lässt sich noch eine Systemzeile hineinschreiben.
     await updateMessageInLocalStore(mid, 500, { isSystem: true })
     expect(await loadLocalMessages(mid)).toEqual([])
+  })
+
+  it('nimmt eine verworfene Nachricht wirklich aus der Ablage', async () => {
+    // Am laufenden System gefunden: `saveLocalMessages` schreibt nur. Die aus
+    // der Liste weggelassene Nachricht blieb in der Ablage stehen und kam beim
+    // nächsten Abgleich über `loadLocalMessages` zurück — die Nachricht mit der
+    // Uhr, die sich nicht löschen liess.
+    const mid = 'box-verworfen'
+    await saveLocalMessages(mid, [
+      {
+        blindMailboxId: mid,
+        id: 700,
+        clientUuid: 'bleibt',
+        senderId: 2,
+        text: 'Bleibt stehen',
+        createdAt: '2026-09-19T10:00:00.000Z',
+        isSelf: false,
+      },
+      {
+        blindMailboxId: mid,
+        id: 1758276000000,
+        clientUuid: 'haengt-fest',
+        senderId: 1,
+        text: 'Ging nie raus',
+        createdAt: '2026-09-19T10:01:00.000Z',
+        isSelf: true,
+        status: 'queued',
+      },
+    ])
+
+    await entferneLokaleNachricht(mid, { clientUuid: 'haengt-fest', id: 1758276000000 })
+
+    expect((await loadLocalMessages(mid)).map((m) => m.text)).toEqual(['Bleibt stehen'])
+
+    // Ein zweiter Aufruf ist kein Fehler, und ohne Kennung passiert nichts.
+    await entferneLokaleNachricht(mid, { clientUuid: 'haengt-fest' })
+    await entferneLokaleNachricht(mid, {})
+    expect((await loadLocalMessages(mid)).map((m) => m.text)).toEqual(['Bleibt stehen'])
   })
 
   it('findet einen abgelegten Umschlagklartext unter derselben Kennung wieder', async () => {

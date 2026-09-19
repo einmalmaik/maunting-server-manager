@@ -123,6 +123,25 @@ vi.mock('@/services/messengerLocalStore', async () => {
     saveLocalMessages: vi.fn(async (mid: string, msgs: any[]) => {
       nachrichten.set(mid, msgs)
     }),
+    // Die Ablage verliert eine Zeile nur, wenn jemand sie herausnimmt:
+    // `saveLocalMessages` schreibt nur. Der Stellvertreter muss das nachbilden,
+    // sonst prüfte der Test eine Ablage, die grosszügiger vergisst als die echte.
+    entferneLokaleNachricht: vi.fn(
+      async (mid: string, kennung: { clientUuid?: string; id?: number }) => {
+        const vorhanden = nachrichten.get(mid)
+        if (!vorhanden) return
+        nachrichten.set(
+          mid,
+          vorhanden.filter(
+            (m) =>
+              !(
+                (kennung.clientUuid !== undefined && m.clientUuid === kennung.clientUuid) ||
+                (typeof kennung.id === 'number' && m.id === kennung.id)
+              )
+          )
+        )
+      }
+    ),
     updateMessageInLocalStore: vi.fn(async () => {}),
     getLocalMailboxLastSyncedId: vi.fn(async () => 0),
     clearLocalMessengerStore: vi.fn(async () => {
@@ -1116,6 +1135,107 @@ describe('Messenger (Allround Chat)', () => {
   // und weil dieselbe Kennung in die Ablage ging, überlebte sie jedes
   // Neuladen. Es waren die Nachrichten, die zugestellt waren und trotzdem für
   // immer „in der Warteschlange" standen.
+  it('verwirft eine hängengebliebene Nachricht endgültig — aus Ansicht, Ablage und Warteschlange', async () => {
+    /**
+     * Am laufenden System gemeldet: eine Nachricht mit der Uhr liess sich
+     * löschen, stand aber Sekunden später wieder da. Zwei Ursachen, beide hier
+     * geprüft.
+     *
+     * `saveLocalMessages` schreibt nur — die weggelassene Zeile blieb in der
+     * Ablage stehen und kam beim nächsten Abgleich über `mischeVerlauf` zurück.
+     *
+     * Und die Warteschlange führt einen Auftrag je Zielgerät, auseinandergehalten
+     * durch `#<geraet>`; verglichen wurde mit der Kennung ohne Zusatz. Der
+     * Auftrag blieb also liegen und wäre später doch noch hinausgegangen. Der
+     * Sitzungsaufbau muss dabei stehen bleiben: ohne ihn findet die Gegenstelle
+     * für alles Spätere keine Sitzung.
+     */
+    const { entferneLokaleNachricht } = await import('@/services/messengerLocalStore')
+    const { baueZustellungen } = await import('@/services/ratchetSitzung')
+    const { getOutbox, setOutbox, enqueueMessageMutation } = await import('@/lib/offlineSync')
+
+    vi.mocked(baueZustellungen).mockImplementation(async (_k: any, _klartext: string, basis: string) => [
+      {
+        empfaengerId: 101,
+        zielGeraet: 'zielgeraet',
+        bootstrap: 'sv-e2ee-hybrid-v1:aufbau',
+        nachricht: 'sv-e2ee-dr-v1:1.testgeraet.zielgeraet.xx',
+        clientUuid: `${basis}#zielgeraet01`,
+        bootstrapClientUuid: `${basis}#izielgeraet01`,
+      },
+    ] as any)
+
+    const warteschlange: any[] = []
+    vi.mocked(enqueueMessageMutation).mockImplementation((p: any) => {
+      const auftrag = {
+        id: p.client_uuid,
+        entity: 'message' as const,
+        action: 'relay' as const,
+        entityId: p.blind_mailbox_id,
+        payload: p,
+        timestamp: '2026-09-19T10:00:00.000Z',
+        retryCount: 0,
+      }
+      warteschlange.push(auftrag)
+      return auftrag
+    })
+    vi.mocked(getOutbox).mockImplementation(() => warteschlange)
+
+    // Kein Netz für das Relais: die Nachricht bleibt in der Warteschlange.
+    vi.mocked(socialApi.relayE2eeEnvelope).mockRejectedValue(
+      Object.assign(new Error('Failed to fetch'), { status: 0 })
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/chat?userId=101']}>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Nachricht schreiben …')).toBeInTheDocument()
+    })
+
+    fireEvent.change(screen.getByPlaceholderText('Nachricht schreiben …'), {
+      target: { value: 'Geht nicht raus' },
+    })
+    fireEvent.click(screen.getByTitle('Senden'))
+
+    // Sitzungsaufbau und Nachricht liegen als zwei Aufträge in der Schlange.
+    await waitFor(() => {
+      expect(screen.getByTitle(/Warteschlange/)).toBeInTheDocument()
+      expect(warteschlange).toHaveLength(2)
+    })
+    const basisUuid = warteschlange[1].payload.client_uuid.split('#')[0]
+
+    fireEvent.click(screen.getByTitle('Nachricht für alle löschen'))
+
+    await waitFor(() => {
+      expect(entferneLokaleNachricht).toHaveBeenCalledWith(
+        'test-blind-mailbox',
+        expect.objectContaining({ clientUuid: basisUuid })
+      )
+    })
+
+    // Der Sitzungsaufbau bleibt, die Nachricht geht.
+    const neueSchlange = vi.mocked(setOutbox).mock.calls.at(-1)![0]
+    expect(neueSchlange.map((m: any) => m.payload.control_type)).toEqual(['dr-init'])
+
+    // Und sie kommt beim nächsten Abgleich nicht zurück.
+    expect(screen.queryByText('Geht nicht raus')).not.toBeInTheDocument()
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('msm:sync-event', {
+          detail: { type: 'e2ee_blind_message', blind_mailbox_id: 'test-blind-mailbox' },
+        })
+      )
+      await Promise.resolve()
+    })
+    await waitFor(() => {
+      expect(screen.queryByText('Geht nicht raus')).not.toBeInTheDocument()
+    })
+  })
+
   it('zieht eine bestätigte Nachricht nach, auch wenn die Warteschlange die Kennung mit Gerätesuffix meldet', async () => {
     const { updateMessageInLocalStore } = await import('@/services/messengerLocalStore')
     vi.mocked(updateMessageInLocalStore).mockClear()

@@ -134,6 +134,7 @@ import {
 import { logischeUuid, DrZustellungFehlgeschlagenError } from '@/services/ratchetSitzung'
 import { verwirfGruppenSchluessel } from '@/services/gruppenSchluessel'
 import {
+  entferneLokaleNachricht,
   loadLocalMessages,
   mischeVerlauf,
   saveLocalMessages,
@@ -1644,14 +1645,37 @@ export function Messenger() {
     if (msg.status === 'queued') {
       const uuid = msg.clientUuid
       if (uuid) {
-        setOutbox(getOutbox().filter((m) => m.payload?.client_uuid !== uuid && m.id !== uuid))
+        /**
+         * Die Warteschlange führt einen Auftrag je Zielgerät, und `#<geraet>`
+         * hält sie auseinander; die Zeile im Verlauf trägt die logische Kennung
+         * ohne Zusatz. Der Vergleich auf Gleichheit traf im Direktchat deshalb
+         * nie zu — der Auftrag blieb liegen, und eine verworfene Nachricht wäre
+         * später doch noch hinausgegangen.
+         *
+         * Der Sitzungsaufbau (`dr-init`) bleibt bewusst stehen. Er entsteht nur,
+         * solange es keine Sitzung gibt; wirft man ihn weg, findet die
+         * Gegenstelle für alles Spätere keine und läuft in den Sitzungsbruch.
+         * Die ausgelassene Nachricht überspringt der Ratchet von selbst.
+         */
+        setOutbox(
+          getOutbox().filter((m) => {
+            if (m.entity !== 'message' || m.payload?.is_control) return true
+            return (logischeUuid(m.payload?.client_uuid ?? m.id) ?? m.id) !== uuid
+          })
+        )
       }
       setMessages((prev) => {
         const uebrig = prev.filter((m) => m.clientUuid !== msg.clientUuid)
         sessionChatCache.set(blindMailboxId, uebrig.slice(-80))
-        void saveLocalMessages(blindMailboxId, uebrig).catch(() => {})
         return uebrig
       })
+      // Die Ablage muss die Zeile aktiv verlieren. `saveLocalMessages` schreibt
+      // nur — die weggelassene Nachricht blieb dort stehen und kam beim nächsten
+      // Abgleich zurück.
+      void entferneLokaleNachricht(blindMailboxId, {
+        clientUuid: msg.clientUuid,
+        id: msg.id,
+      }).catch(() => {})
       toast.success('Ausstehende Nachricht verworfen.')
       return
     }

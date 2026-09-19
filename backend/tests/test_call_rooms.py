@@ -291,6 +291,15 @@ def test_kein_token_mehr_nach_ablehnen(db: Session, client: TestClient) -> None:
         assert abgelehnt.status_code == 200
         ereignis = schlange.get_nowait()
         assert ereignis["type"] == "direct_call_rejected"
+        # Der Anrufer muss den Raum daran wiedererkennen, sonst legt er nicht
+        # auf und sitzt nach der Ablehnung allein im Gespraech weiter.
+        assert ereignis["signaling_token"] == raum
+        # `rejected_by`, nicht `recipient_id`: die Nachbarereignisse meinen mit
+        # `recipient_id` den Empfaenger des Ereignisses, hier stand darunter der
+        # Absender der Ablehnung. Der Client verglich es mit dem eigenen Konto
+        # und legte deshalb nie auf.
+        assert ereignis["rejected_by"] == ziel.id
+        assert "recipient_id" not in ereignis
     finally:
         SyncEventService.unsubscribe(conn_id)
 

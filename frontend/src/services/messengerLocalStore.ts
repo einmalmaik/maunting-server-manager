@@ -411,6 +411,51 @@ export async function saveLocalMessages(
 }
 
 /**
+ * Nimmt eine Nachricht endgültig aus der lokalen Ablage.
+ *
+ * `saveLocalMessages` schreibt nur. Was in der übergebenen Liste fehlt, bleibt
+ * in der Ablage stehen — eine verworfene Nachricht verschwand deshalb nur aus
+ * der Ansicht und kam beim nächsten Abgleich über `loadLocalMessages` und
+ * `mischeVerlauf` zurück. Am laufenden System waren das die Nachrichten mit der
+ * Uhr, die sich nicht löschen liessen: weg, wieder da, weg, wieder da.
+ *
+ * Beide Kennungen zählen: die Zeile einer noch nicht gesendeten Nachricht trägt
+ * eine aus der Uhr erfundene Umschlagkennung, die einer bestätigten die echte.
+ */
+export async function entferneLokaleNachricht(
+  blindMailboxId: string,
+  kennung: { clientUuid?: string; id?: number }
+): Promise<void> {
+  if (!blindMailboxId) return
+  if (!kennung.clientUuid && typeof kennung.id !== 'number') return
+  try {
+    const db = await openLocalDatabase()
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_MESSAGES, 'readwrite')
+      const store = tx.objectStore(STORE_MESSAGES)
+      // Über den Mailbox-Index, nicht über `by_client_uuid`: dieselbe logische
+      // Kennung kann in der Ablage mehrfach liegen (optimistische Zeile und
+      // bestätigte Fassung unter verschiedenen Umschlagkennungen), und ein
+      // `get` auf dem Index fände davon nur eine.
+      const req = store.index('by_mailbox').getAll(IDBKeyRange.only(blindMailboxId))
+      req.onsuccess = () => {
+        for (const m of (req.result || []) as LocalStoredMessage[]) {
+          const trifft =
+            (kennung.clientUuid !== undefined && m.clientUuid === kennung.clientUuid) ||
+            (typeof kennung.id === 'number' && m.id === kennung.id)
+          if (trifft) store.delete([blindMailboxId, m.id])
+        }
+      }
+      req.onerror = () => reject(req.error)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+  } catch {
+    // Non-fatal if IndexedDB write fails
+  }
+}
+
+/**
  * Updates a single message in the local store by clientUuid or id.
  */
 export async function updateMessageInLocalStore(

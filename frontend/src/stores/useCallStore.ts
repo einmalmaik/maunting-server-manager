@@ -1177,13 +1177,29 @@ export const useCallStore = create<UseCallState>((set, get) => {
           )
         }
       } else if (ev.type === 'direct_call_rejected') {
+        /**
+         * Abgelehnt ist abgelehnt — auch beim Anrufer.
+         *
+         * Hier standen zwei Bedingungen, die beide nie zutrafen. `recipient_id`
+         * nannte in diesem Ereignis den Ablehnenden, nicht wie bei Einladung und
+         * Abbruch den Empfänger des Ereignisses; der Vergleich mit dem eigenen
+         * Konto schlug deshalb immer fehl. Und `state` steht längst auf `active`:
+         * der Anrufer betritt den Raum, sobald er klingeln lässt, und wartet dort
+         * allein. Das Ergebnis war ein Anrufer, der nach der Ablehnung weiter im
+         * Raum sass und von Hand auflegen musste.
+         *
+         * Der Raum ist die eindeutige Kennung, und das Ereignis geht ohnehin nur
+         * an den Anrufer. `partnerAngenommen` schützt den Fall, dass jemand
+         * nachgeholt wurde und ablehnt, während die beiden anderen sprechen.
+         */
+        const call = get()
         if (
-          ev.recipient_id &&
-          currentUserId &&
-          Number(ev.recipient_id) === Number(currentUserId) &&
-          get().state === 'outgoing'
+          call.state !== 'idle' &&
+          call.kind === 'direkt' &&
+          !partnerAngenommen &&
+          (!ev.signaling_token || ev.signaling_token === call.raum)
         ) {
-          get().endCall()
+          call.endCall()
           toast.info('Der Anruf wurde abgelehnt.')
         }
       } else if (ev.type === 'direct_call_cancelled') {

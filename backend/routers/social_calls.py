@@ -189,11 +189,17 @@ def einladung_ablehnen(
             status_code=404, detail="Anruf nicht gefunden oder bereits abgelaufen."
         )
     UserActiveCallRegistry.remove_room(signaling_token)
+    # `rejected_by`, nicht `recipient_id`: dieses Ereignis geht an den Anrufer,
+    # und der Abgelehnte ist hier der Absender der Ablehnung. Unter dem Namen
+    # der Nachbarereignisse (`direct_call_invitation`, `direct_call_cancelled`)
+    # stand hier das Gegenteil von dem, was sie damit meinen — der Client las es
+    # als „an dich gerichtet", verglich es mit dem eigenen Konto und legte
+    # deshalb nie auf.
     SyncEventService.publish(
         {
             "type": "direct_call_rejected",
             "signaling_token": signaling_token,
-            "recipient_id": user.id,
+            "rejected_by": user.id,
         },
         user_id=anrufer_id,
     )
