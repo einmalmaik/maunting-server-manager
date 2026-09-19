@@ -22,6 +22,7 @@ router = APIRouter(prefix="/api/calendar", tags=["calendar"])
 
 
 class CalendarEventCreate(BaseModel):
+    event_uid: str | None = Field(default=None, max_length=64)
     title: str = Field(..., min_length=1, max_length=65536)
     start_time: str
     end_time: str
@@ -104,6 +105,7 @@ def create_event(
         return CalendarService.create_event(
             db=db,
             user=user,
+            event_uid=payload.event_uid,
             title=payload.title,
             start_time=payload.start_time,
             end_time=payload.end_time,

@@ -238,6 +238,7 @@ class NotesService:
         user: User,
         *,
         title: str,
+        note_uid: str | None = None,
         content: str = "",
         category: str = "personal",
         color: str | None = "primary",
@@ -245,7 +246,7 @@ class NotesService:
         note_type: str = "personal",
         team_id: int | None = None,
     ) -> dict[str, Any]:
-        """Erstellt eine neue Notiz, verschluesselt mit DIS (AES-256-GCM)."""
+        """Erstellt eine neue Notiz, verschluesselt mit DIS (AES-256-GCM) oder client-seitigem E2EE."""
         norm_type = (note_type or "personal").lower().strip()
         if norm_type not in ("personal", "team"):
             norm_type = "personal"
@@ -257,10 +258,19 @@ class NotesService:
                 raise ValueError(f"Sie sind kein Mitglied von Team {team_id}.")
             final_team_id = team_id
 
-        note_uid = str(uuid.uuid4())
+        if note_uid and note_uid.strip():
+            final_note_uid = note_uid.strip()
+            existing = db.scalar(select(Note).where(Note.note_uid == final_note_uid))
+            if existing:
+                if existing.user_id == user.id:
+                    return cls._format_note(existing, user, db=db)
+                raise ValueError(f"Notiz mit UID '{final_note_uid}' existiert bereits.")
+        else:
+            final_note_uid = str(uuid.uuid4())
+
         clean_title = title.strip()
         clean_content = content or ""
-        aad = _note_aad(user.id, note_uid)
+        aad = _note_aad(user.id, final_note_uid)
 
         # Wenn client-seitiges E2EE verwendet wird (sv-note-v1:), speichert der Server blind
         if clean_title.startswith(NOTE_CIPHERTEXT_PREFIX):
@@ -277,7 +287,7 @@ class NotesService:
 
         note = Note(
             user_id=user.id,
-            note_uid=note_uid,
+            note_uid=final_note_uid,
             title=encrypted_title,
             content=encrypted_content,
             category=(category or "personal").strip().lower(),

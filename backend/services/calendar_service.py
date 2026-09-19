@@ -534,6 +534,7 @@ class CalendarService:
         title: str,
         start_time: str,
         end_time: str,
+        event_uid: str | None = None,
         description: str | None = None,
         location: str | None = None,
         calendar_id: int | None = None,
@@ -576,8 +577,38 @@ class CalendarService:
 
             final_color = color or _default_color_for_type(norm_type)
 
-            event_uid = str(uuid.uuid4())
-            aad = _cal_aad(user.id, event_uid)
+            if event_uid and event_uid.strip():
+                final_event_uid = event_uid.strip()
+                existing = db.scalar(select(CalendarEvent).where(CalendarEvent.event_uid == final_event_uid))
+                if existing:
+                    if existing.user_id == user.id:
+                        dec_title, dec_desc, dec_loc = _decrypt_or_migrate_calendar_event(db, existing)
+                        return {
+                            "status": "created",
+                            "event_id": existing.event_uid,
+                            "id": existing.id,
+                            "title": dec_title,
+                            "start": _iso_utc(existing.start_time),
+                            "end": _iso_utc(existing.end_time),
+                            "description": dec_desc,
+                            "location": dec_loc,
+                            "all_day": existing.all_day,
+                            "color": existing.color or "",
+                            "event_type": existing.event_type,
+                            "team_id": existing.team_id,
+                            "team_name": existing.team.name if existing.team else None,
+                            "server_id": existing.server_id,
+                            "server_name": existing.server.name if existing.server else None,
+                            "creator_name": user.username,
+                            "user_id": user.id,
+                            "can_edit": True,
+                            "calendar": calendar.name,
+                        }
+                    raise ValueError(f"Termin mit UID '{final_event_uid}' existiert bereits.")
+            else:
+                final_event_uid = str(uuid.uuid4())
+
+            aad = _cal_aad(user.id, final_event_uid)
 
             clean_title = title.strip()
             if clean_title.startswith(CALENDAR_CIPHERTEXT_PREFIX):
@@ -602,7 +633,7 @@ class CalendarService:
             ev = CalendarEvent(
                 calendar_id=calendar.id,
                 user_id=user.id,
-                event_uid=event_uid,
+                event_uid=final_event_uid,
                 title=encrypted_title,
                 description=encrypted_desc,
                 location=encrypted_loc,

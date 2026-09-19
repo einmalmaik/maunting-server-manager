@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class NoteCreate(BaseModel):
+    note_uid: str | None = Field(default=None, max_length=64)
     title: str = Field(min_length=1, max_length=65536)
     content: str = Field(default="")
     category: str = Field(default="personal", max_length=64)

@@ -75,6 +75,7 @@ def create_note(
         return NotesService.create_note(
             db=db,
             user=user,
+            note_uid=req.note_uid,
             title=req.title,
             content=req.content,
             category=req.category,

@@ -42,6 +42,20 @@ export const CALENDAR_ENVELOPE_SPEC: VersionedCipherEnvelopeSpec = {
 export const NOTE_CIPHERTEXT_PREFIX = 'sv-note-v1:'
 export const CALENDAR_CIPHERTEXT_PREFIX = 'sv-cal-v1:'
 
+/**
+ * Generiert eine standardkonforme UUIDv4 für lokale Notiz- und Termin-Entitäten.
+ */
+export function generateClientEntityId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    const v = c === 'x' ? r : (r & 0x3) | 0x8
+    return v.toString(16)
+  })
+}
+
 const STORAGE_KEY_PREFIX = 'msm_e2ee_notes_key_'
 const keyCache = new Map<number, CryptoKey>()
 const rawKeyMemoryStore = new Map<number, string>()

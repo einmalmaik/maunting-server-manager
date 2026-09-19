@@ -18,6 +18,7 @@ import type { CalendarEventItem } from '@/pages/Calendar'
 import {
   NOTE_CIPHERTEXT_PREFIX,
   CALENDAR_CIPHERTEXT_PREFIX,
+  generateClientEntityId,
   encryptNoteTitle,
   encryptNoteContent,
   decryptNoteTitle,
@@ -544,12 +545,13 @@ export async function saveNoteOffline(
   const localNotes = getOfflineNotes()
   let resultNote: NoteItem
 
-  const targetUid = editingNote ? editingNote.note_uid : 'local-note-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7)
+  const targetUid = editingNote ? editingNote.note_uid : generateClientEntityId()
   const encryptedTitle = await encryptNoteTitle(payload.title, targetUid)
   const encryptedContent = payload.content !== undefined ? await encryptNoteContent(payload.content, targetUid) : ''
 
   const wirePayload = {
     ...payload,
+    note_uid: targetUid,
     title: encryptedTitle,
     content: encryptedContent,
   }
@@ -575,7 +577,7 @@ export async function saveNoteOffline(
       entity: 'note',
       action: 'update',
       entityId: editingNote.note_uid,
-      payload,
+      payload: wirePayload,
     })
   } else {
     resultNote = {
@@ -601,7 +603,7 @@ export async function saveNoteOffline(
       entity: 'note',
       action: 'create',
       entityId: targetUid,
-      payload,
+      payload: wirePayload,
     })
   }
 
@@ -825,13 +827,14 @@ export async function saveCalendarEventOffline(
   const localEvents = getOfflineCalendarEvents()
   let resultEvent: CalendarEventItem
 
-  const targetUid = formEventId || ('local-evt-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7))
+  const targetUid = formEventId || generateClientEntityId()
   const encryptedTitle = await encryptCalendarField(payload.title, targetUid, 'title')
   const encryptedDesc = payload.description ? await encryptCalendarField(payload.description, targetUid, 'description') : (payload.description ?? '')
   const encryptedLoc = payload.location ? await encryptCalendarField(payload.location, targetUid, 'location') : (payload.location ?? '')
 
   const wirePayload = {
     ...payload,
+    event_uid: targetUid,
     title: encryptedTitle,
     description: encryptedDesc,
     location: encryptedLoc,
@@ -866,7 +869,7 @@ export async function saveCalendarEventOffline(
       entity: 'calendar',
       action: 'update',
       entityId: formEventId,
-      payload,
+      payload: wirePayload,
     })
   } else {
     resultEvent = {
@@ -892,7 +895,7 @@ export async function saveCalendarEventOffline(
       entity: 'calendar',
       action: 'create',
       entityId: targetUid,
-      payload,
+      payload: wirePayload,
     })
   }
 

@@ -25,6 +25,12 @@ import {
   enqueueMessageMutation,
   startLiveSync,
 } from './offlineSync'
+import {
+  NOTE_CIPHERTEXT_PREFIX,
+  CALENDAR_CIPHERTEXT_PREFIX,
+  decryptNoteTitle,
+  decryptCalendarField,
+} from '@/services/notesCalendarCrypto'
 import * as client from '@/api/client'
 
 vi.mock('@/api/client', () => ({
@@ -221,16 +227,20 @@ describe('Offline Storage & Unified Real-Time SSE Sync Engine', () => {
       await saveNoteOffline({ title: 'Notiz 2' })
 
       expect(getOutbox()).toHaveLength(2)
-      expect(getOutbox()[0].payload.title).toBe('Notiz 1')
-      expect(getOutbox()[1].payload.title).toBe('Notiz 2')
+      expect(getOutbox()[0].payload.title.startsWith(NOTE_CIPHERTEXT_PREFIX)).toBe(true)
+      expect(getOutbox()[1].payload.title.startsWith(NOTE_CIPHERTEXT_PREFIX)).toBe(true)
+      expect(await decryptNoteTitle(getOutbox()[0].payload.title, getOutbox()[0].entityId)).toBe('Notiz 1')
+      expect(await decryptNoteTitle(getOutbox()[1].payload.title, getOutbox()[1].entityId)).toBe('Notiz 2')
 
       // Now network is back online
       vi.mocked(client.api).mockImplementation(async (path: string, options?: any) => {
         if (path === '/notes' && options?.method === 'POST') {
           const body = JSON.parse(options.body)
+          expect(body.title.startsWith(NOTE_CIPHERTEXT_PREFIX)).toBe(true)
+          const decTitle = await decryptNoteTitle(body.title, body.note_uid || '')
           return {
             id: 101,
-            note_uid: 'server-uid-' + body.title,
+            note_uid: 'server-uid-' + decTitle,
             title: body.title,
             content: '',
             category: 'personal',
@@ -254,10 +264,12 @@ describe('Offline Storage & Unified Real-Time SSE Sync Engine', () => {
       expect(getOutbox()).toHaveLength(0)
       expect(notesUpdatedListener).toHaveBeenCalled()
 
-      // Check that local cache was updated with server canonical note_uids
+      // Check that local cache was updated with server canonical note_uids while maintaining plaintext titles
       const stored = getOfflineNotes()
       expect(stored[1].note_uid).toBe('server-uid-Notiz 1')
       expect(stored[0].note_uid).toBe('server-uid-Notiz 2')
+      expect(stored[1].title).toBe('Notiz 1')
+      expect(stored[0].title).toBe('Notiz 2')
 
       window.removeEventListener('msm:notes-updated', notesUpdatedListener)
     })

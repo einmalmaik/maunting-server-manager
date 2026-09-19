@@ -12,6 +12,7 @@ import {
   setUserNotesKey,
   exportUserNotesKey,
   clearNotesKeyCache,
+  generateClientEntityId,
 } from './notesCalendarCrypto'
 
 describe('notesCalendarCrypto E2EE', () => {
@@ -20,6 +21,15 @@ describe('notesCalendarCrypto E2EE', () => {
     if (typeof localStorage !== 'undefined') {
       localStorage.clear()
     }
+  })
+
+  it('generates standard RFC4122 v4 UUIDs for client entities', () => {
+    const id1 = generateClientEntityId()
+    const id2 = generateClientEntityId()
+    expect(id1).not.toBe(id2)
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    expect(uuidRegex.test(id1)).toBe(true)
+    expect(uuidRegex.test(id2)).toBe(true)
   })
 
   it('generates and persists user notes key locally without server involvement', async () => {
@@ -105,5 +115,50 @@ describe('notesCalendarCrypto E2EE', () => {
 
     // User 2 attempts to decrypt
     await expect(decryptNoteTitle(encTitle, noteUid, undefined, 2)).rejects.toThrow()
+  })
+
+  it('enables seamless multi-device E2EE key handover and bidirectional note/calendar decryption', async () => {
+    const userId = 99
+    // Device A creates key and encrypts note & calendar event
+    const devAKey = await getOrCreateUserNotesKey(userId)
+    const noteUid = generateClientEntityId()
+    const eventUid = generateClientEntityId()
+
+    const encTitleA = await encryptNoteTitle('Geheime Notiz von Gerät A', noteUid, devAKey, userId)
+    const encContentA = await encryptNoteContent('Details zu Gerät A', noteUid, devAKey, userId)
+    const encCalA = await encryptCalendarField('Wartung von Gerät A', eventUid, 'title', devAKey, userId)
+
+    // Device A exports key for device pairing handover
+    const exportedKey = exportUserNotesKey(userId)
+    expect(exportedKey).toBeTruthy()
+
+    // Device B receives handover packet and sets the key
+    clearNotesKeyCache()
+    const devBKey = await setUserNotesKey(userId, exportedKey!)
+
+    // Device B decrypts note and calendar event created by Device A
+    const decTitleB = await decryptNoteTitle(encTitleA, noteUid, devBKey, userId)
+    const decContentB = await decryptNoteContent(encContentA, noteUid, devBKey, userId)
+    const decCalB = await decryptCalendarField(encCalA, eventUid, 'title', devBKey, userId)
+
+    expect(decTitleB).toBe('Geheime Notiz von Gerät A')
+    expect(decContentB).toBe('Details zu Gerät A')
+    expect(decCalB).toBe('Wartung von Gerät A')
+
+    // Device B now creates an update, and Device A can decrypt it with the shared key
+    const encTitleB = await encryptNoteTitle('Antwort von Gerät B', noteUid, devBKey, userId)
+    const decTitleA = await decryptNoteTitle(encTitleB, noteUid, devAKey, userId)
+    expect(decTitleA).toBe('Antwort von Gerät B')
+  })
+
+  it('strictly validates AAD integrity: mismatched entity UID throws decryption error', async () => {
+    const userId = 55
+    const noteUid1 = generateClientEntityId()
+    const noteUid2 = generateClientEntityId()
+
+    const encTitle = await encryptNoteTitle('Einkauf', noteUid1, undefined, userId)
+
+    // Attempting to decrypt with a different entity UID must be rejected by AES-GCM auth tag
+    await expect(decryptNoteTitle(encTitle, noteUid2, undefined, userId)).rejects.toThrow()
   })
 })

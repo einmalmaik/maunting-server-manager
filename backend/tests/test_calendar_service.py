@@ -509,6 +509,33 @@ def test_calendar_client_e2ee_opaque_storage(db_session, test_user):
     ).fetchone()
     assert upd_row[0] == new_cipher_title
 
+    client_event_uid = "client-uuid-98765-cal-event"
+    ev_with_uid = CalendarService.create_event(
+        db=db_session,
+        user=test_user,
+        event_uid=client_event_uid,
+        title=client_cipher_title,
+        start_time="2026-08-27 14:00",
+        end_time="2026-08-27 15:00",
+        description=client_cipher_desc,
+        location=client_cipher_loc,
+    )
+    assert ev_with_uid["event_id"] == client_event_uid
+
+    # Idempotenter Replay mit gleicher event_uid
+    replay_ev = CalendarService.create_event(
+        db=db_session,
+        user=test_user,
+        event_uid=client_event_uid,
+        title=client_cipher_title,
+        start_time="2026-08-27 14:00",
+        end_time="2026-08-27 15:00",
+        description=client_cipher_desc,
+        location=client_cipher_loc,
+    )
+    assert replay_ev["event_id"] == client_event_uid
+    assert replay_ev["id"] == ev_with_uid["id"]
+
 
 
 

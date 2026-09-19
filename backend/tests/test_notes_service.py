@@ -257,4 +257,27 @@ def test_notes_client_e2ee_opaque_storage(db_session, test_user):
     ).fetchone()
     assert upd_row[0] == new_cipher_title
 
+    client_uid = "client-uuid-98765-note"
+    note_with_uid = NotesService.create_note(
+        db_session,
+        user=test_user,
+        note_uid=client_uid,
+        title=client_cipher_title,
+        content=client_cipher_content,
+        category="personal",
+    )
+    assert note_with_uid["note_uid"] == client_uid
+
+    # Idempotenter Replay mit gleicher UID liefert denselben Eintrag
+    replay_note = NotesService.create_note(
+        db_session,
+        user=test_user,
+        note_uid=client_uid,
+        title=client_cipher_title,
+        content=client_cipher_content,
+        category="personal",
+    )
+    assert replay_note["note_uid"] == client_uid
+    assert replay_note["id"] == note_with_uid["id"]
+
 
