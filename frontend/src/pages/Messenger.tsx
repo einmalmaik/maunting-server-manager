@@ -116,7 +116,7 @@ import {
   type VideoNoteAttachment,
 } from '@/components/social/ChatMediaAttachments'
 import { teamsApi, type TeamMember } from '@/api/teams'
-import { useKonversation, type GespraechsZiel } from '@/hooks/useKonversation'
+import { baueVersandFuer, useKonversation, type GespraechsZiel } from '@/hooks/useKonversation'
 import { uebernimmAltbestand } from '@/services/altbestandUebernahme'
 import {
   loadNotesOfflineFirst,
@@ -656,7 +656,7 @@ export function Messenger() {
   /** Verfallsfrist dieses Chats in Sekunden, 0 = aus. */
   const [verfallSekunden, setVerfallSekunden] = useState(0)
   const [verfallOffen, setVerfallOffen] = useState(false)
-  /** Das Menue hinter den drei Punkten in der Chat-Kopfzeile. */
+  /** Das Menü hinter den drei Punkten in der Chat-Kopfzeile. */
   const [chatMenueOffen, setChatMenueOffen] = useState(false)
   /** Chats mit ungesendetem Text, für die Vorschau in der Liste. */
   const [entwuerfe, setEntwuerfe] = useState<Record<string, string>>({})
@@ -2838,10 +2838,61 @@ export function Messenger() {
     }
   }, [blindMailboxId])
 
-  // Autoscroll
+  /**
+   * Beim Öffnen eines Chats steht man unten, bei der letzten Nachricht.
+   *
+   * Das klang einfacher, als es war. Ein weiches `scrollIntoView` beim Wechsel
+   * zielt auf ein Ende, das sich noch verschiebt: erst steht der lokale
+   * Verlauf, dann kommen die Umschläge vom Server, dann laden die Bilder und
+   * machen die Blasen höher. Die Animation läuft ins Leere und bleibt irgendwo
+   * in der Mitte stehen.
+   *
+   * Deshalb wird nach einem Wechsel eine knappe Sekunde lang bei jedem Bild
+   * hart ans Ende gesetzt — ohne Animation, weil ein Sprung über tausend
+   * Nachrichten niemandem hilft. Rührt der Nutzer das Rad oder den Finger an,
+   * hört das sofort auf: ab da scrollt nur noch er.
+   */
+  const ansEndeRef = useRef(false)
+
+  useEffect(() => {
+    const container = scrollContainerRef.current
+    if (!container || !blindMailboxId) return
+
+    ansEndeRef.current = true
+    let abbruch = false
+    const bis = Date.now() + 1200
+    const ziehen = () => {
+      if (abbruch || !ansEndeRef.current || !scrollContainerRef.current) return
+      const c = scrollContainerRef.current
+      c.scrollTop = c.scrollHeight
+      if (Date.now() < bis) requestAnimationFrame(ziehen)
+      else ansEndeRef.current = false
+    }
+    requestAnimationFrame(ziehen)
+
+    // Eine echte Nutzergeste beendet das Nachziehen. Auf das `scroll`-Ereignis
+    // zu hören ginge nicht: das löst das Nachziehen selbst aus.
+    const losIassen = () => {
+      ansEndeRef.current = false
+    }
+    container.addEventListener('wheel', losIassen, { passive: true })
+    container.addEventListener('touchstart', losIassen, { passive: true })
+
+    return () => {
+      abbruch = true
+      container.removeEventListener('wheel', losIassen)
+      container.removeEventListener('touchstart', losIassen)
+    }
+  }, [blindMailboxId])
+
+  // Autoscroll bei neuen Nachrichten im offenen Chat.
   useEffect(() => {
     const container = scrollContainerRef.current
     if (!container) return
+    if (ansEndeRef.current) {
+      container.scrollTop = container.scrollHeight
+      return
+    }
     const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 120
     if (justSentRef.current || isNearBottom) {
       messagesEndRef.current?.scrollIntoView?.({ behavior: 'smooth' })
@@ -2928,9 +2979,17 @@ export function Messenger() {
       return
     }
 
-    const targetBlindMailboxId = blindMailboxId
-    const targetUserId = activeContact?.userId
-    const currentGroupId = activeGroup?.id
+    /**
+     * Wohin diese Nachricht geht.
+     *
+     * Beim Weiterleiten ist das ein **anderes** Gespräch als das offene. Bis
+     * 09/2026 stand hier stur `blindMailboxId`, und jede Weiterleitung landete
+     * still im gerade geöffneten Chat statt beim gewählten Empfänger.
+     */
+    const fremdesZiel = auftrag.ziel ?? null
+    const targetBlindMailboxId = fremdesZiel?.blindMailboxId ?? blindMailboxId
+    const targetUserId = fremdesZiel ? (fremdesZiel.recipientId ?? undefined) : activeContact?.userId
+    const currentGroupId = fremdesZiel ? (fremdesZiel.groupId ?? undefined) : activeGroup?.id
 
     const clientUuid =
       typeof crypto !== 'undefined' && crypto.randomUUID
@@ -2972,12 +3031,27 @@ export function Messenger() {
       status: 'queued',
     }
 
-    setMessages((prev) => {
-      const updated = [...prev, optimisticMessage]
-      sessionChatCache.set(targetBlindMailboxId, updated.slice(-80))
-      void saveLocalMessages(targetBlindMailboxId, updated.slice(-200))
-      return updated
-    })
+    if (fremdesZiel) {
+      // Der offene Verlauf bleibt unberührt — die Nachricht gehört woandershin.
+      // Sie muss trotzdem lokal landen: den eigenen Ratchet-Umschlag kann
+      // dieses Gerät nie wieder öffnen, die Ablage ist die einzige Fassung.
+      void (async () => {
+        try {
+          const bestand = await loadLocalMessages(targetBlindMailboxId)
+          await saveLocalMessages(targetBlindMailboxId, [...bestand, optimisticMessage].slice(-200))
+          vergissMailbox(targetBlindMailboxId)
+        } catch {
+          // Ohne lokale Zeile ist die Nachricht draußen, aber hier unsichtbar.
+        }
+      })()
+    } else {
+      setMessages((prev) => {
+        const updated = [...prev, optimisticMessage]
+        sessionChatCache.set(targetBlindMailboxId, updated.slice(-80))
+        void saveLocalMessages(targetBlindMailboxId, updated.slice(-200))
+        return updated
+      })
+    }
     setInputText('')
     setSelectedImage(null)
     setStagedFile(null)
@@ -3177,7 +3251,31 @@ export function Messenger() {
       if (!currentGroupId && !aktiveIdentitaet.sendPair) {
         throw new Error('Der Schlüssel dieses Geräts ist noch nicht bereit.')
       }
-      const auftraege = await konversation.baueVersand(payload, clientUuid)
+      const auftraege = fremdesZiel
+        ? await baueVersandFuer(
+            // Für eine fremde Gruppe braucht der Schlüssel ihre Mitglieder;
+            // für einen fremden Direktchat reicht das Gegenüber.
+            fremdesZiel.groupId
+              ? {
+                  groupId: fremdesZiel.groupId,
+                  blindMailboxId: targetBlindMailboxId,
+                  eigeneId: currentUserId,
+                  mitglieder: (() => {
+                    const g = groups.find((x) => x.id === fremdesZiel.groupId)
+                    const ids = (g?.members ?? []).map((m) => Number(m.user_id))
+                    if (!ids.includes(currentUserId)) ids.push(currentUserId)
+                    return ids
+                  })(),
+                }
+              : null,
+            fremdesZiel.recipientId
+              ? { eigeneId: currentUserId, peerId: Number(fremdesZiel.recipientId) }
+              : null,
+            targetBlindMailboxId,
+            payload,
+            clientUuid,
+          )
+        : await konversation.baueVersand(payload, clientUuid)
       if (auftraege.length === 0) {
         // Früher fiel der Sendepfad hier auf einen Schlüssel zurück, den das
         // Backend aus den beiden Benutzerkennungen selbst bilden kann. Lieber
@@ -4887,7 +4985,7 @@ export function Messenger() {
           // aus `min-width: auto` und kann damit nicht unter die Breite
           // seines Inhalts schrumpfen. Der Chatbereich wuchs so auf 402 px
           // in einem 375 px breiten Fenster und schob sich 11 px nach links
-          // aus dem Bild -- daher die verrutschten Texte am Telefon.
+          // aus dem Bild — daher die verrutschten Texte am Telefon.
           className={`flex-1 min-w-0 flex flex-col min-h-0 bg-surface-container-lowest/30 relative ${
             !isChatOpen ? 'hidden md:flex' : 'flex'
           }`}
@@ -5076,14 +5174,14 @@ export function Messenger() {
                   </div>
                 </div>
 
-                {/* Was oft gebraucht wird, steht hier. Alles Uebrige liegt
-                    im Menue: acht Knoepfe passten bei 375 px nicht nebeneinander,
-                    die Gruppe lief 41 px ueber den rechten Rand hinaus und
-                    draengte den Namen auf null Abstand.
+                {/* Was oft gebraucht wird, steht hier. Alles Übrige liegt
+                    im Menü: acht Knöpfe passten bei 375 px nicht nebeneinander,
+                    die Gruppe lief 41 px über den rechten Rand hinaus und
+                    drängte den Namen auf null Abstand.
 
                     Schlichte <button> statt der Button-Komponente: deren
                     size="icon" setzt h-8 w-8 fest, und weil die Klassen nur
-                    aneinandergehaengt werden, gewinnt im CSS die feste Groesse
+                    aneinandergehängt werden, gewinnt im CSS die feste Größe
                     gegen jede mitgegebene. Am Telefon braucht es 44 px. */}
                 <div className="flex items-center gap-1.5 shrink-0 pointer-events-auto">
                   {activeGroup && (
@@ -6011,7 +6109,7 @@ export function Messenger() {
       </Blattmenue>
 
       {/* Alles, was nicht in die Kopfzeile passt. Bei 375 px ist dort Platz
-          fuer drei bis vier Knoepfe, nicht fuer acht. */}
+          für drei bis vier Knöpfe, nicht für acht. */}
       <Blattmenue
         offen={chatMenueOffen}
         onSchliessen={() => setChatMenueOffen(false)}
@@ -6084,7 +6182,7 @@ export function Messenger() {
                 <>
                   <Blatteintrag
                     icon={<ImagePlus className="w-4 h-4" />}
-                    label="Gruppenlogo aendern"
+                    label="Gruppenlogo ändern"
                     disabled={logoLaedt}
                     onClick={() => {
                       setChatMenueOffen(false)
@@ -6104,7 +6202,7 @@ export function Messenger() {
               {activeGroup.owner_user_id === currentUserId ? (
                 <Blatteintrag
                   icon={<Trash2 className="w-4 h-4" />}
-                  label="Gruppe loeschen"
+                  label="Gruppe löschen"
                   gefahr
                   onClick={() => {
                     setChatMenueOffen(false)
