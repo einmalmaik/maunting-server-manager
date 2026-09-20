@@ -158,7 +158,8 @@
            active:scale-[0.98] transition-all duration-200;
   }
 
-  .msm-btn-tertiary {
+  /* Ghost Button - nur Text, bis die Maus kommt */
+  .msm-btn-ghost {
     @apply bg-transparent border border-transparent text-on-surface-variant
            hover:text-primary hover:bg-primary/10 hover:border-primary/20
            font-label-md text-label-md rounded-md
@@ -173,10 +174,6 @@
            font-label-md text-label-md rounded-md
            disabled:pointer-events-none disabled:opacity-50
            active:scale-[0.98] transition-all duration-200;
-  }
-
-  .msm-btn-danger {
-    @apply msm-btn-destructive;
   }
 
   /* Input Field - dark recessed surface */

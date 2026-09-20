@@ -9,7 +9,7 @@ import { Link2, Unlink } from 'lucide-react'
 import { useOAuthLinks } from './useOAuthLinks'
 import { ConnectedMailboxesSection } from './ConnectedMailboxesSection'
 import { ConnectedCalendarsSection } from './ConnectedCalendarsSection'
-
+import { Button, buttonClasses } from '@/Singra/UI'
 /**
  * Tab: Verknuepfte Accounts & Dienste.
  * Enthält:
@@ -111,14 +111,14 @@ export function LinkedAccountsTab() {
                         )}
                       </p>
                     </div>
-                    <button
+                    <Button variant="secondary" size="sm"
                       type="button"
                       onClick={() => handleUnlink(link)}
-                      className="msm-btn-secondary px-3 py-1.5 text-xs inline-flex items-center gap-1.5"
+                      className="inline-flex items-center gap-1.5"
                     >
                       <Unlink className="w-3.5 h-3.5" />
                       {t('profile.linkedAccounts.unlink')}
-                    </button>
+                    </Button>
                   </li>
                 ))}
               </ul>
@@ -134,7 +134,7 @@ export function LinkedAccountsTab() {
                     <a
                       key={p.slug}
                       href={apiUrl(`/oauth/${p.slug}/link/start`)}
-                      className="msm-btn-secondary px-3 py-2 text-sm inline-flex items-center gap-2"
+                      className={buttonClasses('secondary')}
                     >
                       <Link2 className="w-3.5 h-3.5" />
                       {p.name}

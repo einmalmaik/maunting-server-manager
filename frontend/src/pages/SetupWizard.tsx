@@ -5,6 +5,7 @@ import { Logo } from '@/components/Logo'
 import { VersionFooter } from '@/components/VersionFooter'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { api } from '@/api/client'
+import { Button } from '@/Singra/UI'
 
 interface SetupWizardProps {
   onComplete: () => void
@@ -180,13 +181,13 @@ export function SetupWizard({ onComplete, emailConfigured }: SetupWizardProps) {
               <p className="font-body-md text-body-md text-on-surface-variant mb-8 max-w-sm mx-auto">
                 {t('setup.welcomeDesc')}
               </p>
-              <button
+              <Button size="lg"
                 onClick={() => setStep(2)}
-                className="msm-btn-primary px-8 py-3 inline-flex items-center gap-2"
+                className="inline-flex items-center gap-2"
               >
                 {t('setup.start')}
                 <ChevronRight className="w-4 h-4" />
-              </button>
+              </Button>
             </div>
           )}
 
@@ -309,17 +310,17 @@ export function SetupWizard({ onComplete, emailConfigured }: SetupWizardProps) {
                 )}
 
                 <div className="flex gap-3 pt-2">
-                  <button
+                  <Button variant="secondary" size="lg"
                     type="button"
                     onClick={() => setStep(1)}
-                    className="msm-btn-secondary flex-1 py-3"
+                    className="flex-1"
                   >
                     {t('common.back')}
-                  </button>
-                  <button
+                  </Button>
+                  <Button size="lg"
                     type="submit"
                     disabled={submitting}
-                    className="msm-btn-primary flex-1 py-3 disabled:opacity-50"
+                    className="flex-1 disabled:opacity-50"
                   >
                     {submitting ? (
                       <span className="inline-flex items-center gap-2">
@@ -329,7 +330,7 @@ export function SetupWizard({ onComplete, emailConfigured }: SetupWizardProps) {
                     ) : (
                       t('setup.createOwner')
                     )}
-                  </button>
+                  </Button>
                 </div>
               </form>
             </div>
@@ -375,10 +376,10 @@ export function SetupWizard({ onComplete, emailConfigured }: SetupWizardProps) {
                   </div>
                 )}
 
-                <button
+                <Button size="lg"
                   type="submit"
                   disabled={submitting || form.code.length !== 6}
-                  className="msm-btn-primary w-full py-3 disabled:opacity-50"
+                  className="w-full disabled:opacity-50"
                 >
                   {submitting ? (
                     <span className="inline-flex items-center gap-2">
@@ -388,7 +389,7 @@ export function SetupWizard({ onComplete, emailConfigured }: SetupWizardProps) {
                   ) : (
                     t('setup.verify')
                   )}
-                </button>
+                </Button>
 
                 <button
                   type="button"

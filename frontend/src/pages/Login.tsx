@@ -13,7 +13,7 @@ import { ErrorMessage } from '@/components/ui/ErrorMessage'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { CaptchaWidget } from '@/components/ui/CaptchaWidget'
 import { Shield, ArrowRight, KeyRound, Mail, Check } from 'lucide-react'
-
+import { Button, buttonClasses } from '@/Singra/UI'
 export function Login() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -183,16 +183,16 @@ export function Login() {
             <p className="font-body-md text-body-md text-on-surface-variant mb-8">
               {t('auth.verifiedAndSignedIn')}
             </p>
-            <button
+            <Button size="lg"
               onClick={() => {
                 if (!pendingVerifiedUser) return
                 void finishLogin(pendingVerifiedUser).then(() => navigate(zielNachLogin, { replace: true }))
               }}
-              className="msm-btn-primary px-8 py-3 inline-flex items-center gap-2"
+              className="inline-flex items-center gap-2"
             >
               {t('auth.continue')}
               <ArrowRight className="w-4 h-4" />
-            </button>
+            </Button>
           </div>
         )}
 
@@ -232,10 +232,10 @@ export function Login() {
 
               <ErrorMessage message={error} className="text-sm" />
 
-              <button
+              <Button size="lg"
                 type="submit"
                 disabled={submitting || verifyCode.length !== 6}
-                className="msm-btn-primary w-full py-3 disabled:opacity-50"
+                className="w-full disabled:opacity-50"
               >
                 {submitting ? (
                   <span className="inline-flex items-center gap-2">
@@ -245,7 +245,7 @@ export function Login() {
                 ) : (
                   t('auth.verifyNow')
                 )}
-              </button>
+              </Button>
 
               <button
                 type="button"
@@ -351,10 +351,10 @@ export function Login() {
 
               <ErrorMessage message={error} className="text-sm" />
 
-              <button
+              <Button size="lg"
                 type="submit"
                 disabled={submitting}
-                className="msm-btn-primary w-full py-3 flex items-center justify-center gap-2 disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 {submitting ? (
                   <span className="inline-flex items-center gap-2">
@@ -367,7 +367,7 @@ export function Login() {
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}
-              </button>
+              </Button>
             </form>
 
             {oauthProviders.length > 0 && (
@@ -380,7 +380,7 @@ export function Login() {
                     <a
                       key={p.slug}
                       href={apiUrl(`/oauth/${p.slug}/start?next=/&cb=${Date.now().toString(36)}`)}
-                      className="msm-btn-secondary w-full py-2.5 inline-flex items-center justify-center gap-2"
+                      className={buttonClasses('secondary', 'lg', 'w-full')}
                     >
                       <KeyRound className="w-4 h-4" />
                       {t('auth.signInWith', { provider: p.name })}
@@ -506,10 +506,10 @@ function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: 
 
         <ErrorMessage message={error} className="text-sm" />
 
-        <button
+        <Button size="lg"
           type="submit"
           disabled={submitting || otp.length !== 6}
-          className="msm-btn-primary w-full py-3 inline-flex items-center justify-center gap-2 disabled:opacity-50"
+          className="w-full inline-flex items-center justify-center gap-2 disabled:opacity-50"
         >
           {submitting ? (
             <span className="inline-flex items-center gap-2">
@@ -522,7 +522,7 @@ function OAuth2FAStep({ slug, challenge, onCancel }: { slug: string; challenge: 
               <ArrowRight className="w-4 h-4" />
             </>
           )}
-        </button>
+        </Button>
 
         <button
           type="button"

@@ -6,6 +6,7 @@ import { toast } from '@/stores/toastStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { PanelSettings, EMPTY_PANEL_SETTINGS } from './types'
+import { Button } from '@/Singra/UI'
 
 export function SteamTab() {
   const { t } = useTranslation()
@@ -157,7 +158,7 @@ export function SteamTab() {
           </div>
 
           <div className="flex gap-3 justify-end flex-wrap pt-2">
-            <button
+            <Button variant="secondary"
               type="button"
               onClick={async () => {
                 setTestingSteam(true)
@@ -177,7 +178,7 @@ export function SteamTab() {
                 }
               }}
               disabled={testingSteam || !settings.steam_api_configured}
-              className="msm-btn-secondary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+              className="inline-flex items-center gap-2 disabled:opacity-50"
             >
               {testingSteam ? (
                 <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
@@ -185,8 +186,8 @@ export function SteamTab() {
                 <Send className="w-4 h-4" />
               )}
               {t('settings.steamTest')}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={async () => {
                 if (!newSteamKey.trim() && !clearSteamKey) return
@@ -215,7 +216,7 @@ export function SteamTab() {
                 }
               }}
               disabled={savingSteam || (!newSteamKey.trim() && !clearSteamKey) || !canWrite}
-              className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+              className="inline-flex items-center gap-2 disabled:opacity-50"
             >
               {savingSteam ? (
                 <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
@@ -223,7 +224,7 @@ export function SteamTab() {
                 <Save className="w-4 h-4" />
               )}
               {t('settings.steamSaveKey')}
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -277,20 +278,20 @@ export function SteamTab() {
 
           <div className="flex gap-3 justify-end">
             {settings.steam_account_configured && (
-              <button
+              <Button variant="secondary"
                 type="button"
                 onClick={handleRemoveSteamAccount}
                 disabled={!canWrite}
-                className="msm-btn-secondary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+                className="inline-flex items-center gap-2 disabled:opacity-50"
               >
                 {t('settings.steamAccountRemove')}
-              </button>
+              </Button>
             )}
-            <button
+            <Button
               type="button"
               onClick={handleSaveSteamAccount}
               disabled={savingSteamAccount || !steamAccountUsername.trim() || !steamAccountPassword || !canWrite}
-              className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+              className="inline-flex items-center gap-2 disabled:opacity-50"
             >
               {savingSteamAccount ? (
                 <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
@@ -298,7 +299,7 @@ export function SteamTab() {
                 <Save className="w-4 h-4" />
               )}
               {t('settings.steamAccountSave')}
-            </button>
+            </Button>
           </div>
         </div>
       </div>

@@ -4,6 +4,7 @@ import { AlertTriangle, RefreshCw } from "lucide-react";
 import { Server, GuardianIncident } from "../../types";
 import { api } from "@/api/client";
 import { toast } from "@/stores/toastStore";
+import { Button } from '@/Singra/UI'
 
 interface GuardianQuarantineBannerProps {
   server: Server;
@@ -90,10 +91,10 @@ export const GuardianQuarantineBanner: React.FC<GuardianQuarantineBannerProps> =
         </div>
       </div>
 
-      <button
+      <Button
         onClick={() => void handleResolve()}
         disabled={resolving || clearPending || !openQuarantineIncident}
-        className="msm-btn-primary px-4 py-2 text-sm flex-shrink-0 flex items-center gap-2"
+        className="flex-shrink-0 flex items-center gap-2"
       >
         {resolving ? (
           <RefreshCw className="w-4 h-4 animate-spin" />
@@ -101,7 +102,7 @@ export const GuardianQuarantineBanner: React.FC<GuardianQuarantineBannerProps> =
           <RefreshCw className="w-4 h-4" />
         )}
         {t(clearPending ? "servers.guardian.quarantine.pendingAction" : "servers.guardian.quarantine.clearAction")}
-      </button>
+      </Button>
     </div>
   );
 };

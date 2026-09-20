@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
 import { api } from '@/api/client'
 import { Shield, Check, AlertTriangle, Download, RotateCcw } from 'lucide-react'
-
+import { Button, buttonClasses } from '@/Singra/UI'
 /**
  * Tab: Zwei-Faktor-Authentifizierung (TOTP).
  *
@@ -154,32 +154,32 @@ export function TwoFactorTab() {
       {success && <div className="msm-alert-success text-sm mb-4">{success}</div>}
 
       {!user?.two_factor_enabled && !show2FASetup && (
-        <button
+        <Button
           onClick={handleSetup2FA}
-          className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2"
+          className="inline-flex items-center gap-2"
         >
           <Shield className="w-4 h-4" />
           {t('profile.2faSetup')}
-        </button>
+        </Button>
       )}
 
       {user?.two_factor_enabled && !show2FADisable && (
         <div className="flex flex-wrap gap-3">
-          <button
+          <Button variant="secondary"
             onClick={handleRegenerateBackupCodes}
             disabled={submitting}
-            className="msm-btn-secondary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+            className="inline-flex items-center gap-2 disabled:opacity-50"
           >
             <RotateCcw className="w-4 h-4" />
             {t('profile.regenerateBackupCodes')}
-          </button>
-          <button
+          </Button>
+          <Button variant="secondary"
             onClick={() => setShow2FADisable(true)}
-            className="msm-btn-secondary px-4 py-2 inline-flex items-center gap-2"
+            className="inline-flex items-center gap-2"
           >
             <Shield className="w-4 h-4" />
             {t('profile.2faDisable')}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -217,7 +217,7 @@ export function TwoFactorTab() {
               </p>
               <a
                 href={faUri}
-                className="msm-btn-secondary inline-flex items-center gap-2 px-4 py-2 text-sm"
+                className={buttonClasses('secondary')}
               >
                 <Shield className="h-4 w-4" aria-hidden="true" />
                 {t('profile.2faOpenApp')}
@@ -239,17 +239,17 @@ export function TwoFactorTab() {
               placeholder="000000"
               required
             />
-            <button
+            <Button
               type="submit"
               disabled={submitting || otpCode.length !== 6}
-              className="msm-btn-primary px-4 py-2 disabled:opacity-50 whitespace-nowrap"
+              className="disabled:opacity-50 whitespace-nowrap"
             >
               {submitting ? (
                 <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
               ) : (
                 t('common.save')
               )}
-            </button>
+            </Button>
           </form>
         </div>
       )}
@@ -269,17 +269,17 @@ export function TwoFactorTab() {
               placeholder="000000"
               required
             />
-            <button
+            <Button
               type="submit"
               disabled={submitting || otpCode.length !== 6}
-              className="msm-btn-primary px-4 py-2 disabled:opacity-50 whitespace-nowrap"
+              className="disabled:opacity-50 whitespace-nowrap"
             >
               {submitting ? (
                 <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
               ) : (
                 t('common.save')
               )}
-            </button>
+            </Button>
           </form>
           <button
             type="button"
@@ -302,14 +302,14 @@ export function TwoFactorTab() {
             {t('profile.backupCodesDownloadOnce')}
           </p>
           <div className="flex flex-wrap gap-3">
-            <button
+            <Button
               type="button"
               onClick={handleDownloadBackupCodes}
-              className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2"
+              className="inline-flex items-center gap-2"
             >
               <Download className="w-4 h-4" />
               {t('profile.downloadBackupCodes')}
-            </button>
+            </Button>
           </div>
         </div>
       )}

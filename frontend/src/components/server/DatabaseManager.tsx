@@ -20,6 +20,7 @@ import type {
   PostgresTable,
   PostgresTableInfo,
 } from '@/types'
+import { Button } from '@/Singra/UI'
 
 interface Props {
   serverId: number
@@ -408,9 +409,9 @@ export function DatabaseManager({ serverId }: Props) {
       <div className="msm-card p-8 text-center">
         <h3 className="font-headline text-xl text-on-surface">Keine PostgreSQL-Datenbank</h3>
         <p className="mt-2 text-sm text-on-surface-variant">Erstelle eine servergebundene Datenbank, bevor du Tabellen verwaltest.</p>
-        <button className="msm-btn-primary mt-5 inline-flex items-center gap-2 px-4 py-2" onClick={bootstrap} disabled={busy === 'bootstrap'}>
+        <Button className="mt-5 inline-flex items-center gap-2" onClick={bootstrap} disabled={busy === 'bootstrap'}>
           Datenbank erstellen
-        </button>
+        </Button>
         <PostgresCredentialsDialog credentials={credentials} onClose={() => setCredentials([])} />
       </div>
     )
@@ -494,7 +495,7 @@ function PowerUserDialog({ state, onClose }: { state: { db: PostgresDatabase; pa
           <div className="break-all rounded bg-status-destructive/10 p-2 text-status-destructive">password: {state.password}</div>
           <div className="break-all rounded border border-outline-variant bg-surface-container-high p-2 text-on-surface-variant">psql "{connectionUrl}"</div>
         </div>
-        <button className="msm-btn-primary mt-5 w-full py-2" onClick={onClose}>Schließen</button>
+        <Button className="mt-5 w-full" onClick={onClose}>Schließen</Button>
       </div>
     </div>
   )

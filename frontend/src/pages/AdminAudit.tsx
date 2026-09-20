@@ -15,6 +15,7 @@ import {
   mapAuditApiRows,
   safeAuditDetails,
 } from '@/services/auditPresentation'
+import { Button } from '@/Singra/UI'
 
 export function AdminAudit() {
   const { t, i18n } = useTranslation()
@@ -66,15 +67,15 @@ export function AdminAudit() {
           </span>
         }
         actions={
-          <button
+          <Button variant="secondary"
             type="button"
-            className="msm-btn-secondary inline-flex items-center gap-2 px-3 py-2 text-sm"
+            className="inline-flex items-center gap-2"
             onClick={() => void load()}
             disabled={loading}
           >
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             {t('common.refresh', 'Aktualisieren')}
-          </button>
+          </Button>
         }
       />
 
@@ -100,14 +101,13 @@ export function AdminAudit() {
             onChange={(e) => setLimit(Number(e.target.value) || 50)}
           />
         </label>
-        <button
+        <Button
           type="button"
-          className="msm-btn-primary px-4 py-2 text-sm"
           onClick={() => void load()}
           disabled={loading}
         >
           {t('audit.applyFilter', 'Filtern')}
-        </button>
+        </Button>
       </div>
 
       {error && (

@@ -7,6 +7,7 @@ import { ActiveProcessesCard } from '../geo/ActiveProcessesCard'
 import { RegionalAnalysisLayout } from '../geo/RegionalAnalysisLayout'
 import { Sprachblase } from './Sprachblase'
 import { useSprachsitzung, type Beleg, type Vorschlag } from './useSprachsitzung'
+import { Button } from '@/Singra/UI'
 
 /**
  * Der Sprachmodus als eigener Modus — der Chat tritt zurück.
@@ -201,17 +202,17 @@ export function SprachAnsicht({
               {laeuft ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
             </RunderKnopf>
 
-            <button
+            <Button variant="secondary" size="sm"
               type="button"
               onClick={() => {
                 beenden()
                 aufChat()
               }}
-              className="msm-btn-secondary flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-medium"
+              className="flex items-center gap-2 rounded-xl font-medium"
             >
               <X className="h-3.5 w-3.5" aria-hidden="true" />
               <span>{t('ai.voice.end')}</span>
-            </button>
+            </Button>
 
             <RunderKnopf
               label={t('ai.voice.settings')}
@@ -281,13 +282,13 @@ export function SprachAnsicht({
           {laeuft ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
         </RunderKnopf>
 
-        <button
+        <Button variant="secondary" size="lg"
           type="button"
           onClick={() => {
             beenden()
             aufChat()
           }}
-          className="msm-btn-secondary flex flex-col items-center gap-0.5 rounded-xl px-8 py-2.5"
+          className="flex flex-col items-center gap-0.5 rounded-xl"
         >
           <span className="flex items-center gap-2 text-sm font-medium">
             <X className="h-4 w-4" aria-hidden="true" />
@@ -296,7 +297,7 @@ export function SprachAnsicht({
           <span className="text-[11px] text-on-surface-variant/70">
             {t('ai.voice.endHint')}
           </span>
-        </button>
+        </Button>
 
         <RunderKnopf
           label={t('ai.voice.settings')}

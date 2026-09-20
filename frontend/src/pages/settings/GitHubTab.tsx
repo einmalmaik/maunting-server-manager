@@ -6,6 +6,7 @@ import { toast } from '@/stores/toastStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { PanelSettings, EMPTY_PANEL_SETTINGS } from './types'
+import { Button } from '@/Singra/UI'
 
 export function GitHubTab() {
   const { t } = useTranslation()
@@ -179,11 +180,11 @@ export function GitHubTab() {
           </div>
 
           <div className="flex gap-3 justify-end flex-wrap pt-2">
-            <button
+            <Button variant="secondary"
               type="button"
               onClick={handleTest}
               disabled={testing || !settings.github_token_configured}
-              className="msm-btn-secondary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+              className="inline-flex items-center gap-2 disabled:opacity-50"
             >
               {testing ? (
                 <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
@@ -191,11 +192,11 @@ export function GitHubTab() {
                 <Send className="w-4 h-4" />
               )}
               {t('settings.githubTest')}
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
               disabled={saving || !hasChanges || !canWrite}
-              className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+              className="inline-flex items-center gap-2 disabled:opacity-50"
             >
               {saving ? (
                 <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
@@ -203,7 +204,7 @@ export function GitHubTab() {
                 <Save className="w-4 h-4" />
               )}
               {t('settings.githubSave')}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

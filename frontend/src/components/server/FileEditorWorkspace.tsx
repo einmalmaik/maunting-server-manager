@@ -34,6 +34,7 @@ import {
 } from 'lucide-react'
 import { detectLanguage, detectIndentation, fileName } from './fileHelpers'
 import type { EditorTab } from './fileWorkspaceTypes'
+import { Button } from '@/Singra/UI'
 
 interface FileEditorWorkspaceProps {
   tabs: EditorTab[]
@@ -317,23 +318,23 @@ export function FileEditorWorkspace({
               <span className={`hidden items-center gap-1.5 text-[11px] sm:inline-flex ${activeTab.saveState === 'conflict' || activeTab.saveState === 'error' ? 'text-status-destructive' : activeTab.saveState === 'clean' ? 'text-status-success' : 'text-status-warning'}`}>
                 {saveIndicator}
               </span>
-              <button
+              <Button variant="ghost" size="sm"
                 type="button"
                 onClick={() => setSearchOpen((value) => !value)}
-                className="msm-btn-tertiary flex h-8 w-8 items-center justify-center rounded-md"
+                className="flex w-8 items-center justify-center"
                 aria-label={t('files.editor.searchAndReplace')}
               >
                 <Search className="h-4 w-4" />
-              </button>
+              </Button>
               {canWrite && (
-                <button
+                <Button variant="secondary" size="sm"
                   type="button"
                   onClick={() => onSave(activeTab.path)}
                   disabled={activeTab.saveState === 'saving' || activeTab.saveState === 'clean' || activeTab.saveState === 'conflict'}
-                  className="msm-btn-secondary inline-flex h-8 items-center gap-1.5 px-2.5 text-xs disabled:opacity-40"
+                  className="inline-flex items-center gap-1.5 disabled:opacity-40"
                 >
                   <Save className="h-3.5 w-3.5" /> {t('common.save')}
-                </button>
+                </Button>
               )}
             </div>
           </div>
@@ -342,9 +343,9 @@ export function FileEditorWorkspace({
             <div className="flex flex-wrap items-center gap-3 border-b border-status-warning/30 bg-status-warning/8 px-3 py-2 text-xs text-status-warning">
               <AlertTriangle className="h-4 w-4 shrink-0" />
               <p className="min-w-52 flex-1">{t('files.editor.conflictNotice')}</p>
-              <button type="button" className="msm-btn-secondary inline-flex h-8 items-center gap-1.5 px-2.5 text-xs" onClick={() => onReload(activeTab.path)}>
+              <Button variant="secondary" size="sm" type="button" className="inline-flex items-center gap-1.5" onClick={() => onReload(activeTab.path)}>
                 <RotateCcw className="h-3.5 w-3.5" /> {t('files.editor.reloadServerVersion')}
-              </button>
+              </Button>
             </div>
           )}
 
@@ -379,13 +380,13 @@ export function FileEditorWorkspace({
                 />
               </div>
               <div className="flex flex-wrap items-center gap-1">
-                <button type="button" onClick={() => setCaseSensitive((value) => !value)} className={`msm-btn-tertiary h-8 min-w-8 px-2 font-mono text-xs ${caseSensitive ? 'bg-primary/10 text-primary' : ''}`} aria-pressed={caseSensitive} title={t('files.editor.matchCase')}>Aa</button>
-                <button type="button" onClick={() => selectMatch(activeMatch - 1)} disabled={!matches.length} className="msm-btn-tertiary flex h-8 w-8 items-center justify-center disabled:opacity-40" aria-label={t('files.editor.previousMatch')}><ChevronUp className="h-3.5 w-3.5" /></button>
-                <button type="button" onClick={() => selectMatch(activeMatch + 1)} disabled={!matches.length} className="msm-btn-tertiary flex h-8 w-8 items-center justify-center disabled:opacity-40" aria-label={t('files.editor.nextMatch')}><ChevronDown className="h-3.5 w-3.5" /></button>
-                <button type="button" onClick={replaceCurrent} disabled={!canWrite || !matches.length} className="msm-btn-secondary h-8 px-2.5 text-xs disabled:opacity-40">{t('files.editor.replace')}</button>
-                <button type="button" onClick={replaceAll} disabled={!canWrite || !matches.length} className="msm-btn-secondary h-8 px-2.5 text-xs disabled:opacity-40">{t('files.editor.replaceAll')}</button>
-                <button type="button" onClick={() => selectMatch(0)} disabled={!matches.length} className="msm-btn-tertiary h-8 px-2.5 text-xs disabled:opacity-40">{t('files.editor.findAll', { anzahl: matches.length })}</button>
-                <button type="button" onClick={() => setSearchOpen(false)} className="msm-btn-tertiary flex h-8 w-8 items-center justify-center" aria-label={t('files.editor.closeSearch')}><X className="h-3.5 w-3.5" /></button>
+                <Button variant="ghost" size="sm" type="button" onClick={() => setCaseSensitive((value) => !value)} className={`min-w-8 font-mono ${caseSensitive ? 'bg-primary/10 text-primary' : ''}`} aria-pressed={caseSensitive} title={t('files.editor.matchCase')}>Aa</Button>
+                <Button variant="ghost" size="sm" type="button" onClick={() => selectMatch(activeMatch - 1)} disabled={!matches.length} className="flex w-8 items-center justify-center disabled:opacity-40" aria-label={t('files.editor.previousMatch')}><ChevronUp className="h-3.5 w-3.5" /></Button>
+                <Button variant="ghost" size="sm" type="button" onClick={() => selectMatch(activeMatch + 1)} disabled={!matches.length} className="flex w-8 items-center justify-center disabled:opacity-40" aria-label={t('files.editor.nextMatch')}><ChevronDown className="h-3.5 w-3.5" /></Button>
+                <Button variant="secondary" size="sm" type="button" onClick={replaceCurrent} disabled={!canWrite || !matches.length} className="disabled:opacity-40">{t('files.editor.replace')}</Button>
+                <Button variant="secondary" size="sm" type="button" onClick={replaceAll} disabled={!canWrite || !matches.length} className="disabled:opacity-40">{t('files.editor.replaceAll')}</Button>
+                <Button variant="ghost" size="sm" type="button" onClick={() => selectMatch(0)} disabled={!matches.length} className="disabled:opacity-40">{t('files.editor.findAll', { anzahl: matches.length })}</Button>
+                <Button variant="ghost" size="sm" type="button" onClick={() => setSearchOpen(false)} className="flex w-8 items-center justify-center" aria-label={t('files.editor.closeSearch')}><X className="h-3.5 w-3.5" /></Button>
               </div>
             </div>
           )}

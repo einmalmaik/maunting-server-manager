@@ -3,6 +3,7 @@ import { KeyRound, Info, AlertTriangle, ExternalLink } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 
+import { buttonClasses } from '@/Singra/UI'
 function Alert({ type = 'info', title, children }: { type?: 'info' | 'warning', title: string, children: React.ReactNode }) {
   const styles = {
     info: 'bg-primary/10 text-primary border-primary/20',
@@ -47,7 +48,7 @@ export function OAuthDocs() {
       <div className="mb-8">
         <Link
           to="/settings"
-          className="msm-btn-secondary inline-flex items-center gap-2 px-4 py-2"
+          className={buttonClasses('secondary')}
         >
           <ExternalLink className="w-4 h-4" />
           {t('docs.manageBlueprints').replace('Blueprints', 'OAuth')}

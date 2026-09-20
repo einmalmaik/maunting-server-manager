@@ -8,6 +8,7 @@ import { useHasPermission } from '@/hooks/useHasPermission'
 import type { PermissionCatalog, Role } from '@/types/permissions'
 import { PermissionEditor } from '@/Singra/UI/PermissionEditor'
 import { PageHeader } from '@/Singra/UI/PageHeader'
+import { Button } from '@/Singra/UI'
 
 /**
  * Erlaubte Rollennamen — dieselbe Sprache wie `backend/schemas/role.py`.
@@ -117,16 +118,16 @@ function RoleForm({ catalog, initial, onSubmit, onCancel }: RoleFormProps) {
       </div>
 
       <div className="flex gap-3 pt-2">
-        <button type="button" onClick={onCancel} className="msm-btn-secondary px-4 py-2">
+        <Button variant="secondary" type="button" onClick={onCancel}>
           {t('common.cancel')}
-        </button>
-        <button
+        </Button>
+        <Button
           type="submit"
           disabled={saving || isAdminRole}
-          className="msm-btn-primary px-4 py-2 disabled:opacity-50"
+          className="disabled:opacity-50"
         >
           {saving ? t('common.loading') : t('common.save')}
-        </button>
+        </Button>
       </div>
     </form>
   )
@@ -219,16 +220,16 @@ export function Roles() {
   return (
     <div className="msm-page">
       <PageHeader eyebrow={t('pageContext.administration', 'Administration')} title={t('roles.title')} description={t('roles.subtitle')} status={<span className="msm-badge-info">{roles.length} {t('roles.title')}</span>} actions={canManage ? (
-          <button
+          <Button
             onClick={() => {
               setEditing(null)
               setCreating(true)
             }}
-            className="msm-btn-primary min-h-11 px-4 py-2 inline-flex items-center gap-2"
+            className="min-h-11 inline-flex items-center gap-2"
           >
             <Plus className="w-4 h-4" />
             {t('roles.create')}
-          </button>) : undefined} />
+          </Button>) : undefined} />
 
       {creating && (
         <div className="msm-card p-6">

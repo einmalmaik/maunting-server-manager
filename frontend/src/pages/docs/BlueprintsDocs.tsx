@@ -4,7 +4,7 @@ import { BookOpen, Check, Copy, Download, ExternalLink, Info, AlertTriangle } fr
 import { Link } from 'react-router-dom'
 import { apiUrl } from '@/config/api'
 import { PageHeader } from '@/Singra/UI/PageHeader'
-
+import { Button, buttonClasses } from '@/Singra/UI'
 interface CodeBlockProps {
   example: string | object
 }
@@ -26,14 +26,14 @@ function CodeBlock({ example }: CodeBlockProps) {
 
   return (
     <div className="relative mt-4">
-      <button
+      <Button variant="secondary" size="sm"
         type="button"
         onClick={copy}
-        className="absolute top-2 right-2 msm-btn-secondary px-2 py-1 text-xs inline-flex items-center gap-1.5"
+        className="absolute top-2 right-2 inline-flex items-center gap-1.5"
       >
         {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
         {copied ? t('docs.copiedExample') : t('docs.copyExample')}
-      </button>
+      </Button>
       <pre className="bg-surface-container-lowest border border-outline rounded-md p-4 overflow-auto font-mono text-xs text-on-surface whitespace-pre">
         {text}
       </pre>
@@ -300,7 +300,7 @@ export function BlueprintsDocs() {
           href={apiUrl(`/blueprints/template?lang=${i18n.language}`)}
           download
           data-testid="docs-template-download"
-          className="msm-btn-primary inline-flex items-center gap-2 px-4 py-2"
+          className={buttonClasses('primary')}
         >
           <Download className="w-4 h-4" />
           {t('docs.downloadTemplate')}
@@ -308,7 +308,7 @@ export function BlueprintsDocs() {
         <Link
           to="/blueprints"
           data-testid="docs-link-blueprints"
-          className="msm-btn-secondary inline-flex items-center gap-2 px-4 py-2"
+          className={buttonClasses('secondary')}
         >
           <ExternalLink className="w-4 h-4" />
           {t('docs.manageBlueprints')}

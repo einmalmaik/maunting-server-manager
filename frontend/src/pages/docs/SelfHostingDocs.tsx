@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowLeft, ArrowRightLeft, FileArchive, GitBranch, KeyRo
 import { CodeBlock } from '@/components/docs/CodeBlock'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 
+import { buttonClasses } from '@/Singra/UI'
 export const PANEL_BOOTSTRAP_COMMAND = `curl -fsSL https://raw.githubusercontent.com/einmalmaik/maunting-server-manager/main/scripts/bootstrap.sh \\
   | sudo bash -s -- --domain panel.example.com`
 export const COMPONENT_MIGRATION_COMMAND = 'sudo /opt/msm/helper-scripts/migrate-panel-components.sh'
@@ -81,7 +82,7 @@ export function SelfHostingDocs() {
           ['messenger-calls', t('docsSelfHosting.calls.title')],
           ['smart-system', t('docsSelfHosting.smartSystem.title')],
         ].map(([id, label]) => (
-          <a key={id} href={`#${id}`} className="msm-btn-secondary shrink-0 px-3 py-2 text-xs">{label}</a>
+          <a key={id} href={`#${id}`} className={buttonClasses('secondary', 'sm', 'shrink-0')}>{label}</a>
         ))}
       </nav>
 
@@ -330,7 +331,7 @@ export function SelfHostingDocs() {
             anbindet, braucht die Endpunkt- und Webhook-Referenz. */}
         <Link
           to="/docs/hoster-api"
-          className="msm-btn-secondary mt-5 inline-flex items-center gap-2 px-4 py-2 text-sm"
+          className={buttonClasses('secondary', 'md', 'mt-5')}
         >
           <Plug className="h-4 w-4" />
           {t('docsSelfHosting.hoster.apiReferenceLink')}
@@ -434,11 +435,11 @@ export function SelfHostingDocs() {
       </aside>
 
       <nav className="flex flex-col gap-3 border-t border-outline-variant pt-6 sm:flex-row" aria-label={t('docsSelfHosting.navigation.label')}>
-        <Link to="/admin/nodes" className="msm-btn-primary inline-flex items-center justify-center gap-2 px-4 py-2.5">
+        <Link to="/admin/nodes" className={buttonClasses('primary', 'lg')}>
           <Server className="h-4 w-4" />
           {t('docsSelfHosting.navigation.nodes')}
         </Link>
-        <Link to="/docs" className="msm-btn-secondary inline-flex items-center justify-center gap-2 px-4 py-2.5">
+        <Link to="/docs" className={buttonClasses('secondary', 'lg')}>
           <ArrowLeft className="h-4 w-4" />
           {t('docsSelfHosting.navigation.docs')}
         </Link>

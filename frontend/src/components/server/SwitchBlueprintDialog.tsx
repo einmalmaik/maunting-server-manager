@@ -5,6 +5,7 @@ import { api } from "@/api/client";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { toast } from "@/stores/toastStore";
 import type { BlueprintListEntry, Server } from "@/types";
+import { Button } from '@/Singra/UI'
 
 interface SwitchBlueprintDialogProps {
   open: boolean;
@@ -211,18 +212,17 @@ export function SwitchBlueprintDialog({
         </div>
 
         <div className="flex justify-end gap-3 pt-2 border-t border-outline/20">
-          <button
+          <Button variant="secondary"
             ref={abbrechenRef}
             type="button"
-            className="msm-btn-secondary px-4 py-2 text-sm"
             onClick={onClose}
             disabled={submitting}
           >
             {t("common.cancel", "Abbrechen")}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="msm-btn-primary px-4 py-2 text-sm flex items-center gap-2"
+            className="flex items-center gap-2"
             onClick={handleSwitch}
             disabled={
               submitting ||
@@ -234,7 +234,7 @@ export function SwitchBlueprintDialog({
           >
             {submitting && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
             {t("servers.confirmSwitchBtn", "Spiel wechseln & Backup erstellen")}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

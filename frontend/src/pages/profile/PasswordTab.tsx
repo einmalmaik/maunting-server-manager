@@ -4,6 +4,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { api } from '@/api/client'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { KeyRound, Save } from 'lucide-react'
+import { Button } from '@/Singra/UI'
 
 /**
  * Tab: Passwort aendern.
@@ -114,10 +115,10 @@ export function PasswordTab() {
           </div>
         )}
         <div className="md:col-span-2 flex justify-end">
-          <button
+          <Button
             type="submit"
             disabled={submitting}
-            className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+            className="inline-flex items-center gap-2 disabled:opacity-50"
           >
             {submitting ? (
               <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
@@ -125,7 +126,7 @@ export function PasswordTab() {
               <Save className="w-4 h-4" />
             )}
             {t('common.save')}
-          </button>
+          </Button>
         </div>
       </form>
     </div>

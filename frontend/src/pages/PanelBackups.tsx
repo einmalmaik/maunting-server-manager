@@ -6,6 +6,7 @@ import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 import { Dropdown } from '@/components/ui/Dropdown'
+import { Button } from '@/Singra/UI'
 
 /** Panel-Backup-List-Item (GET /api/panel-backups). */
 interface PanelBackupItem {
@@ -205,18 +206,18 @@ export function PanelBackups() {
   return (
     <div className="msm-page">
       <PageHeader eyebrow={t('pageContext.panel', 'Panel')} title={t('panelBackups.title')} description={t('panelBackups.subtitle')} status={<span className="msm-badge-info">{backups.length} Backups</span>} actions={<div className="flex flex-wrap gap-2">
-          <button
+          <Button variant="secondary"
             onClick={() => setShowSettings(!showSettings)}
-            className={`msm-btn-secondary flex min-h-11 items-center gap-2 px-3 py-2 ${showSettings ? 'bg-surface-container' : ''}`}
+            className={`flex min-h-11 items-center gap-2 ${showSettings ? 'bg-surface-container' : ''}`}
             title={t('panelBackups.settingsTitle')}
           >
             <SettingsIcon className="w-4 h-4" />
             {t('panelBackups.settingsButton')}
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={createBackup}
             disabled={creating}
-            className="msm-btn-primary flex min-h-11 items-center gap-2 px-4 py-2 disabled:opacity-50"
+            className="flex min-h-11 items-center gap-2 disabled:opacity-50"
           >
             {creating ? (
               <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
@@ -224,7 +225,7 @@ export function PanelBackups() {
               <Plus className="w-4 h-4" />
             )}
             {creating ? t('common.loading') : t('panelBackups.create')}
-          </button>
+          </Button>
         </div>} />
 
       {/* Settings Section */}
@@ -303,10 +304,10 @@ export function PanelBackups() {
           </div>
 
           <div className="flex justify-end">
-            <button
+            <Button
               onClick={saveSettings}
               disabled={savingSettings}
-              className="msm-btn-primary flex items-center gap-2 px-4 py-2 disabled:opacity-50"
+              className="flex items-center gap-2 disabled:opacity-50"
             >
               {savingSettings ? (
                 <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
@@ -314,7 +315,7 @@ export function PanelBackups() {
                 <Save className="w-4 h-4" />
               )}
               {savingSettings ? t('common.loading') : t('common.save')}
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -365,10 +366,10 @@ export function PanelBackups() {
                       <CloudOff className="w-5 h-5 text-on-surface-variant/40" />
                     </span>
                   )}
-                  <button
+                  <Button variant="secondary" size="sm"
                     onClick={() => prepareRestore(backup.id)}
                     disabled={preparingId === backup.id}
-                    className="msm-btn-secondary flex items-center gap-1 px-3 py-1.5 text-sm disabled:opacity-50"
+                    className="flex items-center gap-1 disabled:opacity-50"
                     title={t('panelBackups.prepareRestore')}
                   >
                     {preparingId === backup.id ? (
@@ -379,11 +380,11 @@ export function PanelBackups() {
                     {preparingId === backup.id
                       ? t('panelBackups.prepareRestoreLoading')
                       : t('panelBackups.prepareRestore')}
-                  </button>
-                  <button
+                  </Button>
+                  <Button variant="destructive" size="sm"
                     onClick={() => deleteBackup(backup.id)}
                     disabled={deletingId === backup.id}
-                    className="msm-btn-danger flex items-center gap-1 px-3 py-1.5 text-sm disabled:opacity-50"
+                    className="flex items-center gap-1 disabled:opacity-50"
                     title={t('common.delete')}
                   >
                     {deletingId === backup.id ? (
@@ -391,7 +392,7 @@ export function PanelBackups() {
                     ) : (
                       <Trash2 className="w-3.5 h-3.5" />
                     )}
-                  </button>
+                  </Button>
                 </div>
               </div>
             )
@@ -420,13 +421,12 @@ export function PanelBackups() {
                   {t('panelBackups.restoreModalSubtitle')}
                 </p>
               </div>
-              <button
+              <Button variant="secondary" size="icon"
                 onClick={closeRestoreModal}
-                className="msm-btn-secondary p-1.5"
                 aria-label={t('panelBackups.restoreModalClose')}
               >
                 <X className="w-4 h-4" />
-              </button>
+              </Button>
             </div>
 
             {/* Warnung */}
@@ -446,9 +446,9 @@ export function PanelBackups() {
                 <code className="font-mono-sm text-sm bg-surface-container-high px-3 py-2 rounded-md flex-1 break-all">
                   {restoreResult.script_path}
                 </code>
-                <button
+                <Button variant="secondary"
                   onClick={copyScriptPath}
-                  className="msm-btn-secondary flex items-center gap-1 px-3 py-2 text-sm"
+                  className="flex items-center gap-1"
                   title={t('panelBackups.restoreModalCopyScript')}
                 >
                   {scriptCopied ? (
@@ -459,7 +459,7 @@ export function PanelBackups() {
                   {scriptCopied
                     ? t('common.copied')
                     : t('common.copy')}
-                </button>
+                </Button>
               </div>
             </div>
 
@@ -474,12 +474,11 @@ export function PanelBackups() {
             </div>
 
             <div className="flex justify-end pt-1">
-              <button
+              <Button
                 onClick={closeRestoreModal}
-                className="msm-btn-primary px-4 py-2"
               >
                 {t('panelBackups.restoreModalClose')}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

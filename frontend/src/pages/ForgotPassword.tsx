@@ -7,7 +7,7 @@ import { VersionFooter } from '@/components/VersionFooter'
 import { ErrorMessage } from '@/components/ui/ErrorMessage'
 import { CaptchaWidget } from '@/components/ui/CaptchaWidget'
 import { Shield, Mail, ArrowRight, ArrowLeft } from 'lucide-react'
-
+import { Button, buttonClasses } from '@/Singra/UI'
 export function ForgotPassword() {
   const { t } = useTranslation()
   const [email, setEmail] = useState('')
@@ -67,7 +67,7 @@ export function ForgotPassword() {
               <p className="font-body-md text-base text-on-surface">{t('forgotPassword.sent')}</p>
               <Link
                 to="/login"
-                className="msm-btn-primary w-full py-3 flex items-center justify-center gap-2"
+                className={buttonClasses('primary', 'lg', 'w-full')}
               >
                 {t('auth.goToLogin')}
                 <ArrowRight className="w-4 h-4" />
@@ -93,10 +93,10 @@ export function ForgotPassword() {
 
               <ErrorMessage message={error} className="text-sm" />
 
-              <button
+              <Button size="lg"
                 type="submit"
                 disabled={status === 'submitting'}
-                className="msm-btn-primary w-full py-3 flex items-center justify-center gap-2 disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 {status === 'submitting' ? (
                   <span className="inline-flex items-center gap-2">
@@ -109,7 +109,7 @@ export function ForgotPassword() {
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}
-              </button>
+              </Button>
             </form>
           )}
 

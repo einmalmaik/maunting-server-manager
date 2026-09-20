@@ -42,7 +42,7 @@ import {
 import { credentialsApi } from '@/api/credentials'
 import { rbacApi } from '@/api/rbac'
 import { api, SanitizedApiError } from '@/api/client'
-import { Button, NumberStepper, Switch } from '@/Singra/UI'
+import { Button, NumberStepper, Switch, buttonClasses } from '@/Singra/UI'
 import { Dropdown } from '@/components/ui/Dropdown'
 import { SecretOnce } from '@/components/ui/SecretOnce'
 import { confirm } from '@/stores/confirmStore'
@@ -174,7 +174,7 @@ export function HosterTab({ canWrite }: { canWrite: boolean }) {
               Webhook-Referenz — dieser Reiter erklaert nur die Konfiguration. */}
           <Link
             to="/docs/hoster-api"
-            className="msm-btn-secondary mt-4 inline-flex items-center gap-2 px-4 py-2 text-sm"
+            className={buttonClasses('secondary', 'md', 'mt-4')}
           >
             <Plug className="h-4 w-4" aria-hidden="true" />
             {t('hoster.docsLink')}
@@ -1217,7 +1217,7 @@ Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe W
                 href={handoffPath(simResult.handoff_url)}
                 target="_blank"
                 rel="noopener"
-                className="msm-btn-primary inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium"
+                className={buttonClasses('primary', 'sm', 'font-medium')}
               >
                 <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
                 {t('hoster.simulator.loginAsCustomer')}

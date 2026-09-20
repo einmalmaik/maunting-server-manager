@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Search, Info, Check, X } from 'lucide-react'
 import type { PermissionDef } from '@/types/permissions'
+import { Button } from '@/Singra/UI'
 
 type Uebersetzer = ReturnType<typeof useTranslation>['t']
 
@@ -272,20 +273,18 @@ export function PermissionEditor({
 
         {!disabled && permissions.length > 0 && (
           <div className="flex gap-2 w-full sm:w-auto justify-end">
-            <button
+            <Button variant="secondary" size="sm"
               type="button"
               onClick={handleSelectVisible}
-              className="msm-btn-secondary text-xs px-3 py-1.5"
             >
               {t('permissionEditor.selectAll')}
-            </button>
-            <button
+            </Button>
+            <Button variant="secondary" size="sm"
               type="button"
               onClick={handleDeselectVisible}
-              className="msm-btn-secondary text-xs px-3 py-1.5"
             >
               {t('permissionEditor.deselectAll')}
-            </button>
+            </Button>
           </div>
         )}
       </div>

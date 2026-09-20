@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Dropdown } from '@/components/ui/Dropdown'
 import { TabBar } from '@/components/ui/TabBar'
 import { PageHeader } from '@/Singra/UI/PageHeader'
+import { Button } from '@/Singra/UI'
 
 export function Servers() {
   const { t } = useTranslation()
@@ -342,16 +343,16 @@ export function Servers() {
   return (
     <div className="msm-page">
       <PageHeader eyebrow={t('pageContext.infrastructure', 'Infrastructure')} title={t('nav.servers')} description={t('servers.subtitle')} status={<span className="msm-badge-info">{servers.length} {t('nav.servers')}</span>} actions={canCreateServer ? (
-          <button
+          <Button
             onClick={() => {
               setShowCreate(true)
               void loadNodes()
             }}
-            className="msm-btn-primary flex min-h-11 items-center gap-2 px-4 py-2"
+            className="flex min-h-11 items-center gap-2"
           >
             <Plus className="w-4 h-4" />
             {t('servers.create')}
-          </button>) : undefined} />
+          </Button>) : undefined} />
 
       {loadError && (
         <div className="msm-card p-12 text-center border-dashed border-2 border-outline-variant">
@@ -700,20 +701,20 @@ export function Servers() {
                 )}
               </div>
               <div className="flex gap-3 pt-2">
-                <button
+                <Button variant="secondary"
                   type="button"
-                  className="msm-btn-secondary flex-1 py-2"
+                  className="flex-1"
                   onClick={() => setShowCreate(false)}
                 >
                   {t('common.cancel')}
-                </button>
-                <button
+                </Button>
+                <Button
                   type="submit"
-                  className="msm-btn-primary flex-1 py-2 disabled:opacity-50"
+                  className="flex-1 disabled:opacity-50"
                   disabled={creating || nodesLoading || interfacesLoading || interfaces.length === 0 || !(form.public_bind_ip || defaultBindIp)}
                 >
                   {creating ? t('common.loading') : t('servers.create')}
-                </button>
+                </Button>
               </div>
             </form>
           </div>

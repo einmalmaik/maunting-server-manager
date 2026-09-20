@@ -13,7 +13,7 @@ import type { Server, User } from '@/types'
 import type { Role } from '@/types/permissions'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 import { MultiSelect } from '@/Singra/UI/MultiSelect'
-import { Avatar } from '@/Singra/UI'
+import { Button, Avatar } from '@/Singra/UI'
 
 export function Users() {
   const { t } = useTranslation()
@@ -126,13 +126,13 @@ export function Users() {
   return (
     <div className="msm-page">
       <PageHeader eyebrow={t('pageContext.administration', 'Administration')} title={t('nav.users')} description={t('users.subtitle')} status={<span className="msm-badge-info">{users.length} {t('nav.users')}</span>} actions={canManageUsers ? (
-          <button
+          <Button
             onClick={() => setShowCreate(!showCreate)}
-            className="msm-btn-primary min-h-11 px-4 py-2 inline-flex items-center gap-2"
+            className="min-h-11 inline-flex items-center gap-2"
           >
             <Plus className="w-4 h-4" />
             {t('users.createUser')}
-          </button>) : undefined} />
+          </Button>) : undefined} />
 
       {showCreate && (
         <div className="msm-card p-6">
@@ -213,20 +213,19 @@ export function Users() {
               </label>
             </div>
             <div className="md:col-span-2 flex gap-3">
-              <button
+              <Button variant="secondary"
                 type="button"
                 onClick={() => setShowCreate(false)}
-                className="msm-btn-secondary px-4 py-2"
               >
                 {t('common.cancel')}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="submit"
                 disabled={creating}
-                className="msm-btn-primary px-4 py-2 disabled:opacity-50"
+                className="disabled:opacity-50"
               >
                 {creating ? t('common.loading') : t('users.createUser')}
-              </button>
+              </Button>
             </div>
           </form>
         </div>

@@ -23,7 +23,7 @@ import { PageHeader } from '@/Singra/UI/PageHeader'
 import { Dropdown } from '@/components/ui/Dropdown'
 import { BlueprintBuilder, type BlueprintBuilderMode } from '@/features/blueprints/BlueprintBuilder'
 import { normalizeBlueprintId } from '@/features/blueprints/contract'
-
+import { Button, buttonClasses } from '@/Singra/UI'
 /** Hilfsfunktion: lesbarer Label pro source_type */
 function sourceLabel(src: string): string {
   if (src === 'steam') return 'Steam'
@@ -198,8 +198,8 @@ export function Blueprints() {
         description={t('blueprints.pageSubtitle')}
         actions={(
           <div className="grid grid-flow-col auto-cols-max items-stretch gap-1.5" data-testid="blueprints-header-actions">
-            <Link to="/docs/blueprints#docs-howto" className="msm-btn-secondary inline-flex h-10 items-center gap-1.5 whitespace-nowrap px-2 text-xs"><BookOpen className="h-4 w-4" />{t('blueprints.guide')}</Link>
-            {canWrite && <button type="button" onClick={() => setBuilder({ mode: 'create' })} className="msm-btn-primary inline-flex h-10 items-center gap-1.5 whitespace-nowrap px-2.5 text-xs" data-testid="blueprints-create"><Plus className="h-4 w-4" />{t('blueprints.create')}</button>}
+            <Link to="/docs/blueprints#docs-howto" className={buttonClasses('secondary', 'md')}><BookOpen className="h-4 w-4" />{t('blueprints.guide')}</Link>
+            {canWrite && <Button type="button" onClick={() => setBuilder({ mode: 'create' })} className="inline-flex items-center gap-1.5 whitespace-nowrap" data-testid="blueprints-create"><Plus className="h-4 w-4" />{t('blueprints.create')}</Button>}
           </div>
         )}
       />
@@ -216,7 +216,7 @@ export function Blueprints() {
         </div>
         <Link
           to="/docs/blueprints#docs-howto"
-          className="msm-btn-secondary py-1.5 px-3 text-xs shrink-0 self-start sm:self-center inline-flex items-center gap-1.5"
+          className={buttonClasses('secondary', 'sm', 'shrink-0 self-start sm:self-center')}
         >
           <BookOpen className="w-3.5 h-3.5" />
           {t('blueprints.docsBannerBtn')}
@@ -239,11 +239,11 @@ export function Blueprints() {
         </div>
         {canWrite && (
           <div className="flex items-center gap-2">
-            <button
+            <Button variant="secondary"
               type="button"
               onClick={() => newFileRef.current?.click()}
               disabled={busy === 'new'}
-              className="msm-btn-secondary inline-flex min-h-11 items-center gap-2 px-4 py-2 disabled:opacity-50"
+              className="inline-flex min-h-11 items-center gap-2 disabled:opacity-50"
               data-testid="blueprints-upload-new"
             >
               {busy === 'new' ? (
@@ -252,7 +252,7 @@ export function Blueprints() {
                 <Upload className="w-4 h-4" />
               )}
               {t('blueprints.uploadNew')}
-            </button>
+            </Button>
             <input
               ref={newFileRef}
               type="file"
@@ -413,7 +413,7 @@ export function Blueprints() {
                     <a
                       href={apiUrl(`/blueprints/${encodeURIComponent(entry.id)}`)}
                       download
-                      className="msm-btn-secondary inline-flex min-h-11 items-center justify-center gap-1 px-3 py-2 text-xs"
+                      className={buttonClasses('secondary', 'sm', 'min-h-11')}
                       data-testid={`blueprint-download-${entry.id}`}
                       title={t('blueprints.download')}
                     >
@@ -421,20 +421,20 @@ export function Blueprints() {
                       {t('blueprints.download')}
                     </a>
                     {canWrite && isNative && (
-                      <button type="button" onClick={() => setBuilder({ mode: 'clone', sourceId: entry.id })} className="msm-btn-secondary inline-flex min-h-11 items-center justify-center gap-1 px-3 py-2 text-xs" data-testid={`blueprint-clone-${entry.id}`}>
+                      <Button variant="secondary" size="sm" type="button" onClick={() => setBuilder({ mode: 'clone', sourceId: entry.id })} className="inline-flex min-h-11 items-center justify-center gap-1" data-testid={`blueprint-clone-${entry.id}`}>
                         <Copy className="h-3.5 w-3.5" />{t('blueprints.clone')}
-                      </button>
+                      </Button>
                     )}
                     {canWrite && !isNative && (
                       <>
-                        <button type="button" onClick={() => setBuilder({ mode: 'edit', sourceId: entry.id })} className="msm-btn-secondary inline-flex min-h-11 items-center justify-center gap-1 px-3 py-2 text-xs" data-testid={`blueprint-edit-${entry.id}`}>
+                        <Button variant="secondary" size="sm" type="button" onClick={() => setBuilder({ mode: 'edit', sourceId: entry.id })} className="inline-flex min-h-11 items-center justify-center gap-1" data-testid={`blueprint-edit-${entry.id}`}>
                           <Pencil className="h-3.5 w-3.5" />{t('common.edit')}
-                        </button>
-                        <button
+                        </Button>
+                        <Button variant="secondary" size="sm"
                           type="button"
                           onClick={() => handleReplace(entry.id)}
                           disabled={isReplacing}
-                          className="msm-btn-secondary inline-flex min-h-11 items-center justify-center gap-1 px-3 py-2 text-xs disabled:opacity-50"
+                          className="inline-flex min-h-11 items-center justify-center gap-1 disabled:opacity-50"
                           data-testid={`blueprint-replace-${entry.id}`}
                           title={t('blueprints.replace')}
                         >
@@ -444,7 +444,7 @@ export function Blueprints() {
                             <RefreshCw className="w-3.5 h-3.5" />
                           )}
                           {t('blueprints.replace')}
-                        </button>
+                        </Button>
                         <button
                           type="button"
                           onClick={() => handleDelete(entry)}

@@ -5,7 +5,7 @@ import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { PasswordInput } from '@/components/ui/PasswordInput'
-import { Dropdown } from '@/Singra/UI'
+import { Button, Dropdown } from '@/Singra/UI'
 import type { PanelSettings } from './types'
 import { EMPTY_PANEL_SETTINGS } from './types'
 
@@ -249,11 +249,11 @@ export function CloudflareTab() {
           </div>
 
           <div className="flex gap-3 justify-end flex-wrap pt-2">
-            <button
+            <Button variant="secondary"
               type="button"
               onClick={handleTest}
               disabled={testing || !settings.cloudflare_api_configured}
-              className="msm-btn-secondary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+              className="inline-flex items-center gap-2 disabled:opacity-50"
             >
               {testing ? (
                 <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
@@ -261,11 +261,11 @@ export function CloudflareTab() {
                 <Send className="w-4 h-4" />
               )}
               {t('settings.testConnection', { defaultValue: 'Verbindung testen' })}
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
               disabled={saving || !hasChanges || !canWrite}
-              className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+              className="inline-flex items-center gap-2 disabled:opacity-50"
             >
               {saving ? (
                 <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
@@ -273,7 +273,7 @@ export function CloudflareTab() {
                 <Save className="w-4 h-4" />
               )}
               {t('settings.cloudflare.save', { defaultValue: 'Einstellungen speichern' })}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

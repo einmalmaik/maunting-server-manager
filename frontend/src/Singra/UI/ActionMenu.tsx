@@ -9,6 +9,7 @@ import {
 import { createPortal } from 'react-dom'
 import { ChevronDown } from 'lucide-react'
 import { cx } from '@/utils/classNames'
+import { buttonClasses } from '@/components/ui/Button'
 
 export interface ActionMenuItem {
   key: string
@@ -129,8 +130,10 @@ export function ActionMenu({
           setOpen(true)
         }}
         className={cx(
-          'msm-btn-secondary inline-flex items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-45',
-          compact ? 'h-11 px-3 text-xs sm:h-8 sm:px-2.5' : 'h-11 px-3 text-sm sm:h-9',
+          buttonClasses('secondary', compact ? 'sm' : 'md', 'gap-1.5 disabled:cursor-not-allowed disabled:opacity-45'),
+          // Auf dem Telefon bleibt der Auslöser ein Daumenziel; ab sm gilt die
+          // Höhe des Knopfs daneben.
+          compact ? 'h-11 sm:h-8' : 'h-11 sm:h-10',
         )}
       >
         {icon}

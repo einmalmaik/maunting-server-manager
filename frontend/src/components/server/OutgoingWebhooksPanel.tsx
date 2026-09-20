@@ -17,6 +17,7 @@ import { api } from '@/api/client';
 import { toast } from '@/stores/toastStore';
 import { confirm } from '@/stores/confirmStore';
 import { Dropdown } from '@/components/ui/Dropdown';
+import { Button } from '@/Singra/UI'
 
 interface WebhookSub {
   id: number;
@@ -233,14 +234,14 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
               })}
             </p>
           </div>
-          <button
+          <Button
             type="button"
-            className="msm-btn-primary flex items-center gap-2"
+            className="flex items-center gap-2"
             onClick={() => setShowCreate((p) => !p)}
           >
             <Plus className="w-4 h-4" />
             {t('webhook.add', { defaultValue: 'Webhook hinzufügen' })}
-          </button>
+          </Button>
         </div>
 
         {showCreate && (
@@ -297,22 +298,20 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
               />
             </div>
             <div className="flex gap-2 justify-end pt-2">
-              <button
+              <Button variant="secondary"
                 type="button"
-                className="msm-btn-secondary"
                 onClick={() => setShowCreate(false)}
               >
                 {t('common.cancel', { defaultValue: 'Abbrechen' })}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="submit"
-                className="msm-btn-primary"
                 disabled={busy === 'create'}
               >
                 {busy === 'create'
                   ? t('common.working', { defaultValue: 'Bitte warten …' })
                   : t('common.save', { defaultValue: 'Anlegen' })}
-              </button>
+              </Button>
             </div>
           </form>
         )}
@@ -355,14 +354,14 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
               <code className="msm-input flex-1 font-mono text-body-sm overflow-x-auto whitespace-nowrap">
                 {sub.target_url}
               </code>
-              <button
+              <Button variant="secondary"
                 type="button"
-                className="msm-btn-secondary flex items-center gap-1"
+                className="flex items-center gap-1"
                 onClick={() => copyToClipboard(sub.target_url, 'URL')}
               >
                 <Copy className="w-4 h-4" />
                 {t('common.copy', { defaultValue: 'Kopieren' })}
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -395,16 +394,16 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
                 <span className="text-label-md text-status-warning font-medium">
                   {t('webhook.secretNew', { defaultValue: 'Neues Webhook-Secret' })}
                 </span>
-                <button
+                <Button variant="secondary"
                   type="button"
-                  className="msm-btn-secondary flex items-center gap-1"
+                  className="flex items-center gap-1"
                   onClick={() =>
                     copyToClipboard(revealedSecrets[sub.id], 'Secret')
                   }
                 >
                   <Copy className="w-4 h-4" />
                   {t('common.copy', { defaultValue: 'Kopieren' })}
-                </button>
+                </Button>
               </div>
               <code className="msm-input block font-mono text-body-sm break-all">
                 {revealedSecrets[sub.id]}
@@ -419,9 +418,9 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
           )}
 
           <div className="flex flex-wrap gap-2 pt-2 border-t border-outline/30">
-            <button
+            <Button variant="secondary"
               type="button"
-              className="msm-btn-secondary flex items-center gap-2"
+              className="flex items-center gap-2"
               onClick={() => void handleTest(sub.id)}
               disabled={testPending === sub.id || !sub.enabled}
               title={
@@ -438,19 +437,19 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
                 <Send className="w-4 h-4" />
               )}
               {t('webhook.test', { defaultValue: 'Test senden' })}
-            </button>
-            <button
+            </Button>
+            <Button variant="secondary"
               type="button"
-              className="msm-btn-secondary flex items-center gap-2"
+              className="flex items-center gap-2"
               onClick={() => void handleRotate(sub.id)}
               disabled={busy === `rotate-${sub.id}`}
             >
               <RotateCw className="w-4 h-4" />
               {t('webhook.rotate', { defaultValue: 'Secret rotieren' })}
-            </button>
-            <button
+            </Button>
+            <Button variant="secondary"
               type="button"
-              className="msm-btn-secondary flex items-center gap-2"
+              className="flex items-center gap-2"
               onClick={() => void handleToggleEnabled(sub)}
               disabled={busy === `toggle-${sub.id}`}
             >
@@ -458,16 +457,16 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
               {sub.enabled
                 ? t('webhook.pause', { defaultValue: 'Pausieren' })
                 : t('webhook.resume', { defaultValue: 'Fortsetzen' })}
-            </button>
-            <button
+            </Button>
+            <Button variant="destructive"
               type="button"
-              className="msm-btn-danger flex items-center gap-2 ml-auto"
+              className="flex items-center gap-2 ml-auto"
               onClick={() => void handleDelete(sub)}
               disabled={busy === `delete-${sub.id}`}
             >
               <Trash2 className="w-4 h-4" />
               {t('common.delete', { defaultValue: 'Löschen' })}
-            </button>
+            </Button>
           </div>
         </div>
       ))}

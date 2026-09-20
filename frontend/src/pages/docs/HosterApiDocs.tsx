@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowLeft, KeyRound, Link2, ListChecks, Plug, Radio, Shi
 import { CodeBlock } from '@/components/docs/CodeBlock'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 
+import { buttonClasses } from '@/Singra/UI'
 /**
  * Endpunkt- und Webhook-Referenz fuer Shop-Anbindungen.
  *
@@ -221,7 +222,7 @@ export function HosterApiDocs() {
         status={<Plug className="h-6 w-6 text-primary" aria-hidden="true" />}
       />
 
-      <Link to="/docs" className="msm-btn-secondary mb-6 inline-flex items-center gap-2 px-3 py-2 text-sm">
+      <Link to="/docs" className={buttonClasses('secondary', 'md', 'mb-6')}>
         <ArrowLeft className="h-4 w-4" />
         {t('docsHosterApi.backToDocs')}
       </Link>
@@ -231,7 +232,7 @@ export function HosterApiDocs() {
         aria-label={t('docsHosterApi.navigationLabel')}
       >
         {SECTIONS.map(([id, key]) => (
-          <a key={id} href={`#${id}`} className="msm-btn-secondary shrink-0 px-3 py-2 text-xs">
+          <a key={id} href={`#${id}`} className={buttonClasses('secondary', 'sm', 'shrink-0')}>
             {t(`docsHosterApi.${key}.title`)}
           </a>
         ))}
@@ -448,7 +449,7 @@ export function HosterApiDocs() {
             body: t(`docsHosterApi.operations.${item}.body`),
           }))}
         />
-        <Link to="/docs/self-hosting#hoster-integration" className="msm-btn-secondary mt-6 inline-flex items-center gap-2 px-4 py-2 text-sm">
+        <Link to="/docs/self-hosting#hoster-integration" className={buttonClasses('secondary', 'md', 'mt-6')}>
           <Plug className="h-4 w-4" />
           {t('docsHosterApi.operations.setupLink')}
         </Link>

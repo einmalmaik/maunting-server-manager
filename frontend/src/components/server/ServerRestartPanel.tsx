@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Bot, CalendarClock, CheckCircle2, Plus, Save, Trash2, XCircle } from 'lucide-react'
 import { api } from '@/api/client'
 import { useHasPermission } from '@/hooks/useHasPermission'
-import { Dropdown, Switch } from '@/Singra/UI'
+import { Button, Dropdown, Switch } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 import type { Server } from '@/types'
 import { formatPanelDateTime, formatPanelTime, type PanelTimeFormat } from '@/utils/timeFormat'
@@ -111,14 +111,14 @@ export function ServerRestartPanel({ server, serverId, onSaved }: Props) {
             </span>
           )}
         </div>
-        <button
+        <Button
           onClick={save}
           disabled={saving || !canWrite}
-          className="msm-btn-primary inline-flex items-center gap-2 px-4 py-2 disabled:opacity-50"
+          className="inline-flex items-center gap-2 disabled:opacity-50"
         >
           <Save className="w-4 h-4" />
           {saving ? t('common.loading') : t('common.save')}
-        </button>
+        </Button>
       </div>
 
       <div className="msm-card p-5 space-y-5">
@@ -234,15 +234,15 @@ export function ServerRestartPanel({ server, serverId, onSaved }: Props) {
                 <label className="block font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">
                   {t('restarts.fixedTimes')}
                 </label>
-                <button
+                <Button variant="secondary" size="sm"
                   type="button"
                   onClick={addTime}
                   disabled={times.length >= 12}
-                  className="msm-btn-secondary inline-flex items-center gap-2 px-3 py-1.5 text-sm disabled:opacity-50"
+                  className="inline-flex items-center gap-2 disabled:opacity-50"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   {t('restarts.addTime')}
-                </button>
+                </Button>
                 {times.length >= 12 && (
                   <span className="text-xs text-on-surface-variant">{t('restarts.maxTimesReached') || 'Max. 12 Zeiten erreicht'}</span>
                 )}
@@ -262,15 +262,15 @@ export function ServerRestartPanel({ server, serverId, onSaved }: Props) {
                       buttonClassName="disabled:opacity-100"
                       aria-label={t('restarts.fixedTimes')}
                     />
-                    <button
+                    <Button variant="secondary"
                       type="button"
                       onClick={() => setTimes(times.filter((_, i) => i !== index))}
                       disabled={times.length <= 1}
-                      className="msm-btn-secondary px-3 disabled:opacity-50"
+                      className="disabled:opacity-50"
                       title={t('common.delete')}
                     >
                       <Trash2 className="w-4 h-4" />
-                    </button>
+                    </Button>
                   </div>
                 ))}
               </div>

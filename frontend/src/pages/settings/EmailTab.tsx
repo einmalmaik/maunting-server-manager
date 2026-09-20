@@ -298,11 +298,11 @@ export function EmailTab() {
               </div>
 
               <div className="flex justify-end pt-2">
-                <button
+                <Button
                   type="button"
                   onClick={handleSaveResendKey}
                   disabled={savingResend || (!newResendKey.trim() && !clearResendKey) || !canWrite}
-                  className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+                  className="inline-flex items-center gap-2 disabled:opacity-50"
                 >
                   {savingResend ? (
                     <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
@@ -310,7 +310,7 @@ export function EmailTab() {
                     <Save className="w-4 h-4" />
                   )}
                   {t('settings.save', { defaultValue: 'Speichern' })}
-                </button>
+                </Button>
               </div>
             </div>
           )}
@@ -329,11 +329,11 @@ export function EmailTab() {
                   placeholder="test@example.com"
                 />
               </div>
-              <button
+              <Button variant="secondary" size="lg"
                 type="button"
                 onClick={handleTestEmail}
                 disabled={sendingTest || !testEmail}
-                className="msm-btn-secondary px-4 py-2.5 inline-flex items-center gap-2 disabled:opacity-50 whitespace-nowrap"
+                className="inline-flex items-center gap-2 disabled:opacity-50 whitespace-nowrap"
               >
                 {sendingTest ? (
                   <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
@@ -341,7 +341,7 @@ export function EmailTab() {
                   <Send className="w-4 h-4" />
                 )}
                 {t('settings.testEmail')}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

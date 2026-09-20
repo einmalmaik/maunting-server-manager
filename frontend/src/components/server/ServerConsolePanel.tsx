@@ -6,6 +6,7 @@ import { useHasPermission } from '@/hooks/useHasPermission'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { toast } from '@/stores/toastStore'
 import { type PanelTimeFormat } from '@/utils/timeFormat'
+import { Button } from '@/Singra/UI'
 
 interface Props {
   serverId: number
@@ -585,7 +586,7 @@ export function ServerConsolePanel({ serverId, mode = 'console' }: Props) {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Logs durchsuchen..."
+              placeholder={t('servers.consoleSearchPlaceholder')}
               className="w-full bg-surface-container-lowest border border-outline rounded-md pl-8 pr-3 py-1.5 font-mono text-xs text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-1 focus:ring-primary"
             />
           </div>
@@ -593,26 +594,26 @@ export function ServerConsolePanel({ serverId, mode = 'console' }: Props) {
 
         <div className="inline-flex items-center gap-2">
           {/* Zeitstempel umschalten */}
-          <button
+          <Button variant="secondary" size="sm"
             type="button"
             onClick={() => setShowTimestamps(!showTimestamps)}
-            className={`msm-btn-secondary px-2.5 py-1.5 text-xs inline-flex items-center gap-1.5 ${showTimestamps ? 'bg-secondary/15 text-primary border-primary/20' : ''}`}
-            title="Zeitstempel umschalten"
+            className={`inline-flex items-center gap-1.5 ${showTimestamps ? 'bg-secondary/15 text-primary border-primary/20' : ''}`}
+            title={t('servers.consoleTimestampsTitle')}
           >
             <Clock className="w-3.5 h-3.5" />
-            {showTimestamps ? 'Zeitstempel an' : 'Zeitstempel aus'}
-          </button>
+            {showTimestamps ? t('servers.consoleTimestampsOn') : t('servers.consoleTimestampsOff')}
+          </Button>
           
-          <button
+          <Button variant="secondary" size="sm"
             type="button"
             onClick={() => void copyVisibleLogs()}
             disabled={filteredLogs.length === 0}
-            className="msm-btn-secondary px-2.5 py-1.5 text-xs inline-flex items-center gap-1.5 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 disabled:opacity-50"
             title={t('servers.consoleCopyTitle')}
           >
             {copiedLogs ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
             {copiedLogs ? t('common.copied') : t('servers.consoleCopy')}
-          </button>
+          </Button>
         </div>
       </div>
       <div className="p-5">
@@ -667,15 +668,15 @@ export function ServerConsolePanel({ serverId, mode = 'console' }: Props) {
               className="flex-1 bg-surface-container-lowest border border-outline rounded-md px-3 py-2 font-mono text-xs text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
               data-testid="console-input"
             />
-            <button
+            <Button size="sm"
               type="submit"
               disabled={sending || !inputValue.trim()}
-              className="msm-btn-primary px-3 py-2 text-xs inline-flex items-center gap-1.5 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 disabled:opacity-50"
               data-testid="console-send"
             >
               <Send className="w-3.5 h-3.5" />
               {sendLabel}
-            </button>
+            </Button>
           </form>
         )}
       </div>

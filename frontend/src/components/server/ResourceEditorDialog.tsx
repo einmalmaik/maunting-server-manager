@@ -5,6 +5,7 @@ import { api, SanitizedApiError } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import type { Node } from '@/types'
+import { Button } from '@/Singra/UI'
 
 /**
  * Resource-Limit-Editor für Server-Detail (CPU / RAM / Disk).
@@ -442,18 +443,18 @@ export function ResourceEditorDialog({
           )}
 
           <div className="flex gap-3 pt-2">
-            <button
+            <Button variant="secondary"
               type="button"
-              className="msm-btn-secondary flex-1 py-2"
+              className="flex-1"
               onClick={() => !saving && onClose()}
               disabled={saving}
               data-testid="resource-cancel-btn"
             >
               {t('common.cancel')}
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
-              className="msm-btn-primary flex-1 py-2 disabled:opacity-50"
+              className="flex-1 disabled:opacity-50"
               disabled={saving || lifecycleBusy}
               aria-busy={saving || undefined}
               data-testid="resource-save-btn"
@@ -461,7 +462,7 @@ export function ResourceEditorDialog({
               {saving
                 ? t('serverDetail.resourceEditor.saving')
                 : t('common.save')}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

@@ -50,6 +50,7 @@ import { AiMemoryManager } from "@/components/ai/AiMemoryManager";
 import type { GameInfo, Server } from "@/types";
 import { labelRole, mapBlueprintPorts } from "@/utils/portRoles";
 import { UptimeDisplay } from "@/components/server/UptimeDisplay";
+import { Button } from '@/Singra/UI'
 
 type TabKey =
   | "files"
@@ -529,13 +530,13 @@ export function ServerDetail() {
         <p className="font-body-md text-on-surface-variant">
           {t("servers.notFound")}
         </p>
-        <button
-          className="msm-btn-secondary mt-4 inline-flex items-center gap-2 px-4 py-2"
+        <Button variant="secondary"
+          className="mt-4 inline-flex items-center gap-2"
           onClick={() => navigate("/servers")}
         >
           <ArrowLeft className="w-4 h-4" />
           {t("servers.backToList")}
-        </button>
+        </Button>
       </div>
     );
   }
@@ -667,31 +668,31 @@ export function ServerDetail() {
         )}
         actions={(
           <div className="flex flex-wrap gap-2">
-          <button
-            className="msm-btn-secondary inline-flex min-h-11 items-center gap-2 px-3 py-2"
+          <Button variant="secondary"
+            className="inline-flex min-h-11 items-center gap-2"
             onClick={() => navigate("/servers")}
             aria-label={t("servers.backToList", "Back to servers")}
           >
             <ArrowLeft className="w-4 h-4" />
             <span>{t("common.back", "Back")}</span>
-          </button>
+          </Button>
           {/* Der KI-Chat lebt seit dem Einzelchat ausschliesslich unter /ai.
               Der Verweis bleibt hier, damit der Weg dorthin nicht verloren
               geht — die KI findet den Server dann selbst ueber list_my_servers. */}
           {canUseAi && (
-            <button
+            <Button variant="secondary"
               type="button"
-              className="msm-btn-secondary inline-flex min-h-11 items-center gap-2 px-3 py-2"
+              className="inline-flex min-h-11 items-center gap-2"
               onClick={() => navigate("/ai")}
               aria-label={t("tabs.ai")}
             >
               <Bot className="w-4 h-4" />
               <span>{t("tabs.ai")}</span>
-            </button>
+            </Button>
           )}
-          <button
+          <Button variant="secondary"
             type="button"
-            className="msm-btn-secondary inline-flex min-h-11 max-w-full items-center gap-2 px-3 py-2 text-left"
+            className="inline-flex min-h-11 max-w-full items-center gap-2 text-left"
             aria-label={t("servers.copyDockerContainerName")}
             title={t("servers.dockerContainerInstallDirHint")}
             onClick={() => {
@@ -703,7 +704,7 @@ export function ServerDetail() {
               {t("servers.dockerContainerLabel")}
             </span>
             <span className="font-mono text-xs">msm-srv-{server.id}</span>
-          </button>
+          </Button>
           </div>
         )}
       />
@@ -722,12 +723,12 @@ export function ServerDetail() {
             </span>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
-            <button type="button" onClick={() => navigate("/servers")} className="msm-btn-secondary inline-flex min-h-11 items-center gap-2 px-3 text-xs">
+            <Button variant="secondary" size="sm" type="button" onClick={() => navigate("/servers")} className="inline-flex min-h-11 items-center gap-2">
               <ArrowLeft className="h-4 w-4" />{t("common.back", "Back")}
-            </button>
-            <button type="button" onClick={() => setMobileOverviewOpen((value) => !value)} aria-expanded={mobileOverviewOpen} className="msm-btn-secondary inline-flex min-h-11 items-center px-3 text-xs">
+            </Button>
+            <Button variant="secondary" size="sm" type="button" onClick={() => setMobileOverviewOpen((value) => !value)} aria-expanded={mobileOverviewOpen} className="inline-flex min-h-11 items-center">
               {mobileOverviewOpen ? t("serverDetail.hideServerOverview") : t("serverDetail.showServerOverview")}
-            </button>
+            </Button>
           </div>
         </section>
       )}
@@ -750,12 +751,11 @@ export function ServerDetail() {
               {t("servers.bindIp.startBlockedBody")}
             </p>
           </div>
-          <button
+          <Button size="sm"
             onClick={() => setShowEditNetwork(true)}
-            className="msm-btn-primary px-3 py-1.5 text-sm"
           >
             {t("servers.bindIp.assignNow")}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -786,10 +786,10 @@ export function ServerDetail() {
       {/* Actions */}
       <div className="flex gap-3 flex-wrap">
         {effectiveStatus !== "running" && effectiveStatus !== "installing" && effectiveStatus !== "starting" && effectiveStatus !== "stopping" && effectiveStatus !== "restarting" && effectiveStatus !== "queued" && (
-          <button
+          <Button
             onClick={() => doAction("start")}
             disabled={!!actionLoading || !server.public_bind_ip || isNodeUnreachable}
-            className="msm-btn-primary flex items-center gap-2 px-4 py-2 disabled:opacity-50"
+            className="flex items-center gap-2 disabled:opacity-50"
             title={
               isNodeUnreachable
                 ? t("servers.nodeUnreachableHint")
@@ -802,73 +802,73 @@ export function ServerDetail() {
             {actionLoading === "start"
               ? t("common.loading")
               : t("servers.start")}
-          </button>
+          </Button>
         )}
         {effectiveStatus === "running" && (
-          <button
+          <Button variant="destructive"
             onClick={() => doAction("stop")}
             disabled={!!actionLoading || isNodeUnreachable}
-            className="msm-btn-danger flex items-center gap-2 px-4 py-2 disabled:opacity-50"
+            className="flex items-center gap-2 disabled:opacity-50"
           >
             <Square className="w-4 h-4" />
             {actionLoading === "stop" ? t("common.loading") : t("servers.stop")}
-          </button>
+          </Button>
         )}
-        <button
+        <Button variant="secondary"
           onClick={() => doAction("restart")}
           disabled={!!actionLoading || isNodeUnreachable || ["installing", "starting", "stopping", "restarting", "queued"].includes(effectiveStatus)}
-          className="msm-btn-secondary flex items-center gap-2 px-4 py-2 disabled:opacity-50"
+          className="flex items-center gap-2 disabled:opacity-50"
         >
           <RefreshCw className="w-4 h-4" />
           {actionLoading === "restart"
             ? t("common.loading")
             : t("servers.restart")}
-        </button>
-        {/* AUFGABE 5: Kill-Button nur bei running|stopping|restarting (msm-btn-danger per DNA), mit confirm */}
+        </Button>
+        {/* AUFGABE 5: Kill-Button nur bei running|stopping|restarting (destructive-Variante), mit confirm */}
         {["starting", "running", "stopping", "restarting"].includes(effectiveStatus) && (
-          <button
+          <Button variant="destructive"
             onClick={handleKill}
             disabled={!!actionLoading || isNodeUnreachable}
-            className="msm-btn-danger flex items-center gap-2 px-4 py-2 disabled:opacity-50"
+            className="flex items-center gap-2 disabled:opacity-50"
           >
             {actionLoading === "kill" ? t("common.loading") : t("servers.kill")}
-          </button>
+          </Button>
         )}
         {effectiveStatus !== "installing" && effectiveStatus !== "queued" && (
-          <button
+          <Button variant="secondary"
             onClick={handleInstall}
             disabled={!!actionLoading || isNodeUnreachable}
-            className="msm-btn-secondary flex items-center gap-2 px-4 py-2 disabled:opacity-50"
+            className="flex items-center gap-2 disabled:opacity-50"
           >
             <Download className="w-4 h-4" />
             {actionLoading === "install" ? t("common.loading") : installLabel}
-          </button>
+          </Button>
         )}
 
         {effectiveStatus !== "installing" && effectiveStatus !== "queued" && (
-          <button
+          <Button variant="secondary"
             onClick={() => setShowSwitchBlueprint(true)}
             disabled={!!actionLoading || isNodeUnreachable || effectiveStatus !== "stopped"}
-            className="msm-btn-secondary flex items-center gap-2 px-4 py-2 disabled:opacity-50"
+            className="flex items-center gap-2 disabled:opacity-50"
             title={effectiveStatus !== "stopped" ? t("servers.mustStopToSwitch", "Der Server muss gestoppt sein, um das Spiel zu wechseln.") : undefined}
           >
             <RefreshCw className="w-4 h-4 text-primary" />
             {t("servers.switchBlueprintAction", "Spiel / Blueprint wechseln")}
-          </button>
+          </Button>
         )}
 
         {hasServerFiles && showServerFileUpdates && (
-          <button
+          <Button variant="secondary"
             type="button"
             onClick={() => void checkServerFileUpdates()}
             disabled={!!actionLoading || serverUpdateCheckLoading || isNodeUnreachable}
-            className="msm-btn-secondary flex items-center gap-2 px-4 py-2 disabled:opacity-50"
+            className="flex items-center gap-2 disabled:opacity-50"
           >
             <RefreshCw className={`w-4 h-4 ${serverUpdateCheckLoading ? "animate-spin" : ""}`} />
             {serverUpdateCheckLoading
               ? t("common.loading")
               : t("servers.checkServerFileUpdates")}
-          </button>
+          </Button>
         )}
 
         {/* Clean Update Badge: nur Server-Datei-/Blueprint-Updates (Blueprint-driven, nie Mods).
@@ -887,14 +887,14 @@ export function ServerDetail() {
           </div>
         )}
 
-        <button
+        <Button variant="destructive"
           onClick={handleDelete}
           disabled={!!actionLoading}
-          className="msm-btn-danger flex items-center gap-2 px-4 py-2 disabled:opacity-50 ml-auto"
+          className="flex items-center gap-2 disabled:opacity-50 ml-auto"
         >
           <Trash2 className="w-4 h-4" />
           {t("common.delete")}
-        </button>
+        </Button>
       </div>
 
       {/* Stats (CPU / RAM / Disk) — Player-Stat ist absichtlich entfernt (KISS, kein A2S) */}
@@ -911,14 +911,14 @@ export function ServerDetail() {
                   {t("serverDetail.resourceEditor.lifecycleBusy")}
                 </span>
               )}
-              <button
+              <Button variant="secondary" size="sm"
                 onClick={openResourceEditor}
                 disabled={isLifecycleBusy || !!actionLoading}
-                className="msm-btn-secondary px-3 py-1.5 text-sm disabled:opacity-50"
+                className="disabled:opacity-50"
                 data-testid="resource-edit-btn"
               >
                 {t("common.edit")}
-              </button>
+              </Button>
             </div>
           )}
         </div>
@@ -967,18 +967,16 @@ export function ServerDetail() {
               {t("servers.network")}
             </h3>
           </div>
-          <button
+          <Button variant="secondary" size="sm"
             onClick={() => setShowEditNetwork(true)}
             disabled={effectiveStatus === "running" || !!actionLoading}
             title={effectiveStatus === "running" ? t("servers.networkEditRequiresStopped") : undefined}
-            className={`px-3 py-1.5 text-sm ${
-              effectiveStatus === "running" || !!actionLoading
-                ? "msm-btn-secondary opacity-50 cursor-not-allowed"
-                : "msm-btn-secondary"
-            }`}
+            className={
+              effectiveStatus === "running" || !!actionLoading ? "opacity-50 cursor-not-allowed" : ""
+            }
           >
             {t("common.edit")}
-          </button>
+          </Button>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           <div>
@@ -1278,20 +1276,20 @@ export function ServerDetail() {
                 );
               })()}
               <div className="flex gap-3 pt-2">
-                <button
+                <Button variant="secondary"
                   type="button"
-                  className="msm-btn-secondary flex-1 py-2"
+                  className="flex-1"
                   onClick={() => setShowEditNetwork(false)}
                 >
                   {t("common.cancel")}
-                </button>
-                <button
+                </Button>
+                <Button
                   type="submit"
-                  className="msm-btn-primary flex-1 py-2 disabled:opacity-50"
+                  className="flex-1 disabled:opacity-50"
                   disabled={savingNetwork || effectiveStatus === "running"}
                 >
                   {savingNetwork ? t("common.loading") : t("common.save")}
-                </button>
+                </Button>
               </div>
             </form>
           </div>

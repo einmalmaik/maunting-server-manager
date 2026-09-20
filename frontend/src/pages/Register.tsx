@@ -10,6 +10,7 @@ import { ErrorMessage } from '@/components/ui/ErrorMessage'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { CaptchaWidget } from '@/components/ui/CaptchaWidget'
 import { Shield, ArrowRight, Check, Mail } from 'lucide-react'
+import { Button } from '@/Singra/UI'
 
 export function Register() {
   const { t } = useTranslation()
@@ -104,17 +105,17 @@ export function Register() {
             <p className="font-body-md text-sm text-on-surface-variant mb-6">
               {t('auth.verifiedAndSignedIn')}
             </p>
-            <button
+            <Button size="lg"
               type="button"
               onClick={() => {
                 if (!pendingUser) return
                 void finishLogin(pendingUser).then(() => navigate(zielNachLogin))
               }}
-              className="msm-btn-primary px-8 py-3 inline-flex items-center gap-2"
+              className="inline-flex items-center gap-2"
             >
               {t('auth.continue')}
               <ArrowRight className="w-4 h-4" />
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -171,10 +172,10 @@ export function Register() {
 
                 <ErrorMessage message={error} className="text-sm" />
 
-                <button
+                <Button size="lg"
                   type="submit"
                   disabled={submitting || verifyCode.length !== 6}
-                  className="msm-btn-primary w-full py-3 disabled:opacity-50"
+                  className="w-full disabled:opacity-50"
                 >
                   {submitting ? (
                     <span className="inline-flex items-center gap-2">
@@ -184,7 +185,7 @@ export function Register() {
                   ) : (
                     t('auth.verifyNow')
                   )}
-                </button>
+                </Button>
 
                 <Link
                   to="/login"
@@ -259,10 +260,10 @@ export function Register() {
 
             <ErrorMessage message={error} className="text-sm" />
 
-            <button
+            <Button size="lg"
               type="submit"
               disabled={submitting}
-              className="msm-btn-primary w-full py-3 flex items-center justify-center gap-2 disabled:opacity-50"
+              className="w-full flex items-center justify-center gap-2 disabled:opacity-50"
             >
               {submitting ? (
                 <span className="inline-flex items-center gap-2">
@@ -275,7 +276,7 @@ export function Register() {
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}
-            </button>
+            </Button>
           </form>
 
           <div className="mt-6 text-center font-body-md text-sm">

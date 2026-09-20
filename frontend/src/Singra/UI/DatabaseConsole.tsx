@@ -45,7 +45,7 @@ import type {
   PostgresTableInfo,
   PostgresUser,
 } from '@/types'
-
+import { Button, buttonClasses } from '@/Singra/UI'
 type TabKey = 'tables' | 'sql' | 'users'
 
 const FOKUSSIERBAR =
@@ -446,16 +446,16 @@ export function DatabaseConsole({
             />
           )}
           {onRefresh && (
-            <button className="msm-btn-secondary h-11 px-3 inline-flex items-center gap-2" onClick={onRefresh}>
+            <Button variant="secondary" className="inline-flex items-center gap-2" onClick={onRefresh}>
               <RefreshCw className="h-4 w-4" />
               {t('common.refresh')}
-            </button>
+            </Button>
           )}
           {canAdmin && onCreateDatabase && (
-            <button className="msm-btn-primary h-11 px-4 inline-flex items-center gap-2" onClick={onCreateDatabase}>
+            <Button className="inline-flex items-center gap-2" onClick={onCreateDatabase}>
               <Plus className="h-4 w-4" />
               {t('databaseConsole.connectDatabase')}
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -513,17 +513,17 @@ export function DatabaseConsole({
                 <p className="text-xs text-on-surface-variant">{t('databaseConsole.sql.subtitle')}</p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <button
-                  className="msm-btn-secondary px-3 py-1.5 text-xs inline-flex items-center gap-1.5 text-status-warning"
+                <Button variant="secondary" size="sm"
+                  className="inline-flex items-center gap-1.5 text-status-warning"
                   onClick={() => setShowSaveFavoriteModal(true)}
                   disabled={!sqlText.trim()}
                   title={t('databaseConsole.sql.saveFavoriteTitle')}
                 >
                   <Star className="h-3.5 w-3.5 fill-status-warning/20" />
                   {t('databaseConsole.sql.saveFavorite')}
-                </button>
+                </Button>
                 {onImport && (
-                  <label className="msm-btn-secondary cursor-pointer px-3 py-1.5 text-xs inline-flex items-center gap-1.5">
+                  <label className={buttonClasses('secondary', 'sm', 'cursor-pointer')}>
                     <FileUp className="h-3.5 w-3.5" />
                     {t('databaseConsole.sql.import')}
                     <input className="hidden" type="file" accept=".sql,text/sql,text/plain" onChange={(event) => {
@@ -534,10 +534,10 @@ export function DatabaseConsole({
                   </label>
                 )}
                 {onExport && (
-                  <button className="msm-btn-secondary px-3 py-1.5 text-xs inline-flex items-center gap-1.5" onClick={onExport}>
+                  <Button variant="secondary" size="sm" className="inline-flex items-center gap-1.5" onClick={onExport}>
                     <Download className="h-3.5 w-3.5" />
                     {t('databaseConsole.sql.export')}
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>
@@ -555,14 +555,14 @@ export function DatabaseConsole({
               spellCheck={false}
             />
             <div className="mt-2.5 mb-2 flex flex-wrap items-center gap-2 shrink-0">
-              <button className="msm-btn-primary px-4 py-1.5 text-xs inline-flex items-center gap-2" onClick={handleRunSqlWithHistory} disabled={!canAdmin || busy === 'sql'}>
+              <Button size="sm" className="inline-flex items-center gap-2" onClick={handleRunSqlWithHistory} disabled={!canAdmin || busy === 'sql'}>
                 <Play className="h-3.5 w-3.5" />
                 {t('databaseConsole.sql.run')}
-              </button>
-              <button className="msm-btn-secondary px-3 py-1.5 text-xs inline-flex items-center gap-2" onClick={() => onSqlTextChange(formatSql(sqlText))}>
+              </Button>
+              <Button variant="secondary" size="sm" className="inline-flex items-center gap-2" onClick={() => onSqlTextChange(formatSql(sqlText))}>
                 <Wand2 className="h-3.5 w-3.5" />
                 {t('databaseConsole.sql.format')}
-              </button>
+              </Button>
               <span className="text-[11px] text-on-surface-variant">{t('databaseConsole.sql.hint')}</span>
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto pr-1">
@@ -688,10 +688,10 @@ export function DatabaseConsole({
               })}
             </div>
             {canAdmin && onCreateTable && (
-              <button className="msm-btn-secondary mt-3 w-full py-2 inline-flex items-center justify-center gap-2 text-xs shrink-0" onClick={onCreateTable}>
+              <Button variant="secondary" size="sm" className="mt-3 w-full inline-flex items-center justify-center gap-2 shrink-0" onClick={onCreateTable}>
                 <Plus className="h-3.5 w-3.5" />
                 {t('databaseConsole.tables.create')}
-              </button>
+              </Button>
             )}
           </aside>
 
@@ -715,34 +715,34 @@ export function DatabaseConsole({
                   {/* Group 1: CRUD Actions */}
                   <div className="inline-flex rounded-lg border border-outline-variant bg-surface-container-high p-0.5 gap-0.5">
                     {selectedTable && onInsertRow && (
-                      <button
-                        className="msm-btn-primary px-2.5 h-8 inline-flex items-center gap-1 text-xs"
+                      <Button size="sm"
+                        className="inline-flex items-center gap-1"
                         onClick={() => setShowInsertModal(true)}
                         title={t('databaseConsole.rows.insertTitle')}
                       >
                         <Plus className="h-3.5 w-3.5" />
                         {t('databaseConsole.rows.insert')}
-                      </button>
+                      </Button>
                     )}
                     {selectedSingleIndex !== null && onUpdateRow && (
-                      <button
-                        className="msm-btn-secondary px-2.5 h-8 inline-flex items-center gap-1 text-xs"
+                      <Button variant="secondary" size="sm"
+                        className="inline-flex items-center gap-1"
                         onClick={() => setEditingRowIndex(selectedSingleIndex)}
                         title={t('databaseConsole.rows.editTitle')}
                       >
                         <Pencil className="h-3.5 w-3.5 text-secondary" />
                         {t('databaseConsole.rows.edit')}
-                      </button>
+                      </Button>
                     )}
                     {selectedRowIndices.size > 0 && onDeleteRows && (
-                      <button
-                        className="msm-btn-destructive px-2.5 h-8 inline-flex items-center gap-1 text-xs"
+                      <Button variant="destructive" size="sm"
+                        className="inline-flex items-center gap-1"
                         onClick={() => setShowDeleteModal(true)}
                         title={t('databaseConsole.rows.deleteTitle')}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                         {t('databaseConsole.rows.delete')}
-                      </button>
+                      </Button>
                     )}
                   </div>
 
@@ -784,9 +784,9 @@ export function DatabaseConsole({
                       onClick={() => setOpenDropdown(openDropdown === 'columns' ? null : 'columns')}
                     />
                     {canAdmin && onDropTable && (
-                      <button className="msm-btn-destructive px-2 h-8 inline-flex items-center gap-1 text-xs" onClick={onDropTable} title={t('databaseConsole.tables.drop')}>
+                      <Button variant="destructive" size="sm" className="inline-flex items-center gap-1" onClick={onDropTable} title={t('databaseConsole.tables.drop')}>
                         <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </div>
@@ -865,14 +865,14 @@ export function DatabaseConsole({
                   <div className="flex flex-wrap gap-1.5">
                     {powerUserActive ? (
                       <>
-                        <button className="msm-btn-secondary px-2.5 py-1 text-[11px]" onClick={onRotatePowerUser}>{t('databaseConsole.powerUser.rotate')}</button>
-                        <button className="msm-btn-destructive px-2.5 py-1 text-[11px]" onClick={onDemotePowerUser}>{t('databaseConsole.powerUser.demote')}</button>
+                        <Button variant="secondary" size="sm" className="text-[11px]" onClick={onRotatePowerUser}>{t('databaseConsole.powerUser.rotate')}</Button>
+                        <Button variant="destructive" size="sm" className="text-[11px]" onClick={onDemotePowerUser}>{t('databaseConsole.powerUser.demote')}</Button>
                       </>
                     ) : (
-                      <button className="msm-btn-secondary px-2.5 py-1 text-[11px] inline-flex items-center gap-1" onClick={onEnablePowerUser}>
+                      <Button variant="secondary" size="sm" className="text-[11px] inline-flex items-center gap-1" onClick={onEnablePowerUser}>
                         <Shield className="h-3 w-3" />
                         {t('databaseConsole.powerUser.enable')}
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </div>
@@ -981,16 +981,15 @@ function SaveFavoriteModal({
           </div>
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-outline-variant pt-3">
-          <button className="msm-btn-secondary px-3 py-1.5 text-xs" onClick={onClose}>
+          <Button variant="secondary" size="sm" onClick={onClose}>
             {t('common.cancel')}
-          </button>
-          <button
-            className="msm-btn-primary px-4 py-1.5 text-xs"
+          </Button>
+          <Button size="sm"
             onClick={() => onSave(title)}
             disabled={!title.trim()}
           >
             {t('common.save')}
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -1014,10 +1013,10 @@ function UsersPanel({ users, canAdmin, busy, onCreateUser, onRotateUser, onDelet
           <p className="text-xs text-on-surface-variant">{t('databaseConsole.users.subtitle')}</p>
         </div>
         {canAdmin && onCreateUser && (
-          <button className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2" onClick={onCreateUser} disabled={busy === 'create-user'}>
+          <Button className="inline-flex items-center gap-2" onClick={onCreateUser} disabled={busy === 'create-user'}>
             <Plus className="h-4 w-4" />
             {t('databaseConsole.users.create')}
-          </button>
+          </Button>
         )}
       </div>
       {!users.length ? (
@@ -1047,14 +1046,14 @@ function UsersPanel({ users, canAdmin, busy, onCreateUser, onRotateUser, onDelet
                     <td className="px-3 py-2 text-right">
                       <div className="inline-flex gap-2">
                         {onRotateUser && (
-                          <button className="msm-btn-secondary px-2 py-1 text-xs" onClick={() => onRotateUser(user.id)} disabled={busy === `rotate-user-${user.id}`}>
+                          <Button variant="secondary" size="sm" onClick={() => onRotateUser(user.id)} disabled={busy === `rotate-user-${user.id}`}>
                             {t('databaseConsole.users.rotate')}
-                          </button>
+                          </Button>
                         )}
                         {onDeleteUser && (
-                          <button className="msm-btn-destructive px-2 py-1 text-xs" onClick={() => onDeleteUser(user.id)} disabled={busy === `delete-user-${user.id}`} title={t('databaseConsole.users.delete')}>
+                          <Button variant="destructive" size="sm" onClick={() => onDeleteUser(user.id)} disabled={busy === `delete-user-${user.id}`} title={t('databaseConsole.users.delete')}>
                             <Trash2 className="h-3 w-3" />
-                          </button>
+                          </Button>
                         )}
                       </div>
                     </td>
@@ -1266,15 +1265,15 @@ function ToolbarToggleButton({ icon: Icon, label, active, hasState, disabled, on
   onClick: () => void
 }) {
   return (
-    <button
-      className={`msm-btn-secondary px-2.5 h-8 inline-flex items-center gap-1.5 text-xs ${active ? 'ring-1 ring-primary' : ''} ${hasState ? 'text-secondary' : ''}`}
+    <Button variant="secondary" size="sm"
+      className={`inline-flex items-center gap-1.5 ${active ? 'ring-1 ring-primary' : ''} ${hasState ? 'text-secondary' : ''}`}
       onClick={onClick}
       disabled={disabled}
       aria-pressed={active}
     >
       <Icon className="h-3.5 w-3.5" />
       {label}
-    </button>
+    </Button>
   )
 }
 
@@ -1322,12 +1321,12 @@ function FilterDropdown({ columns, filterColumn, filterValue, onFilterColumn, on
           />
         </div>
         {active && (
-          <button
-            className="msm-btn-secondary w-full py-1.5 text-xs"
+          <Button variant="secondary" size="sm"
+            className="w-full"
             onClick={() => { onFilterColumn(''); onFilterValue('') }}
           >
             {t('databaseConsole.reset')}
-          </button>
+          </Button>
         )}
       </div>
     </DropdownPanel>
@@ -1359,27 +1358,27 @@ function SortDropdown({ columns, sortColumn, sortDirection, onSortColumn, onSort
         <div className="space-y-1">
           <label className="text-xs text-on-surface-variant">{t('databaseConsole.sort.direction')}</label>
           <div className="flex gap-2">
-            <button
-              className={`msm-btn-secondary flex-1 py-1.5 text-xs ${sortDirection === 'asc' ? 'ring-1 ring-primary' : ''}`}
+            <Button variant="secondary" size="sm"
+              className={`flex-1 ${sortDirection === 'asc' ? 'ring-1 ring-primary' : ''}`}
               onClick={() => onSortDirection('asc')}
             >
               {t('databaseConsole.sort.ascending')}
-            </button>
-            <button
-              className={`msm-btn-secondary flex-1 py-1.5 text-xs ${sortDirection === 'desc' ? 'ring-1 ring-primary' : ''}`}
+            </Button>
+            <Button variant="secondary" size="sm"
+              className={`flex-1 ${sortDirection === 'desc' ? 'ring-1 ring-primary' : ''}`}
               onClick={() => onSortDirection('desc')}
             >
               {t('databaseConsole.sort.descending')}
-            </button>
+            </Button>
           </div>
         </div>
         {sortColumn && (
-          <button
-            className="msm-btn-secondary w-full py-1.5 text-xs"
+          <Button variant="secondary" size="sm"
+            className="w-full"
             onClick={() => { onSortColumn(''); onSortDirection('asc') }}
           >
             {t('databaseConsole.reset')}
-          </button>
+          </Button>
         )}
       </div>
     </DropdownPanel>
@@ -1410,9 +1409,9 @@ function ColumnsDropdown({ columns, hiddenColumns, onToggle, onReset, onClose }:
           ))}
         </div>
         {hiddenColumns.size > 0 && (
-          <button className="msm-btn-secondary w-full py-1.5 text-xs" onClick={onReset}>
+          <Button variant="secondary" size="sm" className="w-full" onClick={onReset}>
             {t('databaseConsole.reset')}
-          </button>
+          </Button>
         )}
       </div>
     </DropdownPanel>
@@ -1498,12 +1497,12 @@ function EditRowModal({
             </div>
           ))}
           <div className="mt-6 flex items-center justify-end gap-2 border-t border-outline-variant pt-4">
-            <button type="button" className="msm-btn-secondary px-4 py-2 text-sm" onClick={onClose} disabled={isSubmitting}>
+            <Button variant="secondary" type="button" onClick={onClose} disabled={isSubmitting}>
               {t('common.cancel')}
-            </button>
-            <button type="submit" className="msm-btn-primary px-4 py-2 text-sm" disabled={isSubmitting}>
+            </Button>
+            <Button type="submit" disabled={isSubmitting}>
               {isSubmitting ? t('databaseConsole.editRow.saving') : t('databaseConsole.editRow.submit')}
-            </button>
+            </Button>
           </div>
         </form>
       </div>
@@ -1581,12 +1580,12 @@ function InsertRowModal({
             </div>
           ))}
           <div className="mt-6 flex items-center justify-end gap-2 border-t border-outline-variant pt-4">
-            <button type="button" className="msm-btn-secondary px-4 py-2 text-sm" onClick={onClose} disabled={isSubmitting}>
+            <Button variant="secondary" type="button" onClick={onClose} disabled={isSubmitting}>
               {t('common.cancel')}
-            </button>
-            <button type="submit" className="msm-btn-primary px-4 py-2 text-sm" disabled={isSubmitting}>
+            </Button>
+            <Button type="submit" disabled={isSubmitting}>
               {isSubmitting ? t('databaseConsole.insertRow.saving') : t('databaseConsole.insertRow.submit')}
-            </button>
+            </Button>
           </div>
         </form>
       </div>
@@ -1643,12 +1642,12 @@ function DeleteConfirmModal({
         </p>
         {error && <div className="rounded border border-status-destructive/30 bg-status-destructive/10 p-2 text-xs text-status-destructive">{error}</div>}
         <div className="flex items-center justify-end gap-2 border-t border-outline-variant pt-4">
-          <button className="msm-btn-secondary px-4 py-2 text-sm" onClick={onClose} disabled={isDeleting}>
+          <Button variant="secondary" onClick={onClose} disabled={isDeleting}>
             {t('common.cancel')}
-          </button>
-          <button className="msm-btn-destructive px-4 py-2 text-sm" onClick={handleConfirm} disabled={isDeleting}>
+          </Button>
+          <Button variant="destructive" onClick={handleConfirm} disabled={isDeleting}>
             {isDeleting ? t('databaseConsole.deleteRows.deleting') : t('databaseConsole.deleteRows.submit')}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

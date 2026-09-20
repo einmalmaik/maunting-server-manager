@@ -22,6 +22,7 @@ import { PageHeader } from '@/Singra/UI/PageHeader'
 import { ProgressBar, StackedProgressBar, type Segment } from '@/Singra/UI/ProgressBar'
 import { Badge } from '@/components/ui/Badge'
 
+import { buttonClasses } from '@/Singra/UI'
 interface ServiceStatus {
   status: 'ok' | 'degraded' | 'error'
   detail: string
@@ -388,7 +389,7 @@ export function Dashboard() {
           {canCreateServer && (
             <a
               href="/servers"
-              className="msm-btn-primary inline-flex items-center gap-2 px-4 py-2"
+              className={buttonClasses('primary')}
             >
               {t('dashboard.createServer')}
             </a>

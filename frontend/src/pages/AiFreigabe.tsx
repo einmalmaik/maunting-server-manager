@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { api, SanitizedApiError } from '@/api/client'
 import { Logo } from '@/components/Logo'
 import { Bot, Check, X, ShieldAlert } from 'lucide-react'
+import { Button } from '@/Singra/UI'
 
 /**
  * Die Seite hinter dem Link aus der Freigabemail.
@@ -195,22 +196,22 @@ export function AiFreigabe() {
               </p>
 
               <div className="flex flex-col sm:flex-row gap-3">
-                <button
+                <Button size="lg"
                   type="button"
                   disabled={stand === 'sendet'}
                   onClick={() => void entscheiden('approved')}
-                  className="msm-btn-primary flex-1 py-3 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {t('ai.approval.approve')}
-                </button>
-                <button
+                </Button>
+                <Button variant="secondary" size="lg"
                   type="button"
                   disabled={stand === 'sendet'}
                   onClick={() => void entscheiden('rejected')}
-                  className="msm-btn-secondary flex-1 py-3 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {t('ai.approval.reject')}
-                </button>
+                </Button>
               </div>
             </div>
           )}

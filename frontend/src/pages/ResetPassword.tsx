@@ -8,7 +8,7 @@ import { ErrorMessage } from '@/components/ui/ErrorMessage'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { CaptchaWidget } from '@/components/ui/CaptchaWidget'
 import { Shield, Check, X, ArrowRight } from 'lucide-react'
-
+import { Button, buttonClasses } from '@/Singra/UI'
 export function ResetPassword() {
   const { t } = useTranslation()
   const [searchParams] = useSearchParams()
@@ -90,7 +90,7 @@ export function ResetPassword() {
               <p className="font-body-md text-base text-on-surface">{message}</p>
               <Link
                 to="/login"
-                className="msm-btn-primary w-full py-3 flex items-center justify-center gap-2"
+                className={buttonClasses('primary', 'lg', 'w-full')}
               >
                 {t('auth.goToLogin')}
                 <ArrowRight className="w-4 h-4" />
@@ -106,7 +106,7 @@ export function ResetPassword() {
               <p className="font-body-md text-base text-status-destructive">{message}</p>
               <Link
                 to="/forgot-password"
-                className="msm-btn-secondary w-full py-3 flex items-center justify-center gap-2"
+                className={buttonClasses('secondary', 'lg', 'w-full')}
               >
                 {t('forgotPassword.title')}
               </Link>
@@ -136,10 +136,10 @@ export function ResetPassword() {
 
               <ErrorMessage message={message} className="text-sm" />
 
-              <button
+              <Button size="lg"
                 type="submit"
                 disabled={status === 'submitting'}
-                className="msm-btn-primary w-full py-3 flex items-center justify-center gap-2 disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 {status === 'submitting' ? (
                   <span className="inline-flex items-center gap-2">
@@ -152,7 +152,7 @@ export function ResetPassword() {
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}
-              </button>
+              </Button>
             </form>
           )}
         </div>

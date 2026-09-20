@@ -4,6 +4,7 @@ import { BookOpen, KeyRound, ArrowRight, BookOpenCheck, FileText, ExternalLink, 
 import { usePublicLegalSettings } from '@/hooks/usePublicLegalSettings'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 
+import { buttonClasses } from '@/Singra/UI'
 export function Docs() {
   const { t } = useTranslation()
   const legal = usePublicLegalSettings()
@@ -99,7 +100,7 @@ function LegalCard({ imprintUrl }: { imprintUrl: string }) {
         </div>
       </div>
       <div className="flex flex-wrap gap-3 pt-3">
-        <Link to="/privacy" className="msm-btn-secondary px-4 py-2 inline-flex items-center gap-2">
+        <Link to="/privacy" className={buttonClasses('secondary')}>
           <FileText className="w-4 h-4" />
           {t('docsIndex.privacyLink')}
         </Link>
@@ -108,7 +109,7 @@ function LegalCard({ imprintUrl }: { imprintUrl: string }) {
             href={imprintUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="msm-btn-secondary px-4 py-2 inline-flex items-center gap-2"
+            className={buttonClasses('secondary')}
           >
             <ExternalLink className="w-4 h-4" />
             {t('docsIndex.imprintLink')}

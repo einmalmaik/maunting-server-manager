@@ -1,6 +1,7 @@
 import { Component, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle } from 'lucide-react'
+import { Button } from '@/Singra/UI'
 
 /**
  * Auffangschale für Renderfehler. Ohne sie hängt React 18 bei einem
@@ -20,13 +21,13 @@ function ErrorCard() {
         <AlertTriangle className="mx-auto mb-4 h-10 w-10 text-status-destructive" />
         <h1 className="font-headline text-body-lg text-on-surface mb-2">{t('errorBoundary.title')}</h1>
         <p className="font-body-md mb-6 text-sm text-on-surface-variant">{t('errorBoundary.hint')}</p>
-        <button
+        <Button
           type="button"
           onClick={() => window.location.reload()}
-          className="msm-btn-primary min-h-11 px-4 py-2"
+          className="min-h-11"
         >
           {t('errorBoundary.reload')}
-        </button>
+        </Button>
       </div>
     </div>
   )

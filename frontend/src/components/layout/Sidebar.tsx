@@ -10,7 +10,7 @@ import { LogOut, Plus, User as UserIcon, X } from 'lucide-react'
 import { buildNavigation, type NavGroupName } from './navigation'
 import { DesktopAppDownloadBadge } from './DesktopAppDownloadBadge'
 import { StoryFableBadge } from './StoryFableBadge'
-import { BenachrichtigungsGlocke, ProfileDropdown, type ProfileDropdownItem } from '@/Singra/UI'
+import { BenachrichtigungsGlocke, ProfileDropdown, type ProfileDropdownItem, buttonClasses } from '@/Singra/UI'
 import { usePresenceAndActivity, type PresenceStatus } from '@/hooks/usePresenceAndActivity'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
 
@@ -159,7 +159,7 @@ export function Sidebar({ mobile = false, onNavigate, presenceStatus: propPresen
           <NavLink
             to="/servers"
             onClick={onNavigate}
-            className="msm-btn-primary w-full py-3 flex items-center justify-center gap-2"
+            className={buttonClasses('primary', 'lg', 'w-full')}
           >
             <Plus className="w-4 h-4" />
             {t('servers.create', 'Server erstellen')}

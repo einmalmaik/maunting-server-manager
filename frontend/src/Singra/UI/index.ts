@@ -1,4 +1,5 @@
-export { Button } from '@/components/ui/Button'
+export { Button, buttonClasses } from '@/components/ui/Button'
+export type { ButtonVariant, ButtonSize } from '@/components/ui/Button'
 export { Badge } from '@/components/ui/Badge'
 export { Input } from '@/components/ui/Input'
 export { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'

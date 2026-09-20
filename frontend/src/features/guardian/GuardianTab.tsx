@@ -16,6 +16,7 @@ import { api } from "@/api/client";
 import { toast } from "@/stores/toastStore";
 import { useHasPermission } from "@/hooks/useHasPermission";
 import { getGuardianDisplayState } from "./GuardianBadge";
+import { Button } from '@/Singra/UI'
 
 /**
  * Was fuer diesen Server abweichend von der Blueprint gilt.
@@ -280,17 +281,17 @@ export const GuardianTab: React.FC<GuardianTabProps> = ({
                   : t("servers.guardian.override.originHuman")}
               </p>
             </div>
-            <button
+            <Button variant="secondary" size="sm"
               type="button"
               onClick={() => void handleResetOverrides()}
               disabled={!canWriteConfig || resettingOverrides}
-              className="msm-btn-secondary px-3 py-1.5 text-xs shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
               title={
                 canWriteConfig ? undefined : t("servers.guardian.override.resetDenied")
               }
             >
               {t("servers.guardian.override.reset")}
-            </button>
+            </Button>
           </div>
           <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {Object.entries(overrides.overrides).map(([name, wert]) => (
@@ -319,15 +320,15 @@ export const GuardianTab: React.FC<GuardianTabProps> = ({
             <Clock className="w-5 h-5 text-primary" />
             {t("servers.guardian.tab.historyTitle")}
           </h3>
-          <button
+          <Button variant="secondary" size="sm"
             onClick={() => void fetchIncidents()}
-            className="msm-btn-secondary px-3 py-1.5 text-xs flex items-center gap-1.5"
+            className="flex items-center gap-1.5"
           >
             <RefreshCw
               className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`}
             />
             {t("common.refresh", { defaultValue: "Aktualisieren" })}
-          </button>
+          </Button>
         </div>
 
         {(() => {
@@ -337,9 +338,9 @@ export const GuardianTab: React.FC<GuardianTabProps> = ({
               <div className="msm-alert-warning" role="alert">
                 <p className="font-semibold">{t("servers.guardian.tab.historyErrorTitle")}</p>
                 <p className="mt-1 text-sm">{t("servers.guardian.tab.historyErrorBody")}</p>
-                <button type="button" className="msm-btn-secondary mt-3 px-3 py-1.5 text-xs" onClick={() => void fetchIncidents()}>
+                <Button variant="secondary" size="sm" type="button" className="mt-3" onClick={() => void fetchIncidents()}>
                   {t("common.retry")}
-                </button>
+                </Button>
               </div>
             );
           }
@@ -442,10 +443,10 @@ export const GuardianTab: React.FC<GuardianTabProps> = ({
 
                     {inc.status !== "resolved" && (
                       <div className="flex justify-end pt-2 border-t border-outline-variant/20">
-                        <button
+                        <Button size="sm"
                           onClick={() => void handleResolveIncident(inc)}
                           disabled={resolvingId === inc.id}
-                          className="msm-btn-primary px-3 py-1.5 text-xs flex items-center gap-1.5"
+                          className="flex items-center gap-1.5"
                         >
                           {resolvingId === inc.id ? (
                             <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -453,7 +454,7 @@ export const GuardianTab: React.FC<GuardianTabProps> = ({
                             <CheckCircle2 className="w-3.5 h-3.5" />
                           )}
                           {t("servers.guardian.tab.resolveAction")}
-                        </button>
+                        </Button>
                       </div>
                     )}
                   </div>

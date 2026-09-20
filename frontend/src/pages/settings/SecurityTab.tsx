@@ -371,9 +371,9 @@ export function SecurityTab() {
             <li>{t('security.notAppDbUser', 'Nicht: App-DB-User pro Gameserver (msm_s…_u…)')}</li>
             <li>{t('security.isMsmAdmin', 'Ja: Cluster-Rolle msm_admin (Managed Postgres)')}</li>
           </ul>
-          <button
+          <Button variant="destructive"
             type="button"
-            className="msm-btn-destructive inline-flex items-center gap-2 px-4 py-2 text-sm"
+            className="inline-flex items-center gap-2"
             onClick={() => void rotateClusterAdmin()}
             disabled={busy}
           >
@@ -381,7 +381,7 @@ export function SecurityTab() {
             {busy
               ? t('security.rotating', 'Rotiere…')
               : t('security.rotateBtn', 'Cluster-Admin-Passwort rotieren')}
-          </button>
+          </Button>
           {lastSummary && (
             <p className="mt-4 rounded-lg border border-status-success/30 bg-status-success/10 p-3 text-sm text-on-surface">
               {lastSummary}

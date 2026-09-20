@@ -24,7 +24,7 @@ import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { usePermissionsStore } from '@/stores/permissionsStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
-import { ActionMenu, Switch, type ActionMenuItem } from '@/Singra/UI'
+import { Button, ActionMenu, Switch, type ActionMenuItem } from '@/Singra/UI'
 import { FileTree } from '@/components/server/FileTree'
 import { FileEditorWorkspace } from '@/components/server/FileEditorWorkspace'
 import {
@@ -735,9 +735,9 @@ export function FileManager({ serverId }: FileManagerProps) {
   return (
     <div className="relative overflow-visible rounded-xl border border-outline-variant/80 bg-surface-container-lowest/65 shadow-panel">
       <header className="flex min-h-14 flex-wrap items-center gap-2 border-b border-outline-variant bg-surface-container-low/80 px-3 py-2">
-        {showWriteActions && <div className="[&>button]:h-11 sm:[&>button]:h-8"><ActionMenu label={t('files.new')} icon={<FilePlus2 className="h-4 w-4" />} items={newItems} compact /></div>}
-        <button type="button" onClick={() => void refreshWorkspace()} className="msm-btn-tertiary inline-flex h-11 items-center gap-2 px-3 text-xs sm:h-8 sm:px-2.5" aria-label={t('common.refresh')}><RefreshCw className="h-3.5 w-3.5" /> <span>{t('common.refresh')}</span></button>
-        {selectedActions.length > 0 && <div className="[&>button]:h-11 sm:[&>button]:h-8"><ActionMenu label={t('files.more')} icon={<MoreHorizontal className="h-4 w-4" />} items={selectedActions} compact /></div>}
+        {showWriteActions && <div><ActionMenu label={t('files.new')} icon={<FilePlus2 className="h-4 w-4" />} items={newItems} compact /></div>}
+        <Button variant="ghost" size="sm" type="button" onClick={() => void refreshWorkspace()} className="inline-flex items-center gap-2 h-11 sm:h-auto" aria-label={t('common.refresh')}><RefreshCw className="h-3.5 w-3.5" /> <span>{t('common.refresh')}</span></Button>
+        {selectedActions.length > 0 && <div><ActionMenu label={t('files.more')} icon={<MoreHorizontal className="h-4 w-4" />} items={selectedActions} compact /></div>}
         <div className="flex w-full flex-wrap items-center gap-2 border-t border-outline-variant/70 pt-2 sm:ml-auto sm:w-auto sm:border-0 sm:pt-0">
           <div className="flex min-h-11 items-center gap-2 rounded-md px-1 sm:min-h-8">
             <div className="flex flex-col leading-tight">
@@ -748,8 +748,8 @@ export function FileManager({ serverId }: FileManagerProps) {
             </div>
             <Switch checked={autosave} onCheckedChange={setAutosave} disabled={!canWrite} aria-label={t('files.autosave')} className="before:absolute before:-inset-x-2 before:-inset-y-3" />
           </div>
-          <button ref={treeTriggerRef} type="button" onClick={() => { setInspectorOpen(false); setTreeOpen((value) => !value) }} className="msm-btn-tertiary inline-flex h-11 items-center justify-center gap-2 px-3 text-xs lg:hidden" aria-label={t('files.showTree')} aria-expanded={treeOpen}><Menu className="h-4 w-4" /><span>{t('files.filesDrawer')}</span></button>
-          <button ref={inspectorTriggerRef} type="button" onClick={() => { setTreeOpen(false); setInspectorOpen((value) => !value) }} className="msm-btn-tertiary inline-flex h-11 items-center justify-center gap-2 px-3 text-xs xl:hidden" aria-label={t('files.showInspector')} aria-expanded={inspectorOpen}><Info className="h-4 w-4" /><span>{t('files.detailsDrawer')}</span></button>
+          <Button variant="ghost" size="sm" ref={treeTriggerRef} type="button" onClick={() => { setInspectorOpen(false); setTreeOpen((value) => !value) }} className="inline-flex items-center justify-center gap-2 lg:hidden" aria-label={t('files.showTree')} aria-expanded={treeOpen}><Menu className="h-4 w-4" /><span>{t('files.filesDrawer')}</span></Button>
+          <Button variant="ghost" size="sm" ref={inspectorTriggerRef} type="button" onClick={() => { setTreeOpen(false); setInspectorOpen((value) => !value) }} className="inline-flex items-center justify-center gap-2 xl:hidden" aria-label={t('files.showInspector')} aria-expanded={inspectorOpen}><Info className="h-4 w-4" /><span>{t('files.detailsDrawer')}</span></Button>
         </div>
         <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(event) => { enqueueUpload(event.target.files); event.target.value = '' }} />
       </header>
@@ -791,7 +791,7 @@ export function FileManager({ serverId }: FileManagerProps) {
                 </button>
               ))}
             </div>
-            {treeOpen && <button type="button" onClick={() => { setTreeOpen(false); window.requestAnimationFrame(() => treeTriggerRef.current?.focus()) }} className="msm-btn-tertiary inline-flex h-11 items-center justify-center gap-2 px-3 text-xs lg:hidden" aria-label={t('common.close')}><X className="h-4 w-4" /><span>{t('common.close')}</span></button>}
+            {treeOpen && <Button variant="ghost" size="sm" type="button" onClick={() => { setTreeOpen(false); window.requestAnimationFrame(() => treeTriggerRef.current?.focus()) }} className="inline-flex items-center justify-center gap-2 lg:hidden" aria-label={t('common.close')}><X className="h-4 w-4" /><span>{t('common.close')}</span></Button>}
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
             <FileTree
@@ -821,7 +821,7 @@ export function FileManager({ serverId }: FileManagerProps) {
         </div>
 
         <aside ref={inspectorPanelRef} tabIndex={inspectorOpen ? -1 : undefined} aria-label={t('files.detailsDrawer')} className={`${inspectorOpen ? 'fixed inset-x-3 bottom-3 top-24 z-40 block overflow-y-auto shadow-panel-strong' : 'hidden'} border-l border-outline-variant bg-surface-container-low/95 outline-none lg:col-span-2 lg:max-h-full lg:overflow-y-auto lg:border-l-0 lg:border-t lg:border-outline-variant xl:static xl:col-span-1 xl:block xl:border-l xl:border-t-0 xl:shadow-none`}>
-          <div className="flex min-h-11 items-center justify-between border-b border-outline-variant px-3"><h3 className="text-xs font-semibold text-on-surface">{t('files.details')}</h3>{inspectorOpen && <button type="button" onClick={() => { setInspectorOpen(false); window.requestAnimationFrame(() => inspectorTriggerRef.current?.focus()) }} className="msm-btn-tertiary inline-flex h-11 items-center justify-center gap-2 px-3 text-xs xl:hidden" aria-label={t('common.close')}><X className="h-4 w-4" /><span>{t('common.close')}</span></button>}</div>
+          <div className="flex min-h-11 items-center justify-between border-b border-outline-variant px-3"><h3 className="text-xs font-semibold text-on-surface">{t('files.details')}</h3>{inspectorOpen && <Button variant="ghost" size="sm" type="button" onClick={() => { setInspectorOpen(false); window.requestAnimationFrame(() => inspectorTriggerRef.current?.focus()) }} className="inline-flex items-center justify-center gap-2 xl:hidden" aria-label={t('common.close')}><X className="h-4 w-4" /><span>{t('common.close')}</span></Button>}</div>
           {activeTab ? <>
             <div className="border-b border-outline-variant p-3"><div className="flex items-start gap-2"><ArchiveRestore className="mt-0.5 h-4 w-4 text-secondary" /><div className="min-w-0"><p className="truncate text-xs font-semibold text-on-surface">{fileName(activeTab.path)}</p><p className="mt-0.5 truncate font-mono text-[10px] text-on-surface-variant">{activeTab.path}</p></div></div></div>
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 border-b border-outline-variant p-3 text-[11px]"><dt className="text-on-surface-variant">{t('files.modified')}</dt><dd className="text-right text-on-surface">{formatModified(activeTab.modified)}</dd><dt className="text-on-surface-variant">{t('files.size')}</dt><dd className="text-right font-mono text-on-surface">{formatBytes(activeTab.size)}</dd><dt className="text-on-surface-variant">{t('files.permissions')}</dt><dd className="text-right font-mono text-on-surface">{activeTab.mode ?? t('files.notAvailable')}</dd><dt className="text-on-surface-variant">{t('files.owner')}</dt><dd className="truncate text-right text-on-surface">{activeTab.owner ?? t('files.notAvailable')}</dd><dt className="text-on-surface-variant">{t('files.group')}</dt><dd className="truncate text-right text-on-surface">{activeTab.group ?? t('files.notAvailable')}</dd></dl>
@@ -838,9 +838,9 @@ export function FileManager({ serverId }: FileManagerProps) {
                         <p className="font-mono text-[9px] text-on-surface-variant">{formatBytes(version.size)}</p>
                       </div>
                       {canWrite && (
-                        <button type="button" onClick={() => void restoreVersion(activeTab.path, version.id)} className="msm-btn-tertiary h-7 px-2 text-[10px]">
+                        <Button variant="ghost" type="button" onClick={() => void restoreVersion(activeTab.path, version.id)} className="h-7 text-[10px]">
                           {t('files.restoreVersion')}
-                        </button>
+                        </Button>
                       )}
                     </div>
                   ))}
@@ -857,9 +857,9 @@ export function FileManager({ serverId }: FileManagerProps) {
 
       {contextMenu && <div ref={contextMenuRef} className="fixed z-[120] min-w-48 rounded-lg border border-outline-variant bg-surface-container-high p-1.5 shadow-panel" style={{ left: Math.min(contextMenu.x, window.innerWidth - 210), top: Math.min(contextMenu.y, window.innerHeight - 240) }} onClick={(event) => event.stopPropagation()} role="menu" aria-label={t('files.more')}>{actionItems(contextMenu).map((item) => <button key={item.key} type="button" role="menuitem" disabled={item.disabled} onClick={() => { item.onSelect(); setContextMenu(null) }} className={`flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary sm:min-h-9 ${item.separatorBefore ? 'mt-1 border-t border-outline-variant' : ''} ${item.destructive ? 'text-status-destructive hover:bg-status-destructive/10' : 'text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface'}`}>{item.icon}{item.label}</button>)}</div>}
 
-      {promptDialog && <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby={promptTitleId} onClick={() => setPromptDialog(null)}><div className="msm-card w-full max-w-md p-5" onClick={(event) => event.stopPropagation()}><h2 id={promptTitleId} className="font-headline text-lg font-semibold text-on-surface">{promptDialog.title}</h2><label className="mt-4 block text-xs font-medium text-on-surface-variant">{promptDialog.label}</label><input ref={promptInputRef} defaultValue={promptDialog.initialValue} className="msm-input mt-1.5" onKeyDown={(event) => { if (event.key === 'Enter') void promptDialog.onConfirm(event.currentTarget.value) }} /><div className="mt-5 flex justify-end gap-2"><button type="button" className="msm-btn-secondary h-9 px-3 text-sm" onClick={() => setPromptDialog(null)}>{t('common.cancel')}</button><button type="button" className="msm-btn-primary h-9 px-3 text-sm" onClick={() => void promptDialog.onConfirm(promptInputRef.current?.value ?? '')}>{promptDialog.confirmLabel}</button></div></div></div>}
+      {promptDialog && <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby={promptTitleId} onClick={() => setPromptDialog(null)}><div className="msm-card w-full max-w-md p-5" onClick={(event) => event.stopPropagation()}><h2 id={promptTitleId} className="font-headline text-lg font-semibold text-on-surface">{promptDialog.title}</h2><label className="mt-4 block text-xs font-medium text-on-surface-variant">{promptDialog.label}</label><input ref={promptInputRef} defaultValue={promptDialog.initialValue} className="msm-input mt-1.5" onKeyDown={(event) => { if (event.key === 'Enter') void promptDialog.onConfirm(event.currentTarget.value) }} /><div className="mt-5 flex justify-end gap-2"><Button variant="secondary" size="sm" type="button" onClick={() => setPromptDialog(null)}>{t('common.cancel')}</Button><Button size="sm" type="button" onClick={() => void promptDialog.onConfirm(promptInputRef.current?.value ?? '')}>{promptDialog.confirmLabel}</Button></div></div></div>}
 
-      {moveDialog && <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby={moveTitleId} onClick={() => setMoveDialog(null)}><div className="msm-card w-full max-w-md p-5" onClick={(event) => event.stopPropagation()}><h2 id={moveTitleId} className="font-headline text-lg font-semibold text-on-surface">{t('files.move')}</h2><p className="mt-2 text-sm text-on-surface-variant">{t('files.moveHint', { name: moveDialog.entry.name })}</p><label className="mt-4 block text-xs font-medium text-on-surface-variant">{t('files.targetFolder')}</label><input value={moveTarget} onChange={(event) => setMoveTarget(event.target.value)} className="msm-input mt-1.5" placeholder="mods/config" autoFocus /><p className="mt-1 text-xs text-on-surface-variant">{t('files.moveTargetHint')}</p><div className="mt-5 flex justify-end gap-2"><button type="button" className="msm-btn-secondary h-9 px-3 text-sm" onClick={() => setMoveDialog(null)}>{t('common.cancel')}</button><button type="button" className="msm-btn-primary h-9 px-3 text-sm" onClick={() => void submitMove()}>{t('common.save')}</button></div></div></div>}
+      {moveDialog && <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby={moveTitleId} onClick={() => setMoveDialog(null)}><div className="msm-card w-full max-w-md p-5" onClick={(event) => event.stopPropagation()}><h2 id={moveTitleId} className="font-headline text-lg font-semibold text-on-surface">{t('files.move')}</h2><p className="mt-2 text-sm text-on-surface-variant">{t('files.moveHint', { name: moveDialog.entry.name })}</p><label className="mt-4 block text-xs font-medium text-on-surface-variant">{t('files.targetFolder')}</label><input value={moveTarget} onChange={(event) => setMoveTarget(event.target.value)} className="msm-input mt-1.5" placeholder="mods/config" autoFocus /><p className="mt-1 text-xs text-on-surface-variant">{t('files.moveTargetHint')}</p><div className="mt-5 flex justify-end gap-2"><Button variant="secondary" size="sm" type="button" onClick={() => setMoveDialog(null)}>{t('common.cancel')}</Button><Button size="sm" type="button" onClick={() => void submitMove()}>{t('common.save')}</Button></div></div></div>}
     </div>
   )
 }

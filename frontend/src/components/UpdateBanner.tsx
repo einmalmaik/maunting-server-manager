@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import type { GitUpdateStatus } from '@/types'
+import { Button } from '@/Singra/UI'
 
 export function UpdateBanner() {
   const { t } = useTranslation()
@@ -89,14 +90,14 @@ export function UpdateBanner() {
               {` (${t('updater.branch', 'Branch')}: ${status.branch})`}
             </p>
             <div className="flex items-center gap-3 mt-3">
-              <button
+              <Button size="sm"
                 onClick={handleUpdate}
                 disabled={updating}
-                className="msm-btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-sm disabled:opacity-60"
+                className="inline-flex items-center gap-1.5 disabled:opacity-60"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${updating ? 'animate-spin' : ''}`} />
                 {updating ? t('updater.updating', 'Update läuft...') : t('updater.startUpdate', 'Update starten')}
-              </button>
+              </Button>
               <span className="font-body-md text-xs text-on-surface-variant">
                 {t('updater.manualUpdateCommand', 'Oder manuell auf dem Server:')}{' '}
                 <code className="font-mono bg-surface-container-high px-1 py-0.5 rounded">

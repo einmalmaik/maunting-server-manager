@@ -26,6 +26,7 @@ import type { Node } from '@/types'
 import { api } from '@/api/client'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { PageHeader } from '@/Singra/UI/PageHeader'
+import { Button } from '@/Singra/UI'
 
 function statusVariant(status: string): 'success' | 'destructive' | 'default' | 'warning' {
   switch (status) {
@@ -315,25 +316,25 @@ export function AdminNodes() {
     <div className="msm-page">
       <PageHeader eyebrow={t('pageContext.infrastructure')} title={t('nav.nodes')} description={t('nodes.subtitle')} status={<span className="msm-badge-info">{total} {t('nav.nodes')}</span>} actions={<div className="flex flex-wrap items-center gap-2">
           {canManageNodes && updateAvailable && (
-            <button
+            <Button variant="secondary"
               type="button"
               disabled={updatingNodes}
               onClick={handleUpdateNodes}
-              className="msm-btn-secondary inline-flex min-h-11 items-center gap-2 px-4 py-2 disabled:opacity-60"
+              className="inline-flex min-h-11 items-center gap-2 disabled:opacity-60"
             >
               <RefreshCw className={`h-4 w-4 ${updatingNodes ? 'animate-spin' : ''}`} />
               {updatingNodes ? t('nodes.updating') : t('nodes.updateAll')}
-            </button>
+            </Button>
           )}
           {canManageNodes && (
-            <button
+            <Button
               type="button"
               onClick={openEnrollment}
-              className="msm-btn-primary inline-flex min-h-11 items-center gap-2 px-4 py-2"
+              className="inline-flex min-h-11 items-center gap-2"
             >
               <Plus className="h-4 w-4" />
               {t('nodes.add')}
-            </button>
+            </Button>
           )}
         </div>} />
       <div className="flex items-center gap-4 bg-surface-variant/20 p-4 rounded-xl" role="search">
@@ -436,19 +437,18 @@ export function AdminNodes() {
               </p>
             </div>
             <div className="flex gap-2 md:col-span-2">
-              <button type="submit" className="msm-btn-primary px-4 py-2" disabled={saving}>
+              <Button type="submit" disabled={saving}>
                 {saving ? t('common.loading') : t('common.save')}
-              </button>
-              <button
+              </Button>
+              <Button variant="secondary"
                 type="button"
-                className="msm-btn-secondary px-4 py-2"
                 onClick={() => {
                   setShowForm(false)
                   setEditing(null)
                 }}
               >
                 {t('common.cancel')}
-              </button>
+              </Button>
             </div>
           </form>
         </div>
@@ -494,9 +494,8 @@ export function AdminNodes() {
                     })()}
                   </div>
                   <div className="flex shrink-0 gap-1">
-                    <button
+                    <Button variant="secondary" size="icon"
                       type="button"
-                      className="msm-btn-secondary p-2"
                       title={t('nodes.healthCheck')}
                       aria-label={t('nodes.healthCheckLabel', { name: node.name })}
                       onClick={() => void handleHealth(node)}
@@ -505,28 +504,27 @@ export function AdminNodes() {
                       <RefreshCw
                         className={`h-4 w-4 ${busyId === node.id ? 'animate-spin' : ''}`}
                       />
-                    </button>
+                    </Button>
                     {canManageNodes && (
                       <>
-                        <button
+                        <Button variant="secondary" size="icon"
                           type="button"
-                          className="msm-btn-secondary p-2"
                           title={t('nodes.edit')}
                           aria-label={t('nodes.editLabel', { name: node.name })}
                           onClick={() => openEdit(node)}
                         >
                           <Pencil className="h-4 w-4" />
-                        </button>
-                        <button
+                        </Button>
+                        <Button variant="secondary" size="icon"
                           type="button"
-                          className="msm-btn-secondary p-2 text-status-destructive disabled:opacity-40"
+                          className="text-status-destructive disabled:opacity-40"
                           title={t('common.delete')}
                           aria-label={t('nodes.deleteLabel', { name: node.name })}
                           disabled={node.is_local || node.server_count > 0}
                           onClick={() => void handleDelete(node)}
                         >
                           <Trash2 className="h-4 w-4" />
-                        </button>
+                        </Button>
                       </>
                     )}
                   </div>
@@ -668,23 +666,23 @@ export function AdminNodes() {
             {t('nodes.pagination.range', { from: (currentPage - 1) * pageSize + 1, to: Math.min(currentPage * pageSize, total), total })}
           </div>
           <div className="flex items-center gap-2">
-            <button
+            <Button variant="secondary" size="sm"
               disabled={currentPage <= 1}
               onClick={() => setCurrentPage((p) => p - 1)}
-              className="msm-btn-secondary px-3 py-1.5 text-xs disabled:opacity-50"
+              className="disabled:opacity-50"
             >
               {t('common.back')}
-            </button>
+            </Button>
             <span className="font-medium px-2">
               {t('nodes.pagination.page', { current: currentPage, total: Math.ceil(total / pageSize) })}
             </span>
-            <button
+            <Button variant="secondary" size="sm"
               disabled={currentPage >= Math.ceil(total / pageSize)}
               onClick={() => setCurrentPage((p) => p + 1)}
-              className="msm-btn-secondary px-3 py-1.5 text-xs disabled:opacity-50"
+              className="disabled:opacity-50"
             >
               {t('common.next')}
-            </button>
+            </Button>
           </div>
         </div>
       )}

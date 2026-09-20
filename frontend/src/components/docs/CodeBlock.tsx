@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Terminal } from 'lucide-react'
 import { Check, Clipboard } from 'lucide-react'
+import { Button } from '@/Singra/UI'
 
 /**
  * Kopierbarer Code- oder Befehlsblock fuer die Doku-Seiten.
@@ -46,15 +47,15 @@ export function CodeBlock({
           <Terminal className="h-4 w-4 text-primary" />
           {label}
         </span>
-        <button
+        <Button variant="secondary" size="sm"
           type="button"
           onClick={() => void copy()}
-          className="msm-btn-secondary inline-flex items-center gap-2 px-3 py-1.5 text-xs"
+          className="inline-flex items-center gap-2"
           aria-label={copied ? copiedText : copyText}
         >
           {copied ? <Check className="h-3.5 w-3.5 text-status-success" /> : <Clipboard className="h-3.5 w-3.5" />}
           {copied ? copiedText : copyText}
-        </button>
+        </Button>
       </div>
       <pre className="overflow-x-auto p-4 font-mono text-xs leading-6 text-on-surface sm:text-sm">
         <code data-testid={testId}>{code}</code>

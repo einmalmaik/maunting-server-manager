@@ -11,6 +11,7 @@ import { confirm } from '@/stores/confirmStore'
 import { Switch } from '@/components/ui/Switch'
 import { NumberStepper } from '@/components/ui/NumberStepper'
 import { Dropdown } from '@/components/ui/Dropdown'
+import { Button } from '@/Singra/UI'
 
 interface FormState {
   id: number | null
@@ -248,14 +249,14 @@ export function OAuthTab() {
             {t('settings.oauth.providers')}
           </h2>
           {canWrite && (
-            <button
+            <Button
               type="button"
               onClick={openNew}
-              className="msm-btn-primary px-3 py-2 text-sm inline-flex items-center gap-2"
+              className="inline-flex items-center gap-2"
             >
               <Plus className="w-4 h-4" />
               {t('settings.oauth.addProvider')}
-            </button>
+            </Button>
           )}
         </div>
 
@@ -299,11 +300,11 @@ export function OAuthTab() {
                   </div>
                   {canWrite && (
                     <div className="flex items-center gap-1 shrink-0">
-                      <button
+                      <Button variant="secondary" size="sm"
                         type="button"
                         onClick={() => handleTest(p)}
                         disabled={testingId === p.id}
-                        className="msm-btn-secondary px-2.5 py-1.5 text-xs inline-flex items-center gap-1.5 disabled:opacity-50"
+                        className="inline-flex items-center gap-1.5 disabled:opacity-50"
                       >
                         {testingId === p.id ? (
                           <span className="w-3.5 h-3.5 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
@@ -311,23 +312,23 @@ export function OAuthTab() {
                           <FlaskConical className="w-3.5 h-3.5" />
                         )}
                         {t('settings.oauth.test')}
-                      </button>
-                      <button
+                      </Button>
+                      <Button variant="secondary" size="sm"
                         type="button"
                         onClick={() => openEdit(p)}
-                        className="msm-btn-secondary px-2.5 py-1.5 text-xs inline-flex items-center gap-1.5"
+                        className="inline-flex items-center gap-1.5"
                         title={t('settings.oauth.edit')}
                       >
                         <Pencil className="w-3.5 h-3.5" />
-                      </button>
-                      <button
+                      </Button>
+                      <Button variant="secondary" size="sm"
                         type="button"
                         onClick={() => handleDelete(p)}
-                        className="msm-btn-secondary px-2.5 py-1.5 text-xs inline-flex items-center gap-1.5 text-status-destructive hover:bg-status-destructive/10"
+                        className="inline-flex items-center gap-1.5 text-status-destructive hover:bg-status-destructive/10"
                         title={t('settings.oauth.delete')}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      </Button>
                     </div>
                   )}
                 </li>
@@ -643,14 +644,14 @@ function ProviderDialog({
         </div>
 
         <div className="flex justify-end gap-3 mt-6 pt-6 border-t border-outline-variant/30">
-          <button type="button" onClick={onClose} className="msm-btn-secondary px-4 py-2">
+          <Button variant="secondary" type="button" onClick={onClose}>
             {t('common.cancel')}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             onClick={onSave}
             disabled={saving}
-            className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
+            className="inline-flex items-center gap-2 disabled:opacity-50"
           >
             {saving ? (
               <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
@@ -658,7 +659,7 @@ function ProviderDialog({
               <Save className="w-4 h-4" />
             )}
             {t('settings.oauth.save')}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

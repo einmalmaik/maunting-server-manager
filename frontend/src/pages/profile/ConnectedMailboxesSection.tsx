@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { Mail, Plus, Trash2, RefreshCw, Star, ShieldCheck, HelpCircle, Info, X } from 'lucide-react'
 import { userIntegrationsApi, type MailboxItem, type MailboxCreateInput } from '@/api/userIntegrations'
-import { Checkbox, Dropdown, type DropdownOption } from '@/Singra/UI'
+import { Button, Checkbox, Dropdown, type DropdownOption } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 
@@ -179,14 +179,14 @@ export function ConnectedMailboxesSection() {
             {t('profile.mailboxes.title', 'Verknüpfte Postfächer (E-Mail)')}
           </h2>
         </div>
-        <button
+        <Button size="sm"
           type="button"
           onClick={() => setShowAddModal(true)}
-          className="msm-btn-primary px-3 py-1.5 text-xs inline-flex items-center gap-1.5"
+          className="inline-flex items-center gap-1.5"
         >
           <Plus className="w-4 h-4" />
           {t('profile.mailboxes.add', 'Postfach hinzufügen')}
-        </button>
+        </Button>
       </div>
 
       {loading ? (
@@ -222,11 +222,11 @@ export function ConnectedMailboxesSection() {
               </div>
 
               <div className="flex items-center gap-2">
-                <button
+                <Button variant="secondary" size="sm"
                   type="button"
                   onClick={() => handleTest(mb.id)}
                   disabled={testingId === mb.id}
-                  className="msm-btn-secondary px-2.5 py-1 text-xs inline-flex items-center gap-1"
+                  className="inline-flex items-center gap-1"
                 >
                   {testingId === mb.id ? (
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -234,15 +234,15 @@ export function ConnectedMailboxesSection() {
                     <ShieldCheck className="w-3.5 h-3.5" />
                   )}
                   {t('profile.mailboxes.test', 'Testen')}
-                </button>
-                <button
+                </Button>
+                <Button variant="destructive" size="sm"
                   type="button"
                   onClick={() => handleDelete(mb)}
-                  className="msm-btn-danger px-2.5 py-1 text-xs inline-flex items-center gap-1"
+                  className="inline-flex items-center gap-1"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   {t('profile.mailboxes.delete', 'Löschen')}
-                </button>
+                </Button>
               </div>
             </li>
           ))}
@@ -462,21 +462,19 @@ export function ConnectedMailboxesSection() {
                 </div>
 
                 <div className="flex items-center justify-end gap-2 pt-4 border-t border-outline-variant/30">
-                  <button
+                  <Button variant="secondary"
                     type="button"
                     onClick={() => setShowAddModal(false)}
-                    className="msm-btn-secondary px-4 py-2 text-sm"
                     disabled={saving}
                   >
                     Abbrechen
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="submit"
-                    className="msm-btn-primary px-4 py-2 text-sm"
                     disabled={saving}
                   >
                     {saving ? 'Speichert...' : 'Postfach speichern'}
-                  </button>
+                  </Button>
                 </div>
               </form>
             </div>

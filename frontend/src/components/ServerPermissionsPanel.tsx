@@ -9,6 +9,7 @@ import { Dropdown } from '@/components/ui/Dropdown'
 import type { User } from '@/types'
 import type { PermissionCatalog } from '@/types/permissions'
 import { PermissionEditor } from '@/Singra/UI/PermissionEditor'
+import { Button } from '@/Singra/UI'
 
 interface Props {
   serverId: number
@@ -164,15 +165,15 @@ export function ServerPermissionsPanel({ serverId }: Props) {
             aria-label={t('serverPermissions.selectUser')}
           />
         </div>
-        <button
+        <Button
           type="button"
           onClick={addUser}
           disabled={!addingUserId}
-          className="msm-btn-primary inline-flex min-h-10 shrink-0 items-center justify-center gap-2 px-4 py-2 disabled:opacity-50"
+          className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 disabled:opacity-50"
         >
           <Plus className="w-4 h-4" />
           {t('serverPermissions.addUser')}
-        </button>
+        </Button>
       </div>
 
       {rows.length === 0 ? (
@@ -220,22 +221,22 @@ export function ServerPermissionsPanel({ serverId }: Props) {
                   <div className="col-start-2 row-start-1 flex items-center justify-end gap-1 md:col-start-3">
                     {isEditing ? (
                       <>
-                        <button
+                        <Button size="sm"
                           type="button"
                           onClick={() => save(row.user.id)}
-                          className="msm-btn-primary inline-flex min-h-9 items-center gap-1 px-3 py-1 text-xs"
+                          className="inline-flex min-h-9 items-center gap-1"
                         >
                           <Save className="w-3.5 h-3.5" />
                           {t('common.save')}
-                        </button>
-                        <button
+                        </Button>
+                        <Button variant="secondary" size="sm"
                           type="button"
                           onClick={cancelEdit}
-                          className="msm-btn-secondary inline-flex min-h-9 items-center gap-1 px-3 py-1 text-xs"
+                          className="inline-flex min-h-9 items-center gap-1"
                         >
                           <X className="w-3.5 h-3.5" />
                           {t('common.cancel')}
-                        </button>
+                        </Button>
                       </>
                     ) : (
                       <button

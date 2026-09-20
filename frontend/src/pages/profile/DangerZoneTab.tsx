@@ -6,6 +6,7 @@ import { api } from '@/api/client'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { AlertTriangle } from 'lucide-react'
 import { useOAuthLinks } from './useOAuthLinks'
+import { Button } from '@/Singra/UI'
 
 /**
  * Tab: Gefahrenzone - Konto loeschen.
@@ -76,12 +77,11 @@ export function DangerZoneTab() {
       ) : (
         <>
           {deleteState === 'idle' && (
-            <button
+            <Button variant="destructive"
               onClick={() => setDeleteState('first-confirmed')}
-              className="msm-btn-danger px-4 py-2"
             >
               {t('profile.deleteAccountBtn')}
-            </button>
+            </Button>
           )}
 
           {deleteState !== 'idle' && deleteState !== 'success' && (
@@ -157,18 +157,18 @@ export function DangerZoneTab() {
               {errorMsg && <div className="msm-alert-error text-sm">{errorMsg}</div>}
 
               <div className="flex flex-wrap gap-3">
-                <button
+                <Button variant="destructive"
                   type="submit"
                   disabled={deleteState === 'deleting'}
-                  className="msm-btn-danger px-4 py-2 inline-flex items-center gap-2"
+                  className="inline-flex items-center gap-2"
                 >
                   {deleteState === 'deleting' ? (
                     <span className="w-4 h-4 border-2 border-on-error border-t-transparent rounded-full animate-spin" />
                   ) : (
                     t('profile.deleteAccountFinalBtn')
                   )}
-                </button>
-                <button
+                </Button>
+                <Button variant="secondary"
                   type="button"
                   onClick={() => {
                     setDeleteState('idle')
@@ -178,10 +178,9 @@ export function DangerZoneTab() {
                     setErrorMsg('')
                   }}
                   disabled={deleteState === 'deleting'}
-                  className="msm-btn-secondary px-4 py-2"
                 >
                   {t('common.cancel')}
-                </button>
+                </Button>
               </div>
             </form>
           )}

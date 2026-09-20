@@ -21,7 +21,7 @@ import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { getModInstallPresentation, hasActiveModInstall } from '@/services/modInstallStatus'
-
+import { Button, buttonClasses } from '@/Singra/UI'
 interface Mod {
   id: number
   server_id: number
@@ -482,18 +482,18 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
             )}
           </div>
           <div className="flex gap-2 mt-1">
-            <button
+            <Button size="sm"
               onClick={() => addSteamMod(mod.publishedfileid, mod.title)}
               disabled={adding || isAdded}
-              className="msm-btn-primary flex-1 px-3 py-1.5 text-sm disabled:opacity-50"
+              className="flex-1 disabled:opacity-50"
             >
               {isAdded ? t('mods.added') : t('mods.add')}
-            </button>
+            </Button>
             <a
               href={mod.direct_url}
               target="_blank"
               rel="noopener noreferrer"
-              className="msm-btn-secondary px-3 py-1.5 text-sm inline-flex items-center gap-1.5"
+              className={buttonClasses('secondary', 'sm')}
               title={isCurseForge ? t('mods.viewInCurseForge', { defaultValue: 'Auf CurseForge anzeigen' }) : t('mods.viewInWorkshop')}
             >
               <ExternalLink className="w-3.5 h-3.5" />
@@ -516,13 +516,13 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
       {/* Tab-Body Header */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <p className="font-body-md text-body-md text-on-surface-variant">{t('mods.subtitle')}</p>
-        <button
+        <Button variant="secondary"
           onClick={() => setShowAddModal(true)}
-          className="msm-btn-secondary flex items-center gap-2 px-3 py-2 text-sm"
+          className="flex items-center gap-2"
         >
           <Plus className="w-4 h-4" />
           {t('mods.addById')}
-        </button>
+        </Button>
       </div>
 
       {/* Installed Mods Section */}
@@ -543,30 +543,30 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
               className="msm-input pl-10 text-sm"
             />
           </div>
-          <button
+          <Button variant="secondary"
             onClick={() => void abortModInstalls()}
             disabled={loading || !anyModInstallActive}
-            className="msm-btn-secondary px-3 py-2 text-sm inline-flex items-center gap-2 disabled:opacity-50"
+            className="inline-flex items-center gap-2 disabled:opacity-50"
             title={t('mods.abortInstallsHint')}
           >
             {t('mods.abortInstalls')}
-          </button>
-          <button
+          </Button>
+          <Button variant="secondary"
             onClick={() => void reinstallAllMods()}
             disabled={loading || reinstallingAll || mods.length === 0 || anyModInstallActive}
-            className="msm-btn-secondary px-3 py-2 text-sm inline-flex items-center gap-2 disabled:opacity-50"
+            className="inline-flex items-center gap-2 disabled:opacity-50"
             title={t('mods.reinstallAllHint')}
           >
             <RotateCcw className={`w-4 h-4 ${reinstallingAll ? 'animate-spin' : ''}`} />
             {t('mods.reinstallAll')}
-          </button>
-          <button
+          </Button>
+          <Button variant="secondary"
             onClick={() => void checkModUpdates()}
-            className="msm-btn-secondary px-3 py-2 text-sm inline-flex items-center gap-2"
+            className="inline-flex items-center gap-2"
           >
             <RefreshCw className="w-4 h-4" />
             {t('mods.checkUpdates')}
-          </button>
+          </Button>
         </div>
 
         <div className="space-y-2">
@@ -648,25 +648,25 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
 
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {hasPendingUpdate && (
-                      <button
+                      <Button size="sm"
                         onClick={() => void installExistingMod(mod, 'update')}
                         disabled={isInstalling}
-                        className="msm-btn-primary px-3 py-1.5 text-xs inline-flex items-center gap-1.5 disabled:opacity-50"
+                        className="inline-flex items-center gap-1.5 disabled:opacity-50"
                         title={t('mods.updateAvailable')}
                       >
                         <RefreshCw className="w-3.5 h-3.5" />
                         {t('mods.updateAvailable')}
-                      </button>
+                      </Button>
                     )}
-                    <button
+                    <Button variant="secondary" size="sm"
                       onClick={() => void installExistingMod(mod, 'reinstall')}
                       disabled={isInstalling}
-                      className="msm-btn-secondary px-2.5 py-1.5 text-xs inline-flex items-center gap-1.5 disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 disabled:opacity-50"
                       title={t('mods.reinstall')}
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
                       {t('mods.reinstall')}
-                    </button>
+                    </Button>
                     <button
                       onClick={() => toggleEnabled(mod.id, mod.enabled)}
                       title={mod.enabled ? t('mods.disable') : t('mods.enable')}
@@ -703,13 +703,13 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
             })
           )}
           {hasMoreInstalled && (
-            <button
+            <Button variant="secondary"
               onClick={() => setInstalledShown((n) => n + INSTALLED_PAGE_SIZE)}
-              className="msm-btn-secondary w-full px-4 py-2 text-sm inline-flex items-center justify-center gap-2"
+              className="w-full inline-flex items-center justify-center gap-2"
             >
               <ChevronDown className="w-4 h-4" />
               {t('mods.loadMore')} ({filteredMods.length - visibleInstalled.length})
-            </button>
+            </Button>
           )}
         </div>
       </section>
@@ -776,20 +776,19 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
               className="msm-input pl-10"
             />
           </div>
-          <button
+          <Button
             onClick={runSearch}
             disabled={steamLoading || !steamQuery.trim()}
-            className="msm-btn-primary px-4 py-2 disabled:opacity-50"
+            className="disabled:opacity-50"
           >
             {steamLoading && steamPage === 1 ? t('common.loading') : t('common.search')}
-          </button>
+          </Button>
           {isSearchMode && (
-            <button
+            <Button variant="secondary"
               onClick={clearSearch}
-              className="msm-btn-secondary px-3 py-2 text-sm"
             >
               {t('mods.clearSearch')}
-            </button>
+            </Button>
           )}
         </div>
 
@@ -821,10 +820,10 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
             </div>
             {(showLoadMoreBrowser || showLoadMoreSearch) && (
               <div className="flex justify-center pt-2">
-                <button
+                <Button variant="secondary"
                   onClick={isSearchMode ? loadMoreSearch : loadMoreBrowser}
                   disabled={browserLoading || steamLoading}
-                  className="msm-btn-secondary px-4 py-2 text-sm inline-flex items-center gap-2 disabled:opacity-50"
+                  className="inline-flex items-center gap-2 disabled:opacity-50"
                 >
                   <ChevronDown className="w-4 h-4" />
                   {isSearchMode
@@ -834,7 +833,7 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
                     : browserLoading
                       ? t('common.loading')
                       : t('mods.loadMore')}
-                </button>
+                </Button>
               </div>
             )}
           </>
@@ -881,16 +880,16 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
               </div>
             </div>
             <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowAddModal(false)} className="msm-btn-secondary flex-1 px-4 py-2">
+              <Button variant="secondary" onClick={() => setShowAddModal(false)} className="flex-1">
                 {t('common.cancel')}
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={() => void addMod()}
                 disabled={adding || !newWorkshopId.trim()}
-                className="msm-btn-primary flex-1 px-4 py-2 disabled:opacity-50"
+                className="flex-1 disabled:opacity-50"
               >
                 {adding ? t('common.loading') : t('mods.add')}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

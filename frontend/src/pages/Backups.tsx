@@ -7,6 +7,7 @@ import { confirm } from "@/stores/confirmStore";
 import { useHasPermission } from "@/hooks/useHasPermission";
 import { Dropdown, Switch } from "@/Singra/UI";
 import { AlertTriangle, Bot, HardDrive, Plus, RotateCcw, Trash2, Settings, Cloud, CloudOff, UploadCloud } from "lucide-react";
+import { Button } from '@/Singra/UI'
 
 interface Backup {
   id: number;
@@ -427,23 +428,23 @@ export function Backups({ serverId }: BackupsProps) {
           )}
         </div>
         <div className="flex gap-2">
-          <button
+          <Button variant="secondary"
             onClick={() => setShowSettings(!showSettings)}
             disabled={isActive}
-            className={`msm-btn-secondary flex items-center gap-2 px-3 py-2 ${showSettings ? "bg-surface-container" : ""}`}
+            className={`flex items-center gap-2 ${showSettings ? "bg-surface-container" : ""}`}
             title={t("backups.scheduling", "Einstellungen")}
           >
             <Settings className="w-4 h-4" />
             {t("backups.scheduling", "Einstellungen")}
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={() => setShowCreateModal(true)}
             disabled={isActive || !!actionLoading}
-            className="msm-btn-primary flex items-center gap-2 px-4 py-2 disabled:opacity-50"
+            className="flex items-center gap-2 disabled:opacity-50"
           >
             <Plus className="w-4 h-4" />
             {t("backups.create")}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -557,13 +558,13 @@ export function Backups({ serverId }: BackupsProps) {
           )}
 
           <div className="flex justify-end">
-            <button
+            <Button
               onClick={saveSettings}
               disabled={isActive || settingsSaving || !canWrite}
-              className="msm-btn-primary px-4 py-2 disabled:opacity-50"
+              className="disabled:opacity-50"
             >
               {settingsSaving ? t("common.loading") : t("common.save")}
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -575,12 +576,12 @@ export function Backups({ serverId }: BackupsProps) {
           <h3 className="font-headline text-body-lg text-on-surface mb-1">
             {t("backups.loadFailed")}
           </h3>
-          <button
+          <Button variant="secondary"
             onClick={() => void fetchBackups()}
-            className="msm-btn-secondary min-h-11 px-4 py-2 mt-4"
+            className="min-h-11 mt-4"
           >
             {t("common.retry")}
-          </button>
+          </Button>
         </div>
       ) : backups.length === 0 ? (
         <div className="msm-card p-12 text-center border-dashed border-2 border-outline-variant">
@@ -631,50 +632,50 @@ export function Backups({ serverId }: BackupsProps) {
                 )}
                 {/* In Cloud hochladen: nur fuer reine lokale Backups */}
                 {!isS3Backed && backup.local_exists && (
-                  <button
+                  <Button variant="secondary" size="sm"
                     onClick={() => uploadToCloud(backup.id)}
                     disabled={isActive || !!actionLoading}
-                    className="msm-btn-secondary flex items-center gap-1 px-3 py-1.5 text-sm disabled:opacity-50"
+                    className="flex items-center gap-1 disabled:opacity-50"
                     title={t("backups.uploadToCloud")}
                   >
                     <UploadCloud className="w-3.5 h-3.5" />
                     {actionLoading === `upload-${backup.id}`
                       ? t("common.loading")
                       : t("backups.uploadToCloud")}
-                  </button>
+                  </Button>
                 )}
                 {/* Restore: lokal oder aus Cloud */}
                 {onlyInCloud ? (
-                  <button
+                  <Button variant="secondary" size="sm"
                     onClick={() => restoreFromCloud(backup.id)}
                     disabled={isActive || !!actionLoading}
-                    className="msm-btn-secondary flex items-center gap-1 px-3 py-1.5 text-sm disabled:opacity-50"
+                    className="flex items-center gap-1 disabled:opacity-50"
                     title={t("backups.restoreFromCloud")}
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
                     {actionLoading === `restore-${backup.id}`
                       ? t("common.loading")
                       : t("backups.restoreFromCloud")}
-                  </button>
+                  </Button>
                 ) : (
-                  <button
+                  <Button variant="secondary" size="sm"
                     onClick={() => restoreBackup(backup.id)}
                     disabled={isActive || !!actionLoading}
-                    className="msm-btn-secondary flex items-center gap-1 px-3 py-1.5 text-sm disabled:opacity-50"
+                    className="flex items-center gap-1 disabled:opacity-50"
                     title={t("backups.restore")}
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
                     {t("backups.restore")}
-                  </button>
+                  </Button>
                 )}
-                <button
+                <Button variant="destructive" size="sm"
                   onClick={() => deleteBackup(backup.id)}
                   disabled={isActive || !!actionLoading}
-                  className="msm-btn-danger flex items-center gap-1 px-3 py-1.5 text-sm disabled:opacity-50"
+                  className="flex items-center gap-1 disabled:opacity-50"
                   title={t("common.delete")}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                </Button>
               </div>
             </div>
             );
@@ -717,24 +718,24 @@ export function Backups({ serverId }: BackupsProps) {
             </div>
 
             <div className="flex gap-3 mt-6">
-              <button
+              <Button variant="secondary"
                 onClick={() => {
                   setShowCreateModal(false);
                   setBackupName("");
                 }}
-                className="msm-btn-secondary flex-1 px-4 py-2"
+                className="flex-1"
               >
                 {t("common.cancel")}
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={createBackup}
                 disabled={isActive || actionLoading === "create"}
-                className="msm-btn-primary flex-1 px-4 py-2 disabled:opacity-50"
+                className="flex-1 disabled:opacity-50"
               >
                 {actionLoading === "create"
                   ? t("common.loading")
                   : t("backups.createNow", "Backup erstellen")}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
