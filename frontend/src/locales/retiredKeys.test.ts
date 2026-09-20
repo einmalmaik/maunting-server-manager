@@ -57,6 +57,30 @@ const ABGELOESTE_SCHLUESSEL = [
   'ai.toolsRunning.search_messenger_contacts',
   'ai.toolsRunning.search_messenger_groups',
   'permissionDetails.ai_social_message_friend',
+  // 09/2026: 342 Schlüssel, die kein Aufruf je gelesen hat (11 % der Datei),
+  // gefunden mit scripts/find-orphan-keys.mjs. Nicht alle stehen hier — eine
+  // Liste mit 342 Zeilen wäre selbst Ballast. Hier steht, was jemand aus
+  // Versehen neu anlegen würde, weil ein lebender Zwilling daneben liegt:
+  //
+  // `verifyEmail.*` beschrieb eine Seite, die es nie gab. Der echte Ablauf
+  // liegt unter `setup.verifyEmail*` — wer die Bestätigungsseite anfasst,
+  // findet über die Suche sonst fünf plausible Schlüssel, die nirgends
+  // erscheinen.
+  'verifyEmail.title',
+  'verifyEmail.loading',
+  'verifyEmail.success',
+  'verifyEmail.error',
+  'verifyEmail.noToken',
+  // `nav.social` ("Social & Hub") hat keine Route in navigation.tsx.
+  //
+  // `profile.tabs.vault` sieht genauso tot aus und ist es nicht: der Panel hat
+  // keinen Tresor-Tab, die Desktop-App benutzt den Schlüssel aber in
+  // desktop/Einstellungen.tsx. Er steht hier als Warnung, nicht als Eintrag —
+  // wer im Panel aufräumt, muss die Desktop-Oberfläche mitlesen.
+  'nav.social',
+  // `shell.openUserMenu` neben den lebenden `shell.mainNavigation` und
+  // `shell.closeNavigation`.
+  'shell.openUserMenu',
 ]
 
 /** Die Nachfolger muss es geben — sonst wäre das Löschen ein Verlust. */
