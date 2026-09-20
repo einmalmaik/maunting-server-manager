@@ -240,6 +240,16 @@ export interface ChatGroupMemberItem {
   avatar_url?: string | null
   role: string
   permissions?: string | null
+  /**
+   * Ob **dieses Mitglied** alle wecken beziehungsweise anheften darf.
+   *
+   * Vom Server ausgerechnet, und zwar je Mitglied, nicht nur für mich: der
+   * Server kann den Inhalt einer Nachricht nicht lesen, also entscheidet das
+   * empfangende Gerät — und das braucht dafür die Rechtelage des *Absenders*.
+   * Fehlt das Feld, gilt nein.
+   */
+  can_mention_everyone?: boolean
+  can_pin_messages?: boolean
   joined_at: string
 }
 
@@ -259,6 +269,9 @@ export interface ChatGroupItem {
   can_share_screen?: boolean
   can_mute_others?: boolean
   can_kick_from_call?: boolean
+  /** Ob ich die Auswahl angeboten bekomme. Die Schranke sitzt beim Empfänger. */
+  can_mention_everyone?: boolean
+  can_pin_messages?: boolean
   created_at: string
   members: ChatGroupMemberItem[]
   /** Ephemeral room token supplied by a live-call invitation, when present. */

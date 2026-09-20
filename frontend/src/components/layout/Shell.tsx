@@ -82,7 +82,14 @@ export function Shell() {
     // — und jedes `position: sticky` darunter, allen voran `.msm-topbar`,
     // bekommt dadurch nie einen Versatz. `clip` klemmt den waagerechten
     // Überlauf genauso ab, erzeugt aber keinen Scroll-Container.
-    <div className={`bg-background text-on-surface flex relative overflow-x-clip ${isFullHeightPage ? 'h-screen max-h-screen overflow-hidden' : 'min-h-screen'}`}>
+    //
+    // `100dvh` statt `h-screen` auf den Vollhöhen-Seiten: `vh` rechnet am
+    // Telefon mit der Höhe **ohne** eingefahrene Adressleiste und ist damit
+    // größer als das, was man sieht. Im Messenger hieß das, dass die
+    // Eingabeleiste unter den Bildschirmrand rutschte, sobald der Browser seine
+    // Leiste einblendet — also genau beim Tippen. `dvh` folgt dem wirklich
+    // sichtbaren Bereich. Die mobile Navigation unten macht es schon so.
+    <div className={`bg-background text-on-surface flex relative overflow-x-clip ${isFullHeightPage ? 'h-[100dvh] max-h-[100dvh] overflow-hidden' : 'min-h-screen'}`}>
       {/* Deep Grid Background */}
       <div className="absolute inset-0 msm-deep-grid opacity-30 pointer-events-none" />
 
@@ -111,7 +118,7 @@ export function Shell() {
       )}
 
       {/* Main Content Area */}
-      <div className={`flex-1 ${sidebarHidden ? 'ml-0' : 'lg:ml-64'} flex flex-col min-w-0 relative z-10 transition-all duration-300 ${isFullHeightPage ? 'h-screen max-h-screen overflow-hidden' : ''}`}>
+      <div className={`flex-1 ${sidebarHidden ? 'ml-0' : 'lg:ml-64'} flex flex-col min-w-0 relative z-10 transition-all duration-300 ${isFullHeightPage ? 'h-[100dvh] max-h-[100dvh] overflow-hidden' : ''}`}>
         <Topbar menuButtonRef={mobileNavigationTriggerRef} onOpenNavigation={() => setMobileNavigationOpen(true)} />
         <CrossDeviceCallBanner />
         {/* Ohne `overflow-auto`: `main` hat als `flex-1` in einer Spalte ohne

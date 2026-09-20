@@ -1,0 +1,134 @@
+/**
+ * Was sich mit einer einzelnen Nachricht anstellen lässt.
+ *
+ * Öffnet sich durch langes Drücken auf die Blase — am Telefon der einzige Weg
+ * dorthin, weil es dort kein Hover gibt. Am Rechner führt zusätzlich die kleine
+ * Leiste unter der eigenen Blase zu Bearbeiten und Löschen.
+ *
+ * Oben die sechs Schnellreaktionen, weil das die häufigste Absicht ist und der
+ * Daumen sie am oberen Rand eines Blattes von unten bequem erreicht. Darunter
+ * die Aktionen in der Reihenfolge, in der sie gebraucht werden.
+ */
+
+import {
+  Copy,
+  Forward,
+  ListChecks,
+  Pencil,
+  Pin,
+  Reply,
+  Star,
+  StarOff,
+  Trash2,
+} from 'lucide-react'
+
+import { Blattmenue, Blatteintrag } from '@/Singra/UI'
+import { SCHNELLREAKTIONEN } from '@/services/reaktionen'
+import type { ChatMessage } from './ChatMessageBubble'
+
+export interface NachrichtenMenueProps {
+  msg: ChatMessage | null
+  onSchliessen: () => void
+  onReaktion: (msg: ChatMessage, emoji: string) => void
+  onAntworten: (msg: ChatMessage) => void
+  onWeiterleiten: (msg: ChatMessage) => void
+  onKopieren: (msg: ChatMessage) => void
+  onMarkieren: (msg: ChatMessage) => void
+  onAuswaehlen: (msg: ChatMessage) => void
+  onBearbeiten: (msg: ChatMessage) => void
+  onLoeschen: (msg: ChatMessage) => void
+  onAnheften?: (msg: ChatMessage) => void
+  /** Ob in dieser Gruppe angeheftet werden darf — vom Server entschieden. */
+  darfAnheften?: boolean
+  /** Ob diese Nachricht gerade oben angeheftet ist. */
+  istAngeheftet?: boolean
+}
+
+export function NachrichtenMenue({
+  msg,
+  onSchliessen,
+  onReaktion,
+  onAntworten,
+  onWeiterleiten,
+  onKopieren,
+  onMarkieren,
+  onAuswaehlen,
+  onBearbeiten,
+  onLoeschen,
+  onAnheften,
+  darfAnheften,
+  istAngeheftet,
+}: NachrichtenMenueProps) {
+  if (!msg) return null
+
+  const schliesseUnd = (tun: (m: ChatMessage) => void) => () => {
+    onSchliessen()
+    tun(msg)
+  }
+
+  return (
+    <Blattmenue offen onSchliessen={onSchliessen} titel="Was mit dieser Nachricht geschehen soll">
+      <div className="px-3 pt-2 pb-3 flex items-center justify-between gap-1 border-b border-outline-variant/20">
+        {SCHNELLREAKTIONEN.map((emoji) => (
+          <button
+            key={emoji}
+            type="button"
+            onClick={schliesseUnd((m) => onReaktion(m, emoji))}
+            // 44 px, damit der Daumen sicher trifft; das Zeichen selbst darf
+            // kleiner aussehen als seine Trefferfläche.
+            className={`w-11 h-11 rounded-full text-xl flex items-center justify-center transition-transform active:scale-90 ${
+              msg.reaktionen?.[emoji]?.length ? 'bg-primary/20' : 'hover:bg-surface-container-high'
+            }`}
+            aria-label={`Mit ${emoji} reagieren`}
+          >
+            <span aria-hidden="true">{emoji}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="py-1">
+        <Blatteintrag icon={<Reply className="w-4 h-4" />} label="Antworten" onClick={schliesseUnd(onAntworten)} />
+        <Blatteintrag
+          icon={<Forward className="w-4 h-4" />}
+          label="Weiterleiten"
+          onClick={schliesseUnd(onWeiterleiten)}
+        />
+        {msg.text && (
+          <Blatteintrag icon={<Copy className="w-4 h-4" />} label="Text kopieren" onClick={schliesseUnd(onKopieren)} />
+        )}
+        <Blatteintrag
+          icon={msg.istMarkiert ? <StarOff className="w-4 h-4" /> : <Star className="w-4 h-4" />}
+          label={msg.istMarkiert ? 'Markierung entfernen' : 'Markieren'}
+          hinweis="Bleibt auf diesem Gerät"
+          onClick={schliesseUnd(onMarkieren)}
+        />
+        {onAnheften && (
+          <Blatteintrag
+            icon={<Pin className="w-4 h-4" />}
+            label={istAngeheftet ? 'Nicht mehr anheften' : 'In der Gruppe anheften'}
+            hinweis={darfAnheften ? undefined : 'Dafür fehlt dir das Recht in dieser Gruppe'}
+            disabled={!darfAnheften}
+            onClick={schliesseUnd(onAnheften)}
+          />
+        )}
+        <Blatteintrag
+          icon={<ListChecks className="w-4 h-4" />}
+          label="Mehrere auswählen"
+          onClick={schliesseUnd(onAuswaehlen)}
+        />
+        {msg.isSelf && msg.text && (
+          <Blatteintrag icon={<Pencil className="w-4 h-4" />} label="Bearbeiten" onClick={schliesseUnd(onBearbeiten)} />
+        )}
+        {msg.isSelf && (
+          <Blatteintrag
+            icon={<Trash2 className="w-4 h-4" />}
+            label="Für alle löschen"
+            hinweis="Entfernt auch Bilder und Dateien vom Server"
+            gefahr
+            onClick={schliesseUnd(onLoeschen)}
+          />
+        )}
+      </div>
+    </Blattmenue>
+  )
+}

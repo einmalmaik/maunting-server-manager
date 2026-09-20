@@ -12,6 +12,9 @@ import {
   Avatar,
   ChatInputBar,
   VoiceRecordingBar,
+  Blattmenue,
+  Blatteintrag,
+  type ChatInputBarRef,
 } from '@/Singra/UI'
 import {
   MessageSquare,
@@ -24,13 +27,10 @@ import {
   UsersRound,
   ChevronLeft,
   X,
-  MapPin,
   Clock,
   RefreshCw,
   Mic,
   Trash2,
-  Play,
-  Pause,
   Share2,
   Plus,
   LogOut,
@@ -38,9 +38,6 @@ import {
   Smile,
   Paperclip,
   FileText,
-  Check,
-  CheckCheck,
-  Download,
   Upload,
   Shield,
   UserCheck,
@@ -56,6 +53,17 @@ import {
   Ban,
   Phone,
   Video,
+  Forward,
+  Copy,
+  Star,
+  Pin,
+  PinOff,
+  Archive,
+  ArchiveRestore,
+  ChevronDown,
+  Timer,
+  ArrowDown,
+  AtSign,
 } from 'lucide-react'
 import { useCallStore, setzeAnrufIdentitaet } from '@/stores/useCallStore'
 import { starteGruppenanruf } from '@/api/calls'
@@ -64,12 +72,16 @@ import {
   CircularVideoNoteRecorder,
   type VideoNoteAufnahme,
 } from '@/components/social/CircularVideoNoteRecorder'
-import { CircularVideoNotePlayer } from '@/components/social/CircularVideoNotePlayer'
-import { DeviceBadge } from '@/components/social/DeviceBadge'
 import {
-  GruppenEinladungsKarte,
-  findeEinladungsCode,
-} from '@/components/social/GruppenEinladungsKarte'
+  ChatMessageBubble,
+  type AntwortBezug,
+  type CalendarAttachment,
+  type ChatMessage,
+  type NoteAttachment,
+  type StickerAttachment,
+  type StoryReplyAttachment,
+} from '@/components/social/ChatMessageBubble'
+import { DeviceBadge } from '@/components/social/DeviceBadge'
 import { StatusDot, type PresenceStatus } from '@/components/social/StatusIndicator'
 import {
   type FriendItem,
@@ -94,8 +106,6 @@ import {
 } from '@/api/social'
 import { maxKlartextBytes } from '@/services/medienKrypto'
 import {
-  ChatMediaImage,
-  ChatMediaFile,
   chatMediaBlobCache,
   holeAnhangUrl,
   type AudioAttachment,
@@ -147,6 +157,58 @@ import {
   tilgeNachrichtBeimServer,
   tilgeNachrichtLokal,
 } from '@/services/nachrichtLoeschen'
+import {
+  bezugFelder,
+  neueBezugstafel,
+  neueSammeltafel,
+  type Bezugsziel,
+} from '@/services/nachrichtBezug'
+import {
+  schalteReaktion,
+  wendeReaktionenAn,
+  type RohReaktion,
+} from '@/services/reaktionen'
+import {
+  binIchGemeint,
+  findeErwaehnungen,
+  offeneErwaehnung,
+  setzeVorschlagEin,
+  sucheVorschlaege,
+  type Erwaehnungsvorschlag,
+} from '@/services/erwaehnungen'
+import {
+  baueWeiterleitung,
+  istWeiterleitbar,
+  type Weiterleitungsziel,
+} from '@/services/nachrichtWeiterleiten'
+import {
+  sammleAnMich,
+  sammleMarkierte,
+  sucheImChat,
+  sucheUeberall,
+  vergissMailbox,
+  type ChatTreffer,
+  type Treffer,
+} from '@/services/verlaufSuche'
+import {
+  faelligeZeilen,
+  setzeVerfallsfrist,
+  stufenLabel,
+  VERFALL_STUFEN,
+  verfaelltAm as berechneVerfall,
+  verfallsfrist,
+} from '@/services/nachrichtVerfall'
+import {
+  ladeAlleEntwuerfe,
+  ladeEntwurf,
+  speichereEntwurf,
+} from '@/services/messengerLocalStore'
+import { ErwaehnungsWache } from '@/components/social/ErwaehnungsWache'
+import { NachrichtenMenue } from '@/components/social/NachrichtenMenue'
+import { WeiterleitenAnsicht } from '@/components/social/WeiterleitenAnsicht'
+import { VerlaufSuchleiste } from '@/components/social/VerlaufSuchleiste'
+import { TrefferListe } from '@/components/social/TrefferListe'
+import { ChatZeilenGeste } from '@/components/social/ChatZeilenGeste'
 
 /** Der Kontoschlüssel ist auf diesem Gerät nicht zu öffnen — nicht gesendet. */
 class E2eeIdentityLockedError extends Error {
@@ -159,7 +221,7 @@ import { compressImageFile } from '@/lib/imageCompression'
 import { getAudioTrackConstraints } from '@/lib/audioSettings'
 import { IN_HOUSE_STICKERS, CATEGORIZED_EMOJIS } from '@/services/stickerCatalog'
 import { CameraSnapshotModal } from '@/components/social/CameraSnapshotModal'
-import { CreateStoryModal, STORY_GRADIENTS } from '@/components/social/CreateStoryModal'
+import { CreateStoryModal } from '@/components/social/CreateStoryModal'
 import { MessengerSperrschirm } from '@/components/social/MessengerSperrschirm'
 import { siegelAktiv } from '@/services/lokaleVersiegelung'
 import { useMessengerSperre } from '@/services/messengerSperre'
@@ -172,7 +234,7 @@ import {
 import { ChatWallpaperModal } from '@/components/social/ChatWallpaperModal'
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
-import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
+import { useMessengerNotificationStore, PINS_MAX } from '@/stores/messengerNotificationStore'
 import { sanitizeSvg, getSafeAttachmentUrl } from '@/lib/sanitizeSvg'
 
 function formatChatDateBadge(isoDateString: string): string {
@@ -206,21 +268,6 @@ function formatChatDateBadge(isoDateString: string): string {
   }
 }
 
-function getWaveformBars(msgId: number, count = 28): number[] {
-  const bars: number[] = []
-  let seed = (Math.abs(msgId) || 1) * 9301 + 49297
-  for (let i = 0; i < count; i++) {
-    seed = (seed * 9301 + 49297) % 233280
-    const rand = seed / 233280
-    // Natural audio envelope: quieter at start & end, natural speech peaks in between
-    const pos = i / (count - 1)
-    const envelope = Math.sin(pos * Math.PI) * 0.45 + 0.55
-    const height = Math.max(0.2, Math.min(1.0, (0.2 + rand * 0.8) * envelope))
-    bars.push(height)
-  }
-  return bars
-}
-
 export interface ChatContact {
   /**
    * Schlüssel für die Kontaktlisten. Wird beim Zusammenführen vergeben und
@@ -240,76 +287,54 @@ export interface ChatContact {
   isPublicUser?: boolean
 }
 
-export interface NoteAttachment {
-  title: string
-  content: string
-  color?: string
-  category?: string
-}
-
-export interface CalendarAttachment {
-  title: string
-  start: string
-  end: string
-  description?: string
-  location?: string
-}
-
-// Die Anhangstypen stehen bei den Komponenten, die sie anzeigen. Hier standen
-// bis 09/2026 zweite Fassungen davon, die auseinanderliefen, sobald sich eine
-// änderte.
+// Die Typen stehen bei den Komponenten, die sie anzeigen. Hier standen bis
+// 09/2026 zweite Fassungen davon, die auseinanderliefen, sobald sich eine
+// änderte. Weitergereicht wird nur, damit der bisherige Importweg bleibt.
 export type {
   ImageAttachment,
   AudioAttachment,
   FileAttachment,
   VideoNoteAttachment,
 } from '@/components/social/ChatMediaAttachments'
-
-export interface StickerAttachment {
-  id: string
-  label: string
-  svg: string
+export type {
+  AntwortBezug,
+  CalendarAttachment,
+  ChatMessage,
+  NoteAttachment,
+  StickerAttachment,
+  StoryReplyAttachment,
 }
 
-export interface StoryReplyAttachment {
-  storyId?: number
-  storyContent: string
-  storyMediaUrl?: string | null
-  storyBackground?: string
-  storyUsername?: string
-}
-
-export interface ChatMessage {
-  id: number
-  clientUuid?: string
-  senderId: number
-  senderName?: string
-  text: string
-  createdAt: string
-  isSelf: boolean
-  isDelivered?: boolean
-  isRead?: boolean
-  isEdited?: boolean
-  editedAt?: string
-  isDeleted?: boolean
-  deletedAt?: string
-  originalText?: string
-  noteAttachment?: NoteAttachment
-  calendarAttachment?: CalendarAttachment
-  imageAttachment?: ImageAttachment
-  audioAttachment?: AudioAttachment
-  fileAttachment?: FileAttachment
-  stickerAttachment?: StickerAttachment
+/**
+ * Was gesendet werden soll.
+ *
+ * Bis 09/2026 nahm `handleSendMessage` zehn Positionsargumente, und die
+ * Aufrufe sahen entsprechend aus: `handleSendMessage('', undefined, undefined,
+ * undefined, { … })`. Wer eine Sprachnachricht verschicken wollte, musste vier
+ * Lücken abzählen, und jede neue Möglichkeit wäre Argument elf geworden.
+ *
+ * Benannte Felder kosten beim Aufruf ein paar Zeichen mehr und ersparen das
+ * Zählen. Alles ist freiwillig; was nichts zu senden hat, kommt gar nicht erst
+ * bis zum Umschlag.
+ */
+export interface SendeAuftrag {
+  /** Ohne Angabe wird genommen, was im Eingabefeld steht. */
+  text?: string
+  note?: NoteAttachment
+  cal?: CalendarAttachment
+  img?: ImageAttachment
+  audio?: AudioAttachment
+  file?: FileAttachment
+  sticker?: StickerAttachment
   storyReply?: StoryReplyAttachment
-  videoNoteAttachment?: VideoNoteAttachment
+  videoNote?: VideoNoteAufnahme
   videoUrl?: string
-  status?: 'queued' | 'sent' | 'delivered' | 'read'
-  /**
-   * Eine Zeile des Messengers selbst, kein Gesprächsbeitrag. Bisher nur für den
-   * Sitzungsbruch: sie gehört mitten in den Verlauf, weil sie genau dort
-   * hingehört, wo die Lücke ist.
-   */
-  isSystem?: boolean
+  /** Worauf geantwortet wird. Ohne Angabe gilt, was gerade im Zitatkopf steht. */
+  antwortAuf?: AntwortBezug | null
+  /** Setzt die Marke „Weitergeleitet" über der Blase. */
+  weitergeleitet?: boolean
+  /** Ein anderes Ziel als der offene Chat — fürs Weiterleiten. */
+  ziel?: { blindMailboxId: string; recipientId?: number | null; groupId?: number | null }
 }
 
 function formatFileSize(bytes: number): string {
@@ -320,12 +345,6 @@ function formatFileSize(bytes: number): string {
 }
 
 export { getSafeAttachmentUrl }
-
-function formatDuration(sec: number): string {
-  const m = Math.floor(sec / 60)
-  const s = Math.floor(sec % 60)
-  return `${m}:${s < 10 ? '0' : ''}${s}`
-}
 
 /** Macht aus einer Aufnahme die Zeichenkette, die `medienKrypto` verschlüsselt. */
 function blobAlsDataUrl(blob: Blob): Promise<string> {
@@ -425,6 +444,13 @@ export function Messenger() {
   const blockUser = useMessengerNotificationStore((s) => s.blockUser)
   const unblockUser = useMessengerNotificationStore((s) => s.unblockUser)
   const markAsRead = useMessengerNotificationStore((s) => s.markAsRead)
+  const mailboxDirectory = useMessengerNotificationStore((s) => s.mailboxDirectory)
+  const pinnedChats = useMessengerNotificationStore((s) => s.pinnedChats)
+  const archivedChats = useMessengerNotificationStore((s) => s.archivedChats)
+  const mentionedChats = useMessengerNotificationStore((s) => s.mentionedChats)
+  const schalteAnheften = useMessengerNotificationStore((s) => s.schalteAnheften)
+  const schalteArchiv = useMessengerNotificationStore((s) => s.schalteArchiv)
+  const merkeErwaehnung = useMessengerNotificationStore((s) => s.merkeErwaehnung)
 
   // Mute & Block modals
   const [isMuteModalOpen, setIsMuteModalOpen] = useState(false)
@@ -594,6 +620,44 @@ export function Messenger() {
 
   // Message Editing State
   const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null)
+
+  /**
+   * Worauf die nächste Nachricht antwortet.
+   *
+   * Der Auszug wird hier festgehalten und reist gleich mit — nicht nachgeschlagen
+   * beim Anzeigen. Sonst stünde das Zitat beim Empfänger leer, wenn die zitierte
+   * Nachricht bei ihm nie ankam oder inzwischen gelöscht wurde.
+   */
+  const [antwortAuf, setAntwortAuf] = useState<AntwortBezug | null>(null)
+  /** Die Nachricht, für die gerade das Langdruck-Menü offen ist. */
+  const [menueNachricht, setMenueNachricht] = useState<ChatMessage | null>(null)
+  /** Mehrfachauswahl: aus der Kopfzeile wird eine Aktionsleiste. */
+  const [auswahlModus, setAuswahlModus] = useState(false)
+  const [gewaehlteUuids, setGewaehlteUuids] = useState<string[]>([])
+  /** Was weitergeleitet werden soll, und wie weit das Neu-Hochladen ist. */
+  const [weiterzuleiten, setWeiterzuleiten] = useState<ChatMessage[] | null>(null)
+  const [wlFortschritt, setWlFortschritt] = useState<{ gesamt: number; fertig: number } | null>(null)
+  /** Suche im offenen Chat. */
+  const [sucheOffen, setSucheOffen] = useState(false)
+  const [suchTreffer, setSuchTreffer] = useState<Treffer[]>([])
+  const [suchIndex, setSuchIndex] = useState(0)
+  const [sucheGesperrt, setSucheGesperrt] = useState(false)
+  /** Die Ansicht über alle Chats: Suche, Markiertes oder „an mich". */
+  const [ueberall, setUeberall] = useState<'aus' | 'suche' | 'markiert' | 'anMich'>('aus')
+  const [ueberallChats, setUeberallChats] = useState<ChatTreffer[]>([])
+  const [ueberallLaeuft, setUeberallLaeuft] = useState(false)
+  const [ueberallGesperrt, setUeberallGesperrt] = useState(false)
+  const [ueberallFrage, setUeberallFrage] = useState('')
+  /** Kurz aufleuchtende Zielzeile nach einem Sprung. */
+  const [hervorgehoben, setHervorgehoben] = useState<string | null>(null)
+  /** Die Nachricht, die in dieser Gruppe oben klebt. */
+  const [angeheftet, setAngeheftet] = useState<ChatMessage | null>(null)
+  /** Verfallsfrist dieses Chats in Sekunden, 0 = aus. */
+  const [verfallSekunden, setVerfallSekunden] = useState(0)
+  const [verfallOffen, setVerfallOffen] = useState(false)
+  /** Chats mit ungesendetem Text, für die Vorschau in der Liste. */
+  const [entwuerfe, setEntwuerfe] = useState<Record<string, string>>({})
+
   const highestIncomingIdAcknowledgedRef = useRef<number>(0)
   const highestIncomingIdDeliveredRef = useRef<number>(0)
   const maxPartnerReadIdRef = useRef<number>(0)
@@ -604,8 +668,142 @@ export function Messenger() {
   const partnerActivityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastTypingSentRef = useRef<number>(0)
 
+  const chatInputRef = useRef<ChatInputBarRef>(null)
+  const [erwaehnungsVorschlaege, setErwaehnungsVorschlaege] = useState<Erwaehnungsvorschlag[]>([])
+
+  /** Höchstens so viel vom Text steht im Zitat — der Rest wäre eine Kopie. */
+  const ZITAT_MAX = 120
+
+  /**
+   * Der Auszug, der mit einer Antwort mitreist.
+   *
+   * Bei einer Nachricht ohne Text beschreibt er den Anhang. „Antwort auf Bild"
+   * ist eine Auskunft; ein leeres Zitat ist keine.
+   */
+  const auszugFuerZitat = (msg: ChatMessage): string => {
+    if (msg.text?.trim()) return msg.text.trim().slice(0, ZITAT_MAX)
+    if (msg.imageAttachment) return 'Bild'
+    if (msg.videoNoteAttachment) return 'Videonotiz'
+    if (msg.audioAttachment) return 'Sprachnachricht'
+    if (msg.stickerAttachment) return msg.stickerAttachment.label || 'Aufkleber'
+    if (msg.fileAttachment) return String(msg.fileAttachment.name || 'Datei')
+    if (msg.noteAttachment) return msg.noteAttachment.title || 'Notiz'
+    if (msg.calendarAttachment) return msg.calendarAttachment.title || 'Termin'
+    return 'Nachricht'
+  }
+
+  /**
+   * Wer in diesem Text genannt wird.
+   *
+   * Nur in Gruppen: ein Direktchat hat genau einen Gegenüber, den man nicht
+   * erst adressieren muss. Aufgelöst wird beim **Senden**, gegen die
+   * Mitgliederliste — der Text trägt danach den Namen, die Wirkung die Kennung.
+   */
+  const erwaehnungsFelder = (text: string) => {
+    if (!activeGroup) return {}
+    const { erwaehnungen, erwaehntAlle } = findeErwaehnungen(text, activeGroup.members || [])
+    return {
+      erwaehnungen: erwaehnungen.length ? erwaehnungen : undefined,
+      erwaehntAlle: erwaehntAlle || undefined,
+    }
+  }
+
+  /** Setzt den gewählten Namen dort ein, wo gerade `@…` getippt wurde. */
+  const waehleErwaehnung = (vorschlag: Erwaehnungsvorschlag) => {
+    const feld = chatInputRef.current?.textarea
+    const cursor = feld?.selectionStart ?? inputText.length
+    const offen = offeneErwaehnung(inputText, cursor)
+    if (!offen) return
+    const { text, cursor: neuerCursor } = setzeVorschlagEin(inputText, offen.start, cursor, vorschlag.name)
+    setInputText(text)
+    setErwaehnungsVorschlaege([])
+    window.requestAnimationFrame(() => {
+      feld?.focus()
+      feld?.setSelectionRange(neuerCursor, neuerCursor)
+    })
+  }
+
+  /**
+   * Entwürfe: entprellt schreiben, versiegelt ablegen.
+   *
+   * Ein Entwurf ist ungesendeter Klartext und damit das Empfindlichste, was
+   * hier anfällt. Er geht deshalb in die versiegelte IndexedDB, nicht in den
+   * localStorage neben die Stummschaltungen.
+   */
+  const entwurfUhr = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const entwurfOffen = useRef<{ mid: string; text: string } | null>(null)
+
+  const schreibeEntwurf = useCallback(() => {
+    const offen = entwurfOffen.current
+    if (!offen) return
+    entwurfOffen.current = null
+    void speichereEntwurf(offen.mid, offen.text).catch(() => {})
+    setEntwuerfe((prev) => {
+      const kurz = offen.text.trim().slice(0, 80)
+      if ((prev[offen.mid] || '') === kurz) return prev
+      const neu = { ...prev }
+      if (kurz) neu[offen.mid] = kurz
+      else delete neu[offen.mid]
+      return neu
+    })
+  }, [])
+
+  const merkeEntwurf = useCallback(
+    (mid: string, text: string) => {
+      entwurfOffen.current = { mid, text }
+      if (entwurfUhr.current) clearTimeout(entwurfUhr.current)
+      entwurfUhr.current = setTimeout(schreibeEntwurf, 600)
+    },
+    [schreibeEntwurf],
+  )
+
+  /**
+   * Am Telefon reißt ein Anruf oder ein Zurückwischen das Getippte weg, bevor
+   * die Entprellung greift. `beforeunload` läuft auf iOS nicht zuverlässig,
+   * deshalb diese beiden.
+   */
+  useEffect(() => {
+    const sichern = () => schreibeEntwurf()
+    document.addEventListener('visibilitychange', sichern)
+    window.addEventListener('pagehide', sichern)
+    return () => {
+      document.removeEventListener('visibilitychange', sichern)
+      window.removeEventListener('pagehide', sichern)
+      sichern()
+    }
+  }, [schreibeEntwurf])
+
+  /** Die Vorschauen für die Chatliste einmal beim Öffnen der Seite. */
+  useEffect(() => {
+    ladeAlleEntwuerfe()
+      .then((alle) => {
+        const kurz: Record<string, string> = {}
+        for (const [mid, text] of Object.entries(alle)) {
+          const gekuerzt = text.trim().slice(0, 80)
+          if (gekuerzt) kurz[mid] = gekuerzt
+        }
+        setEntwuerfe(kurz)
+      })
+      .catch(() => {})
+  }, [])
+
   const handleInputChange = (text: string) => {
     setInputText(text)
+
+    // Vorschlagsliste: nur in Gruppen, und nur solange der Cursor hinter einem
+    // `@…` steht. Die Auswahl ist Bequemlichkeit — die Schranke für `@everyone`
+    // sitzt beim Empfänger, nicht hier.
+    if (activeGroup) {
+      const feld = chatInputRef.current?.textarea
+      const cursor = feld?.selectionStart ?? text.length
+      const offen = offeneErwaehnung(text, cursor)
+      setErwaehnungsVorschlaege(
+        offen ? sucheVorschlaege(activeGroup, offen.praefix, currentUserId) : [],
+      )
+    } else if (erwaehnungsVorschlaege.length) {
+      setErwaehnungsVorschlaege([])
+    }
+
     if (!blindMailboxId) return
     const now = Date.now()
     if (text.trim()) {
@@ -627,6 +825,8 @@ export function Messenger() {
         }).catch(() => {})
       }
     }
+
+    merkeEntwurf(blindMailboxId, text)
   }
 
   const currentUserId = user?.id || 0
@@ -1007,6 +1207,70 @@ export function Messenger() {
     })
   }, [groups, filterTab, searchQuery])
 
+  /**
+   * Angeheftetes nach oben, Archiviertes heraus.
+   *
+   * Beides steht nur auf diesem Gerät: welche Gespräche jemandem wichtig sind,
+   * ist ein Metadatum ersten Ranges und hat auf keinem Server etwas zu suchen.
+   * Dieselbe Bauart wie das Stummschalten.
+   */
+  const ordne = useCallback(
+    <T,>(eintraege: T[], midVon: (e: T) => string | undefined) => {
+      const sichtbar: T[] = []
+      const imArchiv: T[] = []
+      for (const e of eintraege) {
+        const mid = midVon(e)
+        if (mid && archivedChats.includes(mid)) imArchiv.push(e)
+        else sichtbar.push(e)
+      }
+      sichtbar.sort((a, b) => {
+        const pa = pinnedChats.indexOf(midVon(a) || '')
+        const pb = pinnedChats.indexOf(midVon(b) || '')
+        if (pa === pb) return 0
+        return (pa < 0 ? 99 : pa) - (pb < 0 ? 99 : pb)
+      })
+      return { sichtbar, imArchiv }
+    },
+    [pinnedChats, archivedChats],
+  )
+
+  const gruppenNachArchiv = useMemo(
+    () => ordne(filteredGroups, (g) => groupMailboxMap[g.id]),
+    [ordne, filteredGroups, groupMailboxMap],
+  )
+  const kontakteNachArchiv = useMemo(
+    () => ordne(filteredContacts, (c) => contactMailboxMap[c.userId]),
+    [ordne, filteredContacts, contactMailboxMap],
+  )
+  /** Wie viele Chats im Archiv liegen und wie viel dort ungelesen ist. */
+  const archivZahl = gruppenNachArchiv.imArchiv.length + kontakteNachArchiv.imArchiv.length
+  const archivUngelesen = useMemo(() => {
+    let summe = 0
+    for (const g of gruppenNachArchiv.imArchiv) summe += unreadCounts[groupMailboxMap[g.id]] || 0
+    for (const c of kontakteNachArchiv.imArchiv) summe += unreadCounts[contactMailboxMap[c.userId]] || 0
+    return summe
+  }, [gruppenNachArchiv, kontakteNachArchiv, unreadCounts, groupMailboxMap, contactMailboxMap])
+
+  /** Der Chat, für den gerade das Langdruck-Menü der Liste offen ist. */
+  const [zeilenMenue, setZeilenMenue] = useState<{ mid: string; name: string } | null>(null)
+  /** Ob die archivierten Chats gerade mit angezeigt werden. */
+  const [archivOffen, setArchivOffen] = useState(false)
+  /**
+   * Der Rückweg nach einer Wischgeste.
+   *
+   * Eine Geste löst versehentlich aus. Ohne sichtbaren Rückweg wäre ein Chat
+   * weg, ohne dass jemand wüsste wohin — der Streifen unten in der Liste ist
+   * deshalb Teil der Funktion, nicht ihre Verzierung.
+   */
+  const [widerruf, setWiderruf] = useState<{ text: string; zurueck: () => void } | null>(null)
+
+  // Der Streifen verschwindet von selbst; sonst stünde er bis zum nächsten Mal.
+  useEffect(() => {
+    if (!widerruf) return
+    const uhr = window.setTimeout(() => setWiderruf(null), 6000)
+    return () => window.clearTimeout(uhr)
+  }, [widerruf])
+
   // Mailbox-Verzeichnis und Zuordnungen im Benachrichtigungs-Store registrieren
   useEffect(() => {
     if (!currentUserId) return
@@ -1218,6 +1482,31 @@ export function Messenger() {
     setMessages((prev) => sortMessagesChronologically([...prev, zeile]))
   }, [])
 
+  /**
+   * Eine Systemzeile in den offenen Verlauf schreiben.
+   *
+   * Nur Anzeige und nur für diese Sitzung: sie wandert nicht in die lokale
+   * Ablage und reist nirgendwohin. Die Gegenseite schreibt sich ihre eigene,
+   * wenn sie den Umschlag sieht.
+   */
+  const zeigeSystemzeile = useCallback((text: string) => {
+    const jetzt = Date.now()
+    setMessages((prev) =>
+      sortMessagesChronologically([
+        ...prev,
+        {
+          id: jetzt,
+          clientUuid: `sys-${jetzt}`,
+          senderId: 0,
+          text,
+          createdAt: new Date().toISOString(),
+          isSelf: false,
+          isSystem: true,
+        },
+      ]),
+    )
+  }, [])
+
   const konversation = useKonversation({
     ziel: gespraechsZiel,
     eigeneId: currentUserId,
@@ -1244,11 +1533,29 @@ export function Messenger() {
     maxPartnerDeliveredIdRef.current = 0
     useMessengerNotificationStore.getState().setActiveMailboxId(blindMailboxId || null)
 
+    // Was zum neuen Chat gehört und nicht zum alten.
+    setAntwortAuf(null)
+    setSucheOffen(false)
+    setSuchTreffer([])
+    setAngeheftet(null)
+    setAuswahlModus(false)
+    setGewaehlteUuids([])
+    setInputText('')
+
     if (!blindMailboxId) {
       setMessages([])
       setLoadingMessages(Boolean(activeContact || activeGroup))
       return
     }
+
+    // Frist und angefangener Text gehören zu diesem Chat, nicht zum vorigen.
+    setVerfallSekunden(verfallsfrist(blindMailboxId))
+    ladeEntwurf(blindMailboxId)
+      .then((text) => {
+        if (!active || activeMailboxIdRef.current !== blindMailboxId) return
+        if (text) setInputText(text)
+      })
+      .catch(() => {})
 
     const cached = sessionChatCache.get(blindMailboxId)
     if (cached && cached.length > 0) {
@@ -1273,24 +1580,28 @@ export function Messenger() {
     }
   }, [blindMailboxId, activeContact?.userId, activeGroup?.id])
 
-  // Helper: send an E2EE control envelope (e.g. read_receipt, edit_message, delete_message)
+  /**
+   * Schickt einen Steuerumschlag (Quittung, Änderung, Löschung, Reaktion …).
+   *
+   * **Wirft.** Bis 09/2026 verschluckte diese Funktion jeden Fehler, und der
+   * Aufrufer hielt ein gescheitertes Senden für erfolgreich. Bei einer Quittung
+   * ist das verschmerzbar; bei einer Reaktion, die lokal steht und nie ankommt,
+   * ist es eine Lüge. Jeder Aufrufer entscheidet selbst, ob er den Fehler zeigt
+   * oder schluckt — hier wird er nur nicht mehr versteckt.
+   */
   const sendE2eeControlMessage = async (payloadObj: Record<string, unknown>) => {
     if (!blindMailboxId || !currentUserId || (!activeContact && !activeGroup)) return
-    try {
-      const clientUuid =
-        typeof crypto !== 'undefined' && crypto.randomUUID
-          ? crypto.randomUUID()
-          : 'ctrl-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9)
-      const payload = JSON.stringify({ ...payloadObj, client_uuid: clientUuid })
-      const auftraege = await konversation.baueSteuerversand(
-        payload,
-        clientUuid,
-        String(payloadObj.type || 'control'),
-      )
-      await Promise.all(auftraege.map((auftrag) => relayE2eeEnvelope(auftrag)))
-    } catch {
-      // Control message failure is non-fatal
-    }
+    const clientUuid =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : 'ctrl-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9)
+    const payload = JSON.stringify({ ...payloadObj, client_uuid: clientUuid })
+    const auftraege = await konversation.baueSteuerversand(
+      payload,
+      clientUuid,
+      String(payloadObj.type || 'control'),
+    )
+    await Promise.all(auftraege.map((auftrag) => relayE2eeEnvelope(auftrag)))
   }
 
   // 5. Load and decrypt messages (non-flickering background sync + real-time)
@@ -1324,20 +1635,12 @@ export function Messenger() {
       const seenEnvelopeIds = new Set<number>()
       const seenClientUuids = new Set<string>()
 
-      // Dictionaries to track edits, deletions, and read receipts across envelopes
-      const editMap = new Map<number, { newText: string; editedAt: string }>()
-      const deleteMap = new Map<number, { deletedAt: string }>()
-      /**
-       * Dieselben Angaben, adressiert über die logische Nachrichtenkennung.
-       *
-       * Die Umschlagkennung allein reicht nicht: eine Nachricht geht als eine
-       * Kopie je Zielgerät hinaus, jede mit eigener Kennung. Der Absender merkt
-       * sich die der ersten Bestätigung, ein zweites Gerät der Gegenseite liest
-       * aber eine andere — und fand die Nachricht zu `target_id` nicht. Bearbeiten
-       * und Löschen liefen dort ins Leere.
-       */
-      const editUuidMap = new Map<string, { newText: string; editedAt: string }>()
-      const deleteUuidMap = new Map<string, { deletedAt: string }>()
+      // Wirkungen, die aus Steuerumschlägen kommen. Jede Tafel kennt ihre
+      // Nachricht über die Umschlagkennung **und** die logische Kennung; warum
+      // beides nötig ist, steht in `nachrichtBezug.ts`.
+      const aenderungen = neueBezugstafel<{ newText: string; editedAt: string }>()
+      const loeschungen = neueBezugstafel<{ deletedAt: string }>()
+      const reaktionen = neueSammeltafel<RohReaktion>()
       let maxPartnerReadId = 0
       let maxPartnerDeliveredId = 0
       let maxIncomingId = 0
@@ -1428,27 +1731,34 @@ export function Messenger() {
 
             // 2. Edit message control packet
             if (parsed.type === 'edit_message') {
-              const targetId = Number(parsed.target_id || 0)
-              const targetUuid = String(parsed.target_client_uuid || '')
-              if (parsed.new_text && (targetId || targetUuid)) {
-                const eintrag = {
+              if (parsed.new_text) {
+                aenderungen.merke(parsed, {
                   newText: String(parsed.new_text),
                   editedAt: String(parsed.edited_at || env.created_at),
-                }
-                if (targetId) editMap.set(targetId, eintrag)
-                if (targetUuid) editUuidMap.set(targetUuid, eintrag)
+                })
               }
               continue
             }
 
             // 3. Delete message control packet
             if (parsed.type === 'delete_message') {
-              const targetId = Number(parsed.target_id || 0)
-              const targetUuid = String(parsed.target_client_uuid || '')
-              if (targetId || targetUuid) {
-                const eintrag = { deletedAt: String(parsed.deleted_at || env.created_at) }
-                if (targetId) deleteMap.set(targetId, eintrag)
-                if (targetUuid) deleteUuidMap.set(targetUuid, eintrag)
+              loeschungen.merke(parsed, {
+                deletedAt: String(parsed.deleted_at || env.created_at),
+              })
+              continue
+            }
+
+            // 4. Reaktion auf eine Nachricht
+            if (parsed.type === 'reaction') {
+              const zeichen = String(parsed.emoji || '')
+              const wer = Number(parsed.actor_id || 0)
+              if (zeichen && wer) {
+                reaktionen.ergaenze(parsed, {
+                  emoji: zeichen,
+                  actorId: wer,
+                  nehmen: parsed.aktion === 'nehmen',
+                  zeitpunkt: String(parsed.zeitpunkt || env.created_at),
+                })
               }
               continue
             }
@@ -1488,6 +1798,13 @@ export function Messenger() {
               stickerAttachment: parsed.sticker_attachment,
               storyReply: parsed.story_reply,
               videoNoteAttachment: parsed.video_note_attachment,
+              antwortAuf: parsed.antwort_auf,
+              weitergeleitet: Boolean(parsed.weitergeleitet) || undefined,
+              erwaehnungen: Array.isArray(parsed.erwaehnungen) ? parsed.erwaehnungen : undefined,
+              // Ob daraus eine Erwähnung wird, entscheidet nicht dieses Feld,
+              // sondern die Rechtelage des Absenders — geprüft beim Anzeigen.
+              erwaehntAlle: Boolean(parsed.erwaehnt_alle) || undefined,
+              verfaelltAm: typeof parsed.verfaellt_am === 'string' ? parsed.verfaellt_am : undefined,
             })
             continue
           }
@@ -1523,13 +1840,8 @@ export function Messenger() {
         }
       }
 
-      // Eine Nachricht wird über ihre Umschlagkennung **oder** ihre logische
-      // Kennung angesprochen; welche der Absender nennen konnte, hängt an seinem
-      // Stand.
-      const findeAenderung = (m: { id: number; clientUuid?: string }) =>
-        editMap.get(m.id) ?? (m.clientUuid ? editUuidMap.get(m.clientUuid) : undefined)
-      const findeLoeschung = (m: { id: number; clientUuid?: string }) =>
-        deleteMap.get(m.id) ?? (m.clientUuid ? deleteUuidMap.get(m.clientUuid) : undefined)
+      const findeAenderung = (m: Bezugsziel) => aenderungen.finde(m)
+      const findeLoeschung = (m: Bezugsziel) => loeschungen.finde(m)
 
       // Apply Edits, Deletions, and Read Status
       // Gelöscht = gelöscht. Kein Originaltext wird aufbewahrt (Zero Knowledge).
@@ -1581,6 +1893,10 @@ export function Messenger() {
           isDelivered,
           isRead,
           status,
+          // Reaktionen aus diesem Fenster in die Zeile schreiben. Der Stand aus
+          // der Ablage kommt gleich beim Mischen dazu; `wendeReaktionenAn`
+          // trägt hier nur die neu gesehenen Meldungen nach.
+          reaktionen: wendeReaktionenAn(msg.reaktionen, reaktionen.finde(msg)),
         }
         // Ausblenden reicht nicht: was hier stehen bleibt, schreibt
         // `saveLocalMessages` gleich wieder auf die Platte — Text und Anhang
@@ -1591,10 +1907,19 @@ export function Messenger() {
       // Abort if the user has navigated to another chat in the meantime or a newer load completed
       if (activeMailboxIdRef.current !== currentMid || currentLoadSeqRef.current !== seq) return
 
-      // Der eigene Gesprächsanteil steht nur hier: eine Ratchet-Nachricht kann
-      // ihr Absender nicht öffnen. Ein Ersetzen statt Zusammenführen würde
-      // alles selbst Geschriebene bei jedem Abruf wegwischen.
-      const rohesLokal = activeContact ? await loadLocalMessages(currentMid) : []
+      /**
+       * Der eigene Gesprächsanteil steht nur hier: eine Ratchet-Nachricht kann
+       * ihr Absender nicht öffnen. Ein Ersetzen statt Zusammenführen würde
+       * alles selbst Geschriebene bei jedem Abruf wegwischen.
+       *
+       * **Seit 09/2026 auch für Gruppen.** Dort ließ sich die eigene Nachricht
+       * zwar immer schon lesen (Sender Keys sind symmetrisch), weshalb der
+       * lokale Verlauf verzichtbar schien. Verzichtbar war er aber nur für den
+       * Text: Markierungen, die Suche über alle Chats und die Übersicht „an
+       * mich" lesen alle aus dieser Ablage. Ohne sie endeten Gruppen in jeder
+       * dieser Ansichten als leere Stelle.
+       */
+      const rohesLokal = await loadLocalMessages(currentMid)
       if (activeMailboxIdRef.current !== currentMid || currentLoadSeqRef.current !== seq) return
 
       /**
@@ -1610,7 +1935,17 @@ export function Messenger() {
        */
       const lokalerVerlauf = rohesLokal.map((m) => {
         const loeschung = findeLoeschung(m)
-        return loeschung && !m.isDeleted ? tilgeInhalt(m, loeschung.deletedAt) : m
+        if (loeschung && !m.isDeleted) return tilgeInhalt(m, loeschung.deletedAt)
+        /**
+         * Reaktionen auf die **eigenen** Nachrichten stehen nur hier.
+         *
+         * Der eigene Gesprächsanteil kommt aus der Ablage, nicht aus der
+         * Mailbox — eine Ratchet-Nachricht kann ihr Absender nicht öffnen. Die
+         * Reaktion darauf liegt aber als Umschlag in der Mailbox. Ohne diesen
+         * Durchgang träfe sie also nie auf ihre Nachricht.
+         */
+        const neue = wendeReaktionenAn(m.reaktionen, reaktionen.finde(m))
+        return neue === m.reaktionen ? m : { ...m, reaktionen: neue }
       })
 
       const nochZuTilgen = new Map<string, { msg: ChatMessage; geloeschtAm: string }>()
@@ -1717,6 +2052,398 @@ export function Messenger() {
       if (isInitial && activeMailboxIdRef.current === currentMid) {
         setLoadingMessages(false)
       }
+    }
+  }
+
+  /**
+   * Reagieren — dieselbe Bewegung setzt und nimmt zurück.
+   *
+   * Die Wirkung wird **sofort lokal** angewendet, nicht erst beim nächsten
+   * Abruf: der eigene Steuerumschlag kommt nie zurück, weil ein Ratchet sein
+   * eigenes Erzeugnis nicht öffnet. Dieselbe Regel wie bei Bearbeiten und
+   * Löschen.
+   */
+  const handleReaktion = async (msg: ChatMessage, emoji: string) => {
+    if (!currentUserId || !blindMailboxId || msg.isDeleted) return
+    const { reaktionen: neu, aktion } = schalteReaktion(msg.reaktionen, emoji, currentUserId)
+
+    setMessages((prev) => {
+      const geaendert = prev.map((m) =>
+        m.id === msg.id || (msg.clientUuid && m.clientUuid === msg.clientUuid)
+          ? { ...m, reaktionen: neu }
+          : m,
+      )
+      sessionChatCache.set(blindMailboxId, geaendert.slice(-80))
+      return geaendert
+    })
+    void updateMessageInLocalStore(blindMailboxId, msg.id, { reaktionen: neu }).catch(() => {})
+    vergissMailbox(blindMailboxId)
+
+    try {
+      await sendE2eeControlMessage({
+        type: 'reaction',
+        ...bezugFelder(msg),
+        emoji,
+        aktion,
+        actor_id: currentUserId,
+        zeitpunkt: new Date().toISOString(),
+      })
+    } catch {
+      // Eine Reaktion, die lokal steht und nie ankommt, ist eine Lüge — also
+      // wird sie zurückgenommen und gesagt, dass es nicht geklappt hat.
+      const zurueck = schalteReaktion(neu, emoji, currentUserId).reaktionen
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === msg.id || (msg.clientUuid && m.clientUuid === msg.clientUuid)
+            ? { ...m, reaktionen: zurueck }
+            : m,
+        ),
+      )
+      void updateMessageInLocalStore(blindMailboxId, msg.id, { reaktionen: zurueck }).catch(() => {})
+      toast.error('Die Reaktion konnte nicht gesendet werden.')
+    }
+  }
+
+  /** Antworten: den Zitatkopf über die Eingabe setzen und dorthin springen. */
+  const handleAntworten = (msg: ChatMessage) => {
+    if (!msg.clientUuid) {
+      // Ohne logische Kennung gäbe es nichts, worauf das Zitat zeigen könnte.
+      toast.error('Auf diese Nachricht lässt sich nicht antworten.')
+      return
+    }
+    setAntwortAuf({
+      clientUuid: msg.clientUuid,
+      absenderId: msg.senderId,
+      absenderName: msg.isSelf ? user?.username : msg.senderName || activeContact?.username,
+      auszug: auszugFuerZitat(msg),
+    })
+    chatInputRef.current?.focus()
+  }
+
+  /** Markieren — bleibt auf diesem Gerät, geht nie über den Server. */
+  const handleMarkieren = (msg: ChatMessage) => {
+    if (!blindMailboxId) return
+    const neu = !msg.istMarkiert
+    setMessages((prev) => {
+      const geaendert = prev.map((m) => (m.id === msg.id ? { ...m, istMarkiert: neu } : m))
+      sessionChatCache.set(blindMailboxId, geaendert.slice(-80))
+      return geaendert
+    })
+    void updateMessageInLocalStore(blindMailboxId, msg.id, { istMarkiert: neu }).catch(() => {})
+    vergissMailbox(blindMailboxId)
+    toast.success(neu ? 'Markiert.' : 'Markierung entfernt.')
+  }
+
+  /** Text in die Zwischenablage. */
+  const handleKopieren = async (msg: ChatMessage) => {
+    if (!msg.text) return
+    try {
+      await navigator.clipboard.writeText(msg.text)
+      toast.success('Text kopiert.')
+    } catch {
+      toast.error('Kopieren wurde vom Browser abgelehnt.')
+    }
+  }
+
+  /**
+   * Zu einer Nachricht springen.
+   *
+   * Nicht animiert: durch tausend Zeilen zu scrollen dauert und bringt nichts.
+   * Direkt setzen, dann kurz aufleuchten lassen — das Aufleuchten ist die
+   * Antwort auf „wo bin ich jetzt".
+   */
+  const springeZu = (clientUuid: string) => {
+    const ziel = document.querySelector<HTMLElement>(`[data-nachricht="${CSS.escape(clientUuid)}"]`)
+    if (!ziel) {
+      toast.error('Diese Nachricht liegt nicht mehr auf diesem Gerät.')
+      return
+    }
+    ziel.scrollIntoView({ block: 'center' })
+    setHervorgehoben(clientUuid)
+    window.setTimeout(() => setHervorgehoben((v) => (v === clientUuid ? null : v)), 1600)
+  }
+
+  /** Auswahlmodus: ein Haken je Zeile, die Aktionen unten. */
+  const handleAuswahlUmschalten = (msg: ChatMessage) => {
+    const schluessel = msg.clientUuid || `#${msg.id}`
+    setGewaehlteUuids((v) =>
+      v.includes(schluessel) ? v.filter((x) => x !== schluessel) : [...v, schluessel],
+    )
+  }
+
+  const beendeAuswahl = () => {
+    setAuswahlModus(false)
+    setGewaehlteUuids([])
+  }
+
+  const gewaehlteNachrichten = () =>
+    messages.filter((m) => gewaehlteUuids.includes(m.clientUuid || `#${m.id}`))
+
+  /** Mehrere Texte am Stück in die Zwischenablage, in Reihenfolge des Verlaufs. */
+  const handleAuswahlKopieren = async () => {
+    const text = gewaehlteNachrichten()
+      .filter((m) => m.text && !m.isDeleted)
+      .map((m) => m.text)
+      .join('\n')
+    if (!text) {
+      toast.error('In der Auswahl steht kein Text.')
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(text)
+      toast.success('Text kopiert.')
+      beendeAuswahl()
+    } catch {
+      toast.error('Kopieren wurde vom Browser abgelehnt.')
+    }
+  }
+
+  /**
+   * Mehrere löschen.
+   *
+   * Der Reihe nach über denselben Weg wie eine einzelne Nachricht: erst die
+   * Gegenseite, dann Server, dann dieses Gerät. Nebenläufig ginge schneller und
+   * würde beim Netzabbruch einen halb geräumten Zustand hinterlassen.
+   */
+  const handleAuswahlLoeschen = async () => {
+    const eigene = gewaehlteNachrichten().filter((m) => m.isSelf && !m.isDeleted)
+    if (!eigene.length) return
+    beendeAuswahl()
+    for (const m of eigene) await handleDeleteMessage(m)
+  }
+
+  /** Alle Chats, in die sich weiterleiten lässt — zuletzt genutzte zuerst. */
+  const weiterleitungsZiele = useMemo<
+    (Weiterleitungsziel & { avatarUrl?: string | null; istGruppe?: boolean })[]
+  >(() => {
+    const ziele: (Weiterleitungsziel & { avatarUrl?: string | null; istGruppe?: boolean })[] = []
+    for (const g of groups) {
+      const mid = groupMailboxMap[g.id]
+      if (mid) ziele.push({ blindMailboxId: mid, groupId: g.id, name: g.name, istGruppe: true })
+    }
+    for (const c of contactsList) {
+      const mid = contactMailboxMap[c.userId]
+      if (!mid || mid === blindMailboxId) continue
+      ziele.push({
+        blindMailboxId: mid,
+        recipientId: c.userId,
+        name: c.username,
+        avatarUrl: c.avatarUrl,
+      })
+    }
+    // Angeheftete zuerst — das sind die Chats, die jemand selbst als wichtig
+    // markiert hat, und meistens leitet man an dieselben zwei Leute weiter.
+    return ziele.sort((a, b) => {
+      const pa = pinnedChats.indexOf(a.blindMailboxId)
+      const pb = pinnedChats.indexOf(b.blindMailboxId)
+      if (pa !== pb) return (pa < 0 ? 99 : pa) - (pb < 0 ? 99 : pb)
+      return a.name.localeCompare(b.name)
+    })
+  }, [groups, contactsList, groupMailboxMap, contactMailboxMap, blindMailboxId, pinnedChats])
+
+  /**
+   * Weiterleiten heißt neu verschlüsseln.
+   *
+   * Medien müssen wirklich noch einmal hoch: ein Anhang ist an Absender **und**
+   * Mailbox gebunden und geht in einem anderen Gespräch nicht auf. Das dauert,
+   * deshalb der Fortschritt.
+   */
+  const handleWeiterleiten = async (ziele: Weiterleitungsziel[]) => {
+    const auswahl = weiterzuleiten
+    if (!auswahl?.length || !currentUserId || !blindMailboxId) return
+    let gescheitert = 0
+    try {
+      for (const ziel of ziele) {
+        for (const msg of auswahl) {
+          try {
+            const inhalt = await baueWeiterleitung(
+              msg,
+              medienBindung(msg),
+              ziel,
+              currentUserId,
+              setWlFortschritt,
+            )
+            await handleSendMessage({
+              text: inhalt.text || '',
+              note: inhalt.noteAttachment as NoteAttachment | undefined,
+              cal: inhalt.calendarAttachment as CalendarAttachment | undefined,
+              sticker: inhalt.stickerAttachment as StickerAttachment | undefined,
+              storyReply: inhalt.storyReply as StoryReplyAttachment | undefined,
+              img: inhalt.imageAttachment as ImageAttachment | undefined,
+              file: inhalt.fileAttachment as FileAttachment | undefined,
+              audio: inhalt.audioAttachment as AudioAttachment | undefined,
+              weitergeleitet: true,
+              antwortAuf: null,
+              ziel,
+            })
+          } catch {
+            gescheitert++
+          }
+        }
+      }
+    } finally {
+      setWlFortschritt(null)
+    }
+    setWeiterzuleiten(null)
+    beendeAuswahl()
+    if (gescheitert) toast.error(`${gescheitert} Nachricht(en) konnten nicht weitergeleitet werden.`)
+    else toast.success(ziele.length === 1 ? 'Weitergeleitet.' : `An ${ziele.length} Chats weitergeleitet.`)
+  }
+
+  /** Ob ich in dieser Gruppe anheften darf — vom Server entschieden. */
+  const darfAnheften = Boolean(activeGroup?.can_pin_messages)
+
+  /**
+   * Eine Nachricht über den Verlauf heften.
+   *
+   * Dieselbe Bauart wie `@everyone`: der Server kann den Inhalt nicht lesen und
+   * deshalb nicht prüfen, wer was anheftet. Also entscheidet der **empfangende**
+   * Client anhand der Rechte des Anheftenden, ob die Leiste erscheint.
+   */
+  const handleAnheften = async (msg: ChatMessage) => {
+    if (!activeGroup || !msg.clientUuid) return
+    if (!darfAnheften) {
+      toast.error('Dafür fehlt dir das Recht in dieser Gruppe.')
+      return
+    }
+    const loesen = angeheftet?.clientUuid === msg.clientUuid
+    setAngeheftet(loesen ? null : msg)
+    try {
+      await sendE2eeControlMessage({
+        type: 'pin_message',
+        ...bezugFelder(msg),
+        aktion: loesen ? 'loesen' : 'anheften',
+        actor_id: currentUserId,
+        zeitpunkt: new Date().toISOString(),
+      })
+      toast.success(loesen ? 'Nicht mehr angeheftet.' : 'Angeheftet.')
+    } catch {
+      setAngeheftet(loesen ? msg : null)
+      toast.error('Das Anheften konnte nicht gesendet werden.')
+    }
+  }
+
+  /**
+   * Die Verfallsfrist dieses Chats umstellen.
+   *
+   * Keine heimliche Änderung: der Umschlag geht an die Gegenseite, beide Seiten
+   * bekommen dieselbe Systemzeile in den Verlauf. Scheitert das Senden, bleibt
+   * die alte Frist stehen — eine Frist, die nur hier gilt, wäre eine Lüge über
+   * das, was beim Gegenüber passiert.
+   */
+  const handleVerfallWaehlen = async (sekunden: number) => {
+    if (!blindMailboxId || sekunden === verfallSekunden) {
+      setVerfallOffen(false)
+      return
+    }
+    const vorher = verfallSekunden
+    setVerfallSekunden(sekunden)
+    setzeVerfallsfrist(blindMailboxId, sekunden)
+    setVerfallOffen(false)
+    try {
+      await sendE2eeControlMessage({
+        type: 'retention',
+        dauer: sekunden,
+        actor_id: currentUserId,
+        zeitpunkt: new Date().toISOString(),
+      })
+      zeigeSystemzeile(
+        sekunden > 0
+          ? `Du hast eingestellt: Nachrichten verschwinden nach ${stufenLabel(sekunden)}.`
+          : 'Du hast verschwindende Nachrichten ausgeschaltet.',
+      )
+    } catch {
+      setVerfallSekunden(vorher)
+      setzeVerfallsfrist(blindMailboxId, vorher)
+      toast.error('Die Umstellung konnte nicht gesendet werden.')
+    }
+  }
+
+  /** Sucht im offenen Chat, entprellt durch die Suchleiste. */
+  const handleSuchen = useCallback(
+    (frage: string) => {
+      if (!blindMailboxId) return
+      if (!frage.trim()) {
+        setSuchTreffer([])
+        setSuchIndex(0)
+        setSucheGesperrt(false)
+        return
+      }
+      void sucheImChat(blindMailboxId, frage).then(({ treffer, gesperrt }) => {
+        setSuchTreffer(treffer)
+        setSuchIndex(0)
+        setSucheGesperrt(gesperrt)
+        if (treffer[0]?.clientUuid) springeZu(treffer[0].clientUuid)
+      })
+    },
+    [blindMailboxId],
+  )
+
+  const blaettereTreffer = (richtung: 1 | -1) => {
+    if (!suchTreffer.length) return
+    const naechster = (suchIndex + richtung + suchTreffer.length) % suchTreffer.length
+    setSuchIndex(naechster)
+    const ziel = suchTreffer[naechster]
+    if (ziel.clientUuid) springeZu(ziel.clientUuid)
+  }
+
+  /** Öffnet einen Treffer aus der Ansicht über alle Chats. */
+  const oeffneTreffer = async (treffer: Treffer) => {
+    setUeberall('aus')
+    const meta = mailboxDirectory[treffer.blindMailboxId]
+    if (meta?.isGroup && meta.groupId) {
+      const gruppe = groups.find((g) => g.id === meta.groupId)
+      if (gruppe) {
+        setActiveGroup(gruppe)
+        setActiveContact(null)
+      }
+    } else if (meta?.userId) {
+      const kontakt = contactsList.find((c) => c.userId === meta.userId)
+      if (kontakt) {
+        setActiveContact(kontakt)
+        setActiveGroup(null)
+      }
+    }
+    // Der Verlauf muss erst stehen, bevor der Anker im DOM liegt.
+    if (treffer.clientUuid) {
+      const uuid = treffer.clientUuid
+      window.setTimeout(() => springeZu(uuid), 400)
+    }
+  }
+
+  /**
+   * Die Ansicht über alle Chats öffnen — Suche, Markiertes oder „an mich".
+   *
+   * Dieselbe Durchsicht, drei Fragen. Bei gesetztem PIN kostet das Entsiegeln
+   * Rechenzeit, deshalb läuft es asynchron mit sichtbarem „wird durchgesehen".
+   */
+  const oeffneUeberall = async (welche: 'suche' | 'markiert' | 'anMich', frage = '') => {
+    setUeberall(welche)
+    setUeberallFrage(frage)
+    setUeberallChats([])
+    setUeberallLaeuft(true)
+    setUeberallGesperrt(false)
+    try {
+      const ergebnis =
+        welche === 'suche'
+          ? await sucheUeberall(frage)
+          : welche === 'markiert'
+            ? await sammleMarkierte()
+            : await sammleAnMich(currentUserId, (m, mid) => {
+                // Eine Antwort auf meine Nachricht zählt genauso wie eine
+                // Erwähnung: beides heißt „hier werde ich gebraucht".
+                const bezug = m.antwortAuf as { absenderId?: number } | undefined
+                if (bezug?.absenderId && Number(bezug.absenderId) === Number(currentUserId)) return true
+                // Dieselbe Empfängerprüfung wie im Verlauf: ob aus `@everyone`
+                // eine Erwähnung wird, entscheidet das Recht des Absenders.
+                const meta = mailboxDirectory[mid]
+                const gruppe = meta?.groupId ? groups.find((g) => g.id === meta.groupId) : null
+                return binIchGemeint(m, currentUserId, gruppe ?? null)
+              })
+      setUeberallChats(ergebnis.chats)
+      setUeberallGesperrt(ergebnis.gesperrt)
+    } finally {
+      setUeberallLaeuft(false)
     }
   }
 
@@ -1860,6 +2587,47 @@ export function Messenger() {
       toast.error('Fehler beim Löschen der Nachricht.')
     }
   }
+
+  /**
+   * Abgelaufene Zeilen wegräumen.
+   *
+   * Jede Seite tilgt bei sich lokal; beim Server räumt nur ab, wer selbst
+   * gesendet hat — niemand sonst darf das. Läuft still: ein Hinweis pro
+   * verschwundener Nachricht wäre genau das Gegenteil von „verschwunden".
+   */
+  useEffect(() => {
+    if (!blindMailboxId) return
+    let aktiv = true
+
+    const raeumeAuf = async () => {
+      const faellig = faelligeZeilen(messages)
+      if (!faellig.length || !aktiv) return
+      const jetzt = new Date().toISOString()
+      for (const msg of faellig) {
+        try {
+          if (msg.isSelf) await tilgeNachrichtBeimServer(blindMailboxId, msg)
+          await tilgeNachrichtLokal(blindMailboxId, msg, jetzt)
+        } catch {
+          // Was jetzt nicht wegging, geht beim nächsten Durchgang.
+        }
+      }
+      if (!aktiv) return
+      const weg = new Set(faellig.map((m) => m.id))
+      setMessages((prev) => {
+        const uebrig = prev.filter((m) => !weg.has(m.id))
+        sessionChatCache.set(blindMailboxId, uebrig.slice(-80))
+        return uebrig
+      })
+      vergissMailbox(blindMailboxId)
+    }
+
+    void raeumeAuf()
+    const takt = window.setInterval(() => void raeumeAuf(), 60_000)
+    return () => {
+      aktiv = false
+      window.clearInterval(takt)
+    }
+  }, [blindMailboxId, messages])
 
   // Real-time SSE event listener for zero-latency incoming messages & typing signals
   useEffect(() => {
@@ -2078,19 +2846,68 @@ export function Messenger() {
     }
   }, [messages])
 
+  /**
+   * Der Knopf „nach unten".
+   *
+   * Wer weiter oben liest, verliert sonst den Anschluss an das, was gerade
+   * hereinkommt. Beim Springen zu einem Suchtreffer ist er der Rückweg.
+   */
+  const [weitOben, setWeitOben] = useState(false)
+
+  /**
+   * Die Trennlinie „Neue Nachrichten".
+   *
+   * Der Zähler steht nur fest, solange der Chat noch nicht offen ist — mit dem
+   * Öffnen wird gelesen. Er wird deshalb beim Antippen der Zeile festgehalten
+   * und hier auf die erste noch ungelesene Nachricht umgerechnet.
+   */
+  const [trennerId, setTrennerId] = useState<number | null>(null)
+  const ungelesenBeimOeffnen = useRef(0)
+  const trennerGesetztFuer = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!blindMailboxId || !messages.length) return
+    if (trennerGesetztFuer.current === blindMailboxId) return
+    trennerGesetztFuer.current = blindMailboxId
+    const offen = ungelesenBeimOeffnen.current
+    ungelesenBeimOeffnen.current = 0
+    if (!offen) {
+      setTrennerId(null)
+      return
+    }
+    const fremde = messages.filter((m) => !m.isSelf && !m.isSystem)
+    const erste = fremde[Math.max(0, fremde.length - offen)]
+    setTrennerId(erste ? erste.id : null)
+  }, [blindMailboxId, messages])
+  useEffect(() => {
+    const container = scrollContainerRef.current
+    if (!container) return
+    const pruefe = () => {
+      setWeitOben(container.scrollHeight - container.scrollTop - container.clientHeight > 400)
+    }
+    pruefe()
+    container.addEventListener('scroll', pruefe, { passive: true })
+    return () => container.removeEventListener('scroll', pruefe)
+  }, [blindMailboxId])
+
   // 6. Send message (text, note, cal, img, audio, file, sticker)
-  const handleSendMessage = async (
-    customText?: string,
-    note?: NoteAttachment,
-    cal?: CalendarAttachment,
-    img?: ImageAttachment,
-    audio?: AudioAttachment,
-    file?: FileAttachment,
-    sticker?: StickerAttachment,
-    storyReply?: StoryReplyAttachment,
-    videoNote?: VideoNoteAufnahme,
-    videoUrl?: string
-  ) => {
+  const handleSendMessage = async (auftrag: SendeAuftrag = {}) => {
+    const {
+      text: customText,
+      note,
+      cal,
+      img,
+      audio,
+      file,
+      sticker,
+      storyReply,
+      videoNote,
+      videoUrl,
+      weitergeleitet,
+    } = auftrag
+    // Ohne ausdrückliche Angabe gilt der Zitatkopf über der Eingabe.
+    const bezug = auftrag.antwortAuf !== undefined ? auftrag.antwortAuf : antwortAuf
+
     // If currently editing a message, redirect to edit handler
     if (editingMessage) {
       const textToSave = customText !== undefined ? customText : inputText
@@ -2143,6 +2960,10 @@ export function Messenger() {
           }
         : undefined,
       videoUrl,
+      antwortAuf: bezug || undefined,
+      weitergeleitet: weitergeleitet || undefined,
+      ...erwaehnungsFelder(rawText),
+      verfaelltAm: berechneVerfall(verfallSekunden),
       isDelivered: false,
       isRead: false,
       status: 'queued',
@@ -2157,6 +2978,19 @@ export function Messenger() {
     setInputText('')
     setSelectedImage(null)
     setStagedFile(null)
+    setAntwortAuf(null)
+    setErwaehnungsVorschlaege([])
+    // Der Entwurf ist verschickt, also keiner mehr. Die wartende Entprellung
+    // muss mit weg, sonst schreibt sie den gerade gesendeten Text zurück.
+    if (entwurfUhr.current) clearTimeout(entwurfUhr.current)
+    entwurfOffen.current = null
+    void speichereEntwurf(targetBlindMailboxId, '').catch(() => {})
+    setEntwuerfe((v) => {
+      if (!v[targetBlindMailboxId]) return v
+      const neu = { ...v }
+      delete neu[targetBlindMailboxId]
+      return neu
+    })
     justSentRef.current = true
     lastTypingSentRef.current = 0
 
@@ -2187,12 +3021,20 @@ export function Messenger() {
         }
       }
 
+      const erwaehnt = erwaehnungsFelder(rawText)
       const payloadObj: Record<string, unknown> = {
         client_uuid: clientUuid,
         sender_id: currentUserId,
         sender_name: user?.username || 'Ich',
         text: rawText,
         timestamp: new Date().toISOString(),
+        // Nur setzen, was es gibt: ein Umschlag voller `undefined` kostet
+        // Bytes, und jedes Byte reist verschlüsselt mit.
+        ...(bezug ? { antwort_auf: bezug } : {}),
+        ...(weitergeleitet ? { weitergeleitet: true } : {}),
+        ...(erwaehnt.erwaehnungen?.length ? { erwaehnungen: erwaehnt.erwaehnungen } : {}),
+        ...(erwaehnt.erwaehntAlle ? { erwaehnt_alle: true } : {}),
+        ...(optimisticMessage.verfaelltAm ? { verfaellt_am: optimisticMessage.verfaelltAm } : {}),
       }
 
       let finalImg: ImageAttachment | undefined = undefined
@@ -2543,10 +3385,13 @@ export function Messenger() {
           reader.onload = () => {
             const dataUrl = reader.result as string
             if (dataUrl) {
-              handleSendMessage('', undefined, undefined, undefined, {
-                dataUrl,
-                durationSeconds: Math.max(1, duration),
-                mimeType: mime,
+              handleSendMessage({
+                text: '',
+                audio: {
+                  dataUrl,
+                  durationSeconds: Math.max(1, duration),
+                  mimeType: mime,
+                },
               })
             }
           }
@@ -3039,6 +3884,213 @@ export function Messenger() {
 
   const isChatOpen = Boolean(activeContact || activeGroup)
 
+  /**
+   * Anheften und Archivieren — beides bleibt auf diesem Gerät.
+   *
+   * Der Hinweis mit „Widerrufen" ist kein Schmuck: eine Wischgeste löst
+   * versehentlich aus, und ohne Rückweg wäre der Chat weg, ohne dass jemand
+   * wüsste wohin.
+   */
+  const handleAnheftenChat = (mid: string) => {
+    const war = pinnedChats.includes(mid)
+    const ergebnis = schalteAnheften(mid)
+    if (!ergebnis.ok) {
+      toast.error(`Höchstens ${PINS_MAX} Chats lassen sich anheften. Löse zuerst einen.`)
+      return
+    }
+    setWiderruf({
+      text: war ? 'Nicht mehr angeheftet.' : 'Angeheftet.',
+      zurueck: () => {
+        schalteAnheften(mid)
+      },
+    })
+  }
+
+  const handleArchivieren = (mid: string) => {
+    const war = archivedChats.includes(mid)
+    schalteArchiv(mid)
+    setWiderruf({
+      text: war ? 'Aus dem Archiv geholt.' : 'Archiviert.',
+      zurueck: () => {
+        schalteArchiv(mid)
+      },
+    })
+  }
+
+  /** Die Abzeichen rechts an einer Chatzeile — für Gruppen und Kontakte gleich. */
+  const zeilenAbzeichen = (mid: string | undefined) => {
+    if (!mid) return null
+    const unread = unreadCounts[mid] || 0
+    return (
+      <div className="flex items-center gap-1.5 shrink-0 ml-2">
+        {pinnedChats.includes(mid) && <Pin className="w-3.5 h-3.5 text-primary/70" />}
+        {archivedChats.includes(mid) && <Archive className="w-3.5 h-3.5 text-on-surface-variant/50" />}
+        {isChatMuted(mid) && <BellOff className="w-3.5 h-3.5 text-on-surface-variant/50" />}
+        {mentionedChats.includes(mid) && (
+          <span
+            title="Du wurdest erwähnt"
+            className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full bg-primary/20 text-primary"
+          >
+            <AtSign className="w-3 h-3" />
+          </span>
+        )}
+        {unread > 0 && (
+          <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-primary text-on-primary min-w-[18px]">
+            {unread > 99 ? '99+' : unread}
+          </span>
+        )}
+      </div>
+    )
+  }
+
+  /** Die zweite Zeile: ein angefangener Entwurf schlägt jede Beschreibung. */
+  const zeilenVorschau = (mid: string | undefined, sonst: React.ReactNode) => {
+    const entwurf = mid ? entwuerfe[mid] : ''
+    if (!entwurf) return sonst
+    return (
+      <p className="text-[11px] truncate">
+        <span className="text-status-warning font-semibold">Entwurf: </span>
+        <span className="text-on-surface-variant/80">{entwurf}</span>
+      </p>
+    )
+  }
+
+  /** Eine Gruppenzeile, eingefasst in Wischgeste und Langdruckmenü. */
+  const zeichneGruppe = (g: ChatGroupItem) => {
+    const isSelected = activeGroup?.id === g.id
+    const gmid = groupMailboxMap[g.id]
+    const imArchiv = gmid ? archivedChats.includes(gmid) : false
+    return (
+      <ChatZeilenGeste
+        key={`g-${g.id}`}
+        angeheftet={gmid ? pinnedChats.includes(gmid) : false}
+        archiviert={imArchiv}
+        onAnheften={() => gmid && handleAnheftenChat(gmid)}
+        onArchivieren={() => gmid && handleArchivieren(gmid)}
+        onMenue={() => gmid && setZeilenMenue({ mid: gmid, name: g.name })}
+      >
+        <button
+          type="button"
+          onClick={() => {
+            setActiveGroup(g)
+            setActiveContact(null)
+            if (gmid) {
+              ungelesenBeimOeffnen.current = unreadCounts[gmid] || 0
+              trennerGesetztFuer.current = null
+              markAsRead(gmid)
+            }
+          }}
+          className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all ${
+            isSelected
+              ? 'bg-primary/15 border border-primary/30 shadow-xs'
+              : 'hover:bg-surface-container-high/60 border border-transparent'
+          } ${imArchiv ? 'opacity-60' : ''}`}
+        >
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <div className="w-9 h-9 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs shrink-0">
+              {g.avatar_url ? (
+                <img src={g.avatar_url} alt="" className="w-full h-full rounded-full object-cover" />
+              ) : (
+                <UsersRound className="w-4 h-4" />
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-xs font-semibold text-primary truncate">{g.name}</span>
+                <span className="text-[10px] text-on-surface-variant/60 shrink-0">{g.member_count} M.</span>
+              </div>
+              {zeilenVorschau(
+                gmid,
+                <p className="text-[11px] text-on-surface-variant/80 truncate">
+                  {g.description || 'Verschlüsselte Gruppe'}
+                </p>,
+              )}
+            </div>
+          </div>
+          {zeilenAbzeichen(gmid)}
+        </button>
+      </ChatZeilenGeste>
+    )
+  }
+
+  /** Eine Kontaktzeile. */
+  const zeichneKontakt = (c: (typeof contactsList)[number]) => {
+    const isSelected = activeContact?.userId === c.userId
+    const cmid = contactMailboxMap[c.userId]
+    const isUserBlocked = isBlocked(c.userId)
+    const imArchiv = cmid ? archivedChats.includes(cmid) : false
+    return (
+      <ChatZeilenGeste
+        key={c.listKey}
+        angeheftet={cmid ? pinnedChats.includes(cmid) : false}
+        archiviert={imArchiv}
+        onAnheften={() => cmid && handleAnheftenChat(cmid)}
+        onArchivieren={() => cmid && handleArchivieren(cmid)}
+        onMenue={() => cmid && setZeilenMenue({ mid: cmid, name: c.username })}
+      >
+        <button
+          type="button"
+          onClick={() => {
+            setActiveContact(c)
+            setActiveGroup(null)
+            if (cmid) {
+              ungelesenBeimOeffnen.current = unreadCounts[cmid] || 0
+              trennerGesetztFuer.current = null
+              markAsRead(cmid)
+            }
+          }}
+          className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all ${
+            isSelected
+              ? 'bg-primary/15 border border-primary/30 shadow-xs'
+              : 'hover:bg-surface-container-high/60 border border-transparent'
+          } ${imArchiv ? 'opacity-60' : ''}`}
+        >
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <div className="relative shrink-0">
+              <Avatar src={c.avatarUrl} name={c.username} size="sm" />
+              <StatusDot status={c.status} size="sm" className="absolute bottom-0 right-0" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-semibold text-primary truncate">{c.username}</span>
+                {isUserBlocked && (
+                  <span className="text-[9px] px-1 rounded bg-status-error/15 text-status-error font-medium">
+                    Blockiert
+                  </span>
+                )}
+                {c.isPublicUser && !c.isFriend && !c.teamName && !isUserBlocked && (
+                  <span className="text-[9px] px-1.5 py-0.2 rounded-md bg-primary/10 text-primary font-medium flex items-center gap-0.5">
+                    <Globe className="w-2.5 h-2.5" />
+                    <span>Öffentlich</span>
+                  </span>
+                )}
+                <DeviceBadge deviceType={c.deviceType} />
+              </div>
+              {zeilenVorschau(
+                cmid,
+                <>
+                  {c.teamName && (
+                    <p className="text-[10px] text-tertiary truncate flex items-center gap-1">
+                      <UsersRound className="w-2.5 h-2.5" />
+                      <span>{c.teamName}</span>
+                    </p>
+                  )}
+                  {c.isPublicUser && !c.isFriend && !c.teamName && (
+                    <p className="text-[10px] text-on-surface-variant/70 truncate">E2EE Chat bereit</p>
+                  )}
+                  {c.activityLabel && !c.teamName && (
+                    <p className="text-[10px] text-on-surface-variant/80 truncate">{c.activityLabel}</p>
+                  )}
+                </>,
+              )}
+            </div>
+          </div>
+          {zeilenAbzeichen(cmid)}
+        </button>
+      </ChatZeilenGeste>
+    )
+  }
+
   // Gesperrt wird der Verlauf nicht überdeckt, sondern gar nicht erst gebaut.
   // Er stünde auch nicht zur Verfügung: die lokalen Ablagen geben ohne
   // Schlüssel nichts heraus (siehe `services/lokaleVersiegelung`).
@@ -3370,11 +4422,57 @@ export function Messenger() {
             </div>
           )}
 
+          {/* Der Rückweg nach einer Wischgeste. Unten, weil dort der Daumen ist. */}
+          {widerruf && (
+            <div className="shrink-0 mx-2 mb-1 px-3 py-2 rounded-xl bg-surface-container-high border border-outline-variant/30 flex items-center justify-between gap-2">
+              <span className="text-xs text-on-surface truncate">{widerruf.text}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  widerruf.zurueck()
+                  setWiderruf(null)
+                }}
+                className="min-h-11 px-3 text-xs font-semibold text-primary hover:bg-surface-container-highest rounded-lg transition-colors shrink-0"
+              >
+                Widerrufen
+              </button>
+            </div>
+          )}
+
           {/* List Scroll Area */}
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
             {/* View 1: Standard Chats Mode */}
             {mobileNavTab === 'chats' && (
               <>
+                {/* Das Archiv. Ein weggeräumter Chat bleibt weggeräumt, auch
+                    wenn neue Nachrichten kommen; sein Ungelesen-Zähler steht
+                    deshalb hier und nicht in der Hauptliste. */}
+                {archivZahl > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setArchivOffen((offen) => !offen)}
+                    className="w-full min-h-11 px-2.5 py-2 mb-1 flex items-center gap-2.5 rounded-xl text-left hover:bg-surface-container-high/60 transition-colors"
+                    aria-expanded={archivOffen}
+                  >
+                    <span className="w-9 h-9 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center shrink-0">
+                      <Archive className="w-4 h-4" />
+                    </span>
+                    <span className="min-w-0 flex-1 text-xs font-semibold text-on-surface-variant">
+                      Archiviert ({archivZahl})
+                    </span>
+                    {archivUngelesen > 0 && (
+                      <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-on-surface-variant/20 text-on-surface-variant min-w-[18px]">
+                        {archivUngelesen > 99 ? '99+' : archivUngelesen}
+                      </span>
+                    )}
+                    <ChevronDown
+                      className={`w-4 h-4 text-on-surface-variant/70 shrink-0 transition-transform ${
+                        archivOffen ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </button>
+                )}
+
                 {/* Groups Section */}
                 {(filteredGroups.length > 0 || filterTab === 'all' || filterTab === 'groups') && (
                   <div className="space-y-1 mb-2">
@@ -3393,61 +4491,10 @@ export function Messenger() {
                         </button>
                       </div>
                     </div>
-                    {filteredGroups.map((g) => {
-                      const isSelected = activeGroup?.id === g.id
-                      const gmid = groupMailboxMap[g.id]
-                      const unread = gmid ? (unreadCounts[gmid] || 0) : 0
-                      const isMuted = gmid ? isChatMuted(gmid) : false
-                      return (
-                        <button
-                          key={`g-${g.id}`}
-                          type="button"
-                          onClick={() => {
-                            setActiveGroup(g)
-                            setActiveContact(null)
-                            if (gmid) markAsRead(gmid)
-                          }}
-                          className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all ${
-                            isSelected
-                              ? 'bg-primary/15 border border-primary/30 shadow-xs'
-                              : 'hover:bg-surface-container-high/60 border border-transparent'
-                          }`}
-                        >
-                          <div className="flex items-center gap-3 min-w-0 flex-1">
-                            <div className="w-9 h-9 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs shrink-0">
-                              {g.avatar_url ? (
-                                <img src={g.avatar_url} alt="" className="w-full h-full rounded-full object-cover" />
-                              ) : (
-                                <UsersRound className="w-4 h-4" />
-                              )}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center justify-between gap-1">
-                                <span className="text-xs font-semibold text-primary truncate">
-                                  {g.name}
-                                </span>
-                                <span className="text-[10px] text-on-surface-variant/60 shrink-0">
-                                  {g.member_count} M.
-                                </span>
-                              </div>
-                              <p className="text-[11px] text-on-surface-variant/80 truncate">
-                                {g.description || 'Verschlüsselte Gruppe'}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                            {isMuted && (
-                              <BellOff className="w-3.5 h-3.5 text-on-surface-variant/50" />
-                            )}
-                            {unread > 0 && (
-                              <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-primary text-on-primary min-w-[18px]">
-                                {unread > 99 ? '99+' : unread}
-                              </span>
-                            )}
-                          </div>
-                        </button>
-                      )
-                    })}
+                    {(archivOffen
+                      ? [...gruppenNachArchiv.sichtbar, ...gruppenNachArchiv.imArchiv]
+                      : gruppenNachArchiv.sichtbar
+                    ).map((g) => zeichneGruppe(g))}
                   </div>
                 )}
 
@@ -3460,81 +4507,10 @@ export function Messenger() {
                         <span className="text-[10px]">{filteredContacts.length}</span>
                       </div>
                     )}
-                    {filteredContacts.map((c) => {
-                      const isSelected = activeContact?.userId === c.userId
-                      const cmid = contactMailboxMap[c.userId]
-                      const unread = cmid ? (unreadCounts[cmid] || 0) : 0
-                      const isMuted = cmid ? isChatMuted(cmid) : false
-                      const isUserBlocked = isBlocked(c.userId)
-                      return (
-                        <button
-                          key={c.listKey}
-                          type="button"
-                          onClick={() => {
-                            setActiveContact(c)
-                            setActiveGroup(null)
-                            if (cmid) markAsRead(cmid)
-                          }}
-                          className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all ${
-                            isSelected
-                              ? 'bg-primary/15 border border-primary/30 shadow-xs'
-                              : 'hover:bg-surface-container-high/60 border border-transparent'
-                          }`}
-                        >
-                          <div className="flex items-center gap-3 min-w-0 flex-1">
-                            <div className="relative shrink-0">
-                              <Avatar src={c.avatarUrl} name={c.username} size="sm" />
-                              <StatusDot status={c.status} size="sm" className="absolute bottom-0 right-0" />
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-xs font-semibold text-primary truncate">
-                                  {c.username}
-                                </span>
-                                {isUserBlocked && (
-                                  <span className="text-[9px] px-1 rounded bg-status-error/15 text-status-error font-medium">
-                                    Blockiert
-                                  </span>
-                                )}
-                                {c.isPublicUser && !c.isFriend && !c.teamName && !isUserBlocked && (
-                                  <span className="text-[9px] px-1.5 py-0.2 rounded-md bg-primary/10 text-primary font-medium flex items-center gap-0.5">
-                                    <Globe className="w-2.5 h-2.5" />
-                                    <span>Öffentlich</span>
-                                  </span>
-                                )}
-                                <DeviceBadge deviceType={c.deviceType} />
-                              </div>
-                              {c.teamName && (
-                                <p className="text-[10px] text-tertiary truncate flex items-center gap-1">
-                                  <UsersRound className="w-2.5 h-2.5" />
-                                  <span>{c.teamName}</span>
-                                </p>
-                              )}
-                              {c.isPublicUser && !c.isFriend && !c.teamName && (
-                                <p className="text-[10px] text-on-surface-variant/70 truncate flex items-center gap-1">
-                                  <span>E2EE Chat bereit</span>
-                                </p>
-                              )}
-                              {c.activityLabel && !c.teamName && (
-                                <p className="text-[10px] text-on-surface-variant/80 truncate">
-                                  {c.activityLabel}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                            {isMuted && (
-                              <BellOff className="w-3.5 h-3.5 text-on-surface-variant/50" />
-                            )}
-                            {unread > 0 && (
-                              <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-primary text-on-primary min-w-[18px]">
-                                {unread > 99 ? '99+' : unread}
-                              </span>
-                            )}
-                          </div>
-                        </button>
-                      )
-                    })}
+                    {(archivOffen
+                      ? [...kontakteNachArchiv.sichtbar, ...kontakteNachArchiv.imArchiv]
+                      : kontakteNachArchiv.sichtbar
+                    ).map((c) => zeichneKontakt(c))}
                   </div>
                 )}
 
@@ -3543,6 +4519,36 @@ export function Messenger() {
                     Keine Kontakte oder Gruppen gefunden.
                   </p>
                 )}
+
+                {/* Über alle Chats hinweg suchen, Markiertes und „an mich". */}
+                <div className="pt-2 mt-1 border-t border-outline-variant/20 space-y-0.5">
+                  <button
+                    type="button"
+                    onClick={() => void oeffneUeberall('markiert')}
+                    className="w-full min-h-11 px-2.5 flex items-center gap-2.5 rounded-xl text-left text-xs text-on-surface-variant hover:bg-surface-container-high/60 transition-colors"
+                  >
+                    <Star className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>Markierte Nachrichten</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void oeffneUeberall('anMich')}
+                    className="w-full min-h-11 px-2.5 flex items-center gap-2.5 rounded-xl text-left text-xs text-on-surface-variant hover:bg-surface-container-high/60 transition-colors"
+                  >
+                    <AtSign className="w-4 h-4 text-primary shrink-0" />
+                    <span>@ und Antworten an mich</span>
+                  </button>
+                  {searchQuery.trim().length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => void oeffneUeberall('suche', searchQuery)}
+                      className="w-full min-h-11 px-2.5 flex items-center gap-2.5 rounded-xl text-left text-xs text-primary hover:bg-surface-container-high/60 transition-colors"
+                    >
+                      <Search className="w-4 h-4 shrink-0" />
+                      <span className="truncate">Nachrichten nach „{searchQuery.trim()}" durchsuchen</span>
+                    </button>
+                  )}
+                </div>
               </>
             )}
 
@@ -3824,8 +4830,9 @@ export function Messenger() {
 
 
           {/* Mobile WhatsApp-Style Bottom Navigation Bar (Chats, Aktuelles, Community) */}
+          {/* Höhe plus sichere Fläche, siehe die Eingabeleiste weiter unten. */}
           {!isChatOpen && (
-            <nav className="md:hidden shrink-0 h-14 border-t border-outline-variant/20 bg-surface-container/95 backdrop-blur flex items-center justify-around px-2 z-10">
+            <nav className="md:hidden shrink-0 h-14 box-content pb-[env(safe-area-inset-bottom)] border-t border-outline-variant/20 bg-surface-container/95 backdrop-blur flex items-center justify-around px-2 z-10">
               <button
                 type="button"
                 onClick={() => setMobileNavTab('chats')}
@@ -3944,8 +4951,83 @@ export function Messenger() {
 
           {isChatOpen ? (
             <>
+              {/* Die Auswahlleiste ersetzt die schwebenden Bedienelemente.
+                  Zähler und Abbrechen oben, die Aktionen unten in
+                  Daumenreichweite — am Telefon ist der obere Rand außer
+                  Reichweite, sobald man einhändig hält. */}
+              {auswahlModus && (
+                <>
+                  <div className="absolute top-2.5 left-3 right-3 z-40 flex items-center justify-between gap-2 px-3 py-2 rounded-full bg-surface-container-high/95 backdrop-blur-md border border-outline-variant/30 shadow-sm">
+                    <span className="text-xs font-semibold text-on-surface tabular-nums">
+                      {gewaehlteUuids.length} ausgewählt
+                    </span>
+                    <button
+                      type="button"
+                      onClick={beendeAuswahl}
+                      className="w-9 h-9 -mr-1.5 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container-highest transition-colors"
+                      aria-label="Auswahl beenden"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="absolute bottom-0 left-0 right-0 z-40 px-3 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] border-t border-outline-variant/30 bg-surface-container-low flex items-center justify-around">
+                    <button
+                      type="button"
+                      disabled={gewaehlteUuids.length === 0}
+                      onClick={() => {
+                        const auswahl = gewaehlteNachrichten().filter(istWeiterleitbar)
+                        if (!auswahl.length) {
+                          toast.error('An diesen Nachrichten ist nichts weiterzuleiten.')
+                          return
+                        }
+                        setWeiterzuleiten(auswahl)
+                      }}
+                      className="min-w-16 min-h-12 flex flex-col items-center justify-center gap-0.5 rounded-xl text-[10px] text-on-surface-variant hover:bg-surface-container-high disabled:opacity-40 transition-colors"
+                    >
+                      <Forward className="w-5 h-5" />
+                      <span>Weiterleiten</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={gewaehlteUuids.length === 0}
+                      onClick={() => void handleAuswahlKopieren()}
+                      className="min-w-16 min-h-12 flex flex-col items-center justify-center gap-0.5 rounded-xl text-[10px] text-on-surface-variant hover:bg-surface-container-high disabled:opacity-40 transition-colors"
+                    >
+                      <Copy className="w-5 h-5" />
+                      <span>Kopieren</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={gewaehlteUuids.length === 0}
+                      onClick={() => {
+                        for (const m of gewaehlteNachrichten()) handleMarkieren(m)
+                        beendeAuswahl()
+                      }}
+                      className="min-w-16 min-h-12 flex flex-col items-center justify-center gap-0.5 rounded-xl text-[10px] text-on-surface-variant hover:bg-surface-container-high disabled:opacity-40 transition-colors"
+                    >
+                      <Star className="w-5 h-5" />
+                      <span>Markieren</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!gewaehlteNachrichten().some((m) => m.isSelf && !m.isDeleted)}
+                      onClick={() => void handleAuswahlLoeschen()}
+                      className="min-w-16 min-h-12 flex flex-col items-center justify-center gap-0.5 rounded-xl text-[10px] text-destructive hover:bg-destructive/10 disabled:opacity-40 transition-colors"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                      <span>Löschen</span>
+                    </button>
+                  </div>
+                </>
+              )}
+
               {/* Floating Chat Controls (Header-free, maximal chat space) */}
-              <div className="absolute top-2.5 left-3 right-3 z-30 flex items-center justify-between pointer-events-none">
+              <div
+                className={`absolute top-2.5 left-3 right-3 z-30 flex items-center justify-between pointer-events-none ${
+                  auswahlModus || sucheOffen ? 'hidden' : ''
+                }`}
+              >
                 <div className="flex items-center gap-2 pointer-events-auto">
                   {/* Mobile Back Button */}
                   <button
@@ -4192,6 +5274,34 @@ export function Messenger() {
                   <Button
                     variant="ghost"
                     size="icon"
+                    onClick={() => setSucheOffen(true)}
+                    className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-primary shadow-xs"
+                    title="Im Chatverlauf suchen"
+                    aria-label="Im Chatverlauf suchen"
+                  >
+                    <Search className="w-4 h-4" />
+                  </Button>
+
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setVerfallOffen(true)}
+                    className={`h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 shadow-xs ${
+                      verfallSekunden > 0 ? 'text-primary' : 'text-on-surface-variant hover:text-primary'
+                    }`}
+                    title={
+                      verfallSekunden > 0
+                        ? `Nachrichten verschwinden nach ${stufenLabel(verfallSekunden)}`
+                        : 'Verschwindende Nachrichten'
+                    }
+                    aria-label="Verschwindende Nachrichten"
+                  >
+                    <Timer className="w-4 h-4" />
+                  </Button>
+
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     onClick={() => setIsWallpaperModalOpen(true)}
                     className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-primary shadow-xs"
                     title="Chat-Hintergrund anpassen"
@@ -4201,6 +5311,46 @@ export function Messenger() {
                   </Button>
                 </div>
               </div>
+
+              {/* Die angeheftete Nachricht der Gruppe.
+                  Ob sie erscheint, entscheidet das Recht des **Anheftenden** —
+                  geprüft beim Empfänger, weil der Server den Inhalt nicht lesen
+                  und die Regel deshalb nicht durchsetzen kann. */}
+              {angeheftet && !auswahlModus && !sucheOffen && (
+                <button
+                  type="button"
+                  onClick={() => angeheftet.clientUuid && springeZu(angeheftet.clientUuid)}
+                  className="absolute top-14 left-3 right-3 z-20 min-h-11 px-3 py-2 flex items-center gap-2.5 rounded-xl bg-surface-container-high/90 backdrop-blur-md border border-outline-variant/30 shadow-xs text-left"
+                >
+                  <Pin className="w-3.5 h-3.5 text-primary shrink-0" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[10px] font-semibold text-primary">Angeheftet</span>
+                    <span className="block text-[11px] text-on-surface-variant truncate">
+                      {angeheftet.text || auszugFuerZitat(angeheftet)}
+                    </span>
+                  </span>
+                  {darfAnheften && (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        void handleAnheften(angeheftet)
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter' && e.key !== ' ') return
+                        e.preventDefault()
+                        e.stopPropagation()
+                        void handleAnheften(angeheftet)
+                      }}
+                      className="w-11 h-11 -mr-2 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container-highest transition-colors shrink-0"
+                      aria-label="Nicht mehr anheften"
+                    >
+                      <X className="w-4 h-4" />
+                    </span>
+                  )}
+                </button>
+              )}
 
               {/* Message Thread Scroll Area */}
               <div
@@ -4246,465 +5396,77 @@ export function Messenger() {
                   return (
                     <React.Fragment key={msg.id}>
                       {showDateSeparator && (
-                        <div className="flex justify-center my-3 sticky top-2 z-10 pointer-events-none">
+                        <div className="flex justify-center my-3 pointer-events-none">
                           <span className="px-3.5 py-1 rounded-full text-[11px] font-semibold bg-surface-container/90 text-on-surface-variant backdrop-blur-md border border-outline-variant/30 shadow-xs">
                             {currentDateBadge}
                           </span>
                         </div>
                       )}
 
-                      <div
-                        className={`group flex flex-col ${msg.isSelf ? 'items-end' : 'items-start'}`}
-                      >
-                    <div
-                      className={`max-w-[85%] md:max-w-[70%] px-3.5 py-2 rounded-2xl text-xs break-words shadow-xs space-y-2 ${
-                        msg.isSelf
-                          ? 'bg-[#0c2e35] text-[#f0fdfa] rounded-br-xs border border-[#164e5c]/60 shadow-sm'
-                          : 'bg-surface-container-high text-on-surface rounded-bl-xs border border-outline-variant/20 shadow-xs'
-                      }`}
-                    >
-                      {/* Group sender name if in group and not self */}
-                      {activeGroup && !msg.isSelf && (
-                        <div className="text-[10px] font-bold text-tertiary">
-                          {msg.senderName || `Benutzer #${msg.senderId}`}
-                        </div>
-                      )}
-
-                      {/* Image Attachment */}
-                      {!msg.isDeleted && msg.imageAttachment && (
-                        <ChatMediaImage
-                          attachment={msg.imageAttachment}
-                          bindung={medienBindung(msg)}
-                          onViewImage={setViewingImage}
-                          isSelf={msg.isSelf}
-                        />
-                      )}
-
-                      {/* File Attachment Card */}
-                      {!msg.isDeleted && msg.fileAttachment && (
-                        <ChatMediaFile
-                          attachment={msg.fileAttachment}
-                          bindung={medienBindung(msg)}
-                          isSelf={msg.isSelf}
-                        />
-                      )}
-
-                      {/* Sticker Attachment */}
-                      {!msg.isDeleted && msg.stickerAttachment && (
-                        <div className="py-1">
-                          <div
-                            className="w-24 h-24 sm:w-28 sm:h-28 drop-shadow-md"
-                            dangerouslySetInnerHTML={{ __html: sanitizeSvg(msg.stickerAttachment.svg) }}
-                            title={msg.stickerAttachment.label}
-                          />
-                          <div className="text-[10px] opacity-60 text-center mt-1">{msg.stickerAttachment.label}</div>
-                        </div>
-                      )}
-
-                      {/* Audio / Voice Message Attachment (WhatsApp Style) */}
-                      {!msg.isDeleted && msg.audioAttachment && (
-                        <div
-                          className={`flex items-center gap-2.5 p-2 rounded-2xl min-w-[240px] max-w-[320px] ${
-                            msg.isSelf ? 'bg-black/20 text-white' : 'bg-surface-container-high/90 text-on-surface'
-                          }`}
-                        >
-                          {/* Sender Profile Picture on Left (WhatsApp-style: transitions to speed toggle button when playing) */}
-                          {playingAudioId === msg.id ? (
-                            <button
-                              type="button"
-                              onClick={cycleAudioPlaybackRate}
-                              className={`w-10 h-10 rounded-full font-bold text-xs shadow-sm flex items-center justify-center shrink-0 hover:scale-105 active:scale-95 transition-all ${
-                                msg.isSelf
-                                  ? 'bg-white text-[#0c2e35] hover:bg-white/90'
-                                  : 'bg-primary text-on-primary hover:opacity-90'
-                              }`}
-                              title="Wiedergabegeschwindigkeit ändern (1x / 1.5x / 2x)"
-                              aria-label="Wiedergabegeschwindigkeit ändern"
-                            >
-                              {audioPlaybackRate}x
-                            </button>
-                          ) : (
-                            <div
-                              className="relative shrink-0 w-10 h-10 rounded-full cursor-pointer"
-                              onClick={cycleAudioPlaybackRate}
-                              title="Wiedergabegeschwindigkeit ändern (1x / 1.5x / 2x)"
-                            >
-                              <Avatar
-                                src={msg.isSelf ? user?.avatar_url : (activeContact?.avatarUrl || null)}
-                                name={msg.isSelf ? (user?.username || 'Ich') : (msg.senderName || activeContact?.username || 'Benutzer')}
-                                size="md"
-                                className="w-10 h-10"
-                              />
-                              <button
-                                type="button"
-                                onClick={cycleAudioPlaybackRate}
-                                className={`absolute -bottom-1 -right-1 px-1 py-0.5 rounded-full font-bold text-[9px] shadow-xs border border-surface leading-none hover:scale-110 transition-transform ${
-                                  msg.isSelf
-                                    ? 'bg-white text-[#0c2e35]'
-                                    : 'bg-primary text-on-primary'
-                                }`}
-                                title="Wiedergabegeschwindigkeit ändern (1x / 1.5x / 2x)"
-                                aria-label="Wiedergabegeschwindigkeit ändern"
-                              >
-                                {audioPlaybackRate}x
-                              </button>
-                            </div>
-                          )}
-
-                          {/* Play / Pause Button */}
-                          <button
-                            type="button"
-                            onClick={() => void togglePlayAudio(msg.id, msg.audioAttachment!, medienBindung(msg))}
-                            className={`w-8 h-8 rounded-full shrink-0 shadow-xs flex items-center justify-center transition-all ${
-                              msg.isSelf
-                                ? 'bg-white text-[#0c2e35] hover:bg-white/90'
-                                : 'bg-primary text-on-primary hover:opacity-90'
-                            }`}
-                            aria-label={playingAudioId === msg.id ? 'Pause' : 'Abspielen'}
-                          >
-                            {playingAudioId === msg.id ? (
-                              <Pause className="w-3.5 h-3.5" />
-                            ) : (
-                              <Play className="w-3.5 h-3.5 translate-x-0.5" />
-                            )}
-                          </button>
-
-                          {/* Dynamic Audio Waveform with Click-to-Seek */}
-                          <div
-                            className="flex-1 min-w-[130px] space-y-1 cursor-pointer select-none"
-                            onClick={(e) =>
-                              void handleWaveformSeek(
-                                msg.id,
-                                msg.audioAttachment!,
-                                medienBindung(msg),
-                                e
-                              )
-                            }
-                            title="Klicken zum Spulen"
-                          >
-                            <div className="flex items-center gap-[2.5px] h-7 px-0.5">
-                              {getWaveformBars(msg.id).map((barH, bIdx) => {
-                                const count = 28
-                                const progress =
-                                  playingAudioId === msg.id && msg.audioAttachment!.durationSeconds > 0
-                                    ? audioCurrentTime / msg.audioAttachment!.durationSeconds
-                                    : 0
-                                const barProgress = bIdx / count
-                                const isPlayed = barProgress <= progress
-
-                                return (
-                                  <div
-                                    key={bIdx}
-                                    className={`flex-1 rounded-full transition-colors ${
-                                      isPlayed
-                                        ? msg.isSelf
-                                          ? 'bg-white'
-                                          : 'bg-primary'
-                                        : msg.isSelf
-                                        ? 'bg-white/35'
-                                        : 'bg-on-surface-variant/35'
-                                    }`}
-                                    style={{
-                                      height: `${Math.max(4, Math.round(barH * 24))}px`,
-                                      minWidth: '2px',
-                                      maxWidth: '4px',
-                                    }}
-                                  />
-                                )
-                              })}
-                            </div>
-
-                            <div className="flex justify-between items-center text-[10px] opacity-80 px-0.5">
-                              <span>
-                                {playingAudioId === msg.id
-                                  ? formatDuration(audioCurrentTime)
-                                  : formatDuration(msg.audioAttachment.durationSeconds)}
-                              </span>
-                              <span className="flex items-center gap-1 opacity-70">
-                                <Mic className="w-2.5 h-2.5" />
-                                <span>Sprachnachricht</span>
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Circular Video Note Attachment */}
-                      {!msg.isDeleted && msg.videoNoteAttachment && (
-                        <div className="py-1">
-                          <CircularVideoNotePlayer
-                            attachment={msg.videoNoteAttachment}
-                            bindung={medienBindung(msg)}
-                            videoUrl={msg.videoUrl}
-                          />
-                        </div>
-                      )}
-
-                      {/* Note Attachment Card */}
-                      {!msg.isDeleted && msg.noteAttachment && (
-                        <div
-                          className={`p-3 rounded-xl border text-xs shadow-sm space-y-2.5 ${
-                            msg.isSelf
-                              ? 'bg-slate-950/80 border-white/20 text-white'
-                              : 'bg-surface-container-lowest border-outline-variant/50 text-on-surface'
-                          }`}
-                        >
-                          <div
-                            className={`flex items-center justify-between gap-2 border-b pb-2 ${
-                              msg.isSelf ? 'border-white/15' : 'border-outline-variant/30'
-                            }`}
-                          >
-                            <div className="flex items-center gap-1.5 font-bold text-xs truncate">
-                              <StickyNote className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                              <span className="truncate text-white font-medium">{msg.noteAttachment.title || 'Notiz'}</span>
-                            </div>
-                            {(() => {
-                              const noteKey = `note_${msg.id}_${msg.noteAttachment.title}`
-                              const isImported = importedAttachmentIds.has(noteKey)
-                              return (
-                                <Button
-                                  type="button"
-                                  variant={msg.isSelf ? 'secondary' : 'primary'}
-                                  size="sm"
-                                  disabled={isImported}
-                                  onClick={() => void handleImportNote(msg.noteAttachment!, noteKey)}
-                                  className={`h-6 px-2.5 text-[10px] gap-1 shrink-0 rounded-full font-medium ${
-                                    isImported
-                                      ? 'opacity-60 cursor-default bg-white/10 text-white border-none'
-                                      : msg.isSelf
-                                      ? 'bg-white/20 hover:bg-white/30 text-white border-none'
-                                      : 'bg-primary text-on-primary hover:bg-primary/90'
-                                  }`}
-                                  title={isImported ? 'Bereits in eigene Notizen übernommen' : 'In eigene Notizen übernehmen'}
-                                >
-                                  {isImported ? <Check className="w-3 h-3 text-emerald-400" /> : <Download className="w-3 h-3" />}
-                                  <span>{isImported ? 'Übernommen' : 'Übernehmen'}</span>
-                                </Button>
-                              )
-                            })()}
-                          </div>
-                          <p className="whitespace-pre-wrap text-[11px] text-white/90 line-clamp-4 leading-relaxed font-sans">
-                            {msg.noteAttachment.content}
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Calendar Attachment Card */}
-                      {!msg.isDeleted && msg.calendarAttachment && (
-                        <div
-                          className={`p-3 rounded-xl border text-xs shadow-sm space-y-2.5 ${
-                            msg.isSelf
-                              ? 'bg-slate-950/80 border-white/20 text-white'
-                              : 'bg-surface-container-lowest border-outline-variant/50 text-on-surface'
-                          }`}
-                        >
-                          <div
-                            className={`flex items-center justify-between gap-2 border-b pb-2 ${
-                              msg.isSelf ? 'border-white/15' : 'border-outline-variant/30'
-                            }`}
-                          >
-                            <div className="flex items-center gap-1.5 font-bold text-xs truncate">
-                              <div className="w-5 h-5 rounded-md bg-cyan-500/20 flex items-center justify-center shrink-0">
-                                <CalendarIcon className="w-3.5 h-3.5 text-cyan-300" />
-                              </div>
-                              <span className="truncate text-white font-medium">{msg.calendarAttachment.title || 'Termin'}</span>
-                            </div>
-                            {(() => {
-                              const calKey = `cal_${msg.id}_${msg.calendarAttachment.title}`
-                              const isImported = importedAttachmentIds.has(calKey)
-                              return (
-                                <Button
-                                  type="button"
-                                  variant={msg.isSelf ? 'secondary' : 'primary'}
-                                  size="sm"
-                                  disabled={isImported}
-                                  onClick={() => void handleImportCalendar(msg.calendarAttachment!, calKey)}
-                                  className={`h-6 px-2.5 text-[10px] gap-1 shrink-0 rounded-full font-medium ${
-                                    isImported
-                                      ? 'opacity-60 cursor-default bg-white/10 text-white border-none'
-                                      : msg.isSelf
-                                      ? 'bg-white/20 hover:bg-white/30 text-white border-none'
-                                      : 'bg-primary text-on-primary hover:bg-primary/90'
-                                  }`}
-                                  title={isImported ? 'Bereits in eigenen Kalender eingetragen' : 'In eigenen Kalender eintragen'}
-                                >
-                                  {isImported ? <Check className="w-3 h-3 text-emerald-400" /> : <Plus className="w-3 h-3" />}
-                                  <span>{isImported ? 'Eingetragen' : 'Eintragen'}</span>
-                                </Button>
-                              )
-                            })()}
-                          </div>
-                          <div className="text-[11px] text-white/90 flex items-center gap-1.5 font-medium">
-                            <Clock className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                            <span>
-                              {new Date(msg.calendarAttachment.start).toLocaleString([], {
-                                dateStyle: 'short',
-                                timeStyle: 'short',
-                              })}
-                            </span>
-                          </div>
-                          {msg.calendarAttachment.location && (
-                            <div className="text-[11px] text-white/80 flex items-center gap-1.5">
-                              <MapPin className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                              <span>{msg.calendarAttachment.location}</span>
-                            </div>
-                          )}
-                          {msg.calendarAttachment.description && (
-                            <p className="whitespace-pre-wrap text-[11px] text-white/90 line-clamp-3 leading-relaxed font-sans pt-0.5">
-                              {msg.calendarAttachment.description}
-                            </p>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Quoted Story Reply Preview */}
-                      {!msg.isDeleted && msg.storyReply && (
-                        <div
-                          className={`mb-2 p-2 rounded-xl border flex items-center justify-between gap-2.5 overflow-hidden text-xs select-none transition-all ${
-                            msg.isSelf
-                              ? 'bg-black/25 border-white/20 text-white'
-                              : 'bg-surface-container-highest border-outline-variant/30 text-on-surface'
-                          }`}
-                        >
-                          <div className="min-w-0 flex-1 space-y-0.5">
-                            <div className="flex items-center gap-1.5 text-[10px] font-semibold text-primary">
-                              <Sparkles className="w-3 h-3 text-primary shrink-0" />
-                              <span className="truncate">Status von {msg.storyReply.storyUsername || 'Kontakt'}</span>
-                            </div>
-                            <p className="line-clamp-2 text-[11px] opacity-85 leading-snug">
-                              {msg.storyReply.storyContent || 'Status-Update'}
-                            </p>
-                          </div>
-                          {msg.storyReply.storyMediaUrl ? (
-                            <img
-                              src={msg.storyReply.storyMediaUrl}
-                              alt="Status"
-                              className="w-11 h-11 rounded-lg object-cover shrink-0 border border-white/10"
-                            />
-                          ) : (
-                            <div
-                              className={`w-11 h-11 rounded-lg shrink-0 flex items-center justify-center text-[8px] font-bold text-white shadow-xs ${
-                                STORY_GRADIENTS[msg.storyReply.storyBackground || 'gradient-1']?.class || 'bg-slate-800'
-                              }`}
-                            >
-                              Status
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Fallback preview for legacy [Antwort auf Status]: messages */}
-                      {!msg.isDeleted && !msg.storyReply && msg.text.startsWith('[Antwort auf Status]:') && (
-                        <div
-                          className={`mb-1.5 p-1.5 px-2 rounded-lg border flex items-center gap-1.5 overflow-hidden text-[11px] select-none ${
-                            msg.isSelf
-                              ? 'bg-black/25 border-white/20 text-white'
-                              : 'bg-surface-container-highest border-outline-variant/30 text-on-surface'
-                          }`}
-                        >
-                          <Sparkles className="w-3 h-3 text-primary shrink-0" />
-                          <span className="font-semibold text-primary truncate">Antwort auf Status</span>
-                        </div>
-                      )}
-
-                      {/* Text content or Deleted indicator */}
-                      {msg.isDeleted ? (
-                        <div className="flex items-center gap-2 py-0.5 italic opacity-85">
-                          <Trash2 className="w-3.5 h-3.5 shrink-0 opacity-70" />
-                          <span>Diese Nachricht wurde gelöscht.</span>
-                        </div>
-                      ) : (
-                        msg.text && (
-                          <div className="space-y-1">
-                            <p className="leading-relaxed">
-                              {msg.text.startsWith('[Antwort auf Status]:')
-                                ? msg.text.replace(/^\[Antwort auf Status\]:\s*"?/, '').replace(/"?$/, '')
-                                : msg.text}
-                            </p>
-                            {(() => {
-                              // Einladungslink im Text: statt der rohen URL eine
-                              // Karte mit Logo, Name und Beitreten-Knopf.
-                              const code = findeEinladungsCode(msg.text, window.location.origin)
-                              if (!code) return null
-                              return (
-                                <GruppenEinladungsKarte
-                                  inviteCode={code}
-                                  istEigene={msg.isSelf}
-                                  onJoin={handleJoinByInviteCode}
-                                />
-                              )
-                            })()}
-                            {msg.isEdited && (
-                              <span className="text-[9px] opacity-70 italic inline-flex items-center gap-1">
-                                <Pencil className="w-2.5 h-2.5" />
-                                <span>bearbeitet</span>
-                              </span>
-                            )}
-                          </div>
-                        )
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-end gap-1.5 text-[10px] text-on-surface-variant/60 mt-1 px-1">
-                      {/* Message Actions Menu (Edit & Delete for self) */}
-                      {!msg.isDeleted && msg.isSelf && (
-                        <div className="opacity-0 group-hover:opacity-100 hover:opacity-100 focus-within:opacity-100 transition-opacity flex items-center gap-1 mr-1">
-                          {msg.text && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingMessage(msg)
-                                setInputText(msg.text)
-                              }}
-                              className="p-1 rounded-md hover:bg-surface-container-highest text-on-surface-variant hover:text-primary transition-colors"
-                              title="Nachricht bearbeiten"
-                              aria-label="Nachricht bearbeiten"
-                            >
-                              <Pencil className="w-3 h-3" />
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => void handleDeleteMessage(msg)}
-                            className="p-1 rounded-md hover:bg-surface-container-highest text-on-surface-variant hover:text-destructive transition-colors"
-                            title="Nachricht für alle löschen"
-                            aria-label="Nachricht für alle löschen"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        </div>
-                      )}
-
-                      <span>
-                        {new Date(msg.createdAt).toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </span>
-                      {msg.isSelf && (
-                        msg.status === 'queued' ? (
-                          <span title="In Warteschlange / Ausstehend (wird gesendet...)" className="inline-flex items-center">
-                            <Clock className="w-3.5 h-3.5 opacity-60 animate-pulse" />
+                      {trennerId !== null && msg.id === trennerId && (
+                        <div className="flex items-center gap-2 my-3">
+                          <span className="h-px flex-1 bg-primary/30" />
+                          <span className="text-[10px] font-semibold text-primary uppercase tracking-wide">
+                            Neue Nachrichten
                           </span>
-                        ) : msg.isRead && readReceiptsEnabled ? (
-                          <span title="Gelesen vom Gesprächspartner" className="inline-flex items-center">
-                            <CheckCheck className="w-3.5 h-3.5 text-cyan-400" />
-                          </span>
-                        ) : msg.isDelivered ? (
-                          <span title="Zugestellt / Vom Gesprächspartner empfangen" className="inline-flex items-center">
-                            <CheckCheck className="w-3.5 h-3.5 opacity-60" />
-                          </span>
-                        ) : (
-                          <span title="Nicht zugestellt (noch nicht beim Empfänger angekommen)" className="inline-flex items-center">
-                            <Check className="w-3.5 h-3.5 opacity-60" />
-                          </span>
-                        )
+                          <span className="h-px flex-1 bg-primary/30" />
+                        </div>
                       )}
-                      </div>
-                    </div>
-                  </React.Fragment>
-                )
-              })}
+
+                      <ChatMessageBubble
+                        msg={msg}
+                        kontext={{
+                          activeGroup,
+                          activeContact,
+                          eigeneId: currentUserId,
+                          eigenerName: user?.username || 'Ich',
+                          eigenesBild: user?.avatar_url,
+                          readReceiptsEnabled,
+                          importedAttachmentIds,
+                          // Die Rechteprüfung für `@everyone` steht hier, beim
+                          // Empfänger: der Server kann den Inhalt nicht lesen
+                          // und die Regel deshalb nicht durchsetzen.
+                          michGemeint: binIchGemeint(msg, currentUserId, activeGroup),
+                          hervorgehoben: Boolean(
+                            msg.clientUuid && hervorgehoben === msg.clientUuid,
+                          ),
+                        }}
+                        ton={{
+                          playingAudioId,
+                          audioCurrentTime,
+                          audioPlaybackRate,
+                          onTogglePlay: (id, anhang, bindung) =>
+                            void togglePlayAudio(id, anhang, bindung),
+                          onCycleRate: cycleAudioPlaybackRate,
+                          onSeek: (id, anhang, bindung, e) =>
+                            void handleWaveformSeek(id, anhang, bindung, e),
+                        }}
+                        aktionen={{
+                          onViewImage: setViewingImage,
+                          onEdit: (m) => {
+                            setEditingMessage(m)
+                            setInputText(m.text)
+                          },
+                          onDelete: (m) => void handleDeleteMessage(m),
+                          onImportNote: (note, schluessel) => void handleImportNote(note, schluessel),
+                          onImportCalendar: (cal, schluessel) =>
+                            void handleImportCalendar(cal, schluessel),
+                          onJoinByInviteCode: handleJoinByInviteCode,
+                          onMenue: setMenueNachricht,
+                          onAntworten: handleAntworten,
+                          onReaktion: (m, emoji) => void handleReaktion(m, emoji),
+                          onSpringeZu: springeZu,
+                        }}
+                        auswahl={{
+                          aktiv: auswahlModus,
+                          gewaehlt: gewaehlteUuids.includes(msg.clientUuid || `#${msg.id}`),
+                          onUmschalten: handleAuswahlUmschalten,
+                        }}
+                        medienBindung={medienBindung}
+                      />
+                    </React.Fragment>
+                  )
+                })}
                 {/* Floating Typing / Audio Recording Activity Indicator */}
                 {partnerActivity && (
                   <div className="flex items-center gap-2 text-xs py-1.5 px-3 rounded-full bg-surface-container-high/90 border border-outline-variant/30 text-on-surface w-fit shadow-xs animate-in fade-in slide-in-from-bottom-2">
@@ -4808,8 +5570,48 @@ export function Messenger() {
                 </div>
               )}
 
+              {/* Nach unten. Schwebt über der Eingabe, nicht darunter, und weicht
+                  dem Zitatkopf aus, wenn beide gleichzeitig da sind. */}
+              {weitOben && !sucheOffen && (
+                <div className="relative z-10">
+                  <button
+                    type="button"
+                    onClick={() => messagesEndRef.current?.scrollIntoView?.({ behavior: 'smooth' })}
+                    className="absolute -top-14 right-4 w-11 h-11 rounded-full bg-surface-container-high/95 backdrop-blur-md border border-outline-variant/30 shadow-lg flex items-center justify-center text-on-surface-variant hover:text-primary transition-colors"
+                    aria-label="Zum Ende springen"
+                  >
+                    <ArrowDown className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
+              {/* Die Suche im offenen Chat. Sie sitzt über der Eingabe und
+                  damit über der Tastatur: Feld, Zähler und Pfeile liegen alle
+                  im Daumenbereich. Oben wären die Pfeile bei offener Tastatur
+                  außer Reichweite. */}
+              {sucheOffen && (
+                <VerlaufSuchleiste
+                  onSchliessen={() => {
+                    setSucheOffen(false)
+                    setSuchTreffer([])
+                    setSuchIndex(0)
+                  }}
+                  onSuchen={handleSuchen}
+                  trefferAnzahl={suchTreffer.length}
+                  aktuellerTreffer={suchIndex}
+                  onVor={() => blaettereTreffer(1)}
+                  onZurueck={() => blaettereTreffer(-1)}
+                  gesperrt={sucheGesperrt}
+                />
+              )}
+
               {/* Footer Input Area */}
-              <div className="p-2.5 border-t border-outline-variant/20 bg-surface-container-low relative z-1">
+              {/* Die untere Polsterung wächst um die sichere Fläche des Geräts.
+                  `viewport-fit=cover` steht in der index.html, also reicht der
+                  Inhalt bis an den Rand — auf einem iPhone lag die Eingabeleiste
+                  damit unter dem Home-Balken, und jeder Griff dorthin wischte
+                  die App weg, statt zu tippen. */}
+              <div className="p-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] border-t border-outline-variant/20 bg-surface-container-low relative z-1">
                 {activeContact && isBlocked(activeContact.userId) ? (
                   <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3 rounded-xl bg-status-error/10 border border-status-error/30 text-xs text-status-error">
                     <div className="flex items-center gap-2">
@@ -4881,15 +5683,7 @@ export function Messenger() {
                                 key={stk.id}
                                 type="button"
                                 onClick={() => {
-                                  void handleSendMessage(
-                                    undefined,
-                                    undefined,
-                                    undefined,
-                                    undefined,
-                                    undefined,
-                                    undefined,
-                                    stk
-                                  )
+                                  void handleSendMessage({ sticker: stk })
                                   setIsStickerPickerOpen(false)
                                 }}
                                 className="flex flex-col items-center justify-center p-1.5 rounded-xl hover:bg-surface-container-high transition-transform hover:scale-105"
@@ -4934,14 +5728,11 @@ export function Messenger() {
                     <form
                       onSubmit={(e) => {
                         e.preventDefault()
-                        handleSendMessage(
-                          inputText,
-                          undefined,
-                          undefined,
-                          selectedImage || undefined,
-                          undefined,
-                          stagedFile || undefined
-                        )
+                        handleSendMessage({
+                          text: inputText,
+                          img: selectedImage || undefined,
+                          file: stagedFile || undefined,
+                        })
                       }}
                     >
                       {/* Hidden Image Input */}
@@ -4966,17 +5757,79 @@ export function Messenger() {
                       />
 
                       <ChatInputBar
+                        ref={chatInputRef}
                         value={inputText}
                         onChange={handleInputChange}
+                        topSlot={
+                          <>
+                            {/* Die Vorschlagsliste beim Tippen von `@`.
+                                Liegt unmittelbar über dem Feld und damit über
+                                der Tastatur; jede Zeile ist 44 px hoch. */}
+                            {erwaehnungsVorschlaege.length > 0 && (
+                              <div className="border-b border-outline-variant/20 max-h-56 overflow-y-auto">
+                                {erwaehnungsVorschlaege.map((v) => (
+                                  <button
+                                    key={v.userId ?? 'alle'}
+                                    type="button"
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={() => waehleErwaehnung(v)}
+                                    className="w-full min-h-11 px-3 py-1.5 flex items-center gap-2.5 text-left hover:bg-surface-container-high transition-colors"
+                                  >
+                                    {v.istAlle ? (
+                                      <span className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
+                                        <Bell className="w-3.5 h-3.5 text-primary" />
+                                      </span>
+                                    ) : (
+                                      <Avatar
+                                        src={v.avatarUrl ?? null}
+                                        name={v.name}
+                                        size="sm"
+                                        className="w-7 h-7 shrink-0"
+                                      />
+                                    )}
+                                    <span className="min-w-0 flex-1">
+                                      <span className="block text-xs text-on-surface truncate">@{v.name}</span>
+                                      {v.istAlle && (
+                                        <span className="block text-[10px] text-on-surface-variant">
+                                          Benachrichtigt alle in dieser Gruppe
+                                        </span>
+                                      )}
+                                    </span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Der Zitatkopf beim Antworten. */}
+                            {antwortAuf && (
+                              <div className="px-2.5 py-2 border-b border-outline-variant/20 flex items-center gap-2">
+                                <span className="w-0.5 self-stretch rounded-full bg-primary shrink-0" />
+                                <span className="min-w-0 flex-1">
+                                  <span className="block text-[10px] font-semibold text-primary truncate">
+                                    Antwort an {antwortAuf.absenderName || 'Nachricht'}
+                                  </span>
+                                  <span className="block text-[11px] text-on-surface-variant line-clamp-1">
+                                    {antwortAuf.auszug}
+                                  </span>
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setAntwortAuf(null)}
+                                  className="w-11 h-11 -mr-1 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high transition-colors shrink-0"
+                                  aria-label="Antwort verwerfen"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </div>
+                            )}
+                          </>
+                        }
                         onSubmit={() => {
-                          handleSendMessage(
-                            inputText,
-                            undefined,
-                            undefined,
-                            selectedImage || undefined,
-                            undefined,
-                            stagedFile || undefined
-                          )
+                          handleSendMessage({
+                            text: inputText,
+                            img: selectedImage || undefined,
+                            file: stagedFile || undefined,
+                          })
                         }}
                         // Gesperrt heißt gesperrt: unter einer Identität, die
                         // dieses Gerät nicht öffnen kann, wird nicht gesendet.
@@ -5166,6 +6019,45 @@ export function Messenger() {
                   </>
                 )}
               </div>
+
+              {/* Weiterleiten und die Trefferansicht legen sich über den Chat.
+                  Am Telefon ist das der richtige Ort: eine eigene Ansicht statt
+                  eines Kästchens, das bei offener Tastatur verschwindet. */}
+              <WeiterleitenAnsicht
+                offen={Boolean(weiterzuleiten)}
+                onSchliessen={() => {
+                  setWeiterzuleiten(null)
+                  setWlFortschritt(null)
+                }}
+                ziele={weiterleitungsZiele}
+                anzahlNachrichten={weiterzuleiten?.length || 0}
+                fortschritt={wlFortschritt}
+                onSenden={handleWeiterleiten}
+              />
+
+              <TrefferListe
+                offen={ueberall !== 'aus'}
+                titel={
+                  ueberall === 'markiert'
+                    ? 'Markierte Nachrichten'
+                    : ueberall === 'anMich'
+                      ? '@ und Antworten an mich'
+                      : `Suche: ${ueberallFrage}`
+                }
+                leerText={
+                  ueberall === 'markiert'
+                    ? 'Noch nichts markiert. Über das Menü einer Nachricht legst du ein Sternchen an.'
+                    : ueberall === 'anMich'
+                      ? 'Niemand hat dich erwähnt oder auf dich geantwortet.'
+                      : 'Kein Chat auf diesem Gerät enthält diesen Text.'
+                }
+                chats={ueberallChats}
+                verzeichnis={mailboxDirectory}
+                gesperrt={ueberallGesperrt}
+                laeuft={ueberallLaeuft}
+                onSchliessen={() => setUeberall('aus')}
+                onTreffer={(treffer) => void oeffneTreffer(treffer)}
+              />
             </>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
@@ -5182,6 +6074,123 @@ export function Messenger() {
           )}
         </div>
       </div>
+
+      {/* Das Menü zu einer einzelnen Nachricht. Portal an `document.body`,
+          weil `Shell.tsx` jedes `z-50` im Inhaltsbereich auf 10 kappt. */}
+      <NachrichtenMenue
+        msg={menueNachricht}
+        onSchliessen={() => setMenueNachricht(null)}
+        onReaktion={(m, emoji) => void handleReaktion(m, emoji)}
+        onAntworten={handleAntworten}
+        onWeiterleiten={(m) => {
+          if (!istWeiterleitbar(m)) {
+            toast.error('An dieser Nachricht ist nichts weiterzuleiten.')
+            return
+          }
+          setWeiterzuleiten([m])
+        }}
+        onKopieren={(m) => void handleKopieren(m)}
+        onMarkieren={handleMarkieren}
+        onAuswaehlen={(m) => {
+          setAuswahlModus(true)
+          setGewaehlteUuids([m.clientUuid || `#${m.id}`])
+        }}
+        onBearbeiten={(m) => {
+          setEditingMessage(m)
+          setInputText(m.text)
+        }}
+        onLoeschen={(m) => void handleDeleteMessage(m)}
+        onAnheften={activeGroup ? (m) => void handleAnheften(m) : undefined}
+        darfAnheften={darfAnheften}
+        istAngeheftet={Boolean(angeheftet && angeheftet.clientUuid === menueNachricht?.clientUuid)}
+      />
+
+      {/* Das Menü einer Chatzeile — derselbe Aufruf wie die Wischgeste, nur
+          auffindbar. Eine Geste allein findet niemand. */}
+      <Blattmenue
+        offen={Boolean(zeilenMenue)}
+        onSchliessen={() => setZeilenMenue(null)}
+        titel={zeilenMenue?.name || 'Chat'}
+      >
+        <div className="px-4 pt-2 pb-1 text-xs font-semibold text-on-surface-variant truncate">
+          {zeilenMenue?.name}
+        </div>
+        <div className="pb-2">
+          <Blatteintrag
+            icon={zeilenMenue && pinnedChats.includes(zeilenMenue.mid) ? <PinOff className="w-4 h-4" /> : <Pin className="w-4 h-4" />}
+            label={zeilenMenue && pinnedChats.includes(zeilenMenue.mid) ? 'Nicht mehr anheften' : 'Anheften'}
+            hinweis={`Bleibt auf diesem Gerät. Höchstens ${PINS_MAX} Chats.`}
+            onClick={() => {
+              if (zeilenMenue) handleAnheftenChat(zeilenMenue.mid)
+              setZeilenMenue(null)
+            }}
+          />
+          <Blatteintrag
+            icon={zeilenMenue && archivedChats.includes(zeilenMenue.mid) ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
+            label={zeilenMenue && archivedChats.includes(zeilenMenue.mid) ? 'Aus dem Archiv holen' : 'Archivieren'}
+            onClick={() => {
+              if (zeilenMenue) handleArchivieren(zeilenMenue.mid)
+              setZeilenMenue(null)
+            }}
+          />
+          <Blatteintrag
+            icon={zeilenMenue && isChatMuted(zeilenMenue.mid) ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
+            label={zeilenMenue && isChatMuted(zeilenMenue.mid) ? 'Stummschaltung aufheben' : 'Stummschalten'}
+            onClick={() => {
+              if (!zeilenMenue) return
+              if (isChatMuted(zeilenMenue.mid)) void unmuteChat(zeilenMenue.mid)
+              else void muteChat(zeilenMenue.mid)
+              setZeilenMenue(null)
+            }}
+          />
+        </div>
+      </Blattmenue>
+
+      {/* Verschwindende Nachrichten. Die Grenze steht in der Auswahl selbst,
+          nicht in einer Fußnote: beim Server löschen kann nur, wer hochgeladen
+          hat. */}
+      <Blattmenue
+        offen={verfallOffen}
+        onSchliessen={() => setVerfallOffen(false)}
+        titel="Verschwindende Nachrichten"
+      >
+        <div className="px-4 pt-2 pb-3 space-y-1">
+          <p className="text-sm font-semibold text-on-surface">Verschwindende Nachrichten</p>
+          <p className="text-[11px] text-on-surface-variant leading-relaxed">
+            Neue Nachrichten werden nach der gewählten Zeit auf beiden Geräten gelöscht. Beide Seiten
+            sehen die Umstellung als Hinweis im Verlauf. Beim Server räumt nur das Gerät auf, das die
+            Nachricht gesendet hat: bleibt es dauerhaft offline, liegt der verschlüsselte Umschlag
+            dort weiter, auch wenn die Nachricht auf allen Geräten verschwunden ist.
+          </p>
+        </div>
+        <div className="pb-2">
+          {VERFALL_STUFEN.map((stufe) => (
+            <Blatteintrag
+              key={stufe.sekunden}
+              icon={
+                verfallSekunden === stufe.sekunden ? (
+                  <UserCheck className="w-4 h-4 text-primary" />
+                ) : (
+                  <Timer className="w-4 h-4" />
+                )
+              }
+              label={stufe.label}
+              onClick={() => void handleVerfallWaehlen(stufe.sekunden)}
+            />
+          ))}
+        </div>
+      </Blattmenue>
+
+      {/* Die Wache liest Gruppen mit, die gerade nicht offen sind — sonst
+          erschiene ein @-Abzeichen erst, wenn man die Gruppe ohnehin öffnet. */}
+      <ErwaehnungsWache
+        gruppen={groups}
+        aktiveMailboxId={blindMailboxId || null}
+        eigeneId={currentUserId}
+        identitaetRef={identityRef}
+        onErwaehnung={merkeErwaehnung}
+        aktiv={!messengerGesperrt && !!currentUserId}
+      />
 
       {/* Create Group Modal */}
       <Dialog open={isCreateGroupOpen} onOpenChange={setIsCreateGroupOpen}>
@@ -5280,17 +6289,15 @@ export function Messenger() {
                     key={n.id}
                     onClick={() => {
                       setIsNotePickerOpen(false)
-                      handleSendMessage(
-                        '',
-                        {
+                      handleSendMessage({
+                        text: '',
+                        note: {
                           title: n.title,
                           content: n.content,
                           color: n.color,
                           category: n.category,
                         },
-                        undefined,
-                        undefined
-                      )
+                      })
                     }}
                     className="p-3 rounded-xl border border-outline-variant/30 hover:border-primary/50 hover:bg-surface-container transition-all cursor-pointer text-left"
                   >
@@ -5337,18 +6344,16 @@ export function Messenger() {
                     key={ev.event_id || ev.id}
                     onClick={() => {
                       setIsCalendarPickerOpen(false)
-                      handleSendMessage(
-                        '',
-                        undefined,
-                        {
+                      handleSendMessage({
+                        text: '',
+                        cal: {
                           title: ev.title,
                           start: ev.start,
                           end: ev.end,
                           description: ev.description,
                           location: ev.location,
                         },
-                        undefined
-                      )
+                      })
                     }}
                     className="p-3 rounded-xl border border-outline-variant/30 hover:border-primary/50 hover:bg-surface-container transition-all cursor-pointer text-left"
                   >
@@ -5485,16 +6490,7 @@ export function Messenger() {
             setActiveContact(contact)
             setActiveGroup(null)
             setIsViewerStoryOpen(false)
-            void handleSendMessage(
-              text,
-              undefined,
-              undefined,
-              undefined,
-              undefined,
-              undefined,
-              undefined,
-              storyContext
-            )
+            void handleSendMessage({ text, storyReply: storyContext })
           } else {
             toast.error('Kontakt für direkte Antwort nicht gefunden.')
           }
@@ -5761,18 +6757,10 @@ export function Messenger() {
           onCancel={() => setIsVideoNoteRecording(false)}
           onComplete={async (aufnahme: VideoNoteAufnahme) => {
             setIsVideoNoteRecording(false)
-            await handleSendMessage(
-              undefined,
-              undefined,
-              undefined,
-              undefined,
-              undefined,
-              undefined,
-              undefined,
-              undefined,
-              aufnahme,
-              URL.createObjectURL(aufnahme.blob),
-            )
+            await handleSendMessage({
+              videoNote: aufnahme,
+              videoUrl: URL.createObjectURL(aufnahme.blob),
+            })
           }}
         />
       )}

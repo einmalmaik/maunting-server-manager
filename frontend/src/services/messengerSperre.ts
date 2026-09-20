@@ -43,6 +43,7 @@ import {
 } from '@msdis/shield/key-management'
 import { create } from 'zustand'
 
+import { leereSuchspeicher } from './verlaufSuche'
 import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
 
 import {
@@ -444,6 +445,9 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
     // fröhlich weiter: er hätte alles, was er zum Entschlüsseln braucht, und
     // die Sperre wäre ein Vorhang.
     clearGeraeteMemory()
+    // Die Suche hält entsiegelte Verläufe im Arbeitsspeicher. Blieben sie
+    // liegen, ließe sich nach der Sperre weiter darin suchen.
+    leereSuchspeicher()
     set({ entsperrt: false, fehler: null })
   },
 

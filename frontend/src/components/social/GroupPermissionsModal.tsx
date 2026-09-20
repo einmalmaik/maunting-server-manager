@@ -114,9 +114,21 @@ export const GROUP_PERMISSION_DEFINITIONS = [
     category: 'moderation',
   },
   {
+    key: 'mention_everyone',
+    title: 'Alle auf einmal erwähnen',
+    desc: '@everyone und @here benachrichtigen jedes Gruppenmitglied, auch bei stummgeschalteter Gruppe — dort allerdings nur mit einem Abzeichen, ohne Ton. Ohne dieses Recht bleibt @everyone gewöhnlicher Text: das prüft das Gerät des Empfängers, nicht das des Absenders.',
+    category: 'moderation',
+  },
+  {
+    key: 'pin_messages',
+    title: 'Nachricht anheften',
+    desc: 'Heftet eine Nachricht als Leiste über den Verlauf, sichtbar für alle in der Gruppe. Auch hier entscheidet der Empfänger anhand der Rechte des Anheftenden, ob die Leiste erscheint.',
+    category: 'moderation',
+  },
+  {
     key: 'manage_roles',
     title: 'Rollen zuweisen & verwalten',
-    desc: 'Mitgliedern Rollen zuweisen und Standard-Gruppenrechte anpassen.',
+    desc: 'Mitgliedern Rollen zuweisen und Standard-Gruppenrechte anpassen. Eigentümer und Administratoren tragen „Alle erwähnen" und „Nachricht anheften" ohnehin, weil sie sie sich mit zwei Klicks selbst geben könnten.',
     category: 'administration',
   },
 ]
@@ -134,14 +146,14 @@ const SYSTEM_GROUP_ROLES: GroupRoleDefinition[] = [
     name: 'Administrator',
     description: 'Kann Mitglieder kicken, Nachrichten moderieren, Anrufe steuern und Rollen vergeben.',
     is_system: true,
-    permissions: ['send_messages', 'attach_media', 'invite_members', 'start_group_calls', 'join_group_calls', 'share_screen', 'mute_in_calls', 'kick_from_calls', 'kick_members', 'delete_messages', 'manage_roles'],
+    permissions: ['send_messages', 'attach_media', 'invite_members', 'start_group_calls', 'join_group_calls', 'share_screen', 'mute_in_calls', 'kick_from_calls', 'kick_members', 'delete_messages', 'mention_everyone', 'pin_messages', 'manage_roles'],
   },
   {
     id: 'moderator',
     name: 'Moderator',
     description: 'Kann Nachrichten entfernen, Einladungen versenden und Gruppenanrufe moderieren.',
     is_system: true,
-    permissions: ['send_messages', 'attach_media', 'invite_members', 'join_group_calls', 'share_screen', 'mute_in_calls', 'kick_from_calls', 'delete_messages'],
+    permissions: ['send_messages', 'attach_media', 'invite_members', 'join_group_calls', 'share_screen', 'mute_in_calls', 'kick_from_calls', 'delete_messages', 'mention_everyone', 'pin_messages'],
   },
   {
     id: 'member',

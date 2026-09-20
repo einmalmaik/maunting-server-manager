@@ -18,6 +18,17 @@ const STORAGE_BLOCKS_KEY = 'msm:chat_blocks'
 const STORAGE_BLOCKED_PROFILES_KEY = 'msm:chat_blocked_profiles'
 const STORAGE_UNREAD_KEY = 'msm:chat_unread'
 const STORAGE_MAILBOX_DIR_KEY = 'msm:chat_mailbox_dir'
+const STORAGE_PINS_KEY = 'msm:chat_pins'
+const STORAGE_ARCHIVE_KEY = 'msm:chat_archive'
+const STORAGE_MENTIONS_KEY = 'msm:chat_mentions'
+
+/**
+ * So viele Chats lassen sich anheften.
+ *
+ * Eine Grenze, weil eine angeheftete Liste ohne Grenze wieder nur eine Liste
+ * ist. Fünf passen auf ein Telefon, ohne den Rest zu verdrängen.
+ */
+export const PINS_MAX = 5
 
 export interface MailboxMeta {
   name: string
@@ -37,6 +48,23 @@ interface MessengerNotificationState {
   unreadCounts: Record<string, number>
   totalUnreadCount: number
   mutedChats: Record<string, number> // mailboxId -> expiryTimestamp (0 = permanent)
+  /**
+   * Angeheftete und archivierte Chats — **nur auf diesem Gerät**.
+   *
+   * Welche Gespräche jemandem wichtig sind und welche er weggeräumt hat, ist
+   * ein Metadatum ersten Ranges. Es hat auf keinem Server etwas zu suchen,
+   * auch nicht verschlüsselt: die Reihenfolge allein verrät genug. Dieselbe
+   * Bauart wie Stummschalten und Blockieren.
+   */
+  pinnedChats: string[]
+  archivedChats: string[]
+  /**
+   * Chats, in denen ich erwähnt wurde, ohne dass ich sie geöffnet habe.
+   *
+   * Das ist der einzige Hinweis, den eine stummgeschaltete Gruppe noch geben
+   * darf: ein Abzeichen in der Liste, kein Ton, keine Systemmeldung.
+   */
+  mentionedChats: string[]
   blockedUserIds: number[]
   blockedProfiles: Record<number, { username: string; avatarUrl?: string | null }>
   mailboxDirectory: Record<string, MailboxMeta>
@@ -55,6 +83,17 @@ interface MessengerNotificationState {
   isMuted: (mailboxId: string) => boolean
   muteChat: (mailboxId: string, durationMinutes?: number) => void
   unmuteChat: (mailboxId: string) => void
+
+  // Anheften & Archivieren (lokal)
+  istAngeheftet: (mailboxId: string) => boolean
+  istArchiviert: (mailboxId: string) => boolean
+  schalteAnheften: (mailboxId: string) => { ok: boolean; grund?: 'voll' }
+  schalteArchiv: (mailboxId: string) => void
+
+  // @-Abzeichen
+  istErwaehnt: (mailboxId: string) => boolean
+  merkeErwaehnung: (mailboxId: string) => void
+  loescheErwaehnung: (mailboxId: string) => void
 
   // Block
   isBlocked: (userId: number) => boolean
@@ -94,6 +133,24 @@ function loadBlockedProfiles(): Record<number, { username: string; avatarUrl?: s
     if (raw) return JSON.parse(raw)
   } catch {}
   return {}
+}
+
+function ladeListe(schluessel: string): string[] {
+  try {
+    const raw = localStorage.getItem(schluessel)
+    const gelesen = raw ? JSON.parse(raw) : []
+    return Array.isArray(gelesen) ? gelesen.filter((x) => typeof x === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function schreibeListe(schluessel: string, werte: string[]): void {
+  try {
+    localStorage.setItem(schluessel, JSON.stringify(werte))
+  } catch {
+    // Ohne localStorage gilt die Auswahl eben nur für diese Sitzung.
+  }
 }
 
 function loadUnread(): Record<string, number> {
@@ -169,6 +226,9 @@ export const useMessengerNotificationStore = create<MessengerNotificationState>(
     unreadCounts: initialUnread,
     totalUnreadCount: calcTotal(initialUnread, initialMutes),
     mutedChats: initialMutes,
+    pinnedChats: ladeListe(STORAGE_PINS_KEY),
+    archivedChats: ladeListe(STORAGE_ARCHIVE_KEY),
+    mentionedChats: ladeListe(STORAGE_MENTIONS_KEY),
     blockedUserIds: initialBlocks,
     blockedProfiles: initialProfiles,
     mailboxDirectory: loadMailboxDirectory(),
@@ -178,6 +238,8 @@ export const useMessengerNotificationStore = create<MessengerNotificationState>(
       set({ activeMailboxId: id })
       if (id) {
         get().markAsRead(id)
+        // Wer hineinschaut, hat die Erwähnung gesehen.
+        get().loescheErwaehnung(id)
       }
     },
 
@@ -304,6 +366,72 @@ export const useMessengerNotificationStore = create<MessengerNotificationState>(
           totalUnreadCount: calcTotal(state.unreadCounts, updated),
         }
       })
+    },
+
+    istAngeheftet: (mailboxId) => get().pinnedChats.includes(mailboxId),
+    istArchiviert: (mailboxId) => get().archivedChats.includes(mailboxId),
+
+    /**
+     * Anheften und wieder lösen.
+     *
+     * Die Reihenfolge ist die Anzeigereihenfolge: neu Angeheftetes kommt nach
+     * oben, weil man das zuletzt Gewählte auch zuerst sucht. Über der Grenze
+     * wird nichts stillschweigend verdrängt — der Aufrufer bekommt `voll`
+     * zurück und sagt es.
+     */
+    schalteAnheften: (mailboxId) => {
+      const state = get()
+      const drin = state.pinnedChats.includes(mailboxId)
+      if (!drin && state.pinnedChats.length >= PINS_MAX) return { ok: false, grund: 'voll' as const }
+      const neu = drin
+        ? state.pinnedChats.filter((id) => id !== mailboxId)
+        : [mailboxId, ...state.pinnedChats]
+      schreibeListe(STORAGE_PINS_KEY, neu)
+      set({ pinnedChats: neu })
+      return { ok: true }
+    },
+
+    /**
+     * Ins Archiv und zurück.
+     *
+     * Ein archivierter Chat bleibt archiviert, auch wenn neue Nachrichten
+     * kommen: wer etwas weggeräumt hat, hat es weggeräumt. Sein
+     * Ungelesen-Zähler erscheint an der Archivzeile, nicht in der Hauptliste.
+     * Angeheftet und archiviert schließen sich aus.
+     */
+    schalteArchiv: (mailboxId) => {
+      const state = get()
+      const drin = state.archivedChats.includes(mailboxId)
+      const neu = drin
+        ? state.archivedChats.filter((id) => id !== mailboxId)
+        : [mailboxId, ...state.archivedChats]
+      schreibeListe(STORAGE_ARCHIVE_KEY, neu)
+      if (!drin && state.pinnedChats.includes(mailboxId)) {
+        const ohnePin = state.pinnedChats.filter((id) => id !== mailboxId)
+        schreibeListe(STORAGE_PINS_KEY, ohnePin)
+        set({ archivedChats: neu, pinnedChats: ohnePin })
+        return
+      }
+      set({ archivedChats: neu })
+    },
+
+    istErwaehnt: (mailboxId) => get().mentionedChats.includes(mailboxId),
+
+    merkeErwaehnung: (mailboxId) => {
+      const state = get()
+      if (state.activeMailboxId === mailboxId) return
+      if (state.mentionedChats.includes(mailboxId)) return
+      const neu = [...state.mentionedChats, mailboxId]
+      schreibeListe(STORAGE_MENTIONS_KEY, neu)
+      set({ mentionedChats: neu })
+    },
+
+    loescheErwaehnung: (mailboxId) => {
+      const state = get()
+      if (!state.mentionedChats.includes(mailboxId)) return
+      const neu = state.mentionedChats.filter((id) => id !== mailboxId)
+      schreibeListe(STORAGE_MENTIONS_KEY, neu)
+      set({ mentionedChats: neu })
     },
 
     isBlocked: (userId) => {
@@ -474,6 +602,12 @@ if (typeof window !== 'undefined') {
       useMessengerNotificationStore.setState({
         mailboxDirectory: loadMailboxDirectory(),
       })
+    } else if (e.key === STORAGE_PINS_KEY) {
+      useMessengerNotificationStore.setState({ pinnedChats: ladeListe(STORAGE_PINS_KEY) })
+    } else if (e.key === STORAGE_ARCHIVE_KEY) {
+      useMessengerNotificationStore.setState({ archivedChats: ladeListe(STORAGE_ARCHIVE_KEY) })
+    } else if (e.key === STORAGE_MENTIONS_KEY) {
+      useMessengerNotificationStore.setState({ mentionedChats: ladeListe(STORAGE_MENTIONS_KEY) })
     }
   })
 

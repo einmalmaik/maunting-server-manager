@@ -17,7 +17,12 @@
 
   body {
     height: 100%;
+    /* `dvh` folgt der wirklich sichtbaren Höhe. Am Telefon wächst und schrumpft
+       sie mit der Adressleiste des Browsers; `vh` kennt nur den größeren der
+       beiden Zustände und schiebt alles, was unten klebt, aus dem Bild. Die
+       `vh`-Zeile bleibt als Rückfall für Browser ohne `dvh` stehen. */
     min-height: 100vh;
+    min-height: 100dvh;
     margin: 0;
     padding: 0;
     overscroll-behavior: none;
@@ -349,6 +354,29 @@
   100% {
     opacity: 0;
     transform: scale(1.02);
+  }
+}
+
+/* Dialoge und Blattmenues. `fadeIn` wurde seit jeher von `Dialog.tsx`
+   angefordert und war nirgends definiert — die Verdunkelung erschien hart. */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Das Blatt faehrt von unten herein. Kurz genug, um nicht im Weg zu sein:
+   wer ein Menue oeffnet, hat sich schon entschieden. */
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Wer Bewegung abbestellt hat, bekommt sie auch hier nicht. */
+  .animate-\[slideUp_\.16s_ease-out\],
+  .animate-\[fadeIn_\.12s_ease-out\],
+  .animate-\[fadeIn_\.15s_ease-out\] {
+    animation: none;
   }
 }
 
