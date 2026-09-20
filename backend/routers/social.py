@@ -379,6 +379,24 @@ def upload_chat_media(
     }
 
 
+@router.delete(
+    "/media/{media_id}",
+    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
+)
+def delete_chat_media(
+    media_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Loescht einen verschluesselten Medienblob. Nur der Hochladende darf das.
+
+    Gehoert zum Loeschen einer Nachricht: Bild, Datei, Sprachnachricht und
+    Videonotiz liegen als eigene Blobs neben dem Umschlag.
+    """
+    geloescht = ChatMediaService.delete_media(db, user=current_user, media_id=media_id)
+    return {"ok": True, "deleted": geloescht}
+
+
 @router.get(
     "/media/{media_id}/signed-url",
     response_model=ChatMediaSignedUrlResponse,
@@ -536,6 +554,30 @@ def fetch_blind_mailbox_envelopes(
         }
         for env in envelopes
     ]
+
+
+@router.delete(
+    "/e2ee/envelopes/{blind_mailbox_id}",
+    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
+)
+def delete_blind_mailbox_envelopes(
+    blind_mailbox_id: str,
+    client_uuid: str = Query(..., min_length=1, max_length=64),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Nimmt die Umschlaege einer geloeschten Nachricht aus der Mailbox.
+
+    Adressiert wird ueber die logische Nachrichtenkennung, nicht ueber die
+    Umschlagkennung: eine Nachricht liegt als eine Kopie je Zielgeraet da.
+    """
+    entfernt = SocialService.delete_blind_envelopes(
+        db,
+        blind_mailbox_id=blind_mailbox_id,
+        client_uuid=client_uuid,
+        user_id=current_user.id,
+    )
+    return {"ok": True, "deleted": entfernt}
 
 
 @router.post("/e2ee/typing", dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])

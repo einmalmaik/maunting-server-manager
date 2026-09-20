@@ -276,6 +276,30 @@ export async function speichereUmschlagKlartext(
 }
 
 /**
+ * Nimmt den Inhalt eines geöffneten Umschlags heraus, ohne die Zeile zu löschen.
+ *
+ * Gebraucht beim Löschen einer Nachricht: Hier liegt die Fassung, aus der ein
+ * späterer Abruf sie wieder aufbaut. Bliebe sie stehen, käme die gelöschte
+ * Nachricht beim nächsten Öffnen des Gesprächs zurück.
+ *
+ * Die Zeile selbst muss bleiben. Sie ist zugleich die Marke „dieser Umschlag
+ * ist geöffnet", und ein Nachrichtenschlüssel des Double Ratchet ist nach dem
+ * ersten Öffnen verbraucht: ohne die Marke liefe der Ratchet ein zweites Mal
+ * über denselben Umschlag und bräche die Sitzung. Der leere Text ist dafür
+ * ausreichend, die Prüfung fragt auf `null` (`ratchetSitzung.ts`).
+ *
+ * Gab es zu diesem Umschlag noch keine Zeile — etwa beim Absender, der seine
+ * eigene Ratchet-Nachricht nie geöffnet hat —, entsteht hier eine leere. Das
+ * schadet nicht: sie markiert einen Umschlag, der ohnehin verschwindet.
+ */
+export async function leereUmschlagKlartext(
+  blindMailboxId: string,
+  envelopeId: number
+): Promise<void> {
+  await speichereUmschlagKlartext(blindMailboxId, envelopeId, '')
+}
+
+/**
  * Der Klartext **eines** Umschlags — und der Fehlerfall bleibt ein Fehler.
  *
  * `ladeUmschlagKlartexte` darf eine leere Map liefern, wenn die Ablage streikt:

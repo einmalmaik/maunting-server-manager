@@ -1217,6 +1217,104 @@ class SocialService:
 
         return envelope
 
+    @classmethod
+    def assert_mailbox_participant(cls, db: Session, user_id: int, blind_mailbox_id: str) -> None:
+        """Prüft, ob ein Konto zu einer blinden Mailbox gehört.
+
+        Die Mailbox nennt ihre Teilnehmer nicht, das ist ihr Zweck. Geprüft wird
+        deshalb andersherum: aus den Direktchats, Gruppen und Freundschaften
+        dieses Kontos werden dieselben Kennungen abgeleitet, die auch der Client
+        rechnet. Ist die gesuchte nicht darunter, gehört das Konto nicht dazu.
+
+        Die eigene Geräte-Mailbox zählt mit, eine fremde nie: deren Kennung
+        entsteht aus einer anderen Konto-Id und taucht in keiner der Ableitungen
+        hier auf.
+        """
+        clean = (blind_mailbox_id or "").strip()
+        if not clean:
+            raise HTTPException(status_code=400, detail="Mailbox-ID fehlt.")
+
+        if clean == cls.derive_user_device_mailbox_id(user_id):
+            return
+
+        chat = db.query(DirectChat).filter_by(blind_mailbox_id=clean).first()
+        if chat and user_id in (chat.user_a_id, chat.user_b_id):
+            return
+
+        for (gid,) in (
+            db.query(ChatGroupMember.group_id).filter(ChatGroupMember.user_id == user_id).all()
+        ):
+            if hashlib.sha256(f"msm:group:{gid}".encode("utf-8")).hexdigest() == clean:
+                return
+
+        friends = (
+            db.query(UserFriend)
+            .filter(
+                or_(UserFriend.user_id == user_id, UserFriend.friend_id == user_id),
+                UserFriend.status == "accepted",
+            )
+            .all()
+        )
+        for f in friends:
+            other = f.friend_id if f.user_id == user_id else f.user_id
+            if cls.derive_blind_mailbox_id(user_id, other) == clean:
+                return
+
+        raise HTTPException(status_code=403, detail="Keine Berechtigung für diese Mailbox.")
+
+    @classmethod
+    def delete_blind_envelopes(
+        cls, db: Session, blind_mailbox_id: str, client_uuid: str, user_id: int
+    ) -> int:
+        """Entfernt die Umschläge einer Nachricht aus einer blinden Mailbox.
+
+        Eine gelöschte Nachricht muss auch hier verschwinden. Bliebe der
+        Chiffretext liegen, hätte das Löschen nur die Anzeige auf zwei Geräten
+        geändert: ein neu eingerichtetes Gerät holte die Mailbox von vorn und
+        bekäme sie zurück.
+
+        Eine Nachricht liegt als mehrere Umschläge da, einer je Zielgerät,
+        auseinandergehalten durch `<kennung>#<geraet>`. Gelöscht wird deshalb
+        die logische Kennung samt aller Gerätekopien — und nur sie, nie die
+        Mailbox als Ganzes.
+
+        Grenze, die bleibt: Wer zu einer Mailbox gehört, kann darin jeden
+        Umschlag löschen, dessen Kennung er kennt. Der Server kann das nicht
+        enger fassen, ohne zu wissen, wer welchen Umschlag geschrieben hat — und
+        genau das weiß er absichtlich nicht. In einem Direktchat trifft das nur
+        Kopien, die der Löschende ohnehin schon hat; in einer Gruppe kann ein
+        Mitglied damit eine fremde Nachricht aus dem Relais nehmen, bevor andere
+        sie abholen. Das ist der Preis der blinden Adressierung und die
+        Alternative wäre, den Absender an den Umschlag zu schreiben.
+
+        Nebenwirkung: Ein gelöschter Umschlag fällt aus der
+        Wiedereinspielungsprüfung. Wer denselben Chiffretext erneut einliefert,
+        beschädigt damit nur seine eigene Sitzung — der Ratchet-Kopf adressiert
+        ein einzelnes Gerät, und andere Geräte werten ihn als fremd.
+        """
+        cls.assert_social_enabled(db)
+        clean_mailbox = (blind_mailbox_id or "").strip()
+        clean_uuid = (client_uuid or "").strip()
+        if not clean_uuid:
+            raise HTTPException(status_code=400, detail="client_uuid fehlt.")
+
+        cls.assert_mailbox_participant(db, user_id, clean_mailbox)
+
+        rows = (
+            db.query(E2eeBlindEnvelope)
+            .filter(
+                E2eeBlindEnvelope.blind_mailbox_id == clean_mailbox,
+                or_(
+                    E2eeBlindEnvelope.client_uuid == clean_uuid,
+                    E2eeBlindEnvelope.client_uuid.startswith(f"{clean_uuid}#", autoescape=True),
+                ),
+            )
+            .all()
+        )
+        for row in rows:
+            db.delete(row)
+        db.commit()
+        return len(rows)
 
     @classmethod
     def get_blind_envelopes(

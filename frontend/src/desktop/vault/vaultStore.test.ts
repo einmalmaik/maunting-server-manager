@@ -133,6 +133,29 @@ describe('useVaultStore - Security & Operations', () => {
     expect(state.userKey).toBe(fakeKey)
   })
 
+  it('startet die Untätigkeitsfrist beim Entsperren neu, nicht beim Laden der Seite', async () => {
+    const masterPassword = 'super-strong-master-password-2026'
+    await useVaultStore.getState().initializeVault(masterPassword)
+    useVaultStore.getState().lock()
+
+    // Der Sperrbildschirm stand eine halbe Stunde, bevor jemand sein Passwort
+    // eingetippt hat.
+    useVaultStore.setState({
+      autoLockMinutes: 15,
+      lastActivityTime: Date.now() - 30 * 60 * 1000,
+    })
+
+    expect(await useVaultStore.getState().unlock(masterPassword)).toBe(true)
+
+    // Ohne das Nachstellen der Uhr gilt der Tresor im selben Moment als „seit
+    // 30 Minuten untätig": er geht auf und beim nächsten Takt sofort wieder zu.
+    expect(useVaultStore.getState().checkAutoLock()).toBe(false)
+    expect(useVaultStore.getState().isUnlocked).toBe(true)
+
+    useVaultStore.getState().recordActivity()
+    expect(useVaultStore.getState().isUnlocked).toBe(true)
+  })
+
   it('enforces payload attachment limit (<500 KB) in saveItem (SEC-08)', async () => {
     const fakeKey = {} as CryptoKey
     useVaultStore.setState({

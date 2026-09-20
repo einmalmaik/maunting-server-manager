@@ -78,6 +78,8 @@ describe('messengerSperre', () => {
       gesperrtBis: 0,
       biometrieAktiv: false,
       geraetebindung: false,
+      sperrfrist: 15,
+      letzteAktivitaet: Date.now(),
     })
   })
 
@@ -126,6 +128,33 @@ describe('messengerSperre', () => {
       expect(useMessengerSperre.getState().entsperrt).toBe(true)
       expect(useMessengerSperre.getState().fehlversuche).toBe(0)
       expect(istOffen()).toBe(true)
+    },
+    FRIST,
+  )
+
+  it(
+    'fängt die Frist beim Entsperren neu an, nicht beim Laden der Seite',
+    async () => {
+      await useMessengerSperre.getState().einrichten(PIN)
+      useMessengerSperre.getState().sperren()
+
+      // Der Sperrschirm stand eine halbe Stunde — jemand hat die App
+      // aufgemacht und erst mal woanders hingeschaut.
+      useMessengerSperre.setState({
+        sperrfrist: 15,
+        letzteAktivitaet: Date.now() - 30 * 60_000,
+      })
+
+      expect(await useMessengerSperre.getState().entsperren(PIN)).toBe(true)
+
+      // Ohne das Nachstellen der Uhr wäre der Messenger im selben Atemzug „seit
+      // 30 Minuten untätig": er ginge auf und beim nächsten Takt sofort wieder
+      // zu. Genau das war der Fehler — sichtbar als kurzes Aufblitzen.
+      useMessengerSperre.getState().pruefeFrist()
+      expect(useMessengerSperre.getState().entsperrt).toBe(true)
+
+      useMessengerSperre.getState().merkeAktivitaet()
+      expect(useMessengerSperre.getState().entsperrt).toBe(true)
     },
     FRIST,
   )

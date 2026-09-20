@@ -151,7 +151,9 @@ export function MessengerSicherheitTab() {
         ? t('profile.messengerLock.never', 'Nie')
         : minuten === 60
           ? t('profile.messengerLock.afterHour', 'Nach einer Stunde')
-          : t('profile.messengerLock.afterMinutes', 'Nach {{count}} Minuten', { count: minuten }),
+          : minuten === 1
+            ? t('profile.messengerLock.afterMinute', 'Nach einer Minute')
+            : t('profile.messengerLock.afterMinutes', 'Nach {{count}} Minuten', { count: minuten }),
   }))
 
   return (

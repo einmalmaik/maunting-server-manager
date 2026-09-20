@@ -300,6 +300,35 @@ class ChatMediaService:
         return signed_url, expires_at
 
     @classmethod
+    def delete_media(cls, db: Session, user: User, media_id: str) -> bool:
+        """Loescht einen Medienblob endgueltig. Nur der Hochladende darf das.
+
+        Gehoert zum Loeschen einer Nachricht: der Anhang liegt nicht im
+        Umschlag, sondern als eigener Blob daneben. Bliebe er stehen, waere die
+        Nachricht weg und das Bild weiter abrufbar — jedes Chat-Mitglied kann
+        sich dafuer eine signierte URL ausstellen lassen.
+
+        Die Beschraenkung auf den Hochladenden ist die engste Regel, die hier
+        passt: geloescht wird ueber den Knopf an der eigenen Nachricht, und wer
+        eine Datei nicht hochgeladen hat, hat an ihr nichts zu loeschen. Ein
+        bereits verschwundener Blob ist kein Fehler, sondern das Ziel.
+        """
+        SocialService.assert_social_enabled(db)
+
+        media = db.query(ChatMedia).filter(ChatMedia.id == media_id).first()
+        if not media:
+            return False
+        if media.uploader_user_id != user.id:
+            raise HTTPException(
+                status_code=403,
+                detail="Nur der Absender kann einen Anhang loeschen.",
+            )
+
+        db.delete(media)
+        db.commit()
+        return True
+
+    @classmethod
     def get_media_by_signed_url(
         cls,
         db: Session,

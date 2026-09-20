@@ -618,6 +618,12 @@ export const useVaultStore = create<VaultState>((set, get) => {
         isUnlocking: false,
         failedUnlockAttempts: 0,
         lockedUntilMs: 0,
+        // Entsperren ist Aktivität. Ohne das lief die Frist weiter, während der
+        // Tresor zu war: wer ihn aufmacht, eine Viertelstunde woanders
+        // hinschaut und dann sein Master-Passwort eingibt, gilt im selben
+        // Moment als „seit 15 Minuten untätig" — der Tresor geht auf und beim
+        // nächsten Takt wieder zu.
+        lastActivityTime: Date.now(),
         userKey,
         bucketId,
         bucketAuthToken,
@@ -793,6 +799,8 @@ export const useVaultStore = create<VaultState>((set, get) => {
         isUnlocking: false,
         failedUnlockAttempts: 0,
         lockedUntilMs: 0,
+        // Siehe oben: der Zähler startet beim Entsperren, nicht beim Laden.
+        lastActivityTime: Date.now(),
         userKey,
         bucketId,
         bucketAuthToken,

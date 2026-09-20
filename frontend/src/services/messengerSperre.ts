@@ -343,6 +343,7 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
       set({
         eingerichtet: true,
         entsperrt: true,
+        letzteAktivitaet: Date.now(),
         geraetebindung: bindungMoeglich,
         fehlversuche: 0,
         gesperrtBis: 0,
@@ -385,7 +386,18 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
       kdfBytes = await leiteAb(pin, salz, lies(BINDUNG) === 'true', false)
       const userKey = await unwrapUserKey(umschlag, kdfBytes)
       setzeInhaltsSchluessel(userKey)
-      set({ entsperrt: true, fehlversuche: 0, gesperrtBis: 0, fehler: null })
+      // Entsperren **ist** Aktivität. Ohne diese Zeile läuft die Frist weiter,
+      // während der Sperrschirm steht: wer die App aufmacht, eine Viertelstunde
+      // woanders hinschaut und dann seinen PIN eingibt, ist im Moment des
+      // Entsperrens schon „seit 15 Minuten untätig" — der Messenger blitzt auf
+      // und ist beim nächsten Takt wieder zu.
+      set({
+        entsperrt: true,
+        letzteAktivitaet: Date.now(),
+        fehlversuche: 0,
+        gesperrtBis: 0,
+        fehler: null,
+      })
       return true
     } catch (err) {
       // Ein fehlender Schlüsselspeicher ist kein falscher PIN. `leiteAb` wirft

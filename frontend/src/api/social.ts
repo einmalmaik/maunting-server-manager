@@ -361,6 +361,37 @@ export async function getChatMediaSignedUrl(
   )
 }
 
+/**
+ * Löscht einen hochgeladenen Anhang endgültig. Nur der Absender darf das.
+ *
+ * Ein Anhang liegt nicht im Umschlag, sondern als eigener Blob daneben. Ohne
+ * diesen Aufruf wäre die Nachricht gelöscht und das Bild weiter abrufbar.
+ */
+export async function loescheChatMedium(
+  mediaId: string
+): Promise<{ ok: boolean; deleted: boolean }> {
+  return api<{ ok: boolean; deleted: boolean }>(
+    `/social/media/${encodeURIComponent(mediaId)}`,
+    { method: 'DELETE' }
+  )
+}
+
+/**
+ * Nimmt die Umschläge einer gelöschten Nachricht aus der blinden Mailbox.
+ *
+ * Adressiert wird über die logische Nachrichtenkennung: dieselbe Nachricht
+ * liegt dort als eine Kopie je Zielgerät (`<kennung>#<geraet>`).
+ */
+export async function loescheBlindeUmschlaege(
+  blindMailboxId: string,
+  clientUuid: string
+): Promise<{ ok: boolean; deleted: number }> {
+  return api<{ ok: boolean; deleted: number }>(
+    `/social/e2ee/envelopes/${encodeURIComponent(blindMailboxId)}?client_uuid=${encodeURIComponent(clientUuid)}`,
+    { method: 'DELETE' }
+  )
+}
+
 export async function downloadChatMedia(signedUrl: string): Promise<string> {
   const res = await apiStream(signedUrl, {
     method: 'GET',
