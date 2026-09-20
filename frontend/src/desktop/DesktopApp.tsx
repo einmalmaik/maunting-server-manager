@@ -954,9 +954,9 @@ function Hauptseite({
                   }`}
                 >
                   <MessageSquare className="h-4 w-4" />
-                  <span className="flex-1">{t('mss.app.messenger', t('nav.chat'))}</span>
+                  <span>{t('mss.app.messenger', t('nav.chat'))}</span>
                   {totalMessengerUnread > 0 && (
-                    <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-label-sm font-bold rounded-full bg-primary text-on-primary">
+                    <span className="ml-auto inline-flex items-center justify-center px-1.5 py-0.5 text-label-sm font-bold rounded-full bg-primary text-on-primary">
                       {totalMessengerUnread > 99 ? '99+' : totalMessengerUnread}
                     </span>
                   )}

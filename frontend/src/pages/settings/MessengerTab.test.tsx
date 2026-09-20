@@ -21,24 +21,37 @@ vi.mock('@/stores/toastStore', () => ({
   toast: { error: (t: string) => toastFehler(t), success: vi.fn(), info: vi.fn() },
 }))
 
+const de = (await import('@/locales/de.json')).default as Record<string, any>
+const en = (await import('@/locales/en.json')).default as Record<string, any>
+
+function holeText(key: string, opts?: Record<string, unknown>): string {
+  if (key === 'settings.messenger.activeRooms') {
+    const count = opts?.count ?? 0
+    return count === 1 ? de.settings.messenger.activeRooms_one : de.settings.messenger.activeRooms_other
+  }
+  const parts = key.split('.')
+  let cur = de as any
+  for (const p of parts) {
+    cur = cur?.[p]
+  }
+  return typeof cur === 'string' ? cur : key
+}
+
 vi.mock('react-i18next', async (importOriginal) => ({
   ...(await importOriginal<typeof import('react-i18next')>()),
-  // Der Tab liefert zu jedem Schlüssel einen deutschen Standardtext mit; im Test
-  // wird genau der geprüft, damit die Zusagen an den Betreiber sichtbar bleiben.
-  // Dass dieselben Texte auch in `de.json` stehen, prüft der letzte Block.
   useTranslation: () => ({
-    t: (_key: string, fallback?: string, werte?: Record<string, unknown>) => {
-      const text = fallback ?? _key
+    t: (key: string, fallbackOrWerte?: string | Record<string, unknown>, maybeWerte?: Record<string, unknown>) => {
+      const isOpts = typeof fallbackOrWerte === 'object' && fallbackOrWerte !== null
+      const werte = isOpts ? fallbackOrWerte : maybeWerte
+      const rawText = typeof fallbackOrWerte === 'string' ? fallbackOrWerte : holeText(key, werte)
       return werte
-        ? text.replace(/\{\{(\w+)\}\}/g, (_treffer, name) => String(werte[name] ?? ''))
-        : text
+        ? rawText.replace(/\{\{(\w+)\}\}/g, (_treffer: string, name: string) => String(werte[name] ?? ''))
+        : rawText
     },
   }),
 }))
 
 const { MessengerTab } = await import('./MessengerTab')
-const de = (await import('@/locales/de.json')).default as Record<string, any>
-const en = (await import('@/locales/en.json')).default as Record<string, any>
 
 const LOKAL_OK = {
   modus: 'lokal' as const,
