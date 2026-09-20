@@ -103,6 +103,13 @@ const ABGESCHAFFT_MUSTER = new RegExp(
  */
 const ZU_KLEIN = /(?<![\w-])text-\[(?:[1-9]|1[01])px\](?![\w-])/g
 
+/**
+ * Halbe Schritte gibt es in Tailwinds Abstandsskala nur bis 3.5 — `h-8.5`
+ * erzeugt nichts, und der Knopf bleibt so hoch, wie er ohnehin war. Genau so
+ * stand der „Neue Notiz"-Knopf auf 32 px neben zwei 40-px-Feldern.
+ */
+const HALBER_SCHRITT = /(?<![\w-])(?:[wh]|p[xytrbl]?|m[xytrbl]?|gap(?:-[xy])?|space-[xy]|inset|top|right|bottom|left|min-[wh]|max-[wh])-(?:[4-9]|[1-9]\d)\.5(?![\w-])/g
+
 /** `text-<rolle>-<stufe>` — jede Stufe muss in der Config stehen. */
 const SKALA_NAME = /(?<![\w-])text-(display|headline|title|body|label|mono)-([a-z-]+)(?![\w-])/g
 
@@ -143,6 +150,9 @@ for (const file of await sourceFiles(sourceDir)) {
   }
   for (const treffer of source.matchAll(ABGESCHAFFT_MUSTER)) {
     fehler.push(`${relativ}: "${treffer[0]}" gibt es nicht mehr — heute ${ABGESCHAFFT.get(treffer[1])}`)
+  }
+  for (const treffer of source.matchAll(HALBER_SCHRITT)) {
+    fehler.push(`${relativ}: "${treffer[0]}" erzeugt kein CSS — halbe Schritte gibt es nur bis 3.5`)
   }
   for (const treffer of source.matchAll(ZU_KLEIN)) {
     fehler.push(`${relativ}: "${treffer[0]}" liegt unter der Skala — text-label-sm (12px) ist die Untergrenze`)

@@ -361,7 +361,7 @@ export function FriendsListDock({
                   variant="primary"
                   size="sm"
                   onClick={() => navigate('/chat')}
-                  className="w-full text-xs h-7.5 gap-1.5 justify-center"
+                  className="w-full gap-1.5 justify-center"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
                   <span>{t('social.friends.openChatRoom')}</span>
