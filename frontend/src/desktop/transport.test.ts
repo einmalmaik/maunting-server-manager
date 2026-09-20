@@ -95,7 +95,21 @@ describe('native Sitzung', () => {
 
     await expect(api('/auth/me')).rejects.toThrow()
     expect(useAuthStore.getState().isAuthenticated).toBe(false)
-    // Das verbrannte Token fliegt aus dem Tresor — Aufheben waere riskant.
+    // Das Token darf im Hintergrund bei 401/403 NICHT gelöscht werden (nur bei explizitem Logout)
+    expect(invokeMock).not.toHaveBeenCalledWith('refresh_token_loeschen')
+  })
+
+  it('abmelden() ruft refresh_token_loeschen auf', async () => {
+    const { abmelden } = await import('./auth')
+    invokeMock.mockImplementation((befehl: string) => {
+      if (befehl === 'refresh_token_laden') return Promise.resolve('mein-token')
+      return Promise.resolve(null)
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(antwort(200, { message: 'Abgemeldet' }))),
+    )
+    await abmelden()
     expect(invokeMock).toHaveBeenCalledWith('refresh_token_loeschen')
   })
 

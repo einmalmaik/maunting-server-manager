@@ -101,7 +101,22 @@ class AuthService:
         token_hash = AuthService._hash_token(plain_token)
         token_family = family or secrets.token_urlsafe(16)
 
-        expires_at = datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days)
+        is_paired = (geraet == "desktop")
+        if not is_paired and token_family:
+            from models.device_pairing import DevicePairing
+            is_paired = (
+                db.query(DevicePairing)
+                .filter(DevicePairing.family == token_family, DevicePairing.redeemed_at.isnot(None))
+                .first()
+                is not None
+            )
+
+        expire_days = (
+            settings.paired_device_refresh_token_expire_days
+            if is_paired
+            else settings.refresh_token_expire_days
+        )
+        expires_at = datetime.now(timezone.utc) + timedelta(days=expire_days)
 
         rt = RefreshToken(
             user_id=user_id,

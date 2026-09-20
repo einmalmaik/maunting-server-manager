@@ -310,12 +310,13 @@ export function DesktopApp() {
     const nachfragen = async () => {
       const pruefung = await stillAnmeldenDetail(8000)
       if (!aktiv || pruefung.status === 'offline') return
-      setIsOffline(false)
       if (pruefung.status === 'abgelehnt') {
-        setPhase('kopplung')
-      } else {
-        void useAuthStore.getState().checkAuth()
+        // Nicht sofort die Kopplung verwerfen: Bei vorübergehenden Störungen bleibt
+        // das gekoppelte Gerät offline und versucht es im nächsten Takt erneut.
+        return
       }
+      setIsOffline(false)
+      void useAuthStore.getState().checkAuth()
     }
 
     const takt = setInterval(() => void nachfragen(), 20000)
@@ -327,12 +328,13 @@ export function DesktopApp() {
 
   useEffect(() => {
     if (phase === 'bereit' && !angemeldet && !isOffline) {
-      // Wenn das authStore-Flag nicht gesetzt ist, noch einmal prüfen, ob das
-      // Tresor-Token tatsächlich abgelehnt wurde, bevor zur Neukopplung gezwungen wird.
+      // Wenn das authStore-Flag im laufenden Betrieb nicht gesetzt ist, transiente
+      // Fehler abfangen: Statt sofort zur Neukopplung zu zwingen, in den Offline-Modus
+      // wechseln, damit Tresor, Kalender und Notizen lokal benutzbar bleiben.
       void (async () => {
         const pruefung = await stillAnmeldenDetail(3000)
         if (pruefung.status === 'abgelehnt') {
-          setPhase('kopplung')
+          setIsOffline(true)
         } else if (pruefung.status === 'offline') {
           setIsOffline(true)
         } else if (pruefung.status === 'erfolg') {

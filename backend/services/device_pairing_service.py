@@ -145,6 +145,18 @@ def familie_vermerken(db: Session, einladung: DevicePairing, family: str) -> Non
     db.commit()
 
 
+def ist_gekoppelt(db: Session, family: str | None) -> bool:
+    """Prueft, ob eine Refresh-Familie zu einem aktiv gekoppelten Geraet gehoert."""
+    if not family:
+        return False
+    return (
+        db.query(DevicePairing)
+        .filter(DevicePairing.family == family, DevicePairing.redeemed_at.isnot(None))
+        .first()
+        is not None
+    )
+
+
 def geraete(db: Session, user: User) -> list[DevicePairing]:
     """Die gekoppelten Geraete dieses Benutzers, neueste zuerst."""
     return (

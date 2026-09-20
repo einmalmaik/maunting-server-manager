@@ -240,6 +240,36 @@ class TestGeraeteliste:
         rot_retry = client.post("/api/auth/refresh", json={"refresh_token": initial_refresh})
         assert rot_retry.status_code == 200
         assert rot_retry.json()["access_token"]
+        # Keine Verzweigung (Bifurkation): Erneute Anfragen innerhalb der Grace Period erhalten exakt dasselbe Token
+        assert rot_retry.json()["refresh_token"] == rot1_data["refresh_token"]
+
+    def test_gekoppeltes_geraet_erhaelt_dauerhaftes_refresh_token(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
+    ):
+        """Refresh-Tokens für gekoppelte Geräte verfallen nicht nach 30 Tagen, sondern sind dauerhaft (10 Jahre) gültig."""
+        _mit_chatrecht(db, regular_user)
+        code = _code_erzeugen(client, user_cookies, label="DauerhaftesGeraet")["code"]
+        redeem_res = client.post("/api/auth/devices/redeem", json={"code": code}).json()
+        initial_refresh = redeem_res["refresh_token"]
+
+        token_hash = AuthService._hash_token(initial_refresh)
+        rt_db = db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
+        assert rt_db is not None
+        expires_at = rt_db.expires_at.replace(tzinfo=timezone.utc) if rt_db.expires_at.tzinfo is None else rt_db.expires_at
+        rest_tage = (expires_at - datetime.now(timezone.utc)).days
+        assert rest_tage >= 3600
+
+        # Auch nach Rotation muss das neue Refresh-Token dauerhafte Gültigkeit haben
+        rot1 = client.post("/api/auth/refresh", json={"refresh_token": initial_refresh})
+        assert rot1.status_code == 200
+        rot1_refresh = rot1.json()["refresh_token"]
+
+        rot_hash = AuthService._hash_token(rot1_refresh)
+        rt_rot = db.query(RefreshToken).filter(RefreshToken.token_hash == rot_hash).first()
+        assert rt_rot is not None
+        expires_at_rot = rt_rot.expires_at.replace(tzinfo=timezone.utc) if rt_rot.expires_at.tzinfo is None else rt_rot.expires_at
+        rest_tage_rot = (expires_at_rot - datetime.now(timezone.utc)).days
+        assert rest_tage_rot >= 3600
 
     def test_wiederverwendung_ausserhalb_grace_period_revoziert_familie(
         self, client: TestClient, db: Session, regular_user: User, user_cookies: dict

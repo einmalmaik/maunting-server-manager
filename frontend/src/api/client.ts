@@ -188,6 +188,13 @@ function translateErrorCode(code: string): string | null {
   return i18n.exists(key) ? i18n.t(key) : null
 }
 
+export class AuthExpiredError extends Error {
+  constructor(message = 'Session abgelaufen') {
+    super(message)
+    this.name = 'AuthExpiredError'
+  }
+}
+
 let refreshPromise: Promise<void> | null = null
 
 async function doRefresh(): Promise<void> {
@@ -195,18 +202,37 @@ async function doRefresh(): Promise<void> {
   // Cookies — aber durch denselben Trichter hier, damit gleichzeitige 401er
   // weiterhin genau einen Refresh auslösen.
   if (nativeSitzung) {
-    if (!(await nativeSitzung.erneuern())) {
-      throw new Error('Session abgelaufen')
+    let ok = false
+    try {
+      ok = await nativeSitzung.erneuern()
+    } catch (err) {
+      if (err instanceof AuthExpiredError) {
+        throw err
+      }
+      throw err
+    }
+    if (!ok) {
+      throw new Error('Refresh temporär nicht möglich')
     }
     return
   }
-  const res = await fetch(apiUrl('/auth/refresh'), {
-    method: 'POST',
-    credentials: 'include',
-  })
+  let res: Response
+  try {
+    res = await fetch(apiUrl('/auth/refresh'), {
+      method: 'POST',
+      credentials: 'include',
+    })
+  } catch (err) {
+    // Verbindungsabbruch, Offline, Timeout etc.
+    // Das ist KEIN Ablauf der Sitzung; Fehler werfen, ohne die Sitzung zu räumen.
+    throw err
+  }
   captureCsrfFromResponse(res)
+  if (res.status === 401 || res.status === 403) {
+    throw new AuthExpiredError('Session abgelaufen')
+  }
   if (!res.ok) {
-    throw new Error('Session abgelaufen')
+    throw new Error(`Refresh fehlgeschlagen: HTTP ${res.status}`)
   }
 }
 
@@ -281,8 +307,22 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
 
   // Token-Refresh bei 401 (ausser bei Login/Refresh selbst)
   if (res.status === 401 && path !== '/auth/refresh' && path !== '/auth/login') {
+    let refreshed = false
     try {
       await refreshToken()
+      refreshed = true
+    } catch (refreshErr) {
+      // Nur bei echter Authentifizierungsablehnung (401/403 auf /auth/refresh) wird
+      // die Sitzung geräumt. Bei Verbindungsabbrüchen, Timeouts, 502/503 oder Abort
+      // bleibt der Sitzungsspeicher unverändert.
+      if (refreshErr instanceof AuthExpiredError) {
+        useAuthStore.getState().clearSession()
+        throw new SanitizedApiError(i18n.t('errors.SESSION_EXPIRED'), { status: 401 })
+      }
+      throw refreshErr
+    }
+
+    if (refreshed) {
       // Header neu bauen (CSRF und Bearer koennten sich geaendert haben)
       const newHeaders = { ...headers }
       const neuesBearer = nativesToken()
@@ -295,29 +335,21 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
       } else {
         delete newHeaders['X-CSRF-Token']
       }
-      res = await fetch(url, {
-        ...fetchOptions,
-        headers: newHeaders,
-      })
-      captureCsrfFromResponse(res)
-    } catch {
-      // Refresh fehlgeschlagen — die Sitzung ist zu Ende, und der Speicher des
-      // Tabs muss das nachvollziehen. Vorher tat es niemand: kein Aufrufer
-      // wertete SESSION_EXPIRED aus, `isAuthenticated` blieb true, die Wache
-      // der Route griff nicht, und offene Intervalle (z. B. das
-      // Fünf-Sekunden-Polling der Serverdetails) feuerten weiter gegen den
-      // ratenbegrenzten Refresh. Danach fiel zwar das Flag, aber sonst nichts —
-      // Benutzer, Rechte und die Knotenliste mit ihren Agentenadressen standen
-      // weiter im Speicher. `clearSession()` ist der eine Weg, den auch das
-      // bewusste Abmelden geht.
-      // `getState()` läuft erst zur Aufrufzeit, der Importzyklus zum authStore
-      // ist damit unkritisch.
-      useAuthStore.getState().clearSession()
-      // Lokalisierte Meldung, damit der Caller die Fehlermeldung direkt
-      // anzeigen kann (kein doppelter `t()`-Aufruf noetig). Diese Meldung
-      // stammt aus einem verarbeiteten Backend-Response-Pfad und ist
-      // sanitisiert (SanitizedApiError).
-      throw new SanitizedApiError(i18n.t('errors.SESSION_EXPIRED'))
+      try {
+        res = await fetch(url, {
+          ...fetchOptions,
+          headers: newHeaders,
+        })
+        captureCsrfFromResponse(res)
+      } catch (retryErr) {
+        // Ein Netzwerkfehler, Timeout oder AbortError beim wiederholten Request
+        // darf NIEMALS useAuthStore.getState().clearSession() aufrufen!
+        if (!isCurrentlyOffline && typeof window !== 'undefined' && isNetworkOrOfflineError(retryErr)) {
+          isCurrentlyOffline = true
+          window.dispatchEvent(new CustomEvent('msm:network-offline'))
+        }
+        throw retryErr
+      }
     }
   }
 
@@ -400,21 +432,31 @@ export async function apiStream(path: string, options: RequestInit): Promise<Res
   captureCsrfFromResponse(res)
 
   if (res.status === 401 && path !== '/auth/refresh' && path !== '/auth/login') {
+    let refreshed = false
     try {
       await refreshToken()
+      refreshed = true
+    } catch (refreshErr) {
+      if (refreshErr instanceof AuthExpiredError) {
+        useAuthStore.getState().clearSession()
+        throw new SanitizedApiError(i18n.t('errors.SESSION_EXPIRED'), { status: 401 })
+      }
+      throw refreshErr
+    }
+
+    if (refreshed) {
       const retryHeaders = { ...headers }
       const neuesBearer = nativesToken()
       if (neuesBearer) retryHeaders['Authorization'] = `Bearer ${neuesBearer}`
       const csrf = getCsrfToken()
       if (csrf) retryHeaders['X-CSRF-Token'] = csrf
       else delete retryHeaders['X-CSRF-Token']
-      res = await fetch(url, { ...fetchOptions, headers: retryHeaders })
-      captureCsrfFromResponse(res)
-    } catch {
-      // Wie in `api()`: der ganze Sitzungsspeicher fällt, sonst bleibt die
-      // Oberfläche scheinbar angemeldet stehen — mit fremden Daten darin.
-      useAuthStore.getState().clearSession()
-      throw new SanitizedApiError(i18n.t('errors.SESSION_EXPIRED'))
+      try {
+        res = await fetch(url, { ...fetchOptions, headers: retryHeaders })
+        captureCsrfFromResponse(res)
+      } catch (retryErr) {
+        throw retryErr
+      }
     }
   }
 
