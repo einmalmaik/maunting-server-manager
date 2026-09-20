@@ -266,6 +266,22 @@ export function ServerIncidentNotifier() {
           return
         }
 
+        /**
+         * „Hier liegt etwas Neues" — und zwar **vor** der Stummschaltung.
+         *
+         * Die Erwähnungswache hing bis 20.09.2026 am Ungelesen-Zähler, und den
+         * überspringt der stumme Pfad gleich darunter. In einer stummen Gruppe
+         * erschien deshalb nicht einmal das @-Abzeichen, obwohl genau das der
+         * Sinn der Sache ist: kein Ton, aber sehen, dass man gemeint war.
+         *
+         * Das Ereignis nennt nur die Mailbox. Es trägt keinen Inhalt und löst
+         * keine Meldung aus; wer daran hängt, entscheidet selbst, ob er
+         * hinsieht.
+         */
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('msm:mailbox-neu', { detail: { mid } }))
+        }
+
         // 5. Stummschaltung und Blockierung prüfen
         if (store.isMuted(mid)) return
         if (meta.userId && store.isBlocked(meta.userId)) {

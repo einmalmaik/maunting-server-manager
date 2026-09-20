@@ -133,6 +133,31 @@ export const GROUP_PERMISSION_DEFINITIONS = [
   },
 ]
 
+/**
+ * Was in den Standardrechten **nicht** angeboten wird.
+ *
+ * `manage_roles` gehört nicht dorthin: wer Rollen verwalten darf, kann sich
+ * jedes andere Recht selbst geben. Ein Haken, der das für alle setzt, wäre
+ * keine Einstellung, sondern die Abschaffung der Rollen.
+ */
+const NICHT_ALS_STANDARD: ReadonlySet<string> = new Set(['manage_roles'])
+
+/** Was eine frische Gruppe mitbringt, solange der Server nichts anderes sagt. */
+const STANDARD_VORGABE = ['send_messages', 'attach_media', 'invite_members'] as const
+
+/**
+ * Die Abschnitte des Standardrechte-Reiters.
+ *
+ * Die Reihenfolge der Rechte innerhalb eines Abschnitts ist die aus
+ * `GROUP_PERMISSION_DEFINITIONS` — eine zweite Sortierliste wäre wieder eine
+ * Stelle, die man beim nächsten neuen Recht vergessen kann.
+ */
+const STANDARD_ABSCHNITTE: { titel: string | null; kategorien: readonly string[] }[] = [
+  { titel: null, kategorien: ['chat', 'members'] },
+  { titel: 'Sprach- und Videoanrufe', kategorien: ['calls'] },
+  { titel: 'Moderation', kategorien: ['moderation', 'administration'] },
+]
+
 const SYSTEM_GROUP_ROLES: GroupRoleDefinition[] = [
   {
     id: 'owner',
@@ -370,17 +395,16 @@ export function GroupPermissionsModal({
   const [isCreatingRole, setIsCreatingRole] = useState(false)
   const [expandedRoleDescriptions, setExpandedRoleDescriptions] = useState<Record<string, boolean>>({})
 
-  // Standard permissions (@everyone)
-  const [canSendMessages, setCanSendMessages] = useState(true)
-  const [canAttachMedia, setCanAttachMedia] = useState(true)
-  const [canInviteMembers, setCanInviteMembers] = useState(true)
-  const [canStartCalls, setCanStartCalls] = useState(true)
-  const [canJoinCalls, setCanJoinCalls] = useState(true)
-  const [canShareScreen, setCanShareScreen] = useState(false)
-  const [canMuteInCalls, setCanMuteInCalls] = useState(false)
-  const [canKickFromCalls, setCanKickFromCalls] = useState(false)
-  const [canDeleteMessages, setCanDeleteMessages] = useState(false)
-  const [canKickMembers, setCanKickMembers] = useState(false)
+  /**
+   * Die Standardrechte, als Menge der gesetzten Schlüssel.
+   *
+   * Vorher stand hier je Recht ein eigenes `useState`, dreimal wiederholt —
+   * beim Anlegen, beim Laden und beim Speichern. Zwei neue Rechte kamen ins
+   * Vokabular und fehlten hier still: der Dialog zeigte zehn Schalter, das
+   * Backend kannte zwölf. Deshalb kommt die Liste jetzt aus
+   * `GROUP_PERMISSION_DEFINITIONS` und nirgendwo sonst.
+   */
+  const [standardrechte, setStandardrechte] = useState<Set<string>>(new Set(STANDARD_VORGABE))
 
   const isOwner = group?.owner_user_id === currentUserId
   const currentUserRole = group?.role || (isOwner ? 'owner' : 'member')
@@ -389,17 +413,11 @@ export function GroupPermissionsModal({
   useEffect(() => {
     if (open && group) {
       void loadMembers()
-      const defPerms = (group.default_permissions || 'send_messages,attach_media,invite_members').split(',')
-      setCanSendMessages(defPerms.includes('send_messages'))
-      setCanAttachMedia(defPerms.includes('attach_media'))
-      setCanInviteMembers(defPerms.includes('invite_members'))
-      setCanStartCalls(defPerms.includes('start_group_calls'))
-      setCanJoinCalls(defPerms.includes('join_group_calls'))
-      setCanShareScreen(defPerms.includes('share_screen'))
-      setCanMuteInCalls(defPerms.includes('mute_in_calls'))
-      setCanKickFromCalls(defPerms.includes('kick_from_calls'))
-      setCanDeleteMessages(defPerms.includes('delete_messages'))
-      setCanKickMembers(defPerms.includes('kick_members'))
+      const gesetzt = (group.default_permissions || STANDARD_VORGABE.join(','))
+        .split(',')
+        .map((p) => p.trim())
+        .filter(Boolean)
+      setStandardrechte(new Set(gesetzt))
     }
   }, [open, group?.id, group?.default_permissions])
 
@@ -456,19 +474,13 @@ export function GroupPermissionsModal({
   const handleSaveDefaultPermissions = async () => {
     if (!group) return
     setSavingPermissions(true)
-    const perms: string[] = []
-    if (canSendMessages) perms.push('send_messages')
-    if (canAttachMedia) perms.push('attach_media')
-    if (canInviteMembers) perms.push('invite_members')
-    if (canStartCalls) perms.push('start_group_calls')
-    if (canJoinCalls) perms.push('join_group_calls')
-    if (canShareScreen) perms.push('share_screen')
-    if (canMuteInCalls) perms.push('mute_in_calls')
-    if (canKickFromCalls) perms.push('kick_from_calls')
-    if (canDeleteMessages) perms.push('delete_messages')
-    if (canKickMembers) perms.push('kick_members')
-
-    const permString = perms.join(',')
+    // In der Reihenfolge des Vokabulars, und nur, was hier auch angeboten
+    // wurde: ein Recht, das der Dialog nie zeigt, darf er auch nicht schreiben.
+    const permString = GROUP_PERMISSION_DEFINITIONS.filter(
+      (d) => !NICHT_ALS_STANDARD.has(d.key) && standardrechte.has(d.key),
+    )
+      .map((d) => d.key)
+      .join(',')
     try {
       const updated = await updateGroupPermissions(group.id, permString)
       toast.success('Standard-Gruppenrechte (@everyone) gespeichert.')
@@ -918,155 +930,58 @@ export function GroupPermissionsModal({
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-outline-variant/30 p-4 sm:p-6 bg-surface-container/60 shadow-xs">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
-                  <div className="p-3.5 rounded-xl bg-surface-container-high/60 border border-outline-variant/30 flex items-center justify-between gap-4">
-                    <div className="min-w-0 flex-1">
-                      <span className="text-xs font-bold text-primary block">
-                        Nachrichten senden
-                      </span>
-                      <span className="text-[11px] text-on-surface-variant leading-snug">
-                        Erlaubt regulären Mitgliedern das Schreiben und Versenden von Chatnachrichten.
-                      </span>
-                    </div>
-                    <Switch
-                      checked={canSendMessages}
-                      onCheckedChange={setCanSendMessages}
-                      disabled={!canManage}
-                      aria-label="Nachrichten senden erlauben"
-                    />
-                  </div>
-
-                  <div className="p-3.5 rounded-xl bg-surface-container-high/60 border border-outline-variant/30 flex items-center justify-between gap-4">
-                    <div className="min-w-0 flex-1">
-                      <span className="text-xs font-bold text-primary block">
-                        Medien, Notizen & Termine teilen
-                      </span>
-                      <span className="text-[11px] text-on-surface-variant leading-snug">
-                        Erlaubt das Anhängen von Fotos, Dokumenten, Notizen und Kalendereinträgen.
-                      </span>
-                    </div>
-                    <Switch
-                      checked={canAttachMedia}
-                      onCheckedChange={setCanAttachMedia}
-                      disabled={!canManage}
-                      aria-label="Medien teilen erlauben"
-                    />
-                  </div>
-
-                  <div className="p-3.5 rounded-xl bg-surface-container-high/60 border border-outline-variant/30 flex items-center justify-between gap-4">
-                    <div className="min-w-0 flex-1">
-                      <span className="text-xs font-bold text-primary block">
-                        Neue Mitglieder einladen
-                      </span>
-                      <span className="text-[11px] text-on-surface-variant leading-snug">
-                        Erlaubt das Teilen und Verwenden des öffentlichen Gruppen-Einladungslinks.
-                      </span>
-                    </div>
-                    <Switch
-                      checked={canInviteMembers}
-                      onCheckedChange={setCanInviteMembers}
-                      disabled={!canManage}
-                      aria-label="Mitglieder einladen erlauben"
-                    />
-                  </div>
-
-                  <div className="p-3.5 rounded-xl bg-surface-container-high/60 border border-outline-variant/30 flex items-center justify-between gap-4">
-                    <div className="min-w-0 flex-1">
-                      <span className="text-xs font-bold text-primary block">
-                        Nachrichten löschen & moderieren
-                      </span>
-                      <span className="text-[11px] text-on-surface-variant leading-snug">
-                        Erlaubt Mitgliedern das Löschen fremder Chatnachrichten.
-                      </span>
-                    </div>
-                    <Switch
-                      checked={canDeleteMessages}
-                      onCheckedChange={setCanDeleteMessages}
-                      disabled={!canManage}
-                      aria-label="Nachrichten löschen erlauben"
-                    />
-                  </div>
-
-                  <div className="p-3.5 rounded-xl bg-surface-container-high/60 border border-outline-variant/30 flex items-center justify-between gap-4 lg:col-span-2">
-                    <div className="min-w-0 flex-1">
-                      <span className="text-xs font-bold text-primary block">
-                        Mitglieder entfernen (Kicken)
-                      </span>
-                      <span className="text-[11px] text-on-surface-variant leading-snug">
-                        Erlaubt regulären Mitgliedern das Kicken anderer regulärer Teilnehmer.
-                      </span>
-                    </div>
-                    <Switch
-                      checked={canKickMembers}
-                      onCheckedChange={setCanKickMembers}
-                      disabled={!canManage}
-                      aria-label="Mitglieder kicken erlauben"
-                    />
-                  </div>
-                </div>
-
-                <div className="mt-5 border-t border-outline-variant/30 pt-5">
-                  <div className="mb-3 flex items-center gap-2">
-                    <Phone className="h-4 w-4 text-primary" />
-                    <span className="text-body-sm font-bold text-primary">Sprach- und Videoanrufe</span>
-                  </div>
-                  <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
-                    {([
-                      {
-                        checked: canStartCalls,
-                        set: setCanStartCalls,
-                        titel: 'Anrufe starten',
-                        text: 'Öffnet einen Gruppenanruf. Alle mit Beitrittsrecht sehen ihn.',
-                      },
-                      {
-                        checked: canJoinCalls,
-                        set: setCanJoinCalls,
-                        titel: 'Anrufen beitreten',
-                        text: 'Ohne dieses Recht bleibt ein laufender Anruf unsichtbar.',
-                      },
-                      {
-                        checked: canShareScreen,
-                        set: setCanShareScreen,
-                        titel: 'Bildschirm freigeben',
-                        text: 'Teilt einen Bildschirm oder ein Fenster im Anruf.',
-                      },
-                      {
-                        checked: canMuteInCalls,
-                        set: setCanMuteInCalls,
-                        titel: 'Im Anruf stummschalten',
-                        text: 'Nimmt anderen das Mikrofon. Der Betroffene kann es nicht selbst wieder einschalten.',
-                      },
-                      {
-                        checked: canKickFromCalls,
-                        set: setCanKickFromCalls,
-                        titel: 'Aus dem Anruf entfernen',
-                        text: 'Wirft jemanden aus dem Anruf. Die Gruppenmitgliedschaft bleibt bestehen.',
-                        breit: true,
-                      },
-                    ] as const).map((eintrag) => (
-                      <div
-                        key={eintrag.titel}
-                        className={`flex items-center justify-between gap-4 rounded-xl border border-outline-variant/30 bg-surface-container-high/60 p-3.5 ${
-                          'breit' in eintrag && eintrag.breit ? 'lg:col-span-2' : ''
-                        }`}
-                      >
-                        <div className="min-w-0 flex-1">
-                          <span className="block text-xs font-bold text-primary">{eintrag.titel}</span>
-                          <span className="text-[11px] leading-snug text-on-surface-variant">
-                            {eintrag.text}
-                          </span>
+              <div className="rounded-2xl border border-outline-variant/30 p-4 sm:p-6 bg-surface-container/60 shadow-xs space-y-5">
+                {STANDARD_ABSCHNITTE.map((abschnitt, i) => {
+                  const rechte = GROUP_PERMISSION_DEFINITIONS.filter(
+                    (d) => abschnitt.kategorien.includes(d.category) && !NICHT_ALS_STANDARD.has(d.key),
+                  )
+                  if (!rechte.length) return null
+                  return (
+                    <div
+                      key={abschnitt.titel ?? 'chat'}
+                      className={i > 0 ? 'border-t border-outline-variant/30 pt-5' : ''}
+                    >
+                      {abschnitt.titel && (
+                        <div className="mb-3 flex items-center gap-2">
+                          {abschnitt.titel === 'Moderation' ? (
+                            <Shield className="h-4 w-4 text-primary" />
+                          ) : (
+                            <Phone className="h-4 w-4 text-primary" />
+                          )}
+                          <span className="text-body-sm font-bold text-primary">{abschnitt.titel}</span>
                         </div>
-                        <Switch
-                          checked={eintrag.checked}
-                          onCheckedChange={eintrag.set}
-                          disabled={!canManage}
-                          aria-label={`${eintrag.titel} erlauben`}
-                        />
+                      )}
+                      <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
+                        {rechte.map((def) => (
+                          <div
+                            key={def.key}
+                            className="flex items-center justify-between gap-4 rounded-xl border border-outline-variant/30 bg-surface-container-high/60 p-3.5"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <span className="block text-xs font-bold text-primary">{def.title}</span>
+                              <span className="text-[11px] leading-snug text-on-surface-variant">
+                                {def.desc}
+                              </span>
+                            </div>
+                            <Switch
+                              checked={standardrechte.has(def.key)}
+                              onCheckedChange={(an) =>
+                                setStandardrechte((vorher) => {
+                                  const neu = new Set(vorher)
+                                  if (an) neu.add(def.key)
+                                  else neu.delete(def.key)
+                                  return neu
+                                })
+                              }
+                              disabled={!canManage}
+                              aria-label={`${def.title} erlauben`}
+                            />
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                </div>
+                    </div>
+                  )
+                })}
               </div>
 
               {canManage && (

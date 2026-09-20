@@ -102,13 +102,24 @@ function GruppenWache({ gruppe, eigeneId, identitaetRef, onErwaehnung }: WachePr
     }
 
     /**
-     * Ausgelöst wird am Ungelesen-Zähler, nicht am allgemeinen Sync-Ereignis.
+     * Zwei Auslöser, und beide sind bewusst schmal.
      *
-     * Der Zähler steigt genau dann, wenn in dieser Mailbox etwas Neues liegt.
-     * `msm:sync-event` dagegen trägt auch Anrufe, Präsenz und Servermeldungen
-     * — darauf zu lesen hieße, bei jedem Tastendruck eines Fremden eine
-     * fremde Mailbox zu entschlüsseln.
+     * `msm:mailbox-neu` meldet, dass in genau dieser Mailbox etwas Neues liegt.
+     * Es kommt **vor** der Stummschaltung — der Ungelesen-Zähler allein reichte
+     * nicht, denn in einer stummen Gruppe steigt er nie, und dann erschiene
+     * nicht einmal das @-Abzeichen. Genau das war bis zum 20.09.2026 der Fall.
+     *
+     * Der Zähler bleibt als zweiter Weg: er deckt die Fälle ab, in denen die
+     * Zählung von anderswo kommt. `msm:sync-event` wäre der falsche Draht — es
+     * trägt auch Anrufe, Präsenz und Servermeldungen, und darauf zu lesen hieße,
+     * bei jedem Tastendruck eines Fremden eine fremde Mailbox zu entschlüsseln.
      */
+    const aufNeue = (e: Event) => {
+      const ce = e as CustomEvent<{ mid?: string }>
+      if (ce.detail?.mid === mid) void pruefe()
+    }
+    window.addEventListener('msm:mailbox-neu', aufNeue)
+
     let letzterStand = useMessengerNotificationStore.getState().unreadCounts[mid] || 0
     const abbestellen = useMessengerNotificationStore.subscribe((zustand) => {
       const jetzt = zustand.unreadCounts[mid] || 0
@@ -122,6 +133,7 @@ function GruppenWache({ gruppe, eigeneId, identitaetRef, onErwaehnung }: WachePr
 
     return () => {
       lebt = false
+      window.removeEventListener('msm:mailbox-neu', aufNeue)
       abbestellen()
     }
   }, [mid, eigeneId, konversation, onErwaehnung])
