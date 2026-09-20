@@ -48,7 +48,7 @@
     "location": "Ort / Meeting-Link",
     "locationPlaceholder": "z. B. Konferenzraum A oder Teams / Zoom",
     "descriptionLabel": "Beschreibung / Notizen",
-    "descriptionPlaceholder": "Agenda, Vorbereitungspunkte oder Details...",
+    "descriptionPlaceholder": "Agenda, Vorbereitungspunkte oder Details …",
     "color": "Farbkennzeichnung",
     "category": "Kategorie",
     "teamSelect": "Team zuordnen",
@@ -58,11 +58,11 @@
     "nodeSelect": "Node zuordnen",
     "selectNodeOptional": "Node wählen (optional)",
     "allNodesOrLocal": "Lokale Node (Standard)",
-    "saving": "Speichern...",
+    "saving": "Speichern …",
     "feedModalTitle": "Kalender abonnieren & exportieren",
     "feedModalDescription": "Du kannst deinen MSM-Kalender in jeder gängigen Kalender-App (Windows Kalender, Microsoft Outlook, Thunderbird, Apple Calendar, Google Calendar) synchronisieren oder als .ics-Datei herunterladen.",
     "feedUrlLabel": "iCal / Webcal Feed-URL",
-    "loadingFeedUrl": "Lade Feed-URL...",
+    "loadingFeedUrl": "Lade Feed-URL …",
     "feedUrlCopied": "URL in die Zwischenablage kopiert",
     "downloadIcs": ".ics-Datei herunterladen",
     "filterAll": "Alle",
@@ -92,7 +92,7 @@
     "newNote": "Neue Notiz",
     "newNoteShort": "Neu",
     "editNote": "Notiz bearbeiten",
-    "searchPlaceholder": "Notizen durchsuchen...",
+    "searchPlaceholder": "Notizen durchsuchen …",
     "categories": {
       "all": "Alle Kategorien",
       "personal": "Persönlich",
@@ -115,7 +115,7 @@
     "emptyArchivedDesc": "Archivierte Notizen werden hier angezeigt.",
     "activeView": "Aktiv",
     "archivedView": "Archiviert",
-    "contentPlaceholder": "Schreibe deine Notiz, Checkliste [ ] oder formatierten Text...",
+    "contentPlaceholder": "Schreibe deine Notiz, Checkliste [ ] oder formatierten Text …",
     "noTeamsAvailable": "Du bist derzeit in keinem Team Mitglied.",
     "pin": "Anpinnen",
     "unpin": "Lösen",
@@ -137,7 +137,7 @@
     "saveError": "Fehler beim Speichern der Notiz.",
     "titleRequired": "Bitte gib einen Titel für die Notiz ein.",
     "formTitle": "Titel der Notiz",
-    "formTitlePlaceholder": "z. B. Einkaufsliste, Ideen, Server-Setup...",
+    "formTitlePlaceholder": "z. B. Einkaufsliste, Ideen, Server-Setup …",
     "formContent": "Inhalt (Markdown & Checklisten unterstützt)",
     "formCategory": "Kategorie",
     "formColor": "Farbe",
@@ -175,10 +175,10 @@
     "clusterAdminTitle": "Managed-Postgres Cluster-Admin",
     "clusterAdminBody": "Das interne Passwort von msm_admin steuert Provisioning und Admin-DDL der Managed-Postgres-Instanz pro Node. Es wird verschlüsselt gespeichert. Eine Rotation erneuert das Passwort auf den Nodes und im Panel, ohne es in der UI anzuzeigen.",
     "notPanelLogin": "Nicht: Panel-Login-Passwort",
-    "notAppDbUser": "Nicht: App-DB-User pro Gameserver (msm_s…_u…)",
+    "notAppDbUser": "Nicht: App-DB-User pro Gameserver (msm_s …_u …)",
     "isMsmAdmin": "Ja: Cluster-Rolle msm_admin (Managed Postgres)",
     "rotateBtn": "Cluster-Admin-Passwort rotieren",
-    "rotating": "Rotiere…",
+    "rotating": "Rotiere …",
     "rotateConfirmTitle": "Managed-Postgres-Admin rotieren?",
     "rotateConfirmBody": "Erneuert das interne Cluster-Admin-Passwort (msm_admin) auf allen Nodes und im Panel. Das neue Passwort wird nicht in der UI angezeigt.",
     "rotateConfirmBtn": "Jetzt rotieren",
@@ -470,7 +470,7 @@
       "total_other": "{{count}} Einträge insgesamt",
       "countPage": "{{shown}} von {{total}} auf dieser Seite",
       "rememberedAt": "Gemerkt: {{date}}",
-      "lastUsedAt": "Zuletzt genutzt: {{date}}",
+      "lastUsedAt": "Zuletzt genutzt {{date}}",
       "expandAll": "Alle aufklappen",
       "collapseAll": "Alle einklappen",
       "rawKey": "Schlüssel: {{key}}",
@@ -479,7 +479,7 @@
       "newEntry": "Neuer Eintrag",
       "editEntry": "Eintrag bearbeiten",
       "keyPlaceholder": "z. B. vorliebe-getraenke",
-      "valuePlaceholder": "Wert oder Präferenz eingeben..."
+      "valuePlaceholder": "Wert oder Präferenz eingeben …"
     },
     "skills": {
       "title": "Skills",
@@ -488,9 +488,9 @@
       "learnedPending": "Skill „{{name}}“ gelernt (wartet auf Freigabe)",
       "scopes": {
         "shipped": "mitgeliefert",
-        "global": "panelweit",
+        "global": "Panelweit",
         "team": "Team",
-        "personal": "persönlich",
+        "personal": "Persönlich",
         "namedTeam": "Team: {{name}}"
       },
       "origins": {
@@ -582,7 +582,7 @@
       "clear": "Verlauf löschen",
       "clearTitle": "Verlauf löschen?",
       "clearConfirm": "Alle Nachrichten dieser Unterhaltung wirklich löschen? Bereits ausgeführte Aktionen bleiben im Audit-Log.",
-      "reasoning": "Nachdenken",
+      "reasoning": "Denkt nach …",
       "thinkingNow": "Denkt nach …",
       "thought": "Nachgedacht",
       "noPermission": "Keine Berechtigung für den KI-Assistenten.",
@@ -690,7 +690,7 @@
       "status": {
         "proposed": "Prüfung erforderlich",
         "confirmed": "Bestätigt",
-        "executing": "Wird ausgeführt",
+        "executing": "Wird ausgeführt …",
         "succeeded": "Ausgeführt",
         "failed": "Fehlgeschlagen",
         "expired": "Abgelaufen"
@@ -769,8 +769,8 @@
         "terminate_grace_days": "Aufbewahrung nach Kündigung (Tage)",
         "webhook_url": "Webhook-Ziel"
       },
-      "reasonLabel": "Begründung der KI:",
-      "effectLabel": "Erwartete Wirkung:",
+      "reasonLabel": "Begründung der KI",
+      "effectLabel": "Erwartete Wirkung",
       "autonomousBadge": "Automatisch ausgeführt",
       "autonomousHint": "Diese Aktion lief ohne Rückfrage, weil du den autonomen Modus für diesen Bereich freigegeben hast. Berechtigungen wurden unverändert geprüft; der Vorgang steht vollständig im Audit-Log."
     },
@@ -807,7 +807,7 @@
       "desktop_aufraeumen": "Aufgeräumt",
       "desktop_artifact": "Software/Mod verwaltet",
       "forget_memory": "Erinnerungen gelöscht",
-      "forget_skill": "Skill gelöscht",
+      "forget_skill": "Skill gelöscht.",
       "learn_skill": "Skill gelernt",
       "list_blueprints": "Verfügbare Servertypen gelesen",
       "list_my_servers": "Serverliste gelesen",
@@ -1045,7 +1045,7 @@
         "verbindet": "Verbindet …",
         "bereit": "Bereit, sprich einfach los",
         "hoert": "Hört zu",
-        "denkt": "Denkt nach",
+        "denkt": "Denkt nach …",
         "spricht": "Spricht"
       },
       "errors": {
@@ -1093,7 +1093,7 @@
       "title": "Guardian-Reparaturen",
       "subtitle": "Läuft im Hintergrund. Ausgelöst hat es eine Störung, nicht du.",
       "toGuardianMode": "Guardian-Fenster",
-      "running": "Arbeitet gerade",
+      "running": "Arbeitet …",
       "readOnly": "Nur Lesezugriff. Eine neue Nachricht würde die laufende Reparatur unterbrechen. Fragen bitte im Chat stellen.",
       "emptyTitle": "Nichts zu reparieren",
       "emptyDescription": "Meldet die Guardian-Engine eine Störung bei aktiver Autonomie, übernimmt die KI hier automatisch die Analyse.",
@@ -1339,8 +1339,8 @@
         "weather": "Wetterdaten",
         "news": "Nachrichten & Websuche",
         "done": "Fertig",
-        "running": "Läuft...",
-        "waiting": "Wartet..."
+        "running": "Läuft …",
+        "waiting": "Wartet …"
       }
     },
     "usage": {
@@ -1379,7 +1379,7 @@
           "provider": "gemessen",
           "estimate": "geschätzt",
           "none": "kein Preis",
-          "unknown": "unbekannt"
+          "unknown": "Unbekannt"
         }
       }
     },
@@ -1435,7 +1435,7 @@
       "title": "Worker",
       "subtitle": "Hintergrundaufgaben und deren Ausführungsverlauf.",
       "listLabel": "Worker",
-      "running": "arbeitet",
+      "running": "Arbeitet …",
       "waitingApproval": "wartet auf deine Freigabe",
       "waitingUser": "wartet auf deine Antwort",
       "waitingWake": "schläft bis zum nächsten Wecken",
@@ -1523,7 +1523,7 @@
     "fingerprintPlaceholder": "64 Hex-Zeichen vom install-msm-agent.sh",
     "fingerprintHint": "SHA-256 des Agent-Zertifikats (Self-signed Pinning). Pflicht für Remote-Nodes.",
     "fingerprintRequired": "TLS-Fingerprint ist für Remote-Nodes erforderlich.",
-    "searchPlaceholder": "Nodes filtern...",
+    "searchPlaceholder": "Nodes filtern …",
     "loadFailed": "Nodes konnten nicht geladen werden.",
     "created": "Node angelegt.",
     "updated": "Node aktualisiert.",
@@ -1541,7 +1541,7 @@
     "serverCount": "{{count}} Server",
     "cpuCores": "{{count}} Kerne",
     "diskTotal": "Disk {{value}}",
-    "freeRam": "frei {{value}}",
+    "freeRam": "Frei {{value}}",
     "ramCapacity": "Kapazität {{value}}",
     "cpuModelUnknown": "CPU-Modell unbekannt",
     "ramBooked": "{{used}} / {{total}} gebucht",
@@ -1549,7 +1549,7 @@
     "ramAllocatableShort": "zuweisbar {{value}}",
     "diskPanelUsed": "Panel & DBs: {{value}}",
     "diskSystemUsed": "System & Andere: {{value}}",
-    "diskFree": "Frei: {{value}}",
+    "diskFree": "Frei {{value}}",
     "diskBooked": "{{used}} / {{total}} zugewiesen",
     "diskAllocatable": "zuweisbar {{value}}",
     "capacitySubtitle": "{{online}} / {{total}} online",
@@ -1689,7 +1689,7 @@
       "metaCategory": "steam_game, non_steam_game, voice_server, bot.",
       "metaAuthor": "Ersteller der Blueprint.",
       "metaDescription": "Kurze Beschreibung für das UI-Dropdown.",
-      "runtimeImage": "Gültiges Docker-Image (z.B. ubuntu:24.04).",
+      "runtimeImage": "Gültiges Docker-Image (z. B. ubuntu:24.04).",
       "runtimeWorkdir": "Arbeitsverzeichnis im Container.",
       "runtimeEnv": "Umgebungsvariablen als Key-Value-Dict. Werte dürfen Port-Platzhalter enthalten: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}. Kein {INSTALL_DIR} oder {ENV.<KEY>} in env-Werten.",
       "runtimeStartup": "Startbefehl (wird als argv übergeben, KEINE Shell). Gültige Platzhalter: {SERVER_NAME}, {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}, {INSTALL_DIR}, {MOD_ARG}. {SERVER_NAME} übernimmt den individuellen Namen des MSM-Servers. Zusätzlich {ENV.<KEY>} für eigene Env-Variablen. Verbotene Zeichen: $, Backtick.",
@@ -1868,11 +1868,11 @@
     "consoleCopy": "Kopieren",
     "consoleCopyTitle": "Sichtbare Konsolenzeilen kopieren",
     "consoleCopyFailed": "Konsolenlog konnte nicht kopiert werden.",
-    "consolePlaceholder": "Befehl eingeben…",
+    "consolePlaceholder": "Befehl eingeben …",
     "consoleSend": "Senden",
     "consoleInputFailed": "Eingabe konnte nicht zugestellt werden.",
-    "consoleConnecting": "Verbinde…",
-    "consoleReconnecting": "Verbindung verloren. Neuer Verbindungsaufbau…",
+    "consoleConnecting": "Verbinde …",
+    "consoleReconnecting": "Verbindung verloren. Neuer Verbindungsaufbau …",
     "consoleConnectionFailed": "Verbindung fehlgeschlagen",
     "execTab": "Exec (Container)",
     "execPlaceholder": "Befehl im Container ausführen (z. B. ls -la /data)",
@@ -1936,17 +1936,17 @@
       "copyDsn": "Connection-String kopieren"
     },
     "status": {
-      "running": "läuft",
-      "stopped": "gestoppt",
-      "starting": "startet",
+      "running": "Läuft",
+      "stopped": "Gestoppt",
+      "starting": "Startet …",
       "installing": "wird installiert",
-      "updating": "wird aktualisiert",
+      "updating": "Wird aktualisiert …",
       "error": "Fehler",
       "failed": "Fehlgeschlagen",
       "queued": "In Warteschlange",
       "awaiting_files": "wartet auf Dateien",
-      "stopping": "Wird gestoppt...",
-      "restarting": "Wird neu gestartet...",
+      "stopping": "Wird gestoppt …",
+      "restarting": "Wird neu gestartet …",
       "node_unreachable": "Node offline"
     },
     "nodeUnreachableHint": "Node ist offline. Start-, Stopp- und Dateioperationen sind deaktiviert, bis der Agent wieder erreichbar ist.",
@@ -2072,7 +2072,7 @@
     "subtitle": "Globale Rollen und Zugriffsrechte konfigurieren.",
     "create": "Rolle erstellen",
     "name": "Name",
-    "namePlaceholder": "z.B. moderator",
+    "namePlaceholder": "z. B. moderator",
     "description": "Beschreibung",
     "descriptionPlaceholder": "Kurze Beschreibung (optional)",
     "permissions": "Berechtigungen",
@@ -2089,7 +2089,7 @@
     }
   },
   "permissionEditor": {
-    "searchPlaceholder": "Berechtigung suchen...",
+    "searchPlaceholder": "Berechtigung suchen …",
     "selectAll": "Alle auswählen",
     "deselectAll": "Auswahl aufheben",
     "empty": "Keine Berechtigungen gefunden",
@@ -2425,7 +2425,7 @@
     "title": "Dashboard",
     "subtitle": "Übersicht über aktive Server, Node-Auslastung und Systemstatus.",
     "servers": "Server",
-    "running": "läuft",
+    "running": "Läuft",
     "supportedGames": "Unterstützte Spiele",
     "system": "Systemstatus",
     "allSystemsOperational": "Alle Systeme funktionsfähig",
@@ -2477,7 +2477,7 @@
     "or": "oder",
     "signInWith": "Anmelden mit {{provider}}",
     "oauth2faTitle": "2FA-Code für OAuth-Login",
-    "oauth2faDescription": "Dein Account {{provider}} ist mit 2FA geschützt. Gib den 6-stelligen Code aus deiner Authenticator-App ein.",
+    "oauth2faDescription": "Dein Konto bei {{provider}} ist mit 2FA geschützt. Gib den 6-stelligen Code aus deiner Authenticator-App ein.",
     "oauth2faSubmit": "2FA bestätigen",
     "backupCode": "Backup-Code",
     "resendFailed": "Der Code konnte nicht erneut gesendet werden.",
@@ -2508,7 +2508,7 @@
     "resendFailed": "Code konnte nicht erneut gesendet werden",
     "success": "Einrichtung abgeschlossen",
     "successDesc": "Der Owner-Account wurde erfolgreich erstellt und verifiziert.",
-    "redirecting": "Weiterleitung zum Login..."
+    "redirecting": "Weiterleitung zum Login …"
   },
   "forgotPassword": {
     "title": "Passwort vergessen",
@@ -2528,10 +2528,10 @@
   "mods": {
     "subtitle": "Workshop- und CurseForge-Mods verwalten und Load-Order festlegen.",
     "addMod": "Mod hinzufügen",
-    "searchPlaceholder": "Mods durchsuchen...",
+    "searchPlaceholder": "Mods durchsuchen …",
     "curseforgeSearch": "CurseForge Browser",
-    "searchPlaceholderCurseForge": "CurseForge Mods & Modpacks suchen...",
-    "searchPlaceholderCurseForgeModsOnly": "CurseForge-Mods suchen...",
+    "searchPlaceholderCurseForge": "CurseForge Mods & Modpacks suchen …",
+    "searchPlaceholderCurseForgeModsOnly": "CurseForge-Mods suchen …",
     "curseforgeModId": "CurseForge Mod- oder Modpack-ID",
     "typeAll": "Alle",
     "typeMods": "Mods",
@@ -2585,7 +2585,7 @@
     "removeFailed": "Entfernen fehlgeschlagen",
     "updateSettingFailed": "Einstellung fehlgeschlagen",
     "reorderFailed": "Neusortierung fehlgeschlagen",
-    "steamSearchError": "Steam-Suche fehlgeschlagen",
+    "steamSearchError": "Steam-Suche fehlgeschlagen.",
     "loadMore": "Mehr anzeigen",
     "statusPending": "Pending",
     "statusUpdatePending": "Update pending",
@@ -2632,8 +2632,8 @@
     "targetFolder": "Zielordner (relativ zum Server-Root)",
     "moveTargetHint": "Leer lassen für das Wurzelverzeichnis.",
     "download": "Herunterladen",
-    "searchPlaceholder": "Dateien & Ordner suchen…",
-    "searchContentPlaceholder": "In Dateiinhalten suchen…",
+    "searchPlaceholder": "Dateien & Ordner suchen …",
+    "searchContentPlaceholder": "In Dateiinhalten suchen …",
     "searchMode": "Suchart",
     "searchByName": "Name",
     "searchByContent": "Inhalt",
@@ -2691,16 +2691,16 @@
     "editor": {
       "noFileOpen": "Keine Datei geöffnet",
       "closeTab": "{{name}} schließen",
-      "saving": "Speichert…",
+      "saving": "Speichert …",
       "conflict": "Konflikt",
       "saveError": "Speichern fehlgeschlagen",
       "unsaved": "Ungespeichert",
-      "saved": "Gespeichert",
+      "saved": "Gespeichert.",
       "searchAndReplace": "Suchen und ersetzen",
       "conflictNotice": "Die Datei wurde außerhalb dieses Editors geändert. Dein lokaler Inhalt bleibt erhalten und wird nicht überschrieben.",
       "reloadServerVersion": "Server-Version neu laden",
-      "findPlaceholder": "Suchen…",
-      "replacePlaceholder": "Ersetzen durch…",
+      "findPlaceholder": "Suchen …",
+      "replacePlaceholder": "Ersetzen durch …",
       "matchCase": "Groß-/Kleinschreibung",
       "previousMatch": "Vorheriger Treffer",
       "nextMatch": "Nächster Treffer",
@@ -2725,7 +2725,7 @@
     "deletedBackup": "Backup gelöscht",
     "noBackups": "Keine Backups vorhanden",
     "loadFailed": "Die Backups konnten nicht geladen werden.",
-    "createHint": "Erstelle ein manuelles Backup oder richte automatische Sicherungen ein.",
+    "createHint": "Erstelle ein manuelles Backup oder richte automatische Backups ein.",
     "settingsSaved": "Einstellungen gespeichert",
     "scheduling": "Einstellungen",
     "schedulingTitle": "Backup-Einstellungen",
@@ -2733,11 +2733,11 @@
     "interval": "Intervall",
     "retention": "Aufbewahrung (Anzahl)",
     "backupName": "Name (optional)",
-    "backupNamePlaceholder": "z.B. Vor Update v1.5",
+    "backupNamePlaceholder": "z. B. Vor Update v1.5",
     "createModalHint": "Archiv gemäß Blueprint: mit backup.includePaths nur Config/Saves, sonst gesamtes Server-Verzeichnis.",
     "createNow": "Backup erstellen",
-    "creating": "Backup wird erstellt...",
-    "restoring": "Backup wird wiederhergestellt...",
+    "creating": "Backup wird erstellt …",
+    "restoring": "Backup wird wiederhergestellt …",
     "runningSince": "Läuft seit:",
     "s3Active": "S3: Aktiv",
     "s3NotConfigured": "S3: Nicht konfiguriert",
@@ -2841,7 +2841,7 @@
     "curseforgeApiKey": "CurseForge API",
     "curseforgeConfigured": "CurseForge API konfiguriert",
     "curseforgeNotConfigured": "CurseForge API nicht konfiguriert",
-    "curseforgeKeyHint": "Wird für Spiele mit CurseForge-Mod-Support (z.B. ARK: Survival Ascended, Minecraft) benötigt. Registrierung & API-Schlüssel:",
+    "curseforgeKeyHint": "Wird für Spiele mit CurseForge-Mod-Support (z. B. ARK: Survival Ascended, Minecraft) benötigt. Registrierung & API-Schlüssel:",
     "curseforgeSaveKey": "API-Key speichern",
     "curseforgeSaved": "CurseForge API-Key gespeichert",
     "curseforgeDeleteKey": "Schlüssel entfernen",
@@ -2937,10 +2937,10 @@
       "notConfigured": "Nicht konfiguriert",
       "tokenLabel": "API-Token",
       "tokenHint": "Bearer-Token mit Zone:Read und DNS:Edit Rechten. Wird mit dem DIS Sidecar verschlüsselt gespeichert.",
-      "tokenPlaceholder": "Bearer Token...",
+      "tokenPlaceholder": "Bearer Token …",
       "deleteToken": "Token entfernen",
       "defaultZoneLabel": "Standard-Zone (Domain)",
-      "zonePlaceholder": "Zone wählen...",
+      "zonePlaceholder": "Zone wählen …",
       "zoneHint": "Wird für automatische Subdomains verwendet: {spiel}-{name}.{zone}",
       "disabledHint": "Cloudflare DNS ist unter Allgemein deaktiviert.",
       "testSuccess": "Cloudflare API-Token ist gültig",
@@ -2954,7 +2954,7 @@
       "provider": "Anbieter",
       "providers": {
         "singra": "Singra (Discord-Bot)",
-        "singraHint": "nativ",
+        "singraHint": "Nativ",
         "crisp": "Crisp",
         "crispHint": "Website-ID",
         "tawk": "tawk.to",
@@ -2982,7 +2982,7 @@
       "tawkWidgetId": "tawk.to Widget-ID",
       "tawkHint": "Aus dem tawk.to Embed-Code (embed.tawk.to/PROPERTY/WIDGET).",
       "customSnippet": "HTML-Snippet (vor </body>)",
-      "customSnippetPlaceholder": "<script>…</script>",
+      "customSnippetPlaceholder": "<script> …</script>",
       "customHint": "Nur externe Script-Tags von Anbietern, die die Panel-CSP erlaubt (Singra, Crisp, tawk.to) — HTML, Stile und Inline-Skripte werden verworfen.",
       "webhookTitle": "Webhook & Signatur (Singra)",
       "webhookDescription": "1) Diese URL im Singra-Widget-Panel eintragen. 2) Dort „Secret rotieren“ und das Secret unten im MSM-Panel speichern (oder als SINGRA_WEBHOOK_SECRET in der msm-panel-Umgebung).",
@@ -3009,7 +3009,7 @@
     "githubConfigured": "GitHub-Token konfiguriert",
     "githubNotConfigured": "Kein GitHub-Token konfiguriert",
     "githubNewToken": "Neuer GitHub-Token",
-    "githubTokenHint": "Klassisches PAT (ghp_…) mit 'repo'-Scope oder Fine-grained (github_pat_…) mit 'Contents: read'. Wird nur in der Panel-Datenbank gespeichert, niemals ans Frontend zurückgegeben.",
+    "githubTokenHint": "Klassisches PAT (ghp_ …) mit 'repo'-Scope oder Fine-grained (github_pat_ …) mit 'Contents: read'. Wird nur in der Panel-Datenbank gespeichert, niemals ans Frontend zurückgegeben.",
     "githubTest": "Token testen",
     "githubSave": "Token speichern",
     "githubRemove": "Token entfernen",
@@ -3071,8 +3071,8 @@
       "statusTitle": "Backup-Status",
       "s3Configured": "S3: Konfiguriert",
       "s3NotConfigured": "S3: Nicht konfiguriert",
-      "passwordSet": "Backup-Passwort: Gesetzt",
-      "passwordNotSet": "Backup-Passwort: Nicht gesetzt",
+      "passwordSet": "Backup-Passwort gesetzt",
+      "passwordNotSet": "Backup-Passwort nicht gesetzt",
       "s3Title": "S3-Konfiguration",
       "endpoint": "Endpoint",
       "bucket": "Bucket",
@@ -3086,8 +3086,8 @@
       "saveS3": "S3-Konfiguration speichern",
       "s3Saved": "S3-Konfiguration gespeichert",
       "passwordTitle": "Backup-Passwort",
-      "passwordSetLabel": "Backup-Passwort gesetzt",
-      "passwordNotSetLabel": "Backup-Passwort nicht gesetzt",
+      "passwordSetLabel": "Gesetzt",
+      "passwordNotSetLabel": "Nicht gesetzt",
       "newPassword": "Neues Backup-Passwort",
       "newPasswordPlaceholder": "Neues Passwort eingeben",
       "passwordHint": "Wird verschlüsselt gespeichert. Das Passwort wird niemals zurückgegeben und benötigt, um Backups zu verschlüsseln/entschlüsseln.",
@@ -3100,13 +3100,13 @@
   },
   "profile": {
     "title": "Profil",
-    "subtitle": "Dein Account",
+    "subtitle": "Dein Konto",
     "tabs": {
       "account": "Konto",
       "social": "Freunde & Meilensteine",
       "audio": "Mikrofon & Audio",
       "password": "Passwort",
-      "2fa": "2-Faktor",
+      "2fa": "2FA",
       "linked": "Verknüpfte Konten",
       "ai": "KI",
       "devices": "Geräte",
@@ -3167,7 +3167,7 @@
     "newPassword": "Neues Passwort",
     "confirmPassword": "Passwort bestätigen",
     "passwordChanged": "Passwort geändert",
-    "passwordMismatch": "Passwörter stimmen nicht überein",
+    "passwordMismatch": "Passwörter stimmen nicht überein.",
     "2faStatus": "Zwei-Faktor-Authentifizierung",
     "2faEnabled": "Aktiviert",
     "2faDisabled": "Deaktiviert",
@@ -3188,7 +3188,7 @@
     "deleteAccountTitle": "Konto löschen",
     "deleteAccountSubtitle": "Lösche dein persönliches Konto und alle damit verbundenen Daten unwiderruflich.",
     "ownerCannotDelete": "Als System-Owner kannst du dein Konto nicht löschen, um einen vollständigen Lockout zu verhindern.",
-    "deleteAccountBtn": "Konto löschen ...",
+    "deleteAccountBtn": "Konto löschen",
     "deleteAccountWarningTitle": "Achtung: Dies ist eine irreversible Aktion!",
     "deleteAccountWarningText": "Alle deine persönlichen Einstellungen, Sessions, 2FA-Registrierungen und Berechtigungen werden dauerhaft und vollständig gelöscht. Laufende Game-Server bleiben unberührt, aber du verlierst jeglichen Zugriff darauf.",
     "confirmPasswordLabel": "Aktuelles Passwort zur Bestätigung",
@@ -3210,7 +3210,7 @@
       "linkErrorInvalidCallback": "Antwort des IdP war unvollständig.",
       "linkErrorExchangeFailed": "Code-Einlösung am IdP fehlgeschlagen.",
       "linkErrorProfileInvalid": "Antwort des IdP war ungültig.",
-      "linkErrorLinkFailed": "Verknüpfung fehlgeschlagen (Provider bereits mit anderem Account verknüpft?).",
+      "linkErrorLinkFailed": "Verknüpfung fehlgeschlagen (Provider bereits mit anderem Konto verknüpft?).",
       "linkErrorProviderUnavailable": "Provider ist nicht mehr verfügbar.",
       "linkErrorPresetUnknown": "Preset für diesen Provider ist unbekannt.",
       "linkErrorUnknown": "Verknüpfung fehlgeschlagen."
@@ -3278,7 +3278,7 @@
       "loadFailed": "Die Liste konnte nicht geladen werden.",
       "remove": "Entfernen",
       "removeTitle": "Gerät aus der Zustellung nehmen?",
-      "removeMessage": "Dieses Gerät bekommt danach keine neuen Nachrichten mehr. Meldet es sich mit Ihrem Konto wieder an, trägt es sich erneut ein: wer noch Zugang zum Konto hat, ist damit nicht ausgesperrt.",
+      "removeMessage": "Dieses Gerät bekommt danach keine neuen Nachrichten mehr. Meldet es sich mit deinem Konto wieder an, trägt es sich erneut ein: wer noch Zugang zum Konto hat, ist damit nicht ausgesperrt.",
       "removed": "Gerät entfernt."
     },
     "messengerLock": {
@@ -3298,10 +3298,10 @@
       "tooShort": "Mindestens {{count}} Zeichen.",
       "mismatch": "Die beiden Eingaben stimmen nicht überein.",
       "working": "Einen Moment …",
-      "bioTitle": "Mit Fingerabdruck öffnen",
-      "bioSwitch": "Ohne Tippen entsperren",
-      "bioHint": "Der PIN wird im Schlüsselspeicher des Systems hinterlegt und erst nach erfolgreicher Bestätigung herausgegeben.",
-      "bioUnavailable": "Hier nicht möglich. Der Schnelleinstieg braucht einen Schlüsselspeicher in der Hardware: den haben die Desktop-App (Windows Hello) und die Android-App (Fingerabdruck), der Browser nicht. Der PIN selbst funktioniert überall.",
+      "bioTitle": "Mit Fingerabdruck entsperren",
+      "bioSwitch": "Mit Fingerabdruck entsperren",
+      "bioHint": "Der PIN wird im Schlüsselspeicher des Systems hinterlegt und erst nach erfolgreichem Fingerabdruck herausgegeben.",
+      "bioUnavailable": "Hier nicht möglich. Der Fingerabdruck braucht einen Schlüsselspeicher im System, den diese Plattform nicht mitbringt.",
       "bioNeedsPin": "Richte zuerst einen PIN ein.",
       "bioSetUp": "Hinterlegen",
       "autoTitle": "Automatisch sperren",
@@ -3320,7 +3320,7 @@
       "screenFootnote": "Solange gesperrt ist, kommen keine Nachrichten an. Was in der Zwischenzeit geschickt wurde, wird nach dem Entsperren nachgeholt.",
       "pinPlaceholder": "PIN",
       "unlock": "Entsperren",
-      "useBiometrics": "Mit Fingerabdruck",
+      "useBiometrics": "Mit Fingerabdruck entsperren",
       "waiting": "Zu viele Fehlversuche. Noch {{count}} Sekunden.",
       "confirmOff": {
         "title": "Sperre aufheben?",
@@ -3334,11 +3334,13 @@
         "changeFailed": "Der PIN liess sich nicht ändern.",
         "disabled": "Die Sperre ist aufgehoben.",
         "wrongPin": "Der PIN stimmt nicht.",
-        "bioOn": "Der Messenger lässt sich jetzt per Finger öffnen.",
-        "bioOff": "Der Schnelleinstieg ist abgeschaltet.",
-        "bioFailed": "Der Schnelleinstieg liess sich nicht einrichten."
+        "bioOn": "Der Messenger lässt sich jetzt per Fingerabdruck öffnen.",
+        "bioOff": "Der Fingerabdruck ist abgeschaltet.",
+        "bioFailed": "Der Fingerabdruck liess sich nicht einrichten."
       }
-    }
+    },
+    "audioMicrophoneFallback": "Mikrofon {{number}}",
+    "audioSpeakerFallback": "Lautsprecher {{number}}"
   },
   "errorBoundary": {
     "title": "Diese Ansicht konnte nicht geladen werden",
@@ -3373,15 +3375,15 @@
     "current": "Aktuell",
     "manualUpdateCommand": "Update auf dem Server:",
     "startUpdate": "Update starten",
-    "updating": "Update läuft...",
+    "updating": "Update läuft …",
     "updateStarted": "Update wird ausgeführt. Das Panel startet gleich neu.",
     "updateSuccess": "Update erfolgreich abgeschlossen!",
     "updateTimeout": "Update-Timeout. Bitte lade die Seite manuell neu.",
     "branch": "Branch"
   },
   "connection": {
-    "connecting": "Verbinde…",
-    "reconnecting": "Verbindung unterbrochen. Neuer Verbindungsaufbau…",
+    "connecting": "Verbinde …",
+    "reconnecting": "Verbindung unterbrochen. Neuer Verbindungsaufbau …",
     "failed": "Verbindung fehlgeschlagen. Bitte Seite neu laden.",
     "rejected": "Verbindung abgelehnt (Auth/Origin/fehlende Rechte)."
   },
@@ -3447,7 +3449,7 @@
       "sqlLabel": "SQL-Befehl"
     },
     "tables": {
-      "searchPlaceholder": "Tabellen suchen...",
+      "searchPlaceholder": "Tabellen suchen …",
       "create": "Neue Tabelle erstellen",
       "current": "Tabelle:",
       "drop": "Tabelle löschen",
@@ -3460,7 +3462,7 @@
       "editTitle": "Zeile bearbeiten",
       "delete": "Löschen",
       "deleteTitle": "Ausgewählte Zeilen löschen",
-      "searchPlaceholder": "Suchen...",
+      "searchPlaceholder": "Suchen …",
       "selectTable": "Tabelle auswählen.",
       "noData": "Keine Daten."
     },
@@ -3473,7 +3475,7 @@
       "column": "Spalte",
       "columnPlaceholder": "-- Spalte wählen --",
       "valueContains": "Wert enthält",
-      "valuePlaceholder": "Text..."
+      "valuePlaceholder": "Text …"
     },
     "sort": {
       "direction": "Richtung",
@@ -3516,23 +3518,23 @@
       "title": "Zeile bearbeiten",
       "subtitle": "Werte für die ausgewählte Tabellenzeile anpassen.",
       "saveError": "Fehler beim Speichern der Zeile",
-      "saving": "Speichert...",
+      "saving": "Speichert …",
       "submit": "Änderungen speichern"
     },
     "insertRow": {
       "title": "Neue Zeile hinzufügen",
       "subtitle": "Werte für eine neue Tabellenzeile eingeben.",
-      "valuePlaceholder": "Wert eingeben...",
+      "valuePlaceholder": "Wert eingeben …",
       "emptyError": "Mindestens ein Feld muss ausgefüllt werden.",
       "saveError": "Fehler beim Einfügen der Zeile",
-      "saving": "Einfügen...",
+      "saving": "Einfügen …",
       "submit": "Zeile einfügen"
     },
     "deleteRows": {
       "title": "Zeile(n) löschen",
       "question": "Möchtest du die {{anzahl}} ausgewählte(n) Zeile(n) wirklich unwiderruflich aus der Tabelle löschen?",
       "deleteError": "Fehler beim Löschen der Zeilen",
-      "deleting": "Löscht...",
+      "deleting": "Löscht …",
       "submit": "Unwiderruflich löschen"
     }
   },
@@ -3543,7 +3545,7 @@
   },
   "common": {
     "offline": "Offline",
-    "unlimited": "unbegrenzt",
+    "unlimited": "Unbegrenzt",
     "save": "Speichern",
     "saving": "Speichern …",
     "clipboardError": "Zwischenablage nicht verfügbar",
@@ -3569,6 +3571,12 @@
     "pagination": {
       "label": "Seitennavigation",
       "page": "Seite {{page}} von {{pages}}"
+    },
+    "autoLock": {
+      "never": "Nie",
+      "afterHour": "Nach einer Stunde",
+      "afterMinutes_one": "Nach einer Minute",
+      "afterMinutes_other": "Nach {{count}} Minuten"
     }
   },
   "serverDetail": {
@@ -3587,7 +3595,7 @@
       "ramHint": "Minimum: 512 MB.",
       "disk": "Disk-Limit (GB)",
       "diskHint": "Soft-Limit. Minimum: 1 GB. Löscht keine bestehenden Daten.",
-      "saving": "Wird gespeichert...",
+      "saving": "Wird gespeichert …",
       "saved": "Ressourcen-Limits gespeichert.",
       "lifecycleBusy": "Ressourcen-Bearbeitung ist nicht verfügbar, während der Server startet, stoppt oder aktualisiert wird.",
       "errors": {
@@ -4308,7 +4316,7 @@
       "advancedRecoveryHelp": "Begrenzt autonome Versuche und verlangt stabile Gesundheit, bevor eine Reparatur als erfolgreich gilt.",
       "presetsTitle": "Autopilot-Vorlagen (Presets)",
       "presetsHelp": "Wähle eine Vorlage, um bewährte Standardeinstellungen für typische Anwendungen automatisch einzutragen. Du kannst danach alle Felder beliebig anpassen.",
-      "presetsSelect": "Vorlage laden...",
+      "presetsSelect": "Vorlage laden …",
       "presetGeneric": "Guardian deaktivieren (Opt-out)",
       "appQueryNone": "Keine Abfrage (nur Port-Bind)",
       "enabled": "Guardian für dieses Blueprint aktivieren",
@@ -4571,27 +4579,27 @@
       },
       "healthPort": {
         "label": "Liveness-Port",
-        "help": "Port oder Platzhalter, z.B. {{SERVER_PORT}}."
+        "help": "Port oder Platzhalter, z. B. {{SERVER_PORT}}."
       },
       "healthPortTimeout": {
         "label": "Timeout (Liveness-Port)",
-        "help": "z.B. 3s oder 5s."
+        "help": "z. B. 3s oder 5s."
       },
       "healthAppType": {
         "label": "Abfrage-Typ",
-        "help": "z.B. minecraft-query."
+        "help": "z. B. minecraft-query."
       },
       "healthAppPath": {
         "label": "HTTP-Pfad",
-        "help": "Relativer HTTP-Pfad für den Ping, z.B. /healthz."
+        "help": "Relativer HTTP-Pfad für den Ping, z. B. /healthz."
       },
       "healthAppPort": {
         "label": "HTTP-Port",
-        "help": "Optionaler Port (Standard: Liveness-Port), z.B. {{SERVER_PORT}}."
+        "help": "Optionaler Port (Standard: Liveness-Port), z. B. {{SERVER_PORT}}."
       },
       "healthAppInterval": {
         "label": "Query-Intervall",
-        "help": "z.B. 30s."
+        "help": "z. B. 30s."
       },
       "healthAppThreshold": {
         "label": "Fehler-Schwellenwert",
@@ -4655,7 +4663,7 @@
       },
       "logsSources": {
         "label": "Logdateien",
-        "help": "Zusätzliche relative Log-Pfade (z.B. logs/latest.log)."
+        "help": "Zusätzliche relative Log-Pfade (z. B. logs/latest.log)."
       },
       "logsRedact": {
         "label": "Log-Schwärzung",
@@ -4671,7 +4679,7 @@
       },
       "diagnosticsParsers": {
         "label": "Fehler-Parser",
-        "help": "Aktivierte Diagnose-Parser (z.B. java-stacktrace)."
+        "help": "Aktivierte Diagnose-Parser (z. B. java-stacktrace)."
       },
       "recoveryMaxAttempts": {
         "label": "Maximale Versuche",
@@ -4840,7 +4848,7 @@
     "name": "Name",
     "nameHint": "Anzeigename für die Liste im Panel. Rein beschreibend — technisch wirkt er nirgends.",
     "slug": "Kurzname (Slug)",
-    "slugHint": "Panelweit eindeutige technische Kennung. Sie steht in jedem Audit-Eintrag und jeder Webhook-Nutzlast, und daraus entsteht der Benutzername-Präfix angelegter Kunden (<slug>-kunde-…). Nachträglich geändert bricht sie die Zuordnung in bestehenden Protokollen.",
+    "slugHint": "Panelweit eindeutige technische Kennung. Sie steht in jedem Audit-Eintrag und jeder Webhook-Nutzlast, und daraus entsteht der Benutzername-Präfix angelegter Kunden (<slug>-kunde- …). Nachträglich geändert bricht sie die Zuordnung in bestehenden Protokollen.",
     "serviceUserId": "Dienstbenutzer (User-ID)",
     "serviceUserHint": "Die Integration handelt im Namen dieses Panel-Benutzers und kann nie mehr als er. Der Benutzer benötigt das Recht 'servers.create'; der Owner-Account ist nicht zulässig.",
     "webhookUrl": "Webhook-Ziel (HTTPS)",
@@ -4930,7 +4938,7 @@
     },
     "errors": {
       "load": "Hoster-Daten konnten nicht geladen werden",
-      "save": "Änderung konnte nicht gespeichert werden",
+      "save": "Änderung konnte nicht gespeichert werden.",
       "delete": "Eintrag konnte nicht entfernt werden",
       "rotate": "Geheimnis konnte nicht rotiert werden"
     }
@@ -4970,7 +4978,7 @@
       "title": "Zentraler Fallback",
       "description": "Legt fest, ob ein Server ohne eigene Zuordnung den panelweiten Zugang mitbenutzen darf. Für den Self-Hosted-Betrieb sinnvoll, für einen Hoster in der Regel nicht.",
       "label": "Panelweiten Zugang als Fallback erlauben",
-      "saved": "Einstellung gespeichert"
+      "saved": "Einstellung gespeichert."
     },
     "errors": {
       "load": "Zugangsdaten konnten nicht geladen werden",
@@ -5334,7 +5342,7 @@
     "serversHint": "Mitglieder erhalten auf diesen Servern die ausgewählten Rechte. Angeboten wird nur, was du selbst direkt besitzt — ein Team kann nie mehr weitergeben als sein Gründer hat. Verlierst du ein Recht, verlieren es die Mitglieder im selben Moment.",
     "serversSaved": "Serverrechte gespeichert.",
     "noAssignableServers": "Du besitzt derzeit keine Serverrechte, die du weitergeben könntest.",
-    "noAccess": "kein Zugriff",
+    "noAccess": "Kein Zugriff",
     "permissions": "Rechte",
     "errors": {
       "load": "Teams konnten nicht geladen werden.",
@@ -5393,14 +5401,25 @@
       "spaeterErinnern": "Später erinnern"
     },
     "vault": {
-      "autolock": {
-        "disabled": "Sofort beim Verlassen",
-        "5min": "5 Minuten Inaktivität",
-        "10min": "10 Minuten Inaktivität",
-        "15min": "15 Minuten Inaktivität",
-        "30min": "30 Minuten Inaktivität",
-        "60min": "1 Stunde Inaktivität"
-      }
+      "titel": "Tresor-Sicherheit",
+      "autoSperre": "Automatische Sperre",
+      "beiFensterwechsel": "Beim Fensterwechsel sperren",
+      "beiFensterwechselHinweis": "Sperrt den Tresor, sobald das Fenster in den Hintergrund geht oder die App verlassen wird.",
+      "biometrieTitel": "Mit Fingerabdruck entsperren",
+      "biometrieEinrichten": "Fingerabdruck hinterlegen",
+      "masterPasswort": "Master-Passwort",
+      "biometrieAus": "Der Fingerabdruck ist abgeschaltet.",
+      "nichtEingerichtet": "Der Tresor ist auf diesem Gerät noch nicht eingerichtet.",
+      "gesperrt": "Der Tresor ist gesperrt. Entsperre ihn zuerst.",
+      "biometrieSchalter": "Mit Fingerabdruck entsperren",
+      "biometrieHinweis": "Nutzt den Schlüsselspeicher des Systems (Windows Hello oder das Gegenstück deiner Plattform). Der Schlüssel liegt nie im Browser.",
+      "biometrieNichtMoeglich": "Auf diesem Gerät gibt es keinen Fingerabdrucksensor und keinen geschützten Schlüsselspeicher.",
+      "biometrieBestaetigen": "Gib dein Master-Passwort zur Bestätigung ein.",
+      "biometriePruefe": "Prüfe …",
+      "biometrieAktivieren": "Aktivieren",
+      "biometrieAn": "Der Tresor lässt sich jetzt per Fingerabdruck öffnen.",
+      "biometrieAusToast": "Der Fingerabdruck ist abgeschaltet.",
+      "biometrieFehler": "Der Fingerabdruck liess sich nicht einrichten. Prüfe das Master-Passwort."
     },
     "aktion": {
       "freigabeErforderlich": "Bestätigung erforderlich",
@@ -5501,7 +5520,7 @@
       "zuruecksetzen": "Zurücksetzen",
       "erkannt": "Erkannt: „{{name}}“ (Score {{score}})",
       "datenschutz": "Lokale Erkennung ohne Audioübertragung.",
-      "rufname": "Rufname:",
+      "rufname": "Rufname",
       "verfahrenAlt": "Kalibrierung veraltet. Bitte neu einsprechen.",
       "neuKalibrieren": "Name geändert (früher „{{alt}}“, jetzt „{{neu}}“). Bitte neu einsprechen.",
       "aktiv": "Wake-Word aktiv",
@@ -5564,7 +5583,7 @@
       "status": {
         "bereit": "Bereit",
         "hoert": "Hört zu",
-        "denkt": "Denkt",
+        "denkt": "Denkt nach …",
         "spricht": "Spricht"
       },
       "duckingTesten": "Ducking testen (3 s)",
@@ -5588,7 +5607,7 @@
       },
       "rechtliches": {
         "slogan": "Maunting Studios — Sicherheit braucht Vertrauen",
-        "beschreibung": "Vollständige Transparenz, echte Datenhoheit und kein unbemerktes Handeln auf Ihren Systemen.",
+        "beschreibung": "Vollständige Transparenz, echte Datenhoheit und kein unbemerktes Handeln auf deinen Systemen.",
         "datenschutzTitel": "Datenschutzerklärung",
         "datenschutzVersion": "Version {{version}}",
         "datenschutzOeffnen": "Datenschutzerklärung öffnen",

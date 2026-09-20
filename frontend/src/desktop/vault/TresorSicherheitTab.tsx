@@ -15,6 +15,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Fingerprint, ShieldCheck } from 'lucide-react'
 
+import { sperrfristOptionen } from '@/services/autoSperre'
 import { Button, Dropdown, type DropdownOption, Switch } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 
@@ -45,29 +46,16 @@ export function TresorSicherheitTab() {
     void checkBiometricsSupport()
   }, [checkBiometricsSupport])
 
-  /**
-   * Die Werte bleiben, wie sie waren — eine gespeicherte `10` soll weiter
-   * zehn Minuten heißen.
-   *
-   * Die Beschriftung der `0` nicht: sie hieß „Sofort beim Verlassen" und tat
-   * das Gegenteil. `checkAutoLock` steigt bei `autoLockMinutes <= 0` sofort
-   * aus, der Tresor bleibt also offen. Das Verlassen regelt der Schalter
-   * darunter, und zwar unabhängig von dieser Zahl. Wer „Sofort" gewählt hat,
-   * weil er es für die sicherste Einstellung hielt, hatte die unsicherste.
-   */
-  const autoLockOptions: DropdownOption[] = [
-    { value: '0', label: t('mss.vault.autolock.disabled', 'Nie (nur beim Verlassen)') },
-    { value: '5', label: t('mss.vault.autolock.5min', '5 Minuten Inaktivität') },
-    { value: '10', label: t('mss.vault.autolock.10min', '10 Minuten Inaktivität') },
-    { value: '15', label: t('mss.vault.autolock.15min', '15 Minuten Inaktivität') },
-    { value: '30', label: t('mss.vault.autolock.30min', '30 Minuten Inaktivität') },
-    { value: '60', label: t('mss.vault.autolock.60min', '1 Stunde Inaktivität') },
-  ]
+  // Dieselbe Auswahl wie im Messenger-Reiter, aus derselben Quelle. Vorher
+  // standen hier sechs eigene Einträge mit eigener Grammatik („5 Minuten
+  // Inaktivität" gegen „Nach 5 Minuten" drüben) und einer falschen: die `0`
+  // hieß „Sofort beim Verlassen" und bedeutet „nie".
+  const autoLockOptions: DropdownOption[] = sperrfristOptionen(t)
 
   const handleBiometricsToggle = async (checked: boolean) => {
     if (!checked) {
       await disableBiometrics()
-      toast.success('Biometrischer Schnelleinstieg deaktiviert')
+      toast.success(t('mss.vault.biometrieAusToast'))
       return
     }
     setMasterPasswordInput('')
@@ -81,14 +69,14 @@ export function TresorSicherheitTab() {
     try {
       const ok = await enableBiometrics(masterPasswordInput)
       if (ok) {
-        toast.success('Biometrischer Schnelleinstieg aktiviert')
+        toast.success(t('mss.vault.biometrieAn'))
         setBiometricsModalOpen(false)
         setMasterPasswordInput('')
       } else {
-        toast.error('Konnte Biometrie nicht aktivieren. Prüfe das Master-Passwort.')
+        toast.error(t('mss.vault.biometrieFehler'))
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Konnte Biometrie nicht aktivieren. Prüfe das Master-Passwort.'
+      const msg = err instanceof Error ? err.message : t('mss.vault.biometrieFehler')
       toast.error(msg)
     } finally {
       setBiometricsLoading(false)
@@ -104,14 +92,14 @@ export function TresorSicherheitTab() {
             <ShieldCheck className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="text-sm font-semibold text-on-surface">Tresor-Sicherheit & Auto-Lock</h2>
+            <h2 className="text-sm font-semibold text-on-surface">{t('mss.vault.titel')}</h2>
           </div>
         </div>
 
         <div className="space-y-4 pt-2 border-t border-outline-variant/30">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
-              <label className="text-xs font-medium text-on-surface">Automatische Sperre</label>
+              <label className="text-xs font-medium text-on-surface">{t('mss.vault.autoSperre')}</label>
             </div>
             <div className="w-full sm:w-56">
               <Dropdown
@@ -124,9 +112,9 @@ export function TresorSicherheitTab() {
 
           <div className="flex items-center justify-between gap-4 pt-2 border-t border-outline-variant/20">
             <div>
-              <span className="text-xs font-medium text-on-surface">Beim Fensterwechsel / App-Verlassen sperren</span>
+              <span className="text-xs font-medium text-on-surface">{t('mss.vault.beiFensterwechsel')}</span>
               <p className="text-[11px] text-on-surface-variant">
-                Sperrt den Passwort-Manager sofort, sobald das Fenster verlassen oder die App in den Hintergrund gelegt wird.
+                {t('mss.vault.beiFensterwechselHinweis')}
               </p>
             </div>
             <Switch
@@ -144,28 +132,28 @@ export function TresorSicherheitTab() {
             <Fingerprint className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="text-sm font-semibold text-on-surface">Biometrischer Schnelleinstieg</h2>
+            <h2 className="text-sm font-semibold text-on-surface">{t('mss.vault.biometrieTitel')}</h2>
           </div>
         </div>
 
         <div className="pt-2 border-t border-outline-variant/30 space-y-3">
           {!isInitialized ? (
             <div className="p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-xs text-on-surface-variant">
-              Passwort-Manager ist auf diesem Gerät noch nicht eingerichtet.
+              {t('mss.vault.nichtEingerichtet')}
             </div>
           ) : !isUnlocked ? (
             <div className="p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-xs text-on-surface-variant">
-              Tresor ist gesperrt. Bitte zuerst entsperren.
+              {t('mss.vault.gesperrt')}
             </div>
           ) : null}
 
           <div className="flex items-center justify-between gap-4">
             <div>
               <span className="text-xs font-medium text-on-surface">
-                Biometrische Authentifizierung aktivieren
+                {t('mss.vault.biometrieSchalter')}
               </span>
               <p className="text-[11px] text-on-surface-variant">
-                Windows Hello / nativer Hardware-Schlüsselspeicher. Schlüssel werden niemals im Browser oder ungesichert gespeichert.
+                {t('mss.vault.biometrieHinweis')}
               </p>
             </div>
             <Switch
@@ -177,7 +165,7 @@ export function TresorSicherheitTab() {
 
           {!isBiometricsSupported && (
             <div className="p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-xs text-on-surface-variant">
-              Kein biometrischer Sensor oder nativer Hardware-Tresor auf diesem Gerät verfügbar.
+              {t('mss.vault.biometrieNichtMoeglich')}
             </div>
           )}
         </div>
@@ -191,17 +179,17 @@ export function TresorSicherheitTab() {
               <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/10 text-primary">
                 <Fingerprint className="h-4 w-4" />
               </div>
-              <h3 className="text-sm font-semibold text-on-surface">Biometrie einrichten</h3>
+              <h3 className="text-sm font-semibold text-on-surface">{t('mss.vault.biometrieEinrichten')}</h3>
             </div>
             <p className="text-xs text-on-surface-variant">
-              Master-Passwort zur Bestätigung eingeben.
+              {t('mss.vault.biometrieBestaetigen')}
             </p>
             <form onSubmit={handleConfirmBiometrics} className="space-y-3">
               <input
                 type="password"
                 value={masterPasswordInput}
                 onChange={(e) => setMasterPasswordInput(e.target.value)}
-                placeholder="Master-Passwort"
+                placeholder={t('mss.vault.masterPasswort')}
                 className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-2 text-xs text-on-surface focus:outline-none focus:border-primary"
                 autoFocus
                 required
@@ -213,13 +201,13 @@ export function TresorSicherheitTab() {
                   onClick={() => setBiometricsModalOpen(false)}
                   disabled={biometricsLoading}
                 >
-                  Abbrechen
+                  {t('common.cancel')}
                 </Button>
                 <Button
                   type="submit"
                   disabled={biometricsLoading || !masterPasswordInput}
                 >
-                  {biometricsLoading ? 'Prüfe...' : 'Aktivieren'}
+                  {biometricsLoading ? t('mss.vault.biometriePruefe') : t('mss.vault.biometrieAktivieren')}
                 </Button>
               </div>
             </form>

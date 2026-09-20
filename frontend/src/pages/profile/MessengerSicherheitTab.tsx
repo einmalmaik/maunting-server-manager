@@ -17,7 +17,7 @@ import { Fingerprint, Lock, ShieldCheck, Timer } from 'lucide-react'
 
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Button, Dropdown, type DropdownOption, Switch } from '@/Singra/UI'
-import { SPERRFRISTEN_MINUTEN } from '@/services/autoSperre'
+import { sperrfristOptionen } from '@/services/autoSperre'
 import { PIN_MINDESTLAENGE, useMessengerSperre } from '@/services/messengerSperre'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
@@ -144,17 +144,7 @@ export function MessengerSicherheitTab() {
     }
   }
 
-  const fristOptionen: DropdownOption[] = SPERRFRISTEN_MINUTEN.map((minuten) => ({
-    value: String(minuten),
-    label:
-      minuten === 0
-        ? t('profile.messengerLock.never', 'Nie')
-        : minuten === 60
-          ? t('profile.messengerLock.afterHour', 'Nach einer Stunde')
-          : minuten === 1
-            ? t('profile.messengerLock.afterMinute', 'Nach einer Minute')
-            : t('profile.messengerLock.afterMinutes', 'Nach {{count}} Minuten', { count: minuten }),
-  }))
+  const fristOptionen: DropdownOption[] = sperrfristOptionen(t)
 
   return (
     <div className="space-y-4">

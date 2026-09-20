@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
-import { User, Users, KeyRound, Shield, Link2, AlertTriangle, Bot, MonitorSmartphone, Volume2, Lock } from 'lucide-react'
+import { User, Users, KeyRound, Shield, Link2, AlertTriangle, Bot, MonitorSmartphone, Volume2, Lock, Wallet } from 'lucide-react'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { AccountTab } from './profile/AccountTab'
 import { SocialTab } from './profile/SocialTab'
@@ -32,7 +32,10 @@ const BASE_TABS: TabDef<TabId>[] = [
   { id: 'linked', labelKey: 'profile.tabs.linked', icon: Link2 },
   // Eigener Zugangsdaten-Tresor: jeder Benutzer verwaltet seine eigenen
   // Steam-/GitHub-Zugaenge selbst, ohne Operator-Hilfe.
-  { id: 'credentials', labelKey: 'profile.tabs.credentials', icon: KeyRound },
+  // Wallet, nicht KeyRound: den trägt schon der Passwort-Reiter zwei Zeilen
+  // darüber. Zwei Reiter mit demselben Bild sind in einer Leiste, die auf
+  // schmalen Fenstern nur Bilder zeigt, nicht auseinanderzuhalten.
+  { id: 'credentials', labelKey: 'profile.tabs.credentials', icon: Wallet },
 ]
 
 /**

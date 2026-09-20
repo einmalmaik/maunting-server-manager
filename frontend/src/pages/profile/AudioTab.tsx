@@ -54,19 +54,27 @@ export function AudioTab() {
       const inputs = devices.filter((d) => d.kind === 'audioinput')
       const outputs = devices.filter((d) => d.kind === 'audiooutput')
 
+      // Beide Listen benutzen denselben Schlüssel für ihren ersten Eintrag.
+      //
+      // Die Ausgabeliste stand vorher auf `mss.audio.standard` — und der heisst
+      // "Windows-Standard". Im Web-Panel, auf jedem Betriebssystem, direkt
+      // unter einer Mikrofonliste, deren erster Eintrag "Systemstandard" hiess.
+      // Der Ersatztext daneben sagte "Systemstandard (Ausgabe)": die Absicht
+      // war eindeutig, nur der Schlüssel war der falsche. `mss.audio.standard`
+      // bleibt dem Desktop-Einstieg, wo Windows zutrifft.
       setInputDevices([
-        { value: '', label: t('profile.audioDeviceDefault', 'Systemstandard (Eingabe)') },
+        { value: '', label: t('profile.audioDeviceDefault') },
         ...inputs.map((d, index) => ({
           value: d.deviceId,
-          label: d.label || `Mikrofon ${index + 1}`,
+          label: d.label || t('profile.audioMicrophoneFallback', { number: index + 1 }),
         })),
       ])
 
       setOutputDevices([
-        { value: '', label: t('mss.audio.standard', 'Systemstandard (Ausgabe)') },
+        { value: '', label: t('profile.audioDeviceDefault') },
         ...outputs.map((d, index) => ({
           value: d.deviceId,
-          label: d.label || `Lautsprecher ${index + 1}`,
+          label: d.label || t('profile.audioSpeakerFallback', { number: index + 1 }),
         })),
       ])
     } catch {

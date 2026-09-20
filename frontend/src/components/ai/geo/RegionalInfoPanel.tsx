@@ -296,7 +296,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                 <span className="font-semibold uppercase tracking-wider text-on-surface-variant">
                   {t('ai.geo.currentNews', 'Aktuelle Nachrichten')}
                 </span>
-                <span className="text-[11px] text-primary">{t('ai.geo.newsCount', { count: newsList.length, defaultValue: '{{count}} Berichte' })}</span>
+                <span className="text-[11px] text-primary">{t('ai.geo.newsCount', { count: newsList.length })}</span>
               </div>
 
               <div className="space-y-2">
@@ -488,7 +488,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
               <span className="font-semibold uppercase tracking-wider text-on-surface-variant">
                 {t('ai.geo.newsAndWeb', 'Nachrichten & Lageberichte')}
               </span>
-              <span className="text-[11px] text-primary">{t('ai.geo.newsCount', { count: newsList.length, defaultValue: '{{count}} Einträge' })}</span>
+              <span className="text-[11px] text-primary">{t('ai.geo.newsCount', { count: newsList.length })}</span>
             </div>
 
             {newsList.length === 0 && (

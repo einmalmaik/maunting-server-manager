@@ -19,8 +19,42 @@
 /** Wie oft nachgesehen wird, ob die Frist abgelaufen ist. */
 export const PRUEFTAKT_MS = 10_000
 
-/** Die Auswahl, die beide Oberflächen anbieten. `0` heißt „nie". */
-export const SPERRFRISTEN_MINUTEN = [0, 1, 5, 15, 60] as const
+/**
+ * Die Auswahl, die beide Oberflächen anbieten. `0` heißt „nie".
+ *
+ * Bis 09/2026 waren es zwei Listen: der Messenger bot `[0, 1, 5, 15, 60]`, der
+ * Tresor `[0, 5, 10, 15, 30, 60]` — und beschriftete sie anders („Nach 15
+ * Minuten" gegen „15 Minuten Inaktivität"). Die Vereinigung beider Listen ist
+ * die gemeinsame, denn eine gespeicherte `10` oder `30` muss im Auswahlfeld
+ * weiter auftauchen; verschwände sie, sähe eine gesetzte Frist aus wie keine.
+ */
+export const SPERRFRISTEN_MINUTEN = [0, 1, 5, 10, 15, 30, 60] as const
+
+type Uebersetzer = (schluessel: string, werte?: Record<string, unknown>) => string
+
+/**
+ * Baut die Auswahl für beide Oberflächen.
+ *
+ * Absichtlich kein Import aus `components/ui` und kein `TFunction`: ein Dienst,
+ * der die Oberfläche kennt, ist keiner mehr. Beide Aufrufer reichen ihr `t`
+ * herein und bauen daraus ihre `DropdownOption`s.
+ *
+ * Zur `0`: sie hieß im Tresor „Sofort beim Verlassen" und tat das Gegenteil.
+ * `checkAutoLock` steigt bei `<= 0` aus, der Tresor bleibt offen. Wer „Sofort"
+ * wählte, weil es am sichersten klang, hatte die unsicherste Einstellung. Das
+ * Verlassen regelt der Schalter darunter, unabhängig von dieser Zahl.
+ */
+export function sperrfristOptionen(t: Uebersetzer): Array<{ value: string; label: string }> {
+  return SPERRFRISTEN_MINUTEN.map((minuten) => ({
+    value: String(minuten),
+    label:
+      minuten === 0
+        ? t('common.autoLock.never')
+        : minuten === 60
+          ? t('common.autoLock.afterHour')
+          : t('common.autoLock.afterMinutes', { count: minuten }),
+  }))
+}
 
 function minutenKey(praefix: string): string {
   return `${praefix}_autolock_minutes`

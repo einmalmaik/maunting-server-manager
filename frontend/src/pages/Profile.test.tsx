@@ -25,7 +25,7 @@ describe('Profile', () => {
     const header = screen.getByRole('banner')
     expect(within(header).getByRole('heading', { level: 1 })).toHaveTextContent('Profile')
     expect(within(header).getByText('Panel')).toBeInTheDocument()
-    expect(within(header).getByText('Your Account')).toBeInTheDocument()
+    expect(within(header).getByText('Your account')).toBeInTheDocument()
   })
 
   it('zeigt den aktiven Tab als Status-Badge im Kopf', () => {
