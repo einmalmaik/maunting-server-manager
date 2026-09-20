@@ -65,6 +65,28 @@ export function istSteuerpaket(typ: unknown): typ is Steuertyp {
 }
 
 /**
+ * Ob eine gespeicherte Zeile in Wahrheit ein Steuerpaket ist.
+ *
+ * Fand ein Steuerpaket keinen Zweig, fiel es in den gewöhnlichen Weg und wurde
+ * als Nachricht **gespeichert**. Der rohe JSON-Text stand danach für immer im
+ * Verlauf, auch nachdem der Zweig nachgereicht war. Der Lesepfad lässt solche
+ * Zeilen deshalb aus; beim nächsten Speichern sind sie fort.
+ *
+ * Die Prüfung ist absichtlich eng: nur ein Text, der ganz als Objekt aufgeht
+ * und eine bekannte Paketart nennt. Wer eine geschweifte Klammer schreibt,
+ * verliert nichts.
+ */
+export function istSteuerzeile(text: unknown): boolean {
+  if (typeof text !== 'string' || text[0] !== '{') return false
+  try {
+    const paket = JSON.parse(text) as { type?: unknown } | null
+    return Boolean(paket) && typeof paket === 'object' && istSteuerpaket(paket?.type)
+  } catch {
+    return false
+  }
+}
+
+/**
  * Ein Zeitpunkt aus einem Umschlag als Zahl.
  *
  * Wo zwei Seiten dieselbe Einstellung umstellen dürfen — Verfallsfrist,

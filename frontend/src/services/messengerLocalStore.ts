@@ -23,6 +23,7 @@
  */
 
 import { entsiegleZeile, entsiegleZeilen, versiegleZeile } from './lokaleVersiegelung'
+import { istSteuerzeile } from './nachrichtBezug'
 
 export interface LocalStoredMessage {
   blindMailboxId?: string
@@ -549,6 +550,9 @@ export async function loadLocalMessages(blindMailboxId: string): Promise<LocalSt
       // trotzdem: bis 09/2026 schrieb der Messenger sie mit, und bei jedem
       // Ladevorgang kamen sie zurück.
       if (m.isSystem) return false
+      // Dasselbe für ein Steuerpaket, das keinen Zweig fand und als Nachricht
+      // abgelegt wurde: der rohe JSON-Text bliebe sonst für immer stehen.
+      if (istSteuerzeile(m.text)) return false
       if (m.clientUuid && isOptimisticMessage(m) && confirmedUuids.has(m.clientUuid)) {
         return false
       }

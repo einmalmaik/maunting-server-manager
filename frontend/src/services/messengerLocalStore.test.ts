@@ -244,6 +244,33 @@ describe('messengerLocalStore (IndexedDB Chat Persistence & F5 Hydration)', () =
     expect(await loadLocalMessages(mid)).toEqual([])
   })
 
+  it('gibt ein als Nachricht abgelegtes Steuerpaket nicht mehr heraus', async () => {
+    // Am laufenden System gefunden: `pin_message` hatte keinen Zweig, fiel in
+    // den gewöhnlichen Weg und wurde gespeichert. Der rohe JSON-Text stand
+    // danach in beiden Testchats, auch nachdem der Zweig nachgereicht war.
+    const mid = 'box-steuerpaket'
+    await saveLocalMessages(mid, [
+      {
+        blindMailboxId: mid,
+        id: 600,
+        senderId: 2,
+        text: 'Echte Nachricht',
+        createdAt: '2026-09-20T10:00:00.000Z',
+        isSelf: false,
+      },
+      {
+        blindMailboxId: mid,
+        id: 601,
+        senderId: 0,
+        text: '{"type":"pin_message","target_id":4111,"aktion":"anheften","actor_id":10}',
+        createdAt: '2026-09-20T10:00:01.000Z',
+        isSelf: false,
+      },
+    ])
+
+    expect((await loadLocalMessages(mid)).map((m) => m.text)).toEqual(['Echte Nachricht'])
+  })
+
   it('nimmt eine verworfene Nachricht wirklich aus der Ablage', async () => {
     // Am laufenden System gefunden: `saveLocalMessages` schreibt nur. Die aus
     // der Liste weggelassene Nachricht blieb in der Ablage stehen und kam beim
