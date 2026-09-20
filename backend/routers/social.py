@@ -533,13 +533,8 @@ def fetch_blind_mailbox_envelopes(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[dict]:
-    # Blinde Geräte-Mailboxen dürfen nur vom jeweiligen Kontoinhaber abgefragt werden
-    own_device_mailbox = SocialService.derive_user_device_mailbox_id(current_user.id)
-    if blind_mailbox_id != own_device_mailbox:
-        other_users = db.query(User.id).filter(User.id != current_user.id).all()
-        for (uid,) in other_users:
-            if SocialService.derive_user_device_mailbox_id(uid) == blind_mailbox_id:
-                raise HTTPException(status_code=403, detail="Keine Berechtigung für diese Geräte-Mailbox.")
+    # H-3: Jede Mailbox darf nur von berechtigten Teilnehmern abgefragt werden
+    SocialService.assert_mailbox_participant(db, current_user.id, blind_mailbox_id)
 
     envelopes = SocialService.get_blind_envelopes(
         db, blind_mailbox_id=blind_mailbox_id, since_id=since_id, limit=limit

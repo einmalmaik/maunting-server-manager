@@ -144,22 +144,36 @@ function ziele(paket: RohesPaket): { id: number; uuid: string } {
 
 /** Ein Eintrag je Nachricht; der zuletzt gemerkte gewinnt. */
 export interface Bezugstafel<T> {
-  merke(paket: RohesPaket, wert: T): void
-  finde(msg: Bezugsziel): T | undefined
+  merke(paket: RohesPaket, wert: T, urheber?: number): void
+  finde(
+    msg: Bezugsziel,
+    autorPruefung?: number | ((urheber: number | undefined) => boolean)
+  ): T | undefined
   readonly anzahl: number
 }
 
 export function neueBezugstafel<T>(): Bezugstafel<T> {
-  const nachId = new Map<number, T>()
-  const nachUuid = new Map<string, T>()
+  const nachId = new Map<number, { wert: T; urheber?: number }>()
+  const nachUuid = new Map<string, { wert: T; urheber?: number }>()
   return {
-    merke(paket, wert) {
+    merke(paket, wert, urheber) {
       const { id, uuid } = ziele(paket)
-      if (id) nachId.set(id, wert)
-      if (uuid) nachUuid.set(uuid, wert)
+      const eintrag = { wert, urheber }
+      if (id) nachId.set(id, eintrag)
+      if (uuid) nachUuid.set(uuid, eintrag)
     },
-    finde(msg) {
-      return nachId.get(msg.id) ?? (msg.clientUuid ? nachUuid.get(msg.clientUuid) : undefined)
+    finde(msg, autorPruefung) {
+      const eintrag =
+        nachId.get(msg.id) ?? (msg.clientUuid ? nachUuid.get(msg.clientUuid) : undefined)
+      if (!eintrag) return undefined
+      if (autorPruefung !== undefined) {
+        if (typeof autorPruefung === 'function') {
+          if (!autorPruefung(eintrag.urheber)) return undefined
+        } else if (eintrag.urheber !== undefined && eintrag.urheber !== autorPruefung) {
+          return undefined
+        }
+      }
+      return eintrag.wert
     },
     get anzahl() {
       return nachId.size + nachUuid.size

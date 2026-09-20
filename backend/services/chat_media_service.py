@@ -49,8 +49,11 @@ def _utc(dt: datetime | None) -> datetime | None:
 
 
 def _signing_secret() -> str:
-    """Holt das Signiergeheimnis aus den Einstellungen oder generiert einen stabilen Key."""
-    return getattr(settings, "secret_key", None) or "msm-chat-media-secure-signed-secret"
+    """Holt das Signiergeheimnis aus den Einstellungen."""
+    secret = getattr(settings, "secret_key", None)
+    if not secret:
+        raise RuntimeError("MSM_SECRET_KEY ist nicht konfiguriert.")
+    return secret
 
 
 class ChatMediaService:

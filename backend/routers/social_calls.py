@@ -460,6 +460,10 @@ def anruf_heartbeat(
     user: User = Depends(get_current_user),
 ) -> dict:
     ok = UserActiveCallRegistry.heartbeat(user.id, device_id=req.device_id)
+    if ok:
+        curr = UserActiveCallRegistry.get(user.id)
+        if curr and curr.get("room_token"):
+            CallRoomService.touch(curr["room_token"])
     return {"ok": ok}
 
 

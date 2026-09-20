@@ -190,11 +190,12 @@ vi.mock('@/services/messengerLocalStore', async () => {
 
 vi.mock('@/services/ratchetSitzung', () => {
   const PREFIX = 'sv-e2ee-dr-v1:'
-  const einpacken = (t: string) => PREFIX + '1.testgeraet.zielgeraet.' + btoa(unescape(encodeURIComponent(t)))
+  const einpacken = (t: string, von: number = 1) => PREFIX + `${von}.testgeraet.zielgeraet.` + btoa(unescape(encodeURIComponent(t)))
   const auspacken = (u: string) => decodeURIComponent(escape(atob(u.split('.').slice(3).join('.'))))
   return {
     DR_PREFIX: PREFIX,
     DR_INIT_TYP: 'dr-init',
+    einpackenDr: einpacken,
     baueZustellungen: vi.fn(async (_kontext: any, klartext: string, basisUuid: string) => [
       {
         empfaengerId: 101,
@@ -217,7 +218,17 @@ vi.mock('@/services/ratchetSitzung', () => {
         // Fälschung.
         const schon = await klartext.lies()
         if (schon !== null) {
-          return { art: 'klartext', text: schon, vonKonto: 101, vonGeraet: 'zielgeraet' }
+          let von = 101
+          if (umschlag.startsWith(PREFIX)) {
+            const h = Number(umschlag.slice(PREFIX.length).split('.')[0])
+            if (!isNaN(h) && h > 0) von = h
+          } else {
+            try {
+              const p = JSON.parse(schon)
+              if (p && typeof p === 'object' && p.sender_id) von = Number(p.sender_id)
+            } catch {}
+          }
+          return { art: 'klartext', text: schon, vonKonto: von, vonGeraet: 'zielgeraet' }
         }
         // Der Klartext kommt weiterhin aus dem Stellvertreter, den die Tests
         // ohnehin je Fall setzen. So bleibt jede bestehende Vorgabe gültig,
@@ -234,7 +245,17 @@ vi.mock('@/services/ratchetSitzung', () => {
           return { art: 'unbekannt' }
         }
         await klartext.lege(text)
-        return { art: 'klartext', text, vonKonto: 101, vonGeraet: 'zielgeraet' }
+        let von = 101
+        if (umschlag.startsWith(PREFIX)) {
+          const h = Number(umschlag.slice(PREFIX.length).split('.')[0])
+          if (!isNaN(h) && h > 0) von = h
+        } else {
+          try {
+            const p = JSON.parse(text)
+            if (p && typeof p === 'object' && p.sender_id) von = Number(p.sender_id)
+          } catch {}
+        }
+        return { art: 'klartext', text, vonKonto: von, vonGeraet: 'zielgeraet' }
       }
     ),
     verarbeiteBootstrap: vi.fn(async () => ({ istAufbau: false, ersetzt: false })),
@@ -343,6 +364,7 @@ describe('Messenger (Allround Chat)', () => {
     identitaet.sendPair = { publicKeyJwk: '{"kty":"oct"}', privateKeyJwk: '{"kty":"oct"}' }
     identitaet.decryptionKeys = ['{"kty":"oct"}']
     identitaet.empfaengerSchluessel = 'mock-empfaenger-pub-key'
+    vi.mocked(socialApi.relayE2eeEnvelope).mockResolvedValue({ id: 1 } as any)
 
     vi.mocked(socialApi.getFriends).mockResolvedValue([
       {
@@ -2007,6 +2029,142 @@ describe('Messenger (Allround Chat)', () => {
 
     expect(screen.queryByText('Noch keine Nachrichten. Schreibe die erste Nachricht!')).not.toBeInTheDocument()
     expect(screen.getByText('Nachricht vor Wechsel')).toBeInTheDocument()
+  })
+
+  it('K-1: verwirft gefälschte sender_id im 1:1 Direktchat (keine Identitätsfälschung)', async () => {
+    const { einpackenDr } = await import('@/services/ratchetSitzung') as any
+    // Envelope from Alice (101), but payload falsely claims sender_id: 1 (current user)
+    const forgedEnvelope = einpackenDr(
+      JSON.stringify({
+        sender_id: 1,
+        text: 'Gefälschte Nachricht',
+        client_uuid: 'forged-uuid-1',
+        timestamp: '2026-09-08T12:00:00Z',
+      }),
+      101,
+    )
+
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([
+      {
+        id: 501,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: forgedEnvelope,
+        created_at: '2026-09-08T12:00:00Z',
+      },
+    ])
+
+    render(
+      <MemoryRouter initialEntries={['/chat?userId=101']}>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /alice/i })).toBeInTheDocument()
+    })
+
+    // Gefälschte Nachricht darf im Chatverlauf nicht angezeigt werden
+    expect(screen.queryByText('Gefälschte Nachricht')).not.toBeInTheDocument()
+  })
+
+  it('K-2: verhindert Bearbeiten fremder Nachrichten durch Dritte', async () => {
+    const { einpackenDr } = await import('@/services/ratchetSitzung') as any
+    // Nachricht von Alice (101)
+    const originalEnvelope = einpackenDr(
+      JSON.stringify({
+        sender_id: 101,
+        text: 'Originalnachricht von Alice',
+        client_uuid: 'alice-msg-1',
+        timestamp: '2026-09-08T12:00:00Z',
+      }),
+      101,
+    )
+
+    // Unberechtigter Änderungsversuch von Charlie (102)
+    const maliciousEditEnvelope = einpackenDr(
+      JSON.stringify({
+        type: 'edit_message',
+        target_client_uuid: 'alice-msg-1',
+        actor_id: 102,
+        new_text: 'Gehackter Text',
+        edited_at: '2026-09-08T12:01:00Z',
+      }),
+      101,
+    )
+
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([
+      {
+        id: 601,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: originalEnvelope,
+        created_at: '2026-09-08T12:00:00Z',
+      },
+      {
+        id: 602,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: maliciousEditEnvelope,
+        created_at: '2026-09-08T12:01:00Z',
+      },
+    ])
+
+    render(
+      <MemoryRouter initialEntries={['/chat?userId=101']}>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /alice/i })).toBeInTheDocument()
+    })
+
+    // Original bleibt erhalten, Manipulierter Text wird nicht übernommen
+    await waitFor(() => {
+      expect(screen.getByText('Originalnachricht von Alice')).toBeInTheDocument()
+    })
+    expect(screen.queryByText('Gehackter Text')).not.toBeInTheDocument()
+  })
+
+  it('H-6: reiht nachfolgende Ratchet-Nachricht ein wenn dr-init fehlschlägt', async () => {
+    const { baueZustellungen } = await import('@/services/ratchetSitzung')
+    const { enqueueMessageMutation } = await import('@/lib/offlineSync')
+    vi.mocked(enqueueMessageMutation).mockClear()
+
+    // baueZustellungen liefert Bootstrap + Nachricht
+    vi.mocked(baueZustellungen).mockResolvedValueOnce([
+      {
+        empfaengerId: 101,
+        zielGeraet: 'dev-1',
+        bootstrap: 'sv-e2ee-dr-v1:bootstrap-data',
+        nachricht: 'sv-e2ee-dr-v1:1.testgeraet.dev-1.msg-data',
+        clientUuid: 'msg-uuid-1#dev-1',
+        bootstrapClientUuid: 'msg-uuid-1#idev-1',
+      },
+    ])
+
+    // dr-init scheitert beim Relaying
+    vi.mocked(socialApi.relayE2eeEnvelope).mockImplementation(async (auftrag: any) => {
+      if (auftrag.control_type === 'dr-init' || auftrag.is_control) {
+        throw new Error('Netzwerkfehler bei dr-init')
+      }
+      return { id: 701 }
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/chat?userId=101']}>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    const input = await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
+    fireEvent.change(input, { target: { value: 'Nachricht mit Session-Init' } })
+    fireEvent.click(screen.getByTitle('Senden'))
+
+    await waitFor(() => {
+      // Sowohl dr-init als auch die abhängige Nachricht müssen eingereiht werden
+      expect(enqueueMessageMutation).toHaveBeenCalledTimes(2)
+    })
+    // Die Nachricht selbst darf NICHT über den Relay gesendet worden sein (nur dr-init wurde versucht)
+    expect(socialApi.relayE2eeEnvelope).toHaveBeenCalledTimes(1)
   })
 })
 

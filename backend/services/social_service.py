@@ -475,6 +475,15 @@ class SocialService:
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     @classmethod
+    def derive_group_blind_mailbox_id(cls, group_id: int) -> str:
+        """Deterministische Hash-Berechnung der blinden Gruppen-Mailbox-ID.
+
+        Identisch zur Formatdefinition in frontend/src/services/e2eeCrypto.ts.
+        """
+        raw = f"msm:group:{group_id}"
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    @classmethod
     def can_message_user(cls, db: Session, sender_id: int, target_user_id: int) -> tuple[bool, str | None]:
         """Prüft Berechtigung zum Senden von Direktnachrichten zwischen zwei Benutzern.
 
@@ -1125,25 +1134,18 @@ class SocialService:
                         cls.ensure_direct_chat(db, sender_user_id, found_target)
                         target_recipient_id = found_target
                     else:
-                        # Prüfen, ob clean_mailbox zu einer ChatGroup gehört
-                        groups = db.query(ChatGroup).all()
-                        for g in groups:
-                            g_mid = hashlib.sha256(f"msm:group:{g.id}".encode("utf-8")).hexdigest()
-                            if g_mid == clean_mailbox:
-                                mem = (
-                                    db.query(ChatGroupMember)
-                                    .filter_by(group_id=g.id, user_id=sender_user_id)
-                                    .first()
-                                )
-                                if not mem:
-                                    raise HTTPException(
-                                        status_code=403,
-                                        detail="Keine Berechtigung für diese Gruppe.",
-                                    )
+                        # Prüfen, ob clean_mailbox zu einer ChatGroup gehört, in der der Absender Mitglied ist
+                        user_groups = (
+                            db.query(ChatGroupMember.group_id)
+                            .filter_by(user_id=sender_user_id)
+                            .all()
+                        )
+                        for (gid,) in user_groups:
+                            if cls.derive_group_blind_mailbox_id(gid) == clean_mailbox:
                                 group_member_ids = [
                                     m.user_id
                                     for m in db.query(ChatGroupMember.user_id)
-                                    .filter_by(group_id=g.id)
+                                    .filter_by(group_id=gid)
                                     .all()
                                 ]
                                 break
@@ -1183,9 +1185,21 @@ class SocialService:
         # Absenders trägt dieselbe client_uuid und ist eine Zeile weiter oben
         # schon beantwortet. Stünde diese Prüfung davor, bekäme jeder
         # Netzwerk-Retry eine 409 statt der Bestätigung.
-        if db.query(E2eeBlindEnvelope.id).filter(
-            E2eeBlindEnvelope.ciphertext_envelope == clean_envelope,
-        ).first():
+        envelope_hash = hashlib.sha256(clean_envelope.encode("utf-8")).hexdigest()
+        replay_found = (
+            db.query(E2eeBlindEnvelope.id)
+            .filter(
+                or_(
+                    E2eeBlindEnvelope.ciphertext_sha256 == envelope_hash,
+                    and_(
+                        E2eeBlindEnvelope.ciphertext_sha256.is_(None),
+                        E2eeBlindEnvelope.ciphertext_envelope == clean_envelope,
+                    ),
+                )
+            )
+            .first()
+        )
+        if replay_found:
             raise HTTPException(
                 status_code=409,
                 detail="Replay-Angriff erkannt: Dieser verschlüsselte Umschlag wurde bereits übertragen.",
@@ -1194,6 +1208,7 @@ class SocialService:
         envelope = E2eeBlindEnvelope(
             blind_mailbox_id=clean_mailbox,
             ciphertext_envelope=clean_envelope,
+            ciphertext_sha256=envelope_hash,
             client_uuid=clean_client_uuid,
             created_at=_now(),
         )
@@ -1290,7 +1305,7 @@ class SocialService:
         for (gid,) in (
             db.query(ChatGroupMember.group_id).filter(ChatGroupMember.user_id == user_id).all()
         ):
-            if hashlib.sha256(f"msm:group:{gid}".encode("utf-8")).hexdigest() == clean:
+            if cls.derive_group_blind_mailbox_id(gid) == clean:
                 return
 
         friends = (
@@ -1503,13 +1518,17 @@ class SocialService:
                             break
 
                     if not target_recipient_id:
-                        for g in db.query(ChatGroup).all():
-                            g_mid = hashlib.sha256(f"msm:group:{g.id}".encode("utf-8")).hexdigest()
-                            if g_mid == clean_mailbox:
+                        user_groups = (
+                            db.query(ChatGroupMember.group_id)
+                            .filter_by(user_id=sender_id)
+                            .all()
+                        )
+                        for (gid,) in user_groups:
+                            if cls.derive_group_blind_mailbox_id(gid) == clean_mailbox:
                                 group_member_ids = [
                                     m.user_id
                                     for m in db.query(ChatGroupMember.user_id)
-                                    .filter_by(group_id=g.id)
+                                    .filter_by(group_id=gid)
                                     .all()
                                     if m.user_id != sender_id
                                 ]

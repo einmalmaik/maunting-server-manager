@@ -648,6 +648,7 @@ def test_e2ee_security_replay_attack_prevention(db: Session, owner_user: User):
     # 1. Erster Versand ist frisch und erfolgreich
     relayed = SocialService.relay_blind_envelope(db, blind_mailbox_id=box_a, ciphertext_envelope=envelope)
     assert relayed.id is not None
+    assert relayed.ciphertext_sha256 is not None
 
     # 2. Replay-Versuch in derselben Mailbox -> 409 Conflict
     with pytest.raises(HTTPException) as exc_same:
@@ -942,4 +943,89 @@ def test_user_device_mailbox_e2ee_key_sync_and_privacy(
     assert resp_stranger_inactive.status_code == 403
     owner_user.is_active = True
     db.commit()
+
+
+def test_mailbox_participant_access_control_dm_and_group(
+    db: Session, owner_user: User, regular_user: User, client: TestClient, owner_cookies: dict, user_cookies: dict
+):
+    """H-3: Prüft, dass Nicht-Teilnehmer (Fremde) keinen Zugriff auf DM- und Gruppen-Mailboxen erhalten (403)."""
+    PanelSettingsService.set("social_enabled", "true", db)
+
+    # 1. Gruppen-Mailbox: Owner ist Mitglied, regular_user ist Fremder
+    group = ChatGroup(
+        name="Geheime Runde",
+        description="Nur fuer Mitglieder",
+        owner_user_id=owner_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(group)
+    db.flush()
+    db.add(ChatGroupMember(group_id=group.id, user_id=owner_user.id, role="owner"))
+    db.commit()
+
+    group_mid = SocialService.derive_group_blind_mailbox_id(group.id)
+
+    # Einlieferung eines Umschlags in die Gruppe
+    group_ct = base64.b64encode(b"\x05" * 12 + b"geheime-nachricht-fuer-gruppe" + b"\x06" * 16).decode("ascii")
+    envelope = f"sv-e2ee-group-v1:{_GRUPPEN_KEY}{group_ct}"
+    SocialService.relay_blind_envelope(
+        db,
+        blind_mailbox_id=group_mid,
+        ciphertext_envelope=envelope,
+        sender_user_id=owner_user.id,
+        recipient_id=None,
+        client_uuid=str(uuid4()),
+    )
+
+    # Owner (Mitglied) darf abrufen -> 200
+    resp_owner_group = client.get(f"/api/social/e2ee/mailbox/{group_mid}", cookies=owner_cookies)
+    assert resp_owner_group.status_code == 200
+    assert len(resp_owner_group.json()) >= 1
+
+    # regular_user (Nicht-Mitglied / Fremder) wird abgewiesen -> 403
+    resp_stranger_group = client.get(f"/api/social/e2ee/mailbox/{group_mid}", cookies=user_cookies)
+    assert resp_stranger_group.status_code == 403
+
+    # 2. Direktchat-Mailbox: Zwischen Owner und einem dritten Nutzer
+    from services.auth_service import AuthService
+    third_user = AuthService.create_user(
+        db, f"third_{uuid4().hex[:6]}", f"third_{uuid4().hex[:6]}@test.de", "ThirdPass123!"
+    )
+    third_user.email_verified = True
+    db.commit()
+
+    dm_mid = SocialService.derive_blind_mailbox_id(owner_user.id, third_user.id)
+    chat = DirectChat(
+        user_a_id=min(owner_user.id, third_user.id),
+        user_b_id=max(owner_user.id, third_user.id),
+        blind_mailbox_id=dm_mid,
+        initiated_by_user_id=owner_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(chat)
+    db.add(UserFriend(user_id=owner_user.id, friend_id=third_user.id, status="accepted"))
+    db.commit()
+
+    # Einlieferung eines Umschlags in die DM-Mailbox
+    wk = base64.b64encode(b"K" * 256).decode("ascii")
+    ct = base64.b64encode(b"\x01" * 12 + b"dm-secret-payload" + b"\x02" * 16).decode("ascii")
+    dm_envelope = f"sv-e2ee-hybrid-v1:{wk}.{ct}"
+    SocialService.relay_blind_envelope(
+        db,
+        blind_mailbox_id=dm_mid,
+        ciphertext_envelope=dm_envelope,
+        sender_user_id=owner_user.id,
+        recipient_id=third_user.id,
+        client_uuid=str(uuid4()),
+    )
+
+    # Owner (Teilnehmer A) darf abrufen -> 200
+    resp_owner_dm = client.get(f"/api/social/e2ee/mailbox/{dm_mid}", cookies=owner_cookies)
+    assert resp_owner_dm.status_code == 200
+    assert len(resp_owner_dm.json()) >= 1
+
+    # regular_user (Fremder) wird abgewiesen -> 403
+    resp_stranger_dm = client.get(f"/api/social/e2ee/mailbox/{dm_mid}", cookies=user_cookies)
+    assert resp_stranger_dm.status_code == 403
+
 
