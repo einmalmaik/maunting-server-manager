@@ -11,10 +11,11 @@
  * zusammengefasst statt einzeln durchgereicht: was zusammen gebraucht wird,
  * steht zusammen.
  *
- * **Am Telefon.** Die Knöpfe zum Bearbeiten und Löschen hingen an
- * `group-hover`. Wo es keinen Zeiger gibt, gibt es kein Hover — sie waren dort
- * schlicht nicht erreichbar. Jetzt öffnet langes Drücken dieselbe Auswahl, und
- * am Rechner bleibt es beim Erscheinen unter dem Zeiger.
+ * **Ein Einstieg, zwei Wege.** Alles, was mit einer Nachricht geht, steht im
+ * Menü: Reagieren, Antworten, Weiterleiten, Kopieren, Markieren, Anheften,
+ * Auswählen, Bearbeiten, Löschen. Am Telefon öffnet langes Drücken es, am
+ * Rechner der Knopf neben der Uhrzeit. Die Maus kennt keinen Langdruck, und
+ * eine Geste allein findet niemand — es braucht beide.
  */
 
 import React, { useEffect, useRef, useState } from 'react'
@@ -28,6 +29,7 @@ import {
   Forward,
   MapPin,
   Mic,
+  MoreHorizontal,
   Pause,
   Pencil,
   Play,
@@ -283,7 +285,11 @@ export function ChatMessageBubble({
    * Zeiger bleiben sie klein — derselbe Knopf, zwei Trefferflächen.
    */
   const [aktionenOffen, setAktionenOffen] = useState(false)
-  const darfHandeln = !msg.isDeleted && msg.isSelf
+  // Das Menü gilt für jede Nachricht. Bearbeiten und Löschen stehen darin
+  // ohnehin nur bei eigenen — Antworten, Weiterleiten, Markieren und
+  // Reagieren betreffen fremde genauso. Im Auswahlmodus ruht es, dort
+  // bedeutet jeder Tipper schon etwas.
+  const darfHandeln = !msg.isDeleted && !auswahl.aktiv
   const [wischX, setWischX] = useState(0)
 
   /**
@@ -904,14 +910,15 @@ export function ChatMessageBubble({
         {msg.verfaelltAm && (
           <Timer className="w-3 h-3 opacity-70" aria-label="Verschwindet von selbst" />
         )}
-        {/* Message Actions (Edit & Delete for self) */}
+        {/* Der Weg ins Menü für alles, was mit dieser Nachricht geht.
+            Am Telefon öffnet langes Drücken dasselbe Menü; hier steht der
+            sichtbare Knopf daneben, denn eine Geste allein findet niemand und
+            mit der Maus gibt es keinen Langdruck. */}
         {darfHandeln && (
           <div
             // Wo es kein Hover gibt, heißt unsichtbar auch unantastbar: sonst
-            // läge am Telefon eine unsichtbare Löschfläche neben der Uhrzeit.
-            // Am Zeigergerät bleibt es beim bisherigen Verhalten, dort holt das
-            // Darüberfahren die Knöpfe ohnehin hervor, bevor jemand klickt.
-            className={`transition-opacity flex items-center gap-1 mr-1 ${
+            // läge am Telefon eine unsichtbare Fläche neben der Uhrzeit.
+            className={`transition-opacity flex items-center mr-1 ${
               aktionenOffen
                 ? 'opacity-100'
                 : 'opacity-0 [@media(hover:none)]:pointer-events-none group-hover:opacity-100 focus-within:opacity-100'
@@ -920,35 +927,19 @@ export function ChatMessageBubble({
             // der Klick angekommen ist.
             onPointerDown={(e) => e.stopPropagation()}
           >
-            {msg.text && (
-              <button
-                type="button"
-                onClick={() => {
-                  setAktionenOffen(false)
-                  aktionen.onEdit(msg)
-                }}
-                className={`rounded-md hover:bg-surface-container-highest text-on-surface-variant hover:text-primary transition-colors flex items-center justify-center ${
-                  aktionenOffen ? 'w-11 h-11' : 'p-1'
-                }`}
-                title="Nachricht bearbeiten"
-                aria-label="Nachricht bearbeiten"
-              >
-                <Pencil className={aktionenOffen ? 'w-4 h-4' : 'w-3 h-3'} />
-              </button>
-            )}
             <button
               type="button"
               onClick={() => {
                 setAktionenOffen(false)
-                aktionen.onDelete(msg)
+                aktionen.onMenue(msg)
               }}
-              className={`rounded-md hover:bg-surface-container-highest text-on-surface-variant hover:text-destructive transition-colors flex items-center justify-center ${
+              className={`rounded-md hover:bg-surface-container-highest text-on-surface-variant hover:text-primary transition-colors flex items-center justify-center ${
                 aktionenOffen ? 'w-11 h-11' : 'p-1'
               }`}
-              title="Nachricht für alle löschen"
-              aria-label="Nachricht für alle löschen"
+              title="Mehr"
+              aria-label="Was mit dieser Nachricht geschehen soll"
             >
-              <Trash2 className={aktionenOffen ? 'w-4 h-4' : 'w-3 h-3'} />
+              <MoreHorizontal className={aktionenOffen ? 'w-4 h-4' : 'w-3.5 h-3.5'} />
             </button>
           </div>
         )}

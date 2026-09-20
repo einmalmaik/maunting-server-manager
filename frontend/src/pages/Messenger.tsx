@@ -6020,44 +6020,6 @@ export function Messenger() {
                 )}
               </div>
 
-              {/* Weiterleiten und die Trefferansicht legen sich über den Chat.
-                  Am Telefon ist das der richtige Ort: eine eigene Ansicht statt
-                  eines Kästchens, das bei offener Tastatur verschwindet. */}
-              <WeiterleitenAnsicht
-                offen={Boolean(weiterzuleiten)}
-                onSchliessen={() => {
-                  setWeiterzuleiten(null)
-                  setWlFortschritt(null)
-                }}
-                ziele={weiterleitungsZiele}
-                anzahlNachrichten={weiterzuleiten?.length || 0}
-                fortschritt={wlFortschritt}
-                onSenden={handleWeiterleiten}
-              />
-
-              <TrefferListe
-                offen={ueberall !== 'aus'}
-                titel={
-                  ueberall === 'markiert'
-                    ? 'Markierte Nachrichten'
-                    : ueberall === 'anMich'
-                      ? '@ und Antworten an mich'
-                      : `Suche: ${ueberallFrage}`
-                }
-                leerText={
-                  ueberall === 'markiert'
-                    ? 'Noch nichts markiert. Über das Menü einer Nachricht legst du ein Sternchen an.'
-                    : ueberall === 'anMich'
-                      ? 'Niemand hat dich erwähnt oder auf dich geantwortet.'
-                      : 'Kein Chat auf diesem Gerät enthält diesen Text.'
-                }
-                chats={ueberallChats}
-                verzeichnis={mailboxDirectory}
-                gesperrt={ueberallGesperrt}
-                laeuft={ueberallLaeuft}
-                onSchliessen={() => setUeberall('aus')}
-                onTreffer={(treffer) => void oeffneTreffer(treffer)}
-              />
             </>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
@@ -6103,6 +6065,47 @@ export function Messenger() {
         onAnheften={activeGroup ? (m) => void handleAnheften(m) : undefined}
         darfAnheften={darfAnheften}
         istAngeheftet={Boolean(angeheftet && angeheftet.clientUuid === menueNachricht?.clientUuid)}
+      />
+
+      {/* Weiterleiten und die Trefferansicht sind eigene Ansichten über der
+          ganzen Seite, kein Kästchen, das bei offener Tastatur verschwindet.
+          Sie stehen hier und nicht im Chat-Ast: aus der Chatliste heraus
+          aufgerufen gibt es noch keinen offenen Chat, und dort hängend
+          rendern sie dann gar nicht. Beide gehen per Portal an den Body. */}
+      <WeiterleitenAnsicht
+        offen={Boolean(weiterzuleiten)}
+        onSchliessen={() => {
+          setWeiterzuleiten(null)
+          setWlFortschritt(null)
+        }}
+        ziele={weiterleitungsZiele}
+        anzahlNachrichten={weiterzuleiten?.length || 0}
+        fortschritt={wlFortschritt}
+        onSenden={handleWeiterleiten}
+      />
+
+      <TrefferListe
+        offen={ueberall !== 'aus'}
+        titel={
+          ueberall === 'markiert'
+            ? 'Markierte Nachrichten'
+            : ueberall === 'anMich'
+              ? '@ und Antworten an mich'
+              : `Suche: ${ueberallFrage}`
+        }
+        leerText={
+          ueberall === 'markiert'
+            ? 'Noch nichts markiert. Über das Menü einer Nachricht legst du ein Sternchen an.'
+            : ueberall === 'anMich'
+              ? 'Niemand hat dich erwähnt oder auf dich geantwortet.'
+              : 'Kein Chat auf diesem Gerät enthält diesen Text.'
+        }
+        chats={ueberallChats}
+        verzeichnis={mailboxDirectory}
+        gesperrt={ueberallGesperrt}
+        laeuft={ueberallLaeuft}
+        onSchliessen={() => setUeberall('aus')}
+        onTreffer={(treffer) => void oeffneTreffer(treffer)}
       />
 
       {/* Das Menü einer Chatzeile — derselbe Aufruf wie die Wischgeste, nur

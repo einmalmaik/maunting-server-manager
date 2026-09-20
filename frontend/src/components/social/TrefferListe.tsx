@@ -6,9 +6,16 @@
  * dafür statt dreier, die nach dem zweiten Monat verschieden aussehen.
  *
  * Am Telefon ist das eine eigene Ansicht über dem Chat, kein Aufklapper: eine
- * Liste, die sich über mehrere Gespräche zieht, braucht die volle Höhe.
+ * Liste, die sich über mehrere Gespräche zieht, braucht die volle Höhe. *
+ * **Per Portal an `document.body`.** Bis dahin hing die Ansicht im Chat-Ast
+ * von `Messenger.tsx` und war `absolute inset-0` im Chat-Container. Ohne
+ * offenen Chat rendert dieser Ast gar nicht: der Aufruf aus der Chatliste
+ * wirkte folgenlos, und wer danach einen Chat öffnete, fand ihn sofort
+ * überdeckt. Dazu kappt `Shell.tsx` jedes `z-50` im Inhaltsbereich auf 10.
+ * Beides löst dieselbe Maßnahme.
  */
 
+import { createPortal } from 'react-dom'
 import { ArrowLeft, Lock, MessageSquare, Users } from 'lucide-react'
 
 import { Avatar } from '@/Singra/UI'
@@ -51,12 +58,12 @@ export function TrefferListe({
   onSchliessen,
   onTreffer,
 }: TrefferListeProps) {
-  if (!offen) return null
+  if (!offen || typeof document === 'undefined') return null
 
   const gesamt = chats.reduce((s, c) => s + c.treffer.length, 0)
 
-  return (
-    <div className="absolute inset-0 z-20 flex flex-col bg-surface">
+  return createPortal(
+    <div className="fixed inset-0 z-[70] flex flex-col bg-surface">
       <div className="shrink-0 px-3 py-2.5 border-b border-outline-variant/20 flex items-center gap-2">
         <button
           type="button"
@@ -134,6 +141,7 @@ export function TrefferListe({
           })
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

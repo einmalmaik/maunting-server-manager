@@ -12,9 +12,14 @@
  * Während ein Anhang neu hochgeladen wird, läuft ein Fortschritt: über Mobilfunk
  * dauert das spürbar, und ein Knopf, der einfach nicht mehr reagiert, sieht aus
  * wie ein Fehler.
+ *
+ * **Per Portal an `document.body`**, aus demselben Grund wie bei der
+ * `TrefferListe`: im Chat-Ast hängend gäbe es sie ohne offenen Chat nicht, und
+ * `Shell.tsx` kappt jedes `z-50` im Inhaltsbereich auf 10.
  */
 
 import { useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { ArrowLeft, Check, Forward, Search, Users } from 'lucide-react'
 
 import { Avatar, Button, Input } from '@/Singra/UI'
@@ -50,7 +55,7 @@ export function WeiterleitenAnsicht({
     return ziele.filter((z) => z.name.toLowerCase().includes(s))
   }, [ziele, suche])
 
-  if (!offen) return null
+  if (!offen || typeof document === 'undefined') return null
 
   const umschalten = (mid: string) =>
     setGewaehlt((v) => (v.includes(mid) ? v.filter((x) => x !== mid) : [...v, mid]))
@@ -68,8 +73,8 @@ export function WeiterleitenAnsicht({
     }
   }
 
-  return (
-    <div className="absolute inset-0 z-20 flex flex-col bg-surface">
+  return createPortal(
+    <div className="fixed inset-0 z-[70] flex flex-col bg-surface">
       <div className="shrink-0 px-3 py-2.5 border-b border-outline-variant/20 flex items-center gap-2">
         <button
           type="button"
@@ -171,6 +176,7 @@ export function WeiterleitenAnsicht({
           </span>
         </Button>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
