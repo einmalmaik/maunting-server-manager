@@ -5,8 +5,15 @@
  */
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import i18n from '@/i18n'
 import type { CallParticipant } from '@/stores/useCallStore'
+
+// Die Sprache festlegen: die Behauptungen unten prüfen deutsche Texte, und
+// ohne diese Zeile entscheidet navigator.language der Testumgebung.
+beforeAll(async () => {
+  await i18n.changeLanguage('de')
+})
 
 vi.mock('@/api/calls', () => ({
   setzeServerStumm: vi.fn().mockResolvedValue(undefined),
@@ -63,69 +70,69 @@ afterEach(() => {
 describe('Lokale Ebene', () => {
   it('stellt die Lautstärke nur für mich', () => {
     const { onVolumeChange } = zeige()
-    fireEvent.change(screen.getByLabelText('Lautstärke für mich'), { target: { value: '50' } })
+    fireEvent.change(screen.getByLabelText(i18n.t('calls.volumeForMe')), { target: { value: '50' } })
     expect(onVolumeChange).toHaveBeenCalledWith('u2', 0.5)
   })
 
   it('schaltet für mich stumm und wieder laut', () => {
     const { onVolumeChange } = zeige({ participant: teilnehmer({ volume: 0.8 }) })
-    fireEvent.click(screen.getByText('Für mich stumm schalten'))
+    fireEvent.click(screen.getByText(i18n.t('calls.muteForMe')))
     expect(onVolumeChange).toHaveBeenCalledWith('u2', 0)
   })
 
   it('holt beim Aufheben die vorherige Lautstärke zurück, nicht stumpf 100 %', () => {
     const { onVolumeChange } = zeige({ participant: teilnehmer({ volume: 0 }) })
-    fireEvent.click(screen.getByText('Wieder hörbar machen'))
+    fireEvent.click(screen.getByText(i18n.t('calls.unmuteForMe')))
     expect(onVolumeChange).toHaveBeenCalledWith('u2', 1)
   })
 
   it('braucht dafür kein Recht', () => {
     zeige({ darfStummschalten: false, darfEntfernen: false })
-    expect(screen.getByLabelText('Lautstärke für mich')).toBeTruthy()
+    expect(screen.getByLabelText(i18n.t('calls.volumeForMe'))).toBeTruthy()
   })
 })
 
 describe('Moderation', () => {
   it('zeigt ohne Recht keinen Moderationsknopf', () => {
     zeige()
-    expect(screen.queryByText('Mikrofon abschalten')).toBeNull()
-    expect(screen.queryByText('Aus dem Anruf entfernen')).toBeNull()
+    expect(screen.queryByText(i18n.t('calls.muteParticipant'))).toBeNull()
+    expect(screen.queryByText(i18n.t('calls.removeFromCall'))).toBeNull()
   })
 
   it('zeigt nur, wofür das Recht da ist', () => {
     zeige({ darfStummschalten: true, darfEntfernen: false })
-    expect(screen.getByText('Mikrofon abschalten')).toBeTruthy()
-    expect(screen.queryByText('Aus dem Anruf entfernen')).toBeNull()
+    expect(screen.getByText(i18n.t('calls.muteParticipant'))).toBeTruthy()
+    expect(screen.queryByText(i18n.t('calls.removeFromCall'))).toBeNull()
   })
 
   it('schaltet serverseitig stumm', async () => {
     zeige({ darfStummschalten: true })
-    fireEvent.click(screen.getByText('Mikrofon abschalten'))
+    fireEvent.click(screen.getByText(i18n.t('calls.muteParticipant')))
     await waitFor(() => expect(api.setzeServerStumm).toHaveBeenCalledWith('raum-1', 2, true))
   })
 
   it('gibt ein abgeschaltetes Mikrofon wieder frei', async () => {
     zeige({ participant: teilnehmer({ isMuted: true }), darfStummschalten: true })
-    fireEvent.click(screen.getByText('Wieder sprechen lassen'))
+    fireEvent.click(screen.getByText(i18n.t('calls.unmuteParticipant')))
     await waitFor(() => expect(api.setzeServerStumm).toHaveBeenCalledWith('raum-1', 2, false))
   })
 
   it('entfernt aus dem Anruf', async () => {
     zeige({ darfEntfernen: true })
-    fireEvent.click(screen.getByText('Aus dem Anruf entfernen'))
+    fireEvent.click(screen.getByText(i18n.t('calls.removeFromCall')))
     await waitFor(() => expect(api.entferneAusAnruf).toHaveBeenCalledWith('raum-1', 2))
   })
 
   it('bietet im Zweiergespräch keine Moderation an', () => {
     // Ohne Gruppenraum gibt es niemanden, der ein Recht vergeben hätte.
     zeige({ raum: null, darfStummschalten: true, darfEntfernen: true })
-    expect(screen.queryByText('Mikrofon abschalten')).toBeNull()
+    expect(screen.queryByText(i18n.t('calls.muteParticipant'))).toBeNull()
   })
 
   it('bietet nichts gegen einen selbst an', () => {
     zeige({ participant: teilnehmer({ isSelf: true }), darfStummschalten: true })
-    expect(screen.queryByText('Mikrofon abschalten')).toBeNull()
-    expect(screen.queryByLabelText('Lautstärke für mich')).toBeNull()
+    expect(screen.queryByText(i18n.t('calls.muteParticipant'))).toBeNull()
+    expect(screen.queryByLabelText(i18n.t('calls.volumeForMe'))).toBeNull()
   })
 })
 

@@ -1,6 +1,13 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import i18n from '@/i18n'
 import type { ActiveCallInfo, PendingGroupCallInfo } from '@/api/calls'
+
+// Die Sprache festlegen: die Behauptungen unten prüfen deutsche Texte, und
+// ohne diese Zeile entscheidet navigator.language der Testumgebung.
+beforeAll(async () => {
+  await i18n.changeLanguage('de')
+})
 
 const mockStore = {
   crossDeviceCall: null as ActiveCallInfo | null,
@@ -65,8 +72,8 @@ describe('CrossDeviceCallBanner', () => {
     mockStore.state = 'idle'
     render(<CrossDeviceCallBanner />)
 
-    expect(screen.getByRole('region', { name: 'Aktiver Anruf auf anderem Gerät' })).toBeTruthy()
-    expect(screen.getByText('Du bist bereits in einem Anruf')).toBeTruthy()
+    expect(screen.getByRole('region', { name: i18n.t('calls.activeOnOtherDevice') })).toBeTruthy()
+    expect(screen.getByText(i18n.t('calls.alreadyInCall'))).toBeTruthy()
     expect(screen.getByText('Alice')).toBeTruthy()
     expect(screen.getByText('Smartphone / APK')).toBeTruthy()
     expect(screen.getByText(/Audio-Anruf/i)).toBeTruthy()
@@ -134,8 +141,8 @@ describe('CrossDeviceCallBanner', () => {
     ]
     render(<CrossDeviceCallBanner />)
 
-    expect(screen.getByRole('region', { name: 'Aktiver Gruppenanruf' })).toBeTruthy()
-    expect(screen.getByText('Laufender Gruppenanruf')).toBeTruthy()
+    expect(screen.getByRole('region', { name: i18n.t('calls.activeGroupCall') })).toBeTruthy()
+    expect(screen.getByText(i18n.t('calls.ongoingGroupCall'))).toBeTruthy()
     expect(screen.getByText('Team Alpha')).toBeTruthy()
     expect(screen.getByText('3 aktiv')).toBeTruthy()
   })

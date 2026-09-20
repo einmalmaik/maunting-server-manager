@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Mic, MicOff, Video, VideoOff, VolumeX } from 'lucide-react'
 import { Avatar } from '@/Singra/UI/Avatar'
 import type { Track } from 'livekit-client'
@@ -26,12 +27,14 @@ function useSpur(track: Track | null) {
   return ref
 }
 
-function zustandstext(participant: CallParticipant): string {
-  if (participant.isPending) return 'Verbindet…'
-  if (participant.volume === 0 && !participant.isSelf) return 'Für dich stumm'
-  if (participant.isMuted) return 'Stumm'
-  if (participant.isSpeaking) return 'Spricht'
-  return 'Dabei'
+type Uebersetzer = (schluessel: string) => string
+
+function zustandstext(participant: CallParticipant, t: Uebersetzer): string {
+  if (participant.isPending) return t('calls.connecting')
+  if (participant.volume === 0 && !participant.isSelf) return t('calls.mutedForYou')
+  if (participant.isMuted) return t('calls.muted')
+  if (participant.isSpeaking) return t('calls.speaking')
+  return t('calls.present')
 }
 
 export const ParticipantTile: React.FC<ParticipantTileProps> = ({
@@ -39,6 +42,8 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
   compact = false,
   onSelect,
 }) => {
+  const { t } = useTranslation()
+
   const videoRef = useSpur(participant.videoTrack)
   const zeigtVideo = Boolean(participant.videoTrack) && !participant.isCameraOff
   const lokalStumm = participant.volume === 0 && !participant.isSelf
@@ -59,7 +64,7 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
     ? {
         type: 'button' as const,
         onClick: () => onSelect?.(participant),
-        title: `Optionen für ${participant.username}`,
+        title: t('calls.optionsFor', { name: participant.username }),
       }
     : {}
 
@@ -76,20 +81,20 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
             {participant.isSelf && <span className="text-on-surface-variant"> (du)</span>}
           </div>
           <div className="truncate text-[10px] text-on-surface-variant">
-            {zustandstext(participant)}
+            {zustandstext(participant, t)}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5 text-on-surface-variant">
-          {lokalStumm && <VolumeX className="h-3.5 w-3.5 text-status-warning" aria-label="Für dich stumm" />}
+          {lokalStumm && <VolumeX className="h-3.5 w-3.5 text-status-warning" aria-label={t('calls.mutedForYou')} />}
           {participant.isMuted ? (
-            <MicOff className="h-3.5 w-3.5 text-status-error" aria-label="Mikrofon aus" />
+            <MicOff className="h-3.5 w-3.5 text-status-error" aria-label={t('calls.micOff')} />
           ) : (
-            <Mic className="h-3.5 w-3.5" aria-label="Mikrofon an" />
+            <Mic className="h-3.5 w-3.5" aria-label={t('calls.micOn')} />
           )}
           {participant.isCameraOff ? (
-            <VideoOff className="h-3.5 w-3.5" aria-label="Kamera aus" />
+            <VideoOff className="h-3.5 w-3.5" aria-label={t('calls.cameraOff')} />
           ) : (
-            <Video className="h-3.5 w-3.5 text-primary" aria-label="Kamera an" />
+            <Video className="h-3.5 w-3.5 text-primary" aria-label={t('calls.cameraOn')} />
           )}
         </div>
       </Behaelter>
@@ -124,11 +129,11 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
           {participant.isSelf && <span className="text-on-surface-variant"> (du)</span>}
         </span>
         <span className="flex shrink-0 items-center gap-1 rounded-full bg-surface/85 px-2 py-0.5 text-on-surface-variant backdrop-blur-sm">
-          {lokalStumm && <VolumeX className="h-3.5 w-3.5 text-status-warning" aria-label="Für dich stumm" />}
+          {lokalStumm && <VolumeX className="h-3.5 w-3.5 text-status-warning" aria-label={t('calls.mutedForYou')} />}
           {participant.isMuted ? (
-            <MicOff className="h-3.5 w-3.5 text-status-error" aria-label="Mikrofon aus" />
+            <MicOff className="h-3.5 w-3.5 text-status-error" aria-label={t('calls.micOff')} />
           ) : (
-            <Mic className="h-3.5 w-3.5" aria-label="Mikrofon an" />
+            <Mic className="h-3.5 w-3.5" aria-label={t('calls.micOn')} />
           )}
         </span>
       </div>

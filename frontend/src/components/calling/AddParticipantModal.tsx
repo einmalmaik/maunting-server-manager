@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Loader2, UserPlus } from 'lucide-react'
 import { Button, Dialog, DialogContent, Input, Avatar } from '@/Singra/UI'
 import { getFriends, type FriendItem } from '@/api/social'
@@ -24,6 +25,8 @@ export const AddParticipantModal: React.FC<AddParticipantModalProps> = ({
   bereitsImAnruf,
   onInvite,
 }) => {
+  const { t } = useTranslation()
+
   const [freunde, setFreunde] = useState<FriendItem[]>([])
   const [laedt, setLaedt] = useState(false)
   const [suche, setSuche] = useState('')
@@ -34,7 +37,7 @@ export const AddParticipantModal: React.FC<AddParticipantModalProps> = ({
     setLaedt(true)
     getFriends()
       .then(setFreunde)
-      .catch(() => toast.error('Die Freundesliste konnte nicht geladen werden.'))
+      .catch(() => toast.error(t('calls.friendsLoadFailed')))
       .finally(() => setLaedt(false))
   }, [isOpen])
 
@@ -62,17 +65,17 @@ export const AddParticipantModal: React.FC<AddParticipantModalProps> = ({
       <DialogContent className="max-w-md p-6 bg-surface-container-high text-on-surface">
         <h3 className="font-headline text-base font-bold text-primary mb-1 flex items-center gap-2">
           <UserPlus className="w-4 h-4" />
-          Teilnehmer hinzufügen
+          {t('calls.addParticipant')}
         </h3>
         <p className="text-xs text-on-surface-variant mb-4">
-          Bei den Ausgewählten klingelt es sofort.
+          {t('calls.ringsImmediately')}
         </p>
 
         <Input
           value={suche}
           onChange={(e) => setSuche(e.target.value)}
-          placeholder="Freund suchen"
-          aria-label="Freund suchen"
+          placeholder={t('calls.searchFriend')}
+          aria-label={t('calls.searchFriend')}
           className="mb-3"
         />
 
@@ -85,8 +88,8 @@ export const AddParticipantModal: React.FC<AddParticipantModalProps> = ({
           {!laedt && auswahl.length === 0 && (
             <p className="py-6 text-center text-sm text-on-surface-variant">
               {freunde.length === 0
-                ? 'Du hast noch keine Freunde in der Liste.'
-                : 'Alle sind schon dabei.'}
+                ? t('calls.noFriendsYet')
+                : t('calls.allAlreadyIn')}
             </p>
           )}
           {auswahl.map((freund) => (
@@ -109,7 +112,7 @@ export const AddParticipantModal: React.FC<AddParticipantModalProps> = ({
                 {laeuft === freund.user_id ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  'Einladen'
+                  t('calls.invite')
                 )}
               </Button>
             </div>

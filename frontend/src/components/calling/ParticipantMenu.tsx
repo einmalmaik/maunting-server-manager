@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { LogOut, MicOff, Volume2, VolumeX } from 'lucide-react'
 import { Button, Dialog, DialogContent, Slider, Avatar } from '@/Singra/UI'
 import { entferneAusAnruf, setzeServerStumm } from '@/api/calls'
@@ -37,6 +38,8 @@ export function ParticipantMenu({
   darfStummschalten,
   darfEntfernen,
 }: ParticipantMenuProps) {
+  const { t } = useTranslation()
+
   // Die Lautstärke vor dem Stummschalten, damit „wieder laut" den alten Wert
   // trifft und nicht stumpf auf 100 % springt.
   const [vorherigeLautstaerke, setVorherigeLautstaerke] = useState(1)
@@ -72,7 +75,7 @@ export function ParticipantMenu({
       )
       onClose()
     } catch {
-      toast.error('Das hat nicht geklappt. Vielleicht fehlt dir die Berechtigung.')
+      toast.error(t('calls.actionFailed'))
     } finally {
       setLaeuft(false)
     }
@@ -86,7 +89,7 @@ export function ParticipantMenu({
       toast.success(`${participant.username} wurde aus dem Anruf entfernt.`)
       onClose()
     } catch {
-      toast.error('Das hat nicht geklappt. Vielleicht fehlt dir die Berechtigung.')
+      toast.error(t('calls.actionFailed'))
     } finally {
       setLaeuft(false)
     }
@@ -107,14 +110,14 @@ export function ParticipantMenu({
               {participant.username}
             </div>
             <div className="text-xs text-on-surface-variant">
-              {participant.isMuted ? 'Mikrofon aus' : 'Mikrofon an'}
+              {participant.isMuted ? t('calls.micOff') : t('calls.micOn')}
             </div>
           </div>
         </div>
 
         {participant.isSelf ? (
           <p className="p-5 text-sm leading-relaxed text-on-surface-variant">
-            Das bist du. Deine eigene Lautstärke stellst du in Profil → Audio ein.
+            {t('calls.selfNote')}
           </p>
         ) : (
           <div className="space-y-5 p-5">
@@ -125,12 +128,11 @@ export function ParticipantMenu({
                 max={MAX_PROZENT}
                 step={5}
                 onValueChange={(prozent) => onVolumeChange(participant.identity, prozent / 100)}
-                label="Lautstärke für mich"
+                label={t('calls.volumeForMe')}
                 hint={`${Math.round(participant.volume * 100)} %`}
               />
               <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
-                Gilt nur hier bei dir. Die anderen im Anruf hören {participant.username}{' '}
-                unverändert.
+                {t('calls.volumeLocalOnly', { name: participant.username })}
               </p>
             </div>
 
@@ -141,13 +143,13 @@ export function ParticipantMenu({
               className="w-full justify-start gap-2"
             >
               {stumm ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
-              {stumm ? 'Wieder hörbar machen' : 'Für mich stumm schalten'}
+              {stumm ? t('calls.unmuteForMe') : t('calls.muteForMe')}
             </Button>
 
             {zeigeModeration && (
               <div className="space-y-2 border-t border-outline-variant/30 pt-5">
                 <div className="font-label-md text-label-md uppercase tracking-wider text-on-surface-variant">
-                  Für alle im Anruf
+                  {t('calls.forEveryone')}
                 </div>
                 {darfStummschalten && (
                   <Button
@@ -158,7 +160,7 @@ export function ParticipantMenu({
                     className="w-full justify-start gap-2"
                   >
                     <MicOff className="h-4 w-4" />
-                    {participant.isMuted ? 'Wieder sprechen lassen' : 'Mikrofon abschalten'}
+                    {participant.isMuted ? t('calls.unmuteParticipant') : t('calls.muteParticipant')}
                   </Button>
                 )}
                 {darfEntfernen && (
@@ -170,13 +172,11 @@ export function ParticipantMenu({
                     className="w-full justify-start gap-2"
                   >
                     <LogOut className="h-4 w-4" />
-                    Aus dem Anruf entfernen
+                    {t('calls.removeFromCall')}
                   </Button>
                 )}
                 <p className="pt-1 text-xs leading-relaxed text-on-surface-variant">
-                  Ein abgeschaltetes Mikrofon kann der Betroffene nicht selbst wieder
-                  einschalten. Wer entfernt wird, kann erneut beitreten, solange er das
-                  Recht dazu hat.
+                  {t('calls.moderationNote')}
                 </p>
               </div>
             )}

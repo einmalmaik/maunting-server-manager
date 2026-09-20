@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { createPortal } from 'react-dom'
 import {
   Headphones,
@@ -58,6 +59,8 @@ const ShareStage: React.FC<{ track: Track; ownerName: string; isSelf: boolean }>
   ownerName,
   isSelf,
 }) => {
+  const { t } = useTranslation()
+
   const ref = useRef<HTMLVideoElement | null>(null)
   useEffect(() => {
     const element = ref.current
@@ -73,13 +76,17 @@ const ShareStage: React.FC<{ track: Track; ownerName: string; isSelf: boolean }>
       <video ref={ref} autoPlay playsInline muted={isSelf} className="h-full w-full object-contain" />
       <span className="absolute left-3 top-3 flex max-w-[calc(100%-1.5rem)] items-center gap-1.5 truncate rounded-full bg-surface/85 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-primary backdrop-blur-sm">
         <Monitor className="h-3 w-3 shrink-0" />
-        <span className="truncate">{isSelf ? 'Deine Freigabe' : `${ownerName} teilt`}</span>
+        <span className="truncate">
+          {isSelf ? t('calls.yourShare') : t('calls.isSharing', { name: ownerName })}
+        </span>
       </span>
     </div>
   )
 }
 
 export const CallOverlay: React.FC = () => {
+  const { t } = useTranslation()
+
   const {
     state,
     kind,
@@ -137,14 +144,14 @@ export const CallOverlay: React.FC = () => {
     () => screenShares.find((f) => f.identity === focusedShareIdentity) ?? null,
     [screenShares, focusedShareIdentity],
   )
-  const teilnehmerIds = useMemo(() => participants.map((t) => t.userId), [participants])
+  const teilnehmerIds = useMemo(() => participants.map((p) => p.userId), [participants])
   const freigabeMoeglich = useMemo(() => bildschirmfreigabeMoeglich(), [])
   // Das LiveKit-Objekt liegt bewusst außerhalb des Stores. Es hier neu zu holen,
   // sobald der Zustand wechselt, reicht: die Tonwiedergabe hängt sich an, sobald
   // die Verbindung steht, und wird beim Ende wieder abgeräumt.
   const room = useMemo(() => aktiverRaum(), [state, raum])
   const menueTeilnehmer = useMemo(
-    () => participants.find((t) => t.identity === gewaehlterTeilnehmer) ?? null,
+    () => participants.find((p) => p.identity === gewaehlterTeilnehmer) ?? null,
     [participants, gewaehlterTeilnehmer],
   )
 
@@ -221,8 +228,8 @@ export const CallOverlay: React.FC = () => {
     if (state === 'incoming') {
       starteKlingelton()
       void sendeGeraeteBenachrichtigung({
-        titel: 'Eingehender Anruf',
-        text: `${partner?.username ?? 'Jemand'} möchte dich anrufen.`,
+        titel: t('calls.incoming'),
+        text: t('calls.callsYou', { name: partner?.username ?? t('calls.someone') }),
       })
     } else {
       stoppeKlingelton()
@@ -242,11 +249,11 @@ export const CallOverlay: React.FC = () => {
         const audioOut: DropdownOption[] = []
         geraete.forEach((geraet, index) => {
           if (geraet.kind === 'audioinput') {
-            audioIn.push({ value: geraet.deviceId || `mic-${index}`, label: geraet.label || `Mikrofon ${index + 1}` })
+            audioIn.push({ value: geraet.deviceId || `mic-${index}`, label: geraet.label || t('profile.audioMicrophoneFallback', { number: index + 1 }) })
           } else if (geraet.kind === 'videoinput') {
-            videoIn.push({ value: geraet.deviceId || `cam-${index}`, label: geraet.label || `Kamera ${index + 1}` })
+            videoIn.push({ value: geraet.deviceId || `cam-${index}`, label: geraet.label || t('calls.cameraFallback', { number: index + 1 }) })
           } else if (geraet.kind === 'audiooutput') {
-            audioOut.push({ value: geraet.deviceId || `speaker-${index}`, label: geraet.label || `Lautsprecher ${index + 1}` })
+            audioOut.push({ value: geraet.deviceId || `speaker-${index}`, label: geraet.label || t('profile.audioSpeakerFallback', { number: index + 1 }) })
           }
         })
         if (audioIn.length) setAudioEingaenge(audioIn)
@@ -259,16 +266,16 @@ export const CallOverlay: React.FC = () => {
   if (state === 'idle') return null
 
   const kopfStatus = reconnecting
-    ? 'Verbindung wird wiederhergestellt…'
+    ? t('calls.reconnecting')
     : state === 'outgoing' || (!partnerVerbunden && state !== 'incoming' && state !== 'connecting')
-      ? 'Klingelt…'
+      ? t('calls.ringing')
       : state === 'incoming'
-        ? 'Eingehender Anruf'
+        ? t('calls.incoming')
         : state === 'connecting'
-          ? 'Verbindet…'
-          : `Verbunden · ${formatiereDauer(callDurationSeconds)}`
+          ? t('calls.connecting')
+          : t('calls.connectedFor', { duration: formatiereDauer(callDurationSeconds) })
 
-  const titel = istGruppe ? group?.name || 'Gruppenanruf' : partner?.username || 'Gesprächspartner'
+  const titel = istGruppe ? group?.name || t('calls.groupCall') : partner?.username || t('calls.peer')
   const kopfBild = istGruppe ? group?.avatarUrl : partner?.avatarUrl
 
   /** Runder Knopf der Steuerleiste. Ein Ort für Größe, Form und Zustandsfarbe. */
@@ -306,7 +313,7 @@ export const CallOverlay: React.FC = () => {
             <div className="flex min-w-0 items-center gap-1.5 text-sm font-semibold">
               <span className="truncate">{titel}</span>
               <span className="shrink-0 rounded-full bg-status-success/20 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-status-success">
-                {participants.length > 0 ? `${participants.length} live` : 'E2EE'}
+                {participants.length > 0 ? t('calls.liveCount', { count: participants.length }) : t('calls.e2ee')}
               </span>
             </div>
             <div className="flex min-w-0 items-center gap-1.5 text-xs text-on-surface-variant">
@@ -323,8 +330,8 @@ export const CallOverlay: React.FC = () => {
           size="icon"
           onClick={() => setGeraeteDialogOffen(true)}
           className="shrink-0 rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
-          title="Geräte auswählen"
-          aria-label="Geräte auswählen"
+          title={t('calls.chooseDevices')}
+          aria-label={t('calls.chooseDevices')}
         >
           <Settings className="h-5 w-5" />
         </Button>
@@ -363,7 +370,7 @@ export const CallOverlay: React.FC = () => {
             <div>
               <h2 className="font-headline text-2xl font-bold text-on-surface">{partner.username}</h2>
               <p className="mt-1 text-sm text-on-surface-variant">
-                Eingehender {mode === 'video' ? 'Video-' : ''}Anruf
+                {mode === 'video' ? t('calls.incomingVideoCall') : t('calls.incomingAudioCall')}
               </p>
             </div>
             {klingeltonBlockiert && (
@@ -377,12 +384,12 @@ export const CallOverlay: React.FC = () => {
                 }}
                 className="text-xs text-status-warning underline"
               >
-                Klingelton aktivieren
+                {t('calls.enableRingtone')}
               </button>
             )}
             <div className="flex w-full justify-center gap-4">
               <Button variant="destructive" onClick={rejectCall} className="flex-1 rounded-full">
-                <PhoneOff className="mr-2 h-5 w-5" /> Ablehnen
+                <PhoneOff className="mr-2 h-5 w-5" /> {t('calls.decline')}
               </Button>
               <Button
                 onClick={() => {
@@ -391,7 +398,7 @@ export const CallOverlay: React.FC = () => {
                 }}
                 className="flex-1 rounded-full bg-status-success text-surface hover:bg-status-success/90"
               >
-                <Phone className="mr-2 h-5 w-5" /> Annehmen
+                <Phone className="mr-2 h-5 w-5" /> {t('calls.accept')}
               </Button>
             </div>
           </div>
@@ -483,7 +490,7 @@ export const CallOverlay: React.FC = () => {
                     <div className="max-w-full px-4 text-center">
                       <div className="truncate text-base font-semibold text-on-surface">{titel}</div>
                       <div className="text-xs text-on-surface-variant">
-                        {!partnerVerbunden ? 'Wartet auf Annahme…' : 'Verbindet…'}
+                        {!partnerVerbunden ? t('calls.waitingForAnswer') : t('calls.connecting')}
                       </div>
                     </div>
                   </div>
@@ -498,7 +505,7 @@ export const CallOverlay: React.FC = () => {
             {participants.length > 0 && partnerVerbunden && (
               <aside className="flex w-full min-w-0 shrink-0 flex-col overflow-hidden rounded-3xl border border-outline-variant/40 bg-surface-container-low/70 p-3 lg:w-[17rem]">
                 <div className="mb-2 flex shrink-0 items-center justify-between text-[10px] uppercase tracking-[0.18em] text-on-surface-variant">
-                  <span>Im Gespräch</span>
+                  <span>{t('calls.inCall')}</span>
                   <span>{participants.length}</span>
                 </div>
                 <div className="flex min-h-0 min-w-0 gap-2 overflow-x-auto overflow-y-hidden pb-1 lg:flex-col lg:overflow-x-hidden lg:overflow-y-auto lg:pb-0">
@@ -557,12 +564,12 @@ export const CallOverlay: React.FC = () => {
               className={steuerKnopf(isMuted, 'warnung')}
               title={
                 serverStumm
-                  ? 'Ein Moderator hat dich stummgeschaltet'
+                  ? t('calls.mutedByModerator')
                   : isMuted
-                    ? 'Mikrofon einschalten'
-                    : 'Mikrofon stummschalten'
+                    ? t('calls.micEnable')
+                    : t('calls.micMute')
               }
-              aria-label={isMuted ? 'Mikrofon einschalten' : 'Mikrofon stummschalten'}
+              aria-label={isMuted ? t('calls.micEnable') : t('calls.micMute')}
               aria-pressed={isMuted}
             >
               {isMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
@@ -573,8 +580,8 @@ export const CallOverlay: React.FC = () => {
               size="icon"
               onClick={toggleDeafen}
               className={steuerKnopf(isDeafened, 'warnung')}
-              title={isDeafened ? 'Wiedergabe einschalten' : 'Wiedergabe stummschalten (auch das eigene Mikrofon)'}
-              aria-label={isDeafened ? 'Wiedergabe einschalten' : 'Wiedergabe stummschalten'}
+              title={isDeafened ? t('calls.playbackEnable') : t('calls.playbackMuteHint')}
+              aria-label={isDeafened ? t('calls.playbackEnable') : t('calls.playbackMute')}
               aria-pressed={isDeafened}
             >
               {isDeafened ? <HeadphoneOff className="h-5 w-5" /> : <Headphones className="h-5 w-5" />}
@@ -585,8 +592,8 @@ export const CallOverlay: React.FC = () => {
               size="icon"
               onClick={toggleCamera}
               className={steuerKnopf(!isCameraOff, 'aktion')}
-              title={isCameraOff ? 'Kamera einschalten' : 'Kamera ausschalten'}
-              aria-label={isCameraOff ? 'Kamera einschalten' : 'Kamera ausschalten'}
+              title={isCameraOff ? t('calls.cameraEnable') : t('calls.cameraDisable')}
+              aria-label={isCameraOff ? t('calls.cameraEnable') : t('calls.cameraDisable')}
               aria-pressed={!isCameraOff}
             >
               {isCameraOff ? <VideoOff className="h-5 w-5" /> : <VideoIcon className="h-5 w-5" />}
@@ -604,11 +611,11 @@ export const CallOverlay: React.FC = () => {
               title={
                 freigabeMoeglich
                   ? isScreenSharing
-                    ? 'Freigabe beenden'
-                    : 'Bildschirm teilen'
-                  : 'Diese App kann keinen Bildschirm teilen. Im Browser funktioniert es.'
+                    ? t('calls.stopShare')
+                    : t('calls.shareScreen')
+                  : t('calls.shareNotPossible')
               }
-              aria-label={isScreenSharing ? 'Freigabe beenden' : 'Bildschirm teilen'}
+              aria-label={isScreenSharing ? t('calls.stopShare') : t('calls.shareScreen')}
               aria-pressed={isScreenSharing}
             >
               {isScreenSharing ? <MonitorOff className="h-5 w-5" /> : <Monitor className="h-5 w-5" />}
@@ -620,8 +627,8 @@ export const CallOverlay: React.FC = () => {
                 size="icon"
                 onClick={() => setEinladenDialogOffen(true)}
                 className={steuerKnopf(false)}
-                title="Teilnehmer hinzufügen"
-                aria-label="Teilnehmer hinzufügen"
+                title={t('calls.addParticipant')}
+                aria-label={t('calls.addParticipant')}
               >
                 <UserPlus className="h-5 w-5" />
               </Button>
@@ -634,11 +641,11 @@ export const CallOverlay: React.FC = () => {
               variant="destructive"
               onClick={endCall}
               className="h-11 gap-2 rounded-full px-4 sm:px-5"
-              title="Anruf beenden"
-              aria-label="Anruf beenden"
+              title={t('calls.endCall')}
+              aria-label={t('calls.endCall')}
             >
               <PhoneOff className="h-5 w-5" />
-              <span className="hidden sm:inline">Auflegen</span>
+              <span className="hidden sm:inline">{t('calls.hangUp')}</span>
             </Button>
           </div>
         </div>

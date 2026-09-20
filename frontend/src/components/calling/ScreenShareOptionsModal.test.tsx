@@ -1,5 +1,12 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import i18n from '@/i18n'
+
+// Die Sprache festlegen: die Behauptungen unten prüfen deutsche Texte, und
+// ohne diese Zeile entscheidet navigator.language der Testumgebung.
+beforeAll(async () => {
+  await i18n.changeLanguage('de')
+})
 
 const systemtonMoeglich = vi.fn(() => true)
 
@@ -33,7 +40,7 @@ describe('ScreenShareOptionsModal', () => {
   it('startet mit der Voreinstellung 1080p/60 und Systemton', () => {
     const { onStart } = oeffne()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Quelle auswählen' }))
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('calls.chooseSource') }))
 
     expect(onStart).toHaveBeenCalledWith({
       aufloesung: '1080p',
@@ -45,9 +52,9 @@ describe('ScreenShareOptionsModal', () => {
   it('gibt 2K mit 60 Bildern und Systemton so weiter, wie eingestellt', () => {
     const { onStart, onClose } = oeffne()
 
-    waehle('Auflösung', '1440p')
-    waehle('Bildrate', '60 FPS')
-    fireEvent.click(screen.getByRole('button', { name: 'Quelle auswählen' }))
+    waehle(i18n.t('calls.resolution'), '1440p')
+    waehle(i18n.t('calls.frameRate'), '60 FPS')
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('calls.chooseSource') }))
 
     expect(onStart).toHaveBeenCalledWith({
       aufloesung: '1440p',
@@ -61,8 +68,8 @@ describe('ScreenShareOptionsModal', () => {
   it('reicht 30 Bilder als Zahl weiter, nicht als Text', () => {
     const { onStart } = oeffne()
 
-    waehle('Bildrate', '30 FPS')
-    fireEvent.click(screen.getByRole('button', { name: 'Quelle auswählen' }))
+    waehle(i18n.t('calls.frameRate'), '30 FPS')
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('calls.chooseSource') }))
 
     expect(onStart.mock.calls[0][0].bildrate).toBe(30)
   })
@@ -71,7 +78,7 @@ describe('ScreenShareOptionsModal', () => {
     const { onStart } = oeffne()
 
     fireEvent.click(screen.getByRole('checkbox', { name: /Systemton/i }))
-    fireEvent.click(screen.getByRole('button', { name: 'Quelle auswählen' }))
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('calls.chooseSource') }))
 
     expect(onStart.mock.calls[0][0].systemton).toBe(false)
   })
@@ -80,7 +87,7 @@ describe('ScreenShareOptionsModal', () => {
     oeffne()
     expect(screen.queryByText(/gute Leitung/i)).not.toBeInTheDocument()
 
-    waehle('Auflösung', '1440p')
+    waehle(i18n.t('calls.resolution'), '1440p')
     expect(screen.getByText(/gute Leitung/i)).toBeInTheDocument()
   })
 
@@ -92,7 +99,7 @@ describe('ScreenShareOptionsModal', () => {
     expect(schalter).toBeDisabled()
     expect(screen.getByText(/kann keinen Systemton/i)).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Quelle auswählen' }))
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('calls.chooseSource') }))
     // Nichts versprechen, was nicht ankommt.
     expect(onStart.mock.calls[0][0].systemton).toBe(false)
   })
@@ -100,7 +107,7 @@ describe('ScreenShareOptionsModal', () => {
   it('startet nichts, wenn abgebrochen wird', () => {
     const { onStart, onClose } = oeffne()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Abbrechen' }))
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('common.cancel') }))
 
     expect(onStart).not.toHaveBeenCalled()
     expect(onClose).toHaveBeenCalled()
@@ -111,7 +118,7 @@ describe('ScreenShareOptionsModal', () => {
       initial: { aufloesung: '720p', bildrate: 30, systemton: false },
     })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Quelle auswählen' }))
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('calls.chooseSource') }))
 
     expect(onStart).toHaveBeenCalledWith({
       aufloesung: '720p',

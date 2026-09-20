@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { PhoneOff, PhoneForwarded, Smartphone, Monitor, Globe, Radio, Users } from 'lucide-react'
 import { useCallStore, setzeAnrufIdentitaet } from '@/stores/useCallStore'
 import { formatDeviceLabel, getDeviceId } from '@/lib/deviceIdentity'
@@ -10,6 +11,8 @@ interface CrossDeviceCallBannerProps {
 }
 
 export const CrossDeviceCallBanner: React.FC<CrossDeviceCallBannerProps> = ({ className = '' }) => {
+  const { t } = useTranslation()
+
   const {
     crossDeviceCall,
     activeGroupCalls,
@@ -78,7 +81,7 @@ export const CrossDeviceCallBanner: React.FC<CrossDeviceCallBannerProps> = ({ cl
     return (
       <div
         role="region"
-        aria-label="Aktiver Gruppenanruf"
+        aria-label={t('calls.activeGroupCall')}
         data-testid="active-group-call-banner"
         className={`relative z-40 w-full shrink-0 overflow-hidden bg-gradient-to-r from-emerald-950/90 via-emerald-900/90 to-teal-950/90 border-b border-emerald-500/30 text-emerald-100 px-4 py-2.5 shadow-lg backdrop-blur-md transition-all duration-300 ${className}`}
       >
@@ -93,15 +96,15 @@ export const CrossDeviceCallBanner: React.FC<CrossDeviceCallBannerProps> = ({ cl
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-semibold text-white tracking-tight">
-                  Laufender Gruppenanruf
+                  {t('calls.ongoingGroupCall')}
                 </span>
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                   <Users className="w-3 h-3" />
-                  {groupCall.participant_count > 0 ? `${groupCall.participant_count} aktiv` : 'Live'}
+                  {groupCall.participant_count > 0 ? t('calls.activeCount', { count: groupCall.participant_count }) : t('calls.live')}
                 </span>
               </div>
               <div className="text-xs text-emerald-200/80 truncate">
-                Gruppe: <span className="font-medium text-emerald-100">{groupCall.group_name}</span>
+                {t('calls.groupPrefix')} <span className="font-medium text-emerald-100">{groupCall.group_name}</span>
               </div>
             </div>
           </div>
@@ -123,10 +126,10 @@ export const CrossDeviceCallBanner: React.FC<CrossDeviceCallBannerProps> = ({ cl
                 )
               }}
               className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-emerald-950 font-semibold text-xs shadow transition-colors active:scale-95 cursor-pointer"
-              title="Dem laufenden Gruppenanruf beitreten"
+              title={t('calls.joinGroupCall')}
             >
               <PhoneForwarded className="w-3.5 h-3.5" />
-              <span>Anruf beitreten</span>
+              <span>{t('calls.joinCall')}</span>
             </button>
           </div>
         </div>
@@ -140,8 +143,8 @@ export const CrossDeviceCallBanner: React.FC<CrossDeviceCallBannerProps> = ({ cl
 
   const istGruppe = crossDeviceCall.art === 'gruppe'
   const partnerName = istGruppe
-    ? crossDeviceCall.group_name || 'Gruppenanruf'
-    : crossDeviceCall.partner?.username || 'Gesprächspartner'
+    ? crossDeviceCall.group_name || t('calls.groupCall')
+    : crossDeviceCall.partner?.username || t('calls.peer')
   const deviceLabel = formatDeviceLabel(crossDeviceCall.device_type)
 
   const DeviceIcon =
@@ -154,7 +157,7 @@ export const CrossDeviceCallBanner: React.FC<CrossDeviceCallBannerProps> = ({ cl
   return (
     <div
       role="region"
-      aria-label="Aktiver Anruf auf anderem Gerät"
+      aria-label={t('calls.activeOnOtherDevice')}
       data-testid="cross-device-call-banner"
       className={`relative z-40 w-full shrink-0 overflow-hidden bg-gradient-to-r from-emerald-950/90 via-emerald-900/90 to-teal-950/90 border-b border-emerald-500/30 text-emerald-100 px-4 py-2.5 shadow-lg backdrop-blur-md transition-all duration-300 ${className}`}
     >
@@ -170,8 +173,8 @@ export const CrossDeviceCallBanner: React.FC<CrossDeviceCallBannerProps> = ({ cl
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-semibold text-white tracking-tight">
                 {crossDeviceCall.device_id === getDeviceId()
-                  ? 'Laufender Anruf (wieder beitreten)'
-                  : 'Du bist bereits in einem Anruf'}
+                  ? t('calls.ongoingRejoin')
+                  : t('calls.alreadyInCall')}
               </span>
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                 <DeviceIcon className="w-3 h-3" />
@@ -179,10 +182,10 @@ export const CrossDeviceCallBanner: React.FC<CrossDeviceCallBannerProps> = ({ cl
               </span>
             </div>
             <div className="text-xs text-emerald-200/80 truncate">
-              {istGruppe ? 'Gruppe: ' : 'Mit: '}
+              {istGruppe ? t('calls.groupPrefix') : t('calls.withPrefix')}{' '}
               <span className="font-medium text-emerald-100">{partnerName}</span>
               <span className="mx-1.5 opacity-40">·</span>
-              <span className="capitalize">{crossDeviceCall.mode}-Anruf</span>
+              <span className="capitalize">{t('calls.modeCall', { mode: crossDeviceCall.mode })}</span>
             </div>
           </div>
         </div>
@@ -193,13 +196,13 @@ export const CrossDeviceCallBanner: React.FC<CrossDeviceCallBannerProps> = ({ cl
             type="button"
             onClick={() => void transferCallToThisDevice()}
             className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-emerald-950 font-semibold text-xs shadow transition-colors active:scale-95 cursor-pointer"
-            title={crossDeviceCall.device_id === getDeviceId() ? 'Anruf fortsetzen' : 'Diesen Anruf auf dieses Gerät übertragen'}
+            title={crossDeviceCall.device_id === getDeviceId() ? t('calls.resumeCall') : t('calls.transferToThisDevice')}
           >
             <PhoneForwarded className="w-3.5 h-3.5" />
             <span>
               {crossDeviceCall.device_id === getDeviceId()
-                ? 'Anruf fortsetzen'
-                : 'Auf diesem Gerät beitreten'}
+                ? t('calls.resumeCall')
+                : t('calls.joinOnThisDevice')}
             </span>
           </button>
 
@@ -207,10 +210,10 @@ export const CrossDeviceCallBanner: React.FC<CrossDeviceCallBannerProps> = ({ cl
             type="button"
             onClick={() => void terminateCrossDeviceCall()}
             className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 hover:text-red-200 border border-red-500/30 text-xs font-medium transition-colors active:scale-95 cursor-pointer"
-            title="Den Anruf auf allen Geräten beenden"
+            title={t('calls.endOnAllDevices')}
           >
             <PhoneOff className="w-3.5 h-3.5" />
-            <span>Auflegen</span>
+            <span>{t('calls.hangUp')}</span>
           </button>
         </div>
       </div>

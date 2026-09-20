@@ -13,7 +13,14 @@
  */
 
 import { act, cleanup, render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import i18n from '@/i18n'
+
+// Die Sprache festlegen: die Behauptungen unten prüfen deutsche Texte, und
+// ohne diese Zeile entscheidet navigator.language der Testumgebung.
+beforeAll(async () => {
+  await i18n.changeLanguage('de')
+})
 
 // Die ganze Kapsel, nicht `livekit-client` selbst — dort endet der Code, den
 // dieses Projekt schreibt. Der echte Modulpfad zieht den E2EE-Worker mit, den
@@ -156,7 +163,7 @@ describe('CallOverlay: Platz im Baum', () => {
         raum: 'r1',
       })
     })
-    expect(screen.getByLabelText('Anruf beenden')).toBeTruthy()
-    expect(screen.getByText('Auflegen')).toBeTruthy()
+    expect(screen.getByLabelText(i18n.t('calls.endCall'))).toBeTruthy()
+    expect(screen.getByText(i18n.t('calls.hangUp'))).toBeTruthy()
   })
 })
