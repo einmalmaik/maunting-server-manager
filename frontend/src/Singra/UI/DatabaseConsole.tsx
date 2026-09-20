@@ -1325,7 +1325,7 @@ function FilterDropdown({ columns, filterColumn, filterValue, onFilterColumn, on
             className="w-full"
             onClick={() => { onFilterColumn(''); onFilterValue('') }}
           >
-            {t('databaseConsole.reset')}
+            {t('common.reset')}
           </Button>
         )}
       </div>
@@ -1377,7 +1377,7 @@ function SortDropdown({ columns, sortColumn, sortDirection, onSortColumn, onSort
             className="w-full"
             onClick={() => { onSortColumn(''); onSortDirection('asc') }}
           >
-            {t('databaseConsole.reset')}
+            {t('common.reset')}
           </Button>
         )}
       </div>
@@ -1409,7 +1409,7 @@ function ColumnsDropdown({ columns, hiddenColumns, onToggle, onReset, onClose }:
         </div>
         {hiddenColumns.size > 0 && (
           <Button variant="secondary" size="sm" className="w-full" onClick={onReset}>
-            {t('databaseConsole.reset')}
+            {t('common.reset')}
           </Button>
         )}
       </div>

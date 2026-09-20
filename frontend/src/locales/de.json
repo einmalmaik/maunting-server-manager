@@ -341,7 +341,6 @@
         "critical": "Kritische Fälle (nur unumkehrbare oder destruktive Aktionen)"
       },
       "recommendationHint": "MSM ist mit {{model}} erprobt (schnelle Antwortzeiten und Denkstufen). Andere Modelle sind ebenfalls möglich.",
-      "recommendationApply": "Übernehmen",
       "caps": {
         "none": "Dieses Modell denkt nicht nach.",
         "levels": "Denkstufen:",
@@ -1094,7 +1093,7 @@
       "readOnly": "Nur Lesezugriff. Eine neue Nachricht würde die laufende Reparatur unterbrechen. Fragen bitte im Chat stellen.",
       "emptyTitle": "Nichts zu reparieren",
       "emptyDescription": "Meldet die Guardian-Engine eine Störung bei aktiver Autonomie, übernimmt die KI hier automatisch die Analyse.",
-      "takeOver": "Übernehmen",
+      "takeOver": "Steuerung übernehmen",
       "takeOverHint": "Beendet die laufenden Reparaturen und öffnet den Chat. Die KI fängt danach nicht von selbst wieder an.",
       "takeOverDone": "Übernommen. Die Reparatur ist beendet.",
       "waitingApproval": "Wartet auf deine Freigabe per E-Mail",
@@ -3138,7 +3137,6 @@
     "timezonePlaceholder": "Zeitzone auswählen",
     "timezoneSaved": "Zeitzone erfolgreich gespeichert",
     "timezoneBrowserHint": "Dein Browser nutzt {{zone}}, im Profil ist jedoch {{current}} gespeichert.",
-    "timezoneAdopt": "Übernehmen",
     "timezoneDismiss": "Ausblenden",
     "timezoneSave": "Zeitzone speichern",
     "locationSharingTitle": "Standort für KI-Anfragen",
@@ -3403,7 +3401,6 @@
     "deleteDatabase": "Datenbank löschen",
     "connectDatabase": "Datenbank verbinden",
     "rowsUnit": "Zeilen",
-    "reset": "Zurücksetzen",
     "rowNotAddressable": "Zeile ohne Primärschlüssel ist nicht eindeutig adressierbar. Löschen und Bearbeiten sind gesperrt.",
     "metrics": {
       "database": "Datenbank",
@@ -5630,7 +5627,6 @@
       "kalibrierungFertig": "Aufnahmen vollständig. Jetzt trainieren.",
       "trainieren": "Trainieren",
       "trainiert": "Trainiert …",
-      "zuruecksetzen": "Zurücksetzen",
       "erkannt": "Erkannt: „{{name}}“ (Score {{score}})",
       "datenschutz": "Lokale Erkennung ohne Audioübertragung.",
       "rufname": "Rufname",

@@ -40,6 +40,16 @@ import en from './en.json'
  * sie und schriebe daran weiter.
  */
 const ABGELOESTE_SCHLUESSEL = [
+  // 09/2026: vier Schlüssel sagten dasselbe wie `common.apply` und
+  // `common.reset` — auf Deutsch Wort für Wort, auf Englisch in vier
+  // Fassungen („Apply", „Use it", „Adopt", „Reset"). Der fünfte Zwilling,
+  // `ai.guardian.takeOver`, bleibt: „übernehmen" heißt dort nicht
+  // „anwenden", sondern „die Steuerung an sich nehmen", und heißt seitdem
+  // auch so.
+  'profile.timezoneAdopt',
+  'ai.providers.recommendationApply',
+  'mss.wakeword.zuruecksetzen',
+  'databaseConsole.reset',
   'ai.memory.title',
   'ai.memory.description',
   'ai.memory.teamTitle',

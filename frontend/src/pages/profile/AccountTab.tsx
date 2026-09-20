@@ -301,7 +301,7 @@ export function AccountTab() {
                 disabled={saving}
                 onClick={() => void handleSaveTimezone(browserZone)}
               >
-                {t('profile.timezoneAdopt', 'Übernehmen')}
+                {t('common.apply')}
               </Button>
               <Button
                 type="button"

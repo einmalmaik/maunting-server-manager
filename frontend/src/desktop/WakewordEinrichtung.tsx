@@ -296,7 +296,7 @@ export function WakewordEinrichtung() {
           onClick={() => void aktion('reset', () => wakewordZuruecksetzen())}
           disabled={beschaeftigt !== null || (stand.aufnahmen === 0 && !stand.trainiert)}
         >
-          {t('mss.wakeword.zuruecksetzen')}
+          {t('common.reset')}
         </Button>
       </div>
 

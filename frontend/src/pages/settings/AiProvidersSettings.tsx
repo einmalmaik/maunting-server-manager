@@ -906,7 +906,7 @@ function ProviderForm({
                         onClick={() => change({ default_model: empfohlenesModell.model_id })}
                         className="underline underline-offset-2 hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       >
-                        {t('ai.providers.recommendationApply')}
+                        {t('common.apply')}
                       </button>
                     </span>
                   </p>
@@ -1390,7 +1390,7 @@ function ProviderForm({
                       onClick={() => change({ default_model: empfohlenesModell.model_id })}
                       className="underline underline-offset-2 hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
-                      {t('ai.providers.recommendationApply')}
+                      {t('common.apply')}
                     </button>
                   </span>
                 </p>

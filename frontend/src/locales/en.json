@@ -341,7 +341,6 @@
         "critical": "Critical cases (destructive or irreversible actions only)"
       },
       "recommendationHint": "MSM is verified with {{model}} (balanced response speed and reasoning depth). Other models may also be used.",
-      "recommendationApply": "Use it",
       "caps": {
         "none": "This model does not reason.",
         "levels": "Reasoning levels:",
@@ -1094,7 +1093,7 @@
       "readOnly": "Read-only view. A new message would interrupt the ongoing repair. Please ask questions in chat.",
       "emptyTitle": "Nothing to repair",
       "emptyDescription": "When the Guardian Engine reports an incident with autonomy enabled, the AI investigates automatically here.",
-      "takeOver": "Take over",
+      "takeOver": "Take control",
       "takeOverHint": "Ends the running repairs and opens the chat. The AI will not restart them on its own.",
       "takeOverDone": "Taken over. The repair has ended.",
       "waitingApproval": "Waiting for your approval by email",
@@ -3138,7 +3137,6 @@
     "timezonePlaceholder": "Select time zone",
     "timezoneSaved": "Time zone saved successfully",
     "timezoneBrowserHint": "Your browser uses {{zone}}, but your profile is set to {{current}}.",
-    "timezoneAdopt": "Adopt",
     "timezoneDismiss": "Dismiss",
     "timezoneSave": "Save time zone",
     "locationSharingTitle": "Location for AI requests",
@@ -3403,7 +3401,6 @@
     "deleteDatabase": "Delete database",
     "connectDatabase": "Connect database",
     "rowsUnit": "rows",
-    "reset": "Reset",
     "rowNotAddressable": "Row without a primary key cannot be addressed uniquely. Deleting and editing are disabled.",
     "metrics": {
       "database": "Database",
@@ -5630,7 +5627,6 @@
       "kalibrierungFertig": "All recordings complete. Train now.",
       "trainieren": "Train",
       "trainiert": "Training …",
-      "zuruecksetzen": "Reset",
       "erkannt": "Detected: “{{name}}” (score {{score}})",
       "datenschutz": "Local recognition without audio transmission.",
       "rufname": "Wake word",
