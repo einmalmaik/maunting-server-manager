@@ -142,6 +142,11 @@ import {
   updateMessageInLocalStore,
   sortMessagesChronologically,
 } from '@/services/messengerLocalStore'
+import {
+  tilgeInhalt,
+  tilgeNachrichtBeimServer,
+  tilgeNachrichtLokal,
+} from '@/services/nachrichtLoeschen'
 
 /** Der Kontoschlüssel ist auf diesem Gerät nicht zu öffnen — nicht gesendet. */
 class E2eeIdentityLockedError extends Error {
@@ -155,6 +160,9 @@ import { getAudioTrackConstraints } from '@/lib/audioSettings'
 import { IN_HOUSE_STICKERS, CATEGORIZED_EMOJIS } from '@/services/stickerCatalog'
 import { CameraSnapshotModal } from '@/components/social/CameraSnapshotModal'
 import { CreateStoryModal, STORY_GRADIENTS } from '@/components/social/CreateStoryModal'
+import { MessengerSperrschirm } from '@/components/social/MessengerSperrschirm'
+import { siegelAktiv } from '@/services/lokaleVersiegelung'
+import { useMessengerSperre } from '@/services/messengerSperre'
 import { StoryViewerModal, type StoryReplyContext } from '@/components/social/StoryViewerModal'
 import { GroupPermissionsModal } from '@/components/social/GroupPermissionsModal'
 import {
@@ -381,6 +389,17 @@ function loadInitialContactsCache(): {
 
 export function Messenger() {
   const { user } = useAuthStore()
+  // Der Sperrzustand wird ganz oben gelesen, damit kein Effekt darunter auf
+  // eine Ablage greift, die ohne Schlüssel nichts herausgibt.
+  //
+  // `siegelAktiv()` steht daneben, weil der Store seinen Stand erst nach
+  // `initialisiere()` kennt. Ohne diesen zweiten Blick zeigte der erste
+  // Durchlauf nach jedem Neuladen einen kurz aufblitzenden, leeren Messenger,
+  // bevor der Sperrschirm ihn ablöst. Gelesen hätte er nichts — die Ablagen
+  // geben ohne Schlüssel nichts heraus —, aber es sähe kaputt aus.
+  const messengerGesperrt = useMessengerSperre(
+    (s) => !s.entsperrt && (s.eingerichtet || siegelAktiv()),
+  )
   const [searchParams, setSearchParams] = useSearchParams()
   const { inviteCode } = useParams<{ inviteCode?: string }>()
   const navigate = useNavigate()
@@ -515,8 +534,9 @@ export function Messenger() {
   const identityRef = useRef<E2eeIdentity>(IDENTITY_LOADING)
   identityRef.current = identity
   // Ein Gerät legt seinen Schlüssel beim ersten Öffnen selbst an. Es gibt
-  // nichts einzurichten und nichts zu entsperren, also auch keinen Zustand, in
-  // dem das Schreiben gesperrt wäre — nur die kurze Spanne bis `ready`.
+  // nichts einzurichten, also auch keinen Zustand, in dem das Schreiben auf
+  // Dauer gesperrt wäre — nur die kurze Spanne bis `ready`. Ist der Messenger
+  // per PIN zu, steht ohnehin der Sperrschirm statt dieser Leiste.
   const istSchreibenGesperrt = Boolean(activeContact) && identity.state === 'loading'
 
   // Attachments
@@ -621,11 +641,19 @@ export function Messenger() {
   useEffect(() => {
     scrubPlaintextStorage()
     if (!currentUserId) return
+    // Gesperrt gibt die Ablage den Geräteausweis nicht heraus, und das ist so
+    // gewollt. Hier trotzdem zu fragen, hieße: der Versuch scheitert, die
+    // Identität bleibt auf `loading` stehen — und weil dieser Effekt nur am
+    // Konto hängt, käme er nach dem Entsperren nie wieder vorbei. Die Folge war
+    // eine Eingabeleiste, die dauerhaft „zuerst den Schlüssel entsperren"
+    // verlangte, obwohl längst entsperrt war. Deshalb steht der Sperrzustand
+    // mit in den Abhängigkeiten: geht das Schloss auf, wird neu gefragt.
+    if (messengerGesperrt) return
     let active = true
 
     // Legt beim ersten Mal den Geräteschlüssel an und meldet ihn beim Konto.
-    // Es gibt nichts mehr zu entsperren und nichts nachzureichen: der Schlüssel
-    // gehört diesem Gerät und war noch nie woanders.
+    // Es gibt nichts mehr nachzureichen: der Schlüssel gehört diesem Gerät und
+    // war noch nie woanders.
     resolveIdentity(currentUserId)
       .then((next) => {
         if (active) setIdentity(next)
@@ -635,7 +663,7 @@ export function Messenger() {
     return () => {
       active = false
     }
-  }, [currentUserId])
+  }, [currentUserId, messengerGesperrt])
 
   /**
    * Den Verlauf vor dem Aufräumen des Browsers schützen.
@@ -660,6 +688,11 @@ export function Messenger() {
    */
   useEffect(() => {
     if (!currentUserId || friends.length === 0) return
+    // Gesperrt bricht der Umzug bei der ersten Zeile ab, die geschrieben werden
+    // soll. Verloren geht dabei nichts — der alte Schlüssel bleibt liegen, und
+    // beim nächsten Anlauf fängt es von vorn an. Trotzdem nicht anfangen: ein
+    // Durchlauf, der nur scheitern kann, ist keine Arbeit, sondern Lärm.
+    if (messengerGesperrt) return
     let active = true
 
     Promise.all(friends.map((f) => deriveBlindMailboxId(currentUserId, f.user_id)))
@@ -672,7 +705,7 @@ export function Messenger() {
     return () => {
       active = false
     }
-  }, [currentUserId, friends.length])
+  }, [currentUserId, friends.length, messengerGesperrt])
 
   // Der Anruf-Store braucht dieselbe Identität, um Raumschlüssel zu verpacken
   // und auszupacken. Er hängt bewusst nicht selbst am Schlüsselbund: er soll
@@ -1294,6 +1327,17 @@ export function Messenger() {
       // Dictionaries to track edits, deletions, and read receipts across envelopes
       const editMap = new Map<number, { newText: string; editedAt: string }>()
       const deleteMap = new Map<number, { deletedAt: string }>()
+      /**
+       * Dieselben Angaben, adressiert über die logische Nachrichtenkennung.
+       *
+       * Die Umschlagkennung allein reicht nicht: eine Nachricht geht als eine
+       * Kopie je Zielgerät hinaus, jede mit eigener Kennung. Der Absender merkt
+       * sich die der ersten Bestätigung, ein zweites Gerät der Gegenseite liest
+       * aber eine andere — und fand die Nachricht zu `target_id` nicht. Bearbeiten
+       * und Löschen liefen dort ins Leere.
+       */
+      const editUuidMap = new Map<string, { newText: string; editedAt: string }>()
+      const deleteUuidMap = new Map<string, { deletedAt: string }>()
       let maxPartnerReadId = 0
       let maxPartnerDeliveredId = 0
       let maxIncomingId = 0
@@ -1385,11 +1429,14 @@ export function Messenger() {
             // 2. Edit message control packet
             if (parsed.type === 'edit_message') {
               const targetId = Number(parsed.target_id || 0)
-              if (targetId && parsed.new_text) {
-                editMap.set(targetId, {
+              const targetUuid = String(parsed.target_client_uuid || '')
+              if (parsed.new_text && (targetId || targetUuid)) {
+                const eintrag = {
                   newText: String(parsed.new_text),
                   editedAt: String(parsed.edited_at || env.created_at),
-                })
+                }
+                if (targetId) editMap.set(targetId, eintrag)
+                if (targetUuid) editUuidMap.set(targetUuid, eintrag)
               }
               continue
             }
@@ -1397,10 +1444,11 @@ export function Messenger() {
             // 3. Delete message control packet
             if (parsed.type === 'delete_message') {
               const targetId = Number(parsed.target_id || 0)
-              if (targetId) {
-                deleteMap.set(targetId, {
-                  deletedAt: String(parsed.deleted_at || env.created_at),
-                })
+              const targetUuid = String(parsed.target_client_uuid || '')
+              if (targetId || targetUuid) {
+                const eintrag = { deletedAt: String(parsed.deleted_at || env.created_at) }
+                if (targetId) deleteMap.set(targetId, eintrag)
+                if (targetUuid) deleteUuidMap.set(targetUuid, eintrag)
               }
               continue
             }
@@ -1475,6 +1523,14 @@ export function Messenger() {
         }
       }
 
+      // Eine Nachricht wird über ihre Umschlagkennung **oder** ihre logische
+      // Kennung angesprochen; welche der Absender nennen konnte, hängt an seinem
+      // Stand.
+      const findeAenderung = (m: { id: number; clientUuid?: string }) =>
+        editMap.get(m.id) ?? (m.clientUuid ? editUuidMap.get(m.clientUuid) : undefined)
+      const findeLoeschung = (m: { id: number; clientUuid?: string }) =>
+        deleteMap.get(m.id) ?? (m.clientUuid ? deleteUuidMap.get(m.clientUuid) : undefined)
+
       // Apply Edits, Deletions, and Read Status
       // Gelöscht = gelöscht. Kein Originaltext wird aufbewahrt (Zero Knowledge).
       const processedList: ChatMessage[] = decryptedList.map((msg) => {
@@ -1485,18 +1541,18 @@ export function Messenger() {
         let deletedAt: string | undefined = undefined
         let originalText: string | undefined = undefined
 
-        if (editMap.has(msg.id)) {
-          const editInfo = editMap.get(msg.id)!
+        const aenderung = findeAenderung(msg)
+        if (aenderung) {
           originalText = text
-          text = editInfo.newText
+          text = aenderung.newText
           isEdited = true
-          editedAt = editInfo.editedAt
+          editedAt = aenderung.editedAt
         }
 
-        if (deleteMap.has(msg.id)) {
-          const delInfo = deleteMap.get(msg.id)!
+        const loeschung = findeLoeschung(msg)
+        if (loeschung) {
           isDeleted = true
-          deletedAt = delInfo.deletedAt
+          deletedAt = loeschung.deletedAt
           // Kein originalText bei Löschung — gelöscht ist gelöscht.
           originalText = undefined
         }
@@ -1514,7 +1570,7 @@ export function Messenger() {
               ? 'sent'
               : 'queued'
 
-        return {
+        const fertig = {
           ...msg,
           text,
           isEdited,
@@ -1526,6 +1582,10 @@ export function Messenger() {
           isRead,
           status,
         }
+        // Ausblenden reicht nicht: was hier stehen bleibt, schreibt
+        // `saveLocalMessages` gleich wieder auf die Platte — Text und Anhang
+        // einer gelöschten Nachricht eingeschlossen.
+        return isDeleted && deletedAt ? tilgeInhalt(fertig, deletedAt) : fertig
       })
 
       // Abort if the user has navigated to another chat in the meantime or a newer load completed
@@ -1534,8 +1594,38 @@ export function Messenger() {
       // Der eigene Gesprächsanteil steht nur hier: eine Ratchet-Nachricht kann
       // ihr Absender nicht öffnen. Ein Ersetzen statt Zusammenführen würde
       // alles selbst Geschriebene bei jedem Abruf wegwischen.
-      const lokalerVerlauf = activeContact ? await loadLocalMessages(currentMid) : []
+      const rohesLokal = activeContact ? await loadLocalMessages(currentMid) : []
       if (activeMailboxIdRef.current !== currentMid || currentLoadSeqRef.current !== seq) return
+
+      /**
+       * Eine Löschung, die hier ankommt, gilt auch für das, was schon auf der
+       * Platte liegt.
+       *
+       * Der Steuerumschlag nennt eine Nachricht, die dieses Gerät längst hat.
+       * Ohne diesen Durchgang blieben zwei Fassungen zurück: die Zeile im
+       * eigenen Verlauf mit Text und Anhang, und der abgelegte
+       * Umschlag-Klartext. Beide würden beim nächsten Öffnen des Gesprächs
+       * wieder gelesen — die Nachricht wäre „für alle gelöscht" und stünde
+       * trotzdem da.
+       */
+      const lokalerVerlauf = rohesLokal.map((m) => {
+        const loeschung = findeLoeschung(m)
+        return loeschung && !m.isDeleted ? tilgeInhalt(m, loeschung.deletedAt) : m
+      })
+
+      const nochZuTilgen = new Map<string, { msg: ChatMessage; geloeschtAm: string }>()
+      for (const m of [...rohesLokal, ...processedList] as ChatMessage[]) {
+        if (m.isDeleted) continue
+        const loeschung = findeLoeschung(m)
+        if (!loeschung) continue
+        const schluessel = m.clientUuid || `#${m.id}`
+        if (!nochZuTilgen.has(schluessel)) {
+          nochZuTilgen.set(schluessel, { msg: m, geloeschtAm: loeschung.deletedAt })
+        }
+      }
+      for (const { msg, geloeschtAm } of nochZuTilgen.values()) {
+        void tilgeNachrichtLokal(currentMid, msg, geloeschtAm).catch(() => {})
+      }
 
       setMessages((prev) => {
         const processedClientUuids = new Set<string>()
@@ -1637,13 +1727,47 @@ export function Messenger() {
       setEditingMessage(null)
       return
     }
+    const bearbeitetAm = new Date().toISOString()
     try {
       await sendE2eeControlMessage({
         type: 'edit_message',
         target_id: msg.id,
+        target_client_uuid: msg.clientUuid,
         new_text: cleanText,
-        edited_at: new Date().toISOString(),
+        edited_at: bearbeitetAm,
       })
+
+      /**
+       * Die Änderung auch hier anwenden — und zwar selbst, nicht über den
+       * Umschlag.
+       *
+       * Der Steuerumschlag ist gegen die Geräte der Gegenseite versiegelt. Wer
+       * mit dem Double Ratchet verschlüsselt, kann sein eigenes Erzeugnis nicht
+       * wieder öffnen; beim nächsten `loadMessages` liegt für dieses Gerät
+       * nichts vor, was es in `editMap` eintragen könnte. Die Gegenseite sah die
+       * Änderung also, der Absender nie — die Nachricht stand unverändert da,
+       * obwohl die Meldung „Nachricht bearbeitet" erschien.
+       *
+       * Der eigene Verlauf ist die einzige Fassung, die dieses Gerät je hat.
+       * Also wird sie hier geändert, vor dem Neuladen: `loadMessages` liest sie
+       * von dort und würde eine spätere Änderung sonst wieder überschreiben.
+       */
+      await updateMessageInLocalStore(blindMailboxId, msg.id, {
+        text: cleanText,
+        isEdited: true,
+        editedAt: bearbeitetAm,
+      }).catch(() => {})
+
+      setMessages((prev) => {
+        const geaendert = prev.map((m) =>
+          m.id === msg.id
+            ? { ...m, text: cleanText, isEdited: true, editedAt: bearbeitetAm, originalText: m.text }
+            : m,
+        )
+        sessionChatCache.set(blindMailboxId, geaendert.slice(-80))
+        return geaendert
+      })
+
       toast.success('Nachricht bearbeitet.')
       setEditingMessage(null)
       setInputText('')
@@ -1699,12 +1823,37 @@ export function Messenger() {
       return
     }
 
+    const geloeschtAm = new Date().toISOString()
     try {
+      // 1. Die Gegenseite erfährt es. Steht am Anfang, weil nur dieser Schritt
+      //    ein fremdes Gerät erreicht; was danach kommt, kann man wiederholen.
       await sendE2eeControlMessage({
         type: 'delete_message',
         target_id: msg.id,
-        deleted_at: new Date().toISOString(),
+        target_client_uuid: msg.clientUuid,
+        deleted_at: geloeschtAm,
       })
+
+      // 2. Chiffretext und Anhänge vom Server nehmen — vor dem lokalen Tilgen.
+      //    Die Medienkennungen stehen ausschließlich in dieser Zeile; ist sie
+      //    erst ein Grabstein, findet kein zweiter Versuch die Blobs mehr.
+      await tilgeNachrichtBeimServer(blindMailboxId, msg)
+
+      // 3. Und zuletzt dieses Gerät. Der eigene Löschbefehl kommt hier nie an:
+      //    eine Ratchet-Nachricht kann ihr Absender nicht öffnen, `deleteMap`
+      //    bliebe für diese Nachricht auf immer leer.
+      await tilgeNachrichtLokal(blindMailboxId, msg, geloeschtAm)
+
+      setMessages((prev) => {
+        const geaendert = prev.map((m) =>
+          m.id === msg.id || (msg.clientUuid && m.clientUuid === msg.clientUuid)
+            ? tilgeInhalt(m, geloeschtAm)
+            : m
+        )
+        sessionChatCache.set(blindMailboxId, geaendert.slice(-80))
+        return geaendert
+      })
+
       toast.success('Nachricht für alle gelöscht.')
       await loadMessages(false)
     } catch {
@@ -2889,6 +3038,17 @@ export function Messenger() {
   }
 
   const isChatOpen = Boolean(activeContact || activeGroup)
+
+  // Gesperrt wird der Verlauf nicht überdeckt, sondern gar nicht erst gebaut.
+  // Er stünde auch nicht zur Verfügung: die lokalen Ablagen geben ohne
+  // Schlüssel nichts heraus (siehe `services/lokaleVersiegelung`).
+  if (messengerGesperrt) {
+    return (
+      <div className="flex h-full w-full min-h-0 flex-1 flex-col overflow-hidden bg-surface">
+        <MessengerSperrschirm />
+      </div>
+    )
+  }
 
   return (
     <div className="flex h-full w-full min-h-0 flex-1 flex-col overflow-hidden bg-surface">
@@ -4826,7 +4986,13 @@ export function Messenger() {
                         disabled={istSchreibenGesperrt}
                         placeholder={
                           istSchreibenGesperrt
-                            ? 'Zum Schreiben zuerst den Schlüssel entsperren'
+                            ? // Hier stand „zuerst den Schlüssel entsperren".
+                              // Das stammte aus der Zeit, als der
+                              // Identitätsschlüssel eine eigene Passphrase
+                              // hatte — die gibt es nicht mehr, und die
+                              // Aufforderung schickte den Benutzer nach
+                              // nirgendwo. Was bleibt, ist ein kurzer Moment.
+                              'Schlüssel wird vorbereitet …'
                             : editingMessage
                               ? 'Nachricht bearbeiten …'
                               : 'Nachricht schreiben …'

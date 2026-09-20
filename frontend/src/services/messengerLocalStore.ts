@@ -9,7 +9,20 @@
  * Object Stores:
  *  - `messages`: keyed by `[blindMailboxId, id]`, indexed by `blindMailboxId`, `createdAt`, `clientUuid`
  *  - `mailboxes`: keyed by `blindMailboxId`, tracks `lastSyncedEnvelopeId` and `updatedAt`
+ *
+ * Seit 09/2026 liegt der Inhalt hier nicht mehr offen, sobald ein Messenger-PIN
+ * eingerichtet ist: jede Zeile geht durch `lokaleVersiegelung`, nur die
+ * Schlüssel- und Indexfelder bleiben lesbar. Ohne PIN ändert sich nichts.
+ *
+ * Daraus folgt eine Regel für jeden Schreibweg in dieser Datei: **erst
+ * versiegeln, dann die Transaktion öffnen.** Verschlüsseln ist asynchron, und
+ * eine IndexedDB-Transaktion schließt sich, sobald der Ereignisumlauf
+ * leerläuft — ein `await` zwischen `transaction()` und `put()` bricht sie ab.
+ * Gelesen wird umgekehrt: erst die Rohzeilen holen, dann außerhalb der
+ * Transaktion entsiegeln.
  */
+
+import { entsiegleZeile, entsiegleZeilen, versiegleZeile } from './lokaleVersiegelung'
 
 export interface LocalStoredMessage {
   blindMailboxId?: string
@@ -61,6 +74,32 @@ const DB_VERSION = 2
 const STORE_MESSAGES = 'messages'
 const STORE_MAILBOXES = 'mailboxes'
 const STORE_KLARTEXTE = 'envelope_plaintexts'
+
+/**
+ * Die Felder einer Nachricht, die im Klartext liegen bleiben müssen.
+ *
+ * `blindMailboxId` und `id` bilden den Schlüssel, `clientUuid` trägt den Index,
+ * über den `updateMessageInLocalStore` eine Zeile wiederfindet, `createdAt` den
+ * Zeitindex. Was IndexedDB als Schlüssel braucht, kann nicht verschlüsselt
+ * sein — sonst gibt es den Index nicht mehr.
+ *
+ * Das ist der Preis des Siegels und er steht so auch in der Dokumentation: wer
+ * eine kopierte Platte hat, sieht weiter, welche Mailbox wann wie viele
+ * Nachrichten bekommen hat. Den Inhalt sieht er nicht. `blindMailboxId` ist
+ * bereits eine blinde Kennung, `clientUuid` eine Zufallskennung ohne Bezug zum
+ * Text.
+ */
+const NACHRICHT_KLARFELDER = ['blindMailboxId', 'id', 'createdAt', 'clientUuid'] as const
+
+/** Bindet eine Nachrichtenzeile an ihren Platz. Siehe `versiegleZeile`. */
+function nachrichtAad(blindMailboxId: string, id: number | undefined): string {
+  return `msm-nachricht:${blindMailboxId}:${id ?? ''}`
+}
+
+/** Bindet einen Umschlag-Klartext an seinen Platz. */
+function klartextAad(blindMailboxId: string, envelopeId: number): string {
+  return `msm-umschlag:${blindMailboxId}:${envelopeId}`
+}
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
@@ -214,18 +253,50 @@ export async function speichereUmschlagKlartext(
   plain: string
 ): Promise<void> {
   const db = await openLocalDatabase()
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE_KLARTEXTE, 'readwrite')
-    tx.objectStore(STORE_KLARTEXTE).put({
+  // Versiegeln vor der Transaktion — und ein gesperrter Messenger wirft hier,
+  // wie er soll: scheitert dieser Schritt, darf der Ratchet-Schlüssel nicht
+  // als verbraucht gelten.
+  const zeile = await versiegleZeile(
+    {
       blindMailboxId,
       envelopeId,
       plain,
       gespeichertAm: new Date().toISOString(),
-    })
+    },
+    ['blindMailboxId', 'envelopeId'],
+    klartextAad(blindMailboxId, envelopeId),
+  )
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_KLARTEXTE, 'readwrite')
+    tx.objectStore(STORE_KLARTEXTE).put(zeile)
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
     tx.onabort = () => reject(tx.error)
   })
+}
+
+/**
+ * Nimmt den Inhalt eines geöffneten Umschlags heraus, ohne die Zeile zu löschen.
+ *
+ * Gebraucht beim Löschen einer Nachricht: Hier liegt die Fassung, aus der ein
+ * späterer Abruf sie wieder aufbaut. Bliebe sie stehen, käme die gelöschte
+ * Nachricht beim nächsten Öffnen des Gesprächs zurück.
+ *
+ * Die Zeile selbst muss bleiben. Sie ist zugleich die Marke „dieser Umschlag
+ * ist geöffnet", und ein Nachrichtenschlüssel des Double Ratchet ist nach dem
+ * ersten Öffnen verbraucht: ohne die Marke liefe der Ratchet ein zweites Mal
+ * über denselben Umschlag und bräche die Sitzung. Der leere Text ist dafür
+ * ausreichend, die Prüfung fragt auf `null` (`ratchetSitzung.ts`).
+ *
+ * Gab es zu diesem Umschlag noch keine Zeile — etwa beim Absender, der seine
+ * eigene Ratchet-Nachricht nie geöffnet hat —, entsteht hier eine leere. Das
+ * schadet nicht: sie markiert einen Umschlag, der ohnehin verschwindet.
+ */
+export async function leereUmschlagKlartext(
+  blindMailboxId: string,
+  envelopeId: number
+): Promise<void> {
+  await speichereUmschlagKlartext(blindMailboxId, envelopeId, '')
 }
 
 /**
@@ -245,12 +316,17 @@ export async function leseUmschlagKlartext(
 ): Promise<string | null> {
   if (!blindMailboxId) return null
   const db = await openLocalDatabase()
-  return await new Promise<string | null>((resolve, reject) => {
+  const roh = await new Promise<Record<string, any> | null>((resolve, reject) => {
     const tx = db.transaction(STORE_KLARTEXTE, 'readonly')
     const req = tx.objectStore(STORE_KLARTEXTE).get([blindMailboxId, envelopeId])
-    req.onsuccess = () => resolve(typeof req.result?.plain === 'string' ? req.result.plain : null)
+    req.onsuccess = () => resolve(req.result ?? null)
     req.onerror = () => reject(req.error)
   })
+  const zeile = await entsiegleZeile<{ plain?: unknown }>(
+    roh,
+    klartextAad(blindMailboxId, envelopeId),
+  )
+  return typeof zeile?.plain === 'string' ? zeile.plain : null
 }
 
 /** Alle bereits geöffneten Umschläge einer Mailbox, nach Umschlagkennung. */
@@ -261,17 +337,22 @@ export async function ladeUmschlagKlartexte(
   if (!blindMailboxId) return treffer
   try {
     const db = await openLocalDatabase()
-    return await new Promise<Map<number, string>>((resolve, reject) => {
+    const rohzeilen = await new Promise<Record<string, any>[]>((resolve, reject) => {
       const tx = db.transaction(STORE_KLARTEXTE, 'readonly')
       const req = tx.objectStore(STORE_KLARTEXTE).getAll(
         IDBKeyRange.bound([blindMailboxId, -Infinity], [blindMailboxId, Infinity])
       )
-      req.onsuccess = () => {
-        for (const e of req.result || []) treffer.set(e.envelopeId, e.plain)
-        resolve(treffer)
-      }
+      req.onsuccess = () => resolve(req.result || [])
       req.onerror = () => reject(req.error)
     })
+    const offen = await entsiegleZeilen<{ envelopeId: number; plain: string }>(
+      rohzeilen,
+      (z) => klartextAad(blindMailboxId, z.envelopeId),
+    )
+    for (const e of offen) {
+      if (typeof e.plain === 'string') treffer.set(e.envelopeId, e.plain)
+    }
+    return treffer
   } catch {
     return treffer
   }
@@ -325,37 +406,42 @@ export async function loadLocalMessages(blindMailboxId: string): Promise<LocalSt
   if (!blindMailboxId) return []
   try {
     const db = await openLocalDatabase()
-    return await new Promise<LocalStoredMessage[]>((resolve, reject) => {
+    const rohzeilen = await new Promise<Record<string, any>[]>((resolve, reject) => {
       const tx = db.transaction(STORE_MESSAGES, 'readonly')
       const store = tx.objectStore(STORE_MESSAGES)
       const index = store.index('by_mailbox')
       const range = IDBKeyRange.only(blindMailboxId)
       const req = index.getAll(range)
-
-      req.onsuccess = () => {
-        const rawMsgs: LocalStoredMessage[] = req.result || []
-        // Deduplicate by clientUuid: if a confirmed server message exists with this clientUuid,
-        // discard any optimistic leftover with the same clientUuid.
-        const confirmedUuids = new Set<string>()
-        for (const m of rawMsgs) {
-          if (m.clientUuid && !isOptimisticMessage(m)) {
-            confirmedUuids.add(m.clientUuid)
-          }
-        }
-        const filtered = rawMsgs.filter((m) => {
-          // Systemzeilen gehören nicht in den Verlauf. Gespeicherte gibt es
-          // trotzdem: bis 09/2026 schrieb der Messenger sie mit, und bei jedem
-          // Ladevorgang kamen sie zurück.
-          if (m.isSystem) return false
-          if (m.clientUuid && isOptimisticMessage(m) && confirmedUuids.has(m.clientUuid)) {
-            return false
-          }
-          return true
-        })
-        resolve(sortMessagesChronologically(filtered))
-      }
+      req.onsuccess = () => resolve(req.result || [])
       req.onerror = () => reject(req.error)
     })
+
+    // Erst öffnen, dann filtern: `isSystem` und `status` liegen im versiegelten
+    // Teil und stehen vor dem Entsiegeln nicht zur Verfügung.
+    const rawMsgs = await entsiegleZeilen<LocalStoredMessage>(
+      rohzeilen,
+      (z) => nachrichtAad(blindMailboxId, z.id),
+    )
+
+    // Deduplicate by clientUuid: if a confirmed server message exists with this clientUuid,
+    // discard any optimistic leftover with the same clientUuid.
+    const confirmedUuids = new Set<string>()
+    for (const m of rawMsgs) {
+      if (m.clientUuid && !isOptimisticMessage(m)) {
+        confirmedUuids.add(m.clientUuid)
+      }
+    }
+    const filtered = rawMsgs.filter((m) => {
+      // Systemzeilen gehören nicht in den Verlauf. Gespeicherte gibt es
+      // trotzdem: bis 09/2026 schrieb der Messenger sie mit, und bei jedem
+      // Ladevorgang kamen sie zurück.
+      if (m.isSystem) return false
+      if (m.clientUuid && isOptimisticMessage(m) && confirmedUuids.has(m.clientUuid)) {
+        return false
+      }
+      return true
+    })
+    return sortMessagesChronologically(filtered)
   } catch {
     return []
   }
@@ -372,26 +458,33 @@ export async function saveLocalMessages(
   if (!blindMailboxId || !messages || messages.length === 0) return
   try {
     const db = await openLocalDatabase()
+
+    // Versiegeln passiert vollständig vor der Transaktion. Siehe Dateikopf.
+    let maxEnvelopeId = 0
+    const zeilen: Record<string, unknown>[] = []
+    for (const m of messages) {
+      // Siehe `isSystem`: eine Meldung über die Sitzung dieses Geräts ist
+      // kein Gesprächsinhalt und hat in der Ablage nichts verloren.
+      if (m.isSystem) continue
+      zeilen.push(
+        await versiegleZeile(
+          { ...m, blindMailboxId },
+          NACHRICHT_KLARFELDER,
+          nachrichtAad(blindMailboxId, m.id),
+        ),
+      )
+      // Only real server envelope IDs (< 1e11) advance lastSyncedEnvelopeId
+      if (typeof m.id === 'number' && m.id > maxEnvelopeId && m.id < 1e11) {
+        maxEnvelopeId = m.id
+      }
+    }
+
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction([STORE_MESSAGES, STORE_MAILBOXES], 'readwrite')
       const msgStore = tx.objectStore(STORE_MESSAGES)
       const mbStore = tx.objectStore(STORE_MAILBOXES)
 
-      let maxEnvelopeId = 0
-      for (const m of messages) {
-        // Siehe `isSystem`: eine Meldung über die Sitzung dieses Geräts ist
-        // kein Gesprächsinhalt und hat in der Ablage nichts verloren.
-        if (m.isSystem) continue
-        const record: LocalStoredMessage = {
-          ...m,
-          blindMailboxId,
-        }
-        msgStore.put(record)
-        // Only real server envelope IDs (< 1e11) advance lastSyncedEnvelopeId
-        if (typeof m.id === 'number' && m.id > maxEnvelopeId && m.id < 1e11) {
-          maxEnvelopeId = m.id
-        }
-      }
+      for (const zeile of zeilen) msgStore.put(zeile)
 
       if (maxEnvelopeId > 0) {
         const mbMeta: LocalMailboxMeta = {
@@ -466,33 +559,45 @@ export async function updateMessageInLocalStore(
   if (!blindMailboxId) return
   try {
     const db = await openLocalDatabase()
+
+    // Lesen, öffnen, ändern, wieder zumachen, schreiben. Das sind zwei
+    // Transaktionen statt einer, weil Ent- und Verschlüsseln asynchron sind
+    // und eine IndexedDB-Transaktion kein `await` überlebt.
+    const roh = await new Promise<Record<string, any> | null>((resolve, reject) => {
+      const tx = db.transaction(STORE_MESSAGES, 'readonly')
+      const store = tx.objectStore(STORE_MESSAGES)
+      const getReq =
+        typeof clientUuidOrId === 'number'
+          ? store.get([blindMailboxId, clientUuidOrId])
+          : store.index('by_client_uuid').get(clientUuidOrId)
+      getReq.onsuccess = () => resolve(getReq.result ?? null)
+      getReq.onerror = () => reject(getReq.error)
+    })
+
+    if (!roh || roh.blindMailboxId !== blindMailboxId) return
+
+    const alt = await entsiegleZeile<LocalStoredMessage>(
+      roh,
+      nachrichtAad(blindMailboxId, roh.id),
+    )
+    if (!alt) return
+
+    const alteId = roh.id as number
+    const neu = { ...alt, ...patch, blindMailboxId }
+    const zeile = await versiegleZeile(
+      neu,
+      NACHRICHT_KLARFELDER,
+      nachrichtAad(blindMailboxId, neu.id),
+    )
+
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_MESSAGES, 'readwrite')
       const store = tx.objectStore(STORE_MESSAGES)
-
-      if (typeof clientUuidOrId === 'number') {
-        const getReq = store.get([blindMailboxId, clientUuidOrId])
-        getReq.onsuccess = () => {
-          if (getReq.result) {
-            const updated = { ...getReq.result, ...patch }
-            store.put(updated)
-          }
-        }
-      } else {
-        const index = store.index('by_client_uuid')
-        const getReq = index.get(clientUuidOrId)
-        getReq.onsuccess = () => {
-          if (getReq.result && getReq.result.blindMailboxId === blindMailboxId) {
-            const updated = { ...getReq.result, ...patch }
-            // If ID was upgraded (e.g. optimistic timestamp to server id), delete old key
-            if (patch.id && patch.id !== getReq.result.id) {
-              store.delete([blindMailboxId, getReq.result.id])
-            }
-            store.put(updated)
-          }
-        }
+      // If ID was upgraded (e.g. optimistic timestamp to server id), delete old key
+      if (patch.id && patch.id !== alteId) {
+        store.delete([blindMailboxId, alteId])
       }
-
+      store.put(zeile)
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
     })
@@ -547,6 +652,79 @@ export async function getLocalMailboxLastSyncedId(blindMailboxId: string): Promi
   } catch {
     return 0
   }
+}
+
+/**
+ * Schreibt jede Zeile dieser Ablage einmal neu.
+ *
+ * Das ist der Umstellungsdurchlauf beim Ein- und beim Ausschalten des PIN, und
+ * es ist derselbe Code für beide Richtungen: `versiegleZeile` richtet sich nach
+ * dem Schalter, der vorher gesetzt wurde. Einschalten heißt Schalter an und
+ * einmal durchlaufen, Ausschalten heißt Schalter aus und einmal durchlaufen.
+ *
+ * Bricht der Durchlauf in der Mitte ab — geschlossener Reiter, leerer Akku —,
+ * liegen beide Formen nebeneinander. Beide sind lesbar, solange der Schlüssel
+ * da ist, und ein zweiter Durchlauf räumt den Rest ab. Deshalb wird hier Zeile
+ * für Zeile geschrieben und nicht alles in einer großen Transaktion: eine
+ * abgebrochene große Transaktion macht die halbe Arbeit rückgängig, hier bleibt
+ * jede fertige Zeile fertig.
+ */
+export async function schreibeNachrichtenBestandNeu(): Promise<number> {
+  const db = await openLocalDatabase()
+
+  const rohNachrichten = await new Promise<Record<string, any>[]>((resolve, reject) => {
+    const tx = db.transaction(STORE_MESSAGES, 'readonly')
+    const req = tx.objectStore(STORE_MESSAGES).getAll()
+    req.onsuccess = () => resolve(req.result || [])
+    req.onerror = () => reject(req.error)
+  })
+
+  let geschrieben = 0
+  for (const roh of rohNachrichten) {
+    const mailbox = String(roh.blindMailboxId || '')
+    if (!mailbox) continue
+    const aad = nachrichtAad(mailbox, roh.id)
+    const offen = await entsiegleZeile<LocalStoredMessage>(roh, aad)
+    if (!offen) continue
+    const zeile = await versiegleZeile({ ...offen, blindMailboxId: mailbox }, NACHRICHT_KLARFELDER, aad)
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_MESSAGES, 'readwrite')
+      tx.objectStore(STORE_MESSAGES).put(zeile)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+    geschrieben++
+  }
+
+  const rohKlartexte = await new Promise<Record<string, any>[]>((resolve, reject) => {
+    const tx = db.transaction(STORE_KLARTEXTE, 'readonly')
+    const req = tx.objectStore(STORE_KLARTEXTE).getAll()
+    req.onsuccess = () => resolve(req.result || [])
+    req.onerror = () => reject(req.error)
+  })
+
+  for (const roh of rohKlartexte) {
+    const mailbox = String(roh.blindMailboxId || '')
+    const umschlag = Number(roh.envelopeId)
+    if (!mailbox || !Number.isFinite(umschlag)) continue
+    const aad = klartextAad(mailbox, umschlag)
+    const offen = await entsiegleZeile<Record<string, any>>(roh, aad)
+    if (!offen) continue
+    const zeile = await versiegleZeile(
+      { ...offen, blindMailboxId: mailbox, envelopeId: umschlag },
+      ['blindMailboxId', 'envelopeId'],
+      aad,
+    )
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_KLARTEXTE, 'readwrite')
+      tx.objectStore(STORE_KLARTEXTE).put(zeile)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+    geschrieben++
+  }
+
+  return geschrieben
 }
 
 /**

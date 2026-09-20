@@ -22,7 +22,6 @@ import {
   Clock,
   ExternalLink,
   FileSignature,
-  Fingerprint,
   Globe,
   Lock,
   MapPin,
@@ -75,6 +74,8 @@ import { StatusDot } from '@/components/social/StatusIndicator'
 import { formatActivityCategory } from '@/hooks/usePresenceAndActivity'
 import { usePublicLegalSettings } from '@/hooks/usePublicLegalSettings'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
+import { MessengerSicherheitTab } from '@/pages/profile/MessengerSicherheitTab'
+import { TresorSicherheitTab } from './vault/TresorSicherheitTab'
 import { Avatar, Badge, Button, Dropdown, type DropdownOption, Input, ProgressBar, Slider, Switch } from '@/Singra/UI'
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
@@ -82,7 +83,6 @@ import { getAvailableTimezones } from '@/utils/timeFormat'
 import { Gefahrenzone } from './Gefahrenzone'
 import { OVERLAY_ZUSTAND_TEST } from './sprachKoordination'
 import { WakewordEinrichtung } from './WakewordEinrichtung'
-import { useVaultStore } from './vault/vaultStore'
 import {
   audioGeraete,
   duckingSetzen,
@@ -109,13 +109,17 @@ const STATUS_REIHE: AgentStatus[] = ['bereit', 'hoert', 'denkt', 'spricht']
  */
 const VERARBEITUNG_SPEICHERN_MS = 400
 
-type EinstellungsTab = 'konto' | 'social' | 'desktop' | 'wakeword' | 'audio' | 'rechtliches' | 'gefahr'
+type EinstellungsTab = 'konto' | 'social' | 'messenger' | 'tresor' | 'desktop' | 'wakeword' | 'audio' | 'rechtliches' | 'gefahr'
 
 const isAndroidClient = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
 
 const TABS: TabDef<EinstellungsTab>[] = [
   { id: 'konto', labelKey: 'profile.tabs.account', icon: User },
   { id: 'social', labelKey: 'profile.tabs.social', icon: Users },
+  // Derselbe Reiter wie im Web-Panel, dieselbe Komponente. Zwei Fassungen
+  // waeren zwei Staende.
+  { id: 'messenger', labelKey: 'profile.tabs.messenger', icon: Lock },
+  { id: 'tresor', labelKey: 'profile.tabs.vault', icon: ShieldCheck },
   {
     id: 'desktop',
     labelKey: isAndroidClient ? 'mss.einstellungen.tab.app' : 'mss.einstellungen.tab.desktop',
@@ -152,6 +156,8 @@ export function Einstellungen({ onKonfigAenderung }: { onKonfigAenderung?: () =>
       />
       {tab === 'konto' && <KontoEinstellungen />}
       {tab === 'social' && <SocialEinstellungen />}
+      {tab === 'messenger' && <MessengerSicherheitTab />}
+      {tab === 'tresor' && <TresorSicherheitTab />}
       {tab === 'desktop' && <DesktopIntegration onKonfigAenderung={onKonfigAenderung} />}
       {tab === 'wakeword' && <WakewordEinrichtung />}
       {tab === 'audio' && <AudioEinstellungen />}
@@ -181,25 +187,6 @@ function KontoEinstellungen() {
   // Standort für KI State
   const [savingLocationSharing, setSavingLocationSharing] = useState(false)
   const [locationSharingError, setLocationSharingError] = useState<string | null>(null)
-
-  // Tresor & Biometrie
-  const {
-    isInitialized,
-    isUnlocked,
-    autoLockMinutes,
-    lockOnWindowBlur,
-    isBiometricsSupported,
-    isBiometricsEnabled,
-    setAutoLockMinutes,
-    setLockOnWindowBlur,
-    enableBiometrics,
-    disableBiometrics,
-    checkBiometricsSupport,
-  } = useVaultStore()
-
-  useEffect(() => {
-    void checkBiometricsSupport()
-  }, [checkBiometricsSupport])
 
   useEffect(() => {
     if (user?.time_zone) {
@@ -280,10 +267,6 @@ function KontoEinstellungen() {
     }
   }
 
-  const [biometricsModalOpen, setBiometricsModalOpen] = useState(false)
-  const [masterPasswordInput, setMasterPasswordInput] = useState('')
-  const [biometricsLoading, setBiometricsLoading] = useState(false)
-
   const handleAvatarChange = async (file?: File | null) => {
     if (!file) return
     if (file.size > 5 * 1024 * 1024) {
@@ -325,46 +308,6 @@ function KontoEinstellungen() {
       toast.error(err?.detail || t('profile.avatarRemoveFailed', 'Profilbild konnte nicht entfernt werden.'))
     } finally {
       setUploadingAvatar(false)
-    }
-  }
-
-  const autoLockOptions: DropdownOption[] = [
-    { value: '0', label: t('mss.vault.autolock.disabled', 'Sofort beim Verlassen') },
-    { value: '5', label: t('mss.vault.autolock.5min', '5 Minuten Inaktivität') },
-    { value: '10', label: t('mss.vault.autolock.10min', '10 Minuten Inaktivität') },
-    { value: '15', label: t('mss.vault.autolock.15min', '15 Minuten Inaktivität') },
-    { value: '30', label: t('mss.vault.autolock.30min', '30 Minuten Inaktivität') },
-    { value: '60', label: t('mss.vault.autolock.60min', '1 Stunde Inaktivität') },
-  ]
-
-  const handleBiometricsToggle = async (checked: boolean) => {
-    if (!checked) {
-      await disableBiometrics()
-      toast.success('Biometrischer Schnelleinstieg deaktiviert')
-      return
-    }
-    setMasterPasswordInput('')
-    setBiometricsModalOpen(true)
-  }
-
-  const handleConfirmBiometrics = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!masterPasswordInput) return
-    setBiometricsLoading(true)
-    try {
-      const ok = await enableBiometrics(masterPasswordInput)
-      if (ok) {
-        toast.success('Biometrischer Schnelleinstieg aktiviert')
-        setBiometricsModalOpen(false)
-        setMasterPasswordInput('')
-      } else {
-        toast.error('Konnte Biometrie nicht aktivieren. Prüfe das Master-Passwort.')
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Konnte Biometrie nicht aktivieren. Prüfe das Master-Passwort.'
-      toast.error(msg)
-    } finally {
-      setBiometricsLoading(false)
     }
   }
 
@@ -537,135 +480,6 @@ function KontoEinstellungen() {
         )}
       </div>
 
-      {/* 4. Passwort-Manager & Automatische Sperre (Auto-Lock) */}
-      <div className="msm-card p-5 space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <ShieldCheck className="h-5 w-5" />
-          </div>
-          <div>
-            <h2 className="text-sm font-semibold text-on-surface">Tresor-Sicherheit & Auto-Lock</h2>
-          </div>
-        </div>
-
-        <div className="space-y-4 pt-2 border-t border-outline-variant/30">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div>
-              <label className="text-xs font-medium text-on-surface">Automatische Sperre</label>
-            </div>
-            <div className="w-full sm:w-56">
-              <Dropdown
-                options={autoLockOptions}
-                value={String(autoLockMinutes)}
-                onChange={(val) => setAutoLockMinutes(Number(val))}
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between gap-4 pt-2 border-t border-outline-variant/20">
-            <div>
-              <span className="text-xs font-medium text-on-surface">Beim Fensterwechsel / App-Verlassen sperren</span>
-              <p className="text-[11px] text-on-surface-variant">
-                Sperrt den Passwort-Manager sofort, sobald das Fenster verlassen oder die App in den Hintergrund gelegt wird.
-              </p>
-            </div>
-            <Switch
-              checked={lockOnWindowBlur}
-              onCheckedChange={setLockOnWindowBlur}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* 5. Biometrischer Schnelleinstieg */}
-      <div className="msm-card p-5 space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <Fingerprint className="h-5 w-5" />
-          </div>
-          <div>
-            <h2 className="text-sm font-semibold text-on-surface">Biometrischer Schnelleinstieg</h2>
-          </div>
-        </div>
-
-        <div className="pt-2 border-t border-outline-variant/30 space-y-3">
-          {!isInitialized ? (
-            <div className="p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-xs text-on-surface-variant">
-              Passwort-Manager ist auf diesem Gerät noch nicht eingerichtet.
-            </div>
-          ) : !isUnlocked ? (
-            <div className="p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-xs text-on-surface-variant">
-              Tresor ist gesperrt. Bitte zuerst entsperren.
-            </div>
-          ) : null}
-
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <span className="text-xs font-medium text-on-surface">
-                Biometrische Authentifizierung aktivieren
-              </span>
-              <p className="text-[11px] text-on-surface-variant">
-                Windows Hello / nativer Hardware-Schlüsselspeicher. Schlüssel werden niemals im Browser oder ungesichert gespeichert.
-              </p>
-            </div>
-            <Switch
-              checked={isBiometricsEnabled && isBiometricsSupported}
-              onCheckedChange={(checked: boolean) => void handleBiometricsToggle(checked)}
-              disabled={!isBiometricsSupported || !isInitialized || !isUnlocked}
-            />
-          </div>
-
-          {!isBiometricsSupported && (
-            <div className="p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-xs text-on-surface-variant">
-              Kein biometrischer Sensor oder nativer Hardware-Tresor auf diesem Gerät verfügbar.
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Biometrie Aktivierungs-Modal */}
-      {biometricsModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/60 backdrop-blur-xs">
-          <div className="w-full max-w-sm rounded-2xl bg-surface-container border border-outline-variant/30 p-5 shadow-2xl space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                <Fingerprint className="h-4 w-4" />
-              </div>
-              <h3 className="text-sm font-semibold text-on-surface">Biometrie einrichten</h3>
-            </div>
-            <p className="text-xs text-on-surface-variant">
-              Master-Passwort zur Bestätigung eingeben.
-            </p>
-            <form onSubmit={handleConfirmBiometrics} className="space-y-3">
-              <input
-                type="password"
-                value={masterPasswordInput}
-                onChange={(e) => setMasterPasswordInput(e.target.value)}
-                placeholder="Master-Passwort"
-                className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-2 text-xs text-on-surface focus:outline-none focus:border-primary"
-                autoFocus
-                required
-              />
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => setBiometricsModalOpen(false)}
-                  disabled={biometricsLoading}
-                >
-                  Abbrechen
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={biometricsLoading || !masterPasswordInput}
-                >
-                  {biometricsLoading ? 'Prüfe...' : 'Aktivieren'}
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

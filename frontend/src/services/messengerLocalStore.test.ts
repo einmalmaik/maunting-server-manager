@@ -1,8 +1,12 @@
+import { generateAesGcmKey } from '@msdis/shield/aead'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
+import { setzeInhaltsSchluessel, setzeSiegelAktiv } from './lokaleVersiegelung'
 import {
   entferneLokaleNachricht,
   loadLocalMessages,
   saveLocalMessages,
+  schreibeNachrichtenBestandNeu,
   updateMessageInLocalStore,
   getLocalMailboxLastSyncedId,
   clearLocalMessengerStore,
@@ -17,8 +21,30 @@ import {
   type LocalStoredMessage,
 } from './messengerLocalStore'
 
+/** Ein localStorage im Arbeitsspeicher — der Siegelschalter liegt dort. */
+function installiereLocalStorage() {
+  const daten = new Map<string, string>()
+  ;(globalThis as any).localStorage = {
+    getItem: (k: string) => daten.get(k) ?? null,
+    setItem: (k: string, v: string) => daten.set(k, v),
+    removeItem: (k: string) => daten.delete(k),
+    clear: () => daten.clear(),
+  }
+}
+
+/**
+ * Die Ablage überlebt die einzelnen Tests und wird nur geleert.
+ *
+ * `messengerLocalStore` merkt sich die geöffnete Datenbank in `dbPromise` —
+ * einmal pro Modul, nicht einmal pro Test. Eine bei jedem `beforeEach` frisch
+ * gebaute Map wäre deshalb ab dem zweiten Test eine andere als die, in die das
+ * Modul schreibt: die Tests liefen weiter, aber wer hineinschaut, sähe nichts.
+ */
+const mockStores = new Map<string, Map<string, any>>()
+
 function installMockIndexedDb() {
-  const stores = new Map<string, Map<string, any>>()
+  const stores = mockStores
+  stores.forEach((map) => map.clear())
 
   const makeObjectStore = (storeName: string) => {
     let map = stores.get(storeName)
@@ -463,6 +489,137 @@ describe('messengerLocalStore (IndexedDB Chat Persistence & F5 Hydration)', () =
     expect(loaded).toHaveLength(1)
     expect(loaded[0].id).toBe(88)
     expect(loaded[0].status).toBe('sent')
+  })
+})
+
+/**
+ * Der Weg durch die echte Ablage, mit eingeschaltetem PIN.
+ *
+ * `lokaleVersiegelung.test.ts` prüft, dass ein Datensatz zu- und wieder
+ * aufgeht. Hier geht es um die Stelle, an der das schiefgehen kann, ohne dass
+ * es jemandem auffällt: Verschlüsseln ist asynchron, eine IndexedDB-Transaktion
+ * überlebt kein `await`. Wer versiegelt, **während** die Transaktion offen ist,
+ * verliert sie — und die Nachricht.
+ */
+describe('messengerLocalStore mit PIN', () => {
+  let ablage: Map<string, Map<string, any>>
+
+  const mid = 'box-versiegelt'
+  const nachricht: LocalStoredMessage = {
+    blindMailboxId: mid,
+    id: 501,
+    clientUuid: 'uuid-501',
+    senderId: 9,
+    senderName: 'Jules',
+    text: 'Das hier darf niemand im Klartext finden',
+    createdAt: '2026-09-18T09:00:00.000Z',
+    isSelf: false,
+    status: 'sent',
+  }
+
+  beforeEach(async () => {
+    ablage = installMockIndexedDb().stores
+    installiereLocalStorage()
+    setzeAngemeldetesKonto(42)
+    setzeSiegelAktiv(true)
+    setzeInhaltsSchluessel(await generateAesGcmKey())
+  })
+
+  afterEach(() => {
+    setzeSiegelAktiv(false)
+    setzeInhaltsSchluessel(null)
+    setzeAngemeldetesKonto(null)
+  })
+
+  it('schreibt und liest eine Nachricht vollständig zurück', async () => {
+    await saveLocalMessages(mid, [nachricht])
+    const geladen = await loadLocalMessages(mid)
+
+    expect(geladen).toHaveLength(1)
+    expect(geladen[0].text).toBe(nachricht.text)
+    expect(geladen[0].senderName).toBe('Jules')
+    expect(geladen[0].status).toBe('sent')
+  })
+
+  it('legt in der Datenbank keinen lesbaren Text ab', async () => {
+    await saveLocalMessages(mid, [nachricht])
+
+    const zeilen = [...(ablage.get('messages')?.values() ?? [])]
+    expect(zeilen).toHaveLength(1)
+    expect(JSON.stringify(zeilen[0])).not.toContain('darf niemand')
+    expect(JSON.stringify(zeilen[0])).not.toContain('Jules')
+
+    // Die Schlüssel- und Indexfelder bleiben lesbar, sonst gäbe es den Index
+    // nicht mehr, über den `loadLocalMessages` und `updateMessageInLocalStore`
+    // ihre Zeilen finden.
+    expect(zeilen[0].blindMailboxId).toBe(mid)
+    expect(zeilen[0].id).toBe(501)
+    expect(zeilen[0].clientUuid).toBe('uuid-501')
+  })
+
+  it('ändert eine Nachricht über den Index, ohne sie zu öffnen zu lassen', async () => {
+    await saveLocalMessages(mid, [nachricht])
+    await updateMessageInLocalStore(mid, 'uuid-501', { isRead: true, text: 'geändert' })
+
+    const geladen = await loadLocalMessages(mid)
+    expect(geladen[0].isRead).toBe(true)
+    expect(geladen[0].text).toBe('geändert')
+
+    const zeilen = [...(ablage.get('messages')?.values() ?? [])]
+    expect(JSON.stringify(zeilen[0])).not.toContain('geändert')
+  })
+
+  it('hält auch Umschlag-Klartexte zu', async () => {
+    await speichereUmschlagKlartext(mid, 77, 'der geöffnete Umschlag')
+    expect(await leseUmschlagKlartext(mid, 77)).toBe('der geöffnete Umschlag')
+
+    const zeilen = [...(ablage.get('envelope_plaintexts')?.values() ?? [])]
+    expect(JSON.stringify(zeilen[0])).not.toContain('geöffnete Umschlag')
+  })
+
+  it('gibt gesperrt nichts heraus und schreibt nichts', async () => {
+    await saveLocalMessages(mid, [nachricht])
+    setzeInhaltsSchluessel(null)
+
+    expect(await loadLocalMessages(mid)).toHaveLength(0)
+    expect(await leseUmschlagKlartext(mid, 77)).toBeNull()
+
+    // Der Umschlag-Klartext ist der eine Schreibweg, der Fehler nicht schluckt:
+    // scheitert er, darf der Ratchet-Schlüssel nicht als verbraucht gelten.
+    await expect(speichereUmschlagKlartext(mid, 78, 'darf nicht liegen bleiben')).rejects.toThrow()
+
+    const zeilen = [...(ablage.get('envelope_plaintexts')?.values() ?? [])]
+    expect(JSON.stringify(zeilen)).not.toContain('darf nicht liegen bleiben')
+  })
+
+  it('schreibt den Bestand um, ohne ihn zu verlieren', async () => {
+    await saveLocalMessages(mid, [nachricht])
+    await speichereUmschlagKlartext(mid, 77, 'der geöffnete Umschlag')
+
+    // Abschalten: Schalter aus, Schlüssel bleibt, einmal durchlaufen.
+    setzeSiegelAktiv(false)
+    await schreibeNachrichtenBestandNeu()
+
+    const geladen = await loadLocalMessages(mid)
+    expect(geladen[0].text).toBe(nachricht.text)
+    expect(await leseUmschlagKlartext(mid, 77)).toBe('der geöffnete Umschlag')
+
+    const zeilen = [...(ablage.get('messages')?.values() ?? [])]
+    expect(zeilen[0].v).toBeUndefined()
+    expect(zeilen[0].text).toBe(nachricht.text)
+  })
+
+  it('verträgt einen Abbruch mitten in der Umstellung', async () => {
+    // Nach einem Abbruch liegen beide Formen nebeneinander. Beide müssen
+    // lesbar bleiben, sonst wäre ein geschlossener Reiter ein Datenverlust.
+    await saveLocalMessages(mid, [nachricht])
+    setzeSiegelAktiv(false)
+    await saveLocalMessages(mid, [{ ...nachricht, id: 502, clientUuid: 'uuid-502', text: 'offen' }])
+    setzeSiegelAktiv(true)
+
+    const geladen = await loadLocalMessages(mid)
+    expect(geladen).toHaveLength(2)
+    expect(geladen.map((m) => m.text).sort()).toEqual([nachricht.text, 'offen'].sort())
   })
 })
 

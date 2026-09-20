@@ -56,9 +56,14 @@ export function Privacy() {
           t('privacyPolicy.sections.messenger.items.deviceKey'),
           t('privacyPolicy.sections.messenger.items.deviceFanout'),
           t('privacyPolicy.sections.messenger.items.deviceHistory'),
+          t('privacyPolicy.sections.messenger.items.devicePin'),
           t('privacyPolicy.sections.messenger.items.ratchet'),
           t('privacyPolicy.sections.messenger.items.groups'),
           t('privacyPolicy.sections.messenger.items.attachments'),
+          // Was beim Loeschen wirklich passiert. Steht hier, weil die Antwort
+          // frueher "nichts" war: die Zeile verschwand aus der Anzeige, der
+          // Umschlag blieb im Postfach und der Anhang auf der Platte.
+          t('privacyPolicy.sections.messenger.items.deletion'),
           t('privacyPolicy.sections.messenger.items.receipts'),
           // Anrufe sind die eine Stelle, an der die Instanz mehr erfaehrt als
           // bei Nachrichten: der Inhalt bleibt verschluesselt, aber wer wann

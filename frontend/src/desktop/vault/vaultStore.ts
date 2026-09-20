@@ -1,6 +1,14 @@
 import { create } from 'zustand'
 import { api, apiUrl } from '@/api/client'
 import {
+  type AutoSperrQuelle,
+  fristAbgelaufen,
+  liesFensterwechsel,
+  liesSperrfrist,
+  schreibeFensterwechsel,
+  schreibeSperrfrist,
+} from '@/services/autoSperre'
+import {
   base64ToBytes,
   decryptVaultEntry,
   deriveVaultKeys,
@@ -9,7 +17,13 @@ import {
   isBiometricsAvailable,
   promptBiometricVerification,
 } from './vaultCrypto'
-import { biometrieEntsperren, biometrieLoeschen, biometrieSpeichern } from '../tauri'
+import {
+  FACH_TRESOR,
+  biometrieEntsperren,
+  biometrieLoeschen,
+  biometrieSpeichern,
+  biometrieSpeicherFragtSelbst,
+} from '../tauri'
 
 export interface VaultAttachment {
   id: string
@@ -108,8 +122,13 @@ const VAULT_CANARY_PREFIX = 'mss:vault_canary_'
 const VAULT_LOCAL_STORAGE_PREFIX = 'mss:vault_blobs_'
 const VAULT_PENDING_QUEUE_PREFIX = 'mss:vault_pending_'
 const VAULT_REVISION_PREFIX = 'mss:vault_rev_'
-const VAULT_AUTOLOCK_MINUTES_KEY = 'mss:vault_autolock_minutes'
-const VAULT_LOCK_ON_BLUR_KEY = 'mss:vault_lock_on_blur'
+/**
+ * Der Namensraum der Sperrfrist-Einstellungen. Die daraus gebauten Schlüssel
+ * heißen weiter `mss:vault_autolock_minutes` und `mss:vault_lock_on_blur` —
+ * ein umbenannter Schlüssel wäre für jede bestehende Installation eine
+ * zurückgesetzte Sicherheitseinstellung.
+ */
+const VAULT_SPERR_PRAEFIX = 'mss:vault'
 const VAULT_BIOMETRICS_ENABLED_KEY = 'mss:vault_biometrics_enabled'
 const VAULT_SERVER_BUCKET_KEY = 'mss:vault_server_bucket'
 const VAULT_BIO_MIGRATED_KEY = 'mss:vault_bio_migrated_v2'
@@ -125,7 +144,7 @@ export async function cleanseVulnerableBiometricData(): Promise<void> {
     localStorage.removeItem('mss:vault_device_salt')
   }
   try {
-    await biometrieLoeschen()
+    await biometrieLoeschen(FACH_TRESOR)
   } catch {}
 }
 
@@ -295,12 +314,8 @@ export const useVaultStore = create<VaultState>((set, get) => {
   lastSyncTime: null,
   hasHint: null,
 
-  autoLockMinutes: typeof localStorage !== 'undefined'
-    ? parseInt(localStorage.getItem(VAULT_AUTOLOCK_MINUTES_KEY) || '15', 10)
-    : 15,
-  lockOnWindowBlur: typeof localStorage !== 'undefined'
-    ? localStorage.getItem(VAULT_LOCK_ON_BLUR_KEY) === 'true'
-    : false,
+  autoLockMinutes: liesSperrfrist(VAULT_SPERR_PRAEFIX, 15),
+  lockOnWindowBlur: liesFensterwechsel(VAULT_SPERR_PRAEFIX),
   isBiometricsSupported: false,
   isBiometricsEnabled: typeof localStorage !== 'undefined'
     ? localStorage.getItem(VAULT_BIOMETRICS_ENABLED_KEY) === 'true'
@@ -311,41 +326,29 @@ export const useVaultStore = create<VaultState>((set, get) => {
   setSelectedItemId: (selectedItemId) => set({ selectedItemId }),
 
   setAutoLockMinutes: (minutes: number) => {
-    try {
-      localStorage.setItem(VAULT_AUTOLOCK_MINUTES_KEY, String(minutes))
-    } catch {}
+    schreibeSperrfrist(VAULT_SPERR_PRAEFIX, minutes)
     set({ autoLockMinutes: minutes })
   },
 
   setLockOnWindowBlur: (enabled: boolean) => {
-    try {
-      localStorage.setItem(VAULT_LOCK_ON_BLUR_KEY, enabled ? 'true' : 'false')
-    } catch {}
+    schreibeFensterwechsel(VAULT_SPERR_PRAEFIX, enabled)
     set({ lockOnWindowBlur: enabled })
   },
 
   recordActivity: () => {
     const { isUnlocked, autoLockMinutes, lastActivityTime, lock } = get()
-    if (isUnlocked && autoLockMinutes > 0) {
-      const now = Date.now()
-      if (now - lastActivityTime >= autoLockMinutes * 60 * 1000) {
-        lock()
-        return
-      }
+    if (isUnlocked && fristAbgelaufen(lastActivityTime, autoLockMinutes)) {
+      lock()
+      return
     }
     set({ lastActivityTime: Date.now() })
   },
 
   checkAutoLock: () => {
     const { isUnlocked, autoLockMinutes, lastActivityTime, lock } = get()
-    if (!isUnlocked || autoLockMinutes <= 0) return false
-    const now = Date.now()
-    const diffMs = now - lastActivityTime
-    if (diffMs >= autoLockMinutes * 60 * 1000) {
-      lock()
-      return true
-    }
-    return false
+    if (!isUnlocked || !fristAbgelaufen(lastActivityTime, autoLockMinutes)) return false
+    lock()
+    return true
   },
 
   fetchVaultSalt: async () => {
@@ -429,13 +432,21 @@ export const useVaultStore = create<VaultState>((set, get) => {
         }
       }
 
-      const verified = await promptBiometricVerification('Biometrischen Schnelleinstieg aktivieren')
-      if (!verified) {
-        throw new Error('Biometrische Authentifizierung fehlgeschlagen.')
+      // Genau eine Bestätigung. Auf Android verlangt der Keystore sie schon
+      // beim Verschlüsseln, auf Windows nimmt der Credential Store das Geheimnis
+      // wortlos entgegen — dort muss sie also vorher kommen. Ohne diese
+      // Unterscheidung fragte Android zweimal hintereinander nach demselben
+      // Fingerabdruck.
+      if (!(await biometrieSpeicherFragtSelbst())) {
+        const verified = await promptBiometricVerification('Biometrischen Schnelleinstieg aktivieren')
+        if (!verified) {
+          throw new Error('Biometrische Authentifizierung fehlgeschlagen.')
+        }
       }
 
-      // Speichere ausschließlich im hardware-/OS-geschützten Credential Store (kein localStorage!)
-      await biometrieSpeichern(masterPassword)
+      // Speichere ausschließlich im hardware-/OS-geschützten Schlüsselspeicher
+      // des Betriebssystems (kein localStorage!)
+      await biometrieSpeichern(masterPassword, FACH_TRESOR)
 
       if (typeof localStorage !== 'undefined') {
         localStorage.removeItem('mss:vault_bio_wrapped')
@@ -467,7 +478,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
       }
 
       // Primär: Native Windows Hello Verifikation & Freigabe aus dem geschützten Credential Store
-      const masterPassword = await biometrieEntsperren('Passwort-Manager entsperren')
+      const masterPassword = await biometrieEntsperren('Passwort-Manager entsperren', FACH_TRESOR)
       if (!masterPassword) {
         throw new Error('Biometrischer Schlüssel konnte nicht geladen werden.')
       }
@@ -607,6 +618,12 @@ export const useVaultStore = create<VaultState>((set, get) => {
         isUnlocking: false,
         failedUnlockAttempts: 0,
         lockedUntilMs: 0,
+        // Entsperren ist Aktivität. Ohne das lief die Frist weiter, während der
+        // Tresor zu war: wer ihn aufmacht, eine Viertelstunde woanders
+        // hinschaut und dann sein Master-Passwort eingibt, gilt im selben
+        // Moment als „seit 15 Minuten untätig" — der Tresor geht auf und beim
+        // nächsten Takt wieder zu.
+        lastActivityTime: Date.now(),
         userKey,
         bucketId,
         bucketAuthToken,
@@ -782,6 +799,8 @@ export const useVaultStore = create<VaultState>((set, get) => {
         isUnlocking: false,
         failedUnlockAttempts: 0,
         lockedUntilMs: 0,
+        // Siehe oben: der Zähler startet beim Entsperren, nicht beim Laden.
+        lastActivityTime: Date.now(),
         userKey,
         bucketId,
         bucketAuthToken,
@@ -1164,6 +1183,25 @@ export const useVaultStore = create<VaultState>((set, get) => {
   }
 })
 
+/**
+ * Was `useAutoSperre` braucht, um den Tresor zu bewachen.
+ *
+ * Die Ereignis-Anmeldungen standen bis 09/2026 dreimal im Baum: hier auf
+ * Modulebene, noch einmal in `DesktopApp` und in Teilen ein drittes Mal in
+ * `VaultView`. Alle drei taten dasselbe, keine wusste von den anderen. Jetzt
+ * meldet `DesktopApp` sie einmal an, mit dieser Quelle.
+ */
+export const tresorAutoSperrQuelle: AutoSperrQuelle = {
+  istEntsperrt: () => useVaultStore.getState().isUnlocked,
+  istBeschaeftigt: () => useVaultStore.getState().isUnlocking,
+  sperrtBeiFensterwechsel: () => useVaultStore.getState().lockOnWindowBlur,
+  merkeAktivitaet: () => useVaultStore.getState().recordActivity(),
+  pruefeFrist: () => {
+    useVaultStore.getState().checkAutoLock()
+  },
+  sperre: () => useVaultStore.getState().lock(),
+}
+
 if (typeof window !== 'undefined') {
   setTimeout(() => {
     void useVaultStore.getState().checkBiometricsSupport()
@@ -1172,40 +1210,19 @@ if (typeof window !== 'undefined') {
     }
   }, 50)
 
-  const triggerBlurLock = () => {
-    const s = useVaultStore.getState()
-    if (s.lockOnWindowBlur && s.isUnlocked && !s.isUnlocking) {
-      s.lock()
-    }
-  }
-
-  window.addEventListener('blur', triggerBlurLock)
-  window.addEventListener('pagehide', triggerBlurLock)
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden) {
-      triggerBlurLock()
-    } else {
-      const s = useVaultStore.getState()
-      if (s.isUnlocked) {
-        s.checkAutoLock()
-      }
-    }
-  })
-
-  window.addEventListener('focus', () => {
-    const s = useVaultStore.getState()
-    if (s.isUnlocked) {
-      s.checkAutoLock()
-    }
-  })
-
+  // `mss:fenster-blur` kennt nur der Tresor: das Ereignis kommt aus der App,
+  // wenn das Fenster in den Hintergrund geht, und `useAutoSperre` hört
+  // ausschließlich auf `tauri://blur`. Deshalb bleibt diese eine Anmeldung
+  // hier stehen, während der Rest in den Haken gewandert ist.
   if ('__TAURI_INTERNALS__' in window) {
     try {
       import('@tauri-apps/api/event')
-        .then(({ listen }) => {
-          void listen('mss:fenster-blur', triggerBlurLock)
-          void listen('tauri://blur', triggerBlurLock)
-        })
+        .then(({ listen }) =>
+          listen('mss:fenster-blur', () => {
+            const s = useVaultStore.getState()
+            if (s.lockOnWindowBlur && s.isUnlocked && !s.isUnlocking) s.lock()
+          }),
+        )
         .catch(() => {})
     } catch {}
   }

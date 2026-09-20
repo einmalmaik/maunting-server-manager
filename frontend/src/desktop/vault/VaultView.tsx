@@ -84,43 +84,10 @@ export function VaultView() {
     }
   }, [isUnlocked])
 
-  // Sofortige Sperre beim Verlassen des Fensters / der App (Minimieren, Alt+Tab, App-Wechsel)
-  useEffect(() => {
-    if (!isUnlocked) return
-
-    const handleBlurLock = () => {
-      const state = useVaultStore.getState()
-      if (state.lockOnWindowBlur && state.isUnlocked && !state.isUnlocking) {
-        state.lock()
-      }
-    }
-
-    const handleVis = () => {
-      if (document.hidden) {
-        handleBlurLock()
-      } else {
-        const state = useVaultStore.getState()
-        if (state.isUnlocked) state.checkAutoLock()
-      }
-    }
-
-    const handleFocus = () => {
-      const state = useVaultStore.getState()
-      if (state.isUnlocked) state.checkAutoLock()
-    }
-
-    window.addEventListener('blur', handleBlurLock)
-    window.addEventListener('pagehide', handleBlurLock)
-    window.addEventListener('focus', handleFocus)
-    document.addEventListener('visibilitychange', handleVis)
-
-    return () => {
-      window.removeEventListener('blur', handleBlurLock)
-      window.removeEventListener('pagehide', handleBlurLock)
-      window.removeEventListener('focus', handleFocus)
-      document.removeEventListener('visibilitychange', handleVis)
-    }
-  }, [isUnlocked])
+  // Die Sperre beim Fensterwechsel meldet `DesktopApp` einmal für die ganze
+  // App an (`useAutoSperre`). Hier stand bis 09/2026 dieselbe Anmeldung ein
+  // zweites Mal — sie tat nichts, was die andere nicht auch tat, und wäre bei
+  // der nächsten Änderung die Fassung gewesen, die jemand vergisst.
 
   const hasHint = useVaultStore((s) => s.hasHint)
   const checkHintStatus = useVaultStore((s) => s.checkHintStatus)

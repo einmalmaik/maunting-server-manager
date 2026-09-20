@@ -39,6 +39,12 @@ import { bytesToHex } from '@msdis/shield/core'
 
 import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
 import { generateLocalE2eeKeyPair, type LocalE2eeKeyPair } from './e2eeCrypto'
+import {
+  MessengerVerschlossenError,
+  entsiegleZeile,
+  istOffen,
+  versiegleZeile,
+} from './lokaleVersiegelung'
 import { uebernehmeAltbestand } from './ratchetSpeicher'
 import {
   getE2eeGeraete,
@@ -132,25 +138,46 @@ function ausZeile(zeile: any): GeraeteZeile | null {
   }
 }
 
-function zuZeile(kontoId: number, geraet: EigenesGeraet, sitzungenUebernommen: boolean) {
-  return {
-    id: ablageSchluessel(kontoId),
-    kennung: geraet.kennung,
-    publicKeyJwk: geraet.paar.publicKeyJwk,
-    privateKeyJwk: geraet.paar.privateKeyJwk,
-    sitzungenUebernommen,
-  }
+/** Bindet die Zeile eines Kontos an ihren Platz. Siehe `versiegleZeile`. */
+function geraetAad(kontoId: number): string {
+  return `msm-geraet:${ablageSchluessel(kontoId)}`
+}
+
+/**
+ * Baut die Zeile und macht sie zu, falls ein Messenger-PIN eingerichtet ist.
+ *
+ * Nur `id` bleibt lesbar, das ist der Ablageschlüssel. Der private Teil des
+ * Geräteausweises lag hier bis 09/2026 als JWK im Klartext — wer das Profil
+ * kopierte, konnte sich als dieses Gerät ausgeben und mitlesen.
+ */
+async function zuZeile(
+  kontoId: number,
+  geraet: EigenesGeraet,
+  sitzungenUebernommen: boolean,
+): Promise<Record<string, unknown>> {
+  return await versiegleZeile(
+    {
+      id: ablageSchluessel(kontoId),
+      kennung: geraet.kennung,
+      publicKeyJwk: geraet.paar.publicKeyJwk,
+      privateKeyJwk: geraet.paar.privateKeyJwk,
+      sitzungenUebernommen,
+    },
+    ['id'],
+    geraetAad(kontoId),
+  )
 }
 
 async function lies(kontoId: number): Promise<GeraeteZeile | null> {
   try {
     const db = await oeffneDatenbank()
-    return await new Promise<GeraeteZeile | null>((resolve, reject) => {
+    const roh = await new Promise<Record<string, any> | null>((resolve, reject) => {
       const tx = db.transaction(IDB_GERAETE_STORE, 'readonly')
       const req = tx.objectStore(IDB_GERAETE_STORE).get(ablageSchluessel(kontoId))
-      req.onsuccess = () => resolve(ausZeile(req.result))
+      req.onsuccess = () => resolve(req.result ?? null)
       req.onerror = () => reject(req.error)
     })
+    return ausZeile(await entsiegleZeile(roh, geraetAad(kontoId)))
   } catch {
     return null
   }
@@ -162,12 +189,24 @@ async function schreibe(
   sitzungenUebernommen: boolean,
 ): Promise<void> {
   const db = await oeffneDatenbank()
+  const zeile = await zuZeile(kontoId, geraet, sitzungenUebernommen)
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(IDB_GERAETE_STORE, 'readwrite')
-    const req = tx.objectStore(IDB_GERAETE_STORE).put(zuZeile(kontoId, geraet, sitzungenUebernommen))
+    const req = tx.objectStore(IDB_GERAETE_STORE).put(zeile)
     req.onsuccess = () => resolve()
     req.onerror = () => reject(req.error)
   })
+}
+
+/**
+ * Schreibt die Zeile dieses Kontos einmal neu — der Umstellungsdurchlauf für
+ * den Geräteausweis. Siehe `schreibeNachrichtenBestandNeu`.
+ */
+export async function schreibeGeraetBestandNeu(kontoId: number): Promise<boolean> {
+  const vorhanden = await lies(kontoId)
+  if (!vorhanden) return false
+  await schreibe(kontoId, vorhanden.geraet, vorhanden.sitzungenUebernommen)
+  return true
 }
 
 /**
@@ -179,33 +218,51 @@ async function schreibe(
  * Update ist die einzige verfügbare Antwort und fast immer die richtige: es ist
  * dasselbe, das den Browser vorher benutzt hat.
  *
- * Lesen, Schreiben und Löschen liegen in einer Transaktion. Zwei Tabs, die
+ * Der Anspruch selbst liegt in **einer** Transaktion: zwei Tabs, die
  * gleichzeitig starten, sollen nicht beide denselben Altbestand übernehmen und
- * anschließend verschiedene Meinungen darüber haben, wem er gehört.
+ * anschließend verschiedene Meinungen darüber haben, wem er gehört. Nur wer
+ * `self` beim Zugreifen noch vorfindet, gewinnt.
+ *
+ * Das Versiegeln passiert davor, außerhalb der Transaktion — es ist asynchron
+ * und eine IndexedDB-Transaktion überlebt kein `await`. Der Altbestand selbst
+ * stammt aus der Zeit vor dem Siegel und liegt deshalb immer im Klartext.
  */
 async function uebernimmAltbestand(kontoId: number): Promise<EigenesGeraet | null> {
   try {
     const db = await oeffneDatenbank()
-    return await new Promise<EigenesGeraet | null>((resolve, reject) => {
-      const tx = db.transaction(IDB_GERAETE_STORE, 'readwrite')
-      const store = tx.objectStore(IDB_GERAETE_STORE)
-      const req = store.get('self')
-      req.onsuccess = () => {
-        const alt = ausZeile(req.result)
-        if (!alt) return resolve(null)
-        // Der Haken steht bewusst auf `false`: die Sitzungen sind noch nicht
-        // umbenannt, und wenn das gleich scheitert, muss der nächste Start es
-        // erneut versuchen dürfen.
-        const put = store.put(zuZeile(kontoId, alt.geraet, false))
-        put.onsuccess = () => {
-          const weg = store.delete('self')
-          weg.onsuccess = () => resolve(alt.geraet)
-          weg.onerror = () => reject(weg.error)
-        }
-        put.onerror = () => reject(put.error)
-      }
+
+    const roh = await new Promise<Record<string, any> | null>((resolve, reject) => {
+      const tx = db.transaction(IDB_GERAETE_STORE, 'readonly')
+      const req = tx.objectStore(IDB_GERAETE_STORE).get('self')
+      req.onsuccess = () => resolve(req.result ?? null)
       req.onerror = () => reject(req.error)
     })
+    const alt = ausZeile(await entsiegleZeile(roh, geraetAad(kontoId)))
+    if (!alt) return null
+
+    // Der Haken steht bewusst auf `false`: die Sitzungen sind noch nicht
+    // umbenannt, und wenn das gleich scheitert, muss der nächste Start es
+    // erneut versuchen dürfen.
+    const zeile = await zuZeile(kontoId, alt.geraet, false)
+
+    const gewonnen = await new Promise<boolean>((resolve, reject) => {
+      const tx = db.transaction(IDB_GERAETE_STORE, 'readwrite')
+      const store = tx.objectStore(IDB_GERAETE_STORE)
+      let anspruch = false
+      const req = store.get('self')
+      req.onsuccess = () => {
+        if (!req.result) return
+        anspruch = true
+        store.put(zeile)
+        store.delete('self')
+      }
+      req.onerror = () => reject(req.error)
+      tx.oncomplete = () => resolve(anspruch)
+      tx.onerror = () => reject(tx.error)
+      tx.onabort = () => reject(tx.error)
+    })
+
+    return gewonnen ? alt.geraet : null
   } catch {
     return null
   }
@@ -238,6 +295,22 @@ function meinKonto(): number {
  */
 export async function eigenesGeraet(): Promise<EigenesGeraet> {
   const konto = meinKonto()
+
+  /*
+   * Bei gesperrtem Messenger hört das hier auf, und zwar bevor irgendetwas
+   * gelesen wird.
+   *
+   * Der Grund steht ein paar Zeilen tiefer: findet `lies` nichts, gilt das als
+   * „dieses Gerät hat noch keine Identität" und der Weg endet bei einem frisch
+   * erzeugten Schlüsselpaar. Gesperrt findet `lies` aber **nie** etwas — die
+   * Ablage gibt ohne Schlüssel nichts heraus. Ohne diese Schranke liefe jeder
+   * Zugriff im gesperrten Zustand auf den Neuanlage-Zweig zu und versuchte, die
+   * bestehende Identität zu überschreiben. Das Schreiben scheitert zwar
+   * seinerseits am Siegel, aber der Fehler käme dann aus der Ablage und hiesse
+   * irgendetwas — hier heisst er, was er ist.
+   */
+  if (!istOffen()) throw new MessengerVerschlossenError()
+
   if (geraetImRam?.konto === konto) return geraetImRam.geraet
   if (aufbau?.konto === konto) return aufbau.lauf
 

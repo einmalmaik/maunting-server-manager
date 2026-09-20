@@ -1471,7 +1471,7 @@
         "output": "Ausgabe",
         "cached": "Cache",
         "cacheWritten": "Cache geschrieben",
-          "calls": "Rufe",
+        "calls": "Rufe",
         "source": "Quelle",
         "more": "Es gibt weitere Anfragen in diesem Monat; hier stehen die jüngsten.",
         "sources": {
@@ -3325,7 +3325,9 @@
       "ai": "KI",
       "devices": "Geräte",
       "danger": "Gefahrenzone",
-      "credentials": "Zugangsdaten"
+      "credentials": "Zugangsdaten",
+      "messenger": "Messenger-PIN",
+      "vault": "Tresor"
     },
     "email": "E-Mail-Adresse",
     "privacyTitle": "Privatsphäre & Sichtbarkeit",
@@ -3513,6 +3515,64 @@
       "removeTitle": "Gerät aus der Zustellung nehmen?",
       "removeMessage": "Dieses Gerät bekommt danach keine neuen Nachrichten mehr. Meldet es sich mit Ihrem Konto wieder an, trägt es sich erneut ein: wer noch Zugang zum Konto hat, ist damit nicht ausgesperrt.",
       "removed": "Gerät entfernt."
+    },
+    "messengerLock": {
+      "title": "Messenger sperren",
+      "stateOn": "Auf diesem Gerät eingerichtet.",
+      "stateOff": "Auf diesem Gerät nicht eingerichtet.",
+      "explain": "Damit dein Verlauf ein Neuladen übersteht, liegt er auf diesem Gerät. Ohne PIN liegt er dort lesbar: wer an den Rechner kommt, kommt an die Nachrichten und an den Geräteausweis, mit dem sich dieses Gerät ausweist. Mit PIN wird beides verschlüsselt.",
+      "boundNote": "Der Schlüssel hängt zusätzlich am Schlüsselspeicher dieses Rechners. Eine kopierte Festplatte ist anderswo damit wertlos.",
+      "unboundNote": "Auf dieser Plattform gibt es keinen geschützten Schlüsselspeicher. Der Schutz hängt allein an der Länge deines PIN, je länger desto besser.",
+      "warnLoss": "Merk dir diesen PIN. Es gibt keinen Ersatzweg und keinen Wiederherstellungsschlüssel. Deine eigenen gesendeten Nachrichten stehen nirgendwo sonst, auch nicht auf dem Server: wer den PIN vergisst oder diesen Rechner neu aufsetzt, verliert den Verlauf dieses Geräts.",
+      "setUp": "PIN einrichten",
+      "change": "PIN ändern",
+      "turnOff": "Sperre aufheben",
+      "newPin": "Neuer PIN",
+      "currentPin": "Bisheriger PIN",
+      "repeat": "PIN wiederholen",
+      "tooShort": "Mindestens {{count}} Zeichen.",
+      "mismatch": "Die beiden Eingaben stimmen nicht überein.",
+      "working": "Einen Moment …",
+      "bioTitle": "Mit Fingerabdruck öffnen",
+      "bioSwitch": "Ohne Tippen entsperren",
+      "bioHint": "Der PIN wird im Schlüsselspeicher des Systems hinterlegt und erst nach erfolgreicher Bestätigung herausgegeben.",
+      "bioUnavailable": "Hier nicht möglich. Der Schnelleinstieg braucht einen Schlüsselspeicher in der Hardware: den haben die Desktop-App (Windows Hello) und die Android-App (Fingerabdruck), der Browser nicht. Der PIN selbst funktioniert überall.",
+      "bioNeedsPin": "Richte zuerst einen PIN ein.",
+      "bioSetUp": "Hinterlegen",
+      "autoTitle": "Automatisch sperren",
+      "autoSubtitle": "Gilt nur für den Messenger. Der Tresor hat eine eigene Frist.",
+      "autoNeedsPin": "Ohne PIN gibt es nichts zu sperren. Die Einstellung greift, sobald einer eingerichtet ist.",
+      "afterIdle": "Bei Untätigkeit",
+      "never": "Nie",
+      "afterHour": "Nach einer Stunde",
+      "afterMinute": "Nach einer Minute",
+      "afterMinutes": "Nach {{count}} Minuten",
+      "onBlur": "Beim Fensterwechsel sperren",
+      "onBlurHint": "Sperrt, sobald das Fenster in den Hintergrund geht oder der Reiter gewechselt wird.",
+      "footnote": "Die Verschlüsselung zwischen dir und deinem Gegenüber bleibt davon unberührt. Der Server konnte deine Nachrichten nie lesen und kann es weiterhin nicht. Der PIN schützt, was auf diesem Gerät liegt.",
+      "screenTitle": "Messenger gesperrt",
+      "screenHint": "Gib deinen PIN ein, um den Verlauf auf diesem Gerät zu entschlüsseln.",
+      "screenFootnote": "Solange gesperrt ist, kommen keine Nachrichten an. Was in der Zwischenzeit geschickt wurde, wird nach dem Entsperren nachgeholt.",
+      "pinPlaceholder": "PIN",
+      "unlock": "Entsperren",
+      "useBiometrics": "Mit Fingerabdruck",
+      "waiting": "Zu viele Fehlversuche. Noch {{count}} Sekunden.",
+      "confirmOff": {
+        "title": "Sperre aufheben?",
+        "message": "Danach liegen Verlauf, Geräteausweis und Schlüssel wieder unverschlüsselt auf diesem Gerät. Wer Zugriff auf den Rechner hat, kann sie lesen.",
+        "ok": "Sperre aufheben"
+      },
+      "toast": {
+        "enabled": "Der Messenger ist jetzt mit einem PIN gesichert.",
+        "enableFailed": "Der PIN liess sich nicht einrichten.",
+        "changed": "Der PIN wurde geändert.",
+        "changeFailed": "Der PIN liess sich nicht ändern.",
+        "disabled": "Die Sperre ist aufgehoben.",
+        "wrongPin": "Der PIN stimmt nicht.",
+        "bioOn": "Der Messenger lässt sich jetzt per Finger öffnen.",
+        "bioOff": "Der Schnelleinstieg ist abgeschaltet.",
+        "bioFailed": "Der Schnelleinstieg liess sich nicht einrichten."
+      }
     }
   },
   "errorBoundary": {
@@ -4086,8 +4146,7 @@
         "body": "Die Manifeste unter deploy/kubernetes betreiben die Control Plane. Gameserver bleiben Docker-Container auf den angebundenen Nodes. Genau eine Panel-Replica, der DIS-Sidecar läuft im selben Pod. Auch KI-Laufvermittler und KI-Meldestelle sind prozesslokal: Meldungen der Hintergrund-Aufträge stehen in der Datenbank und überleben einen Neustart, nur das Live-Zusehen reisst kurz ab."
       }
     },
-
-          "calls": {
+    "calls": {
       "title": "Anrufe im Messenger",
       "intro": "Sprach-, Video- und Gruppenanrufe laufen über einen Medienserver, der die Ströme entgegennimmt und verteilt. Der mitgelieferte läuft auf dem Panel-Server und wird bei der Installation eingerichtet; alternativ lässt sich ein externer eintragen.",
       "mode": {
@@ -4373,9 +4432,11 @@
           "deviceKey": "Der Schlüssel gehört diesem Gerät und entsteht auf ihm, sobald du den Messenger zum ersten Mal öffnest. Sein privater Teil verlässt das Gerät nie. Bei der Instanz liegt nur der öffentliche Teil, damit andere dir schreiben können.",
           "deviceFanout": "Schreibst du jemandem, verschlüsselt dein Gerät die Nachricht einzeln für jedes Gerät der Gegenseite und für deine übrigen eigenen Geräte. Die Instanz sieht dabei, dass ein Konto mehrere Geräte hat, und sonst nichts.",
           "deviceHistory": "Jedes Gerät führt seinen eigenen Verlauf. Koppelst du ein neues, bekommt es den bisherigen Verlauf verschlüsselt vom bereits eingerichteten Gerät; vom Server holt es sich nichts Zurückliegendes. Im Browser liegt er im Speicher der Website: MSM bittet darum, diesen Speicher dauerhaft zu behalten, aber wer die Websitedaten löscht, löscht den Verlauf dieses Geräts mit. Gehen dir alle Geräte verloren, ist er ganz fort, und der Betreiber kann ihn nicht wiederherstellen, weil er ihn nie lesen konnte.",
+          "devicePin": "Auf dem Gerät selbst liegt dieser Verlauf zunächst lesbar, damit er ein Neuladen übersteht. Richtest du unter Profil einen Messenger-PIN ein, werden Verlauf, Geräteschlüssel, Sitzungszustände und Gruppenschlüssel auf diesem Gerät verschlüsselt und nur nach Eingabe des PIN geöffnet; in der Desktop-App kann Windows Hello den PIN hinterlegen, in der Android-App der Fingerabdruck. Der PIN ist freiwillig, standardmäßig aus und jederzeit wieder abschaltbar. Ohne ihn kann jeder, der Zugriff auf dieses Gerät hat, den Verlauf lesen. Der PIN wird nirgends gespeichert und ist dem Betreiber nicht bekannt: Wer ihn vergisst, verliert den Verlauf dieses Geräts.",
           "ratchet": "Jede Nachricht bekommt einen eigenen Schlüssel, der nach dem Lesen vernichtet wird und sich aus den vorherigen nicht zurückrechnen lässt. Wer später an dein Gerät kommt, kann damit nichts Zurückliegendes mehr öffnen. Musste eine Sicherheitssitzung neu aufgebaut werden — etwa weil die Gegenseite neu installiert hat —, steht das als Hinweis mitten im Verlauf und nicht im Verborgenen.",
           "groups": "In Gruppen teilen sich alle Mitglieder einen Schlüssel. Er entsteht auf dem Gerät, das die erste Nachricht schreibt, und wird einzeln für jedes Gerät jedes Mitglieds verschlüsselt zugestellt; die Instanz reicht auch ihn nur weiter. Bei jeder Änderung der Mitgliedschaft entsteht ein neuer, sodass niemand nach seinem Austritt weiterliest. Zwei Unterschiede zum Einzelchat bleiben: ältere Nachrichten kann ein ausgeschiedenes Mitglied weiterhin öffnen, und ein Gruppenschlüssel gilt für alle Nachrichten seiner Generation, nicht für eine einzelne.",
           "attachments": "Bilder, Sprachnachrichten, Videonotizen und Dateien bekommen vor dem Hochladen einen eigenen Zufallsschlüssel. Der reist ausschließlich im verschlüsselten Nachrichtentext mit, ist also für jeden Anhang ein anderer und der Instanz nie bekannt. Sie erhält den verschlüsselten Block, seine Größe und seinen Zeitpunkt; Dateiname und Dateityp gehen nicht mit, sie stehen mit im verschlüsselten Teil. Wird ein solcher Block in ein anderes Gespräch kopiert, lässt er sich dort nicht öffnen.",
+          "deletion": "Löschst du eine Nachricht für alle, verschwindet sie nicht nur aus der Anzeige: der Umschlag wird aus dem Postfach entfernt, ein hochgeladener Anhang wird mitgelöscht, und auf beiden Geräten werden Text und Anhang aus dem örtlichen Verlauf genommen. Stehen bleibt ein Platzhalter, der sagt, dass hier eine Nachricht war. Was ein Gerät vorher abgespeichert oder abfotografiert hat, erreicht diese Löschung nicht.",
           "receipts": "Zustell- und Lesebestätigungen laufen als verschlüsselte Steuernachrichten über denselben Weg. Kann eine Bestätigung nicht verschlüsselt werden, unterbleibt sie, statt ungeschützt zu gehen.",
           "calls": "Sprach-, Video- und Gruppenanrufe laufen über einen Medienserver. Ton und Bild werden auf deinem Gerät verschlüsselt und erst beim Gegenüber wieder geöffnet; der Medienserver leitet weiter, was er nicht öffnen kann. Standardmäßig läuft er auf dieser Instanz. Trägt der Betreiber einen externen Anbieter ein, laufen die verschlüsselten Ströme über dessen Server.",
           "callMetadata": "Der Medienserver sieht allerdings, welche Kontokennungen wann und wie lange in welchem Raum waren. Diese Angaben leben nur, solange der Anruf läuft: gespeichert werden sie nicht, es gibt keinen Anrufverlauf und keine Gesprächsdauer in der Datenbank. Bei einem externen Anbieter entstehen sie dort und unterliegen dessen Aufbewahrung.",

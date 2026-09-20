@@ -36,6 +36,8 @@ import { Calendar } from '@/pages/Calendar'
 import { Notes } from '@/pages/Notes'
 import { Privacy } from '@/pages/Privacy'
 import { useAuthStore } from '@/stores/authStore'
+import { useAutoSperre } from '@/hooks/useAutoSperre'
+import { useMessengerSperreBereitschaft } from '@/hooks/useMessengerSperre'
 import { usePresenceAndActivity } from '@/hooks/usePresenceAndActivity'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
 import { abmelden } from './auth'
@@ -48,7 +50,7 @@ import { Uebernahmekarte } from './Uebernahmekarte'
 import { UpdateModal } from './UpdateModal'
 import { Wizard } from './Wizard'
 import { VaultView } from './vault/VaultView'
-import { useVaultStore } from './vault/vaultStore'
+import { tresorAutoSperrQuelle, useVaultStore } from './vault/vaultStore'
 import {
   beiFremdemSprachstart,
   sprachstartMelden,
@@ -110,77 +112,12 @@ export function DesktopApp() {
   const offeneUebernahme = useAuftragsschleife(sitzungSteht && !isAndroid)
 
   const isUnlocked = useVaultStore((s) => s.isUnlocked)
-  const lockOnWindowBlur = useVaultStore((s) => s.lockOnWindowBlur)
-  const checkAutoLock = useVaultStore((s) => s.checkAutoLock)
-  const recordActivity = useVaultStore((s) => s.recordActivity)
-  const lockVault = useVaultStore((s) => s.lock)
 
-  // Automatische Tresor-Sperre bei Inaktivität oder Fenster-Wechsel
-  useEffect(() => {
-    if (!isUnlocked) return
-
-    const handleActivity = () => {
-      recordActivity()
-    }
-
-    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'pointerdown']
-    events.forEach((evt) => window.addEventListener(evt, handleActivity, { passive: true }))
-
-    const interval = setInterval(() => {
-      checkAutoLock()
-    }, 10000)
-
-    const handleWindowBlur = () => {
-      const state = useVaultStore.getState()
-      if (state.lockOnWindowBlur && state.isUnlocked && !state.isUnlocking) {
-        state.lock()
-      }
-    }
-
-    const handleVisibilityChange = () => {
-      const state = useVaultStore.getState()
-      if (document.hidden) {
-        if (state.lockOnWindowBlur && state.isUnlocked && !state.isUnlocking) {
-          state.lock()
-        }
-      } else {
-        if (state.isUnlocked) {
-          state.checkAutoLock()
-        }
-      }
-    }
-
-    const handleFocus = () => {
-      const state = useVaultStore.getState()
-      if (state.isUnlocked) {
-        state.checkAutoLock()
-      }
-    }
-
-    window.addEventListener('blur', handleWindowBlur)
-    window.addEventListener('pagehide', handleWindowBlur)
-    window.addEventListener('focus', handleFocus)
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-
-    let unlistenTauriBlur: (() => void) | undefined
-    if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
-      listen('tauri://blur', handleWindowBlur)
-        .then((unlisten) => {
-          unlistenTauriBlur = unlisten
-        })
-        .catch(() => {})
-    }
-
-    return () => {
-      events.forEach((evt) => window.removeEventListener(evt, handleActivity))
-      clearInterval(interval)
-      window.removeEventListener('blur', handleWindowBlur)
-      window.removeEventListener('pagehide', handleWindowBlur)
-      window.removeEventListener('focus', handleFocus)
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
-      if (unlistenTauriBlur) unlistenTauriBlur()
-    }
-  }, [isUnlocked, lockOnWindowBlur, recordActivity, checkAutoLock, lockVault])
+  // Automatische Sperre bei Inaktivität oder Fensterwechsel. Tresor und
+  // Messenger haben eigene Fristen und eigene Schlösser, aber dieselbe
+  // Mechanik — siehe `services/autoSperre`.
+  useAutoSperre(tresorAutoSperrQuelle, isUnlocked)
+  useMessengerSperreBereitschaft()
 
   const ladeKonfigNeu = useCallback(async () => {
     try {

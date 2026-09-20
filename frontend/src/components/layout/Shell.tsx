@@ -11,9 +11,12 @@ import { CallOverlay } from '@/components/calling/CallOverlay'
 import { CrossDeviceCallBanner } from '@/components/calling/CrossDeviceCallBanner'
 import { Users } from 'lucide-react'
 import { api } from '@/api/client'
+import { useMessengerSperreBereitschaft } from '@/hooks/useMessengerSperre'
 import { usePresenceAndActivity } from '@/hooks/usePresenceAndActivity'
 
 export function Shell() {
+  useMessengerSperreBereitschaft()
+
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false)
   const [sidebarHidden, setSidebarHidden] = useState(false)
   const [socialEnabled, setSocialEnabled] = useState(true)

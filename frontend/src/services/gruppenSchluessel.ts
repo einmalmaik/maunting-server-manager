@@ -63,6 +63,7 @@ import { getGroupMembers, relayE2eeEnvelope } from '@/api/social'
 
 import { encryptE2eeHybrid } from './e2eeCrypto'
 import { eigenesGeraet, geraeteVon } from './e2eeGeraet'
+import { entsiegleZeile, versiegleZeile } from './lokaleVersiegelung'
 import { istSchluesselhalter } from './raumSchluessel'
 
 export const GRUPPE_PREFIX = 'sv-e2ee-group-v1:'
@@ -192,20 +193,46 @@ function hole<T>(store: string, key: IDBValidKey): Promise<T | null> {
   )
 }
 
+/** Bindet einen Gruppenschlüssel an seinen Platz. Siehe `versiegleZeile`. */
+function gruppenAad(groupId: number, keyId: string): string {
+  return `msm-gruppenschluessel:${groupId}:${keyId}`
+}
+
+/**
+ * Nur `keys` geht durchs Siegel. In `aktuell` steht ein Zeiger auf eine
+ * Schlüsselkennung und in `beantwortet` eine Marke — beides sagt nichts über
+ * Inhalte aus, und beides muss lesbar bleiben, damit die Zeiger ohne PIN noch
+ * stimmen.
+ */
+async function liesSchluessel(
+  groupId: number,
+  keyId: string,
+): Promise<GruppenSchluesselEintrag | null> {
+  const roh = await hole<Record<string, any>>(STORE_KEYS, [groupId, keyId])
+  const zeile = await entsiegleZeile<GruppenSchluesselEintrag>(roh, gruppenAad(groupId, keyId))
+  return zeile?.schluessel ? zeile : null
+}
+
 const indexedDbAblage: GruppenAblage = {
   async lies(groupId, keyId) {
-    return hole<GruppenSchluesselEintrag>(STORE_KEYS, [groupId, keyId])
+    return liesSchluessel(groupId, keyId)
   },
   async liesAktuellen(groupId) {
     const zeiger = await hole<{ groupId: number; keyId: string }>(STORE_AKTUELL, groupId)
     if (!zeiger?.keyId) return null
-    return hole<GruppenSchluesselEintrag>(STORE_KEYS, [groupId, zeiger.keyId])
+    return liesSchluessel(groupId, zeiger.keyId)
   },
   async schreibe(eintrag) {
     const db = await oeffneDatenbank()
+    // Versiegeln vor der Transaktion — ein `await` mitten drin bricht sie ab.
+    const zeile = await versiegleZeile(
+      eintrag,
+      ['groupId', 'keyId'],
+      gruppenAad(eintrag.groupId, eintrag.keyId),
+    )
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction([STORE_KEYS, STORE_AKTUELL], 'readwrite')
-      tx.objectStore(STORE_KEYS).put(eintrag)
+      tx.objectStore(STORE_KEYS).put(zeile)
       tx.objectStore(STORE_AKTUELL).put({ groupId: eintrag.groupId, keyId: eintrag.keyId })
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
@@ -239,6 +266,44 @@ const indexedDbAblage: GruppenAblage = {
       tx.onabort = () => reject(tx.error)
     })
   },
+}
+
+/**
+ * Schreibt jeden Gruppenschlüssel einmal neu — der Umstellungsdurchlauf.
+ * Siehe `schreibeNachrichtenBestandNeu`.
+ *
+ * Läuft bewusst an `ablage` vorbei direkt auf die IndexedDB: die Schnittstelle
+ * kennt kein „alle", und sie soll es auch nicht lernen. Alles auflisten ist
+ * genau das, was im Alltag niemand tun soll.
+ */
+export async function schreibeGruppenBestandNeu(): Promise<number> {
+  const db = await oeffneDatenbank()
+  const rohzeilen = await new Promise<Record<string, any>[]>((resolve, reject) => {
+    const tx = db.transaction(STORE_KEYS, 'readonly')
+    const req = tx.objectStore(STORE_KEYS).getAll()
+    req.onsuccess = () => resolve(req.result || [])
+    req.onerror = () => reject(req.error)
+  })
+
+  let geschrieben = 0
+  for (const roh of rohzeilen) {
+    const groupId = Number(roh.groupId)
+    const keyId = String(roh.keyId || '')
+    if (!Number.isFinite(groupId) || !keyId) continue
+    const aad = gruppenAad(groupId, keyId)
+    const offen = await entsiegleZeile<GruppenSchluesselEintrag>(roh, aad)
+    if (!offen?.schluessel) continue
+    const zeile = await versiegleZeile(offen, ['groupId', 'keyId'], aad)
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_KEYS, 'readwrite')
+      tx.objectStore(STORE_KEYS).put(zeile)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+      tx.onabort = () => reject(tx.error)
+    })
+    geschrieben++
+  }
+  return geschrieben
 }
 
 let ablage: GruppenAblage = indexedDbAblage

@@ -6,13 +6,29 @@ import {
   cleanseVulnerableBiometricData,
   runBiometricsMigration,
 } from './vaultStore'
-import { biometrieLoeschen, pruefeBiometrieVerfuegbar } from '../tauri'
+import {
+  biometrieLoeschen,
+  biometrieSpeichern,
+  biometrieSpeicherFragtSelbst,
+  pruefeBiometrieVerfuegbar,
+  verifiziereBiometrie,
+} from '../tauri'
 
 vi.mock('../tauri', () => ({
+  FACH_TRESOR: 'vault_biometric_key',
   biometrieSpeichern: vi.fn().mockResolvedValue(undefined),
   biometrieEntsperren: vi.fn().mockImplementation(async () => 'super-strong-master-password-2026'),
   biometrieLoeschen: vi.fn().mockResolvedValue(undefined),
   pruefeBiometrieVerfuegbar: vi.fn().mockResolvedValue(true),
+  // Seit 09/2026 fragt `isBiometricsAvailable` zweierlei: ob sich jemand
+  // bestätigen lässt **und** ob ein Geheimnis verwahrt werden kann. Auf Android
+  // gilt nur das erste, und der Tresor bot dort einen Schnelleinstieg an, der
+  // beim Einrichten scheiterte.
+  biometrieSpeicherVerfuegbar: vi.fn().mockResolvedValue(true),
+  // Windows-Verhalten: der Credential Store fragt beim Ablegen nicht von sich
+  // aus, also muss die Anwendung vorher bestätigen lassen. Auf Android ist das
+  // umgekehrt — dafür der Test weiter unten.
+  biometrieSpeicherFragtSelbst: vi.fn().mockResolvedValue(false),
   verifiziereBiometrie: vi.fn().mockResolvedValue(true),
   setzeTresorSchutz: vi.fn().mockResolvedValue(undefined),
 }))
@@ -115,6 +131,29 @@ describe('useVaultStore - Security & Operations', () => {
     const state = useVaultStore.getState()
     expect(state.isUnlocked).toBe(true)
     expect(state.userKey).toBe(fakeKey)
+  })
+
+  it('startet die Untätigkeitsfrist beim Entsperren neu, nicht beim Laden der Seite', async () => {
+    const masterPassword = 'super-strong-master-password-2026'
+    await useVaultStore.getState().initializeVault(masterPassword)
+    useVaultStore.getState().lock()
+
+    // Der Sperrbildschirm stand eine halbe Stunde, bevor jemand sein Passwort
+    // eingetippt hat.
+    useVaultStore.setState({
+      autoLockMinutes: 15,
+      lastActivityTime: Date.now() - 30 * 60 * 1000,
+    })
+
+    expect(await useVaultStore.getState().unlock(masterPassword)).toBe(true)
+
+    // Ohne das Nachstellen der Uhr gilt der Tresor im selben Moment als „seit
+    // 30 Minuten untätig": er geht auf und beim nächsten Takt sofort wieder zu.
+    expect(useVaultStore.getState().checkAutoLock()).toBe(false)
+    expect(useVaultStore.getState().isUnlocked).toBe(true)
+
+    useVaultStore.getState().recordActivity()
+    expect(useVaultStore.getState().isUnlocked).toBe(true)
   })
 
   it('enforces payload attachment limit (<500 KB) in saveItem (SEC-08)', async () => {
@@ -260,6 +299,38 @@ describe('useVaultStore - Security & Operations', () => {
       expect(val).not.toContain(masterPassword)
       expect(val).not.toContain('sv-bio-v1:')
     }
+  })
+
+  it('fragt vor dem Ablegen, wenn der Schlüsselspeicher es nicht selbst tut (Windows)', async () => {
+    const masterPassword = 'super-strong-master-password-2026'
+    const store = useVaultStore.getState()
+    await store.initializeVault(masterPassword)
+    vi.mocked(verifiziereBiometrie).mockClear()
+
+    await store.enableBiometrics(masterPassword)
+
+    // Der Credential Store nimmt ein Geheimnis wortlos entgegen. Ohne diese
+    // Abfrage könnte jemand an einem unbeaufsichtigten Rechner seinen eigenen
+    // Finger an ein fremdes Master-Passwort binden.
+    expect(verifiziereBiometrie).toHaveBeenCalledOnce()
+    expect(biometrieSpeichern).toHaveBeenCalledWith(masterPassword, 'vault_biometric_key')
+  })
+
+  it('fragt nicht doppelt, wenn der Schlüsselspeicher selbst fragt (Android)', async () => {
+    const masterPassword = 'super-strong-master-password-2026'
+    const store = useVaultStore.getState()
+    await store.initializeVault(masterPassword)
+    vi.mocked(verifiziereBiometrie).mockClear()
+    vi.mocked(biometrieSpeicherFragtSelbst).mockResolvedValueOnce(true)
+
+    await store.enableBiometrics(masterPassword)
+
+    // Der Android-Keystore verlangt die Bestätigung schon zum Verschlüsseln.
+    // Eine zusätzliche davor wäre derselbe Fingerabdruck zweimal hintereinander
+    // — das sieht nicht nach Sorgfalt aus, sondern nach einem Fehler.
+    expect(verifiziereBiometrie).not.toHaveBeenCalled()
+    expect(biometrieSpeichern).toHaveBeenCalledWith(masterPassword, 'vault_biometric_key')
+    expect(useVaultStore.getState().isBiometricsEnabled).toBe(true)
   })
 
   it('enableBiometrics rejects wrong password even when canary is missing from localStorage', async () => {

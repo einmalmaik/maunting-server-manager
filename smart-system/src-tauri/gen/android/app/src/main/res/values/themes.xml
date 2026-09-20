@@ -3,4 +3,25 @@
     <style name="Theme.maunting_smart_system" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <!-- Customize your theme here. -->
     </style>
+
+    <!--
+        Für SchluesselfachActivity: eine Activity, die man nicht sehen soll.
+
+        Sie trägt nur den BiometricPrompt, der als eigenes Systemfenster darüber
+        liegt. Ohne durchsichtigen Hintergrund blitzte beim Entsperren eine leere
+        Fläche über der Anwendung auf.
+
+        Parent ist bewusst `Theme.AppCompat` und nicht das Material-Theme oben:
+        `BiometricPrompt` verlangt eine AppCompat-Activity, und die verlangt ein
+        AppCompat-Theme.
+    -->
+    <style name="Theme.MSS.Schluesselfach" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
 </resources>
