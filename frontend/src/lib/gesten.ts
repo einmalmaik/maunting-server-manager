@@ -7,13 +7,13 @@
  * Sie stehen hier einmal, ohne Zustand und ohne DOM, damit sie prüfbar bleiben
  * und nicht als `onTouchStart`-Abschrift durch sechs Komponenten wandern.
  *
- * Vorbild und Nachbar ist `videoNotizGesten.ts`, das für die Videonotiz genau
- * so aufgebaut ist.
- *
- * **Eine Geste ist nie der einzige Weg.** Was sich hier auslösen lässt, muss
- * auch über einen sichtbaren Knopf erreichbar sein: eine Geste findet niemand
- * von allein, und wer seine Hände nicht frei bewegen kann, kommt sonst gar
- * nicht hin.
+ * **Eine Geste ist nie der einzige Weg, und sie darf keinem im Weg stehen.**
+ * Was sich hier auslösen lässt, muss auch über einen sichtbaren Knopf
+ * erreichbar sein: eine Geste findet niemand von allein, und wer seine Hände
+ * nicht frei bewegen kann, kommt sonst gar nicht hin. Umgekehrt gilt dasselbe —
+ * die Videonotiz hatte eine Wischerkennung am Vollbildrahmen, die die Berührung
+ * des Sendeknopfs darin abfing. Gesten gehören auf den Bereich, für den sie
+ * gedacht sind, nicht auf alles darüber.
  */
 
 /** So lange muss gedrückt werden, bis ein Langdruck gilt. */

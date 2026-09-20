@@ -1,8 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Mic, Volume2, Radio, Sliders, ShieldAlert } from 'lucide-react'
+import { Mic, Volume2, Radio, Sliders, ShieldAlert, Video } from 'lucide-react'
 import { Button, Dropdown, type DropdownOption, Slider, Switch, ProgressBar } from '@/Singra/UI'
 import { getAudioSettings, saveAudioSettings } from '@/lib/audioSettings'
+import {
+  AUFLOESUNGEN as AUFLOESUNG_WERTE,
+  getVideoSettings,
+  saveVideoSettings,
+  type VideoAufloesung,
+  type VideoBildrate,
+} from '@/lib/videoSettings'
 import {
   aktuelleVerarbeitung,
   registriereAudioGeraete,
@@ -23,6 +30,21 @@ export function AudioTab() {
   const [echoCancellation, setEchoCancellation] = useState<boolean>(true)
   const [autoGainControl, setAutoGainControl] = useState<boolean>(true)
   const [gainPercent, setGainPercent] = useState<number>(100)
+
+  // Bildqualität. Gilt für die Kamera im Anruf und für Videonotizen.
+  const [videoAufloesung, setVideoAufloesung] = useState<VideoAufloesung>('1080p')
+  const [videoBildrate, setVideoBildrate] = useState<VideoBildrate>(60)
+
+  const AUFLOESUNGEN: DropdownOption[] = [
+    { value: '2160p', label: t('profile.videoResolution2160'), hint: t('profile.videoResolution2160Hint') },
+    { value: '1440p', label: t('profile.videoResolution1440'), hint: t('profile.videoResolution1440Hint') },
+    { value: '1080p', label: t('profile.videoResolution1080'), hint: t('profile.videoResolution1080Hint') },
+    { value: '720p', label: t('profile.videoResolution720'), hint: t('profile.videoResolution720Hint') },
+  ]
+  const BILDRATEN: DropdownOption[] = [
+    { value: '60', label: t('profile.videoFramerate60'), hint: t('profile.videoFramerate60Hint') },
+    { value: '30', label: t('profile.videoFramerate30'), hint: t('profile.videoFramerate30Hint') },
+  ]
 
   // Live Test State
   const [isTesting, setIsTesting] = useState(false)
@@ -45,7 +67,25 @@ export function AudioTab() {
 
     const currentVerarbeitung = aktuelleVerarbeitung()
     setGainPercent(Math.round(currentVerarbeitung.verstaerkung * 100))
+
+    const bild = getVideoSettings()
+    setVideoAufloesung(bild.aufloesung)
+    setVideoBildrate(bild.bildrate)
   }, [])
+
+  const handleSelectAufloesung = (wert: string) => {
+    const gewaehlt = AUFLOESUNG_WERTE.includes(wert as VideoAufloesung)
+      ? (wert as VideoAufloesung)
+      : '1080p'
+    setVideoAufloesung(gewaehlt)
+    saveVideoSettings({ aufloesung: gewaehlt })
+  }
+
+  const handleSelectBildrate = (wert: string) => {
+    const gewaehlt: VideoBildrate = wert === '30' ? 30 : 60
+    setVideoBildrate(gewaehlt)
+    saveVideoSettings({ bildrate: gewaehlt })
+  }
 
   const loadDevices = useCallback(async () => {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) return
@@ -370,6 +410,55 @@ export function AudioTab() {
               label={t('mss.audio.verstaerkung')}
               hint={`${gainPercent} %`}
             />
+          </div>
+        </div>
+      </section>
+
+      {/* Bildqualität für Anrufe und Videonotizen */}
+      <section className="msm-card p-6" aria-labelledby="video-quality-heading">
+        <div className="flex items-center gap-2 mb-4">
+          <Video className="h-5 w-5 text-secondary" aria-hidden="true" />
+          <h2 id="video-quality-heading" className="font-headline text-title-lg font-semibold text-on-surface">
+            {t('profile.videoTitle')}
+          </h2>
+        </div>
+        <p className="max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant mb-6">
+          {t('profile.videoDescription')}
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl">
+          <div className="space-y-1.5">
+            <label
+              htmlFor="video-resolution"
+              className="block font-label-md text-label-md text-on-surface-variant uppercase tracking-wider"
+            >
+              {t('profile.videoResolution')}
+            </label>
+            <Dropdown
+              id="video-resolution"
+              value={videoAufloesung}
+              onChange={handleSelectAufloesung}
+              options={AUFLOESUNGEN}
+              aria-label={t('profile.videoResolution')}
+            />
+            <p className="text-xs text-on-surface-variant">{t('profile.videoResolutionHint')}</p>
+          </div>
+
+          <div className="space-y-1.5">
+            <label
+              htmlFor="video-framerate"
+              className="block font-label-md text-label-md text-on-surface-variant uppercase tracking-wider"
+            >
+              {t('profile.videoFramerate')}
+            </label>
+            <Dropdown
+              id="video-framerate"
+              value={String(videoBildrate)}
+              onChange={handleSelectBildrate}
+              options={BILDRATEN}
+              aria-label={t('profile.videoFramerate')}
+            />
+            <p className="text-xs text-on-surface-variant">{t('profile.videoFramerateHint')}</p>
           </div>
         </div>
       </section>

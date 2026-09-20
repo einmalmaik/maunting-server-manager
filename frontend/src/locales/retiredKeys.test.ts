@@ -91,6 +91,11 @@ const ABGELOESTE_SCHLUESSEL = [
   // `shell.openUserMenu` neben den lebenden `shell.mainNavigation` und
   // `shell.closeNavigation`.
   'shell.openUserMenu',
+  // 09/2026: Die Videonotiz hat keine Wischgeste mehr. Sie hing am
+  // Vollbildrahmen und fing die Berührung des Sendeknopfs darin ab; abbrechen
+  // und senden gehen jetzt nur noch über die beiden Knöpfe. Ein Hinweis, der
+  // eine Geste erklärt, die es nicht gibt, ist schlimmer als keiner.
+  'social.videoNote.swipeToLock',
 ]
 
 /** Die Nachfolger muss es geben — sonst wäre das Löschen ein Verlust. */

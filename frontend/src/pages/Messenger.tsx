@@ -106,7 +106,7 @@ import {
   ladeAnhangHoch,
   uploadGroupAvatar,
 } from '@/api/social'
-import { maxKlartextBytes } from '@/services/medienKrypto'
+import { maxAnhangBytes } from '@/services/medienKrypto'
 import {
   chatMediaBlobCache,
   holeAnhangUrl,
@@ -3112,6 +3112,18 @@ export function Messenger() {
       return
     }
 
+    // Die Videonotiz wird vor dem Verschlüsseln gemessen, wie jede andere Datei
+    // auch. Ohne diese Zeile lief eine lange Aufnahme durch die ganze
+    // Verschlüsselung und scheiterte erst am Deckel des Servers — im Chat stand
+    // dann eine Zeile, die wieder verschwand, und niemand erfuhr warum. Der
+    // Rekorder hält die Größe zwar im Blick; dies ist der Fangnetz dahinter.
+    if (videoNote && videoNote.blob.size > maxAnhangBytes()) {
+      toast.error(
+        t('messenger.videoNoteTooLarge', { limit: Math.floor(maxAnhangBytes() / (1024 * 1024)) })
+      )
+      return
+    }
+
     /**
      * Wohin diese Nachricht geht.
      *
@@ -3933,7 +3945,7 @@ export function Messenger() {
     // verpackt. Hier standen früher feste 25 MB — genau der Deckel, den der
     // fertige Blob nicht überschreiten darf. Eine 20-MB-Datei lief damit durch
     // die ganze Verschlüsselung und scheiterte erst am Upload.
-    const MAX_FILE_BYTES = Math.floor(maxKlartextBytes() * 0.75)
+    const MAX_FILE_BYTES = maxAnhangBytes()
     const MAX_IMAGE_BYTES = Math.min(8 * 1024 * 1024, MAX_FILE_BYTES)
 
     const isImage = file.type.startsWith('image/')

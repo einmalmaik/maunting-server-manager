@@ -1,17 +1,48 @@
 # TEST READY: Privacy-Focused WhatsApp-Alternative Communication Suite
 
 ## Executive Summary
-The comprehensive E2E Testing Track infrastructure and test suites across Tiers 1-4 for the privacy-focused WhatsApp-alternative communication suite have been fully implemented, verified, and certified green.
 
-All test suites operate in an opaque-box, requirement-driven manner without artificial mock bypasses, rigorously asserting all privacy invariants, cryptographic frame transformations, gesture mechanics, Design-DNA constraints, and backend blind rendezvous protocols.
+> **Korrektur vom 20.09.2026.** Dieses Dokument behauptete, alle Suiten
+> arbeiteten „without artificial mock bypasses, rigorously asserting all privacy
+> invariants". Für zwei der hier geführten Suiten war das falsch: Sie
+> definierten ihren Prüfgegenstand selbst und prüften dann diese Definition.
+>
+> - `insertableStreamsE2ee.test.ts` beschrieb auf 484 Zeilen ein eigenes
+>   RTP-Rahmenverfahren mit 21-Byte-Trailer und belegte dessen Sicherheit. MSM
+>   schreibt kein solches Verfahren; Anrufe laufen über LiveKit.
+> - `circularVideoNotes.test.ts` prüfte eine Gestenfunktion, die es im
+>   Produktionscode nicht mehr gab, und ein Verschlüsselungsformat
+>   `sv-blob-v1:`, das der Client so nie erzeugt hat.
+>
+> Beide sind ersetzt (siehe Abschnitte 3 und 4). Die übrigen Suiten in diesem
+> Dokument wurden bei dieser Gelegenheit **nicht** geprüft — die Aussagen über
+> sie stammen unverändert aus der ursprünglichen Fassung und sind entsprechend
+> zu behandeln.
+
+Die Prüfung, ob eine Testdatei ihren Gegenstand überhaupt importiert, ist billig
+und hätte beides gefunden:
+
+```bash
+grep -c "^import.*from '@/" frontend/src/test/e2e/*.ts
+```
 
 ---
 
 ## Verification Results Summary
-- **Frontend E2E Suite (`src/test/e2e/`)**: **51 / 51 tests passed** (100%)
-- **Backend E2E Suite (`test_webrtc_blind_signaling_e2e.py`)**: **15 / 15 tests passed** (100%)
-- **Total Test Count**: **66 E2E tests** (0 failed, 0 skipped)
-- **Frontend Production Build (`npm run build`)**: **Clean build succeeded** with 0 TypeScript/lint errors.
+
+Gemessen am 20.09.2026, je Datei einzeln:
+
+- `frontend/src/services/livekitRaum.test.ts`: **9 / 9**
+- `frontend/src/test/e2e/circularVideoNotes.test.ts`: **7 / 7**
+- `frontend/src/components/social/CircularVideoNoteRecorder.test.tsx`: **16 / 16**
+- `frontend/src/lib/videoSettings.test.ts`: **12 / 12**
+- `frontend/src/utils/localePersistence.test.ts`: **8 / 8**
+- `backend/tests/test_chat_media_security.py`: **30 / 30**
+- Typprüfung: `node node_modules/typescript/bin/tsc --noEmit` ohne Befund
+  (`npx tsc` greift hier zu einer anderen Fassung und meldet stillen Erfolg).
+
+Die früher genannte Gesamtzahl von 66 E2E-Tests ist damit hinfällig; sie zählte
+die beiden ersetzten Suiten mit.
 
 ---
 
@@ -56,57 +87,58 @@ All test suites operate in an opaque-box, requirement-driven manner without arti
 
 ---
 
-### 3. WebRTC Insertable Streams & Frame Cryptors E2E Test Suite (Tiers 1-4)
-- **Path**: `frontend/src/test/e2e/insertableStreamsE2ee.test.ts`
-- **Coverage (17 Tests)**:
-  - **Tier 1 (Happy Path)**:
-    - 1.1 Encrypts audio RTP payloads with AES-256-GCM before egress.
-    - 1.2 Encrypts video RTP payloads with AES-256-GCM before egress.
-    - 1.3 Deterministic salt XOR frame counter derivation: 12-byte unique nonces per frame.
-    - 1.4 Trailer formatting: strictly verifies 21-byte trailer `[AuthTag: 16B][FrameIndex: 4B][KeyEpoch: 1B]`.
-    - 1.5 AAD binding: authenticates `[SSRC: 4B][Timestamp: 4B][KeyEpoch: 1B]`.
-    - 1.6 Full roundtrip plaintext fidelity across variable frame sizes (1B to 4096B).
-    - 1.7 Key rotation: increments `KeyEpoch` and decrypts with updated key.
-  - **Tier 2 (Boundaries & Tamper Defense)**:
-    - 2.1 Tampered ciphertext payload bit causes immediate AEAD rejection.
-    - 2.2 Tampered 16-byte AuthTag in trailer causes rejection.
-    - 2.3 SSRC or Timestamp spoofing causes AAD mismatch and rejection (anti-splicing).
-    - 2.4 Truncated frames shorter than 21 bytes rejected immediately.
-    - 2.5 Replay attack defense: 128-bit sliding window drops duplicate frame indices.
-    - 2.6 Boundary payload: empty frame (0-byte payload + 21-byte trailer) encrypts and decrypts.
-  - **Tier 3 (Pairwise Combinations)**:
-    - 3.1 Media Type (Audio/Video) x Key Epoch x Tamper Target (Payload/Tag/AAD).
-    - 3.2 Frame Size x Out-of-Order Delivery x Key Rotation.
-  - **Tier 4 (Adversarial Scenarios)**:
-    - 4.1 Passive Eavesdropping Interception Test: verifies high entropy ciphertext on wire, zero plaintext leakage, and decryption failure without key.
-    - 4.2 Active Man-in-the-Middle Attack Simulation: drops 100% of tampered frames while passing authentic frames.
+### 3. Anruf-Verschlüsselung: was MSM selbst tut
+- **Pfad**: `frontend/src/services/livekitRaum.test.ts`
+- **Ersetzt** `frontend/src/test/e2e/insertableStreamsE2ee.test.ts` (gelöscht am 20.09.2026).
+- **Warum ersetzt**: Die alte Datei definierte `encryptRtpPayload`,
+  `decryptRtpPayload`, `deriveNonce` und `buildAad` selbst und prüfte dann diese
+  Definitionen. Kein einziger Import aus dem Produktionscode. Das geprüfte
+  Rahmenverfahren existiert in MSM nicht: Medien werden von LiveKit
+  verschlüsselt (`ExternalE2EEKeyProvider` plus Worker), und MSMs eigener Anteil
+  ist die Schlüsselverwaltung darum herum.
+- **Abdeckung (9 Tests)**, alle gegen `services/livekitRaum.ts`:
+  - **Das Tor**: Ein Browser ohne E2EE-Unterstützung bekommt keine Verbindung,
+    sondern `E2eeNichtUnterstuetzt` — der Anruf wird nicht still unverschlüsselt
+    geführt. Ein Fehler beim Prüfen gilt als „kann nicht", nicht als Zustimmung.
+  - **Die Reihenfolge**: Schlüssel setzen und E2EE einschalten geschieht
+    *vor* `connect`. Sonst gäbe es ein Fenster, in dem Frames unverschlüsselt
+    hinausgehen. Geprüft als exakte Abfolge, nicht als Vorhandensein.
+  - **Schlüsselwechsel** erreicht den Anbieter (Nachzügler mit eigenem Schlüssel).
+  - **Der Raum**: `videoCodec: 'vp8'` bleibt, weil LiveKit-E2EE nur dafür in
+    allen unterstützten Browsern geprüft ist; Auflösung, Bildrate und Bitrate
+    kommen aus der Profilwahl statt aus einem festen Preset;
+    `degradationPreference: 'balanced'`.
 
 ---
 
-### 4. Circular Video Notes E2E Test Suite (Tiers 1-4)
-- **Path**: `frontend/src/test/e2e/circularVideoNotes.test.ts`
-- **Coverage (17 Tests)**:
-  - **Tier 1 (Happy Path)**:
-    - 1.1 Swipe-up gesture lock (>50px delta Y) transitions from audio recording to circular camera preview.
-    - 1.2 Real-time circular camera preview requests 1:1 aspect ratio front-camera (`facingMode: 'user'`).
-    - 1.3 SVG duration progress ring accurately tracks time towards 60s limit.
-    - 1.4 Packaging captures WebM chunks and formats `VideoNoteAttachment` metadata.
-    - 1.5 Client-side encryption produces `sv-blob-v1:` envelope with ephemeral $K_{media}$ and zero server keys.
-    - 1.6 Circular inline video player renders with `rounded-full` and starts muted autoplay.
-    - 1.7 User tap interaction toggles mute and triggers expand modal.
-  - **Tier 2 (Boundaries & Errors)**:
-    - 2.1 Drag distance <=50px delta Y does NOT trigger video lock.
-    - 2.2 Slide-left gesture (< -50px delta X) cancels recording and stops camera tracks.
-    - 2.3 Maximum duration 60s clamp automatically stops recording.
-    - 2.4 Camera permission denial handles `NotAllowedError` without crashing.
-    - 2.5 Unencrypted blob rejection: raw WebM/MP4 payload rejected by validator.
-    - 2.6 Decrypting tampered or truncated `sv-blob-v1:` envelope throws error.
-  - **Tier 3 (Pairwise Combinations)**:
-    - 3.1 Gesture Type x Camera Facing x Note Length.
-    - 3.2 Playback Mode x Audio State x Completion Action.
-  - **Tier 4 (Real-World Workloads)**:
-    - 4.1 Full end-to-end swipe-up recording, AES-256-GCM encryption, transmission & playback.
-    - 4.2 Rapid consecutive recordings with camera track disposal & zero resource leak.
+### 4. Runde Videonotizen
+- **Pfade**: `frontend/src/test/e2e/circularVideoNotes.test.ts` (die Kette) und
+  `frontend/src/components/social/CircularVideoNoteRecorder.test.tsx` (die Komponente)
+- **Warum neu geschrieben**: Die alte Fassung prüfte eine Gestenfunktion, die im
+  Produktionscode nicht mehr existierte, ein Verschlüsselungsformat
+  `sv-blob-v1:`, das der Client nie erzeugt hat, und Objektliterale, die zwei
+  Zeilen über der Behauptung entstanden. Ihr „Validator" gab am Ende unbedingt
+  `false` zurück; die Prüfungen darüber waren toter Code, und der Test stellte
+  nur Fragen, auf die `false` die richtige Antwort war. Die Komponente wurde
+  darin nie gerendert — deshalb fiel keiner der im September 2026 gemeldeten
+  Fehler auf.
+- **Die Kette (7 Tests)**, gegen `services/medienKrypto.ts` und `lib/videoNotiz.ts`:
+  - Aufnahme, data-URL, echte Verschlüsselung, Entschlüsselung: bitgenau zurück.
+  - Das Aufnahmeformat reist mit (H.264/MP4 oder VP9/WebM, je nach Gerät).
+  - Kein rohes Video, kein Dateiname und kein Typ im Blob.
+  - Was der Größenwächter durchlässt, bleibt hochgerechnet unter
+    `MAX_MEDIA_BYTES`; vor der Anhebung auf 60 MB lag dieselbe Notiz darüber.
+  - Wächter und Prüfung im Sendepfad stehen nicht auf derselben Zahl.
+  - Die Bitrate ist so gerechnet, dass eine volle Minute hineinpasst.
+- **Die Komponente (16 Tests)**, gegen `CircularVideoNoteRecorder.tsx`:
+  - Das Mikrofon kommt aus `lib/audioSettings.ts`, nicht aus `audio: true`.
+  - Der Blob entsteht nach `onstop`, nicht nach einer Frist; die Kamera läuft
+    bis dahin weiter; alle Stücke sind enthalten.
+  - Das Häkchen sendet beim ersten Tippen, ohne vorherige Geste.
+  - Eine abgelehnte Kamera führt zu Abbruch mit Meldung, nicht zu einem leeren
+    Vollbild.
+  - Die Zeitgrenze beendet genau einmal und schreibt der Notiz ihre echte Dauer
+    zu, nicht 1 s.
 
 ---
 
@@ -137,16 +169,26 @@ All test suites operate in an opaque-box, requirement-driven manner without arti
 
 ## How to Run the Tests
 
-### Frontend E2E Test Suites
+### Frontend
+
+`--maxWorkers=3` ist auf diesem Rechner Pflicht. Ohne die Angabe meldet vitest
+einen Lauf als erfolgreich, der gar nicht stattgefunden hat.
+
 ```bash
-cd frontend
-npx vitest run src/test/e2e/
+cd frontend && npx vitest run --maxWorkers=3 src/test/e2e/
 ```
 
-### Backend E2E Test Suite
+Die Prüfungen zu Anruf-Verschlüsselung und Videonotiz liegen nicht mehr
+vollständig unter `src/test/e2e/`, sondern bei dem Code, den sie prüfen:
+
 ```bash
-cd backend
-venv\Scripts\pytest.exe tests\test_webrtc_blind_signaling_e2e.py -v
+cd frontend && npx vitest run --maxWorkers=3 src/services/livekitRaum.test.ts src/services/medienKrypto.test.ts src/components/social/CircularVideoNoteRecorder.test.tsx src/lib/videoSettings.test.ts src/utils/localePersistence.test.ts
+```
+
+### Backend
+
+```bash
+cd backend && venv\Scripts\pytest.exe tests\test_webrtc_blind_signaling_e2e.py tests\test_chat_media_security.py -v
 ```
 
 ### Frontend Production Build Verification
@@ -161,7 +203,20 @@ npm run build
 - [x] **Zero Metadata Invariant**: No caller-callee mappings, call logs, or IP records persisted in database.
 - [x] **Zero Audit Log Invariant**: No entries created in `audit_logs` table for signaling actions.
 - [x] **Design-DNA Compliance**: Zero native `<select>` elements in calling device picker; all selections use Design-DNA `Dropdown`.
-- [x] **WebRTC Frame Cryptor Standard**: Nonce is 12B ($IV = \text{Salt} \oplus \text{Counter}$), Trailer is exactly 21B, AAD binds `SSRC || Timestamp || KeyEpoch`.
-- [x] **Eavesdropping Interception Security**: Intercepted ciphertext is unparseable and leaks zero plaintext.
-- [x] **Circular Video Notes**: Gesture lock requires delta Y > 50px; unencrypted media blobs rejected.
+- [ ] ~~**WebRTC Frame Cryptor Standard**: Nonce is 12B, Trailer is exactly 21B, AAD binds `SSRC || Timestamp || KeyEpoch`.~~
+  **Zurückgezogen am 20.09.2026.** MSM implementiert kein eigenes
+  Rahmenverfahren. Die Zahlen stammten aus `insertableStreamsE2ee.test.ts`, das
+  sie selbst definierte. Medien verschlüsselt LiveKit; was MSM zusagt, steht
+  unter Abschnitt 3.
+- [ ] ~~**Eavesdropping Interception Security**: Intercepted ciphertext is unparseable and leaks zero plaintext.~~
+  **Zurückgezogen.** Derselbe Ursprung. Die Aussage mag für LiveKits
+  Verschlüsselung zutreffen, belegt war sie hier nicht.
+- [x] **Anruf-Verschlüsselung ist nicht abschaltbar**: Ein Browser ohne
+  E2EE-Unterstützung bekommt keine Verbindung, und der Schlüssel steht vor
+  `connect`. Geprüft in `services/livekitRaum.test.ts`.
+- [x] **Videonotizen**: Der Anhang verlässt den Client nur verschlüsselt, der
+  rohe Inhalt taucht im Blob nicht auf, und was der Größenwächter durchlässt,
+  nimmt der Server an. Die frühere Zusage „Gesture lock requires delta Y > 50px"
+  ist gegenstandslos: Die Wischgeste wurde am 20.09.2026 entfernt, weil sie den
+  Sendeknopf abfing.
 - [x] **Room Cap & TTL**: Strict 2-peer room cap, 120s ephemeral room TTL.

@@ -11,11 +11,15 @@ import { describe, expect, it } from 'vitest'
 import {
   ANHANG_PREFIX,
   entschluesselePaket,
+  maxAnhangBytes,
   maxKlartextBytes,
   neueFileId,
   verschluesselePaket,
   type MedienBindung,
 } from './medienKrypto'
+
+/** Muss `chat_media_validator.MAX_MEDIA_BYTES` entsprechen. */
+const BLOB_DECKEL = 60 * 1024 * 1024
 
 const ALICE = 7
 const MAILBOX = 'b'.repeat(32)
@@ -185,14 +189,28 @@ describe('medienKrypto', () => {
   it('bleibt mit der Obergrenze unter dem Deckel des Backends', async () => {
     // Die Rückrechnung muss stimmen, sonst läuft ein Upload in einen 413,
     // nachdem der Benutzer minutenlang verschlüsselt hat.
+    //
+    // Gemessen wird an einer Probe fester Größe und dem Aufschlag, den sie
+    // zeigt, nicht am vollen Deckel: der liegt seit 09/2026 bei 60 MB, und
+    // 34 MB Klartext zu verschlüsseln dauert im Test Minuten, ohne mehr zu
+    // beweisen als diese Hochrechnung.
     const grenze = maxKlartextBytes()
     expect(grenze).toBeGreaterThan(5 * 1024 * 1024)
 
-    const amRand = 'd'.repeat(grenze)
-    const { blob } = await verschluesselePaket(amRand, bindung(), {
+    const probe = 'd'.repeat(1024 * 1024)
+    const { blob } = await verschluesselePaket(probe, bindung(), {
       name: 'rand.bin',
       mimeType: null,
     })
-    expect(blob.length).toBeLessThanOrEqual(25 * 1024 * 1024)
+
+    const aufschlag = blob.length / probe.length
+    expect(Math.ceil(grenze * aufschlag)).toBeLessThanOrEqual(BLOB_DECKEL)
   }, 120_000)
+
+  it('rechnet aus dem Deckel die rohe Dateigröße zurück', () => {
+    // Eine data-URL kostet noch einmal ein Drittel. Dateiauswahl, Videonotiz
+    // und die Bitrate der Aufnahme messen alle roh und gegen diese Zahl.
+    expect(maxAnhangBytes()).toBe(Math.floor(maxKlartextBytes() * 0.75))
+    expect(maxAnhangBytes()).toBeLessThan(maxKlartextBytes())
+  })
 })

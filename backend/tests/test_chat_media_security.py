@@ -273,6 +273,79 @@ def test_validate_encrypted_blob_payload():
         validate_encrypted_blob_payload("This is an unencrypted secret message without any encryption")
 
 
+def _dis_paket(chunks: list[bytes], manifest: bytes = b"versiegeltes-manifest") -> str:
+    """Baut einen Anhang in der Form, die der Client seit 09/2026 erzeugt.
+
+    ``sv-msm-anhang-v1:`` + Base64 eines JSON-Pakets aus versiegeltem Manifest
+    und einzeln versiegelten Stuecken. Siehe ``verschluesselePaket`` in
+    ``frontend/src/services/medienKrypto.ts``.
+    """
+    import json
+
+    paket = {
+        "v": 1,
+        "manifest": base64.b64encode(manifest).decode("ascii"),
+        "chunks": [base64.b64encode(c).decode("ascii") for c in chunks],
+    }
+    huelle = json.dumps(paket).encode("utf-8")
+    return "sv-msm-anhang-v1:" + base64.b64encode(huelle).decode("ascii")
+
+
+def test_validate_encrypted_blob_payload_akzeptiert_das_heutige_format():
+    """Der Validator muss das Format annehmen, das der Client wirklich schickt.
+
+    Alle uebrigen Faelle in dieser Datei fahren ``sv-blob-v1:``. Das ist
+    Altbestand; erzeugt wird seit 09/2026 ausschliesslich
+    ``sv-msm-anhang-v1:``. Faellt dieses Praefix aus der Liste in
+    ``validate_encrypted_blob_payload``, bricht jeder Anhang im Panel, und ohne
+    diesen Test faellt es keinem Lauf auf.
+    """
+    # Eine Videonotiz: mehrere versiegelte Stuecke, wie eine laengere Aufnahme
+    # sie erzeugt. Der Inhalt ist Zufallsrauschen, nichts anderes kommt aus
+    # AES-GCM heraus.
+    import os
+
+    validate_encrypted_blob_payload(_dis_paket([os.urandom(2048) for _ in range(4)]))
+
+    # Auch der kleinste Fall, ein einziges Stueck.
+    validate_encrypted_blob_payload(_dis_paket([os.urandom(64)]))
+
+
+def test_validate_encrypted_blob_payload_prueft_auch_das_heutige_format():
+    """Das neue Praefix ist kein Freifahrtschein.
+
+    Die Pruefung auf Klartext hinter dem Umschlag muss fuer jedes Format
+    greifen, sonst waere das Anheben des Praefixes ein Weg daran vorbei.
+    """
+    with pytest.raises(ExecutableBlockedError):
+        validate_encrypted_blob_payload("sv-msm-anhang-v1:MZ\x90\x00BinaryExePayloadHere")
+
+    with pytest.raises(PlaintextBlobRejectedError):
+        validate_encrypted_blob_payload(
+            "sv-msm-anhang-v1:" + base64.b64encode(b"%PDF-1.4\nUnverschluesselt").decode("ascii")
+        )
+
+    with pytest.raises(PlaintextBlobRejectedError):
+        validate_encrypted_blob_payload("sv-msm-anhang-v1:")
+
+
+def test_max_media_bytes_traegt_eine_volle_videonotiz():
+    """Der Deckel muss zu dem passen, was die Videonotiz erzeugen darf.
+
+    09/2026 von 25 auf 60 MB angehoben. Die Gegenzahl steht in
+    ``frontend/src/services/medienKrypto.ts`` als ``BLOB_GRENZE``; wer hier
+    dreht, dreht dort mit. Eine Minute Aufnahme kam vorher regelmaessig nicht
+    an, weil der fertige Umschlag ueber dem alten Deckel lag.
+    """
+    assert MAX_MEDIA_BYTES == 60 * 1024 * 1024
+
+    # Roh bleiben nach Base64 der data-URL und der Huelle rund 40 Prozent
+    # uebrig. Eine volle Minute in der Qualitaet, die der Rekorder faehrt,
+    # liegt darunter -- mit Abstand, nicht knapp.
+    roh_grenze = int(MAX_MEDIA_BYTES * 0.4)
+    assert roh_grenze > 20 * 1024 * 1024
+
+
 def test_medienpaket_wird_angenommen_und_bleibt_geprueft():
     """`sv-msm-anhang-v1:` ist seit 09/2026 das Format jedes neuen Anhangs.
 

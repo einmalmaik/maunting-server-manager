@@ -17,7 +17,18 @@ import zipfile
 from typing import BinaryIO
 
 # Speicher-Limits
-MAX_MEDIA_BYTES = 25 * 1024 * 1024  # 25 MB fuer Anhaenge
+#
+# ``MAX_MEDIA_BYTES`` gilt fuer den fertigen, verschluesselten Blob. Was davon
+# als rohe Datei uebrig bleibt, rechnet das Frontend in ``maxAnhangBytes()``
+# zurueck: die Huelle kostet zweimal Base64, es bleiben rund 40 Prozent. Beide
+# Zahlen gehoeren zusammen -- wer hier dreht, dreht auch ``BLOB_GRENZE`` in
+# ``frontend/src/services/medienKrypto.ts``.
+#
+# 09/2026 von 25 auf 60 MB angehoben, damit eine Videonotiz ueber die vollen
+# 60 Sekunden in hoher Qualitaet durchpasst. Der Upload ist bewusst typneutral
+# (der Server sieht ``anhang.bin``), eine eigene Grenze nur fuer Videonotizen
+# gaebe es also nur um den Preis, ihm den Anhangtyp zu verraten.
+MAX_MEDIA_BYTES = 60 * 1024 * 1024  # 60 MB fuer Anhaenge
 MAX_IMAGE_BYTES = 8 * 1024 * 1024   # 8 MB fuer Bilder
 MAX_AUDIO_BYTES = 10 * 1024 * 1024  # 10 MB fuer Sprachnachrichten
 MAX_ZIP_UNCOMPRESSED_BYTES = 50 * 1024 * 1024  # 50 MB maximal entpackt

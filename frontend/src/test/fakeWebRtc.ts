@@ -471,6 +471,15 @@ export class FakeMediaRecorder {
   mimeType: string
   state: 'inactive' | 'recording' | 'paused' = 'inactive'
   timeslice?: number
+  /**
+   * Die Bitraten, die der Aufrufer mitgibt.
+   *
+   * Der echte `MediaRecorder` legt sie als Eigenschaften ab. Der Fake warf sie
+   * weg, und damit war nicht prüfbar, ob eine Aufnahme dem Browser die Wahl
+   * überlässt — genau das war bei der Videonotiz der Fall.
+   */
+  videoBitsPerSecond?: number
+  audioBitsPerSecond?: number
 
   ondataavailable: ((event: { data: Blob }) => void) | null = null
   onstart: (() => void) | null = null
@@ -481,9 +490,14 @@ export class FakeMediaRecorder {
 
   recordedChunks: Blob[] = []
 
-  constructor(stream: FakeMediaStream, options?: { mimeType?: string }) {
+  constructor(
+    stream: FakeMediaStream,
+    options?: { mimeType?: string; videoBitsPerSecond?: number; audioBitsPerSecond?: number },
+  ) {
     this.stream = stream
     this.mimeType = options?.mimeType ?? 'video/webm'
+    this.videoBitsPerSecond = options?.videoBitsPerSecond
+    this.audioBitsPerSecond = options?.audioBitsPerSecond
     FakeMediaRecorder.instances.push(this)
   }
 

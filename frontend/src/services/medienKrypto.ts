@@ -70,8 +70,13 @@ import { randomBytes } from '@msdis/shield/random'
 export const ANHANG_PREFIX = 'sv-msm-anhang-v1:'
 
 const PAKET_BYTES = 32
-/** Der Deckel des Backends (`MAX_MEDIA_BYTES`) gilt für den fertigen Blob. */
-const BLOB_GRENZE = 25 * 1024 * 1024
+/**
+ * Der Deckel des Backends (`MAX_MEDIA_BYTES`) gilt für den fertigen Blob.
+ *
+ * Muss mit `chat_media_validator.MAX_MEDIA_BYTES` übereinstimmen. Steht hier
+ * mehr, läuft der Upload nach minutenlangem Verschlüsseln in einen 400er.
+ */
+const BLOB_GRENZE = 60 * 1024 * 1024
 
 /**
  * Was ein Anhang an seinem Platz festmacht. Nur `fileId` reist mit; die
@@ -134,6 +139,18 @@ export function maxKlartextBytes(): number {
   const nutzlast = (BLOB_GRENZE - ANHANG_PREFIX.length) * 0.75 // äußere Base64-Hülle
   const stuecke = nutzlast * 0.75 // Base64 je Stück
   return Math.floor(stuecke * 0.97) // JSON-Gerüst, Manifest und AEAD-Aufschlag
+}
+
+/**
+ * Wie viele **rohe** Bytes ein Anhang haben darf.
+ *
+ * Der Klartext oben ist immer eine data-URL, und Base64 kostet dort noch einmal
+ * ein Drittel. Wer eine Datei oder eine Aufnahme misst, misst sie roh und
+ * vergleicht mit dieser Zahl — Dateiauswahl, Videonotiz und die Bitrate der
+ * Aufnahme rechneten das vorher jede für sich.
+ */
+export function maxAnhangBytes(): number {
+  return Math.floor(maxKlartextBytes() * 0.75)
 }
 
 /**

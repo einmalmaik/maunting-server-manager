@@ -18,23 +18,24 @@ import {
   Room,
   RoomEvent,
   Track,
-  VideoPresets,
   isE2EESupported,
   type AudioCaptureOptions,
   type RemoteParticipant,
   type RoomOptions,
   type ScreenShareCaptureOptions,
   type TrackPublishOptions,
+  type VideoCaptureOptions,
 } from 'livekit-client'
 import E2eeWorker from 'livekit-client/e2ee-worker?worker'
 import { ausgabeGeraetId } from '@/components/ai/voice/audioGeraete'
 import { getAudioTrackConstraints } from '@/lib/audioSettings'
+import { getVideoCaptureAufloesung, getVideoSendeGrenzen } from '@/lib/videoSettings'
 
 export { ConnectionState, RoomEvent, Track }
 export type { RemoteParticipant }
 
 /** Auflösungen, die die Bildschirmfreigabe anbietet. */
-export type FreigabeAufloesung = '720p' | '1080p' | '1440p' | 'quelle'
+export type FreigabeAufloesung = '720p' | '1080p' | '1440p' | '2160p' | 'quelle'
 export type FreigabeBildrate = 30 | 60
 
 export interface FreigabeOptionen {
@@ -54,17 +55,24 @@ export const FREIGABE_STANDARD: FreigabeOptionen = {
  * Bitraten je Auflösung. Bewusst großzügig: eine Bildschirmfreigabe zeigt oft
  * Text oder ein Spiel, und beides verliert bei zu knapper Rate genau das, wofür
  * man sie teilt. Bei 60 FPS wird verdoppelt.
+ *
+ * 2160p liegt bei 20 Mbit/s und damit bei 60 Bildern auf 40. Das ist viel, und
+ * es ist der Punkt: eine 4K-Freigabe mit der Rate einer 1440p-Freigabe zeigt
+ * vier Mal so viele Pixel, die alle etwas unschärfer sind — dann kann man auch
+ * gleich 1440p teilen. Wer die Stufe wählt, will die Schärfe.
  */
 const BITRATE_JE_AUFLOESUNG: Record<Exclude<FreigabeAufloesung, 'quelle'>, number> = {
   '720p': 2_500_000,
   '1080p': 5_000_000,
   '1440p': 9_000_000,
+  '2160p': 20_000_000,
 }
 
 const MASSE_JE_AUFLOESUNG: Record<Exclude<FreigabeAufloesung, 'quelle'>, { width: number; height: number }> = {
   '720p': { width: 1280, height: 720 },
   '1080p': { width: 1920, height: 1080 },
   '1440p': { width: 2560, height: 1440 },
+  '2160p': { width: 3840, height: 2160 },
 }
 
 /** Kann dieser Browser verschlüsselte Anrufe? */
@@ -115,6 +123,51 @@ export interface RaumVerbindung {
   keyProvider: ExternalE2EEKeyProvider
 }
 
+/**
+ * Die Kameraeinstellungen des Anrufs — dieselben, die auch die Videonotiz
+ * benutzt, soweit sie auf sie passen.
+ *
+ * Hier stand fest `VideoPresets.h720`, und das ist in livekit-client
+ * `1280×720 bei 30 Bildern und 1,7 Mbit/s` — unabhängig davon, was Kamera und
+ * Leitung hergeben. Jetzt kommt die Stufe aus dem Profil, und LiveKit regelt
+ * von dort aus nach unten: `adaptiveStream` je Empfänger, Simulcast-Ebenen je
+ * Bandbreite.
+ */
+export function kameraAufnahme(): VideoCaptureOptions {
+  const { width, height, frameRate } = getVideoCaptureAufloesung()
+  return { resolution: { width, height, frameRate } }
+}
+
+/**
+ * Wie die Kamera gesendet wird: Codec, Simulcast und die Obergrenzen aus dem Profil.
+ *
+ * Eine Funktion, zwei Aufrufer. `raumOptionen` nimmt sie als Voreinstellung des
+ * Raums, `setzeKamera` gibt sie beim Einschalten noch einmal mit — sonst bliebe
+ * die Bitrate auf dem Stand, den die Wahl beim Verbinden hatte, und wer im
+ * Gespräch von 720p auf 2160p stellt, bekäme ein 4K-Bild mit der Bitrate für
+ * 720p. Also viel Auflösung und wenig davon zu sehen.
+ */
+function kameraSenden(): TrackPublishOptions {
+  const grenzen = getVideoSendeGrenzen()
+  return {
+    // VP8 statt VP9/AV1: die einzigen Codecs, für die LiveKit-E2EE in allen
+    // unterstützten Browsern geprüft ist. Ein hübscherer Codec, der bei
+    // einem Gegenüber schwarz bleibt, ist kein Gewinn.
+    videoCodec: 'vp8',
+    simulcast: true,
+    videoEncoding: {
+      maxBitrate: grenzen.maxBitrate,
+      maxFramerate: grenzen.maxFramerate,
+    },
+    // 'balanced' statt 'maintain-resolution' wie bei der Bildschirmfreigabe:
+    // dort ist ein scharfer Text alles, hier ein flüssiges Gesicht. Wird die
+    // Leitung eng, darf das Bild kleiner werden.
+    degradationPreference: 'balanced',
+    red: true,
+    dtx: true,
+  }
+}
+
 function raumOptionen(keyProvider: ExternalE2EEKeyProvider, worker: Worker): RoomOptions {
   return {
     adaptiveStream: true,
@@ -123,18 +176,8 @@ function raumOptionen(keyProvider: ExternalE2EEKeyProvider, worker: Worker): Roo
     // Kamerabilder, die gerade niemand sieht.
     dynacast: true,
     e2ee: { keyProvider, worker },
-    videoCaptureDefaults: {
-      resolution: VideoPresets.h720.resolution,
-    },
-    publishDefaults: {
-      // VP8 statt VP9/AV1: die einzigen Codecs, für die LiveKit-E2EE in allen
-      // unterstützten Browsern geprüft ist. Ein hübscherer Codec, der bei
-      // einem Gegenüber schwarz bleibt, ist kein Gewinn.
-      videoCodec: 'vp8',
-      simulcast: true,
-      red: true,
-      dtx: true,
-    },
+    videoCaptureDefaults: kameraAufnahme(),
+    publishDefaults: kameraSenden(),
     stopLocalTrackOnUnpublish: true,
   }
 }
@@ -223,7 +266,16 @@ export async function setzeLautsprecher(room: Room): Promise<void> {
 }
 
 export async function setzeKamera(room: Room, an: boolean): Promise<void> {
-  await room.localParticipant.setCameraEnabled(an)
+  // Aufnahme- *und* Sendeoptionen beim Einschalten mitgeben. Die Voreinstellung
+  // des Raums greift nur beim ersten Veröffentlichen; wer die Kamera im
+  // Gespräch aus- und wieder einschaltet, bekäme sonst das, was livekit-client
+  // für richtig hält. Beide Male frisch gelesen, damit eine Änderung im Profil
+  // ohne neuen Anruf ankommt.
+  await room.localParticipant.setCameraEnabled(
+    an,
+    an ? kameraAufnahme() : undefined,
+    an ? kameraSenden() : undefined
+  )
 }
 
 /**
@@ -278,7 +330,11 @@ export function freigabeAufnahmeOptionen(optionen: FreigabeOptionen): ScreenShar
 }
 
 export function freigabeSendeOptionen(optionen: FreigabeOptionen): TrackPublishOptions {
-  const basis = optionen.aufloesung === 'quelle' ? '1440p' : optionen.aufloesung
+  // „Quelle" heißt: so groß wie der Bildschirm, und der ist heute oft 4K. Hier
+  // stand `1440p` als Basis, und damit ging eine 4K-Freigabe mit der Rate einer
+  // 2K-Freigabe hinaus — vier Mal so viele Pixel, alle unschärfer. Die Rate ist
+  // eine Obergrenze: ein kleinerer Bildschirm schöpft sie nicht aus.
+  const basis = optionen.aufloesung === 'quelle' ? '2160p' : optionen.aufloesung
   const bitrate = BITRATE_JE_AUFLOESUNG[basis] * (optionen.bildrate >= 60 ? 2 : 1)
   return {
     // Eine einzige, volle Ebene. Simulcast würde 1440p60 in kleinere Ebenen

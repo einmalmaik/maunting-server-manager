@@ -45,6 +45,7 @@ export const ScreenShareOptionsModal: React.FC<ScreenShareOptionsModalProps> = (
       { value: '720p', label: t('calls.resolution720p') },
       { value: '1080p', label: t('calls.resolution1080p') },
       { value: '1440p', label: t('calls.resolution1440p') },
+      { value: '2160p', label: t('calls.resolution2160p') },
       { value: 'quelle', label: t('calls.resolutionSource') },
     ],
     [t],
@@ -115,7 +116,7 @@ export const ScreenShareOptionsModal: React.FC<ScreenShareOptionsModalProps> = (
             </label>
           </div>
 
-          {aufloesung === '1440p' && bildrate === 60 && (
+          {(aufloesung === '1440p' || aufloesung === '2160p') && bildrate === 60 && (
             <p className="text-xs text-on-surface-variant leading-relaxed">
               {t('calls.heavySettingsNote')}
             </p>
