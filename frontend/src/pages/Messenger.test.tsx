@@ -1,10 +1,17 @@
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import i18n from '@/i18n'
 import { MemoryRouter } from 'react-router-dom'
 import { Messenger, clearSessionChatCache } from './Messenger'
 import * as socialApi from '@/api/social'
 import { teamsApi } from '@/api/teams'
 import { useAuthStore } from '@/stores/authStore'
+
+// Die Sprache festlegen: die Behauptungen unten prüfen deutsche Texte, und
+// ohne diese Zeile entscheidet navigator.language der Testumgebung.
+beforeAll(async () => {
+  await i18n.changeLanguage('de')
+})
 
 const { mockEnvelopeCache } = vi.hoisted(() => ({
   mockEnvelopeCache: new Map<number, { plain: string; ok: boolean }>(),
@@ -644,13 +651,17 @@ describe('Messenger (Allround Chat)', () => {
       expect(screen.getByText('alice')).toBeInTheDocument()
     })
 
+    // Beide Leisten stehen im Baum — im Browser blendet CSS eine aus, in jsdom
+    // nicht. Gemeint ist hier die untere, also die Navigation.
+    const untereLeiste = within(screen.getByRole('navigation'))
+
     // Click Aktuelles tab
-    const updatesTab = screen.getByRole('button', { name: 'Aktuelles' })
+    const updatesTab = untereLeiste.getByRole('button', { name: 'Aktuelles' })
     fireEvent.click(updatesTab)
     expect(screen.getByText('Status')).toBeInTheDocument()
 
     // Click Community tab
-    const communityTab = screen.getByRole('button', { name: 'Community' })
+    const communityTab = untereLeiste.getByRole('button', { name: 'Community' })
     fireEvent.click(communityTab)
     expect(screen.getByText('Communities & Gruppen')).toBeInTheDocument()
 
@@ -658,7 +669,7 @@ describe('Messenger (Allround Chat)', () => {
     expect(screen.queryByRole('button', { name: 'Audio' })).not.toBeInTheDocument()
 
     // Switch back to Chats tab
-    const chatsTab = screen.getByRole('button', { name: 'Chats' })
+    const chatsTab = untereLeiste.getByRole('button', { name: 'Chats' })
     fireEvent.click(chatsTab)
     expect(screen.getByText('alice')).toBeInTheDocument()
   })
@@ -781,7 +792,7 @@ describe('Messenger (Allround Chat)', () => {
       expect(screen.getAllByText('alice')[0]).toBeInTheDocument()
     })
 
-    const updatesTab = screen.getByRole('button', { name: 'Aktuelles' })
+    const updatesTab = within(screen.getByRole('navigation')).getByRole('button', { name: 'Aktuelles' })
     fireEvent.click(updatesTab)
 
     await waitFor(() => {
@@ -952,7 +963,7 @@ describe('Messenger (Allround Chat)', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByTitle('Gelesen vom Gesprächspartner')).toBeInTheDocument()
+      expect(screen.getByTitle('Vom Gesprächspartner gelesen')).toBeInTheDocument()
     })
 
     // 3. Test Editing Message
@@ -1407,7 +1418,7 @@ describe('Messenger (Allround Chat)', () => {
       expect(screen.getByText('Cyber Grid')).toBeInTheDocument()
       expect(screen.getByText('Deep Petrol')).toBeInTheDocument()
       expect(screen.getByText('Mitternacht')).toBeInTheDocument()
-      expect(screen.getByText('Schlicht Dunkel')).toBeInTheDocument()
+      expect(screen.getByText('Schlicht dunkel')).toBeInTheDocument()
     })
 
     // Select Midnight preset and apply
@@ -1858,7 +1869,7 @@ describe('Messenger (Allround Chat)', () => {
     // 1. Initialer Zustand: 1 grauer Strich (noch nicht beim Empfänger angekommen)
     await waitFor(() => {
       expect(screen.getByText('Hallo Alice, ist das angekommen?')).toBeInTheDocument()
-      expect(screen.getByTitle('Nicht zugestellt (noch nicht beim Empfänger angekommen)')).toBeInTheDocument()
+      expect(screen.getByTitle('Noch nicht zugestellt')).toBeInTheDocument()
     })
 
     // 2. Zwischensprung: Bob empfängt Nachricht (Zustellbestätigung -> 2 graue Striche)
@@ -1889,7 +1900,7 @@ describe('Messenger (Allround Chat)', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByTitle('Zugestellt / Vom Gesprächspartner empfangen')).toBeInTheDocument()
+      expect(screen.getByTitle('Zugestellt')).toBeInTheDocument()
     })
 
     // 3. Gelesen: Bob öffnet den Chat (Lesebestätigung -> 2 blaue Striche)
@@ -1926,7 +1937,7 @@ describe('Messenger (Allround Chat)', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByTitle('Gelesen vom Gesprächspartner')).toBeInTheDocument()
+      expect(screen.getByTitle('Vom Gesprächspartner gelesen')).toBeInTheDocument()
     })
   })
 

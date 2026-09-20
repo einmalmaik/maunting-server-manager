@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useSearchParams, useParams, useNavigate } from 'react-router-dom'
 import {
   Button,
@@ -148,7 +149,12 @@ import {
   tilgeNachrichtLokal,
 } from '@/services/nachrichtLoeschen'
 
-/** Der Kontoschlüssel ist auf diesem Gerät nicht zu öffnen — nicht gesendet. */
+/**
+ * Der Kontoschlüssel ist auf diesem Gerät nicht zu öffnen — nicht gesendet.
+ *
+ * Der Text hier ist für den Entwickler, nicht für die Oberfläche: die
+ * Fangstelle unten schreibt ihre eigene, übersetzte Meldung.
+ */
 class E2eeIdentityLockedError extends Error {
   constructor() {
     super('Der Schlüssel dieses Kontos ist auf diesem Gerät gesperrt.')
@@ -175,7 +181,11 @@ import { toast } from '@/stores/toastStore'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
 import { sanitizeSvg, getSafeAttachmentUrl } from '@/lib/sanitizeSvg'
 
-function formatChatDateBadge(isoDateString: string): string {
+function formatChatDateBadge(
+  isoDateString: string,
+  t: (schluessel: string) => string,
+  sprache: string,
+): string {
   try {
     const d = new Date(isoDateString)
     if (isNaN(d.getTime())) return ''
@@ -185,7 +195,7 @@ function formatChatDateBadge(isoDateString: string): string {
       d.getDate() === now.getDate() &&
       d.getMonth() === now.getMonth() &&
       d.getFullYear() === now.getFullYear()
-    if (isToday) return 'Heute'
+    if (isToday) return t('messenger.today')
 
     const yesterday = new Date(now)
     yesterday.setDate(now.getDate() - 1)
@@ -193,10 +203,12 @@ function formatChatDateBadge(isoDateString: string): string {
       d.getDate() === yesterday.getDate() &&
       d.getMonth() === yesterday.getMonth() &&
       d.getFullYear() === yesterday.getFullYear()
-    if (isYesterday) return 'Gestern'
+    if (isYesterday) return t('messenger.yesterday')
 
     const isSameYear = d.getFullYear() === now.getFullYear()
-    return d.toLocaleDateString('de-DE', {
+    // Die Sprache kommt von i18next, nicht fest aus dem Code: sonst stünde im
+    // englischen Messenger ein deutsches Datum.
+    return d.toLocaleDateString(sprache, {
       day: 'numeric',
       month: 'long',
       ...(isSameYear ? {} : { year: 'numeric' }),
@@ -388,6 +400,8 @@ function loadInitialContactsCache(): {
 }
 
 export function Messenger() {
+  const { t, i18n } = useTranslation()
+
   const { user } = useAuthStore()
   // Der Sperrzustand wird ganz oben gelesen, damit kein Effekt darunter auf
   // eine Ablage greift, die ohne Schlüssel nichts herausgibt.
@@ -786,12 +800,12 @@ export function Messenger() {
 
   const handleStoryCreated = (story: ChatStoryItem) => {
     setStories((prev) => [story, ...prev])
-    toast.success('Status-Story erfolgreich veröffentlicht!')
+    toast.success(t('messenger.storyPublished'))
   }
 
   const handleStoryDeleted = (storyId: number) => {
     setStories((prev) => prev.filter((s) => s.id !== storyId))
-    toast.success('Status-Story gelöscht.')
+    toast.success(t('messenger.storyDeleted'))
   }
 
   useEffect(() => {
@@ -808,7 +822,7 @@ export function Messenger() {
     joinGroupByInvite(inviteCode)
       .then((joinedGroup) => {
         if (!active) return
-        toast.success(`Gruppe "${joinedGroup.name}" erfolgreich beigetreten!`)
+        toast.success(t('messenger.groupJoined', { name: joinedGroup.name }))
         setActiveGroup(joinedGroup)
         setActiveContact(null)
         loadData()
@@ -816,7 +830,7 @@ export function Messenger() {
       })
       .catch(() => {
         if (!active) return
-        toast.error('Einladungslink ist ungültig oder abgelaufen.')
+        toast.error(t('messenger.inviteInvalid'))
       })
 
     return () => {
@@ -833,11 +847,11 @@ export function Messenger() {
     // Vorabprüfung nur für die Rückmeldung; die verbindliche Prüfung samt
     // Magic Bytes macht das Backend.
     if (!/^image\/(jpeg|png|webp|gif)$/.test(datei.type)) {
-      toast.error('Erlaubt sind JPEG, PNG, WebP und GIF.')
+      toast.error(t('messenger.logoBadType'))
       return
     }
     if (datei.size > 5 * 1024 * 1024) {
-      toast.error('Das Logo darf höchstens 5 MB groß sein.')
+      toast.error(t('messenger.logoTooLarge'))
       return
     }
     setLogoLaedt(true)
@@ -849,9 +863,9 @@ export function Messenger() {
       setGroups((vorher) =>
         vorher.map((g) => (g.id === aktualisiert.id ? { ...g, avatar_url: aktualisiert.avatar_url } : g))
       )
-      toast.success('Gruppenlogo aktualisiert.')
+      toast.success(t('messenger.logoUpdated'))
     } catch {
-      toast.error('Das Gruppenlogo konnte nicht gesetzt werden.')
+      toast.error(t('messenger.logoFailed'))
     } finally {
       setLogoLaedt(false)
     }
@@ -861,12 +875,12 @@ export function Messenger() {
   const handleJoinByInviteCode = async (code: string) => {
     try {
       const joinedGroup = await joinGroupByInvite(code)
-      toast.success(`Gruppe "${joinedGroup.name}" erfolgreich beigetreten!`)
+      toast.success(t('messenger.groupJoined', { name: joinedGroup.name }))
       setActiveGroup(joinedGroup)
       setActiveContact(null)
       await loadData()
     } catch {
-      toast.error('Der Einladungslink gilt nicht mehr.')
+      toast.error(t('messenger.inviteExpired'))
     }
   }
 
@@ -1106,7 +1120,7 @@ export function Messenger() {
               listKey: `q-${targetId}`,
               id: targetId,
               userId: targetId,
-              username: `User #${targetId}`,
+              username: t('social.contacts.unknownUser', { id: targetId }),
               avatarUrl: null,
               status: 'invisible',
               deviceType: null,
@@ -1210,7 +1224,7 @@ export function Messenger() {
       id: jetzt,
       clientUuid: `sys-dr-${geraet}-${jetzt}`,
       senderId: 0,
-      text: 'Die Sicherheitssitzung mit diesem Gerät wurde neu aufgebaut. Ältere Nachrichten dieses Geräts bleiben unlesbar.',
+      text: t('messenger.sessionRebuilt'),
       createdAt: new Date().toISOString(),
       isSelf: false,
       isSystem: true,
@@ -1382,7 +1396,7 @@ export function Messenger() {
             id: env.id,
             clientUuid,
             senderId: activeContact ? activeContact.userId : 0,
-            text: 'Verschlüsselte Nachricht',
+            text: t('messenger.encryptedMessage'),
             createdAt: env.created_at,
             isSelf: false,
           })
@@ -1768,12 +1782,12 @@ export function Messenger() {
         return geaendert
       })
 
-      toast.success('Nachricht bearbeitet.')
+      toast.success(t('messenger.messageEdited'))
       setEditingMessage(null)
       setInputText('')
       await loadMessages(false)
     } catch {
-      toast.error('Fehler beim Bearbeiten der Nachricht.')
+      toast.error(t('messenger.messageEditFailed'))
     }
   }
 
@@ -1819,7 +1833,7 @@ export function Messenger() {
         clientUuid: msg.clientUuid,
         id: msg.id,
       }).catch(() => {})
-      toast.success('Ausstehende Nachricht verworfen.')
+      toast.success(t('messenger.pendingDiscarded'))
       return
     }
 
@@ -1854,10 +1868,10 @@ export function Messenger() {
         return geaendert
       })
 
-      toast.success('Nachricht für alle gelöscht.')
+      toast.success(t('messenger.messageDeletedForAll'))
       await loadMessages(false)
     } catch {
-      toast.error('Fehler beim Löschen der Nachricht.')
+      toast.error(t('messenger.messageDeleteFailed'))
     }
   }
 
@@ -2330,14 +2344,14 @@ export function Messenger() {
       // hat. Das steht bewusst vor der Offline-Abzweigung: ohne Netz gibt es
       // weder einen frischen Schlüssel noch einen Weg, ihn zu verteilen.
       if (!currentGroupId && !aktiveIdentitaet.sendPair) {
-        throw new Error('Der Schlüssel dieses Geräts ist noch nicht bereit.')
+        throw new Error(t('messenger.deviceKeyNotReady'))
       }
       const auftraege = await konversation.baueVersand(payload, clientUuid)
       if (auftraege.length === 0) {
         // Früher fiel der Sendepfad hier auf einen Schlüssel zurück, den das
         // Backend aus den beiden Benutzerkennungen selbst bilden kann. Lieber
         // nicht senden und es sagen.
-        if (currentGroupId) throw new Error('Die Gruppe ist noch nicht bereit.')
+        if (currentGroupId) throw new Error(t('messenger.groupNotReady'))
         throw new E2eeRecipientKeyMissingError(targetUserId ?? 0)
       }
 
@@ -2372,7 +2386,7 @@ export function Messenger() {
       }
 
       if (verbindungsfehler && niedrigsteId === 0) {
-        toast.info('Nachricht offline in Warteschlange eingereiht (Verbindungsfehler).')
+        toast.info(t('messenger.queuedOffline'))
       }
 
       if (niedrigsteId > 0) {
@@ -2433,19 +2447,21 @@ export function Messenger() {
           // Der Schlüssel dieses Geräts war noch nicht fertig angelegt. Beim
           // nächsten Versuch steht er — es gibt nichts, was der Benutzer dafür
           // tun müsste.
-          toast.error('Der Schlüssel dieses Geräts ist noch nicht bereit. Bitte kurz erneut versuchen.')
+          toast.error(t('messenger.deviceKeyNotReadyRetry'))
         } else if (err instanceof DrZustellungFehlgeschlagenError) {
           // Die Gegenstelle ist angemeldet, das Verschlüsseln hat versagt. Der
           // nächste Versuch setzt die Sitzung neu auf, deshalb der Hinweis auf
           // das Wiederholen statt einer Aussage über den Kontakt.
-          toast.error('Die Nachricht liess sich nicht verschlüsseln und wurde nicht gesendet. Bitte erneut versuchen.')
+          toast.error(t('messenger.encryptFailed'))
         } else {
           toast.error(
-            `${activeContact?.username ?? 'Dieser Kontakt'} ist mit keinem Gerät angemeldet. Die Nachricht wurde nicht gesendet.`
+            t('messenger.noDeviceOnline', {
+              name: activeContact?.username ?? t('messenger.thisContact'),
+            })
           )
         }
       } else {
-        const msg = err instanceof Error ? err.message : 'Fehler beim Senden'
+        const msg = err instanceof Error ? err.message : t('messenger.sendFailed')
         toast.error(msg)
       }
     } finally {
@@ -2456,7 +2472,7 @@ export function Messenger() {
   // Voice recording handlers
   const startRecording = async () => {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-      toast.error('Mikrofon in dieser Browser-Umgebung nicht verfügbar.')
+      toast.error(t('messenger.micUnavailable'))
       return
     }
 
@@ -2505,7 +2521,7 @@ export function Messenger() {
         setRecordingDuration((prev) => prev + 1)
       }, 1000)
     } catch {
-      toast.error('Mikrofonzugriff verweigert oder nicht verfügbar.')
+      toast.error(t('messenger.micDenied'))
     }
   }
 
@@ -2607,7 +2623,7 @@ export function Messenger() {
       }
       const quelle = await tonQuelle(anhang, bindung)
       if (!quelle) {
-        toast.error('Sprachnachricht konnte nicht geladen werden.')
+        toast.error(t('messenger.voiceLoadFailed'))
         return
       }
 
@@ -2628,7 +2644,7 @@ export function Messenger() {
 
       audio.onerror = () => {
         setPlayingAudioId(null)
-        toast.error('Sprachnachricht konnte nicht abgespielt werden.')
+        toast.error(t('messenger.voicePlayFailed'))
       }
 
       audio.play().catch(() => {
@@ -2678,7 +2694,7 @@ export function Messenger() {
       }
       const quelle = await tonQuelle(anhang, bindung)
       if (!quelle) {
-        toast.error('Sprachnachricht konnte nicht geladen werden.')
+        toast.error(t('messenger.voiceLoadFailed'))
         return
       }
 
@@ -2699,7 +2715,7 @@ export function Messenger() {
       }
       audio.onerror = () => {
         setPlayingAudioId(null)
-        toast.error('Sprachnachricht konnte nicht abgespielt werden.')
+        toast.error(t('messenger.voicePlayFailed'))
       }
       audio.play().catch(() => {
         setPlayingAudioId(null)
@@ -2729,7 +2745,7 @@ export function Messenger() {
     const file = e.target.files?.[0]
     if (!file) return
     if (!file.type.startsWith('image/')) {
-      toast.error('Bitte ein gültiges Bild auswählen.')
+      toast.error(t('messenger.pickValidImage'))
       return
     }
 
@@ -2756,7 +2772,7 @@ export function Messenger() {
       setUserNotes(res.notes.filter((n) => !n.is_archived))
       setIsNotePickerOpen(true)
     } catch {
-      toast.error('Notizen konnten nicht geladen werden.')
+      toast.error(t('messenger.notesLoadFailed'))
     }
   }
 
@@ -2770,7 +2786,7 @@ export function Messenger() {
       setUserEvents(res.events)
       setIsCalendarPickerOpen(true)
     } catch {
-      toast.error('Kalendereinträge konnten nicht geladen werden.')
+      toast.error(t('messenger.calendarLoadFailed'))
     }
   }
 
@@ -2784,7 +2800,7 @@ export function Messenger() {
         name: groupName.trim(),
         description: groupDesc.trim() || undefined,
       })
-      toast.success(`Gruppe "${newGroup.name}" erfolgreich erstellt!`)
+      toast.success(t('messenger.groupCreated', { name: newGroup.name }))
       setIsCreateGroupOpen(false)
       setGroupName('')
       setGroupDesc('')
@@ -2792,7 +2808,7 @@ export function Messenger() {
       setActiveGroup(newGroup)
       setActiveContact(null)
     } catch {
-      toast.error('Gruppe konnte nicht erstellt werden.')
+      toast.error(t('messenger.groupCreateFailed'))
     } finally {
       setCreatingGroup(false)
     }
@@ -2802,7 +2818,7 @@ export function Messenger() {
   const handleCopyInviteLink = (group: ChatGroupItem) => {
     const url = `${window.location.origin}/chat/join/${group.invite_code}`
     navigator.clipboard.writeText(url)
-    toast.success('Einladungslink in Zwischenablage kopiert!')
+    toast.success(t('messenger.inviteCopied'))
   }
 
   // Leave Group
@@ -2813,11 +2829,11 @@ export function Messenger() {
       // nicht behalten. Der Verlauf dieser Gruppe wird damit unlesbar, was
       // genau die Zusage ist, die ein Austritt geben soll.
       await verwirfGruppenSchluessel(group.id).catch(() => {})
-      toast.success(`Gruppe "${group.name}" verlassen.`)
+      toast.success(t('messenger.groupLeft', { name: group.name }))
       setActiveGroup(null)
       await loadData()
     } catch {
-      toast.error('Gruppe konnte nicht verlassen werden.')
+      toast.error(t('messenger.groupLeaveFailed'))
     }
   }
 
@@ -2832,12 +2848,12 @@ export function Messenger() {
     try {
       await deleteGroup(groupToDelete.id)
       await verwirfGruppenSchluessel(groupToDelete.id).catch(() => {})
-      toast.success(`Gruppe "${groupToDelete.name}" gelöscht.`)
+      toast.success(t('messenger.groupDeleted', { name: groupToDelete.name }))
       setActiveGroup(null)
       setGroupToDelete(null)
       await loadData()
     } catch {
-      toast.error('Gruppe konnte nicht gelöscht werden.')
+      toast.error(t('messenger.groupDeleteFailed'))
     } finally {
       setIsDeletingGroup(false)
     }
@@ -2858,7 +2874,7 @@ export function Messenger() {
     const isImage = file.type.startsWith('image/')
     const limit = isImage ? MAX_IMAGE_BYTES : MAX_FILE_BYTES
     if (file.size > limit) {
-      toast.error(`Datei ist zu groß (maximal ${Math.floor(limit / (1024 * 1024))} MB erlaubt).`)
+      toast.error(t('messenger.fileTooLarge', { limit: Math.floor(limit / (1024 * 1024)) }))
       return
     }
 
@@ -2866,7 +2882,7 @@ export function Messenger() {
     const lowerName = file.name.toLowerCase()
     const blockedExtensions = ['.exe', '.dll', '.bat', '.cmd', '.sh', '.msi', '.vbs', '.ps1', '.elf', '.com', '.scr', '.pif']
     if (blockedExtensions.some((ext) => lowerName.endsWith(ext))) {
-      toast.error('Ausführbare Dateien sind aus Sicherheitsgründen im Chat strikt untersagt.')
+      toast.error(t('messenger.executableBlocked'))
       return
     }
 
@@ -2906,12 +2922,12 @@ export function Messenger() {
   const handleImportNote = async (note: NoteAttachment, itemKey?: string) => {
     const key = itemKey || `${note.title}_${note.content?.slice(0, 30)}`
     if (importedAttachmentIds.has(key)) {
-      toast.success('Diese Notiz wurde bereits in deine Notizen übernommen.')
+      toast.success(t('messenger.noteAlreadyTaken'))
       return
     }
     try {
       await saveNoteOffline({
-        title: note.title || 'Geteilte Notiz',
+        title: note.title || t('messenger.sharedNote'),
         content: note.content || '',
         category: note.category || 'personal',
         color: note.color || 'primary',
@@ -2920,21 +2936,21 @@ export function Messenger() {
         team_id: null,
       })
       setImportedAttachmentIds((prev) => new Set([...prev, key]))
-      toast.success(`Notiz "${note.title || 'Geteilte Notiz'}" in Notizen gespeichert!`)
+      toast.success(t('messenger.noteSaved', { title: note.title || t('messenger.sharedNote') }))
     } catch {
-      toast.error('Notiz konnte nicht gespeichert werden.')
+      toast.error(t('messenger.noteSaveFailed'))
     }
   }
 
   const handleImportCalendar = async (cal: CalendarAttachment, itemKey?: string) => {
     const key = itemKey || `${cal.title}_${cal.start}`
     if (importedAttachmentIds.has(key)) {
-      toast.success('Dieser Termin wurde bereits in deinen Kalender eingetragen.')
+      toast.success(t('messenger.eventAlreadyTaken'))
       return
     }
     try {
       await saveCalendarEventOffline({
-        title: cal.title || 'Geteilter Termin',
+        title: cal.title || t('messenger.sharedEvent'),
         start_time: cal.start,
         end_time: cal.end,
         description: cal.description || null,
@@ -2946,9 +2962,9 @@ export function Messenger() {
         server_id: null,
       })
       setImportedAttachmentIds((prev) => new Set([...prev, key]))
-      toast.success(`Termin "${cal.title || 'Geteilter Termin'}" im Kalender eingetragen!`)
+      toast.success(t('messenger.eventSaved', { title: cal.title || t('messenger.sharedEvent') }))
     } catch {
-      toast.error('Termin konnte nicht im Kalender gespeichert werden.')
+      toast.error(t('messenger.eventSaveFailed'))
     }
   }
 
@@ -2988,8 +3004,8 @@ export function Messenger() {
     if (joinExisting ? !groupCallPermissions.canJoin : !groupCallPermissions.canStart) {
       toast.error(
         joinExisting
-          ? 'Du hast in dieser Gruppe keine Berechtigung, einem Gruppenanruf beizutreten.'
-          : 'Du hast in dieser Gruppe keine Berechtigung, einen Gruppenanruf zu starten.'
+          ? t('messenger.noJoinCallRight')
+          : t('messenger.noStartCallRight')
       )
       return
     }
@@ -3003,7 +3019,7 @@ export function Messenger() {
       if (joinExisting) {
         const existingToken = (activeGroup as ChatGroupItem & { room_token?: string }).room_token
         if (!existingToken) {
-          toast.error('Für diesen Gruppenanruf ist kein Raum verfügbar.')
+          toast.error(t('messenger.noCallRoom'))
           return
         }
         roomToken = existingToken
@@ -3014,8 +3030,8 @@ export function Messenger() {
     } catch {
       toast.error(
         joinExisting
-          ? 'Der Gruppenanruf konnte nicht geöffnet werden.'
-          : 'Der Gruppenanruf konnte nicht gestartet werden.'
+          ? t('messenger.callOpenFailed')
+          : t('messenger.callStartFailed')
       )
       return
     }
@@ -3060,7 +3076,7 @@ export function Messenger() {
               <MessageSquare className="w-4 h-4" />
             </div>
             <span className="font-headline text-body-md font-bold text-primary">Messenger</span>
-            <span className="text-[11px] text-on-surface-variant/60 hidden sm:inline">• Chats & Gruppen</span>
+            <span className="text-[11px] text-on-surface-variant/60 hidden sm:inline">{t('messenger.headerSubtitle')}</span>
           </div>
 
           <div className="flex items-center gap-1">
@@ -3069,8 +3085,8 @@ export function Messenger() {
               size="icon"
               onClick={() => setIsCameraModalOpen(true)}
               className="h-8 w-8 text-on-surface-variant hover:text-primary"
-              title="Foto aufnehmen"
-              aria-label="Foto aufnehmen"
+              title={t('social.camera.take')}
+              aria-label={t('social.camera.take')}
             >
               <Camera className="w-4 h-4" />
             </Button>
@@ -3082,10 +3098,10 @@ export function Messenger() {
               className="h-8 gap-1.5 bg-surface-container-high/85 px-2.5 text-xs text-cyan-200 shadow-sm hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-60"
               title={
                 groupCallPermissions.canJoin
-                  ? 'Laufendem Gruppenanruf beitreten'
-                  : 'Du hast in dieser Gruppe keine Berechtigung, einem Gruppenanruf beizutreten.'
+                  ? t('messenger.joinOngoingCall')
+                  : t('messenger.noJoinCallRight')
               }
-              aria-label="Laufendem Gruppenanruf beitreten"
+              aria-label={t('messenger.joinOngoingCall')}
             >
               <Phone className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Beitreten</span>
@@ -3123,10 +3139,10 @@ export function Messenger() {
                   ? 'bg-primary text-on-primary shadow-sm font-semibold'
                   : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60'
               }`}
-              aria-label="Desktop-Chats"
+              aria-label={t('messenger.nav.chats')}
             >
               <MessageSquare className="w-3.5 h-3.5" />
-              <span>Chats</span>
+              <span>{t('messenger.nav.chats')}</span>
             </button>
             <button
               type="button"
@@ -3136,10 +3152,10 @@ export function Messenger() {
                   ? 'bg-primary text-on-primary shadow-sm font-semibold'
                   : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60'
               }`}
-              aria-label="Desktop-Aktuelles"
+              aria-label={t('messenger.nav.updates')}
             >
               <Sparkles className="w-3.5 h-3.5" />
-              <span>Aktuelles</span>
+              <span>{t('messenger.nav.updates')}</span>
               {stories.length > 0 && (
                 <span className={`w-2 h-2 rounded-full ${mobileNavTab === 'updates' ? 'bg-white' : 'bg-emerald-500 animate-pulse'}`} />
               )}
@@ -3152,10 +3168,10 @@ export function Messenger() {
                   ? 'bg-primary text-on-primary shadow-sm font-semibold'
                   : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60'
               }`}
-              aria-label="Desktop-Gruppen"
+              aria-label={t('messenger.nav.community')}
             >
               <UsersRound className="w-3.5 h-3.5" />
-              <span>Gruppen</span>
+              <span>{t('messenger.nav.community')}</span>
             </button>
           </div>
 
@@ -3166,7 +3182,7 @@ export function Messenger() {
               <Input
                 value={searchQuery}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
-                placeholder="Freunde oder Teammitglieder suchen …"
+                placeholder={t('messenger.searchPlaceholder')}
                 className="text-xs pl-8 h-8 bg-surface-container-high/60 border-outline-variant/30 focus:border-primary/50 text-on-surface"
               />
             </div>
@@ -3182,8 +3198,8 @@ export function Messenger() {
                       ? 'bg-primary text-on-primary shadow-sm'
                       : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
                   }`}
-                  title="Alle Chats"
-                  aria-label="Alle Chats"
+                  title={t('messenger.filterAll')}
+                  aria-label={t('messenger.filterAll')}
                 >
                   <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
                   <span className="text-[10px] leading-none hidden xs:inline">Alle</span>
@@ -3197,8 +3213,8 @@ export function Messenger() {
                       ? 'bg-primary text-on-primary shadow-sm'
                       : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
                   }`}
-                  title={`Gruppen (${groups.length})`}
-                  aria-label={`Gruppen (${groups.length})`}
+                  title={t('messenger.filterGroups', { count: groups.length })}
+                  aria-label={t('messenger.filterGroups', { count: groups.length })}
                 >
                   <UsersRound className="w-3.5 h-3.5 shrink-0" />
                   {groups.length > 0 && (
@@ -3220,8 +3236,8 @@ export function Messenger() {
                       ? 'bg-primary text-on-primary shadow-sm'
                       : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
                   }`}
-                  title={`Freunde (${contactsList.filter((c) => c.isFriend).length})`}
-                  aria-label={`Freunde (${contactsList.filter((c) => c.isFriend).length})`}
+                  title={t('messenger.filterFriends', { count: contactsList.filter((c) => c.isFriend).length })}
+                  aria-label={t('messenger.filterFriends', { count: contactsList.filter((c) => c.isFriend).length })}
                 >
                   <UserCheck className="w-3.5 h-3.5 shrink-0" />
                   {contactsList.some((c) => c.isFriend) && (
@@ -3243,8 +3259,8 @@ export function Messenger() {
                       ? 'bg-primary text-on-primary shadow-sm'
                       : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
                   }`}
-                  title={`Teams (${contactsList.filter((c) => c.teamName).length})`}
-                  aria-label={`Teams (${contactsList.filter((c) => c.teamName).length})`}
+                  title={t('messenger.filterTeams', { count: contactsList.filter((c) => c.teamName).length })}
+                  aria-label={t('messenger.filterTeams', { count: contactsList.filter((c) => c.teamName).length })}
                 >
                   <Briefcase className="w-3.5 h-3.5 shrink-0" />
                   {contactsList.some((c) => c.teamName) && (
@@ -3266,8 +3282,8 @@ export function Messenger() {
                       ? 'bg-primary text-on-primary shadow-sm'
                       : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
                   }`}
-                  title={`Öffentlich / Entdecken (${contactsList.filter((c) => c.isPublicUser).length})`}
-                  aria-label={`Öffentlich / Entdecken (${contactsList.filter((c) => c.isPublicUser).length})`}
+                  title={t('messenger.filterPublic', { count: contactsList.filter((c) => c.isPublicUser).length })}
+                  aria-label={t('messenger.filterPublic', { count: contactsList.filter((c) => c.isPublicUser).length })}
                 >
                   <Globe className="w-3.5 h-3.5 shrink-0" />
                   <span className="text-[10px] leading-none hidden xs:inline">Entdecken</span>
@@ -3326,7 +3342,7 @@ export function Messenger() {
                     )}
                   </div>
                   <span className="text-[10px] text-on-surface-variant truncate w-full text-center">
-                    {myStories.length > 0 ? 'Dein Status' : 'Neu'}
+                    {myStories.length > 0 ? t('messenger.yourStatus') : 'Neu'}
                   </span>
                 </div>
 
@@ -3379,15 +3395,15 @@ export function Messenger() {
                 {(filteredGroups.length > 0 || filterTab === 'all' || filterTab === 'groups') && (
                   <div className="space-y-1 mb-2">
                     <div className="px-2 py-1 text-[11px] font-semibold text-on-surface-variant/70 uppercase tracking-wider flex items-center justify-between">
-                      <span>Gruppen</span>
+                      <span>{t('messenger.sectionGroups')}</span>
                       <div className="flex items-center gap-1">
                         <span className="text-[10px]">{filteredGroups.length}</span>
                         <button
                           type="button"
                           onClick={() => setIsCreateGroupOpen(true)}
                           className="p-0.5 rounded text-on-surface-variant hover:text-primary transition-colors"
-                          aria-label="Neue Gruppe erstellen"
-                          title="Neue Gruppe erstellen"
+                          aria-label={t('messenger.newGroup')}
+                          title={t('messenger.newGroup')}
                         >
                           <Plus className="w-3 h-3" />
                         </button>
@@ -3431,7 +3447,7 @@ export function Messenger() {
                                 </span>
                               </div>
                               <p className="text-[11px] text-on-surface-variant/80 truncate">
-                                {g.description || 'Verschlüsselte Gruppe'}
+                                {g.description || t('messenger.encryptedGroup')}
                               </p>
                             </div>
                           </div>
@@ -3499,7 +3515,7 @@ export function Messenger() {
                                 {c.isPublicUser && !c.isFriend && !c.teamName && !isUserBlocked && (
                                   <span className="text-[9px] px-1.5 py-0.2 rounded-md bg-primary/10 text-primary font-medium flex items-center gap-0.5">
                                     <Globe className="w-2.5 h-2.5" />
-                                    <span>Öffentlich</span>
+                                    <span>{t('messenger.public')}</span>
                                   </span>
                                 )}
                                 <DeviceBadge deviceType={c.deviceType} />
@@ -3512,7 +3528,7 @@ export function Messenger() {
                               )}
                               {c.isPublicUser && !c.isFriend && !c.teamName && (
                                 <p className="text-[10px] text-on-surface-variant/70 truncate flex items-center gap-1">
-                                  <span>E2EE Chat bereit</span>
+                                  <span>{t('messenger.e2eeReady')}</span>
                                 </p>
                               )}
                               {c.activityLabel && !c.teamName && (
@@ -3565,18 +3581,18 @@ export function Messenger() {
                       setIsCreateStoryOpen(true)
                     }}
                     className="h-8 text-xs gap-1.5 px-3 rounded-xl font-medium"
-                    title="Status hinzufügen"
+                    title={t('messenger.addStatus')}
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>Hinzufügen</span>
+                    <span>{t('common.add')}</span>
                   </Button>
                 </div>
 
                 {/* My Status Card with crisp contrast and clear visual identity */}
                 <div className="p-3.5 rounded-2xl bg-surface-container/70 border border-outline-variant/35 shadow-sm transition-colors hover:bg-surface-container/90">
                   <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-headline font-bold text-on-surface">Mein Status</span>
-                    <span className="text-[11px] text-on-surface-variant font-medium">24h sichtbar</span>
+                    <span className="text-xs font-headline font-bold text-on-surface">{t('messenger.myStatus')}</span>
+                    <span className="text-[11px] text-on-surface-variant font-medium">{t('social.story.badge24h')}</span>
                   </div>
 
                   <div className="flex items-center gap-3">
@@ -3620,12 +3636,12 @@ export function Messenger() {
                       }}
                     >
                       <div className="text-xs font-semibold text-on-surface truncate">
-                        {myStories.length > 0 ? 'Status ansehen' : 'Status teilen'}
+                        {myStories.length > 0 ? t('messenger.viewStatus') : t('social.story.share')}
                       </div>
                       <p className="text-[11px] text-on-surface-variant truncate">
                         {myStories.length > 0
                           ? `${myStories.length} aktive Story${myStories.length === 1 ? '' : 's'} • Tippen zum Abspielen`
-                          : 'Foto aufnehmen oder Text teilen'}
+                          : t('messenger.statusHint')}
                       </p>
                     </div>
                   </div>
@@ -3634,7 +3650,7 @@ export function Messenger() {
                 {/* Friends' Stories Section */}
                 <div className="space-y-2">
                   <div className="px-1 text-[11px] font-semibold text-on-surface-variant/80 uppercase tracking-wider flex items-center justify-between">
-                    <span>Kürzliche Updates</span>
+                    <span>{t('messenger.recentUpdates')}</span>
                     <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-surface-container font-mono text-on-surface-variant">
                       {friendsStoriesGrouped.length}
                     </span>
@@ -3750,7 +3766,7 @@ export function Messenger() {
                   <div>
                     <div className="text-xs font-headline font-bold text-primary flex items-center gap-1.5">
                       <UsersRound className="w-3.5 h-3.5" />
-                      <span>Communities & Gruppen</span>
+                      <span>{t('messenger.communitiesTitle')}</span>
                       <span className="text-[10px] text-on-surface-variant/70">({groups.length})</span>
                     </div>
                     <p className="text-[11px] text-on-surface-variant/80">
@@ -3763,11 +3779,11 @@ export function Messenger() {
                     size="sm"
                     onClick={() => setIsCreateGroupOpen(true)}
                     className="h-7 text-xs gap-1 px-2.5 rounded-full"
-                    aria-label="Neue Gruppe erstellen"
-                    title="Neue Gruppe erstellen"
+                    aria-label={t('messenger.newGroup')}
+                    title={t('messenger.newGroup')}
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>Gruppe erstellen</span>
+                    <span>{t('messenger.createGroup')}</span>
                   </Button>
                 </div>
 
@@ -3808,7 +3824,7 @@ export function Messenger() {
                           size="sm"
                           onClick={() => handleCopyInviteLink(g)}
                           className="h-7 px-2 text-xs gap-1 text-primary"
-                          title="Einladungslink kopieren"
+                          title={t('messenger.copyInvite')}
                         >
                           <Share2 className="w-3.5 h-3.5" />
                           <span>Link</span>
@@ -3832,12 +3848,12 @@ export function Messenger() {
                 className={`flex flex-col items-center justify-center flex-1 py-1 transition-colors ${
                   mobileNavTab === 'chats' ? 'text-primary font-semibold' : 'text-on-surface-variant/70 hover:text-on-surface'
                 }`}
-                aria-label="Chats"
+                aria-label={t('messenger.nav.chats')}
               >
                 <div className={`p-1 rounded-full ${mobileNavTab === 'chats' ? 'bg-primary/15' : ''}`}>
                   <MessageSquare className="w-4 h-4" />
                 </div>
-                <span className="text-[10px] mt-0.5">Chats</span>
+                <span className="text-[10px] mt-0.5">{t('messenger.nav.chats')}</span>
               </button>
 
               <button
@@ -3846,12 +3862,12 @@ export function Messenger() {
                 className={`flex flex-col items-center justify-center flex-1 py-1 transition-colors ${
                   mobileNavTab === 'updates' ? 'text-primary font-semibold' : 'text-on-surface-variant/70 hover:text-on-surface'
                 }`}
-                aria-label="Aktuelles"
+                aria-label={t('messenger.nav.updates')}
               >
                 <div className={`p-1 rounded-full ${mobileNavTab === 'updates' ? 'bg-primary/15' : ''}`}>
                   <Sparkles className="w-4 h-4" />
                 </div>
-                <span className="text-[10px] mt-0.5">Aktuelles</span>
+                <span className="text-[10px] mt-0.5">{t('messenger.nav.updates')}</span>
               </button>
 
               <button
@@ -3860,12 +3876,12 @@ export function Messenger() {
                 className={`flex flex-col items-center justify-center flex-1 py-1 transition-colors ${
                   mobileNavTab === 'community' ? 'text-primary font-semibold' : 'text-on-surface-variant/70 hover:text-on-surface'
                 }`}
-                aria-label="Community"
+                aria-label={t('messenger.nav.community')}
               >
                 <div className={`p-1 rounded-full ${mobileNavTab === 'community' ? 'bg-primary/15' : ''}`}>
                   <UsersRound className="w-4 h-4" />
                 </div>
-                <span className="text-[10px] mt-0.5">Community</span>
+                <span className="text-[10px] mt-0.5">{t('messenger.nav.community')}</span>
               </button>
             </nav>
           )}
@@ -3900,8 +3916,8 @@ export function Messenger() {
           {isDragOver && (
             <div className="absolute inset-0 z-40 bg-surface/85 backdrop-blur-sm border-2 border-dashed border-primary flex flex-col items-center justify-center p-6 text-center pointer-events-none">
               <Upload className="w-12 h-12 text-primary animate-bounce mb-2" />
-              <p className="font-headline font-bold text-sm text-primary">Datei hier ablegen</p>
-              <p className="text-xs text-on-surface-variant">Wird Ende-zu-Ende verschlüsselt an die Konversation angehängt</p>
+              <p className="font-headline font-bold text-sm text-primary">{t('messenger.dropFile')}</p>
+              <p className="text-xs text-on-surface-variant">{t('messenger.dropHint')}</p>
             </div>
           )}
 
@@ -3955,8 +3971,8 @@ export function Messenger() {
                       setActiveGroup(null)
                     }}
                     className="md:hidden p-2 rounded-full bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant shadow-sm transition-colors"
-                    aria-label="Zurück zur Kontaktliste"
-                    title="Zurück zur Kontaktliste"
+                    aria-label={t('messenger.backToContacts')}
+                    title={t('messenger.backToContacts')}
                   >
                     <ChevronLeft className="w-4 h-4" />
                   </button>
@@ -3994,7 +4010,7 @@ export function Messenger() {
                         size="sm"
                         onClick={() => handleCopyInviteLink(activeGroup)}
                         className="h-8 gap-1.5 text-xs px-2.5 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary shadow-sm"
-                        title="Einladungslink kopieren"
+                        title={t('messenger.copyInvite')}
                       >
                         <Share2 className="w-3.5 h-3.5" />
                         <span className="hidden sm:inline">Einladen</span>
@@ -4008,10 +4024,10 @@ export function Messenger() {
                         className="h-8 gap-1.5 bg-surface-container-high/85 px-2.5 text-xs text-primary shadow-sm hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-60"
                         title={
                           groupCallPermissions.canStart
-                            ? 'Gruppenanruf starten'
-                            : 'Du hast in dieser Gruppe keine Berechtigung, einen Gruppenanruf zu starten.'
+                            ? t('messenger.startGroupCall')
+                            : t('messenger.noStartCallRight')
                         }
-                        aria-label="Gruppenanruf starten"
+                        aria-label={t('messenger.startGroupCall')}
                       >
                         <UsersRound className="w-3.5 h-3.5" />
                         <span className="hidden sm:inline">Anruf</span>
@@ -4024,8 +4040,8 @@ export function Messenger() {
                           onClick={() => gruppenLogoInputRef.current?.click()}
                           disabled={logoLaedt}
                           className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-primary shadow-sm"
-                          title="Gruppenlogo ändern"
-                          aria-label="Gruppenlogo ändern"
+                          title={t('messenger.changeGroupLogo')}
+                          aria-label={t('messenger.changeGroupLogo')}
                         >
                           <ImagePlus className="w-4 h-4" />
                         </Button>
@@ -4037,8 +4053,8 @@ export function Messenger() {
                           size="icon"
                           onClick={() => setIsGroupPermissionsOpen(true)}
                           className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-primary shadow-sm"
-                          title="Gruppenrollen & Rechte verwalten"
-                          aria-label="Gruppenrollen & Rechte verwalten"
+                          title={t('messenger.manageGroupRoles')}
+                          aria-label={t('messenger.manageGroupRoles')}
                         >
                           <Shield className="w-4 h-4" />
                         </Button>
@@ -4050,8 +4066,8 @@ export function Messenger() {
                           size="icon"
                           onClick={() => handleDeleteGroup(activeGroup)}
                           className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-error shadow-sm"
-                          title="Gruppe löschen"
-                          aria-label="Gruppe löschen"
+                          title={t('messenger.deleteGroup')}
+                          aria-label={t('messenger.deleteGroup')}
                         >
                           <Trash2 className="w-4 h-4" />
                         </Button>
@@ -4061,8 +4077,8 @@ export function Messenger() {
                           size="icon"
                           onClick={() => handleLeaveGroup(activeGroup)}
                           className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-error shadow-sm"
-                          title="Gruppe verlassen"
-                          aria-label="Gruppe verlassen"
+                          title={t('messenger.leaveGroup')}
+                          aria-label={t('messenger.leaveGroup')}
                         >
                           <LogOut className="w-4 h-4" />
                         </Button>
@@ -4077,16 +4093,16 @@ export function Messenger() {
                       onClick={async () => {
                         try {
                           await sendFriendRequest(activeContact.username)
-                          toast.success(`Freundschaftsanfrage an ${activeContact.username} gesendet!`)
+                          toast.success(t('messenger.friendRequestSent', { name: activeContact.username }))
                         } catch (err: any) {
-                          toast.error(err?.message || 'Konnte keine Anfrage senden.')
+                          toast.error(err?.message || t('messenger.friendRequestFailed'))
                         }
                       }}
                       className="h-8 gap-1.5 text-xs px-2.5 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary shadow-sm"
-                      title="Freundschaftsanfrage senden"
+                      title={t('messenger.sendFriendRequest')}
                     >
                       <UserPlus className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">Anfrage senden</span>
+                      <span className="hidden sm:inline">{t('social.contacts.sendRequest')}</span>
                     </Button>
                   )}
 
@@ -4106,12 +4122,12 @@ export function Messenger() {
                               'audio',
                             )
                           } catch (err: any) {
-                            toast.error(err?.message || 'Anruf konnte nicht gestartet werden.')
+                            toast.error(err?.message || t('messenger.callStartFailedSingle'))
                           }
                         }}
                         className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary hover:text-primary shadow-sm"
-                        title="Sprachanruf starten"
-                        aria-label="Sprachanruf starten"
+                        title={t('messenger.startVoiceCall')}
+                        aria-label={t('messenger.startVoiceCall')}
                       >
                         <Phone className="w-4 h-4" />
                       </Button>
@@ -4129,12 +4145,12 @@ export function Messenger() {
                               'video',
                             )
                           } catch (err: any) {
-                            toast.error(err?.message || 'Anruf konnte nicht gestartet werden.')
+                            toast.error(err?.message || t('messenger.callStartFailedSingle'))
                           }
                         }}
                         className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary hover:text-primary shadow-sm"
-                        title="Videoanruf starten"
-                        aria-label="Videoanruf starten"
+                        title={t('messenger.startVideoCall')}
+                        aria-label={t('messenger.startVideoCall')}
                       >
                         <Video className="w-4 h-4" />
                       </Button>
@@ -4154,10 +4170,10 @@ export function Messenger() {
                       }`}
                       title={
                         isChatMuted(blindMailboxId)
-                          ? 'Stummschaltung aktiv (Klicken zum Ändern)'
-                          : 'Benachrichtigungen stummschalten'
+                          ? t('messenger.muteActive')
+                          : t('messenger.muteNotifications')
                       }
-                      aria-label="Benachrichtigungen stummschalten"
+                      aria-label={t('messenger.muteNotifications')}
                     >
                       {isChatMuted(blindMailboxId) ? (
                         <BellOff className="w-4 h-4" />
@@ -4180,10 +4196,10 @@ export function Messenger() {
                       }`}
                       title={
                         isBlocked(activeContact.userId)
-                          ? 'Kontakt blockiert (Klicken zum Aufheben)'
-                          : 'Kontakt blockieren'
+                          ? t('messenger.blockedClickToUndo')
+                          : t('messenger.blockContact')
                       }
-                      aria-label="Kontakt blockieren"
+                      aria-label={t('messenger.blockContact')}
                     >
                       <Ban className="w-4 h-4" />
                     </Button>
@@ -4194,8 +4210,8 @@ export function Messenger() {
                     size="icon"
                     onClick={() => setIsWallpaperModalOpen(true)}
                     className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-primary shadow-sm"
-                    title="Chat-Hintergrund anpassen"
-                    aria-label="Chat-Hintergrund anpassen"
+                    title={t('social.wallpaper.title')}
+                    aria-label={t('social.wallpaper.title')}
                   >
                     <ImageIcon className="w-4 h-4" />
                   </Button>
@@ -4211,7 +4227,7 @@ export function Messenger() {
                 <div className="py-1 text-center">
                   <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high/60 border border-outline-variant/30 text-[11px] text-on-surface-variant shadow-2xs">
                     <Lock className="w-3 h-3 text-emerald-400" />
-                    <span>Nachrichten in diesem Chat sind Ende-zu-Ende verschlüsselt.</span>
+                    <span>{t('messenger.e2eeBanner')}</span>
                   </div>
                 </div>
 
@@ -4239,8 +4255,8 @@ export function Messenger() {
                     )
                   }
 
-                  const currentDateBadge = formatChatDateBadge(msg.createdAt)
-                  const prevDateBadge = idx > 0 ? formatChatDateBadge(messages[idx - 1].createdAt) : null
+                  const currentDateBadge = formatChatDateBadge(msg.createdAt, t, i18n.language)
+                  const prevDateBadge = idx > 0 ? formatChatDateBadge(messages[idx - 1].createdAt, t, i18n.language) : null
                   const showDateSeparator = Boolean(currentDateBadge && currentDateBadge !== prevDateBadge)
 
                   return (
@@ -4318,8 +4334,8 @@ export function Messenger() {
                                   ? 'bg-white text-[#0c2e35] hover:bg-white/90'
                                   : 'bg-primary text-on-primary hover:opacity-90'
                               }`}
-                              title="Wiedergabegeschwindigkeit ändern (1x / 1.5x / 2x)"
-                              aria-label="Wiedergabegeschwindigkeit ändern"
+                              title={t('messenger.playbackSpeedHint')}
+                              aria-label={t('messenger.playbackSpeed')}
                             >
                               {audioPlaybackRate}x
                             </button>
@@ -4327,7 +4343,7 @@ export function Messenger() {
                             <div
                               className="relative shrink-0 w-10 h-10 rounded-full cursor-pointer"
                               onClick={cycleAudioPlaybackRate}
-                              title="Wiedergabegeschwindigkeit ändern (1x / 1.5x / 2x)"
+                              title={t('messenger.playbackSpeedHint')}
                             >
                               <Avatar
                                 src={msg.isSelf ? user?.avatar_url : (activeContact?.avatarUrl || null)}
@@ -4343,8 +4359,8 @@ export function Messenger() {
                                     ? 'bg-white text-[#0c2e35]'
                                     : 'bg-primary text-on-primary'
                                 }`}
-                                title="Wiedergabegeschwindigkeit ändern (1x / 1.5x / 2x)"
-                                aria-label="Wiedergabegeschwindigkeit ändern"
+                                title={t('messenger.playbackSpeedHint')}
+                                aria-label={t('messenger.playbackSpeed')}
                               >
                                 {audioPlaybackRate}x
                               </button>
@@ -4380,7 +4396,7 @@ export function Messenger() {
                                 e
                               )
                             }
-                            title="Klicken zum Spulen"
+                            title={t('messenger.seekHint')}
                           >
                             <div className="flex items-center gap-[2.5px] h-7 px-0.5">
                               {getWaveformBars(msg.id).map((barH, bIdx) => {
@@ -4475,10 +4491,10 @@ export function Messenger() {
                                       ? 'bg-white/20 hover:bg-white/30 text-white border-none'
                                       : 'bg-primary text-on-primary hover:bg-primary/90'
                                   }`}
-                                  title={isImported ? 'Bereits in eigene Notizen übernommen' : 'In eigene Notizen übernehmen'}
+                                  title={isImported ? t('messenger.noteTakenAlready') : t('messenger.takeNote')}
                                 >
                                   {isImported ? <Check className="w-3 h-3 text-emerald-400" /> : <Download className="w-3 h-3" />}
-                                  <span>{isImported ? 'Übernommen' : 'Übernehmen'}</span>
+                                  <span>{isImported ? t('messenger.taken') : t('common.apply')}</span>
                                 </Button>
                               )
                             })()}
@@ -4526,7 +4542,7 @@ export function Messenger() {
                                       ? 'bg-white/20 hover:bg-white/30 text-white border-none'
                                       : 'bg-primary text-on-primary hover:bg-primary/90'
                                   }`}
-                                  title={isImported ? 'Bereits in eigenen Kalender eingetragen' : 'In eigenen Kalender eintragen'}
+                                  title={isImported ? t('messenger.eventTakenAlready') : t('messenger.takeEvent')}
                                 >
                                   {isImported ? <Check className="w-3 h-3 text-emerald-400" /> : <Plus className="w-3 h-3" />}
                                   <span>{isImported ? 'Eingetragen' : 'Eintragen'}</span>
@@ -4587,7 +4603,7 @@ export function Messenger() {
                                 STORY_GRADIENTS[msg.storyReply.storyBackground || 'gradient-1']?.class || 'bg-slate-800'
                               }`}
                             >
-                              Status
+                              {t('messenger.statusTile')}
                             </div>
                           )}
                         </div>
@@ -4603,7 +4619,7 @@ export function Messenger() {
                           }`}
                         >
                           <Sparkles className="w-3 h-3 text-primary shrink-0" />
-                          <span className="font-semibold text-primary truncate">Antwort auf Status</span>
+                          <span className="font-semibold text-primary truncate">{t('messenger.statusReply')}</span>
                         </div>
                       )}
 
@@ -4611,7 +4627,7 @@ export function Messenger() {
                       {msg.isDeleted ? (
                         <div className="flex items-center gap-2 py-0.5 italic opacity-85">
                           <Trash2 className="w-3.5 h-3.5 shrink-0 opacity-70" />
-                          <span>Diese Nachricht wurde gelöscht.</span>
+                          <span>{t('messenger.messageWasDeleted')}</span>
                         </div>
                       ) : (
                         msg.text && (
@@ -4657,8 +4673,8 @@ export function Messenger() {
                                 setInputText(msg.text)
                               }}
                               className="p-1 rounded-md hover:bg-surface-container-highest text-on-surface-variant hover:text-primary transition-colors"
-                              title="Nachricht bearbeiten"
-                              aria-label="Nachricht bearbeiten"
+                              title={t('messenger.editMessage')}
+                              aria-label={t('messenger.editMessage')}
                             >
                               <Pencil className="w-3 h-3" />
                             </button>
@@ -4667,8 +4683,8 @@ export function Messenger() {
                             type="button"
                             onClick={() => void handleDeleteMessage(msg)}
                             className="p-1 rounded-md hover:bg-surface-container-highest text-on-surface-variant hover:text-destructive transition-colors"
-                            title="Nachricht für alle löschen"
-                            aria-label="Nachricht für alle löschen"
+                            title={t('messenger.deleteForAll')}
+                            aria-label={t('messenger.deleteForAll')}
                           >
                             <Trash2 className="w-3 h-3" />
                           </button>
@@ -4683,19 +4699,19 @@ export function Messenger() {
                       </span>
                       {msg.isSelf && (
                         msg.status === 'queued' ? (
-                          <span title="In Warteschlange / Ausstehend (wird gesendet...)" className="inline-flex items-center">
+                          <span title={t('messenger.stateQueued')} className="inline-flex items-center">
                             <Clock className="w-3.5 h-3.5 opacity-60 animate-pulse" />
                           </span>
                         ) : msg.isRead && readReceiptsEnabled ? (
-                          <span title="Gelesen vom Gesprächspartner" className="inline-flex items-center">
+                          <span title={t('messenger.stateRead')} className="inline-flex items-center">
                             <CheckCheck className="w-3.5 h-3.5 text-cyan-400" />
                           </span>
                         ) : msg.isDelivered ? (
-                          <span title="Zugestellt / Vom Gesprächspartner empfangen" className="inline-flex items-center">
+                          <span title={t('messenger.stateDelivered')} className="inline-flex items-center">
                             <CheckCheck className="w-3.5 h-3.5 opacity-60" />
                           </span>
                         ) : (
-                          <span title="Nicht zugestellt (noch nicht beim Empfänger angekommen)" className="inline-flex items-center">
+                          <span title={t('messenger.stateUndelivered')} className="inline-flex items-center">
                             <Check className="w-3.5 h-3.5 opacity-60" />
                           </span>
                         )
@@ -4712,7 +4728,7 @@ export function Messenger() {
                       <>
                         <Mic className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
                         <span className="text-[11px] text-rose-400 font-medium">
-                          {activeGroup ? `${partnerActivity.username || 'Jemand'} nimmt Audio auf …` : 'Nimmt eine Sprachnachricht auf …'}
+                          {activeGroup ? `${partnerActivity.username || 'Jemand'} nimmt Audio auf …` : t('messenger.recordingVoice')}
                         </span>
                       </>
                     ) : (
@@ -4723,7 +4739,7 @@ export function Messenger() {
                           <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" />
                         </span>
                         <span className="text-[11px] text-primary font-medium">
-                          {activeGroup ? `${partnerActivity.username || 'Jemand'} schreibt …` : 'Schreibt …'}
+                          {activeGroup ? `${partnerActivity.username || 'Jemand'} schreibt …` : t('messenger.typing')}
                         </span>
                       </>
                     )}
@@ -4745,7 +4761,7 @@ export function Messenger() {
                       type="button"
                       onClick={() => setSelectedImage(null)}
                       className="absolute -top-1 -right-1 p-0.5 rounded-full bg-surface-container-highest text-on-surface"
-                      aria-label="Bild entfernen"
+                      aria-label={t('messenger.removeImage')}
                     >
                       <X className="w-3 h-3" />
                     </button>
@@ -4772,7 +4788,7 @@ export function Messenger() {
                     type="button"
                     onClick={() => setStagedFile(null)}
                     className="p-1 rounded-full hover:bg-surface-container-highest text-on-surface-variant"
-                    aria-label="Datei entfernen"
+                    aria-label={t('messenger.removeFile')}
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
@@ -4787,7 +4803,7 @@ export function Messenger() {
                       <Pencil className="w-3.5 h-3.5" />
                     </div>
                     <div className="min-w-0">
-                      <p className="text-xs font-semibold text-primary">Nachricht bearbeiten</p>
+                      <p className="text-xs font-semibold text-primary">{t('messenger.editMessage')}</p>
                       <p className="text-[10px] text-on-surface-variant truncate max-w-md">
                         {editingMessage.text}
                       </p>
@@ -4800,7 +4816,7 @@ export function Messenger() {
                       setInputText('')
                     }}
                     className="p-1 rounded-full hover:bg-surface-container-highest text-on-surface-variant"
-                    aria-label="Bearbeiten abbrechen"
+                    aria-label={t('messenger.cancelEdit')}
                     title="Abbrechen"
                   >
                     <X className="w-3.5 h-3.5" />
@@ -4814,7 +4830,7 @@ export function Messenger() {
                   <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3 rounded-xl bg-status-error/10 border border-status-error/30 text-xs text-status-error">
                     <div className="flex items-center gap-2">
                       <Ban className="w-4 h-4 shrink-0" />
-                      <span>Du hast diesen Kontakt blockiert.</span>
+                      <span>{t('messenger.contactBlocked')}</span>
                     </div>
                     <Button
                       variant="ghost"
@@ -4822,13 +4838,13 @@ export function Messenger() {
                       onClick={() => void unblockUser(activeContact.userId)}
                       className="h-7 text-xs px-3 border border-status-error/30 hover:bg-status-error/20 text-status-error font-medium"
                     >
-                      Blockierung aufheben
+                      {t('messenger.unblock')}
                     </Button>
                   </div>
                 ) : isRecording ? (
                   <VoiceRecordingBar
                     durationSeconds={recordingDuration}
-                    statusLabel="Sprachaufnahme läuft …"
+                    statusLabel={t('messenger.voiceRecording')}
                     stream={mediaStreamRef.current}
                     variant="danger"
                     onCancel={() => stopRecording(false)}
@@ -4868,7 +4884,7 @@ export function Messenger() {
                             type="button"
                             onClick={() => setIsStickerPickerOpen(false)}
                             className="p-1 rounded-md text-on-surface-variant hover:text-on-surface"
-                            aria-label="Schließen"
+                            aria-label={t('common.close')}
                           >
                             <X className="w-3.5 h-3.5" />
                           </button>
@@ -4992,10 +5008,10 @@ export function Messenger() {
                               // hatte — die gibt es nicht mehr, und die
                               // Aufforderung schickte den Benutzer nach
                               // nirgendwo. Was bleibt, ist ein kurzer Moment.
-                              'Schlüssel wird vorbereitet …'
+                              t('messenger.keyPreparing')
                             : editingMessage
-                              ? 'Nachricht bearbeiten …'
-                              : 'Nachricht schreiben …'
+                              ? t('messenger.editPlaceholder')
+                              : t('messenger.writePlaceholder')
                         }
                         leftActions={
                           <>
@@ -5005,8 +5021,8 @@ export function Messenger() {
                               size="icon"
                               onClick={() => setIsStickerPickerOpen((prev) => !prev)}
                               className="h-8 w-8 rounded-full p-0 text-on-surface-variant hover:text-amber-400"
-                              title="Sticker & Emojis"
-                              aria-label="Sticker auswählen"
+                              title={t('messenger.stickers')}
+                              aria-label={t('messenger.pickSticker')}
                             >
                               <Smile className="w-4 h-4" />
                             </Button>
@@ -5019,8 +5035,8 @@ export function Messenger() {
                                 size="icon"
                                 onClick={() => setIsAttachMenuOpen((prev) => !prev)}
                                 className="h-8 w-8 rounded-full p-0 text-on-surface-variant hover:text-primary transition-all"
-                                title="Anhang hinzufügen"
-                                aria-label="Anhang hinzufügen"
+                                title={t('messenger.addAttachment')}
+                                aria-label={t('messenger.addAttachment')}
                               >
                                 <Plus className={`w-4 h-4 transition-transform duration-200 ${isAttachMenuOpen ? 'rotate-45 text-primary' : ''}`} />
                               </Button>
@@ -5035,14 +5051,14 @@ export function Messenger() {
                                       setIsCameraModalOpen(true)
                                     }}
                                     className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
-                                    aria-label="Foto anhängen"
+                                    aria-label={t('messenger.attachPhoto')}
                                   >
                                     <div className="w-7 h-7 rounded-lg bg-pink-500/15 text-pink-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
                                       <Camera className="w-4 h-4" />
                                     </div>
                                     <div className="min-w-0 flex-1">
-                                      <div className="text-xs font-semibold text-primary">Foto aufnehmen</div>
-                                      <div className="text-[10px] text-on-surface-variant/70">Kamera Snapshot</div>
+                                      <div className="text-xs font-semibold text-primary">{t('social.camera.take')}</div>
+                                      <div className="text-[10px] text-on-surface-variant/70">{t('messenger.cameraSnapshot')}</div>
                                     </div>
                                   </button>
 
@@ -5053,14 +5069,14 @@ export function Messenger() {
                                       fileInputRef.current?.click()
                                     }}
                                     className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
-                                    aria-label="Foto & Bild auswählen"
+                                    aria-label={t('messenger.pickPhoto')}
                                   >
                                     <div className="w-7 h-7 rounded-lg bg-purple-500/15 text-purple-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
                                       <ImageIcon className="w-4 h-4" />
                                     </div>
                                     <div className="min-w-0 flex-1">
-                                      <div className="text-xs font-semibold text-primary">Foto & Bild</div>
-                                      <div className="text-[10px] text-on-surface-variant/70">Aus Galerie / Dateien</div>
+                                      <div className="text-xs font-semibold text-primary">{t('messenger.photo')}</div>
+                                      <div className="text-[10px] text-on-surface-variant/70">{t('messenger.fromGallery')}</div>
                                     </div>
                                   </button>
 
@@ -5071,14 +5087,14 @@ export function Messenger() {
                                       docInputRef.current?.click()
                                     }}
                                     className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
-                                    aria-label="Datei anhängen"
+                                    aria-label={t('messenger.attachFile')}
                                   >
                                     <div className="w-7 h-7 rounded-lg bg-indigo-500/15 text-indigo-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
                                       <Paperclip className="w-4 h-4" />
                                     </div>
                                     <div className="min-w-0 flex-1">
-                                      <div className="text-xs font-semibold text-primary">Dokument & Datei</div>
-                                      <div className="text-[10px] text-on-surface-variant/70">Verschlüsselt senden</div>
+                                      <div className="text-xs font-semibold text-primary">{t('messenger.document')}</div>
+                                      <div className="text-[10px] text-on-surface-variant/70">{t('messenger.sendEncrypted')}</div>
                                     </div>
                                   </button>
 
@@ -5089,14 +5105,14 @@ export function Messenger() {
                                       handleOpenNotePicker()
                                     }}
                                     className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
-                                    aria-label="Notiz teilen"
+                                    aria-label={t('messenger.shareNote')}
                                   >
                                     <div className="w-7 h-7 rounded-lg bg-amber-500/15 text-amber-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
                                       <StickyNote className="w-4 h-4" />
                                     </div>
                                     <div className="min-w-0 flex-1">
-                                      <div className="text-xs font-semibold text-primary">Notiz anhängen</div>
-                                      <div className="text-[10px] text-on-surface-variant/70">Aus Notizen wählen</div>
+                                      <div className="text-xs font-semibold text-primary">{t('messenger.attachNote')}</div>
+                                      <div className="text-[10px] text-on-surface-variant/70">{t('messenger.fromNotes')}</div>
                                     </div>
                                   </button>
 
@@ -5107,14 +5123,14 @@ export function Messenger() {
                                       handleOpenCalendarPicker()
                                     }}
                                     className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
-                                    aria-label="Kalendereintrag teilen"
+                                    aria-label={t('messenger.shareEvent')}
                                   >
                                     <div className="w-7 h-7 rounded-lg bg-cyan-500/15 text-cyan-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
                                       <CalendarIcon className="w-4 h-4" />
                                     </div>
                                     <div className="min-w-0 flex-1">
-                                      <div className="text-xs font-semibold text-primary">Termin anhängen</div>
-                                      <div className="text-[10px] text-on-surface-variant/70">Aus Kalender wählen</div>
+                                      <div className="text-xs font-semibold text-primary">{t('messenger.attachEvent')}</div>
+                                      <div className="text-[10px] text-on-surface-variant/70">{t('messenger.fromCalendar')}</div>
                                     </div>
                                   </button>
                                 </div>
@@ -5142,8 +5158,8 @@ export function Messenger() {
                                 size="icon"
                                 onClick={() => setIsVideoNoteRecording(true)}
                                 className="h-8 w-8 p-0 text-on-surface-variant hover:text-emerald-400 hover:bg-emerald-500/10 rounded-full"
-                                title="Videonotiz aufnehmen (Halten/Swipe)"
-                                aria-label="Videonotiz aufnehmen"
+                                title={t('messenger.recordVideoNoteHint')}
+                                aria-label={t('messenger.recordVideoNote')}
                               >
                                 <Video className="w-4 h-4" />
                               </Button>
@@ -5153,8 +5169,8 @@ export function Messenger() {
                                 size="icon"
                                 onClick={startRecording}
                                 className="h-8 w-8 p-0 text-on-surface-variant hover:text-primary hover:bg-primary/10 rounded-full"
-                                title="Sprachnachricht aufnehmen"
-                                aria-label="Sprachnachricht aufnehmen"
+                                title={t('messenger.recordVoice')}
+                                aria-label={t('messenger.recordVoice')}
                               >
                                 <Mic className="w-4 h-4" />
                               </Button>
@@ -5189,28 +5205,28 @@ export function Messenger() {
           <div className="flex items-center justify-between pb-3 border-b border-outline-variant/20">
             <div className="flex items-center gap-2">
               <UsersRound className="w-5 h-5 text-primary" />
-              <span className="font-headline text-body-md font-bold text-primary">Neue Gruppe erstellen</span>
+              <span className="font-headline text-body-md font-bold text-primary">{t('messenger.newGroup')}</span>
             </div>
           </div>
 
           <form onSubmit={handleCreateGroup} className="space-y-4 pt-3">
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-on-surface">Gruppenname *</label>
+              <label className="text-xs font-semibold text-on-surface">{t('messenger.groupNameLabel')}</label>
               <Input
                 value={groupName}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setGroupName(e.target.value)}
-                placeholder="z. B. Server-Admins oder Gaming"
+                placeholder={t('messenger.groupNamePlaceholder')}
                 required
                 className="text-xs h-9"
               />
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-on-surface">Beschreibung (optional)</label>
+              <label className="text-xs font-semibold text-on-surface">{t('messenger.groupDescLabel')}</label>
               <Input
                 value={groupDesc}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setGroupDesc(e.target.value)}
-                placeholder="Worum geht es in dieser Gruppe?"
+                placeholder={t('messenger.groupDescPlaceholder')}
                 className="text-xs h-9"
               />
             </div>
@@ -5218,7 +5234,7 @@ export function Messenger() {
             <div className="p-3 rounded-xl bg-surface-container-high/60 border border-outline-variant/30 text-xs text-on-surface-variant space-y-1">
               <div className="flex items-center gap-1.5 font-semibold text-primary">
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>Ende-zu-Ende verschlüsselte Gruppe</span>
+                <span>{t('messenger.groupE2eeLabel')}</span>
               </div>
               <p className="text-[11px]">
                 Nach der Erstellung erhältst du einen Einladungslink, den du mit Freunden oder Teammitgliedern teilen kannst.
@@ -5241,7 +5257,7 @@ export function Messenger() {
                 size="sm"
                 disabled={!groupName.trim() || creatingGroup}
               >
-                {creatingGroup ? 'Erstelle…' : 'Gruppe erstellen'}
+                {creatingGroup ? t('messenger.creating') : t('messenger.createGroup')}
               </Button>
             </div>
           </form>
@@ -5254,7 +5270,7 @@ export function Messenger() {
           <div className="flex items-center justify-between pb-3 border-b border-outline-variant/20">
             <div className="flex items-center gap-2">
               <StickyNote className="w-4 h-4 text-amber-400" />
-              <span className="font-headline text-body-sm font-bold text-primary">Notiz teilen</span>
+              <span className="font-headline text-body-sm font-bold text-primary">{t('messenger.shareNote')}</span>
             </div>
           </div>
 
@@ -5262,7 +5278,7 @@ export function Messenger() {
             <Input
               value={noteSearch}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNoteSearch(e.target.value)}
-              placeholder="Notiz suchen …"
+              placeholder={t('messenger.searchNote')}
               className="text-xs h-8"
             />
           </div>
@@ -5311,7 +5327,7 @@ export function Messenger() {
           <div className="flex items-center justify-between pb-3 border-b border-outline-variant/20">
             <div className="flex items-center gap-2">
               <CalendarIcon className="w-4 h-4 text-cyan-400" />
-              <span className="font-headline text-body-sm font-bold text-primary">Termin teilen</span>
+              <span className="font-headline text-body-sm font-bold text-primary">{t('messenger.shareEventTitle')}</span>
             </div>
           </div>
 
@@ -5319,7 +5335,7 @@ export function Messenger() {
             <Input
               value={calendarSearch}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCalendarSearch(e.target.value)}
-              placeholder="Termin suchen …"
+              placeholder={t('messenger.searchEvent')}
               className="text-xs h-8"
             />
           </div>
@@ -5375,14 +5391,14 @@ export function Messenger() {
           <div className="relative max-w-4xl max-h-[90vh]">
             <img
               src={viewingImage}
-              alt="Großansicht"
+              alt={t('messenger.fullView')}
               className="max-h-[85vh] max-w-full rounded-xl object-contain shadow-2xl"
             />
             <button
               type="button"
               onClick={() => setViewingImage(null)}
               className="absolute -top-3 -right-3 p-1.5 rounded-full bg-surface-container-highest text-on-surface shadow-md"
-              aria-label="Schließen"
+              aria-label={t('common.close')}
             >
               <X className="w-4 h-4" />
             </button>
@@ -5396,7 +5412,7 @@ export function Messenger() {
           <div className="flex items-center justify-between pb-3 border-b border-outline-variant/20">
             <div className="flex items-center gap-2">
               <Camera className="w-4 h-4 text-primary" />
-              <span className="font-headline text-body-sm font-bold text-primary">Foto senden an …</span>
+              <span className="font-headline text-body-sm font-bold text-primary">{t('messenger.sendPhotoTo')}</span>
             </div>
           </div>
 
@@ -5496,7 +5512,7 @@ export function Messenger() {
               storyContext
             )
           } else {
-            toast.error('Kontakt für direkte Antwort nicht gefunden.')
+            toast.error(t('messenger.replyContactMissing'))
           }
         }}
       />
@@ -5542,11 +5558,10 @@ export function Messenger() {
           <DialogHeader>
             <DialogTitle className="text-error flex items-center gap-2">
               <Trash2 className="w-5 h-5 text-error" />
-              <span>Gruppe löschen?</span>
+              <span>{t('messenger.deleteGroupTitle')}</span>
             </DialogTitle>
             <DialogDescription>
-              Möchtest du die Gruppe <strong>"{groupToDelete?.name}"</strong> wirklich unwiderruflich löschen?
-              Alle Mitglieder werden entfernt und der Chatverlauf kann nicht wiederhergestellt werden.
+              {t('messenger.deleteGroupMessage', { name: groupToDelete?.name ?? '' })}
             </DialogDescription>
           </DialogHeader>
 
@@ -5567,7 +5582,7 @@ export function Messenger() {
               className="gap-1.5"
             >
               <Trash2 className="w-4 h-4" />
-              <span>{isDeletingGroup ? 'Wird gelöscht …' : 'Endgültig löschen'}</span>
+              <span>{isDeletingGroup ? t('messenger.deleting') : t('messenger.deleteForGood')}</span>
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -5586,7 +5601,7 @@ export function Messenger() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <BellOff className="w-5 h-5 text-primary" />
-              <span>Benachrichtigungen stummschalten</span>
+              <span>{t('messenger.muteNotifications')}</span>
             </DialogTitle>
             <DialogDescription>
               Wähle, wie lange Benachrichtigungen für {activeGroup ? `"${activeGroup.name}"` : activeContact ? `"${activeContact.username}"` : 'diesen Chat'} stummgeschaltet werden sollen.
@@ -5600,15 +5615,15 @@ export function Messenger() {
               onClick={() => {
                 if (blindMailboxId) {
                   muteChat(blindMailboxId, 480)
-                  toast.success('Für 8 Stunden stummgeschaltet')
+                  toast.success(t('messenger.muted8h'))
                 }
                 setIsMuteModalOpen(false)
               }}
             >
               <Clock className="w-4 h-4 mr-2.5 text-on-surface-variant" />
               <div>
-                <div className="font-semibold">8 Stunden</div>
-                <div className="text-[10px] text-on-surface-variant/70">Bis morgen stummschalten</div>
+                <div className="font-semibold">{t('messenger.mute8h')}</div>
+                <div className="text-[10px] text-on-surface-variant/70">{t('messenger.mute8hHint')}</div>
               </div>
             </Button>
 
@@ -5618,15 +5633,15 @@ export function Messenger() {
               onClick={() => {
                 if (blindMailboxId) {
                   muteChat(blindMailboxId, 10080)
-                  toast.success('Für 1 Woche stummgeschaltet')
+                  toast.success(t('messenger.muted1w'))
                 }
                 setIsMuteModalOpen(false)
               }}
             >
               <Clock className="w-4 h-4 mr-2.5 text-on-surface-variant" />
               <div>
-                <div className="font-semibold">1 Woche</div>
-                <div className="text-[10px] text-on-surface-variant/70">7 Tage lang keine Töne oder Popups</div>
+                <div className="font-semibold">{t('messenger.mute1w')}</div>
+                <div className="text-[10px] text-on-surface-variant/70">{t('messenger.mute1wHint')}</div>
               </div>
             </Button>
 
@@ -5636,7 +5651,7 @@ export function Messenger() {
               onClick={() => {
                 if (blindMailboxId) {
                   muteChat(blindMailboxId, 0)
-                  toast.success('Dauerhaft stummgeschaltet')
+                  toast.success(t('messenger.mutedForever'))
                 }
                 setIsMuteModalOpen(false)
               }}
@@ -5644,7 +5659,7 @@ export function Messenger() {
               <BellOff className="w-4 h-4 mr-2.5 text-on-surface-variant" />
               <div>
                 <div className="font-semibold">Immer</div>
-                <div className="text-[10px] text-on-surface-variant/70">Bis du es manuell wieder einschaltest</div>
+                <div className="text-[10px] text-on-surface-variant/70">{t('messenger.muteForeverHint')}</div>
               </div>
             </Button>
 
@@ -5654,14 +5669,14 @@ export function Messenger() {
                 className="w-full justify-start text-left text-xs py-2.5 h-auto text-primary hover:bg-primary/10 mt-1 border border-primary/20"
                 onClick={() => {
                   unmuteChat(blindMailboxId)
-                  toast.success('Stummschaltung aufgehoben')
+                  toast.success(t('social.contacts.unmuted'))
                   setIsMuteModalOpen(false)
                 }}
               >
                 <Bell className="w-4 h-4 mr-2.5 text-primary" />
                 <div>
-                  <div className="font-semibold">Stummschaltung aufheben</div>
-                  <div className="text-[10px] text-on-surface-variant/70">Wieder Töne und Banner empfangen</div>
+                  <div className="font-semibold">{t('messenger.unmute')}</div>
+                  <div className="text-[10px] text-on-surface-variant/70">{t('messenger.unmuteHint')}</div>
                 </div>
               </Button>
             )}
@@ -5687,19 +5702,15 @@ export function Messenger() {
               <Ban className="w-5 h-5" />
               <span>
                 {activeContact && isBlocked(activeContact.userId)
-                  ? 'Blockierung aufheben?'
-                  : 'Kontakt blockieren?'}
+                  ? t('messenger.unblockTitle')
+                  : t('messenger.blockTitle')}
               </span>
             </DialogTitle>
             <DialogDescription>
               {activeContact && isBlocked(activeContact.userId) ? (
-                <>
-                  Möchtest du <strong>"{activeContact.username}"</strong> wieder entsperren? Ihr könnt euch danach wieder gegenseitig Nachrichten schreiben.
-                </>
+                t('messenger.unblockMessage', { name: activeContact.username })
               ) : (
-                <>
-                  Möchtest du <strong>"{activeContact?.username}"</strong> wirklich blockieren? Du erhältst keine Nachrichten, Töne oder Benachrichtigungen mehr von diesem Kontakt.
-                </>
+                t('messenger.blockMessage', { name: activeContact?.username ?? '' })
               )}
             </DialogDescription>
           </DialogHeader>
@@ -5718,11 +5729,11 @@ export function Messenger() {
                 size="sm"
                 onClick={async () => {
                   await unblockUser(activeContact.userId)
-                  toast.success(`Blockierung von ${activeContact.username} aufgehoben`)
+                  toast.success(t('social.contacts.unblocked', { name: activeContact.username }))
                   setIsBlockConfirmOpen(false)
                 }}
               >
-                Blockierung aufheben
+                {t('messenger.unblock')}
               </Button>
             ) : (
               <Button
@@ -5731,12 +5742,12 @@ export function Messenger() {
                 onClick={async () => {
                   if (activeContact) {
                     await blockUser(activeContact.userId, activeContact.username, activeContact.avatarUrl)
-                    toast.success(`${activeContact.username} blockiert`)
+                    toast.success(t('messenger.contactBlockedToast', { name: activeContact.username }))
                   }
                   setIsBlockConfirmOpen(false)
                 }}
               >
-                Blockieren
+                {t('messenger.block')}
               </Button>
             )}
           </DialogFooter>
