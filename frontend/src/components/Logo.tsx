@@ -35,7 +35,7 @@ export function Logo({ size = 'md', className = '' }: LogoProps) {
         />
       ) : (
         <div
-          className={`${cls} flex items-center justify-center rounded-full border border-primary/30 bg-primary/10 text-[10px] font-bold text-primary`}
+          className={`${cls} flex items-center justify-center rounded-full border border-primary/30 bg-primary/10 text-label-sm font-bold text-primary`}
           aria-label={LOGO_CONFIG.alt}
           role="img"
         >

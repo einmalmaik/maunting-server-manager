@@ -60,7 +60,7 @@ export function DangerZoneTab() {
         <div className="flex-1">
           {/* Die Warnfarbe bleibt: sie unterscheidet die Gefahrenzone von den
               übrigen Karten. Nur Größe und Bauweise ziehen mit. */}
-          <h2 className="font-headline text-lg font-semibold text-status-destructive">{t('profile.deleteAccountTitle')}</h2>
+          <h2 className="font-headline text-title-lg font-semibold text-status-destructive">{t('profile.deleteAccountTitle')}</h2>
           <p className="font-body-md text-sm text-on-surface-variant mt-1">
             {t('profile.deleteAccountSubtitle')}
           </p>
@@ -132,7 +132,7 @@ export function DangerZoneTab() {
                   autoComplete="off"
                   spellCheck={false}
                 />
-                <p className="text-[10px] text-on-surface-variant mt-1">Tippe das Wort exakt ein – Kopieren/Einfügen ist deaktiviert.</p>
+                <p className="text-label-sm text-on-surface-variant mt-1">Tippe das Wort exakt ein – Kopieren/Einfügen ist deaktiviert.</p>
               </div>
 
               {user?.two_factor_enabled && (

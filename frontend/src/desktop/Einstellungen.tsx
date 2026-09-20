@@ -728,7 +728,7 @@ function SocialEinstellungen() {
             <h2 id="social-friends-title" className="text-sm font-semibold text-on-surface">
               Freunde & Kontakte
             </h2>
-            <p className="text-[11px] text-on-surface-variant mt-0.5">
+            <p className="text-label-sm text-on-surface-variant mt-0.5">
               Verwalte deine Kontakte, blockierte Personen und stummgeschaltete Unterhaltungen.
             </p>
           </div>
@@ -869,7 +869,7 @@ function SocialEinstellungen() {
                             {f.username}
                           </span>
                           {f.presence?.activity_label && (
-                            <p className="text-[10px] text-on-surface-variant truncate">
+                            <p className="text-label-sm text-on-surface-variant truncate">
                               {f.presence.activity_label}
                             </p>
                           )}
@@ -927,7 +927,7 @@ function SocialEinstellungen() {
                         <span className="text-xs font-semibold text-primary truncate block">
                           {b.username}
                         </span>
-                        <span className="text-[10px] text-status-destructive font-medium">
+                        <span className="text-label-sm text-status-destructive font-medium">
                           Blockiert
                         </span>
                       </div>
@@ -972,7 +972,7 @@ function SocialEinstellungen() {
                         <span className="text-xs font-semibold text-primary truncate block">
                           {m.name}
                         </span>
-                        <span className="text-[10px] text-on-surface-variant flex items-center gap-1">
+                        <span className="text-label-sm text-on-surface-variant flex items-center gap-1">
                           <Clock className="w-3 h-3 text-status-warning" />
                           <span>{m.remainingLabel}</span>
                         </span>
@@ -1014,7 +1014,7 @@ function SocialEinstellungen() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <span className="text-xs font-medium text-on-surface">Profil-Sichtbarkeit & Status</span>
-              <p className="text-[11px] text-on-surface-variant">Wer darf deine Präsenz und Aktivitäten sehen?</p>
+              <p className="text-label-sm text-on-surface-variant">Wer darf deine Präsenz und Aktivitäten sehen?</p>
             </div>
             <div className="w-full sm:w-64">
               <Dropdown
@@ -1030,7 +1030,7 @@ function SocialEinstellungen() {
           <div className="flex items-center justify-between gap-3 pt-2 border-t border-outline-variant/20">
             <div>
               <span className="text-xs font-medium text-on-surface">Lesebestätigungen (Gelesen-Häkchen)</span>
-              <p className="text-[11px] text-on-surface-variant">Zeigt Kontakten, sobald Nachrichten gelesen wurden.</p>
+              <p className="text-label-sm text-on-surface-variant">Zeigt Kontakten, sobald Nachrichten gelesen wurden.</p>
             </div>
             <Switch
               checked={readReceiptsEnabled}
@@ -1058,7 +1058,7 @@ function SocialEinstellungen() {
             <span className="text-xs font-bold text-primary font-mono block">
               {formatHours(stats?.active_time_seconds ?? stats?.total_activity_seconds)}
             </span>
-            <span className="text-[10px] text-on-surface-variant">Gesamtaktivität</span>
+            <span className="text-label-sm text-on-surface-variant">Gesamtaktivität</span>
           </div>
         </div>
 
@@ -1066,7 +1066,7 @@ function SocialEinstellungen() {
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 pt-2 border-t border-outline-variant/30">
             {Object.entries(stats.active_time_by_category).map(([cat, secs]) => (
               <div key={cat} className="p-2.5 rounded-xl bg-surface-container-low border border-outline-variant/30">
-                <span className="text-[10px] font-bold text-on-surface-variant tracking-wider block truncate">
+                <span className="text-label-sm font-bold text-on-surface-variant tracking-wider block truncate">
                   {formatActivityCategory(cat)}
                 </span>
                 <span className="text-xs font-semibold text-on-surface font-mono">
@@ -1097,7 +1097,7 @@ function SocialEinstellungen() {
               <span className="text-xs font-bold text-primary font-mono block">
                 {overview?.total_unlocked || 0} / {overview?.total_available || 0}
               </span>
-              <span className="text-[10px] text-on-surface-variant font-mono">
+              <span className="text-label-sm text-on-surface-variant font-mono">
                 {overview?.prestige_score || 0} Pkt
               </span>
             </div>
@@ -1176,18 +1176,18 @@ function SocialEinstellungen() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-xs font-bold text-on-surface truncate">{m.title}</span>
-                    <span className="text-[10px] font-mono text-status-warning font-semibold">+{m.points}</span>
+                    <span className="text-label-sm font-mono text-status-warning font-semibold">+{m.points}</span>
                     {isRare && (
-                      <Badge variant="warning" className="text-[9px] px-1 py-0 uppercase font-bold">
+                      <Badge variant="warning" className="text-label-sm px-1 py-0 uppercase font-bold">
                         Selten
                       </Badge>
                     )}
                   </div>
-                  <p className="text-[11px] text-on-surface-variant mt-0.5 line-clamp-2">
+                  <p className="text-label-sm text-on-surface-variant mt-0.5 line-clamp-2">
                     {m.description}
                   </p>
                   {m.unlocked && m.unlocked_at && (
-                    <span className="inline-flex items-center gap-1 text-[10px] text-status-success mt-1">
+                    <span className="inline-flex items-center gap-1 text-label-sm text-status-success mt-1">
                       <CheckCircle2 className="w-3 h-3" />
                       <span>{new Date(m.unlocked_at).toLocaleDateString()}</span>
                     </span>
@@ -1861,7 +1861,7 @@ function AudioEinstellungen() {
         <div className="flex items-center justify-between gap-4 mb-4">
           <div className="flex items-center gap-2">
             <Mic className="h-5 w-5 text-secondary" aria-hidden="true" />
-            <h2 id="audio-devices-heading" className="font-headline text-lg font-semibold text-on-surface">
+            <h2 id="audio-devices-heading" className="font-headline text-title-lg font-semibold text-on-surface">
               {t('profile.audioTitle', 'Mikrofon & Audio')}
             </h2>
           </div>
@@ -1904,7 +1904,7 @@ function AudioEinstellungen() {
           <div className="flex items-center justify-between gap-3 border-t border-outline-variant/30 pt-4 mt-6 max-w-2xl">
             <div>
               <span className="text-xs font-medium text-on-surface block">{t('mss.audio.ducking', 'Audio-Ducking')}</span>
-              <span className="text-[11px] text-on-surface-variant">
+              <span className="text-label-sm text-on-surface-variant">
                 Senkt Hintergrundgeräusche und Musik ab, während die KI spricht.
               </span>
             </div>
@@ -1921,7 +1921,7 @@ function AudioEinstellungen() {
       <section className="msm-card p-6" aria-labelledby="audio-processing-heading">
         <div className="flex items-center gap-2 mb-4">
           <Sliders className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 id="audio-processing-heading" className="font-headline text-lg font-semibold text-on-surface">
+          <h2 id="audio-processing-heading" className="font-headline text-title-lg font-semibold text-on-surface">
             {t('mss.audio.verarbeitung', 'Signalverarbeitung & Filter')}
           </h2>
         </div>
@@ -2126,7 +2126,7 @@ function Testhoeren({
     <section className="msm-card p-6" aria-labelledby="audio-test-heading">
       <div className="flex items-center gap-2 mb-4">
         <Volume2 className="h-5 w-5 text-secondary" aria-hidden="true" />
-        <h2 id="audio-test-heading" className="font-headline text-lg font-semibold text-on-surface">
+        <h2 id="audio-test-heading" className="font-headline text-title-lg font-semibold text-on-surface">
           {t('mss.audio.testhoeren', 'Testhören & Mikrofon-Pegel')}
         </h2>
       </div>

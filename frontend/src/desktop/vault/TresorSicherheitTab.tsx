@@ -113,7 +113,7 @@ export function TresorSicherheitTab() {
           <div className="flex items-center justify-between gap-4 pt-2 border-t border-outline-variant/20">
             <div>
               <span className="text-xs font-medium text-on-surface">{t('mss.vault.beiFensterwechsel')}</span>
-              <p className="text-[11px] text-on-surface-variant">
+              <p className="text-label-sm text-on-surface-variant">
                 {t('mss.vault.beiFensterwechselHinweis')}
               </p>
             </div>
@@ -152,7 +152,7 @@ export function TresorSicherheitTab() {
               <span className="text-xs font-medium text-on-surface">
                 {t('mss.vault.biometrieSchalter')}
               </span>
-              <p className="text-[11px] text-on-surface-variant">
+              <p className="text-label-sm text-on-surface-variant">
                 {t('mss.vault.biometrieHinweis')}
               </p>
             </div>

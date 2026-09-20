@@ -197,12 +197,12 @@ export function StoryViewerModal({
                 <div className="font-headline text-xs font-bold truncate flex items-center gap-1.5">
                   <span>{currentStory.username}</span>
                   {currentStory.is_self && (
-                    <span className="text-[10px] bg-white/20 px-1.5 py-0.2 rounded font-normal">
+                    <span className="text-label-sm bg-white/20 px-1.5 py-0.2 rounded font-normal">
                       Du
                     </span>
                   )}
                 </div>
-                <div className="text-[10px] opacity-80 flex items-center gap-1">
+                <div className="text-label-sm opacity-80 flex items-center gap-1">
                   <Clock className="w-2.5 h-2.5" />
                   <span>{formatRelativeTime(currentStory.created_at, t)}</span>
                   <span>•</span>
@@ -244,7 +244,7 @@ export function StoryViewerModal({
 
         {/* Story Text Content */}
         <div className="relative z-10 flex-1 flex items-center justify-center p-3 sm:p-4 text-center">
-          <p className="font-headline text-lg sm:text-xl md:text-2xl font-bold text-white drop-shadow-lg leading-snug break-words max-h-44 sm:max-h-60 overflow-y-auto no-scrollbar">
+          <p className="font-headline text-title-lg sm:text-xl md:text-2xl font-bold text-white drop-shadow-lg leading-snug break-words max-h-44 sm:max-h-60 overflow-y-auto no-scrollbar">
             {currentStory.content}
           </p>
         </div>
@@ -310,7 +310,7 @@ export function StoryViewerModal({
               </button>
             </form>
           ) : (
-            <div className="text-[10px] text-white/70 text-center drop-shadow">
+            <div className="text-label-sm text-white/70 text-center drop-shadow">
               {t('social.story.validUntil', {
                 time: new Date(currentStory.expires_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
               })}

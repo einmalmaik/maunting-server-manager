@@ -137,7 +137,7 @@ export function MessengerTab() {
     <section className="msm-card space-y-5 p-6" aria-labelledby="messenger-calls-title">
       <div className="flex items-center gap-2">
         <PhoneCall className="h-5 w-5 text-secondary" aria-hidden="true" />
-        <h3 id="messenger-calls-title" className="font-headline text-lg font-semibold text-on-surface">
+        <h3 id="messenger-calls-title" className="font-headline text-title-lg font-semibold text-on-surface">
           {t('settings.messenger.title', 'Anrufe')}
         </h3>
       </div>

@@ -271,7 +271,7 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
                 placeholder="http://localhost:5173/api/webhooks/server-panel/…?secret=…"
                 required
               />
-              <p className="text-body-xs text-on-surface-variant mt-1">
+              <p className="text-label-sm text-on-surface-variant mt-1">
                 {t('webhook.targetUrlHelp', {
                   defaultValue:
                     'Die URL bekommst du vom Empfaengersystem (Bot-Anbieter, Monitor-Setup usw.).',
@@ -408,7 +408,7 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
               <code className="msm-input block font-mono text-body-sm break-all">
                 {revealedSecrets[sub.id]}
               </code>
-              <p className="text-body-xs text-on-surface-variant mt-2">
+              <p className="text-label-sm text-on-surface-variant mt-2">
                 {t('webhook.secretSetup', {
                   defaultValue:
                     'Trage dieses Secret im Empfaengersystem ein. Es wird als X-Webhook-Secret-Header mitgesendet und dort verifiziert.',
@@ -478,7 +478,7 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
           <h4 className="font-headline text-title-sm text-primary">
             {t('webhook.feedTitle', { defaultValue: 'Zustell-Feed' })}
           </h4>
-          <span className="text-body-xs text-on-surface-variant ml-auto">
+          <span className="text-label-sm text-on-surface-variant ml-auto">
             {t('webhook.feedAuto', { defaultValue: 'Auto-Refresh alle 5s' })}
           </span>
         </div>
@@ -501,10 +501,10 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
                   <span className="msm-badge bg-primary/10 text-primary font-mono">
                     {d.event_type}
                   </span>
-                  <span className="text-body-xs text-on-surface-variant">
+                  <span className="text-label-sm text-on-surface-variant">
                     #{d.id}
                   </span>
-                  <span className="text-body-xs text-on-surface-variant ml-auto">
+                  <span className="text-label-sm text-on-surface-variant ml-auto">
                     {new Date(d.sent_at).toLocaleTimeString()}
                     {d.attempt > 1 && (
                       <span className="ml-2">
@@ -514,9 +514,9 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
                   </span>
                 </div>
                 {d.error && (
-                  <p className="text-body-xs text-status-destructive mb-1">{d.error}</p>
+                  <p className="text-label-sm text-status-destructive mb-1">{d.error}</p>
                 )}
-                <details className="text-body-xs">
+                <details className="text-label-sm">
                   <summary className="cursor-pointer text-on-surface-variant hover:text-primary">
                     {t('webhook.feedPayload', { defaultValue: 'Payload anzeigen' })}
                   </summary>

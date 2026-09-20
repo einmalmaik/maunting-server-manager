@@ -378,7 +378,7 @@ export function Teams() {
           <section className="msm-card p-6" aria-labelledby="personal-title">
             <div className="flex items-center gap-2">
               <User className="h-5 w-5 text-secondary" aria-hidden="true" />
-              <h2 id="personal-title" className="font-headline text-lg font-semibold text-on-surface">
+              <h2 id="personal-title" className="font-headline text-title-lg font-semibold text-on-surface">
                 {t('teams.areaPersonal')}
               </h2>
             </div>
@@ -436,7 +436,7 @@ export function Teams() {
 
       {bereich === 'teams' && canCreate && (
         <section className="msm-card p-6" aria-labelledby="team-create">
-          <h2 id="team-create" className="mb-3 font-headline text-lg font-semibold text-on-surface">
+          <h2 id="team-create" className="mb-3 font-headline text-title-lg font-semibold text-on-surface">
             {t('teams.create')}
           </h2>
           <div className="flex flex-wrap items-end gap-3">
@@ -496,7 +496,7 @@ export function Teams() {
       {bereich === 'teams' && detail && !detail.is_personal && (
         <section className="space-y-4" aria-labelledby="team-knowledge">
           <div className="msm-card p-6">
-            <h2 id="team-knowledge" className="font-headline text-lg font-semibold text-on-surface">
+            <h2 id="team-knowledge" className="font-headline text-title-lg font-semibold text-on-surface">
               {t('teams.knowledge')}
             </h2>
             <p className="mt-2 max-w-3xl text-sm text-on-surface-variant">{t('teams.knowledgeHint')}</p>
@@ -512,7 +512,7 @@ export function Teams() {
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <Users className="h-5 w-5 text-primary" aria-hidden="true" />
-                <h2 id="team-members" className="font-headline text-lg font-semibold text-on-surface">
+                <h2 id="team-members" className="font-headline text-title-lg font-semibold text-on-surface">
                   {t('teams.members')}
                 </h2>
               </div>
@@ -643,7 +643,7 @@ export function Teams() {
             <section className="msm-card p-6" aria-labelledby="team-servers">
               <div className="mb-2 flex items-center gap-2">
                 <Server className="h-5 w-5 text-secondary" aria-hidden="true" />
-                <h2 id="team-servers" className="font-headline text-lg font-semibold text-on-surface">
+                <h2 id="team-servers" className="font-headline text-title-lg font-semibold text-on-surface">
                   {t('teams.servers')}
                 </h2>
               </div>
@@ -734,7 +734,7 @@ function AngebotsBlock({
     <section className="msm-card p-6" aria-labelledby={kennung}>
       <div className="flex items-center gap-2">
         <Mail className="h-5 w-5 text-primary" aria-hidden="true" />
-        <h2 id={kennung} className="font-headline text-lg font-semibold text-on-surface">
+        <h2 id={kennung} className="font-headline text-title-lg font-semibold text-on-surface">
           {titel}
         </h2>
       </div>

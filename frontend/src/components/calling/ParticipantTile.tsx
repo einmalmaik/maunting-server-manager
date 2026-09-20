@@ -80,7 +80,7 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
             {participant.username}
             {participant.isSelf && <span className="text-on-surface-variant"> (du)</span>}
           </div>
-          <div className="truncate text-[10px] text-on-surface-variant">
+          <div className="truncate text-label-sm text-on-surface-variant">
             {zustandstext(participant, t)}
           </div>
         </div>
@@ -124,7 +124,7 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
       )}
 
       <div className="pointer-events-none absolute inset-x-2 bottom-2 flex items-center justify-between gap-2">
-        <span className="min-w-0 truncate rounded-full bg-surface/85 px-2 py-0.5 text-[11px] font-medium text-on-surface backdrop-blur-sm">
+        <span className="min-w-0 truncate rounded-full bg-surface/85 px-2 py-0.5 text-label-sm font-medium text-on-surface backdrop-blur-sm">
           {participant.username}
           {participant.isSelf && <span className="text-on-surface-variant"> (du)</span>}
         </span>
@@ -139,7 +139,7 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
       </div>
 
       {participant.isPending && (
-        <span className="pointer-events-none absolute left-2 top-2 rounded-full bg-status-warning/20 px-2 py-0.5 text-[10px] uppercase tracking-wider text-status-warning">
+        <span className="pointer-events-none absolute left-2 top-2 rounded-full bg-status-warning/20 px-2 py-0.5 text-label-sm uppercase tracking-wider text-status-warning">
           Verbindet
         </span>
       )}

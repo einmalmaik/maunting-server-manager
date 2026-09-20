@@ -281,7 +281,7 @@ export const DateTimePicker = forwardRef<HTMLDivElement, DateTimePickerProps>(
                     </button>
                   </div>
 
-                  <div className="mt-3 grid grid-cols-7 gap-1 text-center text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+                  <div className="mt-3 grid grid-cols-7 gap-1 text-center text-label-sm font-bold uppercase tracking-wider text-on-surface-variant">
                     {weekdays.map((day) => (
                       <span key={day}>{day}</span>
                     ))}
@@ -315,7 +315,7 @@ export const DateTimePicker = forwardRef<HTMLDivElement, DateTimePickerProps>(
 
                   <div className="mt-3 grid grid-cols-[1fr_auto_1fr] items-end gap-2 border-t border-outline-variant pt-3">
                     <div className="min-w-0 space-y-1.5">
-                      <span className="block text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+                      <span className="block text-label-sm font-bold uppercase tracking-wider text-on-surface-variant">
                         {locale === 'de' ? 'Stunde' : 'Hour'}
                       </span>
                       <NumberStepper
@@ -328,7 +328,7 @@ export const DateTimePicker = forwardRef<HTMLDivElement, DateTimePickerProps>(
                     </div>
                     <span className="pb-2 text-sm font-bold text-on-surface-variant">:</span>
                     <div className="min-w-0 space-y-1.5">
-                      <span className="block text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+                      <span className="block text-label-sm font-bold uppercase tracking-wider text-on-surface-variant">
                         {locale === 'de' ? 'Minute' : 'Minute'}
                       </span>
                       <NumberStepper

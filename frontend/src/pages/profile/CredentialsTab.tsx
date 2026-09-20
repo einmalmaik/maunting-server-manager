@@ -111,7 +111,7 @@ export function CredentialsTab() {
       <div className="msm-card p-6">
         <div className="flex items-center gap-2">
           <KeyRound className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h3 id="credentials-title" className="font-headline text-lg font-semibold text-on-surface">
+          <h3 id="credentials-title" className="font-headline text-title-lg font-semibold text-on-surface">
             {t('credentials.title')}
           </h3>
         </div>

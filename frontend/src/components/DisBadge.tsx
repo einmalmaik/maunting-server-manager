@@ -35,7 +35,7 @@ export const DisBadge = ({ size = 24, showText = true, className }: DisBadgeProp
         />
       </span>
       {showText && (
-        <span className="text-[9px] font-semibold uppercase tracking-[0.18em] text-ice-200/80">
+        <span className="text-label-sm font-semibold uppercase tracking-[0.18em] text-ice-200/80">
           Powered by DIS
         </span>
       )}

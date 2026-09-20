@@ -128,7 +128,7 @@ export function MessengerSperrschirm() {
           )}
         </form>
 
-        <p className="text-[11px] text-on-surface-variant text-center leading-relaxed">
+        <p className="text-label-sm text-on-surface-variant text-center leading-relaxed">
           {t(
             'profile.messengerLock.screenFootnote',
             'Solange gesperrt ist, kommen keine Nachrichten an. Was in der Zwischenzeit geschickt wurde, wird nach dem Entsperren nachgeholt.',

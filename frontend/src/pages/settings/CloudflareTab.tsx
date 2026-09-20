@@ -119,7 +119,7 @@ export function CloudflareTab() {
       <div className="msm-card p-6">
         <div className="flex items-center gap-2 mb-6">
           <Globe className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 className="font-headline text-lg font-semibold text-on-surface">
+          <h2 className="font-headline text-title-lg font-semibold text-on-surface">
             {t('settings.cloudflare.title', { defaultValue: 'Cloudflare DNS' })}
           </h2>
         </div>

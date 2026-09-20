@@ -68,7 +68,7 @@ export function AiWorkerSettings({ canWrite }: { canWrite: boolean }) {
     <section className="msm-card space-y-4 p-6" aria-labelledby="ai-worker-title">
       <div className="flex items-center gap-2">
         <Bot className="h-5 w-5 text-tertiary" aria-hidden="true" />
-        <h3 id="ai-worker-title" className="font-headline text-lg font-semibold text-on-surface">
+        <h3 id="ai-worker-title" className="font-headline text-title-lg font-semibold text-on-surface">
           {t('aiSettings.worker.title')}
         </h3>
       </div>

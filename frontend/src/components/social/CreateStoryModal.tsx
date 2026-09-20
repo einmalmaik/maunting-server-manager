@@ -141,7 +141,7 @@ export function CreateStoryModal({
                 )}
 
                 {/* Top watermark / expiry tag */}
-                <div className="relative z-10 flex items-center justify-between text-[11px] font-semibold opacity-95">
+                <div className="relative z-10 flex items-center justify-between text-label-sm font-semibold opacity-95">
                   <span className="flex items-center gap-1 bg-black/50 px-2 py-0.5 rounded-full backdrop-blur-md shadow-sm">
                     <Clock className="w-3 h-3 text-primary-fixed" />
                     <span>{t('social.story.badge24h')}</span>
@@ -167,7 +167,7 @@ export function CreateStoryModal({
                 </div>
 
                 {/* Bottom tag */}
-                <div className="relative z-10 text-[10px] opacity-75 text-center truncate">
+                <div className="relative z-10 text-label-sm opacity-75 text-center truncate">
                   {t('social.story.encrypted')}
                 </div>
               </div>
@@ -220,7 +220,7 @@ export function CreateStoryModal({
             {/* Color / Gradient Selector (if no photo) */}
             {!photoDataUrl && (
               <div className="flex items-center gap-2.5 py-1 px-1">
-                <span className="text-[11px] font-semibold text-on-surface-variant/90 shrink-0">{t('social.story.colour')}</span>
+                <span className="text-label-sm font-semibold text-on-surface-variant/90 shrink-0">{t('social.story.colour')}</span>
                 <div className="flex items-center gap-2.5 overflow-x-auto no-scrollbar py-1">
                   {Object.entries(STORY_GRADIENTS).map(([k, grad]) => (
                     <button

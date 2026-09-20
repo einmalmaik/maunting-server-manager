@@ -149,7 +149,7 @@ export function AiDevicePairingCard() {
     <section className="msm-card space-y-4 p-6" aria-labelledby="ai-devices-title">
       <div className="flex items-center gap-2">
         <MonitorSmartphone className="h-5 w-5 text-secondary" aria-hidden="true" />
-        <h2 id="ai-devices-title" className="font-headline text-lg font-semibold text-on-surface">
+        <h2 id="ai-devices-title" className="font-headline text-title-lg font-semibold text-on-surface">
           {t('ai.profile.devicesTitle', 'Geräte koppeln')}
         </h2>
       </div>

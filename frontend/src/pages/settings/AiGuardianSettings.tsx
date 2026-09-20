@@ -65,7 +65,7 @@ export function AiGuardianSettings({ canWrite }: { canWrite: boolean }) {
           <Shield className="h-5 w-5 text-primary" aria-hidden="true" />
           <h3
             id="ai-guardian-settings-title"
-            className="font-headline text-lg font-semibold text-on-surface"
+            className="font-headline text-title-lg font-semibold text-on-surface"
           >
             {t('aiSettings.guardian.title')}
           </h3>

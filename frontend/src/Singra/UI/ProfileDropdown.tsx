@@ -216,7 +216,7 @@ export function ProfileDropdown({
               </p>
             </div>
             {user?.email && (
-              <p className="truncate text-[11px] text-on-surface-variant font-mono">
+              <p className="truncate text-label-sm text-on-surface-variant font-mono">
                 {user.email}
               </p>
             )}
@@ -258,10 +258,10 @@ export function ProfileDropdown({
             {onStatusChange && (
               <div className="mt-3 pt-2.5 border-t border-outline-variant/20">
                 <div className="flex items-center justify-between gap-1 mb-1.5">
-                  <span className="text-[10px] uppercase font-bold text-on-surface-variant tracking-wider">
+                  <span className="text-label-sm uppercase font-bold text-on-surface-variant tracking-wider">
                     Status
                   </span>
-                  <span className="text-[10px] text-primary capitalize font-medium">
+                  <span className="text-label-sm text-primary capitalize font-medium">
                     {status === 'invisible' ? 'Unsichtbar' : status === 'away' ? 'Abwesend' : 'Online'}
                   </span>
                 </div>
@@ -269,7 +269,7 @@ export function ProfileDropdown({
                   <button
                     type="button"
                     onClick={() => onStatusChange('online')}
-                    className={`py-1 px-1.5 rounded-lg text-[10px] font-semibold flex items-center justify-center gap-1 transition-all ${
+                    className={`py-1 px-1.5 rounded-lg text-label-sm font-semibold flex items-center justify-center gap-1 transition-all ${
                       status === 'online'
                         ? 'bg-status-success/20 text-status-success border border-status-success/40 shadow-sm'
                         : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest'
@@ -281,7 +281,7 @@ export function ProfileDropdown({
                   <button
                     type="button"
                     onClick={() => onStatusChange('away')}
-                    className={`py-1 px-1.5 rounded-lg text-[10px] font-semibold flex items-center justify-center gap-1 transition-all ${
+                    className={`py-1 px-1.5 rounded-lg text-label-sm font-semibold flex items-center justify-center gap-1 transition-all ${
                       status === 'away'
                         ? 'bg-status-warning/20 text-status-warning border border-status-warning/40 shadow-sm'
                         : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest'
@@ -293,7 +293,7 @@ export function ProfileDropdown({
                   <button
                     type="button"
                     onClick={() => onStatusChange('invisible')}
-                    className={`py-1 px-1.5 rounded-lg text-[10px] font-semibold flex items-center justify-center gap-1 transition-all ${
+                    className={`py-1 px-1.5 rounded-lg text-label-sm font-semibold flex items-center justify-center gap-1 transition-all ${
                       status === 'invisible'
                         ? 'bg-surface-container-highest text-on-surface border border-outline-variant/60 shadow-sm'
                         : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest'

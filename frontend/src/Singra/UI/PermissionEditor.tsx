@@ -358,7 +358,7 @@ export function PermissionEditor({
                         >
                           {title}
                         </span>
-                        <span className="font-mono text-[10px] text-on-surface-variant/80 truncate">
+                        <span className="font-mono text-label-sm text-on-surface-variant/80 truncate">
                           {def.key}
                         </span>
                       </div>
@@ -380,7 +380,7 @@ export function PermissionEditor({
               <span className="font-label-md text-xs font-bold text-on-surface">
                 {info.title}
               </span>
-              <span className="font-mono text-[10px] text-on-surface-variant/70 bg-surface-container-high px-1.5 py-0.5 rounded ml-auto">
+              <span className="font-mono text-label-sm text-on-surface-variant/70 bg-surface-container-high px-1.5 py-0.5 rounded ml-auto">
                 {info.key}
               </span>
             </div>

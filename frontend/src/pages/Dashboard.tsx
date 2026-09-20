@@ -149,7 +149,7 @@ function NodeCapacityCard() {
                     </span>
                   )}
                 </div>
-                <p className="mb-1.5 truncate font-mono-sm text-[11px] text-on-surface-variant/80" title={model}>
+                <p className="mb-1.5 truncate font-mono-sm text-label-sm text-on-surface-variant/80" title={model}>
                   {model}
                 </p>
                 <ProgressBar

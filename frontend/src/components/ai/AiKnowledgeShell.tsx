@@ -40,7 +40,7 @@ export function AiKnowledgeShell({
         <div>
           <div className="flex items-center gap-2">
             <Icon className="h-5 w-5 text-secondary" aria-hidden="true" />
-            <h2 className="font-headline text-lg font-semibold text-on-surface">{title}</h2>
+            <h2 className="font-headline text-title-lg font-semibold text-on-surface">{title}</h2>
           </div>
           <p className="mt-2 max-w-3xl text-sm text-on-surface-variant">{description}</p>
         </div>

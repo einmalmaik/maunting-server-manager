@@ -803,13 +803,13 @@ function Hauptseite({
             <h1 className="truncate font-headline text-base sm:text-title-lg font-bold text-on-surface">{agentName}</h1>
           </div>
           {isOffline && (
-            <div className="flex items-center gap-1 rounded-full border border-outline-variant/50 bg-surface-container-high/60 px-2 py-0.5 text-[11px] font-medium text-on-surface-variant">
+            <div className="flex items-center gap-1 rounded-full border border-outline-variant/50 bg-surface-container-high/60 px-2 py-0.5 text-label-sm font-medium text-on-surface-variant">
               <WifiOff className="h-3 w-3" aria-hidden="true" />
               <span>{t('common.offline', 'Offline')}</span>
             </div>
           )}
           {offeneUebernahme && !isOffline && (
-            <div className="flex items-center gap-1 rounded-full border border-status-warning/40 bg-status-warning/10 px-2 py-0.5 text-[11px] font-medium text-status-warning animate-pulse">
+            <div className="flex items-center gap-1 rounded-full border border-status-warning/40 bg-status-warning/10 px-2 py-0.5 text-label-sm font-medium text-status-warning animate-pulse">
               <Eye className="h-3 w-3" aria-hidden="true" />
               <span>{t('mss.einstellungen.banner.aktivitaetLaeuft')}</span>
             </div>
@@ -954,7 +954,7 @@ function Hauptseite({
                   <MessageSquare className="h-4 w-4" />
                   <span className="flex-1">{t('mss.app.messenger', t('nav.chat', 'Messenger'))}</span>
                   {totalMessengerUnread > 0 && (
-                    <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-primary text-on-primary">
+                    <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-label-sm font-bold rounded-full bg-primary text-on-primary">
                       {totalMessengerUnread > 99 ? '99+' : totalMessengerUnread}
                     </span>
                   )}
@@ -1148,7 +1148,7 @@ function Reiter({
       </div>
       <span className={aktiv ? 'inline' : 'hidden xl:inline'}>{label}</span>
       {badge !== undefined && badge > 0 && (
-        <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-[9px] font-bold rounded-full bg-primary text-on-primary ml-0.5">
+        <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-label-sm font-bold rounded-full bg-primary text-on-primary ml-0.5">
           {badge > 99 ? '99+' : badge}
         </span>
       )}

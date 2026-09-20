@@ -166,7 +166,7 @@ export function HosterTab({ canWrite }: { canWrite: boolean }) {
         <div className="max-w-3xl">
           <div className="flex items-center gap-2">
             <Plug className="h-5 w-5 text-secondary" aria-hidden="true" />
-            <h3 id="hoster-title" className="font-headline text-lg font-semibold text-on-surface">
+            <h3 id="hoster-title" className="font-headline text-title-lg font-semibold text-on-surface">
               {t('hoster.title')}
             </h3>
           </div>

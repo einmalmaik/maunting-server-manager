@@ -176,9 +176,9 @@ export function GlobeViewer({
             <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
             <span className="truncate">{resolvedLocation}</span>
           </div>
-          {hasCoordinates && <p className="mt-1 text-[11px] text-on-surface-variant">{coordinateLabel(resolvedLatitude as number, resolvedLongitude as number)}</p>}
+          {hasCoordinates && <p className="mt-1 text-label-sm text-on-surface-variant">{coordinateLabel(resolvedLatitude as number, resolvedLongitude as number)}</p>}
         </div>
-        <div className="rounded-xl border border-outline-variant/30 bg-surface-container-low/90 px-2.5 py-2 text-[11px] text-on-surface-variant shadow-sm backdrop-blur-md">
+        <div className="rounded-xl border border-outline-variant/30 bg-surface-container-low/90 px-2.5 py-2 text-label-sm text-on-surface-variant shadow-sm backdrop-blur-md">
           <span className="flex items-center gap-1.5">
             <Compass className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
             {mapReady ? t('ai.geo.mapInteractive', 'Karte aktiv') : t('ai.geo.mapLoading', 'Karte wird geladen')}
@@ -194,7 +194,7 @@ export function GlobeViewer({
       )}
 
       {scene && (
-        <div className="pointer-events-none absolute bottom-3 left-3 z-10 rounded-xl border border-outline-variant/30 bg-surface-container-low/90 px-3 py-2 text-[11px] shadow-sm backdrop-blur-md">
+        <div className="pointer-events-none absolute bottom-3 left-3 z-10 rounded-xl border border-outline-variant/30 bg-surface-container-low/90 px-3 py-2 text-label-sm shadow-sm backdrop-blur-md">
           <div className="flex items-center gap-1.5 font-medium text-on-surface">
             <Satellite className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
             {scene.mission}

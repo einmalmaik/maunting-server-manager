@@ -43,7 +43,7 @@ export function AiAgentNameCard() {
     <section className="msm-card space-y-4 p-6" aria-labelledby="ai-agent-name-title">
       <div className="flex items-center gap-2">
         <Signature className="h-5 w-5 text-secondary" aria-hidden="true" />
-        <h2 id="ai-agent-name-title" className="font-headline text-lg font-semibold text-on-surface">
+        <h2 id="ai-agent-name-title" className="font-headline text-title-lg font-semibold text-on-surface">
           {t('ai.profile.agentNameTitle', 'Name des Assistenten')}
         </h2>
       </div>

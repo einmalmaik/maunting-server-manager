@@ -516,7 +516,7 @@ export function AufgabenAnsicht() {
           {leer && !formular && (
             <div className="py-16 text-center">
               <Sparkles className="mx-auto h-10 w-10 text-primary/70" aria-hidden="true" />
-              <h3 className="mt-4 font-headline text-lg font-semibold text-on-surface">
+              <h3 className="mt-4 font-headline text-title-lg font-semibold text-on-surface">
                 {t('ai.tasks.emptyTitle')}
               </h3>
               <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-on-surface-variant">

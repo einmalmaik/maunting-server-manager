@@ -108,7 +108,7 @@ export function ConnectedCalendarsSection() {
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <Calendar className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 className="font-headline text-lg font-semibold text-on-surface">
+          <h2 className="font-headline text-title-lg font-semibold text-on-surface">
             {t('profile.calendars.title', 'Verknüpfte Kalender (CalDAV)')}
           </h2>
         </div>
@@ -138,7 +138,7 @@ export function ConnectedCalendarsSection() {
                 <div className="flex items-center gap-2">
                   <span className="font-label-md text-sm text-on-surface font-medium">{cal.name}</span>
                   {cal.is_default && (
-                    <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
+                    <span className="inline-flex items-center gap-1 text-label-sm px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
                       <Star className="w-3 h-3 fill-primary" />
                       Standard
                     </span>
@@ -196,7 +196,7 @@ export function ConnectedCalendarsSection() {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-2">
-                <h3 className="font-headline text-lg font-semibold text-on-surface">
+                <h3 className="font-headline text-title-lg font-semibold text-on-surface">
                   {t('profile.calendars.add', 'Kalender hinzufügen')}
                 </h3>
                 <button
@@ -248,7 +248,7 @@ export function ConnectedCalendarsSection() {
                     onChange={(e) => setCaldavUrl(e.target.value)}
                     className="msm-input w-full text-sm font-mono"
                   />
-                  <p className="text-[11px] text-on-surface-variant mt-1">
+                  <p className="text-label-sm text-on-surface-variant mt-1">
                     {t('profile.calendars.caldavHelp', 'CalDAV-URL deines Kalenders (z. B. Nextcloud, Google CalDAV).')}
                   </p>
                 </div>

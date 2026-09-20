@@ -122,7 +122,7 @@ export function DesktopAktionKarte({
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <h2 className="font-headline text-lg font-semibold text-on-surface">
+              <h2 className="font-headline text-title-lg font-semibold text-on-surface">
                 {anfrage.titel}
               </h2>
               <span className="inline-flex items-center gap-1 rounded-full bg-status-warning/10 px-2 py-0.5 text-xs font-medium text-status-warning">

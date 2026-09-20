@@ -484,7 +484,7 @@
       "learned": "Learned skill “{{name}}”",
       "learnedPending": "Skill “{{name}}” learned (pending approval)",
       "scopes": {
-        "shipped": "bundled",
+        "shipped": "Built-in",
         "global": "Panel-wide",
         "team": "Team",
         "personal": "Personal",

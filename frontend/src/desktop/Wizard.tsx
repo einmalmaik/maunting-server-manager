@@ -298,7 +298,7 @@ function SchrittKopplung({
         {stand?.backend_url && (
           <div className="flex items-center justify-between rounded-lg bg-surface-container-high/40 p-2.5 px-3 border border-outline-variant/30 text-xs">
             <div className="flex flex-col min-w-0 pr-2">
-              <span className="text-on-surface-variant text-[11px]">{t('mss.wizard.verbundenesPanel', 'Panel-Server')}:</span>
+              <span className="text-on-surface-variant text-label-sm">{t('mss.wizard.verbundenesPanel', 'Panel-Server')}:</span>
               <span className="font-mono text-on-surface truncate font-medium">{stand.backend_url}</span>
             </div>
             {onZurueck && (

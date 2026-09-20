@@ -203,7 +203,7 @@ export function FileTree({
             )}
             {entry.is_dir ? <Folder className="h-4 w-4 shrink-0 text-secondary" /> : <FileIcon className="h-4 w-4 shrink-0 text-on-surface-variant" />}
             <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-            {!entry.is_dir && <span className="shrink-0 font-mono text-[10px] text-on-surface-variant/60 group-hover:text-on-surface-variant">{formatBytes(entry.size)}</span>}
+            {!entry.is_dir && <span className="shrink-0 font-mono text-label-sm text-on-surface-variant/60 group-hover:text-on-surface-variant">{formatBytes(entry.size)}</span>}
           </div>
           {entry.is_dir && isExpanded && <div role="group">{renderChildren(path, depth + 1)}</div>}
         </div>
@@ -234,11 +234,11 @@ export function FileTree({
               <span className="flex w-full items-center gap-2 text-xs text-on-surface-variant">
                 <FileIcon className="h-4 w-4 shrink-0" />
                 <span className="truncate font-mono">{match.path}</span>
-                <span className="ml-auto shrink-0 font-mono text-[10px] text-secondary">:{match.line}</span>
+                <span className="ml-auto shrink-0 font-mono text-label-sm text-secondary">:{match.line}</span>
               </span>
               {/* Die Trefferzeile selbst — sie ist der Grund, warum jemand nach
                   Inhalt sucht statt nach Namen. */}
-              <span className="w-full truncate pl-6 font-mono text-[10px] text-on-surface">{match.text}</span>
+              <span className="w-full truncate pl-6 font-mono text-label-sm text-on-surface">{match.text}</span>
             </button>
           )
         })}

@@ -528,7 +528,7 @@ export function Calendar() {
         <span
           title={ev.team_name ? `Team: ${ev.team_name}` : 'Team-Termin'}
           className={`inline-flex items-center gap-1 rounded font-semibold bg-status-success/20 text-status-success border border-status-success/30 ${
-            isCompact ? 'text-[9px] px-1 py-0.5' : 'text-[10px] px-1.5 py-0.5'
+            isCompact ? 'text-label-sm px-1 py-0.5' : 'text-label-sm px-1.5 py-0.5'
           }`}
         >
           <Users className={isCompact ? 'w-2.5 h-2.5' : 'w-3 h-3'} />
@@ -541,7 +541,7 @@ export function Calendar() {
         <span
           title={ev.server_name ? `Server: ${ev.server_name}` : t('calendar.filterServer')}
           className={`inline-flex items-center gap-1 rounded font-semibold ${SERVER_TON.flaecheStark} ${SERVER_TON.text} border ${SERVER_TON.rand} ${
-            isCompact ? 'text-[9px] px-1 py-0.5' : 'text-[10px] px-1.5 py-0.5'
+            isCompact ? 'text-label-sm px-1 py-0.5' : 'text-label-sm px-1.5 py-0.5'
           }`}
         >
           <Server className={isCompact ? 'w-2.5 h-2.5' : 'w-3 h-3'} />
@@ -554,7 +554,7 @@ export function Calendar() {
         <span
           title="Node / Infrastruktur"
           className={`inline-flex items-center gap-1 rounded font-semibold bg-status-warning/20 text-status-warning border border-status-warning/30 ${
-            isCompact ? 'text-[9px] px-1 py-0.5' : 'text-[10px] px-1.5 py-0.5'
+            isCompact ? 'text-label-sm px-1 py-0.5' : 'text-label-sm px-1.5 py-0.5'
           }`}
         >
           <Network className={isCompact ? 'w-2.5 h-2.5' : 'w-3 h-3'} />
@@ -607,7 +607,7 @@ export function Calendar() {
         >
           <CalendarIcon className="w-3.5 h-3.5" />
           <span>{t('calendar.filterAll', 'Alle')}</span>
-          <span className="text-[10px] opacity-80 font-mono">({events.length})</span>
+          <span className="text-label-sm opacity-80 font-mono">({events.length})</span>
         </button>
         <button
           type="button"
@@ -620,7 +620,7 @@ export function Calendar() {
         >
           <User className="w-3.5 h-3.5 text-primary" />
           <span>{t('calendar.filterPersonal', 'Persönlich')}</span>
-          <span className="text-[10px] opacity-80 font-mono">
+          <span className="text-label-sm opacity-80 font-mono">
             ({events.filter((e) => !e.event_type || e.event_type === 'personal').length})
           </span>
         </button>
@@ -635,7 +635,7 @@ export function Calendar() {
         >
           <Users className="w-3.5 h-3.5 text-status-success" />
           <span>{t('calendar.filterTeam', 'Team')}</span>
-          <span className="text-[10px] opacity-80 font-mono">
+          <span className="text-label-sm opacity-80 font-mono">
             ({events.filter((e) => e.event_type === 'team').length})
           </span>
         </button>
@@ -650,7 +650,7 @@ export function Calendar() {
         >
           <Server className={`w-3.5 h-3.5 ${SERVER_TON.text}`} />
           <span>{t('calendar.filterServer', 'Server-Wartung')}</span>
-          <span className="text-[10px] opacity-80 font-mono">
+          <span className="text-label-sm opacity-80 font-mono">
             ({events.filter((e) => e.event_type === 'server').length})
           </span>
         </button>
@@ -665,7 +665,7 @@ export function Calendar() {
         >
           <Network className="w-3.5 h-3.5 text-status-warning" />
           <span>{t('calendar.filterNode', 'Node')}</span>
-          <span className="text-[10px] opacity-80 font-mono">
+          <span className="text-label-sm opacity-80 font-mono">
             ({events.filter((e) => e.event_type === 'node').length})
           </span>
         </button>
@@ -683,7 +683,7 @@ export function Calendar() {
           <Button variant="secondary" size="sm" onClick={handleNext} aria-label="Vor">
             <ChevronRight className="w-4 h-4" />
           </Button>
-          <span className="font-headline text-lg font-bold text-on-surface ml-3">
+          <span className="font-headline text-title-lg font-bold text-on-surface ml-3">
             {headerTitle}
           </span>
         </div>
@@ -772,7 +772,7 @@ export function Calendar() {
                       {date.getDate()}
                     </span>
                     {dayEvents.length > 0 && (
-                      <span className="text-[10px] text-on-surface-variant px-1 font-mono">
+                      <span className="text-label-sm text-on-surface-variant px-1 font-mono">
                         {dayEvents.length}
                       </span>
                     )}
@@ -793,7 +793,7 @@ export function Calendar() {
                             e.stopPropagation()
                             openEditModal(ev)
                           }}
-                          className={`text-[11px] leading-tight px-1.5 py-0.5 rounded border truncate flex items-center gap-1 ${colorStyle.flaecheStark} ${colorStyle.text} ${colorStyle.rand} hover:brightness-110`}
+                          className={`text-label-sm leading-tight px-1.5 py-0.5 rounded border truncate flex items-center gap-1 ${colorStyle.flaecheStark} ${colorStyle.text} ${colorStyle.rand} hover:brightness-110`}
                         >
                           {ev.event_type === 'team' && <Users className="w-2.5 h-2.5 shrink-0 opacity-90 text-status-success" />}
                           {ev.event_type === 'server' && <Server className={`w-2.5 h-2.5 shrink-0 opacity-90 ${SERVER_TON.text}`} />}
@@ -804,7 +804,7 @@ export function Calendar() {
                       )
                     })}
                     {dayEvents.length > 3 && (
-                      <div className="text-[10px] text-primary/80 font-medium px-1">
+                      <div className="text-label-sm text-primary/80 font-medium px-1">
                         +{dayEvents.length - 3} weitere
                       </div>
                     )}
@@ -824,7 +824,7 @@ export function Calendar() {
             <div className="grid grid-cols-7 border-b border-outline-variant/40 bg-surface-container/50 text-center py-2.5">
               {weekDays.map(({ date, isToday }, idx) => (
                 <div key={idx} className="flex flex-col items-center">
-                  <span className="text-[11px] font-label-md uppercase text-on-surface-variant">
+                  <span className="text-label-sm font-label-md uppercase text-on-surface-variant">
                     {date.toLocaleDateString(locale, { weekday: 'short' })}
                   </span>
                   <span
@@ -877,12 +877,12 @@ export function Calendar() {
                               <div className="font-semibold text-sm truncate flex-1">{ev.title}</div>
                               {renderCategoryBadge(ev, true)}
                             </div>
-                            <div className="flex items-center gap-1 text-[10px] opacity-80 mt-1">
+                            <div className="flex items-center gap-1 text-label-sm opacity-80 mt-1">
                               <Clock className="w-3 h-3" />
                               <span>{startStr} – {endStr}</span>
                             </div>
                             {ev.location && (
-                              <div className="flex items-center gap-1 text-[10px] opacity-80 mt-0.5 truncate">
+                              <div className="flex items-center gap-1 text-label-sm opacity-80 mt-0.5 truncate">
                                 <MapPin className="w-3 h-3" />
                                 <span className="truncate">{ev.location}</span>
                               </div>
@@ -923,7 +923,7 @@ export function Calendar() {
                         {weekdayStr}, {dateStr}
                       </span>
                       {isToday && (
-                        <span className="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-primary/15 text-primary">
+                        <span className="text-label-sm font-semibold uppercase px-1.5 py-0.5 rounded bg-primary/15 text-primary">
                           Heute
                         </span>
                       )}
@@ -968,7 +968,7 @@ export function Calendar() {
                                 <div className="font-semibold text-sm truncate">{ev.title}</div>
                                 {renderCategoryBadge(ev, true)}
                               </div>
-                              <div className="flex items-center gap-3 text-[11px] opacity-80 mt-1">
+                              <div className="flex items-center gap-3 text-label-sm opacity-80 mt-1">
                                 <span className="flex items-center gap-1">
                                   <Clock className="w-3.5 h-3.5" />
                                   {startStr} – {endStr}
@@ -998,7 +998,7 @@ export function Calendar() {
         <div className="msm-card p-6 max-w-2xl mx-auto space-y-4">
           <div className="flex items-center justify-between border-b border-outline-variant/40 pb-4">
             <div>
-              <h3 className="font-headline text-lg font-bold text-on-surface">
+              <h3 className="font-headline text-title-lg font-bold text-on-surface">
                 {currentDate.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
               </h3>
               <p className="text-xs text-on-surface-variant">
@@ -1077,7 +1077,7 @@ export function Calendar() {
         <div className="msm-modal-overlay animate-fade-in">
           <div className="msm-card w-full max-w-lg p-6 shadow-2xl space-y-5 animate-scale-in max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-outline-variant/30 pb-3">
-              <h3 className="font-headline text-lg font-bold text-on-surface">
+              <h3 className="font-headline text-title-lg font-bold text-on-surface">
                 {formEventId ? t('calendar.editEvent', 'Termin bearbeiten') : t('calendar.createEvent', 'Neuer Termin')}
               </h3>
               <button
@@ -1350,7 +1350,7 @@ export function Calendar() {
         <div className="msm-modal-overlay animate-fade-in">
           <div className="msm-card w-full max-w-lg p-6 shadow-2xl space-y-5 animate-scale-in">
             <div className="flex items-center justify-between border-b border-outline-variant/30 pb-3">
-              <h3 className="font-headline text-lg font-bold text-on-surface">
+              <h3 className="font-headline text-title-lg font-bold text-on-surface">
                 {t('calendar.feedModalTitle', 'Kalender abonnieren & exportieren')}
               </h3>
               <button

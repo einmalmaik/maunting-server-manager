@@ -174,7 +174,7 @@ export function BackupTab() {
       <div className="msm-card p-6">
         <div className="flex items-center gap-2 mb-4">
           <ShieldCheck className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 className="font-headline text-lg font-semibold text-on-surface">{t('settings.backup.statusTitle')}</h2>
+          <h2 className="font-headline text-title-lg font-semibold text-on-surface">{t('settings.backup.statusTitle')}</h2>
         </div>
         <div className="flex flex-wrap gap-4">
           <span className={`px-3 py-1.5 rounded-full text-sm font-medium border ${
@@ -198,7 +198,7 @@ export function BackupTab() {
       <form onSubmit={handleSaveS3} className="msm-card p-6">
         <div className="flex items-center gap-2 mb-6">
           <Cloud className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 className="font-headline text-lg font-semibold text-on-surface">{t('settings.backup.s3Title')}</h2>
+          <h2 className="font-headline text-title-lg font-semibold text-on-surface">{t('settings.backup.s3Title')}</h2>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -305,7 +305,7 @@ export function BackupTab() {
       <form onSubmit={handleSavePassword} className="msm-card p-6">
         <div className="flex items-center gap-2 mb-6">
           <KeyRound className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 className="font-headline text-lg font-semibold text-on-surface">{t('settings.backup.passwordTitle')}</h2>
+          <h2 className="font-headline text-title-lg font-semibold text-on-surface">{t('settings.backup.passwordTitle')}</h2>
         </div>
 
         <div className="flex items-center gap-2 mb-4">

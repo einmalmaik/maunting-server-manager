@@ -87,7 +87,7 @@ export function GitHubTab() {
       <div className="msm-card p-6">
         <div className="flex items-center gap-2 mb-6">
           <Github className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 className="font-headline text-lg font-semibold text-on-surface">{t('settings.githubTokenTitle')}</h2>
+          <h2 className="font-headline text-title-lg font-semibold text-on-surface">{t('settings.githubTokenTitle')}</h2>
         </div>
 
         <form onSubmit={handleSave} className="space-y-4">

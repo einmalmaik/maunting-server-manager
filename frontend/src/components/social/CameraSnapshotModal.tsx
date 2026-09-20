@@ -255,7 +255,7 @@ export function CameraSnapshotModal({
                 <div className="w-10 h-10 rounded-xl bg-surface-container-high flex items-center justify-center border border-outline-variant/40">
                   <Upload className="w-5 h-5" />
                 </div>
-                <span className="text-[10px]">{t('social.camera.gallery')}</span>
+                <span className="text-label-sm">{t('social.camera.gallery')}</span>
               </button>
 
               {/* Center: Big WhatsApp Shutter Button */}
@@ -285,7 +285,7 @@ export function CameraSnapshotModal({
                 <div className="w-10 h-10 rounded-xl bg-surface-container-high flex items-center justify-center border border-outline-variant/40">
                   <RefreshCw className="w-5 h-5" />
                 </div>
-                <span className="text-[10px]">{t('social.camera.flipShort')}</span>
+                <span className="text-label-sm">{t('social.camera.flipShort')}</span>
               </button>
             </div>
           )}

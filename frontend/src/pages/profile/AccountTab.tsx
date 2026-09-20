@@ -200,7 +200,7 @@ export function AccountTab() {
       <div className="msm-card p-6">
         <div className="flex items-center gap-2 mb-6">
           <Mail className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 className="font-headline text-lg font-semibold text-on-surface">{t('auth.email', 'Konto & Profilbild')}</h2>
+          <h2 className="font-headline text-title-lg font-semibold text-on-surface">{t('auth.email', 'Konto & Profilbild')}</h2>
         </div>
 
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
@@ -277,7 +277,7 @@ export function AccountTab() {
       <div className="msm-card p-6">
         <div className="flex items-center gap-2 mb-6">
           <Clock className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 className="font-headline text-lg font-semibold text-on-surface">
+          <h2 className="font-headline text-title-lg font-semibold text-on-surface">
             {t('profile.timezoneTitle', 'Zeitzone')}
           </h2>
         </div>
@@ -360,7 +360,7 @@ export function AccountTab() {
               <MapPin className="h-4 w-4" aria-hidden="true" />
             </div>
             <div>
-              <h2 id="location-sharing-title" className="font-headline text-lg font-semibold text-on-surface">
+              <h2 id="location-sharing-title" className="font-headline text-title-lg font-semibold text-on-surface">
                 {t('profile.locationSharingTitle', 'Standort für KI-Anfragen')}
               </h2>
               <p className="mt-1 max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant">
@@ -412,7 +412,7 @@ export function AccountTab() {
       <section className="msm-card p-6" aria-labelledby="privacy-settings-title">
         <div className="flex items-center gap-2 mb-4">
           <Shield className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 id="privacy-settings-title" className="font-headline text-lg font-semibold text-on-surface">
+          <h2 id="privacy-settings-title" className="font-headline text-title-lg font-semibold text-on-surface">
             {t('profile.privacyTitle', 'Privatsphäre & Sichtbarkeit')}
           </h2>
         </div>

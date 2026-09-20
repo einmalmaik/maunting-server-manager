@@ -252,7 +252,7 @@ function GroupRoleForm({ initial, onSubmit, onCancel, disabled }: GroupRoleFormP
               <button
                 type="button"
                 onClick={handleSelectAll}
-                className="text-[11px] font-medium text-primary hover:underline"
+                className="text-label-sm font-medium text-primary hover:underline"
               >
                 {t('social.groupRoles.selectAll')}
               </button>
@@ -260,7 +260,7 @@ function GroupRoleForm({ initial, onSubmit, onCancel, disabled }: GroupRoleFormP
               <button
                 type="button"
                 onClick={handleDeselectAll}
-                className="text-[11px] font-medium text-on-surface-variant hover:text-on-surface"
+                className="text-label-sm font-medium text-on-surface-variant hover:text-on-surface"
               >
                 {t('social.groupRoles.selectNone')}
               </button>
@@ -289,7 +289,7 @@ function GroupRoleForm({ initial, onSubmit, onCancel, disabled }: GroupRoleFormP
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="text-xs font-semibold text-primary">{t(permissionTitleKey(def.key))}</div>
-                  <div className="text-[11px] text-on-surface-variant/80 mt-0.5 leading-snug">
+                  <div className="text-label-sm text-on-surface-variant/80 mt-0.5 leading-snug">
                     {t(permissionDescKey(def.key))}
                   </div>
                 </div>
@@ -573,7 +573,7 @@ export function GroupPermissionsModal({
                 setIsCreatingRole(false)
                 setEditingRole(null)
               }}
-              className={`py-2 sm:pb-3.5 px-1 sm:px-3 text-[11px] sm:text-sm font-semibold flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 transition-all rounded-lg sm:rounded-none sm:border-b-2 text-center select-none ${
+              className={`py-2 sm:pb-3.5 px-1 sm:px-3 text-label-sm sm:text-sm font-semibold flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 transition-all rounded-lg sm:rounded-none sm:border-b-2 text-center select-none ${
                 activeTab === 'members'
                   ? 'bg-primary/15 sm:bg-transparent text-primary sm:border-primary shadow-sm sm:shadow-none'
                   : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 sm:hover:bg-transparent sm:border-transparent'
@@ -593,7 +593,7 @@ export function GroupPermissionsModal({
                 setIsCreatingRole(false)
                 setEditingRole(null)
               }}
-              className={`py-2 sm:pb-3.5 px-1 sm:px-3 text-[11px] sm:text-sm font-semibold flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 transition-all rounded-lg sm:rounded-none sm:border-b-2 text-center select-none ${
+              className={`py-2 sm:pb-3.5 px-1 sm:px-3 text-label-sm sm:text-sm font-semibold flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 transition-all rounded-lg sm:rounded-none sm:border-b-2 text-center select-none ${
                 activeTab === 'roles'
                   ? 'bg-primary/15 sm:bg-transparent text-primary sm:border-primary shadow-sm sm:shadow-none'
                   : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 sm:hover:bg-transparent sm:border-transparent'
@@ -613,7 +613,7 @@ export function GroupPermissionsModal({
                 setIsCreatingRole(false)
                 setEditingRole(null)
               }}
-              className={`py-2 sm:pb-3.5 px-1 sm:px-3 text-[11px] sm:text-sm font-semibold flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 transition-all rounded-lg sm:rounded-none sm:border-b-2 text-center select-none ${
+              className={`py-2 sm:pb-3.5 px-1 sm:px-3 text-label-sm sm:text-sm font-semibold flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 transition-all rounded-lg sm:rounded-none sm:border-b-2 text-center select-none ${
                 activeTab === 'permissions'
                   ? 'bg-primary/15 sm:bg-transparent text-primary sm:border-primary shadow-sm sm:shadow-none'
                   : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 sm:hover:bg-transparent sm:border-transparent'
@@ -674,7 +674,7 @@ export function GroupPermissionsModal({
                                 {member.username}
                               </span>
                               {isSelf && (
-                                <span className="text-[10px] text-on-surface-variant/70 font-normal">
+                                <span className="text-label-sm text-on-surface-variant/70 font-normal">
                                   {t('social.groupRoles.you')}
                                 </span>
                               )}
@@ -690,7 +690,7 @@ export function GroupPermissionsModal({
                                     ? 'default'
                                     : 'default'
                                 }
-                                className="text-[10px] py-0 px-2 font-medium"
+                                className="text-label-sm py-0 px-2 font-medium"
                               >
                                 {isMemberOwner
                                   ? t('social.groupRoles.system.owner.name')
@@ -807,15 +807,15 @@ export function GroupPermissionsModal({
                             {rollentext(r.name, r.is_system, t)}
                           </span>
                           {r.is_system ? (
-                            <span className="text-[10px] px-2 py-0.5 rounded-md bg-status-warning/15 text-status-warning font-semibold shrink-0">
+                            <span className="text-label-sm px-2 py-0.5 rounded-md bg-status-warning/15 text-status-warning font-semibold shrink-0">
                               {t('social.groupRoles.badgeSystem')}
                             </span>
                           ) : (
-                            <span className="text-[10px] px-2 py-0.5 rounded-md bg-primary/15 text-primary font-semibold shrink-0">
+                            <span className="text-label-sm px-2 py-0.5 rounded-md bg-primary/15 text-primary font-semibold shrink-0">
                               {t('social.groupRoles.badgeCustom')}
                             </span>
                           )}
-                          <Badge variant="default" className="text-[10px] px-2 py-0.5 font-medium shrink-0">
+                          <Badge variant="default" className="text-label-sm px-2 py-0.5 font-medium shrink-0">
                             {t('social.groupRoles.rightsCount', { count: r.permissions.length })}
                           </Badge>
                         </div>
@@ -870,7 +870,7 @@ export function GroupPermissionsModal({
                                   [r.id]: !isExpanded,
                                 }))
                               }
-                              className="sm:hidden text-[11px] font-medium text-primary hover:underline mt-1 flex items-center gap-1"
+                              className="sm:hidden text-label-sm font-medium text-primary hover:underline mt-1 flex items-center gap-1"
                             >
                               {isExpanded ? (
                                 <>
@@ -895,14 +895,14 @@ export function GroupPermissionsModal({
                           return (
                             <span
                               key={`role-chip-${r.id}-${pk}`}
-                              className="text-[10px] px-2 py-0.5 rounded-md bg-surface-container-high text-on-surface-variant border border-outline-variant/20 font-medium"
+                              className="text-label-sm px-2 py-0.5 rounded-md bg-surface-container-high text-on-surface-variant border border-outline-variant/20 font-medium"
                             >
                               {def ? t(permissionTitleKey(def.key)) : pk}
                             </span>
                           )
                         })}
                         {r.permissions.length > 4 && (
-                          <span className="text-[10px] text-on-surface-variant/80 font-medium px-1">
+                          <span className="text-label-sm text-on-surface-variant/80 font-medium px-1">
                             {t('social.groupRoles.moreRights', { count: r.permissions.length - 4 })}
                           </span>
                         )}
@@ -957,7 +957,7 @@ export function GroupPermissionsModal({
                           <span className="block text-xs font-bold text-primary">
                             {t(permissionTitleKey(recht))}
                           </span>
-                          <span className="text-[11px] leading-snug text-on-surface-variant">
+                          <span className="text-label-sm leading-snug text-on-surface-variant">
                             {t(permissionDescKey(recht))}
                           </span>
                         </div>

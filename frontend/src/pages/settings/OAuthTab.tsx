@@ -246,7 +246,7 @@ export function OAuthTab() {
       <div className="msm-card p-6">
         <div className="flex items-center gap-2 mb-6">
           <KeyRound className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 className="font-headline text-lg font-semibold text-on-surface flex-1">
+          <h2 className="font-headline text-title-lg font-semibold text-on-surface flex-1">
             {t('settings.oauth.providers')}
           </h2>
           {canWrite && (
@@ -344,7 +344,7 @@ export function OAuthTab() {
         <div className="msm-card p-6">
           <div className="flex items-center gap-2 mb-6">
             <ShieldCheck className="h-5 w-5 text-secondary" aria-hidden="true" />
-            <h2 className="font-headline text-lg font-semibold text-on-surface">
+            <h2 className="font-headline text-title-lg font-semibold text-on-surface">
               {t('settings.oauth.switches')}
             </h2>
           </div>

@@ -257,7 +257,7 @@ export const AiAntwortblase = memo(function AiAntwortblase({
           />
         )}
         {message.created_at && !isStreaming && (
-          <p className="mt-1 text-[10px] text-on-surface-variant/60">
+          <p className="mt-1 text-label-sm text-on-surface-variant/60">
             {formatMessageTime(message.created_at)}
           </p>
         )}
@@ -331,7 +331,7 @@ function AiWerkzeugzeile({ tool }: { tool: AiToolUse }) {
       {tool.failed && errorOpen && failureDetail && (
         <div className="ml-5 p-2 rounded bg-status-destructive/10 border border-status-destructive/20 text-xs text-status-destructive font-mono break-all whitespace-pre-wrap">
           {tool.error_code && (
-            <div className="font-semibold mb-1 text-[11px] uppercase tracking-wider text-status-destructive/90">
+            <div className="font-semibold mb-1 text-label-sm uppercase tracking-wider text-status-destructive/90">
               {tool.error_code}
             </div>
           )}
@@ -515,7 +515,7 @@ export function AiVerlauf({ entries, laufendeWerkzeuge, onProposalChange }: {
                   {message.content}
                 </p>
                 {message.created_at && (
-                  <span className="mt-1 text-[10px] text-on-surface-variant/70">
+                  <span className="mt-1 text-label-sm text-on-surface-variant/70">
                     {formatMessageTime(message.created_at)}
                   </span>
                 )}

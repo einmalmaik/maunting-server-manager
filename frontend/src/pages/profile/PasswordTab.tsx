@@ -58,7 +58,7 @@ export function PasswordTab() {
     <div className="msm-card p-6">
       <div className="flex items-center gap-2 mb-6">
         <KeyRound className="h-5 w-5 text-secondary" aria-hidden="true" />
-        <h2 className="font-headline text-lg font-semibold text-on-surface">{t('profile.changePassword')}</h2>
+        <h2 className="font-headline text-title-lg font-semibold text-on-surface">{t('profile.changePassword')}</h2>
       </div>
 
       {error && <div className="msm-alert-error text-sm mb-4">{error}</div>}

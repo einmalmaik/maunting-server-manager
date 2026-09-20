@@ -244,7 +244,7 @@ export function AudioTab() {
         <div className="flex items-center justify-between gap-4 mb-4">
           <div className="flex items-center gap-2">
             <Mic className="h-5 w-5 text-secondary" aria-hidden="true" />
-            <h2 id="audio-devices-heading" className="font-headline text-lg font-semibold text-on-surface">
+            <h2 id="audio-devices-heading" className="font-headline text-title-lg font-semibold text-on-surface">
               {t('profile.audioTitle', 'Mikrofon & Audio')}
             </h2>
           </div>
@@ -306,7 +306,7 @@ export function AudioTab() {
       <section className="msm-card p-6" aria-labelledby="audio-processing-heading">
         <div className="flex items-center gap-2 mb-4">
           <Sliders className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 id="audio-processing-heading" className="font-headline text-lg font-semibold text-on-surface">
+          <h2 id="audio-processing-heading" className="font-headline text-title-lg font-semibold text-on-surface">
             {t('mss.audio.verarbeitung', 'Signalverarbeitung & Filter')}
           </h2>
         </div>
@@ -381,7 +381,7 @@ export function AudioTab() {
       <section className="msm-card p-6" aria-labelledby="audio-test-heading">
         <div className="flex items-center gap-2 mb-4">
           <Volume2 className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 id="audio-test-heading" className="font-headline text-lg font-semibold text-on-surface">
+          <h2 id="audio-test-heading" className="font-headline text-title-lg font-semibold text-on-surface">
             {t('mss.audio.testhoeren', 'Testhören & Mikrofon-Pegel')}
           </h2>
         </div>

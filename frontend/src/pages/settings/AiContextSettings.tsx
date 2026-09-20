@@ -64,7 +64,7 @@ export function AiContextSettings({ canWrite }: { canWrite: boolean }) {
     <section className="msm-card space-y-4 p-6" aria-labelledby="ai-context-title">
       <div className="flex items-center gap-2">
         <Gauge className="h-5 w-5 text-tertiary" aria-hidden="true" />
-        <h3 id="ai-context-title" className="font-headline text-lg font-semibold text-on-surface">
+        <h3 id="ai-context-title" className="font-headline text-title-lg font-semibold text-on-surface">
           {t('ai.context.title')}
         </h3>
       </div>

@@ -241,7 +241,7 @@ export function SecurityTab() {
             <div className="msm-card p-6">
               <div className="mb-3 flex items-center gap-2">
                 <Gauge className="h-5 w-5 text-primary" />
-                <h3 className="font-headline text-lg font-semibold text-on-surface">
+                <h3 className="font-headline text-title-lg font-semibold text-on-surface">
                   {t('security.rateLimitsTitle', {
                     defaultValue: 'API- und Login-Rate-Limits',
                   })}
@@ -357,7 +357,7 @@ export function SecurityTab() {
         <div className="msm-card p-6">
           <div className="mb-3 flex items-center gap-2">
             <ShieldAlert className="h-5 w-5 text-status-warning" />
-            <h3 className="font-headline text-lg font-semibold text-on-surface">
+            <h3 className="font-headline text-title-lg font-semibold text-on-surface">
               {t('security.clusterAdminTitle', 'Managed-Postgres Cluster-Admin')}
             </h3>
           </div>

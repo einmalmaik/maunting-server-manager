@@ -93,7 +93,7 @@ export function AiTomTomSettings({ canWrite }: { canWrite: boolean }) {
     <section className="msm-card space-y-4 p-6" aria-labelledby="ai-tomtom-title">
       <div className="flex items-center gap-2">
         <Car className="h-5 w-5 text-secondary" aria-hidden="true" />
-        <h3 id="ai-tomtom-title" className="font-headline text-lg font-semibold text-on-surface">
+        <h3 id="ai-tomtom-title" className="font-headline text-title-lg font-semibold text-on-surface">
           {t('ai.tomtom.title')}
         </h3>
       </div>

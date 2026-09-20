@@ -609,7 +609,7 @@ export function AdminNodes() {
                         />
                         {node.disk_total != null && (
                           <div className="space-y-1 text-xs text-on-surface-variant" data-testid={`node-disk-breakdown-${node.id}`}>
-                            <div className="flex flex-wrap items-center gap-3 font-mono text-[11px]">
+                            <div className="flex flex-wrap items-center gap-3 font-mono text-label-sm">
                               <span className="text-primary" title={t('nodes.diskPanelUsed', { value: formatRamMb(panelUsedMb) })}>
                                 ■ {t('nodes.diskPanelUsed', { value: formatRamMb(panelUsedMb) })}
                               </span>

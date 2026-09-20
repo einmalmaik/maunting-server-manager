@@ -39,7 +39,7 @@ export function SidebarDownloadBadge({ href, icon, title, subtext, tooltip }: Si
             <span>{title}</span>
             <Download className="w-3 h-3 text-primary opacity-0 group-hover:opacity-100 transition-opacity" />
           </div>
-          <p className="text-[11px] text-on-surface-variant/80 truncate">{subtext}</p>
+          <p className="text-label-sm text-on-surface-variant/80 truncate">{subtext}</p>
         </div>
       </a>
     </div>

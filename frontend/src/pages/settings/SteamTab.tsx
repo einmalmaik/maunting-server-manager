@@ -81,7 +81,7 @@ export function SteamTab() {
       <div className="msm-card p-6">
         <div className="flex items-center gap-2 mb-6">
           <Gamepad2 className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 className="font-headline text-lg font-semibold text-on-surface">{t('settings.steamApiKey')}</h2>
+          <h2 className="font-headline text-title-lg font-semibold text-on-surface">{t('settings.steamApiKey')}</h2>
         </div>
 
         <div className="space-y-4">
@@ -234,7 +234,7 @@ export function SteamTab() {
       <div className="msm-card p-6">
         <div className="flex items-center gap-2 mb-6">
           <Gamepad2 className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 className="font-headline text-lg font-semibold text-on-surface">{t('settings.steamAccountTitle')}</h2>
+          <h2 className="font-headline text-title-lg font-semibold text-on-surface">{t('settings.steamAccountTitle')}</h2>
         </div>
 
         <div className="space-y-4">

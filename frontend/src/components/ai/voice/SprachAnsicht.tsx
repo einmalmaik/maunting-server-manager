@@ -176,12 +176,12 @@ export function SprachAnsicht({
                 {fehler ? (fehlerCode === 'REALTIME_TOOL_TIMEOUT' ? 'Werkzeug hat zu lange gebraucht. Die Sprachsitzung bleibt offen.' : t('ai.voice.hint.error')) : t(`ai.voice.hint.${zustand}`)}
               </p>
               {(fehlerCode || debugCode) && (
-                <p className="mt-1 font-mono text-[11px] text-on-surface-variant/70">
+                <p className="mt-1 font-mono text-label-sm text-on-surface-variant/70">
                   {fehlerCode || debugCode}{debugHint ? ` — ${debugHint}` : ''}{fehlerWerkzeug && fehlerCode !== fehlerWerkzeug ? ` (${fehlerWerkzeug})` : ''}
                 </p>
               )}
               {fehlerDetails && fehlerCode === 'REALTIME_RESPONSE_FAILED' && (
-                <p className="mt-1 max-w-md break-words font-mono text-[10px] leading-tight text-on-surface-variant/60">
+                <p className="mt-1 max-w-md break-words font-mono text-label-sm leading-tight text-on-surface-variant/60">
                   {String((fehlerDetails as Record<string, unknown>).message || (fehlerDetails as Record<string, unknown>).reason || JSON.stringify((fehlerDetails as Record<string, unknown>).details || '').slice(0,400))}
                   {(fehlerDetails as Record<string, unknown>).provider ? ` · ${(fehlerDetails as Record<string, unknown>).provider}` : ''}{(fehlerDetails as Record<string, unknown>).model ? ` ${(fehlerDetails as Record<string, unknown>).model}` : ''}{(fehlerDetails as Record<string, unknown>).param ? ` · param ${(fehlerDetails as Record<string, unknown>).param}` : ''}
                 </p>
@@ -256,7 +256,7 @@ export function SprachAnsicht({
           </p>
         )}
         {fehlerDetails && fehlerCode === 'REALTIME_RESPONSE_FAILED' && (
-          <p className="max-w-lg break-words font-mono text-[11px] leading-tight text-on-surface-variant/60">
+          <p className="max-w-lg break-words font-mono text-label-sm leading-tight text-on-surface-variant/60">
             {String((fehlerDetails as Record<string, unknown>).message || (fehlerDetails as Record<string, unknown>).reason || JSON.stringify((fehlerDetails as Record<string, unknown>).details || '').slice(0,400))}
             {(fehlerDetails as Record<string, unknown>).provider ? ` · ${(fehlerDetails as Record<string, unknown>).provider}` : ''}{(fehlerDetails as Record<string, unknown>).model ? ` ${(fehlerDetails as Record<string, unknown>).model}` : ''}{(fehlerDetails as Record<string, unknown>).param ? ` · param ${(fehlerDetails as Record<string, unknown>).param}` : ''}
           </p>
@@ -294,7 +294,7 @@ export function SprachAnsicht({
             <X className="h-4 w-4" aria-hidden="true" />
             {t('ai.voice.end')}
           </span>
-          <span className="text-[11px] text-on-surface-variant/70">
+          <span className="text-label-sm text-on-surface-variant/70">
             {t('ai.voice.endHint')}
           </span>
         </Button>
@@ -363,7 +363,7 @@ function Belegkasten({ beleg }: { beleg: Beleg }) {
       <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words px-4 py-3 font-mono text-xs leading-5 text-on-surface">
         {beleg.zeilen.join('\n')}
       </pre>
-      <p className="flex gap-2 border-t border-outline-variant/30 px-4 py-2 text-[11px] leading-4 text-on-surface-variant/70">
+      <p className="flex gap-2 border-t border-outline-variant/30 px-4 py-2 text-label-sm leading-4 text-on-surface-variant/70">
         <ShieldAlert className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         {t('ai.voice.beleg.untrusted')}
       </p>

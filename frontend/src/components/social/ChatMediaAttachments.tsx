@@ -253,7 +253,7 @@ export function ChatMediaImage({ attachment, bindung, onViewImage }: ChatMediaIm
     return (
       <div className="rounded-xl border border-black/10 my-1 p-6 flex flex-col items-center justify-center min-h-[140px] w-56 sm:w-64 bg-black/5 dark:bg-white/5 space-y-2">
         <Loader2 className="w-5 h-5 animate-spin text-primary opacity-80" />
-        <span className="text-[11px] opacity-75 font-medium">{t('social.attachment.imageLoading')}</span>
+        <span className="text-label-sm opacity-75 font-medium">{t('social.attachment.imageLoading')}</span>
       </div>
     )
   }
@@ -268,7 +268,7 @@ export function ChatMediaImage({ attachment, bindung, onViewImage }: ChatMediaIm
         <button
           type="button"
           onClick={() => void loadMedia()}
-          className="px-2.5 py-1 text-[11px] font-medium rounded-lg bg-surface-container-high hover:bg-surface-container-highest transition-colors border border-outline-variant/30 flex items-center gap-1 cursor-pointer"
+          className="px-2.5 py-1 text-label-sm font-medium rounded-lg bg-surface-container-high hover:bg-surface-container-highest transition-colors border border-outline-variant/30 flex items-center gap-1 cursor-pointer"
         >
           <RefreshCw className="w-3 h-3" />
           <span>{t('common.retry')}</span>
@@ -371,7 +371,7 @@ export function ChatMediaFile({ attachment, bindung, isSelf = false }: ChatMedia
       </div>
       <div className="min-w-0 flex-1">
         <p className="font-semibold text-xs truncate">{safeName}</p>
-        <p className="text-[10px] opacity-75">{formatFileSize(attachment.sizeBytes)}</p>
+        <p className="text-label-sm opacity-75">{formatFileSize(attachment.sizeBytes)}</p>
       </div>
       {isDownloading ? (
         <Loader2 className="w-3.5 h-3.5 animate-spin opacity-75 shrink-0" />

@@ -359,7 +359,7 @@ export function AiTab() {
           <div className="msm-card p-6">
             <div className="mb-3 flex items-center gap-2">
               <Bot className="h-5 w-5 text-primary" aria-hidden="true" />
-              <h3 className="font-headline text-lg font-semibold text-on-surface">{t('aiSettings.title')}</h3>
+              <h3 className="font-headline text-title-lg font-semibold text-on-surface">{t('aiSettings.title')}</h3>
             </div>
             <p className="max-w-3xl text-sm text-on-surface-variant">{t('aiSettings.description')}</p>
             {/* Der Regeltext steht ueber dem Feldraster und wird zuerst gelesen —

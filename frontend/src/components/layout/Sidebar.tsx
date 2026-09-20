@@ -171,7 +171,7 @@ export function Sidebar({ mobile = false, onNavigate, presenceStatus: propPresen
       <nav className="flex-1 overflow-y-auto px-2 pb-3" aria-label={t('shell.areas', 'Areas')}>
         {groups.map(({ group, items }) => (
           <section key={group} className="mb-3" aria-labelledby={`nav-${group}`}>
-            <h2 id={`nav-${group}`} className="px-4 pb-1 pt-2 font-label-md text-[10px] font-semibold uppercase tracking-[.16em] text-on-surface-variant/55">{groupLabels[group]}</h2>
+            <h2 id={`nav-${group}`} className="px-4 pb-1 pt-2 font-label-md text-label-sm font-semibold uppercase tracking-[.16em] text-on-surface-variant/55">{groupLabels[group]}</h2>
             {items.map((item) => {
               const isChat = item.to === '/chat'
               const showChatBadge = isChat && totalMessengerUnread > 0
@@ -200,7 +200,7 @@ export function Sidebar({ mobile = false, onNavigate, presenceStatus: propPresen
                   </div>
                   <span className="font-label-md text-label-md flex-1">{item.label}</span>
                   {showChatBadge && (
-                    <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-primary text-on-primary">
+                    <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-label-sm font-bold rounded-full bg-primary text-on-primary">
                       {totalMessengerUnread > 99 ? '99+' : totalMessengerUnread}
                     </span>
                   )}

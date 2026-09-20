@@ -701,7 +701,7 @@ export function ServerDetail() {
               toast.success(t("servers.dockerContainerNameCopied"));
             }}
           >
-            <span className="font-label-md text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant">
+            <span className="font-label-md text-label-sm font-semibold uppercase tracking-wider text-on-surface-variant">
               {t("servers.dockerContainerLabel")}
             </span>
             <span className="font-mono text-xs">msm-srv-{server.id}</span>
@@ -715,11 +715,11 @@ export function ServerDetail() {
         <section className="rounded-xl border border-outline-variant/80 bg-surface-container-low/75 p-4 md:hidden">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="font-label-md text-[10px] font-semibold uppercase tracking-[0.12em] text-secondary">{t("pageContext.infrastructure", "Infrastructure")}</p>
+              <p className="font-label-md text-label-sm font-semibold uppercase tracking-[0.12em] text-secondary">{t("pageContext.infrastructure", "Infrastructure")}</p>
               <h1 className="mt-1 truncate font-headline text-xl font-semibold text-on-surface">{server.name}</h1>
               <p className="mt-1 truncate text-xs text-on-surface-variant">{gameName(server.game_type)} · {server.node_name || t("servers.nodeUnknown", { defaultValue: "—" })}</p>
             </div>
-            <span className={`shrink-0 rounded-full border px-2.5 py-1 font-mono text-[10px] ${statusClasses(effectiveStatus)}`}>
+            <span className={`shrink-0 rounded-full border px-2.5 py-1 font-mono text-label-sm ${statusClasses(effectiveStatus)}`}>
               {t(`servers.status.${effectiveStatus}`, { defaultValue: effectiveStatus })}
             </span>
           </div>

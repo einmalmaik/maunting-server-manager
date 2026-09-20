@@ -313,9 +313,9 @@ export function FileEditorWorkspace({
       {activeTab ? (
         <>
           <div className="flex min-h-10 items-center justify-between gap-3 border-b border-outline-variant px-3">
-            <p className="min-w-0 truncate font-mono text-[11px] text-on-surface-variant">{t('files.serverFiles')} / {activeTab.path}</p>
+            <p className="min-w-0 truncate font-mono text-label-sm text-on-surface-variant">{t('files.serverFiles')} / {activeTab.path}</p>
             <div className="flex shrink-0 items-center gap-2">
-              <span className={`hidden items-center gap-1.5 text-[11px] sm:inline-flex ${activeTab.saveState === 'conflict' || activeTab.saveState === 'error' ? 'text-status-destructive' : activeTab.saveState === 'clean' ? 'text-status-success' : 'text-status-warning'}`}>
+              <span className={`hidden items-center gap-1.5 text-label-sm sm:inline-flex ${activeTab.saveState === 'conflict' || activeTab.saveState === 'error' ? 'text-status-destructive' : activeTab.saveState === 'clean' ? 'text-status-success' : 'text-status-warning'}`}>
                 {saveIndicator}
               </span>
               <Button variant="ghost" size="sm"
@@ -367,7 +367,7 @@ export function FileEditorWorkspace({
                   placeholder={t('files.editor.findPlaceholder')}
                   className="msm-input h-8 pl-8 pr-16 text-xs"
                 />
-                <span className="absolute right-2 top-1/2 -translate-y-1/2 font-mono text-[10px] text-on-surface-variant">{matches.length ? `${activeMatch + 1}/${matches.length}` : '0'}</span>
+                <span className="absolute right-2 top-1/2 -translate-y-1/2 font-mono text-label-sm text-on-surface-variant">{matches.length ? `${activeMatch + 1}/${matches.length}` : '0'}</span>
               </div>
               <div className="relative">
                 <Replace className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-on-surface-variant" />
@@ -411,7 +411,7 @@ export function FileEditorWorkspace({
               />
             )}
           </div>
-          <footer className="flex min-h-8 flex-wrap items-center gap-x-4 gap-y-1 border-t border-outline-variant bg-surface-container-low/80 px-3 py-1 font-mono text-[10px] text-on-surface-variant">
+          <footer className="flex min-h-8 flex-wrap items-center gap-x-4 gap-y-1 border-t border-outline-variant bg-surface-container-low/80 px-3 py-1 font-mono text-label-sm text-on-surface-variant">
             <span>{t('files.editor.cursorPosition', { zeile: cursor.line, spalte: cursor.column })}</span>
             <span>{t('files.editor.selection', { anzahl: cursor.selected })}</span>
             <span>{detectIndentation(activeTab.content)}</span>

@@ -112,7 +112,7 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
           {stats && (
             <div className="mt-4 pt-3 border-t border-outline-variant/20 grid grid-cols-2 sm:grid-cols-4 gap-2">
               <div className="bg-surface-container-high/40 p-2 rounded-lg border border-outline-variant/20 text-center">
-                <div className="flex items-center justify-center gap-1 text-[11px] text-on-surface-variant mb-0.5">
+                <div className="flex items-center justify-center gap-1 text-label-sm text-on-surface-variant mb-0.5">
                   <Clock className="w-3 h-3 text-primary" />
                   <span>{t('social.milestones.statActivity')}</span>
                 </div>
@@ -121,7 +121,7 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
                 </div>
               </div>
               <div className="bg-surface-container-high/40 p-2 rounded-lg border border-outline-variant/20 text-center">
-                <div className="flex items-center justify-center gap-1 text-[11px] text-on-surface-variant mb-0.5">
+                <div className="flex items-center justify-center gap-1 text-label-sm text-on-surface-variant mb-0.5">
                   <Sparkles className="w-3 h-3 text-primary" />
                   <span>{t('social.milestones.statAi')}</span>
                 </div>
@@ -130,7 +130,7 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
                 </div>
               </div>
               <div className="bg-surface-container-high/40 p-2 rounded-lg border border-outline-variant/20 text-center">
-                <div className="flex items-center justify-center gap-1 text-[11px] text-on-surface-variant mb-0.5">
+                <div className="flex items-center justify-center gap-1 text-label-sm text-on-surface-variant mb-0.5">
                   <Award className="w-3 h-3 text-status-warning" />
                   <span>{t('social.milestones.statAdmin')}</span>
                 </div>
@@ -139,7 +139,7 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
                 </div>
               </div>
               <div className="bg-surface-container-high/40 p-2 rounded-lg border border-outline-variant/20 text-center">
-                <div className="flex items-center justify-center gap-1 text-[11px] text-on-surface-variant mb-0.5">
+                <div className="flex items-center justify-center gap-1 text-label-sm text-on-surface-variant mb-0.5">
                   <Flame className="w-3 h-3 text-status-warning" />
                   <span>{t('social.milestones.statCommands')}</span>
                 </div>
@@ -214,11 +214,11 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
                     <h4 className="font-headline text-body-md font-bold text-primary truncate">
                       {item.title}
                     </h4>
-                    <span className="text-[11px] font-mono text-status-warning/90 font-semibold">
+                    <span className="text-label-sm font-mono text-status-warning/90 font-semibold">
                       {t('social.milestones.pointsShort', { count: item.points })}
                     </span>
                     {isRare && (
-                      <Badge variant="warning" className="text-[10px] uppercase tracking-wider py-0 px-1.5 font-bold">
+                      <Badge variant="warning" className="text-label-sm uppercase tracking-wider py-0 px-1.5 font-bold">
                         {t('social.milestones.rare')}
                       </Badge>
                     )}
@@ -227,7 +227,7 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
                     {item.description}
                   </p>
 
-                  <div className="flex items-center gap-3 mt-2 text-[11px] text-on-surface-variant/70 flex-wrap">
+                  <div className="flex items-center gap-3 mt-2 text-label-sm text-on-surface-variant/70 flex-wrap">
                     <span className={`font-medium ${isRare ? 'text-status-warning' : ''}`}>
                       {item.rarity_text}
                     </span>

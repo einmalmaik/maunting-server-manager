@@ -158,7 +158,7 @@ export function MessengerSicherheitTab() {
             <h2 className="text-sm font-semibold text-on-surface">
               {t('profile.messengerLock.title', 'Messenger sperren')}
             </h2>
-            <p className="text-[11px] text-on-surface-variant">
+            <p className="text-label-sm text-on-surface-variant">
               {eingerichtet
                 ? t('profile.messengerLock.stateOn', 'Auf diesem Gerät eingerichtet.')
                 : t('profile.messengerLock.stateOff', 'Auf diesem Gerät nicht eingerichtet.')}
@@ -175,7 +175,7 @@ export function MessengerSicherheitTab() {
           </p>
 
           {eingerichtet && (
-            <div className="p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-[11px] text-on-surface-variant">
+            <div className="p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-label-sm text-on-surface-variant">
               {geraetebindung
                 ? t(
                     'profile.messengerLock.boundNote',
@@ -196,7 +196,7 @@ export function MessengerSicherheitTab() {
 
           {formular === 'einrichten' && (
             <div className="space-y-3">
-              <div className="p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-[11px] text-on-surface-variant leading-relaxed">
+              <div className="p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-label-sm text-on-surface-variant leading-relaxed">
                 {t(
                   'profile.messengerLock.warnLoss',
                   'Merk dir diesen PIN. Es gibt keinen Ersatzweg und keinen Wiederherstellungsschlüssel. Deine eigenen gesendeten Nachrichten stehen nirgendwo sonst, auch nicht auf dem Server — wer den PIN vergisst oder diesen Rechner neu aufsetzt, verliert den Verlauf dieses Geräts.',
@@ -342,7 +342,7 @@ export function MessengerSicherheitTab() {
                   <span className="text-xs font-medium text-on-surface">
                     {t('profile.messengerLock.bioSwitch', 'Ohne Tippen entsperren')}
                   </span>
-                  <p className="text-[11px] text-on-surface-variant">
+                  <p className="text-label-sm text-on-surface-variant">
                     {t(
                       'profile.messengerLock.bioHint',
                       'Der PIN wird im Schlüsselspeicher des Systems hinterlegt und erst nach erfolgreicher Bestätigung herausgegeben.',
@@ -389,7 +389,7 @@ export function MessengerSicherheitTab() {
             <h2 className="text-sm font-semibold text-on-surface">
               {t('profile.messengerLock.autoTitle', 'Automatisch sperren')}
             </h2>
-            <p className="text-[11px] text-on-surface-variant">
+            <p className="text-label-sm text-on-surface-variant">
               {t(
                 'profile.messengerLock.autoSubtitle',
                 'Gilt nur für den Messenger. Der Tresor hat eine eigene Frist.',
@@ -426,7 +426,7 @@ export function MessengerSicherheitTab() {
               <span className="text-xs font-medium text-on-surface">
                 {t('profile.messengerLock.onBlur', 'Beim Fensterwechsel sperren')}
               </span>
-              <p className="text-[11px] text-on-surface-variant">
+              <p className="text-label-sm text-on-surface-variant">
                 {t(
                   'profile.messengerLock.onBlurHint',
                   'Sperrt, sobald das Fenster in den Hintergrund geht oder der Reiter gewechselt wird.',
@@ -441,7 +441,7 @@ export function MessengerSicherheitTab() {
         </div>
       </div>
 
-      <div className="flex items-start gap-2 px-1 text-[11px] text-on-surface-variant">
+      <div className="flex items-start gap-2 px-1 text-label-sm text-on-surface-variant">
         <ShieldCheck className="h-3.5 w-3.5 mt-0.5 shrink-0" />
         <p className="leading-relaxed">
           {t(

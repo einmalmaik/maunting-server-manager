@@ -89,12 +89,12 @@ export function AiSkillDirectory() {
               <span className="text-sm font-medium text-on-surface">{skill.name}</span>
               {/* Der Schlüssel ist der einzige Weg, einen mitgelieferten Skill zu
                   ersetzen — ohne ihn müsste man ihn raten. */}
-              <span className="font-mono text-[11px] text-on-surface-variant">{skill.skill_key}</span>
-              <span className="rounded-full border border-outline-variant/40 px-2 py-0.5 text-[10px] uppercase tracking-wider text-on-surface-variant">
+              <span className="font-mono text-label-sm text-on-surface-variant">{skill.skill_key}</span>
+              <span className="rounded-full border border-outline-variant/40 px-2 py-0.5 text-label-sm uppercase tracking-wider text-on-surface-variant">
                 {herkunft(skill)}
               </span>
               {skill.origin === 'ai' && (
-                <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-tertiary">
+                <span className="inline-flex items-center gap-1 text-label-sm uppercase tracking-wider text-tertiary">
                   <Sparkles className="h-3 w-3" aria-hidden="true" />
                   {t('ai.skills.origins.ai')}
                 </span>

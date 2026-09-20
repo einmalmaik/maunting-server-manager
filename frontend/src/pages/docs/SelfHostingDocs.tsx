@@ -103,7 +103,7 @@ export function SelfHostingDocs() {
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface-container-highest text-secondary">
                   {unit.icon}
                 </span>
-                <span className="rounded-md border border-outline-variant bg-surface-container-low px-2 py-1 font-mono text-[11px] text-primary">
+                <span className="rounded-md border border-outline-variant bg-surface-container-low px-2 py-1 font-mono text-label-sm text-primary">
                   {unit.artifact}
                 </span>
               </div>
@@ -156,7 +156,7 @@ export function SelfHostingDocs() {
                 {Array.from({ length: 19 }, (_, index) => (
                   <span
                     key={index}
-                    className="flex aspect-square items-center justify-center rounded-md border border-outline-variant bg-surface-container-low font-mono text-[10px] text-on-surface-variant"
+                    className="flex aspect-square items-center justify-center rounded-md border border-outline-variant bg-surface-container-low font-mono text-label-sm text-on-surface-variant"
                   >
                     {index + 2}
                   </span>

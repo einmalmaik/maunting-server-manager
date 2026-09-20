@@ -185,7 +185,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
       <div className="flex items-start justify-between gap-3 border-b border-outline-variant/30 p-4 shrink-0 bg-surface-container-lowest/60">
         <div className="space-y-1 min-w-0">
           <div className="flex items-center gap-2">
-            <h2 className="font-headline text-lg font-bold text-on-surface leading-tight truncate">
+            <h2 className="font-headline text-title-lg font-bold text-on-surface leading-tight truncate">
               {location}
             </h2>
           </div>
@@ -252,7 +252,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                 <span className="font-semibold uppercase tracking-wider text-on-surface-variant">
                   {t('ai.geo.satelliteData', 'Satellitendaten')}
                 </span>
-                <span className="text-[11px] text-primary font-medium">{t('ai.geo.mapSource', 'MapTiler-Karte')}</span>
+                <span className="text-label-sm text-primary font-medium">{t('ai.geo.mapSource', 'MapTiler-Karte')}</span>
               </div>
 
               {/* Sentinel beschreibt Szenen; die MapTiler-Karte bleibt unverändert. */}
@@ -260,7 +260,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                 {availableLayers.map((layer) => (
                   <span
                     key={layer.id}
-                    className="rounded-lg border border-outline-variant/30 bg-surface-container-high/60 px-2.5 py-1 text-[11px] font-medium text-on-surface-variant whitespace-nowrap"
+                    className="rounded-lg border border-outline-variant/30 bg-surface-container-high/60 px-2.5 py-1 text-label-sm font-medium text-on-surface-variant whitespace-nowrap"
                   >
                     {layer.name}
                   </span>
@@ -283,7 +283,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                     <p className="mt-1 text-xs">{t('ai.geo.mapUnavailableBody', 'MapTiler ist für diese Instanz nicht eingerichtet oder derzeit nicht erreichbar.')}</p>
                   </div>
                 )}
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-gradient-to-t from-surface-container-lowest/95 to-transparent px-3 pb-2 pt-7 text-[10px] text-on-surface">
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-gradient-to-t from-surface-container-lowest/95 to-transparent px-3 pb-2 pt-7 text-label-sm text-on-surface">
                   <span>{t('ai.geo.mapSource', 'MapTiler-Karte')}</span>
                   <span>{formatSafeDate(firstScene?.datetime, t('ai.geo.captureTimeUnknown', 'Aufnahmezeit unbekannt'))}</span>
                 </div>
@@ -296,7 +296,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                 <span className="font-semibold uppercase tracking-wider text-on-surface-variant">
                   {t('ai.geo.currentNews', 'Aktuelle Nachrichten')}
                 </span>
-                <span className="text-[11px] text-primary">{t('ai.geo.newsCount', { count: newsList.length })}</span>
+                <span className="text-label-sm text-primary">{t('ai.geo.newsCount', { count: newsList.length })}</span>
               </div>
 
               <div className="space-y-2">
@@ -312,20 +312,20 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                     className="rounded-xl border border-outline-variant/20 bg-surface-container-lowest/70 p-3 space-y-1.5 transition-colors hover:border-primary/40"
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="rounded-md bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary border border-primary/20">
+                      <span className="rounded-md bg-primary/10 px-2 py-0.5 text-label-sm font-semibold text-primary border border-primary/20">
                         {item.category}
                       </span>
-                      <span className="text-[11px] text-on-surface-variant">{item.timeAgo}</span>
+                      <span className="text-label-sm text-on-surface-variant">{item.timeAgo}</span>
                     </div>
                     <h4 className="text-xs font-semibold text-on-surface leading-snug">
                       {item.title}
                     </h4>
                     {item.snippet && (
-                      <p className="text-[11px] text-on-surface-variant line-clamp-2">
+                      <p className="text-label-sm text-on-surface-variant line-clamp-2">
                         {item.snippet}
                       </p>
                     )}
-                    <div className="flex items-center justify-between pt-1 text-[10px] text-on-surface-variant">
+                    <div className="flex items-center justify-between pt-1 text-label-sm text-on-surface-variant">
                       <span>{item.source}</span>
                       {item.url && (
                         <a
@@ -386,7 +386,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
               <span className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
                 {t('ai.geo.scenes', 'Satelliten-Layer & Szenen')}
               </span>
-              <span className="rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+              <span className="rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-label-sm font-medium text-primary">
                 {t('ai.geo.sceneMetadata', 'Szenenmetadaten')}
               </span>
             </div>
@@ -418,13 +418,13 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                   >
                     <div className="flex items-center justify-between font-medium">
                       <span className="text-on-surface font-semibold">{layer.name}</span>
-                      <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-mono text-primary">
+                      <span className="rounded bg-primary/10 px-1.5 py-0.5 text-label-sm font-mono text-primary">
                         {layer.resolution || '10m'}
                       </span>
                     </div>
 
                     {layer.description && (
-                      <p className="text-[11px] text-on-surface-variant leading-relaxed">
+                      <p className="text-label-sm text-on-surface-variant leading-relaxed">
                         {layer.description}
                       </p>
                     )}
@@ -433,7 +433,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                         ist. Sentinel bleibt als präzise Mess-/Szenenquelle
                         darunter, ohne ein zweites, unscharfes Bild zu zeigen. */}
                     {!mapTilerAvailable && (
-                      <p className="rounded-lg border border-outline-variant/20 bg-surface-container-lowest/60 p-2.5 text-[11px] leading-relaxed text-on-surface-variant">
+                      <p className="rounded-lg border border-outline-variant/20 bg-surface-container-lowest/60 p-2.5 text-label-sm leading-relaxed text-on-surface-variant">
                         {t('ai.geo.sceneAvailableWithoutMap', 'Szenenmetadaten sind verfügbar. Die interaktive Karte benötigt eine erreichbare MapTiler-Konfiguration.')}
                       </p>
                     )}
@@ -444,7 +444,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                           href={layer.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="flex items-center gap-1 text-[11px] text-primary hover:underline"
+                          className="flex items-center gap-1 text-label-sm text-primary hover:underline"
                         >
                           <span>{t('ai.geo.openFullScene', 'HD-Export')}</span>
                           <ExternalLink className="h-3 w-3" />
@@ -458,17 +458,17 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
               {/* Zusätzliche CDSE Szenen falls geladen */}
               {satellite?.scenes && satellite.scenes.length > 0 && (
                 <div className="pt-2 space-y-2">
-                  <span className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider">
+                  <span className="text-label-sm font-semibold text-on-surface-variant uppercase tracking-wider">
                     {t('ai.geo.overflightMetadata', 'Copernicus-CDSE-Überflugsdaten')}
                   </span>
                   {satellite.scenes.map((scene) => (
-                    <div key={scene.id} className="rounded-lg border border-outline-variant/20 bg-surface-container-lowest/60 p-2.5 text-[11px] space-y-1">
+                    <div key={scene.id} className="rounded-lg border border-outline-variant/20 bg-surface-container-lowest/60 p-2.5 text-label-sm space-y-1">
                       <div className="flex justify-between font-medium text-on-surface">
                         <span>{scene.mission}</span>
                         <span>{formatSafeDate(scene.datetime, t('ai.geo.captureTimeUnknown', 'Aufnahmezeit unbekannt'), { day: 'numeric', month: 'short', year: 'numeric' })}</span>
                       </div>
                       {typeof scene.cloud_cover_percent === 'number' && (
-                        <div className="text-on-surface-variant flex justify-between text-[10px]">
+                        <div className="text-on-surface-variant flex justify-between text-label-sm">
                           <span>{t('ai.geo.cloudCover', 'Bewölkung')}</span>
                           <span>{scene.cloud_cover_percent}%</span>
                         </div>
@@ -488,7 +488,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
               <span className="font-semibold uppercase tracking-wider text-on-surface-variant">
                 {t('ai.geo.newsAndWeb', 'Nachrichten & Lageberichte')}
               </span>
-              <span className="text-[11px] text-primary">{t('ai.geo.newsCount', { count: newsList.length })}</span>
+              <span className="text-label-sm text-primary">{t('ai.geo.newsCount', { count: newsList.length })}</span>
             </div>
 
             {newsList.length === 0 && (
@@ -511,10 +511,10 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="rounded-md bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary border border-primary/20">
+                  <span className="rounded-md bg-primary/10 px-2 py-0.5 text-label-sm font-semibold text-primary border border-primary/20">
                     {item.category}
                   </span>
-                  <span className="text-[11px] text-on-surface-variant">{item.timeAgo}</span>
+                  <span className="text-label-sm text-on-surface-variant">{item.timeAgo}</span>
                 </div>
                 <h4 className="text-xs font-semibold text-on-surface leading-snug">
                   {item.title}
@@ -524,7 +524,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                     {item.snippet}
                   </p>
                 )}
-                <div className="flex items-center justify-between pt-1 text-[11px] text-on-surface-variant">
+                <div className="flex items-center justify-between pt-1 text-label-sm text-on-surface-variant">
                   <span>{item.source}</span>
                   {item.url && (
                     <a
@@ -550,7 +550,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
               <span className="font-semibold uppercase tracking-wider text-on-surface-variant">
                 {t('ai.geo.socialMedia', 'Soziale Medien & Trends')}
               </span>
-              <span className="rounded-full border border-outline-variant/30 bg-surface-container-high px-2 py-0.5 text-[11px] font-medium text-on-surface-variant">
+              <span className="rounded-full border border-outline-variant/30 bg-surface-container-high px-2 py-0.5 text-label-sm font-medium text-on-surface-variant">
                 {publicPosts?.status === 'available'
                   ? t('ai.geo.publicPostsUntrusted', 'Öffentliche, unbestätigte Hinweise')
                   : t('ai.geo.publicPostsUnavailableBadge', 'Derzeit nicht verfügbar')}
@@ -583,7 +583,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
               <span className="font-semibold uppercase tracking-wider text-on-surface-variant">
                 {t('ai.geo.trafficStatus', 'Verkehr & Bewegung')}
               </span>
-              <span className="rounded-full border border-outline-variant/30 bg-surface-container-high px-2 py-0.5 text-[11px] font-medium text-on-surface-variant">
+              <span className="rounded-full border border-outline-variant/30 bg-surface-container-high px-2 py-0.5 text-label-sm font-medium text-on-surface-variant">
                 {traffic?.status === 'available'
                   ? t('ai.geo.tomTomTraffic', 'TomTom-Verkehr')
                   : traffic?.status === 'not_configured'
@@ -633,14 +633,14 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                 <div className="flex items-center gap-2">
                   <Wind className="h-4 w-4 text-primary" />
                   <div>
-                    <div className="text-[10px] text-on-surface-variant/70">Windgeschwindigkeit</div>
+                    <div className="text-label-sm text-on-surface-variant/70">Windgeschwindigkeit</div>
                     <div className="font-medium text-on-surface">{weather.wind_speed_kmh} km/h</div>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <Cloud className="h-4 w-4 text-primary" />
                   <div>
-                    <div className="text-[10px] text-on-surface-variant/70">Luftfeuchtigkeit</div>
+                    <div className="text-label-sm text-on-surface-variant/70">Luftfeuchtigkeit</div>
                     <div className="font-medium text-on-surface">{weather.humidity_percent}%</div>
                   </div>
                 </div>
@@ -648,7 +648,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                   <div className="flex items-center gap-2 col-span-2">
                     <CloudRain className="h-4 w-4 text-primary" />
                     <div>
-                      <div className="text-[10px] text-on-surface-variant/70">Niederschlag</div>
+                      <div className="text-label-sm text-on-surface-variant/70">Niederschlag</div>
                       <div className="font-medium text-on-surface">{weather.precipitation_mm} mm</div>
                     </div>
                   </div>
@@ -706,7 +706,7 @@ function SocialPostList({ title, posts, type, highlightedSource }: {
           }`}>
             <h4 className="text-xs font-semibold leading-snug text-on-surface">{heading}</h4>
             <p className="text-xs leading-relaxed text-on-surface-variant">{content}</p>
-            <a href={post.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline">
+            <a href={post.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-label-sm text-primary hover:underline">
               <span>{t('ai.geo.openPublicPost', 'Beitrag öffnen')}</span>
               <ExternalLink className="h-3 w-3" aria-hidden="true" />
             </a>
@@ -738,7 +738,7 @@ function TrafficDetails({ traffic }: { traffic: NonNullable<AiRegionalAnalysis['
         <div className="grid grid-cols-2 gap-2">
           {metrics.map((metric) => (
             <div key={metric.label} className="rounded-xl border border-outline-variant/20 bg-surface-container-lowest/80 p-3">
-              <p className="text-[10px] uppercase tracking-wider text-on-surface-variant">{metric.label}</p>
+              <p className="text-label-sm uppercase tracking-wider text-on-surface-variant">{metric.label}</p>
               <p className="mt-1 text-lg font-semibold text-on-surface">{metric.value}{metric.suffix && <> <span className="text-xs font-medium text-on-surface-variant">{metric.suffix}</span></>}</p>
             </div>
           ))}

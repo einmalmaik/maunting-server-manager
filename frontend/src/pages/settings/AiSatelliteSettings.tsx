@@ -73,7 +73,7 @@ export function AiSatelliteSettings({ canWrite }: { canWrite: boolean }) {
     <section className="msm-card space-y-4 p-6" aria-labelledby="ai-satellite-title">
       <div className="flex items-center gap-2">
         <Globe2 className="h-5 w-5 text-secondary" aria-hidden="true" />
-        <h3 id="ai-satellite-title" className="font-headline text-lg font-semibold text-on-surface">
+        <h3 id="ai-satellite-title" className="font-headline text-title-lg font-semibold text-on-surface">
           {t('ai.satellite.title')}
         </h3>
       </div>

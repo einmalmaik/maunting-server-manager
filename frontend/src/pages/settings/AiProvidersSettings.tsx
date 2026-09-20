@@ -389,7 +389,7 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
         <div className="max-w-3xl">
           <div className="flex items-center gap-2">
             <KeyRound className="h-5 w-5 text-secondary" aria-hidden="true" />
-            <h3 id="ai-provider-title" className="font-headline text-lg font-semibold text-on-surface">{t('ai.providers.title')}</h3>
+            <h3 id="ai-provider-title" className="font-headline text-title-lg font-semibold text-on-surface">{t('ai.providers.title')}</h3>
           </div>
           <p className="mt-2 text-sm text-on-surface-variant">{t('ai.providers.description')}</p>
         </div>
@@ -1436,7 +1436,7 @@ function ProviderForm({
               : t(`ai.errors.codes.${testResult.code}`, { defaultValue: t('ai.providers.testFailed') })}
             {/* Die Anbietermeldung im Original: sie benennt die Ursache
                 praeziser, als ein uebersetzter Code es je koennte. */}
-            {testResult.detail && <span className="mt-1 block font-mono text-[11px] opacity-80">{testResult.detail}</span>}
+            {testResult.detail && <span className="mt-1 block font-mono text-label-sm opacity-80">{testResult.detail}</span>}
           </span>
         </p>
       )}
@@ -1473,7 +1473,7 @@ function ModelCapabilities({ model }: { model: AiCatalogModel }) {
         <p>
           {t('ai.providers.caps.levels')}{' '}
           {model.efforts.map((effort) => (
-            <span key={effort} className="mr-1 inline-block rounded-md border border-outline-variant/50 px-1.5 py-0.5 font-mono text-[11px]">
+            <span key={effort} className="mr-1 inline-block rounded-md border border-outline-variant/50 px-1.5 py-0.5 font-mono text-label-sm">
               {t(`ai.reasoning.levels.${effort}`, { defaultValue: effort })}
             </span>
           ))}

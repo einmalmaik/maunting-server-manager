@@ -45,9 +45,9 @@ describe('AiSkillDirectory', () => {
     render(<AiSkillDirectory />)
     await screen.findByText('DayZ-Start')
 
-    expect(screen.getByText('mitgeliefert')).toBeInTheDocument()
-    expect(screen.getByText('panelweit')).toBeInTheDocument()
-    expect(screen.getByText('persönlich')).toBeInTheDocument()
+    expect(screen.getByText('Mitgeliefert')).toBeInTheDocument()
+    expect(screen.getByText('Panelweit')).toBeInTheDocument()
+    expect(screen.getByText('Persönlich')).toBeInTheDocument()
     expect(screen.getByText('Team: Ops')).toBeInTheDocument()
     // Das Ein-Mann-Team trägt den Benutzernamen. Ihn hier zu zeigen hieße, dem
     // Benutzer sein eigenes Wissen als „Team" zu verkaufen.

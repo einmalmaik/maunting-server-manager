@@ -176,7 +176,7 @@ export function ConnectedMailboxesSection() {
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <Mail className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 className="font-headline text-lg font-semibold text-on-surface">
+          <h2 className="font-headline text-title-lg font-semibold text-on-surface">
             {t('profile.mailboxes.title', 'Verknüpfte Postfächer (E-Mail)')}
           </h2>
         </div>
@@ -206,7 +206,7 @@ export function ConnectedMailboxesSection() {
                 <div className="flex items-center gap-2">
                   <span className="font-label-md text-sm text-on-surface font-medium">{mb.name}</span>
                   {mb.is_default && (
-                    <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
+                    <span className="inline-flex items-center gap-1 text-label-sm px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
                       <Star className="w-3 h-3 fill-primary" />
                       Standard
                     </span>
@@ -265,7 +265,7 @@ export function ConnectedMailboxesSection() {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-2">
-                <h3 className="font-headline text-lg font-semibold text-on-surface">
+                <h3 className="font-headline text-title-lg font-semibold text-on-surface">
                   {t('profile.mailboxes.add', 'Postfach hinzufügen')}
                 </h3>
                 <button
@@ -301,7 +301,7 @@ export function ConnectedMailboxesSection() {
                     options={providerOptions}
                   />
                   {preset === 'gmail' && (
-                    <p className="text-[11px] text-tertiary mt-1.5 flex items-center gap-1">
+                    <p className="text-label-sm text-tertiary mt-1.5 flex items-center gap-1">
                       <HelpCircle className="w-3 h-3 shrink-0" />
                       {t('profile.mailboxes.gmailNotice', 'Hinweis für Gmail: Google erfordert ein 16-stelliges App-Passwort, sofern 2-Faktor-Authentifizierung aktiv ist.')}
                     </p>
@@ -343,7 +343,7 @@ export function ConnectedMailboxesSection() {
                       IMAP (Posteingang lesen & suchen)
                     </span>
                     <span
-                      className="text-[11px] text-on-surface-variant cursor-help flex items-center gap-1 hover:text-primary transition-colors"
+                      className="text-label-sm text-on-surface-variant cursor-help flex items-center gap-1 hover:text-primary transition-colors"
                       title={t('profile.mailboxes.imapHelp', 'Wird zum Suchen und Lesen von E-Mails durch den KI-Assistenten benötigt. Kann freigelassen werden, wenn du nur E-Mails versenden möchtest.')}
                     >
                       <HelpCircle className="w-3.5 h-3.5" />
@@ -352,7 +352,7 @@ export function ConnectedMailboxesSection() {
                   </div>
                   <div className="grid grid-cols-3 gap-2">
                     <div className="col-span-2">
-                      <label className="block text-[11px] text-on-surface-variant mb-1">
+                      <label className="block text-label-sm text-on-surface-variant mb-1">
                         {t('profile.mailboxes.imapHost', 'IMAP-Host')}
                       </label>
                       <input
@@ -364,7 +364,7 @@ export function ConnectedMailboxesSection() {
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] text-on-surface-variant mb-1">
+                      <label className="block text-label-sm text-on-surface-variant mb-1">
                         {t('profile.mailboxes.imapPort', 'Port')}
                       </label>
                       <input
@@ -384,7 +384,7 @@ export function ConnectedMailboxesSection() {
                       SMTP (E-Mails vorbereiten & versenden)
                     </span>
                     <span
-                      className="text-[11px] text-on-surface-variant cursor-help flex items-center gap-1 hover:text-primary transition-colors"
+                      className="text-label-sm text-on-surface-variant cursor-help flex items-center gap-1 hover:text-primary transition-colors"
                       title={t('profile.mailboxes.smtpHelp', 'Wird zum Vorbereiten und Absenden von E-Mails durch den KI-Assistenten benötigt. Kann freigelassen werden, wenn du nur E-Mails lesen möchtest.')}
                     >
                       <HelpCircle className="w-3.5 h-3.5" />
@@ -393,7 +393,7 @@ export function ConnectedMailboxesSection() {
                   </div>
                   <div className="grid grid-cols-3 gap-2">
                     <div className="col-span-2">
-                      <label className="block text-[11px] text-on-surface-variant mb-1">
+                      <label className="block text-label-sm text-on-surface-variant mb-1">
                         {t('profile.mailboxes.smtpHost', 'SMTP-Host')}
                       </label>
                       <input
@@ -405,7 +405,7 @@ export function ConnectedMailboxesSection() {
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] text-on-surface-variant mb-1">
+                      <label className="block text-label-sm text-on-surface-variant mb-1">
                         {t('profile.mailboxes.smtpPort', 'Port')}
                       </label>
                       <input

@@ -97,7 +97,7 @@ export function AiLearningSettings({ canWrite }: { canWrite: boolean }) {
     <section className="msm-card space-y-4 p-6" aria-labelledby="ai-learning-title">
       <div className="flex items-center gap-2">
         <GraduationCap className="h-5 w-5 text-tertiary" aria-hidden="true" />
-        <h3 id="ai-learning-title" className="font-headline text-lg font-semibold text-on-surface">
+        <h3 id="ai-learning-title" className="font-headline text-title-lg font-semibold text-on-surface">
           {t('ai.learning.title')}
         </h3>
       </div>
@@ -151,7 +151,7 @@ export function AiLearningSettings({ canWrite }: { canWrite: boolean }) {
               <p className="text-xs leading-5 text-on-surface-variant">{row.description}</p>
               {/* Der vollständige Text steht hier bewusst mit — freigeben, ohne
                   gelesen zu haben, wäre keine Prüfung. */}
-              <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded-lg bg-surface-container-high/60 p-3 font-mono text-[11px] leading-5 text-on-surface-variant">
+              <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded-lg bg-surface-container-high/60 p-3 font-mono text-label-sm leading-5 text-on-surface-variant">
                 {row.body}
               </pre>
               {canWrite && (

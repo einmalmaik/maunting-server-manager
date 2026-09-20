@@ -198,7 +198,7 @@ function DefinitionTable({ rows }: { rows: { term: string; body: string; badge?:
           <dt className="flex flex-wrap items-center gap-2 text-sm font-semibold text-on-surface">
             <code className="rounded bg-surface-container-highest px-1.5 py-0.5 font-mono text-xs">{row.term}</code>
             {row.badge && (
-              <span className="rounded-full bg-surface-container-highest px-2 py-0.5 font-mono text-[11px] text-on-surface-variant">
+              <span className="rounded-full bg-surface-container-highest px-2 py-0.5 font-mono text-label-sm text-on-surface-variant">
                 {row.badge}
               </span>
             )}

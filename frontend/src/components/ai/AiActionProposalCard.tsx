@@ -313,7 +313,7 @@ export function AiActionProposalCard({
             )}
           </div>
           {operation && <p className="mt-1 text-xs sm:text-sm text-on-surface-variant">{t('ai.actions.operation', { operation })}</p>}
-          {path && <p className="mt-0.5 break-all font-mono text-[11px] sm:text-xs text-on-surface-variant">{path}</p>}
+          {path && <p className="mt-0.5 break-all font-mono text-label-sm sm:text-xs text-on-surface-variant">{path}</p>}
           
           {detailsOpen && (
             <div className="mt-2 space-y-2">
@@ -339,12 +339,12 @@ export function AiActionProposalCard({
                   {proposal.expected_effect}
                 </p>
               )}
-              {diff && <pre className="max-h-64 overflow-auto rounded-lg border border-outline-variant/40 bg-surface-container-lowest p-2.5 sm:p-3 text-[11px] sm:text-xs text-on-surface-variant">{diff}</pre>}
+              {diff && <pre className="max-h-64 overflow-auto rounded-lg border border-outline-variant/40 bg-surface-container-lowest p-2.5 sm:p-3 text-label-sm sm:text-xs text-on-surface-variant">{diff}</pre>}
             </div>
           )}
 
           {proposal.autonomous && (
-            <p className="mt-1 text-[11px] text-on-surface-variant">{t('ai.actions.autonomousHint')}</p>
+            <p className="mt-1 text-label-sm text-on-surface-variant">{t('ai.actions.autonomousHint')}</p>
           )}
           {proposal.error_code && <p className="mt-1.5 flex items-center gap-1 text-xs text-status-destructive"><AlertTriangle className="h-3.5 w-3.5" />{t('ai.actions.failed')}</p>}
         </div>

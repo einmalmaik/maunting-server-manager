@@ -156,7 +156,7 @@ export function FriendsListDock({
         >
           <Users className="w-5 h-5" />
           {incomingRequests.length > 0 && (
-            <span className="absolute -top-1 -right-1 px-1.5 py-0.5 rounded-full bg-status-warning text-[10px] text-white font-bold leading-none shadow">
+            <span className="absolute -top-1 -right-1 px-1.5 py-0.5 rounded-full bg-status-warning text-label-sm text-white font-bold leading-none shadow">
               {incomingRequests.length}
             </span>
           )}
@@ -178,7 +178,7 @@ export function FriendsListDock({
               {t('social.friends.dockTitle')}
             </CardTitle>
             {incomingRequests.length > 0 && (
-              <Badge variant="warning" className="text-[9px] px-1.5 py-0">
+              <Badge variant="warning" className="text-label-sm px-1.5 py-0">
                 {incomingRequests.length}
               </Badge>
             )}
@@ -223,7 +223,7 @@ export function FriendsListDock({
                 <Users className="w-3.5 h-3.5" />
                 <span>{t('social.friends.tabFriends')}</span>
                 {incomingRequests.length > 0 && (
-                  <span className="ml-1 px-1 rounded-full bg-status-warning text-[10px] text-white font-bold">
+                  <span className="ml-1 px-1 rounded-full bg-status-warning text-label-sm text-white font-bold">
                     {incomingRequests.length}
                   </span>
                 )}
@@ -262,13 +262,13 @@ export function FriendsListDock({
                   <button
                     type="button"
                     onClick={() => navigate('/profile?tab=social')}
-                    className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-status-warning/10 border border-status-warning/30 text-[11px] text-status-warning hover:bg-status-warning/15 transition-colors"
+                    className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-status-warning/10 border border-status-warning/30 text-label-sm text-status-warning hover:bg-status-warning/15 transition-colors"
                   >
                     <span className="flex items-center gap-1.5 font-medium">
                       <UserPlus className="w-3.5 h-3.5" />
                       <span>{t('social.friends.openRequests', { count: incomingRequests.length })}</span>
                     </span>
-                    <span className="text-[10px] underline">{t('social.friends.inProfile')}</span>
+                    <span className="text-label-sm underline">{t('social.friends.inProfile')}</span>
                   </button>
                 )}
 
@@ -283,7 +283,7 @@ export function FriendsListDock({
                         <button
                           type="button"
                           onClick={() => navigate('/profile?tab=social')}
-                          className="text-[11px] text-primary hover:underline inline-flex items-center gap-1"
+                          className="text-label-sm text-primary hover:underline inline-flex items-center gap-1"
                         >
                           <UserPlus className="w-3 h-3" />
                           <span>{t('social.friends.addInProfile')}</span>
@@ -312,7 +312,7 @@ export function FriendsListDock({
                               </span>
                               <DeviceBadge deviceType={f.presence?.device_type} />
                             </div>
-                            <p className="text-[10px] text-on-surface-variant/80 truncate">
+                            <p className="text-label-sm text-on-surface-variant/80 truncate">
                               {f.presence?.activity_label || (
                                 f.presence?.status === 'online'
                                   ? 'Online'
@@ -369,7 +369,7 @@ export function FriendsListDock({
 
                 {/* Recent Contacts & Team Members */}
                 <div className="space-y-1 max-h-60 overflow-y-auto pr-1">
-                  <div className="text-[10px] font-bold text-on-surface-variant/70 uppercase tracking-wider px-1 pt-1">
+                  <div className="text-label-sm font-bold text-on-surface-variant/70 uppercase tracking-wider px-1 pt-1">
                     {t('social.friends.directContacts')}
                   </div>
 
@@ -392,7 +392,7 @@ export function FriendsListDock({
                           <span className="text-xs font-semibold text-primary truncate block">
                             {f.username}
                           </span>
-                          <span className="text-[10px] text-on-surface-variant/70 flex items-center gap-1">
+                          <span className="text-label-sm text-on-surface-variant/70 flex items-center gap-1">
                             <DeviceBadge deviceType={f.presence?.device_type} />
                             <span>{t('social.friends.friend')}</span>
                           </span>
@@ -406,7 +406,7 @@ export function FriendsListDock({
                   {/* Team Members without prior friendship */}
                   {teamMembers.length > 0 && (
                     <>
-                      <div className="text-[10px] font-bold text-on-surface-variant/70 uppercase tracking-wider px-1 pt-2">
+                      <div className="text-label-sm font-bold text-on-surface-variant/70 uppercase tracking-wider px-1 pt-2">
                         {t('social.friends.teamMembers')}
                       </div>
                       {teamMembers.map(({ member, teamName }) => (
@@ -421,7 +421,7 @@ export function FriendsListDock({
                               <span className="text-xs font-semibold text-primary truncate block">
                                 {member.username}
                               </span>
-                              <span className="text-[10px] text-tertiary flex items-center gap-1">
+                              <span className="text-label-sm text-tertiary flex items-center gap-1">
                                 <UsersRound className="w-2.5 h-2.5" />
                                 <span>{teamName}</span>
                               </span>

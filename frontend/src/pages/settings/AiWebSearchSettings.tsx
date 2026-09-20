@@ -138,7 +138,7 @@ export function AiWebSearchSettings({ canWrite }: { canWrite: boolean }) {
     <section className="msm-card space-y-5 p-6" aria-labelledby="ai-web-search-title">
       <div className="flex items-center gap-2">
         <Globe className="h-5 w-5 text-secondary" aria-hidden="true" />
-        <h3 id="ai-web-search-title" className="font-headline text-lg font-semibold text-on-surface">
+        <h3 id="ai-web-search-title" className="font-headline text-title-lg font-semibold text-on-surface">
           {t('ai.webSearch.title')}
         </h3>
       </div>

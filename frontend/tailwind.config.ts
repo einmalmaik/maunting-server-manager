@@ -135,6 +135,16 @@ const config: Config = {
         'sans': ['Inter', 'system-ui', 'sans-serif'],
         'mono': ['JetBrains Mono', 'monospace'],
       },
+      /**
+       * Die Typo-Skala. Sie hatte Luecken, die niemandem auffielen, weil eine
+       * undefinierte Stufe kein CSS erzeugt und die Schrift einfach so bleibt,
+       * wie sie war: `body-sm` (20x), `title-md` (3x) und `label-lg` (3x)
+       * standen im Quelltext, aber nicht hier.
+       *
+       * `label-sm` ist die Untergrenze. Darunter lagen 388 feste Pixelwerte
+       * zwischen 8 und 11 px — unter jeder definierten Stufe und an der Grenze
+       * des Lesbaren.
+       */
       fontSize: {
         'display-sm': ['36px', { lineHeight: '1.15', fontWeight: '700' }],
         'headline-lg': ['32px', { lineHeight: '1.2', letterSpacing: '0', fontWeight: '700' }],
@@ -142,10 +152,14 @@ const config: Config = {
         'headline-md': ['24px', { lineHeight: '1.3', fontWeight: '600' }],
         'headline-sm': ['20px', { lineHeight: '1.3', fontWeight: '600' }],
         'title-lg': ['18px', { lineHeight: '1.4', fontWeight: '600' }],
+        'title-md': ['16px', { lineHeight: '1.4', fontWeight: '600' }],
         'title-sm': ['14px', { lineHeight: '1.4', fontWeight: '600' }],
         'body-lg': ['18px', { lineHeight: '1.6', fontWeight: '400' }],
         'body-md': ['16px', { lineHeight: '1.5', fontWeight: '400' }],
+        'body-sm': ['14px', { lineHeight: '1.5', fontWeight: '400' }],
+        'label-lg': ['16px', { lineHeight: '1.4', letterSpacing: '0', fontWeight: '500' }],
         'label-md': ['14px', { lineHeight: '1.4', letterSpacing: '0', fontWeight: '500' }],
+        'label-sm': ['12px', { lineHeight: '1.4', letterSpacing: '0', fontWeight: '500' }],
         'mono-sm': ['13px', { lineHeight: '1.5', fontWeight: '400' }],
       },
       spacing: {

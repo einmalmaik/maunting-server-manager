@@ -420,7 +420,7 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
               )}
             </div>
 
-            <span className="inline-flex items-center gap-1.5 text-[11px] text-on-surface-variant/80">
+            <span className="inline-flex items-center gap-1.5 text-label-sm text-on-surface-variant/80">
               <ShieldAlert className="h-3.5 w-3.5 text-secondary shrink-0" aria-hidden="true" />
               {t('ai.memory.secretHint')}
             </span>
@@ -472,7 +472,7 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
 
                       {/* Server-Zugehörigkeit */}
                       {entry.scope === 'server' && entry.server_id !== null && (
-                        <span className="rounded-full border border-outline-variant/40 bg-surface-container px-2 py-0.5 text-[10px] text-on-surface-variant">
+                        <span className="rounded-full border border-outline-variant/40 bg-surface-container px-2 py-0.5 text-label-sm text-on-surface-variant">
                           {t('ai.memory.forServer', {
                             name: serverNamen.get(entry.server_id) ?? `#${entry.server_id}`,
                           })}
@@ -481,7 +481,7 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
 
                       {/* KI-Herkunftsbadge */}
                       {entry.origin === 'ai' && (
-                        <span className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] text-primary">
+                        <span className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-label-sm text-primary">
                           <BrainCircuit className="h-3 w-3" aria-hidden="true" />
                           {t('ai.memory.originAi')}
                         </span>
@@ -490,7 +490,7 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
                       {/* Häufigkeitszähler */}
                       {entry.use_count > 0 && (
                         <span
-                          className="inline-flex items-center gap-1 rounded-full border border-outline-variant/40 bg-surface-container-high px-2 py-0.5 text-[10px] text-on-surface-variant font-medium"
+                          className="inline-flex items-center gap-1 rounded-full border border-outline-variant/40 bg-surface-container-high px-2 py-0.5 text-label-sm text-on-surface-variant font-medium"
                           title={t('ai.memory.usedCount', { count: entry.use_count })}
                         >
                           <Flame className="h-3 w-3 text-status-warning shrink-0" aria-hidden="true" />
@@ -500,7 +500,7 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
 
                       {/* Gemerkt-Datum (dezent) */}
                       {entry.created_at && (
-                        <span className="hidden md:inline-flex items-center gap-1 text-[10px] text-on-surface-variant/70">
+                        <span className="hidden md:inline-flex items-center gap-1 text-label-sm text-on-surface-variant/70">
                           <Calendar className="h-3 w-3 shrink-0" aria-hidden="true" />
                           {formatMemoryDate(entry.created_at, i18n.language)}
                         </span>
@@ -551,7 +551,7 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
                   </div>
 
                   <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-on-surface-variant border-t border-outline-variant/20 pt-2">
-                    <span className="font-mono text-[11px] text-on-surface-variant/80">
+                    <span className="font-mono text-label-sm text-on-surface-variant/80">
                       {t('ai.memory.rawKey', { key: entry.key })}
                     </span>
 

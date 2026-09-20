@@ -296,7 +296,7 @@ export function Users() {
                           <span className="block break-words font-body-md text-sm font-semibold leading-5">
                             {server.name}
                           </span>
-                          <span className="mt-1 block font-mono text-[10px] uppercase tracking-wide text-on-surface-variant">
+                          <span className="mt-1 block font-mono text-label-sm uppercase tracking-wide text-on-surface-variant">
                             {server.game_type}
                           </span>
                         </span>
@@ -319,7 +319,7 @@ export function Users() {
                       <ServerIcon aria-hidden="true" className="h-4 w-4" />
                     </span>
                     <div className="min-w-0">
-                      <p className="font-label-md text-[10px] uppercase tracking-wider text-on-surface-variant">
+                      <p className="font-label-md text-label-sm uppercase tracking-wider text-on-surface-variant">
                         {t('serverPermissions.selectedServer')}
                       </p>
                       <h3 className="mt-1 break-words font-headline text-base leading-6 text-on-surface">
@@ -350,7 +350,7 @@ export function Users() {
         <div className="msm-card min-w-0" data-testid="user-directory">
           <div
             aria-hidden="true"
-            className="hidden grid-cols-[minmax(9rem,1fr)_minmax(12rem,1.35fr)_7rem_minmax(10rem,12rem)_2.75rem] gap-4 border-b border-outline-variant/50 bg-surface-container-low/35 px-5 py-3 font-label-md text-[10px] uppercase tracking-wider text-on-surface-variant md:grid md:rounded-t-lg"
+            className="hidden grid-cols-[minmax(9rem,1fr)_minmax(12rem,1.35fr)_7rem_minmax(10rem,12rem)_2.75rem] gap-4 border-b border-outline-variant/50 bg-surface-container-low/35 px-5 py-3 font-label-md text-label-sm uppercase tracking-wider text-on-surface-variant md:grid md:rounded-t-lg"
           >
             <span>{t('auth.username')}</span>
             <span>{t('auth.email')}</span>

@@ -216,7 +216,7 @@ export const GuardianTab: React.FC<GuardianTabProps> = ({
     <div className="space-y-6">
       {/* Overview Card */}
       <div className="msm-card p-6">
-        <h3 className="text-lg font-headline font-semibold text-on-surface mb-4 flex items-center gap-2">
+        <h3 className="font-headline text-title-lg font-semibold text-on-surface mb-4 flex items-center gap-2">
           <Activity className="w-5 h-5 text-primary" />
           {t("servers.guardian.tab.overviewTitle")}
         </h3>
@@ -266,7 +266,7 @@ export const GuardianTab: React.FC<GuardianTabProps> = ({
         <div className="msm-card p-6">
           <div className="flex items-start justify-between gap-4 mb-4">
             <div>
-              <h3 className="text-lg font-headline font-semibold text-on-surface flex items-center gap-2">
+              <h3 className="font-headline text-title-lg font-semibold text-on-surface flex items-center gap-2">
                 <SlidersHorizontal className="w-5 h-5 text-primary" />
                 {t("servers.guardian.override.title")}
               </h3>
@@ -316,7 +316,7 @@ export const GuardianTab: React.FC<GuardianTabProps> = ({
       {/* Incidents & History Card */}
       <div className="msm-card p-6">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-headline font-semibold text-on-surface flex items-center gap-2">
+          <h3 className="font-headline text-title-lg font-semibold text-on-surface flex items-center gap-2">
             <Clock className="w-5 h-5 text-primary" />
             {t("servers.guardian.tab.historyTitle")}
           </h3>

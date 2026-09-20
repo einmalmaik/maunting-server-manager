@@ -322,7 +322,7 @@ export function Notes() {
             <h2 className="font-headline text-base sm:text-lg font-bold text-on-surface tracking-tight truncate">
               {t('notes.title', 'Notizen & Listen')}
             </h2>
-            <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant border border-outline-variant/30 shrink-0">
+            <span className="text-label-sm font-medium px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant border border-outline-variant/30 shrink-0">
               {filteredNotes.length}
             </span>
           </div>
@@ -445,7 +445,7 @@ export function Notes() {
                 <div>
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <div className="flex flex-wrap items-center gap-1.5 min-w-0">
-                      <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border truncate ${theme.pille}`}>
+                      <span className={`text-label-sm font-semibold px-2 py-0.5 rounded-full border truncate ${theme.pille}`}>
                         {note.category === 'shopping'
                           ? 'Einkauf'
                           : note.category === 'todo'
@@ -459,7 +459,7 @@ export function Notes() {
                           : 'Notiz'}
                       </span>
                       {note.note_type === 'team' && (
-                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-status-success/20 text-status-success border border-status-success/30 flex items-center gap-1">
+                        <span className="text-label-sm font-semibold px-2 py-0.5 rounded-full bg-status-success/20 text-status-success border border-status-success/30 flex items-center gap-1">
                           <Users className="w-3 h-3" />
                           <span className="truncate max-w-[90px]">{note.team_name || 'Team'}</span>
                         </span>
@@ -523,7 +523,7 @@ export function Notes() {
                 </div>
 
                 {/* Card Footer */}
-                <div className="flex items-center justify-between pt-2 border-t border-outline-variant/20 text-[11px] text-on-surface-variant/80 mt-auto">
+                <div className="flex items-center justify-between pt-2 border-t border-outline-variant/20 text-label-sm text-on-surface-variant/80 mt-auto">
                   <span>
                     {new Date(note.updated_at || note.created_at).toLocaleDateString('de-DE', {
                       day: '2-digit',
@@ -571,7 +571,7 @@ export function Notes() {
           >
             {/* Modal Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-outline-variant/30">
-              <h3 className="font-headline text-lg font-semibold text-on-surface">
+              <h3 className="font-headline text-title-lg font-semibold text-on-surface">
                 {editingNote ? t('notes.editNote', 'Notiz bearbeiten') : t('notes.createNote', 'Neue Notiz erstellen')}
               </h3>
               <button
@@ -688,7 +688,7 @@ export function Notes() {
                   <label className="text-xs font-semibold text-on-surface-variant">
                     {t('notes.formContent', 'Inhalt & Checkliste')}
                   </label>
-                  <div className="flex items-center bg-surface-container rounded-lg p-0.5 border border-outline-variant/30 text-[11px]">
+                  <div className="flex items-center bg-surface-container rounded-lg p-0.5 border border-outline-variant/30 text-label-sm">
                     <button
                       type="button"
                       onClick={() => setModalTab('edit')}
@@ -721,7 +721,7 @@ export function Notes() {
                     <button
                       type="button"
                       onClick={() => setFormContent((prev) => (prev ? `${prev}\n- [ ] ` : '- [ ] '))}
-                      className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg bg-surface-container text-on-surface-variant hover:text-primary hover:bg-surface-container-high border border-outline-variant/30 transition-colors"
+                      className="inline-flex items-center gap-1 text-label-sm px-2.5 py-1 rounded-lg bg-surface-container text-on-surface-variant hover:text-primary hover:bg-surface-container-high border border-outline-variant/30 transition-colors"
                     >
                       <Plus className="w-3 h-3 text-primary" />
                       <span>Checkliste</span>
@@ -729,7 +729,7 @@ export function Notes() {
                     <button
                       type="button"
                       onClick={() => setFormContent((prev) => (prev ? `${prev}\n- [ ] 1x  (~0,00 €)` : '- [ ] 1x  (~0,00 €)'))}
-                      className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg bg-surface-container text-on-surface-variant hover:text-status-success hover:bg-surface-container-high border border-outline-variant/30 transition-colors"
+                      className="inline-flex items-center gap-1 text-label-sm px-2.5 py-1 rounded-lg bg-surface-container text-on-surface-variant hover:text-status-success hover:bg-surface-container-high border border-outline-variant/30 transition-colors"
                     >
                       <Plus className="w-3 h-3 text-status-success" />
                       <span>Einkaufsposten</span>

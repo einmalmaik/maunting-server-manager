@@ -509,7 +509,7 @@ export function DatabaseConsole({
           <section className="msm-card p-4 xl:col-span-9 flex flex-col h-full overflow-hidden">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2 shrink-0">
               <div>
-                <h3 className="font-headline text-lg font-semibold text-on-surface">{t('databaseConsole.sql.title')}</h3>
+                <h3 className="font-headline text-title-lg font-semibold text-on-surface">{t('databaseConsole.sql.title')}</h3>
                 <p className="text-xs text-on-surface-variant">{t('databaseConsole.sql.subtitle')}</p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -563,7 +563,7 @@ export function DatabaseConsole({
                 <Wand2 className="h-3.5 w-3.5" />
                 {t('databaseConsole.sql.format')}
               </Button>
-              <span className="text-[11px] text-on-surface-variant">{t('databaseConsole.sql.hint')}</span>
+              <span className="text-label-sm text-on-surface-variant">{t('databaseConsole.sql.hint')}</span>
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto pr-1">
               <SqlResult result={sqlResult} />
@@ -589,7 +589,7 @@ export function DatabaseConsole({
                         onClick={() => onSqlTextChange(fav.sql)}
                       >
                         <div className="font-semibold text-xs text-on-surface truncate">{fav.title}</div>
-                        <div className="font-mono text-[10px] text-on-surface-variant truncate mt-0.5">{fav.sql}</div>
+                        <div className="font-mono text-label-sm text-on-surface-variant truncate mt-0.5">{fav.sql}</div>
                       </button>
                       <button
                         className="text-on-surface-variant/50 hover:text-status-destructive opacity-0 group-hover:opacity-100 transition p-0.5 shrink-0"
@@ -601,7 +601,7 @@ export function DatabaseConsole({
                     </div>
                   ))}
                   {!favorites.length && (
-                    <p className="text-[11px] text-on-surface-variant/70 italic py-2">{t('databaseConsole.sql.noFavorites')}</p>
+                    <p className="text-label-sm text-on-surface-variant/70 italic py-2">{t('databaseConsole.sql.noFavorites')}</p>
                   )}
                 </div>
               </div>
@@ -615,7 +615,7 @@ export function DatabaseConsole({
                   </span>
                   {localHistory.length > 0 && (
                     <button
-                      className="text-[10px] text-on-surface-variant hover:text-on-surface"
+                      className="text-label-sm text-on-surface-variant hover:text-on-surface"
                       onClick={() => {
                         setLocalHistory([])
                         // Leeren heißt leeren: der Eintrag verschwindet aus dem
@@ -631,7 +631,7 @@ export function DatabaseConsole({
                   {localHistory.map((entry, index) => (
                     <button
                       key={`${entry}-${index}`}
-                      className="w-full rounded-md border border-outline-variant bg-surface-container-high p-2 text-left font-mono text-[11px] text-on-surface-variant hover:text-on-surface hover:border-secondary/40 transition truncate"
+                      className="w-full rounded-md border border-outline-variant bg-surface-container-high p-2 text-left font-mono text-label-sm text-on-surface-variant hover:text-on-surface hover:border-secondary/40 transition truncate"
                       onClick={() => onSqlTextChange(entry)}
                       title={entry}
                     >
@@ -639,7 +639,7 @@ export function DatabaseConsole({
                     </button>
                   ))}
                   {!localHistory.length && (
-                    <p className="text-[11px] text-on-surface-variant/70 italic py-2">{t('databaseConsole.sql.noHistory')}</p>
+                    <p className="text-label-sm text-on-surface-variant/70 italic py-2">{t('databaseConsole.sql.noHistory')}</p>
                   )}
                 </div>
               </div>
@@ -662,7 +662,7 @@ export function DatabaseConsole({
                   <div key={group.schema}>
                     <div className="mb-2 flex items-center justify-between text-xs text-on-surface-variant">
                       <span className="font-semibold text-on-surface">{group.schema}</span>
-                      <span className="rounded-full border border-outline-variant px-2 py-0.5 font-mono text-[10px]">{visible.length}</span>
+                      <span className="rounded-full border border-outline-variant px-2 py-0.5 font-mono text-label-sm">{visible.length}</span>
                     </div>
                     <div className="space-y-1">
                       {visible.map((table) => (
@@ -679,7 +679,7 @@ export function DatabaseConsole({
                             <Table2 className="h-4 w-4 shrink-0" />
                             <span className="truncate font-mono text-xs">{table.name}</span>
                           </span>
-                          <span className="shrink-0 font-mono text-[11px] text-on-surface-variant/80">{formatRows(table.row_estimate, zeilenEinheit, i18n.language)}</span>
+                          <span className="shrink-0 font-mono text-label-sm text-on-surface-variant/80">{formatRows(table.row_estimate, zeilenEinheit, i18n.language)}</span>
                         </button>
                       ))}
                     </div>
@@ -844,7 +844,7 @@ export function DatabaseConsole({
               </div>
               <div>
                 <h3 className="font-headline text-sm font-semibold text-on-surface truncate">{selectedTable?.name || t('databaseConsole.schema.noTable')}</h3>
-                <p className="text-[11px] text-on-surface-variant">{t('databaseConsole.schema.heading')}</p>
+                <p className="text-label-sm text-on-surface-variant">{t('databaseConsole.schema.heading')}</p>
               </div>
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto pr-1">
@@ -856,7 +856,7 @@ export function DatabaseConsole({
                   <KeyRound className="h-3.5 w-3.5 text-status-warning" />
                   {t('databaseConsole.powerUser.title')}
                 </h4>
-                <div className="space-y-1.5 text-[11px]">
+                <div className="space-y-1.5 text-label-sm">
                   <p className="text-on-surface-variant">
                     {powerUserActive
                       ? t('databaseConsole.powerUser.active')
@@ -865,11 +865,11 @@ export function DatabaseConsole({
                   <div className="flex flex-wrap gap-1.5">
                     {powerUserActive ? (
                       <>
-                        <Button variant="secondary" size="sm" className="text-[11px]" onClick={onRotatePowerUser}>{t('databaseConsole.powerUser.rotate')}</Button>
-                        <Button variant="destructive" size="sm" className="text-[11px]" onClick={onDemotePowerUser}>{t('databaseConsole.powerUser.demote')}</Button>
+                        <Button variant="secondary" size="sm" className="text-label-sm" onClick={onRotatePowerUser}>{t('databaseConsole.powerUser.rotate')}</Button>
+                        <Button variant="destructive" size="sm" className="text-label-sm" onClick={onDemotePowerUser}>{t('databaseConsole.powerUser.demote')}</Button>
                       </>
                     ) : (
-                      <Button variant="secondary" size="sm" className="text-[11px] inline-flex items-center gap-1" onClick={onEnablePowerUser}>
+                      <Button variant="secondary" size="sm" className="text-label-sm inline-flex items-center gap-1" onClick={onEnablePowerUser}>
                         <Shield className="h-3 w-3" />
                         {t('databaseConsole.powerUser.enable')}
                       </Button>
@@ -976,7 +976,7 @@ function SaveFavoriteModal({
         </div>
         <div className="space-y-1">
           <label className="text-xs text-on-surface-variant font-medium">{t('databaseConsole.favoriteModal.sqlLabel')}</label>
-          <div className="rounded border border-outline-variant bg-surface-container p-2 font-mono text-[11px] text-on-surface-variant max-h-32 overflow-y-auto">
+          <div className="rounded border border-outline-variant bg-surface-container p-2 font-mono text-label-sm text-on-surface-variant max-h-32 overflow-y-auto">
             {sql}
           </div>
         </div>
@@ -1009,7 +1009,7 @@ function UsersPanel({ users, canAdmin, busy, onCreateUser, onRotateUser, onDelet
     <div className="msm-card p-4">
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <h3 className="font-headline text-lg font-semibold text-on-surface">{t('databaseConsole.users.title')}</h3>
+          <h3 className="font-headline text-title-lg font-semibold text-on-surface">{t('databaseConsole.users.title')}</h3>
           <p className="text-xs text-on-surface-variant">{t('databaseConsole.users.subtitle')}</p>
         </div>
         {canAdmin && onCreateUser && (
@@ -1134,7 +1134,7 @@ function RowsGrid({ result, selectable, selectedIndices, onToggleRow, onToggleAl
                 </td>
               )}
               {result.columns.map((column) => (
-                <td key={column} className="max-w-[380px] px-3 py-2 align-top font-mono text-[11px] whitespace-pre-wrap break-words">
+                <td key={column} className="max-w-[380px] px-3 py-2 align-top font-mono text-label-sm whitespace-pre-wrap break-words">
                   {formatValue(row[column])}
                 </td>
               ))}
@@ -1158,11 +1158,11 @@ function SchemaPanel({ tableInfo }: { tableInfo: PostgresTableInfo | null }) {
     <div className="space-y-4 text-xs">
       <div className="grid grid-cols-2 gap-2 rounded-lg border border-outline-variant bg-surface-container-high p-2.5">
         <div>
-          <span className="text-[11px] text-on-surface-variant block">{t('databaseConsole.schema.estimatedRows')}</span>
+          <span className="text-label-sm text-on-surface-variant block">{t('databaseConsole.schema.estimatedRows')}</span>
           <span className="font-mono font-bold text-xs text-on-surface">{formatRows(tableInfo.row_estimate, t('databaseConsole.rowsUnit'), i18n.language)}</span>
         </div>
         <div>
-          <span className="text-[11px] text-on-surface-variant block">{t('databaseConsole.schema.dataSize')}</span>
+          <span className="text-label-sm text-on-surface-variant block">{t('databaseConsole.schema.dataSize')}</span>
           <span className="font-mono font-bold text-xs text-on-surface">{formatBytes(tableInfo.size_bytes)}</span>
         </div>
       </div>
@@ -1180,15 +1180,15 @@ function SchemaPanel({ tableInfo }: { tableInfo: PostgresTableInfo | null }) {
             return (
               <div key={column.name} className="flex items-center justify-between gap-2 px-2.5 py-1.5 text-xs hover:bg-surface-container-high transition">
                 <span className="truncate font-mono font-medium text-on-surface flex items-center gap-1">
-                  {isPk && <span className="text-[9px] font-bold text-status-warning bg-status-warning/15 px-1 py-0.5 rounded" title={t('databaseConsole.schema.primaryKey')}>PK</span>}
+                  {isPk && <span className="text-label-sm font-bold text-status-warning bg-status-warning/15 px-1 py-0.5 rounded" title={t('databaseConsole.schema.primaryKey')}>PK</span>}
                   {column.name}
                 </span>
                 <div className="flex items-center gap-1 shrink-0">
-                  <span className="font-mono text-[10px] text-on-surface-variant bg-surface-container-highest px-1.5 py-0.5 rounded border border-outline-variant/60">
+                  <span className="font-mono text-label-sm text-on-surface-variant bg-surface-container-highest px-1.5 py-0.5 rounded border border-outline-variant/60">
                     {column.data_type}
                   </span>
                   {column.nullable && (
-                    <span className="text-[9px] text-on-surface-variant/70 italic">NULL</span>
+                    <span className="text-label-sm text-on-surface-variant/70 italic">NULL</span>
                   )}
                 </div>
               </div>
@@ -1205,7 +1205,7 @@ function SchemaPanel({ tableInfo }: { tableInfo: PostgresTableInfo | null }) {
           </h4>
           <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
             {tableInfo.indexes.map((idx) => (
-              <div key={idx.name} className="truncate rounded border border-outline-variant bg-surface-container px-2.5 py-1.5 font-mono text-[10px] text-on-surface-variant">
+              <div key={idx.name} className="truncate rounded border border-outline-variant bg-surface-container px-2.5 py-1.5 font-mono text-label-sm text-on-surface-variant">
                 {idx.name}
               </div>
             ))}
@@ -1221,9 +1221,9 @@ function SchemaPanel({ tableInfo }: { tableInfo: PostgresTableInfo | null }) {
           </h4>
           <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
             {tableInfo.foreign_keys.map((fk) => (
-              <div key={fk.name || `${fk.column_name}-${fk.foreign_table}`} className="rounded border border-outline-variant bg-surface-container p-2 font-mono text-[10px] text-on-surface-variant space-y-0.5">
+              <div key={fk.name || `${fk.column_name}-${fk.foreign_table}`} className="rounded border border-outline-variant bg-surface-container p-2 font-mono text-label-sm text-on-surface-variant space-y-0.5">
                 <div className="font-bold text-on-surface">{fk.column_name}</div>
-                <div className="text-[10px] text-secondary">➔ {fk.foreign_table}.{fk.foreign_column}</div>
+                <div className="text-label-sm text-secondary">➔ {fk.foreign_table}.{fk.foreign_column}</div>
               </div>
             ))}
           </div>
@@ -1477,7 +1477,7 @@ function EditRowModal({
         className="msm-card max-h-[85vh] w-full max-w-xl flex flex-col overflow-hidden p-6 shadow-2xl"
       >
         <div className="flex items-center justify-between">
-          <h3 id="zeile-bearbeiten-titel" className="font-headline text-lg font-bold text-on-surface">
+          <h3 id="zeile-bearbeiten-titel" className="font-headline text-title-lg font-bold text-on-surface">
             {t('databaseConsole.editRow.title')}
           </h3>
           <button aria-label={t('common.close')} className="text-on-surface-variant hover:text-on-surface" onClick={onClose}><X className="h-5 w-5" /></button>
@@ -1559,7 +1559,7 @@ function InsertRowModal({
         className="msm-card max-h-[85vh] w-full max-w-xl flex flex-col overflow-hidden p-6 shadow-2xl"
       >
         <div className="flex items-center justify-between">
-          <h3 id="zeile-einfuegen-titel" className="font-headline text-lg font-bold text-on-surface">
+          <h3 id="zeile-einfuegen-titel" className="font-headline text-title-lg font-bold text-on-surface">
             {t('databaseConsole.insertRow.title')}
           </h3>
           <button aria-label={t('common.close')} className="text-on-surface-variant hover:text-on-surface" onClick={onClose}><X className="h-5 w-5" /></button>
@@ -1629,7 +1629,7 @@ function DeleteConfirmModal({
         className="msm-card w-full max-w-md p-6 shadow-2xl space-y-4"
       >
         <div className="flex items-center justify-between">
-          <h3 id="zeilen-loeschen-titel" className="font-headline text-lg font-bold text-status-destructive">
+          <h3 id="zeilen-loeschen-titel" className="font-headline text-title-lg font-bold text-status-destructive">
             {t('databaseConsole.deleteRows.title')}
           </h3>
           <button aria-label={t('common.close')} className="text-on-surface-variant hover:text-on-surface" onClick={onClose}><X className="h-5 w-5" /></button>

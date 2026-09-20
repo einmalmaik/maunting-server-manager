@@ -96,8 +96,25 @@ const ABGESCHAFFT_MUSTER = new RegExp(
   'g',
 )
 
+/**
+ * Schriftgroessen unterhalb der Skala. 8 bis 11 Pixel lagen unter jeder
+ * definierten Stufe und an der Grenze des Lesbaren; `text-label-sm` (12 px)
+ * ist die Untergrenze.
+ */
+const ZU_KLEIN = /(?<![\w-])text-\[(?:[1-9]|1[01])px\](?![\w-])/g
+
+/** `text-<rolle>-<stufe>` — jede Stufe muss in der Config stehen. */
+const SKALA_NAME = /(?<![\w-])text-(display|headline|title|body|label|mono)-([a-z-]+)(?![\w-])/g
+
 const css = await readFile(cssFile, 'utf8')
 const config = await readFile(configFile, 'utf8')
+
+// Was `extend.fontSize` definiert.
+const fontSizeBlock = config.slice(config.indexOf('fontSize: {'))
+const definierteStufen = new Set(
+  [...fontSizeBlock.slice(0, fontSizeBlock.indexOf('\n      },')).matchAll(/^\s*'([a-z0-9-]+)':\s*\[/gm)]
+    .map(m => m[1]),
+)
 
 // Was index.css als .msm-* definiert, und was die Config als animation kennt.
 const definierteMsm = new Set([...css.matchAll(/^\s*\.(msm-[a-z0-9-]+)/gm)].map(m => m[1]))
@@ -126,6 +143,15 @@ for (const file of await sourceFiles(sourceDir)) {
   }
   for (const treffer of source.matchAll(ABGESCHAFFT_MUSTER)) {
     fehler.push(`${relativ}: "${treffer[0]}" gibt es nicht mehr — heute ${ABGESCHAFFT.get(treffer[1])}`)
+  }
+  for (const treffer of source.matchAll(ZU_KLEIN)) {
+    fehler.push(`${relativ}: "${treffer[0]}" liegt unter der Skala — text-label-sm (12px) ist die Untergrenze`)
+  }
+  for (const treffer of source.matchAll(SKALA_NAME)) {
+    const stufe = `${treffer[1]}-${treffer[2]}`
+    if (!definierteStufen.has(stufe)) {
+      fehler.push(`${relativ}: "${treffer[0]}" ist in tailwind.config.ts unter fontSize nicht definiert — erzeugt keine Schriftgroesse`)
+    }
   }
 
   for (const treffer of source.matchAll(klassenMuster)) {

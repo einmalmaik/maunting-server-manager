@@ -235,7 +235,7 @@ export function SocialTab() {
       <section className="msm-card p-6" aria-labelledby="social-contacts-title">
         <div className="flex items-center gap-2 mb-2">
           <Users className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 id="social-contacts-title" className="font-headline text-lg font-semibold text-on-surface">
+          <h2 id="social-contacts-title" className="font-headline text-title-lg font-semibold text-on-surface">
             {t('social.contacts.title')}
           </h2>
         </div>
@@ -397,7 +397,7 @@ export function SocialTab() {
                             <DeviceBadge deviceType={f.presence?.device_type} />
                           </div>
                           {f.presence?.activity_label && (
-                            <p className="text-[10px] text-on-surface-variant/80 truncate">
+                            <p className="text-label-sm text-on-surface-variant/80 truncate">
                               {f.presence.activity_label}
                             </p>
                           )}
@@ -459,7 +459,7 @@ export function SocialTab() {
                         <span className="text-xs font-semibold text-primary truncate block">
                           {b.username}
                         </span>
-                        <span className="text-[10px] text-status-destructive font-medium">
+                        <span className="text-label-sm text-status-destructive font-medium">
                           {t('social.contacts.blocked')}
                         </span>
                       </div>
@@ -508,7 +508,7 @@ export function SocialTab() {
                         <span className="text-xs font-semibold text-primary truncate block">
                           {m.name}
                         </span>
-                        <span className="text-[10px] text-on-surface-variant/80 flex items-center gap-1">
+                        <span className="text-label-sm text-on-surface-variant/80 flex items-center gap-1">
                           <Clock className="w-3 h-3 text-status-warning" />
                           <span>{m.remainingLabel}</span>
                         </span>
@@ -538,7 +538,7 @@ export function SocialTab() {
       <section className="msm-card p-6" aria-labelledby="chat-privacy-title">
         <div className="flex items-center gap-2 mb-2">
           <Lock className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 id="chat-privacy-title" className="font-headline text-lg font-semibold text-on-surface">
+          <h2 id="chat-privacy-title" className="font-headline text-title-lg font-semibold text-on-surface">
             {t('social.privacy.title')}
           </h2>
         </div>
@@ -551,7 +551,7 @@ export function SocialTab() {
             <span className="text-xs font-bold text-on-surface">
               {t('social.privacy.receipts')}
             </span>
-            <p className="text-[11px] text-on-surface-variant">
+            <p className="text-label-sm text-on-surface-variant">
               {t('social.privacy.receiptsHint')}
             </p>
           </div>
@@ -580,7 +580,7 @@ export function SocialTab() {
           <div className="flex items-center gap-2">
             <Trophy className="h-5 w-5 text-secondary" aria-hidden="true" />
             <div>
-              <h2 id="milestones-title" className="font-headline text-lg font-semibold text-on-surface">
+              <h2 id="milestones-title" className="font-headline text-title-lg font-semibold text-on-surface">
                 {t('social.milestones.title')}
               </h2>
               <p className="font-body-md text-xs text-on-surface-variant mt-0.5">
@@ -594,7 +594,7 @@ export function SocialTab() {
               <span className="text-xs font-bold text-primary font-mono block">
                 {overview?.total_unlocked || 0} / {overview?.total_available || 0}
               </span>
-              <span className="text-[10px] text-on-surface-variant font-mono">
+              <span className="text-label-sm text-on-surface-variant font-mono">
                 {t('social.milestones.points', { count: overview?.prestige_score || 0 })}
               </span>
             </div>
@@ -676,11 +676,11 @@ export function SocialTab() {
                     <span className="font-headline text-xs font-bold text-primary truncate">
                       {m.title}
                     </span>
-                    <span className="text-[10px] font-mono text-status-warning/90 font-semibold">
+                    <span className="text-label-sm font-mono text-status-warning/90 font-semibold">
                       {t('social.milestones.pointsShort', { count: m.points })}
                     </span>
                     {isRare && (
-                      <Badge variant="warning" className="text-[9px] px-1 py-0 uppercase font-bold">
+                      <Badge variant="warning" className="text-label-sm px-1 py-0 uppercase font-bold">
                         {t('social.milestones.rare')}
                       </Badge>
                     )}
@@ -688,7 +688,7 @@ export function SocialTab() {
                   <p className="font-body text-xs text-on-surface-variant mt-0.5 leading-relaxed">
                     {m.description}
                   </p>
-                  <div className="flex items-center gap-3 mt-1.5 text-[10px] text-on-surface-variant/70 flex-wrap">
+                  <div className="flex items-center gap-3 mt-1.5 text-label-sm text-on-surface-variant/70 flex-wrap">
                     {m.rarity_text && <span>{m.rarity_text}</span>}
                     {m.unlocked && m.unlocked_at && (
                       <span className="inline-flex items-center gap-1 text-status-success">

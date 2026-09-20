@@ -133,7 +133,7 @@ export function TwoFactorTab() {
       <div className="flex items-center gap-2 mb-6">
         <Shield className="h-5 w-5 text-secondary" aria-hidden="true" />
         <div className="flex-1">
-          <h2 className="font-headline text-lg font-semibold text-on-surface">{t('profile.2faStatus')}</h2>
+          <h2 className="font-headline text-title-lg font-semibold text-on-surface">{t('profile.2faStatus')}</h2>
           <p className="font-body-md text-sm text-on-surface-variant mt-1">
             {user?.two_factor_enabled ? t('profile.2faEnabled') : t('profile.2faDisabled')}
           </p>

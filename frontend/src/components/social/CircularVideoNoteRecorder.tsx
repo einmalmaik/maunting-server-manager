@@ -234,7 +234,7 @@ export const CircularVideoNoteRecorder: React.FC<CircularVideoNoteRecorderProps>
           </div>
 
           {!isLocked && gestengefuehrt && (
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/60 px-3 py-1 rounded-full text-[11px] text-white/80 flex items-center gap-1 animate-bounce">
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/60 px-3 py-1 rounded-full text-label-sm text-white/80 flex items-center gap-1 animate-bounce">
               <Lock className="w-3 h-3 text-status-success" />
               <span>{t('social.videoNote.swipeToLock')}</span>
             </div>

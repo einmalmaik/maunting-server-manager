@@ -93,7 +93,7 @@ export function CurseForgeTab() {
       <div className="msm-card p-6">
         <div className="flex items-center gap-2 mb-6">
           <Flame className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 className="font-headline text-lg font-semibold text-on-surface">
+          <h2 className="font-headline text-title-lg font-semibold text-on-surface">
             {t('settings.curseforgeApiKey', { defaultValue: 'CurseForge API-Schlüssel' })}
           </h2>
         </div>

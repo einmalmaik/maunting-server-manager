@@ -154,7 +154,7 @@ export function ServerPermissionsPanel({ serverId }: Props) {
       {/* User hinzufuegen */}
       <div className="flex flex-col gap-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/40 p-3 sm:flex-row sm:items-end">
         <div className="min-w-0 flex-1">
-          <label className="mb-1.5 block font-label-md text-[10px] uppercase tracking-wider text-on-surface-variant">
+          <label className="mb-1.5 block font-label-md text-label-sm uppercase tracking-wider text-on-surface-variant">
             {t('serverPermissions.selectUser')}
           </label>
           <Dropdown
@@ -212,7 +212,7 @@ export function ServerPermissionsPanel({ serverId }: Props) {
                       <strong className="block font-label-md text-xs font-medium text-on-surface">
                         {t('serverPermissions.permissionCount', { count: row.permissions.length })}
                       </strong>
-                      <p className="mt-1 break-words font-mono text-[10px] leading-4 text-on-surface-variant">
+                      <p className="mt-1 break-words font-mono text-label-sm leading-4 text-on-surface-variant">
                         {visiblePermissions.join(' · ')}
                         {hiddenPermissionCount > 0 ? ` · +${hiddenPermissionCount}` : ''}
                       </p>

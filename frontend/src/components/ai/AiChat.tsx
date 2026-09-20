@@ -1355,7 +1355,7 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
                             t={t}
                           />
                           {message.created_at && (
-                            <span className="mt-1 text-[10px] text-on-surface-variant/70">
+                            <span className="mt-1 text-label-sm text-on-surface-variant/70">
                               {formatMessageTime(message.created_at)}
                             </span>
                           )}
@@ -1460,7 +1460,7 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
               {queuedMessages.length > 1 && (
                 <button
                   type="button"
-                  className="ml-auto text-[11px] text-on-surface-variant hover:text-status-destructive underline transition-colors"
+                  className="ml-auto text-label-sm text-on-surface-variant hover:text-status-destructive underline transition-colors"
                   onClick={() => setQueuedMessages([])}
                 >
                   Alle leeren
@@ -1670,7 +1670,7 @@ function AnhangListe({ anhaenge, t }: { anhaenge: AiAttachment[]; t: TFunction }
           <Paperclip className="h-3 w-3 shrink-0" aria-hidden="true" />
           <span className="truncate">{anhang.original_name}</span>
           {anhang.redacted_spans ? (
-            <span className="shrink-0 rounded-full border border-outline-variant/50 px-1.5 py-0.5 text-[10px]">
+            <span className="shrink-0 rounded-full border border-outline-variant/50 px-1.5 py-0.5 text-label-sm">
               {t('ai.attachments.redacted', { count: anhang.redacted_spans })}
             </span>
           ) : null}

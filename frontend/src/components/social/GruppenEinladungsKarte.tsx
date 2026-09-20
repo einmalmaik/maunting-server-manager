@@ -100,11 +100,11 @@ export const GruppenEinladungsKarte: React.FC<GruppenEinladungsKarteProps> = ({
         </div>
 
         <div className="min-w-0 flex-1">
-          <div className="text-[10px] uppercase tracking-[0.14em] opacity-60">
+          <div className="text-label-sm uppercase tracking-[0.14em] opacity-60">
             {t('social.invite.heading')}
           </div>
           <div className="truncate text-sm font-semibold">{info.name}</div>
-          <div className="mt-0.5 flex items-center gap-2 text-[11px] opacity-75">
+          <div className="mt-0.5 flex items-center gap-2 text-label-sm opacity-75">
             <span>
               {t('social.invite.memberCount', { count: info.member_count })}
             </span>

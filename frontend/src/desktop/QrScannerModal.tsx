@@ -277,7 +277,7 @@ export function QrScannerModal({ offen, onSchliessen, onCodeGefunden }: QrScanne
               </div>
             </div>
 
-            <div className="absolute bottom-2 flex items-center gap-1 rounded-full bg-black/60 px-3 py-1 text-[11px] font-medium text-primary backdrop-blur-sm">
+            <div className="absolute bottom-2 flex items-center gap-1 rounded-full bg-black/60 px-3 py-1 text-label-sm font-medium text-primary backdrop-blur-sm">
               <Zap className="h-3 w-3 text-primary animate-pulse" />
               <span>Soforterkennung aktiv</span>
             </div>

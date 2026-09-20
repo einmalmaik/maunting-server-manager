@@ -563,7 +563,7 @@ export function ServerConsolePanel({ serverId, mode = 'console' }: Props) {
           {connStatus !== 'live' && (
             <span
               data-testid="console-conn-status"
-              className={`text-[10px] uppercase tracking-wide font-semibold px-2 py-0.5 rounded-full border ${
+              className={`text-label-sm uppercase tracking-wide font-semibold px-2 py-0.5 rounded-full border ${
                 connStatus === 'failed'
                   ? 'text-status-destructive border-status-destructive/40 bg-status-destructive/10'
                   : connStatus === 'reconnecting'

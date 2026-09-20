@@ -312,7 +312,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
                 <span className="text-xs font-semibold text-on-surface">
                   {t('mss.vault.qr.hierAblegen')}
                 </span>
-                <span className="text-[11px] text-on-surface-variant mt-0.5">
+                <span className="text-label-sm text-on-surface-variant mt-0.5">
                   {t('mss.vault.qr.oderKlicken')}
                 </span>
                 <input

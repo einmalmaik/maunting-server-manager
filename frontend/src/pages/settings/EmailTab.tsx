@@ -113,7 +113,7 @@ export function EmailTab() {
         <div className="msm-card p-6">
           <div className="flex items-center gap-2 mb-6">
             <Mail className="h-5 w-5 text-secondary" aria-hidden="true" />
-            <h2 className="font-headline text-lg font-semibold text-on-surface">{t('settings.emailTitle')}</h2>
+            <h2 className="font-headline text-title-lg font-semibold text-on-surface">{t('settings.emailTitle')}</h2>
           </div>
 
           <div className="flex gap-4 mb-6">

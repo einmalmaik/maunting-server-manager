@@ -90,7 +90,7 @@ export function E2eeGeraeteCard() {
     <section className="msm-card space-y-4 p-6" aria-labelledby="e2ee-devices-title">
       <div className="flex items-center gap-2">
         <ShieldCheck className="h-5 w-5 text-secondary" aria-hidden="true" />
-        <h2 id="e2ee-devices-title" className="font-headline text-lg font-semibold text-on-surface">
+        <h2 id="e2ee-devices-title" className="font-headline text-title-lg font-semibold text-on-surface">
           {t('profile.e2eeDevices.title', 'Geräte mit Nachrichtenzugriff')}
         </h2>
       </div>

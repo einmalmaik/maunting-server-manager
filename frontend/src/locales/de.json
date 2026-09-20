@@ -484,7 +484,7 @@
       "learned": "Skill „{{name}}“ gelernt",
       "learnedPending": "Skill „{{name}}“ gelernt (wartet auf Freigabe)",
       "scopes": {
-        "shipped": "mitgeliefert",
+        "shipped": "Mitgeliefert",
         "global": "Panelweit",
         "team": "Team",
         "personal": "Persönlich",

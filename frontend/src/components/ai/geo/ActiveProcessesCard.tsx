@@ -72,7 +72,7 @@ export function ActiveProcessesCard({ processes, className = '' }: ActiveProcess
             </div>
 
             <span
-              className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${
+              className={`text-label-sm font-medium px-2 py-0.5 rounded-full border ${
                 item.status === 'fertig'
                   ? 'bg-status-success/10 text-status-success border-status-success/20'
                   : item.status === 'laeuft'

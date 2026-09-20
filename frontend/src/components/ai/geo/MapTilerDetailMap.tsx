@@ -234,7 +234,7 @@ export function MapTilerDetailMap({
           el.style.boxShadow = '0 0 10px rgba(56,189,248,0.8),0 2px 8px rgba(0,0,0,0.4)'
         })
 
-        const popupHtml = `<div class="pointer-events-none rounded-xl border border-outline-variant/60 bg-surface-container-high/95 px-3.5 py-2 text-xs font-medium leading-tight text-on-surface shadow-2xl backdrop-blur-md"><div class="flex items-center gap-1.5 font-semibold text-primary"><span class="inline-block h-2 w-2 shrink-0 rounded-full bg-primary animate-pulse"></span><span>${escapeHtml(s.name)}</span></div>${s.summary ? `<div class="mt-1 text-[11px] font-normal text-on-surface-variant leading-snug">${escapeHtml(s.summary)}</div>` : ''}</div>`
+        const popupHtml = `<div class="pointer-events-none rounded-xl border border-outline-variant/60 bg-surface-container-high/95 px-3.5 py-2 text-xs font-medium leading-tight text-on-surface shadow-2xl backdrop-blur-md"><div class="flex items-center gap-1.5 font-semibold text-primary"><span class="inline-block h-2 w-2 shrink-0 rounded-full bg-primary animate-pulse"></span><span>${escapeHtml(s.name)}</span></div>${s.summary ? `<div class="mt-1 text-label-sm font-normal text-on-surface-variant leading-snug">${escapeHtml(s.summary)}</div>` : ''}</div>`
         const popup = new Popup({ offset: 14, closeButton: false, className: 'msm-sight-popup', maxWidth: '280px' }).setHTML(popupHtml)
         const m = new Marker({ element: el }).setLngLat([s.longitude, s.latitude]).addTo(map)
         el.addEventListener('mouseenter', () => m.setPopup(popup).addTo(map))

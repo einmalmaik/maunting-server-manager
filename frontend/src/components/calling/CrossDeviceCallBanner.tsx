@@ -98,7 +98,7 @@ export const CrossDeviceCallBanner: React.FC<CrossDeviceCallBannerProps> = ({ cl
                 <span className="font-semibold text-white tracking-tight">
                   {t('calls.ongoingGroupCall')}
                 </span>
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-status-success/20 text-status-success border border-status-success/30">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-label-sm font-medium bg-status-success/20 text-status-success border border-status-success/30">
                   <Users className="w-3 h-3" />
                   {groupCall.participant_count > 0 ? t('calls.activeCount', { count: groupCall.participant_count }) : t('calls.live')}
                 </span>
@@ -176,7 +176,7 @@ export const CrossDeviceCallBanner: React.FC<CrossDeviceCallBannerProps> = ({ cl
                   ? t('calls.ongoingRejoin')
                   : t('calls.alreadyInCall')}
               </span>
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-status-success/20 text-status-success border border-status-success/30">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-label-sm font-medium bg-status-success/20 text-status-success border border-status-success/30">
                 <DeviceIcon className="w-3 h-3" />
                 {deviceLabel}
               </span>

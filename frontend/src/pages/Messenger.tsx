@@ -3076,7 +3076,7 @@ export function Messenger() {
               <MessageSquare className="w-4 h-4" />
             </div>
             <span className="font-headline text-body-md font-bold text-primary">Messenger</span>
-            <span className="text-[11px] text-on-surface-variant/60 hidden sm:inline">{t('messenger.headerSubtitle')}</span>
+            <span className="text-label-sm text-on-surface-variant/60 hidden sm:inline">{t('messenger.headerSubtitle')}</span>
           </div>
 
           <div className="flex items-center gap-1">
@@ -3202,7 +3202,7 @@ export function Messenger() {
                   aria-label={t('messenger.filterAll')}
                 >
                   <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
-                  <span className="text-[10px] leading-none hidden xs:inline">Alle</span>
+                  <span className="text-label-sm leading-none hidden xs:inline">Alle</span>
                 </button>
 
                 <button
@@ -3219,7 +3219,7 @@ export function Messenger() {
                   <UsersRound className="w-3.5 h-3.5 shrink-0" />
                   {groups.length > 0 && (
                     <span
-                      className={`text-[9px] px-1 py-0.2 rounded-full font-bold leading-none ${
+                      className={`text-label-sm px-1 py-0.2 rounded-full font-bold leading-none ${
                         filterTab === 'groups' ? 'bg-white/20 text-white' : 'bg-surface-container-highest text-on-surface-variant'
                       }`}
                     >
@@ -3242,7 +3242,7 @@ export function Messenger() {
                   <UserCheck className="w-3.5 h-3.5 shrink-0" />
                   {contactsList.some((c) => c.isFriend) && (
                     <span
-                      className={`text-[9px] px-1 py-0.2 rounded-full font-bold leading-none ${
+                      className={`text-label-sm px-1 py-0.2 rounded-full font-bold leading-none ${
                         filterTab === 'friends' ? 'bg-white/20 text-white' : 'bg-surface-container-highest text-on-surface-variant'
                       }`}
                     >
@@ -3265,7 +3265,7 @@ export function Messenger() {
                   <Briefcase className="w-3.5 h-3.5 shrink-0" />
                   {contactsList.some((c) => c.teamName) && (
                     <span
-                      className={`text-[9px] px-1 py-0.2 rounded-full font-bold leading-none ${
+                      className={`text-label-sm px-1 py-0.2 rounded-full font-bold leading-none ${
                         filterTab === 'teams' ? 'bg-white/20 text-white' : 'bg-surface-container-highest text-on-surface-variant'
                       }`}
                     >
@@ -3286,10 +3286,10 @@ export function Messenger() {
                   aria-label={t('messenger.filterPublic', { count: contactsList.filter((c) => c.isPublicUser).length })}
                 >
                   <Globe className="w-3.5 h-3.5 shrink-0" />
-                  <span className="text-[10px] leading-none hidden xs:inline">Entdecken</span>
+                  <span className="text-label-sm leading-none hidden xs:inline">Entdecken</span>
                   {contactsList.some((c) => c.isPublicUser) && (
                     <span
-                      className={`text-[9px] px-1 py-0.2 rounded-full font-bold leading-none ${
+                      className={`text-label-sm px-1 py-0.2 rounded-full font-bold leading-none ${
                         filterTab === 'public' ? 'bg-white/20 text-white' : 'bg-surface-container-highest text-on-surface-variant'
                       }`}
                     >
@@ -3332,16 +3332,16 @@ export function Messenger() {
                       />
                     </div>
                     {myStories.length === 0 ? (
-                      <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-primary text-on-primary flex items-center justify-center text-[10px] shadow-sm border-2 border-surface">
+                      <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-primary text-on-primary flex items-center justify-center text-label-sm shadow-sm border-2 border-surface">
                         <Plus className="w-2.5 h-2.5" />
                       </div>
                     ) : (
-                      <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-status-success text-white text-[9px] font-bold flex items-center justify-center border-2 border-surface">
+                      <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-status-success text-white text-label-sm font-bold flex items-center justify-center border-2 border-surface">
                         {myStories.length}
                       </span>
                     )}
                   </div>
-                  <span className="text-[10px] text-on-surface-variant truncate w-full text-center">
+                  <span className="text-label-sm text-on-surface-variant truncate w-full text-center">
                     {myStories.length > 0 ? t('messenger.yourStatus') : 'Neu'}
                   </span>
                 </div>
@@ -3368,13 +3368,13 @@ export function Messenger() {
                         />
                       </div>
                       {group.stories.length > 1 && (
-                        <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-primary text-on-primary text-[9px] font-bold flex items-center justify-center border-2 border-surface">
+                        <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-primary text-on-primary text-label-sm font-bold flex items-center justify-center border-2 border-surface">
                           {group.stories.length}
                         </span>
                       )}
                     </div>
                     <span
-                      className={`text-[10px] truncate w-full text-center ${
+                      className={`text-label-sm truncate w-full text-center ${
                         group.hasUnseen ? 'text-primary font-bold' : 'text-on-surface-variant font-normal'
                       }`}
                     >
@@ -3394,10 +3394,10 @@ export function Messenger() {
                 {/* Groups Section */}
                 {(filteredGroups.length > 0 || filterTab === 'all' || filterTab === 'groups') && (
                   <div className="space-y-1 mb-2">
-                    <div className="px-2 py-1 text-[11px] font-semibold text-on-surface-variant/70 uppercase tracking-wider flex items-center justify-between">
+                    <div className="px-2 py-1 text-label-sm font-semibold text-on-surface-variant/70 uppercase tracking-wider flex items-center justify-between">
                       <span>{t('messenger.sectionGroups')}</span>
                       <div className="flex items-center gap-1">
-                        <span className="text-[10px]">{filteredGroups.length}</span>
+                        <span className="text-label-sm">{filteredGroups.length}</span>
                         <button
                           type="button"
                           onClick={() => setIsCreateGroupOpen(true)}
@@ -3442,11 +3442,11 @@ export function Messenger() {
                                 <span className="text-xs font-semibold text-primary truncate">
                                   {g.name}
                                 </span>
-                                <span className="text-[10px] text-on-surface-variant/60 shrink-0">
+                                <span className="text-label-sm text-on-surface-variant/60 shrink-0">
                                   {g.member_count} M.
                                 </span>
                               </div>
-                              <p className="text-[11px] text-on-surface-variant/80 truncate">
+                              <p className="text-label-sm text-on-surface-variant/80 truncate">
                                 {g.description || t('messenger.encryptedGroup')}
                               </p>
                             </div>
@@ -3456,7 +3456,7 @@ export function Messenger() {
                               <BellOff className="w-3.5 h-3.5 text-on-surface-variant/50" />
                             )}
                             {unread > 0 && (
-                              <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-primary text-on-primary min-w-[18px]">
+                              <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-label-sm font-bold rounded-full bg-primary text-on-primary min-w-[18px]">
                                 {unread > 99 ? '99+' : unread}
                               </span>
                             )}
@@ -3471,9 +3471,9 @@ export function Messenger() {
                 {filteredContacts.length > 0 && (
                   <div className="space-y-1">
                     {filteredGroups.length > 0 && (
-                      <div className="px-2 py-1 text-[11px] font-semibold text-on-surface-variant/70 uppercase tracking-wider flex items-center justify-between">
+                      <div className="px-2 py-1 text-label-sm font-semibold text-on-surface-variant/70 uppercase tracking-wider flex items-center justify-between">
                         <span>Direktnachrichten</span>
-                        <span className="text-[10px]">{filteredContacts.length}</span>
+                        <span className="text-label-sm">{filteredContacts.length}</span>
                       </div>
                     )}
                     {filteredContacts.map((c) => {
@@ -3508,12 +3508,12 @@ export function Messenger() {
                                   {c.username}
                                 </span>
                                 {isUserBlocked && (
-                                  <span className="text-[9px] px-1 rounded bg-status-destructive/15 text-status-destructive font-medium">
+                                  <span className="text-label-sm px-1 rounded bg-status-destructive/15 text-status-destructive font-medium">
                                     Blockiert
                                   </span>
                                 )}
                                 {c.isPublicUser && !c.isFriend && !c.teamName && !isUserBlocked && (
-                                  <span className="text-[9px] px-1.5 py-0.2 rounded-md bg-primary/10 text-primary font-medium flex items-center gap-0.5">
+                                  <span className="text-label-sm px-1.5 py-0.2 rounded-md bg-primary/10 text-primary font-medium flex items-center gap-0.5">
                                     <Globe className="w-2.5 h-2.5" />
                                     <span>{t('messenger.public')}</span>
                                   </span>
@@ -3521,18 +3521,18 @@ export function Messenger() {
                                 <DeviceBadge deviceType={c.deviceType} />
                               </div>
                               {c.teamName && (
-                                <p className="text-[10px] text-tertiary truncate flex items-center gap-1">
+                                <p className="text-label-sm text-tertiary truncate flex items-center gap-1">
                                   <UsersRound className="w-2.5 h-2.5" />
                                   <span>{c.teamName}</span>
                                 </p>
                               )}
                               {c.isPublicUser && !c.isFriend && !c.teamName && (
-                                <p className="text-[10px] text-on-surface-variant/70 truncate flex items-center gap-1">
+                                <p className="text-label-sm text-on-surface-variant/70 truncate flex items-center gap-1">
                                   <span>{t('messenger.e2eeReady')}</span>
                                 </p>
                               )}
                               {c.activityLabel && !c.teamName && (
-                                <p className="text-[10px] text-on-surface-variant/80 truncate">
+                                <p className="text-label-sm text-on-surface-variant/80 truncate">
                                   {c.activityLabel}
                                 </p>
                               )}
@@ -3543,7 +3543,7 @@ export function Messenger() {
                               <BellOff className="w-3.5 h-3.5 text-on-surface-variant/50" />
                             )}
                             {unread > 0 && (
-                              <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-primary text-on-primary min-w-[18px]">
+                              <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-label-sm font-bold rounded-full bg-primary text-on-primary min-w-[18px]">
                                 {unread > 99 ? '99+' : unread}
                               </span>
                             )}
@@ -3592,7 +3592,7 @@ export function Messenger() {
                 <div className="p-3.5 rounded-2xl bg-surface-container/70 border border-outline-variant/35 shadow-sm transition-colors hover:bg-surface-container/90">
                   <div className="flex items-center justify-between mb-3">
                     <span className="text-xs font-headline font-bold text-on-surface">{t('messenger.myStatus')}</span>
-                    <span className="text-[11px] text-on-surface-variant font-medium">{t('social.story.badge24h')}</span>
+                    <span className="text-label-sm text-on-surface-variant font-medium">{t('social.story.badge24h')}</span>
                   </div>
 
                   <div className="flex items-center gap-3">
@@ -3638,7 +3638,7 @@ export function Messenger() {
                       <div className="text-xs font-semibold text-on-surface truncate">
                         {myStories.length > 0 ? t('messenger.viewStatus') : t('social.story.share')}
                       </div>
-                      <p className="text-[11px] text-on-surface-variant truncate">
+                      <p className="text-label-sm text-on-surface-variant truncate">
                         {myStories.length > 0
                           ? `${myStories.length} aktive Story${myStories.length === 1 ? '' : 's'} • Tippen zum Abspielen`
                           : t('messenger.statusHint')}
@@ -3649,9 +3649,9 @@ export function Messenger() {
 
                 {/* Friends' Stories Section */}
                 <div className="space-y-2">
-                  <div className="px-1 text-[11px] font-semibold text-on-surface-variant/80 uppercase tracking-wider flex items-center justify-between">
+                  <div className="px-1 text-label-sm font-semibold text-on-surface-variant/80 uppercase tracking-wider flex items-center justify-between">
                     <span>{t('messenger.recentUpdates')}</span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-surface-container font-mono text-on-surface-variant">
+                    <span className="text-label-sm px-1.5 py-0.5 rounded-full bg-surface-container font-mono text-on-surface-variant">
                       {friendsStoriesGrouped.length}
                     </span>
                   </div>
@@ -3683,7 +3683,7 @@ export function Messenger() {
                               />
                             </div>
                             {grp.stories.length > 1 && (
-                              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-primary text-on-primary text-[9px] font-bold flex items-center justify-center border border-surface">
+                              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-primary text-on-primary text-label-sm font-bold flex items-center justify-center border border-surface">
                                 {grp.stories.length}
                               </span>
                             )}
@@ -3692,7 +3692,7 @@ export function Messenger() {
                             <div className="text-xs font-semibold text-on-surface truncate">
                               {grp.username}
                             </div>
-                            <div className="text-[10px] text-on-surface-variant flex items-center gap-1">
+                            <div className="text-label-sm text-on-surface-variant flex items-center gap-1">
                               <Clock className="w-3 h-3" />
                               <span>
                                 {grp.latestStory
@@ -3715,7 +3715,7 @@ export function Messenger() {
 
                 {/* Contacts Activity Section */}
                 <div className="space-y-2 pt-2 border-t border-outline-variant/20">
-                  <div className="px-1 text-[11px] font-semibold text-on-surface-variant/70 uppercase tracking-wider">
+                  <div className="px-1 text-label-sm font-semibold text-on-surface-variant/70 uppercase tracking-wider">
                     Aktivität deiner Kontakte
                   </div>
                   <div className="space-y-1">
@@ -3734,7 +3734,7 @@ export function Messenger() {
                               <span>{c.username}</span>
                               <DeviceBadge deviceType={c.deviceType} />
                             </div>
-                            <div className="text-[10px] text-on-surface-variant/80 truncate">
+                            <div className="text-label-sm text-on-surface-variant/80 truncate">
                               {c.activityLabel || (c.status === 'online' ? 'Online' : c.status === 'away' ? 'Abwesend' : 'Offline')}
                             </div>
                           </div>
@@ -3767,9 +3767,9 @@ export function Messenger() {
                     <div className="text-xs font-headline font-bold text-primary flex items-center gap-1.5">
                       <UsersRound className="w-3.5 h-3.5" />
                       <span>{t('messenger.communitiesTitle')}</span>
-                      <span className="text-[10px] text-on-surface-variant/70">({groups.length})</span>
+                      <span className="text-label-sm text-on-surface-variant/70">({groups.length})</span>
                     </div>
-                    <p className="text-[11px] text-on-surface-variant/80">
+                    <p className="text-label-sm text-on-surface-variant/80">
                       Öffentliche und private Gruppen mit Einladungslink
                     </p>
                   </div>
@@ -3814,7 +3814,7 @@ export function Messenger() {
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className="text-xs font-semibold text-primary truncate">{g.name}</div>
-                            <div className="text-[10px] text-on-surface-variant/70">{g.member_count} Mitglieder</div>
+                            <div className="text-label-sm text-on-surface-variant/70">{g.member_count} Mitglieder</div>
                           </div>
                         </div>
 
@@ -3853,7 +3853,7 @@ export function Messenger() {
                 <div className={`p-1 rounded-full ${mobileNavTab === 'chats' ? 'bg-primary/15' : ''}`}>
                   <MessageSquare className="w-4 h-4" />
                 </div>
-                <span className="text-[10px] mt-0.5">{t('messenger.nav.chats')}</span>
+                <span className="text-label-sm mt-0.5">{t('messenger.nav.chats')}</span>
               </button>
 
               <button
@@ -3867,7 +3867,7 @@ export function Messenger() {
                 <div className={`p-1 rounded-full ${mobileNavTab === 'updates' ? 'bg-primary/15' : ''}`}>
                   <Sparkles className="w-4 h-4" />
                 </div>
-                <span className="text-[10px] mt-0.5">{t('messenger.nav.updates')}</span>
+                <span className="text-label-sm mt-0.5">{t('messenger.nav.updates')}</span>
               </button>
 
               <button
@@ -3881,7 +3881,7 @@ export function Messenger() {
                 <div className={`p-1 rounded-full ${mobileNavTab === 'community' ? 'bg-primary/15' : ''}`}>
                   <UsersRound className="w-4 h-4" />
                 </div>
-                <span className="text-[10px] mt-0.5">{t('messenger.nav.community')}</span>
+                <span className="text-label-sm mt-0.5">{t('messenger.nav.community')}</span>
               </button>
             </nav>
           )}
@@ -3995,7 +3995,7 @@ export function Messenger() {
                       </span>
                     )}
                     {activeContact && isBlocked(activeContact.userId) && (
-                      <span className="px-1.5 py-0.2 rounded-md bg-status-destructive/15 text-status-destructive text-[9px] font-semibold">
+                      <span className="px-1.5 py-0.2 rounded-md bg-status-destructive/15 text-status-destructive text-label-sm font-semibold">
                         Blockiert
                       </span>
                     )}
@@ -4225,7 +4225,7 @@ export function Messenger() {
               >
                 {/* WhatsApp-style encryption notice banner */}
                 <div className="py-1 text-center">
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high/60 border border-outline-variant/30 text-[11px] text-on-surface-variant shadow-2xs">
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high/60 border border-outline-variant/30 text-label-sm text-on-surface-variant shadow-2xs">
                     <Lock className="w-3 h-3 text-status-success" />
                     <span>{t('messenger.e2eeBanner')}</span>
                   </div>
@@ -4247,7 +4247,7 @@ export function Messenger() {
                   if (msg.isSystem) {
                     return (
                       <div key={msg.id} className="py-1 text-center">
-                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high/60 border border-outline-variant/30 text-[11px] text-on-surface-variant shadow-2xs">
+                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high/60 border border-outline-variant/30 text-label-sm text-on-surface-variant shadow-2xs">
                           <Shield className="w-3 h-3 text-status-warning shrink-0" />
                           <span>{msg.text}</span>
                         </div>
@@ -4263,7 +4263,7 @@ export function Messenger() {
                     <React.Fragment key={msg.id}>
                       {showDateSeparator && (
                         <div className="flex justify-center my-3 sticky top-2 z-10 pointer-events-none">
-                          <span className="px-3.5 py-1 rounded-full text-[11px] font-semibold bg-surface-container/90 text-on-surface-variant backdrop-blur-md border border-outline-variant/30 shadow-sm">
+                          <span className="px-3.5 py-1 rounded-full text-label-sm font-semibold bg-surface-container/90 text-on-surface-variant backdrop-blur-md border border-outline-variant/30 shadow-sm">
                             {currentDateBadge}
                           </span>
                         </div>
@@ -4281,7 +4281,7 @@ export function Messenger() {
                     >
                       {/* Group sender name if in group and not self */}
                       {activeGroup && !msg.isSelf && (
-                        <div className="text-[10px] font-bold text-tertiary">
+                        <div className="text-label-sm font-bold text-tertiary">
                           {msg.senderName || `Benutzer #${msg.senderId}`}
                         </div>
                       )}
@@ -4313,7 +4313,7 @@ export function Messenger() {
                             dangerouslySetInnerHTML={{ __html: sanitizeSvg(msg.stickerAttachment.svg) }}
                             title={msg.stickerAttachment.label}
                           />
-                          <div className="text-[10px] opacity-60 text-center mt-1">{msg.stickerAttachment.label}</div>
+                          <div className="text-label-sm opacity-60 text-center mt-1">{msg.stickerAttachment.label}</div>
                         </div>
                       )}
 
@@ -4354,7 +4354,7 @@ export function Messenger() {
                               <button
                                 type="button"
                                 onClick={cycleAudioPlaybackRate}
-                                className={`absolute -bottom-1 -right-1 px-1 py-0.5 rounded-full font-bold text-[9px] shadow-sm border border-surface leading-none hover:scale-110 transition-transform ${
+                                className={`absolute -bottom-1 -right-1 px-1 py-0.5 rounded-full font-bold text-label-sm shadow-sm border border-surface leading-none hover:scale-110 transition-transform ${
                                   msg.isSelf
                                     ? 'bg-white text-on-primary'
                                     : 'bg-primary text-on-primary'
@@ -4430,7 +4430,7 @@ export function Messenger() {
                               })}
                             </div>
 
-                            <div className="flex justify-between items-center text-[10px] opacity-80 px-0.5">
+                            <div className="flex justify-between items-center text-label-sm opacity-80 px-0.5">
                               <span>
                                 {playingAudioId === msg.id
                                   ? formatDuration(audioCurrentTime)
@@ -4484,7 +4484,7 @@ export function Messenger() {
                                   size="sm"
                                   disabled={isImported}
                                   onClick={() => void handleImportNote(msg.noteAttachment!, noteKey)}
-                                  className={`h-6 px-2.5 text-[10px] gap-1 shrink-0 rounded-full font-medium ${
+                                  className={`h-6 px-2.5 text-label-sm gap-1 shrink-0 rounded-full font-medium ${
                                     isImported
                                       ? 'opacity-60 cursor-default bg-white/10 text-white border-none'
                                       : msg.isSelf
@@ -4499,7 +4499,7 @@ export function Messenger() {
                               )
                             })()}
                           </div>
-                          <p className="whitespace-pre-wrap text-[11px] text-white/90 line-clamp-4 leading-relaxed font-sans">
+                          <p className="whitespace-pre-wrap text-label-sm text-white/90 line-clamp-4 leading-relaxed font-sans">
                             {msg.noteAttachment.content}
                           </p>
                         </div>
@@ -4535,7 +4535,7 @@ export function Messenger() {
                                   size="sm"
                                   disabled={isImported}
                                   onClick={() => void handleImportCalendar(msg.calendarAttachment!, calKey)}
-                                  className={`h-6 px-2.5 text-[10px] gap-1 shrink-0 rounded-full font-medium ${
+                                  className={`h-6 px-2.5 text-label-sm gap-1 shrink-0 rounded-full font-medium ${
                                     isImported
                                       ? 'opacity-60 cursor-default bg-white/10 text-white border-none'
                                       : msg.isSelf
@@ -4550,7 +4550,7 @@ export function Messenger() {
                               )
                             })()}
                           </div>
-                          <div className="text-[11px] text-white/90 flex items-center gap-1.5 font-medium">
+                          <div className="text-label-sm text-white/90 flex items-center gap-1.5 font-medium">
                             <Clock className="w-3.5 h-3.5 text-primary shrink-0" />
                             <span>
                               {new Date(msg.calendarAttachment.start).toLocaleString([], {
@@ -4560,13 +4560,13 @@ export function Messenger() {
                             </span>
                           </div>
                           {msg.calendarAttachment.location && (
-                            <div className="text-[11px] text-white/80 flex items-center gap-1.5">
+                            <div className="text-label-sm text-white/80 flex items-center gap-1.5">
                               <MapPin className="w-3.5 h-3.5 text-primary shrink-0" />
                               <span>{msg.calendarAttachment.location}</span>
                             </div>
                           )}
                           {msg.calendarAttachment.description && (
-                            <p className="whitespace-pre-wrap text-[11px] text-white/90 line-clamp-3 leading-relaxed font-sans pt-0.5">
+                            <p className="whitespace-pre-wrap text-label-sm text-white/90 line-clamp-3 leading-relaxed font-sans pt-0.5">
                               {msg.calendarAttachment.description}
                             </p>
                           )}
@@ -4583,11 +4583,11 @@ export function Messenger() {
                           }`}
                         >
                           <div className="min-w-0 flex-1 space-y-0.5">
-                            <div className="flex items-center gap-1.5 text-[10px] font-semibold text-primary">
+                            <div className="flex items-center gap-1.5 text-label-sm font-semibold text-primary">
                               <Sparkles className="w-3 h-3 text-primary shrink-0" />
                               <span className="truncate">Status von {msg.storyReply.storyUsername || 'Kontakt'}</span>
                             </div>
-                            <p className="line-clamp-2 text-[11px] opacity-85 leading-snug">
+                            <p className="line-clamp-2 text-label-sm opacity-85 leading-snug">
                               {msg.storyReply.storyContent || 'Status-Update'}
                             </p>
                           </div>
@@ -4599,7 +4599,7 @@ export function Messenger() {
                             />
                           ) : (
                             <div
-                              className={`w-11 h-11 rounded-lg shrink-0 flex items-center justify-center text-[8px] font-bold text-white shadow-sm ${
+                              className={`w-11 h-11 rounded-lg shrink-0 flex items-center justify-center text-label-sm font-bold text-white shadow-sm ${
                                 STORY_GRADIENTS[msg.storyReply.storyBackground || 'gradient-1']?.class || 'bg-surface-container-high'
                               }`}
                             >
@@ -4612,7 +4612,7 @@ export function Messenger() {
                       {/* Fallback preview for legacy [Antwort auf Status]: messages */}
                       {!msg.isDeleted && !msg.storyReply && msg.text.startsWith('[Antwort auf Status]:') && (
                         <div
-                          className={`mb-1.5 p-1.5 px-2 rounded-lg border flex items-center gap-1.5 overflow-hidden text-[11px] select-none ${
+                          className={`mb-1.5 p-1.5 px-2 rounded-lg border flex items-center gap-1.5 overflow-hidden text-label-sm select-none ${
                             msg.isSelf
                               ? 'bg-black/25 border-white/20 text-white'
                               : 'bg-surface-container-highest border-outline-variant/30 text-on-surface'
@@ -4651,7 +4651,7 @@ export function Messenger() {
                               )
                             })()}
                             {msg.isEdited && (
-                              <span className="text-[9px] opacity-70 italic inline-flex items-center gap-1">
+                              <span className="text-label-sm opacity-70 italic inline-flex items-center gap-1">
                                 <Pencil className="w-2.5 h-2.5" />
                                 <span>bearbeitet</span>
                               </span>
@@ -4661,7 +4661,7 @@ export function Messenger() {
                       )}
                     </div>
 
-                    <div className="flex items-center justify-end gap-1.5 text-[10px] text-on-surface-variant/60 mt-1 px-1">
+                    <div className="flex items-center justify-end gap-1.5 text-label-sm text-on-surface-variant/60 mt-1 px-1">
                       {/* Message Actions Menu (Edit & Delete for self) */}
                       {!msg.isDeleted && msg.isSelf && (
                         <div className="opacity-0 group-hover:opacity-100 hover:opacity-100 focus-within:opacity-100 transition-opacity flex items-center gap-1 mr-1">
@@ -4727,7 +4727,7 @@ export function Messenger() {
                     {partnerActivity.status === 'recording' ? (
                       <>
                         <Mic className="w-3.5 h-3.5 text-status-destructive animate-pulse" />
-                        <span className="text-[11px] text-status-destructive font-medium">
+                        <span className="text-label-sm text-status-destructive font-medium">
                           {activeGroup ? `${partnerActivity.username || 'Jemand'} nimmt Audio auf …` : t('messenger.recordingVoice')}
                         </span>
                       </>
@@ -4738,7 +4738,7 @@ export function Messenger() {
                           <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:-0.15s]" />
                           <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" />
                         </span>
-                        <span className="text-[11px] text-primary font-medium">
+                        <span className="text-label-sm text-primary font-medium">
                           {activeGroup ? `${partnerActivity.username || 'Jemand'} schreibt …` : t('messenger.typing')}
                         </span>
                       </>
@@ -4781,7 +4781,7 @@ export function Messenger() {
                     </div>
                     <div className="min-w-0">
                       <p className="text-xs font-semibold text-primary truncate">{stagedFile.name}</p>
-                      <p className="text-[10px] text-on-surface-variant">{formatFileSize(stagedFile.sizeBytes)}</p>
+                      <p className="text-label-sm text-on-surface-variant">{formatFileSize(stagedFile.sizeBytes)}</p>
                     </div>
                   </div>
                   <button
@@ -4804,7 +4804,7 @@ export function Messenger() {
                     </div>
                     <div className="min-w-0">
                       <p className="text-xs font-semibold text-primary">{t('messenger.editMessage')}</p>
-                      <p className="text-[10px] text-on-surface-variant truncate max-w-md">
+                      <p className="text-label-sm text-on-surface-variant truncate max-w-md">
                         {editingMessage.text}
                       </p>
                     </div>
@@ -4915,7 +4915,7 @@ export function Messenger() {
                                   className="w-11 h-11 flex items-center justify-center"
                                   dangerouslySetInnerHTML={{ __html: sanitizeSvg(stk.svg) }}
                                 />
-                                <span className="text-[9px] text-on-surface-variant/80 truncate w-full text-center mt-1 font-medium">
+                                <span className="text-label-sm text-on-surface-variant/80 truncate w-full text-center mt-1 font-medium">
                                   {stk.label}
                                 </span>
                               </button>
@@ -4925,7 +4925,7 @@ export function Messenger() {
                           <div className="space-y-3 max-h-52 overflow-y-auto p-1.5">
                             {CATEGORIZED_EMOJIS.map((cat) => (
                               <div key={cat.category} className="space-y-1">
-                                <div className="text-[10px] font-bold text-on-surface-variant/70 uppercase tracking-wider px-1">
+                                <div className="text-label-sm font-bold text-on-surface-variant/70 uppercase tracking-wider px-1">
                                   {cat.category}
                                 </div>
                                 <div className="grid grid-cols-8 sm:grid-cols-12 gap-1">
@@ -5058,7 +5058,7 @@ export function Messenger() {
                                     </div>
                                     <div className="min-w-0 flex-1">
                                       <div className="text-xs font-semibold text-primary">{t('social.camera.take')}</div>
-                                      <div className="text-[10px] text-on-surface-variant/70">{t('messenger.cameraSnapshot')}</div>
+                                      <div className="text-label-sm text-on-surface-variant/70">{t('messenger.cameraSnapshot')}</div>
                                     </div>
                                   </button>
 
@@ -5076,7 +5076,7 @@ export function Messenger() {
                                     </div>
                                     <div className="min-w-0 flex-1">
                                       <div className="text-xs font-semibold text-primary">{t('messenger.photo')}</div>
-                                      <div className="text-[10px] text-on-surface-variant/70">{t('messenger.fromGallery')}</div>
+                                      <div className="text-label-sm text-on-surface-variant/70">{t('messenger.fromGallery')}</div>
                                     </div>
                                   </button>
 
@@ -5094,7 +5094,7 @@ export function Messenger() {
                                     </div>
                                     <div className="min-w-0 flex-1">
                                       <div className="text-xs font-semibold text-primary">{t('messenger.document')}</div>
-                                      <div className="text-[10px] text-on-surface-variant/70">{t('messenger.sendEncrypted')}</div>
+                                      <div className="text-label-sm text-on-surface-variant/70">{t('messenger.sendEncrypted')}</div>
                                     </div>
                                   </button>
 
@@ -5112,7 +5112,7 @@ export function Messenger() {
                                     </div>
                                     <div className="min-w-0 flex-1">
                                       <div className="text-xs font-semibold text-primary">{t('messenger.attachNote')}</div>
-                                      <div className="text-[10px] text-on-surface-variant/70">{t('messenger.fromNotes')}</div>
+                                      <div className="text-label-sm text-on-surface-variant/70">{t('messenger.fromNotes')}</div>
                                     </div>
                                   </button>
 
@@ -5130,7 +5130,7 @@ export function Messenger() {
                                     </div>
                                     <div className="min-w-0 flex-1">
                                       <div className="text-xs font-semibold text-primary">{t('messenger.attachEvent')}</div>
-                                      <div className="text-[10px] text-on-surface-variant/70">{t('messenger.fromCalendar')}</div>
+                                      <div className="text-label-sm text-on-surface-variant/70">{t('messenger.fromCalendar')}</div>
                                     </div>
                                   </button>
                                 </div>
@@ -5236,7 +5236,7 @@ export function Messenger() {
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>{t('messenger.groupE2eeLabel')}</span>
               </div>
-              <p className="text-[11px]">
+              <p className="text-label-sm">
                 Nach der Erstellung erhältst du einen Einladungslink, den du mit Freunden oder Teammitgliedern teilen kannst.
               </p>
             </div>
@@ -5311,7 +5311,7 @@ export function Messenger() {
                     className="p-3 rounded-xl border border-outline-variant/30 hover:border-primary/50 hover:bg-surface-container transition-all cursor-pointer text-left"
                   >
                     <div className="font-semibold text-xs text-primary">{n.title}</div>
-                    <p className="text-[11px] text-on-surface-variant line-clamp-2 mt-0.5">
+                    <p className="text-label-sm text-on-surface-variant line-clamp-2 mt-0.5">
                       {n.content}
                     </p>
                   </div>
@@ -5369,7 +5369,7 @@ export function Messenger() {
                     className="p-3 rounded-xl border border-outline-variant/30 hover:border-primary/50 hover:bg-surface-container transition-all cursor-pointer text-left"
                   >
                     <div className="font-semibold text-xs text-primary">{ev.title}</div>
-                    <div className="text-[10px] text-on-surface-variant flex items-center gap-1 mt-0.5">
+                    <div className="text-label-sm text-on-surface-variant flex items-center gap-1 mt-0.5">
                       <Clock className="w-3 h-3" />
                       <span>
                         {new Date(ev.start).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
@@ -5417,7 +5417,7 @@ export function Messenger() {
           </div>
 
           <div className="flex-1 overflow-y-auto space-y-1 py-2">
-            <div className="text-[11px] font-semibold text-on-surface-variant/70 uppercase tracking-wider px-2 py-1">
+            <div className="text-label-sm font-semibold text-on-surface-variant/70 uppercase tracking-wider px-2 py-1">
               Wähle einen Kontakt oder eine Gruppe
             </div>
             {filteredGroups.map((g) => (
@@ -5442,7 +5442,7 @@ export function Messenger() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="text-xs font-semibold text-primary truncate">{g.name}</div>
-                  <div className="text-[10px] text-on-surface-variant/70">Gruppe ({g.member_count} Mitglieder)</div>
+                  <div className="text-label-sm text-on-surface-variant/70">Gruppe ({g.member_count} Mitglieder)</div>
                 </div>
               </button>
             ))}
@@ -5466,7 +5466,7 @@ export function Messenger() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="text-xs font-semibold text-primary truncate">{c.username}</div>
-                  <div className="text-[10px] text-on-surface-variant/70">{c.teamName || (c.isFriend ? 'Freund' : 'Kontakt')}</div>
+                  <div className="text-label-sm text-on-surface-variant/70">{c.teamName || (c.isFriend ? 'Freund' : 'Kontakt')}</div>
                 </div>
               </button>
             ))}
@@ -5623,7 +5623,7 @@ export function Messenger() {
               <Clock className="w-4 h-4 mr-2.5 text-on-surface-variant" />
               <div>
                 <div className="font-semibold">{t('messenger.mute8h')}</div>
-                <div className="text-[10px] text-on-surface-variant/70">{t('messenger.mute8hHint')}</div>
+                <div className="text-label-sm text-on-surface-variant/70">{t('messenger.mute8hHint')}</div>
               </div>
             </Button>
 
@@ -5641,7 +5641,7 @@ export function Messenger() {
               <Clock className="w-4 h-4 mr-2.5 text-on-surface-variant" />
               <div>
                 <div className="font-semibold">{t('messenger.mute1w')}</div>
-                <div className="text-[10px] text-on-surface-variant/70">{t('messenger.mute1wHint')}</div>
+                <div className="text-label-sm text-on-surface-variant/70">{t('messenger.mute1wHint')}</div>
               </div>
             </Button>
 
@@ -5659,7 +5659,7 @@ export function Messenger() {
               <BellOff className="w-4 h-4 mr-2.5 text-on-surface-variant" />
               <div>
                 <div className="font-semibold">Immer</div>
-                <div className="text-[10px] text-on-surface-variant/70">{t('messenger.muteForeverHint')}</div>
+                <div className="text-label-sm text-on-surface-variant/70">{t('messenger.muteForeverHint')}</div>
               </div>
             </Button>
 
@@ -5676,7 +5676,7 @@ export function Messenger() {
                 <Bell className="w-4 h-4 mr-2.5 text-primary" />
                 <div>
                   <div className="font-semibold">{t('messenger.unmute')}</div>
-                  <div className="text-[10px] text-on-surface-variant/70">{t('messenger.unmuteHint')}</div>
+                  <div className="text-label-sm text-on-surface-variant/70">{t('messenger.unmuteHint')}</div>
                 </div>
               </Button>
             )}

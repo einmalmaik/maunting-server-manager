@@ -80,7 +80,7 @@ export function LinkedAccountsTab() {
         <div className="flex items-center gap-2 mb-6">
           <Link2 className="h-5 w-5 text-secondary" aria-hidden="true" />
           <div>
-            <h2 className="font-headline text-lg font-semibold text-on-surface">{t('profile.linkedAccounts.title')}</h2>
+            <h2 className="font-headline text-title-lg font-semibold text-on-surface">{t('profile.linkedAccounts.title')}</h2>
             <p className="font-body-md text-sm text-on-surface-variant mt-1">
               {t('profile.linkedAccounts.subtitle')}
             </p>

@@ -123,7 +123,7 @@ export const MultiSelect = forwardRef<HTMLDivElement, MultiSelectProps>(
           </span>
           <span className="flex shrink-0 items-center gap-1.5">
             {selectedLabels.length > 0 && (
-              <span className="rounded-full border border-primary/25 bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] text-primary">
+              <span className="rounded-full border border-primary/25 bg-primary/10 px-1.5 py-0.5 font-mono text-label-sm text-primary">
                 {selectedLabels.length}
               </span>
             )}

@@ -147,9 +147,9 @@ export function ChatWallpaperModal({
               <div className="relative z-10">
                 <p className="text-xs font-bold text-on-surface flex items-center gap-1">
                   <span>{t('social.wallpaper.cyber')}</span>
-                  <span className="text-[9px] px-1 py-0.2 rounded bg-primary/20 text-primary font-mono">{t('social.wallpaper.default')}</span>
+                  <span className="text-label-sm px-1 py-0.2 rounded bg-primary/20 text-primary font-mono">{t('social.wallpaper.default')}</span>
                 </p>
-                <p className="text-[10px] text-on-surface-variant/80">{t('social.wallpaper.cyberHint')}</p>
+                <p className="text-label-sm text-on-surface-variant/80">{t('social.wallpaper.cyberHint')}</p>
               </div>
             </button>
 
@@ -176,7 +176,7 @@ export function ChatWallpaperModal({
               </div>
               <div className="relative z-10">
                 <p className="text-xs font-bold text-on-surface">{t('social.wallpaper.petrol')}</p>
-                <p className="text-[10px] text-on-surface-variant/80">{t('social.wallpaper.petrolHint')}</p>
+                <p className="text-label-sm text-on-surface-variant/80">{t('social.wallpaper.petrolHint')}</p>
               </div>
             </button>
 
@@ -203,7 +203,7 @@ export function ChatWallpaperModal({
               </div>
               <div className="relative z-10">
                 <p className="text-xs font-bold text-on-surface">{t('social.wallpaper.midnight')}</p>
-                <p className="text-[10px] text-on-surface-variant/80">{t('social.wallpaper.midnightHint')}</p>
+                <p className="text-label-sm text-on-surface-variant/80">{t('social.wallpaper.midnightHint')}</p>
               </div>
             </button>
 
@@ -230,7 +230,7 @@ export function ChatWallpaperModal({
               </div>
               <div className="relative z-10">
                 <p className="text-xs font-bold text-on-surface">{t('social.wallpaper.minimal')}</p>
-                <p className="text-[10px] text-on-surface-variant/80">{t('social.wallpaper.minimalHint')}</p>
+                <p className="text-label-sm text-on-surface-variant/80">{t('social.wallpaper.minimalHint')}</p>
               </div>
             </button>
           </div>
@@ -244,7 +244,7 @@ export function ChatWallpaperModal({
               <span>{t('social.wallpaper.own')}</span>
             </span>
             {customDataUrl && (
-              <span className="text-[10px] text-status-success font-medium flex items-center gap-1">
+              <span className="text-label-sm text-status-success font-medium flex items-center gap-1">
                 <Check className="w-3 h-3" />
                 <span>{t('social.wallpaper.stored')}</span>
               </span>
@@ -292,7 +292,7 @@ export function ChatWallpaperModal({
                 className="w-full h-full object-cover"
               />
               <div className="absolute inset-0 bg-black/25 flex items-center justify-center">
-                <span className="text-[11px] font-medium text-white/90 bg-black/50 px-2 py-0.5 rounded-full">
+                <span className="text-label-sm font-medium text-white/90 bg-black/50 px-2 py-0.5 rounded-full">
                   {t('social.wallpaper.coverHint')}
                 </span>
               </div>
@@ -300,7 +300,7 @@ export function ChatWallpaperModal({
           )}
 
           {uploadError && (
-            <p className="text-[11px] text-error">{t(uploadError)}</p>
+            <p className="text-label-sm text-error">{t(uploadError)}</p>
           )}
         </div>
 
@@ -311,7 +311,7 @@ export function ChatWallpaperModal({
               <Sliders className="w-3.5 h-3.5 text-primary" />
               <span>{t('social.wallpaper.dim')}</span>
             </span>
-            <span className="font-mono text-[11px] text-primary">{dimLevel}%</span>
+            <span className="font-mono text-label-sm text-primary">{dimLevel}%</span>
           </div>
           <input
             type="range"
@@ -322,7 +322,7 @@ export function ChatWallpaperModal({
             onChange={(e) => setDimLevel(Number(e.target.value))}
             className="w-full accent-primary h-1.5 bg-surface-container-highest rounded-lg cursor-pointer"
           />
-          <div className="flex justify-between text-[10px] text-on-surface-variant/60">
+          <div className="flex justify-between text-label-sm text-on-surface-variant/60">
             <span>{t('social.wallpaper.dimLight')}</span>
             <span>{t('social.wallpaper.dimReadable')}</span>
             <span>{t('social.wallpaper.dimDark')}</span>

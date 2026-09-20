@@ -74,7 +74,7 @@ const ShareStage: React.FC<{ track: Track; ownerName: string; isSelf: boolean }>
   return (
     <div className="relative h-full w-full overflow-hidden rounded-2xl border border-primary/25 bg-surface-container-lowest">
       <video ref={ref} autoPlay playsInline muted={isSelf} className="h-full w-full object-contain" />
-      <span className="absolute left-3 top-3 flex max-w-[calc(100%-1.5rem)] items-center gap-1.5 truncate rounded-full bg-surface/85 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-primary backdrop-blur-sm">
+      <span className="absolute left-3 top-3 flex max-w-[calc(100%-1.5rem)] items-center gap-1.5 truncate rounded-full bg-surface/85 px-2.5 py-1 text-label-sm uppercase tracking-[0.16em] text-primary backdrop-blur-sm">
         <Monitor className="h-3 w-3 shrink-0" />
         <span className="truncate">
           {isSelf ? t('calls.yourShare') : t('calls.isSharing', { name: ownerName })}
@@ -312,7 +312,7 @@ export const CallOverlay: React.FC = () => {
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-1.5 text-sm font-semibold">
               <span className="truncate">{titel}</span>
-              <span className="shrink-0 rounded-full bg-status-success/20 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-status-success">
+              <span className="shrink-0 rounded-full bg-status-success/20 px-1.5 py-0.5 font-mono text-label-sm uppercase tracking-wider text-status-success">
                 {participants.length > 0 ? t('calls.liveCount', { count: participants.length }) : t('calls.e2ee')}
               </span>
             </div>
@@ -504,7 +504,7 @@ export const CallOverlay: React.FC = () => {
                 längs ab `lg`. Nichts darin darf breiter werden als sie selbst. */}
             {participants.length > 0 && partnerVerbunden && (
               <aside className="flex w-full min-w-0 shrink-0 flex-col overflow-hidden rounded-3xl border border-outline-variant/40 bg-surface-container-low/70 p-3 lg:w-[17rem]">
-                <div className="mb-2 flex shrink-0 items-center justify-between text-[10px] uppercase tracking-[0.18em] text-on-surface-variant">
+                <div className="mb-2 flex shrink-0 items-center justify-between text-label-sm uppercase tracking-[0.18em] text-on-surface-variant">
                   <span>{t('calls.inCall')}</span>
                   <span>{participants.length}</span>
                 </div>

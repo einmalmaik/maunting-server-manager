@@ -128,7 +128,7 @@ export const CircularVideoNotePlayer: React.FC<CircularVideoNotePlayerProps> = (
       </div>
 
       {/* Duration Badge */}
-      <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/60 px-2 py-0.5 rounded-full text-[10px] font-mono text-white/90">
+      <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/60 px-2 py-0.5 rounded-full text-label-sm font-mono text-white/90">
         {attachment.durationSeconds}s
       </div>
     </div>
