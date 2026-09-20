@@ -47,6 +47,15 @@ vi.mock('livekit-client', () => {
   }
   class Room {
     optionen: Record<string, unknown>
+    localParticipant = {
+      setCameraEnabled: async (
+        an: boolean,
+        aufnahme?: Record<string, unknown>,
+        senden?: Record<string, unknown>
+      ) => {
+        zustand.kamera.push({ an, aufnahme, senden } as never)
+      },
+    }
     constructor(optionen: Record<string, unknown>) {
       this.optionen = optionen
       zustand.letzterRaum = this
@@ -74,7 +83,13 @@ vi.mock('livekit-client', () => {
   }
 })
 
-import { E2eeNichtUnterstuetzt, e2eeMoeglich, setzeRaumSchluessel, verbinde } from './livekitRaum'
+import {
+  E2eeNichtUnterstuetzt,
+  e2eeMoeglich,
+  setzeKamera,
+  setzeRaumSchluessel,
+  verbinde,
+} from './livekitRaum'
 import { saveVideoSettings } from '@/lib/videoSettings'
 
 const SCHLUESSEL = new Uint8Array(32).fill(7).buffer
@@ -85,6 +100,7 @@ beforeEach(() => {
   zustand.wirftBeimPruefen = false
   zustand.ablauf = []
   zustand.letzterRaum = null
+  zustand.kamera = []
 })
 
 describe('Das Tor', () => {
@@ -176,6 +192,42 @@ describe('Der Raum', () => {
     expect(aufnahme.resolution).toEqual({ width: 3840, height: 2160, frameRate: 60 })
     expect(veroeffentlichen.videoEncoding.maxFramerate).toBe(60)
     expect(veroeffentlichen.videoEncoding.maxBitrate).toBeGreaterThan(8_000_000)
+  })
+
+  it('nimmt eine Änderung im Gespräch mit, nicht erst beim nächsten Anruf', async () => {
+    // Die Voreinstellung des Raums greift nur beim ersten Veröffentlichen.
+    // Ohne die Sendeoptionen am Kameraschalter bekäme jemand, der im Gespräch
+    // von 720p auf 2160p stellt, ein 4K-Bild mit der Bitrate für 720p: viel
+    // Auflösung und wenig davon zu sehen.
+    saveVideoSettings({ aufloesung: '720p', bildrate: 60 })
+    const verbindung = await verbinde('wss://sfu', 'token', SCHLUESSEL)
+
+    saveVideoSettings({ aufloesung: '2160p' })
+    await setzeKamera(verbindung.room, true)
+
+    const letzte = zustand.kamera.at(-1)
+    expect(letzte?.aufnahme?.resolution).toEqual({ width: 3840, height: 2160, frameRate: 60 })
+    expect(letzte?.senden?.videoEncoding?.maxBitrate).toBe(25_000_000)
+  })
+
+  it('behält VP8 auch beim Wiedereinschalten der Kamera', async () => {
+    // Die Sendeoptionen am Schalter ersetzen die Voreinstellung des Raums.
+    // Fehlte der Codec darin, liefe die Kamera nach einem Aus und An mit dem,
+    // was livekit-client wählt — und die Verschlüsselung hängt daran.
+    const verbindung = await verbinde('wss://sfu', 'token', SCHLUESSEL)
+    await setzeKamera(verbindung.room, true)
+
+    expect(zustand.kamera.at(-1)?.senden?.videoCodec).toBe('vp8')
+  })
+
+  it('gibt beim Ausschalten keine Optionen mit', async () => {
+    const verbindung = await verbinde('wss://sfu', 'token', SCHLUESSEL)
+    await setzeKamera(verbindung.room, false)
+
+    const letzte = zustand.kamera.at(-1)
+    expect(letzte?.an).toBe(false)
+    expect(letzte?.aufnahme).toBeUndefined()
+    expect(letzte?.senden).toBeUndefined()
   })
 
   it('lässt das Bild kleiner werden statt zu ruckeln', async () => {
