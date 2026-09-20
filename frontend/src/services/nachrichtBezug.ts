@@ -64,6 +64,27 @@ export function istSteuerpaket(typ: unknown): typ is Steuertyp {
   return typeof typ === 'string' && STEUERTYPEN.has(typ)
 }
 
+/**
+ * Ein Zeitpunkt aus einem Umschlag als Zahl.
+ *
+ * Wo zwei Seiten dieselbe Einstellung umstellen dürfen — Verfallsfrist,
+ * angeheftete Nachricht —, entscheidet der Zeitpunkt, wer gewinnt. Zwei Fallen
+ * stecken darin:
+ *
+ * 1. `Date.parse` liest einen ISO-Zeitpunkt **ohne** Zeitzone als Ortszeit. Das
+ *    `created_at` des Servers kommt teils ohne `Z`, ist aber UTC; ungeprüft
+ *    verschöbe es sich um den Zonenversatz. Fehlt die Zone, wird sie ergänzt.
+ * 2. Buchstabenweise verglichen stünde `…:01` vor `…:01.000Z`. Deshalb Zahlen.
+ *
+ * Unlesbares ergibt 0 und verliert damit gegen jede echte Angabe.
+ */
+export function zeitAlsZahl(stand: string): number {
+  if (!stand) return 0
+  const hatZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(stand)
+  const t = Date.parse(hatZone ? stand : `${stand}Z`)
+  return Number.isFinite(t) ? t : 0
+}
+
 /** Eine Nachricht, so weit sie für den Bezug gebraucht wird. */
 export interface Bezugsziel {
   id: number

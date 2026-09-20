@@ -160,10 +160,17 @@ import {
 } from '@/services/nachrichtLoeschen'
 import {
   bezugFelder,
+  istSteuerpaket,
   neueBezugstafel,
   neueSammeltafel,
   type Bezugsziel,
 } from '@/services/nachrichtBezug'
+import {
+  anheftung,
+  durfteAnheften,
+  setzeAnheftung,
+  uebernehmeAnheftung,
+} from '@/services/nachrichtAnheftung'
 import {
   schalteReaktion,
   wendeReaktionenAn,
@@ -1802,6 +1809,32 @@ export function Messenger() {
               continue
             }
 
+            // 6. Angeheftete Nachricht der Gruppe.
+            //
+            //    Die Schranke sitzt hier, beim Empfänger: der Server kann den
+            //    Inhalt nicht lesen und deshalb nicht prüfen, wer anheften
+            //    durfte. Ohne das Recht bleibt der Umschlag folgenlos.
+            if (parsed.type === 'pin_message') {
+              const wer = Number(parsed.actor_id || 0)
+              const ziel = String(parsed.target_client_uuid || '')
+              const wann = String(parsed.zeitpunkt || env.created_at)
+              const geloest = parsed.aktion === 'loesen'
+              if (wer && durfteAnheften(activeGroup, wer)) {
+                uebernehmeAnheftung(currentMid, geloest ? '' : ziel, wann)
+              }
+              continue
+            }
+
+            /**
+             * Ein Steuerpaket, für das dieser Stand keinen Zweig hat.
+             *
+             * Etwa von einem neueren Client. Ohne diese Schranke fiele es in
+             * den gewöhnlichen Weg und stünde als roher JSON-Text im Verlauf —
+             * und weil der Verlauf gespeichert wird, für immer. Genau so eine
+             * Zeile lag nach der ersten Laufzeitprobe im Testchat.
+             */
+            if (istSteuerpaket(parsed.type)) continue
+
             // Normal Chat Message
             // Die Kennung aus dem Umschlag trägt einen Gerätezusatz je Kopie;
             // für den Verlauf zählt die logische darunter.
@@ -2026,6 +2059,24 @@ export function Messenger() {
         sessionChatCache.set(currentMid, combined.slice(-80))
         void saveLocalMessages(currentMid, combined.slice(-200))
         return combined
+      })
+
+      /**
+       * Die Leiste wird aus der Ablage abgeglichen, nicht aus dem Umschlag.
+       *
+       * Die Kennung überlebt das Hundert-Umschläge-Fenster, der Anheft-Umschlag
+       * nicht. Deshalb ist die Ablage die Wahrheit und die Leiste nur ihre
+       * Anzeige — das deckt beides ab: eine frisch übernommene Anheftung und
+       * eine, die schon vor dem Öffnen des Chats galt. Nach dem `setMessages`,
+       * denn im Updater wäre es ein Seiteneffekt mitten in der Berechnung.
+       */
+      const gemerkt = anheftung(currentMid).clientUuid
+      setAngeheftet((bisher) => {
+        if ((bisher?.clientUuid || '') === gemerkt) return bisher
+        if (!gemerkt) return null
+        // Noch nicht im Verlauf: keine Leiste. Der nächste Durchgang holt sie
+        // nach, sobald die Zeile da ist — eine falsche wäre schlimmer als keine.
+        return [...processedList, ...lokalerVerlauf].find((m) => m.clientUuid === gemerkt) || null
       })
 
       // Ungelesen-Zähler zurücksetzen
@@ -2347,18 +2398,24 @@ export function Messenger() {
       return
     }
     const loesen = angeheftet?.clientUuid === msg.clientUuid
+    const vorher = anheftung(blindMailboxId)
+    // Ein Zeitpunkt für beides. Mit zwei knapp verschiedenen käme der eigene
+    // Umschlag beim nächsten Abruf als „neuer" zurück.
+    const jetzt = new Date().toISOString()
     setAngeheftet(loesen ? null : msg)
+    setzeAnheftung(blindMailboxId, loesen ? '' : msg.clientUuid, jetzt)
     try {
       await sendE2eeControlMessage({
         type: 'pin_message',
         ...bezugFelder(msg),
         aktion: loesen ? 'loesen' : 'anheften',
         actor_id: currentUserId,
-        zeitpunkt: new Date().toISOString(),
+        zeitpunkt: jetzt,
       })
       toast.success(loesen ? 'Nicht mehr angeheftet.' : 'Angeheftet.')
     } catch {
       setAngeheftet(loesen ? msg : null)
+      setzeAnheftung(blindMailboxId, vorher.clientUuid, vorher.stand || jetzt)
       toast.error('Das Anheften konnte nicht gesendet werden.')
     }
   }

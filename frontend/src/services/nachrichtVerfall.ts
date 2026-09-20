@@ -43,6 +43,7 @@
  */
 
 import { listeLokaleMailboxen, loadLocalMessages } from './messengerLocalStore'
+import { zeitAlsZahl } from './nachrichtBezug'
 import { tilgeNachrichtBeimServer, tilgeNachrichtLokal } from './nachrichtLoeschen'
 
 /**
@@ -104,12 +105,6 @@ function alsStand(eintrag: Eintrag | undefined): Verfallstand {
   return { sekunden: 0, stand: '' }
 }
 
-/** Als Zahl, damit ein Zeitpunkt ohne `Z` nicht anders sortiert als einer mit. */
-function alsZahl(stand: string): number {
-  const t = Date.parse(stand)
-  return Number.isFinite(t) ? t : 0
-}
-
 /**
  * Die Frist eines Chats in Sekunden, 0 heißt aus.
  *
@@ -155,7 +150,7 @@ export function setzeVerfallsfrist(
  */
 export function uebernehmeVerfall(blindMailboxId: string, sekunden: number, stand: string): boolean {
   const bisher = verfallStand(blindMailboxId)
-  if (alsZahl(stand) <= alsZahl(bisher.stand)) return false
+  if (zeitAlsZahl(stand) <= zeitAlsZahl(bisher.stand)) return false
   setzeVerfallsfrist(blindMailboxId, sekunden, stand)
   return bisher.sekunden !== sekunden
 }
