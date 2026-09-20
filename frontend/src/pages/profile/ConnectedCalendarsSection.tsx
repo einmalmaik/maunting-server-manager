@@ -7,6 +7,7 @@ import { Button, Checkbox } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 
+import { Spinner } from '@/components/ui/Spinner'
 export function ConnectedCalendarsSection() {
   const { t } = useTranslation()
   const [calendars, setCalendars] = useState<CalendarItem[]>([])
@@ -123,7 +124,7 @@ export function ConnectedCalendarsSection() {
 
       {loading ? (
         <div className="flex items-center justify-center h-20">
-          <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          <Spinner size="md" className="text-primary" />
         </div>
       ) : calendars.length === 0 ? (
         <p className="font-body-md text-sm text-on-surface-variant py-2">
@@ -185,7 +186,7 @@ export function ConnectedCalendarsSection() {
         typeof document !== 'undefined' &&
         createPortal(
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm overflow-y-auto"
+            className="msm-modal-overlay overflow-y-auto"
             onClick={() => setShowAddModal(false)}
             role="dialog"
             aria-modal="true"

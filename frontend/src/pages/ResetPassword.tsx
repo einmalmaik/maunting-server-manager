@@ -9,6 +9,7 @@ import { PasswordInput } from '@/components/ui/PasswordInput'
 import { CaptchaWidget } from '@/components/ui/CaptchaWidget'
 import { Shield, Check, X, ArrowRight } from 'lucide-react'
 import { Button, buttonClasses } from '@/Singra/UI'
+import { Spinner } from '@/components/ui/Spinner'
 export function ResetPassword() {
   const { t } = useTranslation()
   const [searchParams] = useSearchParams()
@@ -143,7 +144,7 @@ export function ResetPassword() {
               >
                 {status === 'submitting' ? (
                   <span className="inline-flex items-center gap-2">
-                    <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                    <Spinner />
                     {t('common.loading')}
                   </span>
                 ) : (

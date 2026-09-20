@@ -8,6 +8,7 @@ import { ErrorMessage } from '@/components/ui/ErrorMessage'
 import { CaptchaWidget } from '@/components/ui/CaptchaWidget'
 import { Shield, Mail, ArrowRight, ArrowLeft } from 'lucide-react'
 import { Button, buttonClasses } from '@/Singra/UI'
+import { Spinner } from '@/components/ui/Spinner'
 export function ForgotPassword() {
   const { t } = useTranslation()
   const [email, setEmail] = useState('')
@@ -100,7 +101,7 @@ export function ForgotPassword() {
               >
                 {status === 'submitting' ? (
                   <span className="inline-flex items-center gap-2">
-                    <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                    <Spinner />
                     {t('common.loading')}
                   </span>
                 ) : (

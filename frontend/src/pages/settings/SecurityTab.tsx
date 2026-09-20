@@ -16,6 +16,7 @@ import { confirm } from '@/stores/confirmStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { Button } from '@/components/ui/Button'
 import { NumberStepper } from '@/components/ui/NumberStepper'
+import { Spinner } from '@/components/ui/Spinner'
 import {
   formatRotateSuccessSummary,
   mapRotateAdminResult,
@@ -222,7 +223,7 @@ export function SecurityTab() {
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }
@@ -340,7 +341,7 @@ export function SecurityTab() {
               <div className="flex justify-end">
                 <Button type="submit" disabled={saving} className="px-6">
                   {saving ? (
-                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-on-primary border-t-transparent" />
+                    <Spinner />
                   ) : (
                     <Save className="h-4 w-4" />
                   )}

@@ -13,6 +13,7 @@ import { PasswordInput } from '@/components/ui/PasswordInput'
 import { PanelSettings, EMPTY_PANEL_SETTINGS, type SupportWidgetProvider } from './types'
 import { API_ORIGIN } from '@/config/api'
 
+import { Spinner } from '@/components/ui/Spinner'
 export function SupportWidgetTab() {
   const { t } = useTranslation()
   const canWrite = useHasPermission('panel.settings.write')
@@ -157,7 +158,7 @@ export function SupportWidgetTab() {
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }
@@ -338,7 +339,7 @@ export function SupportWidgetTab() {
         {canWrite && (
           <div className="flex justify-end">
             <Button type="submit" disabled={saving}>
-              {saving ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-on-primary border-t-transparent" /> : <Save className="h-4 w-4" />}
+              {saving ? <Spinner /> : <Save className="h-4 w-4" />}
               {t('settings.save')}
             </Button>
           </div>

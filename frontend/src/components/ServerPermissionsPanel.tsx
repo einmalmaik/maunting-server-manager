@@ -11,6 +11,7 @@ import type { PermissionCatalog } from '@/types/permissions'
 import { PermissionEditor } from '@/Singra/UI/PermissionEditor'
 import { Button } from '@/Singra/UI'
 
+import { Spinner } from '@/components/ui/Spinner'
 interface Props {
   serverId: number
 }
@@ -132,7 +133,7 @@ export function ServerPermissionsPanel({ serverId }: Props) {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-32">
-        <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+        <Spinner size="md" className="text-primary" />
       </div>
     )
   }

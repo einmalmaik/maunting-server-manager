@@ -11,6 +11,7 @@ import { Dropdown } from '@/components/ui/Dropdown'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { PanelSettings, EMPTY_PANEL_SETTINGS } from './types'
 
+import { Spinner } from '@/components/ui/Spinner'
 export function CaptchaTab() {
   const { t } = useTranslation()
   const canWrite = useHasPermission('panel.settings.write')
@@ -51,7 +52,7 @@ export function CaptchaTab() {
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }
@@ -147,7 +148,7 @@ export function CaptchaTab() {
           <div className="flex justify-end">
             <Button type="submit" disabled={saving} className="px-6">
               {saving ? (
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-on-primary border-t-transparent" />
+                <Spinner />
               ) : (
                 <Save className="h-4 w-4" />
               )}

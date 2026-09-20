@@ -24,6 +24,7 @@ import { Dropdown, type DropdownOption } from '@/Singra/UI'
 import { Button } from '@/components/ui/Button'
 import { Switch } from '@/components/ui/Switch'
 import { teamsApi, type Team } from '@/api/teams'
+import { Spinner } from '@/components/ui/Spinner'
 import {
   loadNotesOfflineFirst,
   saveNoteOffline,
@@ -563,7 +564,7 @@ export function Notes() {
 
       {/* Create / Edit Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+        <div className="msm-modal-overlay animate-fade-in">
           <div
             className="w-full max-w-xl bg-surface-container-low border border-outline-variant/30 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
             onClick={(e) => e.stopPropagation()}
@@ -807,7 +808,7 @@ export function Notes() {
                 </Button>
                 <Button type="submit" disabled={saving}>
                   {saving ? (
-                    <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin mr-1.5" />
+                    <Spinner className="mr-1.5" />
                   ) : null}
                   {editingNote ? t('common.save', 'Speichern') : t('notes.createAction', 'Notiz anlegen')}
                 </Button>

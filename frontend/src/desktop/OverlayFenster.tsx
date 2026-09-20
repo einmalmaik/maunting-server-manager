@@ -239,7 +239,7 @@ export function OverlayFenster({ inApp = false }: OverlayFensterProps) {
 
   if (inApp) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md transition-all duration-300 ease-out animate-fade-in">
+      <div className="msm-modal-overlay backdrop-blur-md transition-all duration-300 ease-out animate-fade-in">
         {container}
       </div>
     )

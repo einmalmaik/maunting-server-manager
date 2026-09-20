@@ -8,6 +8,7 @@ import { PasswordInput } from '@/components/ui/PasswordInput'
 import { PanelSettings, EMPTY_PANEL_SETTINGS } from './types'
 import { Button } from '@/Singra/UI'
 
+import { Spinner } from '@/components/ui/Spinner'
 export function SteamTab() {
   const { t } = useTranslation()
   const canWrite = useHasPermission('panel.settings.write')
@@ -69,7 +70,7 @@ export function SteamTab() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }
@@ -181,7 +182,7 @@ export function SteamTab() {
               className="inline-flex items-center gap-2 disabled:opacity-50"
             >
               {testingSteam ? (
-                <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                <Spinner />
               ) : (
                 <Send className="w-4 h-4" />
               )}
@@ -219,7 +220,7 @@ export function SteamTab() {
               className="inline-flex items-center gap-2 disabled:opacity-50"
             >
               {savingSteam ? (
-                <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                <Spinner />
               ) : (
                 <Save className="w-4 h-4" />
               )}
@@ -294,7 +295,7 @@ export function SteamTab() {
               className="inline-flex items-center gap-2 disabled:opacity-50"
             >
               {savingSteamAccount ? (
-                <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                <Spinner />
               ) : (
                 <Save className="w-4 h-4" />
               )}

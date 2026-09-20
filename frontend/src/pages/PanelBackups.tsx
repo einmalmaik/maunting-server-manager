@@ -7,6 +7,7 @@ import { confirm } from '@/stores/confirmStore'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 import { Dropdown } from '@/components/ui/Dropdown'
 import { Button, Checkbox } from '@/Singra/UI'
+import { Spinner } from '@/components/ui/Spinner'
 /** Panel-Backup-List-Item (GET /api/panel-backups). */
 interface PanelBackupItem {
   id: number
@@ -197,7 +198,7 @@ export function PanelBackups() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <span className="w-6 h-6 border-2 border-secondary border-t-transparent rounded-full animate-spin" />
+        <Spinner size="md" className="text-secondary" />
       </div>
     )
   }
@@ -219,7 +220,7 @@ export function PanelBackups() {
             className="flex min-h-11 items-center gap-2 disabled:opacity-50"
           >
             {creating ? (
-              <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+              <Spinner />
             ) : (
               <Plus className="w-4 h-4" />
             )}
@@ -307,7 +308,7 @@ export function PanelBackups() {
               className="flex items-center gap-2 disabled:opacity-50"
             >
               {savingSettings ? (
-                <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                <Spinner />
               ) : (
                 <Save className="w-4 h-4" />
               )}
@@ -370,7 +371,7 @@ export function PanelBackups() {
                     title={t('panelBackups.prepareRestore')}
                   >
                     {preparingId === backup.id ? (
-                      <span className="w-3.5 h-3.5 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                      <Spinner />
                     ) : (
                       <Wrench className="w-3.5 h-3.5" />
                     )}
@@ -385,7 +386,7 @@ export function PanelBackups() {
                     title={t('common.delete')}
                   >
                     {deletingId === backup.id ? (
-                      <span className="w-3.5 h-3.5 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                      <Spinner />
                     ) : (
                       <Trash2 className="w-3.5 h-3.5" />
                     )}
@@ -400,7 +401,7 @@ export function PanelBackups() {
       {/* Restore Modal */}
       {restoreResult && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          className="msm-modal-overlay"
           role="dialog"
           aria-modal="true"
           aria-labelledby="panel-restore-modal-title"

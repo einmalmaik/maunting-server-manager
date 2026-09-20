@@ -12,6 +12,7 @@ import { CaptchaWidget } from '@/components/ui/CaptchaWidget'
 import { Shield, ArrowRight, Check, Mail } from 'lucide-react'
 import { Button } from '@/Singra/UI'
 
+import { Spinner } from '@/components/ui/Spinner'
 export function Register() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -179,7 +180,7 @@ export function Register() {
                 >
                   {submitting ? (
                     <span className="inline-flex items-center gap-2">
-                      <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                      <Spinner />
                       {t('common.loading')}
                     </span>
                   ) : (
@@ -267,7 +268,7 @@ export function Register() {
             >
               {submitting ? (
                 <span className="inline-flex items-center gap-2">
-                  <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                  <Spinner />
                   {t('common.loading')}
                 </span>
               ) : (

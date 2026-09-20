@@ -5385,7 +5385,7 @@ export function Messenger() {
       {/* Full-size Image Viewer */}
       {viewingImage && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          className="msm-modal-overlay bg-black/80"
           onClick={() => setViewingImage(null)}
         >
           <div className="relative max-w-4xl max-h-[90vh]">

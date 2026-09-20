@@ -850,7 +850,7 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
 
       {/* Add by ID Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+        <div className="msm-modal-overlay">
           <div className="msm-card w-full max-w-md p-6">
             <h2 className="font-headline text-headline-md text-primary mb-4">{t('mods.addMod')}</h2>
             <div className="space-y-4">

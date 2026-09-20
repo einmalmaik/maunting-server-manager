@@ -480,7 +480,7 @@ function PowerUserDialog({ state, onClose }: { state: { db: PostgresDatabase; pa
   if (!state) return null
   const connectionUrl = `postgresql://${state.db.owner_role}:${state.password}@msm-postgres:5432/${state.db.name}`
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+    <div className="msm-modal-overlay" onClick={onClose}>
       <div className="msm-card w-full max-w-2xl p-6" onClick={(event) => event.stopPropagation()}>
         <div className="mb-3 flex items-center gap-2">
           <Shield className="h-5 w-5 text-status-warning" />

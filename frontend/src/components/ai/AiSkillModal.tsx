@@ -32,7 +32,7 @@ export function AiSkillModal({ open, onClose }: AiSkillModalProps) {
       role="dialog"
       aria-modal="true"
       aria-labelledby="skills-modal-title"
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-sm animate-fade-in"
+      className="msm-modal-overlay sm:p-6 animate-fade-in"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}

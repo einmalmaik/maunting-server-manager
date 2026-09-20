@@ -4,6 +4,7 @@ import { ChevronDown, ChevronRight, File as FileIcon, Folder, Server } from 'luc
 import type { ContentMatch, FileEntry, SearchResult } from './fileWorkspaceTypes'
 import { formatBytes, joinPath, sortEntries } from './fileHelpers'
 
+import { Spinner } from '@/components/ui/Spinner'
 interface FileTreeProps {
   nodes: Record<string, FileEntry[]>
   expanded: Set<string>
@@ -190,7 +191,7 @@ export function FileTree({
             {entry.is_dir ? (
               <span className="flex h-4 w-4 shrink-0 items-center justify-center">
                 {loadingPaths.has(path) ? (
-                  <span className="h-3 w-3 animate-spin rounded-full border border-secondary border-t-transparent" />
+                  <Spinner className="text-secondary" />
                 ) : isExpanded ? (
                   <ChevronDown className="h-3.5 w-3.5" />
                 ) : (

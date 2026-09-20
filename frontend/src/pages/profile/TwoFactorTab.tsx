@@ -4,6 +4,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { api } from '@/api/client'
 import { Shield, Check, AlertTriangle, Download, RotateCcw } from 'lucide-react'
 import { Button, buttonClasses } from '@/Singra/UI'
+import { Spinner } from '@/components/ui/Spinner'
 /**
  * Tab: Zwei-Faktor-Authentifizierung (TOTP).
  *
@@ -245,7 +246,7 @@ export function TwoFactorTab() {
               className="disabled:opacity-50 whitespace-nowrap"
             >
               {submitting ? (
-                <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                <Spinner />
               ) : (
                 t('common.save')
               )}
@@ -275,7 +276,7 @@ export function TwoFactorTab() {
               className="disabled:opacity-50 whitespace-nowrap"
             >
               {submitting ? (
-                <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                <Spinner />
               ) : (
                 t('common.save')
               )}

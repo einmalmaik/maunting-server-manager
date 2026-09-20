@@ -9,6 +9,7 @@ import { Button, Dropdown } from '@/Singra/UI'
 import type { PanelSettings } from './types'
 import { EMPTY_PANEL_SETTINGS } from './types'
 
+import { Spinner } from '@/components/ui/Spinner'
 export function CloudflareTab() {
   const { t } = useTranslation()
   const canWrite = useHasPermission('panel.settings.write')
@@ -104,7 +105,7 @@ export function CloudflareTab() {
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }
@@ -256,7 +257,7 @@ export function CloudflareTab() {
               className="inline-flex items-center gap-2 disabled:opacity-50"
             >
               {testing ? (
-                <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                <Spinner />
               ) : (
                 <Send className="w-4 h-4" />
               )}
@@ -268,7 +269,7 @@ export function CloudflareTab() {
               className="inline-flex items-center gap-2 disabled:opacity-50"
             >
               {saving ? (
-                <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                <Spinner />
               ) : (
                 <Save className="w-4 h-4" />
               )}

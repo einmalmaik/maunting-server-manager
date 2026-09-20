@@ -7,6 +7,7 @@ import { useHasPermission } from '@/hooks/useHasPermission'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Button } from '@/Singra/UI'
 
+import { Spinner } from '@/components/ui/Spinner'
 /** S3-Konfiguration aus GET /api/backup-config (Credentials maskiert). */
 interface S3Config {
   endpoint: string
@@ -162,7 +163,7 @@ export function BackupTab() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }
@@ -279,7 +280,7 @@ export function BackupTab() {
             className="inline-flex items-center gap-2 disabled:opacity-50"
           >
             {testing ? (
-              <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+              <Spinner />
             ) : (
               <Send className="w-4 h-4" />
             )}
@@ -291,7 +292,7 @@ export function BackupTab() {
             className="inline-flex items-center gap-2 disabled:opacity-50"
           >
             {savingS3 ? (
-              <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+              <Spinner />
             ) : (
               <Save className="w-4 h-4" />
             )}
@@ -336,7 +337,7 @@ export function BackupTab() {
             className="inline-flex items-center gap-2 disabled:opacity-50"
           >
             {savingPassword ? (
-              <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+              <Spinner />
             ) : (
               <Save className="w-4 h-4" />
             )}

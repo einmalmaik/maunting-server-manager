@@ -52,6 +52,7 @@ import { labelRole, mapBlueprintPorts } from "@/utils/portRoles";
 import { UptimeDisplay } from "@/components/server/UptimeDisplay";
 import { Button } from '@/Singra/UI'
 
+import { Spinner } from '@/components/ui/Spinner'
 type TabKey =
   | "files"
   | "console"
@@ -519,7 +520,7 @@ export function ServerDetail() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <span className="w-6 h-6 border-2 border-secondary border-t-transparent rounded-full animate-spin" />
+        <Spinner size="md" className="text-secondary" />
       </div>
     );
   }
@@ -1134,7 +1135,7 @@ export function ServerDetail() {
 
       {/* Edit-Network Modal */}
       {showEditNetwork && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto">
+        <div className="msm-modal-overlay overflow-y-auto">
           <div className="msm-card w-full max-w-lg p-6 my-8">
             <h2 className="font-headline text-headline-md text-primary mb-1">
               {t("servers.editNetworkTitle")}

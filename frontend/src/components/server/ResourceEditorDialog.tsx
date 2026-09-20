@@ -303,7 +303,7 @@ export function ResourceEditorDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto"
+      className="msm-modal-overlay overflow-y-auto"
       onClick={() => !saving && onClose()}
       role="dialog"
       aria-modal="true"

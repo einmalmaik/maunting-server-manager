@@ -191,7 +191,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+    <div className="msm-modal-overlay">
       <div className="relative w-full max-w-md rounded-2xl bg-surface-container border border-outline-variant/30 shadow-2xl overflow-hidden animate-scale-in">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-outline-variant/20 bg-surface-container-low">

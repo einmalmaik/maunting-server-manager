@@ -7,6 +7,7 @@ import { PasswordInput } from '@/components/ui/PasswordInput'
 import { api } from '@/api/client'
 import { Button } from '@/Singra/UI'
 
+import { Spinner } from '@/components/ui/Spinner'
 interface SetupWizardProps {
   onComplete: () => void
   emailConfigured: boolean
@@ -324,7 +325,7 @@ export function SetupWizard({ onComplete, emailConfigured }: SetupWizardProps) {
                   >
                     {submitting ? (
                       <span className="inline-flex items-center gap-2">
-                        <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                        <Spinner />
                         {t('common.loading')}
                       </span>
                     ) : (
@@ -383,7 +384,7 @@ export function SetupWizard({ onComplete, emailConfigured }: SetupWizardProps) {
                 >
                   {submitting ? (
                     <span className="inline-flex items-center gap-2">
-                      <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                      <Spinner />
                       {t('common.loading')}
                     </span>
                   ) : (

@@ -71,6 +71,7 @@ import {
 import { stillAnmeldenDetail } from './transport'
 import { useAuftragsschleife } from './useAuftragsschleife'
 
+import { Spinner } from '@/components/ui/Spinner'
 type Phase = 'laedt' | 'einrichtung' | 'kopplung' | 'sandbox' | 'bereit'
 
 const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
@@ -552,7 +553,7 @@ function Startbild({ text, progress }: { text?: string | null; progress?: number
   const { t } = useTranslation()
   return (
     <main className="flex flex-1 flex-col items-center justify-center gap-4 text-on-surface-variant px-6 max-w-sm mx-auto text-center animate-fade-in">
-      <div className="h-7 w-7 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      <Spinner size="lg" className="text-primary" />
       <p className="text-sm font-medium text-on-surface">{text || t('mss.app.startet')}</p>
       {typeof progress === 'number' && (
         <div className="w-full bg-surface-container-high rounded-full h-2 overflow-hidden mt-1 border border-outline-variant/30">

@@ -946,7 +946,7 @@ function SaveFavoriteModal({
   const dialogRef = useRef<HTMLDivElement>(null)
   useDialogTastatur(dialogRef, onClose)
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
+    <div className="msm-modal-overlay">
       <div
         ref={dialogRef}
         role="dialog"
@@ -1468,7 +1468,7 @@ function EditRowModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
+    <div className="msm-modal-overlay">
       <div
         ref={dialogRef}
         role="dialog"
@@ -1550,7 +1550,7 @@ function InsertRowModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
+    <div className="msm-modal-overlay">
       <div
         ref={dialogRef}
         role="dialog"
@@ -1620,7 +1620,7 @@ function DeleteConfirmModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
+    <div className="msm-modal-overlay">
       <div
         ref={dialogRef}
         role="dialog"

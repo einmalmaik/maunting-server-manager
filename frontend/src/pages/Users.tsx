@@ -14,6 +14,7 @@ import type { Role } from '@/types/permissions'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 import { MultiSelect } from '@/Singra/UI/MultiSelect'
 import { Button, Avatar, Checkbox } from '@/Singra/UI'
+import { Spinner } from '@/components/ui/Spinner'
 export function Users() {
   const { t } = useTranslation()
   const currentUser = useAuthStore((s) => s.user)
@@ -117,7 +118,7 @@ export function Users() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }

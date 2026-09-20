@@ -20,6 +20,7 @@ import { Button, Dropdown } from '@/Singra/UI'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 
+import { Spinner } from '@/components/ui/Spinner'
 const KINDS: CredentialKind[] = ['steam_account', 'github_token']
 
 export function CredentialsTab() {
@@ -100,7 +101,7 @@ export function CredentialsTab() {
   if (loading) {
     return (
       <div className="flex h-32 items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }

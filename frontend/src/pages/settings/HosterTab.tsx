@@ -50,6 +50,7 @@ import { toast } from '@/stores/toastStore'
 import type { Role } from '@/types/permissions'
 import type { GameInfo, User } from '@/types'
 
+import { Spinner } from '@/components/ui/Spinner'
 /**
  * Handoff-Link same-origin oeffnen: der absolute Link wird aus MSM_PANEL_URL
  * gebaut und zeigt in der Dev-Umgebung am Frontend vorbei. Der Pfad ueber die
@@ -154,7 +155,7 @@ export function HosterTab({ canWrite }: { canWrite: boolean }) {
   if (loading) {
     return (
       <div className="flex h-32 items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }

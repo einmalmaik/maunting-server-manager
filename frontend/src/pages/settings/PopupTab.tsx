@@ -34,6 +34,7 @@ import { confirm } from '@/stores/confirmStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { PanelPopupModal } from '@/components/popups/PanelPopupModal'
 
+import { Spinner } from '@/components/ui/Spinner'
 export function PopupTab() {
   const { t, i18n } = useTranslation()
   const canWrite = useHasPermission('panel.settings.write')
@@ -428,7 +429,7 @@ export function PopupTab() {
 
         {loading ? (
           <div className="flex items-center justify-center h-48">
-            <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+            <Spinner size="lg" className="text-primary" />
           </div>
         ) : popups.length === 0 ? (
           <div className="p-8 text-center text-on-surface-variant">

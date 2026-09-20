@@ -10,6 +10,7 @@ import { NumberStepper } from '@/components/ui/NumberStepper'
 import { Switch } from '@/components/ui/Switch'
 import { PanelSettings, EMPTY_PANEL_SETTINGS } from './types'
 
+import { Spinner } from '@/components/ui/Spinner'
 export function EmailTab() {
   const { t } = useTranslation()
   const canWrite = useHasPermission('panel.settings.write')
@@ -101,7 +102,7 @@ export function EmailTab() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }
@@ -305,7 +306,7 @@ export function EmailTab() {
                   className="inline-flex items-center gap-2 disabled:opacity-50"
                 >
                   {savingResend ? (
-                    <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                    <Spinner />
                   ) : (
                     <Save className="w-4 h-4" />
                   )}
@@ -336,7 +337,7 @@ export function EmailTab() {
                 className="inline-flex items-center gap-2 disabled:opacity-50 whitespace-nowrap"
               >
                 {sendingTest ? (
-                  <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                  <Spinner />
                 ) : (
                   <Send className="w-4 h-4" />
                 )}
@@ -350,7 +351,7 @@ export function EmailTab() {
           <div className="flex justify-end">
             <Button type="submit" disabled={saving}>
               {saving ? (
-                <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                <Spinner />
               ) : (
                 <Save className="w-4 h-4" />
               )}

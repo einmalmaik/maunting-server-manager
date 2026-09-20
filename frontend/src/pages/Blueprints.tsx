@@ -24,6 +24,7 @@ import { Dropdown } from '@/components/ui/Dropdown'
 import { BlueprintBuilder, type BlueprintBuilderMode } from '@/features/blueprints/BlueprintBuilder'
 import { normalizeBlueprintId } from '@/features/blueprints/contract'
 import { Button, buttonClasses } from '@/Singra/UI'
+import { Spinner } from '@/components/ui/Spinner'
 /** Hilfsfunktion: lesbarer Label pro source_type */
 function sourceLabel(src: string): string {
   if (src === 'steam') return 'Steam'
@@ -247,7 +248,7 @@ export function Blueprints() {
               data-testid="blueprints-upload-new"
             >
               {busy === 'new' ? (
-                <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                <Spinner />
               ) : (
                 <Upload className="w-4 h-4" />
               )}
@@ -439,7 +440,7 @@ export function Blueprints() {
                           title={t('blueprints.replace')}
                         >
                           {isReplacing ? (
-                            <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
+                            <Spinner />
                           ) : (
                             <RefreshCw className="w-3.5 h-3.5" />
                           )}
@@ -454,7 +455,7 @@ export function Blueprints() {
                           title={t('blueprints.delete')}
                         >
                           {isDeleting ? (
-                            <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
+                            <Spinner />
                           ) : (
                             <Trash2 className="w-3.5 h-3.5" />
                           )}

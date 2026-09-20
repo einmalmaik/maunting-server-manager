@@ -23,6 +23,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 
+import { Spinner } from '@/components/ui/Spinner'
 interface UserOption {
   id: number
   username: string
@@ -319,7 +320,7 @@ export function Teams() {
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center" aria-label={t('common.loading')}>
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }

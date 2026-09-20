@@ -13,7 +13,7 @@ export function PostgresCredentialsDialog({ credentials, onClose }: Props) {
   if (!credentials.length) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+    <div className="msm-modal-overlay">
       <div className="msm-card w-full max-w-2xl p-6">
         <h2 className="font-headline text-headline-sm text-primary mb-2">
           {t("servers.postgres.credentialsTitle")}

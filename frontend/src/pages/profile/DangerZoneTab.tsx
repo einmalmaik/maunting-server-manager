@@ -8,6 +8,7 @@ import { AlertTriangle } from 'lucide-react'
 import { useOAuthLinks } from './useOAuthLinks'
 import { Button } from '@/Singra/UI'
 
+import { Spinner } from '@/components/ui/Spinner'
 /**
  * Tab: Gefahrenzone - Konto loeschen.
  *
@@ -72,7 +73,7 @@ export function DangerZoneTab() {
         </div>
       ) : loading ? (
         <div className="flex items-center justify-center h-24">
-          <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          <Spinner size="md" className="text-primary" />
         </div>
       ) : (
         <>
@@ -163,7 +164,7 @@ export function DangerZoneTab() {
                   className="inline-flex items-center gap-2"
                 >
                   {deleteState === 'deleting' ? (
-                    <span className="w-4 h-4 border-2 border-on-error border-t-transparent rounded-full animate-spin" />
+                    <Spinner />
                   ) : (
                     t('profile.deleteAccountFinalBtn')
                   )}

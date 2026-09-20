@@ -12,6 +12,7 @@ import { Switch } from '@/components/ui/Switch'
 import { normalizePanelLanguage } from '@/config/panelLocales'
 import { PanelSettings, EMPTY_PANEL_SETTINGS } from './types'
 
+import { Spinner } from '@/components/ui/Spinner'
 export function GeneralTab() {
   const { t, i18n } = useTranslation()
   const canWrite = useHasPermission('panel.settings.write')
@@ -70,7 +71,7 @@ export function GeneralTab() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }
@@ -308,7 +309,7 @@ export function GeneralTab() {
           <div className="flex justify-end">
             <Button type="submit" disabled={saving}>
               {saving ? (
-                <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                <Spinner />
               ) : (
                 <Save className="w-4 h-4" />
               )}

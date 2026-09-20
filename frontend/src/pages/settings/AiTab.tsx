@@ -30,6 +30,7 @@ import { AiSatelliteSettings } from './AiSatelliteSettings'
 import { AiMapTilerSettings } from './AiMapTilerSettings'
 import { AiTomTomSettings } from './AiTomTomSettings'
 
+import { Spinner } from '@/components/ui/Spinner'
 export type AiSubTab = 'providers' | 'features' | 'limits' | 'usage'
 
 const AI_TABS: TabDef<AiSubTab>[] = [
@@ -301,7 +302,7 @@ export function AiTab() {
     return <div className="msm-card p-6 text-sm text-on-surface-variant">{t('aiSettings.noPermission')}</div>
   }
   if (loading) {
-    return <div className="flex h-64 items-center justify-center"><div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>
+    return <div className="flex h-64 items-center justify-center"><Spinner size="lg" className="text-primary" /></div>
   }
 
   return (

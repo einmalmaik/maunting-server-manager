@@ -13,6 +13,7 @@ import { NumberStepper } from '@/components/ui/NumberStepper'
 import { Dropdown } from '@/components/ui/Dropdown'
 import { Button } from '@/Singra/UI'
 
+import { Spinner } from '@/components/ui/Spinner'
 interface FormState {
   id: number | null
   slug: string
@@ -234,7 +235,7 @@ export function OAuthTab() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }
@@ -307,7 +308,7 @@ export function OAuthTab() {
                         className="inline-flex items-center gap-1.5 disabled:opacity-50"
                       >
                         {testingId === p.id ? (
-                          <span className="w-3.5 h-3.5 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                          <Spinner />
                         ) : (
                           <FlaskConical className="w-3.5 h-3.5" />
                         )}
@@ -426,7 +427,7 @@ function ProviderDialog({
   const callbackUri = `${API_ORIGIN}/api/oauth/${form.slug || '<slug>'}/callback`
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
+    <div className="msm-modal-overlay" onClick={onClose}>
       <div
         className="msm-card p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
@@ -654,7 +655,7 @@ function ProviderDialog({
             className="inline-flex items-center gap-2 disabled:opacity-50"
           >
             {saving ? (
-              <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+              <Spinner />
             ) : (
               <Save className="w-4 h-4" />
             )}

@@ -10,6 +10,7 @@ import { useOAuthLinks } from './useOAuthLinks'
 import { ConnectedMailboxesSection } from './ConnectedMailboxesSection'
 import { ConnectedCalendarsSection } from './ConnectedCalendarsSection'
 import { Button, buttonClasses } from '@/Singra/UI'
+import { Spinner } from '@/components/ui/Spinner'
 /**
  * Tab: Verknuepfte Accounts & Dienste.
  * Enthält:
@@ -88,7 +89,7 @@ export function LinkedAccountsTab() {
 
         {loading ? (
           <div className="flex items-center justify-center h-24">
-            <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+            <Spinner size="md" className="text-primary" />
           </div>
         ) : (
           <div className="space-y-4">

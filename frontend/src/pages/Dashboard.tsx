@@ -23,6 +23,7 @@ import { ProgressBar, StackedProgressBar, type Segment } from '@/Singra/UI/Progr
 import { Badge } from '@/components/ui/Badge'
 
 import { buttonClasses } from '@/Singra/UI'
+import { Spinner } from '@/components/ui/Spinner'
 interface ServiceStatus {
   status: 'ok' | 'degraded' | 'error'
   detail: string
@@ -305,7 +306,7 @@ export function Dashboard() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <span className="w-6 h-6 border-2 border-secondary border-t-transparent rounded-full animate-spin" />
+        <Spinner size="md" className="text-secondary" />
       </div>
     )
   }

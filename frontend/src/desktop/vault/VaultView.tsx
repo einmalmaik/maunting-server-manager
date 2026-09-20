@@ -1001,7 +1001,7 @@ export function VaultView() {
 
       {/* ── 4. MODAL: PASSWORT ANLEGEN / BEARBEITEN ── */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/60 backdrop-blur-sm">
+        <div className="msm-modal-overlay">
           <div className="relative w-full max-w-md rounded-2xl bg-surface-container border border-outline-variant/30 shadow-2xl overflow-hidden animate-scale-in">
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-outline-variant/20 bg-surface-container-low">
@@ -1199,7 +1199,7 @@ export function VaultView() {
 
       {/* Modal: Passwort-Hinweis verwalten */}
       {isHintModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+        <div className="msm-modal-overlay">
           <div className="w-full max-w-sm rounded-2xl bg-surface-container border border-outline-variant/30 p-5 space-y-4 shadow-xl">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">

@@ -17,6 +17,7 @@ import { eingabeInMicroUsd, microUsdInEingabe } from '@/utils/geld'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 
+import { Spinner } from '@/components/ui/Spinner'
 interface ProviderDraft extends AiProviderWrite {
   id?: number
   operator_key_configured?: boolean
@@ -379,7 +380,7 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
   }
 
   if (loading) {
-    return <div className="flex h-32 items-center justify-center"><div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>
+    return <div className="flex h-32 items-center justify-center"><Spinner size="lg" className="text-primary" /></div>
   }
 
   return (

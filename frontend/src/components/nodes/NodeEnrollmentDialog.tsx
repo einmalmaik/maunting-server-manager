@@ -165,7 +165,7 @@ export function NodeEnrollmentDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/60 p-3 backdrop-blur-sm sm:p-6"
+      className="msm-modal-overlay overflow-y-auto sm:p-6"
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}

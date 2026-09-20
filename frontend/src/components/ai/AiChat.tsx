@@ -48,6 +48,7 @@ import { AI_ZUSTELLUNG_EVENT } from '@/lib/aiZustellung'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { starteAufnahme, type Aufnahme } from './voice/audioAufnahme'
 
+import { Spinner } from '@/components/ui/Spinner'
 interface ServerOption {
   id: number
   name: string
@@ -1031,7 +1032,7 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center" aria-label={t('common.loading')}>
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }

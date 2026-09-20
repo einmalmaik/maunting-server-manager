@@ -6,6 +6,7 @@ import { PasswordInput } from '@/components/ui/PasswordInput'
 import { KeyRound, Save } from 'lucide-react'
 import { Button } from '@/Singra/UI'
 
+import { Spinner } from '@/components/ui/Spinner'
 /**
  * Tab: Passwort aendern.
  * Validiert lokal (Laenge, Match), ruft /auth/change-password,
@@ -121,7 +122,7 @@ export function PasswordTab() {
             className="inline-flex items-center gap-2 disabled:opacity-50"
           >
             {submitting ? (
-              <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+              <Spinner />
             ) : (
               <Save className="w-4 h-4" />
             )}

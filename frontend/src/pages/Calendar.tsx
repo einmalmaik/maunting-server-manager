@@ -1074,7 +1074,7 @@ export function Calendar() {
 
       {/* MODAL: Termin anlegen / bearbeiten */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-fade-in">
+        <div className="msm-modal-overlay animate-fade-in">
           <div className="msm-card w-full max-w-lg p-6 shadow-2xl space-y-5 animate-scale-in max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-outline-variant/30 pb-3">
               <h3 className="font-headline text-lg font-bold text-on-surface">
@@ -1347,7 +1347,7 @@ export function Calendar() {
 
       {/* MODAL: Kalender-Abonnement & Feed */}
       {isFeedModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-fade-in">
+        <div className="msm-modal-overlay animate-fade-in">
           <div className="msm-card w-full max-w-lg p-6 shadow-2xl space-y-5 animate-scale-in">
             <div className="flex items-center justify-between border-b border-outline-variant/30 pb-3">
               <h3 className="font-headline text-lg font-bold text-on-surface">

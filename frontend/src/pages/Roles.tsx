@@ -10,6 +10,7 @@ import { PermissionEditor } from '@/Singra/UI/PermissionEditor'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 import { Button } from '@/Singra/UI'
 
+import { Spinner } from '@/components/ui/Spinner'
 /**
  * Erlaubte Rollennamen — dieselbe Sprache wie `backend/schemas/role.py`.
  *
@@ -208,7 +209,7 @@ export function Roles() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+        <Spinner size="lg" className="text-primary" />
       </div>
     )
   }

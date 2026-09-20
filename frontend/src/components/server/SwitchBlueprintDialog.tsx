@@ -7,6 +7,7 @@ import { toast } from "@/stores/toastStore";
 import type { BlueprintListEntry, Server } from "@/types";
 import { Button } from '@/Singra/UI'
 
+import { Spinner } from '@/components/ui/Spinner'
 interface SwitchBlueprintDialogProps {
   open: boolean;
   onClose: () => void;
@@ -133,7 +134,7 @@ export function SwitchBlueprintDialog({
     (Array.isArray(blueprints) ? blueprints : []).find((b) => b.id === server.game_type)?.name || server.game_type;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
+    <div className="msm-modal-overlay">
       <div
         ref={dialogRef}
         role="dialog"
@@ -186,7 +187,7 @@ export function SwitchBlueprintDialog({
             </label>
             {loading ? (
               <div className="flex items-center gap-2 py-2 text-xs text-on-surface-variant">
-                <span className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                <Spinner className="text-primary" />
                 {t("common.loading", "Laden...")}
               </div>
             ) : (
@@ -232,7 +233,7 @@ export function SwitchBlueprintDialog({
               server.status !== "stopped"
             }
           >
-            {submitting && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+            {submitting && <Spinner />}
             {t("servers.confirmSwitchBtn", "Spiel wechseln & Backup erstellen")}
           </Button>
         </div>

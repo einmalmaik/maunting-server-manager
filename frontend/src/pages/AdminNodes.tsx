@@ -28,6 +28,7 @@ import { useHasPermission } from '@/hooks/useHasPermission'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 import { Button } from '@/Singra/UI'
 
+import { Spinner } from '@/components/ui/Spinner'
 function statusVariant(status: string): 'success' | 'destructive' | 'default' | 'warning' {
   switch (status) {
     case 'online':
@@ -307,7 +308,7 @@ export function AdminNodes() {
   if (loading && nodes.length === 0) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <span className="h-6 w-6 animate-spin rounded-full border-2 border-secondary border-t-transparent" />
+        <Spinner size="md" className="text-secondary" />
       </div>
     )
   }

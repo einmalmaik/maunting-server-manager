@@ -9,6 +9,7 @@ import { Dropdown, Switch } from "@/Singra/UI";
 import { AlertTriangle, Bot, HardDrive, Plus, RotateCcw, Trash2, Settings, Cloud, CloudOff, UploadCloud } from "lucide-react";
 import { Button } from '@/Singra/UI'
 
+import { Spinner } from '@/components/ui/Spinner'
 interface Backup {
   id: number;
   server_id: number;
@@ -367,7 +368,7 @@ export function Backups({ serverId }: BackupsProps) {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <span className="w-6 h-6 border-2 border-secondary border-t-transparent rounded-full animate-spin" />
+        <Spinner size="md" className="text-secondary" />
       </div>
     );
   }
@@ -378,7 +379,7 @@ export function Backups({ serverId }: BackupsProps) {
       {isActive && (
         <div className="msm-card p-4 border border-secondary/40 bg-surface-container space-y-2">
           <div className="flex items-center gap-3 text-sm text-on-surface">
-            <span className="w-4 h-4 border-2 border-secondary border-t-transparent rounded-full animate-spin flex-shrink-0" />
+            <Spinner className="text-secondary flex-shrink-0" />
             <span className="font-body-md">{operationLabel || t("backups.creating", "Backup wird erstellt...")}</span>
             {elapsedLabel && (
               <span className="text-on-surface-variant">
@@ -685,7 +686,7 @@ export function Backups({ serverId }: BackupsProps) {
 
       {/* Create Backup Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+        <div className="msm-modal-overlay">
           <div className="msm-card w-full max-w-md p-6">
             <h2 className="font-headline text-headline-md text-primary mb-1">
               {t("backups.create")}

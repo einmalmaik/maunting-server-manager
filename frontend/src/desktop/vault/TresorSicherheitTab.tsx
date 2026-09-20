@@ -173,7 +173,7 @@ export function TresorSicherheitTab() {
 
       {/* Biometrie Aktivierungs-Modal */}
       {biometricsModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/60 backdrop-blur-sm">
+        <div className="msm-modal-overlay">
           <div className="w-full max-w-sm rounded-2xl bg-surface-container border border-outline-variant/30 p-5 shadow-2xl space-y-4">
             <div className="flex items-center gap-3">
               <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/10 text-primary">

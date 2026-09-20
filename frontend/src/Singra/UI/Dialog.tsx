@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 
 interface DialogContextValue {
@@ -92,16 +93,16 @@ export function DialogContent({
     }
   }, [ctx])
 
-  return (
+  return createPortal(
     <div
-      className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in ${overlayClassName}`}
+      className={`msm-modal-overlay animate-fade-in ${overlayClassName}`}
       onClick={() => ctx.onOpenChange(false)}
       role="dialog"
       aria-modal="true"
     >
       <div
         ref={dialogRef}
-        className={`relative w-full max-w-lg bg-surface-container-low border border-outline-variant/30 rounded-2xl shadow-2xl overflow-hidden flex flex-col ${className}`}
+        className={`msm-card relative w-full max-w-lg overflow-hidden flex flex-col ${className}`}
         onClick={(e) => e.stopPropagation()}
         {...props}
       >
@@ -117,7 +118,8 @@ export function DialogContent({
           </button>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -143,7 +145,7 @@ export function DialogTitle({
 }: React.HTMLAttributes<HTMLHeadingElement>) {
   return (
     <h3
-      className={`font-headline text-title-lg font-black text-primary tracking-tight ${className}`}
+      className={`font-headline text-headline-md text-primary ${className}`}
       {...props}
     >
       {children}
