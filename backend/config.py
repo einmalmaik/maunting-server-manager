@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 15  # 15 Min — kurzlebig fuer Rotation
     refresh_token_expire_days: int = 30  # 30 Tage Refresh-Token
+    paired_device_refresh_token_expire_days: int = 3650  # 10 Jahre Refresh-Token fuer gekoppelte Geraete (dauerhaft)
     csrf_token_expire_minutes: int = 60 * 24  # 24h CSRF-Token
 
     # DIS Sidecar (lokaler Node-Prozess, wrappt @msdis/shield)

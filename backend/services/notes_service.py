@@ -421,6 +421,7 @@ class NotesService:
 
         note_uid = note.note_uid
         team_id = note.team_id
+        owner_user_id = note.user_id
         db.delete(note)
         db.commit()
         SyncEventService.publish(
@@ -430,9 +431,9 @@ class NotesService:
                 "id": note_uid,
                 "note_uid": note_uid,
                 "team_id": team_id,
-                "user_id": user.id,
+                "user_id": owner_user_id,
             },
-            user_id=user.id,
+            user_id=owner_user_id,
             team_id=team_id,
         )
         return {"status": "deleted", "note_uid": note_uid}

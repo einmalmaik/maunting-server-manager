@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "npm run check && tsc && vite build",
     "dev:desktop": "vite --config vite.desktop.config.ts",
-    "build:desktop": "tsc && vite build --config vite.desktop.config.ts",
-    "build:tauri": "tsc && vite build --config vite.desktop.config.ts",
+    "build:desktop": "npm run check && tsc && vite build --config vite.desktop.config.ts",
+    "build:tauri": "npm run check && tsc && vite build --config vite.desktop.config.ts",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",

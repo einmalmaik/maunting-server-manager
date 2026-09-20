@@ -7,6 +7,7 @@ import { ChatMediaImage, chatMediaBlobCache } from '@/components/social/ChatMedi
 import * as socialApi from '@/api/social'
 import { teamsApi } from '@/api/teams'
 import { useAuthStore } from '@/stores/authStore'
+import i18n from '@/i18n'
 import {
   generateLocalE2eeKeyPair,
   encryptE2eeHybrid,
@@ -461,7 +462,7 @@ describe('Requirement R1 Reproduction: E2EE Messenger Failure Modes', () => {
 
       // Because decryption failed due to key mismatch, Messenger renders the "Verschlüsselte Nachricht" fallback
       await waitFor(() => {
-        expect(screen.getByText('Verschlüsselte Nachricht')).toBeInTheDocument()
+        expect(screen.getByText(i18n.t('messenger.encryptedMessage'))).toBeInTheDocument()
       })
 
       // The actual secret plaintext is NOT displayed
@@ -514,7 +515,7 @@ describe('Requirement R1 Reproduction: E2EE Messenger Failure Modes', () => {
       })
 
       // The unparsed control envelope must be silently discarded and never leak into the chat timeline
-      expect(screen.queryByText('Verschlüsselte Nachricht')).toBeNull()
+      expect(screen.queryByText(i18n.t('messenger.encryptedMessage'))).toBeNull()
     })
 
     it('tick synchronization: optimistic message ID updated to server envelope ID transitions isDelivered to true', () => {
@@ -607,7 +608,7 @@ describe('Requirement R1 Reproduction: E2EE Messenger Failure Modes', () => {
       })
 
       // Send a message via input
-      const input = screen.getByPlaceholderText('Nachricht schreiben …')
+      const input = screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder'))
       fireEvent.change(input, { target: { value: 'Wichtige Nachricht' } })
 
       const sendBtn = screen.getByTitle('Senden')
@@ -631,7 +632,7 @@ describe('Requirement R1 Reproduction: E2EE Messenger Failure Modes', () => {
       )
 
       // The message successfully transitions to 2 checkmarks (delivered)
-      const deliveredCheckTitle = 'Zugestellt / Vom Gesprächspartner empfangen'
+      const deliveredCheckTitle = i18n.t('messenger.stateDelivered')
       await waitFor(
         () => {
           expect(screen.getByTitle(deliveredCheckTitle)).toBeInTheDocument()
@@ -690,7 +691,7 @@ describe('Requirement R1 Reproduction: E2EE Messenger Failure Modes', () => {
       )
 
       await waitFor(() => {
-        expect(screen.getByText('Bild konnte nicht geladen werden')).toBeInTheDocument()
+        expect(screen.getByText(i18n.t('social.attachment.imageFailed'))).toBeInTheDocument()
       })
       expect(socialApi.ladeAnhangHerunter).not.toHaveBeenCalled()
     })

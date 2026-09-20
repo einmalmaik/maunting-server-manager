@@ -18,6 +18,9 @@ import {
   ladeUmschlagKlartexte,
   leseUmschlagKlartext,
   speichereUmschlagKlartext,
+  speichereEntwurf,
+  ladeEntwurf,
+  ladeAlleEntwuerfe,
   type LocalStoredMessage,
 } from './messengerLocalStore'
 
@@ -620,6 +623,88 @@ describe('messengerLocalStore mit PIN', () => {
     const geladen = await loadLocalMessages(mid)
     expect(geladen).toHaveLength(2)
     expect(geladen.map((m) => m.text).sort()).toEqual([nachricht.text, 'offen'].sort())
+  })
+})
+
+/**
+ * Entwürfe.
+ *
+ * Ein Entwurf ist ungesendeter Klartext und damit vom Empfindlichsten, was
+ * dieses Gerät hält: er steht noch nirgends sonst. Deshalb liegt er in der
+ * versiegelten Ablage und nicht im localStorage neben den Stummschaltungen —
+ * dort stünde offen, was jemand gerade schreibt und wem.
+ */
+describe('Entwürfe je Chat', () => {
+  let ablage: Map<string, Map<string, any>>
+  const mid = 'mailbox-entwurf'
+  const anderer = 'mailbox-entwurf-2'
+
+  beforeEach(async () => {
+    ablage = installMockIndexedDb().stores
+    installiereLocalStorage()
+    setzeAngemeldetesKonto(42)
+    setzeSiegelAktiv(true)
+    setzeInhaltsSchluessel(await generateAesGcmKey())
+  })
+
+  afterEach(() => {
+    setzeSiegelAktiv(false)
+    setzeInhaltsSchluessel(null)
+    setzeAngemeldetesKonto(null)
+  })
+
+  it('legt einen Entwurf ab und gibt ihn zurück', async () => {
+    await speichereEntwurf(mid, 'halb getippt')
+    expect(await ladeEntwurf(mid)).toBe('halb getippt')
+  })
+
+  it('legt ihn versiegelt ab, nicht lesbar', async () => {
+    await speichereEntwurf(mid, 'das soll niemand finden')
+    const zeilen = [...(ablage.get('entwuerfe')?.values() ?? [])]
+    expect(zeilen).toHaveLength(1)
+    expect(JSON.stringify(zeilen[0])).not.toContain('niemand finden')
+    // Der Schlüssel bleibt lesbar, sonst fände ihn niemand wieder.
+    expect(zeilen[0].blindMailboxId).toBe(mid)
+  })
+
+  it('schreibt nichts in den localStorage', async () => {
+    await speichereEntwurf(mid, 'nur in der Ablage')
+    expect(JSON.stringify({ ...localStorage })).not.toContain('nur in der Ablage')
+  })
+
+  it('hält die Chats auseinander', async () => {
+    await speichereEntwurf(mid, 'für den einen')
+    await speichereEntwurf(anderer, 'für den anderen')
+    expect(await ladeEntwurf(mid)).toBe('für den einen')
+    expect(await ladeEntwurf(anderer)).toBe('für den anderen')
+  })
+
+  it('löscht den Entwurf, statt ihn leer zu speichern', async () => {
+    // Eine Zeile, die nur sagt „hier wurde mal etwas getippt und verworfen",
+    // ist ein Hinweis, den niemand braucht.
+    await speichereEntwurf(mid, 'erst getippt')
+    await speichereEntwurf(mid, '   ')
+    expect(await ladeEntwurf(mid)).toBe('')
+    expect([...(ablage.get('entwuerfe')?.values() ?? [])]).toHaveLength(0)
+  })
+
+  it('meldet für einen Chat ohne Entwurf einen leeren String', async () => {
+    expect(await ladeEntwurf('nie beschrieben')).toBe('')
+  })
+
+  it('sammelt alle Entwürfe für die Vorschau in der Liste', async () => {
+    await speichereEntwurf(mid, 'eins')
+    await speichereEntwurf(anderer, 'zwei')
+    expect(await ladeAlleEntwuerfe()).toEqual({ [mid]: 'eins', [anderer]: 'zwei' })
+  })
+
+  it('gibt gesperrt nichts heraus', async () => {
+    // Ein unlesbarer Entwurf ist kein Fehler, er ist eben keiner: ohne
+    // Schlüssel bleibt das Eingabefeld leer, statt eine Ausnahme zu werfen.
+    await speichereEntwurf(mid, 'hinter dem PIN')
+    setzeInhaltsSchluessel(null)
+    expect(await ladeEntwurf(mid)).toBe('')
+    expect(await ladeAlleEntwuerfe()).toEqual({})
   })
 })
 

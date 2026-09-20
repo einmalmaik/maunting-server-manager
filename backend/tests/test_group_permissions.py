@@ -207,3 +207,101 @@ def test_gruppenliste_meldet_rechte_kanonisch(
     )
     eigener = next(m for m in eintrag["members"] if m["user_id"] == regular_user.id)
     assert eigener["permissions"] == "join_group_calls"
+
+
+# ── Alle wecken und anheften ────────────────────────────────────────────────
+#
+# Diese beiden Rechte sind anders als alle anderen: der Server kann sie nicht
+# durchsetzen, weil er den Inhalt einer Nachricht nicht liest. Durchgesetzt
+# werden sie vom **empfangenden** Geraet, und das befragt dafuer die Marke am
+# *Absender* aus der Gruppenantwort. Laufen Marke und Pruefung auseinander,
+# klingelt ein Handy bei jemandem, der das nicht duerfte — und kein
+# 403 faengt es ab, weil nie ein Aufruf stattfindet.
+
+
+def test_beide_rechte_stehen_im_vokabular() -> None:
+    assert "mention_everyone" in GROUP_PERMISSIONS
+    assert "pin_messages" in GROUP_PERMISSIONS
+
+
+def test_tippfehler_im_neuen_recht_wird_abgewiesen() -> None:
+    with pytest.raises(HTTPException) as fehler:
+        SocialService.assert_known_permissions("mention_everybody")
+    assert fehler.value.status_code == 422
+    assert "mention_everybody" in fehler.value.detail
+
+
+def test_mitglied_ohne_eintrag_darf_nicht_alle_wecken(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Der sichere Ausgangszustand: bestehende Gruppen bekommen nichts dazu.
+    gruppe = _gruppe(db, owner_user, regular_user, "")
+    assert not SocialService.has_group_permission(
+        db, gruppe.id, regular_user.id, "mention_everyone"
+    )
+    assert not SocialService.has_group_permission(db, gruppe.id, regular_user.id, "pin_messages")
+
+
+def test_vergebenes_recht_wirkt(db: Session, owner_user: User, regular_user: User) -> None:
+    gruppe = _gruppe(db, owner_user, regular_user, "mention_everyone")
+    assert SocialService.has_group_permission(
+        db, gruppe.id, regular_user.id, "mention_everyone"
+    )
+    assert not SocialService.has_group_permission(db, gruppe.id, regular_user.id, "pin_messages")
+
+
+def test_eigentuemer_darf_ohne_eintrag_wecken_und_anheften(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Dieselbe Begruendung wie bei den Anrufrechten: er kann sie sich mit zwei
+    # Klicks selbst geben. Ein Eigentuemer, der seine eigene Gruppe nicht
+    # erreicht, waere kein Schutz, sondern ein Raetsel.
+    gruppe = _gruppe(db, owner_user, regular_user, "")
+    eigene = SocialService.get_group_member(db, gruppe.id, owner_user.id)
+    eigene.permissions = ""
+    db.commit()
+    assert SocialService.has_group_permission(db, gruppe.id, owner_user.id, "mention_everyone")
+    assert SocialService.has_group_permission(db, gruppe.id, owner_user.id, "pin_messages")
+
+
+def test_marke_je_mitglied_stimmt_mit_der_pruefung_ueberein(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    """Die eigentliche Zusicherung dieser Datei.
+
+    Die Marke in der Gruppenantwort und ``has_group_permission`` muessen
+    dasselbe sagen — fuer jedes Mitglied, in jeder Rolle, bei jedem Recht.
+    Sie kommen aus derselben ``effective_permissions``; dieser Test haelt fest,
+    dass das so bleibt.
+    """
+    for rechte in (None, "", "mention_everyone", "pin_messages", "send_messages"):
+        gruppe = _gruppe(db, owner_user, regular_user, rechte)
+        eintrag = next(
+            g
+            for g in SocialService.list_user_groups(db, regular_user.id)
+            if g["id"] == gruppe.id
+        )
+        for mitglied in eintrag["members"]:
+            for recht, marke in (
+                ("mention_everyone", "can_mention_everyone"),
+                ("pin_messages", "can_pin_messages"),
+            ):
+                assert mitglied[marke] is SocialService.has_group_permission(
+                    db, gruppe.id, mitglied["user_id"], recht
+                ), f"{marke} weicht ab bei {mitglied['role']} mit {rechte!r}"
+
+
+def test_gruppenmarke_beschreibt_mich_selbst(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Die Marke an der Gruppe sagt „darf ich den Knopf sehen", die am Mitglied
+    # „durfte dieser Absender". Beim Eigentuemer faellt beides zusammen, beim
+    # Mitglied ohne Recht nicht — sonst waere die Unterscheidung zufaellig
+    # richtig und niemand merkte ihr Fehlen.
+    gruppe = _gruppe(db, owner_user, regular_user, "")
+    meins = next(
+        g for g in SocialService.list_user_groups(db, regular_user.id) if g["id"] == gruppe.id
+    )
+    assert meins["can_mention_everyone"] is False
+    besitzer = next(m for m in meins["members"] if m["user_id"] == owner_user.id)
+    assert besitzer["can_mention_everyone"] is True

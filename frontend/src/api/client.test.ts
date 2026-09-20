@@ -245,6 +245,54 @@ describe('api client', () => {
       expect(useAuthStore.getState().isAuthenticated).toBe(true)
     })
 
+    it('räumt den Sitzungsspeicher NICHT, wenn der Refresh wegen Netzwerkfehlers abbricht', async () => {
+      sitzungsspeicherFuellen()
+      fetchSpy
+        .mockReturnValueOnce(mockResponse(401, { detail: 'Unauthorized' }))
+        .mockRejectedValueOnce(new TypeError('Failed to fetch (Netzwerkabbruch/Offline)'))
+
+      await expect(api('/test')).rejects.toThrow('Failed to fetch')
+      expect(useAuthStore.getState().isAuthenticated).toBe(true)
+      expect(useAuthStore.getState().user).not.toBeNull()
+    })
+
+    it('räumt den Sitzungsspeicher NICHT, wenn der Refresh mit HTTP 502/503 antwortet', async () => {
+      sitzungsspeicherFuellen()
+      fetchSpy
+        .mockReturnValueOnce(mockResponse(401, { detail: 'Unauthorized' }))
+        .mockReturnValueOnce(mockResponse(502, { detail: 'Bad Gateway' }))
+
+      await expect(api('/test')).rejects.toThrow('Refresh fehlgeschlagen: HTTP 502')
+      expect(useAuthStore.getState().isAuthenticated).toBe(true)
+      expect(useAuthStore.getState().user).not.toBeNull()
+    })
+
+    it('räumt den Sitzungsspeicher NICHT, wenn der Refresh gelingt, aber der wiederholte Request fehlschlägt', async () => {
+      sitzungsspeicherFuellen()
+      fetchSpy
+        .mockReturnValueOnce(mockResponse(401, { detail: 'Unauthorized' }))
+        .mockReturnValueOnce(mockResponse(200, { message: 'refreshed' }))
+        .mockRejectedValueOnce(new TypeError('Netzwerkabbruch beim Retry'))
+
+      await expect(api('/test')).rejects.toThrow('Netzwerkabbruch beim Retry')
+      expect(useAuthStore.getState().isAuthenticated).toBe(true)
+      expect(useAuthStore.getState().user).not.toBeNull()
+    })
+
+    it('räumt den Sitzungsspeicher NICHT im SSE-Pfad, wenn der Retry nach erfolgreichem Refresh abbricht', async () => {
+      sitzungsspeicherFuellen()
+      fetchSpy
+        .mockReturnValueOnce(mockResponse(401, { detail: 'Unauthorized' }))
+        .mockReturnValueOnce(mockResponse(200, { message: 'refreshed' }))
+        .mockRejectedValueOnce(new DOMException('The user aborted a request', 'AbortError'))
+
+      await expect(
+        apiStream('/ai/conversations/1/messages/stream', { method: 'POST', body: '{}' }),
+      ).rejects.toThrow('The user aborted a request')
+      expect(useAuthStore.getState().isAuthenticated).toBe(true)
+      expect(useAuthStore.getState().user).not.toBeNull()
+    })
+
     it('should NOT refresh on /auth/login 401', async () => {
       fetchSpy.mockReturnValueOnce(mockResponse(401, { detail: 'Bad credentials' }))
 

@@ -63,6 +63,8 @@ export const GROUP_PERMISSION_DEFINITIONS = [
   { key: 'kick_from_calls', category: 'moderation' },
   { key: 'kick_members', category: 'moderation' },
   { key: 'delete_messages', category: 'moderation' },
+  { key: 'mention_everyone', category: 'moderation' },
+  { key: 'pin_messages', category: 'moderation' },
   { key: 'manage_roles', category: 'administration' },
 ] as const
 
@@ -90,6 +92,39 @@ function rollentext(
 }
 
 /**
+ * Was in den Standardrechten **nicht** angeboten wird.
+ *
+ * `manage_roles` gehört nicht dorthin: wer Rollen verwalten darf, kann sich
+ * jedes andere Recht selbst geben. Ein Haken, der das für alle setzt, wäre
+ * keine Einstellung, sondern die Abschaffung der Rollen.
+ */
+const NICHT_ALS_STANDARD: ReadonlySet<string> = new Set(['manage_roles'])
+
+/** Was eine frische Gruppe mitbringt, solange der Server nichts anderes sagt. */
+const STANDARD_VORGABE = ['send_messages', 'attach_media', 'invite_members'] as const
+
+/**
+ * Die Abschnitte des Standardrechte-Reiters.
+ *
+ * Die Reihenfolge der Rechte innerhalb eines Abschnitts ist die aus
+ * `GROUP_PERMISSION_DEFINITIONS` — eine zweite Sortierliste wäre wieder eine
+ * Stelle, die man beim nächsten neuen Recht vergessen kann.
+ *
+ * `symbol` steht hier als eigenes Feld, weil der Abschnitt vorher am Titel
+ * erkannt wurde (`titel === 'Moderation'`). Das war auf Deutsch richtig und
+ * auf Englisch nie wahr — das Schild hing am übersetzten Text.
+ */
+const STANDARD_ABSCHNITTE: {
+  titelKey: string
+  symbol: 'chat' | 'anruf' | 'moderation'
+  kategorien: readonly string[]
+}[] = [
+  { titelKey: 'social.groupRoles.defaultsChat', symbol: 'chat', kategorien: ['chat', 'members'] },
+  { titelKey: 'social.groupRoles.defaultsCalls', symbol: 'anruf', kategorien: ['calls'] },
+  { titelKey: 'social.groupRoles.defaultsModeration', symbol: 'moderation', kategorien: ['moderation', 'administration'] },
+]
+
+/**
  * Die vier eingebauten Rollen. Name und Beschreibung sind Schlüssel — was in
  * der Oberfläche steht, holt `rolleName`/`rolleBeschreibung` daraus.
  */
@@ -106,14 +141,14 @@ const SYSTEM_GROUP_ROLES: GroupRoleDefinition[] = [
     name: 'social.groupRoles.system.admin.name',
     description: 'social.groupRoles.system.admin.desc',
     is_system: true,
-    permissions: ['send_messages', 'attach_media', 'invite_members', 'start_group_calls', 'join_group_calls', 'share_screen', 'mute_in_calls', 'kick_from_calls', 'kick_members', 'delete_messages', 'manage_roles'],
+    permissions: ['send_messages', 'attach_media', 'invite_members', 'start_group_calls', 'join_group_calls', 'share_screen', 'mute_in_calls', 'kick_from_calls', 'kick_members', 'delete_messages', 'mention_everyone', 'pin_messages', 'manage_roles'],
   },
   {
     id: 'moderator',
     name: 'social.groupRoles.system.moderator.name',
     description: 'social.groupRoles.system.moderator.desc',
     is_system: true,
-    permissions: ['send_messages', 'attach_media', 'invite_members', 'join_group_calls', 'share_screen', 'mute_in_calls', 'kick_from_calls', 'delete_messages'],
+    permissions: ['send_messages', 'attach_media', 'invite_members', 'join_group_calls', 'share_screen', 'mute_in_calls', 'kick_from_calls', 'delete_messages', 'mention_everyone', 'pin_messages'],
   },
   {
     id: 'member',
@@ -126,10 +161,6 @@ const SYSTEM_GROUP_ROLES: GroupRoleDefinition[] = [
 
 /** Wird im Bauteil mit `t()` befüllt — hier stehen nur die Werte. */
 const ROLE_OPTION_IDS = ['admin', 'moderator', 'member'] as const
-
-/** Welche Rechte der Tab „Standardrechte" in welcher Gruppe zeigt. */
-const CHAT_DEFAULT_KEYS = ['send_messages', 'attach_media', 'invite_members', 'delete_messages', 'kick_members'] as const
-const CALL_DEFAULT_KEYS = ['start_group_calls', 'join_group_calls', 'share_screen', 'mute_in_calls', 'kick_from_calls'] as const
 
 interface GroupRoleFormProps {
   initial: GroupRoleDefinition | null
@@ -338,44 +369,16 @@ export function GroupPermissionsModal({
   const [isCreatingRole, setIsCreatingRole] = useState(false)
   const [expandedRoleDescriptions, setExpandedRoleDescriptions] = useState<Record<string, boolean>>({})
 
-  // Standard permissions (@everyone)
-  const [canSendMessages, setCanSendMessages] = useState(true)
-  const [canAttachMedia, setCanAttachMedia] = useState(true)
-  const [canInviteMembers, setCanInviteMembers] = useState(true)
-  const [canStartCalls, setCanStartCalls] = useState(true)
-  const [canJoinCalls, setCanJoinCalls] = useState(true)
-  const [canShareScreen, setCanShareScreen] = useState(false)
-  const [canMuteInCalls, setCanMuteInCalls] = useState(false)
-  const [canKickFromCalls, setCanKickFromCalls] = useState(false)
-  const [canDeleteMessages, setCanDeleteMessages] = useState(false)
-  const [canKickMembers, setCanKickMembers] = useState(false)
-
-  // Schlüssel -> Zustand. Die Oberfläche unten läuft darüber, statt zehnmal
-  // dasselbe Kästchen von Hand zu schreiben.
-  const standardRechte: Record<string, boolean> = {
-    send_messages: canSendMessages,
-    attach_media: canAttachMedia,
-    invite_members: canInviteMembers,
-    delete_messages: canDeleteMessages,
-    kick_members: canKickMembers,
-    start_group_calls: canStartCalls,
-    join_group_calls: canJoinCalls,
-    share_screen: canShareScreen,
-    mute_in_calls: canMuteInCalls,
-    kick_from_calls: canKickFromCalls,
-  }
-  const standardSetzer: Record<string, (wert: boolean) => void> = {
-    send_messages: setCanSendMessages,
-    attach_media: setCanAttachMedia,
-    invite_members: setCanInviteMembers,
-    delete_messages: setCanDeleteMessages,
-    kick_members: setCanKickMembers,
-    start_group_calls: setCanStartCalls,
-    join_group_calls: setCanJoinCalls,
-    share_screen: setCanShareScreen,
-    mute_in_calls: setCanMuteInCalls,
-    kick_from_calls: setCanKickFromCalls,
-  }
+  /**
+   * Die Standardrechte, als Menge der gesetzten Schlüssel.
+   *
+   * Vorher stand hier je Recht ein eigenes `useState`, dreimal wiederholt —
+   * beim Anlegen, beim Laden und beim Speichern. Zwei neue Rechte kamen ins
+   * Vokabular und fehlten hier still: der Dialog zeigte zehn Schalter, das
+   * Backend kannte zwölf. Deshalb kommt die Liste jetzt aus
+   * `GROUP_PERMISSION_DEFINITIONS` und nirgendwo sonst.
+   */
+  const [standardrechte, setStandardrechte] = useState<Set<string>>(new Set(STANDARD_VORGABE))
 
   const rollenAuswahl: DropdownOption[] = ROLE_OPTION_IDS.map((id) => ({
     value: id,
@@ -389,17 +392,11 @@ export function GroupPermissionsModal({
   useEffect(() => {
     if (open && group) {
       void loadMembers()
-      const defPerms = (group.default_permissions || 'send_messages,attach_media,invite_members').split(',')
-      setCanSendMessages(defPerms.includes('send_messages'))
-      setCanAttachMedia(defPerms.includes('attach_media'))
-      setCanInviteMembers(defPerms.includes('invite_members'))
-      setCanStartCalls(defPerms.includes('start_group_calls'))
-      setCanJoinCalls(defPerms.includes('join_group_calls'))
-      setCanShareScreen(defPerms.includes('share_screen'))
-      setCanMuteInCalls(defPerms.includes('mute_in_calls'))
-      setCanKickFromCalls(defPerms.includes('kick_from_calls'))
-      setCanDeleteMessages(defPerms.includes('delete_messages'))
-      setCanKickMembers(defPerms.includes('kick_members'))
+      const gesetzt = (group.default_permissions || STANDARD_VORGABE.join(','))
+        .split(',')
+        .map((p) => p.trim())
+        .filter(Boolean)
+      setStandardrechte(new Set(gesetzt))
     }
   }, [open, group?.id, group?.default_permissions])
 
@@ -461,19 +458,13 @@ export function GroupPermissionsModal({
   const handleSaveDefaultPermissions = async () => {
     if (!group) return
     setSavingPermissions(true)
-    const perms: string[] = []
-    if (canSendMessages) perms.push('send_messages')
-    if (canAttachMedia) perms.push('attach_media')
-    if (canInviteMembers) perms.push('invite_members')
-    if (canStartCalls) perms.push('start_group_calls')
-    if (canJoinCalls) perms.push('join_group_calls')
-    if (canShareScreen) perms.push('share_screen')
-    if (canMuteInCalls) perms.push('mute_in_calls')
-    if (canKickFromCalls) perms.push('kick_from_calls')
-    if (canDeleteMessages) perms.push('delete_messages')
-    if (canKickMembers) perms.push('kick_members')
-
-    const permString = perms.join(',')
+    // In der Reihenfolge des Vokabulars, und nur, was hier auch angeboten
+    // wurde: ein Recht, das der Dialog nie zeigt, darf er auch nicht schreiben.
+    const permString = GROUP_PERMISSION_DEFINITIONS.filter(
+      (d) => !NICHT_ALS_STANDARD.has(d.key) && standardrechte.has(d.key),
+    )
+      .map((d) => d.key)
+      .join(',')
     try {
       const updated = await updateGroupPermissions(group.id, permString)
       toast.success(t('social.groupRoles.defaultsSaved'))
@@ -926,52 +917,59 @@ export function GroupPermissionsModal({
                 </p>
               </div>
 
-              {/* Die beiden Gruppen lesen dieselbe Liste wie der Rollen-Editor.
-                  Vorher standen sie hier ein zweites Mal von Hand, mit eigenem
-                  Wortlaut — und liefen auseinander. */}
-              {([
-                { titel: t('social.groupRoles.defaultsChat'), icon: null, rechte: CHAT_DEFAULT_KEYS },
-                { titel: t('social.groupRoles.defaultsCalls'), icon: <Phone className="h-4 w-4 text-primary" />, rechte: CALL_DEFAULT_KEYS },
-              ] as const).map((abschnitt, index) => (
-                <div
-                  key={abschnitt.titel}
-                  className={`rounded-2xl border border-outline-variant/30 p-4 sm:p-6 bg-surface-container/60 shadow-sm ${
-                    index > 0 ? 'mt-5' : ''
-                  }`}
-                >
-                  <div className="mb-3 flex items-center gap-2">
-                    {abschnitt.icon}
-                    <span className="text-body-sm font-bold text-primary">{abschnitt.titel}</span>
-                  </div>
-                  <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
-                    {abschnitt.rechte.map((recht, stelle) => (
-                      <div
-                        key={recht}
-                        className={`flex items-center justify-between gap-4 rounded-xl border border-outline-variant/30 bg-surface-container-high/60 p-3.5 ${
-                          stelle === abschnitt.rechte.length - 1 && abschnitt.rechte.length % 2 === 1
-                            ? 'lg:col-span-2'
-                            : ''
-                        }`}
-                      >
-                        <div className="min-w-0 flex-1">
-                          <span className="block text-xs font-bold text-primary">
-                            {t(permissionTitleKey(recht))}
-                          </span>
-                          <span className="text-label-sm leading-snug text-on-surface-variant">
-                            {t(permissionDescKey(recht))}
-                          </span>
-                        </div>
-                        <Switch
-                          checked={standardRechte[recht]}
-                          onCheckedChange={standardSetzer[recht]}
-                          disabled={!canManage}
-                          aria-label={t('social.groupRoles.allow', { name: t(permissionTitleKey(recht)) })}
-                        />
+              {/* Ein Abschnitt je Kategorie, die Rechte in der Reihenfolge des
+                  Vokabulars. Vorher standen sie hier ein zweites Mal von Hand,
+                  mit eigenem Wortlaut — und liefen auseinander. */}
+              <div className="rounded-2xl border border-outline-variant/30 p-4 sm:p-6 bg-surface-container/60 shadow-sm space-y-5">
+                {STANDARD_ABSCHNITTE.map((abschnitt, i) => {
+                  const rechte = GROUP_PERMISSION_DEFINITIONS.filter(
+                    (d) => abschnitt.kategorien.includes(d.category) && !NICHT_ALS_STANDARD.has(d.key),
+                  )
+                  if (!rechte.length) return null
+                  const Symbol = abschnitt.symbol === 'moderation' ? Shield : abschnitt.symbol === 'anruf' ? Phone : Users
+                  return (
+                    <div
+                      key={abschnitt.titelKey}
+                      className={i > 0 ? 'border-t border-outline-variant/30 pt-5' : ''}
+                    >
+                      <div className="mb-3 flex items-center gap-2">
+                        <Symbol className="h-4 w-4 text-primary" />
+                        <span className="text-body-sm font-bold text-primary">{t(abschnitt.titelKey)}</span>
                       </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
+                      <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
+                        {rechte.map((def) => (
+                          <div
+                            key={def.key}
+                            className="flex items-center justify-between gap-4 rounded-xl border border-outline-variant/30 bg-surface-container-high/60 p-3.5"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <span className="block text-xs font-bold text-primary">
+                                {t(permissionTitleKey(def.key))}
+                              </span>
+                              <span className="text-label-sm leading-snug text-on-surface-variant">
+                                {t(permissionDescKey(def.key))}
+                              </span>
+                            </div>
+                            <Switch
+                              checked={standardrechte.has(def.key)}
+                              onCheckedChange={(an) =>
+                                setStandardrechte((vorher) => {
+                                  const neu = new Set(vorher)
+                                  if (an) neu.add(def.key)
+                                  else neu.delete(def.key)
+                                  return neu
+                                })
+                              }
+                              disabled={!canManage}
+                              aria-label={t('social.groupRoles.allow', { name: t(permissionTitleKey(def.key)) })}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
 
               {canManage && (
                 <div className="flex justify-end pt-2">

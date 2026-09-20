@@ -5,6 +5,7 @@ import { Messenger } from './Messenger'
 import * as socialApi from '@/api/social'
 import { teamsApi } from '@/api/teams'
 import { useAuthStore } from '@/stores/authStore'
+import i18n from '@/i18n'
 
 vi.mock('@/api/social', () => ({
   getFriends: vi.fn(),
@@ -391,7 +392,7 @@ describe('Messenger Attachment Flow', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByPlaceholderText('Nachricht schreiben …')).toBeInTheDocument()
+      expect(screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder'))).toBeInTheDocument()
     })
 
     const fileInput = container.querySelector('input[type="file"][accept="image/*"]') as HTMLInputElement

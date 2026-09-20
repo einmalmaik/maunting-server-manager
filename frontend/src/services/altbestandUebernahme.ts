@@ -29,6 +29,11 @@ import {
   deleteLocalKeyPair,
   getLocalKeyPair,
 } from './e2eeCrypto'
+// Steuerpakete sind keine Nachrichten. Die Liste stand hier bis 09/2026 ein
+// zweites Mal und lief auseinander, sobald der Messenger eine Paketart
+// dazubekam: jedes unbekannte Paket landete beim Umzug als leere Zeile im
+// Verlauf.
+import { STEUERTYPEN } from './nachrichtBezug'
 import {
   loadLocalMessages,
   mischeVerlauf,
@@ -43,16 +48,6 @@ const FLAGGE = 'msm_altbestand_v1_'
 /** So viele Nachrichten je Mailbox behält der lokale Speicher ohnehin. */
 const JE_MAILBOX = 200
 
-/**
- * Steuerpakete sind keine Nachrichten. Dieselbe Liste wie im Lesepfad des
- * Messengers — was dort übersprungen wird, darf hier nicht im Verlauf landen.
- */
-const STEUERTYPEN = new Set([
-  'read_receipt',
-  'delivery_receipt',
-  'edit_message',
-  'delete_message',
-])
 
 export interface UebernahmeErgebnis {
   /** Ob der Kontoschlüssel danach weg ist. */

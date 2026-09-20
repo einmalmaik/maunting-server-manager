@@ -10,6 +10,7 @@
  * - Bereits quittierte/gemeldete Vorfälle werden dedupliziert, um Spam zu verhindern.
  */
 import { useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
@@ -62,6 +63,7 @@ function saveSeenSet(storageKey: string, set: Set<string>) {
 }
 
 export function ServerIncidentNotifier() {
+  const { t } = useTranslation()
   const { user, isAuthenticated } = useAuthStore()
   const seenIncidentsRef = useRef<Set<string>>(loadSeenSet(SESSION_INCIDENTS_KEY))
   const seenRemindersRef = useRef<Set<string>>(loadSeenSet(SESSION_REMINDERS_KEY))
@@ -93,12 +95,12 @@ export function ServerIncidentNotifier() {
 
               // Push-Benachrichtigung (OS Windows / Android)
               void sendeGeraeteBenachrichtigung({
-                titel: `Server-Vorfall: ${inc.server_name}`,
-                text: `${inc.title} (${inc.type})`,
+                titel: t('notifications.incidentTitle', { server: inc.server_name }),
+                text: t('notifications.incidentText', { titel: inc.title, art: inc.type }),
               })
 
               // Pop-up Toast im Interface
-              toast.error(`⚠️ Vorfall auf ${inc.server_name}: ${inc.title}`)
+              toast.error(t('notifications.incidentToast', { server: inc.server_name, titel: inc.title }))
             }
           }
           if (updatedIncidents) {
@@ -117,12 +119,12 @@ export function ServerIncidentNotifier() {
 
               // Push-Benachrichtigung (OS Windows / Android)
               void sendeGeraeteBenachrichtigung({
-                titel: `Terminerinnerung (${rem.time_hint})`,
-                text: `${rem.title} am ${rem.start}`,
+                titel: t('notifications.reminderTitle', { wann: rem.time_hint }),
+                text: t('notifications.reminderText', { titel: rem.title, start: rem.start }),
               })
 
               // Pop-up Toast im Interface
-              toast.success(`📅 Terminerinnerung (${rem.time_hint}): ${rem.title}`)
+              toast.success(t('notifications.reminderToast', { wann: rem.time_hint, titel: rem.title }))
             }
           }
           if (updatedReminders) {
@@ -160,13 +162,13 @@ export function ServerIncidentNotifier() {
       const ce = e as CustomEvent<any>
       const detail = ce.detail
       if (detail?.type === 'friend_request_received') {
-        const senderName = detail.from_username || 'Ein Benutzer'
+        const senderName = detail.from_username || t('notifications.someUser')
         if (user.device_notifications !== false) {
           void sendeGeraeteBenachrichtigung({
-            titel: 'Neue Freundschaftsanfrage',
-            text: `${senderName} hat dir eine Freundschaftsanfrage gesendet.`,
+            titel: t('notifications.friendRequestTitle'),
+            text: t('notifications.friendRequestText', { name: senderName }),
           })
-          toast.success(`👋 Freundschaftsanfrage von ${senderName} erhalten`)
+          toast.success(t('notifications.friendRequestToast', { name: senderName }))
         }
       } else if (detail?.type === 'e2ee_blind_message') {
         const mid = detail.blind_mailbox_id
@@ -266,6 +268,22 @@ export function ServerIncidentNotifier() {
           return
         }
 
+        /**
+         * „Hier liegt etwas Neues" — und zwar **vor** der Stummschaltung.
+         *
+         * Die Erwähnungswache hing bis 20.09.2026 am Ungelesen-Zähler, und den
+         * überspringt der stumme Pfad gleich darunter. In einer stummen Gruppe
+         * erschien deshalb nicht einmal das @-Abzeichen, obwohl genau das der
+         * Sinn der Sache ist: kein Ton, aber sehen, dass man gemeint war.
+         *
+         * Das Ereignis nennt nur die Mailbox. Es trägt keinen Inhalt und löst
+         * keine Meldung aus; wer daran hängt, entscheidet selbst, ob er
+         * hinsieht.
+         */
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('msm:mailbox-neu', { detail: { mid } }))
+        }
+
         // 5. Stummschaltung und Blockierung prüfen
         if (store.isMuted(mid)) return
         if (meta.userId && store.isBlocked(meta.userId)) {
@@ -273,10 +291,10 @@ export function ServerIncidentNotifier() {
         }
 
         const senderOrChat = meta.name
-        const title = `Neue Nachricht: ${senderOrChat}`
+        const title = t('notifications.messageTitle', { name: senderOrChat })
         const text = meta.isGroup
-          ? `Neue Nachricht in Gruppe „${meta.name}“`
-          : `Du hast eine neue Nachricht von ${senderOrChat} erhalten.`
+          ? t('notifications.messageInGroup', { name: meta.name })
+          : t('notifications.messageFrom', { name: senderOrChat })
 
         // Ungelesen-Zähler im Store erhöhen
         store.incrementUnread(mid)
@@ -284,7 +302,11 @@ export function ServerIncidentNotifier() {
         // Nur akustisch signalisieren und benachrichtigen, wenn Gerätebenachrichtigung aktiv ist
         if (user?.device_notifications !== false) {
           playNotificationChime()
-          toast.success(meta.isGroup ? `💬 Neue Nachricht in „${meta.name}“` : `💬 Neue Nachricht von ${senderOrChat}`)
+          toast.success(
+            meta.isGroup
+              ? t('notifications.messageToastGroup', { name: meta.name })
+              : t('notifications.messageToastDirect', { name: senderOrChat }),
+          )
 
           // Background vs. Foreground Push: Bei aktiver WebSocket-Verbindung im Vordergrund
           // dürfen keine doppelten OS-Pushes getriggert werden!

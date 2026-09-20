@@ -7,6 +7,26 @@ import * as socialApi from '@/api/social'
 import { teamsApi } from '@/api/teams'
 import { useAuthStore } from '@/stores/authStore'
 
+/**
+ * Seit 09/2026 stehen die Aktionen eines Chats im Blattmenue, nicht mehr als
+ * Knopfreihe in der Kopfzeile: bei 375 px war dort Platz fuer drei Knoepfe,
+ * nicht fuer acht.
+ */
+async function oeffneChatMenue() {
+  fireEvent.click(await screen.findByLabelText(i18n.t('messenger.moreChatSettings')))
+}
+
+/**
+ * Dasselbe fuer eine einzelne Nachricht: Reagieren bis Loeschen steht im Menue.
+ * Jede Blase traegt den Knopf, deshalb die Stelle statt des Titels — ohne
+ * Angabe die letzte, also die zuletzt geschriebene Nachricht.
+ */
+function oeffneNachrichtenMenue(stelle = -1) {
+  const knoepfe = screen.getAllByLabelText(i18n.t('messenger.messageActions'))
+  fireEvent.click(knoepfe.at(stelle)!)
+}
+
+
 // Die Sprache festlegen: die Behauptungen unten prüfen deutsche Texte, und
 // ohne diese Zeile entscheidet navigator.language der Testumgebung.
 beforeAll(async () => {
@@ -451,7 +471,7 @@ describe('Messenger (Allround Chat)', () => {
       expect(screen.getByText('Nachrichten in diesem Chat sind Ende-zu-Ende verschlüsselt.')).toBeInTheDocument()
     })
 
-    expect(screen.getByPlaceholderText('Nachricht schreiben …')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder'))).toBeInTheDocument()
     // Open unified attachment menu
     fireEvent.click(screen.getByLabelText('Anhang hinzufügen'))
     expect(screen.getByLabelText('Foto anhängen')).toBeInTheDocument()
@@ -474,10 +494,10 @@ describe('Messenger (Allround Chat)', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByPlaceholderText('Nachricht schreiben …')).toBeInTheDocument()
+      expect(screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder'))).toBeInTheDocument()
     })
 
-    const input = screen.getByPlaceholderText('Nachricht schreiben …')
+    const input = screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder'))
     fireEvent.change(input, { target: { value: 'Hallo Teammate!' } })
 
     const sendBtn = screen.getByTitle('Senden')
@@ -530,9 +550,11 @@ describe('Messenger (Allround Chat)', () => {
     fireEvent.click(screen.getByText('Dev Community'))
 
     await waitFor(() => {
-      expect(screen.getByText('Einladen')).toBeInTheDocument()
-      expect(screen.getByPlaceholderText('Nachricht schreiben …')).toBeInTheDocument()
+      expect(screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder'))).toBeInTheDocument()
     })
+
+    await oeffneChatMenue()
+    expect(screen.getByText(i18n.t('messenger.copyInvite'))).toBeInTheDocument()
   })
 
   it('erlaubt das Erstellen einer neuen Gruppe über den Dialog', async () => {
@@ -596,7 +618,7 @@ describe('Messenger (Allround Chat)', () => {
     })
 
     // Typing text replaces Mic button with Send button
-    const input = screen.getByPlaceholderText('Nachricht schreiben …')
+    const input = screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder'))
     fireEvent.change(input, { target: { value: 'Hey!' } })
 
     expect(screen.queryByLabelText('Sprachnachricht aufnehmen')).not.toBeInTheDocument()
@@ -713,11 +735,8 @@ describe('Messenger (Allround Chat)', () => {
 
     fireEvent.click(screen.getByText('Delete Me Clan'))
 
-    await waitFor(() => {
-      expect(screen.getByLabelText('Gruppe löschen')).toBeInTheDocument()
-    })
-
-    fireEvent.click(screen.getByLabelText('Gruppe löschen'))
+    await oeffneChatMenue()
+    fireEvent.click(screen.getByText(i18n.t('messenger.deleteGroup')))
 
     await waitFor(() => {
       expect(screen.getByText('Endgültig löschen')).toBeInTheDocument()
@@ -756,11 +775,8 @@ describe('Messenger (Allround Chat)', () => {
 
     fireEvent.click(screen.getByText('Admin Tribe'))
 
-    await waitFor(() => {
-      expect(screen.getByLabelText('Gruppenrollen & Rechte verwalten')).toBeInTheDocument()
-    })
-
-    fireEvent.click(screen.getByLabelText('Gruppenrollen & Rechte verwalten'))
+    await oeffneChatMenue()
+    fireEvent.click(screen.getByText(i18n.t('messenger.manageGroupRoles')))
 
     await waitFor(() => {
       expect(screen.getByText('Gruppen-Rollen & Rechte')).toBeInTheDocument()
@@ -847,11 +863,11 @@ describe('Messenger (Allround Chat)', () => {
     fireEvent.click(screen.getByRole('button', { name: /bob_public/i }))
 
     await waitFor(() => {
-      expect(screen.getByText('Anfrage senden')).toBeInTheDocument()
+      expect(screen.getByLabelText(i18n.t('messenger.sendFriendRequest'))).toBeInTheDocument()
     })
 
     // Send friend request
-    fireEvent.click(screen.getByText('Anfrage senden'))
+    fireEvent.click(screen.getByLabelText(i18n.t('messenger.sendFriendRequest')))
     expect(socialApi.sendFriendRequest).toHaveBeenCalledWith('bob_public')
   })
 
@@ -963,14 +979,15 @@ describe('Messenger (Allround Chat)', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByTitle('Vom Gesprächspartner gelesen')).toBeInTheDocument()
+      expect(screen.getByTitle(i18n.t('messenger.stateRead'))).toBeInTheDocument()
     })
 
     // 3. Test Editing Message
-    const editBtn = screen.getByTitle('Nachricht bearbeiten')
-    fireEvent.click(editBtn)
+    // Die eigene Nachricht steht als erste im Verlauf; nur sie kennt Bearbeiten.
+    oeffneNachrichtenMenue(0)
+    fireEvent.click(screen.getByText(i18n.t('common.edit')))
 
-    expect(screen.getByText('Nachricht bearbeiten')).toBeInTheDocument()
+    expect(screen.getByText(i18n.t('messenger.editMessage'))).toBeInTheDocument()
     const input = screen.getByPlaceholderText('Nachricht bearbeiten …')
     fireEvent.change(input, { target: { value: 'Meine korrigierte Nachricht' } })
 
@@ -986,8 +1003,8 @@ describe('Messenger (Allround Chat)', () => {
     })
 
     // 4. Test Deleting Message with Opferschutz / Beweissicherung
-    const deleteBtn = screen.getByTitle('Nachricht für alle löschen')
-    fireEvent.click(deleteBtn)
+    oeffneNachrichtenMenue(0)
+    fireEvent.click(screen.getByText(i18n.t('messenger.deleteForAllShort')))
 
     await waitFor(() => {
       expect(socialApi.relayE2eeEnvelope).toHaveBeenCalledWith(
@@ -1245,10 +1262,10 @@ describe('Messenger (Allround Chat)', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByPlaceholderText('Nachricht schreiben …')).toBeInTheDocument()
+      expect(screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder'))).toBeInTheDocument()
     })
 
-    fireEvent.change(screen.getByPlaceholderText('Nachricht schreiben …'), {
+    fireEvent.change(screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder')), {
       target: { value: 'Geht nicht raus' },
     })
     fireEvent.click(screen.getByTitle('Senden'))
@@ -1260,7 +1277,8 @@ describe('Messenger (Allround Chat)', () => {
     })
     const basisUuid = warteschlange[1].payload.client_uuid.split('#')[0]
 
-    fireEvent.click(screen.getByTitle('Nachricht für alle löschen'))
+    oeffneNachrichtenMenue()
+    fireEvent.click(screen.getByText(i18n.t('messenger.deleteForAllShort')))
 
     await waitFor(() => {
       expect(entferneLokaleNachricht).toHaveBeenCalledWith(
@@ -1405,16 +1423,13 @@ describe('Messenger (Allround Chat)', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: /charlie(?!_)/i }))
 
-    // Wallpaper button in chat header
-    await waitFor(() => {
-      expect(screen.getByLabelText('Chat-Hintergrund anpassen')).toBeInTheDocument()
-    })
-
-    fireEvent.click(screen.getByLabelText('Chat-Hintergrund anpassen'))
+    // Der Hintergrund steht heute im Blattmenue, nicht in der Kopfzeile.
+    await oeffneChatMenue()
+    fireEvent.click(screen.getByText(i18n.t('social.wallpaper.title')))
 
     // Modal opens
     await waitFor(() => {
-      expect(screen.getByText('Chat-Hintergrund anpassen')).toBeInTheDocument()
+      expect(screen.getByText(i18n.t('social.wallpaper.title'))).toBeInTheDocument()
       expect(screen.getByText('Cyber Grid')).toBeInTheDocument()
       expect(screen.getByText('Deep Petrol')).toBeInTheDocument()
       expect(screen.getByText('Mitternacht')).toBeInTheDocument()
@@ -1488,7 +1503,7 @@ describe('Messenger (Allround Chat)', () => {
     })
 
     // Typing sends typing signal
-    const input = screen.getByPlaceholderText('Nachricht schreiben …')
+    const input = screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder'))
     fireEvent.change(input, { target: { value: 'Ich schreibe gerade' } })
 
     await waitFor(() => {
@@ -1537,7 +1552,7 @@ describe('Messenger (Allround Chat)', () => {
       expect(screen.getByText('Nachrichten in diesem Chat sind Ende-zu-Ende verschlüsselt.')).toBeInTheDocument()
     })
 
-    const input = screen.getByPlaceholderText('Nachricht schreiben …')
+    const input = screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder'))
     fireEvent.change(input, { target: { value: 'Nachricht aus Tauri' } })
 
     // Typing signal uses actual userId (205), not friendship id (99)
@@ -1642,7 +1657,7 @@ describe('Messenger (Allround Chat)', () => {
     await waitFor(() => {
       expect(screen.getByText('Nachricht aus Tauri auf Web lesbar')).toBeInTheDocument()
       expect(screen.getByText('Nachricht aus Web auf Tauri lesbar')).toBeInTheDocument()
-      expect(screen.getByText('Verschlüsselte Nachricht')).toBeInTheDocument()
+      expect(screen.getByText(i18n.t('messenger.encryptedMessage'))).toBeInTheDocument()
     })
   })
 
@@ -1937,7 +1952,7 @@ describe('Messenger (Allround Chat)', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByTitle('Vom Gesprächspartner gelesen')).toBeInTheDocument()
+      expect(screen.getByTitle(i18n.t('messenger.stateRead'))).toBeInTheDocument()
     })
   })
 
@@ -1954,7 +1969,7 @@ describe('Messenger (Allround Chat)', () => {
       </MemoryRouter>
     )
 
-    const input = await screen.findByPlaceholderText('Nachricht schreiben …')
+    const input = await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
     fireEvent.change(input, { target: { value: 'Sofortige optimistische Nachricht' } })
 
     const sendButton = screen.getByTitle('Senden')
@@ -1976,7 +1991,7 @@ describe('Messenger (Allround Chat)', () => {
       </MemoryRouter>
     )
 
-    const input = await screen.findByPlaceholderText('Nachricht schreiben …')
+    const input = await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
     vi.mocked(socialApi.relayE2eeEnvelope).mockResolvedValue({ success: true, id: 1001 } as any)
 
     fireEvent.change(input, { target: { value: 'Nachricht vor Wechsel' } })

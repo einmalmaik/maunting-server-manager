@@ -7,6 +7,7 @@ import * as socialApi from '@/api/social'
 import { teamsApi } from '@/api/teams'
 import { useAuthStore } from '@/stores/authStore'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
+import i18n from '@/i18n'
 import {
   deriveBlindMailboxId,
   encryptE2eeHybrid,
@@ -290,9 +291,9 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
   const bobId = 102
   const charlieId = 103
 
-  const singleTickTitle = 'Nicht zugestellt (noch nicht beim Empfänger angekommen)'
-  const doubleGrayTickTitle = 'Zugestellt / Vom Gesprächspartner empfangen'
-  const doubleBlueTickTitle = 'Gelesen vom Gesprächspartner'
+  const singleTickTitle = i18n.t('messenger.stateUndelivered')
+  const doubleGrayTickTitle = i18n.t('messenger.stateDelivered')
+  const doubleBlueTickTitle = i18n.t('messenger.stateRead')
 
   afterEach(() => {
     cleanup()
@@ -400,7 +401,7 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
         expect(screen.getAllByText('alice').length).toBeGreaterThan(0)
       })
 
-      const input = await screen.findByPlaceholderText('Nachricht schreiben …')
+      const input = await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
 
       // Send Message 1 (will get ID 2)
       fireEvent.change(input, { target: { value: 'Rapid Message 1' } })
@@ -585,7 +586,7 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
         expect(screen.getAllByText('alice').length).toBeGreaterThan(0)
       })
 
-      const input = await screen.findByPlaceholderText('Nachricht schreiben …')
+      const input = await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
       fireEvent.change(input, { target: { value: 'In-Flight Message' } })
       const sendBtn = screen.getByTitle('Senden')
 
@@ -724,7 +725,7 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
         created_at: new Date().toISOString(),
       })
 
-      const input = await screen.findByPlaceholderText('Nachricht schreiben …')
+      const input = await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
       fireEvent.change(input, { target: { value: 'Hello Bob low ID' } })
       const sendBtn = screen.getByTitle('Senden')
       fireEvent.click(sendBtn)
@@ -993,7 +994,7 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
       })
 
       // 4. Zero instances of "Verschlüsselte Nachricht" placeholder spam
-      expect(screen.queryByText(/Verschlüsselte Nachricht/i)).not.toBeInTheDocument()
+      expect(screen.queryByText(i18n.t('messenger.encryptedMessage'))).not.toBeInTheDocument()
     }, 30_000)
   })
 

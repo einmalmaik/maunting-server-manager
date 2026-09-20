@@ -1,5 +1,6 @@
 import os
 import re
+import time
 from datetime import datetime, timedelta, timezone
 import logging
 
@@ -12,7 +13,7 @@ from middleware.rate_limit import auth_rate_limit
 # Nur noch das Loeschen der Cookies passiert hier direkt. Das Setzen laeuft
 # ausnahmslos ueber `issue_session`, damit kein Ausstellungsort die dort
 # zugesicherte `jti` erneut vergessen kann.
-from cookies import _clear_auth_cookies
+from cookies import _clear_auth_cookies, _set_auth_cookies
 from database import get_db
 from dependencies import (
     get_current_user,
@@ -22,7 +23,7 @@ from dependencies import (
     _bearer_token,
     session_familie,
 )
-from models import User, EmailVerification
+from models import User, EmailVerification, RefreshToken
 from services.dis_client import DisClient
 from schemas import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest, DeleteAccountRequest, NativeRefreshRequest, LogoutRequest
 from schemas import ResendVerificationRequest
@@ -635,6 +636,17 @@ def logout(
     return {"message": "Abgemeldet"}
 
 
+_recent_rotations: dict[str, dict] = {}
+
+
+def _remember_rotation(token_hash: str, tokens: SessionTokens) -> None:
+    now = time.time()
+    abgelaufen = [h for h, dat in _recent_rotations.items() if now - dat["timestamp"] > 120]
+    for h in abgelaufen:
+        _recent_rotations.pop(h, None)
+    _recent_rotations[token_hash] = {"timestamp": now, "tokens": tokens}
+
+
 @router.post("/refresh")
 def refresh(
     request: Request,
@@ -653,15 +665,32 @@ def refresh(
     refresh_value = body_token or request.cookies.get("__Secure-refresh_token")
     if not refresh_value:
         raise HTTPException(status_code=401, detail="Kein Refresh-Token")
+
+    token_hash = AuthService._hash_token(refresh_value)
+
     rt = AuthService.validate_refresh_token(db, refresh_value)
     if not rt:
         recent_rt = AuthService.find_recently_used_refresh_token(db, refresh_value, max_age_seconds=30)
-        if recent_rt and (not body_token or recent_rt.geraet == "desktop"):
+        if recent_rt and (not body_token or recent_rt.geraet == "desktop" or device_pairing_service.ist_gekoppelt(db, recent_rt.family)):
             user = AuthService.get_user_by_id(db, recent_rt.user_id)
             if user and user.is_active:
                 family = recent_rt.family
                 device_pairing_service.aktivitaet_vermerken(family)
-                tokens = issue_session(response, db, user, family=family, geraet=recent_rt.geraet)
+                cached = _recent_rotations.get(token_hash)
+                if cached:
+                    tokens = cached["tokens"]
+                else:
+                    # Verwaiste unbenutzte Tokens in dieser Familie invalidieren, um Verzweigungen zu verhindern
+                    db.query(RefreshToken).filter(
+                        RefreshToken.family == family,
+                        RefreshToken.used_at.is_(None),
+                        RefreshToken.revoked_at.is_(None),
+                    ).update({"revoked_at": datetime.now(timezone.utc)})
+                    db.commit()
+                    tokens = issue_session(response, db, user, family=family, geraet=recent_rt.geraet)
+                    _remember_rotation(token_hash, tokens)
+
+                _set_auth_cookies(response, tokens.access_token, tokens.refresh_token, tokens.csrf_token)
                 if body_token:
                     return _native_token_body(tokens)
                 return {"message": "Token refreshed"}
@@ -673,6 +702,7 @@ def refresh(
             AuthService.revoke_refresh_family(db, used_rt.user_id, used_rt.family)
 
         raise HTTPException(status_code=401, detail="Ungültiges Refresh-Token")
+
     family = rt.family
     device_pairing_service.aktivitaet_vermerken(family)
     AuthService.mark_refresh_token_used(db, rt)
@@ -689,6 +719,7 @@ def refresh(
     # Erneuern eine gewoehnliche Panel-Sitzung und verloere die Werkzeuge fuer
     # den Rechner des Benutzers.
     tokens = issue_session(response, db, user, family=family, geraet=rt.geraet)
+    _remember_rotation(token_hash, tokens)
     if body_token:
         return _native_token_body(tokens)
     return {"message": "Token refreshed"}

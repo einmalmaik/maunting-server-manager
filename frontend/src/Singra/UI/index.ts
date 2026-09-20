@@ -32,6 +32,7 @@ export {
   type DialogProps,
   type DialogContentProps,
 } from './Dialog'
+export { Blattmenue, Blatteintrag, type BlattmenueProps } from './Blattmenue'
 export {
   ChatInputBar,
   type ChatInputBarProps,

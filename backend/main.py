@@ -527,22 +527,39 @@ async def lifespan(app: FastAPI):
             )
 
     # Managed PostgreSQL: on local node agent only (Phase 7 — no panel psycopg2).
+    # Wird in Produktion im Hintergrund ausgefuehrt, damit Port 8000 sofort oeffnet
+    # und der Backend-Neustart nicht auf Docker-Netzwerke oder Container des Agenten wartet.
     if settings.local_agent_enabled:
-        try:
-            from database import SessionLocal
-            from services.postgres_service import ensure_internal_postgres
-
-            _pg_db = SessionLocal()
+        if is_testing:
             try:
-                ensure_internal_postgres(_pg_db)
-            finally:
-                _pg_db.close()
-        except Exception as exc:
-            import logging
+                from database import SessionLocal
+                from services.postgres_service import ensure_internal_postgres
 
-            logging.getLogger(__name__).warning(
-                "Managed-PostgreSQL beim Panel-Start nicht bereit: %s", exc,
-            )
+                with SessionLocal() as _pg_db:
+                    ensure_internal_postgres(_pg_db)
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Managed-PostgreSQL beim Panel-Start nicht bereit: %s", exc,
+                )
+        else:
+            async def _bg_ensure_postgres():
+                try:
+                    from database import SessionLocal
+                    from services.postgres_service import ensure_internal_postgres
+
+                    def _run():
+                        with SessionLocal() as _pg_db:
+                            ensure_internal_postgres(_pg_db)
+
+                    await _asyncio.to_thread(_run)
+                except Exception as exc:
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "Managed-PostgreSQL beim Panel-Start nicht bereit: %s", exc,
+                    )
+
+            _asyncio.create_task(_bg_ensure_postgres())
 
     # Initialize scheduler and load existing schedules
     start_scheduler()
@@ -670,6 +687,15 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     #
+    # Aktive SSE- und WebSocket-Verbindungen geordnet trennen, damit
+    # Uvicorn den Shutdown ohne blockierende Verbindungen vollziehen kann.
+    try:
+        from services.sync_event_service import SyncEventService
+        SyncEventService.close_all()
+    except Exception as _exc:
+        import logging
+        logging.getLogger(__name__).debug("SyncEventService.close_all bei Shutdown: %s", _exc)
+
     # Der Modellkatalog zuerst, und zwar **vor** den Clients: eine noch laufende
     # Auffrischung benutzt `ai_http_client`. Wird der geschlossen, waehrend sie
     # laeuft, endet sie in einem RuntimeError auf einem geschlossenen Client —

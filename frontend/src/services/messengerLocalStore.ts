@@ -61,6 +61,26 @@ export interface LocalStoredMessage {
   videoNoteAttachment?: any
   videoUrl?: string
   status?: 'queued' | 'sent' | 'delivered' | 'read'
+
+  /**
+   * Wirkungen, die aus Steuerumschlägen kommen und deshalb **hier** landen
+   * müssen, nicht nur im Umschlag.
+   *
+   * Die Mailbox gibt die letzten hundert Umschläge her. Eine Reaktion, die
+   * nur dort lebt, verschwindet, sobald hundert neue darüber gelaufen sind —
+   * die Nachricht bliebe stehen, die Reaktion wäre weg. Näheres in
+   * `nachrichtBezug.ts`. Alle Felder gehen durch dieselbe Versiegelung wie
+   * der Text; `NACHRICHT_KLARFELDER` bleibt unverändert.
+   */
+  reaktionen?: Record<string, number[]>
+  antwortAuf?: { clientUuid: string; absenderId: number; absenderName?: string; auszug: string }
+  erwaehnungen?: number[]
+  erwaehntAlle?: boolean
+  weitergeleitet?: boolean
+  /** Sternchen. Rein lokal — welche Nachricht mir wichtig ist, geht niemanden an. */
+  istMarkiert?: boolean
+  /** Ab wann diese Zeile von selbst verschwindet (ISO). */
+  verfaelltAm?: string
 }
 
 export interface LocalMailboxMeta {
@@ -70,10 +90,11 @@ export interface LocalMailboxMeta {
 }
 
 const DB_NAME = 'msm_messenger_local'
-const DB_VERSION = 2
+const DB_VERSION = 3
 const STORE_MESSAGES = 'messages'
 const STORE_MAILBOXES = 'mailboxes'
 const STORE_KLARTEXTE = 'envelope_plaintexts'
+const STORE_ENTWUERFE = 'entwuerfe'
 
 /**
  * Die Felder einer Nachricht, die im Klartext liegen bleiben müssen.
@@ -164,6 +185,15 @@ function openLocalDatabase(): Promise<IDBDatabase> {
       // Browsersitzung, in der sie ankam.
       if (!db.objectStoreNames.contains(STORE_KLARTEXTE)) {
         db.createObjectStore(STORE_KLARTEXTE, { keyPath: ['blindMailboxId', 'envelopeId'] })
+      }
+      // Version 3: ungesendete Entwürfe.
+      //
+      // Ein Entwurf ist Klartext, den noch niemand gesehen hat — das
+      // Empfindlichste, was der Messenger hält. Er gehört deshalb hierher und
+      // nicht in den localStorage neben die Stummschaltungen: hier greift
+      // dieselbe Versiegelung wie beim Verlauf.
+      if (!db.objectStoreNames.contains(STORE_ENTWUERFE)) {
+        db.createObjectStore(STORE_ENTWUERFE, { keyPath: 'blindMailboxId' })
       }
     }
 
@@ -273,6 +303,89 @@ export async function speichereUmschlagKlartext(
     tx.onerror = () => reject(tx.error)
     tx.onabort = () => reject(tx.error)
   })
+}
+
+/** Bindet einen Entwurf an seinen Chat. */
+function entwurfAad(blindMailboxId: string): string {
+  return `msm-entwurf:${blindMailboxId}`
+}
+
+/**
+ * Legt den ungesendeten Text eines Chats ab — versiegelt wie alles andere.
+ *
+ * Ein leerer Entwurf wird gelöscht statt leer gespeichert: eine Zeile, die nur
+ * sagt „hier wurde mal etwas getippt und wieder verworfen", ist ein Hinweis,
+ * den niemand braucht.
+ */
+export async function speichereEntwurf(blindMailboxId: string, text: string): Promise<void> {
+  if (!blindMailboxId) return
+  const db = await openLocalDatabase()
+  if (!text.trim()) {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_ENTWUERFE, 'readwrite')
+      tx.objectStore(STORE_ENTWUERFE).delete(blindMailboxId)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+      tx.onabort = () => reject(tx.error)
+    })
+    return
+  }
+  const zeile = await versiegleZeile(
+    { blindMailboxId, text, gespeichertAm: new Date().toISOString() },
+    ['blindMailboxId'],
+    entwurfAad(blindMailboxId),
+  )
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_ENTWUERFE, 'readwrite')
+    tx.objectStore(STORE_ENTWUERFE).put(zeile)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error)
+  })
+}
+
+/** Holt den Entwurf eines Chats. Leerer String heißt „keiner". */
+export async function ladeEntwurf(blindMailboxId: string): Promise<string> {
+  if (!blindMailboxId) return ''
+  const db = await openLocalDatabase()
+  const roh = await new Promise<any>((resolve, reject) => {
+    const tx = db.transaction(STORE_ENTWUERFE, 'readonly')
+    const req = tx.objectStore(STORE_ENTWUERFE).get(blindMailboxId)
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+  if (!roh) return ''
+  try {
+    const offen = await entsiegleZeile(roh, entwurfAad(blindMailboxId))
+    return typeof offen?.text === 'string' ? offen.text : ''
+  } catch {
+    // Gesperrt oder mit einem anderen Schlüssel abgelegt. Ein unlesbarer
+    // Entwurf ist kein Fehler, er ist eben keiner.
+    return ''
+  }
+}
+
+/** Alle Chats mit Entwurf, für die Vorschau in der Liste. */
+export async function ladeAlleEntwuerfe(): Promise<Record<string, string>> {
+  const db = await openLocalDatabase()
+  const rohe = await new Promise<any[]>((resolve, reject) => {
+    const tx = db.transaction(STORE_ENTWUERFE, 'readonly')
+    const req = tx.objectStore(STORE_ENTWUERFE).getAll()
+    req.onsuccess = () => resolve(req.result || [])
+    req.onerror = () => reject(req.error)
+  })
+  const ergebnis: Record<string, string> = {}
+  for (const roh of rohe) {
+    const mid = roh?.blindMailboxId
+    if (!mid) continue
+    try {
+      const offen = await entsiegleZeile(roh, entwurfAad(mid))
+      if (typeof offen?.text === 'string' && offen.text.trim()) ergebnis[mid] = offen.text
+    } catch {
+      // siehe `ladeEntwurf`
+    }
+  }
+  return ergebnis
 }
 
 /**

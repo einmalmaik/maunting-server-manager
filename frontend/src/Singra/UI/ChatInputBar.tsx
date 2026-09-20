@@ -11,6 +11,14 @@ export interface ChatInputBarProps {
   minHeight?: number
   leftActions?: React.ReactNode
   rightActions?: React.ReactNode
+  /**
+   * Was über dem Eingabefeld steht: ein Zitatkopf beim Antworten, die
+   * Vorschlagsliste beim Tippen von `@`, ein Entwurfshinweis.
+   *
+   * **Über** dem Feld und nicht darunter, weil darunter am Telefon die
+   * Tastatur ist. Was dort läge, sähe niemand, der gerade schreibt.
+   */
+  topSlot?: React.ReactNode
   className?: string
   textareaClassName?: string
   onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void
@@ -42,6 +50,7 @@ export const ChatInputBar = forwardRef<ChatInputBarRef, ChatInputBarProps>(
       minHeight = 36,
       leftActions,
       rightActions,
+      topSlot,
       className = '',
       textareaClassName = '',
       onKeyDown,
@@ -86,10 +95,12 @@ export const ChatInputBar = forwardRef<ChatInputBarRef, ChatInputBarProps>(
 
     return (
       <div
-        className={`flex items-end gap-2 rounded-2xl border border-outline-variant/50 bg-surface-container-low p-2 transition-all focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20 ${
+        className={`rounded-2xl border border-outline-variant/50 bg-surface-container-low transition-all focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20 ${
           disabled ? 'opacity-60 pointer-events-none' : ''
         } ${className}`}
       >
+        {topSlot}
+        <div className="flex items-end gap-2 p-2">
         {leftActions && (
           <div className="flex items-center gap-1 shrink-0">
             {leftActions}
@@ -115,6 +126,7 @@ export const ChatInputBar = forwardRef<ChatInputBarRef, ChatInputBarProps>(
             {rightActions}
           </div>
         )}
+        </div>
       </div>
     )
   }

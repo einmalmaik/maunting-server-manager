@@ -410,6 +410,12 @@ class ChatGroupMemberResponse(BaseModel):
     avatar_url: str | None = None
     role: str
     permissions: str | None = None
+    # Der Server liest den Inhalt einer Nachricht nicht und kann deshalb nicht
+    # pruefen, ob jemand ``@everyone`` geschrieben hat. Das entscheidet der
+    # empfangende Client — mit der Rechtelage des **Absenders**. Darum haengen
+    # diese beiden Marken am Mitglied und nicht nur an der Gruppe.
+    can_mention_everyone: bool = False
+    can_pin_messages: bool = False
     joined_at: datetime
 
 
@@ -439,6 +445,10 @@ class ChatGroupResponse(BaseModel):
     can_share_screen: bool = False
     can_mute_others: bool = False
     can_kick_from_call: bool = False
+    # Ob ich selbst die Auswahl angeboten bekomme. Bequemlichkeit, keine
+    # Schranke: die sitzt beim Empfaenger.
+    can_mention_everyone: bool = False
+    can_pin_messages: bool = False
     created_at: datetime
     members: list[ChatGroupMemberResponse] = []
     room_token: str | None = None

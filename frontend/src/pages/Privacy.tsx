@@ -59,11 +59,17 @@ export function Privacy() {
           t('privacyPolicy.sections.messenger.items.devicePin'),
           t('privacyPolicy.sections.messenger.items.ratchet'),
           t('privacyPolicy.sections.messenger.items.groups'),
+          // Wer alle wecken darf, entscheidet das empfangende Geraet. Der
+          // Server kann es nicht: er liest den Inhalt nicht.
+          t('privacyPolicy.sections.messenger.items.mentions'),
           t('privacyPolicy.sections.messenger.items.attachments'),
           // Was beim Loeschen wirklich passiert. Steht hier, weil die Antwort
           // frueher "nichts" war: die Zeile verschwand aus der Anzeige, der
           // Umschlag blieb im Postfach und der Anhang auf der Platte.
           t('privacyPolicy.sections.messenger.items.deletion'),
+          // Verschwindende Nachrichten samt der Grenze: beim Server loeschen
+          // kann nur, wer hochgeladen hat.
+          t('privacyPolicy.sections.messenger.items.retention'),
           t('privacyPolicy.sections.messenger.items.receipts'),
           // Anrufe sind die eine Stelle, an der die Instanz mehr erfaehrt als
           // bei Nachrichten: der Inhalt bleibt verschluesselt, aber wer wann

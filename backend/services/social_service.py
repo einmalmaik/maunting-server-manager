@@ -43,6 +43,8 @@ GROUP_PERMISSIONS: frozenset[str] = frozenset(
         "kick_members",
         "delete_messages",
         "manage_roles",
+        "mention_everyone",
+        "pin_messages",
     }
 )
 
@@ -55,6 +57,18 @@ GROUP_CALL_PERMISSIONS: frozenset[str] = frozenset(
         "share_screen",
         "mute_in_calls",
         "kick_from_calls",
+    }
+)
+
+#: Rechte, die in die laufende Unterhaltung eingreifen: alle auf einmal wecken
+#: und eine Nachricht über den Verlauf heften. Dieselbe Begründung wie bei den
+#: Anrufrechten — wer die Rollen verwaltet, kann sie sich ohnehin selbst
+#: eintragen, und ein Eigentümer, der seine eigene Gruppe nicht erreichen darf,
+#: wäre kein Schutz, sondern ein Rätsel.
+GROUP_MODERATION_PERMISSIONS: frozenset[str] = frozenset(
+    {
+        "mention_everyone",
+        "pin_messages",
     }
 )
 
@@ -1562,22 +1576,47 @@ class SocialService:
         return gesetzt
 
     @classmethod
+    def effective_permissions(
+        cls, member_permissions: str | None, group_default: str | None, role: str
+    ) -> set[str]:
+        """Was ein Mitglied tatsächlich darf — ohne Datenbank, ohne Seiteneffekt.
+
+        Die eine Stelle, an der die Regel steht. ``has_group_permission``
+        entscheidet damit den einzelnen Zugriff, ``list_user_groups`` rechnet
+        damit die Marken für die Oberfläche aus. Ohne diese Funktion liefe
+        beides auseinander, und genau dann zeigt die Oberfläche einen Knopf, den
+        das Backend danach mit 403 beantwortet.
+
+        ``member_permissions is None`` heißt „kein eigener Eintrag", und dann
+        gilt die Vorgabe der Gruppe. Ein leerer String heißt dagegen
+        „ausdrücklich nichts" und bleibt leer.
+
+        Eigentümer und Administratoren bekommen die Anruf- und
+        Moderationsrechte pauschal: sie verwalten die Rollen und könnten sie
+        sich mit zwei Klicks selbst eintragen. Beim Beitreten ist das Absicht —
+        wer einen Raum öffnen darf, darf ihn betreten, sonst bekäme der
+        Startende einen Raum ohne Zutritt.
+        """
+        raw = member_permissions if member_permissions is not None else group_default
+        gesetzt = cls.expand_group_permissions(raw)
+        if role in ("owner", "admin"):
+            gesetzt |= GROUP_CALL_PERMISSIONS
+            gesetzt |= GROUP_MODERATION_PERMISSIONS
+        return gesetzt
+
+    @classmethod
     def has_group_permission(cls, db: Session, group_id: int, user_id: int, permission: str) -> bool:
         """Checks membership and effective group permission without mutating state."""
         member = cls.get_group_member(db, group_id, user_id)
         if not member:
             return False
-        # Owners/admins are trusted with calls; explicit permissions remain
-        # required for ordinary members. Joining is included on purpose: whoever
-        # may open a room may enter it, otherwise starting a group call would
-        # hand the starter a room they are refused a token for.
-        if permission in GROUP_CALL_PERMISSIONS and member.role in ("owner", "admin"):
-            return True
-        permissions = member.permissions
-        if permissions is None:
+        group_default: str | None = None
+        if member.permissions is None:
             group = db.query(ChatGroup).filter(ChatGroup.id == group_id).first()
-            permissions = group.default_permissions if group else None
-        return permission in cls.expand_group_permissions(permissions)
+            group_default = group.default_permissions if group else None
+        return permission in cls.effective_permissions(
+            member.permissions, group_default, member.role
+        )
 
     @classmethod
     def assert_known_permissions(cls, raw: str | None) -> str | None:
@@ -1669,8 +1708,17 @@ class SocialService:
             .all()
         )
 
+        default_by_group = {g.id: g.default_permissions for g in groups}
+
         members_by_group: dict[int, list[dict[str, Any]]] = {}
         for mem, uname, uavatar in all_members:
+            # Einmal ausgerechnet, zweimal gebraucht: fuer die Rechteliste und
+            # fuer die Marken darunter. ``effective_permissions`` ist dieselbe
+            # Funktion, die ``has_group_permission`` befragt — kein zweiter
+            # Regelsatz, der auseinanderlaufen koennte.
+            wirksam = cls.effective_permissions(
+                mem.permissions, default_by_group.get(mem.group_id), mem.role
+            )
             members_by_group.setdefault(mem.group_id, []).append({
                 "user_id": mem.user_id,
                 "username": uname,
@@ -1683,6 +1731,14 @@ class SocialService:
                     if mem.permissions is not None
                     else None
                 ),
+                # Der Server kann den Inhalt einer Nachricht nicht lesen und
+                # deshalb nicht pruefen, ob jemand ``@everyone`` geschrieben
+                # oder eine Nachricht angeheftet hat. Das entscheidet der
+                # **empfangende** Client — und er braucht dafuer die Rechtelage
+                # des *Absenders*, nicht seine eigene. Darum steht die Marke
+                # hier an jedem Mitglied und nicht nur an der Gruppe.
+                "can_mention_everyone": "mention_everyone" in wirksam,
+                "can_pin_messages": "pin_messages" in wirksam,
                 "joined_at": mem.joined_at,
             })
 
@@ -1722,6 +1778,13 @@ class SocialService:
                 "can_kick_from_call": cls.has_group_permission(
                     db, g.id, user_id, "kick_from_calls"
                 ),
+                # Ob **ich** den Knopf sehe. Die Schranke sitzt beim Empfaenger,
+                # das hier ist nur die Bequemlichkeit: eine Auswahl anzubieten,
+                # die beim Gegenueber folgenlos verpufft, waere irrefuehrend.
+                "can_mention_everyone": cls.has_group_permission(
+                    db, g.id, user_id, "mention_everyone"
+                ),
+                "can_pin_messages": cls.has_group_permission(db, g.id, user_id, "pin_messages"),
                 "created_at": g.created_at,
                 "members": mems,
                 "room_token": offener_raum,

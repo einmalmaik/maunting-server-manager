@@ -328,3 +328,22 @@ def test_personal_notes_privacy_isolation(db_session, test_user):
     assert q_admin.empty()
 
 
+def test_sync_event_service_close_all(test_user):
+    """Prüft, dass close_all ein shutdown-Event an alle offenen Verbindungen sendet und die Subscriber leert."""
+    conn1, q1 = SyncEventService.subscribe(user_id=test_user.id)
+    conn2, q2 = SyncEventService.subscribe(user_id=test_user.id)
+
+    SyncEventService.close_all()
+
+    # Beide Queues müssen das shutdown-Event erhalten haben
+    assert not q1.empty()
+    evt1 = q1.get_nowait()
+    assert evt1.get("type") == "shutdown"
+
+    assert not q2.empty()
+    evt2 = q2.get_nowait()
+    assert evt2.get("type") == "shutdown"
+
+
+
+

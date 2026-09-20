@@ -142,6 +142,7 @@ export interface Konversation {
   /** Die Umschläge für eine Nachricht, in Zustellreihenfolge. */
   baueVersand: (payload: string, clientUuid: string) => Promise<Versandauftrag[]>
   /** Dasselbe für ein Steuerpaket (Quittung, Bearbeiten, Löschen). */
+  /** Ein Steuerumschlag geht an die Geräte der Gegenseite, nie an die eigenen. */
   baueSteuerversand: (
     payload: string,
     clientUuid: string,
@@ -201,6 +202,67 @@ function useMailboxId(ziel: GespraechsZiel, eigeneId: number): string {
   }, [ziel.art, ziel.art === 'gruppe' ? ziel.groupId : ziel.art === 'direkt' ? ziel.peerId : 0, eigeneId])
 
   return mid
+}
+
+/**
+ * Baut die Umschläge für ein Ziel — ohne an das gerade offene Gespräch gebunden
+ * zu sein.
+ *
+ * Steht hier draußen, weil das Weiterleiten in einen **anderen** Chat schreibt
+ * als den offenen. Ein an den Hook gebundener Versand könnte das nicht: er
+ * kennt nur den Kontext, der gerade auf dem Bildschirm steht, und würde die
+ * weitergeleitete Nachricht still an das falsche Gespräch schicken.
+ *
+ * Der Hook ruft dieselbe Funktion mit seinem eigenen Kontext.
+ */
+export async function baueVersandFuer(
+  gruppenKontext: GruppenKontext | null,
+  drKontext: DrKontext | null,
+  blindMailboxId: string,
+  payload: string,
+  clientUuid: string,
+): Promise<Versandauftrag[]> {
+  const mid = blindMailboxId
+  if (!mid) throw new Error('Für dieses Gespräch steht noch keine Mailbox fest.')
+
+  if (gruppenKontext) {
+    // Der Gruppenschlüssel rotiert hier, falls sich die Mitgliedschaft
+    // geändert hat, und die Zustellung an alle Geräte läuft mit.
+    const umschlag = await verschluesseleFuerGruppe(gruppenKontext, payload)
+    return [{ blind_mailbox_id: mid, ciphertext_envelope: umschlag, client_uuid: clientUuid }]
+  }
+
+  if (drKontext) {
+    // Double Ratchet, je Empfängergerät und je eigenem Zweitgerät ein eigener
+    // Umschlag. Schlägt das fehl, geht die Nachricht nicht raus — früher fiel
+    // sie hier auf einen Schlüssel zurück, den das Backend aus den beiden
+    // Benutzerkennungen selbst bilden kann.
+    const zustellungen = await baueZustellungen(drKontext, payload, clientUuid)
+    const auftraege: Versandauftrag[] = []
+    for (const z of zustellungen) {
+      // Reihenfolge ist bindend: ohne den Aufbau findet die Gegenstelle keine
+      // Sitzung und läuft in den Sitzungsbruch.
+      if (z.bootstrap) {
+        auftraege.push({
+          blind_mailbox_id: mid,
+          ciphertext_envelope: z.bootstrap,
+          recipient_id: drKontext.peerId,
+          client_uuid: z.bootstrapClientUuid,
+          is_control: true,
+          control_type: 'dr-init',
+        })
+      }
+      auftraege.push({
+        blind_mailbox_id: mid,
+        ciphertext_envelope: z.nachricht,
+        recipient_id: drKontext.peerId,
+        client_uuid: z.clientUuid,
+      })
+    }
+    return auftraege
+  }
+
+  return []
 }
 
 export function useKonversation({
@@ -448,49 +510,8 @@ export function useKonversation({
   }, [einDurchlauf])
 
   const baueVersand = useCallback(
-    async (payload: string, clientUuid: string): Promise<Versandauftrag[]> => {
-      const mid = blindMailboxId
-      if (!mid) throw new Error('Für dieses Gespräch steht noch keine Mailbox fest.')
-
-      if (gruppenKontext) {
-        // Der Gruppenschlüssel rotiert hier, falls sich die Mitgliedschaft
-        // geändert hat, und die Zustellung an alle Geräte läuft mit.
-        const umschlag = await verschluesseleFuerGruppe(gruppenKontext, payload)
-        return [{ blind_mailbox_id: mid, ciphertext_envelope: umschlag, client_uuid: clientUuid }]
-      }
-
-      if (drKontext) {
-        // Double Ratchet, je Empfängergerät und je eigenem Zweitgerät ein
-        // eigener Umschlag. Schlägt das fehl, geht die Nachricht nicht raus —
-        // früher fiel sie hier auf einen Schlüssel zurück, den das Backend aus
-        // den beiden Benutzerkennungen selbst bilden kann.
-        const zustellungen = await baueZustellungen(drKontext, payload, clientUuid)
-        const auftraege: Versandauftrag[] = []
-        for (const z of zustellungen) {
-          // Reihenfolge ist bindend: ohne den Aufbau findet die Gegenstelle
-          // keine Sitzung und läuft in den Sitzungsbruch.
-          if (z.bootstrap) {
-            auftraege.push({
-              blind_mailbox_id: mid,
-              ciphertext_envelope: z.bootstrap,
-              recipient_id: drKontext.peerId,
-              client_uuid: z.bootstrapClientUuid,
-              is_control: true,
-              control_type: 'dr-init',
-            })
-          }
-          auftraege.push({
-            blind_mailbox_id: mid,
-            ciphertext_envelope: z.nachricht,
-            recipient_id: drKontext.peerId,
-            client_uuid: z.clientUuid,
-          })
-        }
-        return auftraege
-      }
-
-      return []
-    },
+    (payload: string, clientUuid: string): Promise<Versandauftrag[]> =>
+      baueVersandFuer(gruppenKontext, drKontext, blindMailboxId, payload, clientUuid),
     [blindMailboxId, gruppenKontext, drKontext],
   )
 
@@ -525,6 +546,13 @@ export function useKonversation({
       // kostet ein Häkchen, eine verbrauchte Kettenposition kostet eine
       // Nachricht. Versiegelt wird trotzdem je Gerät einzeln — ein Konto hat
       // keinen gemeinsamen privaten Schlüssel mehr.
+      // **Nur an die Gegenseite, und das ist eine Serverregel, keine Auslassung.**
+      // Ein Umschlag an das eigene Konto ist in einer Chat-Mailbox verboten
+      // (`relay_blind_envelope` antwortet 400, selbstadressiert gehört in die
+      // Geräte-Sync-Mailbox). Die eigenen übrigen Geräte erfahren von einer
+      // Wirkung also erst über den Gerätekanal — das gilt für Quittungen,
+      // Reaktionen und die Verfallsfrist gleichermaßen und wäre eine eigene
+      // Runde wert.
       const geraete = await verlangeGeraeteVon(drKontext.peerId)
       return Promise.all(
         geraete.map(async (geraet, i) => ({
