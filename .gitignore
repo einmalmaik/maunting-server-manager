@@ -105,6 +105,12 @@ docs/smart-system-notes.md
 GEMINI.md
 /smart-system/.idea
 
+# Android-Build-Ausgang der Smart-System-App. `tauri android build` kopiert das
+# fertige `frontend/dist` hierher, damit Gradle es einpacken kann: rund 1300
+# Dateien und 21 MB, die bei jedem Lauf neu entstehen. Der Rest von
+# `gen/android/` (Gradle-Dateien, Manifest, Ressourcen) bleibt versioniert.
+/smart-system/src-tauri/gen/android/app/src/main/assets/
+
 # AI Agent / Dev environment ignore
 .chrome-profile/
 local-plans/
