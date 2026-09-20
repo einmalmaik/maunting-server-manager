@@ -221,7 +221,7 @@ export function NodeEnrollmentDialog({
                 <Loader2 className="mx-auto h-5 w-5 animate-spin text-primary" aria-label={t('common.loading')} />
               ) : commandError ? (
                 <div className="flex w-full flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <p className="text-sm text-status-error">{commandError}</p>
+                  <p className="text-sm text-status-destructive">{commandError}</p>
                   <button
                     type="button"
                     className="msm-btn-secondary shrink-0 px-3 py-2 text-sm"
@@ -273,7 +273,7 @@ export function NodeEnrollmentDialog({
                   <Loader2 className="h-5 w-5 animate-spin text-primary" aria-label={t('common.loading')} />
                 </div>
               ) : pendingError ? (
-                <div className="p-4 text-sm text-status-error">{pendingError}</div>
+                <div className="p-4 text-sm text-status-destructive">{pendingError}</div>
               ) : pending.length === 0 ? (
                 <div className="p-5 text-center">
                   <p className="text-sm font-medium text-on-surface">{t('nodes.enrollment.pendingEmpty')}</p>

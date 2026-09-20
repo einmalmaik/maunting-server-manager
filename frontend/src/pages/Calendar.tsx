@@ -18,6 +18,7 @@ import {
   X,
 } from 'lucide-react'
 import { api } from '@/api/client'
+import { FARB_PALETTE, farbwahl } from '@/config/farbpalette'
 import { apiUrl } from '@/config/api'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
@@ -57,23 +58,9 @@ export interface CalendarEventItem {
 
 type ViewMode = 'month' | 'week' | 'day'
 
-const COLOR_PALETTE = [
-  { id: 'primary', label: 'Blau (Standard)', bg: 'bg-primary/20', text: 'text-primary', border: 'border-primary/40' },
-  { id: 'emerald', label: 'Grün', bg: 'bg-emerald-500/20', text: 'text-emerald-400', border: 'border-emerald-500/40' },
-  { id: 'amber', label: 'Gelb / Orange', bg: 'bg-amber-500/20', text: 'text-amber-400', border: 'border-amber-500/40' },
-  { id: 'rose', label: 'Rot / Rose', bg: 'bg-rose-500/20', text: 'text-rose-400', border: 'border-rose-500/40' },
-  { id: 'purple', label: 'Lila / Violett', bg: 'bg-purple-500/20', text: 'text-purple-400', border: 'border-purple-500/40' },
-  { id: 'cyan', label: 'Cyan', bg: 'bg-cyan-500/20', text: 'text-cyan-400', border: 'border-cyan-500/40' },
-]
-
-function getColorClass(colorId?: string) {
-  // Mapping von Backend-Farbnamen (blue -> primary, green -> emerald, etc.)
-  let normalizedId = colorId
-  if (colorId === 'blue') normalizedId = 'primary'
-  if (colorId === 'green') normalizedId = 'emerald'
-  const found = COLOR_PALETTE.find((c) => c.id === normalizedId)
-  return found || COLOR_PALETTE[0]
-}
+// Ein Server-Termin sieht im Filter aus wie im Kalender: beide nehmen den
+// Lila-Ton aus der Auswahlpalette, den `getDefaultColorForType` ihm ohnehin gibt.
+const SERVER_TON = farbwahl('purple')
 
 function getDefaultColorForType(type: EventCategoryType): string {
   switch (type) {
@@ -540,7 +527,7 @@ export function Calendar() {
       return (
         <span
           title={ev.team_name ? `Team: ${ev.team_name}` : 'Team-Termin'}
-          className={`inline-flex items-center gap-1 rounded font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 ${
+          className={`inline-flex items-center gap-1 rounded font-semibold bg-status-success/20 text-status-success border border-status-success/30 ${
             isCompact ? 'text-[9px] px-1 py-0.5' : 'text-[10px] px-1.5 py-0.5'
           }`}
         >
@@ -552,8 +539,8 @@ export function Calendar() {
     if (ev.event_type === 'server') {
       return (
         <span
-          title={ev.server_name ? `Server: ${ev.server_name}` : 'Server-Wartung'}
-          className={`inline-flex items-center gap-1 rounded font-semibold bg-purple-500/20 text-purple-400 border border-purple-500/30 ${
+          title={ev.server_name ? `Server: ${ev.server_name}` : t('calendar.filterServer')}
+          className={`inline-flex items-center gap-1 rounded font-semibold ${SERVER_TON.flaecheStark} ${SERVER_TON.text} border ${SERVER_TON.rand} ${
             isCompact ? 'text-[9px] px-1 py-0.5' : 'text-[10px] px-1.5 py-0.5'
           }`}
         >
@@ -566,7 +553,7 @@ export function Calendar() {
       return (
         <span
           title="Node / Infrastruktur"
-          className={`inline-flex items-center gap-1 rounded font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30 ${
+          className={`inline-flex items-center gap-1 rounded font-semibold bg-status-warning/20 text-status-warning border border-status-warning/30 ${
             isCompact ? 'text-[9px] px-1 py-0.5' : 'text-[10px] px-1.5 py-0.5'
           }`}
         >
@@ -642,11 +629,11 @@ export function Calendar() {
           onClick={() => setSelectedCategory('team')}
           className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
             selectedCategory === 'team'
-              ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/60 shadow-sm ring-1 ring-emerald-500/40'
+              ? 'bg-status-success/20 text-status-success border-status-success/60 shadow-sm ring-1 ring-status-success/40'
               : 'bg-surface-container/60 text-on-surface-variant border-outline-variant/40 hover:bg-surface-container hover:text-on-surface'
           }`}
         >
-          <Users className="w-3.5 h-3.5 text-emerald-400" />
+          <Users className="w-3.5 h-3.5 text-status-success" />
           <span>{t('calendar.filterTeam', 'Team')}</span>
           <span className="text-[10px] opacity-80 font-mono">
             ({events.filter((e) => e.event_type === 'team').length})
@@ -657,11 +644,11 @@ export function Calendar() {
           onClick={() => setSelectedCategory('server')}
           className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
             selectedCategory === 'server'
-              ? 'bg-purple-500/20 text-purple-400 border-purple-500/60 shadow-sm ring-1 ring-purple-500/40'
+              ? `${SERVER_TON.flaecheStark} ${SERVER_TON.text} ${SERVER_TON.rand} shadow-sm ring-1 ring-primary/40`
               : 'bg-surface-container/60 text-on-surface-variant border-outline-variant/40 hover:bg-surface-container hover:text-on-surface'
           }`}
         >
-          <Server className="w-3.5 h-3.5 text-purple-400" />
+          <Server className={`w-3.5 h-3.5 ${SERVER_TON.text}`} />
           <span>{t('calendar.filterServer', 'Server-Wartung')}</span>
           <span className="text-[10px] opacity-80 font-mono">
             ({events.filter((e) => e.event_type === 'server').length})
@@ -672,11 +659,11 @@ export function Calendar() {
           onClick={() => setSelectedCategory('node')}
           className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
             selectedCategory === 'node'
-              ? 'bg-amber-500/20 text-amber-400 border-amber-500/60 shadow-sm ring-1 ring-amber-500/40'
+              ? 'bg-status-warning/20 text-status-warning border-status-warning/60 shadow-sm ring-1 ring-status-warning/40'
               : 'bg-surface-container/60 text-on-surface-variant border-outline-variant/40 hover:bg-surface-container hover:text-on-surface'
           }`}
         >
-          <Network className="w-3.5 h-3.5 text-amber-400" />
+          <Network className="w-3.5 h-3.5 text-status-warning" />
           <span>{t('calendar.filterNode', 'Node')}</span>
           <span className="text-[10px] opacity-80 font-mono">
             ({events.filter((e) => e.event_type === 'node').length})
@@ -794,7 +781,7 @@ export function Calendar() {
                   {/* Event Chips */}
                   <div className="space-y-1 overflow-hidden">
                     {dayEvents.slice(0, 3).map((ev) => {
-                      const colorStyle = getColorClass(ev.color)
+                      const colorStyle = farbwahl(ev.color)
                       const timeStr = new Date(ev.start).toLocaleTimeString(locale, {
                         hour: '2-digit',
                         minute: '2-digit',
@@ -806,11 +793,11 @@ export function Calendar() {
                             e.stopPropagation()
                             openEditModal(ev)
                           }}
-                          className={`text-[11px] leading-tight px-1.5 py-0.5 rounded border truncate flex items-center gap-1 ${colorStyle.bg} ${colorStyle.text} ${colorStyle.border} hover:brightness-110`}
+                          className={`text-[11px] leading-tight px-1.5 py-0.5 rounded border truncate flex items-center gap-1 ${colorStyle.flaecheStark} ${colorStyle.text} ${colorStyle.rand} hover:brightness-110`}
                         >
-                          {ev.event_type === 'team' && <Users className="w-2.5 h-2.5 shrink-0 opacity-90 text-emerald-400" />}
-                          {ev.event_type === 'server' && <Server className="w-2.5 h-2.5 shrink-0 opacity-90 text-purple-400" />}
-                          {ev.event_type === 'node' && <Network className="w-2.5 h-2.5 shrink-0 opacity-90 text-amber-400" />}
+                          {ev.event_type === 'team' && <Users className="w-2.5 h-2.5 shrink-0 opacity-90 text-status-success" />}
+                          {ev.event_type === 'server' && <Server className={`w-2.5 h-2.5 shrink-0 opacity-90 ${SERVER_TON.text}`} />}
+                          {ev.event_type === 'node' && <Network className="w-2.5 h-2.5 shrink-0 opacity-90 text-status-warning" />}
                           <span className="font-semibold shrink-0">{timeStr}</span>
                           <span className="truncate">{ev.title}</span>
                         </div>
@@ -868,7 +855,7 @@ export function Calendar() {
                       </div>
                     ) : (
                       dayEvents.map((ev) => {
-                        const colorStyle = getColorClass(ev.color)
+                        const colorStyle = farbwahl(ev.color)
                         const startStr = new Date(ev.start).toLocaleTimeString(locale, {
                           hour: '2-digit',
                           minute: '2-digit',
@@ -884,7 +871,7 @@ export function Calendar() {
                               e.stopPropagation()
                               openEditModal(ev)
                             }}
-                            className={`p-2 rounded-lg border text-xs ${colorStyle.bg} ${colorStyle.text} ${colorStyle.border} hover:brightness-110`}
+                            className={`p-2 rounded-lg border text-xs ${colorStyle.flaecheStark} ${colorStyle.text} ${colorStyle.rand} hover:brightness-110`}
                           >
                             <div className="flex items-start justify-between gap-1">
                               <div className="font-semibold text-sm truncate flex-1">{ev.title}</div>
@@ -961,7 +948,7 @@ export function Calendar() {
                   ) : (
                     <div className="space-y-1.5">
                       {dayEvents.map((ev) => {
-                        const colorStyle = getColorClass(ev.color)
+                        const colorStyle = farbwahl(ev.color)
                         const startStr = new Date(ev.start).toLocaleTimeString(locale, {
                           hour: '2-digit',
                           minute: '2-digit',
@@ -974,7 +961,7 @@ export function Calendar() {
                           <div
                             key={ev.event_id}
                             onClick={() => openEditModal(ev)}
-                            className={`p-2.5 rounded-lg border text-xs cursor-pointer flex items-center justify-between gap-2 ${colorStyle.bg} ${colorStyle.text} ${colorStyle.border} hover:brightness-110`}
+                            className={`p-2.5 rounded-lg border text-xs cursor-pointer flex items-center justify-between gap-2 ${colorStyle.flaecheStark} ${colorStyle.text} ${colorStyle.rand} hover:brightness-110`}
                           >
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center justify-between gap-2">
@@ -1041,7 +1028,7 @@ export function Calendar() {
               </div>
             ) : (
               getEventsForDay(currentDate).map((ev) => {
-                const colorStyle = getColorClass(ev.color)
+                const colorStyle = farbwahl(ev.color)
                 const startStr = new Date(ev.start).toLocaleTimeString(locale, {
                   hour: '2-digit',
                   minute: '2-digit',
@@ -1054,7 +1041,7 @@ export function Calendar() {
                   <div
                     key={ev.event_id}
                     onClick={() => openEditModal(ev)}
-                    className={`p-4 rounded-xl border cursor-pointer transition-all hover:scale-[1.01] ${colorStyle.bg} ${colorStyle.text} ${colorStyle.border}`}
+                    className={`p-4 rounded-xl border cursor-pointer transition-all hover:scale-[1.01] ${colorStyle.flaecheStark} ${colorStyle.text} ${colorStyle.rand}`}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
@@ -1132,11 +1119,11 @@ export function Calendar() {
                     }}
                     className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-semibold transition-all ${
                       formEventType === 'team'
-                        ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500 ring-1 ring-emerald-500'
+                        ? 'bg-status-success/20 text-status-success border-status-success ring-1 ring-status-success'
                         : 'bg-surface-container-low text-on-surface-variant border-outline-variant/40 hover:bg-surface-container'
                     }`}
                   >
-                    <Users className="w-3.5 h-3.5 text-emerald-400" />
+                    <Users className="w-3.5 h-3.5 text-status-success" />
                     Team
                   </button>
                   <button
@@ -1147,11 +1134,11 @@ export function Calendar() {
                     }}
                     className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-semibold transition-all ${
                       formEventType === 'server'
-                        ? 'bg-purple-500/20 text-purple-400 border-purple-500 ring-1 ring-purple-500'
+                        ? `${SERVER_TON.flaecheStark} ${SERVER_TON.text} ${SERVER_TON.rand} ring-1 ring-primary/40`
                         : 'bg-surface-container-low text-on-surface-variant border-outline-variant/40 hover:bg-surface-container'
                     }`}
                   >
-                    <Server className="w-3.5 h-3.5 text-purple-400" />
+                    <Server className={`w-3.5 h-3.5 ${SERVER_TON.text}`} />
                     Server
                   </button>
                   <button
@@ -1162,11 +1149,11 @@ export function Calendar() {
                     }}
                     className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-semibold transition-all ${
                       formEventType === 'node'
-                        ? 'bg-amber-500/20 text-amber-400 border-amber-500 ring-1 ring-amber-500'
+                        ? 'bg-status-warning/20 text-status-warning border-status-warning ring-1 ring-status-warning'
                         : 'bg-surface-container-low text-on-surface-variant border-outline-variant/40 hover:bg-surface-container'
                     }`}
                   >
-                    <Network className="w-3.5 h-3.5 text-amber-400" />
+                    <Network className="w-3.5 h-3.5 text-status-warning" />
                     Node
                   </button>
                 </div>
@@ -1310,16 +1297,16 @@ export function Calendar() {
                   {t('calendar.color', 'Farbkennzeichnung')}
                 </label>
                 <div className="flex flex-wrap items-center gap-2">
-                  {COLOR_PALETTE.map((c) => (
+                  {FARB_PALETTE.map((c) => (
                     <button
                       key={c.id}
                       type="button"
                       onClick={() => setFormColor(c.id)}
-                      className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-all ${c.bg} ${c.text} ${
-                        formColor === c.id ? `ring-2 ring-primary ${c.border}` : 'opacity-70 hover:opacity-100'
+                      className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-all ${c.flaecheStark} ${c.text} ${
+                        formColor === c.id ? `ring-2 ring-primary ${c.rand}` : 'opacity-70 hover:opacity-100'
                       }`}
                     >
-                      {c.label}
+                      {t(c.labelKey)}
                     </button>
                   ))}
                 </div>

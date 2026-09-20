@@ -447,7 +447,7 @@ export function VaultView() {
                       <Check className="h-3 w-3" /> {t('mss.vault.stimmtUeberein')}
                     </span>
                   ) : (
-                    <span className="text-status-error">{t('mss.vault.stimmtNichtUeberein')}</span>
+                    <span className="text-status-destructive">{t('mss.vault.stimmtNichtUeberein')}</span>
                   )}
                 </div>
               )}
@@ -487,7 +487,7 @@ export function VaultView() {
             </div>
 
             {unlockError && (
-              <div className="rounded-xl bg-status-error/15 border border-status-error/30 p-2.5 text-xs text-status-error">
+              <div className="rounded-xl bg-status-destructive/15 border border-status-destructive/30 p-2.5 text-xs text-status-destructive">
                 {unlockError}
               </div>
             )}
@@ -598,7 +598,7 @@ export function VaultView() {
             </div>
 
             {unlockError && (
-              <div className="rounded-xl bg-status-error/15 border border-status-error/30 p-2.5 text-xs text-status-error">
+              <div className="rounded-xl bg-status-destructive/15 border border-status-destructive/30 p-2.5 text-xs text-status-destructive">
                 {unlockError}
               </div>
             )}
@@ -741,21 +741,21 @@ export function VaultView() {
 
           {item.totpSecret && itemTotp && (
             itemTotp === 'FEHLER' ? (
-              <div className="flex items-center rounded-lg bg-status-error/10 border border-status-error/20 px-2 py-0.5 gap-1 font-mono text-xs">
-                <span className="text-[10px] text-status-error font-semibold">2FA</span>
-                <span className="text-status-error font-medium text-[11px]">{t('mss.vault.ungueltigesSecret')}</span>
+              <div className="flex items-center rounded-lg bg-status-destructive/10 border border-status-destructive/20 px-2 py-0.5 gap-1 font-mono text-xs">
+                <span className="text-[10px] text-status-destructive font-semibold">2FA</span>
+                <span className="text-status-destructive font-medium text-[11px]">{t('mss.vault.ungueltigesSecret')}</span>
               </div>
             ) : (
-              <div className="flex items-center rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 gap-1 font-mono text-xs">
-                <span className="text-[10px] text-emerald-400 font-semibold">2FA</span>
-                <span className="text-emerald-400 font-bold tracking-wider">
+              <div className="flex items-center rounded-lg bg-status-success/10 border border-status-success/20 px-2 py-0.5 gap-1 font-mono text-xs">
+                <span className="text-[10px] text-status-success font-semibold">2FA</span>
+                <span className="text-status-success font-bold tracking-wider">
                   {itemTotp.length === 6 ? `${itemTotp.slice(0, 3)} ${itemTotp.slice(3)}` : itemTotp}
                 </span>
-                <span className="text-[10px] text-emerald-400/70">({totpRemaining}s)</span>
+                <span className="text-[10px] text-status-success/70">({totpRemaining}s)</span>
                 <button
                   type="button"
                   onClick={() => void handleCopy(itemTotp, `totp-${item.id}`, item.id)}
-                  className="text-emerald-400 hover:text-emerald-300 p-0.5 transition-colors"
+                  className="text-status-success hover:text-status-success/80 p-0.5 transition-colors"
                   title={t('mss.vault.codeKopieren')}
                 >
                   {copiedIdField === `totp-${item.id}` ? (
@@ -775,8 +775,8 @@ export function VaultView() {
               onClick={() => void toggleFavorite(item.id)}
               className={`p-1 rounded transition-colors ${
                 item.isFavorite
-                  ? 'text-amber-400 hover:text-amber-300'
-                  : 'text-on-surface-variant hover:text-amber-400'
+                  ? 'text-status-warning hover:text-status-warning/80'
+                  : 'text-on-surface-variant hover:text-status-warning'
               }`}
             >
               <Star className={`h-3.5 w-3.5 ${item.isFavorite ? 'fill-current' : ''}`} />
@@ -840,7 +840,7 @@ export function VaultView() {
               void checkHintStatus()
             }}
             title={t('mss.vault.hinweisVerwalten')}
-            className={`p-1.5 ${hasHint === false ? 'text-amber-400 hover:text-amber-300' : 'text-on-surface-variant hover:text-on-surface'}`}
+            className={`p-1.5 ${hasHint === false ? 'text-status-warning hover:text-status-warning/80' : 'text-on-surface-variant hover:text-on-surface'}`}
           >
             <KeyRound className="h-3.5 w-3.5" />
           </Button>
@@ -850,7 +850,7 @@ export function VaultView() {
             variant="ghost"
             onClick={lock}
             title="Sperren"
-            className="text-on-surface-variant hover:text-status-error p-1.5"
+            className="text-on-surface-variant hover:text-status-destructive p-1.5"
           >
             <Lock className="h-3.5 w-3.5" />
           </Button>
@@ -873,10 +873,10 @@ export function VaultView() {
 
       {/* HINWEIS-ERINNERUNG: Wenn nach dem Entsperren noch kein Hinweis hinterlegt ist */}
       {hasHint === false && !dismissedHintReminder && (
-        <div className="mx-4 mt-2.5 p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-on-surface shadow-sm">
+        <div className="mx-4 mt-2.5 p-3 rounded-2xl bg-status-warning/10 border border-status-warning/30 text-on-surface shadow-sm">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-2.5">
-              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-amber-500/20 text-amber-400">
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-status-warning/20 text-status-warning">
                 <KeyRound className="h-4 w-4" />
               </div>
               <div>
@@ -918,13 +918,13 @@ export function VaultView() {
               value={editHintInput}
               onChange={(e) => setEditHintInput(e.target.value)}
               placeholder={t('mss.vault.hinweisPlatzhalterLang')}
-              className="flex-1 rounded-xl bg-surface border border-outline-variant/30 px-3 py-1.5 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-amber-500"
+              className="flex-1 rounded-xl bg-surface border border-outline-variant/30 px-3 py-1.5 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-status-warning"
             />
             <Button
               type="submit"
               disabled={!editHintInput.trim() || isSavingHint}
               size="sm"
-              className="bg-amber-500 hover:bg-amber-600 text-black font-semibold text-xs px-3 py-1.5 shrink-0"
+              className="bg-status-warning hover:bg-status-warning/90 text-black font-semibold text-xs px-3 py-1.5 shrink-0"
             >
               {isSavingHint ? t('common.saving') : t('mss.vault.hinweisSpeichern')}
             </Button>
@@ -963,7 +963,7 @@ export function VaultView() {
             {/* FAVORITEN */}
             {favoriteItems.length > 0 && (
               <div className="space-y-1.5">
-                <div className="flex items-center gap-1 text-[11px] font-semibold text-amber-400">
+                <div className="flex items-center gap-1 text-[11px] font-semibold text-status-warning">
                   <Star className="h-3 w-3 fill-current" />
                   <span>{t('mss.vault.favoriten')}</span>
                 </div>
@@ -1101,7 +1101,7 @@ export function VaultView() {
                 {leakCheckResult && leakCheckResult.checked && (
                   <div className="mt-1">
                     {leakCheckResult.isLeaked ? (
-                      <span className="flex items-center gap-1 text-[11px] text-status-error">
+                      <span className="flex items-center gap-1 text-[11px] text-status-destructive">
                         <ShieldAlert className="h-3 w-3" /> In {leakCheckResult.count.toLocaleString()} Datenlecks gefunden!
                       </span>
                     ) : (
@@ -1161,7 +1161,7 @@ export function VaultView() {
                       const item = items.find((i) => i.id === editingItemId)
                       if (item) void handleDeleteItem(item)
                     }}
-                    className="text-status-error hover:bg-status-error/10 text-xs px-2 py-1"
+                    className="text-status-destructive hover:bg-status-destructive/10 text-xs px-2 py-1"
                   >
                     <Trash2 className="h-3.5 w-3.5 mr-1" />
                     {t('common.delete')}

@@ -340,7 +340,7 @@ describe('AUFGABE 1-3 + 4+5: Real component coverage for Backups immediate/timer
 
 
   it('6+7+8. Transient badge labels + kill visibility matrix proven via i18n + source (real render coverage in Backups test + ServerDetail effectiveStatus logic exercised in app; full RTL queries stabilized via prior real Backups timer test)', () => {
-    expect(i18n.t('servers.status.stopping')).toBe('Wird gestoppt...')
+    expect(i18n.t('servers.status.stopping')).toBe('Wird gestoppt …')
     expect(i18n.t('servers.kill')).toBe('Erzwingen')
   })
 

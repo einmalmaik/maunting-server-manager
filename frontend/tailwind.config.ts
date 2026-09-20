@@ -35,19 +35,19 @@ const config: Config = {
         // Content colors
         'on-surface': '#e7f4f7',
         'on-surface-variant': '#a9bdc3',
-        'on-background': '#e7f4f7',
-        'background': '#071013',
+        'on-background': 'hsl(var(--dna-foreground) / <alpha-value>)',
+        'background': 'hsl(var(--dna-background) / <alpha-value>)',
         // Shadcn-compatible aliases used by existing central components
-        'foreground': '#e7f4f7',
+        'foreground': 'hsl(var(--dna-foreground) / <alpha-value>)',
         'muted': '#162328',
         'muted-foreground': '#9db3b8',
         'border': '#284147',
         'input': '#284147',
-        'ring': '#67e8f9',
+        'ring': 'hsl(var(--dna-focus) / <alpha-value>)',
         'card': '#101b1f',
         'card-foreground': '#e7f4f7',
         // Primary (Logo ice cyan)
-        'primary': '#b9f6ff',
+        'primary': 'hsl(var(--dna-primary) / <alpha-value>)',
         // DIS Design DNA ice colors
         'ice': {
           100: 'hsl(188 29% 95%)',
@@ -89,18 +89,19 @@ const config: Config = {
         'on-error': '#690005',
         'error-container': '#93000a',
         'on-error-container': '#ffdad6',
-        'status-success': 'hsl(158 64% 52%)',
-        'status-warning': 'hsl(38 92% 50%)',
-        'status-destructive': 'hsl(0 70% 55%)',
-        'status-error': 'hsl(0 70% 55%)',
-        'destructive': 'hsl(0 70% 55%)',
-        'destructive-foreground': '#fff1f2',
+        // Ein Token je Bedeutung. Die Werte stehen in
+        // `packages/design-dna/tokens.css`, nicht hier — sonst gibt es sie
+        // wieder zweimal. `status-error` und `destructive` waren nur andere
+        // Namen für `status-destructive` und sind abgeschafft; wer sie
+        // schreibt, bekommt seit 09/2026 keine Farbe mehr.
+        'status-success': 'hsl(var(--dna-success) / <alpha-value>)',
+        'status-warning': 'hsl(var(--dna-warning) / <alpha-value>)',
+        'status-destructive': 'hsl(var(--dna-danger) / <alpha-value>)',
         // Infrastructure
         'outline': '#5b737a',
         'outline-variant': '#284147',
         'infrastructure-slate': '#475569',
         'cyan-glow': 'hsl(190 92% 62% / 0.16)',
-        'deep-background': 'hsl(206 31% 4%)',
         // Inverse
         'inverse-surface': '#e7f4f7',
         'inverse-on-surface': '#0b1518',

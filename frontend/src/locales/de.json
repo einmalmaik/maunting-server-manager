@@ -3587,7 +3587,15 @@
     "add": "Hinzufügen",
     "openUserMenu": "Benutzermenü öffnen",
     "decrease": "Wert verringern",
-    "increase": "Wert erhöhen"
+    "increase": "Wert erhöhen",
+    "palette": {
+      "blue": "Blau",
+      "cyan": "Cyan",
+      "green": "Grün",
+      "purple": "Lila",
+      "red": "Rot",
+      "yellow": "Gelb"
+    }
   },
   "serverDetail": {
     "showServerOverview": "Server-Übersicht",

@@ -74,7 +74,7 @@ export const CircularVideoNotePlayer: React.FC<CircularVideoNotePlayerProps> = (
   return (
     <div
       onClick={onExpand}
-      className="relative w-44 h-44 sm:w-52 sm:h-52 rounded-full overflow-hidden bg-slate-900 border-2 border-primary/40 shadow-lg cursor-pointer group select-none transition-transform hover:scale-[1.02]"
+      className="relative w-44 h-44 sm:w-52 sm:h-52 rounded-full overflow-hidden bg-surface-container-high border-2 border-primary/40 shadow-lg cursor-pointer group select-none transition-transform hover:scale-[1.02]"
       title={t('social.videoNote.expand')}
     >
       {quelle ? (

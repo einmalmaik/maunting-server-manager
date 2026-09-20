@@ -427,7 +427,7 @@ export function DatabaseConsole({
                   ? [{
                       value: '__delete__',
                       label: t('databaseConsole.deleteDatabase'),
-                      icon: <Trash2 className="h-4 w-4 text-status-error" />,
+                      icon: <Trash2 className="h-4 w-4 text-status-destructive" />,
                       disabled: !selectedDatabaseId,
                     }]
                   : []),
@@ -592,7 +592,7 @@ export function DatabaseConsole({
                         <div className="font-mono text-[10px] text-on-surface-variant truncate mt-0.5">{fav.sql}</div>
                       </button>
                       <button
-                        className="text-on-surface-variant/50 hover:text-status-error opacity-0 group-hover:opacity-100 transition p-0.5 shrink-0"
+                        className="text-on-surface-variant/50 hover:text-status-destructive opacity-0 group-hover:opacity-100 transition p-0.5 shrink-0"
                         onClick={() => deleteFavorite(fav.id)}
                         title={t('databaseConsole.sql.removeFavorite')}
                       >
@@ -1079,9 +1079,9 @@ function MetricCard({ icon: Icon, label, value, hint, tone = 'default' }: {
   const toneClass = {
     default: 'text-primary bg-primary/10 border-primary/20',
     success: 'text-status-success bg-status-success/10 border-status-success/20',
-    violet: 'text-violet-300 bg-violet-400/10 border-violet-400/20',
+    violet: 'text-tertiary bg-tertiary/10 border-tertiary/20',
     mint: 'text-secondary bg-secondary/10 border-secondary/20',
-    blue: 'text-sky-300 bg-sky-400/10 border-sky-400/20',
+    blue: 'text-primary bg-primary/10 border-primary/20',
     green: 'text-mint-accent bg-mint-accent/10 border-mint-accent/20',
   }[tone]
   return (
@@ -1201,7 +1201,7 @@ function SchemaPanel({ tableInfo }: { tableInfo: PostgresTableInfo | null }) {
       {tableInfo.indexes.length > 0 && (
         <div>
           <h4 className="mb-2 font-semibold text-on-surface flex items-center gap-1.5">
-            <Boxes className="h-3.5 w-3.5 text-sky-400" />
+            <Boxes className="h-3.5 w-3.5 text-primary" />
             {t('databaseConsole.schema.indexes')} ({tableInfo.indexes.length})
           </h4>
           <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
@@ -1217,7 +1217,7 @@ function SchemaPanel({ tableInfo }: { tableInfo: PostgresTableInfo | null }) {
       {tableInfo.foreign_keys.length > 0 && (
         <div>
           <h4 className="mb-2 font-semibold text-on-surface flex items-center gap-1.5">
-            <Sparkles className="h-3.5 w-3.5 text-violet-400" />
+            <Sparkles className="h-3.5 w-3.5 text-tertiary" />
             {t('databaseConsole.schema.foreignKeys')} ({tableInfo.foreign_keys.length})
           </h4>
           <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
@@ -1239,13 +1239,13 @@ function SqlResult({ result }: { result: PostgresSqlResult | null }) {
   return (
     <div className="mt-3 space-y-3">
       {result.statements.map((entry, index) => (
-        <div key={index} className={`rounded-lg border p-3 ${entry.error ? 'border-status-error/40 bg-status-error/10' : 'border-outline-variant bg-surface-container-high'}`}>
+        <div key={index} className={`rounded-lg border p-3 ${entry.error ? 'border-status-destructive/40 bg-status-destructive/10' : 'border-outline-variant bg-surface-container-high'}`}>
           <div className="mb-2 flex items-center justify-between gap-2">
             <code className="truncate text-xs text-on-surface-variant">{entry.statement}</code>
             <span className="font-mono text-xs text-on-surface-variant">{entry.duration_ms ?? 0} ms</span>
           </div>
           {entry.error ? (
-            <pre className="whitespace-pre-wrap break-words font-mono text-xs text-status-error">{entry.error}</pre>
+            <pre className="whitespace-pre-wrap break-words font-mono text-xs text-status-destructive">{entry.error}</pre>
           ) : entry.columns.length ? (
             <RowsGrid result={{ columns: entry.columns, rows: entry.rows }} />
           ) : (
@@ -1485,7 +1485,7 @@ function EditRowModal({
           <button aria-label={t('common.close')} className="text-on-surface-variant hover:text-on-surface" onClick={onClose}><X className="h-5 w-5" /></button>
         </div>
         <p className="mt-1 text-xs text-on-surface-variant">{t('databaseConsole.editRow.subtitle')}</p>
-        {error && <div className="mt-3 rounded border border-status-error/30 bg-status-error/10 p-2 text-xs text-status-error">{error}</div>}
+        {error && <div className="mt-3 rounded border border-status-destructive/30 bg-status-destructive/10 p-2 text-xs text-status-destructive">{error}</div>}
         <form onSubmit={handleSubmit} className="mt-4 flex-1 space-y-3 overflow-y-auto pr-1">
           {columns.map((col) => (
             <div key={col} className="space-y-1">
@@ -1567,7 +1567,7 @@ function InsertRowModal({
           <button aria-label={t('common.close')} className="text-on-surface-variant hover:text-on-surface" onClick={onClose}><X className="h-5 w-5" /></button>
         </div>
         <p className="mt-1 text-xs text-on-surface-variant">{t('databaseConsole.insertRow.subtitle')}</p>
-        {error && <div className="mt-3 rounded border border-status-error/30 bg-status-error/10 p-2 text-xs text-status-error">{error}</div>}
+        {error && <div className="mt-3 rounded border border-status-destructive/30 bg-status-destructive/10 p-2 text-xs text-status-destructive">{error}</div>}
         <form onSubmit={handleSubmit} className="mt-4 flex-1 space-y-3 overflow-y-auto pr-1">
           {columns.map((col) => (
             <div key={col} className="space-y-1">
@@ -1631,7 +1631,7 @@ function DeleteConfirmModal({
         className="msm-card w-full max-w-md p-6 shadow-2xl space-y-4"
       >
         <div className="flex items-center justify-between">
-          <h3 id="zeilen-loeschen-titel" className="font-headline text-lg font-bold text-status-error">
+          <h3 id="zeilen-loeschen-titel" className="font-headline text-lg font-bold text-status-destructive">
             {t('databaseConsole.deleteRows.title')}
           </h3>
           <button aria-label={t('common.close')} className="text-on-surface-variant hover:text-on-surface" onClick={onClose}><X className="h-5 w-5" /></button>
@@ -1641,7 +1641,7 @@ function DeleteConfirmModal({
         <p className="text-sm text-on-surface-variant">
           {t('databaseConsole.deleteRows.question', { anzahl: count })}
         </p>
-        {error && <div className="rounded border border-status-error/30 bg-status-error/10 p-2 text-xs text-status-error">{error}</div>}
+        {error && <div className="rounded border border-status-destructive/30 bg-status-destructive/10 p-2 text-xs text-status-destructive">{error}</div>}
         <div className="flex items-center justify-end gap-2 border-t border-outline-variant pt-4">
           <button className="msm-btn-secondary px-4 py-2 text-sm" onClick={onClose} disabled={isDeleting}>
             {t('common.cancel')}

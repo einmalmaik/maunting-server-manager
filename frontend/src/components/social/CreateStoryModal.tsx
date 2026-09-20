@@ -129,7 +129,7 @@ export function CreateStoryModal({
             <div className="flex justify-center w-full">
               <div
                 className={`relative aspect-16/9 w-full max-w-sm sm:max-w-md max-h-[45dvh] rounded-2xl p-4 flex flex-col justify-between shadow-2xl overflow-hidden transition-all border border-outline-variant/30 ${
-                  photoDataUrl ? 'bg-black text-white' : STORY_GRADIENTS[selectedGradient]?.class || 'bg-slate-900 text-white'
+                  photoDataUrl ? 'bg-black text-white' : STORY_GRADIENTS[selectedGradient]?.class || 'bg-surface-container-high text-white'
                 }`}
               >
                 {photoDataUrl && (

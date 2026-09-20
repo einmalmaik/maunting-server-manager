@@ -95,7 +95,7 @@ export function AiUsageCard() {
                     // Der volle rote Balken allein bliebe zweideutig — er sieht aus
                     // wie „heute aufgebraucht, morgen wieder da“. Der Satz nennt den
                     // Unterschied: hier war nie etwas freigegeben.
-                    <p className="text-xs text-status-error">{t('ai.usage.blocked')}</p>
+                    <p className="text-xs text-status-destructive">{t('ai.usage.blocked')}</p>
                   )}
                 </>
               )}

@@ -52,13 +52,13 @@ export function DangerZoneTab() {
   }
 
   return (
-    <div className="msm-card p-6 border border-status-error/35">
+    <div className="msm-card p-6 border border-status-destructive/35">
       <div className="flex items-center gap-2 mb-6">
-        <AlertTriangle className="h-5 w-5 text-status-error" aria-hidden="true" />
+        <AlertTriangle className="h-5 w-5 text-status-destructive" aria-hidden="true" />
         <div className="flex-1">
           {/* Die Warnfarbe bleibt: sie unterscheidet die Gefahrenzone von den
               übrigen Karten. Nur Größe und Bauweise ziehen mit. */}
-          <h2 className="font-headline text-lg font-semibold text-status-error">{t('profile.deleteAccountTitle')}</h2>
+          <h2 className="font-headline text-lg font-semibold text-status-destructive">{t('profile.deleteAccountTitle')}</h2>
           <p className="font-body-md text-sm text-on-surface-variant mt-1">
             {t('profile.deleteAccountSubtitle')}
           </p>
@@ -89,8 +89,8 @@ export function DangerZoneTab() {
               onSubmit={handleDelete}
               className="space-y-4 border-t border-outline-variant/30 pt-4"
             >
-              <div className="p-4 bg-status-error/5 border border-status-error/20 rounded-lg">
-                <p className="font-label-md text-sm text-status-error font-medium mb-1">
+              <div className="p-4 bg-status-destructive/5 border border-status-destructive/20 rounded-lg">
+                <p className="font-label-md text-sm text-status-destructive font-medium mb-1">
                   {t('profile.deleteAccountWarningTitle')}
                 </p>
                 <p className="font-body-md text-xs text-on-surface-variant">

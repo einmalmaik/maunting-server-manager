@@ -519,7 +519,7 @@ export function AdminNodes() {
                         </button>
                         <button
                           type="button"
-                          className="msm-btn-secondary p-2 text-status-error disabled:opacity-40"
+                          className="msm-btn-secondary p-2 text-status-destructive disabled:opacity-40"
                           title={t('common.delete')}
                           aria-label={t('nodes.deleteLabel', { name: node.name })}
                           disabled={node.is_local || node.server_count > 0}

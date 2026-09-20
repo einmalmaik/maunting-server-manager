@@ -122,7 +122,7 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
               </div>
               <div className="bg-surface-container-high/40 p-2 rounded-lg border border-outline-variant/20 text-center">
                 <div className="flex items-center justify-center gap-1 text-[11px] text-on-surface-variant mb-0.5">
-                  <Sparkles className="w-3 h-3 text-cyan-400" />
+                  <Sparkles className="w-3 h-3 text-primary" />
                   <span>{t('social.milestones.statAi')}</span>
                 </div>
                 <div className="text-xs font-semibold text-primary font-mono">
@@ -131,7 +131,7 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
               </div>
               <div className="bg-surface-container-high/40 p-2 rounded-lg border border-outline-variant/20 text-center">
                 <div className="flex items-center justify-center gap-1 text-[11px] text-on-surface-variant mb-0.5">
-                  <Award className="w-3 h-3 text-amber-400" />
+                  <Award className="w-3 h-3 text-status-warning" />
                   <span>{t('social.milestones.statAdmin')}</span>
                 </div>
                 <div className="text-xs font-semibold text-primary font-mono">
@@ -140,7 +140,7 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
               </div>
               <div className="bg-surface-container-high/40 p-2 rounded-lg border border-outline-variant/20 text-center">
                 <div className="flex items-center justify-center gap-1 text-[11px] text-on-surface-variant mb-0.5">
-                  <Flame className="w-3 h-3 text-rose-400" />
+                  <Flame className="w-3 h-3 text-status-warning" />
                   <span>{t('social.milestones.statCommands')}</span>
                 </div>
                 <div className="text-xs font-semibold text-primary font-mono">
@@ -200,7 +200,7 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
                   className={`w-12 h-12 rounded-xl flex items-center justify-center text-xl shrink-0 border ${
                     item.unlocked
                       ? isRare
-                        ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.25)]'
+                        ? 'bg-status-warning/20 border-status-warning/40 text-status-warning shadow-[0_0_12px_rgba(245,158,11,0.25)]'
                         : 'bg-primary/15 border-primary/30 text-primary'
                       : 'bg-surface-container-high/50 border-outline-variant/20 text-on-surface-variant/40'
                   }`}
@@ -214,7 +214,7 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
                     <h4 className="font-headline text-body-md font-bold text-primary truncate">
                       {item.title}
                     </h4>
-                    <span className="text-[11px] font-mono text-amber-400/90 font-semibold">
+                    <span className="text-[11px] font-mono text-status-warning/90 font-semibold">
                       {t('social.milestones.pointsShort', { count: item.points })}
                     </span>
                     {isRare && (
@@ -228,12 +228,12 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
                   </p>
 
                   <div className="flex items-center gap-3 mt-2 text-[11px] text-on-surface-variant/70 flex-wrap">
-                    <span className={`font-medium ${isRare ? 'text-amber-400' : ''}`}>
+                    <span className={`font-medium ${isRare ? 'text-status-warning' : ''}`}>
                       {item.rarity_text}
                     </span>
 
                     {item.unlocked && item.unlocked_at && (
-                      <span className="inline-flex items-center gap-1 text-emerald-400/90">
+                      <span className="inline-flex items-center gap-1 text-status-success/90">
                         <CheckCircle2 className="w-3 h-3" />
                         <span>{t('social.milestones.unlockedOn', { date: new Date(item.unlocked_at).toLocaleDateString() })}</span>
                       </span>

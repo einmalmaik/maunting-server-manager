@@ -1183,7 +1183,7 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
             onClick={() => void clearHistory()}
             aria-label={t('ai.chat.clear')}
             title={t('ai.chat.clear')}
-            className="h-8 w-8 p-0 text-on-surface-variant hover:text-status-danger transition-colors flex items-center justify-center rounded-lg shrink-0"
+            className="h-8 w-8 p-0 text-on-surface-variant hover:text-status-destructive transition-colors flex items-center justify-center rounded-lg shrink-0"
           >
             <Trash2 className="h-4 w-4" aria-hidden="true" />
           </Button>
@@ -1448,7 +1448,7 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
                   <span className="truncate">{msg}</span>
                   <button
                     type="button"
-                    className="text-on-surface-variant hover:text-status-danger transition-colors"
+                    className="text-on-surface-variant hover:text-status-destructive transition-colors"
                     onClick={() => setQueuedMessages((q) => q.filter((_, i) => i !== idx))}
                     aria-label="Aus Warteschlange entfernen"
                   >
@@ -1459,7 +1459,7 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
               {queuedMessages.length > 1 && (
                 <button
                   type="button"
-                  className="ml-auto text-[11px] text-on-surface-variant hover:text-status-danger underline transition-colors"
+                  className="ml-auto text-[11px] text-on-surface-variant hover:text-status-destructive underline transition-colors"
                   onClick={() => setQueuedMessages([])}
                 >
                   Alle leeren
@@ -1583,7 +1583,7 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
                   type="button"
                   size="sm"
                   variant="destructive"
-                  className="h-9 w-9 shrink-0 rounded-full p-0 flex items-center justify-center bg-status-danger/15 text-status-danger hover:bg-status-danger/25 border border-status-danger/30 transition-colors"
+                  className="h-9 w-9 shrink-0 rounded-full p-0 flex items-center justify-center bg-status-destructive/15 text-status-destructive hover:bg-status-destructive/25 border border-status-destructive/30 transition-colors"
                   onClick={() => void stoppeLauf()}
                   aria-label="KI stoppen (abbrechen)"
                   title="KI stoppen (abbrechen)"
@@ -1607,7 +1607,7 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
                     type="button"
                     size="sm"
                     variant="destructive"
-                    className="h-9 w-9 shrink-0 rounded-full p-0 flex items-center justify-center bg-status-danger/15 text-status-danger hover:bg-status-danger/25 border border-status-danger/30"
+                    className="h-9 w-9 shrink-0 rounded-full p-0 flex items-center justify-center bg-status-destructive/15 text-status-destructive hover:bg-status-destructive/25 border border-status-destructive/30"
                     onClick={() => void sendImmediatelyAndInterrupt(input)}
                     title="Sofort senden & Unterbrechen (Alt+Enter)"
                     aria-label="Sofort senden & Unterbrechen"

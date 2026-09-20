@@ -140,7 +140,7 @@ export function CurseForgeTab() {
                     setClearKey(true)
                     setNewKey('')
                   }}
-                  className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-error transition-colors"
+                  className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-destructive transition-colors"
                   title={t('settings.curseforgeDeleteKey', { defaultValue: 'Schlüssel entfernen' })}
                   aria-label={t('settings.curseforgeDeleteKey', { defaultValue: 'Schlüssel entfernen' })}
                 >

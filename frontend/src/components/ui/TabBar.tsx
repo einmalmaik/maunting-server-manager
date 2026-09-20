@@ -48,10 +48,10 @@ export function TabBar<TId extends string>({ tabs, active, onChange, ariaLabel }
             className={`px-4 py-2 rounded-md text-sm font-medium inline-flex items-center gap-2 transition-colors ${
               isActive
                 ? isDanger
-                  ? 'bg-status-error/15 text-status-error'
+                  ? 'bg-status-destructive/15 text-status-destructive'
                   : 'bg-secondary-container text-on-secondary-container'
                 : isDanger
-                  ? 'text-status-error/80 hover:bg-status-error/10'
+                  ? 'text-status-destructive/80 hover:bg-status-destructive/10'
                   : 'text-on-surface-variant hover:bg-surface-container-high'
             }`}
           >

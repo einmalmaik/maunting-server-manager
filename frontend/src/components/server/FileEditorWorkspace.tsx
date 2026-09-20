@@ -290,7 +290,7 @@ export function FileEditorWorkspace({
                 <FileCode2 className="h-3.5 w-3.5 shrink-0" />
                 <span className="truncate">{fileName(tab.path)}</span>
                 {tab.saveState !== 'clean' && tab.saveState !== 'saving' && (
-                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tab.saveState === 'conflict' || tab.saveState === 'error' ? 'bg-status-error' : 'bg-status-warning'}`} />
+                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tab.saveState === 'conflict' || tab.saveState === 'error' ? 'bg-status-destructive' : 'bg-status-warning'}`} />
                 )}
               </button>
               <button
@@ -314,7 +314,7 @@ export function FileEditorWorkspace({
           <div className="flex min-h-10 items-center justify-between gap-3 border-b border-outline-variant px-3">
             <p className="min-w-0 truncate font-mono text-[11px] text-on-surface-variant">{t('files.serverFiles')} / {activeTab.path}</p>
             <div className="flex shrink-0 items-center gap-2">
-              <span className={`hidden items-center gap-1.5 text-[11px] sm:inline-flex ${activeTab.saveState === 'conflict' || activeTab.saveState === 'error' ? 'text-status-error' : activeTab.saveState === 'clean' ? 'text-status-success' : 'text-status-warning'}`}>
+              <span className={`hidden items-center gap-1.5 text-[11px] sm:inline-flex ${activeTab.saveState === 'conflict' || activeTab.saveState === 'error' ? 'text-status-destructive' : activeTab.saveState === 'clean' ? 'text-status-success' : 'text-status-warning'}`}>
                 {saveIndicator}
               </span>
               <button
@@ -418,7 +418,7 @@ export function FileEditorWorkspace({
             <span>{activeTab.lineEnding === '\r\n' ? 'CRLF' : 'LF'}</span>
             <span>{detectLanguage(activeTab.path).toUpperCase()}</span>
             <span className="sm:hidden">{horizontalScrollHint}</span>
-            <span className={`ml-auto inline-flex items-center gap-1.5 ${activeTab.saveState === 'clean' ? 'text-status-success' : activeTab.saveState === 'conflict' || activeTab.saveState === 'error' ? 'text-status-error' : 'text-status-warning'}`}>{saveIndicator}</span>
+            <span className={`ml-auto inline-flex items-center gap-1.5 ${activeTab.saveState === 'clean' ? 'text-status-success' : activeTab.saveState === 'conflict' || activeTab.saveState === 'error' ? 'text-status-destructive' : 'text-status-warning'}`}>{saveIndicator}</span>
           </footer>
         </>
       ) : (

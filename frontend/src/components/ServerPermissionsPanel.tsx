@@ -249,7 +249,7 @@ export function ServerPermissionsPanel({ serverId }: Props) {
                     <button
                       type="button"
                       onClick={() => revoke(row.user.id)}
-                      className="grid h-9 w-9 place-items-center rounded-lg text-status-error transition-colors hover:bg-status-error/10 hover:text-status-error/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-status-error/60"
+                      className="grid h-9 w-9 place-items-center rounded-lg text-status-destructive transition-colors hover:bg-status-destructive/10 hover:text-status-destructive/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-status-destructive/60"
                       title={t('serverPermissions.revoke')}
                       aria-label={`${t('serverPermissions.revoke')}: ${row.user.username}`}
                     >

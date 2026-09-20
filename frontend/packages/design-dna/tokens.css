@@ -1,10 +1,27 @@
+/**
+ * Die Farbwerte der Design-DNA — und seit 09/2026 die einzige Stelle, an der
+ * sie stehen.
+ *
+ * Bis dahin gab es sie zweimal: hier als HSL-Tripel und daneben in
+ * `tailwind.config.ts` als Hex-Wert. Zwei Quellen, die niemand abglich — bei
+ * `primary` liefen sie bereits auseinander (`#b9f6ff` gegen `#c4e7f0`). Die
+ * Tripel unten tragen jetzt die Werte, die die Oberfläche wirklich zeigt; die
+ * Tailwind-Konfiguration liest sie als `hsl(var(--dna-…) / <alpha-value>)`.
+ *
+ * Die Schreibweise ohne `hsl()` ist Absicht: nur so kann Tailwind eine
+ * Deckkraft anhängen und `bg-status-success/40` überhaupt etwas erzeugen.
+ */
 :root {
-  --dna-background: 206 31% 4%;
-  --dna-foreground: 188 29% 95%;
+  --dna-background: 196 41% 5%;
+  --dna-foreground: 189 43% 94%;
   --dna-panel: 204 25% 10%;
   --dna-panel-raised: 202 26% 14%;
-  --dna-primary: 193 45% 86%;
-  --dna-focus: 194 44% 68%;
+  --dna-primary: 188 100% 86%;
+
+  /* Eine Fokusfarbe. Sie lag früher dreifach vor: als globaler Outline
+     (190 92% 62%), als `ring` (#67e8f9) und hier als eigener Ton. */
+  --dna-focus: 190 92% 62%;
+
   --dna-success: 158 64% 52%;
   --dna-warning: 38 92% 50%;
   --dna-danger: 0 70% 55%;

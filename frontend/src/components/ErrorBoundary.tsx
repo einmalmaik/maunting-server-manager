@@ -17,7 +17,7 @@ function ErrorCard() {
   return (
     <div className="flex min-h-screen items-center justify-center p-6">
       <div className="msm-card w-full max-w-md p-8 text-center">
-        <AlertTriangle className="mx-auto mb-4 h-10 w-10 text-status-error" />
+        <AlertTriangle className="mx-auto mb-4 h-10 w-10 text-status-destructive" />
         <h1 className="font-headline text-body-lg text-on-surface mb-2">{t('errorBoundary.title')}</h1>
         <p className="font-body-md mb-6 text-sm text-on-surface-variant">{t('errorBoundary.hint')}</p>
         <button

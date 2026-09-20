@@ -74,7 +74,7 @@ export function SecretOnce({
             />
             {/* Zentriertes Marken-Emblem (wie Discord/Steam) */}
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <div className="flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center rounded-xl bg-slate-950 p-1 shadow-2xl border-2 border-white ring-2 ring-primary/60">
+              <div className="flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center rounded-xl bg-surface-container-lowest p-1 shadow-2xl border-2 border-white ring-2 ring-primary/60">
                 <img
                   src={firmenLogo}
                   alt="MauntingStudios"

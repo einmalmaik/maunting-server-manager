@@ -156,7 +156,7 @@ export function FriendsListDock({
         >
           <Users className="w-5 h-5" />
           {incomingRequests.length > 0 && (
-            <span className="absolute -top-1 -right-1 px-1.5 py-0.5 rounded-full bg-amber-500 text-[10px] text-white font-bold leading-none shadow">
+            <span className="absolute -top-1 -right-1 px-1.5 py-0.5 rounded-full bg-status-warning text-[10px] text-white font-bold leading-none shadow">
               {incomingRequests.length}
             </span>
           )}
@@ -223,7 +223,7 @@ export function FriendsListDock({
                 <Users className="w-3.5 h-3.5" />
                 <span>{t('social.friends.tabFriends')}</span>
                 {incomingRequests.length > 0 && (
-                  <span className="ml-1 px-1 rounded-full bg-amber-500 text-[10px] text-white font-bold">
+                  <span className="ml-1 px-1 rounded-full bg-status-warning text-[10px] text-white font-bold">
                     {incomingRequests.length}
                   </span>
                 )}
@@ -262,7 +262,7 @@ export function FriendsListDock({
                   <button
                     type="button"
                     onClick={() => navigate('/profile?tab=social')}
-                    className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-300 hover:bg-amber-500/15 transition-colors"
+                    className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-status-warning/10 border border-status-warning/30 text-[11px] text-status-warning hover:bg-status-warning/15 transition-colors"
                   >
                     <span className="flex items-center gap-1.5 font-medium">
                       <UserPlus className="w-3.5 h-3.5" />
@@ -339,7 +339,7 @@ export function FriendsListDock({
                             variant="ghost"
                             size="icon"
                             onClick={() => void handleRemove(f.user_id ?? f.id)}
-                            className="h-7 w-7 p-0 text-on-surface-variant hover:text-rose-400 hover:bg-rose-500/10"
+                            className="h-7 w-7 p-0 text-on-surface-variant hover:text-status-destructive hover:bg-status-destructive/10"
                             title={t('social.friends.remove')}
                             aria-label={t('social.friends.remove')}
                           >

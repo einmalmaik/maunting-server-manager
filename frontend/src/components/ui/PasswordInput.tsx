@@ -82,7 +82,7 @@ export const PasswordInput = React.forwardRef<HTMLInputElement, PasswordInputPro
           </button>
         </div>
         {error && (
-          <span className="text-xs text-destructive">{error}</span>
+          <span className="text-xs text-status-destructive">{error}</span>
         )}
       </div>
     )

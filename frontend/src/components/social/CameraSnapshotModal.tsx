@@ -149,20 +149,20 @@ export function CameraSnapshotModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="max-w-md w-full max-h-[90dvh] p-0 overflow-hidden bg-zinc-950 text-white border border-zinc-800 shadow-2xl flex flex-col my-auto"
+        className="max-w-md w-full max-h-[90dvh] p-0 overflow-hidden bg-surface-container-lowest text-on-surface border border-outline-variant/40 shadow-2xl flex flex-col my-auto"
       >
         {/* Top Header Bar */}
-        <div className="px-4 py-2.5 sm:py-3 bg-zinc-900/80 backdrop-blur border-b border-zinc-800 flex items-center justify-between shrink-0 z-10">
+        <div className="px-4 py-2.5 sm:py-3 bg-surface-container/80 backdrop-blur border-b border-outline-variant/40 flex items-center justify-between shrink-0 z-10">
           <div className="flex items-center gap-2">
-            <Camera className="w-4 h-4 text-emerald-400" />
-            <span className="font-headline text-body-sm font-semibold text-white">
+            <Camera className="w-4 h-4 text-status-success" />
+            <span className="font-headline text-body-sm font-semibold text-on-surface">
               {capturedPhoto ? t('social.camera.preview') : t('social.camera.take')}
             </span>
           </div>
           <button
             type="button"
             onClick={() => onOpenChange(false)}
-            className="p-1.5 rounded-full text-zinc-400 hover:text-white hover:bg-zinc-800/80 transition-colors"
+            className="p-1.5 rounded-full text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/80 transition-colors"
             aria-label={t('common.close')}
           >
             <X className="w-5 h-5" />
@@ -183,8 +183,8 @@ export function CameraSnapshotModal({
             />
           ) : error ? (
             <div className="p-6 text-center space-y-3 max-w-xs">
-              <AlertCircle className="w-10 h-10 text-amber-400 mx-auto" />
-              <p className="text-xs text-zinc-300 leading-relaxed">{t(error)}</p>
+              <AlertCircle className="w-10 h-10 text-status-warning mx-auto" />
+              <p className="text-xs text-on-surface leading-relaxed">{t(error)}</p>
               <Button
                 type="button"
                 variant="secondary"
@@ -197,8 +197,8 @@ export function CameraSnapshotModal({
               </Button>
             </div>
           ) : (
-            <div className="flex flex-col items-center gap-2.5 text-zinc-400">
-              <RefreshCw className="w-7 h-7 animate-spin text-emerald-400" />
+            <div className="flex flex-col items-center gap-2.5 text-on-surface-variant">
+              <RefreshCw className="w-7 h-7 animate-spin text-status-success" />
               <span className="text-xs">{t('social.camera.starting')}</span>
             </div>
           )}
@@ -218,7 +218,7 @@ export function CameraSnapshotModal({
         </div>
 
         {/* WhatsApp-Style Bottom Controls Bar */}
-        <div className="px-6 py-3.5 sm:py-5 bg-zinc-900 border-t border-zinc-800 flex items-center justify-between shrink-0">
+        <div className="px-6 py-3.5 sm:py-5 bg-surface-container border-t border-outline-variant/40 flex items-center justify-between shrink-0">
           {capturedPhoto ? (
             <div className="flex items-center justify-between w-full gap-3">
               <Button
@@ -248,11 +248,11 @@ export function CameraSnapshotModal({
               <button
                 type="button"
                 onClick={() => fallbackFileInputRef.current?.click()}
-                className="flex flex-col items-center gap-1 p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800/60 transition-colors"
+                className="flex flex-col items-center gap-1 p-2 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 transition-colors"
                 title={t('social.camera.fromFile')}
                 aria-label={t('social.camera.fromFile')}
               >
-                <div className="w-10 h-10 rounded-xl bg-zinc-800 flex items-center justify-center border border-zinc-700">
+                <div className="w-10 h-10 rounded-xl bg-surface-container-high flex items-center justify-center border border-outline-variant/40">
                   <Upload className="w-5 h-5" />
                 </div>
                 <span className="text-[10px]">{t('social.camera.gallery')}</span>
@@ -278,11 +278,11 @@ export function CameraSnapshotModal({
                 type="button"
                 onClick={handleFlipCamera}
                 disabled={!stream || !hasMultipleCameras}
-                className="flex flex-col items-center gap-1 p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800/60 transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                className="flex flex-col items-center gap-1 p-2 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 transition-colors disabled:opacity-30 disabled:pointer-events-none"
                 title={t('social.camera.flip')}
                 aria-label={t('social.camera.flip')}
               >
-                <div className="w-10 h-10 rounded-xl bg-zinc-800 flex items-center justify-center border border-zinc-700">
+                <div className="w-10 h-10 rounded-xl bg-surface-container-high flex items-center justify-center border border-outline-variant/40">
                   <RefreshCw className="w-5 h-5" />
                 </div>
                 <span className="text-[10px]">{t('social.camera.flipShort')}</span>

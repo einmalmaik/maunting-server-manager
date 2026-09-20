@@ -459,7 +459,7 @@ export function BlueprintsDocs() {
               <FieldRow field="source.manual" type="object" required={false}>{t('docs.reference.sourceManual')}</FieldRow>
             </FieldTable>
 
-            <div className="mt-3 p-3 rounded-md border border-status-info/30 bg-status-info/10 text-sm text-on-surface">
+            <div className="mt-3 p-3 rounded-md border border-primary/30 bg-primary/10 text-sm text-on-surface">
               <strong>{t('docs.reference.githubPrivateTitle', 'Private Repositories')}</strong>
               <p className="mt-1">
                 {t('docs.reference.githubPrivateBody',

@@ -130,7 +130,7 @@ export function CloudflareTab() {
         </p>
 
         {!settings.cloudflare_enabled && (
-          <div className="p-3 mb-4 bg-amber-500/10 border border-amber-500/30 rounded-md text-sm text-amber-600">
+          <div className="p-3 mb-4 bg-status-warning/10 border border-status-warning/30 rounded-md text-sm text-status-warning">
             {t('settings.cloudflare.disabledHint', { defaultValue: 'Cloudflare DNS ist unter Allgemein deaktiviert.' })}
           </div>
         )}
@@ -179,7 +179,7 @@ export function CloudflareTab() {
                     setClearToken(true)
                     setNewToken('')
                   }}
-                  className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-error transition-colors"
+                  className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-destructive transition-colors"
                   title={t('settings.cloudflare.deleteToken', { defaultValue: 'Token entfernen' })}
                   aria-label={t('settings.cloudflare.deleteToken', { defaultValue: 'Token entfernen' })}
                 >

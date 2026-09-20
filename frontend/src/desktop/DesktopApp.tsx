@@ -1040,7 +1040,7 @@ function Hauptseite({
               <button
                 type="button"
                 onClick={() => { setMobileMenuOffen(false); void abmelden(); }}
-                className="flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium text-status-error hover:bg-status-error/10 transition-colors"
+                className="flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium text-status-destructive hover:bg-status-destructive/10 transition-colors"
               >
                 <LogOut className="h-4 w-4" />
                 <span>{t('mss.app.abmelden')}</span>

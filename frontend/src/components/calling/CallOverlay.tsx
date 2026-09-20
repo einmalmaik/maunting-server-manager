@@ -283,7 +283,7 @@ export const CallOverlay: React.FC = () => {
     if (!aktiv) {
       return 'h-11 w-11 rounded-full bg-surface-container-high text-on-surface hover:bg-surface-container-highest'
     }
-    if (ton === 'warnung') return 'h-11 w-11 rounded-full bg-status-error/20 text-status-error hover:bg-status-error/30'
+    if (ton === 'warnung') return 'h-11 w-11 rounded-full bg-status-destructive/20 text-status-destructive hover:bg-status-destructive/30'
     if (ton === 'aktion') return 'h-11 w-11 rounded-full bg-primary/20 text-primary hover:bg-primary/30'
     return 'h-11 w-11 rounded-full bg-secondary/20 text-secondary hover:bg-secondary/30'
   }

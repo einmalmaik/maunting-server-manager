@@ -143,7 +143,7 @@ export function StoryViewerModal({
 
   const backgroundClass = currentStory.media_url
     ? 'bg-black'
-    : STORY_GRADIENTS[currentStory.background]?.class || 'bg-slate-900 text-white'
+    : STORY_GRADIENTS[currentStory.background]?.class || 'bg-surface-container-high text-white'
 
 
   return (
@@ -206,7 +206,7 @@ export function StoryViewerModal({
                   <Clock className="w-2.5 h-2.5" />
                   <span>{formatRelativeTime(currentStory.created_at, t)}</span>
                   <span>•</span>
-                  <Lock className="w-2.5 h-2.5 text-emerald-300" />
+                  <Lock className="w-2.5 h-2.5 text-status-success" />
                   <span>Ende-zu-Ende</span>
                 </div>
               </div>

@@ -3095,7 +3095,7 @@ export function Messenger() {
               size="sm"
               onClick={() => handleStartGroupCall(true)}
               disabled={!groupCallPermissions.canJoin}
-              className="h-8 gap-1.5 bg-surface-container-high/85 px-2.5 text-xs text-cyan-200 shadow-sm hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-60"
+              className="h-8 gap-1.5 bg-surface-container-high/85 px-2.5 text-xs text-primary shadow-sm hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-60"
               title={
                 groupCallPermissions.canJoin
                   ? t('messenger.joinOngoingCall')
@@ -3157,7 +3157,7 @@ export function Messenger() {
               <Sparkles className="w-3.5 h-3.5" />
               <span>{t('messenger.nav.updates')}</span>
               {stories.length > 0 && (
-                <span className={`w-2 h-2 rounded-full ${mobileNavTab === 'updates' ? 'bg-white' : 'bg-emerald-500 animate-pulse'}`} />
+                <span className={`w-2 h-2 rounded-full ${mobileNavTab === 'updates' ? 'bg-white' : 'bg-status-success animate-pulse'}`} />
               )}
             </button>
             <button
@@ -3336,7 +3336,7 @@ export function Messenger() {
                         <Plus className="w-2.5 h-2.5" />
                       </div>
                     ) : (
-                      <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-emerald-500 text-white text-[9px] font-bold flex items-center justify-center border-2 border-surface">
+                      <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-status-success text-white text-[9px] font-bold flex items-center justify-center border-2 border-surface">
                         {myStories.length}
                       </span>
                     )}
@@ -3368,7 +3368,7 @@ export function Messenger() {
                         />
                       </div>
                       {group.stories.length > 1 && (
-                        <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-indigo-600 text-white text-[9px] font-bold flex items-center justify-center border-2 border-surface">
+                        <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-primary text-on-primary text-[9px] font-bold flex items-center justify-center border-2 border-surface">
                           {group.stories.length}
                         </span>
                       )}
@@ -3508,7 +3508,7 @@ export function Messenger() {
                                   {c.username}
                                 </span>
                                 {isUserBlocked && (
-                                  <span className="text-[9px] px-1 rounded bg-status-error/15 text-status-error font-medium">
+                                  <span className="text-[9px] px-1 rounded bg-status-destructive/15 text-status-destructive font-medium">
                                     Blockiert
                                   </span>
                                 )}
@@ -3683,7 +3683,7 @@ export function Messenger() {
                               />
                             </div>
                             {grp.stories.length > 1 && (
-                              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-indigo-600 text-white text-[9px] font-bold flex items-center justify-center border border-surface">
+                              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-primary text-on-primary text-[9px] font-bold flex items-center justify-center border border-surface">
                                 {grp.stories.length}
                               </span>
                             )}
@@ -3995,7 +3995,7 @@ export function Messenger() {
                       </span>
                     )}
                     {activeContact && isBlocked(activeContact.userId) && (
-                      <span className="px-1.5 py-0.2 rounded-md bg-status-error/15 text-status-error text-[9px] font-semibold">
+                      <span className="px-1.5 py-0.2 rounded-md bg-status-destructive/15 text-status-destructive text-[9px] font-semibold">
                         Blockiert
                       </span>
                     )}
@@ -4191,8 +4191,8 @@ export function Messenger() {
                       onClick={() => setIsBlockConfirmOpen(true)}
                       className={`h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 shadow-sm ${
                         isBlocked(activeContact.userId)
-                          ? 'text-status-error'
-                          : 'text-on-surface-variant hover:text-status-error'
+                          ? 'text-status-destructive'
+                          : 'text-on-surface-variant hover:text-status-destructive'
                       }`}
                       title={
                         isBlocked(activeContact.userId)
@@ -4226,7 +4226,7 @@ export function Messenger() {
                 {/* WhatsApp-style encryption notice banner */}
                 <div className="py-1 text-center">
                   <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high/60 border border-outline-variant/30 text-[11px] text-on-surface-variant shadow-2xs">
-                    <Lock className="w-3 h-3 text-emerald-400" />
+                    <Lock className="w-3 h-3 text-status-success" />
                     <span>{t('messenger.e2eeBanner')}</span>
                   </div>
                 </div>
@@ -4248,7 +4248,7 @@ export function Messenger() {
                     return (
                       <div key={msg.id} className="py-1 text-center">
                         <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high/60 border border-outline-variant/30 text-[11px] text-on-surface-variant shadow-2xs">
-                          <Shield className="w-3 h-3 text-amber-400 shrink-0" />
+                          <Shield className="w-3 h-3 text-status-warning shrink-0" />
                           <span>{msg.text}</span>
                         </div>
                       </div>
@@ -4331,7 +4331,7 @@ export function Messenger() {
                               onClick={cycleAudioPlaybackRate}
                               className={`w-10 h-10 rounded-full font-bold text-xs shadow-sm flex items-center justify-center shrink-0 hover:scale-105 active:scale-95 transition-all ${
                                 msg.isSelf
-                                  ? 'bg-white text-[#0c2e35] hover:bg-white/90'
+                                  ? 'bg-white text-on-primary hover:bg-white/90'
                                   : 'bg-primary text-on-primary hover:opacity-90'
                               }`}
                               title={t('messenger.playbackSpeedHint')}
@@ -4356,7 +4356,7 @@ export function Messenger() {
                                 onClick={cycleAudioPlaybackRate}
                                 className={`absolute -bottom-1 -right-1 px-1 py-0.5 rounded-full font-bold text-[9px] shadow-sm border border-surface leading-none hover:scale-110 transition-transform ${
                                   msg.isSelf
-                                    ? 'bg-white text-[#0c2e35]'
+                                    ? 'bg-white text-on-primary'
                                     : 'bg-primary text-on-primary'
                                 }`}
                                 title={t('messenger.playbackSpeedHint')}
@@ -4373,7 +4373,7 @@ export function Messenger() {
                             onClick={() => void togglePlayAudio(msg.id, msg.audioAttachment!, medienBindung(msg))}
                             className={`w-8 h-8 rounded-full shrink-0 shadow-sm flex items-center justify-center transition-all ${
                               msg.isSelf
-                                ? 'bg-white text-[#0c2e35] hover:bg-white/90'
+                                ? 'bg-white text-on-primary hover:bg-white/90'
                                 : 'bg-primary text-on-primary hover:opacity-90'
                             }`}
                             aria-label={playingAudioId === msg.id ? 'Pause' : 'Abspielen'}
@@ -4461,7 +4461,7 @@ export function Messenger() {
                         <div
                           className={`p-3 rounded-xl border text-xs shadow-sm space-y-2.5 ${
                             msg.isSelf
-                              ? 'bg-slate-950/80 border-white/20 text-white'
+                              ? 'bg-surface-container-lowest/80 border-white/20 text-white'
                               : 'bg-surface-container-lowest border-outline-variant/50 text-on-surface'
                           }`}
                         >
@@ -4471,7 +4471,7 @@ export function Messenger() {
                             }`}
                           >
                             <div className="flex items-center gap-1.5 font-bold text-xs truncate">
-                              <StickyNote className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                              <StickyNote className="w-3.5 h-3.5 text-status-warning shrink-0" />
                               <span className="truncate text-white font-medium">{msg.noteAttachment.title || 'Notiz'}</span>
                             </div>
                             {(() => {
@@ -4493,7 +4493,7 @@ export function Messenger() {
                                   }`}
                                   title={isImported ? t('messenger.noteTakenAlready') : t('messenger.takeNote')}
                                 >
-                                  {isImported ? <Check className="w-3 h-3 text-emerald-400" /> : <Download className="w-3 h-3" />}
+                                  {isImported ? <Check className="w-3 h-3 text-status-success" /> : <Download className="w-3 h-3" />}
                                   <span>{isImported ? t('messenger.taken') : t('common.apply')}</span>
                                 </Button>
                               )
@@ -4510,7 +4510,7 @@ export function Messenger() {
                         <div
                           className={`p-3 rounded-xl border text-xs shadow-sm space-y-2.5 ${
                             msg.isSelf
-                              ? 'bg-slate-950/80 border-white/20 text-white'
+                              ? 'bg-surface-container-lowest/80 border-white/20 text-white'
                               : 'bg-surface-container-lowest border-outline-variant/50 text-on-surface'
                           }`}
                         >
@@ -4520,8 +4520,8 @@ export function Messenger() {
                             }`}
                           >
                             <div className="flex items-center gap-1.5 font-bold text-xs truncate">
-                              <div className="w-5 h-5 rounded-md bg-cyan-500/20 flex items-center justify-center shrink-0">
-                                <CalendarIcon className="w-3.5 h-3.5 text-cyan-300" />
+                              <div className="w-5 h-5 rounded-md bg-primary/20 flex items-center justify-center shrink-0">
+                                <CalendarIcon className="w-3.5 h-3.5 text-primary" />
                               </div>
                               <span className="truncate text-white font-medium">{msg.calendarAttachment.title || 'Termin'}</span>
                             </div>
@@ -4544,14 +4544,14 @@ export function Messenger() {
                                   }`}
                                   title={isImported ? t('messenger.eventTakenAlready') : t('messenger.takeEvent')}
                                 >
-                                  {isImported ? <Check className="w-3 h-3 text-emerald-400" /> : <Plus className="w-3 h-3" />}
+                                  {isImported ? <Check className="w-3 h-3 text-status-success" /> : <Plus className="w-3 h-3" />}
                                   <span>{isImported ? 'Eingetragen' : 'Eintragen'}</span>
                                 </Button>
                               )
                             })()}
                           </div>
                           <div className="text-[11px] text-white/90 flex items-center gap-1.5 font-medium">
-                            <Clock className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                            <Clock className="w-3.5 h-3.5 text-primary shrink-0" />
                             <span>
                               {new Date(msg.calendarAttachment.start).toLocaleString([], {
                                 dateStyle: 'short',
@@ -4561,7 +4561,7 @@ export function Messenger() {
                           </div>
                           {msg.calendarAttachment.location && (
                             <div className="text-[11px] text-white/80 flex items-center gap-1.5">
-                              <MapPin className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                              <MapPin className="w-3.5 h-3.5 text-primary shrink-0" />
                               <span>{msg.calendarAttachment.location}</span>
                             </div>
                           )}
@@ -4600,7 +4600,7 @@ export function Messenger() {
                           ) : (
                             <div
                               className={`w-11 h-11 rounded-lg shrink-0 flex items-center justify-center text-[8px] font-bold text-white shadow-sm ${
-                                STORY_GRADIENTS[msg.storyReply.storyBackground || 'gradient-1']?.class || 'bg-slate-800'
+                                STORY_GRADIENTS[msg.storyReply.storyBackground || 'gradient-1']?.class || 'bg-surface-container-high'
                               }`}
                             >
                               {t('messenger.statusTile')}
@@ -4682,7 +4682,7 @@ export function Messenger() {
                           <button
                             type="button"
                             onClick={() => void handleDeleteMessage(msg)}
-                            className="p-1 rounded-md hover:bg-surface-container-highest text-on-surface-variant hover:text-destructive transition-colors"
+                            className="p-1 rounded-md hover:bg-surface-container-highest text-on-surface-variant hover:text-status-destructive transition-colors"
                             title={t('messenger.deleteForAll')}
                             aria-label={t('messenger.deleteForAll')}
                           >
@@ -4704,7 +4704,7 @@ export function Messenger() {
                           </span>
                         ) : msg.isRead && readReceiptsEnabled ? (
                           <span title={t('messenger.stateRead')} className="inline-flex items-center">
-                            <CheckCheck className="w-3.5 h-3.5 text-cyan-400" />
+                            <CheckCheck className="w-3.5 h-3.5 text-primary" />
                           </span>
                         ) : msg.isDelivered ? (
                           <span title={t('messenger.stateDelivered')} className="inline-flex items-center">
@@ -4726,8 +4726,8 @@ export function Messenger() {
                   <div className="flex items-center gap-2 text-xs py-1.5 px-3 rounded-full bg-surface-container-high/90 border border-outline-variant/30 text-on-surface w-fit shadow-sm animate-slide-up">
                     {partnerActivity.status === 'recording' ? (
                       <>
-                        <Mic className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
-                        <span className="text-[11px] text-rose-400 font-medium">
+                        <Mic className="w-3.5 h-3.5 text-status-destructive animate-pulse" />
+                        <span className="text-[11px] text-status-destructive font-medium">
                           {activeGroup ? `${partnerActivity.username || 'Jemand'} nimmt Audio auf …` : t('messenger.recordingVoice')}
                         </span>
                       </>
@@ -4827,7 +4827,7 @@ export function Messenger() {
               {/* Footer Input Area */}
               <div className="p-2.5 border-t border-outline-variant/20 bg-surface-container-low relative z-1">
                 {activeContact && isBlocked(activeContact.userId) ? (
-                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3 rounded-xl bg-status-error/10 border border-status-error/30 text-xs text-status-error">
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3 rounded-xl bg-status-destructive/10 border border-status-destructive/30 text-xs text-status-destructive">
                     <div className="flex items-center gap-2">
                       <Ban className="w-4 h-4 shrink-0" />
                       <span>{t('messenger.contactBlocked')}</span>
@@ -4836,7 +4836,7 @@ export function Messenger() {
                       variant="ghost"
                       size="sm"
                       onClick={() => void unblockUser(activeContact.userId)}
-                      className="h-7 text-xs px-3 border border-status-error/30 hover:bg-status-error/20 text-status-error font-medium"
+                      className="h-7 text-xs px-3 border border-status-destructive/30 hover:bg-status-destructive/20 text-status-destructive font-medium"
                     >
                       {t('messenger.unblock')}
                     </Button>
@@ -5020,7 +5020,7 @@ export function Messenger() {
                               variant={isStickerPickerOpen ? 'secondary' : 'ghost'}
                               size="icon"
                               onClick={() => setIsStickerPickerOpen((prev) => !prev)}
-                              className="h-8 w-8 rounded-full p-0 text-on-surface-variant hover:text-amber-400"
+                              className="h-8 w-8 rounded-full p-0 text-on-surface-variant hover:text-status-warning"
                               title={t('messenger.stickers')}
                               aria-label={t('messenger.pickSticker')}
                             >
@@ -5053,7 +5053,7 @@ export function Messenger() {
                                     className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
                                     aria-label={t('messenger.attachPhoto')}
                                   >
-                                    <div className="w-7 h-7 rounded-lg bg-pink-500/15 text-pink-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                                    <div className="w-7 h-7 rounded-lg bg-primary/15 text-primary flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
                                       <Camera className="w-4 h-4" />
                                     </div>
                                     <div className="min-w-0 flex-1">
@@ -5071,7 +5071,7 @@ export function Messenger() {
                                     className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
                                     aria-label={t('messenger.pickPhoto')}
                                   >
-                                    <div className="w-7 h-7 rounded-lg bg-purple-500/15 text-purple-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                                    <div className="w-7 h-7 rounded-lg bg-primary/15 text-primary flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
                                       <ImageIcon className="w-4 h-4" />
                                     </div>
                                     <div className="min-w-0 flex-1">
@@ -5089,7 +5089,7 @@ export function Messenger() {
                                     className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
                                     aria-label={t('messenger.attachFile')}
                                   >
-                                    <div className="w-7 h-7 rounded-lg bg-indigo-500/15 text-indigo-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                                    <div className="w-7 h-7 rounded-lg bg-primary/15 text-primary flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
                                       <Paperclip className="w-4 h-4" />
                                     </div>
                                     <div className="min-w-0 flex-1">
@@ -5107,7 +5107,7 @@ export function Messenger() {
                                     className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
                                     aria-label={t('messenger.shareNote')}
                                   >
-                                    <div className="w-7 h-7 rounded-lg bg-amber-500/15 text-amber-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                                    <div className="w-7 h-7 rounded-lg bg-primary/15 text-primary flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
                                       <StickyNote className="w-4 h-4" />
                                     </div>
                                     <div className="min-w-0 flex-1">
@@ -5125,7 +5125,7 @@ export function Messenger() {
                                     className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
                                     aria-label={t('messenger.shareEvent')}
                                   >
-                                    <div className="w-7 h-7 rounded-lg bg-cyan-500/15 text-cyan-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                                    <div className="w-7 h-7 rounded-lg bg-primary/15 text-primary flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
                                       <CalendarIcon className="w-4 h-4" />
                                     </div>
                                     <div className="min-w-0 flex-1">
@@ -5157,7 +5157,7 @@ export function Messenger() {
                                 variant="ghost"
                                 size="icon"
                                 onClick={() => setIsVideoNoteRecording(true)}
-                                className="h-8 w-8 p-0 text-on-surface-variant hover:text-emerald-400 hover:bg-emerald-500/10 rounded-full"
+                                className="h-8 w-8 p-0 text-on-surface-variant hover:text-status-success hover:bg-status-success/10 rounded-full"
                                 title={t('messenger.recordVideoNoteHint')}
                                 aria-label={t('messenger.recordVideoNote')}
                               >
@@ -5269,7 +5269,7 @@ export function Messenger() {
         <DialogContent className="max-w-md max-h-[75vh] flex flex-col p-4">
           <div className="flex items-center justify-between pb-3 border-b border-outline-variant/20">
             <div className="flex items-center gap-2">
-              <StickyNote className="w-4 h-4 text-amber-400" />
+              <StickyNote className="w-4 h-4 text-status-warning" />
               <span className="font-headline text-body-sm font-bold text-primary">{t('messenger.shareNote')}</span>
             </div>
           </div>
@@ -5326,7 +5326,7 @@ export function Messenger() {
         <DialogContent className="max-w-md max-h-[75vh] flex flex-col p-4">
           <div className="flex items-center justify-between pb-3 border-b border-outline-variant/20">
             <div className="flex items-center gap-2">
-              <CalendarIcon className="w-4 h-4 text-cyan-400" />
+              <CalendarIcon className="w-4 h-4 text-primary" />
               <span className="font-headline text-body-sm font-bold text-primary">{t('messenger.shareEventTitle')}</span>
             </div>
           </div>
@@ -5698,7 +5698,7 @@ export function Messenger() {
       <Dialog open={isBlockConfirmOpen} onOpenChange={setIsBlockConfirmOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle className={`flex items-center gap-2 ${activeContact && isBlocked(activeContact.userId) ? 'text-primary' : 'text-status-error'}`}>
+            <DialogTitle className={`flex items-center gap-2 ${activeContact && isBlocked(activeContact.userId) ? 'text-primary' : 'text-status-destructive'}`}>
               <Ban className="w-5 h-5" />
               <span>
                 {activeContact && isBlocked(activeContact.userId)

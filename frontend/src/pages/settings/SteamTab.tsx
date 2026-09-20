@@ -120,7 +120,7 @@ export function SteamTab() {
                     setClearSteamKey(true)
                     setNewSteamKey('')
                   }}
-                  className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-error transition-colors"
+                  className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-destructive transition-colors"
                   title={t('settings.steamDeleteKey', { defaultValue: 'Schlüssel entfernen' })}
                   aria-label={t('settings.steamDeleteKey', { defaultValue: 'Schlüssel entfernen' })}
                 >
@@ -236,7 +236,7 @@ export function SteamTab() {
         </div>
 
         <div className="space-y-4">
-          <div className="p-3 bg-status-error/10 border border-status-error/30 rounded-md text-sm text-status-error flex items-start gap-2">
+          <div className="p-3 bg-status-destructive/10 border border-status-destructive/30 rounded-md text-sm text-status-destructive flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
             <span>{t('settings.steamAccountWarning')}</span>
           </div>

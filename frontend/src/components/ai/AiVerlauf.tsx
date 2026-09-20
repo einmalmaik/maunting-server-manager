@@ -262,7 +262,7 @@ export const AiAntwortblase = memo(function AiAntwortblase({
           </p>
         )}
         {message.status === 'failed' && (
-          <p className="mt-2 text-xs text-status-error">{t('ai.chat.failed')}</p>
+          <p className="mt-2 text-xs text-status-destructive">{t('ai.chat.failed')}</p>
         )}
       </div>
     </article>
@@ -307,7 +307,7 @@ function AiWerkzeugzeile({ tool }: { tool: AiToolUse }) {
                   : gruppe === 'calendar'
                     ? <Calendar className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />
                     : gruppe === 'geo'
-                      ? <Globe2 className="h-3.5 w-3.5 shrink-0 text-teal-400" aria-hidden="true" />
+                      ? <Globe2 className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />
                       : <Wrench className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />}
         <span>{skillLabel ?? t(`ai.tools.${tool.tool_name}`, { defaultValue: tool.tool_name })}</span>
         {/* Ausklappbare Fehlerdetails beim Klick auf den Fehlschlag */}
@@ -315,7 +315,7 @@ function AiWerkzeugzeile({ tool }: { tool: AiToolUse }) {
           <button
             type="button"
             onClick={() => setErrorOpen(!errorOpen)}
-            className="inline-flex items-center gap-1 text-status-error hover:underline cursor-pointer focus:outline-none"
+            className="inline-flex items-center gap-1 text-status-destructive hover:underline cursor-pointer focus:outline-none"
             title={t('ai.chat.toolFailedToggle', { defaultValue: 'Fehlerdetails anzeigen/verstecken' })}
           >
             <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -329,9 +329,9 @@ function AiWerkzeugzeile({ tool }: { tool: AiToolUse }) {
         )}
       </div>
       {tool.failed && errorOpen && failureDetail && (
-        <div className="ml-5 p-2 rounded bg-status-error/10 border border-status-error/20 text-xs text-status-error font-mono break-all whitespace-pre-wrap">
+        <div className="ml-5 p-2 rounded bg-status-destructive/10 border border-status-destructive/20 text-xs text-status-destructive font-mono break-all whitespace-pre-wrap">
           {tool.error_code && (
-            <div className="font-semibold mb-1 text-[11px] uppercase tracking-wider text-status-error/90">
+            <div className="font-semibold mb-1 text-[11px] uppercase tracking-wider text-status-destructive/90">
               {tool.error_code}
             </div>
           )}
@@ -406,7 +406,7 @@ function AiWerkzeuggruppe(
       {/* Ein Fehlschlag darf sich nicht hinter dem Zuklappen verstecken: er ist
           genau die Auskunft, wegen der die Zeile ueberhaupt existiert. */}
       {gescheitert && (
-        <span className="inline-flex items-center gap-1 text-status-error">
+        <span className="inline-flex items-center gap-1 text-status-destructive">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           {t('ai.chat.toolFailed')}
         </span>

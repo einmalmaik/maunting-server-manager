@@ -116,19 +116,19 @@ export function VoiceRecordingBar({
   const isPrimary = variant === 'primary'
 
   const dotColor = isDanger
-    ? 'bg-status-danger shadow-[0_0_8px_hsl(0_70%_55%/0.6)]'
+    ? 'bg-status-destructive shadow-[0_0_8px_hsl(var(--dna-danger)/0.6)]'
     : isPrimary
     ? 'bg-primary shadow-[0_0_8px_hsl(187_85%_60%/0.6)]'
     : 'bg-status-success shadow-[0_0_8px_hsl(158_64%_52%/0.6)]'
 
   const barColor = isDanger
-    ? 'bg-status-danger/75'
+    ? 'bg-status-destructive/75'
     : isPrimary
     ? 'bg-primary/75'
     : 'bg-status-success/75'
 
   const glowBorder = isDanger
-    ? 'border-status-danger/25 bg-status-danger/[0.06]'
+    ? 'border-status-destructive/25 bg-status-destructive/[0.06]'
     : isPrimary
     ? 'border-primary/25 bg-primary/[0.06]'
     : 'border-status-success/25 bg-status-success/[0.06]'
@@ -195,7 +195,7 @@ export function VoiceRecordingBar({
           <button
             type="button"
             onClick={onCancel}
-            className="h-8 px-3 text-xs rounded-xl font-medium text-white/60 hover:text-status-danger hover:bg-status-danger/10 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
+            className="h-8 px-3 text-xs rounded-xl font-medium text-white/60 hover:text-status-destructive hover:bg-status-destructive/10 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
             title={cancelLabel}
             aria-label={cancelLabel}
           >
@@ -210,7 +210,7 @@ export function VoiceRecordingBar({
             onClick={onConfirm}
             className={`h-8 px-3.5 text-xs rounded-xl font-medium text-white active:scale-95 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer ${
               isDanger
-                ? 'bg-status-danger hover:bg-status-danger/90 text-white shadow-status-danger/20'
+                ? 'bg-status-destructive hover:bg-status-destructive/90 text-white shadow-status-destructive/20'
                 : 'bg-primary hover:bg-primary/90 text-on-primary shadow-primary/20'
             }`}
             title={confirmLabel}

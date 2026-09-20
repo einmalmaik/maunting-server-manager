@@ -411,7 +411,7 @@ export function AudioTab() {
           {isTesting && (
             <div className="flex items-center justify-between text-xs px-1 text-on-surface-variant">
               <span>Pegel: {Math.round(testLevel * 100)}%</span>
-              <span className={testLevel > 0.05 ? 'text-emerald-400 font-semibold' : 'text-on-surface-variant/60'}>
+              <span className={testLevel > 0.05 ? 'text-status-success font-semibold' : 'text-on-surface-variant/60'}>
                 {testLevel > 0.05 ? t('profile.audioSignalDetected', 'Signal erkannt') : 'Kein Signal'}
               </span>
             </div>

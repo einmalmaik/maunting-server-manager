@@ -3587,7 +3587,15 @@
     "add": "Add",
     "openUserMenu": "Open user menu",
     "decrease": "Decrease value",
-    "increase": "Increase value"
+    "increase": "Increase value",
+    "palette": {
+      "blue": "Blue",
+      "cyan": "Cyan",
+      "green": "Green",
+      "purple": "Purple",
+      "red": "Red",
+      "yellow": "Yellow"
+    }
   },
   "serverDetail": {
     "showServerOverview": "Server overview",

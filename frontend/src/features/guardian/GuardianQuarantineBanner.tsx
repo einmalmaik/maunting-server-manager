@@ -76,9 +76,9 @@ export const GuardianQuarantineBanner: React.FC<GuardianQuarantineBannerProps> =
   };
 
   return (
-    <div className="msm-card p-4 border-status-error/40 bg-status-error/5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+    <div className="msm-card p-4 border-status-destructive/40 bg-status-destructive/5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
       <div className="flex items-start gap-3">
-        <AlertTriangle className="w-5 h-5 text-status-error flex-shrink-0 mt-0.5" />
+        <AlertTriangle className="w-5 h-5 text-status-destructive flex-shrink-0 mt-0.5" />
         <div>
           <p className="font-headline text-body-md text-on-surface font-semibold mb-1">
             {t("servers.guardian.quarantine.title")}

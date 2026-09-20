@@ -359,7 +359,7 @@ export function ResourceEditorDialog({
               {t('serverDetail.resourceEditor.cpuHint')}
             </p>
             {errors.cpu && (
-              <p id="resource-cpu-error" role="alert" className="font-body-md text-xs text-status-error mt-1" data-testid="resource-cpu-error">
+              <p id="resource-cpu-error" role="alert" className="font-body-md text-xs text-status-destructive mt-1" data-testid="resource-cpu-error">
                 {errors.cpu}
               </p>
             )}
@@ -391,7 +391,7 @@ export function ResourceEditorDialog({
               {t('serverDetail.resourceEditor.ramHint')}
             </p>
             {errors.ram && (
-              <p id="resource-ram-error" role="alert" className="font-body-md text-xs text-status-error mt-1" data-testid="resource-ram-error">
+              <p id="resource-ram-error" role="alert" className="font-body-md text-xs text-status-destructive mt-1" data-testid="resource-ram-error">
                 {errors.ram}
               </p>
             )}
@@ -423,7 +423,7 @@ export function ResourceEditorDialog({
               {t('serverDetail.resourceEditor.diskHint')}
             </p>
             {errors.disk && (
-              <p id="resource-disk-error" role="alert" className="font-body-md text-xs text-status-error mt-1" data-testid="resource-disk-error">
+              <p id="resource-disk-error" role="alert" className="font-body-md text-xs text-status-destructive mt-1" data-testid="resource-disk-error">
                 {errors.disk}
               </p>
             )}
@@ -432,10 +432,10 @@ export function ResourceEditorDialog({
           {formError && (
             <div
               role="alert"
-              className="p-3 rounded-md border border-status-error/30 bg-status-error/5"
+              className="p-3 rounded-md border border-status-destructive/30 bg-status-destructive/5"
               data-testid="resource-form-error"
             >
-              <p className="font-body-md text-sm text-status-error">
+              <p className="font-body-md text-sm text-status-destructive">
                 {formError}
               </p>
             </div>

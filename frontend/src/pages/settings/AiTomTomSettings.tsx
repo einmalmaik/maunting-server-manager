@@ -140,7 +140,7 @@ export function AiTomTomSettings({ canWrite }: { canWrite: boolean }) {
         <p className={`flex items-center gap-2 rounded-lg border p-3 text-xs ${
           testStatus.traffic_status === 'available'
             ? 'border-status-success/30 bg-status-success/10 text-status-success'
-            : 'border-status-error/30 bg-status-error/10 text-status-error'
+            : 'border-status-destructive/30 bg-status-destructive/10 text-status-destructive'
         }`} role="status">
           {testStatus.traffic_status === 'available'
             ? <CircleCheck className="h-4 w-4 shrink-0" aria-hidden="true" />

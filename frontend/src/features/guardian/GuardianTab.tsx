@@ -189,7 +189,7 @@ export const GuardianTab: React.FC<GuardianTabProps> = ({
         );
       case "quarantined":
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-mono-sm border border-status-error/30 bg-status-error/10 text-status-error">
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-mono-sm border border-status-destructive/30 bg-status-destructive/10 text-status-destructive">
             <AlertTriangle className="w-3 h-3" />
             {t("servers.guardian.tab.status.quarantined")}
           </span>

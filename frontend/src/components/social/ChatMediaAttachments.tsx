@@ -260,8 +260,8 @@ export function ChatMediaImage({ attachment, bindung, onViewImage }: ChatMediaIm
 
   if (error) {
     return (
-      <div className="rounded-xl border border-destructive/20 bg-destructive/5 my-1 p-3 flex flex-col items-center justify-center min-h-[90px] w-56 sm:w-64 space-y-2 text-center">
-        <div className="flex items-center gap-1.5 text-xs text-destructive font-medium">
+      <div className="rounded-xl border border-status-destructive/20 bg-status-destructive/5 my-1 p-3 flex flex-col items-center justify-center min-h-[90px] w-56 sm:w-64 space-y-2 text-center">
+        <div className="flex items-center gap-1.5 text-xs text-status-destructive font-medium">
           <AlertCircle className="w-4 h-4 shrink-0" />
           <span>{t('social.attachment.imageFailed')}</span>
         </div>

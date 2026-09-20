@@ -223,7 +223,7 @@ export function AccountTab() {
               <p className="font-label-md text-base text-on-surface font-semibold">{user?.username}</p>
               <p className="font-body-md text-sm text-on-surface-variant">{user?.email}</p>
               {user?.email_verified === false && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-status-error/10 text-status-error border border-status-error/30 mt-1.5">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-status-destructive/10 text-status-destructive border border-status-destructive/30 mt-1.5">
                   <AlertTriangle className="w-3 h-3" />
                   {t('profile.notVerified', 'Nicht verifiziert')}
                 </span>
@@ -259,7 +259,7 @@ export function AccountTab() {
                   size="sm"
                   disabled={uploadingAvatar}
                   onClick={() => void handleDeleteAvatar()}
-                  className="flex items-center gap-1.5 text-status-error hover:text-status-error hover:bg-error-container/20"
+                  className="flex items-center gap-1.5 text-status-destructive hover:bg-status-destructive/10"
                 >
                   <Trash2 className="w-4 h-4" aria-hidden="true" />
                   {t('profile.removeAvatar', 'Entfernen')}
@@ -387,7 +387,7 @@ export function AccountTab() {
         </div>
 
         {locationSharingError && (
-          <p className="mt-4 text-sm text-status-error" role="alert">
+          <p className="mt-4 text-sm text-status-destructive" role="alert">
             {locationSharingError}
           </p>
         )}

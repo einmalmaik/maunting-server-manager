@@ -220,7 +220,7 @@ export const CircularVideoNoteRecorder: React.FC<CircularVideoNoteRecorderProps>
         </svg>
 
         {/* Circular Video Container */}
-        <div className="w-[92%] h-[92%] rounded-full overflow-hidden border-2 border-emerald-500/50 bg-slate-900 shadow-2xl relative">
+        <div className="w-[92%] h-[92%] rounded-full overflow-hidden border-2 border-status-success/50 bg-surface-container-high shadow-2xl relative">
           <video
             ref={videoRef}
             autoPlay
@@ -229,13 +229,13 @@ export const CircularVideoNoteRecorder: React.FC<CircularVideoNoteRecorderProps>
             className="w-full h-full object-cover -scale-x-100"
           />
           <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/60 px-2.5 py-0.5 rounded-full text-xs font-mono text-white flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+            <span className="w-2 h-2 rounded-full bg-status-destructive animate-pulse" />
             <span>{elapsedSeconds}s / {MAX_VIDEO_NOTE_DURATION_SEC}s</span>
           </div>
 
           {!isLocked && gestengefuehrt && (
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/60 px-3 py-1 rounded-full text-[11px] text-white/80 flex items-center gap-1 animate-bounce">
-              <Lock className="w-3 h-3 text-emerald-400" />
+              <Lock className="w-3 h-3 text-status-success" />
               <span>{t('social.videoNote.swipeToLock')}</span>
             </div>
           )}
@@ -256,7 +256,7 @@ export const CircularVideoNoteRecorder: React.FC<CircularVideoNoteRecorderProps>
           <button
             type="button"
             onClick={handleStopAndFinish}
-            className="w-14 h-14 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white flex items-center justify-center shadow-lg shadow-emerald-500/30 transition-transform hover:scale-105"
+            className="w-14 h-14 rounded-full bg-status-success hover:bg-status-success/90 text-on-surface flex items-center justify-center shadow-lg shadow-status-success/30 transition-transform hover:scale-105"
             title={t('social.videoNote.send')}
           >
             <Check className="w-7 h-7" />

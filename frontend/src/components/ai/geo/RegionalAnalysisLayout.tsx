@@ -132,7 +132,7 @@ export function RegionalAnalysisLayout({
           onClick={onClose}
           aria-label={t('ai.geo.close', 'Schließen')}
           title={t('ai.geo.close', 'Schließen')}
-          className="h-8 shrink-0 px-2 rounded-lg text-xs font-medium text-on-surface-variant hover:text-status-danger hover:bg-status-danger/10 border border-outline-variant/30 flex items-center gap-1 transition-colors"
+          className="h-8 shrink-0 px-2 rounded-lg text-xs font-medium text-on-surface-variant hover:text-status-destructive hover:bg-status-destructive/10 border border-outline-variant/30 flex items-center gap-1 transition-colors"
         >
           <X className="h-4 w-4" />
           <span className="hidden sm:inline">{t('ai.geo.close', 'Schließen')}</span>

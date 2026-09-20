@@ -48,6 +48,6 @@ describe('TabBar', () => {
     render(<TabBar tabs={dangerTabs} active="danger" onChange={() => {}} ariaLabel="Danger" />)
 
     const danger = screen.getByRole('tab', { name: 'profile.tabs.danger' })
-    expect(danger.className).toMatch(/status-error/)
+    expect(danger.className).toMatch(/status-destructive/)
   })
 })

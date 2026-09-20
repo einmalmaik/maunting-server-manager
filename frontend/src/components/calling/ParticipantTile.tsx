@@ -87,7 +87,7 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
         <div className="flex shrink-0 items-center gap-1.5 text-on-surface-variant">
           {lokalStumm && <VolumeX className="h-3.5 w-3.5 text-status-warning" aria-label={t('calls.mutedForYou')} />}
           {participant.isMuted ? (
-            <MicOff className="h-3.5 w-3.5 text-status-error" aria-label={t('calls.micOff')} />
+            <MicOff className="h-3.5 w-3.5 text-status-destructive" aria-label={t('calls.micOff')} />
           ) : (
             <Mic className="h-3.5 w-3.5" aria-label={t('calls.micOn')} />
           )}
@@ -131,7 +131,7 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
         <span className="flex shrink-0 items-center gap-1 rounded-full bg-surface/85 px-2 py-0.5 text-on-surface-variant backdrop-blur-sm">
           {lokalStumm && <VolumeX className="h-3.5 w-3.5 text-status-warning" aria-label={t('calls.mutedForYou')} />}
           {participant.isMuted ? (
-            <MicOff className="h-3.5 w-3.5 text-status-error" aria-label={t('calls.micOff')} />
+            <MicOff className="h-3.5 w-3.5 text-status-destructive" aria-label={t('calls.micOff')} />
           ) : (
             <Mic className="h-3.5 w-3.5" aria-label={t('calls.micOn')} />
           )}

@@ -229,8 +229,8 @@ export function AiDevicePairingCard() {
                     {geraet.label || t('ai.profile.devicesUnnamed', 'Unbenanntes Gerät')}
                   </span>
                   {geraet.is_active !== false ? (
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-500 border border-emerald-500/20">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-status-success/10 px-2 py-0.5 text-xs font-medium text-status-success border border-status-success/20">
+                      <span className="h-1.5 w-1.5 rounded-full bg-status-success animate-pulse" />
                       {t('ai.profile.deviceActive', 'Online')}
                     </span>
                   ) : (

@@ -143,7 +143,7 @@ export function TwoFactorTab() {
             {t('profile.2faEnabled')}
           </span>
         ) : (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-status-error/10 text-status-error border border-status-error/30">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-status-destructive/10 text-status-destructive border border-status-destructive/30">
             <AlertTriangle className="w-3 h-3" />
             {t('profile.2faDisabled')}
           </span>

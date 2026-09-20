@@ -100,10 +100,10 @@ export function ResetPassword() {
 
           {status === 'error' && (
             <div className="text-center py-6 space-y-4">
-              <div className="w-16 h-16 rounded-full bg-status-error/10 border border-status-error/30 flex items-center justify-center mx-auto">
-                <X className="w-8 h-8 text-status-error" />
+              <div className="w-16 h-16 rounded-full bg-status-destructive/10 border border-status-destructive/30 flex items-center justify-center mx-auto">
+                <X className="w-8 h-8 text-status-destructive" />
               </div>
-              <p className="font-body-md text-base text-status-error">{message}</p>
+              <p className="font-body-md text-base text-status-destructive">{message}</p>
               <Link
                 to="/forgot-password"
                 className="msm-btn-secondary w-full py-3 flex items-center justify-center gap-2"

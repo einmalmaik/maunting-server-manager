@@ -22,6 +22,11 @@ import process from 'node:process'
  *
  * Dazu die Gegenprobe: jede `msm-*`-Klasse im Quelltext muss in index.css
  * stehen, und jede `animate-*`-Klasse in tailwind.config.ts oder index.css.
+ *
+ * Seit 09/2026 kommt eine dritte Pruefung dazu: Roh-Paletten. `text-emerald-400`
+ * rendert zwar, sagt aber nichts — und weil es rendert, faellt es erst auf, wenn
+ * dasselbe Gruen an der naechsten Stelle `text-status-success` heisst. Genau so
+ * entstanden vier Rottoene, drei Gelbtoene und zwei Gruentoene nebeneinander.
  */
 
 const root = process.cwd()
@@ -56,6 +61,41 @@ const GESPERRT = new Map([
   ['bg-scrim', 'msm-modal-overlay'],
 ])
 
+/**
+ * Roh-Paletten von Tailwind, wo ein Token gehoert. `from-`, `via-` und `to-`
+ * fehlen in der Praefixliste mit Absicht: ein Verlauf ist Schmuck und darf
+ * jede Farbe haben.
+ */
+const ROHFARBE = new RegExp(
+  '(?<![\\w-])(?:(?:hover|focus|focus-visible|active|group-hover|peer-focus|peer-checked|disabled|sm|md|lg|xl|2xl|dark):)*' +
+  '(?:bg|text|border|ring|shadow|fill|stroke|divide|outline|decoration|placeholder|accent|caret)-' +
+  '(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-' +
+  '\\d{2,3}(?:/\\d{1,3})?(?![\\w-])',
+  'g',
+)
+
+/**
+ * Die einzige Datei, in der Roh-Paletten stehen duerfen: die sechs
+ * Auswahlfarben fuer Kalender und Notizen. Drei davon bedeuten nichts und
+ * haben deshalb auch keinen Status-Token.
+ */
+const ROHFARBEN_ERLAUBT = new Set(['src/config/farbpalette.ts'])
+
+/** Tokennamen, die es einmal gab. Wert = was sie heute heissen. */
+const ABGESCHAFFT = new Map([
+  ['status-error', 'status-destructive'],
+  ['status-danger', 'status-destructive'],
+  ['status-info', 'primary'],
+  ['destructive', 'status-destructive'],
+  ['deep-background', 'background'],
+])
+const ABGESCHAFFT_MUSTER = new RegExp(
+  '(?<![\\w-])(?:(?:hover|focus|focus-visible|active|group-hover|peer-focus|peer-checked|disabled|sm|md|lg|xl|2xl|dark):)*' +
+  '(?:bg|text|border|ring|shadow|fill|stroke|divide|outline|decoration|placeholder|accent|caret|from|via|to)-' +
+  `(${[...ABGESCHAFFT.keys()].join('|')})(?:/\\d{1,3})?(?![\\w-])`,
+  'g',
+)
+
 const css = await readFile(cssFile, 'utf8')
 const config = await readFile(configFile, 'utf8')
 
@@ -76,6 +116,17 @@ const klassenMuster = /class(?:Name)?=(?:"([^"]*)"|'([^']*)'|\{`([^`]*)`\})/g
 for (const file of await sourceFiles(sourceDir)) {
   const source = await readFile(file, 'utf8')
   const relativ = path.relative(root, file).replace(/\\/g, '/')
+
+  // Diese beiden Pruefungen lesen die ganze Datei, nicht nur `className=`:
+  // Klassennamen stehen oft in einer Variablen oder einer Tabelle.
+  if (!ROHFARBEN_ERLAUBT.has(relativ)) {
+    for (const treffer of source.matchAll(ROHFARBE)) {
+      fehler.push(`${relativ}: "${treffer[0]}" ist eine Roh-Palette — nimm den Token der Bedeutung (status-*, primary, secondary, surface-*)`)
+    }
+  }
+  for (const treffer of source.matchAll(ABGESCHAFFT_MUSTER)) {
+    fehler.push(`${relativ}: "${treffer[0]}" gibt es nicht mehr — heute ${ABGESCHAFFT.get(treffer[1])}`)
+  }
 
   for (const treffer of source.matchAll(klassenMuster)) {
     const klassen = (treffer[1] ?? treffer[2] ?? treffer[3] ?? '')

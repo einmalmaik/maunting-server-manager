@@ -259,7 +259,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
           )}
 
           {cameraError && (
-            <div className="mb-4 flex items-center gap-2 rounded-xl bg-status-error/15 border border-status-error/30 px-3.5 py-2.5 text-xs text-status-error">
+            <div className="mb-4 flex items-center gap-2 rounded-xl bg-status-destructive/15 border border-status-destructive/30 px-3.5 py-2.5 text-xs text-status-destructive">
               <AlertCircle className="h-4 w-4 shrink-0" />
               <span>{t(cameraError)}</span>
             </div>

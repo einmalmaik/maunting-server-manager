@@ -281,7 +281,7 @@ export function Roles() {
                         {t('roles.system')}
                       </span>
                     ) : (
-                      <span className="text-xs px-1.5 py-0.5 rounded bg-status-info/10 text-status-info border border-status-info/30">
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/30">
                         {t('roles.custom')}
                       </span>
                     )}
@@ -309,7 +309,7 @@ export function Roles() {
                   {canManage && !role.is_system && (
                     <button
                       onClick={() => handleDelete(role)}
-                      className="text-status-error hover:text-status-error/80 transition-colors inline-flex items-center"
+                      className="text-status-destructive hover:text-status-destructive/80 transition-colors inline-flex items-center"
                       title={t('common.delete')}
                     >
                       <Trash2 className="w-4 h-4" />

@@ -124,9 +124,9 @@ export function ProfileDropdown({
     const sizeClasses = size === 'xs' ? 'w-1.5 h-1.5' : size === 'sm' ? 'w-2 h-2' : 'w-2.5 h-2.5'
     const colorClasses =
       status === 'online'
-        ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.6)]'
+        ? 'bg-status-success shadow-[0_0_6px_rgba(16,185,129,0.6)]'
         : status === 'away'
-        ? 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.6)]'
+        ? 'bg-status-warning shadow-[0_0_6px_rgba(245,158,11,0.6)]'
         : 'bg-on-surface-variant/50'
 
     return (
@@ -271,11 +271,11 @@ export function ProfileDropdown({
                     onClick={() => onStatusChange('online')}
                     className={`py-1 px-1.5 rounded-lg text-[10px] font-semibold flex items-center justify-center gap-1 transition-all ${
                       status === 'online'
-                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-sm'
+                        ? 'bg-status-success/20 text-status-success border border-status-success/40 shadow-sm'
                         : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest'
                     }`}
                   >
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-status-success shrink-0" />
                     Online
                   </button>
                   <button
@@ -283,11 +283,11 @@ export function ProfileDropdown({
                     onClick={() => onStatusChange('away')}
                     className={`py-1 px-1.5 rounded-lg text-[10px] font-semibold flex items-center justify-center gap-1 transition-all ${
                       status === 'away'
-                        ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40 shadow-sm'
+                        ? 'bg-status-warning/20 text-status-warning border border-status-warning/40 shadow-sm'
                         : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest'
                     }`}
                   >
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-status-warning shrink-0" />
                     Abwesend
                   </button>
                   <button
@@ -327,13 +327,13 @@ export function ProfileDropdown({
                     }}
                     className={`flex w-full items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium transition-colors ${
                       isDanger
-                        ? 'text-status-error hover:bg-error-container/20'
+                        ? 'text-status-destructive hover:bg-error-container/20'
                         : 'text-on-surface hover:bg-surface-container-highest'
                     }`}
                   >
                     {item.icon && (
                       <span
-                        className={`shrink-0 ${isDanger ? 'text-status-error' : 'text-primary'}`}
+                        className={`shrink-0 ${isDanger ? 'text-status-destructive' : 'text-primary'}`}
                         aria-hidden="true"
                       >
                         {item.icon}

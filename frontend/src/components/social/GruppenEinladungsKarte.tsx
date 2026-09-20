@@ -109,8 +109,8 @@ export const GruppenEinladungsKarte: React.FC<GruppenEinladungsKarteProps> = ({
               {t('social.invite.memberCount', { count: info.member_count })}
             </span>
             {info.live_call && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/20 px-1.5 py-0.5 font-medium text-emerald-300">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+              <span className="inline-flex items-center gap-1 rounded-full bg-status-success/20 px-1.5 py-0.5 font-medium text-status-success">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-status-success" />
                 {t('calls.live')}
                 {info.live_participants > 0 && ` · ${info.live_participants}`}
               </span>

@@ -722,7 +722,7 @@ function ProviderForm({
               <p className="text-xs text-on-surface-variant">{t('ai.providers.ttsHint')}</p>
             )}
             {!draft.provider_kind && (
-              <p className="text-xs text-status-error">{t('ai.providers.kindMissingHint')}</p>
+              <p className="text-xs text-status-destructive">{t('ai.providers.kindMissingHint')}</p>
             )}
           </div>
         </div>
@@ -751,7 +751,7 @@ function ProviderForm({
               {t('ai.providers.azureResourceHint', { url: adresse })}
             </p>
             {!draft.azure_resource_name?.trim() && (
-              <p className="text-xs text-status-error">{t('ai.providers.azureResourceMissing')}</p>
+              <p className="text-xs text-status-destructive">{t('ai.providers.azureResourceMissing')}</p>
             )}
           </div>
         )}
@@ -777,7 +777,7 @@ function ProviderForm({
               <button
                 type="button"
                 onClick={() => change({ clear_operator_api_key: true, operator_api_key: '' })}
-                className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-error transition-colors"
+                className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-destructive transition-colors"
                 title={t('ai.providers.clearKey')}
                 aria-label={t('ai.providers.clearKey')}
               >
@@ -1422,7 +1422,7 @@ function ProviderForm({
           className={`flex items-start gap-2 rounded-lg border p-3 text-xs leading-5 ${
             testResult.ok
               ? 'border-status-success/30 bg-status-success/10 text-status-success'
-              : 'border-status-error/30 bg-status-error/10 text-status-error'
+              : 'border-status-destructive/30 bg-status-destructive/10 text-status-destructive'
           }`}
           role="status"
         >

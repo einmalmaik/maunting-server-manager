@@ -278,7 +278,7 @@ export function OAuthTab() {
                         {t(`settings.oauth.preset.${p.preset}` as any, p.preset)}
                       </span>
                       {!p.enabled && (
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-status-error/10 text-status-error border border-status-error/30">
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-status-destructive/10 text-status-destructive border border-status-destructive/30">
                           {t('settings.oauth.providerEnabled')}: off
                         </span>
                       )}
@@ -323,7 +323,7 @@ export function OAuthTab() {
                       <button
                         type="button"
                         onClick={() => handleDelete(p)}
-                        className="msm-btn-secondary px-2.5 py-1.5 text-xs inline-flex items-center gap-1.5 text-status-error hover:bg-status-error/10"
+                        className="msm-btn-secondary px-2.5 py-1.5 text-xs inline-flex items-center gap-1.5 text-status-destructive hover:bg-status-destructive/10"
                         title={t('settings.oauth.delete')}
                       >
                         <Trash2 className="w-3.5 h-3.5" />

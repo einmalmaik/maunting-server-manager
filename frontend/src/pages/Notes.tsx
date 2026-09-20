@@ -18,6 +18,7 @@ import {
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { toast } from '@/stores/toastStore'
+import { FARB_PALETTE, farbwahl } from '@/config/farbpalette'
 import { confirm } from '@/stores/confirmStore'
 import { Dropdown, type DropdownOption } from '@/Singra/UI'
 import { Button } from '@/components/ui/Button'
@@ -72,22 +73,6 @@ function InlineMarkdown({ text, strikethrough }: { text: string; strikethrough?:
       </ReactMarkdown>
     </span>
   )
-}
-
-const COLOR_THEMES = [
-  { id: 'primary', label: 'Blau (Standard)', bg: 'bg-primary/10', border: 'border-primary/40', text: 'text-primary', badge: 'bg-primary/20 text-primary border-primary/30' },
-  { id: 'emerald', label: 'Grün / Einkäufe', bg: 'bg-emerald-500/10', border: 'border-emerald-500/40', text: 'text-emerald-400', badge: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
-  { id: 'amber', label: 'Gelb / Orange', bg: 'bg-amber-500/10', border: 'border-amber-500/40', text: 'text-amber-400', badge: 'bg-amber-500/20 text-amber-300 border-amber-500/30' },
-  { id: 'rose', label: 'Rot / Dringend', bg: 'bg-rose-500/10', border: 'border-rose-500/40', text: 'text-rose-400', badge: 'bg-rose-500/20 text-rose-300 border-rose-500/30' },
-  { id: 'purple', label: 'Lila / Server & Tech', bg: 'bg-purple-500/10', border: 'border-purple-500/40', text: 'text-purple-400', badge: 'bg-purple-500/20 text-purple-300 border-purple-500/30' },
-  { id: 'cyan', label: 'Cyan / Ideen', bg: 'bg-cyan-500/10', border: 'border-cyan-500/40', text: 'text-cyan-400', badge: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' },
-]
-
-function getColorTheme(colorId?: string) {
-  let normalized = colorId || 'primary'
-  if (normalized === 'blue') normalized = 'primary'
-  if (normalized === 'green') normalized = 'emerald'
-  return COLOR_THEMES.find((c) => c.id === normalized) || COLOR_THEMES[0]
 }
 
 export function Notes() {
@@ -402,7 +387,7 @@ export function Notes() {
             onClick={() => setShowArchived(!showArchived)}
             className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-xl border transition-colors whitespace-nowrap shrink-0 ${
               showArchived
-                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 font-semibold'
+                ? 'bg-status-warning/20 text-status-warning border-status-warning/40 font-semibold'
                 : 'bg-surface-container text-on-surface-variant border-outline-variant/30 hover:text-on-surface'
             }`}
           >
@@ -445,7 +430,7 @@ export function Notes() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
           {filteredNotes.map((note) => {
-            const theme = getColorTheme(note.color)
+            const theme = farbwahl(note.color)
             const lines = (note.content || '').split('\n')
             let checkCounter = 0
 
@@ -453,13 +438,13 @@ export function Notes() {
               <div
                 key={note.id}
                 onClick={() => openEditModal(note)}
-                className={`group relative flex flex-col justify-between rounded-2xl border transition-all duration-200 cursor-pointer overflow-hidden p-3.5 sm:p-4 ${theme.bg} ${theme.border} hover:shadow-md hover:border-outline/50 active:scale-[0.99]`}
+                className={`group relative flex flex-col justify-between rounded-2xl border transition-all duration-200 cursor-pointer overflow-hidden p-3.5 sm:p-4 ${theme.flaeche} ${theme.rand} hover:shadow-md hover:border-outline/50 active:scale-[0.99]`}
               >
                 {/* Header */}
                 <div>
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <div className="flex flex-wrap items-center gap-1.5 min-w-0">
-                      <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border truncate ${theme.badge}`}>
+                      <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border truncate ${theme.pille}`}>
                         {note.category === 'shopping'
                           ? 'Einkauf'
                           : note.category === 'todo'
@@ -473,7 +458,7 @@ export function Notes() {
                           : 'Notiz'}
                       </span>
                       {note.note_type === 'team' && (
-                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-status-success/20 text-status-success border border-status-success/30 flex items-center gap-1">
                           <Users className="w-3 h-3" />
                           <span className="truncate max-w-[90px]">{note.team_name || 'Team'}</span>
                         </span>
@@ -516,7 +501,7 @@ export function Notes() {
                             className="flex items-start gap-2 py-1 px-1.5 rounded-lg hover:bg-surface-container-high/50 active:bg-surface-container-high/70 transition-colors cursor-pointer min-h-[26px]"
                           >
                             {isChecked ? (
-                              <CheckSquare className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                              <CheckSquare className="w-3.5 h-3.5 text-status-success shrink-0 mt-0.5" />
                             ) : (
                               <Square className="w-3.5 h-3.5 text-on-surface-variant shrink-0 mt-0.5" />
                             )}
@@ -564,7 +549,7 @@ export function Notes() {
                         void handleDelete(note)
                       }}
                       title={t('common.delete', 'Löschen')}
-                      className="p-1.5 text-rose-400 hover:text-rose-300 rounded-lg hover:bg-rose-500/10 transition-colors"
+                      className="p-1.5 text-status-destructive hover:text-status-destructive/80 rounded-lg hover:bg-status-destructive/10 transition-colors"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -646,7 +631,7 @@ export function Notes() {
                     {t('notes.formTeam', 'Team zuweisen')}
                   </label>
                   {teams.length === 0 ? (
-                    <p className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl p-2.5">
+                    <p className="text-xs text-status-warning bg-status-warning/10 border border-status-warning/20 rounded-xl p-2.5">
                       {t('notes.noTeamsAvailable', 'Du bist noch keinem Team beigetreten. Erstelle zuerst ein Team unter /teams.')}
                     </p>
                   ) : (
@@ -665,19 +650,19 @@ export function Notes() {
                   {t('notes.formColor', 'Farbakzent')}
                 </label>
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  {COLOR_THEMES.map((theme) => (
+                  {FARB_PALETTE.map((theme) => (
                     <button
                       key={theme.id}
                       type="button"
                       onClick={() => setFormColor(theme.id)}
                       className={`px-2.5 py-1.5 rounded-xl text-xs font-medium border flex items-center gap-1.5 transition-all ${
                         formColor === theme.id
-                          ? `${theme.bg} ${theme.border} ${theme.text} ring-2 ring-primary/40`
+                          ? `${theme.flaeche} ${theme.rand} ${theme.text} ring-2 ring-primary/40`
                           : 'bg-surface-container border-outline-variant/30 text-on-surface-variant hover:text-on-surface'
                       }`}
                     >
-                      <span className={`w-2 h-2 rounded-full ${theme.bg} border ${theme.border}`} />
-                      {theme.label.split(' ')[0]}
+                      <span className={`w-2 h-2 rounded-full ${theme.flaeche} border ${theme.rand}`} />
+                      {t(theme.labelKey)}
                     </button>
                   ))}
                 </div>
@@ -743,9 +728,9 @@ export function Notes() {
                     <button
                       type="button"
                       onClick={() => setFormContent((prev) => (prev ? `${prev}\n- [ ] 1x  (~0,00 €)` : '- [ ] 1x  (~0,00 €)'))}
-                      className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg bg-surface-container text-on-surface-variant hover:text-emerald-400 hover:bg-surface-container-high border border-outline-variant/30 transition-colors"
+                      className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg bg-surface-container text-on-surface-variant hover:text-status-success hover:bg-surface-container-high border border-outline-variant/30 transition-colors"
                     >
-                      <Plus className="w-3 h-3 text-emerald-400" />
+                      <Plus className="w-3 h-3 text-status-success" />
                       <span>Einkaufsposten</span>
                     </button>
                   </div>
@@ -785,7 +770,7 @@ export function Notes() {
                               className="flex items-start gap-2 py-0.5 px-1.5 rounded hover:bg-surface-container-high/60 transition-colors cursor-pointer"
                             >
                               {isChecked ? (
-                                <CheckSquare className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                                <CheckSquare className="w-3.5 h-3.5 text-status-success shrink-0 mt-0.5" />
                               ) : (
                                 <Square className="w-3.5 h-3.5 text-on-surface-variant shrink-0 mt-0.5" />
                               )}

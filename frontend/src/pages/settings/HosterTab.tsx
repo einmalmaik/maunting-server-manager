@@ -236,8 +236,8 @@ export function HosterTab({ canWrite }: { canWrite: boolean }) {
                 <span
                   className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
                     selected.is_sandbox
-                      ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-                      : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                      ? 'bg-status-warning/15 text-status-warning border border-status-warning/30'
+                      : 'bg-status-success/15 text-status-success border border-status-success/30'
                   }`}
                 >
                   {selected.is_sandbox ? (
@@ -1068,10 +1068,10 @@ Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe W
   }
 
   return (
-    <div className="msm-card space-y-5 p-6 border-amber-500/25 bg-surface-container-low/20">
+    <div className="msm-card space-y-5 p-6 border-status-warning/25 bg-surface-container-low/20">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-2.5">
-          <div className="rounded-lg bg-amber-500/15 p-2 text-amber-400 border border-amber-500/30">
+          <div className="rounded-lg bg-status-warning/15 p-2 text-status-warning border border-status-warning/30">
             <FlaskConical className="h-5 w-5" aria-hidden="true" />
           </div>
           <div>
@@ -1089,7 +1089,7 @@ Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe W
           className="gap-2 text-xs"
           onClick={() => setShowAiModal((v) => !v)}
         >
-          <Sparkles className="h-4 w-4 text-amber-400" aria-hidden="true" />
+          <Sparkles className="h-4 w-4 text-status-warning" aria-hidden="true" />
           {t('hoster.simulator.aiDocsTitle')}
         </Button>
       </div>
@@ -1108,7 +1108,7 @@ Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe W
             >
               {copiedPrompt ? (
                 <>
-                  <Check className="h-3.5 w-3.5 text-emerald-400" />
+                  <Check className="h-3.5 w-3.5 text-status-success" />
                   {t('hoster.copied', 'Kopiert')}
                 </>
               ) : (
@@ -1129,7 +1129,7 @@ Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe W
       )}
 
       {products.length === 0 && (
-        <div className="rounded-lg border border-outline-variant/30 bg-surface-container-low/50 p-3 text-xs text-amber-300/90">
+        <div className="rounded-lg border border-outline-variant/30 bg-surface-container-low/50 p-3 text-xs text-status-warning/90">
           {t('hoster.simulator.noProductsHint')}
         </div>
       )}
@@ -1141,9 +1141,9 @@ Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe W
           variant="secondary"
           disabled={!canWrite || Boolean(busyAction) || products.length === 0}
           onClick={() => void runSimulation('order')}
-          className="h-11 justify-center gap-2 text-xs font-medium border-emerald-500/20 hover:border-emerald-500/50 hover:bg-emerald-500/10"
+          className="h-11 justify-center gap-2 text-xs font-medium border-status-success/20 hover:border-status-success/50 hover:bg-status-success/10"
         >
-          <Play className="h-4 w-4 text-emerald-400" aria-hidden="true" />
+          <Play className="h-4 w-4 text-status-success" aria-hidden="true" />
           {busyAction === 'order' ? t('common.loading') : t('hoster.simulator.simulateOrder')}
         </Button>
 
@@ -1152,9 +1152,9 @@ Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe W
           variant="secondary"
           disabled={!canWrite || Boolean(busyAction) || services.length === 0}
           onClick={() => void runSimulation('suspend')}
-          className="h-11 justify-center gap-2 text-xs font-medium border-amber-500/20 hover:border-amber-500/50 hover:bg-amber-500/10"
+          className="h-11 justify-center gap-2 text-xs font-medium border-status-warning/20 hover:border-status-warning/50 hover:bg-status-warning/10"
         >
-          <Pause className="h-4 w-4 text-amber-400" aria-hidden="true" />
+          <Pause className="h-4 w-4 text-status-warning" aria-hidden="true" />
           {busyAction === 'suspend' ? t('common.loading') : t('hoster.simulator.simulateSuspend')}
         </Button>
 
@@ -1163,9 +1163,9 @@ Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe W
           variant="secondary"
           disabled={!canWrite || Boolean(busyAction) || services.length === 0}
           onClick={() => void runSimulation('reactivate')}
-          className="h-11 justify-center gap-2 text-xs font-medium border-cyan-500/20 hover:border-cyan-500/50 hover:bg-cyan-500/10"
+          className="h-11 justify-center gap-2 text-xs font-medium border-primary/20 hover:border-primary/50 hover:bg-primary/10"
         >
-          <RotateCcw className="h-4 w-4 text-cyan-400" aria-hidden="true" />
+          <RotateCcw className="h-4 w-4 text-primary" aria-hidden="true" />
           {busyAction === 'reactivate' ? t('common.loading') : t('hoster.simulator.simulateReactivate')}
         </Button>
 
@@ -1174,9 +1174,9 @@ Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe W
           variant="secondary"
           disabled={!canWrite || Boolean(busyAction) || services.length === 0}
           onClick={() => void runSimulation('terminate')}
-          className="h-11 justify-center gap-2 text-xs font-medium border-rose-500/20 hover:border-rose-500/50 hover:bg-rose-500/10"
+          className="h-11 justify-center gap-2 text-xs font-medium border-status-destructive/20 hover:border-status-destructive/50 hover:bg-status-destructive/10"
         >
-          <XCircle className="h-4 w-4 text-rose-400" aria-hidden="true" />
+          <XCircle className="h-4 w-4 text-status-destructive" aria-hidden="true" />
           {busyAction === 'terminate' ? t('common.loading') : t('hoster.simulator.simulateTerminate')}
         </Button>
 
@@ -1207,7 +1207,7 @@ Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe W
         <div className="rounded-xl border border-outline-variant/40 bg-surface-container-low/60 p-4 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-400 border border-emerald-500/30">
+              <span className="rounded-full bg-status-success/15 px-2 py-0.5 text-xs font-medium text-status-success border border-status-success/30">
                 {simResult.action.toUpperCase()}
               </span>
               <span className="text-sm font-medium text-on-surface">{simResult.message}</span>

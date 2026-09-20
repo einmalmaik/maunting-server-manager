@@ -364,7 +364,7 @@ function KontoEinstellungen() {
                   variant="ghost"
                   disabled={uploadingAvatar}
                   onClick={() => void handleDeleteAvatar()}
-                  className="text-status-error hover:bg-status-error/10"
+                  className="text-status-destructive hover:bg-status-destructive/10"
                 >
                   <Trash2 className="h-3.5 w-3.5 mr-1.5" />
                   {t('profile.removeAvatar', 'Entfernen')}
@@ -473,7 +473,7 @@ function KontoEinstellungen() {
         </div>
 
         {locationSharingError && (
-          <div className="rounded-xl border border-status-error/30 bg-status-error/10 p-3 text-xs text-status-error flex items-center gap-2">
+          <div className="rounded-xl border border-status-destructive/30 bg-status-destructive/10 p-3 text-xs text-status-destructive flex items-center gap-2">
             <AlertTriangle className="h-4 w-4 shrink-0" />
             <span>{locationSharingError}</span>
           </div>
@@ -757,14 +757,14 @@ function SocialEinstellungen() {
         {/* Incoming Requests */}
         {incomingRequests.length > 0 && (
           <div className="space-y-2">
-            <span className="text-xs font-bold text-amber-400 block">
+            <span className="text-xs font-bold text-status-warning block">
               Ausstehende Anfragen ({incomingRequests.length})
             </span>
             <div className="space-y-1.5">
               {incomingRequests.map((req) => (
                 <div
                   key={req.id}
-                  className="flex items-center justify-between p-2.5 rounded-xl bg-surface-container-high/50 border border-amber-500/30"
+                  className="flex items-center justify-between p-2.5 rounded-xl bg-surface-container-high/50 border border-status-warning/30"
                 >
                   <div className="flex items-center gap-2">
                     <Avatar src={req.avatar_url} name={req.username} size="sm" />
@@ -784,7 +784,7 @@ function SocialEinstellungen() {
                       size="sm"
                       variant="ghost"
                       onClick={() => void handleDeclineRequest(req.id)}
-                      className="h-7 px-2 text-xs text-on-surface-variant hover:text-status-error"
+                      className="h-7 px-2 text-xs text-on-surface-variant hover:text-status-destructive"
                     >
                       Ablehnen
                     </Button>
@@ -879,7 +879,7 @@ function SocialEinstellungen() {
                         variant="ghost"
                         size="icon"
                         onClick={() => void handleRemoveFriend(f.user_id ?? f.id)}
-                        className="h-7 w-7 p-0 text-on-surface-variant hover:text-status-error shrink-0"
+                        className="h-7 w-7 p-0 text-on-surface-variant hover:text-status-destructive shrink-0"
                         title="Kontakt entfernen"
                         aria-label="Kontakt entfernen"
                       >
@@ -919,7 +919,7 @@ function SocialEinstellungen() {
                 {blockedList.map((b) => (
                   <div
                     key={b.userId}
-                    className="flex items-center justify-between p-2.5 rounded-xl bg-surface-container-low border border-status-error/30"
+                    className="flex items-center justify-between p-2.5 rounded-xl bg-surface-container-low border border-status-destructive/30"
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
                       <Avatar src={b.avatarUrl} name={b.username} size="sm" />
@@ -927,7 +927,7 @@ function SocialEinstellungen() {
                         <span className="text-xs font-semibold text-primary truncate block">
                           {b.username}
                         </span>
-                        <span className="text-[10px] text-status-error font-medium">
+                        <span className="text-[10px] text-status-destructive font-medium">
                           Blockiert
                         </span>
                       </div>
@@ -939,7 +939,7 @@ function SocialEinstellungen() {
                         await unblockUser(b.userId)
                         toast.success(`Blockierung von ${b.username} aufgehoben`)
                       }}
-                      className="h-7 text-xs px-2.5 border border-status-error/30 text-status-error hover:bg-status-error/15 shrink-0"
+                      className="h-7 text-xs px-2.5 border border-status-destructive/30 text-status-destructive hover:bg-status-destructive/15 shrink-0"
                     >
                       Entblocken
                     </Button>
@@ -1165,7 +1165,7 @@ function SocialEinstellungen() {
                   className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
                     m.unlocked
                       ? isRare
-                        ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                        ? 'bg-status-warning/20 border-status-warning/40 text-status-warning'
                         : 'bg-primary/15 border-primary/30 text-primary'
                       : 'bg-surface-container-high/50 border-outline-variant/20 text-on-surface-variant/40'
                   }`}
@@ -1176,7 +1176,7 @@ function SocialEinstellungen() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-xs font-bold text-on-surface truncate">{m.title}</span>
-                    <span className="text-[10px] font-mono text-amber-400 font-semibold">+{m.points}</span>
+                    <span className="text-[10px] font-mono text-status-warning font-semibold">+{m.points}</span>
                     {isRare && (
                       <Badge variant="warning" className="text-[9px] px-1 py-0 uppercase font-bold">
                         Selten
@@ -1187,7 +1187,7 @@ function SocialEinstellungen() {
                     {m.description}
                   </p>
                   {m.unlocked && m.unlocked_at && (
-                    <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 mt-1">
+                    <span className="inline-flex items-center gap-1 text-[10px] text-status-success mt-1">
                       <CheckCircle2 className="w-3 h-3" />
                       <span>{new Date(m.unlocked_at).toLocaleDateString()}</span>
                     </span>
@@ -2159,7 +2159,7 @@ function Testhoeren({
         {laeuft && (
           <div className="flex items-center justify-between text-xs px-1 text-on-surface-variant">
             <span>Pegel: {Math.round(pegel * 100)}%</span>
-            <span className={pegel > 0.05 ? 'text-emerald-400 font-semibold' : 'text-on-surface-variant/60'}>
+            <span className={pegel > 0.05 ? 'text-status-success font-semibold' : 'text-on-surface-variant/60'}>
               {pegel > 0.05 ? t('profile.audioSignalDetected', 'Signal erkannt') : 'Kein Signal'}
             </span>
           </div>

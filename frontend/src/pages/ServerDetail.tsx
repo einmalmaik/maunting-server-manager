@@ -116,9 +116,9 @@ function statusClasses(s: string | undefined): string {
     case "awaiting_files":
       return "bg-status-warning/10 border-status-warning/30 text-status-warning";
     case "failed":
-      return "bg-status-error/10 border-status-error/30 text-status-error";
+      return "bg-status-destructive/10 border-status-destructive/30 text-status-destructive";
     default:
-      return "bg-status-error/10 border-status-error/30 text-status-error";
+      return "bg-status-destructive/10 border-status-destructive/30 text-status-destructive";
   }
 }
 
@@ -760,8 +760,8 @@ export function ServerDetail() {
       )}
 
       {isNodeUnreachable && (
-        <div className="msm-card p-4 border-status-error/40 bg-status-error/5 flex items-start gap-3">
-          <AlertTriangle className="w-5 h-5 text-status-error flex-shrink-0 mt-0.5" />
+        <div className="msm-card p-4 border-status-destructive/40 bg-status-destructive/5 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-status-destructive flex-shrink-0 mt-0.5" />
           <p className="font-body-md text-sm text-on-surface-variant">
             {t("servers.nodeUnreachableHint")}
           </p>
@@ -769,8 +769,8 @@ export function ServerDetail() {
       )}
 
       {guardianSyncError && (
-        <div className="msm-card p-4 border-status-error/40 bg-status-error/5 flex items-start gap-3">
-          <AlertTriangle className="w-5 h-5 text-status-error flex-shrink-0 mt-0.5" />
+        <div className="msm-card p-4 border-status-destructive/40 bg-status-destructive/5 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-status-destructive flex-shrink-0 mt-0.5" />
           <div>
             <p className="font-headline text-body-md text-on-surface mb-1">
               {t("servers.guardian.syncErrorTitle")}

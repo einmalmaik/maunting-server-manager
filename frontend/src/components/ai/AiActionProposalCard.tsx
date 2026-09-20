@@ -346,7 +346,7 @@ export function AiActionProposalCard({
           {proposal.autonomous && (
             <p className="mt-1 text-[11px] text-on-surface-variant">{t('ai.actions.autonomousHint')}</p>
           )}
-          {proposal.error_code && <p className="mt-1.5 flex items-center gap-1 text-xs text-status-error"><AlertTriangle className="h-3.5 w-3.5" />{t('ai.actions.failed')}</p>}
+          {proposal.error_code && <p className="mt-1.5 flex items-center gap-1 text-xs text-status-destructive"><AlertTriangle className="h-3.5 w-3.5" />{t('ai.actions.failed')}</p>}
         </div>
         {proposal.status === 'proposed' && !proposal.autonomous && (
           <div className="flex w-full sm:w-auto flex-wrap items-center gap-2 justify-end mt-2 sm:mt-0">

@@ -56,7 +56,7 @@ const statusColors = {
   online: 'bg-status-success',
   offline: 'bg-on-surface-variant/45',
   idle: 'bg-status-warning',
-  dnd: 'bg-status-danger',
+  dnd: 'bg-status-destructive',
 }
 
 const MAX_BLOB_CACHE = 200

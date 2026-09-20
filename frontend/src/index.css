@@ -5,8 +5,8 @@
 
 @layer base {
   html {
-    background-color: #071013;
-    color: #e7f4f7;
+    background-color: hsl(var(--dna-background));
+    color: hsl(var(--dna-foreground));
     color-scheme: dark;
     font-family: 'Inter', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
@@ -27,21 +27,24 @@
   }
 
   ::selection {
-    background: hsl(190 92% 62% / 0.28);
-    color: #e7f4f7;
+    background: hsl(var(--dna-focus) / 0.28);
+    color: hsl(var(--dna-foreground));
   }
 
   :focus-visible {
-    outline: 2px solid hsl(190 92% 62%);
+    outline: 2px solid hsl(var(--dna-focus));
     outline-offset: 2px;
   }
 
+  /* Eingeschaltet ist eine Farbe. Der Schalter nahm `primary`, die
+     Checkbox-Komponente `secondary`, und jedes nackte Kästchen hier ein
+     drittes Cyan. Alle drei zeigen jetzt dasselbe. */
   input[type='checkbox'] {
-    accent-color: #67e8f9;
+    accent-color: hsl(var(--dna-primary));
   }
 
   * {
-    scrollbar-color: #284147 #071013;
+    scrollbar-color: #284147 hsl(var(--dna-background));
     scrollbar-width: thin;
   }
 
@@ -51,7 +54,7 @@
   }
 
   *::-webkit-scrollbar-track {
-    background: #071013;
+    background: hsl(var(--dna-background));
   }
 
   *::-webkit-scrollbar-thumb {
@@ -165,7 +168,7 @@
 
   /* Destructive Button - red only for destructive actions */
   .msm-btn-destructive {
-    @apply border border-status-destructive text-error
+    @apply border border-status-destructive text-status-destructive
            hover:bg-status-destructive hover:text-on-error
            font-label-md text-label-md rounded-md
            disabled:pointer-events-none disabled:opacity-50

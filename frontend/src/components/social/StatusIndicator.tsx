@@ -21,7 +21,7 @@ export function StatusDot({ status = 'invisible', className = '', size = 'md' }:
   if (status === 'online') {
     return (
       <span
-        className={`inline-block rounded-full bg-emerald-500 ring-2 ring-surface shadow-[0_0_8px_rgba(16,185,129,0.5)] ${sizeClasses} ${className}`}
+        className={`inline-block rounded-full bg-status-success ring-2 ring-surface shadow-[0_0_8px_rgba(16,185,129,0.5)] ${sizeClasses} ${className}`}
         title={t('social.status.online')}
         aria-label={t('social.status.online')}
       />
@@ -31,7 +31,7 @@ export function StatusDot({ status = 'invisible', className = '', size = 'md' }:
   if (status === 'away') {
     return (
       <span
-        className={`inline-block rounded-full bg-amber-500 ring-2 ring-surface shadow-[0_0_8px_rgba(245,158,11,0.5)] ${sizeClasses} ${className}`}
+        className={`inline-block rounded-full bg-status-warning ring-2 ring-surface shadow-[0_0_8px_rgba(245,158,11,0.5)] ${sizeClasses} ${className}`}
         title={t('social.status.away')}
         aria-label={t('social.status.away')}
       />

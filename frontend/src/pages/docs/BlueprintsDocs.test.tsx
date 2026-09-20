@@ -36,7 +36,7 @@ describe('BlueprintsDocs page', () => {
 
   it('renders English headline and template link with correct href', async () => {
     renderDocs()
-    expect(await screen.findByText('Blueprint Documentation')).toBeInTheDocument()
+    expect(await screen.findByText(i18n.t('docs.pageTitle'))).toBeInTheDocument()
     const link = screen.getByTestId('docs-template-download') as HTMLAnchorElement
     expect(link.getAttribute('href')).toBe('/api/blueprints/template?lang=en')
   })

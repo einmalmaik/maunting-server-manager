@@ -298,9 +298,9 @@ export function Servers() {
       case 'awaiting_files':
         return 'bg-status-warning/10 border-status-warning/30 text-status-warning'
       case 'failed':
-        return 'bg-status-error/10 border-status-error/30 text-status-error'
+        return 'bg-status-destructive/10 border-status-destructive/30 text-status-destructive'
       default:
-        return 'bg-status-error/10 border-status-error/30 text-status-error'
+        return 'bg-status-destructive/10 border-status-destructive/30 text-status-destructive'
     }
   }
 
@@ -355,7 +355,7 @@ export function Servers() {
 
       {loadError && (
         <div className="msm-card p-12 text-center border-dashed border-2 border-outline-variant">
-          <AlertTriangle className="w-10 h-10 text-status-error mx-auto mb-4" />
+          <AlertTriangle className="w-10 h-10 text-status-destructive mx-auto mb-4" />
           <h3 className="font-headline text-body-lg text-on-surface mb-1">
             {t('servers.loadFailed')}
           </h3>

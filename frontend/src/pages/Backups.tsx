@@ -571,7 +571,7 @@ export function Backups({ serverId }: BackupsProps) {
       {/* Backup List */}
       {loadError ? (
         <div className="msm-card p-12 text-center border-dashed border-2 border-outline-variant">
-          <AlertTriangle className="w-10 h-10 text-status-error mx-auto mb-4" />
+          <AlertTriangle className="w-10 h-10 text-status-destructive mx-auto mb-4" />
           <h3 className="font-headline text-body-lg text-on-surface mb-1">
             {t("backups.loadFailed")}
           </h3>

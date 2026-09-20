@@ -491,7 +491,7 @@ function PowerUserDialog({ state, onClose }: { state: { db: PostgresDatabase; pa
         <div className="space-y-2 font-mono text-sm">
           <div>database: {state.db.name}</div>
           <div>username: {state.db.owner_role}</div>
-          <div className="break-all rounded bg-status-error/10 p-2 text-status-error">password: {state.password}</div>
+          <div className="break-all rounded bg-status-destructive/10 p-2 text-status-destructive">password: {state.password}</div>
           <div className="break-all rounded border border-outline-variant bg-surface-container-high p-2 text-on-surface-variant">psql "{connectionUrl}"</div>
         </div>
         <button className="msm-btn-primary mt-5 w-full py-2" onClick={onClose}>Schließen</button>

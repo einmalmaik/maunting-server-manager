@@ -493,7 +493,7 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
                           className="inline-flex items-center gap-1 rounded-full border border-outline-variant/40 bg-surface-container-high px-2 py-0.5 text-[10px] text-on-surface-variant font-medium"
                           title={t('ai.memory.usedCount', { count: entry.use_count })}
                         >
-                          <Flame className="h-3 w-3 text-amber-500 shrink-0" aria-hidden="true" />
+                          <Flame className="h-3 w-3 text-status-warning shrink-0" aria-hidden="true" />
                           {t('ai.memory.usedCount', { count: entry.use_count })}
                         </span>
                       )}

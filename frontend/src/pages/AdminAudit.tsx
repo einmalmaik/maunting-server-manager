@@ -111,7 +111,7 @@ export function AdminAudit() {
       </div>
 
       {error && (
-        <div className="mb-4 rounded-lg border border-status-error/40 bg-status-error/10 p-3 text-sm text-status-error">
+        <div className="mb-4 rounded-lg border border-status-destructive/40 bg-status-destructive/10 p-3 text-sm text-status-destructive">
           {error}
         </div>
       )}

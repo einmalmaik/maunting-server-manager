@@ -225,7 +225,7 @@ export function SupportWidgetTab() {
                   {t('settings.supportWidget.installIdSave')}
                 </Button>
                 {settings.singra_widget_install_source === 'panel' && (
-                  <Button type="button" variant="ghost" onClick={() => void removeInstallId()} className="gap-2 text-status-error">
+                  <Button type="button" variant="ghost" onClick={() => void removeInstallId()} className="gap-2 text-status-destructive">
                     <Trash2 className="h-4 w-4" />
                     {t('settings.supportWidget.installIdRemove')}
                   </Button>
@@ -323,7 +323,7 @@ export function SupportWidgetTab() {
                 {t('settings.supportWidget.webhookSecretSave')}
               </Button>
               {settings.singra_webhook_secret_source === 'panel' && settings.singra_webhook_secret_configured && (
-                <Button type="button" variant="ghost" onClick={() => void removeWebhookSecret()} className="text-status-error">
+                <Button type="button" variant="ghost" onClick={() => void removeWebhookSecret()} className="text-status-destructive">
                   {t('settings.supportWidget.webhookSecretRemove')}
                 </Button>
               )}

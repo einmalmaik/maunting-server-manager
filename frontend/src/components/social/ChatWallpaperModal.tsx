@@ -135,7 +135,7 @@ export function ChatWallpaperModal({
                 }}
               />
               <div className="relative z-10 flex items-center justify-between w-full">
-                <div className="p-1 rounded-md bg-cyan-500/20 text-cyan-400">
+                <div className="p-1 rounded-md bg-primary/15 text-primary">
                   <Layers className="w-3.5 h-3.5" />
                 </div>
                 {selectedPreset === 'cyber' && (
@@ -165,7 +165,7 @@ export function ChatWallpaperModal({
             >
               <div className="absolute inset-0 bg-gradient-to-br from-[#06181d] via-[#092228] to-[#040e11] pointer-events-none" />
               <div className="relative z-10 flex items-center justify-between w-full">
-                <div className="p-1 rounded-md bg-teal-500/20 text-teal-300">
+                <div className="p-1 rounded-md bg-primary/15 text-primary">
                   <Compass className="w-3.5 h-3.5" />
                 </div>
                 {selectedPreset === 'petrol' && (
@@ -192,7 +192,7 @@ export function ChatWallpaperModal({
             >
               <div className="absolute inset-0 bg-gradient-to-br from-[#0c1322] via-[#090e1a] to-[#040810] pointer-events-none" />
               <div className="relative z-10 flex items-center justify-between w-full">
-                <div className="p-1 rounded-md bg-indigo-500/20 text-indigo-400">
+                <div className="p-1 rounded-md bg-primary/15 text-primary">
                   <Sparkles className="w-3.5 h-3.5" />
                 </div>
                 {selectedPreset === 'midnight' && (
@@ -244,7 +244,7 @@ export function ChatWallpaperModal({
               <span>{t('social.wallpaper.own')}</span>
             </span>
             {customDataUrl && (
-              <span className="text-[10px] text-emerald-400 font-medium flex items-center gap-1">
+              <span className="text-[10px] text-status-success font-medium flex items-center gap-1">
                 <Check className="w-3 h-3" />
                 <span>{t('social.wallpaper.stored')}</span>
               </span>

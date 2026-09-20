@@ -271,14 +271,14 @@ export function SocialTab() {
         {/* Ausstehende Anfragen */}
         {incomingRequests.length > 0 && (
           <div className="mb-6 space-y-2 max-w-xl">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-status-warning flex items-center gap-1.5">
               <span>{t('social.contacts.pendingRequests', { count: incomingRequests.length })}</span>
             </h3>
             <div className="space-y-2">
               {incomingRequests.map((req) => (
                 <div
                   key={req.id}
-                  className="flex items-center justify-between p-3 rounded-xl bg-surface-container-high/50 border border-amber-500/30 shadow-sm"
+                  className="flex items-center justify-between p-3 rounded-xl bg-surface-container-high/50 border border-status-warning/30 shadow-sm"
                 >
                   <div className="flex items-center gap-2.5">
                     <Avatar src={req.avatar_url} name={req.username} size="sm" />
@@ -298,7 +298,7 @@ export function SocialTab() {
                       variant="ghost"
                       size="sm"
                       onClick={() => void handleDeclineRequest(req.id)}
-                      className="gap-1 h-7 text-xs px-2.5 text-rose-400 hover:bg-rose-500/10"
+                      className="gap-1 h-7 text-xs px-2.5 text-status-destructive hover:bg-status-destructive/10"
                     >
                       <X className="w-3.5 h-3.5" />
                       <span>{t('social.contacts.decline')}</span>
@@ -408,7 +408,7 @@ export function SocialTab() {
                         variant="ghost"
                         size="icon"
                         onClick={() => void handleRemoveFriend(f.user_id ?? f.id)}
-                        className="h-7 w-7 p-0 text-on-surface-variant hover:text-rose-400 hover:bg-rose-500/10 shrink-0 ml-2"
+                        className="h-7 w-7 p-0 text-on-surface-variant hover:text-status-destructive hover:bg-status-destructive/10 shrink-0 ml-2"
                         title={t('social.contacts.remove')}
                         aria-label={t('social.contacts.remove')}
                       >
@@ -451,7 +451,7 @@ export function SocialTab() {
                 {blockedList.map((b) => (
                   <div
                     key={b.userId}
-                    className="flex items-center justify-between p-3 rounded-xl bg-surface-container-low border border-status-error/30"
+                    className="flex items-center justify-between p-3 rounded-xl bg-surface-container-low border border-status-destructive/30"
                   >
                     <div className="flex items-center gap-3 min-w-0">
                       <Avatar src={b.avatarUrl} name={b.username} size="sm" />
@@ -459,7 +459,7 @@ export function SocialTab() {
                         <span className="text-xs font-semibold text-primary truncate block">
                           {b.username}
                         </span>
-                        <span className="text-[10px] text-status-error font-medium">
+                        <span className="text-[10px] text-status-destructive font-medium">
                           {t('social.contacts.blocked')}
                         </span>
                       </div>
@@ -472,7 +472,7 @@ export function SocialTab() {
                         await unblockUser(b.userId)
                         toast.success(t('social.contacts.unblocked', { name: b.username }))
                       }}
-                      className="h-7 text-xs px-2.5 border border-status-error/30 text-status-error hover:bg-status-error/15 shrink-0"
+                      className="h-7 text-xs px-2.5 border border-status-destructive/30 text-status-destructive hover:bg-status-destructive/15 shrink-0"
                     >
                       {t('social.contacts.unblock')}
                     </Button>
@@ -663,7 +663,7 @@ export function SocialTab() {
                   className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
                     m.unlocked
                       ? isRare
-                        ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                        ? 'bg-status-warning/20 border-status-warning/40 text-status-warning'
                         : 'bg-primary/15 border-primary/30 text-primary'
                       : 'bg-surface-container-high/50 border-outline-variant/20 text-on-surface-variant/40'
                   }`}
@@ -676,7 +676,7 @@ export function SocialTab() {
                     <span className="font-headline text-xs font-bold text-primary truncate">
                       {m.title}
                     </span>
-                    <span className="text-[10px] font-mono text-amber-400/90 font-semibold">
+                    <span className="text-[10px] font-mono text-status-warning/90 font-semibold">
                       {t('social.milestones.pointsShort', { count: m.points })}
                     </span>
                     {isRare && (
@@ -691,7 +691,7 @@ export function SocialTab() {
                   <div className="flex items-center gap-3 mt-1.5 text-[10px] text-on-surface-variant/70 flex-wrap">
                     {m.rarity_text && <span>{m.rarity_text}</span>}
                     {m.unlocked && m.unlocked_at && (
-                      <span className="inline-flex items-center gap-1 text-emerald-400">
+                      <span className="inline-flex items-center gap-1 text-status-success">
                         <CheckCircle2 className="w-3 h-3" />
                         <span>{t('social.milestones.unlockedOn', { date: new Date(m.unlocked_at).toLocaleDateString() })}</span>
                       </span>

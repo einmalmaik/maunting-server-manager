@@ -460,7 +460,7 @@ export function Users() {
                       <button
                         type="button"
                         onClick={() => handleDelete(user.id)}
-                        className="grid h-10 w-10 place-items-center rounded-lg text-status-error transition-colors hover:bg-status-error/10 hover:text-status-error/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-status-error/60"
+                        className="grid h-10 w-10 place-items-center rounded-lg text-status-destructive transition-colors hover:bg-status-destructive/10 hover:text-status-destructive/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-status-destructive/60"
                         title={t('users.delete')}
                         aria-label={`${t('users.delete')}: ${user.username}`}
                       >

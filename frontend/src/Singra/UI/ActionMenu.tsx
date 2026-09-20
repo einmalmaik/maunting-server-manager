@@ -159,7 +159,7 @@ export function ActionMenu({
                     className={cx(
                       'flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 disabled:cursor-not-allowed disabled:opacity-40 sm:min-h-9',
                       item.destructive
-                        ? 'text-status-error hover:bg-status-error/10'
+                        ? 'text-status-destructive hover:bg-status-destructive/10'
                         : 'text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface',
                     )}
                   >

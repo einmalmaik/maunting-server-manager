@@ -283,7 +283,7 @@ export function MessengerTab() {
               </Button>
               {testErgebnis && (
                 <span
-                  className={`text-sm ${testErgebnis.ok ? 'text-status-success' : 'text-status-error'}`}
+                  className={`text-sm ${testErgebnis.ok ? 'text-status-success' : 'text-status-destructive'}`}
                   role="status"
                 >
                   {testErgebnis.text}

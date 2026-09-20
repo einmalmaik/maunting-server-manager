@@ -60,7 +60,7 @@ export function ActiveProcessesCard({ processes, className = '' }: ActiveProcess
           >
             <div className="flex items-center gap-2 text-on-surface">
               {item.status === 'fertig' ? (
-                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" aria-hidden="true" />
+                <CheckCircle2 className="h-3.5 w-3.5 text-status-success shrink-0" aria-hidden="true" />
               ) : item.status === 'laeuft' ? (
                 <Loader2 className="h-3.5 w-3.5 text-primary animate-spin shrink-0" aria-hidden="true" />
               ) : (
@@ -74,7 +74,7 @@ export function ActiveProcessesCard({ processes, className = '' }: ActiveProcess
             <span
               className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${
                 item.status === 'fertig'
-                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                  ? 'bg-status-success/10 text-status-success border-status-success/20'
                   : item.status === 'laeuft'
                   ? 'bg-primary/10 text-primary border-primary/20 animate-pulse'
                   : 'bg-surface-container-highest text-on-surface-variant/60 border-outline-variant/20'

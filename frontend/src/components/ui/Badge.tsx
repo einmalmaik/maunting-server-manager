@@ -10,7 +10,7 @@ export const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
       default: 'bg-muted text-muted-foreground border-border',
       success: 'bg-status-success/10 text-status-success border-status-success/30',
       warning: 'bg-status-warning/10 text-status-warning border-status-warning/30',
-      destructive: 'bg-destructive/10 text-destructive border-destructive/30',
+      destructive: 'bg-status-destructive/10 text-status-destructive border-status-destructive/30',
       info: 'bg-primary/10 text-primary border-primary/30',
     }
 

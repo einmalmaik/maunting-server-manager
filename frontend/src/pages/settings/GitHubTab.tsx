@@ -89,7 +89,7 @@ export function GitHubTab() {
         </div>
 
         <form onSubmit={handleSave} className="space-y-4">
-          <div className="p-3 bg-status-info/10 border border-status-info/30 rounded-md text-sm text-on-surface flex items-start gap-2">
+          <div className="p-3 bg-primary/10 border border-primary/30 rounded-md text-sm text-on-surface flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
             <span>{t('settings.githubWhyNeeded')}</span>
           </div>
@@ -137,7 +137,7 @@ export function GitHubTab() {
                     setClearToken(true)
                     setNewToken('')
                   }}
-                  className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-error transition-colors"
+                  className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-destructive transition-colors"
                   title={t('settings.githubRemove')}
                   aria-label={t('settings.githubRemove')}
                 >

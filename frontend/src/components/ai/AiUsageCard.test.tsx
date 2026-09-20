@@ -73,7 +73,7 @@ describe('AiUsageCard', () => {
 
     const bar = await screen.findByRole('progressbar', { name: 'Heute' })
     expect(bar).toHaveAttribute('aria-valuenow', '100')
-    expect(bar.firstElementChild?.className).toContain('bg-status-error')
+    expect(bar.firstElementChild?.className).toContain('bg-status-destructive')
   })
 
   it('warnt farblich, bevor das Kontingent aufgebraucht ist', async () => {
@@ -81,7 +81,7 @@ describe('AiUsageCard', () => {
     render(<AiUsageCard />)
 
     const bar = await screen.findByRole('progressbar', { name: 'Heute' })
-    expect(bar.firstElementChild?.className).toContain('bg-status-error')
+    expect(bar.firstElementChild?.className).toContain('bg-status-destructive')
   })
 
   it('lässt einen ruhigen Verbrauch ruhig aussehen', async () => {

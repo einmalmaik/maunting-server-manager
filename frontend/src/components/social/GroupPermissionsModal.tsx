@@ -822,7 +822,7 @@ export function GroupPermissionsModal({
                               {t('social.groupRoles.badgeSystem')}
                             </span>
                           ) : (
-                            <span className="text-[10px] px-2 py-0.5 rounded-md bg-status-info/15 text-status-info font-semibold shrink-0">
+                            <span className="text-[10px] px-2 py-0.5 rounded-md bg-primary/15 text-primary font-semibold shrink-0">
                               {t('social.groupRoles.badgeCustom')}
                             </span>
                           )}

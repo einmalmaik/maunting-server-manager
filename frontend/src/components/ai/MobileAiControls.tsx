@@ -153,7 +153,7 @@ export function MobileAiControls({ onActionDone }: { onActionDone?: () => void }
           variant="ghost"
           size="sm"
           onClick={handleClearHistory}
-          className="w-full justify-center text-xs text-status-error hover:bg-status-error/10 hover:text-status-error"
+          className="w-full justify-center text-xs text-status-destructive hover:bg-status-destructive/10"
         >
           <Trash2 className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
           {t('ai.chat.clear', 'Verlauf leeren')}

@@ -515,7 +515,7 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
                   </span>
                 </div>
                 {d.error && (
-                  <p className="text-body-xs text-status-error mb-1">{d.error}</p>
+                  <p className="text-body-xs text-status-destructive mb-1">{d.error}</p>
                 )}
                 <details className="text-body-xs">
                   <summary className="cursor-pointer text-on-surface-variant hover:text-primary">
@@ -551,7 +551,7 @@ function DeliveryBadge({
   }
   if (status === 'failed') {
     return (
-      <span className="msm-badge bg-status-error/15 text-status-error flex items-center gap-1">
+      <span className="msm-badge bg-status-destructive/15 text-status-destructive flex items-center gap-1">
         <XCircle className="w-3 h-3" />
         {code ?? 'fail'}
       </span>

@@ -32,12 +32,13 @@ export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
             'flex h-4 w-4 items-center justify-center rounded border transition-colors focus-ring',
             'border-outline-variant bg-surface-container-high',
             'peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary/50',
-            checked && 'border-secondary/50 bg-secondary/20',
+            // „Eingeschaltet" ist eine Farbe: dieselbe wie beim Schalter.
+            checked && 'border-primary/50 bg-primary/20',
             disabled && 'cursor-not-allowed',
             !disabled && 'hover:border-outline-variant'
           )}
         >
-          {checked && <Check className="h-3 w-3 text-secondary stroke-[3px]" />}
+          {checked && <Check className="h-3 w-3 text-primary stroke-[3px]" />}
         </span>
       </label>
     );
