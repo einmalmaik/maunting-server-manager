@@ -88,7 +88,7 @@ export function TrefferListe({
           <div className="py-16 px-6 text-center space-y-2">
             <Lock className="w-6 h-6 mx-auto text-on-surface-variant/60" />
             <p className="text-xs text-on-surface-variant">
-              Der Messenger ist gesperrt. Ohne PIN gibt die lokale Ablage nichts heraus.
+              Gesperrt. Ohne PIN gibt die lokale Ablage nichts heraus.
             </p>
           </div>
         ) : laeuft ? (

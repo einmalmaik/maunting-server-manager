@@ -18,7 +18,7 @@
  * eine Geste allein findet niemand — es braucht beide.
  */
 
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useRef, useState } from 'react'
 
 import {
   Calendar as CalendarIcon,
@@ -279,12 +279,7 @@ export function ChatMessageBubble({
 
   /**
    * Am Telefon aufgeklappt, am Rechner beim Darüberfahren.
-   *
-   * Beides zusammen, weil beides vorkommt: ein Laptop mit Touchscreen hat
-   * Finger **und** Zeiger. Aufgeklappt sind die Knöpfe daumengroß, unter dem
-   * Zeiger bleiben sie klein — derselbe Knopf, zwei Trefferflächen.
    */
-  const [aktionenOffen, setAktionenOffen] = useState(false)
   // Das Menü gilt für jede Nachricht. Bearbeiten und Löschen stehen darin
   // ohnehin nur bei eigenen — Antworten, Weiterleiten, Markieren und
   // Reagieren betreffen fremde genauso. Im Auswahlmodus ruht es, dort
@@ -305,21 +300,6 @@ export function ChatMessageBubble({
     { aktiv: !msg.isDeleted && !auswahl.aktiv },
   )
 
-  // Der nächste Tipper irgendwohin schließt wieder. Ohne das bliebe die Leiste
-  // am Telefon für immer stehen, weil es dort kein Wegbewegen des Zeigers gibt.
-  useEffect(() => {
-    if (!aktionenOffen) return
-    const zu = () => setAktionenOffen(false)
-    // Erst ab dem nächsten Druck, sonst schlösse der Finger, der gerade noch
-    // auf der Blase liegt, die eben geöffnete Leiste sofort wieder.
-    const anmelden = window.setTimeout(() => {
-      document.addEventListener('pointerdown', zu)
-    }, 0)
-    return () => {
-      window.clearTimeout(anmelden)
-      document.removeEventListener('pointerdown', zu)
-    }
-  }, [aktionenOffen])
 
   /**
    * Wischen nach rechts antwortet — die wichtigste Geste des Messengers.
@@ -918,28 +898,20 @@ export function ChatMessageBubble({
           <div
             // Wo es kein Hover gibt, heißt unsichtbar auch unantastbar: sonst
             // läge am Telefon eine unsichtbare Fläche neben der Uhrzeit.
-            className={`transition-opacity flex items-center mr-1 ${
-              aktionenOffen
-                ? 'opacity-100'
-                : 'opacity-0 [@media(hover:none)]:pointer-events-none group-hover:opacity-100 focus-within:opacity-100'
-            }`}
+            className="transition-opacity flex items-center mr-1 opacity-0
+              [@media(hover:none)]:pointer-events-none group-hover:opacity-100 focus-within:opacity-100"
             // Ein Druck auf die Leiste selbst darf sie nicht schließen, bevor
             // der Klick angekommen ist.
             onPointerDown={(e) => e.stopPropagation()}
           >
             <button
               type="button"
-              onClick={() => {
-                setAktionenOffen(false)
-                aktionen.onMenue(msg)
-              }}
-              className={`rounded-md hover:bg-surface-container-highest text-on-surface-variant hover:text-primary transition-colors flex items-center justify-center ${
-                aktionenOffen ? 'w-11 h-11' : 'p-1'
-              }`}
+              onClick={() => aktionen.onMenue(msg)}
+              className="w-8 h-8 rounded-md hover:bg-surface-container-highest text-on-surface-variant hover:text-primary transition-colors flex items-center justify-center"
               title="Mehr"
               aria-label="Was mit dieser Nachricht geschehen soll"
             >
-              <MoreHorizontal className={aktionenOffen ? 'w-4 h-4' : 'w-3.5 h-3.5'} />
+              <MoreHorizontal className="w-3.5 h-3.5" />
             </button>
           </div>
         )}

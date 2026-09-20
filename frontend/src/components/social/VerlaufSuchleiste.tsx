@@ -89,7 +89,7 @@ export function VerlaufSuchleiste({
           {gesperrt ? (
             <span className="flex items-center gap-1.5 text-on-surface-variant">
               <Lock className="w-3.5 h-3.5" />
-              <span>Der Messenger ist gesperrt. Entsperre ihn, um zu suchen.</span>
+              <span>Gesperrt. Zum Suchen entsperren.</span>
             </span>
           ) : (
             <span className="text-on-surface-variant tabular-nums">

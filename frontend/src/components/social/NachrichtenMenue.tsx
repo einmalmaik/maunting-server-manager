@@ -99,14 +99,14 @@ export function NachrichtenMenue({
         <Blatteintrag
           icon={msg.istMarkiert ? <StarOff className="w-4 h-4" /> : <Star className="w-4 h-4" />}
           label={msg.istMarkiert ? 'Markierung entfernen' : 'Markieren'}
-          hinweis="Bleibt auf diesem Gerät"
+          hinweis="Nur auf diesem Gerät"
           onClick={schliesseUnd(onMarkieren)}
         />
         {onAnheften && (
           <Blatteintrag
             icon={<Pin className="w-4 h-4" />}
             label={istAngeheftet ? 'Nicht mehr anheften' : 'In der Gruppe anheften'}
-            hinweis={darfAnheften ? undefined : 'Dafür fehlt dir das Recht in dieser Gruppe'}
+            hinweis={darfAnheften ? undefined : 'Dafür fehlt dir das Recht'}
             disabled={!darfAnheften}
             onClick={schliesseUnd(onAnheften)}
           />
@@ -123,7 +123,7 @@ export function NachrichtenMenue({
           <Blatteintrag
             icon={<Trash2 className="w-4 h-4" />}
             label="Für alle löschen"
-            hinweis="Entfernt auch Bilder und Dateien vom Server"
+            hinweis="Auch Bilder und Dateien vom Server"
             gefahr
             onClick={schliesseUnd(onLoeschen)}
           />

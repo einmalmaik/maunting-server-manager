@@ -58,6 +58,7 @@ import {
   Star,
   Pin,
   PinOff,
+  MoreVertical,
   Archive,
   ArchiveRestore,
   ChevronDown,
@@ -655,6 +656,8 @@ export function Messenger() {
   /** Verfallsfrist dieses Chats in Sekunden, 0 = aus. */
   const [verfallSekunden, setVerfallSekunden] = useState(0)
   const [verfallOffen, setVerfallOffen] = useState(false)
+  /** Das Menue hinter den drei Punkten in der Chat-Kopfzeile. */
+  const [chatMenueOffen, setChatMenueOffen] = useState(false)
   /** Chats mit ungesendetem Text, für die Vorschau in der Liste. */
   const [entwuerfe, setEntwuerfe] = useState<Record<string, string>>({})
 
@@ -3895,7 +3898,7 @@ export function Messenger() {
     const war = pinnedChats.includes(mid)
     const ergebnis = schalteAnheften(mid)
     if (!ergebnis.ok) {
-      toast.error(`Höchstens ${PINS_MAX} Chats lassen sich anheften. Löse zuerst einen.`)
+      toast.error(`Höchstens ${PINS_MAX} Chats. Löse zuerst einen.`)
       return
     }
     setWiderruf({
@@ -4545,7 +4548,7 @@ export function Messenger() {
                       className="w-full min-h-11 px-2.5 flex items-center gap-2.5 rounded-xl text-left text-xs text-primary hover:bg-surface-container-high/60 transition-colors"
                     >
                       <Search className="w-4 h-4 shrink-0" />
-                      <span className="truncate">Nachrichten nach „{searchQuery.trim()}" durchsuchen</span>
+                      <span className="truncate">„{searchQuery.trim()}" in Nachrichten</span>
                     </button>
                   )}
                 </div>
@@ -4880,7 +4883,12 @@ export function Messenger() {
 
         {/* Right Column: Chat Thread & Input Area */}
         <div
-          className={`flex-1 flex flex-col min-h-0 bg-surface-container-lowest/30 relative ${
+          // `min-w-0` ist hier nicht kosmetisch: ein Flex-Kind hat von Haus
+          // aus `min-width: auto` und kann damit nicht unter die Breite
+          // seines Inhalts schrumpfen. Der Chatbereich wuchs so auf 402 px
+          // in einem 375 px breiten Fenster und schob sich 11 px nach links
+          // aus dem Bild -- daher die verrutschten Texte am Telefon.
+          className={`flex-1 min-w-0 flex flex-col min-h-0 bg-surface-container-lowest/30 relative ${
             !isChatOpen ? 'hidden md:flex' : 'flex'
           }`}
           onDragOver={(e) => {
@@ -5024,11 +5032,11 @@ export function Messenger() {
 
               {/* Floating Chat Controls (Header-free, maximal chat space) */}
               <div
-                className={`absolute top-2.5 left-3 right-3 z-30 flex items-center justify-between pointer-events-none ${
+                className={`absolute top-2.5 left-3 right-3 z-30 flex items-center justify-between gap-2 pointer-events-none ${
                   auswahlModus || sucheOffen ? 'hidden' : ''
                 }`}
               >
-                <div className="flex items-center gap-2 pointer-events-auto">
+                <div className="flex items-center gap-2 min-w-0 pointer-events-auto">
                   {/* Mobile Back Button */}
                   <button
                     type="button"
@@ -5036,7 +5044,7 @@ export function Messenger() {
                       setActiveContact(null)
                       setActiveGroup(null)
                     }}
-                    className="md:hidden p-2 rounded-full bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant shadow-xs transition-colors"
+                    className="md:hidden w-11 h-11 flex items-center justify-center rounded-full bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant shadow-xs transition-colors"
                     aria-label="Zurück zur Kontaktliste"
                     title="Zurück zur Kontaktliste"
                   >
@@ -5044,7 +5052,7 @@ export function Messenger() {
                   </button>
 
                   {/* Header Title Badge with Mute & Block Indicators */}
-                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-container-high/85 backdrop-blur-md border border-outline-variant/30 shadow-xs">
+                  <div className="flex items-center gap-2 min-w-0 px-3 py-1.5 rounded-full bg-surface-container-high/85 backdrop-blur-md border border-outline-variant/30 shadow-xs">
                     {activeGroup?.avatar_url && (
                       <img
                         src={apiUrl(activeGroup.avatar_url)}
@@ -5068,115 +5076,36 @@ export function Messenger() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-1.5 pointer-events-auto">
+                {/* Was oft gebraucht wird, steht hier. Alles Uebrige liegt
+                    im Menue: acht Knoepfe passten bei 375 px nicht nebeneinander,
+                    die Gruppe lief 41 px ueber den rechten Rand hinaus und
+                    draengte den Namen auf null Abstand.
+
+                    Schlichte <button> statt der Button-Komponente: deren
+                    size="icon" setzt h-8 w-8 fest, und weil die Klassen nur
+                    aneinandergehaengt werden, gewinnt im CSS die feste Groesse
+                    gegen jede mitgegebene. Am Telefon braucht es 44 px. */}
+                <div className="flex items-center gap-1.5 shrink-0 pointer-events-auto">
                   {activeGroup && (
-                    <>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleCopyInviteLink(activeGroup)}
-                        className="h-8 gap-1.5 text-xs px-2.5 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary shadow-xs"
-                        title="Einladungslink kopieren"
-                      >
-                        <Share2 className="w-3.5 h-3.5" />
-                        <span className="hidden sm:inline">Einladen</span>
-                      </Button>
-
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleStartGroupCall(false)}
-                        disabled={!groupCallPermissions.canStart}
-                        className="h-8 gap-1.5 bg-surface-container-high/85 px-2.5 text-xs text-primary shadow-xs hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-60"
-                        title={
-                          groupCallPermissions.canStart
-                            ? 'Gruppenanruf starten'
-                            : 'Du hast in dieser Gruppe keine Berechtigung, einen Gruppenanruf zu starten.'
-                        }
-                        aria-label="Gruppenanruf starten"
-                      >
-                        <UsersRound className="w-3.5 h-3.5" />
-                        <span className="hidden sm:inline">Anruf</span>
-                      </Button>
-
-                      {(activeGroup.owner_user_id === currentUserId || activeGroup.role === 'admin') && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => gruppenLogoInputRef.current?.click()}
-                          disabled={logoLaedt}
-                          className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-primary shadow-xs"
-                          title="Gruppenlogo ändern"
-                          aria-label="Gruppenlogo ändern"
-                        >
-                          <ImagePlus className="w-4 h-4" />
-                        </Button>
-                      )}
-
-                      {(activeGroup.owner_user_id === currentUserId || activeGroup.role === 'admin') && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => setIsGroupPermissionsOpen(true)}
-                          className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-primary shadow-xs"
-                          title="Gruppenrollen & Rechte verwalten"
-                          aria-label="Gruppenrollen & Rechte verwalten"
-                        >
-                          <Shield className="w-4 h-4" />
-                        </Button>
-                      )}
-
-                      {activeGroup.owner_user_id === currentUserId ? (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleDeleteGroup(activeGroup)}
-                          className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-error shadow-xs"
-                          title="Gruppe löschen"
-                          aria-label="Gruppe löschen"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleLeaveGroup(activeGroup)}
-                          className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-error shadow-xs"
-                          title="Gruppe verlassen"
-                          aria-label="Gruppe verlassen"
-                        >
-                          <LogOut className="w-4 h-4" />
-                        </Button>
-                      )}
-                    </>
-                  )}
-
-                  {activeContact && !activeContact.isFriend && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={async () => {
-                        try {
-                          await sendFriendRequest(activeContact.username)
-                          toast.success(`Freundschaftsanfrage an ${activeContact.username} gesendet!`)
-                        } catch (err: any) {
-                          toast.error(err?.message || 'Konnte keine Anfrage senden.')
-                        }
-                      }}
-                      className="h-8 gap-1.5 text-xs px-2.5 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary shadow-xs"
-                      title="Freundschaftsanfrage senden"
+                    <button
+                      type="button"
+                      onClick={() => handleStartGroupCall(false)}
+                      disabled={!groupCallPermissions.canStart}
+                      className="flex items-center justify-center rounded-md h-11 w-11 sm:h-8 sm:w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary shadow-xs disabled:opacity-60"
+                      title={
+                        groupCallPermissions.canStart
+                          ? 'Gruppenanruf starten'
+                          : 'Du hast in dieser Gruppe keine Berechtigung, einen Gruppenanruf zu starten.'
+                      }
+                      aria-label="Gruppenanruf starten"
                     >
-                      <UserPlus className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">Anfrage senden</span>
-                    </Button>
+                      <UsersRound className="w-4 h-4" />
+                    </button>
                   )}
 
                   {activeContact && activeContact.isFriend && (
-                    <>
-                      <Button
-                        variant="ghost"
-                        size="icon"
+                    <button
+                        type="button"
                         onClick={async () => {
                           try {
                             await useCallStore.getState().initiateCall(
@@ -5191,124 +5120,52 @@ export function Messenger() {
                             toast.error(err?.message || 'Anruf konnte nicht gestartet werden.')
                           }
                         }}
-                        className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary hover:text-primary shadow-xs"
+                        className="flex items-center justify-center rounded-md h-11 w-11 sm:h-8 sm:w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary shadow-xs"
                         title="Sprachanruf starten"
                         aria-label="Sprachanruf starten"
                       >
-                        <Phone className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={async () => {
-                          try {
-                            await useCallStore.getState().initiateCall(
-                              {
-                                userId: activeContact.userId,
-                                username: activeContact.username,
-                                avatarUrl: activeContact.avatarUrl,
-                              },
-                              'video',
-                            )
-                          } catch (err: any) {
-                            toast.error(err?.message || 'Anruf konnte nicht gestartet werden.')
-                          }
-                        }}
-                        className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary hover:text-primary shadow-xs"
-                        title="Videoanruf starten"
-                        aria-label="Videoanruf starten"
-                      >
-                        <Video className="w-4 h-4" />
-                      </Button>
-                    </>
+                      <Phone className="w-4 h-4" />
+                    </button>
                   )}
 
-                  {/* Stummschalten Button */}
-                  {blindMailboxId && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setIsMuteModalOpen(true)}
-                      className={`h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 shadow-xs ${
-                        isChatMuted(blindMailboxId)
-                          ? 'text-status-warning'
-                          : 'text-on-surface-variant hover:text-primary'
-                      }`}
-                      title={
-                        isChatMuted(blindMailboxId)
-                          ? 'Stummschaltung aktiv (Klicken zum Ändern)'
-                          : 'Benachrichtigungen stummschalten'
-                      }
-                      aria-label="Benachrichtigungen stummschalten"
+                  {activeContact && !activeContact.isFriend && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await sendFriendRequest(activeContact.username)
+                          toast.success(`Freundschaftsanfrage an ${activeContact.username} gesendet!`)
+                        } catch (err: any) {
+                          toast.error(err?.message || 'Konnte keine Anfrage senden.')
+                        }
+                      }}
+                      className="flex items-center justify-center rounded-md h-11 w-11 sm:h-8 sm:w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary shadow-xs"
+                      title="Freundschaftsanfrage senden"
+                      aria-label="Freundschaftsanfrage senden"
                     >
-                      {isChatMuted(blindMailboxId) ? (
-                        <BellOff className="w-4 h-4" />
-                      ) : (
-                        <Bell className="w-4 h-4" />
-                      )}
-                    </Button>
+                      <UserPlus className="w-4 h-4" />
+                    </button>
                   )}
 
-                  {/* Kontakt Blockieren Button */}
-                  {activeContact && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setIsBlockConfirmOpen(true)}
-                      className={`h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 shadow-xs ${
-                        isBlocked(activeContact.userId)
-                          ? 'text-status-error'
-                          : 'text-on-surface-variant hover:text-status-error'
-                      }`}
-                      title={
-                        isBlocked(activeContact.userId)
-                          ? 'Kontakt blockiert (Klicken zum Aufheben)'
-                          : 'Kontakt blockieren'
-                      }
-                      aria-label="Kontakt blockieren"
-                    >
-                      <Ban className="w-4 h-4" />
-                    </Button>
-                  )}
-
-                  <Button
-                    variant="ghost"
-                    size="icon"
+                  <button
+                    type="button"
                     onClick={() => setSucheOffen(true)}
-                    className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-primary shadow-xs"
+                    className="flex items-center justify-center rounded-md h-11 w-11 sm:h-8 sm:w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-primary shadow-xs"
                     title="Im Chatverlauf suchen"
                     aria-label="Im Chatverlauf suchen"
                   >
                     <Search className="w-4 h-4" />
-                  </Button>
+                  </button>
 
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setVerfallOffen(true)}
-                    className={`h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 shadow-xs ${
-                      verfallSekunden > 0 ? 'text-primary' : 'text-on-surface-variant hover:text-primary'
-                    }`}
-                    title={
-                      verfallSekunden > 0
-                        ? `Nachrichten verschwinden nach ${stufenLabel(verfallSekunden)}`
-                        : 'Verschwindende Nachrichten'
-                    }
-                    aria-label="Verschwindende Nachrichten"
+                  <button
+                    type="button"
+                    onClick={() => setChatMenueOffen(true)}
+                    className="flex items-center justify-center rounded-md h-11 w-11 sm:h-8 sm:w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-primary shadow-xs"
+                    title="Mehr"
+                    aria-label="Weitere Einstellungen dieses Chats"
                   >
-                    <Timer className="w-4 h-4" />
-                  </Button>
-
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setIsWallpaperModalOpen(true)}
-                    className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-primary shadow-xs"
-                    title="Chat-Hintergrund anpassen"
-                    aria-label="Chat-Hintergrund anpassen"
-                  >
-                    <ImageIcon className="w-4 h-4" />
-                  </Button>
+                    <MoreVertical className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
 
@@ -5320,7 +5177,7 @@ export function Messenger() {
                 <button
                   type="button"
                   onClick={() => angeheftet.clientUuid && springeZu(angeheftet.clientUuid)}
-                  className="absolute top-14 left-3 right-3 z-20 min-h-11 px-3 py-2 flex items-center gap-2.5 rounded-xl bg-surface-container-high/90 backdrop-blur-md border border-outline-variant/30 shadow-xs text-left"
+                  className="absolute top-[4.25rem] sm:top-14 left-3 right-3 z-20 min-h-11 px-3 py-2 flex items-center gap-2.5 rounded-xl bg-surface-container-high/90 backdrop-blur-md border border-outline-variant/30 shadow-xs text-left"
                 >
                   <Pin className="w-3.5 h-3.5 text-primary shrink-0" />
                   <span className="min-w-0 flex-1">
@@ -5355,20 +5212,24 @@ export function Messenger() {
               {/* Message Thread Scroll Area */}
               <div
                 ref={scrollContainerRef}
-                className="flex-1 overflow-y-auto p-4 pt-12 space-y-3 relative z-1"
+                // Das obere Polster muss die schwebende Kopfzeile freihalten.
+                // Am Telefon ist sie 44 px hoch (Trefflaeche), am Zeigergeraet
+                // 32 px; mit einem festen pt-12 verdeckte sie dort die ersten
+                // Zeilen des Verlaufs.
+                className="flex-1 overflow-y-auto p-4 pt-16 sm:pt-12 space-y-3 relative z-1"
               >
                 {/* WhatsApp-style encryption notice banner */}
                 <div className="py-1 text-center">
                   <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high/60 border border-outline-variant/30 text-[11px] text-on-surface-variant shadow-2xs">
                     <Lock className="w-3 h-3 text-emerald-400" />
-                    <span>Nachrichten in diesem Chat sind Ende-zu-Ende verschlüsselt.</span>
+                    <span>Ende-zu-Ende verschlüsselt</span>
                   </div>
                 </div>
 
 
                 {messages.length === 0 && !loadingMessages && (
                   <div className="py-16 text-center text-xs text-on-surface-variant/70">
-                    Noch keine Nachrichten. Schreibe die erste Nachricht!
+                    Noch keine Nachrichten.
                   </div>
                 )}
 
@@ -5852,31 +5713,35 @@ export function Messenger() {
                         }
                         leftActions={
                           <>
-                            <Button
+                            <button
                               type="button"
-                              variant={isStickerPickerOpen ? 'secondary' : 'ghost'}
-                              size="icon"
                               onClick={() => setIsStickerPickerOpen((prev) => !prev)}
-                              className="h-8 w-8 rounded-full p-0 text-on-surface-variant hover:text-amber-400"
+                              className={`w-11 h-11 sm:w-8 sm:h-8 shrink-0 flex items-center justify-center rounded-full transition-colors ${
+                                isStickerPickerOpen
+                                  ? 'bg-surface-container-highest text-amber-400'
+                                  : 'text-on-surface-variant hover:text-amber-400'
+                              }`}
                               title="Sticker & Emojis"
                               aria-label="Sticker auswählen"
                             >
                               <Smile className="w-4 h-4" />
-                            </Button>
+                            </button>
 
                             {/* Unified Attachment Button with sleek Popover */}
                             <div className="relative shrink-0" ref={attachMenuRef}>
-                              <Button
+                              <button
                                 type="button"
-                                variant={isAttachMenuOpen ? 'secondary' : 'ghost'}
-                                size="icon"
                                 onClick={() => setIsAttachMenuOpen((prev) => !prev)}
-                                className="h-8 w-8 rounded-full p-0 text-on-surface-variant hover:text-primary transition-all"
+                                className={`w-11 h-11 sm:w-8 sm:h-8 shrink-0 flex items-center justify-center rounded-full transition-colors ${
+                                  isAttachMenuOpen
+                                    ? 'bg-surface-container-highest text-primary'
+                                    : 'text-on-surface-variant hover:text-primary'
+                                }`}
                                 title="Anhang hinzufügen"
                                 aria-label="Anhang hinzufügen"
                               >
                                 <Plus className={`w-4 h-4 transition-transform duration-200 ${isAttachMenuOpen ? 'rotate-45 text-primary' : ''}`} />
-                              </Button>
+                              </button>
 
                               {/* Attachment Popover Menu */}
                               {isAttachMenuOpen && (
@@ -5981,7 +5846,7 @@ export function Messenger() {
                               type="submit"
                               disabled={sending}
                               size="sm"
-                              className="h-8 w-8 rounded-full p-0 flex items-center justify-center"
+                              className="w-11 h-11 sm:w-8 sm:h-8 shrink-0 rounded-full flex items-center justify-center"
                               title="Senden"
                               aria-label="Senden"
                             >
@@ -5989,28 +5854,24 @@ export function Messenger() {
                             </Button>
                           ) : (
                             <div className="flex items-center gap-1">
-                              <Button
+                              <button
                                 type="button"
-                                variant="ghost"
-                                size="icon"
                                 onClick={() => setIsVideoNoteRecording(true)}
-                                className="h-8 w-8 p-0 text-on-surface-variant hover:text-emerald-400 hover:bg-emerald-500/10 rounded-full"
+                                className="w-11 h-11 sm:w-8 sm:h-8 shrink-0 flex items-center justify-center text-on-surface-variant hover:text-emerald-400 hover:bg-emerald-500/10 rounded-full transition-colors"
                                 title="Videonotiz aufnehmen (Halten/Swipe)"
                                 aria-label="Videonotiz aufnehmen"
                               >
                                 <Video className="w-4 h-4" />
-                              </Button>
-                              <Button
+                              </button>
+                              <button
                                 type="button"
-                                variant="ghost"
-                                size="icon"
                                 onClick={startRecording}
-                                className="h-8 w-8 p-0 text-on-surface-variant hover:text-primary hover:bg-primary/10 rounded-full"
+                                className="w-11 h-11 sm:w-8 sm:h-8 shrink-0 flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-primary/10 rounded-full transition-colors"
                                 title="Sprachnachricht aufnehmen"
                                 aria-label="Sprachnachricht aufnehmen"
                               >
                                 <Mic className="w-4 h-4" />
-                              </Button>
+                              </button>
                             </div>
                           )
                         }
@@ -6095,10 +5956,10 @@ export function Messenger() {
         }
         leerText={
           ueberall === 'markiert'
-            ? 'Noch nichts markiert. Über das Menü einer Nachricht legst du ein Sternchen an.'
+            ? 'Noch nichts markiert.'
             : ueberall === 'anMich'
-              ? 'Niemand hat dich erwähnt oder auf dich geantwortet.'
-              : 'Kein Chat auf diesem Gerät enthält diesen Text.'
+              ? 'Nichts, wo du gemeint warst.'
+              : 'Kein Chat enthält diesen Text.'
         }
         chats={ueberallChats}
         verzeichnis={mailboxDirectory}
@@ -6122,7 +5983,7 @@ export function Messenger() {
           <Blatteintrag
             icon={zeilenMenue && pinnedChats.includes(zeilenMenue.mid) ? <PinOff className="w-4 h-4" /> : <Pin className="w-4 h-4" />}
             label={zeilenMenue && pinnedChats.includes(zeilenMenue.mid) ? 'Nicht mehr anheften' : 'Anheften'}
-            hinweis={`Bleibt auf diesem Gerät. Höchstens ${PINS_MAX} Chats.`}
+            hinweis={`Höchstens ${PINS_MAX}, nur auf diesem Gerät`}
             onClick={() => {
               if (zeilenMenue) handleAnheftenChat(zeilenMenue.mid)
               setZeilenMenue(null)
@@ -6149,6 +6010,135 @@ export function Messenger() {
         </div>
       </Blattmenue>
 
+      {/* Alles, was nicht in die Kopfzeile passt. Bei 375 px ist dort Platz
+          fuer drei bis vier Knoepfe, nicht fuer acht. */}
+      <Blattmenue
+        offen={chatMenueOffen}
+        onSchliessen={() => setChatMenueOffen(false)}
+        titel={activeGroup ? activeGroup.name : activeContact?.username || 'Chat'}
+      >
+        <div className="px-4 pt-2 pb-1 text-xs font-semibold text-on-surface-variant truncate">
+          {activeGroup ? activeGroup.name : activeContact?.username}
+        </div>
+        <div className="pb-2">
+          {blindMailboxId && (
+            <Blatteintrag
+              icon={isChatMuted(blindMailboxId) ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
+              label={isChatMuted(blindMailboxId) ? 'Stummschaltung aufheben' : 'Stummschalten'}
+              onClick={() => {
+                setChatMenueOffen(false)
+                setIsMuteModalOpen(true)
+              }}
+            />
+          )}
+          <Blatteintrag
+            icon={<Timer className="w-4 h-4" />}
+            label="Verschwindende Nachrichten"
+            hinweis={verfallSekunden > 0 ? stufenLabel(verfallSekunden) : 'Aus'}
+            onClick={() => {
+              setChatMenueOffen(false)
+              setVerfallOffen(true)
+            }}
+          />
+          {activeContact && activeContact.isFriend && (
+            <Blatteintrag
+              icon={<Video className="w-4 h-4" />}
+              label="Videoanruf"
+              onClick={async () => {
+                setChatMenueOffen(false)
+                try {
+                  await useCallStore.getState().initiateCall(
+                    {
+                      userId: activeContact.userId,
+                      username: activeContact.username,
+                      avatarUrl: activeContact.avatarUrl,
+                    },
+                    'video',
+                  )
+                } catch (err: any) {
+                  toast.error(err?.message || 'Anruf konnte nicht gestartet werden.')
+                }
+              }}
+            />
+          )}
+          <Blatteintrag
+            icon={<ImageIcon className="w-4 h-4" />}
+            label="Hintergrund"
+            onClick={() => {
+              setChatMenueOffen(false)
+              setIsWallpaperModalOpen(true)
+            }}
+          />
+
+          {activeGroup && (
+            <>
+              <Blatteintrag
+                icon={<Share2 className="w-4 h-4" />}
+                label="Einladungslink kopieren"
+                onClick={() => {
+                  setChatMenueOffen(false)
+                  handleCopyInviteLink(activeGroup)
+                }}
+              />
+              {(activeGroup.owner_user_id === currentUserId || activeGroup.role === 'admin') && (
+                <>
+                  <Blatteintrag
+                    icon={<ImagePlus className="w-4 h-4" />}
+                    label="Gruppenlogo aendern"
+                    disabled={logoLaedt}
+                    onClick={() => {
+                      setChatMenueOffen(false)
+                      gruppenLogoInputRef.current?.click()
+                    }}
+                  />
+                  <Blatteintrag
+                    icon={<Shield className="w-4 h-4" />}
+                    label="Rollen und Rechte"
+                    onClick={() => {
+                      setChatMenueOffen(false)
+                      setIsGroupPermissionsOpen(true)
+                    }}
+                  />
+                </>
+              )}
+              {activeGroup.owner_user_id === currentUserId ? (
+                <Blatteintrag
+                  icon={<Trash2 className="w-4 h-4" />}
+                  label="Gruppe loeschen"
+                  gefahr
+                  onClick={() => {
+                    setChatMenueOffen(false)
+                    handleDeleteGroup(activeGroup)
+                  }}
+                />
+              ) : (
+                <Blatteintrag
+                  icon={<LogOut className="w-4 h-4" />}
+                  label="Gruppe verlassen"
+                  gefahr
+                  onClick={() => {
+                    setChatMenueOffen(false)
+                    handleLeaveGroup(activeGroup)
+                  }}
+                />
+              )}
+            </>
+          )}
+
+          {activeContact && (
+            <Blatteintrag
+              icon={<Ban className="w-4 h-4" />}
+              label={isBlocked(activeContact.userId) ? 'Blockierung aufheben' : 'Kontakt blockieren'}
+              gefahr={!isBlocked(activeContact.userId)}
+              onClick={() => {
+                setChatMenueOffen(false)
+                setIsBlockConfirmOpen(true)
+              }}
+            />
+          )}
+        </div>
+      </Blattmenue>
+
       {/* Verschwindende Nachrichten. Die Grenze steht in der Auswahl selbst,
           nicht in einer Fußnote: beim Server löschen kann nur, wer hochgeladen
           hat. */}
@@ -6160,10 +6150,9 @@ export function Messenger() {
         <div className="px-4 pt-2 pb-3 space-y-1">
           <p className="text-sm font-semibold text-on-surface">Verschwindende Nachrichten</p>
           <p className="text-[11px] text-on-surface-variant leading-relaxed">
-            Neue Nachrichten werden nach der gewählten Zeit auf beiden Geräten gelöscht. Beide Seiten
-            sehen die Umstellung als Hinweis im Verlauf. Beim Server räumt nur das Gerät auf, das die
-            Nachricht gesendet hat: bleibt es dauerhaft offline, liegt der verschlüsselte Umschlag
-            dort weiter, auch wenn die Nachricht auf allen Geräten verschwunden ist.
+            Neue Nachrichten verschwinden nach der gewählten Zeit auf beiden Geräten, und beide Seiten
+            sehen die Umstellung im Verlauf. Beim Server räumt nur das absendende Gerät auf: bleibt es
+            offline, liegt der verschlüsselte Umschlag dort weiter.
           </p>
         </div>
         <div className="pb-2">
