@@ -108,13 +108,21 @@ class SocialService:
 
     @classmethod
     def get_friends(cls, db: Session, user_id: int) -> list[dict[str, Any]]:
-        """Liefert alle bestätigten Freunde des Benutzers samt aktueller Präsenz."""
+        """Liefert alle bestätigten Freunde des Benutzers samt aktueller Präsenz.
+
+        Je Freund steht hier genau ein Eintrag. Die Eindeutigkeit in
+        ``user_friends`` gilt je Richtung: ``(a, b)`` und ``(b, a)`` sind zwei
+        erlaubte Zeilen, und beide erfüllen den Filter unten. Wo ein solches
+        Paar im Bestand liegt, zählt die ältere Zeile; dafür steht die feste
+        Sortierung.
+        """
         rels = (
             db.query(UserFriend)
             .filter(
                 or_(UserFriend.user_id == user_id, UserFriend.friend_id == user_id),
                 UserFriend.status == "accepted",
             )
+            .order_by(UserFriend.id)
             .all()
         )
 
@@ -131,11 +139,15 @@ class SocialService:
         }
 
         results = []
+        bereits_gelistet: set[int] = set()
         for r in rels:
             fid = r.friend_id if r.user_id == user_id else r.user_id
+            if fid in bereits_gelistet:
+                continue
             u = users.get(fid)
             if not u or not u.is_active:
                 continue
+            bereits_gelistet.add(fid)
             pres = presences.get(fid)
             presence_dict = None
             if pres and pres.status != "invisible":
@@ -329,7 +341,15 @@ class SocialService:
             raise HTTPException(status_code=404, detail="Freundschaft nicht gefunden")
 
         other_id = rel.friend_id if rel.user_id == user_id else rel.user_id
-        db.delete(rel)
+        # Jede Zeile dieser Beziehung, nicht nur die erste. Liegt die
+        # Freundschaft gespiegelt im Bestand, bliebe die zweite Zeile stehen und
+        # die beiden wären nach dem Entfernen weiterhin befreundet.
+        db.query(UserFriend).filter(
+            or_(
+                and_(UserFriend.user_id == user_id, UserFriend.friend_id == other_id),
+                and_(UserFriend.user_id == other_id, UserFriend.friend_id == user_id),
+            )
+        ).delete(synchronize_session=False)
         db.commit()
 
         SyncEventService.publish(
@@ -352,6 +372,18 @@ class SocialService:
             .first()
         )
         if rel:
+            # Erst die Spiegelzeilen derselben Beziehung entfernen: bliebe eine
+            # davon auf "accepted" stehen, wäre der Blockierte weiterhin ein
+            # bestätigter Freund, und `social_privacy="friends"` gäbe ihm
+            # weiter Einblick. Das Löschen geht der Umschreibung voraus, sonst
+            # stößt sie auf die Eindeutigkeit von (user_id, friend_id).
+            db.query(UserFriend).filter(
+                UserFriend.id != rel.id,
+                or_(
+                    and_(UserFriend.user_id == user_id, UserFriend.friend_id == target_user_id),
+                    and_(UserFriend.user_id == target_user_id, UserFriend.friend_id == user_id),
+                ),
+            ).delete(synchronize_session=False)
             rel.user_id = user_id
             rel.friend_id = target_user_id
             rel.status = "blocked"

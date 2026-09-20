@@ -214,6 +214,12 @@ function getWaveformBars(msgId: number, count = 28): number[] {
 }
 
 export interface ChatContact {
+  /**
+   * Schlüssel für die Kontaktlisten. Wird beim Zusammenführen vergeben und
+   * stammt nicht aus der Server-Antwort: eine Benutzer-Id kann doppelt
+   * ankommen, dieser Wert nicht.
+   */
+  listKey: string
   id: number
   userId: number
   username: string
@@ -835,12 +841,20 @@ export function Messenger() {
   const contactsList: ChatContact[] = useMemo(() => {
     const list: ChatContact[] = []
     const seenUserIds = new Set<number>()
+    // Der Zähler gehört dieser Ansicht. Die Benutzer-Id tut es nicht, deshalb
+    // trägt sie den Schlüssel nur lesbar mit, nicht seine Eindeutigkeit.
+    let schluesselZaehler = 0
+    const naechsterSchluessel = (uid: number) => `k${++schluesselZaehler}-${uid}`
 
     for (const f of friends) {
       if (f.status === 'accepted' || (f as any).friend_user_id) {
         const uid = f.user_id ?? (f as any).friend_user_id ?? f.id
+        // Liegt eine Freundschaft in beiden Richtungen im Bestand, kommt sie
+        // zweimal an. Ein Freund, ein Eintrag, wie bei den drei Quellen unten.
+        if (seenUserIds.has(uid)) continue
         seenUserIds.add(uid)
         list.push({
+          listKey: naechsterSchluessel(uid),
           id: f.id,
           userId: uid,
           username: f.username,
@@ -858,6 +872,7 @@ export function Messenger() {
       if (!seenUserIds.has(member.user_id)) {
         seenUserIds.add(member.user_id)
         list.push({
+          listKey: naechsterSchluessel(member.user_id),
           id: member.user_id,
           userId: member.user_id,
           username: member.username,
@@ -880,6 +895,7 @@ export function Messenger() {
       if (!seenUserIds.has(dc.other_user_id)) {
         seenUserIds.add(dc.other_user_id)
         list.push({
+          listKey: naechsterSchluessel(dc.other_user_id),
           id: dc.other_user_id,
           userId: dc.other_user_id,
           username: dc.other_username,
@@ -898,6 +914,7 @@ export function Messenger() {
       if (!seenUserIds.has(p.user_id)) {
         seenUserIds.add(p.user_id)
         list.push({
+          listKey: naechsterSchluessel(p.user_id),
           id: p.user_id,
           userId: p.user_id,
           username: p.username,
@@ -1052,6 +1069,8 @@ export function Messenger() {
           setActiveContact((prev) => {
             if (prev?.userId === targetId) return prev
             return {
+              // Steht in keiner Liste, braucht den Schlüssel aber als Kontakt.
+              listKey: `q-${targetId}`,
               id: targetId,
               userId: targetId,
               username: `User #${targetId}`,
@@ -3289,7 +3308,7 @@ export function Messenger() {
                       const isUserBlocked = isBlocked(c.userId)
                       return (
                         <button
-                          key={`${c.isFriend ? 'f' : 't'}-${c.userId}`}
+                          key={c.listKey}
                           type="button"
                           onClick={() => {
                             setActiveContact(c)
@@ -3526,7 +3545,7 @@ export function Messenger() {
                   <div className="space-y-1">
                     {contactsList.map((c) => (
                       <div
-                        key={`update-${c.userId}`}
+                        key={c.listKey}
                         className="flex items-center justify-between p-2.5 rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60"
                       >
                         <div className="flex items-center gap-3 min-w-0">
@@ -5248,7 +5267,7 @@ export function Messenger() {
 
             {filteredContacts.map((c) => (
               <button
-                key={`photo-c-${c.userId}`}
+                key={c.listKey}
                 type="button"
                 onClick={() => {
                   setActiveContact(c)

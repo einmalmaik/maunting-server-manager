@@ -386,6 +386,47 @@ describe('Messenger (Allround Chat)', () => {
     expect(screen.getByPlaceholderText('Freunde oder Teammitglieder suchen …')).toBeInTheDocument()
   })
 
+  it('zeigt einen Freund einmal, auch wenn zwei Zeilen zur selben Freundschaft ankommen', async () => {
+    // Die Lage vom 20.09.2026: `user_friends` hielt die Freundschaft in beiden
+    // Richtungen, die Liste bekam zwei Zeilen mit derselben Benutzer-Id — und
+    // vergab für beide denselben Schlüssel.
+    const zeile = (id: number) => ({
+      id,
+      user_id: 101,
+      username: 'alice',
+      avatar_url: null,
+      status: 'accepted',
+      is_requester: id === 1,
+      created_at: '2026-09-01T00:00:00Z',
+      presence: {
+        status: 'online',
+        device_type: 'web',
+        activity_label: 'Im Panel',
+        activity_detail: null,
+      },
+    })
+    vi.mocked(socialApi.getFriends).mockResolvedValue([zeile(1), zeile(2)] as any)
+    const konsolenfehler = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('charlie_teammate')).toBeInTheDocument()
+    })
+
+    expect(screen.getAllByText('alice')).toHaveLength(1)
+    // Und React hat nichts zu beanstanden: kein zweiter Eintrag unter `f-101`.
+    const schluesselwarnung = konsolenfehler.mock.calls.some((args) =>
+      args.some((a) => String(a).includes('same key'))
+    )
+    konsolenfehler.mockRestore()
+    expect(schluesselwarnung).toBe(false)
+  })
+
   it('öffnet die Konversation beim Klick auf einen Kontakt und zeigt dezente E2EE-Statuszeile', async () => {
     render(
       <MemoryRouter>

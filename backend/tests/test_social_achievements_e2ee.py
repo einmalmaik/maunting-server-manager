@@ -102,6 +102,73 @@ def test_friends_workflow_and_handshake(db: Session):
     assert db.query(UserAchievement).filter_by(user_id=u2.id, achievement_id="social_handshake").first() is not None
 
 
+def test_gespiegelte_freundschaft_ergibt_einen_eintrag(db: Session):
+    """Eine Freundschaft in beiden Richtungen bleibt ein Freund.
+
+    ``user_friends`` ist je Richtung eindeutig: ``(a, b)`` und ``(b, a)`` sind
+    zwei erlaubte Zeilen, und beide passen auf die Abfrage der Freundesliste.
+    Auf der Dev-Instanz lag am 20.09.2026 genau so ein Paar, und der Messenger
+    zeigte jeden Freund zweimal.
+    """
+    anna = User(username="anna_spiegel", password_hash="hash", is_active=True)
+    bert = User(username="bert_spiegel", password_hash="hash", is_active=True)
+    db.add_all([anna, bert])
+    db.commit()
+
+    db.add_all(
+        [
+            UserFriend(user_id=anna.id, friend_id=bert.id, status="accepted"),
+            UserFriend(user_id=bert.id, friend_id=anna.id, status="accepted"),
+        ]
+    )
+    db.commit()
+
+    assert [f["user_id"] for f in SocialService.get_friends(db, anna.id)] == [bert.id]
+    # Aus der Gegenrichtung gilt dasselbe.
+    assert [f["user_id"] for f in SocialService.get_friends(db, bert.id)] == [anna.id]
+
+
+def _gespiegeltes_paar(db: Session, name_a: str, name_b: str) -> tuple[User, User]:
+    """Zwei Konten mit einer Freundschaft, die in beiden Richtungen eingetragen ist."""
+    a = User(username=name_a, password_hash="hash", is_active=True)
+    b = User(username=name_b, password_hash="hash", is_active=True)
+    db.add_all([a, b])
+    db.commit()
+    db.add_all(
+        [
+            UserFriend(user_id=a.id, friend_id=b.id, status="accepted"),
+            UserFriend(user_id=b.id, friend_id=a.id, status="accepted"),
+        ]
+    )
+    db.commit()
+    return a, b
+
+
+def test_entfernen_loest_auch_die_gespiegelte_freundschaft(db: Session):
+    """Entfernen muss die Beziehung beenden, nicht nur eine ihrer Zeilen."""
+    a, b = _gespiegeltes_paar(db, "anna_entfernt", "bert_entfernt")
+
+    SocialService.remove_friend(db, a.id, b.id)
+
+    assert SocialService.is_confirmed_friend(db, a.id, b.id) is False
+    assert db.query(UserFriend).filter(UserFriend.user_id.in_([a.id, b.id])).count() == 0
+
+
+def test_blockieren_laesst_keine_freundschaftszeile_stehen(db: Session):
+    """Wer blockiert ist, darf über keine zweite Zeile Freund bleiben.
+
+    ``social_privacy="friends"`` hängt an ``is_confirmed_friend``: bliebe die
+    Spiegelzeile auf "accepted" stehen, sähe der Blockierte das Profil weiter.
+    """
+    a, b = _gespiegeltes_paar(db, "anna_blockiert", "bert_blockiert")
+
+    SocialService.block_user(db, a.id, b.id)
+
+    zeilen = db.query(UserFriend).filter(UserFriend.user_id.in_([a.id, b.id])).all()
+    assert [(z.user_id, z.friend_id, z.status) for z in zeilen] == [(a.id, b.id, "blocked")]
+    assert SocialService.is_confirmed_friend(db, a.id, b.id) is False
+
+
 def test_privacy_three_tier_model(db: Session):
     """Prüft das 3-Stufen-Modell (private, friends, public)."""
     owner = User(username="charlie", password_hash="hash3", is_active=True, social_privacy="private")
