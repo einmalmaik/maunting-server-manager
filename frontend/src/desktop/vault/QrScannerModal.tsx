@@ -344,7 +344,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
                   value={manualCode}
                   onChange={(e) => setManualCode(e.target.value)}
                   placeholder={t('mss.vault.qr.codePlatzhalter')}
-                  className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3.5 py-2.5 text-xs text-on-surface font-mono placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary"
+                  className="msm-input font-mono"
                 />
               </div>
 

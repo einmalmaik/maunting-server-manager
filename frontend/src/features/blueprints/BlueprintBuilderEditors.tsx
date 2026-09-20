@@ -1,7 +1,7 @@
 import { cloneElement, useMemo, useRef, useState, type ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Plus, Trash2 } from 'lucide-react'
-import { Button, Dropdown } from '@/Singra/UI'
+import { Button, Dropdown, Checkbox } from '@/Singra/UI'
 import type { BlueprintDraft, BlueprintValidationIssue, GuardianRecoveryAction } from './contract'
 
 interface AccessibleControlProps {
@@ -397,7 +397,7 @@ export function PostInstallEditor({
             <Trash2 className="h-4 w-4" aria-hidden="true" />
           </Button>
           <label className="flex items-center gap-2 text-sm md:col-span-4">
-            <input type="checkbox" checked={row.required} onChange={event => onChange(value.map((item, itemIndex) => itemIndex === index ? { ...item, required: event.target.checked } : item))} />
+            <Checkbox checked={row.required} onCheckedChange={gesetzt => onChange(value.map((item, itemIndex) => itemIndex === index ? { ...item, required: gesetzt } : item))} />
             {t('blueprintBuilder.postInstall.required')}
           </label>
         </div>

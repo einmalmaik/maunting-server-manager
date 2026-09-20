@@ -13,8 +13,7 @@ import type { Server, User } from '@/types'
 import type { Role } from '@/types/permissions'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 import { MultiSelect } from '@/Singra/UI/MultiSelect'
-import { Button, Avatar } from '@/Singra/UI'
-
+import { Button, Avatar, Checkbox } from '@/Singra/UI'
 export function Users() {
   const { t } = useTranslation()
   const currentUser = useAuthStore((s) => s.user)
@@ -184,11 +183,9 @@ export function Users() {
               {currentUser?.is_owner && (
                 <label className="flex items-center gap-2 cursor-pointer">
                   <div className={`relative w-10 h-6 rounded-full transition-colors ${createForm.is_owner ? 'bg-secondary' : 'bg-surface-container-highest'}`}>
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={createForm.is_owner}
-                      onChange={(e) => setCreateForm({ ...createForm, is_owner: e.target.checked })}
-                      className="sr-only"
+                      onCheckedChange={(gesetzt) => setCreateForm({ ...createForm, is_owner: gesetzt })} className="sr-only"
                     />
                     <span className={`absolute top-1 left-1 w-4 h-4 bg-on-surface rounded-full transition-transform ${createForm.is_owner ? 'translate-x-4 bg-on-secondary' : ''}`} />
                   </div>
@@ -199,11 +196,9 @@ export function Users() {
               )}
               <label className="flex items-center gap-2 cursor-pointer">
                 <div className={`relative w-10 h-6 rounded-full transition-colors ${createForm.auto_verify ? 'bg-secondary' : 'bg-surface-container-highest'}`}>
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={createForm.auto_verify}
-                    onChange={(e) => setCreateForm({ ...createForm, auto_verify: e.target.checked })}
-                    className="sr-only"
+                    onCheckedChange={(gesetzt) => setCreateForm({ ...createForm, auto_verify: gesetzt })} className="sr-only"
                   />
                   <span className={`absolute top-1 left-1 w-4 h-4 bg-on-surface rounded-full transition-transform ${createForm.auto_verify ? 'translate-x-4 bg-on-secondary' : ''}`} />
                 </div>

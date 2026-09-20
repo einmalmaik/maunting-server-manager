@@ -587,7 +587,7 @@ export function ServerConsolePanel({ serverId, mode = 'console' }: Props) {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={t('servers.consoleSearchPlaceholder')}
-              className="w-full bg-surface-container-lowest border border-outline rounded-md pl-8 pr-3 py-1.5 font-mono text-xs text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-1 focus:ring-primary"
+              className="msm-input pl-8 pr-3 font-mono"
             />
           </div>
         </div>
@@ -665,7 +665,7 @@ export function ServerConsolePanel({ serverId, mode = 'console' }: Props) {
               maxLength={1024}
               autoComplete="off"
               spellCheck={false}
-              className="flex-1 bg-surface-container-lowest border border-outline rounded-md px-3 py-2 font-mono text-xs text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
+              className="msm-input flex-1 font-mono focus:ring-2 disabled:opacity-50"
               data-testid="console-input"
             />
             <Button size="sm"

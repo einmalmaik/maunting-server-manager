@@ -1,15 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import {
-  Dialog,
-  DialogContent,
-  Button,
-  Badge,
-  Avatar,
-  Dropdown,
-  Input,
-  type DropdownOption,
-} from '@/Singra/UI'
+import { Dialog, DialogContent, Button, Badge, Avatar, Dropdown, Input, type DropdownOption, Checkbox } from '@/Singra/UI'
 import { Switch } from '@/components/ui/Switch'
 import {
   Shield,
@@ -290,12 +281,10 @@ function GroupRoleForm({ initial, onSubmit, onCancel, disabled }: GroupRoleFormP
                 } ${isOwnerRole ? 'opacity-80 cursor-not-allowed' : ''}`}
               >
                 <div className="pt-0.5">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={isChecked}
-                    onChange={() => togglePerm(def.key)}
+                    onCheckedChange={() => togglePerm(def.key)}
                     disabled={isOwnerRole || disabled}
-                    className="w-4 h-4 rounded border-outline-variant text-primary focus:ring-primary"
                   />
                 </div>
                 <div className="min-w-0 flex-1">

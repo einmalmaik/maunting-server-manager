@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle, Check, ChevronLeft, ChevronRight, Code2, Download, Plus, Save, Trash2, X } from 'lucide-react'
-import { Button, Dropdown, NumberStepper } from '@/Singra/UI'
+import { Button, Dropdown, NumberStepper, Checkbox } from '@/Singra/UI'
 import { api } from '@/api/client'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
@@ -250,7 +250,7 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
       <LinesField id="bp-dirs" label={t('blueprintBuilder.fields.dirs.label')} help={t('blueprintBuilder.fields.dirs.help')} error={issueFor('runtime.ensureDirs')} value={draft.runtime.ensureDirs} onChange={ensureDirs => setDraft({ ...draft, runtime: { ...draft.runtime, ensureDirs } })} />
       <LinesField id="bp-files" label={t('blueprintBuilder.fields.files.label')} help={t('blueprintBuilder.fields.files.help')} error={issueFor('runtime.requiredFiles')} value={draft.runtime.requiredFiles} onChange={requiredFiles => setDraft({ ...draft, runtime: { ...draft.runtime, requiredFiles } })} />
       <label className="flex items-start gap-3 rounded-xl border border-status-warning/25 bg-status-warning/5 p-4 md:col-span-2">
-        <input type="checkbox" className="mt-1" checked={draft.runtime.enableExec} onChange={event => setDraft({ ...draft, runtime: { ...draft.runtime, enableExec: event.target.checked } })} />
+        <Checkbox className="mt-1" checked={draft.runtime.enableExec} onCheckedChange={gesetzt => setDraft({ ...draft, runtime: { ...draft.runtime, enableExec: gesetzt } })} />
         <span>
           <strong className="block text-sm">{t('blueprintBuilder.exec.title')}</strong>
           <span className="msm-field-help block">{t('blueprintBuilder.exec.help')}</span>
@@ -322,8 +322,8 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
           <Field id="bp-steam-branch" label={t('blueprintBuilder.fields.steamBranch.label')} help={t('blueprintBuilder.fields.steamBranch.help')}>
             <input className="msm-input font-mono" value={draft.source.steam.branch ?? ''} onChange={event => setDraft({ ...draft, source: { ...draft.source, steam: { ...draft.source.steam!, branch: event.target.value } } })} />
           </Field>
-          <label className="flex items-center gap-3"><input type="checkbox" checked={draft.source.steam.requiresLogin} onChange={event => setDraft({ ...draft, source: { ...draft.source, steam: { ...draft.source.steam!, requiresLogin: event.target.checked } } })} />{t('blueprintBuilder.steam.requiresLogin')}</label>
-          <label className="flex items-center gap-3"><input type="checkbox" checked={draft.source.steam.validate} onChange={event => setDraft({ ...draft, source: { ...draft.source, steam: { ...draft.source.steam!, validate: event.target.checked } } })} />{t('blueprintBuilder.steam.validate')}</label>
+          <label className="flex items-center gap-3"><Checkbox checked={draft.source.steam.requiresLogin} onCheckedChange={gesetzt => setDraft({ ...draft, source: { ...draft.source, steam: { ...draft.source.steam!, requiresLogin: gesetzt } } })} />{t('blueprintBuilder.steam.requiresLogin')}</label>
+          <label className="flex items-center gap-3"><Checkbox checked={draft.source.steam.validate} onCheckedChange={gesetzt => setDraft({ ...draft, source: { ...draft.source, steam: { ...draft.source.steam!, validate: gesetzt } } })} />{t('blueprintBuilder.steam.validate')}</label>
         </>
       )}
       {draft.source.http && (
@@ -356,10 +356,10 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
     if (!draft.mods) return null
     return (
       <div className="space-y-5">
-        <label className="flex items-center gap-3"><input type="checkbox" checked={draft.mods.supportsMods} onChange={event => setDraft({ ...draft, mods: { ...draft.mods!, supportsMods: event.target.checked } })} />{t('blueprintBuilder.mods.supportsMods')}</label>
+        <label className="flex items-center gap-3"><Checkbox checked={draft.mods.supportsMods} onCheckedChange={gesetzt => setDraft({ ...draft, mods: { ...draft.mods!, supportsMods: gesetzt } })} />{t('blueprintBuilder.mods.supportsMods')}</label>
         <div className="grid gap-4 sm:grid-cols-2">
-          <label className="flex items-center gap-3"><input type="checkbox" checked={draft.mods.supportsSteamWorkshop} onChange={event => setDraft({ ...draft, mods: { ...draft.mods!, supportsSteamWorkshop: event.target.checked } })} />{t('blueprintBuilder.mods.supportsWorkshop')}</label>
-          <label className="flex items-center gap-3"><input type="checkbox" checked={draft.mods.supportsCurseForge ?? false} onChange={event => setDraft({ ...draft, mods: { ...draft.mods!, supportsCurseForge: event.target.checked } })} />{t('blueprintBuilder.mods.supportsCurseForge')}</label>
+          <label className="flex items-center gap-3"><Checkbox checked={draft.mods.supportsSteamWorkshop} onCheckedChange={gesetzt => setDraft({ ...draft, mods: { ...draft.mods!, supportsSteamWorkshop: gesetzt } })} />{t('blueprintBuilder.mods.supportsWorkshop')}</label>
+          <label className="flex items-center gap-3"><Checkbox checked={draft.mods.supportsCurseForge ?? false} onCheckedChange={gesetzt => setDraft({ ...draft, mods: { ...draft.mods!, supportsCurseForge: gesetzt } })} />{t('blueprintBuilder.mods.supportsCurseForge')}</label>
         </div>
         {draft.mods.supportsSteamWorkshop && <Field id="bp-workshop-id" label={t('blueprintBuilder.fields.workshopId.label')} help={t('blueprintBuilder.fields.workshopId.help')} error={issueFor('mods.workshopAppId')}><input className="msm-input font-mono" value={draft.mods.workshopAppId ?? ''} onChange={event => setDraft({ ...draft, mods: { ...draft.mods!, workshopAppId: event.target.value } })} /></Field>}
         {draft.mods.supportsCurseForge && (
@@ -530,7 +530,7 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
       <div className="min-w-0 max-w-full space-y-6">
         <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low p-4">
           <label className="flex items-start gap-3">
-            <input className="mt-1" type="checkbox" checked={guardianEnabled} onChange={event => setGuardianEnabled(event.target.checked)} />
+            <Checkbox className="mt-1" checked={guardianEnabled} onCheckedChange={gesetzt => setGuardianEnabled(gesetzt)} />
             <span>
               <strong className="block text-sm">{t('blueprintBuilder.guardian.enabled')}</strong>
               <small className="msm-field-help block">{t('blueprintBuilder.guardian.enabledHelp')}</small>
@@ -579,12 +579,10 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
         <div className="min-w-0 max-w-full rounded-xl border border-outline-variant/60 bg-surface-container-low p-4 space-y-4">
           <h4 className="font-semibold text-lg border-b border-outline-variant/40 pb-2">{t('blueprintBuilder.guardian.healthTitle')}</h4>
           <label className="flex items-start gap-3">
-            <input
-              className="mt-1"
-              type="checkbox"
+            <Checkbox className="mt-1"
               checked={Boolean(health.process)}
-              onChange={event => setDraft(current => {
-                if (event.target.checked) {
+              onCheckedChange={gesetzt => setDraft(current => {
+                if (gesetzt) {
                   return { ...current, health: { ...current.health, process: structuredClone(defaults.health!.process!) } }
                 }
                 const nextHealth = { ...current.health }
@@ -595,12 +593,10 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
             <span>{t('blueprintBuilder.guardian.processEnabled')}<small className="msm-field-help block">{t('blueprintBuilder.guardian.processEnabledHelp')}</small></span>
           </label>
           <label className="flex items-start gap-3">
-            <input
-              className="mt-1"
-              type="checkbox"
+            <Checkbox className="mt-1"
               checked={health.process?.required ?? true}
               disabled={!health.process}
-              onChange={event => updateProcess({ required: event.target.checked })}
+              onCheckedChange={gesetzt => updateProcess({ required: gesetzt })}
             />
             <span>{t('blueprintBuilder.guardian.processRequired')}<small className="msm-field-help block">{t('blueprintBuilder.guardian.processRequiredHelp')}</small></span>
           </label>
@@ -691,8 +687,8 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
                 </Field>
               </div>
               <div className="grid gap-2 md:grid-cols-2">
-                <label className="flex items-start gap-3 text-sm"><input className="mt-1" type="checkbox" checked={health.process?.required_for_startup ?? true} onChange={event => updateProcess({ required_for_startup: event.target.checked })} /><span>{t('blueprintBuilder.fields.guardianRequiredStartup.label')}<small className="msm-field-help block">{t('blueprintBuilder.fields.guardianRequiredStartup.help')}</small></span></label>
-                <label className="flex items-start gap-3 text-sm"><input className="mt-1" type="checkbox" checked={health.process?.required_for_verification ?? true} onChange={event => updateProcess({ required_for_verification: event.target.checked })} /><span>{t('blueprintBuilder.fields.guardianRequiredVerification.label')}<small className="msm-field-help block">{t('blueprintBuilder.fields.guardianRequiredVerification.help')}</small></span></label>
+                <label className="flex items-start gap-3 text-sm"><Checkbox className="mt-1" checked={health.process?.required_for_startup ?? true} onCheckedChange={gesetzt => updateProcess({ required_for_startup: gesetzt })} /><span>{t('blueprintBuilder.fields.guardianRequiredStartup.label')}<small className="msm-field-help block">{t('blueprintBuilder.fields.guardianRequiredStartup.help')}</small></span></label>
+                <label className="flex items-start gap-3 text-sm"><Checkbox className="mt-1" checked={health.process?.required_for_verification ?? true} onCheckedChange={gesetzt => updateProcess({ required_for_verification: gesetzt })} /><span>{t('blueprintBuilder.fields.guardianRequiredVerification.label')}<small className="msm-field-help block">{t('blueprintBuilder.fields.guardianRequiredVerification.help')}</small></span></label>
               </div>
             </fieldset>
 
@@ -705,8 +701,8 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
                 <Field id="bp-port-success" label={t('blueprintBuilder.fields.guardianSuccessThreshold.label')} help={t('blueprintBuilder.fields.guardianSuccessThreshold.help')}><NumberStepper min={1} max={20} value={health.port?.success_threshold ?? 1} onValueChange={value => updatePortHealth({ success_threshold: Number(value) })} /></Field>
               </div>
               <div className="grid gap-2 md:grid-cols-2">
-                <label className="flex items-start gap-3 text-sm"><input className="mt-1" type="checkbox" checked={health.port?.required_for_startup ?? false} onChange={event => updatePortHealth({ required_for_startup: event.target.checked })} /><span>{t('blueprintBuilder.fields.guardianRequiredStartup.label')}<small className="msm-field-help block">{t('blueprintBuilder.fields.guardianRequiredStartup.help')}</small></span></label>
-                <label className="flex items-start gap-3 text-sm"><input className="mt-1" type="checkbox" checked={health.port?.required_for_verification ?? true} onChange={event => updatePortHealth({ required_for_verification: event.target.checked })} /><span>{t('blueprintBuilder.fields.guardianRequiredVerification.label')}<small className="msm-field-help block">{t('blueprintBuilder.fields.guardianRequiredVerification.help')}</small></span></label>
+                <label className="flex items-start gap-3 text-sm"><Checkbox className="mt-1" checked={health.port?.required_for_startup ?? false} onCheckedChange={gesetzt => updatePortHealth({ required_for_startup: gesetzt })} /><span>{t('blueprintBuilder.fields.guardianRequiredStartup.label')}<small className="msm-field-help block">{t('blueprintBuilder.fields.guardianRequiredStartup.help')}</small></span></label>
+                <label className="flex items-start gap-3 text-sm"><Checkbox className="mt-1" checked={health.port?.required_for_verification ?? true} onCheckedChange={gesetzt => updatePortHealth({ required_for_verification: gesetzt })} /><span>{t('blueprintBuilder.fields.guardianRequiredVerification.label')}<small className="msm-field-help block">{t('blueprintBuilder.fields.guardianRequiredVerification.help')}</small></span></label>
               </div>
             </fieldset>
 
@@ -721,9 +717,9 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
                 <Field id="bp-app-response-bytes" label={t('blueprintBuilder.fields.healthResponseBytes.label')} help={t('blueprintBuilder.fields.healthResponseBytes.help')}><NumberStepper min={1} max={1_048_576} value={health.application?.max_response_bytes ?? 4096} onValueChange={value => updateApplication({ max_response_bytes: Number(value) })} /></Field>
               </div>
               <div className="grid gap-2 md:grid-cols-2">
-                <label className="flex items-start gap-3 text-sm"><input className="mt-1" type="checkbox" checked={health.application?.required_for_startup ?? false} onChange={event => updateApplication({ required_for_startup: event.target.checked })} /><span>{t('blueprintBuilder.fields.guardianRequiredStartup.label')}<small className="msm-field-help block">{t('blueprintBuilder.fields.guardianRequiredStartup.help')}</small></span></label>
-                <label className="flex items-start gap-3 text-sm"><input className="mt-1" type="checkbox" checked={health.application?.required_for_verification ?? true} onChange={event => updateApplication({ required_for_verification: event.target.checked })} /><span>{t('blueprintBuilder.fields.guardianRequiredVerification.label')}<small className="msm-field-help block">{t('blueprintBuilder.fields.guardianRequiredVerification.help')}</small></span></label>
-                <label className="flex items-start gap-3 text-sm text-on-surface-variant"><input className="mt-1" type="checkbox" checked={false} disabled /><span>{t('blueprintBuilder.fields.healthFollowRedirects.label')}<small className="msm-field-help block">{t('blueprintBuilder.fields.healthFollowRedirects.help')}</small></span></label>
+                <label className="flex items-start gap-3 text-sm"><Checkbox className="mt-1" checked={health.application?.required_for_startup ?? false} onCheckedChange={gesetzt => updateApplication({ required_for_startup: gesetzt })} /><span>{t('blueprintBuilder.fields.guardianRequiredStartup.label')}<small className="msm-field-help block">{t('blueprintBuilder.fields.guardianRequiredStartup.help')}</small></span></label>
+                <label className="flex items-start gap-3 text-sm"><Checkbox className="mt-1" checked={health.application?.required_for_verification ?? true} onCheckedChange={gesetzt => updateApplication({ required_for_verification: gesetzt })} /><span>{t('blueprintBuilder.fields.guardianRequiredVerification.label')}<small className="msm-field-help block">{t('blueprintBuilder.fields.guardianRequiredVerification.help')}</small></span></label>
+                <label className="flex items-start gap-3 text-sm text-on-surface-variant"><Checkbox className="mt-1" checked={false} disabled onCheckedChange={() => {}} /><span>{t('blueprintBuilder.fields.healthFollowRedirects.label')}<small className="msm-field-help block">{t('blueprintBuilder.fields.healthFollowRedirects.help')}</small></span></label>
               </div>
             </fieldset>
 
@@ -788,16 +784,15 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {(['discord_token', 'api_key', 'authorization_header', 'database_url', 'jwt'] as const).map(redactor => (
                 <label key={redactor} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={logs.redact.includes(redactor)}
-                    onChange={event => setDraft(current => {
+                    onCheckedChange={gesetzt => setDraft(current => {
                       const currentLogs = current.logs ?? defaults.logs!
                       return {
                         ...current,
                         logs: {
                           ...currentLogs,
-                          redact: event.target.checked
+                          redact: gesetzt
                             ? [...currentLogs.redact, redactor]
                             : currentLogs.redact.filter(value => value !== redactor),
                         },
@@ -818,16 +813,15 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {(['linux-oom', 'java-stacktrace', 'nodejs-stacktrace', 'port-conflict', 'missing-runtime', 'corrupted-config', 'startup-pattern'] as GuardianDiagnosticParser[]).map(parser => (
                 <label key={parser} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={diagnostics.parsers.includes(parser)}
-                    onChange={event => setDraft(current => {
+                    onCheckedChange={gesetzt => setDraft(current => {
                       const currentDiagnostics = current.diagnostics ?? defaults.diagnostics!
                       return {
                         ...current,
                         diagnostics: {
                           ...currentDiagnostics,
-                          parsers: event.target.checked
+                          parsers: gesetzt
                             ? [...currentDiagnostics.parsers, parser]
                             : currentDiagnostics.parsers.filter(value => value !== parser),
                         },
@@ -912,10 +906,9 @@ export function BlueprintBuilder({ mode, sourceId, entries, onClose, onSaved }: 
         <div className="min-w-0 max-w-full rounded-xl border border-outline-variant/60 bg-surface-container-low p-4 space-y-4">
           <h4 className="font-semibold text-lg border-b border-outline-variant/40 pb-2">{t('blueprintBuilder.guardian.backupsTitle')}</h4>
           <label className="flex items-center gap-3">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={backups.before_risky_action}
-              onChange={event => setDraft(current => ({ ...current, backups: { ...(current.backups ?? defaults.backups!), before_risky_action: event.target.checked } }))}
+              onCheckedChange={gesetzt => setDraft(current => ({ ...current, backups: { ...(current.backups ?? defaults.backups!), before_risky_action: gesetzt } }))}
             />
             <span>{t('blueprintBuilder.guardian.beforeRiskyAction')}<small className="msm-field-help block">{t('blueprintBuilder.guardian.beforeRiskyActionHelp')}</small></span>
           </label>

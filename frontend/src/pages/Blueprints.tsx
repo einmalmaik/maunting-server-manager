@@ -234,7 +234,7 @@ export function Blueprints() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={t('blueprints.search')}
-            className="min-h-11 w-full rounded-lg border border-outline-variant/50 bg-surface-container py-2 pl-9 pr-3 font-body-md text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
+            className="msm-input min-h-11 pl-9 pr-3 font-body-md"
           />
         </div>
         {canWrite && (

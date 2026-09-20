@@ -18,7 +18,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
         {prefix ? (
           <div
             className={`
-              flex items-stretch w-full rounded-md border border-outline-variant bg-surface-container-high
+              flex h-10 items-stretch w-full rounded-md border border-outline-variant bg-surface-container-high
               focus-within:ring-2 focus-within:ring-primary focus-within:border-transparent focus-within:bg-surface-container
               transition-all duration-200
               ${error ? 'border-status-destructive focus-within:ring-status-destructive' : ''}

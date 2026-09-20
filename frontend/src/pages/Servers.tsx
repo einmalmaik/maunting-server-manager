@@ -14,8 +14,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Dropdown } from '@/components/ui/Dropdown'
 import { TabBar } from '@/components/ui/TabBar'
 import { PageHeader } from '@/Singra/UI/PageHeader'
-import { Button } from '@/Singra/UI'
-
+import { Button, Checkbox } from '@/Singra/UI'
 export function Servers() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -671,17 +670,15 @@ export function Servers() {
                       </span>
                     </span>
                   </span>
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={form.postgres_enabled}
-                    onChange={(e) =>
+                    onCheckedChange={(gesetzt) =>
                       setForm({
                         ...form,
-                        postgres_enabled: e.target.checked,
-                        postgres_database_count: e.target.checked ? form.postgres_database_count || '1' : '1',
+                        postgres_enabled: gesetzt,
+                        postgres_database_count: gesetzt ? form.postgres_database_count || '1' : '1',
                       })
                     }
-                    className="h-4 w-4 accent-secondary"
                   />
                 </label>
                 {form.postgres_enabled && (

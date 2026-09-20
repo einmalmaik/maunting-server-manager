@@ -2,8 +2,7 @@ import { useState, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Search, Info, Check, X } from 'lucide-react'
 import type { PermissionDef } from '@/types/permissions'
-import { Button } from '@/Singra/UI'
-
+import { Button, Checkbox } from '@/Singra/UI'
 type Uebersetzer = ReturnType<typeof useTranslation>['t']
 
 /**
@@ -344,14 +343,12 @@ export function PermissionEditor({
                           "Kontrollkästchen, nicht aktiviert", weil sr-only clip ist und die
                           Checkbox damit im Fokus bleibt, aber namenlos.
                         */}
-                        <input
+                        <Checkbox
                           id={id}
-                          type="checkbox"
                           checked={isChecked}
-                          onChange={() => {}} // handled by click container
+                          onCheckedChange={() => {}} // handled by click container
                           disabled={disabled}
-                          aria-labelledby={`${id}-title`}
-                          className="sr-only"
+                          aria-labelledby={`${id}-title`} className="sr-only"
                         />
                       </div>
                       <div className="flex flex-col gap-0.5 min-w-0">

@@ -6,8 +6,7 @@ import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 import { Dropdown } from '@/components/ui/Dropdown'
-import { Button } from '@/Singra/UI'
-
+import { Button, Checkbox } from '@/Singra/UI'
 /** Panel-Backup-List-Item (GET /api/panel-backups). */
 interface PanelBackupItem {
   id: number
@@ -241,13 +240,11 @@ export function PanelBackups() {
               <div
                 className={`relative w-10 h-6 rounded-full transition-colors ${settings.enabled ? 'bg-secondary' : 'bg-surface-container-highest'}`}
               >
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={settings.enabled}
-                  onChange={(e) =>
-                    setSettings({ ...settings, enabled: e.target.checked })
-                  }
-                  className="sr-only"
+                  onCheckedChange={(gesetzt) =>
+                    setSettings({ ...settings, enabled: gesetzt })
+                  } className="sr-only"
                 />
                 <span
                   className={`absolute top-1 left-1 w-4 h-4 rounded-full transition-transform ${settings.enabled ? 'translate-x-4 bg-on-secondary' : 'bg-on-surface'}`}

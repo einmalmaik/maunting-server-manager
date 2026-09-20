@@ -36,13 +36,6 @@
     outline-offset: 2px;
   }
 
-  /* Eingeschaltet ist eine Farbe. Der Schalter nahm `primary`, die
-     Checkbox-Komponente `secondary`, und jedes nackte Kästchen hier ein
-     drittes Cyan. Alle drei zeigen jetzt dasselbe. */
-  input[type='checkbox'] {
-    accent-color: hsl(var(--dna-primary));
-  }
-
   * {
     scrollbar-color: #284147 hsl(var(--dna-background));
     scrollbar-width: thin;

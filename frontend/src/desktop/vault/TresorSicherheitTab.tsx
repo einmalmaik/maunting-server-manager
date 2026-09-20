@@ -190,7 +190,7 @@ export function TresorSicherheitTab() {
                 value={masterPasswordInput}
                 onChange={(e) => setMasterPasswordInput(e.target.value)}
                 placeholder={t('mss.vault.masterPasswort')}
-                className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-2 text-xs text-on-surface focus:outline-none focus:border-primary"
+                className="msm-input"
                 autoFocus
                 required
               />

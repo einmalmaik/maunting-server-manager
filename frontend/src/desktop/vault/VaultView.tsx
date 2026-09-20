@@ -26,7 +26,7 @@ import {
   Zap,
   X,
 } from 'lucide-react'
-import { Button } from '@/Singra/UI'
+import { Button, Checkbox } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { getBrandIcon } from './brandCatalog'
@@ -404,7 +404,7 @@ export function VaultView() {
                   value={masterPasswordInput}
                   onChange={(e) => setMasterPasswordInput(e.target.value)}
                   placeholder={t('mss.vault.mindestensAchtZeichen')}
-                  className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary pr-9 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden [&::-webkit-credentials-auto-fill-button]:hidden"
+                  className="msm-input pr-9 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden [&::-webkit-credentials-auto-fill-button]:hidden"
                   autoFocus
                 />
                 <button
@@ -428,7 +428,7 @@ export function VaultView() {
                   value={confirmPasswordInput}
                   onChange={(e) => setConfirmPasswordInput(e.target.value)}
                   placeholder={t('mss.vault.erneutEingeben')}
-                  className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary pr-9 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden [&::-webkit-credentials-auto-fill-button]:hidden"
+                  className="msm-input pr-9 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden [&::-webkit-credentials-auto-fill-button]:hidden"
                 />
                 <button
                   type="button"
@@ -469,18 +469,16 @@ export function VaultView() {
                 value={skipHintSetup ? '' : hintInput}
                 onChange={(e) => setHintInput(e.target.value)}
                 placeholder={skipHintSetup ? t('mss.vault.hinweisAbgelehnt') : t('mss.vault.hinweisPlatzhalter')}
-                className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary disabled:opacity-50"
+                className="msm-input disabled:opacity-50"
               />
 
               <label className="flex items-center gap-2 cursor-pointer pt-0.5 text-[11px] text-on-surface-variant hover:text-on-surface">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={skipHintSetup}
-                  onChange={(e) => {
-                    setSkipHintSetup(e.target.checked)
-                    if (e.target.checked) setHintInput('')
+                  onCheckedChange={(gesetzt) => {
+                    setSkipHintSetup(gesetzt)
+                    if (gesetzt) setHintInput('')
                   }}
-                  className="rounded border-outline-variant/40 text-primary focus:ring-primary h-3.5 w-3.5"
                 />
                 <span>{t('mss.vault.ohneHinweisFortfahren')}</span>
               </label>
@@ -584,7 +582,7 @@ export function VaultView() {
                 value={masterPasswordInput}
                 onChange={(e) => setMasterPasswordInput(e.target.value)}
                 placeholder={t('mss.vault.masterPasswort')}
-                className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary pr-9 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden [&::-webkit-credentials-auto-fill-button]:hidden"
+                className="msm-input pr-9 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden [&::-webkit-credentials-auto-fill-button]:hidden"
                 autoFocus={!(isBiometricsEnabled && isBiometricsSupported)}
               />
               <button
@@ -866,7 +864,7 @@ export function VaultView() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={t('common.search')}
-            className="w-full rounded-xl bg-surface-container border border-outline-variant/30 pl-8 pr-3 py-1.5 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary"
+            className="msm-input pl-8 pr-3"
           />
         </div>
       </div>
@@ -918,7 +916,7 @@ export function VaultView() {
               value={editHintInput}
               onChange={(e) => setEditHintInput(e.target.value)}
               placeholder={t('mss.vault.hinweisPlatzhalterLang')}
-              className="flex-1 rounded-xl bg-surface border border-outline-variant/30 px-3 py-1.5 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-status-warning"
+              className="msm-input flex-1"
             />
             <Button
               type="submit"
@@ -1036,7 +1034,7 @@ export function VaultView() {
                   value={modalService}
                   onChange={(e) => setModalService(e.target.value)}
                   placeholder={t('mss.vault.dienstPlatzhalter')}
-                  className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-1.5 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary"
+                  className="msm-input"
                   autoFocus
                   required
                 />
@@ -1052,7 +1050,7 @@ export function VaultView() {
                   value={modalUsername}
                   onChange={(e) => setModalUsername(e.target.value)}
                   placeholder={t('mss.vault.benutzernamePlatzhalter')}
-                  className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-1.5 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary"
+                  className="msm-input"
                 />
               </div>
 
@@ -1085,7 +1083,7 @@ export function VaultView() {
                       debouncedLeakCheck(e.target.value)
                     }}
                     placeholder={t('mss.vault.passwort')}
-                    className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-1.5 text-xs text-on-surface font-mono placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary pr-9 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden [&::-webkit-credentials-auto-fill-button]:hidden"
+                    className="msm-input font-mono pr-9 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden [&::-webkit-credentials-auto-fill-button]:hidden"
                     required
                   />
                   <button
@@ -1133,7 +1131,7 @@ export function VaultView() {
                   value={modalTotpSecret}
                   onChange={(e) => setModalTotpSecret(e.target.value.toUpperCase())}
                   placeholder={t('mss.vault.zweifaktorPlatzhalter')}
-                  className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-1.5 text-xs text-on-surface font-mono placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary"
+                  className="msm-input font-mono"
                 />
               </div>
 
@@ -1147,7 +1145,7 @@ export function VaultView() {
                   value={modalNotes}
                   onChange={(e) => setModalNotes(e.target.value)}
                   placeholder={t('mss.vault.notizPlatzhalter')}
-                  className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 p-2.5 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary resize-y"
+                  className="msm-input resize-y"
                 />
               </div>
 
@@ -1251,7 +1249,7 @@ export function VaultView() {
                   value={editHintInput}
                   onChange={(e) => setEditHintInput(e.target.value)}
                   placeholder={t('mss.vault.hinweisPlatzhalterLang')}
-                  className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary"
+                  className="msm-input"
                   autoFocus
                 />
                 <p className="text-[10px] text-on-surface-variant/80 mt-1 leading-relaxed">

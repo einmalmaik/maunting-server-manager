@@ -348,7 +348,7 @@ export function Notes() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={t('notes.searchPlaceholder', 'Notizen oder Inhalte durchsuchen...')}
-            className="w-full bg-surface-container border border-outline-variant/40 rounded-xl pl-9 pr-8 py-2 text-sm text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:border-primary transition-colors"
+            className="msm-input pl-9 pr-8"
           />
           {searchQuery && (
             <button
@@ -595,7 +595,7 @@ export function Notes() {
                   value={formTitle}
                   onChange={(e) => setFormTitle(e.target.value)}
                   placeholder={t('notes.formTitlePlaceholder', 'z. B. Einkaufsliste Edeka, Meeting-Punkte, Server-Check')}
-                  className="w-full bg-surface-container border border-outline-variant/40 rounded-xl px-3.5 py-2 text-sm text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:border-primary transition-colors"
+                  className="msm-input"
                 />
               </div>
 
@@ -745,7 +745,7 @@ export function Notes() {
                       'notes.contentPlaceholder',
                       '- [ ] 1x Butter (~1,89 €)\n- [ ] 6x Eier (~1,99 €)\n- [ ] 1x Brot (~2,49 €)\n\n**Geschätzte Gesamtsumme: ca. 6,37 €**'
                     )}
-                    className="w-full bg-surface-container border border-outline-variant/40 rounded-xl p-3.5 text-xs text-on-surface placeholder:text-on-surface-variant/60 focus:outline-none focus:border-primary transition-colors font-mono leading-relaxed resize-y"
+                    className="msm-input font-mono leading-relaxed resize-y"
                   />
                 ) : (
                   <div className="w-full min-h-[190px] max-h-[300px] overflow-y-auto bg-surface-container/60 border border-outline-variant/40 rounded-xl p-3.5 text-xs space-y-1.5">

@@ -1399,10 +1399,9 @@ function ColumnsDropdown({ columns, hiddenColumns, onToggle, onReset, onClose }:
         <div className="max-h-60 space-y-1 overflow-y-auto pr-1">
           {columns.map((column) => (
             <label key={column} className="flex items-center gap-2 text-sm text-on-surface cursor-pointer">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={!hiddenColumns.has(column)}
-                onChange={() => onToggle(column)}
+                onCheckedChange={() => onToggle(column)}
               />
               <span className="truncate font-mono text-xs">{column}</span>
             </label>
