@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Check,
   Clock,
@@ -38,6 +39,8 @@ import { useVaultStore, getLocalVaultSalt, type VaultItem } from './vaultStore'
 import { DisBadge } from '@/components/DisBadge'
 
 export function VaultView() {
+  const { t } = useTranslation()
+
   const {
     isInitialized,
     isUnlocked,
@@ -175,14 +178,14 @@ export function VaultView() {
     try {
       await navigator.clipboard.writeText(text)
       setCopiedIdField(fieldKey)
-      toast.success('Kopiert')
+      toast.success(t('mss.vault.kopiert'))
       setTimeout(() => setCopiedIdField(null), 1500)
 
       if (itemId) {
         void markUsed(itemId)
       }
     } catch {
-      toast.error('Kopieren fehlgeschlagen')
+      toast.error(t('mss.vault.kopierenFehlgeschlagen'))
     }
   }
 
@@ -242,7 +245,7 @@ export function VaultView() {
   const handleModalSave = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!modalService.trim()) {
-      toast.error('Bitte Dienstname angeben.')
+      toast.error(t('mss.vault.dienstnamePflicht'))
       return
     }
 
@@ -257,19 +260,19 @@ export function VaultView() {
         totpSecret: modalTotpSecret.trim().toUpperCase(),
       })
       setIsModalOpen(false)
-      toast.success('Gespeichert')
+      toast.success(t('mss.vault.gespeichert'))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Fehler beim Speichern')
+      toast.error(err instanceof Error ? err.message : t('mss.vault.speichernFehlgeschlagen'))
     }
   }
 
   // Löschen eines Eintrags
   const handleDeleteItem = async (item: VaultItem) => {
     const ok = await confirm({
-      title: 'Eintrag löschen',
-      message: `Möchtest du "${item.service}" wirklich unwiderruflich aus dem Tresor löschen?`,
-      confirmText: 'Löschen',
-      cancelText: 'Abbrechen',
+      title: t('mss.vault.loeschenTitel'),
+      message: t('mss.vault.loeschenFrage', { name: item.service }),
+      confirmText: t('common.delete'),
+      cancelText: t('common.cancel'),
       danger: true,
     })
     if (!ok) return
@@ -278,9 +281,9 @@ export function VaultView() {
       if (isModalOpen && editingItemId === item.id) {
         setIsModalOpen(false)
       }
-      toast.success('Gelöscht')
+      toast.success(t('mss.vault.geloescht'))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Fehler beim Löschen')
+      toast.error(err instanceof Error ? err.message : t('mss.vault.loeschenFehlgeschlagen'))
     }
   }
 
@@ -293,7 +296,7 @@ export function VaultView() {
     if (payload.account && !modalUsername) {
       setModalUsername(payload.account)
     }
-    toast.success('2FA-Code übernommen')
+    toast.success(t('mss.vault.codeUebernommen'))
   }
 
   // Hinweis per E-Mail anfordern (max. 1x alle 10 Minuten)
@@ -365,7 +368,7 @@ export function VaultView() {
               <KeyRound className="h-6 w-6" />
             </div>
             <h2 className="text-base font-bold text-on-surface">
-              Passwort-Manager einrichten
+              {t('mss.vault.einrichtenTitel')}
             </h2>
             <div className="flex justify-center pt-0.5">
               <DisBadge size={16} />
@@ -386,21 +389,21 @@ export function VaultView() {
                 setHintInput('')
                 setSkipHintSetup(false)
                 setIsSetupMode(false)
-                toast.success('Passwort-Manager eingerichtet')
+                toast.success(t('mss.vault.eingerichtet'))
               }
             }}
             className="space-y-3.5"
           >
             <div>
               <label className="block text-[11px] font-medium text-on-surface-variant mb-1">
-                Neues Master-Passwort
+                {t('mss.vault.neuesMasterPasswort')}
               </label>
               <div className="relative">
                 <input
                   type={showMasterPassword ? 'text' : 'password'}
                   value={masterPasswordInput}
                   onChange={(e) => setMasterPasswordInput(e.target.value)}
-                  placeholder="Mindestens 8 Zeichen"
+                  placeholder={t('mss.vault.mindestensAchtZeichen')}
                   className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary pr-9 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden [&::-webkit-credentials-auto-fill-button]:hidden"
                   autoFocus
                 />
@@ -417,14 +420,14 @@ export function VaultView() {
 
             <div>
               <label className="block text-[11px] font-medium text-on-surface-variant mb-1">
-                Passwort wiederholen
+                {t('mss.vault.passwortWiederholen')}
               </label>
               <div className="relative">
                 <input
                   type={showConfirmPassword ? 'text' : 'password'}
                   value={confirmPasswordInput}
                   onChange={(e) => setConfirmPasswordInput(e.target.value)}
-                  placeholder="Erneut eingeben"
+                  placeholder={t('mss.vault.erneutEingeben')}
                   className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary pr-9 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden [&::-webkit-credentials-auto-fill-button]:hidden"
                 />
                 <button
@@ -441,10 +444,10 @@ export function VaultView() {
                 <div className="mt-1 text-[11px]">
                   {masterPasswordInput === confirmPasswordInput ? (
                     <span className="flex items-center gap-1 text-status-success">
-                      <Check className="h-3 w-3" /> Stimmt überein
+                      <Check className="h-3 w-3" /> {t('mss.vault.stimmtUeberein')}
                     </span>
                   ) : (
-                    <span className="text-status-error">Stimmt nicht überein</span>
+                    <span className="text-status-error">{t('mss.vault.stimmtNichtUeberein')}</span>
                   )}
                 </div>
               )}
@@ -465,7 +468,7 @@ export function VaultView() {
                 disabled={skipHintSetup}
                 value={skipHintSetup ? '' : hintInput}
                 onChange={(e) => setHintInput(e.target.value)}
-                placeholder={skipHintSetup ? 'Kein Hinweis (bewusst abgelehnt)' : 'z. B. Name der ersten Grundschule'}
+                placeholder={skipHintSetup ? t('mss.vault.hinweisAbgelehnt') : t('mss.vault.hinweisPlatzhalter')}
                 className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary disabled:opacity-50"
               />
 
@@ -479,7 +482,7 @@ export function VaultView() {
                   }}
                   className="rounded border-outline-variant/40 text-primary focus:ring-primary h-3.5 w-3.5"
                 />
-                <span>Ohne Notfall-Hinweis fortfahren (nicht empfohlen)</span>
+                <span>{t('mss.vault.ohneHinweisFortfahren')}</span>
               </label>
             </div>
 
@@ -495,9 +498,9 @@ export function VaultView() {
               className="w-full bg-primary text-on-primary hover:bg-primary-hover py-2 text-xs font-medium"
             >
               {isUnlocking
-                ? 'Richte ein...'
+                ? t('mss.vault.richteEin')
                 : !hintInput.trim() && !skipHintSetup && masterPasswordInput.length >= 8 && masterPasswordInput === confirmPasswordInput
-                  ? 'Hinweis angeben oder ablehnen'
+                  ? t('mss.vault.hinweisNoetig')
                   : 'Einrichten'}
             </Button>
           </form>
@@ -512,7 +515,7 @@ export function VaultView() {
               }}
               className="text-xs text-primary hover:underline"
             >
-              Bereits eingerichtet? Hier mit Master-Passwort anmelden
+              {t('mss.vault.bereitsEingerichtet')}
             </button>
           </div>
         </div>
@@ -530,7 +533,7 @@ export function VaultView() {
               <Lock className="h-6 w-6" />
             </div>
             <h2 className="text-base font-bold text-on-surface">
-              Passwort-Manager
+              {t('mss.vault.titelManager')}
             </h2>
             <div className="flex justify-center pt-0.5">
               <DisBadge size={16} />
@@ -544,7 +547,7 @@ export function VaultView() {
               const ok = await unlock(masterPasswordInput)
               if (ok) {
                 setMasterPasswordInput('')
-                toast.success('Entsperrt')
+                toast.success(t('mss.vault.entsperrt'))
               }
             }}
             className="space-y-3.5"
@@ -557,19 +560,19 @@ export function VaultView() {
                   onClick={async () => {
                     const ok = await unlockWithBiometrics()
                     if (ok) {
-                      toast.success('Per Biometrie entsperrt')
+                      toast.success(t('mss.vault.entsperrtBiometrie'))
                     }
                   }}
                   disabled={isUnlocking}
                   className="w-full flex items-center justify-center gap-2 py-2 text-xs border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20"
                 >
                   <Fingerprint className="h-4 w-4" />
-                  <span>Mit Fingerabdruck / Windows Hello</span>
+                  <span>{t('mss.vault.mitFingerabdruck')}</span>
                 </Button>
                 <div className="relative flex items-center justify-center">
                   <div className="border-t border-outline-variant/30 w-full" />
                   <span className="bg-surface-container px-2 text-[10px] text-on-surface-variant uppercase tracking-wider absolute">
-                    Oder Master-Passwort
+                    {t('mss.vault.oderMasterPasswort')}
                   </span>
                 </div>
               </div>
@@ -580,7 +583,7 @@ export function VaultView() {
                 type={showMasterPassword ? 'text' : 'password'}
                 value={masterPasswordInput}
                 onChange={(e) => setMasterPasswordInput(e.target.value)}
-                placeholder="Master-Passwort"
+                placeholder={t('mss.vault.masterPasswort')}
                 className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary pr-9 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden [&::-webkit-credentials-auto-fill-button]:hidden"
                 autoFocus={!(isBiometricsEnabled && isBiometricsSupported)}
               />
@@ -608,12 +611,12 @@ export function VaultView() {
               {isUnlocking ? (
                 <>
                   <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                  <span>Entschlüssle...</span>
+                  <span>{t('mss.vault.entschluessle')}</span>
                 </>
               ) : (
                 <>
                   <Unlock className="h-3.5 w-3.5" />
-                  <span>Entsperren</span>
+                  <span>{t('mss.vault.entsperren')}</span>
                 </>
               )}
             </Button>
@@ -628,7 +631,7 @@ export function VaultView() {
               className="text-xs text-on-surface-variant hover:text-primary transition-colors flex items-center justify-center gap-1 mx-auto disabled:opacity-50"
             >
               <HelpCircle className="h-3.5 w-3.5" />
-              <span>{isRequestingHint ? 'Sende E-Mail...' : 'Hinweis per E-Mail anfordern'}</span>
+              <span>{isRequestingHint ? t('mss.vault.sendeMail') : t('mss.vault.hinweisPerMail')}</span>
             </button>
 
             {!isInitialized && (
@@ -641,7 +644,7 @@ export function VaultView() {
                   }}
                   className="text-xs text-on-surface-variant/70 hover:text-primary hover:underline transition-colors"
                 >
-                  Neuen Tresor einrichten
+                  {t('mss.vault.neuenTresorEinrichten')}
                 </button>
               </div>
             )}
@@ -694,7 +697,7 @@ export function VaultView() {
                   type="button"
                   onClick={() => void handleCopy(item.username, `user-${item.id}`, item.id)}
                   className="text-on-surface-variant hover:text-on-surface p-0.5 rounded transition-colors"
-                  title="Benutzername kopieren"
+                  title={t('mss.vault.benutzernameKopieren')}
                 >
                   {copiedIdField === `user-${item.id}` ? (
                     <Check className="h-3 w-3 text-status-success" />
@@ -725,7 +728,7 @@ export function VaultView() {
                 type="button"
                 onClick={() => void handleCopy(item.password, `pwd-${item.id}`, item.id)}
                 className="text-primary hover:text-primary-hover p-0.5 transition-colors"
-                title="Passwort kopieren"
+                title={t('mss.vault.passwortKopieren')}
               >
                 {copiedIdField === `pwd-${item.id}` ? (
                   <Check className="h-3.5 w-3.5 text-status-success" />
@@ -740,7 +743,7 @@ export function VaultView() {
             itemTotp === 'FEHLER' ? (
               <div className="flex items-center rounded-lg bg-status-error/10 border border-status-error/20 px-2 py-0.5 gap-1 font-mono text-xs">
                 <span className="text-[10px] text-status-error font-semibold">2FA</span>
-                <span className="text-status-error font-medium text-[11px]">Ungültiges Secret</span>
+                <span className="text-status-error font-medium text-[11px]">{t('mss.vault.ungueltigesSecret')}</span>
               </div>
             ) : (
               <div className="flex items-center rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 gap-1 font-mono text-xs">
@@ -753,7 +756,7 @@ export function VaultView() {
                   type="button"
                   onClick={() => void handleCopy(itemTotp, `totp-${item.id}`, item.id)}
                   className="text-emerald-400 hover:text-emerald-300 p-0.5 transition-colors"
-                  title="Code kopieren"
+                  title={t('mss.vault.codeKopieren')}
                 >
                   {copiedIdField === `totp-${item.id}` ? (
                     <Check className="h-3.5 w-3.5 text-status-success" />
@@ -803,7 +806,7 @@ export function VaultView() {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-xs font-bold text-on-surface">Passwort-Manager</h1>
+              <h1 className="text-xs font-bold text-on-surface">{t('mss.vault.titelManager')}</h1>
               <DisBadge size={14} className="hidden sm:inline-flex py-0.5 px-2" />
             </div>
           </div>
@@ -815,7 +818,7 @@ export function VaultView() {
             className="flex items-center gap-1 bg-primary text-on-primary hover:bg-primary-hover shadow-sm px-2.5 py-1.5 text-xs font-medium"
           >
             <Plus className="h-3.5 w-3.5" />
-            <span>Neues Passwort</span>
+            <span>{t('mss.vault.neuerEintrag')}</span>
           </Button>
 
           <Button
@@ -836,7 +839,7 @@ export function VaultView() {
               setIsHintModalOpen(true)
               void checkHintStatus()
             }}
-            title="Passwort-Hinweis verwalten"
+            title={t('mss.vault.hinweisVerwalten')}
             className={`p-1.5 ${hasHint === false ? 'text-amber-400 hover:text-amber-300' : 'text-on-surface-variant hover:text-on-surface'}`}
           >
             <KeyRound className="h-3.5 w-3.5" />
@@ -862,7 +865,7 @@ export function VaultView() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Suchen..."
+            placeholder={t('common.search')}
             className="w-full rounded-xl bg-surface-container border border-outline-variant/30 pl-8 pr-3 py-1.5 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary"
           />
         </div>
@@ -877,9 +880,9 @@ export function VaultView() {
                 <KeyRound className="h-4 w-4" />
               </div>
               <div>
-                <h3 className="text-xs font-bold text-on-surface">Kein Notfall-Passwort-Hinweis hinterlegt</h3>
+                <h3 className="text-xs font-bold text-on-surface">{t('mss.vault.keinHinweisHinterlegt')}</h3>
                 <p className="text-[11px] text-on-surface-variant mt-0.5">
-                  Falls du dein Master-Passwort vergisst, kann dir dieser Hinweis per E-Mail gesendet werden.
+                  {t('mss.vault.hinweisErklaerungKurz')}
                 </p>
               </div>
             </div>
@@ -887,7 +890,7 @@ export function VaultView() {
               type="button"
               onClick={() => setDismissedHintReminder(true)}
               className="text-on-surface-variant hover:text-on-surface p-1 rounded-lg"
-              title="Schließen"
+              title={t('common.close')}
             >
               <X className="h-3.5 w-3.5" />
             </button>
@@ -900,10 +903,10 @@ export function VaultView() {
               setIsSavingHint(true)
               try {
                 await saveHint(editHintInput.trim())
-                toast.success('Passwort-Hinweis erfolgreich hinterlegt')
+                toast.success(t('mss.vault.hinweisHinterlegt'))
                 setEditHintInput('')
               } catch {
-                toast.error('Fehler beim Speichern des Hinweises')
+                toast.error(t('mss.vault.hinweisSpeichernFehlgeschlagen'))
               } finally {
                 setIsSavingHint(false)
               }
@@ -914,7 +917,7 @@ export function VaultView() {
               type="text"
               value={editHintInput}
               onChange={(e) => setEditHintInput(e.target.value)}
-              placeholder="z. B. Name der ersten Grundschule..."
+              placeholder={t('mss.vault.hinweisPlatzhalterLang')}
               className="flex-1 rounded-xl bg-surface border border-outline-variant/30 px-3 py-1.5 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-amber-500"
             />
             <Button
@@ -923,7 +926,7 @@ export function VaultView() {
               size="sm"
               className="bg-amber-500 hover:bg-amber-600 text-black font-semibold text-xs px-3 py-1.5 shrink-0"
             >
-              {isSavingHint ? 'Speichert...' : 'Hinweis speichern'}
+              {isSavingHint ? t('common.saving') : t('mss.vault.hinweisSpeichern')}
             </Button>
             <Button
               type="button"
@@ -932,7 +935,7 @@ export function VaultView() {
               onClick={() => setDismissedHintReminder(true)}
               className="text-xs text-on-surface-variant hover:text-on-surface px-2.5 py-1.5 shrink-0"
             >
-              Später
+              {t('mss.vault.spaeter')}
             </Button>
           </form>
         </div>
@@ -945,15 +948,15 @@ export function VaultView() {
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-container border border-outline-variant/30 mb-3 text-on-surface-variant/60">
               <KeyRound className="h-6 w-6" />
             </div>
-            <h3 className="text-xs font-semibold text-on-surface mb-3">Keine Passwörter hinterlegt</h3>
+            <h3 className="text-xs font-semibold text-on-surface mb-3">{t('mss.vault.leer')}</h3>
             <Button onClick={openNewEntryModal} className="bg-primary text-on-primary text-xs py-1.5 px-3">
               <Plus className="h-3.5 w-3.5 mr-1" />
-              Passwort anlegen
+              {t('mss.vault.passwortAnlegen')}
             </Button>
           </div>
         ) : searchedItems.length === 0 ? (
           <div className="p-8 text-center text-xs text-on-surface-variant">
-            Keine Treffer
+            {t('mss.vault.keineTreffer')}
           </div>
         ) : (
           <>
@@ -962,7 +965,7 @@ export function VaultView() {
               <div className="space-y-1.5">
                 <div className="flex items-center gap-1 text-[11px] font-semibold text-amber-400">
                   <Star className="h-3 w-3 fill-current" />
-                  <span>Favoriten</span>
+                  <span>{t('mss.vault.favoriten')}</span>
                 </div>
                 <div className="grid grid-cols-1 gap-1.5">
                   {favoriteItems.map(renderItemRow)}
@@ -975,7 +978,7 @@ export function VaultView() {
               <div className="space-y-1.5">
                 <div className="flex items-center gap-1 text-[11px] font-semibold text-primary">
                   <Clock className="h-3 w-3" />
-                  <span>Zuletzt verwendet</span>
+                  <span>{t('mss.vault.zuletztVerwendet')}</span>
                 </div>
                 <div className="grid grid-cols-1 gap-1.5">
                   {recentItems.map(renderItemRow)}
@@ -987,7 +990,7 @@ export function VaultView() {
             {otherItems.length > 0 && (
               <div className="space-y-1.5">
                 <div className="text-[11px] font-semibold text-on-surface-variant">
-                  Alle
+                  {t('mss.vault.alle')}
                 </div>
                 <div className="grid grid-cols-1 gap-1.5">
                   {otherItems.map(renderItemRow)}
@@ -1009,7 +1012,7 @@ export function VaultView() {
                   <ModalBrandIcon className="w-4 h-4" />
                 </div>
                 <h3 className="text-xs font-semibold text-on-surface">
-                  {editingItemId ? 'Bearbeiten' : 'Neues Passwort'}
+                  {editingItemId ? t('common.edit') : t('mss.vault.neuerEintrag')}
                 </h3>
               </div>
               <button
@@ -1026,13 +1029,13 @@ export function VaultView() {
               {/* Dienstname */}
               <div>
                 <label className="block text-[11px] font-medium text-on-surface mb-1">
-                  Dienst / Website
+                  {t('mss.vault.dienstBezeichnung')}
                 </label>
                 <input
                   type="text"
                   value={modalService}
                   onChange={(e) => setModalService(e.target.value)}
-                  placeholder="z. B. Google, Steam, Discord"
+                  placeholder={t('mss.vault.dienstPlatzhalter')}
                   className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-1.5 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary"
                   autoFocus
                   required
@@ -1042,13 +1045,13 @@ export function VaultView() {
               {/* Benutzername */}
               <div>
                 <label className="block text-[11px] font-medium text-on-surface mb-1">
-                  Benutzername / E-Mail
+                  {t('mss.vault.benutzernameBezeichnung')}
                 </label>
                 <input
                   type="text"
                   value={modalUsername}
                   onChange={(e) => setModalUsername(e.target.value)}
-                  placeholder="name@domain.de"
+                  placeholder={t('mss.vault.benutzernamePlatzhalter')}
                   className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-1.5 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary"
                 />
               </div>
@@ -1057,7 +1060,7 @@ export function VaultView() {
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-[11px] font-medium text-on-surface">
-                    Passwort
+                    {t('mss.vault.passwort')}
                   </label>
                   <button
                     type="button"
@@ -1069,7 +1072,7 @@ export function VaultView() {
                     className="text-[11px] text-primary hover:underline flex items-center gap-0.5"
                   >
                     <Zap className="h-3 w-3" />
-                    Generieren
+                    {t('mss.vault.generieren')}
                   </button>
                 </div>
 
@@ -1081,7 +1084,7 @@ export function VaultView() {
                       setModalPassword(e.target.value)
                       debouncedLeakCheck(e.target.value)
                     }}
-                    placeholder="Passwort"
+                    placeholder={t('mss.vault.passwort')}
                     className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-1.5 text-xs text-on-surface font-mono placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary pr-9 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden [&::-webkit-credentials-auto-fill-button]:hidden"
                     required
                   />
@@ -1114,7 +1117,7 @@ export function VaultView() {
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-[11px] font-medium text-on-surface">
-                    2FA-Schlüssel (optional)
+                    {t('mss.vault.zweifaktorBezeichnung')}
                   </label>
                   <button
                     type="button"
@@ -1122,14 +1125,14 @@ export function VaultView() {
                     className="text-[11px] text-primary hover:underline flex items-center gap-0.5"
                   >
                     <QrCode className="h-3 w-3" />
-                    QR-Code scannen
+                    {t('mss.vault.qr.scannen')}
                   </button>
                 </div>
                 <input
                   type="text"
                   value={modalTotpSecret}
                   onChange={(e) => setModalTotpSecret(e.target.value.toUpperCase())}
-                  placeholder="Base32-Schlüssel"
+                  placeholder={t('mss.vault.zweifaktorPlatzhalter')}
                   className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-1.5 text-xs text-on-surface font-mono placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary"
                 />
               </div>
@@ -1137,13 +1140,13 @@ export function VaultView() {
               {/* Notizen */}
               <div>
                 <label className="block text-[11px] font-medium text-on-surface mb-1">
-                  Notiz (optional)
+                  {t('mss.vault.notizBezeichnung')}
                 </label>
                 <textarea
                   rows={2}
                   value={modalNotes}
                   onChange={(e) => setModalNotes(e.target.value)}
-                  placeholder="Zusätzliche Infos..."
+                  placeholder={t('mss.vault.notizPlatzhalter')}
                   className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 p-2.5 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary resize-y"
                 />
               </div>
@@ -1161,7 +1164,7 @@ export function VaultView() {
                     className="text-status-error hover:bg-status-error/10 text-xs px-2 py-1"
                   >
                     <Trash2 className="h-3.5 w-3.5 mr-1" />
-                    Löschen
+                    {t('common.delete')}
                   </Button>
                 ) : (
                   <div />
@@ -1174,13 +1177,13 @@ export function VaultView() {
                     onClick={() => setIsModalOpen(false)}
                     className="text-xs text-on-surface-variant px-2.5 py-1"
                   >
-                    Abbrechen
+                    {t('common.cancel')}
                   </Button>
                   <Button
                     type="submit"
                     className="bg-primary text-on-primary hover:bg-primary-hover text-xs px-3 py-1.5"
                   >
-                    Speichern
+                    {t('common.save')}
                   </Button>
                 </div>
               </div>
@@ -1206,9 +1209,9 @@ export function VaultView() {
                   <KeyRound className="h-4 w-4" />
                 </div>
                 <div>
-                  <h3 className="text-xs font-bold text-on-surface">Passwort-Hinweis</h3>
+                  <h3 className="text-xs font-bold text-on-surface">{t('mss.vault.hinweisTitel')}</h3>
                   <p className="text-[10px] text-on-surface-variant">
-                    {hasHint ? 'Aktuell ist ein Hinweis hinterlegt' : 'Noch kein Hinweis hinterlegt'}
+                    {hasHint ? t('mss.vault.hinweisVorhanden') : t('mss.vault.hinweisFehlt')}
                   </p>
                 </div>
               </div>
@@ -1228,11 +1231,11 @@ export function VaultView() {
                 setIsSavingHint(true)
                 try {
                   await saveHint(editHintInput.trim())
-                  toast.success('Passwort-Hinweis erfolgreich gespeichert')
+                  toast.success(t('mss.vault.hinweisGespeichert'))
                   setEditHintInput('')
                   setIsHintModalOpen(false)
                 } catch {
-                  toast.error('Fehler beim Speichern des Hinweises')
+                  toast.error(t('mss.vault.hinweisSpeichernFehlgeschlagen'))
                 } finally {
                   setIsSavingHint(false)
                 }
@@ -1241,18 +1244,18 @@ export function VaultView() {
             >
               <div>
                 <label className="block text-[11px] font-medium text-on-surface mb-1">
-                  {hasHint ? 'Hinweis aktualisieren / neu setzen' : 'Neuen Hinweis hinterlegen'}
+                  {hasHint ? t('mss.vault.hinweisAktualisieren') : t('mss.vault.hinweisAnlegen')}
                 </label>
                 <input
                   type="text"
                   value={editHintInput}
                   onChange={(e) => setEditHintInput(e.target.value)}
-                  placeholder="z. B. Name der ersten Grundschule..."
+                  placeholder={t('mss.vault.hinweisPlatzhalterLang')}
                   className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary"
                   autoFocus
                 />
                 <p className="text-[10px] text-on-surface-variant/80 mt-1 leading-relaxed">
-                  Dieser Hinweis wird verschlüsselt gespeichert und kann dir per E-Mail gesendet werden, falls du dein Master-Passwort vergisst.
+                  {t('mss.vault.hinweisErklaerungLang')}
                 </p>
               </div>
 
@@ -1275,7 +1278,7 @@ export function VaultView() {
                     className="text-[11px] py-1.5 px-2.5 flex items-center gap-1.5"
                   >
                     <Mail className="h-3.5 w-3.5" />
-                    <span>{isRequestingHint ? 'Sende...' : 'Per E-Mail testen'}</span>
+                    <span>{isRequestingHint ? 'Sende...' : t('mss.vault.perMailTesten')}</span>
                   </Button>
                 )}
                 {!hasHint && <div />}
@@ -1287,14 +1290,14 @@ export function VaultView() {
                     onClick={() => setIsHintModalOpen(false)}
                     className="text-xs text-on-surface-variant px-2.5 py-1.5"
                   >
-                    Schließen
+                    {t('common.close')}
                   </Button>
                   <Button
                     type="submit"
                     disabled={!editHintInput.trim() || isSavingHint}
                     className="bg-primary text-on-primary hover:bg-primary-hover text-xs px-3 py-1.5"
                   >
-                    {isSavingHint ? 'Speichert...' : 'Speichern'}
+                    {isSavingHint ? t('common.saving') : t('common.save')}
                   </Button>
                 </div>
               </div>

@@ -43,9 +43,9 @@ export function buildNavigation(labels: Record<string, string>, access: Navigati
 
   return [
     { to: '/', icon: LayoutDashboard, label: labels.dashboard, group: 'Overview' },
-    ...(access.calendarEnabled !== false ? [{ to: '/calendar', icon: CalendarIcon, label: labels.calendar || 'Kalender', group: 'Overview' as const }] : []),
-    ...(access.notesEnabled !== false ? [{ to: '/notes', icon: StickyNote, label: labels.notes || 'Notizen', group: 'Overview' as const }] : []),
-    ...(online && access.socialEnabled !== false ? [{ to: '/chat', icon: MessageSquare, label: labels.chat || 'Chat', group: 'Overview' as const }] : []),
+    ...(access.calendarEnabled !== false ? [{ to: '/calendar', icon: CalendarIcon, label: labels.calendar, group: 'Overview' as const }] : []),
+    ...(access.notesEnabled !== false ? [{ to: '/notes', icon: StickyNote, label: labels.notes, group: 'Overview' as const }] : []),
+    ...(online && access.socialEnabled !== false ? [{ to: '/chat', icon: MessageSquare, label: labels.chat, group: 'Overview' as const }] : []),
     ...(online ? [{ to: '/servers', icon: Server, label: labels.servers, group: 'Infrastructure' as const }] : []),
     ...(online && (access.owner || access.canViewNodes) ? [{ to: '/admin/nodes', icon: Network, label: labels.nodes, group: 'Infrastructure' as const }] : []),
     ...(online && (access.owner || access.canUseAi) ? [{ to: '/ai', icon: Bot, label: labels.ai, group: 'Infrastructure' as const }] : []),

@@ -1,6 +1,13 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
+import i18n from '@/i18n'
 import { ProfileDropdown, type ProfileDropdownItem } from './ProfileDropdown'
+
+// Die Sprache festlegen: die Behauptungen unten prüfen deutsche Texte, und
+// ohne diese Zeile entscheidet navigator.language der Testumgebung.
+beforeAll(async () => {
+  await i18n.changeLanguage('de')
+})
 
 describe('ProfileDropdown', () => {
   const dummyUser = {
@@ -50,7 +57,7 @@ describe('ProfileDropdown', () => {
       />
     )
 
-    const trigger = screen.getByRole('button', { name: 'Benutzermenü öffnen' })
+    const trigger = screen.getByRole('button', { name: i18n.t('common.openUserMenu') })
     fireEvent.click(trigger)
 
     const menu = screen.getByRole('menu')
@@ -81,7 +88,7 @@ describe('ProfileDropdown', () => {
       />
     )
 
-    const trigger = screen.getByRole('button', { name: 'Benutzermenü öffnen' })
+    const trigger = screen.getByRole('button', { name: i18n.t('common.openUserMenu') })
     fireEvent.click(trigger)
 
     const profileItem = screen.getByText('Profil')
@@ -119,7 +126,7 @@ describe('ProfileDropdown', () => {
       toJSON: () => {},
     })
 
-    const trigger = screen.getByRole('button', { name: 'Benutzermenü öffnen' })
+    const trigger = screen.getByRole('button', { name: i18n.t('common.openUserMenu') })
     fireEvent.click(trigger)
 
     const menu = screen.getByRole('menu')

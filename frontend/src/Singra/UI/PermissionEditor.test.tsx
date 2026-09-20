@@ -64,7 +64,7 @@ describe('PermissionEditor', () => {
     expect(screen.getByRole('checkbox', { name: 'Use AI chat' })).toBeInTheDocument()
     expect(screen.getByText('AI permissions')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Select all' })).toBeInTheDocument()
-    expect(screen.getByPlaceholderText('Search permission...')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(i18n.t('permissionEditor.searchPlaceholder'))).toBeInTheDocument()
     // Kein deutscher Rest: der alte fest verdrahtete Titel darf nicht mehr auftauchen.
     expect(screen.queryByText('KI-Chat verwenden')).toBeNull()
   })

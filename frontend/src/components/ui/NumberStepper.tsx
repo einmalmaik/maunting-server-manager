@@ -1,4 +1,5 @@
 import { forwardRef, type InputHTMLAttributes } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Minus, Plus } from 'lucide-react'
 import { cx } from '@/utils/classNames'
 
@@ -25,6 +26,8 @@ function clamp(value: number, min?: number, max?: number): number {
 
 export const NumberStepper = forwardRef<HTMLInputElement, NumberStepperProps>(
   ({ value, onValueChange, min, max, step = 1, size = 'md', disabled, className = '', ...props }, ref) => {
+  const { t } = useTranslation()
+
     const current = toNumber(value)
     const commit = (next: number) => onValueChange(String(clamp(next, min, max)))
     const adjust = (direction: -1 | 1) => {
@@ -48,7 +51,7 @@ export const NumberStepper = forwardRef<HTMLInputElement, NumberStepperProps>(
             'grid shrink-0 place-items-center border-r border-outline-variant text-on-surface-variant transition-colors hover:bg-surface-container-highest hover:text-on-surface disabled:cursor-not-allowed disabled:opacity-40',
             size === 'sm' ? 'w-8' : 'w-10',
           )}
-          aria-label="Wert verringern"
+          aria-label={t('common.decrease')}
         >
           <Minus className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
@@ -79,7 +82,7 @@ export const NumberStepper = forwardRef<HTMLInputElement, NumberStepperProps>(
             'grid shrink-0 place-items-center border-l border-outline-variant text-on-surface-variant transition-colors hover:bg-surface-container-highest hover:text-on-surface disabled:cursor-not-allowed disabled:opacity-40',
             size === 'sm' ? 'w-8' : 'w-10',
           )}
-          aria-label="Wert erhöhen"
+          aria-label={t('common.increase')}
         >
           <Plus className="h-3.5 w-3.5" aria-hidden="true" />
         </button>

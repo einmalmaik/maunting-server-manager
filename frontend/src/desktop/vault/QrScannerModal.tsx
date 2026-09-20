@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import jsQR from 'jsqr'
 import { Camera, Upload, Keyboard, X, AlertCircle, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/Singra/UI'
@@ -15,6 +16,8 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
   onClose,
   onDetected,
 }) => {
+  const { t } = useTranslation()
+
   const [activeTab, setActiveTab] = useState<'camera' | 'upload' | 'manual'>('camera')
   const [cameraError, setCameraError] = useState<string | null>(null)
   const [isScanning, setIsScanning] = useState(false)
@@ -33,7 +36,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
 
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Kamera-Zugriff wird von diesem Gerät nicht unterstützt.')
+        throw new Error(t('mss.vault.qr.keineKamera'))
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -50,7 +53,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
         scanFrame()
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Kamera konnte nicht gestartet werden.'
+      const msg = err instanceof Error ? err.message : t('mss.vault.qr.kameraFehlgeschlagen')
       setCameraError(msg)
       setIsScanning(false)
     }
@@ -107,7 +110,12 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
     const parsed = parseOtpauthUri(trimmed)
 
     if (parsed) {
-      setScanFeedback(`Erkannt: ${parsed.issuer || '2FA'} (${parsed.label || 'Konto'})`)
+      setScanFeedback(
+        t('mss.vault.qr.erkanntMit', {
+          issuer: parsed.issuer || '2FA',
+          label: parsed.label || t('mss.vault.qr.kontoErsatz'),
+        }),
+      )
       stopCamera()
       setTimeout(() => {
         onDetected({
@@ -123,7 +131,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
     // Falls reines Secret eingegeben/gescannt wurde (z. B. Base32 Zeichen)
     const cleanSecret = trimmed.replace(/\s+/g, '').toUpperCase()
     if (/^[A-Z2-7]{8,}$/.test(cleanSecret)) {
-      setScanFeedback('2FA-Schlüssel erfolgreich erkannt.')
+      setScanFeedback(t('mss.vault.qr.erkannt'))
       stopCamera()
       setTimeout(() => {
         onDetected({ secret: cleanSecret })
@@ -132,7 +140,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
       return
     }
 
-    setScanFeedback('Unbekanntes QR-Code-Format.')
+    setScanFeedback(t('mss.vault.qr.unbekanntesFormat'))
   }
 
   // Bilddatei per Dropzone oder Dateiauswahl dekodieren
@@ -159,7 +167,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
         if (code && code.data) {
           handleFoundCode(code.data)
         } else {
-          setCameraError('Kein gültiger QR-Code im hochgeladenen Bild gefunden.')
+          setCameraError(t('mss.vault.qr.keinCodeImBild'))
         }
       }
       img.src = e.target?.result as string
@@ -189,7 +197,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
         <div className="flex items-center justify-between px-5 py-4 border-b border-outline-variant/20 bg-surface-container-low">
           <div className="flex items-center gap-2.5">
             <Camera className="h-5 w-5 text-primary" />
-            <h3 className="text-base font-semibold text-on-surface">QR-Code scannen</h3>
+            <h3 className="text-base font-semibold text-on-surface">{t('mss.vault.qr.scannen')}</h3>
           </div>
           <button
             type="button"
@@ -212,7 +220,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
             }`}
           >
             <Camera className="h-3.5 w-3.5" />
-            <span>Kamera</span>
+            <span>{t('mss.vault.qr.reiterKamera')}</span>
           </button>
           <button
             type="button"
@@ -224,7 +232,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
             }`}
           >
             <Upload className="h-3.5 w-3.5" />
-            <span>Bild hochladen</span>
+            <span>{t('mss.vault.qr.reiterBild')}</span>
           </button>
           <button
             type="button"
@@ -236,7 +244,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
             }`}
           >
             <Keyboard className="h-3.5 w-3.5" />
-            <span>Code eingeben</span>
+            <span>{t('mss.vault.qr.reiterCode')}</span>
           </button>
         </div>
 
@@ -253,7 +261,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
           {cameraError && (
             <div className="mb-4 flex items-center gap-2 rounded-xl bg-status-error/15 border border-status-error/30 px-3.5 py-2.5 text-xs text-status-error">
               <AlertCircle className="h-4 w-4 shrink-0" />
-              <span>{cameraError}</span>
+              <span>{t(cameraError)}</span>
             </div>
           )}
 
@@ -282,7 +290,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
                 )}
               </div>
               <p className="text-center text-xs text-on-surface-variant">
-                Halte den QR-Code deiner 2FA-Einrichtung vor die Kamera.
+                {t('mss.vault.qr.kameraHinweis')}
               </p>
             </div>
           )}
@@ -302,10 +310,10 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
               >
                 <Upload className="h-8 w-8 text-primary mb-2" />
                 <span className="text-xs font-semibold text-on-surface">
-                  Screenshot oder Bild hier ablegen
+                  {t('mss.vault.qr.hierAblegen')}
                 </span>
                 <span className="text-[11px] text-on-surface-variant mt-0.5">
-                  oder klicken zum Auswählen (PNG, JPG)
+                  {t('mss.vault.qr.oderKlicken')}
                 </span>
                 <input
                   type="file"
@@ -319,7 +327,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
                 />
               </label>
               <p className="text-xs text-center text-on-surface-variant">
-                Lade einen Screenshot des QR-Codes von Google, Discord, GitHub etc. hoch.
+                {t('mss.vault.qr.bildHinweis')}
               </p>
             </div>
           )}
@@ -329,13 +337,13 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
             <div className="space-y-4">
               <div>
                 <label className="block text-xs font-medium text-on-surface mb-1.5">
-                  2FA-Geheimschlüssel oder Link
+                  {t('mss.vault.qr.codeBezeichnung')}
                 </label>
                 <input
                   type="text"
                   value={manualCode}
                   onChange={(e) => setManualCode(e.target.value)}
-                  placeholder="z. B. JBSWY3DPEHPK3PXP oder otpauth://..."
+                  placeholder={t('mss.vault.qr.codePlatzhalter')}
                   className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3.5 py-2.5 text-xs text-on-surface font-mono placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary"
                 />
               </div>
@@ -345,7 +353,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
                 disabled={!manualCode.trim()}
                 className="w-full bg-primary text-on-primary"
               >
-                Schlüssel übernehmen
+                {t('mss.vault.qr.schluesselUebernehmen')}
               </Button>
             </div>
           )}

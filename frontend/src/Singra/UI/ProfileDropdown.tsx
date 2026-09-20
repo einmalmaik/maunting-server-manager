@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Avatar } from './Avatar'
 
 export interface ProfileDropdownItem {
@@ -37,12 +38,15 @@ export function ProfileDropdown({
   items,
   placement = 'bottom-right',
   className = '',
-  triggerAriaLabel = 'Benutzermenü öffnen',
+  triggerAriaLabel,
   avatarSize = 'sm',
   triggerVariant = 'avatar',
   status,
   onStatusChange,
 }: ProfileDropdownProps) {
+  const { t } = useTranslation()
+  const ausloeserName = triggerAriaLabel ?? t('common.openUserMenu')
+
   const [isOpen, setIsOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -176,7 +180,7 @@ export function ProfileDropdown({
           onClick={toggleDropdown}
           aria-expanded={isOpen}
           aria-haspopup="menu"
-          aria-label={triggerAriaLabel}
+          aria-label={ausloeserName}
           className="flex items-center gap-2 rounded-xl p-1 transition-all hover:bg-surface-container-high focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           <div className="relative inline-flex shrink-0">
@@ -194,7 +198,7 @@ export function ProfileDropdown({
           onClick={toggleDropdown}
           aria-expanded={isOpen}
           aria-haspopup="menu"
-          aria-label={triggerAriaLabel}
+          aria-label={ausloeserName}
           className="flex min-w-0 w-full items-center gap-2.5 rounded-xl p-1.5 text-left transition-all hover:bg-surface-container-high focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           <div className="relative inline-flex shrink-0">

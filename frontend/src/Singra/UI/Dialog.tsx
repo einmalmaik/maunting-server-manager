@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { X } from 'lucide-react'
 
 interface DialogContextValue {
@@ -39,6 +40,8 @@ export function DialogContent({
   showCloseButton = true,
   ...props
 }: DialogContentProps) {
+  const { t } = useTranslation()
+
   const ctx = useContext(DialogContext)
   if (!ctx) {
     throw new Error('DialogContent must be used within a Dialog')
@@ -108,7 +111,7 @@ export function DialogContent({
             type="button"
             onClick={() => ctx.onOpenChange(false)}
             className="absolute top-4 right-4 p-1.5 text-on-surface-variant hover:text-on-surface rounded-xl hover:bg-surface-container-high transition-colors z-10"
-            aria-label="Schließen"
+            aria-label={t('common.close')}
           >
             <X className="w-5 h-5" />
           </button>

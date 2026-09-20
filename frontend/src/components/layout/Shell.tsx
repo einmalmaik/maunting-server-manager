@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Outlet, useLocation } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
@@ -15,6 +16,8 @@ import { useMessengerSperreBereitschaft } from '@/hooks/useMessengerSperre'
 import { usePresenceAndActivity } from '@/hooks/usePresenceAndActivity'
 
 export function Shell() {
+  const { t } = useTranslation()
+
   useMessengerSperreBereitschaft()
 
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false)
@@ -150,7 +153,7 @@ export function Shell() {
                 type="button"
                 onClick={() => setMobileDockOpen(true)}
                 className="w-11 h-11 rounded-full bg-primary text-on-primary shadow-lg flex items-center justify-center hover:bg-primary/90 transition-transform active:scale-95"
-                aria-label="Kontakte & Chat öffnen"
+                aria-label={t('social.friends.openDock')}
               >
                 <Users className="w-5 h-5" />
               </button>
@@ -159,7 +162,7 @@ export function Shell() {
 
           {/* Mobile Dock Drawer / Layer */}
           {mobileDockOpen && (
-            <div className="fixed inset-0 z-50 lg:hidden flex flex-col justify-end" role="dialog" aria-label="Kontakte & Chat">
+            <div className="fixed inset-0 z-50 lg:hidden flex flex-col justify-end" role="dialog" aria-label={t('social.friends.dockTitle')}>
               <div
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
                 onClick={() => setMobileDockOpen(false)}
