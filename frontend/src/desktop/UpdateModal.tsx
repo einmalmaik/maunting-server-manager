@@ -93,7 +93,7 @@ export function UpdateModal() {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim/40 backdrop-blur-sm animate-fade-in">
+    <div className="msm-modal-overlay animate-fade-in">
       <div className="relative w-full max-w-md rounded-2xl bg-surface-container p-6 shadow-2xl border border-outline-variant/30 text-on-surface">
         {status !== 'laedt' && (
           <button

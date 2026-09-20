@@ -208,7 +208,7 @@ export function QrScannerModal({ offen, onSchliessen, onCodeGefunden }: QrScanne
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-3 sm:p-4 animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-3 sm:p-4 animate-fade-in"
       role="dialog"
       aria-modal="true"
       aria-labelledby="qr-scanner-title"

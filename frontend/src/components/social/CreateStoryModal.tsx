@@ -139,7 +139,7 @@ export function CreateStoryModal({
 
                 {/* Top watermark / expiry tag */}
                 <div className="relative z-10 flex items-center justify-between text-[11px] font-semibold opacity-95">
-                  <span className="flex items-center gap-1 bg-black/50 px-2 py-0.5 rounded-full backdrop-blur-md shadow-xs">
+                  <span className="flex items-center gap-1 bg-black/50 px-2 py-0.5 rounded-full backdrop-blur-md shadow-sm">
                     <Clock className="w-3 h-3 text-primary-fixed" />
                     <span>24h Status</span>
                   </span>
@@ -147,7 +147,7 @@ export function CreateStoryModal({
                     <button
                       type="button"
                       onClick={() => setPhotoDataUrl(null)}
-                      className="p-1 rounded-full bg-black/60 text-white hover:bg-black/90 transition-colors shadow-xs"
+                      className="p-1 rounded-full bg-black/60 text-white hover:bg-black/90 transition-colors shadow-sm"
                       title="Foto entfernen"
                       aria-label="Foto entfernen"
                     >
@@ -224,7 +224,7 @@ export function CreateStoryModal({
                       key={k}
                       type="button"
                       onClick={() => setSelectedGradient(k)}
-                      className={`w-7 h-7 rounded-full shrink-0 ${grad.class} transition-all duration-200 shadow-xs cursor-pointer ${
+                      className={`w-7 h-7 rounded-full shrink-0 ${grad.class} transition-all duration-200 shadow-sm cursor-pointer ${
                         selectedGradient === k
                           ? 'ring-2 ring-primary ring-offset-2 ring-offset-surface scale-110'
                           : 'opacity-80 hover:opacity-100 hover:scale-105'

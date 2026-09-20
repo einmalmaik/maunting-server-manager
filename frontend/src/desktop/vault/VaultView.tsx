@@ -660,11 +660,11 @@ export function VaultView() {
     return (
       <div
         key={item.id}
-        className="group flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 rounded-xl bg-surface-container hover:bg-surface-container-high border border-outline-variant/20 transition-all shadow-xs"
+        className="group flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 rounded-xl bg-surface-container hover:bg-surface-container-high border border-outline-variant/20 transition-all shadow-sm"
       >
         {/* Logo, Dienst, Benutzer */}
         <div className="flex items-center gap-3 min-w-0 flex-1">
-          <div className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-xl bg-surface border border-outline-variant/20 p-1.5 shadow-xs">
+          <div className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-xl bg-surface border border-outline-variant/20 p-1.5 shadow-sm">
             <ItemBrand className="w-5 h-5" />
           </div>
 
@@ -812,7 +812,7 @@ export function VaultView() {
         <div className="flex items-center gap-1.5">
           <Button
             onClick={openNewEntryModal}
-            className="flex items-center gap-1 bg-primary text-on-primary hover:bg-primary-hover shadow-xs px-2.5 py-1.5 text-xs font-medium"
+            className="flex items-center gap-1 bg-primary text-on-primary hover:bg-primary-hover shadow-sm px-2.5 py-1.5 text-xs font-medium"
           >
             <Plus className="h-3.5 w-3.5" />
             <span>Neues Passwort</span>
@@ -870,7 +870,7 @@ export function VaultView() {
 
       {/* HINWEIS-ERINNERUNG: Wenn nach dem Entsperren noch kein Hinweis hinterlegt ist */}
       {hasHint === false && !dismissedHintReminder && (
-        <div className="mx-4 mt-2.5 p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-on-surface shadow-xs">
+        <div className="mx-4 mt-2.5 p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-on-surface shadow-sm">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-2.5">
               <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-amber-500/20 text-amber-400">
@@ -1000,8 +1000,8 @@ export function VaultView() {
 
       {/* ── 4. MODAL: PASSWORT ANLEGEN / BEARBEITEN ── */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/60 backdrop-blur-xs">
-          <div className="relative w-full max-w-md rounded-2xl bg-surface-container border border-outline-variant/30 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/60 backdrop-blur-sm">
+          <div className="relative w-full max-w-md rounded-2xl bg-surface-container border border-outline-variant/30 shadow-2xl overflow-hidden animate-scale-in">
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-outline-variant/20 bg-surface-container-low">
               <div className="flex items-center gap-2.5">
@@ -1198,7 +1198,7 @@ export function VaultView() {
 
       {/* Modal: Passwort-Hinweis verwalten */}
       {isHintModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-2xl bg-surface-container border border-outline-variant/30 p-5 space-y-4 shadow-xl">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">

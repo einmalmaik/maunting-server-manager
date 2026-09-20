@@ -156,6 +156,47 @@ const config: Config = {
         'stack-compact': '0.5rem',
         'stack-default': '1rem',
       },
+      /*
+       * Ein- und Ausblenden von Overlays.
+       *
+       * Vorher standen im Quelltext sechs Schreibweisen für vier Effekte, und
+       * keine davon erzeugte CSS: `animate-in fade-in slide-in-from-bottom-2`
+       * ist das Vokabular des Plugins `tailwindcss-animate`, das nie
+       * eingebunden war (`plugins: []`), und `animate-[fadeIn_.15s_ease-out]`
+       * verwies auf Keyframes, die es nicht gibt. Dialoge, Menüs und die
+       * mobile Sidebar erschienen deshalb hart, ohne dass es jemandem auffiel —
+       * eine fehlende Animation sieht aus wie eine schnelle.
+       *
+       * Vier Keyframes statt eines Plugins: das Plugin bringt ein volles
+       * Vokabular für Ein- und Ausblendungen mit, benutzt würden vier Varianten.
+       * Die Dauer steckt in der Definition, weil Tailwinds `duration-*` nur
+       * `transition-duration` setzt und Animationen gar nicht erreicht — die
+       * `duration-200` neben den alten `animate-in` waren wirkungslos.
+       */
+      keyframes: {
+        'fade-in': {
+          from: { opacity: '0' },
+          to: { opacity: '1' },
+        },
+        'scale-in': {
+          from: { opacity: '0', transform: 'scale(0.96)' },
+          to: { opacity: '1', transform: 'scale(1)' },
+        },
+        'slide-up': {
+          from: { opacity: '0', transform: 'translateY(0.5rem)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
+        'slide-in-left': {
+          from: { opacity: '0', transform: 'translateX(-100%)' },
+          to: { opacity: '1', transform: 'translateX(0)' },
+        },
+      },
+      animation: {
+        'fade-in': 'fade-in 150ms ease-out both',
+        'scale-in': 'scale-in 150ms ease-out both',
+        'slide-up': 'slide-up 180ms ease-out both',
+        'slide-in-left': 'slide-in-left 180ms ease-out both',
+      },
       backgroundImage: {
         'deep-grid': `linear-gradient(to right, rgba(65, 72, 73, 0.1) 1px, transparent 1px),
                        linear-gradient(to bottom, rgba(65, 72, 73, 0.1) 1px, transparent 1px)`,

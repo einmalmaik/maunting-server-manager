@@ -168,6 +168,6 @@ export function CaptchaWidget({ onVerify }: CaptchaWidgetProps) {
   }
 
   return (
-    <div className="flex justify-center my-4 msm-captcha-container" ref={containerRef} />
+    <div className="flex justify-center my-4" ref={containerRef} />
   )
 }

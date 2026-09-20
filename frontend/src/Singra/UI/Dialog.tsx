@@ -91,7 +91,7 @@ export function DialogContent({
 
   return (
     <div
-      className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-[fadeIn_.15s_ease-out] ${overlayClassName}`}
+      className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in ${overlayClassName}`}
       onClick={() => ctx.onOpenChange(false)}
       role="dialog"
       aria-modal="true"

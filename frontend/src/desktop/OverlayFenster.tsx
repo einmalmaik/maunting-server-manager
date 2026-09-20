@@ -202,7 +202,7 @@ export function OverlayFenster({ inApp = false }: OverlayFensterProps) {
   const container = (
     <div
       data-tauri-drag-region
-      className={`flex flex-col items-center justify-start overflow-hidden rounded-3xl border border-primary/20 bg-surface-container-lowest/90 px-4 pb-4 pt-2 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.8)] backdrop-blur-2xl transition-all duration-300 ease-out animate-in zoom-in-95 slide-in-from-bottom-6 ${
+      className={`flex flex-col items-center justify-start overflow-hidden rounded-3xl border border-primary/20 bg-surface-container-lowest/90 px-4 pb-4 pt-2 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.8)] backdrop-blur-2xl transition-all duration-300 ease-out animate-scale-in ${
         inApp ? 'w-full max-w-sm sm:max-w-md mx-auto max-h-[380px]' : 'h-screen'
       }`}
     >
@@ -239,7 +239,7 @@ export function OverlayFenster({ inApp = false }: OverlayFensterProps) {
 
   if (inApp) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md transition-all duration-300 ease-out animate-in fade-in">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md transition-all duration-300 ease-out animate-fade-in">
         {container}
       </div>
     )

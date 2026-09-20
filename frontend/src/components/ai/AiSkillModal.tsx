@@ -39,7 +39,7 @@ export function AiSkillModal({ open, onClose }: AiSkillModalProps) {
     >
       <div
         ref={modalRef}
-        className="relative flex flex-col w-full max-w-3xl max-h-[85vh] rounded-2xl border border-outline-variant/40 bg-surface shadow-2xl overflow-hidden animate-content-show"
+        className="relative flex flex-col w-full max-w-3xl max-h-[85vh] rounded-2xl border border-outline-variant/40 bg-surface shadow-2xl overflow-hidden animate-scale-in"
       >
         <header className="flex items-center justify-between px-5 py-3.5 border-b border-outline-variant/30 bg-surface-container-high/40">
           <div className="flex items-center gap-2">

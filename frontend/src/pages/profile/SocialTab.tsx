@@ -275,7 +275,7 @@ export function SocialTab() {
               {incomingRequests.map((req) => (
                 <div
                   key={req.id}
-                  className="flex items-center justify-between p-3 rounded-xl bg-surface-container-high/50 border border-amber-500/30 shadow-xs"
+                  className="flex items-center justify-between p-3 rounded-xl bg-surface-container-high/50 border border-amber-500/30 shadow-sm"
                 >
                   <div className="flex items-center gap-2.5">
                     <Avatar src={req.avatar_url} name={req.username} size="sm" />
@@ -652,7 +652,7 @@ export function SocialTab() {
                 key={m.id}
                 className={`flex items-start gap-3.5 p-3.5 rounded-xl border transition-all ${
                   m.unlocked
-                    ? 'bg-surface-container-low border-outline-variant/40 shadow-xs'
+                    ? 'bg-surface-container-low border-outline-variant/40 shadow-sm'
                     : 'bg-surface-container-lowest/40 border-outline-variant/20 opacity-55'
                 }`}
               >

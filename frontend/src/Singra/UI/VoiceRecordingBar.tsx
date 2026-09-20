@@ -144,7 +144,7 @@ export function VoiceRecordingBar({
     >
       {/* Left: Indicator + Timer */}
       <div className="flex items-center gap-2.5 shrink-0 min-w-0">
-        <div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-2.5 py-1 backdrop-blur-xs">
+        <div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-2.5 py-1 backdrop-blur-sm">
           <span className="relative flex h-2 w-2 items-center justify-center">
             <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-60 ${dotColor}`} />
             <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${dotColor}`} />

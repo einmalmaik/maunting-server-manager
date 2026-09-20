@@ -1157,7 +1157,7 @@ function SocialEinstellungen() {
                 key={m.id}
                 className={`flex items-start gap-3 p-3 rounded-xl border transition-all ${
                   m.unlocked
-                    ? 'bg-surface-container-low border-outline-variant/40 shadow-xs'
+                    ? 'bg-surface-container-low border-outline-variant/40 shadow-sm'
                     : 'bg-surface-container-lowest/40 border-outline-variant/20 opacity-55'
                 }`}
               >

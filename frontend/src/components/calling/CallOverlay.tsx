@@ -289,7 +289,7 @@ export const CallOverlay: React.FC = () => {
   // liefe er nach rechts hinaus. Ein höherer z-Wert hilft nicht — er bliebe im
   // selben Käfig. Der Portal nimmt das Fenster aus dem Käfig heraus.
   return createPortal(
-    <div className="fixed inset-0 z-50 flex select-none flex-col justify-between overflow-hidden bg-surface/95 text-on-surface backdrop-blur-md animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex select-none flex-col justify-between overflow-hidden bg-surface/95 text-on-surface backdrop-blur-md animate-fade-in">
       <RemoteAudio room={room} />
 
       {/* Kopf */}
@@ -535,7 +535,7 @@ export const CallOverlay: React.FC = () => {
               {hinweise.map((hinweis) => (
                 <span
                   key={hinweis.id}
-                  className={`max-w-full truncate rounded-full border px-3 py-1.5 text-xs shadow-lg backdrop-blur-sm animate-in fade-in slide-in-from-bottom-2 duration-200 ${
+                  className={`max-w-full truncate rounded-full border px-3 py-1.5 text-xs shadow-lg backdrop-blur-sm animate-slide-up ${
                     hinweis.art === 'beitritt'
                       ? 'border-status-success/40 bg-status-success/15 text-status-success'
                       : hinweis.art === 'info'

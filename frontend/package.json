@@ -12,7 +12,9 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check:i18n": "node scripts/check-i18n.mjs"
+    "check:i18n": "node scripts/check-i18n.mjs",
+    "check:classes": "node scripts/check-classes.mjs",
+    "check": "npm run check:i18n && npm run check:classes"
   },
   "dependencies": {
     "@codemirror/lang-json": "^6.0.2",

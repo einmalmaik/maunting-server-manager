@@ -185,7 +185,7 @@ export const CircularVideoNoteRecorder: React.FC<CircularVideoNoteRecorderProps>
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80 backdrop-blur-md select-none touch-none animate-in fade-in"
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80 backdrop-blur-md select-none touch-none animate-fade-in"
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}

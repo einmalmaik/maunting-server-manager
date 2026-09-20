@@ -470,7 +470,7 @@ export function PopupTab() {
                         </span>
                       )}
                       {isExpired && (
-                        <span className="msm-badge-warn flex items-center gap-1 text-xs">
+                        <span className="msm-badge-warning flex items-center gap-1 text-xs">
                           {t('popups.statusExpired', 'Abgelaufen')}
                         </span>
                       )}

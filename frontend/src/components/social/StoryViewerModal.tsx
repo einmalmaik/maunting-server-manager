@@ -260,7 +260,7 @@ export function StoryViewerModal({
           aria-label="Vorherige Story"
         >
           {currentIndex > 0 && (
-            <div className="p-1 rounded-full bg-black/40 text-white backdrop-blur-xs">
+            <div className="p-1 rounded-full bg-black/40 text-white backdrop-blur-sm">
               <ChevronLeft className="w-5 h-5" />
             </div>
           )}
@@ -271,7 +271,7 @@ export function StoryViewerModal({
           onClick={handleNext}
           aria-label="Nächste Story"
         >
-          <div className="p-1 rounded-full bg-black/40 text-white backdrop-blur-xs">
+          <div className="p-1 rounded-full bg-black/40 text-white backdrop-blur-sm">
             <ChevronRight className="w-5 h-5" />
           </div>
         </div>
@@ -302,7 +302,7 @@ export function StoryViewerModal({
                 onFocus={() => setIsPaused(true)}
                 onBlur={() => setIsPaused(false)}
                 placeholder="Auf Status antworten …"
-                className="flex-1 bg-black/40 border border-white/25 rounded-full px-3.5 py-1.5 text-xs text-white placeholder:text-white/60 focus:outline-none focus:border-primary backdrop-blur-xs"
+                className="flex-1 bg-black/40 border border-white/25 rounded-full px-3.5 py-1.5 text-xs text-white placeholder:text-white/60 focus:outline-none focus:border-primary backdrop-blur-sm"
               />
               <button
                 type="submit"

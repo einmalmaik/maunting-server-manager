@@ -1132,7 +1132,7 @@ function Reiter({
       aria-label={label}
       className={`group relative flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all ${
         aktiv
-          ? 'bg-surface-container-high text-primary shadow-xs font-semibold'
+          ? 'bg-surface-container-high text-primary shadow-sm font-semibold'
           : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/40'
       }`}
     >

@@ -296,7 +296,7 @@ function GroupRoleForm({ initial, onSubmit, onCancel, disabled }: GroupRoleFormP
                 key={`perm-toggle-${def.key}`}
                 className={`flex items-start gap-3 p-3 rounded-xl border transition-all cursor-pointer select-none ${
                   isChecked
-                    ? 'border-primary/40 bg-primary/10 shadow-xs'
+                    ? 'border-primary/40 bg-primary/10 shadow-sm'
                     : 'border-outline-variant/20 bg-surface-container-lowest/60 hover:bg-surface-container-high/40'
                 } ${isOwnerRole ? 'opacity-80 cursor-not-allowed' : ''}`}
               >
@@ -521,7 +521,7 @@ export function GroupPermissionsModal({
         {/* Header with generous vertical padding */}
         <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-outline-variant/20 bg-surface-container/70 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shadow-xs shrink-0">
+            <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shadow-sm shrink-0">
               <ShieldCheck className="w-5 h-5" />
             </div>
             <div className="min-w-0">
@@ -555,7 +555,7 @@ export function GroupPermissionsModal({
               }}
               className={`py-2 sm:pb-3.5 px-1 sm:px-3 text-[11px] sm:text-sm font-semibold flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 transition-all rounded-lg sm:rounded-none sm:border-b-2 text-center select-none ${
                 activeTab === 'members'
-                  ? 'bg-primary/15 sm:bg-transparent text-primary sm:border-primary shadow-xs sm:shadow-none'
+                  ? 'bg-primary/15 sm:bg-transparent text-primary sm:border-primary shadow-sm sm:shadow-none'
                   : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 sm:hover:bg-transparent sm:border-transparent'
               }`}
             >
@@ -575,7 +575,7 @@ export function GroupPermissionsModal({
               }}
               className={`py-2 sm:pb-3.5 px-1 sm:px-3 text-[11px] sm:text-sm font-semibold flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 transition-all rounded-lg sm:rounded-none sm:border-b-2 text-center select-none ${
                 activeTab === 'roles'
-                  ? 'bg-primary/15 sm:bg-transparent text-primary sm:border-primary shadow-xs sm:shadow-none'
+                  ? 'bg-primary/15 sm:bg-transparent text-primary sm:border-primary shadow-sm sm:shadow-none'
                   : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 sm:hover:bg-transparent sm:border-transparent'
               }`}
             >
@@ -595,7 +595,7 @@ export function GroupPermissionsModal({
               }}
               className={`py-2 sm:pb-3.5 px-1 sm:px-3 text-[11px] sm:text-sm font-semibold flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 transition-all rounded-lg sm:rounded-none sm:border-b-2 text-center select-none ${
                 activeTab === 'permissions'
-                  ? 'bg-primary/15 sm:bg-transparent text-primary sm:border-primary shadow-xs sm:shadow-none'
+                  ? 'bg-primary/15 sm:bg-transparent text-primary sm:border-primary shadow-sm sm:shadow-none'
                   : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 sm:hover:bg-transparent sm:border-transparent'
               }`}
             >
@@ -632,7 +632,7 @@ export function GroupPermissionsModal({
                   Mitglieder werden geladen …
                 </div>
               ) : (
-                <div className="divide-y divide-outline-variant/20 rounded-2xl border border-outline-variant/30 bg-surface-container/70 overflow-hidden shadow-xs">
+                <div className="divide-y divide-outline-variant/20 rounded-2xl border border-outline-variant/30 bg-surface-container/70 overflow-hidden shadow-sm">
                   {members.map((member) => {
                     const isMemberOwner = member.role === 'owner' || member.user_id === group?.owner_user_id
                     const isSelf = member.user_id === currentUserId
@@ -773,7 +773,7 @@ export function GroupPermissionsModal({
                   return (
                     <div
                       key={`role-item-${r.id}`}
-                      className="p-3.5 sm:p-4 rounded-2xl border border-outline-variant/35 bg-surface-container/75 hover:bg-surface-container/95 transition-colors shadow-xs space-y-2.5"
+                      className="p-3.5 sm:p-4 rounded-2xl border border-outline-variant/35 bg-surface-container/75 hover:bg-surface-container/95 transition-colors shadow-sm space-y-2.5"
                     >
                       {/* Top Row: Role Name & Badges + Action Buttons */}
                       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -906,7 +906,7 @@ export function GroupPermissionsModal({
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-outline-variant/30 p-4 sm:p-6 bg-surface-container/60 shadow-xs">
+              <div className="rounded-2xl border border-outline-variant/30 p-4 sm:p-6 bg-surface-container/60 shadow-sm">
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
                   <div className="p-3.5 rounded-xl bg-surface-container-high/60 border border-outline-variant/30 flex items-center justify-between gap-4">
                     <div className="min-w-0 flex-1">

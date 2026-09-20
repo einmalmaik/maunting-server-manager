@@ -3079,7 +3079,7 @@ export function Messenger() {
               size="sm"
               onClick={() => handleStartGroupCall(true)}
               disabled={!groupCallPermissions.canJoin}
-              className="h-8 gap-1.5 bg-surface-container-high/85 px-2.5 text-xs text-cyan-200 shadow-xs hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-60"
+              className="h-8 gap-1.5 bg-surface-container-high/85 px-2.5 text-xs text-cyan-200 shadow-sm hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-60"
               title={
                 groupCallPermissions.canJoin
                   ? 'Laufendem Gruppenanruf beitreten'
@@ -3120,7 +3120,7 @@ export function Messenger() {
               onClick={() => setMobileNavTab('chats')}
               className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition-colors ${
                 mobileNavTab === 'chats'
-                  ? 'bg-primary text-on-primary shadow-xs font-semibold'
+                  ? 'bg-primary text-on-primary shadow-sm font-semibold'
                   : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60'
               }`}
               aria-label="Desktop-Chats"
@@ -3133,7 +3133,7 @@ export function Messenger() {
               onClick={() => setMobileNavTab('updates')}
               className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition-colors relative ${
                 mobileNavTab === 'updates'
-                  ? 'bg-primary text-on-primary shadow-xs font-semibold'
+                  ? 'bg-primary text-on-primary shadow-sm font-semibold'
                   : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60'
               }`}
               aria-label="Desktop-Aktuelles"
@@ -3149,7 +3149,7 @@ export function Messenger() {
               onClick={() => setMobileNavTab('community')}
               className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition-colors ${
                 mobileNavTab === 'community'
-                  ? 'bg-primary text-on-primary shadow-xs font-semibold'
+                  ? 'bg-primary text-on-primary shadow-sm font-semibold'
                   : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60'
               }`}
               aria-label="Desktop-Gruppen"
@@ -3179,7 +3179,7 @@ export function Messenger() {
                   onClick={() => setFilterTab('all')}
                   className={`h-7 rounded-lg flex items-center justify-center gap-1 transition-all text-xs font-semibold ${
                     filterTab === 'all'
-                      ? 'bg-primary text-on-primary shadow-xs'
+                      ? 'bg-primary text-on-primary shadow-sm'
                       : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
                   }`}
                   title="Alle Chats"
@@ -3194,7 +3194,7 @@ export function Messenger() {
                   onClick={() => setFilterTab('groups')}
                   className={`h-7 rounded-lg flex items-center justify-center gap-0.5 sm:gap-1 transition-all text-xs font-semibold ${
                     filterTab === 'groups'
-                      ? 'bg-primary text-on-primary shadow-xs'
+                      ? 'bg-primary text-on-primary shadow-sm'
                       : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
                   }`}
                   title={`Gruppen (${groups.length})`}
@@ -3217,7 +3217,7 @@ export function Messenger() {
                   onClick={() => setFilterTab('friends')}
                   className={`h-7 rounded-lg flex items-center justify-center gap-0.5 sm:gap-1 transition-all text-xs font-semibold ${
                     filterTab === 'friends'
-                      ? 'bg-primary text-on-primary shadow-xs'
+                      ? 'bg-primary text-on-primary shadow-sm'
                       : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
                   }`}
                   title={`Freunde (${contactsList.filter((c) => c.isFriend).length})`}
@@ -3240,7 +3240,7 @@ export function Messenger() {
                   onClick={() => setFilterTab('teams')}
                   className={`h-7 rounded-lg flex items-center justify-center gap-0.5 sm:gap-1 transition-all text-xs font-semibold ${
                     filterTab === 'teams'
-                      ? 'bg-primary text-on-primary shadow-xs'
+                      ? 'bg-primary text-on-primary shadow-sm'
                       : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
                   }`}
                   title={`Teams (${contactsList.filter((c) => c.teamName).length})`}
@@ -3263,7 +3263,7 @@ export function Messenger() {
                   onClick={() => setFilterTab('public')}
                   className={`h-7 rounded-lg flex items-center justify-center gap-0.5 sm:gap-1 transition-all text-xs font-semibold ${
                     filterTab === 'public'
-                      ? 'bg-primary text-on-primary shadow-xs'
+                      ? 'bg-primary text-on-primary shadow-sm'
                       : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
                   }`}
                   title={`Öffentlich / Entdecken (${contactsList.filter((c) => c.isPublicUser).length})`}
@@ -3409,7 +3409,7 @@ export function Messenger() {
                           }}
                           className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all ${
                             isSelected
-                              ? 'bg-primary/15 border border-primary/30 shadow-xs'
+                              ? 'bg-primary/15 border border-primary/30 shadow-sm'
                               : 'hover:bg-surface-container-high/60 border border-transparent'
                           }`}
                         >
@@ -3477,7 +3477,7 @@ export function Messenger() {
                           }}
                           className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all ${
                             isSelected
-                              ? 'bg-primary/15 border border-primary/30 shadow-xs'
+                              ? 'bg-primary/15 border border-primary/30 shadow-sm'
                               : 'hover:bg-surface-container-high/60 border border-transparent'
                           }`}
                         >
@@ -3573,7 +3573,7 @@ export function Messenger() {
                 </div>
 
                 {/* My Status Card with crisp contrast and clear visual identity */}
-                <div className="p-3.5 rounded-2xl bg-surface-container/70 border border-outline-variant/35 shadow-xs transition-colors hover:bg-surface-container/90">
+                <div className="p-3.5 rounded-2xl bg-surface-container/70 border border-outline-variant/35 shadow-sm transition-colors hover:bg-surface-container/90">
                   <div className="flex items-center justify-between mb-3">
                     <span className="text-xs font-headline font-bold text-on-surface">Mein Status</span>
                     <span className="text-[11px] text-on-surface-variant font-medium">24h sichtbar</span>
@@ -3898,7 +3898,7 @@ export function Messenger() {
         >
           {/* Drag and Drop Visual Dropzone Overlay */}
           {isDragOver && (
-            <div className="absolute inset-0 z-40 bg-surface/85 backdrop-blur-xs border-2 border-dashed border-primary flex flex-col items-center justify-center p-6 text-center pointer-events-none">
+            <div className="absolute inset-0 z-40 bg-surface/85 backdrop-blur-sm border-2 border-dashed border-primary flex flex-col items-center justify-center p-6 text-center pointer-events-none">
               <Upload className="w-12 h-12 text-primary animate-bounce mb-2" />
               <p className="font-headline font-bold text-sm text-primary">Datei hier ablegen</p>
               <p className="text-xs text-on-surface-variant">Wird Ende-zu-Ende verschlüsselt an die Konversation angehängt</p>
@@ -3954,7 +3954,7 @@ export function Messenger() {
                       setActiveContact(null)
                       setActiveGroup(null)
                     }}
-                    className="md:hidden p-2 rounded-full bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant shadow-xs transition-colors"
+                    className="md:hidden p-2 rounded-full bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant shadow-sm transition-colors"
                     aria-label="Zurück zur Kontaktliste"
                     title="Zurück zur Kontaktliste"
                   >
@@ -3962,7 +3962,7 @@ export function Messenger() {
                   </button>
 
                   {/* Header Title Badge with Mute & Block Indicators */}
-                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-container-high/85 backdrop-blur-md border border-outline-variant/30 shadow-xs">
+                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-container-high/85 backdrop-blur-md border border-outline-variant/30 shadow-sm">
                     {activeGroup?.avatar_url && (
                       <img
                         src={apiUrl(activeGroup.avatar_url)}
@@ -3993,7 +3993,7 @@ export function Messenger() {
                         variant="ghost"
                         size="sm"
                         onClick={() => handleCopyInviteLink(activeGroup)}
-                        className="h-8 gap-1.5 text-xs px-2.5 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary shadow-xs"
+                        className="h-8 gap-1.5 text-xs px-2.5 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary shadow-sm"
                         title="Einladungslink kopieren"
                       >
                         <Share2 className="w-3.5 h-3.5" />
@@ -4005,7 +4005,7 @@ export function Messenger() {
                         size="sm"
                         onClick={() => handleStartGroupCall(false)}
                         disabled={!groupCallPermissions.canStart}
-                        className="h-8 gap-1.5 bg-surface-container-high/85 px-2.5 text-xs text-primary shadow-xs hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-60"
+                        className="h-8 gap-1.5 bg-surface-container-high/85 px-2.5 text-xs text-primary shadow-sm hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-60"
                         title={
                           groupCallPermissions.canStart
                             ? 'Gruppenanruf starten'
@@ -4023,7 +4023,7 @@ export function Messenger() {
                           size="icon"
                           onClick={() => gruppenLogoInputRef.current?.click()}
                           disabled={logoLaedt}
-                          className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-primary shadow-xs"
+                          className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-primary shadow-sm"
                           title="Gruppenlogo ändern"
                           aria-label="Gruppenlogo ändern"
                         >
@@ -4036,7 +4036,7 @@ export function Messenger() {
                           variant="ghost"
                           size="icon"
                           onClick={() => setIsGroupPermissionsOpen(true)}
-                          className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-primary shadow-xs"
+                          className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-primary shadow-sm"
                           title="Gruppenrollen & Rechte verwalten"
                           aria-label="Gruppenrollen & Rechte verwalten"
                         >
@@ -4049,7 +4049,7 @@ export function Messenger() {
                           variant="ghost"
                           size="icon"
                           onClick={() => handleDeleteGroup(activeGroup)}
-                          className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-error shadow-xs"
+                          className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-error shadow-sm"
                           title="Gruppe löschen"
                           aria-label="Gruppe löschen"
                         >
@@ -4060,7 +4060,7 @@ export function Messenger() {
                           variant="ghost"
                           size="icon"
                           onClick={() => handleLeaveGroup(activeGroup)}
-                          className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-error shadow-xs"
+                          className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-error shadow-sm"
                           title="Gruppe verlassen"
                           aria-label="Gruppe verlassen"
                         >
@@ -4082,7 +4082,7 @@ export function Messenger() {
                           toast.error(err?.message || 'Konnte keine Anfrage senden.')
                         }
                       }}
-                      className="h-8 gap-1.5 text-xs px-2.5 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary shadow-xs"
+                      className="h-8 gap-1.5 text-xs px-2.5 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary shadow-sm"
                       title="Freundschaftsanfrage senden"
                     >
                       <UserPlus className="w-3.5 h-3.5" />
@@ -4109,7 +4109,7 @@ export function Messenger() {
                             toast.error(err?.message || 'Anruf konnte nicht gestartet werden.')
                           }
                         }}
-                        className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary hover:text-primary shadow-xs"
+                        className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary hover:text-primary shadow-sm"
                         title="Sprachanruf starten"
                         aria-label="Sprachanruf starten"
                       >
@@ -4132,7 +4132,7 @@ export function Messenger() {
                             toast.error(err?.message || 'Anruf konnte nicht gestartet werden.')
                           }
                         }}
-                        className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary hover:text-primary shadow-xs"
+                        className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary hover:text-primary shadow-sm"
                         title="Videoanruf starten"
                         aria-label="Videoanruf starten"
                       >
@@ -4147,7 +4147,7 @@ export function Messenger() {
                       variant="ghost"
                       size="icon"
                       onClick={() => setIsMuteModalOpen(true)}
-                      className={`h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 shadow-xs ${
+                      className={`h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 shadow-sm ${
                         isChatMuted(blindMailboxId)
                           ? 'text-status-warning'
                           : 'text-on-surface-variant hover:text-primary'
@@ -4173,7 +4173,7 @@ export function Messenger() {
                       variant="ghost"
                       size="icon"
                       onClick={() => setIsBlockConfirmOpen(true)}
-                      className={`h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 shadow-xs ${
+                      className={`h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 shadow-sm ${
                         isBlocked(activeContact.userId)
                           ? 'text-status-error'
                           : 'text-on-surface-variant hover:text-status-error'
@@ -4193,7 +4193,7 @@ export function Messenger() {
                     variant="ghost"
                     size="icon"
                     onClick={() => setIsWallpaperModalOpen(true)}
-                    className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-primary shadow-xs"
+                    className="h-8 w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-primary shadow-sm"
                     title="Chat-Hintergrund anpassen"
                     aria-label="Chat-Hintergrund anpassen"
                   >
@@ -4247,7 +4247,7 @@ export function Messenger() {
                     <React.Fragment key={msg.id}>
                       {showDateSeparator && (
                         <div className="flex justify-center my-3 sticky top-2 z-10 pointer-events-none">
-                          <span className="px-3.5 py-1 rounded-full text-[11px] font-semibold bg-surface-container/90 text-on-surface-variant backdrop-blur-md border border-outline-variant/30 shadow-xs">
+                          <span className="px-3.5 py-1 rounded-full text-[11px] font-semibold bg-surface-container/90 text-on-surface-variant backdrop-blur-md border border-outline-variant/30 shadow-sm">
                             {currentDateBadge}
                           </span>
                         </div>
@@ -4257,10 +4257,10 @@ export function Messenger() {
                         className={`group flex flex-col ${msg.isSelf ? 'items-end' : 'items-start'}`}
                       >
                     <div
-                      className={`max-w-[85%] md:max-w-[70%] px-3.5 py-2 rounded-2xl text-xs break-words shadow-xs space-y-2 ${
+                      className={`max-w-[85%] md:max-w-[70%] px-3.5 py-2 rounded-2xl text-xs break-words shadow-sm space-y-2 ${
                         msg.isSelf
                           ? 'bg-[#0c2e35] text-[#f0fdfa] rounded-br-xs border border-[#164e5c]/60 shadow-sm'
-                          : 'bg-surface-container-high text-on-surface rounded-bl-xs border border-outline-variant/20 shadow-xs'
+                          : 'bg-surface-container-high text-on-surface rounded-bl-xs border border-outline-variant/20 shadow-sm'
                       }`}
                     >
                       {/* Group sender name if in group and not self */}
@@ -4338,7 +4338,7 @@ export function Messenger() {
                               <button
                                 type="button"
                                 onClick={cycleAudioPlaybackRate}
-                                className={`absolute -bottom-1 -right-1 px-1 py-0.5 rounded-full font-bold text-[9px] shadow-xs border border-surface leading-none hover:scale-110 transition-transform ${
+                                className={`absolute -bottom-1 -right-1 px-1 py-0.5 rounded-full font-bold text-[9px] shadow-sm border border-surface leading-none hover:scale-110 transition-transform ${
                                   msg.isSelf
                                     ? 'bg-white text-[#0c2e35]'
                                     : 'bg-primary text-on-primary'
@@ -4355,7 +4355,7 @@ export function Messenger() {
                           <button
                             type="button"
                             onClick={() => void togglePlayAudio(msg.id, msg.audioAttachment!, medienBindung(msg))}
-                            className={`w-8 h-8 rounded-full shrink-0 shadow-xs flex items-center justify-center transition-all ${
+                            className={`w-8 h-8 rounded-full shrink-0 shadow-sm flex items-center justify-center transition-all ${
                               msg.isSelf
                                 ? 'bg-white text-[#0c2e35] hover:bg-white/90'
                                 : 'bg-primary text-on-primary hover:opacity-90'
@@ -4583,7 +4583,7 @@ export function Messenger() {
                             />
                           ) : (
                             <div
-                              className={`w-11 h-11 rounded-lg shrink-0 flex items-center justify-center text-[8px] font-bold text-white shadow-xs ${
+                              className={`w-11 h-11 rounded-lg shrink-0 flex items-center justify-center text-[8px] font-bold text-white shadow-sm ${
                                 STORY_GRADIENTS[msg.storyReply.storyBackground || 'gradient-1']?.class || 'bg-slate-800'
                               }`}
                             >
@@ -4707,7 +4707,7 @@ export function Messenger() {
               })}
                 {/* Floating Typing / Audio Recording Activity Indicator */}
                 {partnerActivity && (
-                  <div className="flex items-center gap-2 text-xs py-1.5 px-3 rounded-full bg-surface-container-high/90 border border-outline-variant/30 text-on-surface w-fit shadow-xs animate-in fade-in slide-in-from-bottom-2">
+                  <div className="flex items-center gap-2 text-xs py-1.5 px-3 rounded-full bg-surface-container-high/90 border border-outline-variant/30 text-on-surface w-fit shadow-sm animate-slide-up">
                     {partnerActivity.status === 'recording' ? (
                       <>
                         <Mic className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
@@ -4842,7 +4842,7 @@ export function Messenger() {
                   <>
                     {/* WhatsApp-Style Sticker & Emoji Picker Popover */}
                     {isStickerPickerOpen && (
-                      <div className="mb-2 p-2.5 rounded-xl bg-surface-container border border-outline-variant/30 shadow-lg animate-in fade-in slide-in-from-bottom-2">
+                      <div className="mb-2 p-2.5 rounded-xl bg-surface-container border border-outline-variant/30 shadow-lg animate-slide-up">
                         <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-outline-variant/20">
                           <div className="flex items-center gap-1.5">
                             <Button
@@ -5027,7 +5027,7 @@ export function Messenger() {
 
                               {/* Attachment Popover Menu */}
                               {isAttachMenuOpen && (
-                                <div className="absolute bottom-10 left-0 z-30 min-w-[210px] p-1.5 rounded-2xl bg-surface-container-high/95 backdrop-blur-md border border-outline-variant/30 shadow-xl space-y-1 animate-in fade-in slide-in-from-bottom-2 duration-150">
+                                <div className="absolute bottom-10 left-0 z-30 min-w-[210px] p-1.5 rounded-2xl bg-surface-container-high/95 backdrop-blur-md border border-outline-variant/30 shadow-xl space-y-1 animate-slide-up">
                                   <button
                                     type="button"
                                     onClick={() => {

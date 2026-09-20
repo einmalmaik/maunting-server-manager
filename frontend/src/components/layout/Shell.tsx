@@ -161,7 +161,7 @@ export function Shell() {
           {mobileDockOpen && (
             <div className="fixed inset-0 z-50 lg:hidden flex flex-col justify-end" role="dialog" aria-label="Kontakte & Chat">
               <div
-                className="absolute inset-0 bg-black/60 backdrop-blur-xs"
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
                 onClick={() => setMobileDockOpen(false)}
                 aria-hidden="true"
               />

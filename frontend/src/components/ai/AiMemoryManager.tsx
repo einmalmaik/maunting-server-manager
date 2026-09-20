@@ -440,9 +440,9 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
               key={entry.id}
               className={`rounded-xl border transition-all duration-150 overflow-hidden ${
                 isEditing
-                  ? 'border-primary/60 bg-primary/5 shadow-xs'
+                  ? 'border-primary/60 bg-primary/5 shadow-sm'
                   : isExpanded
-                    ? 'border-outline-variant/60 bg-surface-container-low/50 shadow-xs'
+                    ? 'border-outline-variant/60 bg-surface-container-low/50 shadow-sm'
                     : 'border-outline-variant/30 bg-surface-container-lowest/60 hover:border-outline-variant/60 hover:bg-surface-container-low/30'
               } ${
                 entry.origin === 'ai' ? 'border-l-4 border-l-primary/70' : 'border-l-4 border-l-secondary/70'

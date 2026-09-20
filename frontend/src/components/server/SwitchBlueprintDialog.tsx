@@ -138,7 +138,7 @@ export function SwitchBlueprintDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="switch-blueprint-title"
-        className="msm-card max-w-lg w-full p-6 shadow-2xl border border-outline/30 animate-in fade-in zoom-in duration-150"
+        className="msm-card max-w-lg w-full p-6 shadow-2xl border border-outline/30 animate-scale-in"
       >
         <h2
           id="switch-blueprint-title"

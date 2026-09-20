@@ -209,6 +209,14 @@
     @apply msm-badge bg-cyan-glow text-primary-fixed border border-primary-fixed/30;
   }
 
+  /* Ruhender Zustand: abgeschaltet, abgelaufen, nicht zutreffend. Kein Erfolg,
+     keine Warnung — und deshalb auch keine Farbe, die zum Hinsehen auffordert.
+     PopupTab benutzte diesen Namen, bevor es ihn gab: die Marke „Inaktiv"
+     stand dort als nackter Text zwischen lauter farbigen Pillen. */
+  .msm-badge-neutral {
+    @apply msm-badge bg-surface-variant/60 text-on-surface-variant border border-outline-variant;
+  }
+
   /* Sidebar Navigation */
   .msm-sidebar {
     @apply bg-surface-container-low/90 backdrop-blur-xl
