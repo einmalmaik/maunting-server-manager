@@ -193,11 +193,16 @@ import {
 } from '@/services/verlaufSuche'
 import {
   faelligeZeilen,
+  istBekannteStufe,
+  raeumeAlleChats,
   setzeVerfallsfrist,
+  stufenDativ,
   stufenLabel,
+  uebernehmeVerfall,
   VERFALL_STUFEN,
   verfaelltAm as berechneVerfall,
   verfallsfrist,
+  verfallStand,
 } from '@/services/nachrichtVerfall'
 import {
   ladeAlleEntwuerfe,
@@ -1766,6 +1771,37 @@ export function Messenger() {
               continue
             }
 
+            // 5. Verfallsfrist — gilt für beide Seiten, nicht nur für den,
+            //    der sie eingestellt hat. Ab hier hängen auch die eigenen
+            //    Nachrichten ihr `verfaellt_am` an. Wer zuletzt umstellt,
+            //    gewinnt; das entscheidet `uebernehmeVerfall` am Zeitpunkt.
+            //
+            //    Angewandt wird sofort und nicht am Ende des Durchlaufs: unten
+            //    stehen zwei Abbruchwächter für den Fall, dass inzwischen ein
+            //    zweiter Abruf läuft. Der Eintrag wäre dann schon geschrieben,
+            //    die Meldung darüber aber verschluckt — und `uebernehmeVerfall`
+            //    meldet dieselbe Umstellung kein zweites Mal.
+            if (parsed.type === 'retention') {
+              const dauer = Number(parsed.dauer || 0)
+              const wann = String(parsed.zeitpunkt || env.created_at)
+              if (istBekannteStufe(dauer) && uebernehmeVerfall(currentMid, dauer, wann)) {
+                const wer = Number(parsed.actor_id || 0)
+                const selbst = wer === Number(currentUserId)
+                const name = selbst
+                  ? 'Du'
+                  : (activeGroup?.members ?? []).find((m) => Number(m.user_id) === wer)?.username ||
+                    activeContact?.username ||
+                    'Die Gegenseite'
+                setVerfallSekunden(dauer)
+                zeigeSystemzeile(
+                  dauer > 0
+                    ? `${name} ${selbst ? 'hast' : 'hat'} eingestellt: neue Nachrichten verschwinden nach ${stufenDativ(dauer)}.`
+                    : `${name} ${selbst ? 'hast' : 'hat'} verschwindende Nachrichten ausgeschaltet.`,
+                )
+              }
+              continue
+            }
+
             // Normal Chat Message
             // Die Kennung aus dem Umschlag trägt einen Gerätezusatz je Kopie;
             // für den Verlauf zählt die logische darunter.
@@ -1991,6 +2027,7 @@ export function Messenger() {
         void saveLocalMessages(currentMid, combined.slice(-200))
         return combined
       })
+
       // Ungelesen-Zähler zurücksetzen
       markAsRead(currentMid)
 
@@ -2329,35 +2366,40 @@ export function Messenger() {
   /**
    * Die Verfallsfrist dieses Chats umstellen.
    *
-   * Keine heimliche Änderung: der Umschlag geht an die Gegenseite, beide Seiten
-   * bekommen dieselbe Systemzeile in den Verlauf. Scheitert das Senden, bleibt
-   * die alte Frist stehen — eine Frist, die nur hier gilt, wäre eine Lüge über
-   * das, was beim Gegenüber passiert.
+   * Keine heimliche Änderung: der Umschlag geht an die Gegenseite, sie übernimmt
+   * die Frist und bekommt dieselbe Systemzeile. Scheitert das Senden, bleibt die
+   * alte Frist stehen — eine Frist, die nur hier gilt, wäre eine Lüge über das,
+   * was beim Gegenüber passiert.
+   *
+   * Lokal und im Umschlag steht **derselbe** Zeitpunkt. Mit zwei knapp
+   * verschiedenen käme der eigene Umschlag beim nächsten Abruf als „neuer" zurück
+   * und schriebe eine zweite Systemzeile.
    */
   const handleVerfallWaehlen = async (sekunden: number) => {
     if (!blindMailboxId || sekunden === verfallSekunden) {
       setVerfallOffen(false)
       return
     }
-    const vorher = verfallSekunden
+    const vorher = verfallStand(blindMailboxId)
+    const jetzt = new Date().toISOString()
     setVerfallSekunden(sekunden)
-    setzeVerfallsfrist(blindMailboxId, sekunden)
+    setzeVerfallsfrist(blindMailboxId, sekunden, jetzt)
     setVerfallOffen(false)
     try {
       await sendE2eeControlMessage({
         type: 'retention',
         dauer: sekunden,
         actor_id: currentUserId,
-        zeitpunkt: new Date().toISOString(),
+        zeitpunkt: jetzt,
       })
       zeigeSystemzeile(
         sekunden > 0
-          ? `Du hast eingestellt: Nachrichten verschwinden nach ${stufenLabel(sekunden)}.`
+          ? `Du hast eingestellt: neue Nachrichten verschwinden nach ${stufenDativ(sekunden)}.`
           : 'Du hast verschwindende Nachrichten ausgeschaltet.',
       )
     } catch {
-      setVerfallSekunden(vorher)
-      setzeVerfallsfrist(blindMailboxId, vorher)
+      setVerfallSekunden(vorher.sekunden)
+      setzeVerfallsfrist(blindMailboxId, vorher.sekunden, vorher.stand || jetzt)
       toast.error('Die Umstellung konnte nicht gesendet werden.')
     }
   }
@@ -2631,6 +2673,20 @@ export function Messenger() {
       window.clearInterval(takt)
     }
   }, [blindMailboxId, messages])
+
+  /**
+   * Derselbe Durchgang über die Chats, die gerade nicht offen sind.
+   *
+   * Der Takt oben sieht nur den offenen Chat. Einen Chat, den man nie wieder
+   * öffnet, würde er nie aufräumen — die Nachricht wäre „nach 24 Stunden weg"
+   * und läge weiter auf der Platte.
+   */
+  useEffect(() => {
+    if (messengerGesperrt) return
+    void raeumeAlleChats().catch(() => {})
+    const takt = window.setInterval(() => void raeumeAlleChats().catch(() => {}), 300_000)
+    return () => window.clearInterval(takt)
+  }, [messengerGesperrt])
 
   // Real-time SSE event listener for zero-latency incoming messages & typing signals
   useEffect(() => {
@@ -6245,12 +6301,10 @@ export function Messenger() {
         onSchliessen={() => setVerfallOffen(false)}
         titel="Verschwindende Nachrichten"
       >
-        <div className="px-4 pt-2 pb-3 space-y-1">
-          <p className="text-sm font-semibold text-on-surface">Verschwindende Nachrichten</p>
+        <div className="px-4 pt-1 pb-3">
           <p className="text-[11px] text-on-surface-variant leading-relaxed">
-            Neue Nachrichten verschwinden nach der gewählten Zeit auf beiden Geräten, und beide Seiten
-            sehen die Umstellung im Verlauf. Beim Server räumt nur das absendende Gerät auf: bleibt es
-            offline, liegt der verschlüsselte Umschlag dort weiter.
+            Gilt für beide Seiten. Neue Nachrichten werden nach Ablauf überall gelöscht, auch beim
+            Server. Ein Gerät, das offline bleibt, räumt seinen Teil erst später ab.
           </p>
         </div>
         <div className="pb-2">

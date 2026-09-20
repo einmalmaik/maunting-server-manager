@@ -142,6 +142,7 @@ export interface Konversation {
   /** Die Umschläge für eine Nachricht, in Zustellreihenfolge. */
   baueVersand: (payload: string, clientUuid: string) => Promise<Versandauftrag[]>
   /** Dasselbe für ein Steuerpaket (Quittung, Bearbeiten, Löschen). */
+  /** Ein Steuerumschlag geht an die Geräte der Gegenseite, nie an die eigenen. */
   baueSteuerversand: (
     payload: string,
     clientUuid: string,
@@ -545,6 +546,13 @@ export function useKonversation({
       // kostet ein Häkchen, eine verbrauchte Kettenposition kostet eine
       // Nachricht. Versiegelt wird trotzdem je Gerät einzeln — ein Konto hat
       // keinen gemeinsamen privaten Schlüssel mehr.
+      // **Nur an die Gegenseite, und das ist eine Serverregel, keine Auslassung.**
+      // Ein Umschlag an das eigene Konto ist in einer Chat-Mailbox verboten
+      // (`relay_blind_envelope` antwortet 400, selbstadressiert gehört in die
+      // Geräte-Sync-Mailbox). Die eigenen übrigen Geräte erfahren von einer
+      // Wirkung also erst über den Gerätekanal — das gilt für Quittungen,
+      // Reaktionen und die Verfallsfrist gleichermaßen und wäre eine eigene
+      // Runde wert.
       const geraete = await verlangeGeraeteVon(drKontext.peerId)
       return Promise.all(
         geraete.map(async (geraet, i) => ({
