@@ -1,7 +1,14 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import i18n from '@/i18n'
 import { SocialTab } from './SocialTab'
 import * as socialApi from '@/api/social'
+
+// Die Sprache festlegen: die Behauptungen unten prüfen deutsche Texte, und
+// ohne diese Zeile entscheidet navigator.language der Testumgebung.
+beforeAll(async () => {
+  await i18n.changeLanguage('de')
+})
 
 vi.mock('@/api/social', () => ({
   getFriends: vi.fn(),
@@ -111,8 +118,8 @@ describe('SocialTab (Profile page)', () => {
   it('rendert Freundesliste und Meilensteine ohne Gaming-Jargon', async () => {
     render(<SocialTab />)
 
-    expect(screen.getByText('Freunde & Kontakte')).toBeInTheDocument()
-    expect(screen.getByText('Meilensteine & Fortschritt')).toBeInTheDocument()
+    expect(screen.getByText(i18n.t('social.contacts.title'))).toBeInTheDocument()
+    expect(screen.getByText(i18n.t('social.milestones.title'))).toBeInTheDocument()
 
     // Confirmed friend
     await waitFor(() => {
@@ -122,13 +129,13 @@ describe('SocialTab (Profile page)', () => {
 
     // Incoming request
     expect(screen.getByText('bob')).toBeInTheDocument()
-    expect(screen.getByText('Ausstehende Anfragen (1)')).toBeInTheDocument()
+    expect(screen.getByText(i18n.t('social.contacts.pendingRequests', { count: 1 }))).toBeInTheDocument()
 
     // Milestones
     expect(screen.getByText('Erster Schritt')).toBeInTheDocument()
     expect(screen.getByText('Weltenbauer')).toBeInTheDocument()
-    expect(screen.getByText('+10 Pkt')).toBeInTheDocument()
-    expect(screen.getByText('+25 Pkt')).toBeInTheDocument()
+    expect(screen.getByText(i18n.t('social.milestones.pointsShort', { count: 10 }))).toBeInTheDocument()
+    expect(screen.getByText(i18n.t('social.milestones.pointsShort', { count: 25 }))).toBeInTheDocument()
 
     // No marketing or Steam prestige jargon
     expect(screen.queryByText(/Steam-Prestige/i)).not.toBeInTheDocument()
@@ -147,7 +154,7 @@ describe('SocialTab (Profile page)', () => {
       expect(screen.getByText('bob')).toBeInTheDocument()
     })
 
-    const acceptBtn = screen.getByRole('button', { name: /Annehmen/i })
+    const acceptBtn = screen.getByRole('button', { name: i18n.t('social.contacts.accept') })
     fireEvent.click(acceptBtn)
 
     await waitFor(() => {
@@ -163,14 +170,14 @@ describe('SocialTab (Profile page)', () => {
     })
 
     // Filter to locked only
-    const lockedBtn = screen.getByRole('button', { name: /Gesperrt/i })
+    const lockedBtn = screen.getByRole('button', { name: i18n.t('social.milestones.filterLocked', { count: 1 }) })
     fireEvent.click(lockedBtn)
 
     expect(screen.getByText('Weltenbauer')).toBeInTheDocument()
     expect(screen.queryByText('Erster Schritt')).not.toBeInTheDocument()
 
     // Filter to unlocked only
-    const unlockedBtn = screen.getByRole('button', { name: /Freigeschaltet/i })
+    const unlockedBtn = screen.getByRole('button', { name: i18n.t('social.milestones.filterUnlocked', { count: 1 }) })
     fireEvent.click(unlockedBtn)
 
     expect(screen.getByText('Erster Schritt')).toBeInTheDocument()
@@ -185,8 +192,8 @@ describe('SocialTab (Profile page)', () => {
 
     render(<SocialTab />)
 
-    const input = screen.getByPlaceholderText('Benutzername eingeben …')
-    const submitBtn = screen.getByRole('button', { name: /Anfrage senden/i })
+    const input = screen.getByPlaceholderText(i18n.t('social.contacts.usernamePlaceholder'))
+    const submitBtn = screen.getByRole('button', { name: i18n.t('social.contacts.sendRequest') })
 
     // Whitespace only
     fireEvent.change(input, { target: { value: '   ' } })

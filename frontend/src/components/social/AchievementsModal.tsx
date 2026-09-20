@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Button,
   Badge,
@@ -28,6 +29,8 @@ interface AchievementsModalProps {
 }
 
 export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps) {
+  const { t } = useTranslation()
+
   const [overview, setOverview] = useState<AchievementsOverview | null>(null)
   const [stats, setStats] = useState<UserStatsResponse | null>(null)
   const [filter, setFilter] = useState<'all' | 'unlocked' | 'locked'>('all')
@@ -51,8 +54,8 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
   const formatHours = (seconds: number) => {
     const hrs = Math.floor(seconds / 3600)
     const mins = Math.floor((seconds % 3600) / 60)
-    if (hrs === 0) return `${mins}m`
-    return `${hrs}h ${mins}m`
+    if (hrs === 0) return t('social.milestones.durationMinutes', { minutes: mins })
+    return t('social.milestones.durationHours', { hours: hrs, minutes: mins })
   }
 
   const filteredAchievements = (overview?.achievements || []).filter((item) => {
@@ -77,12 +80,12 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
               </div>
               <div>
                 <h3 className="font-headline text-title-md font-bold text-primary tracking-tight">
-                  Meilensteine & Fortschritt
+                  {t('social.milestones.title')}
                 </h3>
                 <div className="font-body text-xs text-on-surface-variant flex items-center gap-2 mt-0.5">
-                  <span>Plattform-Aktivitäten</span>
+                  <span>{t('social.milestones.platformActivity')}</span>
                   <span>•</span>
-                  <span className="text-primary font-semibold">{overview?.prestige_score || 0} Punkte</span>
+                  <span className="text-primary font-semibold">{t('social.milestones.points', { count: overview?.prestige_score || 0 })}</span>
                 </div>
               </div>
             </div>
@@ -90,7 +93,11 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
             {/* Progress Badge */}
             <div className="flex flex-col items-end">
               <div className="text-xs font-semibold text-primary mb-1">
-                {overview?.total_unlocked || 0} von {overview?.total_available || 0} ({progressPercent}%)
+                {t('social.milestones.progress', {
+                  unlocked: overview?.total_unlocked || 0,
+                  total: overview?.total_available || 0,
+                  percent: progressPercent,
+                })}
               </div>
               <div className="w-32 h-2 bg-surface-container-high rounded-full overflow-hidden border border-outline-variant/30">
                 <div
@@ -107,7 +114,7 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
               <div className="bg-surface-container-high/40 p-2 rounded-lg border border-outline-variant/20 text-center">
                 <div className="flex items-center justify-center gap-1 text-[11px] text-on-surface-variant mb-0.5">
                   <Clock className="w-3 h-3 text-primary" />
-                  <span>Aktivitätszeit</span>
+                  <span>{t('social.milestones.statActivity')}</span>
                 </div>
                 <div className="text-xs font-semibold text-primary font-mono">
                   {formatHours(stats.total_activity_seconds || stats.active_time_seconds || 0)}
@@ -116,7 +123,7 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
               <div className="bg-surface-container-high/40 p-2 rounded-lg border border-outline-variant/20 text-center">
                 <div className="flex items-center justify-center gap-1 text-[11px] text-on-surface-variant mb-0.5">
                   <Sparkles className="w-3 h-3 text-cyan-400" />
-                  <span>KI-Dialoge</span>
+                  <span>{t('social.milestones.statAi')}</span>
                 </div>
                 <div className="text-xs font-semibold text-primary font-mono">
                   {formatHours(stats.categories?.ai_chat || stats.active_time_by_category?.ai_chat || 0)}
@@ -125,7 +132,7 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
               <div className="bg-surface-container-high/40 p-2 rounded-lg border border-outline-variant/20 text-center">
                 <div className="flex items-center justify-center gap-1 text-[11px] text-on-surface-variant mb-0.5">
                   <Award className="w-3 h-3 text-amber-400" />
-                  <span>Administration</span>
+                  <span>{t('social.milestones.statAdmin')}</span>
                 </div>
                 <div className="text-xs font-semibold text-primary font-mono">
                   {formatHours(stats.categories?.server_admin || stats.active_time_by_category?.server_admin || 0)}
@@ -134,7 +141,7 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
               <div className="bg-surface-container-high/40 p-2 rounded-lg border border-outline-variant/20 text-center">
                 <div className="flex items-center justify-center gap-1 text-[11px] text-on-surface-variant mb-0.5">
                   <Flame className="w-3 h-3 text-rose-400" />
-                  <span>Befehle</span>
+                  <span>{t('social.milestones.statCommands')}</span>
                 </div>
                 <div className="text-xs font-semibold text-primary font-mono">
                   {formatHours(stats.categories?.command_exec || stats.active_time_by_category?.command_exec || 0)}
@@ -153,7 +160,7 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
               onClick={() => setFilter('all')}
               className="text-xs h-7 px-3"
             >
-              Alle ({overview?.achievements.length || 0})
+              {t('social.milestones.filterAll', { count: overview?.achievements.length || 0 })}
             </Button>
             <Button
               variant={filter === 'unlocked' ? 'primary' : 'ghost'}
@@ -161,7 +168,7 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
               onClick={() => setFilter('unlocked')}
               className="text-xs h-7 px-3"
             >
-              Freigeschaltet ({overview?.total_unlocked || 0})
+              {t('social.milestones.filterUnlocked', { count: overview?.total_unlocked || 0 })}
             </Button>
             <Button
               variant={filter === 'locked' ? 'primary' : 'ghost'}
@@ -169,7 +176,7 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
               onClick={() => setFilter('locked')}
               className="text-xs h-7 px-3"
             >
-              Gesperrt ({(overview?.total_available || 0) - (overview?.total_unlocked || 0)})
+              {t('social.milestones.filterLocked', { count: (overview?.total_available || 0) - (overview?.total_unlocked || 0) })}
             </Button>
           </div>
         </div>
@@ -208,11 +215,11 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
                       {item.title}
                     </h4>
                     <span className="text-[11px] font-mono text-amber-400/90 font-semibold">
-                      +{item.points} Pkt
+                      {t('social.milestones.pointsShort', { count: item.points })}
                     </span>
                     {isRare && (
                       <Badge variant="warning" className="text-[10px] uppercase tracking-wider py-0 px-1.5 font-bold">
-                        Selten
+                        {t('social.milestones.rare')}
                       </Badge>
                     )}
                   </div>
@@ -228,7 +235,7 @@ export function AchievementsModal({ open, onOpenChange }: AchievementsModalProps
                     {item.unlocked && item.unlocked_at && (
                       <span className="inline-flex items-center gap-1 text-emerald-400/90">
                         <CheckCircle2 className="w-3 h-3" />
-                        <span>Freigeschaltet am {new Date(item.unlocked_at).toLocaleDateString()}</span>
+                        <span>{t('social.milestones.unlockedOn', { date: new Date(item.unlocked_at).toLocaleDateString() })}</span>
                       </span>
                     )}
                   </div>

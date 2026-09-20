@@ -81,7 +81,11 @@ describe('Schreibweise der Oberflächentexte', () => {
       if (/[.!?:]$/.test(text.trim())) continue
       if (/\{\{/.test(text)) continue
       if (/\be\.g\.|\bi\.e\./.test(text)) continue
+      // Ein führendes Zeichen ohne Buchstaben — ein Emoji etwa — ist kein Wort.
+      // „👑 Owner" ist Satzanfang, nicht Title Case. Nur das erste wird so
+      // behandelt: ein „&" mitten im Text trennt weiter zwei Wörter.
       const woerter = text.trim().split(/\s+/)
+      if (woerter.length > 0 && !/[A-Za-z]/.test(woerter[0])) woerter.shift()
       if (woerter.length < 2 || woerter.length > 6) continue
       const gegenstueck = deutsch.get(pfad) ?? ''
       for (const wort of woerter.slice(1)) {

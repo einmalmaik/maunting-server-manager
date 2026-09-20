@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Avatar,
   Button,
@@ -37,6 +38,8 @@ import { toast } from '@/stores/toastStore'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
 
 export function SocialTab() {
+  const { t } = useTranslation()
+
   // Friends state
   const [friends, setFriends] = useState<FriendItem[]>([])
   const [incomingRequests, setIncomingRequests] = useState<FriendItem[]>([])
@@ -96,11 +99,11 @@ export function SocialTab() {
     setSendingRequest(true)
     try {
       const res = await sendFriendRequest(target)
-      toast.success(res.message || 'Freundschaftsanfrage gesendet.')
+      toast.success(res.message || t('social.contacts.requestSent'))
       setAddUsername('')
       await loadFriendsData()
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Fehler beim Senden der Anfrage.'
+      const msg = err instanceof Error ? err.message : t('social.contacts.requestSendFailed')
       toast.error(msg)
     } finally {
       setSendingRequest(false)
@@ -110,10 +113,10 @@ export function SocialTab() {
   const handleAcceptRequest = async (reqId: number) => {
     try {
       await acceptFriendRequest(reqId)
-      toast.success('Freundschaftsanfrage angenommen.')
+      toast.success(t('social.contacts.requestAccepted'))
       await loadFriendsData()
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Fehler beim Annehmen der Anfrage.'
+      const msg = err instanceof Error ? err.message : t('social.contacts.requestAcceptFailed')
       toast.error(msg)
     }
   }
@@ -121,10 +124,10 @@ export function SocialTab() {
   const handleDeclineRequest = async (reqId: number) => {
     try {
       await declineFriendRequest(reqId)
-      toast.success('Freundschaftsanfrage abgelehnt.')
+      toast.success(t('social.contacts.requestDeclined'))
       await loadFriendsData()
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Fehler beim Ablehnen der Anfrage.'
+      const msg = err instanceof Error ? err.message : t('social.contacts.requestDeclineFailed')
       toast.error(msg)
     }
   }
@@ -132,10 +135,10 @@ export function SocialTab() {
   const handleRemoveFriend = async (friendId: number) => {
     try {
       await removeFriend(friendId)
-      toast.success('Kontakt entfernt.')
+      toast.success(t('social.contacts.removed'))
       await loadFriendsData()
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Fehler beim Entfernen des Kontakts.'
+      const msg = err instanceof Error ? err.message : t('social.contacts.removeFailed')
       toast.error(msg)
     }
   }
@@ -155,7 +158,7 @@ export function SocialTab() {
       const fromFriends = friends.find((f) => (f.user_id ?? f.id) === uid)
       return {
         userId: uid,
-        username: profile?.username || fromFriends?.username || `Benutzer #${uid}`,
+        username: profile?.username || fromFriends?.username || t('social.contacts.unknownUser', { id: uid }),
         avatarUrl: profile?.avatarUrl || fromFriends?.avatar_url || null,
       }
     })
@@ -173,20 +176,20 @@ export function SocialTab() {
     for (const [mid, expiry] of Object.entries(mutedChats)) {
       if (expiry === 0 || expiry > now) {
         const meta = mailboxDirectory[mid]
-        let remainingLabel = 'Dauerhaft'
+        let remainingLabel = t('social.contacts.mutePermanent')
         if (expiry > 0) {
           const diffMin = Math.round((expiry - now) / (60 * 1000))
           if (diffMin < 60) {
-            remainingLabel = `Noch ${diffMin} Min.`
+            remainingLabel = t('social.contacts.muteMinutesLeft', { count: diffMin })
           } else if (diffMin < 24 * 60) {
-            remainingLabel = `Noch ${Math.round(diffMin / 60)} Std.`
+            remainingLabel = t('social.contacts.muteHoursLeft', { count: Math.round(diffMin / 60) })
           } else {
-            remainingLabel = `Noch ${Math.round(diffMin / (24 * 60))} Tage`
+            remainingLabel = t('social.contacts.muteDaysLeft', { count: Math.round(diffMin / (24 * 60)) })
           }
         }
         list.push({
           mailboxId: mid,
-          name: meta?.name || `Chat (${mid.slice(0, 8)})`,
+          name: meta?.name || t('social.contacts.unnamedChat', { id: mid.slice(0, 8) }),
           avatarUrl: meta?.avatarUrl,
           expiry,
           remainingLabel,
@@ -220,7 +223,7 @@ export function SocialTab() {
     setReadReceiptsEnabled(nextVal)
     try {
       localStorage.setItem('msm_read_receipts_enabled', String(nextVal))
-      toast.success(nextVal ? 'Lesebestätigungen aktiviert' : 'Lesebestätigungen deaktiviert')
+      toast.success(nextVal ? t('social.privacy.receiptsOn') : t('social.privacy.receiptsOff'))
     } catch {
       // Non-blocking
     }
@@ -233,23 +236,23 @@ export function SocialTab() {
         <div className="flex items-center gap-2 mb-2">
           <Users className="h-5 w-5 text-secondary" aria-hidden="true" />
           <h2 id="social-contacts-title" className="font-headline text-lg font-semibold text-on-surface">
-            Freunde & Kontakte
+            {t('social.contacts.title')}
           </h2>
         </div>
         <p className="max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant mb-5">
-          Verwalte deine bestätigten Kontakte, blockierte Personen und stummgeschaltete Unterhaltungen.
+          {t('social.contacts.description')}
         </p>
 
         {/* Freund hinzufügen Formular */}
         <div className="max-w-md mb-6 p-4 rounded-xl bg-surface-container-high/40 border border-outline-variant/30">
           <h3 className="text-xs font-bold uppercase tracking-wider text-on-surface-variant mb-2.5">
-            Freund hinzufügen
+            {t('social.contacts.addFriend')}
           </h3>
           <form onSubmit={handleSendFriendRequest} className="flex gap-2">
             <Input
               value={addUsername}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAddUsername(e.target.value)}
-              placeholder="Benutzername eingeben …"
+              placeholder={t('social.contacts.usernamePlaceholder')}
               className="text-xs h-8 flex-1"
               disabled={sendingRequest}
             />
@@ -260,7 +263,7 @@ export function SocialTab() {
               className="gap-1.5 h-8 text-xs shrink-0"
             >
               <UserPlus className="w-3.5 h-3.5" />
-              <span>Anfrage senden</span>
+              <span>{t('social.contacts.sendRequest')}</span>
             </Button>
           </form>
         </div>
@@ -269,7 +272,7 @@ export function SocialTab() {
         {incomingRequests.length > 0 && (
           <div className="mb-6 space-y-2 max-w-xl">
             <h3 className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
-              <span>Ausstehende Anfragen ({incomingRequests.length})</span>
+              <span>{t('social.contacts.pendingRequests', { count: incomingRequests.length })}</span>
             </h3>
             <div className="space-y-2">
               {incomingRequests.map((req) => (
@@ -289,7 +292,7 @@ export function SocialTab() {
                       className="gap-1 h-7 text-xs px-2.5"
                     >
                       <Check className="w-3.5 h-3.5" />
-                      <span>Annehmen</span>
+                      <span>{t('social.contacts.accept')}</span>
                     </Button>
                     <Button
                       variant="ghost"
@@ -298,7 +301,7 @@ export function SocialTab() {
                       className="gap-1 h-7 text-xs px-2.5 text-rose-400 hover:bg-rose-500/10"
                     >
                       <X className="w-3.5 h-3.5" />
-                      <span>Ablehnen</span>
+                      <span>{t('social.contacts.decline')}</span>
                     </Button>
                   </div>
                 </div>
@@ -316,7 +319,7 @@ export function SocialTab() {
             className="text-xs h-7 px-3 gap-1.5"
           >
             <Users className="w-3.5 h-3.5" />
-            <span>Deine Freunde ({acceptedFriends.length})</span>
+            <span>{t('social.contacts.tabFriends', { count: acceptedFriends.length })}</span>
           </Button>
 
           <Button
@@ -326,7 +329,7 @@ export function SocialTab() {
             className="text-xs h-7 px-3 gap-1.5"
           >
             <Ban className="w-3.5 h-3.5" />
-            <span>Blockiert ({blockedList.length})</span>
+            <span>{t('social.contacts.tabBlocked', { count: blockedList.length })}</span>
           </Button>
 
           <Button
@@ -336,7 +339,7 @@ export function SocialTab() {
             className="text-xs h-7 px-3 gap-1.5"
           >
             <BellOff className="w-3.5 h-3.5" />
-            <span>Stummgeschaltet ({mutedList.length})</span>
+            <span>{t('social.contacts.tabMuted', { count: mutedList.length })}</span>
           </Button>
         </div>
 
@@ -345,7 +348,7 @@ export function SocialTab() {
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-3 max-w-xl">
               <h3 className="text-xs font-bold uppercase tracking-wider text-on-surface-variant">
-                Meine Kontakte ({acceptedFriends.length})
+                {t('social.contacts.myContacts', { count: acceptedFriends.length })}
               </h3>
               {acceptedFriends.length > 3 && (
                 <div className="relative w-48">
@@ -356,7 +359,7 @@ export function SocialTab() {
                       setSearchFriend(e.target.value)
                       setVisibleFriendsCount(12)
                     }}
-                    placeholder="Suchen …"
+                    placeholder={t('common.search')}
                     className="text-xs pl-8 h-7"
                   />
                 </div>
@@ -366,8 +369,8 @@ export function SocialTab() {
             {filteredFriends.length === 0 ? (
               <p className="text-xs text-on-surface-variant/70 py-6">
                 {searchFriend
-                  ? 'Keine Treffer für die Suche.'
-                  : 'Noch keine Kontakte hinzugefügt. Sende oben eine Anfrage, um Kontakte zu verbinden.'}
+                  ? t('social.friends.noMatches')
+                  : t('social.contacts.none')}
               </p>
             ) : (
               <>
@@ -406,8 +409,8 @@ export function SocialTab() {
                         size="icon"
                         onClick={() => void handleRemoveFriend(f.user_id ?? f.id)}
                         className="h-7 w-7 p-0 text-on-surface-variant hover:text-rose-400 hover:bg-rose-500/10 shrink-0 ml-2"
-                        title="Kontakt entfernen"
-                        aria-label="Kontakt entfernen"
+                        title={t('social.contacts.remove')}
+                        aria-label={t('social.contacts.remove')}
                       >
                         <UserMinus className="w-3.5 h-3.5" />
                       </Button>
@@ -424,7 +427,7 @@ export function SocialTab() {
                       onClick={() => setVisibleFriendsCount((prev) => prev + 12)}
                       className="text-xs gap-1.5 px-4"
                     >
-                      <span>Weitere Kontakte laden ({filteredFriends.length - visibleFriendsCount} verbleibend)</span>
+                      <span>{t('social.contacts.loadMore', { count: filteredFriends.length - visibleFriendsCount })}</span>
                     </Button>
                   </div>
                 )}
@@ -437,11 +440,11 @@ export function SocialTab() {
         {contactSubTab === 'blocked' && (
           <div className="space-y-3">
             <h3 className="text-xs font-bold uppercase tracking-wider text-on-surface-variant">
-              Blockierte Personen ({blockedList.length})
+              {t('social.contacts.blockedHeading', { count: blockedList.length })}
             </h3>
             {blockedList.length === 0 ? (
               <p className="text-xs text-on-surface-variant/70 py-6">
-                Keine blockierten Kontakte vorhanden.
+                {t('social.contacts.noBlocked')}
               </p>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -457,7 +460,7 @@ export function SocialTab() {
                           {b.username}
                         </span>
                         <span className="text-[10px] text-status-error font-medium">
-                          Blockiert
+                          {t('social.contacts.blocked')}
                         </span>
                       </div>
                     </div>
@@ -467,11 +470,11 @@ export function SocialTab() {
                       size="sm"
                       onClick={async () => {
                         await unblockUser(b.userId)
-                        toast.success(`Blockierung von ${b.username} aufgehoben`)
+                        toast.success(t('social.contacts.unblocked', { name: b.username }))
                       }}
                       className="h-7 text-xs px-2.5 border border-status-error/30 text-status-error hover:bg-status-error/15 shrink-0"
                     >
-                      Entblocken
+                      {t('social.contacts.unblock')}
                     </Button>
                   </div>
                 ))}
@@ -484,11 +487,11 @@ export function SocialTab() {
         {contactSubTab === 'muted' && (
           <div className="space-y-3">
             <h3 className="text-xs font-bold uppercase tracking-wider text-on-surface-variant">
-              Stummgeschaltete Unterhaltungen ({mutedList.length})
+              {t('social.contacts.mutedHeading', { count: mutedList.length })}
             </h3>
             {mutedList.length === 0 ? (
               <p className="text-xs text-on-surface-variant/70 py-6">
-                Keine stummgeschalteten Chats vorhanden.
+                {t('social.contacts.noMuted')}
               </p>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -517,11 +520,11 @@ export function SocialTab() {
                       size="sm"
                       onClick={() => {
                         unmuteChat(m.mailboxId)
-                        toast.success('Stummschaltung aufgehoben')
+                        toast.success(t('social.contacts.unmuted'))
                       }}
                       className="h-7 text-xs px-2.5 text-on-surface-variant hover:text-primary shrink-0"
                     >
-                      Einschalten
+                      {t('social.contacts.unmute')}
                     </Button>
                   </div>
                 ))}
@@ -536,20 +539,20 @@ export function SocialTab() {
         <div className="flex items-center gap-2 mb-2">
           <Lock className="h-5 w-5 text-secondary" aria-hidden="true" />
           <h2 id="chat-privacy-title" className="font-headline text-lg font-semibold text-on-surface">
-            Chat-Privatsphäre
+            {t('social.privacy.title')}
           </h2>
         </div>
         <p className="max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant mb-4">
-          Steuere deine Privatsphäre im Messenger und bei Ende-zu-Ende verschlüsselten Konversationen.
+          {t('social.privacy.description')}
         </p>
 
         <div className="flex items-center justify-between p-4 rounded-xl bg-surface-container-high/40 border border-outline-variant/30">
           <div className="space-y-0.5 max-w-md">
             <span className="text-xs font-bold text-on-surface">
-              Lesebestätigungen (Gelesen-Häkchen ✓✓)
+              {t('social.privacy.receipts')}
             </span>
             <p className="text-[11px] text-on-surface-variant">
-              Wenn aktiviert, wird deinen Kontakten mit zwei blauen Häkchen signalisiert, sobald eine Nachricht gelesen wurde.
+              {t('social.privacy.receiptsHint')}
             </p>
           </div>
 
@@ -578,10 +581,10 @@ export function SocialTab() {
             <Trophy className="h-5 w-5 text-secondary" aria-hidden="true" />
             <div>
               <h2 id="milestones-title" className="font-headline text-lg font-semibold text-on-surface">
-                Meilensteine & Fortschritt
+                {t('social.milestones.title')}
               </h2>
               <p className="font-body-md text-xs text-on-surface-variant mt-0.5">
-                Dokumentiert deine Erfolge bei der Systemverwaltung und Aktivität.
+                {t('social.milestones.description')}
               </p>
             </div>
           </div>
@@ -592,7 +595,7 @@ export function SocialTab() {
                 {overview?.total_unlocked || 0} / {overview?.total_available || 0}
               </span>
               <span className="text-[10px] text-on-surface-variant font-mono">
-                {overview?.prestige_score || 0} Punkte
+                {t('social.milestones.points', { count: overview?.prestige_score || 0 })}
               </span>
             </div>
             <div className="w-24 h-2 bg-surface-container-high rounded-full overflow-hidden border border-outline-variant/30">
@@ -615,7 +618,7 @@ export function SocialTab() {
             }}
             className="text-xs h-7 px-3"
           >
-            Alle ({overview?.achievements.length || 0})
+            {t('social.milestones.filterAll', { count: overview?.achievements.length || 0 })}
           </Button>
           <Button
             variant={milestoneFilter === 'unlocked' ? 'primary' : 'ghost'}
@@ -626,7 +629,7 @@ export function SocialTab() {
             }}
             className="text-xs h-7 px-3"
           >
-            Freigeschaltet ({overview?.total_unlocked || 0})
+            {t('social.milestones.filterUnlocked', { count: overview?.total_unlocked || 0 })}
           </Button>
           <Button
             variant={milestoneFilter === 'locked' ? 'primary' : 'ghost'}
@@ -637,7 +640,7 @@ export function SocialTab() {
             }}
             className="text-xs h-7 px-3"
           >
-            Gesperrt ({(overview?.total_available || 0) - (overview?.total_unlocked || 0)})
+            {t('social.milestones.filterLocked', { count: (overview?.total_available || 0) - (overview?.total_unlocked || 0) })}
           </Button>
         </div>
 
@@ -674,11 +677,11 @@ export function SocialTab() {
                       {m.title}
                     </span>
                     <span className="text-[10px] font-mono text-amber-400/90 font-semibold">
-                      +{m.points} Pkt
+                      {t('social.milestones.pointsShort', { count: m.points })}
                     </span>
                     {isRare && (
                       <Badge variant="warning" className="text-[9px] px-1 py-0 uppercase font-bold">
-                        Selten
+                        {t('social.milestones.rare')}
                       </Badge>
                     )}
                   </div>
@@ -690,7 +693,7 @@ export function SocialTab() {
                     {m.unlocked && m.unlocked_at && (
                       <span className="inline-flex items-center gap-1 text-emerald-400">
                         <CheckCircle2 className="w-3 h-3" />
-                        <span>Freigeschaltet am {new Date(m.unlocked_at).toLocaleDateString()}</span>
+                        <span>{t('social.milestones.unlockedOn', { date: new Date(m.unlocked_at).toLocaleDateString() })}</span>
                       </span>
                     )}
                   </div>
@@ -709,7 +712,7 @@ export function SocialTab() {
               onClick={() => setVisibleMilestonesCount((prev) => prev + 12)}
               className="text-xs gap-1.5 px-4"
             >
-              <span>Weitere Erfolge anzeigen ({filteredMilestones.length - visibleMilestonesCount} verbleibend)</span>
+              <span>{t('social.milestones.loadMore', { count: filteredMilestones.length - visibleMilestonesCount })}</span>
             </Button>
           </div>
         )}

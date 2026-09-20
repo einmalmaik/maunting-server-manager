@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import {
   Card,
@@ -44,6 +45,8 @@ export function FriendsListDock({
   className = '',
   onClose,
 }: FriendsListDockProps) {
+  const { t } = useTranslation()
+
   const { user } = useAuthStore()
   const navigate = useNavigate()
   const [friends, setFriends] = useState<FriendItem[]>([])
@@ -99,10 +102,10 @@ export function FriendsListDock({
   const handleRemove = async (friendId: number) => {
     try {
       await removeFriend(friendId)
-      toast.success('Freund entfernt')
+      toast.success(t('social.friends.removed'))
       await loadData()
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Fehler'
+      const msg = err instanceof Error ? err.message : t('common.error')
       toast.error(msg)
     }
   }
@@ -148,8 +151,8 @@ export function FriendsListDock({
           type="button"
           onClick={() => setCollapsed(false)}
           className="w-12 h-12 rounded-full bg-primary text-on-primary shadow-xl flex items-center justify-center hover:scale-105 active:scale-95 transition-all"
-          aria-label="Kontakte & Chat öffnen"
-          title="Kontakte & Chat öffnen"
+          aria-label={t('social.friends.openDock')}
+          title={t('social.friends.openDock')}
         >
           <Users className="w-5 h-5" />
           {incomingRequests.length > 0 && (
@@ -172,7 +175,7 @@ export function FriendsListDock({
           <div className="flex items-center gap-2 min-w-0">
             <Users className="w-3.5 h-3.5 text-primary shrink-0" />
             <CardTitle className="font-headline text-xs font-bold text-primary truncate">
-              Kontakte & Chat
+              {t('social.friends.dockTitle')}
             </CardTitle>
             {incomingRequests.length > 0 && (
               <Badge variant="warning" className="text-[9px] px-1.5 py-0">
@@ -188,7 +191,7 @@ export function FriendsListDock({
                 size="icon"
                 onClick={onClose}
                 className="h-6 w-6 p-0 text-on-surface-variant hover:text-primary"
-                aria-label="Schließen"
+                aria-label={t('common.close')}
               >
                 <X className="w-3.5 h-3.5" />
               </Button>
@@ -198,7 +201,7 @@ export function FriendsListDock({
               size="icon"
               onClick={() => setCollapsed(true)}
               className="h-6 w-6 p-0 text-on-surface-variant hover:text-primary"
-              aria-label="Einklappen"
+              aria-label={t('social.friends.collapse')}
             >
               <ChevronDown className="w-3.5 h-3.5" />
             </Button>
@@ -218,7 +221,7 @@ export function FriendsListDock({
                 }`}
               >
                 <Users className="w-3.5 h-3.5" />
-                <span>Freunde</span>
+                <span>{t('social.friends.tabFriends')}</span>
                 {incomingRequests.length > 0 && (
                   <span className="ml-1 px-1 rounded-full bg-amber-500 text-[10px] text-white font-bold">
                     {incomingRequests.length}
@@ -236,7 +239,7 @@ export function FriendsListDock({
                 }`}
               >
                 <MessageSquare className="w-3.5 h-3.5" />
-                <span>Chats</span>
+                <span>{t('social.friends.tabChats')}</span>
               </button>
             </div>
 
@@ -249,7 +252,7 @@ export function FriendsListDock({
                   <Input
                     value={searchQuery}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
-                    placeholder="Freunde suchen …"
+                    placeholder={t('social.friends.searchPlaceholder')}
                     className="text-xs pl-8 h-7 bg-surface-container-high/60 border-outline-variant/30 focus:border-primary"
                   />
                 </div>
@@ -263,9 +266,9 @@ export function FriendsListDock({
                   >
                     <span className="flex items-center gap-1.5 font-medium">
                       <UserPlus className="w-3.5 h-3.5" />
-                      <span>{incomingRequests.length} offene Anfrage{incomingRequests.length > 1 ? 'n' : ''}</span>
+                      <span>{t('social.friends.openRequests', { count: incomingRequests.length })}</span>
                     </span>
-                    <span className="text-[10px] underline">Im Profil</span>
+                    <span className="text-[10px] underline">{t('social.friends.inProfile')}</span>
                   </button>
                 )}
 
@@ -274,7 +277,7 @@ export function FriendsListDock({
                   {filteredFriends.length === 0 ? (
                     <div className="py-8 text-center space-y-1">
                       <p className="text-xs text-on-surface-variant/70">
-                        {searchQuery ? 'Keine Treffer für die Suche.' : 'Noch keine Freunde in der Liste.'}
+                        {searchQuery ? t('social.friends.noMatches') : t('social.friends.none')}
                       </p>
                       {!searchQuery && (
                         <button
@@ -283,7 +286,7 @@ export function FriendsListDock({
                           className="text-[11px] text-primary hover:underline inline-flex items-center gap-1"
                         >
                           <UserPlus className="w-3 h-3" />
-                          <span>Freunde im Profil hinzufügen</span>
+                          <span>{t('social.friends.addInProfile')}</span>
                         </button>
                       )}
                     </div>
@@ -327,8 +330,8 @@ export function FriendsListDock({
                             size="icon"
                             onClick={() => handleStartChatWithFriend(f)}
                             className="h-7 w-7 p-0 text-primary hover:bg-primary/15"
-                            title="Nachricht senden"
-                            aria-label="Nachricht senden"
+                            title={t('social.friends.sendMessage')}
+                            aria-label={t('social.friends.sendMessage')}
                           >
                             <MessageSquare className="w-3.5 h-3.5" />
                           </Button>
@@ -337,8 +340,8 @@ export function FriendsListDock({
                             size="icon"
                             onClick={() => void handleRemove(f.user_id ?? f.id)}
                             className="h-7 w-7 p-0 text-on-surface-variant hover:text-rose-400 hover:bg-rose-500/10"
-                            title="Freund entfernen"
-                            aria-label="Freund entfernen"
+                            title={t('social.friends.remove')}
+                            aria-label={t('social.friends.remove')}
                           >
                             <UserMinus className="w-3 h-3" />
                           </Button>
@@ -361,13 +364,13 @@ export function FriendsListDock({
                   className="w-full text-xs h-7.5 gap-1.5 justify-center"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
-                  <span>Großen Chatraum öffnen</span>
+                  <span>{t('social.friends.openChatRoom')}</span>
                 </Button>
 
                 {/* Recent Contacts & Team Members */}
                 <div className="space-y-1 max-h-60 overflow-y-auto pr-1">
                   <div className="text-[10px] font-bold text-on-surface-variant/70 uppercase tracking-wider px-1 pt-1">
-                    Direkte Kontakte
+                    {t('social.friends.directContacts')}
                   </div>
 
                   {acceptedFriends.map((f) => (
@@ -391,7 +394,7 @@ export function FriendsListDock({
                           </span>
                           <span className="text-[10px] text-on-surface-variant/70 flex items-center gap-1">
                             <DeviceBadge deviceType={f.presence?.device_type} />
-                            <span>Freund</span>
+                            <span>{t('social.friends.friend')}</span>
                           </span>
                         </div>
                       </div>
@@ -404,7 +407,7 @@ export function FriendsListDock({
                   {teamMembers.length > 0 && (
                     <>
                       <div className="text-[10px] font-bold text-on-surface-variant/70 uppercase tracking-wider px-1 pt-2">
-                        Teammitglieder
+                        {t('social.friends.teamMembers')}
                       </div>
                       {teamMembers.map(({ member, teamName }) => (
                         <div

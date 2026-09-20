@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Dialog,
   DialogContent,
@@ -52,111 +53,92 @@ export interface GroupRoleDefinition {
   permissions: string[]
 }
 
+/**
+ * Die Rechte der Gruppe — einmal, mit Schlüsseln statt fertiger Sätze.
+ *
+ * Bis 09/2026 standen dieselben neun Rechte zweimal in dieser Datei: hier für
+ * den Rollen-Editor, und noch einmal von Hand im Tab der Standardrechte, dort
+ * mit kürzerem Wortlaut. Wer eine Beschreibung änderte, änderte sie an einer
+ * Stelle. Beide Ansichten lesen jetzt aus dieser Liste.
+ */
 export const GROUP_PERMISSION_DEFINITIONS = [
-  {
-    key: 'send_messages',
-    title: 'Nachrichten senden',
-    desc: 'Erlaubt das Schreiben und Senden von Text-, Foto- und Dateinachrichten.',
-    category: 'chat',
-  },
-  {
-    key: 'attach_media',
-    title: 'Medien & Dokumente anhängen',
-    desc: 'Fotos, Dokumente, Notizen und Kalendereinträge im Gruppenchat teilen.',
-    category: 'chat',
-  },
-  {
-    key: 'invite_members',
-    title: 'Neue Mitglieder einladen',
-    desc: 'Erlaubt das Teilen und Verwenden des Gruppen-Einladungslinks.',
-    category: 'members',
-  },
-  {
-    key: 'start_group_calls',
-    title: 'Anrufe starten',
-    desc: 'Öffnet einen Gruppenanruf. Alle, die beitreten dürfen, bekommen den Anruf angezeigt.',
-    category: 'calls',
-  },
-  {
-    key: 'join_group_calls',
-    title: 'Anrufen beitreten',
-    desc: 'Erlaubt die Teilnahme an laufenden Gruppenanrufen. Ohne dieses Recht bleibt ein Anruf unsichtbar.',
-    category: 'calls',
-  },
-  {
-    key: 'share_screen',
-    title: 'Bildschirm freigeben',
-    desc: 'Teilt einen Bildschirm oder ein Fenster im Gruppenanruf.',
-    category: 'calls',
-  },
-  {
-    key: 'mute_in_calls',
-    title: 'Im Anruf stummschalten',
-    desc: 'Nimmt anderen im Gruppenanruf das Mikrofon. Der Betroffene kann es nicht selbst wieder einschalten, Kamera und Bildschirmfreigabe bleiben ihm.',
-    category: 'moderation',
-  },
-  {
-    key: 'kick_from_calls',
-    title: 'Aus dem Anruf entfernen',
-    desc: 'Wirft jemanden aus dem laufenden Gruppenanruf. Die Mitgliedschaft bleibt bestehen — wer beitreten darf, kann sofort wiederkommen.',
-    category: 'moderation',
-  },
-  {
-    key: 'kick_members',
-    title: 'Mitglieder entfernen (Kicken)',
-    desc: 'Mitglieder mit niedrigerem Rang aus der Gruppe entfernen.',
-    category: 'moderation',
-  },
-  {
-    key: 'delete_messages',
-    title: 'Nachrichten moderieren & löschen',
-    desc: 'Nachrichten anderer Gruppenmitglieder im Gruppenchat entfernen.',
-    category: 'moderation',
-  },
-  {
-    key: 'manage_roles',
-    title: 'Rollen zuweisen & verwalten',
-    desc: 'Mitgliedern Rollen zuweisen und Standard-Gruppenrechte anpassen.',
-    category: 'administration',
-  },
-]
+  { key: 'send_messages', category: 'chat' },
+  { key: 'attach_media', category: 'chat' },
+  { key: 'invite_members', category: 'members' },
+  { key: 'start_group_calls', category: 'calls' },
+  { key: 'join_group_calls', category: 'calls' },
+  { key: 'share_screen', category: 'calls' },
+  { key: 'mute_in_calls', category: 'moderation' },
+  { key: 'kick_from_calls', category: 'moderation' },
+  { key: 'kick_members', category: 'moderation' },
+  { key: 'delete_messages', category: 'moderation' },
+  { key: 'manage_roles', category: 'administration' },
+] as const
 
+export type GroupPermissionKey = (typeof GROUP_PERMISSION_DEFINITIONS)[number]['key']
+
+/** `social.groupRoles.perm.<recht>.title` bzw. `.desc`. */
+export function permissionTitleKey(recht: string): string {
+  return `social.groupRoles.perm.${recht}.title`
+}
+
+export function permissionDescKey(recht: string): string {
+  return `social.groupRoles.perm.${recht}.desc`
+}
+
+/**
+ * Systemrollen tragen einen Schlüssel als Namen, selbst angelegte einen Text,
+ * den jemand eingetippt hat. Der wird nicht übersetzt — er gehört der Gruppe.
+ */
+function rollentext(
+  wert: string,
+  istSystem: boolean,
+  t: (schluessel: string) => string,
+): string {
+  return istSystem ? t(wert) : wert
+}
+
+/**
+ * Die vier eingebauten Rollen. Name und Beschreibung sind Schlüssel — was in
+ * der Oberfläche steht, holt `rolleName`/`rolleBeschreibung` daraus.
+ */
 const SYSTEM_GROUP_ROLES: GroupRoleDefinition[] = [
   {
     id: 'owner',
-    name: 'Eigentümer',
-    description: 'Uneingeschränkte Vollberechtigung über die Gruppe, Rollen und Mitglieder.',
+    name: 'social.groupRoles.system.owner.name',
+    description: 'social.groupRoles.system.owner.desc',
     is_system: true,
     permissions: GROUP_PERMISSION_DEFINITIONS.map((p) => p.key),
   },
   {
     id: 'admin',
-    name: 'Administrator',
-    description: 'Kann Mitglieder kicken, Nachrichten moderieren, Anrufe steuern und Rollen vergeben.',
+    name: 'social.groupRoles.system.admin.name',
+    description: 'social.groupRoles.system.admin.desc',
     is_system: true,
     permissions: ['send_messages', 'attach_media', 'invite_members', 'start_group_calls', 'join_group_calls', 'share_screen', 'mute_in_calls', 'kick_from_calls', 'kick_members', 'delete_messages', 'manage_roles'],
   },
   {
     id: 'moderator',
-    name: 'Moderator',
-    description: 'Kann Nachrichten entfernen, Einladungen versenden und Gruppenanrufe moderieren.',
+    name: 'social.groupRoles.system.moderator.name',
+    description: 'social.groupRoles.system.moderator.desc',
     is_system: true,
     permissions: ['send_messages', 'attach_media', 'invite_members', 'join_group_calls', 'share_screen', 'mute_in_calls', 'kick_from_calls', 'delete_messages'],
   },
   {
     id: 'member',
-    name: 'Mitglied (@everyone)',
-    description: 'Reguläres Mitglied. Berechtigungen richten sich nach den Standardrechten.',
+    name: 'social.groupRoles.system.member.name',
+    description: 'social.groupRoles.system.member.desc',
     is_system: true,
     permissions: ['send_messages', 'attach_media', 'invite_members', 'join_group_calls'],
   },
 ]
 
-const ROLE_OPTIONS: DropdownOption[] = [
-  { value: 'admin', label: 'Administrator' },
-  { value: 'moderator', label: 'Moderator' },
-  { value: 'member', label: 'Mitglied (@everyone)' },
-]
+/** Wird im Bauteil mit `t()` befüllt — hier stehen nur die Werte. */
+const ROLE_OPTION_IDS = ['admin', 'moderator', 'member'] as const
+
+/** Welche Rechte der Tab „Standardrechte" in welcher Gruppe zeigt. */
+const CHAT_DEFAULT_KEYS = ['send_messages', 'attach_media', 'invite_members', 'delete_messages', 'kick_members'] as const
+const CALL_DEFAULT_KEYS = ['start_group_calls', 'join_group_calls', 'share_screen', 'mute_in_calls', 'kick_from_calls'] as const
 
 interface GroupRoleFormProps {
   initial: GroupRoleDefinition | null
@@ -166,6 +148,8 @@ interface GroupRoleFormProps {
 }
 
 function GroupRoleForm({ initial, onSubmit, onCancel, disabled }: GroupRoleFormProps) {
+  const { t } = useTranslation()
+
   const isSystemRole = Boolean(initial?.is_system)
   const isOwnerRole = initial?.id === 'owner'
   const [name, setName] = useState(initial?.name ?? '')
@@ -212,14 +196,16 @@ function GroupRoleForm({ initial, onSubmit, onCancel, disabled }: GroupRoleFormP
         <div className="flex items-center gap-2">
           <Shield className="w-4 h-4 text-primary" />
           <h3 className="font-headline text-body-md font-bold text-primary">
-            {initial ? `Rolle bearbeiten: ${initial.name}` : 'Neue Gruppenrolle erstellen'}
+            {initial
+              ? t('social.groupRoles.editRole', { name: rollentext(initial.name, initial.is_system, t) })
+              : t('social.groupRoles.newRole')}
           </h3>
         </div>
         <button
           type="button"
           onClick={onCancel}
           className="p-1 rounded-md text-on-surface-variant hover:text-on-surface transition-colors"
-          aria-label="Schließen"
+          aria-label={t('common.close')}
         >
           <X className="w-4 h-4" />
         </button>
@@ -227,20 +213,20 @@ function GroupRoleForm({ initial, onSubmit, onCancel, disabled }: GroupRoleFormP
 
       {isOwnerRole && (
         <div className="p-3 rounded-xl bg-status-warning/10 border border-status-warning/30 text-xs text-status-warning">
-          Die Eigentümer-Rolle besitzt feste Vollberechtigung und kann nicht eingeschränkt werden.
+          {t('social.groupRoles.ownerLocked')}
         </div>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label className="block text-xs font-semibold text-on-surface-variant mb-1.5 uppercase tracking-wider">
-            Rollen-Name
+            {t('social.groupRoles.nameLabel')}
           </label>
           <Input
             type="text"
             value={name}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
-            placeholder="z.B. Event-Leiter"
+            placeholder={t('social.groupRoles.namePlaceholder')}
             disabled={isSystemRole || disabled}
             required
             className="text-xs h-9"
@@ -248,13 +234,13 @@ function GroupRoleForm({ initial, onSubmit, onCancel, disabled }: GroupRoleFormP
         </div>
         <div>
           <label className="block text-xs font-semibold text-on-surface-variant mb-1.5 uppercase tracking-wider">
-            Beschreibung
+            {t('social.groupRoles.descLabel')}
           </label>
           <Input
             type="text"
             value={description}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDescription(e.target.value)}
-            placeholder="Aufgaben und Verantwortungsbereich"
+            placeholder={t('social.groupRoles.descPlaceholder')}
             disabled={disabled}
             className="text-xs h-9"
           />
@@ -265,7 +251,10 @@ function GroupRoleForm({ initial, onSubmit, onCancel, disabled }: GroupRoleFormP
       <div className="space-y-3 pt-2">
         <div className="flex items-center justify-between">
           <span className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider">
-            Berechtigungen ({selectedPerms.size} von {GROUP_PERMISSION_DEFINITIONS.length})
+            {t('social.groupRoles.permissionsCount', {
+              selected: selectedPerms.size,
+              total: GROUP_PERMISSION_DEFINITIONS.length,
+            })}
           </span>
           {!isOwnerRole && (
             <div className="flex items-center gap-2">
@@ -274,7 +263,7 @@ function GroupRoleForm({ initial, onSubmit, onCancel, disabled }: GroupRoleFormP
                 onClick={handleSelectAll}
                 className="text-[11px] font-medium text-primary hover:underline"
               >
-                Alle auswählen
+                {t('social.groupRoles.selectAll')}
               </button>
               <span className="text-on-surface-variant/40">•</span>
               <button
@@ -282,7 +271,7 @@ function GroupRoleForm({ initial, onSubmit, onCancel, disabled }: GroupRoleFormP
                 onClick={handleDeselectAll}
                 className="text-[11px] font-medium text-on-surface-variant hover:text-on-surface"
               >
-                Auswahl aufheben
+                {t('social.groupRoles.selectNone')}
               </button>
             </div>
           )}
@@ -310,9 +299,9 @@ function GroupRoleForm({ initial, onSubmit, onCancel, disabled }: GroupRoleFormP
                   />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-xs font-semibold text-primary">{def.title}</div>
+                  <div className="text-xs font-semibold text-primary">{t(permissionTitleKey(def.key))}</div>
                   <div className="text-[11px] text-on-surface-variant/80 mt-0.5 leading-snug">
-                    {def.desc}
+                    {t(permissionDescKey(def.key))}
                   </div>
                 </div>
               </label>
@@ -323,7 +312,7 @@ function GroupRoleForm({ initial, onSubmit, onCancel, disabled }: GroupRoleFormP
 
       <div className="flex justify-end gap-2.5 pt-3 border-t border-outline-variant/20">
         <Button type="button" variant="ghost" size="sm" onClick={onCancel} disabled={saving}>
-          Abbrechen
+          {t('common.cancel')}
         </Button>
         <Button
           type="submit"
@@ -333,7 +322,7 @@ function GroupRoleForm({ initial, onSubmit, onCancel, disabled }: GroupRoleFormP
           className="gap-1.5"
         >
           <Check className="w-4 h-4" />
-          <span>{saving ? 'Wird gespeichert …' : 'Rolle speichern'}</span>
+          <span>{saving ? t('common.saving') : t('social.groupRoles.saveRole')}</span>
         </Button>
       </div>
     </form>
@@ -347,6 +336,8 @@ export function GroupPermissionsModal({
   currentUserId,
   onGroupUpdated,
 }: GroupPermissionsModalProps) {
+  const { t } = useTranslation()
+
   const [activeTab, setActiveTab] = useState<'members' | 'roles' | 'permissions'>('members')
   const [members, setMembers] = useState<ChatGroupMemberItem[]>([])
   const [loading, setLoading] = useState(false)
@@ -369,6 +360,38 @@ export function GroupPermissionsModal({
   const [canKickFromCalls, setCanKickFromCalls] = useState(false)
   const [canDeleteMessages, setCanDeleteMessages] = useState(false)
   const [canKickMembers, setCanKickMembers] = useState(false)
+
+  // Schlüssel -> Zustand. Die Oberfläche unten läuft darüber, statt zehnmal
+  // dasselbe Kästchen von Hand zu schreiben.
+  const standardRechte: Record<string, boolean> = {
+    send_messages: canSendMessages,
+    attach_media: canAttachMedia,
+    invite_members: canInviteMembers,
+    delete_messages: canDeleteMessages,
+    kick_members: canKickMembers,
+    start_group_calls: canStartCalls,
+    join_group_calls: canJoinCalls,
+    share_screen: canShareScreen,
+    mute_in_calls: canMuteInCalls,
+    kick_from_calls: canKickFromCalls,
+  }
+  const standardSetzer: Record<string, (wert: boolean) => void> = {
+    send_messages: setCanSendMessages,
+    attach_media: setCanAttachMedia,
+    invite_members: setCanInviteMembers,
+    delete_messages: setCanDeleteMessages,
+    kick_members: setCanKickMembers,
+    start_group_calls: setCanStartCalls,
+    join_group_calls: setCanJoinCalls,
+    share_screen: setCanShareScreen,
+    mute_in_calls: setCanMuteInCalls,
+    kick_from_calls: setCanKickFromCalls,
+  }
+
+  const rollenAuswahl: DropdownOption[] = ROLE_OPTION_IDS.map((id) => ({
+    value: id,
+    label: t(`social.groupRoles.system.${id}.name`),
+  }))
 
   const isOwner = group?.owner_user_id === currentUserId
   const currentUserRole = group?.role || (isOwner ? 'owner' : 'member')
@@ -416,18 +439,23 @@ export function GroupPermissionsModal({
       setMembers((prev) =>
         prev.map((m) => (m.user_id === member.user_id ? { ...m, role: updated.role } : m))
       )
-      toast.success(`Rolle von ${member.username} auf "${newRole}" aktualisiert.`)
+      toast.success(
+        t('social.groupRoles.memberRoleChanged', {
+          name: member.username,
+          role: t(`social.groupRoles.system.${newRole}.name`),
+        }),
+      )
     } catch (err: any) {
-      toast.error(err?.message || 'Rolle konnte nicht geändert werden.')
+      toast.error(err?.message || t('social.groupRoles.memberRoleFailed'))
     }
   }
 
   const handleKickMember = async (member: ChatGroupMemberItem) => {
     if (!group) return
     const ok = await confirm({
-      title: 'Mitglied entfernen',
-      message: `Möchtest du ${member.username} wirklich aus der Gruppe entfernen?`,
-      confirmText: 'Entfernen',
+      title: t('social.groupRoles.kickTitle'),
+      message: t('social.groupRoles.kickMessage', { name: member.username }),
+      confirmText: t('common.remove'),
       danger: true,
     })
     if (!ok) return
@@ -435,9 +463,9 @@ export function GroupPermissionsModal({
     try {
       await kickGroupMember(group.id, member.user_id)
       setMembers((prev) => prev.filter((m) => m.user_id !== member.user_id))
-      toast.success(`${member.username} wurde aus der Gruppe entfernt.`)
+      toast.success(t('social.groupRoles.kicked', { name: member.username }))
     } catch (err: any) {
-      toast.error(err?.message || 'Mitglied konnte nicht entfernt werden.')
+      toast.error(err?.message || t('social.groupRoles.kickFailed'))
     }
   }
 
@@ -459,10 +487,10 @@ export function GroupPermissionsModal({
     const permString = perms.join(',')
     try {
       const updated = await updateGroupPermissions(group.id, permString)
-      toast.success('Standard-Gruppenrechte (@everyone) gespeichert.')
+      toast.success(t('social.groupRoles.defaultsSaved'))
       if (onGroupUpdated) onGroupUpdated(updated)
     } catch (err: any) {
-      toast.error(err?.message || 'Gruppenrechte konnten nicht gespeichert werden.')
+      toast.error(err?.message || t('social.groupRoles.defaultsFailed'))
     } finally {
       setSavingPermissions(false)
     }
@@ -478,7 +506,7 @@ export function GroupPermissionsModal({
     }
     setRoles((prev) => [...prev, newRole])
     setIsCreatingRole(false)
-    toast.success(`Rolle "${name}" erstellt.`)
+    toast.success(t('social.groupRoles.created', { name }))
   }
 
   const handleUpdateRole = async (
@@ -495,21 +523,21 @@ export function GroupPermissionsModal({
       )
     )
     setEditingRole(null)
-    toast.success(`Rolle "${role.name}" aktualisiert.`)
+    toast.success(t('social.groupRoles.updated', { name: rollentext(role.name, role.is_system, t) }))
   }
 
   const handleDeleteRole = async (role: GroupRoleDefinition) => {
     if (role.is_system) return
     const ok = await confirm({
-      title: 'Rolle löschen',
-      message: `Möchtest du die Gruppenrolle "${role.name}" wirklich löschen?`,
-      confirmText: 'Löschen',
+      title: t('social.groupRoles.deleteTitle'),
+      message: t('social.groupRoles.deleteMessage', { name: role.name }),
+      confirmText: t('common.delete'),
       danger: true,
     })
     if (!ok) return
 
     setRoles((prev) => prev.filter((r) => r.id !== role.id))
-    toast.success(`Rolle "${role.name}" gelöscht.`)
+    toast.success(t('social.groupRoles.deleted', { name: role.name }))
   }
 
   return (
@@ -526,10 +554,13 @@ export function GroupPermissionsModal({
             </div>
             <div className="min-w-0">
               <h2 className="font-headline text-body-lg font-bold text-primary truncate">
-                Gruppen-Rollen & Rechte
+                {t('social.groupRoles.title')}
               </h2>
               <p className="text-xs text-on-surface-variant truncate">
-                {group?.name || 'Gruppe'} • {members.length} Mitglieder • Rollenbasiertes Rechtesystem
+                {t('social.groupRoles.subtitle', {
+                  group: group?.name || t('social.groupRoles.groupFallback'),
+                  count: members.length,
+                })}
               </p>
             </div>
           </div>
@@ -537,7 +568,7 @@ export function GroupPermissionsModal({
             type="button"
             onClick={() => onOpenChange(false)}
             className="p-2 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors shrink-0"
-            aria-label="Schließen"
+            aria-label={t('common.close')}
           >
             <X className="w-4 h-4" />
           </button>
@@ -561,8 +592,8 @@ export function GroupPermissionsModal({
             >
               <Users className="w-4 h-4 shrink-0" />
               <span className="leading-tight">
-                <span className="sm:hidden">Mitglieder</span>
-                <span className="hidden sm:inline">Mitglieder ({members.length})</span>
+                <span className="sm:hidden">{t('social.groupRoles.tabMembersShort')}</span>
+                <span className="hidden sm:inline">{t('social.groupRoles.tabMembers', { count: members.length })}</span>
               </span>
             </button>
 
@@ -581,8 +612,8 @@ export function GroupPermissionsModal({
             >
               <Shield className="w-4 h-4 shrink-0" />
               <span className="leading-tight">
-                <span className="sm:hidden">Rollen</span>
-                <span className="hidden sm:inline">Rollen & Vorlagen ({roles.length})</span>
+                <span className="sm:hidden">{t('social.groupRoles.tabRolesShort')}</span>
+                <span className="hidden sm:inline">{t('social.groupRoles.tabRoles', { count: roles.length })}</span>
               </span>
             </button>
 
@@ -601,8 +632,8 @@ export function GroupPermissionsModal({
             >
               <Sliders className="w-4 h-4 shrink-0" />
               <span className="leading-tight">
-                <span className="sm:hidden">Standard</span>
-                <span className="hidden sm:inline">Standardrechte (@everyone)</span>
+                <span className="sm:hidden">{t('social.groupRoles.tabDefaultsShort')}</span>
+                <span className="hidden sm:inline">{t('social.groupRoles.tabDefaults')}</span>
               </span>
             </button>
           </div>
@@ -616,20 +647,20 @@ export function GroupPermissionsModal({
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div>
                   <h3 className="font-headline text-body-sm font-bold text-primary">
-                    Gruppenmitglieder verwalten
+                    {t('social.groupRoles.membersHeading')}
                   </h3>
                   <p className="text-xs text-on-surface-variant/80">
-                    Weise Mitgliedern Rollen zu oder entferne störende Teilnehmer aus der Gruppe.
+                    {t('social.groupRoles.membersHint')}
                   </p>
                 </div>
                 <Badge variant="default" className="text-xs px-2.5 py-0.5 font-medium">
-                  {members.length} {members.length === 1 ? 'Teilnehmer' : 'Teilnehmer'}
+                  {t('social.groupRoles.participantCount', { count: members.length })}
                 </Badge>
               </div>
 
               {loading ? (
                 <div className="py-16 text-center text-xs text-on-surface-variant">
-                  Mitglieder werden geladen …
+                  {t('social.groupRoles.membersLoading')}
                 </div>
               ) : (
                 <div className="divide-y divide-outline-variant/20 rounded-2xl border border-outline-variant/30 bg-surface-container/70 overflow-hidden shadow-sm">
@@ -655,7 +686,7 @@ export function GroupPermissionsModal({
                               </span>
                               {isSelf && (
                                 <span className="text-[10px] text-on-surface-variant/70 font-normal">
-                                  (Du)
+                                  {t('social.groupRoles.you')}
                                 </span>
                               )}
                             </div>
@@ -673,12 +704,12 @@ export function GroupPermissionsModal({
                                 className="text-[10px] py-0 px-2 font-medium"
                               >
                                 {isMemberOwner
-                                  ? '👑 Eigentümer'
+                                  ? t('social.groupRoles.system.owner.name')
                                   : member.role === 'admin'
-                                  ? '🛡️ Administrator'
+                                  ? t('social.groupRoles.system.admin.name')
                                   : member.role === 'moderator'
-                                  ? '⚔️ Moderator'
-                                  : 'Mitglied (@everyone)'}
+                                  ? t('social.groupRoles.system.moderator.name')
+                                  : t('social.groupRoles.system.member.name')}
                               </Badge>
                             </div>
                           </div>
@@ -692,7 +723,7 @@ export function GroupPermissionsModal({
                                 <Dropdown
                                   value={member.role}
                                   onChange={(val) => void handleRoleChange(member, val)}
-                                  options={ROLE_OPTIONS}
+                                  options={rollenAuswahl}
                                 />
                               </div>
                               <Button
@@ -701,8 +732,8 @@ export function GroupPermissionsModal({
                                 size="sm"
                                 onClick={() => void handleKickMember(member)}
                                 className="h-9 w-9 p-0 text-error hover:bg-error/10 rounded-xl shrink-0"
-                                title="Aus Gruppe entfernen"
-                                aria-label={`${member.username} aus Gruppe entfernen`}
+                                title={t('social.groupRoles.kickTitle')}
+                                aria-label={t('social.groupRoles.kickAria', { name: member.username })}
                               >
                                 <UserMinus className="w-4 h-4" />
                               </Button>
@@ -710,7 +741,7 @@ export function GroupPermissionsModal({
                           )}
                           {!canEditThisMember && isMemberOwner && (
                             <span className="text-xs text-on-surface-variant/70 font-medium px-3 py-1 bg-surface-container rounded-lg">
-                              Gruppenleiter
+                              {t('social.groupRoles.groupLead')}
                             </span>
                           )}
                         </div>
@@ -728,10 +759,10 @@ export function GroupPermissionsModal({
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div>
                   <h3 className="font-headline text-body-sm font-bold text-primary">
-                    Gruppenrollen & Zugriffsrechte
+                    {t('social.groupRoles.rolesHeading')}
                   </h3>
                   <p className="text-xs text-on-surface-variant/80">
-                    Definiere Rollen mit individuellen Berechtigungen analog zu den Panel-Rollen.
+                    {t('social.groupRoles.rolesHint')}
                   </p>
                 </div>
                 {canManage && !isCreatingRole && !editingRole && (
@@ -743,7 +774,7 @@ export function GroupPermissionsModal({
                     className="gap-1.5 rounded-xl h-8 px-3"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>Rolle erstellen</span>
+                    <span>{t('social.groupRoles.createRole')}</span>
                   </Button>
                 )}
               </div>
@@ -784,19 +815,19 @@ export function GroupPermissionsModal({
                             <Shield className="w-4 h-4 text-primary shrink-0" />
                           )}
                           <span className="text-xs sm:text-sm font-bold text-on-surface truncate">
-                            {r.name}
+                            {rollentext(r.name, r.is_system, t)}
                           </span>
                           {r.is_system ? (
                             <span className="text-[10px] px-2 py-0.5 rounded-md bg-status-warning/15 text-status-warning font-semibold shrink-0">
-                              System
+                              {t('social.groupRoles.badgeSystem')}
                             </span>
                           ) : (
                             <span className="text-[10px] px-2 py-0.5 rounded-md bg-status-info/15 text-status-info font-semibold shrink-0">
-                              Eigene
+                              {t('social.groupRoles.badgeCustom')}
                             </span>
                           )}
                           <Badge variant="default" className="text-[10px] px-2 py-0.5 font-medium shrink-0">
-                            {r.permissions.length} Rechte
+                            {t('social.groupRoles.rightsCount', { count: r.permissions.length })}
                           </Badge>
                         </div>
 
@@ -810,19 +841,19 @@ export function GroupPermissionsModal({
                                 setEditingRole(r)
                               }}
                               className="px-2.5 py-1.5 rounded-xl bg-surface-container-high hover:bg-primary/15 text-primary text-xs font-medium flex items-center gap-1.5 transition-colors"
-                              title="Rolle bearbeiten"
-                              aria-label={`${r.name} bearbeiten`}
+                              title={t('social.groupRoles.edit')}
+                              aria-label={t('social.groupRoles.editAria', { name: rollentext(r.name, r.is_system, t) })}
                             >
                               <Pencil className="w-3.5 h-3.5" />
-                              <span className="hidden xs:inline">Bearbeiten</span>
+                              <span className="hidden xs:inline">{t('common.edit')}</span>
                             </button>
                             {!r.is_system && (
                               <button
                                 type="button"
                                 onClick={() => void handleDeleteRole(r)}
                                 className="p-1.5 rounded-xl bg-surface-container-high hover:bg-error/15 text-error transition-colors"
-                                title="Rolle löschen"
-                                aria-label={`${r.name} löschen`}
+                                title={t('social.groupRoles.deleteTitle')}
+                                aria-label={t('social.groupRoles.deleteAria', { name: r.name })}
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
@@ -839,7 +870,7 @@ export function GroupPermissionsModal({
                               isExpanded ? '' : 'line-clamp-2 sm:line-clamp-none'
                             }`}
                           >
-                            {r.description}
+                            {rollentext(r.description, r.is_system, t)}
                           </p>
                           {r.description.length > 70 && (
                             <button
@@ -854,12 +885,12 @@ export function GroupPermissionsModal({
                             >
                               {isExpanded ? (
                                 <>
-                                  <span>Weniger anzeigen</span>
+                                  <span>{t('social.groupRoles.showLess')}</span>
                                   <ChevronUp className="w-3 h-3" />
                                 </>
                               ) : (
                                 <>
-                                  <span>Beschreibung anzeigen</span>
+                                  <span>{t('social.groupRoles.showDescription')}</span>
                                   <ChevronDown className="w-3 h-3" />
                                 </>
                               )}
@@ -877,13 +908,13 @@ export function GroupPermissionsModal({
                               key={`role-chip-${r.id}-${pk}`}
                               className="text-[10px] px-2 py-0.5 rounded-md bg-surface-container-high text-on-surface-variant border border-outline-variant/20 font-medium"
                             >
-                              {def?.title || pk}
+                              {def ? t(permissionTitleKey(def.key)) : pk}
                             </span>
                           )
                         })}
                         {r.permissions.length > 4 && (
                           <span className="text-[10px] text-on-surface-variant/80 font-medium px-1">
-                            +{r.permissions.length - 4} weitere
+                            {t('social.groupRoles.moreRights', { count: r.permissions.length - 4 })}
                           </span>
                         )}
                       </div>
@@ -899,163 +930,59 @@ export function GroupPermissionsModal({
             <div className="space-y-5">
               <div className="p-4 rounded-2xl bg-surface-container/75 border border-outline-variant/35 text-xs text-on-surface-variant space-y-1.5">
                 <span className="font-bold text-primary block text-body-sm">
-                  Standardrechte für alle Gruppenmitglieder (@everyone)
+                  {t('social.groupRoles.defaultsHeading')}
                 </span>
                 <p className="text-xs leading-relaxed">
-                  Diese Rechte gelten unmittelbar für jedes reguläre Mitglied ohne Sonderrolle. Administratoren und Moderatoren behalten ihre erweiterten Befugnisse.
+                  {t('social.groupRoles.defaultsHint')}
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-outline-variant/30 p-4 sm:p-6 bg-surface-container/60 shadow-sm">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
-                  <div className="p-3.5 rounded-xl bg-surface-container-high/60 border border-outline-variant/30 flex items-center justify-between gap-4">
-                    <div className="min-w-0 flex-1">
-                      <span className="text-xs font-bold text-primary block">
-                        Nachrichten senden
-                      </span>
-                      <span className="text-[11px] text-on-surface-variant leading-snug">
-                        Erlaubt regulären Mitgliedern das Schreiben und Versenden von Chatnachrichten.
-                      </span>
-                    </div>
-                    <Switch
-                      checked={canSendMessages}
-                      onCheckedChange={setCanSendMessages}
-                      disabled={!canManage}
-                      aria-label="Nachrichten senden erlauben"
-                    />
-                  </div>
-
-                  <div className="p-3.5 rounded-xl bg-surface-container-high/60 border border-outline-variant/30 flex items-center justify-between gap-4">
-                    <div className="min-w-0 flex-1">
-                      <span className="text-xs font-bold text-primary block">
-                        Medien, Notizen & Termine teilen
-                      </span>
-                      <span className="text-[11px] text-on-surface-variant leading-snug">
-                        Erlaubt das Anhängen von Fotos, Dokumenten, Notizen und Kalendereinträgen.
-                      </span>
-                    </div>
-                    <Switch
-                      checked={canAttachMedia}
-                      onCheckedChange={setCanAttachMedia}
-                      disabled={!canManage}
-                      aria-label="Medien teilen erlauben"
-                    />
-                  </div>
-
-                  <div className="p-3.5 rounded-xl bg-surface-container-high/60 border border-outline-variant/30 flex items-center justify-between gap-4">
-                    <div className="min-w-0 flex-1">
-                      <span className="text-xs font-bold text-primary block">
-                        Neue Mitglieder einladen
-                      </span>
-                      <span className="text-[11px] text-on-surface-variant leading-snug">
-                        Erlaubt das Teilen und Verwenden des öffentlichen Gruppen-Einladungslinks.
-                      </span>
-                    </div>
-                    <Switch
-                      checked={canInviteMembers}
-                      onCheckedChange={setCanInviteMembers}
-                      disabled={!canManage}
-                      aria-label="Mitglieder einladen erlauben"
-                    />
-                  </div>
-
-                  <div className="p-3.5 rounded-xl bg-surface-container-high/60 border border-outline-variant/30 flex items-center justify-between gap-4">
-                    <div className="min-w-0 flex-1">
-                      <span className="text-xs font-bold text-primary block">
-                        Nachrichten löschen & moderieren
-                      </span>
-                      <span className="text-[11px] text-on-surface-variant leading-snug">
-                        Erlaubt Mitgliedern das Löschen fremder Chatnachrichten.
-                      </span>
-                    </div>
-                    <Switch
-                      checked={canDeleteMessages}
-                      onCheckedChange={setCanDeleteMessages}
-                      disabled={!canManage}
-                      aria-label="Nachrichten löschen erlauben"
-                    />
-                  </div>
-
-                  <div className="p-3.5 rounded-xl bg-surface-container-high/60 border border-outline-variant/30 flex items-center justify-between gap-4 lg:col-span-2">
-                    <div className="min-w-0 flex-1">
-                      <span className="text-xs font-bold text-primary block">
-                        Mitglieder entfernen (Kicken)
-                      </span>
-                      <span className="text-[11px] text-on-surface-variant leading-snug">
-                        Erlaubt regulären Mitgliedern das Kicken anderer regulärer Teilnehmer.
-                      </span>
-                    </div>
-                    <Switch
-                      checked={canKickMembers}
-                      onCheckedChange={setCanKickMembers}
-                      disabled={!canManage}
-                      aria-label="Mitglieder kicken erlauben"
-                    />
-                  </div>
-                </div>
-
-                <div className="mt-5 border-t border-outline-variant/30 pt-5">
+              {/* Die beiden Gruppen lesen dieselbe Liste wie der Rollen-Editor.
+                  Vorher standen sie hier ein zweites Mal von Hand, mit eigenem
+                  Wortlaut — und liefen auseinander. */}
+              {([
+                { titel: t('social.groupRoles.defaultsChat'), icon: null, rechte: CHAT_DEFAULT_KEYS },
+                { titel: t('social.groupRoles.defaultsCalls'), icon: <Phone className="h-4 w-4 text-primary" />, rechte: CALL_DEFAULT_KEYS },
+              ] as const).map((abschnitt, index) => (
+                <div
+                  key={abschnitt.titel}
+                  className={`rounded-2xl border border-outline-variant/30 p-4 sm:p-6 bg-surface-container/60 shadow-sm ${
+                    index > 0 ? 'mt-5' : ''
+                  }`}
+                >
                   <div className="mb-3 flex items-center gap-2">
-                    <Phone className="h-4 w-4 text-primary" />
-                    <span className="text-body-sm font-bold text-primary">Sprach- und Videoanrufe</span>
+                    {abschnitt.icon}
+                    <span className="text-body-sm font-bold text-primary">{abschnitt.titel}</span>
                   </div>
                   <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
-                    {([
-                      {
-                        checked: canStartCalls,
-                        set: setCanStartCalls,
-                        titel: 'Anrufe starten',
-                        text: 'Öffnet einen Gruppenanruf. Alle mit Beitrittsrecht sehen ihn.',
-                      },
-                      {
-                        checked: canJoinCalls,
-                        set: setCanJoinCalls,
-                        titel: 'Anrufen beitreten',
-                        text: 'Ohne dieses Recht bleibt ein laufender Anruf unsichtbar.',
-                      },
-                      {
-                        checked: canShareScreen,
-                        set: setCanShareScreen,
-                        titel: 'Bildschirm freigeben',
-                        text: 'Teilt einen Bildschirm oder ein Fenster im Anruf.',
-                      },
-                      {
-                        checked: canMuteInCalls,
-                        set: setCanMuteInCalls,
-                        titel: 'Im Anruf stummschalten',
-                        text: 'Nimmt anderen das Mikrofon. Der Betroffene kann es nicht selbst wieder einschalten.',
-                      },
-                      {
-                        checked: canKickFromCalls,
-                        set: setCanKickFromCalls,
-                        titel: 'Aus dem Anruf entfernen',
-                        text: 'Wirft jemanden aus dem Anruf. Die Gruppenmitgliedschaft bleibt bestehen.',
-                        breit: true,
-                      },
-                    ] as const).map((eintrag) => (
+                    {abschnitt.rechte.map((recht, stelle) => (
                       <div
-                        key={eintrag.titel}
+                        key={recht}
                         className={`flex items-center justify-between gap-4 rounded-xl border border-outline-variant/30 bg-surface-container-high/60 p-3.5 ${
-                          'breit' in eintrag && eintrag.breit ? 'lg:col-span-2' : ''
+                          stelle === abschnitt.rechte.length - 1 && abschnitt.rechte.length % 2 === 1
+                            ? 'lg:col-span-2'
+                            : ''
                         }`}
                       >
                         <div className="min-w-0 flex-1">
-                          <span className="block text-xs font-bold text-primary">{eintrag.titel}</span>
+                          <span className="block text-xs font-bold text-primary">
+                            {t(permissionTitleKey(recht))}
+                          </span>
                           <span className="text-[11px] leading-snug text-on-surface-variant">
-                            {eintrag.text}
+                            {t(permissionDescKey(recht))}
                           </span>
                         </div>
                         <Switch
-                          checked={eintrag.checked}
-                          onCheckedChange={eintrag.set}
+                          checked={standardRechte[recht]}
+                          onCheckedChange={standardSetzer[recht]}
                           disabled={!canManage}
-                          aria-label={`${eintrag.titel} erlauben`}
+                          aria-label={t('social.groupRoles.allow', { name: t(permissionTitleKey(recht)) })}
                         />
                       </div>
                     ))}
                   </div>
                 </div>
-              </div>
+              ))}
 
               {canManage && (
                 <div className="flex justify-end pt-2">
@@ -1068,7 +995,7 @@ export function GroupPermissionsModal({
                     className="gap-2 rounded-xl px-4 py-2"
                   >
                     <Check className="w-4 h-4" />
-                    <span>{savingPermissions ? 'Wird gespeichert …' : 'Standardrechte speichern'}</span>
+                    <span>{savingPermissions ? t('common.saving') : t('social.groupRoles.saveDefaults')}</span>
                   </Button>
                 </div>
               )}

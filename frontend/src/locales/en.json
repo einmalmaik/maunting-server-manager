@@ -5931,6 +5931,228 @@
       "badType": "Choose a valid image file: JPEG, PNG or WebP.",
       "tooLarge": "The image is too large. 8 MB is the limit.",
       "loadFailed": "The image could not be loaded."
+    },
+    "friends": {
+      "dockTitle": "Contacts & chat",
+      "openDock": "Open contacts & chat",
+      "collapse": "Collapse",
+      "tabFriends": "Friends",
+      "tabChats": "Chats",
+      "searchPlaceholder": "Search friends …",
+      "openRequests_one": "{{count}} open request",
+      "openRequests_other": "{{count}} open requests",
+      "inProfile": "In profile",
+      "noMatches": "No matches for that search.",
+      "none": "No friends in the list yet.",
+      "addInProfile": "Add friends in your profile",
+      "sendMessage": "Send message",
+      "remove": "Remove friend",
+      "removed": "Friend removed.",
+      "openChatRoom": "Open the full chat room",
+      "directContacts": "Direct contacts",
+      "friend": "Friend",
+      "teamMembers": "Team members"
+    },
+    "contacts": {
+      "title": "Friends & contacts",
+      "description": "Manage your confirmed contacts, blocked people and muted conversations.",
+      "addFriend": "Add friend",
+      "usernamePlaceholder": "Enter a username …",
+      "sendRequest": "Send request",
+      "requestSent": "Friend request sent.",
+      "requestSendFailed": "The request could not be sent.",
+      "requestAccepted": "Friend request accepted.",
+      "requestAcceptFailed": "The request could not be accepted.",
+      "requestDeclined": "Friend request declined.",
+      "requestDeclineFailed": "The request could not be declined.",
+      "pendingRequests": "Pending requests ({{count}})",
+      "accept": "Accept",
+      "decline": "Decline",
+      "tabFriends": "Your friends ({{count}})",
+      "tabBlocked": "Blocked ({{count}})",
+      "tabMuted": "Muted ({{count}})",
+      "myContacts": "My contacts ({{count}})",
+      "none": "No contacts added yet. Send a request above to connect with someone.",
+      "remove": "Remove contact",
+      "removed": "Contact removed.",
+      "removeFailed": "The contact could not be removed.",
+      "loadMore_one": "Load more contacts ({{count}} left)",
+      "loadMore_other": "Load more contacts ({{count}} left)",
+      "blockedHeading": "Blocked people ({{count}})",
+      "noBlocked": "No blocked contacts.",
+      "blocked": "Blocked",
+      "unblock": "Unblock",
+      "unblocked": "{{name}} is no longer blocked.",
+      "mutedHeading": "Muted conversations ({{count}})",
+      "noMuted": "No muted chats.",
+      "unmute": "Unmute",
+      "unmuted": "Chat unmuted.",
+      "mutePermanent": "Permanently",
+      "muteMinutesLeft_one": "{{count}} min left",
+      "muteMinutesLeft_other": "{{count}} min left",
+      "muteHoursLeft_one": "{{count}} hr left",
+      "muteHoursLeft_other": "{{count}} hr left",
+      "muteDaysLeft_one": "{{count}} day left",
+      "muteDaysLeft_other": "{{count}} days left",
+      "unknownUser": "User #{{id}}",
+      "unnamedChat": "Chat ({{id}})"
+    },
+    "privacy": {
+      "title": "Chat privacy",
+      "description": "Control your privacy in the messenger and in end-to-end encrypted conversations.",
+      "receipts": "Read receipts",
+      "receiptsHint": "When on, your contacts see two blue ticks once you have read a message.",
+      "receiptsOn": "Read receipts on.",
+      "receiptsOff": "Read receipts off."
+    },
+    "milestones": {
+      "title": "Milestones & progress",
+      "description": "Records what you have achieved running the system, and how active you are.",
+      "platformActivity": "Platform activity",
+      "points_one": "{{count}} point",
+      "points_other": "{{count}} points",
+      "pointsShort": "+{{count}} pts",
+      "progress": "{{unlocked}} of {{total}} ({{percent}}%)",
+      "statActivity": "Active time",
+      "statAi": "AI conversations",
+      "statAdmin": "Administration",
+      "statCommands": "Commands",
+      "durationMinutes": "{{minutes}} min",
+      "durationHours": "{{hours}} h {{minutes}} min",
+      "filterAll": "All ({{count}})",
+      "filterUnlocked": "Unlocked ({{count}})",
+      "filterLocked": "Locked ({{count}})",
+      "rare": "Rare",
+      "unlockedOn": "Unlocked on {{date}}",
+      "loadMore_one": "Show more achievements ({{count}} left)",
+      "loadMore_other": "Show more achievements ({{count}} left)"
+    },
+    "groupRoles": {
+      "title": "Group roles & rights",
+      "subtitle_one": "{{group}} · {{count}} member · Role-based rights",
+      "subtitle_other": "{{group}} · {{count}} members · Role-based rights",
+      "groupFallback": "Group",
+      "tabMembers": "Members ({{count}})",
+      "tabMembersShort": "Members",
+      "tabRoles": "Roles & templates ({{count}})",
+      "tabRolesShort": "Roles",
+      "tabDefaults": "Default rights (@everyone)",
+      "tabDefaultsShort": "Defaults",
+      "membersHeading": "Manage group members",
+      "membersHint": "Assign roles to members, or remove disruptive participants from the group.",
+      "membersLoading": "Loading members …",
+      "participantCount_one": "{{count}} participant",
+      "participantCount_other": "{{count}} participants",
+      "you": "(You)",
+      "groupLead": "Group lead",
+      "memberRoleChanged": "{{name}} is now \"{{role}}\".",
+      "memberRoleFailed": "The role could not be changed.",
+      "kickTitle": "Remove member",
+      "kickMessage": "Really remove {{name}} from the group?",
+      "kickAria": "Remove {{name}} from the group",
+      "kicked": "{{name}} has been removed from the group.",
+      "kickFailed": "The member could not be removed.",
+      "rolesHeading": "Group roles & access rights",
+      "rolesHint": "Create roles with their own permissions, just like the panel roles.",
+      "createRole": "Create role",
+      "newRole": "Create a new group role",
+      "editRole": "Edit role: {{name}}",
+      "saveRole": "Save role",
+      "nameLabel": "Role name",
+      "namePlaceholder": "e.g. event lead",
+      "descLabel": "Description",
+      "descPlaceholder": "Duties and area of responsibility",
+      "ownerLocked": "The owner role holds every right and cannot be restricted.",
+      "permissionsCount": "Permissions ({{selected}} of {{total}})",
+      "selectAll": "Select all",
+      "selectNone": "Clear selection",
+      "badgeSystem": "System",
+      "badgeCustom": "Custom",
+      "rightsCount_one": "{{count}} right",
+      "rightsCount_other": "{{count}} rights",
+      "moreRights": "+{{count}} more",
+      "showLess": "Show less",
+      "showDescription": "Show description",
+      "edit": "Edit role",
+      "editAria": "Edit {{name}}",
+      "deleteTitle": "Delete role",
+      "deleteMessage": "Really delete the group role \"{{name}}\"?",
+      "deleteAria": "Delete {{name}}",
+      "created": "The role \"{{name}}\" has been created.",
+      "updated": "The role \"{{name}}\" has been saved.",
+      "deleted": "The role \"{{name}}\" has been deleted.",
+      "defaultsHeading": "Default rights for every group member (@everyone)",
+      "defaultsHint": "These rights apply immediately to every regular member without a special role. Administrators and moderators keep their wider powers.",
+      "defaultsChat": "Chat and members",
+      "defaultsCalls": "Voice and video calls",
+      "saveDefaults": "Save default rights",
+      "defaultsSaved": "The default rights have been saved.",
+      "defaultsFailed": "The group rights could not be saved.",
+      "allow": "Allow {{name}}",
+      "system": {
+        "owner": {
+          "name": "👑 Owner",
+          "desc": "Full, unrestricted control over the group, its roles and its members."
+        },
+        "admin": {
+          "name": "🛡️ Administrator",
+          "desc": "Can remove members, moderate messages, run calls and assign roles."
+        },
+        "moderator": {
+          "name": "⚔️ Moderator",
+          "desc": "Can remove messages, send invitations and moderate group calls."
+        },
+        "member": {
+          "name": "Member (@everyone)",
+          "desc": "A regular member. Permissions follow the default rights."
+        }
+      },
+      "perm": {
+        "send_messages": {
+          "title": "Send messages",
+          "desc": "Allows writing and sending text, photo and file messages."
+        },
+        "attach_media": {
+          "title": "Attach media & documents",
+          "desc": "Share photos, documents, notes and calendar entries in the group chat."
+        },
+        "invite_members": {
+          "title": "Invite new members",
+          "desc": "Allows sharing and using the group invitation link."
+        },
+        "start_group_calls": {
+          "title": "Start calls",
+          "desc": "Opens a group call. Everyone allowed to join is shown the call."
+        },
+        "join_group_calls": {
+          "title": "Join calls",
+          "desc": "Allows joining ongoing group calls. Without this right a call stays invisible."
+        },
+        "share_screen": {
+          "title": "Share screen",
+          "desc": "Shares a screen or a window in the group call."
+        },
+        "mute_in_calls": {
+          "title": "Mute in calls",
+          "desc": "Takes the microphone from others in a group call. They cannot turn it back on themselves; camera and screen sharing stay with them."
+        },
+        "kick_from_calls": {
+          "title": "Remove from call",
+          "desc": "Throws someone out of the ongoing group call. Membership stays — anyone allowed to join can come straight back."
+        },
+        "kick_members": {
+          "title": "Remove members",
+          "desc": "Remove members of a lower rank from the group."
+        },
+        "delete_messages": {
+          "title": "Moderate & delete messages",
+          "desc": "Remove other members’ messages from the group chat."
+        },
+        "manage_roles": {
+          "title": "Assign & manage roles",
+          "desc": "Assign roles to members and adjust the default group rights."
+        }
+      }
     }
   }
 }
