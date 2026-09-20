@@ -109,8 +109,8 @@ export function SprachAnsicht({
         {
           id: 'speculative_prefetch',
           label: intentErkannt.entities.location
-            ? `${t('ai.geo.processes.prefetch', 'Spekulativer Abruf')} (${String(intentErkannt.entities.location)})`
-            : `${t('ai.geo.processes.prefetch', 'Spekulativer Abruf')} (${intentErkannt.intent})`,
+            ? `${t('ai.geo.processes.prefetch')} (${String(intentErkannt.entities.location)})`
+            : `${t('ai.geo.processes.prefetch')} (${intentErkannt.intent})`,
           status:
             intentErkannt.prefetchStatus === 'fertig'
               ? ('fertig' as const)
@@ -120,17 +120,17 @@ export function SprachAnsicht({
         },
         {
           id: 'satellite',
-          label: t('ai.geo.processes.satellite', 'Satellitendaten (Sentinel-2)'),
+          label: t('ai.geo.processes.satellite'),
           status: geoData?.satellite?.available ? ('fertig' as const) : ('laeuft' as const),
         },
         {
           id: 'weather',
-          label: t('ai.geo.processes.weather', 'Wetterdaten'),
+          label: t('ai.geo.processes.weather'),
           status: geoData?.weather ? ('fertig' as const) : ('laeuft' as const),
         },
         {
           id: 'news',
-          label: t('ai.geo.processes.news', 'Nachrichten & Websuche'),
+          label: t('ai.geo.processes.news'),
           status: geoData ? ('fertig' as const) : ('laeuft' as const),
         },
       ]

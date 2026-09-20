@@ -73,7 +73,13 @@
     "addEvent": "Termin hinzufügen",
     "noEventsToday": "Keine Termine für diesen Tag vorhanden.",
     "emptyDayTapToCreate": "Keine Termine — Tippen zum Erstellen",
-    "typePersonal": "Persönlich"
+    "typePersonal": "Persönlich",
+    "titleRequired": "Bitte gib einen Termintitel an",
+    "created": "Termin erfolgreich erstellt",
+    "updated": "Termin aktualisiert",
+    "deleteConfirmTitle": "Termin löschen",
+    "deleteConfirmMessage": "Möchtest du diesen Termin wirklich unwiderruflich aus deinem Kalender löschen?",
+    "deleted": "Termin gelöscht"
   },
   "pageContext": {
     "overview": "Übersicht",
@@ -89,7 +95,11 @@
     "workspace": "Datenbank-Explorer",
     "workspaceSubtitle": "Tabellen, Zeilen und Datenbankstatistiken einsehen.",
     "admin": "Admin-Zugriff",
-    "readOnly": "Nur lesen"
+    "readOnly": "Nur lesen",
+    "importExecuted": "Panel-DB-Import ausgeführt",
+    "rowUpdated": "Zeile erfolgreich aktualisiert",
+    "rowsDeleted": "{{count}} Zeile(n) gelöscht",
+    "rowInserted": "Zeile erfolgreich eingefügt"
   },
   "notes": {
     "title": "Notizen",
@@ -1490,6 +1500,9 @@
       "rejectedDone": "Abgelehnt. Die KI bricht den Vorgang ab oder wählt einen alternativen Lösungsweg.",
       "invalid": "Dieser Link ist nicht mehr gültig. Entweder wurde bereits entschieden, oder die Anfrage ist abgelaufen.",
       "failed": "Die Entscheidung konnte nicht übernommen werden."
+    },
+    "actionProposal": {
+      "userDeclined": "Der Benutzer hat die Ausführung dieser Aktion abgelehnt."
     }
   },
   "shell": {
@@ -1526,7 +1539,7 @@
     "fingerprintHint": "SHA-256 des Agent-Zertifikats (Self-signed Pinning). Pflicht für Remote-Nodes.",
     "fingerprintRequired": "TLS-Fingerprint ist für Remote-Nodes erforderlich.",
     "searchPlaceholder": "Nodes filtern …",
-    "loadFailed": "Nodes konnten nicht geladen werden.",
+    "loadFailed": "Nodes konnten nicht geladen werden",
     "created": "Node angelegt.",
     "updated": "Node aktualisiert.",
     "deleted": "Node gelöscht.",
@@ -2488,7 +2501,11 @@
     "backupCode": "Backup-Code",
     "resendFailed": "Der Code konnte nicht erneut gesendet werden.",
     "use2FAInstead": "Stattdessen einen 2FA-Code verwenden",
-    "captchaLoadFailed": "Sicherheitsabfrage konnte nicht geladen werden. Bitte Werbeblocker prüfen oder Seite neu laden."
+    "captchaLoadFailed": "Sicherheitsabfrage konnte nicht geladen werden. Bitte Werbeblocker prüfen oder Seite neu laden.",
+    "errors": {
+      "refreshUnavailable": "Refresh temporär nicht möglich",
+      "refreshFailed": "Refresh fehlgeschlagen: HTTP {{status}}"
+    }
   },
   "setup": {
     "welcome": "Willkommen beim MSM",
@@ -3252,7 +3269,9 @@
       "protocolHelp": "Du kannst nur IMAP (nur Lesen), nur SMTP (nur Senden) oder beides zusammen eintragen. Mindestens ein Protokoll ist erforderlich.",
       "imapHelp": "Wird zum Suchen und Lesen von E-Mails durch den KI-Assistenten benötigt.",
       "smtpHelp": "Wird zum Vorbereiten und Absenden von E-Mails durch den KI-Assistenten benötigt.",
-      "gmailNotice": "Hinweis für Gmail: Google erfordert ein 16-stelliges App-Passwort, sofern 2-Faktor-Authentifizierung aktiv ist."
+      "gmailNotice": "Hinweis für Gmail: Google erfordert ein 16-stelliges App-Passwort, sofern 2-Faktor-Authentifizierung aktiv ist.",
+      "emailAndNameRequired": "Bitte E-Mail und Bezeichnung angeben.",
+      "hostRequired": "Bitte mindestens IMAP-Host (für Empfang) oder SMTP-Host (für Versand) konfigurieren."
     },
     "calendars": {
       "title": "Verknüpfte Kalender (CalDAV)",
@@ -3271,7 +3290,8 @@
       "password": "Passwort / App-Passwort",
       "isDefault": "Als Standardkalender verwenden",
       "protocolHelp": "Wird zum Abfragen von Terminen und Vorbereiten von Termineinträgen durch den KI-Assistenten verwendet. Termine werden erst nach deiner ausdrücklichen Bestätigung erstellt oder geändert.",
-      "caldavHelp": "CalDAV-URL deines Kalenders (z. B. Nextcloud, Google CalDAV)."
+      "caldavHelp": "CalDAV-URL deines Kalenders (z. B. Nextcloud, Google CalDAV).",
+      "nameAndUrlRequired": "Bitte Bezeichnung und CalDAV-URL angeben."
     },
     "confirmDeleteWordLabel": "Tippe delete zur Bestätigung (nicht kopierbar)",
     "e2eeDevices": {
@@ -3342,11 +3362,38 @@
         "bioOn": "Der Messenger lässt sich jetzt per Fingerabdruck öffnen.",
         "bioOff": "Der Fingerabdruck ist abgeschaltet.",
         "bioFailed": "Der Fingerabdruck liess sich nicht einrichten."
+      },
+      "errors": {
+        "noAccount": "Kein Konto angemeldet.",
+        "pinTooShort": "Der PIN braucht mindestens {{count}} Zeichen.",
+        "alreadySetUp": "Für dieses Konto ist bereits ein PIN eingerichtet.",
+        "storageUnreachable": "Der Schlüsselspeicher dieses Geräts ist nicht erreichbar. Der Messenger lässt sich hier gerade nicht entsperren.",
+        "noPinOnDevice": "Auf diesem Gerät ist kein PIN hinterlegt.",
+        "wrongPin": "Falscher PIN.",
+        "bioFailed": "Biometrische Bestätigung fehlgeschlagen.",
+        "currentPinWrong": "Der bisherige PIN stimmt nicht.",
+        "setupFirst": "Erst einen PIN einrichten.",
+        "pinIncorrect": "Der PIN stimmt nicht."
       }
     },
     "audioMicrophoneFallback": "Mikrofon {{number}}",
     "audioSpeakerFallback": "Lautsprecher {{number}}",
-    "confirmDeleteWordHint": "Tippe das Wort exakt ein – Kopieren/Einfügen ist deaktiviert."
+    "confirmDeleteWordHint": "Tippe das Wort exakt ein – Kopieren/Einfügen ist deaktiviert.",
+    "friends": {
+      "sendError": "Fehler beim Senden.",
+      "acceptError": "Fehler beim Annehmen.",
+      "rejected": "Anfrage abgelehnt.",
+      "rejectError": "Fehler beim Ablehnen.",
+      "removeError": "Fehler beim Entfernen.",
+      "unblocked": "Blockierung von {{username}} aufgehoben",
+      "unmuted": "Stummschaltung aufgehoben",
+      "accepted": "Anfrage angenommen.",
+      "removed": "Kontakt entfernt.",
+      "noMutedChats": "Keine stummgeschalteten Chats vorhanden.",
+      "unmute": "Einschalten",
+      "unblock": "Entblocken",
+      "blockedStatus": "Blockiert"
+    }
   },
   "errorBoundary": {
     "title": "Diese Ansicht konnte nicht geladen werden",
@@ -5557,6 +5604,29 @@
         "codeBezeichnung": "2FA-Geheimschlüssel oder Link",
         "codePlatzhalter": "z. B. JBSWY3DPEHPK3PXP oder ein otpauth-Link",
         "schluesselUebernehmen": "Schlüssel übernehmen"
+      },
+      "errors": {
+        "biometricsNotSupported": "Biometrische Authentifizierung wird auf diesem Gerät oder Browser nicht unterstützt.",
+        "wrongMasterPassword": "Falsches Master-Passwort. Bitte überprüfe deine Eingabe.",
+        "biometricsFailed": "Biometrische Authentifizierung fehlgeschlagen.",
+        "biometricsActivationFailed": "Biometrie-Aktivierung fehlgeschlagen",
+        "biometricsNotSupportedShort": "Biometrie wird auf diesem Gerät oder Browser nicht unterstützt.",
+        "biometricsKeyLoadFailed": "Biometrischer Schlüssel konnte nicht geladen werden.",
+        "biometricsUnlockFailed": "Biometrisches Entsperren fehlgeschlagen.",
+        "setupFailed": "Einrichten fehlgeschlagen",
+        "notSetup": "Es wurde noch kein Tresor eingerichtet. Bitte richte zuerst ein Master-Passwort ein.",
+        "keysMissing": "Tresor-Schlüsseldaten fehlen oder konnten nicht geladen werden.",
+        "unlockFailed": "Entsperren fehlgeschlagen",
+        "locked": "Tresor ist gesperrt",
+        "attachmentTooLarge": "Dateianhang \"{{name}}\" überschreitet das Limit von 500 KB.",
+        "attachmentsTotalTooLarge": "Die Gesamtgröße aller Dateianhänge überschreitet das Limit von 500 KB.",
+        "emptyPassword": "Master-Passwort darf nicht leer sein.",
+        "invalidSalt": "Ungültiger KDF-Salt: Mindestens 16 Bytes erforderlich.",
+        "decryptionFailed": "Tresor-Eintrag konnte nicht entschlüsselt werden (Authentifizierungsfehler oder falscher Schlüssel)",
+        "invalidBase32Char": "Ungültiges Base32-Zeichen '{{char}}' an Position {{pos}}",
+        "invalidTotpSecret": "Ungültiges Base32 TOTP-Secret",
+        "emptyTotpSecret": "Leeres Base32 TOTP-Secret",
+        "invalidEnvelopeFormat": "Ungültiges Umschlag-Format: erwartet {{prefix}}"
       }
     },
     "aktion": {
@@ -5753,7 +5823,12 @@
         "impressumInaktiv": "Nicht konfiguriert",
         "impressumOeffnen": "Impressum im Browser öffnen"
       },
-      "overlayTesten": "Overlay testen"
+      "overlayTesten": "Overlay testen",
+      "updateAvailableVersion": "Version v{{version}} ist verfügbar.",
+      "updateCheckError": "Konnte nicht nach Updates suchen.",
+      "updateUpToDate": "Maunting Smart System ist auf dem neuesten Stand.",
+      "checkingUpdates": "Prüft...",
+      "checkForUpdates": "Auf Updates prüfen"
     },
     "schliessen": {
       "titel": "MSS schließen?",
@@ -5962,7 +6037,23 @@
     "speaking": "Spricht",
     "present": "Dabei",
     "optionsFor": "Optionen für {{name}}",
-    "audioBlockedHint": "Dein Browser lässt den Ton erst nach einem Klick zu."
+    "audioBlockedHint": "Dein Browser lässt den Ton erst nach einem Klick zu.",
+    "nobodyAnswered": "Niemand hat abgenommen.",
+    "callMissed": "Anruf verpasst.",
+    "moderatorMuted": "Ein Moderator hat dich stummgeschaltet. Nur die Moderation kann das aufheben.",
+    "screenshareFailed": "Die Bildschirmfreigabe konnte nicht gestartet werden.",
+    "callTransferred": "Der Anruf wurde auf ein anderes Gerät übertragen.",
+    "joinedOnOtherDevice": "Du bist auf einem anderen Gerät einem anderen Anruf beigetreten.",
+    "callEnded": "Der Anruf wurde beendet.",
+    "callRejected": "Der Anruf wurde abgelehnt.",
+    "callerHungUp": "Der Anrufer hat aufgelegt.",
+    "groupCallEnded": "Der Gruppenanruf wurde beendet.",
+    "participantInvited": "{{username}} wurde eingeladen.",
+    "participantInviteFailed": "{{username}} konnte nicht eingeladen werden.",
+    "participantRemoved": "{{username}} wurde aus dem Anruf entfernt.",
+    "wrongKeyLength": "Raumschlüssel hat die falsche Länge",
+    "participantUnmuted": "{{username}} darf wieder sprechen.",
+    "participantMuted": "{{username}} ist stummgeschaltet."
   },
   "social": {
     "status": {
@@ -6621,6 +6712,34 @@
   "databaseManager": {
     "subtitle": "Verwalte und bearbeite die PostgreSQL-Datenbanken dieses Servers.",
     "powerUserTitle": "Power-User-Zugang",
-    "powerUserWarning": "Passwort nur jetzt anzeigen. Gilt nur für diese eine Datenbank — kein Cluster-SUPERUSER, kein Zugriff auf andere Kunden-DBs. Nicht in Tickets, Logs oder URLs teilen."
+    "powerUserWarning": "Passwort nur jetzt anzeigen. Gilt nur für diese eine Datenbank — kein Cluster-SUPERUSER, kein Zugriff auf andere Kunden-DBs. Nicht in Tickets, Logs oder URLs teilen.",
+    "databaseDeleted": "Datenbank gelöscht",
+    "userCreated": "Datenbank-User erstellt",
+    "passwordRotated": "Passwort rotiert",
+    "userDeleted": "Datenbank-User gelöscht",
+    "rowUpdated": "Zeile erfolgreich aktualisiert",
+    "rowsDeleted": "{{count}} Zeile(n) gelöscht",
+    "rowInserted": "Zeile erfolgreich eingefügt",
+    "deleteTableConfirm": "Tabelle {{schema}}.{{name}} wirklich löschen? Alle Daten gehen verloren.",
+    "enterUsernamePrompt": "Benutzername für den neuen Datenbank-User:",
+    "tableDeleted": "Tabelle gelöscht",
+    "deleteTablePrompt": "Tabelle {{schema}}.{{name}} wirklich löschen?"
+  },
+  "chat": {
+    "errors": {
+      "noMailbox": "Für dieses Gespräch steht noch keine Mailbox fest.",
+      "indexedDbUnavailable": "IndexedDB nicht verfügbar",
+      "noE2eeIdentity": "Kein angemeldetes Konto: dieses Gerät hat keine E2EE-Identität",
+      "groupDbBlocked": "Gruppenschlüssel-Datenbank blockiert: bitte andere Panel-Tabs schließen",
+      "biometricFailed": "Biometrische Bestätigung fehlgeschlagen.",
+      "chunkMissing": "Stück {{index}} fehlt",
+      "mediaDownloadFailed": "Medien-Download fehlgeschlagen: {{status}}"
+    }
+  },
+  "pwa": {
+    "updateTitle": "Update verfügbar",
+    "updateMessage": "Eine neue Version ist verfügbar. Jetzt aktualisieren?",
+    "updateConfirm": "Aktualisieren",
+    "updateCancel": "Später"
   }
 }

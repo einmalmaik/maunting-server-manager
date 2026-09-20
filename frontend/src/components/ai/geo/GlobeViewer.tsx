@@ -71,7 +71,7 @@ export function GlobeViewer({
 
   const resolvedLatitude = latitude ?? data?.coordinates?.latitude
   const resolvedLongitude = longitude ?? data?.coordinates?.longitude
-  const resolvedLocation = locationName ?? data?.location ?? t('ai.geo.region', 'Region')
+  const resolvedLocation = locationName ?? data?.location ?? t('ai.geo.region')
   const hasCoordinates = Number.isFinite(resolvedLatitude) && Number.isFinite(resolvedLongitude)
   const scene = data?.satellite?.scenes?.[0]
 
@@ -151,7 +151,7 @@ export function GlobeViewer({
   const detailZoom = bbox && Math.max(Math.abs(bbox[2] - bbox[0]), Math.abs(bbox[3] - bbox[1])) > 25 ? 5 : 10
 
   return (
-    <section className={`relative h-full min-h-[320px] overflow-hidden rounded-2xl border border-outline-variant/30 bg-surface-container-lowest ${className}`} aria-label={t('ai.geo.globeTitle', 'Regionale Karte')}>
+    <section className={`relative h-full min-h-[320px] overflow-hidden rounded-2xl border border-outline-variant/30 bg-surface-container-lowest ${className}`} aria-label={t('ai.geo.globeTitle')}>
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" aria-hidden="true" />
 
       {hasCoordinates && !mapUnavailable && (
@@ -181,16 +181,16 @@ export function GlobeViewer({
         <div className="rounded-xl border border-outline-variant/30 bg-surface-container-low/90 px-2.5 py-2 text-label-sm text-on-surface-variant shadow-sm backdrop-blur-md">
           <span className="flex items-center gap-1.5">
             <Compass className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
-            {mapReady ? t('ai.geo.mapInteractive', 'Karte aktiv') : t('ai.geo.mapLoading', 'Karte wird geladen')}
+            {mapReady ? t('ai.geo.mapInteractive') : t('ai.geo.mapLoading')}
           </span>
         </div>
       </div>
 
       {!hasCoordinates && (
-        <MapStatus icon={CircleDashed} title={t('ai.geo.coordinatesMissingTitle', 'Keine bestätigten Koordinaten')} body={t('ai.geo.coordinatesMissingBody', 'Die Karte wird angezeigt, sobald der Dienst einen Ort bestätigt hat.')} />
+        <MapStatus icon={CircleDashed} title={t('ai.geo.coordinatesMissingTitle')} body={t('ai.geo.coordinatesMissingBody')} />
       )}
       {mapUnavailable && (
-        <MapStatus icon={Satellite} title={t('ai.geo.mapUnavailableTitle', 'Karte nicht verfügbar')} body={t('ai.geo.mapUnavailableBody', 'MapTiler ist für diese Instanz nicht eingerichtet oder derzeit nicht erreichbar.')} />
+        <MapStatus icon={Satellite} title={t('ai.geo.mapUnavailableTitle')} body={t('ai.geo.mapUnavailableBody')} />
       )}
 
       {scene && (
@@ -199,7 +199,7 @@ export function GlobeViewer({
             <Satellite className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
             {scene.mission}
           </div>
-          <p className="mt-0.5 text-on-surface-variant">{t('ai.geo.sceneMetadata', 'Szenenmetadaten verfügbar')}</p>
+          <p className="mt-0.5 text-on-surface-variant">{t('ai.geo.sceneMetadata')}</p>
         </div>
       )}
     </section>

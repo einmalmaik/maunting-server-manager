@@ -83,7 +83,7 @@ export function DesktopAktionKarte({
             false,
             {
               abgewiesen: true,
-              grund: 'Der Benutzer hat die Ausführung dieser Aktion abgelehnt.',
+              grund: t('ai.actionProposal.userDeclined'),
             },
             'DESKTOP_ACTION_REJECTED',
           )
@@ -127,7 +127,7 @@ export function DesktopAktionKarte({
               </h2>
               <span className="inline-flex items-center gap-1 rounded-full bg-status-warning/10 px-2 py-0.5 text-xs font-medium text-status-warning">
                 <ShieldAlert className="h-3 w-3" aria-hidden="true" />
-                {t('mss.aktion.freigabeErforderlich', 'Bestätigung erforderlich')}
+                {t('mss.aktion.freigabeErforderlich')}
               </span>
             </div>
             <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">
@@ -142,7 +142,7 @@ export function DesktopAktionKarte({
             disabled={busy}
             onClick={() => void entscheiden(false)}
           >
-            {t('mss.aktion.ablehnen', 'Nein, ablehnen')}
+            {t('mss.aktion.ablehnen')}
           </Button>
           <Button
             variant="primary"
@@ -150,7 +150,7 @@ export function DesktopAktionKarte({
             disabled={busy}
             onClick={() => void entscheiden(true)}
           >
-            {t('mss.aktion.bestaetigen', 'Ja, ausführen')}
+            {t('mss.aktion.bestaetigen')}
           </Button>
         </div>
       </div>

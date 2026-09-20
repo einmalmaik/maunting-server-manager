@@ -50,6 +50,7 @@ import {
 } from '@msdis/shield/messaging'
 
 import { entsiegleZeile, versiegleZeile } from './lokaleVersiegelung'
+import i18n from '@/i18n'
 
 const DB_NAME = 'msm_e2ee_ratchet'
 const DB_VERSION = 1
@@ -95,7 +96,7 @@ export interface RatchetAblage {
 function oeffneDatenbank(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (typeof indexedDB === 'undefined') {
-      return reject(new Error('IndexedDB nicht verfügbar'))
+      return reject(new Error(i18n.t('chat.errors.indexedDbUnavailable')))
     }
     const req = indexedDB.open(DB_NAME, DB_VERSION)
     req.onupgradeneeded = () => {

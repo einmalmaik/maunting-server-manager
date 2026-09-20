@@ -66,7 +66,7 @@ export function MessengerTab() {
       .catch(() => {
         if (aktiv) {
           toast.error(
-            t('settings.messenger.errors.load', 'Der Anruf-Status konnte nicht geladen werden.'),
+            t('settings.messenger.errors.load'),
           )
         }
       })
@@ -96,7 +96,7 @@ export function MessengerTab() {
         api_secret: modus === 'extern' ? apiSecret.trim() || undefined : undefined,
       })
       uebernehme(neu)
-      toast.success(t('settings.messenger.saved', 'Gespeichert.'))
+      toast.success(t('settings.messenger.saved'))
     } catch (fehler: unknown) {
       toast.error(fehler instanceof Error ? fehler.message : String(fehler))
     } finally {
@@ -138,15 +138,12 @@ export function MessengerTab() {
       <div className="flex items-center gap-2">
         <PhoneCall className="h-5 w-5 text-secondary" aria-hidden="true" />
         <h3 id="messenger-calls-title" className="font-headline text-title-lg font-semibold text-on-surface">
-          {t('settings.messenger.title', 'Anrufe')}
+          {t('settings.messenger.title')}
         </h3>
       </div>
 
       <p className="max-w-3xl text-sm text-on-surface-variant">
-        {t(
-          'settings.messenger.description',
-          'Sprach-, Video- und Gruppenanrufe laufen über einen Medienserver. Der mitgelieferte läuft auf diesem Host und ist bereits eingerichtet. Ton und Bild bleiben in beiden Fällen Ende-zu-Ende verschlüsselt: der Medienserver leitet weiter, was er nicht öffnen kann.',
-        )}
+        {t('settings.messenger.description')}
       </p>
 
       {/* Statusstreifen */}
@@ -165,13 +162,13 @@ export function MessengerTab() {
         )}
         <span className="font-medium">
           {status?.erreichbar
-            ? t('settings.messenger.reachable', 'Anrufserver erreichbar')
-            : t('settings.messenger.unreachable', 'Anrufserver nicht erreichbar')}
+            ? t('settings.messenger.reachable')
+            : t('settings.messenger.unreachable')}
         </span>
         {status?.url && <span className="font-mono text-xs opacity-80">{status.url}</span>}
         {status?.erreichbar && (
           <span className="text-xs opacity-80">
-            {t('settings.messenger.activeRooms', '{{count}} aktive Räume', {
+            {t('settings.messenger.activeRooms', {
               count: status.raeume_aktiv,
             })}
           </span>
@@ -185,30 +182,24 @@ export function MessengerTab() {
             id="livekit-modus-label"
             className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant"
           >
-            {t('settings.messenger.mode', 'Medienserver')}
+            {t('settings.messenger.mode')}
           </span>
           <Dropdown
             value={modus}
             onChange={(wert) => setModus(wert as Modus)}
             disabled={!canWrite}
-            aria-label={t('settings.messenger.mode', 'Medienserver')}
+            aria-label={t('settings.messenger.mode')}
             data-testid="livekit-modus"
             options={[
               {
                 value: 'lokal',
-                label: t('settings.messenger.modeLocal', 'Integriert (empfohlen)'),
-                hint: t(
-                  'settings.messenger.modeLocalHint',
-                  'Läuft auf diesem Host, keine Konfiguration nötig',
-                ),
+                label: t('settings.messenger.modeLocal'),
+                hint: t('settings.messenger.modeLocalHint'),
               },
               {
                 value: 'extern',
-                label: t('settings.messenger.modeExternal', 'Externer Server'),
-                hint: t(
-                  'settings.messenger.modeExternalHint',
-                  'LiveKit Cloud oder ein eigener LiveKit-Server',
-                ),
+                label: t('settings.messenger.modeExternal'),
+                hint: t('settings.messenger.modeExternalHint'),
               },
             ]}
           />
@@ -218,20 +209,20 @@ export function MessengerTab() {
           <div className="max-w-2xl space-y-3">
             <label className="block space-y-1.5">
               <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                {t('settings.messenger.url', 'Server-URL')}
+                {t('settings.messenger.url')}
               </span>
               <Input
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 disabled={!canWrite}
                 placeholder="wss://mein-projekt.livekit.cloud"
-                aria-label={t('settings.messenger.url', 'Server-URL')}
+                aria-label={t('settings.messenger.url')}
               />
             </label>
 
             <label className="block space-y-1.5">
               <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                {t('settings.messenger.apiKey', 'API-Key')}
+                {t('settings.messenger.apiKey')}
               </span>
               <Input
                 value={apiKey}
@@ -242,13 +233,13 @@ export function MessengerTab() {
                     ? status.api_key_maskiert
                     : 'APIxxxxxxxxxxxx'
                 }
-                aria-label={t('settings.messenger.apiKey', 'API-Key')}
+                aria-label={t('settings.messenger.apiKey')}
               />
             </label>
 
             <label className="block space-y-1.5">
               <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                {t('settings.messenger.apiSecret', 'API-Secret')}
+                {t('settings.messenger.apiSecret')}
               </span>
               <PasswordInput
                 value={apiSecret}
@@ -257,13 +248,10 @@ export function MessengerTab() {
                 autoComplete="new-password"
                 placeholder={
                   hatBestand
-                    ? t(
-                        'settings.messenger.secretStored',
-                        'Gespeichert. Leer lassen, um es zu behalten.',
-                      )
+                    ? t('settings.messenger.secretStored')
                     : ''
                 }
-                aria-label={t('settings.messenger.apiSecret', 'API-Secret')}
+                aria-label={t('settings.messenger.apiSecret')}
               />
             </label>
 
@@ -279,7 +267,7 @@ export function MessengerTab() {
                 ) : (
                   <PlugZap className="h-4 w-4" aria-hidden="true" />
                 )}
-                {t('settings.messenger.test', 'Verbindung testen')}
+                {t('settings.messenger.test')}
               </Button>
               {testErgebnis && (
                 <span
@@ -301,17 +289,14 @@ export function MessengerTab() {
               ) : (
                 <Save className="h-4 w-4" aria-hidden="true" />
               )}
-              {t('settings.save', 'Speichern')}
+              {t('settings.save')}
             </Button>
           </div>
         )}
       </form>
 
       <p className="text-xs leading-relaxed text-on-surface-variant">
-        {t(
-          'settings.messenger.metadataHint',
-          'Der Medienserver sieht keine Gesprächsinhalte, aber er weiß, welche Kennungen wann in welchem Raum waren. Bei einem externen Anbieter liegt diese Information dort.',
-        )}
+        {t('settings.messenger.metadataHint')}
       </p>
     </section>
   )

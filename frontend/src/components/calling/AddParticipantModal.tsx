@@ -52,9 +52,9 @@ export const AddParticipantModal: React.FC<AddParticipantModalProps> = ({
     setLaeuft(freund.user_id)
     try {
       await onInvite(freund.user_id)
-      toast.success(`${freund.username} wurde eingeladen.`)
+      toast.success(t('calls.participantInvited', { username: freund.username }))
     } catch {
-      toast.error(`${freund.username} konnte nicht eingeladen werden.`)
+      toast.error(t('calls.participantInviteFailed', { username: freund.username }))
     } finally {
       setLaeuft(null)
     }

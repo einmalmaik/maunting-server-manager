@@ -85,14 +85,14 @@ export function SecretOnce({
             </div>
           </div>
           <p className="text-center text-xs font-medium text-on-surface-variant max-w-sm">
-            {t('mss.wizard.qrScanHint', 'Diesen QR-Code direkt mit der Smartphone- oder Desktop-Kamera scannen.')}
+            {t('mss.wizard.qrScanHint')}
           </p>
         </div>
       )}
 
       <div>
         <span className="mb-1 block text-xs font-medium text-on-surface-variant">
-          {t('ai.profile.devicesCodeLabel', 'Kopplungscode (manuelle Eingabe)')}
+          {t('ai.profile.devicesCodeLabel')}
         </span>
         <code className="block break-all rounded-xl bg-surface-container-lowest border border-outline-variant/30 p-3.5 text-center font-mono text-base tracking-widest font-bold text-primary select-all shadow-inner">
           {value}
@@ -109,10 +109,10 @@ export function SecretOnce({
           }}
         >
           <Copy className="h-4 w-4" aria-hidden="true" />
-          {t('common.copy', 'Kopieren')}
+          {t('common.copy')}
         </Button>
         <Button type="button" onClick={onDismiss}>
-          {t('hoster.secretUnderstood', 'Fertig')}
+          {t('hoster.secretUnderstood')}
         </Button>
       </div>
     </div>

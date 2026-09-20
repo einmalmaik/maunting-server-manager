@@ -37,7 +37,7 @@ export function AdminAudit() {
       setRows(mapAuditApiRows(data))
     } catch (err: unknown) {
       const message =
-        err instanceof Error ? err.message : t('audit.loadFailed', 'Audit-Log konnte nicht geladen werden.')
+        err instanceof Error ? err.message : t('audit.loadFailed')
       setError(message)
       setRows([])
       toast.error(message)
@@ -55,15 +55,12 @@ export function AdminAudit() {
   return (
     <div className="msm-page">
       <PageHeader
-        eyebrow={t('pageContext.administration', 'Administration')}
-        title={t('audit.title', 'Audit-Protokoll')}
-        description={t(
-          'audit.subtitle',
-          'Privilegierte Operator-Aktionen (wer, wann, was) — ohne Passwörter oder Tokens.',
-        )}
+        eyebrow={t('pageContext.administration')}
+        title={t('audit.title')}
+        description={t('audit.subtitle')}
         status={
           <span className="msm-badge-info">
-            {rows.length} {t('audit.entries', 'Einträge')}
+            {rows.length} {t('audit.entries')}
           </span>
         }
         actions={
@@ -74,24 +71,24 @@ export function AdminAudit() {
             disabled={loading}
           >
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            {t('common.refresh', 'Aktualisieren')}
+            {t('common.refresh')}
           </Button>
         }
       />
 
       <div className="msm-card mb-4 flex flex-wrap items-end gap-3 p-4">
         <label className="flex min-w-[12rem] flex-1 flex-col gap-1 text-sm text-on-surface-variant">
-          {t('audit.filterAction', 'Action-Filter')}
+          {t('audit.filterAction')}
           <input
             className="msm-input"
             value={actionFilter}
             onChange={(e) => setActionFilter(e.target.value)}
-            placeholder={t('audit.filterActionPlaceholder', 'z. B. postgres.admin.rotate')}
+            placeholder={t('audit.filterActionPlaceholder')}
             autoComplete="off"
           />
         </label>
         <label className="flex w-28 flex-col gap-1 text-sm text-on-surface-variant">
-          {t('audit.limit', 'Limit')}
+          {t('audit.limit')}
           <input
             className="msm-input"
             type="number"
@@ -106,7 +103,7 @@ export function AdminAudit() {
           onClick={() => void load()}
           disabled={loading}
         >
-          {t('audit.applyFilter', 'Filtern')}
+          {t('audit.applyFilter')}
         </Button>
       </div>
 
@@ -119,7 +116,7 @@ export function AdminAudit() {
       {!loading && !error && rows.length === 0 && (
         <div className="msm-card flex flex-col items-center gap-2 p-10 text-center text-on-surface-variant">
           <History className="h-8 w-8 opacity-60" />
-          <p>{t('audit.empty', 'Noch keine Audit-Einträge für diesen Filter.')}</p>
+          <p>{t('audit.empty')}</p>
         </div>
       )}
 
@@ -128,13 +125,13 @@ export function AdminAudit() {
           <table className="w-full min-w-[58rem] text-left text-sm">
             <thead className="border-b border-outline-variant bg-surface-container-high text-xs uppercase tracking-wide text-on-surface-variant">
               <tr>
-                <th className="px-3 py-2 font-medium">{t('audit.colTime', 'Zeit')}</th>
-                <th className="px-3 py-2 font-medium">{t('audit.colUser', 'User-ID')}</th>
-                <th className="px-3 py-2 font-medium">{t('audit.colAction', 'Action')}</th>
-                <th className="px-3 py-2 font-medium">{t('audit.colOrigin', 'Herkunft')}</th>
-                <th className="px-3 py-2 font-medium">{t('audit.colCorrelation', 'Vorgang')}</th>
-                <th className="px-3 py-2 font-medium">{t('audit.colTarget', 'Ziel')}</th>
-                <th className="px-3 py-2 font-medium">{t('audit.colDetails', 'Details')}</th>
+                <th className="px-3 py-2 font-medium">{t('audit.colTime')}</th>
+                <th className="px-3 py-2 font-medium">{t('audit.colUser')}</th>
+                <th className="px-3 py-2 font-medium">{t('audit.colAction')}</th>
+                <th className="px-3 py-2 font-medium">{t('audit.colOrigin')}</th>
+                <th className="px-3 py-2 font-medium">{t('audit.colCorrelation')}</th>
+                <th className="px-3 py-2 font-medium">{t('audit.colTarget')}</th>
+                <th className="px-3 py-2 font-medium">{t('audit.colDetails')}</th>
               </tr>
             </thead>
             <tbody>
@@ -163,7 +160,7 @@ export function AdminAudit() {
       )}
 
       {loading && rows.length === 0 && !error && (
-        <p className="text-sm text-on-surface-variant">{t('common.loading', 'Laden…')}</p>
+        <p className="text-sm text-on-surface-variant">{t('common.loading')}</p>
       )}
     </div>
   )

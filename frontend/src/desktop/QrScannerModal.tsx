@@ -34,7 +34,7 @@ export function QrScannerModal({ offen, onSchliessen, onCodeGefunden }: QrScanne
     async function starten() {
       try {
         if (!navigator.mediaDevices?.getUserMedia) {
-          throw new Error(t('mss.qrScanner.keineKamera', 'Kein Kamerazugriff auf diesem Gerät verfügbar.'))
+          throw new Error(t('mss.qrScanner.keineKamera'))
         }
 
         // Natuerliche Orientierung ohne erzwungenes Querformat (Portrait-kompatibel)
@@ -60,7 +60,7 @@ export function QrScannerModal({ offen, onSchliessen, onCodeGefunden }: QrScanne
         }
       } catch (err: any) {
         if (!abgebrochen) {
-          setKameraFehler(err.message || t('mss.qrScanner.fehler', 'Kamera konnte nicht geöffnet werden.'))
+          setKameraFehler(err.message || t('mss.qrScanner.fehler'))
         }
       }
     }
@@ -218,7 +218,7 @@ export function QrScannerModal({ offen, onSchliessen, onCodeGefunden }: QrScanne
           type="button"
           onClick={onSchliessen}
           className="absolute right-3.5 top-3.5 rounded-xl p-2 text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface transition-colors"
-          aria-label={t('common.close', 'Schließen')}
+          aria-label={t('common.close')}
         >
           <X className="h-5 w-5" />
         </button>
@@ -228,7 +228,7 @@ export function QrScannerModal({ offen, onSchliessen, onCodeGefunden }: QrScanne
             <Camera className="h-5 w-5" />
           </div>
           <h2 id="qr-scanner-title" className="font-headline text-base font-semibold text-on-surface">
-            {t('mss.qrScanner.titel', 'Kopplungscode scannen')}
+            {t('mss.qrScanner.titel')}
           </h2>
         </div>
 
@@ -237,7 +237,7 @@ export function QrScannerModal({ offen, onSchliessen, onCodeGefunden }: QrScanne
             <AlertCircle className="h-12 w-12 text-status-destructive" />
             <p className="text-sm font-medium text-status-destructive">{kameraFehler}</p>
             <p className="text-xs text-on-surface-variant">
-              {t('mss.qrScanner.hinweisManuell', 'Du kannst den 12-stelligen Kopplungscode jederzeit manuell abtippen.')}
+              {t('mss.qrScanner.hinweisManuell')}
             </p>
           </div>
         ) : (
@@ -285,11 +285,11 @@ export function QrScannerModal({ offen, onSchliessen, onCodeGefunden }: QrScanne
         )}
 
         <p className="text-center text-xs text-on-surface-variant max-w-xs">
-          {t('mss.qrScanner.anweisung', 'Halte die Kamera kurz auf den im Panel angezeigten QR-Code.')}
+          {t('mss.qrScanner.anweisung')}
         </p>
 
         <Button variant="secondary" onClick={onSchliessen} className="w-full">
-          {t('common.cancel', 'Abbrechen')}
+          {t('common.cancel')}
         </Button>
       </div>
     </div>

@@ -93,7 +93,7 @@ export function RegionalAnalysisLayout({
             }`}
           >
             <MessageSquare className="h-3.5 w-3.5" />
-            <span>{t('ai.geo.mobileTabs.chat', 'Chat / Sprache')}</span>
+            <span>{t('ai.geo.mobileTabs.chat')}</span>
           </button>
 
           <button
@@ -107,7 +107,7 @@ export function RegionalAnalysisLayout({
             }`}
           >
             <Globe2 className="h-3.5 w-3.5" />
-            <span>{t('ai.geo.mobileTabs.globe', '3D-Globus')}</span>
+            <span>{t('ai.geo.mobileTabs.globe')}</span>
           </button>
 
           <button
@@ -121,7 +121,7 @@ export function RegionalAnalysisLayout({
             }`}
           >
             <Satellite className="h-3.5 w-3.5" />
-            <span>{t('ai.geo.mobileTabs.satellite', 'Satellit & Info')}</span>
+            <span>{t('ai.geo.mobileTabs.satellite')}</span>
           </button>
         </div>
 
@@ -130,12 +130,12 @@ export function RegionalAnalysisLayout({
           variant="ghost"
           size="sm"
           onClick={onClose}
-          aria-label={t('ai.geo.close', 'Schließen')}
-          title={t('ai.geo.close', 'Schließen')}
+          aria-label={t('ai.geo.close')}
+          title={t('ai.geo.close')}
           className="h-8 shrink-0 px-2 rounded-lg text-xs font-medium text-on-surface-variant hover:text-status-destructive hover:bg-status-destructive/10 border border-outline-variant/30 flex items-center gap-1 transition-colors"
         >
           <X className="h-4 w-4" />
-          <span className="hidden sm:inline">{t('ai.geo.close', 'Schließen')}</span>
+          <span className="hidden sm:inline">{t('ai.geo.close')}</span>
         </Button>
       </div>
 

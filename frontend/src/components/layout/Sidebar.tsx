@@ -102,13 +102,13 @@ export function Sidebar({ mobile = false, onNavigate, presenceStatus: propPresen
   const profileMenuItems: ProfileDropdownItem[] = [
     {
       key: 'profile',
-      label: t('profile.title', 'Profil'),
+      label: t('profile.title'),
       icon: <UserIcon className="h-4 w-4" />,
       onClick: handleNavigateProfile,
     },
     {
       key: 'logout',
-      label: t('nav.logout', 'Abmelden'),
+      label: t('nav.logout'),
       icon: <LogOut className="h-4 w-4" />,
       onClick: () => void handleLogout(),
       tone: 'danger',
@@ -116,21 +116,21 @@ export function Sidebar({ mobile = false, onNavigate, presenceStatus: propPresen
   ]
 
   const navItems = buildNavigation({
-    dashboard: t('nav.dashboard'), calendar: t('nav.calendar', 'Kalender'), notes: t('nav.notes', 'Notizen'),
-    chat: t('nav.chat', 'Chat'),
+    dashboard: t('nav.dashboard'), calendar: t('nav.calendar'), notes: t('nav.notes'),
+    chat: t('nav.chat'),
     servers: t('nav.servers'), users: t('nav.users'), roles: t('nav.roles'),
     teams: t('nav.teams'),
-    audit: t('nav.audit', 'Audit'),
+    audit: t('nav.audit'),
     settings: t('nav.settings'), blueprints: t('nav.blueprints'), panelBackups: t('nav.panelBackups'),
-    panelDatabase: t('nav.panelDatabase', 'Panel-Datenbank'), nodes: t('nav.nodes'), docs: t('nav.docs'), ai: t('nav.ai'),
+    panelDatabase: t('nav.panelDatabase'), nodes: t('nav.nodes'), docs: t('nav.docs'), ai: t('nav.ai'),
   }, {
     owner: Boolean(user?.is_owner), canManageUsers, canManageRoles, canViewAudit, canViewSettings,
     canManagePanelBackups, canReadPanelDatabase, canViewNodes: canReadNodes || canManageNodes, canUseAi, canUseSkills,
     calendarEnabled, notesEnabled, socialEnabled, isOnline,
   })
   const groupLabels: Record<NavGroupName, string> = {
-    Overview: t('navGroups.overview', 'Overview'), Infrastructure: t('navGroups.infrastructure', 'Infrastructure'),
-    Administration: t('navGroups.administration', 'Administration'), Panel: t('navGroups.panel', 'Panel'), Help: t('navGroups.help', 'Help'),
+    Overview: t('navGroups.overview'), Infrastructure: t('navGroups.infrastructure'),
+    Administration: t('navGroups.administration'), Panel: t('navGroups.panel'), Help: t('navGroups.help'),
   }
   const groups = (Object.keys(groupLabels) as NavGroupName[]).map(group => ({ group, items: navItems.filter(item => item.group === group) })).filter(group => group.items.length > 0)
 
@@ -139,7 +139,7 @@ export function Sidebar({ mobile = false, onNavigate, presenceStatus: propPresen
       ref={asideRef}
       role={mobile ? 'dialog' : undefined}
       aria-modal={mobile || undefined}
-      aria-label={mobile ? t('shell.mainNavigation', 'Main navigation') : undefined}
+      aria-label={mobile ? t('shell.mainNavigation') : undefined}
       className={`msm-sidebar fixed left-0 top-0 z-40 flex flex-col ${mobile ? 'h-[100dvh] w-full !bg-surface-container-low animate-slide-in-left' : 'hidden h-screen w-64 lg:flex'}`}
     >
       {/* Brand */}
@@ -150,7 +150,7 @@ export function Sidebar({ mobile = false, onNavigate, presenceStatus: propPresen
             MSM
           </h1>
         </div>
-        {mobile && <button type="button" onClick={onNavigate} className="ml-auto grid min-h-11 min-w-11 place-items-center rounded-lg hover:bg-surface-container-high" aria-label={t('shell.closeNavigation', 'Close navigation')}><X className="h-5 w-5" /></button>}
+        {mobile && <button type="button" onClick={onNavigate} className="ml-auto grid min-h-11 min-w-11 place-items-center rounded-lg hover:bg-surface-container-high" aria-label={t('shell.closeNavigation')}><X className="h-5 w-5" /></button>}
       </div>
 
       {/* Create Server Button — nur wenn `servers.create` (Owner-Bypass via Hook) und online. */}
@@ -162,13 +162,13 @@ export function Sidebar({ mobile = false, onNavigate, presenceStatus: propPresen
             className={buttonClasses('primary', 'lg', 'w-full')}
           >
             <Plus className="w-4 h-4" />
-            {t('servers.create', 'Server erstellen')}
+            {t('servers.create')}
           </NavLink>
         </div>
       )}
 
       {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto px-2 pb-3" aria-label={t('shell.areas', 'Areas')}>
+      <nav className="flex-1 overflow-y-auto px-2 pb-3" aria-label={t('shell.areas')}>
         {groups.map(({ group, items }) => (
           <section key={group} className="mb-3" aria-labelledby={`nav-${group}`}>
             <h2 id={`nav-${group}`} className="px-4 pb-1 pt-2 font-label-md text-label-sm font-semibold uppercase tracking-[.16em] text-on-surface-variant/55">{groupLabels[group]}</h2>

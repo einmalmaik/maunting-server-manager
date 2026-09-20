@@ -372,7 +372,7 @@ export function AufgabenAnsicht() {
                     </div>
                     <div>
                       <span className="mb-1.5 block text-xs text-on-surface-variant">
-                        {t('ai.tasks.weekdays', 'Wochentage')}
+                        {t('ai.tasks.weekdays')}
                       </span>
                       <div className="flex flex-wrap gap-1.5">
                         {WOCHENTAGE.map((tag) => {
@@ -459,7 +459,7 @@ export function AufgabenAnsicht() {
                     onChange={(wert) => setze('timezone', wert)}
                     options={zeitzonenOptionen}
                     searchable={true}
-                    searchPlaceholder={t('ai.tasks.timezoneSearch', 'Zeitzone suchen …')}
+                    searchPlaceholder={t('ai.tasks.timezoneSearch')}
                     className="max-w-64"
                     aria-label={t('ai.tasks.timezone')}
                   />

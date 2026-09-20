@@ -13,7 +13,7 @@ export function Docs() {
   return (
     <div className="msm-page mx-auto max-w-5xl">
       <PageHeader
-        eyebrow={t('pageContext.help', 'Help & guidance')}
+        eyebrow={t('pageContext.help')}
         title={t('docsIndex.title')}
         description={t('docsIndex.subtitle')}
         status={<BookOpen className="h-6 w-6 text-primary" aria-hidden="true" />}

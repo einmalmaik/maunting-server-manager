@@ -205,7 +205,7 @@ export function PanelBackups() {
 
   return (
     <div className="msm-page">
-      <PageHeader eyebrow={t('pageContext.panel', 'Panel')} title={t('panelBackups.title')} description={t('panelBackups.subtitle')} status={<span className="msm-badge-info">{backups.length} Backups</span>} actions={<div className="flex flex-wrap gap-2">
+      <PageHeader eyebrow={t('pageContext.panel')} title={t('panelBackups.title')} description={t('panelBackups.subtitle')} status={<span className="msm-badge-info">{backups.length} Backups</span>} actions={<div className="flex flex-wrap gap-2">
           <Button variant="secondary"
             onClick={() => setShowSettings(!showSettings)}
             className={`flex min-h-11 items-center gap-2 ${showSettings ? 'bg-surface-container' : ''}`}

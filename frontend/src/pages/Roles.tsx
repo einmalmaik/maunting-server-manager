@@ -220,7 +220,7 @@ export function Roles() {
 
   return (
     <div className="msm-page">
-      <PageHeader eyebrow={t('pageContext.administration', 'Administration')} title={t('roles.title')} description={t('roles.subtitle')} status={<span className="msm-badge-info">{roles.length} {t('roles.title')}</span>} actions={canManage ? (
+      <PageHeader eyebrow={t('pageContext.administration')} title={t('roles.title')} description={t('roles.subtitle')} status={<span className="msm-badge-info">{roles.length} {t('roles.title')}</span>} actions={canManage ? (
           <Button
             onClick={() => {
               setEditing(null)

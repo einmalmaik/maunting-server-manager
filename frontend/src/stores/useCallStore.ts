@@ -13,6 +13,7 @@
  */
 
 import { create } from 'zustand'
+import i18n from '@/i18n'
 import {
   beendeGruppenanruf,
   beendeAktivenAnrufRemote,
@@ -664,7 +665,7 @@ export const useCallStore = create<UseCallState>((set, get) => {
           get().participants.some((p) => !p.isSelf)
         if (get().state === 'outgoing' || !hatFremde) {
           get().endCall()
-          toast.info('Niemand hat abgenommen.')
+          toast.info(i18n.t('calls.nobodyAnswered'))
         }
       }, CALL_TIMEOUT_MS)
       const einladung = await ladeZuAnrufEin(partner.userId, mode)
@@ -718,7 +719,7 @@ export const useCallStore = create<UseCallState>((set, get) => {
         incomingCallTimer = null
         if (get().state === 'incoming') {
           get().rejectCall()
-          toast.info('Anruf verpasst.')
+          toast.info(i18n.t('calls.callMissed'))
         }
       }, CALL_TIMEOUT_MS)
       set({
@@ -844,7 +845,7 @@ export const useCallStore = create<UseCallState>((set, get) => {
       // Serverstumm hebt nur auf, wer es gesetzt hat. Der Versuch scheiterte
       // ohnehin am Server; hier scheitert er sichtbar und ohne Zustandswechsel.
       if (get().serverStumm) {
-        toast.error('Ein Moderator hat dich stummgeschaltet. Nur die Moderation kann das aufheben.')
+        toast.error(i18n.t('calls.moderatorMuted'))
         return
       }
       const naechster = !get().isMuted
@@ -893,7 +894,7 @@ export const useCallStore = create<UseCallState>((set, get) => {
         const name = (fehler as { name?: string } | null)?.name ?? ''
         // Abbrechen im Auswahldialog des Browsers ist kein Fehler.
         if (name === 'NotAllowedError' || name === 'AbortError') return
-        toast.error('Die Bildschirmfreigabe konnte nicht gestartet werden.')
+        toast.error(i18n.t('calls.screenshareFailed'))
       }
     },
 
@@ -1128,7 +1129,7 @@ export const useCallStore = create<UseCallState>((set, get) => {
       } else if (ev.type === 'call_transferred') {
         if (ev.old_device_id === myId && get().state !== 'idle') {
           get().endCall()
-          toast.info('Der Anruf wurde auf ein anderes Gerät übertragen.')
+          toast.info(i18n.t('calls.callTransferred'))
         }
       } else if (ev.type === 'call_partner_transferred') {
         if (get().state === 'active' && (!ev.raum || get().raum === ev.raum)) {
@@ -1139,12 +1140,12 @@ export const useCallStore = create<UseCallState>((set, get) => {
       } else if (ev.type === 'call_superseded') {
         if (get().state !== 'idle' && (!ev.old_raum || get().raum === ev.old_raum)) {
           get().endCall()
-          toast.info('Du bist auf einem anderen Gerät einem anderen Anruf beigetreten.')
+          toast.info(i18n.t('calls.joinedOnOtherDevice'))
         }
       } else if (ev.type === 'call_ended_remotely') {
         if (get().state !== 'idle' && (!ev.raum || get().raum === ev.raum)) {
           get().endCall()
-          toast.info('Der Anruf wurde beendet.')
+          toast.info(i18n.t('calls.callEnded'))
         }
       }
     },
@@ -1200,7 +1201,7 @@ export const useCallStore = create<UseCallState>((set, get) => {
           (!ev.signaling_token || ev.signaling_token === call.raum)
         ) {
           call.endCall()
-          toast.info('Der Anruf wurde abgelehnt.')
+          toast.info(i18n.t('calls.callRejected'))
         }
       } else if (ev.type === 'direct_call_cancelled') {
         const call = get()
@@ -1210,7 +1211,7 @@ export const useCallStore = create<UseCallState>((set, get) => {
           (!ev.signaling_token || ev.signaling_token === call.raum)
         ) {
           call.endCall()
-          toast.info('Der Anrufer hat aufgelegt.')
+          toast.info(i18n.t('calls.callerHungUp'))
         }
       } else if (ev.type === 'group_call_started') {
         if (ev.group_id && ev.room_token) {
@@ -1251,7 +1252,7 @@ export const useCallStore = create<UseCallState>((set, get) => {
           const call = get()
           if (call.group?.id === groupId && call.raum === roomToken) {
             call.endCall()
-            toast.info('Der Gruppenanruf wurde beendet.')
+            toast.info(i18n.t('calls.groupCallEnded'))
           }
         }
       } else if (ev.type === 'call_key') {

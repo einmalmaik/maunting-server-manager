@@ -1064,7 +1064,7 @@ Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe W
       toast.success(t('hoster.simulator.copiedAiPrompt'))
       setTimeout(() => setCopiedPrompt(false), 3000)
     } catch {
-      toast.error(t('common.clipboardError', 'Zwischenablage nicht verfügbar'))
+      toast.error(t('common.clipboardError'))
     }
   }
 
@@ -1110,7 +1110,7 @@ Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe W
               {copiedPrompt ? (
                 <>
                   <Check className="h-3.5 w-3.5 text-status-success" />
-                  {t('hoster.copied', 'Kopiert')}
+                  {t('hoster.copied')}
                 </>
               ) : (
                 <>

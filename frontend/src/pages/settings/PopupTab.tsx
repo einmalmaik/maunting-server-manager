@@ -124,7 +124,7 @@ export function PopupTab() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!title.trim() || !contentMarkdown.trim()) {
-      toast.error(t('popups.validationRequired', 'Titel und Textinhalt sind Pflichtfelder.'))
+      toast.error(t('popups.validationRequired'))
       return
     }
 
@@ -142,10 +142,10 @@ export function PopupTab() {
 
       if (editingPopup) {
         await updateAdminPopup(editingPopup.id, payload)
-        toast.success(t('popups.saved', 'Pop-up erfolgreich aktualisiert.'))
+        toast.success(t('popups.saved'))
       } else {
         await createAdminPopup(payload)
-        toast.success(t('popups.created', 'Pop-up erfolgreich erstellt.'))
+        toast.success(t('popups.created'))
       }
 
       cancelEdit()
@@ -159,16 +159,16 @@ export function PopupTab() {
 
   const handleDelete = async (popup: PanelPopup) => {
     const ok = await confirm({
-      title: t('popups.deleteTitle', 'Pop-up löschen?'),
-      message: t('popups.deleteConfirm', 'Möchtest du dieses Pop-up wirklich unwiderruflich löschen?'),
+      title: t('popups.deleteTitle'),
+      message: t('popups.deleteConfirm'),
       danger: true,
-      confirmText: t('common.delete', 'Löschen'),
+      confirmText: t('common.delete'),
     })
     if (!ok) return
 
     try {
       await deleteAdminPopup(popup.id)
-      toast.success(t('popups.deleted', 'Pop-up gelöscht.'))
+      toast.success(t('popups.deleted'))
       if (editingPopup?.id === popup.id) {
         cancelEdit()
       }
@@ -199,19 +199,16 @@ export function PopupTab() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="font-headline text-headline-sm text-primary">
-            {t('popups.title', 'Pop-ups & Ankündigungen')}
+            {t('popups.title')}
           </h2>
           <p className="font-body-md text-body-md text-on-surface-variant mt-1">
-            {t(
-              'popups.subtitle',
-              'Erstelle wichtige Hinweise und Ankündigungen für alle Benutzer des Panels.'
-            )}
+            {t('popups.subtitle')}
           </p>
         </div>
         {canWrite && !isCreating && !editingPopup && (
           <Button variant="primary" onClick={startCreate} className="shrink-0">
             <Plus className="w-4 h-4 mr-1.5" />
-            {t('popups.newPopup', 'Neues Pop-up anlegen')}
+            {t('popups.newPopup')}
           </Button>
         )}
       </div>
@@ -222,7 +219,7 @@ export function PopupTab() {
           <div className="flex items-center justify-between border-b border-outline-variant/30 pb-4">
             <h3 className="font-headline text-title-lg text-on-surface flex items-center gap-2">
               <Megaphone className="w-5 h-5 text-primary" />
-              {isCreating ? t('popups.createHeader', 'Neues Pop-up erstellen') : t('popups.editHeader', 'Pop-up bearbeiten')}
+              {isCreating ? t('popups.createHeader') : t('popups.editHeader')}
             </h3>
             <button
               type="button"
@@ -237,7 +234,7 @@ export function PopupTab() {
             {/* Titel */}
             <div>
               <label htmlFor="popup-title-input" className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                {t('popups.fieldTitle', 'Titel / Überschrift')} *
+                {t('popups.fieldTitle')} *
               </label>
               <input
                 id="popup-title-input"
@@ -255,7 +252,7 @@ export function PopupTab() {
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label htmlFor="popup-content-input" className="block font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">
-                  {t('popups.fieldContent', 'Inhalt (Markdown)')} *
+                  {t('popups.fieldContent')} *
                 </label>
                 <div className="flex items-center gap-1 bg-surface-container-high rounded-lg p-1 border border-outline-variant/30">
                   <button
@@ -332,27 +329,27 @@ export function PopupTab() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                  {t('popups.fieldStartAt', 'Gültig ab (optional)')}
+                  {t('popups.fieldStartAt')}
                 </label>
                 <DateTimePicker
                   value={startAt}
                   onChange={setStartAt}
                   locale={i18n.language.startsWith('de') ? 'de' : 'en'}
-                  placeholder={t('popups.noStartAt', 'Kein Startzeitpunkt (sofort aktiv)')}
-                  aria-label={t('popups.fieldStartAt', 'Gültig ab (optional)')}
+                  placeholder={t('popups.noStartAt')}
+                  aria-label={t('popups.fieldStartAt')}
                   className="w-full"
                 />
               </div>
               <div>
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                  {t('popups.fieldEndAt', 'Gültig bis (optional)')}
+                  {t('popups.fieldEndAt')}
                 </label>
                 <DateTimePicker
                   value={endAt}
                   onChange={setEndAt}
                   locale={i18n.language.startsWith('de') ? 'de' : 'en'}
-                  placeholder={t('popups.noEndAt', 'Kein Endzeitpunkt (unbegrenzt)')}
-                  aria-label={t('popups.fieldEndAt', 'Gültig bis (optional)')}
+                  placeholder={t('popups.noEndAt')}
+                  aria-label={t('popups.fieldEndAt')}
                   className="w-full"
                 />
               </div>
@@ -362,7 +359,7 @@ export function PopupTab() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                  {t('popups.fieldButtonText', 'Aktions-Button Text (optional)')}
+                  {t('popups.fieldButtonText')}
                 </label>
                 <input
                   type="text"
@@ -375,7 +372,7 @@ export function PopupTab() {
               </div>
               <div>
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                  {t('popups.fieldButtonUrl', 'Aktions-Button URL (optional)')}
+                  {t('popups.fieldButtonUrl')}
                 </label>
                 <input
                   type="url"
@@ -392,10 +389,10 @@ export function PopupTab() {
             <div className="flex items-center justify-between pt-2">
               <div>
                 <span className="font-label-lg text-label-lg text-on-surface font-medium block">
-                  {t('popups.fieldIsActive', 'Pop-up aktivieren')}
+                  {t('popups.fieldIsActive')}
                 </span>
                 <span className="text-body-sm text-on-surface-variant block">
-                  {t('popups.fieldIsActiveHint', 'Wenn aktiv, wird das Pop-up berechtigten Nutzern im Panel angezeigt.')}
+                  {t('popups.fieldIsActiveHint')}
                 </span>
               </div>
               <Switch checked={isActive} onCheckedChange={setIsActive} />
@@ -406,14 +403,14 @@ export function PopupTab() {
           <div className="flex items-center justify-end gap-3 pt-4 border-t border-outline-variant/30">
             <Button type="button" variant="secondary" onClick={openPreview}>
               <Eye className="w-4 h-4 mr-1.5" />
-              {t('popups.preview', 'Live-Vorschau')}
+              {t('popups.preview')}
             </Button>
             <Button type="button" variant="ghost" onClick={cancelEdit}>
-              {t('common.cancel', 'Abbrechen')}
+              {t('common.cancel')}
             </Button>
             <Button type="submit" variant="primary" disabled={saving}>
               <Save className="w-4 h-4 mr-1.5" />
-              {saving ? t('common.saving', 'Speichern...') : t('common.save', 'Speichern')}
+              {saving ? t('common.saving') : t('common.save')}
             </Button>
           </div>
         </form>
@@ -423,7 +420,7 @@ export function PopupTab() {
       <div className="msm-card overflow-hidden">
         <div className="p-5 border-b border-outline-variant/30 bg-surface-container-high/30">
           <h3 className="font-headline text-title-md text-on-surface">
-            {t('popups.listTitle', 'Angelegte Ankündigungen')}
+            {t('popups.listTitle')}
           </h3>
         </div>
 
@@ -435,10 +432,10 @@ export function PopupTab() {
           <div className="p-8 text-center text-on-surface-variant">
             <Megaphone className="w-10 h-10 mx-auto mb-2 opacity-40 text-primary" />
             <p className="font-body-md text-body-md font-medium">
-              {t('popups.empty', 'Keine Pop-ups oder Ankündigungen vorhanden.')}
+              {t('popups.empty')}
             </p>
             <p className="text-body-sm text-on-surface-variant/80 mt-1">
-              {t('popups.emptyHint', 'Klicke oben auf „Neues Pop-up anlegen“, um eine Ankündigung zu erstellen.')}
+              {t('popups.emptyHint')}
             </p>
           </div>
         ) : (
@@ -461,23 +458,23 @@ export function PopupTab() {
                       {p.is_active && !isExpired && !isFuture && (
                         <span className="msm-badge-success flex items-center gap-1 text-xs">
                           <CheckCircle className="w-3 h-3" />
-                          {t('popups.statusActive', 'Aktiv')}
+                          {t('popups.statusActive')}
                         </span>
                       )}
                       {p.is_active && isFuture && (
                         <span className="msm-badge-info flex items-center gap-1 text-xs">
                           <Clock className="w-3 h-3" />
-                          {t('popups.statusScheduled', 'Geplant')}
+                          {t('popups.statusScheduled')}
                         </span>
                       )}
                       {isExpired && (
                         <span className="msm-badge-warning flex items-center gap-1 text-xs">
-                          {t('popups.statusExpired', 'Abgelaufen')}
+                          {t('popups.statusExpired')}
                         </span>
                       )}
                       {!p.is_active && (
                         <span className="msm-badge-neutral text-xs">
-                          {t('popups.statusInactive', 'Inaktiv')}
+                          {t('popups.statusInactive')}
                         </span>
                       )}
                     </div>
@@ -510,10 +507,10 @@ export function PopupTab() {
                       variant="secondary"
                       size="sm"
                       onClick={() => setPreviewPopup(p)}
-                      title={t('popups.preview', 'Vorschau')}
+                      title={t('popups.preview')}
                     >
                       <Eye className="w-4 h-4 mr-1" />
-                      {t('popups.previewBtn', 'Vorschau')}
+                      {t('popups.previewBtn')}
                     </Button>
                     {canWrite && (
                       <>
@@ -521,7 +518,7 @@ export function PopupTab() {
                           variant="ghost"
                           size="sm"
                           onClick={() => startEdit(p)}
-                          title={t('common.edit', 'Bearbeiten')}
+                          title={t('common.edit')}
                         >
                           <Edit2 className="w-4 h-4" />
                         </Button>
@@ -529,7 +526,7 @@ export function PopupTab() {
                           variant="ghost"
                           size="sm"
                           onClick={() => handleDelete(p)}
-                          title={t('common.delete', 'Löschen')}
+                          title={t('common.delete')}
                           className="text-on-surface-variant hover:text-error"
                         >
                           <Trash2 className="w-4 h-4" />

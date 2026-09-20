@@ -36,6 +36,7 @@
 
 import { randomBytes } from '@msdis/shield/random'
 import { bytesToHex } from '@msdis/shield/core'
+import i18n from '@/i18n'
 
 import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
 import { generateLocalE2eeKeyPair, type LocalE2eeKeyPair } from './e2eeCrypto'
@@ -87,7 +88,7 @@ function ablageSchluessel(kontoId: number): string {
 function oeffneDatenbank(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (typeof indexedDB === 'undefined') {
-      return reject(new Error('IndexedDB nicht verfügbar'))
+      return reject(new Error(i18n.t('chat.errors.indexedDbUnavailable')))
     }
     // Version 3: Store `devices` kommt hinzu. `keys` und `keyring` stammen aus
     // der Zeit des Kontoschlüssels und bleiben unangetastet — dort liegt das
@@ -276,7 +277,7 @@ async function uebernimmAltbestand(kontoId: number): Promise<EigenesGeraet | nul
 function meinKonto(): number {
   const id = angemeldetesKonto()
   if (id === null) {
-    throw new Error('Kein angemeldetes Konto: dieses Gerät hat keine E2EE-Identität')
+    throw new Error(i18n.t('chat.errors.noE2eeIdentity'))
   }
   return id
 }

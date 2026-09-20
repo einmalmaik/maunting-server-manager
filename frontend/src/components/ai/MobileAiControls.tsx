@@ -94,7 +94,7 @@ export function MobileAiControls({ onActionDone }: { onActionDone?: () => void }
   const handleClearHistory = async () => {
     try {
       await aiApi.clearHistory()
-      toast.success(t('ai.chat.cleared', 'Verlauf gelöscht'))
+      toast.success(t('ai.chat.cleared'))
       window.dispatchEvent(new Event('msm:ai-chat-cleared'))
       onActionDone?.()
     } catch (e) {
@@ -109,7 +109,7 @@ export function MobileAiControls({ onActionDone }: { onActionDone?: () => void }
       <div className="space-y-1.5">
         <label className="flex items-center gap-1.5 text-xs font-medium text-on-surface-variant">
           <Sparkles className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
-          <span>{t('ai.chat.provider', 'KI-Anbieter & Modell')}</span>
+          <span>{t('ai.chat.provider')}</span>
         </label>
         <Dropdown
           value={providerId ? String(providerId) : null}
@@ -126,7 +126,7 @@ export function MobileAiControls({ onActionDone }: { onActionDone?: () => void }
       {activeProvider?.reasoning && (
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-on-surface-variant">
-            {t('ai.chat.reasoningLevel', 'Nachdenken / Denkschritte')}
+            {t('ai.chat.reasoningLevel')}
           </label>
           <ReasoningPicker
             provider={activeProvider}
@@ -141,7 +141,7 @@ export function MobileAiControls({ onActionDone }: { onActionDone?: () => void }
         <div className="flex items-center justify-between pt-1 border-t border-outline-variant/30">
           <div className="flex items-center gap-1.5">
             <Zap className="h-3.5 w-3.5 text-status-warning" aria-hidden="true" />
-            <span className="text-xs font-medium text-on-surface">{t('ai.autonomy.title', 'Autonomer Modus')}</span>
+            <span className="text-xs font-medium text-on-surface">{t('ai.autonomy.title')}</span>
           </div>
           <AiAutonomyButton servers={servers} />
         </div>
@@ -156,7 +156,7 @@ export function MobileAiControls({ onActionDone }: { onActionDone?: () => void }
           className="w-full justify-center text-xs text-status-destructive hover:bg-status-destructive/10"
         >
           <Trash2 className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
-          {t('ai.chat.clear', 'Verlauf leeren')}
+          {t('ai.chat.clear')}
         </Button>
       </div>
     </div>

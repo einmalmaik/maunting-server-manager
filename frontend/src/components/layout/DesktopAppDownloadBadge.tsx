@@ -34,11 +34,11 @@ export function DesktopAppDownloadBadge() {
 
   const titleText = isAndroid ? 'MSS Mobile App' : 'MSS Desktop'
   const subtext = isAndroid
-    ? t('desktopBadge.androidLabel', 'App für Android (.apk)')
-    : t('desktopBadge.label', 'Desktop-App für Windows')
+    ? t('desktopBadge.androidLabel')
+    : t('desktopBadge.label')
   const tooltip = isAndroid
-    ? t('desktopBadge.androidTooltip', 'Maunting Smart System Android-App herunterladen')
-    : t('desktopBadge.tooltip', 'Maunting Smart System Desktop-App herunterladen')
+    ? t('desktopBadge.androidTooltip')
+    : t('desktopBadge.tooltip')
 
   return (
     <SidebarDownloadBadge

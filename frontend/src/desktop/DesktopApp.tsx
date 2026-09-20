@@ -777,7 +777,7 @@ function Hauptseite({
       ? [
           {
             key: 'settings',
-            label: t('mss.app.einstellungen', 'Einstellungen'),
+            label: t('mss.app.einstellungen'),
             icon: <SettingsIcon className="h-4 w-4" />,
             onClick: () => navigate('/einstellungen'),
           },
@@ -785,7 +785,7 @@ function Hauptseite({
       : []),
     {
       key: 'logout',
-      label: t('mss.app.abmelden', 'Abmelden'),
+      label: t('mss.app.abmelden'),
       icon: <LogOut className="h-4 w-4" />,
       onClick: () => void abmelden(),
       tone: 'danger',
@@ -807,7 +807,7 @@ function Hauptseite({
           {isOffline && (
             <div className="flex items-center gap-1 rounded-full border border-outline-variant/50 bg-surface-container-high/60 px-2 py-0.5 text-label-sm font-medium text-on-surface-variant">
               <WifiOff className="h-3 w-3" aria-hidden="true" />
-              <span>{t('common.offline', 'Offline')}</span>
+              <span>{t('common.offline')}</span>
             </div>
           )}
           {offeneUebernahme && !isOffline && (
@@ -828,7 +828,7 @@ function Hauptseite({
               aktiv={bereich === 'ki'}
               onClick={() => navigate('/ai')}
               icon={<Bot className="h-4 w-4 shrink-0" />}
-              label={t('mss.app.ki', t('nav.ai', 'KI-Assistent'))}
+              label={t('mss.app.ki', t('nav.ai'))}
             />
           )}
           {!isOffline && darfMessenger && (
@@ -836,7 +836,7 @@ function Hauptseite({
               aktiv={bereich === 'chat'}
               onClick={() => navigate('/chat')}
               icon={<MessageSquare className="h-4 w-4 shrink-0" />}
-              label={t('mss.app.messenger', t('nav.chat', 'Messenger'))}
+              label={t('mss.app.messenger', t('nav.chat'))}
               badge={totalMessengerUnread}
               pulse={totalMessengerUnread > 0}
             />
@@ -854,7 +854,7 @@ function Hauptseite({
               aktiv={bereich === 'notizen'}
               onClick={() => navigate('/notizen')}
               icon={<StickyNote className="h-4 w-4 shrink-0" />}
-              label={t('mss.app.notizen', 'Notizen')}
+              label={t('mss.app.notizen')}
             />
           )}
           {!isOffline && darfGedaechtnis && (
@@ -870,7 +870,7 @@ function Hauptseite({
               aktiv={bereich === 'tresor'}
               onClick={() => navigate('/tresor')}
               icon={<KeyRound className="h-4 w-4 shrink-0" />}
-              label={t('mss.app.tresor', 'Passwort-Manager')}
+              label={t('mss.app.tresor')}
             />
           )}
         </nav>
@@ -939,7 +939,7 @@ function Hauptseite({
                   }`}
                 >
                   <Bot className="h-4 w-4" />
-                  <span>{t('mss.app.ki', t('nav.ai', 'KI-Assistent'))}</span>
+                  <span>{t('mss.app.ki', t('nav.ai'))}</span>
                 </button>
               )}
 
@@ -954,7 +954,7 @@ function Hauptseite({
                   }`}
                 >
                   <MessageSquare className="h-4 w-4" />
-                  <span className="flex-1">{t('mss.app.messenger', t('nav.chat', 'Messenger'))}</span>
+                  <span className="flex-1">{t('mss.app.messenger', t('nav.chat'))}</span>
                   {totalMessengerUnread > 0 && (
                     <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-label-sm font-bold rounded-full bg-primary text-on-primary">
                       {totalMessengerUnread > 99 ? '99+' : totalMessengerUnread}
@@ -989,7 +989,7 @@ function Hauptseite({
                   }`}
                 >
                   <StickyNote className="h-4 w-4" />
-                  <span>{t('mss.app.notizen', 'Notizen')}</span>
+                  <span>{t('mss.app.notizen')}</span>
                 </button>
               )}
 
@@ -1019,7 +1019,7 @@ function Hauptseite({
                   }`}
                 >
                   <KeyRound className="h-4 w-4" />
-                  <span>{t('mss.app.tresor', 'Passwort-Manager')}</span>
+                  <span>{t('mss.app.tresor')}</span>
                 </button>
               )}
 

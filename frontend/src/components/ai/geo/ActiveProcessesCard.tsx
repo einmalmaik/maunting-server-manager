@@ -22,17 +22,17 @@ export function ActiveProcessesCard({ processes, className = '' }: ActiveProcess
   const items: ActiveProcessItem[] = processes ?? [
     {
       id: 'satellite',
-      label: t('ai.geo.processes.satellite', 'Satellitendaten (Sentinel-2)'),
+      label: t('ai.geo.processes.satellite'),
       status: 'fertig',
     },
     {
       id: 'weather',
-      label: t('ai.geo.processes.weather', 'Wetterdaten'),
+      label: t('ai.geo.processes.weather'),
       status: 'fertig',
     },
     {
       id: 'news',
-      label: t('ai.geo.processes.news', 'Nachrichten & Websuche'),
+      label: t('ai.geo.processes.news'),
       status: 'fertig',
     },
   ]
@@ -40,11 +40,11 @@ export function ActiveProcessesCard({ processes, className = '' }: ActiveProcess
   return (
     <div
       className={`rounded-xl border border-outline-variant/30 bg-surface-container-lowest/80 p-3.5 backdrop-blur-md space-y-2.5 ${className}`}
-      aria-label={t('ai.geo.processes.title', 'Aktive Prozesse')}
+      aria-label={t('ai.geo.processes.title')}
     >
       <div className="flex items-center justify-between border-b border-outline-variant/20 pb-2">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-          {t('ai.geo.processes.title', 'Aktive Prozesse')}
+          {t('ai.geo.processes.title')}
         </h3>
         <span className="flex h-2 w-2 relative">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
@@ -81,10 +81,10 @@ export function ActiveProcessesCard({ processes, className = '' }: ActiveProcess
               }`}
             >
               {item.status === 'fertig'
-                ? t('ai.geo.processes.done', 'Fertig')
+                ? t('ai.geo.processes.done')
                 : item.status === 'laeuft'
-                ? t('ai.geo.processes.running', 'Läuft...')
-                : t('ai.geo.processes.waiting', 'Wartet...')}
+                ? t('ai.geo.processes.running')
+                : t('ai.geo.processes.waiting')}
             </span>
           </div>
         ))}

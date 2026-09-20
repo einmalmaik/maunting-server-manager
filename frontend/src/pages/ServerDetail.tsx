@@ -656,7 +656,7 @@ export function ServerDetail() {
     <div className="msm-page">
       <div className={activeTab === "files" ? "hidden md:block" : "block"}>
       <PageHeader
-        eyebrow={t("pageContext.infrastructure", "Infrastructure")}
+        eyebrow={t("pageContext.infrastructure")}
         title={server.name}
         description={`${gameName(server.game_type)}${server.node_name ? ` · ${t("servers.node")}: ${server.node_name}` : ""}`}
         status={(
@@ -672,10 +672,10 @@ export function ServerDetail() {
           <Button variant="secondary"
             className="inline-flex min-h-11 items-center gap-2"
             onClick={() => navigate("/servers")}
-            aria-label={t("servers.backToList", "Back to servers")}
+            aria-label={t("servers.backToList")}
           >
             <ArrowLeft className="w-4 h-4" />
-            <span>{t("common.back", "Back")}</span>
+            <span>{t("common.back")}</span>
           </Button>
           {/* Der KI-Chat lebt seit dem Einzelchat ausschliesslich unter /ai.
               Der Verweis bleibt hier, damit der Weg dorthin nicht verloren
@@ -715,7 +715,7 @@ export function ServerDetail() {
         <section className="rounded-xl border border-outline-variant/80 bg-surface-container-low/75 p-4 md:hidden">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="font-label-md text-label-sm font-semibold uppercase tracking-[0.12em] text-secondary">{t("pageContext.infrastructure", "Infrastructure")}</p>
+              <p className="font-label-md text-label-sm font-semibold uppercase tracking-[0.12em] text-secondary">{t("pageContext.infrastructure")}</p>
               <h1 className="mt-1 truncate font-headline text-xl font-semibold text-on-surface">{server.name}</h1>
               <p className="mt-1 truncate text-xs text-on-surface-variant">{gameName(server.game_type)} · {server.node_name || t("servers.nodeUnknown", { defaultValue: "—" })}</p>
             </div>
@@ -725,7 +725,7 @@ export function ServerDetail() {
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
             <Button variant="secondary" size="sm" type="button" onClick={() => navigate("/servers")} className="inline-flex min-h-11 items-center gap-2">
-              <ArrowLeft className="h-4 w-4" />{t("common.back", "Back")}
+              <ArrowLeft className="h-4 w-4" />{t("common.back")}
             </Button>
             <Button variant="secondary" size="sm" type="button" onClick={() => setMobileOverviewOpen((value) => !value)} aria-expanded={mobileOverviewOpen} className="inline-flex min-h-11 items-center">
               {mobileOverviewOpen ? t("serverDetail.hideServerOverview") : t("serverDetail.showServerOverview")}
@@ -851,10 +851,10 @@ export function ServerDetail() {
             onClick={() => setShowSwitchBlueprint(true)}
             disabled={!!actionLoading || isNodeUnreachable || effectiveStatus !== "stopped"}
             className="flex items-center gap-2 disabled:opacity-50"
-            title={effectiveStatus !== "stopped" ? t("servers.mustStopToSwitch", "Der Server muss gestoppt sein, um das Spiel zu wechseln.") : undefined}
+            title={effectiveStatus !== "stopped" ? t("servers.mustStopToSwitch") : undefined}
           >
             <RefreshCw className="w-4 h-4 text-primary" />
-            {t("servers.switchBlueprintAction", "Spiel / Blueprint wechseln")}
+            {t("servers.switchBlueprintAction")}
           </Button>
         )}
 

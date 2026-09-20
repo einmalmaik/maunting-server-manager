@@ -41,7 +41,7 @@ export function UpdateBanner() {
     setUpdating(true)
     try {
       await api('/system/update/panel', { method: 'POST' })
-      toast.success(t('updater.updateStarted', 'Update wird ausgeführt. Das Panel startet gleich neu.'))
+      toast.success(t('updater.updateStarted'))
       
       // Poll until panel is back online and updated
       let checkCount = 0
@@ -51,14 +51,14 @@ export function UpdateBanner() {
         if (checkCount > 40) { // 2 Minuten
           clearInterval(interval)
           setUpdating(false)
-          toast.error(t('updater.updateTimeout', 'Update-Timeout. Bitte lade die Seite manuell neu.'))
+          toast.error(t('updater.updateTimeout'))
           return
         }
         try {
           const check = await api<GitUpdateStatus>('/system/update/status')
           if (check.ok && !check.update_available) {
             clearInterval(interval)
-            toast.success(t('updater.updateSuccess', 'Update erfolgreich abgeschlossen!'))
+            toast.success(t('updater.updateSuccess'))
             window.location.reload()
           }
         } catch {
@@ -81,13 +81,13 @@ export function UpdateBanner() {
           <Download className={`w-5 h-5 text-status-warning flex-shrink-0 mt-0.5 ${updating ? 'animate-bounce' : ''}`} />
           <div>
             <h3 className="font-headline text-body-md text-on-surface">
-              {t('updater.panelUpdateAvailable', 'Panel-Update verfügbar')}
+              {t('updater.panelUpdateAvailable')}
             </h3>
             <p className="font-body-md text-sm text-on-surface-variant mt-1">
               {t('updater.current')}: <span className="font-mono">{status.local_sha}</span>
               {' → '}
               <span className="font-mono text-status-warning">{status.remote_sha}</span>
-              {` (${t('updater.branch', 'Branch')}: ${status.branch})`}
+              {` (${t('updater.branch')}: ${status.branch})`}
             </p>
             <div className="flex items-center gap-3 mt-3">
               <Button size="sm"
@@ -96,10 +96,10 @@ export function UpdateBanner() {
                 className="inline-flex items-center gap-1.5 disabled:opacity-60"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${updating ? 'animate-spin' : ''}`} />
-                {updating ? t('updater.updating', 'Update läuft...') : t('updater.startUpdate', 'Update starten')}
+                {updating ? t('updater.updating') : t('updater.startUpdate')}
               </Button>
               <span className="font-body-md text-xs text-on-surface-variant">
-                {t('updater.manualUpdateCommand', 'Oder manuell auf dem Server:')}{' '}
+                {t('updater.manualUpdateCommand')}{' '}
                 <code className="font-mono bg-surface-container-high px-1 py-0.5 rounded">
                   sudo bash /opt/msm/update.sh
                 </code>
@@ -111,7 +111,7 @@ export function UpdateBanner() {
           <button
             onClick={() => setDismissed(true)}
             className="text-on-surface-variant hover:text-on-surface transition-colors"
-            aria-label={t('common.close', 'Schließen')}
+            aria-label={t('common.close')}
           >
             <X className="w-4 h-4" />
           </button>

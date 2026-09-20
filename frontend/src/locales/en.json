@@ -73,7 +73,13 @@
     "addEvent": "Add event",
     "noEventsToday": "No events for this day.",
     "emptyDayTapToCreate": "No events — tap to create one",
-    "typePersonal": "Personal"
+    "typePersonal": "Personal",
+    "titleRequired": "Please enter an event title",
+    "created": "Event created successfully",
+    "updated": "Event updated",
+    "deleteConfirmTitle": "Delete event",
+    "deleteConfirmMessage": "Do you really want to permanently delete this event from your calendar?",
+    "deleted": "Event deleted"
   },
   "pageContext": {
     "overview": "Overview",
@@ -89,7 +95,11 @@
     "workspace": "Database explorer",
     "workspaceSubtitle": "Inspect tables, rows, and database statistics.",
     "admin": "Admin access",
-    "readOnly": "Read only"
+    "readOnly": "Read only",
+    "importExecuted": "Panel DB import executed",
+    "rowUpdated": "Row updated successfully",
+    "rowsDeleted": "{{count}} row(s) deleted",
+    "rowInserted": "Row inserted successfully"
   },
   "notes": {
     "title": "Notes",
@@ -1490,6 +1500,9 @@
       "rejectedDone": "Rejected. The AI aborted the action or will try an alternative approach.",
       "invalid": "This link is no longer valid. Either a decision was already made, or the request has expired.",
       "failed": "The decision could not be applied."
+    },
+    "actionProposal": {
+      "userDeclined": "The user declined the execution of this action."
     }
   },
   "shell": {
@@ -1526,7 +1539,7 @@
     "fingerprintHint": "SHA-256 of the agent certificate (self-signed pin). Required for remote nodes.",
     "fingerprintRequired": "TLS fingerprint is required for remote nodes.",
     "searchPlaceholder": "Filter nodes …",
-    "loadFailed": "Could not load nodes.",
+    "loadFailed": "Failed to load nodes",
     "created": "Node created.",
     "updated": "Node updated.",
     "deleted": "Node deleted.",
@@ -2488,7 +2501,11 @@
     "backupCode": "Backup code",
     "resendFailed": "The code could not be resent.",
     "use2FAInstead": "Use a 2FA code instead",
-    "captchaLoadFailed": "Captcha could not be loaded. Please disable ad-blockers or reload the page."
+    "captchaLoadFailed": "Captcha could not be loaded. Please disable ad-blockers or reload the page.",
+    "errors": {
+      "refreshUnavailable": "Refresh temporarily unavailable",
+      "refreshFailed": "Refresh failed: HTTP {{status}}"
+    }
   },
   "setup": {
     "welcome": "Welcome to MSM",
@@ -3252,7 +3269,9 @@
       "protocolHelp": "You can configure only IMAP (read-only), only SMTP (send-only), or both together. At least one protocol is required.",
       "imapHelp": "Used for searching and reading emails by the AI assistant.",
       "smtpHelp": "Used for preparing and sending emails by the AI assistant.",
-      "gmailNotice": "Note for Gmail: Google requires a 16-character App Password if 2-factor authentication is active."
+      "gmailNotice": "Note for Gmail: Google requires a 16-character App Password if 2-factor authentication is active.",
+      "emailAndNameRequired": "Please provide email and name.",
+      "hostRequired": "Please configure at least IMAP host (for receiving) or SMTP host (for sending)."
     },
     "calendars": {
       "title": "Connected calendars (CalDAV)",
@@ -3271,7 +3290,8 @@
       "password": "Password / app password",
       "isDefault": "Use as default calendar",
       "protocolHelp": "Used for querying calendar events and preparing schedule drafts by the AI assistant. Events are only created or modified after your explicit approval.",
-      "caldavHelp": "CalDAV URL of your calendar (e.g. Nextcloud, Google CalDAV)."
+      "caldavHelp": "CalDAV URL of your calendar (e.g. Nextcloud, Google CalDAV).",
+      "nameAndUrlRequired": "Please provide name and CalDAV URL."
     },
     "confirmDeleteWordLabel": "Type delete to confirm (paste disabled)",
     "e2eeDevices": {
@@ -3342,11 +3362,38 @@
         "bioOn": "The messenger can now be opened with a fingerprint.",
         "bioOff": "Fingerprint unlock is switched off.",
         "bioFailed": "Fingerprint unlock could not be set up."
+      },
+      "errors": {
+        "noAccount": "No account logged in.",
+        "pinTooShort": "The PIN requires at least {{count}} characters.",
+        "alreadySetUp": "A PIN is already set up for this account.",
+        "storageUnreachable": "This device's keystore is unreachable. The messenger cannot be unlocked right now.",
+        "noPinOnDevice": "No PIN is stored on this device.",
+        "wrongPin": "Incorrect PIN.",
+        "bioFailed": "Biometric verification failed.",
+        "currentPinWrong": "The current PIN is incorrect.",
+        "setupFirst": "Set up a PIN first.",
+        "pinIncorrect": "The PIN is incorrect."
       }
     },
     "audioMicrophoneFallback": "Microphone {{number}}",
     "audioSpeakerFallback": "Speaker {{number}}",
-    "confirmDeleteWordHint": "Type the word exactly – copy and paste is disabled."
+    "confirmDeleteWordHint": "Type the word exactly – copy and paste is disabled.",
+    "friends": {
+      "sendError": "Error sending request.",
+      "acceptError": "Error accepting request.",
+      "rejected": "Request rejected.",
+      "rejectError": "Error rejecting request.",
+      "removeError": "Error removing friend.",
+      "unblocked": "Unblocked {{username}}",
+      "unmuted": "Unmuted",
+      "accepted": "Request accepted.",
+      "removed": "Contact removed.",
+      "noMutedChats": "No muted chats present.",
+      "unmute": "Unmute",
+      "unblock": "Unblock",
+      "blockedStatus": "Blocked"
+    }
   },
   "errorBoundary": {
     "title": "This view could not be loaded",
@@ -5557,6 +5604,29 @@
         "codeBezeichnung": "2FA secret key or link",
         "codePlatzhalter": "e.g. JBSWY3DPEHPK3PXP or an otpauth link",
         "schluesselUebernehmen": "Use key"
+      },
+      "errors": {
+        "biometricsNotSupported": "Biometric authentication is not supported on this device or browser.",
+        "wrongMasterPassword": "Incorrect master password. Please check your input.",
+        "biometricsFailed": "Biometric authentication failed.",
+        "biometricsActivationFailed": "Biometric activation failed",
+        "biometricsNotSupportedShort": "Biometrics is not supported on this device or browser.",
+        "biometricsKeyLoadFailed": "Biometric key could not be loaded.",
+        "biometricsUnlockFailed": "Biometric unlock failed.",
+        "setupFailed": "Setup failed",
+        "notSetup": "No vault has been set up yet. Please set up a master password first.",
+        "keysMissing": "Vault key data is missing or could not be loaded.",
+        "unlockFailed": "Unlock failed",
+        "locked": "Vault is locked",
+        "attachmentTooLarge": "File attachment \"{{name}}\" exceeds the 500 KB limit.",
+        "attachmentsTotalTooLarge": "The total size of all file attachments exceeds the 500 KB limit.",
+        "emptyPassword": "Master password cannot be empty.",
+        "invalidSalt": "Invalid KDF salt: At least 16 bytes required.",
+        "decryptionFailed": "Vault entry could not be decrypted (authentication error or incorrect key)",
+        "invalidBase32Char": "Invalid Base32 character '{{char}}' at position {{pos}}",
+        "invalidTotpSecret": "Invalid Base32 TOTP secret",
+        "emptyTotpSecret": "Empty Base32 TOTP secret",
+        "invalidEnvelopeFormat": "Invalid envelope format: expected {{prefix}}"
       }
     },
     "aktion": {
@@ -5753,7 +5823,12 @@
         "impressumInaktiv": "Not configured",
         "impressumOeffnen": "Open imprint in browser"
       },
-      "overlayTesten": "Test overlay"
+      "overlayTesten": "Test overlay",
+      "updateAvailableVersion": "Version v{{version}} is available.",
+      "updateCheckError": "Could not check for updates.",
+      "updateUpToDate": "Maunting Smart System is up to date.",
+      "checkingUpdates": "Checking...",
+      "checkForUpdates": "Check for updates"
     },
     "schliessen": {
       "titel": "Close MSS?",
@@ -5962,7 +6037,23 @@
     "speaking": "Speaking",
     "present": "Present",
     "optionsFor": "Options for {{name}}",
-    "audioBlockedHint": "Your browser only allows sound after a click."
+    "audioBlockedHint": "Your browser only allows sound after a click.",
+    "nobodyAnswered": "Nobody answered.",
+    "callMissed": "Call missed.",
+    "moderatorMuted": "A moderator muted you. Only moderation can unmute you.",
+    "screenshareFailed": "Screen sharing could not be started.",
+    "callTransferred": "The call was transferred to another device.",
+    "joinedOnOtherDevice": "You joined another call on another device.",
+    "callEnded": "The call ended.",
+    "callRejected": "The call was rejected.",
+    "callerHungUp": "The caller hung up.",
+    "groupCallEnded": "The group call ended.",
+    "participantInvited": "{{username}} was invited.",
+    "participantInviteFailed": "{{username}} could not be invited.",
+    "participantRemoved": "{{username}} was removed from the call.",
+    "wrongKeyLength": "Room key has incorrect length",
+    "participantUnmuted": "{{username}} can speak again.",
+    "participantMuted": "{{username}} is muted."
   },
   "social": {
     "status": {
@@ -6621,6 +6712,34 @@
   "databaseManager": {
     "subtitle": "Manage and edit this server’s PostgreSQL databases.",
     "powerUserTitle": "Power user access",
-    "powerUserWarning": "Shown once. Valid for this one database only — no cluster SUPERUSER, no access to other customers’ databases. Do not share it in tickets, logs or URLs."
+    "powerUserWarning": "Shown once. Valid for this one database only — no cluster SUPERUSER, no access to other customers’ databases. Do not share it in tickets, logs or URLs.",
+    "databaseDeleted": "Database deleted",
+    "userCreated": "Database user created",
+    "passwordRotated": "Password rotated",
+    "userDeleted": "Database user deleted",
+    "rowUpdated": "Row updated successfully",
+    "rowsDeleted": "{{count}} row(s) deleted",
+    "rowInserted": "Row inserted successfully",
+    "deleteTableConfirm": "Really delete table {{schema}}.{{name}}? All data will be lost.",
+    "enterUsernamePrompt": "Username for the new database user:",
+    "tableDeleted": "Table deleted",
+    "deleteTablePrompt": "Really delete table {{schema}}.{{name}}?"
+  },
+  "chat": {
+    "errors": {
+      "noMailbox": "No mailbox has been established for this conversation yet.",
+      "indexedDbUnavailable": "IndexedDB unavailable",
+      "noE2eeIdentity": "No account logged in: this device has no E2EE identity",
+      "groupDbBlocked": "Group key database blocked: please close other panel tabs",
+      "biometricFailed": "Biometric verification failed.",
+      "chunkMissing": "Chunk {{index}} is missing",
+      "mediaDownloadFailed": "Media download failed: {{status}}"
+    }
+  },
+  "pwa": {
+    "updateTitle": "Update available",
+    "updateMessage": "A new version is available. Update now?",
+    "updateConfirm": "Update",
+    "updateCancel": "Later"
   }
 }

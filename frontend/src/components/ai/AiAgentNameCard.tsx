@@ -31,7 +31,7 @@ export function AiAgentNameCard() {
       })
       updateUser({ agent_name: antwort.agent_name })
       setName(antwort.agent_name ?? '')
-      toast.success(t('ai.profile.agentNameSaved', 'Name gespeichert.'))
+      toast.success(t('ai.profile.agentNameSaved'))
     } catch (err: any) {
       toast.error(err.message || t('common.error'))
     } finally {
@@ -44,7 +44,7 @@ export function AiAgentNameCard() {
       <div className="flex items-center gap-2">
         <Signature className="h-5 w-5 text-secondary" aria-hidden="true" />
         <h2 id="ai-agent-name-title" className="font-headline text-title-lg font-semibold text-on-surface">
-          {t('ai.profile.agentNameTitle', 'Name des Assistenten')}
+          {t('ai.profile.agentNameTitle')}
         </h2>
       </div>
       <p className="max-w-3xl text-sm text-on-surface-variant">
@@ -53,7 +53,7 @@ export function AiAgentNameCard() {
       <div className="flex max-w-md items-end gap-3">
         <label className="flex-1">
           <span className="mb-1 block text-xs font-medium text-on-surface-variant">
-            {t('ai.profile.agentNameLabel', 'Rufname')}
+            {t('ai.profile.agentNameLabel')}
           </span>
           <input
             className="msm-input"
@@ -64,7 +64,7 @@ export function AiAgentNameCard() {
           />
         </label>
         <Button onClick={handleSave} disabled={saving || (name.trim() || '') === (user?.agent_name ?? '')}>
-          {t('common.save', 'Speichern')}
+          {t('common.save')}
         </Button>
       </div>
     </section>

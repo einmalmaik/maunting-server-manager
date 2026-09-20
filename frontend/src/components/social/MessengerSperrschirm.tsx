@@ -71,13 +71,10 @@ export function MessengerSperrschirm() {
           </div>
           <div>
             <h1 className="text-base font-semibold text-on-surface">
-              {t('profile.messengerLock.screenTitle', 'Messenger gesperrt')}
+              {t('profile.messengerLock.screenTitle')}
             </h1>
             <p className="mt-1 text-xs text-on-surface-variant leading-relaxed">
-              {t(
-                'profile.messengerLock.screenHint',
-                'Gib deinen PIN ein, um den Verlauf auf diesem Gerät zu entschlüsseln.',
-              )}
+              {t('profile.messengerLock.screenHint')}
             </p>
           </div>
         </div>
@@ -97,11 +94,11 @@ export function MessengerSperrschirm() {
               if (fehler) useMessengerSperre.getState().fehlerLoeschen()
             }}
             autoComplete="current-password"
-            placeholder={t('profile.messengerLock.pinPlaceholder', 'PIN')}
+            placeholder={t('profile.messengerLock.pinPlaceholder')}
             disabled={laeuft || wartet}
             error={
               wartet
-                ? t('profile.messengerLock.waiting', 'Zu viele Fehlversuche. Noch {{count}} Sekunden.', {
+                ? t('profile.messengerLock.waiting', {
                     count: restSekunden,
                   })
                 : (fehler ?? undefined)
@@ -110,8 +107,8 @@ export function MessengerSperrschirm() {
 
           <Button type="submit" className="w-full" disabled={laeuft || wartet || !pin}>
             {laeuft
-              ? t('profile.messengerLock.working', 'Einen Moment …')
-              : t('profile.messengerLock.unlock', 'Entsperren')}
+              ? t('profile.messengerLock.working')
+              : t('profile.messengerLock.unlock')}
           </Button>
 
           {biometrieAktiv && (
@@ -123,16 +120,13 @@ export function MessengerSperrschirm() {
               disabled={laeuft || wartet}
             >
               <Fingerprint className="h-4 w-4" />
-              {t('profile.messengerLock.useBiometrics', 'Mit Fingerabdruck')}
+              {t('profile.messengerLock.useBiometrics')}
             </Button>
           )}
         </form>
 
         <p className="text-label-sm text-on-surface-variant text-center leading-relaxed">
-          {t(
-            'profile.messengerLock.screenFootnote',
-            'Solange gesperrt ist, kommen keine Nachrichten an. Was in der Zwischenzeit geschickt wurde, wird nach dem Entsperren nachgeholt.',
-          )}
+          {t('profile.messengerLock.screenFootnote')}
         </p>
       </div>
     </div>

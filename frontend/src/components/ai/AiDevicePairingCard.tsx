@@ -90,12 +90,12 @@ export function AiDevicePairingCard() {
             }
           }
           if (!aktiv) return
-          toast.success(t('ai.profile.devicePairSuccess', 'Gerät erfolgreich gekoppelt!'))
+          toast.success(t('ai.profile.devicePairSuccess'))
           setCode(null)
           setQrDataUri(null)
           laden()
         } else if (res.expired) {
-          toast.error(t('ai.profile.devicePairExpired', 'Kopplungscode abgelaufen.'))
+          toast.error(t('ai.profile.devicePairExpired'))
           setCode(null)
           setQrDataUri(null)
         }
@@ -130,7 +130,7 @@ export function AiDevicePairingCard() {
   const entziehen = async (geraet: Geraet) => {
     try {
       await api(`/auth/devices/${encodeURIComponent(geraet.family)}`, { method: 'DELETE' })
-      toast.success(t('ai.profile.deviceRevoked', 'Zugang entzogen.'))
+      toast.success(t('ai.profile.deviceRevoked'))
       laden()
     } catch (err: any) {
       toast.error(err.message || t('common.error'))
@@ -150,7 +150,7 @@ export function AiDevicePairingCard() {
       <div className="flex items-center gap-2">
         <MonitorSmartphone className="h-5 w-5 text-secondary" aria-hidden="true" />
         <h2 id="ai-devices-title" className="font-headline text-title-lg font-semibold text-on-surface">
-          {t('ai.profile.devicesTitle', 'Geräte koppeln')}
+          {t('ai.profile.devicesTitle')}
         </h2>
       </div>
       <p className="max-w-3xl text-sm text-on-surface-variant">
@@ -164,7 +164,7 @@ export function AiDevicePairingCard() {
           htmlFor="mss-api-adresse"
           className="mb-1 block text-xs font-medium text-on-surface-variant"
         >
-          {t('ai.profile.devicesApiAddress', 'Diese Adresse in der App eintragen')}
+          {t('ai.profile.devicesApiAddress')}
         </label>
         <div className="flex items-center gap-2">
           <input
@@ -181,7 +181,7 @@ export function AiDevicePairingCard() {
             }}
           >
             <Copy className="h-4 w-4" aria-hidden="true" />
-            {t('common.copy', 'Kopieren')}
+            {t('common.copy')}
           </Button>
         </div>
         <p className="msm-field-help">{t('ai.profile.devicesApiAddressHint')}</p>
@@ -189,10 +189,10 @@ export function AiDevicePairingCard() {
 
       {code ? (
         <SecretOnce
-          label={t('ai.profile.devicesCodeLabel', 'Kopplungscode')}
+          label={t('ai.profile.devicesCodeLabel')}
           value={code}
           qrDataUri={qrDataUri}
-          hinweis={t('ai.profile.devicesOnceHint', 'Gültig für 10 Minuten. Einmalig nutzbar über Code-Eingabe oder QR-Scan.')}
+          hinweis={t('ai.profile.devicesOnceHint')}
           onDismiss={() => {
             setCode(null)
             setQrDataUri(null)
@@ -203,18 +203,18 @@ export function AiDevicePairingCard() {
         <div className="flex max-w-xl items-end gap-3">
           <label className="flex-1">
             <span className="mb-1 block text-xs font-medium text-on-surface-variant">
-              {t('ai.profile.devicesNameLabel', 'Name des Geräts')}
+              {t('ai.profile.devicesNameLabel')}
             </span>
             <input
               className="msm-input"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder={t('ai.profile.devicesNamePlaceholder', 'Arbeitsrechner')}
+              placeholder={t('ai.profile.devicesNamePlaceholder')}
               maxLength={64}
             />
           </label>
           <Button onClick={koppeln} disabled={busy}>
-            {t('ai.profile.devicesPair', 'Code erzeugen')}
+            {t('ai.profile.devicesPair')}
           </Button>
         </div>
       )}
@@ -226,30 +226,30 @@ export function AiDevicePairingCard() {
               <div className="min-w-0 flex-1 space-y-1">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="truncate text-sm font-medium text-on-surface">
-                    {geraet.label || t('ai.profile.devicesUnnamed', 'Unbenanntes Gerät')}
+                    {geraet.label || t('ai.profile.devicesUnnamed')}
                   </span>
                   {geraet.is_active !== false ? (
                     <span className="inline-flex items-center gap-1.5 rounded-full bg-status-success/10 px-2 py-0.5 text-xs font-medium text-status-success border border-status-success/20">
                       <span className="h-1.5 w-1.5 rounded-full bg-status-success animate-pulse" />
-                      {t('ai.profile.deviceActive', 'Online')}
+                      {t('ai.profile.deviceActive')}
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-container-high px-2 py-0.5 text-xs font-medium text-on-surface-variant border border-outline-variant/30">
                       <span className="h-1.5 w-1.5 rounded-full bg-on-surface-variant/50" />
-                      {t('ai.profile.deviceInactive', 'Offline')}
+                      {t('ai.profile.deviceInactive')}
                     </span>
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-on-surface-variant">
                   {geraet.last_active_at && (
                     <span>
-                      {t('ai.profile.deviceLastActive', 'Letzte Aktivität')}:{' '}
+                      {t('ai.profile.deviceLastActive')}:{' '}
                       {formatRelativeTime(geraet.last_active_at, t)}
                     </span>
                   )}
                   {geraet.paired_at && (
                     <span>
-                      {t('ai.profile.devicePairedAt', 'Gekoppelt am')}:{' '}
+                      {t('ai.profile.devicePairedAt')}:{' '}
                       {new Date(geraet.paired_at).toLocaleDateString()}
                     </span>
                   )}
@@ -261,7 +261,7 @@ export function AiDevicePairingCard() {
                 className="self-start sm:self-auto text-error hover:text-error hover:bg-error/10"
               >
                 <Trash2 className="h-4 w-4" aria-hidden="true" />
-                {t('ai.profile.devicesRevoke', 'Zugang entziehen')}
+                {t('ai.profile.devicesRevoke')}
               </Button>
             </li>
           ))}

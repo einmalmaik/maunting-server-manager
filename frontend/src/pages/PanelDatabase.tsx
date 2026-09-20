@@ -111,7 +111,7 @@ export function PanelDatabase() {
       })
       setSqlResult(result)
       await load()
-      toast.success('Panel-DB-Import ausgeführt')
+      toast.success(t('panelDatabase.importExecuted'))
     })
 
   const handleUpdateRow = (schema: string, table: string, keyConditions: Record<string, any>, updates: Record<string, any>) =>
@@ -120,7 +120,7 @@ export function PanelDatabase() {
         method: 'POST',
         body: JSON.stringify({ database_id: PANEL_DB_ID, schema_name: schema, table_name: table, key_conditions: keyConditions, updates }),
       })
-      toast.success('Zeile erfolgreich aktualisiert')
+      toast.success(t('panelDatabase.rowUpdated'))
       if (selectedTable) {
         await selectTable(selectedTable)
       }
@@ -134,7 +134,7 @@ export function PanelDatabase() {
         method: 'POST',
         body: JSON.stringify({ database_id: PANEL_DB_ID, schema_name: schema, table_name: table, row_conditions: rowConditions }),
       })
-      toast.success(`${res?.deleted_count ?? rowConditions.length} Zeile(n) gelöscht`)
+      toast.success(t('panelDatabase.rowsDeleted', { count: res?.deleted_count ?? rowConditions.length }))
       if (selectedTable) {
         await selectTable(selectedTable)
       }
@@ -146,7 +146,7 @@ export function PanelDatabase() {
         method: 'POST',
         body: JSON.stringify({ database_id: PANEL_DB_ID, schema_name: schema, table_name: table, row_data: rowData }),
       })
-      toast.success('Zeile erfolgreich eingefügt')
+      toast.success(t('panelDatabase.rowInserted'))
       if (selectedTable) {
         await selectTable(selectedTable)
       }
@@ -155,14 +155,14 @@ export function PanelDatabase() {
   return (
     <div className="msm-page">
       <PageHeader
-        eyebrow={t('pageContext.data', 'Data')}
-        title={t('panelDatabase.title', 'Panel database')}
-        description={t('panelDatabase.subtitle', 'Manage the panel PostgreSQL database without terminal access.')}
-        status={<span className={canAdmin ? 'msm-badge-warning' : 'msm-badge-info'}>{canAdmin ? t('panelDatabase.admin', 'Admin') : t('panelDatabase.readOnly', 'Read only')}</span>}
+        eyebrow={t('pageContext.data')}
+        title={t('panelDatabase.title')}
+        description={t('panelDatabase.subtitle')}
+        status={<span className={canAdmin ? 'msm-badge-warning' : 'msm-badge-info'}>{canAdmin ? t('panelDatabase.admin') : t('panelDatabase.readOnly')}</span>}
       />
       <DatabaseConsole
-        title={t('panelDatabase.workspace', 'Database explorer')}
-        subtitle={t('panelDatabase.workspaceSubtitle', 'Inspect tables, rows and database statistics.')}
+        title={t('panelDatabase.workspace')}
+        subtitle={t('panelDatabase.workspaceSubtitle')}
         databaseLabel="Panel"
         databases={[PANEL_DATABASE]}
         selectedDatabaseId={PANEL_DB_ID}

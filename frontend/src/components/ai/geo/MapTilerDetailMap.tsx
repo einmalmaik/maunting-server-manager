@@ -387,7 +387,7 @@ export function MapTilerDetailMap({
       <div ref={elementRef} className="h-full w-full cursor-grab active:cursor-grabbing" />
       {!ready && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center bg-surface-container-lowest/70 text-sm text-on-surface-variant">
-          {t('ai.geo.mapLoading', 'Karte wird geladen')}
+          {t('ai.geo.mapLoading')}
         </div>
       )}
       {ready && (
@@ -399,7 +399,7 @@ export function MapTilerDetailMap({
                 mapRef.current.zoomIn({ duration: 300 })
               }
             }}
-            aria-label={t('ai.geo.zoomIn', 'Vergrößern')}
+            aria-label={t('ai.geo.zoomIn')}
             className="flex h-9 w-9 items-center justify-center rounded-xl border border-outline-variant/40 bg-surface-container-low/95 text-on-surface shadow-md backdrop-blur-md transition-colors hover:bg-surface-container-high active:scale-95"
           >
             <Plus className="h-4 w-4" />
@@ -411,7 +411,7 @@ export function MapTilerDetailMap({
                 mapRef.current.zoomOut({ duration: 300 })
               }
             }}
-            aria-label={t('ai.geo.zoomOut', 'Verkleinern')}
+            aria-label={t('ai.geo.zoomOut')}
             className="flex h-9 w-9 items-center justify-center rounded-xl border border-outline-variant/40 bg-surface-container-low/95 text-on-surface shadow-md backdrop-blur-md transition-colors hover:bg-surface-container-high active:scale-95"
           >
             <Minus className="h-4 w-4" />

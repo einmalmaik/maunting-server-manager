@@ -342,7 +342,7 @@ export function Servers() {
 
   return (
     <div className="msm-page">
-      <PageHeader eyebrow={t('pageContext.infrastructure', 'Infrastructure')} title={t('nav.servers')} description={t('servers.subtitle')} status={<span className="msm-badge-info">{servers.length} {t('nav.servers')}</span>} actions={canCreateServer ? (
+      <PageHeader eyebrow={t('pageContext.infrastructure')} title={t('nav.servers')} description={t('servers.subtitle')} status={<span className="msm-badge-info">{servers.length} {t('nav.servers')}</span>} actions={canCreateServer ? (
           <Button
             onClick={() => {
               setShowCreate(true)
@@ -585,7 +585,7 @@ export function Servers() {
                       ? t('servers.bindIp.loading')
                       : interfaces.length === 0
                       ? t('servers.bindIp.noneAvailable')
-                      : t('servers.bindIp.choose', 'Bind-IP auswählen')
+                      : t('servers.bindIp.choose')
                   }
                   aria-label={t('servers.publicBindIp')}
                   data-testid="create-server-bind-ip"

@@ -11,6 +11,7 @@
  * - Biometrie: Echte hardware-gestützte OS-Schlüssel / Keyrings (kein reversibles Master-Passwort in localStorage).
  */
 
+import i18n from '@/i18n'
 import { argon2idRaw } from '@msdis/shield/kdf'
 import { SecureBuffer } from '@msdis/shield/secure-memory'
 import { sha256Hex } from '@msdis/shield/integrity'
@@ -126,10 +127,10 @@ export async function deriveVaultKeys(
   saltBytes: Uint8Array,
 ): Promise<{ userKey: CryptoKey; bucketId: string; bucketAuthToken: string }> {
   if (!masterPassword || masterPassword.length === 0) {
-    throw new Error('Master-Passwort darf nicht leer sein.')
+    throw new Error(i18n.t('mss.vault.errors.emptyPassword'))
   }
   if (!saltBytes || saltBytes.byteLength < 16) {
-    throw new Error('Ungültiger KDF-Salt: Mindestens 16 Bytes erforderlich.')
+    throw new Error(i18n.t('mss.vault.errors.invalidSalt'))
   }
 
   // 1. 64 Bytes Schlüsselmaterial via speicherhartem Argon2id ableiten
@@ -232,7 +233,7 @@ export async function decryptVaultEntry(
   entryId: string,
 ): Promise<Record<string, unknown>> {
   if (!envelope.startsWith(VAULT_ENVELOPE_V1_PREFIX)) {
-    throw new Error(`Ungültiges Umschlag-Format: erwartet ${VAULT_ENVELOPE_V1_PREFIX}`)
+    throw new Error(i18n.t('mss.vault.errors.invalidEnvelopeFormat', { prefix: VAULT_ENVELOPE_V1_PREFIX }))
   }
 
   const b64 = envelope.slice(VAULT_ENVELOPE_V1_PREFIX.length)
@@ -262,7 +263,7 @@ export async function decryptVaultEntry(
     const jsonStr = unpadPayload(rawStr)
     return JSON.parse(jsonStr) as Record<string, unknown>
   } catch {
-    throw new Error('Tresor-Eintrag konnte nicht entschlüsselt werden (Authentifizierungsfehler oder falscher Schlüssel)')
+    throw new Error(i18n.t('mss.vault.errors.decryptionFailed'))
   }
 }
 

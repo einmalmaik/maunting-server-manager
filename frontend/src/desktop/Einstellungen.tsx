@@ -218,9 +218,9 @@ function KontoEinstellungen() {
       updateUser({ time_zone: res.time_zone })
       setSelectedZone(res.time_zone || 'UTC')
       setDismissedBrowserHint(true)
-      toast.success(t('profile.timezoneSaved', 'Zeitzone gespeichert.'))
+      toast.success(t('profile.timezoneSaved'))
     } catch {
-      toast.error(t('profile.timezoneSaveFailed', 'Zeitzone konnte nicht gespeichert werden.'))
+      toast.error(t('profile.timezoneSaveFailed'))
     } finally {
       setSavingZone(false)
     }
@@ -257,10 +257,10 @@ function KontoEinstellungen() {
         (error as Error)?.message === 'UNSUPPORTED'
       ) {
         setLocationSharingError(
-          t('profile.locationSharingPermissionError', 'Der Standortzugriff wurde nicht freigegeben. Du kannst ihn in den Systemeinstellungen erlauben.'),
+          t('profile.locationSharingPermissionError'),
         )
       } else {
-        setLocationSharingError(t('profile.locationSharingSaveError', 'Die Standortfreigabe konnte nicht gespeichert werden.'))
+        setLocationSharingError(t('profile.locationSharingSaveError'))
       }
     } finally {
       setSavingLocationSharing(false)
@@ -270,12 +270,12 @@ function KontoEinstellungen() {
   const handleAvatarChange = async (file?: File | null) => {
     if (!file) return
     if (file.size > 5 * 1024 * 1024) {
-      toast.error(t('profile.avatarSizeLimit', 'Das Profilbild darf maximal 5 MB groß sein.'))
+      toast.error(t('profile.avatarSizeLimit'))
       return
     }
     const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
     if (!allowedTypes.includes(file.type)) {
-      toast.error(t('profile.avatarInvalidType', 'Erlaubte Formate sind JPEG, PNG, WebP und GIF.'))
+      toast.error(t('profile.avatarInvalidType'))
       return
     }
 
@@ -288,9 +288,9 @@ function KontoEinstellungen() {
         body: formData,
       })
       updateUser({ avatar_url: res.avatar_url })
-      toast.success(t('profile.avatarUpdated', 'Profilbild erfolgreich aktualisiert.'))
+      toast.success(t('profile.avatarUpdated'))
     } catch (err: any) {
-      toast.error(err?.detail || t('profile.avatarUpdateFailed', 'Profilbild konnte nicht hochgeladen werden.'))
+      toast.error(err?.detail || t('profile.avatarUpdateFailed'))
     } finally {
       setUploadingAvatar(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
@@ -303,9 +303,9 @@ function KontoEinstellungen() {
     try {
       await api('/auth/me/avatar', { method: 'DELETE' })
       updateUser({ avatar_url: null })
-      toast.success(t('profile.avatarRemoved', 'Profilbild wurde entfernt.'))
+      toast.success(t('profile.avatarRemoved'))
     } catch (err: any) {
-      toast.error(err?.detail || t('profile.avatarRemoveFailed', 'Profilbild konnte nicht entfernt werden.'))
+      toast.error(err?.detail || t('profile.avatarRemoveFailed'))
     } finally {
       setUploadingAvatar(false)
     }
@@ -320,7 +320,7 @@ function KontoEinstellungen() {
             <User className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="text-sm font-semibold text-on-surface">{t('profile.tabs.account', 'Konto & Profilbild')}</h2>
+            <h2 className="text-sm font-semibold text-on-surface">{t('profile.tabs.account')}</h2>
           </div>
         </div>
 
@@ -355,7 +355,7 @@ function KontoEinstellungen() {
                 onClick={() => fileInputRef.current?.click()}
               >
                 <Camera className="h-3.5 w-3.5 mr-1.5" />
-                {user?.avatar_url ? t('profile.changeAvatar', 'Bild ändern') : t('profile.uploadAvatar', 'Bild hochladen')}
+                {user?.avatar_url ? t('profile.changeAvatar') : t('profile.uploadAvatar')}
               </Button>
 
               {user?.avatar_url && (
@@ -367,7 +367,7 @@ function KontoEinstellungen() {
                   className="text-status-destructive hover:bg-status-destructive/10"
                 >
                   <Trash2 className="h-3.5 w-3.5 mr-1.5" />
-                  {t('profile.removeAvatar', 'Entfernen')}
+                  {t('profile.removeAvatar')}
                 </Button>
               )}
             </div>
@@ -382,7 +382,7 @@ function KontoEinstellungen() {
             <Clock className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="text-sm font-semibold text-on-surface">{t('profile.timezoneTitle', 'Zeitzone')}</h2>
+            <h2 className="text-sm font-semibold text-on-surface">{t('profile.timezoneTitle')}</h2>
           </div>
         </div>
 
@@ -391,7 +391,7 @@ function KontoEinstellungen() {
             <div className="flex items-center gap-2">
               <Globe className="h-4 w-4 text-primary shrink-0" aria-hidden="true" />
               <span>
-                {t('profile.timezoneBrowserHint', 'System nutzt {{zone}}, im Konto ist {{current}} gespeichert.', {
+                {t('profile.timezoneBrowserHint', {
                   zone: browserZone,
                   current: user?.time_zone,
                 })}
@@ -413,7 +413,7 @@ function KontoEinstellungen() {
                 size="sm"
                 onClick={() => setDismissedBrowserHint(true)}
               >
-                {t('profile.timezoneDismiss', 'Ausblenden')}
+                {t('profile.timezoneDismiss')}
               </Button>
             </div>
           </div>
@@ -426,9 +426,9 @@ function KontoEinstellungen() {
             onChange={setSelectedZone}
             options={timezoneOptions}
             searchable={true}
-            searchPlaceholder={t('profile.timezoneSearch', 'Zeitzone suchen …')}
-            placeholder={t('profile.timezonePlaceholder', 'Zeitzone auswählen')}
-            aria-label={t('profile.timezoneLabel', 'Zeitzone')}
+            searchPlaceholder={t('profile.timezoneSearch')}
+            placeholder={t('profile.timezonePlaceholder')}
+            aria-label={t('profile.timezoneLabel')}
           />
           <Button
             type="button"
@@ -438,7 +438,7 @@ function KontoEinstellungen() {
             onClick={() => void handleSaveTimezone()}
           >
             <Save className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-            {savingZone ? t('common.saving', 'Speichern …') : t('profile.timezoneSave', 'Zeitzone speichern')}
+            {savingZone ? t('common.saving') : t('profile.timezoneSave')}
           </Button>
         </div>
       </div>
@@ -456,10 +456,10 @@ function KontoEinstellungen() {
             </div>
             <div>
               <h2 className="text-sm font-semibold text-on-surface">
-                {t('profile.locationSharingTitle', 'Standort für KI-Anfragen')}
+                {t('profile.locationSharingTitle')}
               </h2>
               <p className="text-xs text-on-surface-variant">
-                {t('profile.locationSharingDescription', 'Wird nur bei ortsbezogenen KI-Anfragen verwendet.')}
+                {t('profile.locationSharingDescription')}
               </p>
             </div>
           </div>
@@ -468,7 +468,7 @@ function KontoEinstellungen() {
             checked={Boolean(user?.location_sharing_enabled)}
             disabled={savingLocationSharing}
             onCheckedChange={(checked) => void handleLocationSharingChange(checked)}
-            aria-label={t('profile.locationSharingTitle', 'Standort für KI-Anfragen')}
+            aria-label={t('profile.locationSharingTitle')}
           />
         </div>
 
@@ -518,9 +518,9 @@ function SocialEinstellungen() {
         : level
       updateUser({ social_privacy: valid })
       setPrivacyLevel(valid)
-      toast.success(t('profile.privacySaved', 'Privatsphäre gespeichert.'))
+      toast.success(t('profile.privacySaved'))
     } catch {
-      toast.error(t('profile.privacySaveFailed', 'Fehler beim Speichern.'))
+      toast.error(t('profile.privacySaveFailed'))
     } finally {
       setSavingPrivacy(false)
     }
@@ -601,7 +601,7 @@ function SocialEinstellungen() {
       setFriends(fData)
       setIncomingRequests(rData.incoming)
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Fehler beim Senden.')
+      toast.error(err instanceof Error ? err.message : t('profile.friends.sendError'))
     } finally {
       setSendingRequest(false)
     }
@@ -610,34 +610,34 @@ function SocialEinstellungen() {
   const handleAcceptRequest = async (reqId: number) => {
     try {
       await acceptFriendRequest(reqId)
-      toast.success('Anfrage angenommen.')
+      toast.success(t('profile.friends.accepted'))
       const [fData, rData] = await Promise.all([getFriends(), getFriendRequests()])
       setFriends(fData)
       setIncomingRequests(rData.incoming)
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Fehler beim Annehmen.')
+      toast.error(err instanceof Error ? err.message : t('profile.friends.acceptError'))
     }
   }
 
   const handleDeclineRequest = async (reqId: number) => {
     try {
       await declineFriendRequest(reqId)
-      toast.success('Anfrage abgelehnt.')
+      toast.success(t('profile.friends.rejected'))
       const rData = await getFriendRequests()
       setIncomingRequests(rData.incoming)
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Fehler beim Ablehnen.')
+      toast.error(err instanceof Error ? err.message : t('profile.friends.rejectError'))
     }
   }
 
   const handleRemoveFriend = async (friendId: number) => {
     try {
       await removeFriend(friendId)
-      toast.success('Kontakt entfernt.')
+      toast.success(t('profile.friends.removed'))
       const fData = await getFriends()
       setFriends(fData)
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Fehler beim Entfernen.')
+      toast.error(err instanceof Error ? err.message : t('profile.friends.removeError'))
     }
   }
 
@@ -928,7 +928,7 @@ function SocialEinstellungen() {
                           {b.username}
                         </span>
                         <span className="text-label-sm text-status-destructive font-medium">
-                          Blockiert
+                          {t('profile.friends.blockedStatus')}
                         </span>
                       </div>
                     </div>
@@ -937,11 +937,11 @@ function SocialEinstellungen() {
                       size="sm"
                       onClick={async () => {
                         await unblockUser(b.userId)
-                        toast.success(`Blockierung von ${b.username} aufgehoben`)
+                        toast.success(t('profile.friends.unblocked', { username: b.username }))
                       }}
                       className="h-7 text-xs px-2.5 border border-status-destructive/30 text-status-destructive hover:bg-status-destructive/15 shrink-0"
                     >
-                      Entblocken
+                      {t('profile.friends.unblock')}
                     </Button>
                   </div>
                 ))}
@@ -955,7 +955,7 @@ function SocialEinstellungen() {
           <div className="space-y-2">
             {mutedList.length === 0 ? (
               <p className="text-xs text-on-surface-variant py-2">
-                Keine stummgeschalteten Chats vorhanden.
+                {t('profile.friends.noMutedChats')}
               </p>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -983,11 +983,11 @@ function SocialEinstellungen() {
                       size="sm"
                       onClick={() => {
                         unmuteChat(m.mailboxId)
-                        toast.success('Stummschaltung aufgehoben')
+                        toast.success(t('profile.friends.unmuted'))
                       }}
                       className="h-7 text-xs px-2.5 text-on-surface-variant hover:text-primary shrink-0"
                     >
-                      Einschalten
+                      {t('profile.friends.unmute')}
                     </Button>
                   </div>
                 ))}
@@ -1282,7 +1282,7 @@ function DesktopIntegration({ onKonfigAenderung }: { onKonfigAenderung?: () => v
   return (
     <section className="msm-card flex flex-col gap-4 p-5">
       <h2 className="text-sm font-medium text-on-surface">
-        {isAndroid ? t('mss.einstellungen.tab.app', 'App-Status') : t('mss.einstellungen.desktopIntegration')}
+        {isAndroid ? t('mss.einstellungen.tab.app') : t('mss.einstellungen.desktopIntegration')}
       </h2>
 
       <div className="flex items-center justify-between gap-3">
@@ -1348,19 +1348,19 @@ function DesktopIntegration({ onKonfigAenderung }: { onKonfigAenderung?: () => v
                 try {
                   const res = await updatePruefen()
                   if (res.verfuegbar) {
-                    toast.success(`Version v${res.neue_version} ist verfügbar.`)
+                    toast.success(t('mss.einstellungen.updateAvailableVersion', { version: res.neue_version }))
                   } else {
-                    toast.success('Maunting Smart System ist auf dem neuesten Stand.')
+                    toast.success(t('mss.einstellungen.updateUpToDate'))
                   }
                 } catch {
-                  toast.error('Konnte nicht nach Updates suchen.')
+                  toast.error(t('mss.einstellungen.updateCheckError'))
                 } finally {
                   setPrueftUpdate(false)
                 }
               })()
             }}
           >
-            {prueftUpdate ? 'Prüft...' : 'Auf Updates prüfen'}
+            {prueftUpdate ? t('mss.einstellungen.checkingUpdates') : t('mss.einstellungen.checkForUpdates')}
           </Button>
         </div>
       </div>
@@ -1518,7 +1518,7 @@ function ArtefaktInstallationSektion({ onKonfigAenderung }: { onKonfigAenderung?
         onKonfigAenderung?.()
       }
     } catch {
-      toast.error(t('mss.einstellungen.artefakte.ordnerFehler', 'Ordner konnte nicht ausgewählt werden.'))
+      toast.error(t('mss.einstellungen.artefakte.ordnerFehler'))
     }
   }
 
@@ -1538,14 +1538,14 @@ function ArtefaktInstallationSektion({ onKonfigAenderung }: { onKonfigAenderung?
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
-              <p className="text-sm text-on-surface">{t('mss.einstellungen.artefakte.titel', 'Artefakt-Installationen & Quarantäne')}</p>
+              <p className="text-sm text-on-surface">{t('mss.einstellungen.artefakte.titel')}</p>
               {konfig?.artifact_install_aktiv ? (
                 <Badge variant="success">
-                  {t('mss.einstellungen.artefakte.statusAktiv', 'Aktiviert')}
+                  {t('mss.einstellungen.artefakte.statusAktiv')}
                 </Badge>
               ) : (
                 <Badge variant="default">
-                  {t('mss.einstellungen.artefakte.statusDeaktiviert', 'Deaktiviert')}
+                  {t('mss.einstellungen.artefakte.statusDeaktiviert')}
                 </Badge>
               )}
             </div>
@@ -1554,7 +1554,7 @@ function ArtefaktInstallationSektion({ onKonfigAenderung }: { onKonfigAenderung?
             checked={konfig?.artifact_install_aktiv === true}
             disabled={konfig === null}
             onCheckedChange={(an) => void toggle(an)}
-            aria-label={t('mss.einstellungen.artefakte.titel', 'Artefakt-Installationen')}
+            aria-label={t('mss.einstellungen.artefakte.titel')}
           />
         </div>
 
@@ -1562,16 +1562,16 @@ function ArtefaktInstallationSektion({ onKonfigAenderung }: { onKonfigAenderung?
           <div className="mt-2 flex flex-col gap-4 rounded-xl border border-outline-variant/30 bg-surface-container-low/30 p-4">
             {/* Windows Sandbox Status */}
             <div className="flex items-center justify-between gap-2">
-              <p className="text-xs font-medium text-on-surface">{t('mss.einstellungen.artefakte.sandboxTitel', 'Windows Sandbox')}</p>
+              <p className="text-xs font-medium text-on-surface">{t('mss.einstellungen.artefakte.sandboxTitel')}</p>
               <Badge variant={sandboxOk ? 'success' : 'warning'}>
-                {sandboxOk ? t('mss.einstellungen.artefakte.sandboxBereit', 'Bereit') : t('mss.einstellungen.artefakte.sandboxFehlt', 'Nicht verfügbar')}
+                {sandboxOk ? t('mss.einstellungen.artefakte.sandboxBereit') : t('mss.einstellungen.artefakte.sandboxFehlt')}
               </Badge>
             </div>
 
             {/* Download Limit */}
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between text-xs">
-                <span className="text-on-surface font-medium">{t('mss.einstellungen.artefakte.downloadLimitTitel', 'Download-Limit pro Datei')}</span>
+                <span className="text-on-surface font-medium">{t('mss.einstellungen.artefakte.downloadLimitTitel')}</span>
                 <span className="font-mono text-primary">{limitGiB} GiB</span>
               </div>
               <Slider
@@ -1580,21 +1580,21 @@ function ArtefaktInstallationSektion({ onKonfigAenderung }: { onKonfigAenderung?
                 step={1}
                 value={limitGiB}
                 onValueChange={(val) => void downloadLimitAendern(val)}
-                ariaLabel={t('mss.einstellungen.artefakte.downloadLimitTitel', 'Download-Limit')}
+                ariaLabel={t('mss.einstellungen.artefakte.downloadLimitTitel')}
               />
             </div>
 
             {/* Freigegebene Suchwurzeln */}
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between">
-                <p className="text-xs font-medium text-on-surface">{t('mss.einstellungen.artefakte.suchwurzelnTitel', 'Suchbereiche')}</p>
+                <p className="text-xs font-medium text-on-surface">{t('mss.einstellungen.artefakte.suchwurzelnTitel')}</p>
                 <Button variant="secondary" size="sm" onClick={() => void suchwurzelHinzufuegen()}>
-                  {t('mss.einstellungen.artefakte.suchwurzelHinzufuegen', '+ Ordner freigeben')}
+                  {t('mss.einstellungen.artefakte.suchwurzelHinzufuegen')}
                 </Button>
               </div>
               {konfig.search_roots.length === 0 ? (
                 <p className="text-xs italic text-on-surface-variant/70">
-                  {t('mss.einstellungen.artefakte.keineSuchwurzeln', 'Keine Ordner hinterlegt. Standard-Pfade werden automatisch erkannt.')}
+                  {t('mss.einstellungen.artefakte.keineSuchwurzeln')}
                 </p>
               ) : (
                 <ul className="flex flex-col gap-1">
@@ -1618,27 +1618,24 @@ function ArtefaktInstallationSektion({ onKonfigAenderung }: { onKonfigAenderung?
           className="msm-modal-overlay"
           role="dialog"
           aria-modal="true"
-          aria-label={t('mss.einstellungen.artefakte.aktivierenTitel', 'Artefakt-Installationen aktivieren')}
+          aria-label={t('mss.einstellungen.artefakte.aktivierenTitel')}
         >
           <div className="msm-card flex w-full max-w-md flex-col gap-4 p-5">
             <div className="flex items-center gap-2 text-status-warning">
               <AlertTriangle className="h-5 w-5 shrink-0" aria-hidden="true" />
               <h2 className="text-base font-semibold text-on-surface">
-                {t('mss.einstellungen.artefakte.aktivierenTitel', 'Artefakt-Installationen aktivieren')}
+                {t('mss.einstellungen.artefakte.aktivierenTitel')}
               </h2>
             </div>
             <p className="text-xs leading-relaxed text-on-surface-variant">
-              {t(
-                'mss.einstellungen.artefakte.aktivierenWarnung',
-                'Downloads durchlaufen Quarantäne, Defender-Prüfung und Sandbox vor der Ausführung.',
-              )}
+              {t('mss.einstellungen.artefakte.aktivierenWarnung')}
             </p>
             <div className="flex items-center justify-end gap-2 pt-2">
               <Button variant="ghost" size="sm" onClick={() => setDialogOffen(false)}>
-                {t('mss.einstellungen.artefakte.abbrechen', 'Abbrechen')}
+                {t('mss.einstellungen.artefakte.abbrechen')}
               </Button>
               <Button autoFocus size="sm" onClick={() => void bestaetigenAktivieren()}>
-                {t('mss.einstellungen.artefakte.aktivierenBestaetigen', 'Aktivieren')}
+                {t('mss.einstellungen.artefakte.aktivierenBestaetigen')}
               </Button>
             </div>
           </div>
@@ -1862,7 +1859,7 @@ function AudioEinstellungen() {
           <div className="flex items-center gap-2">
             <Mic className="h-5 w-5 text-secondary" aria-hidden="true" />
             <h2 id="audio-devices-heading" className="font-headline text-title-lg font-semibold text-on-surface">
-              {t('profile.audioTitle', 'Mikrofon & Audio')}
+              {t('profile.audioTitle')}
             </h2>
           </div>
           <span
@@ -1873,28 +1870,25 @@ function AudioEinstellungen() {
             }`}
           >
             <Radio className="h-3.5 w-3.5" aria-hidden="true" />
-            {istAmTesten ? t('profile.audioActive', 'Test aktiv') : t('profile.audioInactive', 'Bereit')}
+            {istAmTesten ? t('profile.audioActive') : t('profile.audioInactive')}
           </span>
         </div>
 
         <p className="max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant mb-6">
-          {t(
-            'profile.audioDescription',
-            'Konfiguriere deine Audio-Geräte für Sprachnachrichten, den KI-Sprachmodus und das Wake-Word. Änderungen werden einheitlich im gesamten System angewendet.'
-          )}
+          {t('profile.audioDescription')}
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl">
           <div className="space-y-1.5">
             <label className="block font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">
-              {t('profile.audioDeviceLabel', 'Eingabegerät (Mikrofon)')}
+              {t('profile.audioDeviceLabel')}
             </label>
             {auswahl('audio_eingabe', geraete?.eingaenge ?? [], geraete?.standard_eingang ?? null)}
           </div>
 
           <div className="space-y-1.5">
             <label className="block font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">
-              {t('mss.audio.ausgabe', 'Ausgabegerät (Lautsprecher)')}
+              {t('mss.audio.ausgabe')}
             </label>
             {auswahl('audio_ausgabe', geraete?.ausgaenge ?? [], geraete?.standard_ausgang ?? null)}
           </div>
@@ -1903,15 +1897,15 @@ function AudioEinstellungen() {
         {!isAndroidClient && (
           <div className="flex items-center justify-between gap-3 border-t border-outline-variant/30 pt-4 mt-6 max-w-2xl">
             <div>
-              <span className="text-xs font-medium text-on-surface block">{t('mss.audio.ducking', 'Audio-Ducking')}</span>
+              <span className="text-xs font-medium text-on-surface block">{t('mss.audio.ducking')}</span>
               <span className="text-label-sm text-on-surface-variant">
                 {t('mss.audio.duckingHinweis')}
               </span>
             </div>
             <Button variant="secondary" size="sm" onClick={() => void duckingTesten()} disabled={duckt}>
               {duckt
-                ? t('mss.einstellungen.duckingLaeuft', 'Ducking aktiv …')
-                : t('mss.einstellungen.duckingTesten', 'Ducking testen')}
+                ? t('mss.einstellungen.duckingLaeuft')
+                : t('mss.einstellungen.duckingTesten')}
             </Button>
           </div>
         )}
@@ -1922,7 +1916,7 @@ function AudioEinstellungen() {
         <div className="flex items-center gap-2 mb-4">
           <Sliders className="h-5 w-5 text-secondary" aria-hidden="true" />
           <h2 id="audio-processing-heading" className="font-headline text-title-lg font-semibold text-on-surface">
-            {t('mss.audio.verarbeitung', 'Signalverarbeitung & Filter')}
+            {t('mss.audio.verarbeitung')}
           </h2>
         </div>
         <p className="max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant mb-5">
@@ -1933,7 +1927,7 @@ function AudioEinstellungen() {
           <div className="flex items-center justify-between gap-3 p-3 rounded-xl border border-outline-variant/30 bg-surface-container-low/40">
             <div>
               <span className="text-sm font-medium text-on-surface block">
-                {t('profile.audioNoiseSuppression', 'Rauschunterdrückung (Noise Suppression)')}
+                {t('profile.audioNoiseSuppression')}
               </span>
               <span className="text-xs text-on-surface-variant">
                 {t('mss.audio.rauschenHinweis')}
@@ -1943,14 +1937,14 @@ function AudioEinstellungen() {
               checked={konfig?.audio_rauschen ?? true}
               disabled={konfig === null}
               onCheckedChange={(an) => void verarbeitungSetzen('audio_rauschen', an)}
-              aria-label={t('profile.audioNoiseSuppression', 'Rauschunterdrückung')}
+              aria-label={t('profile.audioNoiseSuppression')}
             />
           </div>
 
           <div className="flex items-center justify-between gap-3 p-3 rounded-xl border border-outline-variant/30 bg-surface-container-low/40">
             <div>
               <span className="text-sm font-medium text-on-surface block">
-                {t('profile.audioEchoCancellation', 'Echounterdrückung (Echo Cancellation)')}
+                {t('profile.audioEchoCancellation')}
               </span>
               <span className="text-xs text-on-surface-variant">
                 {t('mss.audio.echoHinweis')}
@@ -1960,14 +1954,14 @@ function AudioEinstellungen() {
               checked={konfig?.audio_echo ?? true}
               disabled={konfig === null}
               onCheckedChange={(an) => void verarbeitungSetzen('audio_echo', an)}
-              aria-label={t('profile.audioEchoCancellation', 'Echounterdrückung')}
+              aria-label={t('profile.audioEchoCancellation')}
             />
           </div>
 
           <div className="flex items-center justify-between gap-3 p-3 rounded-xl border border-outline-variant/30 bg-surface-container-low/40">
             <div>
               <span className="text-sm font-medium text-on-surface block">
-                {t('profile.audioAutoGain', 'Automatische Pegelanpassung (Auto Gain)')}
+                {t('profile.audioAutoGain')}
               </span>
               <span className="text-xs text-on-surface-variant">
                 Gleicht leise und laute Sprachpassagen automatisch an ein gesundes Niveau an.
@@ -1977,7 +1971,7 @@ function AudioEinstellungen() {
               checked={konfig?.audio_autogain ?? true}
               disabled={konfig === null}
               onCheckedChange={(an) => void verarbeitungSetzen('audio_autogain', an)}
-              aria-label={t('profile.audioAutoGain', 'Automatische Pegelanpassung')}
+              aria-label={t('profile.audioAutoGain')}
             />
           </div>
 
@@ -1989,7 +1983,7 @@ function AudioEinstellungen() {
               step={5}
               disabled={konfig === null}
               onValueChange={(prozent) => void verarbeitungSetzen('audio_verstaerkung', prozent / 100)}
-              label={t('mss.audio.verstaerkung', 'Software-Eingangsverstärkung')}
+              label={t('mss.audio.verstaerkung')}
               hint={`${gainPercent} %`}
             />
           </div>
@@ -2103,7 +2097,7 @@ function Testhoeren({
       setLaeuft(true)
       onTestZustand?.(true)
     } catch {
-      setFehler(t('mss.audio.testhoerenFehler', 'Mikrofon konnte für den Test nicht gestartet werden.'))
+      setFehler(t('mss.audio.testhoerenFehler'))
       setLaeuft(false)
       onTestZustand?.(false)
     }
@@ -2127,7 +2121,7 @@ function Testhoeren({
       <div className="flex items-center gap-2 mb-4">
         <Volume2 className="h-5 w-5 text-secondary" aria-hidden="true" />
         <h2 id="audio-test-heading" className="font-headline text-title-lg font-semibold text-on-surface">
-          {t('mss.audio.testhoeren', 'Testhören & Mikrofon-Pegel')}
+          {t('mss.audio.testhoeren')}
         </h2>
       </div>
       <p className="max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant mb-5">
@@ -2143,12 +2137,12 @@ function Testhoeren({
             className="gap-2 shrink-0"
           >
             <Mic className="w-4 h-4" />
-            <span>{laeuft ? t('profile.audioTestStop', 'Test beenden') : t('profile.audioTestStart', 'Testhören starten')}</span>
+            <span>{laeuft ? t('profile.audioTestStop') : t('profile.audioTestStart')}</span>
           </Button>
 
           <ProgressBar
             value={laeuft ? Math.round(pegel * 100) : null}
-            ariaLabel={t('mss.audio.testhoerenPegel', 'Mikrofonpegel')}
+            ariaLabel={t('mss.audio.testhoerenPegel')}
             className="flex-1"
           />
         </div>
@@ -2157,7 +2151,7 @@ function Testhoeren({
           <div className="flex items-center justify-between text-xs px-1 text-on-surface-variant">
             <span>Pegel: {Math.round(pegel * 100)}%</span>
             <span className={pegel > 0.05 ? 'text-status-success font-semibold' : 'text-on-surface-variant/60'}>
-              {pegel > 0.05 ? t('profile.audioSignalDetected', 'Signal erkannt') : 'Kein Signal'}
+              {pegel > 0.05 ? t('profile.audioSignalDetected') : 'Kein Signal'}
             </span>
           </div>
         )}
@@ -2325,10 +2319,10 @@ function RechtlichesEinstellungen() {
           </div>
           <div>
             <h2 className="font-headline text-base font-semibold text-on-surface">
-              {t('mss.einstellungen.rechtliches.slogan', 'Maunting Studios — Sicherheit braucht Vertrauen')}
+              {t('mss.einstellungen.rechtliches.slogan')}
             </h2>
             <p className="mt-1 text-xs text-on-surface-variant">
-              {t('mss.einstellungen.rechtliches.beschreibung', 'Vollständige Transparenz, echte Datenhoheit und kein unbemerktes Handeln auf Ihren Systemen.')}
+              {t('mss.einstellungen.rechtliches.beschreibung')}
             </p>
           </div>
         </div>
@@ -2339,7 +2333,7 @@ function RechtlichesEinstellungen() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-medium text-on-surface">
-              {t('mss.einstellungen.rechtliches.datenschutzTitel', 'Datenschutzerklärung')}
+              {t('mss.einstellungen.rechtliches.datenschutzTitel')}
             </h3>
             <Badge variant="default">
               {t('mss.einstellungen.rechtliches.datenschutzVersion', { version: 'v2.7' })}
@@ -2351,7 +2345,7 @@ function RechtlichesEinstellungen() {
             onClick={() => navigate('/privacy')}
             className="shrink-0"
           >
-            {t('mss.einstellungen.rechtliches.datenschutzOeffnen', 'Datenschutzerklärung öffnen')}
+            {t('mss.einstellungen.rechtliches.datenschutzOeffnen')}
           </Button>
         </div>
       </section>
@@ -2362,14 +2356,14 @@ function RechtlichesEinstellungen() {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <h3 className="text-sm font-medium text-on-surface">
-                {t('mss.einstellungen.rechtliches.impressumTitel', 'Betreiber-Impressum')}
+                {t('mss.einstellungen.rechtliches.impressumTitel')}
               </h3>
               <Badge
                 variant={legal.imprint_enabled && legal.imprint_url ? 'success' : 'default'}
               >
                 {legal.imprint_enabled && legal.imprint_url
-                  ? t('mss.einstellungen.rechtliches.impressumAktiv', 'Aktiviert')
-                  : t('mss.einstellungen.rechtliches.impressumInaktiv', 'Nicht konfiguriert')}
+                  ? t('mss.einstellungen.rechtliches.impressumAktiv')
+                  : t('mss.einstellungen.rechtliches.impressumInaktiv')}
               </Badge>
             </div>
             {legal.imprint_enabled && legal.imprint_url && (
@@ -2386,7 +2380,7 @@ function RechtlichesEinstellungen() {
               className="shrink-0"
             >
               <ExternalLink className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-              {t('mss.einstellungen.rechtliches.impressumOeffnen', 'Impressum im Browser öffnen')}
+              {t('mss.einstellungen.rechtliches.impressumOeffnen')}
             </Button>
           )}
         </div>

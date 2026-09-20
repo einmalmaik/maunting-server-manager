@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import i18n from '@/i18n'
 import {
   useVaultStore,
   blindVaultSync,
@@ -248,7 +249,7 @@ describe('useVaultStore - Security & Operations', () => {
       const store = useVaultStore.getState()
       await store.initializeVault('master-password-123')
 
-      await expect(store.enableBiometrics('master-password-123')).rejects.toThrow(/nicht unterstützt/)
+      await expect(store.enableBiometrics('master-password-123')).rejects.toThrow(i18n.t('mss.vault.errors.biometricsNotSupported'))
     } finally {
       vi.mocked(pruefeBiometrieVerfuegbar).mockResolvedValue(true)
     }
@@ -261,7 +262,7 @@ describe('useVaultStore - Security & Operations', () => {
 
       const ok = await store.unlockWithBiometrics()
       expect(ok).toBe(false)
-      expect(useVaultStore.getState().unlockError).toMatch(/nicht unterstützt/)
+      expect(useVaultStore.getState().unlockError).toBe(i18n.t('mss.vault.errors.biometricsNotSupportedShort'))
     } finally {
       vi.mocked(pruefeBiometrieVerfuegbar).mockResolvedValue(true)
     }
@@ -344,7 +345,7 @@ describe('useVaultStore - Security & Operations', () => {
     localStorage.removeItem(`mss:vault_canary_${currentBucket}`)
 
     // Attempting to enable biometrics with wrong password must throw and not save to keyring
-    await expect(store.enableBiometrics('wrong-password-456')).rejects.toThrow(/Falsches Master-Passwort/)
+    await expect(store.enableBiometrics('wrong-password-456')).rejects.toThrow(i18n.t('mss.vault.errors.wrongMasterPassword'))
     expect(useVaultStore.getState().isBiometricsEnabled).toBe(false)
   })
 
@@ -391,7 +392,7 @@ describe('useVaultStore - Security & Operations', () => {
 
     const success = await useVaultStore.getState().unlock('master-password-123')
     expect(success).toBe(false)
-    expect(useVaultStore.getState().unlockError).toMatch(/Falsches Master-Passwort/)
+    expect(useVaultStore.getState().unlockError).toBe(i18n.t('mss.vault.errors.wrongMasterPassword'))
   })
 
   it('blindVaultSync sends POST to /api/vault/blind-sync with credentials: omit and auth_token', async () => {
@@ -585,14 +586,14 @@ describe('useVaultStore - Security & Operations', () => {
     expect(wrongSuccess).toBe(false)
     expect(useVaultStore.getState().isUnlocked).toBe(false)
     expect(useVaultStore.getState().items).toHaveLength(0)
-    expect(useVaultStore.getState().unlockError).toMatch(/Falsches Master-Passwort/)
+    expect(useVaultStore.getState().unlockError).toBe(i18n.t('mss.vault.errors.wrongMasterPassword'))
 
     // Also misspellings must be rejected
     const typoSuccess = await store.unlock('my-correct-master-passwrd')
     expect(typoSuccess).toBe(false)
     expect(useVaultStore.getState().isUnlocked).toBe(false)
     expect(useVaultStore.getState().items).toHaveLength(0)
-    expect(useVaultStore.getState().unlockError).toMatch(/Falsches Master-Passwort/)
+    expect(useVaultStore.getState().unlockError).toBe(i18n.t('mss.vault.errors.wrongMasterPassword'))
 
     // Unlocking with the actual correct password must succeed and restore items
     const correctSuccess = await store.unlock('my-correct-master-password')
@@ -611,7 +612,7 @@ describe('useVaultStore - Security & Operations', () => {
     const success = await store.unlock('123')
     expect(success).toBe(false)
     expect(useVaultStore.getState().isUnlocked).toBe(false)
-    expect(useVaultStore.getState().unlockError).toMatch(/Es wurde noch kein Tresor eingerichtet/)
+    expect(useVaultStore.getState().unlockError).toBe(i18n.t('mss.vault.errors.notSetup'))
 
     // Crucial: unlock must NOT have created a salt or marked vault as set up
     expect(localStorage.getItem('mss:vault_setup_done')).toBeNull()
@@ -641,7 +642,7 @@ describe('useVaultStore - Security & Operations', () => {
     const wrongSuccess = await store.unlock('wrong-master-password')
     expect(wrongSuccess).toBe(false)
     expect(useVaultStore.getState().isUnlocked).toBe(false)
-    expect(useVaultStore.getState().unlockError).toMatch(/Falsches Master-Passwort/)
+    expect(useVaultStore.getState().unlockError).toBe(i18n.t('mss.vault.errors.wrongMasterPassword'))
     expect(localStorage.getItem('mss:vault_canary')).toBeNull()
 
     // Correct password must unlock and migrate canary
@@ -661,7 +662,7 @@ describe('useVaultStore - Security & Operations', () => {
     const success = await store.unlock('123')
     expect(success).toBe(false)
     expect(useVaultStore.getState().isUnlocked).toBe(false)
-    expect(useVaultStore.getState().unlockError).toMatch(/Es wurde noch kein Tresor eingerichtet/)
+    expect(useVaultStore.getState().unlockError).toBe(i18n.t('mss.vault.errors.notSetup'))
     expect(localStorage.getItem('mss:vault_setup_done')).toBeNull()
     expect(localStorage.getItem('mss:vault_canary')).toBeNull()
   })
@@ -682,7 +683,7 @@ describe('useVaultStore - Security & Operations', () => {
     const wrongSuccess = await store.unlock('123')
     expect(wrongSuccess).toBe(false)
     expect(useVaultStore.getState().isUnlocked).toBe(false)
-    expect(useVaultStore.getState().unlockError).toMatch(/Falsches Master-Passwort/)
+    expect(useVaultStore.getState().unlockError).toBe(i18n.t('mss.vault.errors.wrongMasterPassword'))
     expect(localStorage.getItem('mss:vault_canary')).toBe(originalCanary)
   })
 

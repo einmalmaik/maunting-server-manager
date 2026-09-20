@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import i18n from '@/i18n'
 import { api, apiUrl } from '@/api/client'
 import {
   type AutoSperrQuelle,
@@ -399,7 +400,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
     try {
       const isAvailable = await isBiometricsAvailable()
       if (!isAvailable) {
-        throw new Error('Biometrische Authentifizierung wird auf diesem Gerät oder Browser nicht unterstützt.')
+        throw new Error(i18n.t('mss.vault.errors.biometricsNotSupported'))
       }
 
       const salt = getOrCreateVaultSalt()
@@ -408,10 +409,10 @@ export const useVaultStore = create<VaultState>((set, get) => {
       const currentBucketId = get().bucketId
       const serverBucket = typeof localStorage !== 'undefined' ? localStorage.getItem(VAULT_SERVER_BUCKET_KEY) : null
       if (currentBucketId && bucketId !== currentBucketId) {
-        throw new Error('Falsches Master-Passwort. Bitte überprüfe deine Eingabe.')
+        throw new Error(i18n.t('mss.vault.errors.wrongMasterPassword'))
       }
       if (serverBucket && bucketId !== serverBucket) {
-        throw new Error('Falsches Master-Passwort. Bitte überprüfe deine Eingabe.')
+        throw new Error(i18n.t('mss.vault.errors.wrongMasterPassword'))
       }
 
       const canary = typeof localStorage !== 'undefined'
@@ -440,7 +441,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
       if (!(await biometrieSpeicherFragtSelbst())) {
         const verified = await promptBiometricVerification('Biometrischen Schnelleinstieg aktivieren')
         if (!verified) {
-          throw new Error('Biometrische Authentifizierung fehlgeschlagen.')
+          throw new Error(i18n.t('mss.vault.errors.biometricsFailed'))
         }
       }
 
@@ -456,7 +457,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
       set({ isBiometricsEnabled: true })
       return true
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Biometrie-Aktivierung fehlgeschlagen'
+      const msg = err instanceof Error ? err.message : i18n.t('mss.vault.errors.biometricsActivationFailed')
       throw new Error(msg)
     }
   },
@@ -474,19 +475,19 @@ export const useVaultStore = create<VaultState>((set, get) => {
     try {
       const isAvailable = await isBiometricsAvailable()
       if (!isAvailable) {
-        throw new Error('Biometrie wird auf diesem Gerät oder Browser nicht unterstützt.')
+        throw new Error(i18n.t('mss.vault.errors.biometricsNotSupportedShort'))
       }
 
       // Primär: Native Windows Hello Verifikation & Freigabe aus dem geschützten Credential Store
       const masterPassword = await biometrieEntsperren('Passwort-Manager entsperren', FACH_TRESOR)
       if (!masterPassword) {
-        throw new Error('Biometrischer Schlüssel konnte nicht geladen werden.')
+        throw new Error(i18n.t('mss.vault.errors.biometricsKeyLoadFailed'))
       }
 
       const success = await get().unlock(masterPassword)
       return success
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Biometrisches Entsperren fehlgeschlagen.'
+      const msg = err instanceof Error ? err.message : i18n.t('mss.vault.errors.biometricsUnlockFailed')
       set({ isUnlocking: false, unlockError: msg })
       return false
     }
@@ -636,7 +637,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
       return true
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Einrichten fehlgeschlagen'
+      const msg = err instanceof Error ? err.message : i18n.t('mss.vault.errors.setupFailed')
       set({ isUnlocking: false, unlockError: msg })
       return false
     }
@@ -672,11 +673,11 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
       // Wenn weder ein lokaler noch ein Server-Tresor eingerichtet ist: Keinen Phantom-Tresor anlegen!
       if (!isConfigured) {
-        throw new Error('Es wurde noch kein Tresor eingerichtet. Bitte richte zuerst ein Master-Passwort ein.')
+        throw new Error(i18n.t('mss.vault.errors.notSetup'))
       }
 
       if (!salt) {
-        throw new Error('Tresor-Schlüsseldaten fehlen oder konnten nicht geladen werden.')
+        throw new Error(i18n.t('mss.vault.errors.keysMissing'))
       }
 
       const { userKey, bucketId, bucketAuthToken } = await deriveVaultKeys(masterPassword, salt)
@@ -684,7 +685,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
       // Bei hinterlegtem Server-Bucket muss der abgeleitete Bucket exakt übereinstimmen
       const serverBucket = typeof localStorage !== 'undefined' ? localStorage.getItem(VAULT_SERVER_BUCKET_KEY) : null
       if (serverBucket && bucketId !== serverBucket) {
-        throw new Error('Falsches Master-Passwort. Bitte überprüfe deine Eingabe.')
+        throw new Error(i18n.t('mss.vault.errors.wrongMasterPassword'))
       }
 
       // 3. Canary prüfen
@@ -696,7 +697,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
           await decryptVaultEntry(canaryCiphertext, userKey, 'vault-canary')
           matchedCanary = true
         } catch {
-          throw new Error('Falsches Master-Passwort. Bitte überprüfe deine Eingabe.')
+          throw new Error(i18n.t('mss.vault.errors.wrongMasterPassword'))
         }
       } else if (typeof localStorage !== 'undefined') {
         const legacyCanaryKeys: string[] = []
@@ -733,7 +734,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
           }
 
           if (!decryptedSuccessfully) {
-            throw new Error('Falsches Master-Passwort. Bitte überprüfe deine Eingabe.')
+            throw new Error(i18n.t('mss.vault.errors.wrongMasterPassword'))
           }
         }
       }
@@ -742,7 +743,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
       // Entweder Canary entschlüsselt ODER über hinterlegten serverBucket verifiziert
       const isVerified = matchedCanary || (serverBucket !== null && bucketId === serverBucket)
       if (!isVerified) {
-        throw new Error('Falsches Master-Passwort. Bitte überprüfe deine Eingabe.')
+        throw new Error(i18n.t('mss.vault.errors.wrongMasterPassword'))
       }
 
       // 4. Lokale verschlüsselte Blobs aus dem Cache laden
@@ -820,7 +821,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
         backoffMs = Math.min(60000, Math.pow(2, attempts - 3) * 1000)
       }
 
-      const msg = err instanceof Error ? err.message : 'Entsperren fehlgeschlagen'
+      const msg = err instanceof Error ? err.message : i18n.t('mss.vault.errors.unlockFailed')
       set({
         isUnlocking: false,
         failedUnlockAttempts: attempts,
@@ -834,7 +835,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
   createQuickPasswordEntry: async (serviceName = 'Neuer Eintrag') => {
     const { userKey, bucketId, items } = get()
     if (!userKey || !bucketId) {
-      throw new Error('Tresor ist gesperrt')
+      throw new Error(i18n.t('mss.vault.errors.locked'))
     }
 
     const newId = window.crypto.randomUUID()
@@ -888,19 +889,19 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
   saveItem: async (itemData) => {
     const { userKey, bucketId, items } = get()
-    if (!userKey || !bucketId) throw new Error('Tresor ist gesperrt')
+    if (!userKey || !bucketId) throw new Error(i18n.t('mss.vault.errors.locked'))
 
     // Payload-Guardrail (SEC-08): Dateianhänge begrenzen (<500 KB)
     if (itemData.attachments && itemData.attachments.length > 0) {
       let totalSize = 0
       for (const att of itemData.attachments) {
         if (att.size > MAX_VAULT_ATTACHMENT_SIZE_BYTES || (att.dataBase64 && att.dataBase64.length > MAX_VAULT_ATTACHMENT_SIZE_BYTES * 1.4)) {
-          throw new Error(`Dateianhang "${att.name}" überschreitet das Limit von 500 KB.`)
+          throw new Error(i18n.t('mss.vault.errors.attachmentTooLarge', { name: att.name }))
         }
         totalSize += att.size
       }
       if (totalSize > MAX_VAULT_ATTACHMENT_SIZE_BYTES) {
-        throw new Error('Die Gesamtgröße aller Dateianhänge überschreitet das Limit von 500 KB.')
+        throw new Error(i18n.t('mss.vault.errors.attachmentsTotalTooLarge'))
       }
     }
 

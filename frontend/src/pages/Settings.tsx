@@ -72,7 +72,7 @@ export function Settings() {
 
   return (
     <div className="msm-page">
-      <PageHeader eyebrow={t('pageContext.panel', 'Panel')} title={t('settings.title')} description={t('settings.subtitle')} status={<span className="msm-badge-info">{t(`settings.tabs.${activeTab}`)}</span>} />
+      <PageHeader eyebrow={t('pageContext.panel')} title={t('settings.title')} description={t('settings.subtitle')} status={<span className="msm-badge-info">{t(`settings.tabs.${activeTab}`)}</span>} />
 
       <TabBar
         tabs={tabs}

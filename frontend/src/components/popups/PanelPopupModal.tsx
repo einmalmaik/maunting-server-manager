@@ -115,7 +115,7 @@ export function PanelPopupModal({ popup: initialPopup, isPreview = false, onClos
             onClick={() => handleDismiss('snooze')}
             disabled={dismissing}
             className="p-1.5 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest transition-colors"
-            aria-label={t('common.close', 'Schließen')}
+            aria-label={t('common.close')}
           >
             <X className="w-5 h-5" />
           </button>
@@ -152,7 +152,7 @@ export function PanelPopupModal({ popup: initialPopup, isPreview = false, onClos
               className="text-on-surface-variant hover:text-error"
             >
               <EyeOff className="w-4 h-4 mr-1.5" />
-              {t('popups.neverShowAgain', 'Nicht mehr anzeigen')}
+              {t('popups.neverShowAgain')}
             </Button>
           </div>
 
@@ -163,7 +163,7 @@ export function PanelPopupModal({ popup: initialPopup, isPreview = false, onClos
               disabled={dismissing}
               onClick={() => handleDismiss('snooze')}
             >
-              {t('common.close', 'Schließen')}
+              {t('common.close')}
             </Button>
             <Button
               variant="primary"
@@ -172,7 +172,7 @@ export function PanelPopupModal({ popup: initialPopup, isPreview = false, onClos
               onClick={() => handleDismiss('snooze')}
             >
               <Check className="w-4 h-4 mr-1.5" />
-              {t('popups.understand', 'Verstanden')}
+              {t('popups.understand')}
             </Button>
           </div>
         </div>

@@ -82,7 +82,7 @@ function RegionalInfoLoading() {
   return (
     <aside
       className="flex h-full w-full flex-col space-y-4 rounded-2xl border border-outline-variant/30 bg-surface-container-low p-4 animate-pulse"
-      aria-label={t('ai.geo.panelTitle', 'Regionale Analyse')}
+      aria-label={t('ai.geo.panelTitle')}
     >
       <div className="h-6 w-3/4 rounded-lg bg-surface-container-highest" />
       <div className="h-10 rounded-xl bg-surface-container-highest" />
@@ -128,7 +128,7 @@ function RegionalInfoContent({ data, news, focus, onClose }: Omit<RegionalInfoPa
         url: previewImg,
         resolution: 'gemäß Szene',
         mission: firstScene?.mission || 'Sentinel',
-        description: t('ai.geo.sceneMetadataDescription', 'Aufnahmezeit und Bewölkung stehen in den Szenenmetadaten.'),
+        description: t('ai.geo.sceneMetadataDescription'),
       },
     ]
   }, [layersMap, previewImg, firstScene?.mission, t])
@@ -158,12 +158,12 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
   }, [data.news, news])
 
   const tabs: { id: TabType; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-    { id: 'overview', label: t('ai.geo.tabs.overview', 'Übersicht'), icon: Globe2 },
-    { id: 'satellite', label: t('ai.geo.tabs.satellite', 'Satellit'), icon: Satellite },
-    { id: 'news', label: t('ai.geo.tabs.news', 'Nachrichten'), icon: Newspaper },
-    { id: 'social', label: t('ai.geo.tabs.social', 'Soziale Medien'), icon: Share2 },
-    { id: 'traffic', label: t('ai.geo.tabs.traffic', 'Verkehr'), icon: Car },
-    { id: 'weather', label: t('ai.geo.tabs.weather', 'Wetter'), icon: Cloud },
+    { id: 'overview', label: t('ai.geo.tabs.overview'), icon: Globe2 },
+    { id: 'satellite', label: t('ai.geo.tabs.satellite'), icon: Satellite },
+    { id: 'news', label: t('ai.geo.tabs.news'), icon: Newspaper },
+    { id: 'social', label: t('ai.geo.tabs.social'), icon: Share2 },
+    { id: 'traffic', label: t('ai.geo.tabs.traffic'), icon: Car },
+    { id: 'weather', label: t('ai.geo.tabs.weather'), icon: Cloud },
   ]
 
   const selectTab = (tab: TabType) => setActiveTab(tab)
@@ -179,7 +179,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
   return (
     <aside
       className="flex h-full w-full flex-col overflow-hidden rounded-2xl border border-outline-variant/30 bg-surface-container-low text-on-surface"
-      aria-label={t('ai.geo.panelTitle', 'Regionale Analyse')}
+      aria-label={t('ai.geo.panelTitle')}
     >
       {/* Kopfbereich mit serverseitig bestätigtem Ort */}
       <div className="flex items-start justify-between gap-3 border-b border-outline-variant/30 p-4 shrink-0 bg-surface-container-lowest/60">
@@ -190,7 +190,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
             </h2>
           </div>
           <div className="flex items-center gap-2 text-xs text-on-surface-variant">
-            <span className="font-medium text-primary">{country || t('ai.geo.region', 'Region')}</span>
+            <span className="font-medium text-primary">{country || t('ai.geo.region')}</span>
             <span>•</span>
             <span>
               {Math.abs(coordinates.latitude).toFixed(4)}° {coordinates.latitude >= 0 ? 'N' : 'S'},{' '}
@@ -204,7 +204,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
           variant="ghost"
           size="sm"
           onClick={onClose}
-          aria-label={t('ai.geo.close', 'Schließen')}
+          aria-label={t('ai.geo.close')}
           className="h-8 w-8 p-0 shrink-0 text-on-surface-variant hover:text-on-surface"
         >
           <X className="h-4 w-4" aria-hidden="true" />
@@ -212,7 +212,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
       </div>
 
       {/* 2. Reiterleiste (Tabs) */}
-      <div role="tablist" aria-label={t('ai.geo.tabsLabel', 'Analysebereiche')} className="flex items-center gap-1 border-b border-outline-variant/20 px-3 py-2 overflow-x-auto no-scrollbar shrink-0 bg-surface-container-lowest/30">
+      <div role="tablist" aria-label={t('ai.geo.tabsLabel')} className="flex items-center gap-1 border-b border-outline-variant/20 px-3 py-2 overflow-x-auto no-scrollbar shrink-0 bg-surface-container-lowest/30">
         {tabs.map((tab, index) => {
           const Icon = tab.icon
           const isActive = activeTab === tab.id
@@ -250,9 +250,9 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-semibold uppercase tracking-wider text-on-surface-variant">
-                  {t('ai.geo.satelliteData', 'Satellitendaten')}
+                  {t('ai.geo.satelliteData')}
                 </span>
-                <span className="text-label-sm text-primary font-medium">{t('ai.geo.mapSource', 'MapTiler-Karte')}</span>
+                <span className="text-label-sm text-primary font-medium">{t('ai.geo.mapSource')}</span>
               </div>
 
               {/* Sentinel beschreibt Szenen; die MapTiler-Karte bleibt unverändert. */}
@@ -279,13 +279,13 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                 ) : (
                   <div className="flex h-full flex-col items-center justify-center p-6 text-center text-on-surface-variant">
                     <Satellite className="h-7 w-7 text-primary/70" aria-hidden="true" />
-                    <p className="mt-2 text-xs font-medium text-on-surface">{t('ai.geo.mapUnavailableTitle', 'Karte nicht verfügbar')}</p>
-                    <p className="mt-1 text-xs">{t('ai.geo.mapUnavailableBody', 'MapTiler ist für diese Instanz nicht eingerichtet oder derzeit nicht erreichbar.')}</p>
+                    <p className="mt-2 text-xs font-medium text-on-surface">{t('ai.geo.mapUnavailableTitle')}</p>
+                    <p className="mt-1 text-xs">{t('ai.geo.mapUnavailableBody')}</p>
                   </div>
                 )}
                 <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-gradient-to-t from-surface-container-lowest/95 to-transparent px-3 pb-2 pt-7 text-label-sm text-on-surface">
-                  <span>{t('ai.geo.mapSource', 'MapTiler-Karte')}</span>
-                  <span>{formatSafeDate(firstScene?.datetime, t('ai.geo.captureTimeUnknown', 'Aufnahmezeit unbekannt'))}</span>
+                  <span>{t('ai.geo.mapSource')}</span>
+                  <span>{formatSafeDate(firstScene?.datetime, t('ai.geo.captureTimeUnknown'))}</span>
                 </div>
               </div>
             </div>
@@ -294,7 +294,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
             <div className="space-y-2.5">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-semibold uppercase tracking-wider text-on-surface-variant">
-                  {t('ai.geo.currentNews', 'Aktuelle Nachrichten')}
+                  {t('ai.geo.currentNews')}
                 </span>
                 <span className="text-label-sm text-primary">{t('ai.geo.newsCount', { count: newsList.length })}</span>
               </div>
@@ -302,8 +302,8 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
               <div className="space-y-2">
                 {newsList.length === 0 && (
                   <div className="rounded-xl border border-dashed border-outline-variant/30 bg-surface-container-lowest/70 p-3 text-center">
-                    <p className="text-xs font-medium text-on-surface">{t('ai.geo.newsUnavailableTitle', 'Keine Nachrichten verfügbar')}</p>
-                    <p className="mt-1 text-xs text-on-surface-variant">{t('ai.geo.newsUnavailableBody', 'Für diese Region ist keine Nachrichtenquelle eingerichtet.')}</p>
+                    <p className="text-xs font-medium text-on-surface">{t('ai.geo.newsUnavailableTitle')}</p>
+                    <p className="mt-1 text-xs text-on-surface-variant">{t('ai.geo.newsUnavailableBody')}</p>
                   </div>
                 )}
                 {newsList.map((item) => (
@@ -334,7 +334,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                           rel="noopener noreferrer"
                           className="flex items-center gap-1 text-primary hover:underline"
                         >
-                          <span>{t('ai.geo.readMore', 'Quelle')}</span>
+                          <span>{t('ai.geo.readMore')}</span>
                           <ExternalLink className="h-2.5 w-2.5" />
                         </a>
                       )}
@@ -351,7 +351,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                   <div className="flex items-center gap-2">
                     <Thermometer className="h-4 w-4 text-primary" />
                     <span className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                      {t('ai.geo.weather', 'Wetter & Klima')}
+                      {t('ai.geo.weather')}
                     </span>
                   </div>
                   <span className="text-xs font-medium text-primary">{weather.condition}</span>
@@ -384,10 +384,10 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                {t('ai.geo.scenes', 'Satelliten-Layer & Szenen')}
+                {t('ai.geo.scenes')}
               </span>
               <span className="rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-label-sm font-medium text-primary">
-                {t('ai.geo.sceneMetadata', 'Szenenmetadaten')}
+                {t('ai.geo.sceneMetadata')}
               </span>
             </div>
 
@@ -434,7 +434,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                         darunter, ohne ein zweites, unscharfes Bild zu zeigen. */}
                     {!mapTilerAvailable && (
                       <p className="rounded-lg border border-outline-variant/20 bg-surface-container-lowest/60 p-2.5 text-label-sm leading-relaxed text-on-surface-variant">
-                        {t('ai.geo.sceneAvailableWithoutMap', 'Szenenmetadaten sind verfügbar. Die interaktive Karte benötigt eine erreichbare MapTiler-Konfiguration.')}
+                        {t('ai.geo.sceneAvailableWithoutMap')}
                       </p>
                     )}
 
@@ -446,7 +446,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                           rel="noopener noreferrer"
                           className="flex items-center gap-1 text-label-sm text-primary hover:underline"
                         >
-                          <span>{t('ai.geo.openFullScene', 'HD-Export')}</span>
+                          <span>{t('ai.geo.openFullScene')}</span>
                           <ExternalLink className="h-3 w-3" />
                         </a>
                       </div>
@@ -459,17 +459,17 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
               {satellite?.scenes && satellite.scenes.length > 0 && (
                 <div className="pt-2 space-y-2">
                   <span className="text-label-sm font-semibold text-on-surface-variant uppercase tracking-wider">
-                    {t('ai.geo.overflightMetadata', 'Copernicus-CDSE-Überflugsdaten')}
+                    {t('ai.geo.overflightMetadata')}
                   </span>
                   {satellite.scenes.map((scene) => (
                     <div key={scene.id} className="rounded-lg border border-outline-variant/20 bg-surface-container-lowest/60 p-2.5 text-label-sm space-y-1">
                       <div className="flex justify-between font-medium text-on-surface">
                         <span>{scene.mission}</span>
-                        <span>{formatSafeDate(scene.datetime, t('ai.geo.captureTimeUnknown', 'Aufnahmezeit unbekannt'), { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                        <span>{formatSafeDate(scene.datetime, t('ai.geo.captureTimeUnknown'), { day: 'numeric', month: 'short', year: 'numeric' })}</span>
                       </div>
                       {typeof scene.cloud_cover_percent === 'number' && (
                         <div className="text-on-surface-variant flex justify-between text-label-sm">
-                          <span>{t('ai.geo.cloudCover', 'Bewölkung')}</span>
+                          <span>{t('ai.geo.cloudCover')}</span>
                           <span>{scene.cloud_cover_percent}%</span>
                         </div>
                       )}
@@ -486,7 +486,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
           <div className="space-y-3">
             <div className="flex items-center justify-between text-xs">
               <span className="font-semibold uppercase tracking-wider text-on-surface-variant">
-                {t('ai.geo.newsAndWeb', 'Nachrichten & Lageberichte')}
+                {t('ai.geo.newsAndWeb')}
               </span>
               <span className="text-label-sm text-primary">{t('ai.geo.newsCount', { count: newsList.length })}</span>
             </div>
@@ -494,7 +494,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
             {newsList.length === 0 && (
               <div className="rounded-xl border border-dashed border-outline-variant/30 bg-surface-container-lowest/80 p-4 text-center">
                 <Newspaper className="mx-auto h-5 w-5 text-on-surface-variant/60" aria-hidden="true" />
-                <p className="mt-2 text-xs font-medium text-on-surface">{t('ai.geo.newsUnavailableTitle', 'Keine Nachrichten verfügbar')}</p>
+                <p className="mt-2 text-xs font-medium text-on-surface">{t('ai.geo.newsUnavailableTitle')}</p>
                 <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">
                   {t('ai.geo.newsSourceMissing')}
                 </p>
@@ -533,7 +533,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                       rel="noopener noreferrer"
                       className="flex items-center gap-1 text-primary hover:underline"
                     >
-                      <span>{t('ai.geo.readArticle', 'Artikel lesen')}</span>
+                      <span>{t('ai.geo.readArticle')}</span>
                       <ExternalLink className="h-3 w-3" />
                     </a>
                   )}
@@ -548,29 +548,29 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
           <div className="space-y-3">
             <div className="flex items-center justify-between text-xs">
               <span className="font-semibold uppercase tracking-wider text-on-surface-variant">
-                {t('ai.geo.socialMedia', 'Soziale Medien & Trends')}
+                {t('ai.geo.socialMedia')}
               </span>
               <span className="rounded-full border border-outline-variant/30 bg-surface-container-high px-2 py-0.5 text-label-sm font-medium text-on-surface-variant">
                 {publicPosts?.status === 'available'
-                  ? t('ai.geo.publicPostsUntrusted', 'Öffentliche, unbestätigte Hinweise')
-                  : t('ai.geo.publicPostsUnavailableBadge', 'Derzeit nicht verfügbar')}
+                  ? t('ai.geo.publicPostsUntrusted')
+                  : t('ai.geo.publicPostsUnavailableBadge')}
               </span>
             </div>
             {publicPosts?.status === 'available' && (
               <p className="rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs leading-relaxed text-on-surface-variant">
-                {t('ai.geo.publicPostsNotice', 'Beiträge sind öffentliche, unbestätigte Hinweise und keine Lagebewertung.')}
+                {t('ai.geo.publicPostsNotice')}
               </p>
             )}
             {publicPosts?.reddit.length ? (
-              <SocialPostList title={t('ai.geo.reddit', 'Reddit')} posts={publicPosts.reddit} type="reddit" highlightedSource={focus?.tab === 'social' ? focus.sourceId : undefined} />
+              <SocialPostList title={t('ai.geo.reddit')} posts={publicPosts.reddit} type="reddit" highlightedSource={focus?.tab === 'social' ? focus.sourceId : undefined} />
             ) : null}
             {publicPosts?.bluesky.length ? (
-              <SocialPostList title={t('ai.geo.bluesky', 'Bluesky')} posts={publicPosts.bluesky} type="bluesky" highlightedSource={focus?.tab === 'social' ? focus.sourceId : undefined} />
+              <SocialPostList title={t('ai.geo.bluesky')} posts={publicPosts.bluesky} type="bluesky" highlightedSource={focus?.tab === 'social' ? focus.sourceId : undefined} />
             ) : null}
             {(!publicPosts || publicPosts.status === 'unavailable' || (publicPosts.reddit.length === 0 && publicPosts.bluesky.length === 0)) && (
               <RegionalEmptyState
-                title={t('ai.geo.socialUnavailableTitle', 'Keine öffentlichen Beiträge verfügbar')}
-                body={t('ai.geo.socialUnavailableBody', 'Für diese Region sind derzeit keine öffentlichen Beiträge verfügbar.')}
+                title={t('ai.geo.socialUnavailableTitle')}
+                body={t('ai.geo.socialUnavailableBody')}
               />
             )}
           </div>
@@ -581,26 +581,26 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
           <div className="space-y-3">
             <div className="flex items-center justify-between text-xs">
               <span className="font-semibold uppercase tracking-wider text-on-surface-variant">
-                {t('ai.geo.trafficStatus', 'Verkehr & Bewegung')}
+                {t('ai.geo.trafficStatus')}
               </span>
               <span className="rounded-full border border-outline-variant/30 bg-surface-container-high px-2 py-0.5 text-label-sm font-medium text-on-surface-variant">
                 {traffic?.status === 'available'
-                  ? t('ai.geo.tomTomTraffic', 'TomTom-Verkehr')
+                  ? t('ai.geo.tomTomTraffic')
                   : traffic?.status === 'not_configured'
-                    ? t('ai.geo.trafficNotConfiguredBadge', 'Nicht eingerichtet')
-                    : t('ai.geo.trafficUnavailableBadge', 'Derzeit nicht verfügbar')}
+                    ? t('ai.geo.trafficNotConfiguredBadge')
+                    : t('ai.geo.trafficUnavailableBadge')}
               </span>
             </div>
             {traffic?.status === 'available' ? <TrafficDetails traffic={traffic} /> : (
               <RegionalEmptyState
                 title={traffic?.status === 'not_configured'
-                  ? t('ai.geo.trafficNotConfiguredTitle', 'Verkehrsquelle nicht eingerichtet')
-                  : t('ai.geo.trafficUnavailableTitle', 'Verkehrsdaten derzeit nicht verfügbar')}
+                  ? t('ai.geo.trafficNotConfiguredTitle')
+                  : t('ai.geo.trafficUnavailableTitle')}
                 body={traffic?.status === 'not_configured'
-                  ? t('ai.geo.trafficNotConfiguredBody', 'Für diese Instanz ist keine TomTom-Verkehrsquelle eingerichtet.')
+                  ? t('ai.geo.trafficNotConfiguredBody')
                   : traffic?.reason
                     ? t(`ai.geo.trafficReasons.${traffic.reason}`, 'TomTom-Verkehrsdaten sind für diese Region derzeit nicht verfügbar.')
-                    : t('ai.geo.trafficUnavailableBody', 'TomTom-Verkehrsdaten sind für diese Region derzeit nicht verfügbar.')}
+                    : t('ai.geo.trafficUnavailableBody')}
               />
             )}
           </div>
@@ -614,7 +614,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                 <div className="flex items-center gap-2">
                   <Thermometer className="h-5 w-5 text-primary" />
                   <span className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                    {t('ai.geo.weatherDetails', 'Detaillierte Wetterdaten')}
+                    {t('ai.geo.weatherDetails')}
                   </span>
                 </div>
                 <span className="text-xs font-semibold text-primary">{weather.condition}</span>
@@ -667,7 +667,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
           className="w-full justify-center text-xs py-2"
           onClick={onClose}
         >
-          {t('ai.geo.backToChat', 'Zurück zum Chat')}
+          {t('ai.geo.backToChat')}
         </Button>
       </div>
     </aside>
@@ -707,7 +707,7 @@ function SocialPostList({ title, posts, type, highlightedSource }: {
             <h4 className="text-xs font-semibold leading-snug text-on-surface">{heading}</h4>
             <p className="text-xs leading-relaxed text-on-surface-variant">{content}</p>
             <a href={post.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-label-sm text-primary hover:underline">
-              <span>{t('ai.geo.openPublicPost', 'Beitrag öffnen')}</span>
+              <span>{t('ai.geo.openPublicPost')}</span>
               <ExternalLink className="h-3 w-3" aria-hidden="true" />
             </a>
           </article>
@@ -720,18 +720,18 @@ function SocialPostList({ title, posts, type, highlightedSource }: {
 function TrafficDetails({ traffic }: { traffic: NonNullable<AiRegionalAnalysis['traffic']> }) {
   const { t } = useTranslation()
   const metrics = [
-    { label: t('ai.geo.currentSpeed', 'Aktuelle Geschwindigkeit'), value: traffic.current_speed_kmh, suffix: 'km/h' },
-    { label: t('ai.geo.freeFlowSpeed', 'Freie Geschwindigkeit'), value: traffic.free_flow_speed_kmh, suffix: 'km/h' },
-    { label: t('ai.geo.currentTravelTime', 'Aktuelle Fahrzeit'), value: traffic.current_travel_time_seconds, suffix: 's' },
-    { label: t('ai.geo.freeFlowTravelTime', 'Freie Fahrzeit'), value: traffic.free_flow_travel_time_seconds, suffix: 's' },
-    { label: t('ai.geo.confidence', 'TomTom-Konfidenz'), value: traffic.confidence, suffix: '' },
+    { label: t('ai.geo.currentSpeed'), value: traffic.current_speed_kmh, suffix: 'km/h' },
+    { label: t('ai.geo.freeFlowSpeed'), value: traffic.free_flow_speed_kmh, suffix: 'km/h' },
+    { label: t('ai.geo.currentTravelTime'), value: traffic.current_travel_time_seconds, suffix: 's' },
+    { label: t('ai.geo.freeFlowTravelTime'), value: traffic.free_flow_travel_time_seconds, suffix: 's' },
+    { label: t('ai.geo.confidence'), value: traffic.confidence, suffix: '' },
   ].filter((metric): metric is { label: string; value: number; suffix: string } => typeof metric.value === 'number')
 
   return (
     <div className="space-y-3">
       {traffic.road_closure === true && (
         <p className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs font-medium text-on-surface">
-          {t('ai.geo.roadClosure', 'TomTom meldet eine Straßensperrung im abgefragten Bereich.')}
+          {t('ai.geo.roadClosure')}
         </p>
       )}
       {metrics.length > 0 ? (
@@ -743,9 +743,9 @@ function TrafficDetails({ traffic }: { traffic: NonNullable<AiRegionalAnalysis['
             </div>
           ))}
         </div>
-      ) : <RegionalEmptyState title={t('ai.geo.trafficNoMetricsTitle', 'Keine aktuellen Messwerte')} body={t('ai.geo.trafficNoMetricsBody', 'TomTom hat für diese Abfrage keine Messwerte geliefert.')} />}
+      ) : <RegionalEmptyState title={t('ai.geo.trafficNoMetricsTitle')} body={t('ai.geo.trafficNoMetricsBody')} />}
       {traffic.road_closure === false && (
-        <p className="flex items-center gap-2 text-xs text-on-surface-variant"><Check className="h-3.5 w-3.5 text-success" aria-hidden="true" />{t('ai.geo.noRoadClosure', 'Keine Straßensperrung gemeldet.')}</p>
+        <p className="flex items-center gap-2 text-xs text-on-surface-variant"><Check className="h-3.5 w-3.5 text-success" aria-hidden="true" />{t('ai.geo.noRoadClosure')}</p>
       )}
     </div>
   )

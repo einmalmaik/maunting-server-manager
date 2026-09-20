@@ -75,7 +75,7 @@ export function Profile() {
 
   return (
     <div className="msm-page">
-      <PageHeader eyebrow={t('pageContext.panel', 'Panel')} title={t('profile.title')} description={t('profile.subtitle')} status={<span className="msm-badge-info">{t(`profile.tabs.${activeTab}`)}</span>} />
+      <PageHeader eyebrow={t('pageContext.panel')} title={t('profile.title')} description={t('profile.subtitle')} status={<span className="msm-badge-info">{t(`profile.tabs.${activeTab}`)}</span>} />
 
       <TabBar
         tabs={tabs}

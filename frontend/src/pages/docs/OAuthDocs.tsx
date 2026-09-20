@@ -39,7 +39,7 @@ export function OAuthDocs() {
   return (
     <div className="msm-page mx-auto max-w-6xl">
       <PageHeader
-        eyebrow={t('pageContext.help', 'Help & guidance')}
+        eyebrow={t('pageContext.help')}
         title={t('docsOAuth.title')}
         description={t('docsOAuth.subtitle')}
         status={<KeyRound className="h-6 w-6 text-primary" aria-hidden="true" />}

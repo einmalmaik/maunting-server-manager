@@ -22,12 +22,12 @@ export function AccountTab() {
   const handleAvatarChange = async (file?: File | null) => {
     if (!file) return
     if (file.size > 5 * 1024 * 1024) {
-      toast.error(t('profile.avatarSizeLimit', 'Das Profilbild darf maximal 5 MB groß sein.'))
+      toast.error(t('profile.avatarSizeLimit'))
       return
     }
     const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
     if (!allowedTypes.includes(file.type)) {
-      toast.error(t('profile.avatarInvalidType', 'Erlaubte Formate sind JPEG, PNG, WebP und GIF.'))
+      toast.error(t('profile.avatarInvalidType'))
       return
     }
 
@@ -40,9 +40,9 @@ export function AccountTab() {
         body: formData,
       })
       updateUser({ avatar_url: res.avatar_url })
-      toast.success(t('profile.avatarUpdated', 'Profilbild erfolgreich aktualisiert.'))
+      toast.success(t('profile.avatarUpdated'))
     } catch (err: any) {
-      toast.error(err?.detail || t('profile.avatarUpdateFailed', 'Profilbild konnte nicht hochgeladen werden.'))
+      toast.error(err?.detail || t('profile.avatarUpdateFailed'))
     } finally {
       setUploadingAvatar(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
@@ -55,9 +55,9 @@ export function AccountTab() {
     try {
       await api<any>('/auth/me/avatar', { method: 'DELETE' })
       updateUser({ avatar_url: null })
-      toast.success(t('profile.avatarRemoved', 'Profilbild wurde entfernt.'))
+      toast.success(t('profile.avatarRemoved'))
     } catch (err: any) {
-      toast.error(err?.detail || t('profile.avatarRemoveFailed', 'Profilbild konnte nicht entfernt werden.'))
+      toast.error(err?.detail || t('profile.avatarRemoveFailed'))
     } finally {
       setUploadingAvatar(false)
     }
@@ -96,9 +96,9 @@ export function AccountTab() {
         : level
       updateUser({ social_privacy: validPrivacy })
       setPrivacyLevel(validPrivacy)
-      toast.success(t('profile.privacySaved', 'Privatsphäre-Einstellungen gespeichert.'))
+      toast.success(t('profile.privacySaved'))
     } catch {
-      toast.error(t('profile.privacySaveFailed', 'Einstellungen konnten nicht gespeichert werden.'))
+      toast.error(t('profile.privacySaveFailed'))
     } finally {
       setSavingPrivacy(false)
     }
@@ -140,9 +140,9 @@ export function AccountTab() {
       updateUser({ time_zone: res.time_zone })
       setSelectedZone(res.time_zone || 'UTC')
       setDismissedBrowserHint(true)
-      toast.success(t('profile.timezoneSaved', 'Zeitzone gespeichert.'))
+      toast.success(t('profile.timezoneSaved'))
     } catch {
-      toast.error(t('profile.timezoneSaveFailed', 'Zeitzone konnte nicht gespeichert werden.'))
+      toast.error(t('profile.timezoneSaveFailed'))
     } finally {
       setSaving(false)
     }
@@ -184,10 +184,10 @@ export function AccountTab() {
         (error as Error)?.message === 'UNSUPPORTED'
       ) {
         setLocationSharingError(
-          t('profile.locationSharingPermissionError', 'Der Standortzugriff wurde nicht freigegeben. Du kannst ihn in den Browser- oder App-Einstellungen erlauben.'),
+          t('profile.locationSharingPermissionError'),
         )
       } else {
-        setLocationSharingError(t('profile.locationSharingSaveError', 'Die Standortfreigabe konnte nicht gespeichert werden.'))
+        setLocationSharingError(t('profile.locationSharingSaveError'))
       }
     } finally {
       setSavingLocationSharing(false)
@@ -200,7 +200,7 @@ export function AccountTab() {
       <div className="msm-card p-6">
         <div className="flex items-center gap-2 mb-6">
           <Mail className="h-5 w-5 text-secondary" aria-hidden="true" />
-          <h2 className="font-headline text-title-lg font-semibold text-on-surface">{t('auth.email', 'Konto & Profilbild')}</h2>
+          <h2 className="font-headline text-title-lg font-semibold text-on-surface">{t('auth.email')}</h2>
         </div>
 
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
@@ -225,7 +225,7 @@ export function AccountTab() {
               {user?.email_verified === false && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-status-destructive/10 text-status-destructive border border-status-destructive/30 mt-1.5">
                   <AlertTriangle className="w-3 h-3" />
-                  {t('profile.notVerified', 'Nicht verifiziert')}
+                  {t('profile.notVerified')}
                 </span>
               )}
             </div>
@@ -249,7 +249,7 @@ export function AccountTab() {
                 className="flex items-center gap-1.5"
               >
                 <Camera className="w-4 h-4 text-primary" aria-hidden="true" />
-                {user?.avatar_url ? t('profile.changeAvatar', 'Profilbild ändern') : t('profile.uploadAvatar', 'Profilbild hochladen')}
+                {user?.avatar_url ? t('profile.changeAvatar') : t('profile.uploadAvatar')}
               </Button>
 
               {user?.avatar_url && (
@@ -262,12 +262,12 @@ export function AccountTab() {
                   className="flex items-center gap-1.5 text-status-destructive hover:bg-status-destructive/10"
                 >
                   <Trash2 className="w-4 h-4" aria-hidden="true" />
-                  {t('profile.removeAvatar', 'Entfernen')}
+                  {t('profile.removeAvatar')}
                 </Button>
               )}
             </div>
             <p className="text-xs text-on-surface-variant/70">
-              {t('profile.avatarHint', 'PNG, JPG, WebP oder GIF (max. 5 MB).')}
+              {t('profile.avatarHint')}
             </p>
           </div>
         </div>
@@ -278,7 +278,7 @@ export function AccountTab() {
         <div className="flex items-center gap-2 mb-6">
           <Clock className="h-5 w-5 text-secondary" aria-hidden="true" />
           <h2 className="font-headline text-title-lg font-semibold text-on-surface">
-            {t('profile.timezoneTitle', 'Zeitzone')}
+            {t('profile.timezoneTitle')}
           </h2>
         </div>
 
@@ -287,7 +287,7 @@ export function AccountTab() {
             <div className="flex items-center gap-2">
               <Globe className="h-4 w-4 text-primary shrink-0" aria-hidden="true" />
               <span>
-                {t('profile.timezoneBrowserHint', 'Dein Browser nutzt {{zone}}, im Profil ist jedoch {{current}} gespeichert.', {
+                {t('profile.timezoneBrowserHint', {
                   zone: browserZone,
                   current: user?.time_zone,
                 })}
@@ -309,7 +309,7 @@ export function AccountTab() {
                 size="sm"
                 onClick={() => setDismissedBrowserHint(true)}
               >
-                {t('profile.timezoneDismiss', 'Ausblenden')}
+                {t('profile.timezoneDismiss')}
               </Button>
             </div>
           </div>
@@ -321,7 +321,7 @@ export function AccountTab() {
               htmlFor="profile-timezone"
               className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider"
             >
-              {t('profile.timezoneLabel', 'Zeitzone')}
+              {t('profile.timezoneLabel')}
             </label>
             <Dropdown
               id="profile-timezone"
@@ -329,9 +329,9 @@ export function AccountTab() {
               onChange={setSelectedZone}
               options={timezoneOptions}
               searchable={true}
-              searchPlaceholder={t('profile.timezoneSearch', 'Zeitzone suchen …')}
-              placeholder={t('profile.timezonePlaceholder', 'Zeitzone auswählen')}
-              aria-label={t('profile.timezoneLabel', 'Zeitzone')}
+              searchPlaceholder={t('profile.timezoneSearch')}
+              placeholder={t('profile.timezonePlaceholder')}
+              aria-label={t('profile.timezoneLabel')}
             />
           </div>
 
@@ -343,7 +343,7 @@ export function AccountTab() {
               onClick={() => void handleSaveTimezone()}
             >
               <Save className="mr-1.5 h-4 w-4" aria-hidden="true" />
-              {saving ? t('common.saving', 'Speichern …') : t('profile.timezoneSave', 'Zeitzone speichern')}
+              {saving ? t('common.saving') : t('profile.timezoneSave')}
             </Button>
           </div>
         </div>
@@ -361,10 +361,10 @@ export function AccountTab() {
             </div>
             <div>
               <h2 id="location-sharing-title" className="font-headline text-title-lg font-semibold text-on-surface">
-                {t('profile.locationSharingTitle', 'Standort für KI-Anfragen')}
+                {t('profile.locationSharingTitle')}
               </h2>
               <p className="mt-1 max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant">
-                {t('profile.locationSharingDescription', 'Wird nur bei ortsbezogenen KI-Anfragen verwendet.')}
+                {t('profile.locationSharingDescription')}
               </p>
             </div>
           </div>
@@ -375,14 +375,14 @@ export function AccountTab() {
           }`}>
             <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
             {user?.location_sharing_enabled
-              ? t('profile.locationSharingEnabled', 'Freigegeben')
-              : t('profile.locationSharingDisabled', 'Nicht freigegeben')}
+              ? t('profile.locationSharingEnabled')
+              : t('profile.locationSharingDisabled')}
           </span>
         </div>
 
         <div className="mt-4 border-l-2 border-primary/40 pl-3">
           <p className="font-body-md text-xs leading-5 text-on-surface-variant">
-            {t('profile.locationSharingPrivacy', 'Keine dauerhafte Speicherung von Koordinaten im Konto.')}
+            {t('profile.locationSharingPrivacy')}
           </p>
         </div>
 
@@ -400,10 +400,10 @@ export function AccountTab() {
             onClick={() => void handleLocationSharingChange(!user?.location_sharing_enabled)}
           >
             {savingLocationSharing
-              ? t('common.saving', 'Speichern …')
+              ? t('common.saving')
               : user?.location_sharing_enabled
-                ? t('profile.locationSharingDisable', 'Standortfreigabe deaktivieren')
-                : t('profile.locationSharingEnable', 'Standortfreigabe aktivieren')}
+                ? t('profile.locationSharingDisable')
+                : t('profile.locationSharingEnable')}
           </Button>
         </div>
       </section>
@@ -413,11 +413,11 @@ export function AccountTab() {
         <div className="flex items-center gap-2 mb-4">
           <Shield className="h-5 w-5 text-secondary" aria-hidden="true" />
           <h2 id="privacy-settings-title" className="font-headline text-title-lg font-semibold text-on-surface">
-            {t('profile.privacyTitle', 'Privatsphäre & Sichtbarkeit')}
+            {t('profile.privacyTitle')}
           </h2>
         </div>
         <p className="max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant mb-4">
-          {t('profile.privacyDescription', 'Bestimme, wer deinen Online-Status und deine Aktivitäten im System sehen kann.')}
+          {t('profile.privacyDescription')}
         </p>
 
         <div className="max-w-md space-y-4">
@@ -426,7 +426,7 @@ export function AccountTab() {
               htmlFor="profile-privacy-dropdown"
               className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider"
             >
-              {t('profile.privacyVisibility', 'Profil-Sichtbarkeit')}
+              {t('profile.privacyVisibility')}
             </label>
             <Dropdown
               id="profile-privacy-dropdown"
@@ -438,7 +438,7 @@ export function AccountTab() {
               }}
               options={privacyOptions}
               disabled={savingPrivacy}
-              aria-label={t('profile.privacyVisibility', 'Profil-Sichtbarkeit')}
+              aria-label={t('profile.privacyVisibility')}
             />
           </div>
           <p className="text-xs text-on-surface-variant/70">

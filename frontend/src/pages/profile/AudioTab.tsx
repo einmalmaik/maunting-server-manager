@@ -174,7 +174,7 @@ export function AudioTab() {
 
       setIsTesting(true)
     } catch {
-      setTestError(t('mss.audio.testhoerenFehler', 'Testhören fehlgeschlagen. Bitte Mikrofonberechtigung prüfen.'))
+      setTestError(t('mss.audio.testhoerenFehler'))
       setIsTesting(false)
     }
   }, [noiseSuppression, autoGainControl, selectedInputId, selectedOutputId, gainPercent, t])
@@ -245,7 +245,7 @@ export function AudioTab() {
           <div className="flex items-center gap-2">
             <Mic className="h-5 w-5 text-secondary" aria-hidden="true" />
             <h2 id="audio-devices-heading" className="font-headline text-title-lg font-semibold text-on-surface">
-              {t('profile.audioTitle', 'Mikrofon & Audio')}
+              {t('profile.audioTitle')}
             </h2>
           </div>
           <span
@@ -256,15 +256,12 @@ export function AudioTab() {
             }`}
           >
             <Radio className="h-3.5 w-3.5" aria-hidden="true" />
-            {isTesting ? t('profile.audioActive', 'Test aktiv') : t('profile.audioInactive', 'Bereit')}
+            {isTesting ? t('profile.audioActive') : t('profile.audioInactive')}
           </span>
         </div>
 
         <p className="max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant mb-6">
-          {t(
-            'profile.audioDescription',
-            'Konfiguriere deine Audio-Geräte für Sprachnachrichten, den KI-Sprachmodus und das Wake-Word. Änderungen werden einheitlich im gesamten System angewendet.'
-          )}
+          {t('profile.audioDescription')}
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl">
@@ -273,14 +270,14 @@ export function AudioTab() {
               htmlFor="audio-input-device"
               className="block font-label-md text-label-md text-on-surface-variant uppercase tracking-wider"
             >
-              {t('profile.audioDeviceLabel', 'Eingabegerät (Mikrofon)')}
+              {t('profile.audioDeviceLabel')}
             </label>
             <Dropdown
               id="audio-input-device"
               value={selectedInputId}
               onChange={handleSelectInput}
               options={inputDevices}
-              aria-label={t('profile.audioDeviceLabel', 'Eingabegerät (Mikrofon)')}
+              aria-label={t('profile.audioDeviceLabel')}
             />
           </div>
 
@@ -289,14 +286,14 @@ export function AudioTab() {
               htmlFor="audio-output-device"
               className="block font-label-md text-label-md text-on-surface-variant uppercase tracking-wider"
             >
-              {t('mss.audio.ausgabe', 'Ausgabegerät (Lautsprecher)')}
+              {t('mss.audio.ausgabe')}
             </label>
             <Dropdown
               id="audio-output-device"
               value={selectedOutputId}
               onChange={handleSelectOutput}
               options={outputDevices}
-              aria-label={t('mss.audio.ausgabe', 'Ausgabegerät (Lautsprecher)')}
+              aria-label={t('mss.audio.ausgabe')}
             />
           </div>
         </div>
@@ -307,7 +304,7 @@ export function AudioTab() {
         <div className="flex items-center gap-2 mb-4">
           <Sliders className="h-5 w-5 text-secondary" aria-hidden="true" />
           <h2 id="audio-processing-heading" className="font-headline text-title-lg font-semibold text-on-surface">
-            {t('mss.audio.verarbeitung', 'Signalverarbeitung & Filter')}
+            {t('mss.audio.verarbeitung')}
           </h2>
         </div>
         <p className="max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant mb-5">
@@ -318,7 +315,7 @@ export function AudioTab() {
           <div className="flex items-center justify-between gap-3 p-3 rounded-xl border border-outline-variant/30 bg-surface-container-low/40">
             <div>
               <span className="text-sm font-medium text-on-surface block">
-                {t('profile.audioNoiseSuppression', 'Rauschunterdrückung (Noise Suppression)')}
+                {t('profile.audioNoiseSuppression')}
               </span>
               <span className="text-xs text-on-surface-variant">
                 {t('mss.audio.rauschenHinweis')}
@@ -327,14 +324,14 @@ export function AudioTab() {
             <Switch
               checked={noiseSuppression}
               onCheckedChange={handleToggleNoise}
-              aria-label={t('profile.audioNoiseSuppression', 'Rauschunterdrückung')}
+              aria-label={t('profile.audioNoiseSuppression')}
             />
           </div>
 
           <div className="flex items-center justify-between gap-3 p-3 rounded-xl border border-outline-variant/30 bg-surface-container-low/40">
             <div>
               <span className="text-sm font-medium text-on-surface block">
-                {t('profile.audioEchoCancellation', 'Echounterdrückung (Echo Cancellation)')}
+                {t('profile.audioEchoCancellation')}
               </span>
               <span className="text-xs text-on-surface-variant">
                 {t('mss.audio.echoHinweis')}
@@ -343,14 +340,14 @@ export function AudioTab() {
             <Switch
               checked={echoCancellation}
               onCheckedChange={handleToggleEcho}
-              aria-label={t('profile.audioEchoCancellation', 'Echounterdrückung')}
+              aria-label={t('profile.audioEchoCancellation')}
             />
           </div>
 
           <div className="flex items-center justify-between gap-3 p-3 rounded-xl border border-outline-variant/30 bg-surface-container-low/40">
             <div>
               <span className="text-sm font-medium text-on-surface block">
-                {t('profile.audioAutoGain', 'Automatische Pegelanpassung (Auto Gain)')}
+                {t('profile.audioAutoGain')}
               </span>
               <span className="text-xs text-on-surface-variant">
                 Gleicht leise und laute Sprachpassagen automatisch an ein gesundes Niveau an.
@@ -359,7 +356,7 @@ export function AudioTab() {
             <Switch
               checked={autoGainControl}
               onCheckedChange={handleToggleAutoGain}
-              aria-label={t('profile.audioAutoGain', 'Automatische Pegelanpassung')}
+              aria-label={t('profile.audioAutoGain')}
             />
           </div>
 
@@ -370,7 +367,7 @@ export function AudioTab() {
               max={400}
               step={5}
               onValueChange={handleGainChange}
-              label={t('mss.audio.verstaerkung', 'Software-Eingangsverstärkung')}
+              label={t('mss.audio.verstaerkung')}
               hint={`${gainPercent} %`}
             />
           </div>
@@ -382,7 +379,7 @@ export function AudioTab() {
         <div className="flex items-center gap-2 mb-4">
           <Volume2 className="h-5 w-5 text-secondary" aria-hidden="true" />
           <h2 id="audio-test-heading" className="font-headline text-title-lg font-semibold text-on-surface">
-            {t('mss.audio.testhoeren', 'Testhören & Mikrofon-Pegel')}
+            {t('mss.audio.testhoeren')}
           </h2>
         </div>
         <p className="max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant mb-5">
@@ -398,12 +395,12 @@ export function AudioTab() {
               className="gap-2 shrink-0"
             >
               <Mic className="w-4 h-4" />
-              <span>{isTesting ? t('profile.audioTestStop', 'Test beenden') : t('profile.audioTestStart', 'Testhören starten')}</span>
+              <span>{isTesting ? t('profile.audioTestStop') : t('profile.audioTestStart')}</span>
             </Button>
 
             <ProgressBar
               value={isTesting ? Math.round(testLevel * 100) : null}
-              ariaLabel={t('mss.audio.testhoerenPegel', 'Mikrofonpegel')}
+              ariaLabel={t('mss.audio.testhoerenPegel')}
               className="flex-1"
             />
           </div>
@@ -412,7 +409,7 @@ export function AudioTab() {
             <div className="flex items-center justify-between text-xs px-1 text-on-surface-variant">
               <span>Pegel: {Math.round(testLevel * 100)}%</span>
               <span className={testLevel > 0.05 ? 'text-status-success font-semibold' : 'text-on-surface-variant/60'}>
-                {testLevel > 0.05 ? t('profile.audioSignalDetected', 'Signal erkannt') : 'Kein Signal'}
+                {testLevel > 0.05 ? t('profile.audioSignalDetected') : 'Kein Signal'}
               </span>
             </div>
           )}

@@ -174,14 +174,14 @@ export function DatabaseManager({ serverId }: Props) {
       if (!selectedDbId || !selectedTable) return
       const ok = await confirm({
         title: 'Tabelle löschen',
-        message: `Tabelle ${selectedTable.schema}.${selectedTable.name} wirklich löschen?`,
+        message: t('databaseManager.deleteTablePrompt', { schema: selectedTable.schema, name: selectedTable.name }),
         confirmText: t('common.delete'),
         danger: true,
       })
       if (!ok) return
       const typed = await prompt({
         title: 'Tabelle löschen',
-        message: `Tabelle ${selectedTable.schema}.${selectedTable.name} wirklich löschen? Alle Daten gehen verloren.`,
+        message: t('databaseManager.deleteTableConfirm', { schema: selectedTable.schema, name: selectedTable.name }),
         expectedValue: selectedTable.name,
         confirmText: 'Löschen',
         danger: true,
@@ -189,14 +189,12 @@ export function DatabaseManager({ serverId }: Props) {
       if (!typed) return
       await api(`/servers/${serverId}/databases/tables/drop`, {
         method: 'POST',
-        body: JSON.stringify({
-          database_id: selectedDbId,
-          schema_name: selectedTable.schema,
-          table_name: selectedTable.name,
-          confirm_name: typed,
-        }),
+        headers: csrfHeader(),
+        body: JSON.stringify({ database_id: selectedDbId, schema_name: selectedTable.schema, table_name: selectedTable.name }),
       })
-      await fetchDatabaseData(selectedDbId)
+      await selectTable(null as any, selectedDbId)
+      await fetchResources()
+      toast.success(t('databaseManager.tableDeleted'))
     })
 
   const deleteDatabase = () =>
@@ -204,14 +202,14 @@ export function DatabaseManager({ serverId }: Props) {
       if (!selectedDbId || !selectedDatabase) return
       const ok = await confirm({
         title: 'Datenbank löschen',
-        message: `Datenbank "${selectedDatabase.name}" wirklich löschen? Alle Daten gehen unwiderruflich verloren.`,
+        message: `Datenbank "${selectedDatabase.name}" wirklich unwiderruflich löschen?`,
         confirmText: t('common.delete'),
         danger: true,
       })
       if (!ok) return
       const typed = await prompt({
         title: 'Datenbank löschen',
-        message: `Datenbank "${selectedDatabase.name}" wirklich löschen? Alle Daten gehen unwiderruflich verloren.`,
+        message: `Datenbank "${selectedDatabase.name}" wirklich unwiderruflich löschen?`,
         expectedValue: selectedDatabase.name,
         confirmText: 'Löschen',
         danger: true,
@@ -222,7 +220,7 @@ export function DatabaseManager({ serverId }: Props) {
         body: JSON.stringify({ confirm_name: typed }),
       })
       await fetchResources()
-      toast.success('Datenbank gelöscht')
+      toast.success(t('databaseManager.databaseDeleted'))
     })
 
   const runSql = () =>
@@ -302,7 +300,7 @@ export function DatabaseManager({ serverId }: Props) {
       if (!selectedDbId) return
       const username = await prompt({
         title: 'Datenbank-Benutzer',
-        message: 'Benutzername für den neuen Datenbank-User:',
+        message: t('databaseManager.enterUsernamePrompt'),
         placeholder: 'z.B. app_user',
         confirmText: 'Erstellen',
       })
@@ -313,7 +311,7 @@ export function DatabaseManager({ serverId }: Props) {
       })
       setCredentials((prev) => [...prev, result.credential])
       await fetchResources()
-      toast.success('Datenbank-User erstellt')
+      toast.success(t('databaseManager.userCreated'))
     })
 
   const rotateUser = (userId: number) =>
@@ -330,7 +328,7 @@ export function DatabaseManager({ serverId }: Props) {
         port: result.port,
       }])
       await fetchResources()
-      toast.success('Passwort rotiert')
+      toast.success(t('databaseManager.passwordRotated'))
     })
 
   const deleteUser = (userId: number) =>
@@ -357,7 +355,7 @@ export function DatabaseManager({ serverId }: Props) {
         body: JSON.stringify({ confirm_name: typed }),
       })
       await fetchResources()
-      toast.success('Datenbank-User gelöscht')
+      toast.success(t('databaseManager.userDeleted'))
     })
 
   const handleUpdateRow = (schema: string, table: string, keyConditions: Record<string, any>, updates: Record<string, any>) =>
@@ -368,7 +366,7 @@ export function DatabaseManager({ serverId }: Props) {
         headers: csrfHeader(),
         body: JSON.stringify({ database_id: selectedDbId, schema_name: schema, table_name: table, key_conditions: keyConditions, updates }),
       })
-      toast.success('Zeile erfolgreich aktualisiert')
+      toast.success(t('databaseManager.rowUpdated'))
       if (selectedTable) {
         await selectTable(selectedTable, selectedDbId)
       }
@@ -384,7 +382,7 @@ export function DatabaseManager({ serverId }: Props) {
         headers: csrfHeader(),
         body: JSON.stringify({ database_id: selectedDbId, schema_name: schema, table_name: table, row_conditions: rowConditions }),
       })
-      toast.success(`${res?.deleted_count ?? rowConditions.length} Zeile(n) gelöscht`)
+      toast.success(t('databaseManager.rowsDeleted', { count: res?.deleted_count ?? rowConditions.length }))
       if (selectedTable) {
         await selectTable(selectedTable, selectedDbId)
       }
@@ -398,7 +396,7 @@ export function DatabaseManager({ serverId }: Props) {
         headers: csrfHeader(),
         body: JSON.stringify({ database_id: selectedDbId, schema_name: schema, table_name: table, row_data: rowData }),
       })
-      toast.success('Zeile erfolgreich eingefügt')
+      toast.success(t('databaseManager.rowInserted'))
       if (selectedTable) {
         await selectTable(selectedTable, selectedDbId)
       }

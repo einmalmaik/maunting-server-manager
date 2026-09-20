@@ -45,7 +45,7 @@ export function ConnectedCalendarsSection() {
     try {
       const res = await userIntegrationsApi.testCalendar(id)
       if (res.ok) {
-        toast.success(t('profile.calendars.testSuccess', 'Verbindungstest erfolgreich!'))
+        toast.success(t('profile.calendars.testSuccess'))
       } else {
         toast.error(t('profile.calendars.testFailed', { details: res.details, defaultValue: `Fehlgeschlagen: ${res.details}` }))
       }
@@ -60,12 +60,12 @@ export function ConnectedCalendarsSection() {
     const ok = await confirm({
       message: t('profile.calendars.deleteConfirm', { name: cal.name, defaultValue: `Möchtest du den Kalender ${cal.name} wirklich entfernen?` }),
       danger: true,
-      confirmText: t('profile.calendars.delete', 'Entfernen'),
+      confirmText: t('profile.calendars.delete'),
     })
     if (!ok) return
     try {
       await userIntegrationsApi.deleteCalendar(cal.id)
-      toast.success(t('profile.calendars.deleteSuccess', 'Kalender entfernt'))
+      toast.success(t('profile.calendars.deleteSuccess'))
       await loadCalendars()
     } catch (err: any) {
       toast.error(err.message || 'Fehler beim Löschen')
@@ -75,7 +75,7 @@ export function ConnectedCalendarsSection() {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!name || !caldavUrl) {
-      toast.error('Bitte Bezeichnung und CalDAV-URL angeben.')
+      toast.error(t('profile.calendars.nameAndUrlRequired'))
       return
     }
     setSaving(true)
@@ -89,7 +89,7 @@ export function ConnectedCalendarsSection() {
         password_or_token: password || undefined,
       }
       await userIntegrationsApi.createCalendar(input)
-      toast.success(t('profile.calendars.saveSuccess', 'Kalender gespeichert'))
+      toast.success(t('profile.calendars.saveSuccess'))
       setShowAddModal(false)
       setName('')
       setCaldavUrl('')
@@ -109,7 +109,7 @@ export function ConnectedCalendarsSection() {
         <div className="flex items-center gap-2">
           <Calendar className="h-5 w-5 text-secondary" aria-hidden="true" />
           <h2 className="font-headline text-title-lg font-semibold text-on-surface">
-            {t('profile.calendars.title', 'Verknüpfte Kalender (CalDAV)')}
+            {t('profile.calendars.title')}
           </h2>
         </div>
         <Button size="sm"
@@ -118,7 +118,7 @@ export function ConnectedCalendarsSection() {
           className="inline-flex items-center gap-1.5"
         >
           <Plus className="w-4 h-4" />
-          {t('profile.calendars.add', 'Kalender hinzufügen')}
+          {t('profile.calendars.add')}
         </Button>
       </div>
 
@@ -128,7 +128,7 @@ export function ConnectedCalendarsSection() {
         </div>
       ) : calendars.length === 0 ? (
         <p className="font-body-md text-sm text-on-surface-variant py-2">
-          {t('profile.calendars.empty', 'Keine verknüpften Kalender vorhanden.')}
+          {t('profile.calendars.empty')}
         </p>
       ) : (
         <ul className="divide-y divide-outline-variant/30">
@@ -165,7 +165,7 @@ export function ConnectedCalendarsSection() {
                   ) : (
                     <ShieldCheck className="w-3.5 h-3.5" />
                   )}
-                  {t('profile.calendars.test', 'Testen')}
+                  {t('profile.calendars.test')}
                 </Button>
                 <Button variant="destructive" size="sm"
                   type="button"
@@ -173,7 +173,7 @@ export function ConnectedCalendarsSection() {
                   className="inline-flex items-center gap-1"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  {t('profile.calendars.delete', 'Löschen')}
+                  {t('profile.calendars.delete')}
                 </Button>
               </div>
             </li>
@@ -197,7 +197,7 @@ export function ConnectedCalendarsSection() {
             >
               <div className="flex items-center justify-between mb-2">
                 <h3 className="font-headline text-title-lg font-semibold text-on-surface">
-                  {t('profile.calendars.add', 'Kalender hinzufügen')}
+                  {t('profile.calendars.add')}
                 </h3>
                 <button
                   type="button"
@@ -210,21 +210,21 @@ export function ConnectedCalendarsSection() {
               </div>
 
               <p className="font-body-md text-xs text-on-surface-variant mb-4">
-                {t('profile.mailboxes.credentialsStoredEncrypted', 'Passwörter werden mit DIS AES-256-GCM verschlüsselt gespeichert und niemals im Klartext übertragen.')}
+                {t('profile.mailboxes.credentialsStoredEncrypted')}
               </p>
 
               {/* Protocol explanation hint */}
               <div className="mb-4 p-3 rounded-lg bg-surface-container-high/60 border border-outline-variant/40 flex items-start gap-2.5">
                 <Info className="w-4 h-4 text-primary shrink-0 mt-0.5" />
                 <p className="font-body-md text-xs text-on-surface-variant">
-                  {t('profile.calendars.protocolHelp', 'Wird zum Abfragen von Terminen und Vorbereiten von Termineinträgen durch den KI-Assistenten verwendet. Termine werden erst nach deiner ausdrücklichen Bestätigung erstellt oder geändert.')}
+                  {t('profile.calendars.protocolHelp')}
                 </p>
               </div>
 
               <form onSubmit={handleCreate} className="space-y-4">
                 <div>
                   <label className="block text-xs font-medium text-on-surface mb-1">
-                    {t('profile.calendars.name', 'Bezeichnung (z. B. Team-Kalender)')}
+                    {t('profile.calendars.name')}
                   </label>
                   <input
                     type="text"
@@ -238,7 +238,7 @@ export function ConnectedCalendarsSection() {
 
                 <div>
                   <label className="block text-xs font-medium text-on-surface mb-1">
-                    {t('profile.calendars.caldavUrl', 'CalDAV-Server URL')}
+                    {t('profile.calendars.caldavUrl')}
                   </label>
                   <input
                     type="url"
@@ -249,14 +249,14 @@ export function ConnectedCalendarsSection() {
                     className="msm-input w-full text-sm font-mono"
                   />
                   <p className="text-label-sm text-on-surface-variant mt-1">
-                    {t('profile.calendars.caldavHelp', 'CalDAV-URL deines Kalenders (z. B. Nextcloud, Google CalDAV).')}
+                    {t('profile.calendars.caldavHelp')}
                   </p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-on-surface mb-1">
-                      {t('profile.calendars.caldavUsername', 'Benutzername')}
+                      {t('profile.calendars.caldavUsername')}
                     </label>
                     <input
                       type="text"
@@ -268,7 +268,7 @@ export function ConnectedCalendarsSection() {
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-on-surface mb-1">
-                      {t('profile.calendars.password', 'Passwort / App-Passwort')}
+                      {t('profile.calendars.password')}
                     </label>
                     <input
                       type="password"
@@ -286,7 +286,7 @@ export function ConnectedCalendarsSection() {
                       checked={isDefault}
                       onCheckedChange={setIsDefault}
                     />
-                    <span>{t('profile.calendars.isDefault', 'Als Standardkalender verwenden')}</span>
+                    <span>{t('profile.calendars.isDefault')}</span>
                   </label>
                 </div>
 

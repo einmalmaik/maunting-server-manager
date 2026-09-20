@@ -62,11 +62,11 @@ interface CreateBackupResponse {
 const INTERVAL_VALUES = [0, 1, 2, 3, 6, 12, 24, 48, 72, 168, 336, 504, 720];
 
 function intervalLabel(value: number, t: TFunction): string {
-  if (value === 0) return t("backups.intervalOff", "Deaktiviert");
-  if (value === 1) return t("backups.intervalHourly", "Stündlich");
-  if (value === 24) return t("backups.intervalDaily", "Täglich");
-  if (value === 168) return t("backups.intervalWeekly", "Wöchentlich");
-  if (value === 720) return t("backups.intervalMonthly", "Alle 30 Tage");
+  if (value === 0) return t("backups.intervalOff");
+  if (value === 1) return t("backups.intervalHourly");
+  if (value === 24) return t("backups.intervalDaily");
+  if (value === 168) return t("backups.intervalWeekly");
+  if (value === 720) return t("backups.intervalMonthly");
   if (value % 168 === 0) return t("backups.intervalWeeks", { count: value / 168 });
   if (value % 24 === 0) return t("backups.intervalDays", { count: value / 24 });
   return t("backups.intervalHours", { count: value });
@@ -240,7 +240,7 @@ export function Backups({ serverId }: BackupsProps) {
         method: "POST",
         body: JSON.stringify({ name: backupName.trim() || null }),
       });
-      toast.success(t("backups.created", "Backup erfolgreich abgeschlossen"));
+      toast.success(t("backups.created"));
       setShowCreateModal(false);
       setBackupName("");
       await fetchBackups();
@@ -335,7 +335,7 @@ export function Backups({ serverId }: BackupsProps) {
           backup_retention_count: settings.backup_retention_count,
         }),
       });
-      toast.success(t("backups.settingsSaved", "Einstellungen gespeichert"));
+      toast.success(t("backups.settingsSaved"));
       // Neu laden: manuelles Speichern nimmt „Von der KI verwaltet" zurück,
       // und der nächste Auto-Backup-Termin kann sich verschoben haben.
       await fetchSettings();
@@ -380,7 +380,7 @@ export function Backups({ serverId }: BackupsProps) {
         <div className="msm-card p-4 border border-secondary/40 bg-surface-container space-y-2">
           <div className="flex items-center gap-3 text-sm text-on-surface">
             <Spinner className="text-secondary flex-shrink-0" />
-            <span className="font-body-md">{operationLabel || t("backups.creating", "Backup wird erstellt...")}</span>
+            <span className="font-body-md">{operationLabel || t("backups.creating")}</span>
             {elapsedLabel && (
               <span className="text-on-surface-variant">
                 {t("backups.runningSince")} {elapsedLabel}
@@ -388,7 +388,7 @@ export function Backups({ serverId }: BackupsProps) {
             )}
             {backupStatus?.estimated_size_mb != null && backupStatus.estimated_size_mb > 0 && (
               <span className="text-on-surface-variant">
-                {t("backups.estimatedSize", "Geschätzte Größe")}: {backupStatus.estimated_size_mb} MB
+                {t("backups.estimatedSize")}: {backupStatus.estimated_size_mb} MB
               </span>
             )}
           </div>
@@ -433,10 +433,10 @@ export function Backups({ serverId }: BackupsProps) {
             onClick={() => setShowSettings(!showSettings)}
             disabled={isActive}
             className={`flex items-center gap-2 ${showSettings ? "bg-surface-container" : ""}`}
-            title={t("backups.scheduling", "Einstellungen")}
+            title={t("backups.scheduling")}
           >
             <Settings className="w-4 h-4" />
-            {t("backups.scheduling", "Einstellungen")}
+            {t("backups.scheduling")}
           </Button>
           <Button
             onClick={() => setShowCreateModal(true)}
@@ -454,7 +454,7 @@ export function Backups({ serverId }: BackupsProps) {
         <div className="msm-card p-5 space-y-4">
           <div className="flex items-center gap-3 flex-wrap">
             <h2 className="font-headline text-body-lg text-on-surface">
-              {t("backups.schedulingTitle", "Backup-Einstellungen")}
+              {t("backups.schedulingTitle")}
             </h2>
             {settings.backup_ai_managed && (
               <span
@@ -470,7 +470,7 @@ export function Backups({ serverId }: BackupsProps) {
           </div>
           {settings.next_auto_backup_at && (
             <p className="font-body-md text-sm text-on-surface-variant">
-              {t("backups.nextAutoBackup", "Nächstes Auto-Backup")}: {formatDate(settings.next_auto_backup_at)}
+              {t("backups.nextAutoBackup")}: {formatDate(settings.next_auto_backup_at)}
             </p>
           )}
 
@@ -485,17 +485,17 @@ export function Backups({ serverId }: BackupsProps) {
                   setSettings({ ...settings, backup_on_start: checked })
                 }
                 disabled={!canWrite}
-                aria-label={t("backups.backupOnStart", "Backup vor dem Start erstellen")}
+                aria-label={t("backups.backupOnStart")}
               />
               <span className="font-body-md text-sm text-on-surface-variant">
-                {t("backups.backupOnStart", "Backup vor dem Start erstellen")}
+                {t("backups.backupOnStart")}
               </span>
             </label>
 
             {/* Interval */}
             <div>
               <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider text-xs">
-                {t("backups.interval", "Intervall")}
+                {t("backups.interval")}
               </label>
               {/* Design-DNA: kein natives <select>. `Number(wert) || null`
                   bleibt — 0 (Deaktiviert) wird als null gespeichert. Der
@@ -520,14 +520,14 @@ export function Backups({ serverId }: BackupsProps) {
                   label: intervalLabel(value, t),
                 }))}
                 disabled={!canWrite}
-                aria-label={t("backups.interval", "Intervall")}
+                aria-label={t("backups.interval")}
               />
             </div>
 
             {/* Retention */}
             <div>
               <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider text-xs">
-                {t("backups.retention", "Aufbewahrung (Anzahl)")}
+                {t("backups.retention")}
               </label>
               <input
                 type="number"
@@ -692,23 +692,17 @@ export function Backups({ serverId }: BackupsProps) {
               {t("backups.create")}
             </h2>
             <p className="font-body-md text-sm text-on-surface-variant mb-5">
-              {t(
-                "backups.createModalHint",
-                "Erstellt ein komprimiertes Archiv des Server-Verzeichnisses.",
-              )}
+              {t("backups.createModalHint")}
             </p>
 
             <div className="space-y-4">
               <div>
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider text-xs">
-                  {t("backups.backupName", "Name (optional)")}
+                  {t("backups.backupName")}
                 </label>
                 <input
                   type="text"
-                  placeholder={t(
-                    "backups.backupNamePlaceholder",
-                    "z.B. Vor Update v1.5",
-                  )}
+                  placeholder={t("backups.backupNamePlaceholder")}
                   value={backupName}
                   onChange={(e) => setBackupName(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && createBackup()}
@@ -735,7 +729,7 @@ export function Backups({ serverId }: BackupsProps) {
               >
                 {actionLoading === "create"
                   ? t("common.loading")
-                  : t("backups.createNow", "Backup erstellen")}
+                  : t("backups.createNow")}
               </Button>
             </div>
           </div>

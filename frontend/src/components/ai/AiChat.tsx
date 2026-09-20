@@ -1124,11 +1124,11 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
             size="sm"
             onClick={() => setSkillsModalOpen(true)}
             className="h-8 px-2 text-xs flex items-center gap-1.5 border border-outline-variant/30 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 rounded-lg transition-colors shrink-0"
-            title={t('ai.skills.directoryTitle', 'Assistenten-Skills')}
-            aria-label={t('ai.skills.directoryTitle', 'Assistenten-Skills')}
+            title={t('ai.skills.directoryTitle')}
+            aria-label={t('ai.skills.directoryTitle')}
           >
             <Sparkles className="h-3.5 w-3.5 text-primary shrink-0" aria-hidden="true" />
-            <span className="hidden xl:inline">{t('ai.skills.directoryTitle', 'Skills')}</span>
+            <span className="hidden xl:inline">{t('ai.skills.directoryTitle')}</span>
           </Button>
         )}
 

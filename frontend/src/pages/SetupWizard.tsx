@@ -212,7 +212,7 @@ export function SetupWizard({ onComplete, emailConfigured }: SetupWizardProps) {
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
                   <label htmlFor="setup-username" className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                    {t('auth.username', 'Benutzername')}
+                    {t('auth.username')}
                   </label>
                   <input
                     type="text"
@@ -228,7 +228,7 @@ export function SetupWizard({ onComplete, emailConfigured }: SetupWizardProps) {
 
                 <div>
                   <label htmlFor="setup-owner-email" className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                    {t('auth.email', 'E-Mail')}
+                    {t('auth.email')}
                   </label>
                   <input
                     type="email"
@@ -243,7 +243,7 @@ export function SetupWizard({ onComplete, emailConfigured }: SetupWizardProps) {
 
                 <PasswordInput
                   id="setup-owner-password"
-                  label={t('auth.password', 'Passwort') || 'Passwort'}
+                  label={t('auth.password') || 'Passwort'}
                   value={form.password}
                   onChange={(e) => setForm({ ...form, password: e.target.value })}
                   placeholder="••••••••"
@@ -253,7 +253,7 @@ export function SetupWizard({ onComplete, emailConfigured }: SetupWizardProps) {
 
                 <PasswordInput
                   id="setup-owner-password-confirm"
-                  label={t('auth.confirmPassword', 'Passwort bestätigen') || 'Passwort bestätigen'}
+                  label={t('auth.confirmPassword') || 'Passwort bestätigen'}
                   value={form.confirm}
                   onChange={(e) => setForm({ ...form, confirm: e.target.value })}
                   placeholder="••••••••"

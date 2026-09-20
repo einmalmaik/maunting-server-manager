@@ -159,7 +159,7 @@ export function Notes() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!formTitle.trim()) {
-      toast.error(t('notes.titleRequired', 'Bitte gib einen Titel für die Notiz ein.'))
+      toast.error(t('notes.titleRequired'))
       return
     }
 
@@ -177,15 +177,15 @@ export function Notes() {
 
       await saveNoteOffline(payload, editingNote)
       if (editingNote) {
-        toast.success(t('notes.updated', 'Notiz erfolgreich aktualisiert.'))
+        toast.success(t('notes.updated'))
       } else {
-        toast.success(t('notes.created', 'Notiz erfolgreich erstellt.'))
+        toast.success(t('notes.created'))
       }
 
       setIsModalOpen(false)
       void loadNotes()
     } catch {
-      toast.error(t('notes.saveError', 'Fehler beim Speichern der Notiz.'))
+      toast.error(t('notes.saveError'))
     } finally {
       setSaving(false)
     }
@@ -193,19 +193,19 @@ export function Notes() {
 
   const handleDelete = async (note: NoteItem) => {
     const ok = await confirm({
-      title: t('notes.deleteConfirmTitle', 'Notiz löschen?'),
-      message: t('notes.deleteConfirmMessage', 'Möchtest du diese Notiz wirklich unwiderruflich löschen?'),
-      confirmText: t('common.delete', 'Löschen'),
+      title: t('notes.deleteConfirmTitle'),
+      message: t('notes.deleteConfirmMessage'),
+      confirmText: t('common.delete'),
       danger: true,
     })
     if (!ok) return
 
     try {
       await deleteNoteOffline(note)
-      toast.success(t('notes.deleted', 'Notiz gelöscht.'))
+      toast.success(t('notes.deleted'))
       void loadNotes()
     } catch {
-      toast.error(t('notes.deleteError', 'Fehler beim Löschen der Notiz.'))
+      toast.error(t('notes.deleteError'))
     }
   }
 
@@ -215,7 +215,7 @@ export function Notes() {
       await toggleNotePinOffline(note)
       void loadNotes()
     } catch {
-      toast.error(t('notes.pinError', 'Fehler beim Anpinnen der Notiz.'))
+      toast.error(t('notes.pinError'))
     }
   }
 
@@ -223,10 +223,10 @@ export function Notes() {
     e.stopPropagation()
     try {
       await toggleNoteArchiveOffline(note)
-      toast.success(note.is_archived ? t('notes.unarchived', 'Notiz wiederhergestellt.') : t('notes.archived', 'Notiz archiviert.'))
+      toast.success(note.is_archived ? t('notes.unarchived') : t('notes.archived'))
       void loadNotes()
     } catch {
-      toast.error(t('notes.archiveError', 'Fehler beim Ändern des Archivierungsstatus.'))
+      toast.error(t('notes.archiveError'))
     }
   }
 
@@ -276,33 +276,33 @@ export function Notes() {
   }, [notes, showArchived, selectedCategory, selectedType, searchQuery])
 
   const categoryOptions: DropdownOption[] = [
-    { value: 'all', label: t('notes.categories.all', 'Alle Kategorien') },
-    { value: 'personal', label: t('notes.categories.personal', 'Persönlich') },
-    { value: 'shopping', label: t('notes.categories.shopping', 'Einkaufsliste') },
-    { value: 'todo', label: t('notes.categories.todo', 'Aufgaben & To-Dos') },
-    { value: 'work', label: t('notes.categories.work', 'Arbeit & Server') },
-    { value: 'idea', label: t('notes.categories.idea', 'Ideen & Entwürfe') },
-    { value: 'meeting', label: t('notes.categories.meeting', 'Besprechung / Notizen') },
+    { value: 'all', label: t('notes.categories.all') },
+    { value: 'personal', label: t('notes.categories.personal') },
+    { value: 'shopping', label: t('notes.categories.shopping') },
+    { value: 'todo', label: t('notes.categories.todo') },
+    { value: 'work', label: t('notes.categories.work') },
+    { value: 'idea', label: t('notes.categories.idea') },
+    { value: 'meeting', label: t('notes.categories.meeting') },
   ]
 
   const modalCategoryOptions: DropdownOption[] = [
-    { value: 'personal', label: t('notes.categories.personal', 'Persönlich') },
-    { value: 'shopping', label: t('notes.categories.shopping', 'Einkaufsliste') },
-    { value: 'todo', label: t('notes.categories.todo', 'Aufgaben & To-Dos') },
-    { value: 'work', label: t('notes.categories.work', 'Arbeit & Server') },
-    { value: 'idea', label: t('notes.categories.idea', 'Ideen & Entwürfe') },
-    { value: 'meeting', label: t('notes.categories.meeting', 'Besprechung / Notizen') },
+    { value: 'personal', label: t('notes.categories.personal') },
+    { value: 'shopping', label: t('notes.categories.shopping') },
+    { value: 'todo', label: t('notes.categories.todo') },
+    { value: 'work', label: t('notes.categories.work') },
+    { value: 'idea', label: t('notes.categories.idea') },
+    { value: 'meeting', label: t('notes.categories.meeting') },
   ]
 
   const typeOptions: DropdownOption[] = [
-    { value: 'all', label: t('notes.types.all', 'Alle Bereiche') },
-    { value: 'personal', label: t('notes.types.personal', 'Nur Persönlich') },
-    { value: 'team', label: t('notes.types.team', 'Nur Team-Notizen') },
+    { value: 'all', label: t('notes.types.all') },
+    { value: 'personal', label: t('notes.types.personal') },
+    { value: 'team', label: t('notes.types.team') },
   ]
 
   const modalTypeOptions: DropdownOption[] = [
-    { value: 'personal', label: t('notes.types.personal', 'Persönlich (privat)') },
-    { value: 'team', label: t('notes.types.team', 'Im Team geteilt') },
+    { value: 'personal', label: t('notes.types.personal') },
+    { value: 'team', label: t('notes.types.team') },
   ]
 
   const teamOptions: DropdownOption[] = teams.map((team) => ({
@@ -320,7 +320,7 @@ export function Notes() {
           </div>
           <div className="flex items-center gap-2 min-w-0">
             <h2 className="font-headline text-base sm:text-lg font-bold text-on-surface tracking-tight truncate">
-              {t('notes.title', 'Notizen & Listen')}
+              {t('notes.title')}
             </h2>
             <span className="text-label-sm font-medium px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant border border-outline-variant/30 shrink-0">
               {filteredNotes.length}
@@ -333,8 +333,8 @@ export function Notes() {
           className="rounded-xl flex items-center gap-1.5 font-medium shadow-sm shrink-0"
         >
           <Plus className="w-4 h-4" />
-          <span className="hidden sm:inline">{t('notes.newNote', 'Neue Notiz')}</span>
-          <span className="sm:hidden">{t('notes.newNoteShort', 'Neu')}</span>
+          <span className="hidden sm:inline">{t('notes.newNote')}</span>
+          <span className="sm:hidden">{t('notes.newNoteShort')}</span>
         </Button>
       </div>
 
@@ -347,7 +347,7 @@ export function Notes() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={t('notes.searchPlaceholder', 'Notizen oder Inhalte durchsuchen...')}
+            placeholder={t('notes.searchPlaceholder')}
             className="msm-input pl-9 pr-8"
           />
           {searchQuery && (
@@ -355,7 +355,7 @@ export function Notes() {
               type="button"
               onClick={() => setSearchQuery('')}
               className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-on-surface-variant hover:text-on-surface rounded-lg"
-              aria-label={t('common.clear', 'Löschen')}
+              aria-label={t('common.clear')}
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -369,7 +369,7 @@ export function Notes() {
               value={selectedCategory}
               onChange={setSelectedCategory}
               options={categoryOptions}
-              aria-label={t('notes.categories.all', 'Kategorie')}
+              aria-label={t('notes.categories.all')}
             />
           </div>
 
@@ -378,7 +378,7 @@ export function Notes() {
               value={selectedType}
               onChange={setSelectedType}
               options={typeOptions}
-              aria-label={t('notes.types.all', 'Bereich')}
+              aria-label={t('notes.types.all')}
             />
           </div>
 
@@ -392,7 +392,7 @@ export function Notes() {
             }`}
           >
             <Archive className="w-3.5 h-3.5" />
-            <span>{showArchived ? t('notes.archivedView', 'Archiviert') : t('notes.activeView', 'Aktiv')}</span>
+            <span>{showArchived ? t('notes.archivedView') : t('notes.activeView')}</span>
           </button>
         </div>
       </div>
@@ -414,17 +414,17 @@ export function Notes() {
           </div>
           <h3 className="font-headline text-base font-semibold text-on-surface mb-1">
             {showArchived
-              ? t('notes.emptyArchivedTitle', 'Keine archivierten Notizen')
+              ? t('notes.emptyArchivedTitle')
               : searchQuery
-              ? t('notes.emptySearch', 'Keine passenden Notizen gefunden.')
-              : t('notes.emptyTitle', 'Noch keine Notizen vorhanden')}
+              ? t('notes.emptySearch')
+              : t('notes.emptyTitle')}
           </h3>
           <p className="text-xs text-on-surface-variant max-w-sm">
             {showArchived
-              ? t('notes.emptyArchivedDesc', 'Archivierte Notizen werden hier angezeigt.')
+              ? t('notes.emptyArchivedDesc')
               : searchQuery
-              ? t('notes.emptySearchDesc', 'Passe deine Suchbegriffe oder Filter an.')
-              : t('notes.emptyDesc', 'Erstelle deine erste Notiz, Einkaufsliste oder diktiere per KI.')}
+              ? t('notes.emptySearchDesc')
+              : t('notes.emptyDesc')}
           </p>
         </div>
       ) : (
@@ -469,7 +469,7 @@ export function Notes() {
                       <button
                         type="button"
                         onClick={(e) => handleTogglePin(note, e)}
-                        title={note.is_pinned ? t('notes.unpin', 'Lösen') : t('notes.pin', 'Anpinnen')}
+                        title={note.is_pinned ? t('notes.unpin') : t('notes.pin')}
                         className={`p-1.5 rounded-lg transition-colors ${
                           note.is_pinned
                             ? 'text-primary bg-primary/20 hover:bg-primary/30'
@@ -536,7 +536,7 @@ export function Notes() {
                     <button
                       type="button"
                       onClick={(e) => handleToggleArchive(note, e)}
-                      title={note.is_archived ? t('notes.unarchive', 'Wiederherstellen') : t('notes.archive', 'Archivieren')}
+                      title={note.is_archived ? t('notes.unarchive') : t('notes.archive')}
                       className="p-1.5 text-on-surface-variant hover:text-on-surface rounded-lg hover:bg-surface-container-high transition-colors"
                     >
                       {note.is_archived ? <ArchiveRestore className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
@@ -548,7 +548,7 @@ export function Notes() {
                         e.stopPropagation()
                         void handleDelete(note)
                       }}
-                      title={t('common.delete', 'Löschen')}
+                      title={t('common.delete')}
                       className="p-1.5 text-status-destructive hover:text-status-destructive/80 rounded-lg hover:bg-status-destructive/10 transition-colors"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -571,7 +571,7 @@ export function Notes() {
             {/* Modal Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-outline-variant/30">
               <h3 className="font-headline text-title-lg font-semibold text-on-surface">
-                {editingNote ? t('notes.editNote', 'Notiz bearbeiten') : t('notes.createNote', 'Neue Notiz erstellen')}
+                {editingNote ? t('notes.editNote') : t('notes.createNote')}
               </h3>
               <button
                 type="button"
@@ -587,14 +587,14 @@ export function Notes() {
               {/* Title */}
               <div>
                 <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
-                  {t('notes.formTitle', 'Titel')} *
+                  {t('notes.formTitle')} *
                 </label>
                 <input
                   type="text"
                   required
                   value={formTitle}
                   onChange={(e) => setFormTitle(e.target.value)}
-                  placeholder={t('notes.formTitlePlaceholder', 'z. B. Einkaufsliste Edeka, Meeting-Punkte, Server-Check')}
+                  placeholder={t('notes.formTitlePlaceholder')}
                   className="msm-input"
                 />
               </div>
@@ -603,7 +603,7 @@ export function Notes() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
-                    {t('notes.formCategory', 'Kategorie')}
+                    {t('notes.formCategory')}
                   </label>
                   <Dropdown
                     value={formCategory}
@@ -614,7 +614,7 @@ export function Notes() {
 
                 <div>
                   <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
-                    {t('notes.formType', 'Bereich & Sichtbarkeit')}
+                    {t('notes.formType')}
                   </label>
                   <Dropdown
                     value={formNoteType}
@@ -628,11 +628,11 @@ export function Notes() {
               {formNoteType === 'team' && (
                 <div>
                   <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
-                    {t('notes.formTeam', 'Team zuweisen')}
+                    {t('notes.formTeam')}
                   </label>
                   {teams.length === 0 ? (
                     <p className="text-xs text-status-warning bg-status-warning/10 border border-status-warning/20 rounded-xl p-2.5">
-                      {t('notes.noTeamsAvailable', 'Du bist noch keinem Team beigetreten. Erstelle zuerst ein Team unter /teams.')}
+                      {t('notes.noTeamsAvailable')}
                     </p>
                   ) : (
                     <Dropdown
@@ -647,7 +647,7 @@ export function Notes() {
               {/* Color Accent Picker */}
               <div>
                 <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
-                  {t('notes.formColor', 'Farbakzent')}
+                  {t('notes.formColor')}
                 </label>
                 <div className="flex items-center gap-1.5 flex-wrap">
                   {FARB_PALETTE.map((theme) => (
@@ -672,12 +672,12 @@ export function Notes() {
               <div className="flex items-center justify-between bg-surface-container/50 border border-outline-variant/30 rounded-xl p-3">
                 <span className="text-xs font-semibold text-on-surface flex items-center gap-1.5">
                   <Pin className="w-3.5 h-3.5 text-primary" />
-                  {t('notes.pinToTop', 'Oben anpinnen')}
+                  {t('notes.pinToTop')}
                 </span>
                 <Switch
                   checked={formIsPinned}
                   onCheckedChange={setFormIsPinned}
-                  aria-label={t('notes.pinToTop', 'Oben anpinnen')}
+                  aria-label={t('notes.pinToTop')}
                 />
               </div>
 
@@ -685,7 +685,7 @@ export function Notes() {
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <label className="text-xs font-semibold text-on-surface-variant">
-                    {t('notes.formContent', 'Inhalt & Checkliste')}
+                    {t('notes.formContent')}
                   </label>
                   <div className="flex items-center bg-surface-container rounded-lg p-0.5 border border-outline-variant/30 text-label-sm">
                     <button
@@ -698,7 +698,7 @@ export function Notes() {
                       }`}
                     >
                       <Edit3 className="w-3 h-3" />
-                      {t('notes.tabEditor', 'Editor')}
+                      {t('notes.tabEditor')}
                     </button>
                     <button
                       type="button"
@@ -710,7 +710,7 @@ export function Notes() {
                       }`}
                     >
                       <Eye className="w-3 h-3" />
-                      {t('notes.tabPreview', 'Vorschau')}
+                      {t('notes.tabPreview')}
                     </button>
                   </div>
                 </div>
@@ -741,10 +741,7 @@ export function Notes() {
                     rows={8}
                     value={formContent}
                     onChange={(e) => setFormContent(e.target.value)}
-                    placeholder={t(
-                      'notes.contentPlaceholder',
-                      '- [ ] 1x Butter (~1,89 €)\n- [ ] 6x Eier (~1,99 €)\n- [ ] 1x Brot (~2,49 €)\n\n**Geschätzte Gesamtsumme: ca. 6,37 €**'
-                    )}
+                    placeholder={t('notes.contentPlaceholder')}
                     className="msm-input font-mono leading-relaxed resize-y"
                   />
                 ) : (
@@ -789,7 +786,7 @@ export function Notes() {
                       })
                     ) : (
                       <p className="text-xs text-on-surface-variant/60 italic py-6 text-center">
-                        {t('notes.previewEmpty', 'Noch kein Inhalt zum Anzeigen eingegeben.')}
+                        {t('notes.previewEmpty')}
                       </p>
                     )}
                   </div>
@@ -803,13 +800,13 @@ export function Notes() {
                   variant="secondary"
                   onClick={() => setIsModalOpen(false)}
                 >
-                  {t('common.cancel', 'Abbrechen')}
+                  {t('common.cancel')}
                 </Button>
                 <Button type="submit" disabled={saving}>
                   {saving ? (
                     <Spinner className="mr-1.5" />
                   ) : null}
-                  {editingNote ? t('common.save', 'Speichern') : t('notes.createAction', 'Notiz anlegen')}
+                  {editingNote ? t('common.save') : t('notes.createAction')}
                 </Button>
               </div>
             </form>

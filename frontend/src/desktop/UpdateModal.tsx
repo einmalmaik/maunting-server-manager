@@ -100,7 +100,7 @@ export function UpdateModal() {
             type="button"
             onClick={() => setSichtbar(false)}
             className="absolute top-4 right-4 p-1.5 rounded-full text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors"
-            title={t('mss.updateModal.spaeterErinnern', 'Später erinnern')}
+            title={t('mss.updateModal.spaeterErinnern')}
           >
             <X className="w-5 h-5" />
           </button>
@@ -119,12 +119,12 @@ export function UpdateModal() {
           <div>
             <h3 className="font-headline text-headline-sm font-semibold text-on-surface">
               {status === 'bereit'
-                ? t('mss.updateModal.titelBereit', 'Update bereit')
+                ? t('mss.updateModal.titelBereit')
                 : status === 'laedt'
-                ? t('mss.updateModal.titelLaedt', 'Update wird geladen')
+                ? t('mss.updateModal.titelLaedt')
                 : status === 'installiert_android'
-                ? t('mss.updateModal.titelAndroid', 'Installation gestartet')
-                : t('mss.updateModal.titelVerfuegbar', 'Update verfügbar')}
+                ? t('mss.updateModal.titelAndroid')
+                : t('mss.updateModal.titelVerfuegbar')}
             </h3>
             <p className="text-xs text-on-surface-variant">
               {t('mss.updateModal.versionInfo', {
@@ -140,8 +140,8 @@ export function UpdateModal() {
           <div className="space-y-4">
             <p className="text-sm text-on-surface-variant leading-relaxed">
               {info.ist_android
-                ? t('mss.updateModal.textAndroid', 'Eine Aktualisierung steht bereit und kann direkt installiert werden.')
-                : t('mss.updateModal.textDesktop', 'Eine Aktualisierung steht bereit und wird beim nächsten Start aktiv.')}
+                ? t('mss.updateModal.textAndroid')
+                : t('mss.updateModal.textDesktop')}
             </p>
 
             {info.notizen && (
@@ -152,13 +152,13 @@ export function UpdateModal() {
 
             <div className="flex items-center justify-end gap-2 pt-2">
               <Button variant="secondary" onClick={() => setSichtbar(false)}>
-                {t('mss.updateModal.spaeter', 'Später')}
+                {t('mss.updateModal.spaeter')}
               </Button>
               <Button onClick={() => void handleInstallieren()} className="gap-2">
                 <Download className="w-4 h-4" />
                 {info.ist_android
-                  ? t('mss.updateModal.ladenUndInstallieren', 'Herunterladen & Installieren')
-                  : t('mss.updateModal.jetztAktualisieren', 'Jetzt aktualisieren')}
+                  ? t('mss.updateModal.ladenUndInstallieren')
+                  : t('mss.updateModal.jetztAktualisieren')}
               </Button>
             </div>
           </div>
@@ -167,7 +167,7 @@ export function UpdateModal() {
         {status === 'laedt' && (
           <div className="space-y-4 py-2">
             <p className="text-sm text-on-surface-variant">
-              {t('mss.updateModal.textLaedt', 'Paket wird geladen …')}
+              {t('mss.updateModal.textLaedt')}
             </p>
             <div className="w-full bg-surface-container-high rounded-full h-2.5 overflow-hidden">
               <div
@@ -189,11 +189,11 @@ export function UpdateModal() {
             </p>
             <div className="flex items-center justify-end gap-2 pt-2">
               <Button variant="secondary" onClick={() => setSichtbar(false)}>
-                {t('mss.updateModal.beimNaechstenStart', 'Beim nächsten Start')}
+                {t('mss.updateModal.beimNaechstenStart')}
               </Button>
               <Button onClick={() => void appNeuStarten()} className="gap-2">
                 <RefreshCw className="w-4 h-4" />
-                {t('mss.updateModal.neuStarten', 'Jetzt neu starten')}
+                {t('mss.updateModal.neuStarten')}
               </Button>
             </div>
           </div>
@@ -202,14 +202,14 @@ export function UpdateModal() {
         {status === 'installiert_android' && (
           <div className="space-y-4">
             <p className="text-sm text-on-surface-variant leading-relaxed">
-              {t('mss.updateModal.textAndroidGestartet', 'Der Android-Paketmanager wurde geöffnet. Bitte bestätige die Aktualisierung im System-Dialog.')}
+              {t('mss.updateModal.textAndroidGestartet')}
             </p>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="secondary" onClick={() => void handleInstallieren()}>
-                {t('mss.updateModal.erneutOeffnen', 'Erneut öffnen')}
+                {t('mss.updateModal.erneutOeffnen')}
               </Button>
               <Button onClick={() => setSichtbar(false)}>
-                {t('mss.updateModal.schliessen', 'Schließen')}
+                {t('mss.updateModal.schliessen')}
               </Button>
             </div>
           </div>
@@ -218,14 +218,14 @@ export function UpdateModal() {
         {status === 'fehler' && (
           <div className="space-y-4">
             <p className="text-sm text-error leading-relaxed">
-              {fehlerText ?? t('mss.updateModal.fehlerStandard', 'Das Update konnte nicht geladen werden.')}
+              {fehlerText ?? t('mss.updateModal.fehlerStandard')}
             </p>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="secondary" onClick={() => setSichtbar(false)}>
-                {t('mss.updateModal.schliessen', 'Schließen')}
+                {t('mss.updateModal.schliessen')}
               </Button>
               <Button onClick={() => void handleInstallieren()}>
-                {t('mss.updateModal.erneutVersuchen', 'Erneut versuchen')}
+                {t('mss.updateModal.erneutVersuchen')}
               </Button>
             </div>
           </div>

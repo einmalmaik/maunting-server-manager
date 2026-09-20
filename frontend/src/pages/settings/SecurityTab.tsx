@@ -103,7 +103,7 @@ export function SecurityTab() {
       })
       .catch((err: unknown) => {
         // Kein stiller Fehler: Nutzer sieht die API-Meldung
-        const message = err instanceof Error ? err.message : t('settings.loadFailed', 'Laden fehlgeschlagen')
+        const message = err instanceof Error ? err.message : t('settings.loadFailed')
         toast.error(message)
       })
       .finally(() => {
@@ -117,7 +117,7 @@ export function SecurityTab() {
   const handleSaveRateLimits = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!canWriteSettings) {
-      toast.error(t('security.rateLimitNoWrite', 'Keine Berechtigung zum Speichern von Rate-Limits.'))
+      toast.error(t('security.rateLimitNoWrite'))
       return
     }
 
@@ -125,11 +125,11 @@ export function SecurityTab() {
     const globalParsed = parseRateLimitInput(globalLimit)
 
     if (authParsed === null) {
-      toast.error(t('security.rateLimitAuthInvalid', 'Login-Limit muss eine ganze Zahl sein.'))
+      toast.error(t('security.rateLimitAuthInvalid'))
       return
     }
     if (globalParsed === null) {
-      toast.error(t('security.rateLimitGlobalInvalid', 'API-Limit muss eine ganze Zahl sein.'))
+      toast.error(t('security.rateLimitGlobalInvalid'))
       return
     }
 
@@ -160,7 +160,7 @@ export function SecurityTab() {
       const message =
         err instanceof Error
           ? err.message
-          : t('security.rateLimitSaveFailed', 'Rate-Limits konnten nicht gespeichert werden.')
+          : t('security.rateLimitSaveFailed')
       toast.error(message)
     } finally {
       setSaving(false)
@@ -169,16 +169,13 @@ export function SecurityTab() {
 
   const rotateClusterAdmin = async () => {
     if (!canRotate) {
-      toast.error(t('security.noPermission', 'Keine Berechtigung zum Rotieren von Cluster-Secrets.'))
+      toast.error(t('security.noPermission'))
       return
     }
     const ok = await confirm({
-      title: t('security.rotateConfirmTitle', 'Managed-Postgres-Admin rotieren?'),
-      message: t(
-        'security.rotateConfirmBody',
-        'Erneuert das interne Cluster-Admin-Passwort (msm_admin) auf allen Nodes und im Panel. Das ist nicht dein Panel-Login und nicht das Passwort der Kunden-App-Datenbanken. Das neue Passwort wird dir nicht angezeigt.',
-      ),
-      confirmText: t('security.rotateConfirmBtn', 'Jetzt rotieren'),
+      title: t('security.rotateConfirmTitle'),
+      message: t('security.rotateConfirmBody'),
+      confirmText: t('security.rotateConfirmBtn'),
       danger: true,
     })
     if (!ok) return
@@ -191,16 +188,16 @@ export function SecurityTab() {
       })
       const result = mapRotateAdminResult(raw)
       if (!result.ok) {
-        throw new Error(t('security.rotateFailed', 'Rotation wurde vom Server abgelehnt.'))
+        throw new Error(t('security.rotateFailed'))
       }
       const summary = formatRotateSuccessSummary(result)
       setLastSummary(summary)
-      toast.success(t('security.rotateSuccess', 'Cluster-Admin erfolgreich rotiert.'))
+      toast.success(t('security.rotateSuccess'))
     } catch (err: unknown) {
       const message =
         err instanceof Error
           ? err.message
-          : t('security.rotateFailed', 'Rotation fehlgeschlagen.')
+          : t('security.rotateFailed')
       toast.error(message)
       setLastSummary(null)
     } finally {
@@ -212,10 +209,7 @@ export function SecurityTab() {
   if (!canReadSettings && !canRotate) {
     return (
       <div className="msm-card p-6 text-sm text-on-surface-variant">
-        {t(
-          'security.noPermissionDetail',
-          'Für diesen Bereich brauchst du panel.settings.read oder system.secrets.rotate (oder Owner).',
-        )}
+        {t('security.noPermissionDetail')}
       </div>
     )
   }
@@ -358,19 +352,16 @@ export function SecurityTab() {
           <div className="mb-3 flex items-center gap-2">
             <ShieldAlert className="h-5 w-5 text-status-warning" />
             <h3 className="font-headline text-title-lg font-semibold text-on-surface">
-              {t('security.clusterAdminTitle', 'Managed-Postgres Cluster-Admin')}
+              {t('security.clusterAdminTitle')}
             </h3>
           </div>
           <p className="mb-4 max-w-2xl text-sm text-on-surface-variant">
-            {t(
-              'security.clusterAdminBody',
-              'Das interne Passwort von msm_admin steuert Provisioning und Admin-DDL der Managed-Postgres-Instanz pro Node. Es ist verschlüsselt im Panel gespeichert. Rotation erneuert es auf den Nodes und im Panel — das neue Passwort erscheint nie in der UI.',
-            )}
+            {t('security.clusterAdminBody')}
           </p>
           <ul className="mb-5 list-inside list-disc space-y-1 text-sm text-on-surface-variant">
-            <li>{t('security.notPanelLogin', 'Nicht: Panel-Login-Passwort')}</li>
-            <li>{t('security.notAppDbUser', 'Nicht: App-DB-User pro Gameserver (msm_s…_u…)')}</li>
-            <li>{t('security.isMsmAdmin', 'Ja: Cluster-Rolle msm_admin (Managed Postgres)')}</li>
+            <li>{t('security.notPanelLogin')}</li>
+            <li>{t('security.notAppDbUser')}</li>
+            <li>{t('security.isMsmAdmin')}</li>
           </ul>
           <Button variant="destructive"
             type="button"
@@ -380,8 +371,8 @@ export function SecurityTab() {
           >
             <KeyRound className="h-4 w-4" />
             {busy
-              ? t('security.rotating', 'Rotiere…')
-              : t('security.rotateBtn', 'Cluster-Admin-Passwort rotieren')}
+              ? t('security.rotating')
+              : t('security.rotateBtn')}
           </Button>
           {lastSummary && (
             <p className="mt-4 rounded-lg border border-status-success/30 bg-status-success/10 p-3 text-sm text-on-surface">
@@ -393,10 +384,7 @@ export function SecurityTab() {
 
       {!canRotate && canReadSettings && (
         <p className="text-xs text-on-surface-variant">
-          {t(
-            'security.rotateHiddenHint',
-            'Cluster-Admin-Rotation ist nur mit system.secrets.rotate (oder Owner) sichtbar.',
-          )}
+          {t('security.rotateHiddenHint')}
         </p>
       )}
     </div>

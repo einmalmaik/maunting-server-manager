@@ -21,6 +21,7 @@
 
 import { base64ToBytes, bytesToBase64 } from '@msdis/shield/core'
 import { randomBytes } from '@msdis/shield/random'
+import i18n from '@/i18n'
 
 import {
   FACH_MESSENGER,
@@ -112,7 +113,7 @@ export async function vergissGeraeteGeheimnis(): Promise<void> {
 export async function verwahrePin(pin: string): Promise<void> {
   if (!(await biometrieSpeicherFragtSelbst())) {
     const bestaetigt = await verifiziereBiometrie('Messenger-PIN hinterlegen')
-    if (!bestaetigt) throw new Error('Biometrische Bestätigung fehlgeschlagen.')
+    if (!bestaetigt) throw new Error(i18n.t('chat.errors.biometricFailed'))
   }
   await biometrieSpeichern(pin, FACH_MESSENGER)
 }

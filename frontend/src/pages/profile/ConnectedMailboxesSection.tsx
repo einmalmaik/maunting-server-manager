@@ -32,12 +32,12 @@ export function ConnectedMailboxesSection() {
   const [saving, setSaving] = useState(false)
 
   const providerOptions: DropdownOption[] = [
-    { value: 'custom', label: t('profile.mailboxes.templateCustom', 'Benutzerdefiniert (IMAP / SMTP)') },
-    { value: 'gmail', label: t('profile.mailboxes.templateGmail', 'Google Mail / Gmail (App-Passwort)') },
-    { value: 'outlook', label: t('profile.mailboxes.templateOutlook', 'Microsoft Outlook / Office 365') },
-    { value: 'gmx', label: t('profile.mailboxes.templateGmx', 'GMX Mail') },
-    { value: 'webde', label: t('profile.mailboxes.templateWebde', 'WEB.DE') },
-    { value: 'icloud', label: t('profile.mailboxes.templateIcloud', 'Apple iCloud (App-spezifisch)') },
+    { value: 'custom', label: t('profile.mailboxes.templateCustom') },
+    { value: 'gmail', label: t('profile.mailboxes.templateGmail') },
+    { value: 'outlook', label: t('profile.mailboxes.templateOutlook') },
+    { value: 'gmx', label: t('profile.mailboxes.templateGmx') },
+    { value: 'webde', label: t('profile.mailboxes.templateWebde') },
+    { value: 'icloud', label: t('profile.mailboxes.templateIcloud') },
   ]
 
   const handlePresetChange = (value: string) => {
@@ -96,7 +96,7 @@ export function ConnectedMailboxesSection() {
     try {
       const res = await userIntegrationsApi.testMailbox(id)
       if (res.ok) {
-        toast.success(t('profile.mailboxes.testSuccess', 'Verbindungstest erfolgreich!'))
+        toast.success(t('profile.mailboxes.testSuccess'))
       } else {
         const fehlerText = res.message || res.details || 'Verbindung fehlgeschlagen'
         toast.error(t('profile.mailboxes.testFailed', { details: fehlerText, defaultValue: `Fehlgeschlagen: ${fehlerText}` }))
@@ -112,12 +112,12 @@ export function ConnectedMailboxesSection() {
     const ok = await confirm({
       message: t('profile.mailboxes.deleteConfirm', { email: mb.email, defaultValue: `Möchtest du das Postfach ${mb.email} wirklich entfernen?` }),
       danger: true,
-      confirmText: t('profile.mailboxes.delete', 'Entfernen'),
+      confirmText: t('profile.mailboxes.delete'),
     })
     if (!ok) return
     try {
       await userIntegrationsApi.deleteMailbox(mb.id)
-      toast.success(t('profile.mailboxes.deleteSuccess', 'Postfach entfernt'))
+      toast.success(t('profile.mailboxes.deleteSuccess'))
       await loadMailboxes()
     } catch (err: any) {
       toast.error(err.message || 'Fehler beim Löschen')
@@ -127,11 +127,11 @@ export function ConnectedMailboxesSection() {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!email || !name) {
-      toast.error('Bitte E-Mail und Bezeichnung angeben.')
+      toast.error(t('profile.mailboxes.emailAndNameRequired'))
       return
     }
     if (!imapHost && !smtpHost) {
-      toast.error('Bitte mindestens IMAP-Host (für Empfang) oder SMTP-Host (für Versand) konfigurieren.')
+      toast.error(t('profile.mailboxes.hostRequired'))
       return
     }
 
@@ -154,7 +154,7 @@ export function ConnectedMailboxesSection() {
         sync_enabled: syncEnabled,
       }
       await userIntegrationsApi.createMailbox(input)
-      toast.success(t('profile.mailboxes.saveSuccess', 'Postfach gespeichert'))
+      toast.success(t('profile.mailboxes.saveSuccess'))
       setShowAddModal(false)
       setName('')
       setEmail('')
@@ -177,7 +177,7 @@ export function ConnectedMailboxesSection() {
         <div className="flex items-center gap-2">
           <Mail className="h-5 w-5 text-secondary" aria-hidden="true" />
           <h2 className="font-headline text-title-lg font-semibold text-on-surface">
-            {t('profile.mailboxes.title', 'Verknüpfte Postfächer (E-Mail)')}
+            {t('profile.mailboxes.title')}
           </h2>
         </div>
         <Button size="sm"
@@ -186,7 +186,7 @@ export function ConnectedMailboxesSection() {
           className="inline-flex items-center gap-1.5"
         >
           <Plus className="w-4 h-4" />
-          {t('profile.mailboxes.add', 'Postfach hinzufügen')}
+          {t('profile.mailboxes.add')}
         </Button>
       </div>
 
@@ -196,7 +196,7 @@ export function ConnectedMailboxesSection() {
         </div>
       ) : mailboxes.length === 0 ? (
         <p className="font-body-md text-sm text-on-surface-variant py-2">
-          {t('profile.mailboxes.empty', 'Keine verknüpften Postfächer vorhanden.')}
+          {t('profile.mailboxes.empty')}
         </p>
       ) : (
         <ul className="divide-y divide-outline-variant/30">
@@ -234,7 +234,7 @@ export function ConnectedMailboxesSection() {
                   ) : (
                     <ShieldCheck className="w-3.5 h-3.5" />
                   )}
-                  {t('profile.mailboxes.test', 'Testen')}
+                  {t('profile.mailboxes.test')}
                 </Button>
                 <Button variant="destructive" size="sm"
                   type="button"
@@ -242,7 +242,7 @@ export function ConnectedMailboxesSection() {
                   className="inline-flex items-center gap-1"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  {t('profile.mailboxes.delete', 'Löschen')}
+                  {t('profile.mailboxes.delete')}
                 </Button>
               </div>
             </li>
@@ -266,7 +266,7 @@ export function ConnectedMailboxesSection() {
             >
               <div className="flex items-center justify-between mb-2">
                 <h3 className="font-headline text-title-lg font-semibold text-on-surface">
-                  {t('profile.mailboxes.add', 'Postfach hinzufügen')}
+                  {t('profile.mailboxes.add')}
                 </h3>
                 <button
                   type="button"
@@ -279,21 +279,21 @@ export function ConnectedMailboxesSection() {
               </div>
 
               <p className="font-body-md text-xs text-on-surface-variant mb-4">
-                {t('profile.mailboxes.credentialsStoredEncrypted', 'Passwörter werden mit DIS AES-256-GCM verschlüsselt gespeichert und niemals im Klartext übertragen.')}
+                {t('profile.mailboxes.credentialsStoredEncrypted')}
               </p>
 
               {/* Protocol explanation hint */}
               <div className="mb-4 p-3 rounded-lg bg-surface-container-high/60 border border-outline-variant/40 flex items-start gap-2.5">
                 <Info className="w-4 h-4 text-primary shrink-0 mt-0.5" />
                 <p className="font-body-md text-xs text-on-surface-variant">
-                  {t('profile.mailboxes.protocolHelp', 'Du kannst nur IMAP (nur Lesen), nur SMTP (nur Senden) oder beides zusammen eintragen. Mindestens ein Protokoll ist erforderlich.')}
+                  {t('profile.mailboxes.protocolHelp')}
                 </p>
               </div>
 
               <form onSubmit={handleCreate} className="space-y-4">
                 <div>
                   <label className="block text-xs font-medium text-on-surface mb-1">
-                    {t('profile.mailboxes.template', 'Anbieter-Vorlage')}
+                    {t('profile.mailboxes.template')}
                   </label>
                   <Dropdown
                     value={preset}
@@ -303,14 +303,14 @@ export function ConnectedMailboxesSection() {
                   {preset === 'gmail' && (
                     <p className="text-label-sm text-tertiary mt-1.5 flex items-center gap-1">
                       <HelpCircle className="w-3 h-3 shrink-0" />
-                      {t('profile.mailboxes.gmailNotice', 'Hinweis für Gmail: Google erfordert ein 16-stelliges App-Passwort, sofern 2-Faktor-Authentifizierung aktiv ist.')}
+                      {t('profile.mailboxes.gmailNotice')}
                     </p>
                   )}
                 </div>
 
                 <div>
                   <label className="block text-xs font-medium text-on-surface mb-1">
-                    {t('profile.mailboxes.name', 'Bezeichnung (z. B. Arbeit / Privat)')}
+                    {t('profile.mailboxes.name')}
                   </label>
                   <input
                     type="text"
@@ -324,7 +324,7 @@ export function ConnectedMailboxesSection() {
 
                 <div>
                   <label className="block text-xs font-medium text-on-surface mb-1">
-                    {t('profile.mailboxes.email', 'E-Mail-Adresse')}
+                    {t('profile.mailboxes.email')}
                   </label>
                   <input
                     type="email"
@@ -344,7 +344,7 @@ export function ConnectedMailboxesSection() {
                     </span>
                     <span
                       className="text-label-sm text-on-surface-variant cursor-help flex items-center gap-1 hover:text-primary transition-colors"
-                      title={t('profile.mailboxes.imapHelp', 'Wird zum Suchen und Lesen von E-Mails durch den KI-Assistenten benötigt. Kann freigelassen werden, wenn du nur E-Mails versenden möchtest.')}
+                      title={t('profile.mailboxes.imapHelp')}
                     >
                       <HelpCircle className="w-3.5 h-3.5" />
                       Optional
@@ -353,7 +353,7 @@ export function ConnectedMailboxesSection() {
                   <div className="grid grid-cols-3 gap-2">
                     <div className="col-span-2">
                       <label className="block text-label-sm text-on-surface-variant mb-1">
-                        {t('profile.mailboxes.imapHost', 'IMAP-Host')}
+                        {t('profile.mailboxes.imapHost')}
                       </label>
                       <input
                         type="text"
@@ -365,7 +365,7 @@ export function ConnectedMailboxesSection() {
                     </div>
                     <div>
                       <label className="block text-label-sm text-on-surface-variant mb-1">
-                        {t('profile.mailboxes.imapPort', 'Port')}
+                        {t('profile.mailboxes.imapPort')}
                       </label>
                       <input
                         type="number"
@@ -385,7 +385,7 @@ export function ConnectedMailboxesSection() {
                     </span>
                     <span
                       className="text-label-sm text-on-surface-variant cursor-help flex items-center gap-1 hover:text-primary transition-colors"
-                      title={t('profile.mailboxes.smtpHelp', 'Wird zum Vorbereiten und Absenden von E-Mails durch den KI-Assistenten benötigt. Kann freigelassen werden, wenn du nur E-Mails lesen möchtest.')}
+                      title={t('profile.mailboxes.smtpHelp')}
                     >
                       <HelpCircle className="w-3.5 h-3.5" />
                       Optional
@@ -394,7 +394,7 @@ export function ConnectedMailboxesSection() {
                   <div className="grid grid-cols-3 gap-2">
                     <div className="col-span-2">
                       <label className="block text-label-sm text-on-surface-variant mb-1">
-                        {t('profile.mailboxes.smtpHost', 'SMTP-Host')}
+                        {t('profile.mailboxes.smtpHost')}
                       </label>
                       <input
                         type="text"
@@ -406,7 +406,7 @@ export function ConnectedMailboxesSection() {
                     </div>
                     <div>
                       <label className="block text-label-sm text-on-surface-variant mb-1">
-                        {t('profile.mailboxes.smtpPort', 'Port')}
+                        {t('profile.mailboxes.smtpPort')}
                       </label>
                       <input
                         type="number"
@@ -421,7 +421,7 @@ export function ConnectedMailboxesSection() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-on-surface mb-1">
-                      {t('profile.mailboxes.username', 'Benutzername (falls abweichend)')}
+                      {t('profile.mailboxes.username')}
                     </label>
                     <input
                       type="text"
@@ -433,7 +433,7 @@ export function ConnectedMailboxesSection() {
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-on-surface mb-1">
-                      {t('profile.mailboxes.password', 'Passwort / App-Passwort')}
+                      {t('profile.mailboxes.password')}
                     </label>
                     <input
                       type="password"
@@ -451,14 +451,14 @@ export function ConnectedMailboxesSection() {
                       checked={isDefault}
                       onCheckedChange={setIsDefault}
                     />
-                    <span>{t('profile.mailboxes.isDefault', 'Als Standardpostfach verwenden')}</span>
+                    <span>{t('profile.mailboxes.isDefault')}</span>
                   </label>
                   <label className="flex items-center gap-2.5 text-xs text-on-surface cursor-pointer select-none">
                     <Checkbox
                       checked={syncEnabled}
                       onCheckedChange={setSyncEnabled}
                     />
-                    <span>{t('profile.mailboxes.syncEnabled', 'Automatische Benachrichtigung bei neuen E-Mails')}</span>
+                    <span>{t('profile.mailboxes.syncEnabled')}</span>
                   </label>
                 </div>
 

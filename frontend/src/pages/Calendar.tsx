@@ -226,16 +226,16 @@ export function Calendar() {
       })
 
       if (res.email_sent) {
-        toast.success(t('calendar.testReminderSentEmail', 'Test-Erinnerung per Push und E-Mail versendet!'))
+        toast.success(t('calendar.testReminderSentEmail'))
       } else if (sent) {
-        toast.success(t('calendar.testReminderSent', 'Test-Erinnerung per Push ausgelöst!'))
+        toast.success(t('calendar.testReminderSent'))
       } else {
         toast.error(
           'Test-Erinnerung generiert. Falls kein Pop-up erscheint, bitte Benachrichtigungen für diese App in den Smartphone-Einstellungen erlauben.'
         )
       }
     } catch {
-      toast.error(t('calendar.testReminderError', 'Fehler beim Senden der Test-Erinnerung'))
+      toast.error(t('calendar.testReminderError'))
     } finally {
       setTestingPush(false)
     }
@@ -349,7 +349,7 @@ export function Calendar() {
   const handleSaveEvent = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!formTitle.trim()) {
-      toast.error('Bitte gib einen Termintitel an')
+      toast.error(t('calendar.titleRequired'))
       return
     }
 
@@ -370,9 +370,9 @@ export function Calendar() {
 
       await saveCalendarEventOffline(payload, formEventId)
       if (formEventId) {
-        toast.success('Termin aktualisiert')
+        toast.success(t('calendar.updated'))
       } else {
-        toast.success('Termin erfolgreich erstellt')
+        toast.success(t('calendar.created'))
       }
       setIsModalOpen(false)
       fetchEvents()
@@ -387,8 +387,8 @@ export function Calendar() {
   const handleDeleteEvent = async () => {
     if (!formEventId) return
     const ok = await confirm({
-      title: 'Termin löschen',
-      message: 'Möchtest du diesen Termin wirklich unwiderruflich aus deinem Kalender löschen?',
+      title: t('calendar.deleteConfirmTitle'),
+      message: t('calendar.deleteConfirmMessage'),
       confirmText: 'Löschen',
       cancelText: 'Abbrechen',
       danger: true,
@@ -398,7 +398,7 @@ export function Calendar() {
     setSaving(true)
     try {
       await deleteCalendarEventOffline(formEventId)
-      toast.success('Termin gelöscht')
+      toast.success(t('calendar.deleted'))
       setIsModalOpen(false)
       fetchEvents()
       window.dispatchEvent(new Event('msm:calendar-updated'))
@@ -490,7 +490,7 @@ export function Calendar() {
     if (viewMode === 'month') {
       return currentDate.toLocaleDateString(locale, { month: 'long', year: 'numeric' })
     } else if (viewMode === 'week') {
-      return `${t('calendar.week', 'Woche')} (${currentDate.toLocaleDateString(locale, { month: 'short', year: 'numeric' })})`
+      return `${t('calendar.week')} (${currentDate.toLocaleDateString(locale, { month: 'short', year: 'numeric' })})`
     } else {
       return currentDate.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
     }
@@ -568,7 +568,7 @@ export function Calendar() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title={t('calendar.title', 'Kalender')}
+        title={t('calendar.title')}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -579,7 +579,7 @@ export function Calendar() {
               className="gap-1.5"
             >
               <BellRing className={`w-4 h-4 ${testingPush ? 'animate-spin' : ''}`} />
-              {t('calendar.testPush', 'Push testen')}
+              {t('calendar.testPush')}
             </Button>
             <Button
               variant="secondary"
@@ -588,7 +588,7 @@ export function Calendar() {
               className="gap-1.5"
             >
               <Download className="w-4 h-4" />
-              {t('calendar.subscribe', 'Abonnieren')}
+              {t('calendar.subscribe')}
             </Button>
           </div>
         }
@@ -606,7 +606,7 @@ export function Calendar() {
           }`}
         >
           <CalendarIcon className="w-3.5 h-3.5" />
-          <span>{t('calendar.filterAll', 'Alle')}</span>
+          <span>{t('calendar.filterAll')}</span>
           <span className="text-label-sm opacity-80 font-mono">({events.length})</span>
         </button>
         <button
@@ -619,7 +619,7 @@ export function Calendar() {
           }`}
         >
           <User className="w-3.5 h-3.5 text-primary" />
-          <span>{t('calendar.filterPersonal', 'Persönlich')}</span>
+          <span>{t('calendar.filterPersonal')}</span>
           <span className="text-label-sm opacity-80 font-mono">
             ({events.filter((e) => !e.event_type || e.event_type === 'personal').length})
           </span>
@@ -634,7 +634,7 @@ export function Calendar() {
           }`}
         >
           <Users className="w-3.5 h-3.5 text-status-success" />
-          <span>{t('calendar.filterTeam', 'Team')}</span>
+          <span>{t('calendar.filterTeam')}</span>
           <span className="text-label-sm opacity-80 font-mono">
             ({events.filter((e) => e.event_type === 'team').length})
           </span>
@@ -649,7 +649,7 @@ export function Calendar() {
           }`}
         >
           <Server className={`w-3.5 h-3.5 ${SERVER_TON.text}`} />
-          <span>{t('calendar.filterServer', 'Server-Wartung')}</span>
+          <span>{t('calendar.filterServer')}</span>
           <span className="text-label-sm opacity-80 font-mono">
             ({events.filter((e) => e.event_type === 'server').length})
           </span>
@@ -664,7 +664,7 @@ export function Calendar() {
           }`}
         >
           <Network className="w-3.5 h-3.5 text-status-warning" />
-          <span>{t('calendar.filterNode', 'Node')}</span>
+          <span>{t('calendar.filterNode')}</span>
           <span className="text-label-sm opacity-80 font-mono">
             ({events.filter((e) => e.event_type === 'node').length})
           </span>
@@ -678,7 +678,7 @@ export function Calendar() {
             <ChevronLeft className="w-4 h-4" />
           </Button>
           <Button variant="secondary" size="sm" onClick={handleToday}>
-            {t('calendar.today', 'Heute')}
+            {t('calendar.today')}
           </Button>
           <Button variant="secondary" size="sm" onClick={handleNext} aria-label="Vor">
             <ChevronRight className="w-4 h-4" />
@@ -699,7 +699,7 @@ export function Calendar() {
                 : 'text-on-surface-variant hover:text-on-surface'
             }`}
           >
-            {t('calendar.viewMonth', 'Monat')}
+            {t('calendar.viewMonth')}
           </button>
           <button
             type="button"
@@ -710,7 +710,7 @@ export function Calendar() {
                 : 'text-on-surface-variant hover:text-on-surface'
             }`}
           >
-            {t('calendar.viewWeek', 'Woche')}
+            {t('calendar.viewWeek')}
           </button>
           <button
             type="button"
@@ -721,7 +721,7 @@ export function Calendar() {
                 : 'text-on-surface-variant hover:text-on-surface'
             }`}
           >
-            {t('calendar.viewDay', 'Tag')}
+            {t('calendar.viewDay')}
           </button>
         </div>
       </div>
@@ -1078,7 +1078,7 @@ export function Calendar() {
           <div className="msm-card w-full max-w-lg p-6 shadow-2xl space-y-5 animate-scale-in max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-outline-variant/30 pb-3">
               <h3 className="font-headline text-title-lg font-bold text-on-surface">
-                {formEventId ? t('calendar.editEvent', 'Termin bearbeiten') : t('calendar.createEvent', 'Neuer Termin')}
+                {formEventId ? t('calendar.editEvent') : t('calendar.createEvent')}
               </h3>
               <button
                 type="button"
@@ -1093,7 +1093,7 @@ export function Calendar() {
             <form onSubmit={handleSaveEvent} className="space-y-4">
               <div>
                 <label className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
-                  {t('calendar.category', 'Kategorie')} *
+                  {t('calendar.category')} *
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   <button
@@ -1162,18 +1162,18 @@ export function Calendar() {
               {formEventType === 'team' && (
                 <div>
                   <label htmlFor="cal-form-team" className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
-                    {t('calendar.teamSelect', 'Team zuordnen')}
+                    {t('calendar.teamSelect')}
                   </label>
                   <Dropdown
                     id="cal-form-team"
                     value={formTeamId ? String(formTeamId) : ''}
                     onChange={(val) => setFormTeamId(val ? Number(val) : null)}
                     options={[
-                      { value: '', label: `-- ${t('calendar.selectTeamOptional', 'Team wählen (optional)')} --` },
+                      { value: '', label: `-- ${t('calendar.selectTeamOptional')} --` },
                       ...teamsList.map((tm) => ({ value: String(tm.id), label: tm.name })),
                     ]}
                     searchable={teamsList.length > 5}
-                    placeholder={t('calendar.selectTeamOptional', 'Team wählen (optional)')}
+                    placeholder={t('calendar.selectTeamOptional')}
                     className="w-full"
                   />
                 </div>
@@ -1182,18 +1182,18 @@ export function Calendar() {
               {formEventType === 'server' && (
                 <div>
                   <label htmlFor="cal-form-server" className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
-                    {t('calendar.serverSelect', 'Server zuordnen')}
+                    {t('calendar.serverSelect')}
                   </label>
                   <Dropdown
                     id="cal-form-server"
                     value={formServerId ? String(formServerId) : ''}
                     onChange={(val) => setFormServerId(val ? Number(val) : null)}
                     options={[
-                      { value: '', label: `-- ${t('calendar.selectServerOptional', 'Server wählen (optional)')} --` },
+                      { value: '', label: `-- ${t('calendar.selectServerOptional')} --` },
                       ...serversList.map((srv) => ({ value: String(srv.id), label: srv.name })),
                     ]}
                     searchable={serversList.length > 5}
-                    placeholder={t('calendar.selectServerOptional', 'Server wählen (optional)')}
+                    placeholder={t('calendar.selectServerOptional')}
                     className="w-full"
                   />
                 </div>
@@ -1202,18 +1202,18 @@ export function Calendar() {
               {formEventType === 'node' && nodesList.length > 1 && (
                 <div>
                   <label htmlFor="cal-form-node" className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
-                    {t('calendar.nodeSelect', 'Node zuordnen')}
+                    {t('calendar.nodeSelect')}
                   </label>
                   <Dropdown
                     id="cal-form-node"
                     value={formLocation || ''}
                     onChange={(val) => setFormLocation(val)}
                     options={[
-                      { value: '', label: `-- ${t('calendar.allNodesOrLocal', 'Lokale Node (Standard)')} --` },
+                      { value: '', label: `-- ${t('calendar.allNodesOrLocal')} --` },
                       ...nodesList.map((nd) => ({ value: nd.name, label: nd.name })),
                     ]}
                     searchable={nodesList.length > 5}
-                    placeholder={t('calendar.selectNodeOptional', 'Node wählen (optional)')}
+                    placeholder={t('calendar.selectNodeOptional')}
                     className="w-full"
                   />
                 </div>
@@ -1221,7 +1221,7 @@ export function Calendar() {
 
               <div>
                 <label htmlFor="cal-form-title" className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
-                  {t('calendar.eventTitle', 'Titel / Anlass')} *
+                  {t('calendar.eventTitle')} *
                 </label>
                 <input
                   id="cal-form-title"
@@ -1229,7 +1229,7 @@ export function Calendar() {
                   required
                   value={formTitle}
                   onChange={(e) => setFormTitle(e.target.value)}
-                  placeholder={t('calendar.eventTitlePlaceholder', 'z. B. Team-Meeting, Wartung Server 1')}
+                  placeholder={t('calendar.eventTitlePlaceholder')}
                   className="msm-input w-full"
                 />
               </div>
@@ -1237,27 +1237,27 @@ export function Calendar() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
-                    {t('calendar.start', 'Beginn')} *
+                    {t('calendar.start')} *
                   </label>
                   <DateTimePicker
                     value={formStart}
                     onChange={(val) => setFormStart(val)}
                     locale={i18n.language.startsWith('de') ? 'de' : 'en'}
-                    placeholder={t('calendar.selectStart', 'Beginn wählen')}
-                    aria-label={t('calendar.start', 'Beginn')}
+                    placeholder={t('calendar.selectStart')}
+                    aria-label={t('calendar.start')}
                     className="w-full"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
-                    {t('calendar.end', 'Ende')} *
+                    {t('calendar.end')} *
                   </label>
                   <DateTimePicker
                     value={formEnd}
                     onChange={(val) => setFormEnd(val)}
                     locale={i18n.language.startsWith('de') ? 'de' : 'en'}
-                    placeholder={t('calendar.selectEnd', 'Ende wählen')}
-                    aria-label={t('calendar.end', 'Ende')}
+                    placeholder={t('calendar.selectEnd')}
+                    aria-label={t('calendar.end')}
                     className="w-full"
                   />
                 </div>
@@ -1265,28 +1265,28 @@ export function Calendar() {
 
               <div>
                 <label htmlFor="cal-form-location" className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
-                  {t('calendar.location', 'Ort / Meeting-Link')}
+                  {t('calendar.location')}
                 </label>
                 <input
                   id="cal-form-location"
                   type="text"
                   value={formLocation}
                   onChange={(e) => setFormLocation(e.target.value)}
-                  placeholder={t('calendar.locationPlaceholder', 'z. B. Konferenzraum A oder Teams / Zoom')}
+                  placeholder={t('calendar.locationPlaceholder')}
                   className="msm-input w-full"
                 />
               </div>
 
               <div>
                 <label htmlFor="cal-form-description" className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
-                  {t('calendar.descriptionLabel', 'Beschreibung / Notizen')}
+                  {t('calendar.descriptionLabel')}
                 </label>
                 <textarea
                   id="cal-form-description"
                   rows={3}
                   value={formDescription}
                   onChange={(e) => setFormDescription(e.target.value)}
-                  placeholder={t('calendar.descriptionPlaceholder', 'Agenda, Vorbereitungspunkte oder Details...')}
+                  placeholder={t('calendar.descriptionPlaceholder')}
                   className="msm-input w-full resize-none text-xs"
                 />
               </div>
@@ -1294,7 +1294,7 @@ export function Calendar() {
               {/* Farbwahl */}
               <div>
                 <label className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-2">
-                  {t('calendar.color', 'Farbkennzeichnung')}
+                  {t('calendar.color')}
                 </label>
                 <div className="flex flex-wrap items-center gap-2">
                   {FARB_PALETTE.map((c) => (
@@ -1322,7 +1322,7 @@ export function Calendar() {
                     className="text-error border-error/40 hover:bg-error/10 gap-1.5"
                   >
                     <Trash2 className="w-4 h-4" />
-                    {t('common.delete', 'Löschen')}
+                    {t('common.delete')}
                   </Button>
                 ) : <div />}
 
@@ -1333,10 +1333,10 @@ export function Calendar() {
                     onClick={() => setIsModalOpen(false)}
                     disabled={saving}
                   >
-                    {t('common.cancel', 'Abbrechen')}
+                    {t('common.cancel')}
                   </Button>
                   <Button type="submit" disabled={saving}>
-                    {saving ? t('calendar.saving', 'Speichern...') : t('common.save', 'Speichern')}
+                    {saving ? t('calendar.saving') : t('common.save')}
                   </Button>
                 </div>
               </div>
@@ -1351,35 +1351,32 @@ export function Calendar() {
           <div className="msm-card w-full max-w-lg p-6 shadow-2xl space-y-5 animate-scale-in">
             <div className="flex items-center justify-between border-b border-outline-variant/30 pb-3">
               <h3 className="font-headline text-title-lg font-bold text-on-surface">
-                {t('calendar.feedModalTitle', 'Kalender abonnieren & exportieren')}
+                {t('calendar.feedModalTitle')}
               </h3>
               <button
                 type="button"
                 onClick={() => setIsFeedModalOpen(false)}
                 className="text-on-surface-variant hover:text-on-surface p-1 rounded-md"
-                aria-label={t('common.close', 'Schließen')}
+                aria-label={t('common.close')}
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <p className="text-xs leading-relaxed text-on-surface-variant">
-              {t(
-                'calendar.feedModalDescription',
-                'Du kannst deinen MSM-Kalender in jeder gängigen Kalender-App (Windows Kalender, Microsoft Outlook, Thunderbird, Apple Calendar, Google Calendar) synchronisieren oder als .ics-Datei herunterladen.'
-              )}
+              {t('calendar.feedModalDescription')}
             </p>
 
             <div className="space-y-2">
               <label htmlFor="cal-feed-url-input" className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase">
-                {t('calendar.feedUrlLabel', 'iCal / Webcal Feed-URL')}
+                {t('calendar.feedUrlLabel')}
               </label>
               <div className="flex items-center gap-2">
                 <input
                   id="cal-feed-url-input"
                   type="text"
                   readOnly
-                  value={loadingFeedUrl ? t('calendar.loadingFeedUrl', 'Lade Feed-URL...') : feedUrl}
+                  value={loadingFeedUrl ? t('calendar.loadingFeedUrl') : feedUrl}
                   className="msm-input flex-1 font-mono text-xs select-all"
                 />
                 <Button
@@ -1388,12 +1385,12 @@ export function Calendar() {
                   disabled={loadingFeedUrl || !feedUrl}
                   onClick={() => {
                     navigator.clipboard.writeText(feedUrl)
-                    toast.success(t('calendar.feedUrlCopied', 'URL in die Zwischenablage kopiert'))
+                    toast.success(t('calendar.feedUrlCopied'))
                   }}
                   className="gap-1"
                 >
                   <Link className="w-4 h-4" />
-                  {t('common.copy', 'Kopieren')}
+                  {t('common.copy')}
                 </Button>
               </div>
             </div>
@@ -1405,10 +1402,10 @@ export function Calendar() {
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-surface-container border border-outline-variant/60 text-xs font-semibold text-on-surface hover:bg-surface-container-high"
               >
                 <Download className="w-4 h-4" />
-                {t('calendar.downloadIcs', '.ics-Datei herunterladen')}
+                {t('calendar.downloadIcs')}
               </a>
               <Button onClick={() => setIsFeedModalOpen(false)}>
-                {t('common.close', 'Schließen')}
+                {t('common.close')}
               </Button>
             </div>
           </div>

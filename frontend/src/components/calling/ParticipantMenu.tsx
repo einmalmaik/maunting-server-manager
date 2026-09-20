@@ -70,8 +70,8 @@ export function ParticipantMenu({
       await setzeServerStumm(raum, participant.userId, !participant.isMuted)
       toast.success(
         participant.isMuted
-          ? `${participant.username} darf wieder sprechen.`
-          : `${participant.username} ist stummgeschaltet.`,
+          ? t('calls.participantUnmuted', { username: participant.username })
+          : t('calls.participantMuted', { username: participant.username }),
       )
       onClose()
     } catch {
@@ -86,7 +86,7 @@ export function ParticipantMenu({
     setLaeuft(true)
     try {
       await entferneAusAnruf(raum, participant.userId)
-      toast.success(`${participant.username} wurde aus dem Anruf entfernt.`)
+      toast.success(t('calls.participantRemoved', { username: participant.username }))
       onClose()
     } catch {
       toast.error(t('calls.actionFailed'))

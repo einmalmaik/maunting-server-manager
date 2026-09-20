@@ -42,6 +42,7 @@ import {
   unwrapUserKey,
 } from '@msdis/shield/key-management'
 import { create } from 'zustand'
+import i18n from '@/i18n'
 
 import { leereSuchspeicher } from './verlaufSuche'
 import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
@@ -179,7 +180,7 @@ async function leiteAb(
   const bindung = await geraeteGeheimnis(erzeugeBindung)
   if (!bindung) {
     throw new Error(
-      'Der Schlüsselspeicher dieses Geräts ist nicht erreichbar. Der Messenger lässt sich hier gerade nicht entsperren.',
+      i18n.t('profile.messengerLock.errors.storageUnreachable'),
     )
   }
   return await deriveRawKey(pin, salzBase64, {
@@ -316,11 +317,11 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
 
   einrichten: async (pin: string) => {
     const kontoId = angemeldetesKonto()
-    if (kontoId === null) throw new Error('Kein Konto angemeldet.')
+    if (kontoId === null) throw new Error(i18n.t('profile.messengerLock.errors.noAccount'))
     if (pin.length < PIN_MINDESTLAENGE) {
-      throw new Error(`Der PIN braucht mindestens ${PIN_MINDESTLAENGE} Zeichen.`)
+      throw new Error(i18n.t('profile.messengerLock.errors.pinTooShort', { count: PIN_MINDESTLAENGE }))
     }
-    if (get().eingerichtet) throw new Error('Für dieses Konto ist bereits ein PIN eingerichtet.')
+    if (get().eingerichtet) throw new Error(i18n.t('profile.messengerLock.errors.alreadySetUp'))
 
     set({ laeuft: true, fehler: null })
     let kdfBytes: Uint8Array | null = null
@@ -369,7 +370,7 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
     const warten = get().gesperrtBis - Date.now()
     if (warten > 0) {
       set({
-        fehler: `Zu viele Fehlversuche. Noch ${Math.ceil(warten / 1000)} Sekunden warten.`,
+        fehler: i18n.t('profile.messengerLock.waiting', { count: Math.ceil(warten / 1000) }),
       })
       return false
     }
@@ -377,7 +378,7 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
     const umschlag = lies(UMSCHLAG)
     const salz = lies(SALZ)
     if (!umschlag || !salz) {
-      set({ fehler: 'Auf diesem Gerät ist kein PIN hinterlegt.' })
+      set({ fehler: i18n.t('profile.messengerLock.errors.noPinOnDevice') })
       return false
     }
 
@@ -404,7 +405,10 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
       // Ein fehlender Schlüsselspeicher ist kein falscher PIN. `leiteAb` wirft
       // dafür eine eigene Meldung, und die muss durchkommen: wer hier „PIN
       // falsch" liest, tippt bis ans Ende seiner Tage.
-      const speicherWeg = err instanceof Error && err.message.includes('Schlüsselspeicher')
+      const speicherWeg =
+        err instanceof Error &&
+        (err.message.includes('Schlüsselspeicher') ||
+          err.message === i18n.t('profile.messengerLock.errors.storageUnreachable'))
       const fehlversuche = speicherWeg ? get().fehlversuche : get().fehlversuche + 1
       const warteMs = wartezeitFuer(fehlversuche)
       set({
@@ -412,7 +416,7 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
         gesperrtBis: warteMs > 0 ? Date.now() + warteMs : 0,
         fehler: speicherWeg
           ? (err as Error).message
-          : 'Falscher PIN.',
+          : i18n.t('profile.messengerLock.errors.wrongPin'),
       })
       return false
     } finally {
@@ -427,7 +431,7 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
     try {
       const pin = await rufePinAb()
       if (!pin) {
-        set({ fehler: 'Biometrische Bestätigung fehlgeschlagen.' })
+        set({ fehler: i18n.t('profile.messengerLock.errors.bioFailed') })
         return false
       }
       set({ laeuft: false })
@@ -453,11 +457,11 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
 
   pinAendern: async (alt: string, neu: string) => {
     if (neu.length < PIN_MINDESTLAENGE) {
-      throw new Error(`Der PIN braucht mindestens ${PIN_MINDESTLAENGE} Zeichen.`)
+      throw new Error(i18n.t('profile.messengerLock.errors.pinTooShort', { count: PIN_MINDESTLAENGE }))
     }
     const umschlag = lies(UMSCHLAG)
     const salz = lies(SALZ)
-    if (!umschlag || !salz) throw new Error('Auf diesem Gerät ist kein PIN hinterlegt.')
+    if (!umschlag || !salz) throw new Error(i18n.t('profile.messengerLock.errors.noPinOnDevice'))
 
     set({ laeuft: true, fehler: null })
     let alteBytes: Uint8Array | null = null
@@ -480,9 +484,11 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
       // Der hinterlegte PIN wäre sonst der alte — und der öffnet nichts mehr.
       if (get().biometrieAktiv) await verwahrePin(neu)
     } catch (err) {
-      throw err instanceof Error && err.message.includes('Schlüsselspeicher')
+      throw err instanceof Error &&
+        (err.message.includes('Schlüsselspeicher') ||
+          err.message === i18n.t('profile.messengerLock.errors.storageUnreachable'))
         ? err
-        : new Error('Der bisherige PIN stimmt nicht.')
+        : new Error(i18n.t('profile.messengerLock.errors.currentPinWrong'))
     } finally {
       wische(alteBytes)
       wische(neueBytes)
@@ -492,23 +498,23 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
 
   abschalten: async (pin: string) => {
     const kontoId = angemeldetesKonto()
-    if (kontoId === null) throw new Error('Kein Konto angemeldet.')
+    if (kontoId === null) throw new Error(i18n.t('profile.messengerLock.errors.noAccount'))
 
     // Erst entsperren: ohne Schlüssel ließe sich der Bestand nicht öffnen, und
     // der Durchlauf schriebe leere Zeilen über den Verlauf.
     if (!get().entsperrt) {
       const offen = await get().entsperren(pin)
-      if (!offen) throw new Error('Falscher PIN.')
+      if (!offen) throw new Error(i18n.t('profile.messengerLock.errors.wrongPin'))
     } else {
       const umschlag = lies(UMSCHLAG)
       const salz = lies(SALZ)
-      if (!umschlag || !salz) throw new Error('Auf diesem Gerät ist kein PIN hinterlegt.')
+      if (!umschlag || !salz) throw new Error(i18n.t('profile.messengerLock.errors.noPinOnDevice'))
       let bytes: Uint8Array | null = null
       try {
         bytes = await leiteAb(pin, salz, lies(BINDUNG) === 'true', false)
         await unwrapUserKey(umschlag, bytes)
       } catch {
-        throw new Error('Falscher PIN.')
+        throw new Error(i18n.t('profile.messengerLock.errors.wrongPin'))
       } finally {
         wische(bytes)
       }
@@ -551,10 +557,10 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
   },
 
   biometrieEinschalten: async (pin: string) => {
-    if (!get().eingerichtet) throw new Error('Erst einen PIN einrichten.')
+    if (!get().eingerichtet) throw new Error(i18n.t('profile.messengerLock.errors.setupFirst'))
     const umschlag = lies(UMSCHLAG)
     const salz = lies(SALZ)
-    if (!umschlag || !salz) throw new Error('Auf diesem Gerät ist kein PIN hinterlegt.')
+    if (!umschlag || !salz) throw new Error(i18n.t('profile.messengerLock.errors.noPinOnDevice'))
 
     set({ laeuft: true, fehler: null })
     let bytes: Uint8Array | null = null
@@ -569,7 +575,7 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
       schreibe(BIOMETRIE, 'true')
       set({ biometrieAktiv: true })
     } catch (err) {
-      throw err instanceof Error ? err : new Error('Der PIN stimmt nicht.')
+      throw err instanceof Error ? err : new Error(i18n.t('profile.messengerLock.errors.pinIncorrect'))
     } finally {
       wische(bytes)
       set({ laeuft: false })

@@ -295,14 +295,14 @@ export function AiRunNotice() {
           className="mt-1 text-xs font-medium text-primary hover:underline"
           onClick={() => { setMeldung(null); navigate(meldung.ziel ?? ZIEL[meldung.kind]) }}
         >
-          {t('ai.notice.open', 'Zum Assistenten')}
+          {t('ai.notice.open')}
         </button>
       </div>
       <button
         type="button"
         className="rounded-md p-1 text-on-surface-variant hover:bg-surface-container-highest"
         onClick={() => setMeldung(null)}
-        aria-label={t('common.close', 'Schließen')}
+        aria-label={t('common.close')}
       >
         <X className="h-4 w-4" aria-hidden="true" />
       </button>

@@ -289,7 +289,7 @@ export function BlueprintsDocs() {
   return (
     <div className="msm-page mx-auto max-w-6xl">
       <PageHeader
-        eyebrow={t('pageContext.help', 'Help & guidance')}
+        eyebrow={t('pageContext.help')}
         title={t('docs.pageTitle')}
         description={t('docs.pageSubtitle')}
         status={<BookOpen className="h-6 w-6 text-primary" aria-hidden="true" />}
@@ -406,17 +406,17 @@ export function BlueprintsDocs() {
               <FieldRow field="runtime.env" type="dict" required={false}>{t('docs.reference.runtimeEnv')}</FieldRow>
               <FieldRow field="runtime.startup" type="string" required={true}>{t('docs.reference.runtimeStartup')}</FieldRow>
               <FieldRow field="runtime.ensureDirs" type="list" required={false}>
-                {t('docs.reference.runtimeEnsureDirs', 'Relative directories created inside the server directory before each start. Useful for profile, log, cache, or runtime folders expected by startup arguments.')}
+                {t('docs.reference.runtimeEnsureDirs')}
               </FieldRow>
               <FieldRow field="runtime.requiredFiles" type="list" required={false}>{t('docs.reference.runtimeRequiredFiles')}</FieldRow>
               <FieldRow field="runtime.seedFiles" type="list" required={false}>
-                {t('docs.reference.runtimeSeedFiles', 'Default files written only when missing (seed-once). Each entry needs file + content. Port tokens allowed. Runs before configPatches.')}
+                {t('docs.reference.runtimeSeedFiles')}
               </FieldRow>
               <FieldRow field="runtime.configPatches" type="list" required={false}>{t('docs.reference.runtimeConfigPatches')}</FieldRow>
               <FieldRow field="runtime.stopGracePeriodSeconds" type="integer" required={false}>{t('docs.reference.runtimeStopGracePeriodSeconds')}</FieldRow>
               <FieldRow field="runtime.startupCheckSeconds" type="float" required={false}>{t('docs.reference.runtimeStartupCheckSeconds')}</FieldRow>
               <FieldRow field="runtime.allowUnprivilegedUserNamespaces" type="boolean" required={false}>
-                {t('docs.reference.runtimeAllowUnprivilegedUserNamespaces', 'Allows nested unprivileged user namespaces for runtimes such as UMU/pressure-vessel. Default: false. Only Docker seccomp is relaxed; cap-drop=ALL, no-new-privileges, non-root user, and the host-network/privileged bans remain active.')}
+                {t('docs.reference.runtimeAllowUnprivilegedUserNamespaces')}
               </FieldRow>
               {/* v1.4.7+: Exec-Tab-Opt-in. Default false. Erlaubt authentifizierten
                   Usern mit Permission ``server.console.exec``, One-Shot-Befehle
@@ -424,10 +424,10 @@ export function BlueprintsDocs() {
                   BlueprintsDocs-Sektion "Container-Befehle (Exec-Tab)" weiter
                   unten. */}
               <FieldRow field="runtime.enableExec" type="boolean" required={false}>
-                {t('docs.reference.runtimeEnableExec', 'Exec-Tab aktivieren. Default: false. Self-Hosted, aber Befehle laufen NUR im MSM-verwalteten Container dieses Servers, NIEMALS auf dem Host oder in fremden Containern.')}
+                {t('docs.reference.runtimeEnableExec')}
               </FieldRow>
               <FieldRow field="runtime.execTimeoutSeconds" type="integer" required={false}>
-                {t('docs.reference.runtimeExecTimeoutSeconds', 'Timeout pro Exec-Aufruf in Sekunden (1..600). Default: 60.')}
+                {t('docs.reference.runtimeExecTimeoutSeconds')}
               </FieldRow>
             </FieldTable>
 
@@ -460,10 +460,9 @@ export function BlueprintsDocs() {
             </FieldTable>
 
             <div className="mt-3 p-3 rounded-md border border-primary/30 bg-primary/10 text-sm text-on-surface">
-              <strong>{t('docs.reference.githubPrivateTitle', 'Private Repositories')}</strong>
+              <strong>{t('docs.reference.githubPrivateTitle')}</strong>
               <p className="mt-1">
-                {t('docs.reference.githubPrivateBody',
-                  'For private repos, set a GitHub Personal Access Token in Settings → GitHub. Public repos work without a token.')}
+                {t('docs.reference.githubPrivateBody')}
               </p>
             </div>
 
@@ -522,13 +521,13 @@ export function BlueprintsDocs() {
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mt-4">
               <div>
                 <span className="font-semibold text-xs text-on-surface-variant block mb-1">
-                  {t('docs.howto.nonSteamExampleTitle', 'Example: Non-Steam Game (Hytale)')}
+                  {t('docs.howto.nonSteamExampleTitle')}
                 </span>
                 <CodeBlock example={nonSteamExample} />
               </div>
               <div>
                 <span className="font-semibold text-xs text-on-surface-variant block mb-1">
-                  {t('docs.howto.steamExampleTitle', 'Example: Steam Game (DayZ)')}
+                  {t('docs.howto.steamExampleTitle')}
                 </span>
                 <CodeBlock example={steamGameExample} />
               </div>
@@ -540,7 +539,7 @@ export function BlueprintsDocs() {
               </div>
               <div>
                 <span className="font-semibold text-xs text-on-surface-variant block mb-1">
-                  {t('docs.howto.voiceExampleTitle', 'Example: Open-Source Voice Server (Mumble)')}
+                  {t('docs.howto.voiceExampleTitle')}
                 </span>
                 <CodeBlock example={voiceServerExample} />
               </div>
@@ -563,25 +562,25 @@ export function BlueprintsDocs() {
               wie Blueprint-Autoren den Tab pro Server-Typ aktivieren. */}
           <section id="docs-exec" className="msm-card p-6 scroll-mt-20">
             <h2 className="font-headline text-headline-sm font-bold text-on-surface mb-2">
-              {t('docs.toc.exec', 'Container-Befehle (Exec-Tab)')}
+              {t('docs.toc.exec')}
             </h2>
             <p className="font-body-md text-body-md text-on-surface-variant mb-3">
-              {t('docs.exec.intro', 'Mit dem Exec-Tab koennen authentifizierte User mit der Permission server.console.exec einmalige Befehle im MSM-verwalteten Container des Servers ausfuehren -- z. B. docker compose logs, npm run build, ls -la /data. Self-Hosted, aber die Befehle laufen NUR im MSM-Container dieses einen Servers, niemals auf dem Host oder in fremden Containern.')}
+              {t('docs.exec.intro')}
             </p>
 
-            <h3 className="font-bold text-on-surface mt-4">{t('docs.exec.safetyTitle', 'Sicherheits-Modell')}</h3>
+            <h3 className="font-bold text-on-surface mt-4">{t('docs.exec.safetyTitle')}</h3>
             <ul className="list-disc ml-6 font-body-md text-body-md text-on-surface-variant mb-3">
-              <li>{t('docs.exec.safety1', 'argv statt Shell-String: Wir reichen das Befehls-Array 1:1 an docker exec weiter. Es gibt keine Shell dazwischen, also koennen Shell-Metazeichen (;, |, $(), Backticks) nicht eskaliert werden -- sie sind literaler Text.')}</li>
-              <li>{t('docs.exec.safety2', 'Container-Name kommt nur aus container_name_for(server.id): Es gibt kein Request-Feld, mit dem der User den Zielcontainer beeinflussen kann. Host-Exec oder Container-eines-anderen-Servers ist strukturell ausgeschlossen.')}</li>
-              <li>{t('docs.exec.safety3', 'Blueprint-Gate: runtime.enableExec muss true sein, sonst lehnt der Endpoint auch fuer Owner mit Permission ab (403). Default ist false.')}</li>
-              <li>{t('docs.exec.safety4', 'Separate Permission server.console.exec (nicht console.write). Wer Exec bekommt, bekommt es explizit.')}</li>
-              <li>{t('docs.exec.safety5', 'Limits: 1..32 Argumente, je max 4096 Zeichen. Timeout 1..600 Sekunden aus Blueprint. Output gedeckelt auf 256 KiB mit [truncated]-Marker.')}</li>
-              <li>{t('docs.exec.safety6', 'Audit-Log: Server-ID, User-ID und argv werden geloggt. Output (kann sensible Daten enthalten) wird NICHT geloggt.')}</li>
+              <li>{t('docs.exec.safety1')}</li>
+              <li>{t('docs.exec.safety2')}</li>
+              <li>{t('docs.exec.safety3')}</li>
+              <li>{t('docs.exec.safety4')}</li>
+              <li>{t('docs.exec.safety5')}</li>
+              <li>{t('docs.exec.safety6')}</li>
             </ul>
 
-            <h3 className="font-bold text-on-surface mt-6">{t('docs.exec.activateTitle', 'Exec-Tab pro Blueprint aktivieren')}</h3>
+            <h3 className="font-bold text-on-surface mt-6">{t('docs.exec.activateTitle')}</h3>
             <p className="font-body-md text-body-md text-on-surface-variant mb-2">
-              {t('docs.exec.activateBody', 'Im Blueprint unter runtime:')}
+              {t('docs.exec.activateBody')}
             </p>
             <CodeBlock example={`"runtime": {
   "image": "node:22-bookworm-slim",
@@ -590,13 +589,13 @@ export function BlueprintsDocs() {
   "execTimeoutSeconds": 120
 }`} />
             <p className="font-body-md text-body-md text-on-surface-variant mt-3 mb-2">
-              {t('docs.exec.useTitle', 'Im Panel:')}
+              {t('docs.exec.useTitle')}
             </p>
             <ol className="list-decimal ml-6 font-body-md text-body-md text-on-surface-variant mb-3">
-              <li>{t('docs.exec.useStep1', 'Oeffne den Server-Detail-Dialog.')}</li>
-              <li>{t('docs.exec.useStep2', 'Klicke auf den Tab "Exec" (neben "Konsole").')}</li>
-              <li>{t('docs.exec.useStep3', 'Tippe einen Befehl ein, z. B. ls -la /data oder npm run build:api.')}</li>
-              <li>{t('docs.exec.useStep4', 'Klicke "Ausfuehren". Output erscheint im Stream darunter.')}</li>
+              <li>{t('docs.exec.useStep1')}</li>
+              <li>{t('docs.exec.useStep2')}</li>
+              <li>{t('docs.exec.useStep3')}</li>
+              <li>{t('docs.exec.useStep4')}</li>
             </ol>
           </section>
 
@@ -679,8 +678,8 @@ export function BlueprintsDocs() {
               <Alert type="warning" title={t('docs.troubleshooting.err8Title')}>
                 {t('docs.troubleshooting.err8Body')}
               </Alert>
-              <Alert type="warning" title={t('docs.troubleshooting.err9Title', 'Hytale OAuth or downloader access failed')}>
-                {t('docs.troubleshooting.err9Body', 'On the first Hytale start, the console shows an OAuth link. Open it, enter the code, and use a Hytale account with server-download access. If you see 403 or Unauthorized, refresh the login flow or remove the local Hytale downloader credential file in that server directory.')}
+              <Alert type="warning" title={t('docs.troubleshooting.err9Title')}>
+                {t('docs.troubleshooting.err9Body')}
               </Alert>
               <Alert type="warning" title={t('docs.troubleshooting.err10Title')}>
                 {t('docs.troubleshooting.err10Body')}

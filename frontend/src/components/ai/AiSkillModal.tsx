@@ -53,7 +53,7 @@ export function AiSkillModal({ open, onClose }: AiSkillModalProps) {
             variant="ghost"
             size="sm"
             onClick={onClose}
-            aria-label={t('common.close', 'Schließen')}
+            aria-label={t('common.close')}
             className="h-9 w-9 rounded-full p-0 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/80 transition-colors"
           >
             <X className="h-5 w-5" aria-hidden="true" />

@@ -212,7 +212,7 @@ async function doRefresh(): Promise<void> {
       throw err
     }
     if (!ok) {
-      throw new Error('Refresh temporär nicht möglich')
+      throw new Error(i18n.t('auth.errors.refreshUnavailable'))
     }
     return
   }
@@ -232,7 +232,7 @@ async function doRefresh(): Promise<void> {
     throw new AuthExpiredError('Session abgelaufen')
   }
   if (!res.ok) {
-    throw new Error(`Refresh fehlgeschlagen: HTTP ${res.status}`)
+    throw new Error(i18n.t('auth.errors.refreshFailed', { status: res.status }))
   }
 }
 

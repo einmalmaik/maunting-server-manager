@@ -64,13 +64,13 @@ export function MessengerSicherheitTab() {
       await useMessengerSperre.getState().einrichten(pin)
       formularSchliessen()
       toast.success(
-        t('profile.messengerLock.toast.enabled', 'Der Messenger ist jetzt mit einem PIN gesichert.'),
+        t('profile.messengerLock.toast.enabled'),
       )
     } catch (fehler) {
       toast.error(
         fehlertext(
           fehler,
-          t('profile.messengerLock.toast.enableFailed', 'Der PIN liess sich nicht einrichten.'),
+          t('profile.messengerLock.toast.enableFailed'),
         ),
       )
     }
@@ -81,12 +81,12 @@ export function MessengerSicherheitTab() {
     try {
       await useMessengerSperre.getState().pinAendern(pin, neuerPin)
       formularSchliessen()
-      toast.success(t('profile.messengerLock.toast.changed', 'Der PIN wurde geändert.'))
+      toast.success(t('profile.messengerLock.toast.changed'))
     } catch (fehler) {
       toast.error(
         fehlertext(
           fehler,
-          t('profile.messengerLock.toast.changeFailed', 'Der PIN liess sich nicht ändern.'),
+          t('profile.messengerLock.toast.changeFailed'),
         ),
       )
     }
@@ -95,22 +95,19 @@ export function MessengerSicherheitTab() {
   const abschalten = async () => {
     if (!pin) return
     const sicher = await confirm({
-      title: t('profile.messengerLock.confirmOff.title', 'Sperre aufheben?'),
-      message: t(
-        'profile.messengerLock.confirmOff.message',
-        'Danach liegen Verlauf, Geräteausweis und Schlüssel wieder unverschlüsselt auf diesem Gerät. Wer Zugriff auf den Rechner hat, kann sie lesen.',
-      ),
-      confirmText: t('profile.messengerLock.confirmOff.ok', 'Sperre aufheben'),
+      title: t('profile.messengerLock.confirmOff.title'),
+      message: t('profile.messengerLock.confirmOff.message'),
+      confirmText: t('profile.messengerLock.confirmOff.ok'),
       danger: true,
     })
     if (!sicher) return
     try {
       await useMessengerSperre.getState().abschalten(pin)
       formularSchliessen()
-      toast.success(t('profile.messengerLock.toast.disabled', 'Die Sperre ist aufgehoben.'))
+      toast.success(t('profile.messengerLock.toast.disabled'))
     } catch (fehler) {
       toast.error(
-        fehlertext(fehler, t('profile.messengerLock.toast.wrongPin', 'Der PIN stimmt nicht.')),
+        fehlertext(fehler, t('profile.messengerLock.toast.wrongPin')),
       )
     }
   }
@@ -119,7 +116,7 @@ export function MessengerSicherheitTab() {
     if (!an) {
       await useMessengerSperre.getState().biometrieAusschalten()
       toast.success(
-        t('profile.messengerLock.toast.bioOff', 'Der Schnelleinstieg ist abgeschaltet.'),
+        t('profile.messengerLock.toast.bioOff'),
       )
       return
     }
@@ -132,13 +129,13 @@ export function MessengerSicherheitTab() {
       await useMessengerSperre.getState().biometrieEinschalten(pin)
       formularSchliessen()
       toast.success(
-        t('profile.messengerLock.toast.bioOn', 'Der Messenger lässt sich jetzt per Finger öffnen.'),
+        t('profile.messengerLock.toast.bioOn'),
       )
     } catch (fehler) {
       toast.error(
         fehlertext(
           fehler,
-          t('profile.messengerLock.toast.bioFailed', 'Der Schnelleinstieg liess sich nicht einrichten.'),
+          t('profile.messengerLock.toast.bioFailed'),
         ),
       )
     }
@@ -156,73 +153,61 @@ export function MessengerSicherheitTab() {
           </div>
           <div>
             <h2 className="text-sm font-semibold text-on-surface">
-              {t('profile.messengerLock.title', 'Messenger sperren')}
+              {t('profile.messengerLock.title')}
             </h2>
             <p className="text-label-sm text-on-surface-variant">
               {eingerichtet
-                ? t('profile.messengerLock.stateOn', 'Auf diesem Gerät eingerichtet.')
-                : t('profile.messengerLock.stateOff', 'Auf diesem Gerät nicht eingerichtet.')}
+                ? t('profile.messengerLock.stateOn')
+                : t('profile.messengerLock.stateOff')}
             </p>
           </div>
         </div>
 
         <div className="space-y-3 pt-2 border-t border-outline-variant/30">
           <p className="text-xs text-on-surface-variant leading-relaxed">
-            {t(
-              'profile.messengerLock.explain',
-              'Damit dein Verlauf ein Neuladen übersteht, liegt er auf diesem Gerät. Ohne PIN liegt er dort lesbar: wer an den Rechner kommt, kommt an die Nachrichten und an den Geräteausweis, mit dem sich dieses Gerät ausweist. Mit PIN wird beides verschlüsselt.',
-            )}
+            {t('profile.messengerLock.explain')}
           </p>
 
           {eingerichtet && (
             <div className="p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-label-sm text-on-surface-variant">
               {geraetebindung
-                ? t(
-                    'profile.messengerLock.boundNote',
-                    'Der Schlüssel hängt zusätzlich am Schlüsselspeicher dieses Rechners. Eine kopierte Festplatte ist anderswo damit wertlos.',
-                  )
-                : t(
-                    'profile.messengerLock.unboundNote',
-                    'Auf dieser Plattform gibt es keinen geschützten Schlüsselspeicher. Der Schutz hängt allein an der Länge deines PIN — je länger, desto besser.',
-                  )}
+                ? t('profile.messengerLock.boundNote')
+                : t('profile.messengerLock.unboundNote')}
             </div>
           )}
 
           {!eingerichtet && formular !== 'einrichten' && (
             <Button onClick={() => setFormular('einrichten')} disabled={laeuft}>
-              {t('profile.messengerLock.setUp', 'PIN einrichten')}
+              {t('profile.messengerLock.setUp')}
             </Button>
           )}
 
           {formular === 'einrichten' && (
             <div className="space-y-3">
               <div className="p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-label-sm text-on-surface-variant leading-relaxed">
-                {t(
-                  'profile.messengerLock.warnLoss',
-                  'Merk dir diesen PIN. Es gibt keinen Ersatzweg und keinen Wiederherstellungsschlüssel. Deine eigenen gesendeten Nachrichten stehen nirgendwo sonst, auch nicht auf dem Server — wer den PIN vergisst oder diesen Rechner neu aufsetzt, verliert den Verlauf dieses Geräts.',
-                )}
+                {t('profile.messengerLock.warnLoss')}
               </div>
               <PasswordInput
-                label={t('profile.messengerLock.newPin', 'Neuer PIN')}
+                label={t('profile.messengerLock.newPin')}
                 value={pin}
                 onChange={(e) => setPin(e.target.value)}
                 autoComplete="new-password"
                 error={
                   zuKurz
-                    ? t('profile.messengerLock.tooShort', 'Mindestens {{count}} Zeichen.', {
+                    ? t('profile.messengerLock.tooShort', {
                         count: PIN_MINDESTLAENGE,
                       })
                     : undefined
                 }
               />
               <PasswordInput
-                label={t('profile.messengerLock.repeat', 'PIN wiederholen')}
+                label={t('profile.messengerLock.repeat')}
                 value={pinWiederholung}
                 onChange={(e) => setPinWiederholung(e.target.value)}
                 autoComplete="new-password"
                 error={
                   passtNicht
-                    ? t('profile.messengerLock.mismatch', 'Die beiden Eingaben stimmen nicht überein.')
+                    ? t('profile.messengerLock.mismatch')
                     : undefined
                 }
               />
@@ -232,11 +217,11 @@ export function MessengerSicherheitTab() {
                   disabled={laeuft || pin.length < PIN_MINDESTLAENGE || pin !== pinWiederholung}
                 >
                   {laeuft
-                    ? t('profile.messengerLock.working', 'Einen Moment …')
-                    : t('profile.messengerLock.setUp', 'PIN einrichten')}
+                    ? t('profile.messengerLock.working')
+                    : t('profile.messengerLock.setUp')}
                 </Button>
                 <Button variant="ghost" onClick={formularSchliessen} disabled={laeuft}>
-                  {t('common.cancel', 'Abbrechen')}
+                  {t('common.cancel')}
                 </Button>
               </div>
             </div>
@@ -245,10 +230,10 @@ export function MessengerSicherheitTab() {
           {eingerichtet && formular === 'keines' && (
             <div className="flex flex-wrap gap-2">
               <Button variant="secondary" onClick={() => setFormular('aendern')}>
-                {t('profile.messengerLock.change', 'PIN ändern')}
+                {t('profile.messengerLock.change')}
               </Button>
               <Button variant="ghost" onClick={() => setFormular('abschalten')}>
-                {t('profile.messengerLock.turnOff', 'Sperre aufheben')}
+                {t('profile.messengerLock.turnOff')}
               </Button>
             </div>
           )}
@@ -256,19 +241,19 @@ export function MessengerSicherheitTab() {
           {formular === 'aendern' && (
             <div className="space-y-3">
               <PasswordInput
-                label={t('profile.messengerLock.currentPin', 'Bisheriger PIN')}
+                label={t('profile.messengerLock.currentPin')}
                 value={pin}
                 onChange={(e) => setPin(e.target.value)}
                 autoComplete="current-password"
               />
               <PasswordInput
-                label={t('profile.messengerLock.newPin', 'Neuer PIN')}
+                label={t('profile.messengerLock.newPin')}
                 value={neuerPin}
                 onChange={(e) => setNeuerPin(e.target.value)}
                 autoComplete="new-password"
               />
               <PasswordInput
-                label={t('profile.messengerLock.repeat', 'PIN wiederholen')}
+                label={t('profile.messengerLock.repeat')}
                 value={pinWiederholung}
                 onChange={(e) => setPinWiederholung(e.target.value)}
                 autoComplete="new-password"
@@ -280,10 +265,10 @@ export function MessengerSicherheitTab() {
                     laeuft || !pin || neuerPin.length < PIN_MINDESTLAENGE || neuerPin !== pinWiederholung
                   }
                 >
-                  {t('profile.messengerLock.change', 'PIN ändern')}
+                  {t('profile.messengerLock.change')}
                 </Button>
                 <Button variant="ghost" onClick={formularSchliessen} disabled={laeuft}>
-                  {t('common.cancel', 'Abbrechen')}
+                  {t('common.cancel')}
                 </Button>
               </div>
             </div>
@@ -292,17 +277,17 @@ export function MessengerSicherheitTab() {
           {formular === 'abschalten' && (
             <div className="space-y-3">
               <PasswordInput
-                label={t('profile.messengerLock.currentPin', 'Bisheriger PIN')}
+                label={t('profile.messengerLock.currentPin')}
                 value={pin}
                 onChange={(e) => setPin(e.target.value)}
                 autoComplete="current-password"
               />
               <div className="flex gap-2">
                 <Button variant="destructive" onClick={abschalten} disabled={laeuft || !pin}>
-                  {t('profile.messengerLock.turnOff', 'Sperre aufheben')}
+                  {t('profile.messengerLock.turnOff')}
                 </Button>
                 <Button variant="ghost" onClick={formularSchliessen} disabled={laeuft}>
-                  {t('common.cancel', 'Abbrechen')}
+                  {t('common.cancel')}
                 </Button>
               </div>
             </div>
@@ -318,7 +303,7 @@ export function MessengerSicherheitTab() {
           </div>
           <div>
             <h2 className="text-sm font-semibold text-on-surface">
-              {t('profile.messengerLock.bioTitle', 'Mit Fingerabdruck öffnen')}
+              {t('profile.messengerLock.bioTitle')}
             </h2>
           </div>
         </div>
@@ -326,27 +311,21 @@ export function MessengerSicherheitTab() {
         <div className="pt-2 border-t border-outline-variant/30 space-y-3">
           {!biometrieMoeglich ? (
             <div className="p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-xs text-on-surface-variant leading-relaxed">
-              {t(
-                'profile.messengerLock.bioUnavailable',
-                'Hier nicht möglich. Der Schnelleinstieg braucht einen Schlüsselspeicher in der Hardware: den haben die Desktop-App (Windows Hello) und die Android-App (Fingerabdruck), der Browser nicht. Der PIN selbst funktioniert überall.',
-              )}
+              {t('profile.messengerLock.bioUnavailable')}
             </div>
           ) : !eingerichtet ? (
             <div className="p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-xs text-on-surface-variant">
-              {t('profile.messengerLock.bioNeedsPin', 'Richte zuerst einen PIN ein.')}
+              {t('profile.messengerLock.bioNeedsPin')}
             </div>
           ) : (
             <>
               <div className="flex items-center justify-between gap-4">
                 <div>
                   <span className="text-xs font-medium text-on-surface">
-                    {t('profile.messengerLock.bioSwitch', 'Ohne Tippen entsperren')}
+                    {t('profile.messengerLock.bioSwitch')}
                   </span>
                   <p className="text-label-sm text-on-surface-variant">
-                    {t(
-                      'profile.messengerLock.bioHint',
-                      'Der PIN wird im Schlüsselspeicher des Systems hinterlegt und erst nach erfolgreicher Bestätigung herausgegeben.',
-                    )}
+                    {t('profile.messengerLock.bioHint')}
                   </p>
                 </div>
                 <Switch
@@ -359,17 +338,17 @@ export function MessengerSicherheitTab() {
               {formular === 'biometrie' && (
                 <div className="space-y-3 pt-2 border-t border-outline-variant/20">
                   <PasswordInput
-                    label={t('profile.messengerLock.currentPin', 'Bisheriger PIN')}
+                    label={t('profile.messengerLock.currentPin')}
                     value={pin}
                     onChange={(e) => setPin(e.target.value)}
                     autoComplete="current-password"
                   />
                   <div className="flex gap-2">
                     <Button onClick={biometrieEinrichten} disabled={laeuft || !pin}>
-                      {t('profile.messengerLock.bioSetUp', 'Hinterlegen')}
+                      {t('profile.messengerLock.bioSetUp')}
                     </Button>
                     <Button variant="ghost" onClick={formularSchliessen} disabled={laeuft}>
-                      {t('common.cancel', 'Abbrechen')}
+                      {t('common.cancel')}
                     </Button>
                   </div>
                 </div>
@@ -387,13 +366,10 @@ export function MessengerSicherheitTab() {
           </div>
           <div>
             <h2 className="text-sm font-semibold text-on-surface">
-              {t('profile.messengerLock.autoTitle', 'Automatisch sperren')}
+              {t('profile.messengerLock.autoTitle')}
             </h2>
             <p className="text-label-sm text-on-surface-variant">
-              {t(
-                'profile.messengerLock.autoSubtitle',
-                'Gilt nur für den Messenger. Der Tresor hat eine eigene Frist.',
-              )}
+              {t('profile.messengerLock.autoSubtitle')}
             </p>
           </div>
         </div>
@@ -401,16 +377,13 @@ export function MessengerSicherheitTab() {
         <div className="space-y-4 pt-2 border-t border-outline-variant/30">
           {!eingerichtet && (
             <div className="p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-xs text-on-surface-variant">
-              {t(
-                'profile.messengerLock.autoNeedsPin',
-                'Ohne PIN gibt es nichts zu sperren. Die Einstellung greift, sobald einer eingerichtet ist.',
-              )}
+              {t('profile.messengerLock.autoNeedsPin')}
             </div>
           )}
 
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <label className="text-xs font-medium text-on-surface">
-              {t('profile.messengerLock.afterIdle', 'Bei Untätigkeit')}
+              {t('profile.messengerLock.afterIdle')}
             </label>
             <div className="w-full sm:w-56">
               <Dropdown
@@ -424,13 +397,10 @@ export function MessengerSicherheitTab() {
           <div className="flex items-center justify-between gap-4 pt-2 border-t border-outline-variant/20">
             <div>
               <span className="text-xs font-medium text-on-surface">
-                {t('profile.messengerLock.onBlur', 'Beim Fensterwechsel sperren')}
+                {t('profile.messengerLock.onBlur')}
               </span>
               <p className="text-label-sm text-on-surface-variant">
-                {t(
-                  'profile.messengerLock.onBlurHint',
-                  'Sperrt, sobald das Fenster in den Hintergrund geht oder der Reiter gewechselt wird.',
-                )}
+                {t('profile.messengerLock.onBlurHint')}
               </p>
             </div>
             <Switch
@@ -444,10 +414,7 @@ export function MessengerSicherheitTab() {
       <div className="flex items-start gap-2 px-1 text-label-sm text-on-surface-variant">
         <ShieldCheck className="h-3.5 w-3.5 mt-0.5 shrink-0" />
         <p className="leading-relaxed">
-          {t(
-            'profile.messengerLock.footnote',
-            'Die Verschlüsselung zwischen dir und deinem Gegenüber bleibt davon unberührt. Der Server konnte deine Nachrichten nie lesen und kann es weiterhin nicht. Der PIN schützt, was auf diesem Gerät liegt.',
-          )}
+          {t('profile.messengerLock.footnote')}
         </p>
       </div>
     </div>

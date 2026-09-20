@@ -298,7 +298,7 @@ function SchrittKopplung({
         {stand?.backend_url && (
           <div className="flex items-center justify-between rounded-lg bg-surface-container-high/40 p-2.5 px-3 border border-outline-variant/30 text-xs">
             <div className="flex flex-col min-w-0 pr-2">
-              <span className="text-on-surface-variant text-label-sm">{t('mss.wizard.verbundenesPanel', 'Panel-Server')}:</span>
+              <span className="text-on-surface-variant text-label-sm">{t('mss.wizard.verbundenesPanel')}:</span>
               <span className="font-mono text-on-surface truncate font-medium">{stand.backend_url}</span>
             </div>
             {onZurueck && (
@@ -308,7 +308,7 @@ function SchrittKopplung({
                 className="px-2.5 py-1 text-xs shrink-0 h-auto"
                 onClick={onZurueck}
               >
-                {t('mss.wizard.adresseAendern', 'Ändern')}
+                {t('mss.wizard.adresseAendern')}
               </Button>
             )}
           </div>
@@ -331,10 +331,10 @@ function SchrittKopplung({
               variant="secondary"
               className="px-3 h-10 inline-flex items-center gap-1.5 shrink-0"
               onClick={() => setScannerOffen(true)}
-              title={t('mss.wizard.qrCodeScannen', 'QR-Code per Kamera scannen')}
+              title={t('mss.wizard.qrCodeScannen')}
             >
               <Camera className="h-4 w-4 text-primary" />
-              <span className="hidden sm:inline text-xs">{t('mss.wizard.scannen', 'Scannen')}</span>
+              <span className="hidden sm:inline text-xs">{t('mss.wizard.scannen')}</span>
             </Button>
           </div>
           <p className="msm-field-help">{t('mss.wizard.codeHinweis')}</p>

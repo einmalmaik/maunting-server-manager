@@ -22,6 +22,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import i18n from '@/i18n'
 
 import { fetchE2eeEnvelopes, type BlindEnvelopeItem } from '@/api/social'
 import {
@@ -223,7 +224,7 @@ export async function baueVersandFuer(
   clientUuid: string,
 ): Promise<Versandauftrag[]> {
   const mid = blindMailboxId
-  if (!mid) throw new Error('Für dieses Gespräch steht noch keine Mailbox fest.')
+  if (!mid) throw new Error(i18n.t('chat.errors.noMailbox'))
 
   if (gruppenKontext) {
     // Der Gruppenschlüssel rotiert hier, falls sich die Mitgliedschaft

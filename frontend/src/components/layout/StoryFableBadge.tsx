@@ -41,8 +41,8 @@ export function StoryFableBadge() {
       href="https://github.com/einmalmaik/MFS/releases/latest/download/MauntingStoryFable.apk"
       icon={<BookOpen className="w-4 h-4" />}
       title="Story Fable"
-      subtext={t('storyFableBadge.label', 'Die Geschichte vergisst nichts.')}
-      tooltip={t('storyFableBadge.tooltip', 'Maunting Story Fable als Android-App laden (APK, Sideload)')}
+      subtext={t('storyFableBadge.label')}
+      tooltip={t('storyFableBadge.tooltip')}
     />
   )
 }

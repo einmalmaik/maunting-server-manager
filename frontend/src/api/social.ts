@@ -3,6 +3,7 @@
  */
 
 import { api, apiStream } from './client'
+import i18n from '@/i18n'
 
 export interface FriendItem {
   id: number
@@ -411,7 +412,7 @@ export async function downloadChatMedia(signedUrl: string): Promise<string> {
     headers: { Accept: '*/*' },
   })
   if (!res.ok) {
-    throw new Error(`Medien-Download fehlgeschlagen: ${res.status}`)
+    throw new Error(i18n.t('chat.errors.mediaDownloadFailed', { status: res.status }))
   }
   return await res.text()
 }

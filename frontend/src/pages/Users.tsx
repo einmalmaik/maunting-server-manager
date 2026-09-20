@@ -125,7 +125,7 @@ export function Users() {
 
   return (
     <div className="msm-page">
-      <PageHeader eyebrow={t('pageContext.administration', 'Administration')} title={t('nav.users')} description={t('users.subtitle')} status={<span className="msm-badge-info">{users.length} {t('nav.users')}</span>} actions={canManageUsers ? (
+      <PageHeader eyebrow={t('pageContext.administration')} title={t('nav.users')} description={t('users.subtitle')} status={<span className="msm-badge-info">{users.length} {t('nav.users')}</span>} actions={canManageUsers ? (
           <Button
             onClick={() => setShowCreate(!showCreate)}
             className="min-h-11 inline-flex items-center gap-2"

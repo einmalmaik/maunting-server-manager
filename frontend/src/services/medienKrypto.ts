@@ -43,6 +43,7 @@
  * Markup. Die Hülle kostet ein Drittel der Blobgröße, siehe `maxKlartextBytes`.
  */
 
+import i18n from '@/i18n'
 import {
   decryptBytes,
   decryptString,
@@ -226,7 +227,7 @@ export async function entschluesselePaket(
       manifest,
       readChunk: async (index) => {
         const stueck = paket.chunks[index]
-        if (typeof stueck !== 'string') throw new Error(`Stück ${index} fehlt`)
+        if (typeof stueck !== 'string') throw new Error(i18n.t('chat.errors.chunkMissing', { index }))
         return stueck
       },
       // Kopieren: DIS gibt den Puffer nach dem Aufruf wieder frei.

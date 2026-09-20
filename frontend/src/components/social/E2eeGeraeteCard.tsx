@@ -61,12 +61,9 @@ export function E2eeGeraeteCard() {
 
   const entfernen = async (geraet: E2eeGeraetItem) => {
     const ok = await confirm({
-      title: t('profile.e2eeDevices.removeTitle', 'Gerät aus der Zustellung nehmen?'),
-      message: t(
-        'profile.e2eeDevices.removeMessage',
-        'Dieses Gerät bekommt danach keine neuen Nachrichten mehr. Meldet es sich mit Ihrem Konto wieder an, trägt es sich erneut ein: wer noch Zugang zum Konto hat, ist damit nicht ausgesperrt.',
-      ),
-      confirmText: t('profile.e2eeDevices.remove', 'Entfernen'),
+      title: t('profile.e2eeDevices.removeTitle'),
+      message: t('profile.e2eeDevices.removeMessage'),
+      confirmText: t('profile.e2eeDevices.remove'),
       danger: true,
     })
     if (!ok) return
@@ -77,7 +74,7 @@ export function E2eeGeraeteCard() {
       // Ohne das Vergessen verschlüsselte dieser Tab noch bis zu zehn Minuten
       // lang gegen die gerade entfernte Adresse.
       if (eigeneId) vergessenGeraete(eigeneId)
-      toast.success(t('profile.e2eeDevices.removed', 'Gerät entfernt.'))
+      toast.success(t('profile.e2eeDevices.removed'))
       await laden()
     } catch (err: any) {
       toast.error(err?.message || t('common.error'))
@@ -91,25 +88,22 @@ export function E2eeGeraeteCard() {
       <div className="flex items-center gap-2">
         <ShieldCheck className="h-5 w-5 text-secondary" aria-hidden="true" />
         <h2 id="e2ee-devices-title" className="font-headline text-title-lg font-semibold text-on-surface">
-          {t('profile.e2eeDevices.title', 'Geräte mit Nachrichtenzugriff')}
+          {t('profile.e2eeDevices.title')}
         </h2>
       </div>
       <p className="max-w-3xl text-sm text-on-surface-variant">
-        {t(
-          'profile.e2eeDevices.description',
-          'Jedes Gerät hat einen eigenen Schlüssel, der es nie verlässt. Nachrichten an dich werden für jedes Gerät in dieser Liste einzeln verschlüsselt.',
-        )}
+        {t('profile.e2eeDevices.description')}
       </p>
 
       {fehler && (
         <p className="text-sm text-on-surface-variant">
-          {t('profile.e2eeDevices.loadFailed', 'Die Liste konnte nicht geladen werden.')}
+          {t('profile.e2eeDevices.loadFailed')}
         </p>
       )}
 
       {!fehler && geraete?.length === 0 && (
         <p className="text-sm text-on-surface-variant">
-          {t('profile.e2eeDevices.empty', 'Kein Gerät angemeldet.')}
+          {t('profile.e2eeDevices.empty')}
         </p>
       )}
 
@@ -125,11 +119,11 @@ export function E2eeGeraeteCard() {
                 <div className="min-w-0 flex-1 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="truncate text-sm font-medium text-on-surface">
-                      {geraet.label || t('profile.e2eeDevices.unnamed', 'Unbenanntes Gerät')}
+                      {geraet.label || t('profile.e2eeDevices.unnamed')}
                     </span>
                     {istMeins && (
                       <span className="inline-flex items-center rounded-full border border-secondary/20 bg-secondary/10 px-2 py-0.5 text-xs font-medium text-secondary">
-                        {t('profile.e2eeDevices.thisDevice', 'Dieses Gerät')}
+                        {t('profile.e2eeDevices.thisDevice')}
                       </span>
                     )}
                   </div>
@@ -148,7 +142,7 @@ export function E2eeGeraeteCard() {
                     className="self-start text-error hover:bg-error/10 hover:text-error sm:self-auto"
                   >
                     <Trash2 className="h-4 w-4" aria-hidden="true" />
-                    {t('profile.e2eeDevices.remove', 'Entfernen')}
+                    {t('profile.e2eeDevices.remove')}
                   </Button>
                 )}
               </li>

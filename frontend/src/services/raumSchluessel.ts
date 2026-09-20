@@ -20,6 +20,7 @@
  */
 
 import { sendeRaumSchluessel } from '@/api/calls'
+import i18n from '@/i18n'
 import { decryptE2eeHybridWithKeyring, encryptE2eeHybrid } from '@/services/e2eeCrypto'
 import { verlangeGeraeteVon } from '@/services/e2eeGeraet'
 
@@ -122,7 +123,7 @@ export async function entpacke(
   const base64 = await decryptE2eeHybridWithKeyring(ciphertext, entschluesselungsSchluessel)
   const bytes = schluesselAusBase64(base64.trim())
   if (bytes.length !== SCHLUESSEL_BYTES) {
-    throw new Error('Raumschlüssel hat die falsche Länge')
+    throw new Error(i18n.t('calls.wrongKeyLength'))
   }
   return bytes
 }

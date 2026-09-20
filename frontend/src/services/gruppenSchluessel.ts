@@ -60,6 +60,7 @@ import { sha256Hex } from '@msdis/shield/integrity'
 import { randomBytes } from '@msdis/shield/random'
 
 import { getGroupMembers, relayE2eeEnvelope } from '@/api/social'
+import i18n from '@/i18n'
 
 import { encryptE2eeHybrid } from './e2eeCrypto'
 import { eigenesGeraet, geraeteVon } from './e2eeGeraet'
@@ -150,7 +151,7 @@ const STORE_ANFRAGEN = 'beantwortet'
 function oeffneDatenbank(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (typeof indexedDB === 'undefined') {
-      return reject(new Error('IndexedDB nicht verfügbar'))
+      return reject(new Error(i18n.t('chat.errors.indexedDbUnavailable')))
     }
     const req = indexedDB.open(DB_NAME, DB_VERSION)
     req.onupgradeneeded = () => {
@@ -177,7 +178,7 @@ function oeffneDatenbank(): Promise<IDBDatabase> {
     // meldet der Browser weder Erfolg noch Fehler, und das Öffnen hinge
     // stillschweigend, bis der andere Tab zugeht.
     req.onblocked = () =>
-      reject(new Error('Gruppenschlüssel-Datenbank blockiert: bitte andere Panel-Tabs schließen'))
+      reject(new Error(i18n.t('chat.errors.groupDbBlocked')))
   })
 }
 

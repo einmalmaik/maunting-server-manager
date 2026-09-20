@@ -218,7 +218,7 @@ export function AiActionProposalCard({
     try {
       const rejected = await aiApi.rejectAction(proposal.id)
       onChange(rejected)
-      toast.success(t('ai.actions.rejectedToast', 'Aktion abgelehnt.'))
+      toast.success(t('ai.actions.rejectedToast'))
     } catch (error: unknown) {
       toast.error(error instanceof SanitizedApiError ? error.message : t('ai.actions.error'))
       void aiApi.getAction(proposal.id).then(onChange).catch(() => undefined)
@@ -242,7 +242,7 @@ export function AiActionProposalCard({
       const accepted = await confirm({
         title: t(`ai.actions.tools.${proposal.tool_name}`, proposal.tool_name),
         message,
-        confirmText: t('ai.actions.execute', 'Ausführen'),
+        confirmText: t('ai.actions.execute'),
         danger: true,
       })
       if (!accepted) return
@@ -286,12 +286,12 @@ export function AiActionProposalCard({
             <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-xs text-on-surface-variant">{t(`ai.actions.status.${proposal.status}`)}</span>
             {proposal.proposal_type === 'read' && (
               <span className="rounded-full bg-secondary/15 px-2 py-0.5 text-xs text-secondary">
-                {t('ai.actions.type.read', 'Lese-Zugriff')}
+                {t('ai.actions.type.read')}
               </span>
             )}
             {proposal.proposal_type === 'worker' && (
               <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs text-primary">
-                {t('ai.actions.type.worker', 'Worker')}
+                {t('ai.actions.type.worker')}
               </span>
             )}
             {proposal.autonomous && (
@@ -357,7 +357,7 @@ export function AiActionProposalCard({
               disabled={busy}
               onClick={() => void reject()}
             >
-              {t('ai.actions.reject', 'Ablehnen')}
+              {t('ai.actions.reject')}
             </Button>
             <Button
               type="button"
@@ -366,7 +366,7 @@ export function AiActionProposalCard({
               disabled={busy}
               onClick={() => void execute()}
             >
-              {busy ? t('ai.actions.executing') : t('ai.actions.execute', 'Ausführen')}
+              {busy ? t('ai.actions.executing') : t('ai.actions.execute')}
             </Button>
           </div>
         )}

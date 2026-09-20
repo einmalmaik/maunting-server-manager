@@ -170,7 +170,7 @@ export function WakewordEinrichtung() {
           stream.getTracks().forEach((t) => t.stop())
         } catch (e: any) {
           setBeschaeftigt(null)
-          setMeldung(t('mss.wakeword.keinMikrofon', 'Mikrofonzugriff wurde verweigert oder ist nicht verfügbar.'))
+          setMeldung(t('mss.wakeword.keinMikrofon'))
           return
         }
       }
@@ -245,7 +245,7 @@ export function WakewordEinrichtung() {
 
       {/* Assistent-Name als Rufname */}
       <div className="flex items-center gap-2">
-        <span className="text-xs text-on-surface-variant">{t('mss.wakeword.rufname', 'Rufname:')}</span>
+        <span className="text-xs text-on-surface-variant">{t('mss.wakeword.rufname')}</span>
         <span className="text-sm font-medium text-on-surface">{agentName}</span>
       </div>
 

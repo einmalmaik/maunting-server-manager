@@ -10,6 +10,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RoomEvent, Track } from 'livekit-client'
 import type { ActiveCallInfo } from '@/api/calls'
+import i18n from '@/i18n'
 
 // ── Gefälschter Raum ────────────────────────────────────────────────────────
 
@@ -851,7 +852,7 @@ describe('Geräteübergreifendes Anruf-Handoff (Cross-Device)', () => {
 
     expect(useCallStore.getState().state).toBe('idle')
     expect(toastInfo).toHaveBeenCalledWith(
-      'Der Anruf wurde auf ein anderes Gerät übertragen.',
+      i18n.t('calls.callTransferred'),
     )
   })
 
@@ -881,7 +882,7 @@ describe('Geräteübergreifendes Anruf-Handoff (Cross-Device)', () => {
 
     expect(useCallStore.getState().state).toBe('idle')
     expect(toastInfo).toHaveBeenCalledWith(
-      'Du bist auf einem anderen Gerät einem anderen Anruf beigetreten.',
+      i18n.t('calls.joinedOnOtherDevice'),
     )
   })
 
@@ -895,7 +896,7 @@ describe('Geräteübergreifendes Anruf-Handoff (Cross-Device)', () => {
     })
 
     expect(useCallStore.getState().state).toBe('idle')
-    expect(toastInfo).toHaveBeenCalledWith('Der Anruf wurde beendet.')
+    expect(toastInfo).toHaveBeenCalledWith(i18n.t('calls.callEnded'))
   })
 
   it('handleCrossDeviceEvent: aktualisiert crossDeviceCall bei user_call_state_changed', () => {
@@ -1031,7 +1032,7 @@ describe('Geräteübergreifendes Anruf-Handoff (Cross-Device)', () => {
 
       vi.advanceTimersByTime(60000)
       expect(useCallStore.getState().state).toBe('idle')
-      expect(toastInfo).toHaveBeenCalledWith('Anruf verpasst.')
+      expect(toastInfo).toHaveBeenCalledWith(i18n.t('calls.callMissed'))
     } finally {
       vi.useRealTimers()
     }
@@ -1047,7 +1048,7 @@ describe('Geräteübergreifendes Anruf-Handoff (Cross-Device)', () => {
 
       vi.advanceTimersByTime(60000)
       expect(useCallStore.getState().state).toBe('idle')
-      expect(toastInfo).toHaveBeenCalledWith('Niemand hat abgenommen.')
+      expect(toastInfo).toHaveBeenCalledWith(i18n.t('calls.nobodyAnswered'))
     } finally {
       vi.useRealTimers()
     }
@@ -1097,7 +1098,7 @@ describe('Geräteübergreifendes Anruf-Handoff (Cross-Device)', () => {
     })
 
     expect(useCallStore.getState().state).toBe('idle')
-    expect(toastInfo).toHaveBeenCalledWith('Der Anrufer hat aufgelegt.')
+    expect(toastInfo).toHaveBeenCalledWith(i18n.t('calls.callerHungUp'))
   })
 
   it('handleCallSyncEvent: legt beim Anrufer auf, wenn der Angerufene ablehnt', async () => {
@@ -1118,7 +1119,7 @@ describe('Geräteübergreifendes Anruf-Handoff (Cross-Device)', () => {
     expect(useCallStore.getState().state).toBe('idle')
     expect(useCallStore.getState().raum).toBeNull()
     expect(livekit.trenne).toHaveBeenCalled()
-    expect(toastInfo).toHaveBeenCalledWith('Der Anruf wurde abgelehnt.')
+    expect(toastInfo).toHaveBeenCalledWith(i18n.t('calls.callRejected'))
   })
 
   it('handleCallSyncEvent: eine Ablehnung aus einem fremden Raum lässt den Anruf stehen', async () => {

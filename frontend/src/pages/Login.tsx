@@ -145,7 +145,7 @@ export function Login() {
         body: JSON.stringify({ email: verifyEmail }),
       })
     } catch (err: any) {
-      setError(err.message || t('auth.resendFailed', 'Code konnte nicht erneut gesendet werden'))
+      setError(err.message || t('auth.resendFailed'))
     } finally {
       setSubmitting(false)
     }
@@ -317,8 +317,8 @@ export function Login() {
                   <div>
                     <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                       {useBackupCode
-                        ? t('auth.backupCode', 'Backup-Code')
-                        : t('auth.otpCode', '2FA-Code')}
+                        ? t('auth.backupCode')
+                        : t('auth.otpCode')}
                     </label>
                     <input
                       type="text"
@@ -340,8 +340,8 @@ export function Login() {
                   >
                     <KeyRound className="w-3 h-3" />
                     {useBackupCode
-                      ? t('auth.use2FAInstead', '2FA-Code stattdessen verwenden')
-                      : t('auth.useBackupCode', 'Backup-Code verwenden')}
+                      ? t('auth.use2FAInstead')
+                      : t('auth.useBackupCode')}
                   </button>
                 </>
               )}

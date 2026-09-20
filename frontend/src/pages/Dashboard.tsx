@@ -314,7 +314,7 @@ export function Dashboard() {
   return (
     <div className="msm-page">
       <UpdateBanner />
-      <PageHeader eyebrow={t('pageContext.overview', 'Overview')} title={t('dashboard.title')} description={t('dashboard.subtitle')} status={<span className={runningCount > 0 ? 'msm-badge-success' : 'msm-badge-info'}>{runningCount} {t('dashboard.running')}</span>} />
+      <PageHeader eyebrow={t('pageContext.overview')} title={t('dashboard.title')} description={t('dashboard.subtitle')} status={<span className={runningCount > 0 ? 'msm-badge-success' : 'msm-badge-info'}>{runningCount} {t('dashboard.running')}</span>} />
 
       {/* Stat Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
