@@ -53,6 +53,9 @@ async def _event_stream(
             try:
                 # Warte bis zu 15 Sekunden auf ein neues Signal
                 event_data = await asyncio.wait_for(queue.get(), timeout=15.0)
+                if event_data.get("type") == "shutdown":
+                    yield SyncEventService.format_sse("shutdown", event_data)
+                    break
                 yield SyncEventService.format_sse("sync", event_data)
             except asyncio.TimeoutError:
                 # Keepalive Ping gegen Verbindungstimeouts bei Proxies/Firewalls
@@ -147,6 +150,14 @@ async def sync_events_ws(
         try:
             while True:
                 event = await queue.get()
+                if event.get("type") == "shutdown":
+                    try:
+                        async with ws_lock:
+                            await websocket.send_json(event)
+                            await websocket.close(code=1001, reason="Server restart")
+                    except Exception:
+                        pass
+                    break
                 async with ws_lock:
                     await websocket.send_json(event)
         except (asyncio.CancelledError, WebSocketDisconnect):

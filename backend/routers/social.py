@@ -989,6 +989,14 @@ async def social_websocket(
         try:
             while True:
                 event = await queue.get()
+                if event.get("type") == "shutdown":
+                    try:
+                        async with ws_lock:
+                            await websocket.send_json(event)
+                            await websocket.close(code=1001, reason="Server restart")
+                    except Exception:
+                        pass
+                    break
                 async with ws_lock:
                     await websocket.send_json(event)
         except (asyncio.CancelledError, WebSocketDisconnect):

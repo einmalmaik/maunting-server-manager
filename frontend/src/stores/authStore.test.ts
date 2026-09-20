@@ -94,6 +94,23 @@ describe('authStore', () => {
       expect(localStorage.getItem('msm_cached_user')).toBe(JSON.stringify(mockUser))
     })
 
+    it('soll bei 502 Bad Gateway (Backend-Neustart via Proxy) die Session behalten und nicht abmelden', async () => {
+      const mockUser = { id: 1, username: 'test', is_owner: true }
+      localStorage.setItem('msm_cached_user', JSON.stringify(mockUser))
+      useAuthStore.setState({ user: mockUser as any, isAuthenticated: true })
+
+      const gatewayError = new client.SanitizedApiError('Bad Gateway', { status: 502 })
+      vi.mocked(client.api).mockRejectedValueOnce(gatewayError)
+
+      const store = useAuthStore.getState()
+      await store.checkAuth()
+
+      expect(useAuthStore.getState().isAuthenticated).toBe(true)
+      expect(useAuthStore.getState().user).toEqual(mockUser)
+      expect(useAuthStore.getState().isLoading).toBe(false)
+      expect(localStorage.getItem('msm_cached_user')).toBe(JSON.stringify(mockUser))
+    })
+
     it('Negativtest: beschädigter/manipulierter Cache bringt authStore bei Offline-Fehler nicht zum Absturz', async () => {
       localStorage.setItem('msm_cached_user', '{"invalid_json": true, "corrupted"')
       useAuthStore.setState({ user: null, isAuthenticated: false })

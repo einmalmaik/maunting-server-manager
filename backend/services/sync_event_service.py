@@ -83,6 +83,40 @@ class SyncEventService:
             _log.debug("SSE-Client getrennt: %s", conn_id)
 
     @classmethod
+    def close_all(cls) -> None:
+        """Informiert alle Abonnenten geordnet über das Herunterfahren des Backends.
+
+        Sendet ein Shutdown-Signal in alle Queues, damit SSE- und WebSocket-Handler
+        die Verbindung unverzüglich schließen, statt den Uvicorn-Shutdown zu blockieren.
+        """
+        payload = {"type": "shutdown", "reason": "server_restart", "timestamp": _iso_now()}
+        for conn_id, sub in list(cls._subscribers.items()):
+            try:
+                def _enqueue(s: _Subscriber, p: dict[str, Any]):
+                    if s.queue.full():
+                        try:
+                            s.queue.get_nowait()
+                        except Exception:
+                            pass
+                    try:
+                        s.queue.put_nowait(p)
+                    except Exception:
+                        pass
+
+                try:
+                    current_loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    current_loop = None
+
+                if sub.loop and sub.loop.is_running() and current_loop is not sub.loop:
+                    sub.loop.call_soon_threadsafe(_enqueue, sub, payload)
+                else:
+                    _enqueue(sub, payload)
+            except Exception:
+                pass
+        _log.info("SyncEventService: Shutdown-Signal an %d Abonnent(en) gesendet.", len(cls._subscribers))
+
+    @classmethod
     def publish(
         cls,
         event_data: dict[str, Any],
