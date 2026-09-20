@@ -10,6 +10,7 @@ from config import settings
 from database import get_db
 from dependencies import require_global, verify_csrf
 from schemas.panel_settings import (
+    PanelLanguage,
     PanelSettingsResponse,
     PanelSettingsUpdate,
     TestEmailRequest,
@@ -73,6 +74,26 @@ def _mask_secret(value: str) -> str:
     return "*" * (len(value) - 4) + value[-4:]
 
 
+def _panel_language(value: str | None) -> PanelLanguage:
+    """Liest eine gespeicherte Panelsprache und gibt immer eine gültige zurück.
+
+    Bis 09/2026 kannte das Panel elf Sprachen, von denen neun nie vollständig
+    übersetzt waren. In der Datenbank einer bestehenden Anlage kann deshalb
+    `fr`, `zh` oder `ar` stehen. Ohne diese Stelle würde die Einstellungsseite
+    dort mit einem Validierungsfehler antworten statt mit Einstellungen — das
+    Panel wäre für den Betreiber unbenutzbar, weil vor Monaten jemand die
+    Sprache umgestellt hat.
+
+    Zwei verschiedene Fälle, zwei verschiedene Antworten: ist gar nichts
+    gespeichert, bleibt es beim bisherigen Auslieferungszustand Deutsch. Steht
+    dort eine abgeschaffte Sprache, wird daraus Englisch — dieselbe Regel, die
+    `normalizePanelLanguage` im Frontend anwendet.
+    """
+    if value is None:
+        return "de"
+    return "de" if value == "de" else "en"
+
+
 @router.get("", response_model=PanelSettingsResponse)
 def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.settings.read"))) -> dict:
     """Liest alle Panel-Einstellungen (DB-Werte mit Fallback auf Defaults).
@@ -98,7 +119,7 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
         "smtp_from": all_db.get("smtp_from", ""),
         "smtp_tls": all_db.get("smtp_tls", "true"),
         "resend_api_key": _mask_secret(EmailService._get_setting("resend_api_key")),
-        "default_language": all_db.get("default_language", "de"),
+        "default_language": _panel_language(all_db.get("default_language")),
         "email_configured": EmailService.is_configured(),
         "email_provider": EmailService._get_provider(),
         "steam_api_key": _mask_secret(steam_key),

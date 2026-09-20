@@ -91,8 +91,9 @@ const NACHFOLGER = [
   'privacyPolicy.sections.ai.items.noMessenger',
 ]
 
-// Nur die beiden Basissprachen: die übrigen neun sind bewusst Teilmengen mit
-// englischem Rückfall (scripts/check-i18n.mjs) und kennen die Schlüssel nicht.
+// Die beiden Panelsprachen — seit 09/2026 gibt es keine weiteren. Die neun
+// Teilübersetzungen sind gefallen, weil sie über die Spracherkennung des
+// Browsers aktiv wurden, ohne je vollständig gewesen zu sein.
 const SPRACHEN: Record<string, unknown> = { de, en }
 
 function blatt(baum: unknown, pfad: string): unknown {

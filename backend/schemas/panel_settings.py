@@ -1,4 +1,13 @@
+from typing import Literal
+
 from pydantic import BaseModel
+
+# Die beiden Panelsprachen. Das Panel schickt seit jeher nur diese zwei — es
+# leitet den Wert durch `normalizePanelLanguage` —, aber als freies `str` war
+# das eine Gewohnheit und keine Zusage: ein `"ar"` aus einem Skript wäre
+# angenommen worden und hätte eine Sprache eingestellt, für die es keine Texte
+# gibt. Steht die Liste hier, sagt die API 422 statt stillschweigend ja.
+PanelLanguage = Literal["de", "en"]
 
 
 class PanelSettingsResponse(BaseModel):
@@ -12,7 +21,7 @@ class PanelSettingsResponse(BaseModel):
     smtp_from: str = ""
     smtp_tls: str = "true"
     resend_api_key: str = ""
-    default_language: str = "de"
+    default_language: PanelLanguage = "de"
     email_configured: bool = False
     email_provider: str = "none"
     steam_api_key: str = ""
@@ -74,7 +83,7 @@ class PanelSettingsUpdate(BaseModel):
     smtp_from: str | None = None
     smtp_tls: str | None = None
     resend_api_key: str | None = None
-    default_language: str | None = None
+    default_language: PanelLanguage | None = None
     time_format: str | None = None
     support_widget_enabled: bool | None = None
     support_widget_mode: str | None = None

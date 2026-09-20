@@ -55,13 +55,24 @@ const missingInEn = [...deKeys].filter(key => !enKeys.has(key))
 if (missingInDe.length) errors.push(`de.json misses keys from en.json:\n  ${missingInDe.join('\n  ')}`)
 if (missingInEn.length) errors.push(`de.json has keys unknown to en.json:\n  ${missingInEn.join('\n  ')}`)
 
-for (const [code, keys] of locales) {
-  if (code === 'en' || code === 'de') continue
-  const extras = [...keys.keys()].filter(key => !enKeys.has(key))
-  if (extras.length) errors.push(`${code}.json has unknown keys:\n  ${extras.join('\n  ')}`)
-  const covered = [...keys.keys()].filter(key => enKeys.has(key)).length
-  const coverage = enKeys.size === 0 ? 100 : (covered / enKeys.size) * 100
-  console.log(`${code}: ${covered}/${enKeys.size} keys (${coverage.toFixed(1)}% coverage; English fallback for the rest)`)
+// Genau zwei Sprachen, und die Prüfung sagt es laut.
+//
+// Bis 09/2026 lagen hier elf Dateien, neun davon mit 772 von 4859 Schlüsseln.
+// Sie waren nicht als Entwurf gekennzeichnet, sondern über ein `import.meta.glob`
+// automatisch aktiv: ein Browser mit arabischer Spracheinstellung bekam sie
+// ausgeliefert. Eine halbe Übersetzung sieht in der Oberfläche nicht nach
+// „unfertig" aus, sondern nach einem Fehler in jedem zweiten Satz.
+//
+// Wer eine Sprache zurückbringen will, muss deshalb hier vorbei — und an dieser
+// Stelle steht die Bedingung: vollständig, und von jemandem, der sie spricht.
+const ERLAUBTE_SPRACHEN = ['de', 'en']
+const unerwartet = [...locales.keys()].filter(code => !ERLAUBTE_SPRACHEN.includes(code))
+if (unerwartet.length) {
+  errors.push(
+    `src/locales/ holds locales beyond de/en: ${unerwartet.join(', ')}.\n` +
+      `  A partial locale is worse than none — it ships broken sentences under a real language name.\n` +
+      `  Add it to ERLAUBTE_SPRACHEN in this script only once it is complete.`,
+  )
 }
 
 const referenced = new Set()
@@ -76,7 +87,7 @@ for (const file of await sourceFiles(sourceDir)) {
 // the ten it sent existed, because they were written as `ai.errors.*` while the
 // texts live under `ai.chat.errors.*`. The check above could not see it: those
 // keys never appear in a literal `t('…')` call, they arrive over SSE at runtime.
-// The operator saw a raw key instead of a sentence, across eleven locales.
+// The operator saw a raw key instead of a sentence, in both locales.
 //
 // The pattern is deliberately narrow. A broad `ai\.` would also match the audit
 // action names (`ai.action.proposed`, `ai.tool.read`) and report them as missing
@@ -118,8 +129,8 @@ for (const key of backendReferenced) referenced.add(key)
 // JSON-v4 nie anzeigt. `_zero/_few/_many` kennen en und de nicht.
 const vorhanden = (keys, key) => keys.has(key) || keys.has(`${key}_one`) || keys.has(`${key}_other`)
 
-// Checked against en and de only — the other nine locales are deliberate partial
-// subsets with English fallback, and demanding completeness there would be wrong.
+// en and de are the only locales, and both must be complete: a key the UI asks
+// for and neither language answers shows up as the raw key name on screen.
 const missingReferenced = [...referenced].filter(key => !vorhanden(enKeys, key) || !vorhanden(deKeys, key)).sort()
 if (missingReferenced.length) errors.push(`UI references keys missing from the en/de base locales:\n  ${missingReferenced.join('\n  ')}`)
 
