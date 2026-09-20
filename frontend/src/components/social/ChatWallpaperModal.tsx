@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Dialog,
   DialogContent,
@@ -38,9 +39,13 @@ export function ChatWallpaperModal({
   currentConfig,
   onSaveConfig,
 }: ChatWallpaperModalProps) {
+  const { t } = useTranslation()
+
   const [selectedPreset, setSelectedPreset] = useState<WallpaperPresetId>(currentConfig.preset)
   const [customDataUrl, setCustomDataUrl] = useState<string | undefined>(currentConfig.customDataUrl)
   const [dimLevel, setDimLevel] = useState<number>(currentConfig.dimLevel)
+  // Schlüssel, kein fertiger Satz — sonst bliebe die Meldung nach einem
+  // Sprachwechsel in der alten Sprache stehen.
   const [uploadError, setUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -50,12 +55,12 @@ export function ChatWallpaperModal({
     if (!file) return
 
     if (!file.type.startsWith('image/')) {
-      setUploadError('Bitte wähle eine gültige Bilddatei (JPEG, PNG, WebP) aus.')
+      setUploadError('social.wallpaper.badType')
       return
     }
 
     if (file.size > 8 * 1024 * 1024) {
-      setUploadError('Das Bild ist zu groß (maximal 8 MB erlaubt).')
+      setUploadError('social.wallpaper.tooLarge')
       return
     }
 
@@ -66,7 +71,7 @@ export function ChatWallpaperModal({
       setSelectedPreset('custom')
     }
     reader.onerror = () => {
-      setUploadError('Bild konnte nicht geladen werden.')
+      setUploadError('social.wallpaper.loadFailed')
     }
     reader.readAsDataURL(file)
   }
@@ -97,10 +102,10 @@ export function ChatWallpaperModal({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base font-bold text-on-surface">
             <ImageIcon className="w-5 h-5 text-primary" />
-            <span>Chat-Hintergrund anpassen</span>
+            <span>{t('social.wallpaper.title')}</span>
           </DialogTitle>
           <DialogDescription className="text-xs text-on-surface-variant">
-            Wähle einen atmosphärischen Hintergrund für deine Unterhaltungen. Das Cyber-Grid-Raster ist standardmäßig aktiv und sorgt für optimalen Kontrast.
+            {t('social.wallpaper.description')}
           </DialogDescription>
         </DialogHeader>
 
@@ -108,7 +113,7 @@ export function ChatWallpaperModal({
         <div className="space-y-3">
           <label className="text-xs font-semibold text-on-surface flex items-center gap-1.5">
             <Layers className="w-3.5 h-3.5 text-primary" />
-            <span>Design-Hintergründe</span>
+            <span>{t('social.wallpaper.presets')}</span>
           </label>
 
           <div className="grid grid-cols-2 gap-2.5">
@@ -141,10 +146,10 @@ export function ChatWallpaperModal({
               </div>
               <div className="relative z-10">
                 <p className="text-xs font-bold text-on-surface flex items-center gap-1">
-                  <span>Cyber Grid</span>
-                  <span className="text-[9px] px-1 py-0.2 rounded bg-primary/20 text-primary font-mono">Standard</span>
+                  <span>{t('social.wallpaper.cyber')}</span>
+                  <span className="text-[9px] px-1 py-0.2 rounded bg-primary/20 text-primary font-mono">{t('social.wallpaper.default')}</span>
                 </p>
-                <p className="text-[10px] text-on-surface-variant/80">Subtiles Daten-Raster</p>
+                <p className="text-[10px] text-on-surface-variant/80">{t('social.wallpaper.cyberHint')}</p>
               </div>
             </button>
 
@@ -170,8 +175,8 @@ export function ChatWallpaperModal({
                 )}
               </div>
               <div className="relative z-10">
-                <p className="text-xs font-bold text-on-surface">Deep Petrol</p>
-                <p className="text-[10px] text-on-surface-variant/80">Maunting Studios Farbverlauf</p>
+                <p className="text-xs font-bold text-on-surface">{t('social.wallpaper.petrol')}</p>
+                <p className="text-[10px] text-on-surface-variant/80">{t('social.wallpaper.petrolHint')}</p>
               </div>
             </button>
 
@@ -197,8 +202,8 @@ export function ChatWallpaperModal({
                 )}
               </div>
               <div className="relative z-10">
-                <p className="text-xs font-bold text-on-surface">Mitternacht</p>
-                <p className="text-[10px] text-on-surface-variant/80">Tiefblaues Weltall</p>
+                <p className="text-xs font-bold text-on-surface">{t('social.wallpaper.midnight')}</p>
+                <p className="text-[10px] text-on-surface-variant/80">{t('social.wallpaper.midnightHint')}</p>
               </div>
             </button>
 
@@ -224,8 +229,8 @@ export function ChatWallpaperModal({
                 )}
               </div>
               <div className="relative z-10">
-                <p className="text-xs font-bold text-on-surface">Schlicht Dunkel</p>
-                <p className="text-[10px] text-on-surface-variant/80">Ohne Musterung</p>
+                <p className="text-xs font-bold text-on-surface">{t('social.wallpaper.minimal')}</p>
+                <p className="text-[10px] text-on-surface-variant/80">{t('social.wallpaper.minimalHint')}</p>
               </div>
             </button>
           </div>
@@ -236,12 +241,12 @@ export function ChatWallpaperModal({
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-on-surface flex items-center gap-1.5">
               <Upload className="w-3.5 h-3.5 text-primary" />
-              <span>Eigenes Hintergrundbild</span>
+              <span>{t('social.wallpaper.own')}</span>
             </span>
             {customDataUrl && (
               <span className="text-[10px] text-emerald-400 font-medium flex items-center gap-1">
                 <Check className="w-3 h-3" />
-                <span>Bild hinterlegt</span>
+                <span>{t('social.wallpaper.stored')}</span>
               </span>
             )}
           </div>
@@ -263,7 +268,7 @@ export function ChatWallpaperModal({
               className="text-xs gap-1.5 h-8 flex-1"
             >
               <Upload className="w-3.5 h-3.5" />
-              <span>{customDataUrl ? 'Anderes Bild wählen' : 'Bild von Gerät hochladen'}</span>
+              <span>{customDataUrl ? t('social.wallpaper.pickOther') : t('social.wallpaper.pickFirst')}</span>
             </Button>
 
             {customDataUrl && (
@@ -274,7 +279,7 @@ export function ChatWallpaperModal({
                 onClick={() => setSelectedPreset('custom')}
                 className={`text-xs h-8 px-2.5 ${selectedPreset === 'custom' ? 'text-primary font-bold' : 'text-on-surface-variant'}`}
               >
-                Aktivieren
+                {t('social.wallpaper.activate')}
               </Button>
             )}
           </div>
@@ -283,19 +288,19 @@ export function ChatWallpaperModal({
             <div className="relative h-16 w-full rounded-xl overflow-hidden border border-outline-variant/40 mt-1.5">
               <img
                 src={customDataUrl}
-                alt="Vorschau Hintergrund"
+                alt=""
                 className="w-full h-full object-cover"
               />
               <div className="absolute inset-0 bg-black/25 flex items-center justify-center">
                 <span className="text-[11px] font-medium text-white/90 bg-black/50 px-2 py-0.5 rounded-full">
-                  Verzerrungsfrei eingepasst (Cover)
+                  {t('social.wallpaper.coverHint')}
                 </span>
               </div>
             </div>
           )}
 
           {uploadError && (
-            <p className="text-[11px] text-error">{uploadError}</p>
+            <p className="text-[11px] text-error">{t(uploadError)}</p>
           )}
         </div>
 
@@ -304,7 +309,7 @@ export function ChatWallpaperModal({
           <div className="flex items-center justify-between text-xs">
             <span className="font-semibold text-on-surface flex items-center gap-1.5">
               <Sliders className="w-3.5 h-3.5 text-primary" />
-              <span>Hintergrund-Abdunklung (Kontrast)</span>
+              <span>{t('social.wallpaper.dim')}</span>
             </span>
             <span className="font-mono text-[11px] text-primary">{dimLevel}%</span>
           </div>
@@ -318,9 +323,9 @@ export function ChatWallpaperModal({
             className="w-full accent-primary h-1.5 bg-surface-container-highest rounded-lg cursor-pointer"
           />
           <div className="flex justify-between text-[10px] text-on-surface-variant/60">
-            <span>Hell / Natürlich</span>
-            <span>Optimal lesbar</span>
-            <span>Sehr dunkel</span>
+            <span>{t('social.wallpaper.dimLight')}</span>
+            <span>{t('social.wallpaper.dimReadable')}</span>
+            <span>{t('social.wallpaper.dimDark')}</span>
           </div>
         </div>
 
@@ -331,10 +336,10 @@ export function ChatWallpaperModal({
             size="sm"
             onClick={handleResetDefault}
             className="text-xs h-8 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high gap-1 px-2.5"
-            title="Auf Standard 'Cyber Grid' zurücksetzen"
+            title={t('social.wallpaper.resetHint')}
           >
             <RotateCcw className="w-3.5 h-3.5" />
-            <span>Zurücksetzen</span>
+            <span>{t('common.reset')}</span>
           </Button>
 
           <div className="flex items-center gap-2">
@@ -343,7 +348,7 @@ export function ChatWallpaperModal({
               onClick={() => onOpenChange(false)}
               className="inline-flex items-center justify-center h-8 px-3.5 text-xs font-medium rounded-lg border border-outline-variant/50 bg-surface-container-high hover:bg-surface-container-highest text-on-surface hover:border-outline transition-all active:scale-[0.98]"
             >
-              Abbrechen
+              {t('common.cancel')}
             </button>
             <Button
               type="button"
@@ -352,7 +357,7 @@ export function ChatWallpaperModal({
               onClick={handleApply}
               className="text-xs h-8 px-4 font-semibold"
             >
-              Übernehmen
+              {t('common.apply')}
             </Button>
           </div>
         </DialogFooter>

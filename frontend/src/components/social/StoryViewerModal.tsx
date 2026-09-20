@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Avatar,
   Button,
@@ -14,6 +15,7 @@ import {
 } from 'lucide-react'
 import { type ChatStoryItem, deleteStory } from '@/api/social'
 import { STORY_GRADIENTS } from './CreateStoryModal'
+import { formatRelativeTime } from '@/utils/timeFormat'
 import { toast } from '@/stores/toastStore'
 
 export interface StoryReplyContext {
@@ -46,6 +48,8 @@ export function StoryViewerModal({
   onDeleted,
   onReply,
 }: StoryViewerModalProps) {
+  const { t } = useTranslation()
+
   const [currentIndex, setCurrentIndex] = useState(initialIndex)
   const [progress, setProgress] = useState(0)
   const [isPaused, setIsPaused] = useState(false)
@@ -121,7 +125,7 @@ export function StoryViewerModal({
     setDeleting(true)
     try {
       await deleteStory(currentStory.id)
-      toast.success('Story gelöscht')
+      toast.success(t('social.story.deleted'))
       onDeleted?.(currentStory.id)
       if (stories.length <= 1) {
         onOpenChange(false)
@@ -129,7 +133,7 @@ export function StoryViewerModal({
         setCurrentIndex((i) => Math.max(0, i - 1))
       }
     } catch {
-      toast.error('Story konnte nicht gelöscht werden')
+      toast.error(t('social.story.deleteFailed'))
     } finally {
       setDeleting(false)
     }
@@ -141,14 +145,6 @@ export function StoryViewerModal({
     ? 'bg-black'
     : STORY_GRADIENTS[currentStory.background]?.class || 'bg-slate-900 text-white'
 
-  const formatTimeAgo = (dateStr: string) => {
-    const diffSec = Math.max(0, Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000))
-    if (diffSec < 60) return 'Gerade eben'
-    const diffMin = Math.floor(diffSec / 60)
-    if (diffMin < 60) return `vor ${diffMin} Min.`
-    const diffHr = Math.floor(diffMin / 60)
-    return `vor ${diffHr} Std.`
-  }
 
   return (
     <div
@@ -208,7 +204,7 @@ export function StoryViewerModal({
                 </div>
                 <div className="text-[10px] opacity-80 flex items-center gap-1">
                   <Clock className="w-2.5 h-2.5" />
-                  <span>{formatTimeAgo(currentStory.created_at)}</span>
+                  <span>{formatRelativeTime(currentStory.created_at, t)}</span>
                   <span>•</span>
                   <Lock className="w-2.5 h-2.5 text-emerald-300" />
                   <span>Ende-zu-Ende</span>
@@ -225,8 +221,8 @@ export function StoryViewerModal({
                   onClick={handleDelete}
                   disabled={deleting}
                   className="h-8 w-8 text-white hover:text-error hover:bg-white/10"
-                  title="Story löschen"
-                  aria-label="Story löschen"
+                  title={t('social.story.delete')}
+                  aria-label={t('social.story.delete')}
                 >
                   <Trash2 className="w-4 h-4" />
                 </Button>
@@ -238,7 +234,7 @@ export function StoryViewerModal({
                 size="icon"
                 onClick={() => onOpenChange(false)}
                 className="h-8 w-8 text-white hover:bg-white/10"
-                aria-label="Schließen"
+                aria-label={t('common.close')}
               >
                 <X className="w-4 h-4" />
               </Button>
@@ -257,7 +253,7 @@ export function StoryViewerModal({
         <div
           className="absolute inset-y-16 left-0 w-1/3 cursor-pointer z-10 flex items-center pl-2 opacity-0 hover:opacity-75 transition-opacity"
           onClick={handlePrev}
-          aria-label="Vorherige Story"
+          aria-label={t('social.story.previous')}
         >
           {currentIndex > 0 && (
             <div className="p-1 rounded-full bg-black/40 text-white backdrop-blur-sm">
@@ -269,7 +265,7 @@ export function StoryViewerModal({
         <div
           className="absolute inset-y-16 right-0 w-1/3 cursor-pointer z-10 flex items-center justify-end pr-2 opacity-0 hover:opacity-75 transition-opacity"
           onClick={handleNext}
-          aria-label="Nächste Story"
+          aria-label={t('social.story.next')}
         >
           <div className="p-1 rounded-full bg-black/40 text-white backdrop-blur-sm">
             <ChevronRight className="w-5 h-5" />
@@ -301,21 +297,23 @@ export function StoryViewerModal({
                 onChange={(e) => setReplyText(e.target.value)}
                 onFocus={() => setIsPaused(true)}
                 onBlur={() => setIsPaused(false)}
-                placeholder="Auf Status antworten …"
+                placeholder={t('social.story.replyPlaceholder')}
                 className="flex-1 bg-black/40 border border-white/25 rounded-full px-3.5 py-1.5 text-xs text-white placeholder:text-white/60 focus:outline-none focus:border-primary backdrop-blur-sm"
               />
               <button
                 type="submit"
                 disabled={!replyText.trim()}
                 className="p-2 rounded-full bg-primary text-on-primary disabled:opacity-40 hover:scale-105 transition-transform"
-                aria-label="Antwort senden"
+                aria-label={t('social.story.sendReply')}
               >
                 <Send className="w-3.5 h-3.5" />
               </button>
             </form>
           ) : (
             <div className="text-[10px] text-white/70 text-center drop-shadow">
-              Gültig bis {new Date(currentStory.expires_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} Uhr
+              {t('social.story.validUntil', {
+                time: new Date(currentStory.expires_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              })}
             </div>
           )}
         </div>

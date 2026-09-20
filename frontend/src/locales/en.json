@@ -412,9 +412,6 @@
       "devicesUnnamed": "Unnamed device",
       "deviceActive": "Online",
       "deviceInactive": "Offline",
-      "deviceActiveNow": "Active just now",
-      "deviceMinutesAgo": "{{count}}m ago",
-      "deviceHoursAgo": "{{count}}h ago",
       "deviceLastActive": "Last activity",
       "devicePairedAt": "Paired on"
     },
@@ -3577,7 +3574,16 @@
       "afterHour": "After one hour",
       "afterMinutes_one": "After one minute",
       "afterMinutes_other": "After {{count}} minutes"
-    }
+    },
+    "timeAgo": {
+      "justNow": "Just now",
+      "minutes_one": "{{count}} min ago",
+      "minutes_other": "{{count}} min ago",
+      "hours_one": "{{count}} hr ago",
+      "hours_other": "{{count}} hr ago"
+    },
+    "reset": "Reset",
+    "apply": "Apply"
   },
   "serverDetail": {
     "showServerOverview": "Server overview",
@@ -5812,5 +5818,119 @@
     "speaking": "Speaking",
     "present": "Present",
     "optionsFor": "Options for {{name}}"
+  },
+  "social": {
+    "status": {
+      "online": "Online",
+      "away": "Away",
+      "invisible": "Invisible",
+      "offline": "Offline"
+    },
+    "device": {
+      "desktop": "Desktop app",
+      "mobile": "Mobile app",
+      "web": "Web panel"
+    },
+    "invite": {
+      "loading": "Loading invitation …",
+      "expired": "This invitation is no longer valid.",
+      "heading": "Invitation to a group",
+      "memberCount_one": "{{count}} member",
+      "memberCount_other": "{{count}} members",
+      "join": "Join"
+    },
+    "videoNote": {
+      "expand": "Click to enlarge",
+      "cameraFailed": "Camera access for the video note did not work.",
+      "swipeToLock": "Swipe up to lock",
+      "send": "Send"
+    },
+    "camera": {
+      "take": "Take photo",
+      "preview": "Photo preview",
+      "starting": "Starting camera …",
+      "retake": "Retake",
+      "use": "Use photo",
+      "fromFile": "Choose photo from file",
+      "gallery": "Gallery",
+      "flip": "Switch camera",
+      "flipShort": "Switch",
+      "unsupported": "This browser has no camera interface.",
+      "denied": "Camera access was denied. Allow camera use in your browser.",
+      "failed": "The camera could not be started. Choose a file instead."
+    },
+    "story": {
+      "create": "Create status",
+      "share": "Share status",
+      "sharing": "Sharing status …",
+      "shared": "Status shared.",
+      "shareFailed": "The status could not be shared.",
+      "needContent": "Add text or a photo to the status.",
+      "fallbackContent": "Status update",
+      "badge24h": "Visible for 24 hours",
+      "removePhoto": "Remove photo",
+      "tapForText": "Tap below to add text",
+      "encrypted": "End-to-end encrypted",
+      "camera": "Camera",
+      "pickImage": "Choose image",
+      "contentPlaceholder": "What are you up to? Text or caption",
+      "colour": "Colour:",
+      "gradientLabel": "{{name}} gradient",
+      "delete": "Delete status",
+      "deleted": "Status deleted.",
+      "deleteFailed": "The status could not be deleted.",
+      "previous": "Previous status",
+      "next": "Next status",
+      "replyPlaceholder": "Reply to status …",
+      "sendReply": "Send reply",
+      "validUntil": "Valid until {{time}}",
+      "gradients": {
+        "violet": "Violet",
+        "ocean": "Ocean",
+        "emerald": "Emerald",
+        "sunset": "Sunset",
+        "cyber": "Cyber",
+        "midnight": "Midnight",
+        "volcano": "Volcano",
+        "neonForest": "Neon forest"
+      }
+    },
+    "attachment": {
+      "imageLoading": "Loading image …",
+      "imageFailed": "The image could not be loaded.",
+      "imageAlt": "Attachment from the chat",
+      "legacyFormat": "This attachment comes from a retired format and can no longer be opened.",
+      "decryptBadFormat": "The attachment could not be decrypted: invalid format.",
+      "decryptFailed": "The attachment could not be decrypted.",
+      "blocked": "The attachment is unsafe or invalid and was blocked."
+    },
+    "wallpaper": {
+      "title": "Adjust chat background",
+      "description": "Pick a background for your conversations. The cyber grid is the default and gives the best contrast.",
+      "presets": "Design backgrounds",
+      "default": "Default",
+      "cyber": "Cyber Grid",
+      "cyberHint": "Fine data grid",
+      "petrol": "Deep Petrol",
+      "petrolHint": "Maunting Studios gradient",
+      "midnight": "Midnight",
+      "midnightHint": "Deep blue space",
+      "minimal": "Plain dark",
+      "minimalHint": "No pattern",
+      "own": "Own background image",
+      "stored": "Image stored",
+      "pickOther": "Choose a different image",
+      "pickFirst": "Upload image from device",
+      "activate": "Activate",
+      "coverHint": "Fitted without distortion",
+      "dim": "Dim background",
+      "dimLight": "Light",
+      "dimReadable": "Best readability",
+      "dimDark": "Very dark",
+      "resetHint": "Reset to the default cyber grid",
+      "badType": "Choose a valid image file: JPEG, PNG or WebP.",
+      "tooLarge": "The image is too large. 8 MB is the limit.",
+      "loadFailed": "The image could not be loaded."
+    }
   }
 }

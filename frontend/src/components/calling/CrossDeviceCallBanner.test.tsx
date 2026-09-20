@@ -75,7 +75,7 @@ describe('CrossDeviceCallBanner', () => {
     expect(screen.getByRole('region', { name: i18n.t('calls.activeOnOtherDevice') })).toBeTruthy()
     expect(screen.getByText(i18n.t('calls.alreadyInCall'))).toBeTruthy()
     expect(screen.getByText('Alice')).toBeTruthy()
-    expect(screen.getByText('Smartphone / APK')).toBeTruthy()
+    expect(screen.getByText(i18n.t('social.device.mobile'))).toBeTruthy()
     expect(screen.getByText(/Audio-Anruf/i)).toBeTruthy()
   })
 
@@ -92,7 +92,7 @@ describe('CrossDeviceCallBanner', () => {
     render(<CrossDeviceCallBanner />)
 
     expect(screen.getByText('Projektteam')).toBeTruthy()
-    expect(screen.getByText('Desktop-App')).toBeTruthy()
+    expect(screen.getByText(i18n.t('social.device.desktop'))).toBeTruthy()
   })
 
   it('führt transferCallToThisDevice aus wenn man auf Beitreten klickt', () => {

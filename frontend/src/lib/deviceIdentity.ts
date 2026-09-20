@@ -38,14 +38,19 @@ export function getDeviceType(): DeviceType {
   return 'web'
 }
 
-export function formatDeviceLabel(deviceType?: string | null): string {
+/**
+ * Der Schlüssel zum Gerätetyp. Die drei Namen standen früher an drei Stellen
+ * in drei Fassungen — „Smartphone / APK" hier, „Mobile App" im Abzeichen,
+ * „Mobile" in dessen Beschriftung. Sie kommen jetzt alle aus `social.device.*`.
+ */
+export function deviceLabelKey(deviceType?: string | null): string {
   switch (deviceType) {
     case 'mobile':
-      return 'Smartphone / APK'
+      return 'social.device.mobile'
     case 'desktop':
-      return 'Desktop-App'
+      return 'social.device.desktop'
     case 'web':
     default:
-      return 'Webpanel'
+      return 'social.device.web'
   }
 }

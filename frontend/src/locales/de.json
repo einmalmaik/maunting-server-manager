@@ -412,9 +412,6 @@
       "devicesUnnamed": "Unbenanntes Gerät",
       "deviceActive": "Online",
       "deviceInactive": "Offline",
-      "deviceActiveNow": "Gerade aktiv",
-      "deviceMinutesAgo": "vor {{count}} Min.",
-      "deviceHoursAgo": "vor {{count}} Std.",
       "deviceLastActive": "Letzte Aktivität",
       "devicePairedAt": "Gekoppelt am"
     },
@@ -1164,14 +1161,14 @@
     },
     "webSearch": {
       "title": "Websuche & Recherche",
-      "description": "Such- und Recherche-Einstellungen für den Assistenten. Direktes Web-Scraping und freie Websuche sind standardmäßig immer aktiv. Optional können Sie einen Brave-API-Schlüssel oder eine eigene SearXNG-Metasuch-Instanz hinterlegen.",
+      "description": "Such- und Recherche-Einstellungen für den Assistenten. Direktes Web-Scraping und freie Websuche sind standardmäßig immer aktiv. Optional kannst du einen Brave-API-Schlüssel oder eine eigene SearXNG-Metasuch-Instanz hinterlegen.",
       "apiKey": "Brave-Search-API-Schlüssel (Optional)",
       "searxngUrl": "SearXNG-Endpunkt-URL (Optional)",
       "sidecarActive": "Lokaler SearXNG-Sidecar aktiv (Standard: {{url}})",
       "sidecarInactive": "Lokaler SearXNG-Sidecar bereit (Standard: {{url}})",
       "customEndpointActive": "Benutzerdefinierter Endpunkt aktiv ({{url}}, überschreibt Standard {{defaultUrl}})",
       "searxngDefaultPlaceholder": "Standard: {{url}} (Lokaler Sidecar)",
-      "searxngDefaultHint": "Standardmäßig nutzt das System den lokalen SearXNG-Sidecar. Tragen Sie hier eine URL ein, um den Endpunkt zu überschreiben.",
+      "searxngDefaultHint": "Standardmäßig nutzt das System den lokalen SearXNG-Sidecar. Trage hier eine URL ein, um den Endpunkt zu überschreiben.",
       "resetToDefault": "Auf Standard zurücksetzen",
       "configured": "Schlüssel hinterlegt; neuen Schlüssel eingeben, um ihn zu ersetzen",
       "placeholder": "Schlüssel eingeben",
@@ -3271,7 +3268,7 @@
     "confirmDeleteWordLabel": "Tippe delete zur Bestätigung (nicht kopierbar)",
     "e2eeDevices": {
       "title": "Geräte mit Nachrichtenzugriff",
-      "description": "Jedes Gerät hat einen eigenen Schlüssel, der es nie verlässt. Nachrichten an Sie werden für jedes Gerät in dieser Liste einzeln verschlüsselt.",
+      "description": "Jedes Gerät hat einen eigenen Schlüssel, der es nie verlässt. Nachrichten an dich werden für jedes Gerät in dieser Liste einzeln verschlüsselt.",
       "thisDevice": "Dieses Gerät",
       "unnamed": "Unbenanntes Gerät",
       "empty": "Kein Gerät angemeldet.",
@@ -3577,7 +3574,16 @@
       "afterHour": "Nach einer Stunde",
       "afterMinutes_one": "Nach einer Minute",
       "afterMinutes_other": "Nach {{count}} Minuten"
-    }
+    },
+    "timeAgo": {
+      "justNow": "Gerade eben",
+      "minutes_one": "vor {{count}} Min.",
+      "minutes_other": "vor {{count}} Min.",
+      "hours_one": "vor {{count}} Std.",
+      "hours_other": "vor {{count}} Std."
+    },
+    "reset": "Zurücksetzen",
+    "apply": "Übernehmen"
   },
   "serverDetail": {
     "showServerOverview": "Server-Übersicht",
@@ -5812,5 +5818,119 @@
     "speaking": "Spricht",
     "present": "Dabei",
     "optionsFor": "Optionen für {{name}}"
+  },
+  "social": {
+    "status": {
+      "online": "Online",
+      "away": "Abwesend",
+      "invisible": "Unsichtbar",
+      "offline": "Offline"
+    },
+    "device": {
+      "desktop": "Desktop-App",
+      "mobile": "Mobile App",
+      "web": "Web-Panel"
+    },
+    "invite": {
+      "loading": "Einladung wird geladen …",
+      "expired": "Diese Einladung gilt nicht mehr.",
+      "heading": "Einladung zur Gruppe",
+      "memberCount_one": "{{count}} Mitglied",
+      "memberCount_other": "{{count}} Mitglieder",
+      "join": "Beitreten"
+    },
+    "videoNote": {
+      "expand": "Klicken zum Vergrößern",
+      "cameraFailed": "Der Kamerazugriff für die Videonotiz hat nicht geklappt.",
+      "swipeToLock": "Nach oben wischen zum Sperren",
+      "send": "Absenden"
+    },
+    "camera": {
+      "take": "Foto aufnehmen",
+      "preview": "Foto-Vorschau",
+      "starting": "Kamera wird gestartet …",
+      "retake": "Wiederholen",
+      "use": "Foto verwenden",
+      "fromFile": "Foto aus Datei wählen",
+      "gallery": "Galerie",
+      "flip": "Kamera wechseln",
+      "flipShort": "Wechseln",
+      "unsupported": "Dieser Browser kennt keine Kamera-Schnittstelle.",
+      "denied": "Der Kamerazugriff wurde verweigert. Erlaube die Kameranutzung im Browser.",
+      "failed": "Die Kamera ließ sich nicht starten. Wähle stattdessen eine Datei aus."
+    },
+    "story": {
+      "create": "Status erstellen",
+      "share": "Status teilen",
+      "sharing": "Status wird geteilt …",
+      "shared": "Status geteilt.",
+      "shareFailed": "Der Status konnte nicht geteilt werden.",
+      "needContent": "Füge dem Status Text oder ein Foto hinzu.",
+      "fallbackContent": "Status-Update",
+      "badge24h": "24 Stunden sichtbar",
+      "removePhoto": "Foto entfernen",
+      "tapForText": "Tippe unten, um Text hinzuzufügen",
+      "encrypted": "Ende-zu-Ende verschlüsselt",
+      "camera": "Kamera",
+      "pickImage": "Bild wählen",
+      "contentPlaceholder": "Was machst du gerade? Text oder Bildunterschrift",
+      "colour": "Farbe:",
+      "gradientLabel": "Farbverlauf {{name}}",
+      "delete": "Status löschen",
+      "deleted": "Status gelöscht.",
+      "deleteFailed": "Der Status konnte nicht gelöscht werden.",
+      "previous": "Vorheriger Status",
+      "next": "Nächster Status",
+      "replyPlaceholder": "Auf Status antworten …",
+      "sendReply": "Antwort senden",
+      "validUntil": "Gültig bis {{time}} Uhr",
+      "gradients": {
+        "violet": "Violett",
+        "ocean": "Ozean",
+        "emerald": "Smaragd",
+        "sunset": "Sonnenuntergang",
+        "cyber": "Cyber",
+        "midnight": "Mitternacht",
+        "volcano": "Vulkan",
+        "neonForest": "Neon-Wald"
+      }
+    },
+    "attachment": {
+      "imageLoading": "Bild wird geladen …",
+      "imageFailed": "Das Bild konnte nicht geladen werden.",
+      "imageAlt": "Anhang aus dem Chat",
+      "legacyFormat": "Dieser Anhang stammt aus einem abgelösten Verfahren und lässt sich nicht mehr öffnen.",
+      "decryptBadFormat": "Der Dateianhang ließ sich nicht entschlüsseln: ungültiges Format.",
+      "decryptFailed": "Der Dateianhang ließ sich nicht entschlüsseln.",
+      "blocked": "Der Dateianhang ist unsicher oder ungültig und wurde blockiert."
+    },
+    "wallpaper": {
+      "title": "Chat-Hintergrund anpassen",
+      "description": "Wähle einen Hintergrund für deine Unterhaltungen. Das Cyber-Grid-Raster ist voreingestellt und sorgt für den besten Kontrast.",
+      "presets": "Design-Hintergründe",
+      "default": "Standard",
+      "cyber": "Cyber Grid",
+      "cyberHint": "Feines Datenraster",
+      "petrol": "Deep Petrol",
+      "petrolHint": "Farbverlauf von Maunting Studios",
+      "midnight": "Mitternacht",
+      "midnightHint": "Tiefblaues Weltall",
+      "minimal": "Schlicht dunkel",
+      "minimalHint": "Ohne Musterung",
+      "own": "Eigenes Hintergrundbild",
+      "stored": "Bild hinterlegt",
+      "pickOther": "Anderes Bild wählen",
+      "pickFirst": "Bild vom Gerät hochladen",
+      "activate": "Aktivieren",
+      "coverHint": "Verzerrungsfrei eingepasst",
+      "dim": "Hintergrund abdunkeln",
+      "dimLight": "Hell",
+      "dimReadable": "Optimal lesbar",
+      "dimDark": "Sehr dunkel",
+      "resetHint": "Auf das voreingestellte Cyber Grid zurücksetzen",
+      "badType": "Wähle eine gültige Bilddatei: JPEG, PNG oder WebP.",
+      "tooLarge": "Das Bild ist zu groß. Erlaubt sind 8 MB.",
+      "loadFailed": "Das Bild konnte nicht geladen werden."
+    }
   }
 }

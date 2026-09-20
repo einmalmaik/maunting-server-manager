@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Loader2, Users } from 'lucide-react'
 import { Button } from '@/Singra/UI'
 import { apiUrl } from '@/config/api'
@@ -32,6 +33,8 @@ export const GruppenEinladungsKarte: React.FC<GruppenEinladungsKarteProps> = ({
   istEigene = false,
   onJoin,
 }) => {
+  const { t } = useTranslation()
+
   const [info, setInfo] = useState<ChatGroupInvitePublic | null>(null)
   const [laedt, setLaedt] = useState(true)
   const [fehlt, setFehlt] = useState(false)
@@ -65,7 +68,7 @@ export const GruppenEinladungsKarte: React.FC<GruppenEinladungsKarteProps> = ({
     return (
       <div className={`mt-2 flex items-center gap-2 rounded-xl border p-3 text-xs ${rahmen}`}>
         <Loader2 className="h-4 w-4 animate-spin opacity-70" />
-        <span className="opacity-75">Einladung wird geladen…</span>
+        <span className="opacity-75">{t('social.invite.loading')}</span>
       </div>
     )
   }
@@ -73,7 +76,7 @@ export const GruppenEinladungsKarte: React.FC<GruppenEinladungsKarteProps> = ({
   if (fehlt || !info) {
     return (
       <div className={`mt-2 rounded-xl border p-3 text-xs ${rahmen}`}>
-        <span className="opacity-75">Diese Einladung gilt nicht mehr.</span>
+        <span className="opacity-75">{t('social.invite.expired')}</span>
       </div>
     )
   }
@@ -98,17 +101,17 @@ export const GruppenEinladungsKarte: React.FC<GruppenEinladungsKarteProps> = ({
 
         <div className="min-w-0 flex-1">
           <div className="text-[10px] uppercase tracking-[0.14em] opacity-60">
-            Einladung zur Gruppe
+            {t('social.invite.heading')}
           </div>
           <div className="truncate text-sm font-semibold">{info.name}</div>
           <div className="mt-0.5 flex items-center gap-2 text-[11px] opacity-75">
             <span>
-              {info.member_count} {info.member_count === 1 ? 'Mitglied' : 'Mitglieder'}
+              {t('social.invite.memberCount', { count: info.member_count })}
             </span>
             {info.live_call && (
               <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/20 px-1.5 py-0.5 font-medium text-emerald-300">
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
-                Live
+                {t('calls.live')}
                 {info.live_participants > 0 && ` · ${info.live_participants}`}
               </span>
             )}
@@ -127,7 +130,7 @@ export const GruppenEinladungsKarte: React.FC<GruppenEinladungsKarteProps> = ({
             }
           }}
         >
-          {tritt ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Beitreten'}
+          {tritt ? <Loader2 className="h-4 w-4 animate-spin" /> : t('social.invite.join')}
         </Button>
       </div>
     </div>

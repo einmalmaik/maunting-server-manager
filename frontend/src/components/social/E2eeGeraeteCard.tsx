@@ -97,7 +97,7 @@ export function E2eeGeraeteCard() {
       <p className="max-w-3xl text-sm text-on-surface-variant">
         {t(
           'profile.e2eeDevices.description',
-          'Jedes Gerät hat einen eigenen Schlüssel, der es nie verlässt. Nachrichten an Sie werden für jedes Gerät in dieser Liste einzeln verschlüsselt.',
+          'Jedes Gerät hat einen eigenen Schlüssel, der es nie verlässt. Nachrichten an dich werden für jedes Gerät in dieser Liste einzeln verschlüsselt.',
         )}
       </p>
 

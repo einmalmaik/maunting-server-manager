@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { Copy, MonitorSmartphone, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import { formatRelativeTime } from '@/utils/timeFormat'
+
 import { api } from '@/api/client'
 import { API_ORIGIN } from '@/config/api'
 import { SecretOnce } from '@/components/ui/SecretOnce'
@@ -242,16 +244,7 @@ export function AiDevicePairingCard() {
                   {geraet.last_active_at && (
                     <span>
                       {t('ai.profile.deviceLastActive', 'Letzte Aktivität')}:{' '}
-                      {(() => {
-                        const datum = new Date(geraet.last_active_at)
-                        const diffSekunden = Math.floor((Date.now() - datum.getTime()) / 1000)
-                        if (diffSekunden < 60) return t('ai.profile.deviceActiveNow', 'Gerade aktiv')
-                        const diffMin = Math.floor(diffSekunden / 60)
-                        if (diffMin < 60) return t('ai.profile.deviceMinutesAgo', { count: diffMin, defaultValue: `vor ${diffMin} Min.` })
-                        const diffStd = Math.floor(diffMin / 60)
-                        if (diffStd < 24) return t('ai.profile.deviceHoursAgo', { count: diffStd, defaultValue: `vor ${diffStd} Std.` })
-                        return datum.toLocaleString()
-                      })()}
+                      {formatRelativeTime(geraet.last_active_at, t)}
                     </span>
                   )}
                   {geraet.paired_at && (

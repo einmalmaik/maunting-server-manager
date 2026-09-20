@@ -1,5 +1,12 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import i18n from '@/i18n'
+
+// Die Sprache festlegen: die Behauptungen unten prüfen deutsche Texte, und
+// ohne diese Zeile entscheidet navigator.language der Testumgebung.
+beforeAll(async () => {
+  await i18n.changeLanguage('de')
+})
 
 const getGroupInviteInfo = vi.fn()
 vi.mock('@/api/social', () => ({
@@ -53,7 +60,7 @@ describe('GruppenEinladungsKarte', () => {
     render(<GruppenEinladungsKarte inviteCode="AbCd1234efGH" onJoin={vi.fn()} />)
 
     expect(await screen.findByText('Serverteam')).toBeInTheDocument()
-    expect(screen.getByText('4 Mitglieder')).toBeInTheDocument()
+    expect(screen.getByText(i18n.t('social.invite.memberCount', { count: 4 }))).toBeInTheDocument()
     // Das Logo trägt bewusst ein leeres alt: der Gruppenname steht daneben,
     // ein Vorlesen der Grafik wäre eine Dopplung. Deshalb hier über das Tag.
     expect(document.querySelector('img')).toHaveAttribute(
@@ -67,7 +74,7 @@ describe('GruppenEinladungsKarte', () => {
     getGroupInviteInfo.mockResolvedValue({ ...INFO, member_count: 1 })
     render(<GruppenEinladungsKarte inviteCode="AbCd1234efGH" onJoin={vi.fn()} />)
 
-    expect(await screen.findByText('1 Mitglied')).toBeInTheDocument()
+    expect(await screen.findByText(i18n.t('social.invite.memberCount', { count: 1 }))).toBeInTheDocument()
   })
 
   it('zeigt einen laufenden Anruf mit Teilnehmerzahl an', async () => {
@@ -90,7 +97,7 @@ describe('GruppenEinladungsKarte', () => {
     render(<GruppenEinladungsKarte inviteCode="AbCd1234efGH" onJoin={onJoin} />)
 
     await screen.findByText('Serverteam')
-    fireEvent.click(screen.getByRole('button', { name: 'Beitreten' }))
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('social.invite.join') }))
 
     await waitFor(() => expect(onJoin).toHaveBeenCalledWith('AbCd1234efGH'))
   })
@@ -100,7 +107,7 @@ describe('GruppenEinladungsKarte', () => {
     render(<GruppenEinladungsKarte inviteCode="AbCd1234efGH" onJoin={vi.fn()} />)
 
     expect(await screen.findByText(/gilt nicht mehr/i)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Beitreten' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: i18n.t('social.invite.join') })).not.toBeInTheDocument()
   })
 
   it('fällt bei fehlendem Logo auf ein Symbol zurück', async () => {

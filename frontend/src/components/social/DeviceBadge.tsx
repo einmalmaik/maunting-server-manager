@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+
 export type DeviceType = 'web' | 'desktop' | 'mobile'
 
 interface DeviceBadgeProps {
@@ -11,14 +13,16 @@ interface DeviceBadgeProps {
  * Follows MauntingStudios Design-DNA guidelines.
  */
 export function DeviceBadge({ deviceType = 'web', className = '', showLabel = false }: DeviceBadgeProps) {
+  const { t } = useTranslation()
+
   const type = (deviceType || 'web').toLowerCase()
 
   if (type === 'desktop') {
     return (
       <span
         className={`inline-flex items-center gap-1.5 text-xs text-primary/90 font-medium ${className}`}
-        title="Desktop-App (MSS)"
-        aria-label="Desktop-App (MSS)"
+        title={t('social.device.desktop')}
+        aria-label={t('social.device.desktop')}
       >
         <svg
           className="w-3.5 h-3.5 shrink-0"
@@ -34,7 +38,7 @@ export function DeviceBadge({ deviceType = 'web', className = '', showLabel = fa
           <line x1="8" x2="16" y1="21" y2="21" />
           <line x1="12" x2="12" y1="17" y2="21" />
         </svg>
-        {showLabel && <span>Desktop-App</span>}
+        {showLabel && <span>{t('social.device.desktop')}</span>}
       </span>
     )
   }
@@ -43,8 +47,8 @@ export function DeviceBadge({ deviceType = 'web', className = '', showLabel = fa
     return (
       <span
         className={`inline-flex items-center gap-1.5 text-xs text-tertiary/90 font-medium ${className}`}
-        title="Mobile App"
-        aria-label="Mobile App"
+        title={t('social.device.mobile')}
+        aria-label={t('social.device.mobile')}
       >
         <svg
           className="w-3.5 h-3.5 shrink-0"
@@ -59,7 +63,7 @@ export function DeviceBadge({ deviceType = 'web', className = '', showLabel = fa
           <rect width="14" height="20" x="5" y="2" rx="2" ry="2" />
           <path d="M12 18h.01" />
         </svg>
-        {showLabel && <span>Mobile</span>}
+        {showLabel && <span>{t('social.device.mobile')}</span>}
       </span>
     )
   }
@@ -68,8 +72,8 @@ export function DeviceBadge({ deviceType = 'web', className = '', showLabel = fa
   return (
     <span
       className={`inline-flex items-center gap-1.5 text-xs text-on-surface-variant/80 font-medium ${className}`}
-      title="Web-Panel"
-      aria-label="Web-Panel"
+      title={t('social.device.web')}
+      aria-label={t('social.device.web')}
     >
       <svg
         className="w-3.5 h-3.5 shrink-0"
@@ -85,7 +89,7 @@ export function DeviceBadge({ deviceType = 'web', className = '', showLabel = fa
         <line x1="2" x2="22" y1="12" y2="12" />
         <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
       </svg>
-      {showLabel && <span>Web</span>}
+      {showLabel && <span>{t('social.device.web')}</span>}
     </span>
   )
 }

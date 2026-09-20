@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import { FileText, Download, Loader2, AlertCircle, RefreshCw } from 'lucide-react'
 import { getSafeAttachmentUrl } from '@/lib/sanitizeSvg'
 import { ladeAnhangHerunter } from '@/api/social'
@@ -168,6 +169,8 @@ export interface ChatMediaImageProps {
 }
 
 export function ChatMediaImage({ attachment, bindung, onViewImage }: ChatMediaImageProps) {
+  const { t } = useTranslation()
+
   const directSafeUrl = getSafeAttachmentUrl(attachment.dataUrl)
   const mediaId = attachment.mediaId
   const cached = mediaId ? chatMediaBlobCache.get(mediaId) : null
@@ -250,7 +253,7 @@ export function ChatMediaImage({ attachment, bindung, onViewImage }: ChatMediaIm
     return (
       <div className="rounded-xl border border-black/10 my-1 p-6 flex flex-col items-center justify-center min-h-[140px] w-56 sm:w-64 bg-black/5 dark:bg-white/5 space-y-2">
         <Loader2 className="w-5 h-5 animate-spin text-primary opacity-80" />
-        <span className="text-[11px] opacity-75 font-medium">Bild wird geladen …</span>
+        <span className="text-[11px] opacity-75 font-medium">{t('social.attachment.imageLoading')}</span>
       </div>
     )
   }
@@ -260,7 +263,7 @@ export function ChatMediaImage({ attachment, bindung, onViewImage }: ChatMediaIm
       <div className="rounded-xl border border-destructive/20 bg-destructive/5 my-1 p-3 flex flex-col items-center justify-center min-h-[90px] w-56 sm:w-64 space-y-2 text-center">
         <div className="flex items-center gap-1.5 text-xs text-destructive font-medium">
           <AlertCircle className="w-4 h-4 shrink-0" />
-          <span>Bild konnte nicht geladen werden</span>
+          <span>{t('social.attachment.imageFailed')}</span>
         </div>
         <button
           type="button"
@@ -268,7 +271,7 @@ export function ChatMediaImage({ attachment, bindung, onViewImage }: ChatMediaIm
           className="px-2.5 py-1 text-[11px] font-medium rounded-lg bg-surface-container-high hover:bg-surface-container-highest transition-colors border border-outline-variant/30 flex items-center gap-1 cursor-pointer"
         >
           <RefreshCw className="w-3 h-3" />
-          <span>Erneut versuchen</span>
+          <span>{t('common.retry')}</span>
         </button>
       </div>
     )
@@ -283,7 +286,7 @@ export function ChatMediaImage({ attachment, bindung, onViewImage }: ChatMediaIm
     <div className="rounded-xl overflow-hidden border border-black/10 my-1 cursor-pointer">
       <img
         src={effectiveUrl}
-        alt={attachment.name || 'Chat Anhang'}
+        alt={attachment.name || t('social.attachment.imageAlt')}
         onClick={() => onViewImage(effectiveUrl)}
         className="max-h-60 w-auto object-cover rounded-lg hover:opacity-95 transition-opacity"
       />
@@ -298,6 +301,8 @@ export interface ChatMediaFileProps {
 }
 
 export function ChatMediaFile({ attachment, bindung, isSelf = false }: ChatMediaFileProps) {
+  const { t } = useTranslation()
+
   const [isDownloading, setIsDownloading] = useState(false)
   const safeName = attachment.name?.replace(/[\r\n"']/g, '') || 'attachment'
   const directSafeHref = getSafeAttachmentUrl(attachment.dataUrl)
@@ -315,7 +320,7 @@ export function ChatMediaFile({ attachment, bindung, isSelf = false }: ChatMedia
           const zeiger = medienZeiger(attachment)
           if (!zeiger) {
             // Altbestand aus der Zeit der ableitbaren Kanalschlüssel.
-            toast.error('Dieser Anhang stammt aus einem abgelösten Verfahren und lässt sich nicht mehr öffnen.')
+            toast.error(t('social.attachment.legacyFormat'))
             return
           }
           decrypted = await ladeAnhangHerunter(zeiger, bindung)
@@ -329,10 +334,10 @@ export function ChatMediaFile({ attachment, bindung, isSelf = false }: ChatMedia
         if (safe) {
           triggerDownload(safe, safeName)
         } else {
-          toast.error('Entschlüsselung des Dateianhangs fehlgeschlagen (ungültiges Format).')
+          toast.error(t('social.attachment.decryptBadFormat'))
         }
       } catch {
-        toast.error('Entschlüsselung des Dateianhangs fehlgeschlagen.')
+        toast.error(t('social.attachment.decryptFailed'))
       } finally {
         setIsDownloading(false)
       }
@@ -345,7 +350,7 @@ export function ChatMediaFile({ attachment, bindung, isSelf = false }: ChatMedia
       return
     }
 
-    toast.error('Unsicherer oder ungültiger Dateianhang blockiert.')
+    toast.error(t('social.attachment.blocked'))
   }
 
   return (

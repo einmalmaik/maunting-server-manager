@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import i18n from '@/i18n'
 import {
   ChatMediaImage,
   ChatMediaFile,
@@ -8,6 +9,12 @@ import {
   chatMediaBlobCache,
 } from './ChatMediaAttachments'
 import * as socialApi from '@/api/social'
+
+// Die Sprache festlegen: die Behauptungen unten prüfen deutsche Texte, und
+// ohne diese Zeile entscheidet navigator.language der Testumgebung.
+beforeAll(async () => {
+  await i18n.changeLanguage('de')
+})
 
 vi.mock('@/api/social', () => ({
   getChatMediaSignedUrl: vi.fn(),
@@ -134,7 +141,7 @@ describe('ChatMediaImage Component', () => {
       />
     )
 
-    expect(screen.getByText('Bild wird geladen …')).toBeInTheDocument()
+    expect(screen.getByText(i18n.t('social.attachment.imageLoading'))).toBeInTheDocument()
 
     await waitFor(() => {
       expect(socialApi.ladeAnhangHerunter).toHaveBeenCalledWith(zeiger('media-remote-1'), BINDUNG)
@@ -163,10 +170,10 @@ describe('ChatMediaImage Component', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByText('Bild konnte nicht geladen werden')).toBeInTheDocument()
+      expect(screen.getByText(i18n.t('social.attachment.imageFailed'))).toBeInTheDocument()
     })
 
-    const retryBtn = screen.getByText('Erneut versuchen')
+    const retryBtn = screen.getByText(i18n.t('common.retry'))
     expect(retryBtn).toBeInTheDocument()
 
     // Setup success for retry
@@ -197,7 +204,7 @@ describe('ChatMediaImage Component', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByText('Bild konnte nicht geladen werden')).toBeInTheDocument()
+      expect(screen.getByText(i18n.t('social.attachment.imageFailed'))).toBeInTheDocument()
     })
     expect(socialApi.ladeAnhangHerunter).not.toHaveBeenCalled()
 

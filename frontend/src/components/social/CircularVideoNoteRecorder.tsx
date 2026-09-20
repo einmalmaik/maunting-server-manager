@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { X, Check, Lock } from 'lucide-react'
 import {
   evaluateSwipeGesture,
@@ -33,6 +34,8 @@ export const CircularVideoNoteRecorder: React.FC<CircularVideoNoteRecorderProps>
   onCancel,
   onComplete,
 }) => {
+  const { t } = useTranslation()
+
   const [isLocked, setIsLocked] = useState(false)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [isRecording, setIsRecording] = useState(true)
@@ -95,7 +98,7 @@ export const CircularVideoNoteRecorder: React.FC<CircularVideoNoteRecorderProps>
 
       recorder.start(250)
     }).catch(() => {
-      toast.error('Kamerazugriff für Videonotiz fehlgeschlagen')
+      toast.error(t('social.videoNote.cameraFailed'))
       onCancel()
     })
 
@@ -233,7 +236,7 @@ export const CircularVideoNoteRecorder: React.FC<CircularVideoNoteRecorderProps>
           {!isLocked && gestengefuehrt && (
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/60 px-3 py-1 rounded-full text-[11px] text-white/80 flex items-center gap-1 animate-bounce">
               <Lock className="w-3 h-3 text-emerald-400" />
-              <span>Nach oben swipen zum Sperren</span>
+              <span>{t('social.videoNote.swipeToLock')}</span>
             </div>
           )}
         </div>
@@ -246,7 +249,7 @@ export const CircularVideoNoteRecorder: React.FC<CircularVideoNoteRecorderProps>
             type="button"
             onClick={onCancel}
             className="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-transform hover:scale-105"
-            title="Abbrechen"
+            title={t('common.cancel')}
           >
             <X className="w-6 h-6" />
           </button>
@@ -254,7 +257,7 @@ export const CircularVideoNoteRecorder: React.FC<CircularVideoNoteRecorderProps>
             type="button"
             onClick={handleStopAndFinish}
             className="w-14 h-14 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white flex items-center justify-center shadow-lg shadow-emerald-500/30 transition-transform hover:scale-105"
-            title="Absenden"
+            title={t('social.videoNote.send')}
           >
             <Check className="w-7 h-7" />
           </button>

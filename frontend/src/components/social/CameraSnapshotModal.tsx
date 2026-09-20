@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Dialog,
   DialogContent,
@@ -24,7 +25,11 @@ export function CameraSnapshotModal({
   onOpenChange,
   onCapture,
 }: CameraSnapshotModalProps) {
+  const { t } = useTranslation()
+
   const [stream, setStream] = useState<MediaStream | null>(null)
+  // Schlüssel, kein fertiger Satz: ein Sprachwechsel soll auch die
+  // stehengebliebene Fehlermeldung mitnehmen.
   const [error, setError] = useState<string | null>(null)
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null)
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user')
@@ -47,7 +52,7 @@ export function CameraSnapshotModal({
     setCapturedPhoto(null)
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setError('Kamera-API in diesem Browser nicht unterstützt.')
+      setError('social.camera.unsupported')
       return
     }
 
@@ -71,9 +76,9 @@ export function CameraSnapshotModal({
     } catch (err) {
       const msg = err instanceof Error ? err.name : 'Unknown'
       if (msg === 'NotAllowedError' || msg === 'PermissionDeniedError') {
-        setError('Kamerazugriff wurde verweigert. Bitte erlaube die Kameranutzung im Browser.')
+        setError('social.camera.denied')
       } else {
-        setError('Kamera konnte nicht gestartet werden. Nutze stattdessen Datei hochladen.')
+        setError('social.camera.failed')
       }
     }
   }
@@ -151,14 +156,14 @@ export function CameraSnapshotModal({
           <div className="flex items-center gap-2">
             <Camera className="w-4 h-4 text-emerald-400" />
             <span className="font-headline text-body-sm font-semibold text-white">
-              {capturedPhoto ? 'Foto-Vorschau' : 'Foto aufnehmen'}
+              {capturedPhoto ? t('social.camera.preview') : t('social.camera.take')}
             </span>
           </div>
           <button
             type="button"
             onClick={() => onOpenChange(false)}
             className="p-1.5 rounded-full text-zinc-400 hover:text-white hover:bg-zinc-800/80 transition-colors"
-            aria-label="Schließen"
+            aria-label={t('common.close')}
           >
             <X className="w-5 h-5" />
           </button>
@@ -179,7 +184,7 @@ export function CameraSnapshotModal({
           ) : error ? (
             <div className="p-6 text-center space-y-3 max-w-xs">
               <AlertCircle className="w-10 h-10 text-amber-400 mx-auto" />
-              <p className="text-xs text-zinc-300 leading-relaxed">{error}</p>
+              <p className="text-xs text-zinc-300 leading-relaxed">{t(error)}</p>
               <Button
                 type="button"
                 variant="secondary"
@@ -188,13 +193,13 @@ export function CameraSnapshotModal({
                 className="mt-2 text-xs gap-1.5 w-full justify-center"
               >
                 <Upload className="w-4 h-4" />
-                <span>Foto aus Datei wählen</span>
+                <span>{t('social.camera.fromFile')}</span>
               </Button>
             </div>
           ) : (
             <div className="flex flex-col items-center gap-2.5 text-zinc-400">
               <RefreshCw className="w-7 h-7 animate-spin text-emerald-400" />
-              <span className="text-xs">Kamera wird gestartet …</span>
+              <span className="text-xs">{t('social.camera.starting')}</span>
             </div>
           )}
 
@@ -224,7 +229,7 @@ export function CameraSnapshotModal({
                 className="text-xs gap-1.5 flex-1 justify-center py-2.5"
               >
                 <RefreshCw className="w-4 h-4" />
-                <span>Wiederholen</span>
+                <span>{t('social.camera.retake')}</span>
               </Button>
               <Button
                 type="button"
@@ -234,7 +239,7 @@ export function CameraSnapshotModal({
                 className="text-xs gap-1.5 flex-1 justify-center py-2.5 font-semibold shadow-lg"
               >
                 <Check className="w-4 h-4" />
-                <span>Foto verwenden</span>
+                <span>{t('social.camera.use')}</span>
               </Button>
             </div>
           ) : (
@@ -244,13 +249,13 @@ export function CameraSnapshotModal({
                 type="button"
                 onClick={() => fallbackFileInputRef.current?.click()}
                 className="flex flex-col items-center gap-1 p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800/60 transition-colors"
-                title="Aus Datei wählen"
-                aria-label="Aus Datei wählen"
+                title={t('social.camera.fromFile')}
+                aria-label={t('social.camera.fromFile')}
               >
                 <div className="w-10 h-10 rounded-xl bg-zinc-800 flex items-center justify-center border border-zinc-700">
                   <Upload className="w-5 h-5" />
                 </div>
-                <span className="text-[10px]">Galerie</span>
+                <span className="text-[10px]">{t('social.camera.gallery')}</span>
               </button>
 
               {/* Center: Big WhatsApp Shutter Button */}
@@ -259,8 +264,8 @@ export function CameraSnapshotModal({
                   type="button"
                   onClick={handleTakePhoto}
                   className="w-18 h-18 rounded-full border-4 border-white flex items-center justify-center p-1 bg-white/20 active:scale-90 hover:bg-white/30 transition-all shadow-2xl cursor-pointer"
-                  title="Foto aufnehmen"
-                  aria-label="Foto auslösen"
+                  title={t('social.camera.take')}
+                  aria-label={t('social.camera.take')}
                 >
                   <div className="w-14 h-14 rounded-full bg-white shadow-inner" />
                 </button>
@@ -274,13 +279,13 @@ export function CameraSnapshotModal({
                 onClick={handleFlipCamera}
                 disabled={!stream || !hasMultipleCameras}
                 className="flex flex-col items-center gap-1 p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800/60 transition-colors disabled:opacity-30 disabled:pointer-events-none"
-                title="Kamera wechseln"
-                aria-label="Kamera wechseln"
+                title={t('social.camera.flip')}
+                aria-label={t('social.camera.flip')}
               >
                 <div className="w-10 h-10 rounded-xl bg-zinc-800 flex items-center justify-center border border-zinc-700">
                   <RefreshCw className="w-5 h-5" />
                 </div>
-                <span className="text-[10px]">Wechseln</span>
+                <span className="text-[10px]">{t('social.camera.flipShort')}</span>
               </button>
             </div>
           )}

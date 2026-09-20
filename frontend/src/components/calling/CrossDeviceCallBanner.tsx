@@ -2,7 +2,7 @@ import React, { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { PhoneOff, PhoneForwarded, Smartphone, Monitor, Globe, Radio, Users } from 'lucide-react'
 import { useCallStore, setzeAnrufIdentitaet } from '@/stores/useCallStore'
-import { formatDeviceLabel, getDeviceId } from '@/lib/deviceIdentity'
+import { deviceLabelKey, getDeviceId } from '@/lib/deviceIdentity'
 import { useAuthStore } from '@/stores/authStore'
 import { eigenesGeraet, geraetVeroeffentlichen } from '@/services/e2eeGeraet'
 
@@ -145,7 +145,7 @@ export const CrossDeviceCallBanner: React.FC<CrossDeviceCallBannerProps> = ({ cl
   const partnerName = istGruppe
     ? crossDeviceCall.group_name || t('calls.groupCall')
     : crossDeviceCall.partner?.username || t('calls.peer')
-  const deviceLabel = formatDeviceLabel(crossDeviceCall.device_type)
+  const deviceLabel = t(deviceLabelKey(crossDeviceCall.device_type))
 
   const DeviceIcon =
     crossDeviceCall.device_type === 'mobile'

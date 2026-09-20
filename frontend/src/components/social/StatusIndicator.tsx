@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+
 import { Dropdown, type DropdownOption } from '@/Singra/UI'
 
 export type PresenceStatus = 'online' | 'away' | 'invisible'
@@ -9,6 +11,7 @@ interface StatusDotProps {
 }
 
 export function StatusDot({ status = 'invisible', className = '', size = 'md' }: StatusDotProps) {
+  const { t } = useTranslation()
   const sizeClasses = {
     sm: 'w-2 h-2',
     md: 'w-2.5 h-2.5',
@@ -19,8 +22,8 @@ export function StatusDot({ status = 'invisible', className = '', size = 'md' }:
     return (
       <span
         className={`inline-block rounded-full bg-emerald-500 ring-2 ring-surface shadow-[0_0_8px_rgba(16,185,129,0.5)] ${sizeClasses} ${className}`}
-        title="Online"
-        aria-label="Online"
+        title={t('social.status.online')}
+        aria-label={t('social.status.online')}
       />
     )
   }
@@ -29,8 +32,8 @@ export function StatusDot({ status = 'invisible', className = '', size = 'md' }:
     return (
       <span
         className={`inline-block rounded-full bg-amber-500 ring-2 ring-surface shadow-[0_0_8px_rgba(245,158,11,0.5)] ${sizeClasses} ${className}`}
-        title="Abwesend"
-        aria-label="Abwesend"
+        title={t('social.status.away')}
+        aria-label={t('social.status.away')}
       />
     )
   }
@@ -39,8 +42,8 @@ export function StatusDot({ status = 'invisible', className = '', size = 'md' }:
   return (
     <span
       className={`inline-block rounded-full bg-on-surface-variant/40 ring-2 ring-surface ${sizeClasses} ${className}`}
-      title="Unsichtbar / Offline"
-      aria-label="Unsichtbar / Offline"
+      title={t('social.status.offline')}
+      aria-label={t('social.status.offline')}
     />
   )
 }
@@ -53,20 +56,21 @@ interface StatusSwitcherProps {
 }
 
 export function StatusSwitcher({ currentStatus, onChange, disabled = false, className = '' }: StatusSwitcherProps) {
+  const { t } = useTranslation()
   const options: DropdownOption[] = [
     {
       value: 'online',
-      label: 'Online',
+      label: t('social.status.online'),
       icon: <StatusDot status="online" size="sm" />,
     },
     {
       value: 'away',
-      label: 'Abwesend',
+      label: t('social.status.away'),
       icon: <StatusDot status="away" size="sm" />,
     },
     {
       value: 'invisible',
-      label: 'Unsichtbar',
+      label: t('social.status.invisible'),
       icon: <StatusDot status="invisible" size="sm" />,
     },
   ]
