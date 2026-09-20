@@ -815,7 +815,7 @@ function ProviderForm({
               onChange={(disable_safety) => change({ disable_safety })}
             />
             <p className="msm-field-help text-xs text-on-surface-variant">
-              Deaktiviert alle 5 Standard-Sicherheitsfilter (Hassrede, Belästigung, gefährliche Inhalte etc.) auf BLOCK_NONE bei Gemini- und Gemma-Modellen über die Google AI Studio API.
+              {t('ai.providers.geminiSafetyOffHint')}
             </p>
           </div>
         )}

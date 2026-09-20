@@ -276,7 +276,7 @@ export function PopupTab() {
                   </button>
                   <button
                     type="button"
-                    title="Überschrift (### )"
+                    title={t('popups.markdownHeading')}
                     onClick={() => insertMarkdown('### ')}
                     className="p-1.5 rounded hover:bg-surface-container-highest text-on-surface-variant hover:text-on-surface text-xs"
                   >
@@ -284,7 +284,7 @@ export function PopupTab() {
                   </button>
                   <button
                     type="button"
-                    title="Aufzählung (- )"
+                    title={t('popups.markdownList')}
                     onClick={() => insertMarkdown('- ')}
                     className="p-1.5 rounded hover:bg-surface-container-highest text-on-surface-variant hover:text-on-surface text-xs"
                   >
@@ -321,7 +321,7 @@ export function PopupTab() {
                 ref={textareaRef}
                 value={contentMarkdown}
                 onChange={(e) => setContentMarkdown(e.target.value)}
-                placeholder="Verfasse den Text der Ankündigung in klarem, menschlichem Ton..."
+                placeholder={t('popups.bodyPlaceholder')}
                 rows={7}
                 required
                 className="msm-input font-mono text-sm leading-relaxed"
@@ -368,7 +368,7 @@ export function PopupTab() {
                   type="text"
                   value={buttonText}
                   onChange={(e) => setButtonText(e.target.value)}
-                  placeholder="z. B. Statusseite öffnen"
+                  placeholder={t('popups.buttonTextPlaceholder')}
                   maxLength={100}
                   className="msm-input"
                 />

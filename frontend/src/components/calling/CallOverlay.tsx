@@ -346,7 +346,7 @@ export const CallOverlay: React.FC = () => {
       {audioBlockiert && state !== 'incoming' && (
         <div className="mx-3 mt-3 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-2xl border border-status-warning/40 bg-status-warning/10 px-3 py-2 sm:mx-4">
           <span className="text-xs leading-relaxed text-on-surface">
-            Dein Browser lässt den Ton erst nach einem Klick zu.
+            {t('calls.audioBlockedHint')}
           </span>
           <Button size="sm" onClick={() => void erlaubeTon()} className="gap-1.5">
             <Volume2 className="h-4 w-4" /> Ton aktivieren

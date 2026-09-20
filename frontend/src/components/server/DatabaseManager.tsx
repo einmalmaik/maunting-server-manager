@@ -421,7 +421,7 @@ export function DatabaseManager({ serverId }: Props) {
     <>
       <DatabaseConsole
         title="Datenbanken"
-        subtitle="Verwalte und bearbeite die PostgreSQL-Datenbanken dieses Servers."
+        subtitle={t('databaseManager.subtitle')}
         databases={resources.databases}
         selectedDatabaseId={selectedDbId}
         stats={stats}
@@ -477,6 +477,7 @@ function csrfHeader(): Record<string, string> {
 }
 
 function PowerUserDialog({ state, onClose }: { state: { db: PostgresDatabase; password: string } | null; onClose: () => void }) {
+  const { t } = useTranslation()
   if (!state) return null
   const connectionUrl = `postgresql://${state.db.owner_role}:${state.password}@msm-postgres:5432/${state.db.name}`
   return (
@@ -484,10 +485,10 @@ function PowerUserDialog({ state, onClose }: { state: { db: PostgresDatabase; pa
       <div className="msm-card w-full max-w-2xl p-6" onClick={(event) => event.stopPropagation()}>
         <div className="mb-3 flex items-center gap-2">
           <Shield className="h-5 w-5 text-status-warning" />
-          <h3 className="font-headline text-xl font-semibold text-on-surface">Power-User-Zugang</h3>
+          <h3 className="font-headline text-xl font-semibold text-on-surface">{t('databaseManager.powerUserTitle')}</h3>
         </div>
         <p className="mb-4 rounded-lg border border-status-warning/40 bg-status-warning/10 p-3 text-sm text-status-warning">
-          Passwort nur jetzt anzeigen. Gilt nur für diese eine Datenbank — kein Cluster-SUPERUSER, kein Zugriff auf andere Kunden-DBs. Nicht in Tickets, Logs oder URLs teilen.
+          {t('databaseManager.powerUserWarning')}
         </p>
         <div className="space-y-2 font-mono text-sm">
           <div>database: {state.db.name}</div>
@@ -495,7 +496,7 @@ function PowerUserDialog({ state, onClose }: { state: { db: PostgresDatabase; pa
           <div className="break-all rounded bg-status-destructive/10 p-2 text-status-destructive">password: {state.password}</div>
           <div className="break-all rounded border border-outline-variant bg-surface-container-high p-2 text-on-surface-variant">psql "{connectionUrl}"</div>
         </div>
-        <Button className="mt-5 w-full" onClick={onClose}>Schließen</Button>
+        <Button className="mt-5 w-full" onClick={onClose}>{t('common.close')}</Button>
       </div>
     </div>
   )

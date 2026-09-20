@@ -1,8 +1,9 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PopupTab } from './PopupTab'
 import * as popupsApi from '@/api/popups'
 import { useToastStore } from '@/stores/toastStore'
+import i18n from '@/i18n'
 
 vi.mock('@/api/popups', () => ({
   listAdminPopups: vi.fn(),
@@ -18,6 +19,10 @@ vi.mock('@/hooks/useHasPermission', () => ({
 }))
 
 describe('PopupTab', () => {
+  beforeAll(async () => {
+    await i18n.changeLanguage('de')
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     useToastStore.setState({ toasts: [] })
@@ -48,7 +53,7 @@ describe('PopupTab', () => {
     fireEvent.click(newBtn)
 
     expect(screen.getByLabelText(/Titel|Title/i)).toBeInTheDocument()
-    expect(screen.getByPlaceholderText(/Verfasse den Text/i)).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(i18n.t('popups.bodyPlaceholder'))).toBeInTheDocument()
   })
 
   it('submits a new popup creation', async () => {
@@ -74,7 +79,7 @@ describe('PopupTab', () => {
     fireEvent.change(screen.getByPlaceholderText(/z. B. Geplante Wartungsarbeiten/i), {
       target: { value: 'Neues Feature' },
     })
-    fireEvent.change(screen.getByPlaceholderText(/Verfasse den Text/i), {
+    fireEvent.change(screen.getByPlaceholderText(i18n.t('popups.bodyPlaceholder')), {
       target: { value: 'Markdown Text.' },
     })
 

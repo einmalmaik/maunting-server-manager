@@ -311,7 +311,7 @@ export function AudioTab() {
           </h2>
         </div>
         <p className="max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant mb-5">
-          Chromiums integrierte WebRTC-Filterreihe zur Beseitigung von Störgeräuschen und Hall in Sprachräumen und Sprachaufnahmen.
+          {t('mss.audio.verarbeitungHinweis')}
         </p>
 
         <div className="max-w-xl space-y-4">
@@ -321,7 +321,7 @@ export function AudioTab() {
                 {t('profile.audioNoiseSuppression', 'Rauschunterdrückung (Noise Suppression)')}
               </span>
               <span className="text-xs text-on-surface-variant">
-                Filtert Hintergrundgeräusche wie Lüfter oder Tastaturanschläge heraus.
+                {t('mss.audio.rauschenHinweis')}
               </span>
             </div>
             <Switch
@@ -337,7 +337,7 @@ export function AudioTab() {
                 {t('profile.audioEchoCancellation', 'Echounterdrückung (Echo Cancellation)')}
               </span>
               <span className="text-xs text-on-surface-variant">
-                Verhindert akustische Rückkopplungen bei Lautsprechern ohne Kopfhörer.
+                {t('mss.audio.echoHinweis')}
               </span>
             </div>
             <Switch
@@ -386,7 +386,7 @@ export function AudioTab() {
           </h2>
         </div>
         <p className="max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant mb-5">
-          Höre deine Stimme live über den gewählten Lautsprecher ab, um Klangqualität und Pegel zu kontrollieren. Die Echounterdrückung ist im Testlauf deaktiviert, damit deine Stimme nicht ausgefiltert wird.
+          {t('mss.audio.testhoerenHinweis')}
         </p>
 
         <div className="max-w-xl space-y-4">

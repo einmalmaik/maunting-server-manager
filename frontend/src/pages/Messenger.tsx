@@ -3556,7 +3556,7 @@ export function Messenger() {
 
                 {filteredContacts.length === 0 && filteredGroups.length === 0 && (
                   <p className="py-12 text-center text-xs text-on-surface-variant/70">
-                    Keine Kontakte oder Gruppen gefunden.
+                    {t('messenger.noContactsOrGroups')}
                   </p>
                 )}
               </>
@@ -3658,7 +3658,7 @@ export function Messenger() {
 
                   {friendsStoriesGrouped.length === 0 ? (
                     <div className="p-4 rounded-xl bg-surface-container/40 border border-outline-variant/25 text-center text-xs text-on-surface-variant">
-                      Noch keine Status-Updates von Freunden vorhanden.
+                      {t('messenger.noStatusUpdates')}
                     </div>
                   ) : (
                     <div className="space-y-1.5">
@@ -3716,7 +3716,7 @@ export function Messenger() {
                 {/* Contacts Activity Section */}
                 <div className="space-y-2 pt-2 border-t border-outline-variant/20">
                   <div className="px-1 text-label-sm font-semibold text-on-surface-variant/70 uppercase tracking-wider">
-                    Aktivität deiner Kontakte
+                    {t('messenger.contactActivity')}
                   </div>
                   <div className="space-y-1">
                     {contactsList.map((c) => (
@@ -3770,7 +3770,7 @@ export function Messenger() {
                       <span className="text-label-sm text-on-surface-variant/70">({groups.length})</span>
                     </div>
                     <p className="text-label-sm text-on-surface-variant/80">
-                      Öffentliche und private Gruppen mit Einladungslink
+                      {t('messenger.communitySubtitle')}
                     </p>
                   </div>
                   <Button
@@ -3790,7 +3790,7 @@ export function Messenger() {
                 <div className="space-y-1.5 pt-1">
                   {groups.length === 0 ? (
                     <p className="py-6 text-center text-xs text-on-surface-variant/70">
-                      Noch keine Gruppen beigetreten.
+                      {t('messenger.noGroupsJoined')}
                     </p>
                   ) : (
                     groups.map((g) => (
@@ -4234,7 +4234,7 @@ export function Messenger() {
 
                 {messages.length === 0 && !loadingMessages && (
                   <div className="py-16 text-center text-xs text-on-surface-variant/70">
-                    Noch keine Nachrichten. Schreibe die erste Nachricht!
+                    {t('messenger.noMessagesYet')}
                   </div>
                 )}
 
@@ -5192,7 +5192,7 @@ export function Messenger() {
                 Deine Konversationen
               </h3>
               <p className="max-w-sm font-body text-xs text-on-surface-variant">
-                Wähle einen Kontakt oder eine Gruppe aus, um einen direkten, Ende-zu-Ende verschlüsselten Chat zu starten.
+                {t('messenger.pickChatHint')}
               </p>
             </div>
           )}
@@ -5237,7 +5237,7 @@ export function Messenger() {
                 <span>{t('messenger.groupE2eeLabel')}</span>
               </div>
               <p className="text-label-sm">
-                Nach der Erstellung erhältst du einen Einladungslink, den du mit Freunden oder Teammitgliedern teilen kannst.
+                {t('messenger.groupInviteHint')}
               </p>
             </div>
 
@@ -5418,7 +5418,7 @@ export function Messenger() {
 
           <div className="flex-1 overflow-y-auto space-y-1 py-2">
             <div className="text-label-sm font-semibold text-on-surface-variant/70 uppercase tracking-wider px-2 py-1">
-              Wähle einen Kontakt oder eine Gruppe
+              {t('messenger.pickChat')}
             </div>
             {filteredGroups.map((g) => (
               <button

@@ -69,7 +69,11 @@
     "filterPersonal": "Persönlich",
     "filterTeam": "Team",
     "filterServer": "Server-Wartung",
-    "filterNode": "Node"
+    "filterNode": "Node",
+    "addEvent": "Termin hinzufügen",
+    "noEventsToday": "Keine Termine für diesen Tag vorhanden.",
+    "emptyDayTapToCreate": "Keine Termine — Tippen zum Erstellen",
+    "typePersonal": "Persönlich"
   },
   "pageContext": {
     "overview": "Übersicht",
@@ -384,7 +388,8 @@
         "audioInputPrice": "Audio-Eingabe je 1 Mio. Tokens",
         "audioOutputPrice": "Audio-Ausgabe je 1 Mio. Tokens",
         "legacyPaused": "Solange dieser Zugang aktiv ist, nutzt der Sprachmodus weder ElevenLabs noch Pipecat oder das Transkriptionsmodell."
-      }
+      },
+      "geminiSafetyOffHint": "Deaktiviert alle 5 Standard-Sicherheitsfilter (Hassrede, Belästigung, gefährliche Inhalte etc.) auf BLOCK_NONE bei Gemini- und Gemma-Modellen über die Google AI Studio API."
     },
     "profile": {
       "title": "KI-Assistent",
@@ -1337,7 +1342,8 @@
         "done": "Fertig",
         "running": "Läuft …",
         "waiting": "Wartet …"
-      }
+      },
+      "newsSourceMissing": "Für diese Region ist keine Nachrichtenquelle eingerichtet. Es werden keine Lageberichte geschätzt."
     },
     "usage": {
       "title": "KI-Nutzung",
@@ -3339,7 +3345,8 @@
       }
     },
     "audioMicrophoneFallback": "Mikrofon {{number}}",
-    "audioSpeakerFallback": "Lautsprecher {{number}}"
+    "audioSpeakerFallback": "Lautsprecher {{number}}",
+    "confirmDeleteWordHint": "Tippe das Wort exakt ein – Kopieren/Einfügen ist deaktiviert."
   },
   "errorBoundary": {
     "title": "Diese Ansicht konnte nicht geladen werden",
@@ -3596,7 +3603,9 @@
       "purple": "Lila",
       "red": "Rot",
       "yellow": "Gelb"
-    }
+    },
+    "opensInNewTab": "Öffnet in neuem Tab",
+    "noRolesAvailable": "Keine Rollen verfügbar"
   },
   "serverDetail": {
     "showServerOverview": "Server-Übersicht",
@@ -5747,19 +5756,19 @@
       "standardSystemMit": "Systemstandard ({{name}})",
       "fehlt": "{{name}} (nicht gefunden)",
       "ducking": "Ton absenken (Ducking)",
-      "duckingHinweis": "Senkt andere Audioquellen ab, während die KI spricht.",
+      "duckingHinweis": "Senkt Hintergrundgeräusche und Musik ab, während die KI spricht.",
       "verarbeitung": "Mikrofon-Verarbeitung",
-      "verarbeitungHinweis": "Lokale Signaloptimierung.",
+      "verarbeitungHinweis": "Chromiums integrierte WebRTC-Filterreihe zur Beseitigung von Störgeräuschen und Hall in Sprachräumen und Sprachaufnahmen.",
       "echo": "Echounterdrückung",
-      "echoHinweis": "Verhindert Rückkopplungen.",
+      "echoHinweis": "Verhindert akustische Rückkopplungen bei Lautsprechern ohne Kopfhörer.",
       "rauschen": "Rauschunterdrückung",
-      "rauschenHinweis": "Filtert Nebengeräusche.",
+      "rauschenHinweis": "Filtert Hintergrundgeräusche wie Lüfter oder Tastaturanschläge heraus.",
       "autogain": "Automatische Pegelanpassung",
       "autogainHinweis": "Gleicht Lautstärkeunterschiede aus.",
       "verstaerkung": "Verstärkung",
       "verstaerkungHinweis": "Software-Verstärkung des Mikrofons.",
       "testhoeren": "Testhören",
-      "testhoerenHinweis": "Mikrofon zur Überprüfung abhören.",
+      "testhoerenHinweis": "Höre deine Stimme live über den gewählten Lautsprecher ab, um Klangqualität und Pegel zu kontrollieren. Die Echounterdrückung ist im Testlauf deaktiviert, damit deine Stimme nicht ausgefiltert wird.",
       "testhoerenStart": "Testhören starten",
       "testhoerenStopp": "Testhören beenden",
       "testhoerenPegel": "Mikrofonpegel",
@@ -5777,6 +5786,15 @@
       "fehler": "Kamera konnte nicht geöffnet werden.",
       "keineKamera": "Kein Kamerazugriff auf diesem Gerät verfügbar.",
       "hinweisManuell": "Du kannst den 12-stelligen Kopplungscode jederzeit manuell abtippen."
+    },
+    "social": {
+      "freundPlatzhalter": "Benutzername für Freundschaftsanfrage …",
+      "sichtbarkeitFrage": "Wer darf deine Präsenz und Aktivitäten sehen?",
+      "lesebestaetigungenLang": "Lesebestätigungen (Gelesen-Häkchen)",
+      "lesebestaetigungen": "Lesebestätigungen",
+      "gesamtaktivitaet": "Gesamtaktivität",
+      "kontakteHinweis": "Verwalte deine Kontakte, blockierte Personen und stummgeschaltete Unterhaltungen.",
+      "privatsphaereTitel": "Privatsphäre & Sichtbarkeit"
     }
   },
   "popups": {
@@ -5811,7 +5829,11 @@
     "statusExpired": "Abgelaufen",
     "statusInactive": "Inaktiv",
     "understand": "Verstanden",
-    "neverShowAgain": "Nicht mehr anzeigen"
+    "neverShowAgain": "Nicht mehr anzeigen",
+    "markdownHeading": "Überschrift (### )",
+    "markdownList": "Aufzählung (- )",
+    "bodyPlaceholder": "Verfasse den Text der Ankündigung in klarem, menschlichem Ton …",
+    "buttonTextPlaceholder": "z. B. Statusseite öffnen"
   },
   "desktopBadge": {
     "tooltip": "Maunting Smart System Desktop-App herunterladen",
@@ -5920,7 +5942,8 @@
     "muted": "Stumm",
     "speaking": "Spricht",
     "present": "Dabei",
-    "optionsFor": "Optionen für {{name}}"
+    "optionsFor": "Optionen für {{name}}",
+    "audioBlockedHint": "Dein Browser lässt den Ton erst nach einem Klick zu."
   },
   "social": {
     "status": {
@@ -6439,6 +6462,20 @@
     "unblockTitle": "Blockierung aufheben?",
     "unblockMessage": "Möchtest du {{name}} wieder entsperren? Ihr könnt euch danach wieder schreiben.",
     "contactBlocked": "Du hast diesen Kontakt blockiert.",
-    "contactBlockedToast": "{{name}} ist blockiert."
+    "contactBlockedToast": "{{name}} ist blockiert.",
+    "noContactsOrGroups": "Keine Kontakte oder Gruppen gefunden.",
+    "noStatusUpdates": "Noch keine Status-Updates von Freunden vorhanden.",
+    "contactActivity": "Aktivität deiner Kontakte",
+    "communitySubtitle": "Öffentliche und private Gruppen mit Einladungslink",
+    "noGroupsJoined": "Noch keine Gruppen beigetreten.",
+    "noMessagesYet": "Noch keine Nachrichten. Schreibe die erste Nachricht!",
+    "pickChatHint": "Wähle einen Kontakt oder eine Gruppe aus, um einen direkten, Ende-zu-Ende verschlüsselten Chat zu starten.",
+    "groupInviteHint": "Nach der Erstellung erhältst du einen Einladungslink, den du mit Freunden oder Teammitgliedern teilen kannst.",
+    "pickChat": "Wähle einen Kontakt oder eine Gruppe"
+  },
+  "databaseManager": {
+    "subtitle": "Verwalte und bearbeite die PostgreSQL-Datenbanken dieses Servers.",
+    "powerUserTitle": "Power-User-Zugang",
+    "powerUserWarning": "Passwort nur jetzt anzeigen. Gilt nur für diese eine Datenbank — kein Cluster-SUPERUSER, kein Zugriff auf andere Kunden-DBs. Nicht in Tickets, Logs oder URLs teilen."
   }
 }

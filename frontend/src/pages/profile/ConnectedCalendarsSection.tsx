@@ -203,7 +203,7 @@ export function ConnectedCalendarsSection() {
                   type="button"
                   onClick={() => setShowAddModal(false)}
                   className="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container"
-                  aria-label="Schließen"
+                  aria-label={t('common.close')}
                 >
                   <X className="w-5 h-5" />
                 </button>

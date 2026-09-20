@@ -132,7 +132,7 @@ export function DangerZoneTab() {
                   autoComplete="off"
                   spellCheck={false}
                 />
-                <p className="text-label-sm text-on-surface-variant mt-1">Tippe das Wort exakt ein – Kopieren/Einfügen ist deaktiviert.</p>
+                <p className="text-label-sm text-on-surface-variant mt-1">{t('profile.confirmDeleteWordHint')}</p>
               </div>
 
               {user?.two_factor_enabled && (

@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+
 export interface DisBadgeProps {
   size?: number;
   showText?: boolean;
@@ -7,13 +9,14 @@ export interface DisBadgeProps {
 const cn = (...classes: any[]) => classes.filter(Boolean).join(' ');
 
 export const DisBadge = ({ size = 24, showText = true, className }: DisBadgeProps) => {
+  const { t } = useTranslation()
   return (
     <a
       href="https://dis.mauntingstudios.de"
       target="_blank"
       rel="noopener noreferrer"
       aria-label="Powered by DIS - Defensive Integration Shield"
-      title="Defensive Integration Shield (Öffnet in neuem Tab)"
+      title={`Defensive Integration Shield (${t('common.opensInNewTab')})`}
       className={cn(
         'inline-flex items-center gap-2 rounded-full border border-ice-300/10 bg-ice-500/10 px-2 py-0.5 backdrop-blur-sm transition-all hover:bg-ice-500/25 hover:border-ice-300/25 cursor-pointer',
         className,

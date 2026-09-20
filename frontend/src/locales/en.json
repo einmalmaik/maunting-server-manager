@@ -69,7 +69,11 @@
     "filterPersonal": "Personal",
     "filterTeam": "Team",
     "filterServer": "Server maintenance",
-    "filterNode": "Node"
+    "filterNode": "Node",
+    "addEvent": "Add event",
+    "noEventsToday": "No events for this day.",
+    "emptyDayTapToCreate": "No events — tap to create one",
+    "typePersonal": "Personal"
   },
   "pageContext": {
     "overview": "Overview",
@@ -384,7 +388,8 @@
         "audioInputPrice": "Audio input per 1M tokens",
         "audioOutputPrice": "Audio output per 1M tokens",
         "legacyPaused": "While this access is active, voice mode does not use ElevenLabs, Pipecat or the transcription model."
-      }
+      },
+      "geminiSafetyOffHint": "Sets all 5 default safety filters (hate speech, harassment, dangerous content and so on) to BLOCK_NONE for Gemini and Gemma models via the Google AI Studio API."
     },
     "profile": {
       "title": "AI assistant",
@@ -1337,7 +1342,8 @@
         "done": "Done",
         "running": "Running …",
         "waiting": "Waiting …"
-      }
+      },
+      "newsSourceMissing": "No news source is set up for this region. No situation reports are estimated."
     },
     "usage": {
       "title": "AI usage",
@@ -3339,7 +3345,8 @@
       }
     },
     "audioMicrophoneFallback": "Microphone {{number}}",
-    "audioSpeakerFallback": "Speaker {{number}}"
+    "audioSpeakerFallback": "Speaker {{number}}",
+    "confirmDeleteWordHint": "Type the word exactly – copy and paste is disabled."
   },
   "errorBoundary": {
     "title": "This view could not be loaded",
@@ -3596,7 +3603,9 @@
       "purple": "Purple",
       "red": "Red",
       "yellow": "Yellow"
-    }
+    },
+    "opensInNewTab": "Opens in a new tab",
+    "noRolesAvailable": "No roles available"
   },
   "serverDetail": {
     "showServerOverview": "Server overview",
@@ -5747,19 +5756,19 @@
       "standardSystemMit": "System default ({{name}})",
       "fehlt": "{{name}} (not found)",
       "ducking": "Lower other audio (ducking)",
-      "duckingHinweis": "Lowers other audio sources while AI speaks.",
+      "duckingHinweis": "Lowers background noise and music while the assistant speaks.",
       "verarbeitung": "Microphone processing",
-      "verarbeitungHinweis": "Local signal optimization.",
+      "verarbeitungHinweis": "Chromium’s built-in WebRTC filter chain, which removes background noise and echo in voice rooms and recordings.",
       "echo": "Echo cancellation",
-      "echoHinweis": "Prevents feedback.",
+      "echoHinweis": "Prevents acoustic feedback on speakers without headphones.",
       "rauschen": "Noise suppression",
-      "rauschenHinweis": "Filters background noise.",
+      "rauschenHinweis": "Filters out background noise such as fans or keystrokes.",
       "autogain": "Automatic gain control",
       "autogainHinweis": "Balances volume differences.",
       "verstaerkung": "Gain",
       "verstaerkungHinweis": "Software gain for microphone.",
       "testhoeren": "Mic test",
-      "testhoerenHinweis": "Listen to microphone to verify.",
+      "testhoerenHinweis": "Listen to your own voice live through the selected speaker to check quality and level. Echo cancellation is off during the test so your voice is not filtered out.",
       "testhoerenStart": "Start mic test",
       "testhoerenStopp": "Stop mic test",
       "testhoerenPegel": "Microphone level",
@@ -5777,6 +5786,15 @@
       "fehler": "Could not open camera.",
       "keineKamera": "No camera access available on this device.",
       "hinweisManuell": "You can manually type the 12-character pairing code at any time."
+    },
+    "social": {
+      "freundPlatzhalter": "Username for the friend request …",
+      "sichtbarkeitFrage": "Who may see your presence and activity?",
+      "lesebestaetigungenLang": "Read receipts (read ticks)",
+      "lesebestaetigungen": "Read receipts",
+      "gesamtaktivitaet": "Total activity",
+      "kontakteHinweis": "Manage your contacts, blocked people and muted conversations.",
+      "privatsphaereTitel": "Privacy & visibility"
     }
   },
   "popups": {
@@ -5811,7 +5829,11 @@
     "statusExpired": "Expired",
     "statusInactive": "Inactive",
     "understand": "Understood",
-    "neverShowAgain": "Don't show again"
+    "neverShowAgain": "Don't show again",
+    "markdownHeading": "Heading (### )",
+    "markdownList": "Bullet list (- )",
+    "bodyPlaceholder": "Write the announcement in clear, human language …",
+    "buttonTextPlaceholder": "e.g. Open status page"
   },
   "desktopBadge": {
     "tooltip": "Download Maunting Smart System desktop app",
@@ -5920,7 +5942,8 @@
     "muted": "Muted",
     "speaking": "Speaking",
     "present": "Present",
-    "optionsFor": "Options for {{name}}"
+    "optionsFor": "Options for {{name}}",
+    "audioBlockedHint": "Your browser only allows sound after a click."
   },
   "social": {
     "status": {
@@ -6439,6 +6462,20 @@
     "unblockTitle": "Unblock?",
     "unblockMessage": "Unblock {{name}}? You will be able to write to each other again.",
     "contactBlocked": "You have blocked this contact.",
-    "contactBlockedToast": "{{name}} is blocked."
+    "contactBlockedToast": "{{name}} is blocked.",
+    "noContactsOrGroups": "No contacts or groups found.",
+    "noStatusUpdates": "No status updates from friends yet.",
+    "contactActivity": "What your contacts are up to",
+    "communitySubtitle": "Public and private groups with an invite link",
+    "noGroupsJoined": "You have not joined a group yet.",
+    "noMessagesYet": "No messages yet. Write the first one!",
+    "pickChatHint": "Pick a contact or a group to start a direct, end-to-end encrypted chat.",
+    "groupInviteHint": "After creating it you get an invite link to share with friends or team members.",
+    "pickChat": "Pick a contact or a group"
+  },
+  "databaseManager": {
+    "subtitle": "Manage and edit this server’s PostgreSQL databases.",
+    "powerUserTitle": "Power user access",
+    "powerUserWarning": "Shown once. Valid for this one database only — no cluster SUPERUSER, no access to other customers’ databases. Do not share it in tickets, logs or URLs."
   }
 }

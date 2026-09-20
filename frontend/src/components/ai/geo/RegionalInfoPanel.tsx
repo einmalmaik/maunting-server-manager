@@ -496,7 +496,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                 <Newspaper className="mx-auto h-5 w-5 text-on-surface-variant/60" aria-hidden="true" />
                 <p className="mt-2 text-xs font-medium text-on-surface">{t('ai.geo.newsUnavailableTitle', 'Keine Nachrichten verfügbar')}</p>
                 <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">
-                  Für diese Region ist keine Nachrichtenquelle eingerichtet. Es werden keine Lageberichte geschätzt.
+                  {t('ai.geo.newsSourceMissing')}
                 </p>
               </div>
             )}

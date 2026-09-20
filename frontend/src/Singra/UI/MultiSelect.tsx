@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Check, ChevronDown } from 'lucide-react'
 
 export interface MultiSelectOption {
@@ -35,6 +36,7 @@ export const MultiSelect = forwardRef<HTMLDivElement, MultiSelectProps>(
     },
     forwardedRef,
   ) {
+    const { t } = useTranslation()
     const [open, setOpen] = useState(false)
     const rootRef = useRef<HTMLDivElement | null>(null)
     const listboxId = useId()
@@ -144,7 +146,7 @@ export const MultiSelect = forwardRef<HTMLDivElement, MultiSelectProps>(
           >
             {options.length === 0 ? (
               <p className="px-3 py-4 text-center text-xs text-on-surface-variant">
-                Keine Rollen verfügbar
+                {t('common.noRolesAvailable')}
               </p>
             ) : (
               options.map((option) => {

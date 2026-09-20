@@ -489,7 +489,7 @@ function SocialEinstellungen() {
   const user = useAuthStore((s) => s.user)
   const updateUser = useAuthStore((s) => s.updateUser)
 
-  // 1. Privatsphäre & Sichtbarkeit
+  // 1. {t('mss.social.privatsphaereTitel')}
   const [privacyLevel, setPrivacyLevel] = useState<'public' | 'friends' | 'private'>(
     (user?.social_privacy as 'public' | 'friends' | 'private') || 'friends',
   )
@@ -729,7 +729,7 @@ function SocialEinstellungen() {
               Freunde & Kontakte
             </h2>
             <p className="text-label-sm text-on-surface-variant mt-0.5">
-              Verwalte deine Kontakte, blockierte Personen und stummgeschaltete Unterhaltungen.
+              {t('mss.social.kontakteHinweis')}
             </p>
           </div>
         </div>
@@ -739,7 +739,7 @@ function SocialEinstellungen() {
           <Input
             value={addUsername}
             onChange={(e) => setAddUsername(e.target.value)}
-            placeholder="Benutzername für Freundschaftsanfrage …"
+            placeholder={t('mss.social.freundPlatzhalter')}
             className="text-xs h-8 flex-1"
             disabled={sendingRequest}
           />
@@ -997,7 +997,7 @@ function SocialEinstellungen() {
         )}
       </section>
 
-      {/* 2. Privatsphäre & Sichtbarkeit */}
+      {/* 2. {t('mss.social.privatsphaereTitel')} */}
       <section className="msm-card p-5 space-y-4" aria-labelledby="social-privacy-title">
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -1005,7 +1005,7 @@ function SocialEinstellungen() {
           </div>
           <div>
             <h2 id="social-privacy-title" className="text-sm font-semibold text-on-surface">
-              Privatsphäre & Sichtbarkeit
+              {t('mss.social.privatsphaereTitel')}
             </h2>
           </div>
         </div>
@@ -1014,7 +1014,7 @@ function SocialEinstellungen() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <span className="text-xs font-medium text-on-surface">Profil-Sichtbarkeit & Status</span>
-              <p className="text-label-sm text-on-surface-variant">Wer darf deine Präsenz und Aktivitäten sehen?</p>
+              <p className="text-label-sm text-on-surface-variant">{t('mss.social.sichtbarkeitFrage')}</p>
             </div>
             <div className="w-full sm:w-64">
               <Dropdown
@@ -1029,13 +1029,13 @@ function SocialEinstellungen() {
 
           <div className="flex items-center justify-between gap-3 pt-2 border-t border-outline-variant/20">
             <div>
-              <span className="text-xs font-medium text-on-surface">Lesebestätigungen (Gelesen-Häkchen)</span>
+              <span className="text-xs font-medium text-on-surface">{t('mss.social.lesebestaetigungenLang')}</span>
               <p className="text-label-sm text-on-surface-variant">Zeigt Kontakten, sobald Nachrichten gelesen wurden.</p>
             </div>
             <Switch
               checked={readReceiptsEnabled}
               onCheckedChange={handleToggleReadReceipts}
-              aria-label="Lesebestätigungen"
+              aria-label={t('mss.social.lesebestaetigungen')}
             />
           </div>
         </div>
@@ -1058,7 +1058,7 @@ function SocialEinstellungen() {
             <span className="text-xs font-bold text-primary font-mono block">
               {formatHours(stats?.active_time_seconds ?? stats?.total_activity_seconds)}
             </span>
-            <span className="text-label-sm text-on-surface-variant">Gesamtaktivität</span>
+            <span className="text-label-sm text-on-surface-variant">{t('mss.social.gesamtaktivitaet')}</span>
           </div>
         </div>
 
@@ -1905,7 +1905,7 @@ function AudioEinstellungen() {
             <div>
               <span className="text-xs font-medium text-on-surface block">{t('mss.audio.ducking', 'Audio-Ducking')}</span>
               <span className="text-label-sm text-on-surface-variant">
-                Senkt Hintergrundgeräusche und Musik ab, während die KI spricht.
+                {t('mss.audio.duckingHinweis')}
               </span>
             </div>
             <Button variant="secondary" size="sm" onClick={() => void duckingTesten()} disabled={duckt}>
@@ -1926,7 +1926,7 @@ function AudioEinstellungen() {
           </h2>
         </div>
         <p className="max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant mb-5">
-          Chromiums integrierte WebRTC-Filterreihe zur Beseitigung von Störgeräuschen und Hall in Sprachräumen und Sprachaufnahmen.
+          {t('mss.audio.verarbeitungHinweis')}
         </p>
 
         <div className="max-w-xl space-y-4">
@@ -1936,7 +1936,7 @@ function AudioEinstellungen() {
                 {t('profile.audioNoiseSuppression', 'Rauschunterdrückung (Noise Suppression)')}
               </span>
               <span className="text-xs text-on-surface-variant">
-                Filtert Hintergrundgeräusche wie Lüfter oder Tastaturanschläge heraus.
+                {t('mss.audio.rauschenHinweis')}
               </span>
             </div>
             <Switch
@@ -1953,7 +1953,7 @@ function AudioEinstellungen() {
                 {t('profile.audioEchoCancellation', 'Echounterdrückung (Echo Cancellation)')}
               </span>
               <span className="text-xs text-on-surface-variant">
-                Verhindert akustische Rückkopplungen bei Lautsprechern ohne Kopfhörer.
+                {t('mss.audio.echoHinweis')}
               </span>
             </div>
             <Switch
@@ -2131,10 +2131,7 @@ function Testhoeren({
         </h2>
       </div>
       <p className="max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant mb-5">
-        {t(
-          'profile.audioTestDescription',
-          'Höre deine Stimme live über den gewählten Lautsprecher ab, um Klangqualität und Pegel zu kontrollieren. Die Echounterdrückung ist im Testlauf deaktiviert, damit deine Stimme nicht ausgefiltert wird.'
-        )}
+        {t('mss.audio.testhoerenHinweis')}
       </p>
 
       <div className="max-w-xl space-y-4">

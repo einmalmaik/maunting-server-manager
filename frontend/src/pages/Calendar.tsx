@@ -674,7 +674,7 @@ export function Calendar() {
       {/* Kalender Steuerleiste */}
       <div className="msm-card p-4 flex flex-col md:flex-row items-center justify-between gap-4">
         <div className="flex items-center gap-2">
-          <Button variant="secondary" size="sm" onClick={handlePrev} aria-label="Zurück">
+          <Button variant="secondary" size="sm" onClick={handlePrev} aria-label={t('common.back')}>
             <ChevronLeft className="w-4 h-4" />
           </Button>
           <Button variant="secondary" size="sm" onClick={handleToday}>
@@ -932,7 +932,7 @@ export function Calendar() {
                       type="button"
                       onClick={() => openCreateModal(date)}
                       className="p-1 rounded-md text-on-surface-variant hover:text-primary hover:bg-surface-container transition-colors"
-                      title="Termin hinzufügen"
+                      title={t('calendar.addEvent')}
                     >
                       <Plus className="w-4 h-4" />
                     </button>
@@ -943,7 +943,7 @@ export function Calendar() {
                       onClick={() => openCreateModal(date)}
                       className="py-2 px-3 rounded-lg border border-dashed border-outline-variant/40 text-xs text-on-surface-variant/50 hover:bg-surface-container/20 cursor-pointer text-center"
                     >
-                      Keine Termine — Tippen zum Erstellen
+                      {t('calendar.emptyDayTapToCreate')}
                     </div>
                   ) : (
                     <div className="space-y-1.5">
@@ -1015,7 +1015,7 @@ export function Calendar() {
             {getEventsForDay(currentDate).length === 0 ? (
               <div className="py-12 text-center text-on-surface-variant">
                 <CalendarIcon className="w-10 h-10 mx-auto opacity-30 mb-2" />
-                <p className="text-sm">Keine Termine für diesen Tag vorhanden.</p>
+                <p className="text-sm">{t('calendar.noEventsToday')}</p>
                 <Button
                   variant="secondary"
                   size="sm"
@@ -1084,7 +1084,7 @@ export function Calendar() {
                 type="button"
                 onClick={() => setIsModalOpen(false)}
                 className="text-on-surface-variant hover:text-on-surface p-1 rounded-md"
-                aria-label="Schließen"
+                aria-label={t('common.close')}
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1109,7 +1109,7 @@ export function Calendar() {
                     }`}
                   >
                     <User className="w-3.5 h-3.5 text-primary" />
-                    Persönlich
+                    {t('calendar.typePersonal')}
                   </button>
                   <button
                     type="button"
