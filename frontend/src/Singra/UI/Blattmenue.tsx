@@ -14,8 +14,9 @@
  * sichere Fläche am unteren Rand, Escape, Klick daneben, Fokusfalle.
  */
 
-import React, { useEffect, useRef } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { MoreVertical } from 'lucide-react'
 
 const FOKUSSIERBAR =
   'button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
@@ -98,6 +99,100 @@ export function Blattmenue({ offen, onSchliessen, titel, children, className = '
       </div>
     </div>,
     document.body,
+  )
+}
+
+/**
+ * Wie der Knopf aussieht, der das Blatt öffnet.
+ *
+ * Zwei Fassungen, weil er an zwei Orten steht: in einer Leiste mit anderen
+ * Knöpfen (`leiste`) und frei über dem Chatbild des Messengers, wo er einen
+ * eigenen Grund braucht, um lesbar zu bleiben (`schwebend`). Eine Fassung mit
+ * durchgereichten Klassen ginge nicht — zwei Tailwind-Klassen derselben
+ * Eigenschaft streiten sich nach Reihenfolge im Stylesheet, nicht nach
+ * Reihenfolge im Attribut, und das Ergebnis wäre Zufall.
+ */
+export type BlattknopfVariante = 'leiste' | 'schwebend'
+
+const KNOPF_KLASSEN: Record<BlattknopfVariante, string> = {
+  // 44 px am Telefon, 36 px am Rechner: kleiner trifft der Daumen nicht mehr
+  // zuverlässig, und ein Menü, das man dreimal antippen muss, ist keins.
+  leiste:
+    'h-11 w-11 sm:h-9 sm:w-9 rounded-lg border border-outline-variant/30 ' +
+    'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60',
+  schwebend:
+    'h-11 w-11 sm:h-8 sm:w-8 rounded-md bg-surface-container-high/85 hover:bg-surface-container-high ' +
+    'backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-primary shadow-sm',
+}
+
+export interface BlattknopfProps {
+  /** Vorgelesen und als Tooltip am Knopf. */
+  label: string
+  /** Überschrift des Blatts; vorgelesen beim Öffnen. */
+  titel: string
+  /**
+   * Die Zeilen. Als Funktion aufgerufen bekommt sie `schliessen` — jede Zeile
+   * schliesst das Blatt selbst, bevor sie ihr Fenster öffnet.
+   */
+  children: React.ReactNode | ((schliessen: () => void) => React.ReactNode)
+  /** Sichtbare Zeile über den Einträgen, z. B. der Name des Chats. */
+  ueberschrift?: string
+  /** Ein anderes Zeichen als die drei Punkte. */
+  icon?: React.ReactNode
+  variante?: BlattknopfVariante
+  disabled?: boolean
+  /** Nur Lage und Abstand — nie Grösse oder Farbe, dafür ist `variante` da. */
+  className?: string
+}
+
+/**
+ * Der Knopf mit seinem Blatt: ein Bauteil statt zweier Einbauten.
+ *
+ * Vorher baute jede Fläche das selbst — Zustand hier, Auslöser dort, Blatt
+ * ganz woanders. Wer eine Zeile hinzufügen wollte, musste drei Stellen finden.
+ * Jetzt steht beides beieinander, und weil `Blattmenue` an `document.body`
+ * zeichnet, darf der Knopf stehen, wo er hingehört.
+ */
+export function Blattknopf({
+  label,
+  titel,
+  children,
+  ueberschrift,
+  icon,
+  variante = 'leiste',
+  disabled,
+  className = '',
+}: BlattknopfProps) {
+  const [offen, setzeOffen] = useState(false)
+  const schliessen = useCallback(() => setzeOffen(false), [])
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setzeOffen(true)}
+        disabled={disabled}
+        aria-haspopup="dialog"
+        aria-expanded={offen}
+        aria-label={label}
+        title={label}
+        className={`inline-flex shrink-0 items-center justify-center transition-colors
+          disabled:opacity-40 disabled:cursor-not-allowed ${KNOPF_KLASSEN[variante]} ${className}`}
+      >
+        {icon ?? <MoreVertical className="w-4 h-4" aria-hidden="true" />}
+      </button>
+
+      <Blattmenue offen={offen} onSchliessen={schliessen} titel={titel}>
+        {ueberschrift && (
+          <div className="px-4 pt-2 pb-1 text-xs font-semibold text-on-surface-variant truncate">
+            {ueberschrift}
+          </div>
+        )}
+        <div className="pb-2">
+          {typeof children === 'function' ? children(schliessen) : children}
+        </div>
+      </Blattmenue>
+    </>
   )
 }
 

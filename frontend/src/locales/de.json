@@ -613,7 +613,8 @@
       "edit": "Nachricht bearbeiten",
       "editHint": "Diese Nachricht und alles danach wird entfernt. Die KI kennt die alte Fassung dann nicht mehr.",
       "editSend": "Neu senden",
-      "reasoningLevel": "Denktiefe"
+      "reasoningLevel": "Denktiefe",
+      "moreSettings": "Weitere Einstellungen dieses Chats"
     },
     "context": {
       "title": "Kontext und Zusammenfassung",
@@ -6219,7 +6220,8 @@
       "resetHint": "Auf das voreingestellte Cyber Grid zurücksetzen",
       "badType": "Wähle eine gültige Bilddatei: JPEG, PNG oder WebP.",
       "tooLarge": "Das Bild ist zu groß. Erlaubt sind 8 MB.",
-      "loadFailed": "Das Bild konnte nicht geladen werden."
+      "loadFailed": "Das Bild konnte nicht geladen werden.",
+      "saveFailed": "Der Hintergrund ließ sich nicht speichern. Der Speicher des Browsers ist voll — meist liegt es an einem zu großen eigenen Bild."
     },
     "friends": {
       "dockTitle": "Kontakte & Chat",

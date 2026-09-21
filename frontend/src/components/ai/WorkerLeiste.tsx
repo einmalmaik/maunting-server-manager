@@ -66,7 +66,9 @@ export function WorkerLeiste() {
 
   return (
     <div
-      className="flex shrink-0 flex-wrap items-center gap-2 border-b border-outline-variant/40 px-3 py-2 sm:px-4"
+      // `relative`: die Leiste steht im Chat über der Hintergrundschicht,
+      // die dort absolut liegt (siehe `features/chatHintergrund`).
+      className="relative flex shrink-0 flex-wrap items-center gap-2 border-b border-outline-variant/40 px-3 py-2 sm:px-4"
       aria-label={t('ai.worker.listLabel')}
     >
       <span className="inline-flex items-center gap-1.5 text-xs font-medium text-on-surface-variant">

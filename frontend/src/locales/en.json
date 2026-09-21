@@ -613,7 +613,8 @@
       "edit": "Edit message",
       "editHint": "This message and everything after it will be removed. The assistant will no longer know the earlier wording.",
       "editSend": "Send again",
-      "reasoningLevel": "Reasoning depth"
+      "reasoningLevel": "Reasoning depth",
+      "moreSettings": "More chat settings"
     },
     "context": {
       "title": "Context and summarization",
@@ -6219,7 +6220,8 @@
       "resetHint": "Reset to the default cyber grid",
       "badType": "Choose a valid image file: JPEG, PNG or WebP.",
       "tooLarge": "The image is too large. 8 MB is the limit.",
-      "loadFailed": "The image could not be loaded."
+      "loadFailed": "The image could not be loaded.",
+      "saveFailed": "The background could not be saved. The browser's storage is full — usually an oversized custom image."
     },
     "friends": {
       "dockTitle": "Contacts & chat",
