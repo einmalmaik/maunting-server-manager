@@ -6218,7 +6218,8 @@
       "resetHint": "Reset to the default cyber grid",
       "badType": "Choose a valid image file: JPEG, PNG or WebP.",
       "tooLarge": "The image is too large. 8 MB is the limit.",
-      "loadFailed": "The image could not be loaded."
+      "loadFailed": "The image could not be loaded.",
+      "saveFailed": "The background could not be saved. The browser's storage is full — usually an oversized custom image."
     },
     "friends": {
       "dockTitle": "Contacts & chat",

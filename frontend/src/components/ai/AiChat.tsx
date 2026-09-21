@@ -24,6 +24,7 @@ import {
   writeAiReasoningChoice,
 } from '@/lib/aiChatPreferences'
 import { browserWahlInsKontoUebernehmen } from '@/lib/aiProviderKonto'
+import { ChatHintergrund, ChatHintergrundKnopf } from '@/features/chatHintergrund'
 import { useAuthStore } from '@/stores/authStore'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
@@ -1062,7 +1063,9 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
       }}
     >
       <section
-        className="flex min-h-0 flex-1 flex-col overflow-hidden"
+        // `relative` trägt die Hintergrundschicht weiter unten; ohne das
+        // spannte sie sich über den nächsten positionierten Vorfahren auf.
+        className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
         aria-label={t('ai.chat.title')}
       onDragEnter={(event) => {
         if (!canAttach || busy) return
@@ -1085,7 +1088,12 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
         void uploadAttachment(event.dataTransfer.files?.[0])
       }}
     >
-      {/* ── Kopfzeile: Provider, Denkschritte, Autonomie, Skills ───────── */}
+      {/* ── Der Hintergrund: dieselbe Schicht wie im Messenger ─────────── */}
+      <ChatHintergrund bereich="ki" />
+
+      {/* ── Kopfzeile: Provider, Denkschritte, Autonomie, Skills ─────────
+          `sticky` ist eine Position und liegt damit von selbst über der
+          Schicht; ihr undurchsichtiger Grund deckt sie dort ab. */}
       <header className="flex flex-nowrap items-center gap-1.5 sm:gap-2 border-b border-outline-variant/30 bg-surface-container-low px-2.5 py-2 sm:px-4 sm:py-2.5 shrink-0 sticky top-0 z-20 overflow-x-auto no-scrollbar">
         <div className="w-40 sm:w-56 max-w-[240px] shrink-0">
           <Dropdown
@@ -1176,6 +1184,12 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
             </button>
           )}
 
+          {/* Der Hintergrund gilt für den ganzen KI-Bereich — Guardian-,
+              Worker- und Aufgabenfenster sehen dieselbe Wahl. Der Einstieg
+              steht trotzdem nur hier: der Chat ist die Fläche, auf der man
+              ihn am längsten ansieht. */}
+          <ChatHintergrundKnopf bereich="ki" />
+
           <Button
             type="button"
             variant="ghost"
@@ -1196,7 +1210,7 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
 
       {/* ── Aktive Prozesse im 3-Spalten-Kommandozentrum ── */}
       {geoOpen && (
-        <div className="hidden shrink-0 px-3 pt-2.5 lg:block">
+        <div className="relative hidden shrink-0 px-3 pt-2.5 lg:block">
           <ActiveProcessesCard />
         </div>
       )}
@@ -1204,7 +1218,8 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
       {/* ── Verlauf ───────────────────────────────────────────────────── */}
       <div
         ref={verlaufRef}
-        className="relative min-h-0 flex-1 overflow-y-auto bg-surface"
+        // Ohne eigenen Grund: hier scheint der Chat-Hintergrund durch.
+        className="relative min-h-0 flex-1 overflow-y-auto"
         aria-live="polite"
         onScroll={(event) => {
           const { scrollTop, scrollHeight, clientHeight } = event.currentTarget
@@ -1400,7 +1415,7 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
       </div>
 
       {/* ── Eingabe ───────────────────────────────────────────────────── */}
-      <form className="shrink-0 border-t border-outline-variant/40 px-2.5 py-2 sm:px-4 sm:py-3 bg-surface" onSubmit={send}>
+      <form className="relative shrink-0 border-t border-outline-variant/40 px-2.5 py-2 sm:px-4 sm:py-3 bg-surface" onSubmit={send}>
         {/* Der Hinweis steht ueber dem Eingabefeld, nicht in einer
             Einstellungsseite: er soll dort auftauchen, wo die Entscheidung
             Folgen hat — bevor jemand etwas Persoenliches tippt. */}

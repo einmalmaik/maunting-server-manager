@@ -260,7 +260,7 @@ describe('GuardianAnsicht', () => {
 
     zeichnen()
 
-    fireEvent.click(await screen.findByRole('button', { name: /Übernehmen/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /übernehmen/i }))
     await waitFor(() => expect(aiApi.takeOverGuardian).toHaveBeenCalledTimes(1))
     await waitFor(() => {
       expect(screen.getByTestId('standort')).toHaveTextContent(/^\/ai$/)
@@ -274,7 +274,7 @@ describe('GuardianAnsicht', () => {
 
     zeichnen()
 
-    fireEvent.click(await screen.findByRole('button', { name: /Übernehmen/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /übernehmen/i }))
     await waitFor(() => expect(aiApi.takeOverGuardian).toHaveBeenCalledTimes(1))
     expect(screen.getByTestId('standort')).toHaveTextContent('/ai?ansicht=guardian')
   })

@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { aiApi, type AiTaskEntry, type AiTaskWrite } from '@/api/ai'
 import { SanitizedApiError } from '@/api/client'
 import { Button, DateTimePicker, Dropdown, type DropdownOption, Switch } from '@/Singra/UI'
+import { ChatHintergrund } from '@/features/chatHintergrund'
 import { useAuthStore } from '@/stores/authStore'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
@@ -255,8 +256,11 @@ export function AufgabenAnsicht() {
   const leer = aufgaben.length === 0 && !laedt
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-outline-variant/40 bg-surface-container-lowest">
-      <header className="flex shrink-0 items-center gap-2 border-b border-outline-variant/40 px-4 py-3">
+    <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-outline-variant/40 bg-surface-container-lowest">
+      {/* Derselbe Hintergrund wie im KI-Chat — eine Wahl für den Bereich. */}
+      <ChatHintergrund bereich="ki" />
+
+      <header className="relative flex shrink-0 items-center gap-2 border-b border-outline-variant/40 px-4 py-3">
         <CalendarClock className="h-4 w-4 shrink-0 text-secondary" aria-hidden="true" />
         <div className="min-w-0">
           <h2 className="truncate font-headline text-sm font-semibold text-on-surface">
@@ -286,7 +290,7 @@ export function AufgabenAnsicht() {
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="relative min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-3xl space-y-3 px-3 py-6 sm:px-4">
           {formular && (
             <form

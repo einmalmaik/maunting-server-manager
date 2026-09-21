@@ -247,11 +247,7 @@ import { siegelAktiv } from '@/services/lokaleVersiegelung'
 import { useMessengerSperre } from '@/services/messengerSperre'
 import { StoryViewerModal, type StoryReplyContext } from '@/components/social/StoryViewerModal'
 import { GroupPermissionsModal } from '@/components/social/GroupPermissionsModal'
-import {
-  type ChatWallpaperConfig,
-  loadChatWallpaperConfig,
-} from '@/components/social/ChatWallpaper'
-import { ChatWallpaperModal } from '@/components/social/ChatWallpaperModal'
+import { ChatHintergrund, ChatHintergrundDialog } from '@/features/chatHintergrund'
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
 import { useMessengerNotificationStore, PINS_MAX } from '@/stores/messengerNotificationStore'
@@ -635,8 +631,9 @@ export function Messenger() {
   // Double-import prevention state for shared notes & calendar entries
   const [importedAttachmentIds, setImportedAttachmentIds] = useState<Set<string>>(() => new Set())
 
-  // Chat Wallpaper state (MSM Heimisch default or custom)
-  const [wallpaperConfig, setWallpaperConfig] = useState<ChatWallpaperConfig>(() => loadChatWallpaperConfig())
+  // Der Chat-Hintergrund liegt im gemeinsamen Modul (`features/chatHintergrund`):
+  // die Schicht liest ihre Wahl selbst und hört auf Änderungen, hier steht nur
+  // noch, ob das Einstellungsfenster offen ist.
   const [isWallpaperModalOpen, setIsWallpaperModalOpen] = useState(false)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -5398,42 +5395,8 @@ export function Messenger() {
             </div>
           )}
 
-          {/* Chat Wallpaper Background Layer (Cyber / Petrol / Midnight / Minimal / Custom) */}
-          <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
-            {wallpaperConfig.preset === 'cyber' && (
-              <div
-                className="absolute inset-0 opacity-20"
-                style={{
-                  backgroundImage: 'radial-gradient(#06b6d4 1.2px, transparent 1.2px)',
-                  backgroundSize: '16px 16px',
-                }}
-              />
-            )}
-            {wallpaperConfig.preset === 'petrol' && (
-              <div className="absolute inset-0 bg-gradient-to-br from-[#06181d] via-[#092228] to-[#040e11]" />
-            )}
-            {wallpaperConfig.preset === 'midnight' && (
-              <div className="absolute inset-0 bg-gradient-to-br from-[#0c1322] via-[#090e1a] to-[#040810]" />
-            )}
-            {wallpaperConfig.preset === 'minimal' && (
-              <div className="absolute inset-0 bg-surface-container-lowest" />
-            )}
-            {wallpaperConfig.preset === 'custom' && wallpaperConfig.customDataUrl && (
-              <img
-                src={wallpaperConfig.customDataUrl}
-                alt=""
-                className="w-full h-full object-cover"
-              />
-            )}
-
-            {/* Configurable Dimming Layer for Text Readability */}
-            {wallpaperConfig.dimLevel > 0 && (
-              <div
-                className="absolute inset-0 bg-black"
-                style={{ opacity: wallpaperConfig.dimLevel / 100 }}
-              />
-            )}
-          </div>
+          {/* Der Chat-Hintergrund — dieselbe Schicht wie im KI-Bereich. */}
+          <ChatHintergrund bereich="messenger" />
 
           {isChatOpen ? (
             <>
@@ -7054,12 +7017,11 @@ export function Messenger() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      {/* Chat Wallpaper Customization Modal */}
-      <ChatWallpaperModal
-        open={isWallpaperModalOpen}
-        onOpenChange={setIsWallpaperModalOpen}
-        currentConfig={wallpaperConfig}
-        onSaveConfig={(newCfg) => setWallpaperConfig(newCfg)}
+      {/* Das Hintergrundfenster — dasselbe, das der KI-Chat öffnet. */}
+      <ChatHintergrundDialog
+        bereich="messenger"
+        offen={isWallpaperModalOpen}
+        onOffenChange={setIsWallpaperModalOpen}
       />
 
       {/* Design-DNA Mute Dialog */}
