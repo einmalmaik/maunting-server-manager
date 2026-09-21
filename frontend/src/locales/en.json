@@ -5877,7 +5877,7 @@
       "updateAvailableVersion": "Version v{{version}} is available.",
       "updateCheckError": "Could not check for updates.",
       "updateUpToDate": "Maunting Smart System is up to date.",
-      "checkingUpdates": "Checking...",
+      "checkingUpdates": "Checking …",
       "checkForUpdates": "Check for updates"
     },
     "schliessen": {

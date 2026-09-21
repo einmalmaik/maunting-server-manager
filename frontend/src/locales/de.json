@@ -5877,7 +5877,7 @@
       "updateAvailableVersion": "Version v{{version}} ist verfügbar.",
       "updateCheckError": "Konnte nicht nach Updates suchen.",
       "updateUpToDate": "Maunting Smart System ist auf dem neuesten Stand.",
-      "checkingUpdates": "Prüft...",
+      "checkingUpdates": "Prüft …",
       "checkForUpdates": "Auf Updates prüfen"
     },
     "schliessen": {
