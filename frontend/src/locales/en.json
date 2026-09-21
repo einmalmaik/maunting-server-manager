@@ -613,7 +613,8 @@
       "edit": "Edit message",
       "editHint": "This message and everything after it will be removed. The assistant will no longer know the earlier wording.",
       "editSend": "Send again",
-      "reasoningLevel": "Reasoning depth"
+      "reasoningLevel": "Reasoning depth",
+      "moreSettings": "More chat settings"
     },
     "context": {
       "title": "Context and summarization",

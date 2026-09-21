@@ -613,7 +613,8 @@
       "edit": "Nachricht bearbeiten",
       "editHint": "Diese Nachricht und alles danach wird entfernt. Die KI kennt die alte Fassung dann nicht mehr.",
       "editSend": "Neu senden",
-      "reasoningLevel": "Denktiefe"
+      "reasoningLevel": "Denktiefe",
+      "moreSettings": "Weitere Einstellungen dieses Chats"
     },
     "context": {
       "title": "Kontext und Zusammenfassung",

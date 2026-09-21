@@ -15,8 +15,10 @@
  * </section>
  * ```
  *
- * und irgendwo einen Einstieg: `<ChatHintergrundKnopf bereich="ki" />` oder,
- * wo das Haus eine eigene Menüzeile hat, `ChatHintergrundDialog` direkt.
+ * und irgendwo einen Einstieg. Der sieht auf beiden Flächen gleich aus: eine
+ * Zeile im Blattmenü (`Blatteintrag`, Beschriftung `social.wallpaper.title`),
+ * die das Menü schliesst und `ChatHintergrundDialog` öffnet — das Fenster
+ * gehört dabei **neben** das Menü, nicht hinein, sonst verschwindet es mit ihm.
  */
 export {
   CHAT_HINTERGRUND_EVENT,
@@ -31,7 +33,6 @@ export {
 
 export { ChatHintergrund, HintergrundFlaeche, useChatHintergrund } from './ChatHintergrund'
 export { ChatHintergrundDialog, type ChatHintergrundDialogProps } from './ChatHintergrundDialog'
-export { ChatHintergrundKnopf } from './ChatHintergrundKnopf'
 export {
   HINTERGRUND_VORLAGEN,
   STANDARD_VORLAGE,

@@ -15,6 +15,7 @@ import {
   VoiceRecordingBar,
   Blattmenue,
   Blatteintrag,
+  Blattknopf,
   type ChatInputBarRef,
 } from '@/Singra/UI'
 import {
@@ -59,7 +60,6 @@ import {
   Star,
   Pin,
   PinOff,
-  MoreVertical,
   Archive,
   ArchiveRestore,
   ChevronDown,
@@ -681,7 +681,6 @@ export function Messenger() {
   const [verfallSekunden, setVerfallSekunden] = useState(0)
   const [verfallOffen, setVerfallOffen] = useState(false)
   /** Das Menü hinter den drei Punkten in der Chat-Kopfzeile. */
-  const [chatMenueOffen, setChatMenueOffen] = useState(false)
   /** Chats mit ungesendetem Text, für die Vorschau in der Liste. */
   const [entwuerfe, setEntwuerfe] = useState<Record<string, string>>({})
 
@@ -5598,15 +5597,136 @@ export function Messenger() {
                     <Search className="w-4 h-4" />
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setChatMenueOffen(true)}
-                    className="flex items-center justify-center rounded-md h-11 w-11 sm:h-8 sm:w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-primary shadow-sm"
-                    title="Mehr"
-                    aria-label={t('messenger.moreChatSettings')}
+                  <Blattknopf
+                    variante="schwebend"
+                    label={t('messenger.moreChatSettings')}
+                    titel={activeGroup ? activeGroup.name : activeContact?.username || t('messenger.chat')}
+                    ueberschrift={activeGroup ? activeGroup.name : activeContact?.username}
                   >
-                    <MoreVertical className="w-4 h-4" />
-                  </button>
+                    {(schliessen) => (
+                      <>
+                      {blindMailboxId && (
+                        <Blatteintrag
+                          icon={isChatMuted(blindMailboxId) ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
+                          label={isChatMuted(blindMailboxId) ? t('messenger.unmute') : t('messenger.mute')}
+                          onClick={() => {
+                            schliessen()
+                            setIsMuteModalOpen(true)
+                          }}
+                        />
+                      )}
+                      <Blatteintrag
+                        icon={<Timer className="w-4 h-4" />}
+                        label={t('messenger.disappearingMessages')}
+                        hinweis={stufenLabel(verfallSekunden > 0 ? verfallSekunden : 0, t)}
+                        onClick={() => {
+                          schliessen()
+                          setVerfallOffen(true)
+                        }}
+                      />
+                      {activeContact && activeContact.isFriend && (
+                        <Blatteintrag
+                          icon={<Video className="w-4 h-4" />}
+                          label={t('messenger.videoCall')}
+                          onClick={async () => {
+                            schliessen()
+                            try {
+                              await useCallStore.getState().initiateCall(
+                                {
+                                  userId: activeContact.userId,
+                                  username: activeContact.username,
+                                  avatarUrl: activeContact.avatarUrl,
+                                },
+                                'video',
+                              )
+                            } catch (err: any) {
+                              toast.error(err?.message || t('messenger.callStartFailedSingle'))
+                            }
+                          }}
+                        />
+                      )}
+                      <Blatteintrag
+                        icon={<ImageIcon className="w-4 h-4" />}
+                        label={t('social.wallpaper.title')}
+                        onClick={() => {
+                          schliessen()
+                          setIsWallpaperModalOpen(true)
+                        }}
+                      />
+
+                      {activeGroup && (
+                        <>
+                          <Blatteintrag
+                            icon={<Share2 className="w-4 h-4" />}
+                            label={t('messenger.copyInvite')}
+                            onClick={() => {
+                              schliessen()
+                              handleCopyInviteLink(activeGroup)
+                            }}
+                          />
+                          {(activeGroup.owner_user_id === currentUserId || activeGroup.role === 'admin') && (
+                            <>
+                              <Blatteintrag
+                                icon={<ImagePlus className="w-4 h-4" />}
+                                label={t('messenger.changeGroupLogo')}
+                                disabled={logoLaedt}
+                                onClick={() => {
+                                  schliessen()
+                                  gruppenLogoInputRef.current?.click()
+                                }}
+                              />
+                              <Blatteintrag
+                                icon={<Shield className="w-4 h-4" />}
+                                label={t('messenger.manageGroupRoles')}
+                                onClick={() => {
+                                  schliessen()
+                                  setIsGroupPermissionsOpen(true)
+                                }}
+                              />
+                            </>
+                          )}
+                          {activeGroup.owner_user_id === currentUserId ? (
+                            <Blatteintrag
+                              icon={<Trash2 className="w-4 h-4" />}
+                              label={t('messenger.deleteGroup')}
+                              gefahr
+                              onClick={() => {
+                                schliessen()
+                                handleDeleteGroup(activeGroup)
+                              }}
+                            />
+                          ) : (
+                            <Blatteintrag
+                              icon={<LogOut className="w-4 h-4" />}
+                              label={t('messenger.leaveGroup')}
+                              gefahr
+                              onClick={() => {
+                                schliessen()
+                                handleLeaveGroup(activeGroup)
+                              }}
+                            />
+                          )}
+                        </>
+                      )}
+
+                      {activeContact && (
+                        <Blatteintrag
+                          icon={<Ban className="w-4 h-4" />}
+                          label={
+                            isBlocked(activeContact.userId)
+                              ? t('messenger.unblockContact')
+                              : t('messenger.blockContact')
+                          }
+                          gefahr={!isBlocked(activeContact.userId)}
+                          onClick={() => {
+                            schliessen()
+                            setIsBlockConfirmOpen(true)
+                          }}
+                        />
+                      )}
+                      </>
+                    )}
+                  </Blattknopf>
                 </div>
               </div>
 
@@ -6464,139 +6584,6 @@ export function Messenger() {
               setZeilenMenue(null)
             }}
           />
-        </div>
-      </Blattmenue>
-
-      {/* Alles, was nicht in die Kopfzeile passt. Bei 375 px ist dort Platz
-          für drei bis vier Knöpfe, nicht für acht. */}
-      <Blattmenue
-        offen={chatMenueOffen}
-        onSchliessen={() => setChatMenueOffen(false)}
-        titel={activeGroup ? activeGroup.name : activeContact?.username || t('messenger.chat')}
-      >
-        <div className="px-4 pt-2 pb-1 text-xs font-semibold text-on-surface-variant truncate">
-          {activeGroup ? activeGroup.name : activeContact?.username}
-        </div>
-        <div className="pb-2">
-          {blindMailboxId && (
-            <Blatteintrag
-              icon={isChatMuted(blindMailboxId) ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
-              label={isChatMuted(blindMailboxId) ? t('messenger.unmute') : t('messenger.mute')}
-              onClick={() => {
-                setChatMenueOffen(false)
-                setIsMuteModalOpen(true)
-              }}
-            />
-          )}
-          <Blatteintrag
-            icon={<Timer className="w-4 h-4" />}
-            label={t('messenger.disappearingMessages')}
-            hinweis={stufenLabel(verfallSekunden > 0 ? verfallSekunden : 0, t)}
-            onClick={() => {
-              setChatMenueOffen(false)
-              setVerfallOffen(true)
-            }}
-          />
-          {activeContact && activeContact.isFriend && (
-            <Blatteintrag
-              icon={<Video className="w-4 h-4" />}
-              label={t('messenger.videoCall')}
-              onClick={async () => {
-                setChatMenueOffen(false)
-                try {
-                  await useCallStore.getState().initiateCall(
-                    {
-                      userId: activeContact.userId,
-                      username: activeContact.username,
-                      avatarUrl: activeContact.avatarUrl,
-                    },
-                    'video',
-                  )
-                } catch (err: any) {
-                  toast.error(err?.message || t('messenger.callStartFailedSingle'))
-                }
-              }}
-            />
-          )}
-          <Blatteintrag
-            icon={<ImageIcon className="w-4 h-4" />}
-            label={t('social.wallpaper.title')}
-            onClick={() => {
-              setChatMenueOffen(false)
-              setIsWallpaperModalOpen(true)
-            }}
-          />
-
-          {activeGroup && (
-            <>
-              <Blatteintrag
-                icon={<Share2 className="w-4 h-4" />}
-                label={t('messenger.copyInvite')}
-                onClick={() => {
-                  setChatMenueOffen(false)
-                  handleCopyInviteLink(activeGroup)
-                }}
-              />
-              {(activeGroup.owner_user_id === currentUserId || activeGroup.role === 'admin') && (
-                <>
-                  <Blatteintrag
-                    icon={<ImagePlus className="w-4 h-4" />}
-                    label={t('messenger.changeGroupLogo')}
-                    disabled={logoLaedt}
-                    onClick={() => {
-                      setChatMenueOffen(false)
-                      gruppenLogoInputRef.current?.click()
-                    }}
-                  />
-                  <Blatteintrag
-                    icon={<Shield className="w-4 h-4" />}
-                    label={t('messenger.manageGroupRoles')}
-                    onClick={() => {
-                      setChatMenueOffen(false)
-                      setIsGroupPermissionsOpen(true)
-                    }}
-                  />
-                </>
-              )}
-              {activeGroup.owner_user_id === currentUserId ? (
-                <Blatteintrag
-                  icon={<Trash2 className="w-4 h-4" />}
-                  label={t('messenger.deleteGroup')}
-                  gefahr
-                  onClick={() => {
-                    setChatMenueOffen(false)
-                    handleDeleteGroup(activeGroup)
-                  }}
-                />
-              ) : (
-                <Blatteintrag
-                  icon={<LogOut className="w-4 h-4" />}
-                  label={t('messenger.leaveGroup')}
-                  gefahr
-                  onClick={() => {
-                    setChatMenueOffen(false)
-                    handleLeaveGroup(activeGroup)
-                  }}
-                />
-              )}
-            </>
-          )}
-
-          {activeContact && (
-            <Blatteintrag
-              icon={<Ban className="w-4 h-4" />}
-              label={
-                isBlocked(activeContact.userId)
-                  ? t('messenger.unblockContact')
-                  : t('messenger.blockContact')
-              }
-              gefahr={!isBlocked(activeContact.userId)}
-              onClick={() => {
-                setChatMenueOffen(false)
-                setIsBlockConfirmOpen(true)
-              }}
-            />
-          )}
         </div>
       </Blattmenue>
 

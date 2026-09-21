@@ -3,10 +3,10 @@ import { useState } from 'react'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import i18n from '@/i18n'
+import { Blatteintrag, Blattknopf } from '@/Singra/UI'
 
 import { ChatHintergrund } from './ChatHintergrund'
 import { ChatHintergrundDialog } from './ChatHintergrundDialog'
-import { ChatHintergrundKnopf } from './ChatHintergrundKnopf'
 import {
   hintergrundSchluessel,
   ladeChatHintergrund,
@@ -216,13 +216,41 @@ describe('Einstellungsfenster', () => {
   })
 })
 
-describe('Knopf', () => {
-  it('öffnet dasselbe Fenster', () => {
-    render(<ChatHintergrundKnopf bereich="ki" />)
+/**
+ * So bauen beide Flächen den Einstieg ein: eine Zeile im Blattmenü, das
+ * Fenster daneben. Stünde das Fenster **im** Menü, nähme das sich schliessende
+ * Menü es mit — der Klick täte dann sichtbar nichts.
+ */
+describe('Einstieg über das Blattmenü', () => {
+  function Probemenue({ bereich }: { bereich: 'messenger' | 'ki' }) {
+    const [offen, setzeOffen] = useState(false)
+    return (
+      <>
+        <Blattknopf label="Weitere Einstellungen" titel="Chat">
+          {(schliessen) => (
+            <Blatteintrag
+              label={i18n.t('social.wallpaper.title')}
+              onClick={() => {
+                schliessen()
+                setzeOffen(true)
+              }}
+            />
+          )}
+        </Blattknopf>
+        <ChatHintergrundDialog bereich={bereich} offen={offen} onOffenChange={setzeOffen} />
+      </>
+    )
+  }
+
+  it('öffnet das Fenster, und das Menü ist danach zu', () => {
+    render(<Probemenue bereich="ki" />)
     expect(screen.queryByText(i18n.t('social.wallpaper.presets'))).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: i18n.t('social.wallpaper.title') }))
+    fireEvent.click(screen.getByRole('button', { name: 'Weitere Einstellungen' }))
+    fireEvent.click(screen.getByText(i18n.t('social.wallpaper.title')))
 
     expect(screen.getByText(i18n.t('social.wallpaper.presets'))).toBeInTheDocument()
+    // Die Zeile selbst ist weg — das Menü hat zugemacht, das Fenster blieb.
+    expect(screen.getAllByText(i18n.t('social.wallpaper.title'))).toHaveLength(1)
   })
 })

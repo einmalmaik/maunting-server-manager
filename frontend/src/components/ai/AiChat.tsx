@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { AudioLines, CalendarClock, Check, ListPlus, Loader2, Mic, Paperclip, Pencil, Send, ShieldAlert, Sparkles, Square, Trash2, X, Zap } from 'lucide-react'
+import { AudioLines, CalendarClock, Check, Image as ImageIcon, ListPlus, Loader2, Mic, Paperclip, Pencil, Send, ShieldAlert, Sparkles, Square, Trash2, X, Zap } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 
@@ -13,7 +13,7 @@ import {
   type AiRunInfo,
 } from '@/api/ai'
 import { api, SanitizedApiError } from '@/api/client'
-import { Button, Dropdown, Avatar, VoiceRecordingBar } from '@/Singra/UI'
+import { Button, Dropdown, Avatar, Blatteintrag, Blattknopf, VoiceRecordingBar } from '@/Singra/UI'
 import {
   aiChatPreferenceKeys,
   readClosedGeoAnalysis,
@@ -24,7 +24,7 @@ import {
   writeAiReasoningChoice,
 } from '@/lib/aiChatPreferences'
 import { browserWahlInsKontoUebernehmen } from '@/lib/aiProviderKonto'
-import { ChatHintergrund, ChatHintergrundKnopf } from '@/features/chatHintergrund'
+import { ChatHintergrund, ChatHintergrundDialog } from '@/features/chatHintergrund'
 import { useAuthStore } from '@/stores/authStore'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
@@ -140,6 +140,7 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
   const merkSchluessel = useMemo(() => aiChatPreferenceKeys(userId), [userId])
 
   const [skillsModalOpen, setSkillsModalOpen] = useState(false)
+  const [hintergrundOffen, setzeHintergrundOffen] = useState(false)
   const [providers, setProviders] = useState<AiProviderAvailable[]>([])
   const [providerId, setProviderId] = useState<number | null>(null)
   const [attachments, setAttachments] = useState<AiAttachment[]>([])
@@ -1184,24 +1185,38 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
             </button>
           )}
 
-          {/* Der Hintergrund gilt für den ganzen KI-Bereich — Guardian-,
-              Worker- und Aufgabenfenster sehen dieselbe Wahl. Der Einstieg
-              steht trotzdem nur hier: der Chat ist die Fläche, auf der man
-              ihn am längsten ansieht. */}
-          <ChatHintergrundKnopf bereich="ki" />
+          {/* Was selten gebraucht wird, steht im Blattmenü — dasselbe Bauteil,
+              das der Messenger über seinem Chat trägt. Eine Zeile darin ist
+              48 px hoch und beschriftet; die beiden 32-px-Quadrate, die hier
+              vorher standen, waren für den Daumen zu klein und für jeden, der
+              das Zeichen nicht kennt, stumm.
 
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            disabled={busy || empty}
-            onClick={() => void clearHistory()}
-            aria-label={t('ai.chat.clear')}
-            title={t('ai.chat.clear')}
-            className="h-8 w-8 p-0 text-on-surface-variant hover:text-status-destructive transition-colors flex items-center justify-center rounded-lg shrink-0"
-          >
-            <Trash2 className="h-4 w-4" aria-hidden="true" />
-          </Button>
+              Der Hintergrund gilt dabei für den ganzen KI-Bereich: Guardian-,
+              Worker- und Aufgabenfenster sehen dieselbe Wahl. */}
+          <Blattknopf label={t('ai.chat.moreSettings')} titel={t('ai.chat.title')}>
+            {(schliessen) => (
+              <>
+                <Blatteintrag
+                  icon={<ImageIcon className="h-4 w-4" aria-hidden="true" />}
+                  label={t('social.wallpaper.title')}
+                  onClick={() => {
+                    schliessen()
+                    setzeHintergrundOffen(true)
+                  }}
+                />
+                <Blatteintrag
+                  icon={<Trash2 className="h-4 w-4" aria-hidden="true" />}
+                  label={t('ai.chat.clear')}
+                  gefahr
+                  disabled={busy || empty}
+                  onClick={() => {
+                    schliessen()
+                    void clearHistory()
+                  }}
+                />
+              </>
+            )}
+          </Blattknopf>
         </div>
       </header>
 
@@ -1656,6 +1671,13 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
       </form>
     </section>
     <AiSkillModal open={skillsModalOpen} onClose={() => setSkillsModalOpen(false)} />
+    {/* Ausserhalb des Blattmenüs: das schliesst sich beim Klick auf die Zeile
+        und nähme sein Fenster mit, stünde es darin. */}
+    <ChatHintergrundDialog
+      bereich="ki"
+      offen={hintergrundOffen}
+      onOffenChange={setzeHintergrundOffen}
+    />
     </RegionalAnalysisLayout>
   )
 }
