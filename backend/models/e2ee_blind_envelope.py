@@ -16,10 +16,24 @@ class E2eeBlindEnvelope(Base):
 
     CRITICAL PRIVACY & SECURITY INVARIANTS:
     - NO USER LINKAGE: Enthält NIEMALS user_id, recipient_id, team_id, IP-Adressen oder Absenderdaten.
-    - BLINDE ADRESSIERUNG: Adressierung erfolgt ausschließlich über den blind_mailbox_id Hash,
-      den nur die beteiligten Parteien kryptographisch aus ihren Schlüsseln berechnen können.
+    - BLINDE ADRESSIERUNG: Adressierung erfolgt ausschließlich über den blind_mailbox_id Hash.
     - DIS ENVELOPE: Der Server speichert und leitet reine DIS-Ciphertext-Umschläge weiter.
       Kein Klartext und keine Metadaten existieren in der Datenbank.
+
+    Was die Kennung **nicht** ist, und das ist wichtig: kein Geheimnis. Bis
+    09/2026 stand hier, nur die beteiligten Parteien könnten sie
+    „kryptographisch aus ihren Schlüsseln berechnen". Das stimmte nie — sie ist
+    `sha256("msm:dm:<min>:<max>")` beziehungsweise `sha256("msm:group:<id>")`
+    und damit aus zwei kleinen Ganzzahlen nachrechenbar. Sie verbirgt die
+    Teilnehmer vor dem *Datenbankblick*, nicht vor jemandem, der sie raten
+    kann.
+
+    Die Schranke ist deshalb die Berechtigungsprüfung, nicht die Kennung:
+    `SocialService.assert_mailbox_participant` steht im Lese-, Schreib- und
+    Löschpfad. Ohne sie war jede Mailbox für jedes angemeldete Konto
+    aufzählbar, samt Zeitstempeln und dem Klartextkopf jedes
+    Double-Ratchet-Umschlags — also dem vollständigen Sozialgraphen. Wer die
+    Prüfung an einem neuen Pfad vergisst, nimmt sie ganz weg.
     """
 
     __tablename__ = "e2ee_blind_envelopes"

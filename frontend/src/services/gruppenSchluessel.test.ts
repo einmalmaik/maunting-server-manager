@@ -83,6 +83,7 @@ vi.mock('@/api/calls', () => ({ sendeRaumSchluessel: async () => undefined }))
 import {
   GRUPPE_PREFIX,
   entschluesseleGruppenUmschlag,
+  erzeugeGruppenSchluessel,
   fordereGruppenSchluessel,
   setzeGruppenAblageFuerTest,
   verarbeiteGruppenSteuerung,
@@ -124,6 +125,9 @@ function neueAblage(): TestAblage {
     async schreibe(eintrag) {
       keys.set(`${eintrag.groupId}:${eintrag.keyId}`, eintrag)
       aktuelle.set(eintrag.groupId, eintrag.keyId)
+    },
+    async schreibeNebenher(eintrag) {
+      keys.set(`${eintrag.groupId}:${eintrag.keyId}`, eintrag)
     },
     async kennstAnfrage(groupId, kennung) {
       return beantwortet.has(`${groupId}:${kennung}`)
@@ -631,5 +635,49 @@ describe('gruppenSchluessel', () => {
 
     expect(carol.ablage.anzahl()).toBe(0)
     expect((await entschluesseleGruppenUmschlag(GRUPPE, umschlag)).art).toBe('kein-schluessel')
+  })
+
+  /**
+   * Ankommen ja, verdrängen nein.
+   *
+   * Bis 09/2026 gewann der zuletzt eingetroffene Schlüssel. Carol konnte Alice
+   * damit einen unterschieben, den nur sie kennt: Alice verschlüsselte ab da
+   * gegen ihn, Bob las nur noch „Verschlüsselte Nachricht", und für Alice sah
+   * alles richtig aus — ihr eigener Tab konnte ja alles lesen.
+   */
+  it('lässt einen zugestellten Schlüssel den aktuellen nicht verdrängen', async () => {
+    const ersterUmschlag = await sende(alice, alle, 'von Alice')
+    const alicesKeyId = ersterUmschlag.slice(GRUPPE_PREFIX.length).split('.')[0]
+    await lies(bob, alle)
+
+    // Carol münzt einen eigenen und stellt ihn ausschliesslich Alice zu.
+    const { keyId, schluessel } = await erzeugeGruppenSchluessel()
+    const untergeschoben = JSON.stringify({
+      typ: 'group_key',
+      v: 1,
+      groupId: GRUPPE,
+      keyId,
+      schluessel: Buffer.from(schluessel).toString('base64'),
+      // Dieselbe Mitgliedschaft wie Alices Schlüssel — sonst rotierte Alice
+      // beim nächsten Senden ohnehin von selbst.
+      mitglieder: alle,
+    })
+
+    aktiviere(alice)
+    await verarbeiteGruppenSteuerung(kontext(alice, alle), untergeschoben)
+
+    // Alice schreibt weiter mit ihrem eigenen Schlüssel. Ohne Rotation geht
+    // dabei nur ein Umschlag raus, und der bekommt genau `naechsteId` — der
+    // Lesestand muss also eins davor liegen.
+    const stand = naechsteId - 1
+    const zweiterUmschlag = await sende(alice, alle, 'weiter von Alice')
+    expect(zweiterUmschlag.slice(GRUPPE_PREFIX.length).split('.')[0]).toBe(alicesKeyId)
+
+    // Und Bob liest sie, ohne nachfordern zu müssen.
+    expect(await lies(bob, alle, stand)).toEqual({ texte: ['weiter von Alice'], unlesbar: 0 })
+
+    // Abgelegt ist Carols Schlüssel trotzdem: käme eine Nachricht damit, wäre
+    // sie lesbar. Verworfen wird nur sein Anspruch, der aktuelle zu sein.
+    expect(await alice.ablage.lies(GRUPPE, keyId)).not.toBeNull()
   })
 })

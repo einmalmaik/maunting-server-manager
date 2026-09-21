@@ -276,9 +276,13 @@ const zielGeraete = () => [
   {
     device_id: 'zielgeraet',
     public_key: identitaet.empfaengerSchluessel || 'mock-empfaenger-pub-key',
+    signing_public_key: '',
     label: '',
   },
 ]
+
+/** Konten, die laut Verzeichnis einen Signaturschlüssel führen. Je Test gesetzt. */
+let kontenMitSignatur: number[] = []
 
 vi.mock('@/services/e2eeGeraet', () => ({
   eigenesGeraet: vi.fn(async () => ({
@@ -290,6 +294,11 @@ vi.mock('@/services/e2eeGeraet', () => ({
     if (!identitaet.empfaengerSchluessel) throw new MockRecipientKeyMissingError(0)
     return zielGeraete()
   }),
+  // Die Downgrade-Schranke der Absenderbeglaubigung: wer hier drinsteht, führt
+  // einen Signaturschlüssel — eine unsignierte Nutzlast in seinem Namen gehört
+  // dann verworfen. Die Signatur selbst prüft `nutzlastSignatur.test.ts`.
+  kontoNutztSignaturen: vi.fn(async (uid: number) => kontenMitSignatur.includes(uid)),
+  signaturSchluesselVon: vi.fn(async () => null),
   vergessenGeraete: vi.fn(),
   clearGeraeteMemory: vi.fn(),
   onNeuesGeraet: vi.fn(() => () => {}),
@@ -358,6 +367,7 @@ describe('Messenger (Allround Chat)', () => {
     if (typeof localStorage !== 'undefined') localStorage.clear()
     clearSessionChatCache()
     mockEnvelopeCache.clear()
+    kontenMitSignatur = []
     setupUser()
 
     // Standardlage: Geraet entsperrt, Gegenseite hat einen Schluessel.
@@ -2166,6 +2176,88 @@ describe('Messenger (Allround Chat)', () => {
     })
     // Die Nachricht selbst darf NICHT über den Relay gesendet worden sein (nur dr-init wurde versucht)
     expect(socialApi.relayE2eeEnvelope).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * Der Fall, den die Ratchet-Prüfung nicht erreicht.
+   *
+   * Steuerpakete laufen im Direktchat bewusst über den Hybridumschlag und
+   * nicht durch den Ratchet — Begründung in `useKonversation.baueSteuerversand`.
+   * Ein Hybridumschlag trägt keinen Absenderkopf, also stand dort `actor_id`
+   * allein, und die Gegenseite konnte damit meine eigene Nachricht
+   * umschreiben. Die Prüfung gegen `lesung.vonKonto` griff hier nie, weil es
+   * auf diesem Weg kein `vonKonto` gibt.
+   */
+  const hybridFaelschung = async (kontenMitSchluessel: number[]) => {
+    const { decryptE2eeHybridWithKeyring } = await import('@/services/e2eeCrypto')
+    kontenMitSignatur = kontenMitSchluessel
+
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([
+      {
+        id: 701,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: 'ciphertext-meins',
+        created_at: '2026-09-08T12:00:00Z',
+      },
+      {
+        id: 702,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: 'sv-e2ee-hybrid-v1:steuerpaket',
+        created_at: '2026-09-08T12:01:00Z',
+      },
+    ] as any)
+
+    testKlartext.mockImplementation(async () =>
+      JSON.stringify({
+        sender_id: 1,
+        text: 'Meine echte Nachricht',
+        client_uuid: 'meine-msg-1',
+        timestamp: '2026-09-08T12:00:00Z',
+      })
+    )
+
+    vi.mocked(decryptE2eeHybridWithKeyring).mockImplementation(async () =>
+      JSON.stringify({
+        type: 'edit_message',
+        target_client_uuid: 'meine-msg-1',
+        actor_id: 1,
+        new_text: 'Ich habe gekündigt',
+        edited_at: '2026-09-08T12:01:00Z',
+      })
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/chat?userId=101']}>
+        <Messenger />
+      </MemoryRouter>
+    )
+  }
+
+  it('K-2: verwirft ein Steuerpaket über den Hybridpfad, das sich als ich ausgibt', async () => {
+    // Mein Konto führt einen Signaturschlüssel. Eine unsignierte Nutzlast in
+    // meinem Namen ist damit keine Nachsicht wert, sondern eine Fälschung.
+    await hybridFaelschung([1])
+
+    await waitFor(() => {
+      expect(screen.getByText('Meine echte Nachricht')).toBeInTheDocument()
+    })
+    expect(screen.queryByText('Ich habe gekündigt')).not.toBeInTheDocument()
+  })
+
+  /**
+   * Die Gegenprobe, und sie gehört dazu: ohne sie liesse sich nicht
+   * unterscheiden, ob der Test oben die Schranke prüft oder nur ein Gerüst,
+   * das die Bearbeitung ohnehin nie anwendet. Führt niemand einen
+   * Signaturschlüssel, gilt weiterhin der alte Stand — sonst stünde jede
+   * Installation, die seit der Umstellung nicht neu gestartet wurde, ohne
+   * Bearbeiten da.
+   */
+  it('lässt dasselbe Paket durch, solange niemand beglaubigen kann', async () => {
+    await hybridFaelschung([])
+
+    await waitFor(() => {
+      expect(screen.getByText('Ich habe gekündigt')).toBeInTheDocument()
+    })
   })
 })
 

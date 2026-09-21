@@ -14,6 +14,7 @@ Betreiber tatsaechlich geht — von der letzten Revision vor diesem Branch bis z
 Head und zurueck.
 """
 
+import re
 from pathlib import Path
 
 from alembic import command
@@ -115,6 +116,41 @@ def test_the_chain_has_exactly_one_head() -> None:
     heads = script.get_heads()
 
     assert len(heads) == 1, f"Die Migrationskette hat {len(heads)} Heads: {heads}"
+
+
+def test_no_two_revisions_share_an_identifier() -> None:
+    """Zwei Dateien mit derselben Revisionskennung sind kein Schoenheitsfehler.
+
+    Alembic *warnt* nur ("Revision X is present more than once") und macht
+    weiter — mit zwei Eintraegen unter demselben Namen in der Kette. `upgrade
+    head` bricht danach ab, und zwar erst beim Betreiber.
+
+    Entstanden ist genau das beim Zusammenfuehren zweier Zweige: beide legten
+    am selben Tag eine Migration an, beide nannten sie `20260921_01`, beide
+    haengten sie an `20260918_01`. Der Merge fand keinen Konflikt, weil es zwei
+    verschiedene Dateien waren.
+
+    Der Head-Test daneben faellt dabei mit um, aber er nennt das Falsche: er
+    meldet zwei Heads mit identischem Namen, und danach sucht man an der
+    falschen Stelle.
+    """
+    backend_dir = Path(__file__).resolve().parent.parent
+    script = ScriptDirectory.from_config(_config(backend_dir))
+
+    gesehen: dict[str, list[str]] = {}
+    for datei in (backend_dir / "migrations" / "versions").glob("*.py"):
+        quelltext = datei.read_text(encoding="utf-8")
+        treffer = re.search(r"^revision(?::\s*str)?\s*=\s*[\"']([^\"']+)[\"']", quelltext, re.M)
+        if treffer:
+            gesehen.setdefault(treffer.group(1), []).append(datei.name)
+
+    doppelt = {kennung: dateien for kennung, dateien in gesehen.items() if len(dateien) > 1}
+    assert not doppelt, "Doppelte Revisionskennungen: " + "; ".join(
+        f"{kennung} in {', '.join(sorted(dateien))}" for kennung, dateien in sorted(doppelt.items())
+    )
+    assert gesehen, "Keine Migrationen gefunden — der Test misst nichts."
+    # Gegenprobe: was auf der Platte steht, muss Alembic auch geladen haben.
+    assert set(gesehen) == {r.revision for r in script.walk_revisions()}
 
 
 def test_every_revision_is_reachable_from_the_head() -> None:

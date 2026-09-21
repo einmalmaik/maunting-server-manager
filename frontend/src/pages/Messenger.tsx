@@ -144,7 +144,8 @@ import {
   type E2eeIdentity,
 } from '@/services/e2eeIdentity'
 import { logischeUuid, DrZustellungFehlgeschlagenError } from '@/services/ratchetSitzung'
-import { geraeteVon, onNeuesGeraet } from '@/services/e2eeGeraet'
+import { geraeteVon, kontoNutztSignaturen, onNeuesGeraet } from '@/services/e2eeGeraet'
+import { pruefeNutzlast, signiereNutzlast } from '@/services/nutzlastSignatur'
 import { verwirfGruppenSchluessel } from '@/services/gruppenSchluessel'
 import {
   entferneLokaleNachricht,
@@ -165,7 +166,6 @@ import {
   istSteuerpaket,
   neueBezugstafel,
   neueSammeltafel,
-  type Bezugsziel,
 } from '@/services/nachrichtBezug'
 import {
   anheftung,
@@ -1557,7 +1557,7 @@ export function Messenger() {
       } else if (activeGroup) {
         const member = (activeGroup.members ?? []).find((m) => Number(m.user_id) === peerId)
         if (member) {
-          const name = member.username || member.display_name || t('messenger.thisContact')
+          const name = member.username || t('messenger.thisContact')
           zeigeSystemzeile(
             t('messenger.newDeviceDetected', {
               name,
@@ -1658,7 +1658,17 @@ export function Messenger() {
       typeof crypto !== 'undefined' && crypto.randomUUID
         ? crypto.randomUUID()
         : 'ctrl-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9)
-    const payload = JSON.stringify({ actor_id: currentUserId, ...payloadObj, client_uuid: clientUuid })
+    // Steuerpakete laufen im Direktchat über den Hybridumschlag und in der
+    // Gruppe über den geteilten Schlüssel — beides ohne Absenderkopf. Ohne den
+    // Beleg hier konnte die Gegenseite `actor_id` auf eine fremde Kennung
+    // setzen und damit fremde Nachrichten umschreiben oder löschen.
+    const payload = JSON.stringify(
+      await signiereNutzlast(blindMailboxId, currentUserId, {
+        actor_id: currentUserId,
+        ...payloadObj,
+        client_uuid: clientUuid,
+      }),
+    )
     const auftraege = await konversation.baueSteuerversand(
       payload,
       clientUuid,
@@ -1761,6 +1771,67 @@ export function Messenger() {
         try {
           const parsed = JSON.parse(plain)
           if (typeof parsed === 'object' && parsed !== null) {
+            /*
+             * Wer das hier geschrieben hat — einmal beantwortet, für alles was
+             * folgt.
+             *
+             * Zwei Belege können vorliegen: die Ratchet-Sitzung (nur im
+             * Direktchat, nur für Nachrichten) und die Nutzlastsignatur
+             * (überall, auch für Steuerpakete). Widersprechen sie einander,
+             * hat jemand an einer von beiden gedreht.
+             *
+             * `belegterUrheber` bleibt `undefined`, wenn keiner der beiden
+             * greift. Das ist kein Freibrief: jede Auswertung unten prüft
+             * zusätzlich, ob das behauptete Konto beglaubigen *könnte* — wer
+             * es kann, muss es auch.
+             */
+            const beleg = await pruefeNutzlast(currentMid, parsed as Record<string, unknown>)
+            if (beleg.art === 'gefaelscht') {
+              console.warn(
+                '[Messenger] Dropping payload with invalid sender signature, claimed:',
+                beleg.behauptet,
+              )
+              continue
+            }
+            const ratchetUrheber = lesung.art === 'klartext' ? lesung.vonKonto : undefined
+            if (
+              beleg.art === 'geprueft' &&
+              ratchetUrheber !== undefined &&
+              Number(ratchetUrheber) !== beleg.vonKonto
+            ) {
+              console.warn(
+                '[Messenger] Dropping payload: signature and ratchet disagree on sender',
+              )
+              continue
+            }
+            const belegterUrheber =
+              beleg.art === 'geprueft' ? beleg.vonKonto : ratchetUrheber
+
+            /**
+             * Der Urheber, gegen eine Behauptung aus der Nutzlast geprüft.
+             *
+             * `null` heißt verwerfen: entweder widerspricht die Behauptung dem
+             * Beleg, oder sie nennt ein Konto, das beglaubigen könnte und es
+             * hier nicht tut — das wäre der Weg, die Prüfung einfach
+             * wegzulassen.
+             */
+            const urheberVon = async (
+              behauptetRoh: unknown,
+            ): Promise<number | undefined | null> => {
+              const behauptet =
+                behauptetRoh === undefined || behauptetRoh === null
+                  ? undefined
+                  : Number(behauptetRoh)
+              if (belegterUrheber !== undefined) {
+                if (behauptet !== undefined && behauptet !== Number(belegterUrheber)) return null
+                return Number(belegterUrheber)
+              }
+              if (behauptet !== undefined && behauptet > 0) {
+                if (await kontoNutztSignaturen(behauptet)) return null
+              }
+              return behauptet
+            }
+
             // 1. Read receipt control packet
             if (parsed.type === 'read_receipt') {
               const readUpTo = Number(parsed.read_up_to_id || 0)
@@ -1795,22 +1866,11 @@ export function Messenger() {
             // 2. Edit message control packet
             if (parsed.type === 'edit_message') {
               if (parsed.new_text) {
-                if (
-                  activeContact &&
-                  lesung.vonKonto !== undefined &&
-                  parsed.actor_id !== undefined &&
-                  Number(parsed.actor_id) !== Number(lesung.vonKonto)
-                ) {
+                const urheber = await urheberVon(parsed.actor_id ?? parsed.sender_id)
+                if (urheber === null) {
                   console.warn('[Messenger] Dropping edit packet with forged actor_id:', parsed.actor_id)
                   continue
                 }
-                const urheber =
-                  lesung.vonKonto ??
-                  (parsed.actor_id !== undefined
-                    ? Number(parsed.actor_id)
-                    : parsed.sender_id !== undefined
-                      ? Number(parsed.sender_id)
-                      : (activeContact ? activeContact.userId : undefined))
                 aenderungen.merke(
                   parsed,
                   {
@@ -1825,22 +1885,11 @@ export function Messenger() {
 
             // 3. Delete message control packet
             if (parsed.type === 'delete_message') {
-              if (
-                activeContact &&
-                lesung.vonKonto !== undefined &&
-                parsed.actor_id !== undefined &&
-                Number(parsed.actor_id) !== Number(lesung.vonKonto)
-              ) {
+              const urheber = await urheberVon(parsed.actor_id ?? parsed.sender_id)
+              if (urheber === null) {
                 console.warn('[Messenger] Dropping delete packet with forged actor_id:', parsed.actor_id)
                 continue
               }
-              const urheber =
-                lesung.vonKonto ??
-                (parsed.actor_id !== undefined
-                  ? Number(parsed.actor_id)
-                  : parsed.sender_id !== undefined
-                    ? Number(parsed.sender_id)
-                    : (activeContact ? activeContact.userId : undefined))
               loeschungen.merke(
                 parsed,
                 {
@@ -1853,8 +1902,13 @@ export function Messenger() {
 
             // 4. Reaktion auf eine Nachricht
             if (parsed.type === 'reaction') {
+              const urheber = await urheberVon(parsed.actor_id)
+              if (urheber === null) {
+                console.warn('[Messenger] Dropping reaction with forged actor_id:', parsed.actor_id)
+                continue
+              }
               const zeichen = String(parsed.emoji || '')
-              const wer = Number(parsed.actor_id || 0)
+              const wer = Number(urheber || 0)
               if (zeichen && wer) {
                 reaktionen.ergaenze(parsed, {
                   emoji: zeichen,
@@ -1906,7 +1960,12 @@ export function Messenger() {
             //    Inhalt nicht lesen und deshalb nicht prüfen, wer anheften
             //    durfte. Ohne das Recht bleibt der Umschlag folgenlos.
             if (parsed.type === 'pin_message') {
-              const wer = Number(parsed.actor_id || 0)
+              const urheber = await urheberVon(parsed.actor_id)
+              if (urheber === null) {
+                console.warn('[Messenger] Dropping pin packet with forged actor_id:', parsed.actor_id)
+                continue
+              }
+              const wer = Number(urheber || 0)
               const ziel = String(parsed.target_client_uuid || '')
               const wann = String(parsed.zeitpunkt || env.created_at)
               const geloest = parsed.aktion === 'loesen'
@@ -1942,11 +2001,18 @@ export function Messenger() {
             let isSelf: boolean
 
             if (activeContact) {
-              // Direct Chat (1:1): Die kryptografisch verifizierte Identitaet kommt aus dem
-              // Double-Ratchet-Umschlag (lesung.vonKonto). Nutzlast-Angaben (parsed.sender_id)
-              // duerfen die Identitaet nicht faelschen (K-1).
-              senderId = lesung.vonKonto ?? activeContact.userId
-              if (parsed.sender_id !== undefined && Number(parsed.sender_id) !== Number(senderId)) {
+              /*
+               * Direktchat: die Kennung kommt aus dem Beleg — dem Ratchet oder
+               * der Nutzlastsignatur —, nie aus `parsed.sender_id`.
+               *
+               * Fehlt jeder Beleg, ist die Gegenseite die einzig mögliche
+               * Antwort: in dieser Mailbox sitzen genau zwei Menschen, und der
+               * eigene Gesprächsanteil kommt aus dem lokalen Speicher, nicht
+               * von hier. Die Behauptung aus der Nutzlast gewinnt also in
+               * keinem der Fälle.
+               */
+              senderId = Number(belegterUrheber ?? activeContact.userId)
+              if (parsed.sender_id !== undefined && Number(parsed.sender_id) !== senderId) {
                 console.warn(
                   '[Messenger] Dropping message with forged sender_id in direct chat:',
                   parsed.sender_id,
@@ -1956,14 +2022,36 @@ export function Messenger() {
                 continue
               }
               isSelf = Number(senderId) === Number(currentUserId)
-              senderName = isSelf
-                ? t('messenger.you')
-                : (activeContact.username || activeContact.fullName || '')
+              senderName = isSelf ? t('messenger.you') : activeContact.username
             } else if (activeGroup) {
-              // Group Chat: senderId aus Nutzlast, aber senderName wird aus verifizierten
-              // Gruppenmitgliedern aufgeloest, um Display-Name-Spoofing zu verhindern.
-              senderId = Number(parsed.sender_id || 0)
+              /*
+               * Gruppe: der Absender steht in der Nutzlastsignatur.
+               *
+               * Ein Gruppenschlüssel ist geteilt — jedes Mitglied kann jede
+               * Nachricht der Gruppe erzeugen. `parsed.sender_id` war deshalb
+               * nie eine Auskunft, sondern eine Behauptung. Anders als im
+               * Direktchat gibt es hier auch keinen Rückfall: „aus dieser
+               * Gruppe" sagt nichts darüber, von wem.
+               *
+               * Bleibt der Urheber unbelegt, weil das sendende Gerät die
+               * Signatur noch nicht kennt, gilt die Zeile weiterhin — aber nur
+               * solange das behauptete Konto nirgends einen Signaturschlüssel
+               * führt. Diese Prüfung steckt in `urheberVon`.
+               */
+              const urheber = await urheberVon(parsed.sender_id)
+              if (urheber === null) {
+                console.warn(
+                  '[Messenger] Dropping group message with forged sender_id:',
+                  parsed.sender_id,
+                )
+                continue
+              }
+              senderId = Number(urheber ?? 0)
+
               isSelf = Number(senderId) === Number(currentUserId)
+              // Der Anzeigename kommt aus der Mitgliederliste, nie aus der
+              // Nutzlast: sonst stünde unter der richtigen Kennung ein
+              // fremder Name.
               const groupMember = activeGroup.members?.find((m) => Number(m.user_id) === Number(senderId))
               senderName = isSelf
                 ? t('messenger.you')
@@ -3510,7 +3598,11 @@ export function Messenger() {
       if (storyReply) payloadObj.story_reply = storyReply
       if (finalVideoNote) payloadObj.video_note_attachment = finalVideoNote
 
-      const payload = JSON.stringify(payloadObj)
+      // Der Beleg über den Absender. Im Direktchat trägt ihn schon der Ratchet,
+      // in der Gruppe gäbe es ihn sonst nirgends — siehe `nutzlastSignatur.ts`.
+      const payload = JSON.stringify(
+        await signiereNutzlast(targetBlindMailboxId, currentUserId, payloadObj),
+      )
 
       // Welche Umschläge daraus werden, entscheidet `useKonversation`: einer
       // für die Gruppe, oder je Empfängergerät und eigenem Zweitgerät einer aus

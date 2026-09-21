@@ -43,6 +43,17 @@ def _valid_rsa_jwk(marker: str = "A") -> str:
     })
 
 
+def _valid_ecdsa_jwk(marker: str = "A") -> str:
+    """Der Signaturschluessel eines Geraets: ECDSA P-256, oeffentlicher Teil."""
+    return json.dumps({
+        "kty": "EC",
+        "crv": "P-256",
+        "x": marker * 43,
+        "y": marker * 43,
+        "key_ops": ["verify"],
+    })
+
+
 # ── Test 1: Empty State ──
 def test_e2ee_sync_empty_state(client: TestClient, db: Session, owner_user: User):
     """GET /api/social/e2ee/sync returns empty list for user without messages."""
@@ -318,37 +329,151 @@ def test_privater_schluessel_im_geraeteeintrag_wird_abgewiesen(client: TestClien
         app.dependency_overrides.pop(verify_csrf, None)
 
 
-def test_geraetedeckel_verdraengt_das_laengst_stille(db: Session, owner_user: User):
-    """Jedes Gerät kostet alle Gegenstellen eine Kopie je Nachricht.
+def test_voller_geraetedeckel_weist_ab_statt_zu_verdraengen(db: Session, owner_user: User):
+    """Der Deckel verdrängte bis 09/2026 das am längsten stille Gerät — lautlos.
 
-    Verdrängt wird nach `last_seen_at`, nicht nach Anlagedatum: das älteste
-    Gerät ist oft das meistgenutzte, das längst stille dagegen ein Browser, den
-    niemand mehr öffnet.
+    Auf dem verdrängten änderte sich nichts Sichtbares: der Verlauf blieb
+    stehen, die Oberfläche wirkte heil, und es kam nur nie wieder eine
+    Nachricht an. Ein Messenger, der stumm wird und dabei in Ordnung aussieht,
+    ist schlimmer als einer, der sagt was los ist — also entscheidet jetzt der
+    Mensch, welches Gerät weichen soll.
     """
-    from datetime import datetime, timedelta, timezone
-    from models import UserE2eeDevice
-
     for i in range(e2ee_device_service.MAX_GERAETE):
         e2ee_device_service.veroeffentlichen(
             db, owner_user, device_id=f"geraet{i:012d}", public_key_jwk=_valid_rsa_jwk("A")
         )
-    # Das erste Gerät war zuletzt vor einem Jahr da.
-    stilles = (
-        db.query(UserE2eeDevice)
-        .filter_by(user_id=owner_user.id, device_id="geraet000000000000")
-        .first()
-    )
-    stilles.last_seen_at = datetime.now(timezone.utc) - timedelta(days=365)
-    db.commit()
 
-    e2ee_device_service.veroeffentlichen(
-        db, owner_user, device_id="neuesgeraet00000", public_key_jwk=_valid_rsa_jwk("A")
-    )
+    with pytest.raises(e2ee_device_service.GeraetedeckelErreichtError):
+        e2ee_device_service.veroeffentlichen(
+            db, owner_user, device_id="neuesgeraet00000", public_key_jwk=_valid_rsa_jwk("A")
+        )
 
     kennungen = {g["device_id"] for g in e2ee_device_service.geraete(db, owner_user.id)}
     assert len(kennungen) == e2ee_device_service.MAX_GERAETE
-    assert "neuesgeraet00000" in kennungen
-    assert "geraet000000000000" not in kennungen
+    # Und vor allem: kein Bestandsgerät ist dabei verschwunden.
+    assert kennungen == {f"geraet{i:012d}" for i in range(e2ee_device_service.MAX_GERAETE)}
+
+    # Ein Gerät, das schon drinsteht, meldet sich weiterhin ohne Murren — der
+    # Deckel gilt für Neuzugänge, nicht für den Start jedes Morgens.
+    e2ee_device_service.veroeffentlichen(
+        db, owner_user, device_id="geraet000000000000", public_key_jwk=_valid_rsa_jwk("B")
+    )
+
+
+def test_voller_geraetedeckel_antwortet_mit_409(client: TestClient, owner_user: User):
+    """Die Anfrage ist in Ordnung, der Zustand des Kontos steht ihr entgegen."""
+    app.dependency_overrides[get_current_user] = lambda: owner_user
+    app.dependency_overrides[verify_csrf] = lambda: None
+    try:
+        for i in range(e2ee_device_service.MAX_GERAETE):
+            res = client.put("/api/social/e2ee/devices/self", json={
+                "device_id": f"voll{i:012d}",
+                "public_key": _valid_rsa_jwk("A"),
+            })
+            assert res.status_code == 200, res.text
+
+        zuviel = client.put("/api/social/e2ee/devices/self", json={
+            "device_id": "einszuviel000000",
+            "public_key": _valid_rsa_jwk("A"),
+        })
+        assert zuviel.status_code == 409, zuviel.text
+        # Der Text muss den Weg nennen, sonst steht der Benutzer davor und rät.
+        assert "Profil" in zuviel.json()["detail"]
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        app.dependency_overrides.pop(verify_csrf, None)
+
+
+def test_signaturschluessel_wird_veroeffentlicht_und_ausgeliefert(
+    client: TestClient, db: Session, owner_user: User
+):
+    """Ohne ihn beweist in einer Gruppe niemand, dass er der Absender ist.
+
+    Der Gruppenschlüssel ist geteilt: er belegt Mitgliedschaft, nie Identität.
+    Die Beglaubigung hängt deshalb an diesem zweiten, asymmetrischen Schlüssel
+    — siehe `frontend/src/services/nutzlastSignatur.ts`.
+    """
+    app.dependency_overrides[get_current_user] = lambda: owner_user
+    app.dependency_overrides[verify_csrf] = lambda: None
+    try:
+        res = client.put("/api/social/e2ee/devices/self", json={
+            "device_id": "signierer0000001",
+            "public_key": _valid_rsa_jwk("A"),
+            "signing_public_key": _valid_ecdsa_jwk("B"),
+        })
+        assert res.status_code == 200, res.text
+        assert res.json()["signing_public_key"] == _valid_ecdsa_jwk("B")
+
+        liste = client.get(f"/api/social/e2ee/devices/{owner_user.id}")
+        assert liste.status_code == 200
+        assert liste.json()[0]["signing_public_key"] == _valid_ecdsa_jwk("B")
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        app.dependency_overrides.pop(verify_csrf, None)
+
+
+def test_ein_leeres_feld_nimmt_den_signaturschluessel_nicht_wieder_weg(
+    db: Session, owner_user: User
+):
+    """Sonst entwaffnet ein älterer Client, der das Feld nicht kennt, das Gerät.
+
+    Und zwar still: es fiele zurück in den ungeprüften Zustand, den die
+    Signatur gerade beendet hat, und beim Empfänger griffe wieder die Nachsicht
+    für unsignierte Nutzlasten.
+    """
+    e2ee_device_service.veroeffentlichen(
+        db,
+        owner_user,
+        device_id="bestand000000001",
+        public_key_jwk=_valid_rsa_jwk("A"),
+        signing_public_key_jwk=_valid_ecdsa_jwk("C"),
+    )
+
+    e2ee_device_service.veroeffentlichen(
+        db, owner_user, device_id="bestand000000001", public_key_jwk=_valid_rsa_jwk("A")
+    )
+
+    liste = e2ee_device_service.geraete(db, owner_user.id)
+    assert liste[0]["signing_public_key"] == _valid_ecdsa_jwk("C")
+
+
+def test_verschluesselungsschluessel_taugt_nicht_als_signaturschluessel(
+    client: TestClient, owner_user: User
+):
+    """Die beiden Prüfungen dürfen einander nicht durchlassen.
+
+    Ein Schlüssel, der beides darf, ist genau die Algorithmusverwechslung,
+    gegen die beide Funktionen stehen — und in der Gegenrichtung würde ein
+    Signaturschlüssel im Verschlüsselungsfeld die Post unlesbar machen.
+    """
+    app.dependency_overrides[get_current_user] = lambda: owner_user
+    app.dependency_overrides[verify_csrf] = lambda: None
+    try:
+        verwechselt = client.put("/api/social/e2ee/devices/self", json={
+            "device_id": "verwechselt00001",
+            "public_key": _valid_rsa_jwk("A"),
+            "signing_public_key": _valid_rsa_jwk("A"),
+        })
+        assert verwechselt.status_code == 422
+
+        andersherum = client.put("/api/social/e2ee/devices/self", json={
+            "device_id": "andersherum00001",
+            "public_key": _valid_ecdsa_jwk("A"),
+        })
+        assert andersherum.status_code == 422
+
+        mit_privatteil = json.dumps({
+            "kty": "EC", "crv": "P-256", "x": "A" * 43, "y": "B" * 43, "d": "geheim",
+        })
+        privat = client.put("/api/social/e2ee/devices/self", json={
+            "device_id": "privatteil000001",
+            "public_key": _valid_rsa_jwk("A"),
+            "signing_public_key": mit_privatteil,
+        })
+        assert privat.status_code == 422
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        app.dependency_overrides.pop(verify_csrf, None)
 
 
 def test_fremdes_geraet_laesst_sich_nicht_vergessen(db: Session, owner_user: User, regular_user: User):

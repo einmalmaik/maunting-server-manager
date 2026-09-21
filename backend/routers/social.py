@@ -277,13 +277,23 @@ def put_own_e2ee_device(
     """
     try:
         eintrag = e2ee_device_service.veroeffentlichen(
-            db, user, device_id=req.device_id, public_key_jwk=req.public_key, label=req.label or ""
+            db,
+            user,
+            device_id=req.device_id,
+            public_key_jwk=req.public_key,
+            label=req.label or "",
+            signing_public_key_jwk=req.signing_public_key or "",
         )
+    except e2ee_device_service.GeraetedeckelErreichtError as e:
+        # 409, nicht 400: die Anfrage ist in Ordnung, der Zustand des Kontos
+        # steht ihr entgegen. Der Client zeigt den Text unverändert an.
+        raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {
         "device_id": eintrag.device_id,
         "public_key": eintrag.public_key_jwk,
+        "signing_public_key": eintrag.signing_public_key_jwk or "",
         "label": eintrag.label or "",
     }
 

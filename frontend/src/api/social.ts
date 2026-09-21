@@ -199,6 +199,11 @@ export async function updatePrivacy(payload: {
 export interface E2eeGeraetItem {
   device_id: string
   public_key: string
+  /**
+   * ECDSA P-256, beglaubigt den Absender einer Gruppennachricht. Leer heißt:
+   * dieses Gerät war seit der Umstellung nicht an. Siehe `absenderSignatur.ts`.
+   */
+  signing_public_key: string
   label: string
 }
 
@@ -211,6 +216,7 @@ export interface E2eeGeraetItem {
 export async function putEigenesGeraet(payload: {
   deviceId: string
   publicKey: string
+  signingPublicKey?: string
   label?: string
 }): Promise<E2eeGeraetItem> {
   return api<E2eeGeraetItem>('/social/e2ee/devices/self', {
@@ -218,6 +224,7 @@ export async function putEigenesGeraet(payload: {
     body: JSON.stringify({
       device_id: payload.deviceId,
       public_key: payload.publicKey,
+      signing_public_key: payload.signingPublicKey ?? '',
       label: payload.label ?? '',
     }),
   })

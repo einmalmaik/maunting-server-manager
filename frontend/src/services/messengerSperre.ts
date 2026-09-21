@@ -102,6 +102,8 @@ const SPERR_PRAEFIX = 'mss:messenger'
  * Minuten. Gegen jemanden, der am offenen Gerät herumprobiert. Gegen jemanden
  * mit der Platte hilft das nichts — dagegen hilft die Länge des PIN und die
  * Gerätebindung, und so steht es auch in der Dokumentation.
+ *
+ * Sie übersteht ein Neuladen; warum das nötig ist, steht bei `VERSUCHE`.
  */
 const WARTEN_AB_VERSUCH = 5
 const WARTEN_GRUND_MS = 5_000
@@ -154,6 +156,42 @@ const UMSCHLAG = 'pin_umschlag'
 const SALZ = 'pin_salz'
 const BINDUNG = 'pin_bindung'
 const BIOMETRIE = 'pin_biometrie'
+
+/**
+ * Fehlversuche und Wartezeit — in der Ablage, nicht nur im Store.
+ *
+ * Bis 09/2026 standen beide ausschliesslich im Zustand des Reiters. Die
+ * Wartezeit richtet sich ausdrücklich gegen jemanden, der am offenen Gerät
+ * herumprobiert — und genau der kann neu laden. Ein `F5` setzte den Zähler
+ * zurück, und aus der verdoppelnden Wartezeit wurde eine Formalie.
+ *
+ * Kein Geheimnis: wer beides aus der Ablage löscht, steht danach da wie nach
+ * fünf gescheiterten Versuchen mit abgelaufener Frist, also genau dort, wo er
+ * ohnehin hinwollte. Was schützt, ist die Länge des PIN und die
+ * Gerätebindung; die Wartezeit hält nur das schnelle Durchprobieren auf, und
+ * dafür muss sie einen Neustart überstehen.
+ */
+const VERSUCHE = 'pin_versuche'
+const GESPERRT_BIS = 'pin_gesperrt_bis'
+
+function liesVersuchsstand(): { fehlversuche: number; gesperrtBis: number } {
+  const fehlversuche = Number(lies(VERSUCHE) ?? 0)
+  const gesperrtBis = Number(lies(GESPERRT_BIS) ?? 0)
+  return {
+    fehlversuche: Number.isFinite(fehlversuche) && fehlversuche > 0 ? fehlversuche : 0,
+    // Ein Zeitstempel aus der Vergangenheit ist keine Sperre mehr, und einer
+    // weit in der Zukunft käme von einer verstellten Uhr — beides landet auf 0.
+    gesperrtBis:
+      Number.isFinite(gesperrtBis) && gesperrtBis > Date.now() && gesperrtBis - Date.now() <= WARTEN_DECKEL_MS
+        ? gesperrtBis
+        : 0,
+  }
+}
+
+function schreibeVersuchsstand(fehlversuche: number, gesperrtBis: number): void {
+  schreibe(VERSUCHE, fehlversuche > 0 ? String(fehlversuche) : null)
+  schreibe(GESPERRT_BIS, gesperrtBis > 0 ? String(gesperrtBis) : null)
+}
 
 // ==========================================
 // Ableitung
@@ -311,6 +349,10 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
       entsperrt: !aktiv,
       geraetebindung: lies(BINDUNG) === 'true',
       biometrieAktiv: lies(BIOMETRIE) === 'true',
+      // Erst hier, nicht im Anfangszustand des Stores: der läuft beim Laden
+      // des Moduls, und da steht das angemeldete Konto noch nicht fest — ohne
+      // Konto hat die Ablage keinen Schlüssel und gäbe nichts heraus.
+      ...liesVersuchsstand(),
     })
     set({ biometrieMoeglich: await biometrieMoeglich() })
   },
@@ -342,6 +384,7 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
 
       await stelleBestandUm(kontoId)
 
+      schreibeVersuchsstand(0, 0)
       set({
         eingerichtet: true,
         entsperrt: true,
@@ -393,6 +436,7 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
       // woanders hinschaut und dann seinen PIN eingibt, ist im Moment des
       // Entsperrens schon „seit 15 Minuten untätig" — der Messenger blitzt auf
       // und ist beim nächsten Takt wieder zu.
+      schreibeVersuchsstand(0, 0)
       set({
         entsperrt: true,
         letzteAktivitaet: Date.now(),
@@ -411,9 +455,11 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
           err.message === i18n.t('profile.messengerLock.errors.storageUnreachable'))
       const fehlversuche = speicherWeg ? get().fehlversuche : get().fehlversuche + 1
       const warteMs = wartezeitFuer(fehlversuche)
+      const gesperrtBis = warteMs > 0 ? Date.now() + warteMs : 0
+      schreibeVersuchsstand(fehlversuche, gesperrtBis)
       set({
         fehlversuche,
-        gesperrtBis: warteMs > 0 ? Date.now() + warteMs : 0,
+        gesperrtBis,
         fehler: speicherWeg
           ? (err as Error).message
           : i18n.t('profile.messengerLock.errors.wrongPin'),
@@ -544,6 +590,7 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
       schreibe(SALZ, null)
       schreibe(BINDUNG, null)
       setzeInhaltsSchluessel(null)
+      schreibeVersuchsstand(0, 0)
       set({
         eingerichtet: false,
         entsperrt: true,

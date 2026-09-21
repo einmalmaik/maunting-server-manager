@@ -13,6 +13,11 @@ Zwei Schranken tragen die Sicherheit:
   weist private Bestandteile, Signaturschluessel und zu kurze Moduln ab — ein
   Client, der aus Versehen seinen privaten Teil hochlaedt, wird hier gestoppt
   statt stillschweigend gespeichert.
+
+Seit 09/2026 steht daneben ein zweiter oeffentlicher Schluessel: ECDSA P-256,
+der nichts verschluesselt und nur den Absender einer Gruppennachricht
+beglaubigt. Warum es ihn braucht, steht im Kopf von `models/user_e2ee_device.py`.
+Beide Pruefungen sind getrennt und lassen einander nicht durch.
 """
 
 from __future__ import annotations
@@ -58,6 +63,7 @@ def veroeffentlichen(
     device_id: str,
     public_key_jwk: str,
     label: str = "",
+    signing_public_key_jwk: str = "",
 ) -> UserE2eeDevice:
     """Legt den Schluessel dieses Geraets ab oder frischt ihn auf.
 
@@ -65,14 +71,23 @@ def veroeffentlichen(
     dabei der Schluessel, gilt der neue — ein Geraet, das seine lokale Ablage
     verloren hat, muss sich neu melden koennen, sonst kaeme es nie wieder in
     ein Gespraech hinein.
+
+    Der Signaturschluessel kommt beim Bestand nach: ein leerer Wert laesst den
+    gespeicherten stehen, statt ihn zu loeschen. Ein aelterer Client, der das
+    Feld gar nicht kennt, nimmt einem Geraet sonst seine Beglaubigung wieder
+    weg — und damit faellt es zurueck in den ungeprueften Zustand, den die
+    Signatur gerade beendet hat.
     """
-    from schemas.social import validate_rsa_public_key_jwk
+    from schemas.social import validate_ecdsa_public_key_jwk, validate_rsa_public_key_jwk
 
     kennung = (device_id or "").strip()
     if not kennung_gueltig(kennung):
         raise ValueError("Ungueltige Geraetekennung.")
 
     validate_rsa_public_key_jwk(public_key_jwk)
+    signatur = (signing_public_key_jwk or "").strip()
+    if signatur:
+        validate_ecdsa_public_key_jwk(signatur)
 
     bestand = (
         db.query(UserE2eeDevice)
@@ -81,6 +96,8 @@ def veroeffentlichen(
     )
     if bestand is not None:
         bestand.public_key_jwk = public_key_jwk
+        if signatur:
+            bestand.signing_public_key_jwk = signatur
         if label:
             bestand.label = label.strip()[:MAX_BEZEICHNUNG]
         bestand.last_seen_at = _jetzt()
@@ -94,6 +111,7 @@ def veroeffentlichen(
         user_id=user.id,
         device_id=kennung,
         public_key_jwk=public_key_jwk,
+        signing_public_key_jwk=signatur or None,
         label=(label or "").strip()[:MAX_BEZEICHNUNG],
         created_at=_jetzt(),
         last_seen_at=_jetzt(),
@@ -122,6 +140,8 @@ def veroeffentlichen(
         if bestand is None:
             raise
         bestand.public_key_jwk = public_key_jwk
+        if signatur:
+            bestand.signing_public_key_jwk = signatur
         if label:
             bestand.label = label.strip()[:MAX_BEZEICHNUNG]
         bestand.last_seen_at = _jetzt()
@@ -132,24 +152,38 @@ def veroeffentlichen(
     return eintrag
 
 
-def _deckel_einhalten(db: Session, user: User) -> None:
-    """Macht Platz fuer einen Neuzugang, indem die aeltesten Stillen weichen.
+class GeraetedeckelErreichtError(ValueError):
+    """Der Deckel ist voll und der Mensch muss entscheiden, was weichen soll."""
 
-    Verdraengt wird nach `last_seen_at`, nicht nach `created_at`: das aelteste
-    Geraet ist oft das meistgenutzte, das laengst stille dagegen ein Browser,
-    den niemand mehr oeffnet.
+    def __init__(self) -> None:
+        super().__init__(
+            f"Es sind bereits {MAX_GERAETE} Geraete angemeldet. Entferne eines unter "
+            "Profil → Geraete, bevor du dieses hinzufuegst."
+        )
+
+
+def _deckel_einhalten(db: Session, user: User) -> None:
+    """Weist einen Neuzugang ab, wenn der Deckel voll ist.
+
+    Bis 09/2026 verdraengte diese Funktion hier das laengst stille Geraet, und
+    zwar lautlos. Das war die falsche Haelfte der Entscheidung: der Server nahm
+    einem Geraet die Zustelladresse weg, ohne dass irgendwo etwas davon stand.
+    Auf dem verdraengten Geraet aenderte sich nichts sichtbar — der Verlauf
+    blieb stehen, die Oberflaeche wirkte heil, und es kam nur nie wieder eine
+    Nachricht an. Ein Messenger, der stumm wird und so tut als sei er in
+    Ordnung, ist schlimmer als einer, der sagt was los ist.
+
+    Jetzt entscheidet der Mensch. Die Liste steht unter `/profile?tab=devices`,
+    und dort ist auch zu sehen, welches Geraet am laengsten nichts mehr getan
+    hat.
     """
-    bestand = (
+    anzahl = (
         db.query(UserE2eeDevice)
         .filter(UserE2eeDevice.user_id == user.id)
-        .order_by(UserE2eeDevice.last_seen_at.asc())
-        .all()
+        .count()
     )
-    ueberzaehlig = len(bestand) - MAX_GERAETE + 1
-    for eintrag in bestand[: max(0, ueberzaehlig)]:
-        db.delete(eintrag)
-    if ueberzaehlig > 0:
-        db.flush()
+    if anzahl >= MAX_GERAETE:
+        raise GeraetedeckelErreichtError()
 
 
 def geraete(db: Session, user_id: int) -> list[dict]:
@@ -164,6 +198,7 @@ def geraete(db: Session, user_id: int) -> list[dict]:
         {
             "device_id": e.device_id,
             "public_key": e.public_key_jwk,
+            "signing_public_key": e.signing_public_key_jwk or "",
             "label": e.label or "",
         }
         for e in eintraege

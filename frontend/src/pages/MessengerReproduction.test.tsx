@@ -227,6 +227,12 @@ vi.mock('@/services/e2eeGeraet', () => ({
     if (!identitaet.empfaengerSchluessel) throw new MockRecipientKeyMissingError(0)
     return zielGeraete()
   }),
+  // Die Absenderbeglaubigung: hier fuehrt kein Konto einen Signaturschluessel,
+  // also gilt die Nachsicht fuer unsignierte Nutzlasten. Die Schranke selbst
+  // pruefen `nutzlastSignatur.test.ts` und der Faelschungstest in
+  // `Messenger.test.tsx`.
+  kontoNutztSignaturen: vi.fn(async () => false),
+  signaturSchluesselVon: vi.fn(async () => null),
   vergessenGeraete: vi.fn(),
   clearGeraeteMemory: vi.fn(),
   onNeuesGeraet: vi.fn(() => () => {}),

@@ -13,8 +13,8 @@ Endpunkt ist eindeutig, nicht das Konto — Begruendung im Kopf von
 Das VAPID-Schluesselpaar braucht keine Migration: es entsteht beim ersten
 Gebrauch und liegt in `panel_settings` (privater Teil DIS-verschluesselt).
 
-Revision ID: 20260921_01
-Revises: 20260918_01
+Revision ID: 20260921_02
+Revises: 20260921_01
 Create Date: 2026-09-21
 """
 
@@ -26,8 +26,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "20260921_01"
-down_revision: Union[str, None] = "20260918_01"
+revision: str = "20260921_02"
+down_revision: Union[str, None] = "20260921_01"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

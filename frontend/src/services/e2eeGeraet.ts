@@ -27,11 +27,16 @@
  * **Ein Schlüssel je Gerät *und* Konto.** Bis 09/2026 lag hier genau ein Paar
  * unter dem festen Namen `self`, mit der Begründung, ein Gerät sei ein Gerät,
  * egal wer sich anmelde. Das war falsch, und zwar zweifach: der private
- * Schlüssel öffnete danach die Post beider Konten, und weil die blinde Mailbox
- * bewusst jedem Angemeldeten offensteht, ist er die einzige Schranke davor.
- * Dazu stritten beide Konten um dieselben Ratchet-Sitzungen. Ein Browser, in
- * dem sich zwei Menschen nacheinander anmelden, ist kein seltener Fall, und
- * `clearSession` räumt die IndexedDB nicht mit ab.
+ * Schlüssel öffnete danach die Post beider Konten. Dazu stritten beide Konten
+ * um dieselben Ratchet-Sitzungen. Ein Browser, in dem sich zwei Menschen
+ * nacheinander anmelden, ist kein seltener Fall, und `clearSession` räumt die
+ * IndexedDB nicht mit ab.
+ *
+ * **Zwei Paare, zwei Aufgaben.** Neben dem RSA-OAEP-Paar, gegen das
+ * verschlüsselt wird, hält ein Gerät seit 09/2026 ein ECDSA-Paar, mit dem es
+ * seine Nutzlasten unterschreibt. Warum ein Gruppenschlüssel das nicht leisten
+ * kann, steht im Kopf von `nutzlastSignatur.ts`. Keines der beiden darf die
+ * Aufgabe des anderen übernehmen; das Backend prüft beide getrennt.
  */
 
 import { randomBytes } from '@msdis/shield/random'
@@ -39,6 +44,7 @@ import { bytesToHex } from '@msdis/shield/core'
 import i18n from '@/i18n'
 
 import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
+import { erzeugeSignaturPaar, type SignaturPaar } from './absenderSignatur'
 import { generateLocalE2eeKeyPair, type LocalE2eeKeyPair } from './e2eeCrypto'
 import {
   MessengerVerschlossenError,
@@ -62,6 +68,15 @@ const IDB_GERAETE_STORE = 'devices'
 export interface EigenesGeraet {
   kennung: string
   paar: LocalE2eeKeyPair
+  /**
+   * Das zweite Paar: ECDSA, und es verschlüsselt nichts.
+   *
+   * Es beglaubigt den Absender einer Gruppennachricht — die Begründung steht
+   * im Kopf von `absenderSignatur.ts`. Der Bestand aus der Zeit davor trägt es
+   * noch nicht; `lies` rüstet es beim ersten Zugriff nach, damit es nicht an
+   * zwei Stellen „vielleicht da" heißen muss.
+   */
+  signaturPaar: SignaturPaar
 }
 
 // ==========================================
@@ -124,17 +139,22 @@ function oeffneDatenbank(): Promise<IDBDatabase> {
  * zu übernehmen gibt.
  */
 interface GeraeteZeile {
-  geraet: EigenesGeraet
+  kennung: string
+  paar: LocalE2eeKeyPair
+  /** `null` heißt: abgelegt vor 09/2026, das Signaturpaar fehlt noch. */
+  signaturPaar: SignaturPaar | null
   sitzungenUebernommen: boolean
 }
 
 function ausZeile(zeile: any): GeraeteZeile | null {
   if (!zeile?.kennung || !zeile?.publicKeyJwk || !zeile?.privateKeyJwk) return null
   return {
-    geraet: {
-      kennung: zeile.kennung,
-      paar: { publicKeyJwk: zeile.publicKeyJwk, privateKeyJwk: zeile.privateKeyJwk },
-    },
+    kennung: zeile.kennung,
+    paar: { publicKeyJwk: zeile.publicKeyJwk, privateKeyJwk: zeile.privateKeyJwk },
+    signaturPaar:
+      zeile.signPublicKeyJwk && zeile.signPrivateKeyJwk
+        ? { publicKeyJwk: zeile.signPublicKeyJwk, privateKeyJwk: zeile.signPrivateKeyJwk }
+        : null,
     sitzungenUebernommen: zeile.sitzungenUebernommen === true,
   }
 }
@@ -162,6 +182,11 @@ async function zuZeile(
       kennung: geraet.kennung,
       publicKeyJwk: geraet.paar.publicKeyJwk,
       privateKeyJwk: geraet.paar.privateKeyJwk,
+      // Derselbe Schutz wie für den privaten Geräteschlüssel: wer ihn hat,
+      // kann als dieses Gerät signieren und in jeder Gruppe als sein Mensch
+      // auftreten.
+      signPublicKeyJwk: geraet.signaturPaar.publicKeyJwk,
+      signPrivateKeyJwk: geraet.signaturPaar.privateKeyJwk,
       sitzungenUebernommen,
     },
     ['id'],
@@ -206,8 +231,25 @@ async function schreibe(
 export async function schreibeGeraetBestandNeu(kontoId: number): Promise<boolean> {
   const vorhanden = await lies(kontoId)
   if (!vorhanden) return false
-  await schreibe(kontoId, vorhanden.geraet, vorhanden.sitzungenUebernommen)
+  await schreibe(kontoId, await vollstaendig(vorhanden), vorhanden.sitzungenUebernommen)
   return true
+}
+
+/**
+ * Macht aus einer abgelegten Zeile eine vollständige Identität.
+ *
+ * Der einzige Ort, an dem ein Signaturpaar nachwächst. Es steht hier und nicht
+ * bei der Neuanlage, weil der Bestand aus der Zeit davor genau denselben Weg
+ * nimmt: lesen, feststellen dass es fehlt, eines münzen, weitermachen. Wer es
+ * münzt, muss die Zeile danach schreiben — sonst wäre es bei jedem Start ein
+ * anderes und niemand könnte die Signatur prüfen, die er gerade gelesen hat.
+ */
+async function vollstaendig(zeile: GeraeteZeile): Promise<EigenesGeraet> {
+  return {
+    kennung: zeile.kennung,
+    paar: zeile.paar,
+    signaturPaar: zeile.signaturPaar ?? (await erzeugeSignaturPaar()),
+  }
 }
 
 /**
@@ -228,7 +270,7 @@ export async function schreibeGeraetBestandNeu(kontoId: number): Promise<boolean
  * und eine IndexedDB-Transaktion überlebt kein `await`. Der Altbestand selbst
  * stammt aus der Zeit vor dem Siegel und liegt deshalb immer im Klartext.
  */
-async function uebernimmAltbestand(kontoId: number): Promise<EigenesGeraet | null> {
+async function uebernimmAltbestand(kontoId: number): Promise<GeraeteZeile | null> {
   try {
     const db = await oeffneDatenbank()
 
@@ -241,10 +283,15 @@ async function uebernimmAltbestand(kontoId: number): Promise<EigenesGeraet | nul
     const alt = ausZeile(await entsiegleZeile(roh, geraetAad(kontoId)))
     if (!alt) return null
 
+    // Das Signaturpaar wächst hier nach und wird mit derselben Zeile
+    // geschrieben. Einmal gemünzt, einmal abgelegt, einmal zurückgegeben —
+    // münzte der Aufrufer danach ein zweites, wäre das geschriebene tot.
+    const geraet = await vollstaendig(alt)
+
     // Der Haken steht bewusst auf `false`: die Sitzungen sind noch nicht
     // umbenannt, und wenn das gleich scheitert, muss der nächste Start es
     // erneut versuchen dürfen.
-    const zeile = await zuZeile(kontoId, alt.geraet, false)
+    const zeile = await zuZeile(kontoId, geraet, false)
 
     const gewonnen = await new Promise<boolean>((resolve, reject) => {
       const tx = db.transaction(IDB_GERAETE_STORE, 'readwrite')
@@ -263,7 +310,7 @@ async function uebernimmAltbestand(kontoId: number): Promise<EigenesGeraet | nul
       tx.onabort = () => reject(tx.error)
     })
 
-    return gewonnen ? alt.geraet : null
+    return gewonnen ? { ...alt, signaturPaar: geraet.signaturPaar } : null
   } catch {
     return null
   }
@@ -317,18 +364,23 @@ export async function eigenesGeraet(): Promise<EigenesGeraet> {
 
   const lauf = (async () => {
     let zeile = await lies(konto)
-    if (!zeile) {
-      const alt = await uebernimmAltbestand(konto)
-      if (alt) zeile = { geraet: alt, sitzungenUebernommen: false }
-    }
+    if (!zeile) zeile = await uebernimmAltbestand(konto)
     if (zeile) {
-      if (!zeile.sitzungenUebernommen) await holeSitzungenNach(konto, zeile.geraet)
-      geraetImRam = { konto, geraet: zeile.geraet }
-      return zeile.geraet
+      const geraet = await vollstaendig(zeile)
+      // Ein nachgewachsenes Signaturpaar muss auf die Platte, bevor irgendwer
+      // damit signiert: sonst prüfte die Gegenstelle gegen einen Schlüssel,
+      // den der nächste Start nicht mehr kennt.
+      if (!zeile.signaturPaar) {
+        await schreibe(konto, geraet, zeile.sitzungenUebernommen)
+      }
+      if (!zeile.sitzungenUebernommen) await holeSitzungenNach(konto, geraet)
+      geraetImRam = { konto, geraet }
+      return geraet
     }
     const frisch: EigenesGeraet = {
       kennung: bytesToHex(randomBytes(KENNUNG_BYTES)),
       paar: await generateLocalE2eeKeyPair(),
+      signaturPaar: await erzeugeSignaturPaar(),
     }
     // Ein frisches Gerät hat nichts zu übernehmen: der Haken steht sofort.
     // Wichtig für ein **zweites** Konto in diesem Browser — die Sitzungen des
@@ -389,10 +441,44 @@ export async function geraetVeroeffentlichen(label = ''): Promise<EigenesGeraet>
   await putEigenesGeraet({
     deviceId: geraet.kennung,
     publicKey: geraet.paar.publicKeyJwk,
+    signingPublicKey: geraet.signaturPaar.publicKeyJwk,
     label,
   })
   veroeffentlichtAls = geraet.kennung
   return geraet
+}
+
+/**
+ * Der veröffentlichte Signaturschlüssel eines fremden Geräts, oder `null`.
+ *
+ * `null` heißt „dieses Gerät hat noch keinen" und ist der Normalfall für
+ * Installationen, die seit der Umstellung nicht neu gestartet wurden. Was ein
+ * Leseweg daraus macht, entscheidet er selbst — hier steht keine Regel,
+ * sondern nur die Auskunft.
+ */
+export async function signaturSchluesselVon(
+  userId: number,
+  deviceId: string,
+): Promise<string | null> {
+  const geraete = await geraeteVon(userId)
+  const treffer = geraete.find((g) => g.device_id === deviceId)
+  return treffer?.signing_public_key || null
+}
+
+/**
+ * Hat dieses Konto mindestens ein Gerät mit Signaturschlüssel?
+ *
+ * Die Frage hinter der Downgrade-Schranke: wer beglaubigen *kann*, muss es
+ * auch. Ohne sie nähme ein Fälscher einfach die Signatur weg und stünde wieder
+ * da, wo er vorher stand.
+ *
+ * Ein misslungener Abruf antwortet `false` — lieber eine Nachricht ungeprüft
+ * anzeigen als bei jedem Netzwackler den halben Verlauf verschwinden lassen.
+ * Die Liste kommt aus demselben zehn Minuten alten Zwischenspeicher, den der
+ * Sendeweg ohnehin füllt.
+ */
+export async function kontoNutztSignaturen(userId: number): Promise<boolean> {
+  return (await geraeteVon(userId)).some((g) => Boolean(g.signing_public_key))
 }
 
 // ==========================================

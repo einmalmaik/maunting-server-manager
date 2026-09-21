@@ -49,6 +49,18 @@ class UserE2eeDevice(Base):
     # Klartext in jedem Umschlag und darf dort nichts verraten.
     device_id: Mapped[str] = mapped_column(String(64), nullable=False)
     public_key_jwk: Mapped[str] = mapped_column(Text, nullable=False)
+    # Der zweite oeffentliche Schluessel dieses Geraets: ECDSA P-256, und er
+    # verschluesselt nichts. Er beglaubigt den Absender einer Gruppennachricht.
+    #
+    # Noetig, weil eine Gruppe einen *geteilten* Schluessel benutzt: damit kann
+    # jedes Mitglied jede Nachricht der Gruppe erzeugen, und wer den Absender
+    # aus der Nutzlast liest, glaubt dem Absender. Symmetrisch ist das nicht zu
+    # schliessen — wer einen MAC pruefen kann, kann ihn auch rechnen.
+    #
+    # Nullable fuer den Bestand: ein Geraet traegt ihn beim naechsten Start
+    # nach. Die Empfaengerregel steht in `gruppenSchluessel.ts`: fehlt er,
+    # bleibt die Nachricht ungeprueft; ist er da, ist die Signatur Pflicht.
+    signing_public_key_jwk: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Wiedererkennung in der Geraeteliste ("Arbeitsrechner"). Frei gewaehlt.
     label: Mapped[str] = mapped_column(String(64), nullable=False, default="")
 

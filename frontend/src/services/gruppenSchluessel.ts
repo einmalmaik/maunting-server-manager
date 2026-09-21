@@ -102,6 +102,11 @@ export interface GruppenKontext {
 }
 
 export type GruppenLesung =
+  /**
+   * Der Klartext — und keine Aussage darüber, wer ihn geschrieben hat. Ein
+   * Gruppenschlüssel beweist Mitgliedschaft, nie Identität; wer den Absender
+   * braucht, prüft die Nutzlastsignatur (`nutzlastSignatur.ts`).
+   */
   | { art: 'klartext'; text: string }
   /** Kein Schlüssel zu dieser Kennung. Der Aufrufer darf nachfordern. */
   | { art: 'kein-schluessel'; keyId: string }
@@ -134,6 +139,13 @@ export interface GruppenAblage {
   liesAktuellen(groupId: number): Promise<GruppenSchluesselEintrag | null>
   /** Legt den Schlüssel ab und macht ihn zum aktuellen dieser Gruppe. */
   schreibe(eintrag: GruppenSchluesselEintrag): Promise<void>
+  /**
+   * Legt den Schlüssel ab, **ohne** den aktuellen zu ersetzen.
+   *
+   * Der Weg für einen zugestellten Schlüssel, dessen Generation dieses Gerät
+   * schon bedient: lesen soll er, senden nicht. Warum, steht bei `nimmSchluessel`.
+   */
+  schreibeNebenher(eintrag: GruppenSchluesselEintrag): Promise<void>
   loescheGruppe(groupId: number): Promise<void>
   /** Wurde diese Nachfrage schon beantwortet? Siehe Kopf der Datei. */
   kennstAnfrage(groupId: number, kennung: string): Promise<boolean>
@@ -235,6 +247,21 @@ const indexedDbAblage: GruppenAblage = {
       const tx = db.transaction([STORE_KEYS, STORE_AKTUELL], 'readwrite')
       tx.objectStore(STORE_KEYS).put(zeile)
       tx.objectStore(STORE_AKTUELL).put({ groupId: eintrag.groupId, keyId: eintrag.keyId })
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+      tx.onabort = () => reject(tx.error)
+    })
+  },
+  async schreibeNebenher(eintrag) {
+    const db = await oeffneDatenbank()
+    const zeile = await versiegleZeile(
+      eintrag,
+      ['groupId', 'keyId'],
+      gruppenAad(eintrag.groupId, eintrag.keyId),
+    )
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_KEYS, 'readwrite')
+      tx.objectStore(STORE_KEYS).put(zeile)
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
       tx.onabort = () => reject(tx.error)
@@ -606,13 +633,61 @@ async function nimmSchluessel(
   // nächste Mal rotiert. Eine falsche Angabe verzögert die Rotation bis zum
   // nächsten eigenen Sendevorgang — mehr kann sie nicht, denn wer den Schlüssel
   // münzt, hat ihn ohnehin.
-  await ablage.schreibe({
+  const mitglieder = normalisiereMitglieder(Array.isArray(roh.mitglieder) ? roh.mitglieder : [])
+  const eintrag: GruppenSchluesselEintrag = {
     groupId: kontext.groupId,
     keyId,
     schluessel,
-    mitglieder: normalisiereMitglieder(Array.isArray(roh.mitglieder) ? roh.mitglieder : []),
+    mitglieder,
     erzeugtAm: new Date().toISOString(),
-  })
+  }
+
+  /*
+   * Ankommen ja, verdrängen nein.
+   *
+   * Ein zugestellter Schlüssel wird immer abgelegt — ohne ihn wäre die
+   * Nachricht unlesbar, für die er gilt. Der *aktuelle* wird er aber nur, wenn
+   * für die heutige Mitgliedschaft noch keiner da ist.
+   *
+   * Bis 09/2026 gewann der zuletzt eingetroffene. Damit konnte ein Mitglied
+   * einem anderen einen nur ihm bekannten Schlüssel unterschieben: das Opfer
+   * verschlüsselte ab da gegen ihn, und der Rest der Gruppe las nur noch
+   * „Verschlüsselte Nachricht". Wer zuerst da ist, bleibt jetzt stehen — und
+   * das ist genau der, der beim letzten Mitgliederwechsel als erster gesendet
+   * hat, also der vorgesehene Weg.
+   *
+   * Verglichen wird gegen `kontext.mitglieder`, die Momentaufnahme der
+   * Oberfläche — **nicht** gegen `frischeMitglieder`. Zwei Gründe: die Liste
+   * aus der Zustellung ist die des Absenders und damit Teil des Angriffs, und
+   * `frischeMitglieder` fragt den Server. Diese Funktion läuft bei *jedem*
+   * Abruf über *jeden* Schlüsselumschlag, der in der Mailbox liegt — also alle
+   * fünf Sekunden. Ein Netzaufruf an dieser Stelle wäre eine Dauerlast.
+   *
+   * Was die Momentaufnahme kostet, wenn sie veraltet ist: dieses Gerät behält
+   * seinen alten Schlüssel, münzt beim nächsten Senden einen frischen (dort
+   * entscheidet `frischeMitglieder`) und verteilt ihn. Die Gruppe hat dann
+   * eine Generation mehr als nötig. Lesbar bleibt alles.
+   *
+   * Was das nicht kann: ein Gerät, das noch gar keinen Schlüssel für diese
+   * Mitgliedschaft hat, nimmt weiterhin den ersten, der kommt. Ohne eine
+   * Absenderbeglaubigung auf der Zustellung ist das nicht enger zu fassen; die
+   * Grenze steht so auch in `docs/agent-rules/security.md`.
+   */
+  const vorhanden = await ablage.liesAktuellen(kontext.groupId)
+  const behalte =
+    vorhanden !== null &&
+    vorhanden.keyId !== keyId &&
+    gleicheMitglieder(
+      vorhanden.mitglieder,
+      normalisiereMitglieder([...kontext.mitglieder, kontext.eigeneId]),
+    )
+
+  if (behalte) {
+    await ablage.schreibeNebenher(eintrag)
+    return { art: 'schluessel', keyId }
+  }
+
+  await ablage.schreibe(eintrag)
   return { art: 'schluessel', keyId }
 }
 

@@ -268,10 +268,9 @@ Harte Invarianten:
 - **Der Geräteschlüssel gehört dem Gerät *und* dem Konto.** Bis 09/2026 lag er in
   der IndexedDB unter dem festen Namen `self`, begründet damit, ein Gerät sei
   ein Gerät, egal wer sich anmelde. Das war zweifach falsch. Erstens öffnete
-  derselbe private Schlüssel danach die Post beider Konten, und weil
-  `GET /api/social/e2ee/mailbox/{id}` bewusst jedem Angemeldeten offensteht, ist
-  er die einzige Schranke davor — im Dev-Bestand standen zwei Kennungen unter
-  zwei Konten, mit identischem öffentlichen Schlüssel. Zweitens stritten beide
+  derselbe private Schlüssel danach die Post beider Konten — im Dev-Bestand
+  standen zwei Kennungen unter zwei Konten, mit identischem öffentlichen
+  Schlüssel. Zweitens stritten beide
   Konten um dieselben Ratchet-Sitzungen: `sitzungsId` nannte nur die
   Gegenstelle, wer als zweiter sendete schaltete den Ratchet des ersten weiter,
   und die Gegenstelle meldete einen Bruch. Seither ist der Ablageschlüssel
@@ -299,6 +298,41 @@ Harte Invarianten:
   Server nicht antwortet. Dazu gehört die Gegenprobe: erreicht eine Zustellung
   **kein** Gerät, wirft `anJedesGeraet` `GruppenSchluesselNichtZugestelltError`,
   statt eine Gruppe entstehen zu lassen, deren Schlüssel nur der Absender hat.
+- **Ein Gruppenschlüssel beweist Mitgliedschaft, nie Identität.** Er ist
+  symmetrisch und geteilt: jedes Mitglied kann damit jede Nachricht der Gruppe
+  *erzeugen*. Wer den Absender aus der Nutzlast las (`sender_id`), glaubte
+  deshalb dem Absender — ein Mitglied konnte sich als jedes andere ausgeben,
+  dauerhaft und im Verlauf aller. Dasselbe Loch hatte der Direktchat bei
+  **Steuerpaketen**: die laufen dort bewusst über den Hybridumschlag und nicht
+  durch den Ratchet, und ein Hybridumschlag hat keinen Absenderkopf —
+  `edit_message` mit fremdem `actor_id` schrieb die Nachricht der Gegenseite
+  um. Symmetrisch ist das nicht zu schliessen, wer einen MAC prüfen kann, kann
+  ihn auch rechnen. Jedes Gerät hält deshalb seit 09/2026 ein zweites Paar
+  (ECDSA P-256, `user_e2ee_devices.signing_public_key_jwk`) und unterschreibt
+  damit seine Nutzlasten; `nutzlastSignatur.ts` bildet die Zeichenkette aus
+  allen Feldern und der Mailbox-Kennung. **Die Downgrade-Schranke ist der Teil,
+  den man vergisst:** eine unsignierte Nutzlast geht nur durch, solange das
+  behauptete Konto *nirgends* einen Signaturschlüssel führt
+  (`kontoNutztSignaturen`) — sonst nähme ein Fälscher einfach die Signatur weg
+  und stünde wieder am Anfang. Wer ein neues Steuerpaket einführt, schickt es
+  über `sendE2eeControlMessage` und wertet seinen Urheber über `urheberVon`
+  aus; beides zu umgehen ist genau der Weg zurück.
+- **Ein zugestellter Gruppenschlüssel verdrängt keinen vorhandenen.** Er wird
+  abgelegt — ohne ihn wäre die Nachricht unlesbar, für die er gilt —, aber der
+  *aktuelle* wird er nur, wenn für die heutige Mitgliedschaft noch keiner da
+  ist. Vorher gewann der zuletzt eingetroffene, und damit konnte ein Mitglied
+  einem anderen einen nur ihm bekannten Schlüssel unterschieben: das Opfer
+  verschlüsselte ab da gegen ihn, und der Rest der Gruppe las nur noch
+  „Verschlüsselte Nachricht". Die Grenze, die bleibt: ein Gerät, das für diese
+  Mitgliedschaft noch gar keinen Schlüssel hat, nimmt weiterhin den ersten, der
+  kommt. Enger ginge es nur mit einer Beglaubigung auf der Zustellung selbst.
+- **Ein voller Gerätedeckel wird gemeldet, nicht stillschweigend geräumt.**
+  `_deckel_einhalten` verdrängte bis 09/2026 das am längsten stille Gerät. Auf
+  dem verdrängten änderte sich nichts sichtbar — der Verlauf blieb stehen, die
+  Oberfläche wirkte heil, und es kam nur nie wieder eine Nachricht an. Jetzt
+  antwortet `PUT /e2ee/devices/self` mit 409 und nennt den Weg
+  (`/profile?tab=devices`). Ein Messenger, der stumm wird und dabei heil
+  aussieht, ist schlimmer als einer, der sagt was los ist.
 - **Ein Steuerumschlag wird genau einmal beantwortet.** Die Mailbox gibt die
   letzten hundert Umschläge zurück, und der Lesepfad holt dieses Fenster alle
   fünf Sekunden neu. Eine Nachfrage nach dem Gruppenschlüssel bleibt darin
@@ -330,6 +364,16 @@ Harte Invarianten:
   gespeicherten Umschlag heraus, bevor irgendwer gefragt hatte, ob der Absender
   zu diesem Gespräch gehört. Jede Abkürzung, die früh zurückkehrt — Cache,
   Entprellung, Idempotenz —, muss hinter der Berechtigung liegen.
+- **Jeder Mailbox-Pfad prüft die Teilnahme, auch der lesende.**
+  `assert_mailbox_participant` stand einmal nur im Löschpfad. `GET
+  /api/social/e2ee/mailbox/{id}` stand jedem Angemeldeten offen, und weil die
+  Kennung aus zwei kleinen Ganzzahlen entsteht, liess sich damit jede DM- und
+  Gruppenmailbox des Panels aufzählen: Zeitstempel, `client_uuid`,
+  Chiffretext — und im Klartextkopf jedes Double-Ratchet-Umschlags Absenderkonto
+  und -gerät. Das ist der vollständige Sozialgraph, ohne Freundschaft und ohne
+  Mitgliedschaft. Ein früherer Stand dieser Datei nannte das „bewusst offen";
+  das war es nicht, und die Kennung ist keine Schranke (siehe den Kopf von
+  `models/e2ee_blind_envelope.py`).
 - **Der lokale Verlauf ist keine Zwischenablage, sondern das Original.** Wer
   eine Ratchet-Nachricht verschlüsselt, kann sie selbst nicht wieder öffnen,
   und der Server hat nur den Umschlag: der **eigene** Gesprächsanteil existiert

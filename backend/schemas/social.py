@@ -169,6 +169,67 @@ def validate_rsa_public_key_jwk(key_str: str) -> dict:
     return data
 
 
+def validate_ecdsa_public_key_jwk(key_str: str) -> dict:
+    """Validiert den Signaturschlüssel eines Geräts: ECDSA P-256, öffentlich.
+
+    Das Gegenstück zu `validate_rsa_public_key_jwk` — und bewusst eine eigene
+    Funktion, keine Erweiterung der anderen. Der eine Schlüssel verschlüsselt
+    und darf nie signieren, der andere signiert und darf nie verschlüsseln.
+    Eine gemeinsame Prüfung, die beides durchlässt, wäre genau die
+    Algorithmus-Verwechslung, die beide Funktionen ausschließen sollen.
+    """
+    if not isinstance(key_str, str) or not key_str.strip():
+        raise ValueError("Signaturschlüssel darf nicht leer sein.")
+    try:
+        data = json.loads(key_str)
+    except Exception as exc:
+        raise ValueError("Signaturschlüssel ist kein gültiges JSON.") from exc
+
+    if not isinstance(data, dict):
+        raise ValueError("Signaturschlüssel JWK muss ein JSON-Objekt sein.")
+
+    if data.get("kty") != "EC":
+        raise ValueError(
+            f"Ungültiger Schlüsseltyp: erwartet 'EC', erhalten '{data.get('kty')}'."
+        )
+    if data.get("crv") != "P-256":
+        raise ValueError(
+            f"Ungültige Kurve: erwartet 'P-256', erhalten '{data.get('crv')}'."
+        )
+
+    # `d` ist der private Skalar. Ein Client, der ihn aus Versehen mitschickt,
+    # wird hier gestoppt statt stillschweigend gespeichert.
+    if "d" in data:
+        raise ValueError(
+            "Sicherheitsverletzung: Der private Schlüsselparameter 'd' darf nicht im Public Key enthalten sein."
+        )
+
+    for feld in ("x", "y"):
+        wert = data.get(feld)
+        if not wert or not isinstance(wert, str):
+            raise ValueError(f"Unvollständiger EC-Schlüssel: '{feld}' fehlt.")
+
+    if "alg" in data and data["alg"] and data["alg"] != "ES256":
+        raise ValueError(
+            f"Sicherheitsverletzung: Nicht unterstützter Algorithmus '{data['alg']}' für den Signaturschlüssel."
+        )
+
+    if "use" in data and data["use"] and data["use"] != "sig":
+        raise ValueError(
+            f"Sicherheitsverletzung: Ungültige Schlüsselverwendung '{data['use']}' für einen Signaturschlüssel (erwartet 'sig')."
+        )
+
+    if "key_ops" in data and isinstance(data["key_ops"], list):
+        erlaubt = {"verify"}
+        unerlaubt = set(data["key_ops"]) - erlaubt
+        if unerlaubt:
+            raise ValueError(
+                f"Sicherheitsverletzung: Unerlaubte Operationen ({', '.join(sorted(unerlaubt))}) im Signatur-Public-Key."
+            )
+
+    return data
+
+
 def validate_e2ee_envelope_format(envelope_str: str) -> None:
     """Validiert, dass ein Umschlag ein gültiges DIS E2EE-Format besitzt und kein Plaintext ist."""
     import base64
@@ -243,6 +304,12 @@ def validate_e2ee_envelope_format(envelope_str: str) -> None:
         # Schlüssel, den er nie sieht. Der alte Gruppenumschlag trug hier
         # ausschließlich Base64 ohne Punkt und fällt damit durch — genau so
         # gewollt, sein Schlüssel ergab sich aus der Gruppenkennung.
+        #
+        # Die Absenderbeglaubigung steht **nicht** hier, sondern in der
+        # verschlüsselten Nutzlast (`nutzlastSignatur.ts`). Sie gehört dorthin,
+        # weil ein Direktchat sie genauso braucht und dessen Steuerpakete auf
+        # dem Hybridumschlag laufen — ein zweites Beglaubigungsverfahren im
+        # Umschlagkopf hätte dieselbe Zusage doppelt und verschieden gemacht.
         if "." not in payload:
             raise ValueError("Ungültiges Gruppen-Payload-Format: Schlüsselkennung vor dem Chiffretext fehlt.")
         key_id, gruppen_ct = payload.split(".", 1)
@@ -377,6 +444,9 @@ class E2eeDeviceUpdate(BaseModel):
 
     device_id: str = Field(..., min_length=8, max_length=64)
     public_key: str = Field(..., min_length=10, max_length=8192)
+    # Leer heißt „dieses Gerät kennt noch keine Signatur". Der Bestand meldet
+    # sich so, bis er einmal neu gestartet ist.
+    signing_public_key: str = Field(default="", max_length=2048)
     label: str = Field(default="", max_length=64)
 
     @field_validator("device_id")
@@ -395,10 +465,20 @@ class E2eeDeviceUpdate(BaseModel):
         validate_rsa_public_key_jwk(v)
         return v
 
+    @field_validator("signing_public_key")
+    @classmethod
+    def validate_signing_key(cls, v: str) -> str:
+        wert = (v or "").strip()
+        if not wert:
+            return ""
+        validate_ecdsa_public_key_jwk(wert)
+        return wert
+
 
 class E2eeDeviceItem(BaseModel):
     device_id: str
     public_key: str
+    signing_public_key: str = ""
     label: str = ""
 
 
