@@ -6104,7 +6104,8 @@
     "participantRemoved": "{{username}} was removed from the call.",
     "wrongKeyLength": "Room key has incorrect length",
     "participantUnmuted": "{{username}} can speak again.",
-    "participantMuted": "{{username}} is muted."
+    "participantMuted": "{{username}} is muted.",
+    "unauthorizedKeyExchange": "An unauthorised key change for this call was rejected."
   },
   "social": {
     "status": {
@@ -6760,7 +6761,8 @@
     "mute": "Mute",
     "chat": "Chat",
     "videoCall": "Video call",
-    "unblockContact": "Unblock"
+    "unblockContact": "Unblock",
+    "you": "You"
   },
   "databaseManager": {
     "subtitle": "Manage and edit this server’s PostgreSQL databases.",

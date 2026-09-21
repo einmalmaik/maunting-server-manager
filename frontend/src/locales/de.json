@@ -6104,7 +6104,8 @@
     "participantRemoved": "{{username}} wurde aus dem Anruf entfernt.",
     "wrongKeyLength": "Raumschlüssel hat die falsche Länge",
     "participantUnmuted": "{{username}} darf wieder sprechen.",
-    "participantMuted": "{{username}} ist stummgeschaltet."
+    "participantMuted": "{{username}} ist stummgeschaltet.",
+    "unauthorizedKeyExchange": "Ein unberechtigter Schlüsselwechsel für den Anruf wurde abgewiesen."
   },
   "social": {
     "status": {
@@ -6760,7 +6761,8 @@
     "mute": "Stummschalten",
     "chat": "Chat",
     "videoCall": "Videoanruf",
-    "unblockContact": "Blockierung aufheben"
+    "unblockContact": "Blockierung aufheben",
+    "you": "Du"
   },
   "databaseManager": {
     "subtitle": "Verwalte und bearbeite die PostgreSQL-Datenbanken dieses Servers.",
