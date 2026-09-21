@@ -522,10 +522,13 @@ describe('Gruppenanruf', () => {
 
 describe('Raumschlüssel', () => {
   it('übernimmt einen Umschlag für den eigenen Raum', async () => {
-    await verbundenerAnruf()
+    setzeAnrufIdentitaet({ userId: 2, publicKeyJwk: '{"kty":"RSA"}', decryptionKeys: ['k'] })
+    await useCallStore.getState().initiateCall({ userId: 1, username: 'alice', avatarUrl: null }, 'audio')
+    aktuellerRaum.feuere(RoomEvent.Connected)
+
     schluessel.entpacke.mockResolvedValueOnce(new Uint8Array(32).fill(9))
 
-    await useCallStore.getState().acceptRoomKey('raum-1', 'sv-e2ee-hybrid-v1.xyz')
+    await useCallStore.getState().acceptRoomKey('raum-1', 'sv-e2ee-hybrid-v1.xyz', 1)
 
     expect(schluessel.entpacke).toHaveBeenCalledWith('sv-e2ee-hybrid-v1.xyz', ['k'])
     expect(livekit.setzeRaumSchluessel).toHaveBeenCalled()
@@ -534,20 +537,46 @@ describe('Raumschlüssel', () => {
   it('ignoriert einen Umschlag für einen fremden Raum', async () => {
     await verbundenerAnruf()
 
-    await useCallStore.getState().acceptRoomKey('ein-anderer-raum', 'sv-e2ee-hybrid-v1.xyz')
+    await useCallStore.getState().acceptRoomKey('ein-anderer-raum', 'sv-e2ee-hybrid-v1.xyz', 2)
 
     expect(schluessel.entpacke).not.toHaveBeenCalled()
     expect(livekit.setzeRaumSchluessel).not.toHaveBeenCalled()
   })
 
   it('läuft weiter, wenn ein Umschlag nicht zu öffnen ist', async () => {
-    await verbundenerAnruf()
+    setzeAnrufIdentitaet({ userId: 2, publicKeyJwk: '{"kty":"RSA"}', decryptionKeys: ['k'] })
+    await useCallStore.getState().initiateCall({ userId: 1, username: 'alice', avatarUrl: null }, 'audio')
+    aktuellerRaum.feuere(RoomEvent.Connected)
     schluessel.entpacke.mockRejectedValueOnce(new Error('nicht für uns'))
 
     await expect(
-      useCallStore.getState().acceptRoomKey('raum-1', 'kaputt'),
+      useCallStore.getState().acceptRoomKey('raum-1', 'kaputt', 1),
     ).resolves.toBeUndefined()
     expect(useCallStore.getState().state).toBe('active')
+  })
+
+  it('verwirft einen zweiten Raumschlüssel von einem nicht-zuständigen Teilnehmer', async () => {
+    await verbundenerAnruf()
+    schluessel.entpacke.mockClear()
+    livekit.setzeRaumSchluessel.mockClear()
+
+    // Ein zweiter Schlüssel von einem nicht-zuständigen Teilnehmer (z. B. User 99)
+    await useCallStore.getState().acceptRoomKey('raum-1', 'sv-e2ee-hybrid-v1.unauthorized', 99)
+
+    expect(schluessel.entpacke).not.toHaveBeenCalled()
+    expect(livekit.setzeRaumSchluessel).not.toHaveBeenCalled()
+  })
+
+  it('verwirft einen Schlüsselwechsel ohne fromUserId, wenn bereits ein Schlüssel aktiv ist', async () => {
+    await verbundenerAnruf()
+    schluessel.entpacke.mockClear()
+    livekit.setzeRaumSchluessel.mockClear()
+
+    // Ein Schlüsselwechsel ohne fromUserId wird abgewiesen
+    await useCallStore.getState().acceptRoomKey('raum-1', 'sv-e2ee-hybrid-v1.anonymous')
+
+    expect(schluessel.entpacke).not.toHaveBeenCalled()
+    expect(livekit.setzeRaumSchluessel).not.toHaveBeenCalled()
   })
 })
 

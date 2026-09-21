@@ -144,6 +144,7 @@ import {
   type E2eeIdentity,
 } from '@/services/e2eeIdentity'
 import { logischeUuid, DrZustellungFehlgeschlagenError } from '@/services/ratchetSitzung'
+import { geraeteVon, onNeuesGeraet } from '@/services/e2eeGeraet'
 import { verwirfGruppenSchluessel } from '@/services/gruppenSchluessel'
 import {
   entferneLokaleNachricht,
@@ -1536,6 +1537,39 @@ export function Messenger() {
     )
   }, [])
 
+  // M-10: Überwachung des Geräteverzeichnisses — warnt bei neuen Geräten eines Gesprächspartners
+  useEffect(() => {
+    if (!activeContact?.userId) return
+    geraeteVon(activeContact.userId).catch(() => {})
+  }, [activeContact?.userId])
+
+  useEffect(() => {
+    const abbestellen = onNeuesGeraet((peerId, neue) => {
+      if (neue.length === 0) return
+      if (activeContact && activeContact.userId === peerId) {
+        const name = activeContact.username || t('messenger.thisContact')
+        zeigeSystemzeile(
+          t('messenger.newDeviceDetected', {
+            name,
+            defaultValue: `${name} hat ein neues Gerät angemeldet.`,
+          }),
+        )
+      } else if (activeGroup) {
+        const member = (activeGroup.members ?? []).find((m) => Number(m.user_id) === peerId)
+        if (member) {
+          const name = member.username || member.display_name || t('messenger.thisContact')
+          zeigeSystemzeile(
+            t('messenger.newDeviceDetected', {
+              name,
+              defaultValue: `${name} hat ein neues Gerät angemeldet.`,
+            }),
+          )
+        }
+      }
+    })
+    return abbestellen
+  }, [activeContact, activeGroup, t, zeigeSystemzeile])
+
   const konversation = useKonversation({
     ziel: gespraechsZiel,
     eigeneId: currentUserId,
@@ -1624,7 +1658,7 @@ export function Messenger() {
       typeof crypto !== 'undefined' && crypto.randomUUID
         ? crypto.randomUUID()
         : 'ctrl-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9)
-    const payload = JSON.stringify({ ...payloadObj, client_uuid: clientUuid })
+    const payload = JSON.stringify({ actor_id: currentUserId, ...payloadObj, client_uuid: clientUuid })
     const auftraege = await konversation.baueSteuerversand(
       payload,
       clientUuid,
@@ -1761,19 +1795,59 @@ export function Messenger() {
             // 2. Edit message control packet
             if (parsed.type === 'edit_message') {
               if (parsed.new_text) {
-                aenderungen.merke(parsed, {
-                  newText: String(parsed.new_text),
-                  editedAt: String(parsed.edited_at || env.created_at),
-                })
+                if (
+                  activeContact &&
+                  lesung.vonKonto !== undefined &&
+                  parsed.actor_id !== undefined &&
+                  Number(parsed.actor_id) !== Number(lesung.vonKonto)
+                ) {
+                  console.warn('[Messenger] Dropping edit packet with forged actor_id:', parsed.actor_id)
+                  continue
+                }
+                const urheber =
+                  lesung.vonKonto ??
+                  (parsed.actor_id !== undefined
+                    ? Number(parsed.actor_id)
+                    : parsed.sender_id !== undefined
+                      ? Number(parsed.sender_id)
+                      : (activeContact ? activeContact.userId : undefined))
+                aenderungen.merke(
+                  parsed,
+                  {
+                    newText: String(parsed.new_text),
+                    editedAt: String(parsed.edited_at || env.created_at),
+                  },
+                  urheber,
+                )
               }
               continue
             }
 
             // 3. Delete message control packet
             if (parsed.type === 'delete_message') {
-              loeschungen.merke(parsed, {
-                deletedAt: String(parsed.deleted_at || env.created_at),
-              })
+              if (
+                activeContact &&
+                lesung.vonKonto !== undefined &&
+                parsed.actor_id !== undefined &&
+                Number(parsed.actor_id) !== Number(lesung.vonKonto)
+              ) {
+                console.warn('[Messenger] Dropping delete packet with forged actor_id:', parsed.actor_id)
+                continue
+              }
+              const urheber =
+                lesung.vonKonto ??
+                (parsed.actor_id !== undefined
+                  ? Number(parsed.actor_id)
+                  : parsed.sender_id !== undefined
+                    ? Number(parsed.sender_id)
+                    : (activeContact ? activeContact.userId : undefined))
+              loeschungen.merke(
+                parsed,
+                {
+                  deletedAt: String(parsed.deleted_at || env.created_at),
+                },
+                urheber,
+              )
               continue
             }
 
@@ -1863,9 +1937,42 @@ export function Messenger() {
               seenClientUuids.add(clientUuid)
             }
 
-            let senderId = parsed.sender_id || (activeContact ? activeContact.userId : 0)
-            let senderName = parsed.sender_name || parsed.sender_username
-            let isSelf = Number(senderId) === Number(currentUserId)
+            let senderId: number
+            let senderName: string
+            let isSelf: boolean
+
+            if (activeContact) {
+              // Direct Chat (1:1): Die kryptografisch verifizierte Identitaet kommt aus dem
+              // Double-Ratchet-Umschlag (lesung.vonKonto). Nutzlast-Angaben (parsed.sender_id)
+              // duerfen die Identitaet nicht faelschen (K-1).
+              senderId = lesung.vonKonto ?? activeContact.userId
+              if (parsed.sender_id !== undefined && Number(parsed.sender_id) !== Number(senderId)) {
+                console.warn(
+                  '[Messenger] Dropping message with forged sender_id in direct chat:',
+                  parsed.sender_id,
+                  'expected:',
+                  senderId,
+                )
+                continue
+              }
+              isSelf = Number(senderId) === Number(currentUserId)
+              senderName = isSelf
+                ? t('messenger.you')
+                : (activeContact.username || activeContact.fullName || '')
+            } else if (activeGroup) {
+              // Group Chat: senderId aus Nutzlast, aber senderName wird aus verifizierten
+              // Gruppenmitgliedern aufgeloest, um Display-Name-Spoofing zu verhindern.
+              senderId = Number(parsed.sender_id || 0)
+              isSelf = Number(senderId) === Number(currentUserId)
+              const groupMember = activeGroup.members?.find((m) => Number(m.user_id) === Number(senderId))
+              senderName = isSelf
+                ? t('messenger.you')
+                : (groupMember?.username || parsed.sender_name || parsed.sender_username || '')
+            } else {
+              senderId = Number(parsed.sender_id || 0)
+              isSelf = Number(senderId) === Number(currentUserId)
+              senderName = parsed.sender_name || parsed.sender_username || ''
+            }
 
             if (!isSelf && env.id > maxIncomingId) {
               maxIncomingId = env.id
@@ -1929,8 +2036,26 @@ export function Messenger() {
         }
       }
 
-      const findeAenderung = (m: Bezugsziel) => aenderungen.finde(m)
-      const findeLoeschung = (m: Bezugsziel) => loeschungen.finde(m)
+      const findeAenderung = (m: ChatMessage) =>
+        aenderungen.finde(m, (urheber) => urheber !== undefined && Number(urheber) === Number(m.senderId))
+
+      const findeLoeschung = (m: ChatMessage) =>
+        loeschungen.finde(m, (urheber) => {
+          if (urheber === undefined) return false
+          if (Number(urheber) === Number(m.senderId)) return true
+          if (activeGroup?.members) {
+            const member = activeGroup.members.find((x) => Number(x.user_id) === Number(urheber))
+            if (member) {
+              return (
+                Number(activeGroup.owner_user_id) === Number(urheber) ||
+                member.role === 'admin' ||
+                member.role === 'moderator' ||
+                Boolean(member.can_pin_messages)
+              )
+            }
+          }
+          return false
+        })
 
       // Apply Edits, Deletions, and Read Status
       // Gelöscht = gelöscht. Kein Originaltext wird aufbewahrt (Zero Knowledge).
@@ -3437,23 +3562,39 @@ export function Messenger() {
        */
       let niedrigsteId = 0
       let verbindungsfehler = false
+      const gescheiterteGeraete = new Set<string>()
+      let ueberspringeNaechsteNachricht = false
+
       for (const auftrag of auftraege) {
-        // Reihenfolge ist bindend: ohne den Sitzungsaufbau findet die
-        // Gegenstelle keine Sitzung und läuft in den Sitzungsbruch.
-        //
-        // Gesendet wird ohne Vorabfrage. Hier stand bis 09/2026
-        // `!navigator.onLine` davor und legte jeden Auftrag ungeprüft in die
-        // Warteschlange. Diese Auskunft des Systems ist keine Aussage über die
-        // Erreichbarkeit des Backends: im Tauri-Fenster unter Windows meldet
-        // sie schon dann „offline", wenn ein virtueller Netzadapter dazwischen
-        // liegt, und der Benutzer sah Nachrichten, die nie losgingen, obwohl
-        // sein Netz stand. Ob es geht, weiss nur der Versuch.
+        // H-6: Paarbildung im Sendepfad. Scheitert ein Auftrag (z. B. dr-init),
+        // darf die zugehörige Ratchet-Nachricht desselben Zielgeräts nicht gesendet
+        // werden, sondern muss ebenfalls eingereiht werden, um Sitzungsbrüche zu verhindern.
+        const raute = auftrag.client_uuid ? auftrag.client_uuid.indexOf('#') : -1
+        const rawSuffix = raute !== -1 ? auftrag.client_uuid.slice(raute + 1) : ''
+        const geraetKey = rawSuffix.startsWith('i') ? rawSuffix.slice(1) : rawSuffix
+
+        const mussUeberspringen =
+          (ueberspringeNaechsteNachricht && !auftrag.is_control) ||
+          Boolean(geraetKey && gescheiterteGeraete.has(geraetKey))
+
+        if (mussUeberspringen) {
+          enqueueMessageMutation(auftrag)
+          ueberspringeNaechsteNachricht = false
+          continue
+        }
+
         try {
           const r = await relayE2eeEnvelope(auftrag)
           if (!auftrag.is_control && r && typeof r.id === 'number') {
             if (niedrigsteId === 0 || r.id < niedrigsteId) niedrigsteId = r.id
           }
         } catch {
+          if (geraetKey) {
+            gescheiterteGeraete.add(geraetKey)
+          }
+          if (auftrag.is_control && auftrag.control_type === 'dr-init') {
+            ueberspringeNaechsteNachricht = true
+          }
           enqueueMessageMutation(auftrag)
           verbindungsfehler = true
         }

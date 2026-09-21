@@ -32,6 +32,7 @@ class E2eeBlindEnvelope(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     blind_mailbox_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     ciphertext_envelope: Mapped[str] = mapped_column(Text, nullable=False)
+    ciphertext_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     client_uuid: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False, index=True

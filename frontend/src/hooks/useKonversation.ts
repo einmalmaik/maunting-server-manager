@@ -75,7 +75,7 @@ export type GespraechsZiel =
  * zwei Geräten je Seite zur Hälfte Rauschen.
  */
 export type Lesung =
-  | { art: 'klartext'; env: BlindEnvelopeItem; text: string }
+  | { art: 'klartext'; env: BlindEnvelopeItem; text: string; vonKonto?: number; vonGeraet?: string }
   | { art: 'still'; env: BlindEnvelopeItem }
   | { art: 'unlesbar'; env: BlindEnvelopeItem }
 
@@ -327,9 +327,26 @@ export function useKonversation({
 
     const einUmschlag = async (env: BlindEnvelopeItem): Promise<Lesung> => {
       const gespeichert = bekannt.get(env.id)
-      if (gespeichert !== undefined) return { art: 'klartext', env, text: gespeichert }
+      if (gespeichert !== undefined) {
+        const zwischen = envelopePlaintextCache.get(env.id)
+        return {
+          art: 'klartext',
+          env,
+          text: gespeichert,
+          vonKonto: zwischen?.vonKonto,
+          vonGeraet: zwischen?.vonGeraet,
+        }
+      }
       const zwischen = envelopePlaintextCache.get(env.id)
-      if (zwischen?.ok) return { art: 'klartext', env, text: zwischen.plain }
+      if (zwischen?.ok) {
+        return {
+          art: 'klartext',
+          env,
+          text: zwischen.plain,
+          vonKonto: zwischen.vonKonto,
+          vonGeraet: zwischen.vonGeraet,
+        }
+      }
 
       try {
         if (gruppenKontext) {
@@ -408,8 +425,19 @@ export function useKonversation({
             lege: (text) => speichereUmschlagKlartext(mid, env.id, text),
           })
           if (lesung.art === 'klartext') {
-            envelopePlaintextCache.set(env.id, { plain: lesung.text, ok: true })
-            return { art: 'klartext', env, text: lesung.text }
+            envelopePlaintextCache.set(env.id, {
+              plain: lesung.text,
+              ok: true,
+              vonKonto: lesung.vonKonto,
+              vonGeraet: lesung.vonGeraet,
+            })
+            return {
+              art: 'klartext',
+              env,
+              text: lesung.text,
+              vonKonto: lesung.vonKonto,
+              vonGeraet: lesung.vonGeraet,
+            }
           }
           if (lesung.art === 'bruch') {
             gebrochene.push({ vonKonto: lesung.vonKonto, vonGeraet: lesung.vonGeraet })

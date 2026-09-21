@@ -6521,6 +6521,7 @@
     "e2eeBanner": "Messages in this chat are end-to-end encrypted.",
     "encryptedMessage": "Encrypted message",
     "sessionRebuilt": "The security session with this device was rebuilt. Older messages from this device stay unreadable.",
+    "newDeviceDetected": "{{name}} registered a new device.",
     "keyPreparing": "Preparing key …",
     "deviceKeyNotReady": "This device’s key is not ready yet.",
     "deviceKeyNotReadyRetry": "This device’s key is not ready yet. Try again in a moment.",

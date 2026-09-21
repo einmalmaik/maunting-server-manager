@@ -476,6 +476,114 @@ class SocialService:
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     @classmethod
+    def derive_group_blind_mailbox_id(cls, group_id: int) -> str:
+        """Deterministische Hash-Berechnung der blinden Gruppen-Mailbox-ID.
+
+        Identisch zur Formatdefinition in frontend/src/services/e2eeCrypto.ts.
+        """
+        raw = f"msm:group:{group_id}"
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def derive_legacy_direct_mailbox_id(cls, user_a_id: int, user_b_id: int) -> str:
+        """Alte Ableitung der Mailbox-ID vor Einführung von msm:dm:<min>:<max>."""
+        min_i, max_i = min(user_a_id, user_b_id), max(user_a_id, user_b_id)
+        return hashlib.sha256(f"msm-e2ee-box:{min_i}:{max_i}:".encode("utf-8")).hexdigest()
+
+    @classmethod
+    def is_blocked(cls, db: Session, user_a_id: int, user_b_id: int) -> bool:
+        """Prüft, ob zwischen zwei Benutzern eine gegenseitige Blockierung vorliegt."""
+        return (
+            db.query(UserFriend)
+            .filter(
+                or_(
+                    and_(UserFriend.user_id == user_a_id, UserFriend.friend_id == user_b_id),
+                    and_(UserFriend.user_id == user_b_id, UserFriend.friend_id == user_a_id),
+                ),
+                UserFriend.status == "blocked",
+            )
+            .first()
+        ) is not None
+
+    @classmethod
+    def resolve_mailbox_target(
+        cls,
+        db: Session,
+        sender_user_id: int,
+        blind_mailbox_id: str,
+        recipient_id: int | None = None,
+    ) -> tuple[int | None, list[int], DirectChat | None, int | None]:
+        """Ermittelt das Ziel einer blinden Mailbox für den Absender.
+
+        Liefert (target_recipient_id, group_member_ids, direct_chat, target_group_id).
+        Wirft HTTPException bei fehlender Berechtigung oder ungültigem Empfänger.
+        """
+        clean_mailbox = blind_mailbox_id.strip()
+        cls.assert_social_enabled(db)
+        user_device_box = cls.derive_user_device_mailbox_id(sender_user_id)
+
+        if clean_mailbox == user_device_box or (recipient_id and recipient_id == sender_user_id):
+            if clean_mailbox != user_device_box:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Mailbox-ID stimmt nicht mit der Geräte-Sync-Mailbox überein.",
+                )
+            return sender_user_id, [], None, None
+
+        if recipient_id:
+            expected_mailbox = cls.derive_blind_mailbox_id(sender_user_id, recipient_id)
+            legacy_mailbox = cls.derive_legacy_direct_mailbox_id(sender_user_id, recipient_id)
+            if clean_mailbox != expected_mailbox and clean_mailbox != legacy_mailbox:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Mailbox-ID stimmt nicht mit dem angegebenen Empfänger überein.",
+                )
+            chat = cls.ensure_direct_chat(db, sender_user_id, recipient_id)
+            return recipient_id, [], chat, None
+
+        # 1. Direktchat über bekannte Mailbox-ID in DB
+        chat = db.query(DirectChat).filter_by(blind_mailbox_id=clean_mailbox).first()
+        if chat:
+            if sender_user_id not in (chat.user_a_id, chat.user_b_id):
+                raise HTTPException(status_code=403, detail="Keine Berechtigung für diesen Chat.")
+            other_id = chat.get_other_user_id(sender_user_id)
+            if cls.is_blocked(db, sender_user_id, other_id):
+                raise HTTPException(status_code=403, detail="Benutzer ist blockiert.")
+            chat.updated_at = _now()
+            db.commit()
+            return other_id, [], chat, None
+
+        # 2. Kandidatensuche über aktive Benutzer (O(N) Fallback)
+        candidates = db.query(User.id).filter(User.is_active == True, User.id != sender_user_id).all()
+        for (cand_id,) in candidates:
+            if (
+                cls.derive_blind_mailbox_id(sender_user_id, cand_id) == clean_mailbox
+                or cls.derive_legacy_direct_mailbox_id(sender_user_id, cand_id) == clean_mailbox
+            ):
+                if cls.is_blocked(db, sender_user_id, cand_id):
+                    raise HTTPException(status_code=403, detail="Benutzer ist blockiert.")
+                chat = cls.ensure_direct_chat(db, sender_user_id, cand_id)
+                return cand_id, [], chat, None
+
+        # 3. Gruppen-Mailbox prüfen
+        user_groups = (
+            db.query(ChatGroupMember.group_id)
+            .filter_by(user_id=sender_user_id)
+            .all()
+        )
+        for (gid,) in user_groups:
+            if cls.derive_group_blind_mailbox_id(gid) == clean_mailbox:
+                group_member_ids = [
+                    m.user_id
+                    for m in db.query(ChatGroupMember.user_id)
+                    .filter_by(group_id=gid)
+                    .all()
+                ]
+                return None, group_member_ids, None, gid
+
+        return None, [], None, None
+
+    @classmethod
     def can_message_user(cls, db: Session, sender_id: int, target_user_id: int) -> tuple[bool, str | None]:
         """Prüft Berechtigung zum Senden von Direktnachrichten zwischen zwei Benutzern.
 
@@ -1069,86 +1177,12 @@ class SocialService:
         group_member_ids: list[int] = []
 
         if sender_user_id:
-            cls.assert_social_enabled(db)
-            user_device_box = cls.derive_user_device_mailbox_id(sender_user_id)
-            if clean_mailbox == user_device_box or (recipient_id and recipient_id == sender_user_id):
-                if clean_mailbox != user_device_box:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Mailbox-ID stimmt nicht mit der Geräte-Sync-Mailbox überein.",
-                    )
-                target_recipient_id = sender_user_id
-            elif recipient_id:
-                expected_mailbox = cls.derive_blind_mailbox_id(sender_user_id, recipient_id)
-                min_i, max_i = min(sender_user_id, recipient_id), max(sender_user_id, recipient_id)
-                legacy_mailbox = hashlib.sha256(f"msm-e2ee-box:{min_i}:{max_i}:".encode("utf-8")).hexdigest()
-                if clean_mailbox != expected_mailbox and clean_mailbox != legacy_mailbox:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Mailbox-ID stimmt nicht mit dem angegebenen Empfänger überein.",
-                    )
-                cls.ensure_direct_chat(db, sender_user_id, recipient_id)
-                target_recipient_id = recipient_id
-            else:
-                chat = db.query(DirectChat).filter_by(blind_mailbox_id=clean_mailbox).first()
-                if chat:
-                    if sender_user_id not in (chat.user_a_id, chat.user_b_id):
-                        raise HTTPException(status_code=403, detail="Keine Berechtigung für diesen Chat.")
-                    blocked = (
-                        db.query(UserFriend)
-                        .filter(
-                            or_(
-                                and_(UserFriend.user_id == chat.user_a_id, UserFriend.friend_id == chat.user_b_id),
-                                and_(UserFriend.user_id == chat.user_b_id, UserFriend.friend_id == chat.user_a_id),
-                            ),
-                            UserFriend.status == "blocked",
-                        )
-                        .first()
-                    )
-                    if blocked:
-                        raise HTTPException(status_code=403, detail="Benutzer ist blockiert.")
-                    chat.updated_at = _now()
-                    db.commit()
-                    target_recipient_id = chat.get_other_user_id(sender_user_id)
-                else:
-                    candidates = db.query(User.id).filter(User.is_active == True, User.id != sender_user_id).all()
-                    found_target = None
-                    for (cand_id,) in candidates:
-                        if cls.derive_blind_mailbox_id(sender_user_id, cand_id) == clean_mailbox:
-                            found_target = cand_id
-                            break
-                        min_i, max_i = min(sender_user_id, cand_id), max(sender_user_id, cand_id)
-                        legacy_mailbox = hashlib.sha256(f"msm-e2ee-box:{min_i}:{max_i}:".encode("utf-8")).hexdigest()
-                        if clean_mailbox == legacy_mailbox:
-                            found_target = cand_id
-                            break
-                    if found_target:
-                        cls.ensure_direct_chat(db, sender_user_id, found_target)
-                        target_recipient_id = found_target
-                    else:
-                        # Prüfen, ob clean_mailbox zu einer ChatGroup gehört
-                        groups = db.query(ChatGroup).all()
-                        for g in groups:
-                            g_mid = hashlib.sha256(f"msm:group:{g.id}".encode("utf-8")).hexdigest()
-                            if g_mid == clean_mailbox:
-                                mem = (
-                                    db.query(ChatGroupMember)
-                                    .filter_by(group_id=g.id, user_id=sender_user_id)
-                                    .first()
-                                )
-                                if not mem:
-                                    raise HTTPException(
-                                        status_code=403,
-                                        detail="Keine Berechtigung für diese Gruppe.",
-                                    )
-                                group_member_ids = [
-                                    m.user_id
-                                    for m in db.query(ChatGroupMember.user_id)
-                                    .filter_by(group_id=g.id)
-                                    .all()
-                                ]
-                                break
-
+            target_recipient_id, group_member_ids, _, _ = cls.resolve_mailbox_target(
+                db,
+                sender_user_id=sender_user_id,
+                blind_mailbox_id=clean_mailbox,
+                recipient_id=recipient_id,
+            )
             if target_recipient_id is None and not group_member_ids:
                 raise HTTPException(status_code=403, detail="Keine Berechtigung für diese Mailbox.")
 
@@ -1184,9 +1218,21 @@ class SocialService:
         # Absenders trägt dieselbe client_uuid und ist eine Zeile weiter oben
         # schon beantwortet. Stünde diese Prüfung davor, bekäme jeder
         # Netzwerk-Retry eine 409 statt der Bestätigung.
-        if db.query(E2eeBlindEnvelope.id).filter(
-            E2eeBlindEnvelope.ciphertext_envelope == clean_envelope,
-        ).first():
+        envelope_hash = hashlib.sha256(clean_envelope.encode("utf-8")).hexdigest()
+        replay_found = (
+            db.query(E2eeBlindEnvelope.id)
+            .filter(
+                or_(
+                    E2eeBlindEnvelope.ciphertext_sha256 == envelope_hash,
+                    and_(
+                        E2eeBlindEnvelope.ciphertext_sha256.is_(None),
+                        E2eeBlindEnvelope.ciphertext_envelope == clean_envelope,
+                    ),
+                )
+            )
+            .first()
+        )
+        if replay_found:
             raise HTTPException(
                 status_code=409,
                 detail="Replay-Angriff erkannt: Dieser verschlüsselte Umschlag wurde bereits übertragen.",
@@ -1195,6 +1241,7 @@ class SocialService:
         envelope = E2eeBlindEnvelope(
             blind_mailbox_id=clean_mailbox,
             ciphertext_envelope=clean_envelope,
+            ciphertext_sha256=envelope_hash,
             client_uuid=clean_client_uuid,
             created_at=_now(),
         )
@@ -1307,7 +1354,7 @@ class SocialService:
         for (gid,) in (
             db.query(ChatGroupMember.group_id).filter(ChatGroupMember.user_id == user_id).all()
         ):
-            if hashlib.sha256(f"msm:group:{gid}".encode("utf-8")).hexdigest() == clean:
+            if cls.derive_group_blind_mailbox_id(gid) == clean:
                 return
 
         friends = (
@@ -1504,48 +1551,21 @@ class SocialService:
         group_member_ids: list[int] = []
         if db:
             if not target_recipient_id:
-                chat = db.query(DirectChat).filter_by(blind_mailbox_id=clean_mailbox).first()
-                if chat and sender_id in (chat.user_a_id, chat.user_b_id):
-                    target_recipient_id = chat.get_other_user_id(sender_id)
-                else:
-                    candidates = db.query(User.id).filter(User.is_active == True, User.id != sender_id).all()
-                    for (cand_id,) in candidates:
-                        if cls.derive_blind_mailbox_id(sender_id, cand_id) == clean_mailbox:
-                            target_recipient_id = cand_id
-                            break
-                        min_i, max_i = min(sender_id, cand_id), max(sender_id, cand_id)
-                        legacy_mailbox = hashlib.sha256(f"msm-e2ee-box:{min_i}:{max_i}:".encode("utf-8")).hexdigest()
-                        if clean_mailbox == legacy_mailbox:
-                            target_recipient_id = cand_id
-                            break
-
-                    if not target_recipient_id:
-                        for g in db.query(ChatGroup).all():
-                            g_mid = hashlib.sha256(f"msm:group:{g.id}".encode("utf-8")).hexdigest()
-                            if g_mid == clean_mailbox:
-                                group_member_ids = [
-                                    m.user_id
-                                    for m in db.query(ChatGroupMember.user_id)
-                                    .filter_by(group_id=g.id)
-                                    .all()
-                                    if m.user_id != sender_id
-                                ]
-                                break
-
-            if target_recipient_id:
-                blocked = (
-                    db.query(UserFriend)
-                    .filter(
-                        or_(
-                            and_(UserFriend.user_id == sender_id, UserFriend.friend_id == target_recipient_id),
-                            and_(UserFriend.user_id == target_recipient_id, UserFriend.friend_id == sender_id),
-                        ),
-                        UserFriend.status == "blocked",
+                try:
+                    resolved_target, all_members, _, _ = cls.resolve_mailbox_target(
+                        db,
+                        sender_user_id=sender_id,
+                        blind_mailbox_id=clean_mailbox,
+                        recipient_id=recipient_id,
                     )
-                    .first()
-                )
-                if blocked:
+                    target_recipient_id = resolved_target
+                    if all_members:
+                        group_member_ids = [m for m in all_members if m != sender_id]
+                except HTTPException:
                     return
+
+            if target_recipient_id and cls.is_blocked(db, sender_id, target_recipient_id):
+                return
 
         payload = {
             "type": "e2ee_typing_signal",

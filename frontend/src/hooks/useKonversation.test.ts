@@ -221,7 +221,7 @@ describe('useKonversation', () => {
       const { result } = await baueHook({ art: 'direkt', peerId: DU })
       const gelesen = await result.current.liesUmschlaege()
 
-      expect(gelesen).toEqual([{ art: 'klartext', env: umschlaege[0], text: 'Hallo' }])
+      expect(gelesen).toEqual([{ art: 'klartext', env: umschlaege[0], text: 'Hallo', vonKonto: DU, vonGeraet: 'fremd-a' }])
       const { speichereUmschlagKlartext } = await import('@/services/messengerLocalStore')
       expect(speichereUmschlagKlartext).toHaveBeenCalledWith('dm-1-2', 1, 'Hallo')
     })

@@ -606,7 +606,10 @@ export async function encryptE2eeHybrid(
   }
 }
 
-export const envelopePlaintextCache = new Map<number, { plain: string; ok: boolean }>()
+export const envelopePlaintextCache = new Map<
+  number,
+  { plain: string; ok: boolean; vonKonto?: number; vonGeraet?: string }
+>()
 
 /**
  * Clears the in-memory decrypted envelope plaintext cache.
@@ -656,12 +659,14 @@ export async function decryptE2eeHybrid(
     }
 
     let rawBytes: Uint8Array | null = null
+    let isLegacyJsonArray = false
     for (const wrappedKey of keyList) {
       try {
         const rawKeyPlain = await rsaOaepDecrypt(wrappedKey, rsaPrivKey)
         if (rawKeyPlain.startsWith('[')) {
           // Backward-compatibility: JSON array format
           rawBytes = new Uint8Array(JSON.parse(rawKeyPlain))
+          isLegacyJsonArray = true
         } else {
           // Standard DIS format: base64 encoded raw key bytes
           rawBytes = base64ToBytes(rawKeyPlain)
@@ -681,13 +686,11 @@ export async function decryptE2eeHybrid(
     try {
       return await secureKey.useAsync(async (keyBytes) => {
         const symKey = await importAesGcmRawKey(keyBytes, ['decrypt'])
-        // Attempt decryption with wrappedKeys bound in AAD (anti-tamper / anti-session-swap)
-        try {
-          return await decryptString(ciphertext, symKey, `msm:hybrid:aad:${wrappedKeysPart}`)
-        } catch {
-          // Fallback to legacy static AAD for backwards compatibility with pre-fix envelopes
+        if (isLegacyJsonArray) {
           return await decryptString(ciphertext, symKey, 'msm:hybrid:aad')
         }
+        // Decrypt with wrappedKeys bound in AAD (anti-tamper / anti-session-swap)
+        return await decryptString(ciphertext, symKey, `msm:hybrid:aad:${wrappedKeysPart}`)
       })
     } finally {
       secureKey.destroy()

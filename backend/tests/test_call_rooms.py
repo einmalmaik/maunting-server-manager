@@ -144,14 +144,33 @@ def test_ein_raum_wird_nicht_endlos_verlaengert(monkeypatch) -> None:
         "services.call_room_service.time.time", lambda: echt() + versatz["wert"]
     )
 
-    for schritt in range(1, 80):
-        versatz["wert"] = schritt * 100.0
+    # Anruf annehmen, damit die Gespraechsfrist gilt
+    assert CallRoomService.authorize(raum, 2) is True
+
+    for schritt in range(1, 300):
+        versatz["wert"] = schritt * 30.0
         if not CallRoomService.authorize(raum, 1):
             break
     else:  # pragma: no cover - waere ein Fehler, kein erwarteter Pfad
         pytest.fail("Der Raum lebte laenger als die Obergrenze erlaubt.")
 
-    assert versatz["wert"] <= 7300.0
+    assert 7000.0 <= versatz["wert"] <= 7300.0
+
+
+def test_angenommener_raum_bleibt_ueber_einladungsfrist_hinaus_gueltig(monkeypatch) -> None:
+    """Ein angenommener Anrufraum stirbt nicht nach 60 Sekunden Einladungsfrist."""
+    raum = CallRoomService.issue(1, 2)
+    echt = __import__("time").time
+    versatz = {"wert": 0.0}
+    monkeypatch.setattr(
+        "services.call_room_service.time.time", lambda: echt() + versatz["wert"]
+    )
+
+    assert CallRoomService.authorize(raum, 2) is True
+
+    versatz["wert"] = 300.0
+    assert CallRoomService.authorize(raum, 1) is True
+    assert CallRoomService.berechtigte(raum) == {1, 2}
 
 
 # ── Einladung ───────────────────────────────────────────────────────────────

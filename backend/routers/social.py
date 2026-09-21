@@ -578,13 +578,8 @@ def fetch_blind_mailbox_envelopes(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[dict]:
-    # Blinde Geräte-Mailboxen dürfen nur vom jeweiligen Kontoinhaber abgefragt werden
-    own_device_mailbox = SocialService.derive_user_device_mailbox_id(current_user.id)
-    if blind_mailbox_id != own_device_mailbox:
-        other_users = db.query(User.id).filter(User.id != current_user.id).all()
-        for (uid,) in other_users:
-            if SocialService.derive_user_device_mailbox_id(uid) == blind_mailbox_id:
-                raise HTTPException(status_code=403, detail="Keine Berechtigung für diese Geräte-Mailbox.")
+    # H-3: Jede Mailbox darf nur von berechtigten Teilnehmern abgefragt werden
+    SocialService.assert_mailbox_participant(db, current_user.id, blind_mailbox_id)
 
     envelopes = SocialService.get_blind_envelopes(
         db, blind_mailbox_id=blind_mailbox_id, since_id=since_id, limit=limit
@@ -652,6 +647,37 @@ def list_my_groups(
     return SocialService.list_user_groups(db, user.id)
 
 
+def _gruppe_antwort(db: Session, group: ChatGroup, user_id: int) -> dict:
+    """Die Gruppe so, wie `list_user_groups` sie liefert."""
+    groups = SocialService.list_user_groups(db, user_id)
+    treffer = next((g for g in groups if g["id"] == group.id), None)
+    if treffer:
+        return treffer
+    role = "owner" if group.owner_user_id == user_id else "member"
+    return {
+        "id": group.id,
+        "name": group.name,
+        "description": group.description,
+        "avatar_url": group.avatar_url,
+        "invite_code": group.invite_code,
+        "owner_user_id": group.owner_user_id,
+        "default_permissions": group.default_permissions,
+        "member_count": len(group.members) if group.members else 1,
+        "role": role,
+        "created_at": group.created_at,
+        "members": [
+            {
+                "user_id": m.user_id,
+                "username": m.user.username if m.user else "",
+                "avatar_url": m.user.avatar_url if m.user else None,
+                "role": m.role,
+                "joined_at": m.joined_at,
+            }
+            for m in (group.members or [])
+        ],
+    }
+
+
 @router.post("/groups", response_model=ChatGroupResponse, dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
 def create_chat_group(
     req: ChatGroupCreate,
@@ -665,30 +691,7 @@ def create_chat_group(
         description=req.description,
         avatar_url=req.avatar_url,
     )
-    groups = SocialService.list_user_groups(db, user.id)
-    match = next((g for g in groups if g["id"] == group.id), None)
-    if match:
-        return match
-    return {
-        "id": group.id,
-        "name": group.name,
-        "description": group.description,
-        "avatar_url": group.avatar_url,
-        "invite_code": group.invite_code,
-        "owner_user_id": group.owner_user_id,
-        "member_count": 1,
-        "role": "owner",
-        "created_at": group.created_at,
-        "members": [
-            {
-                "user_id": user.id,
-                "username": user.username,
-                "avatar_url": user.avatar_url,
-                "role": "owner",
-                "joined_at": group.created_at,
-            }
-        ],
-    }
+    return _gruppe_antwort(db, group, user.id)
 
 
 @router.get("/groups/invite/{invite_code}", response_model=ChatGroupInvitePublicResponse)
@@ -811,26 +814,6 @@ def get_group_avatar(filename: str):
     )
 
 
-def _gruppe_antwort(db: Session, group: ChatGroup, user_id: int) -> dict:
-    """Die Gruppe so, wie `list_user_groups` sie liefert."""
-    groups = SocialService.list_user_groups(db, user_id)
-    treffer = next((g for g in groups if g["id"] == group.id), None)
-    if treffer:
-        return treffer
-    return {
-        "id": group.id,
-        "name": group.name,
-        "description": group.description,
-        "avatar_url": group.avatar_url,
-        "invite_code": group.invite_code,
-        "owner_user_id": group.owner_user_id,
-        "member_count": len(group.members) if group.members else 1,
-        "role": "owner",
-        "created_at": group.created_at,
-        "members": [],
-    }
-
-
 @router.post("/groups/join/{invite_code}", response_model=ChatGroupResponse, dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
 def join_group_by_invite(
     invite_code: str,
@@ -838,22 +821,7 @@ def join_group_by_invite(
     user: User = Depends(get_current_user),
 ) -> dict:
     group = SocialService.join_group_by_invite_code(db, user, invite_code)
-    groups = SocialService.list_user_groups(db, user.id)
-    match = next((g for g in groups if g["id"] == group.id), None)
-    if match:
-        return match
-    return {
-        "id": group.id,
-        "name": group.name,
-        "description": group.description,
-        "avatar_url": group.avatar_url,
-        "invite_code": group.invite_code,
-        "owner_user_id": group.owner_user_id,
-        "member_count": len(group.members) if group.members else 1,
-        "role": "member",
-        "created_at": group.created_at,
-        "members": [],
-    }
+    return _gruppe_antwort(db, group, user.id)
 
 
 @router.post("/groups/{group_id}/leave", dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
@@ -931,23 +899,7 @@ def update_group_permissions_endpoint(
         default_permissions=req.default_permissions,
         caller=user,
     )
-    groups = SocialService.list_user_groups(db, user.id)
-    match = next((g for g in groups if g["id"] == group.id), None)
-    if match:
-        return match
-    return {
-        "id": group.id,
-        "name": group.name,
-        "description": group.description,
-        "avatar_url": group.avatar_url,
-        "invite_code": group.invite_code,
-        "owner_user_id": group.owner_user_id,
-        "default_permissions": group.default_permissions,
-        "member_count": 1,
-        "role": "owner",
-        "created_at": group.created_at,
-        "members": [],
-    }
+    return _gruppe_antwort(db, group, user.id)
 
 
 

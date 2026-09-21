@@ -77,6 +77,7 @@ import {
 } from '@msdis/shield/messaging'
 import { randomBytes } from '@msdis/shield/random'
 import { base64ToBytes, bytesToBase64, bytesToUtf8, utf8ToBytes } from '@msdis/shield/core'
+import { sha256Hex } from '@msdis/shield/integrity'
 
 import { encryptE2eeHybrid } from './e2eeCrypto'
 import { eigenesGeraet, geraeteVon, verlangeGeraeteVon } from './e2eeGeraet'
@@ -530,7 +531,8 @@ export async function liesDrUmschlag(
   // jedem Öffnen des Gesprächs starb die gerade funktionierende Sitzung, die
   // Systemzeile erschien wieder, und die eigenen Nachrichten kamen nicht mehr
   // an. Erkannt wird er am Rumpf, der je Nachricht ein anderer ist.
-  const marke = `${kopf.vonKonto}:${kopf.vonGeraet}:${kopf.rumpf}`
+  const rumpfHash = (await sha256Hex(utf8ToBytes(kopf.rumpf))).slice(0, 32)
+  const marke = `${kopf.vonKonto}:${kopf.vonGeraet}:${rumpfHash}`
   if (await kennstMarke('bruch', marke)) return { art: 'beurteilt' }
 
   const id = sitzungsId(meins.kennung, kopf.vonKonto, kopf.vonGeraet)

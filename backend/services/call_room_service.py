@@ -116,7 +116,12 @@ class CallRoomService:
             # Nur als angenommen markieren, wenn nicht der Ersteller selbst beitritt
             if user_id != raum.ersteller_id:
                 raum.angenommen = True
-            raum.verlaengere(jetzt, EINLADUNG_TTL_SEKUNDEN)
+            spanne = (
+                RAUM_MAX_LEBENSDAUER_SEKUNDEN
+                if raum.angenommen
+                else EINLADUNG_TTL_SEKUNDEN
+            )
+            raum.verlaengere(jetzt, spanne)
             return True
 
     @classmethod
@@ -169,7 +174,23 @@ class CallRoomService:
             if inviter_id not in raum.berechtigte:
                 return False
             raum.berechtigte.add(new_user_id)
-            raum.verlaengere(jetzt, EINLADUNG_TTL_SEKUNDEN)
+            spanne = (
+                RAUM_MAX_LEBENSDAUER_SEKUNDEN
+                if raum.angenommen
+                else EINLADUNG_TTL_SEKUNDEN
+            )
+            raum.verlaengere(jetzt, spanne)
+            return True
+
+    @classmethod
+    def touch(cls, token: str, spanne: float = RAUM_MAX_LEBENSDAUER_SEKUNDEN) -> bool:
+        """Verlaengert einen laufenden Raum (z. B. bei Heartbeat)."""
+        jetzt = time.time()
+        with cls._lock:
+            raum = cls._raeume.get(token)
+            if raum is None or not raum.gueltig(jetzt):
+                return False
+            raum.verlaengere(jetzt, spanne)
             return True
 
     @classmethod

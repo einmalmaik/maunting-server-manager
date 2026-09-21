@@ -213,10 +213,14 @@ settings = Settings()
 
 # Harte Fail-Fast für schwachen Default (Security-Finding #14): verhindert JWT-Forgery in Prod bei vergessener .env.
 # Dev (debug=True) erlaubt Default für schnellen Start; Prod (debug=False) bricht sofort.
-if settings.secret_key == "change-me-in-production-please-use-a-256-bit-key" and not settings.debug:
+if (
+    not settings.secret_key
+    or len(settings.secret_key) < 32
+    or settings.secret_key == "change-me-in-production-please-use-a-256-bit-key"
+) and not settings.debug:
     raise RuntimeError(
         "CRITICAL SECURITY: MSM_SECRET_KEY (or secret_key) must be overridden with a strong >=32 char value in production. "
-        "Default placeholder allows JWT forgery. Set in .env or env (prefixed MSM_)."
+        "Empty, weak or default placeholder allows JWT forgery. Set in .env or env (prefixed MSM_)."
     )
 
 # Harte Fail-Fast für unkonfigurierten panel_url in Production.

@@ -49,8 +49,16 @@ def _utc(dt: datetime | None) -> datetime | None:
 
 
 def _signing_secret() -> str:
-    """Holt das Signiergeheimnis aus den Einstellungen oder generiert einen stabilen Key."""
-    return getattr(settings, "secret_key", None) or "msm-chat-media-secure-signed-secret"
+    """Holt das Signiergeheimnis aus den Einstellungen."""
+    secret = getattr(settings, "secret_key", None)
+    if not secret:
+        raise RuntimeError("MSM_SECRET_KEY ist nicht konfiguriert.")
+    return secret
+
+
+def _ist_blockiert(db: Session, user_a_id: int, user_b_id: int) -> bool:
+    """Prueft, ob eine Blockierung zwischen zwei Benutzern vorliegt."""
+    return SocialService.is_blocked(db, user_a_id, user_b_id)
 
 
 # Wie lange ein hochgeladener Blob serverseitig liegen bleibt.
@@ -109,18 +117,7 @@ class ChatMediaService:
 
             # Blockierungspruefung
             other_id = chat.get_other_user_id(user_id)
-            is_blocked = (
-                db.query(UserFriend)
-                .filter(
-                    or_(
-                        and_(UserFriend.user_id == user_id, UserFriend.friend_id == other_id),
-                        and_(UserFriend.user_id == other_id, UserFriend.friend_id == user_id),
-                    ),
-                    UserFriend.status == "blocked",
-                )
-                .first()
-            ) is not None
-            if is_blocked:
+            if _ist_blockiert(db, user_id, other_id):
                 raise HTTPException(
                     status_code=403,
                     detail="Kommunikation blockiert: Zugriff auf Medien verweigert.",
@@ -138,18 +135,7 @@ class ChatMediaService:
                 )
             # Blockierungspruefung
             other_id = chat_by_box.get_other_user_id(user_id)
-            is_blocked = (
-                db.query(UserFriend)
-                .filter(
-                    or_(
-                        and_(UserFriend.user_id == user_id, UserFriend.friend_id == other_id),
-                        and_(UserFriend.user_id == other_id, UserFriend.friend_id == user_id),
-                    ),
-                    UserFriend.status == "blocked",
-                )
-                .first()
-            ) is not None
-            if is_blocked:
+            if _ist_blockiert(db, user_id, other_id):
                 raise HTTPException(
                     status_code=403,
                     detail="Kommunikation blockiert: Zugriff auf Medien verweigert.",
@@ -162,18 +148,7 @@ class ChatMediaService:
 
         # Pruefe ob der Benutzer mit dem Uploader eine abgeleitete Mailbox teilt (O(1) statt O(N))
         if SocialService.derive_blind_mailbox_id(user_id, media.uploader_user_id) == clean_mailbox:
-            is_blocked = (
-                db.query(UserFriend)
-                .filter(
-                    or_(
-                        and_(UserFriend.user_id == user_id, UserFriend.friend_id == media.uploader_user_id),
-                        and_(UserFriend.user_id == media.uploader_user_id, UserFriend.friend_id == user_id),
-                    ),
-                    UserFriend.status == "blocked",
-                )
-                .first()
-            ) is not None
-            if is_blocked:
+            if _ist_blockiert(db, user_id, media.uploader_user_id):
                 raise HTTPException(
                     status_code=403,
                     detail="Kommunikation blockiert: Zugriff auf Medien verweigert.",
@@ -219,45 +194,25 @@ class ChatMediaService:
                     detail="Upload fehlgeschlagen: Keine Mitgliedschaft in der Chat-Gruppe.",
                 )
             target_group_id = group_id
-        elif recipient_id:
-            can_msg, reason = SocialService.can_message_user(db, uploader.id, recipient_id)
-            if not can_msg:
-                raise HTTPException(status_code=403, detail=reason or "Keine Berechtigung zum Senden.")
-            chat = SocialService.ensure_direct_chat(db, uploader.id, recipient_id)
-            direct_chat_id = chat.id
         else:
-            chat = db.query(DirectChat).filter_by(blind_mailbox_id=clean_mailbox).first()
-            if chat:
-                if uploader.id not in (chat.user_a_id, chat.user_b_id):
-                    raise HTTPException(status_code=403, detail="Keine Berechtigung fuer diesen Chat.")
-                other_id = chat.get_other_user_id(uploader.id)
-                can_msg, reason = SocialService.can_message_user(db, uploader.id, other_id)
+            target_recipient_id, _, direct_chat, resolved_group_id = SocialService.resolve_mailbox_target(
+                db,
+                sender_user_id=uploader.id,
+                blind_mailbox_id=clean_mailbox,
+                recipient_id=recipient_id,
+            )
+            if resolved_group_id:
+                target_group_id = resolved_group_id
+            elif target_recipient_id:
+                can_msg, reason = SocialService.can_message_user(db, uploader.id, target_recipient_id)
                 if not can_msg:
                     raise HTTPException(status_code=403, detail=reason or "Keine Berechtigung fuer diesen Chat.")
-                direct_chat_id = chat.id
+                direct_chat_id = direct_chat.id if direct_chat else SocialService.ensure_direct_chat(db, uploader.id, target_recipient_id).id
             else:
-                candidates = db.query(User.id).filter(User.is_active == True, User.id != uploader.id).all()
-                found_target = None
-                for (cand_id,) in candidates:
-                    if SocialService.derive_blind_mailbox_id(uploader.id, cand_id) == clean_mailbox:
-                        found_target = cand_id
-                        break
-                    min_i, max_i = min(uploader.id, cand_id), max(uploader.id, cand_id)
-                    legacy_mailbox = hashlib.sha256(f"msm-e2ee-box:{min_i}:{max_i}:".encode("utf-8")).hexdigest()
-                    if clean_mailbox == legacy_mailbox:
-                        found_target = cand_id
-                        break
-                if found_target:
-                    can_msg, reason = SocialService.can_message_user(db, uploader.id, found_target)
-                    if not can_msg:
-                        raise HTTPException(status_code=403, detail=reason or "Keine Berechtigung fuer diesen Chat.")
-                    chat = SocialService.ensure_direct_chat(db, uploader.id, found_target)
-                    direct_chat_id = chat.id
-                else:
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Upload verweigert: Keine gueltige Chat-Mitgliedschaft fuer die angegebene Mailbox-ID.",
-                    )
+                raise HTTPException(
+                    status_code=403,
+                    detail="Upload verweigert: Keine gueltige Chat-Mitgliedschaft fuer die angegebene Mailbox-ID.",
+                )
 
         # 2. Server-seitige Validierung des verschluesselten Blobs
         # Stellt sicher: Server akzeptiert NUR E2EE Blobs, keine Klartexte und keine Riesen-Dateien

@@ -6521,6 +6521,7 @@
     "e2eeBanner": "Nachrichten in diesem Chat sind Ende-zu-Ende verschlüsselt.",
     "encryptedMessage": "Verschlüsselte Nachricht",
     "sessionRebuilt": "Die Sicherheitssitzung mit diesem Gerät wurde neu aufgebaut. Ältere Nachrichten dieses Geräts bleiben unlesbar.",
+    "newDeviceDetected": "{{name}} hat ein neues Gerät angemeldet.",
     "keyPreparing": "Schlüssel wird vorbereitet …",
     "deviceKeyNotReady": "Der Schlüssel dieses Geräts ist noch nicht bereit.",
     "deviceKeyNotReadyRetry": "Der Schlüssel dieses Geräts ist noch nicht bereit. Versuche es gleich noch einmal.",

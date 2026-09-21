@@ -125,6 +125,19 @@ describe('Bezugstafel', () => {
     tafel.merke({ target_id: 7 }, 'x')
     expect(tafel.finde({ id: 8, clientUuid: 'fremd' })).toBeUndefined()
   })
+
+  it('prüft den Urheber und verwirft fremde Änderungen', () => {
+    const tafel = neueBezugstafel<string>()
+    // Nachricht von Urheber A (User 10)
+    // Fremder C (User 99) versucht Änderung
+    tafel.merke({ target_id: 7 }, 'C will fälschen', 99)
+    // Abfrage für Nachricht von A (User 10)
+    expect(tafel.finde({ id: 7 }, 10)).toBeUndefined()
+
+    // Echtes Edit von A (User 10)
+    tafel.merke({ target_id: 7 }, 'A ändert selbst', 10)
+    expect(tafel.finde({ id: 7 }, 10)).toBe('A ändert selbst')
+  })
 })
 
 describe('Sammeltafel', () => {

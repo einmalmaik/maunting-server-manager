@@ -228,6 +228,7 @@ vi.mock('@/services/e2eeGeraet', () => ({
   }),
   vergessenGeraete: vi.fn(),
   clearGeraeteMemory: vi.fn(),
+  onNeuesGeraet: vi.fn(() => () => {}),
   E2eeKeinGeraetError: class extends Error {},
 }))
 

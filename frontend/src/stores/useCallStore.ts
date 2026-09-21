@@ -172,7 +172,7 @@ export interface UseCallState {
   erlaubeTon: () => Promise<void>
   verwirfHinweis: (id: number) => void
   /** Ein eingehender `call_key`-Umschlag aus dem Ereignisstrom. */
-  acceptRoomKey: (raum: string, ciphertext: string) => Promise<void>
+  acceptRoomKey: (raum: string, ciphertext: string, fromUserId?: number) => Promise<void>
   setMode: (mode: CallMode) => void
   /** Prüft geräteübergreifend, ob dieses Konto auf einer anderen Plattform telefoniert. */
   checkActiveCall: () => Promise<void>
@@ -959,8 +959,50 @@ export const useCallStore = create<UseCallState>((set, get) => {
 
     verwirfHinweis: (id) => set((s) => ({ hinweise: s.hinweise.filter((h) => h.id !== id) })),
 
-    acceptRoomKey: async (raum, ciphertext) => {
+    acceptRoomKey: async (raum, ciphertext, fromUserId) => {
       if (!identitaet || get().raum !== raum) return
+
+      // H-4: Schutz vor unberechtigter Schlüsselübernahme.
+      // Wenn bereits ein Raumschlüssel aktiv ist, darf nur der nach der
+      // lokalen Regel zuständige Schlüsselhalter einen neuen Schlüssel schicken.
+      // Fehlt fromUserId oder ist der Absender nicht zuständig, wird der Wechsel abgewiesen.
+      if (raumSchluessel) {
+        if (fromUserId === undefined) {
+          console.warn('[Call] Room key replacement rejected: missing fromUserId')
+          return
+        }
+        const zustand = get()
+        let zustaendig = false
+        if (zustand.kind === 'direkt') {
+          // Im Direktchat ist nur der Partner berechtigt.
+          // Existiert bereits ein Schlüssel, ist die kleinere Benutzerkennung der Schlüsselhalter.
+          const partnerId = zustand.partner?.userId
+          if (fromUserId === partnerId) {
+            zustaendig = Math.min(identitaet.userId, partnerId) === fromUserId
+          }
+        } else {
+          // Im Gruppenanruf gilt die istSchluesselhalter-Regel über alle anwesenden Teilnehmer.
+          const room = verbindung?.room
+          const anwesende = room
+            ? [room.localParticipant, ...room.remoteParticipants.values()]
+                .map((t) => benutzerIdAusIdentity(t.identity))
+                .filter((id): id is number => id !== null)
+            : []
+          const liste = anwesende.length > 0 ? anwesende : [identitaet.userId, fromUserId]
+          zustaendig = istSchluesselhalter(fromUserId, liste, identitaet.userId)
+        }
+
+        if (!zustaendig) {
+          console.warn('[Call] Room key replacement rejected from user:', fromUserId)
+          toast.error(
+            i18n.t('calls.unauthorizedKeyExchange', {
+              defaultValue: 'Ein unberechtigter Schlüsselwechsel für den Anruf wurde abgewiesen.',
+            }),
+          )
+          return
+        }
+      }
+
       try {
         const schluessel = await entpacke(ciphertext, identitaet.decryptionKeys)
         raumSchluessel = schluessel
@@ -1257,7 +1299,11 @@ export const useCallStore = create<UseCallState>((set, get) => {
         }
       } else if (ev.type === 'call_key') {
         if (ev.raum && ev.ciphertext) {
-          void get().acceptRoomKey(String(ev.raum), String(ev.ciphertext))
+          const fromUser =
+            ev.from_user_id !== undefined && ev.from_user_id !== null
+              ? Number(ev.from_user_id)
+              : undefined
+          void get().acceptRoomKey(String(ev.raum), String(ev.ciphertext), fromUser)
         }
       } else {
         get().handleCrossDeviceEvent(detail)

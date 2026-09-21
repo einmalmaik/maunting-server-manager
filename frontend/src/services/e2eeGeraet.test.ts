@@ -122,8 +122,19 @@ const platte = new Map<string, any>()
 
 const { setzeAngemeldetesKonto } = await import('@/lib/angemeldetesKonto')
 
-const { clearGeraeteMemory, eigenesGeraet, geraeteVon, geraetVeroeffentlichen, vergessenGeraete, verlangeGeraeteVon, E2eeKeinGeraetError } =
-  await import('./e2eeGeraet')
+const {
+  clearGeraeteMemory,
+  eigenesGeraet,
+  geraeteVon,
+  geraetVeroeffentlichen,
+  vergessenGeraete,
+  verlangeGeraeteVon,
+  E2eeKeinGeraetError,
+  getBekannteGeraete,
+  setBekannteGeraete,
+  pruefeUndAktualisiereNeueGeraete,
+  onNeuesGeraet,
+} = await import('./e2eeGeraet')
 
 describe('e2eeGeraet', () => {
   beforeEach(() => {
@@ -392,6 +403,54 @@ describe('e2eeGeraet', () => {
       } finally {
         fremdeGeraete.fehler = null
         Date.now = echtesJetzt
+      }
+    })
+  })
+
+  describe('Geräteverzeichnis-Prüfung und Warnung bei neuen Geräten (M-10)', () => {
+    it('initialisiert bekannte Geräte beim Erstkontakt ohne neue Geräte zu melden', () => {
+      const g1 = [{ device_id: 'dev-1', public_key: 'pk-1' }]
+      const gemeldet = pruefeUndAktualisiereNeueGeraete(555, g1)
+      expect(gemeldet).toEqual([])
+      expect(getBekannteGeraete(555)).toEqual(['dev-1'])
+    })
+
+    it('erkennt neue Geräte bei Folgeabrufen und aktualisiert den bekannten Stand', () => {
+      setBekannteGeraete(555, ['dev-1'])
+      const g2 = [
+        { device_id: 'dev-1', public_key: 'pk-1' },
+        { device_id: 'dev-2', public_key: 'pk-2' },
+      ]
+      const gemeldet = pruefeUndAktualisiereNeueGeraete(555, g2)
+      expect(gemeldet).toEqual(['dev-2'])
+      expect(getBekannteGeraete(555)).toEqual(['dev-1', 'dev-2'])
+    })
+
+    it('benachrichtigt registrierte Listener bei holeGeraete über neue Geräte', async () => {
+      setBekannteGeraete(777, ['altes-geraet'])
+      fremdeGeraete.liste = [
+        { device_id: 'altes-geraet', public_key: 'pk-alt' },
+        { device_id: 'neues-geraet', public_key: 'pk-neu' },
+      ]
+
+      const empfangen: { peer: number; neue: string[] }[] = []
+      const abbestellen = onNeuesGeraet((peer, neue) => {
+        empfangen.push({ peer, neue })
+      })
+
+      try {
+        const res = await verlangeGeraeteVon(777)
+        expect(res).toHaveLength(2)
+        expect(empfangen).toHaveLength(1)
+        expect(empfangen[0]).toEqual({ peer: 777, neue: ['neues-geraet'] })
+
+        // Zweiter Abruf: Gerät ist jetzt bekannt, kein erneutes Melden
+        empfangen.length = 0
+        vergessenGeraete(777)
+        await verlangeGeraeteVon(777)
+        expect(empfangen).toHaveLength(0)
+      } finally {
+        abbestellen()
       }
     })
   })

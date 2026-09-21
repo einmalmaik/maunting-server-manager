@@ -75,6 +75,20 @@ def _konfiguration_oder_fehler(db: Session) -> livekit_service.LivekitKonfigurat
     return konf
 
 
+def _melde_anrufzustand(user_ids: list[int] | set[int] | int, active_call: dict | None = None) -> None:
+    """Verteilt den neuen Anrufstatus an alle angegebenen Benutzerkonten."""
+    targets = [user_ids] if isinstance(user_ids, int) else list(user_ids)
+    for uid in targets:
+        SyncEventService.publish(
+            {
+                "type": "user_call_state_changed",
+                "user_id": uid,
+                "active_call": active_call,
+            },
+            user_id=uid,
+        )
+
+
 # ── Einladungen zu Zweiergespraechen ────────────────────────────────────────
 
 
@@ -203,22 +217,7 @@ def einladung_ablehnen(
         },
         user_id=anrufer_id,
     )
-    SyncEventService.publish(
-        {
-            "type": "user_call_state_changed",
-            "user_id": user.id,
-            "active_call": None,
-        },
-        user_id=user.id,
-    )
-    SyncEventService.publish(
-        {
-            "type": "user_call_state_changed",
-            "user_id": anrufer_id,
-            "active_call": None,
-        },
-        user_id=anrufer_id,
-    )
+    _melde_anrufzustand([user.id, anrufer_id], None)
     return {"ok": True}
 
 
@@ -253,22 +252,7 @@ def einladung_abbrechen(
         },
         user_id=empfaenger_id,
     )
-    SyncEventService.publish(
-        {
-            "type": "user_call_state_changed",
-            "user_id": user.id,
-            "active_call": None,
-        },
-        user_id=user.id,
-    )
-    SyncEventService.publish(
-        {
-            "type": "user_call_state_changed",
-            "user_id": empfaenger_id,
-            "active_call": None,
-        },
-        user_id=empfaenger_id,
-    )
+    _melde_anrufzustand([user.id, empfaenger_id], None)
     return {"ok": True}
 
 
@@ -364,24 +348,10 @@ def anruf_verlassen(
                     },
                     user_id=empfaenger_id,
                 )
-                SyncEventService.publish(
-                    {
-                        "type": "user_call_state_changed",
-                        "user_id": empfaenger_id,
-                        "active_call": None,
-                    },
-                    user_id=empfaenger_id,
-                )
+                _melde_anrufzustand(empfaenger_id, None)
     removed = UserActiveCallRegistry.leave(user.id, raum=req.raum, device_id=req.device_id)
     if removed:
-        SyncEventService.publish(
-            {
-                "type": "user_call_state_changed",
-                "user_id": user.id,
-                "active_call": None,
-            },
-            user_id=user.id,
-        )
+        _melde_anrufzustand(user.id, None)
     return {"ok": True}
 
 
@@ -424,14 +394,7 @@ def aktiven_anruf_beenden(
                     },
                     user_id=empfaenger_id,
                 )
-                SyncEventService.publish(
-                    {
-                        "type": "user_call_state_changed",
-                        "user_id": empfaenger_id,
-                        "active_call": None,
-                    },
-                    user_id=empfaenger_id,
-                )
+                _melde_anrufzustand(empfaenger_id, None)
         SyncEventService.publish(
             {
                 "type": "call_ended_remotely",
@@ -440,14 +403,7 @@ def aktiven_anruf_beenden(
             },
             user_id=user.id,
         )
-        SyncEventService.publish(
-            {
-                "type": "user_call_state_changed",
-                "user_id": user.id,
-                "active_call": None,
-            },
-            user_id=user.id,
-        )
+        _melde_anrufzustand(user.id, None)
     return {"ok": True}
 
 
@@ -460,6 +416,10 @@ def anruf_heartbeat(
     user: User = Depends(get_current_user),
 ) -> dict:
     ok = UserActiveCallRegistry.heartbeat(user.id, device_id=req.device_id)
+    if ok:
+        curr = UserActiveCallRegistry.get(user.id)
+        if curr and curr.get("room_token"):
+            CallRoomService.touch(curr["room_token"])
     return {"ok": ok}
 
 
@@ -615,24 +575,10 @@ def zugangstoken(
                     },
                     user_id=empfaenger_id,
                 )
-                SyncEventService.publish(
-                    {
-                        "type": "user_call_state_changed",
-                        "user_id": empfaenger_id,
-                        "active_call": None,
-                    },
-                    user_id=empfaenger_id,
-                )
+                _melde_anrufzustand(empfaenger_id, None)
 
     # Signalisiere den neuen Status an alle offenen Sitzungen des Benutzers
-    SyncEventService.publish(
-        {
-            "type": "user_call_state_changed",
-            "user_id": user.id,
-            "active_call": curr_call,
-        },
-        user_id=user.id,
-    )
+    _melde_anrufzustand(user.id, curr_call)
 
     return {
         "url": konf.client_url,
@@ -906,14 +852,7 @@ def gruppenanruf_beenden(
     alle_empfaenger = set(betroffene + _gruppenmitglieder_mit_zutritt(db, group_id, user.id))
     for member_id in alle_empfaenger:
         SyncEventService.publish(ereignis, user_id=member_id)
-        SyncEventService.publish(
-            {
-                "type": "user_call_state_changed",
-                "user_id": member_id,
-                "active_call": None,
-            },
-            user_id=member_id,
-        )
+    _melde_anrufzustand(alle_empfaenger, None)
     return {"ok": True}
 
 
