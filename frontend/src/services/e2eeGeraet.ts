@@ -420,6 +420,60 @@ export async function geraeteVon(userId: number): Promise<E2eeGeraetItem[]> {
   }
 }
 
+// ==========================================
+// Bekannte Geräte & Geräteverzeichnis-Prüfung (M-10)
+// ==========================================
+
+const BEKANNTE_GERAETE_PRAEFIX = 'msm_bekannte_geraete:'
+const bekannteGeraeteImRam = new Map<number, string[]>()
+
+export function getBekannteGeraete(userId: number): string[] | null {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(`${BEKANNTE_GERAETE_PRAEFIX}${userId}`)
+      if (raw) return JSON.parse(raw)
+    }
+  } catch {}
+  return bekannteGeraeteImRam.get(userId) ?? null
+}
+
+export function setBekannteGeraete(userId: number, deviceIds: string[]): void {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(`${BEKANNTE_GERAETE_PRAEFIX}${userId}`, JSON.stringify(deviceIds))
+    }
+  } catch {}
+  bekannteGeraeteImRam.set(userId, deviceIds)
+}
+
+export function pruefeUndAktualisiereNeueGeraete(
+  userId: number,
+  aktuelleGeraete: { device_id: string }[],
+): string[] {
+  const aktuelleIds = aktuelleGeraete.map((g) => g.device_id)
+  const bekannt = getBekannteGeraete(userId)
+  if (bekannt === null) {
+    // Erstkontakt: Wir merken uns die aktuellen Geräte als Basisbestand ohne Warnung.
+    setBekannteGeraete(userId, aktuelleIds)
+    return []
+  }
+  const neue = aktuelleIds.filter((id) => !bekannt.includes(id))
+  if (neue.length > 0) {
+    setBekannteGeraete(userId, Array.from(new Set([...bekannt, ...aktuelleIds])))
+  }
+  return neue
+}
+
+export type NeuesGeraetListener = (userId: number, neueGeraete: string[]) => void
+const neuesGeraetListeners = new Set<NeuesGeraetListener>()
+
+export function onNeuesGeraet(listener: NeuesGeraetListener): () => void {
+  neuesGeraetListeners.add(listener)
+  return () => {
+    neuesGeraetListeners.delete(listener)
+  }
+}
+
 /**
  * Derselbe Abruf, aber ohne die leere Liste als Notausgang.
  *
@@ -437,6 +491,14 @@ async function holeGeraete(userId: number): Promise<E2eeGeraetItem[]> {
   try {
     const geraete = await getE2eeGeraete(userId)
     geraeteCache.set(userId, { geraete, geholtAm: Date.now() })
+    const neue = pruefeUndAktualisiereNeueGeraete(userId, geraete)
+    if (neue.length > 0) {
+      for (const listener of neuesGeraetListeners) {
+        try {
+          listener(userId, neue)
+        } catch {}
+      }
+    }
     return geraete
   } catch (fehler) {
     // Ein abgelaufener Eintrag ist immer noch besser als gar keiner: die
@@ -482,6 +544,7 @@ export async function verlangeGeraeteVon(userId: number): Promise<E2eeGeraetItem
  */
 export function clearGeraeteMemory(): void {
   geraeteCache.clear()
+  bekannteGeraeteImRam.clear()
   geraetImRam = null
   aufbau = null
   veroeffentlichtAls = null

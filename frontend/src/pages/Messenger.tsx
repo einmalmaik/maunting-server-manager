@@ -144,6 +144,7 @@ import {
   type E2eeIdentity,
 } from '@/services/e2eeIdentity'
 import { logischeUuid, DrZustellungFehlgeschlagenError } from '@/services/ratchetSitzung'
+import { geraeteVon, onNeuesGeraet } from '@/services/e2eeGeraet'
 import { verwirfGruppenSchluessel } from '@/services/gruppenSchluessel'
 import {
   entferneLokaleNachricht,
@@ -1535,6 +1536,39 @@ export function Messenger() {
       ]),
     )
   }, [])
+
+  // M-10: Überwachung des Geräteverzeichnisses — warnt bei neuen Geräten eines Gesprächspartners
+  useEffect(() => {
+    if (!activeContact?.userId) return
+    geraeteVon(activeContact.userId).catch(() => {})
+  }, [activeContact?.userId])
+
+  useEffect(() => {
+    const abbestellen = onNeuesGeraet((peerId, neue) => {
+      if (neue.length === 0) return
+      if (activeContact && activeContact.userId === peerId) {
+        const name = activeContact.username || t('messenger.thisContact')
+        zeigeSystemzeile(
+          t('messenger.newDeviceDetected', {
+            name,
+            defaultValue: `${name} hat ein neues Gerät angemeldet.`,
+          }),
+        )
+      } else if (activeGroup) {
+        const member = (activeGroup.members ?? []).find((m) => Number(m.user_id) === peerId)
+        if (member) {
+          const name = member.username || member.display_name || t('messenger.thisContact')
+          zeigeSystemzeile(
+            t('messenger.newDeviceDetected', {
+              name,
+              defaultValue: `${name} hat ein neues Gerät angemeldet.`,
+            }),
+          )
+        }
+      }
+    })
+    return abbestellen
+  }, [activeContact, activeGroup, t, zeigeSystemzeile])
 
   const konversation = useKonversation({
     ziel: gespraechsZiel,
