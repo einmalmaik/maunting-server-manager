@@ -851,6 +851,65 @@ Kapselung und Exit:
 eine zweite Oberflächensprache neben der MauntingStudios Design-DNA, und die
 fünf Komponenten unter `components/calling/` sind aus `Singra/UI` gebaut.
 
+## WebPush ohne `pywebpush` — 21.09.2026
+
+Kein neues Paket. Der Eintrag steht hier, weil eine Nicht-Entscheidung genauso
+begründet gehört wie eine Aufnahme: wer als nächstes an
+`services/webpush_service.py` arbeitet, soll nicht als erstes `pip install
+pywebpush` tippen.
+
+Problem:
+  Ein Empfänger mit geschlossener Anwendung erfuhr von einer neuen Nachricht
+  nichts. `frontend/public/sw.js` hatte einen fertigen `push`-Listener, aber
+  keine Gegenstelle — keine Tabelle für Abonnements, kein Schlüsselpaar, keinen
+  Versender.
+
+Warum vorhandener Code reicht:
+  Ein WebPush-Versand ist ein POST mit zwei Kopfzeilen, und beide entstehen aus
+  Bausteinen, die seit dem ersten Tag im Baum liegen.
+
+  - RFC 8291 (Nutzlast): ECDH auf P-256, HKDF-SHA256, AES-128-GCM. Alles in
+    `cryptography==42.0.8`, das ohnehin für DIS und `python-jose` da ist.
+  - RFC 8188 (Kodierung): derselbe HKDF plus ein Kopf aus Salz, Satzlänge und
+    Serverpunkt. Fünf Zeilen `struct.pack`.
+  - RFC 8292 (VAPID): ein ES256-JWT. `python-jose[cryptography]` signiert
+    bereits jede Panel-Sitzung und liefert die JOSE-Signatur (r‖s) fertig, also
+    entfällt auch die DER-Umrechnung, die man sonst selbst schreiben müsste.
+  - Der POST: `httpx`.
+
+  Zusammen rund achtzig Zeilen in einer Datei. `pywebpush` zöge `http-ece` und
+  `py-vapid` nach — zwei Pakete im Auth-nahen Pfad für genau diese achtzig
+  Zeilen. Dieselbe Rechnung wie beim LiveKit-Token eine Sektion weiter unten.
+
+Wo die Grenze läge:
+  Erfunden wird nichts. Die Schrittfolge steht in den RFCs, hier werden fertige
+  Primitive in dieser Reihenfolge zusammengesetzt. Wäre auch nur ein Schritt
+  eigener Entwurf — ein selbstgebautes KDF, ein eigenes Padding — gälte das
+  Gegenteil und die Bibliothek wäre Pflicht.
+
+Warum das trotzdem prüfbar bleiben muss:
+  Ein Tippfehler in einer `info`-Zeichenkette fällt sonst nirgends auf. Der
+  Push-Dienst nimmt jeden Körper an, und erst der Browser des Empfängers
+  verwirft ihn — stumm. Deshalb hält
+  `tests/test_webpush_service.py::test_verschluesselung_trifft_den_vektor_aus_rfc_8291`
+  die Ausgabe byteweise gegen den Testvektor aus RFC 8291 §5. Ohne diesen Test
+  wäre der Eigenbau nicht vertretbar.
+
+Security:
+  Berührt Schlüsselmaterial. Der private VAPID-Schlüssel liegt DIS-verschlüsselt
+  in `panel_settings` (AAD `msm:settings:webpush_vapid`), wie das
+  LiveKit-Geheimnis. Die Endpunkt-Adresse kommt aus dem Browser und ist damit
+  Fremdeingabe: `_ziel_ist_erlaubt` verlangt `https` und öffentlich geroutete
+  Adressen, geprüft vor jedem Versand. Restrisiko benannt im Modulkopf
+  (DNS-Rebind-Fenster).
+
+Kapselung und Exit-Plan:
+  `services/webpush_service.py` ist die einzige Stelle. `social_service` kennt
+  nur `sende_an_konto`, der Router nur `eintragen`, `austragen` und
+  `oeffentlicher_schluessel`. Kippt die Entscheidung, ersetzen `pywebpush`-Aufrufe
+  die beiden privaten Funktionen `_verschluesseln` und `_vapid_kopf`; Tabelle,
+  Routen, Frontend und Service Worker bleiben unberührt.
+
 ### Warum das Backend ohne `livekit-api` auskommt
 
 Ein LiveKit-Zugangstoken ist ein gewöhnliches HS256-JWT mit einem

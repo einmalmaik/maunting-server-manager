@@ -53,6 +53,21 @@ def _signing_secret() -> str:
     return getattr(settings, "secret_key", None) or "msm-chat-media-secure-signed-secret"
 
 
+# Wie lange ein hochgeladener Blob serverseitig liegen bleibt.
+#
+# Die Zahl haengt an der laengsten Verfallsfrist, die ein Nutzer im Chat waehlen
+# kann (`VERFALL_STUFEN` in `frontend/src/services/nachrichtVerfall.ts`, derzeit
+# 90 Tage). Sie stand bis 09/2026 auf 30 und war damit kuerzer als die Frist,
+# die im Chat einstellbar ist: eine 40 Tage alte Nachricht war noch da, ihr Bild
+# aber nicht mehr abrufbar, und die Anlage brach mit einem 410 weg. Der
+# Empfaenger sah eine kaputte Nachricht, ohne dass jemand etwas geloescht haette.
+#
+# Wer eine laengere Stufe in `VERFALL_STUFEN` ergaenzt, muss diese Zahl
+# mitziehen. `test_medien_aufbewahrung_deckt_laengste_verfallsfrist` haelt das
+# fest.
+MEDIEN_AUFBEWAHRUNG_TAGE = 90
+
+
 class ChatMediaService:
     """Zentrale Geschaeftslogik fuer Chat-Medienanhaenge und signierte URLs."""
 
@@ -264,7 +279,7 @@ class ChatMediaService:
             size_bytes=len(blob_bytes),
             sha256=blob_sha256,
             created_at=_now(),
-            expires_at=_now() + timedelta(days=30),  # Optionale Retention
+            expires_at=_now() + timedelta(days=MEDIEN_AUFBEWAHRUNG_TAGE),
         )
         db.add(media)
         db.commit()

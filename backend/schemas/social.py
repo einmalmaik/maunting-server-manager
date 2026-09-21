@@ -326,6 +326,22 @@ class E2eeMailboxSyncResponse(BaseModel):
     mailboxes: list[E2eeMailboxSyncItem]
 
 
+class PushSubscriptionCreate(BaseModel):
+    """Was `PushSubscription.toJSON()` im Browser herausgibt.
+
+    Die Längen sind die des Formats, nicht geraten: `p256dh` ist ein
+    unkomprimierter P-256-Punkt (65 Bytes, base64url 87 Zeichen), `auth` ein
+    16-Byte-Geheimnis (22 Zeichen). Etwas Luft nach oben, weil manche Browser
+    das Polster mitschicken. Die eigentliche Formprüfung macht
+    `webpush_service.eintragen` — hier fällt nur ab, was offensichtlich nichts
+    damit zu tun hat.
+    """
+
+    endpoint: str = Field(..., min_length=16, max_length=2048)
+    p256dh: str = Field(..., min_length=80, max_length=120)
+    auth: str = Field(..., min_length=16, max_length=32)
+
+
 class E2eeTypingSignalCreate(BaseModel):
     blind_mailbox_id: str = Field(..., min_length=16, max_length=64)
     status: str = Field(..., pattern="^(typing|recording|idle)$")

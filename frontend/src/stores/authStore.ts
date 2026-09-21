@@ -11,6 +11,7 @@ import { clearSqlConsoleHistory } from '@/lib/sqlConsoleStorage'
 import { useVaultStore } from '@/desktop/vault/vaultStore'
 import { clearMemoryKeyStore } from '@/services/e2eeCrypto'
 import { clearGeraeteMemory } from '@/services/e2eeGeraet'
+import { kuendige } from '@/services/pushAbo'
 import type { User } from '@/types'
 
 const CACHED_USER_KEY = 'msm_cached_user'
@@ -148,6 +149,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: async () => {
+    // Vor dem Abmelden, solange die Sitzung noch gilt: sonst lehnt das Panel
+    // das Austragen ab und das Gerät bekäme weiter Benachrichtigungen für ein
+    // Konto, das sich hier abgemeldet hat.
+    await kuendige()
     try {
       await api('/auth/logout', { method: 'POST' })
     } catch {

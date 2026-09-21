@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from models import User, ChatMedia, ChatGroup, ChatGroupMember, DirectChat, UserFriend
 from services.auth_service import AuthService
 from services.social_service import SocialService
-from services.chat_media_service import ChatMediaService
+from services.chat_media_service import MEDIEN_AUFBEWAHRUNG_TAGE, ChatMediaService
 from services.chat_media_validator import (
     MAX_MEDIA_BYTES,
     MAX_IMAGE_BYTES,
@@ -344,6 +344,55 @@ def test_max_media_bytes_traegt_eine_volle_videonotiz():
     # liegt darunter -- mit Abstand, nicht knapp.
     roh_grenze = int(MAX_MEDIA_BYTES * 0.4)
     assert roh_grenze > 20 * 1024 * 1024
+
+
+def test_medien_aufbewahrung_deckt_laengste_verfallsfrist():
+    """Ein Anhang muss mindestens so lange liegen wie die laengste Verfallsfrist.
+
+    Die Gegenzahl steht in ``frontend/src/services/nachrichtVerfall.ts`` als
+    laengste Stufe in ``VERFALL_STUFEN`` (90 Tage). Hier stand bis 09/2026 30,
+    und damit war die Aufbewahrung kuerzer als die Frist, die der Nutzer im Chat
+    einstellen kann: eine 40 Tage alte Nachricht war noch da, ihr Bild aber
+    schon weg, und die Anlage brach mit einem 410 weg. Fuer den Empfaenger sah
+    das aus, als haette jemand die Datei geloescht.
+
+    Wer in ``VERFALL_STUFEN`` eine laengere Stufe ergaenzt, muss
+    ``MEDIEN_AUFBEWAHRUNG_TAGE`` mitziehen. Dieser Test ist die Stelle, an der
+    das auffaellt.
+    """
+    laengste_stufe_sekunden = 7_776_000  # 90 Tage, `retention.d90`
+    assert MEDIEN_AUFBEWAHRUNG_TAGE * 24 * 60 * 60 >= laengste_stufe_sekunden
+
+
+def test_hochgeladener_anhang_bekommt_die_volle_aufbewahrung(
+    db: Session, owner_user: User, regular_user: User
+):
+    """Die Konstante allein genuegt nicht: der Upload muss sie auch benutzen.
+
+    Der Fehler sass nicht in einer Zahl, sondern in der Aufrufstelle, die eine
+    eigene mitbrachte. Ein Test auf die Konstante haette ihn nicht gefunden.
+    """
+    from datetime import timedelta
+
+    friend_req = SocialService.send_friend_request(db, owner_user.id, regular_user.username)
+    SocialService.accept_friend_request(db, regular_user.id, friend_req["id"])
+    chat = SocialService.ensure_direct_chat(db, owner_user.id, regular_user.id)
+
+    media = ChatMediaService.upload_encrypted_media(
+        db,
+        uploader=owner_user,
+        blind_mailbox_id=chat.blind_mailbox_id,
+        ciphertext_blob="sv-blob-v1:AES-GCM:iv=12345678:tag=87654321:ciphertext=EncryptedPayloadXYZ",
+        file_name="urlaubsbild.jpg",
+    )
+
+    assert media.expires_at is not None
+    gesetzt = media.expires_at
+    if gesetzt.tzinfo is None:
+        gesetzt = gesetzt.replace(tzinfo=timezone.utc)
+    rest = gesetzt - datetime.now(timezone.utc)
+    # Eine Stunde Spielraum, damit der Test nicht an der Laufzeit haengt.
+    assert rest > timedelta(days=MEDIEN_AUFBEWAHRUNG_TAGE) - timedelta(hours=1)
 
 
 def test_medienpaket_wird_angenommen_und_bleibt_geprueft():

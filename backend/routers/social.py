@@ -30,6 +30,7 @@ from schemas.social import (
     PresenceInfo,
     PresenceUpdateRequest,
     PrivacyUpdateRequest,
+    PushSubscriptionCreate,
     SocialProfileResponse,
     UserStatsResponse,
     ChatGroupCreate,
@@ -49,7 +50,7 @@ from services.chat_media_validator import sanitize_attachment_filename
 from services.social_service import SocialService
 from services.sync_event_service import SyncEventService
 from services.call_room_service import GroupCallRoomRegistry
-from services import bild_upload, e2ee_device_service, livekit_service
+from services import bild_upload, e2ee_device_service, livekit_service, webpush_service
 
 logger = logging.getLogger(__name__)
 
@@ -314,6 +315,50 @@ def delete_own_e2ee_device(
 ) -> dict:
     entfernt = e2ee_device_service.vergessen(db, user, device_id)
     return {"ok": entfernt}
+
+
+# --- WebPush: Benachrichtigungen bei geschlossener Anwendung ---
+
+@router.get("/push/public-key", dependencies=[Depends(_check_social_enabled)])
+def get_push_public_key(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Der `applicationServerKey`, gegen den ein Browser abonniert.
+
+    Ein leerer Wert heißt: dieses Panel kann nicht zustellen. Der Client
+    abonniert dann gar nicht erst, statt ein Abonnement anzulegen, das nie
+    bedient wird.
+    """
+    return {"key": webpush_service.oeffentlicher_schluessel(db)}
+
+
+@router.post("/push/subscribe", dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
+def subscribe_push(
+    req: PushSubscriptionCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Trägt die Zustelladresse *dieses* Browsers ein.
+
+    `user.id` kommt aus der Sitzung, nie aus dem Rumpf — genau wie beim
+    Geräteschlüssel eine Route weiter oben. Eine fremde Adresse einem anderen
+    Konto unterzuschieben ist damit kein Weg.
+    """
+    webpush_service.eintragen(
+        db, user, endpoint=req.endpoint, p256dh=req.p256dh, auth=req.auth
+    )
+    return {"ok": True}
+
+
+@router.delete("/push/subscribe", dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
+def unsubscribe_push(
+    endpoint: str = Query(..., min_length=16, max_length=2048),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Entfernt eine Zustelladresse. Nur die eigene — fremde findet die Abfrage nicht."""
+    return {"ok": webpush_service.austragen(db, user, endpoint)}
 
 
 @router.post("/e2ee/relay", response_model=E2eeBlindEnvelopeResponse, dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])

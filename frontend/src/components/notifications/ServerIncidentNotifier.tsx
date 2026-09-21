@@ -15,6 +15,7 @@ import { api } from '@/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
 import { sendeGeraeteBenachrichtigung, pruefeUndFrageGeraeteBerechtigung } from '@/lib/benachrichtigung'
+import { abonniere, kuendige } from '@/services/pushAbo'
 import { useMessengerNotificationStore, playNotificationChime } from '@/stores/messengerNotificationStore'
 import { NotificationService } from '@/services/notificationService'
 import { sendE2eeDeliveryReceipt, checkAndDispatchPendingDeliveryReceipts } from '@/services/deliveryReceiptService'
@@ -76,7 +77,22 @@ export function ServerIncidentNotifier() {
 
     // Bei aktivem Dienst Berechtigungen prüfen & abfragen
     if (user.device_notifications !== false) {
-      void pruefeUndFrageGeraeteBerechtigung()
+      // Erst fragen, dann abonnieren: `abonniere` fragt bewusst nicht selbst
+      // nach der Erlaubnis und tut ohne sie nichts. Andersherum wäre das Abo
+      // beim ersten Start immer daneben.
+      //
+      // Das Abonnement ist der Weg für die geschlossene Anwendung. Die Meldungen
+      // weiter unten in dieser Datei sind der Weg für den offenen Tab; beide
+      // nebeneinander doppeln nichts, weil `sw.js` einen Push verwirft, solange
+      // ein Fenster im Vordergrund ist.
+      void pruefeUndFrageGeraeteBerechtigung().then((erlaubt) => {
+        if (erlaubt) void abonniere()
+      })
+    } else {
+      // Der Schalter steht auf aus. Dann gehört auch die Zustelladresse weg und
+      // nicht nur die Anzeige unterdrückt — sonst hinge am Konto weiter ein
+      // Abo, das der Server bei jeder Nachricht bedient.
+      void kuendige()
     }
 
     const checkAlerts = async () => {

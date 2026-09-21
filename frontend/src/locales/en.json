@@ -4002,6 +4002,34 @@
       },
       "permissionsPolicy": "The reverse proxy must allow camera=(self), microphone=(self) and display-capture=(self). Older installations still carry camera=(): the browser then never even asks for permission, and camera and screen sharing stay off. Change the line in the Caddy site and reload Caddy."
     },
+    "push": {
+      "title": "Notifications while the application is closed",
+      "intro": "As long as a window is open, the panel notifies you itself. Once the application is closed, the browser vendor's push service is the only route left: the browser registers a delivery address and the panel sends there.",
+      "setup": {
+        "title": "What you need to set up",
+        "body": "Nothing. The VAPID key pair is created on first use and stored in the panel settings, the private half encrypted. One condition applies: MSM_PANEL_URL must be correct, because that address is the sender claim inside the token."
+      },
+      "content": {
+        "title": "What goes out",
+        "body": "The body is encrypted for the recipient's browser; the push service forwards what it cannot open. It holds no content anyway — text, ciphertext, keys and attachments are stripped before encryption. What is shown is “New message”."
+      },
+      "metadata": {
+        "title": "What the push service sees",
+        "body": "That a particular delivery address received something at that moment. Nothing more, and nothing less is possible on this route. Google, Mozilla and Apple run these services depending on the browser."
+      },
+      "off": {
+        "title": "When nothing goes out",
+        "body": "When the device notification switch in the profile is off, when a window is in the foreground, for read and delivery receipts, and when sender and recipient are the same account. Signing out removes the delivery address."
+      },
+      "shared": {
+        "title": "Shared browsers",
+        "body": "A delivery address belongs to a browser, not to an account. If a different account signs in there, it takes the address over — otherwise the new user would receive the previous one's notifications."
+      },
+      "limits": {
+        "title": "Limits",
+        "body": "Messages are held for one hour; anyone offline longer reads them in the history on opening. Only 404 and 410 remove an address — an outage at the push service leaves it in place. The desktop and Android apps do not need this route, they notify through their own."
+      }
+    },
     "voice": {
       "title": "Voice mode",
       "intro": "Voice mode has two operating modes. OpenAI Realtime speaks directly over WebRTC; without an active Realtime selection, the existing transcription, chat model, Pipecat, and ElevenLabs flow remains in place.",
@@ -4228,6 +4256,8 @@
           "deletion": "Deleting a message for everyone does more than hide it: the envelope is removed from the mailbox, an uploaded attachment is deleted with it, and both devices drop the text and the attachment from their local history. What stays behind is a placeholder saying a message was here. Anything a device saved or photographed beforehand is beyond the reach of this deletion.",
           "retention": "Disappearing messages are set per chat, and the time limit applies to both sides. The other person's device adopts it, shows the change in the conversation, and from then on their messages expire too. Once the time is up, every device drops the entry from its history, and each side removes its own envelopes and attachments from the server. Only whoever uploaded something can delete it there. If a device never comes back online, its encrypted envelope stays in the mailbox even though the message has disappeared everywhere else.",
           "receipts": "Delivery and read receipts travel as encrypted control messages over the same path. If a receipt cannot be encrypted, it is not sent rather than sent unprotected.",
+          "push": "If you have notifications switched on and the application closed, your browser registers a delivery address with its vendor's push service — Google, Mozilla or Apple, depending on the browser. The instance stores that address so it can reach you. What it sends there is encrypted for your browser and carries no content anyway: no text, no sender, only “New message”.",
+          "pushMetadata": "The push service does see that your delivery address received something at that moment. There is no way around this on this route, which is why it is stated here. Turn notifications off in your profile or sign out and the address is deleted, after which nothing leaves the instance. While a window is open nothing is sent at all: the application notifies you itself.",
           "calls": "Voice, video and group calls run through a media server. Audio and video are encrypted on your device and only opened again on the other end; the media server forwards what it cannot open. By default it runs on this instance. If the operator configures an external provider, the encrypted streams travel over that provider's servers.",
           "callMetadata": "The media server does however see which account identifiers were in which room, when and for how long. That information only lives while the call is running: it is not stored, and there is no call history or call duration in the database. With an external provider it arises there and is subject to that provider's retention.",
           "callModeration": "If a moderator mutes or removes someone during a group call, the audit log records who acted, against whom, and in which group. The room itself and anything said stay out of it. This is the only trace a call leaves behind."

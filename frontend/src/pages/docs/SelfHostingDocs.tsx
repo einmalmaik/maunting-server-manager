@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, ArrowRightLeft, FileArchive, GitBranch, KeyRound, Mic, MonitorSmartphone, Network, PhoneCall, Plug, Server, ShieldCheck, Terminal } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRightLeft, BellRing, FileArchive, GitBranch, KeyRound, Mic, MonitorSmartphone, Network, PhoneCall, Plug, Server, ShieldCheck, Terminal } from 'lucide-react'
 import { CodeBlock } from '@/components/docs/CodeBlock'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 
@@ -80,6 +80,7 @@ export function SelfHostingDocs() {
           ['hoster-integration', t('docsSelfHosting.hoster.title')],
           ['voice-mode', t('docsSelfHosting.voice.title')],
           ['messenger-calls', t('docsSelfHosting.calls.title')],
+          ['push-notifications', t('docsSelfHosting.push.title')],
           ['smart-system', t('docsSelfHosting.smartSystem.title')],
         ].map(([id, label]) => (
           <a key={id} href={`#${id}`} className={buttonClasses('secondary', 'sm', 'shrink-0')}>{label}</a>
@@ -394,6 +395,31 @@ export function SelfHostingDocs() {
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
           <p className="text-sm leading-6">{t('docsSelfHosting.calls.permissionsPolicy')}</p>
         </div>
+      </section>
+
+      {/* Benachrichtigungen bei geschlossener Anwendung. Einzurichten ist
+          nichts — aber es geht etwas an einen Dritten hinaus, und das gehört
+          dem Betreiber gesagt, bevor er es woanders herausfindet. */}
+      <section aria-labelledby="push-notifications" className="msm-card mb-10 p-5 sm:p-6">
+        <div className="flex items-start gap-3">
+          <BellRing className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+          <div>
+            <h2 id="push-notifications" className="font-headline text-headline-md text-on-surface">
+              {t('docsSelfHosting.push.title')}
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-on-surface-variant">
+              {t('docsSelfHosting.push.intro')}
+            </p>
+          </div>
+        </div>
+        <dl className="mt-5 grid gap-px overflow-hidden rounded-xl border border-outline-variant bg-outline-variant md:grid-cols-2">
+          {(['setup', 'content', 'metadata', 'off', 'shared', 'limits'] as const).map(item => (
+            <div key={item} className="bg-surface-container p-4">
+              <dt className="text-sm font-semibold text-on-surface">{t(`docsSelfHosting.push.${item}.title`)}</dt>
+              <dd className="mt-1 text-sm leading-6 text-on-surface-variant">{t(`docsSelfHosting.push.${item}.body`)}</dd>
+            </div>
+          ))}
+        </dl>
       </section>
 
       {/* Die Desktop-App. Sie ist optional, und die beiden Punkte, die im

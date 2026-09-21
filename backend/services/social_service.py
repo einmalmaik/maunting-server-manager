@@ -24,6 +24,7 @@ from services.sync_event_service import SyncEventService
 from services.achievement_service import AchievementService
 from services.notification_service import NotificationService
 from services.call_room_service import GroupCallRoomRegistry
+from services import webpush_service
 
 logger = logging.getLogger(__name__)
 
@@ -1231,8 +1232,17 @@ class SocialService:
             SyncEventService.publish(msg_payload, user_id=target_recipient_id)
             if target_recipient_id != sender_user_id:
                 SyncEventService.publish(msg_payload, user_id=sender_user_id)
-                # Push-Dispatching für Offline-Empfänger vorbereiten (strikte Echo- & Foreground-Prüfung)
-                NotificationService.prepare_push_dispatch(
+                # Zwei getrennte Schritte, und das mit Absicht: der erste
+                # entscheidet, ob überhaupt jemand etwas erfahren darf (Echo,
+                # Steuersignal, offener Tab) und streicht jeden Inhalt aus dem
+                # Payload. Der zweite stellt zu. Was `prepare_push_dispatch`
+                # herausgibt, ist deshalb schon bereinigt — dort steht nie mehr
+                # als „Neue Nachricht".
+                #
+                # `sende_an_konto` kehrt sofort zurück und schickt im
+                # Hintergrund. Ein langsamer Push-Dienst darf den Absender hier
+                # nicht warten lassen.
+                nutzlast = NotificationService.prepare_push_dispatch(
                     target_user_id=target_recipient_id,
                     sender_user_id=sender_user_id,
                     title="Neue Nachricht",
@@ -1241,6 +1251,8 @@ class SocialService:
                     control_type=control_type,
                     has_active_foreground_connection=SyncEventService.has_active_subscribers(target_recipient_id),
                 )
+                if nutzlast:
+                    webpush_service.sende_an_konto(db, target_recipient_id, nutzlast)
         elif group_member_ids:
             # Gruppen-Nachrichten zielgerichtet nur an Mitglieder ausliefern (Zero Privacy Leak)
             for g_uid in group_member_ids:
@@ -1248,7 +1260,10 @@ class SocialService:
                 if sender_user_id and not NotificationService.is_outgoing_echo(
                     sender_user_id=sender_user_id, current_user_id=g_uid
                 ):
-                    NotificationService.prepare_push_dispatch(
+                    # Dasselbe je Mitglied. Der Deckel von vier Fäden im
+                    # Versender gilt für alle zusammen: eine große Gruppe
+                    # erzeugt keine Fadenlawine, sondern eine Warteschlange.
+                    nutzlast = NotificationService.prepare_push_dispatch(
                         target_user_id=g_uid,
                         sender_user_id=sender_user_id,
                         title="Neue Gruppennachricht",
@@ -1258,6 +1273,8 @@ class SocialService:
                         has_active_foreground_connection=SyncEventService.has_active_subscribers(g_uid),
                         extra_data={"is_group": True},
                     )
+                    if nutzlast:
+                        webpush_service.sende_an_konto(db, g_uid, nutzlast)
         else:
             SyncEventService.publish(msg_payload)
 

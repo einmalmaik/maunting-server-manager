@@ -1673,6 +1673,74 @@ wirkungslos in der Datenbank zu landen.
 
 ---
 
+## Benachrichtigungen bei geschlossener Anwendung
+
+Solange ein Fenster offen ist, meldet sich das Panel selbst: das Ereignis kommt
+über den Social-WebSocket, und die Oberfläche erzeugt die Meldung. Dafür ist
+nichts einzurichten.
+
+Ist die Anwendung geschlossen, geht dieser Weg nicht mehr. Dann bleibt nur
+WebPush: der Browser hat eine Zustelladresse beim Push-Dienst seines
+Herstellers, und das Panel schickt dorthin.
+
+### Was der Betreiber einrichten muss
+
+Nichts. Das VAPID-Schlüsselpaar entsteht beim ersten Gebrauch und liegt in
+`panel_settings` (`webpush_vapid_public` im Klartext, weil es öffentlich ist;
+`webpush_vapid_private_encrypted` über DIS verschlüsselt). Es gibt keinen
+Installationsschritt und keine Environment-Variable.
+
+Eine Abhängigkeit besteht trotzdem: **`MSM_PANEL_URL` muss stimmen.** Die
+Adresse steht als Absenderangabe (`sub`) im VAPID-Token, das RFC 8292
+vorschreibt. Sie ist ohnehin fail-fast-geprüft, falls sie in Produktion auf dem
+Vorgabewert steht.
+
+### Was hinausgeht und was nicht
+
+| Wer | Sieht |
+| --- | --- |
+| Push-Dienst (Google, Mozilla, Apple) | Dass diese Zustelladresse zu diesem Zeitpunkt etwas bekommen hat. Sonst nichts. |
+| Browser des Empfängers | „Neue Nachricht". Kein Text, kein Absendername. |
+
+Der Körper ist nach RFC 8291 gegen den öffentlichen Schlüssel des Empfängers
+verschlüsselt; der Push-Dienst leitet weiter, was er nicht öffnen kann. Darüber
+hinaus streicht `NotificationService.sanitize_push_payload` jeden Inhalt schon
+vor dem Verschlüsseln — Text, Chiffrat, Schlüssel und Anhänge kommen nicht
+einmal in den verschlüsselten Körper. Die zweite Schranke ist Absicht: sie hält
+auch dann, wenn an der ersten etwas schiefgeht.
+
+Nicht wegzubauen ist der Zeitpunkt. Dass eine bestimmte Adresse jetzt etwas
+bekommen hat, erfährt der Push-Dienst zwangsläufig; das steht deshalb so in der
+Datenschutzerklärung.
+
+### Wann nichts hinausgeht
+
+- Der Schalter „Gerätebenachrichtigungen" im Profil steht auf aus. Er wirkt für
+  beide Wege, nicht nur für die Anzeige im offenen Fenster.
+- Ein Fenster ist im Vordergrund. Geprüft wird das zweimal — vor dem Absenden
+  und noch einmal im Service Worker, weil der Benutzer zwischen beidem den Tab
+  öffnen kann.
+- Die Nachricht ist ein Steuersignal (Lese- oder Zustellbestätigung, Tippen).
+- Der Empfänger ist zugleich der Absender.
+
+### Grenzen
+
+- **Eine Zustelladresse gehört einem Browser, nicht einem Konto.** Meldet sich
+  in einem geteilten Browser ein anderes Konto an, übernimmt es die Adresse.
+  Andernfalls bekäme der neue Benutzer die Benachrichtigungen des vorherigen.
+- **Abmelden trägt die Adresse aus.** Wer den Browser wegwirft, ohne sich
+  abzumelden, hinterlässt eine Zeile; sie verschwindet, sobald der Push-Dienst
+  sie beim nächsten Versuch mit 404 oder 410 für tot erklärt.
+- **Eine Störung des Push-Dienstes löscht nichts.** Eine 500 oder ein
+  Netzwerkaussetzer sagen nichts über das Abonnement aus. Nur 404 und 410 tun
+  das.
+- **Zurückgehalten wird eine Stunde** (`TTL`). Wer länger offline war, liest die
+  Nachricht beim Öffnen im Verlauf.
+- **Der Tauri-Desktop und die Android-App brauchen das nicht.** Sie melden über
+  ihren eigenen Weg und laufen gar nicht erst durch den Service Worker.
+
+---
+
 ## Kubernetes
 
 Manifeste und Betriebsablauf liegen unter

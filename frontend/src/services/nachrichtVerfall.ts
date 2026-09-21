@@ -53,6 +53,12 @@ import { tilgeNachrichtBeimServer, tilgeNachrichtLokal } from './nachrichtLoesch
  * lautet und „nach 7 Tage" kein Deutsch ist. Zwei Formen sind billiger als ein
  * Satzbau, der die Zahl umstellt. Im Englischen sind beide gleich — die
  * Sprachdatei entscheidet das, nicht diese Liste.
+ *
+ * **Die längste Stufe hat ein Gegenstück im Backend.** Ein hochgeladener Anhang
+ * wird dort nach `MEDIEN_AUFBEWAHRUNG_TAGE` (`chat_media_service.py`) abgeräumt.
+ * Steht hier eine längere Frist als dort, lebt die Nachricht weiter und ihr
+ * Anhang ist schon weg: die Anlage bricht mit einem 410 weg, ohne dass jemand
+ * etwas gelöscht hat. Wer hier eine Stufe ergänzt, zieht die Zahl dort mit.
  */
 export const VERFALL_STUFEN = [
   { sekunden: 0, labelKey: 'messenger.retention.off', dativKey: 'messenger.retentionDative.off' },

@@ -1739,3 +1739,115 @@ def test_ein_konto_hat_dieselbe_geraetekennung_nur_einmal(db: Session, owner_use
         db.execute(einfuegen, werte)
         db.commit()
     db.rollback()
+
+
+def test_eine_zustelladresse_verschwindet_mit_ihrem_konto(db: Session, owner_user) -> None:
+    """Ein geloeschtes Konto darf keine Push-Adresse hinterlassen.
+
+    Bliebe die Zeile stehen, liefe der Versender bei jeder Nachricht dagegen und
+    schickte Benachrichtigungen an einen Browser, dessen Konto es nicht mehr
+    gibt — zugestellt wuerde sie, weil der Push-Dienst nur die Adresse kennt und
+    nichts von Konten weiss. Ohne diese Zusage in der **Datenbank** haengt das
+    Aufraeumen allein an Anwendungscode, der beim naechsten Loeschpfad vergessen
+    wird.
+    """
+    from services import webpush_service
+
+    inspector = inspect(db.get_bind())
+    assert _fremdschluessel(inspector, "push_subscriptions", "user_id")["options"] == {
+        "ondelete": "CASCADE"
+    }
+
+    webpush_service.eintragen(
+        db,
+        owner_user,
+        endpoint="https://fcm.googleapis.com/fcm/send/schema-test",
+        p256dh="BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4",
+        auth="BTBZMqHH6r4Tts7J_aSIgg",
+    )
+    db.execute(text("DELETE FROM users WHERE id = :id"), {"id": owner_user.id})
+    db.commit()
+
+    db.expire_all()
+    assert list(db.execute(text("SELECT id FROM push_subscriptions"))) == []
+
+
+def test_dieselbe_zustelladresse_gibt_es_nur_einmal(db: Session, owner_user) -> None:
+    """Die Eindeutigkeit steht in der Datenbank, nicht nur im Dienst.
+
+    `webpush_service.eintragen` uebernimmt eine vorhandene Adresse fuer das neue
+    Konto, statt eine zweite Zeile anzulegen — sonst bekaeme in einem geteilten
+    Browser der neue Benutzer die Benachrichtigungen des vorherigen. Diese Pruefung
+    haelt fest, dass die Schranke auch dann greift, wenn jemand die Tabelle unter
+    dem Dienst hinweg beschreibt.
+    """
+    inspector = inspect(db.get_bind())
+    assert any(
+        eindeutig["column_names"] == ["endpoint"]
+        for eindeutig in inspector.get_unique_constraints("push_subscriptions")
+    ), "push_subscriptions.endpoint ist nicht mehr eindeutig"
+
+    einfuegen = text(
+        "INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, created_at)"
+        " VALUES (:uid, :endpunkt, 'x', 'y', :jetzt)"
+    )
+    werte = {
+        "uid": owner_user.id,
+        "endpunkt": "https://fcm.googleapis.com/fcm/send/doppelt",
+        "jetzt": datetime.now(timezone.utc),
+    }
+    db.execute(einfuegen, werte)
+    db.commit()
+
+    with pytest.raises(IntegrityError):
+        db.execute(einfuegen, werte)
+        db.commit()
+    db.rollback()
+
+
+def test_die_migration_legt_die_zustelladressen_an(tmp_path: Path) -> None:
+    """Modell und Migration duerfen auch hier nicht auseinanderlaufen.
+
+    Die Tests bauen das Schema mit `create_all` aus den Modellen, die Produktion
+    mit Alembic. Stuende die Tabelle nur im Modell, waere die Suite gruen und
+    jede echte Anlage haette beim ersten Abonnement einen Fehler. Der Rueckbau
+    bis **vor** die Revision und wieder vor beweist, dass sie tatsaechlich in der
+    Kette steht und nicht bloss aus `create_all` stammt.
+    """
+    db_url = f"sqlite:///{tmp_path / 'push_constraint.db'}"
+    vorher = settings.database_url
+    settings.database_url = db_url
+    backend_dir = Path(__file__).resolve().parent.parent
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "migrations"))
+    engine = create_engine(db_url)
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+
+        command.downgrade(config, "20260918_01")
+        assert "push_subscriptions" not in inspect(engine).get_table_names()
+
+        command.upgrade(config, "head")
+        inspector = inspect(engine)
+        assert "push_subscriptions" in inspector.get_table_names()
+
+        spalten = {s["name"]: s for s in inspector.get_columns("push_subscriptions")}
+        assert set(spalten) == {"id", "user_id", "endpoint", "p256dh", "auth", "created_at"}
+
+        # Dieselbe Zusage wie am Modell: ein geloeschtes Konto hinterlaesst keine
+        # Adresse, und dieselbe Adresse gibt es nur einmal.
+        assert _fremdschluessel(inspector, "push_subscriptions", "user_id")["options"] == {
+            "ondelete": "CASCADE"
+        }
+        assert any(
+            e["column_names"] == ["endpoint"]
+            for e in inspector.get_unique_constraints("push_subscriptions")
+        )
+        assert any(
+            i["column_names"] == ["user_id"]
+            for i in inspector.get_indexes("push_subscriptions")
+        )
+    finally:
+        engine.dispose()
+        settings.database_url = vorher

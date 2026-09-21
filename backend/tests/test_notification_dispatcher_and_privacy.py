@@ -1,3 +1,18 @@
+"""Die Regeln, wer benachrichtigt werden darf — nicht, dass jemand sie bekommt.
+
+Geprüft werden reine Funktionen: Echo-Erkennung, Empfängerfilter,
+Steuersignal-Ausschluss und die Bereinigung des Payloads. Sie beantworten die
+Frage „darf hier überhaupt etwas hinausgehen, und was davon".
+
+Die Zustellung selbst steht in `test_webpush_service.py` — Verschlüsselung
+gegen die Testvektoren des RFC, SSRF-Schranke, Übernahme einer Adresse bei
+Kontowechsel. Die Aufteilung folgt der des Codes: `notification_service`
+entscheidet, `webpush_service` stellt zu.
+
+Der Vordergrundweg — offener Tab, Sync-Ereignis, Meldung des Betriebssystems —
+läuft im Browser und kommt in keiner der beiden Dateien vor.
+"""
+
 from __future__ import annotations
 
 import base64
@@ -481,7 +496,7 @@ def test_notification_dispatcher_active_foreground_suppression():
         assert SyncEventService.has_active_subscribers(alice_id) is False
 
         # Push-Dispatch für Bob (online im Vordergrund) -> MUSS unterdrückt werden (None)
-        push_bob = NotificationService.dispatch_push(
+        push_bob = NotificationService.prepare_push_dispatch(
             target_user_id=bob_id,
             sender_user_id=alice_id,
             title="Nachricht an Bob",
@@ -490,7 +505,7 @@ def test_notification_dispatcher_active_foreground_suppression():
         assert push_bob is None
 
         # Push-Dispatch für Alice (offline / Hintergrund) -> MUSS gedispatcht werden
-        push_alice = NotificationService.dispatch_push(
+        push_alice = NotificationService.prepare_push_dispatch(
             target_user_id=alice_id,
             sender_user_id=bob_id,
             title="Nachricht an Alice",

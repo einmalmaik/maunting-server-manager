@@ -63,6 +63,7 @@ from .user_friend import UserFriend
 from .user_presence import UserPresence
 from .e2ee_blind_envelope import E2eeBlindEnvelope
 from .user_e2ee_device import UserE2eeDevice
+from .push_subscription import PushSubscription
 from .credential import (
     CREDENTIAL_KINDS,
     KIND_GITHUB_TOKEN,
@@ -107,7 +108,7 @@ __all__ = [
     "PanelPopup", "UserPopupState",
     "VaultEntry", "VaultHint", "VaultUserSetting", "VaultBlindBucket",
     "UserAchievement", "UserActivityTime", "UserFriend", "UserPresence", "E2eeBlindEnvelope",
-    "UserE2eeDevice",
+    "UserE2eeDevice", "PushSubscription",
     "ChatGroup", "ChatGroupMember", "ChatStory", "DirectChat", "ChatMedia",
 ]  # noqa: E501
 

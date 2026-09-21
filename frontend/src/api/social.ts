@@ -235,6 +235,30 @@ export async function deleteEigenesGeraet(deviceId: string): Promise<{ ok: boole
   )
 }
 
+/** Der `applicationServerKey`. Leer heißt: dieses Panel kann nicht zustellen. */
+export async function getPushPublicKey(): Promise<string> {
+  const antwort = await api<{ key: string }>('/social/push/public-key')
+  return antwort.key || ''
+}
+
+export async function meldePushAbo(abo: {
+  endpoint: string
+  p256dh: string
+  auth: string
+}): Promise<{ ok: boolean }> {
+  return api<{ ok: boolean }>('/social/push/subscribe', {
+    method: 'POST',
+    body: JSON.stringify(abo),
+  })
+}
+
+export async function loeschePushAbo(endpoint: string): Promise<{ ok: boolean }> {
+  return api<{ ok: boolean }>(
+    `/social/push/subscribe?endpoint=${encodeURIComponent(endpoint)}`,
+    { method: 'DELETE' }
+  )
+}
+
 export interface ChatGroupMemberItem {
   user_id: number
   username: string

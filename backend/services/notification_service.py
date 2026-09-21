@@ -1,3 +1,34 @@
+"""Wer über eine Nachricht benachrichtigt werden darf — und was davon ankommt.
+
+Diese Datei entscheidet, sie stellt nicht zu. Das ist die Aufteilung und nicht
+eine halbe Sache: hier steht, wer niemals etwas erfahren darf und was in einem
+Payload nicht vorkommen darf; `webpush_service` bringt das Ergebnis danach zum
+Gerät.
+
+Zwei Wege führen zum Empfänger, und sie schließen einander aus:
+
+* **Offener Tab.** Das Ereignis kommt über den Social-WebSocket, und
+  `ServerIncidentNotifier` macht daraus über `sendeGeraeteBenachrichtigung`
+  eine Meldung des Betriebssystems. Dieser Weg läuft vollständig im Browser und
+  kommt an dieser Datei nicht vorbei.
+* **Geschlossene Anwendung.** `relay_blind_envelope` ruft
+  `prepare_push_dispatch`, und was dabei herauskommt, geht an
+  `webpush_service.sende_an_konto`. Zugestellt wird an den `push`-Listener in
+  `frontend/public/sw.js`.
+
+Gedoppelt wird dabei nichts, und zwar zweifach abgesichert:
+`has_active_foreground_connection` verhindert hier schon das Absenden, und
+`sw.js` verwirft einen Push, solange ein Fenster im Vordergrund ist. Die zweite
+Prüfung ist keine Verdopplung der ersten — zwischen Absenden und Zustellen
+liegen Sekunden, in denen der Benutzer den Tab öffnen kann.
+
+**Was den Weg nach draußen niemals verlässt, ist Inhalt.**
+`sanitize_push_payload` streicht Text, Chiffrat, Schlüssel und Anhänge und
+setzt „Neue Nachricht" an deren Stelle. Der Push-Dienst des Browserherstellers
+bekommt ohnehin nur Chiffrat zu sehen (RFC 8291), aber er soll auch dann nichts
+sehen, wenn an der Verschlüsselung einmal etwas schiefginge.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -7,13 +38,17 @@ logger = logging.getLogger(__name__)
 
 
 class NotificationService:
-    """Zentraler Notification-Service für Messenger- und System-Benachrichtigungen.
+    """Die Regeln, wer benachrichtigt werden darf.
 
     Implementiert strikte Outgoing Echo Prevention und Empfänger-Filterung:
     - Wenn die KI eine Nachricht im Namen des angemeldeten Benutzers versendet,
       darf für den Sender-Account KEINE Push-Benachrichtigung oder Unread-Badge getriggert werden.
     - Push/Alerts und Unread-Badges gibt es ausschließlich für den Empfänger bei
       ungesehenen Nachrichten (recipient_id == current_user && !is_read).
+
+    `should_notify` und `should_notify_group` beantworten eine Frage, die der
+    Client stellt. `prepare_push_dispatch` baut den Payload, den
+    `webpush_service` anschließend zustellt.
     """
 
     @staticmethod
@@ -269,7 +304,14 @@ class NotificationService:
         has_active_foreground_connection: bool = False,
         extra_data: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
-        """Erzeugt einen validierten, bereinigten WebPush/FCM Push-Dispatch-Auftrag.
+        """Erzeugt einen validierten, bereinigten WebPush-Auftrag.
+
+        Der Name sagt „dispatch", gemeint ist „vorbereiten": zugestellt wird in
+        `webpush_service.sende_an_konto`. Die Trennung ist gewollt — wer prüft,
+        ob jemand etwas erfahren darf, soll nicht zugleich HTTP sprechen.
+
+        **`None` ist die häufigste Antwort und bedeutet immer: hier geht nichts
+        hinaus.** Der Aufrufer darf daraus keinen leeren Payload bauen.
 
         Liefert None zurück, wenn:
         - target_user_id == sender_user_id (Outgoing Echo Prevention)
@@ -302,35 +344,4 @@ class NotificationService:
             raw_payload, is_e2ee=is_e2ee, privacy_mode=privacy_mode
         )
 
-    @staticmethod
-    def dispatch_push(
-        *,
-        target_user_id: int | str,
-        sender_user_id: int | str | None = None,
-        title: str,
-        body: str | None = None,
-        is_e2ee: bool = True,
-        privacy_mode: bool = True,
-        is_control: bool = False,
-        control_type: str | None = None,
-        has_active_foreground_connection: bool = False,
-        extra_data: dict[str, Any] | None = None,
-    ) -> dict[str, Any] | None:
-        """Zentraler Push-Dispatcher: Filtert, bereinigt und plant WebPush/FCM-Payloads."""
-        payload = NotificationService.prepare_push_dispatch(
-            target_user_id=target_user_id,
-            sender_user_id=sender_user_id,
-            title=title,
-            body=body,
-            is_e2ee=is_e2ee,
-            privacy_mode=privacy_mode,
-            is_control=is_control,
-            control_type=control_type,
-            has_active_foreground_connection=has_active_foreground_connection,
-            extra_data=extra_data,
-        )
-        if payload is None:
-            return None
-        logger.debug("Push-Dispatch vorbereitet für User %s: %s", target_user_id, payload.get("title"))
-        return payload
 
