@@ -3143,6 +3143,7 @@
     "privacyTitle": "Privatsphäre & Sichtbarkeit",
     "privacyDescription": "Bestimme, wer deinen Online-Status und deine Aktivitäten im System sehen kann.",
     "privacyVisibility": "Profil-Sichtbarkeit",
+    "privacyCallsFriendsOnly": "Anrufe bleiben davon unberührt: Sprach- und Videoanrufe kann dir nur schicken, wer als Freund bestätigt ist — auch bei einem öffentlichen Profil.",
     "privacySaved": "Privatsphäre-Einstellungen gespeichert.",
     "privacySaveFailed": "Einstellungen konnten nicht gespeichert werden.",
     "uploadAvatar": "Profilbild hochladen",

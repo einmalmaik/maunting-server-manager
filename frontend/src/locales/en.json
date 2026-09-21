@@ -3143,6 +3143,7 @@
     "privacyTitle": "Privacy & visibility",
     "privacyDescription": "Control who can see your online presence and activities in the system.",
     "privacyVisibility": "Profile visibility",
+    "privacyCallsFriendsOnly": "Calls are not affected: only confirmed friends can call you by voice or video — even with a public profile.",
     "privacySaved": "Privacy settings saved.",
     "privacySaveFailed": "Failed to save privacy settings.",
     "uploadAvatar": "Upload profile picture",

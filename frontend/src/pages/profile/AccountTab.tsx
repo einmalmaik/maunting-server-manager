@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
-import { Mail, AlertTriangle, Clock, Globe, MapPin, Save, ShieldCheck, Trash2, Camera, Loader2, Shield } from 'lucide-react'
+import { Mail, AlertTriangle, Clock, Globe, MapPin, Phone, Save, ShieldCheck, Trash2, Camera, Loader2, Shield } from 'lucide-react'
 import { Avatar, Button, Dropdown, type DropdownOption } from '@/Singra/UI'
 import { api } from '@/api/client'
 import { updatePrivacy } from '@/api/social'
@@ -447,6 +447,13 @@ export function AccountTab() {
               : privacyLevel === 'friends'
               ? 'Nur bestätigte Freunde sehen dein Gerät und deinen aktuellen Status.'
               : 'Jedes Mitglied im Panel kann deinen Status sehen.'}
+          </p>
+          {/* Die Sichtbarkeit regelt Status und Profil, nie das Klingeln. Wer
+              hier „Öffentlich" wählt, soll nicht vermuten müssen, dass er damit
+              auch Fremden das Anrufen erlaubt. */}
+          <p className="flex items-start gap-2 rounded-lg bg-surface-container-high/60 px-3 py-2 text-xs text-on-surface-variant">
+            <Phone className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+            <span>{t('profile.privacyCallsFriendsOnly')}</span>
           </p>
         </div>
       </section>

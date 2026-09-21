@@ -91,3 +91,19 @@ describe('Standortfreigabe im Konto', () => {
 
 })
 
+describe('Anrufe in der Sichtbarkeits-Einstellung', () => {
+  beforeEach(() => {
+    vi.mocked(api).mockReset()
+    setUser()
+  })
+
+  it('sagt neben der Profil-Sichtbarkeit, dass Anrufe Freunden vorbehalten bleiben', () => {
+    // Der Irrtum entsteht genau hier: „Öffentlich" klingt danach, als duerfte
+    // dann jeder anrufen. Das Backend weist solche Anrufe ab — die Oberflaeche
+    // muss es sagen, sonst erfaehrt man es nie.
+    render(<AccountTab />)
+
+    expect(screen.getByText(t('profile.privacyCallsFriendsOnly'))).toBeInTheDocument()
+  })
+})
+

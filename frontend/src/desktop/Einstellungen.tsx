@@ -27,6 +27,7 @@ import {
   MapPin,
   Mic,
   MonitorCog,
+  Phone,
   Radio,
   Save,
   ShieldAlert,
@@ -1026,6 +1027,13 @@ function SocialEinstellungen() {
               />
             </div>
           </div>
+
+          {/* Dieselbe Zusage wie im Panel: die Sichtbarkeit öffnet den Status,
+              nie das Klingeln. */}
+          <p className="flex items-start gap-2 rounded-lg bg-surface-container-high/60 px-3 py-2 text-label-sm text-on-surface-variant">
+            <Phone className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+            <span>{t('profile.privacyCallsFriendsOnly')}</span>
+          </p>
 
           <div className="flex items-center justify-between gap-3 pt-2 border-t border-outline-variant/20">
             <div>

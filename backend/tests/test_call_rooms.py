@@ -331,6 +331,100 @@ def test_kein_token_mehr_nach_ablehnen(db: Session, client: TestClient) -> None:
     assert nachtraeglich.status_code == 410
 
 
+def _raum_zwischen(db: Session, client: TestClient, anrufer: User, ziel: User) -> str:
+    """Zwei Freunde, ein offener Raum. Gibt den Raumnamen zurueck."""
+    _befreunde(db, anrufer, ziel)
+    kekse = _login(client, anrufer.username)
+    antwort = client.post(
+        f"/api/social/calls/invite/{ziel.id}",
+        cookies=kekse,
+        headers=_csrf(kekse),
+    )
+    assert antwort.status_code == 200
+    return antwort.json()["signaling_token"]
+
+
+def _token_anfordern(client: TestClient, raum: str, kekse: dict[str, str]):
+    return client.post(
+        "/api/social/calls/token",
+        json={"art": "direkt", "raum": raum},
+        cookies=kekse,
+        headers=_csrf(kekse),
+    )
+
+
+def test_kein_token_mehr_nach_blockieren(db: Session, client: TestClient) -> None:
+    """Blockieren schliesst die Tuer, auch wenn der Raum schon offen steht.
+
+    Das laufende Gespraech bricht davon nicht ab — ein Token wird nur beim
+    Verbinden gezogen. Was nicht mehr geht, ist Neuverbinden, Geraetewechsel und
+    spaetes Annehmen. Ohne diese Pruefung waere die Freundschaft nur in der
+    Sekunde des Waehlens eine Bedingung und danach zwei Stunden lang keine mehr.
+    """
+    anrufer = _user(db, f"anrufer_{secrets.token_hex(4)}")
+    ziel = _user(db, f"ziel_{secrets.token_hex(4)}")
+    raum = _raum_zwischen(db, client, anrufer, ziel)
+    anrufer_kekse = _login(client, anrufer.username)
+    ziel_kekse = _login(client, ziel.username)
+
+    assert _token_anfordern(client, raum, ziel_kekse).status_code == 200
+
+    blockiert = client.post(
+        f"/api/social/friends/{anrufer.id}/block",
+        cookies=ziel_kekse,
+        headers=_csrf(ziel_kekse),
+    )
+    assert blockiert.status_code == 200
+
+    # Beide Seiten: der Blockierte kommt nicht mehr herein, und wer blockiert
+    # hat, betritt den gemeinsamen Raum ebenfalls nicht mehr.
+    for kekse in (anrufer_kekse, ziel_kekse):
+        abgewiesen = _token_anfordern(client, raum, kekse)
+        assert abgewiesen.status_code == 403
+        assert "Freunden" in abgewiesen.json()["detail"]
+
+
+def test_kein_token_mehr_nach_entfreunden(db: Session, client: TestClient) -> None:
+    anrufer = _user(db, f"anrufer_{secrets.token_hex(4)}")
+    ziel = _user(db, f"ziel_{secrets.token_hex(4)}")
+    raum = _raum_zwischen(db, client, anrufer, ziel)
+    anrufer_kekse = _login(client, anrufer.username)
+    ziel_kekse = _login(client, ziel.username)
+
+    entfernt = client.delete(
+        f"/api/social/friends/{ziel.id}",
+        cookies=anrufer_kekse,
+        headers=_csrf(anrufer_kekse),
+    )
+    assert entfernt.status_code == 200
+
+    for kekse in (anrufer_kekse, ziel_kekse):
+        assert _token_anfordern(client, raum, kekse).status_code == 403
+
+
+def test_pending_schweigt_nach_blockieren(db: Session, client: TestClient) -> None:
+    """Ein Blockierter klingelt nicht auf dem naechsten Geraet noch einmal."""
+    anrufer = _user(db, f"anrufer_{secrets.token_hex(4)}")
+    ziel = _user(db, f"ziel_{secrets.token_hex(4)}")
+    _raum_zwischen(db, client, anrufer, ziel)
+    ziel_kekse = _login(client, ziel.username)
+
+    vorher = client.get("/api/social/calls/pending", cookies=ziel_kekse)
+    assert vorher.status_code == 200
+    assert vorher.json()["has_pending_call"] is True
+
+    client.post(
+        f"/api/social/friends/{anrufer.id}/block",
+        cookies=ziel_kekse,
+        headers=_csrf(ziel_kekse),
+    )
+
+    nachher = client.get("/api/social/calls/pending", cookies=ziel_kekse)
+    assert nachher.status_code == 200
+    assert nachher.json()["has_pending_call"] is False
+    assert nachher.json()["call"] is None
+
+
 def test_abbrechen_meldet_dem_ziel_und_entwertet_den_raum(
     db: Session, client: TestClient
 ) -> None:
@@ -401,6 +495,10 @@ def test_dritten_in_ein_laufendes_gespraech_holen(db: Session, client: TestClien
     finally:
         SyncEventService.unsubscribe(conn_id)
 
+    # Der Dritte ist mit dem Angerufenen **nicht** befreundet, nur mit dem
+    # Anrufer. Die Freundschaftspruefung an der Tokenausgabe fragt deshalb nach
+    # einem Freund unter den Berechtigten, nicht nach allen — sonst waere das
+    # Nachholen hier stillschweigend abgeschafft.
     zugang = client.post(
         "/api/social/calls/token",
         json={"art": "direkt", "raum": raum},

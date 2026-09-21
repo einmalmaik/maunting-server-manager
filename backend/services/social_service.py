@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime, timezone
 import logging
 from typing import Any
@@ -114,6 +115,32 @@ class SocialService:
                 or_(
                     and_(UserFriend.user_id == user_a_id, UserFriend.friend_id == user_b_id),
                     and_(UserFriend.user_id == user_b_id, UserFriend.friend_id == user_a_id),
+                ),
+                UserFriend.status == "accepted",
+            )
+            .first()
+        )
+        return rel is not None
+
+    @classmethod
+    def is_confirmed_friend_of_any(
+        cls, db: Session, user_id: int, candidate_ids: Iterable[int]
+    ) -> bool:
+        """Gibt es unter den Kandidaten mindestens einen bestätigten Freund?
+
+        Dieselbe Frage wie ``is_confirmed_friend``, nur gegen eine Menge und in
+        einer einzigen Abfrage. Das eigene Konto zählt nie mit: sonst wäre jeder
+        Raum, in dem man selbst steht, automatisch freundschaftlich gedeckt.
+        """
+        ids = {int(kandidat) for kandidat in candidate_ids} - {user_id}
+        if not ids:
+            return False
+        rel = (
+            db.query(UserFriend.id)
+            .filter(
+                or_(
+                    and_(UserFriend.user_id == user_id, UserFriend.friend_id.in_(ids)),
+                    and_(UserFriend.friend_id == user_id, UserFriend.user_id.in_(ids)),
                 ),
                 UserFriend.status == "accepted",
             )

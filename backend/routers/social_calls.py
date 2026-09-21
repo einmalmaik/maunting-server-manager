@@ -75,6 +75,36 @@ def _konfiguration_oder_fehler(db: Session) -> livekit_service.LivekitKonfigurat
     return konf
 
 
+#: Ein Wortlaut fuer dieselbe Regel, an jeder Schranke. Wer ihn aendert, aendert
+#: ihn ueberall — der Anrufende soll nicht raten muessen, ob er eben abgewiesen
+#: wurde, weil er nie Freund war oder weil er es nicht mehr ist.
+NUR_UNTER_FREUNDEN = "Anrufe sind nur zwischen bestätigten Freunden möglich."
+
+
+def _freundschaft_fehlt(db: Session, user_id: int, raum: str) -> bool:
+    """Ist die Freundschaft, die diesen Raum getragen hat, weggefallen?
+
+    Die Einladung prueft die Freundschaft einmal, in der Sekunde des Waehlens.
+    Danach lebt der Raum zwei Stunden weiter, und ohne diese zweite Frage haette
+    Blockieren oder Entfreunden keine Wirkung mehr: der Blockierte koennte sich
+    neu verbinden, das Geraet wechseln oder eine alte Einladung noch annehmen.
+
+    Gefragt wird nach **einem** Freund unter den uebrigen Berechtigten, nicht
+    nach allen. Im Zweiergespraech ist das genau die Freundschaft der beiden. Im
+    nachgeholten Dreiergespraech (A kennt B, A kennt C, B und C sind einander
+    fremd) haelt es C drin, weil A im Raum steht — dass ein gemeinsamer Bekannter
+    jemanden dazuholen darf, ist eine gewollte Regel und soll hier nicht
+    stillschweigend zurueckgenommen werden.
+
+    Ueber einen Raum, an dem der Nutzer ohnehin nicht berechtigt ist, urteilt
+    diese Funktion nicht; das ist die Aufgabe von ``CallRoomService.authorize``.
+    """
+    berechtigte = CallRoomService.berechtigte(raum)
+    if user_id not in berechtigte:
+        return False
+    return not SocialService.is_confirmed_friend_of_any(db, user_id, berechtigte)
+
+
 def _melde_anrufzustand(user_ids: list[int] | set[int] | int, active_call: dict | None = None) -> None:
     """Verteilt den neuen Anrufstatus an alle angegebenen Benutzerkonten."""
     targets = [user_ids] if isinstance(user_ids, int) else list(user_ids)
@@ -110,10 +140,7 @@ def einladung_erstellen(
     if ziel.id == user.id:
         raise HTTPException(status_code=400, detail="Man ruft sich nicht selbst an.")
     if not SocialService.is_confirmed_friend(db, user.id, target_user_id):
-        raise HTTPException(
-            status_code=403,
-            detail="Anrufe sind nur zwischen bestätigten Freunden möglich.",
-        )
+        raise HTTPException(status_code=403, detail=NUR_UNTER_FREUNDEN)
     _konfiguration_oder_fehler(db)
 
     raum = CallRoomService.issue(user.id, target_user_id, mode=mode)
@@ -284,7 +311,12 @@ def ausstehende_anrufe(
     """Prüft auf eingehende Direkt-Anrufe und aktive Gruppenanrufe des Nutzers."""
     pending = CallRoomService.get_pending_invitation(user.id)
     pending_call = None
-    if pending is not None:
+    # Eine Einladung, deren Freundschaft inzwischen weg ist, wird hier nicht mehr
+    # nachgereicht. Sonst klingelte ein Blockierter beim naechsten Geraet, das
+    # sich meldet, noch einmal — obwohl er den Raum gar nicht mehr betreten darf.
+    if pending is not None and not _freundschaft_fehlt(
+        db, user.id, pending["signaling_token"]
+    ):
         caller = db.query(User).filter_by(id=pending["caller_id"], is_active=True).first()
         if caller:
             pending_call = {
@@ -453,6 +485,12 @@ def zugangstoken(
     if req.art == "direkt":
         if CallRoomService.is_consumed(req.raum):
             raise HTTPException(status_code=410, detail="Der Anruf ist bereits beendet.")
+        # Vor `authorize`, nicht danach: die Berechtigung merkt sich als
+        # Nebenwirkung, dass der Raum angenommen wurde, und ein Beitritt, der
+        # gleich darauf an der Freundschaft scheitert, soll diese Spur nicht
+        # hinterlassen.
+        if _freundschaft_fehlt(db, user.id, req.raum):
+            raise HTTPException(status_code=403, detail=NUR_UNTER_FREUNDEN)
         if not CallRoomService.authorize(req.raum, user.id):
             raise HTTPException(
                 status_code=403, detail="Für diesen Anruf liegt keine Einladung vor."
