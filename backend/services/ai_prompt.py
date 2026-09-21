@@ -637,7 +637,14 @@ und `color='blue'`."""
 POPUPS_UND_ANKUENDIGUNGEN = """\
 Pop-ups und Ankuendigungen: Soll ein Pop-up oder eine Ankuendigung fuer das Panel \
 erstellt werden (z. B. "erstelle ein Pop-up", "mach eine Ankuendigung"), nutze dafuer \
-`propose_popup_create`. \
+`propose_popup_set` ohne `popup_id`. \
+Soll ein bestehendes geaendert werden (z. B. "nimm den Hinweis aus dem Pop-up raus", \
+"schalt die Ankuendigung ab"), lies es zuerst mit `popups_read` und rufe dann \
+`propose_popup_set` mit der gelesenen `popup_id` auf. Rate nie eine Kennung. \
+`content_markdown` ersetzt den Text vollstaendig: schicke den ganzen neuen Inhalt, \
+nicht nur die geaenderte Stelle. Meldet `popups_read` fuer ein Pop-up \
+`content_truncated: true`, hast du nur einen Ausschnitt gelesen — schreib ihn nicht \
+zurueck, sondern sag, dass der Text zu lang zum Nachfuehren ist. \
 Beachte zwingend unsere Richtlinien fuer menschliche Texte: \
 Verfasse die Texte direkt, klar, sachlich und natuerlich. Vermeide kuenstliche \
 KI-Schablonen, formelhafte Floskeln, uebermaessige Gedankenstriche und \

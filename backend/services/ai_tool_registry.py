@@ -243,6 +243,13 @@ WERKZEUGE: dict[str, Werkzeug] = {
     "notes_read": Werkzeug(
         "global_read", gruppe="notes", angebot=("ai.notes.use",)
     ),
+    # Ohne dieses Werkzeug konnte die KI nur neue Ankuendigungen anlegen. Ein
+    # "nimm den Hinweis auf Mac und Linux aus dem Pop-up raus" war damit nicht
+    # zu erfuellen: sie kannte weder die Kennung noch den Text, den sie haette
+    # aendern sollen — und sagte das auch so.
+    "popups_read": Werkzeug(
+        "global_read", gruppe="popup", angebot=("ai.popups.manage",)
+    ),
     "execute_server_action": Werkzeug("global_read"),
 
     # ── Rueckfrage ────────────────────────────────────────────────────
@@ -683,7 +690,13 @@ WERKZEUGE: dict[str, Werkzeug] = {
         recht="ai.notes.use",
         recht_global=True,
     ),
-    "propose_popup_create": Werkzeug(
+    # Anlegen **und** aendern in einem Werkzeug, nach dem Vorbild von
+    # `propose_task_set`: beide tragen dasselbe Schema, und eine `popup_id`
+    # entscheidet, welcher der beiden Faelle gemeint ist. Zwei Werkzeuge waeren
+    # hier rund 1.700 Zeichen Katalog fuer ein zweites Mal dieselben acht
+    # Felder gewesen — der Katalog geht in jeder Runde mit
+    # (`test_ai_tool_handler_contract`).
+    "propose_popup_set": Werkzeug(
         "global_write",
         gruppe="popup",
         recht="ai.popups.manage",

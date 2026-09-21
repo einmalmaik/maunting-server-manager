@@ -77,7 +77,10 @@ const SCHREIBWERKZEUGE = [
   'propose_note_create',
   'propose_note_update',
   'propose_note_delete',
-  'propose_popup_create',
+  // Anlegen und Aendern in einem Werkzeug, wie `propose_task_set`: eine
+  // `popup_id` aus `popups_read` entscheidet, welcher der beiden Faelle
+  // gemeint ist. Zwei Werkzeuge waeren zweimal dasselbe Schema im Katalog.
+  'propose_popup_set',
   'propose_cloudflare_dns_record',
   'propose_cloudflare_dns_delete',
   'propose_modpack_install',

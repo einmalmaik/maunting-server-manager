@@ -21,35 +21,133 @@ _AUFGABEN_FELDER = frozenset({
     "channel",
 })
 
-def _popup_create_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
-    title = str(rest.get("title", "")).strip()
-    content_markdown = str(rest.get("content_markdown", "")).strip()
-    if not title or not content_markdown:
-        raise AiActionValidationError("Pop-up erfordert title und content_markdown")
+_POPUP_FELDER = frozenset({
+    "popup_id", "title", "content_markdown", "is_active",
+    "start_at", "end_at", "button_text", "button_url",
+})
 
-    is_active = bool(rest.get("is_active", True))
-    start_at = rest.get("start_at")
-    end_at = rest.get("end_at")
-    button_text = rest.get("button_text")
-    button_url = rest.get("button_url")
+# Was beim Aendern unberuehrt bleibt, wenn das Modell es nicht nennt. Genannt
+# werden muss ein Feld auch dann, wenn es auf `null` soll — deshalb entscheidet
+# die **Anwesenheit** des Schluessels und nicht sein Wert.
+_POPUP_OPTIONAL = ("start_at", "end_at", "button_text", "button_url")
 
-    payload = {
-        "title": redact_sensitive_text(title),
-        "content_markdown": redact_sensitive_text(content_markdown),
-        "is_active": is_active,
-        "start_at": str(start_at).strip() if start_at else None,
-        "end_at": str(end_at).strip() if end_at else None,
-        "button_text": redact_sensitive_text(str(button_text).strip()) if button_text else None,
-        "button_url": str(button_url).strip() if button_url else None,
-    }
+
+def _popup_zeitpunkt(wert: object) -> datetime | None:
+    if not wert:
+        return None
+    try:
+        return datetime.fromisoformat(str(wert).replace("Z", "+00:00"))
+    except ValueError:
+        raise AiActionValidationError(
+            f"'{wert}' ist kein Zeitpunkt im Format ISO-8601"
+        ) from None
+
+
+def _popup_set_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
+    """Nutzlast fuer `propose_popup_set` — anlegen oder aendern.
+
+    Welcher der beiden Faelle gemeint ist, entscheidet `popup_id`: ohne sie
+    entsteht ein neues Pop-up, mit ihr wird das bestehende geaendert. Dasselbe
+    Muster wie `propose_task_set` — die Felder sind in beiden Faellen dieselben,
+    und zwei Werkzeuge dafuer waeren zweimal dasselbe Schema im Katalog.
+
+    Das Pop-up wird **jetzt** aufgeschlagen und nicht erst beim Klick. Auf der
+    Karte soll der Titel stehen, der geaendert wird, und nicht eine Kennung;
+    und ein Vorschlag auf ein geloeschtes Pop-up soll gar nicht erst entstehen.
+    """
+    from models import PanelPopup
+
+    if set(rest) - _POPUP_FELDER:
+        raise AiActionValidationError("Pop-up-Tool hat ungueltige Argumente")
+
+    # Eine leere Kennung heisst dasselbe wie keine: anlegen. Dieselbe Nachsicht
+    # wie bei `propose_task_set` — ein Modell schickt lieber `""` als ein Feld
+    # wegzulassen, das es gerade gelesen hat.
+    roh = rest.get("popup_id")
+    if isinstance(roh, str) and not roh.strip():
+        roh = None
+    popup_id: int | None = None
+    bestehend: PanelPopup | None = None
+    if roh is not None:
+        try:
+            popup_id = int(roh)
+        except (TypeError, ValueError):
+            raise AiActionValidationError(
+                "popup_id muss eine Kennung aus popups_read sein"
+            ) from None
+        bestehend = db.query(PanelPopup).filter(PanelPopup.id == popup_id).first()
+        if bestehend is None:
+            raise AiActionValidationError(f"Pop-up {popup_id} gibt es nicht")
+
+    title = str(rest["title"]).strip() if rest.get("title") is not None else None
+    content_markdown = (
+        str(rest["content_markdown"]).strip()
+        if rest.get("content_markdown") is not None
+        else None
+    )
+
+    if bestehend is None:
+        # Ein neues Pop-up ohne Titel oder Text waere eine leere Karte.
+        if not title or not content_markdown:
+            raise AiActionValidationError(
+                "Ein neues Pop-up erfordert title und content_markdown"
+            )
+    elif not any(feld in rest for feld in _POPUP_FELDER - {"popup_id"}):
+        raise AiActionValidationError(
+            "Es wurde nichts genannt, das geaendert werden soll"
+        )
+    # Ein leer genanntes Pflichtfeld ist beim Aendern **nicht** dasselbe wie ein
+    # weggelassenes: es wuerde das Pop-up ohne Titel oder ohne Inhalt
+    # zuruecklassen. Beide sind in der Datenbank `nullable=False` und im
+    # Panel-Schema `min_length=1`; die KI darf sie nicht unterlaufen.
+    if title == "":
+        raise AiActionValidationError("Der Titel darf nicht leer sein")
+    if content_markdown == "":
+        raise AiActionValidationError("Der Inhalt darf nicht leer sein")
+    # Die Zeitpunkte werden **jetzt** geprueft und nicht erst beim Klick. Eine
+    # Karte, die im Bestaetigungsmoment an einem Datumsformat scheitert, hat dem
+    # Benutzer eine Zusage hingelegt, die nicht haelt.
+    for feld in ("start_at", "end_at"):
+        if rest.get(feld):
+            _popup_zeitpunkt(rest[feld])
+
+    payload: dict = {"popup_id": popup_id}
+    if title is not None:
+        payload["title"] = redact_sensitive_text(title)
+    if content_markdown is not None:
+        payload["content_markdown"] = redact_sensitive_text(content_markdown)
+    if "is_active" in rest:
+        payload["is_active"] = bool(rest["is_active"])
+    for feld in _POPUP_OPTIONAL:
+        if feld not in rest:
+            continue
+        wert = rest[feld]
+        text = str(wert).strip() if wert is not None and str(wert).strip() else None
+        payload[feld] = (
+            redact_sensitive_text(text)
+            if text is not None and feld == "button_text"
+            else text
+        )
+
     preview = {
-        "operation": "popup_create",
-        "title": redact_sensitive_text(title),
-        "content_preview": redact_sensitive_text(content_markdown)[:300],
-        "is_active": is_active,
-        "start_at": str(start_at).strip() if start_at else None,
-        "end_at": str(end_at).strip() if end_at else None,
-        "button_text": redact_sensitive_text(str(button_text).strip()) if button_text else None,
+        "operation": "popup_update" if bestehend is not None else "popup_create",
+        "popup_id": popup_id,
+        # Beim Aendern steht der bisherige Titel da, wenn das Modell keinen
+        # neuen nennt — sonst traegt die Karte "Pop-up aendern" und sonst nichts.
+        "title": payload.get(
+            "title",
+            redact_sensitive_text(str(bestehend.title)) if bestehend else "",
+        ),
+        "content_preview": payload.get(
+            "content_markdown",
+            redact_sensitive_text(str(bestehend.content_markdown)) if bestehend else "",
+        )[:300],
+        "is_active": payload.get(
+            "is_active", bool(bestehend.is_active) if bestehend else True
+        ),
+        "start_at": payload.get("start_at"),
+        "end_at": payload.get("end_at"),
+        "button_text": payload.get("button_text"),
     }
     return payload, preview
 
@@ -113,28 +211,53 @@ def _task_delete_payload(db: Session, user: User, arguments: dict) -> tuple[dict
         },
     )
 
-def _ausfuehren_popup_create(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
-    from models import PanelPopup
-    from datetime import datetime
+def _ausfuehren_popup_set(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    """Legt ein Pop-up an oder aendert das genannte.
 
-    p = rahmen.payload
-    start_dt = (
-        datetime.fromisoformat(p["start_at"].replace("Z", "+00:00"))
-        if p.get("start_at")
-        else None
-    )
-    end_dt = (
-        datetime.fromisoformat(p["end_at"].replace("Z", "+00:00"))
-        if p.get("end_at")
-        else None
-    )
+    **Zwischen Vorschlag und Bestaetigung liegt ein Zeitfenster ohne
+    Obergrenze**, und in ihm kann jemand das Pop-up im Panel geloescht haben.
+    Deshalb wird hier erneut nachgesehen, statt sich auf die Pruefung im
+    Payload-Bau zu verlassen; ein `None` an dieser Stelle wuerde sonst still
+    ein zweites Pop-up anlegen.
+    """
+    from models import PanelPopup
+
+    p = dict(rahmen.payload)
+    popup_id = p.pop("popup_id", None)
+
+    if popup_id is not None:
+        popup = db.query(PanelPopup).filter(PanelPopup.id == int(popup_id)).first()
+        if popup is None:
+            raise AiActionValidationError(
+                f"Pop-up {popup_id} gibt es nicht mehr — es wurde inzwischen geloescht"
+            )
+        if "title" in p:
+            popup.title = str(p["title"])
+        if "content_markdown" in p:
+            popup.content_markdown = str(p["content_markdown"])
+        if "is_active" in p:
+            popup.is_active = bool(p["is_active"])
+        if "start_at" in p:
+            popup.start_at = _popup_zeitpunkt(p["start_at"])
+        if "end_at" in p:
+            popup.end_at = _popup_zeitpunkt(p["end_at"])
+        if "button_text" in p:
+            popup.button_text = str(p["button_text"]) if p["button_text"] else None
+        if "button_url" in p:
+            popup.button_url = str(p["button_url"]) if p["button_url"] else None
+        popup.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(popup)
+        return _Ausgefuehrt(
+            result={"updated": True, "popup_id": popup.id, "title": popup.title}
+        )
 
     popup = PanelPopup(
         title=str(p["title"]),
         content_markdown=str(p["content_markdown"]),
         is_active=bool(p.get("is_active", True)),
-        start_at=start_dt,
-        end_at=end_dt,
+        start_at=_popup_zeitpunkt(p.get("start_at")),
+        end_at=_popup_zeitpunkt(p.get("end_at")),
         button_text=str(p["button_text"]) if p.get("button_text") else None,
         button_url=str(p["button_url"]) if p.get("button_url") else None,
         created_by_user_id=rahmen.active_user.id,

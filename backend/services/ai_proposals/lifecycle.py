@@ -128,10 +128,10 @@ from services.ai_proposals.network_proposals import (
     _ausfuehren_cloudflare_dns_delete,
 )
 from services.ai_proposals.task_proposals import (
-    _popup_create_payload,
+    _popup_set_payload,
     _task_set_payload,
     _task_delete_payload,
-    _ausfuehren_popup_create,
+    _ausfuehren_popup_set,
     _ausfuehren_task_set,
     _ausfuehren_task_delete,
     _ausfuehren_read_tool,
@@ -247,8 +247,8 @@ _GLOBALE_PAYLOADS: dict = {
     "propose_note_delete": lambda db, user, rest, arguments, guardian: (
         _note_delete_payload(db, user, rest)
     ),
-    "propose_popup_create": lambda db, user, rest, arguments, guardian: (
-        _popup_create_payload(db, user, rest)
+    "propose_popup_set": lambda db, user, rest, arguments, guardian: (
+        _popup_set_payload(db, user, rest)
     ),
     "propose_cloudflare_dns_record": lambda db, user, rest, arguments, guardian: (
         _cloudflare_dns_payload(rest)
@@ -802,7 +802,7 @@ _AUSFUEHRUNGEN: dict[str, Callable[[Session, _AusfuehrungsRahmen], _Ausgefuehrt]
     "propose_note_create": _ausfuehren_note_create,
     "propose_note_update": _ausfuehren_note_update,
     "propose_note_delete": _ausfuehren_note_delete,
-    "propose_popup_create": _ausfuehren_popup_create,
+    "propose_popup_set": _ausfuehren_popup_set,
     "propose_cloudflare_dns_record": _ausfuehren_cloudflare_dns,
     "propose_cloudflare_dns_delete": _ausfuehren_cloudflare_dns_delete,
     "propose_modpack_install": _ausfuehren_modpack_install,

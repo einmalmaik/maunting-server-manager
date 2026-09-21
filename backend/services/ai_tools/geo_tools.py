@@ -17,7 +17,7 @@ def _voice_tool_definitions() -> list[dict]:
     return [
         _function(
             "voice_resolve_latest_proposal",
-            "BestÃ¤tigt oder verwirft ausschlieÃŸlich den zuletzt in dieser "
+            "Bestätigt oder verwirft ausschließlich den zuletzt in dieser "
             "Sprachsitzung angezeigten Vorschlag. Nutze dies nur, wenn der "
             "Benutzer dem sichtbaren Vorschlag eindeutig zustimmt oder ihn "
             "eindeutig ablehnt.",
@@ -31,9 +31,9 @@ def _voice_tool_definitions() -> list[dict]:
         ),
         _function(
             "voice_set_region_view",
-            "Steuert ausschlieÃŸlich die sichtbare Regionalansicht dieser Sprachsitzung. "
-            "Nutze es unmittelbar bevor du Ã¼ber Wetter, Nachrichten, soziale BeitrÃ¤ge, Verkehr oder eine Satellitenszene sprichst. "
-            "source_id und scene_id mÃ¼ssen aus den zuletzt erhaltenen Regionaldaten stammen.",
+            "Steuert ausschließlich die sichtbare Regionalansicht dieser Sprachsitzung. "
+            "Nutze es unmittelbar bevor du über Wetter, Nachrichten, soziale Beiträge, Verkehr oder eine Satellitenszene sprichst. "
+            "source_id und scene_id müssen aus den zuletzt erhaltenen Regionaldaten stammen.",
             {
                 "tab": {"type": "string", "enum": ["overview", "satellite", "news", "social", "traffic", "weather"]},
                 "source_id": {"type": "string", "maxLength": 512},
@@ -43,7 +43,7 @@ def _voice_tool_definitions() -> list[dict]:
         ),
         _function(
             "voice_leave_region_view",
-            "SchlieÃŸt die Regionalansicht, wenn das GesprÃ¤ch zu einem Thema ohne Ortsbezug wechselt. "
+            "Schließt die Regionalansicht, wenn das Gespräch zu einem Thema ohne Ortsbezug wechselt. "
             "Keine Server-, Log-, Kalender- oder allgemeine Antwort in einer alten Ortsansicht lassen.",
             {},
             [],
@@ -51,30 +51,30 @@ def _voice_tool_definitions() -> list[dict]:
     ]
 
 def voice_control_tool_definitions() -> list[dict]:
-    """Nur der Realtime-Transport erhÃ¤lt diese sitzungsgebundenen Tools."""
+    """Nur der Realtime-Transport erhält diese sitzungsgebundenen Tools."""
     return _voice_tool_definitions()
 
 def _region_request(
     db: Session, *, user: User, arguments: dict,
 ) -> tuple[str, str]:
-    """PrÃ¼ft die gemeinsame Berechtigungs- und Eingabegrenze der Regionsanalyse."""
+    """Prüft die gemeinsame Berechtigungs- und Eingabegrenze der Regionsanalyse."""
     from services import permission_service
 
     if not permission_service.has_global_permission(db, user, "ai.satellite.use"):
-        raise AiActionValidationError("Satelliten- und Regionsanalyse ist fÃ¼r diesen Benutzer nicht freigegeben")
+        raise AiActionValidationError("Satelliten- und Regionsanalyse ist für diesen Benutzer nicht freigegeben")
 
     location = arguments.get("location")
     if not isinstance(location, str) or not location.strip():
-        raise AiActionValidationError("Ort (location) fehlt oder ist ungÃ¼ltig")
+        raise AiActionValidationError("Ort (location) fehlt oder ist ungültig")
     camera = arguments.get("camera", "focus")
     if camera not in {"overview", "focus", "detail"}:
-        raise AiActionValidationError("Kameramodus ist ungÃ¼ltig")
+        raise AiActionValidationError("Kameramodus ist ungültig")
     return redact_sensitive_text(location.strip())[:100], camera
 
 def execute_realtime_region_initial(
     db: Session, *, user: User, arguments: dict,
 ) -> dict:
-    """Liefert den ersten, sofort darstellbaren Stand fÃ¼r den Sprachmodus."""
+    """Liefert den ersten, sofort darstellbaren Stand für den Sprachmodus."""
     from services import ai_geo_service
 
     safe_location, camera = _region_request(db, user=user, arguments=arguments)
@@ -91,7 +91,7 @@ def execute_realtime_region_enrichment(
     initial: dict,
     prefetch_session_id: str | None = None,
 ) -> dict:
-    """ErgÃ¤nzt einen bereits gezeigten Regionsstand um langsame, optionale Quellen."""
+    """Ergänzt einen bereits gezeigten Regionsstand um langsame, optionale Quellen."""
     from services import ai_geo_service, ai_web_search_service, permission_service
 
     safe_location, _camera = _region_request(db, user=user, arguments=arguments)
@@ -119,7 +119,7 @@ def execute_realtime_region_enrichment(
     regional_cache_scope = (
         f"regional:{user.id}:{prefetch_session_id}" if prefetch_session_id else None
     )
-    # Verkehr, Ã¶ffentliche BeitrÃ¤ge und Weblage dÃ¼rfen den sofort sichtbaren
+    # Verkehr, öffentliche Beiträge und Weblage dürfen den sofort sichtbaren
     # Wetter-/Kartenstand nie aufhalten, laden aber untereinander parallel.
     with ThreadPoolExecutor(max_workers=2, thread_name_prefix="msm-region") as executor:
         signals_future = executor.submit(
@@ -137,7 +137,7 @@ def execute_realtime_region_enrichment(
 def _execute_analyze_region(
     db: Session, *, user: User, arguments: dict, prefetch_session_id: str | None = None,
 ) -> dict:
-    """FÃ¼hrt fÃ¼r den Chat die vollstÃ¤ndige regionale Analyse aus."""
+    """Führt für den Chat die vollständige regionale Analyse aus."""
     initial = execute_realtime_region_initial(db, user=user, arguments=arguments)
     return execute_realtime_region_enrichment(
         db,

@@ -74,6 +74,48 @@ def test_every_global_read_tool_is_named_in_its_dispatch() -> None:
     assert fehlend == []
 
 
+def test_eine_binaerdatei_wird_auch_ohne_nullbyte_erkannt() -> None:
+    """Die zweite Haelfte von `is_binary_text` war stillschweigend tot.
+
+    Die Funktion hat zwei Wege: das Nullbyte und die Quote der Ersatzzeichen,
+    die `errors="replace"` aus undekodierbaren Bytes macht. Der zweite zaehlte
+    bis zum 21.09.2026 nicht `U+FFFD`, sondern die **drei** Zeichen `Ã¯Â¿Â½` —
+    den Mojibake davon, entstanden, als der Quelltext einmal falsch umkodiert
+    wurde. Eine solche Folge erzeugt kein Dekodierer, also traf die Zaehlung
+    nie zu, und uebrig blieb allein das Nullbyte.
+
+    Das ist keine Kosmetik: `is_binary_text` steht vor sechs Aufrufen, unter
+    anderem vor dem **Schreiben** von Serverdateien. Eine Binaerdatei ohne
+    Nullbyte im dekodierten Text ging seitdem als Textdatei durch — die KI
+    haette sie lesen und als Text zurueckschreiben koennen.
+
+    Der bestehende Test in `test_file_delete_rueckweg.py` sagt in seinem
+    Kommentar ausdruecklich, dass ihm das Nullbyte genuegt und er "die
+    U+FFFD-Quote gar nicht erst" braucht. Genau deshalb fiel es niemandem auf.
+    """
+    from services.ai_tools.base import is_binary_text
+
+    # Was `read_text(errors="replace")` aus undekodierbaren Bytes macht.
+    verdorben = b"\xff\xfe\x81\x8d\x8f" * 40
+    inhalt = verdorben.decode("utf-8", errors="replace")
+    assert "\x00" not in inhalt, "Der Nullbyte-Weg darf hier nicht mithelfen"
+    assert is_binary_text(inhalt) is True
+
+    # Eine echte Konfigurationsdatei mit einer einzigen kaputten Umlautstelle
+    # bleibt Text — das ist die Zusage des Docstrings. Sie gilt allerdings nur
+    # fuer eine Datei von echter Laenge: die Schwelle ist eine **Quote**, und in
+    # einer sehr kurzen Zeichenkette reisst ein einzelnes Ersatzzeichen sie
+    # rechnerisch (1 von 37 sind 2,7 Prozent). Der Fall hat keine Bedeutung im
+    # Betrieb — er steht hier, damit der Naechste nicht dasselbe fuer einen
+    # Fehler haelt, den er beheben soll.
+    konfig = "port=2302\nname=Serv�r\nmaxPlayers=40\n" + "verbose=0\n" * 30
+    assert len(konfig) > 300
+    assert is_binary_text(konfig) is False
+    assert is_binary_text("port=2302\nmaxPlayers=40\n") is False
+    assert is_binary_text("") is False
+    assert is_binary_text("text\x00mit-nullbyte") is True
+
+
 def test_every_write_tool_has_its_own_payload_branch() -> None:
     """Kein Schreibwerkzeug darf die Nutzlast eines anderen bekommen.
 
@@ -290,6 +332,37 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
     angehobener Deckel, den niemand wieder senkt, macht freigewordenen Platz
     stillschweigend zum Budget des nächsten Werkzeugs — und genau dagegen steht
     dieser Test.
+
+    **Nachtrag 21.09.2026: `popups_read`, und die Grenze bleibt bei 92.000.**
+    Die KI konnte ein Pop-up anlegen und danach nie wieder ansehen oder ändern;
+    auf „nimm den Hinweis auf Mac und Linux raus" antwortete sie, ihr fehle das
+    Lese- und Aktualisierungswerkzeug. Beides fehlte wirklich. Zwei neue
+    Werkzeuge hätten rund 2.150 Zeichen gekostet — mehr, als übrig war.
+    Stattdessen ist `propose_popup_create` zu `propose_popup_set` geworden
+    (Muster `propose_task_set`: eine optionale `popup_id` entscheidet zwischen
+    anlegen und ändern), und nur das Lesewerkzeug kam dazu. Nachgemessen: aus
+    der App **90.469** Zeichen, 89 Werkzeuge; aus dem Panel **84.980** Zeichen,
+    83 Werkzeuge. Der Zuwachs beträgt 692 Zeichen für zwei Fähigkeiten, die
+    Luft **1.531**. Der Hebel bleibt derselbe: zusammenlegen, nicht kürzen.
+
+    **Nachtrag 21.09.2026, zweiter Teil: ein dritter Hebel, der vorher niemandem
+    aufgefallen ist — die Kodierung.** Der deutsche Text in
+    `backend/services/ai_tools/` stand doppelt kodiert im Quelltext: jemand hatte
+    UTF-8 als **cp1252** gelesen und erneut als UTF-8 geschrieben. Die Dateien
+    waren gültiges UTF-8 und fielen deshalb nie auf, enthielten aber `Ã¤` statt
+    `ä` und `â€”` statt `—`. Das Modell las seit jeher "SchlÃ¤gt das Erstellen
+    einer neuen Notiz vor", und **jeder Umlaut zählte zwei Zeichen statt einem**.
+
+    404 Zeilen in sechs Dateien repariert (`zeile.encode('cp1252').decode('utf-8')`,
+    zeilenweise — `server_tools.py`, `base.py` und `personal_tools.py` waren
+    gemischt). Nachgemessen: aus der App **90.244** Zeichen, aus dem Panel
+    **84.771**; gewonnen 225 beziehungsweise 209 Zeichen, Luft jetzt **1.756**.
+
+    Der Gewinn ist kleiner als die 404 Zeilen vermuten lassen, und das ist der
+    Punkt, den der Nächste wissen muss: die meisten davon sind **Kommentare und
+    Docstrings**, und die gehen nie über die Leitung. Bezahlt wurden nur die
+    Umlaute in den Beschreibungen selbst. Wer hier Platz sucht, findet ihn
+    nicht in der Kodierung — der Hebel bleibt das Zusammenlegen.
      """
     for herkunft in ("panel", "desktop"):
         erlaubt = herkunft_schnitt(

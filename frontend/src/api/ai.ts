@@ -601,7 +601,7 @@ export const SCHREIBWERKZEUGE = [
   'propose_note_create',
   'propose_note_update',
   'propose_note_delete',
-  'propose_popup_create',
+  'propose_popup_set',
   'propose_cloudflare_dns_record',
   'propose_cloudflare_dns_delete',
   'propose_modpack_install',

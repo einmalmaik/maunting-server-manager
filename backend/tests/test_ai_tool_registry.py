@@ -524,6 +524,31 @@ def test_keine_worker_tiefe_ueber_eins() -> None:
     assert steuerung & ai_tool_registry.aufgaben_tools("act") == set()
 
 
+def test_gehirn_und_worker_koennen_pop_ups_lesen_und_aendern() -> None:
+    """Ein Pop-up anlegen zu koennen und es nie wieder ansehen ist keine Faehigkeit.
+
+    Genau das war der Zustand: `propose_popup_create` war das einzige
+    Pop-up-Werkzeug. Auf die Bitte, einen Satz aus einer bestehenden
+    Ankuendigung zu streichen, antwortete die KI woertlich, ihr fehle "ein
+    Popup-Lese- oder Aktualisierungswerkzeug" — und das stimmte.
+
+    Der Betreiber hat beide Laufarten verlangt. Gehirn und Worker holen ihre
+    Kataloge aus entgegengesetzten Richtungen (das eine aufzaehlend ueber
+    `CHAT_INTERACTION_TOOLS`, das andere subtrahierend ueber
+    `worker_ausschluss()`), deshalb steht die Zusage hier zweimal.
+    """
+    popups = ai_tool_registry.POPUP_TOOLS
+    assert popups == {"popups_read", "propose_popup_set"}
+    assert popups <= ai_tool_registry.GEHIRN_TOOLS
+    assert popups & ai_tool_registry.worker_ausschluss() == set()
+    # Aus dem Panel wie aus der App — ein Pop-up gehoert dem Panel, nicht dem
+    # Rechner, und darf an keiner Herkunft haengenbleiben.
+    for herkunft in ("panel", "desktop"):
+        assert popups <= ai_tool_registry.herkunft_schnitt(
+            ai_tool_registry.GEHIRN_TOOLS, herkunft
+        )
+
+
 def test_der_worker_fragt_ueber_die_meldestelle_nie_direkt() -> None:
     """`ask_user` faellt namentlich weg, `worker_frage` bleibt.
 

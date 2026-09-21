@@ -24,17 +24,17 @@ logger = logging.getLogger(__name__)
 _TESTMAILS: dict[int, list[float]] = {}
 
 def _mailbox_and_calendar_tool_definitions() -> list[dict]:
-    """E-Mail- und Kalender-Werkzeuge (VerknÃ¼pfte PostfÃ¤cher und Kalender)."""
+    """E-Mail- und Kalender-Werkzeuge (Verknüpfte Postfächer und Kalender)."""
     return [
         _function(
             "email_search",
-            "Sucht in den verknÃ¼pften PostfÃ¤chern des Benutzers nach E-Mails. "
-            "Liefert Betreff, Absender, EmpfÃ¤nger, Datum und Nachrichten-ID.",
+            "Sucht in den verknüpften Postfächern des Benutzers nach E-Mails. "
+            "Liefert Betreff, Absender, Empfänger, Datum und Nachrichten-ID.",
             {
                 "query": {
                     "type": "string",
                     "maxLength": 200,
-                    "description": "Suchbegriff fÃ¼r Betreff oder Inhalt.",
+                    "description": "Suchbegriff für Betreff oder Inhalt.",
                 },
                 "sender": {
                     "type": "string",
@@ -72,7 +72,7 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
         ),
         _function(
             "calendar_read",
-            "Liest Termine aus dem verknÃ¼pften Kalender des Benutzers.",
+            "Liest Termine aus dem verknüpften Kalender des Benutzers.",
             {
                 "start_date": {
                     "type": "string",
@@ -93,13 +93,13 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_email_send",
-            "SchlÃ¤gt das Verfassen und Versenden einer E-Mail Ã¼ber ein verknÃ¼pftes Postfach vor. "
-            "Erfordert zwingend eine BestÃ¤tigung des Benutzers vor dem tatsÃ¤chlichen Versand.",
+            "Schlägt das Verfassen und Versenden einer E-Mail über ein verknüpftes Postfach vor. "
+            "Erfordert zwingend eine Bestätigung des Benutzers vor dem tatsächlichen Versand.",
             {
                 "recipient": {
                     "type": "string",
                     "maxLength": 255,
-                    "description": "EmpfÃ¤nger-E-Mail-Adresse.",
+                    "description": "Empfänger-E-Mail-Adresse.",
                 },
                 "subject": {
                     "type": "string",
@@ -109,7 +109,7 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
                 "body_text": {
                     "type": "string",
                     "maxLength": 8000,
-                    "description": "VollstÃ¤ndiger Textinhalt der E-Mail.",
+                    "description": "Vollständiger Textinhalt der E-Mail.",
                 },
                 "body_html": {
                     "type": "string",
@@ -126,7 +126,7 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_calendar_event_create",
-            "SchlÃ¤gt einen neuen Termin im verknÃ¼pften Kalender vor (kann mehrfach aufgerufen werden fÃ¼r mehrere Termine in einem Tagesplan; Standard-Dauer 1 Stunde wenn keine Endzeit genannt). "
+            "Schlägt einen neuen Termin im verknüpften Kalender vor (kann mehrfach aufgerufen werden für mehrere Termine in einem Tagesplan; Standard-Dauer 1 Stunde wenn keine Endzeit genannt). "
             "Erfordert die Freigabe des Benutzers.",
             {
                 "title": {
@@ -165,11 +165,11 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
                 },
                 "team_id": {
                     "type": "integer",
-                    "description": "Optionale Team-ID fÃ¼r Team-Termine (event_type=team).",
+                    "description": "Optionale Team-ID für Team-Termine (event_type=team).",
                 },
                 "server_id": {
                     "type": "integer",
-                    "description": "Optionale Server-ID fÃ¼r Server-Wartungstermine (event_type=server).",
+                    "description": "Optionale Server-ID für Server-Wartungstermine (event_type=server).",
                 },
                 "color": {
                     "type": "string",
@@ -181,13 +181,13 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_calendar_event_update",
-            "SchlÃ¤gt die Anpassung oder Verschiebung eines bestehenden Termins im Kalender vor (nur wenn ein Termin explizit geÃ¤ndert werden soll, fÃ¼r neue Termine propose_calendar_event_create nutzen). "
+            "Schlägt die Anpassung oder Verschiebung eines bestehenden Termins im Kalender vor (nur wenn ein Termin explizit geändert werden soll, für neue Termine propose_calendar_event_create nutzen). "
             "Erfordert die Freigabe des Benutzers.",
             {
                 "event_id": {
                     "type": "string",
                     "maxLength": 255,
-                    "description": "ID oder UID des zu Ã¤ndernden Termins aus calendar_read.",
+                    "description": "ID oder UID des zu ändernden Termins aus calendar_read.",
                 },
                 "title": {
                     "type": "string",
@@ -241,12 +241,12 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_calendar_event_delete",
-            "SchlÃ¤gt das LÃ¶schen eines Termins aus dem Kalender vor.",
+            "Schlägt das Löschen eines Termins aus dem Kalender vor.",
             {
                 "event_id": {
                     "type": "string",
                     "maxLength": 255,
-                    "description": "ID des zu lÃ¶schenden Termins.",
+                    "description": "ID des zu löschenden Termins.",
                 },
                 "calendar_id": {
                     "type": "integer",
@@ -257,54 +257,72 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
             ["event_id", *_RATIONALE_REQUIRED],
         ),
         _function(
-            "propose_popup_create",
-            "SchlÃ¤gt das Erstellen eines Panel-weiten Pop-ups / einer AnkÃ¼ndigung vor. "
-            "Der Inhalt soll im sauberen Markdown-Format formuliert sein â€” menschlich, "
-            "verstÃ¤ndlich und frei von kÃ¼nstlichen KI-Schablonen oder Gedankenstrich-Ketten. "
-            "Erfordert zwingend die Freigabe des Benutzers Ã¼ber eine Vorschlagskarte.",
+            "popups_read",
+            "Listet die Panel-Pop-ups und Ankündigungen auf: Kennung, Titel, Text, "
+            "Zeitfenster und ob sie aktiv sind. Der Schritt vor jeder Änderung: "
+            "die `popup_id` für propose_popup_set kommt von hier.",
             {
+                "only_active": {
+                    "type": "boolean",
+                    "description": "Nur aktiv geschaltete Pop-ups (Standard: alle).",
+                },
+            },
+            [],
+        ),
+        _function(
+            "propose_popup_set",
+            "Schlägt ein Panel-weites Pop-up / eine Ankündigung vor: ohne `popup_id` "
+            "als neues, mit `popup_id` aus popups_read als Änderung des bestehenden. "
+            "Der Inhalt soll im sauberen Markdown-Format formuliert sein, menschlich "
+            "und frei von künstlichen KI-Schablonen oder Gedankenstrich-Ketten. "
+            "Erfordert zwingend die Freigabe des Benutzers über eine Vorschlagskarte.",
+            {
+                "popup_id": {
+                    "type": "integer",
+                    "description": "Kennung aus popups_read. Weglassen legt ein neues Pop-up an.",
+                },
                 "title": {
                     "type": "string",
                     "maxLength": 255,
-                    "description": "PrÃ¤gnanter Titel des Pop-ups.",
+                    "description": "Prägnanter Titel des Pop-ups.",
                 },
                 "content_markdown": {
                     "type": "string",
                     "maxLength": 32000,
-                    "description": "VollstÃ¤ndiger Textinhalt als Markdown.",
+                    "description": "Vollständiger Textinhalt als Markdown. Beim Ändern der ganze neue Text, kein Ausschnitt.",
                 },
                 "is_active": {
                     "type": "boolean",
-                    "description": "Ob das Pop-up sofort aktiv geschaltet werden soll (Standard: true).",
+                    "description": "Ob das Pop-up aktiv geschaltet sein soll (Standard beim Anlegen: true).",
                 },
                 "start_at": {
                     "type": ["string", "null"],
                     "maxLength": 32,
-                    "description": "Optionales Startdatum (ISO-8601, z. B. 2026-08-26T12:00:00Z).",
+                    "description": "Optionales Startdatum (ISO-8601, z. B. 2026-08-26T12:00:00Z). null entfernt es.",
                 },
                 "end_at": {
                     "type": ["string", "null"],
                     "maxLength": 32,
-                    "description": "Optionales Enddatum (ISO-8601).",
+                    "description": "Optionales Enddatum (ISO-8601). null entfernt es.",
                 },
                 "button_text": {
                     "type": ["string", "null"],
                     "maxLength": 100,
-                    "description": "Optionaler Beschriftungstext fÃ¼r einen zusÃ¤tzlichen Aktions-Button (z. B. 'Mehr erfahren').",
+                    "description": "Optionale Beschriftung eines zusätzlichen Aktions-Buttons (z. B. 'Mehr erfahren'). null entfernt ihn.",
                 },
                 "button_url": {
                     "type": ["string", "null"],
                     "maxLength": 2048,
-                    "description": "Optionale Web-Adresse fÃ¼r den Aktions-Button (http:// oder https://).",
+                    "description": "Optionale Web-Adresse für den Aktions-Button (http:// oder https://). null entfernt sie.",
                 },
                 **_RATIONALE_SCHEMA,
             },
-            ["title", "content_markdown", *_RATIONALE_REQUIRED],
+            [*_RATIONALE_REQUIRED],
         ),
     ]
 
 def _notes_tool_definitions() -> list[dict]:
-    """Notiz-Werkzeuge (PersÃ¶nliche und geteilte Notizen, Aufgaben und Checklisten)."""
+    """Notiz-Werkzeuge (Persönliche und geteilte Notizen, Aufgaben und Checklisten)."""
     return [
         _function(
             "notes_read",
@@ -322,7 +340,7 @@ def _notes_tool_definitions() -> list[dict]:
                 },
                 "team_id": {
                     "type": "integer",
-                    "description": "Optionale Team-ID (0 = nur persÃ¶nliche Notizen).",
+                    "description": "Optionale Team-ID (0 = nur persönliche Notizen).",
                 },
                 "is_pinned": {
                     "type": "boolean",
@@ -333,19 +351,19 @@ def _notes_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_note_create",
-            "SchlÃ¤gt das Erstellen einer neuen Notiz, Checkliste oder Einkaufsliste vor. "
-            "Inhalte sollen Ã¼bersichtlich und prÃ¤gnant formatiert werden (z. B. Markdown, Checklisten [ ] / [x], "
-            "oder Einkaufslisten mit geschÃ¤tzten Richtpreisen und Gesamtsumme).",
+            "Schlägt das Erstellen einer neuen Notiz, Checkliste oder Einkaufsliste vor. "
+            "Inhalte sollen übersichtlich und prägnant formatiert werden (z. B. Markdown, Checklisten [ ] / [x], "
+            "oder Einkaufslisten mit geschätzten Richtpreisen und Gesamtsumme).",
             {
                 "title": {
                     "type": "string",
                     "maxLength": 255,
-                    "description": "PrÃ¤gnanter Titel der Notiz (z. B. 'Einkaufsliste Edeka', 'Projekt-Todos').",
+                    "description": "Prägnanter Titel der Notiz (z. B. 'Einkaufsliste Edeka', 'Projekt-Todos').",
                 },
                 "content": {
                     "type": "string",
                     "maxLength": 32000,
-                    "description": "VollstÃ¤ndiger Inhalt der Notiz (strukturiertes Markdown, Checklisten, Mengenangaben).",
+                    "description": "Vollständiger Inhalt der Notiz (strukturiertes Markdown, Checklisten, Mengenangaben).",
                 },
                 "category": {
                     "type": "string",
@@ -355,7 +373,7 @@ def _notes_tool_definitions() -> list[dict]:
                 "color": {
                     "type": "string",
                     "maxLength": 32,
-                    "description": "Farbakzent: 'primary' (blau), 'emerald' (grÃ¼n), 'amber' (gelb/orange), 'rose' (rot), 'purple' (lila), 'cyan'.",
+                    "description": "Farbakzent: 'primary' (blau), 'emerald' (grün), 'amber' (gelb/orange), 'rose' (rot), 'purple' (lila), 'cyan'.",
                 },
                 "is_pinned": {
                     "type": "boolean",
@@ -376,7 +394,7 @@ def _notes_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_note_update",
-            "SchlÃ¤gt die Bearbeitung oder ErgÃ¤nzung einer bestehenden Notiz vor.",
+            "Schlägt die Bearbeitung oder Ergänzung einer bestehenden Notiz vor.",
             {
                 "note_id": {
                     "type": "string",
@@ -405,11 +423,11 @@ def _notes_tool_definitions() -> list[dict]:
                 },
                 "is_pinned": {
                     "type": "boolean",
-                    "description": "Pin-Status Ã¤ndern.",
+                    "description": "Pin-Status ändern.",
                 },
                 "is_archived": {
                     "type": "boolean",
-                    "description": "Archivierungsstatus Ã¤ndern.",
+                    "description": "Archivierungsstatus ändern.",
                 },
                 "note_type": {
                     "type": "string",
@@ -426,12 +444,12 @@ def _notes_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_note_delete",
-            "SchlÃ¤gt das LÃ¶schen einer Notiz vor.",
+            "Schlägt das Löschen einer Notiz vor.",
             {
                 "note_id": {
                     "type": "string",
                     "maxLength": 64,
-                    "description": "ID oder UID der zu lÃ¶schenden Notiz.",
+                    "description": "ID oder UID der zu löschenden Notiz.",
                 },
                 **_RATIONALE_SCHEMA,
             },
@@ -439,15 +457,15 @@ def _notes_tool_definitions() -> list[dict]:
         ),
         _function(
             "execute_server_action",
-            "FÃ¼hrt eine Server-, Mod-, Backup-, Konfigurations- oder Verwaltungsaktion aus, "
-            "fÃ¼r die kein direktes Schnellwerkzeug im aktuellen Aufrufsatz vorliegt (z. B. Ports abfragen, "
-            "Mods suchen/installieren, Backup anlegen/wiederherstellen, Konfigurationen Ã¤ndern, Aufgaben planen). "
-            "Gib die gewÃ¼nschte Anweisung als 'action' und optional 'server_id' an.",
+            "Führt eine Server-, Mod-, Backup-, Konfigurations- oder Verwaltungsaktion aus, "
+            "für die kein direktes Schnellwerkzeug im aktuellen Aufrufsatz vorliegt (z. B. Ports abfragen, "
+            "Mods suchen/installieren, Backup anlegen/wiederherstellen, Konfigurationen ändern, Aufgaben planen). "
+            "Gib die gewünschte Anweisung als 'action' und optional 'server_id' an.",
             {
                 "action": {
                     "type": "string",
                     "maxLength": 500,
-                    "description": "Die auszufÃ¼hrende Aktion oder Abfrage in natÃ¼rlicher Sprache.",
+                    "description": "Die auszuführende Aktion oder Abfrage in natürlicher Sprache.",
                 },
                 "server_id": {
                     "type": "integer",
@@ -473,14 +491,14 @@ def _execute_send_test_email(db: Session, *, user: User) -> dict:
     **Kein Empfaengerparameter.** Das ist die eigentliche Sicherheitsaussage
     dieses Werkzeugs: es gibt keinen Weg von einer Modellausgabe zu einer
     fremden Adresse, also kann MSM ueber die KI kein Mailversender fuer Dritte
-    werden. Ein `to`-Argument haette genau das eroeffnet â€” und waere aus dem
+    werden. Ein `to`-Argument haette genau das eroeffnet — und waere aus dem
     Chat heraus mit einem Satz auszuloesen gewesen.
 
     Zurueck kommt, was der Benutzer zum Nachsehen braucht: ob es rausging, an
     welches Postfach (maskiert) und **welche Art** von Versandweg benutzt wurde.
     Bewusst nicht der SMTP-Host: das ist Betreiberkonfiguration, die ein Kunde
     im Panel nur mit `panel.settings.read` zu sehen bekaeme. Fuer die Diagnose
-    genuegt "es lief ueber SMTP" â€” wo die Einstellungen stehen, weiss der
+    genuegt "es lief ueber SMTP" — wo die Einstellungen stehen, weiss der
     Betreiber selbst.
 
     Der Versand laeuft ueber `ai_mail` und damit ueber denselben Weg wie jede
@@ -526,11 +544,11 @@ def _execute_send_test_email(db: Session, *, user: User) -> dict:
     verlauf.append(jetzt)
     _TESTMAILS[user.id] = verlauf
 
-    # Auch die Testmail schreibt die KI selbst â€” der Betreiber hat
+    # Auch die Testmail schreibt die KI selbst — der Betreiber hat
     # ausdruecklich verlangt, dass hier nichts Vorgefertigtes mehr steht. Der
     # Verfassungsschritt liegt aber nicht mehr hier, sondern im Arbeiter am
     # Ausgangskorb: dort steht er innerhalb einer Schranke und ueberlebt einen
-    # Neustart. Was hier entsteht, ist der Rueckfall â€” und bei genau dieser Mail
+    # Neustart. Was hier entsteht, ist der Rueckfall — und bei genau dieser Mail
     # ist er wichtiger als bei den anderen beiden. Sie ist das Messgeraet fuer
     # den Versandweg und darf nicht ausgerechnet dann ausbleiben, wenn das
     # Modell klemmt.
@@ -548,7 +566,7 @@ def _execute_send_test_email(db: Session, *, user: User) -> dict:
         fakten=(
             "Anlass: der Benutzer hat im Chat um eine Testmail gebeten, "
             "um den eingerichteten Versandweg des Panels zu pruefen.\n"
-            "Es ist nichts passiert, worueber zu berichten waere â€” die Mail "
+            "Es ist nichts passiert, worueber zu berichten waere — die Mail "
             "beweist sich selbst, indem sie ankommt.\n"
             "Sag ihm in zwei bis drei Saetzen, dass der Versandweg damit "
             "nachgewiesen ist und dass auch die Berichte zu seinen Aufgaben "
@@ -562,7 +580,7 @@ def _execute_send_test_email(db: Session, *, user: User) -> dict:
         "transport": EmailService._get_provider(),
         "detail": (
             "Die Mail wurde dem Versand uebergeben. Ob sie ankommt, entscheidet "
-            "der Weg dahinter â€” sag dem Benutzer, er soll jetzt nachsehen, auch "
+            "der Weg dahinter — sag dem Benutzer, er soll jetzt nachsehen, auch "
             "im Spam-Ordner. Kommt nichts an, liegt es an der Einrichtung des "
             "Versands im Panel und nicht an dir."
         ),

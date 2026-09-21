@@ -62,6 +62,13 @@ MAX_AUFRAEUM_PFADE = 500
 MAX_LISTED_SERVERS = 60
 MAX_INCIDENT_ATTEMPTS = 8
 MAX_TESTMAILS_JE_STUNDE = 3
+MAX_LISTED_POPUPS = 25
+# Ein Pop-up darf 32.000 Zeichen tragen; fuenfundzwanzig davon waeren das halbe
+# Kontextfenster fuer eine Liste. Abgeschnitten wird deshalb — aber **sichtbar**:
+# `popups_read` setzt dann `content_truncated`, und `propose_popup_set` ersetzt
+# den Inhalt vollstaendig. Ohne die Marke wuerde ein gekuerzter Text als ganzer
+# zurueckgeschrieben, und der Rest des Pop-ups waere weg.
+MAX_POPUP_INHALT_CHARS = 8_000
 
 _SERVER_ID_SCHEMA = {
     "server_id": {
@@ -169,7 +176,7 @@ _MEMORY_KEY_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 
 def _function(name: str, description: str, properties: dict, required: list[str]) -> dict:
     # Ohne Zeile in `ai_tool_registry` waere das Werkzeug zwar im Katalog, aber
-    # in keiner Menge â€” das Modell duerfte es aufrufen und die Allowlist wuerde
+    # in keiner Menge — das Modell duerfte es aufrufen und die Allowlist wuerde
     # es abweisen. Hier faellt der fehlende Eintrag sofort auf.
     assert _werkzeug_bekannt(name), f"Werkzeug {name!r} fehlt in ai_tool_registry"
     return {
@@ -202,13 +209,13 @@ def _vorfall_versuche(attempts_json: str | None) -> list[dict]:
 
     Sie stehen als JSON-Zeichenkette am Vorfall (`incidents.attempts`) und
     tragen je Eintrag `attempt`, `stage`, `action`, `at` und `result`. Genau
-    diese fuenf gehen weiter â€” mehr steht nicht drin, und was der Agent kuenftig
+    diese fuenf gehen weiter — mehr steht nicht drin, und was der Agent kuenftig
     ergaenzt, soll nicht ungefragt an einen Modellanbieter gehen.
 
     Ohne diese Liste faengt die KI bei jedem Vorfall mit einem Neustart an. Das
     ist der Schritt, den die Guardian-Engine ausweislich ihrer eigenen
     Eskalationsleiter schon dreimal gemacht hat, bevor sie den Vorfall ueberhaupt
-    meldete â€” die KI wuerde also als Erstes das wiederholen, was nachweislich
+    meldete — die KI wuerde also als Erstes das wiederholen, was nachweislich
     nicht geholfen hat.
 
     Unlesbares gibt eine leere Liste. Der Inhalt kommt vom Agenten, und ein
@@ -233,24 +240,24 @@ def _require_no_arguments(tool_name: str, arguments: dict) -> None:
         raise AiActionValidationError(f"{tool_name} akzeptiert keine Argumente")
 
 def _visible_servers(db: Session, user: User) -> list[Server]:
-    """Alle Server, die der Benutzer sehen darf â€” die Grundlage von `list_my_servers`.
+    """Alle Server, die der Benutzer sehen darf — die Grundlage von `list_my_servers`.
 
-    Die AuflÃ¶sung von Rollenrechten *und* einzeln delegierten Serverrechten
-    liegt an genau einer Stelle â€” sie ist nur die Mengenfunktion und nicht die
-    EinzelprÃ¼fung. Hier stand einmal eine Schleife, die `has_server_permission`
+    Die Auflösung von Rollenrechten *und* einzeln delegierten Serverrechten
+    liegt an genau einer Stelle — sie ist nur die Mengenfunktion und nicht die
+    Einzelprüfung. Hier stand einmal eine Schleife, die `has_server_permission`
     je Serverzeile rief. Sie lieferte dieselbe Menge, kostete aber drei Abfragen
     je Zeile, und der Deckel griff erst bei 60 *sichtbaren* Treffern: ein Kunde
-    mit einem Server unter fÃ¼nfhundert lief alle fÃ¼nfhundert Zeilen durch, auf
+    mit einem Server unter fünfhundert lief alle fünfhundert Zeilen durch, auf
     dem Weg zum ersten Token. `list_visible_server_ids` beantwortet dieselbe
-    Frage gebÃ¼ndelt, einschlieÃŸlich des Teamwegs.
+    Frage gebündelt, einschließlich des Teamwegs.
 
     Die Obergrenze verhindert, dass ein Betreiber mit hunderten Servern die
     halbe Liste ins Kostenbudget des Benutzers schreibt. Sie steht jetzt in der
     Abfrage statt in der Schleife und zieht dieselbe Grenze.
     """
-    # Dreiwertig: `None` heiÃŸt **alle** (EigentÃ¼mer oder pauschale Rolle), eine
-    # leere Liste heiÃŸt **keiner**. Die beiden zu verwechseln wÃ¤re in der einen
-    # Richtung eine Rechteausweitung und in der anderen eine leere Liste fÃ¼r den
+    # Dreiwertig: `None` heißt **alle** (Eigentümer oder pauschale Rolle), eine
+    # leere Liste heißt **keiner**. Die beiden zu verwechseln wäre in der einen
+    # Richtung eine Rechteausweitung und in der anderen eine leere Liste für den
     # Betreiber.
     ids = permission_service.list_visible_server_ids(db, user)
     if ids is not None and not ids:
@@ -264,7 +271,7 @@ def _resolve_server(db: Session, user: User, arguments: dict) -> tuple[Server, d
     """Entnimmt ``server_id``, laedt den Server und prueft `server.view`.
 
     Das ist die Stelle, an der "die KI erbt die Rechte des Benutzers" fuer jedes
-    serverbezogene Werkzeug tatsaechlich durchgesetzt wird â€” einmal, zentral,
+    serverbezogene Werkzeug tatsaechlich durchgesetzt wird — einmal, zentral,
     fuer Lese- und Schreibwerkzeuge gleichermassen. Ein Modell, das eine fremde
     ID errraet oder aus einem manipulierten Logtext uebernimmt, kommt hier nicht
     vorbei.
@@ -288,7 +295,7 @@ def _resolve_server(db: Session, user: User, arguments: dict) -> tuple[Server, d
     return server, rest
 
 def _node_health(db: Session) -> dict:
-    """Zustand aller Hosts â€” ohne Hostnamen und ohne IP.
+    """Zustand aller Hosts — ohne Hostnamen und ohne IP.
 
     Dieselbe Zurueckhaltung wie bei `read_node_capacity`: das Modell soll
     Auslastung und Erreichbarkeit vergleichen koennen, nicht die Netzstruktur
@@ -338,21 +345,29 @@ def is_binary_text(content: str) -> bool:
     als Folge von Ersatzzeichen (U+FFFD) zurueck, ein Nullbyte als solches. Beides
     kann in einer echten Textdatei nicht in Menge auftreten.
 
-    Die Schwelle ist bewusst grosszuegig â€” eine einzelne kaputte Umlautstelle in
+    Die Schwelle ist bewusst grosszuegig — eine einzelne kaputte Umlautstelle in
     einer sonst brauchbaren Konfigurationsdatei soll nicht dazu fuehren, dass die
     KI sie fuer binaer haelt und nicht mehr anfasst.
+
+    **Das Ersatzzeichen steht hier als `\\ufffd` und nicht als Zeichen.** Bis zum
+    21.09.2026 stand es ausgeschrieben da, und der Quelltext war zwischendurch
+    einmal falsch umkodiert worden: aus dem einen `U+FFFD` waren die drei Zeichen
+    `Ã¯Â¿Â½` geworden. Die Zeile zaehlte danach eine Folge, die kein
+    `errors="replace"` je erzeugt — die Erkennung lief ins Leere, und uebrig
+    blieb allein die Nullbyte-Pruefung. Als Escape kann dasselbe nicht noch
+    einmal passieren.
     """
     if "\x00" in content:
         return True
     if not content:
         return False
-    return content.count("ï¿½") / len(content) > 0.02
+    return content.count("\ufffd") / len(content) > 0.02
 
 def _config_path(value: object) -> str:
     """Prueft einen Pfad relativ zum Serververzeichnis.
 
     **Keine Endungsliste mehr.** Frueher stand hier ein Filter auf neun
-    Erweiterungen, und alles andere war fuer die KI unsichtbar â€” Dateien **ohne**
+    Erweiterungen, und alles andere war fuer die KI unsichtbar — Dateien **ohne**
     Endung (`Dockerfile`, `.env`, `whitelist`, `banlist`), `.xml` (Ark, Unreal),
     `.lua` (Garry's Mod, DayZ), `.sh`, `.md`. Ein Mensch bearbeitet die im
     Dateimanager selbstverstaendlich; die Vorgabe des Betreibers ist, dass die
@@ -371,7 +386,7 @@ def _config_path(value: object) -> str:
         raise AiActionValidationError("Dateipfad ist nicht erlaubt")
     # Kein Namensteil darf mit einem Bindestrich beginnen.
     #
-    # Nicht wegen des Dateisystems â€” dort ist das erlaubt â€”, sondern wegen der
+    # Nicht wegen des Dateisystems — dort ist das erlaubt —, sondern wegen der
     # Werkzeuge, die diese Namen spaeter als Argumente weiterreichen. `tar`
     # deutet einen Operanden, der mit `-` beginnt, als Option; `games/updater.py`
     # sichert seine Aufrufe deshalb zusaetzlich mit `--` ab. Diese Pruefung ist

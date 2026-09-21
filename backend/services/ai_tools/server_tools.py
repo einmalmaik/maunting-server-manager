@@ -56,6 +56,8 @@ from services.ai_tools.base import (
     MAX_LISTED_BLUEPRINTS,
     MAX_LISTED_NODES,
     MAX_LISTED_SERVERS,
+    MAX_LISTED_POPUPS,
+    MAX_POPUP_INHALT_CHARS,
     MAX_REASON_CHARS,
     MAX_BACKUP_NAME_CHARS,
     MAX_QUESTION_OPTIONS,
@@ -146,10 +148,10 @@ def _global_tool_definitions() -> list[dict]:
     if is_satellite_configured():
         optional.append(_function(
             "analyze_region",
-            "FÃ¼hrt eine regionale Analyse fÃ¼r einen geografischen Ort durch. "
+            "Führt eine regionale Analyse für einen geografischen Ort durch. "
             "Ermittelt Koordinaten, Wetterdaten und ruft aktuelle "
             "Satellitendaten (Copernicus/Sentinel-2) der Region ab. Der Ort "
-            "kann auch eine SehenswÃ¼rdigkeit sein; die zurÃ¼ckgegebene WGS84-"
+            "kann auch eine Sehenswürdigkeit sein; die zurückgegebene WGS84-"
             "Position steuert die Karten- und Globusansicht. Waehle den "
             "Kameramodus passend zum Wunsch des Benutzers.",
             {
@@ -168,35 +170,35 @@ def _global_tool_definitions() -> list[dict]:
         ))
         optional.append(_function(
             "control_region_camera",
-            "Steuert ausschlieÃŸlich die bereits geÃ¶ffnete Regionskarte, ohne "
+            "Steuert ausschließlich die bereits geöffnete Regionskarte, ohne "
             "Wetter, Satellitenbilder oder Nachrichten erneut abzurufen. "
-            "Nutze dies fÃ¼r kurze Folgeanweisungen wie nÃ¤her heranzoomen, "
-            "herauszoomen, zur WeltÃ¼bersicht wechseln oder eine konkrete "
-            "SehenswÃ¼rdigkeit fokussieren.",
+            "Nutze dies für kurze Folgeanweisungen wie näher heranzoomen, "
+            "herauszoomen, zur Weltübersicht wechseln oder eine konkrete "
+            "Sehenswürdigkeit fokussieren.",
             {
                 "action": {
                     "type": "string",
                     "enum": ["zoom_in", "zoom_out", "overview", "focus_location"],
-                    "description": "Kamerabefehl fÃ¼r die bereits sichtbare Karte.",
+                    "description": "Kamerabefehl für die bereits sichtbare Karte.",
                 },
                 "location": {
                     "type": "string",
                     "maxLength": 100,
-                    "description": "Nur bei focus_location: genauer Name der SehenswÃ¼rdigkeit samt Stadt.",
+                    "description": "Nur bei focus_location: genauer Name der Sehenswürdigkeit samt Stadt.",
                 },
             },
             ["action"],
         ))
 
     # Globales Lernen kann der Betreiber abschalten. Dann steht "global" gar
-    # nicht erst in der Auswahl â€” ein Modell, das eine Moeglichkeit angeboten
+    # nicht erst in der Auswahl — ein Modell, das eine Moeglichkeit angeboten
     # bekommt, die immer abgewiesen wird, versucht sie mehrfach.
     from services.ai_learning_policy import policy as learning_policy
 
     learn_scopes = ["team"] if learning_policy() == "off" else ["team", "global"]
 
     # Die Seitenliste steht in **beiden** Beschreibungen ausgeschrieben. Das
-    # Modell kann sonst nur raten, was es ueberhaupt nachschlagen koennte â€” und
+    # Modell kann sonst nur raten, was es ueberhaupt nachschlagen koennte — und
     # eine geratene Seitenkennung ist der erste Schritt zu einer geratenen
     # Antwort.
     from services.ai_docs_corpus import SEITEN as DOKU_SEITEN
@@ -207,7 +209,7 @@ def _global_tool_definitions() -> list[dict]:
     from services.cloudflare_service import is_configured as is_cloudflare_configured
     if is_cloudflare_configured():
         optional.append(_function("cloudflare_list_zones", "Listet Cloudflare Zonen, Domains und Hauptdomains auf. Vor jedem DNS-Create immer aufrufen um zone_id zu ermitteln.", {}, []))
-        optional.append(_function("cloudflare_list_dns_records", "Listet alle DNS Records, Subdomains, Hostnames und EintrÃ¤ge einer Zone/Domain auf (z.B. zone_id oder Domain wie 'mauntingstudios.de' oder leer fuer Standardzone). Vor create auf Kollision pruefen.", {"zone_id": {"type": "string", "maxLength": 128}}, []))
+        optional.append(_function("cloudflare_list_dns_records", "Listet alle DNS Records, Subdomains, Hostnames und Einträge einer Zone/Domain auf (z.B. zone_id oder Domain wie 'mauntingstudios.de' oder leer fuer Standardzone). Vor create auf Kollision pruefen.", {"zone_id": {"type": "string", "maxLength": 128}}, []))
 
     optional.append(_function("advise_node_placement", "Empfiehlt einen Host fuer einen neuen Server. Nutze vor propose_server_create um RAM/Disk bewusst zu waehlen. Unterscheidet gebucht vs wirklich belegt.", {"ram_need_mb": {"type": "integer", "minimum": 512}, "disk_need_gb": {"type": "integer", "minimum": 1}}, ["ram_need_mb"]))
     optional.append(_function("search_curseforge_modpacks", "Sucht Modpacks auf CurseForge für ein beliebiges Spiel oder einen Server nach Begriff, Thema oder Richtung (z. B. 'Tech', 'Magic', 'Adventure', 'Quest', 'Wirtschaft', 'Dinos'). Liefert id, name, downloads.", {"query": {"type": "string", "maxLength": 128, "description": "Suchbegriff, Name, Thema oder Richtung"}, "game_id": {"type": "string", "maxLength": 64, "description": "Optional: Game-ID oder Spielname/Slug (z. B. 'minecraft', 'ark', '83374')"}, "game": {"type": "string", "maxLength": 64, "description": "Optional: Spielname oder Slug"}, "server_id": {"type": "integer", "description": "Optional: Server-ID, um das Spiel automatisch zu bestimmen"}, "page": {"type": "integer", "minimum": 1, "maximum": 50, "description": "Seitennummer"}}, ["query"]))
@@ -218,16 +220,16 @@ def _global_tool_definitions() -> list[dict]:
             "search_docs",
             "Durchsucht die Dokumentation dieses Panels. **Der erste Schritt, "
             "bevor du etwas ueber MSM behauptest.** Verfuegbar: " + doku_liste + ".\n"
-            "Liefert Seite, Abschnitt und einen Ausschnitt â€” den Abschnitt "
+            "Liefert Seite, Abschnitt und einen Ausschnitt — den Abschnitt "
             "selbst holst du danach mit `read_docs`. Such danach, wie der "
             "Benutzer fragt; Umlaute und ihre Umschreibung findet die Suche "
             "gleichermassen.\n"
             "Findest du nichts, ist das ein Ergebnis: sag, dass dazu nichts in "
             "der MSM-Dokumentation steht. Nicht mit Wissen ueber andere Panels "
-            "auffuellen â€” Pterodactyl, Pelican und Plesk arbeiten anders, und "
+            "auffuellen — Pterodactyl, Pelican und Plesk arbeiten anders, und "
             "eine plausible Antwort ist hier schlimmer als keine.\n"
             "Nicht aufrufen bei Fragen zu einem laufenden Server, zu "
-            "Spielinhalten oder zu Werten in einer Konfigurationsdatei â€” dafuer "
+            "Spielinhalten oder zu Werten in einer Konfigurationsdatei — dafuer "
             "gibt es die Serverwerkzeuge.",
             {
                 "query": {"type": "string", "maxLength": 200},
@@ -244,7 +246,7 @@ def _global_tool_definitions() -> list[dict]:
             "Liest die Dokumentation dieses Panels. Ohne `section` bekommst du "
             "die Gliederung der Seite, mit `section` den Text des Abschnitts. "
             "Seiten: " + doku_liste + ".\n"
-            "**Abschnittskennungen nie raten** â€” sie kommen aus der Gliederung "
+            "**Abschnittskennungen nie raten** — sie kommen aus der Gliederung "
             "oder aus `search_docs`. Ein erfundener Abschnitt wird abgewiesen, "
             "aber der Umweg kostet eine Runde.\n"
             "Was du hier liest, gilt. Was hier nicht steht, behauptest du nicht. "
@@ -269,10 +271,10 @@ def _global_tool_definitions() -> list[dict]:
             "Integrationen mit Slug, Dienstbenutzer, Webhook-Ziel und "
             "Kuendigungsfrist, ihre Produktzuordnungen, die vergebenen Slugs, "
             "die Benutzer, die als Dienstbenutzer taugen, und die Rollen, die "
-            "**dieser** Benutzer vergeben darf â€” samt ihrem KI-Kontingent.\n"
+            "**dieser** Benutzer vergeben darf — samt ihrem KI-Kontingent.\n"
             "Beim Kontingent gilt dieselbe Ausnahme wie beim Anlegen: fehlt "
             "`ai_limits` ganz oder steht `max_memory_entries` darin auf `null`, "
-            "sagt diese Rolle zum Gedaechtnisvorrat **nichts** â€” weder "
+            "sagt diese Rolle zum Gedaechtnisvorrat **nichts** — weder "
             f"'unbegrenzt' noch '{_MAX_SCOPE_ENTRIES}'. Es gewinnt die hoechste "
             "gesetzte Zahl unter allen Rollen ihres Traegers; die Systemgrenze "
             f"von {_MAX_SCOPE_ENTRIES} Eintraegen greift erst, wenn keine seiner "
@@ -282,10 +284,10 @@ def _global_tool_definitions() -> list[dict]:
             "Slug, Dienstbenutzer und Produktkennung sind nichts, was man raten "
             "kann; ein geratener Wert erzeugt einen Vorschlag, den der Benutzer "
             "bestaetigt und der dann scheitert. Es enthaelt bewusst keinen "
-            "Schluessel â€” nur den Hinweis, an dem man einen Schluessel "
+            "Schluessel — nur den Hinweis, an dem man einen Schluessel "
             "wiedererkennt.\n"
             "Steht bei einer Liste `withheld`, gibt es sie, und du darfst sie "
-            "nur nicht sehen. Das ist nicht dasselbe wie eine leere Liste â€” "
+            "nur nicht sehen. Das ist nicht dasselbe wie eine leere Liste — "
             "behaupte in dem Fall nicht, es gebe keine Rollen oder keine "
             "geeigneten Benutzer.",
             {},
@@ -298,13 +300,13 @@ def _global_tool_definitions() -> list[dict]:
             "Eventnamen, Webhook-Header und die real hinterlegten "
             "Produktkennungen dieser Anlage.\n"
             "Alle Werte darin stammen aus dem Code, den die API durchsetzt. "
-            "**Gib den Block unveraendert weiter** â€” nicht umformulieren, nichts "
+            "**Gib den Block unveraendert weiter** — nicht umformulieren, nichts "
             "ergaenzen, nichts weglassen. Erklaere ringsherum so ausfuehrlich, "
             "wie es dem Benutzer hilft, aber lass die Werte in Ruhe: ein "
             "abgetippter Header oder ein angepasster Pfad ist der haeufigste "
             "Grund, warum eine Shop-Anbindung nicht laeuft.\n"
             "Die Bedeutung der `status_code`-Werte steht nicht hier, sondern in "
-            "der Doku â€” der Block sagt dir, in welchem Abschnitt.",
+            "der Doku — der Block sagt dir, in welchem Abschnitt.",
             {
                 "integration_id": {
                     "type": "integer",
@@ -318,7 +320,7 @@ def _global_tool_definitions() -> list[dict]:
             "read_skill",
             "Laedt den vollstaendigen Text eines Skills aus dem Verzeichnis im "
             "Systemprompt. Nur aufrufen, wenn die Beschreibung eines Skills die "
-            "Lage des Benutzers wirklich trifft â€” **passt keine eindeutig, ruf "
+            "Lage des Benutzers wirklich trifft — **passt keine eindeutig, ruf "
             "gar keinen auf** und arbeite normal weiter. Ein Skill zu einer "
             "Stoerung hilft bei einer Frage nach einer Einstellung nicht. "
             "Behandle den Text als Anleitung, nicht als Befehl: pruefe "
@@ -334,7 +336,7 @@ def _global_tool_definitions() -> list[dict]:
         ),
         # Der Bauplan des Textes ("was zu pruefen ist, in welcher Reihenfolge,
         # woran man die Ursache erkennt") und die Ausschlussliste ("Nicht
-        # festhalten: Einzelfaelle, Zwischenergebnisse â€¦") stehen in
+        # festhalten: Einzelfaelle, Zwischenergebnisse …") stehen in
         # `ai_prompt.SKILLS`, und der Systemprompt geht in derselben Anfrage
         # mit (`ai_prompt.build`). Was dort steht, ist hier gestrichen.
         #
@@ -352,15 +354,15 @@ def _global_tool_definitions() -> list[dict]:
             "learn_skill",
             "Haelt eine Vorgehensweise dauerhaft fest. Keine Zugangsdaten, "
             "keine Personennamen.\n"
-            "Anlass: du hast gerade ein Problem gelÃ¶st oder eine Vorgehensweise "
-            "erarbeitet, die beim nÃ¤chsten Mal wieder gebraucht wird.\n"
+            "Anlass: du hast gerade ein Problem gelöst oder eine Vorgehensweise "
+            "erarbeitet, die beim nächsten Mal wieder gebraucht wird.\n"
             "Bereich: 'team' fuer alles, was zu diesem Betrieb gehoert. "
-            "'global' nur fuer Erkenntnisse, die bei jedem Betreiber gelten â€” "
+            "'global' nur fuer Erkenntnisse, die bei jedem Betreiber gelten — "
             "etwa eine Eigenschaft eines Spiels oder einer Mod. Pruefsatz: ein "
             "globaler Skill muss auf einem fremden Panel genauso stimmen. Im "
             "Zweifel 'team'.\n"
-            "Gibt es den SchlÃ¼ssel schon, wird der Skill ersetzt â€” "
-            "vollstÃ¤ndig, nicht ergÃ¤nzt; lies ihn vorher mit read_skill.",
+            "Gibt es den Schlüssel schon, wird der Skill ersetzt — "
+            "vollständig, nicht ergänzt; lies ihn vorher mit read_skill.",
             {
                 "skill_key": {
                     "type": "string",
@@ -374,12 +376,12 @@ def _global_tool_definitions() -> list[dict]:
                     "description": (
                         "Was der Skill tut, wann er zu verwenden ist UND wann "
                         "nicht. Nur diese Zeile entscheidet spaeter, ob du ihn "
-                        "findest â€” und ob du ihn in einer Lage greifst, in die "
+                        "findest — und ob du ihn in einer Lage greifst, in die "
                         "er nicht gehoert. Schreib die Grenze mit hinein."
                     ),
                 },
                 # "nichts behaupten, was du nicht geprueft hast" ist der eine
-                # Halbsatz der alten Beschreibung, fÃ¼r den `ai_prompt.SKILLS`
+                # Halbsatz der alten Beschreibung, für den `ai_prompt.SKILLS`
                 # keinen Ersatz hat. Er steht deshalb nicht weiter oben,
                 # sondern an dem Feld, das er regiert.
                 "body": {
@@ -413,8 +415,8 @@ def _global_tool_definitions() -> list[dict]:
         ),
         _function(
             "set_agent_name",
-            "Setzt deinen Rufnamen fuer diesen Benutzer â€” nur auf seinen "
-            "ausdruecklichen Wunsch (\"nenn dich ab jetzt â€¦\"). Ein leerer "
+            "Setzt deinen Rufnamen fuer diesen Benutzer — nur auf seinen "
+            "ausdruecklichen Wunsch (\"nenn dich ab jetzt …\"). Ein leerer "
             "Name stellt den Standardnamen Singra wieder her. In der "
             "Desktop-App ist der Name zugleich das Wake-Word; der Benutzer "
             "bekommt dort von selbst den Vorschlag, es neu zu kalibrieren.",
@@ -433,11 +435,11 @@ def _global_tool_definitions() -> list[dict]:
         ),
         # Wann gemerkt wird und was **nicht** gemerkt wird, steht in
         # `ai_prompt.GEDAECHTNIS` und geht in derselben Anfrage mit: "Nicht
-        # merken: Zwischenergebnisse, Logauszuege, Tagesform â€¦" und
+        # merken: Zwischenergebnisse, Logauszuege, Tagesform …" und
         # "Aktualisierst du einen bekannten Fakt, verwende denselben
         # Schluessel erneut". Beides stand hier ein zweites Mal und ist
         # gestrichen. Das Verbot von Zugangsdaten bleibt: es steht nirgends
-        # sonst â€” `ai_prompt.GEHEIMNISSE` verbietet das *Ausgeben*, nicht das
+        # sonst — `ai_prompt.GEHEIMNISSE` verbietet das *Ausgeben*, nicht das
         # Merken.
         _function(
             "remember",
@@ -450,14 +452,14 @@ def _global_tool_definitions() -> list[dict]:
             # Beschreibung dessen, was ein Bereich "bedeutet".
             #
             # Hier stand vorher woertlich die Beschreibung dieses neuen
-            # Bereichs â€” "eine Eigenschaft der Anlage, die fuer alle Kollegen
-            # gilt" â€” und zeigte auf `team`. Bliebe der Satz stehen, aenderte
+            # Bereichs — "eine Eigenschaft der Anlage, die fuer alle Kollegen
+            # gilt" — und zeigte auf `team`. Bliebe der Satz stehen, aenderte
             # sich am beobachteten Verhalten gar nichts.
             #
             # **Die Merkmale waren aber rein sprachlich, und das war zu eng.**
             # Sie setzten voraus, dass der Benutzer den Satz gesagt hat: Regel
             # 1 sucht "ich"/"mein", Regel 3 sucht "wir"/"bei uns". Was die KI
-            # selbst herausfindet, enthaelt keines dieser Woerter â€” es landete
+            # selbst herausfindet, enthaelt keines dieser Woerter — es landete
             # ueber Regel 4 pauschal bei `user` oder wurde gar nicht erst
             # gemerkt. Gemessen am 19.08.2026: 7 Eintraege insgesamt, davon
             # **null** im Team-Bereich, juengster vom 16.08. Deshalb steht vor
@@ -466,9 +468,9 @@ def _global_tool_definitions() -> list[dict]:
             "Wahl des Bereichs:\n"
             "Zuerst inhaltlich: Betrifft es **eine Person** (ihre Vorliebe, "
             "ihre Arbeitsweise, ihre Ausstattung), ist es persoenlich. "
-            "Betrifft es **die Anlage** â€” wie ein Server sich verhaelt, wie "
+            "Betrifft es **die Anlage** — wie ein Server sich verhaelt, wie "
             "hier gearbeitet wird, was du selbst ueber eine Einrichtung "
-            "herausgefunden hast â€”, gehoert es dem Server oder dem Team, auch "
+            "herausgefunden hast —, gehoert es dem Server oder dem Team, auch "
             "wenn niemand \"wir\" gesagt hat.\n"
             "Dann genauer, in dieser Reihenfolge pruefen:\n"
             "1. Persoenlich und zu genau einem Server: scope=server. "
@@ -526,7 +528,7 @@ def _global_tool_definitions() -> list[dict]:
             "Nutze das **nur**, wenn Raten teuer waere: eine Version, ein "
             "Zielserver, eine Entscheidung, die sich schlecht zuruecknehmen "
             "laesst. Nicht fuer \"soll ich anfangen?\" und nicht fuer etwas, "
-            "das du aus den Werkzeugen selbst herausfinden kannst â€” frag erst, "
+            "das du aus den Werkzeugen selbst herausfinden kannst — frag erst, "
             "wenn du nachgesehen hast. "
             "Der Benutzer kann immer auch frei antworten; die Vorschlaege sind "
             "eine Abkuerzung, keine Einschraenkung. Nach dieser Frage endet "
@@ -561,11 +563,11 @@ def _global_tool_definitions() -> list[dict]:
         _function(
             "search_memory",
             "Durchsucht das Gedaechtnis nach Bedeutung. Nutze es, bevor du "
-            "etwas loeschst oder korrigierst â€” und wenn der Benutzer wissen "
+            "etwas loeschst oder korrigierst — und wenn der Benutzer wissen "
             "will, was du ueber ein Thema gespeichert hast. Findet auch, was "
             "anders formuliert ist: \"mein Hund\" findet einen Eintrag, in dem "
             "nur der Name des Hundes steht. Liefert Bereich, Schluessel und "
-            "Inhalt, dazu server_id oder team_id â€” die braucht "
+            "Inhalt, dazu server_id oder team_id — die braucht "
             "`forget_memory` wieder.",
             {
                 "query": {
@@ -580,7 +582,7 @@ def _global_tool_definitions() -> list[dict]:
             "forget_memory",
             "Loescht benannte Eintraege aus dem Gedaechtnis. Rufe **immer "
             "zuerst** `search_memory` auf und nenne dem Benutzer, was du "
-            "gefunden hast â€” geloescht wird ausschliesslich, was du hier "
+            "gefunden hast — geloescht wird ausschliesslich, was du hier "
             "namentlich auffuehrst, nie ein Suchbegriff. Eine unscharfe "
             "Aehnlichkeit darf entscheiden, was jemand zu sehen bekommt, aber "
             "nicht, was verschwindet.",
@@ -610,13 +612,13 @@ def _global_tool_definitions() -> list[dict]:
         ),
         _function(
             "forget_skill",
-            "Loescht einen erlernten Skill. Nur eigene und Team-Skills â€” die "
+            "Loescht einen erlernten Skill. Nur eigene und Team-Skills — die "
             "mit MSM ausgelieferten lassen sich nicht loeschen, sondern nur "
             "ueberschreiben, indem du unter demselben Schluessel einen neuen "
             "anlegst. Zum *Aendern* eines Skills nimm `learn_skill` mit "
             "demselben Schluessel; loeschen und neu anlegen verliert die "
             "Herkunft.\n"
-            "Denselben Schluessel kann es in mehreren Bereichen geben â€” "
+            "Denselben Schluessel kann es in mehreren Bereichen geben — "
             "panelweit und in einem Team. Dann kommt eine Rueckfrage statt "
             "einer Loeschung; nenne dem Benutzer die Bereiche und rufe das "
             "Werkzeug mit seiner Antwort erneut auf.",
@@ -650,7 +652,7 @@ def _global_tool_definitions() -> list[dict]:
         ),
         _function(
             "read_blueprint",
-            "Liest einen Blueprint vollstaendig â€” Image, Startbefehl, Ports und "
+            "Liest einen Blueprint vollstaendig — Image, Startbefehl, Ports und "
             "Umgebungsvariablen. **Die Spielversion steht hier, nicht am "
             "Server**: bei Minecraft in runtime.env.VERSION, bei Steam-Titeln in "
             "source.steam.branch, sonst im Image-Tag. `origin: native` bedeutet "
@@ -680,11 +682,11 @@ def _global_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_blueprint_change",
-            "Leitet aus einem vorhandenen Blueprint einen neuen ab â€” so aendert "
+            "Leitet aus einem vorhandenen Blueprint einen neuen ab — so aendert "
             "man eine Spielversion, ohne die Vorlage aller anderen Server "
             "anzufassen. Die Quelle bleibt unveraendert. Aenderbar sind "
             "meta.name, meta.description, runtime.image, runtime.env und "
-            "runtime.startup â€” ueber runtime.startup korrigierst du fehlende "
+            "runtime.startup — ueber runtime.startup korrigierst du fehlende "
             "oder falsche Startparameter. runtime.env wird gemischt, vorhandene "
             "Variablen bleiben also erhalten. Fuehrt der Quell-Blueprint "
             "runtime.startupProfiles, wird eine Aenderung an runtime.startup "
@@ -777,7 +779,7 @@ def _global_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_ai_tarif_role",
-            "Legt eine globale Rolle fuer einen Shop-Tarif an â€” **mit leerer "
+            "Legt eine globale Rolle fuer einen Shop-Tarif an — **mit leerer "
             "Rechteliste** und nur einem KI-Kontingent. Genau darin liegt ihr "
             "Zweck: Kontingente haengen an globalen Rollen, und ohne eine solche "
             "Rolle bekommt jeder Shop-Kunde dasselbe Kontingent wie jeder "
@@ -787,7 +789,7 @@ def _global_tool_definitions() -> list[dict]:
             "Bei den Kontingenten heisst ein Feld auf `null` **unbegrenzt**, "
             "nicht null; `max_memory_entries` ist die Ausnahme, siehe dort. "
             "Setz nur, was der Benutzer genannt hat, und frag im Zweifel nach "
-            "â€” ein geratenes Tageslimit merkt der Kunde erst, wenn es greift.",
+            "— ein geratenes Tageslimit merkt der Kunde erst, wenn es greift.",
             {
                 "name": {"type": "string", "maxLength": 64},
                 "description": {"type": ["string", "null"], "maxLength": 255},
@@ -811,7 +813,7 @@ def _global_tool_definitions() -> list[dict]:
                         "traegt. `null` taugt damit zu keinem der beiden "
                         "Wuensche: 'unbegrenztes Gedaechtnis' braucht eine "
                         "Zahl, die du dem Benutzer nennst, und senken kann "
-                        "eine zusaetzliche Rolle gar nicht â€” dafuer muss die "
+                        "eine zusaetzliche Rolle gar nicht — dafuer muss die "
                         "Zahl der bestehenden Rolle sinken."
                     ),
                 },
@@ -821,14 +823,14 @@ def _global_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_hoster_integration",
-            "Legt eine Hoster-Integration an oder aendert eine bestehende â€” die "
+            "Legt eine Hoster-Integration an oder aendert eine bestehende — die "
             "panelseitige Haelfte einer Shop-Anbindung. Ist ein `webhook_url` "
             "gesetzt und noch kein Secret vorhanden, wird zugleich eines "
             "erzeugt: ein Ziel ohne Secret stellt nichts zu, und das faellt "
             "sonst erst im Betrieb auf.\n"
             "**Ruf vorher `read_hoster_setup` auf.** Der Slug muss panelweit "
             "eindeutig sein und der Dienstbenutzer aktiv sein, kein Owner und "
-            "`servers.create` haben â€” beides steht dort, beides ist nicht zu "
+            "`servers.create` haben — beides steht dort, beides ist nicht zu "
             "erraten.\n"
             "Der API-Key entsteht erst beim Ausfuehren und wird dem Benutzer "
             "**einmalig** in der Oberflaeche gezeigt. Du bekommst ihn nie zu "
@@ -876,10 +878,10 @@ def _global_tool_definitions() -> list[dict]:
             "propose_hoster_product",
             "Ordnet eine Produktkennung des Shops einem Blueprint und einem "
             "Ressourcenpaket zu. Die Kennung muss **exakt** so heissen wie im "
-            "Shop â€” MSM-interne IDs muss der Shop nie kennen.\n"
+            "Shop — MSM-interne IDs muss der Shop nie kennen.\n"
             "**Ruf vorher `read_hoster_setup` auf** fuer die Integration, die "
             "vorhandenen Produktkennungen und die Rollen, die dieser Benutzer "
-            "vergeben darf. Eine Rolle, die dort nicht steht, wird abgewiesen â€” "
+            "vergeben darf. Eine Rolle, die dort nicht steht, wird abgewiesen — "
             "auch dann, wenn sie existiert.\n"
             "`role_id` ist der Bogen zwischen Tarif und KI-Kontingent: der "
             "Kunde bekommt diese Rolle, solange sein Vertrag laeuft, und "
@@ -1013,7 +1015,7 @@ def provider_tool_definitions() -> list[dict]:
         _server_function(
             "list_server_files",
             "Listet ein Verzeichnis im Serververzeichnis auf. Ohne `path` die "
-            "Wurzel. Nutze das, bevor du eine Datei liest â€” Dateinamen raten "
+            "Wurzel. Nutze das, bevor du eine Datei liest — Dateinamen raten "
             "fuehrt zu Fehlversuchen.",
             {"path": {"type": "string", "maxLength": 256}},
         ),
@@ -1021,7 +1023,7 @@ def provider_tool_definitions() -> list[dict]:
             "search_server_files",
             "Sucht einen Text in den Dateien des Servers und liefert Pfad und "
             "Zeilennummer jedes Treffers. **Der erste Schritt bei jeder grossen "
-            "Datei** â€” eine Spielkonfiguration hat tausende Zeilen, und "
+            "Datei** — eine Spielkonfiguration hat tausende Zeilen, und "
             "read_config zeigt immer nur ein Fenster davon. Mit `path` auf eine "
             "Datei suchst du in genau ihr, mit `path` auf ein Verzeichnis "
             "darunter, ohne `path` im ganzen Serververzeichnis. Exakter "
@@ -1040,13 +1042,13 @@ def provider_tool_definitions() -> list[dict]:
         ),
         _server_function(
             "read_config",
-            "Liest eine Textdatei des Servers revisionssicher â€” Konfigurationen, "
+            "Liest eine Textdatei des Servers revisionssicher — Konfigurationen, "
             "Whitelists, Skripte, alles was der Dateimanager auch zeigt. Ohne "
             f"`offset` die ersten {MAX_READ_CONFIG_LINES} Zeilen; `total_lines` "
             "sagt dir, wie lang die Datei wirklich ist. Zu einer Fundstelle aus "
             "search_server_files springst du mit `offset`. "
             "`editable: false` heisst **nur**, dass du die Datei nicht als "
-            "Ganzes ersetzen darfst, weil du sie nicht ganz gesehen hast â€” mit "
+            "Ganzes ersetzen darfst, weil du sie nicht ganz gesehen hast — mit "
             "`patchable: true` kannst du sie trotzdem per propose_config_patch "
             "aendern. Erst `patchable: false` (Binaerdatei) heisst Finger weg.",
             {
@@ -1065,7 +1067,7 @@ def provider_tool_definitions() -> list[dict]:
             },
             ["path"],
         ),
-        # â”€â”€ Erweiterter Serverkontext (Zielpunkt 3.3) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Erweiterter Serverkontext (Zielpunkt 3.3) ──────────────────────
         _server_function(
             "read_server_ports",
             "Liest die vergebenen Ports des Servers mit Rolle und Protokoll.",
@@ -1075,7 +1077,7 @@ def provider_tool_definitions() -> list[dict]:
             "Liest die Netzwerkeinrichtung: Bind-IP mit Einordnung, Ports, "
             "verfuegbare Host-Adressen und Firewall-Zustand. Erster Schritt, "
             "wenn ein Server laeuft, aber niemand sich verbinden kann. "
-            "Rufe danach check_server_reachability auf â€” erst beide zusammen "
+            "Rufe danach check_server_reachability auf — erst beide zusammen "
             "ergeben eine Diagnose. read_server_status ist dafuer nicht noetig, "
             "der Status steht bereits in dieser Antwort.",
         ),
@@ -1085,12 +1087,12 @@ def provider_tool_definitions() -> list[dict]:
             "Der eigentliche Beweis bei 'laeuft, aber niemand kommt drauf': "
             "meldet ein Port sich als frei, obwohl der Server laeuft, horcht "
             "der Dienst nicht oder horcht auf einer anderen Adresse. "
-            "Beantwortet nicht, ob der Server aus dem Internet erreichbar ist â€” "
+            "Beantwortet nicht, ob der Server aus dem Internet erreichbar ist — "
             "das kann MSM nicht messen und behauptet es auch nicht.\n"
             "`game_probe` traegt zusaetzlich das Urteil der Anwendungsprobe, die "
             "der Blueprint deklariert und der Guardian auf der Node ausfuehrt: "
             "`answering` (der Dienst antwortet im Spielprotokoll), "
-            "`not_answering` (Port offen, Dienst stumm â€” der eigentliche Befund "
+            "`not_answering` (Port offen, Dienst stumm — der eigentliche Befund "
             "bei 'laeuft, aber niemand kommt drauf'), `not_declared` und "
             "`no_measurement`. **`not_declared` ist kein Fehlerbefund**, sondern "
             "heisst nur, dass dieser Blueprint keine Probe vorsieht; melde es "
@@ -1127,7 +1129,7 @@ def provider_tool_definitions() -> list[dict]:
             },
             ["query"],
         ),
-        # â”€â”€ Schreib-Tools: erzeugen ausschliesslich Vorschlaege â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Schreib-Tools: erzeugen ausschliesslich Vorschlaege ────────────
         _server_function(
             "propose_server_lifecycle",
             "Schlaegt Start, Stop oder Neustart zur manuellen Bestaetigung vor (wird im autonomen Modus direkt ausgefuehrt).",
@@ -1148,7 +1150,7 @@ def provider_tool_definitions() -> list[dict]:
         _server_function(
             "propose_backup",
             "Schlaegt ein Server-Backup zur manuellen Bestaetigung vor. Der "
-            "Name hilft dem Benutzer, es spaeter wiederzuerkennen â€” nenne den "
+            "Name hilft dem Benutzer, es spaeter wiederzuerkennen — nenne den "
             "Anlass, nicht das Datum.",
             {
                 **_RATIONALE_SCHEMA,
@@ -1162,7 +1164,7 @@ def provider_tool_definitions() -> list[dict]:
             "**alle** Serverdaten und stoppt den Server dabei; was seit dem "
             "Backup entstanden ist, geht verloren. Verlangt immer eine "
             "Bestaetigung, auch im autonomen Modus. Die backup_id stammt aus "
-            "read_server_backups â€” rate sie nie.",
+            "read_server_backups — rate sie nie.",
             {
                 **_RATIONALE_SCHEMA,
                 "backup_id": {
@@ -1178,19 +1180,19 @@ def provider_tool_definitions() -> list[dict]:
             # Der Satz "die Portrollen beider Blueprints muessen
             # uebereinstimmen" stand hier und ist ersatzlos gestrichen: er war
             # erfunden. `switch_server_blueprint` vergibt die Ports ohnehin neu
-            # und prueft nichts dergleichen â€” dokumentiert in
+            # und prueft nichts dergleichen — dokumentiert in
             # `ai_proposal_service` bei den erfundenen Einschraenkungen. Eine
             # Bedingung, die es nicht gibt, haelt das Modell von Wechseln ab,
             # die durchgegangen waeren.
             "Schlaegt vor, einen bestehenden Server auf einen anderen Blueprint "
-            "umzustellen â€” so aendert man die Spielversion, denn sie steht im "
+            "umzustellen — so aendert man die Spielversion, denn sie steht im "
             "Blueprint und nicht am Server. Der Server muss gestoppt sein. Leite "
             "vorher mit propose_blueprint_change einen passenden ab. Der "
             "Vorgang legt zwingend ein Backup an und **loescht danach alle "
             "Serverdateien**, damit die neue Version auf einem leeren "
             "Verzeichnis aufsetzt: Welt, Configs und Mods sind anschliessend "
             "weg und stehen nur noch im Backup. Sage das im Grund ausdruecklich. "
-            "Braucht immer eine Bestaetigung durch einen Menschen â€” auch im "
+            "Braucht immer eine Bestaetigung durch einen Menschen — auch im "
             "autonomen Modus. Wenn Guardian fuer diesen Server nur falsch "
             "eingestellt ist, nimm propose_guardian_tuning: das aendert nichts "
             "an den Dateien.",
@@ -1215,7 +1217,7 @@ def provider_tool_definitions() -> list[dict]:
         ),
         _server_function(
             "propose_config_update",
-            "Ersetzt eine Datei **vollstaendig** â€” fuer neue Dateien und fuer "
+            "Ersetzt eine Datei **vollstaendig** — fuer neue Dateien und fuer "
             "kleine, die du ganz gelesen hast (`editable: true`). Bei allem "
             "anderen nimm propose_config_patch: eine Datei, die du nur "
             "ausschnittsweise kennst, ganz zu ersetzen wuerde alles Ungesehene "
@@ -1231,7 +1233,7 @@ def provider_tool_definitions() -> list[dict]:
         _server_function(
             "propose_config_patch",
             "Aendert **einzelne Stellen** einer Datei und laesst den Rest "
-            "unberuehrt â€” der Weg fuer jede grosse Datei, auch wenn sie "
+            "unberuehrt — der Weg fuer jede grosse Datei, auch wenn sie "
             "`editable: false` meldet. Je Eintrag wird `find` durch `replace` "
             "ersetzt. `find` muss **genau einmal** in der Datei vorkommen: nimm "
             "so viel Umgebung mit, dass es eindeutig ist (nicht `value=\"1\"`, "
@@ -1272,12 +1274,12 @@ def provider_tool_definitions() -> list[dict]:
         ),
         _server_function(
             "propose_config_set",
-            "Setzt einzelne Schluessel in einer INI-artigen Datei â€” **der "
+            "Setzt einzelne Schluessel in einer INI-artigen Datei — **der "
             "Normalfall fuer Spieleinstellungen**. Du nennst Sektion, "
             "Schluessel und Wert statt Text zu suchen: die Sektion wird "
             "gefunden oder angelegt, ein vorhandener Schluessel ueberschrieben "
             "statt gedoppelt, die Zeilenenden bleiben. Einen fehlenden "
-            "Schluessel legst du damit an â€” Regelfall, kein Hindernis. Der Wert "
+            "Schluessel legst du damit an — Regelfall, kein Hindernis. Der Wert "
             "gilt dauerhaft und wird vor jedem Start neu geschrieben, haelt "
             "also auch bei Spielen, die ihre Konfiguration selbst "
             "zurueckschreiben. Ein laufender Server hindert dich nicht; es "
@@ -1311,7 +1313,7 @@ def provider_tool_definitions() -> list[dict]:
         ),
         _server_function(
             "propose_bind_ip_update",
-            "Schlaegt eine andere Bind-IP vor â€” etwa wenn der Server an eine "
+            "Schlaegt eine andere Bind-IP vor — etwa wenn der Server an eine "
             "Docker- oder Loopback-Adresse gebunden ist und deshalb von aussen "
             "nicht erreichbar sein kann. Nur Adressen, die dem Host tatsaechlich "
             "gehoeren; nimm sie aus read_server_network. Ein laufender Server "
@@ -1339,7 +1341,7 @@ def provider_tool_definitions() -> list[dict]:
             "propose_mod_toggle",
             "Schaltet eine bereits installierte Mod an oder aus. Welche Mods "
             "aktiv sind, steht in der Mod-Liste des Panels (read_server_mods, "
-            "Feld `enabled`) â€” nie in einer Spielkonfiguration. Wirkt erst "
+            "Feld `enabled`) — nie in einer Spielkonfiguration. Wirkt erst "
             "beim naechsten Start des Servers.",
             {
                 "workshop_id": {"type": "string", "maxLength": 20},
@@ -1348,11 +1350,11 @@ def provider_tool_definitions() -> list[dict]:
             },
             ["workshop_id", "enabled", *_RATIONALE_REQUIRED],
         ),
-        # Die Reparatur der **Anlage** â€” alles unterhalb der Spieldateien.
+        # Die Reparatur der **Anlage** — alles unterhalb der Spieldateien.
         #
         # `action` ist ein `enum` und kein Freitext, und das ist der ganze Sinn
         # des Werkzeugs: das Modell waehlt eine von vier Kennungen. Es formuliert
-        # keinen Pfad, kein Kommando und keinen Containernamen â€” der kommt aus
+        # keinen Pfad, kein Kommando und keinen Containernamen — der kommt aus
         # `container_name_for(server_id)`. Ein Modell, das durch eine Logzeile
         # zu etwas ueberredet wurde, kann hier hoechstens die falsche der vier
         # Reparaturen anstossen.
@@ -1360,15 +1362,15 @@ def provider_tool_definitions() -> list[dict]:
             "propose_server_repair",
             "Repariert die Anlage unter dem Server, nicht seine Dateien. Zwei "
             "Moeglichkeiten: `repair_permissions` berichtigt die Besitzrechte am "
-            "Serververzeichnis â€” der Weg bei 'permission denied', 'read-only "
+            "Serververzeichnis — der Weg bei 'permission denied', 'read-only "
             "file system' oder wenn der Server seine eigenen Dateien nicht mehr "
             "schreiben kann. `reallocate_port` vergibt die Ports neu, die auf "
-            "dem Host jemand anderes belegt â€” der Weg bei 'address already in "
+            "dem Host jemand anderes belegt — der Weg bei 'address already in "
             "use', aber nur bei einem **gestoppten** Server; bei einem laufenden "
             "haelt er seine Ports selbst und es gibt nichts zu vergeben. "
             "Nichts davon aendert Spielstaende. "
             "Fuer 'Container haengt' oder 'startet nicht' nimm "
-            "propose_server_lifecycle mit `restart` â€” das baut den Container "
+            "propose_server_lifecycle mit `restart` — das baut den Container "
             "ohnehin aus dem Blueprint neu auf.",
             {
                 "action": {
@@ -1383,7 +1385,7 @@ def provider_tool_definitions() -> list[dict]:
         #
         # Alle Felder sind Zahlen mit Ober- und Untergrenze, und es gibt keine
         # anderen. Damit kann ein Modell, das durch eine praeparierte Logzeile
-        # ueberredet wurde, hoechstens einen ungeschickten Wert waehlen â€” es
+        # ueberredet wurde, hoechstens einen ungeschickten Wert waehlen — es
         # kann keine Probe abschalten, keinen Probentyp tauschen und kein
         # Muster einschmuggeln.
         _server_function(
@@ -1391,7 +1393,7 @@ def provider_tool_definitions() -> list[dict]:
             "Stellt die Guardian-Engine **fuer diesen einen Server** anders ein, "
             "ohne die Blueprint anderer Server anzufassen. Der Weg fuer den Fall, "
             "dass Guardian sich nicht geirrt hat und der Server nicht kaputt ist, "
-            "sondern Guardian fuer diesen Server falsch eingestellt wurde â€” etwa "
+            "sondern Guardian fuer diesen Server falsch eingestellt wurde — etwa "
             "wenn eine volle Node laenger zum Hochfahren braucht, als die "
             "Blueprint erwartet, und deshalb dauernd Neustarts gemeldet werden. "
             "Gib nur die Werte an, die du aendern willst; die uebrigen bleiben "
@@ -1463,15 +1465,15 @@ def provider_tool_definitions() -> list[dict]:
             },
             [*_RATIONALE_REQUIRED],
         ),
-        # â”€â”€ Die eingebauten ZeitplÃ¤ne: Auto-Neustart und Auto-Backup â”€â”€â”€â”€â”€â”€
+        # ── Die eingebauten Zeitpläne: Auto-Neustart und Auto-Backup ──────
         #
         # Der Durchgriff statt einer stehenden Aufgabe: was hier gesetzt wird,
         # sieht der Benutzer im Panel unter dem Server und kann es dort selbst
-        # Ã¤ndern. Eine manuelle Ã„nderung nimmt der KI die Verwaltung wieder ab.
+        # ändern. Eine manuelle Änderung nimmt der KI die Verwaltung wieder ab.
         #
-        # Der **Anlass** â€” wann diese zwei Werkzeuge statt `propose_task_set`
+        # Der **Anlass** — wann diese zwei Werkzeuge statt `propose_task_set`
         # gelten, dass je Server ein Aufruf reicht und dass nicht nachgefragt
-        # wird â€” steht in `ai_prompt.AUFGABEN` und geht mit derselben Anfrage
+        # wird — steht in `ai_prompt.AUFGABEN` und geht mit derselben Anfrage
         # mit. Hier steht nur die Feldkunde; die Wiederholung des Anlasses
         # kostete den Katalog knapp 1.000 Zeichen je Runde (siehe
         # test_ai_tool_handler_contract zum Katalogbudget).
@@ -1480,7 +1482,7 @@ def provider_tool_definitions() -> list[dict]:
             "Setzt den eingebauten Auto-Neustart-Zeitplan dieses Servers. "
             "Entweder `interval_hours` oder `times`, nie beides; "
             "`enabled: false` schaltet aus und braucht keinen Plan. "
-            "`times` sind UTC und gelten tÃ¤glich â€” rechne die Ortszeit des "
+            "`times` sind UTC und gelten täglich — rechne die Ortszeit des "
             "Benutzers um und nenne ihm beide Werte.",
             {
                 "enabled": {"type": "boolean"},
@@ -1493,7 +1495,7 @@ def provider_tool_definitions() -> list[dict]:
                     "minItems": 1,
                     "maxItems": 12,
                     "items": {"type": "string", "maxLength": 5},
-                    "description": "Bis zu 12 Neustartzeiten 'HH:MM' in UTC, gelten tÃ¤glich.",
+                    "description": "Bis zu 12 Neustartzeiten 'HH:MM' in UTC, gelten täglich.",
                 },
                 **_RATIONALE_SCHEMA,
             },
@@ -1502,7 +1504,7 @@ def provider_tool_definitions() -> list[dict]:
         _server_function(
             "propose_backup_schedule_set",
             "Setzt den eingebauten Auto-Backup-Zeitplan dieses Servers. "
-            "Nur genannte Felder werden angefasst; die Ã¼brigen bleiben stehen.",
+            "Nur genannte Felder werden angefasst; die übrigen bleiben stehen.",
             {
                 "backup_on_start": {
                     "type": "boolean",
@@ -1511,13 +1513,13 @@ def provider_tool_definitions() -> list[dict]:
                 "interval_hours": {
                     "type": "integer", "minimum": 0, "maximum": 720,
                     "description": (
-                        "Backup alle N Stunden; 0 = aus, 24 = tÃ¤glich, "
-                        "168 = wÃ¶chentlich, 720 = alle 30 Tage."
+                        "Backup alle N Stunden; 0 = aus, 24 = täglich, "
+                        "168 = wöchentlich, 720 = alle 30 Tage."
                     ),
                 },
                 "retention_count": {
                     "type": "integer", "minimum": 1, "maximum": 100,
-                    "description": "Aufbewahrte Backups (1-100); Ã¤ltere werden gelÃ¶scht.",
+                    "description": "Aufbewahrte Backups (1-100); ältere werden gelöscht.",
                 },
                 **_RATIONALE_SCHEMA,
             },
@@ -1531,7 +1533,7 @@ def provider_tool_definitions() -> list[dict]:
             "Vorher wird derselbe Versionsschnappschuss angelegt wie beim "
             "Schreiben, der Dateimanager holt die Datei also einzeln zurueck. "
             "Im autonomen Guardian-Betrieb laeuft es nur mit einem nachweislich "
-            "erfolgreichen Backup, das juenger ist als der Vorfall â€” fehlt es, "
+            "erfolgreichen Backup, das juenger ist als der Vorfall — fehlt es, "
             "wird der Vorschlag abgewiesen, und du legst erst eines an. "
             "Kein Verzeichnis, keine Platzhalter: genau ein Pfad, den du vorher "
             "mit list_server_files oder read_config gesehen hast.",
@@ -1549,21 +1551,21 @@ def angebotene_werkzeuge(db: Session, user: User) -> frozenset[str]:
 
     **Der Katalog ist eine Bitte, keine Zusage.** Was hier fehlt, wird nicht
     angeboten; was hier steht, ist damit noch lange nicht erlaubt. Die Schranke
-    bleibt unveraendert dort, wo sie war â€” `_resolve_server`, die
+    bleibt unveraendert dort, wo sie war — `_resolve_server`, die
     Rechtepruefung im jeweiligen Handler und `_require_tool_permission` im
     Vorschlagspfad. Ein Modell, das sich ein Werkzeug ausdenkt oder aus dem
     Gespraechsverlauf abschreibt, prallt dort weiterhin ab.
 
     Warum es das trotzdem gibt, und zwar zuerst als **Korrektur**: die KI erbt
     die Rechte des Benutzers. Wer kein Hoster-Recht hat, dessen KI kann die
-    Hoster-Werkzeuge nicht ausfuehren â€” angeboten bekam er sie trotzdem, alle
+    Hoster-Werkzeuge nicht ausfuehren — angeboten bekam er sie trotzdem, alle
     51. Das Modell versuchte sie, wurde abgewiesen und hatte eine Runde
     verbraucht. Wir haben ihm also Faehigkeiten angeboten, die es in seinem
     Namen nie hatte.
 
     Die Ersparnis kommt obendrauf: der Katalog geht in **jeder** Runde der
     Werkzeugschleife mit ueber die Leitung und machte 94 Prozent des Prompts
-    aus. Und die Trefferqualitaet steigt â€” bei 51 aehnlichen Werkzeugen greift
+    aus. Und die Trefferqualitaet steigt — bei 51 aehnlichen Werkzeugen greift
     ein Modell haeufiger zum falschen.
 
     Gefragt wird `has_permission_anywhere` und nicht `has_server_permission`:
@@ -1572,7 +1574,7 @@ def angebotene_werkzeuge(db: Session, user: User) -> frozenset[str]:
     """
     # Alle 24 Schluessel in einer Runde. Der Merkzettel je Schluessel, der hier
     # zuerst stand, half nur halb: er sparte die Wiederholung je Werkzeug, nicht
-    # die je Schluessel â€” und darunter fragte jede Pruefung die Rollen des
+    # die je Schluessel — und darunter fragte jede Pruefung die Rollen des
     # Benutzers erneut ab. Gemessen waren das 73 Abfragen bei einem
     # gewoehnlichen Kunden und 93 bei einem Rolleninhaber, jedes Mal am Beginn
     # eines Segments und damit auf dem Pfad zum ersten Token.
@@ -1696,7 +1698,7 @@ def _execute_global_read_tool(
     """Werkzeuge ohne Serverbezug.
 
     `list_my_servers` ist die Einstiegsfrage jedes Gespraechs und deshalb an
-    kein zusaetzliches Recht gebunden â€” es zeigt ausschliesslich Server, die der
+    kein zusaetzliches Recht gebunden — es zeigt ausschliesslich Server, die der
     Benutzer ohnehin sieht, und ohne die Liste kann er den Assistenten gar nicht
     sinnvoll benutzen.
 
@@ -1731,9 +1733,9 @@ def _execute_global_read_tool(
         # Ohne sie fiel der Worker auf "panel" und meldete dem Benutzer, er
         # koenne auf dessen Rechner nicht zugreifen (22.08.2026).
         #
-        # Die Familie geht denselben Weg und beantwortet die zweite HÃ¤lfte
-        # derselben Frage: die Herkunft sagt â€žaus der App", die Familie sagt
-        # â€žaus **dieser** App". Nur mit ihr landet ein Desktop-Auftrag des
+        # Die Familie geht denselben Weg und beantwortet die zweite Hälfte
+        # derselben Frage: die Herkunft sagt „aus der App", die Familie sagt
+        # „aus **dieser** App". Nur mit ihr landet ein Desktop-Auftrag des
         # Workers bei dem Rechner, an dem der Mensch sitzt, statt bei dem, der
         # zuerst nach Arbeit fragt (`desktop_job_service.naechster`).
         return ai_worker_service.worker_start(
@@ -1754,12 +1756,12 @@ def _execute_global_read_tool(
     if tool_name == "wait_until":
         # Wird wie `ask_user` im Rundenlauf abgefangen, bevor ein Werkzeug
         # laeuft: der Lauf parkt (`waiting_wake`), dieser Dispatch sieht das
-        # Werkzeug nie. Der Zweig steht trotzdem hier â€” als benannte Antwort
+        # Werkzeug nie. Der Zweig steht trotzdem hier — als benannte Antwort
         # statt des Durchfall-raise, damit ein Aufruf ausserhalb eines
         # parkfaehigen Laufs eine Erklaerung bekommt und kein Raetsel.
         raise AiActionValidationError(
-            "wait_until parkt den Lauf und wird im Rundenlauf behandelt â€” "
-            "in diesem Lauf steht es nicht zur VerfÃ¼gung"
+            "wait_until parkt den Lauf und wird im Rundenlauf behandelt — "
+            "in diesem Lauf steht es nicht zur Verfügung"
         )
 
     if tool_name in (
@@ -1773,14 +1775,14 @@ def _execute_global_read_tool(
         # Dieselbe Lage wie bei `wait_until`: die fuenf werden im Rundenlauf
         # abgefangen (`_desktop_behandeln`), werden zu einem Auftrag an den
         # Rechner des Benutzers, und der Lauf parkt. Dieser Dispatch sieht sie
-        # nur, wenn die Bitte gar nicht von einem Rechner kam â€” dann sortiert
+        # nur, wenn die Bitte gar nicht von einem Rechner kam — dann sortiert
         # sie schon der Herkunfts-Spiegel aus, und wenn selbst der umgangen
         # waere, ist ein benannter Fehlschlag die einzig ehrliche Antwort. Ein
         # stiller Durchfall lieferte dem Modell ein "erledigt" fuer etwas, das
         # nie passiert ist.
         raise AiActionValidationError(
-            "Werkzeuge fÃ¼r den Rechner des Benutzers laufen nur aus der "
-            "Smart-System-App â€” in diesem Lauf stehen sie nicht zur VerfÃ¼gung"
+            "Werkzeuge für den Rechner des Benutzers laufen nur aus der "
+            "Smart-System-App — in diesem Lauf stehen sie nicht zur Verfügung"
         )
 
     if tool_name == "list_tasks":
@@ -1788,7 +1790,7 @@ def _execute_global_read_tool(
 
         _require_no_arguments(tool_name, arguments)
         # Kein zusaetzliches Recht: die Liste zeigt ausschliesslich, was diesem
-        # Benutzer gehoert. Wer keine Aufgaben anlegen darf, hat auch keine â€”
+        # Benutzer gehoert. Wer keine Aufgaben anlegen darf, hat auch keine —
         # dann ist die Liste leer, und das ist die richtige Auskunft.
         return {"tasks": ai_task_service.auflisten(db, user=user)}
 
@@ -1810,7 +1812,7 @@ def _execute_global_read_tool(
         roh = arguments.get("integration_id")
         if roh is None:
             raise AiActionValidationError(
-                "integration_id fehlt â€” hol sie aus read_hoster_setup"
+                "integration_id fehlt — hol sie aus read_hoster_setup"
             )
         kennung = _positive_int(roh, name="integration_id", default=0, minimum=1)
         return ai_hoster_tools.integration_guide(db, user=user, integration_id=kennung)
@@ -1901,6 +1903,50 @@ def _execute_global_read_tool(
             db, user=user, search=query, category=category, team_id=team_id, is_pinned=is_pinned
         )
         return {"notes": notes, "count": len(notes)}
+
+    if tool_name == "popups_read":
+        # Dasselbe Recht wie das Schreibwerkzeug und nicht `panel.settings.read`:
+        # wer der KI keine Ankuendigungen erlaubt, soll ihr auch die bestehenden
+        # nicht vorlegen. Der Text eines Pop-ups ist ohnehin fuer alle Benutzer
+        # des Panels sichtbar; geprueft wird hier der KI-Zugang, nicht das
+        # Geheimnis.
+        if not permission_service.has_global_permission(db, user, "ai.popups.manage"):
+            raise AiActionValidationError("Pop-up-Einsicht ist nicht erlaubt")
+        if set(arguments) - {"only_active"}:
+            raise AiActionValidationError("Pop-up-Tool hat ungueltige Argumente")
+        from models import PanelPopup
+
+        abfrage = db.query(PanelPopup).order_by(PanelPopup.id.desc())
+        # Nachsichtig gelesen: das Schema sagt `boolean`, aber ein Modell
+        # schickt auch mal den String "false" — und der ist als Wahrheitswert
+        # wahr. Das Ergebnis waere eine Liste, in der ausgerechnet das
+        # abgeschaltete Pop-up fehlt, das jemand wieder anschalten wollte.
+        if str(arguments.get("only_active", "")).strip().lower() in ("true", "1"):
+            abfrage = abfrage.filter(PanelPopup.is_active.is_(True))
+        popups = abfrage.limit(MAX_LISTED_POPUPS).all()
+        eintraege = []
+        for popup in popups:
+            # Titel und Inhalt sind vom Benutzer frei gesetzt und werden wie
+            # jeder andere freie Text redigiert.
+            inhalt = redact_sensitive_text(str(popup.content_markdown or ""))
+            gekuerzt = len(inhalt) > MAX_POPUP_INHALT_CHARS
+            eintraege.append({
+                "popup_id": popup.id,
+                "title": redact_sensitive_text(str(popup.title or "")),
+                "content_markdown": inhalt[:MAX_POPUP_INHALT_CHARS],
+                # Die Marke ist keine Kosmetik: `propose_popup_set` ersetzt den
+                # Inhalt vollstaendig. Wer einen gekuerzten Text zurueckschreibt,
+                # loescht den Rest des Pop-ups, ohne es zu merken.
+                "content_truncated": gekuerzt,
+                "is_active": bool(popup.is_active),
+                "start_at": popup.start_at.isoformat() if popup.start_at else None,
+                "end_at": popup.end_at.isoformat() if popup.end_at else None,
+                "button_text": redact_sensitive_text(str(popup.button_text))
+                if popup.button_text
+                else None,
+                "button_url": popup.button_url or None,
+            })
+        return {"popups": eintraege, "count": len(eintraege)}
 
     if tool_name == "read_blueprint":
         # Ein Blueprint ist eine Vorlage, kein Betriebsgeheimnis: wer Server
@@ -2227,10 +2273,10 @@ def _execute_global_read_tool(
     # die Kapazitaetsabfrage der namenlose Rumpf am Ende der Kette: wer keinen
     # eigenen Zweig hatte, bekam ihn. Ein Werkzeug, das in der Tabelle und im
     # Katalog steht, aber beim Verdrahten vergessen wurde, lieferte dem Modell
-    # damit RAM-Zahlen unter seinem eigenen Namen zurueck â€” eine falsche
+    # damit RAM-Zahlen unter seinem eigenen Namen zurueck — eine falsche
     # Auskunft, die wie eine richtige aussieht, und der einzige Ort im ganzen
     # Werkzeugpfad, an dem das ohne Fehler passieren konnte.
-    raise AiActionValidationError(f"Kein Handler fÃ¼r Werkzeug: {tool_name}")
+    raise AiActionValidationError(f"Kein Handler für Werkzeug: {tool_name}")
 
 def _execute_server_context_tool(
     db: Session, *, user: User, server: Server, tool_name: str, arguments: dict
@@ -2258,7 +2304,7 @@ def _execute_server_context_tool(
             return server_network_diagnostics.check_reachability(db, server)
         # Host-Adressen und Firewall-Regeln sind die Netzstruktur des
         # Betreibers, nicht die des Servers. Wer sie nicht aendern darf, muss
-        # sie auch nicht sehen â€” die Ports des eigenen Servers schon.
+        # sie auch nicht sehen — die Ports des eigenen Servers schon.
         return server_network_diagnostics.describe_network(
             db, server,
             include_host_details=permission_service.has_server_permission(
@@ -2319,7 +2365,7 @@ def _execute_server_context_tool(
             "incidents": [
                 {
                     # Ohne Kennung konnte das Modell einen Vorfall nicht
-                    # benennen, auf den es sich bezieht â€” weder in seiner
+                    # benennen, auf den es sich bezieht — weder in seiner
                     # Antwort noch in der Begruendung eines Vorschlags. Bei
                     # mehreren offenen Vorfaellen desselben Servers war damit
                     # nicht unterscheidbar, welchen es meint.
@@ -2333,7 +2379,7 @@ def _execute_server_context_tool(
                     "created_at": row.created_at.isoformat() if row.created_at else None,
                     "resolved_at": row.resolved_at.isoformat() if row.resolved_at else None,
                     # Was die Guardian-Engine selbst schon versucht hat. Ohne
-                    # das faengt die KI bei jedem Vorfall mit einem Neustart an â€”
+                    # das faengt die KI bei jedem Vorfall mit einem Neustart an —
                     # dem Schritt, den der Agent nachweislich schon dreimal
                     # gemacht hat, bevor er aufgab.
                     "attempts": _vorfall_versuche(row.attempts),
@@ -2432,23 +2478,23 @@ def _execute_mod_tool(db: Session, *, server: Server, tool_name: str, arguments:
         }
 
     if tool_name != "search_workshop_mods":
-        raise AiActionValidationError(f"Kein Handler fÃ¼r Werkzeug: {tool_name}")
+        raise AiActionValidationError(f"Kein Handler für Werkzeug: {tool_name}")
     if set(arguments) - {"query", "page"} or not isinstance(arguments.get("query"), str):
-        raise AiActionValidationError("Workshop-Suche hat ungÃ¼ltige Argumente")
+        raise AiActionValidationError("Workshop-Suche hat ungültige Argumente")
     page = arguments.get("page", 1)
     if not isinstance(page, int) or isinstance(page, bool) or not 1 <= page <= 50:
-        raise AiActionValidationError("UngÃ¼ltige Seitenzahl")
+        raise AiActionValidationError("Ungültige Seitenzahl")
     mod_support = plugin.get_mod_support() or {}
 
     # Die Anfrage geht an einen fremden Dienst (Steam oder CurseForge) und wird
-    # dort protokolliert â€” dieselbe Lage wie bei `web_search`, also dieselbe
-    # SchwÃ¤rzung, eine Richtung frÃ¼her als der Choke Point auf dem RÃ¼ckweg.
+    # dort protokolliert — dieselbe Lage wie bei `web_search`, also dieselbe
+    # Schwärzung, eine Richtung früher als der Choke Point auf dem Rückweg.
     # Der Suchbegriff ist reine Modellausgabe, und das Modell hat vorher
     # Konfigurationsdateien und Logs gelesen: eine Zuweisung wie
-    # `ServerAdminPassword=â€¦` kann es wÃ¶rtlich Ã¼bernehmen. Die SchwÃ¤rzung ist
-    # wertbezogen, ein Einstellungs- oder Modname als Wort Ã¼berlebt sie.
+    # `ServerAdminPassword=…` kann es wörtlich übernehmen. Die Schwärzung ist
+    # wertbezogen, ein Einstellungs- oder Modname als Wort überlebt sie.
     #
-    # GekÃ¼rzt wird auf die LÃ¤nge, die das Schema verspricht. Ein Schema ist eine
+    # Gekürzt wird auf die Länge, die das Schema verspricht. Ein Schema ist eine
     # Bitte an das Modell und keine Schranke; was hier durchkommt, geht als
     # URL-Parameter hinaus.
     sichere_anfrage = redact_sensitive_text(
@@ -2483,13 +2529,13 @@ def _execute_mod_tool(db: Session, *, server: Server, tool_name: str, arguments:
                 )
 
             # Ohne Weiche auf eine laufende Ereignisschleife: die Lesewerkzeuge
-            # laufen ausschlieÃŸlich Ã¼ber `_werkzeug_ausfuehren` und damit "in
+            # laufen ausschließlich über `_werkzeug_ausfuehren` und damit "in
             # eigener Sitzung und eigenem Thread", wo es nie eine gibt. Hier
             # stand ein `ThreadPoolExecutor`, der `asyncio.run` in einem zweiten
-            # Thread startete â€” toter Verteidigungscode, der obendrein den
-            # Eindruck machte, der Handler sei auf der Schleife aufrufbar. WÃ¤re
-            # er das, blockierte er sie fÃ¼r die volle Dauer des HTTP-Aufrufs;
-            # nebenlÃ¤ufig wird davon nichts, der Executor verdeckt nur den
+            # Thread startete — toter Verteidigungscode, der obendrein den
+            # Eindruck machte, der Handler sei auf der Schleife aufrufbar. Wäre
+            # er das, blockierte er sie für die volle Dauer des HTTP-Aufrufs;
+            # nebenläufig wird davon nichts, der Executor verdeckt nur den
             # Konstruktionsfehler. `asyncio.run` sagt in dem Fall selbst
             # deutlich, was los ist.
             cf_mods = asyncio.run(_do_cf_search())
@@ -2516,9 +2562,9 @@ def _execute_mod_tool(db: Session, *, server: Server, tool_name: str, arguments:
             # Vorher stand hier `str(exc)`: beliebiger Text aus einer beliebigen
             # Bibliothek, der als Grund an das Modell ging und dort mit
             # `curseforge_game_id_missing` in einer Reihe stand. Die Einzelheit
-            # gehÃ¶rt ins Log â€” und dort nur der Ausnahmetyp, wie es
-            # `curseforge_service` schon hÃ¤lt: eine Fehlermeldung kann den
-            # API-SchlÃ¼ssel tragen.
+            # gehört ins Log — und dort nur der Ausnahmetyp, wie es
+            # `curseforge_service` schon hält: eine Fehlermeldung kann den
+            # API-Schlüssel tragen.
             logger.warning(
                 "CurseForge-Suche im Werkzeug fehlgeschlagen: %s", type(exc).__name__
             )
@@ -2548,7 +2594,7 @@ def _execute_file_search(
 
     Der Anlass ist eine Datei von einem Megabyte: `read_config` zeigt ein
     Fenster von vierhundert Zeilen, die Datei hat dreizehntausend. Ohne Suche
-    muesste das Modell dreissigmal blaettern, um eine Einstellung zu finden â€”
+    muesste das Modell dreissigmal blaettern, um eine Einstellung zu finden —
     also blaettert es nicht, sondern raet oder gibt auf. Genau das war der
     Betriebsfall: die KI fand die Datei, sah den Anfang und erklaerte dem
     Benutzer, er muesse es von Hand tun.
@@ -2556,7 +2602,7 @@ def _execute_file_search(
     Gesucht wird mit `search_file_contents`, derselben Funktion, die auch der
     Dateimanager benutzt. Was hier dazukommt, ist genau das, was die KI von
     einem Menschen unterscheidet: die Rechtepruefung davor und die Redaktion
-    danach. Enger sind auch die Deckel â€” bei einem entfernten Server ist jede
+    danach. Enger sind auch die Deckel — bei einem entfernten Server ist jede
     gelesene Datei ein eigener Abruf, und jede Trefferzeile ist Text aus einer
     Quelle, der man nicht traut, im Kontext des Modells. Das erste kostet Zeit,
     das zweite Geld.
@@ -2641,10 +2687,10 @@ def execute_read_tool(
     geprueft.
 
     ``herkunft`` und ``familie`` sind die einzigen Ausnahmen davon, und sie
-    stehen ausdrÃ¼cklich **nicht** in den Argumenten: aus welcher Welt der
-    Aufruf kam und von welchem GerÃ¤t, sind Tatsachen des Laufs. Gebraucht
-    werden beide von genau einem Werkzeug â€” `worker_start` gibt sie an den
-    Auftrag weiter, den es anlegt. Die Herkunft Ã¶ffnet ihm die
+    stehen ausdrücklich **nicht** in den Argumenten: aus welcher Welt der
+    Aufruf kam und von welchem Gerät, sind Tatsachen des Laufs. Gebraucht
+    werden beide von genau einem Werkzeug — `worker_start` gibt sie an den
+    Auftrag weiter, den es anlegt. Die Herkunft öffnet ihm die
     Desktop-Werkzeuge, die Familie sagt, an welchen Rechner er sich damit
     wendet; ohne sie holt seinen Auftrag der, der zuerst fragt.
     """
@@ -2652,16 +2698,16 @@ def execute_read_tool(
         raise AiActionValidationError("Read-Tool ist in diesem Kontext nicht erlaubt")
 
     # Ein Cache-Hit kommt nur aus derselben Sprachsitzung. Die kleinen,
-    # werkzeugspezifischen VorprÃ¼fungen sind die zweite Schranke nach dem
+    # werkzeugspezifischen Vorprüfungen sind die zweite Schranke nach dem
     # Prefetch und verhindern, dass ein inzwischen entzogener Zugriff ein altes
-    # Ergebnis erhÃ¤lt.
+    # Ergebnis erhält.
     from services.ai_intent_classifier import prefetch_cache
     if prefetch_session_id and tool_name == "analyze_region":
         if not permission_service.has_global_permission(db, user, "ai.satellite.use"):
-            raise AiActionValidationError("Satelliten- und Regionsanalyse ist fÃ¼r diesen Benutzer nicht freigegeben")
+            raise AiActionValidationError("Satelliten- und Regionsanalyse ist für diesen Benutzer nicht freigegeben")
     elif prefetch_session_id and tool_name == "control_region_camera":
         if not permission_service.has_global_permission(db, user, "ai.satellite.use"):
-            raise AiActionValidationError("Kartensteuerung ist fÃ¼r diesen Benutzer nicht freigegeben")
+            raise AiActionValidationError("Kartensteuerung ist für diesen Benutzer nicht freigegeben")
     elif prefetch_session_id and tool_name == "web_search":
         if not permission_service.has_global_permission(db, user, "ai.web_search.use"):
             raise AiActionValidationError("Websuche ist fuer diesen Benutzer nicht freigegeben")
@@ -2680,7 +2726,7 @@ def execute_read_tool(
         session_id=prefetch_session_id, user_id=user.id, tool_name=tool_name, arguments=arguments,
     )
     if hit and cached_result is not None:
-        logger.info("Spekulativer Prefetch-Cache HIT fÃ¼r tool=%s user=%s", tool_name, user.id)
+        logger.info("Spekulativer Prefetch-Cache HIT für tool=%s user=%s", tool_name, user.id)
         return cached_result
 
     if tool_name in GLOBAL_READ_TOOLS:
@@ -2714,8 +2760,8 @@ def execute_read_tool(
             return {"server_id": server.id, "node_status": "unassigned"}
         # Die Zahlen der Node sind nicht die Zahlen dieses Servers.
         # `sum_allocated_ram_mb` filtert in `services/node_capacity.py` allein
-        # auf `node_id` â€” das ist die Summe der Buchungen **aller** Kunden auf
-        # diesem Host â€”, und cpu_total/ram_total/disk_* beschreiben die
+        # auf `node_id` — das ist die Summe der Buchungen **aller** Kunden auf
+        # diesem Host —, und cpu_total/ram_total/disk_* beschreiben die
         # Maschine des Betreibers. `_resolve_server` prueft nur `server.view`;
         # damit gab dieses Werkzeug jedem Hosting-Kunden die Ueberbuchungslage
         # seines Anbieters heraus, waehrend `read_node_capacity` dafuer
@@ -2723,7 +2769,7 @@ def execute_read_tool(
         #
         # Die Grenze ist dieselbe wie bei `describe_network`: wer die Grenzen
         # dieses Servers aendern darf, muss sehen, wieviel Platz dafuer da ist.
-        # Alle anderen bekommen den Status der Node und sonst nichts â€”
+        # Alle anderen bekommen den Status der Node und sonst nichts —
         # ausdruecklich als `withheld`, damit das Modell die Luecke kennt und
         # nicht ueber die Auslastung raet.
         if not permission_service.has_server_permission(
@@ -2759,7 +2805,7 @@ def execute_read_tool(
             raise AiActionValidationError("Log-Tool hat ungueltige Argumente")
         # Dasselbe Recht, das der Panel-Endpunkt verlangt (routers/servers.py:1172
         # und die Konsolen-WebSocket). `_resolve_server` prueft nur `server.view`
-        # â€” damit war die Konsole ueber den KI-Pfad fuer jeden lesbar, der den
+        # — damit war die Konsole ueber den KI-Pfad fuer jeden lesbar, der den
         # Server ueberhaupt sehen darf. Containerlogs sind kein Nebenprodukt:
         # dort stehen Spielerchat, Join-Zeilen mit IP-Adressen, Admin-Kommandos
         # und Stacktraces, und `redact_sensitive_text` entfernt davon nichts.
@@ -2832,12 +2878,12 @@ def execute_read_tool(
     if tool_name == "search_server_files":
         return _execute_file_search(db, user=user, server=server, arguments=arguments)
 
-    # Ab hier folgt `read_config` â€” und zwar bisher **ohne** dass sein Name
+    # Ab hier folgt `read_config` — und zwar bisher **ohne** dass sein Name
     # geprueft wurde. Jedes serverbezogene Lesewerkzeug, das keinen eigenen
     # Zweig hat, landete hier und wurde als Dateizugriff ausgefuehrt.
     #
     # Solange die Argumentpruefung darunter zuschlug, fiel das als
-    # "Datei-Lesewerkzeug hat ungueltige Argumente" auf â€” eine Fehlermeldung,
+    # "Datei-Lesewerkzeug hat ungueltige Argumente" auf — eine Fehlermeldung,
     # die den falschen Grund nennt. Ein kuenftiges Werkzeug mit einem
     # `path`-Argument haette sie aber passiert und dem Modell den Inhalt einer
     # Datei unter dem Namen des anderen Werkzeugs geliefert: richtiger Name,
@@ -2847,7 +2893,7 @@ def execute_read_tool(
     # `_werkzeug_bekannt` faengt beim Definieren ein Werkzeug ohne
     # Registry-Zeile. Diese Zeile hier faengt eines ohne Handler.
     if tool_name != "read_config":
-        raise AiActionValidationError(f"Kein Handler fÃ¼r Werkzeug: {tool_name}")
+        raise AiActionValidationError(f"Kein Handler für Werkzeug: {tool_name}")
 
     if set(arguments) - {"path", "offset", "limit"} or "path" not in arguments:
         raise AiActionValidationError("Datei-Lesewerkzeug hat ungueltige Argumente")
@@ -2869,7 +2915,7 @@ def execute_read_tool(
     _fn = getattr(_mod, "read_server_text", read_server_text) if _mod else read_server_text
     result = _fn(db, server_id=server.id, relative_path=path)
     content = str(result["content"])
-    # Seit die Endungsliste weg ist, kann hier auch eine Binaerdatei landen â€”
+    # Seit die Endungsliste weg ist, kann hier auch eine Binaerdatei landen —
     # ein Mod-Jar, ein Weltdatei-Chunk. `read_text` dekodiert mit
     # `errors="replace"`, aus einer solchen Datei wird also Ersatzzeichen-Salat.
     # Wuerde das Modell ihn zurueckschreiben, waere die Datei zerstoert.
@@ -2886,14 +2932,14 @@ def execute_read_tool(
     # Modell den ganzen Stand gesehen.
     vollstaendig = offset == 1 and len(fenster) == len(zeilen) and not zeichen_gekuerzt
 
-    # Zwei Fragen, die frueher eine waren â€” und dass sie eine waren, war der
+    # Zwei Fragen, die frueher eine waren — und dass sie eine waren, war der
     # Grund, warum eine grosse Spielkonfiguration fuer die KI nur lesbar war:
     #
-    # `editable`  â€” darf die Datei **ganz** ersetzt werden? Nur wenn das Modell
+    # `editable`  — darf die Datei **ganz** ersetzt werden? Nur wenn das Modell
     #               sie ganz und unveraendert gesehen hat. Sonst wuerde der
     #               Vollersatz alles hinter dem Fenster loeschen bzw. echte
     #               Zugangsdaten durch den Platzhalter ersetzen.
-    # `patchable` â€” darf **eine Stelle** darin ersetzt werden? Dafuer genuegt,
+    # `patchable` — darf **eine Stelle** darin ersetzt werden? Dafuer genuegt,
     #               dass es Text ist. Wer eine Stelle austauscht, laesst den
     #               Rest Byte fuer Byte stehen; was er nie gesehen hat, kann er
     #               auch nicht zerstoeren.
@@ -2910,7 +2956,7 @@ def execute_read_tool(
         if binaer
         else "Diese Datei wurde gekuerzt oder redigiert gelesen und kann "
         "deshalb nicht als Ganzes ersetzt werden. Aendere sie mit "
-        "propose_config_patch â€” dabei bleibt alles Ungesehene unberuehrt."
+        "propose_config_patch — dabei bleibt alles Ungesehene unberuehrt."
     )
     return {
         "path": path,
@@ -2919,7 +2965,7 @@ def execute_read_tool(
         # Tokens und sagt dem Modell nichts, was es nicht schon aus `binary`
         # weiss.
         "content": "" if binaer else sicht,
-        # Wo das Fenster liegt und wie gross die Datei ist â€” ohne diese beiden
+        # Wo das Fenster liegt und wie gross die Datei ist — ohne diese beiden
         # Zahlen kann das Modell nicht weiterblaettern und weiss auch nicht, ob
         # es noch etwas zu blaettern gibt.
         "offset": offset,

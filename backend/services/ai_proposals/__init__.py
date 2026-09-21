@@ -124,10 +124,10 @@ from services.ai_proposals.network_proposals import (
 )
 from services.ai_proposals.task_proposals import (
     _AUFGABEN_FELDER,
-    _popup_create_payload,
+    _popup_set_payload,
     _task_set_payload,
     _task_delete_payload,
-    _ausfuehren_popup_create,
+    _ausfuehren_popup_set,
     _ausfuehren_task_set,
     _ausfuehren_task_delete,
     _ausfuehren_read_tool,
