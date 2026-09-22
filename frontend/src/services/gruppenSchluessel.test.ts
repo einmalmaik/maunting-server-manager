@@ -681,3 +681,107 @@ describe('gruppenSchluessel', () => {
     expect(await alice.ablage.lies(GRUPPE, keyId)).not.toBeNull()
   })
 })
+
+/**
+ * Die echte Ablage — eine Datenbank je Konto.
+ *
+ * Die Tests oben spritzen eine Attrappe ein und berühren `oeffneDatenbank`
+ * nie. Genau deshalb fiel jahrelang nicht auf, dass `msm_e2ee_gruppen` als
+ * einzige der vier E2EE-Ablagen an gar nichts hing: der Geräteschlüssel liegt
+ * unter `konto:<id>`, der Ratchet unter einer Kennung mit dem eigenen Gerät —
+ * die Gruppenschlüssel unter nichts. Zwei Konten in einem Browserprofil
+ * teilten sie sich.
+ */
+describe('Schlüsselablage je Konto', () => {
+  const geoeffnet: string[] = []
+  const geloescht: string[] = []
+
+  function installiereIndexedDb() {
+    geoeffnet.length = 0
+    geloescht.length = 0
+    const db: any = {
+      close: () => {},
+      objectStoreNames: { contains: () => true },
+      createObjectStore: () => ({ createIndex: () => {} }),
+      transaction: () => {
+        const tx: any = {
+          objectStore: () => ({
+            delete: () => {
+              const r: any = { onsuccess: null, onerror: null }
+              queueMicrotask(() => r.onsuccess?.())
+              return r
+            },
+            get: () => {
+              const r: any = { onsuccess: null, onerror: null, result: null }
+              queueMicrotask(() => r.onsuccess?.())
+              return r
+            },
+            put: () => {
+              const r: any = { onsuccess: null, onerror: null }
+              queueMicrotask(() => r.onsuccess?.())
+              return r
+            },
+          }),
+          oncomplete: null,
+          onerror: null,
+        }
+        // `loescheGruppe` wartet auf den Abschluss der Transaktion. Ohne
+        // dieses Signal liefe der Test in die Zeitgrenze statt in eine
+        // Aussage.
+        queueMicrotask(() => tx.oncomplete?.())
+        return tx
+      },
+    }
+    ;(globalThis as any).IDBKeyRange = {
+      bound: (lower: any, upper: any) => ({ lower, upper }),
+      only: (v: any) => v,
+    }
+    ;(globalThis as any).indexedDB = {
+      open: (name: string) => {
+        geoeffnet.push(name)
+        const req: any = { onsuccess: null, onerror: null, onupgradeneeded: null, onblocked: null, result: db }
+        queueMicrotask(() => {
+          req.onupgradeneeded?.()
+          req.onsuccess?.()
+        })
+        return req
+      },
+      deleteDatabase: (name: string) => {
+        geloescht.push(name)
+        const r: any = { onsuccess: null, onerror: null }
+        queueMicrotask(() => r.onsuccess?.())
+        return r
+      },
+    }
+  }
+
+  beforeEach(() => {
+    // Die echte Ablage zurückholen — die Attrappe der anderen Tests ginge
+    // sonst an `oeffneDatenbank` vorbei, und dieser Test prüfte nichts.
+    setzeGruppenAblageFuerTest(null)
+    installiereIndexedDb()
+  })
+
+  it('öffnet für jedes Konto eine eigene Datenbank und nie die alte', async () => {
+    const { setzeAngemeldetesKonto } = await import('@/lib/angemeldetesKonto')
+
+    setzeAngemeldetesKonto(1)
+    await verwirfGruppenSchluessel(GRUPPE)
+    setzeAngemeldetesKonto(7)
+    await verwirfGruppenSchluessel(GRUPPE)
+
+    expect(geoeffnet).toEqual(['msm_e2ee_gruppen:konto:1', 'msm_e2ee_gruppen:konto:7'])
+    expect(geloescht).toContain('msm_e2ee_gruppen')
+    setzeAngemeldetesKonto(null)
+  })
+
+  it('gibt ohne angemeldetes Konto keine Schlüsselablage her', async () => {
+    const { setzeAngemeldetesKonto } = await import('@/lib/angemeldetesKonto')
+    setzeAngemeldetesKonto(null)
+
+    // `verwirfGruppenSchluessel` schluckt Fehler nicht — ohne Konto muss der
+    // Versuch scheitern, statt auf eine gemeinsame Ablage auszuweichen.
+    await expect(verwirfGruppenSchluessel(GRUPPE)).rejects.toThrow()
+    expect(geoeffnet).toEqual([])
+  })
+})

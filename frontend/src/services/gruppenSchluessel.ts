@@ -52,6 +52,20 @@
  * stand nichts mehr ausser „Verschlüsselte Nachricht". Gemerkt wird je
  * fragendem Gerät und fehlender Schlüsselkennung — fragt dasselbe Gerät später
  * nach einer anderen Kennung, bekommt es wieder eine Antwort.
+ *
+ * **Eine Ablage je Konto, seit 09/2026.** Sie hiess schlicht
+ * `msm_e2ee_gruppen` und war damit die einzige der vier E2EE-Ablagen ohne
+ * Bindung an einen Menschen: der Geräteschlüssel liegt unter `konto:<id>`, der
+ * Ratchet unter einer Sitzungskennung mit dem eigenen Gerät darin — die
+ * Gruppenschlüssel unter gar nichts. Wer sich auf demselben Rechner
+ * nacheinander mit zwei Konten anmeldete, hinterliess dem zweiten die
+ * Gruppenschlüssel des ersten.
+ *
+ * Übernommen wird nichts: ein Schlüssel trägt kein Konto, und ihn dem
+ * zuzuschlagen, das nach dem Umstieg zufällig als erstes den Messenger
+ * öffnet, wäre genau das Leck. Der Preis ist hier gering und vorgesehen —
+ * ein Gerät ohne passenden Schlüssel fragt nach, und der eigene Verlauf liegt
+ * ohnehin entschlüsselt in der kontogebundenen Nachrichtenablage.
  */
 
 import { decryptString, encryptString, importAesGcmRawKey } from '@msdis/shield/aead'
@@ -60,6 +74,7 @@ import { sha256Hex } from '@msdis/shield/integrity'
 import { randomBytes } from '@msdis/shield/random'
 
 import { getGroupMembers, relayE2eeEnvelope } from '@/api/social'
+import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
 import i18n from '@/i18n'
 
 import { encryptE2eeHybrid } from './e2eeCrypto'
@@ -153,19 +168,57 @@ export interface GruppenAblage {
   merkeAnfrage(groupId: number, kennung: string): Promise<void>
 }
 
-const DB_NAME = 'msm_e2ee_gruppen'
+const DB_PRAEFIX = 'msm_e2ee_gruppen'
 /** Version 2: `beantwortet` kommt hinzu. */
 const DB_VERSION = 2
 const STORE_KEYS = 'keys'
 const STORE_AKTUELL = 'aktuell'
 const STORE_ANFRAGEN = 'beantwortet'
 
+/** Die Ablage dieses Kontos. Ein anderes Konto, eine andere Datenbank. */
+function dbName(kontoId: number): string {
+  return `${DB_PRAEFIX}:konto:${kontoId}`
+}
+
+let offeneDb: Promise<IDBDatabase> | null = null
+let offenesKonto: number | null = null
+let altbestandGeraeumt = false
+
+/**
+ * Entfernt die alte, kontolose Datenbank — einmal je Browsersitzung.
+ *
+ * Ohne Übernahme, aus demselben Grund wie beim Nachrichtenverlauf: ein
+ * abgelegter Gruppenschlüssel sagt nicht, wem er gehört.
+ */
+function raeumeAltbestand(): void {
+  if (altbestandGeraeumt) return
+  altbestandGeraeumt = true
+  try {
+    indexedDB.deleteDatabase(DB_PRAEFIX)
+  } catch {
+    // Blockiert durch einen anderen Tab. Der nächste Start holt es nach.
+  }
+}
+
 function oeffneDatenbank(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
+  const konto = angemeldetesKonto()
+  if (konto === null) {
+    // Ohne Konto keine Schlüsselablage. Nicht „ersatzweise die gemeinsame".
+    return Promise.reject(new Error(i18n.t('chat.errors.indexedDbUnavailable')))
+  }
+  if (offeneDb && offenesKonto !== konto) {
+    const alt = offeneDb
+    offeneDb = null
+    void alt.then((db) => db.close()).catch(() => {})
+  }
+  if (offeneDb) return offeneDb
+  offenesKonto = konto
+  offeneDb = new Promise<IDBDatabase>((resolve, reject) => {
     if (typeof indexedDB === 'undefined') {
       return reject(new Error(i18n.t('chat.errors.indexedDbUnavailable')))
     }
-    const req = indexedDB.open(DB_NAME, DB_VERSION)
+    raeumeAltbestand()
+    const req = indexedDB.open(dbName(konto), DB_VERSION)
     req.onupgradeneeded = () => {
       const db = req.result
       if (!db.objectStoreNames.contains(STORE_KEYS)) {
@@ -182,16 +235,36 @@ function oeffneDatenbank(): Promise<IDBDatabase> {
       // Ein zweiter Tab kann jederzeit eine neuere Version aufziehen. Ohne
       // diesen Abgang liefen laufende Zugriffe danach gegen eine Verbindung,
       // die der Browser nur noch mit Fehlern beantwortet.
-      req.result.onversionchange = () => req.result.close()
+      //
+      // Seit die Verbindung gemerkt wird, muss der Abgang sie auch aus dem
+      // Gedächtnis nehmen: vorher öffnete jeder Aufruf eine neue und heilte
+      // sich dadurch von selbst.
+      req.result.onversionchange = () => {
+        offeneDb = null
+        offenesKonto = null
+        req.result.close()
+      }
+      req.result.onclose = () => {
+        offeneDb = null
+        offenesKonto = null
+      }
       resolve(req.result)
     }
-    req.onerror = () => reject(req.error)
+    req.onerror = () => {
+      offeneDb = null
+      offenesKonto = null
+      reject(req.error)
+    }
     // Ein älterer Tab hält die Vorgängerversion offen. Ohne diesen Zweig
     // meldet der Browser weder Erfolg noch Fehler, und das Öffnen hinge
     // stillschweigend, bis der andere Tab zugeht.
-    req.onblocked = () =>
+    req.onblocked = () => {
+      offeneDb = null
+      offenesKonto = null
       reject(new Error(i18n.t('chat.errors.groupDbBlocked')))
+    }
   })
+  return offeneDb
 }
 
 function hole<T>(store: string, key: IDBValidKey): Promise<T | null> {
