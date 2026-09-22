@@ -45,6 +45,8 @@ import {
   verschluesseleFuerGruppe,
   type GruppenKontext,
 } from '@/services/gruppenSchluessel'
+import { abonniereMailbox } from '@/services/mailboxAbo'
+import { mailboxNachweis } from '@/services/mailboxNachweis'
 import {
   ladeUmschlagKlartexte,
   leseUmschlagKlartext,
@@ -284,6 +286,19 @@ export function useKonversation({
   /** Woran ein laufender Abruf merkt, dass er zu spät kommt. */
   const aktuelleMailbox = useRef('')
   aktuelleMailbox.current = blindMailboxId
+
+  // Dem Echtzeitstrom sagen, dass diese Mailbox uns angeht. Ein offenes
+  // Gespräch ist der Fall, in dem eine verspätete Nachricht am meisten
+  // auffällt — und für eine Kennung, die der Server nicht ausrechnen kann,
+  // ist das Abo der einzige Weg, überhaupt davon zu erfahren.
+  //
+  // Nicht wieder gekündigt beim Schliessen: wer ein Gespräch zumacht, will
+  // trotzdem wissen, wenn dort etwas ankommt. Gekündigt wird beim Verlassen
+  // einer Gruppe und beim Abmelden.
+  useEffect(() => {
+    if (!blindMailboxId) return
+    abonniereMailbox(blindMailboxId, mailboxNachweis(blindMailboxId))
+  }, [blindMailboxId])
 
   const gruppenKontext = useMemo<GruppenKontext | null>(() => {
     if (ziel.art !== 'gruppe' || !eigeneId || !blindMailboxId) return null

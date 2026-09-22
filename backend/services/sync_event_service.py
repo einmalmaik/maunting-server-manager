@@ -23,8 +23,18 @@ def _iso_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+#: Wie viele Mailboxen ein Client höchstens abonnieren darf.
+#:
+#: Ein Mensch hat Gespräche, keine Sammlung — 200 ist grosszügig und zugleich
+#: die Grenze, ab der ein Abo nur noch Speicher belegt.
+MAX_MAILBOXES = 200
+
+
 class _Subscriber:
-    __slots__ = ("conn_id", "user_id", "team_ids", "is_admin", "queue", "loop", "created_at")
+    __slots__ = (
+        "conn_id", "user_id", "team_ids", "is_admin", "queue", "loop", "created_at",
+        "mailboxes",
+    )
 
     def __init__(
         self,
@@ -42,6 +52,17 @@ class _Subscriber:
         self.queue = queue
         self.loop = loop
         self.created_at = _iso_now()
+        #: Die Mailboxen, über die dieser Client Bescheid wissen will.
+        #:
+        #: Der Weg für Mailboxen, die der Server nicht ausrechnen kann. Bis
+        #: 09/2026 ging jede Zustellung über `user_id`, und das setzte voraus,
+        #: dass der Server aus der Mailbox den Empfänger ableiten kann — also
+        #: genau das Wissen, das ihm genommen werden soll.
+        #:
+        #: Was hier steht, ist bereits geprüft: der WebSocket lässt eine
+        #: Kennung nur herein, wenn das Konto zur Mailbox gehört **oder** ein
+        #: gültiger Besitznachweis vorlag. Diese Klasse prüft nicht nach.
+        self.mailboxes: set[str] = set()
 
 
 class SyncEventService:
@@ -81,6 +102,41 @@ class SyncEventService:
         if conn_id in cls._subscribers:
             cls._subscribers.pop(conn_id, None)
             _log.debug("SSE-Client getrennt: %s", conn_id)
+
+    @classmethod
+    def set_mailboxes(
+        cls, conn_id: str, mailboxes: set[str] | list[str], *, user_id: int
+    ) -> int:
+        """Setzt die Mailboxen, über die dieser Client Bescheid wissen will.
+
+        Ersetzt die bisherige Liste vollständig — der Client sagt jedesmal, was
+        ihn **jetzt** interessiert. Das ist wichtiger als es klingt: eine
+        verlassene Gruppe muss sich abbestellen lassen, und ein Anhängen ohne
+        Abbestellen wüchse bis zum Deckel.
+
+        Ob die Kennungen selbst erlaubt sind, ist an dieser Stelle schon
+        geprüft (siehe `_Subscriber.mailboxes`). Was **hier** geprüft wird, ist
+        etwas anderes: dass die Verbindung dem Konto gehört, das sie ändern
+        will. Die `conn_id` steht im `ready`-Signal und reist damit durch den
+        Browser; ohne diese Zeile könnte ein fremdes Konto die Abos einer
+        anderen Verbindung setzen — und sich so in deren Mailboxen einhängen.
+
+        `user_id` ist ein Pflichtargument und benannt, damit es beim Aufruf
+        sichtbar ist und nicht versehentlich an die Kennungsliste rutscht.
+
+        Gibt zurück, wie viele Kennungen jetzt hinterlegt sind.
+        """
+        sub = cls._subscribers.get(conn_id)
+        if sub is None or sub.user_id != user_id:
+            return 0
+        sauber = {m.strip().lower() for m in mailboxes if isinstance(m, str) and m.strip()}
+        # Sortiert gekappt, nicht zufällig: ein Client, der über dem Deckel
+        # liegt, soll bei jeder Verbindung dieselben Mailboxen bekommen und
+        # nicht mal die einen, mal die anderen.
+        if len(sauber) > MAX_MAILBOXES:
+            sauber = set(sorted(sauber)[:MAX_MAILBOXES])
+        sub.mailboxes = sauber
+        return len(sauber)
 
     @classmethod
     def close_all(cls) -> None:
@@ -123,12 +179,22 @@ class SyncEventService:
         *,
         user_id: int | None = None,
         team_id: int | None = None,
+        mailbox_id: str | None = None,
         exclude_conn_id: str | None = None,
     ) -> int:
         """Verteilt ein Ereignis an alle berechtigten aktiven Abonnenten.
 
+        Drei Wege zu einem Empfänger, und sie schliessen einander nicht aus:
+        sein Konto, eines seiner Teams, oder eine Mailbox, die er abonniert
+        hat. Der dritte ist der, der ohne Kontobezug auskommt — für Mailboxen,
+        deren Kennung der Server nicht ausrechnen kann.
+
+        Ein Aufruf mit **allen** Angaben nichts ist dasselbe wie ein
+        systemweites Signal; das war schon so und bleibt so.
+
         Gibt die Anzahl der erreichten Empfänger zurück.
         """
+        ziel_mailbox = mailbox_id.strip().lower() if mailbox_id else None
         payload = dict(event_data)
         if "timestamp" not in payload:
             payload["timestamp"] = _iso_now()
@@ -145,7 +211,9 @@ class SyncEventService:
                 is_recipient = True
             elif team_id is not None and team_id in sub.team_ids:
                 is_recipient = True
-            elif user_id is None and team_id is None:
+            elif ziel_mailbox is not None and ziel_mailbox in sub.mailboxes:
+                is_recipient = True
+            elif user_id is None and team_id is None and ziel_mailbox is None:
                 # Systemweites Signal
                 is_recipient = True
 

@@ -14,6 +14,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { api, apiStream } from '@/api/client'
 import { nachweisKopf } from '@/services/mailboxNachweis'
+import { merkeStromKennung, vergissStromKennung } from '@/services/mailboxAbo'
 import type { NoteItem } from '@/pages/Notes'
 import type { CalendarEventItem } from '@/pages/Calendar'
 import { useAuthStore } from '@/stores/authStore'
@@ -1271,6 +1272,14 @@ export function startLiveSync(): () => void {
             const dataStr = trimmed.slice(5).trim()
             try {
               const data = JSON.parse(dataStr) as SyncEventPayload
+              if (currentEvent === 'ready') {
+                // Der Rückweg eines Stroms, der nur in eine Richtung spricht:
+                // mit dieser Kennung meldet der Client an, welche Mailboxen
+                // ihn angehen. Nötig für Kennungen, die der Server nicht
+                // ausrechnen kann — dort gibt es keinen Empfänger
+                // nachzuschlagen.
+                merkeStromKennung((data as { conn_id?: string }).conn_id ?? null)
+              }
               handleIncomingSyncEvent(currentEvent, data)
             } catch {
               // Non-JSON or keepalive
@@ -1286,6 +1295,10 @@ export function startLiveSync(): () => void {
         stableTimer = null
       }
       isLiveConnected = false
+      // Die Kennung gehoert zu diesem Strom und stirbt mit ihm. Ohne das
+      // meldete der Client nach dem Neuverbinden an eine Verbindung, die es
+      // nicht mehr gibt — und bliebe stumm.
+      vergissStromKennung()
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('msm:sync-status', { detail: { connected: false } }))
       }

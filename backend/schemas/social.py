@@ -408,6 +408,31 @@ class E2eeMailboxRegister(BaseModel):
         return klein
 
 
+class MailboxAbo(BaseModel):
+    """Eine Mailbox, über die ein Stream Bescheid geben soll.
+
+    Das Token ist freiwillig: für eine Mailbox, die der Server selbst
+    ausrechnen kann, genügt die Mitgliedschaft. Für eine, die er nicht kennt,
+    ist es die einzige Eintrittskarte.
+    """
+
+    mailbox_id: str = Field(..., min_length=16, max_length=64)
+    mailbox_token: str | None = Field(default=None, min_length=64, max_length=64)
+
+
+class StreamMailboxAbos(BaseModel):
+    """Was ein laufender Stream ab jetzt hören will.
+
+    Die Liste ersetzt die bisherige vollständig — eine verlassene Gruppe muss
+    sich abbestellen lassen. Der Deckel steht bewusst im Schema und nicht erst
+    im Dienst: eine Anfrage mit 100.000 Einträgen soll gar nicht erst
+    ankommen.
+    """
+
+    conn_id: str = Field(..., min_length=4, max_length=64)
+    eintraege: list[MailboxAbo] = Field(default_factory=list, max_length=200)
+
+
 class E2eeMailboxSyncItem(BaseModel):
     blind_mailbox_id: str
     max_envelope_id: int

@@ -12,6 +12,7 @@ import { useVaultStore } from '@/desktop/vault/vaultStore'
 import { clearMemoryKeyStore } from '@/services/e2eeCrypto'
 import { clearGeraeteMemory } from '@/services/e2eeGeraet'
 import { leereGeraeteStand } from '@/services/gruppenSchluessel'
+import { leereMailboxAbos } from '@/services/mailboxAbo'
 import { leereMailboxNachweise } from '@/services/mailboxNachweis'
 import { kuendige } from '@/services/pushAbo'
 import type { User } from '@/types'
@@ -141,6 +142,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // hiesse, dem naechsten Menschen an diesem Geraet fertige Nachweise zu
     // hinterlassen.
     leereMailboxNachweise()
+    // Und die Abos: was der Strom melden soll, gehoert dem angemeldeten Konto.
+    leereMailboxAbos()
     // Und der Lesestand der eigenen Geräte-Mailbox. Er ist je Konto getrennt,
     // aber stehenzulassen hiesse, dem nächsten Konto in diesem Tab zu
     // verschweigen, was vor seiner Anmeldung dort ankam.

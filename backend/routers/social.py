@@ -51,7 +51,7 @@ from services.achievement_service import AchievementService
 from services.chat_media_service import ChatMediaService
 from services.chat_media_validator import sanitize_attachment_filename
 from services.social_service import SocialService
-from services.sync_event_service import SyncEventService
+from services.sync_event_service import MAX_MAILBOXES, SyncEventService
 from services.call_room_service import GroupCallRoomRegistry
 from services import bild_upload, e2ee_device_service, livekit_service, webpush_service
 
@@ -431,6 +431,7 @@ def relay_e2ee_message(
         client_uuid=req.client_uuid,
         is_control=req.is_control,
         control_type=req.control_type,
+        mailbox_token=nachweis,
     )
 
     return {
@@ -1131,6 +1132,49 @@ async def social_websocket(
                         await websocket.send_json({"type": "joined", "status": "ok", "user_id": user_id})
                 except Exception as exc:
                     logger.debug("Fehler bei broadcast_user_joined: %s", exc)
+            elif msg_type == "mailboxes":
+                # Der Client sagt, über welche Mailboxen er Bescheid wissen
+                # will. Der Weg für Kennungen, die der Server nicht ausrechnen
+                # kann — bei ihnen gibt es keinen Empfänger nachzuschlagen.
+                #
+                # Jede Kennung wird einzeln geprüft, und es gibt genau zwei
+                # Arten hineinzukommen: das Konto gehört zur Mailbox (der
+                # Bestand), oder es legt den Besitznachweis vor (das Neue).
+                # Ohne diese Prüfung wäre das Abo eine Verkehrsanalyse für
+                # jedermann: abonnieren und zusehen, wann es sich regt.
+                eintraege = data.get("eintraege")
+                erlaubt: list[str] = []
+                if isinstance(eintraege, list):
+                    try:
+                        with SessionLocal() as db:
+                            for eintrag in eintraege[:MAX_MAILBOXES]:
+                                if not isinstance(eintrag, dict):
+                                    continue
+                                mid = str(eintrag.get("mailbox_id") or "").strip()
+                                if not mid:
+                                    continue
+                                token = eintrag.get("mailbox_token")
+                                if SocialService.hat_gueltigen_nachweis(db, mid, token):
+                                    erlaubt.append(mid)
+                                    continue
+                                try:
+                                    SocialService.assert_mailbox_participant(db, user_id, mid)
+                                except HTTPException:
+                                    continue
+                                # Eine Mailbox mit hinterlegtem Nachweis öffnet
+                                # sich nicht allein durch Mitgliedschaft —
+                                # sonst wäre das Abo die Hintertür neben der
+                                # verschlossenen Vordertür.
+                                try:
+                                    SocialService.assert_mailbox_token(db, mid, token)
+                                except HTTPException:
+                                    continue
+                                erlaubt.append(mid)
+                    except Exception as exc:
+                        logger.debug("Fehler beim Setzen der Mailbox-Abos: %s", exc)
+                anzahl = SyncEventService.set_mailboxes(conn_id, erlaubt, user_id=user_id)
+                async with ws_lock:
+                    await websocket.send_json({"type": "mailboxes_ok", "count": anzahl})
             elif msg_type == "presence":
                 try:
                     with SessionLocal() as db:
@@ -1180,6 +1224,7 @@ async def social_websocket(
                             client_uuid=client_uuid,
                             is_control=is_control,
                             control_type=control_type,
+                            mailbox_token=data.get("mailbox_token"),
                         )
                     # Sofortige Bestätigung an den WebSocket-Sender (Acknowledge zur Queue-Bereinigung)
                     async with ws_lock:

@@ -84,6 +84,7 @@ import {
   encryptE2eeHybrid,
 } from './e2eeCrypto'
 import { eigenesGeraet, geraeteVon } from './e2eeGeraet'
+import { abonniereMailbox } from './mailboxAbo'
 import { merkeMailboxNachweis } from './mailboxNachweis'
 import { entsiegleZeile, versiegleZeile } from './lokaleVersiegelung'
 import { istSchluesselhalter } from './raumSchluessel'
@@ -591,7 +592,13 @@ export async function nachweisAusGeheimnis(geheimnis: string): Promise<string> {
  * jederzeit daraus nachrechnen.
  */
 async function sichereBesitznachweis(kontext: GruppenKontext, geheimnis: string): Promise<void> {
-  merkeMailboxNachweis(kontext.blindMailboxId, await nachweisAusGeheimnis(geheimnis))
+  const token = await nachweisAusGeheimnis(geheimnis)
+  merkeMailboxNachweis(kontext.blindMailboxId, token)
+  // Und dem Echtzeitstrom sagen, dass diese Mailbox uns angeht. Für die
+  // heutige, ableitbare Kennung ändert das nichts — der Server findet den
+  // Empfänger noch selbst. Für die Kennung aus dem Geheimnis ist es der
+  // einzige Weg, überhaupt etwas zu erfahren.
+  abonniereMailbox(kontext.blindMailboxId, token)
 }
 
 /**
@@ -937,7 +944,9 @@ async function nimmSchluessel(
         geheimnis,
         erzeugtAm: new Date().toISOString(),
       })
-      merkeMailboxNachweis(kontext.blindMailboxId, await nachweisAusGeheimnis(geheimnis))
+      const token = await nachweisAusGeheimnis(geheimnis)
+      merkeMailboxNachweis(kontext.blindMailboxId, token)
+      abonniereMailbox(kontext.blindMailboxId, token)
     } catch {
       // Ein Geheimnis, das sich nicht ablegen lässt, darf den Schlüssel nicht
       // aufhalten: ohne den wäre die Nachricht unlesbar, ohne jenes nur die

@@ -1260,6 +1260,7 @@ class SocialService:
         client_uuid: str | None = None,
         is_control: bool = False,
         control_type: str | None = None,
+        mailbox_token: str | None = None,
     ) -> E2eeBlindEnvelope:
 
         """Speichert einen blinden E2EE-Umschlag mit serverseitiger Berechtigungsprüfung.
@@ -1280,6 +1281,10 @@ class SocialService:
 
         target_recipient_id: int | None = None
         group_member_ids: list[int] = []
+        #: Eine Mailbox, die der Server nicht kennt, und die nur der Nachweis
+        #: geöffnet hat. Die Zustellung läuft dann über das Abo, nicht über
+        #: Konten — der Server weiss schlicht nicht, wer gemeint ist.
+        nur_ueber_nachweis = False
 
         if sender_user_id:
             target_recipient_id, group_member_ids, _, _ = cls.resolve_mailbox_target(
@@ -1290,7 +1295,22 @@ class SocialService:
                 is_control=is_control,
             )
             if target_recipient_id is None and not group_member_ids:
-                raise HTTPException(status_code=403, detail="Keine Berechtigung für diese Mailbox.")
+                # Kein kontogebundenes Ziel. Früher war das immer ein 403, und
+                # das musste es auch sein: jede Mailbox war aus kleinen
+                # Ganzzahlen nachrechenbar, eine unbekannte Kennung also
+                # entweder ein Tippfehler oder ein Versuch.
+                #
+                # Seit die Kennung aus einem Gruppengeheimnis fallen kann, gibt
+                # es einen dritten Fall — eine Mailbox, die *niemand* ausrechnen
+                # kann, auch der Server nicht. Dort ist der Besitznachweis keine
+                # zusätzliche Schranke mehr, sondern die einzige Berechtigung,
+                # die es überhaupt gibt. Deshalb zählt hier der strenge
+                # `hat_gueltigen_nachweis` und nicht das nachsichtige
+                # `assert_mailbox_token`: ohne hinterlegten Nachweis bleibt es
+                # beim 403.
+                if not cls.hat_gueltigen_nachweis(db, clean_mailbox, mailbox_token):
+                    raise HTTPException(status_code=403, detail="Keine Berechtigung für diese Mailbox.")
+                nur_ueber_nachweis = True
 
         # Idempotenz-Prüfung: Erst NACH erfolgreicher Autorisierung prüfen,
         # ob dieser Umschlag bereits mit dieser client_uuid existiert.
@@ -1429,7 +1449,24 @@ class SocialService:
                     if nutzlast:
                         webpush_service.sende_an_konto(db, g_uid, nutzlast)
         else:
-            SyncEventService.publish(msg_payload)
+            # Kein kontogebundenes Ziel — die Mailbox **ist** die Adresse.
+            #
+            # Hier stand bis 09/2026 ein `publish(msg_payload)` ohne jede
+            # Angabe, und das ist systemweit: jeder verbundene Client erfuhr,
+            # dass in dieser Mailbox etwas liegt, samt Kennung und laufender
+            # Nummer. Erreichbar war der Zweig nur ohne `sender_user_id`, also
+            # selten — aber ausgerechnet in einem Messenger, der niemandem
+            # verraten soll, wer wann mit wem spricht, war das die falsche
+            # Voreinstellung.
+            #
+            # Zugestellt wird jetzt an die Abonnenten dieser Mailbox. Wer sie
+            # nicht abonniert hat, erfährt nichts — und abonnieren darf nur,
+            # wer teilnimmt oder den Besitznachweis hat.
+            #
+            # Was hier (noch) fehlt: Push bei geschlossenem Tab. Die
+            # Zustelladressen hängen am Konto, und genau das aufzulösen ist der
+            # nächste Schritt.
+            SyncEventService.publish(msg_payload, mailbox_id=clean_mailbox)
 
         return envelope
 
@@ -1607,6 +1644,30 @@ class SocialService:
             raise HTTPException(status_code=403, detail="Kein gültiger Besitznachweis für diese Mailbox.")
 
     @classmethod
+    def hat_gueltigen_nachweis(
+        cls, db: Session, mailbox_id: str, auth_token: str | None
+    ) -> bool:
+        """Liegt für diese Mailbox ein Nachweis vor, und stimmt das Token?
+
+        Der Unterschied zu `assert_mailbox_token` ist der Fall „kein Nachweis
+        hinterlegt": dort ist er ein stilles Ja (der Bestand läuft weiter),
+        hier ein klares Nein. Denn wer hiermit fragt, will keine Schranke
+        prüfen — er will wissen, ob der Nachweis eine **Eintrittskarte** ist.
+
+        Gebraucht wird das für Mailboxen, die der Server nicht ausrechnen
+        kann: dort gibt es keine Mitgliedschaft nachzuschlagen, und dann ist
+        der Nachweis die einzige Berechtigung, die es überhaupt gibt. Ein
+        stilles Ja wäre dort ein offenes Tor für jede erfundene Kennung.
+        """
+        clean = (mailbox_id or "").strip().lower()
+        if not clean or not auth_token:
+            return False
+        eintrag = db.get(E2eeBlindMailbox, clean)
+        if eintrag is None:
+            return False
+        return secrets.compare_digest(eintrag.auth_verifier, cls._verifier_von(auth_token))
+
+    @classmethod
     def delete_blind_envelopes(
         cls, db: Session, blind_mailbox_id: str, client_uuid: str, user_id: int
     ) -> int:
@@ -1769,6 +1830,28 @@ class SocialService:
         return results
 
     @classmethod
+    def _kennung_passt_zum_empfaenger(
+        cls, sender_id: int, empfaenger_id: int, clean_mailbox: str
+    ) -> bool:
+        """Gehört diese Mailbox-Kennung zum Gespräch dieser beiden?
+
+        Beide Ableitungen zählen, die heutige und die alte — ein Gespräch, das
+        vor dem Wechsel begonnen hat, liegt noch unter der alten Kennung.
+
+        Rechnet nur, legt nichts an. Das ist der Unterschied zu
+        `resolve_mailbox_target`, das im Empfängerzweig `ensure_direct_chat`
+        ruft: ein Tippsignal darf keinen Chat entstehen lassen, sonst
+        schriebe ein flüchtiges Signal eine Zeile in `direct_chats` — und
+        genau die soll dort möglichst selten stehen.
+        """
+        if sender_id == empfaenger_id:
+            return False
+        return clean_mailbox in {
+            cls.derive_blind_mailbox_id(sender_id, empfaenger_id),
+            cls.derive_legacy_direct_mailbox_id(sender_id, empfaenger_id),
+        }
+
+    @classmethod
     def broadcast_typing_signal(
         cls,
         blind_mailbox_id: str,
@@ -1784,6 +1867,22 @@ class SocialService:
         target_recipient_id: int | None = recipient_id
         group_member_ids: list[int] = []
         if db:
+            if target_recipient_id and not cls._kennung_passt_zum_empfaenger(
+                sender_id, target_recipient_id, clean_mailbox
+            ):
+                # Der Absender nennt einen Empfänger, der nicht zu dieser
+                # Mailbox gehört. Bis 09/2026 war das der ganze Weg: ein
+                # genanntes `recipient_id` sprang an der Mailbox-Auflösung
+                # vorbei, und die einzige verbleibende Prüfung war die
+                # Blockierung. Jedes angemeldete Konto konnte damit jedem
+                # anderen „tippt gerade" schicken, mit einer frei erfundenen
+                # Kennung.
+                #
+                # Verworfen, nicht abgewiesen: die Mailbox entscheidet gleich
+                # selbst, wer das Signal bekommt. Ein Fehler wäre hier zu
+                # streng — Altclients schicken das Feld auch dort mit, wo es
+                # nicht hingehört.
+                target_recipient_id = None
             if not target_recipient_id:
                 try:
                     resolved_target, all_members, _, _ = cls.resolve_mailbox_target(
@@ -1815,7 +1914,19 @@ class SocialService:
             for g_uid in group_member_ids:
                 SyncEventService.publish(payload, user_id=g_uid)
         else:
-            SyncEventService.publish(payload)
+            # An die Abonnenten dieser Mailbox, an niemanden sonst.
+            #
+            # Hier stand ein `publish(payload)` ohne Angabe — systemweit. Und
+            # anders als im Relais war dieser Zweig von aussen erreichbar:
+            # `resolve_mailbox_target` kehrt bei einer Kennung, die zu nichts
+            # gehört, ohne Ausnahme zurück (`None, [], None, None`), und
+            # `broadcast_typing_signal` fängt nur `HTTPException`. Ein
+            # Tippsignal auf eine erfundene Kennung ging damit an **jeden**
+            # verbundenen Client — samt `sender_id` und `sender_username`.
+            #
+            # Das ist genau die Präsenzauskunft, die der Messenger sonst
+            # sorgfältig auf die Gegenseite beschränkt.
+            SyncEventService.publish(payload, mailbox_id=clean_mailbox)
 
     # --- Chat-Gruppen & Öffentliche Einladungslinks ---
 
