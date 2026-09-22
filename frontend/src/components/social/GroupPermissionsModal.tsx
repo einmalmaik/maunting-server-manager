@@ -24,8 +24,10 @@ import {
   Trash2,
   ShieldCheck,
   Sliders,
+  Phone,
   ChevronDown,
   ChevronUp,
+  type LucideIcon,
 } from 'lucide-react'
 import {
   type ChatGroupItem,
@@ -140,12 +142,12 @@ const STANDARD_VORGABE = ['send_messages', 'attach_media', 'invite_members'] as 
  */
 const RECHTE_ABSCHNITTE: {
   titelKey: string
-  symbol: 'chat' | 'anruf' | 'moderation'
+  symbol: LucideIcon
   kategorien: readonly string[]
 }[] = [
-  { titelKey: 'social.groupRoles.defaultsChat', symbol: 'chat', kategorien: ['chat', 'members'] },
-  { titelKey: 'social.groupRoles.defaultsCalls', symbol: 'anruf', kategorien: ['calls'] },
-  { titelKey: 'social.groupRoles.defaultsModeration', symbol: 'moderation', kategorien: ['moderation', 'administration'] },
+  { titelKey: 'social.groupRoles.defaultsChat', symbol: Users, kategorien: ['chat', 'members'] },
+  { titelKey: 'social.groupRoles.defaultsCalls', symbol: Phone, kategorien: ['calls'] },
+  { titelKey: 'social.groupRoles.defaultsModeration', symbol: Shield, kategorien: ['moderation', 'administration'] },
 ]
 
 /**

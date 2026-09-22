@@ -2115,7 +2115,7 @@
     "selectAll": "Alle auswählen",
     "deselectAll": "Auswahl aufheben",
     "empty": "Keine Berechtigungen gefunden",
-    "hoverHint": "Fahre mit der Maus über eine Berechtigung, um eine Beschreibung anzuzeigen.",
+    "allow": "{{name}} erlauben",
     "groups": {
       "users": "Benutzer & Rollen",
       "panel": "Panel-Einstellungen",

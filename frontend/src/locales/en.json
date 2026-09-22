@@ -2115,7 +2115,7 @@
     "selectAll": "Select all",
     "deselectAll": "Clear selection",
     "empty": "No permissions found",
-    "hoverHint": "Hover over a permission to see its description.",
+    "allow": "Allow {{name}}",
     "groups": {
       "users": "Users & roles",
       "panel": "Panel settings",

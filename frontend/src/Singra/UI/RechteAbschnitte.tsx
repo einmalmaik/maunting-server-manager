@@ -1,23 +1,28 @@
-import { Phone, Shield, Users } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 
 import { Switch } from '@/components/ui/Switch'
 
 /**
  * Eine Rechteliste, nach Kategorien in Abschnitte gelegt.
  *
- * Es gab diese Ansicht zweimal und beide Male anders: der Reiter der
- * Standardrechte legte die Rechte in Abschnitte („Chat und Mitglieder",
- * „Sprach- und Videoanrufe", „Moderation") und schaltete sie mit einem
+ * **Das eine Aussehen für alles, wo Rechte an einer Rolle hängen.** Es gab
+ * diese Ansicht dreimal und jedes Mal anders: der Reiter der Standardrechte im
+ * Messenger legte die Rechte in Abschnitte und schaltete sie mit einem
  * Schalter; das Rollen-Formular daneben warf dieselben Rechte in eine flache
- * zweispaltige Liste mit Haken und ignorierte das Feld `category`, aus dem die
- * Abschnitte entstehen. Zwei Ansichten auf dasselbe Vokabular, und nur eine
- * davon zeigte seine Ordnung.
+ * zweispaltige Liste mit Haken; und der Panel-Rechteeditor zeigte
+ * dreispaltige Kacheln mit Titel und roher Kennung, deren Beschreibung man
+ * erst zu sehen bekam, wenn man mit der Maus darüberfuhr.
  *
- * Dieses Bauteil ist die eine Ansicht. Es übersetzt bewusst nichts: Titel und
- * Beschreibungen kommen fertig herein. Damit passt es auch auf Rechtekataloge,
- * die ihre Texte anders nachschlagen als die Gruppenrechte — der Panelkatalog
- * in `PermissionEditor.tsx` etwa holt sie mit einem Standardwert aus dem
- * Backend.
+ * Betreiberentscheidung vom 22.09.2026: *„Rollen erstellen sind Rollen
+ * erstellen, deshalb beide exakt gleich aussehen."* Das Messenger-Aussehen ist
+ * die Vorlage, weil die Beschreibung dort **in der Zeile steht**. Genau
+ * deshalb konnte im Panel das eigene Erklärfeld unter der Liste ersatzlos
+ * entfallen: es existierte nur, weil in der Kachel kein Platz dafür war.
+ *
+ * Das Bauteil übersetzt bewusst nichts — Titel und Beschreibungen kommen
+ * fertig herein. Der Messenger schlägt sie unter `social.groupRoles.perm.*`
+ * nach, der Panelkatalog unter `permissionDetails.*` mit einem Standardwert
+ * aus dem Backend. Zwei Wege, ein Aussehen.
  *
  * Die Reihenfolge innerhalb eines Abschnitts ist die der übergebenen Liste. Es
  * gibt bewusst keine zweite Sortierung: die wäre wieder eine Stelle, die man
@@ -32,18 +37,31 @@ export interface RechteZeile {
   kategorie: string
   titel: string
   beschreibung: string
+  /**
+   * Die rohe Rechte-Kennung, einzeilig in Mono unter der Beschreibung.
+   *
+   * Nur für den Panelkatalog: dort heißt ein Recht `server.files.read`, und
+   * genau diesen Namen tragen Fehlermeldungen, Prüfprotokoll und die
+   * Hoster-API. Ein Betreiber, der einem Bericht nachgeht, braucht ihn
+   * sichtbar. Die Gruppenrechte im Messenger lassen ihn weg — dort ist die
+   * Kennung eine Implementierungssache, die niemandem nützt.
+   */
+  kennung?: string
 }
 
 /**
  * Ein Abschnitt sammelt eine oder mehrere Kategorien ein.
  *
- * `symbol` steht als eigenes Feld da und wird **nicht** aus dem Titel
+ * `symbol` ist die Icon-Komponente selbst und wird **nicht** aus dem Titel
  * abgeleitet. Vorher hing das Schild am übersetzten Text (`titel ===
  * 'Moderation'`) — das war auf Deutsch richtig und auf Englisch nie wahr.
+ * Und es ist bewusst keine feste Auswahl an Namen: der Panelkatalog hat acht
+ * Gruppen, der Messenger drei, und eine Liste im Bauteil wäre eine Kopplung
+ * an fremdes Vokabular.
  */
 export interface RechteAbschnittDefinition {
   titel: string
-  symbol: 'chat' | 'anruf' | 'moderation'
+  symbol: LucideIcon
   kategorien: readonly string[]
 }
 
@@ -58,17 +76,12 @@ export interface RechteAbschnitteProps {
    * Baut die Vorlesebeschriftung des Schalters aus dem Titel des Rechts.
    *
    * Pflicht, weil ein Schalter ohne Beschriftung für eine Sprachausgabe nur
-   * „an" oder „aus" ist, ohne zu sagen, wovon.
+   * „an" oder „aus" ist, ohne zu sagen, wovon. Bei rund 90 Rechten
+   * hintereinander ist das der Unterschied zwischen benutzbar und nicht.
    */
   zeilenBeschriftung: (titel: string) => string
   className?: string
 }
-
-const SYMBOLE = {
-  chat: Users,
-  anruf: Phone,
-  moderation: Shield,
-} as const
 
 export function RechteAbschnitte({
   rechte,
@@ -86,10 +99,11 @@ export function RechteAbschnitte({
       {abschnitte.map((abschnitt, i) => {
         const zeilen = rechte.filter((r) => abschnitt.kategorien.includes(r.kategorie))
         // Ein Abschnitt ohne Rechte wird nicht gezeichnet. So kann der Aufrufer
-        // Rechte weglassen, ohne die Abschnittsliste anfassen zu müssen — der
-        // Reiter der Standardrechte lässt `manage_roles` aus.
+        // Rechte weglassen oder filtern, ohne die Abschnittsliste anzufassen —
+        // der Reiter der Standardrechte lässt `manage_roles` aus, die Suche im
+        // Panel lässt alles aus, was nicht passt.
         if (!zeilen.length) return null
-        const Symbol = SYMBOLE[abschnitt.symbol]
+        const Symbol = abschnitt.symbol
 
         return (
           <div
@@ -97,7 +111,7 @@ export function RechteAbschnitte({
             className={i > 0 ? 'border-t border-outline-variant/30 pt-5' : ''}
           >
             <div className="mb-3 flex items-center gap-2">
-              <Symbol className="h-4 w-4 text-primary" />
+              <Symbol className="h-4 w-4 text-primary shrink-0" />
               <span className="text-body-sm font-bold text-primary">{abschnitt.titel}</span>
             </div>
             <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
@@ -111,6 +125,11 @@ export function RechteAbschnitte({
                     <span className="text-label-sm leading-snug text-on-surface-variant">
                       {zeile.beschreibung}
                     </span>
+                    {zeile.kennung && (
+                      <span className="mt-1 block truncate font-mono text-label-sm text-on-surface-variant/70">
+                        {zeile.kennung}
+                      </span>
+                    )}
                   </div>
                   <Switch
                     checked={gesetzt.has(zeile.key)}
