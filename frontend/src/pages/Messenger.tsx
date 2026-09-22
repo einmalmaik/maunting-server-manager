@@ -147,6 +147,8 @@ import { logischeUuid, DrZustellungFehlgeschlagenError } from '@/services/ratche
 import { geraeteVon, kontoNutztSignaturen, onNeuesGeraet } from '@/services/e2eeGeraet'
 import { pruefeNutzlast, signiereNutzlast } from '@/services/nutzlastSignatur'
 import { verwirfGruppenSchluessel } from '@/services/gruppenSchluessel'
+import { ladeGruppenzustand, type Gruppenzustand } from '@/services/gruppenKonfig'
+import { wirksameGruppenrechte } from '@/services/gruppenRollen'
 import {
   entferneLokaleNachricht,
   loadLocalMessages,
@@ -159,6 +161,7 @@ import {
 import {
   tilgeInhalt,
   tilgeNachrichtBeimServer,
+  tilgeFremdeNachrichtBeimServer,
   tilgeNachrichtLokal,
 } from '@/services/nachrichtLoeschen'
 import {
@@ -488,6 +491,15 @@ export function Messenger() {
   // Selection
   const [activeContact, setActiveContact] = useState<ChatContact | null>(null)
   const [activeGroup, setActiveGroup] = useState<ChatGroupItem | null>(null)
+  /**
+   * Die eigenen Rollen der offenen Gruppe, entschlüsselt.
+   *
+   * `null` heisst „nicht belegbar": entweder hat die Gruppe noch keinen Block,
+   * oder diesem Gerät fehlt der Schlüssel, oder er war nicht beglaubigt. In
+   * allen drei Fällen zählen nur die Rechte aus der Mitgliederzeile — das ist
+   * der ehrliche Stand, und nicht etwa „keine Rechte".
+   */
+  const [gruppenRollenZustand, setGruppenRollenZustand] = useState<Gruppenzustand | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [filterTab, setFilterTab] = useState<'all' | 'groups' | 'friends' | 'teams' | 'public'>('all')
   const [mobileNavTab, setMobileNavTab] = useState<'chats' | 'updates' | 'community'>('chats')
@@ -1699,6 +1711,40 @@ export function Messenger() {
   }
 
   // 5. Load and decrypt messages (non-flickering background sync + real-time)
+  /**
+   * Was ein Konto in der offenen Gruppe darf.
+   *
+   * Zwei Quellen: die Mitgliederzeile vom Server und der verschlüsselte
+   * Rollenblock (`gruppenRollenZustand`). Zusammengeführt in
+   * `wirksameGruppenrechte` — das ist die einzige Stelle, die diese Frage
+   * beantwortet, und der Rechte-Dialog benutzt dieselbe.
+   */
+  const gruppenrechteVon = useCallback(
+    (konto: number) => {
+      if (!activeGroup) return new Set<string>()
+      const mitglied = activeGroup.members?.find((m) => Number(m.user_id) === Number(konto))
+      return wirksameGruppenrechte({
+        konto,
+        systemRolle: mitglied?.role,
+        istEigentuemer: Number(activeGroup.owner_user_id) === Number(konto),
+        eigeneRechte: mitglied?.permissions,
+        standardrechte: activeGroup.default_permissions,
+        zustand: gruppenRollenZustand,
+      })
+    },
+    [activeGroup, gruppenRollenZustand],
+  )
+
+  /**
+   * Ob ich fremde Nachrichten in dieser Gruppe entfernen darf.
+   *
+   * `delete_messages` stand seit je im Rechtevokabular und hatte bis 09/2026
+   * keinen Konsumenten: der Menüeintrag hing an `msg.isSelf`, ein Moderator
+   * konnte also nichts entfernen, egal was im Dialog gesetzt war.
+   */
+  const darfFremdeLoeschen =
+    Boolean(activeGroup) && gruppenrechteVon(currentUserId).has('delete_messages')
+
   const loadMessages = async (isInitial = false) => {
     const currentMid = blindMailboxId
     if (!currentMid || !currentUserId) return
@@ -2148,22 +2194,28 @@ export function Messenger() {
       const findeAenderung = (m: ChatMessage) =>
         aenderungen.finde(m, (urheber) => urheber !== undefined && Number(urheber) === Number(m.senderId))
 
+      /**
+       * Wessen Löschbefehl befolgt wird.
+       *
+       * Der eigene Absender immer. In einer Gruppe zusätzlich, wer
+       * `delete_messages` trägt — und das ist seit 09/2026 auch wirklich dieses
+       * Recht. Vorher wurde hier `can_pin_messages` geprüft, also das Recht,
+       * eine Nachricht **anzuheften**: ein Moderator mit Löschrecht und ohne
+       * Heftrecht wurde ignoriert, einer mit Heftrecht und ohne Löschrecht kam
+       * durch. Die Rechtelage kommt jetzt aus derselben Stelle wie im
+       * Rechte-Dialog, inklusive der Rollen aus dem verschlüsselten Block.
+       *
+       * Die ehrliche Grenze steht hier und nicht im Werbetext: Moderation unter
+       * Ende-zu-Ende-Verschlüsselung ist eine Bitte, die Clients befolgen —
+       * keine Tatsache, die der Server durchsetzt. Wer die Nachricht schon
+       * gelesen hat, behält sie. Das gilt für Signal und WhatsApp genauso.
+       */
       const findeLoeschung = (m: ChatMessage) =>
         loeschungen.finde(m, (urheber) => {
           if (urheber === undefined) return false
           if (Number(urheber) === Number(m.senderId)) return true
-          if (activeGroup?.members) {
-            const member = activeGroup.members.find((x) => Number(x.user_id) === Number(urheber))
-            if (member) {
-              return (
-                Number(activeGroup.owner_user_id) === Number(urheber) ||
-                member.role === 'admin' ||
-                member.role === 'moderator' ||
-                Boolean(member.can_pin_messages)
-              )
-            }
-          }
-          return false
+          if (!activeGroup) return false
+          return gruppenrechteVon(Number(urheber)).has('delete_messages')
         })
 
       /**
@@ -2677,8 +2729,57 @@ export function Messenger() {
     else toast.success(t('messenger.forwarded', { count: ziele.length }))
   }
 
+  /**
+   * Den verschlüsselten Rollenblock der offenen Gruppe holen.
+   *
+   * Er entscheidet mit, ob ein fremder Löschbefehl befolgt wird — also muss er
+   * hier liegen und nicht nur im Rechte-Dialog. Wer ihn schreiben durfte, wird
+   * gegen die **Mitgliederzeile** geprüft und nicht gegen den Block selbst:
+   * ein Block, der seine eigene Befugnis bescheinigt, bescheinigt nichts.
+   */
+  useEffect(() => {
+    if (!activeGroup || !blindMailboxId) {
+      setGruppenRollenZustand(null)
+      return
+    }
+    let abgebrochen = false
+    const mitglieder = activeGroup.members ?? []
+    const darfSchreiben = (konto: number) => {
+      if (Number(activeGroup.owner_user_id) === Number(konto)) return true
+      const m = mitglieder.find((x) => Number(x.user_id) === Number(konto))
+      if (!m) return false
+      if (m.role === 'owner' || m.role === 'admin') return true
+      return (m.permissions || '')
+        .split(',')
+        .map((p) => p.trim())
+        .includes('manage_roles')
+    }
+
+    void ladeGruppenzustand(
+      {
+        groupId: activeGroup.id,
+        blindMailboxId,
+        eigeneId: currentUserId,
+        mitglieder: mitglieder.map((m) => m.user_id),
+      },
+      darfSchreiben,
+    )
+      .then((lesung) => {
+        if (abgebrochen) return
+        setGruppenRollenZustand(lesung.art === 'zustand' ? lesung.zustand : null)
+      })
+      .catch(() => {
+        if (!abgebrochen) setGruppenRollenZustand(null)
+      })
+
+    return () => {
+      abgebrochen = true
+    }
+  }, [activeGroup?.id, activeGroup?.members, blindMailboxId, currentUserId])
+
   /** Ob ich in dieser Gruppe anheften darf — vom Server entschieden. */
   const darfAnheften = Boolean(activeGroup?.can_pin_messages)
+
 
   /**
    * Eine Nachricht über den Verlauf heften.
@@ -2989,6 +3090,15 @@ export function Messenger() {
       return
     }
 
+    // Eine fremde Nachricht zu entfernen ist Moderation und braucht das Recht
+    // dafür. Der Menüeintrag erscheint ohne es gar nicht; diese Zeile fängt den
+    // Weg über die Mehrfachauswahl und über die Leiste ab.
+    const fremd = !msg.isSelf
+    if (fremd && !darfFremdeLoeschen) {
+      toast.error(t('messenger.deleteNoRight'))
+      return
+    }
+
     const geloeschtAm = new Date().toISOString()
     try {
       // 1. Die Gegenseite erfährt es. Steht am Anfang, weil nur dieser Schritt
@@ -3003,7 +3113,12 @@ export function Messenger() {
       // 2. Chiffretext und Anhänge vom Server nehmen — vor dem lokalen Tilgen.
       //    Die Medienkennungen stehen ausschließlich in dieser Zeile; ist sie
       //    erst ein Grabstein, findet kein zweiter Versuch die Blobs mehr.
-      await tilgeNachrichtBeimServer(blindMailboxId, msg)
+      let medienGeblieben = 0
+      if (fremd) {
+        ;({ medienGeblieben } = await tilgeFremdeNachrichtBeimServer(blindMailboxId, msg))
+      } else {
+        await tilgeNachrichtBeimServer(blindMailboxId, msg)
+      }
 
       // 3. Und zuletzt dieses Gerät. Der eigene Löschbefehl kommt hier nie an:
       //    eine Ratchet-Nachricht kann ihr Absender nicht öffnen, `deleteMap`
@@ -3020,7 +3135,14 @@ export function Messenger() {
         return geaendert
       })
 
-      toast.success(t('messenger.messageDeletedForAll'))
+      if (!fremd) {
+        toast.success(t('messenger.messageDeletedForAll'))
+      } else if (medienGeblieben > 0) {
+        // Nicht verschweigen: der Text ist weg, das Bild liegt noch da.
+        toast.info(t('messenger.messageRemovedMediaStays', { count: medienGeblieben }))
+      } else {
+        toast.success(t('messenger.messageRemovedByModeration'))
+      }
       await loadMessages(false)
     } catch {
       toast.error(t('messenger.messageDeleteFailed'))
@@ -6656,6 +6778,7 @@ export function Messenger() {
         onLoeschen={(m) => void handleDeleteMessage(m)}
         onAnheften={activeGroup ? (m) => void handleAnheften(m) : undefined}
         darfAnheften={darfAnheften}
+        darfFremdeLoeschen={darfFremdeLoeschen}
         istAngeheftet={Boolean(angeheftet && angeheftet.clientUuid === menueNachricht?.clientUuid)}
       />
 

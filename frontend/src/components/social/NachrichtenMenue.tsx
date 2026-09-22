@@ -43,6 +43,14 @@ export interface NachrichtenMenueProps {
   darfAnheften?: boolean
   /** Ob diese Nachricht gerade oben angeheftet ist. */
   istAngeheftet?: boolean
+  /**
+   * Ob **fremde** Nachrichten in dieser Gruppe entfernt werden dürfen.
+   *
+   * Bis 09/2026 gab es diesen Eintrag nur für eigene Nachrichten. Das Recht
+   * `delete_messages` stand im Rechte-Dialog, ließ sich setzen — und hatte
+   * nirgends einen Konsumenten: wer es hatte, konnte trotzdem nichts entfernen.
+   */
+  darfFremdeLoeschen?: boolean
 }
 
 export function NachrichtenMenue({
@@ -59,6 +67,7 @@ export function NachrichtenMenue({
   onAnheften,
   darfAnheften,
   istAngeheftet,
+  darfFremdeLoeschen,
 }: NachrichtenMenueProps) {
   const { t } = useTranslation()
   if (!msg) return null
@@ -121,11 +130,15 @@ export function NachrichtenMenue({
         {msg.isSelf && msg.text && (
           <Blatteintrag icon={<Pencil className="w-4 h-4" />} label={t('common.edit')} onClick={schliesseUnd(onBearbeiten)} />
         )}
-        {msg.isSelf && (
+        {(msg.isSelf || darfFremdeLoeschen) && (
           <Blatteintrag
             icon={<Trash2 className="w-4 h-4" />}
-            label={t('messenger.deleteForAllShort')}
-            hinweis={t('messenger.deleteForAllHint')}
+            label={
+              msg.isSelf ? t('messenger.deleteForAllShort') : t('messenger.deleteForeignShort')
+            }
+            hinweis={
+              msg.isSelf ? t('messenger.deleteForAllHint') : t('messenger.deleteForeignHint')
+            }
             gefahr
             onClick={schliesseUnd(onLoeschen)}
           />

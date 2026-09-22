@@ -155,3 +155,40 @@ export async function tilgeNachrichtBeimServer(
     await loescheBlindeUmschlaege(blindMailboxId, msg.clientUuid)
   }
 }
+
+/**
+ * Dasselbe für eine **fremde** Nachricht, die moderiert wird.
+ *
+ * Zwei Dinge verhalten sich hier anders, und beide haben denselben Grund: der
+ * Server weiss nicht, wer welchen Umschlag geschrieben hat — absichtlich.
+ *
+ * 1. **Die Umschläge gehen weg.** Wer zu einer Mailbox gehört, darf darin jeden
+ *    Umschlag löschen, dessen Kennung er kennt. Das ist der Preis der blinden
+ *    Adressierung und hier ausnahmsweise nützlich.
+ * 2. **Der Anhang bleibt womöglich liegen.** Einen hochgeladenen Blob darf nur
+ *    löschen, wer ihn hochgeladen hat. Das wird nicht verschluckt, sondern
+ *    zurückgemeldet: „entfernt" zu lesen, während das Bild noch abrufbar ist,
+ *    wäre eine falsche Zusage über fremde Daten.
+ *
+ * Ein Fehlschlag am Blob hält die Umschläge nicht auf. Andersherum bliebe der
+ * Text für jedes noch nicht abgeholte Gerät stehen, nur weil ein Bild nicht
+ * wegging.
+ */
+export async function tilgeFremdeNachrichtBeimServer(
+  blindMailboxId: string,
+  msg: TilgbareNachricht
+): Promise<{ medienGeblieben: number }> {
+  let medienGeblieben = 0
+  for (const mediaId of medienKennungen(msg)) {
+    try {
+      await loescheChatMedium(mediaId)
+    } catch {
+      medienGeblieben++
+    }
+  }
+
+  if (blindMailboxId && msg.clientUuid) {
+    await loescheBlindeUmschlaege(blindMailboxId, msg.clientUuid)
+  }
+  return { medienGeblieben }
+}

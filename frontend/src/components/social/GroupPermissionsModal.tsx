@@ -46,6 +46,15 @@ import {
   type GruppenRolle,
   type Konfiglesung,
 } from '@/services/gruppenKonfig'
+import {
+  GRUPPEN_RECHTE,
+  SYSTEM_GRUPPENROLLEN,
+  SYSTEM_ROLLEN_IDS,
+  permissionDescKey,
+  permissionTitleKey,
+  type Gruppenrolle,
+  type GruppenRechtKennung,
+} from '@/services/gruppenRollen'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 
@@ -57,59 +66,19 @@ interface GroupPermissionsModalProps {
   onGroupUpdated?: (group: ChatGroupItem) => void
 }
 
-export interface GroupRoleDefinition {
-  id: string
-  name: string
-  description: string
-  is_system: boolean
-  /**
-   * Nur für Systemrollen: ist `description` noch der Übersetzungsschlüssel?
-   *
-   * Eine Systemrolle behält ihren Namen, ihre Beschreibung darf die Gruppe aber
-   * überschreiben. Ohne dieses Feld liefe der eingetippte Text noch einmal
-   * durch `t()` — und ein Text, der zufällig wie ein Schlüssel aussieht, stünde
-   * plötzlich als etwas ganz anderes da.
-   */
-  description_is_key?: boolean
-  permissions: string[]
-}
-
-/**
- * Die Rechte der Gruppe — einmal, mit Schlüsseln statt fertiger Sätze.
+/*
+ * Vokabular und Systemrollen liegen seit 09/2026 in `services/gruppenRollen.ts`.
  *
- * Bis 09/2026 standen dieselben neun Rechte zweimal in dieser Datei: hier für
- * den Rollen-Editor, und noch einmal von Hand im Tab der Standardrechte, dort
- * mit kürzerem Wortlaut. Wer eine Beschreibung änderte, änderte sie an einer
- * Stelle. Beide Ansichten lesen jetzt aus dieser Liste.
+ * Sie standen hier, und deshalb kam der Messenger nicht an sie heran: er
+ * beantwortete die Frage „darf dieses Konto eine fremde Nachricht löschen?"
+ * mit `can_pin_messages` — dem Recht, eine Nachricht **anzuheften**. Eine
+ * Rechtetabelle gehört nicht in eine Dialogdatei.
  */
-export const GROUP_PERMISSION_DEFINITIONS = [
-  { key: 'send_messages', category: 'chat' },
-  { key: 'attach_media', category: 'chat' },
-  { key: 'invite_members', category: 'members' },
-  { key: 'start_group_calls', category: 'calls' },
-  { key: 'join_group_calls', category: 'calls' },
-  { key: 'share_screen', category: 'calls' },
-  { key: 'mute_in_calls', category: 'moderation' },
-  { key: 'kick_from_calls', category: 'moderation' },
-  { key: 'kick_members', category: 'moderation' },
-  { key: 'delete_messages', category: 'moderation' },
-  { key: 'mention_everyone', category: 'moderation' },
-  { key: 'pin_messages', category: 'moderation' },
-  { key: 'manage_roles', category: 'administration' },
-] as const
-
-export type GroupPermissionKey = (typeof GROUP_PERMISSION_DEFINITIONS)[number]['key']
+export type GroupRoleDefinition = Gruppenrolle
+export const GROUP_PERMISSION_DEFINITIONS = GRUPPEN_RECHTE
+export type GroupPermissionKey = GruppenRechtKennung
 
 type Uebersetzer = ReturnType<typeof useTranslation>['t']
-
-/** `social.groupRoles.perm.<recht>.title` bzw. `.desc`. */
-export function permissionTitleKey(recht: string): string {
-  return `social.groupRoles.perm.${recht}.title`
-}
-
-export function permissionDescKey(recht: string): string {
-  return `social.groupRoles.perm.${recht}.desc`
-}
 
 /**
  * Systemrollen tragen einen Schlüssel als Namen, selbst angelegte einen Text,
@@ -190,44 +159,6 @@ function uebersetzteAbschnitte(t: Uebersetzer): RechteAbschnittDefinition[] {
     kategorien: abschnitt.kategorien,
   }))
 }
-
-/**
- * Die vier eingebauten Rollen. Name und Beschreibung sind Schlüssel — was in
- * der Oberfläche steht, holt `rolleName`/`rolleBeschreibung` daraus.
- */
-const SYSTEM_GROUP_ROLES: GroupRoleDefinition[] = [
-  {
-    id: 'owner',
-    name: 'social.groupRoles.system.owner.name',
-    description: 'social.groupRoles.system.owner.desc',
-    is_system: true,
-    permissions: GROUP_PERMISSION_DEFINITIONS.map((p) => p.key),
-  },
-  {
-    id: 'admin',
-    name: 'social.groupRoles.system.admin.name',
-    description: 'social.groupRoles.system.admin.desc',
-    is_system: true,
-    permissions: ['send_messages', 'attach_media', 'invite_members', 'start_group_calls', 'join_group_calls', 'share_screen', 'mute_in_calls', 'kick_from_calls', 'kick_members', 'delete_messages', 'mention_everyone', 'pin_messages', 'manage_roles'],
-  },
-  {
-    id: 'moderator',
-    name: 'social.groupRoles.system.moderator.name',
-    description: 'social.groupRoles.system.moderator.desc',
-    is_system: true,
-    permissions: ['send_messages', 'attach_media', 'invite_members', 'join_group_calls', 'share_screen', 'mute_in_calls', 'kick_from_calls', 'delete_messages', 'mention_everyone', 'pin_messages'],
-  },
-  {
-    id: 'member',
-    name: 'social.groupRoles.system.member.name',
-    description: 'social.groupRoles.system.member.desc',
-    is_system: true,
-    permissions: ['send_messages', 'attach_media', 'invite_members', 'join_group_calls'],
-  },
-]
-
-/** Die Kennungen der eingebauten Rollen. Alles andere hat die Gruppe angelegt. */
-const SYSTEM_ROLE_IDS: ReadonlySet<string> = new Set(SYSTEM_GROUP_ROLES.map((r) => r.id))
 
 /** Wird im Bauteil mit `t()` befüllt — hier stehen nur die Werte. */
 const ROLE_OPTION_IDS = ['admin', 'moderator', 'member'] as const
@@ -480,7 +411,7 @@ export function GroupPermissionsModal({
    */
   const roles = useMemo<GroupRoleDefinition[]>(() => {
     const ueberschrieben = new Map(eigeneRollen.map((r) => [r.id, r]))
-    const system = SYSTEM_GROUP_ROLES.map((vorlage) => {
+    const system = SYSTEM_GRUPPENROLLEN.map((vorlage) => {
       const eigen = ueberschrieben.get(vorlage.id)
       if (!eigen) return vorlage
       ueberschrieben.delete(vorlage.id)
@@ -756,7 +687,7 @@ export function GroupPermissionsModal({
     // der er gesetzt wurde: der Moderator hiesse für alle künftigen Mitglieder
     // auf Deutsch, was vorher in elf Sprachen dastand. Leer heisst „nimm die
     // eingebaute".
-    const eingebaut = SYSTEM_GROUP_ROLES.find((s) => s.id === role.id)
+    const eingebaut = SYSTEM_GRUPPENROLLEN.find((s) => s.id === role.id)
     const beschreibung =
       role.is_system && eingebaut && description.trim() === t(eingebaut.description).trim()
         ? ''
@@ -809,7 +740,7 @@ export function GroupPermissionsModal({
 
   /** Die selbst angelegten Rollen — die eingebauten trägt die Mitgliederzeile. */
   const zusatzRollen = useMemo(
-    () => eigeneRollen.filter((r) => !SYSTEM_ROLE_IDS.has(r.id)),
+    () => eigeneRollen.filter((r) => !SYSTEM_ROLLEN_IDS.has(r.id)),
     [eigeneRollen],
   )
 
