@@ -74,6 +74,22 @@ GROUP_MODERATION_PERMISSIONS: frozenset[str] = frozenset(
     }
 )
 
+#: Rechte, die nur an einer **Rolle** hängen dürfen, nie an den Standardrechten
+#: für alle (@everyone).
+#:
+#: ``manage_roles`` ist das eine: wer Rollen verwalten darf, kann sich jedes
+#: andere Recht selbst eintragen. Als Standard für alle gesetzt, ist das keine
+#: Einstellung, sondern die Abschaffung der Rollen — jedes einfache Mitglied
+#: wäre dann Administrator.
+#:
+#: Der Dialog bietet es unter den Standardrechten schon länger nicht an
+#: (``NICHT_ALS_STANDARD`` in ``GroupPermissionsModal.tsx``). Das war aber nur
+#: ein ausgeblendeter Haken: ein einziger PATCH auf
+#: ``/groups/<id>/permissions`` mit ``manage_roles`` wurde bis 09/2026 klaglos
+#: angenommen und gespeichert. Eine Regel, die nur die Oberfläche kennt, ist
+#: keine Regel. Wer die Liste hier ändert, ändert sie auch dort.
+GROUP_ROLE_ONLY_PERMISSIONS: frozenset[str] = frozenset({"manage_roles"})
+
 #: Was der Rechte-Dialog vor dem 17.09.2026 geschrieben hat. Wird beim Lesen
 #: übersetzt, damit bereits gesetzte Haken nicht verloren gehen.
 GROUP_PERMISSION_ALIASES: dict[str, tuple[str, ...]] = {
@@ -2080,6 +2096,19 @@ class SocialService:
             raise HTTPException(status_code=404, detail="Gruppe nicht gefunden.")
 
         clean_perms = cls.assert_known_permissions(default_permissions) or ""
+        # Nach dem Auflösen der Aliase prüfen, nicht davor: sonst käme ein
+        # künftiger Aliasname auf ein nur-Rollen-Recht hier ungesehen durch.
+        nur_rollen = sorted(
+            set(p for p in clean_perms.split(",") if p) & GROUP_ROLE_ONLY_PERMISSIONS
+        )
+        if nur_rollen:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Diese Berechtigung gehört an eine Rolle, nicht an die "
+                    f"Standardrechte aller Mitglieder: {', '.join(nur_rollen)}"
+                ),
+            )
         group.default_permissions = clean_perms
         db.commit()
         db.refresh(group)

@@ -17,6 +17,7 @@ from models import User
 from services.social_service import (
     GROUP_PERMISSION_ALIASES,
     GROUP_PERMISSIONS,
+    GROUP_ROLE_ONLY_PERMISSIONS,
     SocialService,
 )
 
@@ -305,3 +306,69 @@ def test_gruppenmarke_beschreibt_mich_selbst(
     assert meins["can_mention_everyone"] is False
     besitzer = next(m for m in meins["members"] if m["user_id"] == owner_user.id)
     assert besitzer["can_mention_everyone"] is True
+
+
+# ── Nur-Rollen-Rechte gehoeren nicht an @everyone ───────────────────────────
+
+
+def test_manage_roles_nicht_als_standardrecht(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Der Dialog bot es nie an, das Backend nahm es klaglos: ein PATCH auf die
+    # Standardrechte machte jedes einfache Mitglied zum Rollenverwalter, und
+    # damit zum Administrator. Der Haken war versteckt, die Regel fehlte.
+    gruppe = _gruppe(db, owner_user, regular_user, None)
+    with pytest.raises(HTTPException) as fehler:
+        SocialService.update_group_default_permissions(
+            db,
+            group_id=gruppe.id,
+            default_permissions="send_messages,manage_roles",
+            caller=owner_user,
+        )
+    assert fehler.value.status_code == 422
+    assert "manage_roles" in fehler.value.detail
+
+    db.rollback()
+    frisch = SocialService.get_group_member(db, gruppe.id, regular_user.id)
+    assert frisch is not None
+    assert not SocialService.has_group_permission(
+        db, gruppe.id, regular_user.id, "manage_roles"
+    )
+
+
+def test_standardrechte_ohne_nur_rollen_recht_gehen_durch(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Die Schranke darf nur das eine Recht treffen, nicht den ganzen Vorgang.
+    gruppe = _gruppe(db, owner_user, regular_user, None)
+    aktualisiert = SocialService.update_group_default_permissions(
+        db,
+        group_id=gruppe.id,
+        default_permissions="send_messages,attach_media",
+        caller=owner_user,
+    )
+    assert aktualisiert.default_permissions == "attach_media,send_messages"
+
+
+def test_nur_rollen_recht_bleibt_an_einer_rolle_erlaubt(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Genau dafuer ist es da. Verboten ist nur der Weg ueber @everyone.
+    gruppe = _gruppe(db, owner_user, regular_user, None)
+    SocialService.update_member_role_permissions(
+        db,
+        group_id=gruppe.id,
+        target_user_id=regular_user.id,
+        role="admin",
+        permissions="send_messages,manage_roles",
+        caller=owner_user,
+    )
+    assert SocialService.has_group_permission(
+        db, gruppe.id, regular_user.id, "manage_roles"
+    )
+
+
+def test_jedes_nur_rollen_recht_ist_ein_bekanntes_recht() -> None:
+    # Ein Eintrag, der auf einen Namen zeigt, den das Vokabular nicht kennt,
+    # waere eine Schranke vor einer Tuer, die es nicht gibt.
+    assert GROUP_ROLE_ONLY_PERMISSIONS <= GROUP_PERMISSIONS

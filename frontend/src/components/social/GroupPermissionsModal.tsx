@@ -1,7 +1,18 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Dialog, DialogContent, Button, Badge, Avatar, Dropdown, Input, type DropdownOption, Checkbox } from '@/Singra/UI'
-import { Switch } from '@/components/ui/Switch'
+import {
+  Dialog,
+  DialogContent,
+  Button,
+  Badge,
+  Avatar,
+  Dropdown,
+  Input,
+  type DropdownOption,
+  RechteAbschnitte,
+  type RechteAbschnittDefinition,
+  type RechteZeile,
+} from '@/Singra/UI'
 import {
   Shield,
   Users,
@@ -13,7 +24,6 @@ import {
   Trash2,
   ShieldCheck,
   Sliders,
-  Phone,
   ChevronDown,
   ChevronUp,
 } from 'lucide-react'
@@ -70,6 +80,8 @@ export const GROUP_PERMISSION_DEFINITIONS = [
 
 export type GroupPermissionKey = (typeof GROUP_PERMISSION_DEFINITIONS)[number]['key']
 
+type Uebersetzer = ReturnType<typeof useTranslation>['t']
+
 /** `social.groupRoles.perm.<recht>.title` bzw. `.desc`. */
 export function permissionTitleKey(recht: string): string {
   return `social.groupRoles.perm.${recht}.title`
@@ -97,6 +109,13 @@ function rollentext(
  * `manage_roles` gehört nicht dorthin: wer Rollen verwalten darf, kann sich
  * jedes andere Recht selbst geben. Ein Haken, der das für alle setzt, wäre
  * keine Einstellung, sondern die Abschaffung der Rollen.
+ *
+ * Das hier ist nur die Anzeige. Durchgesetzt wird es im Backend
+ * (`GROUP_ROLE_ONLY_PERMISSIONS` in `social_service.py`), und zwar seit
+ * 09/2026: bis dahin stand die Regel ausschließlich in dieser Zeile, und ein
+ * einzelner PATCH auf `/groups/<id>/permissions` trug `manage_roles` an den
+ * Standardrechten ein, ohne dass jemand widersprach. Beide Listen gehören
+ * zusammen — wer eine ändert, ändert die andere mit.
  */
 const NICHT_ALS_STANDARD: ReadonlySet<string> = new Set(['manage_roles'])
 
@@ -104,7 +123,12 @@ const NICHT_ALS_STANDARD: ReadonlySet<string> = new Set(['manage_roles'])
 const STANDARD_VORGABE = ['send_messages', 'attach_media', 'invite_members'] as const
 
 /**
- * Die Abschnitte des Standardrechte-Reiters.
+ * Die Abschnitte, in denen die Gruppenrechte stehen — in **beiden** Ansichten.
+ *
+ * Bis 09/2026 galten sie nur für den Standardrechte-Reiter. Das Rollen-Formular
+ * daneben warf dieselben Rechte in eine flache zweispaltige Liste und ignorierte
+ * `category` ganz: zwei Ansichten auf dasselbe Vokabular, und nur eine zeigte
+ * seine Ordnung. Wer hier einen Abschnitt ändert, ändert jetzt beide.
  *
  * Die Reihenfolge der Rechte innerhalb eines Abschnitts ist die aus
  * `GROUP_PERMISSION_DEFINITIONS` — eine zweite Sortierliste wäre wieder eine
@@ -114,7 +138,7 @@ const STANDARD_VORGABE = ['send_messages', 'attach_media', 'invite_members'] as 
  * erkannt wurde (`titel === 'Moderation'`). Das war auf Deutsch richtig und
  * auf Englisch nie wahr — das Schild hing am übersetzten Text.
  */
-const STANDARD_ABSCHNITTE: {
+const RECHTE_ABSCHNITTE: {
   titelKey: string
   symbol: 'chat' | 'anruf' | 'moderation'
   kategorien: readonly string[]
@@ -123,6 +147,29 @@ const STANDARD_ABSCHNITTE: {
   { titelKey: 'social.groupRoles.defaultsCalls', symbol: 'anruf', kategorien: ['calls'] },
   { titelKey: 'social.groupRoles.defaultsModeration', symbol: 'moderation', kategorien: ['moderation', 'administration'] },
 ]
+
+/**
+ * Die Rechte als Zeilen für `RechteAbschnitte`: Text nachgeschlagen, das
+ * Ausgeblendete weg. `ausgeblendet` ist der einzige Unterschied zwischen den
+ * beiden Ansichten — die Standardrechte lassen `manage_roles` aus, das
+ * Rollen-Formular zeigt es.
+ */
+function rechteZeilen(t: Uebersetzer, ausgeblendet?: ReadonlySet<string>): RechteZeile[] {
+  return GROUP_PERMISSION_DEFINITIONS.filter((def) => !ausgeblendet?.has(def.key)).map((def) => ({
+    key: def.key,
+    kategorie: def.category,
+    titel: t(permissionTitleKey(def.key)),
+    beschreibung: t(permissionDescKey(def.key)),
+  }))
+}
+
+function uebersetzteAbschnitte(t: Uebersetzer): RechteAbschnittDefinition[] {
+  return RECHTE_ABSCHNITTE.map((abschnitt) => ({
+    titel: t(abschnitt.titelKey),
+    symbol: abschnitt.symbol,
+    kategorien: abschnitt.kategorien,
+  }))
+}
 
 /**
  * Die vier eingebauten Rollen. Name und Beschreibung sind Schlüssel — was in
@@ -299,35 +346,17 @@ function GroupRoleForm({ initial, onSubmit, onCancel, disabled }: GroupRoleFormP
           )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-          {GROUP_PERMISSION_DEFINITIONS.map((def) => {
-            const isChecked = selectedPerms.has(def.key)
-            return (
-              <label
-                key={`perm-toggle-${def.key}`}
-                className={`flex items-start gap-3 p-3 rounded-xl border transition-all cursor-pointer select-none ${
-                  isChecked
-                    ? 'border-primary/40 bg-primary/10 shadow-sm'
-                    : 'border-outline-variant/20 bg-surface-container-lowest/60 hover:bg-surface-container-high/40'
-                } ${isOwnerRole ? 'opacity-80 cursor-not-allowed' : ''}`}
-              >
-                <div className="pt-0.5">
-                  <Checkbox
-                    checked={isChecked}
-                    onCheckedChange={() => togglePerm(def.key)}
-                    disabled={isOwnerRole || disabled}
-                  />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-semibold text-primary">{t(permissionTitleKey(def.key))}</div>
-                  <div className="text-label-sm text-on-surface-variant/80 mt-0.5 leading-snug">
-                    {t(permissionDescKey(def.key))}
-                  </div>
-                </div>
-              </label>
-            )
-          })}
-        </div>
+        {/* Dieselben Abschnitte wie im Standardrechte-Reiter. `manage_roles`
+            bleibt hier stehen — eine Rolle darf es tragen, die Standardrechte
+            aller nicht (siehe NICHT_ALS_STANDARD). */}
+        <RechteAbschnitte
+          rechte={rechteZeilen(t)}
+          abschnitte={uebersetzteAbschnitte(t)}
+          gesetzt={selectedPerms}
+          onToggle={(key) => togglePerm(key)}
+          disabled={isOwnerRole || disabled}
+          zeilenBeschriftung={(titel) => t('social.groupRoles.allow', { name: titel })}
+        />
       </div>
 
       <div className="flex justify-end gap-2.5 pt-3 border-t border-outline-variant/20">
@@ -917,59 +946,25 @@ export function GroupPermissionsModal({
                 </p>
               </div>
 
-              {/* Ein Abschnitt je Kategorie, die Rechte in der Reihenfolge des
-                  Vokabulars. Vorher standen sie hier ein zweites Mal von Hand,
-                  mit eigenem Wortlaut — und liefen auseinander. */}
-              <div className="rounded-2xl border border-outline-variant/30 p-4 sm:p-6 bg-surface-container/60 shadow-sm space-y-5">
-                {STANDARD_ABSCHNITTE.map((abschnitt, i) => {
-                  const rechte = GROUP_PERMISSION_DEFINITIONS.filter(
-                    (d) => abschnitt.kategorien.includes(d.category) && !NICHT_ALS_STANDARD.has(d.key),
-                  )
-                  if (!rechte.length) return null
-                  const Symbol = abschnitt.symbol === 'moderation' ? Shield : abschnitt.symbol === 'anruf' ? Phone : Users
-                  return (
-                    <div
-                      key={abschnitt.titelKey}
-                      className={i > 0 ? 'border-t border-outline-variant/30 pt-5' : ''}
-                    >
-                      <div className="mb-3 flex items-center gap-2">
-                        <Symbol className="h-4 w-4 text-primary" />
-                        <span className="text-body-sm font-bold text-primary">{t(abschnitt.titelKey)}</span>
-                      </div>
-                      <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
-                        {rechte.map((def) => (
-                          <div
-                            key={def.key}
-                            className="flex items-center justify-between gap-4 rounded-xl border border-outline-variant/30 bg-surface-container-high/60 p-3.5"
-                          >
-                            <div className="min-w-0 flex-1">
-                              <span className="block text-xs font-bold text-primary">
-                                {t(permissionTitleKey(def.key))}
-                              </span>
-                              <span className="text-label-sm leading-snug text-on-surface-variant">
-                                {t(permissionDescKey(def.key))}
-                              </span>
-                            </div>
-                            <Switch
-                              checked={standardrechte.has(def.key)}
-                              onCheckedChange={(an) =>
-                                setStandardrechte((vorher) => {
-                                  const neu = new Set(vorher)
-                                  if (an) neu.add(def.key)
-                                  else neu.delete(def.key)
-                                  return neu
-                                })
-                              }
-                              disabled={!canManage}
-                              aria-label={t('social.groupRoles.allow', { name: t(permissionTitleKey(def.key)) })}
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
+              {/* Dasselbe Bauteil wie im Rollen-Formular, nur ohne
+                  `manage_roles`: wer Rollen verwalten darf, kann sich jedes
+                  andere Recht selbst geben. */}
+              <RechteAbschnitte
+                rechte={rechteZeilen(t, NICHT_ALS_STANDARD)}
+                abschnitte={uebersetzteAbschnitte(t)}
+                gesetzt={standardrechte}
+                onToggle={(key, an) =>
+                  setStandardrechte((vorher) => {
+                    const neu = new Set(vorher)
+                    if (an) neu.add(key)
+                    else neu.delete(key)
+                    return neu
+                  })
+                }
+                disabled={!canManage}
+                zeilenBeschriftung={(titel) => t('social.groupRoles.allow', { name: titel })}
+              />
+
 
               {canManage && (
                 <div className="flex justify-end pt-2">
