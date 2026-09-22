@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
+import i18n from '@/i18n'
 import { Notes, type NoteItem } from './Notes'
 import { api } from '@/api/client'
 import { teamsApi } from '@/api/teams'
@@ -59,6 +60,14 @@ const mockNotes: NoteItem[] = [
 ]
 
 describe('Notes Component', () => {
+  // Der Platzhalter stand hier als fester Satz („Notizen oder Inhalte
+  // durchsuchen...") und stammte aus der Zeit vor der Übersetzung. Die Seite
+  // holt ihn heute aus `notes.searchPlaceholder`; gesucht wird deshalb über
+  // denselben Schlüssel, damit eine Textänderung nicht als Fehlschlag zählt.
+  beforeAll(async () => {
+    await i18n.changeLanguage('de')
+  })
+
   beforeEach(() => {
     vi.mocked(api).mockImplementation(async (url) => {
       if (typeof url === 'string' && url.includes('/notes')) {
@@ -76,10 +85,17 @@ describe('Notes Component', () => {
       </MemoryRouter>
     )
 
-    const searchInput = await screen.findByPlaceholderText('Notizen oder Inhalte durchsuchen...')
+    const searchInput = await screen.findByPlaceholderText(i18n.t('notes.searchPlaceholder'))
     expect(searchInput).toBeInTheDocument()
 
-    const newNoteButtons = screen.getAllByRole('button', { name: /Neue Notiz|Neu/i })
+    // Der Knopf trägt beide Beschriftungen im Markup — die lange für breite
+    // Fenster, die kurze fürs Telefon. Sichtbar ist immer nur eine; im Test
+    // ohne Stylesheet stehen beide im Namen. Deshalb Teiltreffer statt
+    // Gleichheit. Die Zusage bleibt: **genau einer**, kein zweiter in der
+    // Kopfzeile.
+    const newNoteButtons = screen.getAllByRole('button', {
+      name: new RegExp(i18n.t('notes.newNote')),
+    })
     expect(newNoteButtons.length).toBe(1)
   })
 
@@ -109,7 +125,7 @@ describe('Notes Component', () => {
       </MemoryRouter>
     )
 
-    const searchInput = await screen.findByPlaceholderText('Notizen oder Inhalte durchsuchen...')
+    const searchInput = await screen.findByPlaceholderText(i18n.t('notes.searchPlaceholder'))
     await waitFor(() => {
       expect(screen.getByText('Einkaufsliste Supermarkt')).toBeInTheDocument()
     })

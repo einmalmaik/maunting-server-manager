@@ -52,11 +52,20 @@ def list_roles(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> list[RoleResponse]:
-    """Jeder eingeloggte User darf die Rollen-Liste lesen (nur Namen/Beschreibung).
+    """Jeder eingeloggte User darf die Rollen-Liste lesen.
 
-    Volle Permission-Listen sind ohnehin nicht geheim — sie kommen auch via
-    `/api/permissions/catalog`. Aenderungen sind weiterhin per `roles.manage`
-    geschuetzt.
+    **Was hier wirklich herausgeht:** `_to_response` haengt an jede Rolle ihre
+    tatsaechlich zugewiesenen Permission-Keys. Der Docstring behauptete bis
+    09/2026 "nur Namen/Beschreibung" und stimmte damit nicht mit dem Code
+    ueberein — nachgemessen antwortet die Route einem Konto ohne jedes
+    globale Recht mit 200 und der vollstaendigen Rechtezuordnung aller Rollen.
+
+    Das ist mehr als `/api/permissions/catalog`: der Katalog nennt die
+    *moeglichen* Keys, diese Route die *dieser Instanz tatsaechlich
+    vergebenen*. Wer sie enger ziehen will, braucht ein `require_global` —
+    das ist eine bewusste Betreiberentscheidung, keine stille Aenderung.
+    Welches Konto welche Rolle traegt, verraet sie nicht, und Aenderungen
+    bleiben per `roles.manage` geschuetzt.
     """
     return [_to_response(db, r) for r in role_service.list_roles(db)]
 

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
+import time
+
 import pytest
 from sqlalchemy.orm import Session
 from fastapi.testclient import TestClient
@@ -127,49 +130,129 @@ def test_e2ee_envelope_without_uuid_creates_distinct_records(db: Session):
 # 2. WebSocket relay_ack & Idempotente Bestätigung
 # ============================================================================
 
-def test_websocket_relay_ack_and_idempotency(db: Session, client: TestClient, owner_cookies: dict):
-    """Prüft, dass der WebSocket auf Relay-Nachrichten mit relay_ack und korrekter ID quittiert."""
-    mailbox = "ws-mailbox-dedup-test"
+def _quittung(ws, *, frist: float = 10.0) -> dict:
+    """Wartet auf die eine Antwort, die auf einen `relay`-Rahmen folgt.
+
+    Zwei Dinge, die die frühere Fassung nicht konnte und die diesen Test zum
+    Suitenkiller gemacht haben:
+
+    1. **Eine Fehlerantwort ist auch eine Antwort.** Der Server beantwortet
+       jeden `relay`-Rahmen genau einmal — mit `relay_ack` oder mit `error`.
+       Wer nur auf `relay_ack` wartet und den Fehler überliest, wartet auf
+       etwas, das nie kommt.
+    2. **Das Warten hat eine Frist.** `receive_json()` hängt an einer
+       `queue.Queue` ohne Zeitgrenze. Unter xdist erschlägt die 120-Sekunden-
+       Grenze auf Windows nicht den Test, sondern den ganzen Arbeitsprozess
+       („node down: Not properly terminated"), und der Lauf bleibt bei 99 %
+       stehen. Eine eigene Frist macht daraus einen gewöhnlichen Fehlschlag.
+
+    Alles andere (etwa ein vorangestelltes `e2ee_blind_message`) wird
+    übersprungen.
+    """
+    import queue as _queue
+
+    ende = time.monotonic() + frist
+    while True:
+        rest = ende - time.monotonic()
+        if rest <= 0:
+            raise AssertionError(
+                "Der Server hat den relay-Rahmen innerhalb der Frist weder "
+                "quittiert noch abgelehnt."
+            )
+        try:
+            rohnachricht = ws._send_queue.get(timeout=rest)
+        except _queue.Empty:
+            continue
+        if isinstance(rohnachricht, BaseException):
+            raise rohnachricht
+        if rohnachricht.get("type") == "websocket.close":
+            raise AssertionError(
+                f"Verbindung geschlossen statt quittiert: {rohnachricht!r}"
+            )
+        nachricht = json.loads(rohnachricht["text"])
+        if nachricht.get("type") in ("relay_ack", "error"):
+            return nachricht
+
+
+def test_websocket_relay_ack_and_idempotency(db: Session, client: TestClient):
+    """Derselbe `client_uuid` zweimal ergibt zweimal dieselbe Umschlagkennung.
+
+    Die Mailbox gehört hier wirklich den beiden Beteiligten. Vorher stand da
+    eine ausgedachte Kennung (`ws-mailbox-dedup-test`), und seit die
+    Entprellung **hinter** der Berechtigungsprüfung steht — der Sicherheitsfix
+    aus 09/2026, siehe `relay_blind_envelope` —, antwortet der Server darauf
+    mit 403 statt mit einer Quittung. Der Test prüfte damit eine Zusage, die
+    das Panel bewusst nicht mehr gibt.
+    """
+    anna = _create_user(db, "ws_dedup_anna")
+    bert = _create_user(db, "ws_dedup_bert")
+    db.add_all([
+        UserFriend(user_id=anna.id, friend_id=bert.id, status="accepted"),
+        UserFriend(user_id=bert.id, friend_id=anna.id, status="accepted"),
+    ])
+    db.commit()
+
+    mailbox = SocialService.ensure_direct_chat(db, anna.id, bert.id).blind_mailbox_id
     client_uuid = "client-ws-uuid-999"
+    umschlag = _umschlag("ws-relay-cipher")
+    cookies = _login_user(client, "ws_dedup_anna")
 
-    with client.websocket_connect("/api/social/ws", cookies=owner_cookies) as ws:
-        # Sende Relay-Frame
+    with client.websocket_connect("/api/social/ws", cookies=cookies) as ws:
         ws.send_json({
             "type": "relay",
             "blind_mailbox_id": mailbox,
-            "ciphertext_envelope": _umschlag("ws-relay-cipher"),
+            "ciphertext_envelope": umschlag,
             "client_uuid": client_uuid,
+            "recipient_id": bert.id,
         })
+        erste = _quittung(ws)
+        assert erste["type"] == "relay_ack", erste
+        assert erste["client_uuid"] == client_uuid
+        assert isinstance(erste["id"], int)
 
-        def _read_until(target_type: str, max_msgs: int = 5) -> dict:
-            for _ in range(max_msgs):
-                msg = ws.receive_json()
-                if msg.get("type") == target_type:
-                    return msg
-            raise AssertionError(f"Did not receive message of type {target_type}")
-
-        # Erwarte relay_ack (kann e2ee_blind_message voranstellen)
-        resp = _read_until("relay_ack")
-        assert resp["type"] == "relay_ack"
-        assert resp["client_uuid"] == client_uuid
-        assert isinstance(resp["id"], int)
-        first_id = resp["id"]
-
-        # Erneutes Senden mit derselben client_uuid (Retry-Simulation)
+        # Derselbe Rahmen noch einmal — so sieht ein Wiederholungsversuch nach
+        # einer Netzschwankung aus.
         ws.send_json({
             "type": "relay",
             "blind_mailbox_id": mailbox,
-            "ciphertext_envelope": _umschlag("ws-relay-cipher"),
+            "ciphertext_envelope": umschlag,
             "client_uuid": client_uuid,
+            "recipient_id": bert.id,
         })
+        zweite = _quittung(ws)
+        assert zweite["type"] == "relay_ack", zweite
+        assert zweite["client_uuid"] == client_uuid
+        assert zweite["id"] == erste["id"]
 
-        resp2 = _read_until("relay_ack")
-        assert resp2["type"] == "relay_ack"
-        assert resp2["client_uuid"] == client_uuid
-        assert resp2["id"] == first_id
+    assert db.query(E2eeBlindEnvelope).filter_by(
+        blind_mailbox_id=mailbox, client_uuid=client_uuid
+    ).count() == 1
 
-    # Sicherstellen, dass nur 1 Eintrag in der DB vorliegt
-    assert db.query(E2eeBlindEnvelope).filter_by(blind_mailbox_id=mailbox, client_uuid=client_uuid).count() == 1
+
+def test_websocket_relay_in_fremde_mailbox_wird_abgelehnt(db: Session, client: TestClient):
+    """Eine Mailbox, zu der man nicht gehört, bringt eine Ablehnung — keine Quittung.
+
+    Die Kehrseite des Tests darüber, und der Grund, warum er umgeschrieben
+    werden musste: die Mailbox-Kennung ist für jeden ausrechenbar. Ohne diese
+    Zusage wäre der Entprellungspfad ein Weg an der Berechtigungsprüfung vorbei.
+    """
+    fremde = _create_user(db, "ws_dedup_fremde")
+    cookies = _login_user(client, "ws_dedup_fremde")
+
+    with client.websocket_connect("/api/social/ws", cookies=cookies) as ws:
+        ws.send_json({
+            "type": "relay",
+            "blind_mailbox_id": "ws-mailbox-dedup-test",
+            "ciphertext_envelope": _umschlag("ws-relay-fremd"),
+            "client_uuid": "client-ws-uuid-fremd",
+        })
+        antwort = _quittung(ws)
+
+    assert antwort["type"] == "error", antwort
+    assert antwort["status_code"] == 403
+    assert db.query(E2eeBlindEnvelope).filter_by(
+        blind_mailbox_id="ws-mailbox-dedup-test"
+    ).count() == 0
 
 
 # ============================================================================

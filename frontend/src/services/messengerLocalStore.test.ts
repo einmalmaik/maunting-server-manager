@@ -520,6 +520,126 @@ describe('messengerLocalStore (IndexedDB Chat Persistence & F5 Hydration)', () =
     expect(loaded[0].id).toBe(88)
     expect(loaded[0].status).toBe('sent')
   })
+
+  it('gibt verbogene Zeilen gar nicht erst heraus', async () => {
+    /*
+     * Eine einzige Zeile ohne brauchbaren `text` riss den kompletten
+     * Messenger in die Fehlergrenze (`msg.text.startsWith is not a
+     * function`), und weil sie auf der Platte lag, half auch Neuladen nicht.
+     * Eine defekte Zeile darf eine Nachricht kosten, nicht das Gespräch.
+     */
+    const mid = 'box-verbogen'
+    const ablage = mockStores.get('messages') || new Map()
+    mockStores.set('messages', ablage)
+    const kaputt = [
+      { blindMailboxId: mid, id: 900001, clientUuid: 'a', createdAt: '2026-09-21T10:00:00.000Z' },
+      { blindMailboxId: mid, id: 900002, clientUuid: 'b', createdAt: null, text: 'ok' },
+      { blindMailboxId: mid, id: 900003, clientUuid: 'c', createdAt: '2026-09-21T10:00:00.000Z', text: { nicht: 'string' } },
+      { blindMailboxId: mid, id: 'keine zahl', clientUuid: 'd', createdAt: '2026-09-21T10:00:00.000Z', text: 'ok' },
+    ]
+    for (const z of kaputt) ablage.set(`${mid}:${z.id}`, z)
+
+    await saveLocalMessages(mid, [
+      {
+        blindMailboxId: mid,
+        id: 77,
+        clientUuid: 'heil',
+        senderId: 1,
+        text: 'Die heile Zeile',
+        createdAt: '2026-09-21T11:00:00.000Z',
+        isSelf: true,
+        status: 'sent',
+      },
+    ])
+
+    const geladen = await loadLocalMessages(mid)
+    expect(geladen).toHaveLength(1)
+    expect(geladen[0].text).toBe('Die heile Zeile')
+  })
+
+  it('nimmt die optimistische Zeile aus der Ablage, sobald die bestätigte da ist', async () => {
+    /*
+     * Beim Laden zu entdoppeln reicht nicht. Die optimistische Zeile blieb in
+     * der Ablage stehen und überlebte die bestätigte: rutscht der Umschlag aus
+     * dem Hundert-Umschläge-Fenster, ist sie die einzige Fassung, die dieses
+     * Gerät noch hat — mit `status: 'queued'`, ganz unten im Verlauf statt an
+     * ihrem Platz, ohne Häkchen und ohne Reaktionen.
+     */
+    const mid = 'box-aufraeumen'
+    const clientUuid = 'uuid-aufraeumen'
+    const gemeinsam = {
+      blindMailboxId: mid,
+      clientUuid,
+      senderId: 1,
+      text: 'Erste Nachricht',
+      createdAt: '2026-09-16T18:00:00.000Z',
+      isSelf: true,
+    }
+
+    // Runde 1: nur die optimistische Zeile, wie direkt nach dem Absenden.
+    await saveLocalMessages(mid, [{ ...gemeinsam, id: 1773680000000, status: 'queued' }])
+    expect(mockStores.get('messages')?.has(`${mid}:1773680000000`)).toBe(true)
+
+    // Runde 2: die Bestätigung kommt nach — ohne die optimistische Zeile.
+    await saveLocalMessages(mid, [{ ...gemeinsam, id: 88, status: 'sent' }])
+
+    const abgelegt = mockStores.get('messages') as Map<string, any>
+    expect(abgelegt.has(`${mid}:88`)).toBe(true)
+    expect(abgelegt.has(`${mid}:1773680000000`)).toBe(false)
+  })
+
+  it('räumt auch auf, wenn beide Fassungen in derselben Runde kommen', async () => {
+    const mid = 'box-gleichzeitig'
+    const clientUuid = 'uuid-gleichzeitig'
+    const gemeinsam = {
+      blindMailboxId: mid,
+      clientUuid,
+      senderId: 1,
+      text: 'Zusammen',
+      createdAt: '2026-09-16T18:00:00.000Z',
+      isSelf: true,
+    }
+    await saveLocalMessages(mid, [
+      { ...gemeinsam, id: 1773680000001, status: 'queued' },
+      { ...gemeinsam, id: 89, status: 'sent' },
+    ])
+
+    const abgelegt = mockStores.get('messages') as Map<string, any>
+    expect(abgelegt.has(`${mid}:89`)).toBe(true)
+    expect(abgelegt.has(`${mid}:1773680000001`)).toBe(false)
+  })
+
+  it('lässt eine noch nicht bestätigte Nachricht in Ruhe', async () => {
+    // Die Kehrseite: ohne bestätigte Fassung darf nichts verschwinden, sonst
+    // wäre die Warteschlange nach dem ersten Abgleich leer.
+    const mid = 'box-wartet'
+    await saveLocalMessages(mid, [
+      {
+        blindMailboxId: mid,
+        id: 1773680000002,
+        clientUuid: 'uuid-wartet',
+        senderId: 1,
+        text: 'Noch unterwegs',
+        createdAt: '2026-09-16T18:00:00.000Z',
+        isSelf: true,
+        status: 'queued',
+      },
+      {
+        blindMailboxId: mid,
+        id: 90,
+        clientUuid: 'uuid-fremd',
+        senderId: 2,
+        text: 'Von der Gegenseite',
+        createdAt: '2026-09-16T18:01:00.000Z',
+        isSelf: false,
+        status: 'sent',
+      },
+    ])
+
+    const abgelegt = mockStores.get('messages') as Map<string, any>
+    expect(abgelegt.has(`${mid}:1773680000002`)).toBe(true)
+    expect(abgelegt.has(`${mid}:90`)).toBe(true)
+  })
 })
 
 /**

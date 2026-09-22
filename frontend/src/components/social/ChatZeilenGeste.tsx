@@ -14,7 +14,7 @@
 
 import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Archive, ArchiveRestore, Pin, PinOff } from 'lucide-react'
+import { Archive, ArchiveRestore, MoreHorizontal, Pin, PinOff } from 'lucide-react'
 
 import {
   erkenneWischen,
@@ -101,7 +101,7 @@ export function ChatZeilenGeste({
   }
 
   return (
-    <div className="relative overflow-hidden rounded-xl">
+    <div className="group relative overflow-hidden rounded-xl">
       {/* Was unter der Zeile zum Vorschein kommt, während sie wandert. */}
       {weg !== 0 && (
         <div className="absolute inset-0 flex items-center justify-between px-4 pointer-events-none">
@@ -134,6 +134,44 @@ export function ChatZeilenGeste({
         onContextMenu={langdruck.onContextMenu}
       >
         {children}
+      </div>
+
+      {/*
+       * Der Weg ohne Geste — und mit der Maus der einzige.
+       *
+       * Der Modulkopf verspricht ihn seit jeher („Die Geste ist nie der
+       * einzige Weg"), eingelöst war er nicht: das Menü hing allein am
+       * Langdruck, und `useLangdruck` tut bei `pointerType === 'mouse'`
+       * ausdrücklich nichts. Am Rechner gab es damit überhaupt keinen Zugang
+       * zu Anheften, Archivieren und Stummschalten — kein Knopf, kein
+       * Kontextmenü, und wischen kann eine Maus auch nicht.
+       *
+       * Dieselbe Bauart wie an der Nachrichtenblase: sichtbar beim Überfahren
+       * oder per Tastaturfokus. Solange er unsichtbar ist, nimmt er auch keine
+       * Klicks an — er liegt über dem Ungelesen-Abzeichen, und ein Tippen dort
+       * soll den Chat öffnen. Am Telefon wird er nie eingeblendet; dort führt
+       * der Langdruck zum selben Menü, per Tabulator ist er trotzdem
+       * erreichbar.
+       */}
+      <div
+        className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 pointer-events-none
+          transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto
+          focus-within:opacity-100 focus-within:pointer-events-auto"
+      >
+        <button
+          type="button"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation()
+            onMenue()
+          }}
+          className="w-8 h-8 rounded-md bg-surface-container-high/90 text-on-surface-variant
+            hover:text-primary transition-colors flex items-center justify-center"
+          aria-label={t('messenger.chatActions')}
+          title={t('messenger.chatActions')}
+        >
+          <MoreHorizontal className="w-4 h-4" />
+        </button>
       </div>
     </div>
   )

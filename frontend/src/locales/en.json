@@ -6649,6 +6649,7 @@
     "groupInviteHint": "After creating it you get an invite link to share with friends or team members.",
     "pickChat": "Pick a contact or a group",
     "messageActions": "What to do with this message",
+    "chatActions": "What to do with this chat",
     "reactWith": "React with {{emoji}}",
     "reply": "Reply",
     "forward": "Forward",
