@@ -752,14 +752,29 @@ async def stream_chat_completion(
     spec = ai_provider_registry.anbieter(provider.provider_kind)
     headers = schluesselkopf(spec, api_key)
 
+    # **Wer Googles Signaturzwang bedienen muss, sagt der Zugang — nicht der
+    # Modellname.** Hier standen fuenf Bedingungen, von denen drei nie zutrafen
+    # und zwei zu oft:
+    #
+    # * ``provider_kind == "google_ai_studio"`` gibt es nicht. Der Schluessel
+    #   heisst ``"google"`` (`ai_provider_registry.google.ANBIETER.kind`), und
+    #   jede andere Stelle im Panel fragt genau so (`ai_provider_service`,
+    #   `routers/ai_voice`).
+    # * ``spec.name`` gibt es nicht. `Anbieter` hat ``kind`` und ``label``; das
+    #   ``getattr(…, "")`` verdeckte den Tippfehler und lieferte immer ``False``.
+    # * ``"gemini-2.5" in model_name`` traf dagegen auch ``google/gemini-2.5-pro``
+    #   **bei OpenRouter**. Dort ging damit an jedem Werkzeugaufruf ein
+    #   ``thought_signature: "skip_thought_signature_validator"`` mit hinaus —
+    #   ein Google-Sentinel in der Nutzlast eines fremden Anbieters, in einem
+    #   Feld, das dessen strenge Validierung ablehnen darf.
+    #
+    # Getragen hat das Ganze allein die Adressprüfung, und die bleibt: sie ist
+    # die ehrliche Frage („spreche ich mit Google?") und stammt aus dem
+    # Programm, nicht aus einem Formular.
     target_base = provider_base_url(provider).lower()
-    model_name = (model or provider.default_model or "").lower()
     is_google = (
-        provider.provider_kind == "google_ai_studio"
+        provider.provider_kind == "google"
         or "generativelanguage.googleapis.com" in target_base
-        or "google" in getattr(spec, "name", "").lower()
-        or "gemini-3" in model_name
-        or "gemini-2.5" in model_name
     )
     sende_nachrichten = ensure_google_thought_signatures(messages) if (is_google and messages) else messages
 
@@ -853,14 +868,22 @@ async def stream_chat_completion(
                     try:
                         arguments = json.loads(raw_args)
                     except json.JSONDecodeError as exc:
+                        # Durch `_kurzfassung` wie jeder andere Fremdtext auch.
+                        # Werkzeugname **und** Argumente stammen aus der Ausgabe
+                        # des Modells, und das Modell hat in derselben Runde
+                        # Logzeilen, Dateiinhalte oder Websuchtreffer gelesen.
+                        # Hier gingen beide roh in `detail` — an der Redaktion
+                        # vorbei, die die Klasse in ihrem eigenen Namen zusagt.
                         raise AiProviderRequestError(
                             "AI_PROVIDER_PROTOCOL_ERROR",
-                            detail=f"Ungültige JSON-Argumente für {name}: {str(raw_args)[:100]}",
+                            detail=_kurzfassung(
+                                f"Ungültige JSON-Argumente für {name}: {str(raw_args)[:100]}"
+                            ),
                         ) from exc
                 if not isinstance(arguments, dict):
                     raise AiProviderRequestError(
                         "AI_PROVIDER_PROTOCOL_ERROR",
-                        detail=f"Tool-Argumente für {name} sind kein Objekt",
+                        detail=_kurzfassung(f"Tool-Argumente für {name} sind kein Objekt"),
                     )
                 thought_sig = item.get("thought_signature") or last_seen_thought_signature
                 return ProviderToolCall(
@@ -896,7 +919,7 @@ async def stream_chat_completion(
                 except (TypeError, json.JSONDecodeError) as exc:
                     raise AiProviderRequestError(
                         "AI_PROVIDER_PROTOCOL_ERROR",
-                        detail=f"Ungültiger SSE-Frame: {payload[:100]}",
+                        detail=_kurzfassung(f"Ungültiger SSE-Frame: {payload[:100]}"),
                     ) from exc
                 usage_uebernehmen(usage, frame.get("usage"))
                 frame_sig = extract_thought_signature(frame)

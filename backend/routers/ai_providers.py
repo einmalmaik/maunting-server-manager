@@ -422,7 +422,6 @@ async def list_catalog_models(
     request: Request,
     refresh: bool = False,
     provider_id: int | None = None,
-    api_key: str | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(require_global("panel.settings.read")),
 ) -> list[AiCatalogModelResponse]:
@@ -443,14 +442,27 @@ async def list_catalog_models(
     dort, kommt eine **leere Liste** und kein Fehler — beim Anlegen eines
     Zugangs gibt es die Zeile mit dem Schluessel naemlich noch gar nicht, und
     eine Fehlermeldung an dieser Stelle waere die Meldung eines Normalzustands.
-    Wird jedoch direkt im Formular ein ``api_key`` bzw. ``X-Provider-Api-Key``
-    übergeben, wird der Katalog sofort in Echtzeit mit diesem Schlüssel abgerufen.
+    Wird direkt im Formular ein Schlüssel eingetippt, wird der Katalog sofort in
+    Echtzeit damit abgerufen. Er kommt dafür **ausschliesslich** im Kopf
+    ``X-Provider-Api-Key``.
+
+    **Der Abfrageteil ist kein Weg dafür.** Hier stand daneben ein
+    ``api_key``-Parameter, und das Formular schickte den Schlüssel brav in
+    beidem. Ein Abfrageteil steht aber in jeder Zugriffszeile, die Caddy und
+    uvicorn schreiben, im Verlauf des Browsers und in jedem ``Referer`` —
+    also genau in den drei Ablagen, aus denen ein Schlüssel nicht wieder
+    herauszubekommen ist. Der Kopf steht in keiner davon.
+
+    Der Parameter ist ersatzlos weg und nicht abgekündigt: ein Client, der ihn
+    noch anhängt, schickt den Kopf ohnehin mit (er tat beides), und FastAPI
+    übergeht einen unbekannten Abfrageteil. Ihn weiter zu lesen hiesse, die
+    Zeile im Protokoll in Kauf zu nehmen, gegen die die Änderung geht.
     """
     if not ai_provider_registry.bekannt(kind):
         raise HTTPException(status_code=404, detail="Unbekannter KI-Anbieter")
 
     schluessel: str | None = None
-    ephemeral_key = (request.headers.get("x-provider-api-key") or api_key or "").strip()
+    ephemeral_key = (request.headers.get("x-provider-api-key") or "").strip()
     if ephemeral_key:
         try:
             schluessel = ai_provider_service._assert_key_passt(kind, ephemeral_key)

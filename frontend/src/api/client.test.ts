@@ -262,7 +262,12 @@ describe('api client', () => {
         .mockReturnValueOnce(mockResponse(401, { detail: 'Unauthorized' }))
         .mockReturnValueOnce(mockResponse(502, { detail: 'Bad Gateway' }))
 
-      await expect(api('/test')).rejects.toThrow('Refresh fehlgeschlagen: HTTP 502')
+      // Über `i18n.t`, nicht über den deutschen Wortlaut: diese Datei stellt in
+      // `beforeEach` auf Englisch um, und ein fest eingetippter Satz prüft dann
+      // die Sprache statt das Verhalten.
+      await expect(api('/test')).rejects.toThrow(
+        i18n.t('auth.errors.refreshFailed', { status: 502 }),
+      )
       expect(useAuthStore.getState().isAuthenticated).toBe(true)
       expect(useAuthStore.getState().user).not.toBeNull()
     })

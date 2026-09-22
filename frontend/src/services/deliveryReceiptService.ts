@@ -9,6 +9,7 @@
 import { relayE2eeEnvelope, fetchE2eeEnvelopes, syncE2eeMailboxes } from '@/api/social'
 import { encryptE2eeHybrid } from '@/services/e2eeCrypto'
 import { eigenesGeraet, geraeteVon } from '@/services/e2eeGeraet'
+import { merkeQuittung, quittungsstand } from '@/services/quittungsstand'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
 
 const DELIVERED_STORAGE_KEY = 'msm:delivered_envelope_ids'
@@ -84,6 +85,20 @@ export async function sendE2eeDeliveryReceipt({
     return false
   }
 
+  /*
+   * Und dieselbe Frage noch einmal an die Ablage.
+   *
+   * `deliveredEnvelopeIds` liegt im `sessionStorage` und ist nach jedem
+   * Neuladen leer. Der Merker darüber hält dagegen: eine Quittung nennt mit
+   * `delivered_up_to_id` eine Obergrenze, also ist alles darunter schon
+   * gesagt. Ohne diese Zeile quittierte jeder Ladevorgang den kompletten
+   * Mailbox-Inhalt erneut — und weil das Fenster hundert Umschläge fasst,
+   * verdrängte es genau die Nachrichten, für die es gedacht war.
+   */
+  if (envelopeId <= quittungsstand(blindMailboxId).zugestellt) {
+    return false
+  }
+
   // Group chat protection: direct delivery receipts are only valid for 1-on-1 direct chats
   const store = useMessengerNotificationStore.getState()
   const mailboxMeta = store.mailboxDirectory[blindMailboxId]
@@ -155,6 +170,7 @@ export async function sendE2eeDeliveryReceipt({
 
     deliveredEnvelopeIds.add(envelopeId)
     persistDeliveredEnvelopeIds(deliveredEnvelopeIds)
+    merkeQuittung(blindMailboxId, 'zugestellt', envelopeId)
     return true
   } catch {
     // If delivery failed, remove from cache so subsequent events/polls can retry
@@ -194,18 +210,42 @@ export async function checkAndDispatchPendingDeliveryReceipts(currentUserId: num
     try {
       // Check mailbox if it has pending updates or envelopes
       const envelopes = await fetchE2eeEnvelopes(mid)
+
+      /*
+       * Eine Quittung je Mailbox, nicht eine je Umschlag.
+       *
+       * `delivered_up_to_id` nennt eine Obergrenze — die höchste Kennung
+       * deckt alles darunter mit ab. Trotzdem lief hier bis 09/2026 eine
+       * Schleife über den kompletten Mailbox-Inhalt und schickte für jeden
+       * einzelnen Umschlag eine eigene Quittung. Da der Merker im
+       * `sessionStorage` lag und jedes Neuladen ihn leerte, waren das bis zu
+       * hundert Umschläge pro Ladevorgang; gemessen bestand die Mailbox zu
+       * 64 % aus Quittungen, und das Relais bremste mit 429. Verdrängt wurde
+       * dabei, was nicht nachbestellt werden kann: Bearbeitungen,
+       * Reaktionen, Anheftungen.
+       *
+       * Wessen Umschlag der höchste ist, lässt sich hier nicht sagen — der
+       * Inhalt ist verschlüsselt, und `fetchE2eeEnvelopes` liefert keinen
+       * Absender. Die Obergrenze kann deshalb eine eigene Nachricht
+       * erwischen und ein Häkchen einen Umschlag zu früh setzen. Das galt
+       * für die alte Schleife genauso; im offenen Chat rechnet der Messenger
+       * die Grenze ohnehin aus den entschlüsselten Zeilen.
+       */
+      let hoechste = 0
       for (const env of envelopes) {
         // Eine Quittung braucht keine Quittung. Ohne diese Zeile wuchs die
         // Mailbox bei jedem Ladevorgang um ihren eigenen Bestand.
         if (env.client_uuid?.startsWith(QUITTUNG_PRAEFIX)) continue
-        if (env.id && !deliveredEnvelopeIds.has(env.id) && meta.userId) {
-          await sendE2eeDeliveryReceipt({
-            blindMailboxId: mid,
-            envelopeId: env.id,
-            senderUserId: meta.userId,
-            currentUserId,
-          })
-        }
+        if (env.id && env.id > hoechste) hoechste = env.id
+      }
+
+      if (hoechste && meta.userId) {
+        await sendE2eeDeliveryReceipt({
+          blindMailboxId: mid,
+          envelopeId: hoechste,
+          senderUserId: meta.userId,
+          currentUserId,
+        })
       }
     } catch {
       // Non-fatal background sync

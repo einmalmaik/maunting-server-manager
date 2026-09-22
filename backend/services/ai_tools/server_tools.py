@@ -1853,13 +1853,40 @@ def _execute_global_read_tool(
     if tool_name == "forget_skill":
         return _execute_forget_skill(db, user=user, arguments=arguments)
 
+    # **Die drei Postfach- und Kalenderwerkzeuge pruefen ihr Recht hier.** Bis
+    # hierher taten sie es nirgends: `ai.mailbox.use` und `ai.calendar.use`
+    # standen allein als `angebot` in `ai_tool_registry`, und das ist
+    # ausdruecklich **kein** Ausfuehrungsgate — `angebotene_werkzeuge` sagt
+    # selbst, der Katalog sei „eine Bitte, keine Zusage", und verweist fuer die
+    # Schranke auf den Handler. Der Nachbar `notes_read` hat sie, diese drei
+    # hatten sie nicht.
+    #
+    # Der Katalog allein traegt aus drei Gruenden nicht: ein Modell kann einen
+    # Namen aus dem Gespraechsverlauf abschreiben, `execute_server_action` loest
+    # Namen ueber einen semantischen Router auf, und die Sprachsitzungen reichen
+    # den Namen des Modells ohne Abgleich mit der Angebotsmenge an
+    # `voice_werkzeug_ausfuehren` weiter. In allen drei Faellen las die KI das
+    # Postfach eines Benutzers, dem der Betreiber genau das nicht erlaubt hatte.
+    if tool_name in {"email_search", "email_read"}:
+        if not permission_service.has_global_permission(db, user, "ai.mailbox.use"):
+            raise AiActionValidationError("Postfach-Einsicht ist nicht erlaubt")
+
     if tool_name == "email_search":
         from services.mailbox_service import MailboxService
 
         query = str(arguments.get("query", "")) if arguments.get("query") else None
         sender = str(arguments.get("sender", "")) if arguments.get("sender") else None
-        limit = int(arguments.get("limit", 10))
-        mailbox_id = int(arguments["mailbox_id"]) if arguments.get("mailbox_id") else None
+        # Gedeckelt und getippt statt `int(...)`. Ein `int("alle")` warf einen
+        # `ValueError` — der faellt aus dem Zweig, den `_werkzeug_ausfuehren`
+        # fuer Formfehler abfaengt (`AiActionValidationError`, `HTTPException`),
+        # und riss damit den ganzen Lauf ab statt einer Runde. Und ein
+        # `limit: 1000000` war eine Postfachabfrage ohne Obergrenze.
+        limit = _positive_int(
+            arguments.get("limit"), name="limit", default=10, minimum=1, maximum=100
+        )
+        mailbox_id = _positive_int(
+            arguments.get("mailbox_id"), name="mailbox_id", default=0, minimum=1
+        ) or None
         messages = MailboxService.search_messages(
             db, user=user, mailbox_id=mailbox_id, query=query, sender=sender, limit=limit
         )
@@ -1871,7 +1898,9 @@ def _execute_global_read_tool(
         if "message_id" not in arguments:
             raise AiActionValidationError("message_id ist erforderlich")
         message_id = str(arguments["message_id"]).strip()
-        mailbox_id = int(arguments["mailbox_id"]) if arguments.get("mailbox_id") else None
+        mailbox_id = _positive_int(
+            arguments.get("mailbox_id"), name="mailbox_id", default=0, minimum=1
+        ) or None
         msg = MailboxService.read_message(
             db, user=user, message_id=message_id, mailbox_id=mailbox_id
         )
@@ -1880,11 +1909,15 @@ def _execute_global_read_tool(
         return msg
 
     if tool_name == "calendar_read":
+        if not permission_service.has_global_permission(db, user, "ai.calendar.use"):
+            raise AiActionValidationError("Kalender-Einsicht ist nicht erlaubt")
         from services.calendar_service import CalendarService
 
         start_date = str(arguments.get("start_date", "")) if arguments.get("start_date") else None
         end_date = str(arguments.get("end_date", "")) if arguments.get("end_date") else None
-        calendar_id = int(arguments["calendar_id"]) if arguments.get("calendar_id") else None
+        calendar_id = _positive_int(
+            arguments.get("calendar_id"), name="calendar_id", default=0, minimum=1
+        ) or None
         events = CalendarService.get_events(
             db, user=user, calendar_id=calendar_id, start_date=start_date, end_date=end_date
         )

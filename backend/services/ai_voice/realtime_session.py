@@ -26,7 +26,11 @@ from database import SessionLocal
 from models import AiProvider, User
 from services import ai_action_service, ai_chat_service, ai_meldestelle, ai_memory_service, ai_prompt, ai_provider_service, ai_usage_service
 from services.ai_redaction import redact_sensitive_text
-from services.ai_stream.read_tools import _werkzeug_nebenlaeufigkeit, voice_werkzeug_ausfuehren
+from services.ai_stream.read_tools import (
+    _werkzeug_nebenlaeufigkeit,
+    voice_werkzeug_ausfuehren,
+    werkzeugergebnis_umschlag,
+)
 from services.ai_tool_registry import GEHIRN_TOOLS, VOICE_CONTROL_TOOLS, WORKER_STEUERUNG, herkunft_schnitt
 from services.ai_voice import interactions as voice_interactions
 from services.ai_voice.contracts import Lage, MAX_SITZUNGSSEKUNDEN, voice_tool_frame
@@ -48,8 +52,45 @@ _CALL_ID = re.compile(r"^[A-Za-z0-9_-]{1,160}$")
 _SPRACHNAMEN = {"de": "Deutsch", "en": "Englisch"}
 
 
+#: Wieviel Fremdtext aus einer Anbietermeldung stehenbleiben darf. Grosszuegiger
+#: als im Chatadapter (200), weil die Auswertung des Ratenlimits unten den Satz
+#: „try again in 1.5s" noch darin finden muss — er steht bei OpenAI am Ende.
+MAX_FEHLERTEXT_ZEICHEN = 400
+
+
 class RealtimeSitzungsfehler(RuntimeError):
     """Ein nach außen bewusst detailarmer Realtime-Fehler."""
+
+
+def _fremdtext(text: object, grenze: int = MAX_FEHLERTEXT_ZEICHEN) -> str:
+    """Eine Anbietermeldung zu einer Zeile, die man zeigen kann.
+
+    Redigiert, einzeilig, gekuerzt — dieselbe Behandlung, die
+    `openai_compatible_adapter._kurzfassung` dem Chatweg angedeihen laesst. Hier
+    fehlte sie: die Fehlerobjekte des Realtime-Anbieters gingen roh und in
+    voller Laenge an den Browser. Eine solche Meldung zitiert oft Teile der
+    abgelehnten Anfrage zurueck, und was darin steht, entscheidet nicht MSM.
+    """
+    return " ".join(redact_sensitive_text(str(text or "")).split())[:grenze]
+
+
+def _fremdtext_tief(wert: object) -> object:
+    """Dasselbe, aber durch ein verschachteltes Fehlerobjekt hindurch.
+
+    Der Anbieter schickt ``error`` und ``status_details`` als Woerterbuecher;
+    der interessante Text steht in ihren Blaettern. Rekursion statt einer
+    Stringfassung, damit die **Form** erhalten bleibt — das Panel liest
+    ``code`` und ``type`` daraus aus, und eine flachgeklopfte Meldung waere
+    dort nicht mehr auswertbar. Schluessel bleiben unberuehrt: sie stammen vom
+    Protokoll, nicht aus den Daten (Muster von `_ergebnis_schwaerzen`).
+    """
+    if isinstance(wert, str):
+        return _fremdtext(wert)
+    if isinstance(wert, dict):
+        return {schluessel: _fremdtext_tief(inhalt) for schluessel, inhalt in wert.items()}
+    if isinstance(wert, list):
+        return [_fremdtext_tief(inhalt) for inhalt in wert[:50]]
+    return wert
 
 
 @dataclass(frozen=True)
@@ -530,7 +571,16 @@ class RealtimeSitzung:
                 await self._panel_senden({"art": "vorschlag", "vorschlag": karte})
         if self._sideband is not None:
             try:
-                output = json.dumps(wert, ensure_ascii=False, separators=(",", ":"), default=str)
+                # Mit Untrusted-Huelle, wie im Chat und bei Gemini Live. Ohne sie
+                # las das Modell Logzeilen, Websuchtreffer und Mailtext als
+                # blanken Inhalt ohne Herkunft — siehe
+                # `werkzeugergebnis_umschlag`.
+                output = json.dumps(
+                    werkzeugergebnis_umschlag(name, wert),
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    default=str,
+                )
                 await self._sideband.send(json.dumps({
                     "type": "conversation.item.create",
                     "item": {"type": "function_call_output", "call_id": call_id, "output": output},
@@ -662,6 +712,9 @@ class RealtimeSitzung:
             return {"error": fehler}, fehler
         if entscheidung == "reject":
             return {"status": "rejected_by_user"}, None
+        if voice_interactions.braucht_klick(user_id=self.user_id, kennung=kennung):
+            return {"status": "needs_panel_confirmation",
+                    "hinweis": voice_interactions.KLICK_NOETIG}, None
         erledigt, _ = voice_interactions.vorschlag_ausfuehren(
             user_id=self.user_id, kennung=kennung
         )
@@ -734,6 +787,16 @@ class RealtimeSitzung:
                     ex_msg = err.get("message") or err.get("msg") or details.get("message") if isinstance(err, dict) else None
                     ex_param = err.get("param") if isinstance(err, dict) else None
                     hint = f"{status}:{ex_code or ex_reason or ''}".rstrip(":")
+                    # **Fremdtext, also redigiert.** `err` und `details` kommen
+                    # vom Anbieter und gingen bisher ungeschwaerzt und in voller
+                    # Laenge an den Browser — dieselbe Regel, die
+                    # `AiProviderRequestError` fuer den Chatweg festhaelt, galt
+                    # hier nicht. Eine Anbietermeldung zitiert gern Teile der
+                    # abgelehnten Anfrage zurueck; was darin steht, entscheidet
+                    # nicht MSM.
+                    ex_msg = _fremdtext(ex_msg)
+                    details = _fremdtext_tief(details)
+                    err = _fremdtext_tief(err)
                     safe_details = json.dumps(details, ensure_ascii=False, default=str)[:2000] if details else ""
                     provider_kind = getattr(self.v, "provider_kind", "unknown")
                     model_name = response.get("model") or getattr(self.v, "model", "")
