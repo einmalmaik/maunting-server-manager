@@ -464,6 +464,7 @@ export function GroupPermissionsModal({
       blindMailboxId: await deriveGroupBlindMailboxId(group.id),
       eigeneId: currentUserId,
       mitglieder: members.map((m) => m.user_id),
+      istEigentuemer: group.role === 'owner',
     }
   }, [group, currentUserId, members])
 

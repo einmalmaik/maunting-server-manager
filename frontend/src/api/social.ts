@@ -3,6 +3,7 @@
  */
 
 import { api, apiStream } from './client'
+import { nachweisKopf } from '@/services/mailboxNachweis'
 import i18n from '@/i18n'
 
 export interface FriendItem {
@@ -365,6 +366,20 @@ export async function startDirectChat(targetUserId: number): Promise<DirectChatI
   })
 }
 
+/**
+ * Hinterlegt den blinden Besitznachweis einer Mailbox.
+ *
+ * Der authentifizierte Übergang: danach verlangt der Server für diese Mailbox
+ * bei jedem Zugriff den Nachweis — zusätzlich zur bisherigen Prüfung, nicht an
+ * ihrer Stelle.
+ */
+export async function registriereMailbox(mailboxId: string, authToken: string): Promise<void> {
+  await api<{ ok: boolean }>('/social/e2ee/mailbox/register', {
+    method: 'POST',
+    body: JSON.stringify({ mailbox_id: mailboxId, auth_token: authToken }),
+  })
+}
+
 export async function relayE2eeEnvelope(payload: {
   blind_mailbox_id: string
   ciphertext_envelope: string
@@ -377,6 +392,7 @@ export async function relayE2eeEnvelope(payload: {
   return api<BlindEnvelopeItem>('/social/e2ee/relay', {
     method: 'POST',
     body: JSON.stringify(payload),
+    headers: nachweisKopf(payload.blind_mailbox_id),
   })
 }
 
@@ -401,6 +417,7 @@ export async function uploadChatMedia(payload: {
   return api<ChatMediaItem>('/social/media/upload', {
     method: 'POST',
     body: JSON.stringify(payload),
+    headers: nachweisKopf(payload.blind_mailbox_id),
   })
 }
 
@@ -440,7 +457,7 @@ export async function loescheBlindeUmschlaege(
 ): Promise<{ ok: boolean; deleted: number }> {
   return api<{ ok: boolean; deleted: number }>(
     `/social/e2ee/envelopes/${encodeURIComponent(blindMailboxId)}?client_uuid=${encodeURIComponent(clientUuid)}`,
-    { method: 'DELETE' }
+    { method: 'DELETE', headers: nachweisKopf(blindMailboxId) }
   )
 }
 
@@ -536,7 +553,9 @@ export async function fetchE2eeEnvelopes(
   sinceId?: number
 ): Promise<BlindEnvelopeItem[]> {
   const query = sinceId ? `?since_id=${sinceId}` : ''
-  return api<BlindEnvelopeItem[]>(`/social/e2ee/mailbox/${blindMailboxId}${query}`)
+  return api<BlindEnvelopeItem[]>(`/social/e2ee/mailbox/${blindMailboxId}${query}`, {
+    headers: nachweisKopf(blindMailboxId),
+  })
 }
 
 export async function sendTypingSignal(payload: {
@@ -547,6 +566,7 @@ export async function sendTypingSignal(payload: {
   return api<{ ok: boolean }>('/social/e2ee/typing', {
     method: 'POST',
     body: JSON.stringify(payload),
+    headers: nachweisKopf(payload.blind_mailbox_id),
   })
 }
 

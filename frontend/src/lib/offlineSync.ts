@@ -13,6 +13,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { api, apiStream } from '@/api/client'
+import { nachweisKopf } from '@/services/mailboxNachweis'
 import type { NoteItem } from '@/pages/Notes'
 import type { CalendarEventItem } from '@/pages/Calendar'
 import { useAuthStore } from '@/stores/authStore'
@@ -430,6 +431,10 @@ export async function replayOutbox(): Promise<{ processed: number; failed: numbe
             const res = await api<any>('/social/e2ee/relay', {
               method: 'POST',
               body: JSON.stringify(mutation.payload),
+              // Auch hier: die Warteschlange ruft `/e2ee/relay` direkt auf und
+              // geht an `relayE2eeEnvelope` vorbei. Ohne den Nachweis waere
+              // sie der eine Sendeweg, den die Mailbox abweist.
+              headers: nachweisKopf(mutation.payload?.blind_mailbox_id),
             })
             if (res && res.id) {
               if (typeof window !== 'undefined') {

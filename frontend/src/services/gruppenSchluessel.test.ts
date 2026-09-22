@@ -55,6 +55,12 @@ let naechsteId = 1
 let serverMitglieder: number[] = []
 /** Lässt jeden Relais-Aufruf scheitern, für den Fall „erreicht niemanden". */
 let relaisKaputt = false
+/**
+ * Jede Registrierung eines Besitznachweises, in der Reihenfolge.
+ *
+ * Muss in dieser Stufe leer bleiben — siehe den Test dazu.
+ */
+const registrierungen: { mailboxId: string; authToken: string }[] = []
 
 vi.mock('@/api/social', () => ({
   relayE2eeEnvelope: async (payload: {
@@ -76,6 +82,9 @@ vi.mock('@/api/social', () => ({
   // Liste, die der Aufrufer im Kontext mitgibt: genau dieses Auseinanderlaufen
   // ist der Fall, den ein Nachzügler auslöst.
   getGroupMembers: async () => serverMitglieder.map((user_id) => ({ user_id })),
+  registriereMailbox: async (mailboxId: string, authToken: string) => {
+    registrierungen.push({ mailboxId, authToken })
+  },
 }))
 
 vi.mock('@/api/calls', () => ({ sendeRaumSchluessel: async () => undefined }))
@@ -90,10 +99,14 @@ import {
   verschluesseleFuerGruppe,
   GruppenSchluesselNichtZugestelltError,
   verwirfGruppenSchluessel,
+  mailboxAusGeheimnis,
+  nachweisAusGeheimnis,
   type GruppenAblage,
+  type GruppenGeheimnis,
   type GruppenKontext,
   type GruppenSchluesselEintrag,
 } from './gruppenSchluessel'
+import { leereMailboxNachweise, mailboxNachweis } from './mailboxNachweis'
 
 const ALICE = 1
 const BOB = 2
@@ -114,7 +127,16 @@ function neueAblage(): TestAblage {
   const keys = new Map<string, GruppenSchluesselEintrag>()
   const aktuelle = new Map<number, string>()
   const beantwortet = new Set<string>()
+  const geheimnisse = new Map<number, GruppenGeheimnis>()
   return {
+    async liesGeheimnis(groupId) {
+      return geheimnisse.get(groupId) ?? null
+    },
+    async schreibeGeheimnis(eintrag) {
+      // Wie die echte Ablage: wer zuerst da ist, bleibt stehen.
+      if (geheimnisse.has(eintrag.groupId)) return
+      geheimnisse.set(eintrag.groupId, eintrag)
+    },
     async lies(groupId, keyId) {
       return keys.get(`${groupId}:${keyId}`) ?? null
     },
@@ -140,6 +162,7 @@ function neueAblage(): TestAblage {
         if (schluessel.startsWith(`${groupId}:`)) keys.delete(schluessel)
       }
       aktuelle.delete(groupId)
+      geheimnisse.delete(groupId)
       for (const marke of [...beantwortet]) {
         if (marke.startsWith(`${groupId}:`)) beantwortet.delete(marke)
       }
@@ -167,8 +190,14 @@ function aktiviere(g: TestGeraet): void {
   setzeGruppenAblageFuerTest(g.ablage)
 }
 
-function kontext(g: TestGeraet, mitglieder: number[]): GruppenKontext {
-  return { groupId: GRUPPE, blindMailboxId: MAILBOX, eigeneId: g.konto, mitglieder }
+function kontext(g: TestGeraet, mitglieder: number[], istEigentuemer = false): GruppenKontext {
+  return {
+    groupId: GRUPPE,
+    blindMailboxId: MAILBOX,
+    eigeneId: g.konto,
+    mitglieder,
+    istEigentuemer,
+  }
 }
 
 /** Öffnet einen Stellvertreter-Hybridumschlag, wenn er für dieses Gerät ist. */
@@ -207,6 +236,23 @@ async function lies(
   return { texte, unlesbar }
 }
 
+/** Wie `sende`, aber als Eigentuemer — nur der darf ein Gruppengeheimnis erzeugen. */
+async function sendeAlsEigentuemer(
+  g: TestGeraet,
+  mitglieder: number[],
+  text: string,
+): Promise<string> {
+  aktiviere(g)
+  const umschlag = await verschluesseleFuerGruppe(kontext(g, mitglieder, true), text)
+  mailbox.push({
+    id: naechsteId++,
+    ciphertext_envelope: umschlag,
+    client_uuid: null,
+    control_type: null,
+  })
+  return umschlag
+}
+
 async function sende(g: TestGeraet, mitglieder: number[], text: string): Promise<string> {
   aktiviere(g)
   const umschlag = await verschluesseleFuerGruppe(kontext(g, mitglieder), text)
@@ -239,6 +285,7 @@ describe('gruppenSchluessel', () => {
     alle = [ALICE, BOB, CAROL]
     serverMitglieder = [...alle]
     relaisKaputt = false
+    registrierungen.length = 0
   })
 
   it('erreicht ein Mitglied, das erst nach dem Öffnen des Gesprächs beitritt', async () => {
@@ -783,5 +830,146 @@ describe('Schlüsselablage je Konto', () => {
     // Versuch scheitern, statt auf eine gemeinsame Ablage auszuweichen.
     await expect(verwirfGruppenSchluessel(GRUPPE)).rejects.toThrow()
     expect(geoeffnet).toEqual([])
+  })
+})
+
+/**
+ * Das Gruppengeheimnis: erzeugen, mitreisen, den Besitznachweis daraus.
+ *
+ * Es ist nicht der Nachrichtenschlüssel. **Der** rotiert bei jedem
+ * Mitgliederwechsel; das Geheimnis darf das nicht, denn aus ihm entsteht die
+ * Kennung der Mailbox — rotierte es mit, zöge die Gruppe bei jedem Beitritt
+ * um und liesse ihr Fenster stehen.
+ */
+describe('Gruppengeheimnis', () => {
+  // Eigene Geraete: die der oberen Suite leben in deren Gueltigkeitsbereich.
+  let alice: TestGeraet
+  let bob: TestGeraet
+  let carol: TestGeraet
+  let alle: number[]
+
+  beforeEach(() => {
+    verzeichnis.clear()
+    mailbox = []
+    naechsteId = 1
+    alice = geraet(ALICE, 'alice-laptop')
+    bob = geraet(BOB, 'bob-handy')
+    carol = geraet(CAROL, 'carol-tablet')
+    alle = [ALICE, BOB, CAROL]
+    serverMitglieder = [...alle]
+    relaisKaputt = false
+    registrierungen.length = 0
+    leereMailboxNachweise()
+  })
+
+  it('trennt Mailbox-Kennung und Besitznachweis', async () => {
+    // Die Kennung steht in jedem Aufruf. Wäre der Nachweis derselbe Wert,
+    // hätte ihn jeder, der die Kennung sieht — das Schloss wäre ein Türschild.
+    const geheimnis = 'Z'.repeat(44)
+    const mid = await mailboxAusGeheimnis(geheimnis)
+    const token = await nachweisAusGeheimnis(geheimnis)
+
+    expect(mid).toMatch(/^[0-9a-f]{64}$/)
+    expect(token).toMatch(/^[0-9a-f]{64}$/)
+    expect(mid).not.toBe(token)
+  })
+
+  it('leitet aus verschiedenen Geheimnissen verschiedene Kennungen ab', async () => {
+    expect(await mailboxAusGeheimnis('A'.repeat(44))).not.toBe(
+      await mailboxAusGeheimnis('B'.repeat(44)),
+    )
+  })
+
+  it('wird nur vom Eigentümer erzeugt', async () => {
+    // Erzeugten zwei Mitglieder gleichzeitig eines, hätte die Gruppe zwei
+    // Mailboxen und zerfiele in zwei Hälften, die einander nicht mehr sehen.
+    await sende(bob, alle, 'Bob ist nicht Eigentümer')
+
+    expect(await bob.ablage.liesGeheimnis(GRUPPE)).toBeNull()
+    expect(registrierungen).toEqual([])
+  })
+
+  it('entsteht beim ersten Senden des Eigentümers', async () => {
+    await sendeAlsEigentuemer(alice, alle, 'erste Nachricht')
+
+    const geheimnis = await alice.ablage.liesGeheimnis(GRUPPE)
+    expect(geheimnis).not.toBeNull()
+    // Der Nachweis liegt danach im Speicher und geht bei jedem Aufruf mit.
+    expect(mailboxNachweis(MAILBOX)).toBe(await nachweisAusGeheimnis(geheimnis!.geheimnis))
+  })
+
+  it('reist mit dem Schlüssel zu den anderen Geräten', async () => {
+    const stand = naechsteId
+    await sendeAlsEigentuemer(alice, alle, 'mit Geheimnis')
+    // `stand - 1`: `lies` filtert `id > ab`, und der erste Umschlag dieses
+    // Sendevorgangs traegt genau `stand`.
+    await lies(bob, alle, stand - 1)
+
+    const beiAlice = await alice.ablage.liesGeheimnis(GRUPPE)
+    const beiBob = await bob.ablage.liesGeheimnis(GRUPPE)
+    expect(beiBob?.geheimnis).toBe(beiAlice?.geheimnis)
+  })
+
+  it('wird beim Empfänger nie überschrieben', async () => {
+    // Der Fall, der die Gruppe spalten würde: ein zweites Geheimnis von
+    // irgendwo. Wer schon eines hat, behält es.
+    await sendeAlsEigentuemer(alice, alle, 'erst')
+    await lies(bob, alle)
+    const erstes = (await bob.ablage.liesGeheimnis(GRUPPE))?.geheimnis
+
+    aktiviere(bob)
+    await verarbeiteGruppenSteuerung(
+      kontext(bob, alle),
+      JSON.stringify({
+        typ: 'group_key',
+        v: 1,
+        groupId: GRUPPE,
+        keyId: 'ffffffffffffffff',
+        schluessel: 'x',
+        mitglieder: alle,
+        geheimnis: 'UNTERGESCHOBEN'.padEnd(44, 'x'),
+      }),
+    )
+
+    expect((await bob.ablage.liesGeheimnis(GRUPPE))?.geheimnis).toBe(erstes)
+  })
+
+  it('erzwingt genau einmal eine Rotation und danach nicht mehr', async () => {
+    // Ohne Mitgliederwechsel rotiert nichts — ein frisch erzeugtes Geheimnis
+    // muss die Rotation deshalb selbst auslösen, sonst käme es nie zu den
+    // anderen. Beim zweiten Senden darf das nicht noch einmal passieren.
+    await sendeAlsEigentuemer(alice, alle, 'erste')
+    const nachErster = alice.ablage.anzahl()
+
+    await sendeAlsEigentuemer(alice, alle, 'zweite')
+
+    expect(alice.ablage.anzahl()).toBe(nachErster)
+  })
+
+  it('registriert die Gruppenmailbox nicht, solange der Schlüssel durch sie läuft', async () => {
+    /*
+     * Der Test zu einem gemessenen Fehler, nicht zu einer Vermutung.
+     *
+     * Ein früherer Entwurf registrierte den Nachweis beim ersten Senden. Am
+     * laufenden System war die Gruppe danach tot: die Schlüsselzustellung geht
+     * durch dieselbe Mailbox (`anJedesGeraet` → `kontext.blindMailboxId`), und
+     * ein Mitglied ohne Geheimnis bekam dort 403 — also nie den Schlüssel, aus
+     * dem das Geheimnis gekommen wäre. Es sah die Nachricht nicht einmal als
+     * „Verschlüsselte Nachricht"; die Mailbox lieferte gar nichts mehr.
+     *
+     * Registriert werden darf erst, wenn die Zustellung woanders läuft.
+     */
+    const stand = naechsteId
+    await sendeAlsEigentuemer(alice, alle, 'erste')
+    expect(registrierungen).toEqual([])
+
+    // Und die Gegenprobe, die zählt: das Mitglied kommt an den Schlüssel.
+    // Von Anfang an gelesen, denn die Zustellung liegt beim ersten Senden —
+    // danach rotiert nichts mehr.
+    await sendeAlsEigentuemer(alice, alle, 'zweite')
+    expect(await lies(bob, alle, stand - 1)).toEqual({
+      texte: ['erste', 'zweite'],
+      unlesbar: 0,
+    })
   })
 })

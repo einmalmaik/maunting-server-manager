@@ -62,7 +62,13 @@ const HYBRID_PREFIX = 'sv-e2ee-hybrid-v1:'
 /** Mit wem oder was gesprochen wird. */
 export type GespraechsZiel =
   | { art: 'direkt'; peerId: number }
-  | { art: 'gruppe'; groupId: number; mitglieder: readonly number[] }
+  | {
+      art: 'gruppe'
+      groupId: number
+      mitglieder: readonly number[]
+      /** Nur der Eigentümer darf das Gruppengeheimnis erzeugen. Siehe `GruppenKontext`. */
+      istEigentuemer: boolean
+    }
   | { art: 'keins' }
 
 /**
@@ -287,8 +293,14 @@ export function useKonversation({
     if (ziel.mitglieder.length === 0) return null
     const mitglieder = [...ziel.mitglieder]
     if (!mitglieder.includes(eigeneId)) mitglieder.push(eigeneId)
-    return { groupId: ziel.groupId, blindMailboxId, eigeneId, mitglieder }
-  }, [ziel.art, ziel.art === 'gruppe' ? ziel.groupId : 0, ziel.art === 'gruppe' ? ziel.mitglieder.join(',') : '', eigeneId, blindMailboxId])
+    return {
+      groupId: ziel.groupId,
+      blindMailboxId,
+      eigeneId,
+      mitglieder,
+      istEigentuemer: ziel.istEigentuemer,
+    }
+  }, [ziel.art, ziel.art === 'gruppe' ? ziel.groupId : 0, ziel.art === 'gruppe' ? ziel.mitglieder.join(',') : '', ziel.art === 'gruppe' ? ziel.istEigentuemer : false, eigeneId, blindMailboxId])
 
   const drKontext = useMemo<DrKontext | null>(
     () => (ziel.art === 'direkt' && eigeneId ? { eigeneId, peerId: ziel.peerId } : null),

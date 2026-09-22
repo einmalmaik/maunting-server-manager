@@ -1508,6 +1508,7 @@ export function Messenger() {
         art: 'gruppe',
         groupId: activeGroup.id,
         mitglieder: (activeGroup.members ?? []).map((m) => m.user_id),
+        istEigentuemer: activeGroup.role === 'owner',
       }
     }
     if (activeContact) return { art: 'direkt', peerId: activeContact.userId }
@@ -2816,6 +2817,7 @@ export function Messenger() {
         blindMailboxId,
         eigeneId: currentUserId,
         mitglieder: mitglieder.map((m) => m.user_id),
+        istEigentuemer: activeGroup.role === 'owner',
       },
       darfSchreiben,
     )
@@ -3995,6 +3997,8 @@ export function Messenger() {
                     if (!ids.includes(currentUserId)) ids.push(currentUserId)
                     return ids
                   })(),
+                  istEigentuemer:
+                    groups.find((x) => x.id === fremdesZiel.groupId)?.role === 'owner',
                 }
               : null,
             fremdesZiel.recipientId
