@@ -40,6 +40,7 @@ import type { E2eeIdentity } from '@/services/e2eeIdentity'
 import {
   entschluesseleGruppenUmschlag,
   fordereGruppenSchluessel,
+  holeGeraeteSteuerung,
   verarbeiteGruppenSteuerung,
   verschluesseleFuerGruppe,
   type GruppenKontext,
@@ -317,10 +318,21 @@ export function useKonversation({
     const identitaet = identitaetRef.current
     if (identitaet.state === 'loading') return null
 
+    const schluessel = identitaet.decryptionKeys
+
+    // Zuerst die eigene Geräte-Mailbox: dort liegen die Gruppenschlüssel. Ein
+    // Gerät, das den Schlüssel noch nicht hat, bekäme ihn sonst nie — und
+    // stünde vor einer Mailbox voller „Verschlüsselte Nachricht". Vor dem
+    // Lesen, nicht danach: sonst wäre der erste Durchlauf immer der blinde.
+    if (gruppenKontext) {
+      await holeGeraeteSteuerung(eigeneId, (umschlag) =>
+        decryptE2eeHybridWithKeyring(umschlag, schluessel),
+      ).catch(() => 0)
+      if (aktuelleMailbox.current !== mid) return null
+    }
+
     const umschlaege = await fetchE2eeEnvelopes(mid)
     if (aktuelleMailbox.current !== mid) return null
-
-    const schluessel = identitaet.decryptionKeys
     // Was hier steht, ist schon einmal geöffnet worden. Unverzichtbar, nicht
     // bloß schnell: ein Ratchet-Nachrichtenschlüssel ist nach dem ersten Öffnen
     // verbraucht, ein zweiter Versuch am selben Umschlag muss scheitern.

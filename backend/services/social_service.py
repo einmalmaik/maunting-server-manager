@@ -558,6 +558,7 @@ class SocialService:
         sender_user_id: int,
         blind_mailbox_id: str,
         recipient_id: int | None = None,
+        is_control: bool = False,
     ) -> tuple[int | None, list[int], DirectChat | None, int | None]:
         """Ermittelt das Ziel einer blinden Mailbox für den Absender.
 
@@ -575,6 +576,11 @@ class SocialService:
                     detail="Mailbox-ID stimmt nicht mit der Geräte-Sync-Mailbox überein.",
                 )
             return sender_user_id, [], None, None
+
+        if is_control:
+            ziel = cls._steuerziel_geraetemailbox(db, sender_user_id, clean_mailbox)
+            if ziel is not None:
+                return ziel, [], None, None
 
         if recipient_id:
             expected_mailbox = cls.derive_blind_mailbox_id(sender_user_id, recipient_id)
@@ -628,6 +634,59 @@ class SocialService:
                 return None, group_member_ids, None, gid
 
         return None, [], None, None
+
+    @classmethod
+    def _steuerziel_geraetemailbox(
+        cls, db: Session, sender_user_id: int, clean_mailbox: str
+    ) -> int | None:
+        """Die Geräte-Mailbox eines Mitglieds, das mit dem Absender eine Gruppe teilt.
+
+        Der Weg, auf dem ein Gruppenschlüssel sein Ziel erreicht, ohne durch die
+        Gruppenmailbox zu laufen. Bis 09/2026 ging er durch sie hindurch, und das
+        hatte zwei Folgen: die Mailbox liess sich nicht mit einem Besitznachweis
+        verschliessen (der Schlüssel dafür lag dahinter), und 99 von 100
+        Umschlägen im Lesefenster waren Schlüsselzustellungen.
+
+        Eng gefasst, und jede Einschränkung hat ihren Grund:
+
+        - **Nur Steuerumschläge.** Eine Nachricht gehört nie in eine fremde
+          Geräte-Mailbox; sonst wäre dieser Weg ein Chat am Gespräch vorbei, den
+          kein Verlauf und keine Blockierung je zu sehen bekäme. Der Server kann
+          nicht hineinsehen, aber er kann darauf bestehen, dass der Umschlag als
+          Steuerung deklariert ist — und kein Client zeigt Steuerung je als Text.
+        - **Nur an Mitglieder gemeinsamer Gruppen.** Nicht an jedes Konto: die
+          Kennung ist aus einer kleinen Ganzzahl nachrechenbar, und ohne diese
+          Schranke könnte jeder jedem in die Geräte-Mailbox schreiben.
+
+        Was damit möglich bleibt: wer mit mir in einer Gruppe ist, kann mein
+        Lesefenster mit Steuerumschlägen füllen. Das konnte er vorher auch —
+        über die Gruppenmailbox, die ich ebenso lese.
+
+        Liefert die Konto-Id des Empfängers oder `None`, wenn die Kennung zu
+        keiner erreichbaren Geräte-Mailbox gehört.
+        """
+        gruppen = [
+            gid
+            for (gid,) in db.query(ChatGroupMember.group_id)
+            .filter(ChatGroupMember.user_id == sender_user_id)
+            .all()
+        ]
+        if not gruppen:
+            return None
+
+        kandidaten = {
+            uid
+            for (uid,) in db.query(ChatGroupMember.user_id)
+            .filter(
+                ChatGroupMember.group_id.in_(gruppen),
+                ChatGroupMember.user_id != sender_user_id,
+            )
+            .all()
+        }
+        for uid in kandidaten:
+            if cls.derive_user_device_mailbox_id(uid) == clean_mailbox:
+                return uid
+        return None
 
     @classmethod
     def can_message_user(cls, db: Session, sender_id: int, target_user_id: int) -> tuple[bool, str | None]:
@@ -1228,6 +1287,7 @@ class SocialService:
                 sender_user_id=sender_user_id,
                 blind_mailbox_id=clean_mailbox,
                 recipient_id=recipient_id,
+                is_control=is_control,
             )
             if target_recipient_id is None and not group_member_ids:
                 raise HTTPException(status_code=403, detail="Keine Berechtigung für diese Mailbox.")

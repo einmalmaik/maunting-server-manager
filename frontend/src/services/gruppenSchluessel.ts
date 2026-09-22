@@ -73,11 +73,16 @@ import { base64ToBytes, bytesToBase64 } from '@msdis/shield/core'
 import { sha256Hex } from '@msdis/shield/integrity'
 import { randomBytes } from '@msdis/shield/random'
 
-import { getGroupMembers, relayE2eeEnvelope } from '@/api/social'
+import { fetchE2eeEnvelopes, getGroupMembers, relayE2eeEnvelope } from '@/api/social'
 import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
 import i18n from '@/i18n'
 
-import { encryptE2eeHybrid } from './e2eeCrypto'
+import {
+  E2EE_HYBRID_ENVELOPE_SPEC,
+  deriveGroupBlindMailboxId,
+  deriveUserDeviceMailboxId,
+  encryptE2eeHybrid,
+} from './e2eeCrypto'
 import { eigenesGeraet, geraeteVon } from './e2eeGeraet'
 import { merkeMailboxNachweis } from './mailboxNachweis'
 import { entsiegleZeile, versiegleZeile } from './lokaleVersiegelung'
@@ -701,7 +706,22 @@ async function schluesselZumSenden(kontext: GruppenKontext): Promise<GruppenSchl
   return eintrag
 }
 
-/** Versiegelt eine Nutzlast für jedes Gerät der genannten Konten und relayed sie. */
+/**
+ * Versiegelt eine Nutzlast für jedes Gerät der genannten Konten und relayed sie.
+ *
+ * Zugestellt wird in die **Geräte-Mailbox des Empfängers**, nicht in die der
+ * Gruppe. Bis 09/2026 lief es andersherum, mit zwei Folgen:
+ *
+ * 1. Die Gruppenmailbox liess sich nicht verschliessen. Wer den Schlüssel noch
+ *    nicht hatte, hätte ihn hinter genau dem Schloss holen müssen, das er
+ *    aufsperren sollte — eine Laufzeitprobe zeigte das Mitglied danach vor
+ *    einer stummen Mailbox.
+ * 2. Das Lesefenster verhungerte: 99 von 100 Umschlägen waren
+ *    Schlüsselzustellungen für fremde Geräte, die dieses Gerät nie öffnen kann.
+ *
+ * Gelesen wird weiterhin aus beiden Quellen — Altbestand liegt noch in den
+ * Gruppenmailboxen, und der soll nicht verloren gehen.
+ */
 async function anJedesGeraet(
   kontext: GruppenKontext,
   empfaengerIds: readonly number[],
@@ -719,6 +739,7 @@ async function anJedesGeraet(
   let ziele = 0
   for (const empfaengerId of empfaengerIds) {
     const geraete = await geraeteVon(empfaengerId)
+    const ziel = await deriveUserDeviceMailboxId(empfaengerId)
     for (const geraet of geraete) {
       // Das eigene Gerät hat den Schlüssel schon.
       if (empfaengerId === kontext.eigeneId && geraet.device_id === meins.kennung) continue
@@ -727,7 +748,7 @@ async function anJedesGeraet(
       try {
         const umschlag = await encryptE2eeHybrid(nutzlast, geraet.public_key)
         await relayE2eeEnvelope({
-          blind_mailbox_id: kontext.blindMailboxId,
+          blind_mailbox_id: ziel,
           ciphertext_envelope: umschlag,
           // Je Gerät eine eigene Kennung: das Relais gibt beim zweiten Aufruf
           // mit derselben Kennung still den ersten Umschlag zurück.
@@ -1106,6 +1127,109 @@ export async function fordereGruppenSchluessel(
     gefragt.delete(marke)
     return false
   }
+}
+
+// ==========================================
+// Die eigene Geräte-Mailbox
+// ==========================================
+
+/**
+ * Wie weit die eigene Geräte-Mailbox schon gelesen ist, je Konto.
+ *
+ * Nur im Arbeitsspeicher. Nach einem Neuladen wird einmal alles gelesen — das
+ * kostet einen Durchlauf und ist der Preis dafür, nichts zu verpassen. Je
+ * Konto getrennt, damit ein Kontowechsel im selben Tab nicht den Stand des
+ * vorigen erbt und dessen Umschläge überspringt.
+ */
+const geraeteStand = new Map<number, number>()
+
+/** Vergisst den Lesestand. Gehört zum Abmelden. */
+export function leereGeraeteStand(): void {
+  geraeteStand.clear()
+}
+
+/**
+ * Liest die Steuerumschläge aus der eigenen Geräte-Mailbox.
+ *
+ * Der Weg, auf dem ein Gruppenschlüssel heute ankommt. Er hängt an keiner
+ * Gruppe: ein Gerät, das von einer Gruppe noch gar nichts weiss, bekommt hier
+ * ihren Schlüssel und ihr Geheimnis — und erst damit kann es ihre Mailbox
+ * öffnen. Genau diese Reihenfolge fehlte, solange die Zustellung durch die
+ * Gruppenmailbox lief.
+ *
+ * Der Gruppenkontext entsteht aus der Nutzlast selbst, denn beim Lesen ist
+ * noch nicht bekannt, um welche Gruppe es geht. Das ist keine Lücke: der
+ * Umschlag war hybrid für dieses Gerät versiegelt, und was er setzen kann,
+ * entscheidet `verarbeiteGruppenSteuerung` — ein Schlüssel wird abgelegt, aber
+ * verdrängt keinen, und ein Geheimnis kommt nur an, wo noch keines ist.
+ *
+ * `entsiegle` kommt von aussen, damit diese Datei den Schlüsselbund des
+ * Geräts nicht kennen muss. Wirft sie, war der Umschlag für ein anderes Gerät
+ * — der Normalfall, kein Fehler.
+ */
+export async function holeGeraeteSteuerung(
+  eigeneId: number,
+  entsiegle: (umschlag: string) => Promise<string>,
+): Promise<number> {
+  if (!Number.isInteger(eigeneId) || eigeneId <= 0) return 0
+
+  const mid = await deriveUserDeviceMailboxId(eigeneId)
+  const seit = geraeteStand.get(eigeneId) ?? 0
+
+  let umschlaege: { id: number; ciphertext_envelope: string }[]
+  try {
+    umschlaege = await fetchE2eeEnvelopes(mid, seit)
+  } catch {
+    // Kein Netz oder ein Server, der diese Mailbox nicht kennt. Der nächste
+    // Durchlauf holt es nach; der Stand bleibt stehen.
+    return 0
+  }
+
+  let verarbeitet = 0
+  for (const env of umschlaege) {
+    if (env.id > (geraeteStand.get(eigeneId) ?? 0)) geraeteStand.set(eigeneId, env.id)
+    if (!env.ciphertext_envelope.startsWith(E2EE_HYBRID_ENVELOPE_SPEC.currentPrefix)) continue
+
+    let klartext: string
+    try {
+      klartext = await entsiegle(env.ciphertext_envelope)
+    } catch {
+      continue // Für ein anderes Gerät desselben Kontos.
+    }
+
+    let groupId = 0
+    let mitglieder: number[] = []
+    try {
+      const roh = JSON.parse(klartext)
+      groupId = Number(roh?.groupId)
+      mitglieder = normalisiereMitglieder(Array.isArray(roh?.mitglieder) ? roh.mitglieder : [])
+    } catch {
+      continue // Kein JSON — gehört einem anderen Nutzer dieser Mailbox
+      // (Notizen, Kalender) und nicht hierher.
+    }
+    if (!Number.isInteger(groupId) || groupId <= 0) continue
+
+    if (!mitglieder.includes(eigeneId)) mitglieder.push(eigeneId)
+    const kontext: GruppenKontext = {
+      groupId,
+      blindMailboxId: await deriveGroupBlindMailboxId(groupId),
+      eigeneId,
+      mitglieder,
+      // Aus einem eingehenden Umschlag wird niemand Eigentümer. Das Flag
+      // entscheidet allein, ob dieses Gerät ein Geheimnis *erzeugen* darf —
+      // und das darf es beim Empfangen unter keinen Umständen.
+      istEigentuemer: false,
+    }
+
+    try {
+      const ergebnis = await verarbeiteGruppenSteuerung(kontext, klartext)
+      if (ergebnis.art !== 'keine') verarbeitet += 1
+    } catch {
+      // Eine Zustellung, die sich nicht verarbeiten lässt, hält die übrigen
+      // nicht auf.
+    }
+  }
+  return verarbeitet
 }
 
 /** Wirft die Schlüssel einer Gruppe weg. Beim Verlassen und beim Löschen fällig. */

@@ -22,6 +22,16 @@ vi.mock('./e2eeCrypto', () => ({
   decryptE2eeHybridWithKeyring: async () => {
     throw new Error('im Test nicht benutzt')
   },
+  // Literal, nicht `HYBRID`: dieser Wert wird beim Bau der Factory gelesen,
+  // und die läuft vor den Konstanten der Datei.
+  E2EE_HYBRID_ENVELOPE_SPEC: { currentPrefix: 'sv-e2ee-hybrid-v1:' },
+  // Die echten Ableitungen sind SHA-256; hier zählt nur, dass jede Mailbox
+  // eine eigene Kennung hat und die der Gruppe dieselbe bleibt, die der
+  // Kontext trägt (`MAILBOX`, weiter unten — hier als Literal, weil `vi.mock`
+  // vor den Konstanten läuft).
+  deriveUserDeviceMailboxId: async (uid: number) => `dev:${uid}`,
+  deriveGroupBlindMailboxId: async (gid: number) =>
+    gid === 42 ? 'a'.repeat(32) : `grp:${gid}`,
 }))
 
 // ---- Stellvertreter für die Geräteverwaltung ----------------------------
@@ -44,6 +54,8 @@ vi.mock('./e2eeGeraet', () => ({
 // ---- Stellvertreter für Relais und Anrufe -------------------------------
 interface Umschlag {
   id: number
+  /** In welcher Mailbox er liegt. Seit 09/2026 der Gegenstand eigener Zusagen. */
+  mailboxId: string
   ciphertext_envelope: string
   client_uuid: string | null
   control_type: string | null
@@ -64,6 +76,7 @@ const registrierungen: { mailboxId: string; authToken: string }[] = []
 
 vi.mock('@/api/social', () => ({
   relayE2eeEnvelope: async (payload: {
+    blind_mailbox_id: string
     ciphertext_envelope: string
     client_uuid?: string | null
     control_type?: string | null
@@ -71,6 +84,7 @@ vi.mock('@/api/social', () => ({
     if (relaisKaputt) throw new Error('Relais nicht erreichbar')
     const umschlag: Umschlag = {
       id: naechsteId++,
+      mailboxId: payload.blind_mailbox_id,
       ciphertext_envelope: payload.ciphertext_envelope,
       client_uuid: payload.client_uuid ?? null,
       control_type: payload.control_type ?? null,
@@ -78,6 +92,8 @@ vi.mock('@/api/social', () => ({
     mailbox.push(umschlag)
     return umschlag
   },
+  fetchE2eeEnvelopes: async (mid: string, seit = 0) =>
+    mailbox.filter((u) => u.mailboxId === mid && u.id > seit),
   // Die Mitgliederliste, wie der Server sie sieht. Absichtlich getrennt von der
   // Liste, die der Aufrufer im Kontext mitgibt: genau dieses Auseinanderlaufen
   // ist der Fall, den ein Nachzügler auslöst.
@@ -94,6 +110,8 @@ import {
   entschluesseleGruppenUmschlag,
   erzeugeGruppenSchluessel,
   fordereGruppenSchluessel,
+  holeGeraeteSteuerung,
+  leereGeraeteStand,
   setzeGruppenAblageFuerTest,
   verarbeiteGruppenSteuerung,
   verschluesseleFuerGruppe,
@@ -210,8 +228,10 @@ function oeffneHybrid(g: TestGeraet, umschlag: string): string | null {
 }
 
 /**
- * Lässt ein Gerät die Mailbox durchgehen: Steuerumschläge verarbeiten, Nachricht
- * zurückgeben. Genau das, was `loadMessages` tut.
+ * Lässt ein Gerät einen Durchlauf machen: erst die eigene Geräte-Mailbox, dann
+ * die der Gruppe. Genau die Reihenfolge aus `einDurchlauf` — und sie ist keine
+ * Geschmacksfrage: die Schlüssel liegen in der ersten, die Nachrichten in der
+ * zweiten. Andersherum wäre der erste Durchlauf immer der blinde.
  */
 async function lies(
   g: TestGeraet,
@@ -219,10 +239,19 @@ async function lies(
   ab = 0,
 ): Promise<{ texte: string[]; unlesbar: number }> {
   aktiviere(g)
+
+  await holeGeraeteSteuerung(g.konto, async (umschlag) => {
+    const klartext = oeffneHybrid(g, umschlag)
+    if (klartext === null) throw new Error('nicht für dieses Gerät')
+    return klartext
+  })
+
   const texte: string[] = []
   let unlesbar = 0
-  for (const umschlag of mailbox.filter((u) => u.id > ab)) {
+  for (const umschlag of mailbox.filter((u) => u.mailboxId === MAILBOX && u.id > ab)) {
     if (umschlag.ciphertext_envelope.startsWith(HYBRID)) {
+      // Altbestand: bis 09/2026 lagen die Steuerumschläge hier. Der Lesepfad
+      // muss sie weiter verstehen, sonst verlöre ein Gerät seinen Schlüssel.
       const klartext = oeffneHybrid(g, umschlag.ciphertext_envelope)
       if (klartext !== null) {
         await verarbeiteGruppenSteuerung(kontext(g, mitglieder), klartext)
@@ -246,6 +275,7 @@ async function sendeAlsEigentuemer(
   const umschlag = await verschluesseleFuerGruppe(kontext(g, mitglieder, true), text)
   mailbox.push({
     id: naechsteId++,
+    mailboxId: MAILBOX,
     ciphertext_envelope: umschlag,
     client_uuid: null,
     control_type: null,
@@ -258,6 +288,7 @@ async function sende(g: TestGeraet, mitglieder: number[], text: string): Promise
   const umschlag = await verschluesseleFuerGruppe(kontext(g, mitglieder), text)
   mailbox.push({
     id: naechsteId++,
+    mailboxId: MAILBOX,
     ciphertext_envelope: umschlag,
     client_uuid: null,
     control_type: null,
@@ -286,6 +317,7 @@ describe('gruppenSchluessel', () => {
     serverMitglieder = [...alle]
     relaisKaputt = false
     registrierungen.length = 0
+    leereGeraeteStand()
   })
 
   it('erreicht ein Mitglied, das erst nach dem Öffnen des Gesprächs beitritt', async () => {
@@ -500,14 +532,17 @@ describe('gruppenSchluessel', () => {
         }
       }
 
-      // Die Antwort liegt in der Mailbox hinter der Nachricht, die sie lesbar
-      // macht. Der erste Durchlauf nimmt den Schlüssel entgegen und lässt die
-      // Nachricht stehen, der nächste öffnet sie. Genau so läuft es im Betrieb:
-      // ein Ladevorgang später steht der Text da.
+      // **Ein** Durchlauf reicht. Die Antwort liegt in Bobs Geräte-Mailbox,
+      // und die geht `lies` vor der Gruppenmailbox durch — der Schlüssel ist
+      // also da, wenn die Nachricht an der Reihe ist.
+      //
+      // Bis 09/2026 brauchte es hier zwei Ladevorgänge: die Antwort lag in
+      // derselben Mailbox *hinter* der Nachricht, die sie lesbar macht. Wer
+      // nachforderte, sah beim ersten Mal „Verschlüsselte Nachricht" und musste
+      // auf den nächsten Durchlauf warten.
       const ersterDurchlauf = await lies(bobZwei, alle)
-      expect(ersterDurchlauf.texte).toEqual([])
-      expect(ersterDurchlauf.unlesbar).toBe(1)
-      expect((await lies(bobZwei, alle)).texte).toEqual(['lief schon'])
+      expect(ersterDurchlauf.texte).toEqual(['lief schon'])
+      expect(ersterDurchlauf.unlesbar).toBe(0)
     })
 
     it('antwortet nicht, wer nicht zuständig ist', async () => {
@@ -860,6 +895,7 @@ describe('Gruppengeheimnis', () => {
     relaisKaputt = false
     registrierungen.length = 0
     leereMailboxNachweise()
+    leereGeraeteStand()
   })
 
   it('trennt Mailbox-Kennung und Besitznachweis', async () => {
@@ -971,5 +1007,140 @@ describe('Gruppengeheimnis', () => {
       texte: ['erste', 'zweite'],
       unlesbar: 0,
     })
+  })
+})
+
+// ==========================================
+// Die Geräte-Mailbox
+// ==========================================
+
+describe('Zustellung über die Geräte-Mailbox', () => {
+  let alice: TestGeraet
+  let bob: TestGeraet
+  let alle: number[]
+
+  /** Öffnet einen Umschlag für dieses Gerät — sonst wirft es, wie im Betrieb. */
+  const entsiegleFuer = (g: TestGeraet) => async (umschlag: string) => {
+    const klartext = oeffneHybrid(g, umschlag)
+    if (klartext === null) throw new Error('nicht für dieses Gerät')
+    return klartext
+  }
+
+  beforeEach(() => {
+    verzeichnis.clear()
+    mailbox = []
+    naechsteId = 1
+    alice = geraet(ALICE, 'alice-laptop')
+    bob = geraet(BOB, 'bob-handy')
+    alle = [ALICE, BOB]
+    serverMitglieder = [...alle]
+    relaisKaputt = false
+    registrierungen.length = 0
+    leereMailboxNachweise()
+    leereGeraeteStand()
+  })
+
+  it('legt keinen Steuerumschlag mehr in die Gruppenmailbox', async () => {
+    /*
+     * Die Zusage, an der die ganze Scheibe hängt.
+     *
+     * Solange der Schlüssel durch die Gruppenmailbox läuft, lässt sie sich
+     * nicht verschliessen — der Schlüssel läge hinter dem Schloss, das er
+     * aufsperren soll. Und das Lesefenster verhungerte: 99 von 100 Umschlägen
+     * waren Zustellungen für fremde Geräte.
+     */
+    await sendeAlsEigentuemer(alice, alle, 'eine Nachricht')
+
+    const inDerGruppe = mailbox.filter((u) => u.mailboxId === MAILBOX)
+    expect(inDerGruppe.every((u) => u.control_type === null)).toBe(true)
+    expect(inDerGruppe).toHaveLength(1)
+
+    // Und das Gegenstück: die Zustellung liegt bei Bob, nicht bei Alice.
+    const beiBob = mailbox.filter((u) => u.mailboxId === 'dev:2')
+    expect(beiBob).toHaveLength(1)
+    expect(beiBob[0].control_type).toBe('group_key')
+  })
+
+  it('holt den Schlüssel, ohne die Gruppe zu kennen', async () => {
+    // Der Bootstrap: Bobs Gerät weiss von der Gruppe nichts — keine groupId,
+    // keine Mitgliederliste, kein Kontext. Der Umschlag bringt alles mit.
+    await sendeAlsEigentuemer(alice, alle, 'für Bob')
+
+    aktiviere(bob)
+    expect(await bob.ablage.liesAktuellen(GRUPPE)).toBeNull()
+
+    const verarbeitet = await holeGeraeteSteuerung(BOB, entsiegleFuer(bob))
+
+    expect(verarbeitet).toBe(1)
+    expect(await bob.ablage.liesAktuellen(GRUPPE)).not.toBeNull()
+    expect((await bob.ablage.liesGeheimnis(GRUPPE))?.geheimnis).toBe(
+      (await alice.ablage.liesGeheimnis(GRUPPE))?.geheimnis,
+    )
+  })
+
+  it('liest jeden Umschlag nur einmal', async () => {
+    // Ohne Lesestand liefe jeder Durchlauf über den ganzen Bestand. Das ist
+    // nicht nur langsam: `beantworteAnfrage` würde jede Nachfrage erneut
+    // beantworten und dabei neue Umschläge erzeugen.
+    await sendeAlsEigentuemer(alice, alle, 'einmal')
+
+    aktiviere(bob)
+    expect(await holeGeraeteSteuerung(BOB, entsiegleFuer(bob))).toBe(1)
+    expect(await holeGeraeteSteuerung(BOB, entsiegleFuer(bob))).toBe(0)
+  })
+
+  it('geht über fremden Inhalt derselben Mailbox hinweg', async () => {
+    /*
+     * Die Geräte-Mailbox gehört nicht dem Messenger allein — Notizen und
+     * Kalender legen dort ihre Schlüssel ab. Deren Umschläge sind kein JSON
+     * mit `groupId`, und ein Fehler daran dürfte den Schlüssel dahinter nicht
+     * aufhalten.
+     */
+    mailbox.push({
+      id: naechsteId++,
+      mailboxId: 'dev:2',
+      ciphertext_envelope: `${HYBRID}pub-bob-handy.${Buffer.from('kein JSON', 'utf-8').toString('base64')}`,
+      client_uuid: null,
+      control_type: 'notes_key',
+    })
+    await sendeAlsEigentuemer(alice, alle, 'dahinter')
+
+    aktiviere(bob)
+    expect(await holeGeraeteSteuerung(BOB, entsiegleFuer(bob))).toBe(1)
+    expect(await bob.ablage.liesAktuellen(GRUPPE)).not.toBeNull()
+  })
+
+  it('macht aus einem eingehenden Umschlag keinen Eigentümer', async () => {
+    /*
+     * Der Missbrauchsfall: wer über die Geräte-Mailbox etwas bekommt, darf
+     * daraus keine Rechte ableiten. Ein erzeugtes Geheimnis wäre das
+     * schlimmste — es spaltete die Gruppe in zwei Mailboxen.
+     *
+     * Geprüft wird über die Wirkung: Bob bekommt einen Schlüssel **ohne**
+     * Geheimnis. Legte der Lesepfad ihm dabei den Eigentümerrang bei, stünde
+     * danach eines in seiner Ablage.
+     */
+    // Alice sendet *nicht* als Eigentümerin: ihr Schlüssel geht raus, ein
+    // Geheimnis entsteht dabei nicht.
+    await sende(alice, alle, 'ohne Geheimnis')
+    expect(await alice.ablage.liesGeheimnis(GRUPPE)).toBeNull()
+
+    aktiviere(bob)
+    expect(await holeGeraeteSteuerung(BOB, entsiegleFuer(bob))).toBe(1)
+
+    expect(await bob.ablage.liesAktuellen(GRUPPE)).not.toBeNull()
+    expect(await bob.ablage.liesGeheimnis(GRUPPE)).toBeNull()
+  })
+
+  it('versteht Altbestand aus der Gruppenmailbox weiter', async () => {
+    // Was vor 09/2026 zugestellt wurde, liegt dort. Ginge es beim Umstieg
+    // verloren, verlöre jedes Gerät seinen laufenden Schlüssel.
+    await sende(alice, alle, 'aus der alten Zeit')
+    // Die Zustellung dorthin zurücklegen, wo sie vor 09/2026 lag.
+    for (const u of mailbox) {
+      if (u.mailboxId === 'dev:2') u.mailboxId = MAILBOX
+    }
+
+    expect(await lies(bob, alle)).toEqual({ texte: ['aus der alten Zeit'], unlesbar: 0 })
   })
 })

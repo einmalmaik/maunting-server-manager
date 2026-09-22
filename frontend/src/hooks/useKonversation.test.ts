@@ -30,6 +30,7 @@ const { lesungen, geraete, gruppenLesungen, gerufen, klartextCache, abgelegt } =
     fordereGruppenSchluessel: [] as string[],
     verwirfDrSitzung: [] as string[],
     verarbeiteGruppenSteuerung: [] as string[],
+    holeGeraeteSteuerung: [] as number[],
   },
 }))
 
@@ -78,6 +79,13 @@ vi.mock('@/services/gruppenSchluessel', () => ({
   }),
   verarbeiteGruppenSteuerung: vi.fn(async (_k: any, klartext: string) => {
     gerufen.verarbeiteGruppenSteuerung.push(klartext)
+  }),
+  // Die eigene Geräte-Mailbox. Sie steht vor dem Lesen der Gruppenmailbox und
+  // bringt den Schlüssel mit; was sie im einzelnen tut, prüft
+  // `gruppenSchluessel.test.ts`.
+  holeGeraeteSteuerung: vi.fn(async (eigeneId: number) => {
+    gerufen.holeGeraeteSteuerung.push(eigeneId)
+    return 0
   }),
   verschluesseleFuerGruppe: vi.fn(async (k: any, payload: string) => `sv-e2ee-group-v1:${k.groupId}:${payload}`),
 }))
@@ -164,6 +172,7 @@ describe('useKonversation', () => {
     gerufen.fordereGruppenSchluessel.length = 0
     gerufen.verwirfDrSitzung.length = 0
     gerufen.verarbeiteGruppenSteuerung.length = 0
+    gerufen.holeGeraeteSteuerung.length = 0
     klartextCache.clear()
     abgelegt.clear()
     identitaetRef.current = {
@@ -422,6 +431,31 @@ describe('useKonversation', () => {
       await result.current.liesUmschlaege()
 
       expect(gerufen.fordereGruppenSchluessel).toEqual([])
+    })
+
+    it('sieht vor jedem Durchlauf in der eigenen Geräte-Mailbox nach', async () => {
+      // Dort liegt seit 09/2026 der Gruppenschlüssel. Ohne diesen Griff stünde
+      // ein Gerät ohne Schlüssel vor einer Mailbox voller „Verschlüsselte
+      // Nachricht" — und bekäme ihn nie, weil er nirgends sonst ankommt.
+      umschlaege = [umschlag(1, 'g-ok')]
+      gruppenLesungen.set('g-ok', { art: 'klartext', text: 'Hallo Gruppe' })
+
+      const { result } = await baueHook({ art: 'gruppe', groupId: 7, mitglieder: [ICH, DU] })
+      await result.current.liesUmschlaege()
+
+      expect(gerufen.holeGeraeteSteuerung).toEqual([ICH])
+    })
+
+    it('lässt die Geräte-Mailbox beim Direktchat aus', async () => {
+      // Sie trägt Gruppenschlüssel. Ein Direktchat hat keine, und ein Aufruf
+      // je Durchlauf wäre eine Abfrage, die nie etwas findet.
+      umschlaege = [umschlag(1, 'dr-ok')]
+      lesungen.set('dr-ok', { art: 'klartext', text: 'Hallo' })
+
+      const { result } = await baueHook({ art: 'direkt', peerId: DU })
+      await result.current.liesUmschlaege()
+
+      expect(gerufen.holeGeraeteSteuerung).toEqual([])
     })
   })
 

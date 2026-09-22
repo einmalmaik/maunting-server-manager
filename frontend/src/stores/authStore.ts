@@ -11,6 +11,7 @@ import { clearSqlConsoleHistory } from '@/lib/sqlConsoleStorage'
 import { useVaultStore } from '@/desktop/vault/vaultStore'
 import { clearMemoryKeyStore } from '@/services/e2eeCrypto'
 import { clearGeraeteMemory } from '@/services/e2eeGeraet'
+import { leereGeraeteStand } from '@/services/gruppenSchluessel'
 import { leereMailboxNachweise } from '@/services/mailboxNachweis'
 import { kuendige } from '@/services/pushAbo'
 import type { User } from '@/types'
@@ -140,6 +141,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // hiesse, dem naechsten Menschen an diesem Geraet fertige Nachweise zu
     // hinterlassen.
     leereMailboxNachweise()
+    // Und der Lesestand der eigenen Geräte-Mailbox. Er ist je Konto getrennt,
+    // aber stehenzulassen hiesse, dem nächsten Konto in diesem Tab zu
+    // verschweigen, was vor seiner Anmeldung dort ankam.
+    leereGeraeteStand()
     // Die Knotenliste hält Name, Adresse und Port des Agenten sowie den
     // TLS-Fingerabdruck. Ohne dieses clear() bliebe sie bis zum nächsten
     // Neuladen der Seite im Speicher des Tabs liegen.
