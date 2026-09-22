@@ -671,7 +671,12 @@ def _gruppe_antwort(db: Session, group: ChatGroup, user_id: int) -> dict:
         "name": group.name,
         "description": group.description,
         "avatar_url": group.avatar_url,
-        "invite_code": group.invite_code,
+        # Wie in `list_user_groups`: der Code geht nur an die, die einladen
+        # dürfen. Dieser Zweig greift, solange die Mitgliedschaft noch nicht in
+        # der Liste steht — beim Anlegen der Gruppe also für den Gründer.
+        "invite_code": (
+            group.invite_code if SocialService.darf_einladen(db, group.id, user_id) else None
+        ),
         "owner_user_id": group.owner_user_id,
         "default_permissions": group.default_permissions,
         "member_count": len(group.members) if group.members else 1,

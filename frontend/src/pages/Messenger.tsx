@@ -1745,6 +1745,22 @@ export function Messenger() {
   const darfFremdeLoeschen =
     Boolean(activeGroup) && gruppenrechteVon(currentUserId).has('delete_messages')
 
+  /**
+   * Ob ich in dieser Gruppe schreiben und anhängen darf.
+   *
+   * Im Direktchat immer — dort gibt es keine Rollen. `send_messages` und
+   * `attach_media` standen seit je im Vokabular, ließen sich setzen und hatten
+   * keinen Konsumenten: das Eingabefeld fragte nie.
+   *
+   * Durchgesetzt wird das **beim Empfänger** (siehe `loadMessages`), nicht am
+   * Server. Der Server kann den Inhalt nicht lesen und weiß nach Stufe 6 auch
+   * nicht mehr, wer Mitglied ist; eine Schranke dort wäre eine, die wir bald
+   * wieder herausreißen. Hier zu sperren ist die Höflichkeit, dort zu
+   * verwerfen die Wirkung.
+   */
+  const darfSchreiben = !activeGroup || gruppenrechteVon(currentUserId).has('send_messages')
+  const darfAnhaengen = !activeGroup || gruppenrechteVon(currentUserId).has('attach_media')
+
   const loadMessages = async (isInitial = false) => {
     const currentMid = blindMailboxId
     if (!currentMid || !currentUserId) return
@@ -2066,6 +2082,8 @@ export function Messenger() {
             let senderId: number
             let senderName: string
             let isSelf: boolean
+            /** Im Direktchat immer; in der Gruppe entscheidet `attach_media`. */
+            let anhaengeErlaubt = true
 
             if (activeContact) {
               /*
@@ -2116,6 +2134,43 @@ export function Messenger() {
               senderId = Number(urheber ?? 0)
 
               isSelf = Number(senderId) === Number(currentUserId)
+
+              /**
+               * Durfte dieses Konto hier überhaupt schreiben?
+               *
+               * Hier sitzt die Durchsetzung von `send_messages` und
+               * `attach_media` — nicht am Eingabefeld. Ein verändertes Programm
+               * schickt trotzdem; dass es niemand **anzeigt**, ist die
+               * Wirkung. Dieselbe Bauart wie bei `@everyone` und beim
+               * Anheften.
+               *
+               * Zwei Feinheiten, die leicht verloren gehen:
+               *
+               * - Geprüft wird nur bei **aktuellen** Mitgliedern. Wer die
+               *   Gruppe verlassen hat oder hinausgeworfen wurde, steht in
+               *   keiner Rolle mehr; seine alten Nachrichten deshalb
+               *   nachträglich verschwinden zu lassen, wäre Geschichtsfälschung
+               *   — er durfte, als er schrieb.
+               * - Verworfen wird beim **ersten Sehen**. Eine Nachricht, die
+               *   schon in der Ablage steht, bleibt: `mischeVerlauf` behält
+               *   lokale Zeilen. Sonst löschte das Stummschalten rückwirkend
+               *   alles, was noch im Hundert-Umschläge-Fenster liegt.
+               */
+              const istMitglied = Boolean(
+                activeGroup.members?.some((m) => Number(m.user_id) === Number(senderId)),
+              )
+              const senderrechte = gruppenrechteVon(senderId)
+              if (!isSelf && istMitglied && !senderrechte.has('send_messages')) {
+                console.warn(
+                  '[Messenger] Gruppennachricht verworfen, Absender darf nicht schreiben:',
+                  senderId,
+                )
+                continue
+              }
+              // Ein Anhang ohne das Recht dazu fällt weg, der Text bleibt: die
+              // Nachricht ganz zu verwerfen nähme jemandem seine Worte wegen
+              // eines Bildes.
+              anhaengeErlaubt = isSelf || !istMitglied || senderrechte.has('attach_media')
               // Der Anzeigename kommt aus der Mitgliederliste, nie aus der
               // Nutzlast: sonst stünde unter der richtigen Kennung ein
               // fremder Name.
@@ -2141,14 +2196,14 @@ export function Messenger() {
               text: parsed.text || '',
               createdAt: env.created_at,
               isSelf,
-              noteAttachment: parsed.note_attachment,
-              calendarAttachment: parsed.calendar_attachment,
-              imageAttachment: parsed.image_attachment,
-              audioAttachment: parsed.audio_attachment,
-              fileAttachment: parsed.file_attachment,
-              stickerAttachment: parsed.sticker_attachment,
-              storyReply: parsed.story_reply,
-              videoNoteAttachment: parsed.video_note_attachment,
+              noteAttachment: anhaengeErlaubt ? parsed.note_attachment : undefined,
+              calendarAttachment: anhaengeErlaubt ? parsed.calendar_attachment : undefined,
+              imageAttachment: anhaengeErlaubt ? parsed.image_attachment : undefined,
+              audioAttachment: anhaengeErlaubt ? parsed.audio_attachment : undefined,
+              fileAttachment: anhaengeErlaubt ? parsed.file_attachment : undefined,
+              stickerAttachment: anhaengeErlaubt ? parsed.sticker_attachment : undefined,
+              storyReply: anhaengeErlaubt ? parsed.story_reply : undefined,
+              videoNoteAttachment: anhaengeErlaubt ? parsed.video_note_attachment : undefined,
               antwortAuf: parsed.antwort_auf,
               weitergeleitet: Boolean(parsed.weitergeleitet) || undefined,
               erwaehnungen: Array.isArray(parsed.erwaehnungen) ? parsed.erwaehnungen : undefined,
@@ -2776,6 +2831,37 @@ export function Messenger() {
       abgebrochen = true
     }
   }, [activeGroup?.id, activeGroup?.members, blindMailboxId, currentUserId])
+
+  /**
+   * Die offene Gruppe frisch halten.
+   *
+   * `activeGroup` war eine Momentaufnahme vom Öffnen des Chats und wurde nie
+   * wieder angefasst — die Liste daneben aktualisierte sich im Takt, dieser
+   * eine Eintrag nicht. Solange daran nur der Name hing, fiel es niemandem
+   * auf. Seit die **Rechte** daran hängen, ist es eine Sicherheitsfrage: ein
+   * entzogenes Schreibrecht wirkte erst, wenn der Betroffene den Chat von
+   * Hand neu öffnete, und ein frisch vergebenes ebenso wenig.
+   *
+   * Verglichen wird nur, was Rechte trägt. Raumzeichen und Anrufzustand
+   * ändern sich im Sekundentakt; darauf zu reagieren hiesse, die Ansicht
+   * ständig neu zu setzen, ohne dass sich etwas geändert hätte.
+   */
+  useEffect(() => {
+    if (!activeGroup) return
+    const frisch = groups.find((g) => g.id === activeGroup.id)
+    if (!frisch) return
+    const rechtekennung = (g: ChatGroupItem) =>
+      JSON.stringify([
+        g.default_permissions ?? null,
+        g.invite_code ?? null,
+        g.role ?? null,
+        g.owner_user_id,
+        g.can_pin_messages ?? null,
+        g.can_mention_everyone ?? null,
+        (g.members ?? []).map((m) => [m.user_id, m.role, m.permissions ?? null]),
+      ])
+    if (rechtekennung(frisch) !== rechtekennung(activeGroup)) setActiveGroup(frisch)
+  }, [groups, activeGroup])
 
   /** Ob ich in dieser Gruppe anheften darf — vom Server entschieden. */
   const darfAnheften = Boolean(activeGroup?.can_pin_messages)
@@ -3549,6 +3635,21 @@ export function Messenger() {
       !blindMailboxId ||
       !currentUserId
     ) {
+      return
+    }
+
+    // Die Rechtelage der Gruppe, bevor irgendetwas verschlüsselt wird. Das
+    // Eingabefeld ist bereits gesperrt; dies fängt die anderen Wege ab —
+    // Weiterleiten, Sprachnachricht, Videonotiz, Sticker.
+    if (!darfSchreiben) {
+      toast.error(t('messenger.sendNoRight'))
+      return
+    }
+    if (
+      !darfAnhaengen &&
+      (note || cal || img || audio || file || sticker || storyReply || videoNote)
+    ) {
+      toast.error(t('messenger.attachNoRight'))
       return
     }
 
@@ -4395,8 +4496,20 @@ export function Messenger() {
     }
   }
 
-  // Copy Group Invite Link
+  /**
+   * Den Einladungslink kopieren — wenn es einen gibt.
+   *
+   * `invite_code` ist `null`, sobald das Backend dieses Mitglied nicht als
+   * einladungsberechtigt ansieht. Das ist die eigentliche Durchsetzung von
+   * `invite_members`: wer den Code nicht bekommt, kann ihn nicht weitergeben.
+   * Der Knopf erscheint dann gar nicht erst; diese Zeile fängt den Fall ab,
+   * dass eine Liste noch aus einem älteren Abruf stammt.
+   */
   const handleCopyInviteLink = (group: ChatGroupItem) => {
+    if (!group.invite_code) {
+      toast.error(t('messenger.inviteNoRight'))
+      return
+    }
     const url = `${window.location.origin}/chat/join/${group.invite_code}`
     navigator.clipboard.writeText(url)
     toast.success(t('messenger.inviteCopied'))
@@ -5560,17 +5673,19 @@ export function Messenger() {
                           </div>
                         </div>
 
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleCopyInviteLink(g)}
-                          className="h-7 px-2 text-xs gap-1 text-primary"
-                          title={t('messenger.copyInvite')}
-                        >
-                          <Share2 className="w-3.5 h-3.5" />
-                          <span>Link</span>
-                        </Button>
+                        {g.invite_code && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleCopyInviteLink(g)}
+                            className="h-7 px-2 text-xs gap-1 text-primary"
+                            title={t('messenger.copyInvite')}
+                          >
+                            <Share2 className="w-3.5 h-3.5" />
+                            <span>Link</span>
+                          </Button>
+                        )}
                       </div>
                     ))
                   )}
@@ -5931,14 +6046,16 @@ export function Messenger() {
 
                       {activeGroup && (
                         <>
-                          <Blatteintrag
-                            icon={<Share2 className="w-4 h-4" />}
-                            label={t('messenger.copyInvite')}
-                            onClick={() => {
-                              schliessen()
-                              handleCopyInviteLink(activeGroup)
-                            }}
-                          />
+                          {activeGroup.invite_code && (
+                            <Blatteintrag
+                              icon={<Share2 className="w-4 h-4" />}
+                              label={t('messenger.copyInvite')}
+                              onClick={() => {
+                                schliessen()
+                                handleCopyInviteLink(activeGroup)
+                              }}
+                            />
+                          )}
                           {(activeGroup.owner_user_id === currentUserId || activeGroup.role === 'admin') && (
                             <>
                               <Blatteintrag
@@ -6537,9 +6654,15 @@ export function Messenger() {
                         // Während `loading` bleibt die Leiste offen, sonst
                         // flackerte sie bei jedem Öffnen kurz tot.
                         // Gruppenchats laufen über den Gruppenschlüssel weiter.
-                        disabled={istSchreibenGesperrt}
+                        disabled={istSchreibenGesperrt || !darfSchreiben}
                         placeholder={
-                          istSchreibenGesperrt
+                          !darfSchreiben
+                            ? // Kein Schlüsselproblem, sondern eine
+                              // Rechtelage: in dieser Gruppe darf dieses Konto
+                              // nicht schreiben. Das gehört gesagt, nicht
+                              // durch ein totes Feld angedeutet.
+                              t('messenger.sendNoRight')
+                            : istSchreibenGesperrt
                             ? // Hier stand „zuerst den Schlüssel entsperren".
                               // Das stammte aus der Zeit, als der
                               // Identitätsschlüssel eine eigene Passphrase
@@ -6571,14 +6694,15 @@ export function Messenger() {
                             <div className="relative shrink-0" ref={attachMenuRef}>
                               <button
                                 type="button"
+                                disabled={!darfAnhaengen}
                                 onClick={() => setIsAttachMenuOpen((prev) => !prev)}
-                                className={`w-11 h-11 sm:w-8 sm:h-8 shrink-0 flex items-center justify-center rounded-full transition-colors ${
+                                className={`w-11 h-11 sm:w-8 sm:h-8 shrink-0 flex items-center justify-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                                   isAttachMenuOpen
                                     ? 'bg-surface-container-highest text-primary'
                                     : 'text-on-surface-variant hover:text-primary'
                                 }`}
-                                title={t('messenger.addAttachment')}
-                                aria-label={t('messenger.addAttachment')}
+                                title={darfAnhaengen ? t('messenger.addAttachment') : t('messenger.attachNoRight')}
+                                aria-label={darfAnhaengen ? t('messenger.addAttachment') : t('messenger.attachNoRight')}
                               >
                                 <Plus className={`w-4 h-4 transition-transform duration-200 ${isAttachMenuOpen ? 'rotate-45 text-primary' : ''}`} />
                               </button>

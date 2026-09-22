@@ -574,7 +574,10 @@ class ChatGroupResponse(BaseModel):
     name: str
     description: str | None = None
     avatar_url: str | None = None
-    invite_code: str
+    # `None` für Mitglieder ohne `invite_members`: der Einladungscode gewährt
+    # Zugang, und wer ihn nicht bekommt, kann ihn auch nicht weitergeben. Das
+    # ist die einzige Durchsetzung, die es für dieses Recht geben kann.
+    invite_code: str | None = None
     owner_user_id: int
     member_count: int
     role: str

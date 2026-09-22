@@ -1700,6 +1700,29 @@ class SocialService:
         )
 
     @classmethod
+    def darf_einladen(cls, db: Session, group_id: int, user_id: int) -> bool:
+        """Ob dieses Mitglied neue Leute in die Gruppe holen darf.
+
+        Steht hier und nicht in ``effective_permissions``, weil Eigentümer und
+        Administratoren ``invite_members`` nicht automatisch tragen — die
+        Vorgabe erweitert für sie nur die Anruf- und Moderationsrechte. Ein
+        Eigentümer, der niemanden in seine eigene Gruppe holen darf, wäre kein
+        Schutz, sondern ein Rätsel.
+
+        Der Aufrufer entscheidet damit, ob er den **Einladungscode** überhaupt
+        zu sehen bekommt. Bis 09/2026 ging er an jedes Mitglied heraus, bei
+        jedem Abruf der Gruppenliste: ``invite_members`` war damit nicht nur
+        ungeprüft, es war strukturell unprüfbar. Wer den Code hat, kommt rein —
+        also ist ihn nicht zu bekommen die einzige Schranke, die es geben kann.
+        """
+        member = cls.get_group_member(db, group_id, user_id)
+        if not member:
+            return False
+        if member.role in ("owner", "admin"):
+            return True
+        return cls.has_group_permission(db, group_id, user_id, "invite_members")
+
+    @classmethod
     def assert_known_permissions(cls, raw: str | None) -> str | None:
         """Weist unbekannte Rechtenamen ab, statt sie stumm zu speichern.
 
@@ -1834,7 +1857,12 @@ class SocialService:
                 "name": g.name,
                 "description": g.description,
                 "avatar_url": g.avatar_url,
-                "invite_code": g.invite_code,
+                # Nur für die, die einladen dürfen. Der Code ist ein Geheimnis,
+                # das Zugang gewährt — er hat in der Antwort an ein Mitglied
+                # ohne dieses Recht nichts verloren.
+                "invite_code": (
+                    g.invite_code if cls.darf_einladen(db, g.id, user_id) else None
+                ),
                 "owner_user_id": g.owner_user_id,
                 "default_permissions": ",".join(
                     sorted(

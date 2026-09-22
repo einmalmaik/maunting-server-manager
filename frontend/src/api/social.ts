@@ -290,7 +290,14 @@ export interface ChatGroupItem {
   name: string
   description?: string | null
   avatar_url?: string | null
-  invite_code: string
+  /**
+   * `null`, wenn dieses Mitglied nicht einladen darf.
+   *
+   * Das Backend lässt den Code dann ganz weg — und das ist die einzige
+   * Durchsetzung, die `invite_members` haben kann: wer den Code hat, kommt
+   * rein. Bis 09/2026 ging er bei jedem Abruf an jedes Mitglied.
+   */
+  invite_code: string | null
   owner_user_id: number
   member_count: number
   role: string
