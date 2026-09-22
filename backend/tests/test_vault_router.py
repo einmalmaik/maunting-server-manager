@@ -522,34 +522,45 @@ def test_vault_blind_sync_invalid_token(test_db):
     app.dependency_overrides.clear()
 
 
-def test_vault_migration_preserves_entries(test_db):
-    """Verifies that existing entries remain 100% accessible after blind verifier registration and user_id is decoupled."""
+def test_vault_migration_preserves_entries(client, test_db):
+    """Verifies that existing entries remain 100% accessible after the owner has
+    bound the blind verifier to their bucket.
+
+    Der Uebergang vom Cookie-Pfad auf den blinden Pfad laeuft seit dem
+    Sicherheitsaudit vom 22.09.2026 ueber `/api/vault/blind-register` und damit
+    **angemeldet**. Vorher tat `/blind-sync` dasselbe fuer jeden anonymen
+    Aufrufer und loeste dabei die Kontokopplung — wer eine `bucket_id` kannte,
+    uebernahm damit einen fremden Tresor (siehe
+    `tests/test_vault_security_audit.py`). Zero-Breakage bleibt die Zusage, der
+    Weg dorthin ist jetzt autorisiert.
+    """
     session, user1, _ = test_db
+    bucket = "7" * 64
+    auth_token = "c" * 64
 
-    def override_get_db():
-        yield session
-
-    app.dependency_overrides[get_db] = override_get_db
-
-    with TestClient(app) as client:
-        bucket = "7" * 64
-        auth_token = "c" * 64
-
-        # 1. Existing legacy entry created in database under user1
-        legacy_setting = VaultUserSetting(user_id=user1.id, bucket_id=bucket)
-        session.add(legacy_setting)
-        legacy_entry = VaultEntry(
+    # 1. Existing legacy entry created in database under user1
+    session.add(VaultUserSetting(user_id=user1.id, bucket_id=bucket))
+    session.add(
+        VaultEntry(
             id="legacy-item-1",
             bucket_id=bucket,
             ciphertext="sv-vault-v1:original_unbroken_vault_data",
             revision=5,
             is_deleted=False,
         )
-        session.add(legacy_entry)
-        session.commit()
+    )
+    session.commit()
 
-        # 2. Client unlocks and performs blind-sync with derived bucketAuthToken
-        res_blind = client.post(
+    # 2. Der angemeldete Besitzer bindet seinen blinden Besitznachweis.
+    res_reg = client.post(
+        "/api/vault/blind-register",
+        json={"bucket_id": bucket, "auth_token": auth_token},
+    )
+    assert res_reg.status_code == 200
+
+    with TestClient(app) as anonymous_client:
+        # 3. Ab jetzt traegt der blinde, cookie-lose Pfad — ohne Datenverlust.
+        res_blind = anonymous_client.post(
             "/api/vault/blind-sync",
             json={
                 "bucket_id": bucket,
@@ -565,13 +576,13 @@ def test_vault_migration_preserves_entries(test_db):
         assert data["entries"][0]["id"] == "legacy-item-1"
         assert data["entries"][0]["ciphertext"] == "sv-vault-v1:original_unbroken_vault_data"
 
-        # 3. Verify zero-breakage privacy: VaultUserSetting.bucket_id is decoupled (None)
+        # 4. Die Kontokopplung bleibt bestehen: sie ist der IDOR-Schutz des
+        #    Cookie-Pfads, und ein anonymer Request darf sie nicht aufloesen.
         session.expire_all()
-        refreshed_setting = session.get(VaultUserSetting, user1.id)
-        assert refreshed_setting.bucket_id is None
+        assert session.get(VaultUserSetting, user1.id).bucket_id == bucket
 
-        # 4. Subsequent blind mutations succeed under the same bucket
-        res_mutate = client.post(
+        # 5. Subsequent blind mutations succeed under the same bucket
+        res_mutate = anonymous_client.post(
             "/api/vault/blind-sync",
             json={
                 "bucket_id": bucket,
@@ -589,8 +600,6 @@ def test_vault_migration_preserves_entries(test_db):
         )
         assert res_mutate.status_code == 200
         assert res_mutate.json()["server_revision"] == 6
-
-    app.dependency_overrides.clear()
 
 
 def test_vault_blind_sync_duplicate_mutations_in_batch(test_db):

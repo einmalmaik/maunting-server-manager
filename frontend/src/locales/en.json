@@ -5572,7 +5572,7 @@
       "neuenTresorEinrichten": "Set up a new vault",
       "bereitsEingerichtet": "Already set up? Sign in with your master password",
       "neuesMasterPasswort": "New master password",
-      "mindestensAchtZeichen": "At least 8 characters",
+      "mindestlaenge": "At least {{anzahl}} characters",
       "passwortWiederholen": "Repeat password",
       "erneutEingeben": "Enter again",
       "stimmtUeberein": "Matches",

@@ -26,6 +26,23 @@ export { SecureBuffer }
 export const VAULT_ENVELOPE_V1_PREFIX = 'sv-vault-v1:'
 const AES_GCM_IV_LENGTH = 12 // 96-Bit IV
 
+/**
+ * Mindestlänge des Master-Passworts.
+ *
+ * Diese Zahl ist keine Bedienfreundlichkeits-Frage, sondern die einzige
+ * Verteidigung gegen den einen Angriff, den Zero-Knowledge prinzipbedingt
+ * offenlässt: der Server hält den KDF-Salt (`/api/vault/salt`) **und** die
+ * Ciphertexte. Wer beides hat — der Betreiber, ein Datenbank-Leak — kann offline
+ * Kandidaten durchprobieren: Argon2id rechnen, AES-GCM-Tag prüfen, fertig. Kein
+ * Rate-Limit greift dort, denn es findet auf seiner Hardware statt.
+ *
+ * Argon2id mit 64 MiB und 3 Durchgängen macht jeden Versuch teuer, aber nicht
+ * beliebig teuer. Acht Zeichen (der Wert bis zum Audit vom 22.09.2026) sind, so
+ * wie Menschen sie wählen, ungefähr 25–30 Bit — das ist in Tagen durch, nicht in
+ * Jahren. Zwölf verschieben die Rechnung um Größenordnungen.
+ */
+export const MASTER_PASSWORT_MINDESTLAENGE = 12
+
 export function bytesToBase64(bytes: Uint8Array): string {
   let binary = ''
   const chunkSize = 0x8000
@@ -393,7 +410,36 @@ export async function promptBiometricVerification(title?: string): Promise<boole
 }
 
 /**
+ * Zieht eine gleichverteilte Zahl aus [0, obergrenze) — ohne Modulo-Schiefe.
+ *
+ * `zufall % n` bevorzugt die niedrigen Werte, wann immer n kein Teiler von 2^32
+ * ist. Verworfen wird deshalb alles oberhalb des größten durch n teilbaren
+ * Vielfachen; erwartet kostet das weniger als einen zusätzlichen Zug.
+ */
+function zufallsZahl(obergrenze: number): number {
+  if (obergrenze <= 0) throw new Error('obergrenze muss positiv sein')
+  const grenze = Math.floor(0x100000000 / obergrenze) * obergrenze
+  const puffer = new Uint32Array(1)
+  for (;;) {
+    window.crypto.getRandomValues(puffer)
+    if (puffer[0] < grenze) return puffer[0] % obergrenze
+  }
+}
+
+/**
  * Kryptographischer Zufalls-Passwortgenerator (stark & vorkonfiguriert).
+ *
+ * Zwei Dinge waren hier bis zum Audit vom 22.09.2026 falsch:
+ *
+ * 1. Das Mischen griff auf **dieselben** Zufallswerte zurück, aus denen kurz
+ *    zuvor die Zeichen gewählt worden waren (`array[i]` doppelt genutzt). Damit
+ *    hing die Zielposition eines Zeichens von dem Zeichen selbst ab — der
+ *    Shuffle war keine unabhängige Permutation mehr.
+ * 2. Bei `length < 4` und Symbolen war `array[3]` undefined; `symbols[NaN]`
+ *    ergibt `undefined`, das als Zeichenkette „undefined" im Passwort landete.
+ *
+ * Beides ist hier beseitigt: jeder Zug kommt frisch aus `zufallsZahl`, und die
+ * Länge wird auf das erzwungen, was die Kategorien überhaupt zulassen.
  */
 export function generateSecurePassword(length = 20, useSymbols = true): string {
   const lowercase = 'abcdefghjkmnpqrstuvwxyz' // ohne verwirrende Zeichen l, i, o
@@ -401,30 +447,24 @@ export function generateSecurePassword(length = 20, useSymbols = true): string {
   const digits = '23456789' // ohne 0, 1
   const symbols = '!@#$%^&*()_+-=[]{}|;:,.?'
 
-  let charset = lowercase + uppercase + digits
-  if (useSymbols) charset += symbols
+  const kategorien = useSymbols
+    ? [lowercase, uppercase, digits, symbols]
+    : [lowercase, uppercase, digits]
+  const charset = kategorien.join('')
 
-  const array = new Uint32Array(length)
-  window.crypto.getRandomValues(array)
+  // Kürzer als die Zahl der Kategorien kann kein Passwort sein, das aus jeder
+  // Kategorie ein Zeichen enthalten soll.
+  const laenge = Math.max(kategorien.length, Math.floor(length) || 0)
 
-  let result = ''
   // Garantiere mindestens 1 Zeichen jeder Kategorie
-  result += lowercase[array[0] % lowercase.length]
-  result += uppercase[array[1] % uppercase.length]
-  result += digits[array[2] % digits.length]
-  if (useSymbols) {
-    result += symbols[array[3] % symbols.length]
+  const chars = kategorien.map((satz) => satz[zufallsZahl(satz.length)])
+  for (let i = kategorien.length; i < laenge; i++) {
+    chars.push(charset[zufallsZahl(charset.length)])
   }
 
-  const startIdx = useSymbols ? 4 : 3
-  for (let i = startIdx; i < length; i++) {
-    result += charset[array[i] % charset.length]
-  }
-
-  // Mische das Ergebnis durch Fisher-Yates
-  const chars = result.split('')
+  // Fisher-Yates mit unabhängigem Zufall
   for (let i = chars.length - 1; i > 0; i--) {
-    const j = array[i] % (i + 1)
+    const j = zufallsZahl(i + 1)
     const tmp = chars[i]
     chars[i] = chars[j]
     chars[j] = tmp

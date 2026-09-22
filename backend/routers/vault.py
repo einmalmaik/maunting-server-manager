@@ -10,6 +10,7 @@ from dependencies import get_current_user, verify_csrf
 from middleware.rate_limit import limiter
 from models.user import User
 from schemas.vault import (
+    VaultBlindRegisterRequest,
     VaultBlindSyncRequest,
     VaultHintSetRequest,
     VaultHintStatusResponse,
@@ -66,6 +67,32 @@ def sync_vault_blind(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Interner Fehler bei der blinden Tresor-Synchronisation.",
         ) from exc
+
+
+@router.post("/blind-register")
+def register_blind_vault_bucket(
+    payload: VaultBlindRegisterRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    __=Depends(verify_csrf),
+) -> dict[str, str]:
+    """Hinterlegt den blinden Besitznachweis für den eigenen Tresor-Bucket.
+
+    Der authentifizierte Übergang vom Cookie-Pfad auf den blinden Pfad. Er ersetzt
+    die frühere unauthentifizierte „sanfte Migration" in `/blind-sync`, über die
+    sich jeder bestehende Tresor übernehmen ließ.
+    """
+    _check_vault_enabled()
+    try:
+        vault_service.register_blind_bucket(
+            db, current_user.id, payload.bucket_id, payload.auth_token
+        )
+    except vault_service.VaultBucketAccessDenied as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except vault_service.VaultBucketAlreadyBound as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return {"status": "ok", "message": "Blinder Besitznachweis hinterlegt."}
 
 
 @router.post("/sync", response_model=VaultSyncResponse)
@@ -166,12 +193,19 @@ def get_vault_hint_status(
 
 
 @router.post("/request-hint")
+@limiter.limit("5/minute")
 async def send_vault_hint(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     __=Depends(verify_csrf),
 ) -> dict[str, str]:
-    """Sendet den hinterlegten Passwort-Hinweis an die E-Mail des Benutzers (max. 1x alle 10 Minuten)."""
+    """Sendet den hinterlegten Passwort-Hinweis an die E-Mail des Benutzers (max. 1x alle 10 Minuten).
+
+    Zwei Bremsen, weil eine zu wenig ist: der Zähler hier begrenzt den Andrang
+    pro Herkunft, die Sperrfrist im Service den pro Konto. Ohne die erste kosten
+    schon die abgewiesenen Anfragen jeweils einen Datenbank-Roundtrip.
+    """
     _check_vault_enabled()
     success, msg = await vault_service.request_vault_hint_email(db, current_user)
     if not success:

@@ -5572,7 +5572,7 @@
       "neuenTresorEinrichten": "Neuen Tresor einrichten",
       "bereitsEingerichtet": "Bereits eingerichtet? Hier mit Master-Passwort anmelden",
       "neuesMasterPasswort": "Neues Master-Passwort",
-      "mindestensAchtZeichen": "Mindestens 8 Zeichen",
+      "mindestlaenge": "Mindestens {{anzahl}} Zeichen",
       "passwortWiederholen": "Passwort wiederholen",
       "erneutEingeben": "Erneut eingeben",
       "stimmtUeberein": "Stimmt überein",

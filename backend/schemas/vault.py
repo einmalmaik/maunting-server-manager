@@ -8,12 +8,31 @@ from pydantic import BaseModel, Field, field_validator
 
 HEX_64_REGEX = re.compile(r"^[0-9a-fA-F]{64}$")
 
+# Obergrenze fuer die Summe aller Ciphertexte eines Requests.
+#
+# Je Mutation galt 1 MiB, je Request bis zu 100 Mutationen — also 100 MiB pro
+# Aufruf. `/blind-sync` braucht kein Konto, und 60 Aufrufe je Minute und Herkunft
+# sind erlaubt: das sind 6 GB pro Minute, die ein beliebiger Fremder in die
+# Datenbank schreiben darf. Ein Tresor-Eintrag ist in der Praxis deutlich
+# kleiner (Anhaenge sind bei 500 KB gedeckelt, `padPayload` rundet auf 4-KiB-
+# Bloecke), ein ganzer Sync-Stapel sprengt 8 MiB also nicht.
+MAX_MUTATION_PAYLOAD_BYTES = 8 * 1024 * 1024
+
 
 class VaultMutation(BaseModel):
     id: str = Field(..., min_length=1, max_length=64, description="Eindeutige ID des Eintrags (Client-seitig generiert)")
     ciphertext: str = Field(..., max_length=1048576, description="Vollstaendig verschluesselter AES-GCM Ciphertext-Envelope (sv-vault-v1:)")
     revision: int = Field(..., ge=0, description="Lokale Revisionsnummer")
     is_deleted: bool = Field(default=False, description="Tombstone-Flag fuer Loeschungen")
+
+
+def _pruefe_gesamtgroesse(mutations: List["VaultMutation"]) -> List["VaultMutation"]:
+    gesamt = sum(len(m.ciphertext) for m in mutations)
+    if gesamt > MAX_MUTATION_PAYLOAD_BYTES:
+        raise ValueError(
+            f"Gesamtgroesse der Mutationen ueberschreitet {MAX_MUTATION_PAYLOAD_BYTES} Bytes"
+        )
+    return mutations
 
 
 class VaultSyncRequest(BaseModel):
@@ -27,6 +46,11 @@ class VaultSyncRequest(BaseModel):
         if not HEX_64_REGEX.match(v):
             raise ValueError("bucket_id must be a 64-character hex string")
         return v.lower()
+
+    @field_validator("mutations")
+    @classmethod
+    def validate_mutations_size(cls, v: List[VaultMutation]) -> List[VaultMutation]:
+        return _pruefe_gesamtgroesse(v)
 
 
 class VaultBlindSyncRequest(BaseModel):
@@ -47,6 +71,25 @@ class VaultBlindSyncRequest(BaseModel):
     def validate_auth_token(cls, v: str) -> str:
         if not HEX_64_REGEX.match(v):
             raise ValueError("auth_token must be a 64-character hex string")
+        return v.lower()
+
+    @field_validator("mutations")
+    @classmethod
+    def validate_mutations_size(cls, v: List[VaultMutation]) -> List[VaultMutation]:
+        return _pruefe_gesamtgroesse(v)
+
+
+class VaultBlindRegisterRequest(BaseModel):
+    """Authentifizierte Bindung des blinden Besitznachweises an den eigenen Bucket."""
+
+    bucket_id: str = Field(..., min_length=64, max_length=64, description="64-Hex Bucket-ID")
+    auth_token: str = Field(..., min_length=64, max_length=64, description="Blinder Besitznachweis (SHA-256 Hex)")
+
+    @field_validator("bucket_id", "auth_token")
+    @classmethod
+    def validate_hex(cls, v: str) -> str:
+        if not HEX_64_REGEX.match(v):
+            raise ValueError("value must be a 64-character hex string")
         return v.lower()
 
 

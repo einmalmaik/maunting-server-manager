@@ -94,6 +94,22 @@ export interface VaultBlindSyncPayload {
 }
 
 /**
+ * Nutzlast eines kryptographisch belegten Tombstones.
+ *
+ * `is_deleted` ist ein unverschlüsseltes Feld neben dem Umschlag — der Server
+ * setzt es, der Client befolgte es. Damit konnte jeder, der die Antwort formt
+ * (der Betreiber, ein übernommener Bucket, ein MitM mit eigenem Zertifikat),
+ * einen Tresor leerräumen: der Client warf die betroffenen Blobs aus seinem
+ * lokalen Cache, und der ist bei einem Zero-Knowledge-Tresor die einzige
+ * lesbare Kopie. Verschwiegen werden konnte nichts, zerstört alles.
+ *
+ * Seit dem Audit vom 22.09.2026 trägt jede Löschung ihren Beweis im Umschlag:
+ * nur wer den UserKey hat, kann einen Tombstone erzeugen, der an dieselbe
+ * `entryId` gebunden ist.
+ */
+export const VAULT_TOMBSTONE_MARKER = 'mss-vault-tombstone-v1'
+
+/**
  * Führt einen anonymen Tresor-Sync über credentials: 'omit' ohne Session-Cookies oder User-Header durch.
  */
 export async function blindVaultSync(
@@ -972,6 +988,16 @@ export const useVaultStore = create<VaultState>((set, get) => {
     const existing = items.find((i) => i.id === id)
     const revision = (existing?.revision || 0) + 1
 
+    // Der Tombstone wird verschlüsselt und an dieselbe `entryId` gebunden wie
+    // der Eintrag, den er beerdigt. Früher stand hier `ciphertext: ''` — eine
+    // Löschung ohne Absender, die jeder erfinden konnte. Siehe
+    // VAULT_TOMBSTONE_MARKER.
+    const tombstone = await encryptVaultEntry(
+      { [VAULT_TOMBSTONE_MARKER]: true, deletedAt: Date.now() },
+      userKey,
+      id,
+    )
+
     // Lokalen Cache bereinigen
     let cachedBlobs = getStoredBlobs(bucketId)
     cachedBlobs = cachedBlobs.filter((b) => b.id !== id)
@@ -979,7 +1005,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
     // Tombstone in Pending Queue
     const pendingQueue = getPendingQueue(bucketId).filter((b) => b.id !== id)
-    pendingQueue.push({ id, ciphertext: '', revision, is_deleted: true })
+    pendingQueue.push({ id, ciphertext: tombstone, revision, is_deleted: true })
     localStorage.setItem(`${VAULT_PENDING_QUEUE_PREFIX}${bucketId}`, JSON.stringify(pendingQueue))
 
     const remaining = items.filter((i) => i.id !== id)
@@ -1011,6 +1037,11 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
     set({ syncStatus: 'syncing' })
 
+    // Hat der Server uns abgewiesen, bleibt das ein Auth-Fehler — auch wenn der
+    // anschließende Registrierungsversuch am Netz scheitert. „offline" wäre hier
+    // die falsche Auskunft: erreichbar war er ja.
+    let blindAbgewiesen = false
+
     try {
       const pendingQueue = getPendingQueue(bucketId)
 
@@ -1026,12 +1057,30 @@ export const useVaultStore = create<VaultState>((set, get) => {
 
       let data: VaultSyncResponse
       if (bucketAuthToken) {
-        data = await blindVaultSync({
-          bucket_id: bucketId,
-          auth_token: bucketAuthToken,
-          since_revision: sinceRevision,
-          mutations,
-        })
+        const blind = () =>
+          blindVaultSync({
+            bucket_id: bucketId,
+            auth_token: bucketAuthToken,
+            since_revision: sinceRevision,
+            mutations,
+          })
+        try {
+          data = await blind()
+        } catch (err: unknown) {
+          // 401 heißt hier: der Bucket trägt schon Daten, aber noch keinen
+          // blinden Besitznachweis — ein Tresor aus der Zeit vor dem Audit.
+          // Den Nachweis darf nur der angemeldete Besitzer hinterlegen;
+          // unauthentifiziert nachzuregistrieren war genau die Lücke, über die
+          // sich fremde Tresore übernehmen ließen.
+          const istAuthFehler = err instanceof Error && err.message.includes('401')
+          if (!istAuthFehler) throw err
+          blindAbgewiesen = true
+          await api('/api/vault/blind-register', {
+            method: 'POST',
+            body: JSON.stringify({ bucket_id: bucketId, auth_token: bucketAuthToken }),
+          })
+          data = await blind()
+        }
       } else {
         const payload: VaultSyncPayload = {
           bucket_id: bucketId,
@@ -1049,7 +1098,30 @@ export const useVaultStore = create<VaultState>((set, get) => {
       let currentItems = [...items]
 
       for (const entry of data.entries) {
+        // Rollback-Schutz: Revisionen wachsen. Eine Antwort, die für einen
+        // bekannten Eintrag zurückgeht, ist kein Sync, sondern ein Angebot —
+        // etwa das alte, längst ersetzte Passwort eines kompromittierten
+        // Dienstes. Der Umschlag daran ist gültig (er war es ja einmal), also
+        // fällt es der Entschlüsselung nicht auf. Nur die Revision verrät es.
+        const bekannt = cachedBlobs.find((b) => b.id === entry.id)
+        if (bekannt && entry.revision < bekannt.revision) {
+          console.warn(
+            `Tresor-Sync: Rücksprung für ${entry.id} (${bekannt.revision} → ${entry.revision}) verworfen.`,
+          )
+          continue
+        }
+
         if (entry.id === 'vault-canary') {
+          // Ein Canary, der sich nicht mit dem eigenen Schlüssel öffnen lässt,
+          // wird nicht übernommen. Sonst genügte ein ausgetauschter Prüfblock,
+          // um den Besitzer beim nächsten Entsperren mit „falsches
+          // Master-Passwort" aus seinem eigenen Tresor auszusperren.
+          try {
+            await decryptVaultEntry(entry.ciphertext, userKey, 'vault-canary')
+          } catch {
+            console.warn('Tresor-Sync: fremder Canary verworfen.')
+            continue
+          }
           if (typeof localStorage !== 'undefined') {
             localStorage.setItem(VAULT_CANARY_KEY, entry.ciphertext)
             localStorage.setItem(`${VAULT_CANARY_PREFIX}${bucketId}`, entry.ciphertext)
@@ -1058,11 +1130,38 @@ export const useVaultStore = create<VaultState>((set, get) => {
           continue
         }
         if (entry.is_deleted) {
+          // Gelöscht wird nur auf Vorlage eines belegten Tombstones. Ein
+          // `is_deleted` ohne passenden Umschlag stammt nicht vom Besitzer des
+          // Schlüssels und bleibt folgenlos.
+          //
+          // Der Preis, offen benannt: Tombstones aus der Zeit vor dem Audit
+          // tragen einen leeren Ciphertext. Eine solche Alt-Löschung erreicht
+          // ein frisch eingerichtetes Zweitgerät nicht mehr — der Eintrag
+          // steht dort und kann erneut gelöscht werden. Ein stehengebliebener
+          // Eintrag ist reparierbar, ein leergeräumter Tresor nicht.
+          let belegt = false
+          try {
+            const beleg = await decryptVaultEntry(entry.ciphertext, userKey, entry.id)
+            belegt = beleg?.[VAULT_TOMBSTONE_MARKER] === true
+          } catch {
+            belegt = false
+          }
+          if (!belegt) {
+            console.warn(`Tresor-Sync: unbelegte Löschung für ${entry.id} ignoriert.`)
+            continue
+          }
           cachedBlobs = cachedBlobs.filter((b) => b.id !== entry.id)
           currentItems = currentItems.filter((i) => i.id !== entry.id)
         } else {
           try {
             const dec = await decryptVaultEntry(entry.ciphertext, userKey, entry.id)
+            // Ein Umschlag mit Tombstone-Inhalt ist nie ein Eintrag — auch dann
+            // nicht, wenn die Antwort ihn als lebendig ausgibt.
+            if (dec?.[VAULT_TOMBSTONE_MARKER] === true) {
+              cachedBlobs = cachedBlobs.filter((b) => b.id !== entry.id)
+              currentItems = currentItems.filter((i) => i.id !== entry.id)
+              continue
+            }
             const item: VaultItem = {
               id: entry.id,
               service: String(dec.service || 'Unbekannt'),
@@ -1138,7 +1237,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
       })
     } catch (err: unknown) {
       // Bei 401 Unauthorized: Auth-Fehler anzeigen, sonst im Offline-Modus bleiben
-      const isAuthError = err instanceof Error && err.message.includes('401')
+      const isAuthError = blindAbgewiesen || (err instanceof Error && err.message.includes('401'))
       set({ syncStatus: isAuthError ? 'error' : 'offline' })
     }
   },

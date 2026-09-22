@@ -31,7 +31,7 @@ import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { getBrandIcon } from './brandCatalog'
 import { generateTotpCode, getTotpSecondsRemaining } from './totpEngine'
-import { generateSecurePassword } from './vaultCrypto'
+import { MASTER_PASSWORT_MINDESTLAENGE, generateSecurePassword } from './vaultCrypto'
 import { createDebouncedLeakChecker, type LeakCheckResult } from './leakChecker'
 import { QrScannerModal } from './QrScannerModal'
 import { setzeTresorSchutz } from '../tauri'
@@ -355,7 +355,7 @@ export function VaultView() {
   // ── 1. ERSTEINRICHTUNG (NUR wenn Ersteinrichtungs-Modus aktiv) ──
   if (!isUnlocked && isSetupMode) {
     const canSubmitSetup =
-      masterPasswordInput.length >= 8 &&
+      masterPasswordInput.length >= MASTER_PASSWORT_MINDESTLAENGE &&
       masterPasswordInput === confirmPasswordInput &&
       (hintInput.trim().length > 0 || skipHintSetup) &&
       !isUnlocking
@@ -403,7 +403,7 @@ export function VaultView() {
                   type={showMasterPassword ? 'text' : 'password'}
                   value={masterPasswordInput}
                   onChange={(e) => setMasterPasswordInput(e.target.value)}
-                  placeholder={t('mss.vault.mindestensAchtZeichen')}
+                  placeholder={t('mss.vault.mindestlaenge', { anzahl: MASTER_PASSWORT_MINDESTLAENGE })}
                   className="msm-input pr-9 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden [&::-webkit-credentials-auto-fill-button]:hidden"
                   autoFocus
                 />
@@ -497,7 +497,7 @@ export function VaultView() {
             >
               {isUnlocking
                 ? t('mss.vault.richteEin')
-                : !hintInput.trim() && !skipHintSetup && masterPasswordInput.length >= 8 && masterPasswordInput === confirmPasswordInput
+                : !hintInput.trim() && !skipHintSetup && masterPasswordInput.length >= MASTER_PASSWORT_MINDESTLAENGE && masterPasswordInput === confirmPasswordInput
                   ? t('mss.vault.hinweisNoetig')
                   : 'Einrichten'}
             </Button>

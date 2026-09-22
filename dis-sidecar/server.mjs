@@ -100,8 +100,62 @@ const NONCE_LEN = 12; // AES-GCM 96-bit nonce
 const TAG_LEN = 16; // AES-GCM auth tag
 const FRAME_LEN_FIELD = 4; // big-endian uint32
 
+// A frame carries at most STREAM_CHUNK plaintext plus nonce and tag. Anything
+// larger is not a frame we ever wrote.
+//
+// Audit 2026-09-22: the length field was read as an arbitrary uint32 and the
+// reader then waited for that many bytes to arrive. A single frame header of
+// 0xFFFFFFFF made the decryptor accumulate up to 4 GiB in one Buffer before it
+// could conclude anything — an OOM kill of the one process every crypto
+// operation of the panel depends on.
+const MAX_FRAME_LEN = NONCE_LEN + STREAM_CHUNK + TAG_LEN + 64;
+
+// ── Backup stream format v2 ──────────────────────────────────────────────
+//
+// Audit 2026-09-22: v1 frames were each authenticated on their own, but nothing
+// bound a frame to its *position*. Every frame used AAD=null, so an attacker
+// holding the encrypted backup (a compromised S3 bucket, NAS, or anyone who can
+// write where backups land) could reorder frames, duplicate them, or cut the
+// stream short — and every single frame still verified. The restore then wrote
+// authentic-but-rearranged plaintext: an old database page back over a new one,
+// silently, with a valid GCM tag on every chunk.
+//
+// v2 binds each frame to its index and marks the final frame, so reordering,
+// duplication and truncation all fail the tag check.
+//
+//   stream := MAGIC || frame*
+//   frame  := [4B BE len][12B nonce][ct||tag]
+//   AAD    := [8B BE index][1B final]
+//
+// The magic cannot collide with a v1 stream: a v1 stream opens with a frame
+// length field, and 'M' (0x4D) as its high byte would mean a frame of ~1.3 GB —
+// far beyond MAX_FRAME_LEN. Streams without the magic are read as v1 so that
+// backups written before this change stay restorable; v1 is never written.
+const STREAM_MAGIC_V2 = Buffer.from('MSMBKP2\n', 'ascii');
+
+/** AAD for frame `index`; `final` marks the last frame of the stream. */
+function frameAad(index, final) {
+  const aad = new Uint8Array(9);
+  const view = new DataView(aad.buffer);
+  view.setBigUint64(0, BigInt(index), false);
+  aad[8] = final ? 1 : 0;
+  return aad;
+}
+
 // ── HTTP server ──────────────────────────────────────────────────────────
-/** @param {import('node:http').IncomingMessage} req */
+const EXPECTED_AUTH = Buffer.from(`Bearer ${TOKEN}`, 'utf8');
+
+/**
+ * Constant-time bearer check.
+ *
+ * Audit 2026-09-22: this used `===` on the header string. JavaScript's string
+ * comparison exits at the first differing byte, so the response time leaked how
+ * long a prefix matched. Over loopback — where the whole threat model is "some
+ * other local process must not be able to call us" — an attacker can recover
+ * the token byte by byte and then use `/decrypt` as a universal oracle against
+ * every secret the panel holds. `constantTimeEqual` was already imported for
+ * password verification; it just wasn't used on the door.
+ */
 function checkAuth(req) {
   if (!TOKEN) {
     if (NODE_ENV === 'production') {
@@ -109,7 +163,15 @@ function checkAuth(req) {
     }
     return true;
   }
-  return req.headers.authorization === `Bearer ${TOKEN}`;
+  const supplied = Buffer.from(String(req.headers.authorization || ''), 'utf8');
+  // Length is not a secret (the token length is fixed by config), but the
+  // comparison must not short-circuit on content.
+  if (supplied.length !== EXPECTED_AUTH.length) {
+    // Still burn a comparison so a wrong length costs the same as a wrong byte.
+    constantTimeEqual(new Uint8Array(EXPECTED_AUTH), new Uint8Array(EXPECTED_AUTH));
+    return false;
+  }
+  return constantTimeEqual(new Uint8Array(supplied), new Uint8Array(EXPECTED_AUTH));
 }
 
 /** @param {import('node:http').ServerResponse} res @param {number} code @param {any} data */
@@ -118,10 +180,23 @@ function jsonReply(res, code, data) {
   res.end(JSON.stringify(data));
 }
 
+// A JSON request to this service is a secret, a hash or a TOTP code — none of
+// them is megabytes long. Without a ceiling a single request could grow the
+// heap until the process dies, taking every crypto operation of the panel with
+// it (fail-closed means: nothing works any more).
+const MAX_JSON_BODY = 8 * 1024 * 1024; // 8 MiB
+
 /** @param {import('node:http').IncomingMessage} req @returns {Promise<any>} */
 async function readJson(req) {
   let body = '';
-  for await (const chunk of req) body += chunk;
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > MAX_JSON_BODY) {
+      throw new Error('PayloadTooLarge');
+    }
+    body += chunk;
+  }
   return JSON.parse(body);
 }
 
@@ -383,16 +458,20 @@ async function handleEncryptStream(req, res) {
     'Content-Type': 'application/octet-stream',
     'Transfer-Encoding': 'chunked',
   });
+  res.write(STREAM_MAGIC_V2);
 
   let buffer = Buffer.alloc(0);
+  let frameIndex = 0;
 
   /**
    * Encrypt one plaintext chunk into a frame and write it to the response.
    * Frame: [4-byte BE length][12-byte nonce][ciphertext + 16-byte tag]
+   * AAD binds the frame to its index and to whether it ends the stream.
    */
-  async function flushChunk(chunk) {
+  async function flushChunk(chunk, final) {
     const nonce = randomBytes(NONCE_LEN);
-    const ct = await aesGcmEncrypt(key, nonce, new Uint8Array(chunk));
+    const ct = await aesGcmEncrypt(key, nonce, new Uint8Array(chunk), frameAad(frameIndex, final));
+    frameIndex += 1;
     const len = NONCE_LEN + ct.length; // 12 + ciphertext + tag
     const frame = Buffer.allocUnsafe(FRAME_LEN_FIELD + len);
     frame.writeUInt32BE(len, 0);
@@ -407,12 +486,12 @@ async function handleEncryptStream(req, res) {
       while (buffer.length >= STREAM_CHUNK) {
         const piece = buffer.subarray(0, STREAM_CHUNK);
         buffer = buffer.subarray(STREAM_CHUNK);
-        await flushChunk(piece);
+        await flushChunk(piece, false);
       }
     }
-    if (buffer.length > 0) {
-      await flushChunk(buffer);
-    }
+    // Always emit a final frame — it is the receipt that the stream was not cut
+    // short. For empty input that is a single frame with empty plaintext.
+    await flushChunk(buffer, true);
     res.end();
   } catch (e) {
     // Encryption with a valid key should not fail; if it does, abort the
@@ -443,6 +522,9 @@ async function handleDecryptStream(req, res) {
 
   let headersSent = false;
   let buffer = Buffer.alloc(0);
+  let version = null; // null = not yet determined, 1 = legacy, 2 = position-bound
+  let frameIndex = 0;
+  let sawFinalFrame = false;
 
   /** Send 200 + chunked headers on first successful plaintext write. */
   function beginStreaming() {
@@ -452,6 +534,38 @@ async function handleDecryptStream(req, res) {
         'Transfer-Encoding': 'chunked',
       });
       headersSent = true;
+    }
+  }
+
+  /**
+   * Decrypt one frame. For v2 the frame's AAD must match its position; the
+   * final frame is recognised by falling back to the `final` AAD exactly once.
+   * Returns the plaintext, or null if the frame does not authenticate.
+   */
+  async function decryptFrame(nonce, ct) {
+    if (version === 1) {
+      try {
+        return await aesGcmDecrypt(key, nonce, ct);
+      } catch {
+        return null;
+      }
+    }
+    try {
+      const plain = await aesGcmDecrypt(key, nonce, ct, frameAad(frameIndex, false));
+      frameIndex += 1;
+      return plain;
+    } catch {
+      // Not a body frame at this position — the only other thing it may be is
+      // the final frame for this very index. Anything else (reordered,
+      // duplicated, foreign) fails both and is rejected below.
+    }
+    try {
+      const plain = await aesGcmDecrypt(key, nonce, ct, frameAad(frameIndex, true));
+      frameIndex += 1;
+      sawFinalFrame = true;
+      return plain;
+    } catch {
+      return null;
     }
   }
 
@@ -471,13 +585,24 @@ async function handleDecryptStream(req, res) {
     for await (const chunk of req) {
       buffer = buffer.length > 0 ? Buffer.concat([buffer, chunk]) : chunk;
 
+      // Determine the stream version once, from the leading magic.
+      if (version === null) {
+        if (buffer.length < STREAM_MAGIC_V2.length) continue;
+        if (buffer.subarray(0, STREAM_MAGIC_V2.length).equals(STREAM_MAGIC_V2)) {
+          version = 2;
+          buffer = Buffer.from(buffer.subarray(STREAM_MAGIC_V2.length));
+        } else {
+          version = 1;
+        }
+      }
+
       // Process as many complete frames as are available in the buffer.
       let off = 0;
       while (off + FRAME_LEN_FIELD <= buffer.length) {
         const frameLen = buffer.readUInt32BE(off);
         off += FRAME_LEN_FIELD;
-        if (frameLen < NONCE_LEN) {
-          // frame_length too small to contain a nonce — malformed.
+        if (frameLen < NONCE_LEN || frameLen > MAX_FRAME_LEN) {
+          // Too small to hold a nonce, or larger than anything we ever wrote.
           return failDecrypt();
         }
         if (off + frameLen > buffer.length) {
@@ -491,11 +616,15 @@ async function handleDecryptStream(req, res) {
         if (ct.length < TAG_LEN) {
           return failDecrypt();
         }
-        let plaintext;
-        try {
-          plaintext = await aesGcmDecrypt(key, nonce, ct);
-        } catch {
-          // Auth-tag mismatch (tamper or wrong key).
+        if (sawFinalFrame) {
+          // Data after the frame that claimed to end the stream: appended or
+          // replayed frames. Refuse rather than hand the caller a longer file
+          // than the one that was signed off.
+          return failDecrypt();
+        }
+        const plaintext = await decryptFrame(nonce, ct);
+        if (plaintext === null) {
+          // Auth-tag mismatch: tamper, wrong key, or a frame out of position.
           return failDecrypt();
         }
         beginStreaming();
@@ -510,6 +639,12 @@ async function handleDecryptStream(req, res) {
 
     // Request stream ended. Any leftover bytes mean a truncated final frame.
     if (buffer.length > 0) {
+      return failDecrypt();
+    }
+
+    // A v2 stream that never presented its final frame was cut short — the one
+    // manipulation a per-frame tag cannot notice on its own.
+    if (version === 2 && !sawFinalFrame) {
       return failDecrypt();
     }
 
