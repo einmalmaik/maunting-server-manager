@@ -556,8 +556,26 @@ export function GroupPermissionsModal({
         className="w-[96vw] max-w-5xl xl:max-w-6xl p-0 overflow-hidden bg-surface border-outline-variant/30 flex flex-col max-h-[92vh] sm:max-h-[88vh] shadow-2xl rounded-2xl"
       >
         {/* Header with generous vertical padding */}
-        <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-outline-variant/20 bg-surface-container/70 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
+        <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-outline-variant/20 bg-surface-container/70 flex items-center justify-between gap-2 shrink-0">
+          {/*
+           * `min-w-0 flex-1` ist hier keine Feinheit, sondern der Unterschied
+           * zwischen „passt" und „Dialog kaputt".
+           *
+           * Titel und Untertitel tragen seit jeher `truncate`, und der innere
+           * Kasten `min-w-0` — trotzdem lief der Kopf bei 375 px auf 383 px
+           * auf. Grund: ein Flex-Kind hat `min-width: auto` und schrumpft
+           * nicht unter seine Inhaltsbreite. Das `truncate` weiter innen kam
+           * nie zum Zug, weil dieser Kasten hier gar nicht erst schmaler
+           * wurde.
+           *
+           * Die Folge war mehr als ein abgeschnittener Titel: `DialogContent`
+           * traegt `overflow-hidden`, und der Klick auf einen Reiter loest ein
+           * `scrollIntoView` aus. Das setzte `scrollLeft` auf 90 — der ganze
+           * Dialoginhalt stand danach links ausserhalb, der Titel las sich als
+           * „uppen-Rollen & Rechte", und ohne Scrollleiste kam man nicht
+           * zurueck. Nur Schliessen und Neuoeffnen half.
+           */}
+          <div className="flex items-center gap-3 min-w-0 flex-1">
             <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shadow-sm shrink-0">
               <ShieldCheck className="w-5 h-5" />
             </div>
