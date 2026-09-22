@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 import re
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, WebSocket
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Response, UploadFile, WebSocket
 from fastapi.responses import FileResponse
 from starlette.websockets import WebSocketDisconnect
 from sqlalchemy.orm import Session
@@ -21,6 +21,7 @@ from schemas.social import (
     ActivityPingRequest,
     E2eeBlindEnvelopeCreate,
     E2eeBlindEnvelopeResponse,
+    E2eeMailboxRegister,
     E2eeMailboxSyncResponse,
     E2eeTypingSignalCreate,
     E2eeDeviceItem,
@@ -373,12 +374,54 @@ def unsubscribe_push(
     return {"ok": webpush_service.austragen(db, user, endpoint)}
 
 
+def mailbox_token(
+    x_mailbox_token: str | None = Header(default=None, alias="X-Mailbox-Token"),
+) -> str | None:
+    """Der Besitznachweis, den der Client zu einer Mailbox mitschickt.
+
+    Als Kopfzeile, nicht als Abfrageparameter: was in der Adresse steht, steht
+    im Zugriffsprotokoll des Webservers und in jedem Zwischenspeicher davor.
+    Ein Nachweis, der dort landet, ist keiner mehr.
+
+    Fehlt er, ist das für sich kein Fehler — für Mailboxen ohne hinterlegten
+    Nachweis ändert sich nichts. Erst `assert_mailbox_token` entscheidet, ob
+    an dieser Stelle einer nötig gewesen wäre.
+    """
+    return x_mailbox_token
+
+
+@router.post(
+    "/e2ee/mailbox/register",
+    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
+)
+def register_blind_mailbox(
+    req: E2eeMailboxRegister,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Hinterlegt den blinden Besitznachweis einer Mailbox.
+
+    Der authentifizierte Übergang vom kontogebundenen Weg auf den blinden —
+    dieselbe Stelle, die beim Tresor `/blind-register` ist. Danach gilt für
+    diese Mailbox der Nachweis **zusätzlich** zur bisherigen Prüfung.
+    """
+    SocialService.register_blind_mailbox(
+        db,
+        user_id=current_user.id,
+        mailbox_id=req.mailbox_id,
+        auth_token=req.auth_token,
+    )
+    return {"ok": True}
+
+
 @router.post("/e2ee/relay", response_model=E2eeBlindEnvelopeResponse, dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
 def relay_e2ee_message(
     req: E2eeBlindEnvelopeCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    nachweis: str | None = Depends(mailbox_token),
 ) -> dict:
+    SocialService.assert_mailbox_token(db, req.blind_mailbox_id, nachweis)
     envelope = SocialService.relay_blind_envelope(
         db,
         blind_mailbox_id=req.blind_mailbox_id,
@@ -410,11 +453,13 @@ def upload_chat_media(
     req: ChatMediaUploadRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    nachweis: str | None = Depends(mailbox_token),
 ) -> dict:
     """Laedt einen clientseitig verschluesselten E2EE-Medienblob hoch.
 
     Der Server nimmt ausschliesslich verschluesselte Blobs entgegen (Zero-Knowledge).
     """
+    SocialService.assert_mailbox_token(db, req.blind_mailbox_id, nachweis)
     media = ChatMediaService.upload_encrypted_media(
         db,
         uploader=current_user,
@@ -589,8 +634,10 @@ def fetch_blind_mailbox_envelopes(
     limit: int = Query(100, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    nachweis: str | None = Depends(mailbox_token),
 ) -> list[dict]:
     # H-3: Jede Mailbox darf nur von berechtigten Teilnehmern abgefragt werden
+    SocialService.assert_mailbox_token(db, blind_mailbox_id, nachweis)
     SocialService.assert_mailbox_participant(db, current_user.id, blind_mailbox_id)
 
     envelopes = SocialService.get_blind_envelopes(
@@ -617,12 +664,14 @@ def delete_blind_mailbox_envelopes(
     client_uuid: str = Query(..., min_length=1, max_length=64),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    nachweis: str | None = Depends(mailbox_token),
 ) -> dict:
     """Nimmt die Umschlaege einer geloeschten Nachricht aus der Mailbox.
 
     Adressiert wird ueber die logische Nachrichtenkennung, nicht ueber die
     Umschlagkennung: eine Nachricht liegt als eine Kopie je Zielgeraet da.
     """
+    SocialService.assert_mailbox_token(db, blind_mailbox_id, nachweis)
     entfernt = SocialService.delete_blind_envelopes(
         db,
         blind_mailbox_id=blind_mailbox_id,
@@ -637,7 +686,9 @@ def send_e2ee_typing_signal(
     req: E2eeTypingSignalCreate,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
+    nachweis: str | None = Depends(mailbox_token),
 ) -> dict:
+    SocialService.assert_mailbox_token(db, req.blind_mailbox_id, nachweis)
     SocialService.broadcast_typing_signal(
         blind_mailbox_id=req.blind_mailbox_id,
         status=req.status,
@@ -1092,6 +1143,12 @@ async def social_websocket(
                 recipient_id = data.get("recipient_id")
                 try:
                     with SessionLocal() as db:
+                        # Derselbe Nachweis wie auf dem HTTP-Weg. Ohne ihn wäre
+                        # der WebSocket die offene Hintertür neben der
+                        # verschlossenen Vordertür.
+                        SocialService.assert_mailbox_token(
+                            db, blind_mailbox_id, data.get("mailbox_token")
+                        )
                         SocialService.broadcast_typing_signal(
                             blind_mailbox_id=blind_mailbox_id,
                             status=status,
@@ -1111,6 +1168,9 @@ async def social_websocket(
                 client_uuid = data.get("client_uuid")
                 try:
                     with SessionLocal() as db:
+                        SocialService.assert_mailbox_token(
+                            db, blind_mailbox_id, data.get("mailbox_token")
+                        )
                         envelope = SocialService.relay_blind_envelope(
                             db,
                             blind_mailbox_id=blind_mailbox_id,

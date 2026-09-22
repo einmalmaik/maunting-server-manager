@@ -1851,3 +1851,46 @@ def test_die_migration_legt_die_zustelladressen_an(tmp_path: Path) -> None:
     finally:
         engine.dispose()
         settings.database_url = vorher
+
+
+def test_die_blinde_mailbox_zeigt_auf_keinen_menschen(tmp_path: Path) -> None:
+    """Die eine Zusage dieser Tabelle, und sie ist eine Zusage ans Schema.
+
+    `e2ee_blind_mailboxes` traegt den Besitznachweis einer Mailbox. Ihr ganzer
+    Zweck ist, dass ein Datenbankabzug daraus nichts ueber Menschen verraet —
+    und der einzige Weg, das kaputtzumachen, ist eine Spalte, die auf ein Konto
+    zeigt. Genau dafuer ist dieser Test da: er faellt, sobald jemand „nur mal
+    eben" ein `user_id` dazulegt, weil es an einer Stelle bequem waere.
+
+    Der Rueckbau bis **vor** die Revision und wieder vor beweist zugleich, dass
+    die Tabelle in der Alembic-Kette steht und nicht bloss aus `create_all`
+    stammt.
+    """
+    db_url = f"sqlite:///{tmp_path / 'blinde_mailbox.db'}"
+    vorher = settings.database_url
+    settings.database_url = db_url
+    backend_dir = Path(__file__).resolve().parent.parent
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "migrations"))
+    engine = create_engine(db_url)
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+
+        command.downgrade(config, "20260922_10")
+        assert "e2ee_blind_mailboxes" not in inspect(engine).get_table_names()
+
+        command.upgrade(config, "head")
+        inspector = inspect(engine)
+        assert "e2ee_blind_mailboxes" in inspector.get_table_names()
+
+        spalten = {s["name"] for s in inspector.get_columns("e2ee_blind_mailboxes")}
+        assert spalten == {"mailbox_id", "auth_verifier", "created_at", "updated_at"}
+
+        # Kein Fremdschluessel — auch keiner auf etwas anderes als `users`.
+        # Jede Beziehung waere eine Spur, an der sich die Mailbox einem Konto
+        # zuordnen liesse.
+        assert inspector.get_foreign_keys("e2ee_blind_mailboxes") == []
+    finally:
+        engine.dispose()
+        settings.database_url = vorher

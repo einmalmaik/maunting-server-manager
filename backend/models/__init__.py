@@ -62,6 +62,7 @@ from .user_activity_time import UserActivityTime
 from .user_friend import UserFriend
 from .user_presence import UserPresence
 from .e2ee_blind_envelope import E2eeBlindEnvelope
+from .e2ee_blind_mailbox import E2eeBlindMailbox
 from .user_e2ee_device import UserE2eeDevice
 from .push_subscription import PushSubscription
 from .credential import (
@@ -109,6 +110,7 @@ __all__ = [
     "PanelPopup", "UserPopupState",
     "VaultEntry", "VaultHint", "VaultUserSetting", "VaultBlindBucket",
     "UserAchievement", "UserActivityTime", "UserFriend", "UserPresence", "E2eeBlindEnvelope",
+    "E2eeBlindMailbox",
     "UserE2eeDevice", "PushSubscription",
     "ChatGroup", "ChatGroupMember", "ChatGroupConfig", "ChatStory", "DirectChat", "ChatMedia",
 ]  # noqa: E501

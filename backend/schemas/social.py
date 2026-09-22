@@ -383,6 +383,31 @@ class E2eeBlindEnvelopeResponse(BaseModel):
         return iso
 
 
+_BESITZNACHWEIS = re.compile(r"^[0-9a-f]{64}$")
+
+
+class E2eeMailboxRegister(BaseModel):
+    """Der blinde Besitznachweis einer Mailbox.
+
+    Beide Felder sind 64 Hexzeichen: die Kennung ist ein SHA-256, das Token ein
+    aus Gruppenschlüsselmaterial abgeleiteter Wert derselben Länge. Der Server
+    bekommt das Token **einmal** zu sehen und behält nur dessen Hash; eine
+    andere Länge oder ein anderes Alphabet zu erlauben hieße, an dieser Stelle
+    Beliebiges entgegenzunehmen.
+    """
+
+    mailbox_id: str = Field(..., min_length=64, max_length=64)
+    auth_token: str = Field(..., min_length=64, max_length=64)
+
+    @field_validator("mailbox_id", "auth_token")
+    @classmethod
+    def validate_hex(cls, v: str) -> str:
+        klein = (v or "").strip().lower()
+        if not _BESITZNACHWEIS.match(klein):
+            raise ValueError("Kennung und Token müssen 64 Hexzeichen sein.")
+        return klein
+
+
 class E2eeMailboxSyncItem(BaseModel):
     blind_mailbox_id: str
     max_envelope_id: int

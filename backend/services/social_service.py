@@ -10,11 +10,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import hashlib
+import secrets
 from models import (
     User,
     UserFriend,
     UserPresence,
     E2eeBlindEnvelope,
+    E2eeBlindMailbox,
     ChatGroup,
     ChatGroupConfig,
     ChatGroupMember,
@@ -1415,6 +1417,134 @@ class SocialService:
                 return
 
         raise HTTPException(status_code=403, detail="Keine Berechtigung für diese Mailbox.")
+
+    # ------------------------------------------------------------------
+    # Blinder Besitznachweis (Stufe 3)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _verifier_von(auth_token: str) -> str:
+        """Was der Server von einem Token behält: seinen SHA-256, sonst nichts."""
+        return hashlib.sha256(auth_token.strip().lower().encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _mailbox_ist_ableitbar(cls, db: Session, mailbox_id: str) -> bool:
+        """Gehört diese Kennung zu einer Mailbox, die der Server selbst ausrechnen kann?
+
+        Gemeint sind die Altkennungen: `sha256("msm:group:<id>")`,
+        `sha256("msm:devices:<id>")` und die in `direct_chats` hinterlegten. Sie
+        sind aus kleinen Ganzzahlen nachrechenbar — und genau deshalb darf sie
+        nicht der Nächstbeste mit einem Besitznachweis belegen. Täte er es,
+        wäre das eine Sperre gegen die echten Mitglieder, ohne je etwas
+        entschlüsselt zu haben.
+
+        Eine Kennung aus einem Gruppengeheimnis taucht hier nie auf. Sie ist
+        unableitbar, und das ist der Unterschied, an dem diese Prüfung hängt.
+
+        Der Preis ist ein Durchlauf über die Gruppen- und Konto-Ids. Er läuft
+        nur beim Registrieren einer noch leeren, unbeanspruchten Mailbox —
+        nicht im Sende- oder Lesepfad.
+        """
+        if db.query(DirectChat).filter_by(blind_mailbox_id=mailbox_id).first():
+            return True
+        for (gid,) in db.query(ChatGroup.id).all():
+            if cls.derive_group_blind_mailbox_id(gid) == mailbox_id:
+                return True
+        for (uid,) in db.query(User.id).all():
+            if cls.derive_user_device_mailbox_id(uid) == mailbox_id:
+                return True
+        return False
+
+    @classmethod
+    def register_blind_mailbox(
+        cls, db: Session, user_id: int, mailbox_id: str, auth_token: str
+    ) -> None:
+        """Hinterlegt den Besitznachweis einer Mailbox — der authentifizierte Übergang.
+
+        Drei Regeln, und jede schließt eine Tür, die sonst offen stünde:
+
+        - **Ein hinterlegter Nachweis wird nie überschrieben.** Derselbe Token
+          ist idempotent, ein anderer ist 409. Sonst wäre ein übernommenes
+          Panel-Konto ein Generalschlüssel für jede Mailbox — dieselbe Lehre
+          wie beim Tresor.
+        - **Eine Mailbox mit Umschlägen gehört nie dem Nächstbesten.** Wer für
+          sie registrieren will, muss nach den heutigen Regeln dazugehören.
+          Das ist der Weg für den Bestand: eine gewachsene Gruppe bekommt
+          ihren Nachweis von einem echten Mitglied.
+        - **Eine leere, aber ableitbare Kennung ist ebenfalls tabu.** Gruppe 5
+          hat eine ausrechenbare Mailbox; wäre sie nur leer genug, könnte ein
+          Fremder sie mit einem Nachweis belegen und die Gruppe aussperren.
+
+        Was übrig bleibt, ist der Normalfall der Stufe 3: eine unableitbare,
+        leere Kennung aus einem frisch erzeugten Gruppengeheimnis. Die darf,
+        wer angemeldet ist — dem Server ist sie nicht zuzuordnen, und sie
+        enthält nichts, was jemandem gehören könnte.
+        """
+        clean = (mailbox_id or "").strip().lower()
+        if not clean:
+            raise HTTPException(status_code=400, detail="Mailbox-ID fehlt.")
+        verifier = cls._verifier_von(auth_token)
+
+        vorhanden = db.get(E2eeBlindMailbox, clean)
+        if vorhanden is not None:
+            if secrets.compare_digest(vorhanden.auth_verifier, verifier):
+                return
+            raise HTTPException(
+                status_code=409, detail="Für diese Mailbox ist bereits ein Besitznachweis hinterlegt."
+            )
+
+        hat_umschlaege = (
+            db.query(E2eeBlindEnvelope.id).filter(E2eeBlindEnvelope.blind_mailbox_id == clean).first()
+            is not None
+        )
+        if hat_umschlaege or cls._mailbox_ist_ableitbar(db, clean):
+            cls.assert_mailbox_participant(db, user_id, clean)
+
+        db.add(
+            E2eeBlindMailbox(
+                mailbox_id=clean,
+                auth_verifier=verifier,
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
+        )
+        try:
+            db.commit()
+        except IntegrityError:
+            # Zwei Geräte haben gleichzeitig registriert. Derselbe Token ist
+            # kein Fehler, ein anderer schon.
+            db.rollback()
+            nun = db.get(E2eeBlindMailbox, clean)
+            if nun is None or not secrets.compare_digest(nun.auth_verifier, verifier):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Für diese Mailbox ist bereits ein Besitznachweis hinterlegt.",
+                )
+
+    @classmethod
+    def assert_mailbox_token(cls, db: Session, mailbox_id: str, auth_token: str | None) -> None:
+        """Prüft den Besitznachweis, falls für diese Mailbox einer hinterlegt ist.
+
+        Ohne hinterlegten Nachweis tut diese Prüfung nichts — der Bestand läuft
+        weiter wie bisher und wird von `assert_mailbox_participant` gehalten.
+        Ist einer hinterlegt, gilt er: ein fehlendes oder falsches Token ist
+        403, und zwar bevor irgendetwas gelesen, geschrieben oder gelöscht
+        wird.
+
+        Verglichen wird mit `compare_digest`. Ein Vergleich, der beim ersten
+        abweichenden Zeichen abbricht, verrät über viele Versuche den Verifier
+        — und der ist hier das Einzige, was es zu erraten gibt.
+        """
+        clean = (mailbox_id or "").strip().lower()
+        if not clean:
+            return
+        eintrag = db.get(E2eeBlindMailbox, clean)
+        if eintrag is None:
+            return
+        if not auth_token or not secrets.compare_digest(
+            eintrag.auth_verifier, cls._verifier_von(auth_token)
+        ):
+            raise HTTPException(status_code=403, detail="Kein gültiger Besitznachweis für diese Mailbox.")
 
     @classmethod
     def delete_blind_envelopes(
