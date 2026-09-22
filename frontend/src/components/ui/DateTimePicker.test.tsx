@@ -51,4 +51,37 @@ describe('DateTimePicker', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.queryByRole('dialog')).toBeNull()
   })
+
+  describe('dateOnly: ein Feld, dem eine Uhrzeit nichts nuetzt', () => {
+    it('gibt nur das Datum zurueck, ohne Uhrzeit-Anhang', () => {
+      const handleChange = vi.fn()
+      render(<DateTimePicker value="2026-08-21" onChange={handleChange} dateOnly />)
+
+      fireEvent.click(screen.getByRole('button'))
+      fireEvent.click(screen.getByRole('button', { name: '15' }))
+
+      expect(handleChange).toHaveBeenCalledWith('2026-08-15')
+    })
+
+    it('zeigt weder Stunden- noch Minutenfeld', () => {
+      render(<DateTimePicker value="2026-08-21" onChange={() => {}} dateOnly />)
+
+      fireEvent.click(screen.getByRole('button'))
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+      // Ein Bedienelement, dessen Eingabe weggeworfen wird, darf es nicht geben.
+      expect(screen.queryByText('Stunde')).toBeNull()
+      expect(screen.queryByText('Minute')).toBeNull()
+    })
+
+    it('laesst die Uhrzeit stehen, solange dateOnly fehlt', () => {
+      const handleChange = vi.fn()
+      render(<DateTimePicker value="2026-08-21T14:30" onChange={handleChange} />)
+
+      fireEvent.click(screen.getByRole('button'))
+      expect(screen.getByText('Stunde')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: '15' }))
+
+      expect(handleChange).toHaveBeenCalledWith('2026-08-15T14:30')
+    })
+  })
 })

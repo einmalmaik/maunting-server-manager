@@ -24,7 +24,7 @@ import { apiUrl } from '@/config/api'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { PageHeader } from '@/Singra/UI/PageHeader'
-import { DateTimePicker, Dropdown } from '@/Singra/UI'
+import { DateTimePicker, Dropdown, NumberStepper } from '@/Singra/UI'
 import { Button } from '@/components/ui/Button'
 import { sendeGeraeteBenachrichtigung, pruefeUndFrageGeraeteBerechtigung } from '@/lib/benachrichtigung'
 import {
@@ -1519,18 +1519,20 @@ export function Calendar() {
                     )}
                   </div>
 
-                  <select
+                  <Dropdown
                     id="cal-form-takt"
                     value={formTakt ?? ''}
-                    onChange={(e) => setFormTakt((e.target.value || null) as Frequenz | null)}
-                    className="msm-input w-full"
-                  >
-                    <option value="">{t('calendar.recurrence.none')}</option>
-                    <option value="DAILY">{t('calendar.recurrence.daily')}</option>
-                    <option value="WEEKLY">{t('calendar.recurrence.weekly')}</option>
-                    <option value="MONTHLY">{t('calendar.recurrence.monthly')}</option>
-                    <option value="YEARLY">{t('calendar.recurrence.yearly')}</option>
-                  </select>
+                    onChange={(val) => setFormTakt((val || null) as Frequenz | null)}
+                    options={[
+                      { value: '', label: t('calendar.recurrence.none') },
+                      { value: 'DAILY', label: t('calendar.recurrence.daily') },
+                      { value: 'WEEKLY', label: t('calendar.recurrence.weekly') },
+                      { value: 'MONTHLY', label: t('calendar.recurrence.monthly') },
+                      { value: 'YEARLY', label: t('calendar.recurrence.yearly') },
+                    ]}
+                    placeholder={t('calendar.recurrence.none')}
+                    className="w-full"
+                  />
 
                   {formTakt && (
                     <>
@@ -1538,14 +1540,14 @@ export function Calendar() {
                         <label htmlFor="cal-form-intervall" className="text-xs text-on-surface-variant">
                           {t('calendar.recurrence.everyNth')}
                         </label>
-                        <input
+                        <NumberStepper
                           id="cal-form-intervall"
-                          type="number"
                           min={1}
                           max={99}
                           value={formIntervall}
-                          onChange={(e) => setFormIntervall(Math.max(1, Number(e.target.value) || 1))}
-                          className="msm-input w-20"
+                          onValueChange={(val) => setFormIntervall(Math.max(1, Number(val) || 1))}
+                          size="sm"
+                          className="w-24"
                         />
                         <span className="text-xs text-on-surface-variant">
                           {t(`calendar.recurrence.unit.${formTakt}`, { count: formIntervall })}
@@ -1585,57 +1587,44 @@ export function Calendar() {
                         <span className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase">
                           {t('calendar.recurrence.endsLabel')}
                         </span>
-                        <div className="flex flex-wrap items-center gap-3 text-xs text-on-surface">
-                          <label className="flex items-center gap-1.5">
-                            <input
-                              type="radio"
-                              name="cal-serie-ende"
-                              checked={formEndeArt === 'nie'}
-                              onChange={() => setFormEndeArt('nie')}
-                            />
-                            {t('calendar.recurrence.endsNever')}
-                          </label>
-                          <label className="flex items-center gap-1.5">
-                            <input
-                              type="radio"
-                              name="cal-serie-ende"
-                              checked={formEndeArt === 'bis'}
-                              onChange={() => setFormEndeArt('bis')}
-                            />
-                            {t('calendar.recurrence.endsOn')}
-                          </label>
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-on-surface">
+                          <Dropdown
+                            id="cal-form-ende-art"
+                            value={formEndeArt}
+                            onChange={(val) => setFormEndeArt(val as typeof formEndeArt)}
+                            options={[
+                              { value: 'nie', label: t('calendar.recurrence.endsNever') },
+                              { value: 'bis', label: t('calendar.recurrence.endsOn') },
+                              { value: 'anzahl', label: t('calendar.recurrence.endsAfter') },
+                            ]}
+                            aria-label={t('calendar.recurrence.endsLabel')}
+                            className="w-44"
+                          />
                           {formEndeArt === 'bis' && (
-                            <input
-                              type="date"
+                            <DateTimePicker
                               value={formBis}
-                              onChange={(e) => setFormBis(e.target.value)}
+                              onChange={setFormBis}
+                              dateOnly
+                              locale={i18n.language.startsWith('de') ? 'de' : 'en'}
                               /* Ein Serienende vor dem Beginn ergibt eine Regel,
                                  die endet, bevor sie anfängt. Der Termin wäre
                                  dann in keinem Zeitraum mehr zu sehen — die
                                  Ausbreitung fängt das ab, aber ein vertipptes
                                  Jahr soll gar nicht erst durchgehen. */
                               min={formStart ? formStart.slice(0, 10) : undefined}
-                              className="msm-input"
+                              placeholder={t('calendar.recurrence.endsOn')}
                               aria-label={t('calendar.recurrence.endsOn')}
+                              className="flex-1 min-w-[10rem]"
                             />
                           )}
-                          <label className="flex items-center gap-1.5">
-                            <input
-                              type="radio"
-                              name="cal-serie-ende"
-                              checked={formEndeArt === 'anzahl'}
-                              onChange={() => setFormEndeArt('anzahl')}
-                            />
-                            {t('calendar.recurrence.endsAfter')}
-                          </label>
                           {formEndeArt === 'anzahl' && (
-                            <input
-                              type="number"
+                            <NumberStepper
                               min={1}
                               max={999}
                               value={formAnzahl}
-                              onChange={(e) => setFormAnzahl(Math.max(1, Number(e.target.value) || 1))}
-                              className="msm-input w-20"
+                              onValueChange={(val) => setFormAnzahl(Math.max(1, Number(val) || 1))}
+                              size="sm"
+                              className="w-24"
                               aria-label={t('calendar.recurrence.endsAfter')}
                             />
                           )}
