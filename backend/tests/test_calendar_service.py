@@ -745,6 +745,55 @@ def test_ical_export_schreibt_die_regel_statt_aller_vorkommen(db_session, test_u
     assert ics.count("BEGIN:VEVENT") == 1, "ein VEVENT mit Regel, keine Liste von Kopien"
 
 
+def test_ical_export_ganztag_behaelt_sein_datum(db_session, test_user):
+    """Der Export schrieb das UTC-Datum eines ganzen Tages.
+
+    Berliner Mitternacht ist 23:00 UTC des Vortags, und `_parse_datetime`
+    liefert immer UTC. Aus dem Geburtstag am 14.03. wurde im abonnierten
+    Google-Kalender `DTSTART;VALUE=DATE:20260313` — ein Tag zu frueh, und mit
+    einer jaehrlichen Regel jedes Jahr aufs Neue.
+
+    Das Gegenstueck zu `test_caldav_ganztag_behaelt_sein_datum_oestlich_von_greenwich`:
+    dort kommt der Tag herein, hier geht er hinaus.
+    """
+    for zone in ("Europe/Berlin", "Asia/Tokyo", "Pacific/Kiritimati", "America/Los_Angeles"):
+        test_user.time_zone = zone
+        db_session.commit()
+        ev = CalendarService.create_event(
+            db=db_session, user=test_user,
+            title="Geburtstag", start_time="2026-03-14 00:00", end_time="2026-03-15 00:00",
+            all_day=True, recurrence=_serie("FREQ=YEARLY"),
+        )
+        ics = CalendarService.export_ical(db_session, test_user)
+        assert "DTSTART;VALUE=DATE:20260314" in ics, f"{zone} verschiebt den Tag"
+        assert "DTEND;VALUE=DATE:20260315" in ics, f"{zone} verschiebt das Ende"
+        CalendarService.delete_event(db=db_session, user=test_user, event_id=ev["event_id"])
+
+
+def test_ical_export_ausnahme_trifft_das_vorkommen(db_session, test_user):
+    """Ein abgesagtes Vorkommen muss der Abonnent auch finden koennen.
+
+    Der Ausnahmetag ist ein lokales Datum, die Uhrzeit stand in UTC. Beides
+    aneinandergeklebt ergibt ueber die Sommerzeit einen Zeitpunkt, den es in
+    der Serie nicht gibt — der abgesagte Termin bliebe im fremden Kalender
+    stehen. Der Termin hier liegt im Winter (09:00 Berlin = 08:00Z), die
+    Ausnahme im Sommer (09:00 Berlin = 07:00Z).
+    """
+    test_user.time_zone = "Europe/Berlin"
+    db_session.commit()
+    CalendarService.create_event(
+        db=db_session, user=test_user,
+        title="Wochentermin", start_time="2026-01-05 09:00", end_time="2026-01-05 10:00",
+        recurrence=_serie("FREQ=WEEKLY", ausnahmen=["2026-07-06"]),
+    )
+    ics = CalendarService.export_ical(db_session, test_user)
+    assert "DTSTART:20260105T080000Z" in ics, "Start im Winter: 09:00 Berlin ist 08:00Z"
+    assert "EXDATE:20260706T070000Z" in ics, (
+        "Ausnahme im Sommer: 09:00 Berlin ist 07:00Z. "
+        f"Gefunden: {[z for z in ics.split(chr(13) + chr(10)) if z.startswith('EXDATE')]}"
+    )
+
+
 # ── Erinnerungen ──────────────────────────────────────────────────────────
 
 
@@ -905,3 +954,62 @@ def test_caldav_import_ohne_rrule_bleibt_wie_bisher():
 
 
 
+
+
+@pytest.fixture
+def fremder(db_session):
+    """Ein zweites Konto, ohne jedes Recht am ersten."""
+    user = User(
+        username="fremder",
+        email="fremder@example.com",
+        password_hash="fakehash",
+        is_owner=False,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+def test_fremder_kommt_an_die_serie_nicht_heran(db_session, test_user, fremder):
+    """Ein zweites Konto darf eine fremde Serie weder sehen noch anfassen.
+
+    Die Wiederholung ist ein neues Feld am Termin — sie muss dieselbe Schranke
+    haben wie Titel und Ort. Besonders `recurrence`: wer sie aendern koennte,
+    liesse einen fremden Geburtstag taeglich feuern oder brauchte nur ein
+    `UNTIL` in der Vergangenheit, um ihn verschwinden zu lassen.
+    """
+    ev = CalendarService.create_event(
+        db=db_session, user=test_user,
+        title="Geburtstag Lisa", start_time="2026-03-14 00:00", end_time="2026-03-15 00:00",
+        all_day=True, recurrence=_serie("FREQ=YEARLY"),
+    )
+    kennung = ev["event_id"]
+
+    assert [e for e in CalendarService.get_events(db_session, fremder)
+            if e["event_id"] == kennung] == [], "der fremde Termin ist sichtbar"
+
+    for name, ruf in (
+        ("Regel aendern", lambda: CalendarService.update_event(
+            db=db_session, user=fremder, event_id=kennung, recurrence=_serie("FREQ=DAILY"))),
+        ("Serie beenden", lambda: CalendarService.update_event(
+            db=db_session, user=fremder, event_id=kennung,
+            recurrence=_serie("FREQ=YEARLY;UNTIL=20000101"))),
+        ("Titel aendern", lambda: CalendarService.update_event(
+            db=db_session, user=fremder, event_id=kennung, title="uebernommen")),
+        ("loeschen", lambda: CalendarService.delete_event(
+            db=db_session, user=fremder, event_id=kennung)),
+    ):
+        with pytest.raises(Exception):
+            ruf()
+
+    # Zweite, unabhaengige Zusage: selbst wenn hier nichts wuerfe, muesste der
+    # Termin danach unveraendert dastehen. Ein stiller Fehlschlag waere sonst
+    # ebenso gut wie ein lautes Nein — und ein stiller *Erfolg* faellt nur
+    # hier auf.
+    meine = [e for e in CalendarService.get_events(db_session, test_user)
+             if e["event_id"] == kennung]
+    assert len(meine) == 1, "der eigene Termin ist weg"
+    assert meine[0]["title"] == "Geburtstag Lisa"
+    assert "YEARLY" in meine[0]["recurrence"]
+    assert "DAILY" not in meine[0]["recurrence"]

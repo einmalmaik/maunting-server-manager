@@ -184,6 +184,12 @@ function tagPlus(jahr: number, monat: number, tag: number, tage: number): [numbe
   return [d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate()]
 }
 
+/** Ganze Tage von `a` bis `b`. Negativ, wenn `b` vor `a` liegt. */
+function tageZwischen(a: [number, number, number], b: [number, number, number]): number {
+  const ms = Date.UTC(b[0], b[1] - 1, b[2]) - Date.UTC(a[0], a[1] - 1, a[2])
+  return Math.round(ms / 86_400_000)
+}
+
 function datumKleinerGleich(a: [number, number, number], b: [number, number, number]): boolean {
   if (a[0] !== b[0]) return a[0] < b[0]
   if (a[1] !== b[1]) return a[1] < b[1]
@@ -444,6 +450,7 @@ function* lokaleKandidaten(
   startUhr: Wanduhr,
   zeitzone: string,
   grenze: [number, number, number] | null,
+  ab: [number, number, number] | null = null,
 ): Generator<Kandidat> {
   const uhrzeit = { stunde: startUhr.stunde, minute: startUhr.minute, sekunde: startUhr.sekunde }
   let geliefert = 0
@@ -488,7 +495,26 @@ function* lokaleKandidaten(
     }
 
     const schrittTage = regel.interval * (regel.freq === 'WEEKLY' ? 7 : 1)
-    for (let n = 0; n < MAX_SCHRITTE; n++) {
+    // Der Deckel zählte ab dem Ursprung, nicht ab dem Fenster. Eine tägliche
+    // Serie war damit aufgebraucht, bevor sie den gefragten Zeitraum überhaupt
+    // erreichte: ab etwa 13,7 Jahren Laufzeit (`MAX_SCHRITTE` Tage) verschwand
+    // sie vollständig — kein Vorkommen, in keinem Fenster. Deshalb wird
+    // vorgesprungen.
+    //
+    // Nur in diesem Zweig: DAILY und WEEKLY ohne BYDAY liefern je Schritt genau
+    // einen Kandidaten, also lässt sich der Zähler für `COUNT` exakt
+    // vorbelasten. Die anderen Takte überspringen Tage, die es nicht gibt
+    // (31. im Februar) — dort wäre die Vorbelastung geraten. Sie brauchen den
+    // Sprung auch nicht: 5000 Wochen sind 96 Jahre, 5000 Monate 416.
+    let n0 = 0
+    if (ab) {
+      const abstand = tageZwischen([startUhr.jahr, startUhr.monat, startUhr.tag], ab)
+      if (abstand > 0) {
+        n0 = Math.floor(abstand / schrittTage)
+        geliefert = n0
+      }
+    }
+    for (let n = n0; n < n0 + MAX_SCHRITTE; n++) {
       const [j, m, t] = tagPlus(startUhr.jahr, startUhr.monat, startUhr.tag, n * schrittTage)
       if (j > 9999 || Number.isNaN(j)) return
       if (fertig(j, m, t)) return
@@ -638,8 +664,38 @@ export function ausbreiten(
     grenze = tagPlus(u.jahr, u.monat, u.tag, 1)
   }
 
-  for (const kandidat of lokaleKandidaten(regel, startUhr, zeitzone, grenze)) {
+  // Ab wo gerechnet wird. Ein Vorkommen, das **vor** dem Fenster beginnt und
+  // hineinreicht, gehört dazu — deshalb die Dauer abziehen, und einen Tag Luft
+  // für die Zonenkante obendrauf. Lieber ein Kandidat zu früh als einer zu
+  // wenig; `eintragen` sortiert ihn ohnehin aus.
+  let ab: [number, number, number] | null = null
+  if (fensterVon) {
+    const luft = Math.max(dauer, ganzeTage * 86_400_000) + 86_400_000
+    const u = wanduhr(new Date(fensterVon.getTime() - luft), zeitzone)
+    ab = [u.jahr, u.monat, u.tag]
+  }
+
+  let kandidaten = 0
+  for (const kandidat of lokaleKandidaten(regel, startUhr, zeitzone, grenze, ab)) {
+    kandidaten++
     eintragen(kandidat.datum, kandidat.start, endeFuer(kandidat.start))
+  }
+
+  if (kandidaten === 0) {
+    // Die Regel endet, bevor sie beginnt — `UNTIL` liegt vor dem Start. Sie
+    // liefert dann in **keinem** Zeitraum ein Vorkommen, und der Termin ist
+    // nirgends mehr zu sehen; anklicken und richtigstellen kann ihn auch
+    // niemand mehr. Ein vertipptes Endjahr darf keinen Termin verschlucken,
+    // also gilt hier dasselbe wie bei einer unlesbaren Regel: das
+    // ursprüngliche Vorkommen bleibt stehen.
+    //
+    // Eine *abgelaufene* Serie trifft das nicht — sie liefert Kandidaten, die
+    // nur außerhalb des gefragten Fensters liegen. Eine Serie, deren
+    // Vorkommen alle abgesagt wurden, ebenso wenig: dort zählt der Kandidat,
+    // und die Ausnahme entfernt ihn erst danach. Liegt das Fenster ganz vor
+    // dem Termin, fällt das Vorkommen in `eintragen` durch die
+    // Fensterprüfung — es entsteht keines aus dem Nichts.
+    eintragen(alsDatum(startUhr), start, ende)
   }
 
   // Eine Abweichung kann ein Vorkommen nach hinten verschieben; sortieren,

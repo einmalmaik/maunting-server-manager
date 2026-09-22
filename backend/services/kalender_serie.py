@@ -458,7 +458,9 @@ def _monat_versetzt(jahr: int, monat: int, schritte: int) -> tuple[int, int] | N
     return neues_jahr, (gesamt % 12) + 1
 
 
-def _lokale_kandidaten(regel: Regel, start_lokal: datetime, grenze_lokal: date):
+def _lokale_kandidaten(
+    regel: Regel, start_lokal: datetime, grenze_lokal: date, ab_lokal: date | None = None
+):
     """Erzeugt lokale Startzeitpunkte in aufsteigender Reihenfolge.
 
     Liefert Wanduhrzeiten, keine Instanten: eine woechentliche Besprechung um
@@ -509,7 +511,23 @@ def _lokale_kandidaten(regel: Regel, start_lokal: datetime, grenze_lokal: date):
                     yield d, baue(d)
             return
 
-        for n in range(_MAX_SCHRITTE):
+        # Der Deckel zaehlte ab dem Ursprung, nicht ab dem Fenster. Eine
+        # taegliche Serie war damit aufgebraucht, bevor sie den gefragten
+        # Zeitraum ueberhaupt erreichte: ab etwa 13,7 Jahren Laufzeit
+        # (`_MAX_SCHRITTE` Tage) verschwand sie vollstaendig — kein Vorkommen,
+        # in keinem Fenster. Deshalb wird vorgesprungen.
+        #
+        # Nur in diesem Zweig: DAILY und WEEKLY ohne BYDAY liefern je Schritt
+        # genau einen Kandidaten, also laesst sich der Zaehler fuer `COUNT`
+        # exakt vorbelasten. Die anderen Takte ueberspringen Tage, die es nicht
+        # gibt (31. im Februar) — dort waere die Vorbelastung geraten. Sie
+        # brauchen den Sprung auch nicht: 5000 Wochen sind 96 Jahre, 5000
+        # Monate 416, 5000 Jahre 5000.
+        n0 = 0
+        if ab_lokal is not None and ab_lokal > erstes_datum:
+            n0 = (ab_lokal - erstes_datum).days // schritt_tage
+            geliefert = n0
+        for n in range(n0, n0 + _MAX_SCHRITTE):
             try:
                 d = erstes_datum + timedelta(days=n * schritt_tage)
             except OverflowError:
@@ -672,9 +690,39 @@ def ausbreiten(
     else:
         grenze_lokal = date.max - timedelta(days=1)
 
-    for _datum, beginn_lokal in _lokale_kandidaten(regel, start_lokal, grenze_lokal):
+    # Ab wo gerechnet wird. Ein Vorkommen, das **vor** dem Fenster beginnt und
+    # hineinreicht, gehoert dazu — deshalb die Dauer abziehen, und einen Tag
+    # Luft fuer die Zonenkante obendrauf. Lieber ein Kandidat zu frueh als
+    # einer zu wenig; `eintragen` sortiert ihn ohnehin aus.
+    if fenster_von is not None:
+        luft = max(dauer, timedelta(days=ganze_tage)) + timedelta(days=1)
+        ab_lokal = (fenster_von.astimezone(tz) - luft).date()
+    else:
+        ab_lokal = None
+
+    kandidaten = 0
+    for _datum, beginn_lokal in _lokale_kandidaten(regel, start_lokal, grenze_lokal, ab_lokal):
+        kandidaten += 1
         a, b = bis_utc(beginn_lokal)
         eintragen(_datum.isoformat(), a, b)
+
+    if kandidaten == 0:
+        # Die Regel endet, bevor sie beginnt — `UNTIL` liegt vor dem Start.
+        # Sie liefert dann in **keinem** Zeitraum ein Vorkommen, und der Termin
+        # ist nirgends mehr zu sehen; anklicken und richtigstellen kann ihn
+        # auch niemand mehr. Ein vertipptes Endjahr darf keinen Termin
+        # verschlucken, also gilt hier dasselbe wie bei einer unlesbaren Regel:
+        # das urspruengliche Vorkommen bleibt stehen.
+        #
+        # Eine Serie, deren Vorkommen alle abgesagt wurden, trifft das nicht:
+        # dort zaehlt der Kandidat, und die Ausnahme entfernt ihn erst danach.
+        #
+        # Bei einer *abgelaufenen* Serie kann der Vorsprung dazu fuehren, dass
+        # hier null Kandidaten ankommen — dann steht das urspruengliche
+        # Vorkommen zur Pruefung an, liegt aber vor dem Fenster und faellt in
+        # `eintragen` durch. Dasselbe gilt, wenn das Fenster ganz vor dem
+        # Termin liegt: es entsteht kein Vorkommen aus dem Nichts.
+        eintragen(start_lokal.date().isoformat(), start_utc, ende_utc)
 
     # Eine Abweichung kann ein Vorkommen nach hinten verschieben; sortieren,
     # damit die Ansicht nicht springt.

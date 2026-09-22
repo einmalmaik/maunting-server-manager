@@ -10,7 +10,7 @@ Sicherheitsinvariante:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import logging
 import re
 import threading
@@ -1396,6 +1396,7 @@ class CalendarService:
             cal_name = "MSM Kalender"
 
         tz_name = getattr(user, "time_zone", None) or "Europe/Berlin"
+        tz = _user_timezone(user)
 
         lines = [
             "BEGIN:VCALENDAR",
@@ -1422,12 +1423,16 @@ class CalendarService:
                 start_dt = _parse_datetime(ev.get("start", ""), user=user)
                 end_dt = _parse_datetime(ev.get("end", ""), user=user)
 
+                # `_parse_datetime` liefert **immer** UTC. Ein ganzer Tag in
+                # Berlin beginnt um 23:00 UTC des Vortags — ohne Ruecksprung in
+                # die Benutzerzone wuerde aus dem Geburtstag am 14.03. ein
+                # `DTSTART;VALUE=DATE:20270313` im abonnierten Kalender.
                 if is_all_day:
-                    dt_start_line = f"DTSTART;VALUE=DATE:{start_dt.strftime('%Y%m%d')}"
-                    dt_end_line = f"DTEND;VALUE=DATE:{end_dt.strftime('%Y%m%d')}"
+                    dt_start_line = f"DTSTART;VALUE=DATE:{_ical_zeit_schreiben(start_dt, True, tz)}"
+                    dt_end_line = f"DTEND;VALUE=DATE:{_ical_zeit_schreiben(end_dt, True, tz)}"
                 else:
-                    dt_start_line = f"DTSTART:{start_dt.astimezone(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
-                    dt_end_line = f"DTEND:{end_dt.astimezone(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+                    dt_start_line = f"DTSTART:{_ical_zeit_schreiben(start_dt, False, tz)}"
+                    dt_end_line = f"DTEND:{_ical_zeit_schreiben(end_dt, False, tz)}"
 
                 uid = f"{raw_uid}@msm.mauntingstudios.de" if "@" not in raw_uid else raw_uid
                 title = _escape_ical_text(ev.get("title", "Termin"))
@@ -1459,13 +1464,31 @@ class CalendarService:
                 if serie.ist_serie:
                     event_lines.append(f"RRULE:{serie.rrule}")
                     if serie.ausnahmen:
+                        # Der Ausnahmetag ist ein **lokales** Datum, die
+                        # Uhrzeit steht am Start. Beides muss in der
+                        # Benutzerzone zusammengesetzt und erst dann nach UTC
+                        # gerechnet werden. Lokales Datum mit UTC-Uhrzeit zu
+                        # verkleben geht ueber die Sommerzeit um eine Stunde
+                        # daneben — und bei Terminen um Mitternacht um einen
+                        # ganzen Tag. Das abonnierende Programm findet das
+                        # Vorkommen dann nicht und zeigt den abgesagten Termin
+                        # trotzdem an.
+                        start_lokal = start_dt.astimezone(tz)
                         for tag in sorted(serie.ausnahmen):
                             kompakt = tag.replace("-", "")
                             if is_all_day:
                                 event_lines.append(f"EXDATE;VALUE=DATE:{kompakt}")
-                            else:
-                                zeit = start_dt.astimezone(timezone.utc).strftime("%H%M%S")
-                                event_lines.append(f"EXDATE:{kompakt}T{zeit}Z")
+                                continue
+                            try:
+                                datum = date.fromisoformat(tag)
+                            except ValueError:
+                                continue
+                            treffer = datetime.combine(
+                                datum, start_lokal.time()
+                            ).replace(tzinfo=tz)
+                            event_lines.append(
+                                f"EXDATE:{treffer.astimezone(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+                            )
 
                 event_lines.append("END:VEVENT")
 

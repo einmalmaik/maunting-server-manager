@@ -1609,6 +1609,12 @@ export function Calendar() {
                               type="date"
                               value={formBis}
                               onChange={(e) => setFormBis(e.target.value)}
+                              /* Ein Serienende vor dem Beginn ergibt eine Regel,
+                                 die endet, bevor sie anfängt. Der Termin wäre
+                                 dann in keinem Zeitraum mehr zu sehen — die
+                                 Ausbreitung fängt das ab, aber ein vertipptes
+                                 Jahr soll gar nicht erst durchgehen. */
+                              min={formStart ? formStart.slice(0, 10) : undefined}
                               className="msm-input"
                               aria-label={t('calendar.recurrence.endsOn')}
                             />
