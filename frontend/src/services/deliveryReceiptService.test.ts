@@ -36,6 +36,10 @@ describe('deliveryReceiptService', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     deliveredEnvelopeIds.clear()
+    // Der Quittungsstand überlebt absichtlich das Neuladen. Zwischen zwei
+    // Prüfungen darf er das nicht, sonst hängt das Ergebnis an der
+    // Reihenfolge der Kennungen.
+    localStorage.clear()
     useMessengerNotificationStore.setState({
       blockedUserIds: [],
       mailboxDirectory: {},
@@ -96,6 +100,74 @@ describe('deliveryReceiptService', () => {
     expect(quittierte).toHaveLength(1)
     expect(deliveredEnvelopeIds.has(2)).toBe(true)
     expect(deliveredEnvelopeIds.has(1)).toBe(false)
+  })
+
+  it('schickt eine Quittung je Mailbox, nicht eine je Umschlag', async () => {
+    // Gemessen am laufenden System: 2221 von 3444 Umschlägen waren
+    // Quittungen. Die Schleife hier quittierte jeden Umschlag einzeln, und
+    // das Fenster fasst hundert — verdrängt wurde, was sich nicht
+    // nachbestellen lässt.
+    useMessengerNotificationStore.setState({
+      blockedUserIds: [],
+      mailboxDirectory: { 'mailbox-abc': { isGroup: false, userId: 2 } as never },
+    })
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue(
+      Array.from({ length: 100 }, (_, i) => ({
+        id: i + 1,
+        client_uuid: `nachricht-${i}`,
+        ciphertext_envelope: 'x',
+        created_at: '',
+      })) as never,
+    )
+
+    await checkAndDispatchPendingDeliveryReceipts(1)
+
+    expect(vi.mocked(socialApi.relayE2eeEnvelope)).toHaveBeenCalledTimes(1)
+  })
+
+  it('quittiert nach einem Neuladen nicht noch einmal', async () => {
+    // `deliveredEnvelopeIds` liegt im `sessionStorage` und ist nach einem
+    // Neuladen leer. Genau das ließ die Mailbox bei jedem Ladevorgang um
+    // ihren eigenen Bestand wachsen; der Merker in `quittungsstand` hält
+    // dagegen.
+    useMessengerNotificationStore.setState({
+      blockedUserIds: [],
+      mailboxDirectory: { 'mailbox-abc': { isGroup: false, userId: 2 } as never },
+    })
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([
+      { id: 7, client_uuid: 'echte-nachricht', ciphertext_envelope: 'y', created_at: '' },
+    ] as never)
+
+    await checkAndDispatchPendingDeliveryReceipts(1)
+    expect(vi.mocked(socialApi.relayE2eeEnvelope)).toHaveBeenCalledTimes(1)
+
+    // So sieht ein Neuladen für diesen Dienst aus: die Sitzungsablage ist
+    // weg, `localStorage` bleibt.
+    deliveredEnvelopeIds.clear()
+    await checkAndDispatchPendingDeliveryReceipts(1)
+    expect(vi.mocked(socialApi.relayE2eeEnvelope)).toHaveBeenCalledTimes(1)
+  })
+
+  it('quittiert eine neuere Nachricht auch nach dem Neuladen', async () => {
+    // Die Kehrseite: der Merker darf nicht verstummen lassen, was wirklich
+    // neu ist.
+    useMessengerNotificationStore.setState({
+      blockedUserIds: [],
+      mailboxDirectory: { 'mailbox-abc': { isGroup: false, userId: 2 } as never },
+    })
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([
+      { id: 7, client_uuid: 'echte-nachricht', ciphertext_envelope: 'y', created_at: '' },
+    ] as never)
+    await checkAndDispatchPendingDeliveryReceipts(1)
+
+    deliveredEnvelopeIds.clear()
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([
+      { id: 7, client_uuid: 'echte-nachricht', ciphertext_envelope: 'y', created_at: '' },
+      { id: 8, client_uuid: 'noch-eine', ciphertext_envelope: 'z', created_at: '' },
+    ] as never)
+    await checkAndDispatchPendingDeliveryReceipts(1)
+
+    expect(vi.mocked(socialApi.relayE2eeEnvelope)).toHaveBeenCalledTimes(2)
   })
 
   it('deduplicates delivery receipts for the same envelopeId', async () => {

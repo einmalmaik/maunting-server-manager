@@ -546,6 +546,23 @@ export async function loadLocalMessages(blindMailboxId: string): Promise<LocalSt
       }
     }
     const filtered = rawMsgs.filter((m) => {
+      // Was hier herauskommt, muss eine Nachricht **sein** — sonst stirbt die
+      // ganze Ansicht an einer einzigen Zeile.
+      //
+      // Nachgemessen am 21.09.2026: fünf von Hand verbogene Zeilen in der
+      // IndexedDB (`text` fehlt, `text` ist ein Objekt) rissen den kompletten
+      // Messenger in die Fehlergrenze — `msg.text.startsWith is not a
+      // function` in `ChatMessageBubble`. Und weil die Zeilen auf der Platte
+      // liegen, half der angebotene Rat „Neu laden" genau nie.
+      //
+      // Die Prüfung steht hier und nicht in der Blase: `msg.text` wird an
+      // Dutzenden Stellen wie ein String behandelt. Eine Zeile, die das nicht
+      // hergibt, gehört gar nicht erst herausgegeben. Eine defekte Zeile
+      // kostet so eine Nachricht statt das Gespräch.
+      if (!m || typeof m !== 'object') return false
+      if (typeof m.id !== 'number' || !Number.isFinite(m.id)) return false
+      if (typeof m.text !== 'string') return false
+      if (typeof m.createdAt !== 'string') return false
       // Systemzeilen gehören nicht in den Verlauf. Gespeicherte gibt es
       // trotzdem: bis 09/2026 schrieb der Messenger sie mit, und bei jedem
       // Ladevorgang kamen sie zurück.
@@ -567,6 +584,28 @@ export async function loadLocalMessages(blindMailboxId: string): Promise<LocalSt
 /**
  * Saves a list of decrypted messages to the local IndexedDB store.
  * Existing entries with the same `[blindMailboxId, id]` are updated idempotently.
+ *
+ * ## Die optimistische Zeile geht dabei weg
+ *
+ * Eine gesendete Nachricht liegt zweimal in der Ablage: einmal unter der aus
+ * der Uhr erfundenen Kennung, die sie beim Absenden bekam, und einmal unter
+ * der echten Umschlagkennung, sobald der Server sie vergeben hat. Geschrieben
+ * wird hier nur — die erste Fassung blieb also stehen.
+ *
+ * Solange beide da sind, fällt das nicht auf: `mischeVerlauf` wirft die
+ * optimistische Fassung aus der Anzeige. Sie überlebt aber die bestätigte.
+ * Rutscht der Umschlag aus dem Hundert-Umschläge-Fenster, ist die
+ * optimistische Zeile die einzige, die dieses Gerät noch hat — und sie trägt
+ * `status: 'queued'`. Gemessen am laufenden System hiess das: die älteste
+ * Nachricht des Chats stand unter der neuesten, weil
+ * `sortMessagesChronologically` Bestätigtes vor Optimistisches sortiert; das
+ * Häkchen fehlte dauerhaft; und weil `mischeVerlauf` bei einer optimistischen
+ * Zeile die Fassung aus dem Arbeitsspeicher vorzieht, nahm sie auch keine
+ * Reaktion mehr an.
+ *
+ * Deshalb räumt jeder Schreibvorgang auf: kommt eine bestätigte Fassung
+ * herein, verschwindet die optimistische Zeile mit derselben logischen
+ * Kennung. Das heilt auch, was früher liegengeblieben ist.
  */
 export async function saveLocalMessages(
   blindMailboxId: string,
@@ -579,6 +618,10 @@ export async function saveLocalMessages(
     // Versiegeln passiert vollständig vor der Transaktion. Siehe Dateikopf.
     let maxEnvelopeId = 0
     const zeilen: Record<string, unknown>[] = []
+    /** Logische Kennungen, für die eine bestätigte Fassung hereinkommt. */
+    const bestaetigt = new Set<string>()
+    /** Optimistische Zeilen aus dieser Liste, je logischer Kennung. */
+    const optimistischHier = new Map<string, number[]>()
     for (const m of messages) {
       // Siehe `isSystem`: eine Meldung über die Sitzung dieses Geräts ist
       // kein Gesprächsinhalt und hat in der Ablage nichts verloren.
@@ -590,9 +633,51 @@ export async function saveLocalMessages(
           nachrichtAad(blindMailboxId, m.id),
         ),
       )
+      if (m.clientUuid) {
+        if (isOptimisticMessage(m)) {
+          // Beide Fassungen können in derselben Liste stehen — der Verlauf im
+          // Arbeitsspeicher trägt die optimistische Zeile noch eine Runde mit.
+          const bisher = optimistischHier.get(m.clientUuid)
+          if (bisher) bisher.push(m.id)
+          else optimistischHier.set(m.clientUuid, [m.id])
+        } else {
+          bestaetigt.add(m.clientUuid)
+        }
+      }
       // Only real server envelope IDs (< 1e11) advance lastSyncedEnvelopeId
       if (typeof m.id === 'number' && m.id > maxEnvelopeId && m.id < 1e11) {
         maxEnvelopeId = m.id
+      }
+    }
+
+    /*
+     * Welche Zeilen wegfallen, steht vor der Transaktion fest.
+     *
+     * Wie beim Versiegeln: eine IndexedDB-Transaktion überlebt kein `await`,
+     * und ein `delete`, das erst im `onsuccess` einer Suche abgesetzt wird,
+     * kommt je nach Browser zu spät. Gesucht wird über `by_mailbox` und nicht
+     * über `by_client_uuid` — dieselbe logische Kennung liegt hier absichtlich
+     * mehrfach, und der Index gäbe davon nur eine heraus.
+     */
+    const zuLoeschen: number[] = []
+    for (const [clientUuid, ids] of optimistischHier) {
+      if (bestaetigt.has(clientUuid)) zuLoeschen.push(...ids)
+    }
+    if (bestaetigt.size > 0) {
+      const vorhanden = await new Promise<LocalStoredMessage[]>((resolve) => {
+        const tx = db.transaction(STORE_MESSAGES, 'readonly')
+        const req = tx
+          .objectStore(STORE_MESSAGES)
+          .index('by_mailbox')
+          .getAll(IDBKeyRange.only(blindMailboxId))
+        req.onsuccess = () => resolve((req.result || []) as LocalStoredMessage[])
+        req.onerror = () => resolve([])
+      })
+      for (const m of vorhanden) {
+        if (m.blindMailboxId !== blindMailboxId) continue
+        if (!m.clientUuid || !bestaetigt.has(m.clientUuid)) continue
+        if (!isOptimisticMessage(m)) continue
+        zuLoeschen.push(m.id)
       }
     }
 
@@ -602,6 +687,10 @@ export async function saveLocalMessages(
       const mbStore = tx.objectStore(STORE_MAILBOXES)
 
       for (const zeile of zeilen) msgStore.put(zeile)
+      // Nach dem Schreiben: die bestätigte Fassung steht dann schon, und es
+      // gibt keinen Augenblick, in dem die Nachricht gar nicht in der Ablage
+      // liegt.
+      for (const id of zuLoeschen) msgStore.delete([blindMailboxId, id])
 
       if (maxEnvelopeId > 0) {
         const mbMeta: LocalMailboxMeta = {

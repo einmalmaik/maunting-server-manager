@@ -1,6 +1,7 @@
-import { describe, expect, it, beforeEach, vi } from 'vitest'
+import { describe, expect, it, beforeAll, beforeEach, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import i18n from '@/i18n'
 import { RequirePermission } from './RequirePermission'
 import { usePermissionsStore } from '@/stores/permissionsStore'
 import type { MePermissions } from '@/types/permissions'
@@ -44,6 +45,14 @@ function GuardApp({ routeKey = 'users' }: { routeKey?: string }) {
 }
 
 describe('RequirePermission', () => {
+  // Ohne geladene Übersetzungen rendert der Wächter seine Schlüssel
+  // (`routes.errorTitle`) statt der Sätze, und die Zusagen unten prüften ins
+  // Leere. Die Sprache wird festgelegt, nicht erkannt: sonst hinge das
+  // Ergebnis an der Spracheinstellung der Testumgebung.
+  beforeAll(async () => {
+    await i18n.changeLanguage('de')
+  })
+
   beforeEach(() => {
     usePermissionsStore.setState({ me: null, isLoading: false, error: null })
   })

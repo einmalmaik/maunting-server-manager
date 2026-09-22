@@ -867,9 +867,17 @@ export function ChatMessageBubble({
 
       {/* Die Reaktionsleiste.
           Sitzt unter der Blase und überlappt sie leicht, damit klar ist, wozu
-          sie gehört. Jeder Knopf ist am Telefon daumenbreit; ein Tipper
-          schaltet die eigene Reaktion um. Wer sehen will, wer reagiert hat,
-          öffnet das Menü — ein Tooltip ist am Telefon nichts. */}
+          sie gehört. Ein Tipper schaltet die eigene Reaktion um. Wer sehen
+          will, wer reagiert hat, öffnet das Menü — ein Tooltip ist am Telefon
+          nichts.
+
+          Sichtbare Pille und Trefferfläche sind getrennt: gemessen war der
+          Knopf 34 × 32 Pixel, also unter dem, was ein Daumen sicher trifft.
+          Der Knopf ist jetzt 44 × 44 und holt sich diese Höhe über einen
+          negativen Außenabstand zurück, damit die Zeile so flach bleibt wie
+          vorher. Eine überstehende Trefferfläche käme billiger, würde sich
+          aber mit der Nachbarpille überschneiden — dann landet der Tipper auf
+          dem falschen Zeichen. */}
       {!msg.isDeleted && knoepfe.length > 0 && (
         <div className={`flex flex-wrap gap-1 -mt-1 px-1 ${msg.isSelf ? 'justify-end' : 'justify-start'}`}>
           {knoepfe.map((k) => (
@@ -880,16 +888,20 @@ export function ChatMessageBubble({
                 e.stopPropagation()
                 aktionen.onReaktion(msg, k.emoji)
               }}
-              className={`min-h-8 px-2 py-0.5 rounded-full border text-xs flex items-center gap-1 transition-colors ${
-                k.eigene
-                  ? 'bg-primary/20 border-primary/50 text-on-surface'
-                  : 'bg-surface-container-high border-outline-variant/30 text-on-surface-variant hover:bg-surface-container-highest'
-              }`}
+              className="h-11 min-w-11 -my-1.5 flex items-center justify-center"
               aria-label={`${k.emoji}, ${k.anzahl} ${k.anzahl === 1 ? 'Reaktion' : 'Reaktionen'}${k.eigene ? ', eigene' : ''}`}
               aria-pressed={k.eigene}
             >
-              <span aria-hidden="true">{k.emoji}</span>
-              {k.anzahl > 1 && <span className="text-label-sm font-semibold tabular-nums">{k.anzahl}</span>}
+              <span
+                className={`min-h-8 px-2 py-0.5 rounded-full border text-xs flex items-center gap-1 transition-colors ${
+                  k.eigene
+                    ? 'bg-primary/20 border-primary/50 text-on-surface'
+                    : 'bg-surface-container-high border-outline-variant/30 text-on-surface-variant hover:bg-surface-container-highest'
+                }`}
+              >
+                <span aria-hidden="true">{k.emoji}</span>
+                {k.anzahl > 1 && <span className="text-label-sm font-semibold tabular-nums">{k.anzahl}</span>}
+              </span>
             </button>
           ))}
         </div>

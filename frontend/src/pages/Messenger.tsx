@@ -173,6 +173,7 @@ import {
   setzeAnheftung,
   uebernehmeAnheftung,
 } from '@/services/nachrichtAnheftung'
+import { merkeQuittung, quittungsstand } from '@/services/quittungsstand'
 import {
   schalteReaktion,
   wendeReaktionenAn,
@@ -758,6 +759,9 @@ export function Messenger() {
    */
   const entwurfUhr = useRef<ReturnType<typeof setTimeout> | null>(null)
   const entwurfOffen = useRef<{ mid: string; text: string } | null>(null)
+
+  /** Ob gerade ein Versand läuft. Siehe `handleSendMessage`. */
+  const sendeLaeuft = useRef(false)
 
   const schreibeEntwurf = useCallback(() => {
     const offen = entwurfOffen.current
@@ -1411,6 +1415,22 @@ export function Messenger() {
     }
   }, [queryUserId, contactsList, activeGroup])
 
+  /**
+   * Ein anderer Chat schliesst die Vollbildansicht.
+   *
+   * „Markierte Nachrichten", „@ und Antworten an mich" und die Suche über alle
+   * Chats liegen als `fixed inset-0` über dem Gesprächsbereich — aber **nicht**
+   * über der Seitenleiste: die Hülle kappt den Stapelkontext im Inhaltsbereich
+   * (siehe `Shell.tsx`). Ein Klick auf einen Chat dort wechselte also die
+   * Adresse, öffnete das Gespräch und liess die Trefferliste darüber stehen.
+   * Man konnte tippen und senden, ohne etwas davon zu sehen; der einzige Weg
+   * zurück war der Zurück-Knopf der Ansicht. Ein Treffer selbst schliesst sie
+   * schon länger (`oeffneTreffer`), der Weg über die Seitenleiste nicht.
+   */
+  useEffect(() => {
+    setUeberall('aus')
+  }, [activeContact?.userId, activeGroup?.id])
+
   // Auto-select group if groupId query parameter or storage is present
   useEffect(() => {
     if (queryGroupId && !activeContact && groups.length > 0) {
@@ -1586,8 +1606,13 @@ export function Messenger() {
 
     if (activeMailboxIdRef.current === blindMailboxId) return
     activeMailboxIdRef.current = blindMailboxId
-    highestIncomingIdAcknowledgedRef.current = 0
-    highestIncomingIdDeliveredRef.current = 0
+    // Der eigene Quittungsstand kommt aus der Ablage, nicht von null. Sonst
+    // quittiert jeder Chatwechsel dieselbe letzte Nachricht erneut. Was die
+    // Gegenseite quittiert hat, wird dagegen bei jedem Abruf neu aus den
+    // Umschlägen gelesen und darf hier zurückfallen.
+    const stand = quittungsstand(blindMailboxId)
+    highestIncomingIdAcknowledgedRef.current = stand.gelesen
+    highestIncomingIdDeliveredRef.current = stand.zugestellt
     maxPartnerReadIdRef.current = 0
     maxPartnerDeliveredIdRef.current = 0
     useMessengerNotificationStore.getState().setActiveMailboxId(blindMailboxId || null)
@@ -2141,6 +2166,42 @@ export function Messenger() {
           return false
         })
 
+      /**
+       * Die Wirkungen dieses Durchlaufs auf eine Zeile, die es schon gibt.
+       *
+       * Gebraucht an **zwei** Stellen, und genau darin lag ein Fehler: der
+       * lokale Verlauf wendete Löschung und Reaktionen an, die noch
+       * unbestätigten Zeilen aus dem React-Zustand dagegen gar nichts.
+       * `mischeVerlauf` lässt bei zwei optimistischen Fassungen die aus dem
+       * Zustand gewinnen — die gerade berechnete Reaktion wurde damit wieder
+       * überschrieben und so weggespeichert. Am laufenden System: eine
+       * Nachricht, die keine Reaktion mehr annahm, für immer.
+       *
+       * Bearbeitungen fehlten hier ganz. Sie standen allein im Zweig für frisch
+       * entschlüsselte Umschläge, und der kennt nur, was noch im
+       * Hundert-Umschläge-Fenster liegt. Alles Ältere blieb beim Empfänger
+       * unverändert stehen, auch nach dem Neuladen.
+       */
+      const wendeWirkungenAn = (m: ChatMessage): ChatMessage => {
+        const loeschung = findeLoeschung(m)
+        if (loeschung && !m.isDeleted) return tilgeInhalt(m, loeschung.deletedAt) as ChatMessage
+
+        let zeile = m
+        const aenderung = findeAenderung(zeile)
+        if (aenderung && zeile.text !== aenderung.newText) {
+          zeile = {
+            ...zeile,
+            originalText: zeile.text,
+            text: aenderung.newText,
+            isEdited: true,
+            editedAt: aenderung.editedAt,
+          }
+        }
+
+        const neue = wendeReaktionenAn(zeile.reaktionen, reaktionen.finde(zeile))
+        return neue === zeile.reaktionen ? zeile : { ...zeile, reaktionen: neue }
+      }
+
       // Apply Edits, Deletions, and Read Status
       // Gelöscht = gelöscht. Kein Originaltext wird aufbewahrt (Zero Knowledge).
       const processedList: ChatMessage[] = decryptedList.map((msg) => {
@@ -2231,20 +2292,7 @@ export function Messenger() {
        * wieder gelesen — die Nachricht wäre „für alle gelöscht" und stünde
        * trotzdem da.
        */
-      const lokalerVerlauf = rohesLokal.map((m) => {
-        const loeschung = findeLoeschung(m)
-        if (loeschung && !m.isDeleted) return tilgeInhalt(m, loeschung.deletedAt)
-        /**
-         * Reaktionen auf die **eigenen** Nachrichten stehen nur hier.
-         *
-         * Der eigene Gesprächsanteil kommt aus der Ablage, nicht aus der
-         * Mailbox — eine Ratchet-Nachricht kann ihr Absender nicht öffnen. Die
-         * Reaktion darauf liegt aber als Umschlag in der Mailbox. Ohne diesen
-         * Durchgang träfe sie also nie auf ihre Nachricht.
-         */
-        const neue = wendeReaktionenAn(m.reaktionen, reaktionen.finde(m))
-        return neue === m.reaktionen ? m : { ...m, reaktionen: neue }
-      })
+      const lokalerVerlauf = rohesLokal.map(wendeWirkungenAn)
 
       const nochZuTilgen = new Map<string, { msg: ChatMessage; geloeschtAm: string }>()
       for (const m of [...rohesLokal, ...processedList] as ChatMessage[]) {
@@ -2268,13 +2316,17 @@ export function Messenger() {
         const pendingOptimistic = prev
           .filter((m) => m.isSelf && m.clientUuid && !processedClientUuids.has(m.clientUuid))
           .map((m) => {
-            const isRead = m.isSelf && maxPartnerReadId >= m.id
-            const isDelivered = m.isSelf && (isRead || maxPartnerDeliveredId >= m.id)
+            // Dieselben Wirkungen wie im lokalen Verlauf. Ohne sie brächte
+            // diese Fassung eine Reaktion oder Bearbeitung weniger mit und
+            // würde die berechnete beim Mischen wieder verdrängen.
+            const zeile = wendeWirkungenAn(m)
+            const isRead = zeile.isSelf && maxPartnerReadId >= zeile.id
+            const isDelivered = zeile.isSelf && (isRead || maxPartnerDeliveredId >= zeile.id)
             return {
-              ...m,
+              ...zeile,
               isRead,
               isDelivered,
-              status: isRead ? ('read' as const) : isDelivered ? ('delivered' as const) : m.status || ('queued' as const),
+              status: isRead ? ('read' as const) : isDelivered ? ('delivered' as const) : zeile.status || ('queued' as const),
             }
           })
         const systemzeilen = prev.filter((m) => m.isSystem)
@@ -2322,16 +2374,31 @@ export function Messenger() {
 
       if (needsDelivery) {
         const idToDeliver = maxIncomingId
+        /*
+         * Der Stand steigt **vor** dem Versand, nicht danach.
+         *
+         * Bis 09/2026 wanderte er erst im `.then()` hoch. Jeder gescheiterte
+         * Versand ließ ihn stehen, und der nächste Abruf ein paar Sekunden
+         * später schickte dieselbe Quittung noch einmal. Bremste der Server
+         * mit 429, hielt sich das von selbst am Leben: gemessen waren 64 % der
+         * Umschläge in der Mailbox Zustellquittungen, und das Fenster fasst
+         * hundert — verdrängt wurden Bearbeitungen und Reaktionen.
+         *
+         * Ein Verlust kostet nichts: `delivered_up_to_id` nennt eine
+         * Obergrenze. Die nächste Nachricht bringt eine höhere Kennung und
+         * damit eine Quittung, die den Bereich mit abdeckt.
+         */
+        highestIncomingIdDeliveredRef.current = Math.max(
+          highestIncomingIdDeliveredRef.current,
+          idToDeliver,
+        )
+        merkeQuittung(currentMid, 'zugestellt', idToDeliver)
         sendE2eeControlMessage({
           type: 'delivery_receipt',
           delivered_up_to_id: idToDeliver,
           receiver_id: currentUserId,
           timestamp: new Date().toISOString(),
-        })
-          .then(() => {
-            highestIncomingIdDeliveredRef.current = Math.max(highestIncomingIdDeliveredRef.current, idToDeliver)
-          })
-          .catch(() => {})
+        }).catch(() => {})
       }
 
       // Send read receipt if there are new incoming unacknowledged messages and document is visible
@@ -2344,17 +2411,20 @@ export function Messenger() {
 
       if (needsRead) {
         const idToAck = maxIncomingId
+        // Derselbe Grund wie bei der Zustellquittung: kumulativ, also lieber
+        // einmal zu wenig als in jeder Runde erneut.
+        highestIncomingIdAcknowledgedRef.current = Math.max(
+          highestIncomingIdAcknowledgedRef.current,
+          idToAck,
+        )
+        merkeQuittung(currentMid, 'gelesen', idToAck)
         const dispatchReadReceipt = () => {
           sendE2eeControlMessage({
             type: 'read_receipt',
             read_up_to_id: idToAck,
             reader_id: currentUserId,
             timestamp: new Date().toISOString(),
-          })
-            .then(() => {
-              highestIncomingIdAcknowledgedRef.current = Math.max(highestIncomingIdAcknowledgedRef.current, idToAck)
-            })
-            .catch(() => {})
+          }).catch(() => {})
         }
 
         if (needsDelivery) {
@@ -2782,7 +2852,27 @@ export function Messenger() {
   const handleEditMessage = async (msg: ChatMessage, newText: string) => {
     const cleanText = newText.trim()
     if (!cleanText || cleanText === msg.text) {
+      /*
+       * Nichts zu ändern — dann auch nichts stehen lassen.
+       *
+       * Bis hierher wurde nur `setEditingMessage(null)` gerufen. Wer eine
+       * Nachricht zum Bearbeiten öffnete, alles löschte und Enter drückte,
+       * sah die Bearbeiten-Leiste verschwinden und fünf Leerzeichen im Feld
+       * zurückbleiben, ohne ein Wort dazu. Aufgeräumt wird jetzt wie im
+       * Erfolgsfall, samt der wartenden Entwurfs-Entprellung: sonst schreibt
+       * die den Rest gleich wieder als Entwurf in die Chatliste.
+       */
       setEditingMessage(null)
+      setInputText('')
+      if (entwurfUhr.current) clearTimeout(entwurfUhr.current)
+      entwurfOffen.current = null
+      void speichereEntwurf(blindMailboxId, '').catch(() => {})
+      setEntwuerfe((v) => {
+        if (!v[blindMailboxId]) return v
+        const neu = { ...v }
+        delete neu[blindMailboxId]
+        return neu
+      })
       return
     }
     const bearbeitetAm = new Date().toISOString()
@@ -2829,6 +2919,24 @@ export function Messenger() {
       toast.success(t('messenger.messageEdited'))
       setEditingMessage(null)
       setInputText('')
+      /**
+       * Der Entwurf muss mit weg — wie beim Senden.
+       *
+       * `setInputText('')` leert nur das Feld. Der Text lag zusätzlich als
+       * Entwurf in der Ablage, und die entprellte Übernahme schrieb ihn dort
+       * sogar noch einmal hin. Sichtbar wurde das in der Chatliste als
+       * „Entwurf: …" zu einem Chat mit leerer Eingabe, und beim nächsten
+       * Öffnen stand der bearbeitete Satz wieder im Feld.
+       */
+      if (entwurfUhr.current) clearTimeout(entwurfUhr.current)
+      entwurfOffen.current = null
+      void speichereEntwurf(blindMailboxId, '').catch(() => {})
+      setEntwuerfe((v) => {
+        if (!v[blindMailboxId]) return v
+        const neu = { ...v }
+        delete neu[blindMailboxId]
+        return neu
+      })
       await loadMessages(false)
     } catch {
       toast.error(t('messenger.messageEditFailed'))
@@ -3085,8 +3193,9 @@ export function Messenger() {
       clearTimeout(partnerActivityTimeoutRef.current)
       partnerActivityTimeoutRef.current = null
     }
-    highestIncomingIdAcknowledgedRef.current = 0
-    highestIncomingIdDeliveredRef.current = 0
+    const stand = quittungsstand(blindMailboxId)
+    highestIncomingIdAcknowledgedRef.current = stand.gelesen
+    highestIncomingIdDeliveredRef.current = stand.zugestellt
     maxPartnerReadIdRef.current = 0
     maxPartnerDeliveredIdRef.current = 0
   }, [blindMailboxId])
@@ -3333,6 +3442,27 @@ export function Messenger() {
       return
     }
 
+    /*
+     * Der Riegel gegen den Doppelklick — und er muss eine Ref sein.
+     *
+     * Am Knopf steht `disabled={sending}`, und `sending` ist Zustand. React
+     * rendert erst nach dem Tick neu; acht Klicks im selben Tick laufen
+     * deshalb alle durch. Nachgemessen am 21.09.2026: acht Klicks ergaben
+     * **acht** Nachrichten mit acht eigenen Umschlägen. Für einen ungeduldigen
+     * Doppelklick heisst das zwei Nachrichten — und jeder Umschlag geht vom
+     * Hundert-Umschläge-Fenster ab.
+     *
+     * Er steht hier, direkt hinter dem letzten Abbruchgrund und **vor** der
+     * optimistischen Zeile. Weiter unten am `setSending(true)` reichte nicht:
+     * die Nachzügler kamen zwar nicht mehr zum Versand, legten aber schon
+     * Zeilen in der Ablage an, die dann als „queued" liegenblieben. Bis
+     * hierher ist nichts `await`, ein zweiter Aufruf kann also nur hier
+     * auflaufen. Das Weiterleiten ruft in einer Schleife auf, aber mit
+     * `await` — jeder Durchgang gibt den Riegel im `finally` wieder frei.
+     */
+    if (sendeLaeuft.current) return
+    sendeLaeuft.current = true
+
     /**
      * Wohin diese Nachricht geht.
      *
@@ -3385,26 +3515,43 @@ export function Messenger() {
       status: 'queued',
     }
 
+    /**
+     * Wann die optimistische Zeile wirklich auf der Platte liegt.
+     *
+     * Hier lag ein Rennen mit dauerhaftem Schaden. Der Schreibvorgang lief
+     * ungewartet los, und nach dem Versand zog `updateMessageInLocalStore` die
+     * Serverkennung nach — ebenfalls ungewartet. Kam das Nachziehen zuerst,
+     * fand es über den `by_client_uuid`-Index noch nichts und kehrte
+     * **stillschweigend** um; die verspätete Erstablage schrieb danach die
+     * alte Fassung fest. Am wahrscheinlichsten beim allerersten Mal, weil dann
+     * auch noch die Datenbank und der Versiegelungsschlüssel entstehen.
+     *
+     * Was blieb, war eine zugestellte Nachricht mit `status: 'queued'` und
+     * einer Zeitstempel-Notkennung. Und das ist nicht bloss ein falsches
+     * Symbol: `isOptimisticMessage` steuert damit auch die Sortierung (die
+     * Zeile sinkt unter jede später empfangene) und den Vorrang beim Mischen.
+     *
+     * Geschrieben wird nur die neue Zeile, nicht der halbe Verlauf:
+     * `saveLocalMessages` legt je Nachricht ab und löscht nie.
+     */
+    let ablageBereit: Promise<unknown> = Promise.resolve()
+
     if (fremdesZiel) {
       // Der offene Verlauf bleibt unberührt — die Nachricht gehört woandershin.
       // Sie muss trotzdem lokal landen: den eigenen Ratchet-Umschlag kann
       // dieses Gerät nie wieder öffnen, die Ablage ist die einzige Fassung.
-      void (async () => {
-        try {
-          const bestand = await loadLocalMessages(targetBlindMailboxId)
-          await saveLocalMessages(targetBlindMailboxId, [...bestand, optimisticMessage].slice(-200))
-          vergissMailbox(targetBlindMailboxId)
-        } catch {
+      ablageBereit = saveLocalMessages(targetBlindMailboxId, [optimisticMessage])
+        .then(() => vergissMailbox(targetBlindMailboxId))
+        .catch(() => {
           // Ohne lokale Zeile ist die Nachricht draußen, aber hier unsichtbar.
-        }
-      })()
+        })
     } else {
       setMessages((prev) => {
         const updated = [...prev, optimisticMessage]
         sessionChatCache.set(targetBlindMailboxId, updated.slice(-80))
-        void saveLocalMessages(targetBlindMailboxId, updated.slice(-200))
         return updated
       })
+      ablageBereit = saveLocalMessages(targetBlindMailboxId, [optimisticMessage]).catch(() => {})
     }
     setInputText('')
     setSelectedImage(null)
@@ -3582,7 +3729,8 @@ export function Messenger() {
         setMessages((prev) =>
           prev.map((m) => (m.clientUuid === clientUuid ? { ...m, ...nachtrag } : m))
         )
-        void updateMessageInLocalStore(targetBlindMailboxId, clientUuid, nachtrag)
+        await ablageBereit
+        await updateMessageInLocalStore(targetBlindMailboxId, clientUuid, nachtrag).catch(() => {})
       }
 
       if (note) payloadObj.note_attachment = note
@@ -3716,12 +3864,16 @@ export function Messenger() {
         if (cached) {
           sessionChatCache.set(targetBlindMailboxId, sortMessagesChronologically(cached.map(nachziehen)))
         }
-        void updateMessageInLocalStore(targetBlindMailboxId, clientUuid, {
+        // Beides gewartet, und in dieser Reihenfolge: die Zeile muss liegen,
+        // bevor sie nachgezogen wird, und nachgezogen sein, bevor
+        // `loadMessages` sie liest und wieder wegschreibt.
+        await ablageBereit
+        await updateMessageInLocalStore(targetBlindMailboxId, clientUuid, {
           id: serverId,
           status,
           isRead,
           isDelivered,
-        })
+        }).catch(() => {})
       }
 
       await loadMessages()
@@ -3768,6 +3920,7 @@ export function Messenger() {
         toast.error(msg)
       }
     } finally {
+      sendeLaeuft.current = false
       setSending(false)
     }
   }
@@ -6407,16 +6560,29 @@ export function Messenger() {
                         }
                         rightActions={
                           inputText.trim() || selectedImage || stagedFile ? (
-                            <Button
+                            /*
+                             * Ein einfacher Knopf, kein `<Button>` — wie seine
+                             * Nachbarn in dieser Leiste.
+                             *
+                             * `<Button size="sm">` bringt `h-8` mit, und das
+                             * gewinnt gegen ein `h-11` aus `className`: über
+                             * die Höhe entscheidet die Reihenfolge im
+                             * Stylesheet, nicht die im Attribut. Gemessen war
+                             * der Knopf am Telefon deshalb 44 × 32 statt
+                             * 44 × 44 — zu flach für einen Daumen, und das
+                             * bei der einen Handlung, für die es keinen
+                             * zweiten Weg gibt. `msm-btn-primary` bringt nur
+                             * die Farben mit und kollidiert mit nichts.
+                             */
+                            <button
                               type="submit"
                               disabled={sending}
-                              size="sm"
-                              className="w-11 h-11 sm:w-8 sm:h-8 shrink-0 rounded-full flex items-center justify-center"
+                              className="msm-btn-primary w-11 h-11 sm:w-8 sm:h-8 shrink-0 rounded-full flex items-center justify-center"
                               title="Senden"
                               aria-label="Senden"
                             >
                               <Send className="w-3.5 h-3.5" />
-                            </Button>
+                            </button>
                           ) : (
                             <div className="flex items-center gap-1">
                               <button
