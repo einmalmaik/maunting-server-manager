@@ -357,6 +357,16 @@ class E2eeBlindEnvelopeCreate(BaseModel):
     client_uuid: str | None = Field(None, max_length=64, description="Client-UUID zur Idempotenz und Deduplizierung")
     is_control: bool = Field(False, description="Markiert interne Steuernachrichten (z. B. Lesequittungen, Quittungen)")
     control_type: str | None = Field(None, description="Typ des Steuersignals (read_receipt, delivery_receipt, edit, delete)")
+    push_ausnahme: str | None = Field(
+        None,
+        min_length=64,
+        max_length=64,
+        pattern="^[0-9a-fA-F]{64}$",
+        description=(
+            "SHA-256 der eigenen Push-Adresse. Hält den absendenden Browser aus "
+            "der Zustellung heraus, wo es keine Empfängerkennung mehr gibt."
+        ),
+    )
 
 
     @field_validator("ciphertext_envelope")
@@ -457,6 +467,17 @@ class PushSubscriptionCreate(BaseModel):
     endpoint: str = Field(..., min_length=16, max_length=2048)
     p256dh: str = Field(..., min_length=80, max_length=120)
     auth: str = Field(..., min_length=16, max_length=32)
+
+
+class MailboxPushAbos(PushSubscriptionCreate):
+    """Dieselbe Adresse, aber für Mailboxen statt für ein Konto.
+
+    Erbt die drei Felder des Browsers und nennt dazu, wofür sie gelten sollen.
+    Dieselbe Obergrenze wie beim Strom-Abo (`StreamMailboxAbos`): wer mehr
+    Mailboxen hat, meldet in mehreren Anläufen.
+    """
+
+    eintraege: list[MailboxAbo] = Field(default_factory=list, max_length=200)
 
 
 class E2eeTypingSignalCreate(BaseModel):

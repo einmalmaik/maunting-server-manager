@@ -1261,6 +1261,7 @@ class SocialService:
         is_control: bool = False,
         control_type: str | None = None,
         mailbox_token: str | None = None,
+        push_ausnahme: str | None = None,
     ) -> E2eeBlindEnvelope:
 
         """Speichert einen blinden E2EE-Umschlag mit serverseitiger Berechtigungsprüfung.
@@ -1268,6 +1269,12 @@ class SocialService:
         sender_user_id und recipient_id werden im SSE-Event mitgeliefert, damit
         Outgoing Echo Prevention und striktes Empfänger-Filtering greifen.
         client_uuid garantiert Idempotenz bei Netzwerk-Schwankungen und Retries.
+
+        `push_ausnahme` ist der SHA-256 der eigenen Push-Adresse des Absenders.
+        Auf dem kontogebundenen Weg braucht es ihn nicht — dort erkennt
+        `is_outgoing_echo` den Absender an seiner Kennung. Auf dem Mailbox-Weg
+        gibt es keine Kennung mehr, an der man ihn erkennen könnte, und er
+        bekäme sonst die Meldung über seine eigene Nachricht.
         """
         clean_mailbox = blind_mailbox_id.strip()
         clean_envelope = ciphertext_envelope.strip()
@@ -1462,11 +1469,23 @@ class SocialService:
             # Zugestellt wird jetzt an die Abonnenten dieser Mailbox. Wer sie
             # nicht abonniert hat, erfährt nichts — und abonnieren darf nur,
             # wer teilnimmt oder den Besitznachweis hat.
-            #
-            # Was hier (noch) fehlt: Push bei geschlossenem Tab. Die
-            # Zustelladressen hängen am Konto, und genau das aufzulösen ist der
-            # nächste Schritt.
             SyncEventService.publish(msg_payload, mailbox_id=clean_mailbox)
+
+            # Und derselbe Weg für den geschlossenen Tab. `sende_an_mailbox`
+            # fragt keine Konten ab — es gibt hier keines zu fragen, und genau
+            # deshalb steht es hier: ein `sende_an_konto` an dieser Stelle wäre
+            # die eine Zeile, die dem Server wieder verriete, wer Post in einer
+            # Mailbox bekommt, die er sonst niemandem zuordnen kann.
+            nutzlast = NotificationService.prepare_mailbox_push(
+                is_control=is_control, control_type=control_type
+            )
+            if nutzlast:
+                webpush_service.sende_an_mailbox(
+                    db,
+                    clean_mailbox,
+                    nutzlast,
+                    ausser_abdruck=push_ausnahme,
+                )
 
         return envelope
 
@@ -1666,6 +1685,44 @@ class SocialService:
         if eintrag is None:
             return False
         return secrets.compare_digest(eintrag.auth_verifier, cls._verifier_von(auth_token))
+
+    @classmethod
+    def erlaubte_mailboxen(
+        cls, db: Session, user_id: int, eintraege: Iterable[tuple[str, str | None]]
+    ) -> list[str]:
+        """Filtert eine Wunschliste von Mailboxen auf die erlaubten.
+
+        Die Tür, durch die ein Client sagt „darüber will ich Bescheid wissen".
+        Es gibt zwei davon in den Routern — den Echtzeitstrom und die
+        Push-Adresse —, und sie müssen dieselbe Prüfung haben. Stünde sie
+        zweimal da, wäre die zweite Fassung irgendwann die nachsichtigere, und
+        Push wäre der Weg, über den man erfährt, was der Strom einem nicht sagt.
+
+        Zwei Wege hinein, und jede Kennung geht einzeln: das Konto gehört zur
+        Mailbox (der Bestand), oder es legt den Besitznachweis vor (das Neue).
+
+        **Was durchfällt, fällt still durch.** Die Antwort nennt nur, was
+        erlaubt ist, nie warum etwas fehlt — eine einzelne Ablehnung wäre eine
+        Auskunft darüber, welche Mailboxen es gibt.
+        """
+        erlaubt: list[str] = []
+        for kennung, token in eintraege:
+            mid = (kennung or "").strip()
+            if not mid:
+                continue
+            if cls.hat_gueltigen_nachweis(db, mid, token):
+                erlaubt.append(mid)
+                continue
+            try:
+                cls.assert_mailbox_participant(db, user_id, mid)
+                # Eine Mailbox mit hinterlegtem Nachweis öffnet sich nicht
+                # allein durch Mitgliedschaft — sonst wäre das Abo die
+                # Hintertür neben der verschlossenen Vordertür.
+                cls.assert_mailbox_token(db, mid, token)
+            except HTTPException:
+                continue
+            erlaubt.append(mid)
+        return erlaubt
 
     @classmethod
     def delete_blind_envelopes(

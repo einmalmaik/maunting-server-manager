@@ -31,6 +31,7 @@ from schemas.social import (
     PresenceInfo,
     PresenceUpdateRequest,
     PrivacyUpdateRequest,
+    MailboxPushAbos,
     PushSubscriptionCreate,
     SocialProfileResponse,
     UserStatsResponse,
@@ -371,7 +372,77 @@ def unsubscribe_push(
     user: User = Depends(get_current_user),
 ) -> dict:
     """Entfernt eine Zustelladresse. Nur die eigene — fremde findet die Abfrage nicht."""
-    return {"ok": webpush_service.austragen(db, user, endpoint)}
+    entfernt = webpush_service.austragen(db, user, endpoint)
+    # Und die mailboxgebundenen Zeilen derselben Adresse. Sie kennen kein
+    # Konto, also kann sie auch kein Abmelden eines Kontos treffen — sie
+    # hängen an dieser Adresse, und die trägt sich hier gerade aus.
+    webpush_service.austragen_mailboxen(db, endpoint)
+    return {"ok": entfernt}
+
+
+@router.post(
+    "/e2ee/mailbox-push",
+    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
+)
+def subscribe_mailbox_push(
+    req: MailboxPushAbos,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Trägt diesen Browser als Zustelladresse für Mailboxen ein.
+
+    Das Gegenstück zu `/push/subscribe` für den Fall, dass es kein Konto zu
+    benachrichtigen gibt. Die Sitzung entscheidet hier, **ob** eingetragen
+    werden darf — und nur das: in der Zeile bleibt von ihr nichts übrig, kein
+    `user_id` und kein Fremdschlüssel.
+
+    Die Erlaubnis kommt aus derselben Prüfung wie beim Echtzeitstrom. Wichtig,
+    dass es dieselbe ist: wäre Push die nachsichtigere Tür, könnte man sich
+    über eine Benachrichtigung sagen lassen, was der Strom einem verschweigt.
+
+    Was durchfällt, fällt still durch. Die Antwort nennt nur die Anzahl —
+    welche Kennung abgelehnt wurde, wäre eine Auskunft darüber, welche
+    Mailboxen es gibt.
+    """
+    erlaubt = SocialService.erlaubte_mailboxen(
+        db,
+        user.id,
+        ((e.mailbox_id, e.mailbox_token) for e in req.eintraege[:MAX_MAILBOXES]),
+    )
+
+    for mid in erlaubt:
+        webpush_service.eintragen_mailbox(
+            db, mailbox_id=mid, endpoint=req.endpoint, p256dh=req.p256dh, auth=req.auth
+        )
+
+    # Was dieser Browser vorher hatte und jetzt nicht mehr nennt, fällt weg:
+    # sonst bliebe die verlassene Gruppe als Zustellziel stehen, und das Gerät
+    # bekäme weiter Meldungen über Nachrichten, die es nicht mehr lesen kann.
+    bestand = webpush_service.mailboxen_von(db, req.endpoint)
+    ueberzaehlig = bestand - set(erlaubt)
+    if ueberzaehlig:
+        webpush_service.austragen_mailboxen(db, req.endpoint, nur=ueberzaehlig)
+
+    return {"ok": True, "count": len(erlaubt)}
+
+
+@router.delete(
+    "/e2ee/mailbox-push",
+    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
+)
+def unsubscribe_mailbox_push(
+    endpoint: str = Query(..., min_length=16, max_length=2048),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Trägt diesen Browser aus allen Mailboxen aus. Der Weg beim Abmelden.
+
+    Es wird bewusst nicht geprüft, wem die Adresse gehört: das ist in dieser
+    Tabelle nicht hinterlegt, und es nachzutragen hiesse, die Zeile doch wieder
+    einem Konto zuzuordnen. Die Adresse ist das Geheimnis des Browsers, der sie
+    bekommen hat — sie steht in keiner Antwort dieses Panels.
+    """
+    return {"ok": True, "count": webpush_service.austragen_mailboxen(db, endpoint)}
 
 
 def mailbox_token(
@@ -432,6 +503,7 @@ def relay_e2ee_message(
         is_control=req.is_control,
         control_type=req.control_type,
         mailbox_token=nachweis,
+        push_ausnahme=req.push_ausnahme,
     )
 
     return {
@@ -1137,39 +1209,24 @@ async def social_websocket(
                 # will. Der Weg für Kennungen, die der Server nicht ausrechnen
                 # kann — bei ihnen gibt es keinen Empfänger nachzuschlagen.
                 #
-                # Jede Kennung wird einzeln geprüft, und es gibt genau zwei
-                # Arten hineinzukommen: das Konto gehört zur Mailbox (der
-                # Bestand), oder es legt den Besitznachweis vor (das Neue).
-                # Ohne diese Prüfung wäre das Abo eine Verkehrsanalyse für
-                # jedermann: abonnieren und zusehen, wann es sich regt.
+                # Geprüft wird in `SocialService.erlaubte_mailboxen` — dieselbe
+                # Prüfung wie auf dem SSE-Weg und bei der Push-Adresse. Ohne
+                # sie wäre das Abo eine Verkehrsanalyse für jedermann:
+                # abonnieren und zusehen, wann es sich regt.
                 eintraege = data.get("eintraege")
                 erlaubt: list[str] = []
                 if isinstance(eintraege, list):
                     try:
                         with SessionLocal() as db:
-                            for eintrag in eintraege[:MAX_MAILBOXES]:
-                                if not isinstance(eintrag, dict):
-                                    continue
-                                mid = str(eintrag.get("mailbox_id") or "").strip()
-                                if not mid:
-                                    continue
-                                token = eintrag.get("mailbox_token")
-                                if SocialService.hat_gueltigen_nachweis(db, mid, token):
-                                    erlaubt.append(mid)
-                                    continue
-                                try:
-                                    SocialService.assert_mailbox_participant(db, user_id, mid)
-                                except HTTPException:
-                                    continue
-                                # Eine Mailbox mit hinterlegtem Nachweis öffnet
-                                # sich nicht allein durch Mitgliedschaft —
-                                # sonst wäre das Abo die Hintertür neben der
-                                # verschlossenen Vordertür.
-                                try:
-                                    SocialService.assert_mailbox_token(db, mid, token)
-                                except HTTPException:
-                                    continue
-                                erlaubt.append(mid)
+                            erlaubt = SocialService.erlaubte_mailboxen(
+                                db,
+                                user_id,
+                                (
+                                    (str(e.get("mailbox_id") or ""), e.get("mailbox_token"))
+                                    for e in eintraege[:MAX_MAILBOXES]
+                                    if isinstance(e, dict)
+                                ),
+                            )
                     except Exception as exc:
                         logger.debug("Fehler beim Setzen der Mailbox-Abos: %s", exc)
                 anzahl = SyncEventService.set_mailboxes(conn_id, erlaubt, user_id=user_id)

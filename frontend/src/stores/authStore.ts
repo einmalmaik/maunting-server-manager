@@ -14,6 +14,7 @@ import { clearGeraeteMemory } from '@/services/e2eeGeraet'
 import { leereGeraeteStand } from '@/services/gruppenSchluessel'
 import { leereMailboxAbos } from '@/services/mailboxAbo'
 import { leereMailboxNachweise } from '@/services/mailboxNachweis'
+import { kuendigeMailboxPush, leereMailboxPush } from '@/services/mailboxPush'
 import { kuendige } from '@/services/pushAbo'
 import type { User } from '@/types'
 
@@ -144,6 +145,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     leereMailboxNachweise()
     // Und die Abos: was der Strom melden soll, gehoert dem angemeldeten Konto.
     leereMailboxAbos()
+    // Dasselbe fuer die Push-Adresse. Die Zeilen im Panel raeumt `logout()`
+    // weg, solange die Sitzung noch gilt; hier faellt nur der gemerkte Stand,
+    // damit der naechste Anmelder nicht auf eine Meldung wartet, die diese
+    // Datei fuer laengst abgeschickt haelt.
+    leereMailboxPush()
     // Und der Lesestand der eigenen Geräte-Mailbox. Er ist je Konto getrennt,
     // aber stehenzulassen hiesse, dem nächsten Konto in diesem Tab zu
     // verschweigen, was vor seiner Anmeldung dort ankam.
@@ -166,6 +172,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // Vor dem Abmelden, solange die Sitzung noch gilt: sonst lehnt das Panel
     // das Austragen ab und das Gerät bekäme weiter Benachrichtigungen für ein
     // Konto, das sich hier abgemeldet hat.
+    //
+    // Zweimal, weil es zwei Tabellen sind: `kuendigeMailboxPush` trägt die
+    // mailboxgebundenen Zeilen aus, `kuendige` die kontogebundene Adresse. Die
+    // ersten kennen kein Konto — sie können deshalb auch nicht mit einem
+    // wegfallen, und sie stehenzulassen hiesse, dass dieses Gerät weiter
+    // Meldungen über Mailboxen bekommt, deren Schlüssel gerade aus dem
+    // Speicher gefallen sind.
+    //
+    // **In dieser Reihenfolge.** `kuendige` beendet am Ende das Abonnement im
+    // Browser, und danach findet `kuendigeMailboxPush` keine Adresse mehr, die
+    // es austragen könnte. Andersherum bliebe die Zeile für immer stehen.
+    await kuendigeMailboxPush()
     await kuendige()
     try {
       await api('/auth/logout', { method: 'POST' })

@@ -11,7 +11,7 @@ import json
 import logging
 from typing import AsyncIterator
 
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
+from fastapi import APIRouter, Depends, Request, WebSocket
 from fastapi.responses import StreamingResponse
 from starlette.websockets import WebSocketDisconnect
 from sqlalchemy.orm import Session
@@ -115,29 +115,15 @@ def set_stream_mailboxes(
     ausrechnen kann. Bei ihnen gibt es keinen Empfänger nachzuschlagen — die
     Kennung **ist** die Adresse, und wer nichts abonniert hat, erfährt nichts.
 
-    Zwei Wege hinein, und jede Kennung geht einzeln durch: das Konto gehört
-    zur Mailbox (der Bestand), oder es legt den Besitznachweis vor (das Neue).
-    Was durchfällt, wird still übergangen — die Antwort nennt nur die Anzahl.
-    Eine Kennung einzeln abzulehnen wäre eine Auskunft darüber, welche
-    Mailboxen es gibt.
+    Wer hinein darf, entscheidet `SocialService.erlaubte_mailboxen` — dieselbe
+    Prüfung, die auch über die Push-Adresse wacht. Was durchfällt, wird still
+    übergangen; die Antwort nennt nur die Anzahl.
     """
-    erlaubt: list[str] = []
-    for eintrag in req.eintraege[:MAX_MAILBOXES]:
-        mid = eintrag.mailbox_id.strip()
-        if not mid:
-            continue
-        if SocialService.hat_gueltigen_nachweis(db, mid, eintrag.mailbox_token):
-            erlaubt.append(mid)
-            continue
-        try:
-            SocialService.assert_mailbox_participant(db, user.id, mid)
-            # Eine Mailbox mit hinterlegtem Nachweis öffnet sich nicht allein
-            # durch Mitgliedschaft — sonst wäre das Abo die Hintertür neben
-            # der verschlossenen Vordertür.
-            SocialService.assert_mailbox_token(db, mid, eintrag.mailbox_token)
-        except HTTPException:
-            continue
-        erlaubt.append(mid)
+    erlaubt = SocialService.erlaubte_mailboxen(
+        db,
+        user.id,
+        ((e.mailbox_id, e.mailbox_token) for e in req.eintraege[:MAX_MAILBOXES]),
+    )
 
     anzahl = SyncEventService.set_mailboxes(req.conn_id, erlaubt, user_id=user.id)
     return {"ok": True, "count": anzahl}

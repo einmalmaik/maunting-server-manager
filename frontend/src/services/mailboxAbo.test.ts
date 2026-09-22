@@ -21,6 +21,14 @@ vi.mock('@/api/client', () => ({
   },
 }))
 
+const anPush: { mailbox_id: string; mailbox_token?: string }[][] = []
+
+vi.mock('@/services/mailboxPush', () => ({
+  meldeMailboxPush: async (eintraege: { mailbox_id: string }[]) => {
+    anPush.push(eintraege as never)
+  },
+}))
+
 import {
   abonniereMailbox,
   kuendigeMailbox,
@@ -40,6 +48,7 @@ const ruhe = () => new Promise((r) => setTimeout(r, 0))
 describe('mailboxAbo', () => {
   beforeEach(() => {
     rufe.length = 0
+    anPush.length = 0
     apiKaputt = false
     leereMailboxAbos()
   })
@@ -168,6 +177,37 @@ describe('mailboxAbo', () => {
 
     expect(offeneMailboxAbos()).toEqual([])
     expect(rufe).toEqual([])
+  })
+
+  it('gibt dieselbe Liste an die Push-Adresse weiter', async () => {
+    /*
+     * Die Kopplung, die sonst still bricht. Der Strom und Push haben
+     * verschiedene Lebensdauern, aber **eine** Liste — führte jede Seite ihre
+     * eigene, erführe der Benutzer je nach Tab-Zustand etwas anderes, und
+     * niemand suchte den Fehler an dieser Stelle.
+     *
+     * Ohne `conn_id`, mit Absicht: die Zustelladresse soll gerade dann noch
+     * stehen, wenn keine Verbindung da ist.
+     */
+    abonniereMailbox(A, TOKEN)
+    await ruhe()
+
+    expect(anPush).toEqual([[{ mailbox_id: A, mailbox_token: TOKEN }]])
+    expect(rufe).toEqual([]) // der Strom steht ja noch nicht
+  })
+
+  it('meldet der Push-Adresse auch das Kündigen', async () => {
+    // Der Fall „Gruppe verlassen". Bliebe die Zeile stehen, bekäme das Gerät
+    // weiter Meldungen über Nachrichten, die es nicht mehr lesen kann.
+    abonniereMailbox(A)
+    abonniereMailbox(B)
+    await ruhe()
+    anPush.length = 0
+
+    kuendigeMailbox(A)
+    await ruhe()
+
+    expect(anPush).toEqual([[{ mailbox_id: B }]])
   })
 
   it('vergisst beim Abmelden alles', async () => {

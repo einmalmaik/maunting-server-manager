@@ -52,6 +52,7 @@ Chiffrat ohne Panel-Cookie; das VAPID-Token nennt seinen Empfaenger im
 from __future__ import annotations
 
 import base64
+import hashlib
 import ipaddress
 import json
 import logging
@@ -74,7 +75,7 @@ from sqlalchemy.orm import Session
 
 from config import settings
 from database import SessionLocal
-from models import PanelSetting, PushSubscription, User
+from models import E2eeMailboxPush, PanelSetting, PushSubscription, User
 
 logger = logging.getLogger(__name__)
 
@@ -304,6 +305,42 @@ def _ziel_ist_erlaubt(endpunkt: str) -> bool:
 # ── Eintragen und austragen ─────────────────────────────────────────────────
 
 
+def _geprueftes_ziel(endpoint: str, p256dh: str, auth: str) -> tuple[str, str, str]:
+    """Adresse und Schluessel, so wie sie in eine Zeile gehoeren.
+
+    Wirft 400, wenn etwas davon unbrauchbar ist. Fruehe Formpruefung mit Absicht:
+    ein kaputter Punkt faellt beim Eintragen auf und nicht erst im
+    Hintergrundfaden, wo ihn niemand sieht.
+    """
+    from fastapi import HTTPException
+
+    sauber = (endpoint or "").strip()
+    if not _ziel_ist_erlaubt(sauber):
+        raise HTTPException(status_code=400, detail="Ungültige Push-Adresse.")
+
+    sauberer_p256dh = (p256dh or "").strip()
+    sauberes_auth = (auth or "").strip()
+    try:
+        ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), _b64d(sauberer_p256dh))
+        if len(_b64d(sauberes_auth)) != 16:
+            raise ValueError("auth-Geheimnis hat nicht 16 Bytes")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Ungültige Push-Schlüssel.")
+
+    return sauber, sauberer_p256dh, sauberes_auth
+
+
+def endpunkt_abdruck(endpoint: str) -> str:
+    """Der SHA-256 einer Zustelladresse, hex.
+
+    Traegt die Eindeutigkeit in `e2ee_mailbox_push` und ist zugleich das, was
+    ein Absender als `push_ausnahme` mitschickt. Der Client rechnet denselben
+    Wert — deshalb wird hier nur getrimmt und nicht etwa normalisiert: eine
+    Adresse ist byteweise das, was der Browser herausgegeben hat.
+    """
+    return hashlib.sha256((endpoint or "").strip().encode("utf-8")).hexdigest()
+
+
 def eintragen(db: Session, user: User, *, endpoint: str, p256dh: str, auth: str) -> PushSubscription:
     """Legt die Zustelladresse dieses Browsers an oder uebernimmt sie.
 
@@ -312,24 +349,7 @@ def eintragen(db: Session, user: User, *, endpoint: str, p256dh: str, auth: str)
     Konto an, wandert die Zeile mit — sonst bekaeme der neue Benutzer die
     Benachrichtigungen des vorherigen.
     """
-    sauber = (endpoint or "").strip()
-    if not _ziel_ist_erlaubt(sauber):
-        from fastapi import HTTPException
-
-        raise HTTPException(status_code=400, detail="Ungültige Push-Adresse.")
-
-    sauberer_p256dh = (p256dh or "").strip()
-    sauberes_auth = (auth or "").strip()
-    try:
-        # Fruehe Formpruefung: ein unbrauchbarer Punkt faellt beim Eintragen
-        # auf und nicht erst im Hintergrundfaden, wo ihn niemand sieht.
-        ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), _b64d(sauberer_p256dh))
-        if len(_b64d(sauberes_auth)) != 16:
-            raise ValueError("auth-Geheimnis hat nicht 16 Bytes")
-    except Exception:
-        from fastapi import HTTPException
-
-        raise HTTPException(status_code=400, detail="Ungültige Push-Schlüssel.")
+    sauber, sauberer_p256dh, sauberes_auth = _geprueftes_ziel(endpoint, p256dh, auth)
 
     vorhanden = db.query(PushSubscription).filter_by(endpoint=sauber).first()
     if vorhanden:
@@ -371,6 +391,152 @@ def austragen(db: Session, user: User, endpoint: str) -> bool:
     return True
 
 
+# ── Dasselbe, aber ohne Konto: Zustelladressen je Mailbox ───────────────────
+
+
+def eintragen_mailbox(db: Session, *, mailbox_id: str, endpoint: str, p256dh: str, auth: str) -> None:
+    """Merkt sich: in diese Mailbox faellt etwas, schick es an diese Adresse.
+
+    Kein `user`-Parameter, und das ist der ganze Punkt. Die Sitzung, ueber die
+    das hereinkommt, entscheidet im Router, **ob** eingetragen werden darf; in
+    der Zeile bleibt von ihr nichts uebrig.
+
+    Uebernimmt eine vorhandene Zeile, statt eine zweite anzulegen: gemeldet
+    wird bei jeder Anmeldung (siehe `mailboxPush.ts`), und die Schluessel eines
+    Browsers koennen sich dabei geaendert haben.
+    """
+    sauber, sauberer_p256dh, sauberes_auth = _geprueftes_ziel(endpoint, p256dh, auth)
+    kennung = (mailbox_id or "").strip()
+    if not kennung:
+        return
+    abdruck = endpunkt_abdruck(sauber)
+
+    vorhanden = (
+        db.query(E2eeMailboxPush).filter_by(mailbox_id=kennung, endpoint_hash=abdruck).first()
+    )
+    if vorhanden:
+        vorhanden.endpoint = sauber
+        vorhanden.p256dh = sauberer_p256dh
+        vorhanden.auth = sauberes_auth
+        db.commit()
+        return
+
+    db.add(
+        E2eeMailboxPush(
+            mailbox_id=kennung,
+            endpoint_hash=abdruck,
+            endpoint=sauber,
+            p256dh=sauberer_p256dh,
+            auth=sauberes_auth,
+            created_at=datetime.now(timezone.utc),
+        )
+    )
+    try:
+        db.commit()
+    except IntegrityError:
+        # Zwei Tabs derselben Anmeldung. Der andere war schneller.
+        db.rollback()
+
+
+def mailboxen_von(db: Session, endpoint: str) -> set[str]:
+    """Wofuer dieser Browser heute eingetragen ist.
+
+    Gebraucht beim Melden, um abzuraeumen, was nicht mehr genannt wird. Nur
+    Kennungen, keine Adressen und keine Schluessel — wer fragt, hat die Adresse
+    ohnehin schon.
+    """
+    sauber = (endpoint or "").strip()
+    if not sauber:
+        return set()
+    abdruck = endpunkt_abdruck(sauber)
+    zeilen = (
+        db.query(E2eeMailboxPush.mailbox_id)
+        .filter(E2eeMailboxPush.endpoint_hash == abdruck)
+        .all()
+    )
+    return {z[0] for z in zeilen}
+
+
+def austragen_mailboxen(db: Session, endpoint: str, *, nur: set[str] | None = None) -> int:
+    """Entfernt die Zustellungen dieses Browsers. Gibt deren Zahl zurueck.
+
+    Ohne `nur` faellt alles, was zu dieser Adresse gehoert — der Weg beim
+    Abmelden. Mit `nur` fallen genau die genannten Mailboxen, der Weg, wenn der
+    Client eine Gruppe verlassen hat.
+
+    Geprueft wird hier **nichts** ausser dem Besitz der Adresse, und das mit
+    Absicht: wer eine Endpunkt-Adresse hat, ist der Browser, um den es geht.
+    Ein Konto daneben zu verlangen hiesse, die Zeile doch wieder einem Konto
+    zuzuordnen. Die Adresse ist ein Geheimnis des Browsers und steht in keiner
+    Antwort dieses Panels.
+    """
+    abdruck = endpunkt_abdruck(endpoint)
+    if not (endpoint or "").strip():
+        return 0
+    abfrage = db.query(E2eeMailboxPush).filter(E2eeMailboxPush.endpoint_hash == abdruck)
+    if nur is not None:
+        sauber = {m.strip() for m in nur if (m or "").strip()}
+        if not sauber:
+            return 0
+        abfrage = abfrage.filter(E2eeMailboxPush.mailbox_id.in_(sauber))
+    entfernt = abfrage.delete(synchronize_session=False)
+    db.commit()
+    return int(entfernt or 0)
+
+
+def sende_an_mailbox(
+    db: Session,
+    mailbox_id: str,
+    nutzlast: dict[str, Any],
+    *,
+    ausser_abdruck: str | None = None,
+) -> int:
+    """Stellt `nutzlast` an alle Adressen dieser Mailbox zu. Gibt deren Zahl zurueck.
+
+    Das Gegenstueck zu `sende_an_konto` fuer Mailboxen, die der Server niemandem
+    zuordnen kann. Zwei Unterschiede, beide unvermeidlich:
+
+    Es gibt **keinen `users.device_notifications`-Schalter** zu pruefen, denn es
+    gibt kein Konto. Der Schalter wirkt trotzdem: der Client traegt gar nicht
+    erst ein, solange er aus ist, und traegt beim Umlegen aus. Die Entscheidung
+    liegt damit beim Geraet des Benutzers statt beim Server — was fuer einen
+    Schalter ueber die eigenen Benachrichtigungen die richtige Seite ist.
+
+    Und es gibt **keine Vordergrund-Pruefung** je Empfaenger: welche Adresse zu
+    welcher offenen Verbindung gehoert, weiss hier niemand. Unterdrueckt wird
+    stattdessen dort, wo die Frage beantwortbar ist — `sw.js` zeigt nichts an,
+    solange ein Fenster den Fokus hat.
+
+    `ausser_abdruck` haelt den absendenden Browser heraus. Dessen **andere**
+    Geraete bekommen die Meldung: sie zu erkennen hiesse, sie wieder
+    untereinander zu verknuepfen, und genau das soll hier nicht mehr gehen.
+    """
+    kennung = (mailbox_id or "").strip()
+    if not kennung:
+        return 0
+
+    abfrage = db.query(E2eeMailboxPush).filter(E2eeMailboxPush.mailbox_id == kennung)
+    if ausser_abdruck:
+        abfrage = abfrage.filter(E2eeMailboxPush.endpoint_hash != ausser_abdruck.strip().lower())
+    abos = abfrage.all()
+    if not abos:
+        return 0
+
+    paar = _paar(db)
+    if not paar:
+        return 0
+    privates_pem, oeffentlich = paar
+
+    koerper = json.dumps(nutzlast, separators=(",", ":"), default=str).encode("utf-8")
+    if len(koerper) > MAX_NUTZLAST_BYTES:
+        logger.warning("webpush: Nutzlast zu gross (%d Bytes), kein Versand", len(koerper))
+        return 0
+
+    ziele = [(a.id, a.endpoint, a.p256dh, a.auth) for a in abos]
+    _versender.submit(_zustellen_alle, ziele, koerper, privates_pem, oeffentlich, True)
+    return len(ziele)
+
+
 # ── Versand ─────────────────────────────────────────────────────────────────
 
 
@@ -407,7 +573,7 @@ def sende_an_konto(db: Session, user_id: int, nutzlast: dict[str, Any]) -> int:
     # Reine Werte ueber die Fadengrenze, keine ORM-Objekte: die gehoeren zu
     # dieser Sitzung und waeren drueben abgeloest.
     ziele = [(a.id, a.endpoint, a.p256dh, a.auth) for a in abos]
-    _versender.submit(_zustellen_alle, ziele, koerper, privates_pem, oeffentlich)
+    _versender.submit(_zustellen_alle, ziele, koerper, privates_pem, oeffentlich, False)
     return len(ziele)
 
 
@@ -416,9 +582,15 @@ def _zustellen_alle(
     koerper: bytes,
     privates_pem: str,
     oeffentlich: str,
+    je_mailbox: bool = False,
 ) -> None:
     """Laeuft im Hintergrundfaden. Faengt alles — hier gibt es niemanden mehr,
-    dem ein Fehler auffallen wuerde, ausser dem Log."""
+    dem ein Fehler auffallen wuerde, ausser dem Log.
+
+    `je_mailbox` sagt nur, aus welcher Tabelle die `id` in `ziele` stammt. Beide
+    Wege raeumen ihre toten Adressen selbst ab; eine tote Adresse in der einen
+    Tabelle sagt nichts ueber die andere, weil dort andere Zeilen stehen.
+    """
     tot: list[int] = []
     try:
         with httpx.Client(timeout=10.0) as client:
@@ -436,9 +608,8 @@ def _zustellen_alle(
         # Ein 404 oder 410 heisst: diesen Browser gibt es nicht mehr. Die Zeile
         # stehen zu lassen hiesse, bei jeder Nachricht erneut dagegen zu
         # laufen.
-        db.query(PushSubscription).filter(PushSubscription.id.in_(tot)).delete(
-            synchronize_session=False
-        )
+        modell = E2eeMailboxPush if je_mailbox else PushSubscription
+        db.query(modell).filter(modell.id.in_(tot)).delete(synchronize_session=False)
         db.commit()
         logger.info("webpush: %d abgelaufene Abonnements entfernt", len(tot))
     except Exception:

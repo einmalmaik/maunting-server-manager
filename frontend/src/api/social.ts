@@ -4,6 +4,7 @@
 
 import { api, apiStream } from './client'
 import { nachweisKopf } from '@/services/mailboxNachweis'
+import { eigenerPushAbdruck } from '@/services/mailboxPush'
 import i18n from '@/i18n'
 
 export interface FriendItem {
@@ -389,9 +390,15 @@ export async function relayE2eeEnvelope(payload: {
   control_type?: string | null
 
 }): Promise<BlindEnvelopeItem> {
+  // Der eigene Push-Abdruck hängt an jedem Umschlag und hält diesen Browser aus
+  // der Zustellung heraus. Auf dem kontogebundenen Weg braucht es ihn nicht —
+  // dort erkennt der Server den Absender an seiner Kennung. Auf dem
+  // Mailbox-Weg gibt es keine Kennung mehr, und ohne ihn bekäme man die
+  // Meldung über die eigene Nachricht.
+  const abdruck = eigenerPushAbdruck()
   return api<BlindEnvelopeItem>('/social/e2ee/relay', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify(abdruck ? { ...payload, push_ausnahme: abdruck } : payload),
     headers: nachweisKopf(payload.blind_mailbox_id),
   })
 }

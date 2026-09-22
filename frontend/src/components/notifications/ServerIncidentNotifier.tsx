@@ -16,6 +16,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
 import { sendeGeraeteBenachrichtigung, pruefeUndFrageGeraeteBerechtigung } from '@/lib/benachrichtigung'
 import { abonniere, kuendige } from '@/services/pushAbo'
+import { kuendigeMailboxPush } from '@/services/mailboxPush'
 import { useMessengerNotificationStore, playNotificationChime } from '@/stores/messengerNotificationStore'
 import { NotificationService } from '@/services/notificationService'
 import { sendE2eeDeliveryReceipt, checkAndDispatchPendingDeliveryReceipts } from '@/services/deliveryReceiptService'
@@ -92,7 +93,13 @@ export function ServerIncidentNotifier() {
       // Der Schalter steht auf aus. Dann gehört auch die Zustelladresse weg und
       // nicht nur die Anzeige unterdrückt — sonst hinge am Konto weiter ein
       // Abo, das der Server bei jeder Nachricht bedient.
-      void kuendige()
+      //
+      // Erst die Mailboxen, dann das Konto: `kuendige` beendet am Ende das
+      // Abonnement im Browser, und danach gibt es keine Adresse mehr
+      // auszutragen. Dass der Schalter auch für den Mailbox-Weg gilt, kann nur
+      // hier entschieden werden — dort steht kein Konto mehr, an dem der
+      // Server ihn nachschlagen könnte.
+      void kuendigeMailboxPush().then(() => kuendige())
     }
 
     const checkAlerts = async () => {

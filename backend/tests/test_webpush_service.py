@@ -305,9 +305,14 @@ def test_versand_geht_an_jedes_geraet(db: Session, owner_user: User, abgefangene
 
     assert webpush_service.sende_an_konto(db, owner_user.id, {"title": "Neue Nachricht"}) == 2
 
-    ziele, koerper, _pem, _oeff = abgefangener_versand[0]
+    ziele, koerper, _pem, _oeff, je_mailbox = abgefangener_versand[0]
     assert len(ziele) == 2
     assert json.loads(koerper)["title"] == "Neue Nachricht"
+    # Der kontogebundene Weg raeumt in `push_subscriptions` auf, nie in
+    # `e2ee_mailbox_push`. Beide reichen `id`-Werte in denselben Faden; stuende
+    # hier `True`, loeschte ein toter Browser eine gleichnummerige Zeile der
+    # anderen Tabelle — und ein Geraet bekaeme still nie wieder eine Meldung.
+    assert je_mailbox is False
 
 
 def test_was_hinausgeht_traegt_keinen_inhalt(db: Session, owner_user: User, abgefangener_versand):
@@ -333,7 +338,7 @@ def test_was_hinausgeht_traegt_keinen_inhalt(db: Session, owner_user: User, abge
     assert nutzlast is not None
     webpush_service.sende_an_konto(db, owner_user.id, nutzlast)
 
-    _ziele, koerper, _pem, _oeff = abgefangener_versand[0]
+    _ziele, koerper, _pem, _oeff, _je_mailbox = abgefangener_versand[0]
     text = koerper.decode("utf-8")
     assert "Bahnhof" not in text
     assert "sv-e2ee-dr-v1" not in text
@@ -558,7 +563,7 @@ def test_eine_nachricht_loest_den_versand_aus(
     )
 
     assert len(abgefangener_versand) == 1
-    ziele, koerper, _pem, _oeff = abgefangener_versand[0]
+    ziele, koerper, _pem, _oeff, _je_mailbox = abgefangener_versand[0]
     assert [z[1] for z in ziele] == [ENDPUNKT]
     assert json.loads(koerper)["title"] == "Neue Nachricht"
 

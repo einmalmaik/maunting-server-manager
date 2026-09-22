@@ -19,9 +19,16 @@
  *    Folge ein; was zuerst da ist, wartet auf das andere. Beim Neuverbinden
  *    kommt eine neue `conn_id`, und die Liste geht von selbst erneut raus —
  *    ohne das wäre der Messenger nach jedem Netzwechsel stumm.
+ *
+ * Dieselbe Liste geht an einen zweiten Empfänger: `mailboxPush.ts` meldet sie
+ * als Zustelladresse für den geschlossenen Tab. Sie steht hier und nicht
+ * zweimal, weil zwei Listen derselben Mailboxen die sichere Art wären, sie
+ * auseinanderlaufen zu lassen — der Strom hat dann Kennungen, von denen Push
+ * nichts weiß, und der Benutzer erfährt je nach Tab-Zustand etwas anderes.
  */
 
 import { api } from '@/api/client'
+import { meldeMailboxPush } from '@/services/mailboxPush'
 
 export interface MailboxAbo {
   mailboxId: string
@@ -40,6 +47,26 @@ function abdruck(eintraege: Map<string, string | null>): string {
     .map(([id, token]) => `${id}:${token ?? ''}`)
     .sort()
     .join('|')
+}
+
+function alsListe(): { mailbox_id: string; mailbox_token?: string }[] {
+  return [...gewuenscht.entries()].map(([mailbox_id, token]) => ({
+    mailbox_id,
+    ...(token ? { mailbox_token: token } : {}),
+  }))
+}
+
+/**
+ * Gibt die Liste an den zweiten Empfänger weiter: die Push-Adresse.
+ *
+ * Getrennt von `melde()` und ohne dessen `conn_id`-Bedingung, denn die beiden
+ * haben verschiedene Lebensdauern. Der Strom ist mit der Verbindung weg; die
+ * Zustelladresse soll gerade dann noch stehen, wenn keine Verbindung mehr da
+ * ist — das ist ihr einziger Zweck. Hinge sie am Strom, nähme ein Netzwechsel
+ * sie mit.
+ */
+function meldePush(): void {
+  void meldeMailboxPush(alsListe())
 }
 
 /**
@@ -62,10 +89,7 @@ async function melde(): Promise<void> {
 
   const kennung = stromKennung
   const stand = abdruck(gewuenscht)
-  const eintraege = [...gewuenscht.entries()].map(([mailbox_id, token]) => ({
-    mailbox_id,
-    ...(token ? { mailbox_token: token } : {}),
-  }))
+  const eintraege = alsListe()
 
   laeuft = (async () => {
     try {
@@ -120,6 +144,7 @@ export function abonniereMailbox(mailboxId: string, token?: string | null): void
   if (gewuenscht.has(id) && bisher === neu) return
   gewuenscht.set(id, neu)
   void melde()
+  meldePush()
 }
 
 /** Nimmt eine Mailbox aus der Liste. Beim Verlassen einer Gruppe fällig. */
@@ -127,6 +152,11 @@ export function kuendigeMailbox(mailboxId: string): void {
   const id = (mailboxId || '').trim().toLowerCase()
   if (!gewuenscht.delete(id)) return
   void melde()
+  // Auch hier, und hier besonders: was nicht mehr gemeldet wird, räumt das
+  // Backend ab. Ohne diesen Aufruf bliebe die verlassene Gruppe als
+  // Zustellziel stehen, und das Gerät bekäme weiter Meldungen über
+  // Nachrichten, die es nicht mehr lesen kann.
+  meldePush()
 }
 
 /** Vergisst alles. Gehört zum Abmelden. */
