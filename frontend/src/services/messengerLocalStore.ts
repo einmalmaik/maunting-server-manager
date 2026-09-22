@@ -5,7 +5,7 @@
  * browser refreshes (F5) and app restarts (Web, Desktop, Mobile) without
  * re-entering recovery keys or waiting for network round-trips.
  *
- * Database: `msm_messenger_local` (v1)
+ * Database: `msm_messenger_local:konto:<id>` (v3)
  * Object Stores:
  *  - `messages`: keyed by `[blindMailboxId, id]`, indexed by `blindMailboxId`, `createdAt`, `clientUuid`
  *  - `mailboxes`: keyed by `blindMailboxId`, tracks `lastSyncedEnvelopeId` and `updatedAt`
@@ -20,8 +20,24 @@
  * leerläuft — ein `await` zwischen `transaction()` und `put()` bricht sie ab.
  * Gelesen wird umgekehrt: erst die Rohzeilen holen, dann außerhalb der
  * Transaktion entsiegeln.
+ *
+ * **Eine Datenbank je Konto, seit 09/2026.** Bis dahin hieß sie schlicht
+ * `msm_messenger_local` und gehörte damit dem Browserprofil statt dem
+ * angemeldeten Menschen. Wer sich nacheinander mit zwei Konten anmeldete,
+ * hinterließ beide Gesprächsverläufe in derselben Ablage — im Klartext, solange
+ * kein Messenger-PIN gesetzt ist, und über das Abmelden hinaus. Das zweite Konto
+ * las sie beim Öffnen des Messengers einfach mit: `loadLocalMessages` fragt nach
+ * der Mailbox, nicht nach dem Besitzer. Aufgefallen ist es an einer Zeile mit
+ * `senderId: 2` und `isSelf: true` in der Sitzung von Konto 1 — die abgelegte
+ * Sicht des anderen Kontos auf dessen eigene Nachricht.
+ *
+ * Die Trennung liegt deshalb auf der Datenbank, nicht auf einem Schlüsselfeld:
+ * eine fremde Zeile ist dann nicht „gefiltert", sondern außer Reichweite. Ohne
+ * angemeldetes Konto gibt es keine Ablage — `openLocalDatabase` weist ab, statt
+ * auf eine gemeinsame auszuweichen.
  */
 
+import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
 import { entsiegleZeile, entsiegleZeilen, versiegleZeile } from './lokaleVersiegelung'
 import { istSteuerzeile } from './nachrichtBezug'
 
@@ -90,8 +106,13 @@ export interface LocalMailboxMeta {
   updatedAt: string
 }
 
-const DB_NAME = 'msm_messenger_local'
+const DB_PRAEFIX = 'msm_messenger_local'
 const DB_VERSION = 3
+
+/** Die Ablage dieses Kontos. Ein anderes Konto, eine andere Datenbank. */
+function dbName(kontoId: number): string {
+  return `${DB_PRAEFIX}:konto:${kontoId}`
+}
 const STORE_MESSAGES = 'messages'
 const STORE_MAILBOXES = 'mailboxes'
 const STORE_KLARTEXTE = 'envelope_plaintexts'
@@ -124,6 +145,36 @@ function klartextAad(blindMailboxId: string, envelopeId: number): string {
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null
+/** Zu welchem Konto die offene Verbindung gehört. */
+let offenesKonto: number | null = null
+let altbestandGeraeumt = false
+
+/**
+ * Entfernt die alte, kontolose Datenbank — einmal je Browsersitzung.
+ *
+ * Übernommen wird nichts. Ihre Zeilen tragen kein Konto, und keines lässt sich
+ * nachträglich ermitteln: `senderId` und `isSelf` beschreiben die Sicht dessen,
+ * der sie abgelegt hat, und die Mailbox-Kennung gehört dem Gespräch, nicht einem
+ * Menschen. Sie dem Konto zuzuschlagen, das nach dem Umstieg zufällig als
+ * erstes den Messenger öffnet, wäre genau das Leck, das hier zugeht.
+ *
+ * Der Preis steht dazu und ist bekannt: was nur dort lag, ist weg. Für Gruppen
+ * und empfangene Nachrichten holt die Mailbox das Fenster der letzten hundert
+ * Umschläge zurück; der eigene Anteil eines Direktgesprächs kommt nicht wieder,
+ * denn eine selbst verschlüsselte Ratchet-Nachricht kann der Absender nicht
+ * erneut öffnen. Ein Verlauf, der jedem Konto dieses Rechners offensteht, ist
+ * den Tausch trotzdem nicht wert.
+ */
+function raeumeAltbestand(): void {
+  if (altbestandGeraeumt) return
+  altbestandGeraeumt = true
+  try {
+    indexedDB.deleteDatabase(DB_PRAEFIX)
+  } catch {
+    // Ein blockiertes Löschen (offene Verbindung in einem anderen Tab) holt
+    // der nächste Start nach. Kein Grund, den Messenger nicht zu starten.
+  }
+}
 
 /**
  * Bittet den Browser, diese Ablage zu behalten.
@@ -157,12 +208,29 @@ export async function sichereDauerhafteAblage(): Promise<boolean> {
 }
 
 function openLocalDatabase(): Promise<IDBDatabase> {
+  const konto = angemeldetesKonto()
+  if (konto === null) {
+    // Ohne Konto keine Ablage. Nicht „ersatzweise die gemeinsame" — dieser
+    // Ausweg *war* der Fehler. Jeder Aufrufer, dem das etwas ausmacht, fängt
+    // ihn; die Wege, die bewusst laut scheitern, sollen auch hier laut sein.
+    return Promise.reject(new Error('Lokale Messenger-Ablage ohne angemeldetes Konto'))
+  }
+  // Kontowechsel in derselben Browsersitzung: die alte Verbindung geht zu,
+  // bevor die neue aufgeht. Sonst bliebe die Ablage des vorigen Kontos offen
+  // und `dbPromise` zeigte weiter dorthin.
+  if (dbPromise && offenesKonto !== konto) {
+    const alt = dbPromise
+    dbPromise = null
+    void alt.then((db) => db.close()).catch(() => {})
+  }
   if (dbPromise) return dbPromise
+  offenesKonto = konto
   dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
     if (typeof indexedDB === 'undefined') {
       return reject(new Error('IndexedDB not available in current environment'))
     }
-    const req = indexedDB.open(DB_NAME, DB_VERSION)
+    raeumeAltbestand()
+    const req = indexedDB.open(dbName(konto), DB_VERSION)
 
     req.onupgradeneeded = () => {
       const db = req.result
@@ -201,6 +269,7 @@ function openLocalDatabase(): Promise<IDBDatabase> {
     req.onsuccess = () => resolve(req.result)
     req.onerror = () => {
       dbPromise = null
+      offenesKonto = null
       reject(req.error)
     }
   })
