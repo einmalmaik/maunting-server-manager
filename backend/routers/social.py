@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from database import SessionLocal, get_db
 from dependencies import get_current_user, get_optional_user, verify_csrf, get_current_user_for_ws, ws_subprotokoll
-from models import ChatGroup, User
+from models import ChatGroup, ChatGroupConfig, User
 from schemas.chat_media import (
     ChatMediaUploadRequest,
     ChatMediaUploadResponse,
@@ -38,6 +38,8 @@ from schemas.social import (
     ChatGroupMemberResponse,
     ChatGroupMemberUpdate,
     ChatGroupPermissionsUpdate,
+    ChatGroupConfigWrite,
+    ChatGroupConfigResponse,
     ChatGroupInvitePublicResponse,
     ChatStoryCreate,
     ChatStoryResponse,
@@ -911,6 +913,50 @@ def update_group_permissions_endpoint(
     )
     return _gruppe_antwort(db, group, user.id)
 
+
+# --- Gruppenzustand: die eigenen Rollen einer Gruppe, verschlüsselt ---
+#
+# Zwei Endpunkte, die nichts über ihren Inhalt wissen. Was hier durchgereicht
+# wird, ist ein Umschlag unter dem Gruppenschlüssel; der liegt bei den Geräten
+# der Mitglieder, nicht auf dem Server. Deshalb gibt es hier auch keine Route
+# „Rolle anlegen" oder „Rolle löschen": der Server kennt keine Rollen. Er kennt
+# einen Block und eine Zahl.
+
+
+@router.get(
+    "/groups/{group_id}/config",
+    response_model=ChatGroupConfigResponse | None,
+    dependencies=[Depends(_check_social_enabled)],
+)
+def get_group_config_endpoint(
+    group_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ChatGroupConfig | None:
+    # `null` heißt „diese Gruppe hat noch keinen Zustand" — der Client schreibt
+    # dann mit `erwartete_revision: 0`. Ein 404 wäre hier missverständlich: die
+    # Gruppe gibt es, nur den Block noch nicht.
+    return SocialService.get_group_config(db, group_id=group_id, caller=user)
+
+
+@router.put(
+    "/groups/{group_id}/config",
+    response_model=ChatGroupConfigResponse,
+    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
+)
+def put_group_config_endpoint(
+    group_id: int,
+    req: ChatGroupConfigWrite,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ChatGroupConfig:
+    return SocialService.write_group_config(
+        db,
+        group_id=group_id,
+        blob=req.blob,
+        erwartete_revision=req.erwartete_revision,
+        caller=user,
+    )
 
 
 # --- Stories (Temporäre Statusmeldungen, 24h) ---

@@ -615,6 +615,41 @@ export async function updateGroupPermissions(
   })
 }
 
+/**
+ * Der verschlüsselte Gruppenzustand: die eigenen Rollen dieser Gruppe.
+ *
+ * `blob` ist ein Umschlag unter dem Gruppenschlüssel — das Backend reicht ihn
+ * durch und liest ihn nie. Ausgewertet wird er in `services/gruppenKonfig.ts`;
+ * hier steht nur der Transport.
+ */
+export interface GruppenKonfigAntwort {
+  group_id: number
+  blob: string
+  revision: number
+  updated_at: string
+}
+
+/** `null`, solange die Gruppe noch keinen Zustand hat — dann ist Revision 0. */
+export async function getGroupConfig(groupId: number): Promise<GruppenKonfigAntwort | null> {
+  return api<GruppenKonfigAntwort | null>(`/social/groups/${groupId}/config`)
+}
+
+/**
+ * Schreibt den nächsten Stand. `erwarteteRevision` ist der Stand, den dieses
+ * Gerät gelesen hat; kam ein anderes dazwischen, antwortet das Backend mit 409
+ * und es wird nichts überschrieben.
+ */
+export async function putGroupConfig(
+  groupId: number,
+  blob: string,
+  erwarteteRevision: number,
+): Promise<GruppenKonfigAntwort> {
+  return api<GruppenKonfigAntwort>(`/social/groups/${groupId}/config`, {
+    method: 'PUT',
+    body: JSON.stringify({ blob, erwartete_revision: erwarteteRevision }),
+  })
+}
+
 /** Gruppenlogo setzen. Nur Besitzer und Admins der Gruppe dürfen das. */
 export async function uploadGroupAvatar(groupId: number, file: File): Promise<ChatGroupItem> {
   const formular = new FormData()

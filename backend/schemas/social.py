@@ -524,6 +524,51 @@ class ChatGroupPermissionsUpdate(BaseModel):
     default_permissions: str = Field(..., min_length=2, max_length=256)
 
 
+#: Obergrenze für den verschlüsselten Gruppenzustand. 256 KiB tragen einige
+#: hundert Rollen samt Beschreibung; darüber hinaus wäre die Zeile kein
+#: Gruppenzustand mehr, sondern eine Ablage, die jedes Mitglied beliebig füllen
+#: kann. Der Server kann den Inhalt nicht beurteilen — also begrenzt er die Menge.
+MAX_GROUP_CONFIG_BYTES = 256 * 1024
+
+
+class ChatGroupConfigWrite(BaseModel):
+    """Ein neuer Gruppenzustand, verschlüsselt, mit der Revision, die er ablöst.
+
+    ``erwartete_revision`` ist der Stand, den der Schreibende gelesen hat. Der
+    Server nimmt den Block nur an, wenn das noch der aktuelle Stand ist — sonst
+    409. So kann ein zweites Gerät keinen Rechteentzug überschreiben, den es
+    nie gesehen hat, und ein Mitschreibender keinen alten Stand zurückspielen.
+    ``0`` heißt „die Gruppe hatte noch keinen Zustand".
+    """
+
+    blob: str = Field(..., min_length=10, max_length=MAX_GROUP_CONFIG_BYTES)
+    erwartete_revision: int = Field(..., ge=0)
+
+    @field_validator("blob")
+    @classmethod
+    def validate_blob(cls, v: str) -> str:
+        # Dieselbe Prüfung wie für eine Nachricht, und aus demselben Grund: sie
+        # weist Klartext ab. Ein Rollenname, der hier versehentlich im Klartext
+        # landete, wäre genau die Metadatenzeile, die es nicht geben soll — und
+        # ein Fehler dieser Art fällt sonst niemandem auf, weil alles
+        # funktioniert.
+        validate_e2ee_envelope_format(v)
+        return v
+
+
+class ChatGroupConfigResponse(BaseModel):
+    group_id: int
+    blob: str
+    revision: int
+    updated_at: datetime
+
+    @field_serializer("updated_at")
+    def serialize_updated_at(self, dt: datetime) -> str:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.isoformat()
+
+
 class ChatGroupResponse(BaseModel):
     id: int
     name: str

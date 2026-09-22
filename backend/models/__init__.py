@@ -81,6 +81,7 @@ from .hoster import (
 )
 
 from .chat_group import ChatGroup, ChatGroupMember
+from .chat_group_config import ChatGroupConfig
 from .chat_story import ChatStory
 from .direct_chat import DirectChat
 from .chat_media import ChatMedia
@@ -109,6 +110,6 @@ __all__ = [
     "VaultEntry", "VaultHint", "VaultUserSetting", "VaultBlindBucket",
     "UserAchievement", "UserActivityTime", "UserFriend", "UserPresence", "E2eeBlindEnvelope",
     "UserE2eeDevice", "PushSubscription",
-    "ChatGroup", "ChatGroupMember", "ChatStory", "DirectChat", "ChatMedia",
+    "ChatGroup", "ChatGroupMember", "ChatGroupConfig", "ChatStory", "DirectChat", "ChatMedia",
 ]  # noqa: E501
 
