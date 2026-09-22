@@ -1245,8 +1245,12 @@ export const aiApi = {
     if (providerId !== undefined) frage.set('provider_id', String(providerId))
     const headers: Record<string, string> = {}
     if (apiKey?.trim()) {
+      // **Nur im Kopf, nie im Abfrageteil.** Hier stand der Schlüssel zusätzlich
+      // als `api_key=…` in der Adresse — und eine Adresse landet in der
+      // Zugriffszeile von Caddy und uvicorn, im Verlauf des Browsers und im
+      // `Referer`. Aus keiner der drei Ablagen bekommt man ihn wieder heraus.
+      // Der Server liest ihn seit derselben Änderung ausschliesslich hier.
       headers['X-Provider-Api-Key'] = apiKey.trim()
-      frage.set('api_key', apiKey.trim())
     }
     const anhang = frage.toString()
     return api<AiCatalogModel[]>(

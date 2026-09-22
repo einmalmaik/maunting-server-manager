@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
+from urllib.parse import quote_plus
 import httpx
 import pytest
 from sqlalchemy.orm import Session
@@ -426,7 +427,95 @@ async def test_gemini_live_session_tool_response_has_name() -> None:
     assert len(func_responses) == 1
     assert func_responses[0]["name"] == "get_status"
     assert func_responses[0]["id"] == "call_abc"
-    assert func_responses[0]["response"] == {"output": {"status": "running"}}
+    # Dieselbe Untrusted-Huelle wie im Chat (`werkzeugergebnis_umschlag`). Der
+    # Systemprompt sagt zu, dass markiertes Material Daten sind und keine
+    # Anweisungen — die Zusage haelt nur, wenn die Marke auch auf dem Sprachweg
+    # dransteht. Sie stand dort nicht.
+    assert func_responses[0]["response"] == {
+        "untrusted": True,
+        "tool": "get_status",
+        "data": {"status": "running"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_gemini_live_deckelt_werkzeugargumente_wie_realtime() -> None:
+    """Beide Sprachwege haben dieselbe Obergrenze für Werkzeugargumente.
+
+    Der Realtime-Weg prüft sie vor dem Parsen (`MAX_TOOL_ARGUMENTE_ZEICHEN`).
+    Bei Gemini kommt der Rahmen bereits geparst an, und die einzige Grenze war
+    `max_size` des WebSockets — vier Megabyte je Aufruf.
+    """
+    from services.ai_voice.realtime_session import MAX_TOOL_ARGUMENTE_ZEICHEN
+
+    vorb = RealtimeVorbereitung(
+        provider_id=1,
+        provider_kind="google",
+        model="gemini-2.5-flash",
+        api_key="AIzaSyTestKey",
+        tools=[{"name": "web_search"}],
+    )
+    mock_ws = MagicMock()
+    mock_ws.send_json = AsyncMock()
+    sitzung = GeminiLiveSitzung(
+        websocket=mock_ws, vorbereitung=vorb, user_id=1, http_client=MagicMock()
+    )
+
+    with patch(
+        "services.ai_stream.read_tools.voice_werkzeug_ausfuehren"
+    ) as mock_exec:
+        wert = await sitzung._werkzeug_ausfuehren(
+            "call-gross", "web_search", {"query": "x" * (MAX_TOOL_ARGUMENTE_ZEICHEN + 1)}
+        )
+
+    assert wert == {"error": "Werkzeugargumente ungültig"}
+    mock_exec.assert_not_called()
+    # Das Panel darf nicht mit einem `werkzeug_gestartet` stehenbleiben, das
+    # nie endet — der Abschlussrahmen geht auch im Fehlerfall hinaus.
+    arten = [ruf.args[0].get("art") for ruf in mock_ws.send_json.call_args_list]
+    assert "werkzeug" in arten
+
+
+@pytest.mark.asyncio
+async def test_gemini_live_fehlertext_traegt_den_schluessel_nicht_hinaus() -> None:
+    """Eine Anbietermeldung geht redigiert und gekürzt an den Browser.
+
+    Der Schlüssel steht bei Googles Live-API im Abfrageteil der Adresse
+    (``?key=…``) — anders ist ihr WebSocket-Handshake nicht dokumentiert. Eine
+    Ausnahme aus `websockets.connect` trägt diese Adresse oft im Text, und
+    ``str(exc)`` ging bisher ungeschwärzt sowohl ins Protokoll als auch über
+    ``art: "fehler"`` an den Browser. Die Mustererkennung allein rettet das
+    nicht: ``key`` ist in `_GEHEIM_KERN` bewusst kein Geheimniswort.
+    """
+    from services.ai_voice.gemini_live_session import MAX_FEHLERTEXT_ZEICHEN
+
+    schluessel = "AIzaSy" + "B" * 33
+    vorb = RealtimeVorbereitung(
+        provider_id=1,
+        provider_kind="google",
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+        model="gemini-2.5-flash",
+        api_key=schluessel,
+    )
+    sitzung = GeminiLiveSitzung(
+        websocket=MagicMock(),
+        vorbereitung=vorb,
+        user_id=1,
+        http_client=MagicMock(),
+    )
+
+    roh = (
+        "InvalidURI: wss://generativelanguage.googleapis.com/ws/"
+        f"google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key={schluessel}"
+        " isn't a valid URI " + "x" * 500
+    )
+    gekuerzt = sitzung._fremdtext(roh)
+
+    assert schluessel not in gekuerzt
+    assert "[REDACTED]" in gekuerzt
+    assert len(gekuerzt) <= MAX_FEHLERTEXT_ZEICHEN
+    # Auch URL-kodiert — genau so steht er in der Adresse.
+    assert schluessel not in sitzung._fremdtext(f"?key={quote_plus(schluessel)}")
 
 
 @pytest.mark.asyncio
@@ -569,7 +658,12 @@ def test_gemini_live_session_safety_settings() -> None:
 
 
 def test_list_catalog_models_with_ephemeral_key(client: TestClient, owner_cookies: dict, monkeypatch) -> None:
-    """Prüft, dass der Katalog mit einem flüchtigen Schlüssel (Header oder Query) direkt abgerufen wird."""
+    """Prüft, dass der Katalog mit einem flüchtigen Schlüssel direkt abgerufen wird.
+
+    **Nur über den Kopf.** Der Abfrageteil war der zweite Weg und ist weg: eine
+    Adresse steht in der Zugriffszeile von Caddy und uvicorn, im Verlauf des
+    Browsers und im `Referer` — ein Schlüssel dort ist nicht mehr einzufangen.
+    """
     from services import ai_model_catalog
 
     aufgerufen_mit: dict[str, str | None] = {}
@@ -603,13 +697,19 @@ def test_list_catalog_models_with_ephemeral_key(client: TestClient, owner_cookie
     assert daten[0]["model_id"] == "gemini-2.5-flash"
     assert aufgerufen_mit["schluessel"] == "AIzaSyLiveTestKey"
 
-    # 2. Mit api_key Query Parameter
+    # 2. Derselbe Schlüssel im Abfrageteil wird **nicht** mehr angenommen.
+    #    Google verlangt für seinen Katalog einen Schlüssel
+    #    (`katalog_braucht_schluessel`); ohne einen im Kopf und ohne
+    #    `provider_id` ist die richtige Antwort die leere Liste — nicht ein
+    #    Abruf mit dem Schlüssel aus der Adresse.
+    aufgerufen_mit.clear()
     resp2 = client.get(
         "/api/ai/settings/provider-kinds/google/models?api_key=AIzaSyQueryTestKey",
         cookies=owner_cookies,
     )
     assert resp2.status_code == 200
-    assert aufgerufen_mit["schluessel"] == "AIzaSyQueryTestKey"
+    assert resp2.json() == []
+    assert aufgerufen_mit == {}
 
 
 @pytest.mark.asyncio

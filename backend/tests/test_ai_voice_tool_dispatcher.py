@@ -133,19 +133,55 @@ def test_notes_tools_in_chat_interaction_tools():
 def test_voice_werkzeug_ausfuehren_propose_note(db: Session, regular_user: User):
     from services.ai_stream.read_tools import voice_werkzeug_ausfuehren
     from services.openai_compatible_adapter import ProviderToolCall
-    with patch("services.ai_stream.write_tools._persist_write_proposals") as mock_persist:
-        mock_persist.return_value = [{"id": "prop-note-1", "tool_name": "propose_note_create", "status": "proposed"}]
-        call = ProviderToolCall(
-            id="call-note",
-            name="propose_note_create",
-            arguments={"title": "Einkaufsliste", "content": "- [ ] Butter\n- [ ] Milch", "category": "shopping"},
-        )
-        wert, fehler, anzeige, vorschlaege = voice_werkzeug_ausfuehren(
-            user_id=regular_user.id,
-            call=call,
-            conversation_id="conv-note-test",
-        )
-        assert fehler is None
-        assert len(vorschlaege) == 1
-        assert vorschlaege[0]["id"] == "prop-note-1"
+    with patch("services.ai_stream.read_tools.angebotene_werkzeuge") as mock_angebot:
+        mock_angebot.return_value = frozenset({"propose_note_create"})
+        with patch("services.ai_stream.write_tools._persist_write_proposals") as mock_persist:
+            mock_persist.return_value = [{"id": "prop-note-1", "tool_name": "propose_note_create", "status": "proposed"}]
+            call = ProviderToolCall(
+                id="call-note",
+                name="propose_note_create",
+                arguments={"title": "Einkaufsliste", "content": "- [ ] Butter\n- [ ] Milch", "category": "shopping"},
+            )
+            wert, fehler, anzeige, vorschlaege = voice_werkzeug_ausfuehren(
+                user_id=regular_user.id,
+                call=call,
+                conversation_id="conv-note-test",
+            )
+            assert fehler is None
+            assert len(vorschlaege) == 1
+            assert vorschlaege[0]["id"] == "prop-note-1"
+
+
+def test_voice_werkzeug_ausfuehren_weist_nicht_angebotenes_ab(
+    db: Session, regular_user: User
+):
+    """Ein Name, den die Sitzung nie angeboten hat, laeuft gar nicht erst.
+
+    Bis hierher trug diesen Fall allein die Rechtepruefung im jeweiligen
+    Handler — und drei Handler hatten keine. Der Sprachweg reichte den Namen
+    des Modells ungeprueft weiter, waehrend der Chatweg ihn laengst gegen die
+    Angebotsmenge haelt.
+
+    Geprueft wird ueber die echte Menge und nicht ueber eine Kopie: ein Test
+    mit eigener Liste bliebe gruen, wenn jemand das Gate wieder herausnimmt.
+    """
+    from services.ai_stream.read_tools import voice_werkzeug_ausfuehren
+    from services.openai_compatible_adapter import ProviderToolCall
+
+    with patch("services.ai_stream.read_tools._werkzeug_ausfuehren") as mock_exec:
+        with patch("services.ai_stream.read_tools.angebotene_werkzeuge") as mock_angebot:
+            mock_angebot.return_value = frozenset({"list_my_servers"})
+            call = ProviderToolCall(id="call-mail", name="email_read", arguments={"message_id": "1"})
+            wert, fehler, anzeige, vorschlaege = voice_werkzeug_ausfuehren(
+                user_id=regular_user.id,
+                call=call,
+                conversation_id="conv-mail-test",
+            )
+
+    assert fehler == "Dieses Werkzeug steht in dieser Sitzung nicht zur Verfügung"
+    assert wert == {"error": fehler}
+    assert vorschlaege == []
+    # Der eigentliche Punkt: es ist nichts gelaufen, nicht nur nichts
+    # zurueckgekommen.
+    mock_exec.assert_not_called()
 

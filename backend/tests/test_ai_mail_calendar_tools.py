@@ -85,6 +85,62 @@ def test_calendar_read_tool_dispatches_cleanly(db: Session, mailbox_user: User):
         mock_events.assert_called_once()
 
 
+@pytest.mark.parametrize(
+    ("werkzeug", "argumente", "gepatchter_dienst"),
+    [
+        ("email_search", {"query": "Meeting"}, "services.mailbox_service.MailboxService.search_messages"),
+        ("email_read", {"message_id": "msg-1"}, "services.mailbox_service.MailboxService.read_message"),
+        ("calendar_read", {"start_date": "2026-08-26"}, "services.calendar_service.CalendarService.get_events"),
+    ],
+)
+def test_lesewerkzeuge_ohne_recht_lesen_nichts(
+    db: Session, regular_user: User, werkzeug: str, argumente: dict, gepatchter_dienst: str
+):
+    """Ohne `ai.mailbox.use` / `ai.calendar.use` laeuft der Handler gar nicht.
+
+    Diese drei hatten als einzige der persoenlichen Lesewerkzeuge keine
+    Rechtepruefung — ihr Schluessel stand allein als `angebot` in
+    `ai_tool_registry`, und das ist ausdruecklich nur ein Katalogfilter
+    (`angebotene_werkzeuge`: „eine Bitte, keine Zusage"). Der Nachbar
+    `notes_read` prueft seit jeher.
+
+    Der Katalog allein traegt nicht: ein Modell kann einen Namen aus dem
+    Verlauf abschreiben, `execute_server_action` loest Namen semantisch auf,
+    und die Sprachsitzungen reichten den Namen des Modells weiter. Geprueft
+    wird deshalb hier — und der Dienst darf nicht einmal gefragt worden sein.
+    """
+    with patch(gepatchter_dienst) as mock_dienst:
+        with pytest.raises(AiActionValidationError):
+            ai_action_service._execute_global_read_tool(
+                db, user=regular_user, tool_name=werkzeug, arguments=argumente
+            )
+    mock_dienst.assert_not_called()
+
+
+def test_email_search_limit_bleibt_im_rahmen(db: Session, mailbox_user: User):
+    """Ein `limit` aus der Modellausgabe ist gedeckelt und getippt.
+
+    Vorher stand hier ein blankes ``int(arguments.get("limit", 10))``. Das war
+    zweimal falsch: ``limit: 1000000`` war eine Postfachabfrage ohne
+    Obergrenze, und ``limit: "alle"`` warf einen ``ValueError`` — der faellt
+    aus dem Zweig, den `_werkzeug_ausfuehren` fuer Formfehler abfaengt, und
+    riss damit den ganzen Lauf ab statt einer Runde.
+    """
+    with patch("services.mailbox_service.MailboxService.search_messages") as mock_search:
+        mock_search.return_value = []
+        with pytest.raises(AiActionValidationError):
+            ai_action_service._execute_global_read_tool(
+                db, user=mailbox_user, tool_name="email_search",
+                arguments={"query": "x", "limit": 1_000_000},
+            )
+        with pytest.raises(AiActionValidationError):
+            ai_action_service._execute_global_read_tool(
+                db, user=mailbox_user, tool_name="email_search",
+                arguments={"query": "x", "limit": "alle"},
+            )
+    mock_search.assert_not_called()
+
+
 def test_propose_email_send_lifecycle(db: Session, mailbox_user: User, conversation: AiConversation):
     # 1. Create proposal
     proposal = ai_proposal_service.create_proposal(

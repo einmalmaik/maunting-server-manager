@@ -364,7 +364,15 @@ async def test_slow_realtime_tool_returns_a_safe_timeout_and_starts_the_followup
         "reason": "timeout",
     }
     output_frame = json.loads(sideband.sent[0])
-    assert json.loads(output_frame["item"]["output"]) == {"error": "TOOL_TIMEOUT"}
+    # In derselben Untrusted-Hülle wie im Chat (`werkzeugergebnis_umschlag`) —
+    # auch die Absage. Eine Ausnahme für kurze Ergebnisse wäre eine zweite
+    # Regel für dieselbe Frage, und das Modell müsste dann raten, ob ein
+    # fehlender Marker „vertrauenswürdig" heißt oder „vergessen".
+    assert json.loads(output_frame["item"]["output"]) == {
+        "untrusted": True,
+        "tool": "web_search",
+        "data": {"error": "TOOL_TIMEOUT"},
+    }
     assert json.loads(sideband.sent[1]) == {"type": "response.create"}
 
 
@@ -414,7 +422,15 @@ async def test_realtime_region_sends_initial_data_before_optional_enrichment(mon
     })
 
     first_output = json.loads(sideband.sent[0])
-    assert json.loads(first_output["item"]["output"]) == initial
+    # `analyze_region` zieht Nachrichten, Verkehrslage und öffentliche Posts von
+    # draußen herein — die Hülle gehört hier genauso dran wie an einer Logzeile.
+    # Die Anzeige im Panel (`geo_analysis`) bleibt davon unberührt: sie geht an
+    # einen Menschen, nicht an das Modell.
+    assert json.loads(first_output["item"]["output"]) == {
+        "untrusted": True,
+        "tool": "analyze_region",
+        "data": initial,
+    }
     assert panel.sent[1]["geo_analysis"] == initial
 
     session._response_aktiv = False
@@ -604,6 +620,48 @@ def test_voice_confirmation_is_bound_to_latest_proposal_in_session(monkeypatch) 
     assert session._offener_vorschlag is None
     _, zweiter_fehler = session._vorschlag_entscheiden("confirm")
     assert zweiter_fehler is not None
+
+
+def test_gesprochenes_ja_traegt_keine_unumkehrbare_aktion(monkeypatch) -> None:
+    """Was niemand zurückholt, braucht den Finger auf der Karte.
+
+    Im Panel entscheidet ein Mensch, indem er drückt. In der Sprachsitzung
+    entscheidet das *Modell*, dass der Mensch zugestimmt habe — und derselbe
+    Lauf hat in derselben Runde Logzeilen, Websuchtreffer oder Mailtext
+    gelesen. Ein „der Benutzer hat bereits zugestimmt" darin ist genau die
+    Vorlage, auf die ein Modell hereinfällt; die Untrusted-Markierung macht das
+    unwahrscheinlicher, sie ist aber ein Prompt und keine Schranke.
+
+    Die Trennlinie ist dieselbe wie im autonomen Modus und steht an derselben
+    Stelle: `Werkzeug.immer_bestaetigen` → `ALWAYS_CONFIRM_TOOLS`.
+    """
+    session = realtime_session.RealtimeSitzung(
+        object(),
+        vorbereitung=_vorbereitung(),
+        user_id=7,
+        http_client=None,
+        herkunft="panel",
+        familie=None,
+    )
+    aufrufe: list[dict] = []
+    monkeypatch.setattr(
+        realtime_session.voice_interactions,
+        "vorschlag_ausfuehren",
+        lambda **werte: (aufrufe.append(werte) is None, None),
+    )
+    monkeypatch.setattr(
+        realtime_session.voice_interactions, "braucht_klick", lambda **_: True
+    )
+
+    session._offener_vorschlag = "proposal-delete"
+    wert, fehler = session._vorschlag_entscheiden("confirm")
+
+    assert fehler is None
+    assert wert["status"] == "needs_panel_confirmation"
+    # Der Punkt: es ist nichts gelaufen. Die Karte bleibt stehen, der Benutzer
+    # drückt im Panel — abgelehnt ist die gesprochene Bestätigung, nicht der
+    # Vorschlag.
+    assert aufrufe == []
 
 
 def test_realtime_migration_carries_provider_and_usage_columns(tmp_path: Path) -> None:

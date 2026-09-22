@@ -18,6 +18,7 @@ import contextlib
 import json
 import logging
 from typing import Any
+from urllib.parse import quote_plus
 from uuid import uuid4
 
 import httpx
@@ -32,10 +33,17 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from database import SessionLocal
 from models import AiProvider, User
 from services import ai_action_service, ai_meldestelle, ai_provider_service, ai_usage_service
-from services.ai_stream.read_tools import voice_werkzeug_ausfuehren
+from services.ai_stream.read_tools import (
+    voice_werkzeug_ausfuehren,
+    werkzeugergebnis_umschlag,
+)
 from services.ai_voice import interactions as voice_interactions
 from services.ai_voice.contracts import Lage, MAX_SITZUNGSSEKUNDEN, voice_tool_frame
-from services.ai_voice.realtime_session import RealtimeVorbereitung
+from services.ai_voice.realtime_session import (
+    MAX_TOOL_ARGUMENTE_ZEICHEN,
+    RealtimeVorbereitung,
+)
+from services.ai_redaction import redact_sensitive_text
 from services.ai_voice_debug import emit as voice_debug
 from services.openai_compatible_adapter import ProviderToolCall
 
@@ -47,6 +55,10 @@ GEMINI_LIVE_WS_BASE = (
     "google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
 )
 GEMINI_TOOL_TIMEOUT_SECONDS = 12.0
+#: Fremdtext in einer Fehlermeldung. Bewusst knapp, aus demselben Grund wie
+#: `openai_compatible_adapter.MAX_PROVIDER_DETAIL_CHARS`: die Zeile soll die
+#: Ursache benennen, nicht eine fremde Antwort in unsere Oberflaeche kopieren.
+MAX_FEHLERTEXT_ZEICHEN = 200
 
 
 class GeminiLiveSitzungsfehler(RuntimeError):
@@ -193,6 +205,39 @@ class GeminiLiveSitzung:
         self._beendet = False
         self._setup_fertig = asyncio.Event()
 
+    def _fremdtext(self, text: object) -> str:
+        """Fremdtext zu einer Zeile, die man dem Browser zeigen kann.
+
+        Drei Wege brachten hier rohen Text nach draussen: die Fehlermeldung
+        von Google (``error.message``), die Abbruchmeldung des WebSockets und
+        ``str(exc)`` aus dem Sitzungsrumpf. Alle drei gingen unveraendert und
+        ungekuerzt sowohl ins Protokoll als auch ueber ``art: "fehler"`` an den
+        Browser.
+
+        **Der Schluessel ist der Grund, warum das mehr als Unordnung war.** Die
+        Live-API von Google nimmt ihn als Abfrageteil der Adresse (``?key=…``);
+        anders ist ihr WebSocket-Handshake nicht dokumentiert. Eine Ausnahme
+        aus `websockets.connect` traegt die Adresse aber oft im Text
+        (``InvalidURI``, Weiterleitungen, manche Handshake-Fehler), und damit
+        stand der Zugang des Betreibers in einer Meldung, die an den Browser
+        ging. Die Mustererkennung in `ai_redaction` faengt das **nicht**:
+        ``key`` allein ist dort kein Geheimniswort, sonst wuerde jedes
+        ``server_key`` in einer Konfiguration unlesbar.
+
+        Der eigene Schluessel wird deshalb woertlich gesucht und ersetzt — roh
+        und URL-kodiert, denn genau so steht er in der Adresse. Das ist exakt
+        und haengt an keinem Muster.
+
+        Danach dieselbe Behandlung wie bei jedem Fremdtext: redigieren,
+        einzeilig, hart kuerzen.
+        """
+        roh = str(text or "")
+        schluessel = (self.v.api_key or "").strip()
+        if schluessel:
+            roh = roh.replace(schluessel, "[REDACTED]")
+            roh = roh.replace(quote_plus(schluessel), "[REDACTED]")
+        return " ".join(redact_sensitive_text(roh).split())[:MAX_FEHLERTEXT_ZEICHEN]
+
     async def _panel_senden(self, daten: dict) -> None:
         async with self._senden_lock:
             await self.websocket.send_json(daten)
@@ -265,7 +310,22 @@ class GeminiLiveSitzung:
         anzeige: dict[str, Any] = {"tool_name": name}
         vorschlaege: list[dict] = []
 
-        if name == "voice_resolve_latest_proposal":
+        # **Derselbe Deckel wie auf dem Realtime-Weg** (dort
+        # `MAX_TOOL_ARGUMENTE_ZEICHEN`, geprueft vor dem Parsen). Hier fehlte
+        # er: Googles Rahmen kommt bereits geparst an, und die einzige Grenze
+        # war `max_size` des WebSockets — vier Megabyte je Aufruf, die
+        # ungebremst in einen Werkzeughandler und von dort in den Rueckkanal
+        # gingen. Zwei Wege fuer dieselbe Sitzungsart duerfen nicht zwei
+        # verschiedene Obergrenzen haben.
+        #
+        # Als erster Zweig der Kette und nicht als vorgezogener `return`: der
+        # Abschluss unten schickt den `werkzeug`-Rahmen ans Panel. Wer hier
+        # aussteigt, laesst das Panel mit einem `werkzeug_gestartet` stehen,
+        # das nie endet.
+        if len(json.dumps(argumente, default=str)) > MAX_TOOL_ARGUMENTE_ZEICHEN:
+            fehler = "Werkzeugargumente ungültig"
+            wert, anzeige = {"error": fehler}, {"tool_name": name, "failed": True}
+        elif name == "voice_resolve_latest_proposal":
             wert, fehler = await asyncio.to_thread(
                 self._vorschlag_entscheiden, argumente.get("decision")
             )
@@ -350,6 +410,9 @@ class GeminiLiveSitzung:
             return {"error": fehler}, fehler
         if decision == "reject":
             return {"status": "rejected_by_user"}, None
+        if voice_interactions.braucht_klick(user_id=self.user_id, kennung=kennung):
+            return {"status": "needs_panel_confirmation",
+                    "hinweis": voice_interactions.KLICK_NOETIG}, None
         erledigt, _ = voice_interactions.vorschlag_ausfuehren(
             user_id=self.user_id, kennung=kennung
         )
@@ -445,7 +508,8 @@ class GeminiLiveSitzung:
                 # Fehlermeldung von Google (z. B. Modell nicht unterstützt, Quota oder ungültige Parameter)
                 if "error" in event:
                     err = event["error"]
-                    err_msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+                    roh_msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+                    err_msg = self._fremdtext(roh_msg)
                     logger.warning("Gemini Live Fehler vom Anbieter: %s", err_msg)
                     await self._debug_senden("GEMINI_LIVE_ERROR", hint=err_msg)
                     with contextlib.suppress(Exception):
@@ -502,7 +566,10 @@ class GeminiLiveSitzung:
                         name = fc.get("name") or ""
                         args = fc.get("args") or {}
                         res = await self._werkzeug_ausfuehren(call_id, name, args)
-                        resp_obj = {"output": res} if isinstance(res, dict) else {"result": res}
+                        # Dieselbe Huelle wie im Chat. Warum sie hier fehlte und
+                        # warum gerade hier am wenigsten: siehe
+                        # `werkzeugergebnis_umschlag`.
+                        resp_obj = werkzeugergebnis_umschlag(name, res)
                         responses.append({"name": name, "response": resp_obj, "id": call_id})
 
                     tool_response = {
@@ -524,13 +591,14 @@ class GeminiLiveSitzung:
                     except Exception:
                         pass
         except Exception as exc:
-            logger.warning("Gemini Live WebSocket Fehler im Lesestrom: %s", exc)
-            await self._debug_senden("GEMINI_LIVE_CLOSED", hint=str(exc))
+            grund = self._fremdtext(exc)
+            logger.warning("Gemini Live WebSocket Fehler im Lesestrom: %s", grund)
+            await self._debug_senden("GEMINI_LIVE_CLOSED", hint=grund)
             with contextlib.suppress(Exception):
                 await self._panel_senden({
                     "art": "fehler",
                     "code": "GEMINI_LIVE_CLOSED",
-                    "detail": str(exc),
+                    "detail": grund,
                 })
 
     def _build_setup_payload(
@@ -600,8 +668,6 @@ class GeminiLiveSitzung:
             await self._debug_senden("GEMINI_NOT_AVAILABLE", hint="websockets Paket fehlt")
             raise GeminiLiveSitzungsfehler("GEMINI_NOT_AVAILABLE")
 
-        from urllib.parse import quote_plus
-
         ai_meldestelle.realtime_sitzung_start(self.user_id)
         url = f"{GEMINI_LIVE_WS_BASE}?key={quote_plus(self.v.api_key)}"
         model_raw = (self.v.model or "").strip()
@@ -609,6 +675,13 @@ class GeminiLiveSitzung:
             logger.info("Kein gültiges Gemini-Live-Modell angegeben ('%s'), nutze gemini-2.0-flash", model_raw)
             model_raw = "gemini-2.0-flash"
         model_name = model_raw if model_raw.startswith("models/") else f"models/{model_raw}"
+        # Hier gehoert die Kleinschreibung hin und nicht nur in
+        # `_build_setup_payload`: die Werkzeugschleife unten fragt dieselbe
+        # Marke ab. Sie tat es bisher gegen einen Namen, den es in dieser
+        # Funktion gar nicht gibt — ein `NameError`, der **vor** dem `try`
+        # steht und damit jede Gemini-Live-Sitzung mit auch nur einem Werkzeug
+        # gekillt hat, bevor die erste Verbindung stand.
+        model_lower = model_raw.lower()
         voice_name = self.v.voice or "Puck"
 
         gemini_tools = []
@@ -683,10 +756,19 @@ class GeminiLiveSitzung:
         except WebSocketDisconnect:
             pass
         except Exception as exc:
-            logger.exception("Gemini Live Sitzung fehlgeschlagen: %s", exc)
+            # **Kein `logger.exception`.** Der Rueckverfolgungstext enthaelt die
+            # Aufrufzeile von `websockets.connect(url, …)` samt Adresse — und in
+            # der Adresse steht der Schluessel. Die Art der Ausnahme und die
+            # redigierte Meldung sagen dasselbe ueber die Ursache, ohne ihn.
+            grund = self._fremdtext(exc)
+            logger.warning(
+                "Gemini Live Sitzung fehlgeschlagen art=%s grund=%s",
+                type(exc).__name__,
+                grund,
+            )
             voice_debug("GEMINI_INTERNAL_ERROR", hint=type(exc).__name__)
             with contextlib.suppress(Exception):
-                await self._panel_senden({"art": "fehler", "code": "GEMINI_INTERNAL_ERROR", "detail": str(exc)})
+                await self._panel_senden({"art": "fehler", "code": "GEMINI_INTERNAL_ERROR", "detail": grund})
         finally:
             self._beendet = True
             for task in self._tool_tasks:

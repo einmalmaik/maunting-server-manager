@@ -105,6 +105,53 @@ def test_known_token_shapes_go_even_without_an_assignment() -> None:
         assert roh not in redact_sensitive_text(f"Im Log stand {roh} mittendrin")
 
 
+@pytest.mark.parametrize(
+    "roh",
+    [
+        # Jede Form wird aus Präfix und Rumpf zusammengesetzt, und die Rümpfe
+        # sind erkennbar erfunden. Das Repo ist öffentlich: eine vollständige
+        # Schlüsselform als durchgehendes Literal schlägt bei den Scannern der
+        # Anbieter an, und ein Testwert, der wie eine echte Marke aussieht,
+        # löst denselben Alarm aus wie eine echte. Geprüft wird hier die Form,
+        # nie ein konkreter Wert — das Zusammensetzen kostet den Test nichts.
+        #
+        # Google AI Studio / Gemini: 39 Zeichen, kein `sk-`, kein `_`. Keines
+        # der drei alten Muster (OpenAI, GitHub, AWS) griff, und `key` allein
+        # ist in `_GEHEIM_KERN` bewusst kein Geheimniswort — sonst wäre jedes
+        # `server_key` in einer Spielkonfiguration unlesbar.
+        "AIzaSy" + "B" * 33,
+        # Googles OAuth-Zugangsmarken, beide Prägungen.
+        "ya29." + "C" * 30,
+        "AQ." + "D" * 48,
+        # Slack-Webhook-Marke und ein JWT — dieselbe Klasse, dieselbe Behandlung.
+        "xoxb-" + "1234567890-abcdefghij",
+        "eyJ" + "hbGciOiJIUzI1NiJ9." + "eyJ" + "zdWIiOiJtc20tdGVzdCJ9." + "E" * 24,
+    ],
+)
+def test_fremde_schluesselformen_gehen_auch_ohne_zuweisung(roh: str) -> None:
+    """Der Anbieter, gegen den geprüft wurde, fehlte in der Musterliste.
+
+    Ein Google-Schlüssel steht praktisch nie hinter einem ``api_key=``, sondern
+    im Abfrageteil einer Adresse (``?key=…``) oder mitten in einer
+    Fehlermeldung — also genau dort, wo nur die Form ihn verrät.
+    """
+    assert roh not in redact_sensitive_text(f"Im Log stand {roh} mittendrin")
+    assert roh not in redact_sensitive_text(f"wss://host/ws?key={roh}&alt=sse")
+    assert enthaelt_zugangsdaten(f"merk dir {roh}")
+
+
+def test_harmlose_schluesselnamen_bleiben_lesbar() -> None:
+    """Die Gegenprobe zur erweiterten Musterliste.
+
+    Eine Denyliste, die zu weit greift, macht Werkzeugantworten unlesbar — und
+    das fällt erst auf, wenn ein Feature bricht. Diese fünf sind die Fälle, die
+    `ai_redaction` ausdrücklich stehen lassen will.
+    """
+    text = "Compass=N, bypass=true, server_key=oeffentlich, secretary=anna, skill_key=abc"
+    assert redact_sensitive_text(text) == text
+    assert not enthaelt_zugangsdaten(text)
+
+
 def test_a_private_key_block_goes_as_a_whole() -> None:
     text = "vorher\n-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n-----END RSA PRIVATE KEY-----\nnachher"
     ergebnis = redact_sensitive_text(text)
