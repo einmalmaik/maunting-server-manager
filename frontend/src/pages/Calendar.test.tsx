@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom'
 import * as client from '@/api/client'
 import i18n from '@/i18n'
 import { Calendar } from './Calendar'
+import { grundbestandZuruecksetzen } from '@/lib/offlineSync'
 
 vi.mock('@/api/client', () => ({
   api: vi.fn(),
@@ -163,6 +164,76 @@ describe('Calendar Page Component', () => {
 
     await waitFor(() => {
       expect(client.api).toHaveBeenCalledWith(expect.stringContaining('event_type=server'))
+    })
+  })
+
+  describe('Tageszuordnung: das Ende ist exklusiv', () => {
+    /** Ortszeit-Mitternacht des Tages `tag` im aktuellen Monat, als ISO. */
+    const mitternacht = (tag: number) => {
+      const jetzt = new Date()
+      return new Date(jetzt.getFullYear(), jetzt.getMonth(), tag, 0, 0, 0).toISOString()
+    }
+    const uhrzeit = (tag: number, stunde: number) => {
+      const jetzt = new Date()
+      return new Date(jetzt.getFullYear(), jetzt.getMonth(), tag, stunde, 0, 0).toISOString()
+    }
+
+    async function zeige(termin: Record<string, unknown>) {
+      grundbestandZuruecksetzen()
+      localStorage.clear()
+      vi.mocked(client.api).mockResolvedValue([
+        { id: 1, event_id: 'evt', recurrence: '{"rrule":null}', ...termin },
+      ] as any)
+      render(
+        <MemoryRouter>
+          <Calendar />
+        </MemoryRouter>,
+      )
+      await waitFor(() => {
+        expect(screen.getAllByText(String(termin.title)).length).toBeGreaterThan(0)
+      })
+      return screen.getAllByText(String(termin.title)).length
+    }
+
+    it('zeigt einen ganztaegigen Termin auf genau einem Tag', async () => {
+      // So speichert MSM einen eintaegigen ganztaegigen Termin, und so schreibt
+      // `export_ical` ihn als `DTEND;VALUE=DATE:` heraus: das Ende ist
+      // Mitternacht des Folgetags. Mit `evEnd >= dayStart` sass jeder
+      // Geburtstag auf zwei Tagen.
+      expect(
+        await zeige({
+          title: 'Geburtstag Ganztag',
+          start: mitternacht(14),
+          end: mitternacht(15),
+          all_day: true,
+        }),
+      ).toBe(1)
+    })
+
+    it('zaehlt einen Termin, der um Mitternacht endet, nicht zum Folgetag', async () => {
+      expect(
+        await zeige({ title: 'Spaete Wartung', start: uhrzeit(20, 23), end: mitternacht(21) }),
+      ).toBe(1)
+    })
+
+    it('zeigt einen mehrtaegigen Termin auf allen Tagen, die er wirklich belegt', async () => {
+      // 14. bis 17. Mitternacht sind drei Tage, nicht vier.
+      expect(
+        await zeige({
+          title: 'Mehrtaegige Wartung',
+          start: mitternacht(14),
+          end: mitternacht(17),
+          all_day: true,
+        }),
+      ).toBe(3)
+    })
+
+    it('zeigt einen punktuellen Termin ohne Dauer trotzdem', async () => {
+      // `end === start`: es gibt kein Ende, das nach dem Tagesbeginn liegen
+      // koennte. Ohne die Ausnahme verschwaende so ein Meilenstein ganz.
+      expect(
+        await zeige({ title: 'Meilenstein', start: uhrzeit(9, 14), end: uhrzeit(9, 14) }),
+      ).toBe(1)
     })
   })
 })

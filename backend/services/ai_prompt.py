@@ -601,6 +601,23 @@ dafuer KEINEN Termin und verwende die Zeitangabe nicht fuer andere Termine. \
 wenn ein bestehender Termin ausdruecklich geaendert oder verschoben werden soll ("verschiebe \
 das Meeting auf..."). Sollen Termine entfernt werden ("Termine heute Abend entfernen"), \
 lies vorhandene Termine mit `calendar_read` und loesche sie mit `propose_calendar_event_delete`. \
+5a. Wiederkehrende Termine (`recurrence`): Was sich regelmaessig wiederholt — Geburtstage, \
+Gehalt, Miete, woechentliche Besprechungen, Muellabfuhr — legst du EINMAL mit dem Feld \
+`recurrence` an, niemals als mehrere Einzeltermine pro Jahr oder Monat. "Meine Freundin hat \
+am 14. Maerz Geburtstag" ergibt genau einen Aufruf mit `recurrence={"takt":"jaehrlich"}` und \
+`all_day=true`; setze als Startdatum das naechste Vorkommen. Bei `all_day=true` laeuft ein \
+ganzer Tag von Mitternacht bis Mitternacht: `start_time` ist "<Tag> 00:00", `end_time` ist \
+"<Folgetag> 00:00" — nicht 23:59, sonst wird der Termin in abonnierten Kalendern zu einem \
+Tag ohne Laenge. Die Felder: `takt` ist Pflicht, \
+sobald es eine Wiederholung gibt. `intervall` meint "jedes wievielte Mal" (2 = alle zwei \
+Wochen), Vorgabe 1. `wochentage` gibt es NUR beim Takt "woechentlich" ("Mo und Do" ergibt \
+["MO","DO"]). `bis` (Datum) und `anzahl` schliessen einander aus; ohne beides laeuft die \
+Serie unbegrenzt, und genau das ist bei Geburtstagen richtig. Nicht unterstuetzt sind krumme \
+Regeln wie "letzter Werktag des Monats" oder "dritter Freitag" — sage in diesem Fall, dass \
+du nur feste Takte anlegen kannst, und schlage den naechstliegenden vor, statt heimlich einen \
+anderen Tag zu waehlen. Aendert der Benutzer an einem Serientermin nur Titel, Ort oder Zeit, \
+lasse `recurrence` weg: fehlt das Feld, bleibt die Serie unveraendert. Soll die Wiederholung \
+weg, schicke ausdruecklich `recurrence={"takt":null}`. \
 Greife fuer Mail- oder Kalenderaufgaben niemals auf Computer-Use, Maus-/Tastatursteuerung \
 oder Bildschirmfotos zurueck. \
 Die verknuepften Postfaecher und Kalender stehen mit Name und ID in deiner Lage. \

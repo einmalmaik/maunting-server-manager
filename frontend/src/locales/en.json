@@ -79,7 +79,45 @@
     "updated": "Event updated",
     "deleteConfirmTitle": "Delete event",
     "deleteConfirmMessage": "Do you really want to permanently delete this event from your calendar?",
-    "deleted": "Event deleted"
+    "deleted": "Event deleted",
+    "recurrence": {
+      "label": "Repeat",
+      "none": "Does not repeat",
+      "daily": "Daily",
+      "weekly": "Weekly",
+      "monthly": "Monthly",
+      "yearly": "Yearly",
+      "everyNth": "Every",
+      "unit": {
+        "DAILY": "days",
+        "WEEKLY": "weeks",
+        "MONTHLY": "months",
+        "YEARLY": "years"
+      },
+      "weekday": {
+        "MO": "Mo",
+        "TU": "Tu",
+        "WE": "We",
+        "TH": "Th",
+        "FR": "Fr",
+        "SA": "Sa",
+        "SU": "Su"
+      },
+      "endsLabel": "Ends",
+      "endsNever": "Never",
+      "endsOn": "On",
+      "endsAfter": "After",
+      "scopeLabel": "What should change?",
+      "scopeSingle": "This event only",
+      "scopeSeries": "Entire series",
+      "scopeSingleHint": "The change applies to this occurrence alone. All others stay as they are.",
+      "scopeSeriesHint": "The change applies to every occurrence of the series ({{regel}}).",
+      "deleteOccurrenceTitle": "Cancel this occurrence?",
+      "deleteOccurrenceMessage": "Only this single occurrence is removed. The series continues.",
+      "deleteSeriesMessage": "The event and all of its repetitions will be deleted.",
+      "occurrenceDeleted": "Occurrence cancelled",
+      "reminderHint": "Note: for recurring events you create here, reminders reach your devices only. The server cannot send a reminder e-mail — it cannot read the recurrence rule, which is encrypted on your device."
+    }
   },
   "pageContext": {
     "overview": "Overview",

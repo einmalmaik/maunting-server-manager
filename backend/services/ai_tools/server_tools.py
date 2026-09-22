@@ -56,6 +56,7 @@ from services.ai_tools.base import (
     MAX_LISTED_BLUEPRINTS,
     MAX_LISTED_NODES,
     MAX_LISTED_SERVERS,
+    MAX_KALENDER_VORKOMMEN,
     MAX_LISTED_POPUPS,
     MAX_POPUP_INHALT_CHARS,
     MAX_REASON_CHARS,
@@ -1918,10 +1919,37 @@ def _execute_global_read_tool(
         calendar_id = _positive_int(
             arguments.get("calendar_id"), name="calendar_id", default=0, minimum=1
         ) or None
-        events = CalendarService.get_events(
-            db, user=user, calendar_id=calendar_id, start_date=start_date, end_date=end_date
+        # Ausgebreitete Vorkommen, nicht Serienkoepfe: auf "was steht naechste
+        # Woche an" ist ein Geburtstag von 1995 die richtige Antwort, sein
+        # Ursprungsdatum nicht. Serien, deren Regel der Server nicht lesen kann
+        # (E2EE), erscheinen als einzelner Termin — dort steht ohnehin schon
+        # der Umschlag im Titel.
+        from datetime import timedelta as _zeitspanne
+
+        from services.calendar_service import _parse_datetime as _kalender_zeit
+
+        # Ohne Zeitraum braucht es trotzdem einen: eine Serie ohne Ende liefe
+        # sonst bis an die Schrittgrenze, und das Ergebnis ginge Runde fuer
+        # Runde als Kontext mit. Ein Jahr voraus und ein Monat zurueck ist das,
+        # was "was steht an" gewoehnlich meint.
+        jetzt = datetime.now(timezone.utc)
+        von = _kalender_zeit(start_date, user=user) if start_date else jetzt - _zeitspanne(days=30)
+        bis = _kalender_zeit(end_date, user=user) if end_date else jetzt + _zeitspanne(days=365)
+
+        events = CalendarService.vorkommen_im_fenster(
+            db, user=user, calendar_id=calendar_id, von=von, bis=bis
         )
-        return {"events": events, "count": len(events)}
+        gekuerzt = len(events) > MAX_KALENDER_VORKOMMEN
+        if gekuerzt:
+            events = events[:MAX_KALENDER_VORKOMMEN]
+        ergebnis: dict[str, Any] = {"events": events, "count": len(events)}
+        if gekuerzt:
+            ergebnis["gekuerzt"] = True
+            ergebnis["hinweis"] = (
+                f"Nur die ersten {MAX_KALENDER_VORKOMMEN} Vorkommen. "
+                "Fuer mehr einen engeren Zeitraum angeben."
+            )
+        return ergebnis
 
     if tool_name == "notes_read":
         if not permission_service.has_global_permission(db, user, "ai.notes.use"):

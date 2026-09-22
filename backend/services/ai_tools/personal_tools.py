@@ -23,6 +23,56 @@ logger = logging.getLogger(__name__)
 # Lokaler Zaehler fuer Test-E-Mails je Benutzer und Stunde
 _TESTMAILS: dict[int, list[float]] = {}
 
+# Wiederholung als **Feld** an den beiden bestehenden Terminwerkzeugen statt
+# als eigenes Werkzeug. Drei Gruende, in der Reihenfolge ihres Gewichts:
+#
+# 1. Ein Termin mit Wiederholung ist derselbe Vorgang mit einem Feld mehr,
+#    nicht eine zweite Handlung. Zwei Werkzeuge haetten das Modell vor eine
+#    Wahl gestellt, die es nicht zu treffen hat — und `propose_task_set` wie
+#    `propose_popup_set` machen es aus demselben Grund schon so.
+# 2. `propose_calendar_event_create` steht fest im Sprachweg
+#    (`realtime_session.realtime_static_extra` und `HOTSET`). Ein neues
+#    Werkzeug haette dort und bei Gemini Live einzeln nachgetragen werden
+#    muessen; eine Faehigkeit, die nur im Chatweg steht, fehlt im Sprachweg.
+# 3. Der Katalog geht in **jeder** Runde mit. Dieses Feld kostet rund 350
+#    Zeichen, ein eigenes Werkzeug rund 900 (test_ai_tool_handler_contract).
+#
+# Die Wochentage stehen deutsch im Schema, werden aber in beiden Sprachen
+# gelesen (`serie_aus_werkzeug`): MO, FR und SA meinen hier wie dort denselben
+# Tag, es gibt also nichts zu verwechseln.
+# Bewusst karg beschrieben. Beim Bau lag der Desktop-Katalog bei 91.908 von
+# 92.000 Zeichen — 92 Zeichen Luft, weil eine ausfuehrliche Fassung dieses
+# Schemas 1.664 Zeichen kostete (832 je Werkzeug, es steht an zweien).
+#
+# Was das Modell **wissen** muss, steht deshalb in `ai_prompt`: dass
+# Wiederkehrendes eine Wiederholung ist und nicht zwanzig Einzeltermine, dass
+# `wochentage` nur zum woechentlichen Takt gehoert, dass `bis` und `anzahl`
+# einander ausschliessen. Der Systemprompt wird zwischengespeichert, der
+# Katalog geht in **jeder** Runde ungecacht mit — dieselbe Auskunft ist dort
+# um ein Vielfaches billiger.
+#
+# Die Feldnamen tragen den Rest: `takt`, `intervall`, `wochentage`, `bis`,
+# `anzahl` sagen auf Deutsch, was sie meinen. Gelesen werden die Wochentage in
+# beiden Sprachen (`serie_aus_werkzeug`); MO, FR und SA meinen hier wie dort
+# denselben Tag.
+_WIEDERHOLUNG_SCHEMA = {
+    "type": "object",
+    "description": "Optionale Wiederholung. Ohne Angabe einmalig.",
+    "properties": {
+        "takt": {
+            "type": "string",
+            "enum": ["taeglich", "woechentlich", "monatlich", "jaehrlich"],
+        },
+        "intervall": {"type": "integer", "minimum": 1},
+        "wochentage": {
+            "type": "array",
+            "items": {"type": "string", "enum": ["MO", "DI", "MI", "DO", "FR", "SA", "SO"]},
+        },
+        "bis": {"type": "string", "description": "YYYY-MM-DD"},
+        "anzahl": {"type": "integer", "minimum": 1},
+    },
+}
+
 def _mailbox_and_calendar_tool_definitions() -> list[dict]:
     """E-Mail- und Kalender-Werkzeuge (Verknüpfte Postfächer und Kalender)."""
     return [
@@ -175,6 +225,7 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
                     "type": "string",
                     "description": "Optionale Farbe (z. B. blue, green, purple, amber, red, cyan).",
                 },
+                "recurrence": _WIEDERHOLUNG_SCHEMA,
                 **_RATIONALE_SCHEMA,
             },
             ["title", "start_time", "end_time", *_RATIONALE_REQUIRED],
@@ -235,6 +286,7 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
                     "type": "string",
                     "description": "Optionale Farbe.",
                 },
+                "recurrence": _WIEDERHOLUNG_SCHEMA,
                 **_RATIONALE_SCHEMA,
             },
             ["event_id", *_RATIONALE_REQUIRED],

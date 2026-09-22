@@ -75,6 +75,19 @@ const rawKeyMemoryStore = new Map<number, string>()
 const syncedInSession = new Set<number>()
 
 /**
+ * Die Kennung, unter der bis zum 22.09.2026 **jeder** Schlüssel landete.
+ *
+ * Der Schreibpfad in `offlineSync` reichte den `userId`-Parameter nicht durch,
+ * also griff hier der Vorgabewert 1 — unabhängig davon, wer angemeldet war.
+ * Der Lesepfad gab die echte Kennung mit und fand nichts. Für jedes Konto mit
+ * einer anderen Kennung als 1 blieb damit alles Chiffretext.
+ *
+ * Der Schreibfehler ist behoben. Was unter dieser Kennung liegt, muss aber
+ * weiter erreichbar bleiben, sonst wäre der gesamte Bestand verloren.
+ */
+const ALTSCHLUESSEL_KENNUNG = 1
+
+/**
  * Leert den In-Memory-Schlüsselcache (z. B. bei Session-Wipe oder Tests).
  */
 export function clearNotesKeyCache(): void {
@@ -185,6 +198,11 @@ export async function getOrCreateUserNotesKey(userId: number = 1): Promise<Crypt
     }
   }
 
+  // Hier wird der Altbestand unter der Kennung 1 **nicht** übernommen, obwohl
+  // er oft genau der gesuchte Schlüssel wäre. Er ist mehrdeutig: auf einem
+  // geteilten Gerät gehört er dem Konto 1, und eine Übernahme ohne Nachweis
+  // gäbe dem zweiten Konto den Schlüssel des ersten. Die Übernahme steht in
+  // `altschluesselUebernehmen` und verlangt einen Beleg.
   if (!rawBase64) {
     // 32 Bytes kryptographischer Zufall (256-Bit)
     const randomBytes = new Uint8Array(32)
@@ -257,6 +275,56 @@ export function exportUserNotesKey(userId: number = 1): string | null {
     }
   } catch {}
   return rawKeyMemoryStore.get(userId) ?? null
+}
+
+/**
+ * Liest den Altschlüssel (Kennung 1) — rein lokal, ohne Netz, ohne Erzeugung.
+ *
+ * Absichtlich getrennt von `getUserNotesKey`: dort hängt ein Mailbox-Abruf
+ * daran, und dort gilt die Zusage „ein Schlüssel gehört genau einem Konto".
+ * Diese Funktion bricht die Zusage nicht, sie reicht nur einen Kandidaten
+ * heraus. Wer ihn benutzt, muss selbst belegen, dass er ihm gehört — siehe
+ * `altschluesselUebernehmen`.
+ */
+export async function altschluessel(): Promise<CryptoKey | null> {
+  const zwischengespeichert = keyCache.get(ALTSCHLUESSEL_KENNUNG)
+  if (zwischengespeichert) return zwischengespeichert
+
+  const roh = exportUserNotesKey(ALTSCHLUESSEL_KENNUNG)
+  if (!roh) return null
+
+  try {
+    const schluessel = await importAesGcmRawKey(base64ToBytes(roh), ['encrypt', 'decrypt'])
+    keyCache.set(ALTSCHLUESSEL_KENNUNG, schluessel)
+    return schluessel
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Schreibt den Altschlüssel unter die echte Kennung um.
+ *
+ * Nur aufrufen, wenn erwiesen ist, dass er diesem Konto gehört — und der
+ * einzige brauchbare Beweis ist, dass er eine Zeile entschlüsselt, die der
+ * Server diesem Konto ausgeliefert hat. Ein Konto bekommt nur die eigenen
+ * Zeilen; was sich damit öffnen lässt, war nie fremd.
+ *
+ * Überschreibt nie einen vorhandenen Schlüssel: liegt unter der echten Kennung
+ * schon einer, ist er die Wahrheit und der Altbestand nur noch Geschichte.
+ */
+export async function altschluesselUebernehmen(userId: number): Promise<boolean> {
+  if (userId === ALTSCHLUESSEL_KENNUNG) return false
+  if (hasUserNotesKey(userId)) return false
+
+  const roh = exportUserNotesKey(ALTSCHLUESSEL_KENNUNG)
+  if (!roh) return false
+
+  // `setUserNotesKey` legt ab, cached, und meldet `msm:notes-key-updated` —
+  // daraufhin holt `redecryptPendingOfflineNotesAndCalendar` den Spiegel nach,
+  // der bis eben nur Chiffretext hielt.
+  await setUserNotesKey(userId, roh)
+  return true
 }
 
 /**
@@ -626,7 +694,7 @@ export async function decryptNoteContent(
 export async function encryptCalendarField(
   text: string | null | undefined,
   eventUid: string,
-  fieldName: 'title' | 'description' | 'location',
+  fieldName: 'title' | 'description' | 'location' | 'recurrence',
   key?: CryptoKey,
   userId?: number,
 ): Promise<string> {
@@ -642,7 +710,7 @@ export async function encryptCalendarField(
 export async function decryptCalendarField(
   ciphertext: string | null | undefined,
   eventUid: string,
-  fieldName: 'title' | 'description' | 'location',
+  fieldName: 'title' | 'description' | 'location' | 'recurrence',
   key?: CryptoKey,
   userId?: number,
 ): Promise<string> {

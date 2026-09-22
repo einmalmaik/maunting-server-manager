@@ -69,6 +69,11 @@ MAX_LISTED_POPUPS = 25
 # den Inhalt vollstaendig. Ohne die Marke wuerde ein gekuerzter Text als ganzer
 # zurueckgeschrieben, und der Rest des Pop-ups waere weg.
 MAX_POPUP_INHALT_CHARS = 8_000
+# Seit es Serientermine gibt, ist die Zahl der Vorkommen nicht mehr die Zahl
+# der Termine: "taeglich, ohne Ende" ergibt in einem Jahresfenster 365 Zeilen
+# aus einer einzigen Datenbankzeile. Gekuerzt wird deshalb — und wie beim
+# Pop-up-Inhalt **sichtbar**, damit die KI weiss, dass sie nicht alles hat.
+MAX_KALENDER_VORKOMMEN = 200
 
 _SERVER_ID_SCHEMA = {
     "server_id": {
