@@ -2157,26 +2157,24 @@ class SocialService:
         return member
 
     @classmethod
-    def create_group(
-        cls,
-        db: Session,
-        user: User,
-        name: str,
-        description: str | None = None,
-        avatar_url: str | None = None,
-    ) -> ChatGroup:
+    def create_group(cls, db: Session, user: User) -> ChatGroup:
+        """Legt eine Gruppe an — ohne Namen.
+
+        Bis Stufe 6 nahm diese Stelle einen Namen entgegen, prüfte seine Länge
+        und legte ihn ab. Sie tut nichts davon mehr: Name, Beschreibung und
+        Logo liegen im verschlüsselten Gruppenblock und in der
+        Einladungskarte, und dieser Server kennt sie nicht.
+
+        Was bleibt, ist das Gerüst, das er tragen muss und nur er tragen kann:
+        eine Kennung, ein Eigentümer, ein Einladungscode, eine erste
+        Mitgliedschaft.
+        """
         cls.assert_social_enabled(db)
-        clean_name = name.strip()
-        if not 2 <= len(clean_name) <= 64:
-            raise HTTPException(status_code=422, detail="Gruppenname muss zwischen 2 und 64 Zeichen lang sein.")
 
         import secrets
         invite_code = secrets.token_urlsafe(16)
 
         group = ChatGroup(
-            name=clean_name,
-            description=description.strip() if description else None,
-            avatar_url=avatar_url,
             invite_code=invite_code,
             owner_user_id=user.id,
             created_at=_now(),
@@ -2257,9 +2255,12 @@ class SocialService:
             offener_raum = GroupCallRoomRegistry.find_for_group(g.id)
             results.append({
                 "id": g.id,
-                "name": g.name,
-                "description": g.description,
-                "avatar_url": g.avatar_url,
+                # Seit Stufe 6 leer, und zwar an der Quelle: die Spalten sind
+                # geräumt, und niemand schreibt mehr hinein. Der Client setzt
+                # Name, Beschreibung und Logo aus dem verschlüsselten Block.
+                "name": None,
+                "description": None,
+                "avatar_url": None,
                 # Nur für die, die einladen dürfen. Der Code ist ein Geheimnis,
                 # das Zugang gewährt — er hat in der Antwort an ein Mitglied
                 # ohne dieses Recht nichts verloren.
@@ -2303,7 +2304,12 @@ class SocialService:
                 "live_call": offener_raum is not None,
             })
 
-        return sorted(results, key=lambda x: x["name"].casefold())
+        # Nach Alter, nicht nach Namen: seit 09/2026 kennt der Server keinen
+        # Namen mehr, nach dem er sortieren koennte. Die alphabetische Ordnung
+        # macht der Client, sobald er die Namen entschluesselt hat -- dort
+        # liegt das Wissen, und nur dort kann sie stimmen. `created_at` ist
+        # ohnehin Teil der Antwort und verraet damit nichts Neues.
+        return sorted(results, key=lambda x: (x["created_at"], x["id"]))
 
     @classmethod
     def get_group_by_invite_code(cls, db: Session, invite_code: str) -> ChatGroup:

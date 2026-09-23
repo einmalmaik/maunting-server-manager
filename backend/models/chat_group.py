@@ -22,7 +22,15 @@ class ChatGroup(Base):
     __tablename__ = "chat_groups"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    #: Leer, seit Stufe 6. Name, Beschreibung und Logo liegen im
+    #: verschlüsselten Gruppenblock und in der Einladungskarte — dieser Server
+    #: kennt sie nicht mehr.
+    #:
+    #: Die Spalten bleiben stehen und bleiben leer. Sie zu entfernen hiesse,
+    #: jede Altmigration und jeden Bestand anzufassen, der noch darauf zeigt;
+    #: geleert sind sie genauso still. `20260923_03` hat sie einmal geräumt,
+    #: und nichts schreibt mehr hinein.
+    name: Mapped[str | None] = mapped_column(String(64), nullable=True)
     description: Mapped[str | None] = mapped_column(String(256), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     invite_code: Mapped[str] = mapped_column(

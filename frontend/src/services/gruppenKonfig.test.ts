@@ -310,6 +310,85 @@ describe('gruppenKonfig', () => {
   })
 
   it('beginnt leer', () => {
-    expect(leererGruppenzustand()).toEqual({ v: KONFIG_FORMAT, rollen: [], zuordnung: {} })
+    expect(leererGruppenzustand()).toEqual({
+      v: KONFIG_FORMAT,
+      name: null,
+      beschreibung: null,
+      logo: null,
+      rollen: [],
+      zuordnung: {},
+    })
+  })
+
+  // ── Name, Beschreibung und Logo ──────────────────────────────────────────
+  //
+  // Seit Stufe 6 stehen sie in diesem Block, weil `chat_groups.name` geräumt
+  // ist. Sie reisen damit denselben Weg wie die Rollen — aber sie werden
+  // anders gelesen: nachsichtig statt streng. Ein unbrauchbares Logo kostet
+  // ein Bild, eine unbrauchbare Rechtetabelle kostet die Gruppe.
+
+  it('trägt Name, Beschreibung und Logo durch', async () => {
+    const LOGO = 'data:image/png;base64,iVBORw0KGgo='
+    await schreibeGruppenzustand(
+      KONTEXT,
+      { ...zustand([AUFSICHT]), name: 'Küchenplanung', beschreibung: 'Wer bringt was', logo: LOGO },
+      0,
+    )
+
+    const gelesen = await ladeGruppenzustand(KONTEXT, NUR_ANNA)
+
+    expect(gelesen.art).toBe('zustand')
+    if (gelesen.art !== 'zustand') return
+    expect(gelesen.zustand.name).toBe('Küchenplanung')
+    expect(gelesen.zustand.beschreibung).toBe('Wer bringt was')
+    expect(gelesen.zustand.logo).toBe(LOGO)
+    // Und die Rollen daneben bleiben, was sie waren.
+    expect(gelesen.zustand.rollen).toEqual([AUFSICHT])
+  })
+
+  it('wirft einen Block nicht weg, nur weil der Name unbrauchbar ist', async () => {
+    /*
+     * Der Unterschied zu den Rollen, und er ist Absicht. Ein Block mit
+     * kaputter Rechtetabelle ist unbrauchbar und wird verworfen — sonst
+     * entschiede ein Angreifer per Formfehler über die Rechte. Ein kaputter
+     * Name ist eine fehlende Überschrift. Den ganzen Block deswegen
+     * wegzuwerfen, nähme der Gruppe ihre Rollen mit.
+     */
+    const beglaubigt = await signiereNutzlast(MAILBOX, ANNA, {
+      v: KONFIG_FORMAT,
+      name: 42,
+      beschreibung: { boeses: 'objekt' },
+      logo: 'data:text/html,<script>',
+      rollen: [AUFSICHT],
+      zuordnung: { custom_1: [BERT] },
+    })
+    legeAb(beglaubigt)
+
+    const gelesen = await ladeGruppenzustand(KONTEXT, NUR_ANNA)
+
+    expect(gelesen.art).toBe('zustand')
+    if (gelesen.art !== 'zustand') return
+    expect(gelesen.zustand.name).toBeNull()
+    expect(gelesen.zustand.beschreibung).toBeNull()
+    expect(gelesen.zustand.logo).toBeNull()
+    expect(gelesen.zustand.rollen).toEqual([AUFSICHT])
+  })
+
+  it('kürzt einen überlangen Namen, statt ihn zu übernehmen', async () => {
+    const beglaubigt = await signiereNutzlast(MAILBOX, ANNA, {
+      v: KONFIG_FORMAT,
+      name: 'x'.repeat(500),
+      beschreibung: 'y'.repeat(1000),
+      rollen: [],
+      zuordnung: {},
+    })
+    legeAb(beglaubigt)
+
+    const gelesen = await ladeGruppenzustand(KONTEXT, NUR_ANNA)
+
+    expect(gelesen.art).toBe('zustand')
+    if (gelesen.art !== 'zustand') return
+    expect(gelesen.zustand.name).toHaveLength(64)
+    expect(gelesen.zustand.beschreibung).toHaveLength(256)
   })
 })

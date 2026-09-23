@@ -289,7 +289,17 @@ export interface ChatGroupMemberItem {
 
 export interface ChatGroupItem {
   id: number
-  name: string
+  /**
+   * `null`, solange dieses Gerät den Namen nicht kennt.
+   *
+   * Der Server liefert hier seit Stufe 6 **immer** `null` — er kennt den Namen
+   * einer Gruppe nicht mehr. Gefüllt wird das Feld im Client aus dem
+   * versiegelten Namensspeicher und dem verschlüsselten Gruppenblock
+   * (`gruppenName.ts`). Dass der Typ das zulässt, ist Absicht: ein
+   * `name: string` wäre eine Zusage, die niemand mehr einhält, und jede
+   * Anzeige führe blind auf einen leeren String.
+   */
+  name: string | null
   description?: string | null
   avatar_url?: string | null
   /**
@@ -594,14 +604,18 @@ export async function getGroups(): Promise<ChatGroupItem[]> {
   return api<ChatGroupItem[]>('/social/groups')
 }
 
-export async function createGroup(payload: {
-  name: string
-  description?: string
-  avatar_url?: string
-}): Promise<ChatGroupItem> {
+/**
+ * Legt eine Gruppe an — ohne ihr einen Namen mitzugeben.
+ *
+ * Seit Stufe 6 hat der Aufruf keine Nutzlast mehr: Name, Beschreibung und Logo
+ * gehen den Server nichts an. Er vergibt eine Kennung und einen Einladungscode,
+ * alles Weitere schreibt der Client anschliessend in den verschlüsselten
+ * Gruppenblock (`sichereGruppenAnsicht`).
+ */
+export async function createGroup(): Promise<ChatGroupItem> {
   return api<ChatGroupItem>('/social/groups', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({}),
   })
 }
 
@@ -714,19 +728,15 @@ export async function putGroupConfig(
   })
 }
 
-/** Gruppenlogo setzen. Nur Besitzer und Admins der Gruppe dürfen das. */
-export async function uploadGroupAvatar(groupId: number, file: File): Promise<ChatGroupItem> {
-  const formular = new FormData()
-  formular.append('file', file)
-  return api<ChatGroupItem>(`/social/groups/${groupId}/avatar`, {
-    method: 'POST',
-    body: formular,
-  })
-}
-
-export async function deleteGroupAvatar(groupId: number): Promise<ChatGroupItem> {
-  return api<ChatGroupItem>(`/social/groups/${groupId}/avatar`, { method: 'DELETE' })
-}
+/*
+ * `uploadGroupAvatar` und `deleteGroupAvatar` gibt es seit Stufe 6 nicht mehr.
+ *
+ * Ein Gruppenlogo auf der Platte des Servers ist eine Datei, die unter einer
+ * rate-URL jedem offensteht, und ein Bild sagt über eine Gruppe oft mehr als
+ * ihr Name. Das Logo lebt jetzt als Data-URL im verschlüsselten Gruppenblock;
+ * gesetzt wird es über `sichereGruppenAnsicht` in `services/gruppenName.ts`.
+ * Die Routen `POST/DELETE /social/groups/{id}/avatar` sind entfernt.
+ */
 
 export interface ChatStoryItem {
   id: number

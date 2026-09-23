@@ -51,7 +51,17 @@ export interface GruppenEinladungsKarteProps {
   schluessel?: string | null
   /** Eigene Nachricht: dann wird die Karte etwas dezenter gezeichnet. */
   istEigene?: boolean
-  onJoin: (inviteCode: string) => void | Promise<void>
+  /**
+   * Der Beitritt — und mit ihm der geöffnete Karteninhalt.
+   *
+   * Der Inhalt reist mit, weil die Karte die **einzige** Stelle ist, an der
+   * der Name einer fremden Gruppe vor dem Beitritt bekannt ist: der Server
+   * kennt ihn seit Stufe 6 nicht, und der verschlüsselte Gruppenblock ist
+   * ohne Gruppengeheimnis verschlossen, das es erst nach dem Beitritt gibt.
+   * Wird er hier fallen gelassen, heisst die frisch betretene Gruppe für
+   * immer „Verschlüsselte Gruppe".
+   */
+  onJoin: (inviteCode: string, karte?: EinladungsInhalt | null) => void | Promise<void>
 }
 
 export const GruppenEinladungsKarte: React.FC<GruppenEinladungsKarteProps> = ({
@@ -121,10 +131,10 @@ export const GruppenEinladungsKarte: React.FC<GruppenEinladungsKarteProps> = ({
    * Zwei Quellen, eine Anzeige — und der Vorrang ist nicht beliebig.
    *
    * Die entschlüsselte Karte gewinnt immer. Sie kommt von einem Mitglied und
-   * ist an diesen Einladungscode gebunden; der Klartext daneben kommt aus
-   * Spalten, die der Server kennt und die in Stufe 6 verschwinden. Wäre es
-   * umgekehrt, zeigte die Karte bis dahin weiter den Serverstand und niemandem
-   * fiele auf, dass die Verschlüsselung nichts bewirkt.
+   * ist an diesen Einladungscode gebunden; der Klartext daneben kam aus
+   * Spalten, die der Server kannte. Seit Stufe 6 sind die geräumt und `info`
+   * liefert dort überall `null` — der Zweig bleibt trotzdem stehen, weil ein
+   * Panel, das noch nicht migriert ist, weiter Werte schickt.
    *
    * Das Logo: aus der Karte als Data-URL, im Altweg als Adresse. Eine Adresse
    * heisst, dass der Server das Bild ausliefert — und damit mitbekommt, wer
@@ -178,7 +188,7 @@ export const GruppenEinladungsKarte: React.FC<GruppenEinladungsKarteProps> = ({
           onClick={async () => {
             setTritt(true)
             try {
-              await onJoin(inviteCode)
+              await onJoin(inviteCode, karte)
             } finally {
               setTritt(false)
             }

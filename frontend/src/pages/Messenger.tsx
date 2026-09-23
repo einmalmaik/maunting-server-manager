@@ -104,7 +104,7 @@ import {
   relayE2eeEnvelope,
   sendTypingSignal,
   ladeAnhangHoch,
-  uploadGroupAvatar,
+  getGroupInviteInfo,
   setzeEinladungsKarte,
 } from '@/api/social'
 import { maxAnhangBytes } from '@/services/medienKrypto'
@@ -155,9 +155,18 @@ import {
 import {
   baueEinladungsKarte,
   einladungsschluesselAus,
-  gruppenLogoAlsDatenUrl,
+  lieseEinladungsKarte,
+  logoAlsDatenUrl,
   mitSchluessel,
+  schluesselAusLink,
+  type EinladungsInhalt,
 } from '@/services/einladungsKarte'
+import {
+  benenneGruppen,
+  merkeGruppenName,
+  sichereGruppenAnsicht,
+  vergissGruppenName,
+} from '@/services/gruppenName'
 import { ladeGruppenzustand, type Gruppenzustand } from '@/services/gruppenKonfig'
 import { wirksameGruppenrechte } from '@/services/gruppenRollen'
 import {
@@ -445,6 +454,22 @@ function loadInitialContactsCache(): {
 
 export function Messenger() {
   const { t, i18n } = useTranslation()
+
+  /**
+   * Wie eine Gruppe in der Oberfläche heisst.
+   *
+   * Seit Stufe 6 liefert der Server für `name` überall `null` — er kennt den
+   * Namen nicht mehr. `benenneGruppen` setzt ihn aus dem versiegelten örtlichen
+   * Speicher und aus dem verschlüsselten Gruppenblock wieder ein; bleibt er
+   * trotzdem leer, ist der Schlüssel noch nicht da (frisches Gerät, verschlossener
+   * Messenger). Dann steht hier eine ehrliche Überschrift statt eines leeren
+   * Platzes — dieselbe Linie wie `social.invite.sealed` bei der Einladungskarte.
+   */
+  const gruppenTitel = useCallback(
+    (g: { name?: string | null } | null | undefined): string =>
+      g?.name?.trim() || t('messenger.groupSealed'),
+    [t],
+  )
 
   const { user } = useAuthStore()
   // Der Sperrzustand wird ganz oben gelesen, damit kein Effekt darunter auf
@@ -1021,7 +1046,10 @@ export function Messenger() {
         getDirectChats().catch(() => []),
       ])
       setFriends(friendsData)
-      setGroups(groupsData)
+      // Der Server liefert für Gruppen seit Stufe 6 keinen Namen mehr. Diese
+      // eine Zeile setzt ihn aus dem versiegelten örtlichen Speicher wieder
+      // ein — bewusst hier an der Liste und nicht an jeder Anzeige einzeln.
+      setGroups(await benenneGruppen(groupsData).catch(() => groupsData))
       setStories(storiesData)
       setPublicUsers(publicData)
       setDirectChats(directChatsData)
@@ -1055,6 +1083,11 @@ export function Messenger() {
           CONTACTS_CACHE_KEY,
           JSON.stringify({
             friends: friendsData,
+            // Bewusst `groupsData` und nicht die benannte Liste: dieser Cache
+            // liegt offen in `localStorage`. Ein Gruppenname darin wäre genau
+            // die Zeile, die Stufe 6 aus der Datenbank entfernt hat, nur auf
+            // einer anderen Platte. Die Namen stehen versiegelt in
+            // `msm:gruppennamen` und kommen beim nächsten `benenneGruppen`.
             groups: groupsData,
             teamMembers: membersList,
             publicUsers: publicData,
@@ -1078,22 +1111,42 @@ export function Messenger() {
     toast.success(t('messenger.storyDeleted'))
   }
 
+  // `messengerGesperrt` in den Abhängigkeiten, damit das Entsperren sofort neu
+  // lädt: die Gruppennamen liegen versiegelt und sind vorher nicht zu haben.
+  // Ohne das stünde bis zum nächsten Takt — bis zu 15 Sekunden — überall
+  // „Verschlüsselte Gruppe", obwohl die PIN längst eingegeben ist.
   useEffect(() => {
     loadData()
     const interval = setInterval(loadData, 15000)
     return () => clearInterval(interval)
-  }, [currentUserId])
+  }, [currentUserId, messengerGesperrt])
 
   // 3. Handle public invite link join if inviteCode param is present
   useEffect(() => {
     if (!inviteCode || !currentUserId) return
     let active = true
 
+    /*
+     * Der Schlüssel steht in `location.hash` und wird hier gelesen, bevor das
+     * `navigate` weiter unten ihn wegräumt. Er kam nie beim Server an — der
+     * Browser schickt nichts hinter der Raute —, und genau deshalb ist er die
+     * einzige Stelle, an der der Name dieser Gruppe zu holen ist.
+     */
+    const schluessel = schluesselAusLink(window.location.hash)
+
     joinGroupByInvite(inviteCode)
-      .then((joinedGroup) => {
+      .then(async (joinedGroup) => {
         if (!active) return
-        toast.success(t('messenger.groupJoined', { name: joinedGroup.name }))
-        setActiveGroup(joinedGroup)
+        let karte: EinladungsInhalt | null = null
+        if (schluessel) {
+          karte = await getGroupInviteInfo(inviteCode)
+            .then((daten) => lieseEinladungsKarte(daten.invite_card, schluessel, inviteCode))
+            .catch(() => null)
+        }
+        const benannt = await uebernimmEinladung(joinedGroup, karte)
+        if (!active) return
+        toast.success(t('messenger.groupJoined', { name: gruppenTitel(benannt) }))
+        setActiveGroup(benannt)
         setActiveContact(null)
         loadData()
         navigate('/chat', { replace: true })
@@ -1108,14 +1161,55 @@ export function Messenger() {
     }
   }, [inviteCode, currentUserId, navigate])
 
-  /** Gruppenlogo: Auswahl, Prüfung, Upload. */
+  /**
+   * Übernimmt Name, Beschreibung und Logo einer Einladungskarte in den
+   * versiegelten örtlichen Speicher und gibt die so benannte Gruppe zurück.
+   *
+   * Ohne Karte passiert nichts weiter — die Gruppe heisst dann bis zur ersten
+   * Nachricht „Verschlüsselte Gruppe", und das ist ehrlicher als ein Name, den
+   * der Server geraten hätte.
+   *
+   * Nicht in den Gruppenblock geschrieben: wer gerade beitritt, hat das
+   * Gruppengeheimnis noch nicht, und ein neu gebauter Block überschriebe den
+   * bestehenden samt Rollen. Der Block bleibt Sache der Mitglieder.
+   */
+  const uebernimmEinladung = async (
+    gruppe: ChatGroupItem,
+    karte?: EinladungsInhalt | null,
+  ): Promise<ChatGroupItem> => {
+    if (!karte) return gruppe
+    await merkeGruppenName(gruppe.id, {
+      name: karte.name,
+      beschreibung: karte.beschreibung,
+      logo: karte.logo,
+    }).catch(() => {})
+    return {
+      ...gruppe,
+      name: gruppe.name ?? karte.name ?? null,
+      description: gruppe.description ?? karte.beschreibung ?? null,
+      avatar_url: gruppe.avatar_url ?? karte.logo ?? null,
+    }
+  }
+
+  /** Gruppenlogo: Auswahl, Prüfung, Ablage im verschlüsselten Gruppenblock. */
   const gruppenLogoInputRef = useRef<HTMLInputElement | null>(null)
   const [logoLaedt, setLogoLaedt] = useState(false)
 
+  /*
+   * Das Logo geht nicht mehr auf die Platte des Servers.
+   *
+   * Bis Stufe 6 lud `POST /social/groups/{id}/avatar` die Datei hoch und der
+   * Server lieferte sie unter einer rate-URL an jeden aus, der sie kannte —
+   * ohne Anmeldung. Ein Bild sagt über eine Gruppe oft mehr als ihr Name.
+   *
+   * Jetzt schrumpft `logoAlsDatenUrl` das Bild auf 128 Pixel und macht eine
+   * Data-URL daraus; die landet im verschlüsselten Gruppenblock und im
+   * versiegelten örtlichen Speicher. Der Grössenriegel darunter ist damit kein
+   * Upload-Limit mehr, sondern der Schutz davor, ein 5-MB-Bild überhaupt erst
+   * zu dekodieren.
+   */
   const handleGruppenLogo = async (datei: File | undefined) => {
-    if (!datei || !activeGroup) return
-    // Vorabprüfung nur für die Rückmeldung; die verbindliche Prüfung samt
-    // Magic Bytes macht das Backend.
+    if (!datei || !activeGroup || !currentUserId) return
     if (!/^image\/(jpeg|png|webp|gif)$/.test(datei.type)) {
       toast.error(t('messenger.logoBadType'))
       return
@@ -1126,14 +1220,33 @@ export function Messenger() {
     }
     setLogoLaedt(true)
     try {
-      const aktualisiert = await uploadGroupAvatar(activeGroup.id, datei)
+      const logo = await logoAlsDatenUrl(datei)
+      if (!logo) {
+        toast.error(t('messenger.logoFailed'))
+        return
+      }
+      const gruppenId = activeGroup.id
+      const mailbox = await deriveGroupBlindMailboxId(gruppenId)
+      const gespeichert = await sichereGruppenAnsicht(
+        {
+          groupId: gruppenId,
+          blindMailboxId: mailbox,
+          eigeneId: currentUserId,
+          mitglieder: (activeGroup.members ?? []).map((m) => m.user_id),
+          istEigentuemer: activeGroup.role === 'owner',
+        },
+        { logo },
+      )
+      // Anzeigen auch dann, wenn der Block nicht zu schreiben war: der
+      // örtliche Speicher hat das Logo (`sichereGruppenAnsicht` merkt es
+      // immer), und dieses Gerät zeigt es ab jetzt.
       setActiveGroup((aktuell) =>
-        aktuell?.id === aktualisiert.id ? { ...aktuell, avatar_url: aktualisiert.avatar_url } : aktuell
+        aktuell?.id === gruppenId ? { ...aktuell, avatar_url: logo } : aktuell,
       )
       setGroups((vorher) =>
-        vorher.map((g) => (g.id === aktualisiert.id ? { ...g, avatar_url: aktualisiert.avatar_url } : g))
+        vorher.map((g) => (g.id === gruppenId ? { ...g, avatar_url: logo } : g)),
       )
-      toast.success(t('messenger.logoUpdated'))
+      toast.success(gespeichert ? t('messenger.logoUpdated') : t('messenger.logoLocalOnly'))
     } catch {
       toast.error(t('messenger.logoFailed'))
     } finally {
@@ -1141,12 +1254,20 @@ export function Messenger() {
     }
   }
 
-  /** Beitritt über die Einladungskarte im Chat. */
-  const handleJoinByInviteCode = async (code: string) => {
+  /**
+   * Beitritt über die Einladungskarte im Chat.
+   *
+   * `karte` ist der bereits geöffnete Inhalt der Vorschau. Er ist die einzige
+   * Quelle für den Namen: der Server kennt ihn nicht, und den verschlüsselten
+   * Gruppenblock kann dieses Gerät erst lesen, wenn es das Gruppengeheimnis
+   * hat — das kommt mit der ersten Nachricht, nicht mit dem Beitritt.
+   */
+  const handleJoinByInviteCode = async (code: string, karte?: EinladungsInhalt | null) => {
     try {
       const joinedGroup = await joinGroupByInvite(code)
-      toast.success(t('messenger.groupJoined', { name: joinedGroup.name }))
-      setActiveGroup(joinedGroup)
+      const benannt = await uebernimmEinladung(joinedGroup, karte)
+      toast.success(t('messenger.groupJoined', { name: gruppenTitel(benannt) }))
+      setActiveGroup(benannt)
       setActiveContact(null)
       await loadData()
     } catch {
@@ -1283,7 +1404,7 @@ export function Messenger() {
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase()
         return (
-          g.name.toLowerCase().includes(q) ||
+          gruppenTitel(g).toLowerCase().includes(q) ||
           (g.description && g.description.toLowerCase().includes(q))
         )
       }
@@ -1379,7 +1500,7 @@ export function Messenger() {
         if (!active) return
         setGroupMailboxMap((prev) => (prev[g.id] === mid ? prev : { ...prev, [g.id]: mid }))
         store.registerMailbox(mid, {
-          name: g.name,
+          name: gruppenTitel(g),
           avatarUrl: g.avatar_url,
           isGroup: true,
           groupId: g.id,
@@ -2756,7 +2877,7 @@ export function Messenger() {
     const ziele: (Weiterleitungsziel & { avatarUrl?: string | null; istGruppe?: boolean })[] = []
     for (const g of groups) {
       const mid = groupMailboxMap[g.id]
-      if (mid) ziele.push({ blindMailboxId: mid, groupId: g.id, name: g.name, istGruppe: true })
+      if (mid) ziele.push({ blindMailboxId: mid, groupId: g.id, name: gruppenTitel(g), istGruppe: true })
     }
     for (const c of contactsList) {
       const mid = contactMailboxMap[c.userId]
@@ -2866,6 +2987,32 @@ export function Messenger() {
       .then((lesung) => {
         if (abgebrochen) return
         setGruppenRollenZustand(lesung.art === 'zustand' ? lesung.zustand : null)
+        /*
+         * Derselbe Block trägt den Namen. Er hier mitzunehmen kostet keinen
+         * zweiten Abruf — und das ist der Weg, auf dem ein frisch
+         * eingerichtetes Gerät überhaupt erfährt, wie die Gruppe heisst: sein
+         * örtlicher Speicher ist leer, und der Server weiss es nicht mehr.
+         *
+         * Das Ergebnis wandert bewusst nicht direkt in `setGroups`: die Liste
+         * holt es beim nächsten `loadData` über `benenneGruppen`, und damit
+         * gibt es weiterhin genau eine Stelle, an der Gruppen benannt werden.
+         */
+        if (lesung.art === 'zustand') {
+          const ansicht = {
+            name: lesung.zustand.name,
+            beschreibung: lesung.zustand.beschreibung,
+            logo: lesung.zustand.logo,
+          }
+          // `loadData` nur, wenn der Block etwas weiss, das die Liste noch
+          // nicht zeigt. Sonst löste jedes Öffnen einer Gruppe einen vollen
+          // Abruf aus, und zwar genau auf den Geräten, die ihn nicht brauchen.
+          const neu = Boolean(ansicht.name) && ansicht.name !== (activeGroup.name ?? null)
+          void merkeGruppenName(activeGroup.id, ansicht)
+            .then(() => {
+              if (!abgebrochen && neu) void loadData()
+            })
+            .catch(() => {})
+        }
       })
       .catch(() => {
         if (!abgebrochen) setGruppenRollenZustand(null)
@@ -2886,9 +3033,16 @@ export function Messenger() {
    * entzogenes Schreibrecht wirkte erst, wenn der Betroffene den Chat von
    * Hand neu öffnete, und ein frisch vergebenes ebenso wenig.
    *
-   * Verglichen wird nur, was Rechte trägt. Raumzeichen und Anrufzustand
-   * ändern sich im Sekundentakt; darauf zu reagieren hiesse, die Ansicht
-   * ständig neu zu setzen, ohne dass sich etwas geändert hätte.
+   * Verglichen wird, was Rechte trägt — und seit Stufe 6 auch Name,
+   * Beschreibung und Logo. Die kommen jetzt aus dem verschlüsselten
+   * Gruppenblock und treffen daher **nach** dem Öffnen ein: auf einem frisch
+   * eingerichteten Gerät stünde sonst für immer „Verschlüsselte Gruppe" über
+   * einem Chat, dessen Name längst in der Liste daneben steht. Sie ändern sich
+   * selten genug, um das Vergleichen nicht teuer zu machen.
+   *
+   * Raumzeichen und Anrufzustand bleiben draussen; die ändern sich im
+   * Sekundentakt, und darauf zu reagieren hiesse, die Ansicht ständig neu zu
+   * setzen, ohne dass sich etwas geändert hätte.
    */
   useEffect(() => {
     if (!activeGroup) return
@@ -2902,6 +3056,9 @@ export function Messenger() {
         g.owner_user_id,
         g.can_pin_messages ?? null,
         g.can_mention_everyone ?? null,
+        g.name ?? null,
+        g.description ?? null,
+        g.avatar_url ?? null,
         (g.members ?? []).map((m) => [m.user_id, m.role, m.permissions ?? null]),
       ])
     if (rechtekennung(frisch) !== rechtekennung(activeGroup)) setActiveGroup(frisch)
@@ -4520,11 +4677,44 @@ export function Messenger() {
     if (!groupName.trim()) return
     setCreatingGroup(true)
     try {
-      const newGroup = await createGroup({
-        name: groupName.trim(),
-        description: groupDesc.trim() || undefined,
-      })
-      toast.success(t('messenger.groupCreated', { name: newGroup.name }))
+      const name = groupName.trim()
+      const beschreibung = groupDesc.trim() || null
+      // Der Server bekommt nur die Bitte, eine Gruppe anzulegen. Name und
+      // Beschreibung gehen ihn nichts an.
+      const roh = await createGroup()
+
+      /*
+       * Der Name geht zwei Wege, und beide braucht es.
+       *
+       * `merkeGruppenName` schreibt ihn sofort in den versiegelten örtlichen
+       * Speicher — damit steht er in der Liste, bevor irgendein Netzaufruf
+       * zurück ist. `sichereGruppenAnsicht` legt ihn zusätzlich in den
+       * verschlüsselten Gruppenblock, damit ihn auch das nächste Gerät
+       * bekommt.
+       *
+       * Der Block kann hier noch scheitern: eine frisch angelegte Gruppe hat
+       * oft noch kein Geheimnis, das entsteht erst beim ersten Senden. Das ist
+       * kein Grund, das Anlegen abzubrechen — der örtliche Speicher trägt den
+       * Namen, und `sichereGruppenAnsicht` läuft beim nächsten Umbenennen
+       * erneut.
+       */
+      await merkeGruppenName(roh.id, { name, beschreibung }).catch(() => {})
+      const mailbox = await deriveGroupBlindMailboxId(roh.id).catch(() => null)
+      if (mailbox && currentUserId) {
+        void sichereGruppenAnsicht(
+          {
+            groupId: roh.id,
+            blindMailboxId: mailbox,
+            eigeneId: currentUserId,
+            mitglieder: [currentUserId],
+            istEigentuemer: true,
+          },
+          { name, beschreibung },
+        ).catch(() => false)
+      }
+
+      const newGroup: ChatGroupItem = { ...roh, name, description: beschreibung }
+      toast.success(t('messenger.groupCreated', { name }))
       setIsCreateGroupOpen(false)
       setGroupName('')
       setGroupDesc('')
@@ -4562,9 +4752,10 @@ export function Messenger() {
      * vorgestern. Zweitens hat die Gruppe beim Anlegen oft noch gar kein
      * Geheimnis: das entsteht, wenn der Eigentümer zum ersten Mal sendet.
      *
-     * Ohne Geheimnis bleibt der Link, was er war — ohne Raute, mit
-     * Klartextvorschau aus der Datenbank. Das ist der Altweg, und er stirbt
-     * mit den Spalten in Stufe 6.
+     * Ohne Geheimnis bleibt der Link, was er war — ohne Raute und ohne
+     * Vorschau. Seit Stufe 6 gibt es keinen Klartext mehr, auf den er dafür
+     * zurückfallen könnte; der Eingeladene sieht dann „Verschlüsselte
+     * Einladung" und die Mitgliederzahl, sonst nichts.
      */
     let fertig = url
     try {
@@ -4573,7 +4764,14 @@ export function Messenger() {
         const karte = await baueEinladungsKarte(geheimnis, group.invite_code, {
           name: group.name,
           beschreibung: group.description ?? null,
-          logo: await gruppenLogoAlsDatenUrl(group.avatar_url),
+          // `avatar_url` trägt seit Stufe 6 bereits die Data-URL aus dem
+          // Gruppenblock — nichts mehr nachzuladen. Der Prüfausdruck fängt
+          // Altbestände ab, die noch eine Serveradresse enthalten: die wäre
+          // für den Eingeladenen ohnehin nicht abrufbar.
+          logo:
+            group.avatar_url && group.avatar_url.startsWith('data:image/')
+              ? group.avatar_url
+              : null,
         })
         await setzeEinladungsKarte(group.id, karte)
         fertig = mitSchluessel(url, await einladungsschluesselAus(geheimnis))
@@ -4590,12 +4788,16 @@ export function Messenger() {
   // Leave Group
   const handleLeaveGroup = async (group: ChatGroupItem) => {
     try {
+      const name = gruppenTitel(group)
       await leaveGroup(group.id)
       // Wer draußen ist, braucht die Schlüssel nicht mehr — und soll sie auch
       // nicht behalten. Der Verlauf dieser Gruppe wird damit unlesbar, was
       // genau die Zusage ist, die ein Austritt geben soll.
       await verwirfGruppenSchluessel(group.id).catch(() => {})
-      toast.success(t('messenger.groupLeft', { name: group.name }))
+      // Und den Namen dazu: er lag versiegelt auf diesem Gerät, aber er lag
+      // da. Ein Austritt, der die Überschrift stehen lässt, ist keiner.
+      await vergissGruppenName(group.id).catch(() => {})
+      toast.success(t('messenger.groupLeft', { name }))
       setActiveGroup(null)
       await loadData()
     } catch {
@@ -4612,9 +4814,11 @@ export function Messenger() {
     if (!groupToDelete) return
     setIsDeletingGroup(true)
     try {
+      const name = gruppenTitel(groupToDelete)
       await deleteGroup(groupToDelete.id)
       await verwirfGruppenSchluessel(groupToDelete.id).catch(() => {})
-      toast.success(t('messenger.groupDeleted', { name: groupToDelete.name }))
+      await vergissGruppenName(groupToDelete.id).catch(() => {})
+      toast.success(t('messenger.groupDeleted', { name }))
       setActiveGroup(null)
       setGroupToDelete(null)
       await loadData()
@@ -4805,7 +5009,7 @@ export function Messenger() {
     await useCallStore.getState().joinGroupCall(
       {
         id: activeGroup.id,
-        name: activeGroup.name,
+        name: gruppenTitel(activeGroup),
         avatarUrl: activeGroup.avatar_url ?? null,
         canShare: groupCallPermissions.canShare,
         canModerate: groupCallPermissions.canModerate,
@@ -4904,7 +5108,7 @@ export function Messenger() {
         archiviert={imArchiv}
         onAnheften={() => gmid && handleAnheftenChat(gmid)}
         onArchivieren={() => gmid && handleArchivieren(gmid)}
-        onMenue={() => gmid && setZeilenMenue({ mid: gmid, name: g.name })}
+        onMenue={() => gmid && setZeilenMenue({ mid: gmid, name: gruppenTitel(g) })}
       >
         <button
           type="button"
@@ -4933,7 +5137,7 @@ export function Messenger() {
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center justify-between gap-1">
-                <span className="text-xs font-semibold text-primary truncate">{g.name}</span>
+                <span className="text-xs font-semibold text-primary truncate">{gruppenTitel(g)}</span>
                 <span className="text-label-sm text-on-surface-variant/60 shrink-0">{g.member_count} M.</span>
               </div>
               {zeilenVorschau(
@@ -5963,7 +6167,7 @@ export function Messenger() {
                       />
                     )}
                     <span className="text-xs font-bold text-on-surface truncate max-w-[130px] sm:max-w-xs">
-                      {activeGroup ? activeGroup.name : activeContact?.username}
+                      {activeGroup ? gruppenTitel(activeGroup) : activeContact?.username}
                     </span>
                     {blindMailboxId && isChatMuted(blindMailboxId) && (
                       <span title="Stummgeschaltet" className="inline-flex items-center text-status-warning">
@@ -6062,8 +6266,8 @@ export function Messenger() {
                   <Blattknopf
                     variante="schwebend"
                     label={t('messenger.moreChatSettings')}
-                    titel={activeGroup ? activeGroup.name : activeContact?.username || t('messenger.chat')}
-                    ueberschrift={activeGroup ? activeGroup.name : activeContact?.username}
+                    titel={activeGroup ? gruppenTitel(activeGroup) : activeContact?.username || t('messenger.chat')}
+                    ueberschrift={activeGroup ? gruppenTitel(activeGroup) : activeContact?.username}
                   >
                     {(schliessen) => (
                       <>
@@ -7505,7 +7709,7 @@ export function Messenger() {
               <span>{t('messenger.muteNotifications')}</span>
             </DialogTitle>
             <DialogDescription>
-              Wähle, wie lange Benachrichtigungen für {activeGroup ? `"${activeGroup.name}"` : activeContact ? `"${activeContact.username}"` : 'diesen Chat'} stummgeschaltet werden sollen.
+              Wähle, wie lange Benachrichtigungen für {activeGroup ? `"${gruppenTitel(activeGroup)}"` : activeContact ? `"${activeContact.username}"` : 'diesen Chat'} stummgeschaltet werden sollen.
             </DialogDescription>
           </DialogHeader>
 

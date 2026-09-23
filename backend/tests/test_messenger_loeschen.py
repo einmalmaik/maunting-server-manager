@@ -152,7 +152,7 @@ def test_fremde_geraete_mailbox_bleibt_zu(db: Session, owner_user: User, regular
 def test_gruppenmitglied_darf_in_der_gruppenmailbox_loeschen(
     db: Session, owner_user: User, regular_user: User
 ):
-    gruppe = SocialService.create_group(db, user=owner_user, name="Runde", description="")
+    gruppe = SocialService.create_group(db, user=owner_user)
     SocialService.join_group_by_invite_code(db, user=regular_user, invite_code=gruppe.invite_code)
     gruppen_box = hashlib.sha256(f"msm:group:{gruppe.id}".encode("utf-8")).hexdigest()
 

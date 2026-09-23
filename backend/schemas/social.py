@@ -586,9 +586,17 @@ class SocialProfileResponse(BaseModel):
 
 
 class ChatGroupCreate(BaseModel):
-    name: str = Field(..., min_length=2, max_length=64)
-    description: str | None = Field(None, max_length=256)
-    avatar_url: str | None = None
+    """Eine neue Gruppe — ohne Namen.
+
+    Bis Stufe 6 stand hier `name`, `description` und `avatar_url`, und der
+    Server legte sie ab. Er kennt sie nicht mehr: Name, Beschreibung und Logo
+    liegen im verschlüsselten Gruppenblock und in der Einladungskarte. Was
+    hier bleibt, ist die Handlung selbst — „lege eine Gruppe an".
+
+    Leer und nicht abgeschafft: ein Altclient schickt weiter `{"name": ...}`,
+    Pydantic überliest es, und das Anlegen geht durch. Ein 422 hier hiesse,
+    dass kein nicht aktualisiertes Gerät mehr eine Gruppe gründen kann.
+    """
 
 
 class ChatGroupMemberResponse(BaseModel):
@@ -662,7 +670,10 @@ class ChatGroupConfigResponse(BaseModel):
 
 class ChatGroupResponse(BaseModel):
     id: int
-    name: str
+    #: Immer `None` seit Stufe 6 — der Server kennt den Namen nicht mehr. Das
+    #: Feld bleibt in der Antwort, damit ein Altclient nicht auf ein fehlendes
+    #: Feld läuft; der neue Client setzt es aus dem verschlüsselten Block.
+    name: str | None = None
     description: str | None = None
     avatar_url: str | None = None
     # `None` für Mitglieder ohne `invite_members`: der Einladungscode gewährt

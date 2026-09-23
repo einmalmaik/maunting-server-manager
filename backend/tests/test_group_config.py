@@ -67,7 +67,7 @@ def _fremder(db: Session) -> User:
 
 
 def _gruppe(db: Session, besitzer: User, mitglied: User, rechte: str | None = None):
-    gruppe = SocialService.create_group(db, besitzer, "Zustandsgruppe")
+    gruppe = SocialService.create_group(db, besitzer)
     SocialService.join_group_by_invite_code(db, mitglied, gruppe.invite_code)
     if rechte is not None:
         mitgliedschaft = SocialService.get_group_member(db, gruppe.id, mitglied.id)

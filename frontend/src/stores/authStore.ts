@@ -13,6 +13,7 @@ import { clearMemoryKeyStore } from '@/services/e2eeCrypto'
 import { clearGeraeteMemory } from '@/services/e2eeGeraet'
 import { leereGeraeteStand } from '@/services/gruppenSchluessel'
 import { leereMailboxAbos } from '@/services/mailboxAbo'
+import { leereGruppenNamen } from '@/services/gruppenName'
 import { leereMailboxNachweise } from '@/services/mailboxNachweis'
 import { kuendigeMailboxPush, leereMailboxPush } from '@/services/mailboxPush'
 import { kuendige } from '@/services/pushAbo'
@@ -145,6 +146,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     leereMailboxNachweise()
     // Und die Abos: was der Strom melden soll, gehoert dem angemeldeten Konto.
     leereMailboxAbos()
+    // Die Gruppennamen. Sie liegen versiegelt, aber sie liegen da — und wie
+    // eine Gruppe heisst, sagt ueber ihren Besitzer oft mehr als jede einzelne
+    // Nachricht darin. Der naechste Mensch an diesem Geraet erbt sie nicht.
+    leereGruppenNamen()
     // Dasselbe fuer die Push-Adresse. Die Zeilen im Panel raeumt `logout()`
     // weg, solange die Sitzung noch gilt; hier faellt nur der gemerkte Stand,
     // damit der naechste Anmelder nicht auf eine Meldung wartet, die diese

@@ -681,13 +681,21 @@ describe('Messenger (Allround Chat)', () => {
     const submitBtn = screen.getByRole('button', { name: 'Gruppe erstellen' })
     fireEvent.click(submitBtn)
 
+    /*
+     * Ohne Nutzlast — und das ist der ganze Punkt von Stufe 6.
+     *
+     * `chat_groups.name`, `description` und `avatar_url` sind geräumt; der
+     * Server vergibt nur noch eine Kennung und einen Einladungscode. Der Name
+     * geht von hier in den versiegelten örtlichen Speicher und in den
+     * verschlüsselten Gruppenblock. Stünde er hier wieder im Aufruf, läge er
+     * beim nächsten Blick in die Datenbank wieder im Klartext da.
+     */
     await waitFor(() => {
-      expect(socialApi.createGroup).toHaveBeenCalledWith(
-        expect.objectContaining({
-          name: 'Neue Supergruppe',
-        })
-      )
+      expect(socialApi.createGroup).toHaveBeenCalledWith()
     })
+    const ruf = (socialApi.createGroup as unknown as { mock: { calls: unknown[][] } }).mock
+      .calls[0]
+    expect(JSON.stringify(ruf)).not.toContain('Neue Supergruppe')
   })
 
   it('zeigt WhatsApp-typischen Sprachnachricht-Button bei leerem Textfeld und Senden-Button bei Eingabe', async () => {

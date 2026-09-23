@@ -56,7 +56,7 @@ def _header(kekse: dict) -> dict[str, str]:
 
 
 def _gruppe_mit_raum(db: Session, besitzer: User, mitglied: User, rechte: str) -> tuple[int, str]:
-    gruppe = SocialService.create_group(db, besitzer, "Moderationsgruppe")
+    gruppe = SocialService.create_group(db, besitzer)
     SocialService.join_group_by_invite_code(db, mitglied, gruppe.invite_code)
     SocialService.update_member_role_permissions(
         db, gruppe.id, mitglied.id, "member", rechte, besitzer
@@ -145,7 +145,7 @@ def test_beitrittsrecht_allein_reicht_nicht(
     twirp_aufrufe: list,
 ) -> None:
     # Wer im Anruf sitzen darf, darf deshalb noch niemandem das Wort nehmen.
-    gruppe = SocialService.create_group(db, owner_user, "Dritte")
+    gruppe = SocialService.create_group(db, owner_user)
     SocialService.join_group_by_invite_code(db, regular_user, gruppe.invite_code)
     SocialService.update_member_role_permissions(
         db, gruppe.id, regular_user.id, "member", "join_group_calls", owner_user
@@ -188,7 +188,7 @@ def test_der_eigentuemer_laesst_sich_nicht_moderieren(
     user_cookies: dict,
     twirp_aufrufe: list,
 ) -> None:
-    gruppe = SocialService.create_group(db, owner_user, "Rangfrage")
+    gruppe = SocialService.create_group(db, owner_user)
     SocialService.join_group_by_invite_code(db, regular_user, gruppe.invite_code)
     SocialService.update_member_role_permissions(
         db, gruppe.id, regular_user.id, "member", "mute_in_calls", owner_user
@@ -249,7 +249,7 @@ def test_nichtmitglied_wird_nicht_moderiert(
     owner_cookies: dict,
     twirp_aufrufe: list,
 ) -> None:
-    gruppe = SocialService.create_group(db, owner_user, "Allein")
+    gruppe = SocialService.create_group(db, owner_user)
     raum, _ = GroupCallRoomRegistry.create(gruppe.id, max_peers=GRUPPE_MAX_TEILNEHMER)
     antwort = client.post(
         f"/api/social/calls/{raum}/teilnehmer/{regular_user.id}/stumm",
@@ -316,7 +316,7 @@ def test_stummrecht_erlaubt_keinen_rauswurf(
     twirp_aufrufe: list,
 ) -> None:
     # Zwei Rechte, zwei Wirkungen. Sonst waere die Aufspaltung Zierde.
-    gruppe = SocialService.create_group(db, owner_user, "Nur stumm")
+    gruppe = SocialService.create_group(db, owner_user)
     SocialService.join_group_by_invite_code(db, regular_user, gruppe.invite_code)
     dritter = AuthService.create_user(db, "dritter", "dritter@test.de", "DritterPass123!")
     db.commit()

@@ -52,6 +52,27 @@ export interface GruppenRolle {
 export interface Gruppenzustand {
   /** Formatnummer, nicht die Revision. Die zählt der Server. */
   v: number
+  /**
+   * Wie die Gruppe heisst — seit Stufe 6 nur noch hier.
+   *
+   * `chat_groups.name` ist geräumt. Der Server kennt den Namen einer Gruppe
+   * nicht mehr, und er soll ihn nicht kennen: er ist die eine Zeile, aus der
+   * sich ohne jede Nachricht ablesen liesse, worum es geht.
+   *
+   * `null` heisst „dieser Stand sagt nichts dazu", nicht „namenlos" — ein
+   * Altbestand aus der Zeit vor Stufe 6 hat hier nichts stehen, und der
+   * Aufrufer greift dann auf seinen örtlichen Namensspeicher zurück.
+   */
+  name?: string | null
+  beschreibung?: string | null
+  /**
+   * Das Logo als Data-URL (128 px, WebP) — wie in der Einladungskarte.
+   *
+   * Eine Adresse wie bisher müsste der Server ausliefern und wüsste dabei,
+   * wer sich gerade eine Gruppe ansieht. Die Route dafür gibt es seit Stufe 6
+   * nicht mehr.
+   */
+  logo?: string | null
   rollen: GruppenRolle[]
   /**
    * Rollenkennung → Konten, die sie tragen.
@@ -88,7 +109,27 @@ export type Konfigschreibung =
 
 /** Ein leerer Ausgangszustand, wenn die Gruppe noch keinen hat. */
 export function leererGruppenzustand(): Gruppenzustand {
-  return { v: KONFIG_FORMAT, rollen: [], zuordnung: {} }
+  return { v: KONFIG_FORMAT, name: null, beschreibung: null, logo: null, rollen: [], zuordnung: {} }
+}
+
+/** Ein Text aus fremder Hand, auf ein erträgliches Mass gestutzt. */
+function alsText(wert: unknown, hoechstens: number): string | null {
+  if (typeof wert !== 'string') return null
+  const sauber = wert.trim()
+  return sauber ? sauber.slice(0, hoechstens) : null
+}
+
+/**
+ * Nur `data:image/...` — dieselbe Schranke wie bei der Einladungskarte.
+ *
+ * Der Block kommt von einem anderen Menschen. `data:text/html,…` wäre in
+ * einem `<img src>` harmlos, in einem späteren `<a href>` oder `window.open`
+ * nicht. Die Schranke steht am Lesen, damit sie nicht an jeder Anzeige
+ * einzeln stehen muss.
+ */
+function alsBild(wert: unknown): string | null {
+  if (typeof wert !== 'string') return null
+  return /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(wert) ? wert : null
 }
 
 function istRolle(wert: unknown): wert is GruppenRolle {
@@ -131,7 +172,18 @@ function liesGruppenzustand(roh: Record<string, unknown>): Gruppenzustand | null
     return null
   }
 
-  return { v: KONFIG_FORMAT, rollen: roh.rollen as GruppenRolle[], zuordnung }
+  return {
+    v: KONFIG_FORMAT,
+    // Nachsichtig, und hier mit Absicht anders als bei den Rollen: ein
+    // krummer Name ist eine kaputte Überschrift, eine krumme Rechtetabelle
+    // ist ein Sicherheitsproblem. Deshalb fällt dort der ganze Block durch
+    // und hier nur das einzelne Feld.
+    name: alsText(roh.name, 64),
+    beschreibung: alsText(roh.beschreibung, 256),
+    logo: alsBild(roh.logo),
+    rollen: roh.rollen as GruppenRolle[],
+    zuordnung,
+  }
 }
 
 /**
@@ -213,8 +265,15 @@ export async function schreibeGruppenzustand(
   zustand: Gruppenzustand,
   erwarteteRevision: number,
 ): Promise<Konfigschreibung> {
+  // Die Felder stehen einzeln da und nicht als `...zustand`: was in den Block
+  // wandert, soll an dieser Stelle aufgezählt sein. Ein durchgereichtes Objekt
+  // nähme irgendwann ein Feld mit, das niemand hier haben wollte — und es
+  // stünde dann unterschrieben und verschlüsselt auf dem Server.
   const nutzlast = await signiereNutzlast(kontext.blindMailboxId, kontext.eigeneId, {
     v: KONFIG_FORMAT,
+    name: zustand.name ?? null,
+    beschreibung: zustand.beschreibung ?? null,
+    logo: zustand.logo ?? null,
     rollen: zustand.rollen,
     zuordnung: zustand.zuordnung,
   })

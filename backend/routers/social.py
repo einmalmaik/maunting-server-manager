@@ -793,9 +793,12 @@ def _gruppe_antwort(db: Session, group: ChatGroup, user_id: int) -> dict:
     role = "owner" if group.owner_user_id == user_id else "member"
     return {
         "id": group.id,
-        "name": group.name,
-        "description": group.description,
-        "avatar_url": group.avatar_url,
+        # Seit Stufe 6 immer leer. Der Client setzt sie aus dem
+        # verschluesselten Block; hier steht nichts, was er ueberschreiben
+        # muesste.
+        "name": None,
+        "description": None,
+        "avatar_url": None,
         # Wie in `list_user_groups`: der Code geht nur an die, die einladen
         # dürfen. Dieser Zweig greift, solange die Mitgliedschaft noch nicht in
         # der Liste steht — beim Anlegen der Gruppe also für den Gründer.
@@ -826,13 +829,11 @@ def create_chat_group(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    group = SocialService.create_group(
-        db,
-        user=user,
-        name=req.name,
-        description=req.description,
-        avatar_url=req.avatar_url,
-    )
+    # `req` wird absichtlich nicht ausgewertet: seit Stufe 6 legt der Server
+    # zu einer Gruppe nichts mehr ab als ihre Kennung, ihren Gruender und den
+    # Einladungscode. Der Rumpf bleibt im Schema, damit ein Altclient nicht an
+    # einer fehlenden Route scheitert.
+    group = SocialService.create_group(db, user=user)
     return _gruppe_antwort(db, group, user.id)
 
 
@@ -853,9 +854,11 @@ def get_group_invite_info(
     bleiben `None`. Beides nebeneinander auszuliefern wäre Verschlüsselung als
     Zierde — wer den Klartext danebenlegt, hat nichts verschlossen.
 
-    Der Klartextzweig ist Altbestand. Er stirbt in Stufe 6 mit den Spalten, aus
-    denen er kommt; bis dahin hält er Gruppen am Leben, die noch nie einen Link
-    geteilt haben und darum noch keine Karte besitzen.
+    Seit Stufe 6 gibt es den Klartextzweig nicht mehr — die Spalten, aus denen
+    er kam, sind geräumt. Eine Gruppe ohne Karte zeigt deshalb nur noch ihre
+    Zahlen; der Client schreibt „Verschlüsselte Einladung" darüber. Das ist
+    kein Rückschritt gegenüber vorher, sondern das Ende des Übergangs: wer
+    einlädt, hinterlegt beim Teilen eine Karte.
     """
     group = SocialService.get_group_by_invite_code(db, invite_code)
     member_count = len(group.members) if group.members else 1
@@ -863,9 +866,9 @@ def get_group_invite_info(
     karte = (group.invite_card or "").strip() or None
     return {
         "group_id": group.id,
-        "name": None if karte else group.name,
-        "description": None if karte else group.description,
-        "avatar_url": None if karte else group.avatar_url,
+        "name": None,
+        "description": None,
+        "avatar_url": None,
         "invite_card": karte,
         "member_count": member_count,
         "live_call": raum is not None,
@@ -938,74 +941,16 @@ def _gruppenadmin_oder_fehler(db: Session, group_id: int, user_id: int) -> ChatG
     return group
 
 
-@router.post(
-    "/groups/{group_id}/avatar",
-    response_model=ChatGroupResponse,
-    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
-)
-async def upload_group_avatar(
-    group_id: int,
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> dict:
-    """Setzt das Gruppenlogo (max. 5 MB, JPEG/PNG/WebP/GIF)."""
-    group = _gruppenadmin_oder_fehler(db, group_id, user.id)
-    content_type = (file.content_type or "").lower().split(";")[0].strip()
-    if content_type not in bild_upload.ERLAUBTE_BILDTYPEN:
-        raise HTTPException(
-            status_code=400,
-            detail="Ungültiges Bildformat. Erlaubt sind JPEG, PNG, WebP und GIF.",
-        )
-    inhalt = await file.read()
-    if len(inhalt) > bild_upload.MAX_BILD_BYTES:
-        raise HTTPException(status_code=400, detail="Bild darf maximal 5 MB groß sein.")
-    if not bild_upload.ist_gueltiges_bild(inhalt, content_type):
-        raise HTTPException(status_code=400, detail="Ungültige oder beschädigte Bilddatei.")
-
-    bild_upload.loesche_bild(group.avatar_url)
-    dateiname = bild_upload.speichere_bild(inhalt, content_type, "group", group.id)
-    group.avatar_url = f"/api/social/groups/avatar/{dateiname}"
-    db.commit()
-    return _gruppe_antwort(db, group, user.id)
-
-
-@router.delete(
-    "/groups/{group_id}/avatar",
-    response_model=ChatGroupResponse,
-    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
-)
-def delete_group_avatar(
-    group_id: int,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> dict:
-    group = _gruppenadmin_oder_fehler(db, group_id, user.id)
-    bild_upload.loesche_bild(group.avatar_url)
-    group.avatar_url = None
-    db.commit()
-    return _gruppe_antwort(db, group, user.id)
-
-
-@router.get("/groups/avatar/{filename}")
-def get_group_avatar(filename: str):
-    """Liefert ein gespeichertes Gruppenlogo aus.
-
-    Ohne Anmeldung, weil eine Einladungskarte das Logo zeigt, bevor jemand
-    beigetreten ist. Der Dateiname ist zufällig und nicht erratbar.
-    """
-    if not re.match(r"^group_\d+_[a-zA-Z0-9]+\.(jpg|jpeg|png|webp|gif)$", filename):
-        raise HTTPException(status_code=404, detail="Gruppenlogo nicht gefunden")
-    pfad = os.path.join(bild_upload.bilder_verzeichnis(), filename)
-    if not os.path.isfile(pfad):
-        raise HTTPException(status_code=404, detail="Gruppenlogo nicht gefunden")
-    return FileResponse(
-        pfad,
-        headers={
-            "Cache-Control": "public, max-age=86400",
-            "Access-Control-Allow-Origin": "*",
-        },
-    )
+# Die drei Gruppenlogo-Routen standen hier bis Stufe 6.
+#
+# Sie schrieben `chat_groups.avatar_url` — genau die Spalte, die `20260923_03`
+# geraeumt hat — und die dritte lieferte das Bild **ohne Anmeldung** an jeden
+# aus, der den Dateinamen hatte. Damit wusste der Server, wie eine Gruppe
+# aussieht, und sein Zugriffsprotokoll wusste, wer gerade hinsieht.
+#
+# Das Logo reist jetzt als Data-URL im verschluesselten Gruppenblock und in
+# der Einladungskarte (`logoAlsDatenUrl`, 128 px, WebP). Eine Route, die eine
+# geleerte Spalte beschreibt, waere kein Rest, sondern ein Rueckweg.
 
 
 @router.post("/groups/join/{invite_code}", response_model=ChatGroupResponse, dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])

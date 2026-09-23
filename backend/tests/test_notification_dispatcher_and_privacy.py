@@ -392,7 +392,7 @@ async def test_group_relay_targeted_to_members_only_no_leak_to_strangers(db: Ses
     bob = _create_user(db, "group_bob")
     charlie_stranger = _create_user(db, "group_charlie_stranger")
 
-    group = SocialService.create_group(db, alice, name="MSS Core Devs")
+    group = SocialService.create_group(db, alice)
     SocialService.join_group_by_invite_code(db, bob, group.invite_code)
 
     g_mid = hashlib.sha256(f"msm:group:{group.id}".encode("utf-8")).hexdigest()

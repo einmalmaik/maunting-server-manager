@@ -128,7 +128,8 @@ describe('GruppenEinladungsKarte', () => {
     await screen.findByText('Serverteam')
     fireEvent.click(screen.getByRole('button', { name: i18n.t('social.invite.join') }))
 
-    await waitFor(() => expect(onJoin).toHaveBeenCalledWith('AbCd1234efGH'))
+    // Ohne Schlüssel gibt es keinen Karteninhalt weiterzureichen.
+    await waitFor(() => expect(onJoin).toHaveBeenCalledWith('AbCd1234efGH', null))
   })
 
   it('sagt es, wenn die Einladung nicht mehr gilt', async () => {
@@ -233,11 +234,40 @@ describe('GruppenEinladungsKarte, verschlüsselt', () => {
 
   it('nimmt weiter den Klartext, solange es keine Karte gibt', async () => {
     // Der Altweg. Er hält Gruppen am Leben, die noch nie einen Link geteilt
-    // haben — und stirbt in Stufe 6 mit den Spalten, aus denen er kommt.
+    // haben. Seit Stufe 6 kommt dieser Klartext nur noch von einem Panel, das
+    // die Räumung noch nicht mitgemacht hat — das eigene schickt dort `null`.
     getGroupInviteInfo.mockResolvedValue({ ...INFO, invite_card: null })
 
     render(<GruppenEinladungsKarte inviteCode={CODE} schluessel={null} onJoin={vi.fn()} />)
 
     expect(await screen.findByText('Serverteam')).toBeInTheDocument()
+  })
+
+  it('reicht den geöffneten Karteninhalt an den Beitritt weiter', async () => {
+    /*
+     * Seit Stufe 6 die Klartextspalten geräumt hat, ist diese Karte die
+     * einzige Stelle, an der der Name einer fremden Gruppe **vor** dem
+     * Beitritt bekannt ist: der Server kennt ihn nicht, und den
+     * verschlüsselten Gruppenblock kann ein Beitretender noch nicht lesen —
+     * das Gruppengeheimnis kommt erst mit der ersten Nachricht. Fällt der
+     * Inhalt hier auf den Boden, heisst die frisch betretene Gruppe für immer
+     * „Verschlüsselte Gruppe".
+     */
+    getGroupInviteInfo.mockResolvedValue(await mitKarte({ logo: LOGO }))
+    const schluessel = await einladungsschluesselAus(GEHEIMNIS)
+    const onJoin = vi.fn().mockResolvedValue(undefined)
+
+    render(<GruppenEinladungsKarte inviteCode={CODE} schluessel={schluessel} onJoin={onJoin} />)
+
+    await screen.findByText('Serverteam')
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('social.invite.join') }))
+
+    await waitFor(() =>
+      expect(onJoin).toHaveBeenCalledWith(CODE, {
+        name: 'Serverteam',
+        beschreibung: 'Wir bauen Dinge',
+        logo: LOGO,
+      }),
+    )
   })
 })

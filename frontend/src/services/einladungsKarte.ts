@@ -176,32 +176,16 @@ export function schluesselAusLink(link: string): string | null {
   return treffer ? treffer[1] : null
 }
 
-/**
- * Holt das heute öffentlich ausgelieferte Gruppenlogo und macht eine
- * verschlüsselbare Data-URL daraus.
+/*
+ * `gruppenLogoAlsDatenUrl` gab es hier bis Stufe 6.
  *
- * Der Übergang: bis Stufe 6 liegt das Logo als Datei hinter
- * `/api/social/groups/avatar/<name>` und wird ohne Anmeldung ausgeliefert.
- * Für die **Einladung** hört das hier auf — was der Eingeladene sieht, kommt
- * aus der verschlüsselten Karte, nicht von dieser Adresse. Wer die Karte baut,
- * ist Mitglied und kommt an die Datei heran; der Eingeladene nicht mehr.
- *
- * `null` bei allem, was schiefgeht. Ein Logo ist Zierde, eine Einladung ohne
- * Logo immer noch eine Einladung.
+ * Sie holte das Logo von `/api/social/groups/avatar/<name>` — einer Adresse,
+ * die der Server ohne Anmeldung auslieferte — und machte eine Data-URL daraus,
+ * damit wenigstens die Einladung nicht darauf zeigen musste. Diese Route ist
+ * entfernt; das Logo entsteht jetzt beim Setzen direkt als Data-URL
+ * (`logoAlsDatenUrl`) und liegt im verschlüsselten Gruppenblock. Es gibt
+ * nichts mehr nachzuladen.
  */
-export async function gruppenLogoAlsDatenUrl(
-  avatarUrl: string | null | undefined,
-): Promise<string | null> {
-  if (!avatarUrl) return null
-  try {
-    const { apiUrl } = await import('@/config/api')
-    const antwort = await fetch(apiUrl(avatarUrl), { credentials: 'include' })
-    if (!antwort.ok) return null
-    return await logoAlsDatenUrl(await antwort.blob())
-  } catch {
-    return null
-  }
-}
 
 /**
  * Verkleinert ein Bild und gibt es als Data-URL zurück.

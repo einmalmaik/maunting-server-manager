@@ -352,21 +352,22 @@ def test_presence_offline_timeout(db: Session, owner_user: User):
 
 def test_chat_group_create_join_invite(db: Session, owner_user: User, regular_user: User) -> None:
     # 1. Gruppe erstellen
-    group = SocialService.create_group(
-        db,
-        user=owner_user,
-        name="Singra Vault Community",
-        description="Offizielle Community-Gruppe",
-    )
+    group = SocialService.create_group(db, user=owner_user)
     assert group.id is not None
-    assert group.name == "Singra Vault Community"
+    # Seit Stufe 6 legt der Server keinen Namen mehr ab. Was er zu einer Gruppe
+    # weiss, ist ihre Kennung, ihr Gruender und ihr Einladungscode.
+    assert group.name is None
     assert len(group.invite_code) >= 16
     assert group.owner_user_id == owner_user.id
 
     # 2. Öffentliche Einladung abrufen (ohne Auth)
     invite_info = SocialService.get_group_by_invite_code(db, group.invite_code)
     assert invite_info.id == group.id
-    assert invite_info.name == "Singra Vault Community"
+    # Ein Einladungscode fuehrt zu einer Gruppe, nicht zu ihrem Namen. Was der
+    # Eingeladene sieht, steht in der verschluesselten Karte
+    # (`test_gruppen_einladungskarte.py`) und geht nur mit dem Schluessel aus
+    # dem Link auf.
+    assert invite_info.name is None
 
     # 3. Zweiter Nutzer tritt über Einladungslink bei
     joined_group = SocialService.join_group_by_invite_code(db, regular_user, group.invite_code)
@@ -394,11 +395,7 @@ def test_chat_group_create_join_invite(db: Session, owner_user: User, regular_us
     assert env.blind_mailbox_id == blind_mailbox
 
     # 5. Zweite Gruppe erstellen (unbegrenzt)
-    group2 = SocialService.create_group(
-        db,
-        user=owner_user,
-        name="Zweite Gruppe",
-    )
+    group2 = SocialService.create_group(db, user=owner_user)
     all_groups = SocialService.list_user_groups(db, owner_user.id)
     assert len(all_groups) == 2
 
@@ -450,12 +447,7 @@ def test_chat_stories_creation_and_expiration(db: Session, owner_user: User, reg
 
 def test_chat_group_roles_and_permissions(db: Session, owner_user: User, regular_user: User) -> None:
     # 1. Gruppe erstellen
-    group = SocialService.create_group(
-        db,
-        user=owner_user,
-        name="Security & Privacy Guild",
-        description="Gilden-Chat",
-    )
+    group = SocialService.create_group(db, user=owner_user)
     SocialService.join_group_by_invite_code(db, regular_user, group.invite_code)
 
     # 2. Rolle von regular_user zu Moderator befördern mit Rechten

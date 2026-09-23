@@ -204,7 +204,7 @@ def test_e2ee_sync_participant_security_boundary_and_zero_knowledge(client: Test
 # ── Test 5: Group Chat Mailbox Sync & Revocation ──
 def test_e2ee_sync_group_chat_mailbox(client: TestClient, db: Session, owner_user: User, regular_user: User):
     """Group chat mailboxes are returned to active members and excluded upon kick/leave."""
-    group = SocialService.create_group(db, user=owner_user, name="Sync Test Guild")
+    group = SocialService.create_group(db, user=owner_user)
     SocialService.join_group_by_invite_code(db, regular_user, group.invite_code)
 
     group_box = hashlib.sha256(f"msm:group:{group.id}".encode("utf-8")).hexdigest()

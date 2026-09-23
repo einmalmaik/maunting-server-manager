@@ -605,12 +605,7 @@ def test_chat_media_upload_and_signed_url_flow(db: Session, owner_user: User, re
 def test_group_chat_media_membership_enforcement(db: Session, owner_user: User, regular_user: User):
     """Stellt sicher, dass bei Gruppenmedien ausschliesslich aktuelle Gruppenmitglieder Zugriff haben."""
     # 1. Erstelle Gruppe mit Owner und regular_user
-    group = SocialService.create_group(
-        db,
-        user=owner_user,
-        name="Security Research Group",
-        description="Streng vertraulich",
-    )
+    group = SocialService.create_group(db, user=owner_user)
     SocialService.join_group_by_invite_code(db, user=regular_user, invite_code=group.invite_code)
 
     # 2. Drittnutzer (Fremder)
