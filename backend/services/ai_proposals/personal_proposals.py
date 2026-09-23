@@ -10,10 +10,32 @@ from services import permission_service
 from services.ai_action_errors import AiActionValidationError
 from services.ai_redaction import redact_sensitive_text
 from services.ai_proposals.base import _AusfuehrungsRahmen, _Ausgefuehrt
+from services.kalender_serie import (
+    Serie,
+    SerienRegelFehler,
+    kurzform,
+    serie_aus_werkzeug,
+    serie_schreiben,
+)
 
 from services.achievement_service import AchievementService
 
 logger = logging.getLogger(__name__)
+
+
+def _wiederholung_pruefen(roh) -> Serie:
+    """Liest das `recurrence`-Argument der KI — nachsichtig, aber streng.
+
+    Deutsche wie englische Kuerzel, Gross wie klein; was danach noch falsch
+    ist, kostet eine Runde statt die Antwort. Wichtig ist, dass hier
+    **geworfen** wird: eine stillschweigend verworfene Wiederholung ergaebe
+    einen Einzeltermin unter dem Namen einer Serie, und das faellt erst im
+    naechsten Jahr auf.
+    """
+    try:
+        return serie_aus_werkzeug(roh)
+    except SerienRegelFehler as e:
+        raise AiActionValidationError(f"Wiederholung nicht verwendbar: {e}") from e
 
 def _email_send_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
     recipient = str(rest.get("recipient", "")).strip()
@@ -55,6 +77,7 @@ def _calendar_event_create_payload(db: Session, user: User, rest: dict) -> tuple
     team_id = rest.get("team_id")
     server_id = rest.get("server_id")
     color = rest.get("color")
+    serie = _wiederholung_pruefen(rest.get("recurrence"))
 
     payload = {
         "title": redact_sensitive_text(title),
@@ -67,6 +90,7 @@ def _calendar_event_create_payload(db: Session, user: User, rest: dict) -> tuple
         "team_id": int(team_id) if team_id else None,
         "server_id": int(server_id) if server_id else None,
         "color": str(color).strip() if color else None,
+        "recurrence": serie_schreiben(serie),
     }
     preview = {
         "operation": "calendar_event_create",
@@ -78,6 +102,12 @@ def _calendar_event_create_payload(db: Session, user: User, rest: dict) -> tuple
         "event_type": payload["event_type"],
         "team_id": payload["team_id"],
         "server_id": payload["server_id"],
+        # Lesbar, und das mit Absicht: `preview_json` liegt im Klartext, damit
+        # der Mensch sieht, was er freigibt. Wer nicht erkennt, dass er eine
+        # **jaehrliche** Wiederholung durchwinkt, gibt etwas anderes frei, als
+        # er denkt. Die Regel selbst steht in `payload`, das verschluesselt
+        # abgelegt wird.
+        "recurrence": kurzform(serie),
     }
     return payload, preview
 
@@ -115,6 +145,13 @@ def _calendar_event_update_payload(db: Session, user: User, rest: dict) -> tuple
     server_id = rest.get("server_id")
     color = rest.get("color")
 
+    # Fehlt `recurrence`, bleibt die Wiederholung unangetastet — wie jedes
+    # andere Feld hier auch. Wer eine Serie aufloesen will, schickt
+    # ausdruecklich `{"takt": null}`; ein Termin, der seine Serie verliert,
+    # weil jemand nur den Ort geaendert hat, waere stiller Datenverlust.
+    roh_serie = rest.get("recurrence")
+    serie = _wiederholung_pruefen(roh_serie) if roh_serie is not None else None
+
     payload = {
         "event_id": event_id,
         "title": str(title).strip() if title else None,
@@ -127,6 +164,7 @@ def _calendar_event_update_payload(db: Session, user: User, rest: dict) -> tuple
         "team_id": int(team_id) if team_id else None,
         "server_id": int(server_id) if server_id else None,
         "color": str(color).strip() if color else None,
+        "recurrence": serie_schreiben(serie) if serie is not None else None,
     }
     preview = {
         "operation": "calendar_event_update",
@@ -140,6 +178,7 @@ def _calendar_event_update_payload(db: Session, user: User, rest: dict) -> tuple
         "event_type": payload["event_type"],
         "team_id": payload["team_id"],
         "server_id": payload["server_id"],
+        "recurrence": kurzform(serie) if serie is not None else None,
     }
     return payload, preview
 
@@ -258,6 +297,7 @@ def _ausfuehren_calendar_event_create(db: Session, rahmen: _AusfuehrungsRahmen) 
         team_id=int(p["team_id"]) if p.get("team_id") else None,
         server_id=int(p["server_id"]) if p.get("server_id") else None,
         color=str(p["color"]) if p.get("color") else None,
+        recurrence=str(p["recurrence"]) if p.get("recurrence") else None,
     )
     return _Ausgefuehrt(result=result)
 
@@ -279,6 +319,7 @@ def _ausfuehren_calendar_event_update(db: Session, rahmen: _AusfuehrungsRahmen) 
         team_id=int(p["team_id"]) if p.get("team_id") else None,
         server_id=int(p["server_id"]) if p.get("server_id") else None,
         color=str(p["color"]) if p.get("color") else None,
+        recurrence=str(p["recurrence"]) if p.get("recurrence") else None,
     )
     return _Ausgefuehrt(result=result)
 

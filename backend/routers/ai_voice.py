@@ -13,15 +13,17 @@ jeweils als ``close(1008)``. Wer das kopiert, kopiert eine Entscheidung, die
 schon einmal getroffen und begründet wurde.
 
 Der Router wählt genau einen von zwei Wegen. Ein panelweit aktivierter
-OpenAI-Realtime-Zugang hat Vorrang und verwendet WebRTC plus serverseitiges
-Sideband. Ohne ihn bleibt der Legacy-Weg aus Transkription, normalem Chatlauf,
-Pipecat und ElevenLabs unverändert. Ein Laufzeitfehler wechselt niemals still
-zwischen diesen Wegen.
+Echtzeit-Zugang hat Vorrang — OpenAI Realtime oder GPT-Live mit WebRTC plus
+serverseitigem Sideband, oder Gemini Live; welcher, sagt der Sprachweg seines
+Modells (`services.ai_voice.sprachwege`). Ohne ihn bleibt der Legacy-Weg aus
+Transkription, normalem Chatlauf, Pipecat und ElevenLabs unverändert. Ein
+Laufzeitfehler wechselt niemals still zwischen diesen Wegen.
 """
 
 from __future__ import annotations
 
 import logging
+from typing import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
 from fastapi.concurrency import run_in_threadpool
@@ -47,8 +49,10 @@ from services import (
     ai_voice_vad,
 )
 from services.permission_service import has_global_permission
+from services.ai_voice.live_session import LiveSitzung, vorbereiten as live_vorbereiten
 from services.ai_voice.pipecat_pipeline import pipecat_verfuegbar
 from services.ai_voice.realtime_session import RealtimeSitzung, vorbereiten as realtime_vorbereiten
+from services.ai_voice.sprachwege import GEMINI_LIVE, OPENAI_LIVE, OPENAI_REALTIME, Sprachweg
 from services.ai_voice.transcription import hoeren as transkribieren
 
 logger = logging.getLogger(__name__)
@@ -185,6 +189,26 @@ def _sprechender_zugang(db: Session) -> AiProvider | None:
     return None
 
 
+def _sprachsitzung(weg: Sprachweg | None) -> tuple[Callable, type]:
+    """Vorbereitung und Sitzung eines Sprachwegs.
+
+    Zur Laufzeit aus diesem Modul gelesen und nicht beim Import in eine Tabelle
+    eingefroren: die Tests ersetzen `realtime_vorbereiten` und
+    `RealtimeSitzung` genau hier. Ohne erkannten Weg bleibt es bei Realtime —
+    so wählte der Router, bevor es mehr als einen OpenAI-Weg gab, und
+    `ai_provider_service.realtime_zugang` lässt einen Zugang ohne Weg ohnehin
+    nicht durch.
+    """
+    name = weg.name if weg is not None else OPENAI_REALTIME.name
+    if name == OPENAI_LIVE.name:
+        return live_vorbereiten, LiveSitzung
+    if name == GEMINI_LIVE.name:
+        from services.ai_voice.gemini_live_session import GeminiLiveSitzung
+
+        return realtime_vorbereiten, GeminiLiveSitzung
+    return realtime_vorbereiten, RealtimeSitzung
+
+
 def _zugaenge(db: Session) -> list[AiProvider]:
     return (
         db.query(AiProvider)
@@ -243,8 +267,9 @@ def voice_config(
     diktat = _hoerender_zugang(db, provider_id or user.ai_provider_id)
     diktat_kontingent = ai_usage_service.get_user_dictation_quota(db, user)
     mode = "legacy"
+    weg = ai_provider_service.sprachweg(realtime) if realtime else None
     if realtime:
-        mode = "gemini_live" if realtime.provider_kind == "google" else "openai_realtime"
+        mode = weg.name if weg is not None else OPENAI_REALTIME.name
     return {
         "available": realtime is not None or zugaenge is not None,
         "mode": mode,
@@ -259,6 +284,13 @@ def voice_config(
         "voice": realtime.realtime_voice if realtime else (sprechen.default_voice if sprechen else None),
         "language": realtime.realtime_language if realtime else "auto",
         "reasoning_effort": realtime.realtime_reasoning_effort if realtime else None,
+        # Nur bei GPT-Live: das Modell, das hinter der Stimme nachdenkt. Die
+        # Denkstufe darüber gehört dann ihm und nicht der Stimme.
+        "backend_model": (
+            ai_provider_service.backend_modell(realtime)
+            if realtime and weg is not None and weg.backend_modell
+            else None
+        ),
         "dictation_available": bool(
             diktat and has_global_permission(db, user, "ai.chat.use")
         ),
@@ -349,9 +381,10 @@ async def voice_ws(websocket: WebSocket, provider_id: int | None = None) -> None
         if realtime is not None:
             herkunft = ws_session_herkunft(websocket)
             familie = ws_session_familie(websocket)
+            vorbereiten, sitzung_art = _sprachsitzung(ai_provider_service.sprachweg(realtime))
             try:
                 realtime_daten = await run_in_threadpool(
-                    realtime_vorbereiten,
+                    vorbereiten,
                     db,
                     provider=realtime,
                     user=user,
@@ -436,27 +469,7 @@ async def voice_ws(websocket: WebSocket, provider_id: int | None = None) -> None
     # laengst angenommen hat. Cookie-Clients bekommen das unveraenderte `None`.
     await websocket.accept(subprotocol=ws_subprotokoll(websocket))
     if realtime_daten is not None:
-        if realtime_daten.provider_kind == "google":
-            from services.ai_voice.gemini_live_session import GeminiLiveSitzung
-
-            sitzung = GeminiLiveSitzung(
-                websocket,
-                vorbereitung=realtime_daten,
-                user_id=benutzer_id,
-                http_client=websocket.app.state.ai_http_client,
-                herkunft=herkunft,
-                familie=familie,
-            )
-            try:
-                await sitzung.fuehren()
-            finally:
-                from starlette.websockets import WebSocketState
-
-                if websocket.client_state is WebSocketState.CONNECTED:
-                    await websocket.close()
-            return
-
-        sitzung = RealtimeSitzung(
+        sitzung = sitzung_art(
             websocket,
             vorbereitung=realtime_daten,
             user_id=benutzer_id,

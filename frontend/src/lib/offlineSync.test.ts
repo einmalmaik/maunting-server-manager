@@ -26,6 +26,7 @@ import {
   startLiveSync,
   redecryptPendingOfflineNotesAndCalendar,
   loadNotesOfflineFirst,
+  grundbestandZuruecksetzen,
 } from './offlineSync'
 import {
   NOTE_CIPHERTEXT_PREFIX,
@@ -41,6 +42,7 @@ import {
   clearNotesKeyCache,
 } from '@/services/notesCalendarCrypto'
 import * as client from '@/api/client'
+import { useAuthStore } from '@/stores/authStore'
 
 vi.mock('@/api/client', () => ({
   api: vi.fn(),
@@ -1089,6 +1091,297 @@ describe('Offline Storage & Unified Real-Time SSE Sync Engine', () => {
       expect(decryptedNote).toBeDefined()
       expect(decryptedNote?.title).toBe(plainTitle)
       expect(decryptedNote?.title.startsWith(NOTE_CIPHERTEXT_PREFIX)).toBe(false)
+    })
+  })
+
+  describe('Serientermine', () => {
+    beforeEach(() => {
+      grundbestandZuruecksetzen()
+    })
+
+    /** Antwortet auf den Grundbestand-Abruf und auf Bereichsabrufe getrennt. */
+    function antworteMit(termine: any[], optionen: { bereichFaellt?: boolean } = {}) {
+      vi.mocked(client.api).mockImplementation(async (pfad: string) => {
+        if (pfad === '/calendar/events') return termine as any
+        if (pfad.startsWith('/calendar/events?')) {
+          if (optionen.bereichFaellt) throw new TypeError('NetworkError')
+          // Der Server filtert nach Zeitraum — ein Geburtstag von 1995 fällt
+          // aus einer Abfrage für 2026 heraus. Genau deshalb gibt es den
+          // Grundbestand.
+          return [] as any
+        }
+        return [] as any
+      })
+    }
+
+    const geburtstag1995 = {
+      id: 1,
+      event_id: 'geb-1',
+      title: 'Geburtstag Lisa',
+      start: '1995-03-13T23:00:00.000Z',
+      end: '1995-03-14T23:00:00.000Z',
+      all_day: true,
+      recurrence: '{"rrule":"FREQ=YEARLY"}',
+      user_id: 1,
+    }
+
+    it('zeigt den Geburtstag von 1995 im Fenster von 2026', async () => {
+      // Der Fall, der die ganze Übung nötig macht: der Serienkopf liegt
+      // außerhalb jeder Bereichsabfrage, das Vorkommen liegt darin.
+      antworteMit([geburtstag1995])
+
+      const { events } = await loadCalendarEventsOfflineFirst(
+        '2026-03-01T00:00:00Z',
+        '2026-04-01T00:00:00Z',
+        undefined,
+        1,
+        'Europe/Berlin',
+      )
+
+      expect(events).toHaveLength(1)
+      expect(events[0].title).toBe('Geburtstag Lisa')
+      expect(events[0].vorkommen).toBe('2026-03-14')
+      expect(events[0].istSerie).toBe(true)
+      // `event_id` ist bei allen Vorkommen dasselbe; nur der zusammengesetzte
+      // Schlüssel taugt als React-Key.
+      expect(events[0].schluessel).toBe('geb-1#2026-03-14')
+    })
+
+    it('holt den Grundbestand nur einmal je Sitzung', async () => {
+      antworteMit([geburtstag1995])
+
+      await loadCalendarEventsOfflineFirst('2026-03-01T00:00:00Z', '2026-04-01T00:00:00Z', undefined, 1, 'UTC')
+      await loadCalendarEventsOfflineFirst('2026-04-01T00:00:00Z', '2026-05-01T00:00:00Z', undefined, 1, 'UTC')
+
+      const grundabrufe = vi.mocked(client.api).mock.calls.filter((c) => c[0] === '/calendar/events')
+      expect(grundabrufe).toHaveLength(1)
+    })
+
+    it('behält die Serien, wenn danach der Bereichsabruf scheitert', async () => {
+      // Der Grundbestand hat seinen eigenen Versuch: zöge er den Bereichsabruf
+      // mit — oder umgekehrt —, stünde bei einem einzigen Fehlschlag der ganze
+      // Kalender auf dem Stand von vorher.
+      antworteMit([geburtstag1995], { bereichFaellt: true })
+
+      const { events, isOffline } = await loadCalendarEventsOfflineFirst(
+        '2026-03-01T00:00:00Z',
+        '2026-04-01T00:00:00Z',
+        undefined,
+        1,
+        'Europe/Berlin',
+      )
+
+      expect(isOffline).toBe(true)
+      expect(events).toHaveLength(1)
+      expect(events[0].vorkommen).toBe('2026-03-14')
+    })
+
+    it('breitet eine Serie über mehrere Vorkommen im Fenster aus', async () => {
+      antworteMit([
+        {
+          ...geburtstag1995,
+          event_id: 'standup',
+          title: 'Standup',
+          start: '2026-01-05T08:00:00.000Z',
+          end: '2026-01-05T08:30:00.000Z',
+          all_day: false,
+          recurrence: '{"rrule":"FREQ=WEEKLY;BYDAY=MO,TH"}',
+        },
+      ])
+
+      const { events } = await loadCalendarEventsOfflineFirst(
+        '2026-01-01T00:00:00Z',
+        '2026-01-20T00:00:00Z',
+        undefined,
+        1,
+        'Europe/Berlin',
+      )
+      expect(events.map((e) => e.vorkommen)).toEqual([
+        '2026-01-05', '2026-01-08', '2026-01-12', '2026-01-15', '2026-01-19',
+      ])
+    })
+
+    it('lässt ausgenommene Vorkommen weg und nimmt verschobene mit', async () => {
+      antworteMit([
+        {
+          ...geburtstag1995,
+          recurrence: JSON.stringify({
+            rrule: 'FREQ=YEARLY',
+            ausnahmen: ['2027-03-14'],
+            abweichungen: {
+              '2028-03-14': { start: '2028-03-15T09:00:00Z', ende: '2028-03-15T10:00:00Z', titel: 'Nachgefeiert' },
+            },
+          }),
+        },
+      ])
+
+      const { events } = await loadCalendarEventsOfflineFirst(
+        '2026-01-01T00:00:00Z',
+        '2029-01-01T00:00:00Z',
+        undefined,
+        1,
+        'Europe/Berlin',
+      )
+      expect(events.map((e) => e.vorkommen)).toEqual(['2026-03-14', '2028-03-14'])
+      expect(events[1].title).toBe('Nachgefeiert')
+    })
+
+    it('speichert auch bei einem Einzeltermin ein Wiederholungsdokument', async () => {
+      // Der Kern der Metadaten-Entscheidung: ein leeres Feld neben lauter
+      // gefüllten wäre in der Datenbank selbst eine Auskunft darüber, welche
+      // Termine Serien sind.
+      vi.mocked(client.api).mockRejectedValue(new TypeError('NetworkError'))
+
+      await saveCalendarEventOffline({
+        title: 'Zahnarzt',
+        start_time: '2026-09-02T10:00:00Z',
+        end_time: '2026-09-02T11:00:00Z',
+      })
+
+      const auslauf = getOutbox().find((m) => m.entity === 'calendar')
+      expect(auslauf?.payload.recurrence).toBeTruthy()
+      expect(auslauf?.payload.recurrence.startsWith(CALENDAR_CIPHERTEXT_PREFIX)).toBe(true)
+    })
+
+    it('verschlüsselt die Regel, bevor sie den Rechner verlässt', async () => {
+      vi.mocked(client.api).mockRejectedValue(new TypeError('NetworkError'))
+
+      await saveCalendarEventOffline({
+        title: 'Geburtstag',
+        start_time: '2026-03-14T00:00:00Z',
+        end_time: '2026-03-15T00:00:00Z',
+        all_day: true,
+        recurrence: '{"rrule":"FREQ=YEARLY"}',
+      })
+
+      const auslauf = getOutbox().find((m) => m.entity === 'calendar')
+      expect(auslauf?.payload.recurrence.startsWith(CALENDAR_CIPHERTEXT_PREFIX)).toBe(true)
+      expect(auslauf?.payload.recurrence).not.toContain('FREQ')
+      expect(auslauf?.payload.recurrence).not.toContain('YEARLY')
+    })
+  })
+
+  describe('Schlüssel unter der echten Kennung', () => {
+    // Bis zum 22.09.2026 liess der Schreibpfad den `userId`-Parameter weg.
+    // Jeder Schluessel landete unter der Kennung 1, der Lesepfad suchte unter
+    // der echten — fuer jedes Konto ausser dem ersten blieb alles Chiffretext,
+    // und eine Serie, deren Regel unlesbar ist, erscheint nur noch einmal.
+    const KONTO = 18
+
+    beforeEach(() => {
+      clearNotesKeyCache()
+      localStorage.clear()
+      grundbestandZuruecksetzen()
+      useAuthStore.setState({ user: { id: KONTO, username: 'pruefung' } as any })
+    })
+
+    afterEach(() => {
+      useAuthStore.setState({ user: null })
+      localStorage.clear()
+      clearNotesKeyCache()
+    })
+
+    function antworteMit(termine: any[]) {
+      vi.mocked(client.api).mockImplementation(async (pfad: string) => {
+        if (pfad.startsWith('/calendar/events')) return termine as any
+        return [] as any
+      })
+    }
+
+    it('legt den Schluessel beim Speichern unter der echten Kennung ab', async () => {
+      vi.mocked(client.api).mockResolvedValue({
+        id: 1,
+        event_id: 'neu-1',
+        title: 'x',
+        start: '2026-09-14T09:00:00.000Z',
+        end: '2026-09-14T10:00:00.000Z',
+      } as any)
+
+      await saveCalendarEventOffline({
+        title: 'Geburtstag Lisa',
+        start_time: '2026-09-14 09:00',
+        end_time: '2026-09-14 10:00',
+        recurrence: '{"rrule":"FREQ=YEARLY"}',
+      })
+
+      expect(exportUserNotesKey(KONTO)).toBeTruthy()
+      expect(exportUserNotesKey(1)).toBeNull()
+    })
+
+    it('oeffnet den Altbestand und uebernimmt den Schluessel — die Serie kommt zurueck', async () => {
+      // Aufbau wie nach dem Schreibfehler: der Schluessel liegt unter 1,
+      // angemeldet ist Konto 18, unter 18 liegt nichts.
+      const alt = await getOrCreateUserNotesKey(1)
+      const altRoh = exportUserNotesKey(1)
+      const uid = 'geb-alt-1'
+      const verTitel = await encryptCalendarField('Geburtstag Lisa', uid, 'title', alt, 1)
+      const verRegel = await encryptCalendarField('{"rrule":"FREQ=YEARLY"}', uid, 'recurrence', alt, 1)
+      clearNotesKeyCache()
+      localStorage.removeItem('msm_e2ee_notes_key_18')
+
+      antworteMit([
+        {
+          id: 1,
+          event_id: uid,
+          title: verTitel,
+          start: '1995-03-13T23:00:00.000Z',
+          end: '1995-03-14T23:00:00.000Z',
+          all_day: true,
+          recurrence: verRegel,
+          user_id: KONTO,
+        },
+      ])
+
+      const { events } = await loadCalendarEventsOfflineFirst(
+        '2026-03-01T00:00:00Z',
+        '2026-04-01T00:00:00Z',
+        undefined,
+        KONTO,
+        'Europe/Berlin',
+      )
+
+      // Der Titel ist lesbar …
+      expect(events).toHaveLength(1)
+      expect(events[0].title).toBe('Geburtstag Lisa')
+      // … und die Regel auch, sonst stuende hier kein Vorkommen von 2026.
+      expect(events[0].istSerie).toBe(true)
+      expect(events[0].vorkommen).toBe('2026-03-14')
+      // Der Beleg ist erbracht, also wandert der Schluessel auf die echte Kennung.
+      expect(exportUserNotesKey(KONTO)).toBe(altRoh)
+    })
+
+    it('uebernimmt nichts, was sich nicht oeffnen laesst', async () => {
+      // Derselbe Aufbau, aber der Schluessel unter 1 gehoert jemand anderem:
+      // er oeffnet keine Zeile dieses Kontos, also bleibt er liegen.
+      const fremd = await getOrCreateUserNotesKey(77)
+      const uid = 'fremd-1'
+      const verTitel = await encryptCalendarField('Nicht fuer dich', uid, 'title', fremd, 77)
+      clearNotesKeyCache()
+      localStorage.clear()
+      await getOrCreateUserNotesKey(1) // ein anderer, unbeteiligter Altbestand
+
+      antworteMit([
+        {
+          id: 1,
+          event_id: uid,
+          title: verTitel,
+          start: '2026-03-14T09:00:00.000Z',
+          end: '2026-03-14T10:00:00.000Z',
+          recurrence: '{"rrule":null}',
+          user_id: KONTO,
+        },
+      ])
+
+      const { events } = await loadCalendarEventsOfflineFirst(
+        '2026-03-01T00:00:00Z',
+        '2026-04-01T00:00:00Z',
+        undefined,
+        KONTO,
+        'Europe/Berlin',
+      )
+
+      expect(events[0].title.startsWith(CALENDAR_CIPHERTEXT_PREFIX)).toBe(true)
+      expect(exportUserNotesKey(KONTO)).toBeNull()
     })
   })
 })

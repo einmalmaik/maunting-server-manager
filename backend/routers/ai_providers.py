@@ -28,6 +28,7 @@ from schemas.ai_provider import (
     AiProviderResponse,
     AiProviderTestResponse,
     AiProviderUpdate,
+    AiSprachwegResponse,
 )
 from services import (
     ai_limit_service,
@@ -39,6 +40,7 @@ from services import (
     audit_service,
 )
 from services.ai_provider_service import AiProviderConfigurationError
+from services.ai_voice import sprachwege
 from services.dis_client import DisSidecarError
 from services.openai_compatible_adapter import (
     AiProviderRequestError,
@@ -99,6 +101,8 @@ def _admin_response(provider: AiProvider) -> AiProviderResponse:
         realtime_text_output_price_micro_usd_per_million=provider.realtime_text_output_price_micro_usd_per_million,
         realtime_audio_input_price_micro_usd_per_million=provider.realtime_audio_input_price_micro_usd_per_million,
         realtime_audio_output_price_micro_usd_per_million=provider.realtime_audio_output_price_micro_usd_per_million,
+        realtime_backend_model=provider.realtime_backend_model,
+        realtime_minute_price_micro_usd=provider.realtime_minute_price_micro_usd,
         standard_enabled=bool(getattr(provider, "standard_enabled", bool(provider.default_model))),
         worker_enabled=bool(getattr(provider, "worker_enabled", bool(provider.worker_model))),
         ethics_enabled=bool(getattr(provider, "ethics_enabled", bool(provider.ethics_model))),
@@ -313,8 +317,12 @@ async def test_provider(
         or provider.worker_model
         or provider.ethics_model
         or (
+            # `bekannt` und nicht `ALLE`: das Paket fuehrt keinen solchen
+            # Namen. Die Zeile warf einen AttributeError, sobald ein Zugang
+            # weder Standard- noch Worker- noch Ethikmodell trug — der Test-
+            # Knopf endete dann in einem 500 statt in einer Auskunft.
             ai_provider_registry.anbieter(provider.provider_kind).empfehlung
-            if provider.provider_kind in ai_provider_registry.ALLE
+            if ai_provider_registry.bekannt(provider.provider_kind)
             else None
         )
         or provider.transcription_model
@@ -405,7 +413,11 @@ def list_provider_kinds(
             protokoll=spec.protokoll,
             katalog_braucht_schluessel=spec.katalog_braucht_schluessel,
             ressource_noetig=spec.ressource_noetig,
-            realtime_tauglich=bool(getattr(spec, "realtime_tauglich", False)),
+            realtime_tauglich=spec.realtime_tauglich,
+            sprachwege=[
+                AiSprachwegResponse(**sprachwege.weg(name).als_dict())
+                for name in spec.sprachwege
+            ],
             fuehrt_katalog=spec.catalog_url is not None,
             kann_hoeren=bool(spec.gehoer_wege),
         )
@@ -496,26 +508,42 @@ async def list_catalog_models(
     except Exception as exc:
         logger.info("Katalogabruf fuer %s fehlgeschlagen: %s", kind, exc)
         return []
-    return [
-        AiCatalogModelResponse(
-            model_id=modell.model_id,
-            name=modell.name,
-            reasoning=modell.denkt,
-            # Ohne Deckel: der Betreiber soll sehen, was das Modell **kann**.
-            # Was ein einzelner Benutzer davon waehlen darf, entscheidet
-            # spaeter seine Rolle — das ist eine andere Frage als diese.
-            efforts=ai_reasoning.waehlbare_stufen(modell, None),
-            default_effort=modell.standard_stufe,
-            mandatory=modell.zwingend,
-            # Die Empfehlung steht in der Anbieterliste und wird hier nur
-            # zugeordnet. Trifft sie auf kein Modell — weil der Anbieter die
-            # Kennung umbenannt oder abgekuendigt hat —, bleibt schlicht jede
-            # Zeile ohne Marke. Nie eine erfundene daneben.
-            recommended=modell.model_id == ai_provider_registry.anbieter(kind).empfehlung,
-            vision=modell.sieht,
-        )
-        for modell in modelle
-    ]
+    return [_katalogantwort(kind, modell) for modell in modelle]
+
+
+def _katalogantwort(kind: str, modell) -> AiCatalogModelResponse:
+    """Ein Katalogmodell, wie die Einstellungsseite es zeigt.
+
+    Eine Funktion fuer beide Endpunkte — Liste und Einzelmodell. Vorher stand
+    derselbe Aufbau zweimal da, und das naechste Feld haette in einem der
+    beiden gefehlt.
+    """
+    return AiCatalogModelResponse(
+        model_id=modell.model_id,
+        name=modell.name,
+        # ``None`` bleibt ``None``: „der Katalog sagt nichts" ist eine
+        # eigene Auskunft und kein „denkt nicht".
+        reasoning=modell.denkt,
+        # Ohne Deckel: der Betreiber soll sehen, was das Modell **kann**.
+        # Was ein einzelner Benutzer davon waehlen darf, entscheidet
+        # spaeter seine Rolle — das ist eine andere Frage als diese.
+        efforts=ai_reasoning.waehlbare_stufen(modell, None),
+        default_effort=modell.standard_stufe,
+        mandatory=modell.zwingend,
+        # Die Empfehlung steht in der Anbieterliste und wird hier nur
+        # zugeordnet. Trifft sie auf kein Modell — weil der Anbieter die
+        # Kennung umbenannt oder abgekuendigt hat —, bleibt schlicht jede
+        # Zeile ohne Marke. Nie eine erfundene daneben. Bei Anbietern ohne
+        # Katalog gibt es keine, weil die Kennung dem Betreiber gehoert.
+        recommended=modell.model_id == ai_provider_registry.anbieter(kind).empfehlung,
+        # Geliehen wie Fenster und Stufen: heisst ein Azure-Deployment wie das
+        # Modell, steht hier die Wahrheit, sonst `null` — und `null` heisst
+        # "unbekannt", nicht "sieht nichts".
+        vision=modell.sieht,
+        context_tokens=modell.kontext_tokens,
+        max_output_tokens=modell.max_ausgabe_tokens,
+        shutdown_date=modell.abschaltung,
+    )
 
 
 @router.get(
@@ -560,24 +588,7 @@ async def find_catalog_model(
     )
     if modell is None:
         return None
-    return AiCatalogModelResponse(
-        model_id=modell.model_id,
-        name=modell.name,
-        reasoning=modell.denkt,
-        # Ohne Deckel, wie beim Katalogendpunkt: der Betreiber soll sehen, was
-        # das Modell kann. Was ein Benutzer davon wählen darf, entscheidet
-        # später seine Rolle.
-        efforts=ai_reasoning.waehlbare_stufen(modell, None),
-        default_effort=modell.standard_stufe,
-        mandatory=modell.zwingend,
-        # Eine Empfehlung kann es hier nicht geben: Anbieter ohne Katalog
-        # führen keine, weil die Kennung dem Betreiber gehört.
-        recommended=modell.model_id == ai_provider_registry.anbieter(kind).empfehlung,
-        # Geliehen wie Fenster und Stufen: heisst das Deployment wie das
-        # Modell, steht hier die Wahrheit, sonst `null` — und `null` heisst
-        # "unbekannt", nicht "sieht nichts".
-        vision=modell.sieht,
-    )
+    return _katalogantwort(kind, modell)
 
 
 @router.get("/providers", response_model=list[AiProviderAvailableResponse])

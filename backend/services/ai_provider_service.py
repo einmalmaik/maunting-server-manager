@@ -46,6 +46,13 @@ import re
 
 from services import ai_provider_registry, ai_model_price_service
 from services.ai_reasoning import RANGFOLGE
+from services.ai_voice.sprachwege import (
+    SPRACHEN as REALTIME_SPRACHEN,
+    VAD_STUFEN as REALTIME_VAD,
+    Sprachweg,
+    sprachweg_fuer,
+    weg as sprachweg_nach_name,
+)
 from services.dis_client import DisClient
 
 
@@ -344,27 +351,75 @@ def _assert_worker_rolle(
 
 ETHICS_MODI = ("off", "auto", "always", "critical")
 
-REALTIME_STIMMEN = frozenset(
-    {"alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"}
-)
-GEMINI_LIVE_STIMMEN = frozenset(
-    {"Puck", "Charon", "Kore", "Fenrir", "Aoede", "Zephyr", "Leda", "Orus"}
-)
-GEMINI_LIVE_STIMMEN_MAP = {s.lower(): s for s in GEMINI_LIVE_STIMMEN}
-REALTIME_SPRACHEN = frozenset({"auto", "de", "en"})
-REALTIME_VAD = frozenset({"auto", "low", "medium", "high"})
-REALTIME_2_REASONING = frozenset({"low", "medium", "high"})
+#: Die Preisfelder der Realtime-API — Token, getrennt nach Text und Audio.
 REALTIME_PREISFELDER = (
     "realtime_text_input_price_micro_usd_per_million",
     "realtime_text_output_price_micro_usd_per_million",
     "realtime_audio_input_price_micro_usd_per_million",
     "realtime_audio_output_price_micro_usd_per_million",
 )
+#: Der Preis je Minute Sprachsitzung, in Micro-USD — GPT-Live rechnet die
+#: Sitzung nach Dauer ab („billed per second", Modellseite `gpt-live-1`).
+REALTIME_MINUTENPREIS = "realtime_minute_price_micro_usd"
+
+
+def sprachweg(provider: AiProvider) -> Sprachweg | None:
+    """Der Sprachweg dieses Zugangs — aus seinem Anbieter und seinem Modell.
+
+    ``None`` heisst: der Anbieter trägt keinen, oder das eingestellte Modell
+    passt auf keinen seiner Wege.
+    """
+    if not ai_provider_registry.bekannt(provider.provider_kind):
+        return None
+    return sprachweg_fuer(
+        ai_provider_registry.anbieter(provider.provider_kind).sprachwege,
+        provider.realtime_model,
+    )
+
+
+def realtime_preisfelder(provider: AiProvider) -> tuple[str, ...]:
+    """Die Preisfelder, nach denen dieser Zugang abrechnet.
+
+    Die beiden Textpreise gelten auf jedem Weg — bei GPT-Live sind es die des
+    Backend-Modells, das dort die Token verbraucht. Audio-Token gibt es nur,
+    wo das Sprachmodell selbst in Token abrechnet; GPT-Live rechnet stattdessen
+    nach Minuten.
+    """
+    weg = sprachweg(provider)
+    felder = list(REALTIME_PREISFELDER[:2])
+    if weg is None or weg.audiopreise:
+        felder += REALTIME_PREISFELDER[2:]
+    if weg is not None and weg.minutenpreis:
+        felder.append(REALTIME_MINUTENPREIS)
+    return tuple(felder)
+
+
+def backend_modell(provider: AiProvider) -> str | None:
+    """Das Modell, das hinter GPT-Live nachdenkt und die Werkzeuge ruft.
+
+    Das eigene Feld, sonst das Standardmodell des Zugangs — dasselbe Modell,
+    das im getippten Chat antwortet, ist die naheliegende Vorgabe, und OpenAI
+    empfiehlt für diese Rolle ausdrücklich ein Modell der GPT-5.6-Reihe
+    (`gpt-5.6-terra`, für Kosten `gpt-5.6-luna`), also ein gewöhnliches
+    Chatmodell. Geraten wird nichts: ohne beides gibt es keines.
+    """
+    return (
+        (provider.realtime_backend_model or "").strip()
+        or (provider.default_model or "").strip()
+        or None
+    )
+
+
+def _kein_sprachmodell(spec) -> AiProviderConfigurationError:
+    namen = " und kein ".join(
+        f"{sprachweg_nach_name(name).label}-Modell" for name in spec.sprachwege
+    )
+    return AiProviderConfigurationError(f"Das gewählte Modell ist kein {namen}")
 
 
 def _assert_realtime_werte(provider: AiProvider) -> None:
     spec = ai_provider_registry.anbieter(provider.provider_kind) if ai_provider_registry.bekannt(provider.provider_kind) else None
-    if spec is None or not getattr(spec, "realtime_tauglich", False):
+    if spec is None or not spec.sprachwege:
         raise AiProviderConfigurationError("Realtime-Sprachmodus wird von diesem Anbieter nicht unterstützt")
     if not provider.enabled:
         raise AiProviderConfigurationError("Der Realtime-Zugang muss aktiviert sein")
@@ -373,50 +428,46 @@ def _assert_realtime_werte(provider: AiProvider) -> None:
     realtime_model = (provider.realtime_model or "").strip()
     if not realtime_model:
         raise AiProviderConfigurationError("Wähle ein Realtime-Modell aus")
-    is_google = provider.provider_kind == "google"
-    if is_google:
-        if "gemini" not in realtime_model.lower():
-            raise AiProviderConfigurationError("Das gewählte Modell ist kein Gemini-Live-Modell")
-        _assert_google_realtime_reasoning(realtime_model, provider.realtime_reasoning_effort)
-        voice_str = (provider.realtime_voice or "").strip()
-        if voice_str.lower() not in GEMINI_LIVE_STIMMEN_MAP:
-            raise AiProviderConfigurationError("Wähle eine eingebaute Gemini-Live-Stimme aus")
-    else:
-        if "realtime" not in realtime_model.lower():
-            raise AiProviderConfigurationError("Das gewählte Modell ist kein OpenAI-Realtime-Modell")
-        _assert_realtime_reasoning(realtime_model, provider.realtime_reasoning_effort)
-        if provider.realtime_voice not in REALTIME_STIMMEN:
-            raise AiProviderConfigurationError("Wähle eine eingebaute OpenAI-Stimme aus")
+    weg = sprachweg_fuer(spec.sprachwege, realtime_model)
+    if weg is None:
+        raise _kein_sprachmodell(spec)
+    _assert_sprachweg_denkstufe(weg, realtime_model, provider.realtime_reasoning_effort)
+    if weg.stimme(provider.realtime_voice) is None:
+        raise AiProviderConfigurationError(f"Wähle eine eingebaute {weg.label}-Stimme aus")
+    if weg.backend_modell and backend_modell(provider) is None:
+        raise AiProviderConfigurationError(
+            f"{weg.label} braucht ein Backend-Modell, das nachdenkt und die Werkzeuge ruft. "
+            "Wähle eines aus oder hinterlege ein Standardmodell."
+        )
     if provider.realtime_language not in REALTIME_SPRACHEN:
         raise AiProviderConfigurationError("Unbekannte Realtime-Antwortsprache")
     if provider.realtime_vad_eagerness not in REALTIME_VAD:
         raise AiProviderConfigurationError("Unbekannte Realtime-VAD-Empfindlichkeit")
 
 
-def _realtime_ist_zwei(modell: str | None) -> bool:
-    """Nur die explizite Realtime-2-Reihe erhält eine Denkstufe."""
-    return "realtime-2" in (modell or "").strip().lower()
+def _assert_sprachweg_denkstufe(weg: Sprachweg, modell: str | None, effort: str | None) -> str | None:
+    """Ob dieser Weg bei diesem Modell eine Denkstufe annimmt, und welche.
 
-
-def _assert_realtime_reasoning(modell: str | None, effort: str | None) -> str | None:
+    Nur die Form wird hier geprüft: das Wort muss eines sein, das der
+    **Endpunkt** kennt. Ob das Modell dahinter es führt, weiss erst der
+    Katalog — bei GPT-Live prüft das die Sitzung beim Aufbau gegen das
+    Backend-Modell (`live_session`), hier gibt es keinen Katalogabruf.
+    """
     wert = (effort or "").strip().lower() or None
     if wert is None:
         return None
-    if not _realtime_ist_zwei(modell):
+    if not weg.nimmt_denkstufe(modell):
         raise AiProviderConfigurationError(
-            "Eine Realtime-Denkstufe ist nur für die OpenAI-Realtime-2-Reihe verfügbar"
+            f"Eine Denkstufe ist bei {weg.label} nur für Modelle mit "
+            f"„{weg.denkstufen_merkmal}“ im Namen verfügbar"
+            if weg.denkstufen_merkmal
+            else f"{weg.label} nimmt keine Denkstufe an"
         )
-    if wert not in REALTIME_2_REASONING:
-        raise AiProviderConfigurationError("Unbekannte Realtime-Denkstufe")
-    return wert
-
-
-def _assert_google_realtime_reasoning(modell: str | None, effort: str | None) -> str | None:
-    wert = (effort or "").strip().lower() or None
-    if wert is None:
-        return None
-    if wert not in REALTIME_2_REASONING:
-        raise AiProviderConfigurationError("Unbekannte Realtime-Denkstufe")
+    if wert not in weg.denkstufen:
+        raise AiProviderConfigurationError(
+            f"Unbekannte Denkstufe für {weg.label}. Zulässig sind: "
+            + ", ".join(weg.denkstufen)
+        )
     return wert
 
 
@@ -436,33 +487,54 @@ def _realtime_felder_setzen(provider: AiProvider, values: dict) -> None:
         "realtime_reasoning_effort",
         "realtime_language",
         "realtime_vad_eagerness",
+        "realtime_backend_model",
         *REALTIME_PREISFELDER,
+        REALTIME_MINUTENPREIS,
     ):
         if feld not in values or values[feld] is None and feld in {"realtime_language", "realtime_vad_eagerness"}:
             continue
         wert = values[feld]
-        if feld in {"realtime_model", "realtime_voice", "realtime_reasoning_effort"}:
+        if feld in {"realtime_model", "realtime_voice", "realtime_reasoning_effort", "realtime_backend_model"}:
             wert = (wert or "").strip() or None
         elif feld in {"realtime_language", "realtime_vad_eagerness"}:
             wert = str(wert).strip().lower()
         setattr(provider, feld, wert)
-    is_google = provider.provider_kind == "google"
-    if provider.realtime_voice is not None:
-        if is_google:
-            v_lower = provider.realtime_voice.lower()
-            if v_lower not in GEMINI_LIVE_STIMMEN_MAP:
-                raise AiProviderConfigurationError("Unbekannte Gemini-Live-Stimme")
-            provider.realtime_voice = GEMINI_LIVE_STIMMEN_MAP[v_lower]
-        else:
-            if provider.realtime_voice not in REALTIME_STIMMEN:
-                raise AiProviderConfigurationError("Unbekannte OpenAI-Realtime-Stimme")
-    if is_google:
-        provider.realtime_reasoning_effort = _assert_google_realtime_reasoning(
-            provider.realtime_model, provider.realtime_reasoning_effort
+    # Geprüft wird gegen den Weg, den das Modell wählt. Steht noch keines da
+    # (oder eines, das auf keinen Weg passt), gilt eine Stimme, die irgendein
+    # Weg dieses Anbieters kennt — ein Entwurf darf die Stimme vor dem Modell
+    # bekommen. Die strenge Prüfung gegen **den** Weg folgt spätestens beim
+    # Einschalten (`_assert_realtime_werte`).
+    weg = sprachweg(provider)
+    if weg is not None:
+        kandidaten: tuple[Sprachweg, ...] = (weg,)
+    elif ai_provider_registry.bekannt(provider.provider_kind):
+        kandidaten = tuple(
+            sprachweg_nach_name(name)
+            for name in ai_provider_registry.anbieter(provider.provider_kind).sprachwege
         )
     else:
-        provider.realtime_reasoning_effort = _assert_realtime_reasoning(
-            provider.realtime_model, provider.realtime_reasoning_effort
+        kandidaten = ()
+    # Ohne jeden Sprachweg sind Stimme und Stufe an diesem Zugang wirkungslos —
+    # geprüft wird dann nichts. Stehen geblieben sind sie meist nach einem
+    # Anbieterwechsel, und daran soll der Wechsel nicht scheitern; einschalten
+    # lässt sich der Sprachmodus hier ohnehin nicht (`_assert_realtime_werte`).
+    if provider.realtime_voice is not None and kandidaten:
+        for kandidat in kandidaten:
+            kanonisch = kandidat.stimme(provider.realtime_voice)
+            if kanonisch is not None:
+                provider.realtime_voice = kanonisch
+                break
+        else:
+            raise AiProviderConfigurationError(
+                "Unbekannte " + " / ".join(f"{k.label}-Stimme" for k in kandidaten)
+            )
+    if weg is not None:
+        provider.realtime_reasoning_effort = _assert_sprachweg_denkstufe(
+            weg, provider.realtime_model, provider.realtime_reasoning_effort
+        )
+    elif kandidaten and provider.realtime_reasoning_effort is not None:
+        raise AiProviderConfigurationError(
+            "Eine Realtime-Denkstufe braucht ein Sprachmodell, das sie annimmt"
         )
     if provider.realtime_language not in REALTIME_SPRACHEN:
         raise AiProviderConfigurationError("Unbekannte Realtime-Antwortsprache")
@@ -569,6 +641,10 @@ def create_provider(
     realtime_text_output_price_micro_usd_per_million: int | None = None,
     realtime_audio_input_price_micro_usd_per_million: int | None = None,
     realtime_audio_output_price_micro_usd_per_million: int | None = None,
+    # Nur für GPT-Live: das Modell dahinter (sonst gilt das Standardmodell) und
+    # der Preis je Minute Sitzung.
+    realtime_backend_model: str | None = None,
+    realtime_minute_price_micro_usd: int | None = None,
     # Optional: die Worker-Rolle dieses Zugangs (docs/agentic-framework.md,
     # Abschnitt 5). Ohne Worker-Modell gilt der heutige Ein-Modell-Betrieb.
     # Zählt bewusst **nicht** als Funktion im Sinne der Prüfung unten: Worker
@@ -686,6 +762,8 @@ def create_provider(
         "realtime_text_output_price_micro_usd_per_million": realtime_text_output_price_micro_usd_per_million,
         "realtime_audio_input_price_micro_usd_per_million": realtime_audio_input_price_micro_usd_per_million,
         "realtime_audio_output_price_micro_usd_per_million": realtime_audio_output_price_micro_usd_per_million,
+        "realtime_backend_model": realtime_backend_model,
+        REALTIME_MINUTENPREIS: realtime_minute_price_micro_usd,
     })
     _realtime_auswahl_anwenden(db, provider, verlangt=realtime_default)
     db.flush()

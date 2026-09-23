@@ -601,6 +601,23 @@ dafuer KEINEN Termin und verwende die Zeitangabe nicht fuer andere Termine. \
 wenn ein bestehender Termin ausdruecklich geaendert oder verschoben werden soll ("verschiebe \
 das Meeting auf..."). Sollen Termine entfernt werden ("Termine heute Abend entfernen"), \
 lies vorhandene Termine mit `calendar_read` und loesche sie mit `propose_calendar_event_delete`. \
+5a. Wiederkehrende Termine (`recurrence`): Was sich regelmaessig wiederholt — Geburtstage, \
+Gehalt, Miete, woechentliche Besprechungen, Muellabfuhr — legst du EINMAL mit dem Feld \
+`recurrence` an, niemals als mehrere Einzeltermine pro Jahr oder Monat. "Meine Freundin hat \
+am 14. Maerz Geburtstag" ergibt genau einen Aufruf mit `recurrence={"takt":"jaehrlich"}` und \
+`all_day=true`; setze als Startdatum das naechste Vorkommen. Bei `all_day=true` laeuft ein \
+ganzer Tag von Mitternacht bis Mitternacht: `start_time` ist "<Tag> 00:00", `end_time` ist \
+"<Folgetag> 00:00" — nicht 23:59, sonst wird der Termin in abonnierten Kalendern zu einem \
+Tag ohne Laenge. Die Felder: `takt` ist Pflicht, \
+sobald es eine Wiederholung gibt. `intervall` meint "jedes wievielte Mal" (2 = alle zwei \
+Wochen), Vorgabe 1. `wochentage` gibt es NUR beim Takt "woechentlich" ("Mo und Do" ergibt \
+["MO","DO"]). `bis` (Datum) und `anzahl` schliessen einander aus; ohne beides laeuft die \
+Serie unbegrenzt, und genau das ist bei Geburtstagen richtig. Nicht unterstuetzt sind krumme \
+Regeln wie "letzter Werktag des Monats" oder "dritter Freitag" — sage in diesem Fall, dass \
+du nur feste Takte anlegen kannst, und schlage den naechstliegenden vor, statt heimlich einen \
+anderen Tag zu waehlen. Aendert der Benutzer an einem Serientermin nur Titel, Ort oder Zeit, \
+lasse `recurrence` weg: fehlt das Feld, bleibt die Serie unveraendert. Soll die Wiederholung \
+weg, schicke ausdruecklich `recurrence={"takt":null}`. \
 Greife fuer Mail- oder Kalenderaufgaben niemals auf Computer-Use, Maus-/Tastatursteuerung \
 oder Bildschirmfotos zurueck. \
 Die verknuepften Postfaecher und Kalender stehen mit Name und ID in deiner Lage. \
@@ -1628,6 +1645,26 @@ NUR_GETIPPT = frozenset({
 })
 
 
+#: Wie im Gespraech ueber einen Vorschlag entschieden wird. Herausgeloest aus
+#: `GESPROCHEN`, weil es auch dort gilt, wo das Modell nicht selbst spricht
+#: (`HINTER_DER_STIMME`) — zwei Abschriften liefen beim naechsten Umbau
+#: auseinander. `GESPROCHEN` ist dadurch byteweise unveraendert.
+ZUSTIMMUNG_GESPROCHEN = """\
+Wartet ein Vorschlag auf seine Zustimmung, sag in einem Satz, was du tun
+wuerdest, und frag, ob du es tun sollst. Ein klares "Ja" fuehrt es aus, ein
+klares "Nein" laesst es. Sagt er etwas anderes, ist das keine Antwort auf die
+Frage, sondern ein neuer Auftrag — behandle ihn so.
+
+Wartet er nicht — die Lage nennt den autonomen Modus als aktiv —, dann frag
+auch nicht. Er laeuft, waehrend du redest; sag hinterher in einem Satz, was
+passiert ist.
+
+Es gibt nichts, was du auf eine Karte im Panel verschieben musst — Loeschen und
+das Einspielen eines Backups eingeschlossen. Der Weg ist derselbe wie bei allem
+anderen: sag, was du tun wuerdest, frag, und handle nach der Antwort. Verweise
+ihn nicht auf einen Knopf; im Sprachmodus gibt es keinen."""
+
+
 #: Was nur gesprochen gilt — der Gegenpol zu `NUR_GETIPPT`.
 #:
 #: Kommt **ans Ende** des Prompts und ersetzt keinen der Bloecke davor. Die
@@ -1667,19 +1704,43 @@ Frag nicht, ob du anfangen sollst — er hat dich bereits gebeten. Musst du
 etwas wissen, frag es geradeheraus im Satz; deine Antwortmoeglichkeiten werden
 mitgesprochen, und er antwortet einfach.
 
-Wartet ein Vorschlag auf seine Zustimmung, sag in einem Satz, was du tun
-wuerdest, und frag, ob du es tun sollst. Ein klares "Ja" fuehrt es aus, ein
-klares "Nein" laesst es. Sagt er etwas anderes, ist das keine Antwort auf die
-Frage, sondern ein neuer Auftrag — behandle ihn so.
+""" + ZUSTIMMUNG_GESPROCHEN
 
-Wartet er nicht — die Lage nennt den autonomen Modus als aktiv —, dann frag
-auch nicht. Er laeuft, waehrend du redest; sag hinterher in einem Satz, was
-passiert ist.
 
-Es gibt nichts, was du auf eine Karte im Panel verschieben musst — Loeschen und
-das Einspielen eines Backups eingeschlossen. Der Weg ist derselbe wie bei allem
-anderen: sag, was du tun wuerdest, frag, und handle nach der Antwort. Verweise
-ihn nicht auf einen Knopf; im Sprachmodus gibt es keinen."""
+#: Was gesprochen gilt, wenn **ein anderes Modell** spricht — der Schluss der
+#: Rolle ``live``, des Backends hinter GPT-Live (`ai_voice.live_session`).
+#:
+#: Dort hoert der Mensch nicht dieses Modell, sondern GPT-Live, und das bekommt
+#: den Text dieses Modells zurueck und sagt ihn in eigenen Worten. Was
+#: `GESPROCHEN` dem sprechenden Modell auftraegt, trifft hier deshalb nur zur
+#: Haelfte: die Form (keine Formatierung, Zahlen in Worten, keine Pfade) gilt
+#: erst recht, der Codeblock dagegen, der dort "gezeigt statt vorgelesen" wird,
+#: erschiene hier nirgends — es gibt keinen Schirm, nur die Stimme. OpenAI sagt
+#: dasselbe ueber das Backend: "Keep large structured payloads, lengthy tool
+#: output, and Markdown intended for display in the backend. Give GPT-Live the
+#: relevant facts and let it choose how to say them." (Delegation and tools,
+#: "Start with your existing backend prompt", gelesen am 22.09.2026).
+#:
+#: Aus demselben Grund steht kein Widerruf von `GESPROCHEN` hier, sondern ein
+#: eigener Block an seiner Stelle — siehe den Kommentar dort.
+HINTER_DER_STIMME = """\
+Du sprichst nicht selbst. Was du zurueckgibst, bekommt ein Sprachassistent, der
+gerade mit dem Menschen redet, und er sagt es ihm in eigenen Worten. Der Mensch
+hoert zu; was du schreibst, sieht er nie.
+
+Gib deshalb die Sache zurueck und keine Darstellung: Fliesstext ohne
+Ueberschriften, Listen, Sternchen oder Codebloecke. Nenne Zahlen gerundet und in
+Worten, wo es geht — "gut zwei Gigabyte" statt "2147483648 Bytes". Lass Pfade,
+Kennungen und Feldnamen weg; nenne den Namen einer Datei, nicht ihren Weg
+dorthin. Aus einem Log oder einer Datei gibst du die Stelle, um die es geht, in
+Worten wieder, nie eine Abschrift.
+
+Kuendige nichts an und erklaere keine Werkzeuge: das Gespraech haelt der
+Sprachassistent im Fluss, waehrend du arbeitest. Frag nicht, ob du anfangen
+sollst — er hat bereits gebeten. Fehlt dir etwas, gib genau diese eine Frage
+zurueck, statt zu raten.
+
+""" + ZUSTIMMUNG_GESPROCHEN
 
 
 #: Die drei Rollen und ihre Blockfolgen — die einzige Stelle, an der ein
@@ -1715,12 +1776,31 @@ REALTIME_BLOECKE = (
     UNTRUSTED,
 )
 
+#: Was hinter einer fremden Stimme nicht gilt (Rolle ``live``). Beide Bloecke
+#: setzen voraus, dass der Mensch **diesen** Text bekommt: `MITREDEN` laesst
+#: das Modell ansagen, was es gerade tut — hinter GPT-Live haelt die Stimme das
+#: Gespraech selbst im Fluss, und eine Ansage des Backends waere eine zweite,
+#: die sie nachsprechen muesste. `BELEGE` verlangt den Codeblock, den nur ein
+#: Schirm zeigen kann. Was an ihre Stelle tritt, steht in `HINTER_DER_STIMME`.
+NICHT_HINTER_DER_STIMME = frozenset({MITREDEN, BELEGE})
+
+LIVE_BLOECKE = tuple(
+    block for block in REALTIME_BLOECKE if block not in NICHT_HINTER_DER_STIMME
+)
+
 ROLLEN_BLOECKE = {
     "voll": BLOECKE,
     "gehirn": GEHIRN_BLOECKE,
     "worker": WORKER_BLOECKE,
     "realtime": REALTIME_BLOECKE,
+    # Das Backend hinter GPT-Live: dieselben Werkzeuge und Regeln wie Realtime,
+    # nur spricht ein anderes Modell (`ai_voice.live_session`).
+    "live": LIVE_BLOECKE,
 }
+
+#: Womit eine **gesprochene** Rolle schliesst — `GESPROCHEN`, ausser dort, wo
+#: nicht das Modell selbst spricht.
+SCHLUSS_GESPROCHEN: dict[str, str] = {"live": HINTER_DER_STIMME}
 
 
 #: Was nur auf dem Rechner des Benutzers gilt — angehaengt wie `GESPROCHEN`
@@ -1829,5 +1909,5 @@ def build(*, gesprochen: bool = False, rolle: str = "voll", desktop: bool = Fals
         # widerspraeche. Am Ende heisst jetzt nur noch "zuletzt gelesen" — was
         # fuer eine Anweisung spricht, die sagt, wie dieser Kanal zu bedienen
         # ist.
-        teile.append(GESPROCHEN)
+        teile.append(SCHLUSS_GESPROCHEN.get(rolle, GESPROCHEN))
     return "\n".join(teile)

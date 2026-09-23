@@ -548,35 +548,50 @@ def test_nachrichten_fuer_fortsetzung_extracts_only_trailing_deltas() -> None:
 
 
 @pytest.mark.asyncio
-async def test_stream_responses_passes_previous_response_id_and_compaction() -> None:
-    """previous_response_id und compaction Flag werden im Request-Payload uebertragen."""
-    client = _FakeClient(_sse(
+async def test_http_continues_with_the_whole_history_never_by_reference() -> None:
+    """Per HTTP gibt es keine Fortsetzung über ``previous_response_id``.
+
+    MSM sendet ``store: false``, und dann kennt OpenAI die vorige Antwort nur
+    im Speicher **derselben** WebSocket-Verbindung („the service keeps recent
+    previous-response state in a connection-local in-memory cache",
+    WebSocket-Mode-Leitfaden). Gemessen am 23.09.2026 gegen gpt-6-luna: per
+    HTTP ``400 previous_response_not_found``, jedes Mal. Bis dahin ging jede
+    Werkzeugrunde erst mit Verweis hinaus, scheiterte und wurde mit dem ganzen
+    Verlauf wiederholt — eine verlorene Anfrage je Runde.
+
+    Ebenso gemessen: ``compaction: true`` ist ``400 unknown_parameter``. Das
+    Feld gibt es in der Responses-API nicht; MSM fasst selbst zusammen
+    (`ai_compaction_service`).
+    """
+    client = _ZaehlenderClient(_sse(
         {"type": "response.created", "response": {"id": "resp_new_456", "stream_id": "strm_789"}},
         {"type": "response.output_text.delta", "delta": "Server ist gestartet."},
         {"type": "response.completed", "response": {"id": "resp_new_456", "usage": {"input_tokens": 50, "output_tokens": 15, "total_tokens": 65}}},
     ))
+    verlauf = [
+        {"role": "system", "content": "System"},
+        {"role": "user", "content": "Starte Server 1"},
+        {"role": "assistant", "content": None, "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "t", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "c1", "content": "ok"},
+    ]
     usage = StreamUsage()
     chunks = []
     async for chunk in stream_responses(
         client,
         provider=_provider(),
         api_key="sk-test",
-        messages=[
-            {"role": "system", "content": "System"},
-            {"role": "assistant", "content": None, "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "t", "arguments": "{}"}}]},
-            {"role": "tool", "tool_call_id": "c1", "content": "ok"},
-        ],
+        messages=verlauf,
         usage=usage,
         previous_response_id="resp_old_123",
-        compaction=True,
         use_websocket=False,
     ):
         chunks.append(chunk)
 
+    assert client.anfragen == 1
     assert client.gesendet is not None
-    assert client.gesendet["previous_response_id"] == "resp_old_123"
-    assert client.gesendet["compaction"] is True
-    assert client.gesendet["input"] == [{"type": "function_call_output", "call_id": "c1", "output": "ok"}]
+    assert "previous_response_id" not in client.gesendet
+    assert "compaction" not in client.gesendet
+    assert client.gesendet["input"] == nachrichten_uebersetzen(verlauf)
     assert usage.response_id == "resp_new_456"
     assert usage.stream_id == "strm_789"
     assert usage.total_tokens == 65
@@ -643,7 +658,11 @@ async def test_websocket_responses_session_streaming(monkeypatch: pytest.MonkeyP
 
     assert len(fake_ws.sent) == 1
     sent_obj = json.loads(fake_ws.sent[0])
-    assert sent_obj["type"] == "response.create"
+    # „This payload uses the same top-level fields as `POST /v1/responses`"
+    # (Referenz „Responses WebSocket events", `response.create`). Bis zum
+    # 23.09.2026 steckte der Körper unter `"response"` — OpenAI antwortete
+    # darauf mit „Missing required parameter: 'model'", auf jeden Zug.
+    assert sent_obj == {"type": "response.create", "model": "gpt-5.6-luna", "input": []}
     assert usage.response_id == "resp_ws_1"
     assert usage.stream_id == "strm_ws_1"
     assert usage.total_tokens == 160
@@ -655,34 +674,105 @@ async def test_websocket_responses_session_streaming(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
-async def test_websocket_failure_falls_back_to_http(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Wenn die WebSocket-Verbindung fehlschlaegt, faellt der Adapter transparent auf HTTP SSE zurueck."""
+async def test_a_held_session_keeps_its_one_connection(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Zwei Züge, eine Verbindung — sonst zeigt der Verweis auf die vorige Antwort ins Leere.
+
+    websockets 16 (requirements.txt) führt am Verbindungsobjekt kein ``closed``
+    mehr, nur ``state``. `connect` fragte ``getattr(ws, "closed", True)`` und las
+    damit jede Verbindung als geschlossen: jeder Zug öffnete eine neue, die alte
+    blieb offen liegen, und der zweite Zug einer Werkzeugschleife bekam
+    „Previous response with id '…' not found" — gemessen am 23.09.2026 mit
+    dieser Sitzung gegen gpt-6-luna.
+    """
+    from websockets.protocol import State
+
     import services.openai_responses_websocket as ws_mod
 
-    async def _failing_connect(*_args, **_kwargs):
-        raise ConnectionError("WS connection refused")
+    class _Verbindung:
+        """Die Form von ``websockets.asyncio.client.ClientConnection``: ``state``, kein ``closed``."""
 
-    monkeypatch.setattr(ws_mod.websockets, "connect", _failing_connect)
+        def __init__(self) -> None:
+            self.state = State.OPEN
+            self._rahmen: list[str] = []
 
-    client = _FakeClient(_sse(
-        {"type": "response.output_text.delta", "delta": "HTTP fallback antwortet."},
+        async def send(self, _daten: str) -> None:
+            self._rahmen.append(json.dumps(
+                {"type": "response.completed", "response": {"id": "resp_x", "usage": {}}}
+            ))
+
+        async def recv(self) -> str:
+            return self._rahmen.pop(0)
+
+        async def close(self) -> None:
+            self.state = State.CLOSED
+
+    verbindungen: list[_Verbindung] = []
+
+    async def _connect(*_args, **_kwargs):
+        verbindungen.append(_Verbindung())
+        return verbindungen[-1]
+
+    monkeypatch.setattr(ws_mod.websockets, "connect", _connect)
+
+    async def zug(sitzung) -> None:
+        async for _ in sitzung.stream_turn({"model": "gpt-6-luna", "input": []}, StreamUsage()):
+            pass
+
+    async with ws_mod.OpenAiResponsesWsSession("wss://api.openai.com/v1/responses", {}) as sitzung:
+        await zug(sitzung)
+        await zug(sitzung)
+        assert len(verbindungen) == 1
+        # Die Gegenprobe: eine wirklich geschlossene Verbindung wird ersetzt.
+        verbindungen[0].state = State.CLOSED
+        await zug(sitzung)
+        assert len(verbindungen) == 2
+
+    assert verbindungen[1].state is State.CLOSED
+
+
+@pytest.mark.asyncio
+async def test_without_a_lasting_socket_the_turn_goes_straight_to_http(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Eine WebSocket-Verbindung je Zug ist langsamer als HTTP, nicht schneller.
+
+    Der WebSocket-Modus spart dort, wo **eine** Verbindung viele Züge trägt
+    („reduces per-turn continuation overhead"). Eine neue Verbindung für
+    einen einzelnen Zug zahlt nur den Aufbau: gemessen am 23.09.2026 gegen
+    gpt-6-luna, je fünf Züge, Median 1,43 s gegen 0,99 s per HTTP mit
+    gehaltener Verbindung. Ohne `ws_session` wird deshalb gar keine geöffnet.
+    """
+    import services.openai_responses_websocket as ws_mod
+
+    verbindungen: list[str] = []
+
+    async def _connect(url, *_args, **_kwargs):
+        verbindungen.append(url)
+        raise AssertionError("ohne Sitzung keine WebSocket-Verbindung")
+
+    monkeypatch.setattr(ws_mod.websockets, "connect", _connect)
+
+    client = _ZaehlenderClient(_sse(
+        {"type": "response.output_text.delta", "delta": "per HTTP"},
         {"type": "response.completed", "response": {"usage": {"total_tokens": 40}}},
     ))
 
     usage = StreamUsage()
-    chunks = []
-    async for chunk in stream_responses(
-        client,
-        provider=_provider("openai"),
-        api_key="sk-test",
-        messages=[{"role": "user", "content": "Hallo"}],
-        usage=usage,
-        use_websocket=True,
-    ):
-        chunks.append(chunk)
+    chunks = [
+        chunk
+        async for chunk in stream_responses(
+            client,
+            provider=_provider("openai"),
+            api_key="sk-test",
+            messages=[{"role": "user", "content": "Hallo"}],
+            usage=usage,
+            use_websocket=True,
+        )
+    ]
 
-    assert len(chunks) == 1
-    assert chunks[0].text == "HTTP fallback antwortet."
+    assert verbindungen == []
+    assert client.anfragen == 1
+    assert [chunk.text for chunk in chunks] == ["per HTTP"]
     assert usage.total_tokens == 40
 
 
@@ -819,3 +909,277 @@ async def test_non_openai_provider_fallback_to_chat_completions() -> None:
     assert captured["url"].endswith("/chat/completions")
 
 
+
+
+# ── GPT-6: Fehlercodes und der Sicherheitsstopp ──────────────────────
+#
+# Die Codes stehen so in OpenAIs Fehlerliste (guides/error-codes) und in der
+# Beschreibung der Misalignment-Ueberwachung (guides/safety-checks/
+# misalignment-monitoring), beide gelesen am 22.09.2026. Die Rahmen hier sind
+# nach diesen Beschreibungen gebaut und nicht gemessen — ein echter
+# Sicherheitsstopp laesst sich nicht auf Bestellung ausloesen.
+
+
+def _fehlerkoerper(code: str, typ: str = "invalid_request_error") -> bytes:
+    return json.dumps(
+        {"error": {"type": typ, "code": code, "message": "Nachricht des Anbieters"}}
+    ).encode()
+
+
+def test_the_gpt6_error_codes_keep_their_class() -> None:
+    """Warten hilft bei einem Guthaben nicht, und ein Stopp ist keine Ablehnung."""
+    for code, marke in (
+        ("slow_down", "AI_PROVIDER_RATE_LIMITED"),
+        ("server_is_overloaded", "AI_PROVIDER_UNAVAILABLE"),
+        ("credit_balance_exhausted", "AI_PROVIDER_PAYMENT_REQUIRED"),
+        ("organization_spend_limit_exceeded", "AI_PROVIDER_PAYMENT_REQUIRED"),
+        ("project_spend_limit_exceeded", "AI_PROVIDER_PAYMENT_REQUIRED"),
+        ("organization_usage_limit_exceeded", "AI_PROVIDER_PAYMENT_REQUIRED"),
+        ("misalignment_policy_violation", "AI_PROVIDER_SAFETY_STOPPED"),
+    ):
+        # Einmal als Ende einer Antwort, einmal als nacktes ``error``-Ereignis —
+        # so kommt es auf der WebSocket-Verbindung.
+        assert _fehler_im_ereignis({
+            "type": "response.failed",
+            "response": {"error": {"code": code, "message": "x"}},
+        }) == (marke, "x")
+        assert _fehler_im_ereignis({
+            "type": "error",
+            "error": {"type": "invalid_request_error", "code": code, "message": "x"},
+        }) == (marke, "x")
+
+
+@pytest.mark.asyncio
+async def test_a_status_error_is_read_from_its_body() -> None:
+    """Derselbe Status, verschiedene Sachverhalte — der Code im Koerper entscheidet.
+
+    Bis zum 22.09.2026 las dieser Weg nur den Status: der Sicherheitsstopp
+    (403) hiess „der API-Key wurde abgelehnt", ein leeres Guthaben (429) „der
+    Anbieter drosselt gerade, versuche es gleich noch einmal".
+    """
+    for status, koerper, marke in (
+        (403, _fehlerkoerper("misalignment_policy_violation"), "AI_PROVIDER_SAFETY_STOPPED"),
+        (429, _fehlerkoerper("credit_balance_exhausted", "insufficient_quota"),
+         "AI_PROVIDER_PAYMENT_REQUIRED"),
+        (429, _fehlerkoerper("slow_down", "rate_limit_error"), "AI_PROVIDER_RATE_LIMITED"),
+        (503, _fehlerkoerper("server_is_overloaded", "service_unavailable_error"),
+         "AI_PROVIDER_UNAVAILABLE"),
+        # Ohne bekannten Code bleibt es beim Status — die Tabelle ergaenzt nur.
+        (403, _fehlerkoerper("unsupported_country_region_territory"), "AI_PROVIDER_AUTH_FAILED"),
+        (403, b"kein json", "AI_PROVIDER_AUTH_FAILED"),
+    ):
+        with pytest.raises(AiProviderRequestError) as fehler:
+            async for _ in stream_responses(
+                _FakeClient(koerper, status), provider=_provider(), api_key="sk-test",
+                messages=[{"role": "user", "content": "x"}], usage=StreamUsage(),
+                use_websocket=False,
+            ):
+                pass
+        assert fehler.value.code == marke, (status, koerper)
+
+
+class _ZaehlenderClient(_FakeClient):
+    """Zaehlt jede HTTP-Anfrage — ein zweiter Anlauf ist genau eine mehr."""
+
+    def __init__(self, koerper: bytes, status: int = 200) -> None:
+        super().__init__(koerper, status)
+        self.anfragen = 0
+
+    def stream(self, *args, **kwargs):
+        self.anfragen += 1
+        return super().stream(*args, **kwargs)
+
+
+class _Sitzung:
+    """Eine dauerhafte WebSocket-Sitzung, die ihre Schritte der Reihe nach liefert.
+
+    Ein ``StreamChunk`` wird ausgeliefert, eine Ausnahme geworfen — so laesst
+    sich ein Abbruch vor und nach dem ersten Stueck bauen, ohne eine echte
+    Verbindung. ``gesendet`` haelt fest, welcher Zug hinausging.
+    """
+
+    def __init__(self, *schritte) -> None:
+        self._schritte = schritte
+        self.gesendet: list[dict] = []
+
+    async def stream_turn(self, payload, usage, **_kwargs):
+        self.gesendet.append(payload)
+        for schritt in self._schritte:
+            if isinstance(schritt, BaseException):
+                raise schritt
+            yield schritt
+
+
+_VERLAUF_MIT_WERKZEUG = [
+    {"role": "system", "content": "Du bist MSM."},
+    {"role": "user", "content": "Starte Server 1"},
+    {"role": "assistant", "content": None,
+     "tool_calls": [{"id": "c1", "type": "function",
+                     "function": {"name": "read_server_status", "arguments": '{"server_id":1}'}}]},
+    {"role": "tool", "tool_call_id": "c1", "content": '{"status":"stopped"}'},
+]
+
+
+@pytest.mark.asyncio
+async def test_a_lasting_socket_continues_by_reference() -> None:
+    """Auf **derselben** Verbindung trägt der Verweis — und spart den Verlauf.
+
+    Gemessen am 23.09.2026 gegen gpt-6-luna mit ``store: false``: zweiter Zug
+    mit ``previous_response_id`` auf derselben Verbindung beantwortet, auf
+    einer neuen ``previous_response_not_found``. Die Sitzung sendet deshalb nur
+    die neuen Einträge, und zwar flach wie `POST /v1/responses`.
+    """
+    from services.openai_compatible_adapter import StreamChunk
+
+    sitzung = _Sitzung(StreamChunk("content", "läuft"))
+    stuecke = [
+        stueck.text
+        async for stueck in stream_responses(
+            _ZaehlenderClient(b""), provider=_provider(), api_key="sk-test",
+            messages=_VERLAUF_MIT_WERKZEUG, usage=StreamUsage(),
+            previous_response_id="resp_vorher", ws_session=sitzung,
+        )
+    ]
+
+    assert stuecke == ["läuft"]
+    (zug,) = sitzung.gesendet
+    assert zug["previous_response_id"] == "resp_vorher"
+    assert zug["model"] == "gpt-5.6-luna"
+    assert zug["store"] is False
+    assert zug["input"] == [
+        {"type": "function_call_output", "call_id": "c1", "output": '{"status":"stopped"}'}
+    ]
+    assert "compaction" not in zug
+
+
+@pytest.mark.asyncio
+async def test_a_safety_stop_is_never_sent_a_second_time() -> None:
+    """**Die Zusage.** „Do not automatically retry the blocked workflow."
+
+    Der Rueckfall von WebSocket auf HTTP ist sonst unsichtbar und richtig — hier
+    waere er genau die automatische Wiederholung, die OpenAI untersagt.
+    """
+    from services.openai_compatible_adapter import SICHERHEITSSTOPP
+
+    sitzung = _Sitzung(AiProviderRequestError(SICHERHEITSSTOPP, "gestoppt"))
+    http = _ZaehlenderClient(_sse(
+        {"type": "response.output_text.delta", "delta": "zweiter Anlauf"},
+        {"type": "response.completed", "response": {"usage": {}}},
+    ))
+
+    with pytest.raises(AiProviderRequestError) as fehler:
+        async for _ in stream_responses(
+            http, provider=_provider(), api_key="sk-test",
+            messages=[{"role": "user", "content": "x"}], usage=StreamUsage(),
+            ws_session=sitzung,
+        ):
+            pass
+
+    assert fehler.value.code == SICHERHEITSSTOPP
+    assert http.anfragen == 0
+
+
+@pytest.mark.asyncio
+async def test_nothing_is_sent_twice_once_output_went_out() -> None:
+    """Nach dem ersten Stueck gibt es keinen stillen zweiten Anlauf mehr.
+
+    Bis zum 22.09.2026 fing der WebSocket-Zweig jede Ausnahme, auch mitten im
+    Strom, und schickte denselben Zug per HTTP noch einmal los. Der Aufrufer
+    bekam den Anfang doppelt — und ein Werkzeugaufruf, der schon hinausging,
+    kam mit neuer Kennung ein zweites Mal.
+    """
+    from services.openai_compatible_adapter import StreamChunk
+
+    sitzung = _Sitzung(
+        StreamChunk("content", "Ich sehe nach"),
+        AiProviderRequestError("AI_PROVIDER_UNAVAILABLE"),
+    )
+    http = _ZaehlenderClient(_sse(
+        {"type": "response.output_text.delta", "delta": "Ich sehe nach"},
+        {"type": "response.completed", "response": {"usage": {}}},
+    ))
+
+    stuecke = []
+    with pytest.raises(AiProviderRequestError) as fehler:
+        async for stueck in stream_responses(
+            http, provider=_provider(), api_key="sk-test",
+            messages=[{"role": "user", "content": "x"}], usage=StreamUsage(),
+            ws_session=sitzung,
+        ):
+            stuecke.append(stueck.text)
+
+    assert fehler.value.code == "AI_PROVIDER_UNAVAILABLE"
+    assert stuecke == ["Ich sehe nach"]
+    assert http.anfragen == 0
+
+
+@pytest.mark.asyncio
+async def test_before_the_first_piece_the_fallback_still_works() -> None:
+    """Die Gegenprobe: vor dem ersten Stueck bleibt der Rueckfall unsichtbar.
+
+    Und er geht mit dem ganzen Verlauf hinaus — per HTTP traegt der Verweis auf
+    die vorige Antwort nicht (``store: false``).
+    """
+    sitzung = _Sitzung(AiProviderRequestError("AI_PROVIDER_UNAVAILABLE"))
+    http = _ZaehlenderClient(_sse(
+        {"type": "response.output_text.delta", "delta": "per HTTP"},
+        {"type": "response.completed", "response": {"usage": {}}},
+    ))
+
+    stuecke = [
+        stueck.text
+        async for stueck in stream_responses(
+            http, provider=_provider(), api_key="sk-test",
+            messages=_VERLAUF_MIT_WERKZEUG, usage=StreamUsage(),
+            previous_response_id="resp_vorher", ws_session=sitzung,
+        )
+    ]
+
+    assert stuecke == ["per HTTP"]
+    assert http.anfragen == 1
+    assert "previous_response_id" not in http.gesendet
+    assert http.gesendet["input"] == nachrichten_uebersetzen(_VERLAUF_MIT_WERKZEUG)
+
+
+@pytest.mark.asyncio
+async def test_a_safety_stop_ends_the_chain_retry_too() -> None:
+    """Auch mit Verweis auf die vorige Antwort bleibt ein Stopp eine Anfrage.
+
+    Bis zum 23.09.2026 folgte auf jede abgelehnte Fortsetzung ein zweiter
+    Anlauf ohne ``previous_response_id`` — nach einem Sicherheitsstopp genau
+    die Wiederholung, die OpenAI untersagt. Den Weg gibt es nicht mehr; der
+    Test hält fest, dass er auch nicht zurückkommt.
+    """
+    http = _ZaehlenderClient(_fehlerkoerper("misalignment_policy_violation"), 403)
+
+    with pytest.raises(AiProviderRequestError) as fehler:
+        async for _ in stream_responses(
+            http, provider=_provider(), api_key="sk-test",
+            messages=[{"role": "user", "content": "x"}], usage=StreamUsage(),
+            previous_response_id="resp_vorher", use_websocket=False,
+        ):
+            pass
+
+    assert fehler.value.code == "AI_PROVIDER_SAFETY_STOPPED"
+    assert http.anfragen == 1
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_background_response_keeps_its_class() -> None:
+    """Auch am Ende eines Hintergrundauftrags steht der Code, nicht nur „failed"."""
+    from services.openai_responses_adapter import poll_background_response
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "id": "resp_bg", "status": "failed",
+            "error": {"code": "misalignment_policy_violation", "message": "angehalten"},
+        })
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(AiProviderRequestError) as fehler:
+            await poll_background_response(
+                client, provider=_provider(), api_key="sk-test", response_id="resp_bg",
+                poll_interval=0.01, timeout=2.0,
+            )
+
+    assert fehler.value.code == "AI_PROVIDER_SAFETY_STOPPED"

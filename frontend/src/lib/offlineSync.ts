@@ -16,7 +16,8 @@ import { api, apiStream } from '@/api/client'
 import { nachweisKopf } from '@/services/mailboxNachweis'
 import { merkeStromKennung, vergissStromKennung } from '@/services/mailboxAbo'
 import type { NoteItem } from '@/pages/Notes'
-import type { CalendarEventItem } from '@/pages/Calendar'
+import type { CalendarEventItem, KalenderVorkommen } from '@/pages/Calendar'
+import { LEERES_DOKUMENT, ausbreiten, serieLesen } from '@/services/kalenderSerie'
 import { useAuthStore } from '@/stores/authStore'
 import {
   NOTE_CIPHERTEXT_PREFIX,
@@ -32,6 +33,8 @@ import {
   checkAndReceiveDeviceNotesKey,
   syncNotesKeyToPairedDevices,
   checkAndRespondToDeviceKeyRequests,
+  altschluessel,
+  altschluesselUebernehmen,
 } from '@/services/notesCalendarCrypto'
 
 export const STORAGE_KEYS = {
@@ -163,6 +166,10 @@ export function setOfflineCalendarEvents(events: CalendarEventItem[]): void {
       end: ev.end,
       description: ev.description ?? '',
       location: ev.location ?? '',
+      // Das Wiederholungsdokument gehört in den lokalen Spiegel, sonst
+      // verliert ein Serientermin beim nächsten Offline-Start seine Regel und
+      // erscheint als Einzeltermin.
+      recurrence: ev.recurrence ?? '',
       all_day: Boolean(ev.all_day),
       color: ev.color || 'primary',
       calendar: ev.calendar || 'MSM Kalender',
@@ -578,8 +585,9 @@ export async function redecryptPendingOfflineNotesAndCalendar(userId: number = 1
     const titleIsEnc = typeof ev.title === 'string' && ev.title.startsWith(CALENDAR_CIPHERTEXT_PREFIX)
     const descIsEnc = typeof ev.description === 'string' && ev.description.startsWith(CALENDAR_CIPHERTEXT_PREFIX)
     const locIsEnc = typeof ev.location === 'string' && ev.location.startsWith(CALENDAR_CIPHERTEXT_PREFIX)
+    const recIsEnc = typeof ev.recurrence === 'string' && ev.recurrence.startsWith(CALENDAR_CIPHERTEXT_PREFIX)
 
-    if (titleIsEnc || descIsEnc || locIsEnc) {
+    if (titleIsEnc || descIsEnc || locIsEnc || recIsEnc) {
       try {
         const decryptedTitle = titleIsEnc
           ? await decryptCalendarField(ev.title, ev.event_id, 'title', undefined, userId)
@@ -590,12 +598,16 @@ export async function redecryptPendingOfflineNotesAndCalendar(userId: number = 1
         const decryptedLoc = locIsEnc
           ? await decryptCalendarField(ev.location, ev.event_id, 'location', undefined, userId)
           : ev.location
+        const decryptedRec = recIsEnc
+          ? await decryptCalendarField(ev.recurrence, ev.event_id, 'recurrence', undefined, userId)
+          : ev.recurrence
 
         updatedEvents.push({
           ...ev,
           title: decryptedTitle,
           description: decryptedDesc,
           location: decryptedLoc,
+          recurrence: decryptedRec,
         })
         eventsChanged = true
         decryptedEventsCount++
@@ -628,6 +640,40 @@ function getEffectiveUserId(explicitUserId?: number): number {
     }
   } catch {}
   return 1
+}
+
+/**
+ * Ein Entschlüsselungsversuch, der den Altbestand mitnimmt.
+ *
+ * Bis zum 22.09.2026 schrieb diese Datei jeden Schlüssel unter der Kennung 1
+ * fort, weil der `userId`-Parameter fehlte. Der Schreibfehler ist behoben — was
+ * damals entstand, liegt aber weiter dort, und ohne diesen Weg bliebe es für
+ * immer Chiffretext.
+ *
+ * Der Altschlüssel ist mehrdeutig: er kann dem Konto 1 gehören oder falsch
+ * abgelegt worden sein. Deshalb wird er **nicht** einfach mitprobiert, sondern
+ * nur hier, an einer Zeile, die der Server diesem Konto ausgeliefert hat. Ein
+ * Konto bekommt nur die eigenen Zeilen; öffnet der Schlüssel eine davon, ist
+ * er belegt dieses Kontos Schlüssel, und genau dann wird er übernommen.
+ *
+ * Die Zusage der Primitiven bleibt davon unberührt: `decryptNoteTitle` und
+ * `decryptCalendarField` greifen weiterhin ausschließlich den Schlüssel der
+ * übergebenen Kennung (siehe `notesCalendarCrypto.test.ts`, „fails decryption
+ * if encrypted with a different user key").
+ */
+async function mitAltbestand<T>(
+  kennung: number,
+  versuch: (schluessel: CryptoKey | undefined) => Promise<T>,
+): Promise<T> {
+  try {
+    return await versuch(undefined)
+  } catch (fehler) {
+    const alt = await altschluessel()
+    if (!alt) throw fehler
+    const ergebnis = await versuch(alt)
+    void altschluesselUebernehmen(kennung).catch(() => {})
+    return ergebnis
+  }
 }
 
 // Globaler Event-Listener für neu eingegangene oder synchronisierte Notizenschlüssel
@@ -664,13 +710,17 @@ export async function loadNotesOfflineFirst(_options?: {
           let title = n.title
           let content = n.content
           try {
-            title = await decryptNoteTitle(n.title, n.note_uid, undefined, itemUid)
+            title = await mitAltbestand(itemUid, (k) =>
+              decryptNoteTitle(n.title, n.note_uid, k, itemUid),
+            )
           } catch {
             // Bei fehlendem oder falschem Schlüssel Ciphertext im Offline-Cache belassen,
             // damit nach Key-Sync redecryptPendingOfflineNotesAndCalendar greift
           }
           try {
-            content = await decryptNoteContent(n.content, n.note_uid, undefined, itemUid)
+            content = await mitAltbestand(itemUid, (k) =>
+              decryptNoteContent(n.content, n.note_uid, k, itemUid),
+            )
           } catch {
             // Ciphertext belassen
           }
@@ -711,8 +761,15 @@ export async function saveNoteOffline(
   let resultNote: NoteItem
 
   const targetUid = editingNote ? editingNote.note_uid : generateClientEntityId()
-  const encryptedTitle = await encryptNoteTitle(payload.title, targetUid)
-  const encryptedContent = payload.content !== undefined ? await encryptNoteContent(payload.content, targetUid) : ''
+  // `targetUid` ist die Notiz-Kennung, nicht die des Benutzers — die gehört
+  // getrennt mitgegeben, sonst greift der Vorgabewert 1 und der Schlüssel
+  // landet unter dem falschen Konto. Siehe ALTSCHLUESSEL_KENNUNG.
+  const kennung = getEffectiveUserId()
+  const encryptedTitle = await encryptNoteTitle(payload.title, targetUid, undefined, kennung)
+  const encryptedContent =
+    payload.content !== undefined
+      ? await encryptNoteContent(payload.content, targetUid, undefined, kennung)
+      : ''
 
   const wirePayload = {
     ...payload,
@@ -896,7 +953,12 @@ export async function toggleCheckItemOffline(
   const updated = localNotes.map((n) => (n.note_uid === note.note_uid ? updatedNote : n))
   setOfflineNotes(updated)
 
-  const encContent = await encryptNoteContent(updatedContent, note.note_uid)
+  const encContent = await encryptNoteContent(
+    updatedContent,
+    note.note_uid,
+    undefined,
+    note.user_id || getEffectiveUserId(),
+  )
   enqueueMutation({
     entity: 'note',
     action: 'update',
@@ -915,12 +977,87 @@ export async function toggleCheckItemOffline(
 
 // ── Public Offline-First Calendar API ──
 
+/**
+ * Entschlüsselt die vier Textfelder eines Termins, jedes für sich.
+ *
+ * Jedes Feld in seinem eigenen `try`: schlägt eines fehl, sollen die übrigen
+ * trotzdem lesbar sein. Ein Termin, dessen Ort sich nicht entschlüsseln lässt,
+ * ist immer noch ein Termin.
+ */
+async function entschluesselterTermin(
+  ev: CalendarEventItem,
+  itemUid: number,
+): Promise<CalendarEventItem> {
+  let title = ev.title
+  let description = ev.description
+  let location = ev.location
+  let recurrence = ev.recurrence
+  try {
+    title = await mitAltbestand(itemUid, (k) =>
+      decryptCalendarField(ev.title, ev.event_id, 'title', k, itemUid),
+    )
+  } catch {}
+  try {
+    description = ev.description
+      ? await mitAltbestand(itemUid, (k) =>
+          decryptCalendarField(ev.description, ev.event_id, 'description', k, itemUid),
+        )
+      : ''
+  } catch {}
+  try {
+    location = ev.location
+      ? await mitAltbestand(itemUid, (k) =>
+          decryptCalendarField(ev.location, ev.event_id, 'location', k, itemUid),
+        )
+      : ''
+  } catch {}
+  try {
+    recurrence = ev.recurrence
+      ? await mitAltbestand(itemUid, (k) =>
+          decryptCalendarField(ev.recurrence, ev.event_id, 'recurrence', k, itemUid),
+        )
+      : ''
+  } catch {}
+  return { ...ev, title, description, location, recurrence }
+}
+
+/**
+ * Der Grundbestand ist einmal je Sitzung zu holen.
+ *
+ * Der Server kann nicht wissen, welche Zeile eine Serie ist — das Feld
+ * `recurrence` ist verschlüsselt, und bei E2EE-Terminen bleibt es das auch für
+ * ihn (Betreiberentscheid 22.09.2026). Eine Bereichsabfrage für 2026 liefert
+ * deshalb keinen Geburtstag, der 1995 angelegt wurde: sein `start_time` liegt
+ * außerhalb.
+ *
+ * Also holt der Client einmal alles und hält es im Spiegel. Danach reichen die
+ * gewohnten Bereichsabfragen plus die Echtzeitmeldungen.
+ */
+let grundbestandGeholt = false
+
+export function grundbestandZuruecksetzen(): void {
+  grundbestandGeholt = false
+}
+
+async function holeGrundbestand(effectiveUid: number): Promise<CalendarEventItem[] | null> {
+  if (grundbestandGeholt) return null
+  const data = await api<CalendarEventItem[]>('/calendar/events')
+  if (!Array.isArray(data)) return null
+  const entschluesselt = await Promise.all(
+    data.map((ev) => entschluesselterTermin(ev, ev.user_id || effectiveUid)),
+  )
+  const zusammengefuehrt = mergeCalendarWithServer(entschluesselt)
+  grundbestandGeholt = true
+  return zusammengefuehrt
+}
+
 export async function loadCalendarEventsOfflineFirst(
   rangeStart: string,
   rangeEnd: string,
   eventType?: string,
-  userId?: number
-): Promise<{ events: CalendarEventItem[]; isOffline: boolean }> {
+  userId?: number,
+  zeitzone?: string | null
+): Promise<{ events: KalenderVorkommen[]; isOffline: boolean }> {
   const effectiveUid = getEffectiveUserId(userId)
   if (!hasUserNotesKey(effectiveUid)) {
     await checkAndReceiveDeviceNotesKey(effectiveUid).catch(() => false)
@@ -932,6 +1069,24 @@ export async function loadCalendarEventsOfflineFirst(
   let localEvents = getOfflineCalendarEvents()
   let isOffline = false
 
+  // Der Grundbestand hat seinen **eigenen** Versuch. Zöge er den
+  // Bereichsabruf mit, stünde bei einem einzigen Fehlschlag der ganze Kalender
+  // auf dem lokalen Spiegel — nur weil ein zusätzlicher Abruf nicht klappte,
+  // den es vorher gar nicht gab.
+  try {
+    // Das Ergebnis übernehmen, nicht nur ablegen: scheitert gleich darauf der
+    // Bereichsabruf, wäre `localEvents` sonst der Stand von **vor** dem
+    // Grundbestand — und die Serien fehlten in genau dem Fall, für den er da
+    // ist.
+    const grundbestand = await holeGrundbestand(effectiveUid)
+    if (grundbestand) localEvents = grundbestand
+  } catch {
+    // Beim nächsten Aufruf noch einmal: ein misslungener Grundbestand darf
+    // nicht für den Rest der Sitzung als erledigt gelten, sonst fehlen die
+    // Serien bis zum Neuladen der Seite.
+    grundbestandGeholt = false
+  }
+
   try {
     const catParam = eventType && eventType !== 'all' ? '&event_type=' + encodeURIComponent(eventType) : ''
     const data = await api<CalendarEventItem[]>(
@@ -939,31 +1094,7 @@ export async function loadCalendarEventsOfflineFirst(
     )
     if (Array.isArray(data)) {
       const decryptedData: CalendarEventItem[] = await Promise.all(
-        data.map(async (ev) => {
-          const itemUid = ev.user_id || effectiveUid
-          let title = ev.title
-          let description = ev.description
-          let location = ev.location
-          try {
-            title = await decryptCalendarField(ev.title, ev.event_id, 'title', undefined, itemUid)
-          } catch {}
-          try {
-            description = ev.description
-              ? await decryptCalendarField(ev.description, ev.event_id, 'description', undefined, itemUid)
-              : ''
-          } catch {}
-          try {
-            location = ev.location
-              ? await decryptCalendarField(ev.location, ev.event_id, 'location', undefined, itemUid)
-              : ''
-          } catch {}
-          return {
-            ...ev,
-            title,
-            description,
-            location,
-          }
-        })
+        data.map((ev) => entschluesselterTermin(ev, ev.user_id || effectiveUid)),
       )
       localEvents = mergeCalendarWithServer(decryptedData)
     }
@@ -971,25 +1102,45 @@ export async function loadCalendarEventsOfflineFirst(
     isOffline = true
   }
 
-  const startDt = new Date(rangeStart).getTime()
-  const endDt = new Date(rangeEnd).getTime()
+  const von = new Date(rangeStart)
+  const bis = new Date(rangeEnd)
 
-  const filtered = localEvents.filter((ev) => {
-    if (eventType && eventType !== 'all' && ev.event_type !== eventType) {
-      return false
+  const vorkommen: KalenderVorkommen[] = []
+  for (const ev of localEvents) {
+    if (eventType && eventType !== 'all' && ev.event_type !== eventType) continue
+
+    const serie = serieLesen(ev.recurrence)
+    const start = new Date(ev.start)
+    if (isNaN(start.getTime())) continue
+    const rohEnde = ev.end ? new Date(ev.end) : start
+    const ende = isNaN(rohEnde.getTime()) ? start : rohEnde
+
+    for (const v of ausbreiten(serie, start, ende, {
+      ganztaegig: Boolean(ev.all_day),
+      zeitzone,
+      fensterVon: von,
+      fensterBis: bis,
+    })) {
+      vorkommen.push({
+        ...ev,
+        title: v.titel || ev.title,
+        start: v.start.toISOString(),
+        end: v.ende.toISOString(),
+        vorkommen: serie.rrule ? v.schluessel : '',
+        istSerie: Boolean(serie.rrule),
+        // `event_id` ist bei einer Serie für alle Vorkommen dasselbe. Als
+        // React-Schlüssel oder zum Wiederfinden taugt nur beides zusammen.
+        schluessel: serie.rrule ? `${ev.event_id}#${v.schluessel}` : ev.event_id,
+      })
     }
-    const evStart = new Date(ev.start).getTime()
-    const rawEnd = ev.end ? new Date(ev.end).getTime() : NaN
-    const evEnd = isNaN(rawEnd) ? evStart : rawEnd
-    const validStart = isNaN(evStart) ? 0 : evStart
-    return validStart <= endDt && evEnd >= startDt
-  })
+  }
+  vorkommen.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
 
   if (!isOffline && getOutbox().length > 0) {
     void replayOutbox()
   }
 
-  return { events: filtered, isOffline }
+  return { events: vorkommen, isOffline }
 }
 
 export async function saveCalendarEventOffline(
@@ -1004,6 +1155,7 @@ export async function saveCalendarEventOffline(
     event_type?: string
     team_id?: number | null
     server_id?: number | null
+    recurrence?: string
   },
   formEventId?: string | null
 ): Promise<{ event: CalendarEventItem; queued: boolean }> {
@@ -1011,9 +1163,19 @@ export async function saveCalendarEventOffline(
   let resultEvent: CalendarEventItem
 
   const targetUid = formEventId || generateClientEntityId()
-  const encryptedTitle = await encryptCalendarField(payload.title, targetUid, 'title')
-  const encryptedDesc = payload.description ? await encryptCalendarField(payload.description, targetUid, 'description') : (payload.description ?? '')
-  const encryptedLoc = payload.location ? await encryptCalendarField(payload.location, targetUid, 'location') : (payload.location ?? '')
+  // `targetUid` ist die Termin-Kennung, nicht die des Benutzers — die gehört
+  // getrennt mitgegeben, sonst greift der Vorgabewert 1 und der Schlüssel
+  // landet unter dem falschen Konto. Siehe ALTSCHLUESSEL_KENNUNG.
+  const kennung = getEffectiveUserId()
+  const encryptedTitle = await encryptCalendarField(payload.title, targetUid, 'title', undefined, kennung)
+  const encryptedDesc = payload.description ? await encryptCalendarField(payload.description, targetUid, 'description', undefined, kennung) : (payload.description ?? '')
+  const encryptedLoc = payload.location ? await encryptCalendarField(payload.location, targetUid, 'location', undefined, kennung) : (payload.location ?? '')
+
+  // Das Wiederholungsdokument geht **immer** mit, auch bei Einzelterminen —
+  // dann eben als verschlüsseltes "keine Wiederholung". Ein leeres Feld neben
+  // lauter gefüllten wäre in der Datenbank selbst eine Auskunft.
+  const klartextSerie = payload.recurrence || LEERES_DOKUMENT
+  const encryptedRec = await encryptCalendarField(klartextSerie, targetUid, 'recurrence', undefined, kennung)
 
   const wirePayload = {
     ...payload,
@@ -1021,6 +1183,7 @@ export async function saveCalendarEventOffline(
     title: encryptedTitle,
     description: encryptedDesc,
     location: encryptedLoc,
+    recurrence: encryptedRec,
   }
 
   if (formEventId) {
@@ -1038,6 +1201,7 @@ export async function saveCalendarEventOffline(
       end: payload.end_time,
       description: payload.description ?? '',
       location: payload.location ?? '',
+      recurrence: klartextSerie,
       all_day: Boolean(payload.all_day),
       color: payload.color || 'primary',
       event_type: payload.event_type || 'personal',
@@ -1063,6 +1227,7 @@ export async function saveCalendarEventOffline(
       end: payload.end_time,
       description: payload.description ?? '',
       location: payload.location ?? '',
+      recurrence: klartextSerie,
       all_day: Boolean(payload.all_day),
       color: payload.color || 'primary',
       calendar: 'MSM Kalender',
@@ -1397,12 +1562,15 @@ export function handleIncomingSyncEvent(eventName: string, data: SyncEventPayloa
           window.dispatchEvent(new CustomEvent('msm:calendar-updated', { detail: data }))
         } else if (data.data && typeof data.data === 'object') {
           const raw = data.data
-          const isEncrypted = typeof raw.title === 'string' && raw.title.startsWith(CALENDAR_CIPHERTEXT_PREFIX)
+          const isEncrypted =
+            (typeof raw.title === 'string' && raw.title.startsWith(CALENDAR_CIPHERTEXT_PREFIX)) ||
+            (typeof raw.recurrence === 'string' && raw.recurrence.startsWith(CALENDAR_CIPHERTEXT_PREFIX))
           if (isEncrypted) {
             void (async () => {
               let title = raw.title
               let description = raw.description || ''
               let location = raw.location || ''
+              let recurrence = raw.recurrence || ''
               try {
                 title = await decryptCalendarField(raw.title, id, 'title', undefined, raw.user_id)
               } catch {}
@@ -1416,11 +1584,17 @@ export function handleIncomingSyncEvent(eventName: string, data: SyncEventPayloa
                   location = await decryptCalendarField(raw.location, id, 'location', undefined, raw.user_id)
                 }
               } catch {}
+              try {
+                if (raw.recurrence) {
+                  recurrence = await decryptCalendarField(raw.recurrence, id, 'recurrence', undefined, raw.user_id)
+                }
+              } catch {}
               const decryptedData: CalendarEventItem = {
                 ...raw,
                 title,
                 description,
                 location,
+                recurrence,
               }
               const current = getOfflineCalendarEvents()
               if (data.action === 'created') {

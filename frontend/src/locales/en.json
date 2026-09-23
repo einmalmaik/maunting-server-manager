@@ -79,7 +79,45 @@
     "updated": "Event updated",
     "deleteConfirmTitle": "Delete event",
     "deleteConfirmMessage": "Do you really want to permanently delete this event from your calendar?",
-    "deleted": "Event deleted"
+    "deleted": "Event deleted",
+    "recurrence": {
+      "label": "Repeat",
+      "none": "Does not repeat",
+      "daily": "Daily",
+      "weekly": "Weekly",
+      "monthly": "Monthly",
+      "yearly": "Yearly",
+      "everyNth": "Every",
+      "unit": {
+        "DAILY": "days",
+        "WEEKLY": "weeks",
+        "MONTHLY": "months",
+        "YEARLY": "years"
+      },
+      "weekday": {
+        "MO": "Mo",
+        "TU": "Tu",
+        "WE": "We",
+        "TH": "Th",
+        "FR": "Fr",
+        "SA": "Sa",
+        "SU": "Su"
+      },
+      "endsLabel": "Ends",
+      "endsNever": "Never",
+      "endsOn": "On",
+      "endsAfter": "After",
+      "scopeLabel": "What should change?",
+      "scopeSingle": "This event only",
+      "scopeSeries": "Entire series",
+      "scopeSingleHint": "The change applies to this occurrence alone. All others stay as they are.",
+      "scopeSeriesHint": "The change applies to every occurrence of the series ({{regel}}).",
+      "deleteOccurrenceTitle": "Cancel this occurrence?",
+      "deleteOccurrenceMessage": "Only this single occurrence is removed. The series continues.",
+      "deleteSeriesMessage": "The event and all of its repetitions will be deleted.",
+      "occurrenceDeleted": "Occurrence cancelled",
+      "reminderHint": "Note: for recurring events you create here, reminders reach your devices only. The server cannot send a reminder e-mail — it cannot read the recurrence rule, which is encrypted on your device."
+    }
   },
   "pageContext": {
     "overview": "Overview",
@@ -332,6 +370,7 @@
       },
       "recommended": "Recommended",
       "vision": "Reads images",
+      "contextShort": "{{tokens}} token context",
       "workerSection": "Workers (background tasks)",
       "workerHint": "Model and reasoning depth for background workers. If left blank, the primary chat model handles background tasks.",
       "workerModel": "Worker model",
@@ -359,31 +398,50 @@
         "none": "This model does not reason.",
         "levels": "Reasoning levels:",
         "toggleOnly": "This model supports reasoning, but only as an on/off toggle without intermediate levels.",
-        "mandatory": "Reasoning cannot be turned off for this model."
+        "mandatory": "Reasoning cannot be turned off for this model.",
+        "unknown": "The catalog does not say whether this model reasons. MSM therefore sends no reasoning level, and the provider's default applies. For a newly released model, “Reload models” may help.",
+        "context": "Context window: {{tokens}} tokens",
+        "maxOutput": "Output up to {{tokens}} tokens",
+        "shutdown": "The provider has announced that this model will be shut down on {{date}}."
       },
       "ttsHint": "A voice access. It does not appear in the chat model picker; it reads out what the chat model answers in voice mode. Who may use it is decided by the “Talk to the AI” permission.",
       "transcriptionModel": "Model for speech",
       "transcriptionModelHint": "Converts speech to text for legacy voice mode and chat dictation.",
       "transcriptionOff": "No model for speech",
       "realtime": {
-        "title": "OpenAI Realtime",
-        "googleTitle": "Gemini multimodal live (Realtime)",
-        "hint": "Sends speech directly to OpenAI over WebRTC. Tools, permissions and billing remain under panel control.",
-        "googleHint": "Bidirectional audio and tool streaming via the Gemini Multimodal Live API. Tools, permissions and billing remain under panel control.",
+        "wege": {
+          "openai_realtime": {
+            "title": "OpenAI Realtime",
+            "hint": "Sends speech directly to OpenAI over WebRTC. Tools, permissions and billing remain under panel control.",
+            "voice": "OpenAI voice",
+            "reasoningHint": "Only Realtime 2 supports a reasoning effort. It stays off for Realtime 1.5."
+          },
+          "openai_live": {
+            "title": "GPT-Live",
+            "hint": "Sends speech to GPT-Live over WebRTC. The voice listens and speaks at the same time and hands tasks to a backend model that calls the tools. Tools, permissions and billing remain under panel control.",
+            "voice": "GPT-Live voice",
+            "reasoningHint": "Applies to the backend model, not the voice. You can choose what GPT-Live accepts and the backend model supports according to the catalog."
+          },
+          "gemini_live": {
+            "title": "Gemini multimodal live (Realtime)",
+            "hint": "Bidirectional audio and tool streaming via the Gemini Multimodal Live API. Tools, permissions and billing remain under panel control.",
+            "voice": "Gemini live voice",
+            "reasoningHint": "Gemini 2.0 / 2.5 models support configurable reasoning effort levels."
+          }
+        },
+        "modelDecides": "The selected model decides which endpoint is used.",
         "enabled": "Use for Realtime voice mode",
         "model": "Realtime model",
-        "voice": "OpenAI voice",
-        "googleVoice": "Gemini live voice",
+        "voiceAny": "Voice",
         "voiceChoose": "Choose a voice …",
+        "backendModel": "Backend model",
+        "backendModelHint": "Reasons and calls the tools while GPT-Live speaks. Without a choice of its own, this access's default model is used.",
+        "backendModelDefault": "Same as default model ({{model}})",
+        "backendModelMissing": "Same as default model (none selected)",
         "reasoning": "Reasoning effort",
         "reasoningOff": "No reasoning effort",
-        "reasoningHint": "Only Realtime 2 supports a reasoning effort. It stays off for Realtime 1.5.",
-        "googleReasoningHint": "Gemini 2.0 / 2.5 models support configurable reasoning effort levels.",
-        "reasoningValues": {
-          "low": "Low",
-          "medium": "Medium",
-          "high": "High"
-        },
+        "reasoningDefault": "Backend model default",
+        "reasoningStale": "Does not match the selected model",
         "language": "Response language",
         "auto": "Automatic",
         "vad": "Response to speech pauses",
@@ -397,6 +455,10 @@
         "textOutputPrice": "Text output per 1M tokens",
         "audioInputPrice": "Audio input per 1M tokens",
         "audioOutputPrice": "Audio output per 1M tokens",
+        "backendInputPrice": "Backend model: input per 1M tokens",
+        "backendOutputPrice": "Backend model: output per 1M tokens",
+        "minutePrice": "Voice session per minute",
+        "minutePriceHint": "GPT-Live bills the session per second. Creating a session bills 15 seconds up front, credited against its running time. The backend model is billed separately by its tokens.",
         "legacyPaused": "While this access is active, voice mode does not use ElevenLabs, Pipecat or the transcription model."
       },
       "geminiSafetyOffHint": "Sets all 5 default safety filters (hate speech, harassment, dangerous content and so on) to BLOCK_NONE for Gemini and Gemma models via the Google AI Studio API."
@@ -1011,6 +1073,7 @@
         "AI_PROVIDER_REQUEST_REJECTED": "The provider rejected the request. Usually the model name is wrong.",
         "AI_PROVIDER_PAYMENT_REQUIRED": "The provider reports an exhausted balance. The key is fine, but the account needs funds.",
         "AI_PROVIDER_RATE_LIMITED": "The provider is rate limiting. Try again in a moment.",
+        "AI_PROVIDER_SAFETY_STOPPED": "The provider's safety monitoring stopped this run. It will not be retried automatically – first review what the AI has done so far.",
         "AI_PROVIDER_UNAVAILABLE": "The provider is unreachable.",
         "AI_PROVIDER_KEY_MISSING": "No API key is configured for this provider.",
         "AI_PROVIDER_MODEL_MISSING": "No model is configured for this provider.",
@@ -1070,7 +1133,9 @@
         "realtimeQuota": "This role's Realtime cost limit has been reached. The conversation is paused.",
         "rateLimit": "Rate limit reached. Please wait a moment. Limit 40,000 TPM — use fewer tools or raise the limit at https://platform.openai.com/account/rate-limits.",
         "connection": "Lost the connection to voice mode.",
-        "veraltet": "The panel does not support this voice mode yet. Please update the panel."
+        "veraltet": "The panel does not support this voice mode yet. Please update the panel.",
+        "safety": "The provider's safety monitoring stopped the conversation. It will not resume automatically.",
+        "content": "The provider ended the conversation because of its content."
       },
       "toVoiceMode": "Realtime mode",
       "toTextMode": "Text mode",
@@ -1089,6 +1154,7 @@
       "info": {
         "model": "Model",
         "voice": "Voice",
+        "backendModel": "Backend model",
         "sampleRate": "Sample rate",
         "maxSession": "Session length",
         "minutes": "{{count}} minutes",

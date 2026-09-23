@@ -363,6 +363,26 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
     Docstrings**, und die gehen nie über die Leitung. Bezahlt wurden nur die
     Umlaute in den Beschreibungen selbst. Wer hier Platz sucht, findet ihn
     nicht in der Kodierung — der Hebel bleibt das Zusammenlegen.
+
+    **Nachtrag 22.09.2026: Serientermine, und die Grenze bleibt bei 92.000.**
+    Kein neues Werkzeug — `propose_calendar_event_create` und
+    `propose_calendar_event_update` haben ein Feld `recurrence` bekommen.
+    Nachgemessen: aus der App **91.182** Zeichen, 89 Werkzeuge; aus dem Panel
+    **85.709** Zeichen, 83 Werkzeuge. Die Luft beträgt **818 Zeichen**.
+
+    Hier steckt ein vierter Hebel, der vorher nicht benannt war: **wohin eine
+    Auskunft gehört.** Die erste Fassung des Schemas beschrieb jedes Feld
+    ordentlich — Pflichtangabe, "jedes wievielte Mal", "nur bei
+    takt=woechentlich" — und kostete 1.664 Zeichen. Der Katalog stand damit bei
+    91.908, also 92 Zeichen unter der Grenze. Dieselbe Auskunft steht jetzt in
+    `ai_prompt._KALENDER_WIEDERHOLUNG`: 938 Zeichen im Katalog, der Rest im
+    Systemprompt.
+
+    Der Unterschied ist nicht Länge, sondern Häufigkeit. Der Katalog geht in
+    **jeder** Runde ungecacht mit; der Systemprompt wird zwischengespeichert
+    und in derselben Unterhaltung nur einmal bezahlt. Wer das nächste Mal
+    Platz sucht: erst prüfen, ob die Beschreibung überhaupt in den Katalog
+    gehört, dann zusammenlegen, und kürzen zuletzt.
      """
     for herkunft in ("panel", "desktop"):
         erlaubt = herkunft_schnitt(

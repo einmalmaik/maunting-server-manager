@@ -405,6 +405,11 @@ function Einstellungen({ konfiguration }: { konfiguration: AiVoiceConfig | null 
   const { t } = useTranslation()
   const zeilen: [string, string][] = [
     ['ai.voice.info.model', konfiguration?.model ?? '—'],
+    // Nur bei GPT-Live: dort denkt ein zweites Modell hinter der Stimme, und
+    // dessen Antworten hört man.
+    ...(konfiguration?.backend_model
+      ? [['ai.voice.info.backendModel', konfiguration.backend_model] as [string, string]]
+      : []),
     ['ai.voice.info.voice', konfiguration?.voice || '—'],
     ['ai.voice.info.sampleRate', `${(konfiguration?.sample_rate ?? 0) / 1000} kHz`],
     [

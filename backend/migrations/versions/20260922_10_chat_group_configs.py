@@ -21,8 +21,13 @@ eine Klartextzeile darueber, wer diese Gruppe verwaltet. Die Unterschrift des
 schreibenden Geraets liegt **innerhalb** des Umschlags.
 
 Revision ID: 20260922_10
-Revises: 20260922_01
+Revises: 20260922_03
 Create Date: 2026-09-22
+
+*Nachtraeglich umgehaengt.* Diese Kette entstand parallel zu den Kalender- und
+Sprachweg-Migrationen (`20260922_02`, `20260922_03`), beide auf `20260922_01`
+aufsetzend. Beim Zusammenfuehren waeren das zwei Alembic-Heads gewesen. Der
+juengere Zweig — dieser — haengt sich hinter den aelteren.
 """
 
 from __future__ import annotations
@@ -34,7 +39,7 @@ import sqlalchemy as sa
 
 
 revision: str = "20260922_10"
-down_revision: Union[str, None] = "20260922_01"
+down_revision: Union[str, None] = "20260922_03"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

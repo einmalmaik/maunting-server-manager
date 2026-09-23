@@ -105,14 +105,26 @@ def _sum_since(db: Session, user_id: int, since: datetime, column) -> int:
 
 
 def _sum_realtime_since(db: Session, user_id: int, since: datetime) -> int:
-    """Summiert nur Realtime-Sitzungen; die Modellkennung ist serverseitig gesetzt."""
+    """Summiert nur Echtzeit-Sprachsitzungen — erkannt am Buchungsweg.
+
+    Hier stand ``model LIKE 'gpt-realtime%'``, und das zählte genau einen der
+    drei Sprachwege: Gemini Live (``gemini-…``) lief am Monatsdeckel für
+    Realtime vorbei, und GPT-Live (``gpt-live-1``) hätte es ebenso getan. Jede
+    Sprachsitzung bucht aber über `realtime_verbrauch_ergaenzen`, und nur die
+    setzt die Realtime-Tokenspalten — auch auf ``0``, wenn eine Buchung nur
+    Kosten trägt. Eine gesetzte Spalte ist damit das Merkmal, und es hängt an
+    keinem Namen, den der nächste Anbieter anders schreibt.
+
+    Eine Reservierung ohne jede Buchung bleibt draussen; sie hat nichts
+    gekostet (`accounted_cost_microunits` ist dort ``0``).
+    """
     value = (
         db.query(func.coalesce(func.sum(AiUsageEvent.accounted_cost_microunits), 0))
         .filter(
             AiUsageEvent.user_id == user_id,
             AiUsageEvent.status.in_(ACTIVE_STATUSES),
             AiUsageEvent.created_at >= since,
-            AiUsageEvent.model.like("gpt-realtime%"),
+            AiUsageEvent.realtime_text_input_tokens.isnot(None),
         )
         .scalar()
     )
@@ -478,9 +490,30 @@ def realtime_verbrauch_ergaenzen(
     audio_input: int,
     audio_output: int,
     cost_microunits: int,
+    anfragen: int = 1,
+    grenzen_pruefen: bool = True,
 ) -> AiUsageEvent:
-    """Ergänzt eine laufende Realtime-Sitzung atomar um genau eine Antwort."""
-    werte = (text_input, text_output, audio_input, audio_output, cost_microunits)
+    """Ergänzt eine laufende Realtime-Sitzung atomar um eine Buchung.
+
+    ``anfragen`` ist, wieviele Anbieteranfragen diese Buchung zählt. Bei
+    Realtime und Gemini Live ist jede Buchung eine Antwort, also ``1``. GPT-Live
+    bucht die Anlage der Sitzung als eine Anfrage — ohne sie schlösse
+    `realtime_sitzung_abschliessen` eine Sitzung, die nie ein Backend fragte,
+    als gescheitert und setzte ihre Kosten auf null, obwohl OpenAI die Anlage
+    berechnet — und danach die **Dauer**, sobald OpenAI eine neue Summe
+    meldet. Das ist keine weitere Anfrage, sondern dieselbe Sitzung, die länger
+    lief, und zählt ``0``. Ohne diese Unterscheidung stünde nach einem Gespräch
+    von zehn Minuten eine dreistellige Anfragezahl da.
+
+    ``grenzen_pruefen=False`` bucht, ohne die Grenzen des Benutzers zu prüfen.
+    Das ist für Verbrauch, der **schon angefallen** ist: GPT-Live meldet die
+    Dauer erst, nachdem sie gelaufen ist. Überschreitet sie dabei eine Grenze,
+    muss die Sitzung enden — aber die Kosten zu verschweigen hiesse, dass der
+    nächste Anlauf wieder unter der Grenze beginnt. Der Aufrufer bucht deshalb
+    erst mit Prüfung, und nur nach einer Ablehnung ein zweites Mal ohne. Die
+    Obergrenze einer einzelnen Zeile (``realtime_session_limit``) gilt immer.
+    """
+    werte = (text_input, text_output, audio_input, audio_output, cost_microunits, anfragen)
     if any(wert < 0 for wert in werte):
         raise ValueError("Realtime-Verbrauch darf nicht negativ sein")
     event = (
@@ -498,26 +531,27 @@ def realtime_verbrauch_ergaenzen(
         raise AiQuotaExceeded("realtime_session_limit")
 
     user = db.query(User).filter(User.id == event.user_id).with_for_update().one()
-    now = datetime.now(timezone.utc)
-    day, week, month = _period_starts(now)
-    limits = resolve_effective_limits(db, user)
-    # Die Summen enthalten den bisherigen Wert dieser offenen Zeile. Nur die
-    # neue Antwort wird als requested addiert.
-    _ensure_within(limits.daily_token_limit, _sum_since(db, user.id, day, AiUsageEvent.accounted_tokens), delta_tokens, "daily_token_limit")
-    _ensure_within(limits.weekly_token_limit, _sum_since(db, user.id, week, AiUsageEvent.accounted_tokens), delta_tokens, "weekly_token_limit")
-    _ensure_within(limits.monthly_token_limit, _sum_since(db, user.id, month, AiUsageEvent.accounted_tokens), delta_tokens, "monthly_token_limit")
-    _ensure_within(
-        None if limits.monthly_cost_limit_cents is None else limits.monthly_cost_limit_cents * MICROUNITS_PER_CENT,
-        _sum_since(db, user.id, month, AiUsageEvent.accounted_cost_microunits),
-        cost_microunits,
-        "monthly_cost_limit_cents",
-    )
-    _ensure_within(
-        None if limits.monthly_realtime_cost_limit_cents is None else limits.monthly_realtime_cost_limit_cents * MICROUNITS_PER_CENT,
-        _sum_realtime_since(db, user.id, month),
-        cost_microunits,
-        "monthly_realtime_cost_limit_cents",
-    )
+    if grenzen_pruefen:
+        now = datetime.now(timezone.utc)
+        day, week, month = _period_starts(now)
+        limits = resolve_effective_limits(db, user)
+        # Die Summen enthalten den bisherigen Wert dieser offenen Zeile. Nur die
+        # neue Antwort wird als requested addiert.
+        _ensure_within(limits.daily_token_limit, _sum_since(db, user.id, day, AiUsageEvent.accounted_tokens), delta_tokens, "daily_token_limit")
+        _ensure_within(limits.weekly_token_limit, _sum_since(db, user.id, week, AiUsageEvent.accounted_tokens), delta_tokens, "weekly_token_limit")
+        _ensure_within(limits.monthly_token_limit, _sum_since(db, user.id, month, AiUsageEvent.accounted_tokens), delta_tokens, "monthly_token_limit")
+        _ensure_within(
+            None if limits.monthly_cost_limit_cents is None else limits.monthly_cost_limit_cents * MICROUNITS_PER_CENT,
+            _sum_since(db, user.id, month, AiUsageEvent.accounted_cost_microunits),
+            cost_microunits,
+            "monthly_cost_limit_cents",
+        )
+        _ensure_within(
+            None if limits.monthly_realtime_cost_limit_cents is None else limits.monthly_realtime_cost_limit_cents * MICROUNITS_PER_CENT,
+            _sum_realtime_since(db, user.id, month),
+            cost_microunits,
+            "monthly_realtime_cost_limit_cents",
+        )
     event.accounted_tokens = neue_tokens
     event.reserved_tokens = neue_tokens
     event.accounted_cost_microunits = neue_kosten
@@ -526,7 +560,7 @@ def realtime_verbrauch_ergaenzen(
     event.realtime_text_output_tokens = int(event.realtime_text_output_tokens or 0) + text_output
     event.realtime_audio_input_tokens = int(event.realtime_audio_input_tokens or 0) + audio_input
     event.realtime_audio_output_tokens = int(event.realtime_audio_output_tokens or 0) + audio_output
-    event.provider_requests = int(event.provider_requests or 0) + 1
+    event.provider_requests = int(event.provider_requests or 0) + anfragen
     event.cost_source = "estimate"
     db.flush()
     return event

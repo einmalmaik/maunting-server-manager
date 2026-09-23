@@ -232,7 +232,12 @@ def _schloss(kind: str) -> asyncio.Lock:
     return schloss
 
 
-def _auffrischen_anstossen(kind: str, schluessel: str | None = None) -> bool:
+def _auffrischen_anstossen(
+    kind: str,
+    schluessel: str | None = None,
+    *,
+    mindestens: datetime | None = None,
+) -> bool:
     """Eine Auffrischung im Hintergrund anstossen; laeuft schon eine, nichts tun.
 
     Der Rueckgabewert ist die eigentliche Aussage: ``True`` heisst „um den
@@ -245,6 +250,11 @@ def _auffrischen_anstossen(kind: str, schluessel: str | None = None) -> bool:
     ``schluessel`` reist mit in die Hintergrundaufgabe. Ohne ihn bekaeme ein
     schluesselpflichtiger Katalog dort ein 401 — und zwar unsichtbar, weil
     niemand auf diese Aufgabe wartet.
+
+    ``mindestens`` reist aus demselben Grund mit: ohne es faende die Aufgabe
+    einen Stand „innerhalb der Frist" vor und holte nichts, obwohl sie gerade
+    deshalb angestossen wurde, weil er aelter ist als der eigene Katalog
+    (`_fremdkatalog`).
     """
     laufend = _auffrischungen.get(kind)
     if laufend is not None and not laufend.done():
@@ -256,7 +266,9 @@ def _auffrischen_anstossen(kind: str, schluessel: str | None = None) -> bool:
         schleife = asyncio.get_running_loop()
     except RuntimeError:
         return False
-    aufgabe = schleife.create_task(_auffrischen(client, kind, schluessel))
+    aufgabe = schleife.create_task(
+        _auffrischen(client, kind, schluessel, mindestens=mindestens)
+    )
     _auffrischungen[kind] = aufgabe
     # Ohne diesen Rueckruf meldet asyncio beim Aufraeumen "Task exception was
     # never retrieved" — und der Verweis bliebe fuer immer stehen.
@@ -279,7 +291,11 @@ def _auffrischung_abschliessen(kind: str, aufgabe: asyncio.Task) -> None:
 
 
 async def _auffrischen(
-    client: httpx.AsyncClient, kind: str, schluessel: str | None = None
+    client: httpx.AsyncClient,
+    kind: str,
+    schluessel: str | None = None,
+    *,
+    mindestens: datetime | None = None,
 ) -> None:
     """Der Abruf im Hintergrund.
 
@@ -288,7 +304,14 @@ async def _auffrischen(
     abgeschickten Nachricht ein neuer Abruf ueber die volle ``ABRUF_TIMEOUT``
     an — unsichtbar, aber deswegen nicht harmlos.
     """
-    await _besorgen(client, kind, erzwingen=False, sofort=False, schluessel=schluessel)
+    await _besorgen(
+        client,
+        kind,
+        erzwingen=False,
+        sofort=False,
+        schluessel=schluessel,
+        mindestens=mindestens,
+    )
 
 
 def vorwaermen_anstossen() -> None:
@@ -374,7 +397,11 @@ def _gehoert_dem_frager(eintrag: _Eintrag, spec: Anbieter, schluessel: str | Non
 
 
 def _antwortet_ohne_abruf(
-    eintrag: _Eintrag, jetzt: datetime, *, schluessel_da: bool
+    eintrag: _Eintrag,
+    jetzt: datetime,
+    *,
+    schluessel_da: bool,
+    mindestens: datetime | None = None,
 ) -> bool:
     """Beantwortet dieser Eintrag die Frage, ohne den Anbieter zu fragen?
 
@@ -382,7 +409,10 @@ def _antwortet_ohne_abruf(
     zusammen, weil dieselbe Entscheidung zweimal faellt — einmal vor dem
     Schloss und einmal darin:
 
-    * Der Stand ist frisch genug (``geholt_am`` innerhalb ``CACHE_TTL``).
+    * Der Stand ist frisch genug (``geholt_am`` innerhalb ``CACHE_TTL``) —
+      und, wo ``mindestens`` gesetzt ist, nicht aelter als dieser Zeitpunkt.
+      Das ist die Frage des geliehenen Katalogs (`_fremdkatalog`): er darf
+      nicht aelter sein als der Katalog, den er ergaenzt.
     * Der letzte Versuch ist gerade erst gescheitert (``fehler_am`` innerhalb
       ``FEHLER_RUHE``). Dann ist der alte Stand — notfalls die leere Liste —
       die richtige Antwort, denn ein zweiter Versuch im selben Atemzug kostet
@@ -396,7 +426,11 @@ def _antwortet_ohne_abruf(
     die Oberflaeche zeigt dann „dieser Anbieter kennt keine Modelle", waehrend
     der Schluessel daneben gespeichert ist.
     """
-    if eintrag.geholt_am is not None and jetzt - eintrag.geholt_am < CACHE_TTL:
+    if (
+        eintrag.geholt_am is not None
+        and jetzt - eintrag.geholt_am < CACHE_TTL
+        and (mindestens is None or eintrag.geholt_am >= mindestens)
+    ):
         return True
     if eintrag.fehler_am is None:
         return False
@@ -500,7 +534,7 @@ async def modelle(
     eigene = await _besorgen(
         client, kind, erzwingen=erzwingen, sofort=True, schluessel=schluessel
     )
-    return await _mit_faehigkeiten(client, anbieter(kind), eigene)
+    return await _mit_faehigkeiten(client, anbieter(kind), eigene, erzwingen=erzwingen)
 
 
 def _anreichern(eigen: Modell, fremd: Modell | None) -> Modell:
@@ -510,11 +544,16 @@ def _anreichern(eigen: Modell, fremd: Modell | None) -> Modell:
     bleibt stehen, nachgetragen wird nur, wo sie fehlt. Der Anbieter, dessen
     Modell es ist, hat immer recht.
 
-    Bei den beiden Wahrheitswerten sieht das nach einer Ausnahme aus (``or``
-    statt „vorhanden?"), ist aber dieselbe Regel: ein ``bool`` kann nicht
-    „unbekannt" sagen, und ein Anbieter mit ``faehigkeiten_aus`` laesst sie
-    deshalb bewusst auf dem Standardwert stehen — bei OpenAI steht dort
-    ``denkt=False`` und meint „von hier aus unbekannt".
+    ``denkt`` folgt seit dem 22.09.2026 derselben Regel wie das Fenster: es
+    ist ein ``bool | None``, und nachgetragen wird nur ein ``None``. Vorher
+    stand hier ``eigen.denkt or fremd.denkt``, weil das Feld „unbekannt" nicht
+    sagen konnte — ein Anbieter mit ``faehigkeiten_aus`` schrieb ``False`` hin
+    und meinte „von hier aus unbekannt". Fuer den Sendepfad war das gleich, fuer
+    die Einstellungsseite nicht: fehlte das Modell im fremden Katalog, stand
+    dort „denkt nicht nach". Stufen, Vorgabe und Denkzwang wandern nur mit, wenn
+    ``denkt`` aus dem fremden Katalog kommt — sie beschreiben dasselbe Wissen,
+    und ein eigener Katalog, der „denkt" sagt, aber keine Stufen nennt, wird
+    nicht mit fremden Stufen zu einem Modell verschnitten, das es so nicht gibt.
 
     ``cache_marke_noetig`` wandert ausdruecklich **nicht** mit. Es ist kein
     Merkmal des Modells, sondern eine Aussage ueber die Abrechnung des
@@ -530,6 +569,10 @@ def _anreichern(eigen: Modell, fremd: Modell | None) -> Modell:
     Weg dorthin — anders als die Cache-Marke, die eine Aussage ueber die
     Abrechnung eines Vermittlers ist.
 
+    ``abschaltung`` wandert aus demselben Grund wie die Cache-Marke **nicht**
+    mit: OpenRouters ``expiration_date`` sagt, wann OpenRouter ein Modell aus
+    seiner Liste nimmt, nicht wann OpenAI es abschaltet.
+
     ``name`` bleibt ebenfalls der eigene. Im fremden Katalog steht der Name des
     Listeneintrags dort (``OpenAI: GPT-5.5``); in der Modellauswahl eines
     OpenAI-Zugangs waere das die Beschriftung eines Vermittlers, den der
@@ -537,12 +580,15 @@ def _anreichern(eigen: Modell, fremd: Modell | None) -> Modell:
     """
     if fremd is None:
         return eigen
+    geliehen = eigen.denkt is None
     return replace(
         eigen,
-        denkt=eigen.denkt or fremd.denkt,
-        zwingend=eigen.zwingend or fremd.zwingend,
-        stufen=eigen.stufen or fremd.stufen,
-        standard_stufe=eigen.standard_stufe or fremd.standard_stufe,
+        denkt=fremd.denkt if geliehen else eigen.denkt,
+        zwingend=eigen.zwingend or (geliehen and fremd.zwingend),
+        stufen=eigen.stufen or (fremd.stufen if geliehen else ()),
+        standard_stufe=eigen.standard_stufe or (
+            fremd.standard_stufe if geliehen else None
+        ),
         kontext_tokens=(
             eigen.kontext_tokens
             if eigen.kontext_tokens is not None
@@ -558,7 +604,11 @@ def _anreichern(eigen: Modell, fremd: Modell | None) -> Modell:
 
 
 async def _mit_faehigkeiten(
-    client: httpx.AsyncClient, spec: Anbieter, eigene: list[Modell]
+    client: httpx.AsyncClient,
+    spec: Anbieter,
+    eigene: list[Modell],
+    *,
+    erzwingen: bool = False,
 ) -> list[Modell]:
     """Den Katalog eines Anbieters um das ergaenzen, was er selbst nicht sagt.
 
@@ -582,10 +632,16 @@ async def _mit_faehigkeiten(
     Faellt der fremde Katalog aus, bleibt es beim eigenen Wissen. Er ist eine
     Ergaenzung und keine Bedingung; ein Anbieter, den MSM direkt anspricht, darf
     nicht daran haengen, dass ein anderer erreichbar ist.
+
+    ``erzwingen`` gilt fuer **beide** Kataloge. Der Knopf „Modelle neu laden"
+    holte bis zum 22.09.2026 nur OpenAIs eigene Liste; OpenRouters Stand blieb
+    bis zu sechs Stunden alt. Am Erscheinungstag eines Modells stand es dann in
+    der Auswahl, aber ohne Denkstufen und Fenster — der Knopf versprach eine
+    frische Antwort und lieferte eine halbe.
     """
     if not eigene:
         return eigene
-    nach_kennung = await _fremdkatalog(client, spec)
+    nach_kennung = await _fremdkatalog(client, spec, erzwingen=erzwingen)
     if not nach_kennung:
         return eigene
     return [
@@ -597,7 +653,7 @@ async def _mit_faehigkeiten(
 
 
 async def _fremdkatalog(
-    client: httpx.AsyncClient, spec: Anbieter
+    client: httpx.AsyncClient, spec: Anbieter, *, erzwingen: bool = False
 ) -> dict[str, Modell]:
     """Der Katalog, aus dem dieser Anbieter seine Faehigkeiten borgt.
 
@@ -610,6 +666,18 @@ async def _fremdkatalog(
     eine **Liste** an, `finde` ein **einzelnes** Modell bei einem Anbieter, der
     gar keine Liste hat. Zweimal derselbe Abruf mit denselben drei
     Fehlerfaellen, einmal geschrieben.
+
+    **Der fremde Katalog darf nicht aelter sein als der eigene.** Beide haben
+    dieselbe Frist, aber sie laufen nicht gleich: OpenAIs Liste wird mit dem
+    Knopf neu geholt und im Hintergrund aufgefrischt, sobald sie ablaeuft;
+    OpenRouters Stand konnte daneben bis zu sechs Stunden alt sein. Ein Modell,
+    das am selben Tag erschien, stand damit in der eigenen Liste und fehlte in
+    der fremden — die Einstellungsseite zeigte es ohne Denkstufen und ohne
+    Fenster. Deshalb gilt ein fremder Stand, der vor dem eigenen geholt wurde,
+    als abgelaufen: er wird im Hintergrund erneuert, und bis dahin geht der alte
+    hinaus, wie ueberall hier. Das kostet hoechstens einen Abruf des fremden
+    Katalogs je Abruf des eigenen; die Ruhefrist nach einem Fehlschlag gilt
+    unveraendert.
     """
     if spec.faehigkeiten_aus is None:
         return {}
@@ -620,9 +688,14 @@ async def _fremdkatalog(
             spec.faehigkeiten_aus,
         )
         return {}
+    eigener_stand = _cache.get(spec.kind)
     try:
         fremde = await _besorgen(
-            client, spec.faehigkeiten_aus, erzwingen=False, sofort=True
+            client,
+            spec.faehigkeiten_aus,
+            erzwingen=erzwingen,
+            sofort=True,
+            mindestens=eigener_stand.geholt_am if eigener_stand else None,
         )
     except Exception as exc:
         logger.warning(
@@ -642,6 +715,7 @@ async def _besorgen(
     erzwingen: bool,
     sofort: bool,
     schluessel: str | None = None,
+    mindestens: datetime | None = None,
 ) -> list[Modell]:
     """Der gemeinsame Weg fuer Vordergrund und Hintergrund.
 
@@ -650,6 +724,10 @@ async def _besorgen(
     Im Hintergrund (``False``) zaehlt das Gegenteil — dort *soll* wirklich
     abgerufen werden, sonst faende die Auffrischung nur den alten Stand vor, den
     sie gerade ersetzen soll, und taete nichts.
+
+    ``mindestens`` verschiebt die Frische: ein Stand, der vor diesem Zeitpunkt
+    geholt wurde, gilt als abgelaufen, auch wenn ``CACHE_TTL`` noch laeuft.
+    Warum es das braucht, steht bei `_fremdkatalog`.
     """
     spec = anbieter(kind)
 
@@ -682,6 +760,7 @@ async def _besorgen(
                 eintrag,
                 datetime.now(timezone.utc),
                 schluessel_da=bool(schluessel),
+                mindestens=mindestens,
             )
         )
 
@@ -689,7 +768,9 @@ async def _besorgen(
     if eintrag is not None and bedient(eintrag, schluessel):
         return eintrag.modelle
 
-    if not erzwingen and sofort and _auffrischen_anstossen(kind, schluessel):
+    if not erzwingen and sofort and _auffrischen_anstossen(
+        kind, schluessel, mindestens=mindestens
+    ):
         # Ab hier holt jemand anders den frischen Stand. Also nicht warten —
         # aber nur mit einem Stand antworten, der auch diesem Frager gehoert.
         # Ein abgelaufener eigener Stand ist eine brauchbare Antwort, der Stand
@@ -884,7 +965,7 @@ async def finde(
     # Betreibers. Der Weg durch `_anreichern` ist derselbe wie bei einer
     # angereicherten Liste — damit gelten dort auch dieselben Ausnahmen
     # (``cache_marke_noetig`` und ``name`` wandern nicht mit).
-    return _anreichern(Modell(model_id=gesucht, name=gesucht, denkt=False), fremd)
+    return _anreichern(Modell(model_id=gesucht, name=gesucht, denkt=None), fremd)
 
 
 async def fuer_provider(

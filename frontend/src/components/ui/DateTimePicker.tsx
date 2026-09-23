@@ -22,6 +22,15 @@ export interface DateTimePickerProps
   disabled?: boolean
   min?: string
   max?: string
+  /**
+   * Nur ein Datum, keine Uhrzeit. Der Wert ist dann `YYYY-MM-DD`, die
+   * Stunden-/Minutenzeile entfällt, und das Uhrsymbol verschwindet.
+   *
+   * Für Felder, bei denen eine Uhrzeit nichts bewirkt — etwa das Ende einer
+   * Terminserie. Ein Bedienelement anzubieten, dessen Eingabe stillschweigend
+   * weggeworfen wird, ist schlimmer als keines.
+   */
+  dateOnly?: boolean
   buttonClassName?: string
   'aria-label'?: string
   'data-testid'?: string
@@ -76,6 +85,7 @@ export const DateTimePicker = forwardRef<HTMLDivElement, DateTimePickerProps>(
       disabled = false,
       min,
       max,
+      dateOnly = false,
       className = '',
       buttonClassName = '',
       'aria-label': ariaLabel,
@@ -169,8 +179,7 @@ export const DateTimePicker = forwardRef<HTMLDivElement, DateTimePickerProps>(
           year: 'numeric',
           month: '2-digit',
           day: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
+          ...(dateOnly ? {} : { hour: '2-digit' as const, minute: '2-digit' as const }),
         }).format(
           new Date(
             parsed.date.getFullYear(),
@@ -180,7 +189,14 @@ export const DateTimePicker = forwardRef<HTMLDivElement, DateTimePickerProps>(
             minute,
           ),
         )
-      : (placeholder ?? (locale === 'de' ? 'Datum und Uhrzeit wählen' : 'Pick date and time'))
+      : (placeholder ??
+        (dateOnly
+          ? locale === 'de'
+            ? 'Datum wählen'
+            : 'Pick date'
+          : locale === 'de'
+            ? 'Datum und Uhrzeit wählen'
+            : 'Pick date and time'))
 
     const isOutOfRange = (date: Date): boolean => {
       const candidate = new Date(date.getFullYear(), date.getMonth(), date.getDate())
@@ -199,6 +215,11 @@ export const DateTimePicker = forwardRef<HTMLDivElement, DateTimePickerProps>(
 
     const selectDate = (date: Date) => {
       if (isOutOfRange(date)) return
+      if (dateOnly) {
+        onChange(`${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`)
+        setOpen(false)
+        return
+      }
       onChange(toDateTimeValue(date, hour, minute))
     }
 
@@ -230,7 +251,9 @@ export const DateTimePicker = forwardRef<HTMLDivElement, DateTimePickerProps>(
                 {displayValue}
               </span>
             </span>
-            <Clock className="h-4 w-4 shrink-0 text-on-surface-variant" aria-hidden="true" />
+            {!dateOnly && (
+              <Clock className="h-4 w-4 shrink-0 text-on-surface-variant" aria-hidden="true" />
+            )}
           </button>
 
           {open && menuStyle
@@ -313,6 +336,7 @@ export const DateTimePicker = forwardRef<HTMLDivElement, DateTimePickerProps>(
                     })}
                   </div>
 
+                  {!dateOnly && (
                   <div className="mt-3 grid grid-cols-[1fr_auto_1fr] items-end gap-2 border-t border-outline-variant pt-3">
                     <div className="min-w-0 space-y-1.5">
                       <span className="block text-label-sm font-bold uppercase tracking-wider text-on-surface-variant">
@@ -341,6 +365,7 @@ export const DateTimePicker = forwardRef<HTMLDivElement, DateTimePickerProps>(
                       />
                     </div>
                   </div>
+                  )}
                 </div>,
                 document.body,
               )

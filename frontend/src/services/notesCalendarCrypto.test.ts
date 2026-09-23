@@ -20,6 +20,8 @@ import {
   processNotesKeyControlEnvelope,
   checkAndReceiveDeviceNotesKey,
   checkAndRespondToDeviceKeyRequests,
+  altschluessel,
+  altschluesselUebernehmen,
 } from './notesCalendarCrypto'
 import * as socialApi from '@/api/social'
 import * as e2eeGeraet from './e2eeGeraet'
@@ -420,5 +422,80 @@ describe('notesCalendarCrypto E2EE', () => {
         control_type: 'notes_key_sync',
       })
     )
+  })
+
+  // ── Altbestand unter der Kennung 1 (Schreibfehler bis 22.09.2026) ──
+
+  describe('Altschlüssel der Kennung 1', () => {
+    it('gibt nichts heraus, wenn nichts abgelegt ist', async () => {
+      expect(await altschluessel()).toBeNull()
+    })
+
+    it('reicht den abgelegten Altschlüssel heraus, ohne einen zu erzeugen', async () => {
+      await getOrCreateUserNotesKey(1)
+      const alt = await altschluessel()
+      expect(alt).not.toBeNull()
+      // Rein lesend: für Kennung 7 darf dabei nichts entstanden sein.
+      expect(hasUserNotesKey(7)).toBe(false)
+    })
+
+    it('übernimmt ihn auf die echte Kennung und meldet das Ereignis', async () => {
+      await getOrCreateUserNotesKey(1)
+      const alt = exportUserNotesKey(1)
+
+      let gemeldet: number | null = null
+      const horcher = (e: any) => {
+        gemeldet = e.detail?.userId ?? null
+      }
+      window.addEventListener('msm:notes-key-updated', horcher)
+
+      const uebernommen = await altschluesselUebernehmen(18)
+      window.removeEventListener('msm:notes-key-updated', horcher)
+
+      expect(uebernommen).toBe(true)
+      expect(exportUserNotesKey(18)).toBe(alt)
+      expect(gemeldet).toBe(18)
+    })
+
+    it('überschreibt niemals einen vorhandenen Schlüssel', async () => {
+      await getOrCreateUserNotesKey(1)
+      await getOrCreateUserNotesKey(18)
+      const eigener = exportUserNotesKey(18)
+
+      expect(await altschluesselUebernehmen(18)).toBe(false)
+      expect(exportUserNotesKey(18)).toBe(eigener)
+    })
+
+    it('übernimmt nichts auf die Kennung 1 selbst', async () => {
+      await getOrCreateUserNotesKey(1)
+      expect(await altschluesselUebernehmen(1)).toBe(false)
+    })
+
+    it('greift den Altbestand beim Erzeugen NICHT — das waere eine Uebernahme ohne Beleg', async () => {
+      // Auf einem geteilten Geraet gehoert der Schluessel unter der Kennung 1
+      // dem Konto 1. Wuerde `getOrCreateUserNotesKey` ihn einfach nehmen,
+      // bekaeme das zweite Konto beim ersten Speichern den Schluessel des
+      // ersten. Der Rueckgriff auf den Altbestand gehoert deshalb ausschliess-
+      // lich in den Lesepfad, wo eine geoeffnete eigene Zeile ihn belegt.
+      await getOrCreateUserNotesKey(1)
+      const alt = exportUserNotesKey(1)
+
+      clearNotesKeyCache()
+      await getOrCreateUserNotesKey(18)
+
+      expect(exportUserNotesKey(18)).toBeTruthy()
+      expect(exportUserNotesKey(18)).not.toBe(alt)
+    })
+
+    it('laesst die Zusage der Primitiven unberuehrt: Kennung 2 oeffnet nichts von Kennung 1', async () => {
+      // Dieselbe Zusage wie oben, hier aber ausdruecklich *mit* vorhandenem
+      // Altbestand: der Rueckgriff darauf gehoert in die Synchronisierungs-
+      // schicht, die nur eigene Zeilen sieht — nie in die Primitive.
+      const noteUid = 'altbestand-zusage-1'
+      const encTitle = await encryptNoteTitle('Streng vertraulich', noteUid, undefined, 1)
+      await getOrCreateUserNotesKey(2)
+
+      await expect(decryptNoteTitle(encTitle, noteUid, undefined, 2)).rejects.toThrow()
+    })
   })
 })

@@ -37,7 +37,7 @@ ANBIETER = Anbieter(
     gehoer_form="json",
     anfrage_erweiterungen=frozenset({"reasoning_effort"}),
     protokoll_chat="chat_completions",
-    realtime_tauglich=True,
+    sprachwege=("gemini_live",),
 )
 
 

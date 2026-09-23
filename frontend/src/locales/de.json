@@ -79,7 +79,45 @@
     "updated": "Termin aktualisiert",
     "deleteConfirmTitle": "Termin löschen",
     "deleteConfirmMessage": "Möchtest du diesen Termin wirklich unwiderruflich aus deinem Kalender löschen?",
-    "deleted": "Termin gelöscht"
+    "deleted": "Termin gelöscht",
+    "recurrence": {
+      "label": "Wiederholung",
+      "none": "Einmalig",
+      "daily": "Täglich",
+      "weekly": "Wöchentlich",
+      "monthly": "Monatlich",
+      "yearly": "Jährlich",
+      "everyNth": "Jedes",
+      "unit": {
+        "DAILY": "Tage",
+        "WEEKLY": "Wochen",
+        "MONTHLY": "Monate",
+        "YEARLY": "Jahre"
+      },
+      "weekday": {
+        "MO": "Mo",
+        "TU": "Di",
+        "WE": "Mi",
+        "TH": "Do",
+        "FR": "Fr",
+        "SA": "Sa",
+        "SU": "So"
+      },
+      "endsLabel": "Endet",
+      "endsNever": "Nie",
+      "endsOn": "Am",
+      "endsAfter": "Nach",
+      "scopeLabel": "Was soll geändert werden?",
+      "scopeSingle": "Nur dieser Termin",
+      "scopeSeries": "Ganze Serie",
+      "scopeSingleHint": "Die Änderung gilt allein für dieses Vorkommen. Alle anderen bleiben, wie sie sind.",
+      "scopeSeriesHint": "Die Änderung gilt für alle Vorkommen der Serie ({{regel}}).",
+      "deleteOccurrenceTitle": "Diesen Termin absagen?",
+      "deleteOccurrenceMessage": "Nur dieses eine Vorkommen entfällt. Die Serie läuft weiter.",
+      "deleteSeriesMessage": "Der Termin und alle seine Wiederholungen werden gelöscht.",
+      "occurrenceDeleted": "Termin abgesagt",
+      "reminderHint": "Hinweis: Für Serientermine, die du hier anlegst, kommen Erinnerungen nur auf deine Geräte. Eine Erinnerungs-Mail kann der Server nicht verschicken — er kann die Wiederholungsregel nicht lesen, weil sie verschlüsselt auf deinem Gerät entsteht."
+    }
   },
   "pageContext": {
     "overview": "Übersicht",
@@ -332,6 +370,7 @@
       },
       "recommended": "Empfohlen",
       "vision": "Sieht Bilder",
+      "contextShort": "{{tokens}} Token Kontext",
       "workerSection": "Worker (Hintergrund-Aufträge)",
       "workerHint": "Modell und feste Denkstufe für Hintergrundaufgaben. Bleibt das Feld leer, übernimmt das primäre Chat-Modell auch die Hintergrundarbeit.",
       "workerModel": "Worker-Modell",
@@ -359,31 +398,50 @@
         "none": "Dieses Modell denkt nicht nach.",
         "levels": "Denkstufen:",
         "toggleOnly": "Dieses Modell unterstützt Reasoning, jedoch ohne variable Stufen (nur an oder aus).",
-        "mandatory": "Nachdenken lässt sich bei diesem Modell nicht abschalten."
+        "mandatory": "Nachdenken lässt sich bei diesem Modell nicht abschalten.",
+        "unknown": "Der Katalog sagt nicht, ob dieses Modell nachdenkt. MSM schickt deshalb keine Denkstufe mit, und es gilt die Vorgabe des Anbieters. Bei einem gerade erschienenen Modell kann „Modelle neu laden“ helfen.",
+        "context": "Kontextfenster: {{tokens}} Token",
+        "maxOutput": "Antwort bis {{tokens}} Token",
+        "shutdown": "Der Hersteller hat die Abschaltung dieses Modells für den {{date}} angekündigt."
       },
       "ttsHint": "Ein Stimmzugang. Er erscheint nicht in der Modellauswahl des Chats, sondern liest im Sprachmodus vor, was das Chatmodell antwortet. Wer ihn nutzen darf, entscheidet das Recht „Mit der KI sprechen“.",
       "transcriptionModel": "Modell für Gesprochenes",
       "transcriptionModelHint": "Wandelt Gesprochenes für den bisherigen Sprachmodus und die Chat-Diktierfunktion in Text um.",
       "transcriptionOff": "Kein Modell für Gesprochenes",
       "realtime": {
-        "title": "OpenAI Realtime",
-        "googleTitle": "Gemini Multimodal Live (Echtzeit)",
-        "hint": "Überträgt Sprache per WebRTC direkt an OpenAI. Werkzeuge, Rechte und Abrechnung bleiben im Panel.",
-        "googleHint": "Bidirektionales Audio- und Werkzeug-Streaming über die Gemini Multimodal Live API. Werkzeuge, Rechte und Abrechnung bleiben im Panel.",
+        "wege": {
+          "openai_realtime": {
+            "title": "OpenAI Realtime",
+            "hint": "Überträgt Sprache per WebRTC direkt an OpenAI. Werkzeuge, Rechte und Abrechnung bleiben im Panel.",
+            "voice": "OpenAI-Stimme",
+            "reasoningHint": "Nur Realtime-2 unterstützt eine Denkstufe. Bei Realtime-1.5 bleibt sie aus."
+          },
+          "openai_live": {
+            "title": "GPT-Live",
+            "hint": "Überträgt Sprache per WebRTC an GPT-Live. Die Stimme hört und spricht zugleich und gibt Aufgaben an ein Backend-Modell weiter, das die Werkzeuge ruft. Werkzeuge, Rechte und Abrechnung bleiben im Panel.",
+            "voice": "GPT-Live-Stimme",
+            "reasoningHint": "Gilt dem Backend-Modell, nicht der Stimme. Zur Wahl steht, was GPT-Live annimmt und das Backend-Modell laut Katalog führt."
+          },
+          "gemini_live": {
+            "title": "Gemini Multimodal Live (Echtzeit)",
+            "hint": "Bidirektionales Audio- und Werkzeug-Streaming über die Gemini Multimodal Live API. Werkzeuge, Rechte und Abrechnung bleiben im Panel.",
+            "voice": "Gemini-Live-Stimme",
+            "reasoningHint": "Gemini 2.0 / 2.5 Modelle unterstützen anpassbare Denkstufen."
+          }
+        },
+        "modelDecides": "Welcher Endpunkt spricht, entscheidet das gewählte Modell.",
         "enabled": "Für den Realtime-Sprachmodus verwenden",
         "model": "Realtime-Modell",
-        "voice": "OpenAI-Stimme",
-        "googleVoice": "Gemini-Live-Stimme",
+        "voiceAny": "Stimme",
         "voiceChoose": "Stimme wählen …",
+        "backendModel": "Backend-Modell",
+        "backendModelHint": "Denkt nach und ruft die Werkzeuge, während GPT-Live spricht. Ohne eigene Wahl gilt das Standardmodell dieses Zugangs.",
+        "backendModelDefault": "Wie Standardmodell ({{model}})",
+        "backendModelMissing": "Wie Standardmodell (keines gewählt)",
         "reasoning": "Denkstufe",
         "reasoningOff": "Keine Denkstufe",
-        "reasoningHint": "Nur Realtime-2 unterstützt eine Denkstufe. Bei Realtime-1.5 bleibt sie aus.",
-        "googleReasoningHint": "Gemini 2.0 / 2.5 Modelle unterstützen anpassbare Denkstufen.",
-        "reasoningValues": {
-          "low": "Niedrig",
-          "medium": "Mittel",
-          "high": "Hoch"
-        },
+        "reasoningDefault": "Vorgabe des Backend-Modells",
+        "reasoningStale": "Passt nicht zum gewählten Modell",
         "language": "Antwortsprache",
         "auto": "Automatisch",
         "vad": "Reaktion auf Sprechpausen",
@@ -397,6 +455,10 @@
         "textOutputPrice": "Text-Ausgabe je 1 Mio. Tokens",
         "audioInputPrice": "Audio-Eingabe je 1 Mio. Tokens",
         "audioOutputPrice": "Audio-Ausgabe je 1 Mio. Tokens",
+        "backendInputPrice": "Backend-Modell: Eingabe je 1 Mio. Tokens",
+        "backendOutputPrice": "Backend-Modell: Ausgabe je 1 Mio. Tokens",
+        "minutePrice": "Sprachsitzung je Minute",
+        "minutePriceHint": "GPT-Live rechnet die Sitzung sekundengenau ab. Jede Anlage kostet zunächst 15 Sekunden, die auf die Laufzeit angerechnet werden. Das Backend-Modell rechnet getrennt nach seinen Tokens ab.",
         "legacyPaused": "Solange dieser Zugang aktiv ist, nutzt der Sprachmodus weder ElevenLabs noch Pipecat oder das Transkriptionsmodell."
       },
       "geminiSafetyOffHint": "Deaktiviert alle 5 Standard-Sicherheitsfilter (Hassrede, Belästigung, gefährliche Inhalte etc.) auf BLOCK_NONE bei Gemini- und Gemma-Modellen über die Google AI Studio API."
@@ -1011,6 +1073,7 @@
         "AI_PROVIDER_REQUEST_REJECTED": "Der Anbieter hat die Anfrage abgelehnt. Meist stimmt der Modellname nicht.",
         "AI_PROVIDER_PAYMENT_REQUIRED": "Der Anbieter meldet aufgebrauchtes Guthaben. Der Schlüssel ist gültig, das Guthaben muss aufgeladen werden.",
         "AI_PROVIDER_RATE_LIMITED": "Der Anbieter drosselt gerade. Versuche es in einem Moment erneut.",
+        "AI_PROVIDER_SAFETY_STOPPED": "Die Sicherheitsüberwachung des Anbieters hat diesen Lauf angehalten. Er wird nicht automatisch wiederholt – prüfe zuerst, was die KI bis hierhin getan hat.",
         "AI_PROVIDER_UNAVAILABLE": "Der Anbieter ist nicht erreichbar.",
         "AI_PROVIDER_KEY_MISSING": "Für diesen Provider ist kein API-Key hinterlegt.",
         "AI_PROVIDER_MODEL_MISSING": "Für diesen Provider ist kein Modell hinterlegt.",
@@ -1070,7 +1133,9 @@
         "realtimeQuota": "Das Realtime-Kostenlimit dieser Rolle ist erreicht. Das Gespräch pausiert.",
         "rateLimit": "Rate-Limit erreicht. Bitte kurz warten. Limit 40.000 TPM — verwende weniger Tools oder erhöhe das Limit unter https://platform.openai.com/account/rate-limits.",
         "connection": "Verbindung zum Sprachmodus verloren.",
-        "veraltet": "Das Panel unterstützt diesen Sprachmodus noch nicht. Bitte das Panel aktualisieren."
+        "veraltet": "Das Panel unterstützt diesen Sprachmodus noch nicht. Bitte das Panel aktualisieren.",
+        "safety": "Die Sicherheitsüberwachung des Anbieters hat das Gespräch angehalten. Es wird nicht automatisch fortgesetzt.",
+        "content": "Der Anbieter hat das Gespräch wegen seines Inhalts beendet."
       },
       "toVoiceMode": "Realtime-Modus",
       "toTextMode": "Text-Modus",
@@ -1089,6 +1154,7 @@
       "info": {
         "model": "Modell",
         "voice": "Stimme",
+        "backendModel": "Backend-Modell",
         "sampleRate": "Abtastrate",
         "maxSession": "Sitzungsdauer",
         "minutes": "{{count}} Minuten",

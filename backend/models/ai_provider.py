@@ -113,6 +113,13 @@ class AiProvider(Base):
     realtime_text_output_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     realtime_audio_input_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     realtime_audio_output_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Nur für GPT-Live (`services.ai_voice.sprachwege.OPENAI_LIVE`): das Modell,
+    # das hinter der Stimme nachdenkt und die Werkzeuge ruft — leer heisst „das
+    # Standardmodell" —, und der Preis je Minute Sitzung in Micro-USD. Die
+    # beiden Textpreise darüber gelten dort für dieses Backend-Modell;
+    # Audio-Token rechnet GPT-Live nicht ab.
+    realtime_backend_model: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    realtime_minute_price_micro_usd: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     standard_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"), nullable=False)
     worker_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"), nullable=False)
     ethics_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"), nullable=False)

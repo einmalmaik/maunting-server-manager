@@ -96,6 +96,21 @@ const ABGELOESTE_SCHLUESSEL = [
   // und senden gehen jetzt nur noch über die beiden Knöpfe. Ein Hinweis, der
   // eine Geste erklärt, die es nicht gibt, ist schlimmer als keiner.
   'social.videoNote.swipeToLock',
+  // 09/2026: Mit GPT-Live trägt OpenAI zwei Sprachwege, und welcher gilt,
+  // entscheidet das Modell, nicht der Anbieter. Die Texte stehen seitdem je
+  // Weg unter `ai.providers.realtime.wege.<weg>`; die alten Paare aus
+  // OpenAI-Text und `google…`-Zwilling hätten für GPT-Live einen dritten
+  // Zwilling gebraucht. `reasoningValues` sagte Wort für Wort dasselbe wie
+  // `ai.reasoning.levels` und kannte die Stufen von GPT-Live nicht.
+  'ai.providers.realtime.title',
+  'ai.providers.realtime.googleTitle',
+  'ai.providers.realtime.hint',
+  'ai.providers.realtime.googleHint',
+  'ai.providers.realtime.voice',
+  'ai.providers.realtime.googleVoice',
+  'ai.providers.realtime.reasoningHint',
+  'ai.providers.realtime.googleReasoningHint',
+  'ai.providers.realtime.reasoningValues',
 ]
 
 /** Die Nachfolger muss es geben — sonst wäre das Löschen ein Verlust. */
@@ -128,6 +143,13 @@ const NACHFOLGER = [
   // diesen Satz wäre aus der Oberfläche nicht zu erkennen, ob der Zugriff
   // entfernt wurde oder nur unerwähnt blieb.
   'privacyPolicy.sections.ai.items.noMessenger',
+  // Die Nachfolger der Sprachweg-Texte — je Weg, den das Backend kennt
+  // (`services/ai_voice/sprachwege.py`).
+  ...['openai_realtime', 'openai_live', 'gemini_live'].flatMap((weg) =>
+    ['title', 'hint', 'voice', 'reasoningHint'].map((feld) => `ai.providers.realtime.wege.${weg}.${feld}`)),
+  'ai.reasoning.levels.low',
+  'ai.reasoning.levels.medium',
+  'ai.reasoning.levels.high',
 ]
 
 // Die beiden Panelsprachen — seit 09/2026 gibt es keine weiteren. Die neun

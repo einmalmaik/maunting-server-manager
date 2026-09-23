@@ -507,7 +507,7 @@ def lauf_beendet(db: Session, *, run, zustand: dict) -> None:
     eigener Stimme formuliert.
     """
     from models import User as UserModell
-    from services.ai_task_report import abschlusstext
+    from services.ai_task_report import abschlusstext, sicherheitsstopp_vermerken
 
     rahmen = zustand.get("worker") or {}
     if str(run.stop_reason or "") in OHNE_MELDUNG:
@@ -522,6 +522,7 @@ def lauf_beendet(db: Session, *, run, zustand: dict) -> None:
             "Der Auftrag hat keine Zusammenfassung hinterlassen; der Verlauf "
             "steht in der Auftragsansicht."
         )
+    bericht = sicherheitsstopp_vermerken(run, bericht)
     geschafft = run.status == "completed"
     stand = "erledigt" if geschafft else (
         f"nicht abgeschlossen ({run.stop_reason or 'unbekannt'})"

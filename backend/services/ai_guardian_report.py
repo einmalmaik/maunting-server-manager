@@ -29,7 +29,7 @@ from models import AiRun, Backup, Incident, Server, User
 # mehr Runden als ein Aufgabenlauf, also mehr Ansagen — die Mail an den
 # Betreiber trug damit ausgerechnet im wichtigeren Fall die Ankündigungen statt
 # des Ergebnisses. Kein Importzyklus: `ai_task_report` kennt dieses Modul nicht.
-from services.ai_task_report import abschlusstext
+from services.ai_task_report import abschlusstext, sicherheitsstopp_vermerken
 from services.ai_redaction import redact_sensitive_text
 
 
@@ -194,6 +194,7 @@ def bericht_versenden(db: Session, *, run: AiRun, zustand: dict) -> None:
             "Der Assistent hat keinen Abschlussbericht hinterlassen. "
             "Der Verlauf steht im KI-Chat des Panels."
         )
+    bericht = sicherheitsstopp_vermerken(run, bericht)
 
     _zustellen(
         db=db,
