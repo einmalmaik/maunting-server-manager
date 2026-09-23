@@ -7,6 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.datastructures import Headers
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import Response
+from starlette.types import Scope
 
 from limits import parse
 from slowapi import _rate_limit_exceeded_handler
@@ -849,14 +853,30 @@ async def security_headers_middleware(request: Request, call_next):
     # gewinnt jetzt; wo keiner gesetzt ist, gilt weiterhin die Vorgabe.
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
 
-    # ── Cache-Control: Vite erzeugt content-gehashte Asset-Pfade ──
-    # /assets/* → 1 Jahr immutable (Hash aendert sich bei jeder neuen Version)
-    # /index.html und alle HTML-Routen → kein Cache (Browser fragt immer beim Server nach)
+    # ── Cache-Control ──
+    # /api/* und jeder Fehler → `no-store`, sofern die Route nichts Eigenes
+    # setzt (das Bild der Regionsanalyse etwa `private, max-age=900`). Bis
+    # 09/2026 fiel beides unter die Tagesregel ganz unten: `/api/auth/me`, jede
+    # 401 — und `public` erlaubt ausgerechnet geteilten Caches, die Antwort auf
+    # eine angemeldete Anfrage anderen auszuliefern (RFC 9111 §3.5). `no-store`
+    # statt `private, no-cache`: Die API liefert kein ETag, eine Nachfrage
+    # spart also nichts, und so bleibt auch die Platte des Browsers leer.
+    # /assets/* → 1 Jahr immutable (Vite hasht den Inhalt in den Namen). Ein
+    # 404 dort nicht: Nach einem Zurückrollen gibt es den Chunk wieder.
+    # HTML → kein Cache, erkannt auch am Inhaltstyp, damit ein SPA-Fallback
+    # unter `/ai` genauso nachfragt wie `/`.
     # Alles andere (Icons, Fonts, etc.) → 1 Tag
     path = request.url.path
-    if path.startswith("/assets/"):
+    html = (
+        path == "/"
+        or path.endswith(".html")
+        or response.headers.get("content-type", "").startswith("text/html")
+    )
+    if path.startswith("/api/") or response.status_code >= 400:
+        response.headers.setdefault("Cache-Control", "no-store")
+    elif path.startswith("/assets/"):
         response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
-    elif path == "/" or path.endswith(".html"):
+    elif html:
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
@@ -983,16 +1003,52 @@ def health():
 # /assets/* ohne html-Fallback: fehlende JS-Chunks liefern 404 (text/plain),
 # nicht index.html — verhindert „MIME type text/html“ bei veralteten Lazy-Chunks.
 _FRONTEND_DIST = "/opt/msm/frontend/dist"
-_FRONTEND_ASSETS = f"{_FRONTEND_DIST}/assets"
-if settings.serve_frontend and os.path.exists(_FRONTEND_DIST):
-    app.mount(
+#: Hier fällt nichts auf die Startseite zurück: ein fehlender Chunk muss ein
+#: 404 bleiben (siehe unten), eine unbekannte API-Route auch.
+_OHNE_RUECKFALL = frozenset({"api", "ws", "assets"})
+
+
+class _OberflaecheMitRueckfall(StaticFiles):
+    """Das gebaute Frontend, mit der index.html für jede Unterseite.
+
+    Die Oberfläche routet im Browser (`BrowserRouter`): `/ai`, `/servers/12`
+    oder der Freigabelink aus einer Mail sind keine Dateien. Hinter Caddy
+    fängt `try_files {path} /index.html` das ab. Liefert das Panel die
+    Oberfläche selbst aus (Kubernetes), endete ein Neuladen dort bis 09/2026
+    in 404.
+
+    Zurück fällt nur, was ein Browser als Seite anfragt (`Accept: text/html`).
+    Ein fehlendes Bild, Skript oder Manifest bleibt 404 — HTML an seiner
+    Stelle hielte der Browser für den Inhalt. Am Punkt im Pfad lässt sich das
+    nicht ablesen: auch eine Unterseite darf einen tragen.
+    """
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            erstes = path.replace(os.sep, "/").split("/", 1)[0]
+            seite = "text/html" in Headers(scope=scope).get("accept", "")
+            if exc.status_code != 404 or erstes in _OHNE_RUECKFALL or not seite:
+                raise
+        return await super().get_response("index.html", scope)
+
+
+def _frontend_einhaengen(ziel: FastAPI, dist: str) -> None:
+    """Hängt das gebaute Frontend ein. Eigene Funktion, damit die Tests genau
+    diese Einhängung gegen ein eigenes `dist` prüfen können."""
+    ziel.mount(
         "/assets",
         # Der Mount entfernt `/assets` vor der Dateisuche. Vite legt seine
         # Chunks aber in `dist/assets` ab; `dist` würde daher nach
         # `dist/<chunk>.js` statt nach `dist/assets/<chunk>.js` suchen.
         # Fehlende Chunks dürfen nie als SPA-HTML zurückkommen, weil das den
         # laufenden Client (unter anderem die Realtime-WebRTC-Sitzung) stoppt.
-        StaticFiles(directory=_FRONTEND_ASSETS, html=False),
+        StaticFiles(directory=f"{dist}/assets", html=False),
         name="frontend-assets",
     )
-    app.mount("/", StaticFiles(directory=_FRONTEND_DIST, html=True), name="frontend")
+    ziel.mount("/", _OberflaecheMitRueckfall(directory=dist, html=True), name="frontend")
+
+
+if settings.serve_frontend and os.path.exists(_FRONTEND_DIST):
+    _frontend_einhaengen(app, _FRONTEND_DIST)

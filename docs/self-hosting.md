@@ -244,7 +244,16 @@ Die Kosten: 63 Dateien, rund 660 KB im Build. Ein Aufruf zieht davon nur, was
 `unicode-range` verlangt — eine deutschsprachige Oberfläche lädt zehn Dateien
 mit zusammen etwa 200 KB, eine russische zusätzlich die kyrillischen Schnitte.
 Die Caddy-Site liefert `/assets/*` mit `max-age=31536000, immutable` aus; ein
-Besucher lädt sie damit einmal pro Release, nicht einmal pro Seitenaufruf.
+Besucher lädt sie damit einmal pro Release, nicht einmal pro Seitenaufruf. Ein
+fehlender Chunk bleibt dort ein 404. Die Seite selbst (`/`, jede `.html` und
+jede Unterseite, die auf die `index.html` fällt) trägt `no-cache, no-store`,
+alles andere im `dist` (Icons, Manifest, Erdtextur) einen Tag. Das gilt seit
+09/2026. Vorher setzte die Site gar keinen Cache-Kopf. Ein Browser durfte eine
+alte `index.html` dann nach eigener Schätzung weiterverwenden, und einen
+fehlenden Chunk beantwortete Caddy mit der `index.html`: Die Oberfläche konnte
+nach einem Update leer bleiben. `update.sh` schreibt die Site nicht neu,
+sondern meldet eine ohne diese Regeln. `install.sh` erneut auszuführen behält
+die vorhandenen Werte und schreibt die Site neu.
 
 Prüfen lässt sich das am gebauten Frontend. Die Ausgabe muss leer bleiben:
 
@@ -1770,6 +1779,20 @@ Zwei Punkte, die man nicht ändern sollte, ohne die Folgen zu kennen:
   Zustellung der Hintergrund-Aufträge verliert dadurch bei einem Neustart
   nichts — Meldungen stehen in der Datenbank, die Oberfläche pollt und lädt
   die persistierte Chat-Nachricht nach; nur das Live-Zusehen reisst kurz ab.
+
+Ohne Caddy davor liefert das Panel die Oberfläche selbst aus. Jede Unterseite
+wie `/ai` oder ein Freigabelink aus einer Mail bekommt dann die `index.html`,
+sofern der Browser eine Seite anfragt (`Accept: text/html`). Ein fehlendes
+Bild oder Skript bleibt 404, ebenso alles unter `/api/`, `/ws/` und
+`/assets/`. Bis 09/2026 endete dort jedes Neuladen einer Unterseite in 404.
+Die Cache-Köpfe setzt dann ebenfalls das Panel: `/assets/*` ein Jahr
+`immutable`, HTML `no-cache, no-store`, übrige Dateien einen Tag.
+API-Antworten tragen in jeder Installationsart `no-store`, sofern eine Route
+nichts anderes setzt, ebenso jeder Fehler. Ein vorgeschalteter Cache oder ein
+CDN darf sie also nicht speichern. Bis 09/2026 stand dort `public,
+max-age=86400`, auch für `/api/auth/me` und jede 401 — und `public` erlaubt
+einem geteilten Cache ausdrücklich, die Antwort auf eine angemeldete Anfrage
+anderen auszuliefern.
 
 ---
 

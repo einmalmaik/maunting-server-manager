@@ -135,6 +135,9 @@ export function SelfHostingDocs() {
         <p className="mt-4 border-l-2 border-primary/50 pl-4 text-sm leading-6 text-on-surface-variant">
           {t('docsSelfHosting.install.releaseNote')}
         </p>
+        <p className="mt-3 border-l-2 border-primary/50 pl-4 text-sm leading-6 text-on-surface-variant">
+          {t('docsSelfHosting.install.caddyUpdate')}
+        </p>
       </section>
 
       <section aria-labelledby="topology" className="mb-10">

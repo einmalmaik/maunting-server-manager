@@ -692,6 +692,22 @@ EOF
     fi
 fi
 
+# Cache-Regeln der Oberflaeche (seit 09/2026) stehen ebenfalls in der
+# Caddy-Site, die ein Update nicht anfasst. Ohne sie haelt ein Browser die
+# index.html von vor diesem Update fest. Die zeigt auf Chunks, die es jetzt
+# nicht mehr gibt, und Caddy beantwortete jeden fehlenden Chunk mit der
+# index.html — die Oberflaeche bleibt leer, bis der Cache verfaellt.
+for _kandidat in /etc/caddy/conf.d/msm.caddy /etc/caddy/conf.d/msm.conf; do
+    [[ -f "$_kandidat" ]] || continue
+    if grep -q "root \* /opt/msm/frontend/dist" "$_kandidat" 2>/dev/null \
+            && ! grep -q "handle /assets/\*" "$_kandidat" 2>/dev/null; then
+        warn "Caddy liefert die Oberflaeche noch ohne Cache-Regeln aus — ein Browser kann nach diesem Update eine alte, leere Seite festhalten."
+        warn "  $MSM_DIR/install.sh erneut ausfuehren (behaelt die vorhandenen Werte und schreibt die Site neu)"
+        warn "  oder in $_kandidat die Bloecke 'handle /assets/*' und 'handle' aus $MSM_DIR/Caddyfile.template uebernehmen."
+    fi
+    break
+done
+
 # ── DIS Sidecar Abhängigkeiten installieren ──
 log "Installiere DIS Sidecar-Abhängigkeiten..."
 if ! su - "$MSM_USER" -c "

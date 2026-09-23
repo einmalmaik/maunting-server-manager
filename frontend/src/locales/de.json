@@ -3850,7 +3850,8 @@
       "commandLabel": "Öffentlicher Bootstrap",
       "copy": "Befehl kopieren",
       "copied": "Kopiert",
-      "releaseNote": "Der Bootstrap bevorzugt das getestete msm-panel-Artefakt des neuesten GitHub-Releases. install.sh bleibt für Bootstrap, Simple- und interaktiven Modus der zentrale Installer: Er installiert auf Minimal-Systemen alle benötigten Basispakete und repariert eine unvollständige Caddy-Paketquelle sicher, ohne eine vorhandene Caddyfile zu ersetzen."
+      "releaseNote": "Der Bootstrap bevorzugt das getestete msm-panel-Artefakt des neuesten GitHub-Releases. install.sh bleibt für Bootstrap, Simple- und interaktiven Modus der zentrale Installer: Er installiert auf Minimal-Systemen alle benötigten Basispakete und repariert eine unvollständige Caddy-Paketquelle sicher, ohne eine vorhandene Caddyfile zu ersetzen.",
+      "caddyUpdate": "Seit 09/2026 schreibt install.sh Cache-Regeln in die Caddy-Site: Die gehashten Assets bleiben ein Jahr im Browser, die Seite selbst lädt bei jedem Aufruf neu, und ein fehlender Chunk bleibt ein 404. Ohne diese Regeln konnte ein Browser nach einem Update eine alte, leere Seite festhalten. update.sh schreibt eine vorhandene Site nicht neu, sondern meldet eine ohne diese Regeln. Dann install.sh erneut ausführen: Es übernimmt die vorhandenen Einstellungen und schreibt die Site neu."
     },
     "topology": {
       "title": "Beispiel-Topologie: 20 Hosts",

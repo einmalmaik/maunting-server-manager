@@ -244,3 +244,56 @@ def test_caddy_erlaubt_dem_panel_das_mikrofon() -> None:
                 continue
             assert "microphone=(self)" in zeile, f"{name}: {zeile.strip()}"
             assert "microphone=()" not in zeile, f"{name}: {zeile.strip()}"
+
+
+def _caddy_sites(installer: str) -> list[str]:
+    """Die Caddy-Sites, die install.sh schreibt: je Heredoc der Text bis EOF."""
+    return [teil.split("\nEOF\n", 1)[0] for teil in installer.split('cat > "$MSM_CADDY_FILE" <<EOF\n')[1:]]
+
+
+def test_caddy_haelt_die_oberflaeche_nur_so_lange_wie_sie_gilt() -> None:
+    # Ohne Cache-Kopf hielt ein Browser die index.html von vor einem Update
+    # heuristisch fest, und Caddy beantwortete jeden fehlenden Chunk mit der
+    # index.html als 200 text/html: Die Oberfläche blieb leer. Am echten
+    # Caddy 2.11 geprüft (23.09.2026); hier steht, dass jede Site, die die
+    # Oberfläche ausliefert, die Regeln trägt — und die Vorlage auch.
+    template = (ROOT / "Caddyfile.template").read_text(encoding="utf-8")
+    sites = _caddy_sites(_installer())
+    assert len(sites) == 3
+    oberflaeche = [site for site in sites if "root * /opt/msm/frontend/dist" in site]
+    assert len(oberflaeche) == 2
+
+    for site in [*oberflaeche, template]:
+        assets = site.split("    handle /assets/* {\n", 1)[1].split("\n    }\n", 1)[0]
+        assert "@vorhanden file" in assets
+        assert 'header @vorhanden Cache-Control "public, max-age=31536000, immutable"' in assets
+        # Ein fehlender Chunk bleibt ein 404 und wird nie zur index.html.
+        assert "try_files" not in assets
+        seite = site.split("\n    handle {\n", 1)[1].split("\n    }\n", 1)[0]
+        # Die Matcher entscheiden, welche Antwort welchen Kopf bekommt; ein
+        # `header` wirkt vor dem Rewrite von try_files, also am Originalpfad.
+        assert "@seite not file" in seite
+        assert "@html path / *.html" in seite
+        assert "@datei {\n            file\n            not path / *.html\n        }" in seite
+        assert 'header @seite Cache-Control "no-cache, no-store, must-revalidate"' in seite
+        assert 'header @html Cache-Control "no-cache, no-store, must-revalidate"' in seite
+        assert 'header @datei Cache-Control "public, max-age=86400"' in seite
+        assert "try_files {path} /index.html" in seite
+
+    # Die API setzt ihre Köpfe selbst. Ein Caddy-Kopf käme als zweiter hinzu
+    # und übertrumpfte etwa das Regionsbild (`private, max-age=900`).
+    for site in [*sites, template]:
+        api = site.split("handle /api/* {", 1)[1].split("}", 1)[0]
+        assert "Cache-Control" not in api
+
+
+def test_update_meldet_eine_site_ohne_cache_regeln() -> None:
+    # Die Site gehört install.sh, ein Update schreibt sie nicht neu. Also
+    # sagt der Updatelauf, wenn eine bestehende Installation die Regeln noch
+    # nicht trägt — wie schon bei /livekit und camera=(self).
+    updater = (ROOT / "update.sh").read_text(encoding="utf-8")
+    block = updater.split("# Cache-Regeln der Oberflaeche", 1)[1].split("\ndone\n", 1)[0]
+
+    assert 'grep -q "root \\* /opt/msm/frontend/dist"' in block
+    assert '! grep -q "handle /assets/\\*"' in block
+    assert "install.sh erneut ausfuehren" in block

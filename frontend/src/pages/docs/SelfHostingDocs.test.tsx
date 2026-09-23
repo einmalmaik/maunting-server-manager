@@ -46,6 +46,13 @@ describe('SelfHostingDocs', () => {
     expect(screen.getByText(/without replacing an existing Caddyfile/i)).toBeInTheDocument()
   })
 
+  it('tells operators of existing installs how they get the cache rules', () => {
+    renderPage()
+
+    expect(screen.getByText(/update\.sh does not rewrite an existing site; it reports one without these rules/i)).toBeInTheDocument()
+    expect(screen.getByText(/Run install\.sh again in that case: it keeps the existing settings/i)).toBeInTheDocument()
+  })
+
   it('documents safe continuation of a partial PostgreSQL setup', () => {
     renderPage()
 
