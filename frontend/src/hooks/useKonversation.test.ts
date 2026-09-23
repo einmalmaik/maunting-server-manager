@@ -31,6 +31,7 @@ const { lesungen, geraete, gruppenLesungen, gerufen, klartextCache, abgelegt } =
     verwirfDrSitzung: [] as string[],
     verarbeiteGruppenSteuerung: [] as string[],
     holeGeraeteSteuerung: [] as number[],
+    dmZiele: [] as string[],
     /** Aus welchen Mailboxen ein Durchlauf gelesen hat, in der Reihenfolge. */
     gelesen: [] as string[],
   },
@@ -102,16 +103,24 @@ vi.mock('@/services/gruppenSchluessel', () => ({
   verschluesseleFuerGruppe: vi.fn(async (k: any, payload: string) => `sv-e2ee-group-v1:${k.groupId}:${payload}`),
   // Wohin gesendet und woraus gelesen wird. Ohne gesetzten Umzug bleibt es bei
   // der alten Kennung — so verhalten sich alle Fälle wie vor Stufe 3d.
-  gruppenZiele: vi.fn(async (_g: number, alt: string) => {
-    const neu = umzug.get(alt)
-    return neu
-      ? { senden: neu, lesen: [neu, alt], nachweis: 'token' }
-      : { senden: alt, lesen: [alt], nachweis: null }
+  gruppenZiele: vi.fn(async (_g: number, alt: string) => zieleFuer(alt)),
+  // Dasselbe für den Direktchat. Der Hook fragt hier mit **beiden** Konten,
+  // die Ziele hängen aber — wie beim echten Dienst — allein an der Kennung.
+  dmZiele: vi.fn(async (eigeneId: number, peerId: number, alt: string) => {
+    gerufen.dmZiele.push(`${eigeneId}->${peerId}:${alt}`)
+    return zieleFuer(alt)
   }),
 }))
 
-/** Gesetzt heisst: diese Gruppe ist in die neue Kennung umgezogen. */
+/** Gesetzt heisst: dieses Gespräch ist in die neue Kennung umgezogen. */
 const umzug = new Map<string, string>()
+
+function zieleFuer(alt: string) {
+  const neu = umzug.get(alt)
+  return neu
+    ? { senden: neu, lesen: [neu, alt], nachweis: 'token' }
+    : { senden: alt, lesen: [alt], nachweis: null }
+}
 
 vi.mock('@/services/ratchetSitzung', () => ({
   baueZustellungen: vi.fn(async (_k: any, klartext: string, basisUuid: string) => [
@@ -196,6 +205,7 @@ describe('useKonversation', () => {
     gerufen.verwirfDrSitzung.length = 0
     gerufen.verarbeiteGruppenSteuerung.length = 0
     gerufen.holeGeraeteSteuerung.length = 0
+    gerufen.dmZiele.length = 0
     gerufen.gelesen.length = 0
     umzug.clear()
     proMailbox.clear()
@@ -515,16 +525,37 @@ describe('useKonversation', () => {
       expect(gelesen?.map((l: any) => l.text)).toEqual(['aus der neuen'])
     })
 
-    it('lässt die Geräte-Mailbox beim Direktchat aus', async () => {
-      // Sie trägt Gruppenschlüssel. Ein Direktchat hat keine, und ein Aufruf
-      // je Durchlauf wäre eine Abfrage, die nie etwas findet.
+    it('sieht auch beim Direktchat in der Geräte-Mailbox nach', async () => {
+      /*
+       * Bis 3d war das ausgelassen: sie trug nur Gruppenschlüssel, und ein
+       * Direktchat hat keine. Seit 3e liegt dort auch sein **Chatgeheimnis** —
+       * der Wert, aus dem seine Mailbox fällt. Bliebe der Griff aus, bekäme
+       * die Gegenseite das Geheimnis nie und das Gespräch stünde für immer
+       * auf der abgeleiteten Kennung, die das Backend selbst ausrechnen kann.
+       */
       umschlaege = [umschlag(1, 'dr-ok')]
       lesungen.set('dr-ok', { art: 'klartext', text: 'Hallo' })
 
       const { result } = await baueHook({ art: 'direkt', peerId: DU })
       await result.current.liesUmschlaege()
 
-      expect(gerufen.holeGeraeteSteuerung).toEqual([])
+      expect(gerufen.holeGeraeteSteuerung).toEqual([ICH])
+    })
+
+    it('liest den Direktchat während des Umzugs aus beiden Mailboxen', async () => {
+      // Dieselbe Gleichzeitigkeit wie bei der Gruppe: die Gegenseite bekommt
+      // das Chatgeheimnis später und schreibt bis dahin in die alte Mailbox.
+      umzug.set('dm-1-2', 'geheimer-chat')
+      proMailbox.set('geheimer-chat', [umschlag(2, 'dr-neu')])
+      proMailbox.set('dm-1-2', [umschlag(1, 'dr-alt')])
+      lesungen.set('dr-neu', { art: 'klartext', text: 'aus der neuen' })
+      lesungen.set('dr-alt', { art: 'klartext', text: 'aus der alten' })
+
+      const { result } = await baueHook({ art: 'direkt', peerId: DU })
+      const gelesen = await result.current.liesUmschlaege()
+
+      expect(gerufen.gelesen).toEqual(['geheimer-chat', 'dm-1-2'])
+      expect(gelesen?.map((l: any) => l.text)).toEqual(['aus der alten', 'aus der neuen'])
     })
   })
 
@@ -569,6 +600,36 @@ describe('useKonversation', () => {
 
       expect(auftraege).toHaveLength(1)
       expect(auftraege[0].blind_mailbox_id).toBe('geheime-mailbox')
+    })
+
+    it('adressiert die Kennung aus dem Chatgeheimnis, sobald es eine gibt', async () => {
+      // Dasselbe für den Direktchat — und zwar für **beide** Umschläge, den
+      // Sitzungsaufbau eingeschlossen. Bliebe der Aufbau in der alten Mailbox
+      // liegen, fände die Gegenstelle die Nachricht ohne die dazugehörige
+      // Sitzung und liefe in den Sitzungsbruch.
+      umzug.set('dm-1-2', 'geheimer-chat')
+
+      const { result } = await baueHook({ art: 'direkt', peerId: DU })
+      const auftraege = await result.current.baueVersand('Hallo', 'uuid-5')
+
+      expect(auftraege.map((a) => a.blind_mailbox_id)).toEqual([
+        'geheimer-chat',
+        'geheimer-chat',
+        'geheimer-chat',
+      ])
+      expect(gerufen.dmZiele).toContain(`${ICH}->${DU}:dm-1-2`)
+    })
+
+    it('schickt auch die Quittung des Direktchats in die neue Mailbox', async () => {
+      // Eine Quittung in der alten Mailbox erreicht niemanden mehr, sobald die
+      // Gegenseite umgezogen ist — das Häkchen bliebe für immer aus.
+      umzug.set('dm-1-2', 'geheimer-chat')
+      geraete.push({ device_id: 'fremd-a', public_key: 'pub-a' })
+
+      const { result } = await baueHook({ art: 'direkt', peerId: DU })
+      const auftraege = await result.current.baueSteuerversand('{}', 'ctrl-4', 'read_receipt')
+
+      expect(auftraege.map((a) => a.blind_mailbox_id)).toEqual(['geheimer-chat'])
     })
 
     it('versiegelt eine Quittung je Gerät, mit eigener Kennung', async () => {

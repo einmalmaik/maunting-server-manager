@@ -639,13 +639,13 @@ class SocialService:
     def _steuerziel_geraetemailbox(
         cls, db: Session, sender_user_id: int, clean_mailbox: str
     ) -> int | None:
-        """Die Geräte-Mailbox eines Mitglieds, das mit dem Absender eine Gruppe teilt.
+        """Die Geräte-Mailbox eines Kontos, mit dem der Absender schon zu tun hat.
 
-        Der Weg, auf dem ein Gruppenschlüssel sein Ziel erreicht, ohne durch die
-        Gruppenmailbox zu laufen. Bis 09/2026 ging er durch sie hindurch, und das
-        hatte zwei Folgen: die Mailbox liess sich nicht mit einem Besitznachweis
-        verschliessen (der Schlüssel dafür lag dahinter), und 99 von 100
-        Umschlägen im Lesefenster waren Schlüsselzustellungen.
+        Der Weg, auf dem ein Schlüssel sein Ziel erreicht, ohne durch die
+        Mailbox des Gesprächs zu laufen. Bis 09/2026 ging er durch sie hindurch,
+        und das hatte zwei Folgen: die Mailbox liess sich nicht mit einem
+        Besitznachweis verschliessen (der Schlüssel dafür lag dahinter), und 99
+        von 100 Umschlägen im Lesefenster waren Schlüsselzustellungen.
 
         Eng gefasst, und jede Einschränkung hat ihren Grund:
 
@@ -654,37 +654,87 @@ class SocialService:
           kein Verlauf und keine Blockierung je zu sehen bekäme. Der Server kann
           nicht hineinsehen, aber er kann darauf bestehen, dass der Umschlag als
           Steuerung deklariert ist — und kein Client zeigt Steuerung je als Text.
-        - **Nur an Mitglieder gemeinsamer Gruppen.** Nicht an jedes Konto: die
-          Kennung ist aus einer kleinen Ganzzahl nachrechenbar, und ohne diese
-          Schranke könnte jeder jedem in die Geräte-Mailbox schreiben.
+        - **Nur an bestehende Beziehungen.** Nicht an jedes Konto: die Kennung
+          ist aus einer kleinen Ganzzahl nachrechenbar, und ohne diese Schranke
+          könnte jeder jedem in die Geräte-Mailbox schreiben.
 
-        Was damit möglich bleibt: wer mit mir in einer Gruppe ist, kann mein
-        Lesefenster mit Steuerumschlägen füllen. Das konnte er vorher auch —
-        über die Gruppenmailbox, die ich ebenso lese.
+        **Drei Quellen, und die zweite und dritte kamen mit Stufe 3e dazu.**
+        Vorher zählten allein gemeinsame Gruppen — passend, solange hier nur
+        Gruppenschlüssel liefen. Seit auch das Chatgeheimnis eines Direktchats
+        diesen Weg nimmt, war das zu eng: zwei Freunde ohne gemeinsame Gruppe
+        bekamen ein 403, das Geheimnis erreichte die Gegenseite nie, und ihr
+        Chat wäre für immer auf der abgeleiteten Kennung stehen geblieben — der
+        einen, die der Server selbst ausrechnen kann.
+
+        Bewusst **nicht** dabei: ein Fremder mit öffentlichem Profil. Der darf
+        mir eine erste Nachricht schreiben, und genau dabei entsteht die
+        Chatzeile, die ihn ab dann hier hereinlässt. Ihn schon vorher
+        zuzulassen, hiesse, jedem Unbekannten das Lesefenster zu öffnen, das
+        mein Gerät bei *jedem* Gespräch abholt.
+
+        Was damit möglich bleibt: wer mit mir in einer Gruppe ist oder mit mir
+        schreibt, kann mein Lesefenster mit Steuerumschlägen füllen. Das konnte
+        er vorher auch — über die Mailbox, die ich ohnehin lese.
 
         Liefert die Konto-Id des Empfängers oder `None`, wenn die Kennung zu
         keiner erreichbaren Geräte-Mailbox gehört.
         """
+        kandidaten: set[int] = set()
+
         gruppen = [
             gid
             for (gid,) in db.query(ChatGroupMember.group_id)
             .filter(ChatGroupMember.user_id == sender_user_id)
             .all()
         ]
-        if not gruppen:
-            return None
+        if gruppen:
+            kandidaten.update(
+                uid
+                for (uid,) in db.query(ChatGroupMember.user_id)
+                .filter(
+                    ChatGroupMember.group_id.in_(gruppen),
+                    ChatGroupMember.user_id != sender_user_id,
+                )
+                .all()
+            )
 
-        kandidaten = {
-            uid
-            for (uid,) in db.query(ChatGroupMember.user_id)
+        for freundschaft in (
+            db.query(UserFriend)
             .filter(
-                ChatGroupMember.group_id.in_(gruppen),
-                ChatGroupMember.user_id != sender_user_id,
+                or_(
+                    UserFriend.user_id == sender_user_id,
+                    UserFriend.friend_id == sender_user_id,
+                ),
+                UserFriend.status == "accepted",
             )
             .all()
-        }
+        ):
+            kandidaten.add(
+                freundschaft.friend_id
+                if freundschaft.user_id == sender_user_id
+                else freundschaft.user_id
+            )
+
+        for chat in (
+            db.query(DirectChat)
+            .filter(
+                or_(
+                    DirectChat.user_a_id == sender_user_id,
+                    DirectChat.user_b_id == sender_user_id,
+                )
+            )
+            .all()
+        ):
+            gegenueber = chat.get_other_user_id(sender_user_id)
+            if gegenueber:
+                kandidaten.add(gegenueber)
+
         for uid in kandidaten:
             if cls.derive_user_device_mailbox_id(uid) == clean_mailbox:
+                # Eine Blockierung schneidet auch diesen Weg ab. Sonst wäre er
+                # die Hintertür, durch die ein Blockierter weiter zustellt.
+                if cls.is_blocked(db, sender_user_id, uid):
+                    return None
                 return uid
         return None
 

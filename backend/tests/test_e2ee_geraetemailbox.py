@@ -20,8 +20,15 @@ Zwei Schranken, und keine davon ist Zierde:
 * **Nur Steuerumschlaege.** Eine Nachricht in einer fremden Geraete-Mailbox
   waere ein Chat am Gespraech vorbei, den kein Verlauf und keine Blockierung je
   zu sehen bekaeme.
-* **Nur an Mitglieder gemeinsamer Gruppen.** Ohne das koennte jeder jedem in
-  die Geraete-Mailbox schreiben.
+* **Nur an bestehende Beziehungen.** Ohne das koennte jeder jedem in die
+  Geraete-Mailbox schreiben.
+
+Die zweite Schranke wurde mit Stufe 3e geweitet: sie kannte nur gemeinsame
+Gruppen, was passte, solange hier nur Gruppenschluessel liefen. Seit auch das
+Chatgeheimnis eines Direktchats diesen Weg nimmt, zaehlen zusaetzlich
+bestaetigte Freundschaften und bestehende Chatzeilen — sonst haetten zwei
+Freunde ohne gemeinsame Gruppe ihr Geheimnis nie ausgetauscht, und zwar
+lautlos. Ein Fremder mit oeffentlichem Profil bleibt bewusst draussen.
 """
 
 from __future__ import annotations
@@ -248,3 +255,200 @@ def test_eine_unbekannte_kennung_bleibt_auch_als_steuerung_ohne_ziel(
 
     assert empfaenger is None
     assert mitglieder == []
+
+
+# ── Stufe 3e: das Chatgeheimnis nimmt denselben Weg ─────────────────────────
+
+
+def _befreundet(db: Session, a: User, b: User) -> None:
+    """Eine bestaetigte Freundschaft — ohne gemeinsame Gruppe."""
+    anfrage = SocialService.send_friend_request(db, a.id, b.username)
+    SocialService.accept_friend_request(db, b.id, anfrage["id"])
+
+
+def test_steuerumschlag_an_einen_freund_ohne_gemeinsame_gruppe(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    """Der Fund aus der Laufzeitprobe zu Stufe 3e.
+
+    Bis dahin zaehlten hier allein gemeinsame Gruppen — passend, solange nur
+    Gruppenschluessel diesen Weg nahmen. Seit auch das Chatgeheimnis eines
+    Direktchats darueber reist, war das zu eng: zwei Freunde ohne gemeinsame
+    Gruppe bekamen ein 403, das Geheimnis erreichte die Gegenseite nie, und ihr
+    Chat waere fuer immer auf der abgeleiteten Kennung stehen geblieben — der
+    einen, die der Server selbst ausrechnen kann.
+
+    Und zwar **lautlos**: der Client faengt die gescheiterte Zustellung ab,
+    damit sie keine Nachricht aufhaelt. Ohne diesen Test waere der Ausfall
+    nirgends zu sehen gewesen.
+    """
+    _befreundet(db, owner_user, regular_user)
+    ziel_mailbox = SocialService.derive_user_device_mailbox_id(regular_user.id)
+
+    empfaenger, mitglieder, chat, gruppe = SocialService.resolve_mailbox_target(
+        db,
+        sender_user_id=owner_user.id,
+        blind_mailbox_id=ziel_mailbox,
+        is_control=True,
+    )
+
+    assert empfaenger == regular_user.id
+    assert mitglieder == []
+    assert chat is None
+    assert gruppe is None
+
+
+def test_steuerumschlag_an_einen_bestehenden_chat_ohne_freundschaft(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    """Wer mir schon schreibt, darf mir auch ein Geheimnis zustellen.
+
+    Der Weg, ueber den ein Gespraech mit einem Fremden nachtraeglich umzieht:
+    die erste Nachricht legt die Chatzeile an, und ab da traegt sie die
+    Berechtigung. Ohne diesen Zweig zoege ein Chat ohne Freundschaft nie um.
+
+    Die Chatzeile entsteht hier so, wie sie im Betrieb entsteht — ueber ein
+    oeffentliches Profil. Sie danach wieder zuzudrehen zeigt, dass die
+    Berechtigung an der **Zeile** haengt und nicht an der Sichtbarkeit: sonst
+    fiele ein Gespraech in dem Augenblick auseinander, in dem jemand sein
+    Profil privat stellt.
+    """
+    regular_user.social_privacy = "public"
+    db.commit()
+    SocialService.ensure_direct_chat(db, owner_user.id, regular_user.id)
+    regular_user.social_privacy = "private"
+    db.commit()
+    ziel_mailbox = SocialService.derive_user_device_mailbox_id(regular_user.id)
+
+    empfaenger, _, _, _ = SocialService.resolve_mailbox_target(
+        db,
+        sender_user_id=owner_user.id,
+        blind_mailbox_id=ziel_mailbox,
+        is_control=True,
+    )
+
+    assert empfaenger == regular_user.id
+
+
+def test_eine_offene_freundschaftsanfrage_reicht_nicht(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    """Angefragt ist nicht angenommen.
+
+    Sonst waere die Anfrage selbst der Tuerdruecker: jeder koennte eine
+    stellen, niemand muesste sie beantworten, und die Geraete-Mailbox staende
+    trotzdem offen.
+    """
+    SocialService.send_friend_request(db, owner_user.id, regular_user.username)
+    ziel_mailbox = SocialService.derive_user_device_mailbox_id(regular_user.id)
+
+    empfaenger, mitglieder, _, _ = SocialService.resolve_mailbox_target(
+        db,
+        sender_user_id=owner_user.id,
+        blind_mailbox_id=ziel_mailbox,
+        is_control=True,
+    )
+
+    assert empfaenger is None
+    assert mitglieder == []
+
+
+def test_ein_fremder_mit_oeffentlichem_profil_bleibt_draussen(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    """Die Grenze, die bewusst steht.
+
+    Ein oeffentliches Profil erlaubt eine erste Nachricht — in die Mailbox des
+    Gespraechs, die nur dieses eine Gespraech betrifft. Die Geraete-Mailbox ist
+    etwas anderes: sie ist das Fenster, das mein Geraet bei **jedem** Gespraech
+    abholt. Wer sie fuellen darf, kann mir jeden Chat lahmlegen.
+    """
+    aussen = _dritter(db)
+    regular_user.social_privacy = "public"
+    db.commit()
+    ziel_mailbox = SocialService.derive_user_device_mailbox_id(regular_user.id)
+
+    empfaenger, mitglieder, _, _ = SocialService.resolve_mailbox_target(
+        db,
+        sender_user_id=aussen.id,
+        blind_mailbox_id=ziel_mailbox,
+        is_control=True,
+    )
+
+    assert empfaenger is None
+    assert mitglieder == []
+
+
+def test_blockierung_schliesst_auch_die_geraetemailbox(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    """Sonst waere dieser Weg die Hintertuer neben der verschlossenen Tuer.
+
+    Geprueft wird gegen den Zustand **nach** einer bestehenden Beziehung: erst
+    befreundet, dann blockiert. Genau dort liegt der Fehler, den man macht —
+    die Kandidatenliste steht schon, und die Blockierung wird beim Auflisten
+    vergessen.
+    """
+    _befreundet(db, owner_user, regular_user)
+    SocialService.ensure_direct_chat(db, owner_user.id, regular_user.id)
+    SocialService.block_user(db, regular_user.id, owner_user.id)
+    ziel_mailbox = SocialService.derive_user_device_mailbox_id(regular_user.id)
+
+    empfaenger, mitglieder, _, _ = SocialService.resolve_mailbox_target(
+        db,
+        sender_user_id=owner_user.id,
+        blind_mailbox_id=ziel_mailbox,
+        is_control=True,
+    )
+
+    assert empfaenger is None
+    assert mitglieder == []
+
+
+def test_das_chatgeheimnis_geht_durch_das_relais(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    """Der ganze Weg, nicht nur die Aufloesung.
+
+    `resolve_mailbox_target` ist die Auskunft; `relay_blind_envelope` ist die
+    Tuer. Ein Test nur auf der Auskunft waere gruen, selbst wenn die Tuer
+    daneben zu bliebe.
+    """
+    _befreundet(db, owner_user, regular_user)
+    ziel_mailbox = SocialService.derive_user_device_mailbox_id(regular_user.id)
+
+    umschlag = SocialService.relay_blind_envelope(
+        db,
+        blind_mailbox_id=ziel_mailbox,
+        ciphertext_envelope=_hybrid_umschlag("chatgeheimnis"),
+        sender_user_id=owner_user.id,
+        client_uuid="dm-secret-1",
+        is_control=True,
+        control_type="dm_secret",
+    )
+
+    assert umschlag.blind_mailbox_id == ziel_mailbox
+
+
+def test_eine_nachricht_in_die_geraetemailbox_des_freundes_bleibt_verboten(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    """Die Schranke, die durch die Erweiterung **nicht** weicher wird.
+
+    Waere sie es, haette ein Freund einen Kanal an jedem Verlauf und jeder
+    Blockierung vorbei — sichtbar fuer niemanden.
+    """
+    _befreundet(db, owner_user, regular_user)
+    ziel_mailbox = SocialService.derive_user_device_mailbox_id(regular_user.id)
+
+    with pytest.raises(HTTPException) as fehler:
+        SocialService.relay_blind_envelope(
+            db,
+            blind_mailbox_id=ziel_mailbox,
+            ciphertext_envelope=_hybrid_umschlag("keine-steuerung"),
+            sender_user_id=owner_user.id,
+            client_uuid="dm-secret-2",
+            is_control=False,
+        )
+
+    assert fehler.value.status_code == 403

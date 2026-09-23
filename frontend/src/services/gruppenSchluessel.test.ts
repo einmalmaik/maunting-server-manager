@@ -32,6 +32,24 @@ vi.mock('./e2eeCrypto', () => ({
   deriveUserDeviceMailboxId: async (uid: number) => `dev:${uid}`,
   deriveGroupBlindMailboxId: async (gid: number) =>
     gid === 42 ? 'a'.repeat(32) : `grp:${gid}`,
+  // Symmetrisch wie das Original: die Unterschrift des Chatgeheimnisses haengt
+  // daran, dass beide Seiten dieselbe Kennung bilden.
+  deriveBlindMailboxId: async (a: number, b: number) =>
+    `dm:${Math.min(a, b)}:${Math.max(a, b)}`,
+}))
+
+/**
+ * Stellvertreter fuer die Absendersignatur.
+ *
+ * Ein Beleg ist hier `sig(<privat>):<daten>` und gilt, wenn der oeffentliche
+ * Schluessel zum privaten passt. Dass die echte Fassung ECDSA ist, prueft
+ * `absenderSignatur.test.ts`; hier zaehlt allein, ob der Lesepfad einen
+ * falschen Beleg auch als falsch behandelt.
+ */
+vi.mock('./absenderSignatur', () => ({
+  signiere: async (daten: string, privat: string) => `sig(${privat}):${daten}`,
+  pruefe: async (daten: string, beleg: string, oeffentlich: string) =>
+    beleg === `sig(priv-${oeffentlich}):${daten}`,
 }))
 
 // ---- Stellvertreter für die Geräteverwaltung ----------------------------
@@ -39,16 +57,25 @@ interface TestGeraet {
   kennung: string
   konto: number
   oeffentlich: string
+  /** Fehlt bei einem Geraet, das noch nicht beglaubigen kann. */
+  signaturPaar?: { privateKeyJwk: string }
   ablage: TestAblage
 }
 
 let aktuell: TestGeraet
-const verzeichnis = new Map<number, { device_id: string; public_key: string; label: string }[]>()
+const verzeichnis = new Map<
+  number,
+  { device_id: string; public_key: string; label: string; signing_public_key?: string }[]
+>()
 
 vi.mock('./e2eeGeraet', () => ({
   eigenesGeraet: async () => aktuell,
   geraeteVon: async (uid: number) => verzeichnis.get(uid) ?? [],
   verlangeGeraeteVon: async (uid: number) => verzeichnis.get(uid) ?? [],
+  signaturSchluesselVon: async (uid: number, did: string) =>
+    (verzeichnis.get(uid) ?? []).find((g) => g.device_id === did)?.signing_public_key || null,
+  kontoNutztSignaturen: async (uid: number) =>
+    (verzeichnis.get(uid) ?? []).some((g) => Boolean(g.signing_public_key)),
 }))
 
 // ---- Stellvertreter für Relais und Anrufe -------------------------------
@@ -112,6 +139,7 @@ vi.mock('@/api/calls', () => ({ sendeRaumSchluessel: async () => undefined }))
 
 import {
   GRUPPE_PREFIX,
+  dmZiele,
   entschluesseleGruppenUmschlag,
   erzeugeGruppenSchluessel,
   fordereGruppenSchluessel,
@@ -127,6 +155,7 @@ import {
   verwirfGruppenSchluessel,
   mailboxAusGeheimnis,
   nachweisAusGeheimnis,
+  type DmGeheimnis,
   type GruppenAblage,
   type GruppenGeheimnis,
   type GruppenKontext,
@@ -154,6 +183,7 @@ function neueAblage(): TestAblage {
   const aktuelle = new Map<number, string>()
   const beantwortet = new Set<string>()
   const geheimnisse = new Map<number, GruppenGeheimnis>()
+  const dmGeheimnisse = new Map<number, DmGeheimnis>()
   return {
     async liesGeheimnis(groupId) {
       return geheimnisse.get(groupId) ?? null
@@ -162,6 +192,19 @@ function neueAblage(): TestAblage {
       // Wie die echte Ablage: wer zuerst da ist, bleibt stehen.
       if (geheimnisse.has(eintrag.groupId)) return
       geheimnisse.set(eintrag.groupId, eintrag)
+    },
+    async liesDmGeheimnis(peerId) {
+      return dmGeheimnisse.get(peerId) ?? null
+    },
+    async schreibeDmGeheimnis(eintrag) {
+      if (dmGeheimnisse.has(eintrag.peerId)) return
+      dmGeheimnisse.set(eintrag.peerId, eintrag)
+    },
+    async merkeDmVerteilung(peerId, wann) {
+      // Wie die echte Ablage: nur die Marke, nie das Geheimnis.
+      const vorhanden = dmGeheimnisse.get(peerId)
+      if (!vorhanden || vorhanden.verteiltAm) return
+      dmGeheimnisse.set(peerId, { ...vorhanden, verteiltAm: wann })
     },
     async lies(groupId, keyId) {
       return keys.get(`${groupId}:${keyId}`) ?? null
@@ -197,15 +240,29 @@ function neueAblage(): TestAblage {
   }
 }
 
-function geraet(konto: number, name: string): TestGeraet {
+/**
+ * Ein Geraet im Verzeichnis.
+ *
+ * `mitSignatur` ist der Normalfall — jedes heutige Geraet fuehrt einen
+ * Signaturschluessel. `false` steht fuer den Altbestand, an dem die
+ * Downgrade-Schranke haengt: wer nicht beglaubigen kann, darf unsigniert
+ * senden, und nur er.
+ */
+function geraet(konto: number, name: string, mitSignatur = true): TestGeraet {
   const g: TestGeraet = {
     kennung: name.padEnd(32, '0'),
     konto,
     oeffentlich: `pub-${name}`,
+    ...(mitSignatur ? { signaturPaar: { privateKeyJwk: `priv-sig-${name}` } } : {}),
     ablage: neueAblage(),
   }
   const liste = verzeichnis.get(konto) ?? []
-  liste.push({ device_id: g.kennung, public_key: g.oeffentlich, label: name })
+  liste.push({
+    device_id: g.kennung,
+    public_key: g.oeffentlich,
+    label: name,
+    ...(mitSignatur ? { signing_public_key: `sig-${name}` } : {}),
+  })
   verzeichnis.set(konto, liste)
   return g
 }
@@ -1211,5 +1268,404 @@ describe('Zustellung über die Geräte-Mailbox', () => {
     }
 
     expect(await lies(bob, alle)).toEqual({ texte: ['aus der alten Zeit'], unlesbar: 0 })
+  })
+})
+
+// ==========================================
+// Das Chatgeheimnis (Stufe 3e)
+// ==========================================
+
+/**
+ * Verteilt ein Chatgeheimnis von Hand — den Weg, den `dmZiele` sonst selbst
+ * geht. Gebraucht für die Fälle, die der echte Weg gar nicht erzeugen kann:
+ * ein Dritter, der sich als die Gegenstelle ausgibt, und die grössere
+ * Kontokennung, die es gar nicht erst versuchen dürfte.
+ */
+async function verteileFremdesDmGeheimnis(
+  absenderGeraet: TestGeraet,
+  anKonto: number,
+  geheimnis: string,
+  behauptetVon: number,
+  behauptetAn: number,
+): Promise<void> {
+  const gespraech = `dm:${Math.min(behauptetVon, behauptetAn)}:${Math.max(behauptetVon, behauptetAn)}`
+  const roh: Record<string, unknown> = {
+    typ: 'dm_secret',
+    v: 1,
+    peerId: behauptetAn,
+    eigeneId: behauptetVon,
+    geheimnis,
+  }
+  // Unterschrieben wird mit dem **echten** Gerät des Absenders. Wer lügt,
+  // unterschreibt seine Lüge — und genau das soll auffallen.
+  const nutzlast = absenderGeraet.signaturPaar
+    ? {
+        ...roh,
+        von_konto: absenderGeraet.konto,
+        von_geraet: absenderGeraet.kennung,
+        sig: `sig(${absenderGeraet.signaturPaar.privateKeyJwk}):${signaturDatenFuerTest(gespraech, {
+          ...roh,
+          von_konto: absenderGeraet.konto,
+          von_geraet: absenderGeraet.kennung,
+        })}`,
+      }
+    : roh
+  for (const g of verzeichnis.get(anKonto) ?? []) {
+    mailbox.push({
+      id: naechsteId++,
+      mailboxId: `dev:${anKonto}`,
+      ciphertext_envelope: `${HYBRID}${g.public_key}.${Buffer.from(JSON.stringify(nutzlast), 'utf-8').toString('base64')}`,
+      client_uuid: `fremd-${naechsteId}`,
+      control_type: 'dm_secret',
+    })
+  }
+}
+
+/** Dieselbe Zeichenkette wie `nutzlastSignatur.signaturDaten`. */
+function signaturDatenFuerTest(mailboxId: string, roh: Record<string, unknown>): string {
+  const felder = Object.keys(roh)
+    .filter((name) => name !== 'sig' && roh[name] !== undefined)
+    .sort()
+    .map((name) => `${name}=${JSON.stringify(roh[name])}`)
+  return `msm:nutzlast:v1:${mailboxId}:${felder.join('&')}`
+}
+
+describe('Chatgeheimnis des Direktchats', () => {
+  let alice: TestGeraet
+  let bob: TestGeraet
+  let bobZweit: TestGeraet
+  /** Die abgeleitete Kennung, auf der das Gespräch heute liegt. */
+  const ALT = 'alt'.repeat(10)
+
+  const entsiegleFuer = (g: TestGeraet) => async (umschlag: string) => {
+    const klartext = oeffneHybrid(g, umschlag)
+    if (klartext === null) throw new Error('nicht für dieses Gerät')
+    return klartext
+  }
+
+  beforeEach(() => {
+    verzeichnis.clear()
+    mailbox = []
+    naechsteId = 1
+    alice = geraet(ALICE, 'alice-laptop')
+    bob = geraet(BOB, 'bob-handy')
+    bobZweit = geraet(BOB, 'bob-tablet')
+    serverMitglieder = [ALICE, BOB]
+    relaisKaputt = false
+    registrierungen.length = 0
+    registrierungFehlschlag = false
+    leereMailboxNachweise()
+    leereGeraeteStand()
+    leereUmzuege()
+  })
+
+  it('wird nur von der kleineren Kontokennung erzeugt', async () => {
+    /*
+     * Eine Gruppe hat einen Eigentümer, ein Direktchat hat keinen. Ohne eine
+     * Regel, die beide Seiten unabhängig zum selben Ergebnis führt, erzeugten
+     * beide eines — das Gespräch hätte zwei Mailboxen und zerfiele in zwei
+     * Hälften, die einander nicht mehr sehen. Welche Seite gewinnt, ist
+     * willkürlich; dass es immer dieselbe ist, nicht.
+     */
+    aktiviere(bob)
+    const beiBob = await dmZiele(BOB, ALICE, ALT, { erzeuge: true })
+    expect(beiBob.senden).toBe(ALT)
+    expect(beiBob.lesen).toEqual([ALT])
+    expect(await bob.ablage.liesDmGeheimnis(ALICE)).toBeNull()
+
+    aktiviere(alice)
+    const beiAlice = await dmZiele(ALICE, BOB, ALT, { erzeuge: true })
+    expect(beiAlice.senden).not.toBe(ALT)
+    expect(await alice.ablage.liesDmGeheimnis(BOB)).not.toBeNull()
+  })
+
+  it('erzeugt beim blossen Lesen nichts', async () => {
+    /*
+     * Erzeugen heisst verteilen, und verteilen heisst Umschläge an die Geräte
+     * der Gegenstelle. Täte das schon das Öffnen eines Chats, wäre Nachsehen
+     * ein sichtbarer Vorgang: wer ein Gespräch nur aufschlägt und nichts
+     * schreibt, hinterliesse trotzdem eine Spur bei der Gegenseite.
+     */
+    aktiviere(alice)
+    const ziele = await dmZiele(ALICE, BOB, ALT)
+
+    expect(ziele.senden).toBe(ALT)
+    expect(await alice.ablage.liesDmGeheimnis(BOB)).toBeNull()
+    expect(mailbox).toHaveLength(0)
+  })
+
+  it('bleibt lesbar, wenn die Ablage nicht antwortet', async () => {
+    /*
+     * Der Fehler, der die halbe Messenger-Suite umwarf: `dmZiele` fragt
+     * IndexedDB, und eine verschlossene oder fehlende Ablage warf. In
+     * `einDurchlauf` riss das nicht den Umzug mit, sondern das **Lesen** — der
+     * Verlauf blieb leer, und zwar ohne jede Meldung.
+     *
+     * Wo ein Gespräch liegt, muss immer beantwortbar sein. Die abgeleitete
+     * Kennung ist diese Antwort: beide Seiten können sie ausrechnen.
+     */
+    setzeGruppenAblageFuerTest({
+      ...alice.ablage,
+      liesDmGeheimnis: async () => {
+        throw new Error('IndexedDB nicht verfügbar')
+      },
+    })
+
+    const ziele = await dmZiele(ALICE, BOB, ALT, { erzeuge: true })
+    expect(ziele).toEqual({ senden: ALT, lesen: [ALT], nachweis: null })
+  })
+
+  it('bringt beide Seiten auf dieselbe Mailbox', async () => {
+    // Der eigentliche Zweck. Zwei verschiedene Kennungen wären ein Gespräch,
+    // in dem keiner den anderen hört.
+    aktiviere(alice)
+    const beiAlice = await dmZiele(ALICE, BOB, ALT, { erzeuge: true })
+
+    aktiviere(bob)
+    expect(await holeGeraeteSteuerung(BOB, entsiegleFuer(bob))).toBe(1)
+    const beiBob = await dmZiele(BOB, ALICE, ALT, { erzeuge: true })
+
+    expect(beiBob.senden).toBe(beiAlice.senden)
+    expect(beiBob.nachweis).toBe(beiAlice.nachweis)
+  })
+
+  it('liest während des Umzugs aus beiden Mailboxen', async () => {
+    /*
+     * Dieselbe Gleichzeitigkeit wie bei der Gruppe (siehe dort): Alice ist
+     * umgezogen, Bob hat das Geheimnis noch nicht und schreibt weiter in die
+     * alte. Läse Alice nur die neue, verschwände Bobs Hälfte des Gesprächs —
+     * ohne Fehlermeldung, und das ist das Schlimmste daran.
+     */
+    aktiviere(alice)
+    const ziele = await dmZiele(ALICE, BOB, ALT, { erzeuge: true })
+
+    expect(ziele.lesen).toEqual([ziele.senden, ALT])
+    expect(umgezogeneMailbox(ALT)).toBe(ziele.senden)
+  })
+
+  it('stellt das Geheimnis über die Geräte-Mailboxen zu, nie über die des Gesprächs', async () => {
+    /*
+     * Die Zusage, an der die Scheibe hängt — dieselbe wie beim
+     * Gruppenschlüssel. Läge das Geheimnis in der Chatmailbox, läge der
+     * Schlüssel hinter dem Schloss, das er aufsperren soll.
+     */
+    aktiviere(alice)
+    await dmZiele(ALICE, BOB, ALT, { erzeuge: true })
+
+    expect(mailbox.every((u) => u.mailboxId.startsWith('dev:'))).toBe(true)
+    // Beide Geräte von Bob, und keines von Alice: sie hat nur eines, und das
+    // ist ihr eigenes.
+    expect(mailbox.map((u) => u.mailboxId).sort()).toEqual(['dev:2', 'dev:2'])
+  })
+
+  it('erreicht auch das Zweitgerät der eigenen Seite', async () => {
+    // Zwei Geräte desselben Kontos müssen in dieselbe Mailbox schreiben —
+    // sonst schreibt das Handy in eine, die der Laptop nie liest.
+    const aliceZweit = geraet(ALICE, 'alice-handy')
+
+    aktiviere(alice)
+    const beiAlice = await dmZiele(ALICE, BOB, ALT, { erzeuge: true })
+
+    aktiviere(aliceZweit)
+    expect(await holeGeraeteSteuerung(ALICE, entsiegleFuer(aliceZweit))).toBe(1)
+    expect(await dmZiele(ALICE, BOB, ALT, { erzeuge: true })).toEqual(beiAlice)
+  })
+
+  it('hinterlegt den Besitznachweis auf der neuen Kennung, nie auf der alten', async () => {
+    /*
+     * Ein Nachweis auf der alten Kennung wäre der Fehler aus 3b: durch sie
+     * kommt das Geheimnis nicht, aber die Gegenseite schreibt bis zum Umzug
+     * dorthin — ein Schloss davor sperrt sie aus dem eigenen Gespräch aus.
+     */
+    aktiviere(alice)
+    const ziele = await dmZiele(ALICE, BOB, ALT, { erzeuge: true })
+
+    expect(registrierungen.map((r) => r.mailboxId)).toEqual([ziele.senden])
+    expect(registrierungen[0].authToken).toBe(ziele.nachweis)
+  })
+
+  it('sendet weiter, wenn der Nachweis nicht angenommen wird', async () => {
+    // Ein 409 heisst: die Mailbox ist schon registriert, meist vom eigenen
+    // Zweitgerät. Eine Nachricht daran scheitern zu lassen, wäre der teuerste
+    // denkbare Preis für einen jederzeit nachholbaren Schritt.
+    registrierungFehlschlag = true
+
+    aktiviere(alice)
+    const ziele = await dmZiele(ALICE, BOB, ALT, { erzeuge: true })
+
+    expect(ziele.senden).not.toBe(ALT)
+    expect(ziele.nachweis).not.toBeNull()
+  })
+
+  it('zieht nicht um, solange die Gegenstelle das Geheimnis nicht hat', async () => {
+    /*
+     * Der Ring, der sich sonst nicht von selbst öffnet.
+     *
+     * Die allererste Nachricht an jemanden, mit dem es noch keine Chatzeile
+     * gibt: der Server lässt einen Steuerumschlag in eine fremde
+     * Geräte-Mailbox nur bei bestehender Beziehung durch, und die entsteht
+     * erst mit dieser Nachricht. Zöge das Gespräch trotzdem um, ginge sie in
+     * eine Mailbox, die die Gegenseite weder kennt noch je erfährt — und die
+     * Zustellung, die es ihr sagen würde, käme nie zustande.
+     *
+     * Also: erzeugt sofort, umgezogen erst nach erfolgreicher Zustellung.
+     */
+    relaisKaputt = true
+
+    aktiviere(alice)
+    const ziele = await dmZiele(ALICE, BOB, ALT, { erzeuge: true })
+
+    expect(ziele).toEqual({ senden: ALT, lesen: [ALT], nachweis: null })
+    // Erzeugt wurde es trotzdem — nur eben noch nicht wirksam.
+    const eintrag = await alice.ablage.liesDmGeheimnis(BOB)
+    expect(eintrag).not.toBeNull()
+    expect(eintrag?.verteiltAm).toBeFalsy()
+  })
+
+  it('holt die Zustellung beim nächsten Versand nach', async () => {
+    // Die Gegenprobe: sobald die Beziehung besteht — hier: sobald das Relais
+    // wieder antwortet — greift der Umzug ohne weiteres Zutun.
+    relaisKaputt = true
+    aktiviere(alice)
+    expect((await dmZiele(ALICE, BOB, ALT, { erzeuge: true })).senden).toBe(ALT)
+
+    relaisKaputt = false
+    const zweiter = await dmZiele(ALICE, BOB, ALT, { erzeuge: true })
+
+    expect(zweiter.senden).not.toBe(ALT)
+    expect((await alice.ablage.liesDmGeheimnis(BOB))?.verteiltAm).toBeTruthy()
+    // Und es ist dasselbe Geheimnis wie beim ersten Versuch, kein zweites.
+    aktiviere(bob)
+    await holeGeraeteSteuerung(BOB, entsiegleFuer(bob))
+    expect((await dmZiele(BOB, ALICE, ALT)).senden).toBe(zweiter.senden)
+  })
+
+  it('zieht nicht um, wenn nur die eigenen Zweitgeräte erreicht wurden', async () => {
+    /*
+     * Die Zahl, die zählt, ist die der **Gegenstelle**. Eine Summe über beide
+     * Seiten wäre hier ein stilles Ja: mein Handy hat es, also zieh um — und
+     * die Gegenseite stünde vor einer Mailbox, von der sie nie erfährt.
+     */
+    geraet(ALICE, 'alice-handy')
+    // Bob hat keine Geräte mehr: niemand auf seiner Seite ist erreichbar.
+    verzeichnis.set(BOB, [])
+
+    aktiviere(alice)
+    const ziele = await dmZiele(ALICE, BOB, ALT, { erzeuge: true })
+
+    expect(ziele.senden).toBe(ALT)
+    // Das eigene Zweitgerät bekam es trotzdem — es schadet nicht und spart
+    // später eine Runde.
+    expect(mailbox.map((u) => u.mailboxId)).toEqual(['dev:1'])
+  })
+
+  it('nimmt ein beglaubigtes Geheimnis der kleineren Kennung an', async () => {
+    /*
+     * Die Gegenprobe zu den drei Ablehnungen darunter — und der Grund, warum
+     * sie überhaupt etwas aussagen. Baute `verteileFremdesDmGeheimnis` einen
+     * Umschlag, den niemand öffnen kann, gingen alle drei aus dem falschen
+     * Grund durch: nicht weil die Schranke greift, sondern weil nie etwas
+     * ankam.
+     */
+    const aliceZweit = geraet(ALICE, 'alice-handy')
+    await verteileFremdesDmGeheimnis(aliceZweit, BOB, 'P'.repeat(44), ALICE, BOB)
+
+    aktiviere(bob)
+    expect(await holeGeraeteSteuerung(BOB, entsiegleFuer(bob))).toBe(1)
+    expect((await bob.ablage.liesDmGeheimnis(ALICE))?.geheimnis).toBe('P'.repeat(44))
+  })
+
+  it('überschreibt ein vorhandenes Geheimnis nicht', async () => {
+    // Sonst genügte ein später eintreffender Umschlag, um ein laufendes
+    // Gespräch in eine andere Mailbox zu zerren.
+    aktiviere(alice)
+    await dmZiele(ALICE, BOB, ALT, { erzeuge: true })
+    const erstes = await alice.ablage.liesDmGeheimnis(BOB)
+    mailbox = []
+
+    // Ein zweiter Umschlag mit anderem Wert, formal einwandfrei: von Alices
+    // eigenem Zweitgerät, das die kleinere Kennung genauso trägt.
+    const aliceZweit = geraet(ALICE, 'alice-handy')
+    await verteileFremdesDmGeheimnis(aliceZweit, ALICE, 'X'.repeat(44), ALICE, BOB)
+
+    aktiviere(alice)
+    await holeGeraeteSteuerung(ALICE, entsiegleFuer(alice))
+
+    expect(await alice.ablage.liesDmGeheimnis(BOB)).toEqual(erstes)
+  })
+
+  it('nimmt kein Geheimnis von der grösseren Kontokennung an', async () => {
+    /*
+     * Die Erzeugungsregel, von der anderen Seite geprüft. Ohne sie wäre sie
+     * eine Bitte: Bob könnte eines erzeugen, Alice auch, beide behielten ihres
+     * — und das Gespräch zerfiele in genau die zwei Hälften, die die Regel
+     * verhindern soll.
+     */
+    aktiviere(bob)
+    await verteileFremdesDmGeheimnis(bob, ALICE, 'Y'.repeat(44), BOB, ALICE)
+
+    aktiviere(alice)
+    expect(await holeGeraeteSteuerung(ALICE, entsiegleFuer(alice))).toBe(0)
+    expect(await alice.ablage.liesDmGeheimnis(BOB)).toBeNull()
+  })
+
+  it('nimmt kein Geheimnis von einem Dritten an, der sich als die Gegenstelle ausgibt', async () => {
+    /*
+     * Der Angriff, gegen den die Beglaubigung steht. Ein Hybridumschlag hat
+     * keinen Absenderkopf — jeder, der Bobs öffentlichen Geräteschlüssel
+     * kennt, kann ihm einen schicken. Carol behauptet darin, Alice zu sein,
+     * also die kleinere Kennung, die erzeugen darf.
+     *
+     * Lesen könnte Carol nichts: die Nachrichten bleiben im Ratchet. Aber sie
+     * lenkte Bobs halbes Gespräch in eine Mailbox, die Alice nie liest — ein
+     * stiller Abriss, und genau die Sorte Fehler, die niemand meldet.
+     */
+    const carol = geraet(CAROL, 'carol-tablet')
+    aktiviere(carol)
+    await verteileFremdesDmGeheimnis(carol, BOB, 'Z'.repeat(44), ALICE, BOB)
+
+    aktiviere(bob)
+    expect(await holeGeraeteSteuerung(BOB, entsiegleFuer(bob))).toBe(0)
+    expect(await bob.ablage.liesDmGeheimnis(ALICE)).toBeNull()
+  })
+
+  it('verwirft ein unsigniertes Geheimnis, wenn die Gegenstelle beglaubigen kann', async () => {
+    /*
+     * Die Downgrade-Schranke. Ohne sie nähme ein Fälscher die Unterschrift
+     * einfach weg und stünde wieder da, wo er vor der Beglaubigung stand —
+     * Alice führt einen Signaturschlüssel, also muss jedes Paket in ihrem
+     * Namen einen tragen.
+     */
+    const faelscher = geraet(CAROL, 'carol-ohne-beleg', false)
+    aktiviere(faelscher)
+    await verteileFremdesDmGeheimnis(faelscher, BOB, 'Q'.repeat(44), ALICE, BOB)
+
+    aktiviere(bob)
+    expect(await holeGeraeteSteuerung(BOB, entsiegleFuer(bob))).toBe(0)
+    expect(await bob.ablage.liesDmGeheimnis(ALICE)).toBeNull()
+  })
+
+  it('lässt einen Gruppenschlüssel unberührt, der in derselben Mailbox liegt', async () => {
+    // Beide Arten teilen sich die Geräte-Mailbox. Ein Chatgeheimnis biegt vor
+    // der `groupId`-Prüfung ab — es darf dabei nicht den Gruppenpfad
+    // verschlucken, der gleich daneben steht.
+    aktiviere(alice)
+    await verschluesseleFuerGruppe(
+      {
+        groupId: GRUPPE,
+        blindMailboxId: MAILBOX,
+        eigeneId: ALICE,
+        mitglieder: [ALICE, BOB],
+        istEigentuemer: true,
+      },
+      'Hallo Gruppe',
+    )
+    await dmZiele(ALICE, BOB, ALT, { erzeuge: true })
+
+    aktiviere(bob)
+    // Zwei Zustellungen, zwei verschiedene Arten, beide verarbeitet.
+    expect(await holeGeraeteSteuerung(BOB, entsiegleFuer(bob))).toBe(2)
+    expect(await bob.ablage.liesAktuellen(GRUPPE)).not.toBeNull()
+    expect(await bob.ablage.liesDmGeheimnis(ALICE)).not.toBeNull()
   })
 })

@@ -40,6 +40,7 @@ import type { E2eeIdentity } from '@/services/e2eeIdentity'
 import {
   entschluesseleGruppenUmschlag,
   fordereGruppenSchluessel,
+  dmZiele,
   gruppenZiele,
   holeGeraeteSteuerung,
   verarbeiteGruppenSteuerung,
@@ -259,13 +260,19 @@ export async function baueVersandFuer(
     // sie hier auf einen Schlüssel zurück, den das Backend aus den beiden
     // Benutzerkennungen selbst bilden kann.
     const zustellungen = await baueZustellungen(drKontext, payload, clientUuid)
+    // Wie bei der Gruppe: adressiert wird die Kennung aus dem Chatgeheimnis,
+    // `mid` bleibt die Kennung des Gesprächs. `erzeuge` steht nur hier — der
+    // Versand ist der Augenblick, in dem ein Gespräch wirklich beginnt, und
+    // erzeugen heisst Umschläge an die Geräte der Gegenstelle. Beim Lesen
+    // wäre das eine Spur fürs blosse Nachsehen.
+    const ziel = await dmZiele(drKontext.eigeneId, drKontext.peerId, mid, { erzeuge: true })
     const auftraege: Versandauftrag[] = []
     for (const z of zustellungen) {
       // Reihenfolge ist bindend: ohne den Aufbau findet die Gegenstelle keine
       // Sitzung und läuft in den Sitzungsbruch.
       if (z.bootstrap) {
         auftraege.push({
-          blind_mailbox_id: mid,
+          blind_mailbox_id: ziel.senden,
           ciphertext_envelope: z.bootstrap,
           recipient_id: drKontext.peerId,
           client_uuid: z.bootstrapClientUuid,
@@ -274,7 +281,7 @@ export async function baueVersandFuer(
         })
       }
       auftraege.push({
-        blind_mailbox_id: mid,
+        blind_mailbox_id: ziel.senden,
         ciphertext_envelope: z.nachricht,
         recipient_id: drKontext.peerId,
         client_uuid: z.clientUuid,
@@ -346,26 +353,24 @@ export function useKonversation({
 
     const schluessel = identitaet.decryptionKeys
 
-    // Zuerst die eigene Geräte-Mailbox: dort liegen die Gruppenschlüssel. Ein
-    // Gerät, das den Schlüssel noch nicht hat, bekäme ihn sonst nie — und
-    // stünde vor einer Mailbox voller „Verschlüsselte Nachricht". Vor dem
-    // Lesen, nicht danach: sonst wäre der erste Durchlauf immer der blinde.
-    if (gruppenKontext) {
-      await holeGeraeteSteuerung(eigeneId, (umschlag) =>
-        decryptE2eeHybridWithKeyring(umschlag, schluessel),
-      ).catch(() => 0)
-      if (aktuelleMailbox.current !== mid) return null
-    }
+    // Zuerst die eigene Geräte-Mailbox: dort liegen die Gruppenschlüssel und
+    // die Chatgeheimnisse. Ein Gerät, das sie noch nicht hat, bekäme sie sonst
+    // nie — und stünde vor einer Mailbox voller „Verschlüsselte Nachricht"
+    // oder, beim Direktchat, vor einer leeren. Vor dem Lesen, nicht danach:
+    // sonst wäre der erste Durchlauf immer der blinde.
+    await holeGeraeteSteuerung(eigeneId, (umschlag) =>
+      decryptE2eeHybridWithKeyring(umschlag, schluessel),
+    ).catch(() => 0)
+    if (aktuelleMailbox.current !== mid) return null
 
     /**
      * Aus welchen Mailboxen dieser Durchlauf liest.
      *
-     * Bei einer Gruppe sind das zwei, solange der Umzug läuft: die Kennung aus
-     * dem Gruppengeheimnis und die alte aus der `group_id`. Die Mitglieder
-     * bekommen das Geheimnis nicht gleichzeitig — es reist als Steuerumschlag
-     * in ihre Geräte-Mailbox —, und wer es noch nicht hat, sendet weiter in
-     * die alte. Läse jeder nur seine eigene, verlöre das Gespräch lautlos die
-     * Hälfte seiner Nachrichten.
+     * Zwei, solange der Umzug läuft: die Kennung aus dem Geheimnis und die
+     * alte, abgeleitete. Die Gegenseite bekommt das Geheimnis nicht im selben
+     * Augenblick — es reist als Steuerumschlag in ihre Geräte-Mailbox —, und
+     * wer es noch nicht hat, sendet weiter in die alte. Läse jeder nur seine
+     * eigene, verlöre das Gespräch lautlos die Hälfte seiner Nachrichten.
      *
      * Nach `holeGeraeteSteuerung`, nicht davor: genau dort kommt das
      * Geheimnis an, und ein Durchlauf, der vorher fragt, liest die neue
@@ -373,7 +378,9 @@ export function useKonversation({
      */
     const lesen = gruppenKontext
       ? (await gruppenZiele(gruppenKontext.groupId, mid)).lesen
-      : [mid]
+      : drKontext
+        ? (await dmZiele(drKontext.eigeneId, drKontext.peerId, mid)).lesen
+        : [mid]
     if (aktuelleMailbox.current !== mid) return null
 
     const umschlaege = (
@@ -663,9 +670,10 @@ export function useKonversation({
       // Reaktionen und die Verfallsfrist gleichermaßen und wäre eine eigene
       // Runde wert.
       const geraete = await verlangeGeraeteVon(drKontext.peerId)
+      const ziel = await dmZiele(drKontext.eigeneId, drKontext.peerId, mid)
       return Promise.all(
         geraete.map(async (geraet, i) => ({
-          blind_mailbox_id: mid,
+          blind_mailbox_id: ziel.senden,
           ciphertext_envelope: await encryptE2eeHybrid(payload, geraet.public_key, sendPair.publicKeyJwk),
           recipient_id: drKontext.peerId,
           // Je Gerät eine eigene Kennung, sonst gibt das Relais beim zweiten
