@@ -275,7 +275,8 @@ export interface ChatGroupMemberItem {
   role: string
   permissions?: string | null
   /**
-   * Ob **dieses Mitglied** alle wecken beziehungsweise anheften darf.
+   * Ob **dieses Mitglied** alle wecken, anheften beziehungsweise die
+   * Verfallsfrist der Gruppe stellen darf.
    *
    * Vom Server ausgerechnet, und zwar je Mitglied, nicht nur für mich: der
    * Server kann den Inhalt einer Nachricht nicht lesen, also entscheidet das
@@ -284,6 +285,7 @@ export interface ChatGroupMemberItem {
    */
   can_mention_everyone?: boolean
   can_pin_messages?: boolean
+  can_set_disappearing_messages?: boolean
   joined_at: string
 }
 
@@ -323,6 +325,7 @@ export interface ChatGroupItem {
   /** Ob ich die Auswahl angeboten bekomme. Die Schranke sitzt beim Empfänger. */
   can_mention_everyone?: boolean
   can_pin_messages?: boolean
+  can_set_disappearing_messages?: boolean
   created_at: string
   members: ChatGroupMemberItem[]
   /** Ephemeral room token supplied by a live-call invitation, when present. */

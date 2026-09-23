@@ -4324,7 +4324,7 @@
           "mentions": "Whether an @everyone becomes a notification is decided by the receiving device, not the sending one: it checks the group permissions to see whether the sender was allowed to alert everyone, and otherwise leaves the text as ordinary text. The instance cannot check this, because it does not read the content. In a muted group only a badge appears in the chat list, with no sound. The same check applies to a group's pinned message: which message that is, each device remembers for itself.",
           "attachments": "Images, voice messages, video notes and files each get their own random key before upload. It travels only inside the encrypted message text, so it differs per attachment and the instance never learns it. What the instance receives is the encrypted block, its size and its timestamp; the file name and file type stay inside the encrypted part. Copy such a block into another conversation and it will not open there.",
           "deletion": "Deleting a message for everyone does more than hide it: the envelope is removed from the mailbox, an uploaded attachment is deleted with it, and both devices drop the text and the attachment from their local history. What stays behind is a placeholder saying a message was here. Anything a device saved or photographed beforehand is beyond the reach of this deletion.",
-          "retention": "Disappearing messages are set per chat, and the time limit applies to both sides. The other person's device adopts it, shows the change in the conversation, and from then on their messages expire too. Once the time is up, every device drops the entry from its history, and each side removes its own envelopes and attachments from the server. Only whoever uploaded something can delete it there. If a device never comes back online, its encrypted envelope stays in the mailbox even though the message has disappeared everywhere else.",
+          "retention": "Disappearing messages are set per chat, and the time limit applies to everyone in it: in a one-to-one chat both sides may change it, in a group only those with the right to do so. Whether the sender had that right is checked by each receiving device itself; the instance cannot read the change. The other devices adopt the time limit, show the change in the conversation, and from then on their messages expire too. Once the time is up, every device drops the entry from its history, and each side removes its own envelopes and attachments from the server. Only whoever uploaded something can delete it there. If a device never comes back online, its encrypted envelope stays in the mailbox even though the message has disappeared everywhere else.",
           "receipts": "Delivery and read receipts travel as encrypted control messages over the same path. If a receipt cannot be encrypted, it is not sent rather than sent unprotected.",
           "push": "If you have notifications switched on and the application closed, your browser registers a delivery address with its vendor's push service — Google, Mozilla or Apple, depending on the browser. The instance stores that address so it can reach you. What it sends there is encrypted for your browser and carries no content anyway: no text, no sender, only “New message”.",
           "pushMetadata": "The push service does see that your delivery address received something at that moment. There is no way around this on this route, which is why it is stated here. Turn notifications off in your profile or sign out and the address is deleted, after which nothing leaves the instance. While a window is open nothing is sent at all: the application notifies you itself.",
@@ -6526,9 +6526,13 @@
           "title": "Pin a message",
           "desc": "Pins a message as a bar above the history, visible to everyone in the group. Here too the recipient decides from the pinner’s rights whether the bar appears."
         },
+        "set_disappearing_messages": {
+          "title": "Set disappearing messages",
+          "desc": "Sets, for the whole group, after how long new messages disappear, or turns this off. The server cannot read the change and therefore cannot check it: every device compares it with the member list it currently knows, and without this right the change has no effect. If that list is out of date, a permitted change can go unheeded there until the list is reloaded, and a right that was just revoked still counts there until then."
+        },
         "manage_roles": {
           "title": "Assign & manage roles",
-          "desc": "Assign roles to members and adjust the default group rights. Owners and administrators carry “Mention everyone at once” and “Pin a message” anyway, because they could grant them to themselves in two clicks."
+          "desc": "Assign roles to members and adjust the default group rights. Owners and administrators carry “Mention everyone at once”, “Pin a message” and “Set disappearing messages” anyway, because they could grant them to themselves in two clicks."
         }
       }
     }
@@ -6808,6 +6812,7 @@
     "retentionOffSelf": "{{name}} turned disappearing messages off.",
     "retentionOffOther": "{{name}} turned disappearing messages off.",
     "retentionChangeFailed": "The change could not be sent.",
+    "retentionNoRight": "You are not allowed to change the time limit in this group.",
     "disappearingMessages": "Disappearing messages",
     "disappearingHint": "Applies to both sides. New messages are deleted everywhere once the time is up, on the server too. A device that stays offline clears its part later.",
     "reactionFailed": "The reaction could not be sent.",

@@ -231,6 +231,7 @@ import {
   type Treffer,
 } from '@/services/verlaufSuche'
 import {
+  durfteVerfallStellen,
   faelligeZeilen,
   istBekannteStufe,
   raeumeAlleChats,
@@ -2251,11 +2252,31 @@ export function Messenger() {
             //    zweiter Abruf läuft. Der Eintrag wäre dann schon geschrieben,
             //    die Meldung darüber aber verschluckt — und `uebernehmeVerfall`
             //    meldet dieselbe Umstellung kein zweites Mal.
+            //
+            //    Wer umgestellt hat, sagt der Beleg, nicht `actor_id`. Bis
+            //    09/2026 stand hier `Number(parsed.actor_id)`: jedes Mitglied
+            //    hält den Gruppenschlüssel und unterschreibt seine eigene
+            //    Nutzlast, konnte also bei allen „<Eigentümer> hat eingestellt
+            //    …" erscheinen lassen, und im Direktchat die Gegenseite ein
+            //    „Du hast eingestellt …". In der Gruppe braucht die Umstellung
+            //    seitdem auch das Recht `set_disappearing_messages`; im
+            //    Direktchat gibt es keine Rollen.
+            //
+            //    Beide Schranken stehen vor `uebernehmeVerfall`, nicht danach:
+            //    ein verworfenes Paket landete dort sonst als neuester Stand,
+            //    und jede spätere berechtigte Umstellung verlöre gegen seinen
+            //    Zeitpunkt — lautlos, wenn sich an der Frist nichts ändert.
             if (parsed.type === 'retention') {
+              const urheber = await urheberVon(parsed.actor_id)
+              if (urheber === null) {
+                console.warn('[Messenger] Dropping retention packet with forged actor_id:', parsed.actor_id)
+                continue
+              }
+              const wer = Number(urheber || 0)
+              if (activeGroup && !(wer && durfteVerfallStellen(activeGroup, wer))) continue
               const dauer = Number(parsed.dauer || 0)
               const wann = String(parsed.zeitpunkt || env.created_at)
               if (istBekannteStufe(dauer) && uebernehmeVerfall(currentMid, dauer, wann)) {
-                const wer = Number(parsed.actor_id || 0)
                 const selbst = wer === Number(currentUserId)
                 const name = selbst
                   ? t('messenger.retentionYou')
@@ -3130,6 +3151,7 @@ export function Messenger() {
         g.owner_user_id,
         g.can_pin_messages ?? null,
         g.can_mention_everyone ?? null,
+        g.can_set_disappearing_messages ?? null,
         g.name ?? null,
         g.description ?? null,
         g.avatar_url ?? null,
@@ -3140,6 +3162,18 @@ export function Messenger() {
 
   /** Ob ich in dieser Gruppe anheften darf — vom Server entschieden. */
   const darfAnheften = Boolean(activeGroup?.can_pin_messages)
+
+  /**
+   * Ob ich die Verfallsfrist dieses Chats umstellen darf.
+   *
+   * Im Direktchat immer, dort gibt es keine Rollen. In der Gruppe entscheidet
+   * der Server — dieselbe Rechnung, deren Marke die anderen Geräte am Mitglied
+   * prüfen. Nicht `gruppenrechteVon`: der verschlüsselte Rollenblock gibt
+   * dieses Recht beim Empfänger nicht, und eine Auswahl, die bei allen anderen
+   * folgenlos verpufft, wäre eine Irreführung. Hier sperren ist die Höflichkeit,
+   * dort verwerfen die Wirkung.
+   */
+  const darfVerfallStellen = !activeGroup || Boolean(activeGroup.can_set_disappearing_messages)
 
 
   /**
@@ -3193,6 +3227,14 @@ export function Messenger() {
   const handleVerfallWaehlen = async (sekunden: number) => {
     if (!blindMailboxId || sekunden === verfallSekunden) {
       setVerfallOffen(false)
+      return
+    }
+    // Ohne das Recht ist die Auswahl gar nicht erst zu öffnen. Das hier fängt
+    // den Fall ab, dass es entzogen wurde, während sie offen stand: gesendet
+    // würde eine Umstellung, die jedes andere Gerät verwirft.
+    if (!darfVerfallStellen) {
+      setVerfallOffen(false)
+      toast.error(t('messenger.retentionNoRight'))
       return
     }
     const vorher = verfallStand(blindMailboxId)
@@ -6355,10 +6397,18 @@ export function Messenger() {
                           }}
                         />
                       )}
+                      {/* Die aktuelle Frist steht auch ohne das Recht da —
+                          wissen, wann die eigenen Nachrichten verschwinden,
+                          darf jedes Mitglied. */}
                       <Blatteintrag
                         icon={<Timer className="w-4 h-4" />}
                         label={t('messenger.disappearingMessages')}
-                        hinweis={stufenLabel(verfallSekunden > 0 ? verfallSekunden : 0, t)}
+                        hinweis={
+                          darfVerfallStellen
+                            ? stufenLabel(verfallSekunden > 0 ? verfallSekunden : 0, t)
+                            : `${stufenLabel(verfallSekunden > 0 ? verfallSekunden : 0, t)} · ${t('messenger.retentionNoRight')}`
+                        }
+                        disabled={!darfVerfallStellen}
                         onClick={() => {
                           schliessen()
                           setVerfallOffen(true)
