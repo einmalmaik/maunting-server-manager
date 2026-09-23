@@ -645,6 +645,44 @@ describe('gruppenSchluessel', () => {
       expect(mailbox.length).toBe(vorher)
     })
 
+    it('gibt den Schlüssel nur heraus, wem er gemünzt wurde', async () => {
+      // Die Mitgliederliste des Servers allein genügt nicht. Wer darin erst
+      // nach dem Münzen auftaucht — frisch beigetreten, über einen alten Link
+      // zurückgekehrt oder vom Server eingetragen —, bekäme mit dem aktuellen
+      // Schlüssel alles, was unter ihm geschrieben wurde, bevor er da war. Den
+      // nächsten Schlüssel bekommt er beim nächsten Senden ohnehin.
+      const ohneCarol = [ALICE, BOB]
+      serverMitglieder = [...ohneCarol]
+      await sende(alice, ohneCarol, 'als Carol nicht dabei war')
+      serverMitglieder = [ALICE, BOB, CAROL]
+
+      const keyId = (await alice.ablage.liesAktuellen(GRUPPE))!.keyId
+      const vorher = mailbox.length
+      aktiviere(alice)
+      const anfrage = JSON.stringify({
+        typ: 'group_key_request',
+        v: 1,
+        groupId: GRUPPE,
+        vonKonto: CAROL,
+        vonGeraet: 'carol-tablet',
+        keyId,
+      })
+      expect(await verarbeiteGruppenSteuerung(kontext(alice, ohneCarol), anfrage)).toMatchObject({
+        art: 'anfrage',
+        beantwortet: false,
+      })
+      expect(mailbox.length).toBe(vorher)
+
+      // Der nächste Sendevorgang münzt für die Liste des Servers, Carol
+      // eingeschlossen — sie liest ab da mit, aber nicht davor.
+      const stand = naechsteId
+      await sende(alice, ohneCarol, 'mit Carol')
+      expect((await lies(carol, alle, stand - 1)).texte).toEqual(['mit Carol'])
+      const vonAnfang = await lies(carol, alle, 0)
+      expect(vonAnfang.texte).toEqual(['mit Carol'])
+      expect(vonAnfang.unlesbar).toBe(1)
+    })
+
     it('gibt nur den aktuellen Schlüssel heraus, nie einen alten', async () => {
       await sende(alice, alle, 'alte Generation')
       await lies(bob, alle)

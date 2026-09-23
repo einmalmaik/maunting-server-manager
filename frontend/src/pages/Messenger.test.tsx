@@ -189,13 +189,18 @@ vi.mock('@/services/messengerLocalStore', async () => {
   }
 })
 
-vi.mock('@/services/ratchetSitzung', () => {
+vi.mock('@/services/ratchetSitzung', async (importOriginal) => {
+  // Die Fehlerklassen echt: der Messenger unterscheidet an ihnen, was er sagt.
+  const { DrGeraetNichtEingetragenError, DrZustellungFehlgeschlagenError } =
+    await importOriginal<typeof import('@/services/ratchetSitzung')>()
   const PREFIX = 'sv-e2ee-dr-v1:'
   const einpacken = (t: string, von: number = 1) => PREFIX + `${von}.testgeraet.zielgeraet.` + btoa(unescape(encodeURIComponent(t)))
   const auspacken = (u: string) => decodeURIComponent(escape(atob(u.split('.').slice(3).join('.'))))
   return {
     DR_PREFIX: PREFIX,
     DR_INIT_TYP: 'dr-init',
+    DrGeraetNichtEingetragenError,
+    DrZustellungFehlgeschlagenError,
     einpackenDr: einpacken,
     baueZustellungen: vi.fn(async (_kontext: any, klartext: string, basisUuid: string) => [
       {
@@ -261,6 +266,11 @@ vi.mock('@/services/ratchetSitzung', () => {
     ),
     verarbeiteBootstrap: vi.fn(async () => ({ istAufbau: false, ersetzt: false })),
     verwirfDrSitzung: vi.fn(async () => {}),
+    drUrheber: (u: string) => {
+      if (!u.startsWith(PREFIX)) return null
+      const [konto, geraet] = u.slice(PREFIX.length).split('.')
+      return Number(konto) > 0 ? { vonKonto: Number(konto), vonGeraet: geraet } : null
+    },
     logischeUuid: (u?: string | null) =>
       !u ? undefined : u.indexOf('#') === -1 ? u : u.slice(0, u.indexOf('#')),
   }
@@ -305,6 +315,30 @@ vi.mock('@/services/e2eeGeraet', () => ({
   onNeuesGeraet: vi.fn(() => () => {}),
   E2eeKeinGeraetError: class extends Error {},
 }))
+
+/**
+ * Nutzlasten, die als beglaubigt gelten: `client_uuid` → Konto. Je Test gesetzt.
+ *
+ * Wer beglaubigen kann, muss es auch — seit 09/2026 auch über den Ratchet. Ein
+ * Test, der ein unterschreibendes Konto aufstellt, braucht deshalb für dessen
+ * echte Nachrichten einen Beleg. Die Signatur selbst prüft
+ * `nutzlastSignatur.test.ts`; hier zählt nur, was der Messenger mit dem
+ * Ergebnis macht.
+ */
+let beglaubigt = new Map<string, number>()
+
+vi.mock('@/services/nutzlastSignatur', async (importOriginal) => {
+  const echt = await importOriginal<typeof import('@/services/nutzlastSignatur')>()
+  return {
+    ...echt,
+    pruefeNutzlast: vi.fn(async (mid: string, roh: Record<string, unknown>) => {
+      const konto = beglaubigt.get(String(roh.client_uuid))
+      return konto !== undefined
+        ? { art: 'geprueft' as const, vonKonto: konto }
+        : echt.pruefeNutzlast(mid, roh)
+    }),
+  }
+})
 
 vi.mock('@/services/e2eeIdentity', () => ({
   IDENTITY_LOADING: { state: 'loading', sendPair: null, decryptionKeys: [] },
@@ -372,6 +406,7 @@ describe('Messenger (Allround Chat)', () => {
     // und nicht nur in `localStorage`; `clear()` oben erreicht sie nicht.
     leereGespraeche()
     kontenMitSignatur = []
+    beglaubigt = new Map()
     setupUser()
 
     // Standardlage: Geraet entsperrt, Gegenseite hat einen Schluessel.
@@ -1682,6 +1717,45 @@ describe('Messenger (Allround Chat)', () => {
     })
   })
 
+  it('sagt, warum ein entferntes Gerät nicht sendet, und gibt den Text zurück', async () => {
+    // In einem anderen Tab aus der Geräteliste entfernt. Senden hiesse
+    // Aufbauten, die drüben niemand prüfen kann; die Nachricht verschwände
+    // dort still, und hier stünde sie als gesendet.
+    const { baueZustellungen, DrGeraetNichtEingetragenError } = (await import(
+      '@/services/ratchetSitzung'
+    )) as any
+    const { useToastStore } = await import('@/stores/toastStore')
+    vi.mocked(baueZustellungen).mockRejectedValueOnce(new DrGeraetNichtEingetragenError())
+
+    render(
+      <MemoryRouter initialEntries={['/chat?userId=101']}>
+        <Messenger />
+      </MemoryRouter>
+    )
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder'))).toBeInTheDocument()
+    })
+    fireEvent.change(screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder')), {
+      target: { value: 'Von einem entfernten Gerät' },
+    })
+    fireEvent.click(screen.getByTitle('Senden'))
+
+    await waitFor(() => {
+      expect(useToastStore.getState().toasts.map((t) => t.message)).toContain(
+        i18n.t('messenger.deviceNotListed'),
+      )
+    })
+    expect(screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder'))).toHaveValue(
+      'Von einem entfernten Gerät',
+    )
+    // Hinaus ging keine Nachricht. Eine Lesequittung für das, was beim Öffnen
+    // im Fenster lag, darf es geben — sie läuft nicht über den Ratchet.
+    const nachrichten = vi
+      .mocked(socialApi.relayE2eeEnvelope)
+      .mock.calls.filter(([auftrag]: any[]) => !auftrag?.is_control)
+    expect(nachrichten).toEqual([])
+  })
+
   it('entschluesselt empfangene Nachrichten aus Tauri/Web zuverlaessig ueber den synchronisierten Direktkanal', async () => {
     const { decryptE2eeHybridWithKeyring } = await import('@/services/e2eeCrypto')
     vi.mocked(socialApi.getFriends).mockResolvedValue([
@@ -2300,6 +2374,9 @@ describe('Messenger (Allround Chat)', () => {
   it('K-2: verwirft ein Steuerpaket über den Hybridpfad, das sich als ich ausgibt', async () => {
     // Mein Konto führt einen Signaturschlüssel. Eine unsignierte Nutzlast in
     // meinem Namen ist damit keine Nachsicht wert, sondern eine Fälschung.
+    // Meine echte Nachricht trägt deshalb einen Beleg — ohne ihn fiele sie
+    // unter dieselbe Schranke.
+    beglaubigt.set('meine-msg-1', 1)
     await hybridFaelschung([1])
 
     await waitFor(() => {
@@ -2321,6 +2398,200 @@ describe('Messenger (Allround Chat)', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Ich habe gekündigt')).toBeInTheDocument()
+    })
+  })
+
+  /**
+   * Die Downgrade-Schranke am Ratchet.
+   *
+   * Eine Sitzung aus der Zeit vor der Unterschrift am Sitzungsaufbau wurde nie
+   * geprüft. War sie untergeschoben, läuft sie weiter, und ihr Kopf nennt das
+   * Konto, das der Fälscher gewählt hat — unterschreiben kann er in dessen
+   * Namen aber nicht.
+   *
+   * Die eigene Nachricht daneben ist der Beweis, dass der Durchlauf fertig
+   * ist: ohne sie bestünde der erste Test auch, wenn noch gar nichts gelesen
+   * wäre.
+   */
+  const ratchetOhneBeleg = async (kontenMitSchluessel: number[]) => {
+    const { einpackenDr } = (await import('@/services/ratchetSitzung')) as any
+    kontenMitSignatur = kontenMitSchluessel
+
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([
+      {
+        id: 801,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: einpackenDr(
+          JSON.stringify({
+            sender_id: 1,
+            text: 'Von meinem Zweitgerät',
+            client_uuid: 'zweitgeraet-1',
+            timestamp: '2026-09-08T12:00:00Z',
+          }),
+          1,
+        ),
+        created_at: '2026-09-08T12:00:00Z',
+      },
+      {
+        id: 802,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: einpackenDr(
+          JSON.stringify({
+            sender_id: 101,
+            text: 'Über eine alte Sitzung',
+            client_uuid: 'alte-sitzung-1',
+            timestamp: '2026-09-08T12:01:00Z',
+          }),
+          101,
+        ),
+        created_at: '2026-09-08T12:01:00Z',
+      },
+    ] as any)
+
+    render(
+      <MemoryRouter initialEntries={['/chat?userId=101']}>
+        <Messenger />
+      </MemoryRouter>
+    )
+  }
+
+  it('verwirft eine unsignierte Ratchet-Nachricht eines Kontos, das unterschreibt', async () => {
+    await ratchetOhneBeleg([101])
+
+    await waitFor(() => {
+      expect(screen.getByText('Von meinem Zweitgerät')).toBeInTheDocument()
+    })
+    expect(screen.queryByText('Über eine alte Sitzung')).not.toBeInTheDocument()
+  })
+
+  it('zeigt dieselbe Nachricht, solange das Konto nicht unterschreiben kann', async () => {
+    await ratchetOhneBeleg([])
+
+    await waitFor(() => {
+      expect(screen.getByText('Über eine alte Sitzung')).toBeInTheDocument()
+    })
+  })
+
+  /**
+   * Klartext ohne JSON-Hülle über den Ratchet.
+   *
+   * Der Rückfallweg für Altbestand nahm jeden solchen Text, und `[ME]:` am
+   * Anfang machte ihn zur eigenen Nachricht — gleich, von welchem Gerät der
+   * Ratchet ihn brachte. Ohne Hülle gibt es auch keine Unterschrift: dieselbe
+   * Schranke wie oben.
+   */
+  const ratchetOhneHuelle = async (kontenMitSchluessel: number[], text: string) => {
+    const { einpackenDr } = (await import('@/services/ratchetSitzung')) as any
+    kontenMitSignatur = kontenMitSchluessel
+
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([
+      {
+        id: 811,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: einpackenDr(
+          JSON.stringify({
+            sender_id: 1,
+            text: 'Von meinem Zweitgerät',
+            client_uuid: 'zweitgeraet-2',
+            timestamp: '2026-09-08T12:00:00Z',
+          }),
+          1,
+        ),
+        created_at: '2026-09-08T12:00:00Z',
+      },
+      {
+        id: 812,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: einpackenDr(text, 101),
+        created_at: '2026-09-08T12:01:00Z',
+      },
+    ] as any)
+
+    render(
+      <MemoryRouter initialEntries={['/chat?userId=101']}>
+        <Messenger />
+      </MemoryRouter>
+    )
+    await waitFor(() => {
+      expect(screen.getByText('Von meinem Zweitgerät')).toBeInTheDocument()
+    })
+  }
+
+  it('verwirft Klartext ohne Hülle über den Ratchet, wenn das Konto unterschreibt', async () => {
+    await ratchetOhneHuelle([101], 'Einfach nur Text')
+    expect(screen.queryByText('Einfach nur Text')).not.toBeInTheDocument()
+  })
+
+  it('macht die Gegenseite über den Ratchet nie zu mir, auch nicht mit [ME]:', async () => {
+    // Ein Konto aus der Zeit vor der Unterschrift darf weiter Klartext ohne
+    // Hülle schicken — aber der Absender steht im Ratchet, nicht im Text.
+    await ratchetOhneHuelle([], '[ME]:Ich kündige')
+    await waitFor(() => {
+      expect(screen.getByText('[ME]:Ich kündige')).toBeInTheDocument()
+    })
+  })
+
+  /**
+   * Ein Hybridumschlag im Direktchat hat keinen Absenderkopf. Versiegeln kann
+   * ihn jeder, der den Geräteschlüssel des Empfängers kennt — der Server
+   * allemal. Ohne Unterschrift stand er trotzdem als Nachricht des Gegenübers
+   * im Verlauf.
+   */
+  const hybridOhneBeleg = async (kontenMitSchluessel: number[]) => {
+    const { einpackenDr } = (await import('@/services/ratchetSitzung')) as any
+    const { decryptE2eeHybridWithKeyring } = await import('@/services/e2eeCrypto')
+    kontenMitSignatur = kontenMitSchluessel
+
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([
+      {
+        id: 821,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: einpackenDr(
+          JSON.stringify({
+            sender_id: 1,
+            text: 'Von meinem Zweitgerät',
+            client_uuid: 'zweitgeraet-3',
+            timestamp: '2026-09-08T12:00:00Z',
+          }),
+          1,
+        ),
+        created_at: '2026-09-08T12:00:00Z',
+      },
+      {
+        id: 822,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: 'sv-e2ee-hybrid-v1:erfunden',
+        client_uuid: 'erfunden-1',
+        created_at: '2026-09-08T12:01:00Z',
+      },
+    ] as any)
+    vi.mocked(decryptE2eeHybridWithKeyring).mockImplementation(async () =>
+      JSON.stringify({
+        text: 'Vom Server erfunden',
+        client_uuid: 'erfunden-1',
+        timestamp: '2026-09-08T12:01:00Z',
+      })
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/chat?userId=101']}>
+        <Messenger />
+      </MemoryRouter>
+    )
+    await waitFor(() => {
+      expect(screen.getByText('Von meinem Zweitgerät')).toBeInTheDocument()
+    })
+  }
+
+  it('verwirft eine unsignierte Hybridnachricht, wenn das Gegenüber unterschreibt', async () => {
+    await hybridOhneBeleg([101])
+    expect(screen.queryByText('Vom Server erfunden')).not.toBeInTheDocument()
+  })
+
+  it('zeigt dieselbe Hybridnachricht, solange das Gegenüber nicht unterschreiben kann', async () => {
+    await hybridOhneBeleg([])
+    await waitFor(() => {
+      expect(screen.getByText('Vom Server erfunden')).toBeInTheDocument()
     })
   })
 })

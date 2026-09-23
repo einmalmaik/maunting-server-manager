@@ -1025,8 +1025,23 @@ def kick_group_member_endpoint(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    SocialService.kick_group_member(db, group_id=group_id, target_user_id=target_user_id, caller=user)
-    return {"success": True, "message": "Mitglied aus Gruppe entfernt"}
+    """Wirft ein Mitglied hinaus; der Einladungscode ist danach ein neuer.
+
+    Der neue Code geht in der Antwort zurück — sonst teilte der Einladende bis
+    zum nächsten Laden einen toten Link. Aber nur an jemanden, der ihn ohnehin
+    sehen dürfte (`darf_einladen`): wer nur hinauswerfen darf, bekommt ihn hier
+    so wenig wie in der Gruppenliste.
+    """
+    group = SocialService.kick_group_member(
+        db, group_id=group_id, target_user_id=target_user_id, caller=user
+    )
+    return {
+        "success": True,
+        "message": "Mitglied aus Gruppe entfernt",
+        "invite_code": (
+            group.invite_code if SocialService.darf_einladen(db, group_id, user.id) else None
+        ),
+    }
 
 
 @router.patch("/groups/{group_id}/permissions", response_model=ChatGroupResponse, dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])

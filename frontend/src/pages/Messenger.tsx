@@ -143,7 +143,11 @@ import {
   IDENTITY_LOADING,
   type E2eeIdentity,
 } from '@/services/e2eeIdentity'
-import { logischeUuid, DrZustellungFehlgeschlagenError } from '@/services/ratchetSitzung'
+import {
+  logischeUuid,
+  DrGeraetNichtEingetragenError,
+  DrZustellungFehlgeschlagenError,
+} from '@/services/ratchetSitzung'
 import { geraeteVon, kontoNutztSignaturen, onNeuesGeraet } from '@/services/e2eeGeraet'
 import { pruefeNutzlast, signiereNutzlast } from '@/services/nutzlastSignatur'
 import {
@@ -1757,6 +1761,32 @@ export function Messenger() {
   }, [])
 
   /**
+   * Schreibt die Systemzeile zu einem abgewiesenen Sitzungsaufbau.
+   *
+   * Jeder Aufbau meldet sich nur einmal — er bleibt gemerkt. Gedrosselt wird
+   * trotzdem, je Gerät und Minute: wer Fälschungen in Serie schickt, soll den
+   * Verlauf nicht mit Warnungen zuschütten können.
+   */
+  const aufbauMeldungRef = useRef<Map<string, number>>(new Map())
+  const aufbauAbgelehnt = useCallback((geraet: string) => {
+    const jetzt = Date.now()
+    const zuletzt = aufbauMeldungRef.current.get(geraet) || 0
+    if (jetzt - zuletzt < 60_000) return
+    aufbauMeldungRef.current.set(geraet, jetzt)
+
+    const zeile: ChatMessage = {
+      id: jetzt,
+      clientUuid: `sys-dr-abgewiesen-${geraet}-${jetzt}`,
+      senderId: 0,
+      text: t('messenger.sessionSetupRejected'),
+      createdAt: new Date().toISOString(),
+      isSelf: false,
+      isSystem: true,
+    }
+    setMessages((prev) => sortMessagesChronologically([...prev, zeile]))
+  }, [t])
+
+  /**
    * Eine Systemzeile in den offenen Verlauf schreiben.
    *
    * Nur Anzeige und nur für diese Sitzung: sie wandert nicht in die lokale
@@ -1819,6 +1849,7 @@ export function Messenger() {
     eigeneId: currentUserId,
     identitaetRef: identityRef,
     meldeSitzungsbruch: sitzungNeuGemeldet,
+    meldeAufbauAbgelehnt: aufbauAbgelehnt,
   })
   const blindMailboxId = konversation.blindMailboxId
 
@@ -2125,6 +2156,22 @@ export function Messenger() {
               )
               continue
             }
+            // Die Downgrade-Schranke gilt auch für den Ratchet. Eine Sitzung aus
+            // der Zeit vor der Unterschrift am Sitzungsaufbau (09/2026) wurde nie
+            // geprüft — auch eine untergeschobene nicht, und die liefe weiter.
+            // Wer unterschreiben kann, unterschreibt jede Nachricht; fehlt der
+            // Beleg trotzdem, schreibt jemand anderes über diese Sitzung.
+            if (
+              beleg.art === 'unsigniert' &&
+              ratchetUrheber !== undefined &&
+              (await kontoNutztSignaturen(Number(ratchetUrheber)))
+            ) {
+              console.warn(
+                '[Messenger] Dropping unsigned ratchet payload from an account that signs:',
+                ratchetUrheber,
+              )
+              continue
+            }
             const belegterUrheber =
               beleg.art === 'geprueft' ? beleg.vonKonto : ratchetUrheber
 
@@ -2306,6 +2353,29 @@ export function Messenger() {
              */
             if (istSteuerpaket(parsed.type)) continue
 
+            /*
+             * Direktchat ohne jeden Beleg: keine Unterschrift und kein Ratchet.
+             *
+             * So kommt ein Hybridumschlag an, und versiegeln kann den jeder,
+             * der den Geräteschlüssel dieses Geräts kennt — der Server
+             * allemal. Bis 09/2026 stand er trotzdem als Nachricht der
+             * Gegenseite im Verlauf. Gilt nur noch, solange die Gegenseite
+             * nicht unterschreiben kann; dieselbe Schranke wie oben für den
+             * Ratchet. Vor der Kennungsliste, damit eine verworfene Fälschung
+             * der echten Nachricht mit derselben Kennung nicht den Platz nimmt.
+             */
+            if (
+              activeContact &&
+              belegterUrheber === undefined &&
+              (await kontoNutztSignaturen(Number(activeContact.userId)))
+            ) {
+              console.warn(
+                '[Messenger] Dropping unsigned direct message without a ratchet sender:',
+                activeContact.userId,
+              )
+              continue
+            }
+
             // Normal Chat Message
             // Die Kennung aus dem Umschlag trägt einen Gerätezusatz je Kopie;
             // für den Verlauf zählt die logische darunter.
@@ -2453,7 +2523,32 @@ export function Messenger() {
             continue
           }
         } catch {
-          // Legacy / simple text fallback
+          /*
+           * Klartext ohne JSON-Hülle, aus der Zeit vor der Hülle.
+           *
+           * Er trägt keine Unterschrift. Wer ihn geschrieben hat, sagt im
+           * Direktchat der Ratchet; ohne ihn bleibt nur die Behauptung —
+           * `[ME]:` am Anfang, sonst die Gegenseite. Bis 09/2026 galt die
+           * Behauptung auch über den Ratchet: eine Nachricht der Gegenseite
+           * mit `[ME]:` stand als eigene im Verlauf. Und wie jeder Beleg gilt
+           * sie nur für ein Konto, das nicht unterschreiben kann — wer es
+           * kann, schickt JSON mit Unterschrift.
+           */
+          const ratchetUrheber = lesung.art === 'klartext' ? lesung.vonKonto : undefined
+          const vonMirBehauptet = plain.startsWith('[ME]:')
+          const urheber =
+            ratchetUrheber !== undefined
+              ? Number(ratchetUrheber)
+              : vonMirBehauptet
+                ? Number(currentUserId)
+                : activeContact
+                  ? Number(activeContact.userId)
+                  : 0
+          if (urheber > 0 && (await kontoNutztSignaturen(urheber))) {
+            console.warn('[Messenger] Dropping unsigned plain-text message from an account that signs:', urheber)
+            continue
+          }
+
           const clientUuid = logischeUuid(env.client_uuid)
           if (clientUuid && seenClientUuids.has(clientUuid)) {
             continue
@@ -2462,14 +2557,11 @@ export function Messenger() {
             seenClientUuids.add(clientUuid)
           }
 
-          let text = plain
-          let isSelf = false
-          let senderId = activeContact ? activeContact.userId : 0
-          if (plain.startsWith('[ME]:')) {
-            text = plain.replace('[ME]:', '')
-            isSelf = true
-            senderId = currentUserId
-          }
+          const isSelf = urheber === Number(currentUserId)
+          // Die Markierung fällt nur weg, wo sie stimmt. Nennt der Ratchet die
+          // Gegenseite, bleibt sie stehen: so sieht man, was behauptet wurde.
+          const text = isSelf && vonMirBehauptet ? plain.slice('[ME]:'.length) : plain
+          const senderId = urheber || (activeContact ? activeContact.userId : 0)
           if (!isSelf && env.id > maxIncomingId) {
             maxIncomingId = env.id
           }
@@ -4379,7 +4471,8 @@ export function Messenger() {
       const istSchluesselProblem =
         err instanceof E2eeRecipientKeyMissingError ||
         err instanceof E2eeIdentityLockedError ||
-        err instanceof DrZustellungFehlgeschlagenError
+        err instanceof DrZustellungFehlgeschlagenError ||
+        err instanceof DrGeraetNichtEingetragenError
 
       if (istSchluesselProblem) {
         // Konnte nicht verschlüsselt werden: die optimistisch eingefügte
@@ -4406,6 +4499,10 @@ export function Messenger() {
           // nächste Versuch setzt die Sitzung neu auf, deshalb der Hinweis auf
           // das Wiederholen statt einer Aussage über den Kontakt.
           toast.error(t('messenger.encryptFailed'))
+        } else if (err instanceof DrGeraetNichtEingetragenError) {
+          // Dieses Gerät wurde in der Geräteliste entfernt. Der Text sagt,
+          // warum nicht gesendet wird und was es wieder einträgt.
+          toast.error(err.message)
         } else {
           toast.error(
             t('messenger.noDeviceOnline', {

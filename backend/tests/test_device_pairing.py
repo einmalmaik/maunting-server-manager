@@ -543,6 +543,12 @@ class TestVerlaufsErstabgleich:
         assert status["redeemed"] is True
         assert [g["device_id"] for g in status["neue_geraete"]] == ["a1b2c3d4e5f60718"]
         assert status["verlauf_abgelegt"] is False
+        # Name und Zeitpunkt gehen mit: das Panel zeigt sie neben der
+        # Sicherheitsnummer, bevor es den Verlauf hergibt. Ohne sie hiesse die
+        # Rueckfrage nur „ein Geraet" — und welches, wuesste niemand.
+        neu = status["neue_geraete"][0]
+        assert neu["label"] == "Neu"
+        assert neu["created_at"]
 
         ablegen = client.put(
             f"/api/auth/devices/pairing/{code}/verlauf",
@@ -679,13 +685,13 @@ class TestVerlaufsErstabgleich:
         )
         assert antwort.status_code == 422
 
-    def test_der_blob_stirbt_mit_dem_code(
+    def test_der_blob_stirbt_mit_der_uebergabe(
         self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
     ):
         """Eingeloeste Zeilen bleiben liegen — ihr Verlaufsblob darf das nicht.
 
-        Hat das neue Geraet ihn bis zum Ablauf nicht geholt, ist der
-        Erstabgleich gescheitert und der Blob hat keinen Zweck mehr.
+        Hat das neue Geraet ihn bis zum Ende der Uebergabe nicht geholt, ist
+        der Erstabgleich gescheitert und der Blob hat keinen Zweck mehr.
         """
         _mit_chatrecht(db, regular_user)
         code = _code_erzeugen(client, user_cookies)["code"]
@@ -699,7 +705,11 @@ class TestVerlaufsErstabgleich:
         )
 
         einladung = db.query(DevicePairing).filter_by(user_id=regular_user.id).first()
-        einladung.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        jetzt = datetime.now(timezone.utc)
+        einladung.expires_at = jetzt - timedelta(minutes=5)
+        einladung.redeemed_at = jetzt - timedelta(
+            minutes=device_pairing_service.FRIST_MINUTEN, seconds=1
+        )
         db.commit()
 
         device_pairing_service.aufraeumen(db)
@@ -709,3 +719,77 @@ class TestVerlaufsErstabgleich:
         assert einladung.redeemed_at is not None
         assert einladung.verlauf_blob is None
         assert einladung.verlauf_abgelegt_am is None
+
+    def _eingeloest_und_gemeldet(
+        self, client: TestClient, db: Session, user: User, cookies: dict
+    ) -> tuple[str, dict, DevicePairing]:
+        _mit_chatrecht(db, user)
+        code = _code_erzeugen(client, cookies)["code"]
+        tokens = client.post("/api/auth/devices/redeem", json={"code": code}).json()
+        _geraet_melden(client, tokens["access_token"], "a1b2c3d4e5f60718")
+        einladung = db.query(DevicePairing).filter_by(user_id=user.id).first()
+        return code, {"Authorization": f"Bearer {tokens['access_token']}"}, einladung
+
+    def test_die_uebergabe_laeuft_ab_dem_einloesen(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
+    ):
+        """Zwischen Einloesen und Uebergabe liegt eine Rueckfrage.
+
+        Im Panel vergleicht ein Mensch die Sicherheitsnummer, bevor der Verlauf
+        hinuebergeht — das dauert Minuten. Galt dafuer die Frist des Codes,
+        scheiterte eine Kopplung, die kurz vor Ablauf eingeloest wurde, am
+        Ablegen: Code um 12:00, eingeloest um 12:08, bestaetigt um 12:10:30.
+        Das Geraet wartete danach bis 12:18 auf einen Verlauf, der nie kam.
+        """
+        code, bearer, einladung = self._eingeloest_und_gemeldet(
+            client, db, regular_user, user_cookies
+        )
+        jetzt = datetime.now(timezone.utc)
+        einladung.expires_at = jetzt - timedelta(seconds=30)
+        einladung.redeemed_at = jetzt - timedelta(minutes=2, seconds=30)
+        db.commit()
+
+        ablegen = client.put(
+            f"/api/auth/devices/pairing/{code}/verlauf",
+            json={"blob": "sv-e2ee-hybrid-v1:versiegelt"},
+            cookies=user_cookies,
+            headers=_kopf(user_cookies),
+        )
+        assert ablegen.status_code == 200, ablegen.text
+
+        # Das Aufraeumen richtet sich nach derselben Frist.
+        device_pairing_service.aufraeumen(db)
+
+        abholen = client.get(f"/api/auth/devices/pairing/{code}/verlauf", headers=bearer)
+        assert abholen.status_code == 200
+        assert abholen.json()["blob"] == "sv-e2ee-hybrid-v1:versiegelt"
+
+    def test_die_uebergabe_endet_nach_der_frist_ab_dem_einloesen(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
+    ):
+        # Ein eingeloester Code ist kein Dauerauftrag: nach der Frist nimmt der
+        # Server nichts mehr an und gibt nichts mehr heraus.
+        code, bearer, einladung = self._eingeloest_und_gemeldet(
+            client, db, regular_user, user_cookies
+        )
+        client.put(
+            f"/api/auth/devices/pairing/{code}/verlauf",
+            json={"blob": "sv-e2ee-hybrid-v1:versiegelt"},
+            cookies=user_cookies,
+            headers=_kopf(user_cookies),
+        )
+        jetzt = datetime.now(timezone.utc)
+        einladung.redeemed_at = jetzt - timedelta(
+            minutes=device_pairing_service.FRIST_MINUTEN, seconds=1
+        )
+        db.commit()
+
+        abholen = client.get(f"/api/auth/devices/pairing/{code}/verlauf", headers=bearer)
+        assert abholen.json()["blob"] is None
+        ablegen = client.put(
+            f"/api/auth/devices/pairing/{code}/verlauf",
+            json={"blob": "sv-e2ee-hybrid-v1:zu-spaet"},
+            cookies=user_cookies,
+            headers=_kopf(user_cookies),
+        )
+        assert ablegen.status_code == 400

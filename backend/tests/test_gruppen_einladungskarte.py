@@ -26,6 +26,7 @@ from __future__ import annotations
 import base64
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -294,3 +295,91 @@ def test_ein_klartext_kommt_nicht_in_die_spalte(als_owner, db: Session, owner_us
     assert antwort.status_code == 422
     db.refresh(gruppe)
     assert gruppe.invite_card is None
+
+
+# ── Der Rauswurf erneuert den Code ──────────────────────────────────────────
+#
+# Wer hinausgeworfen wird, kennt den Einladungscode oft: er hatte das
+# Einladungsrecht, oder der Link stand im Verlauf. Bis 09/2026 blieb der Code
+# gueltig, und der Rauswurf war eine Formalie — ein Klick auf den alten Link,
+# und er war wieder drin.
+
+
+def _mit_mitglied(db: Session, besitzer: User, mitglied: User, rechte: str | None) -> ChatGroup:
+    gruppe = SocialService.create_group(db, besitzer)
+    SocialService.join_group_by_invite_code(db, mitglied, gruppe.invite_code)
+    if rechte is not None:
+        SocialService.get_group_member(db, gruppe.id, mitglied.id).permissions = rechte
+        db.commit()
+    return gruppe
+
+
+def test_nach_dem_rauswurf_fuehrt_der_alte_link_nicht_mehr_hinein(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    gruppe = _mit_mitglied(db, owner_user, regular_user, "send_messages,invite_members")
+    alter_code = gruppe.invite_code
+
+    SocialService.kick_group_member(
+        db, group_id=gruppe.id, target_user_id=regular_user.id, caller=owner_user
+    )
+    db.refresh(gruppe)
+
+    assert gruppe.invite_code != alter_code
+    with pytest.raises(HTTPException) as fehler:
+        SocialService.join_group_by_invite_code(db, regular_user, alter_code)
+    assert fehler.value.status_code == 404
+    assert SocialService.get_group_member(db, gruppe.id, regular_user.id) is None
+
+
+def test_der_rauswurf_nimmt_die_karte_mit(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    """Ihre gebundenen Daten nennen den alten Code — gegen den neuen oeffnet
+    sie sich nicht mehr. Stehen bliebe nur ein Umschlag, den niemand lesen kann.
+    """
+    gruppe = _mit_mitglied(db, owner_user, regular_user, None)
+    gruppe.invite_card = _karte()
+    db.commit()
+
+    SocialService.kick_group_member(
+        db, group_id=gruppe.id, target_user_id=regular_user.id, caller=owner_user
+    )
+    db.refresh(gruppe)
+
+    assert gruppe.invite_card is None
+
+
+def test_der_rauswurf_meldet_den_neuen_code_zurueck(
+    als_owner, db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Sonst teilte der Einladende bis zum naechsten Laden einen toten Link.
+    gruppe = _mit_mitglied(db, owner_user, regular_user, None)
+
+    antwort = als_owner.delete(f"/api/social/groups/{gruppe.id}/members/{regular_user.id}")
+
+    assert antwort.status_code == 200
+    db.refresh(gruppe)
+    assert antwort.json()["invite_code"] == gruppe.invite_code
+
+
+def test_wer_nur_hinauswerfen_darf_bekommt_den_code_nicht(
+    client: TestClient, db: Session, owner_user: User, regular_user: User, inactive_user: User
+) -> None:
+    """Dieselbe Schranke wie in der Gruppenliste (`darf_einladen`).
+
+    Die Antwort des Rauswurfs darf kein zweiter Weg zum Code sein.
+    """
+    gruppe = _mit_mitglied(db, owner_user, regular_user, "send_messages,kick_members")
+    SocialService.join_group_by_invite_code(db, inactive_user, gruppe.invite_code)
+
+    app.dependency_overrides[get_current_user] = lambda: regular_user
+    app.dependency_overrides[verify_csrf] = lambda: None
+    try:
+        antwort = client.delete(f"/api/social/groups/{gruppe.id}/members/{inactive_user.id}")
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        app.dependency_overrides.pop(verify_csrf, None)
+
+    assert antwort.status_code == 200
+    assert antwort.json()["invite_code"] is None

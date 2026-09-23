@@ -1600,6 +1600,16 @@ async function beantworteAnfrage(
   const eintrag = await ablage.liesAktuellen(kontext.groupId)
   if (!eintrag) return { art: 'anfrage', vonKonto: anfragerId, beantwortet: false }
 
+  // Und nur, wem dieser Schlüssel gemünzt wurde. Die Liste des Servers oben
+  // sagt, wer *jetzt* dazugehört; wer darin erst nach dem Münzen auftaucht —
+  // frisch beigetreten, über einen alten Link zurückgekehrt oder vom Server
+  // eingetragen —, läse mit diesem Schlüssel alles, was geschrieben wurde,
+  // bevor er da war. Den nächsten bekommt er beim nächsten Senden: der münzt
+  // für die Liste des Servers. Nicht gemerkt, denn eine Antwort ist das nicht.
+  if (!eintrag.mitglieder.includes(anfragerId)) {
+    return { art: 'anfrage', vonKonto: anfragerId, beantwortet: false }
+  }
+
   // Nur der aktuelle Schlüssel. Ältere bleiben hier, sonst holte sich ein
   // Zurückgekehrter über eine Anfrage den ganzen Verlauf.
   //

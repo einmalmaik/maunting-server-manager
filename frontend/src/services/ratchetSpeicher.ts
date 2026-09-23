@@ -337,8 +337,13 @@ export async function verwirfSitzung(id: string): Promise<void> {
  *   erneut als Sitzungsbruch gewertet — und ein Bruch wirft die Sitzung weg.
  *   Ein einziger alter Umschlag zerstörte so bei jedem Öffnen des Messengers
  *   die gerade funktionierende Sitzung, und ab da kam nichts mehr an.
+ * - `abgewiesen`: ein Sitzungsaufbau, dessen Unterschrift nicht trug (Kennung:
+ *   sein öffentlicher Teil), und jede Nachricht, die zu ihm gehört (Kennung wie
+ *   bei `bruch`). Beides kommt bei jedem Abruf wieder; ohne die Marke wüsste der
+ *   nächste Durchlauf nicht mehr, dass eine unlesbare Nachricht dieses Geräts
+ *   zu einer Fälschung gehört — und würfe ihretwegen die echte Sitzung weg.
  */
-export type Markenbereich = 'aufbau' | 'bruch'
+export type Markenbereich = 'aufbau' | 'bruch' | 'abgewiesen'
 
 /**
  * Schreibt jede Zeile dieser Ablage einmal neu — der Umstellungsdurchlauf für

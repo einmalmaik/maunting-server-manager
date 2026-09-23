@@ -5,12 +5,16 @@ import { useTranslation } from 'react-i18next'
 import { formatRelativeTime } from '@/utils/timeFormat'
 
 import { api } from '@/api/client'
+import { deleteEigenesGeraet } from '@/api/social'
 import { API_ORIGIN } from '@/config/api'
 import { SecretOnce } from '@/components/ui/SecretOnce'
+import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
 import { Button } from '@/Singra/UI'
+import { sicherheitsnummer, vergessenGeraete } from '@/services/e2eeGeraet'
 import {
   uebergebeVerlauf,
   type KopplungsStatus,
+  type UebergabeZiel,
 } from '@/services/verlaufsUebergabe'
 import { toast } from '@/stores/toastStore'
 
@@ -20,6 +24,17 @@ interface Geraet {
   paired_at: string | null
   is_active?: boolean
   last_active_at?: string | null
+}
+
+/** Die offene Rückfrage: welches Gerät, welche Nummer, an welchem Code abgelegt wird. */
+interface Rueckfrage {
+  code: string
+  ziel: UebergabeZiel
+  nummer: string
+  /** Der Name aus der Einladung — falls das Gerät sich selbst keinen gegeben hat. */
+  einladungsName: string
+  /** Die Anmeldung aus dem Einlösen, zum Widerrufen. */
+  family: string | null
 }
 
 /**
@@ -46,6 +61,8 @@ export function AiDevicePairingCard() {
   const [code, setCode] = useState<string | null>(null)
   const [qrDataUri, setQrDataUri] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [rueckfrage, setRueckfrage] = useState<Rueckfrage | null>(null)
+  const [uebergibt, setUebergibt] = useState(false)
 
   const laden = () => {
     api<Geraet[]>('/auth/devices')
@@ -56,19 +73,30 @@ export function AiDevicePairingCard() {
   useEffect(laden, [])
 
   /**
-   * Wartet auf das Einlösen — und übergibt dann den Verlauf.
+   * Wartet auf das Einlösen — und fragt dann, ob der Verlauf hinüber soll.
    *
-   * Der Code bleibt nach `redeemed` noch stehen, bis der Erstabgleich
-   * abgelegt ist. Das neue Gerät hat seinen Schlüssel erst nach dem Einlösen
-   * veröffentlicht, deshalb kann erst jetzt gegen ihn versiegelt werden. Steht
-   * nach ein paar Runden noch kein Gerät in der Antwort, gibt diese Seite auf:
-   * eine Kopplung ohne Verlaufsumzug ist unschön, eine hängende Karte wäre
-   * schlimmer.
+   * Das neue Gerät veröffentlicht seinen Schlüssel erst nach dem Einlösen,
+   * deshalb kann erst jetzt gegen ihn versiegelt werden. Steht nach ein paar
+   * Runden noch kein Gerät in der Antwort, gibt diese Seite auf: eine Kopplung
+   * ohne Verlaufsumzug ist unschön, eine hängende Karte wäre schlimmer.
+   *
+   * **Übergeben wird nur auf Bestätigung.** Welche Geräte „neu" sind, sagt der
+   * Server, und genau dort könnte er ein eigenes unterschieben. Bis 09/2026
+   * gingen Verlauf und Notizschlüssel ohne Nachfrage an jedes Gerät, das er
+   * nannte. Jetzt stehen Name und Sicherheitsnummer auf der Karte, die App
+   * zeigt dieselbe Nummer, und erst der Klick übergibt. Hat sich mehr als ein
+   * Gerät gemeldet, wird gar nicht übergeben: welches das richtige ist, ließe
+   * sich nur raten.
    */
   useEffect(() => {
     if (!code) return
     let aktiv = true
     let versuche = 0
+    const schliessen = () => {
+      setCode(null)
+      setQrDataUri(null)
+      laden()
+    }
     const interval = setInterval(async () => {
       try {
         const res = await api<KopplungsStatus>(
@@ -82,18 +110,30 @@ export function AiDevicePairingCard() {
             // Das Gerät meldet seinen Schlüssel gleich. Noch eine Runde warten.
             return
           }
-          if (ziele.length > 0 && !res.verlauf_abgelegt) {
-            try {
-              await uebergebeVerlauf(code, ziele)
-            } catch {
-              // Der Verlauf bleibt beim alten Gerät. Die Kopplung selbst steht.
-            }
+          aktiv = false
+          clearInterval(interval)
+          if (ziele.length > 1 && !res.verlauf_abgelegt) {
+            toast.error(t('ai.profile.devicePairTooMany'))
+            schliessen()
+            return
           }
-          if (!aktiv) return
+          if (ziele.length === 1 && !res.verlauf_abgelegt) {
+            const ziel = ziele[0]
+            const nummer = await sicherheitsnummer(ziel.public_key)
+            setRueckfrage({
+              code,
+              ziel,
+              nummer,
+              einladungsName: res.label ?? '',
+              family: res.family ?? null,
+            })
+            schliessen()
+            return
+          }
+          // Schon übergeben — etwa aus einem zweiten Tab — oder kein Gerät
+          // gemeldet: die Kopplung steht, eine Rückfrage gibt es nicht.
           toast.success(t('ai.profile.devicePairSuccess'))
-          setCode(null)
-          setQrDataUri(null)
-          laden()
+          schliessen()
         } else if (res.expired) {
           toast.error(t('ai.profile.devicePairExpired'))
           setCode(null)
@@ -124,6 +164,66 @@ export function AiDevicePairingCard() {
       toast.error(err.message || t('common.error'))
     } finally {
       setBusy(false)
+    }
+  }
+
+  const uebergeben = async () => {
+    if (!rueckfrage) return
+    setUebergibt(true)
+    try {
+      const abgelegt = await uebergebeVerlauf(rueckfrage.code, [rueckfrage.ziel])
+      toast.success(
+        t(abgelegt ? 'ai.profile.devicePairHandedOver' : 'ai.profile.devicePairSuccess'),
+      )
+    } catch {
+      // Der Verlauf bleibt beim alten Gerät. Die Kopplung selbst steht.
+      toast.error(t('ai.profile.devicePairHandOverFailed'))
+    } finally {
+      setUebergibt(false)
+      setRueckfrage(null)
+    }
+  }
+
+  const ablehnen = () => {
+    setRueckfrage(null)
+    toast.info(t('ai.profile.devicePairDeclined'))
+  }
+
+  /**
+   * Das Gerät wieder hinauswerfen — für den Fall, dass die Nummern nicht passen.
+   *
+   * Nur die Karte zu schliessen liess es im Verzeichnis: der nächste Abgleich
+   * schickte ihm den Notizschlüssel, und jede neue Nachricht ging auch an
+   * seinen Schlüssel. Deshalb zwei Schritte, in dieser Reihenfolge: erst die
+   * Anmeldung widerrufen — ohne sie trägt es sich nicht wieder ein —, dann die
+   * Zustelladresse entfernen. Ist die Anmeldung schon weg (404, etwa aus einem
+   * zweiten Tab), fehlt nur noch die Adresse.
+   */
+  const entfernen = async () => {
+    if (!rueckfrage) return
+    setUebergibt(true)
+    try {
+      if (rueckfrage.family) {
+        try {
+          await api(`/auth/devices/${encodeURIComponent(rueckfrage.family)}`, { method: 'DELETE' })
+        } catch (err: any) {
+          if (err?.status !== 404) throw err
+        }
+      }
+      await deleteEigenesGeraet(rueckfrage.ziel.device_id)
+      // Sonst verschlüsselte dieser Tab noch bis zu zehn Minuten lang auch an
+      // das gerade entfernte Gerät.
+      const konto = angemeldetesKonto()
+      if (konto) vergessenGeraete(konto)
+      toast.success(t('ai.profile.devicePairRemoved'))
+      setRueckfrage(null)
+    } catch (err: any) {
+      // Die Rückfrage bleibt stehen: entfernt ist womöglich noch nichts, und
+      // der Knopf soll ein zweites Mal gehen.
+      toast.error(err?.message || t('common.error'))
+    } finally {
+      setUebergibt(false)
+      laden()
     }
   }
 
@@ -187,7 +287,51 @@ export function AiDevicePairingCard() {
         <p className="msm-field-help">{t('ai.profile.devicesApiAddressHint')}</p>
       </div>
 
-      {code ? (
+      {rueckfrage ? (
+        <div
+          className="max-w-xl space-y-3 rounded-lg border border-outline-variant/40 bg-surface-container-high/40 p-4"
+          role="group"
+          aria-labelledby="kopplung-rueckfrage-titel"
+        >
+          <h3 id="kopplung-rueckfrage-titel" className="text-sm font-semibold text-on-surface">
+            {t('ai.profile.devicePairConfirmTitle')}
+          </h3>
+          <p className="text-sm text-on-surface-variant">{t('ai.profile.devicePairConfirmHint')}</p>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+            <dt className="text-on-surface-variant">{t('ai.profile.devicePairDevice')}</dt>
+            <dd className="min-w-0 truncate text-on-surface">
+              {rueckfrage.ziel.label || rueckfrage.einladungsName || t('ai.profile.devicesUnnamed')}
+            </dd>
+            {rueckfrage.ziel.created_at && (
+              <>
+                <dt className="text-on-surface-variant">{t('ai.profile.devicePairRegistered')}</dt>
+                <dd className="text-on-surface">
+                  {new Date(rueckfrage.ziel.created_at).toLocaleString()}
+                </dd>
+              </>
+            )}
+            <dt className="text-on-surface-variant">{t('ai.profile.devicePairSafetyNumber')}</dt>
+            <dd className="font-mono tracking-wider text-on-surface">{rueckfrage.nummer}</dd>
+          </dl>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => void entfernen()}
+              disabled={uebergibt}
+              className="text-error hover:bg-error/10 hover:text-error"
+            >
+              <Trash2 className="h-4 w-4" aria-hidden="true" />
+              {t('ai.profile.devicePairRemove')}
+            </Button>
+            <Button variant="secondary" onClick={ablehnen} disabled={uebergibt}>
+              {t('ai.profile.devicePairDecline')}
+            </Button>
+            <Button onClick={() => void uebergeben()} disabled={uebergibt}>
+              {t('ai.profile.devicePairHandOver')}
+            </Button>
+          </div>
+        </div>
+      ) : code ? (
         <SecretOnce
           label={t('ai.profile.devicesCodeLabel')}
           value={code}

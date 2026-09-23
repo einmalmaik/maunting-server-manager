@@ -134,7 +134,11 @@ const {
   setBekannteGeraete,
   pruefeUndAktualisiereNeueGeraete,
   onNeuesGeraet,
+  pruefeGeraeteBeleg,
+  sicherheitsnummer,
+  verzeichnisVon,
 } = await import('./e2eeGeraet')
+const { erzeugeSignaturPaar, signiere } = await import('./absenderSignatur')
 
 describe('e2eeGeraet', () => {
   beforeEach(() => {
@@ -452,6 +456,135 @@ describe('e2eeGeraet', () => {
       } finally {
         abbestellen()
       }
+    })
+  })
+
+  describe('Belege über Schlüsselumschläge', () => {
+    const DATEN = 'msm:test:ein-schluessel-fuer-geraet-b'
+
+    async function verzeichnisMit(...eintraege: { device_id: string; signing_public_key: string }[]) {
+      fremdeGeraete.liste = eintraege.map((e) => ({ ...e, public_key: `pub-${e.device_id}` })) as any
+    }
+
+    it('erkennt die Unterschrift des Geräts, das der Umschlag nennt', async () => {
+      const paar = await erzeugeSignaturPaar()
+      await verzeichnisMit({ device_id: 'geraet-a', signing_public_key: paar.publicKeyJwk })
+
+      const sig = await signiere(DATEN, paar.privateKeyJwk)
+      expect(await pruefeGeraeteBeleg(50, 'geraet-a', DATEN, sig)).toBe('echt')
+    })
+
+    it('weist eine Unterschrift ab, die zu einem anderen Gerät gehört', async () => {
+      // Der Fall, gegen den das Ganze steht: ein Kontakt unterschreibt mit
+      // seinem eigenen Schlüssel und nennt das Gerät eines anderen.
+      const echt = await erzeugeSignaturPaar()
+      const fremd = await erzeugeSignaturPaar()
+      await verzeichnisMit({ device_id: 'geraet-a', signing_public_key: echt.publicKeyJwk })
+
+      const sig = await signiere(DATEN, fremd.privateKeyJwk)
+      expect(await pruefeGeraeteBeleg(51, 'geraet-a', DATEN, sig)).toBe('falsch')
+      // Und derselbe Beleg über andere Daten ebenso.
+      const echteSig = await signiere(DATEN, echt.privateKeyJwk)
+      expect(await pruefeGeraeteBeleg(51, 'geraet-a', `${DATEN}-verbogen`, echteSig)).toBe('falsch')
+    })
+
+    it('lässt die Unterschrift nicht einfach weglassen', async () => {
+      // Die Downgrade-Schranke: wer unterschreiben kann, muss es.
+      const paar = await erzeugeSignaturPaar()
+      await verzeichnisMit({ device_id: 'geraet-a', signing_public_key: paar.publicKeyJwk })
+      expect(await pruefeGeraeteBeleg(52, 'geraet-a', DATEN, undefined)).toBe('falsch')
+      expect(await pruefeGeraeteBeleg(52, 'geraet-a', DATEN, '')).toBe('falsch')
+    })
+
+    it('nimmt Altbestand, solange das Konto nirgends unterschreibt', async () => {
+      await verzeichnisMit({ device_id: 'geraet-a', signing_public_key: '' })
+      expect(await pruefeGeraeteBeleg(53, 'geraet-a', DATEN, undefined)).toBe('altbestand')
+    })
+
+    it('hält ein unbekanntes Gerät für unbekannt, nicht für widerlegt', async () => {
+      await verzeichnisMit({ device_id: 'geraet-a', signing_public_key: '' })
+      const paar = await erzeugeSignaturPaar()
+      const sig = await signiere(DATEN, paar.privateKeyJwk)
+      expect(await pruefeGeraeteBeleg(54, 'geraet-x', DATEN, sig)).toBe('unbekannt')
+      // Auch ein Gerät, dessen Signaturschlüssel das Verzeichnis noch nicht
+      // führt, ist nicht widerlegt — es hat sich womöglich gerade erst gemeldet.
+      expect(await pruefeGeraeteBeleg(54, 'geraet-a', DATEN, sig)).toBe('unbekannt')
+    })
+
+    it('sieht vor einem Nein frisch nach, aber höchstens alle halbe Minute', async () => {
+      const paar = await erzeugeSignaturPaar()
+      await verzeichnisMit({ device_id: 'geraet-a', signing_public_key: paar.publicKeyJwk })
+      const sig = await signiere(DATEN, paar.privateKeyJwk)
+
+      // Die zehn Minuten alte Liste kennt das neue Gerät noch nicht.
+      await verlangeGeraeteVon(55)
+      const echtesJetzt = Date.now
+      try {
+        Date.now = () => echtesJetzt() + 60_000
+        await verzeichnisMit(
+          { device_id: 'geraet-a', signing_public_key: paar.publicKeyJwk },
+          { device_id: 'geraet-neu', signing_public_key: paar.publicKeyJwk },
+        )
+        const vorher = fremdeGeraete.rufe
+        expect(await pruefeGeraeteBeleg(55, 'geraet-neu', DATEN, sig)).toBe('echt')
+        expect(fremdeGeraete.rufe).toBe(vorher + 1)
+
+        // Wer mit erfundenen Geräten um sich wirft, bekommt keinen Abruf je
+        // Umschlag: die Liste ist jetzt frisch genug.
+        expect(await pruefeGeraeteBeleg(55, 'erfunden-1', DATEN, sig)).toBe('unbekannt')
+        expect(await pruefeGeraeteBeleg(55, 'erfunden-2', DATEN, sig)).toBe('unbekannt')
+        expect(fremdeGeraete.rufe).toBe(vorher + 1)
+      } finally {
+        Date.now = echtesJetzt
+      }
+    })
+
+    it('glaubt die Nachsicht für Altbestand keiner zehn Minuten alten Liste', async () => {
+      // Durchsicht vom 23.09.: `altbestand` kam ohne frischen Blick aus dem
+      // Zwischenspeicher. Hatte das Konto eben seinen ersten Signaturschlüssel
+      // bekommen, ging bis zu zehn Minuten lang jede unsignierte Übergabe
+      // durch — die Downgrade-Schranke hatte ein Fenster.
+      await verzeichnisMit({ device_id: 'geraet-a', signing_public_key: '' })
+      await verlangeGeraeteVon(57)
+      const paar = await erzeugeSignaturPaar()
+      const echtesJetzt = Date.now
+      try {
+        Date.now = () => echtesJetzt() + 60_000
+        await verzeichnisMit({ device_id: 'geraet-a', signing_public_key: paar.publicKeyJwk })
+        expect(await pruefeGeraeteBeleg(57, 'geraet-a', DATEN, undefined)).toBe('falsch')
+      } finally {
+        Date.now = echtesJetzt
+      }
+    })
+
+    it('sagt „offen", wenn das Verzeichnis nicht antwortet', async () => {
+      // Kein Nein: ein Netzfehler darf keinen echten Aufbau für immer abweisen.
+      fremdeGeraete.fehler = new Error('Netzwerk weg')
+      try {
+        expect(await pruefeGeraeteBeleg(56, 'geraet-a', DATEN, 'c2lnbmF0dXI=')).toBe('offen')
+        // Und `verzeichnisVon` wirft, statt „niemand da" zu sagen.
+        await expect(verzeichnisVon(56)).rejects.toThrow('Netzwerk weg')
+      } finally {
+        fremdeGeraete.fehler = null
+      }
+    })
+  })
+
+  describe('Sicherheitsnummer', () => {
+    it('sind zwanzig Ziffern in vier Gruppen, und für jeden Schlüssel andere', async () => {
+      const a = await sicherheitsnummer('{"kty":"RSA","n":"AAAA","e":"AQAB"}')
+      const b = await sicherheitsnummer('{"kty":"RSA","n":"AAAB","e":"AQAB"}')
+      expect(a).toMatch(/^\d{5} \d{5} \d{5} \d{5}$/)
+      expect(b).not.toBe(a)
+    })
+
+    it('hängt nicht an der Reihenfolge der Felder', async () => {
+      // Panel und App rechnen dieselbe Nummer aus zwei verschiedenen
+      // Zeichenketten: die App aus ihrem eigenen Schlüssel, das Panel aus dem,
+      // was der Server zurückgibt.
+      expect(await sicherheitsnummer('{"e":"AQAB","n":"xyz","kty":"RSA","ext":true}')).toBe(
+        await sicherheitsnummer('{"kty":"RSA","n":"xyz","e":"AQAB"}'),
+      )
     })
   })
 })

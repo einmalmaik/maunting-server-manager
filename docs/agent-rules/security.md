@@ -389,7 +389,134 @@ Harte Invarianten:
   Geräteschlüssel des neuen (`frontend/src/services/verlaufsUebergabe.ts`), der
   Server reicht ihn unter dem Kopplungscode einmal durch und löscht ihn dabei.
   Übertragen wird, was gelesen wurde, nie die Fähigkeit zu lesen: zwei Geräte
-  mit demselben Material verklemmen jede Ratchet-Sitzung.
+  mit demselben Material verklemmen jede Ratchet-Sitzung. Die eine Ausnahme ist
+  der Notizschlüssel, der ohnehin allen Geräten des Kontos gehört — und zwar
+  der des **angemeldeten** Kontos (`angemeldetesKonto()`). Bis 09/2026 ging der
+  unter der Kennung 1 mit, gleich wer angemeldet war. Und er geht nur mit der
+  Unterschrift des übergebenden Geräts, gebunden an das Zielgerät
+  (`unterschreibeNotizUebergabe`/`pruefeNotizUebergabe`, dieselbe Aussage wie
+  bei `notes_key_sync`). Was das leistet und was nicht: die Unterschrift bindet
+  den Schlüssel an ein Gerät, das das Verzeichnis unter diesem Konto führt, und
+  an genau dieses Zielgerät — ein Paket für ein anderes Gerät oder Konto lässt
+  sich nicht unterschieben. Den Server hält sie nicht auf, und keine andere
+  Sitzung desselben Kontos: beide können im Verzeichnis ein Gerät mit eigenem
+  Signaturschlüssel eintragen (`PUT /e2ee/devices/self`) — dieselbe Grenze wie
+  beim Sitzungsaufbau. Einen Schlüssel, den das neue Gerät
+  während der Rückfrage selbst erzeugt hat, ersetzt der belegte; ihn zu
+  behalten hiesse zwei Notizschlüssel für immer.
+- **Übergeben wird erst nach einer Rückfrage, und nie an mehr als ein Gerät.**
+  Für welches Gerät versiegelt wird, sagt der Server (`neue_geraete`: wer sich
+  nach dem Einlösen gemeldet hat) — genau dort könnte er ein eigenes
+  unterschieben. Bis 09/2026 ging der Verlauf ohne Nachfrage an jedes Gerät,
+  das er nannte. Jetzt zeigt `AiDevicePairingCard` Name, Zeitpunkt
+  und `sicherheitsnummer` des Geräts, die App zeigt nach dem Koppeln ihre eigene
+  (`desktop/auth.koppeln`), und erst die Bestätigung übergibt; bei mehr als einem
+  Gerät wird nicht übergeben. Die Nummer rechnet der Client aus dem Schlüssel,
+  nie der Server: seine Angabe wäre die Behauptung dessen, gegen den sie schützt.
+  Weil ein Mensch vergleicht, läuft die Übergabe ab dem Einlösen eine volle
+  Frist (`_uebergabe_endet`), nicht ab dem Anlegen des Codes, und `holeVerlaufAb`
+  wartet ebenso lange. Ablehnen heisst nur „kein Verlauf": das Gerät bleibt
+  gekoppelt und bekommt neue Nachrichten und den Notizschlüssel — die Karte
+  sagt das. Passt die Nummer nicht, gehört es entfernt: „Gerät entfernen"
+  widerruft die Anmeldung aus dem Einlösen (sonst trüge es sich beim nächsten
+  Start wieder ein) und nimmt seinen Schlüssel aus der Zustellung.
+  Was die Rückfrage **nicht** schützt, ist der Notizschlüssel: er erreicht jedes
+  Gerät im Verzeichnis des Kontos auch über die Geräte-Mailbox
+  (`notes_key_request`/`notes_key_sync`), bestätigt oder nicht, und das
+  Entfernen erneuert ihn nicht. Seit die Übergabe dort überhaupt ankommt (siehe
+  unten, 64 Zeichen), ist das keine Theorie mehr. Das Entfernen hat drei
+  weitere Grenzen: ein schon ausgestelltes Zugangstoken gilt bis zu 15 Minuten
+  weiter (`access_token_expire_minutes`) — in der Zeit kann sich das Gerät
+  wieder eintragen, abrufen und selbst einen neuen Kopplungscode einlösen —;
+  die Geräte der Kontakte verschlüsseln bis zu zehn Minuten weiter an seinen
+  Schlüssel (`CACHE_FRIST_MS`); und welcher Verzeichniseintrag fällt, wählt
+  `neue_geraete` nach der Zeit, nicht nach der widerrufenen Anmeldung — eine
+  Verbindung zwischen beiden führt das Verzeichnis nicht. Alle vier schließt
+  erst die Freigabe neuer Geräte durch ein vorhandenes (Stufe „mittel") samt
+  Token, die an ihre Anmeldung gebunden sind.
+- **Ein Sitzungsaufbau trägt eine Unterschrift, und angewandt wird nur ein
+  belegter.** Der Hybridumschlag sagt nur, *für* welches Gerät er ist, nie *von*
+  welchem — den Geräteschlüssel des Empfängers kann jeder benutzen. Bis 09/2026
+  genügte ein erfundener `dr-init`, und wer ihn schickte, hielt beide Enden der
+  Sitzung: seine Nachrichten standen unter fremdem Namen, auch als eigenes
+  Zweitgerät, und was an das angebliche Gegenüber ging, konnte er lesen. Jetzt
+  unterschreibt das sendende Gerät `aufbauDaten` (Kontenpaar, Geräte, Material),
+  und `verarbeiteBootstrap` prüft über `pruefeGeraeteBeleg` gegen das
+  Verzeichnis. Die Ausgänge sind vier, nicht zwei: `echt`/`altbestand` wird
+  angewandt; `falsch` wird gemerkt, nicht angewandt und als Systemzeile
+  gemeldet (`meldeAufbauAbgelehnt`); `offen`/`unbekannt` — Verzeichnis nicht
+  erreichbar, Gerät noch nicht gelistet — wird **nicht** gemerkt, und die
+  Nachrichten dieses Geräts werden im selben Durchlauf zurückgestellt
+  (`DrLeseOptionen.zurueckstellen`). Gegen eine Sitzung gelesen, die es noch
+  nicht gibt, wären sie als Bruch gewertet und für immer verloren. Vor jedem
+  Nein wird das Verzeichnis einmal frisch geholt, gedrosselt auf einen Abruf je
+  halbe Minute (`FRISCH_MS`). Ein abgewiesener Aufbau kostet auch dann keine
+  Sitzung, wenn eine Nachricht aus der gefälschten Sitzung hinter ihm steht:
+  was von diesem Gerät kommt und sich gegen die bestehende nicht öffnen lässt,
+  wird unter eigener Marke still verworfen (`abgewiesen`,
+  `DrLeseOptionen.schonen`), statt als Bruch die echte Sitzung wegzuwerfen.
+  Wer sendet, muss selbst im Verzeichnis stehen (`geraetVeroeffentlichen` in
+  `baueZustellungen`), sonst schickte er Aufbauten, die drüben niemand prüfen
+  kann — und zwar noch beim Senden, nicht nur beim Start (`eigenesVerzeichnis`):
+  wurde das Gerät in der Geräteliste entfernt, scheitert das Senden mit Grund
+  (`DrGeraetNichtEingetragenError`). Sich still neu einzutragen nähme dem
+  Entfernen, was der Dialog verspricht. Und für Sitzungen von vor dieser
+  Prüfung gilt die Downgrade-Schranke am Ratchet (`Messenger.tsx`): eine
+  unsignierte Nutzlast über den Ratchet von einem Konto, das unterschreiben
+  kann, wird verworfen — auch nach dem Neuladen, wenn der Klartext aus der
+  Ablage kommt (Absender aus dem Umschlagkopf, `drUrheber`), auch für Klartext
+  ohne JSON-Hülle (ein `[ME]:` macht über den Ratchet niemanden mehr zum
+  eigenen Absender), und auch für einen Hybridumschlag im Direktchat, der
+  weder Ratchet noch Unterschrift hat. Die Grenze, die bleibt: geprüft wird
+  gegen das Verzeichnis des Servers. Gegen andere Benutzer hält das, gegen
+  einen Server, der das Verzeichnis selbst fälscht, nicht.
+- **Schlüsselmaterial geht nur an Geräte aus dem Verzeichnis, nie an einen
+  Schlüssel aus der Anfrage.** In die eigene Geräte-Mailbox darf jeder Freund,
+  jedes Gruppenmitglied und jedes Gegenüber eines Direktchats Steuerumschläge
+  legen. `notes_key_request` versiegelte die Antwort bis 09/2026 gegen
+  `requesterPublicKey` aus der Anfrage — wer einen Umschlag einwerfen durfte,
+  bekam den Notizschlüssel gegen seinen eigenen Schlüssel. Jetzt nimmt
+  `processNotesKeyControlEnvelope` den Schlüssel des genannten Geräts aus dem
+  Verzeichnis **des eigenen Kontos** und antwortet nur für das eigene Konto;
+  `notes_key_sync` wird nur mit der Unterschrift eines eigenen Geräts
+  angenommen (`uebergabeDaten`, `pruefeGeraeteBeleg`) und nie unter einem
+  anderen Konto abgelegt als dem, das liest — auch nicht auf dem Ereignisweg
+  (`handleIncomingSyncEvent`), wo `sender_user_id` jeder sein kann, der
+  einwerfen darf, und bis 09/2026 als Konto galt. Beim Gruppenschlüssel dasselbe
+  Prinzip: `beantworteAnfrage` gibt den aktuellen Schlüssel nur heraus, wenn der
+  Fragende in `eintrag.mitglieder` steht, der Mitgliedschaft, für die er
+  gemünzt wurde. Die Liste des Servers allein reichte nicht — wer darin erst
+  nach dem Münzen auftaucht, läse alles, was vor seinem Beitritt unter diesem
+  Schlüssel geschrieben wurde. Den nächsten bekommt er beim nächsten Senden.
+- **Steuerumschläge unter eigenen Geräten gehen einmal, nicht bei jedem
+  Abruf.** Bis 09/2026 scheiterte jede Anfrage und jede Übergabe des
+  Notizschlüssels am Relais (Umschlagkennung über 64 Zeichen, `umschlagKennung`)
+  — und verdeckte damit, dass jeder Abruf jede Anfrage in der Mailbox aufs Neue
+  beantwortete und jedes Laden von Notizen oder Kalender den Schlüssel noch
+  einmal an jedes eigene Gerät schickte. In der ersten Laufzeitprobe danach
+  waren es über sechzig Umschläge in der Minute, und weil das Relais je Adresse
+  zählt, bekamen auch echte Nachrichten ein 429. Jetzt merkt sich jedes Gerät
+  über das Neuladen hinaus, mit welchen Umschlägen es fertig ist und welchem
+  Gerät es welchen Schlüssel gegeben hat (`merkeErledigt`, `merkeGegeben`; vom
+  Schlüssel steht dort nur ein Fingerabdruck). Es fragt höchstens einmal in
+  zehn Minuten nach, und eine gemeldete Anfrage beantwortet es, statt an alle
+  zu senden. Einem fragenden Gerät antwortet es höchstens einmal in zehn
+  Minuten, wie viele Anfragen auch kommen: in die Geräte-Mailbox darf jeder
+  Freund einwerfen, und jede Anfrage, die ein echtes eigenes Gerät nennt, war
+  sonst ein Hebel, das Relais-Kontingent dieses Kontos aufzubrauchen. Was nur
+  „jetzt nicht" hieß — das Verzeichnis stumm oder das fragende Gerät darin
+  noch nicht zu sehen, das Relais 429 —, bleibt offen und wird beim nächsten
+  Abruf wiederholt; gesendet wird dabei nichts. Zwei Läufe zugleich —
+  Erinnerungen und Messenger laden gemeinsam — teilen sich einen
+  (`einLaufZugleich`) mit einem Nachlauf für alles, was währenddessen
+  eintrifft; vermerkt wird erst nach dem Senden, und so ging der Schlüssel in
+  der Laufzeitprobe zweimal in derselben Sekunde an jedes Gerät.
+- **Ein Rauswurf erneuert den Einladungscode.** Wer hinausgeworfen wird, kennt
+  den Code oft — er hatte das Einladungsrecht, oder der Link stand im Verlauf.
+  Bis 09/2026 blieb er gültig, und der Rauswurf war eine Formalie.
+  `kick_group_member` setzt im selben Commit einen neuen Code und leert
+  `invite_card` (deren gebundene Daten nennen den alten); die Antwort gibt den
+  neuen nur an jemanden heraus, der `darf_einladen`.
 
 Wer eine dieser Zusagen ändert, muss `frontend/src/pages/Privacy.tsx`
 (Abschnitt `privacyPolicy.sections.messenger`) im selben Commit mitziehen.

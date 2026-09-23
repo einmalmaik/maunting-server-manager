@@ -20,31 +20,60 @@ vi.mock('./e2eeCrypto', () => ({
 }))
 
 // ---- Stellvertreter für die Geräteverwaltung ----------------------------
+//
+// Nur zwei Dinge sind hier erfunden: welches Gerät gerade „dieses" ist, und
+// was der Server auf die Frage nach einem Verzeichnis antwortet. Die Prüfung
+// der Aufbau-Unterschrift läuft durch das echte `e2eeGeraet` — mit echten
+// ECDSA-Paaren. Ein Stellvertreter für diese Prüfung bewiese nur, dass Test
+// und Code dieselbe Annahme teilen.
 interface TestGeraet {
   kennung: string
   paar: { publicKeyJwk: string; privateKeyJwk: string }
+  signaturPaar: SignaturPaar
   konto: number
   ablage: RatchetAblage
 }
 
 let aktuell: TestGeraet
-const verzeichnis = new Map<number, { device_id: string; public_key: string; label: string }[]>()
+/** Jeder Aufruf von `geraetVeroeffentlichen`, mit seinen Argumenten. */
+const anmeldungen: unknown[][] = []
+const verzeichnis = new Map<
+  number,
+  { device_id: string; public_key: string; signing_public_key: string; label: string }[]
+>()
+/** Der Server ist nicht zu erreichen, solange das hier gesetzt ist. */
+const netz = { aus: false, veroeffentlichenScheitert: false }
 
-vi.mock('./e2eeGeraet', () => ({
-  eigenesGeraet: async () => aktuell,
-  geraeteVon: async (uid: number) => verzeichnis.get(uid) ?? [],
-  verlangeGeraeteVon: async (uid: number) => {
-    const liste = verzeichnis.get(uid) ?? []
-    if (liste.length === 0) throw new Error('Kein Gerät angemeldet')
-    return liste
+vi.mock('@/api/social', () => ({
+  getE2eeGeraete: async (uid: number) => {
+    if (netz.aus) throw new Error('Netzwerk weg')
+    return [...(verzeichnis.get(uid) ?? [])]
   },
+  putEigenesGeraet: async () => ({}),
 }))
 
+vi.mock('./e2eeGeraet', async (importOriginal) => {
+  const echt = await importOriginal<typeof import('./e2eeGeraet')>()
+  return {
+    ...echt,
+    eigenesGeraet: async () => aktuell,
+    geraetVeroeffentlichen: async (...argumente: unknown[]) => {
+      anmeldungen.push(argumente)
+      if (netz.veroeffentlichenScheitert) throw new Error('Anmeldung gescheitert')
+      return aktuell
+    },
+  }
+})
+
+import { erzeugeSignaturPaar, type SignaturPaar } from './absenderSignatur'
+import { clearGeraeteMemory, geraeteVon, verlangeGeraeteVon } from './e2eeGeraet'
 import { setzeAblageFuerTest, type RatchetAblage } from './ratchetSpeicher'
 import {
   DR_PREFIX,
+  DrGeraetNichtEingetragenError,
   DrZustellungFehlgeschlagenError,
   baueZustellungen,
+  drUrheber,
   liesDrUmschlag,
   logischeUuid,
   verarbeiteBootstrap,
@@ -74,17 +103,33 @@ function neueAblage(): RatchetAblage {
   }
 }
 
-/** Legt ein Gerät an und trägt es ins Verzeichnis seines Kontos ein. */
-function geraet(konto: number, name: string): TestGeraet {
+/**
+ * Legt ein Gerät an und trägt es ins Verzeichnis seines Kontos ein.
+ *
+ * `altbestand` steht für ein Gerät aus der Zeit vor der Unterschrift: es hat
+ * ein Signaturpaar (jeder heutige Stand erzeugt eines), aber das Verzeichnis
+ * führt es nicht.
+ */
+async function geraet(
+  konto: number,
+  name: string,
+  { altbestand = false }: { altbestand?: boolean } = {},
+): Promise<TestGeraet> {
   const kennung = name.padEnd(32, '0')
   const g: TestGeraet = {
     kennung,
     paar: { publicKeyJwk: `pub-${name}`, privateKeyJwk: `priv-${name}` },
+    signaturPaar: await erzeugeSignaturPaar(),
     konto,
     ablage: neueAblage(),
   }
   const liste = verzeichnis.get(konto) ?? []
-  liste.push({ device_id: kennung, public_key: g.paar.publicKeyJwk, label: name })
+  liste.push({
+    device_id: kennung,
+    public_key: g.paar.publicKeyJwk,
+    signing_public_key: altbestand ? '' : g.signaturPaar.publicKeyJwk,
+    label: name,
+  })
   verzeichnis.set(konto, liste)
   return g
 }
@@ -126,10 +171,16 @@ describe('ratchetSitzung', () => {
   let alice: TestGeraet
   let bob: TestGeraet
 
-  beforeEach(() => {
+  beforeEach(async () => {
     verzeichnis.clear()
-    alice = geraet(ALICE, 'alice-laptop')
-    bob = geraet(BOB, 'bob-handy')
+    // Der Zwischenspeicher des Verzeichnisses lebt im Modul und damit über
+    // alle Tests hinweg — ohne das hier sähe jeder Test die Geräte des vorigen.
+    clearGeraeteMemory()
+    netz.aus = false
+    netz.veroeffentlichenScheitert = false
+    anmeldungen.length = 0
+    alice = await geraet(ALICE, 'alice-laptop')
+    bob = await geraet(BOB, 'bob-handy')
   })
 
   /** Stellt eine Zustellung zu: erst der Aufbau, dann die Nachricht. */
@@ -175,9 +226,9 @@ describe('ratchetSitzung', () => {
     const BERT = 3
     verzeichnis.clear()
     const geteilteAblage = neueAblage()
-    const annaBrowser = { ...geraet(ALICE, 'anna-browser'), ablage: geteilteAblage }
-    const bertBrowser = { ...geraet(BERT, 'bert-browser'), ablage: geteilteAblage }
-    const empfaenger = geraet(BOB, 'bob-handy')
+    const annaBrowser = { ...(await geraet(ALICE, 'anna-browser')), ablage: geteilteAblage }
+    const bertBrowser = { ...(await geraet(BERT, 'bert-browser')), ablage: geteilteAblage }
+    const empfaenger = await geraet(BOB, 'bob-handy')
 
     aktiviere(annaBrowser)
     const [vonAnna] = await baueZustellungen(kontextVon(ALICE, BOB), 'von Anna', 'u1')
@@ -230,7 +281,7 @@ describe('ratchetSitzung', () => {
   })
 
   it('fächert an jedes Gerät der Gegenstelle auf', async () => {
-    const bobTablet = geraet(BOB, 'bob-tablet')
+    const bobTablet = await geraet(BOB, 'bob-tablet')
 
     aktiviere(alice)
     const zustellungen = await baueZustellungen(kontextVon(ALICE, BOB), 'an alle', 'u1')
@@ -256,7 +307,7 @@ describe('ratchetSitzung', () => {
   })
 
   it('schickt eine Kopie an das eigene Zweitgerät, aber nicht an sich selbst', async () => {
-    const alicePc = geraet(ALICE, 'alice-pc')
+    const alicePc = await geraet(ALICE, 'alice-pc')
 
     aktiviere(alice)
     const zustellungen = await baueZustellungen(kontextVon(ALICE, BOB), 'auch für mich', 'u1')
@@ -609,7 +660,7 @@ describe('ratchetSitzung', () => {
 
   it('lässt kein fremdes Gespräch die Sitzung mit Alice überschreiben', async () => {
     const EVE = 3
-    const eve = geraet(EVE, 'eve-geraet')
+    const eve = await geraet(EVE, 'eve-geraet')
     const kAliceSeite = kontextVon(ALICE, BOB)
     const kBobMitAlice = kontextVon(BOB, ALICE)
     const kBobMitEve = kontextVon(BOB, EVE)
@@ -704,5 +755,324 @@ describe('ratchetSitzung', () => {
       istAufbau: false,
       ersetzt: false,
     })
+  })
+
+  describe('Die Unterschrift am Sitzungsaufbau', () => {
+    /** Der Klartext eines Aufbaus, zum Verbiegen. */
+    async function aufbauVon(
+      sender: TestGeraet,
+      kontext: DrKontext,
+      zielGeraet: string,
+    ): Promise<Record<string, any>> {
+      aktiviere(sender)
+      const zustellungen = await baueZustellungen(kontext, 'egal', `u-${Math.random()}`)
+      const z = zustellungen.find((x) => x.zielGeraet === zielGeraet)!
+      return JSON.parse(oeffneHybrid(z.bootstrap!))
+    }
+
+    it('lässt das Gegenüber keine Sitzung als eigenes Zweitgerät unterschieben', async () => {
+      // Der Befund vom 23.09.2026. Bob schreibt in die Mailbox, die er mit
+      // Alice teilt — das darf er —, und behauptet im Aufbau, Alices zweites
+      // Gerät zu sein. Das Konto gehört zu diesem Gespräch, also ging es
+      // durch: Alices Laptop ersetzte seine Sitzung mit dem eigenen PC durch
+      // eine, deren beide Enden Bob kannte. Seine Nachrichten standen danach
+      // als „von dir" im Verlauf, und was der Laptop an den PC schickte — in
+      // jedem Gespräch, denn diese Sitzung gilt für alle —, konnte er lesen.
+      const alicePc = await geraet(ALICE, 'alice-pc')
+      const kAlice = kontextVon(ALICE, BOB)
+
+      // Die echte Sitzung zwischen Alices Geräten steht.
+      aktiviere(alicePc)
+      const vomPc = await baueZustellungen(kAlice, 'vom PC', 'u-pc')
+      const anLaptop = vomPc.find((z) => z.zielGeraet === alice.kennung)!
+      expect(await zustellen(alice, kAlice, anLaptop)).toMatchObject({ art: 'klartext' })
+
+      // Bob baut einen Aufbau an Alices Laptop und gibt sich als ihr PC aus.
+      const gefaelscht = await aufbauVon(bob, kontextVon(BOB, ALICE), alice.kennung)
+      gefaelscht.vonKonto = ALICE
+      gefaelscht.vonGeraet = alicePc.kennung
+
+      aktiviere(alice)
+      const ergebnis = await verarbeiteBootstrap(kAlice, JSON.stringify(gefaelscht))
+      expect(ergebnis).toMatchObject({ istAufbau: true, ersetzt: false, abgelehnt: true })
+
+      // Die echte Sitzung lebt weiter: die nächste Nachricht vom PC geht auf,
+      // ohne neuen Aufbau.
+      aktiviere(alicePc)
+      const weiter = (await baueZustellungen(kAlice, 'immer noch der PC', 'u-pc2')).find(
+        (z) => z.zielGeraet === alice.kennung,
+      )!
+      expect(weiter.bootstrap).toBeNull()
+      aktiviere(alice)
+      expect(await liesDrUmschlag(kAlice, weiter.nachricht, verwerfen)).toMatchObject({
+        art: 'klartext',
+        text: 'immer noch der PC',
+        vonKonto: ALICE,
+        vonGeraet: alicePc.kennung,
+      })
+    })
+
+    it('weist einen Aufbau ohne Unterschrift ab, wenn das Konto unterschreiben kann', async () => {
+      // Die Downgrade-Schranke. Ohne sie nähme ein Fälscher die Unterschrift
+      // einfach weg und stünde wieder am Anfang.
+      const ohne = await aufbauVon(alice, kontextVon(ALICE, BOB), bob.kennung)
+      delete ohne.sig
+
+      aktiviere(bob)
+      expect(await verarbeiteBootstrap(kontextVon(BOB, ALICE), JSON.stringify(ohne))).toMatchObject({
+        istAufbau: true,
+        ersetzt: false,
+        abgelehnt: true,
+        vonKonto: ALICE,
+        vonGeraet: alice.kennung,
+      })
+    })
+
+    it('weist einen Aufbau ab, an dem nach dem Unterschreiben gedreht wurde', async () => {
+      const aufbau = await aufbauVon(alice, kontextVon(ALICE, BOB), bob.kennung)
+      // Ein anderes Geheimnis — wer es einsetzt, kennt die Sitzung.
+      aufbau.geheimnis = Buffer.alloc(32, 7).toString('base64')
+
+      aktiviere(bob)
+      expect(await verarbeiteBootstrap(kontextVon(BOB, ALICE), JSON.stringify(aufbau))).toMatchObject({
+        abgelehnt: true,
+      })
+    })
+
+    it('meldet einen abgewiesenen Aufbau genau einmal', async () => {
+      // Er bleibt in der Mailbox liegen und kommt bei jedem Abruf wieder. Jedes
+      // Mal eine neue Meldung wäre Rauschen, das die echte übertönt.
+      const aufbau = await aufbauVon(alice, kontextVon(ALICE, BOB), bob.kennung)
+      delete aufbau.sig
+      const klartext = JSON.stringify(aufbau)
+
+      aktiviere(bob)
+      expect((await verarbeiteBootstrap(kontextVon(BOB, ALICE), klartext)).abgelehnt).toBe(true)
+      const nochmal = await verarbeiteBootstrap(kontextVon(BOB, ALICE), klartext)
+      expect(nochmal.istAufbau).toBe(true)
+      expect(nochmal.abgelehnt).toBeUndefined()
+    })
+
+    it('nimmt Altbestand ohne Unterschrift, solange das Konto nirgends unterschreibt', async () => {
+      // Ein Konto, dessen Geräte alle noch vor der Unterschrift stehen, kann es
+      // nicht besser. Es auszusperren hiesse, seine Gespräche zu beenden.
+      verzeichnis.clear()
+      clearGeraeteMemory()
+      const altesGeraet = await geraet(ALICE, 'alice-alt', { altbestand: true })
+      const empfaenger = await geraet(BOB, 'bob-neu')
+      aktiviere(altesGeraet)
+      const [z] = await baueZustellungen(kontextVon(ALICE, BOB), 'von früher', 'u-alt')
+      const ohne = JSON.parse(oeffneHybrid(z.bootstrap!))
+      delete ohne.sig
+
+      aktiviere(empfaenger)
+      expect(
+        await verarbeiteBootstrap(kontextVon(BOB, ALICE), JSON.stringify(ohne)),
+      ).toMatchObject({ istAufbau: true, ersetzt: false })
+      expect(await liesDrUmschlag(kontextVon(BOB, ALICE), z.nachricht, verwerfen)).toMatchObject({
+        art: 'klartext',
+        text: 'von früher',
+      })
+    })
+
+    it('entscheidet nichts, solange das Verzeichnis nicht antwortet', async () => {
+      // Ein Netzfehler ist kein Nein. Abgewiesen und gemerkt wäre der Aufbau
+      // für immer verloren, und mit ihm jede Nachricht, die auf ihm aufbaut.
+      const kB = kontextVon(BOB, ALICE)
+      aktiviere(alice)
+      const [z] = await baueZustellungen(kontextVon(ALICE, BOB), 'trotz Funkloch', 'u-netz')
+
+      clearGeraeteMemory()
+      netz.aus = true
+      aktiviere(bob)
+      const aufbau = await verarbeiteBootstrap(kB, oeffneHybrid(z.bootstrap!))
+      expect(aufbau).toMatchObject({ istAufbau: true, offen: true, vonKonto: ALICE })
+
+      // Die Nachricht dahinter wird in diesem Durchlauf nicht angefasst ...
+      const offen = new Set([`${ALICE}:${alice.kennung}`])
+      const zurueckstellen = (konto: number, geraet: string) => offen.has(`${konto}:${geraet}`)
+      expect(await liesDrUmschlag(kB, z.nachricht, verwerfen, { zurueckstellen })).toEqual({
+        art: 'zurueckgestellt',
+      })
+
+      // ... und geht auf, sobald das Verzeichnis wieder antwortet.
+      netz.aus = false
+      expect(await verarbeiteBootstrap(kB, oeffneHybrid(z.bootstrap!))).toMatchObject({
+        istAufbau: true,
+        ersetzt: false,
+      })
+      expect(await liesDrUmschlag(kB, z.nachricht, verwerfen)).toMatchObject({
+        art: 'klartext',
+        text: 'trotz Funkloch',
+      })
+    })
+
+    it('hält ein gerade erst angemeldetes Gerät nicht für eine Fälschung', async () => {
+      // Bobs Liste von Alices Geräten ist wenige Sekunden alt, als Alices
+      // neues Handy sich anmeldet und sofort schreibt. Ein Nein an dieser
+      // Stelle wäre endgültig; ein „noch nicht" löst sich beim nächsten Abruf.
+      const kB = kontextVon(BOB, ALICE)
+      const neuesHandy = await geraet(ALICE, 'alice-handy')
+      aktiviere(neuesHandy)
+      const [z] = (await baueZustellungen(kontextVon(ALICE, BOB), 'mein neues Handy', 'u-neu')).filter(
+        (x) => x.zielGeraet === bob.kennung,
+      )
+
+      // Bobs Liste stammt von kurz vor der Anmeldung. Im Test teilen sich alle
+      // Geräte einen Zwischenspeicher, und das Handy hat seine eigene Liste
+      // eben frisch geholt — Bobs wird deshalb von Hand auf den alten Stand
+      // gebracht.
+      const handyEintrag = verzeichnis.get(ALICE)!.find((g) => g.device_id === neuesHandy.kennung)!
+      verzeichnis.set(ALICE, verzeichnis.get(ALICE)!.filter((g) => g !== handyEintrag))
+      clearGeraeteMemory()
+      aktiviere(bob)
+      await baueZustellungen(kB, 'Bob füllt seinen Zwischenspeicher', 'u-vorher')
+      verzeichnis.set(ALICE, [...verzeichnis.get(ALICE)!, handyEintrag])
+
+      expect(await verarbeiteBootstrap(kB, oeffneHybrid(z.bootstrap!))).toMatchObject({ offen: true })
+
+      // Eine halbe Minute später darf frisch gefragt werden.
+      const echtesJetzt = Date.now
+      Date.now = () => echtesJetzt() + 31_000
+      try {
+        expect(await verarbeiteBootstrap(kB, oeffneHybrid(z.bootstrap!))).toMatchObject({
+          istAufbau: true,
+          ersetzt: false,
+        })
+        expect((await verarbeiteBootstrap(kB, oeffneHybrid(z.bootstrap!))).abgelehnt).toBeUndefined()
+      } finally {
+        Date.now = echtesJetzt
+      }
+      expect(await liesDrUmschlag(kB, z.nachricht, verwerfen)).toMatchObject({
+        art: 'klartext',
+        text: 'mein neues Handy',
+        vonGeraet: neuesHandy.kennung,
+      })
+    })
+
+    it('sendet nicht, solange dieses Gerät nicht im Verzeichnis steht', async () => {
+      // Drüben prüft jeder den Aufbau gegen das Verzeichnis. Ein Gerät, dessen
+      // Anmeldung gescheitert ist, schickte sonst Aufbauten, die niemand prüfen
+      // kann — hier sähe alles zugestellt aus, drüben käme nichts an.
+      netz.veroeffentlichenScheitert = true
+      aktiviere(alice)
+      await expect(baueZustellungen(kontextVon(ALICE, BOB), 'hallo', 'u1')).rejects.toThrow(
+        /Anmeldung gescheitert/,
+      )
+    })
+
+    it('sendet nicht, wenn das Verzeichnis dieses Gerät nicht mehr führt', async () => {
+      // In einem anderen Tab aus der Geräteliste entfernt, dieser hier blieb
+      // offen. Die Anmeldung beim Start war längst erledigt und kostet danach
+      // nichts mehr — seine Aufbauten gingen drüben als „unbekannt" ins Leere,
+      // und hier sähe alles zugestellt aus. Sich still neu einzutragen nähme
+      // dem Entfernen, was der Dialog verspricht; also scheitert das Senden.
+      const zweites = await geraet(ALICE, 'alice-tablet')
+      verzeichnis.set(ALICE, verzeichnis.get(ALICE)!.filter((g) => g.device_id !== alice.kennung))
+      clearGeraeteMemory()
+      aktiviere(alice)
+      await expect(baueZustellungen(kontextVon(ALICE, BOB), 'hallo', 'u-weg')).rejects.toBeInstanceOf(
+        DrGeraetNichtEingetragenError,
+      )
+      // Nichts angelegt: kein Zustand, der später ohne Aufbau weitersendete.
+      expect(await alice.ablage.alleIds()).toEqual([])
+      expect(anmeldungen).toHaveLength(1)
+
+      // Das zweite Gerät steht drin und sendet wie immer — an Bob, und nicht
+      // mehr an das entfernte Gerät.
+      aktiviere(zweites)
+      const vomTablet = await baueZustellungen(kontextVon(ALICE, BOB), 'vom Tablet', 'u-da')
+      expect(vomTablet.map((z) => z.zielGeraet)).toEqual([bob.kennung])
+    })
+
+    it('hält eine Liste von vor der eigenen Anmeldung nicht für einen Befund', async () => {
+      // Der Zwischenspeicher kann älter sein als die Anmeldung dieses Geräts —
+      // beim Start fragt mehr als eine Stelle nach den eigenen Geräten. Erst
+      // ein Abruf ohne Zwischenspeicher entscheidet.
+      const eintrag = verzeichnis.get(ALICE)!.find((g) => g.device_id === alice.kennung)!
+      verzeichnis.set(ALICE, verzeichnis.get(ALICE)!.filter((g) => g !== eintrag))
+      clearGeraeteMemory()
+      expect(await geraeteVon(ALICE)).toEqual([])
+      verzeichnis.set(ALICE, [...verzeichnis.get(ALICE)!, eintrag])
+
+      aktiviere(alice)
+      expect(await baueZustellungen(kontextVon(ALICE, BOB), 'hallo', 'u-alt')).toHaveLength(1)
+    })
+
+    it('sendet trotzdem, wenn das eigene Verzeichnis nicht antwortet', async () => {
+      // Keine Antwort ist kein Befund. Ob das Relais erreichbar ist, entscheidet
+      // der Versand selbst.
+      aktiviere(alice)
+      await baueZustellungen(kontextVon(ALICE, BOB), 'vorher', 'u-vorher')
+      clearGeraeteMemory()
+      await verlangeGeraeteVon(BOB)
+      netz.aus = true
+      try {
+        expect(await baueZustellungen(kontextVon(ALICE, BOB), 'ohne Netz', 'u-ohne')).toHaveLength(1)
+      } finally {
+        netz.aus = false
+      }
+    })
+
+    it('hält die Sitzung, wenn hinter einem abgewiesenen Aufbau eine Nachricht kommt', async () => {
+      // Der Befund der Durchsicht vom 23.09.2026: eine Fälschung kommt nicht
+      // allein. Hinter dem Aufbau steht eine Nachricht aus der gefälschten
+      // Sitzung — gegen die echte geöffnet scheiterte sie, galt als Bruch, und
+      // der Bruch warf die echte Sitzung weg. „Die bestehende Sitzung bleibt,
+      // wie sie ist" hielt dann genau bis zur nächsten Zeile.
+      const kB = kontextVon(BOB, ALICE)
+      aktiviere(alice)
+      const [echt] = await baueZustellungen(kontextVon(ALICE, BOB), 'echt', 'u-echt')
+      expect(await zustellen(bob, kB, echt)).toMatchObject({ art: 'klartext', text: 'echt' })
+
+      // Alices Kennung, aber ein Signaturschlüssel, den das Verzeichnis nicht kennt.
+      const faelscher: TestGeraet = {
+        ...alice,
+        signaturPaar: await erzeugeSignaturPaar(),
+        ablage: neueAblage(),
+      }
+      aktiviere(faelscher)
+      const [f] = await baueZustellungen(kontextVon(ALICE, BOB), 'gefälscht', 'u-falsch')
+
+      aktiviere(bob)
+      expect(await verarbeiteBootstrap(kB, oeffneHybrid(f.bootstrap!))).toMatchObject({
+        abgelehnt: true,
+        abgewiesen: true,
+        vonKonto: ALICE,
+        vonGeraet: alice.kennung,
+      })
+      const geschont = new Set([`${ALICE}:${alice.kennung}`])
+      const schonen = (konto: number, g: string) => geschont.has(`${konto}:${g}`)
+      expect(await liesDrUmschlag(kB, f.nachricht, verwerfen, { schonen })).toEqual({ art: 'abgewiesen' })
+
+      // Beim nächsten Abruf liegt beides wieder im Fenster: gemeldet wird nichts
+      // mehr, geschont weiterhin — und die Nachricht bleibt still.
+      const nochmal = await verarbeiteBootstrap(kB, oeffneHybrid(f.bootstrap!))
+      expect(nochmal).toMatchObject({ istAufbau: true, abgewiesen: true, vonKonto: ALICE })
+      expect(nochmal.abgelehnt).toBeUndefined()
+      expect(await liesDrUmschlag(kB, f.nachricht, verwerfen)).toEqual({ art: 'abgewiesen' })
+
+      // Die echte Sitzung trägt weiter, ohne neuen Aufbau.
+      aktiviere(alice)
+      const [weiter] = await baueZustellungen(kontextVon(ALICE, BOB), 'immer noch echt', 'u-weiter')
+      expect(weiter.bootstrap).toBeNull()
+      aktiviere(bob)
+      expect(await liesDrUmschlag(kB, weiter.nachricht, verwerfen, { schonen })).toMatchObject({
+        art: 'klartext',
+        text: 'immer noch echt',
+      })
+    })
+  })
+
+  it('nennt den Absender aus dem Kopf eines Umschlags', async () => {
+    // Der Kopf wählt die Sitzung, gegen die entschlüsselt wird. Was sich damit
+    // öffnen liess, kam von diesem Gerät — auch dann noch, wenn der Klartext
+    // nach einem Neuladen aus der Ablage kommt und kein Zwischenspeicher mehr
+    // weiss, von wem.
+    aktiviere(alice)
+    const [z] = await baueZustellungen(kontextVon(ALICE, BOB), 'x', 'u-kopf')
+    expect(drUrheber(z.nachricht)).toEqual({ vonKonto: ALICE, vonGeraet: alice.kennung })
+    expect(drUrheber('sv-e2ee-hybrid-v1:abc')).toBeNull()
+    expect(drUrheber(`${DR_PREFIX}0.a.b.c`)).toBeNull()
   })
 })

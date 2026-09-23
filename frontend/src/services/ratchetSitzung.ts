@@ -16,6 +16,16 @@
  * Sitzung. Ab der ersten Antwort greift die Erholung des Ratchets, weil die
  * Gegenstelle dann ihr eigenes Paar erzeugt hat.
  *
+ * **Der Aufbau trägt eine Unterschrift.** Der Hybridumschlag sagt nur, *für*
+ * welches Gerät er ist, nie *von* welchem — den Geräteschlüssel des Empfängers
+ * kann jeder benutzen. Bis 09/2026 genügte deshalb ein erfundener Aufbau, und
+ * wer ihn schickte, hielt danach beide Enden der Sitzung: seine Nachrichten
+ * erschienen unter fremdem Namen, auch unter dem eigenen, und was dieses Gerät
+ * an das angebliche Gegenüber sandte, konnte er lesen. Jetzt unterschreibt das
+ * sendende Gerät mit seinem Signaturpaar, und `verarbeiteBootstrap` wendet
+ * einen Aufbau erst an, wenn die Unterschrift zum Verzeichnis passt
+ * (`pruefeGeraeteBeleg`).
+ *
  * **Das Format.**
  *
  * ```
@@ -79,8 +89,21 @@ import { randomBytes } from '@msdis/shield/random'
 import { base64ToBytes, bytesToBase64, bytesToUtf8, utf8ToBytes } from '@msdis/shield/core'
 import { sha256Hex } from '@msdis/shield/integrity'
 
+import type { E2eeGeraetItem } from '@/api/social'
+import i18n from '@/i18n'
+
+import { signiere } from './absenderSignatur'
 import { encryptE2eeHybrid } from './e2eeCrypto'
-import { eigenesGeraet, geraeteVon, verlangeGeraeteVon } from './e2eeGeraet'
+import {
+  eigenesGeraet,
+  geraeteVon,
+  geraetVeroeffentlichen,
+  pruefeGeraeteBeleg,
+  verlangeGeraeteVon,
+  vergessenGeraete,
+  verzeichnisVon,
+  type EigenesGeraet,
+} from './e2eeGeraet'
 import {
   hatSitzung,
   kennstMarke,
@@ -115,6 +138,22 @@ export class DrZustellungFehlgeschlagenError extends Error {
   constructor(public readonly ursachen: unknown[]) {
     super('Für kein Zielgerät liess sich ein Umschlag bauen')
     this.name = 'DrZustellungFehlgeschlagenError'
+  }
+}
+
+/**
+ * Dieses Gerät steht nicht mehr im Verzeichnis des eigenen Kontos.
+ *
+ * Jemand hat es in der Geräteliste entfernt, während dieser Tab offen war.
+ * Senden hiesse Aufbauten, die drüben niemand prüfen kann; sich still neu
+ * einzutragen hiesse, dem Entfernen zu nehmen, was der Dialog dort verspricht.
+ * Der Text sagt deshalb beides: warum nicht, und dass ein Neuladen es wieder
+ * einträgt — so, wie es der Dialog angekündigt hat.
+ */
+export class DrGeraetNichtEingetragenError extends Error {
+  constructor() {
+    super(i18n.t('messenger.deviceNotListed'))
+    this.name = 'DrGeraetNichtEingetragenError'
   }
 }
 
@@ -159,6 +198,72 @@ export type DrLesung =
    * Geräts abreißen. Der Umschlag bleibt liegen und wird später erneut versucht.
    */
   | { art: 'fehler'; grund: string }
+  /**
+   * Noch nicht angefasst, weil der Sitzungsaufbau dieses Geräts im selben
+   * Durchlauf nicht entschieden werden konnte. Nicht anzeigen; der nächste
+   * Durchlauf versucht es erneut. Siehe `DrLeseOptionen.zurueckstellen`.
+   */
+  | { art: 'zurueckgestellt' }
+  /**
+   * Gehört zu einem abgewiesenen Sitzungsaufbau: das Gerät hat einen im
+   * Fenster, und diese Nachricht öffnet sich gegen die bestehende Sitzung
+   * nicht. Nicht anzeigen, und — der Grund für diese Art — **keine** Sitzung
+   * verwerfen. Siehe `DrLeseOptionen.schonen`.
+   */
+  | { art: 'abgewiesen' }
+
+/** Was `verarbeiteBootstrap` über einen Hybrid-Klartext herausgefunden hat. */
+export interface AufbauErgebnis {
+  /** Es war ein Sitzungsaufbau, gleich was daraus wurde. Gehört nie in den Verlauf. */
+  istAufbau: boolean
+  /** Eine bestehende Sitzung wurde ersetzt. Der Aufrufer macht das sichtbar. */
+  ersetzt: boolean
+  vonKonto?: number
+  vonGeraet?: string
+  /**
+   * Noch nicht entschieden: das Verzeichnis antwortete nicht, oder es führt
+   * das Gerät noch nicht. Nichts angewandt, nichts gemerkt — der nächste
+   * Durchlauf versucht es erneut.
+   *
+   * Nachrichten dieses Geräts, die im selben Durchlauf folgen, gehören
+   * zurückgestellt. Liefen sie gegen eine Sitzung, die es noch nicht gibt,
+   * wären sie als Bruch gewertet und damit für immer verloren.
+   */
+  offen?: boolean
+  /**
+   * Abgewiesen und gemerkt: die Unterschrift passt nicht zum Verzeichnis, sie
+   * fehlt bei einem Konto, das unterschreiben kann, oder der Aufbau nennt ein
+   * Konto, das nicht zu diesem Gespräch gehört. Angewandt wurde nichts; der
+   * Aufrufer macht es sichtbar.
+   *
+   * Nur beim ersten Sehen — gemeldet wird einmal.
+   */
+  abgelehnt?: boolean
+  /**
+   * Ein abgewiesener Aufbau, beim ersten Sehen und bei jedem weiteren. Solange
+   * er im Fenster liegt, gehören unlesbare Nachrichten seines Geräts zu ihm und
+   * nicht zur bestehenden Sitzung: `DrLeseOptionen.schonen`.
+   */
+  abgewiesen?: boolean
+}
+
+export interface DrLeseOptionen {
+  /**
+   * Liefert `true` für ein Gerät, dessen Sitzungsaufbau in diesem Durchlauf
+   * offen geblieben ist (`AufbauErgebnis.offen`). Seine Nachrichten werden
+   * dann nicht geöffnet, sondern als `zurueckgestellt` gemeldet.
+   */
+  zurueckstellen?: (vonKonto: number, vonGeraet: string) => boolean
+  /**
+   * Liefert `true` für ein Gerät, von dem ein abgewiesener Aufbau im Fenster
+   * liegt (`AufbauErgebnis.abgewiesen`). Öffnet sich eine seiner Nachrichten
+   * gegen die bestehende Sitzung nicht, ist das kein Bruch, sondern die
+   * Nachricht hinter der Fälschung: `abgewiesen`, und die Sitzung bleibt.
+   * Ohne das kippte ein gefälschter Aufbau mit einer einzigen Nachricht
+   * dahinter die laufende Sitzung doch noch.
+   */
+  schonen?: (vonKonto: number, vonGeraet: string) => boolean
+}
 
 // ==========================================
 // Format
@@ -201,6 +306,24 @@ function lieseKopf(umschlag: string): DrKopf | null {
 }
 
 /**
+ * Konto und Gerät aus dem Kopf eines Ratchet-Umschlags, oder `null`.
+ *
+ * Der Kopf wählt die Sitzung, gegen die entschlüsselt wird — was sich damit
+ * öffnen liess, kam von diesem Gerät. Für Klartext aus der Ablage ist das die
+ * einzige Quelle: der Zwischenspeicher, der sich den Absender beim Öffnen
+ * gemerkt hat, lebt nur bis zum Neuladen. Ohne Absender griffe die
+ * Downgrade-Schranke im Messenger nicht, und eine Nachricht, die sie beim
+ * ersten Sehen verworfen hat, stünde nach dem Neuladen im Verlauf.
+ *
+ * Nur für Umschläge, die dieses Gerät schon geöffnet hat. Einem fremden Kopf
+ * glaubt hier niemand etwas.
+ */
+export function drUrheber(umschlag: string): { vonKonto: number; vonGeraet: string } | null {
+  const kopf = lieseKopf(umschlag)
+  return kopf ? { vonKonto: kopf.vonKonto, vonGeraet: kopf.vonGeraet } : null
+}
+
+/**
  * Schneidet den Gerätezusatz von der Kennung ab.
  *
  * Dieselbe Nachricht liegt je Zielgerät einmal in der Mailbox. Damit alle Geräte
@@ -225,6 +348,61 @@ interface BootstrapInhalt {
   fuerGeraet: string
   geheimnis: string
   paar: { algorithm: string; publicKey: string; privateKey: string }
+  /**
+   * Die Unterschrift des sendenden Geräts über `aufbauDaten`. Fehlt sie, gilt
+   * die Downgrade-Schranke aus `pruefeGeraeteBeleg`: durch kommt dann nur, wer
+   * gar nicht unterschreiben *kann*.
+   */
+  sig?: string
+}
+
+/**
+ * Hat der Klartext die Form eines Aufbaus?
+ *
+ * Nicht bloß Hygiene: ein Aufbau mit fehlendem Konto oder Gerät liefe sonst
+ * bis in die Verzeichnisabfrage, bliebe dort `offen` und kostete bei jedem
+ * Abruf eine Anfrage, die nie beantwortet werden kann.
+ */
+function istAufbauInhalt(roh: any): roh is BootstrapInhalt {
+  return (
+    Number.isInteger(roh.vonKonto) &&
+    roh.vonKonto > 0 &&
+    typeof roh.vonGeraet === 'string' &&
+    roh.vonGeraet.length > 0 &&
+    typeof roh.fuerGeraet === 'string' &&
+    typeof roh.geheimnis === 'string' &&
+    Boolean(roh.paar) &&
+    typeof roh.paar.algorithm === 'string' &&
+    typeof roh.paar.publicKey === 'string' &&
+    typeof roh.paar.privateKey === 'string'
+  )
+}
+
+/**
+ * Die Zeichenkette, über die ein Sitzungsaufbau unterschrieben wird.
+ *
+ * Alles, was die Sitzung ausmacht: von wem, für wen, in welchem Gespräch, und
+ * das Material selbst. Das Gespräch steht als Kontenpaar darin und nicht als
+ * Mailbox — die Mailbox zieht mit dem Chatgeheimnis um, das Gespräch nicht.
+ *
+ * Ein JSON-Array statt einer Feldliste: Reihenfolge und Grenzen sind damit
+ * eindeutig, ohne dass jemand ein Trennzeichen maskieren muss. Der Vorsatz
+ * hält diese Unterschrift von denen über Nutzlasten (`msm:nutzlast:v1:`)
+ * fern, die mit demselben Schlüssel entstehen.
+ */
+function aufbauDaten(kontext: DrKontext, inhalt: BootstrapInhalt): string {
+  return JSON.stringify([
+    'msm:dr-init:v1',
+    Math.min(kontext.eigeneId, kontext.peerId),
+    Math.max(kontext.eigeneId, kontext.peerId),
+    inhalt.vonKonto,
+    inhalt.vonGeraet,
+    inhalt.fuerGeraet,
+    inhalt.geheimnis,
+    inhalt.paar.algorithm,
+    inhalt.paar.publicKey,
+    inhalt.paar.privateKey,
+  ])
 }
 
 /**
@@ -236,8 +414,7 @@ interface BootstrapInhalt {
  */
 async function beginneSitzung(
   kontext: DrKontext,
-  meinGeraet: string,
-  meinOeffentlicher: string,
+  meins: EigenesGeraet,
   zielGeraet: string,
   zielOeffentlicher: string,
 ) {
@@ -248,7 +425,7 @@ async function beginneSitzung(
     typ: DR_INIT_TYP,
     v: 1,
     vonKonto: kontext.eigeneId,
-    vonGeraet: meinGeraet,
+    vonGeraet: meins.kennung,
     fuerGeraet: zielGeraet,
     geheimnis: bytesToBase64(geheimnis),
     paar: {
@@ -257,17 +434,20 @@ async function beginneSitzung(
       privateKey: bytesToBase64(paar.privateKey),
     },
   }
+  // Scheitert das, scheitert der Aufbau für dieses Ziel. Ein unsignierter
+  // Aufbau aus diesem Stand wäre genau die Lücke, die die Unterschrift schließt.
+  inhalt.sig = await signiere(aufbauDaten(kontext, inhalt), meins.signaturPaar.privateKeyJwk)
   const umschlag = await encryptE2eeHybrid(
     JSON.stringify(inhalt),
     zielOeffentlicher,
-    meinOeffentlicher,
+    meins.paar.publicKeyJwk,
   )
   paar.privateKey.fill(0)
 
   const zustand = await initSenderState({
     sharedSecret: geheimnis,
     remotePublicKey: paar.publicKey,
-    associatedData: gebundeneDaten(kontext, meinGeraet, zielGeraet),
+    associatedData: gebundeneDaten(kontext, meins.kennung, zielGeraet),
   })
   return { umschlag, zustand }
 }
@@ -276,26 +456,32 @@ async function beginneSitzung(
  * Nimmt einen entschlüsselten Hybrid-Klartext entgegen und richtet die Sitzung
  * ein, falls es ein Sitzungsaufbau ist.
  *
- * Meldet `false`, wenn der Klartext etwas anderes war — dann gehört er in den
- * normalen Lesepfad. Ein Aufbau für ein fremdes Gerät wird verworfen: er ist
- * eine der aufgefächerten Kopien und nicht für dieses Gerät bestimmt.
+ * Meldet `istAufbau: false`, wenn der Klartext etwas anderes war — dann gehört
+ * er in den normalen Lesepfad. Ein Aufbau für ein fremdes Gerät wird
+ * übergangen: er ist eine der aufgefächerten Kopien und nicht für dieses Gerät
+ * bestimmt.
  *
  * Kommt ein Aufbau, obwohl schon eine Sitzung steht, ersetzt er sie. Die
  * Gegenstelle hat dann ihren Zustand verloren, und ihr altes Gegenstück liegt
  * nur noch im Weg. `ersetzt: true` sagt dem Aufrufer, dass er das sichtbar
  * machen soll.
+ *
+ * Angewandt wird nur, was das nennende Gerät unterschrieben hat — oder was von
+ * einem Konto kommt, das nirgends unterschreiben kann. Siehe `AufbauErgebnis`
+ * für die beiden anderen Ausgänge.
  */
 export async function verarbeiteBootstrap(
   kontext: DrKontext,
   klartext: string,
-): Promise<{ istAufbau: boolean; ersetzt: boolean; vonGeraet?: string }> {
+): Promise<AufbauErgebnis> {
   let inhalt: BootstrapInhalt
   try {
     const roh = JSON.parse(klartext)
     if (!roh || typeof roh !== 'object' || roh.typ !== DR_INIT_TYP) {
       return { istAufbau: false, ersetzt: false }
     }
-    inhalt = roh as BootstrapInhalt
+    if (!istAufbauInhalt(roh)) return { istAufbau: true, ersetzt: false }
+    inhalt = roh
   } catch {
     return { istAufbau: false, ersetzt: false }
   }
@@ -305,23 +491,64 @@ export async function verarbeiteBootstrap(
     // Kopie für ein anderes Gerät desselben Kontos.
     return { istAufbau: true, ersetzt: false }
   }
-  // Nur die beiden Konten dieser Mailbox dürfen hier eine Sitzung setzen. Ohne
-  // diese Prüfung könnte ein Absender eine fremde Kontokennung behaupten und
-  // damit eine Sitzung überschreiben, die einem anderen Gespräch gehört.
-  if (inhalt.vonKonto !== kontext.eigeneId && inhalt.vonKonto !== kontext.peerId) {
-    return { istAufbau: true, ersetzt: false }
-  }
 
   // Derselbe Umschlag beim nächsten Abruf ist kein Neuaufbau. Der öffentliche
   // Teil des mitgereisten Paares wird je Aufbau frisch erzeugt und ist damit
   // die Kennung dieses einen Aufbaus — anders als die Gerätekennung, die über
   // alle Aufbauten hinweg dieselbe bleibt.
   const aufbauKennung = inhalt.paar.publicKey
-  // Der übliche Fall, und er soll billig bleiben: ein längst angewandter Aufbau
-  // liegt bei jedem Abruf wieder im Fenster und braucht weder Schloss noch
-  // Zustand. Die verbindliche Prüfung steht unten.
+  const herkunft = { vonKonto: inhalt.vonKonto, vonGeraet: inhalt.vonGeraet }
+  // Der übliche Fall, und er soll billig bleiben: ein längst angewandter — oder
+  // abgewiesener — Aufbau liegt bei jedem Abruf wieder im Fenster und braucht
+  // weder Verzeichnis noch Schloss. Die verbindliche Prüfung steht unten.
   if (await kennstMarke('aufbau', aufbauKennung)) {
+    // Ein abgewiesener meldet sich nicht noch einmal, schont aber weiter: die
+    // Nachricht hinter ihm liegt ebenso wieder im Fenster.
+    if (await kennstMarke('abgewiesen', aufbauKennung)) {
+      return { istAufbau: true, ersetzt: false, abgewiesen: true, ...herkunft }
+    }
     return { istAufbau: true, ersetzt: false, vonGeraet: inhalt.vonGeraet }
+  }
+
+  /**
+   * Abweisen und merken, in dieser Reihenfolge.
+   *
+   * `abgewiesen` zuerst: bricht der Vorgang zwischen beiden Marken ab, prüft
+   * der nächste Durchlauf den Aufbau eben noch einmal und meldet ihn ein
+   * zweites Mal. Andersherum stünde er als angewandt da, und die Nachricht
+   * hinter ihm kostete die laufende Sitzung doch noch.
+   */
+  const weiseAb = async (): Promise<AufbauErgebnis> => {
+    await merkeMarke('abgewiesen', aufbauKennung)
+    await merkeMarke('aufbau', aufbauKennung)
+    return { istAufbau: true, ersetzt: false, abgelehnt: true, abgewiesen: true, ...herkunft }
+  }
+
+  // Nur die beiden Konten dieses Gesprächs dürfen hier eine Sitzung setzen.
+  // Ohne diese Prüfung könnte ein Absender eine fremde Kontokennung behaupten
+  // und damit eine Sitzung überschreiben, die einem anderen Gespräch gehört.
+  if (inhalt.vonKonto !== kontext.eigeneId && inhalt.vonKonto !== kontext.peerId) {
+    return weiseAb()
+  }
+
+  // Von wem ist er? Die Kontenprüfung oben begrenzt das auf zwei Verzeichnisse,
+  // die der Sendepfad ohnehin schon abfragt.
+  const beleg = await pruefeGeraeteBeleg(
+    inhalt.vonKonto,
+    inhalt.vonGeraet,
+    aufbauDaten(kontext, inhalt),
+    inhalt.sig,
+  )
+  if (beleg === 'offen' || beleg === 'unbekannt') {
+    // Nichts merken: der nächste Durchlauf fragt noch einmal. Ein Gerät, das
+    // sich eben erst gemeldet hat, steht dann im Verzeichnis.
+    return { istAufbau: true, ersetzt: false, offen: true, ...herkunft }
+  }
+  if (beleg === 'falsch') {
+    // Gemerkt, damit derselbe Umschlag nicht bei jedem Abruf eine neue Meldung
+    // auslöst. Angewandt wird nichts — die laufende Sitzung bleibt, wie sie ist,
+    // auch gegen die Nachricht dahinter (`DrLeseOptionen.schonen`).
+    return weiseAb()
   }
 
   const id = sitzungsId(meins.kennung, inhalt.vonKonto, inhalt.vonGeraet)
@@ -363,7 +590,7 @@ export async function verarbeiteBootstrap(
   })
   paar.privateKey.fill(0)
 
-  return { istAufbau: true, ersetzt: ersetzt === true, vonGeraet: inhalt.vonGeraet }
+  return { istAufbau: true, ersetzt: ersetzt === true, ...herkunft }
 }
 
 // ==========================================
@@ -381,15 +608,26 @@ export async function verarbeiteBootstrap(
  * Ziele sind alle Geräte der Gegenstelle und alle eigenen außer diesem. Das
  * eigene Gerät bleibt außen vor: es hat den Klartext schon und könnte seine
  * eigene Ratchet-Nachricht ohnehin nicht öffnen.
+ *
+ * **Wer sendet, muss im Verzeichnis stehen.** Die Gegenstelle prüft jeden
+ * Aufbau gegen den Signaturschlüssel, den das Verzeichnis für dieses Gerät
+ * führt. Ein Gerät, dessen Anmeldung beim Start gescheitert ist, schickte
+ * sonst Aufbauten, die drüben niemand prüfen kann — seine Nachrichten blieben
+ * dort still liegen, und hier sähe alles zugestellt aus. `geraetVeroeffentlichen`
+ * kostet nach dem ersten Erfolg nichts mehr; scheitert es, scheitert das Senden
+ * mit einem Fehler, der sagt, woran. Dass das Gerät seither nicht entfernt
+ * wurde, prüft `eigenesVerzeichnis`.
  */
 export async function baueZustellungen(
   kontext: DrKontext,
   klartext: string,
   basisUuid: string,
 ): Promise<DrZustellung[]> {
-  const meins = await eigenesGeraet()
+  const meins = await geraetVeroeffentlichen()
+  const eigene = (await eigenesVerzeichnis(kontext.eigeneId, meins.kennung)).filter(
+    (g) => g.device_id !== meins.kennung,
+  )
   const fremde = await verlangeGeraeteVon(kontext.peerId)
-  const eigene = (await geraeteVon(kontext.eigeneId)).filter((g) => g.device_id !== meins.kennung)
 
   const ziele = [
     ...fremde.map((g) => ({ geraet: g, konto: kontext.peerId })),
@@ -420,8 +658,7 @@ export async function baueZustellungen(
           if (!arbeitszustand || arbeitszustand.sendingChainKey === null) {
             const begonnen = await beginneSitzung(
               kontext,
-              meins.kennung,
-              meins.paar.publicKeyJwk,
+              meins,
               zielGeraet,
               ziel.geraet.public_key,
             )
@@ -480,6 +717,36 @@ export async function baueZustellungen(
   return zustellungen
 }
 
+/**
+ * Die eigenen Geräte — und die Gewissheit, dass dieses darunter ist.
+ *
+ * `geraetVeroeffentlichen` meldet sich je Sitzung einmal. Wird das Gerät
+ * danach in der Geräteliste entfernt, bleibt dieser Tab offen und sendete
+ * weiter Aufbauten, die drüben niemand prüfen kann: sie blieben als
+ * „unbekannt" zurückgestellt, bis sie aus dem Fenster rutschen. Sich neu
+ * einzutragen wäre die bequeme Antwort und nähme dem Entfernen, was der
+ * Dialog verspricht — also `DrGeraetNichtEingetragenError`.
+ *
+ * Frisch gefragt, weil eine zehn Minuten alte Liste das Gerät noch führen
+ * kann, wenn es längst entfernt ist; gedrosselt ist das über `FRISCH_MS`.
+ * Fehlt es, wird noch einmal ohne Zwischenspeicher nachgesehen: eine Liste
+ * von vor der eigenen Anmeldung ist kein Befund. Keine Antwort auch nicht —
+ * ob das Relais erreichbar ist, entscheidet der Versand selbst.
+ */
+async function eigenesVerzeichnis(eigeneId: number, kennung: string): Promise<E2eeGeraetItem[]> {
+  const fuehrt = (liste: E2eeGeraetItem[]) => liste.some((g) => g.device_id === kennung)
+  try {
+    const liste = await verzeichnisVon(eigeneId, { frisch: true })
+    if (fuehrt(liste)) return liste
+    vergessenGeraete(eigeneId)
+    const nochmal = await verzeichnisVon(eigeneId, { frisch: true })
+    if (fuehrt(nochmal)) return nochmal
+  } catch {
+    return geraeteVon(eigeneId)
+  }
+  throw new DrGeraetNichtEingetragenError()
+}
+
 // ==========================================
 // Lesen
 // ==========================================
@@ -512,6 +779,7 @@ export async function liesDrUmschlag(
   kontext: DrKontext,
   umschlag: string,
   klartext: KlartextAblage,
+  optionen: DrLeseOptionen = {},
 ): Promise<DrLesung> {
   const kopf = lieseKopf(umschlag)
   if (!kopf) return { art: 'unbekannt' }
@@ -534,17 +802,33 @@ export async function liesDrUmschlag(
   const rumpfHash = (await sha256Hex(utf8ToBytes(kopf.rumpf))).slice(0, 32)
   const marke = `${kopf.vonKonto}:${kopf.vonGeraet}:${rumpfHash}`
   if (await kennstMarke('bruch', marke)) return { art: 'beurteilt' }
+  if (await kennstMarke('abgewiesen', marke)) return { art: 'abgewiesen' }
+
+  // Der Aufbau davor ist noch nicht entschieden. Jetzt zu öffnen hiesse, gegen
+  // die alte Sitzung oder gegen gar keine zu laufen — und das endete als Bruch
+  // mit Marke, die Nachricht wäre für immer weg.
+  if (optionen.zurueckstellen?.(kopf.vonKonto, kopf.vonGeraet)) return { art: 'zurueckgestellt' }
+
+  /**
+   * Was sich nicht öffnen lässt, ist ein Bruch — ausser, von diesem Gerät liegt
+   * ein abgewiesener Aufbau im Fenster.
+   *
+   * Dann ist es die Nachricht aus der gefälschten Sitzung, und als Bruch
+   * gezählt kippte sie die echte doch noch. Gemerkt wird sie trotzdem, unter
+   * eigener Marke: beim nächsten Abruf bleibt sie still, auch wenn der Aufbau
+   * bis dahin aus dem Fenster gerutscht ist.
+   */
+  const unlesbar = async (grund: string): Promise<DrLesung> => {
+    if (optionen.schonen?.(kopf.vonKonto, kopf.vonGeraet)) {
+      await merkeMarke('abgewiesen', marke)
+      return { art: 'abgewiesen' }
+    }
+    await merkeMarke('bruch', marke)
+    return { art: 'bruch', vonKonto: kopf.vonKonto, vonGeraet: kopf.vonGeraet, grund }
+  }
 
   const id = sitzungsId(meins.kennung, kopf.vonKonto, kopf.vonGeraet)
-  if (!(await hatSitzung(id))) {
-    await merkeMarke('bruch', marke)
-    return {
-      art: 'bruch',
-      vonKonto: kopf.vonKonto,
-      vonGeraet: kopf.vonGeraet,
-      grund: 'keine Sitzung',
-    }
-  }
+  if (!(await hatSitzung(id))) return unlesbar('keine Sitzung')
 
   let nachricht
   try {
@@ -586,13 +870,7 @@ export async function liesDrUmschlag(
     if (!name.startsWith('Dis')) {
       return { art: 'fehler', grund: name }
     }
-    await merkeMarke('bruch', marke)
-    return {
-      art: 'bruch',
-      vonKonto: kopf.vonKonto,
-      vonGeraet: kopf.vonGeraet,
-      grund: name,
-    }
+    return unlesbar(name)
   }
 }
 

@@ -23,6 +23,7 @@ from models import (
     ChatStory,
     DirectChat,
 )
+from models.chat_group import generate_invite_code
 from services.panel_settings_service import PanelSettingsService
 from services.sync_event_service import SyncEventService
 from services.achievement_service import AchievementService
@@ -2480,7 +2481,18 @@ class SocialService:
         group_id: int,
         target_user_id: int,
         caller: User,
-    ) -> None:
+    ) -> ChatGroup:
+        """Wirft ein Mitglied hinaus und erneuert dabei den Einladungscode.
+
+        Wer hinausgeworfen wird, kennt den Code oft: er hatte das
+        Einladungsrecht, oder der Link stand im Verlauf. Bis 09/2026 blieb der
+        Code gültig, und der Rauswurf war eine Formalie — ein Klick auf den
+        alten Link, und er war wieder drin.
+
+        Die Einladungskarte geht mit. Ihre gebundenen Daten nennen den alten
+        Code; gegen den neuen öffnet sie sich nicht mehr. Wer als Nächstes
+        einen Link teilt, hinterlegt eine neue.
+        """
         cls.assert_social_enabled(db)
         caller_mem = (
             db.query(ChatGroupMember)
@@ -2511,8 +2523,17 @@ class SocialService:
         if target_mem.role == "admin" and caller_mem.role != "owner":
             raise HTTPException(status_code=403, detail="Nur der Eigentümer kann Administratoren entfernen.")
 
+        group = db.query(ChatGroup).filter(ChatGroup.id == group_id).first()
+        if not group:
+            raise HTTPException(status_code=404, detail="Gruppe nicht gefunden.")
+
         db.delete(target_mem)
+        # Im selben Commit: ein Rauswurf ohne neuen Code wäre genau der Zustand,
+        # den diese Stelle beenden soll.
+        group.invite_code = generate_invite_code()
+        group.invite_card = None
         db.commit()
+        db.refresh(group)
 
         SyncEventService.publish(
             {
@@ -2522,6 +2543,7 @@ class SocialService:
             },
             user_id=target_user_id,
         )
+        return group
 
     @classmethod
     def update_group_default_permissions(

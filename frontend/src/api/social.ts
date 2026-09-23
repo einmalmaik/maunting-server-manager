@@ -680,13 +680,21 @@ export async function updateGroupMemberRole(
   })
 }
 
+/**
+ * Wirft ein Mitglied hinaus. Der Einladungscode ist danach ein neuer.
+ *
+ * `invite_code` ist der neue Code — oder `null`, wenn der Aufrufer nicht
+ * einladen darf und ihn deshalb auch hier nicht bekommt. Der alte Link führt
+ * nicht mehr hinein, und die Einladungskarte ist weg.
+ */
 export async function kickGroupMember(
   groupId: number,
   targetUserId: number
-): Promise<{ success: boolean; message: string }> {
-  return api<{ success: boolean; message: string }>(`/social/groups/${groupId}/members/${targetUserId}`, {
-    method: 'DELETE',
-  })
+): Promise<{ success: boolean; message: string; invite_code: string | null }> {
+  return api<{ success: boolean; message: string; invite_code: string | null }>(
+    `/social/groups/${groupId}/members/${targetUserId}`,
+    { method: 'DELETE' },
+  )
 }
 
 export async function updateGroupPermissions(
