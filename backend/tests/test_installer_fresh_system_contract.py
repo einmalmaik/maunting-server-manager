@@ -258,6 +258,29 @@ def test_caddy_setzt_content_security_policy() -> None:
         assert "frame-ancestors 'none'" in quelle, f"{name} muss frame-ancestors 'none' enthalten"
 
 
+def test_caddy_csp_und_gebaute_csp_sind_dieselbe() -> None:
+    """Der Caddy-Kopf erreicht nur neue Installationen, das `<meta>` jede.
+
+    Laufen beide auseinander, verhaelt sich eine frische Installation anders
+    als eine aktualisierte — und keiner merkt es, bis ein Anhang nicht spielt.
+    """
+    import re
+
+    ts = (ROOT / "frontend" / "vite.csp.ts").read_text(encoding="utf-8")
+    block = ts[ts.index("export const PANEL_CSP = ["):ts.index("].join('; ')")]
+    gebaut = set(re.findall(r'^\s*"([^"]+)",$', block, re.M))
+    assert gebaut, "PANEL_CSP nicht gelesen"
+
+    installer = _installer()
+    template = (ROOT / "Caddyfile.template").read_text(encoding="utf-8")
+    for quelle, name in ((installer, "install.sh"), (template, "Caddyfile.template")):
+        koepfe = re.findall(r'Content-Security-Policy "([^"]+)"', quelle)
+        assert koepfe, name
+        for kopf in koepfe:
+            teile = {t.strip() for t in kopf.split(";") if t.strip()}
+            assert teile - {"frame-ancestors 'none'"} == gebaut, name
+
+
 
 def _caddy_sites(installer: str) -> list[str]:
     """Die Caddy-Sites, die install.sh schreibt: je Heredoc der Text bis EOF."""

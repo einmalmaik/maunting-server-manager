@@ -207,7 +207,11 @@ export interface E2eeGeraetItem {
    */
   signing_public_key: string
   label: string
+  /** Wort des Servers. Die Clients glauben stattdessen der Unterschrift darunter. */
   is_approved?: boolean
+  /** Das Gerät, das dieses freigegeben hat, und seine Unterschrift (`vertrauteGeraete`). */
+  approved_by?: string
+  approval_signature?: string
 }
 
 /**
@@ -239,17 +243,18 @@ export async function getE2eeGeraete(userId: number, includeUnapproved = false):
   return api<E2eeGeraetItem[]>(`/social/e2ee/devices/${userId}${query}`)
 }
 
+/** Gibt ein wartendes Gerät frei — mit der Unterschrift eines freigegebenen (`gebeGeraetFrei`). */
 export async function approveEigenesGeraet(
   deviceId: string,
-  approverDeviceId?: string,
-  signature?: string,
+  approverDeviceId: string,
+  signature: string,
 ): Promise<{ ok: boolean }> {
   return api<{ ok: boolean }>('/social/e2ee/devices/self/approve', {
     method: 'POST',
     body: JSON.stringify({
       device_id: deviceId,
-      approver_device_id: approverDeviceId || null,
-      signature: signature || null,
+      approver_device_id: approverDeviceId,
+      signature,
     }),
   })
 }
@@ -258,11 +263,31 @@ export async function getPendingE2eeGeraete(): Promise<E2eeGeraetItem[]> {
   return api<E2eeGeraetItem[]>('/social/e2ee/devices/self/pending')
 }
 
-export async function deleteEigenesGeraet(deviceId: string): Promise<{ ok: boolean }> {
-  return api<{ ok: boolean }>(
-    `/social/e2ee/devices/self?device_id=${encodeURIComponent(deviceId)}`,
-    { method: 'DELETE' }
-  )
+/**
+ * Entfernt ein Gerät und sperrt seine Sitzung sofort. Ein freigegebenes
+ * verlangt die Unterschrift eines freigegebenen (`entferneGeraet`).
+ */
+export async function removeEigenesGeraet(
+  deviceId: string,
+  approverDeviceId?: string,
+  signature?: string,
+): Promise<{ ok: boolean }> {
+  return api<{ ok: boolean }>('/social/e2ee/devices/self/remove', {
+    method: 'POST',
+    body: JSON.stringify({
+      device_id: deviceId,
+      approver_device_id: approverDeviceId ?? '',
+      signature: signature ?? '',
+    }),
+  })
+}
+
+/** Alle Geräte verloren: Verzeichnis leeren, andere Sitzungen sperren. */
+export async function resetEigeneGeraete(password: string): Promise<{ ok: boolean; removed: number }> {
+  return api<{ ok: boolean; removed: number }>('/social/e2ee/devices/self/reset', {
+    method: 'POST',
+    body: JSON.stringify({ password }),
+  })
 }
 
 /** Der `applicationServerKey`. Leer heißt: dieses Panel kann nicht zustellen. */

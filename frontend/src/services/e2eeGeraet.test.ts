@@ -130,13 +130,9 @@ const {
   vergessenGeraete,
   verlangeGeraeteVon,
   E2eeKeinGeraetError,
-  getBekannteGeraete,
-  setBekannteGeraete,
-  getBekannteSchluessel,
-  setBekannteSchluessel,
-  pruefeUndAktualisiereNeueGeraete,
-  onNeuesGeraet,
+  freigabeDaten,
   onSchluesselWarnung,
+  vertrauteGeraete,
   pruefeGeraeteBeleg,
   sicherheitsnummer,
   verzeichnisVon,
@@ -414,118 +410,127 @@ describe('e2eeGeraet', () => {
     })
   })
 
-  describe('Geräteverzeichnis-Prüfung und Warnung bei neuen Geräten (M-10)', () => {
-    it('initialisiert bekannte Geräte beim Erstkontakt ohne neue Geräte zu melden', () => {
-      const g1 = [{ device_id: 'dev-1', public_key: 'pk-1' }]
-      const gemeldet = pruefeUndAktualisiereNeueGeraete(555, g1)
-      expect(gemeldet).toEqual([])
-      expect(getBekannteGeraete(555)).toEqual(['dev-1'])
+  describe('Vertraute Geräte: der Server hat nicht das letzte Wort', () => {
+    const geraet = (id: string, pk: string, sig = '', extra: Record<string, unknown> = {}) => ({
+      device_id: id,
+      public_key: pk,
+      signing_public_key: sig,
+      label: '',
+      ...extra,
     })
 
-    it('erkennt neue Geräte bei Folgeabrufen und aktualisiert den bekannten Stand', () => {
-      setBekannteGeraete(555, ['dev-1'])
-      const g2 = [
-        { device_id: 'dev-1', public_key: 'pk-1' },
-        { device_id: 'dev-2', public_key: 'pk-2' },
-      ]
-      const gemeldet = pruefeUndAktualisiereNeueGeraete(555, g2)
-      expect(gemeldet).toEqual(['dev-2'])
-      expect(getBekannteGeraete(555)).toEqual(['dev-1', 'dev-2'])
-    })
+    const mitWarnungen = async (lauf: (w: any[]) => Promise<void>) => {
+      const warnungen: any[] = []
+      const abbestellen = onSchluesselWarnung((w) => warnungen.push(w))
+      try {
+        await lauf(warnungen)
+      } finally {
+        abbestellen()
+      }
+    }
 
-    it('benachrichtigt registrierte Listener bei holeGeraete über neue Geräte', async () => {
-      setBekannteGeraete(777, ['altes-geraet'])
-      fremdeGeraete.liste = [
-        { device_id: 'altes-geraet', public_key: 'pk-alt' },
-        { device_id: 'neues-geraet', public_key: 'pk-neu' },
-      ]
-
-      const empfangen: { peer: number; neue: string[] }[] = []
-      const abbestellen = onNeuesGeraet((peer, neue) => {
-        empfangen.push({ peer, neue })
+    it('glaubt beim Erstkontakt allem und warnt nicht', async () => {
+      await mitWarnungen(async (warnungen) => {
+        const liste = [geraet('a-1', 'pk-a')]
+        expect(await vertrauteGeraete(4001, liste)).toEqual(liste)
+        expect(warnungen).toEqual([])
       })
-
-      try {
-        const res = await verlangeGeraeteVon(777)
-        expect(res).toHaveLength(2)
-        expect(empfangen).toHaveLength(1)
-        expect(empfangen[0]).toEqual({ peer: 777, neue: ['neues-geraet'] })
-
-        // Zweiter Abruf: Gerät ist jetzt bekannt, kein erneutes Melden
-        empfangen.length = 0
-        vergessenGeraete(777)
-        await verlangeGeraeteVon(777)
-        expect(empfangen).toHaveLength(0)
-      } finally {
-        abbestellen()
-      }
     })
 
-    it('erkennt eine Schlüsseländerung an einem bestehenden Gerät und warnt', () => {
-      const warnungen: any[] = []
-      const abbestellen = onSchluesselWarnung((w) => warnungen.push(w))
-
-      try {
-        // Erstkontakt
-        pruefeUndAktualisiereNeueGeraete(888, [{ device_id: 'dev-x', public_key: 'pk-orig' }])
-        expect(warnungen).toHaveLength(0)
-
-        // Schlüsseländerung am selben Gerät
-        pruefeUndAktualisiereNeueGeraete(888, [{ device_id: 'dev-x', public_key: 'pk-neu' }])
-        expect(warnungen).toHaveLength(1)
-        expect(warnungen[0]).toEqual({
-          userId: 888,
-          typ: 'schluessel_geaendert',
-          deviceId: 'dev-x',
-        })
-      } finally {
-        abbestellen()
-      }
+    it('gibt einem Gerät, das der Server einträgt, nichts', async () => {
+      // Genau der Fall, gegen den `is_approved` nicht hilft: der Server trägt
+      // selbst ein Gerät ein und meldet es als freigegeben.
+      await mitWarnungen(async (warnungen) => {
+        await vertrauteGeraete(4002, [geraet('echt-1', 'pk-echt')])
+        const untergeschoben = geraet('fremd-1', 'pk-fremd', '', { is_approved: true })
+        const ergebnis = await vertrauteGeraete(4002, [geraet('echt-1', 'pk-echt'), untergeschoben])
+        expect(ergebnis.map((g) => g.device_id)).toEqual(['echt-1'])
+        expect(warnungen).toEqual([{ userId: 4002, typ: 'unbestaetigt', geraete: ['fremd-1'] }])
+      })
     })
 
-    it('erkennt einen Konto-Neustart (alle Geräte ersetzt) und warnt', () => {
-      const warnungen: any[] = []
-      const abbestellen = onSchluesselWarnung((w) => warnungen.push(w))
+    it('gibt einem bekannten Gerät mit ausgetauschtem Schlüssel nichts', async () => {
+      await mitWarnungen(async (warnungen) => {
+        await vertrauteGeraete(4003, [geraet('tel', 'pk-tel'), geraet('lap', 'pk-lap')])
+        const ergebnis = await vertrauteGeraete(4003, [geraet('tel', 'pk-tel'), geraet('lap', 'pk-dieb')])
+        expect(ergebnis.map((g) => g.device_id)).toEqual(['tel'])
+        expect(warnungen[0]).toMatchObject({ typ: 'unbestaetigt', geraete: ['lap'] })
+      })
+    })
 
-      try {
-        // Bekannte alte Geräte
-        setBekannteGeraete(999, ['alt-1', 'alt-2'])
-        setBekannteSchluessel(999, { 'alt-1': 'pk-alt-1', 'alt-2': 'pk-alt-2' })
-
-        // Alle Geräte wurden durch neue ersetzt
-        pruefeUndAktualisiereNeueGeraete(999, [
-          { device_id: 'frisch-1', public_key: 'pk-frisch-1' },
-          { device_id: 'frisch-2', public_key: 'pk-frisch-2' },
+    it('nimmt ein Gerät auf, das ein bekanntes über genau diese Schlüssel freigegeben hat', async () => {
+      const tel = await erzeugeSignaturPaar()
+      const neu = await erzeugeSignaturPaar()
+      await vertrauteGeraete(4004, [geraet('tel', 'pk-tel', tel.publicKeyJwk)])
+      const sig = await signiere(
+        await freigabeDaten(4004, 'neu', 'pk-neu', neu.publicKeyJwk),
+        tel.privateKeyJwk,
+      )
+      await mitWarnungen(async (warnungen) => {
+        const ergebnis = await vertrauteGeraete(4004, [
+          geraet('tel', 'pk-tel', tel.publicKeyJwk),
+          geraet('neu', 'pk-neu', neu.publicKeyJwk, { approved_by: 'tel', approval_signature: sig }),
         ])
-
-        expect(warnungen.some((w) => w.typ === 'konto_neustart' && w.userId === 999)).toBe(true)
-        // Nach Konto-Neustart müssen die alten Geräte und Schlüssel vollständig verdrängt sein
-        expect(getBekannteGeraete(999)).toEqual(['frisch-1', 'frisch-2'])
-        expect(getBekannteSchluessel(999)).toEqual({
-          'frisch-1': 'pk-frisch-1',
-          'frisch-2': 'pk-frisch-2',
-        })
-      } finally {
-        abbestellen()
-      }
+        expect(ergebnis.map((g) => g.device_id)).toEqual(['tel', 'neu'])
+        expect(warnungen).toEqual([{ userId: 4004, typ: 'neues_geraet', geraete: ['neu'] }])
+      })
+      // Dieselbe Unterschrift deckt keinen anderen Schlüssel unter derselben Kennung.
+      const ergebnis = await vertrauteGeraete(4004, [
+        geraet('tel', 'pk-tel', tel.publicKeyJwk),
+        geraet('neu', 'pk-anders', neu.publicKeyJwk, { approved_by: 'tel', approval_signature: sig }),
+      ])
+      expect(ergebnis.map((g) => g.device_id)).toEqual(['tel'])
     })
 
-    it('entfernt gelöschte Geräte sofort aus den bekannten Geräten', () => {
-      setBekannteGeraete(777, ['g1', 'g2'])
-      setBekannteSchluessel(777, { g1: 'pk1', g2: 'pk2' })
+    it('glaubt einer Freigabe durch ein Gerät, das inzwischen entfernt ist', async () => {
+      // Altes Telefon gibt das neue frei und wird danach entfernt. Wer in der
+      // Zwischenzeit nicht nachgesehen hat, muss das neue trotzdem annehmen.
+      const alt = await erzeugeSignaturPaar()
+      const neu = await erzeugeSignaturPaar()
+      await vertrauteGeraete(4005, [geraet('alt', 'pk-alt', alt.publicKeyJwk), geraet('pc', 'pk-pc')])
+      const sig = await signiere(
+        await freigabeDaten(4005, 'neu', 'pk-neu', neu.publicKeyJwk),
+        alt.privateKeyJwk,
+      )
+      const ergebnis = await vertrauteGeraete(4005, [
+        geraet('pc', 'pk-pc'),
+        geraet('neu', 'pk-neu', neu.publicKeyJwk, { approved_by: 'alt', approval_signature: sig }),
+      ])
+      expect(ergebnis.map((g) => g.device_id)).toEqual(['pc', 'neu'])
+    })
 
-      // g2 wurde entfernt, nur noch g1 existiert
-      pruefeUndAktualisiereNeueGeraete(777, [{ device_id: 'g1', public_key: 'pk1' }])
+    it('beginnt mit Warnung neu, wenn keines der bekannten Geräte mehr da ist', async () => {
+      await mitWarnungen(async (warnungen) => {
+        await vertrauteGeraete(4006, [geraet('alt-1', 'pk-1'), geraet('alt-2', 'pk-2')])
+        const neu = [geraet('frisch-1', 'pk-f')]
+        expect(await vertrauteGeraete(4006, neu)).toEqual(neu)
+        expect(warnungen).toEqual([{ userId: 4006, typ: 'konto_neustart', geraete: ['frisch-1'] }])
+        // Ab jetzt ist der neue Bestand der bekannte.
+        expect(await vertrauteGeraete(4006, neu)).toEqual(neu)
+        expect(warnungen).toHaveLength(1)
+      })
+    })
 
-      expect(getBekannteGeraete(777)).toEqual(['g1'])
-      expect(getBekannteSchluessel(777)).toEqual({ g1: 'pk1' })
+    it('liefert aus dem Sendeweg nur die geprüften Geräte', async () => {
+      fremdeGeraete.liste = [geraet('echt-1', 'pk-echt')] as any
+      await geraeteVon(4007)
+      vergessenGeraete(4007)
+      fremdeGeraete.liste = [geraet('echt-1', 'pk-echt'), geraet('fremd-1', 'pk-fremd')] as any
+      expect((await verlangeGeraeteVon(4007)).map((g) => g.device_id)).toEqual(['echt-1'])
     })
   })
 
   describe('Belege über Schlüsselumschläge', () => {
     const DATEN = 'msm:test:ein-schluessel-fuer-geraet-b'
 
-    async function verzeichnisMit(...eintraege: { device_id: string; signing_public_key: string }[]) {
+    async function verzeichnisMit(
+      ...eintraege: {
+        device_id: string
+        signing_public_key: string
+        approved_by?: string
+        approval_signature?: string
+      }[]
+    ) {
       fremdeGeraete.liste = eintraege.map((e) => ({ ...e, public_key: `pub-${e.device_id}` })) as any
     }
 
@@ -584,9 +589,20 @@ describe('e2eeGeraet', () => {
       const echtesJetzt = Date.now
       try {
         Date.now = () => echtesJetzt() + 60_000
+        // Das neue Gerät kommt mit der Freigabe durch das bekannte — ohne sie
+        // bekäme es nichts (`vertrauteGeraete`).
+        const freigabe = await signiere(
+          await freigabeDaten(55, 'geraet-neu', 'pub-geraet-neu', paar.publicKeyJwk),
+          paar.privateKeyJwk,
+        )
         await verzeichnisMit(
           { device_id: 'geraet-a', signing_public_key: paar.publicKeyJwk },
-          { device_id: 'geraet-neu', signing_public_key: paar.publicKeyJwk },
+          {
+            device_id: 'geraet-neu',
+            signing_public_key: paar.publicKeyJwk,
+            approved_by: 'geraet-a',
+            approval_signature: freigabe,
+          },
         )
         const vorher = fremdeGeraete.rufe
         expect(await pruefeGeraeteBeleg(55, 'geraet-neu', DATEN, sig)).toBe('echt')

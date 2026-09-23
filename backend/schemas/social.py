@@ -572,12 +572,30 @@ class E2eeDeviceItem(BaseModel):
     signing_public_key: str = ""
     label: str = ""
     is_approved: bool = True
+    # Kennung und Unterschrift des freigebenden Geraets. Die Clients pruefen sie
+    # selbst (`vertrauteGeraete`), statt `is_approved` zu glauben.
+    approved_by: str = ""
+    approval_signature: str = ""
 
 
 class E2eeDeviceApproveRequest(BaseModel):
-    device_id: str
-    approver_device_id: str | None = None
-    signature: str | None = None
+    device_id: str = Field(..., min_length=8, max_length=64)
+    approver_device_id: str = Field(..., min_length=8, max_length=64)
+    signature: str = Field(..., min_length=16, max_length=256)
+
+
+class E2eeDeviceRemoveRequest(BaseModel):
+    """Entfernen eines Geraets. Unterschrift ist Pflicht, wenn es freigegeben ist."""
+
+    device_id: str = Field(..., min_length=8, max_length=64)
+    approver_device_id: str = Field(default="", max_length=64)
+    signature: str = Field(default="", max_length=256)
+
+
+class E2eeDeviceResetRequest(BaseModel):
+    """Alle Geraete verloren: Neustart des Geraeteverzeichnisses, nur mit Passwort."""
+
+    password: str = Field(..., min_length=1, max_length=512)
 
 
 class SocialProfileResponse(BaseModel):

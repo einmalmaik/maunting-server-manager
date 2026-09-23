@@ -21,7 +21,7 @@ der Server nicht ohnehin weiterreichen muss.
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -67,7 +67,20 @@ class UserE2eeDevice(Base):
     # Geraetebestaetigung: Ein neues Geraet muss auf einem bestehenden Geraet
     # bestaetigt werden, bevor es Nachrichten/Schluessel empfangen darf.
     # Erstes Geraet eines Kontos wird automatisch freigegeben.
-    is_approved: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_approved: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=true(), nullable=False
+    )
+    # Wer die Freigabe gegeben hat, und seine Unterschrift darueber. Beides geht
+    # mit der Geraeteliste hinaus: die Clients pruefen die Unterschrift selbst.
+    # `is_approved` allein waere ein Wort des Servers, und genau dem soll ein
+    # Gegenueber nicht glauben muessen. Leer beim ersten Geraet eines Kontos und
+    # beim Bestand von vor der Freigabe.
+    approved_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    approval_signature: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Die Sitzungskette (Refresh-Familie), die dieses Geraet zuletzt gemeldet
+    # hat. Entfernen sperrt sie aus, und das Access-Token faellt beim naechsten
+    # Aufruf — nicht erst nach seinen 15 Minuten.
+    auth_family: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False

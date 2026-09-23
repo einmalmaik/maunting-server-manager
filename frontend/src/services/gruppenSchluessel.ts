@@ -1559,13 +1559,15 @@ async function nimmSchluessel(
 }
 
 /**
- * Maximal zulässige Schlüsselantworten an dasselbe Mitglied pro Minute (Flutschutz).
+ * Höchstens drei Schlüsselantworten je Mitglied und Gruppe in zehn Minuten.
  *
- * Verhindert, dass ein bösartiges Gruppenmitglied durch massenhafte Nachfragen
- * (z. B. mit erfundenen keyIds oder Gerätekennungen) das Relais-Kontingent
- * unseres Kontos erschöpft und so das Senden eigener Nachrichten (HTTP 429) blockiert.
+ * Gezählt wird je Konto, nicht je Gerät: die Gerätekennung steht in der
+ * Anfrage, und wer sie frei erfindet, hätte sonst für jede erfundene Kennung
+ * drei neue Antworten. So erschöpft ein Mitglied mit einer Flut von Anfragen
+ * nicht das Relais-Kontingent des Antwortenden (HTTP 429 beim eigenen Senden).
+ * Drei reichen für ein Konto, das mehrere Geräte zugleich neu einrichtet.
  */
-export const MAX_ANTWORTEN_FENSTER_MS = 60_000
+export const MAX_ANTWORTEN_FENSTER_MS = 10 * 60_000
 export const MAX_ANTWORTEN_PRO_FENSTER = 3
 
 const antwortZeiten = new Map<string, number[]>()
@@ -1622,7 +1624,7 @@ async function beantworteAnfrage(
   }
 
   // 2. Flutschutz: Rate-Limiting gegen Fluten mit erfundenen keyIds oder Geräten
-  // Maximal 3 Schlüssel-Antworten pro Minute an dasselbe Konto in dieser Gruppe
+  // Höchstens drei Antworten je Konto und Gruppe im Fenster
   const sperrKey = `${kontext.groupId}:${anfragerId}`
   const jetzt = Date.now()
   const zeiten = (antwortZeiten.get(sperrKey) ?? []).filter(

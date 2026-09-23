@@ -18,12 +18,12 @@ vi.mock('@/services/e2eeGeraet', () => ({
     kennung: 'dieses-geraet',
     paar: { publicKeyJwk: 'pub', privateKeyJwk: 'priv' },
   })),
-  vergessenGeraete: vi.fn(),
+  entferneGeraet: vi.fn(async () => undefined),
+  gebeGeraetFrei: vi.fn(async () => undefined),
 }))
 
 vi.mock('@/api/social', () => ({
   getE2eeGeraete: vi.fn(async () => []),
-  deleteEigenesGeraet: vi.fn(async () => ({ ok: true })),
 }))
 
 vi.mock('@/api/client', async () => {

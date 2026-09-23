@@ -152,7 +152,8 @@ import {
 import {
   geraeteVon,
   kontoNutztSignaturen,
-  onNeuesGeraet,
+  eigenesGeraetFreigegeben,
+  onEigeneFreigabe,
   onSchluesselWarnung,
   sicherheitsnummer,
 } from '@/services/e2eeGeraet'
@@ -1822,79 +1823,49 @@ export function Messenger() {
     )
   }, [])
 
-  // M-10: Überwachung des Geräteverzeichnisses — warnt bei neuen Geräten eines Gesprächspartners
+  // Geräteverzeichnis: wer die Liste holt, prüft sie (`vertrauteGeraete`) und
+  // meldet, was ihm auffällt. Das eigene Konto gehört dazu — ein Gerät, das
+  // jemand mit deinem Passwort einträgt, sollst zuerst du sehen.
   useEffect(() => {
     if (!activeContact?.userId) return
     geraeteVon(activeContact.userId).catch(() => {})
   }, [activeContact?.userId])
 
-  /*
   useEffect(() => {
     if (!currentUserId) return
     geraeteVon(currentUserId).catch(() => {})
   }, [currentUserId])
-  */
 
-  useEffect(() => {
-    const abbestellen = onNeuesGeraet((peerId, neue) => {
-      if (neue.length === 0) return
-      if (activeContact && activeContact.userId === peerId) {
-        const name = activeContact.username || t('messenger.thisContact')
-        zeigeSystemzeile(
-          t('messenger.newDeviceDetected', {
-            name,
-            defaultValue: `${name} hat ein neues Gerät angemeldet.`,
-          }),
-        )
-      } else if (activeGroup) {
-        const member = (activeGroup.members ?? []).find((m) => Number(m.user_id) === peerId)
-        if (member) {
-          const name = member.username || t('messenger.thisContact')
-          zeigeSystemzeile(
-            t('messenger.newDeviceDetected', {
-              name,
-              defaultValue: `${name} hat ein neues Gerät angemeldet.`,
-            }),
-          )
-        }
-      }
-    })
-    return abbestellen
-  }, [activeContact, activeGroup, t, zeigeSystemzeile])
+  // Ein wartendes Gerät bekommt nichts. Ohne Hinweis sähe das aus wie ein
+  // kaputter Messenger — also steht oben, was zu tun ist.
+  const [geraetWartet, setGeraetWartet] = useState(eigenesGeraetFreigegeben() === false)
+  useEffect(() => onEigeneFreigabe((frei) => setGeraetWartet(frei === false)), [])
 
   useEffect(() => {
     const abbestellen = onSchluesselWarnung((ev) => {
-      let betroffenerName = ''
-      if (activeContact && activeContact.userId === ev.userId) {
-        betroffenerName = activeContact.username || t('messenger.thisContact')
-      } else if (activeGroup) {
-        const member = (activeGroup.members ?? []).find((m) => Number(m.user_id) === ev.userId)
-        if (member) betroffenerName = member.username || t('messenger.thisContact')
-      } else if (currentUserId === ev.userId) {
-        zeigeSystemzeile(
-          t('messenger.ownKeyChangedWarning', {
-            defaultValue: 'Sicherheitswarnung: Ein Geräteschlüssel deines Kontos hat sich geändert.',
-          }),
-        )
+      if (currentUserId === ev.userId) {
+        const text = {
+          neues_geraet: t('messenger.ownNewDevice'),
+          unbestaetigt: t('messenger.ownUnverifiedDeviceWarning'),
+          konto_neustart: t('messenger.ownAccountResetWarning'),
+        }[ev.typ]
+        zeigeSystemzeile(text)
         return
       }
-      if (!betroffenerName) return
-
-      if (ev.typ === 'schluessel_geaendert') {
-        zeigeSystemzeile(
-          t('messenger.keyChangedWarning', {
-            name: betroffenerName,
-            defaultValue: `Sicherheitswarnung: Der Geräteschlüssel von ${betroffenerName} hat sich geändert. Bitte überprüfe die Sicherheitsnummer.`,
-          }),
-        )
-      } else if (ev.typ === 'konto_neustart') {
-        zeigeSystemzeile(
-          t('messenger.accountResetWarning', {
-            name: betroffenerName,
-            defaultValue: `Sicherheitswarnung: Alle Geräte von ${betroffenerName} wurden ersetzt. Bitte überprüfe die Sicherheitsnummer.`,
-          }),
-        )
+      let name = ''
+      if (activeContact && activeContact.userId === ev.userId) {
+        name = activeContact.username || t('messenger.thisContact')
+      } else if (activeGroup) {
+        const member = (activeGroup.members ?? []).find((m) => Number(m.user_id) === ev.userId)
+        if (member) name = member.username || t('messenger.thisContact')
       }
+      if (!name) return
+      const text = {
+        neues_geraet: t('messenger.newDeviceDetected', { name }),
+        unbestaetigt: t('messenger.unverifiedDeviceWarning', { name }),
+        konto_neustart: t('messenger.accountResetWarning', { name }),
+      }[ev.typ]
+      zeigeSystemzeile(text)
     })
     return abbestellen
   }, [activeContact, activeGroup, currentUserId, t, zeigeSystemzeile])
@@ -2128,7 +2099,6 @@ export function Messenger() {
 
   const loadMessages = async (isInitial = false) => {
     const currentMid = blindMailboxId
-    console.log('[DEBUG loadMessages] called, currentMid:', currentMid, 'activeMailboxIdRef:', activeMailboxIdRef.current, 'currentUserId:', currentUserId)
     if (!currentMid || !currentUserId) return
     if (activeMailboxIdRef.current !== currentMid) return
     // Erst entschlüsseln, wenn feststeht, welche Schlüssel dieses Gerät hat.
@@ -2150,12 +2120,8 @@ export function Messenger() {
       // Mailbox, welches Verfahren, was ein Umschlag bedeutet. Hier bleibt die
       // Anzeige — Quittungen, Häkchen, Bearbeiten und Löschen.
       const gelesen = await konversation.liesUmschlaege()
-      console.log('[DEBUG loadMessages] gelesen:', gelesen?.map(g => ({ art: g.art, envId: g.env.id, text: g.art === 'klartext' ? g.text : undefined })))
-      if (gelesen === null) { console.log('[DEBUG loadMessages] gelesen is null, returning'); return }
-      if (activeMailboxIdRef.current !== currentMid || currentLoadSeqRef.current !== seq) {
-        console.log('[DEBUG loadMessages] sequence or activeMailboxId changed! activeMailboxIdRef:', activeMailboxIdRef.current, 'currentMid:', currentMid, 'currentLoadSeqRef:', currentLoadSeqRef.current, 'seq:', seq)
-        return
-      }
+      if (gelesen === null) return
+      if (activeMailboxIdRef.current !== currentMid || currentLoadSeqRef.current !== seq) return
 
       const decryptedList: ChatMessage[] = []
       const seenEnvelopeIds = new Set<number>()
@@ -2892,7 +2858,6 @@ export function Messenger() {
         const combined = lokalerVerlauf.length
           ? (mischeVerlauf(lokalerVerlauf, frisch) as ChatMessage[])
           : sortMessagesChronologically(frisch)
-        console.log('[DEBUG loadMessages] maxPartnerDeliveredId:', maxPartnerDeliveredId, 'combined:', combined.map(c => ({ id: c.id, clientUuid: c.clientUuid, status: c.status, isDelivered: c.isDelivered })))
         sessionChatCache.set(currentMid, combined.slice(-80))
         void saveLocalMessages(currentMid, combined.slice(-200))
         return combined
@@ -2992,8 +2957,7 @@ export function Messenger() {
           dispatchReadReceipt()
         }
       }
-    } catch (err) {
-      console.log('[DEBUG loadMessages] CAUGHT ERROR:', err)
+    } catch {
       // Offline fallback
     } finally {
       if (isInitial && activeMailboxIdRef.current === currentMid) {
@@ -3844,7 +3808,6 @@ export function Messenger() {
       ) {
         useCallStore.getState().handleCallSyncEvent(detail)
       } else if (detail?.type === 'e2ee_blind_message') {
-        console.log('[DEBUG handleSync] detail:', detail, 'blindMailboxId:', blindMailboxId)
         const isCurrentActive = detail.blind_mailbox_id === blindMailboxId
         // Outgoing Echo Prevention: Sender niemals benachrichtigen
         if (detail.sender_user_id && currentUserId && Number(detail.sender_user_id) === Number(currentUserId)) {
@@ -5561,6 +5524,15 @@ export function Messenger() {
 
   return (
     <div className="flex h-full w-full min-h-0 flex-1 flex-col overflow-hidden bg-surface">
+      {geraetWartet && (
+        <button
+          type="button"
+          onClick={() => navigate('/profile?tab=devices')}
+          className="shrink-0 border-b border-status-warning/30 bg-status-warning/10 px-4 py-2 text-left text-sm text-on-surface"
+        >
+          {t('messenger.thisDevicePending')}
+        </button>
+      )}
       {/* Slim, Compact Header - Only shown in overview mode when no chat is open, maximizing chat space */}
       {!isChatOpen && (
         <header className="h-12 shrink-0 border-b border-outline-variant/20 bg-surface-container/70 backdrop-blur px-3 sm:px-4 flex items-center justify-between z-10">

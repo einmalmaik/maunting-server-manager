@@ -302,6 +302,22 @@ class ChatMediaService:
         return True
 
     @classmethod
+    def cleanup_expired_media(cls, db: Session) -> int:
+        """Loescht Anhaenge, deren Aufbewahrung abgelaufen ist.
+
+        Bis 09/2026 galt `expires_at` nur beim Abruf (410) — der verschluesselte
+        Blob lag danach unbegrenzt weiter in der Datenbank. Die Frist steht in
+        der Datenschutzerklaerung; sie muss also auch loeschen.
+        """
+        getroffen = (
+            db.query(ChatMedia)
+            .filter(ChatMedia.expires_at.isnot(None), ChatMedia.expires_at < _now())
+            .delete(synchronize_session=False)
+        )
+        db.commit()
+        return int(getroffen)
+
+    @classmethod
     def get_media_by_signed_url(
         cls,
         db: Session,

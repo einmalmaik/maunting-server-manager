@@ -1,20 +1,32 @@
+"""Geraetefreigabe: wer nur das Passwort hat, liest nicht mit.
+
+Die Freigabe ist eine Unterschrift eines freigegebenen Geraets ueber beide
+Schluessel des neuen (`freigabe_daten`). Entfernen verlangt dieselbe Art
+Unterschrift und sperrt die Sitzung des Geraets sofort. Die Clients pruefen die
+Unterschrift selbst — das steht in `e2eeGeraet.test.ts`; hier steht, was der
+Server durchsetzt.
+"""
+
 from __future__ import annotations
 
 import base64
 import json
-import pytest
+
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, utils
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
+from starlette.responses import Response
 
 from dependencies import get_current_user, verify_csrf
 from main import app
-from models import User, UserE2eeDevice
+from models import User
 from services import e2ee_device_service
+from services.auth_service import AuthService
+from services.session_service import issue_session
 
 
-def _valid_rsa_jwk(marker: str = "A") -> str:
+def _rsa_jwk(marker: str = "A") -> str:
     return json.dumps({
         "kty": "RSA",
         "n": marker * 350,
@@ -25,10 +37,9 @@ def _valid_rsa_jwk(marker: str = "A") -> str:
     })
 
 
-def _create_real_ecdsa_keypair():
+def _ecdsa_paar():
     priv = ec.generate_private_key(ec.SECP256R1())
-    pub = priv.public_key()
-    pub_nums = pub.public_numbers()
+    zahlen = priv.public_key().public_numbers()
 
     def b64url(b: bytes) -> str:
         return base64.urlsafe_b64encode(b).rstrip(b"=").decode("ascii")
@@ -36,250 +47,227 @@ def _create_real_ecdsa_keypair():
     jwk = json.dumps({
         "kty": "EC",
         "crv": "P-256",
-        "x": b64url(pub_nums.x.to_bytes(32, "big")),
-        "y": b64url(pub_nums.y.to_bytes(32, "big")),
+        "x": b64url(zahlen.x.to_bytes(32, "big")),
+        "y": b64url(zahlen.y.to_bytes(32, "big")),
         "use": "sig",
         "key_ops": ["verify"],
     })
     return priv, jwk
 
 
-def _sign_device_approval(priv_key, user_id: int, target_device_id: str) -> str:
-    msg = f"msm:device-approval:v1:{user_id}:{target_device_id}".encode("utf-8")
-    der = priv_key.sign(msg, ec.ECDSA(hashes.SHA256()))
+def _unterschreibe(priv, daten: str) -> str:
+    der = priv.sign(daten.encode("utf-8"), ec.ECDSA(hashes.SHA256()))
     r, s = utils.decode_dss_signature(der)
-    raw = r.to_bytes(32, "big") + s.to_bytes(32, "big")
-    return base64.b64encode(raw).decode("ascii")
+    return base64.b64encode(r.to_bytes(32, "big") + s.to_bytes(32, "big")).decode("ascii")
 
 
-DUMMY_RSA_KEY = _valid_rsa_jwk("A")
-DUMMY_RSA_KEY_2 = _valid_rsa_jwk("B")
+def _freigabe(priv, user_id: int, device_id: str, rsa: str, ecdsa: str) -> str:
+    return _unterschreibe(priv, e2ee_device_service.freigabe_daten(user_id, device_id, rsa, ecdsa))
 
 
-def test_erstes_geraet_wird_automatisch_freigegeben(db: Session, clean_db):
-    user = User(username="user1", email="u1@msm.local", password_hash="pw", is_active=True)
+def _entfernen(priv, user_id: int, device_id: str, rsa: str) -> str:
+    return _unterschreibe(priv, e2ee_device_service.entfernen_daten(user_id, device_id, rsa))
+
+
+RSA_A = _rsa_jwk("A")
+RSA_B = _rsa_jwk("B")
+RSA_X = _rsa_jwk("X")
+
+
+def _konto(db: Session, name: str) -> User:
+    user = User(username=name, email=f"{name}@msm.local", password_hash="pw", is_active=True)
     db.add(user)
     db.commit()
     db.refresh(user)
+    return user
 
-    priv1, ecdsa1 = _create_real_ecdsa_keypair()
-    _, ecdsa2 = _create_real_ecdsa_keypair()
 
-    dev1 = e2ee_device_service.veroeffentlichen(
-        db, user, "device00000001", DUMMY_RSA_KEY, "Erstes Geraet", ecdsa1
-    )
-    assert dev1.is_approved is True
+def _zwei_geraete(db: Session, user: User):
+    """Telefon (erstes, freigegeben) und Laptop (wartend)."""
+    tel_priv, tel_ecdsa = _ecdsa_paar()
+    lap_priv, lap_ecdsa = _ecdsa_paar()
+    e2ee_device_service.veroeffentlichen(db, user, "telefon-0001", RSA_A, "Telefon", tel_ecdsa, familie="fam-tel")
+    e2ee_device_service.veroeffentlichen(db, user, "laptop-00002", RSA_B, "Laptop", lap_ecdsa, familie="fam-lap")
+    return tel_priv, tel_ecdsa, lap_priv, lap_ecdsa
 
-    # Zweites Geraet registriert: da bereits ein bestaetigtes Geraet existiert,
-    # muss dieses freigegeben werden (is_approved=False).
-    dev2 = e2ee_device_service.veroeffentlichen(
-        db, user, "device00000002", DUMMY_RSA_KEY_2, "Zweites Geraet", ecdsa2
-    )
-    assert dev2.is_approved is False
 
-    # Fremde sehen nur bestaetigte Geraete
-    fremde_sicht = e2ee_device_service.geraete(db, user.id, nur_bestaetigt=True)
-    assert len(fremde_sicht) == 1
-    assert fremde_sicht[0]["device_id"] == "device00000001"
+def test_erstes_geraet_frei_weiteres_wartet_bis_zur_unterschrift(db: Session, clean_db):
+    user = _konto(db, "freigabe1")
+    tel_priv, _, _, lap_ecdsa = _zwei_geraete(db, user)
 
-    # Ausstehende Geraete abrufen
-    ausstehend = e2ee_device_service.ausstehende_geraete(db, user)
-    assert len(ausstehend) == 1
-    assert ausstehend[0]["device_id"] == "device00000002"
+    assert [g["device_id"] for g in e2ee_device_service.geraete(db, user.id, nur_bestaetigt=True)] == ["telefon-0001"]
+    assert [g["device_id"] for g in e2ee_device_service.ausstehende_geraete(db, user)] == ["laptop-00002"]
 
-    # Versuch ohne approver_device_id schlaegt fehl (Passwort-Schutz)
-    assert e2ee_device_service.bestaetigen(db, user, "device00000002") is False
+    # Ohne Unterzeichner, mit Unsinn, mit der alten v1-Unterschrift: nichts.
+    assert e2ee_device_service.bestaetigen(db, user, "laptop-00002") is False
+    assert e2ee_device_service.bestaetigen(
+        db, user, "laptop-00002", "telefon-0001", base64.b64encode(b"0" * 64).decode()
+    ) is False
+    v1 = _unterschreibe(tel_priv, f"msm:device-approval:v1:{user.id}:laptop-00002")
+    assert e2ee_device_service.bestaetigen(db, user, "laptop-00002", "telefon-0001", v1) is False
 
-    # Versuch mit falscher Signatur schlaegt fehl
-    assert (
-        e2ee_device_service.bestaetigen(
-            db,
-            user,
-            "device00000002",
-            approver_device_id="device00000001",
-            signature=base64.b64encode(b"0" * 64).decode("ascii"),
+    sig = _freigabe(tel_priv, user.id, "laptop-00002", RSA_B, lap_ecdsa)
+    assert e2ee_device_service.bestaetigen(db, user, "laptop-00002", "telefon-0001", sig) is True
+
+    laptop = next(g for g in e2ee_device_service.geraete(db, user.id, nur_bestaetigt=True) if g["device_id"] == "laptop-00002")
+    # Der Beleg geht mit hinaus — die Gegenueber pruefen ihn selbst.
+    assert laptop["approved_by"] == "telefon-0001"
+    assert laptop["approval_signature"] == sig
+
+
+def test_freigabe_deckt_nur_die_unterschriebenen_schluessel(db: Session, clean_db):
+    """Eine Unterschrift ueber andere Schluessel gibt dieses Geraet nicht frei."""
+    user = _konto(db, "freigabe2")
+    tel_priv, _, _, lap_ecdsa = _zwei_geraete(db, user)
+    fremd = _freigabe(tel_priv, user.id, "laptop-00002", RSA_X, lap_ecdsa)
+    assert e2ee_device_service.bestaetigen(db, user, "laptop-00002", "telefon-0001", fremd) is False
+
+
+def test_geraet_ohne_signaturschluessel_gibt_nichts_frei(db: Session, clean_db):
+    user = _konto(db, "freigabe3")
+    e2ee_device_service.veroeffentlichen(db, user, "altgeraet-01", RSA_A, "Alt", "")
+    _, neu_ecdsa = _ecdsa_paar()
+    e2ee_device_service.veroeffentlichen(db, user, "neugeraet-02", RSA_B, "Neu", neu_ecdsa)
+    assert e2ee_device_service.bestaetigen(db, user, "neugeraet-02", "altgeraet-01", "x" * 88) is False
+
+
+def test_schluesselwechsel_nimmt_freigabe_und_beleg(db: Session, clean_db):
+    user = _konto(db, "freigabe4")
+    tel_priv, tel_ecdsa, _, lap_ecdsa = _zwei_geraete(db, user)
+    sig = _freigabe(tel_priv, user.id, "laptop-00002", RSA_B, lap_ecdsa)
+    assert e2ee_device_service.bestaetigen(db, user, "laptop-00002", "telefon-0001", sig)
+
+    neu = e2ee_device_service.veroeffentlichen(db, user, "laptop-00002", RSA_X, "Laptop", lap_ecdsa, familie="fam-lap")
+    assert neu.is_approved is False
+    assert neu.approved_by is None and neu.approval_signature is None
+
+    # Ein nachgereichter Signaturschluessel ist ebenfalls ein neuer Schluessel.
+    user2 = _konto(db, "freigabe4b")
+    e2ee_device_service.veroeffentlichen(db, user2, "erstes-00001", RSA_A, "Eins", tel_ecdsa)
+    e2ee_device_service.veroeffentlichen(db, user2, "zweites-0002", RSA_B, "Zwei", "")
+    e2ee_device_service.bestaetigen(db, user2, "zweites-0002")  # scheitert: Unterzeichner fehlt
+    assert e2ee_device_service.ausstehende_geraete(db, user2)
+
+
+def test_fremde_sitzung_ueberschreibt_kein_geraet(db: Session, clean_db):
+    """Unter einer bekannten Kennung legt nur die eigene Sitzung neue Schluessel ab."""
+    user = _konto(db, "freigabe5")
+    _, tel_ecdsa, _, _ = _zwei_geraete(db, user)
+    try:
+        e2ee_device_service.veroeffentlichen(db, user, "telefon-0001", RSA_X, "Dieb", tel_ecdsa, familie="fam-dieb")
+    except e2ee_device_service.FremdeSitzungError:
+        pass
+    else:
+        raise AssertionError("fremde Sitzung durfte den Schluessel ersetzen")
+    tel = next(g for g in e2ee_device_service.geraete(db, user.id) if g["device_id"] == "telefon-0001")
+    assert tel["public_key"] == RSA_A and tel["is_approved"] is True
+
+    # Dasselbe Geraet nach neuer Anmeldung (neue Familie, gleiche Schluessel) ist willkommen.
+    e2ee_device_service.veroeffentlichen(db, user, "telefon-0001", RSA_A, "Telefon", tel_ecdsa, familie="fam-neu")
+
+
+def test_freigegebenes_geraet_entfernt_nur_ein_freigegebenes(db: Session, clean_db):
+    user = _konto(db, "freigabe6")
+    tel_priv, _, lap_priv, _ = _zwei_geraete(db, user)
+
+    # Das wartende Geraet (der Dieb) kann das Telefon nicht entfernen —
+    # sonst waere es danach das erste und damit frei.
+    try:
+        e2ee_device_service.vergessen(
+            db, user, "telefon-0001", "laptop-00002", _entfernen(lap_priv, user.id, "telefon-0001", RSA_A)
         )
-        is False
-    )
+    except e2ee_device_service.GeraeteaenderungAbgelehntError:
+        pass
+    else:
+        raise AssertionError("wartendes Geraet durfte ein freigegebenes entfernen")
+    try:
+        e2ee_device_service.vergessen(db, user, "telefon-0001")
+    except e2ee_device_service.GeraeteaenderungAbgelehntError:
+        pass
+    else:
+        raise AssertionError("Entfernen ohne Unterschrift ging durch")
 
-    # Zweites Geraet mit gueltiger Signatur des ersten Geraets bestaetigen
-    sig = _sign_device_approval(priv1, user.id, "device00000002")
-    ok = e2ee_device_service.bestaetigen(
-        db, user, "device00000002", approver_device_id="device00000001", signature=sig
-    )
-    assert ok is True
-
-    # Jetzt sehen auch Fremde beide Geraete
-    fremde_sicht_neu = e2ee_device_service.geraete(db, user.id, nur_bestaetigt=True)
-    assert len(fremde_sicht_neu) == 2
+    # Das wartende Geraet selbst darf jeder Teil des Kontos entfernen.
+    assert e2ee_device_service.vergessen(db, user, "laptop-00002") is True
+    # Und das Telefon sich selbst — mit Unterschrift.
+    assert e2ee_device_service.vergessen(
+        db, user, "telefon-0001", "telefon-0001", _entfernen(tel_priv, user.id, "telefon-0001", RSA_A)
+    ) is True
 
 
-def test_api_geraetefreigabe_und_sicherheitsabfrage(client: TestClient, db: Session, clean_db):
-    alice = User(username="alice", email="alice@msm.local", password_hash="pw", is_active=True)
-    bob = User(username="bob", email="bob@msm.local", password_hash="pw", is_active=True)
-    db.add_all([alice, bob])
-    db.commit()
-    db.refresh(alice)
-    db.refresh(bob)
+def _sitzung(db: Session, user: User):
+    tokens = issue_session(Response(), db, user)
+    familie = AuthService.decode_token(tokens.access_token)["familie"]
+    return {"Authorization": f"Bearer {tokens.access_token}"}, familie
 
+
+def test_entfernen_sperrt_das_geraet_sofort(client: TestClient, db: Session, clean_db):
+    """Das Access-Token des entfernten Geraets faellt beim naechsten Aufruf, nicht nach 15 Minuten."""
+    user = _konto(db, "freigabe7")
+    tel_kopf, _ = _sitzung(db, user)
+    lap_kopf, _ = _sitzung(db, user)
+    tel_priv, tel_ecdsa = _ecdsa_paar()
+    lap_priv, lap_ecdsa = _ecdsa_paar()
+
+    assert client.put("/api/social/e2ee/devices/self", headers=tel_kopf, json={
+        "device_id": "telefon-0001", "public_key": RSA_A, "signing_public_key": tel_ecdsa,
+    }).json()["is_approved"] is True
+    assert client.put("/api/social/e2ee/devices/self", headers=lap_kopf, json={
+        "device_id": "laptop-00002", "public_key": RSA_B, "signing_public_key": lap_ecdsa,
+    }).json()["is_approved"] is False
+    assert client.post("/api/social/e2ee/devices/self/approve", headers=tel_kopf, json={
+        "device_id": "laptop-00002", "approver_device_id": "telefon-0001",
+        "signature": _freigabe(tel_priv, user.id, "laptop-00002", RSA_B, lap_ecdsa),
+    }).status_code == 200
+    assert client.get(f"/api/social/e2ee/devices/{user.id}", headers=lap_kopf).status_code == 200
+
+    # Ohne Unterschrift: 403, der Laptop bleibt.
+    assert client.post("/api/social/e2ee/devices/self/remove", headers=tel_kopf, json={
+        "device_id": "laptop-00002",
+    }).status_code == 403
+
+    assert client.post("/api/social/e2ee/devices/self/remove", headers=tel_kopf, json={
+        "device_id": "laptop-00002", "approver_device_id": "telefon-0001",
+        "signature": _entfernen(tel_priv, user.id, "laptop-00002", RSA_B),
+    }).json() == {"ok": True}
+
+    assert client.get(f"/api/social/e2ee/devices/{user.id}", headers=lap_kopf).status_code == 401
+    geraete = client.get(f"/api/social/e2ee/devices/{user.id}", headers=tel_kopf)
+    assert geraete.status_code == 200
+    assert [g["device_id"] for g in geraete.json()] == ["telefon-0001"]
+
+
+def test_dritte_sehen_nur_freigegebene(client: TestClient, db: Session, clean_db):
+    alice = _konto(db, "alice_fg")
+    bob = _konto(db, "bob_fg")
+    _zwei_geraete(db, alice)
     app.dependency_overrides[verify_csrf] = lambda: None
-
-    alice_phone_priv, alice_phone_ecdsa = _create_real_ecdsa_keypair()
-    _, laptop_ecdsa = _create_real_ecdsa_keypair()
-
-    # 1. Alice registriert erstes Geraet
-    app.dependency_overrides[get_current_user] = lambda: alice
-    res1 = client.put("/api/social/e2ee/devices/self", json={
-        "device_id": "alice-phone01",
-        "public_key": DUMMY_RSA_KEY,
-        "signing_public_key": alice_phone_ecdsa,
-        "label": "Alice Phone",
-    })
-    assert res1.status_code == 200
-    assert res1.json()["is_approved"] is True
-
-    # 2. Alice registriert zweites Geraet (z. B. Angreifer mit Passwort)
-    res2 = client.put("/api/social/e2ee/devices/self", json={
-        "device_id": "alice-laptop02",
-        "public_key": DUMMY_RSA_KEY_2,
-        "signing_public_key": laptop_ecdsa,
-        "label": "Alice Laptop",
-    })
-    assert res2.status_code == 200
-    assert res2.json()["is_approved"] is False
-
-    # 3. Bob fragt Alice' Geraete ab: er darf NUR das bestaetigte Phone sehen!
     app.dependency_overrides[get_current_user] = lambda: bob
-    res_bob = client.get(f"/api/social/e2ee/devices/{alice.id}")
-    assert res_bob.status_code == 200
-    bob_geraete = res_bob.json()
-    assert len(bob_geraete) == 1
-    assert bob_geraete[0]["device_id"] == "alice-phone01"
-
-    # Bob versucht mit include_unapproved=true Alice' unbestaetigte Geraete zu sehen:
-    # Der Server ignoriert das fuer Fremde!
-    res_bob_hack = client.get(f"/api/social/e2ee/devices/{alice.id}?include_unapproved=true")
-    assert res_bob_hack.status_code == 200
-    assert len(res_bob_hack.json()) == 1
-    assert res_bob_hack.json()[0]["device_id"] == "alice-phone01"
-
-    # 4. Alice ruft eigene Geraete mit include_unapproved=true ab:
+    for pfad in (f"/api/social/e2ee/devices/{alice.id}", f"/api/social/e2ee/devices/{alice.id}?include_unapproved=true"):
+        assert [g["device_id"] for g in client.get(pfad).json()] == ["telefon-0001"]
     app.dependency_overrides[get_current_user] = lambda: alice
-    res_alice_all = client.get(f"/api/social/e2ee/devices/{alice.id}?include_unapproved=true")
-    assert res_alice_all.status_code == 200
-    assert len(res_alice_all.json()) == 2
-
-    # 5. Alice ruft /pending ab
-    res_pending = client.get("/api/social/e2ee/devices/self/pending")
-    assert res_pending.status_code == 200
-    assert len(res_pending.json()) == 1
-    assert res_pending.json()[0]["device_id"] == "alice-laptop02"
-
-    # 6. Angreifer mit Passwort versucht Freigabe ohne approver_device_id -> HTTP 400
-    res_hack_no_approver = client.post("/api/social/e2ee/devices/self/approve", json={
-        "device_id": "alice-laptop02"
-    })
-    assert res_hack_no_approver.status_code == 400
-
-    # Angreifer versucht Freigabe mit gefaelschter Signatur -> HTTP 400
-    res_hack_bad_sig = client.post("/api/social/e2ee/devices/self/approve", json={
-        "device_id": "alice-laptop02",
-        "approver_device_id": "alice-phone01",
-        "signature": base64.b64encode(b"1" * 64).decode("ascii"),
-    })
-    assert res_hack_bad_sig.status_code == 400
-
-    # Legitime Freigabe durch Alice' Phone mit Signatur
-    sig = _sign_device_approval(alice_phone_priv, alice.id, "alice-laptop02")
-    res_approve = client.post("/api/social/e2ee/devices/self/approve", json={
-        "device_id": "alice-laptop02",
-        "approver_device_id": "alice-phone01",
-        "signature": sig,
-    })
-    assert res_approve.status_code == 200
-    assert res_approve.json()["ok"] is True
-
-    # 7. Bob sieht jetzt beide Geraete
-    app.dependency_overrides[get_current_user] = lambda: bob
-    res_bob_neu = client.get(f"/api/social/e2ee/devices/{alice.id}")
-    assert len(res_bob_neu.json()) == 2
-
-    # 8. Sofortiges Entfernen (Revocation)
-    app.dependency_overrides[get_current_user] = lambda: alice
-    res_del = client.delete("/api/social/e2ee/devices/self?device_id=alice-laptop02")
-    assert res_del.status_code == 200
-
-    # Bob sieht Laptop sofort nicht mehr
-    app.dependency_overrides[get_current_user] = lambda: bob
-    res_bob_nach_del = client.get(f"/api/social/e2ee/devices/{alice.id}")
-    assert len(res_bob_nach_del.json()) == 1
-    assert res_bob_nach_del.json()[0]["device_id"] == "alice-phone01"
+    assert len(client.get(f"/api/social/e2ee/devices/{alice.id}?include_unapproved=true").json()) == 2
 
 
-def test_unbestaetigtes_geraet_kann_sich_nicht_selbst_freigeben(client: TestClient, db: Session, clean_db):
-    user = User(username="victim", email="vic@msm.local", password_hash="pw", is_active=True)
-    db.add(user)
+def test_neustart_nur_mit_passwort_und_sperrt_die_anderen(client: TestClient, db: Session, clean_db):
+    user = _konto(db, "freigabe8")
+    user.password_hash = AuthService.hash_password("richtig-genug-1")
     db.commit()
-    db.refresh(user)
+    alt_kopf, alt_familie = _sitzung(db, user)
+    neu_kopf, neu_familie = _sitzung(db, user)
+    _, alt_ecdsa = _ecdsa_paar()
+    e2ee_device_service.veroeffentlichen(db, user, "altgeraet-01", RSA_A, "Alt", alt_ecdsa, familie=alt_familie)
 
-    app.dependency_overrides[verify_csrf] = lambda: None
-    app.dependency_overrides[get_current_user] = lambda: user
+    assert client.post("/api/social/e2ee/devices/self/reset", headers=neu_kopf, json={"password": "falsch"}).status_code == 403
+    assert e2ee_device_service.geraete(db, user.id)
 
-    _, phone_ecdsa = _create_real_ecdsa_keypair()
-    rogue_priv, rogue_ecdsa = _create_real_ecdsa_keypair()
+    antwort = client.post("/api/social/e2ee/devices/self/reset", headers=neu_kopf, json={"password": "richtig-genug-1"})
+    assert antwort.status_code == 200 and antwort.json()["removed"] == 1
+    assert e2ee_device_service.geraete(db, user.id) == []
+    assert client.get(f"/api/social/e2ee/devices/{user.id}", headers=alt_kopf).status_code == 401
 
-    # Erstes Geraet (Phone)
-    client.put("/api/social/e2ee/devices/self", json={
-        "device_id": "phone-00000001",
-        "public_key": DUMMY_RSA_KEY,
-        "signing_public_key": phone_ecdsa,
-        "label": "Phone",
-    })
-
-    # Angreifer registriert zweites Geraet (unbestaetigt)
-    client.put("/api/social/e2ee/devices/self", json={
-        "device_id": "rogue-00000002",
-        "public_key": DUMMY_RSA_KEY_2,
-        "signing_public_key": rogue_ecdsa,
-        "label": "Rogue",
-    })
-
-    # Angreifer versucht sich selbst als approver_device_id einzutragen:
-    rogue_sig = _sign_device_approval(rogue_priv, user.id, "rogue-00000002")
-    res_self_app = client.post("/api/social/e2ee/devices/self/approve", json={
-        "device_id": "rogue-00000002",
-        "approver_device_id": "rogue-00000002",
-        "signature": rogue_sig,
-    })
-    assert res_self_app.status_code == 400
-
-
-def test_schluesselaenderung_auf_bestaetigtem_geraet_entzieht_freigabe_wenn_andere_existieren(db: Session, clean_db):
-    user = User(username="user_key_change", email="kc@msm.local", password_hash="pw", is_active=True)
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-
-    priv1, ecdsa1 = _create_real_ecdsa_keypair()
-    _, ecdsa2 = _create_real_ecdsa_keypair()
-
-    # 2 Geraete freigegeben
-    dev1 = e2ee_device_service.veroeffentlichen(db, user, "dev-phone", DUMMY_RSA_KEY, "Phone", ecdsa1)
-    dev2 = e2ee_device_service.veroeffentlichen(db, user, "dev-laptop", DUMMY_RSA_KEY_2, "Laptop", ecdsa2)
-    sig = _sign_device_approval(priv1, user.id, "dev-laptop")
-    assert (
-        e2ee_device_service.bestaetigen(
-            db, user, "dev-laptop", approver_device_id="dev-phone", signature=sig
-        )
-        is True
-    )
-
-    assert dev1.is_approved is True
-    assert dev2.is_approved is True
-
-    # Ein Angreifer mit Passwort versucht dev-phone mit neuem Schluessel zu ueberschreiben:
-    dev1_updated = e2ee_device_service.veroeffentlichen(
-        db, user, "dev-phone", _valid_rsa_jwk("X"), "Phone Hijacked", ecdsa1
-    )
-    # Da dev-laptop existiert und bestaetigt ist, verliert dev-phone seine Freigabe!
-    assert dev1_updated.is_approved is False
+    # Das naechste Geraet ist wieder das erste.
+    _, neu_ecdsa = _ecdsa_paar()
+    assert client.put("/api/social/e2ee/devices/self", headers=neu_kopf, json={
+        "device_id": "neugeraet-02", "public_key": RSA_B, "signing_public_key": neu_ecdsa,
+    }).json()["is_approved"] is True

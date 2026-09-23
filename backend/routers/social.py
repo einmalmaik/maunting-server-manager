@@ -5,7 +5,7 @@ from starlette.websockets import WebSocketDisconnect
 from sqlalchemy.orm import Session
 
 from database import SessionLocal, get_db
-from dependencies import get_current_user, get_optional_user, verify_csrf, get_current_user_for_ws, ws_subprotokoll
+from dependencies import get_current_user, get_optional_user, verify_csrf, get_current_user_for_ws, session_familie, ws_subprotokoll
 from models import ChatGroup, ChatGroupConfig, User
 from schemas.chat_media import (
     ChatMediaUploadRequest,
@@ -24,6 +24,8 @@ from schemas.social import (
     E2eeDeviceItem,
     E2eeDeviceUpdate,
     E2eeDeviceApproveRequest,
+    E2eeDeviceRemoveRequest,
+    E2eeDeviceResetRequest,
     FriendRequestCreate,
     FriendResponse,
     PresenceInfo,
@@ -53,7 +55,9 @@ from services.chat_media_validator import sanitize_attachment_filename
 from services.social_service import SocialService
 from services.sync_event_service import MAX_MAILBOXES, SyncEventService
 from services.call_room_service import GroupCallRoomRegistry
+from middleware.rate_limit import auth_rate_limit
 from services import e2ee_device_service, livekit_service, webpush_service
+from services.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
 
@@ -272,6 +276,7 @@ def put_own_e2ee_device(
     req: E2eeDeviceUpdate,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
+    familie: str | None = Depends(session_familie),
 ) -> dict:
     """Veröffentlicht den Schlüssel *dieses* Geräts.
 
@@ -286,20 +291,15 @@ def put_own_e2ee_device(
             public_key_jwk=req.public_key,
             label=req.label or "",
             signing_public_key_jwk=req.signing_public_key or "",
+            familie=familie,
         )
-    except e2ee_device_service.GeraetedeckelErreichtError as e:
+    except (e2ee_device_service.GeraetedeckelErreichtError, e2ee_device_service.FremdeSitzungError) as e:
         # 409, nicht 400: die Anfrage ist in Ordnung, der Zustand des Kontos
         # steht ihr entgegen. Der Client zeigt den Text unverändert an.
         raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return {
-        "device_id": eintrag.device_id,
-        "public_key": eintrag.public_key_jwk,
-        "signing_public_key": eintrag.signing_public_key_jwk or "",
-        "label": eintrag.label or "",
-        "is_approved": eintrag.is_approved,
-    }
+    return e2ee_device_service.eintrag_als_dict(eintrag)
 
 
 @router.get("/e2ee/devices/{target_user_id}", response_model=list[E2eeDeviceItem], dependencies=[Depends(_check_social_enabled)])
@@ -333,12 +333,15 @@ def approve_own_e2ee_device(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    """Bestätigt ein ausstehendes Gerät des Benutzers."""
-    success = e2ee_device_service.bestaetigen(
+    """Gibt ein wartendes Gerät frei — mit der Unterschrift eines freigegebenen.
+
+    Die Unterschrift geht mit der Geräteliste hinaus. Gegenüber prüfen sie
+    selbst; was hier steht, ist nur die Zustellsperre für wartende Geräte.
+    """
+    if not e2ee_device_service.bestaetigen(
         db, user, req.device_id, approver_device_id=req.approver_device_id, signature=req.signature
-    )
-    if not success:
-        raise HTTPException(status_code=400, detail="Gerät konnte nicht bestätigt werden")
+    ):
+        raise HTTPException(status_code=403, detail="Freigabe nicht gültig unterschrieben")
     return {"ok": True}
 
 
@@ -351,14 +354,43 @@ def get_pending_e2ee_devices(
     return e2ee_device_service.ausstehende_geraete(db, user)
 
 
-@router.delete("/e2ee/devices/self", dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
-def delete_own_e2ee_device(
-    device_id: str = Query(..., min_length=8, max_length=64),
+@router.post("/e2ee/devices/self/remove", dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
+def remove_own_e2ee_device(
+    req: E2eeDeviceRemoveRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    entfernt = e2ee_device_service.vergessen(db, user, device_id)
+    """Entfernt ein Gerät und sperrt seine Sitzung sofort.
+
+    Ein freigegebenes Gerät entfernt nur ein freigegebenes Gerät mit
+    Unterschrift — sonst räumte, wer nur das Passwort hat, die echten Geräte
+    ab und stünde danach allein als erstes da.
+    """
+    try:
+        entfernt = e2ee_device_service.vergessen(
+            db, user, req.device_id, approver_device_id=req.approver_device_id, signature=req.signature
+        )
+    except e2ee_device_service.GeraeteaenderungAbgelehntError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     return {"ok": entfernt}
+
+
+@router.post("/e2ee/devices/self/reset", dependencies=[Depends(_check_social_enabled), Depends(verify_csrf), Depends(auth_rate_limit)])
+def reset_own_e2ee_devices(
+    req: E2eeDeviceResetRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    familie: str | None = Depends(session_familie),
+) -> dict:
+    """Alle Geräte verloren: Verzeichnis leeren, alle anderen Sitzungen sperren.
+
+    Das Passwort wird hier noch einmal verlangt, damit ein offener Tab allein
+    nicht genügt. Die Kontakte sehen danach, dass alle bekannten Geräte fort
+    sind, und bekommen eine Warnung.
+    """
+    if not user.password_hash or not AuthService.verify_password(req.password, user.password_hash):
+        raise HTTPException(status_code=403, detail="Passwort falsch")
+    return {"ok": True, "removed": e2ee_device_service.zuruecksetzen(db, user, familie)}
 
 
 # --- WebPush: Benachrichtigungen bei geschlossener Anwendung ---

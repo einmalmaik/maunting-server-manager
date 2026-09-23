@@ -2,19 +2,14 @@ import { useCallback, useEffect, useState } from 'react'
 import { CheckCircle2, Clock, ShieldCheck, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import {
-  approveEigenesGeraet,
-  deleteEigenesGeraet,
-  getE2eeGeraete,
-  type E2eeGeraetItem,
-} from '@/api/social'
+import { getE2eeGeraete, type E2eeGeraetItem } from '@/api/social'
 import { Button } from '@/Singra/UI'
-import { signiere } from '@/services/absenderSignatur'
 import {
   eigenesGeraet,
-  pruefeUndAktualisiereNeueGeraete,
+  entferneGeraet,
+  gebeGeraetFrei,
+  geraeteZuruecksetzen,
   sicherheitsnummer,
-  vergessenGeraete,
 } from '@/services/e2eeGeraet'
 import { useAuthStore } from '@/stores/authStore'
 import { confirm } from '@/stores/confirmStore'
@@ -29,12 +24,10 @@ import { toast } from '@/stores/toastStore'
  * der Geräteschlüssel ist also die einzige Schranke davor. Sichtbar war er
  * nirgends, und entfernen ließ er sich schon gar nicht.
  *
- * Was das Entfernen leistet, steht auch im Bestätigungstext, und was es nicht
- * leistet, ebenso: das Gerät bekommt nichts Neues mehr, trägt sich aber wieder
- * ein, sobald es sich mit diesem Konto anmeldet. Ein Aussperren ist es also
- * nicht. Der Text nennt dafür bewusst keine zweite Stelle im Panel — die
- * Kopplungskarte darüber gibt es nur mit `ai.chat.use`, und ein Verweis auf
- * etwas, das der Leser nicht sieht, ist schlimmer als keiner.
+ * Seit 09/2026 sperrt Entfernen aus: die Sitzung des Geräts fällt sofort, und
+ * meldet es sich wieder an, wartet es auf Freigabe. Freigeben und Entfernen
+ * unterschreibt dieses Gerät (`gebeGeraetFrei`, `entferneGeraet`) — und kann
+ * es deshalb nur, solange es selbst freigegeben ist.
  *
  * Das eigene Gerät steht in der Liste, hat aber keinen Knopf. Es würde sich
  * sofort wieder eintragen, und im selben Tab nicht einmal das:
@@ -48,6 +41,7 @@ export function E2eeGeraeteCard() {
   const [fehler, setFehler] = useState(false)
   const [meineKennung, setMeineKennung] = useState<string | null>(null)
   const [laeuft, setLaeuft] = useState<string | null>(null)
+  const [passwort, setPasswort] = useState('')
 
   const laden = useCallback(async () => {
     if (!eigeneId) return
@@ -58,7 +52,6 @@ export function E2eeGeraeteCard() {
       const liste = await getE2eeGeraete(eigeneId, true)
       setGeraete(liste)
       setFehler(false)
-      pruefeUndAktualisiereNeueGeraete(eigeneId, liste)
       const nummern: Record<string, string> = {}
       for (const item of liste) {
         if (item.public_key) {
@@ -88,16 +81,7 @@ export function E2eeGeraeteCard() {
   const freigeben = async (geraet: E2eeGeraetItem) => {
     setLaeuft(geraet.device_id)
     try {
-      const meins = await eigenesGeraet().catch(() => null)
-      let sig: string | undefined = undefined
-      if (meins?.signaturPaar && eigeneId) {
-        sig = await signiere(
-          `msm:device-approval:v1:${eigeneId}:${geraet.device_id}`,
-          meins.signaturPaar.privateKeyJwk,
-        ).catch(() => undefined)
-      }
-      await approveEigenesGeraet(geraet.device_id, meins?.kennung, sig)
-      if (eigeneId) vergessenGeraete(eigeneId)
+      await gebeGeraetFrei(geraet)
       toast.success(t('profile.e2eeDevices.approved'))
       await laden()
     } catch (err: any) {
@@ -118,10 +102,9 @@ export function E2eeGeraeteCard() {
 
     setLaeuft(geraet.device_id)
     try {
-      await deleteEigenesGeraet(geraet.device_id)
-      // Ohne das Vergessen verschlüsselte dieser Tab noch bis zu zehn Minuten
-      // lang gegen die gerade entfernte Adresse.
-      if (eigeneId) vergessenGeraete(eigeneId)
+      // Vergisst auch den Cache: sonst verschlüsselte dieser Tab noch bis zu
+      // zehn Minuten lang gegen die gerade entfernte Adresse.
+      await entferneGeraet(geraet)
       toast.success(t('profile.e2eeDevices.removed'))
       await laden()
     } catch (err: any) {
@@ -130,6 +113,26 @@ export function E2eeGeraeteCard() {
       setLaeuft(null)
     }
   }
+
+  const neuBeginnen = async () => {
+    if (!passwort) return
+    setLaeuft('reset')
+    try {
+      await geraeteZuruecksetzen(passwort)
+      setPasswort('')
+      toast.success(t('profile.e2eeDevices.resetDone'))
+      await laden()
+    } catch (err: any) {
+      toast.error(err?.message || t('common.error'))
+    } finally {
+      setLaeuft(null)
+    }
+  }
+
+  const meinEintrag = geraete?.find((g) => g.device_id === meineKennung)
+  // Freigeben und Entfernen freigegebener Geräte unterschreibt dieses Gerät;
+  // der Server nimmt das nur von einem freigegebenen an.
+  const ichBinFrei = meinEintrag?.is_approved !== false
 
   return (
     <section className="msm-card space-y-4 p-6" aria-labelledby="e2ee-devices-title">
@@ -142,6 +145,39 @@ export function E2eeGeraeteCard() {
       <p className="max-w-3xl text-sm text-on-surface-variant">
         {t('profile.e2eeDevices.description')}
       </p>
+
+      <p className="max-w-3xl text-sm text-on-surface-variant">
+        {t('profile.e2eeDevices.approvalHelp')}
+      </p>
+
+      {meinEintrag && !ichBinFrei && (
+        <div className="space-y-3 rounded-lg border border-status-warning/30 bg-status-warning/10 p-4">
+          <p className="text-sm text-on-surface">{t('profile.e2eeDevices.thisDevicePending')}</p>
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-on-surface">{t('profile.e2eeDevices.resetTitle')}</p>
+            <p className="text-sm text-on-surface-variant">{t('profile.e2eeDevices.resetHelp')}</p>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <input
+                type="password"
+                autoComplete="current-password"
+                aria-label={t('profile.e2eeDevices.resetPassword')}
+                placeholder={t('profile.e2eeDevices.resetPassword')}
+                value={passwort}
+                onChange={(e) => setPasswort(e.target.value)}
+                className="msm-input min-w-0 flex-1"
+              />
+              <Button
+                variant="secondary"
+                disabled={!passwort || laeuft === 'reset'}
+                onClick={() => void neuBeginnen()}
+                className="text-error hover:bg-error/10 hover:text-error"
+              >
+                {t('profile.e2eeDevices.resetButton')}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {fehler && (
         <p className="text-sm text-on-surface-variant">
@@ -195,7 +231,7 @@ export function E2eeGeraeteCard() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2 self-start sm:self-auto">
-                  {!istMeins && geraet.is_approved === false && (
+                  {!istMeins && ichBinFrei && geraet.is_approved === false && (
                     <Button
                       variant="primary"
                       disabled={laeuft === geraet.device_id}
@@ -205,7 +241,7 @@ export function E2eeGeraeteCard() {
                       {t('profile.e2eeDevices.approve')}
                     </Button>
                   )}
-                  {!istMeins && (
+                  {!istMeins && (ichBinFrei || geraet.is_approved === false) && (
                     <Button
                       variant="secondary"
                       disabled={laeuft === geraet.device_id}

@@ -140,3 +140,34 @@ def test_sync_mailboxes_respects_30_days_retention(db: Session, clean_db):
     assert target_box is not None
     # Unread count darf NUR den gueltigen (<= 30 Tage) Umschlag zaehlen
     assert target_box["unread_count"] == 1
+
+
+def test_abgelaufene_anhaenge_werden_geloescht(db: Session):
+    """`expires_at` galt bis 09/2026 nur beim Abruf — der Blob blieb liegen."""
+    from models import ChatMedia
+    from services.chat_media_service import ChatMediaService
+
+    user = User(username="medienfrist", email="medienfrist@msm.local", password_hash="pw", is_active=True)
+    db.add(user)
+    db.commit()
+    now = _now()
+
+    def anhang(kennung: str, ablauf: datetime) -> ChatMedia:
+        return ChatMedia(
+            id=kennung,
+            blind_mailbox_id="box-medienfrist",
+            uploader_user_id=user.id,
+            ciphertext_blob="blob",
+            media_type="image/png",
+            file_name="bild.png",
+            size_bytes=4,
+            sha256="0" * 64,
+            created_at=ablauf - timedelta(days=90),
+            expires_at=ablauf,
+        )
+
+    db.add_all([anhang("abgelaufen-1", now - timedelta(hours=1)), anhang("gilt-noch-1", now + timedelta(days=1))])
+    db.commit()
+
+    assert ChatMediaService.cleanup_expired_media(db) == 1
+    assert [m.id for m in db.query(ChatMedia).filter(ChatMedia.blind_mailbox_id == "box-medienfrist")] == ["gilt-noch-1"]

@@ -605,7 +605,11 @@ async def lifespan(app: FastAPI):
         cols = [c['name'] for c in inspector.get_columns('user_e2ee_devices')]
         if 'is_approved' not in cols:
             with engine.begin() as conn:
-                conn.execute(text("ALTER TABLE user_e2ee_devices ADD COLUMN is_approved BOOLEAN NOT NULL DEFAULT 1"))
+                conn.execute(text("ALTER TABLE user_e2ee_devices ADD COLUMN is_approved BOOLEAN NOT NULL DEFAULT TRUE"))
+        for spalte, typ in (("approved_by", "VARCHAR(64)"), ("approval_signature", "TEXT"), ("auth_family", "VARCHAR(64)")):
+            if spalte not in cols:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE user_e2ee_devices ADD COLUMN {spalte} {typ}"))
 
     # OAuth: abgelaufene Login-Challenges aufraeumen (idempotent, low-cost).
     # Kein Hard-Fail, wenn der Cleanup scheitert — der naechste Startup macht

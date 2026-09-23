@@ -1203,12 +1203,19 @@ def _ensure_calendar_reminder_job() -> None:
 
 async def _e2ee_envelope_cleanup_task() -> None:
     """Regelmäßiger Hintergrund-Task zur Durchsetzung der 30-Tage-Vorhaltefrist für E2EE-Umschläge."""
+    from services.chat_media_service import ChatMediaService
     from services.social_service import SocialService
     db = SessionLocal()
     try:
         SocialService.cleanup_expired_envelopes(db)
     except Exception as e:
         logger.error("Fehler bei E2EE-Umschlag-Bereinigung: %s", e)
+        db.rollback()
+    # Anhaenge nach Ablauf ihrer Aufbewahrung — bis dahin lagen sie ewig.
+    try:
+        ChatMediaService.cleanup_expired_media(db)
+    except Exception as e:
+        logger.error("Fehler bei Anhang-Bereinigung: %s", e)
     finally:
         db.close()
 

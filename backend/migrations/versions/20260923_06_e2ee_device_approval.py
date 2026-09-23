@@ -44,7 +44,9 @@ def upgrade() -> None:
                 SPALTE,
                 sa.Boolean(),
                 nullable=False,
-                server_default=sa.text("1"),
+                # `sa.true()`, nicht `text("1")`: PostgreSQL nimmt fuer eine
+                # Boolean-Spalte keine Ganzzahl als Vorgabe.
+                server_default=sa.true(),
             )
         )
 
