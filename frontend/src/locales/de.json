@@ -1402,7 +1402,6 @@
       "trafficNoMetricsBody": "TomTom hat für diese Abfrage keine Messwerte geliefert.",
       "weatherDetails": "Detaillierte Wetterdaten",
       "scenes": "Sentinel-2 L2A Szenen",
-      "openFullScene": "Szene in Vollauflösung öffnen",
       "tabs": {
         "overview": "Übersicht",
         "satellite": "Satellit",
@@ -1413,20 +1412,33 @@
       },
       "mobileTabs": {
         "chat": "Chat / Sprache",
-        "globe": "3D-Globus",
+        "globe": "Karte",
         "satellite": "Satellit & Info"
       },
       "processes": {
         "title": "Aktive Prozesse",
         "prefetch": "Spekulativer Abruf",
-        "satellite": "Satellitendaten (Sentinel-2)",
+        "satellite": "Bild der Region",
         "weather": "Wetterdaten",
         "news": "Nachrichten & Websuche",
         "done": "Fertig",
         "running": "Läuft …",
         "waiting": "Wartet …"
       },
-      "newsSourceMissing": "Für diese Region ist keine Nachrichtenquelle eingerichtet. Es werden keine Lageberichte geschätzt."
+      "newsSourceMissing": "Für diese Region ist keine Nachrichtenquelle eingerichtet. Es werden keine Lageberichte geschätzt.",
+      "imageHeading": "Bild der Region",
+      "mosaicBadge": "Mosaik",
+      "image": {
+        "scene": "Satellitenszene",
+        "map": "Kartenbild",
+        "capturedOn": "Aufgenommen am {{date}}",
+        "clouds": "{{percent}} % Bewölkung",
+        "mosaic": "Mosaik aus vielen Aufnahmen, kein Überflug",
+        "alt": "Bild der Region {{location}}",
+        "unavailable": "Bild nicht verfügbar",
+        "loading": "Bild wird geladen",
+        "source": "Quelle: {{source}}"
+      }
     },
     "usage": {
       "title": "KI-Nutzung",
@@ -2306,7 +2318,7 @@
     },
     "ai_satellite_use": {
       "title": "Satelliten- & Regionsanalyse nutzen",
-      "desc": "Ermöglicht der KI den Abruf von Sentinel-2-Satellitenbildern, Geodaten und Wetteranalysen."
+      "desc": "Ermöglicht der KI Regionsanalysen und das Steuern der Kartenansicht. Ortsname und Koordinaten gehen dabei ohne weitere Einrichtung an OpenStreetMap, Open-Meteo, Reddit, Bluesky und Esri (Kartenbild), mit hinterlegtem Zugang auch an Copernicus, TomTom und MapTiler."
     },
     "ai_autonomous_use": {
       "title": "Autonomen Modus nutzen",

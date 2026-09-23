@@ -160,8 +160,9 @@ WERKZEUGE: dict[str, Werkzeug] = {
     "cloudflare_list_zones": Werkzeug("global_read", gruppe="domains", angebot=("cloudflare.manage",)),
     "cloudflare_list_dns_records": Werkzeug("global_read", gruppe="domains", angebot=("cloudflare.manage",)),
 
-    # Satelliten- und Regionsanalyse ueber Copernicus / Sentinel & Open-Meteo.
-    # Steht ohne hinterlegte Zugangsdaten gar nicht erst im Katalog.
+    # Regionsanalyse: Geocoding, Open-Meteo und ein Bild der Region — mit
+    # Copernicus-Zugang die neueste Sentinel-2-Szene, ohne ihn das
+    # schluesselfreie Kartenbild (ArcGIS-Mosaik). Steht deshalb immer im Katalog.
     "analyze_region": Werkzeug(
         "global_read", gruppe="geo", angebot=("ai.satellite.use",)
     ),

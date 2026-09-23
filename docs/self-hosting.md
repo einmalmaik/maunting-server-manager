@@ -269,6 +269,12 @@ Betreiber aktiviert sind:
 - **KI, Websuche und Umgebungssignale** (OpenAI, Anthropic, TomTom, Open-Meteo,
   Copernicus, Brave Search etc.) laufen ausnahmslos über das Backend. Drittanbieter
   sehen ausschließlich die IP-Adresse des Servers, niemals die des Endnutzers.
+- Das **Bild einer Regionsanalyse** (Sentinel-2-Vorschau oder das schlüsselfreie
+  ArcGIS-Kartenbild, auch jeder Ausschnitt, auf den die Kamera ohne MapTiler
+  zoomt) holt ebenfalls das Backend (`/api/ai/geo/image`); der
+  Browser lädt es von dort. Einen Link zum Anbieter gibt es weder zum
+  Kartenbild noch zu einer Szene; der Browser spricht nie selbst mit Esri,
+  Copernicus oder CREODIAS.
 
 ## Bestehende All-in-one-Installation aufteilen
 

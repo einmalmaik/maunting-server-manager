@@ -19,7 +19,8 @@ import { useTranslation } from 'react-i18next'
 import type { AiRegionalAnalysis, AiSatelliteLayer } from '@/api/ai'
 import { Button } from '@/Singra/UI'
 import { MapTilerDetailMap } from './MapTilerDetailMap'
-import { hasRegionalCoordinates } from './regionalAnalysis'
+import { Regionalbild } from './Regionalbild'
+import { hasRegionalCoordinates, regionalbildPfad } from './regionalAnalysis'
 import type { RegionalFocus } from '../voice/useSprachsitzung'
 
 type TabType = 'overview' | 'satellite' | 'news' | 'social' | 'traffic' | 'weather'
@@ -141,6 +142,11 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
 }
 
   const activeLayer = availableLayers[0]
+  // Ohne MapTiler ist das Bild der Region die Bildfläche — das Kartenbild
+  // oder die Sentinel-Szene, beide vom Panel geholt. Mit MapTiler bleibt die
+  // Karte die einzige; ein zweites, unschärferes Bild daneben hilft niemandem.
+  const bildAlsFlaeche = !mapTilerAvailable && activeLayer && regionalbildPfad(activeLayer) ? activeLayer : null
+  const istKartenbild = activeLayer?.kind === 'map'
 
   // Nachrichtenfeed: Text bleibt reiner Text. Fremde HTML/XML-Fragmente werden
   // nicht als Inhalt oder Markup in die Oberfläche übernommen.
@@ -250,9 +256,11 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-semibold uppercase tracking-wider text-on-surface-variant">
-                  {t('ai.geo.satelliteData')}
+                  {istKartenbild ? t('ai.geo.imageHeading') : t('ai.geo.satelliteData')}
                 </span>
-                <span className="text-label-sm text-primary font-medium">{t('ai.geo.mapSource')}</span>
+                {!bildAlsFlaeche && (
+                  <span className="text-label-sm text-primary font-medium">{t('ai.geo.mapSource')}</span>
+                )}
               </div>
 
               {/* Sentinel beschreibt Szenen; die MapTiler-Karte bleibt unverändert. */}
@@ -267,27 +275,31 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                 ))}
               </div>
 
-              <div className="relative aspect-video overflow-hidden rounded-xl border border-outline-variant/30 bg-surface-container-lowest">
-                {mapTilerAvailable ? (
-                  <MapTilerDetailMap
-                    latitude={coordinates.latitude}
-                    longitude={coordinates.longitude}
-                    locationName={location}
-                    zoom={12}
-                    onUnavailable={() => setMapTilerAvailable(false)}
-                  />
-                ) : (
-                  <div className="flex h-full flex-col items-center justify-center p-6 text-center text-on-surface-variant">
-                    <Satellite className="h-7 w-7 text-primary/70" aria-hidden="true" />
-                    <p className="mt-2 text-xs font-medium text-on-surface">{t('ai.geo.mapUnavailableTitle')}</p>
-                    <p className="mt-1 text-xs">{t('ai.geo.mapUnavailableBody')}</p>
+              {bildAlsFlaeche ? (
+                <Regionalbild layer={bildAlsFlaeche} location={location} />
+              ) : (
+                <div className="relative aspect-video overflow-hidden rounded-xl border border-outline-variant/30 bg-surface-container-lowest">
+                  {mapTilerAvailable ? (
+                    <MapTilerDetailMap
+                      latitude={coordinates.latitude}
+                      longitude={coordinates.longitude}
+                      locationName={location}
+                      zoom={12}
+                      onUnavailable={() => setMapTilerAvailable(false)}
+                    />
+                  ) : (
+                    <div className="flex h-full flex-col items-center justify-center p-6 text-center text-on-surface-variant">
+                      <Satellite className="h-7 w-7 text-primary/70" aria-hidden="true" />
+                      <p className="mt-2 text-xs font-medium text-on-surface">{t('ai.geo.mapUnavailableTitle')}</p>
+                      <p className="mt-1 text-xs">{t('ai.geo.mapUnavailableBody')}</p>
+                    </div>
+                  )}
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-gradient-to-t from-surface-container-lowest/95 to-transparent px-3 pb-2 pt-7 text-label-sm text-on-surface">
+                    <span>{t('ai.geo.mapSource')}</span>
+                    <span>{formatSafeDate(firstScene?.datetime, t('ai.geo.captureTimeUnknown'))}</span>
                   </div>
-                )}
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-gradient-to-t from-surface-container-lowest/95 to-transparent px-3 pb-2 pt-7 text-label-sm text-on-surface">
-                  <span>{t('ai.geo.mapSource')}</span>
-                  <span>{formatSafeDate(firstScene?.datetime, t('ai.geo.captureTimeUnknown'))}</span>
                 </div>
-              </div>
+              )}
             </div>
 
             {/* Aktuelle Nachrichten Feed */}
@@ -382,12 +394,14 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
         {/* TAB: SATELLIT */}
         {activeTab === 'satellite' && (
           <div className="space-y-4">
+            {/* Ein Kartenbild ist keine Szene: dann heißt der Bereich nach
+                dem Bild und trägt „Mosaik", nicht „Szenenmetadaten". */}
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                {t('ai.geo.scenes')}
+                {istKartenbild ? t('ai.geo.imageHeading') : t('ai.geo.scenes')}
               </span>
               <span className="rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-label-sm font-medium text-primary">
-                {t('ai.geo.sceneMetadata')}
+                {istKartenbild ? t('ai.geo.mosaicBadge') : t('ai.geo.sceneMetadata')}
               </span>
             </div>
 
@@ -402,6 +416,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                 />
               </div>
             )}
+            {bildAlsFlaeche && <Regionalbild layer={bildAlsFlaeche} location={data.location} />}
 
             {/* Layer-Karten */}
             <div className="space-y-3">
@@ -430,27 +445,19 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                     )}
 
                     {/* MapTiler ist die einzige Bildfläche, sobald es verfügbar
-                        ist. Sentinel bleibt als präzise Mess-/Szenenquelle
-                        darunter, ohne ein zweites, unscharfes Bild zu zeigen. */}
-                    {!mapTilerAvailable && (
+                        ist. Ohne MapTiler steht das Bild der Region oben; nur
+                        eine Ebene ohne abrufbares Bild braucht den Hinweis. */}
+                    {!mapTilerAvailable && !regionalbildPfad(layer) && (
                       <p className="rounded-lg border border-outline-variant/20 bg-surface-container-lowest/60 p-2.5 text-label-sm leading-relaxed text-on-surface-variant">
                         {t('ai.geo.sceneAvailableWithoutMap')}
                       </p>
                     )}
 
-                    {layer.url && (
-                      <div className="flex justify-end pt-1">
-                        <a
-                          href={layer.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1 text-label-sm text-primary hover:underline"
-                        >
-                          <span>{t('ai.geo.openFullScene')}</span>
-                          <ExternalLink className="h-3 w-3" />
-                        </a>
-                      </div>
-                    )}
+                    {/* Kein Link zum Anbieter, weder zu Esri noch zu
+                        Copernicus: Das Bild holt das Panel, der Browser
+                        fragt keinen der beiden selbst. Die Adresse einer
+                        Szene führte auch nur zu derselben kleinen Vorschau,
+                        als Download. */}
                   </div>
                 )
               })}

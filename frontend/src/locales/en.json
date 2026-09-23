@@ -1402,7 +1402,6 @@
       "trafficNoMetricsBody": "TomTom did not return measurements for this request.",
       "weatherDetails": "Detailed weather data",
       "scenes": "Sentinel-2 L2A scenes",
-      "openFullScene": "Open full resolution scene",
       "tabs": {
         "overview": "Overview",
         "satellite": "Satellite",
@@ -1413,20 +1412,33 @@
       },
       "mobileTabs": {
         "chat": "Chat / voice",
-        "globe": "3D globe",
+        "globe": "Map",
         "satellite": "Satellite & info"
       },
       "processes": {
         "title": "Active processes",
         "prefetch": "Speculative prefetch",
-        "satellite": "Satellite data (Sentinel-2)",
+        "satellite": "Region image",
         "weather": "Weather data",
         "news": "News & web search",
         "done": "Done",
         "running": "Running …",
         "waiting": "Waiting …"
       },
-      "newsSourceMissing": "No news source is set up for this region. No situation reports are estimated."
+      "newsSourceMissing": "No news source is set up for this region. No situation reports are estimated.",
+      "imageHeading": "Image of the region",
+      "mosaicBadge": "Mosaic",
+      "image": {
+        "scene": "Satellite scene",
+        "map": "Map image",
+        "capturedOn": "Captured on {{date}}",
+        "clouds": "{{percent}}% cloud cover",
+        "mosaic": "Mosaic of many captures, not a single overpass",
+        "alt": "Image of {{location}}",
+        "unavailable": "Image unavailable",
+        "loading": "Loading image",
+        "source": "Source: {{source}}"
+      }
     },
     "usage": {
       "title": "AI usage",
@@ -2306,7 +2318,7 @@
     },
     "ai_satellite_use": {
       "title": "Use satellite & regional analysis",
-      "desc": "Allows the assistant to query Sentinel-2 satellite data, geodata, and weather analysis."
+      "desc": "Allows the assistant to analyse regions and steer the map view. The place name and coordinates go to OpenStreetMap, Open-Meteo, Reddit, Bluesky and Esri (map image) without further setup, and with configured access also to Copernicus, TomTom and MapTiler."
     },
     "ai_autonomous_use": {
       "title": "Use autonomous mode",

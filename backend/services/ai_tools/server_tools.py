@@ -144,52 +144,32 @@ def _global_tool_definitions() -> list[dict]:
             ["query"],
         ))
 
-    from services.ai_satellite_service import is_configured as is_satellite_configured
-
-    if is_satellite_configured():
-        optional.append(_function(
-            "analyze_region",
-            "Führt eine regionale Analyse für einen geografischen Ort durch. "
-            "Ermittelt Koordinaten, Wetterdaten und ruft aktuelle "
-            "Satellitendaten (Copernicus/Sentinel-2) der Region ab. Der Ort "
-            "kann auch eine Sehenswürdigkeit sein; die zurückgegebene WGS84-"
-            "Position steuert die Karten- und Globusansicht. Waehle den "
-            "Kameramodus passend zum Wunsch des Benutzers.",
-            {
-                "location": {
-                    "type": "string",
-                    "maxLength": 100,
-                    "description": "Name der Stadt, Region oder des Ortes (z.B. 'Berlin', 'Washington').",
-                },
-                "camera": {
-                    "type": "string",
-                    "enum": ["overview", "focus", "detail"],
-                    "description": "overview fuer Weltuebersicht, focus fuer eine Region, detail nur wenn der Benutzer gezielt hineinzoomen moechte.",
-                },
-            },
-            ["location"],
-        ))
-        optional.append(_function(
-            "control_region_camera",
-            "Steuert ausschließlich die bereits geöffnete Regionskarte, ohne "
-            "Wetter, Satellitenbilder oder Nachrichten erneut abzurufen. "
-            "Nutze dies für kurze Folgeanweisungen wie näher heranzoomen, "
-            "herauszoomen, zur Weltübersicht wechseln oder eine konkrete "
-            "Sehenswürdigkeit fokussieren.",
-            {
-                "action": {
-                    "type": "string",
-                    "enum": ["zoom_in", "zoom_out", "overview", "focus_location"],
-                    "description": "Kamerabefehl für die bereits sichtbare Karte.",
-                },
-                "location": {
-                    "type": "string",
-                    "maxLength": 100,
-                    "description": "Nur bei focus_location: genauer Name der Sehenswürdigkeit samt Stadt.",
-                },
-            },
-            ["action"],
-        ))
+    # Die Regionsanalyse steht immer im Katalog: ohne Copernicus-Zugang zeigt
+    # sie ein schlüsselfreies Kartenbild statt einer Sentinel-Szene. Das hat
+    # den Katalog an seine Grenze gebracht (siehe
+    # `test_the_tool_catalogue_stays_within_a_stated_budget`), deshalb so
+    # knapp: wann welcher Kameramodus und wann `location`, steht einmal im
+    # Systemprompt (`ai_prompt.REGIONSANALYSE`, im Sprachmodus
+    # `REGION_ANWEISUNGEN`) statt in jeder Runde ungecacht hier. Die Länge des
+    # Ortes kürzt der Server selbst auf 100 Zeichen.
+    optional.append(_function(
+        "analyze_region",
+        "Karte, Globus, Wetter und Bild zu einem Ort oder einer Sehenswürdigkeit.",
+        {
+            "location": {"type": "string"},
+            "camera": {"type": "string", "enum": ["overview", "focus", "detail"]},
+        },
+        ["location"],
+    ))
+    optional.append(_function(
+        "control_region_camera",
+        "Bewegt nur die offene Regionskarte, ohne neue Abfrage.",
+        {
+            "action": {"type": "string", "enum": ["zoom_in", "zoom_out", "overview", "focus_location"]},
+            "location": {"type": "string"},
+        },
+        ["action"],
+    ))
 
     # Globales Lernen kann der Betreiber abschalten. Dann steht "global" gar
     # nicht erst in der Auswahl — ein Modell, das eine Moeglichkeit angeboten

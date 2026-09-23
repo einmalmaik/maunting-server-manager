@@ -179,7 +179,8 @@ def _execute_control_region_camera(db: Session, *, user: User, arguments: dict) 
             },
         }
 
-    if set(arguments) != {"action"}:
-        raise AiActionValidationError("location ist nur fuer focus_location zulaessig")
-
+    # Zoom und Übersicht gehen vom sichtbaren Ausschnitt aus; ein Ort ändert
+    # daran nichts und wird übergangen statt abgewiesen. In der Sprachprobe
+    # wiederholte GPT-Live abgewiesene Kameraaufrufe, bis das Tokenlimit
+    # griff, und wich danach auf `focus_location` mit dem Ort aus.
     return {"action": action, "command_id": str(uuid4())}

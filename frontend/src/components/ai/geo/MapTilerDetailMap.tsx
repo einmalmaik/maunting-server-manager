@@ -8,6 +8,7 @@ import { aiApi } from '@/api/ai'
 
 type CameraMode = 'overview' | 'focus' | 'detail'
 type CameraAction = 'zoom_in' | 'zoom_out' | 'overview' | 'focus_location'
+export type MapUnavailableReason = 'not_configured' | 'rejected' | 'failed'
 
 interface Sight {
   latitude: number
@@ -21,7 +22,8 @@ interface MapTilerDetailMapProps {
   latitude: number
   longitude: number
   locationName: string
-  onUnavailable: () => void
+  /** `not_configured` und `rejected` bleiben so, bis der Betreiber etwas ändert. */
+  onUnavailable: (reason: MapUnavailableReason) => void
   onReady?: () => void
   globe?: boolean
   zoom?: number
@@ -94,21 +96,21 @@ export function MapTilerDetailMap({
   useEffect(() => {
     let disposed = false
     let unavailableReported = false
-    const unavailable = () => {
+    const unavailable = (reason: MapUnavailableReason) => {
       if (disposed || unavailableReported) return
       unavailableReported = true
-      onUnavailableRef.current()
+      onUnavailableRef.current(reason)
     }
     const initialise = async () => {
       const initial = latestViewRef.current
       if (!Number.isFinite(initial.latitude) || !Number.isFinite(initial.longitude)) {
-        unavailable()
+        unavailable('failed')
         return
       }
       const config = await aiApi.getMapTilerMapConfig()
       if (disposed) return
       if (!config.configured || !config.style_url || !elementRef.current) {
-        unavailable()
+        unavailable(!config.configured || !config.style_url ? 'not_configured' : 'failed')
         return
       }
       const { Map: MapLibre, Marker } = await import('maplibre-gl')
@@ -187,12 +189,12 @@ export function MapTilerDetailMap({
           msg.includes('Forbidden') ||
           msg.includes('Unauthorized')
         ) {
-          if (!disposed && !styleReady) unavailable()
+          if (!disposed && !styleReady) unavailable('rejected')
         }
       })
     }
     setReady(false)
-    void initialise().catch(unavailable)
+    void initialise().catch(() => unavailable('failed'))
     return () => {
       disposed = true
       if (tourTimerRef.current) {
