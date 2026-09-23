@@ -196,7 +196,7 @@ class GeminiLiveSitzung:
         self._senden_lock = asyncio.Lock()
         self._tool_tasks: set[asyncio.Task] = set()
         self._region_tasks: set[asyncio.Task] = set()
-        self._offener_vorschlag: str | None = None
+        self._vorschlaege = voice_interactions.OffeneVorschlaege()
         self._verbrauch_tokens = [0, 0, 0, 0]  # text_in, text_out, audio_in, audio_out
         self._verbrauch_kosten = 0
         self._last_prompt_tokens = 0
@@ -329,8 +329,12 @@ class GeminiLiveSitzung:
             wert, fehler = await asyncio.to_thread(
                 self._vorschlag_entscheiden, argumente.get("decision")
             )
-            anzeige = {"tool_name": name, **({"failed": True} if fehler else {})}
-            await self._panel_senden({"art": "vorschlag", "vorschlag": None})
+            anzeige = voice_interactions.anzeige_nach_entscheidung(wert, fehler)
+            # Eine Karte, die den Klick braucht, bleibt stehen: auf ihr sitzt
+            # der Knopf, mit dem der Benutzer bestätigt. Sonst zeigt das Panel
+            # die nächste wartende Karte oder keine.
+            if wert.get("status") != "needs_panel_confirmation":
+                await self._panel_senden(self._vorschlaege.rahmen())
         elif name == "voice_set_region_view":
             tab = argumente.get("tab")
             source_id = argumente.get("source_id")
@@ -346,14 +350,21 @@ class GeminiLiveSitzung:
             wert, fehler, anzeige = {"ok": True}, None, {"tool_name": name}
         elif name == "analyze_region":
             try:
-                wert = await asyncio.wait_for(
-                    asyncio.to_thread(self._region_anfang, argumente),
+                erster_stand, ethik = await asyncio.wait_for(
+                    asyncio.to_thread(self._region_oder_karte, call_id, argumente),
                     timeout=GEMINI_TOOL_TIMEOUT_SECONDS,
                 )
-                fehler = None
-                anzeige = {"tool_name": name, "geo_analysis": wert}
-                if wert.get("status") == "success":
-                    self._region_nachladen(argumente, wert)
+                if isinstance(erster_stand, tuple):
+                    wert, fehler, anzeige, vorschlaege = erster_stand
+                else:
+                    wert = erster_stand
+                    fehler = None
+                    anzeige = {"tool_name": name, "geo_analysis": wert}
+                    if wert.get("status") == "success":
+                        self._region_nachladen(argumente, wert)
+                # Erst nach Anzeige und Nachladen: die Beratung ist für das
+                # Modell, nicht für die Karte im Panel.
+                wert = voice_interactions.mit_ethik(wert, ethik)
             except TimeoutError:
                 fehler = "Werkzeug hat nicht rechtzeitig geantwortet"
                 wert = {"error": "TOOL_TIMEOUT"}
@@ -392,34 +403,32 @@ class GeminiLiveSitzung:
             await self._debug_senden("REALTIME_TOOL_ERROR" if anzeige.get("failed") else "REALTIME_TOOL_OK", hint=name)
 
         for vorschlag in vorschlaege:
-            kennung = vorschlag.get("id")
-            if not isinstance(kennung, str) or not kennung:
-                continue
-            karte = {k: v for k, v in vorschlag.items() if k != "call_id"}
-            if not bool(vorschlag.get("autonomous")) and vorschlag.get("status") == "proposed":
-                self._offener_vorschlag = kennung
-                await self._panel_senden({"art": "vorschlag", "vorschlag": karte})
+            rahmen = self._vorschlaege.merken(vorschlag)
+            if rahmen is not None:
+                await self._panel_senden(rahmen)
 
         return wert
 
     def _vorschlag_entscheiden(self, decision: object) -> tuple[dict, str | None]:
-        kennung = self._offener_vorschlag
-        self._offener_vorschlag = None
-        if decision not in {"confirm", "reject", "accept"} or kennung is None:
-            fehler = "Kein passender Vorschlag in dieser Sprachsitzung"
-            return {"error": fehler}, fehler
-        if decision == "reject":
-            return {"status": "rejected_by_user"}, None
-        if voice_interactions.braucht_klick(user_id=self.user_id, kennung=kennung):
-            return {"status": "needs_panel_confirmation",
-                    "hinweis": voice_interactions.KLICK_NOETIG}, None
-        erledigt, _ = voice_interactions.vorschlag_ausfuehren(
-            user_id=self.user_id, kennung=kennung
+        return self._vorschlaege.entscheiden(user_id=self.user_id, entscheidung=decision)
+
+    def _region_oder_karte(
+        self, call_id: str, argumente: dict
+    ) -> tuple[dict | tuple[dict, str | None, dict, list[dict]], dict | None]:
+        """Der erste Stand der Regionsanalyse oder die Karte, die davor fragt,
+        dazu der Hinweis der Ethik-Engine (`None`, wenn sie nichts einwendet).
+
+        Dieselbe Frage wie auf dem Realtime-Weg (`RealtimeSitzung`): die
+        Regionsanalyse läuft an `voice_werkzeug_ausfuehren` vorbei und muss
+        Zustimmung und Beratung deshalb selbst einholen.
+        """
+        aufruf = ProviderToolCall(id=call_id, name="analyze_region", arguments=argumente)
+        beratung = voice_interactions.ethik_anstossen(self.user_id, aufruf)
+        karte = voice_interactions.freigabe_einholen(
+            self.user_id, aufruf, conversation_id=self.v.conversation_id
         )
-        if not erledigt:
-            fehler = "Vorschlag konnte nicht bestätigt werden"
-            return {"error": fehler}, fehler
-        return {"status": "confirmed"}, None
+        stand = karte if karte is not None else self._region_anfang(argumente)
+        return stand, voice_interactions.ethik_abholen(beratung, aufruf)
 
     def _region_anfang(self, argumente: dict) -> dict:
         with SessionLocal() as db:

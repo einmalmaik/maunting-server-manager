@@ -490,16 +490,92 @@ describe('useSprachsitzung', () => {
         art: 'vorschlag',
         vorschlag: {
           id: 'proposal-1',
-          tool_name: 'propose_server_delete',
-          expected_effect: 'Der Server „Kreativ" und seine Dateien werden entfernt.',
+          tool_name: 'propose_backup',
+          expected_effect: 'Vom Server „Kreativ" entsteht ein Backup.',
         },
       })
     })
 
+    // Ohne `klick` entscheidet das gesprochene Ja. Die Kennung ist keine UUID
+    // und wird deshalb nicht übernommen; sie wäre nur für den Knopf da.
     expect(haken.result.current.vorschlag).toEqual({
+      id: '',
+      werkzeug: 'propose_backup',
+      wirkung: 'Vom Server „Kreativ" entsteht ein Backup.',
+      klick: false,
+    })
+  })
+
+  it('merkt sich bei einem Löschvorgang Kennung und Knopf', async () => {
+    const haken = await sitzung()
+    const kennung = '0b7e7a52-2f6e-4a39-9d4e-3c2d1f0a9b11'
+
+    act(() => {
+      leitung().simulateMessage({
+        art: 'vorschlag',
+        vorschlag: {
+          id: kennung,
+          tool_name: 'propose_server_delete',
+          expected_effect: 'Der Server „Kreativ" und seine Dateien werden entfernt.',
+        },
+        klick: true,
+      })
+    })
+
+    expect(haken.result.current.vorschlag).toEqual({
+      id: kennung,
       werkzeug: 'propose_server_delete',
       wirkung: 'Der Server „Kreativ" und seine Dateien werden entfernt.',
+      klick: true,
     })
+  })
+
+  it('lässt eine Karte mit Knopf stehen, wenn der Mensch spricht', async () => {
+    const haken = await sitzung()
+
+    act(() => {
+      leitung().simulateMessage({
+        art: 'vorschlag',
+        vorschlag: {
+          id: '0b7e7a52-2f6e-4a39-9d4e-3c2d1f0a9b11',
+          tool_name: 'propose_server_delete',
+          expected_effect: '',
+        },
+        klick: true,
+      })
+    })
+    act(() => {
+      leitung().simulateMessage({ art: 'gehoert', text: 'Ja, lösch ihn' })
+    })
+
+    // Über diese Karte entscheidet kein gesprochenes Wort. Verschwände sie beim
+    // Ja, gäbe es den einzigen Knopf nicht mehr, der sie bestätigen kann.
+    expect(haken.result.current.vorschlag?.klick).toBe(true)
+
+    act(() => haken.result.current.vorschlagErledigt('0b7e7a52-2f6e-4a39-9d4e-3c2d1f0a9b11'))
+    expect(haken.result.current.vorschlag).toBeNull()
+  })
+
+  it('lässt nach einem Klick die nächste Karte stehen, die inzwischen kam', async () => {
+    // Bestätigen und Ausführen dauern. Legt die Sitzung währenddessen die
+    // nächste wartende Karte hin, darf das Ende des Klicks sie nicht wegnehmen:
+    // über sie hat niemand entschieden.
+    const haken = await sitzung()
+    const geklickt = '0b7e7a52-2f6e-4a39-9d4e-3c2d1f0a9b11'
+    const naechste = '5d0e6c1a-8f3b-4c2d-9e7a-1b2c3d4e5f60'
+
+    for (const kennung of [geklickt, naechste]) {
+      act(() => {
+        leitung().simulateMessage({
+          art: 'vorschlag',
+          vorschlag: { id: kennung, tool_name: 'propose_file_delete', expected_effect: '' },
+          klick: true,
+        })
+      })
+    }
+    act(() => haken.result.current.vorschlagErledigt(geklickt))
+
+    expect(haken.result.current.vorschlag?.id).toBe(naechste)
   })
 
   it('nimmt den Vorschlag weg, sobald der Mensch etwas sagt', async () => {

@@ -279,6 +279,123 @@ async def test_gemini_live_session_tool_execution() -> None:
         assert "call_123" in sitzung._gestartet
 
 
+def _gemini_sitzung() -> tuple[GeminiLiveSitzung, MagicMock]:
+    vorb = RealtimeVorbereitung(
+        provider_id=1,
+        provider_kind="google",
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+        model="gemini-2.5-flash",
+        voice="Puck",
+        api_key="AIzaSyTestKey",
+        instructions="Du bist der Serverassistent.",
+        tools=[{"name": "analyze_region"}, {"name": "voice_resolve_latest_proposal"}],
+    )
+    mock_ws = MagicMock()
+    mock_ws.send_json = AsyncMock()
+    sitzung = GeminiLiveSitzung(
+        websocket=mock_ws, vorbereitung=vorb, user_id=1, http_client=MagicMock()
+    )
+    return sitzung, mock_ws
+
+
+@pytest.mark.asyncio
+async def test_gemini_live_region_fragt_ohne_autonomie_erst() -> None:
+    """Dieselbe Frage wie auf dem Realtime-Weg: ohne Ja keine Regionsanalyse.
+
+    Die Regionsanalyse läuft an `voice_werkzeug_ausfuehren` vorbei und holte
+    Wetter, Satellit und Nachrichten, bevor jemand zugestimmt hatte (Vorgabe
+    des Betreibers vom 23.09.2026: ohne autonomen Modus fragt jedes Werkzeug).
+    """
+    from services.ai_voice import interactions as voice_interactions
+
+    sitzung, mock_ws = _gemini_sitzung()
+    kennung = "5d0e6c1a-8f3b-4c2d-9e7a-1b2c3d4e5f60"
+    karte = {
+        "id": kennung,
+        "call_id": "call_region",
+        "tool_name": "analyze_region",
+        "status": "proposed",
+        "autonomous": False,
+    }
+    wert = {"proposals": [karte], "status": "needs_confirmation",
+            "hinweis": voice_interactions.JA_NOETIG}
+
+    with patch.object(
+        voice_interactions,
+        "freigabe_einholen",
+        return_value=(wert, None, {"tool_name": "analyze_region"}, [karte]),
+    ), patch.object(sitzung, "_region_anfang", side_effect=AssertionError("ohne Ja")):
+        res = await sitzung._werkzeug_ausfuehren(
+            "call_region", "analyze_region", {"location": "Berlin"}
+        )
+
+    assert res["status"] == "needs_confirmation"
+    assert sitzung._vorschlaege.rahmen()["vorschlag"]["id"] == kennung
+    gesendet = [aufruf.args[0] for aufruf in mock_ws.send_json.call_args_list]
+    assert {
+        "art": "vorschlag",
+        "vorschlag": {k: v for k, v in karte.items() if k != "call_id"},
+        "klick": False,
+    } in gesendet
+    assert not any("geo_analysis" in rahmen for rahmen in gesendet)
+
+
+@pytest.mark.asyncio
+async def test_gemini_live_region_gibt_das_urteil_dem_modell_nicht_dem_schirm() -> None:
+    """Dieselbe Beratung wie auf dem Realtime-Weg, und dieselbe Trennung."""
+    from services.ai_voice import interactions as voice_interactions
+
+    sitzung, mock_ws = _gemini_sitzung()
+    initial = {"status": "success", "location": "Berlin", "weather": {"temperature_celsius": 20}}
+    hinweis = {"untrusted": True, "quelle": "ethik_engine", "einschaetzung": "review",
+               "empfehlung": "Nichts Privates zeigen.", "begruendung": "Ein Wohnhaus."}
+    nachgeladen: list[dict] = []
+
+    with patch.object(voice_interactions, "freigabe_einholen", return_value=None), \
+            patch.object(voice_interactions, "ethik_anstossen", return_value=None),             patch.object(voice_interactions, "ethik_abholen", return_value=hinweis), \
+            patch.object(sitzung, "_region_anfang", return_value=initial), \
+            patch.object(sitzung, "_region_nachladen",
+                         side_effect=lambda _args, stand: nachgeladen.append(stand)):
+        res = await sitzung._werkzeug_ausfuehren(
+            "call_region", "analyze_region", {"location": "Berlin"}
+        )
+
+    assert res == {**initial, "ethik": hinweis}
+    gesendet = [aufruf.args[0] for aufruf in mock_ws.send_json.call_args_list]
+    assert [r["geo_analysis"] for r in gesendet if "geo_analysis" in r] == [initial]
+    assert nachgeladen == [initial]
+
+
+def test_gemini_live_ja_bringt_das_ergebnis_mit_und_zaehlt_nur_einmal() -> None:
+    """Nach dem Ja kommt das Ergebnis mit; ein Ja nach dem Klick führt nichts aus."""
+    from services.ai_voice import interactions as voice_interactions
+
+    sitzung, _ = _gemini_sitzung()
+    ausgang = voice_interactions.Ausgang(
+        erledigt=True, werkzeug="web_search", ergebnis={"results": []}
+    )
+
+    sitzung._vorschlaege.merken(
+        {"id": "vorschlag-1", "tool_name": "web_search", "status": "proposed"}
+    )
+    with patch.object(voice_interactions, "schon_entschieden", return_value=None), \
+            patch.object(voice_interactions, "braucht_klick", return_value=False), \
+            patch.object(voice_interactions, "vorschlag_ausfuehren", return_value=ausgang):
+        wert, fehler = sitzung._vorschlag_entscheiden("confirm")
+    assert fehler is None
+    assert wert == {"status": "confirmed", "tool_name": "web_search", "result": {"results": []}}
+
+    sitzung._vorschlaege.merken(
+        {"id": "vorschlag-2", "tool_name": "web_search", "status": "proposed"}
+    )
+    with patch.object(voice_interactions, "schon_entschieden", return_value="succeeded"), \
+            patch.object(voice_interactions, "vorschlag_ausfuehren") as ausfuehren:
+        wert, fehler = sitzung._vorschlag_entscheiden("confirm")
+    assert fehler is None
+    assert wert == {"status": "already_decided", "stand": "succeeded"}
+    ausfuehren.assert_not_called()
+
+
 def test_clean_gemini_schema() -> None:
     """Prüft, dass additionalProperties/$schema entfernt, Typen großgeschrieben und Union-Nullables sauber aufgelöst werden."""
     from services.ai_voice.gemini_live_session import _clean_gemini_schema

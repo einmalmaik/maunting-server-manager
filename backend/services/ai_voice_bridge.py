@@ -101,6 +101,11 @@ from services.ai_voice.text import (
 # PCM-Frames oder TTS-Schlüssel werden sitzungsübergreifend aufbewahrt.
 _USER_KADENZ_CACHE: dict[int, float] = {}
 
+#: Was die Sprachansicht zeigt, wenn jemand zu einem Löschvorgang „ja" sagt.
+#: Nur angezeigt und nicht gesprochen: feste Sätze spricht die Stimme nicht
+#: (Betreiber-Veto vom 18.08.2026, die Quittung kommt vom Modell).
+KLICK_TEXT = "Das bestätigst du mit dem Knopf auf der Karte, nicht mit einem Ja."
+
 
 class Sprachbruecke:
     """Eine Sprachsitzung von „verbunden" bis „aufgelegt"."""
@@ -594,7 +599,13 @@ class Sprachbruecke:
         # gesprochen schwer zu behalten. Entschieden wird ausschliesslich per
         # Stimme; ein zweiter Weg neben dem gesprochenen Ja waere ein zweiter
         # Zustand, den der Sprachmodus dann pflegen muesste.
-        await self._senden({"art": "vorschlag", "vorschlag": daten})
+        await self._senden({
+            "art": "vorschlag",
+            "vorschlag": daten,
+            # Ein Löschvorgang bekommt auf der Karte einen Knopf: ein Ja reicht
+            # dort nicht (`voice_interactions.klick_noetig`).
+            "klick": voice_interactions.klick_noetig(daten.get("tool_name")),
+        })
 
     async def _entscheidung(self, wortlaut: str) -> bool:
         """Prüft, ob diese Äusserung über die offenen Vorschläge entscheidet.
@@ -630,13 +641,26 @@ class Sprachbruecke:
                         f"{len(verworfene)} weitere wurden verworfen."
                     ),
                 })
+            stand, klick = await asyncio.to_thread(self._vorschlagslage, letzter)
+            if stand is not None:
+                # Schon entschieden, meist per Knopf auf der Karte. Ein
+                # zweites Ausführen gäbe nur eine Störung.
+                await self._zustand_melden(ZUSTAND_BEREIT)
+                return True
+            if klick:
+                # Ein Löschvorgang wartet auf den Klick, nicht auf ein Ja
+                # (`voice_interactions.vorschlag_ausfuehren`). Ohne diesen
+                # Zweig hiess die Antwort auf „ja" hier „Störung".
+                await self._senden({"art": "antworttext", "text": KLICK_TEXT})
+                await self._zustand_melden(ZUSTAND_BEREIT)
+                return True
             await self._zustand_melden(ZUSTAND_DENKT)
-            erledigt, lauf_id = await asyncio.to_thread(self._ausfuehren, letzter)
-            if not erledigt:
+            ausgang = await asyncio.to_thread(self._ausfuehren, letzter)
+            if not ausgang.erledigt:
                 await self._senden({"art": "stoerung"})
                 await self._zustand_melden(ZUSTAND_BEREIT)
                 return True
-            await self._fortsetzung_verfolgen(lauf_id)
+            await self._fortsetzung_verfolgen(ausgang.lauf_id)
             return True
         if ist_ablehnung(wortlaut):
             # Nichts an der Datenbank. Ein abgelehnter Vorschlag verhält sich
@@ -651,7 +675,14 @@ class Sprachbruecke:
         self._offene_vorschlaege = []
         return False
 
-    def _ausfuehren(self, kennung: str) -> tuple[bool, str | None]:
+    def _vorschlagslage(self, kennung: str) -> tuple[str | None, bool]:
+        """Schon entschieden (Stand), und braucht er den Klick statt eines Ja?"""
+        return (
+            voice_interactions.schon_entschieden(user_id=self._user_id, kennung=kennung),
+            voice_interactions.braucht_klick(user_id=self._user_id, kennung=kennung),
+        )
+
+    def _ausfuehren(self, kennung: str) -> voice_interactions.Ausgang:
         """Bestätigen und ausführen — **derselbe** Weg wie der Klick auf die Karte.
 
         `confirm_proposal` prüft die Rechte erneut und erzeugt den Einmal-Token,
@@ -659,12 +690,12 @@ class Sprachbruecke:
         entwertet den Token atomar. Die gesprochene Zustimmung ersetzt genau
         einen Schritt — den Klick — und keinen einzigen der Schutzmechanismen.
 
-        Es gibt **keine** Werkzeugmenge, die der Sprachmodus sich vorbehält.
-        Er nimmt denselben Katalog wie der Chat, `ALWAYS_CONFIRM_TOOLS`
-        eingeschlossen; die frühere Sperre ist am 16.08.2026 auf ausdrückliche
-        Anweisung des Betreibers gefallen. Ob ein Vorschlag überhaupt bestätigt
-        werden muss, entscheidet unverändert `create_proposal` über
-        ``immer_bestaetigen`` — hier wird nur der Klick durch ein Wort ersetzt.
+        Es gibt **keine** Werkzeugmenge, die der Sprachmodus sich vorbehält: er
+        nimmt denselben Katalog wie der Chat. Ein gesprochenes Ja ersetzt aber
+        nicht jeden Klick. Was auch im autonomen Modus fragt
+        (``immer_bestaetigen``, seit dem 23.09.2026 jedes Löschen), bestätigt
+        der Benutzer auf der Karte; `vorschlag_ausfuehren` weist das Ja dort ab,
+        und `_entscheidung` sagt es vorher.
 
         Zurück kommt neben dem Erfolg der **geweckte Lauf**: `lauf_fortsetzen`
         hat ihn wieder auf „running" gestellt, und der Aufrufer muss sich

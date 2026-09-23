@@ -1,9 +1,11 @@
 """Geloescht wird nur, was sich zurueckholen laesst.
 
-`propose_file_delete` traegt in der Werkzeugtabelle **keine**
-Bestaetigungspflicht, und begruendet wird das mit genau einem Satz: der
-Versionsschnappschuss aus `file_history_service` holt die Datei zurueck. Damit
-ist der Schnappschuss die **Vorbedingung** des Loeschens und nicht sein Beiwerk.
+`propose_file_delete` trug in der Werkzeugtabelle bis zum 23.09.2026 **keine**
+Bestaetigungspflicht, begruendet mit genau einem Satz: der
+Versionsschnappschuss aus `file_history_service` holt die Datei zurueck. Seitdem
+fragt jedes Loeschen, auch im autonomen Modus (Vorgabe des Betreibers). Der
+Schnappschuss bleibt trotzdem die **Vorbedingung** des Loeschens und nicht sein
+Beiwerk: er ist der Weg zurueck, wenn ein Mensch zugestimmt und sich geirrt hat.
 Eine Vorbedingung, die nur behauptet wird, ist aber keine — und behauptet war
 sie:
 

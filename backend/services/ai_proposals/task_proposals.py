@@ -309,7 +309,18 @@ def _ausfuehren_task_delete(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgef
     return _Ausgefuehrt(result={"deleted": True, "title": geloescht})
 
 def _ausfuehren_read_tool(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    """Ein bestaetigter Lesevorschlag, geschwaerzt wie ein direkter Aufruf.
+
+    Ohne autonomen Modus laeuft **jedes** Lesewerkzeug hier entlang, im Chat
+    wie in der Stimme. Der direkte Weg (`ai_stream.read_tools`) schwaerzt jedes
+    Ergebnis, bevor es zum Modell geht; dieser Weg tat es bis zum 23.09.2026
+    nicht. Das Ergebnis landete roh in `ai_tool_results` und von dort im
+    Kontext der naechsten Runde, etwa ein Passwort aus der Umgebung eines
+    Blueprints (`read_blueprint` liefert sie ungefiltert).
+    """
     from services.ai_action_service import execute_read_tool
+    from services.ai_stream.read_tools import _ergebnis_schwaerzen
+    from services.ai_stream.types import _FREITEXT_WERKZEUGE
 
     args = dict(rahmen.payload)
     if rahmen.server_id is not None and "server_id" not in args:
@@ -320,6 +331,9 @@ def _ausfuehren_read_tool(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefue
         tool_name=rahmen.tool_name,
         arguments=args,
         herkunft="panel",
+    )
+    res = _ergebnis_schwaerzen(
+        res, freitext=rahmen.tool_name in _FREITEXT_WERKZEUGE
     )
     return _Ausgefuehrt(result=res if isinstance(res, dict) else {"result": res})
 

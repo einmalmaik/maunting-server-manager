@@ -146,6 +146,60 @@ async def test_voice_prefetch_sends_completed_geo_payload_immediately() -> None:
     assert messages[-1]["geo_analysis"] == result
 
 
+@pytest.mark.parametrize("autonom", [False, True])
+@pytest.mark.asyncio
+async def test_der_vorababruf_holt_nur_mit_autonomie(db, regular_user, monkeypatch, autonom):
+    """Ohne autonomen Modus holt der Vorababruf nichts, bevor jemand ja sagt.
+
+    Er führt ein Lesewerkzeug aus, bevor das Modell es gewählt hat. Ohne
+    Freigabe wäre das eine Ausführung am Ja vorbei, das der Lauf danach
+    einholt: die Websuche ginge mit den Worten des Benutzers hinaus, bevor er
+    zugestimmt hat (Vorgabe des Betreibers vom 23.09.2026).
+    """
+    from models import Role, RolePermission
+    from services import ai_autonomy_service, ai_intent_classifier
+    from services.role_service import set_user_roles
+
+    if autonom:
+        rolle = Role(name="vorab-autonom", description=None, is_system=False)
+        db.add(rolle)
+        db.flush()
+        db.add(RolePermission(role_id=rolle.id, permission_key="ai.autonomous.use"))
+        db.commit()
+        set_user_roles(db, regular_user, [rolle.id])
+        ai_autonomy_service.set_grant(
+            db, user=regular_user, server_id=None, enabled=True,
+            max_actions_per_hour=10, granted_by=regular_user.id,
+        )
+        db.commit()
+
+    vorhersage = IntentPrediction(
+        intent="web_search",
+        confidence=0.95,
+        entities={"query": "OpenSSH"},
+        arguments={"query": "OpenSSH"},
+    )
+    monkeypatch.setattr(ai_intent_classifier, "classify_streaming_intent", lambda _text: vorhersage)
+    gestartet: list[str] = []
+
+    async def prefetch(**werte):
+        gestartet.append(werte["tool_name"])
+        return None
+
+    monkeypatch.setattr(ai_intent_classifier.prefetch_cache, "prefetch", prefetch)
+    nachrichten: list[dict] = []
+
+    async def senden(nachricht: dict) -> None:
+        nachrichten.append(nachricht)
+
+    vorab = VoicePrefetch(user_id=regular_user.id, herkunft="panel", familie=None, senden=senden)
+    await vorab.verarbeite("Suche aktuelle Nachrichten zu OpenSSH")
+
+    assert gestartet == (["web_search"] if autonom else [])
+    # Erkannt wird die Absicht trotzdem; das ist eine Anzeige, kein Abruf.
+    assert nachrichten and nachrichten[0]["prefetch_status"] == "erkannt"
+
+
 @pytest.mark.asyncio
 async def test_intent_switch_cancels_old_prefetch():
     cache = PrefetchCache()

@@ -193,6 +193,17 @@ def test_realtime_websocket_never_enters_legacy_path(
     assert ausgefuehrt
 
 
+def _karte(kennung: str, werkzeug: str = "propose_backup") -> dict:
+    """Ein offener Vorschlag, wie ihn `voice_werkzeug_ausfuehren` meldet."""
+    return {
+        "id": kennung,
+        "call_id": f"call-{kennung}",
+        "tool_name": werkzeug,
+        "status": "proposed",
+        "autonomous": False,
+    }
+
+
 def _vorbereitung() -> realtime_session.RealtimeVorbereitung:
     return realtime_session.RealtimeVorbereitung(
         provider_id=1,
@@ -414,6 +425,10 @@ async def test_realtime_region_sends_initial_data_before_optional_enrichment(mon
     complete = {**initial, "traffic": {"status": "available"}, "news": [], "news_status": "available"}
     monkeypatch.setattr(session, "_region_anfang", lambda _args: initial)
     monkeypatch.setattr(session, "_region_ergaenzen", lambda _args, _initial: complete)
+    # Im autonomen Modus: keine Karte davor.
+    monkeypatch.setattr(
+        realtime_session.voice_interactions, "freigabe_einholen", lambda *a, **k: None
+    )
 
     await session._tool_ausfuehren({
         "call_id": "call_region",
@@ -437,6 +452,215 @@ async def test_realtime_region_sends_initial_data_before_optional_enrichment(mon
     await asyncio.gather(*tuple(session._region_tasks))
     assert panel.sent[2]["geo_analysis"] == complete
     assert json.loads(sideband.sent[-1]) == {"type": "response.create"}
+
+
+@pytest.mark.asyncio
+async def test_realtime_region_gibt_das_urteil_dem_modell_nicht_dem_schirm(monkeypatch) -> None:
+    """Die Regionsanalyse nimmt einen eigenen Weg und holt die Ethik-Engine selbst.
+
+    Ihr Urteil gehört an den Wert fürs Modell. Die Karte im Panel und das
+    Nachladen bekommen den Stand ohne Beratung: sie ist für das Modell
+    geschrieben, das mit dem Menschen spricht, nicht für den Schirm.
+    """
+    class Panel:
+        def __init__(self):
+            self.sent = []
+
+        async def send_json(self, value):
+            self.sent.append(value)
+
+    class Sideband:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, value):
+            self.sent.append(value)
+
+    panel = Panel()
+    sideband = Sideband()
+    session = realtime_session.RealtimeSitzung(
+        panel,
+        vorbereitung=_vorbereitung(),
+        user_id=7,
+        http_client=None,
+        herkunft="panel",
+        familie=None,
+    )
+    session._angeboten.add("analyze_region")
+    session._sideband = sideband
+    initial = {"status": "success", "location": "Berlin", "weather": {"temperature_celsius": 20}}
+    hinweis = {"untrusted": True, "quelle": "ethik_engine", "einschaetzung": "review",
+               "empfehlung": "Nichts Privates zeigen.", "begruendung": "Ein Wohnhaus."}
+    nachgeladen: list[dict] = []
+    monkeypatch.setattr(session, "_region_anfang", lambda _args: initial)
+    monkeypatch.setattr(session, "_region_nachladen", lambda _args, stand: nachgeladen.append(stand))
+    monkeypatch.setattr(
+        realtime_session.voice_interactions, "freigabe_einholen", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        realtime_session.voice_interactions, "ethik_anstossen", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        realtime_session.voice_interactions, "ethik_abholen", lambda *a, **k: hinweis
+    )
+
+    await session._tool_ausfuehren({
+        "call_id": "call_region",
+        "name": "analyze_region",
+        "arguments": '{"location":"Berlin"}',
+    })
+
+    ausgabe = json.loads(json.loads(sideband.sent[0])["item"]["output"])
+    assert ausgabe["data"] == {**initial, "ethik": hinweis}
+    assert panel.sent[1]["geo_analysis"] == initial
+    assert nachgeladen == [initial]
+
+
+@pytest.mark.asyncio
+async def test_realtime_region_fragt_ohne_autonomie_erst(monkeypatch) -> None:
+    """Ohne autonomen Modus holt die Regionsanalyse nichts, bevor jemand ja sagt.
+
+    Sie nimmt einen eigenen, schnelleren Weg als die übrigen Werkzeuge und lief
+    deshalb an der Frage nach der Zustimmung vorbei: Wetter, Satellit und
+    Nachrichten kamen, bevor jemand zugestimmt hatte. Vorgabe des Betreibers
+    vom 23.09.2026: ohne autonomen Modus fragt die Stimme vor jedem Werkzeug.
+    """
+    class Panel:
+        def __init__(self):
+            self.sent = []
+
+        async def send_json(self, value):
+            self.sent.append(value)
+
+    class Sideband:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, value):
+            self.sent.append(value)
+
+    panel = Panel()
+    sideband = Sideband()
+    session = realtime_session.RealtimeSitzung(
+        panel,
+        vorbereitung=_vorbereitung(),
+        user_id=7,
+        http_client=None,
+        herkunft="panel",
+        familie=None,
+    )
+    session._angeboten.add("analyze_region")
+    session._sideband = sideband
+
+    def _nicht_ohne_ja(_args):
+        raise AssertionError("die Analyse lief ohne Zustimmung")
+
+    monkeypatch.setattr(session, "_region_anfang", _nicht_ohne_ja)
+    kennung = "0b7e7a52-2f6e-4a39-9d4e-3c2d1f0a9b11"
+    karte = {
+        "id": kennung,
+        "call_id": "call_region",
+        "tool_name": "analyze_region",
+        "status": "proposed",
+        "autonomous": False,
+    }
+    wert = {
+        "proposals": [karte],
+        "status": "needs_confirmation",
+        "hinweis": realtime_session.voice_interactions.JA_NOETIG,
+    }
+    monkeypatch.setattr(
+        realtime_session.voice_interactions,
+        "freigabe_einholen",
+        lambda *a, **k: (wert, None, {"tool_name": "analyze_region"}, [karte]),
+    )
+
+    await session._tool_ausfuehren({
+        "call_id": "call_region",
+        "name": "analyze_region",
+        "arguments": '{"location":"Berlin"}',
+    })
+
+    ausgabe = json.loads(json.loads(sideband.sent[0])["item"]["output"])
+    assert ausgabe["data"]["status"] == "needs_confirmation"
+    assert "voice_resolve_latest_proposal" in ausgabe["data"]["hinweis"]
+    # Die Karte steht in der Sprachansicht, ein gesprochenes Ja genügt.
+    vorschlagsrahmen = [r for r in panel.sent if r.get("art") == "vorschlag"]
+    assert vorschlagsrahmen == [{
+        "art": "vorschlag",
+        "vorschlag": {k: v for k, v in karte.items() if k != "call_id"},
+        "klick": False,
+    }]
+    assert session._vorschlaege.rahmen() == vorschlagsrahmen[0]
+    assert not session._region_tasks
+    assert not any("geo_analysis" in r for r in panel.sent)
+
+
+@pytest.mark.asyncio
+async def test_nach_dem_ja_kommt_das_ergebnis_mit(monkeypatch) -> None:
+    """Ein bestätigter Lesevorschlag liefert sein Ergebnis an Modell und Panel.
+
+    Ein Lesevorschlag der Stimme hängt an keinem Lauf, der das Ergebnis
+    weitertrüge. Ohne diesen Weg meldete das Ja nur „bestätigt": das Modell
+    wusste nichts über das Wetter, und die Regionsansicht blieb leer.
+    """
+    class Panel:
+        def __init__(self):
+            self.sent = []
+
+        async def send_json(self, value):
+            self.sent.append(value)
+
+    class Sideband:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, value):
+            self.sent.append(value)
+
+    panel = Panel()
+    sideband = Sideband()
+    session = realtime_session.RealtimeSitzung(
+        panel,
+        vorbereitung=_vorbereitung(),
+        user_id=7,
+        http_client=None,
+        herkunft="panel",
+        familie=None,
+    )
+    session._angeboten.add("voice_resolve_latest_proposal")
+    session._sideband = sideband
+    session._vorschlaege.merken(_karte("vorschlag-region", "analyze_region"))
+    analyse = {
+        "status": "success",
+        "location": "Berlin",
+        "coordinates": {"latitude": 52.52, "longitude": 13.405, "bbox": [13, 52, 14, 53]},
+    }
+    voice = realtime_session.voice_interactions
+    monkeypatch.setattr(voice, "schon_entschieden", lambda **_: None)
+    monkeypatch.setattr(voice, "braucht_klick", lambda **_: False)
+    monkeypatch.setattr(
+        voice,
+        "vorschlag_ausfuehren",
+        lambda **_: voice.Ausgang(erledigt=True, werkzeug="analyze_region", ergebnis=analyse),
+    )
+
+    await session._tool_ausfuehren({
+        "call_id": "call_ja",
+        "name": "voice_resolve_latest_proposal",
+        "arguments": '{"decision":"confirm"}',
+    })
+
+    ausgabe = json.loads(json.loads(sideband.sent[0])["item"]["output"])
+    # In der Untrusted-Hülle: Nachrichten und Posts kommen von draußen.
+    assert ausgabe["untrusted"] is True
+    assert ausgabe["data"] == {
+        "status": "confirmed", "tool_name": "analyze_region", "result": analyse,
+    }
+    werkzeugrahmen = [r for r in panel.sent if r.get("geo_analysis") is not None]
+    assert werkzeugrahmen and werkzeugrahmen[0]["geo_analysis"] == analyse
+    # Die erledigte Karte verschwindet aus der Sprachansicht.
+    assert {"art": "vorschlag", "vorschlag": None} in panel.sent
 
 
 @pytest.mark.asyncio
@@ -610,20 +834,25 @@ def test_voice_confirmation_is_bound_to_latest_proposal_in_session(monkeypatch) 
     monkeypatch.setattr(
         realtime_session.voice_interactions,
         "vorschlag_ausfuehren",
-        lambda **werte: (aufrufe.append(werte) is None, None),
+        lambda **werte: realtime_session.voice_interactions.Ausgang(
+            erledigt=aufrufe.append(werte) is None
+        ),
     )
-    session._offener_vorschlag = "proposal-current"
+    session._vorschlaege.merken(_karte("proposal-current"))
     wert, fehler = session._vorschlag_entscheiden("confirm")
     assert fehler is None
     assert wert == {"status": "confirmed"}
     assert aufrufe == [{"user_id": 7, "kennung": "proposal-current"}]
-    assert session._offener_vorschlag is None
+    assert session._vorschlaege.leer
     _, zweiter_fehler = session._vorschlag_entscheiden("confirm")
     assert zweiter_fehler is not None
 
 
 def test_gesprochenes_ja_traegt_keine_unumkehrbare_aktion(monkeypatch) -> None:
-    """Was niemand zurückholt, braucht den Finger auf der Karte.
+    """Was auch im autonomen Modus fragt, braucht den Finger auf der Karte.
+
+    Seit dem 23.09.2026 ist das jedes Löschen, auch eines mit Rückweg
+    (Betreiberwahl „Klick auf die Karte").
 
     Im Panel entscheidet ein Mensch, indem er drückt. In der Sprachsitzung
     entscheidet das *Modell*, dass der Mensch zugestimmt habe — und derselbe
@@ -647,13 +876,15 @@ def test_gesprochenes_ja_traegt_keine_unumkehrbare_aktion(monkeypatch) -> None:
     monkeypatch.setattr(
         realtime_session.voice_interactions,
         "vorschlag_ausfuehren",
-        lambda **werte: (aufrufe.append(werte) is None, None),
+        lambda **werte: realtime_session.voice_interactions.Ausgang(
+            erledigt=aufrufe.append(werte) is None
+        ),
     )
     monkeypatch.setattr(
         realtime_session.voice_interactions, "braucht_klick", lambda **_: True
     )
 
-    session._offener_vorschlag = "proposal-delete"
+    session._vorschlaege.merken(_karte("proposal-delete", "propose_file_delete"))
     wert, fehler = session._vorschlag_entscheiden("confirm")
 
     assert fehler is None
@@ -662,6 +893,225 @@ def test_gesprochenes_ja_traegt_keine_unumkehrbare_aktion(monkeypatch) -> None:
     # drückt im Panel — abgelehnt ist die gesprochene Bestätigung, nicht der
     # Vorschlag.
     assert aufrufe == []
+    # Und die Sitzung weiß das noch: ein zweites Ja zeigt wieder auf den
+    # Knopf. Bis zum 23.09.2026 vergaß sie die Karte beim ersten Ja, und
+    # das zweite hörte „kein passender Vorschlag".
+    wert, fehler = session._vorschlag_entscheiden("confirm")
+    assert fehler is None
+    assert wert["status"] == "needs_panel_confirmation"
+    assert session._vorschlaege.rahmen()["vorschlag"]["id"] == "proposal-delete"
+    assert aufrufe == []
+
+
+class _Mitschrift:
+    """Panel und Sideband zugleich: alles Gesendete landet in `sent`."""
+
+    def __init__(self) -> None:
+        self.sent: list = []
+
+    async def send_json(self, value) -> None:
+        self.sent.append(value)
+
+    async def send(self, value) -> None:
+        self.sent.append(value)
+
+
+def _ausgabe(sideband: _Mitschrift, call_id: str) -> dict:
+    """Was das Modell zu genau diesem Aufruf zurückbekam, ohne Untrusted-Hülle."""
+    for roh in sideband.sent:
+        rahmen = json.loads(roh)
+        eintrag = rahmen.get("item") or {}
+        if eintrag.get("call_id") == call_id:
+            return json.loads(eintrag["output"])["data"]
+    raise AssertionError(f"kein Ergebnis zu {call_id}")
+
+
+@pytest.mark.asyncio
+async def test_ein_ja_gilt_genau_einer_karte(monkeypatch) -> None:
+    """Zwei Karten, ein Ja: es läuft die jüngste, die andere verfällt, angesagt.
+
+    Bis zum 23.09.2026 hielt die Sitzung genau eine Kennung, und die ältere
+    Karte verschwand still. Ein Stapel, der sie danach zur jüngsten machte,
+    ließ ein doppelt geschicktes Ja sie ausführen, ohne dass jemand nach ihr
+    gefragt hatte (Review vom selben Tag). Jetzt gilt die Regel der
+    Pipeline-Stimme: ein Ja, ein Vorschlag, und das Modell erfährt den Rest.
+    """
+    panel, sideband = _Mitschrift(), _Mitschrift()
+    session = realtime_session.RealtimeSitzung(
+        panel, vorbereitung=_vorbereitung(), user_id=7, http_client=None,
+        herkunft="panel", familie=None,
+    )
+    session._sideband = sideband
+    session._angeboten |= {
+        "propose_server_lifecycle", "propose_backup", "voice_resolve_latest_proposal",
+    }
+    voice = realtime_session.voice_interactions
+    ausgefuehrt: list[str] = []
+    monkeypatch.setattr(voice, "schon_entschieden", lambda *, user_id, kennung: None)
+    monkeypatch.setattr(voice, "braucht_klick", lambda **_: False)
+    monkeypatch.setattr(
+        voice, "vorschlag_ausfuehren",
+        lambda *, user_id, kennung: ausgefuehrt.append(kennung) or voice.Ausgang(erledigt=True),
+    )
+    antworten = iter([
+        ({"status": "needs_confirmation"}, None, {"tool_name": "propose_server_lifecycle"},
+         [_karte("neustart", "propose_server_lifecycle")]),
+        ({"status": "needs_confirmation"}, None, {"tool_name": "propose_backup"},
+         [_karte("backup", "propose_backup")]),
+    ])
+    monkeypatch.setattr(
+        realtime_session, "voice_werkzeug_ausfuehren", lambda *a, **k: next(antworten)
+    )
+    for call_id, name in (("c1", "propose_server_lifecycle"), ("c2", "propose_backup")):
+        await session._tool_ausfuehren({"call_id": call_id, "name": name, "arguments": "{}"})
+
+    # Dasselbe Ja zweimal, wie nach einem Dazwischenreden.
+    for call_id in ("ja1", "ja2"):
+        await session._tool_ausfuehren({
+            "call_id": call_id, "name": "voice_resolve_latest_proposal",
+            "arguments": '{"decision":"confirm"}',
+        })
+
+    assert ausgefuehrt == ["backup"]
+    erste = _ausgabe(sideband, "ja1")
+    assert erste["status"] == "confirmed"
+    assert erste["verworfene_vorschlaege"] == ["propose_server_lifecycle"]
+    assert erste["hinweis_verworfen"] == voice.VERWORFEN
+    assert "error" in _ausgabe(sideband, "ja2")
+    assert [r for r in panel.sent if r.get("art") == "vorschlag"][-1] == {
+        "art": "vorschlag", "vorschlag": None,
+    }
+    assert session._vorschlaege.leer
+
+
+def test_ein_gescheitertes_ja_macht_die_aeltere_karte_nicht_zur_neuen(monkeypatch) -> None:
+    """Scheitert die Ausführung, trifft das Ja zum Wiederholen nicht die Karte darunter.
+
+    Das Modell bietet nach „konnte nicht bestätigt werden" an, es noch einmal
+    zu versuchen. Lag darunter eine zweite Karte, führte das nächste Ja sie
+    aus, obwohl der Mensch die erste meinte.
+    """
+    session = realtime_session.RealtimeSitzung(
+        object(), vorbereitung=_vorbereitung(), user_id=7, http_client=None,
+        herkunft="panel", familie=None,
+    )
+    voice = realtime_session.voice_interactions
+    ausgefuehrt: list[str] = []
+
+    def ausfuehren(*, user_id, kennung):
+        ausgefuehrt.append(kennung)
+        return voice.Ausgang(erledigt=kennung != "neustart")
+
+    monkeypatch.setattr(voice, "schon_entschieden", lambda *, user_id, kennung: None)
+    monkeypatch.setattr(voice, "braucht_klick", lambda **_: False)
+    monkeypatch.setattr(voice, "vorschlag_ausfuehren", ausfuehren)
+    session._vorschlaege.merken(_karte("konfig", "propose_config_update"))
+    session._vorschlaege.merken(_karte("neustart", "propose_server_lifecycle"))
+
+    wert, fehler = session._vorschlag_entscheiden("confirm")
+    assert fehler is not None
+    assert wert["verworfene_vorschlaege"] == ["propose_config_update"]
+
+    _, fehler = session._vorschlag_entscheiden("confirm")
+    assert fehler is not None
+    assert ausgefuehrt == ["neustart"]
+
+
+def test_ein_ja_nach_dem_klick_trifft_nicht_die_karte_darunter(monkeypatch) -> None:
+    """Wer die Löschkarte geklickt hat und dann „ja" sagt, meint nicht den Neustart."""
+    session = realtime_session.RealtimeSitzung(
+        object(), vorbereitung=_vorbereitung(), user_id=7, http_client=None,
+        herkunft="panel", familie=None,
+    )
+    voice = realtime_session.voice_interactions
+    ausgefuehrt: list[str] = []
+    monkeypatch.setattr(
+        voice, "schon_entschieden",
+        lambda *, user_id, kennung: "succeeded" if kennung.startswith("loeschen") else None,
+    )
+    monkeypatch.setattr(voice, "braucht_klick", lambda *, user_id, kennung: kennung.startswith("loeschen"))
+    monkeypatch.setattr(
+        voice, "vorschlag_ausfuehren",
+        lambda *, user_id, kennung: ausgefuehrt.append(kennung) or voice.Ausgang(erledigt=True),
+    )
+    session._vorschlaege.merken(_karte("neustart", "propose_server_lifecycle"))
+    session._vorschlaege.merken(_karte("loeschen", "propose_file_delete"))
+
+    wert, fehler = session._vorschlag_entscheiden("confirm")
+
+    assert fehler is None
+    assert wert["status"] == "already_decided"
+    assert wert["verworfene_vorschlaege"] == ["propose_server_lifecycle"]
+    assert ausgefuehrt == []
+
+    # Ebenso ein Nein nach dem Klick: es ist gelaufen, nicht abgebrochen.
+    session._vorschlaege.merken(_karte("loeschen-2", "propose_file_delete"))
+    wert, _ = session._vorschlag_entscheiden("reject")
+    assert wert["status"] == "already_decided"
+    assert session._vorschlaege.leer
+
+
+def test_ein_entzogenes_recht_beendet_die_sitzung_nicht(monkeypatch) -> None:
+    """Wird der Server zwischen Karte und Ja entzogen, gibt es eine Antwort.
+
+    `owned_proposal` wirft dann `AI_ACTION_ACCESS_REVOKED`. Bis zum Review vom
+    23.09.2026 endete die Gemini-Sitzung daran, und Realtime verstummte bei
+    jedem Ja oder Nein zu derselben Karte.
+    """
+    from services.ai_action_errors import AiActionStateError
+
+    session = realtime_session.RealtimeSitzung(
+        object(), vorbereitung=_vorbereitung(), user_id=7, http_client=None,
+        herkunft="panel", familie=None,
+    )
+    voice = realtime_session.voice_interactions
+
+    def entzogen(**_):
+        raise AiActionStateError("AI_ACTION_ACCESS_REVOKED")
+
+    monkeypatch.setattr(voice, "schon_entschieden", entzogen)
+    monkeypatch.setattr(voice, "vorschlag_ausfuehren", lambda **_: pytest.fail("ausgeführt"))
+    session._vorschlaege.merken(_karte("fremd", "propose_server_lifecycle"))
+
+    wert, fehler = session._vorschlag_entscheiden("reject")
+
+    assert fehler is not None
+    assert wert["error"] == fehler
+    assert session._vorschlaege.leer
+
+
+def test_eine_geklickte_karte_haelt_keine_meldung_mehr_auf(
+    db: Session, regular_user
+) -> None:
+    """Die Meldungen warten, solange eine Karte wartet, und keinen Klick länger.
+
+    Der Zusteller der Realtime-Sitzung fragt `noch_offen`. Den Klick im Panel
+    erfährt die Sitzung nicht; die Datenbank weiß ihn.
+    """
+    from models import AiActionProposal, AiConversation
+
+    fenster = AiConversation(id=str(uuid4()), user_id=regular_user.id, title="Stimme")
+    db.add(fenster)
+    db.flush()
+    vorschlag = AiActionProposal(
+        id=str(uuid4()), conversation_id=fenster.id, user_id=regular_user.id,
+        server_id=None, tool_name="propose_file_delete", payload_encrypted="x",
+        preview_json="{}", autonomous=False, correlation_id=str(uuid4()),
+    )
+    db.add(vorschlag)
+    db.commit()
+    stapel = realtime_session.voice_interactions.OffeneVorschlaege()
+    stapel.merken(_karte(vorschlag.id, "propose_file_delete"))
+
+    assert stapel.noch_offen(user_id=regular_user.id) is True
+
+    vorschlag.status = "succeeded"
+    db.commit()
+
+    assert stapel.noch_offen(user_id=regular_user.id) is False
+    # Die Karte bleibt trotzdem liegen: das nächste Ja soll „schon erledigt"
+    # hören und nicht die Karte darunter treffen.
+    assert not stapel.leer
 
 
 def test_realtime_migration_carries_provider_and_usage_columns(tmp_path: Path) -> None:

@@ -9,10 +9,12 @@
 //! * Maus/Tastatur/Bildschirm → `uebernahme` (dort liegt die Freigabe).
 //!
 //! Zwei Auftraege tun hier gar nichts, sondern fragen einen Menschen: die
-//! Bitte um die Uebernahme und — bei ausgeschaltetem autonomem Modus — das
-//! Aufraeumen. Sie gehen als Ereignis an die Oberflaeche, der Mensch
-//! entscheidet, und erst seine Antwort meldet das Ergebnis. Deshalb liefern
-//! sie `None` statt eines Ergebnisses.
+//! Bitte um die Uebernahme und das Aufraeumen. Sie gehen als Ereignis an die
+//! Oberflaeche, der Mensch entscheidet, und erst seine Antwort meldet das
+//! Ergebnis. Deshalb liefern sie `None` statt eines Ergebnisses. Dasselbe gilt
+//! fuer jeden anderen Auftrag, dessen `autonom` nicht `true` ist: ohne
+//! autonomen Modus, und seit dem 23.09.2026 bei jedem Loeschen (das Panel
+//! setzt es dann nie, `desktop_loescht`).
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -33,7 +35,8 @@ use crate::zonen;
 pub const EREIGNIS_UEBERNAHME: &str = "mss:uebernahme-anfrage";
 /// Dasselbe fuer das Aufraeumen — mit der vollstaendigen Liste im Gepaeck.
 pub const EREIGNIS_AUFRAEUMEN: &str = "mss:aufraeumen-anfrage";
-/// Das Ereignis fuer allgemeine Werkzeugaktionen bei inaktivem autonomem Modus.
+/// Das Ereignis fuer allgemeine Werkzeugaktionen, deren `autonom` nicht `true`
+/// ist: ohne autonomen Modus, und bei `desktop_dateien` mit `loeschen` immer.
 pub const EREIGNIS_AKTION: &str = "mss:aktion-anfrage";
 
 /// Was ein ausgefuehrter Auftrag zurueckgibt. `None` heisst: das Ergebnis
@@ -439,10 +442,12 @@ fn pfadliste(argumente: &Value) -> Result<Vec<String>, String> {
 ///
 /// **Die Entscheidung darueber trifft das Panel, nicht diese Datei.** Es
 /// setzt `autonom` beim Anlegen des Auftrags (`_desktop_argumente`), und die
-/// Regel dahinter ist die des Betreibers: autonomer Modus an, keine
-/// Bestaetigung; autonomer Modus aus, immer eine. Fehlt das Feld — ein alter
-/// Panelstand, ein manipulierter Auftrag —, wird gefragt. Die vorsichtige
-/// Seite ist hier die richtige.
+/// Regel dahinter ist die des Betreibers: im autonomen Modus alles ohne
+/// Bestaetigung, ausser Loeschvorgaenge. Aufraeumen ist immer einer, also
+/// setzt das Panel `autonom` hier seit dem 23.09.2026 nie auf `true`. Der
+/// Zweig fuer `true` bleibt fuer aeltere Panelstaende. Fehlt das Feld — ein
+/// alter Panelstand, ein manipulierter Auftrag —, wird gefragt. Die
+/// vorsichtige Seite ist hier die richtige.
 ///
 /// Gleiches gilt fuer `systembereich`: das steht im Konto des Benutzers, und
 /// ohne den Wert `schreiben` bleibt Windows selbst gesperrt.

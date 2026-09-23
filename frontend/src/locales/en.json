@@ -740,6 +740,8 @@
         "propose_note_create": "Create note",
         "propose_note_update": "Update note",
         "propose_note_delete": "Delete note",
+        "forget_memory": "Delete memory",
+        "forget_skill": "Delete skill",
         "propose_cloudflare_dns_delete": "Delete Cloudflare DNS record",
         "propose_cloudflare_dns_record": "Create Cloudflare DNS record",
         "propose_modpack_install": "Install CurseForge modpack",
@@ -830,6 +832,8 @@
         "game_type": "Blueprint",
         "image_after": "New image",
         "integration": "Integration",
+        "memory_keys": "Entries",
+        "memory_scope": "Area",
         "name": "Name",
         "node_id": "Node",
         "permissions": "Role permissions",
@@ -837,6 +841,7 @@
         "role": "Role granted on purchase",
         "role_permissions": "Permissions of this role",
         "service_user": "Service user",
+        "skill_key": "Skill",
         "slug": "Slug",
         "startup_after": "New start command",
         "startup_before": "Current start command",
@@ -1170,7 +1175,9 @@
       },
       "vorschlag": {
         "heading": "Waiting for you",
-        "hint": "Say yes and it runs. Say no, or anything else, and it does not."
+        "hint": "Say yes and it runs. Say no, or anything else, and it does not.",
+        "hintKlick": "Confirm this here with a click. Saying yes is not enough for this one.",
+        "hintKlickChat": "Confirm this with a click on the card in the chat. Saying yes is not enough for this one."
       }
     },
     "guardian": {
@@ -2322,7 +2329,7 @@
     },
     "ai_autonomous_use": {
       "title": "Use autonomous mode",
-      "desc": "Allow the AI to execute approved read and standard tools directly."
+      "desc": "Allow the AI to run permitted tools without asking first. Deletions still always ask."
     },
     "ai_tasks_manage": {
       "title": "Manage AI tasks",
@@ -4396,7 +4403,7 @@
           "bildschirm": "Screenshots: the AI can look at the main screen. The image is downscaled, never written to disk, and transmitted as a tool result to the panel, which stores it encrypted and passes it to the model provider. The provider therefore sees everything visible at that moment, including other windows, messages and open documents. An indicator lights up at the edge of the screen for every capture; it cannot be switched off.",
           "dateien": "Read access to the computer: the AI can inspect drives, folders and disk space, as far as the signed-in Windows user may do so. Drive details as well as folder and file names with sizes are transmitted. File contents are only read and transmitted from the sandbox folder you select yourself. Whether the Windows system area may be read is configured per account in the panel.",
           "schreiben": "Write access: creating and changing files happens exclusively inside the sandbox folder you select. The resolved path is checked so that a link cannot lead out of the folder.",
-          "aufraeumen": "Cleaning up outside the sandbox: deleting is possible outside it too. Deleted items go to the recycle bin; permanent deletion only on explicit request. Windows itself, program folders and other user profiles stay locked until you unlock them. The affected file paths, their size and their classification are sent to the panel and the model provider. With autonomous mode off, the app shows you the full list for confirmation first.",
+          "aufraeumen": "Cleaning up outside the sandbox: deleting is possible outside it too. Deleted items go to the recycle bin; permanent deletion only on explicit request. Windows itself, program folders and other user profiles stay locked until you unlock them. The affected file paths, their size and their classification are sent to the panel and the model provider. The app always shows you the full list for confirmation first, even in autonomous mode.",
           "virenscan": "Virus check: on request the app checks a file with the locally installed Microsoft Defender, without changing or removing it. The checked path and, if something is found, an excerpt of the Defender output (which contains file paths and threat names) go to the model provider.",
           "eingabe": "Mouse and keyboard: the app does not record your input. There is no capture of keystrokes or mouse movement, neither locally nor transmitted. Conversely the AI can take over mouse and keyboard; with autonomous mode off, every takeover must be confirmed on your machine and is time-limited. Text the AI types originates from the model and is contained in the transmitted job.",
           "discordRpc": "Discord Rich Presence (RPC): If the Discord desktop app is running on your computer, the desktop app can report your activity status locally via a Windows pipe to Discord (e.g. 'MSS Desktop Companion'). No server addresses, chat histories, IP addresses, or sensitive credentials are ever transmitted. This feature can be completely disabled in the desktop app configuration ('konfig.json' -> 'discord_rpc_aktiv': false).",
