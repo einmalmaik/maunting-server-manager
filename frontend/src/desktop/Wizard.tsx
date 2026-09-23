@@ -261,6 +261,30 @@ function SchrittKopplung({
   const [fehler, setFehler] = useState<string | null>(null)
   const [laeuft, setLaeuft] = useState(false)
   const [scannerOffen, setScannerOffen] = useState(false)
+  /**
+   * Die Sicherheitsnummer nach dem Koppeln. Solange sie steht, bleibt der
+   * Schritt offen: das Panel fragt gleich, ob es den Verlauf hierher übergeben
+   * soll, und dort vergleicht man mit genau dieser Nummer.
+   */
+  const [nummer, setNummer] = useState<string | null>(null)
+
+  async function fortfahren() {
+    const frischerStand = { ...(stand ?? {}), eingerichtet: true }
+    await onWeiter(frischerStand as AppKonfig)
+  }
+
+  /** Weiter unter der Nummer: ein Fehler beim Speichern gehört auf den Schirm. */
+  async function weiterNachNummer() {
+    setFehler(null)
+    setLaeuft(true)
+    try {
+      await fortfahren()
+    } catch (e) {
+      setFehler(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLaeuft(false)
+    }
+  }
 
   async function absenden(manuellerCode?: string) {
     const zielCode = (manuellerCode ?? code).trim()
@@ -268,9 +292,12 @@ function SchrittKopplung({
     setFehler(null)
     setLaeuft(true)
     try {
-      await koppeln(zielCode, name.trim())
-      const frischerStand = { ...(stand ?? {}), eingerichtet: true }
-      await onWeiter(frischerStand as AppKonfig)
+      const ergebnis = await koppeln(zielCode, name.trim())
+      if (ergebnis.sicherheitsnummer) {
+        setNummer(ergebnis.sicherheitsnummer)
+        return
+      }
+      await fortfahren()
     } catch (e) {
       setFehler(e instanceof Error ? e.message : String(e))
     } finally {
@@ -282,6 +309,24 @@ function SchrittKopplung({
     const sauber = gescannterCode.trim()
     setCode(sauber)
     void absenden(sauber)
+  }
+
+  if (nummer) {
+    return (
+      <div className="flex flex-col gap-4">
+        <div className="rounded-lg border border-outline-variant/40 bg-surface-container-high/40 p-4">
+          <p className="text-label-sm text-on-surface-variant">{t('mss.wizard.sicherheitsnummerTitel')}</p>
+          <p className="mt-1 font-mono text-title-md tracking-wider text-on-surface">{nummer}</p>
+        </div>
+        <p className="text-sm text-on-surface-variant">{t('mss.wizard.sicherheitsnummerHinweis')}</p>
+        <Fehlerzeile text={fehler} />
+        <div className="flex justify-end">
+          <Button type="button" onClick={() => void weiterNachNummer()} disabled={laeuft}>
+            {t('mss.wizard.weiter')}
+          </Button>
+        </div>
+      </div>
+    )
   }
 
   return (

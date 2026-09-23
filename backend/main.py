@@ -601,6 +601,12 @@ async def lifespan(app: FastAPI):
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE oauth_providers ADD COLUMN client_secret_mask VARCHAR(64)"))
 
+    if legacy_schema_bridge and 'user_e2ee_devices' in inspector.get_table_names():
+        cols = [c['name'] for c in inspector.get_columns('user_e2ee_devices')]
+        if 'is_approved' not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE user_e2ee_devices ADD COLUMN is_approved BOOLEAN NOT NULL DEFAULT 1"))
+
     # OAuth: abgelaufene Login-Challenges aufraeumen (idempotent, low-cost).
     # Kein Hard-Fail, wenn der Cleanup scheitert — der naechste Startup macht
     # es wieder.
@@ -631,6 +637,18 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         import logging
         logging.getLogger(__name__).warning("KI-Freigaben-Cleanup fehlgeschlagen: %s", exc)
+    # E2EE: Abgelaufene blinde Umschläge (> 30 Tage) auf dem Relais-Server aufräumen
+    try:
+        from database import SessionLocal as _SessionLocalEnv
+        from services.social_service import SocialService
+        _env_db = _SessionLocalEnv()
+        try:
+            SocialService.cleanup_expired_envelopes(_env_db)
+        finally:
+            _env_db.close()
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("E2EE-Envelope-Cleanup fehlgeschlagen: %s", exc)
 
 
     from services.ai_proposal_service import reconcile_interrupted_actions
@@ -830,11 +848,11 @@ async def security_headers_middleware(request: Request, call_next):
     docs_page = request.url.path in _API_DOCS_PATHS
     csp = (
         "default-src 'self'; "
-        f"script-src 'self'{' ' + _DOCS_CDN if docs_page else ''} https://singrabot.mauntingstudios.de https://client.crisp.chat https://embed.tawk.to; "
+        f"script-src 'self' 'wasm-unsafe-eval'{' ' + _DOCS_CDN if docs_page else ''} https://singrabot.mauntingstudios.de https://client.crisp.chat https://embed.tawk.to; "
         f"style-src 'self' 'unsafe-inline'{' ' + _DOCS_CDN if docs_page else ''} https://singrabot.mauntingstudios.de; "
-        f"img-src 'self' data:{' ' + _DOCS_CDN if docs_page else ''} https://singrabot.mauntingstudios.de; "
+        f"img-src 'self' data: blob:{' ' + _DOCS_CDN if docs_page else ''} https://singrabot.mauntingstudios.de; "
         f"connect-src {_csp_connect_src()} https://singrabot.mauntingstudios.de https://client.crisp.chat wss://client.relay.crisp.chat https://va.tawk.to; "
-        "font-src 'self' https://singrabot.mauntingstudios.de; "
+        "font-src 'self' data: https://singrabot.mauntingstudios.de; "
         "frame-src 'self' https://singrabot.mauntingstudios.de; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "

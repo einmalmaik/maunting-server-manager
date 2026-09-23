@@ -42,6 +42,7 @@ import {
   clearNotesKeyCache,
 } from '@/services/notesCalendarCrypto'
 import * as client from '@/api/client'
+import { deriveUserDeviceMailboxId } from '@/services/e2eeCrypto'
 import { useAuthStore } from '@/stores/authStore'
 
 vi.mock('@/api/client', () => ({
@@ -1033,6 +1034,65 @@ describe('Offline Storage & Unified Real-Time SSE Sync Engine', () => {
           sender_user_id: 1,
         } as any)
       }).not.toThrow()
+    })
+
+    it('liest Schlüsselumschläge unter dem angemeldeten Konto, nicht unter dem des Einwerfers', async () => {
+      // Auf dem Mailbox-Weg steht in `recipient_id` nichts, und `sender_user_id`
+      // ist, wer den Umschlag eingeworfen hat. Unter dessen Kennung zu lesen
+      // hiesse, seine Mailbox nach einem Schlüssel zu durchsuchen, den er selbst
+      // hineingelegt hat.
+      useAuthStore.setState({ user: { id: 31, username: 'ich' } as any })
+      try {
+        clearNotesKeyCache()
+        localStorage.removeItem('msm_e2ee_notes_key_31')
+        localStorage.removeItem('msm_e2ee_notes_key_77')
+        vi.mocked(client.api).mockResolvedValue([] as any)
+        const eigene = await deriveUserDeviceMailboxId(31)
+        const fremde = await deriveUserDeviceMailboxId(77)
+        const abgerufen = () => vi.mocked(client.api).mock.calls.map(([pfad]) => String(pfad))
+
+        handleIncomingSyncEvent('sync', {
+          type: 'e2ee_blind_message',
+          control_type: 'notes_key_sync',
+          recipient_id: null,
+          sender_user_id: 77,
+        } as any)
+
+        await vi.waitFor(() => expect(abgerufen().some((p) => p.includes(eigene))).toBe(true))
+        expect(abgerufen().some((p) => p.includes(fremde))).toBe(false)
+      } finally {
+        useAuthStore.setState({ user: null })
+      }
+    })
+
+    it('beantwortet eine gemeldete Anfrage aus der Mailbox, statt den Schlüssel an alle zu schicken', async () => {
+      // Bis 09/2026 schickte jede solche Meldung den Schlüssel an jedes eigene
+      // Gerät — auch an die, die ihn längst hatten. Gefragt hat ein Gerät, und
+      // dessen Anfrage liegt in der Mailbox: die wird beantwortet, einmal.
+      // Geprüft wird hier der Weg — die Meldung führt in die eigene Mailbox,
+      // die Verteilung an alle hätte sie nie geöffnet. Dass dabei nichts
+      // hinausgeht, beweist dieser Test nicht: der Messenger ist hier
+      // gesperrt, und ohne Gerät sendet keiner der beiden Wege.
+      useAuthStore.setState({ user: { id: 32, username: 'ich' } as any })
+      try {
+        clearNotesKeyCache()
+        await setUserNotesKey(32, btoa(String.fromCharCode(...new Uint8Array(32).fill(3))))
+        vi.mocked(client.api).mockResolvedValue([] as any)
+        const eigene = await deriveUserDeviceMailboxId(32)
+        const abgerufen = () => vi.mocked(client.api).mock.calls.map(([pfad]) => String(pfad))
+
+        handleIncomingSyncEvent('sync', {
+          type: 'e2ee_blind_message',
+          control_type: 'notes_key_request',
+          recipient_id: null,
+          sender_user_id: 77,
+        } as any)
+
+        await vi.waitFor(() => expect(abgerufen().some((p) => p.includes(eigene))).toBe(true))
+      } finally {
+        localStorage.removeItem('msm_e2ee_notes_key_32')
+        useAuthStore.setState({ user: null })
+      }
     })
 
     it('preserves encrypted notes from server when key is absent and re-decrypts on key sync', async () => {

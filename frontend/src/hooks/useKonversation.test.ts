@@ -142,25 +142,58 @@ vi.mock('@/services/ratchetSitzung', () => ({
     },
   ]),
   liesDrUmschlag: vi.fn(
-    async (_k: any, umschlag: string, klartext: { lies(): Promise<string | null>; lege(t: string): Promise<void> }) => {
+    async (
+      _k: any,
+      umschlag: string,
+      klartext: { lies(): Promise<string | null>; lege(t: string): Promise<void> },
+      optionen: {
+        zurueckstellen?: (vonKonto: number, vonGeraet: string) => boolean
+        schonen?: (vonKonto: number, vonGeraet: string) => boolean
+      } = {},
+    ) => {
+      const wert = lesungen.get(umschlag) ?? { art: 'unbekannt' }
+      // Wie der echte Lesepfad: der Kopf nennt das Absendergerät, und dessen
+      // Aufbau muss entschieden sein, bevor der Umschlag angefasst wird.
+      if (wert.vonKonto !== undefined && optionen.zurueckstellen?.(wert.vonKonto, wert.vonGeraet)) {
+        return { art: 'zurueckgestellt' }
+      }
+      // Ein Bruch von einem Gerät mit abgewiesenem Aufbau im Fenster gehört zu
+      // diesem Aufbau, nicht zur Sitzung.
+      if (wert.art === 'bruch' && optionen.schonen?.(wert.vonKonto, wert.vonGeraet)) {
+        return { art: 'abgewiesen' }
+      }
       // Der echte Lesepfad sieht im Sitzungsschloss zuerst nach, ob ein
       // anderer Durchlauf den Umschlag schon geöffnet hat.
       const schon = await klartext.lies()
       if (schon !== null) return { art: 'klartext', text: schon, vonKonto: 2, vonGeraet: 'fremd-a' }
-      const wert = lesungen.get(umschlag) ?? { art: 'unbekannt' }
       if (wert.art === 'klartext') await klartext.lege(wert.text)
       return wert
     },
   ),
+  // `OFFEN` und `ABGELEHNT` im Klartext stehen für die beiden Ausgänge der
+  // Unterschriftsprüfung; die Prüfung selbst steht in `ratchetSitzung.test.ts`.
   verarbeiteBootstrap: vi.fn(async (_k: any, klartext: string) =>
     klartext.startsWith('AUFBAU')
-      ? { istAufbau: true, ersetzt: klartext.includes('ERSETZT'), vonGeraet: 'fremd-a' }
+      ? {
+          istAufbau: true,
+          ersetzt: klartext.includes('ERSETZT'),
+          vonKonto: 2,
+          vonGeraet: 'fremd-a',
+          ...(klartext.includes('OFFEN') ? { offen: true } : {}),
+          ...(klartext.includes('ABGELEHNT') ? { abgelehnt: true } : {}),
+          ...(klartext.includes('ABGEWIESEN') ? { abgewiesen: true } : {}),
+        }
       : { istAufbau: false, ersetzt: false }
   ),
   verwirfDrSitzung: vi.fn(async (konto: number, geraet: string) => {
     gerufen.verwirfDrSitzung.push(`${konto}:${geraet}`)
   }),
+  // Der Kopf eines Ratchet-Umschlags. Im Test steht er in `koepfe`.
+  drUrheber: vi.fn((umschlag: string) => koepfe.get(umschlag) ?? null),
 }))
+
+/** Was der Kopf eines Test-Umschlags über seinen Absender sagt. */
+const koepfe = new Map<string, { vonKonto: number; vonGeraet: string }>()
 
 const { useKonversation } = await import('./useKonversation')
 import type { GespraechsZiel } from './useKonversation'
@@ -187,12 +220,16 @@ function umschlag(id: number, ciphertext: string, extra: Record<string, unknown>
   }
 }
 
-async function baueHook(ziel: GespraechsZiel, meldeSitzungsbruch = vi.fn()) {
+async function baueHook(
+  ziel: GespraechsZiel,
+  meldeSitzungsbruch = vi.fn(),
+  meldeAufbauAbgelehnt = vi.fn(),
+) {
   const ergebnis = renderHook(() =>
-    useKonversation({ ziel, eigeneId: ICH, identitaetRef, meldeSitzungsbruch })
+    useKonversation({ ziel, eigeneId: ICH, identitaetRef, meldeSitzungsbruch, meldeAufbauAbgelehnt })
   )
   await waitFor(() => expect(ergebnis.result.current.blindMailboxId).not.toBe(''))
-  return { ...ergebnis, meldeSitzungsbruch }
+  return { ...ergebnis, meldeSitzungsbruch, meldeAufbauAbgelehnt }
 }
 
 describe('useKonversation', () => {
@@ -211,6 +248,7 @@ describe('useKonversation', () => {
     proMailbox.clear()
     klartextCache.clear()
     abgelegt.clear()
+    koepfe.clear()
     identitaetRef.current = {
       state: 'ready',
       sendPair: { publicKeyJwk: 'mein-pub', privateKeyJwk: 'mein-priv' },
@@ -251,7 +289,13 @@ describe('useKonversation', () => {
 
     it('bleibt ohne Gespräch leer', () => {
       const { result } = renderHook(() =>
-        useKonversation({ ziel: { art: 'keins' }, eigeneId: ICH, identitaetRef, meldeSitzungsbruch: vi.fn() })
+        useKonversation({
+          ziel: { art: 'keins' },
+          eigeneId: ICH,
+          identitaetRef,
+          meldeSitzungsbruch: vi.fn(),
+          meldeAufbauAbgelehnt: vi.fn(),
+        })
       )
       expect(result.current.blindMailboxId).toBe('')
       expect(result.current.gruppenKontext).toBeNull()
@@ -332,6 +376,99 @@ describe('useKonversation', () => {
 
       expect(gelesen!.map((l) => l.art)).toEqual(['still', 'still'])
       expect(meldeSitzungsbruch).toHaveBeenCalledTimes(1)
+    })
+
+    it('stellt die Nachrichten eines Geräts zurück, solange sein Aufbau offen ist', async () => {
+      // Das Verzeichnis antwortet nicht: der Aufbau ist weder angenommen noch
+      // abgewiesen. Liefe die Nachricht jetzt gegen eine Sitzung, die es noch
+      // nicht gibt, wäre sie als Bruch gewertet und für immer verloren.
+      umschlaege = [
+        umschlag(1, 'sv-e2ee-hybrid-v1:aufbau'),
+        umschlag(2, 'dr-wartet'),
+        umschlag(3, 'dr-anderes-geraet'),
+      ]
+      lesungen.set('sv-e2ee-hybrid-v1:aufbau', 'AUFBAU OFFEN')
+      lesungen.set('dr-wartet', { art: 'klartext', text: 'Hallo', vonKonto: DU, vonGeraet: 'fremd-a' })
+      lesungen.set('dr-anderes-geraet', { art: 'klartext', text: 'Vom Tablet', vonKonto: DU, vonGeraet: 'fremd-b' })
+
+      const { result, meldeSitzungsbruch, meldeAufbauAbgelehnt } = await baueHook({ art: 'direkt', peerId: DU })
+      const zuerst = await result.current.liesUmschlaege()
+
+      // Zurückgestellt wird nur das Gerät, dessen Aufbau offen ist.
+      expect(zuerst!.map((l) => l.art)).toEqual(['still', 'still', 'klartext'])
+      expect(abgelegt.has(2)).toBe(false)
+      expect(klartextCache.has(2)).toBe(false)
+      expect(meldeSitzungsbruch).not.toHaveBeenCalled()
+      expect(meldeAufbauAbgelehnt).not.toHaveBeenCalled()
+
+      // Das Verzeichnis ist wieder da, der Aufbau gilt: jetzt kommt sie durch.
+      lesungen.set('sv-e2ee-hybrid-v1:aufbau', 'AUFBAU')
+      const danach = await result.current.liesUmschlaege()
+
+      expect(danach!.map((l) => l.art)).toEqual(['still', 'klartext', 'klartext'])
+      expect(danach![1]).toMatchObject({ text: 'Hallo', vonGeraet: 'fremd-a' })
+    })
+
+    it('meldet einen abgewiesenen Aufbau, ohne ihn als Bruch zu zählen', async () => {
+      // Abgewiesen heisst: angewandt wurde nichts, die laufende Sitzung steht
+      // noch. Sie wegzuwerfen, wie bei einem Bruch, gäbe dem Fälscher, was er
+      // wollte — einen Neuaufbau.
+      umschlaege = [umschlag(1, 'sv-e2ee-hybrid-v1:falsch')]
+      lesungen.set('sv-e2ee-hybrid-v1:falsch', 'AUFBAU ABGELEHNT')
+
+      const { result, meldeSitzungsbruch, meldeAufbauAbgelehnt } = await baueHook({ art: 'direkt', peerId: DU })
+      const gelesen = await result.current.liesUmschlaege()
+
+      expect(gelesen!.map((l) => l.art)).toEqual(['still'])
+      expect(meldeAufbauAbgelehnt).toHaveBeenCalledWith('fremd-a')
+      expect(meldeSitzungsbruch).not.toHaveBeenCalled()
+      expect(gerufen.verwirfDrSitzung).toEqual([])
+    })
+
+    it('schont die Sitzung vor der Nachricht hinter einem abgewiesenen Aufbau', async () => {
+      // Eine Fälschung kommt nicht allein: hinter dem Aufbau steht eine
+      // Nachricht aus der gefälschten Sitzung. Gegen die echte geöffnet
+      // scheitert sie — als Bruch gezählt, kippte sie die echte Sitzung doch
+      // noch, und die Systemzeile behauptete das Gegenteil.
+      umschlaege = [umschlag(1, 'sv-e2ee-hybrid-v1:falsch'), umschlag(2, 'dr-dahinter')]
+      lesungen.set('sv-e2ee-hybrid-v1:falsch', 'AUFBAU ABGELEHNT ABGEWIESEN')
+      lesungen.set('dr-dahinter', { art: 'bruch', vonKonto: DU, vonGeraet: 'fremd-a', grund: 'Tag' })
+
+      const { result, meldeSitzungsbruch, meldeAufbauAbgelehnt } = await baueHook({ art: 'direkt', peerId: DU })
+      const gelesen = await result.current.liesUmschlaege()
+
+      expect(gelesen!.map((l) => l.art)).toEqual(['still', 'still'])
+      expect(meldeAufbauAbgelehnt).toHaveBeenCalledTimes(1)
+      expect(meldeSitzungsbruch).not.toHaveBeenCalled()
+      expect(gerufen.verwirfDrSitzung).toEqual([])
+
+      // Beim nächsten Abruf ist der Aufbau bekannt: gemeldet wird nicht mehr,
+      // geschont weiterhin.
+      lesungen.set('sv-e2ee-hybrid-v1:falsch', 'AUFBAU ABGEWIESEN')
+      await result.current.liesUmschlaege()
+      expect(meldeAufbauAbgelehnt).toHaveBeenCalledTimes(1)
+      expect(gerufen.verwirfDrSitzung).toEqual([])
+    })
+
+    it('nennt den Absender eines geöffneten Umschlags auch nach dem Neuladen', async () => {
+      // Der Klartext kommt dann aus der Ablage, und der Zwischenspeicher, der
+      // sich den Absender gemerkt hatte, ist leer. Ohne Absender griff die
+      // Downgrade-Schranke im Messenger nicht mehr — eine Nachricht, die sie
+      // beim ersten Sehen verworfen hatte, stand nach dem Neuladen im Verlauf.
+      const { ladeUmschlagKlartexte } = await import('@/services/messengerLocalStore')
+      vi.mocked(ladeUmschlagKlartexte).mockResolvedValueOnce(new Map([[1, 'schon offen']]))
+      umschlaege = [umschlag(1, 'dr-schon-offen')]
+      koepfe.set('dr-schon-offen', { vonKonto: DU, vonGeraet: 'fremd-a' })
+
+      const { result } = await baueHook({ art: 'direkt', peerId: DU })
+      const gelesen = await result.current.liesUmschlaege()
+
+      expect(gelesen![0]).toMatchObject({
+        art: 'klartext',
+        text: 'schon offen',
+        vonKonto: DU,
+        vonGeraet: 'fremd-a',
+      })
     })
 
     it('lässt Quittungen als Klartext durch', async () => {

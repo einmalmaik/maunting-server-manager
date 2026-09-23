@@ -572,8 +572,19 @@ export function GroupPermissionsModal({
     if (!ok) return
 
     try {
-      await kickGroupMember(group.id, member.user_id)
+      const antwort = await kickGroupMember(group.id, member.user_id)
       setMembers((prev) => prev.filter((m) => m.user_id !== member.user_id))
+      // Der Rauswurf erneuert den Einladungscode. Mit dem alten stünde bis zum
+      // nächsten Laden ein toter Link im Dialog — und wer ihn teilte, wunderte
+      // sich, warum niemand hineinkommt.
+      if (onGroupUpdated) {
+        onGroupUpdated({
+          ...group,
+          invite_code: antwort.invite_code ?? null,
+          members: (group.members ?? []).filter((m) => m.user_id !== member.user_id),
+          member_count: Math.max(1, group.member_count - 1),
+        })
+      }
       toast.success(t('social.groupRoles.kicked', { name: member.username }))
     } catch (err: any) {
       toast.error(err?.message || t('social.groupRoles.kickFailed'))

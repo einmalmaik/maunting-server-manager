@@ -207,6 +207,7 @@ export interface E2eeGeraetItem {
    */
   signing_public_key: string
   label: string
+  is_approved?: boolean
 }
 
 /**
@@ -233,8 +234,28 @@ export async function putEigenesGeraet(payload: {
 }
 
 /** Die Zustelladressen eines Kontos — je Geraet eine. */
-export async function getE2eeGeraete(userId: number): Promise<E2eeGeraetItem[]> {
-  return api<E2eeGeraetItem[]>(`/social/e2ee/devices/${userId}`)
+export async function getE2eeGeraete(userId: number, includeUnapproved = false): Promise<E2eeGeraetItem[]> {
+  const query = includeUnapproved ? '?include_unapproved=true' : ''
+  return api<E2eeGeraetItem[]>(`/social/e2ee/devices/${userId}${query}`)
+}
+
+export async function approveEigenesGeraet(
+  deviceId: string,
+  approverDeviceId?: string,
+  signature?: string,
+): Promise<{ ok: boolean }> {
+  return api<{ ok: boolean }>('/social/e2ee/devices/self/approve', {
+    method: 'POST',
+    body: JSON.stringify({
+      device_id: deviceId,
+      approver_device_id: approverDeviceId || null,
+      signature: signature || null,
+    }),
+  })
+}
+
+export async function getPendingE2eeGeraete(): Promise<E2eeGeraetItem[]> {
+  return api<E2eeGeraetItem[]>('/social/e2ee/devices/self/pending')
 }
 
 export async function deleteEigenesGeraet(deviceId: string): Promise<{ ok: boolean }> {
@@ -275,7 +296,8 @@ export interface ChatGroupMemberItem {
   role: string
   permissions?: string | null
   /**
-   * Ob **dieses Mitglied** alle wecken beziehungsweise anheften darf.
+   * Ob **dieses Mitglied** alle wecken, anheften beziehungsweise die
+   * Verfallsfrist der Gruppe stellen darf.
    *
    * Vom Server ausgerechnet, und zwar je Mitglied, nicht nur für mich: der
    * Server kann den Inhalt einer Nachricht nicht lesen, also entscheidet das
@@ -284,6 +306,7 @@ export interface ChatGroupMemberItem {
    */
   can_mention_everyone?: boolean
   can_pin_messages?: boolean
+  can_set_disappearing_messages?: boolean
   joined_at: string
 }
 
@@ -323,6 +346,7 @@ export interface ChatGroupItem {
   /** Ob ich die Auswahl angeboten bekomme. Die Schranke sitzt beim Empfänger. */
   can_mention_everyone?: boolean
   can_pin_messages?: boolean
+  can_set_disappearing_messages?: boolean
   created_at: string
   members: ChatGroupMemberItem[]
   /** Ephemeral room token supplied by a live-call invitation, when present. */
@@ -680,13 +704,21 @@ export async function updateGroupMemberRole(
   })
 }
 
+/**
+ * Wirft ein Mitglied hinaus. Der Einladungscode ist danach ein neuer.
+ *
+ * `invite_code` ist der neue Code — oder `null`, wenn der Aufrufer nicht
+ * einladen darf und ihn deshalb auch hier nicht bekommt. Der alte Link führt
+ * nicht mehr hinein, und die Einladungskarte ist weg.
+ */
 export async function kickGroupMember(
   groupId: number,
   targetUserId: number
-): Promise<{ success: boolean; message: string }> {
-  return api<{ success: boolean; message: string }>(`/social/groups/${groupId}/members/${targetUserId}`, {
-    method: 'DELETE',
-  })
+): Promise<{ success: boolean; message: string; invite_code: string | null }> {
+  return api<{ success: boolean; message: string; invite_code: string | null }>(
+    `/social/groups/${groupId}/members/${targetUserId}`,
+    { method: 'DELETE' },
+  )
 }
 
 export async function updateGroupPermissions(

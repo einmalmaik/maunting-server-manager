@@ -140,19 +140,56 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die um den Messenger-Abschnitt ergaenzte Fassung 3.2 vom 2026-09-13 aus', () => {
+  it('weist die Fassung 3.3 vom 2026-09-23 aus (Unterschrift am Sitzungsaufbau, Rueckfrage vor der Uebergabe, Recht fuer die Verfallsfrist in Gruppen)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.2`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.3`)),
     ).toBeInTheDocument();
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();
     // Maschinenlesbar und sichtbar muessen dasselbe Datum tragen: ein Leser
     // vergleicht den Text, ein Archiv das Attribut.
-    expect(stand).toHaveAttribute('datetime', '2026-09-13');
-    expect(stand).toHaveTextContent('2026-09-13');
+    expect(stand).toHaveAttribute('datetime', '2026-09-23');
+    expect(stand).toHaveTextContent('2026-09-23');
+  });
+
+  /**
+   * Ablehnen heisst beim Koppeln nur „kein Verlauf". Das Gerät bleibt ein Gerät
+   * des Kontos und bekommt jede neue Nachricht und den Notizschlüssel — wer das
+   * nicht will, muss es entfernen. Das gehört in die Erklärung, nicht erst in
+   * die Meldung nach dem Klick.
+   */
+  it('sagt, was nach dem Ablehnen beim Koppeln weiterläuft und wie man ein Gerät loswird', () => {
+    const de = i18n.t('privacyPolicy.sections.messenger.items.deviceHistory', { lng: 'de' })
+    expect(de).toMatch(/nur mit der Unterschrift des übergebenden Geräts/)
+    expect(de).toMatch(/bleibt das Gerät gekoppelt/)
+    expect(de).toMatch(/entferne es/)
+    const en = i18n.t('privacyPolicy.sections.messenger.items.deviceHistory', { lng: 'en' })
+    expect(en).toMatch(/only accepts with the signature of the handing-over device/)
+    expect(en).toMatch(/the device stays paired/)
+    expect(en).toMatch(/remove it/)
+  });
+
+  /**
+   * Durchsicht vom 23.09.: der Text las sich, als hielte die Rückfrage samt
+   * Entfernen den Schaden auf. Der Notizschlüssel geht aber an jedes Gerät des
+   * Kontos, bestätigt oder nicht, und wird beim Entfernen nicht erneuert; ein
+   * schon ausgestellter Zugang gilt noch bis zu 15 Minuten.
+   */
+  it('verspricht vom Entfernen nicht mehr, als es hält', () => {
+    const de = i18n.t('privacyPolicy.sections.messenger.items.deviceHistory', { lng: 'de' })
+    expect(de).toMatch(/auch ohne die Rückfrage beim Koppeln/)
+    expect(de).toMatch(/Beim Entfernen wird er nicht erneuert/)
+    expect(de).toMatch(/bis zu 15 Minuten/)
+    const en = i18n.t('privacyPolicy.sections.messenger.items.deviceHistory', { lng: 'en' })
+    expect(en).toMatch(/without the confirmation used for pairing/)
+    expect(en).toMatch(/Removing a device does not replace that key/)
+    expect(en).toMatch(/up to 15 minutes/)
+    for (const lng of ['de', 'en']) {
+      expect(i18n.t('ai.profile.devicePairRemoved', { lng })).toMatch(/15/)
+    }
   });
 
   /**

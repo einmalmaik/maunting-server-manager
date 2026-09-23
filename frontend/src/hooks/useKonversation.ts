@@ -56,6 +56,7 @@ import {
 } from '@/services/messengerLocalStore'
 import {
   baueZustellungen,
+  drUrheber,
   liesDrUmschlag,
   verarbeiteBootstrap,
   verwirfDrSitzung,
@@ -136,6 +137,13 @@ export interface KonversationOptionen {
   identitaetRef: { current: E2eeIdentity }
   /** Wird gerufen, wenn eine Sitzung neu aufgebaut werden musste. */
   meldeSitzungsbruch: (geraet: string) => void
+  /**
+   * Wird gerufen, wenn ein Sitzungsaufbau abgewiesen wurde: seine Unterschrift
+   * passt nicht zum Verzeichnis, sie fehlt bei einem Konto, das unterschreiben
+   * kann, oder er nennt ein fremdes Konto. Einmal je Aufbau — der abgewiesene
+   * bleibt gemerkt. Die laufende Sitzung bleibt unberührt.
+   */
+  meldeAufbauAbgelehnt: (geraet: string) => void
 }
 
 export interface Konversation {
@@ -295,6 +303,7 @@ export function useKonversation({
   eigeneId,
   identitaetRef,
   meldeSitzungsbruch,
+  meldeAufbauAbgelehnt,
 }: KonversationOptionen): Konversation {
   const blindMailboxId = useMailboxId(ziel, eigeneId)
 
@@ -400,6 +409,25 @@ export function useKonversation({
 
     const gebrochene: { vonKonto: number; vonGeraet: string }[] = []
     /**
+     * Geräte, deren Sitzungsaufbau in diesem Durchlauf offen blieb, als
+     * `konto:gerät`.
+     *
+     * Ihre Nachrichten werden in diesem Durchlauf nicht geöffnet. Liefen sie
+     * gegen eine Sitzung, die es noch nicht gibt, wären sie als Bruch gewertet
+     * und verloren; so kommen sie mit dem Aufbau im nächsten Durchlauf.
+     */
+    const aufbauOffen = new Set<string>()
+    /**
+     * Geräte, von denen ein abgewiesener Sitzungsaufbau im Fenster liegt, als
+     * `konto:gerät`.
+     *
+     * Was von ihnen kommt und sich gegen die bestehende Sitzung nicht öffnen
+     * lässt, gehört zu diesem Aufbau: still, und keine Sitzung verworfen.
+     * Sonst kippte die Nachricht hinter einer Fälschung die echte Sitzung
+     * doch noch.
+     */
+    const aufbauAbgewiesen = new Set<string>()
+    /**
      * Die jüngste Nachricht, für die der Gruppenschlüssel fehlt.
      *
      * Nur sie löst eine Nachforderung aus. Ältere unlesbare Nachrichten stammen
@@ -412,13 +440,18 @@ export function useKonversation({
     const einUmschlag = async (env: BlindEnvelopeItem): Promise<Lesung> => {
       const gespeichert = bekannt.get(env.id)
       if (gespeichert !== undefined) {
+        // Abgelegt wird nur, was sich über den Ratchet öffnen liess, und dessen
+        // Kopf nennt den Absender. Der Zwischenspeicher weiss es nach einem
+        // Neuladen nicht mehr — ohne Absender griffe die Downgrade-Schranke
+        // im Messenger nicht.
+        const kopf = drUrheber(env.ciphertext_envelope)
         const zwischen = envelopePlaintextCache.get(env.id)
         return {
           art: 'klartext',
           env,
           text: gespeichert,
-          vonKonto: zwischen?.vonKonto,
-          vonGeraet: zwischen?.vonGeraet,
+          vonKonto: kopf?.vonKonto ?? zwischen?.vonKonto,
+          vonGeraet: kopf?.vonGeraet ?? zwischen?.vonGeraet,
         }
       }
       const zwischen = envelopePlaintextCache.get(env.id)
@@ -490,6 +523,13 @@ export function useKonversation({
             }
             const aufbau = await verarbeiteBootstrap(drKontext, klartext)
             if (aufbau.istAufbau) {
+              if (aufbau.offen && aufbau.vonKonto && aufbau.vonGeraet) {
+                aufbauOffen.add(`${aufbau.vonKonto}:${aufbau.vonGeraet}`)
+              }
+              if (aufbau.abgewiesen && aufbau.vonKonto && aufbau.vonGeraet) {
+                aufbauAbgewiesen.add(`${aufbau.vonKonto}:${aufbau.vonGeraet}`)
+              }
+              if (aufbau.abgelehnt && aufbau.vonGeraet) meldeAufbauAbgelehnt(aufbau.vonGeraet)
               if (aufbau.ersetzt && aufbau.vonGeraet) meldeSitzungsbruch(aufbau.vonGeraet)
               return { art: 'still', env }
             }
@@ -507,6 +547,9 @@ export function useKonversation({
             // Zustand. Schlägt das fehl, scheitert der ganze Schritt und der
             // Umschlag bleibt beim nächsten Mal lesbar.
             lege: (text) => speichereUmschlagKlartext(mid, env.id, text),
+          }, {
+            zurueckstellen: (vonKonto, vonGeraet) => aufbauOffen.has(`${vonKonto}:${vonGeraet}`),
+            schonen: (vonKonto, vonGeraet) => aufbauAbgewiesen.has(`${vonKonto}:${vonGeraet}`),
           })
           if (lesung.art === 'klartext') {
             envelopePlaintextCache.set(env.id, {
@@ -542,7 +585,10 @@ export function useKonversation({
           // 'eigen' — der Absender kann seine eigene Ratchet-Nachricht nicht
           // öffnen, das ist der Sinn der Sache; sein Gesprächsanteil kommt aus
           // dem lokalen Speicher. 'fremd' — eine der aufgefächerten Kopien für
-          // ein anderes Gerät.
+          // ein anderes Gerät. 'zurueckgestellt' — der Aufbau davor ist noch
+          // offen; ungeöffnet und nicht zwischengespeichert, kommt der Umschlag
+          // im nächsten Durchlauf wieder. 'abgewiesen' — die Nachricht hinter
+          // einem gefälschten Aufbau; gemeldet ist der Aufbau schon.
           return { art: 'still', env }
         }
 
@@ -581,7 +627,7 @@ export function useKonversation({
     }
 
     return gelesen
-  }, [blindMailboxId, eigeneId, gruppenKontext, drKontext, identitaetRef, meldeSitzungsbruch])
+  }, [blindMailboxId, eigeneId, gruppenKontext, drKontext, identitaetRef, meldeSitzungsbruch, meldeAufbauAbgelehnt])
 
   /** Der laufende Durchlauf, und der eine, der hinter ihm warten darf. */
   const laufend = useRef<Promise<unknown>>(Promise.resolve())

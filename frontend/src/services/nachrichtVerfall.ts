@@ -21,6 +21,20 @@
  * eigene Abschaltung würde also beim nächsten Abruf vom alten Einschalten der
  * Gegenseite wieder überrollt.
  *
+ * ## In der Gruppe braucht es ein Recht
+ *
+ * Bis 09/2026 stellte jedes Mitglied die Frist für die ganze Gruppe, und der
+ * Empfänger glaubte obendrein der `actor_id` im Paket: jedes Mitglied konnte
+ * bei allen „<Eigentümer> hat eingestellt …" erscheinen lassen. Seitdem prüft
+ * der Lesepfad zuerst den belegten Urheber (`urheberVon`) und dann dessen Recht
+ * `set_disappearing_messages` (`durfteVerfallStellen`). Wie beim Anheften kann
+ * der Server das nicht: er liest die Umstellung nie.
+ *
+ * Die Reihenfolge zählt. Eine verworfene Umstellung darf `uebernehmeVerfall`
+ * nie erreichen — ihr Zeitpunkt stünde sonst als neuester Stand in der Ablage,
+ * und jede spätere berechtigte Umstellung verlöre gegen ihn. Im Direktchat
+ * gibt es keine Rollen; dort dürfen weiterhin beide.
+ *
  * ## Wer was wegräumt
  *
  * Jede Seite tilgt abgelaufene Zeilen bei sich lokal und nimmt **ihre eigenen**
@@ -42,6 +56,7 @@
  * über einen Steuerumschlag reist, und gehört in eine eigene Runde.
  */
 
+import type { ChatGroupItem } from '@/api/social'
 import { listeLokaleMailboxen, loadLocalMessages } from './messengerLocalStore'
 import { zeitAlsZahl } from './nachrichtBezug'
 import { tilgeNachrichtBeimServer, tilgeNachrichtLokal } from './nachrichtLoeschen'
@@ -165,6 +180,27 @@ export function uebernehmeVerfall(blindMailboxId: string, sekunden: number, stan
   if (zeitAlsZahl(stand) <= zeitAlsZahl(bisher.stand)) return false
   setzeVerfallsfrist(blindMailboxId, sekunden, stand)
   return bisher.sekunden !== sekunden
+}
+
+/**
+ * Ob dieses Mitglied die Frist der Gruppe stellen durfte.
+ *
+ * Dieselbe Bauart wie `durfteAnheften`: die Antwort kommt aus der Marke, die
+ * der Server je Mitglied ausrechnet, nicht aus einer hier nachgebauten
+ * Rollenlogik. Fehlt die Marke, gilt **nein** — eine ausbleibende Umstellung
+ * ist der sichere Ausgang, eine unberechtigte nicht.
+ *
+ * `absenderId` muss der **belegte** Urheber sein, nie die `actor_id` aus dem
+ * Paket: sonst liehe sich jeder das Recht des Eigentümers, indem er dessen
+ * Kennung hineinschreibt.
+ */
+export function durfteVerfallStellen(
+  gruppe: Pick<ChatGroupItem, 'members'> | null | undefined,
+  absenderId: number,
+): boolean {
+  if (!gruppe?.members) return false
+  const m = gruppe.members.find((x) => Number(x.user_id) === Number(absenderId))
+  return Boolean(m?.can_set_disappearing_messages)
 }
 
 /** Wann eine jetzt gesendete Nachricht verfällt, oder `undefined` ohne Frist. */

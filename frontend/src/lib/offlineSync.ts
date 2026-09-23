@@ -1485,12 +1485,21 @@ export function handleIncomingSyncEvent(eventName: string, data: SyncEventPayloa
 
   if ((data as any)?.type === 'e2ee_blind_message' && (data as any)?.control_type?.startsWith('notes_key_')) {
     const cType = (data as any).control_type
-    const targetUid = (data as any).recipient_id || (data as any).sender_user_id || getEffectiveUserId()
+    // Der Notizschlüssel wandert nur zwischen Geräten des angemeldeten Kontos,
+    // gleich wer das Ereignis ausgelöst hat. Auf dem Mailbox-Weg steht in
+    // `recipient_id` nichts, und `sender_user_id` ist, wer den Umschlag
+    // eingeworfen hat — das darf jeder Freund. Bis 09/2026 wurde unter dessen
+    // Kennung gelesen und abgelegt.
+    const targetUid = useAuthStore.getState().user?.id
+    if (typeof targetUid !== 'number' || targetUid <= 0) return
     if (cType === 'notes_key_sync') {
       void checkAndReceiveDeviceNotesKey(targetUid)
     } else if (cType === 'notes_key_request') {
+      // Gefragt hat ein Gerät, und seine Anfrage liegt in der Mailbox: die wird
+      // beantwortet, einmal. Bis 09/2026 ging bei jeder solchen Meldung der
+      // Schlüssel an jedes eigene Gerät — auch an alle, die ihn längst hatten.
       if (hasUserNotesKey(targetUid)) {
-        void syncNotesKeyToPairedDevices(targetUid)
+        void checkAndRespondToDeviceKeyRequests(targetUid)
       }
     }
     return

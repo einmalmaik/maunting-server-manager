@@ -42,6 +42,7 @@ import {
   FileText,
   Upload,
   Shield,
+  ShieldCheck,
   UserCheck,
   Briefcase,
   LayoutGrid,
@@ -143,8 +144,18 @@ import {
   IDENTITY_LOADING,
   type E2eeIdentity,
 } from '@/services/e2eeIdentity'
-import { logischeUuid, DrZustellungFehlgeschlagenError } from '@/services/ratchetSitzung'
-import { geraeteVon, kontoNutztSignaturen, onNeuesGeraet } from '@/services/e2eeGeraet'
+import {
+  logischeUuid,
+  DrGeraetNichtEingetragenError,
+  DrZustellungFehlgeschlagenError,
+} from '@/services/ratchetSitzung'
+import {
+  geraeteVon,
+  kontoNutztSignaturen,
+  onNeuesGeraet,
+  onSchluesselWarnung,
+  sicherheitsnummer,
+} from '@/services/e2eeGeraet'
 import { pruefeNutzlast, signiereNutzlast } from '@/services/nutzlastSignatur'
 import {
   abonniereBekannteGespraeche,
@@ -231,6 +242,7 @@ import {
   type Treffer,
 } from '@/services/verlaufSuche'
 import {
+  durfteVerfallStellen,
   faelligeZeilen,
   istBekannteStufe,
   raeumeAlleChats,
@@ -525,6 +537,9 @@ export function Messenger() {
   // Mute & Block modals
   const [isMuteModalOpen, setIsMuteModalOpen] = useState(false)
   const [isBlockConfirmOpen, setIsBlockConfirmOpen] = useState(false)
+  const [isSafetyNumberModalOpen, setIsSafetyNumberModalOpen] = useState(false)
+  const [contactDevices, setContactDevices] = useState<{ id: string; label: string; number: string }[]>([])
+  const [loadingSafetyNumbers, setLoadingSafetyNumbers] = useState(false)
 
   // Pre-computed mailbox IDs
   const [contactMailboxMap, setContactMailboxMap] = useState<Record<number, string>>({})
@@ -1757,6 +1772,32 @@ export function Messenger() {
   }, [])
 
   /**
+   * Schreibt die Systemzeile zu einem abgewiesenen Sitzungsaufbau.
+   *
+   * Jeder Aufbau meldet sich nur einmal — er bleibt gemerkt. Gedrosselt wird
+   * trotzdem, je Gerät und Minute: wer Fälschungen in Serie schickt, soll den
+   * Verlauf nicht mit Warnungen zuschütten können.
+   */
+  const aufbauMeldungRef = useRef<Map<string, number>>(new Map())
+  const aufbauAbgelehnt = useCallback((geraet: string) => {
+    const jetzt = Date.now()
+    const zuletzt = aufbauMeldungRef.current.get(geraet) || 0
+    if (jetzt - zuletzt < 60_000) return
+    aufbauMeldungRef.current.set(geraet, jetzt)
+
+    const zeile: ChatMessage = {
+      id: jetzt,
+      clientUuid: `sys-dr-abgewiesen-${geraet}-${jetzt}`,
+      senderId: 0,
+      text: t('messenger.sessionSetupRejected'),
+      createdAt: new Date().toISOString(),
+      isSelf: false,
+      isSystem: true,
+    }
+    setMessages((prev) => sortMessagesChronologically([...prev, zeile]))
+  }, [t])
+
+  /**
    * Eine Systemzeile in den offenen Verlauf schreiben.
    *
    * Nur Anzeige und nur für diese Sitzung: sie wandert nicht in die lokale
@@ -1787,6 +1828,13 @@ export function Messenger() {
     geraeteVon(activeContact.userId).catch(() => {})
   }, [activeContact?.userId])
 
+  /*
+  useEffect(() => {
+    if (!currentUserId) return
+    geraeteVon(currentUserId).catch(() => {})
+  }, [currentUserId])
+  */
+
   useEffect(() => {
     const abbestellen = onNeuesGeraet((peerId, neue) => {
       if (neue.length === 0) return
@@ -1814,11 +1862,90 @@ export function Messenger() {
     return abbestellen
   }, [activeContact, activeGroup, t, zeigeSystemzeile])
 
+  useEffect(() => {
+    const abbestellen = onSchluesselWarnung((ev) => {
+      let betroffenerName = ''
+      if (activeContact && activeContact.userId === ev.userId) {
+        betroffenerName = activeContact.username || t('messenger.thisContact')
+      } else if (activeGroup) {
+        const member = (activeGroup.members ?? []).find((m) => Number(m.user_id) === ev.userId)
+        if (member) betroffenerName = member.username || t('messenger.thisContact')
+      } else if (currentUserId === ev.userId) {
+        zeigeSystemzeile(
+          t('messenger.ownKeyChangedWarning', {
+            defaultValue: 'Sicherheitswarnung: Ein Geräteschlüssel deines Kontos hat sich geändert.',
+          }),
+        )
+        return
+      }
+      if (!betroffenerName) return
+
+      if (ev.typ === 'schluessel_geaendert') {
+        zeigeSystemzeile(
+          t('messenger.keyChangedWarning', {
+            name: betroffenerName,
+            defaultValue: `Sicherheitswarnung: Der Geräteschlüssel von ${betroffenerName} hat sich geändert. Bitte überprüfe die Sicherheitsnummer.`,
+          }),
+        )
+      } else if (ev.typ === 'konto_neustart') {
+        zeigeSystemzeile(
+          t('messenger.accountResetWarning', {
+            name: betroffenerName,
+            defaultValue: `Sicherheitswarnung: Alle Geräte von ${betroffenerName} wurden ersetzt. Bitte überprüfe die Sicherheitsnummer.`,
+          }),
+        )
+      }
+    })
+    return abbestellen
+  }, [activeContact, activeGroup, currentUserId, t, zeigeSystemzeile])
+
+  useEffect(() => {
+    if (!isSafetyNumberModalOpen || !activeContact?.userId) {
+      setContactDevices([])
+      return
+    }
+    let aktiv = true
+    setLoadingSafetyNumbers(true)
+    geraeteVon(activeContact.userId)
+      .then(async (geraete) => {
+        const ergebnisse: { id: string; label: string; number: string }[] = []
+        for (const g of geraete) {
+          let num = ''
+          if (g.public_key) {
+            try {
+              num = await sicherheitsnummer(g.public_key)
+            } catch {
+              num = ''
+            }
+          }
+          ergebnisse.push({
+            id: g.device_id,
+            label: g.label || t('profile.e2eeDevices.unnamed'),
+            number: num,
+          })
+        }
+        if (aktiv) {
+          setContactDevices(ergebnisse)
+          setLoadingSafetyNumbers(false)
+        }
+      })
+      .catch(() => {
+        if (aktiv) {
+          setContactDevices([])
+          setLoadingSafetyNumbers(false)
+        }
+      })
+    return () => {
+      aktiv = false
+    }
+  }, [isSafetyNumberModalOpen, activeContact?.userId, t])
+
   const konversation = useKonversation({
     ziel: gespraechsZiel,
     eigeneId: currentUserId,
     identitaetRef: identityRef,
     meldeSitzungsbruch: sitzungNeuGemeldet,
+    meldeAufbauAbgelehnt: aufbauAbgelehnt,
   })
   const blindMailboxId = konversation.blindMailboxId
 
@@ -2001,6 +2128,7 @@ export function Messenger() {
 
   const loadMessages = async (isInitial = false) => {
     const currentMid = blindMailboxId
+    console.log('[DEBUG loadMessages] called, currentMid:', currentMid, 'activeMailboxIdRef:', activeMailboxIdRef.current, 'currentUserId:', currentUserId)
     if (!currentMid || !currentUserId) return
     if (activeMailboxIdRef.current !== currentMid) return
     // Erst entschlüsseln, wenn feststeht, welche Schlüssel dieses Gerät hat.
@@ -2022,8 +2150,12 @@ export function Messenger() {
       // Mailbox, welches Verfahren, was ein Umschlag bedeutet. Hier bleibt die
       // Anzeige — Quittungen, Häkchen, Bearbeiten und Löschen.
       const gelesen = await konversation.liesUmschlaege()
-      if (gelesen === null) return
-      if (activeMailboxIdRef.current !== currentMid || currentLoadSeqRef.current !== seq) return
+      console.log('[DEBUG loadMessages] gelesen:', gelesen?.map(g => ({ art: g.art, envId: g.env.id, text: g.art === 'klartext' ? g.text : undefined })))
+      if (gelesen === null) { console.log('[DEBUG loadMessages] gelesen is null, returning'); return }
+      if (activeMailboxIdRef.current !== currentMid || currentLoadSeqRef.current !== seq) {
+        console.log('[DEBUG loadMessages] sequence or activeMailboxId changed! activeMailboxIdRef:', activeMailboxIdRef.current, 'currentMid:', currentMid, 'currentLoadSeqRef:', currentLoadSeqRef.current, 'seq:', seq)
+        return
+      }
 
       const decryptedList: ChatMessage[] = []
       const seenEnvelopeIds = new Set<number>()
@@ -2122,6 +2254,22 @@ export function Messenger() {
             ) {
               console.warn(
                 '[Messenger] Dropping payload: signature and ratchet disagree on sender',
+              )
+              continue
+            }
+            // Die Downgrade-Schranke gilt auch für den Ratchet. Eine Sitzung aus
+            // der Zeit vor der Unterschrift am Sitzungsaufbau (09/2026) wurde nie
+            // geprüft — auch eine untergeschobene nicht, und die liefe weiter.
+            // Wer unterschreiben kann, unterschreibt jede Nachricht; fehlt der
+            // Beleg trotzdem, schreibt jemand anderes über diese Sitzung.
+            if (
+              beleg.art === 'unsigniert' &&
+              ratchetUrheber !== undefined &&
+              (await kontoNutztSignaturen(Number(ratchetUrheber)))
+            ) {
+              console.warn(
+                '[Messenger] Dropping unsigned ratchet payload from an account that signs:',
+                ratchetUrheber,
               )
               continue
             }
@@ -2251,11 +2399,31 @@ export function Messenger() {
             //    zweiter Abruf läuft. Der Eintrag wäre dann schon geschrieben,
             //    die Meldung darüber aber verschluckt — und `uebernehmeVerfall`
             //    meldet dieselbe Umstellung kein zweites Mal.
+            //
+            //    Wer umgestellt hat, sagt der Beleg, nicht `actor_id`. Bis
+            //    09/2026 stand hier `Number(parsed.actor_id)`: jedes Mitglied
+            //    hält den Gruppenschlüssel und unterschreibt seine eigene
+            //    Nutzlast, konnte also bei allen „<Eigentümer> hat eingestellt
+            //    …" erscheinen lassen, und im Direktchat die Gegenseite ein
+            //    „Du hast eingestellt …". In der Gruppe braucht die Umstellung
+            //    seitdem auch das Recht `set_disappearing_messages`; im
+            //    Direktchat gibt es keine Rollen.
+            //
+            //    Beide Schranken stehen vor `uebernehmeVerfall`, nicht danach:
+            //    ein verworfenes Paket landete dort sonst als neuester Stand,
+            //    und jede spätere berechtigte Umstellung verlöre gegen seinen
+            //    Zeitpunkt — lautlos, wenn sich an der Frist nichts ändert.
             if (parsed.type === 'retention') {
+              const urheber = await urheberVon(parsed.actor_id)
+              if (urheber === null) {
+                console.warn('[Messenger] Dropping retention packet with forged actor_id:', parsed.actor_id)
+                continue
+              }
+              const wer = Number(urheber || 0)
+              if (activeGroup && !(wer && durfteVerfallStellen(activeGroup, wer))) continue
               const dauer = Number(parsed.dauer || 0)
               const wann = String(parsed.zeitpunkt || env.created_at)
               if (istBekannteStufe(dauer) && uebernehmeVerfall(currentMid, dauer, wann)) {
-                const wer = Number(parsed.actor_id || 0)
                 const selbst = wer === Number(currentUserId)
                 const name = selbst
                   ? t('messenger.retentionYou')
@@ -2305,6 +2473,29 @@ export function Messenger() {
              * Zeile lag nach der ersten Laufzeitprobe im Testchat.
              */
             if (istSteuerpaket(parsed.type)) continue
+
+            /*
+             * Direktchat ohne jeden Beleg: keine Unterschrift und kein Ratchet.
+             *
+             * So kommt ein Hybridumschlag an, und versiegeln kann den jeder,
+             * der den Geräteschlüssel dieses Geräts kennt — der Server
+             * allemal. Bis 09/2026 stand er trotzdem als Nachricht der
+             * Gegenseite im Verlauf. Gilt nur noch, solange die Gegenseite
+             * nicht unterschreiben kann; dieselbe Schranke wie oben für den
+             * Ratchet. Vor der Kennungsliste, damit eine verworfene Fälschung
+             * der echten Nachricht mit derselben Kennung nicht den Platz nimmt.
+             */
+            if (
+              activeContact &&
+              belegterUrheber === undefined &&
+              (await kontoNutztSignaturen(Number(activeContact.userId)))
+            ) {
+              console.warn(
+                '[Messenger] Dropping unsigned direct message without a ratchet sender:',
+                activeContact.userId,
+              )
+              continue
+            }
 
             // Normal Chat Message
             // Die Kennung aus dem Umschlag trägt einen Gerätezusatz je Kopie;
@@ -2453,7 +2644,32 @@ export function Messenger() {
             continue
           }
         } catch {
-          // Legacy / simple text fallback
+          /*
+           * Klartext ohne JSON-Hülle, aus der Zeit vor der Hülle.
+           *
+           * Er trägt keine Unterschrift. Wer ihn geschrieben hat, sagt im
+           * Direktchat der Ratchet; ohne ihn bleibt nur die Behauptung —
+           * `[ME]:` am Anfang, sonst die Gegenseite. Bis 09/2026 galt die
+           * Behauptung auch über den Ratchet: eine Nachricht der Gegenseite
+           * mit `[ME]:` stand als eigene im Verlauf. Und wie jeder Beleg gilt
+           * sie nur für ein Konto, das nicht unterschreiben kann — wer es
+           * kann, schickt JSON mit Unterschrift.
+           */
+          const ratchetUrheber = lesung.art === 'klartext' ? lesung.vonKonto : undefined
+          const vonMirBehauptet = plain.startsWith('[ME]:')
+          const urheber =
+            ratchetUrheber !== undefined
+              ? Number(ratchetUrheber)
+              : vonMirBehauptet
+                ? Number(currentUserId)
+                : activeContact
+                  ? Number(activeContact.userId)
+                  : 0
+          if (urheber > 0 && (await kontoNutztSignaturen(urheber))) {
+            console.warn('[Messenger] Dropping unsigned plain-text message from an account that signs:', urheber)
+            continue
+          }
+
           const clientUuid = logischeUuid(env.client_uuid)
           if (clientUuid && seenClientUuids.has(clientUuid)) {
             continue
@@ -2462,14 +2678,11 @@ export function Messenger() {
             seenClientUuids.add(clientUuid)
           }
 
-          let text = plain
-          let isSelf = false
-          let senderId = activeContact ? activeContact.userId : 0
-          if (plain.startsWith('[ME]:')) {
-            text = plain.replace('[ME]:', '')
-            isSelf = true
-            senderId = currentUserId
-          }
+          const isSelf = urheber === Number(currentUserId)
+          // Die Markierung fällt nur weg, wo sie stimmt. Nennt der Ratchet die
+          // Gegenseite, bleibt sie stehen: so sieht man, was behauptet wurde.
+          const text = isSelf && vonMirBehauptet ? plain.slice('[ME]:'.length) : plain
+          const senderId = urheber || (activeContact ? activeContact.userId : 0)
           if (!isSelf && env.id > maxIncomingId) {
             maxIncomingId = env.id
           }
@@ -2679,6 +2892,7 @@ export function Messenger() {
         const combined = lokalerVerlauf.length
           ? (mischeVerlauf(lokalerVerlauf, frisch) as ChatMessage[])
           : sortMessagesChronologically(frisch)
+        console.log('[DEBUG loadMessages] maxPartnerDeliveredId:', maxPartnerDeliveredId, 'combined:', combined.map(c => ({ id: c.id, clientUuid: c.clientUuid, status: c.status, isDelivered: c.isDelivered })))
         sessionChatCache.set(currentMid, combined.slice(-80))
         void saveLocalMessages(currentMid, combined.slice(-200))
         return combined
@@ -2778,7 +2992,8 @@ export function Messenger() {
           dispatchReadReceipt()
         }
       }
-    } catch {
+    } catch (err) {
+      console.log('[DEBUG loadMessages] CAUGHT ERROR:', err)
       // Offline fallback
     } finally {
       if (isInitial && activeMailboxIdRef.current === currentMid) {
@@ -3130,6 +3345,7 @@ export function Messenger() {
         g.owner_user_id,
         g.can_pin_messages ?? null,
         g.can_mention_everyone ?? null,
+        g.can_set_disappearing_messages ?? null,
         g.name ?? null,
         g.description ?? null,
         g.avatar_url ?? null,
@@ -3140,6 +3356,18 @@ export function Messenger() {
 
   /** Ob ich in dieser Gruppe anheften darf — vom Server entschieden. */
   const darfAnheften = Boolean(activeGroup?.can_pin_messages)
+
+  /**
+   * Ob ich die Verfallsfrist dieses Chats umstellen darf.
+   *
+   * Im Direktchat immer, dort gibt es keine Rollen. In der Gruppe entscheidet
+   * der Server — dieselbe Rechnung, deren Marke die anderen Geräte am Mitglied
+   * prüfen. Nicht `gruppenrechteVon`: der verschlüsselte Rollenblock gibt
+   * dieses Recht beim Empfänger nicht, und eine Auswahl, die bei allen anderen
+   * folgenlos verpufft, wäre eine Irreführung. Hier sperren ist die Höflichkeit,
+   * dort verwerfen die Wirkung.
+   */
+  const darfVerfallStellen = !activeGroup || Boolean(activeGroup.can_set_disappearing_messages)
 
 
   /**
@@ -3193,6 +3421,14 @@ export function Messenger() {
   const handleVerfallWaehlen = async (sekunden: number) => {
     if (!blindMailboxId || sekunden === verfallSekunden) {
       setVerfallOffen(false)
+      return
+    }
+    // Ohne das Recht ist die Auswahl gar nicht erst zu öffnen. Das hier fängt
+    // den Fall ab, dass es entzogen wurde, während sie offen stand: gesendet
+    // würde eine Umstellung, die jedes andere Gerät verwirft.
+    if (!darfVerfallStellen) {
+      setVerfallOffen(false)
+      toast.error(t('messenger.retentionNoRight'))
       return
     }
     const vorher = verfallStand(blindMailboxId)
@@ -3608,6 +3844,7 @@ export function Messenger() {
       ) {
         useCallStore.getState().handleCallSyncEvent(detail)
       } else if (detail?.type === 'e2ee_blind_message') {
+        console.log('[DEBUG handleSync] detail:', detail, 'blindMailboxId:', blindMailboxId)
         const isCurrentActive = detail.blind_mailbox_id === blindMailboxId
         // Outgoing Echo Prevention: Sender niemals benachrichtigen
         if (detail.sender_user_id && currentUserId && Number(detail.sender_user_id) === Number(currentUserId)) {
@@ -4379,7 +4616,8 @@ export function Messenger() {
       const istSchluesselProblem =
         err instanceof E2eeRecipientKeyMissingError ||
         err instanceof E2eeIdentityLockedError ||
-        err instanceof DrZustellungFehlgeschlagenError
+        err instanceof DrZustellungFehlgeschlagenError ||
+        err instanceof DrGeraetNichtEingetragenError
 
       if (istSchluesselProblem) {
         // Konnte nicht verschlüsselt werden: die optimistisch eingefügte
@@ -4406,6 +4644,10 @@ export function Messenger() {
           // nächste Versuch setzt die Sitzung neu auf, deshalb der Hinweis auf
           // das Wiederholen statt einer Aussage über den Kontakt.
           toast.error(t('messenger.encryptFailed'))
+        } else if (err instanceof DrGeraetNichtEingetragenError) {
+          // Dieses Gerät wurde in der Geräteliste entfernt. Der Text sagt,
+          // warum nicht gesendet wird und was es wieder einträgt.
+          toast.error(err.message)
         } else {
           toast.error(
             t('messenger.noDeviceOnline', {
@@ -6355,10 +6597,28 @@ export function Messenger() {
                           }}
                         />
                       )}
+                      {activeContact && (
+                        <Blatteintrag
+                          icon={<ShieldCheck className="w-4 h-4" />}
+                          label={t('messenger.verifySafetyNumber')}
+                          onClick={() => {
+                            schliessen()
+                            setIsSafetyNumberModalOpen(true)
+                          }}
+                        />
+                      )}
+                      {/* Die aktuelle Frist steht auch ohne das Recht da —
+                          wissen, wann die eigenen Nachrichten verschwinden,
+                          darf jedes Mitglied. */}
                       <Blatteintrag
                         icon={<Timer className="w-4 h-4" />}
                         label={t('messenger.disappearingMessages')}
-                        hinweis={stufenLabel(verfallSekunden > 0 ? verfallSekunden : 0, t)}
+                        hinweis={
+                          darfVerfallStellen
+                            ? stufenLabel(verfallSekunden > 0 ? verfallSekunden : 0, t)
+                            : `${stufenLabel(verfallSekunden > 0 ? verfallSekunden : 0, t)} · ${t('messenger.retentionNoRight')}`
+                        }
+                        disabled={!darfVerfallStellen}
                         onClick={() => {
                           schliessen()
                           setVerfallOffen(true)
@@ -7868,6 +8128,47 @@ export function Messenger() {
               onClick={() => setIsMuteModalOpen(false)}
             >
               Abbrechen
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Design-DNA Sicherheitsnummer Dialog */}
+      <Dialog open={isSafetyNumberModalOpen} onOpenChange={setIsSafetyNumberModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-secondary" />
+              <span>{t('messenger.safetyNumberModalTitle')}</span>
+            </DialogTitle>
+            <DialogDescription>
+              {t('messenger.safetyNumberModalDesc')}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-3 px-6 py-4">
+            {loadingSafetyNumbers && (
+              <p className="text-xs text-on-surface-variant">{t('common.loading')}</p>
+            )}
+            {!loadingSafetyNumbers && contactDevices.length === 0 && (
+              <p className="text-xs text-on-surface-variant">{t('messenger.noDeviceOnline', { name: activeContact?.username || '' })}</p>
+            )}
+            {!loadingSafetyNumbers && contactDevices.map((d) => (
+              <div key={d.id} className="rounded-lg border border-outline-variant/30 bg-surface-container-high/40 p-3 space-y-1">
+                <div className="flex items-center justify-between text-xs text-on-surface font-medium">
+                  <span>{d.label}</span>
+                  <span className="font-mono text-on-surface-variant">{d.id.slice(0, 10)}</span>
+                </div>
+                <div className="font-mono text-sm tracking-wider text-primary font-bold bg-surface-container-lowest/60 rounded px-2 py-1.5 text-center select-all">
+                  {d.number || '—'}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <DialogFooter>
+            <Button variant="secondary" size="sm" onClick={() => setIsSafetyNumberModalOpen(false)}>
+              {t('common.close')}
             </Button>
           </DialogFooter>
         </DialogContent>

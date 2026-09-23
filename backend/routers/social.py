@@ -23,6 +23,7 @@ from schemas.social import (
     E2eeTypingSignalCreate,
     E2eeDeviceItem,
     E2eeDeviceUpdate,
+    E2eeDeviceApproveRequest,
     FriendRequestCreate,
     FriendResponse,
     PresenceInfo,
@@ -297,26 +298,57 @@ def put_own_e2ee_device(
         "public_key": eintrag.public_key_jwk,
         "signing_public_key": eintrag.signing_public_key_jwk or "",
         "label": eintrag.label or "",
+        "is_approved": eintrag.is_approved,
     }
 
 
 @router.get("/e2ee/devices/{target_user_id}", response_model=list[E2eeDeviceItem], dependencies=[Depends(_check_social_enabled)])
 def get_e2ee_devices(
     target_user_id: int,
+    include_unapproved: bool = False,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> list[dict]:
     """Die Zustelladressen eines Kontos.
 
     Angemeldet zu sein genügt — wie zuvor beim Kontoschlüssel. Was hier
-    herauskommt, sind öffentliche Schlüssel und bedeutungsfreie Zufallskennungen;
-    beides steht ohnehin im Klartext in jedem Umschlag, den das Relais
-    weiterreicht.
+    herauskommt, sind öffentliche Schlüssel und bedeutungsfreie Zufallskennungen.
+
+    Schutz vor unbefugtem Mitlesen: Dritte erhalten AUSSCHLIESSLICH bestätigte
+    Geräte (nur_bestaetigt=True). Nur der Kontoinhaber selbst darf include_unapproved=True
+    abfragen (z. B. um ausstehende Geräte zu prüfen und freizugeben).
     """
     target = db.query(User).filter_by(id=target_user_id).first()
     if not target or not target.is_active:
         raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
-    return e2ee_device_service.geraete(db, target_user_id)
+    nur_bestaetigt = True
+    if include_unapproved and current_user.id == target_user_id:
+        nur_bestaetigt = False
+    return e2ee_device_service.geraete(db, target_user_id, nur_bestaetigt=nur_bestaetigt)
+
+
+@router.post("/e2ee/devices/self/approve", dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
+def approve_own_e2ee_device(
+    req: E2eeDeviceApproveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Bestätigt ein ausstehendes Gerät des Benutzers."""
+    success = e2ee_device_service.bestaetigen(
+        db, user, req.device_id, approver_device_id=req.approver_device_id, signature=req.signature
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail="Gerät konnte nicht bestätigt werden")
+    return {"ok": True}
+
+
+@router.get("/e2ee/devices/self/pending", response_model=list[E2eeDeviceItem], dependencies=[Depends(_check_social_enabled)])
+def get_pending_e2ee_devices(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[dict]:
+    """Liefert alle noch unbestätigten Geräte des angemeldeten Benutzers."""
+    return e2ee_device_service.ausstehende_geraete(db, user)
 
 
 @router.delete("/e2ee/devices/self", dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
@@ -1025,8 +1057,23 @@ def kick_group_member_endpoint(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    SocialService.kick_group_member(db, group_id=group_id, target_user_id=target_user_id, caller=user)
-    return {"success": True, "message": "Mitglied aus Gruppe entfernt"}
+    """Wirft ein Mitglied hinaus; der Einladungscode ist danach ein neuer.
+
+    Der neue Code geht in der Antwort zurück — sonst teilte der Einladende bis
+    zum nächsten Laden einen toten Link. Aber nur an jemanden, der ihn ohnehin
+    sehen dürfte (`darf_einladen`): wer nur hinauswerfen darf, bekommt ihn hier
+    so wenig wie in der Gruppenliste.
+    """
+    group = SocialService.kick_group_member(
+        db, group_id=group_id, target_user_id=target_user_id, caller=user
+    )
+    return {
+        "success": True,
+        "message": "Mitglied aus Gruppe entfernt",
+        "invite_code": (
+            group.invite_code if SocialService.darf_einladen(db, group_id, user.id) else None
+        ),
+    }
 
 
 @router.patch("/groups/{group_id}/permissions", response_model=ChatGroupResponse, dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])

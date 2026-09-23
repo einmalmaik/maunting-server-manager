@@ -95,6 +95,25 @@ def veroeffentlichen(
         .first()
     )
     if bestand is not None:
+        key_geaendert = (bestand.public_key_jwk != public_key_jwk) or (
+            bool(signatur) and bestand.signing_public_key_jwk != signatur
+        )
+        if key_geaendert:
+            # Schutz vor Kapern einer Gerätekennung durch Angreifer mit Passwort:
+            # Ändert ein Gerät seinen Schlüssel, verliert es seine Freigabe, wenn es andere
+            # freigegebene Geräte gibt.
+            andere_bestaetigt = (
+                db.query(UserE2eeDevice)
+                .filter(
+                    UserE2eeDevice.user_id == user.id,
+                    UserE2eeDevice.device_id != kennung,
+                    UserE2eeDevice.is_approved.is_(True),
+                )
+                .count()
+            )
+            if andere_bestaetigt > 0:
+                bestand.is_approved = False
+
         bestand.public_key_jwk = public_key_jwk
         if signatur:
             bestand.signing_public_key_jwk = signatur
@@ -107,12 +126,23 @@ def veroeffentlichen(
 
     _deckel_einhalten(db, user)
 
+    # Geraetebestaetigung: Gibt es bereits bestaetigte Geraete fuer diesen Benutzer?
+    # Wenn ja, muss ein neues Geraet freigegeben werden (is_approved=False).
+    # Wenn nein (erstes Geraet), wird es automatisch bestaetigt (is_approved=True).
+    bestehende_bestaetigt = (
+        db.query(UserE2eeDevice)
+        .filter(UserE2eeDevice.user_id == user.id, UserE2eeDevice.is_approved.is_(True))
+        .count()
+    )
+    is_approved = (bestehende_bestaetigt == 0)
+
     eintrag = UserE2eeDevice(
         user_id=user.id,
         device_id=kennung,
         public_key_jwk=public_key_jwk,
         signing_public_key_jwk=signatur or None,
         label=(label or "").strip()[:MAX_BEZEICHNUNG],
+        is_approved=is_approved,
         created_at=_jetzt(),
         last_seen_at=_jetzt(),
     )
@@ -186,12 +216,135 @@ def _deckel_einhalten(db: Session, user: User) -> None:
         raise GeraetedeckelErreichtError()
 
 
-def geraete(db: Session, user_id: int) -> list[dict]:
-    """Die Zustelladressen eines Kontos, juengste Aktivitaet zuerst."""
+def geraete(db: Session, user_id: int, nur_bestaetigt: bool = False) -> list[dict]:
+    """Die Zustelladressen eines Kontos, juengste Aktivitaet zuerst.
+
+    Wenn `nur_bestaetigt=True` gesetzt ist, werden ausschliesslich freigegebene
+    Geraete zurueckgegeben, damit unbestaetigte Geraete keine Nachrichten oder
+    Schluessel erhalten koennen.
+    """
+    query = db.query(UserE2eeDevice).filter(UserE2eeDevice.user_id == user_id)
+    if nur_bestaetigt:
+        query = query.filter(UserE2eeDevice.is_approved.is_(True))
+    eintraege = query.order_by(UserE2eeDevice.last_seen_at.desc()).all()
+    return [
+        {
+            "device_id": e.device_id,
+            "public_key": e.public_key_jwk,
+            "signing_public_key": e.signing_public_key_jwk or "",
+            "label": e.label or "",
+            "is_approved": e.is_approved,
+        }
+        for e in eintraege
+    ]
+
+
+def _verify_approval_signature(
+    user_id: int, target_device_id: str, signing_jwk_str: str, signature_b64: str
+) -> bool:
+    try:
+        import base64
+        import json
+        from cryptography.hazmat.primitives.asymmetric import ec, utils
+        from cryptography.hazmat.primitives import hashes
+
+        jwk = json.loads(signing_jwk_str)
+
+        def b64url_decode(s: str) -> bytes:
+            s += "=" * ((4 - len(s) % 4) % 4)
+            return base64.urlsafe_b64decode(s)
+
+        x_bytes = b64url_decode(jwk["x"])
+        y_bytes = b64url_decode(jwk["y"])
+        x_int = int.from_bytes(x_bytes, "big")
+        y_int = int.from_bytes(y_bytes, "big")
+
+        pub_key = ec.EllipticCurvePublicNumbers(x_int, y_int, ec.SECP256R1()).public_key()
+        raw_sig = base64.b64decode(signature_b64)
+        if len(raw_sig) != 64:
+            return False
+        r = int.from_bytes(raw_sig[:32], "big")
+        s = int.from_bytes(raw_sig[32:], "big")
+        der_sig = utils.encode_dss_signature(r, s)
+
+        msg = f"msm:device-approval:v1:{user_id}:{target_device_id}".encode("utf-8")
+        pub_key.verify(der_sig, msg, ec.ECDSA(hashes.SHA256()))
+        return True
+    except Exception:
+        return False
+
+
+def bestaetigen(
+    db: Session,
+    user: User,
+    device_id: str,
+    approver_device_id: str | None = None,
+    signature: str | None = None,
+) -> bool:
+    """Bestaetigt ein ausstehendes Geraet des Benutzers.
+
+    Geraetefreigabe: Nur freigegebene Geraete duerfen Nachrichten und
+    Schluessel erhalten. Wer dein Passwort hat, liest trotzdem nicht mit.
+    """
+    target_id = (device_id or "").strip()
+    eintrag = (
+        db.query(UserE2eeDevice)
+        .filter(
+            UserE2eeDevice.user_id == user.id,
+            UserE2eeDevice.device_id == target_id,
+        )
+        .first()
+    )
+    if eintrag is None:
+        return False
+
+    # Ein unbestaetigtes Geraet kann sich unter keinen Umstaenden selbst freigeben
+    if approver_device_id and approver_device_id.strip() == target_id:
+        return False
+
+    bestehende_bestaetigt = (
+        db.query(UserE2eeDevice)
+        .filter(
+            UserE2eeDevice.user_id == user.id,
+            UserE2eeDevice.device_id != target_id,
+            UserE2eeDevice.is_approved.is_(True),
+        )
+        .all()
+    )
+    if bestehende_bestaetigt:
+        # Wenn bereits freigegebene Geraete existieren, MUSS die Freigabe
+        # zwingend durch eines dieser Geraete erfolgen (Passwort-Kompromittierungsschutz).
+        if not approver_device_id:
+            return False
+        approver = next(
+            (g for g in bestehende_bestaetigt if g.device_id == approver_device_id.strip()),
+            None,
+        )
+        if approver is None:
+            return False
+        if approver.signing_public_key_jwk:
+            if not signature:
+                return False
+            if not _verify_approval_signature(
+                user.id, target_id, approver.signing_public_key_jwk, signature
+            ):
+                return False
+
+    eintrag.is_approved = True
+    db.commit()
+    db.refresh(eintrag)
+    return True
+
+
+def ausstehende_geraete(db: Session, user: User) -> list[dict]:
+    """Geraete des Kontos, die noch auf Bestaetigung warten."""
     eintraege = (
         db.query(UserE2eeDevice)
-        .filter(UserE2eeDevice.user_id == user_id)
-        .order_by(UserE2eeDevice.last_seen_at.desc())
+        .filter(
+            UserE2eeDevice.user_id == user.id,
+            UserE2eeDevice.is_approved.is_(False),
+        )
+        .order_by(UserE2eeDevice.created_at.desc())
         .all()
     )
     return [
@@ -200,6 +353,7 @@ def geraete(db: Session, user_id: int) -> list[dict]:
             "public_key": e.public_key_jwk,
             "signing_public_key": e.signing_public_key_jwk or "",
             "label": e.label or "",
+            "is_approved": False,
         }
         for e in eintraege
     ]

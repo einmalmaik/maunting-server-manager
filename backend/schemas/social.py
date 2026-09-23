@@ -571,6 +571,13 @@ class E2eeDeviceItem(BaseModel):
     public_key: str
     signing_public_key: str = ""
     label: str = ""
+    is_approved: bool = True
+
+
+class E2eeDeviceApproveRequest(BaseModel):
+    device_id: str
+    approver_device_id: str | None = None
+    signature: str | None = None
 
 
 class SocialProfileResponse(BaseModel):
@@ -606,11 +613,14 @@ class ChatGroupMemberResponse(BaseModel):
     role: str
     permissions: str | None = None
     # Der Server liest den Inhalt einer Nachricht nicht und kann deshalb nicht
-    # pruefen, ob jemand ``@everyone`` geschrieben hat. Das entscheidet der
-    # empfangende Client — mit der Rechtelage des **Absenders**. Darum haengen
-    # diese beiden Marken am Mitglied und nicht nur an der Gruppe.
+    # pruefen, ob jemand ``@everyone`` geschrieben, angeheftet oder die
+    # Verfallsfrist gestellt hat. Das entscheidet der empfangende Client — mit
+    # der Rechtelage des **Absenders**. Darum haengen diese Marken am Mitglied
+    # und nicht nur an der Gruppe. Fehlt eine hier, wirft ``response_model``
+    # sie still weg, und beim Empfaenger heisst eine fehlende Marke nein.
     can_mention_everyone: bool = False
     can_pin_messages: bool = False
+    can_set_disappearing_messages: bool = False
     joined_at: datetime
 
 
@@ -695,6 +705,7 @@ class ChatGroupResponse(BaseModel):
     # Schranke: die sitzt beim Empfaenger.
     can_mention_everyone: bool = False
     can_pin_messages: bool = False
+    can_set_disappearing_messages: bool = False
     created_at: datetime
     members: list[ChatGroupMemberResponse] = []
     room_token: str | None = None

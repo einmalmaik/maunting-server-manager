@@ -51,6 +51,11 @@ export const GRUPPEN_RECHTE = [
   { key: 'delete_messages', category: 'moderation' },
   { key: 'mention_everyone', category: 'moderation' },
   { key: 'pin_messages', category: 'moderation' },
+  // Seit 09/2026. Vorher stellte jedes Mitglied die Frist für die ganze
+  // Gruppe. Bewusst nicht in der Vorlage „Moderator": die Frist entscheidet,
+  // wie lange die Nachrichten aller leben, und der Empfänger fragt ohnehin die
+  // Marke vom Server — die bekommt ein Moderator nur mit Eintrag.
+  { key: 'set_disappearing_messages', category: 'moderation' },
   { key: 'manage_roles', category: 'administration' },
 ] as const
 

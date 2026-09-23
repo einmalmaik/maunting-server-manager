@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import logging
 from typing import Any
 from fastapi import HTTPException
@@ -23,6 +23,7 @@ from models import (
     ChatStory,
     DirectChat,
 )
+from models.chat_group import generate_invite_code
 from services.panel_settings_service import PanelSettingsService
 from services.sync_event_service import SyncEventService
 from services.achievement_service import AchievementService
@@ -31,6 +32,10 @@ from services.call_room_service import GroupCallRoomRegistry
 from services import webpush_service
 
 logger = logging.getLogger(__name__)
+
+#: Vorhaltefrist für E2EE-Umschläge auf dem Relais-Server (30 Tage).
+#: Schützt vor Datenanhäufung bei Datenlecks und erzwingt das Zero-Knowledge-Prinzip.
+E2EE_ENVELOPE_RETENTION_DAYS: int = 30
 
 
 #: Alle Rechte, die eine Gruppenrolle tragen kann. Wer hier nichts stehen hat,
@@ -50,6 +55,7 @@ GROUP_PERMISSIONS: frozenset[str] = frozenset(
         "manage_roles",
         "mention_everyone",
         "pin_messages",
+        "set_disappearing_messages",
     }
 )
 
@@ -65,15 +71,21 @@ GROUP_CALL_PERMISSIONS: frozenset[str] = frozenset(
     }
 )
 
-#: Rechte, die in die laufende Unterhaltung eingreifen: alle auf einmal wecken
-#: und eine Nachricht über den Verlauf heften. Dieselbe Begründung wie bei den
+#: Rechte, die in die laufende Unterhaltung eingreifen: alle auf einmal wecken,
+#: eine Nachricht über den Verlauf heften und die Frist stellen, nach der neue
+#: Nachrichten für alle verschwinden. Dieselbe Begründung wie bei den
 #: Anrufrechten — wer die Rollen verwaltet, kann sie sich ohnehin selbst
 #: eintragen, und ein Eigentümer, der seine eigene Gruppe nicht erreichen darf,
 #: wäre kein Schutz, sondern ein Rätsel.
+#:
+#: Durchgesetzt wird keines davon hier: die Handlung reist verschlüsselt, und
+#: der Server liest sie nie. Er rechnet nur die Marke je Mitglied aus
+#: (``list_user_groups``), gegen die das **empfangende** Gerät prüft.
 GROUP_MODERATION_PERMISSIONS: frozenset[str] = frozenset(
     {
         "mention_everyone",
         "pin_messages",
+        "set_disappearing_messages",
     }
 )
 
@@ -1876,12 +1888,38 @@ class SocialService:
         return len(rows)
 
     @classmethod
+    def cleanup_expired_envelopes(
+        cls, db: Session, days: int = E2EE_ENVELOPE_RETENTION_DAYS
+    ) -> int:
+        """Löscht blinde Umschläge, die älter als `days` Tage sind (Default: 30 Tage).
+
+        Zero-Knowledge / Vorhaltefrist-Garantie:
+        Der Relais-Server speichert Umschläge maximal 30 Tage.
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        deleted = (
+            db.query(E2eeBlindEnvelope)
+            .filter(E2eeBlindEnvelope.created_at < cutoff)
+            .delete(synchronize_session=False)
+        )
+        if deleted > 0:
+            db.commit()
+            logger.info(
+                "E2EE-Vorhaltefrist: %d abgelaufene Umschläge (> %d Tage) bereinigt.",
+                deleted,
+                days,
+            )
+        return deleted
+
+    @classmethod
     def get_blind_envelopes(
         cls, db: Session, blind_mailbox_id: str, since_id: int = 0, limit: int = 50
     ) -> list[E2eeBlindEnvelope]:
-        """Holt blinde Umschläge aus einer Mailbox ab."""
+        """Holt blinde Umschläge aus einer Mailbox ab (maximal 30 Tage alt)."""
+        cutoff = datetime.now(timezone.utc) - timedelta(days=E2EE_ENVELOPE_RETENTION_DAYS)
         query = db.query(E2eeBlindEnvelope).filter(
-            E2eeBlindEnvelope.blind_mailbox_id == blind_mailbox_id
+            E2eeBlindEnvelope.blind_mailbox_id == blind_mailbox_id,
+            E2eeBlindEnvelope.created_at >= cutoff,
         )
         if since_id > 0:
             query = query.filter(E2eeBlindEnvelope.id > since_id)
@@ -1954,6 +1992,7 @@ class SocialService:
             return []
 
         # 4. Aggregiere Mailbox-Statistiken über E2eeBlindEnvelope in Batches à 500
+        cutoff = datetime.now(timezone.utc) - timedelta(days=E2EE_ENVELOPE_RETENTION_DAYS)
         results: list[dict[str, Any]] = []
         chunk_size = 500
         for i in range(0, len(all_mids), chunk_size):
@@ -1967,6 +2006,7 @@ class SocialService:
                 .filter(
                     E2eeBlindEnvelope.blind_mailbox_id.in_(chunk),
                     E2eeBlindEnvelope.id > effective_since,
+                    E2eeBlindEnvelope.created_at >= cutoff,
                 )
                 .group_by(E2eeBlindEnvelope.blind_mailbox_id)
                 .all()
@@ -2248,13 +2288,15 @@ class SocialService:
                     else None
                 ),
                 # Der Server kann den Inhalt einer Nachricht nicht lesen und
-                # deshalb nicht pruefen, ob jemand ``@everyone`` geschrieben
-                # oder eine Nachricht angeheftet hat. Das entscheidet der
-                # **empfangende** Client — und er braucht dafuer die Rechtelage
-                # des *Absenders*, nicht seine eigene. Darum steht die Marke
-                # hier an jedem Mitglied und nicht nur an der Gruppe.
+                # deshalb nicht pruefen, ob jemand ``@everyone`` geschrieben,
+                # eine Nachricht angeheftet oder die Verfallsfrist gestellt
+                # hat. Das entscheidet der **empfangende** Client — und er
+                # braucht dafuer die Rechtelage des *Absenders*, nicht seine
+                # eigene. Darum steht die Marke hier an jedem Mitglied und
+                # nicht nur an der Gruppe.
                 "can_mention_everyone": "mention_everyone" in wirksam,
                 "can_pin_messages": "pin_messages" in wirksam,
+                "can_set_disappearing_messages": "set_disappearing_messages" in wirksam,
                 "joined_at": mem.joined_at,
             })
 
@@ -2309,6 +2351,9 @@ class SocialService:
                     db, g.id, user_id, "mention_everyone"
                 ),
                 "can_pin_messages": cls.has_group_permission(db, g.id, user_id, "pin_messages"),
+                "can_set_disappearing_messages": cls.has_group_permission(
+                    db, g.id, user_id, "set_disappearing_messages"
+                ),
                 "created_at": g.created_at,
                 "members": mems,
                 "room_token": offener_raum,
@@ -2480,7 +2525,18 @@ class SocialService:
         group_id: int,
         target_user_id: int,
         caller: User,
-    ) -> None:
+    ) -> ChatGroup:
+        """Wirft ein Mitglied hinaus und erneuert dabei den Einladungscode.
+
+        Wer hinausgeworfen wird, kennt den Code oft: er hatte das
+        Einladungsrecht, oder der Link stand im Verlauf. Bis 09/2026 blieb der
+        Code gültig, und der Rauswurf war eine Formalie — ein Klick auf den
+        alten Link, und er war wieder drin.
+
+        Die Einladungskarte geht mit. Ihre gebundenen Daten nennen den alten
+        Code; gegen den neuen öffnet sie sich nicht mehr. Wer als Nächstes
+        einen Link teilt, hinterlegt eine neue.
+        """
         cls.assert_social_enabled(db)
         caller_mem = (
             db.query(ChatGroupMember)
@@ -2511,8 +2567,17 @@ class SocialService:
         if target_mem.role == "admin" and caller_mem.role != "owner":
             raise HTTPException(status_code=403, detail="Nur der Eigentümer kann Administratoren entfernen.")
 
+        group = db.query(ChatGroup).filter(ChatGroup.id == group_id).first()
+        if not group:
+            raise HTTPException(status_code=404, detail="Gruppe nicht gefunden.")
+
         db.delete(target_mem)
+        # Im selben Commit: ein Rauswurf ohne neuen Code wäre genau der Zustand,
+        # den diese Stelle beenden soll.
+        group.invite_code = generate_invite_code()
+        group.invite_card = None
         db.commit()
+        db.refresh(group)
 
         SyncEventService.publish(
             {
@@ -2522,6 +2587,7 @@ class SocialService:
             },
             user_id=target_user_id,
         )
+        return group
 
     @classmethod
     def update_group_default_permissions(

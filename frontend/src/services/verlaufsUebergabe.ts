@@ -20,12 +20,38 @@
  *
  * Der Server sieht einen Textblock. Aufmachen kann ihn nur das Gerät, für das
  * versiegelt wurde.
+ *
+ * **Übergeben wird erst nach einer Rückfrage.** Für welches Gerät versiegelt
+ * wird, sagt der Server (`neue_geraete`), und genau das ist die Stelle, an der
+ * er ein eigenes unterschieben könnte. Deshalb zeigt das Panel Name und
+ * Sicherheitsnummer des Geräts und übergibt erst, wenn der Mensch bestätigt —
+ * die App zeigt dieselbe Nummer (`sicherheitsnummer`). Haben sich mehrere
+ * Geräte gemeldet, wird gar nicht übergeben.
+ *
+ * **Der Notizschlüssel geht nur mit Unterschrift.** Er ist die eine Ausnahme
+ * von „Schlüssel wandern nicht mit", und ihn nimmt das neue Gerät nur, wenn
+ * ein Gerät dieses Kontos laut Verzeichnis die Übergabe an genau dieses Gerät
+ * unterschrieben hat (`pruefeNotizUebergabe`). Ohne Unterschrift genügte ein
+ * selbst gebautes Paket mit einem Schlüssel nach Wahl, und jede Notiz, die das
+ * Gerät danach schreibt, wäre für den lesbar, der ihn gewählt hat. Die
+ * Unterschrift bindet an ein Gerät, das das Verzeichnis unter diesem Konto
+ * führt, und an genau das Zielgerät. Den Server hält sie nicht auf, und keine
+ * andere Sitzung desselben Kontos — beide können ein Gerät mit eigenem
+ * Signaturschlüssel eintragen. Die Sicherheitsnummer hilft hier ohnehin
+ * nicht: sie weist dem Panel das Gerät nach, nicht dem Gerät das Paket.
  */
 
 import { api } from '@/api/client'
+import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
 
 import { decryptE2eeHybrid, encryptE2eeHybrid } from './e2eeCrypto'
-import { exportUserNotesKey, setUserNotesKey } from './notesCalendarCrypto'
+import { eigenesGeraet, type EigenesGeraet } from './e2eeGeraet'
+import {
+  exportUserNotesKey,
+  pruefeNotizUebergabe,
+  setUserNotesKey,
+  unterschreibeNotizUebergabe,
+} from './notesCalendarCrypto'
 import {
   listeLokaleMailboxen,
   loadLocalMessages,
@@ -54,11 +80,25 @@ interface VerlaufPaket {
   /** Je Mailbox die jüngsten Nachrichten, so wie sie lokal liegen. */
   mailboxen: Record<string, LocalStoredMessage[]>
   notesKey?: string | null
+  /**
+   * Das Konto, dem `notesKey` gehört. Fehlt es — Pakete von vor 09/2026 —,
+   * bleibt der Schlüssel liegen: damals ging der unter der Kennung 1 mit,
+   * gleich wer angemeldet war.
+   */
+  konto?: number | null
+  /** Das Gerät, das übergibt. Fehlt es, bleibt der Schlüssel liegen. */
+  vonGeraet?: string
+  /** Seine Unterschrift unter die Übergabe an **dieses** Zielgerät. */
+  sig?: string
 }
 
 export interface UebergabeZiel {
   device_id: string
   public_key: string
+  /** Wie das Gerät sich selbst genannt hat. Nur zur Anzeige in der Rückfrage. */
+  label?: string
+  /** Wann es sich gemeldet hat. Nur zur Anzeige in der Rückfrage. */
+  created_at?: string | null
 }
 
 /** Was `GET /auth/devices/pairing/{code}/status` über den Erstabgleich sagt. */
@@ -67,6 +107,8 @@ export interface KopplungsStatus {
   redeemed: boolean
   expired: boolean
   label?: string
+  /** Die Anmeldung, die das Einlösen erzeugt hat. Zum Widerrufen, falls das Gerät fremd ist. */
+  family?: string | null
   neue_geraete?: UebergabeZiel[]
   verlauf_abgelegt?: boolean
 }
@@ -89,24 +131,31 @@ export async function packeUndVersiegele(ziele: readonly UebergabeZiel[]): Promi
   if (ziele.length === 0) return null
 
   const mailboxen = await listeLokaleMailboxen()
-  const rawNotesKey = exportUserNotesKey()
+  // Der Notizschlüssel des angemeldeten Kontos. Bis 09/2026 stand hier
+  // `exportUserNotesKey()` mit dem Vorgabewert 1: für jedes andere Konto ging
+  // nichts mit, und auf einem geteilten Gerät ging der Schlüssel von Konto 1
+  // an das neue Gerät eines anderen.
+  const konto = angemeldetesKonto()
+  const rawNotesKey = konto ? exportUserNotesKey(konto) : null
+  const schluesselJe = await unterschriebeneSchluessel(konto, rawNotesKey, ziele)
 
   const verlaeufe = await Promise.all(
     mailboxen.map(async (mid) => ({ mid, nachrichten: await loadLocalMessages(mid) })),
   )
   const belegt = verlaeufe.filter((v) => v.nachrichten.length > 0)
-  if (belegt.length === 0 && !rawNotesKey) return null
+  if (belegt.length === 0 && schluesselJe.size === 0) return null
 
   for (const stufe of STUFEN) {
-    const paket: VerlaufPaket = { v: 1, mailboxen: {}, notesKey: rawNotesKey }
+    const verlauf: VerlaufPaket['mailboxen'] = {}
     for (const { mid, nachrichten } of belegt) {
-      paket.mailboxen[mid] = sortMessagesChronologically(nachrichten).slice(-stufe)
+      verlauf[mid] = sortMessagesChronologically(nachrichten).slice(-stufe)
     }
-    const klartext = JSON.stringify(paket)
 
+    // Je Ziel ein eigenes Paket: die Unterschrift nennt das Zielgerät.
     const umschlaege: string[] = []
     for (const ziel of ziele) {
-      umschlaege.push(await encryptE2eeHybrid(klartext, ziel.public_key))
+      const paket: VerlaufPaket = { v: 1, mailboxen: verlauf, ...schluesselJe.get(ziel.device_id) }
+      umschlaege.push(await encryptE2eeHybrid(JSON.stringify(paket), ziel.public_key))
     }
     const blob = JSON.stringify(umschlaege)
     if (byteLaenge(blob) <= MAX_BLOB_BYTES) return blob
@@ -115,6 +164,62 @@ export async function packeUndVersiegele(ziele: readonly UebergabeZiel[]): Promi
   // Selbst die kleinste Stufe passt nicht. Lieber nichts übergeben als eine
   // Anfrage schicken, die das Backend zurückweist.
   return null
+}
+
+/**
+ * Der Notizschlüssel mit Unterschrift, je Zielgerät.
+ *
+ * Leer, wenn es keinen gibt oder dieses Gerät nicht unterschreiben kann. Dann
+ * geht der Verlauf ohne Schlüssel: unsigniert nähme ihn das neue Gerät ohnehin
+ * nicht, und es holt ihn sich später über die Geräte-Mailbox.
+ */
+async function unterschriebeneSchluessel(
+  konto: number | null,
+  rawNotesKey: string | null,
+  ziele: readonly UebergabeZiel[],
+): Promise<Map<string, Pick<VerlaufPaket, 'notesKey' | 'konto' | 'vonGeraet' | 'sig'>>> {
+  const je = new Map<string, Pick<VerlaufPaket, 'notesKey' | 'konto' | 'vonGeraet' | 'sig'>>()
+  if (!konto || !rawNotesKey) return je
+  let meins: EigenesGeraet
+  try {
+    meins = await eigenesGeraet()
+  } catch {
+    return je
+  }
+  for (const ziel of ziele) {
+    const sig = await unterschreibeNotizUebergabe(meins, konto, ziel.device_id, rawNotesKey)
+    if (sig) je.set(ziel.device_id, { notesKey: rawNotesKey, konto, vonGeraet: meins.kennung, sig })
+  }
+  return je
+}
+
+/**
+ * Nimmt den Notizschlüssel aus einem Paket — wenn er belegt ist.
+ *
+ * Überschreibt einen vorhandenen. Beim Koppeln übernimmt das Gerät den Stand
+ * des Kontos, und ein abweichender Schlüssel kann hier nur einer sein, den das
+ * Gerät während der Rückfrage selbst erzeugt hat. Ihn zu behalten hiesse, dass
+ * die beiden Geräte ihre Notizen dauerhaft mit zwei Schlüsseln schreiben; ihn
+ * zu ersetzen kostet die Notizen aus diesen Minuten. Das Kleinere von beidem.
+ */
+async function uebernimmNotizschluessel(konto: number, paket: VerlaufPaket): Promise<void> {
+  if (typeof paket.notesKey !== 'string' || !paket.notesKey) return
+  if (typeof paket.vonGeraet !== 'string' || !paket.vonGeraet) return
+  let meins: EigenesGeraet
+  try {
+    meins = await eigenesGeraet()
+  } catch {
+    return
+  }
+  if (paket.vonGeraet === meins.kennung) return
+  if (!(await pruefeNotizUebergabe(konto, paket.vonGeraet, meins.kennung, paket.notesKey, paket.sig))) {
+    return
+  }
+  const vorhanden = exportUserNotesKey(konto)
+  if (vorhanden && vorhanden !== paket.notesKey) {
+    console.warn('[Verlauf] Ersetze den während der Kopplung erzeugten Notizschlüssel durch den des Kontos')
+  }
+  await setUserNotesKey(konto, paket.notesKey)
 }
 
 /**
@@ -151,9 +256,13 @@ export async function uebernimmVerlauf(blob: string, eigenerPrivateKey: string):
   }
   if (!paket) return 0
 
-  if (paket.notesKey) {
+  // Nur unter dem Konto, das hier angemeldet ist, und nur, wenn das Paket
+  // dasselbe nennt. Gekoppelt wird innerhalb eines Kontos; ein Paket, das ein
+  // anderes nennt, gehört nicht hierher. Belegt sein muss es obendrein.
+  const konto = angemeldetesKonto()
+  if (paket.notesKey && konto && paket.konto === konto) {
     try {
-      await setUserNotesKey(1, paket.notesKey)
+      await uebernimmNotizschluessel(konto, paket)
     } catch {}
   }
 
@@ -194,16 +303,18 @@ export async function uebergebeVerlauf(code: string, ziele: readonly UebergabeZi
  * Geräteseite: holt den Verlauf ab, solange der Code lebt.
  *
  * Gepollt wird, weil die andere Seite erst am Status merkt, dass eingelöst
- * wurde, dann versiegelt und ablegt — das dauert ein paar Sekunden, und in
- * dieser Zeit steht hier schon ein angemeldetes Gerät. Nach `fristMs` ist
- * Schluss: liegt dann nichts, gab es nichts, und das Gerät beginnt mit einem
+ * wurde, dann nachfragt, versiegelt und ablegt. Die Nachfrage ist das Lange
+ * daran: dort vergleicht ein Mensch die Sicherheitsnummer, und das dauert
+ * Minuten. Deshalb zehn Minuten ab jetzt, also ab dem Einlösen — so lange
+ * nimmt auch der Server an (`_uebergabe_endet` im Backend), danach nichts mehr.
+ * Liegt bis dahin nichts, gab es nichts, und das Gerät beginnt mit einem
  * leeren Verlauf.
  */
 export async function holeVerlaufAb(
   code: string,
   eigenerPrivateKey: string,
-  fristMs = 60_000,
-  taktMs = 2_000,
+  fristMs = 10 * 60_000,
+  taktMs = 3_000,
 ): Promise<number> {
   const ende = Date.now() + fristMs
   while (Date.now() < ende) {

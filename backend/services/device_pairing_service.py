@@ -76,13 +76,14 @@ def aufraeumen(db: Session) -> None:
         DevicePairing.expires_at <= jetzt,
     ).delete(synchronize_session=False)
     # Eingeloeste Zeilen bleiben liegen, ihr Verlaufsblob darf das nicht. Er
-    # lebt hoechstens so lange wie der Code selbst: hat das neue Geraet ihn bis
-    # dahin nicht geholt, ist der Erstabgleich gescheitert und der Blob hat
-    # keinen Zweck mehr. Er ist zwar versiegelt — aber nichts aufzubewahren ist
-    # besser, als sich auf die Versiegelung zu verlassen.
+    # lebt hoechstens so lange wie die Uebergabe (`_uebergabe_endet`): hat das
+    # neue Geraet ihn bis dahin nicht geholt, ist der Erstabgleich gescheitert
+    # und der Blob hat keinen Zweck mehr. Er ist zwar versiegelt — aber nichts
+    # aufzubewahren ist besser, als sich auf die Versiegelung zu verlassen.
+    # Abgelegt wird nur an eingeloesten Codes, `redeemed_at` steht also immer.
     db.query(DevicePairing).filter(
         DevicePairing.verlauf_blob.isnot(None),
-        DevicePairing.expires_at <= jetzt,
+        DevicePairing.redeemed_at <= jetzt - timedelta(minutes=FRIST_MINUTEN),
     ).update(
         {DevicePairing.verlauf_blob: None, DevicePairing.verlauf_abgelegt_am: None},
         synchronize_session=False,
@@ -267,8 +268,17 @@ def status(db: Session, user: User, code: str) -> dict:
         "expired": is_expired and not is_redeemed,
         "label": einladung.label,
         "family": einladung.family,
+        # Name und Zeitpunkt stehen daneben, weil das Panel vor dem Übergeben
+        # fragt: welches Gerät, seit wann, mit welcher Sicherheitsnummer. Die
+        # Nummer rechnet der Client aus `public_key` — hier stünde sie nur als
+        # Behauptung desselben Servers, gegen den sie schützen soll.
         "neue_geraete": [
-            {"device_id": g.device_id, "public_key": g.public_key_jwk}
+            {
+                "device_id": g.device_id,
+                "public_key": g.public_key_jwk,
+                "label": g.label or "",
+                "created_at": g.created_at.isoformat() if g.created_at else None,
+            }
             for g in neue_geraete(db, einladung)
         ],
         "verlauf_abgelegt": einladung.verlauf_blob is not None,
@@ -310,8 +320,23 @@ def neue_geraete(db: Session, einladung: DevicePairing) -> list[UserE2eeDevice]:
     )
 
 
+def _uebergabe_endet(einladung: DevicePairing) -> datetime:
+    """Bis wann an dieser Einladung Verlauf abgelegt und abgeholt werden darf.
+
+    Ab dem Einloesen gerechnet, nicht ab dem Anlegen. Dazwischen liegt eine
+    Rueckfrage: im Panel vergleicht ein Mensch die Sicherheitsnummer, bevor der
+    Verlauf hinuebergeht, und das dauert Minuten. Mit der Frist des Codes
+    scheiterte eine Kopplung, die kurz vor Ablauf eingeloest wurde, am Ablegen —
+    und das Geraet wartete danach auf einen Verlauf, der nie kam. Laenger als
+    eine Frist nach dem Einloesen bleibt es trotzdem nicht offen.
+    """
+    if einladung.redeemed_at is None:
+        return einladung.expires_at
+    return einladung.redeemed_at + timedelta(minutes=FRIST_MINUTEN)
+
+
 def _offene_einladung(db: Session, user: User, code: str) -> DevicePairing | None:
-    """Die Einladung dieses Benutzers zu diesem Code, solange sie noch laeuft."""
+    """Die Einladung dieses Benutzers zu diesem Code, solange die Uebergabe laeuft."""
     einladung = (
         db.query(DevicePairing)
         .filter(
@@ -322,7 +347,8 @@ def _offene_einladung(db: Session, user: User, code: str) -> DevicePairing | Non
     )
     if einladung is None:
         return None
-    if einladung.expires_at <= _jetzt(einladung.expires_at):
+    ende = _uebergabe_endet(einladung)
+    if ende <= _jetzt(ende):
         return None
     return einladung
 

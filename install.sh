@@ -1629,6 +1629,7 @@ $DOMAIN {
         # Messenger zusaetzlich Kamera und getDisplayMedia — jeweils auf der
         # eigenen Herkunft. Mit =() fragt der Browser nicht einmal nach.
         Permissions-Policy "accelerometer=(), camera=(self), display-capture=(self), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()"
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://singrabot.mauntingstudios.de https://client.crisp.chat https://embed.tawk.to; style-src 'self' 'unsafe-inline' https://singrabot.mauntingstudios.de; img-src 'self' data: blob: https://singrabot.mauntingstudios.de; connect-src 'self' https: http: ws: wss:; font-src 'self' data: https://singrabot.mauntingstudios.de; frame-src 'self' https://singrabot.mauntingstudios.de; frame-ancestors 'none'; base-uri 'self'; form-action 'self';"
     }
 
     handle /api/* {
@@ -1668,6 +1669,7 @@ $DOMAIN {
         # Messenger zusaetzlich Kamera und getDisplayMedia — jeweils auf der
         # eigenen Herkunft. Mit =() fragt der Browser nicht einmal nach.
         Permissions-Policy "accelerometer=(), camera=(self), display-capture=(self), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()"
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://singrabot.mauntingstudios.de https://client.crisp.chat https://embed.tawk.to; style-src 'self' 'unsafe-inline' https://singrabot.mauntingstudios.de; img-src 'self' data: blob: https://singrabot.mauntingstudios.de; connect-src 'self' https: http: ws: wss:; font-src 'self' data: https://singrabot.mauntingstudios.de; frame-src 'self' https://singrabot.mauntingstudios.de; frame-ancestors 'none'; base-uri 'self'; form-action 'self';"
     }
 
     handle /api/* {
@@ -1729,6 +1731,8 @@ EOF
         X-Content-Type-Options nosniff
         X-Frame-Options DENY
         Referrer-Policy strict-origin-when-cross-origin
+        Permissions-Policy "accelerometer=(), camera=(self), display-capture=(self), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()"
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://singrabot.mauntingstudios.de https://client.crisp.chat https://embed.tawk.to; style-src 'self' 'unsafe-inline' https://singrabot.mauntingstudios.de; img-src 'self' data: blob: https://singrabot.mauntingstudios.de; connect-src 'self' https: http: ws: wss:; font-src 'self' data: https://singrabot.mauntingstudios.de; frame-src 'self' https://singrabot.mauntingstudios.de; frame-ancestors 'none'; base-uri 'self'; form-action 'self';"
     }
 
     handle /api/* {

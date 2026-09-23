@@ -11,7 +11,7 @@
 import { invoke } from '@tauri-apps/api/core'
 
 import { api } from '@/api/client'
-import { geraetVeroeffentlichen } from '@/services/e2eeGeraet'
+import { geraetVeroeffentlichen, sicherheitsnummer } from '@/services/e2eeGeraet'
 import { holeVerlaufAb } from '@/services/verlaufsUebergabe'
 import { useAuthStore } from '@/stores/authStore'
 import { konfigLaden, konfigSpeichern } from './tauri'
@@ -40,6 +40,17 @@ export async function erreichbar(adresse: string): Promise<void> {
   await antwort.json()
 }
 
+/** Was nach dem Koppeln auf dem Schirm stehen soll. */
+export interface Kopplungsergebnis {
+  /**
+   * Die Sicherheitsnummer dieses Geräts — dieselbe, die das Panel neben der
+   * Rückfrage zeigt, ob es den Verlauf hierher übergeben soll. `null`, wenn
+   * sich das Gerät nicht veröffentlichen ließ; dann gibt es auch keinen
+   * Verlauf, über den jemand entscheiden müsste.
+   */
+  sicherheitsnummer: string | null
+}
+
 /**
  * Löst einen Kopplungscode ein und übernimmt die Sitzung.
  *
@@ -48,7 +59,7 @@ export async function erreichbar(adresse: string): Promise<void> {
  * authStore die Wahrheit: `checkAuth()` lädt Benutzer und Rechte, dieselbe
  * Hydrierung wie beim Panel-Start.
  */
-export async function koppeln(code: string, bezeichnung: string): Promise<void> {
+export async function koppeln(code: string, bezeichnung: string): Promise<Kopplungsergebnis> {
   const antwort = await api<TokenAntwort>('/auth/devices/redeem', {
     method: 'POST',
     body: JSON.stringify({ code, label: bezeichnung }),
@@ -62,21 +73,23 @@ export async function koppeln(code: string, bezeichnung: string): Promise<void> 
   await useAuthStore.getState().checkAuth()
 
   // Der Verlaufs-Erstabgleich. Erst den eigenen Geräteschlüssel veröffentlichen
-  // — daran erkennt die andere Seite, für wen sie versiegeln soll —, dann
-  // warten, bis der Verlauf abgelegt ist. Beides im Hintergrund: ein Gerät, das
-  // gekoppelt ist, soll benutzbar sein, auch wenn nebenan noch ein Umzug läuft.
+  // — daran erkennt die andere Seite, für wen sie versiegeln soll. Das wird
+  // abgewartet, weil die Sicherheitsnummer daraus kommt: das Panel übergibt
+  // erst, wenn dort jemand bestätigt, dass seine Nummer dieselbe ist wie hier.
   //
-  // Scheitert es, beginnt das Gerät mit einem leeren Verlauf. Das ist der
-  // Normalfall bei einem Konto ohne bisherige Nachrichten und kein Grund, die
-  // Kopplung zu verwerfen.
-  void (async () => {
-    try {
-      const geraet = await geraetVeroeffentlichen(bezeichnung)
-      await holeVerlaufAb(code, geraet.paar.privateKeyJwk)
-    } catch {
-      // Kein Verlauf. Die Kopplung selbst steht.
-    }
-  })()
+  // Das Abholen läuft im Hintergrund: ein Gerät, das gekoppelt ist, soll
+  // benutzbar sein, auch wenn nebenan noch jemand vergleicht. Scheitert es,
+  // beginnt das Gerät mit einem leeren Verlauf — der Normalfall bei einem
+  // Konto ohne bisherige Nachrichten und kein Grund, die Kopplung zu verwerfen.
+  let geraet: Awaited<ReturnType<typeof geraetVeroeffentlichen>>
+  try {
+    geraet = await geraetVeroeffentlichen(bezeichnung)
+  } catch {
+    // Kein Verlauf. Die Kopplung selbst steht.
+    return { sicherheitsnummer: null }
+  }
+  void holeVerlaufAb(code, geraet.paar.privateKeyJwk).catch(() => 0)
+  return { sicherheitsnummer: await sicherheitsnummer(geraet.paar.publicKeyJwk) }
 }
 
 /**

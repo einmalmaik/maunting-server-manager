@@ -18,9 +18,11 @@ vi.mock('./nachrichtLoeschen', () => ({
   tilgeNachrichtLokal: vi.fn(async () => {}),
 }))
 
+import type { ChatGroupItem } from '@/api/social'
 import { listeLokaleMailboxen, loadLocalMessages } from './messengerLocalStore'
 import { tilgeNachrichtBeimServer, tilgeNachrichtLokal } from './nachrichtLoeschen'
 import {
+  durfteVerfallStellen,
   faelligeZeilen,
   istVerfallen,
   raeumeAlleChats,
@@ -149,5 +151,61 @@ describe('Durchgang über alle Chats', () => {
     })
 
     expect(await raeumeAlleChats()).toBe(1)
+  })
+})
+
+/**
+ * Die Schranke beim Empfänger — in der Gruppe.
+ *
+ * Bis 09/2026 gab es keine: jedes Mitglied stellte die Frist für alle. Seitdem
+ * braucht es `set_disappearing_messages`, und geprüft wird wie beim Anheften
+ * an der Marke, die der Server je Mitglied ausrechnet. Im Direktchat fragt der
+ * Messenger diese Funktion gar nicht erst.
+ */
+describe('Die Schranke beim Empfänger', () => {
+  /** So, wie der Server die Gruppe liefert: die Marke steht je Mitglied. */
+  function gruppe(marken: Record<number, boolean>): Pick<ChatGroupItem, 'members'> {
+    return {
+      members: Object.entries(marken).map(([id, darf]) => ({
+        user_id: Number(id),
+        username: `nutzer-${id}`,
+        can_set_disappearing_messages: darf,
+      })),
+    } as Pick<ChatGroupItem, 'members'>
+  }
+
+  it('erkennt ein Mitglied ohne das Recht nicht an', () => {
+    expect(durfteVerfallStellen(gruppe({ 7: false }), 7)).toBe(false)
+  })
+
+  it('erkennt ein Mitglied mit dem Recht an', () => {
+    expect(durfteVerfallStellen(gruppe({ 7: true }), 7)).toBe(true)
+  })
+
+  it('sagt nein, wenn die Marke fehlt', () => {
+    // Eine Gruppenantwort ohne das Feld — ein Server vor dieser Änderung —
+    // darf die Frist aller nicht umstellen lassen. Eine ausbleibende
+    // Umstellung ist der sichere Ausgang, eine unberechtigte nicht.
+    expect(
+      durfteVerfallStellen(
+        { members: [{ user_id: 7, username: 'a' }] } as Pick<ChatGroupItem, 'members'>,
+        7,
+      ),
+    ).toBe(false)
+  })
+
+  it('sieht nur die Marke des Absenders, nicht die eines anderen', () => {
+    // Genau die Verwechslung, die eine gefälschte `actor_id` ausnutzen würde:
+    // das Recht des Eigentümers hilft einem anderen Absender nichts.
+    expect(durfteVerfallStellen(gruppe({ 7: true, 8: false }), 8)).toBe(false)
+  })
+
+  it('sagt nein für jemanden, der nicht in der Gruppe ist', () => {
+    expect(durfteVerfallStellen(gruppe({ 7: true }), 9)).toBe(false)
+  })
+
+  it('sagt nein ohne geladene Gruppe', () => {
+    expect(durfteVerfallStellen(null, 7)).toBe(false)
+    expect(durfteVerfallStellen(undefined, 7)).toBe(false)
   })
 })

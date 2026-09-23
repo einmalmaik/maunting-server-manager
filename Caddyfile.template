@@ -18,6 +18,7 @@
         # Messenger kann Video- und Bildschirmanrufe. Mit camera=() fragte der
         # Browser auch hier nicht, und die Kamera blieb im Gespraech tot.
         Permissions-Policy "accelerometer=(), camera=(self), display-capture=(self), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()"
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://singrabot.mauntingstudios.de https://client.crisp.chat https://embed.tawk.to; style-src 'self' 'unsafe-inline' https://singrabot.mauntingstudios.de; img-src 'self' data: blob: https://singrabot.mauntingstudios.de; connect-src 'self' https: http: ws: wss:; font-src 'self' data: https://singrabot.mauntingstudios.de; frame-src 'self' https://singrabot.mauntingstudios.de; frame-ancestors 'none'; base-uri 'self'; form-action 'self';"
     }
 
     # Ohne eigenen Cache-Kopf: Das Backend setzt ihn selbst (`no-store`, sofern

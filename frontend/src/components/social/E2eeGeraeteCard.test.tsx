@@ -2,15 +2,15 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import i18n from '@/i18n'
-import { deleteEigenesGeraet, getE2eeGeraete } from '@/api/social'
-import { vergessenGeraete } from '@/services/e2eeGeraet'
+import { approveEigenesGeraet, deleteEigenesGeraet, getE2eeGeraete } from '@/api/social'
+import { sicherheitsnummer, vergessenGeraete } from '@/services/e2eeGeraet'
 import { useAuthStore } from '@/stores/authStore'
 import { useConfirmStore } from '@/stores/confirmStore'
 import { E2eeGeraeteCard } from './E2eeGeraeteCard'
 
 const { liste } = vi.hoisted(() => ({
   liste: {
-    inhalt: [] as { device_id: string; public_key: string; label: string }[],
+    inhalt: [] as { device_id: string; public_key: string; label: string; is_approved?: boolean }[],
     fehler: null as Error | null,
   },
 }))
@@ -21,6 +21,7 @@ vi.mock('@/api/social', () => ({
     return liste.inhalt
   }),
   deleteEigenesGeraet: vi.fn(async () => ({ ok: true })),
+  approveEigenesGeraet: vi.fn(async () => ({ ok: true })),
 }))
 
 vi.mock('@/services/e2eeGeraet', () => ({
@@ -28,7 +29,9 @@ vi.mock('@/services/e2eeGeraet', () => ({
     kennung: 'dieses-geraet-0001',
     paar: { publicKeyJwk: 'pub', privateKeyJwk: 'priv' },
   })),
+  sicherheitsnummer: vi.fn(async () => '11111 22222 33333 44444'),
   vergessenGeraete: vi.fn(),
+  pruefeUndAktualisiereNeueGeraete: vi.fn(),
 }))
 
 /** Beantwortet den nächsten Bestätigungsdialog. */
@@ -103,5 +106,30 @@ describe('E2eeGeraeteCard', () => {
     // Die Kennung steht im Klartext in jedem Umschlag, sie verrät hier nichts.
     expect(await screen.findByText('aaaaaaaaaaaa')).toBeInTheDocument()
     expect(screen.getByText('bbbbbbbbbbbb')).toBeInTheDocument()
+  })
+
+  it('zeigt die Sicherheitsnummer und den Freigeben-Knopf für ausstehende Geräte', async () => {
+    liste.inhalt = [
+      { device_id: 'dieses-geraet-0001', public_key: 'pub-1', label: '', is_approved: true },
+      { device_id: 'wartendes-geraet-03', public_key: 'pub-3', label: 'Zweitgerät', is_approved: false },
+    ]
+    render(<E2eeGeraeteCard />)
+
+    expect(await screen.findByText('Wartet auf Freigabe')).toBeInTheDocument()
+    expect(screen.getByText('Zweitgerät')).toBeInTheDocument()
+    expect(screen.getAllByText(/Sicherheitsnummer: 11111 22222 33333 44444/)).toHaveLength(2)
+
+    const freigebenBtn = screen.getByRole('button', { name: /Freigeben/ })
+    expect(freigebenBtn).toBeInTheDocument()
+
+    fireEvent.click(freigebenBtn)
+    await waitFor(() =>
+      expect(approveEigenesGeraet).toHaveBeenCalledWith(
+        'wartendes-geraet-03',
+        'dieses-geraet-0001',
+        undefined,
+      ),
+    )
+    expect(vergessenGeraete).toHaveBeenCalledWith(10)
   })
 })

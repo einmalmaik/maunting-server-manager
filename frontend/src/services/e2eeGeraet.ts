@@ -40,11 +40,12 @@
  */
 
 import { randomBytes } from '@msdis/shield/random'
-import { bytesToHex } from '@msdis/shield/core'
+import { bytesToHex, utf8ToBytes } from '@msdis/shield/core'
+import { sha256Hex } from '@msdis/shield/integrity'
 import i18n from '@/i18n'
 
 import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
-import { erzeugeSignaturPaar, type SignaturPaar } from './absenderSignatur'
+import { erzeugeSignaturPaar, pruefe, type SignaturPaar } from './absenderSignatur'
 import { generateLocalE2eeKeyPair, type LocalE2eeKeyPair } from './e2eeCrypto'
 import {
   MessengerVerschlossenError,
@@ -481,11 +482,122 @@ export async function kontoNutztSignaturen(userId: number): Promise<boolean> {
   return (await geraeteVon(userId)).some((g) => Boolean(g.signing_public_key))
 }
 
+/**
+ * Was eine Unterschrift über einen Schlüsselumschlag sagt.
+ *
+ * - `echt` — das Verzeichnis führt dieses Gerät unter diesem Konto, und die
+ *   Unterschrift passt zu seinem Signaturschlüssel.
+ * - `altbestand` — ohne Unterschrift, von einem Gerät im Verzeichnis, dessen
+ *   Konto **nirgends** einen Signaturschlüssel führt. Es kann es nicht besser.
+ * - `falsch` — widerlegt: die Unterschrift passt nicht zum Schlüssel im
+ *   Verzeichnis, oder sie fehlt bei einem Konto, das unterschreiben könnte
+ *   (die Downgrade-Schranke).
+ * - `unbekannt` — das Verzeichnis führt dieses Gerät nicht, oder noch ohne
+ *   Signaturschlüssel. Das ist kein Nein: ein Gerät, das sich gerade eben
+ *   gemeldet hat, steht auch nach dem frischen Abruf womöglich noch nicht in
+ *   einer Liste, die vor ein paar Sekunden geholt wurde.
+ * - `offen` — das Verzeichnis war nicht zu erreichen. Weder ja noch nein; der
+ *   Aufrufer versucht es später wieder, statt etwas zu entscheiden.
+ */
+export type GeraeteBeleg = 'echt' | 'altbestand' | 'falsch' | 'unbekannt' | 'offen'
+
+/**
+ * Prüft, ob ein Umschlag von dem Gerät stammt, das er nennt.
+ *
+ * Für Umschläge, die **Schlüsselmaterial** tragen: den Sitzungsaufbau des
+ * Double Ratchet und die Übergabe des Notizschlüssels. Beide sind hybrid gegen
+ * den Geräteschlüssel des Empfängers versiegelt, und das beweist nur, *für*
+ * wen sie sind — nie, *von* wem. Der Geräteschlüssel steht im Verzeichnis und
+ * kann von jedem benutzt werden, vom Server ohnehin, und in die eigene Geräte-Mailbox
+ * darf jeder Freund, jedes Gruppenmitglied und jedes Gegenüber eines
+ * Direktchats Steuerumschläge legen.
+ *
+ * Anders als `pruefeNutzlast` trifft diese Funktion die Downgrade-Entscheidung
+ * selbst: für Schlüsselmaterial gibt es keinen Leseweg, der sie besser wüsste.
+ *
+ * Ein Nein aus der zehn Minuten alten Liste ist noch keins. Ein Gerät, das sich
+ * eben erst angemeldet hat, steht dort nicht — also wird vor jedem `falsch`
+ * und `unbekannt` einmal frisch nachgesehen. `FRISCH_MS` hält das in Grenzen:
+ * wer mit gefälschten Umschlägen um sich wirft, erzwingt höchstens einen Abruf
+ * je halbe Minute.
+ */
+export async function pruefeGeraeteBeleg(
+  userId: number,
+  deviceId: string,
+  daten: string,
+  signatur: unknown,
+): Promise<GeraeteBeleg> {
+  const urteil = async (frisch: boolean): Promise<GeraeteBeleg> => {
+    const liste = await holeGeraete(userId, frisch ? FRISCH_MS : CACHE_FRIST_MS)
+    const eintrag = liste.find((g) => g.device_id === deviceId)
+    if (!eintrag) return 'unbekannt'
+    if (typeof signatur === 'string' && signatur) {
+      if (!eintrag.signing_public_key) return 'unbekannt'
+      return (await pruefe(daten, signatur, eintrag.signing_public_key)) ? 'echt' : 'falsch'
+    }
+    return liste.some((g) => Boolean(g.signing_public_key)) ? 'falsch' : 'altbestand'
+  }
+
+  try {
+    const erst = await urteil(false)
+    // `altbestand` ebenso: die Nachsicht für Konten ohne Signaturschlüssel darf
+    // nicht aus der alten Liste kommen. Unterschreibt das Konto seit eben, wäre
+    // sie sonst bis zu zehn Minuten lang der Weg an der Downgrade-Schranke
+    // vorbei (Durchsicht vom 23.09.).
+    return erst === 'falsch' || erst === 'unbekannt' || erst === 'altbestand'
+      ? await urteil(true)
+      : erst
+  } catch {
+    return 'offen'
+  }
+}
+
+/**
+ * Die Sicherheitsnummer eines Geräteschlüssels: zwanzig Ziffern in vier Gruppen.
+ *
+ * Zum Vergleichen mit dem Auge. Beim Koppeln zeigt das Panel die Nummer des
+ * Geräts, das sich gerade gemeldet hat, und die App ihre eigene. Stimmen beide
+ * überein, ist das Gerät, das den Verlauf bekommt, dasjenige, das man in der
+ * Hand hält — und nicht eines, das jemand im selben Moment untergeschoben hat.
+ *
+ * Gerechnet wird über die **kanonische** Form (`e`, `kty`, `n`), nicht über den
+ * JWK-String: der Server gibt den Schlüssel so zurück, wie er ihn bekam, aber
+ * eine andere Feldreihenfolge dürfte nie eine andere Nummer ergeben.
+ */
+export async function sicherheitsnummer(publicKeyJwk: string): Promise<string> {
+  let kanonisch = publicKeyJwk
+  try {
+    const jwk = JSON.parse(publicKeyJwk)
+    if (jwk && typeof jwk.n === 'string' && typeof jwk.e === 'string') {
+      kanonisch = JSON.stringify({ e: jwk.e, kty: jwk.kty, n: jwk.n })
+    }
+  } catch {
+    // Kein JSON — dann eben über den Wert, wie er ist.
+  }
+  const hex = await sha256Hex(utf8ToBytes(`msm:sicherheitsnummer:v1:${kanonisch}`))
+  const gruppen: string[] = []
+  // Je Gruppe fünf Bytes (40 Bit, sicher unter 2^53), auf fünf Ziffern
+  // gefaltet: zusammen rund 66 Bit. Das reicht, weil ein Angreifer keine
+  // Kollision irgendwelcher zwei Schlüssel braucht, sondern einen, der genau
+  // diese eine angezeigte Nummer trifft.
+  for (let i = 0; i < 4; i += 1) {
+    const wert = parseInt(hex.slice(i * 10, i * 10 + 10), 16) % 100_000
+    gruppen.push(String(wert).padStart(5, '0'))
+  }
+  return gruppen.join(' ')
+}
+
 // ==========================================
 // Gegenstellen
 // ==========================================
 
 const CACHE_FRIST_MS = 600000
+/**
+ * Wie alt die Liste höchstens sein darf, wenn eine Prüfung „frisch" verlangt.
+ * Kurz genug für ein Gerät, das sich gerade angemeldet hat; lang genug, dass
+ * eine Flut gefälschter Umschläge nicht in eine Flut von Abrufen übersetzt.
+ */
+const FRISCH_MS = 30_000
 
 const geraeteCache = new Map<number, { geraete: E2eeGeraetItem[]; geholtAm: number }>()
 
@@ -511,7 +623,9 @@ export async function geraeteVon(userId: number): Promise<E2eeGeraetItem[]> {
 // ==========================================
 
 const BEKANNTE_GERAETE_PRAEFIX = 'msm_bekannte_geraete:'
+const BEKANNTE_SCHLUESSEL_PRAEFIX = 'msm_bekannte_schluessel:'
 const bekannteGeraeteImRam = new Map<number, string[]>()
+const bekannteSchluesselImRam = new Map<number, Record<string, string>>()
 
 export function getBekannteGeraete(userId: number): string[] | null {
   try {
@@ -532,21 +646,130 @@ export function setBekannteGeraete(userId: number, deviceIds: string[]): void {
   bekannteGeraeteImRam.set(userId, deviceIds)
 }
 
+export function getBekannteSchluessel(userId: number): Record<string, string> | null {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(`${BEKANNTE_SCHLUESSEL_PRAEFIX}${userId}`)
+      if (raw) return JSON.parse(raw)
+    }
+  } catch {}
+  return bekannteSchluesselImRam.get(userId) ?? null
+}
+
+export function setBekannteSchluessel(userId: number, schluessel: Record<string, string>): void {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(`${BEKANNTE_SCHLUESSEL_PRAEFIX}${userId}`, JSON.stringify(schluessel))
+    }
+  } catch {}
+  bekannteSchluesselImRam.set(userId, schluessel)
+}
+
+export type SchluesselWarnungTyp = 'schluessel_geaendert' | 'konto_neustart' | 'neues_geraet'
+
+export interface SchluesselWarnungEvent {
+  userId: number
+  typ: SchluesselWarnungTyp
+  deviceId?: string
+  neueGeraete?: string[]
+}
+
+export type SchluesselWarnungListener = (event: SchluesselWarnungEvent) => void
+const schluesselWarnungListeners = new Set<SchluesselWarnungListener>()
+
+export function onSchluesselWarnung(listener: SchluesselWarnungListener): () => void {
+  schluesselWarnungListeners.add(listener)
+  return () => {
+    schluesselWarnungListeners.delete(listener)
+  }
+}
+
+function triggerSchluesselWarnung(event: SchluesselWarnungEvent): void {
+  for (const listener of schluesselWarnungListeners) {
+    try {
+      listener(event)
+    } catch {}
+  }
+}
+
 export function pruefeUndAktualisiereNeueGeraete(
   userId: number,
-  aktuelleGeraete: { device_id: string }[],
+  aktuelleGeraete: { device_id: string; public_key?: string }[],
 ): string[] {
   const aktuelleIds = aktuelleGeraete.map((g) => g.device_id)
   const bekannt = getBekannteGeraete(userId)
+  const bekannteSchluessel = getBekannteSchluessel(userId) ?? {}
+
   if (bekannt === null) {
-    // Erstkontakt: Wir merken uns die aktuellen Geräte als Basisbestand ohne Warnung.
+    // Erstkontakt: Wir merken uns die aktuellen Geräte und Schlüssel als Basisbestand ohne Warnung.
+    const initialSchluessel: Record<string, string> = {}
+    for (const g of aktuelleGeraete) {
+      if (g.public_key) initialSchluessel[g.device_id] = g.public_key
+    }
     setBekannteGeraete(userId, aktuelleIds)
+    setBekannteSchluessel(userId, initialSchluessel)
     return []
   }
+
+  // 1. Konto-Neustart: Falls der Kontakt bereits Geräte hatte und jetzt ALLE bisherigen
+  // Geräte durch eine komplett neue Menge ersetzt wurden.
+  const istKontoNeustart =
+    bekannt.length > 0 &&
+    aktuelleIds.length > 0 &&
+    aktuelleIds.every((id) => !bekannt.includes(id))
+
+  if (istKontoNeustart) {
+    triggerSchluesselWarnung({
+      userId,
+      typ: 'konto_neustart',
+      neueGeraete: aktuelleIds,
+    })
+    setBekannteGeraete(userId, aktuelleIds)
+    const neustartSchluessel: Record<string, string> = {}
+    for (const g of aktuelleGeraete) {
+      if (g.public_key) neustartSchluessel[g.device_id] = g.public_key
+    }
+    setBekannteSchluessel(userId, neustartSchluessel)
+    return aktuelleIds
+  }
+
+  // 2. Schlüssel geändert: Ein bekanntes Gerät ändert seinen public_key
+  for (const g of aktuelleGeraete) {
+    if (g.public_key && bekannt.includes(g.device_id) && bekannteSchluessel[g.device_id]) {
+      if (bekannteSchluessel[g.device_id] !== g.public_key) {
+        triggerSchluesselWarnung({
+          userId,
+          typ: 'schluessel_geaendert',
+          deviceId: g.device_id,
+        })
+      }
+    }
+  }
+
+  // 3. Neue Geräte
   const neue = aktuelleIds.filter((id) => !bekannt.includes(id))
   if (neue.length > 0) {
-    setBekannteGeraete(userId, Array.from(new Set([...bekannt, ...aktuelleIds])))
+    triggerSchluesselWarnung({
+      userId,
+      typ: 'neues_geraet',
+      neueGeraete: neue,
+    })
   }
+
+  // Synchronisiere die bekannten Geräte mit den tatsächlich vorhandenen Geräten
+  // (Entfernen wirkt sofort: gelöschte Geräte werden sofort aus dem Bestand getilgt)
+  const verbleibendeIds = bekannt.filter((id) => aktuelleIds.includes(id))
+  setBekannteGeraete(userId, Array.from(new Set([...verbleibendeIds, ...aktuelleIds])))
+
+  // Schlüsselbestand aktualisieren und entfernte Geräte bereinigen
+  const aktualisierteSchluessel: Record<string, string> = {}
+  for (const g of aktuelleGeraete) {
+    if (g.public_key) {
+      aktualisierteSchluessel[g.device_id] = g.public_key
+    }
+  }
+  setBekannteSchluessel(userId, aktualisierteSchluessel)
+
   return neue
 }
 
@@ -568,10 +791,15 @@ export function onNeuesGeraet(listener: NeuesGeraetListener): () => void {
  * halten: ohne Antwort weiss niemand, ob ein Gerät da ist, und der Benutzer
  * bekäme eine Aussage über die Gegenstelle zu lesen, die gar nicht geprüft
  * wurde.
+ *
+ * `frist` ist das Höchstalter der gecachten Liste. Wer eine kürzere verlangt
+ * (`pruefeGeraeteBeleg` vor einem Nein), bekommt bei einem Ausfall **keine**
+ * alte Liste zurück, sondern den Fehler: er fragt ja gerade, weil er der alten
+ * nicht traut.
  */
-async function holeGeraete(userId: number): Promise<E2eeGeraetItem[]> {
+async function holeGeraete(userId: number, frist = CACHE_FRIST_MS): Promise<E2eeGeraetItem[]> {
   const cached = geraeteCache.get(userId)
-  if (cached && Date.now() - cached.geholtAm < CACHE_FRIST_MS) {
+  if (cached && Date.now() - cached.geholtAm < frist) {
     return cached.geraete
   }
   try {
@@ -589,9 +817,27 @@ async function holeGeraete(userId: number): Promise<E2eeGeraetItem[]> {
   } catch (fehler) {
     // Ein abgelaufener Eintrag ist immer noch besser als gar keiner: die
     // Geräteliste ändert sich selten, der Abruf scheitert oft nur kurz.
-    if (cached) return cached.geraete
+    if (cached && frist === CACHE_FRIST_MS) return cached.geraete
     throw fehler
   }
+}
+
+/**
+ * Die Geräte eines Kontos, und bei einem Ausfall ein Fehler statt einer leeren
+ * Liste.
+ *
+ * Für Prüfwege, die „kein Gerät" von „keine Antwort" unterscheiden müssen —
+ * etwa, bevor der Notizschlüssel an ein eigenes Gerät geht.
+ *
+ * `frisch` verlangt eine Liste, die höchstens `FRISCH_MS` alt ist: für ein
+ * Gerät, das sich gerade erst gemeldet haben könnte. Gedrosselt ist das
+ * trotzdem — öfter als einmal je halbe Minute fragt niemand nach.
+ */
+export async function verzeichnisVon(
+  userId: number,
+  { frisch = false }: { frisch?: boolean } = {},
+): Promise<E2eeGeraetItem[]> {
+  return holeGeraete(userId, frisch ? FRISCH_MS : CACHE_FRIST_MS)
 }
 
 export function vergessenGeraete(userId: number): void {
@@ -631,6 +877,7 @@ export async function verlangeGeraeteVon(userId: number): Promise<E2eeGeraetItem
 export function clearGeraeteMemory(): void {
   geraeteCache.clear()
   bekannteGeraeteImRam.clear()
+  bekannteSchluesselImRam.clear()
   geraetImRam = null
   aufbau = null
   veroeffentlichtAls = null
