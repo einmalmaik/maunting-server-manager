@@ -28,4 +28,16 @@
   --dna-radius-control: .65rem;
   --dna-radius-panel: 1rem;
   --dna-shadow-panel: 0 20px 48px hsl(0 0% 0% / .38);
+
+  /* Der Sprachschwarm (`@maunting/design-dna/swarm`). Leuchten und Eis sind
+     Fokus und Primär; Denken, Störung und Ruhe sind seine eigenen Töne. Der
+     Schwarm zeichnet in WebGL und kann keine CSS-Variable lesen — er nimmt
+     dieselben Tripel aus `voiceTokens` in `index.js`, und
+     `src/test/designDna.test.ts` hält beide Stellen gleich. Hier stehen sie
+     für alles, was neben dem Schwarm denselben Zustand zeigt. */
+  --dna-voice-glow: 190 92% 62%;
+  --dna-voice-ice: 188 100% 86%;
+  --dna-voice-think: 203 100% 64%;
+  --dna-voice-fault: 38 92% 50%;
+  --dna-voice-rest: 205 18% 40%;
 }

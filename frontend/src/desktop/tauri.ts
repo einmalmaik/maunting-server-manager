@@ -76,9 +76,18 @@ export async function setzeStatus(status: AgentStatus): Promise<void> {
   await invoke('setze_status', { status })
 }
 
-/** Zeigt oder versteckt das Overlay-Fenster (Sprachblase). */
+/** Zeigt oder versteckt das Overlay-Fenster (Sprachschwarm). */
 export async function overlaySichtbar(sichtbar: boolean): Promise<void> {
   await invoke('overlay_sichtbar', { sichtbar })
+}
+
+/**
+ * Wo das durchsichtige Overlay Klicks annimmt, als `[links, oben, breite,
+ * höhe]` in CSS-Pixeln. Überall sonst gehen sie an das, was darunter liegt
+ * (`durchklick.rs`).
+ */
+export async function overlayTrefferflaechen(flaechen: Array<[number, number, number, number]>): Promise<void> {
+  await invoke('overlay_trefferflaechen', { flaechen })
 }
 
 /**

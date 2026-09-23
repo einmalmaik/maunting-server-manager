@@ -127,18 +127,21 @@ describe('Wiedergabe', () => {
     expect(wiedergabe.spricht).toBe(false)
   })
 
-  it('fuehrt jedes Stueck ueber den Messpunkt zum Lautsprecher', () => {
+  it('fuehrt jedes Stueck genau einmal ueber den Messpunkt zum Lautsprecher', () => {
     const wiedergabe = new Wiedergabe()
     wiedergabe.spiele(stueck(100))
+    wiedergabe.spiele(stueck(100))
 
-    // Der Messpunkt liegt **vor** dem Lautsprecher, aber nicht statt seiner:
-    // die Blase soll sich zum gesprochenen Wort bewegen, und gehoert werden
-    // soll es trotzdem. Faellt eine der beiden Verbindungen weg, ist entweder
-    // die Kugel tot oder der Ton weg.
+    // Der Messpunkt liegt **vor** dem Lautsprecher und reicht den Ton
+    // weiter: der Schwarm bewegt sich zum gesprochenen Wort, und gehoert wird
+    // es trotzdem. Hier stand einmal zusaetzlich der direkte Weg zum Ziel —
+    // dort kam jedes Stueck dann zweimal an, 6 dB zu laut.
     const messer = kontext().messer[0]
-    expect(messer.verbunden).toBe(true)
-    expect(kontext().quellen[0].ziele).toContain(messer)
-    expect(kontext().quellen[0].ziele).toContain(kontext().destination)
+    expect(kontext().messer).toHaveLength(1)
+    expect(messer.ziele).toEqual([kontext().destination])
+    for (const quelle of kontext().quellen) {
+      expect(quelle.ziele).toEqual([messer])
+    }
   })
 
   it('misst den Pegel des laufenden Tonstuecks und klemmt ihn bei eins', () => {
@@ -150,8 +153,8 @@ describe('Wiedergabe', () => {
     kontext().messer[0].welle = 16
     expect(wiedergabe.pegel()).toBeCloseTo(0.5, 5)
 
-    // Und lauter als „ganz" wird die Blase nicht: sonst waechst sie aus dem
-    // Bild heraus, statt zu atmen.
+    // Und lauter als „ganz" wird der Pegel nicht: sonst waechst der Schwarm
+    // aus dem Bild heraus, statt zu atmen.
     kontext().messer[0].welle = 64
     expect(wiedergabe.pegel()).toBe(1)
   })
@@ -165,7 +168,7 @@ describe('Wiedergabe', () => {
     wiedergabe.abbrechen()
 
     // Der Messpunkt haelt seinen letzten Ausschlag noch eine Weile — ohne die
-    // Frage, ob ueberhaupt etwas laeuft, atmete die Kugel weiter, waehrend die
+    // Frage, ob ueberhaupt etwas laeuft, atmete der Schwarm weiter, waehrend die
     // KI laengst schweigt.
     expect(wiedergabe.pegel()).toBe(0)
   })
@@ -177,10 +180,10 @@ describe('Wiedergabe', () => {
 
     wiedergabe.spiele(stueck(100))
 
-    // Ein Browser ohne `createAnalyser` verliert die Bewegung der Blase, nicht
-    // den Ton. Der Weg zum Ziel bleibt bestehen.
+    // Ein Browser ohne `createAnalyser` verliert die Bewegung des Schwarms,
+    // nicht den Ton: das Stueck geht direkt ans Ziel.
     expect(kontext().messer).toHaveLength(0)
-    expect(kontext().quellen[0].ziele).toContain(kontext().destination)
+    expect(kontext().quellen[0].ziele).toEqual([kontext().destination])
     expect(kontext().quellen[0].startZeit).not.toBeNull()
     expect(wiedergabe.pegel()).toBe(0)
   })

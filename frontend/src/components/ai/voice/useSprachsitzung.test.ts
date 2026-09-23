@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { installFakeAudio, type FakeAudioContext } from '@/test/fakeAudio'
+import { FakeMediaStream, installFakeAudio, type FakeAudioContext } from '@/test/fakeAudio'
 import { FakeWebSocket, installFakeWebSocket } from '@/test/fakeWebSocket'
 import { useSprachsitzung } from './useSprachsitzung'
 
@@ -707,7 +707,7 @@ describe('useSprachsitzung', () => {
     expect(haken.result.current.pegel()).toBe(1)
 
     // Wer gerade redet, bestimmt die Quelle. Ein Maximum ueber beide waere
-    // bequemer und falsch — dann atmete die Blase auch dann, wenn nur ein
+    // bequemer und falsch — dann atmete der Schwarm auch dann, wenn nur ein
     // Luefter neben dem Mikrofon steht.
     act(() => leitung().simulateMessage({ art: 'zustand', zustand: 'hoert' }))
     expect(haken.result.current.pegel()).toBeCloseTo(0.3, 5)
@@ -738,6 +738,137 @@ describe('useSprachsitzung', () => {
 
     act(() => leitung().simulateMessage({ art: 'tool_start', tool_name: 'read_server_status' }))
     expect(haken.result.current.werkzeug).toBe('read_server_status')
+  })
+
+  it('haelt den Werkzeuglauf bis zum Ende des Zugs, auch wenn die KI dazwischen spricht', async () => {
+    const haken = await sitzung()
+    expect(haken.result.current.werkzeugLaeuft).toBe(false)
+    expect(haken.result.current.werkzeugStarts).toBe(0)
+
+    act(() => leitung().simulateMessage({ art: 'werkzeug_gestartet', name: 'list_my_servers' }))
+    expect(haken.result.current.werkzeugLaeuft).toBe(true)
+    expect(haken.result.current.werkzeugStarts).toBe(1)
+
+    // „Ich sehe nach" mitten im Zug und das Ergebnis des Werkzeugs beenden
+    // den Zug nicht. Der Schwarm bliebe sonst nicht beim Logo, sondern
+    // spränge zwischen Logo und Globus hin und her.
+    act(() => leitung().simulateMessage({ art: 'zustand', zustand: 'spricht' }))
+    act(() => leitung().simulateMessage({ art: 'werkzeug', name: 'list_my_servers' }))
+    act(() => leitung().simulateMessage({ art: 'zustand', zustand: 'denkt' }))
+    expect(haken.result.current.werkzeugLaeuft).toBe(true)
+
+    act(() => leitung().simulateMessage({ art: 'zustand', zustand: 'bereit' }))
+    expect(haken.result.current.werkzeugLaeuft).toBe(false)
+  })
+
+  it('zaehlt jeden Werkzeugstart, auch zweimal dasselbe Werkzeug', async () => {
+    const haken = await sitzung()
+
+    act(() => leitung().simulateMessage({ art: 'werkzeug_gestartet', name: 'read_server_status' }))
+    act(() => leitung().simulateMessage({ art: 'tool_start', tool_name: 'read_server_status' }))
+    // Ein Ergebnis ist kein Start — es schickt keinen zweiten Lichtring.
+    act(() => leitung().simulateMessage({ art: 'werkzeug', name: 'read_server_status' }))
+
+    expect(haken.result.current.werkzeugStarts).toBe(2)
+  })
+
+  it('beendet den Werkzeuglauf, sobald der Mensch wieder spricht oder auflegt', async () => {
+    const haken = await sitzung()
+
+    act(() => leitung().simulateMessage({ art: 'werkzeug_gestartet', name: 'list_my_servers' }))
+    act(() => leitung().simulateMessage({ art: 'zustand', zustand: 'hoert' }))
+    expect(haken.result.current.werkzeugLaeuft).toBe(false)
+
+    act(() => leitung().simulateMessage({ art: 'werkzeug_gestartet', name: 'list_my_servers' }))
+    act(() => haken.result.current.beenden())
+    expect(haken.result.current.werkzeugLaeuft).toBe(false)
+  })
+
+  it('meldet die abgelaufene Sitzung, bis die neue ihren ersten Zustand schickt', async () => {
+    const haken = await sitzung()
+
+    act(() => leitung().simulateMessage({ art: 'abgelaufen' }))
+    expect(haken.result.current.abgelaufen).toBe(true)
+    act(() => leitung().simulateClose(1000))
+    await act(async () => {
+      vi.advanceTimersByTime(500)
+    })
+    // Neu verbunden, aber noch ohne Nachricht: der Schwarm liegt noch flach.
+    expect(sockets.instances).toHaveLength(2)
+    expect(haken.result.current.abgelaufen).toBe(true)
+
+    // Realtime und GPT-Live melden sich mit `zustand: bereit` — nicht mit
+    // `bereit`. Stand hier nur `bereit`, blieb „abgelaufen" für immer stehen.
+    act(() => leitung(1).simulateOpen())
+    act(() => leitung(1).simulateMessage({ art: 'zustand', zustand: 'bereit' }))
+    expect(haken.result.current.abgelaufen).toBe(false)
+  })
+
+  it('nimmt „abgelaufen" zurueck, wenn das Neuverbinden scheitert', async () => {
+    const haken = await sitzung()
+
+    act(() => leitung().simulateMessage({ art: 'abgelaufen' }))
+    act(() => leitung().simulateClose(1000))
+    await act(async () => {
+      vi.advanceTimersByTime(500)
+    })
+    act(() => leitung(1).simulateClose(1006))
+
+    // Aus ist aus: eine Sitzung, die nicht wiederkommt, ist nicht abgelaufen.
+    expect(haken.result.current.zustand).toBe('aus')
+    expect(haken.result.current.abgelaufen).toBe(false)
+  })
+
+  it('misst per WebRTC beim Sprechen die Stimme der KI und beim Zuhoeren das Mikrofon', async () => {
+    class StimmPeer {
+      static instances: StimmPeer[] = []
+      localDescription: RTCSessionDescriptionInit | null = null
+      ontrack: ((event: RTCTrackEvent) => void) | null = null
+      constructor() {
+        StimmPeer.instances.push(this)
+      }
+      addTrack() {}
+      createDataChannel() { return {} }
+      async createOffer() { return { type: 'offer' as const, sdp: 'v=0\r\noffer' } }
+      async setLocalDescription(value: RTCSessionDescriptionInit) { this.localDescription = value }
+      async setRemoteDescription() {}
+      close() {}
+    }
+    const originalPeer = globalThis.RTCPeerConnection
+    ;(globalThis as { RTCPeerConnection?: unknown }).RTCPeerConnection = StimmPeer
+    // jsdom spielt nichts ab; `play()` muss nur gelingen.
+    const abspielen = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+    try {
+      const haken = renderHook(() => useSprachsitzung(undefined, 'openai_realtime'))
+      await act(() => haken.result.current.starten())
+      await act(async () => {
+        leitung().simulateOpen()
+        await Promise.resolve()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      act(() => {
+        StimmPeer.instances[0].ontrack?.({ streams: [new FakeMediaStream()] } as unknown as RTCTrackEvent)
+      })
+      const kontext = audio.kontexte[audio.kontexte.length - 1]
+      // Der erste Messpunkt hängt am Mikrofon, der zweite an der Stimme.
+      expect(kontext.messer).toHaveLength(2)
+      kontext.messer[0].welle = 8
+      kontext.messer[1].welle = 32
+
+      // Vorher lief die Stimme per WebRTC an keinem Messpunkt vorbei: beim
+      // Sprechen fiel der Pegel auf die Wiedergabe zurück, die es auf diesem
+      // Weg gar nicht gibt — der Schwarm stand still, während die KI sprach.
+      act(() => leitung().simulateMessage({ art: 'zustand', zustand: 'spricht' }))
+      expect(haken.result.current.pegel()).toBe(1)
+      act(() => leitung().simulateMessage({ art: 'zustand', zustand: 'hoert' }))
+      expect(haken.result.current.pegel()).toBeCloseTo(0.25, 5)
+      act(() => haken.result.current.beenden())
+    } finally {
+      abspielen.mockRestore()
+      if (originalPeer) globalThis.RTCPeerConnection = originalPeer
+      else delete (globalThis as { RTCPeerConnection?: unknown }).RTCPeerConnection
+    }
   })
 
   it('normalisiert Geodaten aus alten Werkzeugereignissen vor der Anzeige', async () => {

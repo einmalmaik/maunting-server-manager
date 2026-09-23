@@ -1118,6 +1118,7 @@
       "start": "Sprachmodus starten",
       "stop": "Sprachmodus beenden",
       "zustand": {
+        "abgelaufen": "Sitzung abgelaufen",
         "aus": "Sprachmodus aus",
         "verbindet": "Verbindet …",
         "bereit": "Bereit, sprich einfach los",
@@ -1142,7 +1143,10 @@
       "end": "Gespräch beenden",
       "endHint": "ESC drücken",
       "settings": "Angaben zum Sprachmodus",
+      "werkzeug": "Ein Werkzeug läuft",
       "hint": {
+        "abgelaufen": "Die Höchstdauer ist erreicht, ich verbinde neu.",
+        "werkzeugZeit": "Das Werkzeug hat zu lange gebraucht. Die Sprachsitzung bleibt offen.",
         "aus": "Der Sprachmodus ist beendet.",
         "verbindet": "Die Verbindung wird aufgebaut.",
         "bereit": "Sprich mit mir, ich bin bereit.",

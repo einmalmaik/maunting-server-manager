@@ -1118,6 +1118,7 @@
       "start": "Start voice mode",
       "stop": "Stop voice mode",
       "zustand": {
+        "abgelaufen": "Session expired",
         "aus": "Voice mode off",
         "verbindet": "Connecting …",
         "bereit": "Ready, speak whenever you want",
@@ -1142,7 +1143,10 @@
       "end": "End conversation",
       "endHint": "press ESC",
       "settings": "Voice mode details",
+      "werkzeug": "A tool is running",
       "hint": {
+        "abgelaufen": "The maximum length was reached. Reconnecting.",
+        "werkzeugZeit": "The tool took too long. The voice session stays open.",
         "aus": "Voice mode has ended.",
         "verbindet": "Setting up the connection.",
         "bereit": "Talk to me, I'm ready.",
