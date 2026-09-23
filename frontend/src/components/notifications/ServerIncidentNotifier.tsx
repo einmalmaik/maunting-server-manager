@@ -18,6 +18,7 @@ import { sendeGeraeteBenachrichtigung, pruefeUndFrageGeraeteBerechtigung } from 
 import { abonniere, kuendige } from '@/services/pushAbo'
 import { useMessengerNotificationStore, playNotificationChime } from '@/stores/messengerNotificationStore'
 import { NotificationService } from '@/services/notificationService'
+import { loadCalendarEventsOfflineFirst } from '@/lib/offlineSync'
 import { sendE2eeDeliveryReceipt, checkAndDispatchPendingDeliveryReceipts } from '@/services/deliveryReceiptService'
 
 interface IncidentAlert {
@@ -39,6 +40,63 @@ interface CalendarDueReminder {
   location: string
   time_hint: string
   key: string
+}
+
+/**
+ * Fällige Vorkommen aus Serien, die der Server nicht lesen kann.
+ *
+ * Er liefert in `/calendar/due-reminders` nur, was er selbst ausbreiten kann.
+ * Bei einem Ende-zu-Ende verschlüsselten Termin steht die Wiederholungsregel
+ * als `sv-cal-v1:`-Umschlag in seiner Datenbank — und das bleibt so. Also
+ * rechnet dieses Gerät sie aus seinem eigenen Spiegel aus.
+ *
+ * Dieselben Fenster wie serverseitig (`CalendarService.get_due_reminders`) und
+ * derselbe Schlüsselbau, damit nichts doppelt meldet, wenn der Server einen
+ * Termin doch lesen kann.
+ */
+async function faelligeSerienVorkommen(
+  userId: number | undefined,
+  zeitzone: string | null | undefined,
+): Promise<CalendarDueReminder[]> {
+  const jetzt = new Date()
+  const bis = new Date(jetzt.getTime() + 50 * 3600_000)
+  const { events } = await loadCalendarEventsOfflineFirst(
+    jetzt.toISOString(),
+    bis.toISOString(),
+    undefined,
+    userId,
+    zeitzone ?? null,
+  )
+
+  const faellig: CalendarDueReminder[] = []
+  for (const ev of events) {
+    // Nur Serien: Einzeltermine meldet der Server bereits, und die trügen
+    // sonst zwei Meldungen.
+    if (!ev.istSerie) continue
+
+    const start = new Date(ev.start)
+    const stunden = (start.getTime() - jetzt.getTime()) / 3600_000
+    let hinweis: string | null = null
+    let stufe: string | null = null
+    if (stunden > 25 && stunden <= 49) {
+      hinweis = 'in 2 Tagen'
+      stufe = '48h'
+    } else if (stunden >= 0 && stunden <= 25) {
+      hinweis = stunden > 2 ? 'in 1 Tag' : 'in Kürze'
+      stufe = '24h'
+    }
+    if (!hinweis || !stufe) continue
+
+    faellig.push({
+      event_id: ev.event_id,
+      title: ev.title,
+      start: start.toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }),
+      location: ev.location || '',
+      time_hint: hinweis,
+      key: `${userId ?? 0}_${ev.event_id}_${ev.vorkommen}_${stufe}`,
+    })
+  }
+  return faellig
 }
 
 const POLL_INTERVAL_MS = 20_000
@@ -125,7 +183,13 @@ export function ServerIncidentNotifier() {
         }
 
         // 2. Fällige Termine (24h / 48h) abrufen
-        const reminders = await api<CalendarDueReminder[]>('/calendar/due-reminders').catch(() => [])
+        const vomServer = await api<CalendarDueReminder[]>('/calendar/due-reminders').catch(() => [])
+        // Serien, deren Regel Ende-zu-Ende verschlüsselt ist, fehlen in der
+        // Serverliste — er kann sie nicht ausbreiten. Dieses Gerät hat den
+        // Schlüssel und trägt sie nach; ohne das meldete sich ausgerechnet der
+        // Geburtstag nie, um den es bei Serienterminen zuallererst geht.
+        const vomGeraet = await faelligeSerienVorkommen(user?.id, user?.time_zone).catch(() => [])
+        const reminders = [...(Array.isArray(vomServer) ? vomServer : []), ...vomGeraet]
         if (Array.isArray(reminders)) {
           let updatedReminders = false
           for (const rem of reminders) {

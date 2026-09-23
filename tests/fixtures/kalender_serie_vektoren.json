@@ -1,0 +1,418 @@
+{
+  "_hinweis": [
+    "Verbindliche Faelle fuer die Ausbreitung von Serienterminen.",
+    "Gelesen von backend/tests/test_kalender_serie.py UND",
+    "frontend/src/services/kalenderSerie.test.ts — beide Implementierungen",
+    "muessen dieselben Vorkommen liefern, sonst zeigt die Ansicht etwas",
+    "anderes an als die Erinnerung verschickt.",
+    "",
+    "Alle Zeitpunkte sind UTC (Suffix Z). Die lokale Uhrzeit, um die es",
+    "jeweils geht, steht im Namen des Falls — sie ist der eigentliche",
+    "Gegenstand, denn eine Serie wiederholt sich nach der Uhr des Menschen,",
+    "nicht nach UTC."
+  ],
+  "gueltig": [
+    {
+      "name": "jaehrlich: Geburtstag, ganztaegig, ohne Ende",
+      "rrule": "FREQ=YEARLY",
+      "start": "2026-03-13T23:00:00Z",
+      "ende": "2026-03-14T23:00:00Z",
+      "ganztaegig": true,
+      "zeitzone": "Europe/Berlin",
+      "fenster_von": "2026-01-01T00:00:00Z",
+      "fenster_bis": "2029-01-01T00:00:00Z",
+      "erwartet": [
+        { "schluessel": "2026-03-14", "start": "2026-03-13T23:00:00Z", "ende": "2026-03-14T23:00:00Z" },
+        { "schluessel": "2027-03-14", "start": "2027-03-13T23:00:00Z", "ende": "2027-03-14T23:00:00Z" },
+        { "schluessel": "2028-03-14", "start": "2028-03-13T23:00:00Z", "ende": "2028-03-14T23:00:00Z" }
+      ]
+    },
+    {
+      "name": "jaehrlich: 29. Februar faellt in Nicht-Schaltjahren aus (09:00 Berlin)",
+      "rrule": "FREQ=YEARLY",
+      "start": "2024-02-29T08:00:00Z",
+      "ende": "2024-02-29T09:00:00Z",
+      "ganztaegig": false,
+      "zeitzone": "Europe/Berlin",
+      "fenster_von": "2024-01-01T00:00:00Z",
+      "fenster_bis": "2033-01-01T00:00:00Z",
+      "erwartet": [
+        { "schluessel": "2024-02-29", "start": "2024-02-29T08:00:00Z", "ende": "2024-02-29T09:00:00Z" },
+        { "schluessel": "2028-02-29", "start": "2028-02-29T08:00:00Z", "ende": "2028-02-29T09:00:00Z" },
+        { "schluessel": "2032-02-29", "start": "2032-02-29T08:00:00Z", "ende": "2032-02-29T09:00:00Z" }
+      ]
+    },
+    {
+      "name": "monatlich: der 31. ueberspringt kurze Monate (12:00 Berlin)",
+      "rrule": "FREQ=MONTHLY",
+      "start": "2026-01-31T11:00:00Z",
+      "ende": "2026-01-31T12:00:00Z",
+      "ganztaegig": false,
+      "zeitzone": "Europe/Berlin",
+      "fenster_von": "2026-01-01T00:00:00Z",
+      "fenster_bis": "2026-08-01T00:00:00Z",
+      "erwartet": [
+        { "schluessel": "2026-01-31", "start": "2026-01-31T11:00:00Z", "ende": "2026-01-31T12:00:00Z" },
+        { "schluessel": "2026-03-31", "start": "2026-03-31T10:00:00Z", "ende": "2026-03-31T11:00:00Z" },
+        { "schluessel": "2026-05-31", "start": "2026-05-31T10:00:00Z", "ende": "2026-05-31T11:00:00Z" },
+        { "schluessel": "2026-07-31", "start": "2026-07-31T10:00:00Z", "ende": "2026-07-31T11:00:00Z" }
+      ]
+    },
+    {
+      "name": "monatlich mit COUNT: Miete am Ersten (08:00 Berlin)",
+      "rrule": "FREQ=MONTHLY;COUNT=4",
+      "start": "2026-02-01T07:00:00Z",
+      "ende": "2026-02-01T07:30:00Z",
+      "ganztaegig": false,
+      "zeitzone": "Europe/Berlin",
+      "fenster_von": "2026-01-01T00:00:00Z",
+      "fenster_bis": "2027-01-01T00:00:00Z",
+      "erwartet": [
+        { "schluessel": "2026-02-01", "start": "2026-02-01T07:00:00Z", "ende": "2026-02-01T07:30:00Z" },
+        { "schluessel": "2026-03-01", "start": "2026-03-01T07:00:00Z", "ende": "2026-03-01T07:30:00Z" },
+        { "schluessel": "2026-04-01", "start": "2026-04-01T06:00:00Z", "ende": "2026-04-01T06:30:00Z" },
+        { "schluessel": "2026-05-01", "start": "2026-05-01T06:00:00Z", "ende": "2026-05-01T06:30:00Z" }
+      ]
+    },
+    {
+      "name": "woechentlich BYDAY: Montag und Donnerstag (09:00 Berlin)",
+      "rrule": "FREQ=WEEKLY;BYDAY=MO,TH",
+      "start": "2026-01-05T08:00:00Z",
+      "ende": "2026-01-05T08:30:00Z",
+      "ganztaegig": false,
+      "zeitzone": "Europe/Berlin",
+      "fenster_von": "2026-01-01T00:00:00Z",
+      "fenster_bis": "2026-01-20T00:00:00Z",
+      "erwartet": [
+        { "schluessel": "2026-01-05", "start": "2026-01-05T08:00:00Z", "ende": "2026-01-05T08:30:00Z" },
+        { "schluessel": "2026-01-08", "start": "2026-01-08T08:00:00Z", "ende": "2026-01-08T08:30:00Z" },
+        { "schluessel": "2026-01-12", "start": "2026-01-12T08:00:00Z", "ende": "2026-01-12T08:30:00Z" },
+        { "schluessel": "2026-01-15", "start": "2026-01-15T08:00:00Z", "ende": "2026-01-15T08:30:00Z" },
+        { "schluessel": "2026-01-19", "start": "2026-01-19T08:00:00Z", "ende": "2026-01-19T08:30:00Z" }
+      ]
+    },
+    {
+      "name": "woechentlich INTERVAL=2: Muell raus, jeden zweiten Dienstag (18:00 Berlin)",
+      "rrule": "FREQ=WEEKLY;INTERVAL=2",
+      "start": "2026-01-06T17:00:00Z",
+      "ende": "2026-01-06T17:15:00Z",
+      "ganztaegig": false,
+      "zeitzone": "Europe/Berlin",
+      "fenster_von": "2026-01-01T00:00:00Z",
+      "fenster_bis": "2026-03-01T00:00:00Z",
+      "erwartet": [
+        { "schluessel": "2026-01-06", "start": "2026-01-06T17:00:00Z", "ende": "2026-01-06T17:15:00Z" },
+        { "schluessel": "2026-01-20", "start": "2026-01-20T17:00:00Z", "ende": "2026-01-20T17:15:00Z" },
+        { "schluessel": "2026-02-03", "start": "2026-02-03T17:00:00Z", "ende": "2026-02-03T17:15:00Z" },
+        { "schluessel": "2026-02-17", "start": "2026-02-17T17:00:00Z", "ende": "2026-02-17T17:15:00Z" }
+      ]
+    },
+    {
+      "name": "taeglich mit COUNT=3 (07:30 Berlin)",
+      "rrule": "FREQ=DAILY;COUNT=3",
+      "start": "2026-06-01T05:30:00Z",
+      "ende": "2026-06-01T06:00:00Z",
+      "ganztaegig": false,
+      "zeitzone": "Europe/Berlin",
+      "fenster_von": "2026-01-01T00:00:00Z",
+      "fenster_bis": "2027-01-01T00:00:00Z",
+      "erwartet": [
+        { "schluessel": "2026-06-01", "start": "2026-06-01T05:30:00Z", "ende": "2026-06-01T06:00:00Z" },
+        { "schluessel": "2026-06-02", "start": "2026-06-02T05:30:00Z", "ende": "2026-06-02T06:00:00Z" },
+        { "schluessel": "2026-06-03", "start": "2026-06-03T05:30:00Z", "ende": "2026-06-03T06:00:00Z" }
+      ]
+    },
+    {
+      "name": "taeglich mit UNTIL als reines Datum, einschliesslich des Tages (12:00 Berlin)",
+      "rrule": "FREQ=DAILY;UNTIL=20260110",
+      "start": "2026-01-08T11:00:00Z",
+      "ende": "2026-01-08T12:00:00Z",
+      "ganztaegig": false,
+      "zeitzone": "Europe/Berlin",
+      "fenster_von": "2026-01-01T00:00:00Z",
+      "fenster_bis": "2026-02-01T00:00:00Z",
+      "erwartet": [
+        { "schluessel": "2026-01-08", "start": "2026-01-08T11:00:00Z", "ende": "2026-01-08T12:00:00Z" },
+        { "schluessel": "2026-01-09", "start": "2026-01-09T11:00:00Z", "ende": "2026-01-09T12:00:00Z" },
+        { "schluessel": "2026-01-10", "start": "2026-01-10T11:00:00Z", "ende": "2026-01-10T12:00:00Z" }
+      ]
+    },
+    {
+      "name": "Sommerzeit: 10:00 Berlin bleibt 10:00 Berlin, der UTC-Zeitpunkt springt",
+      "rrule": "FREQ=WEEKLY",
+      "start": "2026-03-23T09:00:00Z",
+      "ende": "2026-03-23T10:00:00Z",
+      "ganztaegig": false,
+      "zeitzone": "Europe/Berlin",
+      "fenster_von": "2026-03-01T00:00:00Z",
+      "fenster_bis": "2026-04-20T00:00:00Z",
+      "erwartet": [
+        { "schluessel": "2026-03-23", "start": "2026-03-23T09:00:00Z", "ende": "2026-03-23T10:00:00Z" },
+        { "schluessel": "2026-03-30", "start": "2026-03-30T08:00:00Z", "ende": "2026-03-30T09:00:00Z" },
+        { "schluessel": "2026-04-06", "start": "2026-04-06T08:00:00Z", "ende": "2026-04-06T09:00:00Z" },
+        { "schluessel": "2026-04-13", "start": "2026-04-13T08:00:00Z", "ende": "2026-04-13T09:00:00Z" }
+      ]
+    },
+    {
+      "name": "Ausnahme: ein Vorkommen faellt aus",
+      "rrule": "FREQ=YEARLY",
+      "ausnahmen": ["2027-03-14"],
+      "start": "2026-03-13T23:00:00Z",
+      "ende": "2026-03-14T23:00:00Z",
+      "ganztaegig": true,
+      "zeitzone": "Europe/Berlin",
+      "fenster_von": "2026-01-01T00:00:00Z",
+      "fenster_bis": "2029-01-01T00:00:00Z",
+      "erwartet": [
+        { "schluessel": "2026-03-14", "start": "2026-03-13T23:00:00Z", "ende": "2026-03-14T23:00:00Z" },
+        { "schluessel": "2028-03-14", "start": "2028-03-13T23:00:00Z", "ende": "2028-03-14T23:00:00Z" }
+      ]
+    },
+    {
+      "name": "Abweichung: ein Vorkommen ist verschoben und heisst anders",
+      "rrule": "FREQ=YEARLY",
+      "abweichungen": {"2027-03-14": {"start": "2027-03-15T09:00:00Z", "ende": "2027-03-15T10:00:00Z", "titel": "Nachgefeiert"}},
+      "start": "2026-03-13T23:00:00Z",
+      "ende": "2026-03-14T23:00:00Z",
+      "ganztaegig": true,
+      "zeitzone": "Europe/Berlin",
+      "fenster_von": "2026-01-01T00:00:00Z",
+      "fenster_bis": "2029-01-01T00:00:00Z",
+      "erwartet": [
+        { "schluessel": "2026-03-14", "start": "2026-03-13T23:00:00Z", "ende": "2026-03-14T23:00:00Z" },
+        { "schluessel": "2027-03-14", "start": "2027-03-15T09:00:00Z", "ende": "2027-03-15T10:00:00Z", "ist_abweichung": true, "titel": "Nachgefeiert" },
+        { "schluessel": "2028-03-14", "start": "2028-03-13T23:00:00Z", "ende": "2028-03-14T23:00:00Z" }
+      ]
+    },
+    {
+      "name": "Der Geburtstag von 1995 erscheint im Fenster von 2026",
+      "rrule": "FREQ=YEARLY",
+      "start": "1995-03-13T23:00:00Z",
+      "ende": "1995-03-14T23:00:00Z",
+      "ganztaegig": true,
+      "zeitzone": "Europe/Berlin",
+      "fenster_von": "2026-03-01T00:00:00Z",
+      "fenster_bis": "2026-04-01T00:00:00Z",
+      "erwartet": [
+        { "schluessel": "2026-03-14", "start": "2026-03-13T23:00:00Z", "ende": "2026-03-14T23:00:00Z" }
+      ]
+    },
+    {
+      "name": "Keine Wiederholung: der Termin selbst, sonst nichts",
+      "rrule": null,
+      "start": "2026-05-04T10:00:00Z",
+      "ende": "2026-05-04T11:00:00Z",
+      "ganztaegig": false,
+      "zeitzone": "Europe/Berlin",
+      "fenster_von": "2026-01-01T00:00:00Z",
+      "fenster_bis": "2027-01-01T00:00:00Z",
+      "erwartet": [
+        { "schluessel": "2026-05-04", "start": "2026-05-04T10:00:00Z", "ende": "2026-05-04T11:00:00Z" }
+      ]
+    },
+    {
+      "name": "Keine Wiederholung ausserhalb des Fensters: nichts",
+      "rrule": null,
+      "start": "2026-05-04T10:00:00Z",
+      "ende": "2026-05-04T11:00:00Z",
+      "ganztaegig": false,
+      "zeitzone": "Europe/Berlin",
+      "fenster_von": "2027-01-01T00:00:00Z",
+      "fenster_bis": "2028-01-01T00:00:00Z",
+      "erwartet": []
+    },
+    {
+      "name": "UTC-Konto: ohne hinterlegte Zeitzone bleibt alles UTC",
+      "rrule": "FREQ=DAILY;COUNT=2",
+      "start": "2026-03-28T23:30:00Z",
+      "ende": "2026-03-29T00:00:00Z",
+      "ganztaegig": false,
+      "zeitzone": "UTC",
+      "fenster_von": "2026-01-01T00:00:00Z",
+      "fenster_bis": "2027-01-01T00:00:00Z",
+      "erwartet": [
+        { "schluessel": "2026-03-28", "start": "2026-03-28T23:30:00Z", "ende": "2026-03-29T00:00:00Z" },
+        { "schluessel": "2026-03-29", "start": "2026-03-29T23:30:00Z", "ende": "2026-03-30T00:00:00Z" }
+      ]
+    },
+    {
+      "name": "Ende vor Beginn: der Termin bleibt trotzdem sichtbar",
+      "_warum": "Ein vertipptes Endjahr ergibt eine Regel, die endet, bevor sie anfaengt. Sie liefert dann in KEINEM Zeitraum ein Vorkommen - der Termin ist nirgends zu sehen, und anklicken und richtigstellen kann ihn auch niemand mehr. Also bleibt das urspruengliche Vorkommen stehen, wie bei einer unlesbaren Regel.",
+      "rrule": "FREQ=YEARLY;UNTIL=20200101",
+      "start": "2026-03-14T09:00:00Z",
+      "ende": "2026-03-14T10:00:00Z",
+      "zeitzone": "Europe/Berlin",
+      "fenster_von": "2026-01-01T00:00:00Z",
+      "fenster_bis": "2027-01-01T00:00:00Z",
+      "erwartet": [
+        { "schluessel": "2026-03-14", "start": "2026-03-14T09:00:00Z", "ende": "2026-03-14T10:00:00Z" }
+      ]
+    },
+    {
+      "name": "abgelaufene Serie: im eigenen Fenster sichtbar",
+      "_warum": "Gegenprobe zum Fall darueber: eine Serie, die ordentlich zu Ende ging, darf nicht mit derselben Begruendung wiederbelebt werden.",
+      "rrule": "FREQ=DAILY;COUNT=3",
+      "start": "2026-01-05T09:00:00Z",
+      "ende": "2026-01-05T10:00:00Z",
+      "zeitzone": "Europe/Berlin",
+      "fenster_von": "2026-01-01T00:00:00Z",
+      "fenster_bis": "2026-02-01T00:00:00Z",
+      "erwartet": [
+        { "schluessel": "2026-01-05", "start": "2026-01-05T09:00:00Z", "ende": "2026-01-05T10:00:00Z" },
+        { "schluessel": "2026-01-06", "start": "2026-01-06T09:00:00Z", "ende": "2026-01-06T10:00:00Z" },
+        { "schluessel": "2026-01-07", "start": "2026-01-07T09:00:00Z", "ende": "2026-01-07T10:00:00Z" }
+      ]
+    },
+    {
+      "name": "abgelaufene Serie: im spaeteren Fenster nicht",
+      "_warum": "Dieselbe Serie ein Jahr spaeter. Hier darf nichts stehen - weder ein echtes Vorkommen noch ein wiederbelebtes.",
+      "rrule": "FREQ=DAILY;COUNT=3",
+      "start": "2026-01-05T09:00:00Z",
+      "ende": "2026-01-05T10:00:00Z",
+      "zeitzone": "Europe/Berlin",
+      "fenster_von": "2027-01-01T00:00:00Z",
+      "fenster_bis": "2027-02-01T00:00:00Z",
+      "erwartet": []
+    },
+    {
+      "name": "alle Vorkommen abgesagt: nichts kommt zurueck",
+      "_warum": "Zweite Gegenprobe. Hier zaehlt der Kandidat, und die Ausnahme entfernt ihn erst danach - der Rettungsanker fuer 'Ende vor Beginn' darf also nicht greifen. Wer alles absagt, hat alles abgesagt.",
+      "rrule": "FREQ=DAILY;COUNT=2",
+      "ausnahmen": ["2026-01-05", "2026-01-06"],
+      "start": "2026-01-05T09:00:00Z",
+      "ende": "2026-01-05T10:00:00Z",
+      "zeitzone": "Europe/Berlin",
+      "fenster_von": "2026-01-01T00:00:00Z",
+      "fenster_bis": "2026-02-01T00:00:00Z",
+      "erwartet": []
+    },
+    {
+      "name": "Fenster liegt ganz vor dem Termin: kein Vorkommen aus dem Nichts",
+      "_warum": "Dritte Gegenprobe. Der Rettungsanker traegt das urspruengliche Vorkommen ein - es muss an der Fensterpruefung scheitern, sonst erfindet eine Abfrage fuer 2020 einen Termin von 2026.",
+      "rrule": "FREQ=YEARLY;UNTIL=20200101",
+      "start": "2026-03-14T09:00:00Z",
+      "ende": "2026-03-14T10:00:00Z",
+      "zeitzone": "Europe/Berlin",
+      "fenster_von": "2020-01-01T00:00:00Z",
+      "fenster_bis": "2020-12-31T00:00:00Z",
+      "erwartet": []
+    },
+    {
+      "name": "taegliche Serie seit 20 Jahren: sie ist heute noch da",
+      "_warum": "Der Schrittdeckel zaehlte ab dem Ursprung. Eine taegliche Serie war nach etwa 13,7 Jahren aufgebraucht, bevor sie das gefragte Fenster erreichte - sie verschwand vollstaendig, in jedem Zeitraum. Erkennbar war das nur im Vergleich: dieselbe Kadenz als WEEKLY mit allen sieben Tagen lieferte weiter Vorkommen. Die Uhrzeit wandert dabei mit der Zeitzone, nicht mit UTC: 09:00 Berliner Wanduhrzeit ist im Winter 08:00Z und im September 07:00Z.",
+      "rrule": "FREQ=DAILY",
+      "start": "2006-01-02T08:00:00Z",
+      "ende": "2006-01-02T09:00:00Z",
+      "zeitzone": "Europe/Berlin",
+      "fenster_von": "2026-09-22T00:00:00Z",
+      "fenster_bis": "2026-09-25T00:00:00Z",
+      "erwartet": [
+        { "schluessel": "2026-09-22", "start": "2026-09-22T07:00:00Z", "ende": "2026-09-22T08:00:00Z" },
+        { "schluessel": "2026-09-23", "start": "2026-09-23T07:00:00Z", "ende": "2026-09-23T08:00:00Z" },
+        { "schluessel": "2026-09-24", "start": "2026-09-24T07:00:00Z", "ende": "2026-09-24T08:00:00Z" }
+      ]
+    },
+    {
+      "name": "taeglich alle drei Tage seit 20 Jahren: das Raster bleibt stehen",
+      "_warum": "Der Vorsprung darf das Raster nicht verschieben. Vom 02.01.2006 aus ist der 23.09.2026 der Tag 7569, und nur 7569 ist durch drei teilbar - der 22. (7568) und der 24. (7570) nicht.",
+      "rrule": "FREQ=DAILY;INTERVAL=3",
+      "start": "2006-01-02T08:00:00Z",
+      "ende": "2006-01-02T09:00:00Z",
+      "zeitzone": "Europe/Berlin",
+      "fenster_von": "2026-09-22T00:00:00Z",
+      "fenster_bis": "2026-09-25T00:00:00Z",
+      "erwartet": [
+        { "schluessel": "2026-09-23", "start": "2026-09-23T07:00:00Z", "ende": "2026-09-23T08:00:00Z" }
+      ]
+    },
+    {
+      "name": "taeglich mit COUNT: der Vorsprung zaehlt die uebersprungenen mit",
+      "_warum": "Beim Springen muss der Zaehler vorbelastet werden, sonst laeuft eine Serie mit COUNT ueber ihr Ende hinaus weiter. 500 Tage ab dem 02.01.2006 enden am 16.05.2007 - das Fenster 2026 ist leer.",
+      "rrule": "FREQ=DAILY;COUNT=500",
+      "start": "2006-01-02T08:00:00Z",
+      "ende": "2006-01-02T09:00:00Z",
+      "zeitzone": "Europe/Berlin",
+      "fenster_von": "2026-09-22T00:00:00Z",
+      "fenster_bis": "2026-09-24T00:00:00Z",
+      "erwartet": []
+    }
+  ],
+  "ungueltig": [
+    {
+      "name": "FREQ fehlt",
+      "rrule": "INTERVAL=2"
+    },
+    {
+      "name": "FREQ ausserhalb der Teilmenge",
+      "rrule": "FREQ=HOURLY"
+    },
+    {
+      "name": "FREQ unbekannt",
+      "rrule": "FREQ=JAEHRLICH"
+    },
+    {
+      "name": "INTERVAL ist null",
+      "rrule": "FREQ=DAILY;INTERVAL=0"
+    },
+    {
+      "name": "INTERVAL ist negativ",
+      "rrule": "FREQ=DAILY;INTERVAL=-1"
+    },
+    {
+      "name": "INTERVAL ist keine Zahl",
+      "rrule": "FREQ=DAILY;INTERVAL=zwei"
+    },
+    {
+      "name": "UNTIL und COUNT zusammen",
+      "rrule": "FREQ=DAILY;UNTIL=20260110;COUNT=3"
+    },
+    {
+      "name": "COUNT ist null",
+      "rrule": "FREQ=DAILY;COUNT=0"
+    },
+    {
+      "name": "UNTIL ist kein Datum",
+      "rrule": "FREQ=DAILY;UNTIL=bald"
+    },
+    {
+      "name": "BYSETPOS gehoert nicht zur Teilmenge",
+      "rrule": "FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1"
+    },
+    {
+      "name": "BYMONTHDAY gehoert nicht zur Teilmenge",
+      "rrule": "FREQ=MONTHLY;BYMONTHDAY=15"
+    },
+    {
+      "name": "BYMONTH gehoert nicht zur Teilmenge",
+      "rrule": "FREQ=YEARLY;BYMONTH=3"
+    },
+    {
+      "name": "BYDAY nur bei WEEKLY",
+      "rrule": "FREQ=MONTHLY;BYDAY=MO"
+    },
+    {
+      "name": "BYDAY mit Zahlpraefix",
+      "rrule": "FREQ=WEEKLY;BYDAY=2MO"
+    },
+    {
+      "name": "BYDAY mit unbekanntem Tag",
+      "rrule": "FREQ=WEEKLY;BYDAY=MO,XX"
+    },
+    {
+      "name": "BYDAY leer",
+      "rrule": "FREQ=WEEKLY;BYDAY="
+    },
+    {
+      "name": "Unbekannter Schluessel",
+      "rrule": "FREQ=DAILY;WKST=SU"
+    },
+    {
+      "name": "Leere Regel",
+      "rrule": ""
+    },
+    {
+      "name": "Nur ein Semikolon",
+      "rrule": ";"
+    }
+  ]
+}

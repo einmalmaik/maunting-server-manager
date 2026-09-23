@@ -79,7 +79,45 @@
     "updated": "Termin aktualisiert",
     "deleteConfirmTitle": "Termin löschen",
     "deleteConfirmMessage": "Möchtest du diesen Termin wirklich unwiderruflich aus deinem Kalender löschen?",
-    "deleted": "Termin gelöscht"
+    "deleted": "Termin gelöscht",
+    "recurrence": {
+      "label": "Wiederholung",
+      "none": "Einmalig",
+      "daily": "Täglich",
+      "weekly": "Wöchentlich",
+      "monthly": "Monatlich",
+      "yearly": "Jährlich",
+      "everyNth": "Jedes",
+      "unit": {
+        "DAILY": "Tage",
+        "WEEKLY": "Wochen",
+        "MONTHLY": "Monate",
+        "YEARLY": "Jahre"
+      },
+      "weekday": {
+        "MO": "Mo",
+        "TU": "Di",
+        "WE": "Mi",
+        "TH": "Do",
+        "FR": "Fr",
+        "SA": "Sa",
+        "SU": "So"
+      },
+      "endsLabel": "Endet",
+      "endsNever": "Nie",
+      "endsOn": "Am",
+      "endsAfter": "Nach",
+      "scopeLabel": "Was soll geändert werden?",
+      "scopeSingle": "Nur dieser Termin",
+      "scopeSeries": "Ganze Serie",
+      "scopeSingleHint": "Die Änderung gilt allein für dieses Vorkommen. Alle anderen bleiben, wie sie sind.",
+      "scopeSeriesHint": "Die Änderung gilt für alle Vorkommen der Serie ({{regel}}).",
+      "deleteOccurrenceTitle": "Diesen Termin absagen?",
+      "deleteOccurrenceMessage": "Nur dieses eine Vorkommen entfällt. Die Serie läuft weiter.",
+      "deleteSeriesMessage": "Der Termin und alle seine Wiederholungen werden gelöscht.",
+      "occurrenceDeleted": "Termin abgesagt",
+      "reminderHint": "Hinweis: Für Serientermine, die du hier anlegst, kommen Erinnerungen nur auf deine Geräte. Eine Erinnerungs-Mail kann der Server nicht verschicken — er kann die Wiederholungsregel nicht lesen, weil sie verschlüsselt auf deinem Gerät entsteht."
+    }
   },
   "pageContext": {
     "overview": "Übersicht",

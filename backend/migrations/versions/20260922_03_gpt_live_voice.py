@@ -10,7 +10,7 @@ Standardmodell des Zugangs"; ein fehlender Minutenpreis heisst wie bei den
 übrigen Realtime-Preisen „ohne Preisquelle", nicht „kostenlos geschätzt".
 
 Revision ID: 20260922_03
-Revises: 20260922_01
+Revises: 20260922_02
 Create Date: 2026-09-22
 """
 
@@ -21,7 +21,7 @@ import sqlalchemy as sa
 
 
 revision: str = "20260922_03"
-down_revision: Union[str, None] = "20260922_01"
+down_revision: Union[str, None] = "20260922_02"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

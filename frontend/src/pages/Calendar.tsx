@@ -11,6 +11,7 @@ import {
   MapPin,
   Network,
   Plus,
+  Repeat,
   Server,
   Trash2,
   User,
@@ -23,15 +24,28 @@ import { apiUrl } from '@/config/api'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { PageHeader } from '@/Singra/UI/PageHeader'
-import { DateTimePicker, Dropdown } from '@/Singra/UI'
+import { DateTimePicker, Dropdown, NumberStepper } from '@/Singra/UI'
 import { Button } from '@/components/ui/Button'
 import { sendeGeraeteBenachrichtigung, pruefeUndFrageGeraeteBerechtigung } from '@/lib/benachrichtigung'
 import {
   loadCalendarEventsOfflineFirst,
   saveCalendarEventOffline,
   deleteCalendarEventOffline,
+  getOfflineCalendarEvents,
   useEntitySync,
 } from '@/lib/offlineSync'
+import {
+  LEERE_SERIE,
+  type Frequenz,
+  type Serie,
+  kurzform,
+  regelZerlegen,
+  serieBauen,
+  serieLesen,
+  serieSchreiben,
+  WOCHENTAG_KUERZEL,
+} from '@/services/kalenderSerie'
+import { useAuthStore } from '@/stores/authStore'
 
 export type EventCategoryType = 'personal' | 'team' | 'server' | 'node'
 
@@ -43,6 +57,11 @@ export interface CalendarEventItem {
   end: string
   description?: string
   location?: string
+  /**
+   * Das Wiederholungsdokument — Klartext-JSON, oder ein `sv-cal-v1:`-Umschlag,
+   * solange es noch nicht entschlüsselt wurde. `serieLesen` verträgt beides.
+   */
+  recurrence?: string
   all_day?: boolean
   color?: string
   calendar?: string
@@ -54,6 +73,20 @@ export interface CalendarEventItem {
   creator_name?: string | null
   user_id?: number
   can_edit?: boolean
+}
+
+/**
+ * Ein einzelnes Vorkommen, wie die Ansicht es zeigt.
+ *
+ * Der Server liefert Serienköpfe, keine Vorkommen (`CalendarService.get_events`
+ * kann die Regel eines E2EE-Termins nicht lesen). Ausgebreitet wird hier.
+ */
+export interface KalenderVorkommen extends CalendarEventItem {
+  /** Lokales Datum des ursprünglichen Vorkommens, `''` bei Einzelterminen. */
+  vorkommen: string
+  istSerie: boolean
+  /** Zusammengesetzt aus Termin und Vorkommen — eindeutig, anders als `event_id`. */
+  schluessel: string
 }
 
 type ViewMode = 'month' | 'week' | 'day'
@@ -89,7 +122,9 @@ export function Calendar() {
   const [currentDate, setCurrentDate] = useState(() => new Date())
   const [viewMode, setViewMode] = useState<ViewMode>('month')
   const [selectedCategory, setSelectedCategory] = useState<'all' | EventCategoryType>('all')
-  const [events, setEvents] = useState<CalendarEventItem[]>([])
+  // Vorkommen, nicht Termine: der Server liefert Serienköpfe, ausgebreitet
+  // wird im Client (siehe `loadCalendarEventsOfflineFirst`).
+  const [events, setEvents] = useState<KalenderVorkommen[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isFeedModalOpen, setIsFeedModalOpen] = useState(false)
 
@@ -110,6 +145,28 @@ export function Calendar() {
   const [formTeamId, setFormTeamId] = useState<number | null>(null)
   const [formServerId, setFormServerId] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
+
+  // Serientermine. `formSerie` ist das Dokument des Termins, wie es gespeichert
+  // ist; die Einzelfelder darunter sind seine zerlegte Form fürs Formular.
+  const [formSerie, setFormSerie] = useState<Serie>(LEERE_SERIE)
+  const [formTakt, setFormTakt] = useState<Frequenz | null>(null)
+  const [formIntervall, setFormIntervall] = useState(1)
+  const [formWochentage, setFormWochentage] = useState<string[]>([])
+  const [formEndeArt, setFormEndeArt] = useState<'nie' | 'bis' | 'anzahl'>('nie')
+  const [formBis, setFormBis] = useState('')
+  const [formAnzahl, setFormAnzahl] = useState(10)
+  /** Welches Vorkommen angeklickt wurde; leer, wenn es keine Serie ist. */
+  const [formVorkommen, setFormVorkommen] = useState('')
+  /**
+   * Vorgabe ist **einzeln**, nicht die Serie.
+   *
+   * Wer einen Geburtstag anklickt, um die Uhrzeit zu korrigieren, soll damit
+   * nicht dreißig Jahre umstellen. Die weiter reichende Wahl kostet einen
+   * bewussten Klick — und die Zeile daneben sagt, was sie bedeutet.
+   */
+  const [formUmfang, setFormUmfang] = useState<'einzeln' | 'serie'>('einzeln')
+  /** Der Termin selbst, wenn ein Vorkommen bearbeitet wird. */
+  const [formKopf, setFormKopf] = useState<CalendarEventItem | null>(null)
 
   const locale = i18n.language.startsWith('de') ? 'de-DE' : 'en-US'
 
@@ -143,15 +200,21 @@ export function Calendar() {
     }
   }, [currentDate, viewMode])
 
+  // Die Zeitzone des Kontos, nicht die des Browsers: eine Serie wiederholt
+  // sich nach der Uhr, unter der sie angelegt wurde. Der Erinnerungslauf im
+  // Backend rechnet mit derselben Angabe, sonst zeigt die Ansicht etwas
+  // anderes an, als die Erinnerung meldet.
+  const kontoZeitzone = useAuthStore((s) => s.user?.time_zone) || null
+
   const fetchEvents = useCallback(() => {
-    loadCalendarEventsOfflineFirst(rangeStart, rangeEnd, selectedCategory)
+    loadCalendarEventsOfflineFirst(rangeStart, rangeEnd, selectedCategory, undefined, kontoZeitzone)
       .then(({ events: data }) => {
         setEvents(Array.isArray(data) ? data : [])
       })
       .catch(() => {
         setEvents([])
       })
-  }, [rangeStart, rangeEnd, selectedCategory])
+  }, [rangeStart, rangeEnd, selectedCategory, kontoZeitzone])
 
   useEffect(() => {
     // Lade Teams, Server und Nodes für Zuordnungs-Dropdowns
@@ -323,10 +386,36 @@ export function Calendar() {
     setFormTeamId(null)
     setFormServerId(null)
     setFormColor(getDefaultColorForType(targetType))
+    setzeSerienFelder(LEERE_SERIE)
+    setFormVorkommen('')
+    setFormUmfang('einzeln')
+    setFormKopf(null)
     setIsModalOpen(true)
   }
 
-  const openEditModal = (ev: CalendarEventItem) => {
+  /** Zerlegt das gespeicherte Dokument in die Formularfelder. */
+  const setzeSerienFelder = (serie: Serie) => {
+    setFormSerie(serie)
+    const teile = regelZerlegen(serie)
+    setFormTakt(teile.takt)
+    setFormIntervall(teile.intervall)
+    setFormWochentage(teile.wochentage)
+    if (teile.bis) {
+      setFormEndeArt('bis')
+      setFormBis(teile.bis)
+      setFormAnzahl(10)
+    } else if (teile.anzahl) {
+      setFormEndeArt('anzahl')
+      setFormAnzahl(teile.anzahl)
+      setFormBis('')
+    } else {
+      setFormEndeArt('nie')
+      setFormBis('')
+      setFormAnzahl(10)
+    }
+  }
+
+  const openEditModal = (ev: KalenderVorkommen) => {
     const rawType = (ev.event_type as EventCategoryType) || 'personal'
     const evType: EventCategoryType = ['personal', 'team', 'server', 'node'].includes(rawType)
       ? rawType
@@ -343,8 +432,31 @@ export function Calendar() {
     setFormTeamId(ev.team_id || null)
     setFormServerId(ev.server_id || null)
     setFormColor(ev.color ? (ev.color === 'blue' ? 'primary' : ev.color === 'green' ? 'emerald' : ev.color) : getDefaultColorForType(evType))
+
+    const serie = serieLesen(ev.recurrence)
+    setzeSerienFelder(serie)
+    setFormVorkommen(ev.istSerie ? ev.vorkommen : '')
+    setFormUmfang('einzeln')
+    // Der Termin selbst, nicht das angeklickte Vorkommen: wer nur dieses
+    // Vorkommen verschiebt, darf Start und Titel des Termins nicht mitnehmen.
+    setFormKopf(ev.istSerie ? findeKopf(ev.event_id) : null)
     setIsModalOpen(true)
   }
+
+  /** Der gespeicherte Termin zu einem Vorkommen, aus dem lokalen Spiegel. */
+  const findeKopf = (eventId: string): CalendarEventItem | null =>
+    getOfflineCalendarEvents().find((e) => e.event_id === eventId) || null
+
+  /**
+   * Ob gerade ein einzelnes Vorkommen bearbeitet wird und nicht die Serie.
+   *
+   * Drei Bedingungen, alle nötig: es gibt eine Serie, ein Vorkommen ist
+   * angeklickt, und der Umfang steht auf "einzeln". Fehlt eine davon, ist es
+   * ein gewöhnlicher Termin oder die ganze Serie.
+   */
+  const bearbeitetEinzelnesVorkommen = Boolean(
+    formEventId && formVorkommen && formSerie.rrule && formUmfang === 'einzeln',
+  )
 
   const handleSaveEvent = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -355,10 +467,35 @@ export function Calendar() {
 
     setSaving(true)
     try {
+      // Ein einzelnes Vorkommen zu ändern heißt **nicht**, den Termin zu
+      // ändern: Start, Titel und Zeiten des Termins bleiben stehen, und die
+      // Abweichung wird ins Wiederholungsdokument geschrieben. Sonst würde ein
+      // verschobenes Standup die ganze Serie verschieben.
+      const einzelnesVorkommen = bearbeitetEinzelnesVorkommen
+
+      const neueSerie: Serie = einzelnesVorkommen
+        ? {
+            ...formSerie,
+            abweichungen: {
+              ...formSerie.abweichungen,
+              [formVorkommen]: {
+                start: new Date(formStart).toISOString(),
+                ende: new Date(formEnd).toISOString(),
+                ...(formTitle.trim() !== (formKopf?.title || '') ? { titel: formTitle.trim() } : {}),
+              },
+            },
+          }
+        : serieBauen(formTakt, {
+            intervall: formIntervall,
+            wochentage: formWochentage,
+            bis: formEndeArt === 'bis' ? formBis || null : null,
+            anzahl: formEndeArt === 'anzahl' ? formAnzahl : null,
+          }, formSerie)
+
       const payload = {
-        title: formTitle.trim(),
-        start_time: formStart,
-        end_time: formEnd,
+        title: einzelnesVorkommen ? (formKopf?.title ?? formTitle.trim()) : formTitle.trim(),
+        start_time: einzelnesVorkommen ? (formKopf?.start ?? formStart) : formStart,
+        end_time: einzelnesVorkommen ? (formKopf?.end ?? formEnd) : formEnd,
         description: formDescription.trim() || null,
         location: formLocation.trim() || null,
         all_day: formAllDay,
@@ -366,6 +503,7 @@ export function Calendar() {
         event_type: formEventType,
         team_id: formEventType === 'team' ? formTeamId : null,
         server_id: formEventType === 'server' ? formServerId : null,
+        recurrence: serieSchreiben(neueSerie),
       }
 
       await saveCalendarEventOffline(payload, formEventId)
@@ -386,19 +524,53 @@ export function Calendar() {
 
   const handleDeleteEvent = async () => {
     if (!formEventId) return
+
+    const einzelnesVorkommen = bearbeitetEinzelnesVorkommen
     const ok = await confirm({
-      title: t('calendar.deleteConfirmTitle'),
-      message: t('calendar.deleteConfirmMessage'),
-      confirmText: 'Löschen',
-      cancelText: 'Abbrechen',
+      title: einzelnesVorkommen
+        ? t('calendar.recurrence.deleteOccurrenceTitle')
+        : t('calendar.deleteConfirmTitle'),
+      message: einzelnesVorkommen
+        ? t('calendar.recurrence.deleteOccurrenceMessage')
+        : formSerie.rrule
+          ? t('calendar.recurrence.deleteSeriesMessage')
+          : t('calendar.deleteConfirmMessage'),
+      confirmText: t('common.delete'),
+      cancelText: t('common.cancel'),
       danger: true,
     })
     if (!ok) return
 
     setSaving(true)
     try {
-      await deleteCalendarEventOffline(formEventId)
-      toast.success(t('calendar.deleted'))
+      if (einzelnesVorkommen) {
+        // Ein einzelnes Vorkommen abzusagen löscht den Termin nicht, es trägt
+        // das Datum als Ausnahme ins Dokument ein. Der Rest der Serie bleibt.
+        const ohneDieses: Serie = {
+          ...formSerie,
+          ausnahmen: [...new Set([...formSerie.ausnahmen, formVorkommen])].sort(),
+        }
+        await saveCalendarEventOffline(
+          {
+            title: formKopf?.title ?? formTitle.trim(),
+            start_time: formKopf?.start ?? formStart,
+            end_time: formKopf?.end ?? formEnd,
+            description: formDescription.trim() || null,
+            location: formLocation.trim() || null,
+            all_day: formAllDay,
+            color: formColor,
+            event_type: formEventType,
+            team_id: formEventType === 'team' ? formTeamId : null,
+            server_id: formEventType === 'server' ? formServerId : null,
+            recurrence: serieSchreiben(ohneDieses),
+          },
+          formEventId,
+        )
+        toast.success(t('calendar.recurrence.occurrenceDeleted'))
+      } else {
+        await deleteCalendarEventOffline(formEventId)
+        toast.success(t('calendar.deleted'))
+      }
       setIsModalOpen(false)
       fetchEvents()
       window.dispatchEvent(new Event('msm:calendar-updated'))
@@ -452,6 +624,19 @@ export function Calendar() {
   }, [currentDate, viewMode])
 
   // Events für einen bestimmten Tag filtern
+  /**
+   * Welche Vorkommen gehören in die Zelle eines Tages.
+   *
+   * Das Ende ist **exklusiv**: ein Termin, der um Mitternacht endet, gehört
+   * nicht mehr zum folgenden Tag. Genau so speichert MSM einen ganztägigen
+   * Termin — der 14. März läuft von Mitternacht bis Mitternacht des 15. —, und
+   * genau so schreibt `export_ical` ihn als `DTEND;VALUE=DATE:` heraus, wie es
+   * RFC 5545 verlangt. Mit `>=` erschien jeder Geburtstag auf zwei Tagen.
+   *
+   * Ausnahme ist der punktuelle Termin ohne Dauer (`end === start`, etwa ein
+   * Meilenstein): der hat kein Ende, das nach dem Tagesbeginn liegen könnte,
+   * und würde sonst nirgends erscheinen.
+   */
   const getEventsForDay = (day: Date) => {
     const dayStart = new Date(day)
     dayStart.setHours(0, 0, 0, 0)
@@ -461,7 +646,9 @@ export function Calendar() {
     return events.filter((ev) => {
       const evStart = new Date(ev.start)
       const evEnd = new Date(ev.end)
-      return evStart <= dayEnd && evEnd >= dayStart
+      if (evStart > dayEnd) return false
+      if (evEnd.getTime() === evStart.getTime()) return evStart >= dayStart
+      return evEnd > dayStart
     })
   }
 
@@ -788,7 +975,7 @@ export function Calendar() {
                       })
                       return (
                         <div
-                          key={ev.event_id}
+                          key={ev.schluessel}
                           onClick={(e) => {
                             e.stopPropagation()
                             openEditModal(ev)
@@ -866,7 +1053,7 @@ export function Calendar() {
                         })
                         return (
                           <div
-                            key={ev.event_id}
+                            key={ev.schluessel}
                             onClick={(e) => {
                               e.stopPropagation()
                               openEditModal(ev)
@@ -959,7 +1146,7 @@ export function Calendar() {
                         })
                         return (
                           <div
-                            key={ev.event_id}
+                            key={ev.schluessel}
                             onClick={() => openEditModal(ev)}
                             className={`p-2.5 rounded-lg border text-xs cursor-pointer flex items-center justify-between gap-2 ${colorStyle.flaecheStark} ${colorStyle.text} ${colorStyle.rand} hover:brightness-110`}
                           >
@@ -1039,7 +1226,7 @@ export function Calendar() {
                 })
                 return (
                   <div
-                    key={ev.event_id}
+                    key={ev.schluessel}
                     onClick={() => openEditModal(ev)}
                     className={`p-4 rounded-xl border cursor-pointer transition-all hover:scale-[1.01] ${colorStyle.flaecheStark} ${colorStyle.text} ${colorStyle.rand}`}
                   >
@@ -1091,6 +1278,48 @@ export function Calendar() {
             </div>
 
             <form onSubmit={handleSaveEvent} className="space-y-4">
+              {/* Umfang zuerst: wer eine Serie anklickt, soll vor allem
+                  anderen sehen, wie weit seine Änderung reicht. Die Vorgabe
+                  ist das einzelne Vorkommen — die weiter reichende Wahl kostet
+                  einen bewussten Klick. */}
+              {formEventId && formVorkommen && formSerie.rrule && (
+                <div className="rounded-lg border border-outline-variant/40 bg-surface-container-low p-3 space-y-2">
+                  <div className="flex items-center gap-2 text-xs font-label-md font-semibold text-on-surface-variant uppercase">
+                    <Repeat className="w-3.5 h-3.5" />
+                    {t('calendar.recurrence.scopeLabel')}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setFormUmfang('einzeln')}
+                      className={`px-3 py-2 rounded-lg border text-xs font-semibold transition-all ${
+                        formUmfang === 'einzeln'
+                          ? 'bg-primary/20 text-primary border-primary ring-1 ring-primary'
+                          : 'bg-surface-container text-on-surface-variant border-outline-variant/40 hover:bg-surface-container-high'
+                      }`}
+                    >
+                      {t('calendar.recurrence.scopeSingle')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormUmfang('serie')}
+                      className={`px-3 py-2 rounded-lg border text-xs font-semibold transition-all ${
+                        formUmfang === 'serie'
+                          ? 'bg-primary/20 text-primary border-primary ring-1 ring-primary'
+                          : 'bg-surface-container text-on-surface-variant border-outline-variant/40 hover:bg-surface-container-high'
+                      }`}
+                    >
+                      {t('calendar.recurrence.scopeSeries')}
+                    </button>
+                  </div>
+                  <p className="text-xs text-on-surface-variant">
+                    {formUmfang === 'einzeln'
+                      ? t('calendar.recurrence.scopeSingleHint')
+                      : t('calendar.recurrence.scopeSeriesHint', { regel: kurzform(formSerie) })}
+                  </p>
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
                   {t('calendar.category')} *
@@ -1262,6 +1491,157 @@ export function Calendar() {
                   />
                 </div>
               </div>
+
+              {/* Wiederholung. Beim Bearbeiten eines einzelnen Vorkommens
+                  ausgeblendet: dort wird die Regel nicht geändert, sondern
+                  eine Ausnahme von ihr geschrieben. */}
+              {!bearbeitetEinzelnesVorkommen && (
+                <div className="rounded-lg border border-outline-variant/40 p-3 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <label
+                      htmlFor="cal-form-takt"
+                      className="flex items-center gap-1.5 text-xs font-label-md font-semibold text-on-surface-variant uppercase"
+                    >
+                      <Repeat className="w-3.5 h-3.5" />
+                      {t('calendar.recurrence.label')}
+                    </label>
+                    {formTakt && (
+                      <span className="text-xs text-primary font-semibold">
+                        {kurzform(
+                          serieBauen(formTakt, {
+                            intervall: formIntervall,
+                            wochentage: formWochentage,
+                            bis: formEndeArt === 'bis' ? formBis || null : null,
+                            anzahl: formEndeArt === 'anzahl' ? formAnzahl : null,
+                          }, formSerie),
+                        )}
+                      </span>
+                    )}
+                  </div>
+
+                  <Dropdown
+                    id="cal-form-takt"
+                    value={formTakt ?? ''}
+                    onChange={(val) => setFormTakt((val || null) as Frequenz | null)}
+                    options={[
+                      { value: '', label: t('calendar.recurrence.none') },
+                      { value: 'DAILY', label: t('calendar.recurrence.daily') },
+                      { value: 'WEEKLY', label: t('calendar.recurrence.weekly') },
+                      { value: 'MONTHLY', label: t('calendar.recurrence.monthly') },
+                      { value: 'YEARLY', label: t('calendar.recurrence.yearly') },
+                    ]}
+                    placeholder={t('calendar.recurrence.none')}
+                    className="w-full"
+                  />
+
+                  {formTakt && (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <label htmlFor="cal-form-intervall" className="text-xs text-on-surface-variant">
+                          {t('calendar.recurrence.everyNth')}
+                        </label>
+                        <NumberStepper
+                          id="cal-form-intervall"
+                          min={1}
+                          max={99}
+                          value={formIntervall}
+                          onValueChange={(val) => setFormIntervall(Math.max(1, Number(val) || 1))}
+                          size="sm"
+                          className="w-24"
+                        />
+                        <span className="text-xs text-on-surface-variant">
+                          {t(`calendar.recurrence.unit.${formTakt}`, { count: formIntervall })}
+                        </span>
+                      </div>
+
+                      {formTakt === 'WEEKLY' && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {WOCHENTAG_KUERZEL.map((kuerzel) => {
+                            const aktiv = formWochentage.includes(kuerzel)
+                            return (
+                              <button
+                                key={kuerzel}
+                                type="button"
+                                aria-pressed={aktiv}
+                                onClick={() =>
+                                  setFormWochentage((vorher) =>
+                                    vorher.includes(kuerzel)
+                                      ? vorher.filter((k) => k !== kuerzel)
+                                      : [...vorher, kuerzel],
+                                  )
+                                }
+                                className={`w-10 h-10 rounded-lg border text-xs font-semibold transition-all ${
+                                  aktiv
+                                    ? 'bg-primary/20 text-primary border-primary'
+                                    : 'bg-surface-container-low text-on-surface-variant border-outline-variant/40 hover:bg-surface-container'
+                                }`}
+                              >
+                                {t(`calendar.recurrence.weekday.${kuerzel}`)}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
+
+                      <div className="space-y-2">
+                        <span className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase">
+                          {t('calendar.recurrence.endsLabel')}
+                        </span>
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-on-surface">
+                          <Dropdown
+                            id="cal-form-ende-art"
+                            value={formEndeArt}
+                            onChange={(val) => setFormEndeArt(val as typeof formEndeArt)}
+                            options={[
+                              { value: 'nie', label: t('calendar.recurrence.endsNever') },
+                              { value: 'bis', label: t('calendar.recurrence.endsOn') },
+                              { value: 'anzahl', label: t('calendar.recurrence.endsAfter') },
+                            ]}
+                            aria-label={t('calendar.recurrence.endsLabel')}
+                            className="w-44"
+                          />
+                          {formEndeArt === 'bis' && (
+                            <DateTimePicker
+                              value={formBis}
+                              onChange={setFormBis}
+                              dateOnly
+                              locale={i18n.language.startsWith('de') ? 'de' : 'en'}
+                              /* Ein Serienende vor dem Beginn ergibt eine Regel,
+                                 die endet, bevor sie anfängt. Der Termin wäre
+                                 dann in keinem Zeitraum mehr zu sehen — die
+                                 Ausbreitung fängt das ab, aber ein vertipptes
+                                 Jahr soll gar nicht erst durchgehen. */
+                              min={formStart ? formStart.slice(0, 10) : undefined}
+                              placeholder={t('calendar.recurrence.endsOn')}
+                              aria-label={t('calendar.recurrence.endsOn')}
+                              className="flex-1 min-w-[10rem]"
+                            />
+                          )}
+                          {formEndeArt === 'anzahl' && (
+                            <NumberStepper
+                              min={1}
+                              max={999}
+                              value={formAnzahl}
+                              onValueChange={(val) => setFormAnzahl(Math.max(1, Number(val) || 1))}
+                              size="sm"
+                              className="w-24"
+                              aria-label={t('calendar.recurrence.endsAfter')}
+                            />
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Die E-Mail-Erinnerung braucht die Regel, und die kann
+                          der Server bei einem hier angelegten Termin nicht
+                          lesen. Das gehört an die Stelle, an der die Serie
+                          entsteht — nicht in eine Dokumentation. */}
+                      <p className="text-xs text-on-surface-variant border-t border-outline-variant/30 pt-2">
+                        {t('calendar.recurrence.reminderHint')}
+                      </p>
+                    </>
+                  )}
+                </div>
+              )}
 
               <div>
                 <label htmlFor="cal-form-location" className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">

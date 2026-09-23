@@ -310,3 +310,148 @@ def test_tasks_include_email_and_calendar_read_tools():
     assert "email_read" in AUFGABEN_LESEN
     assert "calendar_read" in AUFGABEN_LESEN
 
+
+# ── Serientermine ueber die KI ────────────────────────────────────────────
+
+
+def test_wiederholung_steht_in_beiden_terminwerkzeugen():
+    """Kein eigenes Werkzeug, sondern ein Feld an den beiden bestehenden.
+
+    Ein neues Werkzeug haette in `realtime_static_extra` und bei Gemini Live
+    einzeln nachgetragen werden muessen — und genau dort faellt so etwas erst
+    auf, wenn jemand es per Sprache versucht.
+    """
+    from services.ai_action_service import provider_tool_definitions
+
+    schemata = {
+        t["function"]["name"]: t["function"]["parameters"]["properties"]
+        for t in provider_tool_definitions()
+    }
+    for werkzeug in ("propose_calendar_event_create", "propose_calendar_event_update"):
+        assert "recurrence" in schemata[werkzeug], werkzeug
+        takt = schemata[werkzeug]["recurrence"]["properties"]["takt"]
+        assert takt["enum"] == ["taeglich", "woechentlich", "monatlich", "jaehrlich"]
+
+    # Und es ist kein zusaetzliches Werkzeug dazugekommen.
+    namen = {t["function"]["name"] for t in provider_tool_definitions()}
+    assert not any("recurrence" in n or "serie" in n for n in namen)
+
+
+def test_der_sprachweg_kennt_das_terminwerkzeug_weiterhin():
+    """Die Schranke, die nur im Chatweg steht, fehlt im Sprachweg.
+
+    Weil die Wiederholung ein Feld am bestehenden Werkzeug ist, gilt sie im
+    Realtime-Weg automatisch mit — dieser Test haelt fest, dass das Werkzeug
+    dort ueberhaupt gefuehrt wird, damit die Annahme nicht still verfaellt.
+    """
+    import inspect
+
+    from services.ai_voice import realtime_session
+
+    quelle = inspect.getsource(realtime_session)
+    assert '"propose_calendar_event_create"' in quelle
+    assert '"propose_calendar_event_update"' in quelle
+
+
+def _kalender_nutzlast(rest: dict):
+    from services.ai_proposals.personal_proposals import _calendar_event_create_payload
+
+    return _calendar_event_create_payload(None, None, rest)
+
+
+def test_vorschlag_traegt_die_regel_verschluesselbar_und_die_kurzform_lesbar():
+    """Zwei Orte, zwei Zwecke.
+
+    `payload` wird verschluesselt abgelegt und traegt die Regel selbst;
+    `preview_json` liegt im Klartext und traegt die Kurzform — wer nicht
+    sieht, dass er eine **jaehrliche** Wiederholung freigibt, gibt etwas
+    anderes frei, als er denkt.
+    """
+    payload, preview = _kalender_nutzlast(
+        {
+            "title": "Geburtstag Lisa",
+            "start_time": "2026-03-14 00:00",
+            "end_time": "2026-03-15 00:00",
+            "recurrence": {"takt": "jaehrlich"},
+        }
+    )
+    assert json.loads(payload["recurrence"])["rrule"] == "FREQ=YEARLY"
+    assert preview["recurrence"] == "jährlich, ohne Ende"
+
+
+def test_vorschlag_ohne_wiederholung_speichert_trotzdem_ein_dokument():
+    payload, preview = _kalender_nutzlast(
+        {"title": "Zahnarzt", "start_time": "2026-03-14 10:00", "end_time": "2026-03-14 11:00"}
+    )
+    assert json.loads(payload["recurrence"]) == {"rrule": None}
+    assert preview["recurrence"] == "einmalig"
+
+
+@pytest.mark.parametrize(
+    "eingabe,erwartet",
+    [
+        ({"takt": "woechentlich", "wochentage": ["MO", "DO"]}, "FREQ=WEEKLY;BYDAY=MO,TH"),
+        ({"takt": "woechentlich", "wochentage": ["MO", "TH"]}, "FREQ=WEEKLY;BYDAY=MO,TH"),
+        ({"takt": "jährlich"}, "FREQ=YEARLY"),
+        ({"takt": "MONTHLY", "anzahl": 12}, "FREQ=MONTHLY;COUNT=12"),
+    ],
+)
+def test_die_ki_darf_deutsch_oder_englisch_schreiben(eingabe, erwartet):
+    """Nachsichtig lesen, streng speichern.
+
+    Das Schema nennt die deutschen Kuerzel; ein Modell antwortet aber auch mal
+    englisch. Ein Formfehler soll eine Runde kosten, nicht die Antwort.
+    """
+    payload, _ = _kalender_nutzlast(
+        {
+            "title": "T",
+            "start_time": "2026-03-14 10:00",
+            "end_time": "2026-03-14 11:00",
+            "recurrence": eingabe,
+        }
+    )
+    assert json.loads(payload["recurrence"])["rrule"] == erwartet
+
+
+@pytest.mark.parametrize(
+    "unbrauchbar",
+    [
+        {"takt": "alle drei Tage"},
+        {"takt": "monatlich", "wochentage": ["MO"]},
+        {"takt": "taeglich", "bis": "2026-01-10", "anzahl": 3},
+        {"intervall": 2},
+        "jaehrlich",
+    ],
+)
+def test_unbrauchbare_wiederholung_wird_abgewiesen_statt_verworfen(unbrauchbar):
+    """Abgewiesen, nicht stillschweigend fallengelassen.
+
+    Eine verworfene Wiederholung ergaebe einen Einzeltermin unter dem Namen
+    einer Serie — und das faellt erst im naechsten Jahr auf, wenn der
+    Geburtstag ausbleibt.
+    """
+    with pytest.raises(AiActionValidationError):
+        _kalender_nutzlast(
+            {
+                "title": "T",
+                "start_time": "2026-03-14 10:00",
+                "end_time": "2026-03-14 11:00",
+                "recurrence": unbrauchbar,
+            }
+        )
+
+
+def test_aenderung_ohne_recurrence_laesst_die_serie_in_ruhe():
+    """Fehlendes Feld heisst 'nicht anfassen', ausdrueckliches null heisst 'aufloesen'."""
+    from services.ai_proposals.personal_proposals import _calendar_event_update_payload
+
+    unberuehrt, vorschau = _calendar_event_update_payload(None, None, {"event_id": "x", "title": "Neu"})
+    assert unberuehrt["recurrence"] is None
+    assert vorschau["recurrence"] is None
+
+    aufgeloest, vorschau2 = _calendar_event_update_payload(
+        None, None, {"event_id": "x", "recurrence": {"takt": None}}
+    )
+    assert json.loads(aufgeloest["recurrence"]) == {"rrule": None}
+    assert vorschau2["recurrence"] == "einmalig"
+

@@ -10,7 +10,7 @@ Sicherheitsinvariante:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import logging
 import re
 import threading
@@ -29,6 +29,16 @@ from models.user import User
 from models.user_calendar import UserCalendar
 from services.dis_client import DisClient, DisDecryptionError
 from services.email_service import EmailService
+from services.kalender_serie import (
+    LEERES_DOKUMENT,
+    Serie,
+    SerienRegelFehler,
+    ausbreiten,
+    regel_lesen,
+    regel_schreiben,
+    serie_lesen,
+    zeitzone_von,
+)
 from services import permission_service, team_service
 from services.ai_latency_metrics import measure
 from services.sync_event_service import SyncEventService
@@ -37,6 +47,11 @@ _log = logging.getLogger("msm.calendar")
 
 # Dedup-Speicher für gesendete Terminerinnerungen (im Speicher je Server-Lauf)
 _sent_reminder_keys: set[str] = set()
+# Seit die Schluessel das Vorkommen tragen, waechst die Menge mit jeder Serie
+# weiter statt sich auf die Zahl der Termine einzupendeln. Bei 20.000 wird
+# geleert: ein doppelt verschickter Hinweis ist ein kleiner Schaden, ein
+# unbegrenzt wachsender Prozessspeicher ein grosser.
+_MAX_DEDUP_SCHLUESSEL = 20_000
 _CALDAV_CACHE_TTL_SECONDS = 10.0
 _caldav_cache: dict[tuple[int, int, str | None, str | None], tuple[float, list[dict[str, Any]]]] = {}
 _caldav_cache_lock = threading.Lock()
@@ -106,66 +121,137 @@ def _cal_aad(user_id: int, event_uid: str) -> str:
     return f"msm:cal:{user_id}:{event_uid}"
 
 
+def _feld_entschluesseln(db: Session, ev: CalendarEvent, spalte: str, aad: str) -> str:
+    """Ein einzelnes Feld lesen, Altbestand dabei nachziehen.
+
+    Drei Faelle, in dieser Reihenfolge:
+      1. E2EE-Ciphertext (`sv-cal-v1:`) — bleibt unangetastet, der Server hat
+         den Schluessel nicht und reicht ihn blind an den Client durch.
+      2. DIS-Ciphertext — wird entschluesselt.
+      3. Klartext aus der Zeit vor der Verschluesselung — wird gelesen **und**
+         gleich verschluesselt zurueckgeschrieben.
+    """
+    roh = getattr(ev, spalte) or ""
+    if roh.startswith(CALENDAR_CIPHERTEXT_PREFIX):
+        return roh
+    if not roh:
+        return ""
+    try:
+        return DisClient.decrypt(roh, aad=aad)
+    except DisDecryptionError:
+        setattr(ev, spalte, DisClient.encrypt(roh, aad=aad))
+        try:
+            db.commit()
+            db.refresh(ev)
+        except Exception as e:
+            _log.warning(
+                "Fehler bei Altdaten-Verschluesselung von %s am Termin %s: %s",
+                spalte,
+                ev.event_uid,
+                e,
+            )
+            db.rollback()
+        return roh
+
+
+def _wiederholung_entschluesseln(db: Session, ev: CalendarEvent) -> str:
+    """Liest das Wiederholungsdokument und legt es bei Altbestand erst an.
+
+    Anders als Titel oder Ort darf dieses Feld **nie** leer bleiben: eine leere
+    Spalte neben lauter gefuellten wuerde verraten, dass diese Zeile keine
+    Serie ist — und damit umgekehrt, dass die gefuellten welche sind. Wo noch
+    nichts steht, wird deshalb der verschluesselte Satz "keine Wiederholung"
+    nachgetragen (Betreiberentscheid 22.09.2026).
+    """
+    aad = _cal_aad(ev.user_id, ev.event_uid)
+    roh = ev.recurrence or ""
+
+    if roh.startswith(CALENDAR_CIPHERTEXT_PREFIX):
+        return roh
+
+    if not roh:
+        try:
+            ev.recurrence = DisClient.encrypt(LEERES_DOKUMENT, aad=aad)
+            db.commit()
+            db.refresh(ev)
+        except Exception as e:
+            # Fehlschlag ist nicht schlimm: der naechste Lesevorgang versucht
+            # es erneut, und die Antwort stimmt in beiden Faellen.
+            _log.warning(
+                "Konnte Wiederholungsfeld des Termins %s nicht nachtragen: %s", ev.event_uid, e
+            )
+            db.rollback()
+        return LEERES_DOKUMENT
+
+    try:
+        return DisClient.decrypt(roh, aad=aad)
+    except DisDecryptionError:
+        # Klartext aus einer aelteren Fassung — lesen und verschluesselt
+        # zurueckschreiben, wie bei den uebrigen Feldern.
+        try:
+            ev.recurrence = DisClient.encrypt(roh, aad=aad)
+            db.commit()
+            db.refresh(ev)
+        except Exception as e:
+            _log.warning(
+                "Fehler bei Altdaten-Verschluesselung der Wiederholung des Termins %s: %s",
+                ev.event_uid,
+                e,
+            )
+            db.rollback()
+        return roh
+
+
+def _dedup_beschneiden() -> None:
+    """Haelt den Dedup-Speicher endlich."""
+    if len(_sent_reminder_keys) > _MAX_DEDUP_SCHLUESSEL:
+        _sent_reminder_keys.clear()
+
+
+def _anzeigetitel(roh: str | None) -> str:
+    """Titel fuer etwas, das der Server verschickt (Mail, Geraetemeldung).
+
+    Bei einem E2EE-Termin steht in `title` der Umschlag `sv-cal-v1:…`, und
+    ohne diese Stelle stuende genau das in der Erinnerungsmail. Der Server hat
+    den Schluessel nicht und wird ihn nie haben; er kann den Termin nur
+    ankuendigen, nicht benennen.
+    """
+    text = (roh or "").strip()
+    if not text or text.startswith(CALENDAR_CIPHERTEXT_PREFIX):
+        return "Ein Termin"
+    return text
+
+
+def _anzeigeort(roh: str | None) -> str:
+    """Wie `_anzeigetitel`, aber ein unlesbarer Ort entfaellt ersatzlos."""
+    text = (roh or "").strip()
+    if not text or text.startswith(CALENDAR_CIPHERTEXT_PREFIX):
+        return ""
+    return text
+
+
+def _wiederholung_verschluesseln(roh: str | None, aad: str) -> str:
+    """Schreibfassung des Wiederholungsfelds.
+
+    `None` und leer heissen "keine Wiederholung" — und werden trotzdem
+    gespeichert, nicht weggelassen.
+    """
+    text = (roh or "").strip()
+    if text.startswith(CALENDAR_CIPHERTEXT_PREFIX):
+        return text
+    if not text:
+        text = LEERES_DOKUMENT
+    return DisClient.encrypt(text, aad=aad)
+
+
 def _decrypt_or_migrate_calendar_event(db: Session, ev: CalendarEvent) -> tuple[str, str, str]:
     """Entschluesselt title, description und location eines nativen Termins bei Altdaten; E2EE-Ciphertexte bleiben unangetastet."""
     aad = _cal_aad(ev.user_id, ev.event_uid)
-
-    # 1. Titel
-    raw_title = ev.title or ""
-    if raw_title.startswith(CALENDAR_CIPHERTEXT_PREFIX):
-        title = raw_title
-    else:
-        try:
-            title = DisClient.decrypt(raw_title, aad=aad)
-        except DisDecryptionError:
-            title = raw_title
-            ev.title = DisClient.encrypt(title, aad=aad)
-            try:
-                db.commit()
-                db.refresh(ev)
-            except Exception as e:
-                _log.warning("Fehler bei Altdaten-Verschluesselung des Termins %s: %s", ev.event_uid, e)
-                db.rollback()
-
-    # 2. Beschreibung
-    raw_desc = ev.description or ""
-    if raw_desc.startswith(CALENDAR_CIPHERTEXT_PREFIX):
-        desc = raw_desc
-    elif not raw_desc:
-        desc = ""
-    else:
-        try:
-            desc = DisClient.decrypt(raw_desc, aad=aad)
-        except DisDecryptionError:
-            desc = raw_desc
-            ev.description = DisClient.encrypt(desc, aad=aad)
-            try:
-                db.commit()
-                db.refresh(ev)
-            except Exception as e:
-                _log.warning("Fehler bei Altdaten-Verschluesselung der Beschreibung des Termins %s: %s", ev.event_uid, e)
-                db.rollback()
-
-    # 3. Ort
-    raw_loc = ev.location or ""
-    if raw_loc.startswith(CALENDAR_CIPHERTEXT_PREFIX):
-        loc = raw_loc
-    elif not raw_loc:
-        loc = ""
-    else:
-        try:
-            loc = DisClient.decrypt(raw_loc, aad=aad)
-        except DisDecryptionError:
-            loc = raw_loc
-            ev.location = DisClient.encrypt(loc, aad=aad)
-            try:
-                db.commit()
-                db.refresh(ev)
-            except Exception as e:
-                _log.warning("Fehler bei Altdaten-Verschluesselung des Orts des Termins %s: %s", ev.event_uid, e)
-                db.rollback()
-
-    return title, desc, loc
+    return (
+        _feld_entschluesseln(db, ev, "title", aad),
+        _feld_entschluesseln(db, ev, "description", aad),
+        _feld_entschluesseln(db, ev, "location", aad),
+    )
 
 
 def _user_timezone(user: User | None = None, user_tz: str | None = None) -> timezone | ZoneInfo:
@@ -254,29 +340,120 @@ def _format_ical_date(dt_input: str | datetime, user: User | None = None) -> str
     return dt.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
-def _parse_vevents(ical_text: str) -> list[dict[str, Any]]:
-    """Extrahiert VEVENT-Blöcke aus einer iCalendar-Antwort."""
+def _ical_zeit_lesen(roh: str, tz: timezone | ZoneInfo) -> datetime | None:
+    """Liest DTSTART/DTEND/EXDATE im iCal-Kompaktformat.
+
+    `20260314T090000Z` ist UTC, `20260314T090000` gilt als Ortszeit des
+    Benutzers, `20260314` als ganzer Tag ab Mitternacht Ortszeit.
+    """
+    text = (roh or "").strip()
+    if not text:
+        return None
+    try:
+        if text.endswith("Z"):
+            return datetime.strptime(text, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+        if "T" in text:
+            return datetime.strptime(text, "%Y%m%dT%H%M%S").replace(tzinfo=tz).astimezone(timezone.utc)
+        return datetime.strptime(text, "%Y%m%d").replace(tzinfo=tz).astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _ical_zeit_schreiben(dt: datetime, ganztaegig: bool, tz: timezone | ZoneInfo) -> str:
+    """Zurueck in die Form, in der CalDAV-Termine bisher schon geliefert wurden.
+
+    Bei einem ganzen Tag zaehlt das **lokale** Datum. Ueber UTC formatiert
+    verliert jede Zone oestlich von Greenwich einen Tag: Berliner Mitternacht
+    ist 23:00 UTC des Vortags, und aus `DTSTART;VALUE=DATE:20260314` wuerde
+    `20260313` — der Geburtstag saesse einen Tag zu frueh im Kalender.
+    """
+    if ganztaegig:
+        return dt.astimezone(tz).strftime("%Y%m%d")
+    return dt.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _parse_vevents(
+    ical_text: str,
+    *,
+    von: datetime | None = None,
+    bis: datetime | None = None,
+    tz_name: str | None = None,
+) -> list[dict[str, Any]]:
+    """Extrahiert VEVENT-Blöcke aus einer iCalendar-Antwort und breitet Serien aus.
+
+    Bis zum 22.09.2026 stand `RRULE` nicht in der Liste der gelesenen Felder.
+    Wer seinen Google- oder Nextcloud-Kalender angebunden hatte, sah eine
+    jaehrliche Geburtstagsserie deshalb **einmal**, am Ursprungsdatum, und nie
+    wieder — kein fehlendes Merkmal, sondern eine stille Falschauskunft.
+
+    Regeln ausserhalb der unterstuetzten Teilmenge (`BYSETPOS` & Co., die
+    andere Kalender durchaus schreiben) fallen auf das bisherige Verhalten
+    zurueck: ein Vorkommen am Ursprungsdatum. Das ist unvollstaendig, aber es
+    erfindet nichts.
+    """
     events: list[dict[str, Any]] = []
+    tz = zeitzone_von(tz_name)
     vevent_matches = re.findall(r"BEGIN:VEVENT(.*?)END:VEVENT", ical_text, re.DOTALL)
 
     for block in vevent_matches:
         uid_m = re.search(r"UID:(.+)", block)
         summary_m = re.search(r"SUMMARY:(.+)", block)
-        dtstart_m = re.search(r"DTSTART(?:;[^:]+)?:(.+)", block)
-        dtend_m = re.search(r"DTEND(?:;[^:]+)?:(.+)", block)
+        dtstart_m = re.search(r"DTSTART(;[^:]+)?:(.+)", block)
+        dtend_m = re.search(r"DTEND(;[^:]+)?:(.+)", block)
         desc_m = re.search(r"DESCRIPTION:(.+)", block)
         loc_m = re.search(r"LOCATION:(.+)", block)
+        rrule_m = re.search(r"^RRULE:(.+)$", block, re.MULTILINE)
 
-        events.append(
-            {
-                "event_id": uid_m.group(1).strip() if uid_m else str(uuid.uuid4()),
-                "title": summary_m.group(1).strip() if summary_m else "Ohne Titel",
-                "start": dtstart_m.group(1).strip() if dtstart_m else "",
-                "end": dtend_m.group(1).strip() if dtend_m else "",
-                "description": desc_m.group(1).strip() if desc_m else "",
-                "location": loc_m.group(1).strip() if loc_m else "",
-            }
-        )
+        start_roh = dtstart_m.group(2).strip() if dtstart_m else ""
+        ende_roh = dtend_m.group(2).strip() if dtend_m else ""
+        ganztaegig = "VALUE=DATE" in (dtstart_m.group(1) or "") if dtstart_m else False
+
+        grund = {
+            "event_id": uid_m.group(1).strip() if uid_m else str(uuid.uuid4()),
+            "title": summary_m.group(1).strip() if summary_m else "Ohne Titel",
+            "start": start_roh,
+            "end": ende_roh,
+            "description": desc_m.group(1).strip() if desc_m else "",
+            "location": loc_m.group(1).strip() if loc_m else "",
+        }
+
+        start_dt = _ical_zeit_lesen(start_roh, tz)
+        if not rrule_m or start_dt is None:
+            events.append(grund)
+            continue
+
+        ende_dt = _ical_zeit_lesen(ende_roh, tz) or start_dt
+
+        try:
+            regel = regel_lesen(rrule_m.group(1).strip())
+        except SerienRegelFehler:
+            _log.debug("RRULE ausserhalb der Teilmenge, Termin bleibt einmalig: %s", rrule_m.group(1))
+            events.append(grund)
+            continue
+
+        ausnahmen: set[str] = set()
+        for zeile in re.findall(r"^EXDATE(?:;[^:]+)?:(.+)$", block, re.MULTILINE):
+            for stueck in zeile.split(","):
+                ausgenommen = _ical_zeit_lesen(stueck, tz)
+                if ausgenommen is not None:
+                    ausnahmen.add(ausgenommen.astimezone(tz).date().isoformat())
+
+        serie = Serie(rrule=regel_schreiben(regel), ausnahmen=frozenset(ausnahmen))
+        for v in ausbreiten(
+            serie,
+            start_dt,
+            ende_dt,
+            ganztaegig=ganztaegig,
+            zeitzone=tz_name,
+            fenster_von=von,
+            fenster_bis=bis,
+        ):
+            eintrag = dict(grund)
+            eintrag["start"] = _ical_zeit_schreiben(v.start, ganztaegig, tz)
+            eintrag["end"] = _ical_zeit_schreiben(v.ende, ganztaegig, tz)
+            eintrag["vorkommen"] = v.schluessel
+            eintrag["ist_serie"] = True
+            events.append(eintrag)
 
     return events
 
@@ -381,9 +558,25 @@ class CalendarService:
         server_id: int | None = None,
     ) -> list[dict[str, Any]]:
         """Liest Termine aus dem nativen oder CalDAV-Kalender.
-        
+
         Nativer Kalender berücksichtigt persönliche Termine, Team-Termine des Nutzers,
         Server-Wartungstermine für zugängliche Server und Node-Termine.
+
+        **Serien werden hier nicht ausgebreitet.** Geliefert wird der Termin
+        selbst, mitsamt seinem Feld `recurrence`; die einzelnen Vorkommen
+        rechnet der Client aus. Das ist kein Versehen, sondern die einzige
+        Stelle, an der beides zusammenpasst: der Server kann die Regel eines
+        E2EE-Termins nicht lesen, und breitete er die uebrigen aus, stuende
+        jedes Vorkommen doppelt in der Ansicht — einmal vom Server, einmal vom
+        Client.
+
+        Wer ausgebreitete Vorkommen braucht und serverseitig laeuft
+        (Erinnerungen, `calendar_read`), nimmt `vorkommen_im_fenster`.
+
+        Die Zeitraumgrenzen filtern deshalb den **Termin**, nicht seine
+        Vorkommen: ein Geburtstag von 1995 faellt aus einer Abfrage fuer 2026
+        heraus. Der Client holt seinen Grundbestand einmal ohne Grenzen und
+        haelt ihn vor.
         """
         calendar = cls.get_calendar(db, user, calendar_id)
         if not calendar:
@@ -446,6 +639,7 @@ class CalendarService:
                     can_edit = True
 
                 title, desc, loc = _decrypt_or_migrate_calendar_event(db, ev)
+                recurrence = _wiederholung_entschluesseln(db, ev)
 
                 result.append({
                     "event_id": ev.event_uid,
@@ -455,6 +649,7 @@ class CalendarService:
                     "end": _iso_utc(ev.end_time),
                     "description": desc,
                     "location": loc,
+                    "recurrence": recurrence,
                     "all_day": ev.all_day,
                     "color": ev_color,
                     "event_type": ev_type,
@@ -516,7 +711,15 @@ class CalendarService:
                     "REPORT", calendar.caldav_url, auth=auth, headers=headers, content=query_body
                 )
                 if resp.status_code in (200, 207):
-                    events = _parse_vevents(resp.text)
+                    # Fenster und Zeitzone muessen mit: eine Serie breitet der
+                    # Anbieter nicht aus, das tun wir, und ohne Grenzen waere
+                    # "jaehrlich, ohne Ende" nicht zu beenden.
+                    events = _parse_vevents(
+                        resp.text,
+                        von=_parse_datetime(start_date, user=user) if start_date else None,
+                        bis=_parse_datetime(end_date, user=user) if end_date else None,
+                        tz_name=getattr(user, "time_zone", None),
+                    )
                     with _caldav_cache_lock:
                         _caldav_cache[cache_key] = (time.monotonic() + _CALDAV_CACHE_TTL_SECONDS, events)
                     return events
@@ -525,6 +728,95 @@ class CalendarService:
             _log.warning("Fehler beim Abruf von Terminen für %s: %s", calendar.name, e)
 
         return []
+
+    @classmethod
+    def vorkommen_im_fenster(
+        cls,
+        db: Session,
+        user: User,
+        *,
+        von: datetime | None = None,
+        bis: datetime | None = None,
+        calendar_id: int | None = None,
+        event_type: str | None = None,
+        team_id: int | None = None,
+        server_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Termine im Fenster, Serien ausgebreitet — soweit der Server sie lesen kann.
+
+        Fuer alles, was serverseitig laeuft und echte Vorkommen braucht:
+        Erinnerungen und `calendar_read`. Die Ansicht nimmt `get_events` und
+        breitet selbst aus.
+
+        Zwei Grenzen, die hier zusammenkommen:
+
+        * **E2EE-Serien bleiben ein Termin.** Der Server hat den Schluessel
+          nicht, `serie_lesen` findet kein JSON und liefert "keine
+          Wiederholung". Das ist die ehrliche Antwort — der Server weiss es
+          wirklich nicht — und nicht schlechter als heute, wo er bei solchen
+          Terminen schon den Titel nicht lesen kann.
+        * **Der Termin selbst wird ohne Zeitraumgrenze geladen.** Ein
+          Geburtstag von 1995 traegt bis heute, also darf ihn kein Filter
+          vorher wegnehmen. Das ist der Preis der Metadaten-Entscheidung; der
+          Erinnerungslauf zahlte ihn schon vorher, weil er `get_events` ohnehin
+          ohne Zeitraum aufruft.
+        """
+        kalender = cls.get_calendar(db, user, calendar_id)
+
+        # CalDAV filtert der Anbieter selbst, und `_parse_vevents` breitet die
+        # dort gelieferten RRULEs bereits aus.
+        if kalender is not None and kalender.provider_type != "native":
+            return cls.get_events(
+                db,
+                user,
+                calendar_id=calendar_id,
+                start_date=_iso_utc(von) if von else None,
+                end_date=_iso_utc(bis) if bis else None,
+                event_type=event_type,
+                team_id=team_id,
+                server_id=server_id,
+            )
+
+        termine = cls.get_events(
+            db,
+            user,
+            calendar_id=calendar_id,
+            event_type=event_type,
+            team_id=team_id,
+            server_id=server_id,
+        )
+
+        tz_name = getattr(user, "time_zone", None)
+        ergebnis: list[dict[str, Any]] = []
+
+        for termin in termine:
+            serie = serie_lesen(termin.get("recurrence"))
+            try:
+                start_dt = _parse_datetime(termin.get("start", ""), user=user)
+                ende_dt = _parse_datetime(termin.get("end", ""), user=user)
+            except Exception:
+                continue
+
+            for v in ausbreiten(
+                serie,
+                start_dt,
+                ende_dt,
+                ganztaegig=bool(termin.get("all_day")),
+                zeitzone=tz_name,
+                fenster_von=von,
+                fenster_bis=bis,
+            ):
+                eintrag = dict(termin)
+                eintrag["start"] = _iso_utc(v.start)
+                eintrag["end"] = _iso_utc(v.ende)
+                eintrag["vorkommen"] = v.schluessel
+                eintrag["ist_serie"] = serie.ist_serie
+                if v.titel:
+                    eintrag["title"] = v.titel
+                ergebnis.append(eintrag)
+
+        ergebnis.sort(key=lambda e: e.get("start") or "")
+        return ergebnis
 
     @classmethod
     def create_event(
@@ -543,8 +835,17 @@ class CalendarService:
         event_type: str = "personal",
         team_id: int | None = None,
         server_id: int | None = None,
+        recurrence: str | None = None,
     ) -> dict[str, Any]:
-        """Erstellt einen neuen Termin im nativen oder CalDAV-Kalender."""
+        """Erstellt einen neuen Termin im nativen oder CalDAV-Kalender.
+
+        `recurrence` ist das Wiederholungsdokument — entweder Klartext-JSON
+        (dann verschluesselt es der Server) oder ein fertiger E2EE-Umschlag
+        (`sv-cal-v1:`, dann reicht der Server ihn blind durch). Fehlt es, wird
+        trotzdem etwas gespeichert: der verschluesselte Satz "keine
+        Wiederholung". Ein leeres Feld neben lauter gefuellten waere selbst
+        eine Auskunft.
+        """
         calendar = cls.get_calendar(db, user, calendar_id)
         if not calendar:
             calendar = cls.get_or_create_native_calendar(db, user)
@@ -592,6 +893,7 @@ class CalendarService:
                             "end": _iso_utc(existing.end_time),
                             "description": dec_desc,
                             "location": dec_loc,
+                            "recurrence": _wiederholung_entschluesseln(db, existing),
                             "all_day": existing.all_day,
                             "color": existing.color or "",
                             "event_type": existing.event_type,
@@ -630,6 +932,8 @@ class CalendarService:
             else:
                 encrypted_loc = None
 
+            encrypted_recurrence = _wiederholung_verschluesseln(recurrence, aad)
+
             ev = CalendarEvent(
                 calendar_id=calendar.id,
                 user_id=user.id,
@@ -637,6 +941,7 @@ class CalendarService:
                 title=encrypted_title,
                 description=encrypted_desc,
                 location=encrypted_loc,
+                recurrence=encrypted_recurrence,
                 start_time=start_dt,
                 end_time=end_dt,
                 all_day=all_day,
@@ -657,6 +962,7 @@ class CalendarService:
                 "end": _iso_utc(ev.end_time),
                 "description": description or "",
                 "location": location or "",
+                "recurrence": (recurrence or "").strip() or LEERES_DOKUMENT,
                 "all_day": ev.all_day,
                 "color": ev.color or "",
                 "event_type": ev.event_type,
@@ -765,8 +1071,16 @@ class CalendarService:
         event_type: str | None = None,
         team_id: int | None = None,
         server_id: int | None = None,
+        recurrence: str | None = None,
     ) -> dict[str, Any]:
-        """Aktualisiert einen bestehenden Termin."""
+        """Aktualisiert einen bestehenden Termin.
+
+        `recurrence=None` heisst "die Wiederholung bleibt, wie sie ist" — wie
+        bei allen anderen Feldern hier. Wer eine Serie **aufloesen** will,
+        schickt das Dokument "keine Wiederholung", nicht `None`: ein Termin,
+        der seine Serie verliert, weil jemand nur den Titel geaendert hat,
+        waere genau die Art stiller Datenverlust, die niemand bemerkt.
+        """
         calendar = cls.get_calendar(db, user, calendar_id)
         if not calendar:
             calendar = cls.get_or_create_native_calendar(db, user)
@@ -821,6 +1135,8 @@ class CalendarService:
                     ev.location = None
             if all_day is not None:
                 ev.all_day = all_day
+            if recurrence is not None:
+                ev.recurrence = _wiederholung_verschluesseln(recurrence, aad)
 
             if event_type is not None:
                 norm_type = event_type.lower().strip()
@@ -874,6 +1190,7 @@ class CalendarService:
                 "end": _iso_utc(ev.end_time),
                 "description": dec_desc,
                 "location": dec_loc,
+                "recurrence": _wiederholung_entschluesseln(db, ev),
                 "all_day": ev.all_day,
                 "color": ev.color or _default_color_for_type(ev.event_type),
                 "event_type": ev.event_type,
@@ -1079,6 +1396,7 @@ class CalendarService:
             cal_name = "MSM Kalender"
 
         tz_name = getattr(user, "time_zone", None) or "Europe/Berlin"
+        tz = _user_timezone(user)
 
         lines = [
             "BEGIN:VCALENDAR",
@@ -1105,12 +1423,16 @@ class CalendarService:
                 start_dt = _parse_datetime(ev.get("start", ""), user=user)
                 end_dt = _parse_datetime(ev.get("end", ""), user=user)
 
+                # `_parse_datetime` liefert **immer** UTC. Ein ganzer Tag in
+                # Berlin beginnt um 23:00 UTC des Vortags — ohne Ruecksprung in
+                # die Benutzerzone wuerde aus dem Geburtstag am 14.03. ein
+                # `DTSTART;VALUE=DATE:20270313` im abonnierten Kalender.
                 if is_all_day:
-                    dt_start_line = f"DTSTART;VALUE=DATE:{start_dt.strftime('%Y%m%d')}"
-                    dt_end_line = f"DTEND;VALUE=DATE:{end_dt.strftime('%Y%m%d')}"
+                    dt_start_line = f"DTSTART;VALUE=DATE:{_ical_zeit_schreiben(start_dt, True, tz)}"
+                    dt_end_line = f"DTEND;VALUE=DATE:{_ical_zeit_schreiben(end_dt, True, tz)}"
                 else:
-                    dt_start_line = f"DTSTART:{start_dt.astimezone(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
-                    dt_end_line = f"DTEND:{end_dt.astimezone(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+                    dt_start_line = f"DTSTART:{_ical_zeit_schreiben(start_dt, False, tz)}"
+                    dt_end_line = f"DTEND:{_ical_zeit_schreiben(end_dt, False, tz)}"
 
                 uid = f"{raw_uid}@msm.mauntingstudios.de" if "@" not in raw_uid else raw_uid
                 title = _escape_ical_text(ev.get("title", "Termin"))
@@ -1129,6 +1451,45 @@ class CalendarService:
                     event_lines.append(f"DESCRIPTION:{desc}")
                 if loc:
                     event_lines.append(f"LOCATION:{loc}")
+
+                # Die Serie geht als Regel hinaus, nicht als Liste von
+                # Vorkommen — das abonnierende Programm rechnet selbst, und ein
+                # Geburtstag ohne Ende braucht so keine kuenstliche Grenze.
+                #
+                # Nur fuer Serien, deren Regel der Server lesen kann. Bei
+                # E2EE-Terminen fehlt sie, so wie dort schon heute der Titel
+                # fehlt: der Feed ist fuer sie ohnehin unbrauchbar, weil in
+                # SUMMARY der Umschlag steht.
+                serie = serie_lesen(ev.get("recurrence"))
+                if serie.ist_serie:
+                    event_lines.append(f"RRULE:{serie.rrule}")
+                    if serie.ausnahmen:
+                        # Der Ausnahmetag ist ein **lokales** Datum, die
+                        # Uhrzeit steht am Start. Beides muss in der
+                        # Benutzerzone zusammengesetzt und erst dann nach UTC
+                        # gerechnet werden. Lokales Datum mit UTC-Uhrzeit zu
+                        # verkleben geht ueber die Sommerzeit um eine Stunde
+                        # daneben — und bei Terminen um Mitternacht um einen
+                        # ganzen Tag. Das abonnierende Programm findet das
+                        # Vorkommen dann nicht und zeigt den abgesagten Termin
+                        # trotzdem an.
+                        start_lokal = start_dt.astimezone(tz)
+                        for tag in sorted(serie.ausnahmen):
+                            kompakt = tag.replace("-", "")
+                            if is_all_day:
+                                event_lines.append(f"EXDATE;VALUE=DATE:{kompakt}")
+                                continue
+                            try:
+                                datum = date.fromisoformat(tag)
+                            except ValueError:
+                                continue
+                            treffer = datetime.combine(
+                                datum, start_lokal.time()
+                            ).replace(tzinfo=tz)
+                            event_lines.append(
+                                f"EXDATE:{treffer.astimezone(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+                            )
+
                 event_lines.append("END:VEVENT")
 
                 lines.extend(event_lines)
@@ -1184,7 +1545,13 @@ class CalendarService:
                 continue
 
             try:
-                events = cls.get_events(db, user)
+                # Nur das Fenster, in dem ueberhaupt erinnert wird (48h/24h
+                # voraus, mit etwas Luft). Ohne Grenzen wuerde eine Serie ohne
+                # Ende bis an die Schrittgrenze ausgebreitet — je Benutzer, je
+                # Takt.
+                events = cls.vorkommen_im_fenster(
+                    db, user, von=now, bis=now + timedelta(hours=50)
+                )
             except Exception as e:
                 _log.warning("Konnte Termine für Benutzer %s nicht laden: %s", user.id, e)
                 continue
@@ -1217,12 +1584,17 @@ class CalendarService:
                     continue
 
                 event_id = str(ev.get("event_id", ""))
-                dedup_key = f"{user.id}_{event_id}_{key_suffix}"
+                # Das Vorkommen gehoert in den Schluessel. Ohne es traegt jede
+                # Serie denselben Schluessel wie beim ersten Mal — der
+                # Geburtstag 2027 gilt als schon erinnert, weil 2026 erinnert
+                # wurde, und meldet sich nie wieder.
+                vorkommen = str(ev.get("vorkommen") or "")
+                dedup_key = f"{user.id}_{event_id}_{vorkommen}_{key_suffix}"
                 if dedup_key in _sent_reminder_keys:
                     continue
 
-                title = ev.get("title", "Termin")
-                loc = ev.get("location", "")
+                title = _anzeigetitel(ev.get("title", ""))
+                loc = _anzeigeort(ev.get("location", ""))
                 start_formatted = start_dt.strftime("%d.%m.%Y um %H:%M Uhr")
 
                 # 1. E-Mail Benachrichtigung
@@ -1242,6 +1614,7 @@ class CalendarService:
                 _sent_reminder_keys.add(dedup_key)
                 sent_count += 1
 
+        _dedup_beschneiden()
         return sent_count
 
     @classmethod
@@ -1280,7 +1653,16 @@ class CalendarService:
 
     @classmethod
     def get_due_reminders(cls, db: Session, user: User) -> list[dict[str, Any]]:
-        """Liefert anstehende Termine für Push-Benachrichtigungen (48h / 24h vor Beginn)."""
+        """Liefert anstehende Termine für Push-Benachrichtigungen (48h / 24h vor Beginn).
+
+        Titel und Ort gehen **unveraendert** hinaus, auch als E2EE-Umschlag:
+        Empfaenger ist der Client, und der hat den Schluessel. Anders als bei
+        der Erinnerungsmail (`_anzeigetitel`) ist hier nichts zu ersetzen.
+
+        Serien, deren Regel der Server nicht lesen kann, fehlen in dieser
+        Liste. Der Client ergaenzt sie aus seinem eigenen Bestand — er ist die
+        einzige Stelle, die sie ausbreiten kann.
+        """
         if not user.device_notifications:
             return []
 
@@ -1288,7 +1670,7 @@ class CalendarService:
         reminders: list[dict[str, Any]] = []
 
         try:
-            events = cls.get_events(db, user)
+            events = cls.vorkommen_im_fenster(db, user, von=now, bis=now + timedelta(hours=50))
         except Exception:
             return []
 
@@ -1318,6 +1700,7 @@ class CalendarService:
                 continue
 
             event_id = str(ev.get("event_id", ""))
+            vorkommen = str(ev.get("vorkommen") or "")
             reminders.append(
                 {
                     "event_id": event_id,
@@ -1325,7 +1708,11 @@ class CalendarService:
                     "start": start_dt.strftime("%d.%m.%Y um %H:%M Uhr"),
                     "location": ev.get("location", ""),
                     "time_hint": time_hint,
-                    "key": f"{user.id}_{event_id}_{key_suffix}",
+                    "vorkommen": vorkommen,
+                    # Derselbe Schluesselbau wie in `check_and_send_due_reminders`:
+                    # ohne das Vorkommen gilt die Serie nach dem ersten Mal als
+                    # erledigt, und der Client blendet sie fuer immer aus.
+                    "key": f"{user.id}_{event_id}_{vorkommen}_{key_suffix}",
                 }
             )
 

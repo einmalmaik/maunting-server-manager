@@ -21,6 +21,14 @@ from services.panel_settings_service import PanelSettingsService
 router = APIRouter(prefix="/api/calendar", tags=["calendar"])
 
 
+# Das Wiederholungsdokument kommt entweder als E2EE-Umschlag (`sv-cal-v1:…`)
+# oder als Klartext-JSON, das der Server verschluesselt. Die Obergrenze ist
+# grosszuegig, weil Ausnahmen und verschobene Einzeltermine im selben Dokument
+# stehen — aber nicht unbegrenzt: das Feld geht bei jedem Lesen ueber die
+# Leitung und durch den Sidecar.
+_WIEDERHOLUNG_MAX = 65536
+
+
 class CalendarEventCreate(BaseModel):
     event_uid: str | None = Field(default=None, max_length=64)
     title: str = Field(..., min_length=1, max_length=65536)
@@ -34,6 +42,7 @@ class CalendarEventCreate(BaseModel):
     event_type: str = "personal"
     team_id: int | None = None
     server_id: int | None = None
+    recurrence: str | None = Field(default=None, max_length=_WIEDERHOLUNG_MAX)
 
 
 class CalendarEventUpdate(BaseModel):
@@ -48,6 +57,7 @@ class CalendarEventUpdate(BaseModel):
     event_type: str | None = None
     team_id: int | None = None
     server_id: int | None = None
+    recurrence: str | None = Field(default=None, max_length=_WIEDERHOLUNG_MAX)
 
 
 def _check_calendar_enabled() -> None:
@@ -117,6 +127,7 @@ def create_event(
             event_type=payload.event_type,
             team_id=payload.team_id,
             server_id=payload.server_id,
+            recurrence=payload.recurrence,
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -147,6 +158,7 @@ def update_event(
             event_type=payload.event_type,
             team_id=payload.team_id,
             server_id=payload.server_id,
+            recurrence=payload.recurrence,
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
