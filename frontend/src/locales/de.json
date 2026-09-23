@@ -1118,6 +1118,7 @@
       "start": "Sprachmodus starten",
       "stop": "Sprachmodus beenden",
       "zustand": {
+        "abgelaufen": "Sitzung abgelaufen",
         "aus": "Sprachmodus aus",
         "verbindet": "Verbindet …",
         "bereit": "Bereit, sprich einfach los",
@@ -1142,7 +1143,10 @@
       "end": "Gespräch beenden",
       "endHint": "ESC drücken",
       "settings": "Angaben zum Sprachmodus",
+      "werkzeug": "Ein Werkzeug läuft",
       "hint": {
+        "abgelaufen": "Die Höchstdauer ist erreicht, ich verbinde neu.",
+        "werkzeugZeit": "Das Werkzeug hat zu lange gebraucht. Die Sprachsitzung bleibt offen.",
         "aus": "Der Sprachmodus ist beendet.",
         "verbindet": "Die Verbindung wird aufgebaut.",
         "bereit": "Sprich mit mir, ich bin bereit.",
@@ -1398,7 +1402,6 @@
       "trafficNoMetricsBody": "TomTom hat für diese Abfrage keine Messwerte geliefert.",
       "weatherDetails": "Detaillierte Wetterdaten",
       "scenes": "Sentinel-2 L2A Szenen",
-      "openFullScene": "Szene in Vollauflösung öffnen",
       "tabs": {
         "overview": "Übersicht",
         "satellite": "Satellit",
@@ -1409,20 +1412,33 @@
       },
       "mobileTabs": {
         "chat": "Chat / Sprache",
-        "globe": "3D-Globus",
+        "globe": "Karte",
         "satellite": "Satellit & Info"
       },
       "processes": {
         "title": "Aktive Prozesse",
         "prefetch": "Spekulativer Abruf",
-        "satellite": "Satellitendaten (Sentinel-2)",
+        "satellite": "Bild der Region",
         "weather": "Wetterdaten",
         "news": "Nachrichten & Websuche",
         "done": "Fertig",
         "running": "Läuft …",
         "waiting": "Wartet …"
       },
-      "newsSourceMissing": "Für diese Region ist keine Nachrichtenquelle eingerichtet. Es werden keine Lageberichte geschätzt."
+      "newsSourceMissing": "Für diese Region ist keine Nachrichtenquelle eingerichtet. Es werden keine Lageberichte geschätzt.",
+      "imageHeading": "Bild der Region",
+      "mosaicBadge": "Mosaik",
+      "image": {
+        "scene": "Satellitenszene",
+        "map": "Kartenbild",
+        "capturedOn": "Aufgenommen am {{date}}",
+        "clouds": "{{percent}} % Bewölkung",
+        "mosaic": "Mosaik aus vielen Aufnahmen, kein Überflug",
+        "alt": "Bild der Region {{location}}",
+        "unavailable": "Bild nicht verfügbar",
+        "loading": "Bild wird geladen",
+        "source": "Quelle: {{source}}"
+      }
     },
     "usage": {
       "title": "KI-Nutzung",
@@ -2302,7 +2318,7 @@
     },
     "ai_satellite_use": {
       "title": "Satelliten- & Regionsanalyse nutzen",
-      "desc": "Ermöglicht der KI den Abruf von Sentinel-2-Satellitenbildern, Geodaten und Wetteranalysen."
+      "desc": "Ermöglicht der KI Regionsanalysen und das Steuern der Kartenansicht. Ortsname und Koordinaten gehen dabei ohne weitere Einrichtung an OpenStreetMap, Open-Meteo, Reddit, Bluesky und Esri (Kartenbild), mit hinterlegtem Zugang auch an Copernicus, TomTom und MapTiler."
     },
     "ai_autonomous_use": {
       "title": "Autonomen Modus nutzen",
@@ -3834,7 +3850,8 @@
       "commandLabel": "Öffentlicher Bootstrap",
       "copy": "Befehl kopieren",
       "copied": "Kopiert",
-      "releaseNote": "Der Bootstrap bevorzugt das getestete msm-panel-Artefakt des neuesten GitHub-Releases. install.sh bleibt für Bootstrap, Simple- und interaktiven Modus der zentrale Installer: Er installiert auf Minimal-Systemen alle benötigten Basispakete und repariert eine unvollständige Caddy-Paketquelle sicher, ohne eine vorhandene Caddyfile zu ersetzen."
+      "releaseNote": "Der Bootstrap bevorzugt das getestete msm-panel-Artefakt des neuesten GitHub-Releases. install.sh bleibt für Bootstrap, Simple- und interaktiven Modus der zentrale Installer: Er installiert auf Minimal-Systemen alle benötigten Basispakete und repariert eine unvollständige Caddy-Paketquelle sicher, ohne eine vorhandene Caddyfile zu ersetzen.",
+      "caddyUpdate": "Seit 09/2026 schreibt install.sh Cache-Regeln in die Caddy-Site: Die gehashten Assets bleiben ein Jahr im Browser, die Seite selbst lädt bei jedem Aufruf neu, und ein fehlender Chunk bleibt ein 404. Ohne diese Regeln konnte ein Browser nach einem Update eine alte, leere Seite festhalten. update.sh schreibt eine vorhandene Site nicht neu, sondern meldet eine ohne diese Regeln. Dann install.sh erneut ausführen: Es übernimmt die vorhandenen Einstellungen und schreibt die Site neu."
     },
     "topology": {
       "title": "Beispiel-Topologie: 20 Hosts",

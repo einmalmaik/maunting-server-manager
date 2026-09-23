@@ -31,6 +31,7 @@ mod bildschirm;
 mod biometrie;
 mod deinstallation;
 pub mod discord;
+mod durchklick;
 #[cfg(windows)]
 mod ducking;
 mod geheimnisse;
@@ -81,7 +82,7 @@ async fn benachrichtigung_senden(
 fn setze_status(app: tauri::AppHandle, status: String) -> Result<(), String> {
     // Nur das Tray. Das Schaufenster-Ereignis (`mss:overlay-zustand-test`)
     // schicken die Diagnose-Knöpfe selbst — hier stand es einmal mit, und
-    // dann folgte die Schaufenster-Blase jeder echten Sitzung des
+    // dann folgte das Schaufenster jeder echten Sitzung des
     // Hauptfensters, weil auch die Zustandsverdrahtung diesen Befehl ruft.
     tray::set_status(&app, &status)
 }
@@ -433,11 +434,11 @@ fn sprachsitzung_umschalten(app: &tauri::AppHandle) {
 }
 
 /// Der Testknopf in den Einstellungen — ein **Schaufenster**, keine Sitzung:
-/// das Overlay zeigt sich mit der Sprachblase, aber ohne Mikrofon und ohne
+/// das Overlay zeigt sich mit dem Sprachschwarm, aber ohne Mikrofon und ohne
 /// Leitung. Hier stand einmal der echte Sitzungsstart (derselbe Weg wie
 /// Hotkey und Wake-Word) — wer nur sehen wollte, wie das Overlay aussieht,
 /// sprach plötzlich mit der KI. Die vier Diagnose-Knöpfe (`setze_status`)
-/// färben zusätzlich die Blase. Zweiter Druck, X oder ESC schließen.
+/// wählen zusätzlich seine Form. Zweiter Druck, X oder ESC schließen.
 #[tauri::command]
 fn overlay_testen(app: tauri::AppHandle) {
     let Some(overlay) = app.get_webview_window("overlay") else {
@@ -818,6 +819,7 @@ pub fn run() {
             setze_status,
             overlay_sichtbar,
             overlay_testen,
+            durchklick::overlay_trefferflaechen,
             audio_geraete,
             ducking,
             konfig_laden,

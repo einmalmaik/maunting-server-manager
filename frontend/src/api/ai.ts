@@ -478,6 +478,19 @@ export interface AiSatelliteLayer {
   resolution?: string
   mission?: string
   description?: string
+  /**
+   * `scene`: eine Sentinel-2-Szene mit Aufnahmezeitpunkt. `map`: das
+   * Kartenbild, ein Mosaik ohne Zeitpunkt — nie als Überflug anzeigen.
+   * Fehlt bei Ständen von vor 09/2026.
+   */
+  kind?: 'scene' | 'map'
+  scene_id?: string
+  /** Der Ausschnitt des Kartenbilds, mit dem es das Panel holt (`kind: 'map'`). */
+  bbox?: [number, number, number, number]
+  captured_at?: string
+  cloud_cover_percent?: number | null
+  /** Die Quellennennung, die neben dem Bild stehen muss. */
+  attribution?: string
 }
 
 export interface AiSatelliteScene {

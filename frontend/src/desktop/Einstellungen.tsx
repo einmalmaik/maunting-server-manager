@@ -1282,8 +1282,8 @@ function DesktopIntegration({ onKonfigAenderung }: { onKonfigAenderung?: () => v
     await setzeStatus(neu).catch(() => {})
     // Das Schaufenster-Ereignis kommt von hier und nur von hier — nicht aus
     // `setze_status` in Rust: den Befehl ruft auch die Zustandsverdrahtung
-    // echter Sitzungen, und die Blase im Schaufenster folgte dann der
-    // fremden Sitzung statt der geklickten Diagnose-Farbe.
+    // echter Sitzungen, und das Schaufenster folgte dann der fremden
+    // Sitzung statt der geklickten Diagnose-Form.
     await emit(OVERLAY_ZUSTAND_TEST, neu).catch(() => {})
   }
 

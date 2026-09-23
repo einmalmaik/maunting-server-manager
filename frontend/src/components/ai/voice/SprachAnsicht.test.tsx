@@ -11,9 +11,13 @@ const beenden = vi.fn()
 
 let sitzung: {
   zustand: Sprachzustand
+  abgelaufen?: boolean
   zeilen: Sprachzeile[]
   werkzeug: string | null
+  werkzeugLaeuft?: boolean
+  werkzeugStarts?: number
   fehler: string | null
+  fehlerCode?: string | null
   belege: Beleg[]
   vorschlag: Vorschlag | null
   geoData: AiRegionalAnalysis | null
@@ -25,10 +29,19 @@ vi.mock('./useSprachsitzung', () => ({
   useSprachsitzung: () => ({ ...sitzung, pegel: () => 0, starten, beenden }),
 }))
 
-// Die Kugel zeichnet auf ein Canvas, und jsdom hat keinen 2D-Kontext. Sie
-// bringt sich selbst nicht um (der Kontext wird geprueft), aber hier geht es um
-// die Bedienung — nicht um Farbverlaeufe.
-vi.mock('./Sprachblase', () => ({ Sprachblase: () => null }))
+// Der Schwarm zeichnet in WebGL, und jsdom hat keinen Kontext. Hier geht es
+// um die Bedienung — gezeichnet wird er in `designDnaSwarm.test.ts`. Die
+// Attrappe hält nur fest, was die Ansicht ihm sagt: Form, Ort und Impulse.
+const schwarm = vi.hoisted(() => ({
+  zuletzt: null as null | { zustand: string; ort: unknown; impulse: number },
+}))
+vi.mock('./Schwarm', async (original) => ({
+  ...(await original<typeof import('./Schwarm')>()),
+  Schwarm: (props: { zustand: string; ort?: unknown; impulse?: number }) => {
+    schwarm.zuletzt = { zustand: props.zustand, ort: props.ort ?? null, impulse: props.impulse ?? 0 }
+    return null
+  },
+}))
 
 const KONFIGURATION: AiVoiceConfig = {
   available: true,
@@ -48,9 +61,13 @@ function ansicht(
 ) {
   sitzung = {
     zustand: 'bereit',
+    abgelaufen: false,
     zeilen: [],
     werkzeug: null,
+    werkzeugLaeuft: false,
+    werkzeugStarts: 0,
     fehler: null,
+    fehlerCode: null,
     belege: [],
     vorschlag: null,
     geoData: null,
@@ -72,6 +89,7 @@ describe('SprachAnsicht', () => {
   beforeEach(() => {
     starten.mockClear()
     beenden.mockClear()
+    schwarm.zuletzt = null
   })
 
   it('hat fuer jeden Zustand Ueberschrift und Erklaerung', () => {
@@ -134,11 +152,46 @@ describe('SprachAnsicht', () => {
     expect(screen.queryByText(i18n.t('ai.voice.zustand.aus'))).not.toBeInTheDocument()
   })
 
-  it('zeigt nur den Werkzeugnamen', () => {
-    ansicht({ zustand: 'denkt', werkzeug: 'read_server_status' })
+  it('sagt, was das laufende Werkzeug tut, und formt dabei das Logo', () => {
+    ansicht({ zustand: 'denkt', werkzeug: 'read_server_status', werkzeugLaeuft: true, werkzeugStarts: 1 })
 
-    // Argumente tragen Serverkennungen und Pfade.
-    expect(screen.getByText('read_server_status')).toBeInTheDocument()
+    // Ein Satz aus dem Katalog statt der Kennung — und nie die Argumente:
+    // die tragen Serverkennungen und Pfade.
+    expect(screen.getByText(i18n.t('ai.toolsRunning.read_server_status'))).toBeInTheDocument()
+    expect(screen.queryByText('read_server_status')).not.toBeInTheDocument()
+    expect(schwarm.zuletzt).toMatchObject({ zustand: 'working', impulse: 1 })
+  })
+
+  it('nennt ein Werkzeug ohne eigenen Satz nicht bei seiner Kennung', () => {
+    ansicht({ zustand: 'denkt', werkzeug: 'neues_werkzeug_ohne_satz', werkzeugLaeuft: true })
+
+    expect(screen.getByText(i18n.t('ai.voice.werkzeug'))).toBeInTheDocument()
+    expect(screen.queryByText('neues_werkzeug_ohne_satz')).not.toBeInTheDocument()
+  })
+
+  it('zeigt ein Werkzeug vom letzten Zug nicht mehr an', () => {
+    // `werkzeug` behaelt seinen Namen, solange eine Regionalanalyse offen ist.
+    // Ohne `werkzeugLaeuft` stuende er in jedem spaeteren Zug noch da.
+    ansicht({ zustand: 'denkt', werkzeug: 'read_server_status', werkzeugLaeuft: false })
+
+    expect(screen.queryByText(i18n.t('ai.toolsRunning.read_server_status'))).not.toBeInTheDocument()
+    expect(schwarm.zuletzt?.zustand).toBe('thinking')
+  })
+
+  it('sagt, dass die Sitzung abgelaufen ist, und legt den Schwarm flach', () => {
+    ansicht({ zustand: 'verbindet', abgelaufen: true })
+
+    expect(screen.getByText(i18n.t('ai.voice.zustand.abgelaufen'))).toBeInTheDocument()
+    expect(screen.getByText(i18n.t('ai.voice.hint.abgelaufen'))).toBeInTheDocument()
+    expect(schwarm.zuletzt?.zustand).toBe('expired')
+  })
+
+  it('erklaert eine Zeitueberschreitung des Werkzeugs in der Sprache des Panels', () => {
+    ansicht({ zustand: 'bereit', fehler: 'ai.voice.errors.provider', fehlerCode: 'REALTIME_TOOL_TIMEOUT' })
+
+    // Stand hier einmal fest auf Deutsch — auch im englischen Panel.
+    expect(screen.getByText(i18n.t('ai.voice.hint.werkzeugZeit'))).toBeInTheDocument()
+    expect(schwarm.zuletzt?.zustand).toBe('fault')
   })
 
   it('haelt den Zustand vorlesbar', () => {
@@ -268,6 +321,27 @@ describe('SprachAnsicht', () => {
 
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(aufChat).toHaveBeenCalledOnce()
+  })
+
+  it('laesst den Schwarm im Kommandozentrum zur Erde werden, gedreht zum Ort', () => {
+    ansicht({
+      zustand: 'spricht',
+      werkzeug: 'analyze_region',
+      geoData: {
+        status: 'success',
+        location: 'Berlin',
+        country: 'Deutschland',
+        coordinates: { latitude: 52.52, longitude: 13.405, bbox: [13.08, 52.33, 13.76, 52.67] },
+      },
+    })
+
+    expect(schwarm.zuletzt?.ort).toMatchObject({ latitude: 52.52, longitude: 13.405 })
+  })
+
+  it('zeigt ohne Regionalanalyse keine Erde', () => {
+    ansicht({ zustand: 'spricht' })
+
+    expect(schwarm.zuletzt?.ort).toBeNull()
   })
 
   it('oeffnet 3-Spalten-Kommandozentren-Modus sofort bei analyze_region', () => {

@@ -1685,7 +1685,30 @@ $DOMAIN {
         reverse_proxy localhost:7880
     }
 
+    # Die gehashten Assets tragen ihren Inhalt im Namen: ein Jahr, ohne
+    # Nachfrage. Nur was es gibt; ein fehlender Chunk bleibt ein 404 und wird
+    # nie zur index.html, sonst stoppt der laufende Client mit
+    # "MIME type text/html".
+    handle /assets/* {
+        @vorhanden file
+        header @vorhanden Cache-Control "public, max-age=31536000, immutable"
+        file_server
+    }
+
+    # Die Seite selbst (/, jede .html und jede Unterseite, die try_files auf
+    # die index.html lenkt) fragt immer nach. Eine alte index.html zeigte nach
+    # einem Update auf Chunks, die es nicht mehr gibt, und die Oberflaeche
+    # bliebe leer. Icons, Manifest und die Erdtextur duerfen einen Tag bleiben.
     handle {
+        @seite not file
+        @html path / *.html
+        @datei {
+            file
+            not path / *.html
+        }
+        header @seite Cache-Control "no-cache, no-store, must-revalidate"
+        header @html Cache-Control "no-cache, no-store, must-revalidate"
+        header @datei Cache-Control "public, max-age=86400"
         try_files {path} /index.html
         file_server
     }
@@ -1723,7 +1746,30 @@ EOF
         reverse_proxy localhost:7880
     }
 
+    # Die gehashten Assets tragen ihren Inhalt im Namen: ein Jahr, ohne
+    # Nachfrage. Nur was es gibt; ein fehlender Chunk bleibt ein 404 und wird
+    # nie zur index.html, sonst stoppt der laufende Client mit
+    # "MIME type text/html".
+    handle /assets/* {
+        @vorhanden file
+        header @vorhanden Cache-Control "public, max-age=31536000, immutable"
+        file_server
+    }
+
+    # Die Seite selbst (/, jede .html und jede Unterseite, die try_files auf
+    # die index.html lenkt) fragt immer nach. Eine alte index.html zeigte nach
+    # einem Update auf Chunks, die es nicht mehr gibt, und die Oberflaeche
+    # bliebe leer. Icons, Manifest und die Erdtextur duerfen einen Tag bleiben.
     handle {
+        @seite not file
+        @html path / *.html
+        @datei {
+            file
+            not path / *.html
+        }
+        header @seite Cache-Control "no-cache, no-store, must-revalidate"
+        header @html Cache-Control "no-cache, no-store, must-revalidate"
+        header @datei Cache-Control "public, max-age=86400"
         try_files {path} /index.html
         file_server
     }

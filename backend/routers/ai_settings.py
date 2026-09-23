@@ -5,7 +5,7 @@ folgen in separaten Schnitten, damit Rollenverwaltung und Secret-Flows nicht
 zu einem schwer prüfbaren Monolithen werden.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -250,8 +250,8 @@ def set_satellite_credentials(
 ) -> AiSatelliteStatus:
     """Hinterlegt oder entfernt die Copernicus CDSE Zugangsdaten.
 
-    Ein leeres Feldpaar entfernt sie — dann verschwindet auch das Werkzeug
-    aus dem Katalog.
+    Ein leeres Feldpaar entfernt sie — dann zeigt die Regionsanalyse wieder
+    das Kartenbild statt der neuesten Sentinel-2-Szene.
     """
     from services import ai_satellite_service
 
@@ -335,6 +335,51 @@ def get_maptiler_map_config(
     if not config:
         return AiMapTilerMapConfig(configured=False)
     return AiMapTilerMapConfig(configured=True, style_url=config["style_url"])
+
+
+@router.get("/geo/image")
+def get_regional_image(
+    kind: str = Query(..., pattern="^(map|scene)$"),
+    bbox: str | None = Query(None, max_length=120),
+    shape: str = Query("landscape", pattern="^(landscape|portrait|square)$"),
+    scene_id: str | None = Query(None, min_length=1, max_length=128),
+    _: User = Depends(require_global("ai.satellite.use")),
+) -> Response:
+    """Das Bild einer Regionsanalyse, vom Panel geholt (``ai_geo_image_service``).
+
+    Der Browser fragt nur hier und nie ArcGIS oder Copernicus selbst. Eine
+    Adresse nimmt die Route nicht an: ``map`` bekommt einen Ausschnitt — den
+    der Analyse oder den, auf den die Kamera gezoomt hat — und eine der drei
+    Bildformen, ``scene`` die ID einer gerade gefundenen Szene.
+    """
+    from services import ai_geo_image_service
+
+    try:
+        if kind == "map":
+            try:
+                werte = [float(teil) for teil in (bbox or "").split(",")]
+            except ValueError:
+                werte = []
+            if len(werte) != 4:
+                raise HTTPException(status_code=422, detail="AI_GEO_IMAGE_BBOX_INVALID")
+            min_lon, min_lat, max_lon, max_lat = werte
+            if not (-180 <= min_lon < max_lon <= 180 and -90 <= min_lat < max_lat <= 90):
+                raise HTTPException(status_code=422, detail="AI_GEO_IMAGE_BBOX_INVALID")
+            ausschnitt = ai_geo_image_service.image_bbox(
+                werte, (min_lat + max_lat) / 2, (min_lon + max_lon) / 2,
+            )
+            daten, medientyp = ai_geo_image_service.map_image(ausschnitt, shape)
+        else:
+            if not scene_id:
+                raise HTTPException(status_code=422, detail="AI_GEO_IMAGE_SCENE_MISSING")
+            daten, medientyp = ai_geo_image_service.scene_image(scene_id)
+    except ai_geo_image_service.GeoImageUnavailable as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.code) from exc
+    return Response(
+        content=daten,
+        media_type=medientyp,
+        headers={"Cache-Control": "private, max-age=900", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.get("/settings/tomtom", response_model=AiTomTomStatus)

@@ -1118,6 +1118,7 @@
       "start": "Start voice mode",
       "stop": "Stop voice mode",
       "zustand": {
+        "abgelaufen": "Session expired",
         "aus": "Voice mode off",
         "verbindet": "Connecting …",
         "bereit": "Ready, speak whenever you want",
@@ -1142,7 +1143,10 @@
       "end": "End conversation",
       "endHint": "press ESC",
       "settings": "Voice mode details",
+      "werkzeug": "A tool is running",
       "hint": {
+        "abgelaufen": "The maximum length was reached. Reconnecting.",
+        "werkzeugZeit": "The tool took too long. The voice session stays open.",
         "aus": "Voice mode has ended.",
         "verbindet": "Setting up the connection.",
         "bereit": "Talk to me, I'm ready.",
@@ -1398,7 +1402,6 @@
       "trafficNoMetricsBody": "TomTom did not return measurements for this request.",
       "weatherDetails": "Detailed weather data",
       "scenes": "Sentinel-2 L2A scenes",
-      "openFullScene": "Open full resolution scene",
       "tabs": {
         "overview": "Overview",
         "satellite": "Satellite",
@@ -1409,20 +1412,33 @@
       },
       "mobileTabs": {
         "chat": "Chat / voice",
-        "globe": "3D globe",
+        "globe": "Map",
         "satellite": "Satellite & info"
       },
       "processes": {
         "title": "Active processes",
         "prefetch": "Speculative prefetch",
-        "satellite": "Satellite data (Sentinel-2)",
+        "satellite": "Region image",
         "weather": "Weather data",
         "news": "News & web search",
         "done": "Done",
         "running": "Running …",
         "waiting": "Waiting …"
       },
-      "newsSourceMissing": "No news source is set up for this region. No situation reports are estimated."
+      "newsSourceMissing": "No news source is set up for this region. No situation reports are estimated.",
+      "imageHeading": "Image of the region",
+      "mosaicBadge": "Mosaic",
+      "image": {
+        "scene": "Satellite scene",
+        "map": "Map image",
+        "capturedOn": "Captured on {{date}}",
+        "clouds": "{{percent}}% cloud cover",
+        "mosaic": "Mosaic of many captures, not a single overpass",
+        "alt": "Image of {{location}}",
+        "unavailable": "Image unavailable",
+        "loading": "Loading image",
+        "source": "Source: {{source}}"
+      }
     },
     "usage": {
       "title": "AI usage",
@@ -2302,7 +2318,7 @@
     },
     "ai_satellite_use": {
       "title": "Use satellite & regional analysis",
-      "desc": "Allows the assistant to query Sentinel-2 satellite data, geodata, and weather analysis."
+      "desc": "Allows the assistant to analyse regions and steer the map view. The place name and coordinates go to OpenStreetMap, Open-Meteo, Reddit, Bluesky and Esri (map image) without further setup, and with configured access also to Copernicus, TomTom and MapTiler."
     },
     "ai_autonomous_use": {
       "title": "Use autonomous mode",
@@ -3834,7 +3850,8 @@
       "commandLabel": "Public bootstrap",
       "copy": "Copy command",
       "copied": "Copied",
-      "releaseNote": "The bootstrap prefers the tested msm-panel artifact from the latest GitHub release. install.sh remains the central installer for bootstrap, simple and interactive modes: on minimal systems it installs every required base package and safely repairs an incomplete Caddy repository without replacing an existing Caddyfile."
+      "releaseNote": "The bootstrap prefers the tested msm-panel artifact from the latest GitHub release. install.sh remains the central installer for bootstrap, simple and interactive modes: on minimal systems it installs every required base package and safely repairs an incomplete Caddy repository without replacing an existing Caddyfile.",
+      "caddyUpdate": "Since 09/2026 install.sh writes cache rules into the Caddy site: hashed assets stay in the browser for a year, the page itself reloads on every visit, and a missing chunk stays a 404. Without these rules a browser could hold on to an old, blank page after an update. update.sh does not rewrite an existing site; it reports one without these rules. Run install.sh again in that case: it keeps the existing settings and rewrites the site."
     },
     "topology": {
       "title": "Example topology: 20 hosts",

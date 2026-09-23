@@ -103,10 +103,27 @@ export interface RegionalFocus {
 
 interface Ergebnis {
   zustand: Sprachzustand
+  /**
+   * Die Sitzung hat ihre Höchstdauer erreicht und wird gerade neu verbunden.
+   * Wahr ab der Ankündigung des Servers, bis die neue Sitzung ihren ersten
+   * Zustand meldet oder das Neuverbinden scheitert — der Schwarm legt sich in
+   * dieser Zeit flach, statt nur „verbindet" zu zeigen.
+   */
+  abgelaufen: boolean
   /** Der laufende Wortwechsel, für die Anzeige. */
   zeilen: Sprachzeile[]
   /** Welches Werkzeug gerade arbeitet — nur der Name, nie die Argumente. */
   werkzeug: string | null
+  /**
+   * Ob in diesem Zug ein Werkzeug gestartet wurde: wahr ab dem Start bis zum
+   * Ende des Zugs (`bereit` oder `hoert`), auch wenn die KI zwischendurch
+   * etwas sagt. `werkzeug` taugt dafür nicht — es behält den letzten Namen,
+   * solange eine Regionalanalyse offen ist, und stünde dann in jedem
+   * späteren Zug noch da.
+   */
+  werkzeugLaeuft: boolean
+  /** Zählt die Werkzeugstarts; jeder neue schickt einen Lichtring durch den Schwarm. */
+  werkzeugStarts: number
   /** Was schiefging, als Übersetzungsschlüssel. `null`, wenn nichts. */
   fehler: string | null
   fehlerWerkzeug: string | null
@@ -134,8 +151,8 @@ interface Ergebnis {
   /**
    * Der aktuelle Lautstärkepegel zwischen 0 und 1 — wer gerade redet, egal wer.
    *
-   * Eine **Funktion** und kein Zustandswert. Die Blase liest ihn sechzigmal je
-   * Sekunde; als `useState` wäre das sechzig Renderdurchläufe je Sekunde für
+   * Eine **Funktion** und kein Zustandswert. Der Schwarm liest ihn sechzigmal
+   * je Sekunde; als `useState` wäre das sechzig Renderdurchläufe je Sekunde für
    * eine Zahl, die kein React-Element je anzeigt.
    */
   pegel: () => number
@@ -303,6 +320,9 @@ export function useSprachsitzung(
   const [geoData, setGeoData] = useState<AiRegionalAnalysis | null>(null)
   const [regionalFocus, setRegionalFocus] = useState<RegionalFocus | null>(null)
   const [regionalContextActive, setRegionalContextActive] = useState(true)
+  const [abgelaufen, setAbgelaufen] = useState(false)
+  const [werkzeugLaeuft, setWerkzeugLaeuft] = useState(false)
+  const [werkzeugStarts, setWerkzeugStarts] = useState(0)
   const intentRevision = useRef(0)
 
   const ws = useRef<WebSocket | null>(null)
@@ -314,6 +334,9 @@ export function useSprachsitzung(
   const rtcKontext = useRef<AudioContext | null>(null)
   const rtcMesser = useRef<AnalyserNode | null>(null)
   const rtcProbe = useRef<Uint8Array<ArrayBuffer> | null>(null)
+  /** Der Messpunkt an der Stimme der KI, wenn sie per WebRTC ankommt. */
+  const rtcStimme = useRef<AnalyserNode | null>(null)
+  const rtcStimmProbe = useRef<Uint8Array<ArrayBuffer> | null>(null)
   /** Ob der letzte Abbruch planmäßig war — dann wird neu verbunden. */
   const planmaessig = useRef(false)
   /** Verhindert, dass ein Neustart eine bereits beendete Sitzung wiederbelebt. */
@@ -334,6 +357,8 @@ export function useSprachsitzung(
     rtcKontext.current = null
     rtcMesser.current = null
     rtcProbe.current = null
+    rtcStimme.current = null
+    rtcStimmProbe.current = null
     const offen = ws.current
     ws.current = null
     if (offen && offen.readyState <= WebSocket.OPEN) offen.close()
@@ -345,10 +370,12 @@ export function useSprachsitzung(
     aufraeumen()
     setZustand('aus')
     setWerkzeug(null)
+    setWerkzeugLaeuft(false)
     setVorschlag(null)
     setIntentErkannt(null)
     setRegionalFocus(null)
     setRegionalContextActive(true)
+    setAbgelaufen(false)
     intentRevision.current = 0
     voiceDebug('VOICE_BEENDET', { zustand: 'aus' })
   }, [aufraeumen])
@@ -483,8 +510,10 @@ export function useSprachsitzung(
           peer.ontrack = (event) => {
             const audio = new Audio()
             audio.autoplay = true
-            audio.srcObject = event.streams[0] ?? new MediaStream([event.track])
+            const stimme = event.streams[0] ?? new MediaStream([event.track])
+            audio.srcObject = stimme
             rtcAudio.current = audio
+            stimmeMessen(kontext, stimme, rtcStimme, rtcStimmProbe)
             void ausgabeGeraetId().then((sink) => {
               const mitSink = audio as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }
               if (sink && mitSink.setSinkId) return mitSink.setSinkId(sink)
@@ -582,6 +611,7 @@ export function useSprachsitzung(
         case 'bereit':
           voiceDebug('VOICE_BEREIT')
           setFehler(null)
+          setAbgelaufen(false)
           setZustand('bereit')
           break
         case 'debug': {
@@ -632,6 +662,11 @@ export function useSprachsitzung(
             }
           }
           if (neu === 'bereit' && !geoData) setWerkzeug(null)
+          if (neu === 'bereit' || neu === 'hoert') setWerkzeugLaeuft(false)
+          // Ein Zustand vom Server heißt: die neue Sitzung steht. Realtime und
+          // GPT-Live melden sich mit `zustand: bereit`, nicht mit `bereit` —
+          // ohne diese Zeile bliebe „abgelaufen" nach dem Neuverbinden stehen.
+          setAbgelaufen(false)
           // Nur ein Zustand, in dem wirklich gesprochen oder gehört wird,
           // beweist, dass die Leitung trägt — ein `bereit` folgt auch auf jede
           // Störung und darf sie deshalb nicht wegräumen (siehe
@@ -731,6 +766,8 @@ export function useSprachsitzung(
           if (name) {
             voiceDebug('VOICE_TOOL_START', { name })
             setWerkzeug(name)
+            setWerkzeugLaeuft(true)
+            setWerkzeugStarts((bisher) => bisher + 1)
             const analysis = normalizeRegionalAnalysis(nachricht.geo_analysis)
             if (analysis) {
               setGeoData(analysis)
@@ -808,6 +845,7 @@ export function useSprachsitzung(
           // Planmäßiges Ende nach der Höchstdauer. Der Server schließt gleich;
           // `onclose` verbindet dann neu.
           planmaessig.current = true
+          setAbgelaufen(true)
           break
         case 'fehler': {
           const code = typeof nachricht.code === 'string' ? nachricht.code : 'UNKNOWN'
@@ -874,8 +912,11 @@ export function useSprachsitzung(
       rtcKontext.current = null
       rtcMesser.current = null
       rtcProbe.current = null
+      rtcStimme.current = null
+      rtcStimmProbe.current = null
       ws.current = null
       setWerkzeug(null)
+      setWerkzeugLaeuft(false)
       // Die offenen Vorschläge der Brücke leben in der Sitzung und nicht in
       // der Datenbank. Nach dem Neuverbinden nimmt kein gesprochenes Ja sie
       // mehr an — eine Karte, die stehen bliebe, versprächt das Gegenteil.
@@ -897,6 +938,9 @@ export function useSprachsitzung(
       if (!verbunden && gewollt.current && protokolle) {
         void handshakeErklaeren().then(setFehler)
       }
+      // Gescheitert ist ab hier auch das Neuverbinden nach der Höchstdauer:
+      // die Sitzung ist aus, nicht mehr abgelaufen.
+      setAbgelaufen(false)
       setZustand('aus')
     }
   }, [beenden, modus, providerId, zeileAnhaengen])
@@ -918,17 +962,17 @@ export function useSprachsitzung(
 
   // Wer gerade redet, bestimmt die Quelle: beim Zuhören das Mikrofon, sonst
   // die Stimme der KI. Ein Maximum über beide wäre bequemer und falsch — dann
-  // atmete die Blase auch dann, wenn nur ein Lüfter neben dem Mikrofon steht.
+  // atmete die Figur auch dann, wenn nur ein Lüfter neben dem Mikrofon steht.
   const pegel = useCallback(
     () => {
       if (zustand === 'hoert' && rtcMesser.current && rtcProbe.current) {
-        rtcMesser.current.getByteTimeDomainData(rtcProbe.current)
-        let summe = 0
-        for (const sample of rtcProbe.current) {
-          const wert = (sample - 128) / 128
-          summe += wert * wert
-        }
-        return Math.min(1, Math.sqrt(summe / rtcProbe.current.length) * 4)
+        return effektivwert(rtcMesser.current, rtcProbe.current)
+      }
+      // Per WebRTC spielt ein <audio>-Element die Stimme, nicht die
+      // Wiedergabe — ohne eigenen Messpunkt stand die Figur still, während
+      // die KI sprach.
+      if (zustand === 'spricht' && rtcStimme.current && rtcStimmProbe.current) {
+        return effektivwert(rtcStimme.current, rtcStimmProbe.current)
       }
       return (zustand === 'hoert' ? mikro.current?.pegel() : lautsprecher.current?.pegel()) ?? 0
     },
@@ -937,8 +981,11 @@ export function useSprachsitzung(
 
   return {
     zustand,
+    abgelaufen,
     zeilen,
     werkzeug,
+    werkzeugLaeuft,
+    werkzeugStarts,
     fehlerWerkzeug,
     fehlerCode,
     debugCode,
@@ -955,5 +1002,42 @@ export function useSprachsitzung(
     pegel,
     starten,
     beenden,
+  }
+}
+
+/** Effektivwert eines Messpunkts, auf 0 bis 1 gespreizt wie der Mikrofonpegel. */
+function effektivwert(messer: AnalyserNode, probe: Uint8Array<ArrayBuffer>): number {
+  messer.getByteTimeDomainData(probe)
+  let summe = 0
+  for (const sample of probe) {
+    const wert = (sample - 128) / 128
+    summe += wert * wert
+  }
+  return Math.min(1, Math.sqrt(summe / probe.length) * 4)
+}
+
+/**
+ * Hängt einen Messpunkt an die Stimme der KI, ohne sie ein zweites Mal
+ * abzuspielen: der Analysator endet in keinem Ziel, er hört nur zu.
+ *
+ * Chrome liefert einen entfernten WebRTC-Strom nur dann an WebAudio, wenn
+ * derselbe Strom auch an einem Medienelement hängt — das tut er hier, das
+ * <audio> des Aufrufers spielt ihn. Scheitert das Messen, fehlt der Figur
+ * die Bewegung beim Sprechen, dem Menschen aber kein Wort.
+ */
+function stimmeMessen(
+  kontext: AudioContext,
+  stimme: MediaStream,
+  messpunkt: { current: AnalyserNode | null },
+  probe: { current: Uint8Array<ArrayBuffer> | null },
+): void {
+  try {
+    const messer = kontext.createAnalyser()
+    messer.fftSize = 256
+    kontext.createMediaStreamSource(stimme).connect(messer)
+    messpunkt.current = messer
+    probe.current = new Uint8Array(messer.fftSize)
+  } catch (fehler) {
+    voiceWarn('VOICE_STIMMPEGEL_FEHLT', { error: String(fehler) })
   }
 }
