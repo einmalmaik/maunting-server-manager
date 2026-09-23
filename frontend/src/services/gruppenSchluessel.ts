@@ -1559,6 +1559,22 @@ async function nimmSchluessel(
 }
 
 /**
+ * Maximal zulässige Schlüsselantworten an dasselbe Mitglied pro Minute (Flutschutz).
+ *
+ * Verhindert, dass ein bösartiges Gruppenmitglied durch massenhafte Nachfragen
+ * (z. B. mit erfundenen keyIds oder Gerätekennungen) das Relais-Kontingent
+ * unseres Kontos erschöpft und so das Senden eigener Nachrichten (HTTP 429) blockiert.
+ */
+export const MAX_ANTWORTEN_FENSTER_MS = 60_000
+export const MAX_ANTWORTEN_PRO_FENSTER = 3
+
+const antwortZeiten = new Map<string, number[]>()
+
+export function leereAntwortSperren(): void {
+  antwortZeiten.clear()
+}
+
+/**
  * Wer einem Nachzügler antwortet, entscheidet jedes Gerät für sich aus der
  * Mitgliederliste — dieselbe Regel wie beim Raumschlüssel eines Anrufs.
  *
@@ -1590,23 +1606,29 @@ async function beantworteAnfrage(
     eigenesKonto || istSchluesselhalter(kontext.eigeneId, mitglieder, anfragerId)
   if (!zustaendig) return { art: 'anfrage', vonKonto: anfragerId, beantwortet: false }
 
-  // Diese Nachfrage liegt als Umschlag in der Mailbox und kommt bei jedem
-  // Abruf wieder. Einmal beantworten reicht; siehe Kopf der Datei.
-  const kennung = `${anfragerId}:${String(roh.vonGeraet ?? '')}:${String(roh.keyId ?? '')}`
-  if (await ablage.kennstAnfrage(kontext.groupId, kennung)) {
+  // 1. Dedup je anfragendem Gerät und keyId (verhindert Mehrfachantworten auf denselben Umschlag in der Mailbox)
+  const keyIdStr = String(roh.keyId ?? '')
+  const geraeteKennung = `${anfragerId}:${String(roh.vonGeraet ?? '')}:${keyIdStr}`
+  if (await ablage.kennstAnfrage(kontext.groupId, geraeteKennung)) {
     return { art: 'anfrage', vonKonto: anfragerId, beantwortet: false }
   }
 
   const eintrag = await ablage.liesAktuellen(kontext.groupId)
   if (!eintrag) return { art: 'anfrage', vonKonto: anfragerId, beantwortet: false }
 
-  // Und nur, wem dieser Schlüssel gemünzt wurde. Die Liste des Servers oben
-  // sagt, wer *jetzt* dazugehört; wer darin erst nach dem Münzen auftaucht —
-  // frisch beigetreten, über einen alten Link zurückgekehrt oder vom Server
-  // eingetragen —, läse mit diesem Schlüssel alles, was geschrieben wurde,
-  // bevor er da war. Den nächsten bekommt er beim nächsten Senden: der münzt
-  // für die Liste des Servers. Nicht gemerkt, denn eine Antwort ist das nicht.
+  // Und nur, wem dieser Schlüssel gemünzt wurde.
   if (!eintrag.mitglieder.includes(anfragerId)) {
+    return { art: 'anfrage', vonKonto: anfragerId, beantwortet: false }
+  }
+
+  // 2. Flutschutz: Rate-Limiting gegen Fluten mit erfundenen keyIds oder Geräten
+  // Maximal 3 Schlüssel-Antworten pro Minute an dasselbe Konto in dieser Gruppe
+  const sperrKey = `${kontext.groupId}:${anfragerId}`
+  const jetzt = Date.now()
+  const zeiten = (antwortZeiten.get(sperrKey) ?? []).filter(
+    (t) => jetzt - t < MAX_ANTWORTEN_FENSTER_MS,
+  )
+  if (zeiten.length >= MAX_ANTWORTEN_PRO_FENSTER) {
     return { art: 'anfrage', vonKonto: anfragerId, beantwortet: false }
   }
 
@@ -1631,11 +1653,10 @@ async function beantworteAnfrage(
   } catch {
     zugestellt = 0
   }
-  // Erst merken, wenn wirklich etwas rausging. Eine gescheiterte Antwort soll
-  // der nächste Durchlauf erneut versuchen — sonst bliebe der Fragende ohne
-  // Schlüssel und niemand käme je darauf zurück.
   if (zugestellt > 0) {
-    await ablage.merkeAnfrage(kontext.groupId, kennung).catch(() => {})
+    zeiten.push(jetzt)
+    antwortZeiten.set(sperrKey, zeiten)
+    await ablage.merkeAnfrage(kontext.groupId, geraeteKennung).catch(() => {})
   }
   return { art: 'anfrage', vonKonto: anfragerId, beantwortet: zugestellt > 0 }
 }
@@ -1717,9 +1738,10 @@ export async function fordereGruppenSchluessel(
  */
 const geraeteStand = new Map<number, number>()
 
-/** Vergisst den Lesestand. Gehört zum Abmelden. */
+/** Vergisst den Lesestand und Antwortsperren. Gehört zum Abmelden. */
 export function leereGeraeteStand(): void {
   geraeteStand.clear()
+  leereAntwortSperren()
 }
 
 /**

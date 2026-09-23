@@ -42,6 +42,7 @@ import {
   FileText,
   Upload,
   Shield,
+  ShieldCheck,
   UserCheck,
   Briefcase,
   LayoutGrid,
@@ -148,7 +149,13 @@ import {
   DrGeraetNichtEingetragenError,
   DrZustellungFehlgeschlagenError,
 } from '@/services/ratchetSitzung'
-import { geraeteVon, kontoNutztSignaturen, onNeuesGeraet } from '@/services/e2eeGeraet'
+import {
+  geraeteVon,
+  kontoNutztSignaturen,
+  onNeuesGeraet,
+  onSchluesselWarnung,
+  sicherheitsnummer,
+} from '@/services/e2eeGeraet'
 import { pruefeNutzlast, signiereNutzlast } from '@/services/nutzlastSignatur'
 import {
   abonniereBekannteGespraeche,
@@ -530,6 +537,9 @@ export function Messenger() {
   // Mute & Block modals
   const [isMuteModalOpen, setIsMuteModalOpen] = useState(false)
   const [isBlockConfirmOpen, setIsBlockConfirmOpen] = useState(false)
+  const [isSafetyNumberModalOpen, setIsSafetyNumberModalOpen] = useState(false)
+  const [contactDevices, setContactDevices] = useState<{ id: string; label: string; number: string }[]>([])
+  const [loadingSafetyNumbers, setLoadingSafetyNumbers] = useState(false)
 
   // Pre-computed mailbox IDs
   const [contactMailboxMap, setContactMailboxMap] = useState<Record<number, string>>({})
@@ -1818,6 +1828,13 @@ export function Messenger() {
     geraeteVon(activeContact.userId).catch(() => {})
   }, [activeContact?.userId])
 
+  /*
+  useEffect(() => {
+    if (!currentUserId) return
+    geraeteVon(currentUserId).catch(() => {})
+  }, [currentUserId])
+  */
+
   useEffect(() => {
     const abbestellen = onNeuesGeraet((peerId, neue) => {
       if (neue.length === 0) return
@@ -1844,6 +1861,84 @@ export function Messenger() {
     })
     return abbestellen
   }, [activeContact, activeGroup, t, zeigeSystemzeile])
+
+  useEffect(() => {
+    const abbestellen = onSchluesselWarnung((ev) => {
+      let betroffenerName = ''
+      if (activeContact && activeContact.userId === ev.userId) {
+        betroffenerName = activeContact.username || t('messenger.thisContact')
+      } else if (activeGroup) {
+        const member = (activeGroup.members ?? []).find((m) => Number(m.user_id) === ev.userId)
+        if (member) betroffenerName = member.username || t('messenger.thisContact')
+      } else if (currentUserId === ev.userId) {
+        zeigeSystemzeile(
+          t('messenger.ownKeyChangedWarning', {
+            defaultValue: 'Sicherheitswarnung: Ein Geräteschlüssel deines Kontos hat sich geändert.',
+          }),
+        )
+        return
+      }
+      if (!betroffenerName) return
+
+      if (ev.typ === 'schluessel_geaendert') {
+        zeigeSystemzeile(
+          t('messenger.keyChangedWarning', {
+            name: betroffenerName,
+            defaultValue: `Sicherheitswarnung: Der Geräteschlüssel von ${betroffenerName} hat sich geändert. Bitte überprüfe die Sicherheitsnummer.`,
+          }),
+        )
+      } else if (ev.typ === 'konto_neustart') {
+        zeigeSystemzeile(
+          t('messenger.accountResetWarning', {
+            name: betroffenerName,
+            defaultValue: `Sicherheitswarnung: Alle Geräte von ${betroffenerName} wurden ersetzt. Bitte überprüfe die Sicherheitsnummer.`,
+          }),
+        )
+      }
+    })
+    return abbestellen
+  }, [activeContact, activeGroup, currentUserId, t, zeigeSystemzeile])
+
+  useEffect(() => {
+    if (!isSafetyNumberModalOpen || !activeContact?.userId) {
+      setContactDevices([])
+      return
+    }
+    let aktiv = true
+    setLoadingSafetyNumbers(true)
+    geraeteVon(activeContact.userId)
+      .then(async (geraete) => {
+        const ergebnisse: { id: string; label: string; number: string }[] = []
+        for (const g of geraete) {
+          let num = ''
+          if (g.public_key) {
+            try {
+              num = await sicherheitsnummer(g.public_key)
+            } catch {
+              num = ''
+            }
+          }
+          ergebnisse.push({
+            id: g.device_id,
+            label: g.label || t('profile.e2eeDevices.unnamed'),
+            number: num,
+          })
+        }
+        if (aktiv) {
+          setContactDevices(ergebnisse)
+          setLoadingSafetyNumbers(false)
+        }
+      })
+      .catch(() => {
+        if (aktiv) {
+          setContactDevices([])
+          setLoadingSafetyNumbers(false)
+        }
+      })
+    return () => {
+      aktiv = false
+    }
+  }, [isSafetyNumberModalOpen, activeContact?.userId, t])
 
   const konversation = useKonversation({
     ziel: gespraechsZiel,
@@ -2033,6 +2128,7 @@ export function Messenger() {
 
   const loadMessages = async (isInitial = false) => {
     const currentMid = blindMailboxId
+    console.log('[DEBUG loadMessages] called, currentMid:', currentMid, 'activeMailboxIdRef:', activeMailboxIdRef.current, 'currentUserId:', currentUserId)
     if (!currentMid || !currentUserId) return
     if (activeMailboxIdRef.current !== currentMid) return
     // Erst entschlüsseln, wenn feststeht, welche Schlüssel dieses Gerät hat.
@@ -2054,8 +2150,12 @@ export function Messenger() {
       // Mailbox, welches Verfahren, was ein Umschlag bedeutet. Hier bleibt die
       // Anzeige — Quittungen, Häkchen, Bearbeiten und Löschen.
       const gelesen = await konversation.liesUmschlaege()
-      if (gelesen === null) return
-      if (activeMailboxIdRef.current !== currentMid || currentLoadSeqRef.current !== seq) return
+      console.log('[DEBUG loadMessages] gelesen:', gelesen?.map(g => ({ art: g.art, envId: g.env.id, text: g.art === 'klartext' ? g.text : undefined })))
+      if (gelesen === null) { console.log('[DEBUG loadMessages] gelesen is null, returning'); return }
+      if (activeMailboxIdRef.current !== currentMid || currentLoadSeqRef.current !== seq) {
+        console.log('[DEBUG loadMessages] sequence or activeMailboxId changed! activeMailboxIdRef:', activeMailboxIdRef.current, 'currentMid:', currentMid, 'currentLoadSeqRef:', currentLoadSeqRef.current, 'seq:', seq)
+        return
+      }
 
       const decryptedList: ChatMessage[] = []
       const seenEnvelopeIds = new Set<number>()
@@ -2792,6 +2892,7 @@ export function Messenger() {
         const combined = lokalerVerlauf.length
           ? (mischeVerlauf(lokalerVerlauf, frisch) as ChatMessage[])
           : sortMessagesChronologically(frisch)
+        console.log('[DEBUG loadMessages] maxPartnerDeliveredId:', maxPartnerDeliveredId, 'combined:', combined.map(c => ({ id: c.id, clientUuid: c.clientUuid, status: c.status, isDelivered: c.isDelivered })))
         sessionChatCache.set(currentMid, combined.slice(-80))
         void saveLocalMessages(currentMid, combined.slice(-200))
         return combined
@@ -2891,7 +2992,8 @@ export function Messenger() {
           dispatchReadReceipt()
         }
       }
-    } catch {
+    } catch (err) {
+      console.log('[DEBUG loadMessages] CAUGHT ERROR:', err)
       // Offline fallback
     } finally {
       if (isInitial && activeMailboxIdRef.current === currentMid) {
@@ -3742,6 +3844,7 @@ export function Messenger() {
       ) {
         useCallStore.getState().handleCallSyncEvent(detail)
       } else if (detail?.type === 'e2ee_blind_message') {
+        console.log('[DEBUG handleSync] detail:', detail, 'blindMailboxId:', blindMailboxId)
         const isCurrentActive = detail.blind_mailbox_id === blindMailboxId
         // Outgoing Echo Prevention: Sender niemals benachrichtigen
         if (detail.sender_user_id && currentUserId && Number(detail.sender_user_id) === Number(currentUserId)) {
@@ -6494,6 +6597,16 @@ export function Messenger() {
                           }}
                         />
                       )}
+                      {activeContact && (
+                        <Blatteintrag
+                          icon={<ShieldCheck className="w-4 h-4" />}
+                          label={t('messenger.verifySafetyNumber')}
+                          onClick={() => {
+                            schliessen()
+                            setIsSafetyNumberModalOpen(true)
+                          }}
+                        />
+                      )}
                       {/* Die aktuelle Frist steht auch ohne das Recht da —
                           wissen, wann die eigenen Nachrichten verschwinden,
                           darf jedes Mitglied. */}
@@ -8015,6 +8128,47 @@ export function Messenger() {
               onClick={() => setIsMuteModalOpen(false)}
             >
               Abbrechen
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Design-DNA Sicherheitsnummer Dialog */}
+      <Dialog open={isSafetyNumberModalOpen} onOpenChange={setIsSafetyNumberModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-secondary" />
+              <span>{t('messenger.safetyNumberModalTitle')}</span>
+            </DialogTitle>
+            <DialogDescription>
+              {t('messenger.safetyNumberModalDesc')}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-3 px-6 py-4">
+            {loadingSafetyNumbers && (
+              <p className="text-xs text-on-surface-variant">{t('common.loading')}</p>
+            )}
+            {!loadingSafetyNumbers && contactDevices.length === 0 && (
+              <p className="text-xs text-on-surface-variant">{t('messenger.noDeviceOnline', { name: activeContact?.username || '' })}</p>
+            )}
+            {!loadingSafetyNumbers && contactDevices.map((d) => (
+              <div key={d.id} className="rounded-lg border border-outline-variant/30 bg-surface-container-high/40 p-3 space-y-1">
+                <div className="flex items-center justify-between text-xs text-on-surface font-medium">
+                  <span>{d.label}</span>
+                  <span className="font-mono text-on-surface-variant">{d.id.slice(0, 10)}</span>
+                </div>
+                <div className="font-mono text-sm tracking-wider text-primary font-bold bg-surface-container-lowest/60 rounded px-2 py-1.5 text-center select-all">
+                  {d.number || '—'}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <DialogFooter>
+            <Button variant="secondary" size="sm" onClick={() => setIsSafetyNumberModalOpen(false)}>
+              {t('common.close')}
             </Button>
           </DialogFooter>
         </DialogContent>

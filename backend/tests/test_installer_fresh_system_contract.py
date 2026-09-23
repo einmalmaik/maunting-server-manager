@@ -246,6 +246,19 @@ def test_caddy_erlaubt_dem_panel_das_mikrofon() -> None:
             assert "microphone=()" not in zeile, f"{name}: {zeile.strip()}"
 
 
+def test_caddy_setzt_content_security_policy() -> None:
+    # Schritt 1: CSP in der Web-Version schützt vor Schadcode und XSS
+    installer = _installer()
+    template = (ROOT / "Caddyfile.template").read_text(encoding="utf-8")
+
+    for quelle, name in ((installer, "install.sh"), (template, "Caddyfile.template")):
+        assert "Content-Security-Policy" in quelle, f"{name} muss Content-Security-Policy setzen"
+        assert "default-src 'self'" in quelle, f"{name} muss default-src 'self' enthalten"
+        assert "script-src 'self'" in quelle, f"{name} muss script-src 'self' enthalten"
+        assert "frame-ancestors 'none'" in quelle, f"{name} muss frame-ancestors 'none' enthalten"
+
+
+
 def _caddy_sites(installer: str) -> list[str]:
     """Die Caddy-Sites, die install.sh schreibt: je Heredoc der Text bis EOF."""
     return [teil.split("\nEOF\n", 1)[0] for teil in installer.split('cat > "$MSM_CADDY_FILE" <<EOF\n')[1:]]

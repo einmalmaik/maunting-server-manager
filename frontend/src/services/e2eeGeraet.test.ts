@@ -132,8 +132,11 @@ const {
   E2eeKeinGeraetError,
   getBekannteGeraete,
   setBekannteGeraete,
+  getBekannteSchluessel,
+  setBekannteSchluessel,
   pruefeUndAktualisiereNeueGeraete,
   onNeuesGeraet,
+  onSchluesselWarnung,
   pruefeGeraeteBeleg,
   sicherheitsnummer,
   verzeichnisVon,
@@ -456,6 +459,66 @@ describe('e2eeGeraet', () => {
       } finally {
         abbestellen()
       }
+    })
+
+    it('erkennt eine Schlüsseländerung an einem bestehenden Gerät und warnt', () => {
+      const warnungen: any[] = []
+      const abbestellen = onSchluesselWarnung((w) => warnungen.push(w))
+
+      try {
+        // Erstkontakt
+        pruefeUndAktualisiereNeueGeraete(888, [{ device_id: 'dev-x', public_key: 'pk-orig' }])
+        expect(warnungen).toHaveLength(0)
+
+        // Schlüsseländerung am selben Gerät
+        pruefeUndAktualisiereNeueGeraete(888, [{ device_id: 'dev-x', public_key: 'pk-neu' }])
+        expect(warnungen).toHaveLength(1)
+        expect(warnungen[0]).toEqual({
+          userId: 888,
+          typ: 'schluessel_geaendert',
+          deviceId: 'dev-x',
+        })
+      } finally {
+        abbestellen()
+      }
+    })
+
+    it('erkennt einen Konto-Neustart (alle Geräte ersetzt) und warnt', () => {
+      const warnungen: any[] = []
+      const abbestellen = onSchluesselWarnung((w) => warnungen.push(w))
+
+      try {
+        // Bekannte alte Geräte
+        setBekannteGeraete(999, ['alt-1', 'alt-2'])
+        setBekannteSchluessel(999, { 'alt-1': 'pk-alt-1', 'alt-2': 'pk-alt-2' })
+
+        // Alle Geräte wurden durch neue ersetzt
+        pruefeUndAktualisiereNeueGeraete(999, [
+          { device_id: 'frisch-1', public_key: 'pk-frisch-1' },
+          { device_id: 'frisch-2', public_key: 'pk-frisch-2' },
+        ])
+
+        expect(warnungen.some((w) => w.typ === 'konto_neustart' && w.userId === 999)).toBe(true)
+        // Nach Konto-Neustart müssen die alten Geräte und Schlüssel vollständig verdrängt sein
+        expect(getBekannteGeraete(999)).toEqual(['frisch-1', 'frisch-2'])
+        expect(getBekannteSchluessel(999)).toEqual({
+          'frisch-1': 'pk-frisch-1',
+          'frisch-2': 'pk-frisch-2',
+        })
+      } finally {
+        abbestellen()
+      }
+    })
+
+    it('entfernt gelöschte Geräte sofort aus den bekannten Geräten', () => {
+      setBekannteGeraete(777, ['g1', 'g2'])
+      setBekannteSchluessel(777, { g1: 'pk1', g2: 'pk2' })
+
+      // g2 wurde entfernt, nur noch g1 existiert
+      pruefeUndAktualisiereNeueGeraete(777, [{ device_id: 'g1', public_key: 'pk1' }])
+
+      expect(getBekannteGeraete(777)).toEqual(['g1'])
+      expect(getBekannteSchluessel(777)).toEqual({ g1: 'pk1' })
     })
   })
 

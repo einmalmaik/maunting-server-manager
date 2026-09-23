@@ -797,6 +797,28 @@ describe('gruppenSchluessel', () => {
       ).toMatchObject({ art: 'anfrage', beantwortet: true })
       expect(mailbox.length).toBeGreaterThan(nachErster)
     })
+
+    it('beantwortet Nachforderungen von verschiedenen Geräten desselben Mitglieds', async () => {
+      await sende(alice, alle, 'lief schon')
+      const anfrage = (vonGeraet: string) =>
+        JSON.stringify({
+          typ: 'group_key_request',
+          v: 1,
+          groupId: GRUPPE,
+          vonKonto: BOB,
+          vonGeraet,
+          keyId: '0'.repeat(16),
+        })
+
+      aktiviere(alice)
+      // Erstes Gerät von Bob (z. B. Smartphone) fordert an
+      const antw1 = await verarbeiteGruppenSteuerung(kontext(alice, alle), anfrage('bob-phone'))
+      expect(antw1).toMatchObject({ art: 'anfrage', beantwortet: true })
+
+      // Zweites Gerät von Bob (z. B. Laptop) fordert denselben Schlüssel an
+      const antw2 = await verarbeiteGruppenSteuerung(kontext(alice, alle), anfrage('bob-laptop'))
+      expect(antw2).toMatchObject({ art: 'anfrage', beantwortet: true })
+    })
   })
 
   it('überlebt einen Neustart der Anwendung', async () => {

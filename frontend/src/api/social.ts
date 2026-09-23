@@ -207,6 +207,7 @@ export interface E2eeGeraetItem {
    */
   signing_public_key: string
   label: string
+  is_approved?: boolean
 }
 
 /**
@@ -233,8 +234,28 @@ export async function putEigenesGeraet(payload: {
 }
 
 /** Die Zustelladressen eines Kontos — je Geraet eine. */
-export async function getE2eeGeraete(userId: number): Promise<E2eeGeraetItem[]> {
-  return api<E2eeGeraetItem[]>(`/social/e2ee/devices/${userId}`)
+export async function getE2eeGeraete(userId: number, includeUnapproved = false): Promise<E2eeGeraetItem[]> {
+  const query = includeUnapproved ? '?include_unapproved=true' : ''
+  return api<E2eeGeraetItem[]>(`/social/e2ee/devices/${userId}${query}`)
+}
+
+export async function approveEigenesGeraet(
+  deviceId: string,
+  approverDeviceId?: string,
+  signature?: string,
+): Promise<{ ok: boolean }> {
+  return api<{ ok: boolean }>('/social/e2ee/devices/self/approve', {
+    method: 'POST',
+    body: JSON.stringify({
+      device_id: deviceId,
+      approver_device_id: approverDeviceId || null,
+      signature: signature || null,
+    }),
+  })
+}
+
+export async function getPendingE2eeGeraete(): Promise<E2eeGeraetItem[]> {
+  return api<E2eeGeraetItem[]>('/social/e2ee/devices/self/pending')
 }
 
 export async function deleteEigenesGeraet(deviceId: string): Promise<{ ok: boolean }> {

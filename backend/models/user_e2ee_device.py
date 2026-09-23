@@ -21,7 +21,7 @@ der Server nicht ohnehin weiterreichen muss.
 
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -63,6 +63,11 @@ class UserE2eeDevice(Base):
     signing_public_key_jwk: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Wiedererkennung in der Geraeteliste ("Arbeitsrechner"). Frei gewaehlt.
     label: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+
+    # Geraetebestaetigung: Ein neues Geraet muss auf einem bestehenden Geraet
+    # bestaetigt werden, bevor es Nachrichten/Schluessel empfangen darf.
+    # Erstes Geraet eines Kontos wird automatisch freigegeben.
+    is_approved: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False

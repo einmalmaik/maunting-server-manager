@@ -623,7 +623,9 @@ export async function geraeteVon(userId: number): Promise<E2eeGeraetItem[]> {
 // ==========================================
 
 const BEKANNTE_GERAETE_PRAEFIX = 'msm_bekannte_geraete:'
+const BEKANNTE_SCHLUESSEL_PRAEFIX = 'msm_bekannte_schluessel:'
 const bekannteGeraeteImRam = new Map<number, string[]>()
+const bekannteSchluesselImRam = new Map<number, Record<string, string>>()
 
 export function getBekannteGeraete(userId: number): string[] | null {
   try {
@@ -644,21 +646,130 @@ export function setBekannteGeraete(userId: number, deviceIds: string[]): void {
   bekannteGeraeteImRam.set(userId, deviceIds)
 }
 
+export function getBekannteSchluessel(userId: number): Record<string, string> | null {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(`${BEKANNTE_SCHLUESSEL_PRAEFIX}${userId}`)
+      if (raw) return JSON.parse(raw)
+    }
+  } catch {}
+  return bekannteSchluesselImRam.get(userId) ?? null
+}
+
+export function setBekannteSchluessel(userId: number, schluessel: Record<string, string>): void {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(`${BEKANNTE_SCHLUESSEL_PRAEFIX}${userId}`, JSON.stringify(schluessel))
+    }
+  } catch {}
+  bekannteSchluesselImRam.set(userId, schluessel)
+}
+
+export type SchluesselWarnungTyp = 'schluessel_geaendert' | 'konto_neustart' | 'neues_geraet'
+
+export interface SchluesselWarnungEvent {
+  userId: number
+  typ: SchluesselWarnungTyp
+  deviceId?: string
+  neueGeraete?: string[]
+}
+
+export type SchluesselWarnungListener = (event: SchluesselWarnungEvent) => void
+const schluesselWarnungListeners = new Set<SchluesselWarnungListener>()
+
+export function onSchluesselWarnung(listener: SchluesselWarnungListener): () => void {
+  schluesselWarnungListeners.add(listener)
+  return () => {
+    schluesselWarnungListeners.delete(listener)
+  }
+}
+
+function triggerSchluesselWarnung(event: SchluesselWarnungEvent): void {
+  for (const listener of schluesselWarnungListeners) {
+    try {
+      listener(event)
+    } catch {}
+  }
+}
+
 export function pruefeUndAktualisiereNeueGeraete(
   userId: number,
-  aktuelleGeraete: { device_id: string }[],
+  aktuelleGeraete: { device_id: string; public_key?: string }[],
 ): string[] {
   const aktuelleIds = aktuelleGeraete.map((g) => g.device_id)
   const bekannt = getBekannteGeraete(userId)
+  const bekannteSchluessel = getBekannteSchluessel(userId) ?? {}
+
   if (bekannt === null) {
-    // Erstkontakt: Wir merken uns die aktuellen Geräte als Basisbestand ohne Warnung.
+    // Erstkontakt: Wir merken uns die aktuellen Geräte und Schlüssel als Basisbestand ohne Warnung.
+    const initialSchluessel: Record<string, string> = {}
+    for (const g of aktuelleGeraete) {
+      if (g.public_key) initialSchluessel[g.device_id] = g.public_key
+    }
     setBekannteGeraete(userId, aktuelleIds)
+    setBekannteSchluessel(userId, initialSchluessel)
     return []
   }
+
+  // 1. Konto-Neustart: Falls der Kontakt bereits Geräte hatte und jetzt ALLE bisherigen
+  // Geräte durch eine komplett neue Menge ersetzt wurden.
+  const istKontoNeustart =
+    bekannt.length > 0 &&
+    aktuelleIds.length > 0 &&
+    aktuelleIds.every((id) => !bekannt.includes(id))
+
+  if (istKontoNeustart) {
+    triggerSchluesselWarnung({
+      userId,
+      typ: 'konto_neustart',
+      neueGeraete: aktuelleIds,
+    })
+    setBekannteGeraete(userId, aktuelleIds)
+    const neustartSchluessel: Record<string, string> = {}
+    for (const g of aktuelleGeraete) {
+      if (g.public_key) neustartSchluessel[g.device_id] = g.public_key
+    }
+    setBekannteSchluessel(userId, neustartSchluessel)
+    return aktuelleIds
+  }
+
+  // 2. Schlüssel geändert: Ein bekanntes Gerät ändert seinen public_key
+  for (const g of aktuelleGeraete) {
+    if (g.public_key && bekannt.includes(g.device_id) && bekannteSchluessel[g.device_id]) {
+      if (bekannteSchluessel[g.device_id] !== g.public_key) {
+        triggerSchluesselWarnung({
+          userId,
+          typ: 'schluessel_geaendert',
+          deviceId: g.device_id,
+        })
+      }
+    }
+  }
+
+  // 3. Neue Geräte
   const neue = aktuelleIds.filter((id) => !bekannt.includes(id))
   if (neue.length > 0) {
-    setBekannteGeraete(userId, Array.from(new Set([...bekannt, ...aktuelleIds])))
+    triggerSchluesselWarnung({
+      userId,
+      typ: 'neues_geraet',
+      neueGeraete: neue,
+    })
   }
+
+  // Synchronisiere die bekannten Geräte mit den tatsächlich vorhandenen Geräten
+  // (Entfernen wirkt sofort: gelöschte Geräte werden sofort aus dem Bestand getilgt)
+  const verbleibendeIds = bekannt.filter((id) => aktuelleIds.includes(id))
+  setBekannteGeraete(userId, Array.from(new Set([...verbleibendeIds, ...aktuelleIds])))
+
+  // Schlüsselbestand aktualisieren und entfernte Geräte bereinigen
+  const aktualisierteSchluessel: Record<string, string> = {}
+  for (const g of aktuelleGeraete) {
+    if (g.public_key) {
+      aktualisierteSchluessel[g.device_id] = g.public_key
+    }
+  }
+  setBekannteSchluessel(userId, aktualisierteSchluessel)
+
   return neue
 }
 
@@ -766,6 +877,7 @@ export async function verlangeGeraeteVon(userId: number): Promise<E2eeGeraetItem
 export function clearGeraeteMemory(): void {
   geraeteCache.clear()
   bekannteGeraeteImRam.clear()
+  bekannteSchluesselImRam.clear()
   geraetImRam = null
   aufbau = null
   veroeffentlichtAls = null

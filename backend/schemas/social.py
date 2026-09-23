@@ -571,6 +571,13 @@ class E2eeDeviceItem(BaseModel):
     public_key: str
     signing_public_key: str = ""
     label: str = ""
+    is_approved: bool = True
+
+
+class E2eeDeviceApproveRequest(BaseModel):
+    device_id: str
+    approver_device_id: str | None = None
+    signature: str | None = None
 
 
 class SocialProfileResponse(BaseModel):
