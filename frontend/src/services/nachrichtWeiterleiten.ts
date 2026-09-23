@@ -101,7 +101,6 @@ async function hängeAnhangUm(
     blindMailboxId: ziel.blindMailboxId,
     absenderId: eigeneId,
     groupId: ziel.groupId ?? null,
-    recipientId: ziel.recipientId ?? null,
   })
   return {
     ...anhang,

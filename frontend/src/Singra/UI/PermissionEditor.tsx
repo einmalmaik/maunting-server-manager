@@ -1,8 +1,23 @@
 import { useState, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Search, Info, Check, X } from 'lucide-react'
+import {
+  FolderOpen,
+  Power,
+  Puzzle,
+  Search,
+  Server,
+  Settings2,
+  Shield,
+  Sliders,
+  Sparkles,
+  Terminal,
+  Users,
+  X,
+  type LucideIcon,
+} from 'lucide-react'
 import type { PermissionDef } from '@/types/permissions'
-import { Button, Checkbox } from '@/Singra/UI'
+import { Button } from '@/Singra/UI'
+import { RechteAbschnitte, type RechteAbschnittDefinition, type RechteZeile } from './RechteAbschnitte'
 type Uebersetzer = ReturnType<typeof useTranslation>['t']
 
 /**
@@ -140,6 +155,26 @@ const SUBGROUPS = [
   },
 ]
 
+/**
+ * Ein Schild je Gruppe.
+ *
+ * Steht hier und nicht in `RechteAbschnitte`: das Bauteil soll das
+ * Panelvokabular nicht kennen. Die Gruppenkennungen sind dieselben wie in
+ * `SUBGROUPS`; eine ohne Eintrag bekommt das Schild von `other`.
+ */
+const GRUPPEN_SYMBOLE: Record<string, LucideIcon> = {
+  users: Users,
+  panel: Sliders,
+  ai: Sparkles,
+  infrastructure: Server,
+  server_basic: Power,
+  server_config: Settings2,
+  server_console: Terminal,
+  server_files: FolderOpen,
+  server_features: Puzzle,
+  other: Shield,
+}
+
 interface PermissionEditorProps {
   permissions: PermissionDef[]
   selected: Set<string>
@@ -155,12 +190,6 @@ export function PermissionEditor({
 }: PermissionEditorProps) {
   const { t } = useTranslation()
   const [search, setSearch] = useState('')
-  const [hoveredKey, setHoveredKey] = useState<string | null>(null)
-
-  // Map permissions by key for fast lookup
-  const permissionMap = useMemo(() => {
-    return new Map(permissions.map((p) => [p.key, p]))
-  }, [permissions])
 
   // Filter permission definitions based on search query
   const filteredDefs = useMemo(() => {
@@ -176,34 +205,43 @@ export function PermissionEditor({
     })
   }, [permissions, search, t])
 
-  // Group filtered definitions
-  const groupedData = useMemo(() => {
-    const groups: { id: string; defs: PermissionDef[] }[] = []
-    const mappedKeys = new Set<string>()
-
-    // Predefined groups
-    for (const group of SUBGROUPS) {
-      const defsInGroup = filteredDefs.filter((p) => group.keys.includes(p.key))
-      if (defsInGroup.length > 0) {
-        groups.push({
-          id: group.id,
-          defs: defsInGroup,
-        })
-        defsInGroup.forEach((p) => mappedKeys.add(p.key))
-      }
+  /**
+   * Welche Gruppe ein Recht trägt. Was in keiner `SUBGROUPS`-Liste steht,
+   * fällt auf `other` — so bleibt ein Recht, das das Backend neu ausliefert,
+   * sichtbar, statt lautlos aus der Ansicht zu fallen.
+   */
+  const gruppeVon = useMemo(() => {
+    const zuordnung = new Map<string, string>()
+    for (const gruppe of SUBGROUPS) {
+      for (const key of gruppe.keys) zuordnung.set(key, gruppe.id)
     }
+    return zuordnung
+  }, [])
 
-    // Remaining items (fallback for future permissions)
-    const remainingDefs = filteredDefs.filter((p) => !mappedKeys.has(p.key))
-    if (remainingDefs.length > 0) {
-      groups.push({
-        id: 'other',
-        defs: remainingDefs,
-      })
-    }
+  const zeilen = useMemo<RechteZeile[]>(
+    () =>
+      filteredDefs.map((def) => ({
+        key: def.key,
+        kategorie: gruppeVon.get(def.key) ?? 'other',
+        titel: titelVon(t, def),
+        beschreibung: beschreibungVon(t, def),
+        // Die rohe Kennung bleibt sichtbar: sie steht in Fehlermeldungen, im
+        // Prüfprotokoll und in der Hoster-API, und ein Betreiber, der einem
+        // Bericht nachgeht, sucht genau danach.
+        kennung: def.key,
+      })),
+    [filteredDefs, gruppeVon, t],
+  )
 
-    return groups
-  }, [filteredDefs])
+  const abschnitte = useMemo<RechteAbschnittDefinition[]>(
+    () =>
+      [...SUBGROUPS.map((g) => g.id), 'other'].map((id) => ({
+        titel: t(`permissionEditor.groups.${id}`),
+        symbol: GRUPPEN_SYMBOLE[id] ?? Shield,
+        kategorien: [id],
+      })),
+    [t],
+  )
 
   const togglePermission = (key: string) => {
     if (disabled) return
@@ -229,21 +267,6 @@ export function PermissionEditor({
     filteredDefs.forEach((p) => next.delete(p.key))
     onChange(next)
   }
-
-  // Get description for hovered or first selected permission
-  const getInfoDisplay = () => {
-    const activeKey = hoveredKey
-    if (!activeKey) return null
-    const def = permissionMap.get(activeKey)
-    if (!def) return { key: activeKey, title: activeKey, desc: '' }
-    return {
-      key: activeKey,
-      title: titelVon(t, def),
-      desc: beschreibungVon(t, def),
-    }
-  }
-
-  const info = getInfoDisplay()
 
   return (
     <div className="space-y-4">
@@ -288,111 +311,33 @@ export function PermissionEditor({
         )}
       </div>
 
-      {/* Permissions Grid */}
-      <div className="space-y-6 max-h-[380px] overflow-y-auto pr-1">
-        {groupedData.length === 0 ? (
+      {/*
+        Dasselbe Bauteil wie im Messenger — siehe `RechteAbschnitte`.
+        Hier stand bis 09/2026 ein eigenes dreispaltiges Kachelraster, in dem
+        nur Titel und rohe Kennung Platz hatten. Die **Beschreibung** bekam man
+        erst zu sehen, wenn man mit der Maus über eine Kachel fuhr; sie
+        erschien dann unten in einem eigenen Erklärfeld. Auf einem Gerät ohne
+        Maus gab es sie also gar nicht, und wer wissen wollte, was drei Rechte
+        tun, musste sie nacheinander überfahren und sich den Text merken.
+
+        Jetzt steht die Beschreibung in der Zeile. Damit ist das Erklärfeld
+        ersatzlos entfallen — es war nie eine Funktion, sondern der Ausgleich
+        für fehlenden Platz.
+      */}
+      <div className="max-h-[380px] overflow-y-auto pr-1">
+        {zeilen.length === 0 ? (
           <div className="p-8 text-center text-on-surface-variant bg-surface-container-low/40 rounded-lg border border-outline-variant/30 font-body-md text-sm">
             {t('permissionEditor.empty')}
           </div>
         ) : (
-          groupedData.map((group) => (
-            <div key={group.id} className="space-y-2.5">
-              <h4 className="font-label-md text-xs text-on-surface-variant uppercase tracking-wider pl-1">
-                {t(`permissionEditor.groups.${group.id}`)}
-              </h4>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                {group.defs.map((def) => {
-                  const title = titelVon(t, def)
-                  const isChecked = selected.has(def.key)
-                  const id = `perm-editor-${def.key}`
-
-                  return (
-                    <div
-                      key={def.key}
-                      onMouseEnter={() => setHoveredKey(def.key)}
-                      onMouseLeave={() => setHoveredKey(null)}
-                      onClick={() => !disabled && togglePermission(def.key)}
-                      className={`p-3 rounded-lg border text-left transition-all duration-150 flex items-start gap-3 select-none relative group ${
-                        disabled ? 'opacity-65' : 'cursor-pointer'
-                      } ${
-                        isChecked
-                          ? 'bg-primary/5 border-primary/40 shadow-sm shadow-primary/5'
-                          : 'bg-surface-container-high/30 border-outline-variant/40 hover:bg-surface-container-high/60 hover:border-outline-variant'
-                      }`}
-                    >
-                      <div className="mt-0.5 shrink-0">
-                        <div
-                          className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
-                            isChecked
-                              ? 'bg-primary border-primary text-on-primary'
-                              : 'bg-surface-container border-outline-variant'
-                          }`}
-                        >
-                          {isChecked && <Check className="w-3 h-3 stroke-[3]" />}
-                        </div>
-                        {/*
-                          Der zugängliche Name hängt an aria-labelledby und bewusst nicht an
-                          einem <label htmlFor>: Den Umschalter trägt das umschließende <div>
-                          mit onClick. Ein Label würde beim Klick auf den Titel zusätzlich
-                          einen Klick auf das Eingabefeld auslösen, sodass derselbe Handler
-                          zweimal liefe (nachgemessen: zwei Aufrufe pro Klick) — heute
-                          unauffällig, weil React beide aus demselben Zustand berechnet, aber
-                          eine Falle, die wir uns für einen bloßen Namen nicht einhandeln.
-                          aria-labelledby vergibt den Namen, ohne den Klickweg anzufassen.
-                          Ohne ihn meldet ein Screenreader für jedes der rund 90 Rechte nur
-                          "Kontrollkästchen, nicht aktiviert", weil sr-only clip ist und die
-                          Checkbox damit im Fokus bleibt, aber namenlos.
-                        */}
-                        <Checkbox
-                          id={id}
-                          checked={isChecked}
-                          onCheckedChange={() => {}} // handled by click container
-                          disabled={disabled}
-                          aria-labelledby={`${id}-title`} className="sr-only"
-                        />
-                      </div>
-                      <div className="flex flex-col gap-0.5 min-w-0">
-                        <span
-                          id={`${id}-title`}
-                          className="font-label-md text-xs font-semibold text-on-surface group-hover:text-primary transition-colors truncate"
-                        >
-                          {title}
-                        </span>
-                        <span className="font-mono text-label-sm text-on-surface-variant/80 truncate">
-                          {def.key}
-                        </span>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-
-      {/* Dynamic Explanation Panel */}
-      <div className="p-3.5 rounded-lg border border-outline-variant/60 bg-surface-container-low min-h-[76px] flex flex-col justify-center transition-all duration-200">
-        {info ? (
-          <div className="space-y-0.5">
-            <div className="flex items-center gap-1.5">
-              <Info className="w-3.5 h-3.5 text-primary shrink-0" />
-              <span className="font-label-md text-xs font-bold text-on-surface">
-                {info.title}
-              </span>
-              <span className="font-mono text-label-sm text-on-surface-variant/70 bg-surface-container-high px-1.5 py-0.5 rounded ml-auto">
-                {info.key}
-              </span>
-            </div>
-            <p className="text-xs text-on-surface-variant mt-1 leading-relaxed">
-              {info.desc}
-            </p>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2 text-on-surface-variant/60 italic text-xs">
-            <Info className="w-3.5 h-3.5" />
-            <span>{t('permissionEditor.hoverHint')}</span>
-          </div>
+          <RechteAbschnitte
+            rechte={zeilen}
+            abschnitte={abschnitte}
+            gesetzt={selected}
+            onToggle={(key) => togglePermission(key)}
+            disabled={disabled}
+            zeilenBeschriftung={(titel) => t('permissionEditor.allow', { name: titel })}
+          />
         )}
       </div>
     </div>

@@ -22,12 +22,31 @@ class ChatGroup(Base):
     __tablename__ = "chat_groups"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(64), nullable=False)
-    description: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: `name`, `description` und `avatar_url` standen hier bis Stufe 6c.
+    #:
+    #: `20260923_03` hat sie geleert, `20260923_05` hat sie entfernt. Der
+    #: Unterschied ist nicht der Bestand — der war nach dem Leeren weg —,
+    #: sondern was ein späterer Zweig tun kann: in eine Spalte, die es gibt,
+    #: schreibt sich still zurück, was hier nie wieder stehen soll. Ein Feld,
+    #: das es nicht gibt, bricht den Bau.
+    #:
+    #: Name, Beschreibung und Logo liegen im verschlüsselten Gruppenblock
+    #: (`gruppenKonfig.ts`), im versiegelten örtlichen Namensspeicher
+    #: (`gruppenName.ts`) und in der Einladungskarte unten.
     invite_code: Mapped[str] = mapped_column(
         String(32), unique=True, index=True, nullable=False, default=generate_invite_code
     )
+    #: Die Einladungskarte, verschlüsselt (`sv-einladung-v1:…`).
+    #:
+    #: Name, Beschreibung und Logo, wie ein Eingeladener sie sieht — und zwar
+    #: so, dass dieser Server sie nicht lesen kann. Der Schlüssel fällt aus dem
+    #: Gruppengeheimnis und steht **hinter der Raute** im Einladungslink; alles
+    #: hinter der Raute schickt der Browser nie an einen Server.
+    #:
+    #: Ohne diese Spalte hinge die Vorschau an `name` und `avatar_url` — genau
+    #: den Feldern, die in Stufe 6 verschwinden. Sie ist der Grund, warum die
+    #: Einladung das überlebt.
+    invite_card: Mapped[str | None] = mapped_column(Text, nullable=True)
     owner_user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )

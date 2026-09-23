@@ -51,7 +51,6 @@ class ActiveCallInfo(BaseModel):
     raum: str
     art: Literal["direkt", "gruppe"]
     group_id: int | None = None
-    group_name: str | None = None
     mode: Literal["audio", "video"] = "audio"
     device_id: str | None = None
     device_type: str | None = None
@@ -136,9 +135,16 @@ class LivekitTestResponse(BaseModel):
 
 
 class PendingGroupCallInfo(BaseModel):
+    """Ein laufender Gruppenanruf — ohne zu sagen, wie die Gruppe heisst.
+
+    `group_name` und `avatar_url` standen hier bis Stufe 6c und kamen aus
+    `chat_groups.name`/`avatar_url`. Seit Stufe 6a sind diese Spalten leer, und
+    ein Feld, das nur noch `None` traegt, ist eine offene Einladung, es wieder
+    zu fuellen. Den Namen setzt der Client aus seinem versiegelten
+    Namensspeicher ueber die `group_id`.
+    """
+
     group_id: int
-    group_name: str
-    avatar_url: str | None = None
     room_token: str
     participant_count: int = 0
 

@@ -351,12 +351,35 @@ def validate_e2ee_envelope_format(envelope_str: str) -> None:
 
 
 class E2eeBlindEnvelopeCreate(BaseModel):
+    """Ein blinder Umschlag — ohne Empfängerkennung.
+
+    Bis 09/2026 stand hier ein `recipient_id`. Für eine **ableitbare** Mailbox
+    verriet es nichts Neues: der Server rechnet `sha256("msm:dm:<min>:<max>")`
+    ohnehin selbst nach. Für eine Mailbox aus einem Geheimnis verriet es alles
+    — er kann sie keinem Konto zuordnen, und genau das ist ihr Zweck; das Feld
+    daneben hätte die Antwort mitgeliefert und Stufe 3 zur Zierde gemacht.
+
+    Weggelassen statt abgewiesen: Pydantic überliest unbekannte Felder, ein
+    Altclient sendet also weiter `recipient_id` und wird schlicht nicht mehr
+    gehört. Das schliesst die Auskunft auch für Geräte, die noch nicht
+    aktualisiert sind — eine Fehlermeldung täte das nicht.
+    """
+
     blind_mailbox_id: str = Field(..., min_length=16, max_length=64)
     ciphertext_envelope: str = Field(..., min_length=10)
-    recipient_id: int | None = Field(None, description="Optionale Empfänger-User-ID zur strikten Push-Filterung")
     client_uuid: str | None = Field(None, max_length=64, description="Client-UUID zur Idempotenz und Deduplizierung")
     is_control: bool = Field(False, description="Markiert interne Steuernachrichten (z. B. Lesequittungen, Quittungen)")
     control_type: str | None = Field(None, description="Typ des Steuersignals (read_receipt, delivery_receipt, edit, delete)")
+    push_ausnahme: str | None = Field(
+        None,
+        min_length=64,
+        max_length=64,
+        pattern="^[0-9a-fA-F]{64}$",
+        description=(
+            "SHA-256 der eigenen Push-Adresse. Hält den absendenden Browser aus "
+            "der Zustellung heraus, wo es keine Empfängerkennung mehr gibt."
+        ),
+    )
 
 
     @field_validator("ciphertext_envelope")
@@ -381,6 +404,56 @@ class E2eeBlindEnvelopeResponse(BaseModel):
         if iso.endswith("+00:00"):
             iso = iso[:-6] + "Z"
         return iso
+
+
+_BESITZNACHWEIS = re.compile(r"^[0-9a-f]{64}$")
+
+
+class E2eeMailboxRegister(BaseModel):
+    """Der blinde Besitznachweis einer Mailbox.
+
+    Beide Felder sind 64 Hexzeichen: die Kennung ist ein SHA-256, das Token ein
+    aus Gruppenschlüsselmaterial abgeleiteter Wert derselben Länge. Der Server
+    bekommt das Token **einmal** zu sehen und behält nur dessen Hash; eine
+    andere Länge oder ein anderes Alphabet zu erlauben hieße, an dieser Stelle
+    Beliebiges entgegenzunehmen.
+    """
+
+    mailbox_id: str = Field(..., min_length=64, max_length=64)
+    auth_token: str = Field(..., min_length=64, max_length=64)
+
+    @field_validator("mailbox_id", "auth_token")
+    @classmethod
+    def validate_hex(cls, v: str) -> str:
+        klein = (v or "").strip().lower()
+        if not _BESITZNACHWEIS.match(klein):
+            raise ValueError("Kennung und Token müssen 64 Hexzeichen sein.")
+        return klein
+
+
+class MailboxAbo(BaseModel):
+    """Eine Mailbox, über die ein Stream Bescheid geben soll.
+
+    Das Token ist freiwillig: für eine Mailbox, die der Server selbst
+    ausrechnen kann, genügt die Mitgliedschaft. Für eine, die er nicht kennt,
+    ist es die einzige Eintrittskarte.
+    """
+
+    mailbox_id: str = Field(..., min_length=16, max_length=64)
+    mailbox_token: str | None = Field(default=None, min_length=64, max_length=64)
+
+
+class StreamMailboxAbos(BaseModel):
+    """Was ein laufender Stream ab jetzt hören will.
+
+    Die Liste ersetzt die bisherige vollständig — eine verlassene Gruppe muss
+    sich abbestellen lassen. Der Deckel steht bewusst im Schema und nicht erst
+    im Dienst: eine Anfrage mit 100.000 Einträgen soll gar nicht erst
+    ankommen.
+    """
+
+    conn_id: str = Field(..., min_length=4, max_length=64)
+    eintraege: list[MailboxAbo] = Field(default_factory=list, max_length=200)
 
 
 class E2eeMailboxSyncItem(BaseModel):
@@ -409,10 +482,28 @@ class PushSubscriptionCreate(BaseModel):
     auth: str = Field(..., min_length=16, max_length=32)
 
 
+class MailboxPushAbos(PushSubscriptionCreate):
+    """Dieselbe Adresse, aber für Mailboxen statt für ein Konto.
+
+    Erbt die drei Felder des Browsers und nennt dazu, wofür sie gelten sollen.
+    Dieselbe Obergrenze wie beim Strom-Abo (`StreamMailboxAbos`): wer mehr
+    Mailboxen hat, meldet in mehreren Anläufen.
+    """
+
+    eintraege: list[MailboxAbo] = Field(default_factory=list, max_length=200)
+
+
 class E2eeTypingSignalCreate(BaseModel):
+    """Ein flüchtiges „tippt gerade" — ebenfalls ohne Empfängerkennung.
+
+    Dasselbe wie beim Umschlag, und hier war es sogar eine Lücke: ein
+    genanntes `recipient_id` sprang an der Mailbox-Auflösung vorbei, sodass
+    jedes angemeldete Konto jedem anderen ein Signal schicken konnte. Die
+    Mailbox entscheidet jetzt allein, wer es bekommt.
+    """
+
     blind_mailbox_id: str = Field(..., min_length=16, max_length=64)
     status: str = Field(..., pattern="^(typing|recording|idle)$")
-    recipient_id: int | None = None
 
 
 class DirectChatResponse(BaseModel):
@@ -495,9 +586,17 @@ class SocialProfileResponse(BaseModel):
 
 
 class ChatGroupCreate(BaseModel):
-    name: str = Field(..., min_length=2, max_length=64)
-    description: str | None = Field(None, max_length=256)
-    avatar_url: str | None = None
+    """Eine neue Gruppe — ohne Namen.
+
+    Bis Stufe 6 stand hier `name`, `description` und `avatar_url`, und der
+    Server legte sie ab. Er kennt sie nicht mehr: Name, Beschreibung und Logo
+    liegen im verschlüsselten Gruppenblock und in der Einladungskarte. Was
+    hier bleibt, ist die Handlung selbst — „lege eine Gruppe an".
+
+    Leer und nicht abgeschafft: ein Altclient schickt weiter `{"name": ...}`,
+    Pydantic überliest es, und das Anlegen geht durch. Ein 422 hier hiesse,
+    dass kein nicht aktualisiertes Gerät mehr eine Gruppe gründen kann.
+    """
 
 
 class ChatGroupMemberResponse(BaseModel):
@@ -524,12 +623,63 @@ class ChatGroupPermissionsUpdate(BaseModel):
     default_permissions: str = Field(..., min_length=2, max_length=256)
 
 
+#: Obergrenze für den verschlüsselten Gruppenzustand. 256 KiB tragen einige
+#: hundert Rollen samt Beschreibung; darüber hinaus wäre die Zeile kein
+#: Gruppenzustand mehr, sondern eine Ablage, die jedes Mitglied beliebig füllen
+#: kann. Der Server kann den Inhalt nicht beurteilen — also begrenzt er die Menge.
+MAX_GROUP_CONFIG_BYTES = 256 * 1024
+
+
+class ChatGroupConfigWrite(BaseModel):
+    """Ein neuer Gruppenzustand, verschlüsselt, mit der Revision, die er ablöst.
+
+    ``erwartete_revision`` ist der Stand, den der Schreibende gelesen hat. Der
+    Server nimmt den Block nur an, wenn das noch der aktuelle Stand ist — sonst
+    409. So kann ein zweites Gerät keinen Rechteentzug überschreiben, den es
+    nie gesehen hat, und ein Mitschreibender keinen alten Stand zurückspielen.
+    ``0`` heißt „die Gruppe hatte noch keinen Zustand".
+    """
+
+    blob: str = Field(..., min_length=10, max_length=MAX_GROUP_CONFIG_BYTES)
+    erwartete_revision: int = Field(..., ge=0)
+
+    @field_validator("blob")
+    @classmethod
+    def validate_blob(cls, v: str) -> str:
+        # Dieselbe Prüfung wie für eine Nachricht, und aus demselben Grund: sie
+        # weist Klartext ab. Ein Rollenname, der hier versehentlich im Klartext
+        # landete, wäre genau die Metadatenzeile, die es nicht geben soll — und
+        # ein Fehler dieser Art fällt sonst niemandem auf, weil alles
+        # funktioniert.
+        validate_e2ee_envelope_format(v)
+        return v
+
+
+class ChatGroupConfigResponse(BaseModel):
+    group_id: int
+    blob: str
+    revision: int
+    updated_at: datetime
+
+    @field_serializer("updated_at")
+    def serialize_updated_at(self, dt: datetime) -> str:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.isoformat()
+
+
 class ChatGroupResponse(BaseModel):
     id: int
-    name: str
+    #: Immer `None` seit Stufe 6 — der Server kennt den Namen nicht mehr. Das
+    #: Feld bleibt in der Antwort, damit ein Altclient nicht auf ein fehlendes
+    #: Feld läuft; der neue Client setzt es aus dem verschlüsselten Block.
+    name: str | None = None
     description: str | None = None
     avatar_url: str | None = None
-    invite_code: str
+    # `None` für Mitglieder ohne `invite_members`: der Einladungscode gewährt
+    # Zugang, und wer ihn nicht bekommt, kann ihn auch nicht weitergeben. Das
+    # ist die einzige Durchsetzung, die es für dieses Recht geben kann.
+    invite_code: str | None = None
     owner_user_id: int
     member_count: int
     role: str
@@ -553,14 +703,55 @@ class ChatGroupResponse(BaseModel):
 
 class ChatGroupInvitePublicResponse(BaseModel):
     group_id: int
-    name: str
+    #: Klartext — und nur noch, solange die Gruppe **keine** verschluesselte
+    #: Karte hat. Sobald sie eine hat, stehen hier `None` und der Eingeladene
+    #: braucht den Schluessel aus dem Link. Beides gleichzeitig auszuliefern
+    #: waere die Verschluesselung als Zierde: wer den Klartext daneben legt,
+    #: hat nichts verschlossen.
+    name: str | None = None
     description: str | None = None
     avatar_url: str | None = None
+    #: `sv-einladung-v1:…` — Name, Beschreibung und Logo, verschluesselt.
+    invite_card: str | None = None
     member_count: int
     # Fuer die Vorschaukarte im Chat: laeuft gerade ein Gruppenanruf, und wie
     # viele sind drin. Bewusst nur Ja/Nein und eine Zahl.
     live_call: bool = False
     live_participants: int = 0
+
+
+class ChatGroupInviteCardUpdate(BaseModel):
+    """Die verschluesselte Einladungskarte, wie ein Mitglied sie hinterlegt.
+
+    `None` nimmt sie zurueck — dann faellt die Vorschau wieder auf die
+    Klartextfelder, solange es die noch gibt.
+    """
+
+    invite_card: str | None = Field(None, max_length=262144)
+
+    @field_validator("invite_card")
+    @classmethod
+    def _pruefe_form(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        sauber = v.strip()
+        if not sauber:
+            return None
+        # Der Server kann nicht hineinsehen. Er kann aber darauf bestehen, dass
+        # es ein Umschlag ist und kein Klartext, der hier aus Versehen landet —
+        # einmal abgelegt, liefert er ihn ohne Anmeldung an jeden mit dem Code.
+        if not sauber.startswith("sv-einladung-v1:"):
+            raise ValueError("Einladungskarte muss ein sv-einladung-v1-Umschlag sein.")
+        rumpf = sauber[len("sv-einladung-v1:") :]
+        if len(rumpf) < 38:
+            raise ValueError("Einladungskarte zu kurz für gültigen IV und AEAD-Tag.")
+        import base64
+
+        try:
+            base64.b64decode(rumpf, validate=True)
+        except Exception as exc:
+            raise ValueError("Ungültige Base64-Kodierung in der Einladungskarte.") from exc
+        return sauber
 
 
 class GroupCallRoomResponse(BaseModel):

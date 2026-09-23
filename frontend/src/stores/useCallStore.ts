@@ -1115,6 +1115,17 @@ export const useCallStore = create<UseCallState>((set, get) => {
           get().endCall()
         }
       } else if (target.art === 'gruppe' && target.group_id) {
+        // Der Name kommt aus dem versiegelten oertlichen Namensspeicher: seit
+        // Stufe 6c kennt der Server ihn nicht mehr und schickt ihn auch nicht
+        // mit. Kennt dieses Geraet die Gruppe nicht, bleibt es beim Platzhalter.
+        const gruppenName =
+          (
+            await import('@/services/gruppenName')
+              .then((m) => m.ladeGruppenNamen())
+              .catch(() => null)
+          )
+            ?.get(target.group_id)
+            ?.name?.trim() || ''
         set({
           state: 'connecting',
           kind: 'gruppe',
@@ -1122,7 +1133,7 @@ export const useCallStore = create<UseCallState>((set, get) => {
           partner: null,
           group: {
             id: target.group_id,
-            name: target.group_name || 'Gruppenanruf',
+            name: gruppenName || i18n.t('messenger.groupSealed'),
             canShare: true,
             canModerate: false,
           },
@@ -1271,10 +1282,11 @@ export const useCallStore = create<UseCallState>((set, get) => {
             return {
               activeGroupCalls: [
                 ...s.activeGroupCalls,
+                // Ohne Namen: das Ereignis trug nie einen, und seit Stufe 6c
+                // hat der Server auch keinen mehr. Wer den Anruf anzeigt,
+                // holt ihn aus dem oertlichen Namensspeicher.
                 {
                   group_id: groupId,
-                  group_name: String(ev.group_name || 'Gruppenanruf'),
-                  avatar_url: (ev.avatar_url as string | null | undefined) ?? null,
                   room_token: roomToken,
                   participant_count: 1,
                 },

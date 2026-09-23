@@ -52,6 +52,20 @@
  * stand nichts mehr ausser „Verschlüsselte Nachricht". Gemerkt wird je
  * fragendem Gerät und fehlender Schlüsselkennung — fragt dasselbe Gerät später
  * nach einer anderen Kennung, bekommt es wieder eine Antwort.
+ *
+ * **Eine Ablage je Konto, seit 09/2026.** Sie hiess schlicht
+ * `msm_e2ee_gruppen` und war damit die einzige der vier E2EE-Ablagen ohne
+ * Bindung an einen Menschen: der Geräteschlüssel liegt unter `konto:<id>`, der
+ * Ratchet unter einer Sitzungskennung mit dem eigenen Gerät darin — die
+ * Gruppenschlüssel unter gar nichts. Wer sich auf demselben Rechner
+ * nacheinander mit zwei Konten anmeldete, hinterliess dem zweiten die
+ * Gruppenschlüssel des ersten.
+ *
+ * Übernommen wird nichts: ein Schlüssel trägt kein Konto, und ihn dem
+ * zuzuschlagen, das nach dem Umstieg zufällig als erstes den Messenger
+ * öffnet, wäre genau das Leck. Der Preis ist hier gering und vorgesehen —
+ * ein Gerät ohne passenden Schlüssel fragt nach, und der eigene Verlauf liegt
+ * ohnehin entschlüsselt in der kontogebundenen Nachrichtenablage.
  */
 
 import { decryptString, encryptString, importAesGcmRawKey } from '@msdis/shield/aead'
@@ -59,11 +73,26 @@ import { base64ToBytes, bytesToBase64 } from '@msdis/shield/core'
 import { sha256Hex } from '@msdis/shield/integrity'
 import { randomBytes } from '@msdis/shield/random'
 
-import { getGroupMembers, relayE2eeEnvelope } from '@/api/social'
+import {
+  fetchE2eeEnvelopes,
+  getGroupMembers,
+  registriereMailbox,
+  relayE2eeEnvelope,
+} from '@/api/social'
+import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
 import i18n from '@/i18n'
 
-import { encryptE2eeHybrid } from './e2eeCrypto'
-import { eigenesGeraet, geraeteVon } from './e2eeGeraet'
+import {
+  E2EE_HYBRID_ENVELOPE_SPEC,
+  deriveBlindMailboxId,
+  deriveGroupBlindMailboxId,
+  deriveUserDeviceMailboxId,
+  encryptE2eeHybrid,
+} from './e2eeCrypto'
+import { eigenesGeraet, geraeteVon, kontoNutztSignaturen } from './e2eeGeraet'
+import { pruefeNutzlast, signiereNutzlast } from './nutzlastSignatur'
+import { abonniereMailbox } from './mailboxAbo'
+import { mailboxNachweis, merkeMailboxNachweis } from './mailboxNachweis'
 import { entsiegleZeile, versiegleZeile } from './lokaleVersiegelung'
 import { istSchluesselhalter } from './raumSchluessel'
 
@@ -99,6 +128,16 @@ export interface GruppenKontext {
   eigeneId: number
   /** Die Mitglieder, wie dieses Gerät sie gerade sieht. Quelle jeder Rotation. */
   mitglieder: readonly number[]
+  /**
+   * Gehört die Gruppe mir?
+   *
+   * Pflichtfeld, kein optionales: gebraucht wird es nur an einer Stelle — wer
+   * das Gruppengeheimnis einer Bestandsgruppe erzeugen darf —, und dort
+   * entscheidet es darüber, ob die Gruppe in zwei Mailboxen zerfällt. Ein
+   * vergessenes `true` wäre ein Fehler, den niemand sieht; ein vergessenes
+   * Feld meldet der Typprüfer.
+   */
+  istEigentuemer: boolean
 }
 
 export type GruppenLesung =
@@ -134,9 +173,86 @@ export interface GruppenSchluesselEintrag {
   erzeugtAm: string
 }
 
+/**
+ * Das Gruppengeheimnis — 32 Bytes, die eine Gruppe ihr Leben lang behält.
+ *
+ * Nicht zu verwechseln mit dem Nachrichtenschlüssel darüber: **der** rotiert
+ * bei jedem Mitgliederwechsel, und das muss er auch. Das Geheimnis darf das
+ * nicht, denn aus ihm entsteht die Kennung der Mailbox. Rotierte es mit, zöge
+ * die Gruppe bei jedem Beitritt um und liesse ihr Fenster stehen.
+ *
+ * Es reist mit dem Schlüssel: dieselbe Zustellung, dieselben Empfänger. Ein
+ * eigener Weg wäre ein zweiter, der genauso oft scheitern kann — und wer den
+ * Schlüssel nicht hat, kann mit dem Geheimnis ohnehin nichts anfangen.
+ */
+export interface GruppenGeheimnis {
+  groupId: number
+  /** Base64 der 32 Geheimnisbytes. */
+  geheimnis: string
+  erzeugtAm: string
+}
+
+/**
+ * Dasselbe für einen Direktchat — das Gegenstück zu `GruppenGeheimnis`.
+ *
+ * Warum überhaupt eines, wo der Double Ratchet doch ein gemeinsames Geheimnis
+ * hat: **er hat eines je Gerätepaar, nicht je Gespräch.** Zwei Leute mit je
+ * zwei Geräten haben vier Ratchets mit vier verschiedenen Wurzeln. Fiele die
+ * Mailbox daraus, hätte dasselbe Gespräch vier Mailboxen, und jedes Gerät
+ * sähe nur ein Viertel davon.
+ *
+ * Also dieselbe Bauform wie bei der Gruppe: ein Zufallswert, den alle Geräte
+ * beider Seiten teilen. Der Ratchet bleibt, was er ist — er verschlüsselt die
+ * Nachrichten. Das Geheimnis hier benennt nur den Ort.
+ */
+export interface DmGeheimnis {
+  /** Das Konto der Gegenstelle. Die eigene Seite steckt in der Datenbankwahl. */
+  peerId: number
+  /** Base64 der 32 Geheimnisbytes. */
+  geheimnis: string
+  erzeugtAm: string
+  /**
+   * Wann die Gegenstelle es bekam — und bis dahin wird **nicht** umgezogen.
+   *
+   * Der Fall, an dem das hängt: die allererste Nachricht an jemanden, mit dem
+   * es noch keine Chatzeile gibt. Der Server lässt einen Steuerumschlag in
+   * eine fremde Geräte-Mailbox nur bei bestehender Beziehung durch; die
+   * entsteht aber erst mit dieser Nachricht. Zöge das Gespräch trotzdem um,
+   * ginge die Nachricht in eine Mailbox, die die Gegenseite nicht kennt und
+   * nie erfährt — und die Zustellung, die ihr das sagen würde, käme nie
+   * zustande. Ein Ring, der sich nicht von selbst öffnet.
+   *
+   * Darum: erzeugt wird sofort, umgezogen erst, wenn wirklich ein Gerät der
+   * **Gegenstelle** erreicht wurde. Vorher bleibt es bei der abgeleiteten
+   * Kennung, und jeder Versand versucht die Zustellung erneut.
+   *
+   * Beim Empfänger steht hier der Augenblick des Empfangs: er hat es ja.
+   */
+  verteiltAm?: string | null
+}
+
 export interface GruppenAblage {
   lies(groupId: number, keyId: string): Promise<GruppenSchluesselEintrag | null>
   liesAktuellen(groupId: number): Promise<GruppenSchluesselEintrag | null>
+  /** Das Geheimnis dieser Gruppe, falls dieses Gerät es kennt. */
+  liesGeheimnis(groupId: number): Promise<GruppenGeheimnis | null>
+  /** Das Geheimnis dieses Direktchats, falls dieses Gerät es kennt. */
+  liesDmGeheimnis(peerId: number): Promise<DmGeheimnis | null>
+  /** Legt es ab und überschreibt ein vorhandenes **nie** — wie bei der Gruppe. */
+  schreibeDmGeheimnis(eintrag: DmGeheimnis): Promise<void>
+  /**
+   * Trägt nach, dass die Gegenstelle es hat. Der einzige erlaubte Nachtrag:
+   * das Geheimnis selbst bleibt unberührt.
+   */
+  merkeDmVerteilung(peerId: number, wann: string): Promise<void>
+  /**
+   * Legt das Geheimnis ab — und überschreibt ein vorhandenes **nie**.
+   *
+   * Zwei Geräte, die gleichzeitig eines erzeugen, wären zwei Mailboxen und
+   * damit eine gespaltene Gruppe. Wer schon eines hat, behält es; der andere
+   * erfährt seines mit der nächsten Schlüsselzustellung.
+   */
+  schreibeGeheimnis(eintrag: GruppenGeheimnis): Promise<void>
   /** Legt den Schlüssel ab und macht ihn zum aktuellen dieser Gruppe. */
   schreibe(eintrag: GruppenSchluesselEintrag): Promise<void>
   /**
@@ -153,19 +269,62 @@ export interface GruppenAblage {
   merkeAnfrage(groupId: number, kennung: string): Promise<void>
 }
 
-const DB_NAME = 'msm_e2ee_gruppen'
-/** Version 2: `beantwortet` kommt hinzu. */
-const DB_VERSION = 2
+const DB_PRAEFIX = 'msm_e2ee_gruppen'
+/**
+ * Version 2: `beantwortet` kommt hinzu. Version 3: das Gruppengeheimnis.
+ * Version 4: dasselbe für den Direktchat.
+ */
+const DB_VERSION = 4
 const STORE_KEYS = 'keys'
 const STORE_AKTUELL = 'aktuell'
 const STORE_ANFRAGEN = 'beantwortet'
+const STORE_GEHEIMNISSE = 'geheimnisse'
+const STORE_DM_GEHEIMNISSE = 'dm_geheimnisse'
+
+/** Die Ablage dieses Kontos. Ein anderes Konto, eine andere Datenbank. */
+function dbName(kontoId: number): string {
+  return `${DB_PRAEFIX}:konto:${kontoId}`
+}
+
+let offeneDb: Promise<IDBDatabase> | null = null
+let offenesKonto: number | null = null
+let altbestandGeraeumt = false
+
+/**
+ * Entfernt die alte, kontolose Datenbank — einmal je Browsersitzung.
+ *
+ * Ohne Übernahme, aus demselben Grund wie beim Nachrichtenverlauf: ein
+ * abgelegter Gruppenschlüssel sagt nicht, wem er gehört.
+ */
+function raeumeAltbestand(): void {
+  if (altbestandGeraeumt) return
+  altbestandGeraeumt = true
+  try {
+    indexedDB.deleteDatabase(DB_PRAEFIX)
+  } catch {
+    // Blockiert durch einen anderen Tab. Der nächste Start holt es nach.
+  }
+}
 
 function oeffneDatenbank(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
+  const konto = angemeldetesKonto()
+  if (konto === null) {
+    // Ohne Konto keine Schlüsselablage. Nicht „ersatzweise die gemeinsame".
+    return Promise.reject(new Error(i18n.t('chat.errors.indexedDbUnavailable')))
+  }
+  if (offeneDb && offenesKonto !== konto) {
+    const alt = offeneDb
+    offeneDb = null
+    void alt.then((db) => db.close()).catch(() => {})
+  }
+  if (offeneDb) return offeneDb
+  offenesKonto = konto
+  offeneDb = new Promise<IDBDatabase>((resolve, reject) => {
     if (typeof indexedDB === 'undefined') {
       return reject(new Error(i18n.t('chat.errors.indexedDbUnavailable')))
     }
-    const req = indexedDB.open(DB_NAME, DB_VERSION)
+    raeumeAltbestand()
+    const req = indexedDB.open(dbName(konto), DB_VERSION)
     req.onupgradeneeded = () => {
       const db = req.result
       if (!db.objectStoreNames.contains(STORE_KEYS)) {
@@ -177,21 +336,51 @@ function oeffneDatenbank(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE_ANFRAGEN)) {
         db.createObjectStore(STORE_ANFRAGEN, { keyPath: ['groupId', 'kennung'] })
       }
+      if (!db.objectStoreNames.contains(STORE_GEHEIMNISSE)) {
+        db.createObjectStore(STORE_GEHEIMNISSE, { keyPath: 'groupId' })
+      }
+      // Dasselbe für Direktchats. Ein eigener Speicher und kein geteilter mit
+      // negativen Schlüsseln: `peerId` und `groupId` sind beides kleine
+      // Ganzzahlen, und eine Verwechslung wäre ein Gespräch, das das Geheimnis
+      // eines fremden bekäme.
+      if (!db.objectStoreNames.contains(STORE_DM_GEHEIMNISSE)) {
+        db.createObjectStore(STORE_DM_GEHEIMNISSE, { keyPath: 'peerId' })
+      }
     }
     req.onsuccess = () => {
       // Ein zweiter Tab kann jederzeit eine neuere Version aufziehen. Ohne
       // diesen Abgang liefen laufende Zugriffe danach gegen eine Verbindung,
       // die der Browser nur noch mit Fehlern beantwortet.
-      req.result.onversionchange = () => req.result.close()
+      //
+      // Seit die Verbindung gemerkt wird, muss der Abgang sie auch aus dem
+      // Gedächtnis nehmen: vorher öffnete jeder Aufruf eine neue und heilte
+      // sich dadurch von selbst.
+      req.result.onversionchange = () => {
+        offeneDb = null
+        offenesKonto = null
+        req.result.close()
+      }
+      req.result.onclose = () => {
+        offeneDb = null
+        offenesKonto = null
+      }
       resolve(req.result)
     }
-    req.onerror = () => reject(req.error)
+    req.onerror = () => {
+      offeneDb = null
+      offenesKonto = null
+      reject(req.error)
+    }
     // Ein älterer Tab hält die Vorgängerversion offen. Ohne diesen Zweig
     // meldet der Browser weder Erfolg noch Fehler, und das Öffnen hinge
     // stillschweigend, bis der andere Tab zugeht.
-    req.onblocked = () =>
+    req.onblocked = () => {
+      offeneDb = null
+      offenesKonto = null
       reject(new Error(i18n.t('chat.errors.groupDbBlocked')))
+    }
   })
+  return offeneDb
 }
 
 function hole<T>(store: string, key: IDBValidKey): Promise<T | null> {
@@ -209,6 +398,29 @@ function hole<T>(store: string, key: IDBValidKey): Promise<T | null> {
 /** Bindet einen Gruppenschlüssel an seinen Platz. Siehe `versiegleZeile`. */
 function gruppenAad(groupId: number, keyId: string): string {
   return `msm-gruppenschluessel:${groupId}:${keyId}`
+}
+
+/** Bindet ein Gruppengeheimnis an seine Gruppe. */
+function geheimnisAad(groupId: number): string {
+  return `msm-gruppengeheimnis:${groupId}`
+}
+
+/** Bindet ein Chatgeheimnis an seine Gegenstelle. */
+function dmGeheimnisAad(peerId: number): string {
+  return `msm-chatgeheimnis:${peerId}`
+}
+
+/** Legt eine Chatgeheimnis-Zeile ab, ohne zu fragen, ob dort schon eine liegt. */
+async function dmZeileSchreiben(eintrag: DmGeheimnis): Promise<void> {
+  const db = await oeffneDatenbank()
+  const zeile = await versiegleZeile(eintrag, ['peerId'], dmGeheimnisAad(eintrag.peerId))
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_DM_GEHEIMNISSE, 'readwrite')
+    tx.objectStore(STORE_DM_GEHEIMNISSE).put(zeile)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error)
+  })
 }
 
 /**
@@ -267,10 +479,51 @@ const indexedDbAblage: GruppenAblage = {
       tx.onabort = () => reject(tx.error)
     })
   },
+  async liesGeheimnis(groupId) {
+    const roh = await hole<Record<string, any>>(STORE_GEHEIMNISSE, groupId)
+    const zeile = await entsiegleZeile<GruppenGeheimnis>(roh, geheimnisAad(groupId))
+    return zeile?.geheimnis ? zeile : null
+  },
+  async schreibeGeheimnis(eintrag) {
+    // Erst nachsehen, dann schreiben. Ein vorhandenes Geheimnis zu
+    // überschreiben hiesse, die Gruppe in zwei Mailboxen zu spalten.
+    if (await indexedDbAblage.liesGeheimnis(eintrag.groupId)) return
+    const db = await oeffneDatenbank()
+    const zeile = await versiegleZeile(eintrag, ['groupId'], geheimnisAad(eintrag.groupId))
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_GEHEIMNISSE, 'readwrite')
+      tx.objectStore(STORE_GEHEIMNISSE).put(zeile)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+      tx.onabort = () => reject(tx.error)
+    })
+  },
+  async liesDmGeheimnis(peerId) {
+    const roh = await hole<Record<string, any>>(STORE_DM_GEHEIMNISSE, peerId)
+    const zeile = await entsiegleZeile<DmGeheimnis>(roh, dmGeheimnisAad(peerId))
+    return zeile?.geheimnis ? zeile : null
+  },
+  async schreibeDmGeheimnis(eintrag) {
+    // Wie bei der Gruppe: ein vorhandenes zu überschreiben hiesse, das
+    // Gespräch in zwei Mailboxen zu spalten.
+    if (await indexedDbAblage.liesDmGeheimnis(eintrag.peerId)) return
+    await dmZeileSchreiben(eintrag)
+  },
+  async merkeDmVerteilung(peerId, wann) {
+    // Der einzige erlaubte Nachtrag an einem abgelegten Chatgeheimnis: das
+    // Geheimnis selbst bleibt, nur die Zustellmarke kommt dazu.
+    const vorhanden = await indexedDbAblage.liesDmGeheimnis(peerId)
+    if (!vorhanden || vorhanden.verteiltAm) return
+    await dmZeileSchreiben({ ...vorhanden, verteiltAm: wann })
+  },
   async loescheGruppe(groupId) {
     const db = await oeffneDatenbank()
     await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction([STORE_KEYS, STORE_AKTUELL, STORE_ANFRAGEN], 'readwrite')
+      const tx = db.transaction(
+        [STORE_KEYS, STORE_AKTUELL, STORE_ANFRAGEN, STORE_GEHEIMNISSE],
+        'readwrite',
+      )
+      tx.objectStore(STORE_GEHEIMNISSE).delete(groupId)
       // Der zusammengesetzte Schlüssel beginnt mit der Gruppenkennung, also
       // trifft ein Bereich über [groupId] genau deren Schlüssel.
       tx.objectStore(STORE_KEYS).delete(IDBKeyRange.bound([groupId], [groupId, []]))
@@ -392,6 +645,543 @@ function gleicheMitglieder(a: readonly number[], b: readonly number[]): boolean 
 }
 
 // ==========================================
+// Geheimnis, Mailbox und Besitznachweis
+// ==========================================
+
+/**
+ * Zwei Werte aus einem Geheimnis, und beide sind ein SHA-256 mit eigenem
+ * Vorsatz.
+ *
+ * Der Vorsatz ist nicht Zierde: ohne ihn wäre die Mailbox-Kennung derselbe
+ * Wert wie der Besitznachweis. Wer die Kennung kennt — und die steht in jedem
+ * Aufruf —, hätte damit auch den Nachweis, und das ganze Schloss wäre ein
+ * Türschild. Dieselbe Trennung wie beim Tresor, wo `bucketId` und
+ * `bucketAuthToken` aus demselben Seed mit verschiedenen Zusätzen entstehen.
+ */
+const MAILBOX_VORSATZ = 'msm:gruppe:mailbox:'
+const NACHWEIS_VORSATZ = 'msm:gruppe:nachweis:'
+
+/** Die Mailbox-Kennung einer Gruppe aus ihrem Geheimnis. 64 Hexzeichen. */
+export async function mailboxAusGeheimnis(geheimnis: string): Promise<string> {
+  return sha256Hex(new TextEncoder().encode(MAILBOX_VORSATZ + geheimnis))
+}
+
+/** Der Besitznachweis derselben Mailbox. 64 Hexzeichen, nie gleich der Kennung. */
+export async function nachweisAusGeheimnis(geheimnis: string): Promise<string> {
+  return sha256Hex(new TextEncoder().encode(NACHWEIS_VORSATZ + geheimnis))
+}
+
+/**
+ * Wohin eine Gruppe sendet und woraus sie liest.
+ *
+ * Der Umzug in einem Wert. `senden` ist die Kennung aus dem Geheimnis, sobald
+ * es eines gibt, sonst die alte aus der `group_id`. `lesen` sind **beide**,
+ * solange es zwei gibt.
+ *
+ * Warum beide: die Mitglieder bekommen das Geheimnis nicht gleichzeitig. Es
+ * reist als Steuerumschlag in ihre Geräte-Mailbox und kommt beim nächsten
+ * Durchlauf an — bei einem heute, beim anderen morgen. Wer es schon hat,
+ * sendet in die neue Mailbox; wer nicht, in die alte. Läse jeder nur seine
+ * eigene, verlöre das Gespräch für Tage die Hälfte seiner Nachrichten, und
+ * zwar lautlos. Gelesen wird deshalb aus beiden, bis der Bestand versiegt.
+ *
+ * **Die Kennung ist nicht die Gesprächskennung.** Der örtliche Klartext-Cache,
+ * die Anzeige und die Wache gegen das Umschalten hängen weiter an der alten,
+ * ableitbaren Kennung — die bleibt, was sie war. Bewegt hat sich nur die
+ * Adresse auf dem Umschlag.
+ */
+export interface GruppenZiele {
+  /** Die Mailbox, in die neue Nachrichten gehen. */
+  senden: string
+  /** Alle Mailboxen, aus denen zu lesen ist. Neue zuerst. */
+  lesen: string[]
+  /** Der Besitznachweis der neuen Kennung, falls es eine gibt. */
+  nachweis: string | null
+}
+
+/**
+ * Wohin eine alte Kennung umgezogen ist — synchron, ohne die Ablage zu fragen.
+ *
+ * Gebraucht dort, wo eine Kennung ankommt und niemand die Gruppe dazu kennt:
+ * beim Löschen einer Nachricht etwa, das nur die Mailbox des Gesprächs hat.
+ * Gefüllt wird die Karte überall, wo das Geheimnis ohnehin aufgeschlagen wird.
+ *
+ * Leer heisst „kein Umzug bekannt", nie „kein Umzug". Wer darauf baut, muss
+ * den Fall vertragen — etwa indem er beide Kennungen bedient.
+ */
+const umzugsZiele = new Map<string, string>()
+
+export function umgezogeneMailbox(altKennung: string): string | null {
+  return umzugsZiele.get((altKennung || '').trim().toLowerCase()) ?? null
+}
+
+/** Nur für Tests: die gemerkten Umzüge vergessen. */
+export function leereUmzuege(): void {
+  umzugsZiele.clear()
+}
+
+function merkeUmzug(altKennung: string, neu: string): void {
+  const alt = (altKennung || '').trim().toLowerCase()
+  if (!alt || !neu || alt === neu) return
+  umzugsZiele.set(alt, neu)
+}
+
+/**
+ * Die alte, abgeleitete Kennung — das Ergebnis, wenn nichts anderes bekannt
+ * ist. Sie funktioniert immer: beide Seiten können sie ausrechnen.
+ */
+function beiDerAltenKennung(altKennung: string): GruppenZiele {
+  abonniereMailbox(altKennung, mailboxNachweis(altKennung))
+  return { senden: altKennung, lesen: [altKennung], nachweis: null }
+}
+
+export async function gruppenZiele(groupId: number, altKennung: string): Promise<GruppenZiele> {
+  // Die Ablage darf hier nicht durchschlagen. Wo ein Gespräch liegt, ist eine
+  // Frage, auf die es immer eine Antwort geben muss — eine verschlossene oder
+  // fehlende IndexedDB nähme sonst nicht den Umzug, sondern das **Lesen**:
+  // `einDurchlauf` käme nie bis zum Abruf, und der Verlauf bliebe leer.
+  let eintrag: GruppenGeheimnis | null
+  try {
+    eintrag = await ablage.liesGeheimnis(groupId)
+  } catch {
+    return beiDerAltenKennung(altKennung)
+  }
+  if (!eintrag?.geheimnis) {
+    // Kein Geheimnis: Bestandsgruppe, oder das Geheimnis ist noch unterwegs.
+    return beiDerAltenKennung(altKennung)
+  }
+
+  const neu = await mailboxAusGeheimnis(eintrag.geheimnis)
+  const token = await nachweisAusGeheimnis(eintrag.geheimnis)
+  merkeMailboxNachweis(neu, token)
+  abonniereMailbox(neu, token)
+  if (neu === altKennung) return { senden: neu, lesen: [neu], nachweis: token }
+
+  merkeUmzug(altKennung, neu)
+  abonniereMailbox(altKennung, mailboxNachweis(altKennung))
+  return { senden: neu, lesen: [neu, altKennung], nachweis: token }
+}
+
+/**
+ * Meldet jede bekannte Mailbox beim Strom an — nicht nur die offene.
+ *
+ * **Ohne das ist der Messenger nach Stufe 4 stumm.** Bis 09/2026 schlug der
+ * Server bei jeder Gruppennachricht die Mitgliederliste nach und stellte an
+ * jedes Konto einzeln zu; wer die Anwendung offen hatte, erfuhr davon, egal
+ * welches Gespräch gerade auf dem Schirm war. Dieser Nachschlag ist weg — und
+ * damit ist das Abo der **einzige** Weg, überhaupt von einer Nachricht zu
+ * erfahren. Ein Abo nur für das offene Gespräch hiesse: alles andere kommt
+ * erst beim nächsten Öffnen an, und die Meldung auf dem geschlossenen Tab nie.
+ *
+ * Nebenbei wandert dieselbe Liste an die Push-Zustellung — `abonniereMailbox`
+ * meldet beide Empfänger aus einer Quelle.
+ *
+ * Nacheinander und nicht parallel: jeder Schritt liest die Ablage und rechnet
+ * SHA-256, und ein Schwung von hundert gleichzeitig liesse den ersten
+ * Bildaufbau stehen. Ein Fehlschlag hält die übrigen nicht auf — eine Gruppe,
+ * deren Geheimnis klemmt, darf die anderen nicht mit stumm machen.
+ */
+export async function abonniereBekannteGespraeche(
+  eigeneId: number,
+  gruppen: readonly number[],
+  gegenstellen: readonly number[],
+): Promise<void> {
+  for (const groupId of gruppen) {
+    try {
+      await gruppenZiele(groupId, await deriveGroupBlindMailboxId(groupId))
+    } catch {
+      /* Diese Gruppe nicht, die nächste schon. */
+    }
+  }
+  if (!eigeneId) return
+  for (const peerId of gegenstellen) {
+    if (!peerId || peerId === eigeneId) continue
+    try {
+      // Ohne `erzeuge`: ein Abo ist kein Versand. Ein Chatgeheimnis entsteht
+      // beim Schreiben, nicht beim Zuhören — sonst legte das blosse Öffnen
+      // des Messengers für jeden Kontakt eines an und verteilte es.
+      await dmZiele(eigeneId, peerId, await deriveBlindMailboxId(eigeneId, peerId))
+    } catch {
+      /* dito */
+    }
+  }
+}
+
+// ==========================================
+// Der Direktchat: dieselbe Übung, andere Gegenstelle
+// ==========================================
+
+/** Der Steuerumschlag, mit dem ein Chatgeheimnis zu den Geräten reist. */
+const DM_GEHEIMNIS_TYP = 'dm_secret'
+
+/**
+ * Wer ein Chatgeheimnis erzeugen darf: das **kleinere Konto**.
+ *
+ * Bei der Gruppe ist es der Eigentümer. Ein Direktchat hat keinen, also
+ * braucht es eine Regel, die beide Seiten unabhängig voneinander zum selben
+ * Ergebnis führt — sonst erzeugen beide eines, das Gespräch hat zwei Mailboxen
+ * und zerfällt in zwei Hälften, die einander nicht mehr sehen.
+ *
+ * Die kleinere Kennung ist willkürlich, aber eindeutig und ohne Rückfrage
+ * bestimmbar. Wer nicht darf, wartet: das Geheimnis kommt mit der nächsten
+ * Zustellung der Gegenseite.
+ */
+function darfDmGeheimnisErzeugen(eigeneId: number, peerId: number): boolean {
+  return eigeneId < peerId
+}
+
+/**
+ * Verteilt ein Chatgeheimnis an jedes Gerät beider Seiten.
+ *
+ * Über die Geräte-Mailboxen, nicht über die Chatmailbox — aus demselben Grund
+ * wie bei der Gruppe: durch die neue Mailbox darf nichts kommen, was man zum
+ * Öffnen der neuen Mailbox bräuchte. Sonst steht die Gegenseite vor einem
+ * Schloss, dessen Schlüssel dahinter liegt.
+ *
+ * **Gezählt wird nur die Gegenstelle**, und darum laufen es zwei Aufrufe statt
+ * einem. Die eigenen Zweitgeräte zu erreichen ist schön, sagt aber nichts
+ * darüber, ob der Umzug tragfähig ist — und genau diese Zahl entscheidet
+ * darüber (siehe `verteiltAm`). Eine Summe über beide Seiten wäre hier ein
+ * stilles Ja auf eine Frage, die niemand gestellt hat.
+ */
+async function verteileDmGeheimnis(
+  eigeneId: number,
+  peerId: number,
+  geheimnis: string,
+): Promise<number> {
+  // Beglaubigt, und zwar gebunden an die **abgeleitete Gesprächskennung** und
+  // nicht an die Geräte-Mailbox, in die der Umschlag fällt: das Paket geht an
+  // viele Mailboxen, eine Unterschrift je Ziel wäre eine je Gerät. Die
+  // abgeleitete Kennung nennt genau dieses Gespräch, beide Seiten können sie
+  // ausrechnen, und dieselbe Unterschrift lässt sich damit in kein anderes
+  // umhängen.
+  const gespraech = await deriveBlindMailboxId(eigeneId, peerId)
+  const nutzlast = await signiereNutzlast(gespraech, eigeneId, {
+    typ: DM_GEHEIMNIS_TYP,
+    v: 1,
+    peerId,
+    eigeneId,
+    geheimnis,
+  })
+  const kontext: GruppenKontext = {
+    groupId: 0,
+    blindMailboxId: '',
+    eigeneId,
+    mitglieder: [],
+    istEigentuemer: false,
+  }
+  const text = JSON.stringify(nutzlast)
+
+  // Zuerst die Gegenstelle — diese Zahl zählt.
+  let erreicht = 0
+  try {
+    erreicht = await anJedesGeraet(kontext, [peerId], text, DM_GEHEIMNIS_TYP)
+  } catch {
+    // `anJedesGeraet` wirft, wenn es Ziele gab und keines erreicht wurde. Für
+    // die Gruppe ist das ein Abbruch; hier ist es schlicht eine Null.
+    erreicht = 0
+  }
+
+  // Dann die eigenen Zweitgeräte. Bestes Bemühen: erreicht es keines, schreibt
+  // das Handy vorerst in die alte Mailbox — und die wird ohnehin mitgelesen.
+  try {
+    await anJedesGeraet(kontext, [eigeneId], text, DM_GEHEIMNIS_TYP)
+  } catch {
+    /* nachholbar */
+  }
+  return erreicht
+}
+
+/**
+ * Nimmt ein zugestelltes Chatgeheimnis an. Gibt `true`, wenn es neu war.
+ *
+ * Die Kennung im Umschlag ist die des **Absenders**, nicht meine: er schrieb
+ * `peerId` aus seiner Sicht. Für mich ist die Gegenstelle deshalb sein
+ * `eigeneId` — es sei denn, der Umschlag kommt von meinem eigenen Zweitgerät,
+ * dann stimmt seine Sicht mit meiner überein.
+ *
+ * **Drei Schranken, und jede hat einen eigenen Angriff hinter sich:**
+ *
+ * 1. *Beglaubigt.* Ein Hybridumschlag hat keinen Absenderkopf — jeder, der
+ *    meinen öffentlichen Geräteschlüssel kennt, kann mir einen schicken. Ohne
+ *    Prüfung könnte ein Dritter sich als meine Gegenstelle ausgeben und mein
+ *    Gespräch in eine Mailbox umlenken, die er selbst gewählt hat. Lesen
+ *    könnte er dort nichts (die Nachrichten bleiben im Ratchet), aber die
+ *    Gegenstelle sähe nie wieder eine — ein stiller Abriss.
+ * 2. *Nur von der kleineren Kennung.* Dieselbe Regel wie beim Erzeugen, hier
+ *    von der anderen Seite. Ohne sie könnten beide Seiten gleichzeitig eines
+ *    erzeugen, jede das eigene behalten, und das Gespräch zerfiele in zwei
+ *    Hälften — genau das, was die Regel verhindern soll.
+ * 3. *Überschreibt nie.* Wer schon eines hat, behält es.
+ */
+async function nimmDmGeheimnis(eigeneId: number, roh: Record<string, unknown>): Promise<boolean> {
+  const geheimnis = typeof roh.geheimnis === 'string' ? roh.geheimnis : ''
+  const absender = Number(roh.eigeneId)
+  const gemeint = Number(roh.peerId)
+  if (!geheimnis || !Number.isInteger(absender) || !Number.isInteger(gemeint)) return false
+  // Der Absender muss der sein, der erzeugen darf. Sonst wäre die Regel eine
+  // Bitte und keine Schranke.
+  if (!darfDmGeheimnisErzeugen(absender, gemeint)) return false
+
+  const gegenstelle = absender === eigeneId ? gemeint : absender
+  if (!Number.isInteger(gegenstelle) || gegenstelle <= 0 || gegenstelle === eigeneId) return false
+
+  // Gebunden an die abgeleitete Gesprächskennung, wie beim Unterschreiben.
+  const pruefung = await pruefeNutzlast(await deriveBlindMailboxId(eigeneId, gegenstelle), roh)
+  if (pruefung.art === 'gefaelscht') return false
+  if (pruefung.art === 'geprueft') {
+    // Die Unterschrift gilt — aber wem? Wer unterschrieben hat, muss auch der
+    // sein, der sich im Paket nennt.
+    if (pruefung.vonKonto !== absender) return false
+  } else if (await kontoNutztSignaturen(absender)) {
+    // Die Downgrade-Schranke: wer beglaubigen kann, muss es auch. Ohne sie
+    // nähme ein Fälscher die Unterschrift einfach weg.
+    return false
+  }
+
+  /*
+   * Das Gespräch in den örtlichen Speicher — hier und nirgends sonst.
+   *
+   * Seit Stufe 6b führt der Server keine Liste mehr, mit wem dieses Konto
+   * schreibt. Dieser Umschlag ist der Moment, in dem ein bis dahin unbekanntes
+   * Gegenüber zum Gesprächspartner wird; wird er hier nicht festgehalten,
+   * abonniert dieses Gerät die neue Mailbox nie und die erste Nachricht kommt
+   * nirgends an.
+   *
+   * Ohne Namen: der Umschlag trägt eine Konto-Id, und das soll er auch. Ein
+   * Anzeigename darin wäre ein Feld, das ein Absender frei wählt — und damit
+   * der Weg, sich in einer Kontaktliste als jemand anderes auszugeben. Den
+   * Namen holt `fuelleNamenNach` aus der Kontaktliste.
+   */
+  try {
+    const { merkeGespraech } = await import('./gespraechsListe')
+    await merkeGespraech(gegenstelle, {})
+  } catch {
+    // Verschlossener Messenger oder volle Ablage. Das Geheimnis selbst zählt
+    // mehr als die Zeile daneben; der nächste `dmZiele` holt sie nach.
+  }
+
+  const vorhanden = await ablage.liesDmGeheimnis(gegenstelle)
+  const jetzt = new Date().toISOString()
+  await ablage.schreibeDmGeheimnis({
+    peerId: gegenstelle,
+    geheimnis,
+    erzeugtAm: jetzt,
+    // Beim Empfänger steht die Marke sofort: er hat es ja. Sie fragt „wissen
+    // es beide?", nicht „habe ich es verschickt?".
+    verteiltAm: jetzt,
+  })
+  if (vorhanden) return false
+
+  const neu = await mailboxAusGeheimnis(geheimnis)
+  const token = await nachweisAusGeheimnis(geheimnis)
+  merkeMailboxNachweis(neu, token)
+  abonniereMailbox(neu, token)
+  try {
+    // Ohne Nachweis bliebe die Mailbox für dieses Gerät offen — lesen könnte
+    // es dort, aber der Server liesse auch jeden anderen hinein, der die
+    // Kennung errät. Scheitert es, holt es der nächste `dmZiele` nach.
+    await registriereMailbox(neu, token)
+  } catch {
+    /* nachholbar */
+  }
+  return true
+}
+
+/**
+ * Wohin ein Direktchat sendet und woraus er liest — das Gegenstück zu
+ * `gruppenZiele`.
+ *
+ * Mit `erzeuge` entsteht eines, wenn dieses Konto darf und es noch keines
+ * gibt; verteilt wird es dann an beide Seiten. Was daran scheitert, hält das
+ * Senden nicht auf: ohne Geheimnis bleibt es bei der alten Kennung, und die
+ * funktioniert.
+ *
+ * **Nur beim Senden, nie beim Lesen.** Erzeugen heisst verteilen, und
+ * verteilen heisst Umschläge an die Geräte der Gegenstelle. Täte das schon
+ * das Öffnen eines Chats, würde Nachsehen zu einem sichtbaren Vorgang — wer
+ * ein Gespräch nur aufschlägt und nichts schreibt, hinterliesse trotzdem eine
+ * Spur bei der Gegenseite. Dieselbe Trennung hat die Gruppe: dort entsteht
+ * das Geheimnis in `verschluesseleFuerGruppe`, und `gruppenZiele` liest nur,
+ * was schon da ist.
+ *
+ * **Die erste Kontaktaufnahme bleibt sichtbar.** Sie läuft über die
+ * Geräte-Mailbox der Gegenstelle, und dort steht, dass *irgendjemand* Konto 42
+ * angeschrieben hat — nicht wer. Danach zieht das Gespräch um. Dasselbe
+ * Restleck hat Signal, und es lässt sich ohne einen dritten Dienst nicht
+ * schliessen.
+ */
+export async function dmZiele(
+  eigeneId: number,
+  peerId: number,
+  altKennung: string,
+  { erzeuge = false }: { erzeuge?: boolean } = {},
+): Promise<GruppenZiele> {
+  if (!Number.isInteger(eigeneId) || !Number.isInteger(peerId) || peerId <= 0) {
+    return beiDerAltenKennung(altKennung)
+  }
+
+  // Wie bei `gruppenZiele`: eine unerreichbare Ablage nimmt den Umzug, nie
+  // das Lesen.
+  let eintrag: DmGeheimnis | null
+  try {
+    eintrag = await ablage.liesDmGeheimnis(peerId)
+    if (!eintrag && erzeuge && darfDmGeheimnisErzeugen(eigeneId, peerId)) {
+      const roh = randomBytes(SCHLUESSEL_BYTES)
+      const neu = bytesToBase64(roh)
+      roh.fill(0)
+      await ablage.schreibeDmGeheimnis({
+        peerId,
+        geheimnis: neu,
+        erzeugtAm: new Date().toISOString(),
+        verteiltAm: null,
+      })
+      // Nicht das gerade erzeugte nehmen, sondern das abgelegte: ein
+      // gleichzeitiger zweiter Aufruf hat vielleicht gewonnen.
+      eintrag = await ablage.liesDmGeheimnis(peerId)
+    }
+
+    // Solange die Gegenstelle es nicht hat, wird bei jedem Versand erneut
+    // zugestellt. Der Fall dahinter ist die allererste Nachricht: der Server
+    // lässt einen Steuerumschlag in eine fremde Geräte-Mailbox nur bei
+    // bestehender Beziehung durch, und die entsteht erst mit dieser Nachricht.
+    if (eintrag && erzeuge && !eintrag.verteiltAm) {
+      let erreicht = 0
+      try {
+        erreicht = await verteileDmGeheimnis(eigeneId, peerId, eintrag.geheimnis)
+      } catch {
+        // Kein Netz. Nächster Versand, nächster Versuch.
+      }
+      if (erreicht > 0) {
+        const wann = new Date().toISOString()
+        await ablage.merkeDmVerteilung(peerId, wann)
+        eintrag = { ...eintrag, verteiltAm: wann }
+      }
+    }
+  } catch {
+    return beiDerAltenKennung(altKennung)
+  }
+
+  // **Kein Umzug ohne Zustellung.** Zöge das Gespräch schon vorher um, ginge
+  // die Nachricht in eine Mailbox, die die Gegenseite weder kennt noch je
+  // erfährt — und die Zustellung, die es ihr sagen würde, käme nie zustande.
+  // Ein Ring, der sich nicht von selbst öffnet.
+  if (!eintrag?.geheimnis || !eintrag.verteiltAm) return beiDerAltenKennung(altKennung)
+
+  const neu = await mailboxAusGeheimnis(eintrag.geheimnis)
+  const token = await nachweisAusGeheimnis(eintrag.geheimnis)
+  merkeMailboxNachweis(neu, token)
+  abonniereMailbox(neu, token)
+  try {
+    await registriereMailbox(neu, token)
+  } catch {
+    // Wie bei der Gruppe: lieber ohne Nachweis senden als gar nicht.
+  }
+  if (neu === altKennung) return { senden: neu, lesen: [neu], nachweis: token }
+
+  merkeUmzug(altKennung, neu)
+  abonniereMailbox(altKennung, mailboxNachweis(altKennung))
+  return { senden: neu, lesen: [neu, altKennung], nachweis: token }
+}
+
+/**
+ * Hinterlegt den Besitznachweis der Gruppenmailbox beim Server.
+ *
+ * **Auf der neuen Kennung, nie auf der alten** — und daran hängt alles. Der
+ * erste Entwurf registrierte auf der alten, und eine Laufzeitprobe am
+ * 22.09.2026 zeigte, warum das die Gruppe zerstört: damals lief die
+ * Schlüsselzustellung über genau diese Mailbox. Sobald der Eigentümer
+ * registriert hatte, bekam jedes Mitglied ohne Geheimnis dort 403 — und damit
+ * nie den Schlüssel, aus dem das Geheimnis gekommen wäre. Gemessen: das
+ * Mitglied sah die Nachricht nicht einmal mehr als „Verschlüsselte Nachricht".
+ *
+ * Ein Schloss vor die Tür zu hängen, deren Schlüssel dahinter liegt, ist kein
+ * Sicherheitsgewinn, sondern ein Aussperren.
+ *
+ * Jetzt geht es, weil der Schlüssel einen anderen Weg nimmt: `anJedesGeraet`
+ * stellt in die **Geräte-Mailbox** des Empfängers zu. Durch die neue
+ * Gruppenmailbox kommt nichts, was man zum Öffnen der neuen Gruppenmailbox
+ * bräuchte — der Kreis ist durchtrennt. Die alte Kennung bleibt offen und
+ * unregistriert; sie trägt den Bestand, und `assert_mailbox_participant` hält
+ * sie wie bisher.
+ */
+async function sichereBesitznachweis(kontext: GruppenKontext, geheimnis: string): Promise<void> {
+  const mailbox = await mailboxAusGeheimnis(geheimnis)
+  const token = await nachweisAusGeheimnis(geheimnis)
+  merkeMailboxNachweis(mailbox, token)
+  merkeUmzug(kontext.blindMailboxId, mailbox)
+  // Und dem Echtzeitstrom sagen, dass diese Mailbox uns angeht. Für eine
+  // Kennung, die der Server nicht ausrechnen kann, ist das der einzige Weg,
+  // überhaupt etwas zu erfahren.
+  abonniereMailbox(mailbox, token)
+
+  try {
+    await registriereMailbox(mailbox, token)
+  } catch {
+    // Still, und das mit Absicht. Ein 409 hiesse „schon registriert, mit einem
+    // anderen Token" — dann hat jemand ein zweites Geheimnis erzeugt, und das
+    // ist ein Fall für die Schlüsselzustellung, nicht fürs Senden. Alles
+    // andere ist ein Netzfehler. In beiden Fällen lieber ohne Nachweis weiter
+    // als gar nicht senden: der Nachweis ist jederzeit nachholbar, eine
+    // verlorene Nachricht nicht.
+    void kontext
+  }
+}
+
+/**
+ * Das Geheimnis dieser Gruppe — und wer es erzeugen darf, wenn es keines gibt.
+ *
+ * Bestandsgruppen haben keines. Eines zu erzeugen darf deshalb **nur der
+ * Eigentümer**: erzeugten zwei Mitglieder gleichzeitig eines, hätte die Gruppe
+ * zwei Mailboxen und zerfiele in zwei Hälften, die einander nicht mehr sehen.
+ * Wer nicht Eigentümer ist, wartet — spätestens mit der nächsten
+ * Schlüsselzustellung bekommt er es.
+ */
+async function geheimnisFuer(
+  kontext: GruppenKontext,
+): Promise<{ geheimnis: string | null; frischErzeugt: boolean }> {
+  const vorhanden = await ablage.liesGeheimnis(kontext.groupId)
+  if (vorhanden) return { geheimnis: vorhanden.geheimnis, frischErzeugt: false }
+  if (!kontext.istEigentuemer) return { geheimnis: null, frischErzeugt: false }
+
+  const roh = randomBytes(SCHLUESSEL_BYTES)
+  const neu = bytesToBase64(roh)
+  roh.fill(0)
+  await ablage.schreibeGeheimnis({
+    groupId: kontext.groupId,
+    geheimnis: neu,
+    erzeugtAm: new Date().toISOString(),
+  })
+  // Nicht das gerade erzeugte zurückgeben, sondern das abgelegte: ein
+  // gleichzeitiger zweiter Aufruf hat vielleicht gewonnen, und dann gilt
+  // seines.
+  const abgelegt = (await ablage.liesGeheimnis(kontext.groupId))?.geheimnis ?? neu
+  return { geheimnis: abgelegt, frischErzeugt: true }
+}
+
+/**
+ * Das Gruppengeheimnis, falls dieses Gerät es kennt.
+ *
+ * Die eine Stelle, an der es nach aussen geht — und bewusst nur lesend. Wer
+ * es braucht, braucht etwas **daraus**: die Mailbox-Kennung, den
+ * Besitznachweis, den Einladungsschlüssel. Jeder dieser Werte ist ein
+ * einseitiger Hash, keiner führt zurück.
+ *
+ * `null` heisst: diese Gruppe hat noch keines, oder dieses Gerät hat es noch
+ * nicht bekommen. Beides ist Alltag und kein Fehler — das Geheimnis entsteht,
+ * wenn der Eigentümer zum ersten Mal sendet.
+ */
+export async function gruppenGeheimnis(groupId: number): Promise<string | null> {
+  try {
+    return (await ablage.liesGeheimnis(groupId))?.geheimnis ?? null
+  } catch {
+    // Verschlossene oder fehlende Ablage. Wie bei `gruppenZiele`: die Antwort
+    // ist „weiss ich nicht", nie ein geworfener Fehler beim Aufrufer.
+    return null
+  }
+}
+
+// ==========================================
 // Schlüssel
 // ==========================================
 
@@ -440,8 +1230,20 @@ export async function erzeugeGruppenSchluessel(): Promise<{
  */
 async function schluesselZumSenden(kontext: GruppenKontext): Promise<GruppenSchluesselEintrag> {
   const jetzige = await frischeMitglieder(kontext)
+  const { geheimnis, frischErzeugt } = await geheimnisFuer(kontext)
+  if (geheimnis) await sichereBesitznachweis(kontext, geheimnis)
+
   const vorhanden = await ablage.liesAktuellen(kontext.groupId)
-  if (vorhanden && gleicheMitglieder(vorhanden.mitglieder, jetzige)) return vorhanden
+  /**
+   * Ein **frisch erzeugtes** Geheimnis muss zu den anderen, und der einzige
+   * Weg dorthin ist die Schlüsselzustellung. Ohne Mitgliederwechsel rotiert
+   * aber nichts — also erzwingt es hier einmal eine Rotation. Das kostet eine
+   * Generation und heilt sich von selbst; alles andere wäre ein zweiter
+   * Zustellweg neben dem ersten, der genauso oft scheitern kann.
+   */
+  if (vorhanden && !frischErzeugt && gleicheMitglieder(vorhanden.mitglieder, jetzige)) {
+    return vorhanden
+  }
 
   const { keyId, schluessel } = await erzeugeGruppenSchluessel()
   const eintrag: GruppenSchluesselEintrag = {
@@ -456,11 +1258,26 @@ async function schluesselZumSenden(kontext: GruppenKontext): Promise<GruppenSchl
   // Erst ablegen, dann verteilen: ein Schlüssel, der schon unterwegs ist und
   // nirgends liegt, macht die eigenen Nachrichten unlesbar.
   await ablage.schreibe(eintrag)
-  await verteileSchluessel(kontext, eintrag, jetzige)
+  await verteileSchluessel(kontext, eintrag, jetzige, geheimnis)
   return eintrag
 }
 
-/** Versiegelt eine Nutzlast für jedes Gerät der genannten Konten und relayed sie. */
+/**
+ * Versiegelt eine Nutzlast für jedes Gerät der genannten Konten und relayed sie.
+ *
+ * Zugestellt wird in die **Geräte-Mailbox des Empfängers**, nicht in die der
+ * Gruppe. Bis 09/2026 lief es andersherum, mit zwei Folgen:
+ *
+ * 1. Die Gruppenmailbox liess sich nicht verschliessen. Wer den Schlüssel noch
+ *    nicht hatte, hätte ihn hinter genau dem Schloss holen müssen, das er
+ *    aufsperren sollte — eine Laufzeitprobe zeigte das Mitglied danach vor
+ *    einer stummen Mailbox.
+ * 2. Das Lesefenster verhungerte: 99 von 100 Umschlägen waren
+ *    Schlüsselzustellungen für fremde Geräte, die dieses Gerät nie öffnen kann.
+ *
+ * Gelesen wird weiterhin aus beiden Quellen — Altbestand liegt noch in den
+ * Gruppenmailboxen, und der soll nicht verloren gehen.
+ */
 async function anJedesGeraet(
   kontext: GruppenKontext,
   empfaengerIds: readonly number[],
@@ -478,6 +1295,7 @@ async function anJedesGeraet(
   let ziele = 0
   for (const empfaengerId of empfaengerIds) {
     const geraete = await geraeteVon(empfaengerId)
+    const ziel = await deriveUserDeviceMailboxId(empfaengerId)
     for (const geraet of geraete) {
       // Das eigene Gerät hat den Schlüssel schon.
       if (empfaengerId === kontext.eigeneId && geraet.device_id === meins.kennung) continue
@@ -486,7 +1304,7 @@ async function anJedesGeraet(
       try {
         const umschlag = await encryptE2eeHybrid(nutzlast, geraet.public_key)
         await relayE2eeEnvelope({
-          blind_mailbox_id: kontext.blindMailboxId,
+          blind_mailbox_id: ziel,
           ciphertext_envelope: umschlag,
           // Je Gerät eine eigene Kennung: das Relais gibt beim zweiten Aufruf
           // mit derselben Kennung still den ersten Umschlag zurück.
@@ -512,7 +1330,10 @@ async function anJedesGeraet(
   return zugestellt
 }
 
-function schluesselNutzlast(eintrag: GruppenSchluesselEintrag): string {
+function schluesselNutzlast(
+  eintrag: GruppenSchluesselEintrag,
+  geheimnis: string | null,
+): string {
   return JSON.stringify({
     typ: GRUPPEN_SCHLUESSEL_TYP,
     v: 1,
@@ -520,6 +1341,10 @@ function schluesselNutzlast(eintrag: GruppenSchluesselEintrag): string {
     keyId: eintrag.keyId,
     schluessel: eintrag.schluessel,
     mitglieder: eintrag.mitglieder,
+    // Fehlt bei Gruppen, deren Eigentümer noch nicht gesendet hat. Ein
+    // Empfänger, der nichts bekommt, bleibt schlicht ohne — er darf selbst
+    // keines erzeugen.
+    ...(geheimnis ? { geheimnis } : {}),
   })
 }
 
@@ -527,8 +1352,14 @@ async function verteileSchluessel(
   kontext: GruppenKontext,
   eintrag: GruppenSchluesselEintrag,
   empfaenger: readonly number[],
+  geheimnis: string | null,
 ): Promise<number> {
-  return anJedesGeraet(kontext, empfaenger, schluesselNutzlast(eintrag), GRUPPEN_SCHLUESSEL_TYP)
+  return anJedesGeraet(
+    kontext,
+    empfaenger,
+    schluesselNutzlast(eintrag, geheimnis),
+    GRUPPEN_SCHLUESSEL_TYP,
+  )
 }
 
 // ==========================================
@@ -643,6 +1474,42 @@ async function nimmSchluessel(
   }
 
   /*
+   * Das Gruppengeheimnis reist mit. Wer zuerst da war, bleibt stehen — das
+   * entscheidet die Ablage, nicht diese Stelle.
+   *
+   * Dass ein Mitglied hier ein falsches Geheimnis unterschieben könnte, ist
+   * dieselbe Lage wie beim Schlüssel selbst: wer eines schickt, hat den
+   * Schlüssel ohnehin. Wirkung hätte es nur bei einem Gerät, das noch gar
+   * keines kennt, und die Folge wäre kein Mitlesen, sondern ein Gerät, das in
+   * der falschen Mailbox sucht und nichts mehr sieht. Kryptographisch
+   * abgesichert wird die Herkunft erst mit MLS; bis dahin ist die
+   * Erstankunft die Regel.
+   */
+  const geheimnis = typeof roh.geheimnis === 'string' ? roh.geheimnis : ''
+  if (geheimnis) {
+    try {
+      await ablage.schreibeGeheimnis({
+        groupId: kontext.groupId,
+        geheimnis,
+        erzeugtAm: new Date().toISOString(),
+      })
+      // Auf der Kennung aus dem Geheimnis, nicht auf der alten: ab hier liest
+      // und sendet dieses Gerät dort. Die alte bleibt daneben im Abo, damit
+      // der Bestand und die noch nicht umgezogenen Mitglieder nicht wegfallen.
+      const neu = await mailboxAusGeheimnis(geheimnis)
+      const token = await nachweisAusGeheimnis(geheimnis)
+      merkeMailboxNachweis(neu, token)
+      abonniereMailbox(neu, token)
+      merkeUmzug(kontext.blindMailboxId, neu)
+      abonniereMailbox(kontext.blindMailboxId)
+    } catch {
+      // Ein Geheimnis, das sich nicht ablegen lässt, darf den Schlüssel nicht
+      // aufhalten: ohne den wäre die Nachricht unlesbar, ohne jenes nur die
+      // Mailbox ungeschützt.
+    }
+  }
+
+  /*
    * Ankommen ja, verdrängen nein.
    *
    * Ein zugestellter Schlüssel wird immer abgelegt — ohne ihn wäre die
@@ -744,7 +1611,11 @@ async function beantworteAnfrage(
     zugestellt = await anJedesGeraet(
       kontext,
       [anfragerId],
-      schluesselNutzlast(eintrag),
+      // Das Geheimnis geht mit: wer nachfragt, hat es oft ebenfalls nicht —
+      // ein frisches Gerät eines Mitglieds kennt weder Schlüssel noch
+      // Geheimnis, und eine Antwort mit nur der Hälfte liesse es in der
+      // falschen Mailbox zurück.
+      schluesselNutzlast(eintrag, (await ablage.liesGeheimnis(kontext.groupId))?.geheimnis ?? null),
       GRUPPEN_SCHLUESSEL_TYP,
     )
   } catch {
@@ -820,6 +1691,126 @@ export async function fordereGruppenSchluessel(
     gefragt.delete(marke)
     return false
   }
+}
+
+// ==========================================
+// Die eigene Geräte-Mailbox
+// ==========================================
+
+/**
+ * Wie weit die eigene Geräte-Mailbox schon gelesen ist, je Konto.
+ *
+ * Nur im Arbeitsspeicher. Nach einem Neuladen wird einmal alles gelesen — das
+ * kostet einen Durchlauf und ist der Preis dafür, nichts zu verpassen. Je
+ * Konto getrennt, damit ein Kontowechsel im selben Tab nicht den Stand des
+ * vorigen erbt und dessen Umschläge überspringt.
+ */
+const geraeteStand = new Map<number, number>()
+
+/** Vergisst den Lesestand. Gehört zum Abmelden. */
+export function leereGeraeteStand(): void {
+  geraeteStand.clear()
+}
+
+/**
+ * Liest die Steuerumschläge aus der eigenen Geräte-Mailbox.
+ *
+ * Der Weg, auf dem ein Gruppenschlüssel heute ankommt. Er hängt an keiner
+ * Gruppe: ein Gerät, das von einer Gruppe noch gar nichts weiss, bekommt hier
+ * ihren Schlüssel und ihr Geheimnis — und erst damit kann es ihre Mailbox
+ * öffnen. Genau diese Reihenfolge fehlte, solange die Zustellung durch die
+ * Gruppenmailbox lief.
+ *
+ * Der Gruppenkontext entsteht aus der Nutzlast selbst, denn beim Lesen ist
+ * noch nicht bekannt, um welche Gruppe es geht. Das ist keine Lücke: der
+ * Umschlag war hybrid für dieses Gerät versiegelt, und was er setzen kann,
+ * entscheidet `verarbeiteGruppenSteuerung` — ein Schlüssel wird abgelegt, aber
+ * verdrängt keinen, und ein Geheimnis kommt nur an, wo noch keines ist.
+ *
+ * Auf demselben Weg kommt das **Chatgeheimnis** eines Direktchats an. Es hat
+ * keine `groupId` und biegt darum früher ab.
+ *
+ * `entsiegle` kommt von aussen, damit diese Datei den Schlüsselbund des
+ * Geräts nicht kennen muss. Wirft sie, war der Umschlag für ein anderes Gerät
+ * — der Normalfall, kein Fehler.
+ */
+export async function holeGeraeteSteuerung(
+  eigeneId: number,
+  entsiegle: (umschlag: string) => Promise<string>,
+): Promise<number> {
+  if (!Number.isInteger(eigeneId) || eigeneId <= 0) return 0
+
+  const mid = await deriveUserDeviceMailboxId(eigeneId)
+  const seit = geraeteStand.get(eigeneId) ?? 0
+
+  let umschlaege: { id: number; ciphertext_envelope: string }[]
+  try {
+    umschlaege = await fetchE2eeEnvelopes(mid, seit)
+  } catch {
+    // Kein Netz oder ein Server, der diese Mailbox nicht kennt. Der nächste
+    // Durchlauf holt es nach; der Stand bleibt stehen.
+    return 0
+  }
+
+  let verarbeitet = 0
+  for (const env of umschlaege) {
+    if (env.id > (geraeteStand.get(eigeneId) ?? 0)) geraeteStand.set(eigeneId, env.id)
+    if (!env.ciphertext_envelope.startsWith(E2EE_HYBRID_ENVELOPE_SPEC.currentPrefix)) continue
+
+    let klartext: string
+    try {
+      klartext = await entsiegle(env.ciphertext_envelope)
+    } catch {
+      continue // Für ein anderes Gerät desselben Kontos.
+    }
+
+    let roh: Record<string, unknown>
+    try {
+      const geparst = JSON.parse(klartext)
+      if (!geparst || typeof geparst !== 'object') continue
+      roh = geparst as Record<string, unknown>
+    } catch {
+      continue // Kein JSON — gehört einem anderen Nutzer dieser Mailbox
+      // (Notizen, Kalender) und nicht hierher.
+    }
+
+    // Ein Chatgeheimnis kennt keine Gruppe. Es muss vor der `groupId`-Prüfung
+    // abbiegen, sonst fiele es durch — der Fehler wäre stumm und der
+    // Direktchat bliebe für immer auf der alten Mailbox.
+    if (roh.typ === DM_GEHEIMNIS_TYP) {
+      try {
+        if (await nimmDmGeheimnis(eigeneId, roh)) verarbeitet += 1
+      } catch {
+        // Wie unten: eine Zustellung hält die übrigen nicht auf.
+      }
+      continue
+    }
+
+    const groupId = Number(roh.groupId)
+    const mitglieder = normalisiereMitglieder(Array.isArray(roh.mitglieder) ? roh.mitglieder : [])
+    if (!Number.isInteger(groupId) || groupId <= 0) continue
+
+    if (!mitglieder.includes(eigeneId)) mitglieder.push(eigeneId)
+    const kontext: GruppenKontext = {
+      groupId,
+      blindMailboxId: await deriveGroupBlindMailboxId(groupId),
+      eigeneId,
+      mitglieder,
+      // Aus einem eingehenden Umschlag wird niemand Eigentümer. Das Flag
+      // entscheidet allein, ob dieses Gerät ein Geheimnis *erzeugen* darf —
+      // und das darf es beim Empfangen unter keinen Umständen.
+      istEigentuemer: false,
+    }
+
+    try {
+      const ergebnis = await verarbeiteGruppenSteuerung(kontext, klartext)
+      if (ergebnis.art !== 'keine') verarbeitet += 1
+    } catch {
+      // Eine Zustellung, die sich nicht verarbeiten lässt, hält die übrigen
+      // nicht auf.
+    }
+  }
+  return verarbeitet
 }
 
 /** Wirft die Schlüssel einer Gruppe weg. Beim Verlassen und beim Löschen fällig. */

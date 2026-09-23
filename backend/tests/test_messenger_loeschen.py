@@ -36,14 +36,9 @@ def _umschlag(payload: bytes = b"test-secret-payload-bytes-12345678") -> str:
 def _lege_chat_an(db: Session, a: User, b: User) -> str:
     """Direktchat zwischen zwei Konten samt seiner blinden Mailbox-Kennung."""
     mailbox = SocialService.derive_blind_mailbox_id(a.id, b.id)
-    db.add(
-        DirectChat(
-            user_a_id=min(a.id, b.id),
-            user_b_id=max(a.id, b.id),
-            blind_mailbox_id=mailbox,
-            initiated_by_user_id=a.id,
-        )
-    )
+    # Seit Stufe 6b nennt die Zeile keine Menschen mehr: nur noch die Kennung
+    # der Mailbox. Wer dazugehoert, rechnet `gegenueber_aus_mailbox` aus.
+    db.add(DirectChat(blind_mailbox_id=mailbox))
     db.commit()
     return mailbox
 
@@ -152,7 +147,7 @@ def test_fremde_geraete_mailbox_bleibt_zu(db: Session, owner_user: User, regular
 def test_gruppenmitglied_darf_in_der_gruppenmailbox_loeschen(
     db: Session, owner_user: User, regular_user: User
 ):
-    gruppe = SocialService.create_group(db, user=owner_user, name="Runde", description="")
+    gruppe = SocialService.create_group(db, user=owner_user)
     SocialService.join_group_by_invite_code(db, user=regular_user, invite_code=gruppe.invite_code)
     gruppen_box = hashlib.sha256(f"msm:group:{gruppe.id}".encode("utf-8")).hexdigest()
 
@@ -202,7 +197,6 @@ def test_anhang_loescht_nur_der_absender(db: Session, owner_user: User, regular_
         blind_mailbox_id=mailbox,
         ciphertext_blob="sv-blob-v1:AES-GCM-256:iv=abcdef123456:tag=987654:ciphertext=abcabcabcabc",
         file_name="anhang.bin",
-        recipient_id=regular_user.id,
     )
 
     # Der Empfaenger darf den Blob lesen, aber nicht loeschen.

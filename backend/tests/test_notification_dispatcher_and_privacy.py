@@ -179,7 +179,6 @@ def test_eigene_nachricht_erzeugt_keine_eigene_benachrichtigung(db: Session, own
             blind_mailbox_id=mailbox,
             ciphertext_envelope=umschlag,
             sender_user_id=user_sender.id,
-            recipient_id=user_recipient.id,
         )
     finally:
         SyncEventService.publish = orig_pub
@@ -379,6 +378,13 @@ def test_privacy_leaks_prevented_in_group_payload():
 async def test_group_relay_targeted_to_members_only_no_leak_to_strangers(db: Session):
     """Gruppennachrichten werden zielgerichtet nur an Mitglieder der Gruppe ausgeliefert,
     während Unbeteiligte keinerlei Event oder Metadaten erhalten.
+
+    Seit 09/2026 über das Mailbox-Abo statt über die Mitgliederliste: der
+    Server schlägt nicht mehr nach, wer dazugehört. Die Zusage ist dieselbe
+    geblieben, der Weg dorthin ist ein anderer — und deshalb melden Alice und
+    Bob die Kennung hier ausdrücklich an. Ein Fremder kann das auch versuchen,
+    kommt aber nicht durch: `set_mailboxes` nimmt nur, was `hat_zugang`
+    durchlässt.
     """
     import hashlib
 
@@ -386,7 +392,7 @@ async def test_group_relay_targeted_to_members_only_no_leak_to_strangers(db: Ses
     bob = _create_user(db, "group_bob")
     charlie_stranger = _create_user(db, "group_charlie_stranger")
 
-    group = SocialService.create_group(db, alice, name="MSS Core Devs")
+    group = SocialService.create_group(db, alice)
     SocialService.join_group_by_invite_code(db, bob, group.invite_code)
 
     g_mid = hashlib.sha256(f"msm:group:{group.id}".encode("utf-8")).hexdigest()
@@ -394,6 +400,22 @@ async def test_group_relay_targeted_to_members_only_no_leak_to_strangers(db: Ses
     conn_alice, q_alice = SyncEventService.subscribe(user_id=alice.id)
     conn_bob, q_bob = SyncEventService.subscribe(user_id=bob.id)
     conn_stranger, q_stranger = SyncEventService.subscribe(user_id=charlie_stranger.id)
+    def _melde_an(conn_id: str, user_id: int) -> None:
+        """Wie der Router es tut: erst filtern, dann setzen.
+
+        Über `erlaubte_mailboxen` und nicht direkt über `set_mailboxes` — die
+        Prüfung sitzt dort, und ein Test, der sie überspringt, wäre für den
+        Fremden unten aus dem falschen Grund grün.
+        """
+        erlaubt = SocialService.erlaubte_mailboxen(db, user_id, [(g_mid, None)])
+        SyncEventService.set_mailboxes(conn_id, erlaubt, user_id=user_id)
+
+    _melde_an(conn_alice, alice.id)
+    _melde_an(conn_bob, bob.id)
+    # Und der Fremde versucht es ebenfalls — das ist der eigentliche
+    # Missbrauchsfall, seit die Kennung die Adresse ist: `msm:group:<id>` fällt
+    # aus einer kleinen Ganzzahl, jeder kann sie ausrechnen.
+    _melde_an(conn_stranger, charlie_stranger.id)
 
     valid_env = "sv-e2ee-group-v1:" + _GRUPPEN_KEY + base64.b64encode(b"N" * 12 + b"group_payload_test" + b"T" * 16).decode("ascii")
     illegal_env = "sv-e2ee-group-v1:" + _GRUPPEN_KEY + base64.b64encode(b"N" * 12 + b"illegal_payload_test" + b"T" * 16).decode("ascii")

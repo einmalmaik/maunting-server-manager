@@ -377,7 +377,6 @@ export async function syncNotesKeyToPairedDevices(userId: number = 1): Promise<n
       await relayE2eeEnvelope({
         blind_mailbox_id: mailboxId,
         ciphertext_envelope: ciphertextEnvelope,
-        recipient_id: userId,
         client_uuid: `noteskeysync:${self.kennung}:${target.deviceId}:${Date.now()}`,
         is_control: true,
         control_type: 'notes_key_sync',
@@ -441,7 +440,6 @@ export async function requestNotesKeyFromPairedDevices(userId: number = 1): Prom
       await relayE2eeEnvelope({
         blind_mailbox_id: mailboxId,
         ciphertext_envelope: ciphertextEnvelope,
-        recipient_id: userId,
         client_uuid: `noteskeyreq:${self.kennung}:${target.deviceId}:${Date.now()}`,
         is_control: true,
         control_type: 'notes_key_request',
@@ -521,7 +519,6 @@ export async function processNotesKeyControlEnvelope(
         await relayE2eeEnvelope({
           blind_mailbox_id: mailboxId,
           ciphertext_envelope: replyEnv,
-          recipient_id: targetUserId,
           client_uuid: `noteskeysync:${self.kennung}:${data.requesterDeviceId}:${Date.now()}`,
           is_control: true,
           control_type: 'notes_key_sync',

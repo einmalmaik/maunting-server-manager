@@ -48,7 +48,7 @@ def _header(kekse: dict) -> dict[str, str]:
 def test_gruppenanrufrechte_haengen_an_der_rolle(
     db: Session, owner_user: User, regular_user: User
 ) -> None:
-    gruppe = SocialService.create_group(db, owner_user, "Calls")
+    gruppe = SocialService.create_group(db, owner_user)
     SocialService.join_group_by_invite_code(db, regular_user, gruppe.invite_code)
 
     assert SocialService.has_group_permission(
@@ -73,7 +73,7 @@ def test_wer_starten_darf_darf_auch_beitreten(
     db: Session, owner_user: User, regular_user: User
 ) -> None:
     """Sonst oeffnet der Besitzer einen Raum, den er selbst nicht betreten darf."""
-    gruppe = SocialService.create_group(db, owner_user, "Selbst hinein")
+    gruppe = SocialService.create_group(db, owner_user)
     SocialService.join_group_by_invite_code(db, regular_user, gruppe.invite_code)
     SocialService.update_member_role_permissions(
         db, gruppe.id, regular_user.id, "admin", "", owner_user
@@ -92,7 +92,7 @@ def test_gruppenliste_traegt_die_anrufrechte_des_backends(
     db: Session, owner_user: User, regular_user: User
 ) -> None:
     """Die Oberflaeche soll die Regel nicht nachbauen, sondern ablesen."""
-    gruppe = SocialService.create_group(db, owner_user, "Abgelesen")
+    gruppe = SocialService.create_group(db, owner_user)
     SocialService.join_group_by_invite_code(db, regular_user, gruppe.invite_code)
 
     als_besitzer = next(
@@ -129,7 +129,7 @@ def test_start_meldet_nur_denen_die_beitreten_duerfen(
     monkeypatch,
 ) -> None:
     """Wer nicht beitreten darf, erfaehrt auch nicht, dass telefoniert wird."""
-    gruppe = SocialService.create_group(db, owner_user, "Broadcast calls")
+    gruppe = SocialService.create_group(db, owner_user)
     SocialService.join_group_by_invite_code(db, regular_user, gruppe.invite_code)
 
     ereignisse: list[tuple[dict, int | None]] = []
@@ -175,7 +175,7 @@ def test_ohne_startrecht_kein_gruppenanruf(
     regular_user: User,
     user_cookies: dict,
 ) -> None:
-    gruppe = SocialService.create_group(db, owner_user, "Nur Zuhoerer")
+    gruppe = SocialService.create_group(db, owner_user)
     SocialService.join_group_by_invite_code(db, regular_user, gruppe.invite_code)
     SocialService.update_member_role_permissions(
         db, gruppe.id, regular_user.id, "member", "join_group_calls", owner_user
@@ -200,7 +200,7 @@ def test_token_fuer_gruppenraum_nur_mit_beitrittsrecht(
     owner_cookies: dict,
     user_cookies: dict,
 ) -> None:
-    gruppe = SocialService.create_group(db, owner_user, "Tokenpruefung")
+    gruppe = SocialService.create_group(db, owner_user)
     SocialService.join_group_by_invite_code(db, regular_user, gruppe.invite_code)
 
     raum = client.post(
@@ -239,8 +239,8 @@ def test_token_nur_fuer_die_gruppe_der_der_raum_gehoert(
     client: TestClient, db: Session, owner_user: User, owner_cookies: dict
 ) -> None:
     """Die eigene Gruppenkennung oeffnet keinen fremden Raum."""
-    eine = SocialService.create_group(db, owner_user, "Gruppe A")
-    andere = SocialService.create_group(db, owner_user, "Gruppe B")
+    eine = SocialService.create_group(db, owner_user)
+    andere = SocialService.create_group(db, owner_user)
 
     raum = client.post(
         f"/api/social/calls/groups/{eine.id}/start",
@@ -260,7 +260,7 @@ def test_token_nur_fuer_die_gruppe_der_der_raum_gehoert(
 def test_token_fuer_unbekannten_gruppenraum(
     client: TestClient, db: Session, owner_user: User, owner_cookies: dict
 ) -> None:
-    gruppe = SocialService.create_group(db, owner_user, "Leer")
+    gruppe = SocialService.create_group(db, owner_user)
     antwort = client.post(
         "/api/social/calls/token",
         json={"art": "gruppe", "raum": "grp_" + "0" * 32, "group_id": gruppe.id},
@@ -288,7 +288,7 @@ def test_gruppenanruf_ohne_gruppenkennung(
 def test_beenden_schliesst_den_raum_fuer_alle(
     client: TestClient, db: Session, owner_user: User, owner_cookies: dict
 ) -> None:
-    gruppe = SocialService.create_group(db, owner_user, "Ende")
+    gruppe = SocialService.create_group(db, owner_user)
     raum = client.post(
         f"/api/social/calls/groups/{gruppe.id}/start",
         cookies=owner_cookies,
@@ -321,7 +321,7 @@ def test_ein_gast_beendet_den_anruf_nicht_fuer_alle(
     owner_cookies: dict,
     user_cookies: dict,
 ) -> None:
-    gruppe = SocialService.create_group(db, owner_user, "Gast geht")
+    gruppe = SocialService.create_group(db, owner_user)
     SocialService.join_group_by_invite_code(db, regular_user, gruppe.invite_code)
     SocialService.update_member_role_permissions(
         db, gruppe.id, regular_user.id, "member", "join_group_calls", owner_user
@@ -368,7 +368,7 @@ def test_einladungskarte_zeigt_den_laufenden_anruf(
     client: TestClient, db: Session, owner_user: User, owner_cookies: dict, monkeypatch
 ) -> None:
     """Wer den Code hat, darf sehen, ob sich das Beitreten gerade lohnt."""
-    gruppe = SocialService.create_group(db, owner_user, "Live-Gruppe")
+    gruppe = SocialService.create_group(db, owner_user)
 
     ruhig = client.get(f"/api/social/groups/invite/{gruppe.invite_code}")
     assert ruhig.status_code == 200
@@ -395,7 +395,15 @@ def test_einladungskarte_zeigt_den_laufenden_anruf(
         "name",
         "description",
         "avatar_url",
+        "invite_card",
         "member_count",
         "live_call",
         "live_participants",
     }
+    # Die drei Klartextfelder stehen noch in der Antwort, damit ein aelterer
+    # Client nicht auf einen fehlenden Schluessel laeuft -- aber sie sind seit
+    # 09/2026 leer. Was ueber die Gruppe zu erfahren ist, steht im Umschlag
+    # `invite_card` und geht nur mit dem Schluessel hinter der Raute auf.
+    assert daten["name"] is None
+    assert daten["description"] is None
+    assert daten["avatar_url"] is None

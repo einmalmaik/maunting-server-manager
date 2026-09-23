@@ -1,10 +1,11 @@
-import React, { useEffect } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { PhoneOff, PhoneForwarded, Smartphone, Monitor, Globe, Radio, Users } from 'lucide-react'
 import { useCallStore, setzeAnrufIdentitaet } from '@/stores/useCallStore'
 import { deviceLabelKey, getDeviceId } from '@/lib/deviceIdentity'
 import { useAuthStore } from '@/stores/authStore'
 import { eigenesGeraet, geraetVeroeffentlichen } from '@/services/e2eeGeraet'
+import type { GruppenAnsicht } from '@/services/gruppenName'
 
 interface CrossDeviceCallBannerProps {
   className?: string
@@ -24,6 +25,50 @@ export const CrossDeviceCallBanner: React.FC<CrossDeviceCallBannerProps> = ({ cl
     joinGroupCall,
   } = useCallStore()
   const user = useAuthStore((s) => s.user)
+
+  /*
+   * Wie die Gruppe heisst, sagt nicht mehr der Server.
+   *
+   * Bis Stufe 6a stand der Name in `chat_groups.name` und kam mit dem
+   * Anrufhinweis mit. Die Spalte ist seit Stufe 6c entfernt, und der Hinweis
+   * trägt nur noch die Kennung. Den Namen holt dieses Gerät aus seinem
+   * versiegelten Namensspeicher — derselbe, aus dem der Messenger ihn nimmt.
+   *
+   * Ein Gerät, das die Gruppe noch nie geöffnet hat, hat ihn dort nicht. Dann
+   * steht „Verschlüsselte Gruppe" — dieselbe Auskunft wie im Messenger, und
+   * ehrlicher als ein Name, den der Server geraten hätte.
+   */
+  const [gruppenNamen, setGruppenNamen] = useState<Map<number, GruppenAnsicht>>(new Map())
+  const gruppenKennungen = [
+    ...(activeGroupCalls ?? []).map((g) => g.group_id),
+    crossDeviceCall?.group_id ?? null,
+  ]
+    .filter((id): id is number => typeof id === 'number')
+    .join(',')
+
+  useEffect(() => {
+    if (!gruppenKennungen) return
+    let aktiv = true
+    // Spaet geladen: dieses Banner haengt in der Huelle jeder Seite, und der
+    // Namensspeicher zieht die Gruppenschluessel-Kette hinter sich her. Ohne
+    // laufenden Gruppenanruf wird nichts davon gebraucht.
+    void import('@/services/gruppenName')
+      .then((m) => m.ladeGruppenNamen())
+      .then((namen) => {
+        if (aktiv) setGruppenNamen(namen)
+      })
+      .catch(() => {})
+    return () => {
+      aktiv = false
+    }
+  }, [gruppenKennungen])
+
+  const gruppenTitel = useCallback(
+    (groupId: number | null | undefined): string =>
+      (typeof groupId === 'number' ? gruppenNamen.get(groupId)?.name?.trim() : '') ||
+      t('messenger.groupSealed'),
+    [gruppenNamen, t],
+  )
 
   // Globale E2EE-Anrufidentität beim Start und Benutzerwechsel auflösen,
   // damit Anrufe auch außerhalb des Messengers angenommen und entschlüsselt werden können.
@@ -104,7 +149,8 @@ export const CrossDeviceCallBanner: React.FC<CrossDeviceCallBannerProps> = ({ cl
                 </span>
               </div>
               <div className="text-xs text-on-surface-variant truncate">
-                {t('calls.groupPrefix')} <span className="font-medium text-on-surface">{groupCall.group_name}</span>
+                {t('calls.groupPrefix')}{' '}
+                <span className="font-medium text-on-surface">{gruppenTitel(groupCall.group_id)}</span>
               </div>
             </div>
           </div>
@@ -117,8 +163,8 @@ export const CrossDeviceCallBanner: React.FC<CrossDeviceCallBannerProps> = ({ cl
                 void joinGroupCall(
                   {
                     id: groupCall.group_id,
-                    name: groupCall.group_name,
-                    avatarUrl: groupCall.avatar_url,
+                    name: gruppenTitel(groupCall.group_id),
+                    avatarUrl: gruppenNamen.get(groupCall.group_id)?.logo ?? null,
                     canShare: true,
                     canModerate: false,
                   },
@@ -143,7 +189,7 @@ export const CrossDeviceCallBanner: React.FC<CrossDeviceCallBannerProps> = ({ cl
 
   const istGruppe = crossDeviceCall.art === 'gruppe'
   const partnerName = istGruppe
-    ? crossDeviceCall.group_name || t('calls.groupCall')
+    ? gruppenTitel(crossDeviceCall.group_id)
     : crossDeviceCall.partner?.username || t('calls.peer')
   const deviceLabel = t(deviceLabelKey(crossDeviceCall.device_type))
 

@@ -284,14 +284,16 @@ def test_messaging_non_friend_to_public_user_and_reply_rule(db: Session):
         blind_mailbox_id=mid,
         ciphertext_envelope=_valid_test_envelope(payload_tag="first_message_from_a"),
         sender_user_id=user_a.id,
-        recipient_id=user_b.id,
     )
     assert env1.id is not None
 
-    # Chat existiert nun in direct_chats
+    # Chat existiert nun in direct_chats — als Kennung, nicht als Namenspaar.
+    # `initiated_by_user_id` stand hier bis Stufe 6b; die Zeile sagt seitdem
+    # „dieses Gespraech gibt es", nicht „diese beiden fuehren es".
     chat = db.query(DirectChat).filter_by(blind_mailbox_id=mid).first()
     assert chat is not None
-    assert chat.initiated_by_user_id == user_a.id
+    assert not hasattr(chat, "initiated_by_user_id")
+    assert not hasattr(chat, "user_a_id")
 
     # 2. Antwort-Erlaubnis: B muss direkt antworten können, obwohl A 'private' ist und keine Freundschaft besteht!
     can_reply, reply_reason = SocialService.can_message_user(db, user_b.id, user_a.id)
@@ -304,16 +306,22 @@ def test_messaging_non_friend_to_public_user_and_reply_rule(db: Session):
         blind_mailbox_id=mid,
         ciphertext_envelope=_valid_test_envelope(payload_tag="reply_message_from_b"),
         sender_user_id=user_b.id,
-        recipient_id=user_a.id,
     )
     assert env2.id is not None
 
-    # 3. Unterhaltung funktioniert in beide Richtungen uneingeschränkt
-    chats_a = SocialService.list_direct_chats(db, user_a.id)
-    assert any(c["other_user_id"] == user_b.id for c in chats_a)
+    # 3. Unterhaltung funktioniert in beide Richtungen uneingeschränkt.
+    #
+    # Geprueft wird am Zugang, nicht mehr an einer Liste: `list_direct_chats`
+    # gab es bis Stufe 6b, und sie beantwortete genau die Frage, die der Server
+    # nicht mehr beantworten soll. Was bleibt, ist die Tuer — beide kommen an
+    # die gemeinsame Mailbox, ein Dritter nicht.
+    SocialService.assert_mailbox_participant(db, user_a.id, mid)
+    SocialService.assert_mailbox_participant(db, user_b.id, mid)
 
-    chats_b = SocialService.list_direct_chats(db, user_b.id)
-    assert any(c["other_user_id"] == user_a.id for c in chats_b)
+    fremder = _create_user(db, "fremder_im_gespraech", privacy="public")
+    with pytest.raises(HTTPException) as fehler:
+        SocialService.assert_mailbox_participant(db, fremder.id, mid)
+    assert fehler.value.status_code == 403
 
 
 def test_messaging_forbidden_for_private_non_friend_without_existing_chat(db: Session):
@@ -338,7 +346,6 @@ def test_messaging_forbidden_for_private_non_friend_without_existing_chat(db: Se
             blind_mailbox_id=SocialService.derive_blind_mailbox_id(sender.id, target_private.id),
             ciphertext_envelope=_valid_test_envelope(payload_tag="unauthorized_attempt"),
             sender_user_id=sender.id,
-            recipient_id=target_private.id,
         )
     assert exc1.value.status_code == 403
 
@@ -449,10 +456,23 @@ async def test_server_presence_broadcast_invisible_masks_as_offline(db: Session)
         SyncEventService.unsubscribe(conn_friend)
 
 
-def test_messaging_relay_mailbox_mismatch_rejected(db: Session):
-    """Prüft, dass manipulierte Mailbox-IDs beim Senden mit Empfänger-ID mit HTTP 400 abgewiesen werden."""
+def test_messaging_relay_erfundene_mailbox_abgewiesen(db: Session):
+    """Eine frei erfundene Mailbox-Kennung wird abgewiesen — mit 403.
+
+    Bis 09/2026 war das ein 400 mit „stimmt nicht mit dem angegebenen
+    Empfänger überein": der Absender nannte ein `recipient_id`, und der Server
+    rechnete nach, ob die Kennung dazu passt. Das Feld gibt es nicht mehr, und
+    damit auch diesen Abgleich nicht.
+
+    Die Zusage bleibt und wird sogar schärfer: eine Kennung, zu der der Server
+    kein Konto findet, braucht **Besitznachweis oder Teilnahme**. Dieser
+    Absender hat weder das eine noch das andere. 403 statt 400 ist dabei die
+    bessere Antwort — ein 400 unterschiede „gibt es, passt aber nicht" von
+    „gibt es nicht", und genau diese Unterscheidung soll niemand aus einer
+    Antwort ablesen können.
+    """
     sender = _create_user(db, "sender_spoof", privacy="public")
-    target = _create_user(db, "target_spoof", privacy="public")
+    _create_user(db, "target_spoof", privacy="public")
 
     fake_mailbox = "0" * 64
     with pytest.raises(HTTPException) as exc_info:
@@ -461,10 +481,9 @@ def test_messaging_relay_mailbox_mismatch_rejected(db: Session):
             blind_mailbox_id=fake_mailbox,
             ciphertext_envelope=_valid_test_envelope(payload_tag="spoofed_payload"),
             sender_user_id=sender.id,
-            recipient_id=target.id,
         )
-    assert exc_info.value.status_code == 400
-    assert "stimmt nicht mit" in exc_info.value.detail
+    assert exc_info.value.status_code == 403
+    assert "Keine Berechtigung" in exc_info.value.detail
 
 
 def test_blocked_user_gets_no_presence_and_cannot_message(db: Session):
@@ -502,7 +521,6 @@ def test_blocked_user_gets_no_presence_and_cannot_message(db: Session):
             blind_mailbox_id=mid,
             ciphertext_envelope=_valid_test_envelope(payload_tag="blocked_attempt"),
             sender_user_id=user_b.id,
-            recipient_id=user_a.id,
         )
     assert exc_msg.value.status_code == 403
 
@@ -515,7 +533,6 @@ def test_blocked_user_gets_no_presence_and_cannot_message(db: Session):
             sender_id=user_b.id,
             sender_username=user_b.username,
             db=db,
-            recipient_id=user_a.id,
         )
         assert queue_a.empty()
     finally:
@@ -554,7 +571,6 @@ async def test_typing_signal_targeted_to_recipient_only(db: Session):
             sender_id=sender.id,
             sender_username=sender.username,
             db=db,
-            recipient_id=recipient.id,
         )
 
         # Empfänger erhält Signal
@@ -589,7 +605,6 @@ async def test_message_relay_targeted_to_chat_participants_only(db: Session):
             blind_mailbox_id=mid,
             ciphertext_envelope=_valid_test_envelope(payload_tag="private_message"),
             sender_user_id=sender.id,
-            recipient_id=recipient.id,
         )
 
         assert not queue_rec.empty()

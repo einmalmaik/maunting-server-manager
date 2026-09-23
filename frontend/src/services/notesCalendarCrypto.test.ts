@@ -25,7 +25,11 @@ import {
 } from './notesCalendarCrypto'
 import * as socialApi from '@/api/social'
 import * as e2eeGeraet from './e2eeGeraet'
-import { encryptE2eeHybrid, generateLocalE2eeKeyPair } from './e2eeCrypto'
+import {
+  deriveUserDeviceMailboxId,
+  encryptE2eeHybrid,
+  generateLocalE2eeKeyPair,
+} from './e2eeCrypto'
 
 vi.mock('@/api/social', () => ({
   relayE2eeEnvelope: vi.fn().mockResolvedValue({ id: 999, blind_mailbox_id: 'box-1' }),
@@ -226,7 +230,9 @@ describe('notesCalendarCrypto E2EE', () => {
     expect(count).toBe(1)
     expect(socialApi.relayE2eeEnvelope).toHaveBeenCalledWith(
       expect.objectContaining({
-        recipient_id: userId,
+        // Die Mailbox ist die Adresse: seit Stufe 4 nimmt das Relais keine
+        // Empfaengerkennung mehr entgegen.
+        blind_mailbox_id: await deriveUserDeviceMailboxId(userId),
         is_control: true,
         control_type: 'notes_key_sync',
       })
@@ -293,7 +299,9 @@ describe('notesCalendarCrypto E2EE', () => {
     expect(processed).toBe(true)
     expect(socialApi.relayE2eeEnvelope).toHaveBeenCalledWith(
       expect.objectContaining({
-        recipient_id: userId,
+        // Die Mailbox ist die Adresse: seit Stufe 4 nimmt das Relais keine
+        // Empfaengerkennung mehr entgegen.
+        blind_mailbox_id: await deriveUserDeviceMailboxId(userId),
         is_control: true,
         control_type: 'notes_key_sync',
       })
@@ -407,7 +415,9 @@ describe('notesCalendarCrypto E2EE', () => {
     expect(count).toBe(1)
     expect(socialApi.relayE2eeEnvelope).toHaveBeenCalledWith(
       expect.objectContaining({
-        recipient_id: userId,
+        // Die Mailbox ist die Adresse: seit Stufe 4 nimmt das Relais keine
+        // Empfaengerkennung mehr entgegen.
+        blind_mailbox_id: await deriveUserDeviceMailboxId(userId),
         is_control: true,
         control_type: 'notes_key_sync',
       })

@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from dependencies import get_current_user, require_global, verify_csrf
-from models import ChatGroup, ChatGroupMember, User
+from models import ChatGroupMember, User
 from schemas.calls import (
     ActiveCallInfo,
     ActiveCallResponse,
@@ -334,20 +334,18 @@ def ausstehende_anrufe(
         .filter(ChatGroupMember.user_id == user.id)
         .all()
     )
-    group_ids = [row[0] for row in user_groups]
-    if group_ids:
-        groups = db.query(ChatGroup).filter(ChatGroup.id.in_(group_ids)).all()
-        for g in groups:
-            room_token = GroupCallRoomRegistry.find_for_group(g.id)
-            if room_token:
-                participants_count = livekit_service.raum_teilnehmer(room_token, db)
-                group_calls.append({
-                    "group_id": g.id,
-                    "group_name": g.name,
-                    "avatar_url": g.avatar_url,
-                    "room_token": room_token,
-                    "participant_count": participants_count,
-                })
+    # Die Gruppenzeile selbst wird nicht mehr geladen: an ihr stand nur noch
+    # der Name und das Logo, und beides ist seit Stufe 6a leer. Gebraucht wird
+    # allein die Kennung — den Namen setzt der Client aus seinem versiegelten
+    # Namensspeicher.
+    for group_id in [row[0] for row in user_groups]:
+        room_token = GroupCallRoomRegistry.find_for_group(group_id)
+        if room_token:
+            group_calls.append({
+                "group_id": group_id,
+                "room_token": room_token,
+                "participant_count": livekit_service.raum_teilnehmer(room_token, db),
+            })
 
     return {
         "has_pending_call": pending_call is not None,
@@ -480,7 +478,6 @@ def zugangstoken(
     partner_id: int | None = None
     partner_username: str | None = None
     partner_avatar_url: str | None = None
-    group_name: str | None = None
 
     if req.art == "direkt":
         if CallRoomService.is_consumed(req.raum):
@@ -514,9 +511,6 @@ def zugangstoken(
             raise HTTPException(
                 status_code=404, detail="Gruppenanruf nicht gefunden oder abgelaufen."
             )
-        gruppe_obj = db.query(ChatGroup).filter_by(id=req.group_id).first()
-        if gruppe_obj:
-            group_name = gruppe_obj.name
 
     identity = f"u{user.id}"
     user_metadata = json.dumps({
@@ -538,7 +532,6 @@ def zugangstoken(
         req.raum,
         req.art,
         group_id=req.group_id,
-        group_name=group_name,
         mode=req.mode or "audio",
         device_id=req.device_id,
         device_type=req.device_type,

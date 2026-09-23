@@ -14,9 +14,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
 import uuid
-from typing import Any
 from fastapi import HTTPException
-from sqlalchemy import or_, and_
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -26,7 +24,6 @@ from models import (
     ChatMedia,
     DirectChat,
     User,
-    UserFriend,
 )
 from services.chat_media_validator import (
     MAX_MEDIA_BYTES,
@@ -107,35 +104,33 @@ class ChatMediaService:
             return
 
         # 2. Direktchat (1:1)
+        #
+        # Bis Stufe 6b stand in der Chatzeile, wer dazugehoert; hier wurde
+        # nachgeschlagen. Jetzt steht dort nur noch die Kennung der Mailbox,
+        # und die Zugehoerigkeit wird gerechnet: `gegenueber_aus_mailbox`
+        # leitet fuer jedes aktive Konto die Kennung ab, die dieses Paar
+        # ergaebe. Dieselbe Antwort, ohne dass der Server eine Liste fuehrt.
+        clean_mailbox = media.blind_mailbox_id.strip()
+        zeile = None
         if media.direct_chat_id is not None:
-            chat = db.query(DirectChat).filter(DirectChat.id == media.direct_chat_id).first()
-            if not chat or user_id not in (chat.user_a_id, chat.user_b_id):
+            zeile = db.query(DirectChat).filter(DirectChat.id == media.direct_chat_id).first()
+            if zeile is None:
                 raise HTTPException(
                     status_code=403,
                     detail="Keine Chat-Mitgliedschaft: Benutzer gehoert nicht zu dieser Konversation.",
                 )
+            clean_mailbox = (zeile.blind_mailbox_id or clean_mailbox).strip()
+        else:
+            zeile = db.query(DirectChat).filter_by(blind_mailbox_id=clean_mailbox).first()
 
-            # Blockierungspruefung
-            other_id = chat.get_other_user_id(user_id)
-            if _ist_blockiert(db, user_id, other_id):
-                raise HTTPException(
-                    status_code=403,
-                    detail="Kommunikation blockiert: Zugriff auf Medien verweigert.",
-                )
-            return
-
-        # 3. Blinde Mailbox Fallback
-        clean_mailbox = media.blind_mailbox_id.strip()
-        chat_by_box = db.query(DirectChat).filter_by(blind_mailbox_id=clean_mailbox).first()
-        if chat_by_box:
-            if user_id not in (chat_by_box.user_a_id, chat_by_box.user_b_id):
+        if zeile is not None:
+            gegenueber = SocialService.gegenueber_aus_mailbox(db, user_id, clean_mailbox)
+            if gegenueber is None:
                 raise HTTPException(
                     status_code=403,
                     detail="Keine Chat-Mitgliedschaft: Benutzer gehoert nicht zu diesem Chat.",
                 )
-            # Blockierungspruefung
-            other_id = chat_by_box.get_other_user_id(user_id)
-            if _ist_blockiert(db, user_id, other_id):
+            if _ist_blockiert(db, user_id, gegenueber):
                 raise HTTPException(
                     status_code=403,
                     detail="Kommunikation blockiert: Zugriff auf Medien verweigert.",
@@ -170,7 +165,7 @@ class ChatMediaService:
         file_name: str,
         media_type: str = "application/octet-stream",
         group_id: int | None = None,
-        recipient_id: int | None = None,
+        mailbox_token: str | None = None,
     ) -> ChatMedia:
         """Nimmt einen clientseitig verschluesselten E2EE-Medienblob entgegen."""
         SocialService.assert_social_enabled(db)
@@ -195,24 +190,32 @@ class ChatMediaService:
                 )
             target_group_id = group_id
         else:
-            target_recipient_id, _, direct_chat, resolved_group_id = SocialService.resolve_mailbox_target(
+            target_recipient_id, direct_chat = SocialService.resolve_mailbox_target(
                 db,
                 sender_user_id=uploader.id,
                 blind_mailbox_id=clean_mailbox,
-                recipient_id=recipient_id,
             )
-            if resolved_group_id:
-                target_group_id = resolved_group_id
-            elif target_recipient_id:
+            if target_recipient_id:
                 can_msg, reason = SocialService.can_message_user(db, uploader.id, target_recipient_id)
                 if not can_msg:
                     raise HTTPException(status_code=403, detail=reason or "Keine Berechtigung fuer diesen Chat.")
                 direct_chat_id = direct_chat.id if direct_chat else SocialService.ensure_direct_chat(db, uploader.id, target_recipient_id).id
             else:
-                raise HTTPException(
-                    status_code=403,
-                    detail="Upload verweigert: Keine gueltige Chat-Mitgliedschaft fuer die angegebene Mailbox-ID.",
-                )
+                # Eine Mailbox, die der Server keinem Konto zuordnen kann.
+                #
+                # Bis 09/2026 war das hier ein 403 — und damit war jeder
+                # Anhang in einer Gruppe mit geheimer Mailbox unmoeglich,
+                # ausser der Client nannte die `group_id` dazu. Die Zeile
+                # bleibt ohne `direct_chat_id` und ohne `group_id`: sie sagt
+                # nicht mehr, zu welchem Gespraech der Anhang gehoert, und
+                # `assert_chat_membership` faellt beim Lesen auf denselben
+                # Mailbox-Weg zurueck.
+                #
+                # Die Schranke ist dieselbe wie im Relais: Besitznachweis
+                # **oder** Teilnahme. Eine erfundene Kennung ohne beides ist
+                # weiter 403 — sonst waere der Upload eine Ablage, die jedes
+                # angemeldete Konto unter beliebigen Kennungen fuellen kann.
+                SocialService.assert_mailbox_zugang(db, uploader.id, clean_mailbox, mailbox_token)
 
         # 2. Server-seitige Validierung des verschluesselten Blobs
         # Stellt sicher: Server akzeptiert NUR E2EE Blobs, keine Klartexte und keine Riesen-Dateien

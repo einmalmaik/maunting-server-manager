@@ -1,15 +1,12 @@
 import asyncio
 import logging
-import os
-import re
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, WebSocket
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, WebSocket
 from starlette.websockets import WebSocketDisconnect
 from sqlalchemy.orm import Session
 
 from database import SessionLocal, get_db
 from dependencies import get_current_user, get_optional_user, verify_csrf, get_current_user_for_ws, ws_subprotokoll
-from models import ChatGroup, User
+from models import ChatGroup, ChatGroupConfig, User
 from schemas.chat_media import (
     ChatMediaUploadRequest,
     ChatMediaUploadResponse,
@@ -21,6 +18,7 @@ from schemas.social import (
     ActivityPingRequest,
     E2eeBlindEnvelopeCreate,
     E2eeBlindEnvelopeResponse,
+    E2eeMailboxRegister,
     E2eeMailboxSyncResponse,
     E2eeTypingSignalCreate,
     E2eeDeviceItem,
@@ -30,6 +28,7 @@ from schemas.social import (
     PresenceInfo,
     PresenceUpdateRequest,
     PrivacyUpdateRequest,
+    MailboxPushAbos,
     PushSubscriptionCreate,
     SocialProfileResponse,
     UserStatsResponse,
@@ -38,6 +37,9 @@ from schemas.social import (
     ChatGroupMemberResponse,
     ChatGroupMemberUpdate,
     ChatGroupPermissionsUpdate,
+    ChatGroupConfigWrite,
+    ChatGroupConfigResponse,
+    ChatGroupInviteCardUpdate,
     ChatGroupInvitePublicResponse,
     ChatStoryCreate,
     ChatStoryResponse,
@@ -48,9 +50,9 @@ from services.achievement_service import AchievementService
 from services.chat_media_service import ChatMediaService
 from services.chat_media_validator import sanitize_attachment_filename
 from services.social_service import SocialService
-from services.sync_event_service import SyncEventService
+from services.sync_event_service import MAX_MAILBOXES, SyncEventService
 from services.call_room_service import GroupCallRoomRegistry
-from services import bild_upload, e2ee_device_service, livekit_service, webpush_service
+from services import e2ee_device_service, livekit_service, webpush_service
 
 logger = logging.getLogger(__name__)
 
@@ -368,7 +370,117 @@ def unsubscribe_push(
     user: User = Depends(get_current_user),
 ) -> dict:
     """Entfernt eine Zustelladresse. Nur die eigene — fremde findet die Abfrage nicht."""
-    return {"ok": webpush_service.austragen(db, user, endpoint)}
+    entfernt = webpush_service.austragen(db, user, endpoint)
+    # Und die mailboxgebundenen Zeilen derselben Adresse. Sie kennen kein
+    # Konto, also kann sie auch kein Abmelden eines Kontos treffen — sie
+    # hängen an dieser Adresse, und die trägt sich hier gerade aus.
+    webpush_service.austragen_mailboxen(db, endpoint)
+    return {"ok": entfernt}
+
+
+@router.post(
+    "/e2ee/mailbox-push",
+    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
+)
+def subscribe_mailbox_push(
+    req: MailboxPushAbos,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Trägt diesen Browser als Zustelladresse für Mailboxen ein.
+
+    Das Gegenstück zu `/push/subscribe` für den Fall, dass es kein Konto zu
+    benachrichtigen gibt. Die Sitzung entscheidet hier, **ob** eingetragen
+    werden darf — und nur das: in der Zeile bleibt von ihr nichts übrig, kein
+    `user_id` und kein Fremdschlüssel.
+
+    Die Erlaubnis kommt aus derselben Prüfung wie beim Echtzeitstrom. Wichtig,
+    dass es dieselbe ist: wäre Push die nachsichtigere Tür, könnte man sich
+    über eine Benachrichtigung sagen lassen, was der Strom einem verschweigt.
+
+    Was durchfällt, fällt still durch. Die Antwort nennt nur die Anzahl —
+    welche Kennung abgelehnt wurde, wäre eine Auskunft darüber, welche
+    Mailboxen es gibt.
+    """
+    erlaubt = SocialService.erlaubte_mailboxen(
+        db,
+        user.id,
+        ((e.mailbox_id, e.mailbox_token) for e in req.eintraege[:MAX_MAILBOXES]),
+    )
+
+    for mid in erlaubt:
+        webpush_service.eintragen_mailbox(
+            db, mailbox_id=mid, endpoint=req.endpoint, p256dh=req.p256dh, auth=req.auth
+        )
+
+    # Was dieser Browser vorher hatte und jetzt nicht mehr nennt, fällt weg:
+    # sonst bliebe die verlassene Gruppe als Zustellziel stehen, und das Gerät
+    # bekäme weiter Meldungen über Nachrichten, die es nicht mehr lesen kann.
+    bestand = webpush_service.mailboxen_von(db, req.endpoint)
+    ueberzaehlig = bestand - set(erlaubt)
+    if ueberzaehlig:
+        webpush_service.austragen_mailboxen(db, req.endpoint, nur=ueberzaehlig)
+
+    return {"ok": True, "count": len(erlaubt)}
+
+
+@router.delete(
+    "/e2ee/mailbox-push",
+    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
+)
+def unsubscribe_mailbox_push(
+    endpoint: str = Query(..., min_length=16, max_length=2048),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Trägt diesen Browser aus allen Mailboxen aus. Der Weg beim Abmelden.
+
+    Es wird bewusst nicht geprüft, wem die Adresse gehört: das ist in dieser
+    Tabelle nicht hinterlegt, und es nachzutragen hiesse, die Zeile doch wieder
+    einem Konto zuzuordnen. Die Adresse ist das Geheimnis des Browsers, der sie
+    bekommen hat — sie steht in keiner Antwort dieses Panels.
+    """
+    return {"ok": True, "count": webpush_service.austragen_mailboxen(db, endpoint)}
+
+
+def mailbox_token(
+    x_mailbox_token: str | None = Header(default=None, alias="X-Mailbox-Token"),
+) -> str | None:
+    """Der Besitznachweis, den der Client zu einer Mailbox mitschickt.
+
+    Als Kopfzeile, nicht als Abfrageparameter: was in der Adresse steht, steht
+    im Zugriffsprotokoll des Webservers und in jedem Zwischenspeicher davor.
+    Ein Nachweis, der dort landet, ist keiner mehr.
+
+    Fehlt er, ist das für sich kein Fehler — für Mailboxen ohne hinterlegten
+    Nachweis ändert sich nichts. Erst `assert_mailbox_token` entscheidet, ob
+    an dieser Stelle einer nötig gewesen wäre.
+    """
+    return x_mailbox_token
+
+
+@router.post(
+    "/e2ee/mailbox/register",
+    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
+)
+def register_blind_mailbox(
+    req: E2eeMailboxRegister,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Hinterlegt den blinden Besitznachweis einer Mailbox.
+
+    Der authentifizierte Übergang vom kontogebundenen Weg auf den blinden —
+    dieselbe Stelle, die beim Tresor `/blind-register` ist. Danach gilt für
+    diese Mailbox der Nachweis **zusätzlich** zur bisherigen Prüfung.
+    """
+    SocialService.register_blind_mailbox(
+        db,
+        user_id=current_user.id,
+        mailbox_id=req.mailbox_id,
+        auth_token=req.auth_token,
+    )
+    return {"ok": True}
 
 
 @router.post("/e2ee/relay", response_model=E2eeBlindEnvelopeResponse, dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
@@ -376,16 +488,19 @@ def relay_e2ee_message(
     req: E2eeBlindEnvelopeCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    nachweis: str | None = Depends(mailbox_token),
 ) -> dict:
+    SocialService.assert_mailbox_token(db, req.blind_mailbox_id, nachweis)
     envelope = SocialService.relay_blind_envelope(
         db,
         blind_mailbox_id=req.blind_mailbox_id,
         ciphertext_envelope=req.ciphertext_envelope,
         sender_user_id=current_user.id,
-        recipient_id=req.recipient_id,
         client_uuid=req.client_uuid,
         is_control=req.is_control,
         control_type=req.control_type,
+        mailbox_token=nachweis,
+        push_ausnahme=req.push_ausnahme,
     )
 
     return {
@@ -408,11 +523,13 @@ def upload_chat_media(
     req: ChatMediaUploadRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    nachweis: str | None = Depends(mailbox_token),
 ) -> dict:
     """Laedt einen clientseitig verschluesselten E2EE-Medienblob hoch.
 
     Der Server nimmt ausschliesslich verschluesselte Blobs entgegen (Zero-Knowledge).
     """
+    SocialService.assert_mailbox_token(db, req.blind_mailbox_id, nachweis)
     media = ChatMediaService.upload_encrypted_media(
         db,
         uploader=current_user,
@@ -421,7 +538,7 @@ def upload_chat_media(
         file_name=req.file_name,
         media_type=req.media_type,
         group_id=req.group_id,
-        recipient_id=req.recipient_id,
+        mailbox_token=nachweis,
     )
     return {
         "id": media.id,
@@ -510,14 +627,21 @@ def download_chat_media_blob(
 
 # --- Direkte Chats (1:1 Unterhaltungen & Berechtigungsprüfung) ---
 
-@router.get("/chats", response_model=list[DirectChatResponse], dependencies=[Depends(_check_social_enabled)])
-@router.get("/direct-chats", response_model=list[DirectChatResponse], dependencies=[Depends(_check_social_enabled)])
-def list_my_direct_chats(
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> list[dict]:
-    """Liefert alle aktiven 1:1-Chats des authentifizierten Benutzers."""
-    return SocialService.list_direct_chats(db, user.id)
+"""
+`GET /chats` und `GET /direct-chats` gab es hier bis Stufe 6b.
+
+Sie beantworteten „mit wem schreibt dieses Konto?" — und um sie beantworten
+zu koennen, musste der Server es aufschreiben. Genau das soll er nicht.
+
+Die Liste fuehrt jetzt der Client: `gespraechsListe.ts` haelt sie versiegelt
+im oertlichen Speicher. Gespeist wird sie aus `POST /chat/start/{id}` (dort
+nennt der Aufrufer sein Gegenueber selbst, der Server erfaehrt nichts Neues)
+und aus dem, was in den abonnierten Mailboxen ankommt.
+
+Die Routen sind entfernt und nicht etwa auf eine leere Liste gesetzt: ein
+Endpunkt, der immer `[]` liefert, sieht fuer einen alten Client wie „du hast
+keine Gespraeche" aus. Ein 404 ist die ehrlichere Auskunft.
+"""
 
 
 @router.get("/chat/can-message/{target_user_id}", response_model=CanMessageResponse, dependencies=[Depends(_check_social_enabled)])
@@ -587,9 +711,13 @@ def fetch_blind_mailbox_envelopes(
     limit: int = Query(100, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    nachweis: str | None = Depends(mailbox_token),
 ) -> list[dict]:
-    # H-3: Jede Mailbox darf nur von berechtigten Teilnehmern abgefragt werden
-    SocialService.assert_mailbox_participant(db, current_user.id, blind_mailbox_id)
+    # Eine Mailbox öffnet sich nur ihren Besitzern: entweder gehört das Konto
+    # dazu, oder es legt den Besitznachweis vor. Seit die Kennung aus einem
+    # Gruppengeheimnis fallen kann, ist der zweite Weg kein Zusatz mehr,
+    # sondern der einzige — der Server kann dort niemanden nachschlagen.
+    SocialService.assert_mailbox_zugang(db, current_user.id, blind_mailbox_id, nachweis)
 
     envelopes = SocialService.get_blind_envelopes(
         db, blind_mailbox_id=blind_mailbox_id, since_id=since_id, limit=limit
@@ -615,6 +743,7 @@ def delete_blind_mailbox_envelopes(
     client_uuid: str = Query(..., min_length=1, max_length=64),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    nachweis: str | None = Depends(mailbox_token),
 ) -> dict:
     """Nimmt die Umschlaege einer geloeschten Nachricht aus der Mailbox.
 
@@ -626,6 +755,7 @@ def delete_blind_mailbox_envelopes(
         blind_mailbox_id=blind_mailbox_id,
         client_uuid=client_uuid,
         user_id=current_user.id,
+        mailbox_token=nachweis,
     )
     return {"ok": True, "deleted": entfernt}
 
@@ -635,14 +765,15 @@ def send_e2ee_typing_signal(
     req: E2eeTypingSignalCreate,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
+    nachweis: str | None = Depends(mailbox_token),
 ) -> dict:
+    SocialService.assert_mailbox_token(db, req.blind_mailbox_id, nachweis)
     SocialService.broadcast_typing_signal(
         blind_mailbox_id=req.blind_mailbox_id,
         status=req.status,
         sender_id=user.id,
         sender_username=user.username,
         db=db,
-        recipient_id=req.recipient_id,
     )
     return {"ok": True}
 
@@ -666,10 +797,18 @@ def _gruppe_antwort(db: Session, group: ChatGroup, user_id: int) -> dict:
     role = "owner" if group.owner_user_id == user_id else "member"
     return {
         "id": group.id,
-        "name": group.name,
-        "description": group.description,
-        "avatar_url": group.avatar_url,
-        "invite_code": group.invite_code,
+        # Seit Stufe 6 immer leer. Der Client setzt sie aus dem
+        # verschluesselten Block; hier steht nichts, was er ueberschreiben
+        # muesste.
+        "name": None,
+        "description": None,
+        "avatar_url": None,
+        # Wie in `list_user_groups`: der Code geht nur an die, die einladen
+        # dürfen. Dieser Zweig greift, solange die Mitgliedschaft noch nicht in
+        # der Liste steht — beim Anlegen der Gruppe also für den Gründer.
+        "invite_code": (
+            group.invite_code if SocialService.darf_einladen(db, group.id, user_id) else None
+        ),
         "owner_user_id": group.owner_user_id,
         "default_permissions": group.default_permissions,
         "member_count": len(group.members) if group.members else 1,
@@ -694,13 +833,11 @@ def create_chat_group(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    group = SocialService.create_group(
-        db,
-        user=user,
-        name=req.name,
-        description=req.description,
-        avatar_url=req.avatar_url,
-    )
+    # `req` wird absichtlich nicht ausgewertet: seit Stufe 6 legt der Server
+    # zu einer Gruppe nichts mehr ab als ihre Kennung, ihren Gruender und den
+    # Einladungscode. Der Rumpf bleibt im Schema, damit ein Altclient nicht an
+    # einer fehlenden Route scheitert.
+    group = SocialService.create_group(db, user=user)
     return _gruppe_antwort(db, group, user.id)
 
 
@@ -715,19 +852,73 @@ def get_group_invite_info(
     Wer den Code hat, soll beitreten können und darf deshalb sehen, ob sich das
     gerade lohnt. Mehr geht bewusst nicht hinaus: keine Namen, keine Kennungen,
     keine Nachrichten.
+
+    **Entweder verschlüsselt oder im Klartext, nie beides.** Hat die Gruppe
+    eine `invite_card`, geht nur die hinaus; Name, Beschreibung und Logo
+    bleiben `None`. Beides nebeneinander auszuliefern wäre Verschlüsselung als
+    Zierde — wer den Klartext danebenlegt, hat nichts verschlossen.
+
+    Seit Stufe 6 gibt es den Klartextzweig nicht mehr — die Spalten, aus denen
+    er kam, sind geräumt. Eine Gruppe ohne Karte zeigt deshalb nur noch ihre
+    Zahlen; der Client schreibt „Verschlüsselte Einladung" darüber. Das ist
+    kein Rückschritt gegenüber vorher, sondern das Ende des Übergangs: wer
+    einlädt, hinterlegt beim Teilen eine Karte.
     """
     group = SocialService.get_group_by_invite_code(db, invite_code)
     member_count = len(group.members) if group.members else 1
     raum = _offener_gruppenraum(group.id)
+    karte = (group.invite_card or "").strip() or None
     return {
         "group_id": group.id,
-        "name": group.name,
-        "description": group.description,
-        "avatar_url": group.avatar_url,
+        "name": None,
+        "description": None,
+        "avatar_url": None,
+        "invite_card": karte,
         "member_count": member_count,
         "live_call": raum is not None,
         "live_participants": livekit_service.raum_teilnehmer(raum, db) if raum else 0,
     }
+
+
+@router.put(
+    "/groups/{group_id}/invite-card",
+    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
+)
+def set_group_invite_card(
+    group_id: int,
+    req: ChatGroupInviteCardUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Hinterlegt die verschlüsselte Einladungskarte.
+
+    **Wer den Link teilen darf, darf die Karte setzen** — dasselbe Recht
+    (`invite_members`), weil es dieselbe Handlung ist: die Karte entsteht genau
+    dann, wenn jemand einen Link baut. Ein eigenes Recht daneben wäre eine
+    zweite Fassung derselben Frage, und die zweite Fassung ist irgendwann die
+    nachsichtigere.
+
+    Nicht auf Besitzer und Administratoren eingeschränkt: ein Mitglied mit
+    Einladungsrecht, dessen Karte abgewiesen wird, teilt trotzdem einen Link —
+    nur einen ohne Vorschau. Die Schranke schützte dann nichts und kostete eine
+    kaputte Karte.
+
+    Der Server prüft die Form, nie den Inhalt. Er kann ihn nicht lesen; das ist
+    der Zweck.
+    """
+    if not SocialService.get_group_member(db, group_id, user.id):
+        raise HTTPException(status_code=404, detail="Gruppe nicht gefunden.")
+    if not SocialService.darf_einladen(db, group_id, user.id):
+        raise HTTPException(
+            status_code=403, detail="Kein Recht, Einladungen für diese Gruppe zu erstellen."
+        )
+    group = db.query(ChatGroup).filter(ChatGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Gruppe nicht gefunden.")
+
+    group.invite_card = req.invite_card
+    db.commit()
+    return {"ok": True}
 
 
 def _offener_gruppenraum(group_id: int) -> str | None:
@@ -754,74 +945,16 @@ def _gruppenadmin_oder_fehler(db: Session, group_id: int, user_id: int) -> ChatG
     return group
 
 
-@router.post(
-    "/groups/{group_id}/avatar",
-    response_model=ChatGroupResponse,
-    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
-)
-async def upload_group_avatar(
-    group_id: int,
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> dict:
-    """Setzt das Gruppenlogo (max. 5 MB, JPEG/PNG/WebP/GIF)."""
-    group = _gruppenadmin_oder_fehler(db, group_id, user.id)
-    content_type = (file.content_type or "").lower().split(";")[0].strip()
-    if content_type not in bild_upload.ERLAUBTE_BILDTYPEN:
-        raise HTTPException(
-            status_code=400,
-            detail="Ungültiges Bildformat. Erlaubt sind JPEG, PNG, WebP und GIF.",
-        )
-    inhalt = await file.read()
-    if len(inhalt) > bild_upload.MAX_BILD_BYTES:
-        raise HTTPException(status_code=400, detail="Bild darf maximal 5 MB groß sein.")
-    if not bild_upload.ist_gueltiges_bild(inhalt, content_type):
-        raise HTTPException(status_code=400, detail="Ungültige oder beschädigte Bilddatei.")
-
-    bild_upload.loesche_bild(group.avatar_url)
-    dateiname = bild_upload.speichere_bild(inhalt, content_type, "group", group.id)
-    group.avatar_url = f"/api/social/groups/avatar/{dateiname}"
-    db.commit()
-    return _gruppe_antwort(db, group, user.id)
-
-
-@router.delete(
-    "/groups/{group_id}/avatar",
-    response_model=ChatGroupResponse,
-    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
-)
-def delete_group_avatar(
-    group_id: int,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> dict:
-    group = _gruppenadmin_oder_fehler(db, group_id, user.id)
-    bild_upload.loesche_bild(group.avatar_url)
-    group.avatar_url = None
-    db.commit()
-    return _gruppe_antwort(db, group, user.id)
-
-
-@router.get("/groups/avatar/{filename}")
-def get_group_avatar(filename: str):
-    """Liefert ein gespeichertes Gruppenlogo aus.
-
-    Ohne Anmeldung, weil eine Einladungskarte das Logo zeigt, bevor jemand
-    beigetreten ist. Der Dateiname ist zufällig und nicht erratbar.
-    """
-    if not re.match(r"^group_\d+_[a-zA-Z0-9]+\.(jpg|jpeg|png|webp|gif)$", filename):
-        raise HTTPException(status_code=404, detail="Gruppenlogo nicht gefunden")
-    pfad = os.path.join(bild_upload.bilder_verzeichnis(), filename)
-    if not os.path.isfile(pfad):
-        raise HTTPException(status_code=404, detail="Gruppenlogo nicht gefunden")
-    return FileResponse(
-        pfad,
-        headers={
-            "Cache-Control": "public, max-age=86400",
-            "Access-Control-Allow-Origin": "*",
-        },
-    )
+# Die drei Gruppenlogo-Routen standen hier bis Stufe 6.
+#
+# Sie schrieben `chat_groups.avatar_url` — genau die Spalte, die `20260923_03`
+# geraeumt hat — und die dritte lieferte das Bild **ohne Anmeldung** an jeden
+# aus, der den Dateinamen hatte. Damit wusste der Server, wie eine Gruppe
+# aussieht, und sein Zugriffsprotokoll wusste, wer gerade hinsieht.
+#
+# Das Logo reist jetzt als Data-URL im verschluesselten Gruppenblock und in
+# der Einladungskarte (`logoAlsDatenUrl`, 128 px, WebP). Eine Route, die eine
+# geleerte Spalte beschreibt, waere kein Rest, sondern ein Rueckweg.
 
 
 @router.post("/groups/join/{invite_code}", response_model=ChatGroupResponse, dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
@@ -911,6 +1044,50 @@ def update_group_permissions_endpoint(
     )
     return _gruppe_antwort(db, group, user.id)
 
+
+# --- Gruppenzustand: die eigenen Rollen einer Gruppe, verschlüsselt ---
+#
+# Zwei Endpunkte, die nichts über ihren Inhalt wissen. Was hier durchgereicht
+# wird, ist ein Umschlag unter dem Gruppenschlüssel; der liegt bei den Geräten
+# der Mitglieder, nicht auf dem Server. Deshalb gibt es hier auch keine Route
+# „Rolle anlegen" oder „Rolle löschen": der Server kennt keine Rollen. Er kennt
+# einen Block und eine Zahl.
+
+
+@router.get(
+    "/groups/{group_id}/config",
+    response_model=ChatGroupConfigResponse | None,
+    dependencies=[Depends(_check_social_enabled)],
+)
+def get_group_config_endpoint(
+    group_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ChatGroupConfig | None:
+    # `null` heißt „diese Gruppe hat noch keinen Zustand" — der Client schreibt
+    # dann mit `erwartete_revision: 0`. Ein 404 wäre hier missverständlich: die
+    # Gruppe gibt es, nur den Block noch nicht.
+    return SocialService.get_group_config(db, group_id=group_id, caller=user)
+
+
+@router.put(
+    "/groups/{group_id}/config",
+    response_model=ChatGroupConfigResponse,
+    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
+)
+def put_group_config_endpoint(
+    group_id: int,
+    req: ChatGroupConfigWrite,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ChatGroupConfig:
+    return SocialService.write_group_config(
+        db,
+        group_id=group_id,
+        blob=req.blob,
+        erwartete_revision=req.erwartete_revision,
+        caller=user,
+    )
 
 
 # --- Stories (Temporäre Statusmeldungen, 24h) ---
@@ -1029,6 +1206,34 @@ async def social_websocket(
                         await websocket.send_json({"type": "joined", "status": "ok", "user_id": user_id})
                 except Exception as exc:
                     logger.debug("Fehler bei broadcast_user_joined: %s", exc)
+            elif msg_type == "mailboxes":
+                # Der Client sagt, über welche Mailboxen er Bescheid wissen
+                # will. Der Weg für Kennungen, die der Server nicht ausrechnen
+                # kann — bei ihnen gibt es keinen Empfänger nachzuschlagen.
+                #
+                # Geprüft wird in `SocialService.erlaubte_mailboxen` — dieselbe
+                # Prüfung wie auf dem SSE-Weg und bei der Push-Adresse. Ohne
+                # sie wäre das Abo eine Verkehrsanalyse für jedermann:
+                # abonnieren und zusehen, wann es sich regt.
+                eintraege = data.get("eintraege")
+                erlaubt: list[str] = []
+                if isinstance(eintraege, list):
+                    try:
+                        with SessionLocal() as db:
+                            erlaubt = SocialService.erlaubte_mailboxen(
+                                db,
+                                user_id,
+                                (
+                                    (str(e.get("mailbox_id") or ""), e.get("mailbox_token"))
+                                    for e in eintraege[:MAX_MAILBOXES]
+                                    if isinstance(e, dict)
+                                ),
+                            )
+                    except Exception as exc:
+                        logger.debug("Fehler beim Setzen der Mailbox-Abos: %s", exc)
+                anzahl = SyncEventService.set_mailboxes(conn_id, erlaubt, user_id=user_id)
+                async with ws_lock:
+                    await websocket.send_json({"type": "mailboxes_ok", "count": anzahl})
             elif msg_type == "presence":
                 try:
                     with SessionLocal() as db:
@@ -1038,37 +1243,43 @@ async def social_websocket(
             elif msg_type == "typing":
                 blind_mailbox_id = data.get("blind_mailbox_id", "")
                 status = data.get("status", "idle")
-                recipient_id = data.get("recipient_id")
                 try:
                     with SessionLocal() as db:
+                        # Derselbe Nachweis wie auf dem HTTP-Weg. Ohne ihn wäre
+                        # der WebSocket die offene Hintertür neben der
+                        # verschlossenen Vordertür.
+                        SocialService.assert_mailbox_token(
+                            db, blind_mailbox_id, data.get("mailbox_token")
+                        )
                         SocialService.broadcast_typing_signal(
                             blind_mailbox_id=blind_mailbox_id,
                             status=status,
                             sender_id=user_id,
                             sender_username=user_username,
                             db=db,
-                            recipient_id=recipient_id,
                         )
                 except Exception as exc:
                     logger.debug("Fehler bei broadcast_typing_signal: %s", exc)
             elif msg_type == "relay":
                 blind_mailbox_id = data.get("blind_mailbox_id", "")
                 ciphertext_envelope = data.get("ciphertext_envelope", "")
-                recipient_id = data.get("recipient_id")
                 is_control = bool(data.get("is_control", False))
                 control_type = data.get("control_type")
                 client_uuid = data.get("client_uuid")
                 try:
                     with SessionLocal() as db:
+                        SocialService.assert_mailbox_token(
+                            db, blind_mailbox_id, data.get("mailbox_token")
+                        )
                         envelope = SocialService.relay_blind_envelope(
                             db,
                             blind_mailbox_id=blind_mailbox_id,
                             ciphertext_envelope=ciphertext_envelope,
                             sender_user_id=user_id,
-                            recipient_id=recipient_id,
                             client_uuid=client_uuid,
                             is_control=is_control,
                             control_type=control_type,
+                            mailbox_token=data.get("mailbox_token"),
                         )
                     # Sofortige Bestätigung an den WebSocket-Sender (Acknowledge zur Queue-Bereinigung)
                     async with ws_lock:

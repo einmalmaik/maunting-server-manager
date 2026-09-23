@@ -352,21 +352,23 @@ def test_presence_offline_timeout(db: Session, owner_user: User):
 
 def test_chat_group_create_join_invite(db: Session, owner_user: User, regular_user: User) -> None:
     # 1. Gruppe erstellen
-    group = SocialService.create_group(
-        db,
-        user=owner_user,
-        name="Singra Vault Community",
-        description="Offizielle Community-Gruppe",
-    )
+    group = SocialService.create_group(db, user=owner_user)
     assert group.id is not None
-    assert group.name == "Singra Vault Community"
+    # Seit Stufe 6 legt der Server keinen Namen mehr ab, und seit Stufe 6c gibt
+    # es die Spalte nicht einmal mehr. Was er zu einer Gruppe weiss, ist ihre
+    # Kennung, ihr Gruender und ihr Einladungscode.
+    assert not hasattr(group, "name")
     assert len(group.invite_code) >= 16
     assert group.owner_user_id == owner_user.id
 
     # 2. Öffentliche Einladung abrufen (ohne Auth)
     invite_info = SocialService.get_group_by_invite_code(db, group.invite_code)
     assert invite_info.id == group.id
-    assert invite_info.name == "Singra Vault Community"
+    # Ein Einladungscode fuehrt zu einer Gruppe, nicht zu ihrem Namen. Was der
+    # Eingeladene sieht, steht in der verschluesselten Karte
+    # (`test_gruppen_einladungskarte.py`) und geht nur mit dem Schluessel aus
+    # dem Link auf.
+    assert not hasattr(invite_info, "name")
 
     # 3. Zweiter Nutzer tritt über Einladungslink bei
     joined_group = SocialService.join_group_by_invite_code(db, regular_user, group.invite_code)
@@ -394,11 +396,7 @@ def test_chat_group_create_join_invite(db: Session, owner_user: User, regular_us
     assert env.blind_mailbox_id == blind_mailbox
 
     # 5. Zweite Gruppe erstellen (unbegrenzt)
-    group2 = SocialService.create_group(
-        db,
-        user=owner_user,
-        name="Zweite Gruppe",
-    )
+    group2 = SocialService.create_group(db, user=owner_user)
     all_groups = SocialService.list_user_groups(db, owner_user.id)
     assert len(all_groups) == 2
 
@@ -450,12 +448,7 @@ def test_chat_stories_creation_and_expiration(db: Session, owner_user: User, reg
 
 def test_chat_group_roles_and_permissions(db: Session, owner_user: User, regular_user: User) -> None:
     # 1. Gruppe erstellen
-    group = SocialService.create_group(
-        db,
-        user=owner_user,
-        name="Security & Privacy Guild",
-        description="Gilden-Chat",
-    )
+    group = SocialService.create_group(db, user=owner_user)
     SocialService.join_group_by_invite_code(db, regular_user, group.invite_code)
 
     # 2. Rolle von regular_user zu Moderator befördern mit Rechten
@@ -605,7 +598,7 @@ def test_die_ki_hat_keinen_zugang_zum_messenger(db: Session, owner_user: User) -
     db.add(alice)
     db.commit()
     db.add(UserFriend(user_id=owner_user.id, friend_id=alice.id, status="accepted"))
-    gruppe = ChatGroup(name="Gamer Community", owner_user_id=owner_user.id, invite_code="testinv123")
+    gruppe = ChatGroup(owner_user_id=owner_user.id, invite_code="testinv123")
     db.add(gruppe)
     db.commit()
     db.add_all([
@@ -888,7 +881,6 @@ def test_user_device_mailbox_e2ee_key_sync_and_privacy(
         blind_mailbox_id=device_mailbox_owner,
         ciphertext_envelope=envelope,
         sender_user_id=owner_user.id,
-        recipient_id=owner_user.id,
         client_uuid="noteskey:devA:devB:12345",
         is_control=True,
         control_type="notes_key_sync",
@@ -901,7 +893,12 @@ def test_user_device_mailbox_e2ee_key_sync_and_privacy(
     mids = [m["blind_mailbox_id"] for m in synced]
     assert device_mailbox_owner in mids
 
-    # 3. Fremder Nutzer darf NICHT in die Geräte-Mailbox des Owners einliefern (mit recipient_id -> 400)
+    # 3. Fremder Nutzer darf NICHT in die Geräte-Mailbox des Owners einliefern.
+    #
+    # Bis 09/2026 standen hier zwei Fälle: mit genanntem `recipient_id` gab es
+    # 400 („stimmt nicht mit dem angegebenen Empfänger überein"), ohne 403.
+    # Das Feld gibt es nicht mehr, also bleibt der eine ehrliche Fall — und er
+    # antwortet mit derselben 403 wie jede andere verschlossene Mailbox.
     ct2 = base64.b64encode(b"\x03" * 12 + b"attack-secret-payload" + b"\x04" * 16).decode("ascii")
     with pytest.raises(HTTPException) as exc:
         SocialService.relay_blind_envelope(
@@ -909,22 +906,23 @@ def test_user_device_mailbox_e2ee_key_sync_and_privacy(
             blind_mailbox_id=device_mailbox_owner,
             ciphertext_envelope=f"sv-e2ee-hybrid-v1:{wk}.{ct2}",
             sender_user_id=regular_user.id,
-            recipient_id=owner_user.id,
             client_uuid="attack:123",
         )
-    assert exc.value.status_code == 400
+    assert exc.value.status_code == 403
 
-    # 3b. Fremder Nutzer darf auch OHNE recipient_id NICHT in fremde Geräte-Mailbox einliefern (403)
-    with pytest.raises(HTTPException) as exc_no_recip:
+    # 3b. Auch als Steuerumschlag nicht: `_steuerziel_geraetemailbox` verlangt
+    # eine bestehende Beziehung, und diese beiden haben keine.
+    with pytest.raises(HTTPException) as exc_steuerung:
         SocialService.relay_blind_envelope(
             db,
             blind_mailbox_id=device_mailbox_owner,
             ciphertext_envelope=f"sv-e2ee-hybrid-v1:{wk}.{ct2}",
             sender_user_id=regular_user.id,
-            recipient_id=None,
             client_uuid="attack:124",
+            is_control=True,
+            control_type="notes_key_sync",
         )
-    assert exc_no_recip.value.status_code == 403
+    assert exc_steuerung.value.status_code == 403
 
     # 4. Owner kann seine Geräte-Mailbox abfragen
     resp_owner = client.get(f"/api/social/e2ee/mailbox/{device_mailbox_owner}", cookies=owner_cookies)
@@ -952,9 +950,9 @@ def test_mailbox_participant_access_control_dm_and_group(
     PanelSettingsService.set("social_enabled", "true", db)
 
     # 1. Gruppen-Mailbox: Owner ist Mitglied, regular_user ist Fremder
+    # Ohne Namen: seit Stufe 6c gibt es die Spalte nicht mehr. Fuer diesen
+    # Test aendert das nichts — er fragt nach dem Zugang, nicht nach dem Namen.
     group = ChatGroup(
-        name="Geheime Runde",
-        description="Nur fuer Mitglieder",
         owner_user_id=owner_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -973,7 +971,6 @@ def test_mailbox_participant_access_control_dm_and_group(
         blind_mailbox_id=group_mid,
         ciphertext_envelope=envelope,
         sender_user_id=owner_user.id,
-        recipient_id=None,
         client_uuid=str(uuid4()),
     )
 
@@ -996,10 +993,7 @@ def test_mailbox_participant_access_control_dm_and_group(
 
     dm_mid = SocialService.derive_blind_mailbox_id(owner_user.id, third_user.id)
     chat = DirectChat(
-        user_a_id=min(owner_user.id, third_user.id),
-        user_b_id=max(owner_user.id, third_user.id),
         blind_mailbox_id=dm_mid,
-        initiated_by_user_id=owner_user.id,
         created_at=datetime.now(timezone.utc),
     )
     db.add(chat)
@@ -1015,7 +1009,6 @@ def test_mailbox_participant_access_control_dm_and_group(
         blind_mailbox_id=dm_mid,
         ciphertext_envelope=dm_envelope,
         sender_user_id=owner_user.id,
-        recipient_id=third_user.id,
         client_uuid=str(uuid4()),
     )
 

@@ -93,7 +93,6 @@ import {
   type DirectChatItem,
   getFriends,
   getGroups,
-  getDirectChats,
   createGroup,
   joinGroupByInvite,
   sendFriendRequest,
@@ -104,7 +103,8 @@ import {
   relayE2eeEnvelope,
   sendTypingSignal,
   ladeAnhangHoch,
-  uploadGroupAvatar,
+  getGroupInviteInfo,
+  setzeEinladungsKarte,
 } from '@/api/social'
 import { maxAnhangBytes } from '@/services/medienKrypto'
 import {
@@ -146,7 +146,35 @@ import {
 import { logischeUuid, DrZustellungFehlgeschlagenError } from '@/services/ratchetSitzung'
 import { geraeteVon, kontoNutztSignaturen, onNeuesGeraet } from '@/services/e2eeGeraet'
 import { pruefeNutzlast, signiereNutzlast } from '@/services/nutzlastSignatur'
-import { verwirfGruppenSchluessel } from '@/services/gruppenSchluessel'
+import {
+  abonniereBekannteGespraeche,
+  gruppenGeheimnis,
+  verwirfGruppenSchluessel,
+} from '@/services/gruppenSchluessel'
+import {
+  baueEinladungsKarte,
+  einladungsschluesselAus,
+  lieseEinladungsKarte,
+  logoAlsDatenUrl,
+  mitSchluessel,
+  schluesselAusLink,
+  type EinladungsInhalt,
+} from '@/services/einladungsKarte'
+import {
+  benenneGruppen,
+  merkeGruppenName,
+  sichereGruppenAnsicht,
+  vergissGruppenName,
+} from '@/services/gruppenName'
+import {
+  fuelleNamenNach,
+  gespraechsListe,
+  gespraechsPartner,
+  merkeGespraech,
+  vergissGespraech,
+} from '@/services/gespraechsListe'
+import { ladeGruppenzustand, type Gruppenzustand } from '@/services/gruppenKonfig'
+import { wirksameGruppenrechte } from '@/services/gruppenRollen'
 import {
   entferneLokaleNachricht,
   loadLocalMessages,
@@ -159,6 +187,7 @@ import {
 import {
   tilgeInhalt,
   tilgeNachrichtBeimServer,
+  tilgeFremdeNachrichtBeimServer,
   tilgeNachrichtLokal,
 } from '@/services/nachrichtLoeschen'
 import {
@@ -432,6 +461,22 @@ function loadInitialContactsCache(): {
 export function Messenger() {
   const { t, i18n } = useTranslation()
 
+  /**
+   * Wie eine Gruppe in der Oberfläche heisst.
+   *
+   * Seit Stufe 6 liefert der Server für `name` überall `null` — er kennt den
+   * Namen nicht mehr. `benenneGruppen` setzt ihn aus dem versiegelten örtlichen
+   * Speicher und aus dem verschlüsselten Gruppenblock wieder ein; bleibt er
+   * trotzdem leer, ist der Schlüssel noch nicht da (frisches Gerät, verschlossener
+   * Messenger). Dann steht hier eine ehrliche Überschrift statt eines leeren
+   * Platzes — dieselbe Linie wie `social.invite.sealed` bei der Einladungskarte.
+   */
+  const gruppenTitel = useCallback(
+    (g: { name?: string | null } | null | undefined): string =>
+      g?.name?.trim() || t('messenger.groupSealed'),
+    [t],
+  )
+
   const { user } = useAuthStore()
   // Der Sperrzustand wird ganz oben gelesen, damit kein Effekt darunter auf
   // eine Ablage greift, die ohne Schlüssel nichts herausgibt.
@@ -488,6 +533,15 @@ export function Messenger() {
   // Selection
   const [activeContact, setActiveContact] = useState<ChatContact | null>(null)
   const [activeGroup, setActiveGroup] = useState<ChatGroupItem | null>(null)
+  /**
+   * Die eigenen Rollen der offenen Gruppe, entschlüsselt.
+   *
+   * `null` heisst „nicht belegbar": entweder hat die Gruppe noch keinen Block,
+   * oder diesem Gerät fehlt der Schlüssel, oder er war nicht beglaubigt. In
+   * allen drei Fällen zählen nur die Rechte aus der Mitgliederzeile — das ist
+   * der ehrliche Stand, und nicht etwa „keine Rechte".
+   */
+  const [gruppenRollenZustand, setGruppenRollenZustand] = useState<Gruppenzustand | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [filterTab, setFilterTab] = useState<'all' | 'groups' | 'friends' | 'teams' | 'public'>('all')
   const [mobileNavTab, setMobileNavTab] = useState<'chats' | 'updates' | 'community'>('chats')
@@ -842,7 +896,6 @@ export function Messenger() {
         void sendTypingSignal({
           blind_mailbox_id: blindMailboxId,
           status: 'typing',
-          recipient_id: activeContact?.userId ?? null,
         }).catch(() => {})
       }
     } else {
@@ -851,7 +904,6 @@ export function Messenger() {
         void sendTypingSignal({
           blind_mailbox_id: blindMailboxId,
           status: 'idle',
-          recipient_id: activeContact?.userId ?? null,
         }).catch(() => {})
       }
     }
@@ -860,6 +912,50 @@ export function Messenger() {
   }
 
   const currentUserId = user?.id || 0
+
+  /*
+   * Jede bekannte Mailbox beim Strom anmelden, nicht nur die offene.
+   *
+   * Der Server schlägt seit Stufe 4 nicht mehr nach, wer zu einer Gruppe
+   * gehört — er stellt an die Abonnenten einer Mailbox zu und sonst an
+   * niemanden. Ohne diese Stelle erführe man von einer Gruppennachricht erst
+   * beim Öffnen genau dieses Gesprächs, und auf dem geschlossenen Tab nie.
+   *
+   * Der Abdruck statt der Listen selbst: `groups` und `directChats` sind bei
+   * jedem Abruf neue Felder, auch wenn sich nichts geändert hat. An ihnen zu
+   * hängen hiesse, bei jedem Abruf erneut über alle Gespräche zu laufen und
+   * die Ablage zu lesen.
+   */
+  const gespraechsAbdruck = useMemo(
+    () =>
+      [...groups.map((g) => `g${g.id}`), ...directChats.map((c) => `d${c.other_user_id}`)]
+        .sort()
+        .join(','),
+    [groups, directChats],
+  )
+
+  useEffect(() => {
+    if (!currentUserId || !gespraechsAbdruck) return
+    void (async () => {
+      /*
+       * Die Gegenstellen kommen aus `gespraechsPartner()` und nicht aus
+       * `directChats`. Der Unterschied sind die noch **namenlosen** Einträge:
+       * ein Chatgeheimnis bringt eine Konto-Id mit, den Namen holt die
+       * Kontaktliste später nach. Bis dahin steht das Gespräch nicht in
+       * `directChats` — abonniert werden muss es trotzdem, sonst kommt die
+       * erste Nachricht des neuen Gegenübers nirgends an.
+       */
+      const partner = await gespraechsPartner().catch(() => [] as number[])
+      await abonniereBekannteGespraeche(
+        currentUserId,
+        groups.map((g) => g.id),
+        partner,
+      )
+    })()
+    // `groups`/`directChats` bewusst nicht in der Liste: der Abdruck ist ihr
+    // Inhalt, und die Felder selbst wechseln bei jedem Abruf die Identität.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUserId, gespraechsAbdruck])
 
   // 1. Identität des Kontos auflösen und Klartextreste aus der Altzeit entfernen.
   //
@@ -964,10 +1060,15 @@ export function Messenger() {
         teamsApi.list().catch(() => []),
         getStories().catch(() => []),
         getPublicProfiles().catch(() => []),
-        getDirectChats().catch(() => []),
+        // Kein Netzaufruf mehr: seit Stufe 6b weiss der Server nicht, mit wem
+        // dieses Konto schreibt. Die Liste liegt versiegelt auf diesem Gerät.
+        gespraechsListe().catch(() => []),
       ])
       setFriends(friendsData)
-      setGroups(groupsData)
+      // Der Server liefert für Gruppen seit Stufe 6 keinen Namen mehr. Diese
+      // eine Zeile setzt ihn aus dem versiegelten örtlichen Speicher wieder
+      // ein — bewusst hier an der Liste und nicht an jeder Anzeige einzeln.
+      setGroups(await benenneGruppen(groupsData).catch(() => groupsData))
       setStories(storiesData)
       setPublicUsers(publicData)
       setDirectChats(directChatsData)
@@ -1001,11 +1102,20 @@ export function Messenger() {
           CONTACTS_CACHE_KEY,
           JSON.stringify({
             friends: friendsData,
+            // Bewusst `groupsData` und nicht die benannte Liste: dieser Cache
+            // liegt offen in `localStorage`. Ein Gruppenname darin wäre genau
+            // die Zeile, die Stufe 6 aus der Datenbank entfernt hat, nur auf
+            // einer anderen Platte. Die Namen stehen versiegelt in
+            // `msm:gruppennamen` und kommen beim nächsten `benenneGruppen`.
             groups: groupsData,
             teamMembers: membersList,
             publicUsers: publicData,
             stories: storiesData,
-            directChats: directChatsData,
+            // Und aus demselben Grund gar nicht: die Gesprächsliste ist die
+            // Auskunft „mit wem schreibt dieser Mensch". Sie liegt versiegelt
+            // in `msm:gespraeche` und kommt von dort beim nächsten Laden —
+            // ein offener Abzug daneben machte die Versiegelung sinnlos.
+            directChats: [],
           })
         )
       } catch {}
@@ -1024,22 +1134,42 @@ export function Messenger() {
     toast.success(t('messenger.storyDeleted'))
   }
 
+  // `messengerGesperrt` in den Abhängigkeiten, damit das Entsperren sofort neu
+  // lädt: die Gruppennamen liegen versiegelt und sind vorher nicht zu haben.
+  // Ohne das stünde bis zum nächsten Takt — bis zu 15 Sekunden — überall
+  // „Verschlüsselte Gruppe", obwohl die PIN längst eingegeben ist.
   useEffect(() => {
     loadData()
     const interval = setInterval(loadData, 15000)
     return () => clearInterval(interval)
-  }, [currentUserId])
+  }, [currentUserId, messengerGesperrt])
 
   // 3. Handle public invite link join if inviteCode param is present
   useEffect(() => {
     if (!inviteCode || !currentUserId) return
     let active = true
 
+    /*
+     * Der Schlüssel steht in `location.hash` und wird hier gelesen, bevor das
+     * `navigate` weiter unten ihn wegräumt. Er kam nie beim Server an — der
+     * Browser schickt nichts hinter der Raute —, und genau deshalb ist er die
+     * einzige Stelle, an der der Name dieser Gruppe zu holen ist.
+     */
+    const schluessel = schluesselAusLink(window.location.hash)
+
     joinGroupByInvite(inviteCode)
-      .then((joinedGroup) => {
+      .then(async (joinedGroup) => {
         if (!active) return
-        toast.success(t('messenger.groupJoined', { name: joinedGroup.name }))
-        setActiveGroup(joinedGroup)
+        let karte: EinladungsInhalt | null = null
+        if (schluessel) {
+          karte = await getGroupInviteInfo(inviteCode)
+            .then((daten) => lieseEinladungsKarte(daten.invite_card, schluessel, inviteCode))
+            .catch(() => null)
+        }
+        const benannt = await uebernimmEinladung(joinedGroup, karte)
+        if (!active) return
+        toast.success(t('messenger.groupJoined', { name: gruppenTitel(benannt) }))
+        setActiveGroup(benannt)
         setActiveContact(null)
         loadData()
         navigate('/chat', { replace: true })
@@ -1054,14 +1184,55 @@ export function Messenger() {
     }
   }, [inviteCode, currentUserId, navigate])
 
-  /** Gruppenlogo: Auswahl, Prüfung, Upload. */
+  /**
+   * Übernimmt Name, Beschreibung und Logo einer Einladungskarte in den
+   * versiegelten örtlichen Speicher und gibt die so benannte Gruppe zurück.
+   *
+   * Ohne Karte passiert nichts weiter — die Gruppe heisst dann bis zur ersten
+   * Nachricht „Verschlüsselte Gruppe", und das ist ehrlicher als ein Name, den
+   * der Server geraten hätte.
+   *
+   * Nicht in den Gruppenblock geschrieben: wer gerade beitritt, hat das
+   * Gruppengeheimnis noch nicht, und ein neu gebauter Block überschriebe den
+   * bestehenden samt Rollen. Der Block bleibt Sache der Mitglieder.
+   */
+  const uebernimmEinladung = async (
+    gruppe: ChatGroupItem,
+    karte?: EinladungsInhalt | null,
+  ): Promise<ChatGroupItem> => {
+    if (!karte) return gruppe
+    await merkeGruppenName(gruppe.id, {
+      name: karte.name,
+      beschreibung: karte.beschreibung,
+      logo: karte.logo,
+    }).catch(() => {})
+    return {
+      ...gruppe,
+      name: gruppe.name ?? karte.name ?? null,
+      description: gruppe.description ?? karte.beschreibung ?? null,
+      avatar_url: gruppe.avatar_url ?? karte.logo ?? null,
+    }
+  }
+
+  /** Gruppenlogo: Auswahl, Prüfung, Ablage im verschlüsselten Gruppenblock. */
   const gruppenLogoInputRef = useRef<HTMLInputElement | null>(null)
   const [logoLaedt, setLogoLaedt] = useState(false)
 
+  /*
+   * Das Logo geht nicht mehr auf die Platte des Servers.
+   *
+   * Bis Stufe 6 lud `POST /social/groups/{id}/avatar` die Datei hoch und der
+   * Server lieferte sie unter einer rate-URL an jeden aus, der sie kannte —
+   * ohne Anmeldung. Ein Bild sagt über eine Gruppe oft mehr als ihr Name.
+   *
+   * Jetzt schrumpft `logoAlsDatenUrl` das Bild auf 128 Pixel und macht eine
+   * Data-URL daraus; die landet im verschlüsselten Gruppenblock und im
+   * versiegelten örtlichen Speicher. Der Grössenriegel darunter ist damit kein
+   * Upload-Limit mehr, sondern der Schutz davor, ein 5-MB-Bild überhaupt erst
+   * zu dekodieren.
+   */
   const handleGruppenLogo = async (datei: File | undefined) => {
-    if (!datei || !activeGroup) return
-    // Vorabprüfung nur für die Rückmeldung; die verbindliche Prüfung samt
-    // Magic Bytes macht das Backend.
+    if (!datei || !activeGroup || !currentUserId) return
     if (!/^image\/(jpeg|png|webp|gif)$/.test(datei.type)) {
       toast.error(t('messenger.logoBadType'))
       return
@@ -1072,14 +1243,33 @@ export function Messenger() {
     }
     setLogoLaedt(true)
     try {
-      const aktualisiert = await uploadGroupAvatar(activeGroup.id, datei)
+      const logo = await logoAlsDatenUrl(datei)
+      if (!logo) {
+        toast.error(t('messenger.logoFailed'))
+        return
+      }
+      const gruppenId = activeGroup.id
+      const mailbox = await deriveGroupBlindMailboxId(gruppenId)
+      const gespeichert = await sichereGruppenAnsicht(
+        {
+          groupId: gruppenId,
+          blindMailboxId: mailbox,
+          eigeneId: currentUserId,
+          mitglieder: (activeGroup.members ?? []).map((m) => m.user_id),
+          istEigentuemer: activeGroup.role === 'owner',
+        },
+        { logo },
+      )
+      // Anzeigen auch dann, wenn der Block nicht zu schreiben war: der
+      // örtliche Speicher hat das Logo (`sichereGruppenAnsicht` merkt es
+      // immer), und dieses Gerät zeigt es ab jetzt.
       setActiveGroup((aktuell) =>
-        aktuell?.id === aktualisiert.id ? { ...aktuell, avatar_url: aktualisiert.avatar_url } : aktuell
+        aktuell?.id === gruppenId ? { ...aktuell, avatar_url: logo } : aktuell,
       )
       setGroups((vorher) =>
-        vorher.map((g) => (g.id === aktualisiert.id ? { ...g, avatar_url: aktualisiert.avatar_url } : g))
+        vorher.map((g) => (g.id === gruppenId ? { ...g, avatar_url: logo } : g)),
       )
-      toast.success(t('messenger.logoUpdated'))
+      toast.success(gespeichert ? t('messenger.logoUpdated') : t('messenger.logoLocalOnly'))
     } catch {
       toast.error(t('messenger.logoFailed'))
     } finally {
@@ -1087,12 +1277,20 @@ export function Messenger() {
     }
   }
 
-  /** Beitritt über die Einladungskarte im Chat. */
-  const handleJoinByInviteCode = async (code: string) => {
+  /**
+   * Beitritt über die Einladungskarte im Chat.
+   *
+   * `karte` ist der bereits geöffnete Inhalt der Vorschau. Er ist die einzige
+   * Quelle für den Namen: der Server kennt ihn nicht, und den verschlüsselten
+   * Gruppenblock kann dieses Gerät erst lesen, wenn es das Gruppengeheimnis
+   * hat — das kommt mit der ersten Nachricht, nicht mit dem Beitritt.
+   */
+  const handleJoinByInviteCode = async (code: string, karte?: EinladungsInhalt | null) => {
     try {
       const joinedGroup = await joinGroupByInvite(code)
-      toast.success(t('messenger.groupJoined', { name: joinedGroup.name }))
-      setActiveGroup(joinedGroup)
+      const benannt = await uebernimmEinladung(joinedGroup, karte)
+      toast.success(t('messenger.groupJoined', { name: gruppenTitel(benannt) }))
+      setActiveGroup(benannt)
       setActiveContact(null)
       await loadData()
     } catch {
@@ -1206,6 +1404,34 @@ export function Messenger() {
     })
   }, [friends, teamMembers, publicUsers, directChats])
 
+  /*
+   * Namenlose Gespräche benennen.
+   *
+   * Ein zugestelltes Chatgeheimnis bringt eine Konto-Id und keinen Namen — ein
+   * Anzeigename im Steuerumschlag wäre ein Feld, das der Absender frei wählt,
+   * und damit der Weg, sich in einer fremden Kontaktliste als jemand anderes
+   * auszugeben. Der Name kommt deshalb aus der Kontaktliste dieses Geräts, und
+   * zwar sobald sie geladen ist.
+   *
+   * `loadData()` danach: erst damit wandert der frisch gefundene Name auch in
+   * `directChats` und wird sichtbar.
+   */
+  useEffect(() => {
+    if (contactsList.length === 0) return
+    void fuelleNamenNach(
+      contactsList.map((c) => ({
+        userId: c.userId,
+        username: c.username,
+        avatarUrl: c.avatarUrl,
+      })),
+    )
+      .then((geaendert) => {
+        if (geaendert) void loadData()
+      })
+      .catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contactsList.length])
+
   const filteredContacts = useMemo(() => {
     return contactsList.filter((c) => {
       if (filterTab === 'groups') return false
@@ -1229,7 +1455,7 @@ export function Messenger() {
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase()
         return (
-          g.name.toLowerCase().includes(q) ||
+          gruppenTitel(g).toLowerCase().includes(q) ||
           (g.description && g.description.toLowerCase().includes(q))
         )
       }
@@ -1325,7 +1551,7 @@ export function Messenger() {
         if (!active) return
         setGroupMailboxMap((prev) => (prev[g.id] === mid ? prev : { ...prev, [g.id]: mid }))
         store.registerMailbox(mid, {
-          name: g.name,
+          name: gruppenTitel(g),
           avatarUrl: g.avatar_url,
           isGroup: true,
           groupId: g.id,
@@ -1431,6 +1657,7 @@ export function Messenger() {
     setUeberall('aus')
   }, [activeContact?.userId, activeGroup?.id])
 
+
   // Auto-select group if groupId query parameter or storage is present
   useEffect(() => {
     if (queryGroupId && !activeContact && groups.length > 0) {
@@ -1496,6 +1723,7 @@ export function Messenger() {
         art: 'gruppe',
         groupId: activeGroup.id,
         mitglieder: (activeGroup.members ?? []).map((m) => m.user_id),
+        istEigentuemer: activeGroup.role === 'owner',
       }
     }
     if (activeContact) return { art: 'direkt', peerId: activeContact.userId }
@@ -1593,6 +1821,28 @@ export function Messenger() {
     meldeSitzungsbruch: sitzungNeuGemeldet,
   })
   const blindMailboxId = konversation.blindMailboxId
+
+  /*
+   * Das offene Gespräch in den versiegelten örtlichen Speicher.
+   *
+   * Seit Stufe 6b weiss der Server nicht mehr, mit wem dieses Konto schreibt —
+   * `direct_chats` nennt keine Menschen, und `GET /social/direct-chats` ist
+   * entfernt. Diese Zeile ist der Ersatz: wer ein Gespräch öffnet, merkt es
+   * sich selbst.
+   *
+   * Nur Kontakte, die nicht ohnehin in der Kontaktliste stehen, brauchen das
+   * eigentlich — gemerkt wird trotzdem jeder. Ein Freund, der später keiner
+   * mehr ist, verschwände sonst samt seinem Chatverlauf aus der Liste, und ein
+   * Verlauf ohne Zeile ist ein Verlauf, den niemand mehr findet.
+   */
+  useEffect(() => {
+    if (!activeContact) return
+    void merkeGespraech(activeContact.userId, {
+      username: activeContact.username,
+      avatarUrl: activeContact.avatarUrl,
+      blindMailboxId: blindMailboxId,
+    }).catch(() => {})
+  }, [activeContact?.userId, activeContact?.username, blindMailboxId])
 
   /**
    * Der Wechsel in ein anderes Gespräch.
@@ -1699,6 +1949,56 @@ export function Messenger() {
   }
 
   // 5. Load and decrypt messages (non-flickering background sync + real-time)
+  /**
+   * Was ein Konto in der offenen Gruppe darf.
+   *
+   * Zwei Quellen: die Mitgliederzeile vom Server und der verschlüsselte
+   * Rollenblock (`gruppenRollenZustand`). Zusammengeführt in
+   * `wirksameGruppenrechte` — das ist die einzige Stelle, die diese Frage
+   * beantwortet, und der Rechte-Dialog benutzt dieselbe.
+   */
+  const gruppenrechteVon = useCallback(
+    (konto: number) => {
+      if (!activeGroup) return new Set<string>()
+      const mitglied = activeGroup.members?.find((m) => Number(m.user_id) === Number(konto))
+      return wirksameGruppenrechte({
+        konto,
+        systemRolle: mitglied?.role,
+        istEigentuemer: Number(activeGroup.owner_user_id) === Number(konto),
+        eigeneRechte: mitglied?.permissions,
+        standardrechte: activeGroup.default_permissions,
+        zustand: gruppenRollenZustand,
+      })
+    },
+    [activeGroup, gruppenRollenZustand],
+  )
+
+  /**
+   * Ob ich fremde Nachrichten in dieser Gruppe entfernen darf.
+   *
+   * `delete_messages` stand seit je im Rechtevokabular und hatte bis 09/2026
+   * keinen Konsumenten: der Menüeintrag hing an `msg.isSelf`, ein Moderator
+   * konnte also nichts entfernen, egal was im Dialog gesetzt war.
+   */
+  const darfFremdeLoeschen =
+    Boolean(activeGroup) && gruppenrechteVon(currentUserId).has('delete_messages')
+
+  /**
+   * Ob ich in dieser Gruppe schreiben und anhängen darf.
+   *
+   * Im Direktchat immer — dort gibt es keine Rollen. `send_messages` und
+   * `attach_media` standen seit je im Vokabular, ließen sich setzen und hatten
+   * keinen Konsumenten: das Eingabefeld fragte nie.
+   *
+   * Durchgesetzt wird das **beim Empfänger** (siehe `loadMessages`), nicht am
+   * Server. Der Server kann den Inhalt nicht lesen und weiß nach Stufe 6 auch
+   * nicht mehr, wer Mitglied ist; eine Schranke dort wäre eine, die wir bald
+   * wieder herausreißen. Hier zu sperren ist die Höflichkeit, dort zu
+   * verwerfen die Wirkung.
+   */
+  const darfSchreiben = !activeGroup || gruppenrechteVon(currentUserId).has('send_messages')
+  const darfAnhaengen = !activeGroup || gruppenrechteVon(currentUserId).has('attach_media')
+
   const loadMessages = async (isInitial = false) => {
     const currentMid = blindMailboxId
     if (!currentMid || !currentUserId) return
@@ -2020,6 +2320,8 @@ export function Messenger() {
             let senderId: number
             let senderName: string
             let isSelf: boolean
+            /** Im Direktchat immer; in der Gruppe entscheidet `attach_media`. */
+            let anhaengeErlaubt = true
 
             if (activeContact) {
               /*
@@ -2070,6 +2372,43 @@ export function Messenger() {
               senderId = Number(urheber ?? 0)
 
               isSelf = Number(senderId) === Number(currentUserId)
+
+              /**
+               * Durfte dieses Konto hier überhaupt schreiben?
+               *
+               * Hier sitzt die Durchsetzung von `send_messages` und
+               * `attach_media` — nicht am Eingabefeld. Ein verändertes Programm
+               * schickt trotzdem; dass es niemand **anzeigt**, ist die
+               * Wirkung. Dieselbe Bauart wie bei `@everyone` und beim
+               * Anheften.
+               *
+               * Zwei Feinheiten, die leicht verloren gehen:
+               *
+               * - Geprüft wird nur bei **aktuellen** Mitgliedern. Wer die
+               *   Gruppe verlassen hat oder hinausgeworfen wurde, steht in
+               *   keiner Rolle mehr; seine alten Nachrichten deshalb
+               *   nachträglich verschwinden zu lassen, wäre Geschichtsfälschung
+               *   — er durfte, als er schrieb.
+               * - Verworfen wird beim **ersten Sehen**. Eine Nachricht, die
+               *   schon in der Ablage steht, bleibt: `mischeVerlauf` behält
+               *   lokale Zeilen. Sonst löschte das Stummschalten rückwirkend
+               *   alles, was noch im Hundert-Umschläge-Fenster liegt.
+               */
+              const istMitglied = Boolean(
+                activeGroup.members?.some((m) => Number(m.user_id) === Number(senderId)),
+              )
+              const senderrechte = gruppenrechteVon(senderId)
+              if (!isSelf && istMitglied && !senderrechte.has('send_messages')) {
+                console.warn(
+                  '[Messenger] Gruppennachricht verworfen, Absender darf nicht schreiben:',
+                  senderId,
+                )
+                continue
+              }
+              // Ein Anhang ohne das Recht dazu fällt weg, der Text bleibt: die
+              // Nachricht ganz zu verwerfen nähme jemandem seine Worte wegen
+              // eines Bildes.
+              anhaengeErlaubt = isSelf || !istMitglied || senderrechte.has('attach_media')
               // Der Anzeigename kommt aus der Mitgliederliste, nie aus der
               // Nutzlast: sonst stünde unter der richtigen Kennung ein
               // fremder Name.
@@ -2095,14 +2434,14 @@ export function Messenger() {
               text: parsed.text || '',
               createdAt: env.created_at,
               isSelf,
-              noteAttachment: parsed.note_attachment,
-              calendarAttachment: parsed.calendar_attachment,
-              imageAttachment: parsed.image_attachment,
-              audioAttachment: parsed.audio_attachment,
-              fileAttachment: parsed.file_attachment,
-              stickerAttachment: parsed.sticker_attachment,
-              storyReply: parsed.story_reply,
-              videoNoteAttachment: parsed.video_note_attachment,
+              noteAttachment: anhaengeErlaubt ? parsed.note_attachment : undefined,
+              calendarAttachment: anhaengeErlaubt ? parsed.calendar_attachment : undefined,
+              imageAttachment: anhaengeErlaubt ? parsed.image_attachment : undefined,
+              audioAttachment: anhaengeErlaubt ? parsed.audio_attachment : undefined,
+              fileAttachment: anhaengeErlaubt ? parsed.file_attachment : undefined,
+              stickerAttachment: anhaengeErlaubt ? parsed.sticker_attachment : undefined,
+              storyReply: anhaengeErlaubt ? parsed.story_reply : undefined,
+              videoNoteAttachment: anhaengeErlaubt ? parsed.video_note_attachment : undefined,
               antwortAuf: parsed.antwort_auf,
               weitergeleitet: Boolean(parsed.weitergeleitet) || undefined,
               erwaehnungen: Array.isArray(parsed.erwaehnungen) ? parsed.erwaehnungen : undefined,
@@ -2148,22 +2487,28 @@ export function Messenger() {
       const findeAenderung = (m: ChatMessage) =>
         aenderungen.finde(m, (urheber) => urheber !== undefined && Number(urheber) === Number(m.senderId))
 
+      /**
+       * Wessen Löschbefehl befolgt wird.
+       *
+       * Der eigene Absender immer. In einer Gruppe zusätzlich, wer
+       * `delete_messages` trägt — und das ist seit 09/2026 auch wirklich dieses
+       * Recht. Vorher wurde hier `can_pin_messages` geprüft, also das Recht,
+       * eine Nachricht **anzuheften**: ein Moderator mit Löschrecht und ohne
+       * Heftrecht wurde ignoriert, einer mit Heftrecht und ohne Löschrecht kam
+       * durch. Die Rechtelage kommt jetzt aus derselben Stelle wie im
+       * Rechte-Dialog, inklusive der Rollen aus dem verschlüsselten Block.
+       *
+       * Die ehrliche Grenze steht hier und nicht im Werbetext: Moderation unter
+       * Ende-zu-Ende-Verschlüsselung ist eine Bitte, die Clients befolgen —
+       * keine Tatsache, die der Server durchsetzt. Wer die Nachricht schon
+       * gelesen hat, behält sie. Das gilt für Signal und WhatsApp genauso.
+       */
       const findeLoeschung = (m: ChatMessage) =>
         loeschungen.finde(m, (urheber) => {
           if (urheber === undefined) return false
           if (Number(urheber) === Number(m.senderId)) return true
-          if (activeGroup?.members) {
-            const member = activeGroup.members.find((x) => Number(x.user_id) === Number(urheber))
-            if (member) {
-              return (
-                Number(activeGroup.owner_user_id) === Number(urheber) ||
-                member.role === 'admin' ||
-                member.role === 'moderator' ||
-                Boolean(member.can_pin_messages)
-              )
-            }
-          }
-          return false
+          if (!activeGroup) return false
+          return gruppenrechteVon(Number(urheber)).has('delete_messages')
         })
 
       /**
@@ -2606,7 +2951,7 @@ export function Messenger() {
     const ziele: (Weiterleitungsziel & { avatarUrl?: string | null; istGruppe?: boolean })[] = []
     for (const g of groups) {
       const mid = groupMailboxMap[g.id]
-      if (mid) ziele.push({ blindMailboxId: mid, groupId: g.id, name: g.name, istGruppe: true })
+      if (mid) ziele.push({ blindMailboxId: mid, groupId: g.id, name: gruppenTitel(g), istGruppe: true })
     }
     for (const c of contactsList) {
       const mid = contactMailboxMap[c.userId]
@@ -2677,8 +3022,125 @@ export function Messenger() {
     else toast.success(t('messenger.forwarded', { count: ziele.length }))
   }
 
+  /**
+   * Den verschlüsselten Rollenblock der offenen Gruppe holen.
+   *
+   * Er entscheidet mit, ob ein fremder Löschbefehl befolgt wird — also muss er
+   * hier liegen und nicht nur im Rechte-Dialog. Wer ihn schreiben durfte, wird
+   * gegen die **Mitgliederzeile** geprüft und nicht gegen den Block selbst:
+   * ein Block, der seine eigene Befugnis bescheinigt, bescheinigt nichts.
+   */
+  useEffect(() => {
+    if (!activeGroup || !blindMailboxId) {
+      setGruppenRollenZustand(null)
+      return
+    }
+    let abgebrochen = false
+    const mitglieder = activeGroup.members ?? []
+    const darfSchreiben = (konto: number) => {
+      if (Number(activeGroup.owner_user_id) === Number(konto)) return true
+      const m = mitglieder.find((x) => Number(x.user_id) === Number(konto))
+      if (!m) return false
+      if (m.role === 'owner' || m.role === 'admin') return true
+      return (m.permissions || '')
+        .split(',')
+        .map((p) => p.trim())
+        .includes('manage_roles')
+    }
+
+    void ladeGruppenzustand(
+      {
+        groupId: activeGroup.id,
+        blindMailboxId,
+        eigeneId: currentUserId,
+        mitglieder: mitglieder.map((m) => m.user_id),
+        istEigentuemer: activeGroup.role === 'owner',
+      },
+      darfSchreiben,
+    )
+      .then((lesung) => {
+        if (abgebrochen) return
+        setGruppenRollenZustand(lesung.art === 'zustand' ? lesung.zustand : null)
+        /*
+         * Derselbe Block trägt den Namen. Er hier mitzunehmen kostet keinen
+         * zweiten Abruf — und das ist der Weg, auf dem ein frisch
+         * eingerichtetes Gerät überhaupt erfährt, wie die Gruppe heisst: sein
+         * örtlicher Speicher ist leer, und der Server weiss es nicht mehr.
+         *
+         * Das Ergebnis wandert bewusst nicht direkt in `setGroups`: die Liste
+         * holt es beim nächsten `loadData` über `benenneGruppen`, und damit
+         * gibt es weiterhin genau eine Stelle, an der Gruppen benannt werden.
+         */
+        if (lesung.art === 'zustand') {
+          const ansicht = {
+            name: lesung.zustand.name,
+            beschreibung: lesung.zustand.beschreibung,
+            logo: lesung.zustand.logo,
+          }
+          // `loadData` nur, wenn der Block etwas weiss, das die Liste noch
+          // nicht zeigt. Sonst löste jedes Öffnen einer Gruppe einen vollen
+          // Abruf aus, und zwar genau auf den Geräten, die ihn nicht brauchen.
+          const neu = Boolean(ansicht.name) && ansicht.name !== (activeGroup.name ?? null)
+          void merkeGruppenName(activeGroup.id, ansicht)
+            .then(() => {
+              if (!abgebrochen && neu) void loadData()
+            })
+            .catch(() => {})
+        }
+      })
+      .catch(() => {
+        if (!abgebrochen) setGruppenRollenZustand(null)
+      })
+
+    return () => {
+      abgebrochen = true
+    }
+  }, [activeGroup?.id, activeGroup?.members, blindMailboxId, currentUserId])
+
+  /**
+   * Die offene Gruppe frisch halten.
+   *
+   * `activeGroup` war eine Momentaufnahme vom Öffnen des Chats und wurde nie
+   * wieder angefasst — die Liste daneben aktualisierte sich im Takt, dieser
+   * eine Eintrag nicht. Solange daran nur der Name hing, fiel es niemandem
+   * auf. Seit die **Rechte** daran hängen, ist es eine Sicherheitsfrage: ein
+   * entzogenes Schreibrecht wirkte erst, wenn der Betroffene den Chat von
+   * Hand neu öffnete, und ein frisch vergebenes ebenso wenig.
+   *
+   * Verglichen wird, was Rechte trägt — und seit Stufe 6 auch Name,
+   * Beschreibung und Logo. Die kommen jetzt aus dem verschlüsselten
+   * Gruppenblock und treffen daher **nach** dem Öffnen ein: auf einem frisch
+   * eingerichteten Gerät stünde sonst für immer „Verschlüsselte Gruppe" über
+   * einem Chat, dessen Name längst in der Liste daneben steht. Sie ändern sich
+   * selten genug, um das Vergleichen nicht teuer zu machen.
+   *
+   * Raumzeichen und Anrufzustand bleiben draussen; die ändern sich im
+   * Sekundentakt, und darauf zu reagieren hiesse, die Ansicht ständig neu zu
+   * setzen, ohne dass sich etwas geändert hätte.
+   */
+  useEffect(() => {
+    if (!activeGroup) return
+    const frisch = groups.find((g) => g.id === activeGroup.id)
+    if (!frisch) return
+    const rechtekennung = (g: ChatGroupItem) =>
+      JSON.stringify([
+        g.default_permissions ?? null,
+        g.invite_code ?? null,
+        g.role ?? null,
+        g.owner_user_id,
+        g.can_pin_messages ?? null,
+        g.can_mention_everyone ?? null,
+        g.name ?? null,
+        g.description ?? null,
+        g.avatar_url ?? null,
+        (g.members ?? []).map((m) => [m.user_id, m.role, m.permissions ?? null]),
+      ])
+    if (rechtekennung(frisch) !== rechtekennung(activeGroup)) setActiveGroup(frisch)
+  }, [groups, activeGroup])
+
   /** Ob ich in dieser Gruppe anheften darf — vom Server entschieden. */
   const darfAnheften = Boolean(activeGroup?.can_pin_messages)
+
 
   /**
    * Eine Nachricht über den Verlauf heften.
@@ -2989,6 +3451,15 @@ export function Messenger() {
       return
     }
 
+    // Eine fremde Nachricht zu entfernen ist Moderation und braucht das Recht
+    // dafür. Der Menüeintrag erscheint ohne es gar nicht; diese Zeile fängt den
+    // Weg über die Mehrfachauswahl und über die Leiste ab.
+    const fremd = !msg.isSelf
+    if (fremd && !darfFremdeLoeschen) {
+      toast.error(t('messenger.deleteNoRight'))
+      return
+    }
+
     const geloeschtAm = new Date().toISOString()
     try {
       // 1. Die Gegenseite erfährt es. Steht am Anfang, weil nur dieser Schritt
@@ -3003,7 +3474,12 @@ export function Messenger() {
       // 2. Chiffretext und Anhänge vom Server nehmen — vor dem lokalen Tilgen.
       //    Die Medienkennungen stehen ausschließlich in dieser Zeile; ist sie
       //    erst ein Grabstein, findet kein zweiter Versuch die Blobs mehr.
-      await tilgeNachrichtBeimServer(blindMailboxId, msg)
+      let medienGeblieben = 0
+      if (fremd) {
+        ;({ medienGeblieben } = await tilgeFremdeNachrichtBeimServer(blindMailboxId, msg))
+      } else {
+        await tilgeNachrichtBeimServer(blindMailboxId, msg)
+      }
 
       // 3. Und zuletzt dieses Gerät. Der eigene Löschbefehl kommt hier nie an:
       //    eine Ratchet-Nachricht kann ihr Absender nicht öffnen, `deleteMap`
@@ -3020,7 +3496,14 @@ export function Messenger() {
         return geaendert
       })
 
-      toast.success(t('messenger.messageDeletedForAll'))
+      if (!fremd) {
+        toast.success(t('messenger.messageDeletedForAll'))
+      } else if (medienGeblieben > 0) {
+        // Nicht verschweigen: der Text ist weg, das Bild liegt noch da.
+        toast.info(t('messenger.messageRemovedMediaStays', { count: medienGeblieben }))
+      } else {
+        toast.success(t('messenger.messageRemovedByModeration'))
+      }
       await loadMessages(false)
     } catch {
       toast.error(t('messenger.messageDeleteFailed'))
@@ -3430,6 +3913,21 @@ export function Messenger() {
       return
     }
 
+    // Die Rechtelage der Gruppe, bevor irgendetwas verschlüsselt wird. Das
+    // Eingabefeld ist bereits gesperrt; dies fängt die anderen Wege ab —
+    // Weiterleiten, Sprachnachricht, Videonotiz, Sticker.
+    if (!darfSchreiben) {
+      toast.error(t('messenger.sendNoRight'))
+      return
+    }
+    if (
+      !darfAnhaengen &&
+      (note || cal || img || audio || file || sticker || storyReply || videoNote)
+    ) {
+      toast.error(t('messenger.attachNoRight'))
+      return
+    }
+
     // Die Videonotiz wird vor dem Verschlüsseln gemessen, wie jede andere Datei
     // auch. Ohne diese Zeile lief eine lange Aufnahme durch die ganze
     // Verschlüsselung und scheiterte erst am Deckel des Servers — im Chat stand
@@ -3576,7 +4074,6 @@ export function Messenger() {
       void sendTypingSignal({
         blind_mailbox_id: targetBlindMailboxId,
         status: 'idle',
-        recipient_id: targetUserId ?? null,
       }).catch(() => {})
     }
 
@@ -3636,7 +4133,6 @@ export function Messenger() {
           blindMailboxId: targetBlindMailboxId,
           absenderId: currentUserId,
           groupId: currentGroupId,
-          recipientId: targetUserId,
         })
 
       if (img) {
@@ -3772,6 +4268,8 @@ export function Messenger() {
                     if (!ids.includes(currentUserId)) ids.push(currentUserId)
                     return ids
                   })(),
+                  istEigentuemer:
+                    groups.find((x) => x.id === fremdesZiel.groupId)?.role === 'owner',
                 }
               : null,
             fremdesZiel.recipientId
@@ -3969,7 +4467,6 @@ export function Messenger() {
         void sendTypingSignal({
           blind_mailbox_id: blindMailboxId,
           status: 'recording',
-          recipient_id: activeContact?.userId ?? null,
         }).catch(() => {})
       }
 
@@ -3986,7 +4483,6 @@ export function Messenger() {
       void sendTypingSignal({
         blind_mailbox_id: blindMailboxId,
         status: 'idle',
-        recipient_id: activeContact?.userId ?? null,
       }).catch(() => {})
     }
 
@@ -4255,11 +4751,44 @@ export function Messenger() {
     if (!groupName.trim()) return
     setCreatingGroup(true)
     try {
-      const newGroup = await createGroup({
-        name: groupName.trim(),
-        description: groupDesc.trim() || undefined,
-      })
-      toast.success(t('messenger.groupCreated', { name: newGroup.name }))
+      const name = groupName.trim()
+      const beschreibung = groupDesc.trim() || null
+      // Der Server bekommt nur die Bitte, eine Gruppe anzulegen. Name und
+      // Beschreibung gehen ihn nichts an.
+      const roh = await createGroup()
+
+      /*
+       * Der Name geht zwei Wege, und beide braucht es.
+       *
+       * `merkeGruppenName` schreibt ihn sofort in den versiegelten örtlichen
+       * Speicher — damit steht er in der Liste, bevor irgendein Netzaufruf
+       * zurück ist. `sichereGruppenAnsicht` legt ihn zusätzlich in den
+       * verschlüsselten Gruppenblock, damit ihn auch das nächste Gerät
+       * bekommt.
+       *
+       * Der Block kann hier noch scheitern: eine frisch angelegte Gruppe hat
+       * oft noch kein Geheimnis, das entsteht erst beim ersten Senden. Das ist
+       * kein Grund, das Anlegen abzubrechen — der örtliche Speicher trägt den
+       * Namen, und `sichereGruppenAnsicht` läuft beim nächsten Umbenennen
+       * erneut.
+       */
+      await merkeGruppenName(roh.id, { name, beschreibung }).catch(() => {})
+      const mailbox = await deriveGroupBlindMailboxId(roh.id).catch(() => null)
+      if (mailbox && currentUserId) {
+        void sichereGruppenAnsicht(
+          {
+            groupId: roh.id,
+            blindMailboxId: mailbox,
+            eigeneId: currentUserId,
+            mitglieder: [currentUserId],
+            istEigentuemer: true,
+          },
+          { name, beschreibung },
+        ).catch(() => false)
+      }
+
+      const newGroup: ChatGroupItem = { ...roh, name, description: beschreibung }
+      toast.success(t('messenger.groupCreated', { name }))
       setIsCreateGroupOpen(false)
       setGroupName('')
       setGroupDesc('')
@@ -4273,22 +4802,76 @@ export function Messenger() {
     }
   }
 
-  // Copy Group Invite Link
-  const handleCopyInviteLink = (group: ChatGroupItem) => {
+  /**
+   * Den Einladungslink kopieren — wenn es einen gibt.
+   *
+   * `invite_code` ist `null`, sobald das Backend dieses Mitglied nicht als
+   * einladungsberechtigt ansieht. Das ist die eigentliche Durchsetzung von
+   * `invite_members`: wer den Code nicht bekommt, kann ihn nicht weitergeben.
+   * Der Knopf erscheint dann gar nicht erst; diese Zeile fängt den Fall ab,
+   * dass eine Liste noch aus einem älteren Abruf stammt.
+   */
+  const handleCopyInviteLink = async (group: ChatGroupItem) => {
+    if (!group.invite_code) {
+      toast.error(t('messenger.inviteNoRight'))
+      return
+    }
     const url = `${window.location.origin}/chat/join/${group.invite_code}`
-    navigator.clipboard.writeText(url)
+
+    /*
+     * Die Vorschaukarte entsteht hier — beim Teilen, nicht beim Anlegen.
+     *
+     * Zwei Gründe. Erstens trägt sie dann genau den Stand, den der Absender
+     * gerade sieht; eine beim Anlegen erzeugte Karte zeigte den Namen von
+     * vorgestern. Zweitens hat die Gruppe beim Anlegen oft noch gar kein
+     * Geheimnis: das entsteht, wenn der Eigentümer zum ersten Mal sendet.
+     *
+     * Ohne Geheimnis bleibt der Link, was er war — ohne Raute und ohne
+     * Vorschau. Seit Stufe 6 gibt es keinen Klartext mehr, auf den er dafür
+     * zurückfallen könnte; der Eingeladene sieht dann „Verschlüsselte
+     * Einladung" und die Mitgliederzahl, sonst nichts.
+     */
+    let fertig = url
+    try {
+      const geheimnis = await gruppenGeheimnis(group.id)
+      if (geheimnis) {
+        const karte = await baueEinladungsKarte(geheimnis, group.invite_code, {
+          name: group.name,
+          beschreibung: group.description ?? null,
+          // `avatar_url` trägt seit Stufe 6 bereits die Data-URL aus dem
+          // Gruppenblock — nichts mehr nachzuladen. Der Prüfausdruck fängt
+          // Altbestände ab, die noch eine Serveradresse enthalten: die wäre
+          // für den Eingeladenen ohnehin nicht abrufbar.
+          logo:
+            group.avatar_url && group.avatar_url.startsWith('data:image/')
+              ? group.avatar_url
+              : null,
+        })
+        await setzeEinladungsKarte(group.id, karte)
+        fertig = mitSchluessel(url, await einladungsschluesselAus(geheimnis))
+      }
+    } catch {
+      // Eine Karte, die nicht zustande kommt, darf das Einladen nicht
+      // aufhalten. Der Link ohne Raute funktioniert; nur die Vorschau fehlt.
+    }
+
+    navigator.clipboard.writeText(fertig)
     toast.success(t('messenger.inviteCopied'))
   }
 
   // Leave Group
   const handleLeaveGroup = async (group: ChatGroupItem) => {
     try {
+      const name = gruppenTitel(group)
       await leaveGroup(group.id)
       // Wer draußen ist, braucht die Schlüssel nicht mehr — und soll sie auch
       // nicht behalten. Der Verlauf dieser Gruppe wird damit unlesbar, was
       // genau die Zusage ist, die ein Austritt geben soll.
       await verwirfGruppenSchluessel(group.id).catch(() => {})
-      toast.success(t('messenger.groupLeft', { name: group.name }))
+      // Und den Namen dazu: er lag versiegelt auf diesem Gerät, aber er lag
+      // da. Ein Austritt, der die Überschrift stehen lässt, ist keiner.
+      await vergissGruppenName(group.id).catch(() => {})
+      toast.success(t('messenger.groupLeft', { name }))
       setActiveGroup(null)
       await loadData()
     } catch {
@@ -4305,9 +4888,11 @@ export function Messenger() {
     if (!groupToDelete) return
     setIsDeletingGroup(true)
     try {
+      const name = gruppenTitel(groupToDelete)
       await deleteGroup(groupToDelete.id)
       await verwirfGruppenSchluessel(groupToDelete.id).catch(() => {})
-      toast.success(t('messenger.groupDeleted', { name: groupToDelete.name }))
+      await vergissGruppenName(groupToDelete.id).catch(() => {})
+      toast.success(t('messenger.groupDeleted', { name }))
       setActiveGroup(null)
       setGroupToDelete(null)
       await loadData()
@@ -4498,7 +5083,7 @@ export function Messenger() {
     await useCallStore.getState().joinGroupCall(
       {
         id: activeGroup.id,
-        name: activeGroup.name,
+        name: gruppenTitel(activeGroup),
         avatarUrl: activeGroup.avatar_url ?? null,
         canShare: groupCallPermissions.canShare,
         canModerate: groupCallPermissions.canModerate,
@@ -4597,7 +5182,7 @@ export function Messenger() {
         archiviert={imArchiv}
         onAnheften={() => gmid && handleAnheftenChat(gmid)}
         onArchivieren={() => gmid && handleArchivieren(gmid)}
-        onMenue={() => gmid && setZeilenMenue({ mid: gmid, name: g.name })}
+        onMenue={() => gmid && setZeilenMenue({ mid: gmid, name: gruppenTitel(g) })}
       >
         <button
           type="button"
@@ -4626,7 +5211,7 @@ export function Messenger() {
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center justify-between gap-1">
-                <span className="text-xs font-semibold text-primary truncate">{g.name}</span>
+                <span className="text-xs font-semibold text-primary truncate">{gruppenTitel(g)}</span>
                 <span className="text-label-sm text-on-surface-variant/60 shrink-0">{g.member_count} M.</span>
               </div>
               {zeilenVorschau(
@@ -5438,17 +6023,19 @@ export function Messenger() {
                           </div>
                         </div>
 
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleCopyInviteLink(g)}
-                          className="h-7 px-2 text-xs gap-1 text-primary"
-                          title={t('messenger.copyInvite')}
-                        >
-                          <Share2 className="w-3.5 h-3.5" />
-                          <span>Link</span>
-                        </Button>
+                        {g.invite_code && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleCopyInviteLink(g)}
+                            className="h-7 px-2 text-xs gap-1 text-primary"
+                            title={t('messenger.copyInvite')}
+                          >
+                            <Share2 className="w-3.5 h-3.5" />
+                            <span>Link</span>
+                          </Button>
+                        )}
                       </div>
                     ))
                   )}
@@ -5654,7 +6241,7 @@ export function Messenger() {
                       />
                     )}
                     <span className="text-xs font-bold text-on-surface truncate max-w-[130px] sm:max-w-xs">
-                      {activeGroup ? activeGroup.name : activeContact?.username}
+                      {activeGroup ? gruppenTitel(activeGroup) : activeContact?.username}
                     </span>
                     {blindMailboxId && isChatMuted(blindMailboxId) && (
                       <span title="Stummgeschaltet" className="inline-flex items-center text-status-warning">
@@ -5753,8 +6340,8 @@ export function Messenger() {
                   <Blattknopf
                     variante="schwebend"
                     label={t('messenger.moreChatSettings')}
-                    titel={activeGroup ? activeGroup.name : activeContact?.username || t('messenger.chat')}
-                    ueberschrift={activeGroup ? activeGroup.name : activeContact?.username}
+                    titel={activeGroup ? gruppenTitel(activeGroup) : activeContact?.username || t('messenger.chat')}
+                    ueberschrift={activeGroup ? gruppenTitel(activeGroup) : activeContact?.username}
                   >
                     {(schliessen) => (
                       <>
@@ -5809,14 +6396,16 @@ export function Messenger() {
 
                       {activeGroup && (
                         <>
-                          <Blatteintrag
-                            icon={<Share2 className="w-4 h-4" />}
-                            label={t('messenger.copyInvite')}
-                            onClick={() => {
-                              schliessen()
-                              handleCopyInviteLink(activeGroup)
-                            }}
-                          />
+                          {activeGroup.invite_code && (
+                            <Blatteintrag
+                              icon={<Share2 className="w-4 h-4" />}
+                              label={t('messenger.copyInvite')}
+                              onClick={() => {
+                                schliessen()
+                                handleCopyInviteLink(activeGroup)
+                              }}
+                            />
+                          )}
                           {(activeGroup.owner_user_id === currentUserId || activeGroup.role === 'admin') && (
                             <>
                               <Blatteintrag
@@ -6415,9 +7004,15 @@ export function Messenger() {
                         // Während `loading` bleibt die Leiste offen, sonst
                         // flackerte sie bei jedem Öffnen kurz tot.
                         // Gruppenchats laufen über den Gruppenschlüssel weiter.
-                        disabled={istSchreibenGesperrt}
+                        disabled={istSchreibenGesperrt || !darfSchreiben}
                         placeholder={
-                          istSchreibenGesperrt
+                          !darfSchreiben
+                            ? // Kein Schlüsselproblem, sondern eine
+                              // Rechtelage: in dieser Gruppe darf dieses Konto
+                              // nicht schreiben. Das gehört gesagt, nicht
+                              // durch ein totes Feld angedeutet.
+                              t('messenger.sendNoRight')
+                            : istSchreibenGesperrt
                             ? // Hier stand „zuerst den Schlüssel entsperren".
                               // Das stammte aus der Zeit, als der
                               // Identitätsschlüssel eine eigene Passphrase
@@ -6449,14 +7044,15 @@ export function Messenger() {
                             <div className="relative shrink-0" ref={attachMenuRef}>
                               <button
                                 type="button"
+                                disabled={!darfAnhaengen}
                                 onClick={() => setIsAttachMenuOpen((prev) => !prev)}
-                                className={`w-11 h-11 sm:w-8 sm:h-8 shrink-0 flex items-center justify-center rounded-full transition-colors ${
+                                className={`w-11 h-11 sm:w-8 sm:h-8 shrink-0 flex items-center justify-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                                   isAttachMenuOpen
                                     ? 'bg-surface-container-highest text-primary'
                                     : 'text-on-surface-variant hover:text-primary'
                                 }`}
-                                title={t('messenger.addAttachment')}
-                                aria-label={t('messenger.addAttachment')}
+                                title={darfAnhaengen ? t('messenger.addAttachment') : t('messenger.attachNoRight')}
+                                aria-label={darfAnhaengen ? t('messenger.addAttachment') : t('messenger.attachNoRight')}
                               >
                                 <Plus className={`w-4 h-4 transition-transform duration-200 ${isAttachMenuOpen ? 'rotate-45 text-primary' : ''}`} />
                               </button>
@@ -6656,6 +7252,7 @@ export function Messenger() {
         onLoeschen={(m) => void handleDeleteMessage(m)}
         onAnheften={activeGroup ? (m) => void handleAnheften(m) : undefined}
         darfAnheften={darfAnheften}
+        darfFremdeLoeschen={darfFremdeLoeschen}
         istAngeheftet={Boolean(angeheftet && angeheftet.clientUuid === menueNachricht?.clientUuid)}
       />
 
@@ -7186,7 +7783,7 @@ export function Messenger() {
               <span>{t('messenger.muteNotifications')}</span>
             </DialogTitle>
             <DialogDescription>
-              Wähle, wie lange Benachrichtigungen für {activeGroup ? `"${activeGroup.name}"` : activeContact ? `"${activeContact.username}"` : 'diesen Chat'} stummgeschaltet werden sollen.
+              Wähle, wie lange Benachrichtigungen für {activeGroup ? `"${gruppenTitel(activeGroup)}"` : activeContact ? `"${activeContact.username}"` : 'diesen Chat'} stummgeschaltet werden sollen.
             </DialogDescription>
           </DialogHeader>
 
@@ -7324,6 +7921,11 @@ export function Messenger() {
                 onClick={async () => {
                   if (activeContact) {
                     await blockUser(activeContact.userId, activeContact.username, activeContact.avatarUrl)
+                    // Und aus der örtlichen Gesprächsliste. Seit Stufe 6b führt
+                    // sie dieses Gerät; bliebe die Zeile stehen, tauchte der
+                    // Blockierte weiter in der Kontaktliste auf und sein
+                    // Gespräch bliebe abonniert.
+                    await vergissGespraech(activeContact.userId).catch(() => {})
                     toast.success(t('messenger.contactBlockedToast', { name: activeContact.username }))
                   }
                   setIsBlockConfirmOpen(false)

@@ -11,8 +11,11 @@ from fastapi.testclient import TestClient
 
 from main import app
 from dependencies import get_current_user, verify_csrf
+from fastapi import HTTPException
+
 from models import (
     User,
+    UserFriend,
     DirectChat,
     ChatGroup,
     ChatGroupMember,
@@ -91,17 +94,27 @@ def test_e2ee_sync_unauthenticated_and_disabled(client: TestClient, db: Session,
 def test_e2ee_sync_direct_chat_mailbox_filtering_and_delta(
     client: TestClient, db: Session, owner_user: User, regular_user: User
 ):
-    """Sync filters by since_id and returns accurate max_envelope_id and unread_count."""
+    """Sync filters by since_id and returns accurate max_envelope_id and unread_count.
+
+    Die Freundschaft steht hier seit Stufe 6b. Vorher genuegte die Zeile in
+    `direct_chats`: `sync_mailboxes` las dort `user_a_id`/`user_b_id` und zaehlte
+    auf, mit wem dieses Konto schreibt. Genau diese Abfrage gibt es nicht mehr.
+    Was der Server heute selbst aufzaehlen kann, sind Gruppen, Freunde und die
+    eigene Geraete-Mailbox; alles andere nennt der Client und der Server prueft
+    es nur (`erlaubte_mailboxen`).
+
+    Geprueft wird hier die Delta-Rechnung — `since_id`, `max_envelope_id`,
+    `unread_count` —, und die ist von der Quelle der Kennung unabhaengig.
+    """
     # Establish DirectChat between owner and regular
-    min_id, max_id = min(owner_user.id, regular_user.id), max(owner_user.id, regular_user.id)
     mailbox_id = SocialService.derive_blind_mailbox_id(owner_user.id, regular_user.id)
-    chat = DirectChat(
-        user_a_id=min_id,
-        user_b_id=max_id,
-        blind_mailbox_id=mailbox_id,
-        initiated_by_user_id=owner_user.id,
+    db.add(DirectChat(blind_mailbox_id=mailbox_id))
+    db.add_all(
+        [
+            UserFriend(user_id=owner_user.id, friend_id=regular_user.id, status="accepted"),
+            UserFriend(user_id=regular_user.id, friend_id=owner_user.id, status="accepted"),
+        ]
     )
-    db.add(chat)
     db.commit()
 
     # Seed 3 envelopes into this mailbox
@@ -150,11 +163,22 @@ def test_e2ee_sync_participant_security_boundary_and_zero_knowledge(client: Test
 
     # Chat AB
     box_ab = SocialService.derive_blind_mailbox_id(alice.id, bob.id)
-    chat_ab = DirectChat(user_a_id=min(alice.id, bob.id), user_b_id=max(alice.id, bob.id), blind_mailbox_id=box_ab, initiated_by_user_id=alice.id)
+    chat_ab = DirectChat(blind_mailbox_id=box_ab)
     # Chat BC
     box_bc = SocialService.derive_blind_mailbox_id(bob.id, charlie.id)
-    chat_bc = DirectChat(user_a_id=min(bob.id, charlie.id), user_b_id=max(bob.id, charlie.id), blind_mailbox_id=box_bc, initiated_by_user_id=bob.id)
+    chat_bc = DirectChat(blind_mailbox_id=box_bc)
     db.add_all([chat_ab, chat_bc])
+    # Die Freundschaften sind seit Stufe 6b die Quelle, aus der `sync_mailboxes`
+    # eine Direktchat-Kennung ueberhaupt noch kennt. Die Chatzeilen daneben
+    # nennen niemanden mehr.
+    db.add_all(
+        [
+            UserFriend(user_id=alice.id, friend_id=bob.id, status="accepted"),
+            UserFriend(user_id=bob.id, friend_id=alice.id, status="accepted"),
+            UserFriend(user_id=bob.id, friend_id=charlie.id, status="accepted"),
+            UserFriend(user_id=charlie.id, friend_id=bob.id, status="accepted"),
+        ]
+    )
     db.commit()
 
     # Envelopes in both
@@ -200,11 +224,43 @@ def test_e2ee_sync_participant_security_boundary_and_zero_knowledge(client: Test
     finally:
         app.dependency_overrides.pop(get_current_user, None)
 
+    # 5. Und die Gegenprobe zu Stufe 6b: ein Gespraech ohne Freundschaft zaehlt
+    #    der Server nicht mehr auf. Alice und Dave haben eine Chatzeile samt
+    #    Umschlag — `sync_mailboxes` nennt sie trotzdem nicht, weil es dafuer
+    #    `direct_chats.user_a_id`/`user_b_id` braeuchte.
+    box_ad = SocialService.derive_blind_mailbox_id(alice.id, dave.id)
+    db.add(DirectChat(blind_mailbox_id=box_ad))
+    db.add(
+        E2eeBlindEnvelope(
+            blind_mailbox_id=box_ad,
+            ciphertext_envelope=_valid_test_envelope(b"ad"),
+            client_uuid=str(uuid4()),
+        )
+    )
+    db.commit()
+
+    app.dependency_overrides[get_current_user] = lambda: alice
+    try:
+        mids = [
+            m["blind_mailbox_id"]
+            for m in client.get("/api/social/e2ee/sync").json()["mailboxes"]
+        ]
+        assert box_ad not in mids
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+    # Erreichbar bleibt sie trotzdem — ueber die Tuer, nicht ueber die Liste.
+    SocialService.assert_mailbox_participant(db, alice.id, box_ad)
+    SocialService.assert_mailbox_participant(db, dave.id, box_ad)
+    with pytest.raises(HTTPException) as fehler:
+        SocialService.assert_mailbox_participant(db, charlie.id, box_ad)
+    assert fehler.value.status_code == 403
+
 
 # ── Test 5: Group Chat Mailbox Sync & Revocation ──
 def test_e2ee_sync_group_chat_mailbox(client: TestClient, db: Session, owner_user: User, regular_user: User):
     """Group chat mailboxes are returned to active members and excluded upon kick/leave."""
-    group = SocialService.create_group(db, user=owner_user, name="Sync Test Guild")
+    group = SocialService.create_group(db, user=owner_user)
     SocialService.join_group_by_invite_code(db, regular_user, group.invite_code)
 
     group_box = hashlib.sha256(f"msm:group:{group.id}".encode("utf-8")).hexdigest()

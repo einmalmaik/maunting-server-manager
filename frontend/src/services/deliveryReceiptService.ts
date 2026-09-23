@@ -162,7 +162,6 @@ export async function sendE2eeDeliveryReceipt({
     await relayE2eeEnvelope({
       blind_mailbox_id: blindMailboxId,
       ciphertext_envelope: ciphertext,
-      recipient_id: senderUserId,
       client_uuid: clientUuid,
       is_control: true,
       control_type: 'delivery_receipt',

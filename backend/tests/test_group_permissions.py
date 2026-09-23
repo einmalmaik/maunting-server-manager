@@ -17,6 +17,7 @@ from models import User
 from services.social_service import (
     GROUP_PERMISSION_ALIASES,
     GROUP_PERMISSIONS,
+    GROUP_ROLE_ONLY_PERMISSIONS,
     SocialService,
 )
 
@@ -90,7 +91,7 @@ def test_none_bleibt_none() -> None:
 
 
 def _gruppe(db: Session, besitzer: User, mitglied: User, rechte: str | None):
-    gruppe = SocialService.create_group(db, besitzer, "Rechtegruppe")
+    gruppe = SocialService.create_group(db, besitzer)
     SocialService.join_group_by_invite_code(db, mitglied, gruppe.invite_code)
     if rechte is not None:
         mitgliedschaft = SocialService.get_group_member(db, gruppe.id, mitglied.id)
@@ -305,3 +306,157 @@ def test_gruppenmarke_beschreibt_mich_selbst(
     assert meins["can_mention_everyone"] is False
     besitzer = next(m for m in meins["members"] if m["user_id"] == owner_user.id)
     assert besitzer["can_mention_everyone"] is True
+
+
+# ── Nur-Rollen-Rechte gehoeren nicht an @everyone ───────────────────────────
+
+
+def test_manage_roles_nicht_als_standardrecht(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Der Dialog bot es nie an, das Backend nahm es klaglos: ein PATCH auf die
+    # Standardrechte machte jedes einfache Mitglied zum Rollenverwalter, und
+    # damit zum Administrator. Der Haken war versteckt, die Regel fehlte.
+    gruppe = _gruppe(db, owner_user, regular_user, None)
+    with pytest.raises(HTTPException) as fehler:
+        SocialService.update_group_default_permissions(
+            db,
+            group_id=gruppe.id,
+            default_permissions="send_messages,manage_roles",
+            caller=owner_user,
+        )
+    assert fehler.value.status_code == 422
+    assert "manage_roles" in fehler.value.detail
+
+    db.rollback()
+    frisch = SocialService.get_group_member(db, gruppe.id, regular_user.id)
+    assert frisch is not None
+    assert not SocialService.has_group_permission(
+        db, gruppe.id, regular_user.id, "manage_roles"
+    )
+
+
+def test_standardrechte_ohne_nur_rollen_recht_gehen_durch(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Die Schranke darf nur das eine Recht treffen, nicht den ganzen Vorgang.
+    gruppe = _gruppe(db, owner_user, regular_user, None)
+    aktualisiert = SocialService.update_group_default_permissions(
+        db,
+        group_id=gruppe.id,
+        default_permissions="send_messages,attach_media",
+        caller=owner_user,
+    )
+    assert aktualisiert.default_permissions == "attach_media,send_messages"
+
+
+def test_nur_rollen_recht_bleibt_an_einer_rolle_erlaubt(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Genau dafuer ist es da. Verboten ist nur der Weg ueber @everyone.
+    gruppe = _gruppe(db, owner_user, regular_user, None)
+    SocialService.update_member_role_permissions(
+        db,
+        group_id=gruppe.id,
+        target_user_id=regular_user.id,
+        role="admin",
+        permissions="send_messages,manage_roles",
+        caller=owner_user,
+    )
+    assert SocialService.has_group_permission(
+        db, gruppe.id, regular_user.id, "manage_roles"
+    )
+
+
+def test_jedes_nur_rollen_recht_ist_ein_bekanntes_recht() -> None:
+    # Ein Eintrag, der auf einen Namen zeigt, den das Vokabular nicht kennt,
+    # waere eine Schranke vor einer Tuer, die es nicht gibt.
+    assert GROUP_ROLE_ONLY_PERMISSIONS <= GROUP_PERMISSIONS
+
+
+# ── Der Einladungscode ──────────────────────────────────────────────────────
+#
+# `invite_members` war bis 09/2026 nicht nur ungeprueft, es war strukturell
+# unprueflar: der Code ging bei jedem Abruf der Gruppenliste an jedes Mitglied
+# heraus. Wer ihn hat, kommt rein — also ist ihn *nicht zu bekommen* die
+# einzige Durchsetzung, die es geben kann.
+
+
+def _code_von(db: Session, gruppe, wer: User) -> str | None:
+    eintrag = next(
+        (g for g in SocialService.list_user_groups(db, wer.id) if g["id"] == gruppe.id),
+        None,
+    )
+    assert eintrag is not None, "Die Gruppe fehlt in der eigenen Liste."
+    return eintrag["invite_code"]
+
+
+def test_eigentuemer_bekommt_den_einladungscode_immer(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Auch wenn `invite_members` nirgends gesetzt ist: ein Eigentuemer, der
+    # niemanden in seine eigene Gruppe holen darf, waere kein Schutz.
+    gruppe = _gruppe(db, owner_user, regular_user, "")
+    SocialService.update_group_default_permissions(
+        db, group_id=gruppe.id, default_permissions="send_messages", caller=owner_user
+    )
+
+    assert _code_von(db, gruppe, owner_user) == gruppe.invite_code
+
+
+def test_mitglied_ohne_recht_bekommt_keinen_einladungscode(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    gruppe = _gruppe(db, owner_user, regular_user, "send_messages")
+
+    assert _code_von(db, gruppe, regular_user) is None
+
+
+def test_mitglied_mit_recht_bekommt_den_einladungscode(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    gruppe = _gruppe(db, owner_user, regular_user, "send_messages,invite_members")
+
+    assert _code_von(db, gruppe, regular_user) == gruppe.invite_code
+
+
+def test_standardrecht_reicht_fuer_den_einladungscode(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # `permissions = None` heisst „nimm die Standardrechte" — und die tragen
+    # `invite_members` in einer frischen Gruppe.
+    gruppe = _gruppe(db, owner_user, regular_user, None)
+    SocialService.update_group_default_permissions(
+        db,
+        group_id=gruppe.id,
+        default_permissions="send_messages,invite_members",
+        caller=owner_user,
+    )
+
+    assert _code_von(db, gruppe, regular_user) == gruppe.invite_code
+
+
+def test_entzogenes_recht_nimmt_den_einladungscode_wieder_weg(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    gruppe = _gruppe(db, owner_user, regular_user, "send_messages,invite_members")
+    assert _code_von(db, gruppe, regular_user) == gruppe.invite_code
+
+    SocialService.update_member_role_permissions(
+        db,
+        group_id=gruppe.id,
+        target_user_id=regular_user.id,
+        role="member",
+        permissions="send_messages",
+        caller=owner_user,
+    )
+
+    assert _code_von(db, gruppe, regular_user) is None
+
+
+def test_darf_einladen_sagt_bei_einem_nichtmitglied_nein(
+    db: Session, owner_user: User, regular_user: User, inactive_user: User
+) -> None:
+    gruppe = _gruppe(db, owner_user, regular_user, None)
+
+    assert SocialService.darf_einladen(db, gruppe.id, inactive_user.id) is False

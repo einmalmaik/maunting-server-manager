@@ -13,7 +13,10 @@ class ChatMediaUploadRequest(BaseModel):
     file_name: str = Field(..., min_length=1, max_length=256)
     media_type: str = Field(default="application/octet-stream", max_length=64)
     group_id: int | None = None
-    recipient_id: int | None = None
+    # Kein `recipient_id`. Es nannte dem Server den Empfänger eines Anhangs,
+    # und für eine Mailbox aus einem Geheimnis war das die eine Auskunft, die
+    # er sonst nicht hat. Wie beim Umschlag: weggelassen, nicht abgewiesen —
+    # ein Altclient sendet es weiter und wird nicht mehr gehört.
 
 
 class ChatMediaUploadResponse(BaseModel):

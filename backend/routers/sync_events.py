@@ -17,10 +17,12 @@ from starlette.websockets import WebSocketDisconnect
 from sqlalchemy.orm import Session
 
 from database import SessionLocal, get_db
-from dependencies import get_current_user, get_current_user_for_ws, ws_subprotokoll
+from dependencies import get_current_user, get_current_user_for_ws, verify_csrf, ws_subprotokoll
 from models.user import User
+from schemas.social import StreamMailboxAbos
 from services import team_service
-from services.sync_event_service import SyncEventService
+from services.social_service import SocialService
+from services.sync_event_service import MAX_MAILBOXES, SyncEventService
 
 _log = logging.getLogger("msm.sync_events_router")
 
@@ -94,6 +96,37 @@ async def live_events(
             "Connection": "keep-alive",
         },
     )
+
+
+@router.post("/mailboxes", dependencies=[Depends(verify_csrf)])
+def set_stream_mailboxes(
+    req: StreamMailboxAbos,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Sagt dem laufenden Stream, über welche Mailboxen er Bescheid geben soll.
+
+    Der Gegenweg zu SSE, das ja nur in eine Richtung spricht: die `conn_id`
+    steht im `ready`-Signal, und mit ihr meldet der Client hier an, was ihn
+    interessiert. Der WebSocket macht dasselbe über eine Nachricht vom Typ
+    `mailboxes`; beide landen in derselben Prüfung.
+
+    Gebraucht wird das für Mailboxen, deren Kennung der Server nicht
+    ausrechnen kann. Bei ihnen gibt es keinen Empfänger nachzuschlagen — die
+    Kennung **ist** die Adresse, und wer nichts abonniert hat, erfährt nichts.
+
+    Wer hinein darf, entscheidet `SocialService.erlaubte_mailboxen` — dieselbe
+    Prüfung, die auch über die Push-Adresse wacht. Was durchfällt, wird still
+    übergangen; die Antwort nennt nur die Anzahl.
+    """
+    erlaubt = SocialService.erlaubte_mailboxen(
+        db,
+        user.id,
+        ((e.mailbox_id, e.mailbox_token) for e in req.eintraege[:MAX_MAILBOXES]),
+    )
+
+    anzahl = SyncEventService.set_mailboxes(req.conn_id, erlaubt, user_id=user.id)
+    return {"ok": True, "count": anzahl}
 
 
 # Zusätzlicher Alias-Router unter /api/sync/events zur maximalen Kompatibilität

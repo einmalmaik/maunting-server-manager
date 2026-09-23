@@ -13,6 +13,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { api, apiStream } from '@/api/client'
+import { nachweisKopf } from '@/services/mailboxNachweis'
+import { merkeStromKennung, vergissStromKennung } from '@/services/mailboxAbo'
 import type { NoteItem } from '@/pages/Notes'
 import type { CalendarEventItem, KalenderVorkommen } from '@/pages/Calendar'
 import { LEERES_DOKUMENT, ausbreiten, serieLesen } from '@/services/kalenderSerie'
@@ -230,7 +232,6 @@ export function enqueueMutation(
 export function enqueueMessageMutation(payload: {
   blind_mailbox_id: string
   ciphertext_envelope: string
-  recipient_id?: number | null
   client_uuid: string
   /**
    * Steuerumschläge müssen ihre Kennzeichnung auch über die Outbox behalten.
@@ -437,6 +438,10 @@ export async function replayOutbox(): Promise<{ processed: number; failed: numbe
             const res = await api<any>('/social/e2ee/relay', {
               method: 'POST',
               body: JSON.stringify(mutation.payload),
+              // Auch hier: die Warteschlange ruft `/e2ee/relay` direkt auf und
+              // geht an `relayE2eeEnvelope` vorbei. Ohne den Nachweis waere
+              // sie der eine Sendeweg, den die Mailbox abweist.
+              headers: nachweisKopf(mutation.payload?.blind_mailbox_id),
             })
             if (res && res.id) {
               if (typeof window !== 'undefined') {
@@ -1431,6 +1436,14 @@ export function startLiveSync(): () => void {
             const dataStr = trimmed.slice(5).trim()
             try {
               const data = JSON.parse(dataStr) as SyncEventPayload
+              if (currentEvent === 'ready') {
+                // Der Rückweg eines Stroms, der nur in eine Richtung spricht:
+                // mit dieser Kennung meldet der Client an, welche Mailboxen
+                // ihn angehen. Nötig für Kennungen, die der Server nicht
+                // ausrechnen kann — dort gibt es keinen Empfänger
+                // nachzuschlagen.
+                merkeStromKennung((data as { conn_id?: string }).conn_id ?? null)
+              }
               handleIncomingSyncEvent(currentEvent, data)
             } catch {
               // Non-JSON or keepalive
@@ -1446,6 +1459,10 @@ export function startLiveSync(): () => void {
         stableTimer = null
       }
       isLiveConnected = false
+      // Die Kennung gehoert zu diesem Strom und stirbt mit ihm. Ohne das
+      // meldete der Client nach dem Neuverbinden an eine Verbindung, die es
+      // nicht mehr gibt — und bliebe stumm.
+      vergissStromKennung()
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('msm:sync-status', { detail: { connected: false } }))
       }

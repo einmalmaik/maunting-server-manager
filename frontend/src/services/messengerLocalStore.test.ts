@@ -43,13 +43,40 @@ function installiereLocalStorage() {
  * gebaute Map wäre deshalb ab dem zweiten Test eine andere als die, in die das
  * Modul schreibt: die Tests liefen weiter, aber wer hineinschaut, sähe nichts.
  */
-const mockStores = new Map<string, Map<string, any>>()
+const datenbanken = new Map<string, Map<string, Map<string, any>>>()
+/** Jeder `open`-Aufruf mit seinem Datenbanknamen, in der Reihenfolge. */
+const geoeffneteDatenbanken: string[] = []
+/** Jeder `deleteDatabase`-Aufruf. */
+const geloeschteDatenbanken: string[] = []
+
+/**
+ * Die Ablage **einer** Datenbank.
+ *
+ * Der Browser trennt Datenbanken nach Namen; diese Fälschung muss das
+ * nachmachen, sonst wäre jede Aussage über die Trennung je Konto eine Aussage
+ * über nichts. Die Map-Objekte selbst bleiben über alle Tests dieselben, siehe
+ * den Hinweis oben.
+ */
+function ablageVon(name: string): Map<string, Map<string, any>> {
+  let vorhanden = datenbanken.get(name)
+  if (!vorhanden) {
+    vorhanden = new Map()
+    datenbanken.set(name, vorhanden)
+  }
+  return vorhanden
+}
+
+/** Das Konto, unter dem die Tests dieser Datei laufen, und seine Datenbank. */
+const TEST_KONTO = 1
+const HAUPT_DB = `msm_messenger_local:konto:${TEST_KONTO}`
+const mockStores = ablageVon(HAUPT_DB)
 
 function installMockIndexedDb() {
-  const stores = mockStores
-  stores.forEach((map) => map.clear())
+  datenbanken.forEach((db) => db.forEach((map) => map.clear()))
+  geoeffneteDatenbanken.length = 0
+  geloeschteDatenbanken.length = 0
 
-  const makeObjectStore = (storeName: string) => {
+  const makeObjectStore = (stores: Map<string, Map<string, any>>, storeName: string) => {
     let map = stores.get(storeName)
     if (!map) {
       map = new Map()
@@ -129,25 +156,31 @@ function installMockIndexedDb() {
     }
   }
 
-  const db: any = {
-    objectStoreNames: {
-      contains: (n: string) => stores.has(n),
-    },
-    createObjectStore: (n: string) => {
-      stores.set(n, new Map())
-      return {
-        createIndex: () => {},
-      }
-    },
-    transaction: (_storeNames: any) => {
-      const tx: any = {
-        objectStore: (n: string) => makeObjectStore(n),
-        oncomplete: null,
-        onerror: null,
-      }
-      queueMicrotask(() => tx.oncomplete?.())
-      return tx
-    },
+  const macheDb = (name: string): any => {
+    const stores = ablageVon(name)
+    return {
+      // Schließen ist im Browser echt; hier reicht die Nachbildung, damit der
+      // Kontowechsel dieselbe Bewegung macht wie in der Anwendung.
+      close: () => {},
+      objectStoreNames: {
+        contains: (n: string) => stores.has(n),
+      },
+      createObjectStore: (n: string) => {
+        stores.set(n, new Map())
+        return {
+          createIndex: () => {},
+        }
+      },
+      transaction: (_storeNames: any) => {
+        const tx: any = {
+          objectStore: (n: string) => makeObjectStore(stores, n),
+          oncomplete: null,
+          onerror: null,
+        }
+        queueMicrotask(() => tx.oncomplete?.())
+        return tx
+      },
+    }
   }
 
   ;(globalThis as any).IDBKeyRange = {
@@ -156,21 +189,37 @@ function installMockIndexedDb() {
   }
 
   ;(globalThis as any).indexedDB = {
-    open: () => {
-      const req: any = { onsuccess: null, onerror: null, onupgradeneeded: null, result: db }
+    open: (name: string) => {
+      geoeffneteDatenbanken.push(name)
+      const req: any = {
+        onsuccess: null,
+        onerror: null,
+        onupgradeneeded: null,
+        result: macheDb(name),
+      }
       queueMicrotask(() => {
         req.onupgradeneeded?.()
         req.onsuccess?.()
       })
       return req
     },
+    deleteDatabase: (name: string) => {
+      geloeschteDatenbanken.push(name)
+      ablageVon(name).forEach((map) => map.clear())
+      const req: any = { onsuccess: null, onerror: null }
+      queueMicrotask(() => req.onsuccess?.())
+      return req
+    },
   }
 
-  return { stores }
+  return { stores: ablageVon(HAUPT_DB), geoeffneteDatenbanken, geloeschteDatenbanken }
 }
 
 describe('messengerLocalStore (IndexedDB Chat Persistence & F5 Hydration)', () => {
   beforeEach(() => {
+    // Die Ablage gehört einem Konto. Ohne dieses Blatt gäbe sie nichts heraus —
+    // und das ist, seit der Trennung je Konto, richtig so.
+    setzeAngemeldetesKonto(TEST_KONTO)
     installMockIndexedDb()
   })
 
@@ -670,7 +719,7 @@ describe('messengerLocalStore mit PIN', () => {
   beforeEach(async () => {
     ablage = installMockIndexedDb().stores
     installiereLocalStorage()
-    setzeAngemeldetesKonto(42)
+    setzeAngemeldetesKonto(TEST_KONTO)
     setzeSiegelAktiv(true)
     setzeInhaltsSchluessel(await generateAesGcmKey())
   })
@@ -789,7 +838,7 @@ describe('Entwürfe je Chat', () => {
   beforeEach(async () => {
     ablage = installMockIndexedDb().stores
     installiereLocalStorage()
-    setzeAngemeldetesKonto(42)
+    setzeAngemeldetesKonto(TEST_KONTO)
     setzeSiegelAktiv(true)
     setzeInhaltsSchluessel(await generateAesGcmKey())
   })
@@ -973,5 +1022,101 @@ describe('sichereDauerhafteAblage', () => {
 
     stelleSpeicher({ persisted: async () => { throw new Error('verboten') }, persist: async () => true })
     expect(await sichereDauerhafteAblage()).toBe(false)
+  })
+})
+
+/**
+ * Eine Ablage je Konto.
+ *
+ * Bis 09/2026 hieß die Datenbank schlicht `msm_messenger_local` und gehörte
+ * damit dem Browserprofil. Zwei Konten nacheinander auf demselben Rechner
+ * hinterließen ihre Verläufe nebeneinander, und das zweite las die des ersten
+ * beim Öffnen des Messengers mit. Diese Tests halten die Trennung fest — nicht
+ * als Filter über einer gemeinsamen Ablage, sondern als getrennte Datenbanken.
+ */
+describe('Ablage je Konto', () => {
+  const mid = 'box-getrennt'
+  const zeile: LocalStoredMessage = {
+    blindMailboxId: mid,
+    id: 11,
+    senderId: 1,
+    text: 'Gehört Konto 1',
+    createdAt: '2026-09-22T10:00:00.000Z',
+    isSelf: true,
+    status: 'sent',
+  }
+
+  beforeEach(() => {
+    setzeAngemeldetesKonto(TEST_KONTO)
+    installMockIndexedDb()
+  })
+
+  afterEach(() => {
+    setzeAngemeldetesKonto(TEST_KONTO)
+  })
+
+  it('zeigt einem anderen Konto den Verlauf nicht', async () => {
+    await saveLocalMessages(mid, [zeile])
+    expect(await loadLocalMessages(mid)).toHaveLength(1)
+
+    // Dasselbe Gerät, dasselbe Gespräch, ein anderer Mensch.
+    setzeAngemeldetesKonto(7)
+    expect(await loadLocalMessages(mid)).toEqual([])
+
+    // Und es bleibt dabei: das fremde Konto sieht auch nichts, wenn es selbst
+    // etwas ablegt. Zwei Verläufe, zwei Ablagen.
+    await saveLocalMessages(mid, [{ ...zeile, id: 12, text: 'Gehört Konto 7' }])
+    const beiSieben = await loadLocalMessages(mid)
+    expect(beiSieben).toHaveLength(1)
+    expect(beiSieben[0].text).toBe('Gehört Konto 7')
+
+    setzeAngemeldetesKonto(TEST_KONTO)
+    const beiEins = await loadLocalMessages(mid)
+    expect(beiEins).toHaveLength(1)
+    expect(beiEins[0].text).toBe('Gehört Konto 1')
+  })
+
+  it('öffnet für jedes Konto eine eigene Datenbank', async () => {
+    // Jeder Kontowechsel erzwingt ein neues Öffnen — die gemerkte Verbindung
+    // des vorigen Kontos darf nicht weiterverwendet werden.
+    setzeAngemeldetesKonto(7)
+    await loadLocalMessages(mid)
+    setzeAngemeldetesKonto(TEST_KONTO)
+    await loadLocalMessages(mid)
+
+    // Genau zwei, mit Namen, und der alte kontolose ist keiner davon.
+    expect(geoeffneteDatenbanken).toEqual([
+      'msm_messenger_local:konto:7',
+      'msm_messenger_local:konto:1',
+    ])
+  })
+
+  it('schreibt und liest nichts, solange niemand angemeldet ist', async () => {
+    setzeAngemeldetesKonto(null)
+
+    // Kein Wurf nach außen, aber auch kein Ausweichen auf eine gemeinsame
+    // Ablage: der Aufruf tut schlicht nichts.
+    await saveLocalMessages(mid, [zeile])
+    expect(await loadLocalMessages(mid)).toEqual([])
+    expect(await getLocalMailboxLastSyncedId(mid)).toBe(0)
+    expect(geoeffneteDatenbanken).toEqual([])
+
+    // Nach der Anmeldung ist die eigene Ablage da — und leer, denn abgelegt
+    // wurde vorhin nichts.
+    setzeAngemeldetesKonto(TEST_KONTO)
+    expect(await loadLocalMessages(mid)).toEqual([])
+  })
+
+  it('räumt die alte, kontolose Datenbank ab', async () => {
+    // Frisches Modul: `raeumeAltbestand` läuft einmal je Sitzung, und die ist
+    // in dieser Datei längst vorbei.
+    vi.resetModules()
+    const { setzeAngemeldetesKonto: setzeFrisch } = await import('@/lib/angemeldetesKonto')
+    setzeFrisch(TEST_KONTO)
+    const frisch = await import('./messengerLocalStore')
+
+    await frisch.loadLocalMessages(mid)
+
+    expect(geloeschteDatenbanken).toContain('msm_messenger_local')
   })
 })

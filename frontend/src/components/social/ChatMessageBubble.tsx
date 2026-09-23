@@ -54,7 +54,7 @@ import {
   type VideoNoteAttachment,
 } from '@/components/social/ChatMediaAttachments'
 import { CircularVideoNotePlayer } from '@/components/social/CircularVideoNotePlayer'
-import { GruppenEinladungsKarte, findeEinladungsCode } from '@/components/social/GruppenEinladungsKarte'
+import { GruppenEinladungsKarte, findeEinladung } from '@/components/social/GruppenEinladungsKarte'
 import { STORY_GRADIENTS } from '@/components/social/CreateStoryModal'
 import { sanitizeSvg } from '@/lib/sanitizeSvg'
 import { useLangdruck } from '@/hooks/useLangdruck'
@@ -844,11 +844,15 @@ export function ChatMessageBubble({
               {(() => {
                 // Einladungslink im Text: statt der rohen URL eine
                 // Karte mit Logo, Name und Beitreten-Knopf.
-                const code = findeEinladungsCode(msg.text, window.location.origin)
-                if (!code) return null
+                const einladung = findeEinladung(msg.text, window.location.origin)
+                if (!einladung) return null
                 return (
                   <GruppenEinladungsKarte
-                    inviteCode={code}
+                    inviteCode={einladung.code}
+                    // Der Schlüssel steht hinter der Raute im Link, und der
+                    // Link steht in dieser Nachricht. Ohne ihn bliebe eine
+                    // verschlüsselte Karte zu.
+                    schluessel={einladung.schluessel}
                     istEigene={msg.isSelf}
                     onJoin={aktionen.onJoinByInviteCode}
                   />

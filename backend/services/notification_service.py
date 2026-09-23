@@ -344,4 +344,38 @@ class NotificationService:
             raw_payload, is_e2ee=is_e2ee, privacy_mode=privacy_mode
         )
 
+    @staticmethod
+    def prepare_mailbox_push(
+        *,
+        is_control: bool = False,
+        control_type: str | None = None,
+        title: str = "Neue Nachricht",
+    ) -> dict[str, Any] | None:
+        """Dasselbe fuer eine Mailbox, die zu keinem Konto gehoert.
+
+        Der Unterschied zu `prepare_push_dispatch` ist genau das, was **nicht**
+        drinsteht: kein `target_user_id`, kein `sender_user_id`. Die grosse
+        Schwester setzt beide in die Nutzlast, und fuer diesen Weg waere das der
+        Rueckweg zu allem, was gerade abgebaut wurde — die Mailbox verraet
+        niemanden, die Meldung darin dann aber doch.
+
+        Zwei der drei Gruende fuer `None` bleiben unveraendert: Steuersignale
+        loesen keine Meldung aus. Der dritte — „der Empfaenger hat einen offenen
+        Tab" — ist hier nicht beantwortbar und wird in `sw.js` entschieden, das
+        seine eigenen Fenster kennt. Der vierte — „das ist das Echo des
+        Absenders" — ebenfalls nicht, und ihn traegt `ausser_abdruck` in
+        `webpush_service.sende_an_mailbox`.
+        """
+        if is_control or (control_type and control_type not in ("message", "normal")):
+            return None
+
+        # Durch dieselbe Reinigung wie jeder andere Push. Sie ist hier zwar
+        # nicht viel zu tun, aber sie ist die Stelle, an der „was darf in einer
+        # Meldung stehen" einmal beantwortet wird — und nicht zweimal.
+        return NotificationService.sanitize_push_payload(
+            {"title": title, "body": "Neue Nachricht"},
+            is_e2ee=True,
+            privacy_mode=True,
+        )
+
 

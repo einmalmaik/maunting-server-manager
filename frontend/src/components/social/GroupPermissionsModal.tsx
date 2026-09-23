@@ -1,7 +1,18 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Dialog, DialogContent, Button, Badge, Avatar, Dropdown, Input, type DropdownOption, Checkbox } from '@/Singra/UI'
-import { Switch } from '@/components/ui/Switch'
+import {
+  Dialog,
+  DialogContent,
+  Button,
+  Badge,
+  Avatar,
+  Dropdown,
+  Input,
+  type DropdownOption,
+  RechteAbschnitte,
+  type RechteAbschnittDefinition,
+  type RechteZeile,
+} from '@/Singra/UI'
 import {
   Shield,
   Users,
@@ -16,6 +27,7 @@ import {
   Phone,
   ChevronDown,
   ChevronUp,
+  type LucideIcon,
 } from 'lucide-react'
 import {
   type ChatGroupItem,
@@ -25,6 +37,24 @@ import {
   kickGroupMember,
   updateGroupPermissions,
 } from '@/api/social'
+import { deriveGroupBlindMailboxId } from '@/services/e2eeCrypto'
+import type { GruppenKontext } from '@/services/gruppenSchluessel'
+import {
+  aendereGruppenzustand,
+  ladeGruppenzustand,
+  leererGruppenzustand,
+  type GruppenRolle,
+  type Konfiglesung,
+} from '@/services/gruppenKonfig'
+import {
+  GRUPPEN_RECHTE,
+  SYSTEM_GRUPPENROLLEN,
+  SYSTEM_ROLLEN_IDS,
+  permissionDescKey,
+  permissionTitleKey,
+  type Gruppenrolle,
+  type GruppenRechtKennung,
+} from '@/services/gruppenRollen'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 
@@ -36,48 +66,19 @@ interface GroupPermissionsModalProps {
   onGroupUpdated?: (group: ChatGroupItem) => void
 }
 
-export interface GroupRoleDefinition {
-  id: string
-  name: string
-  description: string
-  is_system: boolean
-  permissions: string[]
-}
-
-/**
- * Die Rechte der Gruppe — einmal, mit Schlüsseln statt fertiger Sätze.
+/*
+ * Vokabular und Systemrollen liegen seit 09/2026 in `services/gruppenRollen.ts`.
  *
- * Bis 09/2026 standen dieselben neun Rechte zweimal in dieser Datei: hier für
- * den Rollen-Editor, und noch einmal von Hand im Tab der Standardrechte, dort
- * mit kürzerem Wortlaut. Wer eine Beschreibung änderte, änderte sie an einer
- * Stelle. Beide Ansichten lesen jetzt aus dieser Liste.
+ * Sie standen hier, und deshalb kam der Messenger nicht an sie heran: er
+ * beantwortete die Frage „darf dieses Konto eine fremde Nachricht löschen?"
+ * mit `can_pin_messages` — dem Recht, eine Nachricht **anzuheften**. Eine
+ * Rechtetabelle gehört nicht in eine Dialogdatei.
  */
-export const GROUP_PERMISSION_DEFINITIONS = [
-  { key: 'send_messages', category: 'chat' },
-  { key: 'attach_media', category: 'chat' },
-  { key: 'invite_members', category: 'members' },
-  { key: 'start_group_calls', category: 'calls' },
-  { key: 'join_group_calls', category: 'calls' },
-  { key: 'share_screen', category: 'calls' },
-  { key: 'mute_in_calls', category: 'moderation' },
-  { key: 'kick_from_calls', category: 'moderation' },
-  { key: 'kick_members', category: 'moderation' },
-  { key: 'delete_messages', category: 'moderation' },
-  { key: 'mention_everyone', category: 'moderation' },
-  { key: 'pin_messages', category: 'moderation' },
-  { key: 'manage_roles', category: 'administration' },
-] as const
+export type GroupRoleDefinition = Gruppenrolle
+export const GROUP_PERMISSION_DEFINITIONS = GRUPPEN_RECHTE
+export type GroupPermissionKey = GruppenRechtKennung
 
-export type GroupPermissionKey = (typeof GROUP_PERMISSION_DEFINITIONS)[number]['key']
-
-/** `social.groupRoles.perm.<recht>.title` bzw. `.desc`. */
-export function permissionTitleKey(recht: string): string {
-  return `social.groupRoles.perm.${recht}.title`
-}
-
-export function permissionDescKey(recht: string): string {
-  return `social.groupRoles.perm.${recht}.desc`
-}
+type Uebersetzer = ReturnType<typeof useTranslation>['t']
 
 /**
  * Systemrollen tragen einen Schlüssel als Namen, selbst angelegte einen Text,
@@ -97,6 +98,13 @@ function rollentext(
  * `manage_roles` gehört nicht dorthin: wer Rollen verwalten darf, kann sich
  * jedes andere Recht selbst geben. Ein Haken, der das für alle setzt, wäre
  * keine Einstellung, sondern die Abschaffung der Rollen.
+ *
+ * Das hier ist nur die Anzeige. Durchgesetzt wird es im Backend
+ * (`GROUP_ROLE_ONLY_PERMISSIONS` in `social_service.py`), und zwar seit
+ * 09/2026: bis dahin stand die Regel ausschließlich in dieser Zeile, und ein
+ * einzelner PATCH auf `/groups/<id>/permissions` trug `manage_roles` an den
+ * Standardrechten ein, ohne dass jemand widersprach. Beide Listen gehören
+ * zusammen — wer eine ändert, ändert die andere mit.
  */
 const NICHT_ALS_STANDARD: ReadonlySet<string> = new Set(['manage_roles'])
 
@@ -104,7 +112,12 @@ const NICHT_ALS_STANDARD: ReadonlySet<string> = new Set(['manage_roles'])
 const STANDARD_VORGABE = ['send_messages', 'attach_media', 'invite_members'] as const
 
 /**
- * Die Abschnitte des Standardrechte-Reiters.
+ * Die Abschnitte, in denen die Gruppenrechte stehen — in **beiden** Ansichten.
+ *
+ * Bis 09/2026 galten sie nur für den Standardrechte-Reiter. Das Rollen-Formular
+ * daneben warf dieselben Rechte in eine flache zweispaltige Liste und ignorierte
+ * `category` ganz: zwei Ansichten auf dasselbe Vokabular, und nur eine zeigte
+ * seine Ordnung. Wer hier einen Abschnitt ändert, ändert jetzt beide.
  *
  * Die Reihenfolge der Rechte innerhalb eines Abschnitts ist die aus
  * `GROUP_PERMISSION_DEFINITIONS` — eine zweite Sortierliste wäre wieder eine
@@ -114,50 +127,38 @@ const STANDARD_VORGABE = ['send_messages', 'attach_media', 'invite_members'] as 
  * erkannt wurde (`titel === 'Moderation'`). Das war auf Deutsch richtig und
  * auf Englisch nie wahr — das Schild hing am übersetzten Text.
  */
-const STANDARD_ABSCHNITTE: {
+const RECHTE_ABSCHNITTE: {
   titelKey: string
-  symbol: 'chat' | 'anruf' | 'moderation'
+  symbol: LucideIcon
   kategorien: readonly string[]
 }[] = [
-  { titelKey: 'social.groupRoles.defaultsChat', symbol: 'chat', kategorien: ['chat', 'members'] },
-  { titelKey: 'social.groupRoles.defaultsCalls', symbol: 'anruf', kategorien: ['calls'] },
-  { titelKey: 'social.groupRoles.defaultsModeration', symbol: 'moderation', kategorien: ['moderation', 'administration'] },
+  { titelKey: 'social.groupRoles.defaultsChat', symbol: Users, kategorien: ['chat', 'members'] },
+  { titelKey: 'social.groupRoles.defaultsCalls', symbol: Phone, kategorien: ['calls'] },
+  { titelKey: 'social.groupRoles.defaultsModeration', symbol: Shield, kategorien: ['moderation', 'administration'] },
 ]
 
 /**
- * Die vier eingebauten Rollen. Name und Beschreibung sind Schlüssel — was in
- * der Oberfläche steht, holt `rolleName`/`rolleBeschreibung` daraus.
+ * Die Rechte als Zeilen für `RechteAbschnitte`: Text nachgeschlagen, das
+ * Ausgeblendete weg. `ausgeblendet` ist der einzige Unterschied zwischen den
+ * beiden Ansichten — die Standardrechte lassen `manage_roles` aus, das
+ * Rollen-Formular zeigt es.
  */
-const SYSTEM_GROUP_ROLES: GroupRoleDefinition[] = [
-  {
-    id: 'owner',
-    name: 'social.groupRoles.system.owner.name',
-    description: 'social.groupRoles.system.owner.desc',
-    is_system: true,
-    permissions: GROUP_PERMISSION_DEFINITIONS.map((p) => p.key),
-  },
-  {
-    id: 'admin',
-    name: 'social.groupRoles.system.admin.name',
-    description: 'social.groupRoles.system.admin.desc',
-    is_system: true,
-    permissions: ['send_messages', 'attach_media', 'invite_members', 'start_group_calls', 'join_group_calls', 'share_screen', 'mute_in_calls', 'kick_from_calls', 'kick_members', 'delete_messages', 'mention_everyone', 'pin_messages', 'manage_roles'],
-  },
-  {
-    id: 'moderator',
-    name: 'social.groupRoles.system.moderator.name',
-    description: 'social.groupRoles.system.moderator.desc',
-    is_system: true,
-    permissions: ['send_messages', 'attach_media', 'invite_members', 'join_group_calls', 'share_screen', 'mute_in_calls', 'kick_from_calls', 'delete_messages', 'mention_everyone', 'pin_messages'],
-  },
-  {
-    id: 'member',
-    name: 'social.groupRoles.system.member.name',
-    description: 'social.groupRoles.system.member.desc',
-    is_system: true,
-    permissions: ['send_messages', 'attach_media', 'invite_members', 'join_group_calls'],
-  },
-]
+function rechteZeilen(t: Uebersetzer, ausgeblendet?: ReadonlySet<string>): RechteZeile[] {
+  return GROUP_PERMISSION_DEFINITIONS.filter((def) => !ausgeblendet?.has(def.key)).map((def) => ({
+    key: def.key,
+    kategorie: def.category,
+    titel: t(permissionTitleKey(def.key)),
+    beschreibung: t(permissionDescKey(def.key)),
+  }))
+}
+
+function uebersetzteAbschnitte(t: Uebersetzer): RechteAbschnittDefinition[] {
+  return RECHTE_ABSCHNITTE.map((abschnitt) => ({
+    titel: t(abschnitt.titelKey),
+    symbol: abschnitt.symbol,
+    kategorien: abschnitt.kategorien,
+  }))
+}
 
 /** Wird im Bauteil mit `t()` befüllt — hier stehen nur die Werte. */
 const ROLE_OPTION_IDS = ['admin', 'moderator', 'member'] as const
@@ -174,8 +175,26 @@ function GroupRoleForm({ initial, onSubmit, onCancel, disabled }: GroupRoleFormP
 
   const isSystemRole = Boolean(initial?.is_system)
   const isOwnerRole = initial?.id === 'owner'
-  const [name, setName] = useState(initial?.name ?? '')
-  const [description, setDescription] = useState(initial?.description ?? '')
+  /*
+   * Angezeigt wird, was auch in der Liste steht — nicht der Übersetzungs-
+   * schlüssel. Eine Systemrolle trägt als `name` und `description` einen
+   * Schlüssel wie `social.groupRoles.system.moderator.desc`; stand der im
+   * Eingabefeld, las man ihn dort und speicherte ihn beim nächsten Klick als
+   * Text ab. Solange die Rollen nur im Arbeitsspeicher lagen, fiel das beim
+   * Schliessen des Dialogs wieder weg.
+   */
+  const [name, setName] = useState(
+    initial ? rollentext(initial.name, initial.is_system, t) : '',
+  )
+  const [description, setDescription] = useState(
+    initial
+      ? rollentext(
+          initial.description,
+          initial.is_system && initial.description_is_key !== false,
+          t,
+        )
+      : '',
+  )
   const [selectedPerms, setSelectedPerms] = useState<Set<string>>(
     new Set(initial?.permissions ?? ['send_messages', 'attach_media'])
   )
@@ -299,35 +318,17 @@ function GroupRoleForm({ initial, onSubmit, onCancel, disabled }: GroupRoleFormP
           )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-          {GROUP_PERMISSION_DEFINITIONS.map((def) => {
-            const isChecked = selectedPerms.has(def.key)
-            return (
-              <label
-                key={`perm-toggle-${def.key}`}
-                className={`flex items-start gap-3 p-3 rounded-xl border transition-all cursor-pointer select-none ${
-                  isChecked
-                    ? 'border-primary/40 bg-primary/10 shadow-sm'
-                    : 'border-outline-variant/20 bg-surface-container-lowest/60 hover:bg-surface-container-high/40'
-                } ${isOwnerRole ? 'opacity-80 cursor-not-allowed' : ''}`}
-              >
-                <div className="pt-0.5">
-                  <Checkbox
-                    checked={isChecked}
-                    onCheckedChange={() => togglePerm(def.key)}
-                    disabled={isOwnerRole || disabled}
-                  />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-semibold text-primary">{t(permissionTitleKey(def.key))}</div>
-                  <div className="text-label-sm text-on-surface-variant/80 mt-0.5 leading-snug">
-                    {t(permissionDescKey(def.key))}
-                  </div>
-                </div>
-              </label>
-            )
-          })}
-        </div>
+        {/* Dieselben Abschnitte wie im Standardrechte-Reiter. `manage_roles`
+            bleibt hier stehen — eine Rolle darf es tragen, die Standardrechte
+            aller nicht (siehe NICHT_ALS_STANDARD). */}
+        <RechteAbschnitte
+          rechte={rechteZeilen(t)}
+          abschnitte={uebersetzteAbschnitte(t)}
+          gesetzt={selectedPerms}
+          onToggle={(key) => togglePerm(key)}
+          disabled={isOwnerRole || disabled}
+          zeilenBeschriftung={(titel) => t('social.groupRoles.allow', { name: titel })}
+        />
       </div>
 
       <div className="flex justify-end gap-2.5 pt-3 border-t border-outline-variant/20">
@@ -363,8 +364,19 @@ export function GroupPermissionsModal({
   const [loading, setLoading] = useState(false)
   const [savingPermissions, setSavingPermissions] = useState(false)
 
-  // Custom roles state
-  const [roles, setRoles] = useState<GroupRoleDefinition[]>(SYSTEM_GROUP_ROLES)
+  /**
+   * Die Rollen der Gruppe, wie sie im verschlüsselten Block stehen.
+   *
+   * Eine Kennung, die auch eine Systemrolle trägt (`admin`, `moderator`, …),
+   * ist eine Überschreibung: Rechte und Beschreibung kommen dann von hier, der
+   * Name bleibt der eingebaute. Alles andere ist eine eigene Rolle.
+   */
+  const [eigeneRollen, setEigeneRollen] = useState<GruppenRolle[]>([])
+  const [rollenZuordnung, setRollenZuordnung] = useState<Record<string, number[]>>({})
+  const [konfigLage, setKonfigLage] = useState<
+    'laedt' | 'bereit' | { art: Konfiglesung['art'] }
+  >('laedt')
+  const [rollenSpeichern, setRollenSpeichern] = useState(false)
   const [editingRole, setEditingRole] = useState<GroupRoleDefinition | null>(null)
   const [isCreatingRole, setIsCreatingRole] = useState(false)
   const [expandedRoleDescriptions, setExpandedRoleDescriptions] = useState<Record<string, boolean>>({})
@@ -389,6 +401,73 @@ export function GroupPermissionsModal({
   const currentUserRole = group?.role || (isOwner ? 'owner' : 'member')
   const canManage = isOwner || currentUserRole === 'admin'
 
+  /**
+   * Die Rollen, wie sie auf dem Bildschirm stehen: die eingebauten, und darüber
+   * gelegt, was die Gruppe selbst festgelegt hat.
+   *
+   * Der Name einer Systemrolle bleibt der eingebaute Schlüssel — „Eigentümer"
+   * soll in jeder Sprache „Eigentümer" heissen und in keiner Gruppe etwas
+   * anderes bedeuten. Rechte und Beschreibung darf die Gruppe überschreiben.
+   */
+  const roles = useMemo<GroupRoleDefinition[]>(() => {
+    const ueberschrieben = new Map(eigeneRollen.map((r) => [r.id, r]))
+    const system = SYSTEM_GRUPPENROLLEN.map((vorlage) => {
+      const eigen = ueberschrieben.get(vorlage.id)
+      if (!eigen) return vorlage
+      ueberschrieben.delete(vorlage.id)
+      return {
+        ...vorlage,
+        description: eigen.beschreibung || vorlage.description,
+        description_is_key: !eigen.beschreibung,
+        permissions: eigen.rechte,
+      }
+    })
+    const eigene = eigeneRollen
+      .filter((r) => ueberschrieben.has(r.id))
+      .map<GroupRoleDefinition>((r) => ({
+        id: r.id,
+        name: r.name,
+        description: r.beschreibung,
+        is_system: false,
+        permissions: r.rechte,
+      }))
+    return [...system, ...eigene]
+  }, [eigeneRollen])
+
+  /**
+   * Wer diesen Block geschrieben haben darf.
+   *
+   * Dieselbe Quelle wie im Backend (`darf_gruppenzustand_schreiben`): die
+   * Mitgliederzeile. Sie ist Klartext und fällt mit Stufe 6 weg — bis dahin
+   * prüfen beide Seiten dasselbe, statt zwei Wahrheiten zu pflegen. Den Block
+   * gegen sich selbst zu prüfen wäre wertlos: er behauptet dann genau das, was
+   * ihn beglaubigen soll.
+   */
+  const darfSchreiben = useCallback(
+    (konto: number) => {
+      if (konto === group?.owner_user_id) return true
+      const mitglied = members.find((m) => m.user_id === konto)
+      if (!mitglied) return false
+      if (mitglied.role === 'owner' || mitglied.role === 'admin') return true
+      return (mitglied.permissions || '')
+        .split(',')
+        .map((p) => p.trim())
+        .includes('manage_roles')
+    },
+    [group?.owner_user_id, members],
+  )
+
+  const gruppenKontext = useCallback(async (): Promise<GruppenKontext | null> => {
+    if (!group) return null
+    return {
+      groupId: group.id,
+      blindMailboxId: await deriveGroupBlindMailboxId(group.id),
+      eigeneId: currentUserId,
+      mitglieder: members.map((m) => m.user_id),
+      istEigentuemer: group.role === 'owner',
+    }
+  }, [group, currentUserId, members])
+
   useEffect(() => {
     if (open && group) {
       void loadMembers()
@@ -399,6 +478,52 @@ export function GroupPermissionsModal({
       setStandardrechte(new Set(gesetzt))
     }
   }, [open, group?.id, group?.default_permissions])
+
+  /**
+   * Den verschlüsselten Rollenblock holen — erst, wenn die Mitglieder da sind.
+   *
+   * Die Reihenfolge ist keine Vorsicht, sondern nötig: ohne Mitgliederliste
+   * könnte `darfSchreiben` niemanden bestätigen, und ein gültiger Block käme
+   * als „unbefugt" an.
+   */
+  useEffect(() => {
+    if (!open || !group || members.length === 0) return
+    let abgebrochen = false
+
+    void (async () => {
+      setKonfigLage('laedt')
+      try {
+        const kontext = await gruppenKontext()
+        if (!kontext || abgebrochen) return
+        const lesung = await ladeGruppenzustand(kontext, darfSchreiben)
+        if (abgebrochen) return
+
+        if (lesung.art === 'zustand') {
+          setEigeneRollen(lesung.zustand.rollen)
+          setRollenZuordnung(lesung.zustand.zuordnung)
+          setKonfigLage('bereit')
+        } else if (lesung.art === 'leer') {
+          setEigeneRollen([])
+          setRollenZuordnung({})
+          setKonfigLage('bereit')
+        } else {
+          // Nichts anzeigen, was nicht geprüft ist. Ein Block, der nicht
+          // aufgeht oder nicht beglaubigt ist, wird nicht „so gut es geht"
+          // dargestellt — dann stünde eine Rechtetabelle auf dem Schirm, von
+          // der niemand sagen kann, wer sie geschrieben hat.
+          setEigeneRollen([])
+          setRollenZuordnung({})
+          setKonfigLage({ art: lesung.art })
+        }
+      } catch {
+        if (!abgebrochen) setKonfigLage({ art: 'unlesbar' })
+      }
+    })()
+
+    return () => {
+      abgebrochen = true
+    }
+  }, [open, group?.id, members, darfSchreiben, gruppenKontext])
 
   const loadMembers = async () => {
     if (!group) return
@@ -476,17 +601,76 @@ export function GroupPermissionsModal({
     }
   }
 
-  const handleCreateRole = async (name: string, description: string, permissions: string[]) => {
-    const newRole: GroupRoleDefinition = {
-      id: `custom_${Date.now()}`,
-      name,
-      description,
-      is_system: false,
-      permissions,
+  /**
+   * Eine Änderung an den Rollen: lesen, ändern, verschlüsselt zurückschreiben.
+   *
+   * Die Änderung wird als Funktion übergeben und nicht als fertiger Stand, weil
+   * `aendereGruppenzustand` sie bei einem Konflikt auf den frischen Stand
+   * anwenden muss. Ein „ich hatte da eben noch etwas anderes gesehen"
+   * überschreibt sonst die Rolle, die ein anderes Gerät gerade angelegt hat.
+   */
+  const speichereRollen = async (
+    aendere: (vorher: { rollen: GruppenRolle[]; zuordnung: Record<string, number[]> }) => {
+      rollen: GruppenRolle[]
+      zuordnung: Record<string, number[]>
+    },
+    erfolg: string,
+  ): Promise<boolean> => {
+    const kontext = await gruppenKontext()
+    if (!kontext) return false
+
+    setRollenSpeichern(true)
+    try {
+      const ergebnis = await aendereGruppenzustand(kontext, darfSchreiben, (vorher) => ({
+        ...leererGruppenzustand(),
+        ...aendere(vorher),
+      }))
+
+      if (ergebnis.art === 'gespeichert') {
+        // Aus der Quelle lesen statt den eigenen Stand fortzuschreiben: was
+        // angezeigt wird, ist dann immer das, was auch geschrieben wurde.
+        const frisch = await ladeGruppenzustand(kontext, darfSchreiben)
+        if (frisch.art === 'zustand') {
+          setEigeneRollen(frisch.zustand.rollen)
+          setRollenZuordnung(frisch.zustand.zuordnung)
+          setKonfigLage('bereit')
+        }
+        toast.success(erfolg)
+        return true
+      }
+
+      if (ergebnis.art === 'konflikt') {
+        toast.error(t('social.groupRoles.saveConflict'))
+      } else if (ergebnis.art === 'nicht-unterschreibbar') {
+        toast.error(t('social.groupRoles.saveUnsigned'))
+      } else {
+        toast.error(t('social.groupRoles.saveUnreadable'))
+      }
+      return false
+    } catch (err: any) {
+      toast.error(err?.message || t('social.groupRoles.saveFailed'))
+      return false
+    } finally {
+      setRollenSpeichern(false)
     }
-    setRoles((prev) => [...prev, newRole])
-    setIsCreatingRole(false)
-    toast.success(t('social.groupRoles.created', { name }))
+  }
+
+  const handleCreateRole = async (name: string, description: string, permissions: string[]) => {
+    // Zufällig statt fortlaufend: zwei Geräte, die gleichzeitig eine Rolle
+    // anlegen, dürfen sich keine Kennung teilen — sonst stünde die eine Rolle
+    // in der Zuordnung der anderen.
+    const id = `custom_${crypto.randomUUID()}`
+    const angelegt = await speichereRollen(
+      (vorher) => ({
+        ...vorher,
+        rollen: [
+          ...vorher.rollen,
+          { id, name, beschreibung: description, rechte: permissions },
+        ],
+      }),
+      t('social.groupRoles.created', { name }),
+    )
+    if (angelegt) setIsCreatingRole(false)
   }
 
   const handleUpdateRole = async (
@@ -495,15 +679,42 @@ export function GroupPermissionsModal({
     description: string,
     permissions: string[]
   ) => {
-    setRoles((prev) =>
-      prev.map((r) =>
-        r.id === role.id
-          ? { ...r, name: r.is_system ? r.name : name, description, permissions }
-          : r
-      )
+    // Eine Systemrolle hat noch keinen Eintrag im Block, solange sie unverändert
+    // ist. Die erste Änderung legt ihn an — unter derselben Kennung, damit die
+    // Verschmelzung sie als Überschreibung erkennt und nicht als neue Rolle.
+    //
+    // Die Beschreibung einer Systemrolle wird nur abgelegt, wenn sie wirklich
+    // geändert wurde. Sonst fröre ein blosser Haken sie in der Sprache ein, in
+    // der er gesetzt wurde: der Moderator hiesse für alle künftigen Mitglieder
+    // auf Deutsch, was vorher in elf Sprachen dastand. Leer heisst „nimm die
+    // eingebaute".
+    const eingebaut = SYSTEM_GRUPPENROLLEN.find((s) => s.id === role.id)
+    const beschreibung =
+      role.is_system && eingebaut && description.trim() === t(eingebaut.description).trim()
+        ? ''
+        : description
+
+    const geaendert = await speichereRollen(
+      (vorher) => {
+        const vorhanden = vorher.rollen.some((r) => r.id === role.id)
+        const neu: GruppenRolle = {
+          id: role.id,
+          name: role.is_system ? role.id : name,
+          beschreibung,
+          rechte: permissions,
+        }
+        return {
+          ...vorher,
+          rollen: vorhanden
+            ? vorher.rollen.map((r) => (r.id === role.id ? neu : r))
+            : [...vorher.rollen, neu],
+        }
+      },
+      t('social.groupRoles.updated', {
+        name: rollentext(role.name, role.is_system, t),
+      }),
     )
-    setEditingRole(null)
-    toast.success(t('social.groupRoles.updated', { name: rollentext(role.name, role.is_system, t) }))
+    if (geaendert) setEditingRole(null)
   }
 
   const handleDeleteRole = async (role: GroupRoleDefinition) => {
@@ -516,8 +727,49 @@ export function GroupPermissionsModal({
     })
     if (!ok) return
 
-    setRoles((prev) => prev.filter((r) => r.id !== role.id))
-    toast.success(t('social.groupRoles.deleted', { name: role.name }))
+    await speichereRollen(
+      (vorher) => {
+        // Auch die Zuordnung mitnehmen: eine Rollenkennung ohne Rolle wäre eine
+        // Liste von Konten, die auf nichts mehr zeigt — und beim nächsten
+        // Anlegen mit derselben Kennung plötzlich wieder gälte.
+        const { [role.id]: _entfernt, ...rest } = vorher.zuordnung
+        return { rollen: vorher.rollen.filter((r) => r.id !== role.id), zuordnung: rest }
+      },
+      t('social.groupRoles.deleted', { name: role.name }),
+    )
+  }
+
+  /** Die selbst angelegten Rollen — die eingebauten trägt die Mitgliederzeile. */
+  const zusatzRollen = useMemo(
+    () => eigeneRollen.filter((r) => !SYSTEM_ROLLEN_IDS.has(r.id)),
+    [eigeneRollen],
+  )
+
+  /**
+   * Eine eigene Rolle an einem Mitglied an- oder abschalten.
+   *
+   * Die Zuordnung steht im verschlüsselten Block und nicht in
+   * `chat_group_members`. Genau das ist der Unterschied zur Systemrolle: „Konto
+   * 42 ist Moderator in Gruppe 7" weiss der Server, „Konto 42 trägt
+   * Nachtaufsicht" nicht.
+   */
+  const handleToggleMemberRole = async (
+    member: ChatGroupMemberItem,
+    rolle: GruppenRolle,
+    an: boolean,
+  ) => {
+    await speichereRollen(
+      (vorher) => {
+        const bisher = vorher.zuordnung[rolle.id] ?? []
+        const neu = an
+          ? [...new Set([...bisher, member.user_id])]
+          : bisher.filter((k) => k !== member.user_id)
+        return { ...vorher, zuordnung: { ...vorher.zuordnung, [rolle.id]: neu } }
+      },
+      an
+        ? t('social.groupRoles.memberRoleGiven', { name: member.username, role: rolle.name })
+        : t('social.groupRoles.memberRoleTaken', { name: member.username, role: rolle.name }),
+    )
   }
 
   return (
@@ -527,8 +779,26 @@ export function GroupPermissionsModal({
         className="w-[96vw] max-w-5xl xl:max-w-6xl p-0 overflow-hidden bg-surface border-outline-variant/30 flex flex-col max-h-[92vh] sm:max-h-[88vh] shadow-2xl rounded-2xl"
       >
         {/* Header with generous vertical padding */}
-        <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-outline-variant/20 bg-surface-container/70 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
+        <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-outline-variant/20 bg-surface-container/70 flex items-center justify-between gap-2 shrink-0">
+          {/*
+           * `min-w-0 flex-1` ist hier keine Feinheit, sondern der Unterschied
+           * zwischen „passt" und „Dialog kaputt".
+           *
+           * Titel und Untertitel tragen seit jeher `truncate`, und der innere
+           * Kasten `min-w-0` — trotzdem lief der Kopf bei 375 px auf 383 px
+           * auf. Grund: ein Flex-Kind hat `min-width: auto` und schrumpft
+           * nicht unter seine Inhaltsbreite. Das `truncate` weiter innen kam
+           * nie zum Zug, weil dieser Kasten hier gar nicht erst schmaler
+           * wurde.
+           *
+           * Die Folge war mehr als ein abgeschnittener Titel: `DialogContent`
+           * traegt `overflow-hidden`, und der Klick auf einen Reiter loest ein
+           * `scrollIntoView` aus. Das setzte `scrollLeft` auf 90 — der ganze
+           * Dialoginhalt stand danach links ausserhalb, der Titel las sich als
+           * „uppen-Rollen & Rechte", und ohne Scrollleiste kam man nicht
+           * zurueck. Nur Schliessen und Neuoeffnen half.
+           */}
+          <div className="flex items-center gap-3 min-w-0 flex-1">
             <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shadow-sm shrink-0">
               <ShieldCheck className="w-5 h-5" />
             </div>
@@ -692,6 +962,64 @@ export function GroupPermissionsModal({
                                   : t('social.groupRoles.system.member.name')}
                               </Badge>
                             </div>
+                            {/*
+                              Die eigenen Rollen dieser Gruppe. Anklickbar für
+                              wen verwalten darf, sonst nur sichtbar — wer eine
+                              Rolle trägt, soll das sehen können, auch ohne sie
+                              ändern zu dürfen.
+                            */}
+                            {zusatzRollen.length > 0 && (
+                              <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                                {zusatzRollen.map((rolle) => {
+                                  const traegt = (rollenZuordnung[rolle.id] ?? []).includes(
+                                    member.user_id,
+                                  )
+                                  if (!canEditThisMember) {
+                                    return traegt ? (
+                                      <span
+                                        key={`mem-rolle-${member.user_id}-${rolle.id}`}
+                                        className="text-label-sm px-2 py-0.5 rounded-md bg-primary/15 text-primary font-semibold"
+                                      >
+                                        {rolle.name}
+                                      </span>
+                                    ) : null
+                                  }
+                                  return (
+                                    <button
+                                      key={`mem-rolle-${member.user_id}-${rolle.id}`}
+                                      type="button"
+                                      role="switch"
+                                      aria-checked={traegt}
+                                      disabled={rollenSpeichern}
+                                      onClick={() =>
+                                        void handleToggleMemberRole(member, rolle, !traegt)
+                                      }
+                                      aria-label={t('social.groupRoles.memberRoleToggleAria', {
+                                        role: rolle.name,
+                                        name: member.username,
+                                      })}
+                                      /*
+                                        Auf dem Handy 44 px hoch, am Schreibtisch
+                                        der schmale Chip. Als Anzeige reichten
+                                        21 px; als Schalter, den man mit dem
+                                        Daumen trifft, nicht. Die Höhe steckt im
+                                        Knopf selbst und nicht in einem
+                                        unsichtbaren Feld darüber — sonst
+                                        überlappten sich zwei umgebrochene
+                                        Reihen.
+                                      */
+                                      className={`text-label-sm inline-flex items-center px-3 sm:px-2 min-h-[44px] sm:min-h-0 sm:py-0.5 rounded-md font-semibold transition-colors disabled:opacity-50 ${
+                                        traegt
+                                          ? 'bg-primary/15 text-primary hover:bg-primary/25'
+                                          : 'bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest'
+                                      }`}
+                                    >
+                                      {rolle.name}
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                            )}
                           </div>
                         </div>
 
@@ -750,6 +1078,7 @@ export function GroupPermissionsModal({
                     type="button"
                     variant="primary"
                     size="sm"
+                    disabled={konfigLage !== 'bereit'}
                     onClick={() => setIsCreatingRole(true)}
                     className="gap-1.5 rounded-xl h-8 px-3"
                   >
@@ -759,12 +1088,42 @@ export function GroupPermissionsModal({
                 )}
               </div>
 
+              {/*
+                Der Zustand des verschlüsselten Blocks, offen benannt.
+
+                Ein Gerät, dem der Gruppenschlüssel fehlt, sieht die Rollen
+                nicht — und soll das auch lesen können, statt vor einer Liste zu
+                stehen, in der nur die eingebauten vier stehen und die eigenen
+                fehlen. Dasselbe gilt für einen Block, der nicht beglaubigt ist:
+                lieber „nicht prüfbar" als eine Rechtetabelle, von der niemand
+                sagen kann, wer sie geschrieben hat.
+              */}
+              {konfigLage !== 'bereit' && (
+                <div
+                  className={`px-3.5 py-3 rounded-2xl border text-xs ${
+                    konfigLage === 'laedt'
+                      ? 'border-outline-variant/30 bg-surface-container/60 text-on-surface-variant'
+                      : 'border-status-warning/40 bg-status-warning/10 text-status-warning'
+                  }`}
+                  role={konfigLage === 'laedt' ? undefined : 'alert'}
+                >
+                  {konfigLage === 'laedt'
+                    ? t('social.groupRoles.configLoading')
+                    : konfigLage.art === 'kein-schluessel'
+                    ? t('social.groupRoles.configNoKey')
+                    : konfigLage.art === 'unbefugt'
+                    ? t('social.groupRoles.configUnsigned')
+                    : t('social.groupRoles.configUnreadable')}
+                </div>
+              )}
+
               {/* Create Role Form */}
               {isCreatingRole && (
                 <GroupRoleForm
                   initial={null}
                   onSubmit={handleCreateRole}
                   onCancel={() => setIsCreatingRole(false)}
+                  disabled={rollenSpeichern}
                 />
               )}
 
@@ -774,6 +1133,7 @@ export function GroupPermissionsModal({
                   initial={editingRole}
                   onSubmit={(n, d, p) => handleUpdateRole(editingRole, n, d, p)}
                   onCancel={() => setEditingRole(null)}
+                  disabled={rollenSpeichern}
                 />
               )}
 
@@ -816,11 +1176,12 @@ export function GroupPermissionsModal({
                           <div className="flex items-center gap-1.5 shrink-0 ml-auto">
                             <button
                               type="button"
+                              disabled={konfigLage !== 'bereit' || rollenSpeichern}
                               onClick={() => {
                                 setIsCreatingRole(false)
                                 setEditingRole(r)
                               }}
-                              className="px-2.5 py-1.5 rounded-xl bg-surface-container-high hover:bg-primary/15 text-primary text-xs font-medium flex items-center gap-1.5 transition-colors"
+                              className="px-2.5 py-1.5 rounded-xl bg-surface-container-high hover:bg-primary/15 text-primary text-xs font-medium flex items-center gap-1.5 transition-colors disabled:opacity-50"
                               title={t('social.groupRoles.edit')}
                               aria-label={t('social.groupRoles.editAria', { name: rollentext(r.name, r.is_system, t) })}
                             >
@@ -830,8 +1191,9 @@ export function GroupPermissionsModal({
                             {!r.is_system && (
                               <button
                                 type="button"
+                                disabled={konfigLage !== 'bereit' || rollenSpeichern}
                                 onClick={() => void handleDeleteRole(r)}
-                                className="p-1.5 rounded-xl bg-surface-container-high hover:bg-error/15 text-error transition-colors"
+                                className="p-1.5 rounded-xl bg-surface-container-high hover:bg-error/15 text-error transition-colors disabled:opacity-50"
                                 title={t('social.groupRoles.deleteTitle')}
                                 aria-label={t('social.groupRoles.deleteAria', { name: r.name })}
                               >
@@ -850,7 +1212,11 @@ export function GroupPermissionsModal({
                               isExpanded ? '' : 'line-clamp-2 sm:line-clamp-none'
                             }`}
                           >
-                            {rollentext(r.description, r.is_system, t)}
+                            {rollentext(
+                              r.description,
+                              r.is_system && r.description_is_key !== false,
+                              t,
+                            )}
                           </p>
                           {r.description.length > 70 && (
                             <button
@@ -917,59 +1283,25 @@ export function GroupPermissionsModal({
                 </p>
               </div>
 
-              {/* Ein Abschnitt je Kategorie, die Rechte in der Reihenfolge des
-                  Vokabulars. Vorher standen sie hier ein zweites Mal von Hand,
-                  mit eigenem Wortlaut — und liefen auseinander. */}
-              <div className="rounded-2xl border border-outline-variant/30 p-4 sm:p-6 bg-surface-container/60 shadow-sm space-y-5">
-                {STANDARD_ABSCHNITTE.map((abschnitt, i) => {
-                  const rechte = GROUP_PERMISSION_DEFINITIONS.filter(
-                    (d) => abschnitt.kategorien.includes(d.category) && !NICHT_ALS_STANDARD.has(d.key),
-                  )
-                  if (!rechte.length) return null
-                  const Symbol = abschnitt.symbol === 'moderation' ? Shield : abschnitt.symbol === 'anruf' ? Phone : Users
-                  return (
-                    <div
-                      key={abschnitt.titelKey}
-                      className={i > 0 ? 'border-t border-outline-variant/30 pt-5' : ''}
-                    >
-                      <div className="mb-3 flex items-center gap-2">
-                        <Symbol className="h-4 w-4 text-primary" />
-                        <span className="text-body-sm font-bold text-primary">{t(abschnitt.titelKey)}</span>
-                      </div>
-                      <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
-                        {rechte.map((def) => (
-                          <div
-                            key={def.key}
-                            className="flex items-center justify-between gap-4 rounded-xl border border-outline-variant/30 bg-surface-container-high/60 p-3.5"
-                          >
-                            <div className="min-w-0 flex-1">
-                              <span className="block text-xs font-bold text-primary">
-                                {t(permissionTitleKey(def.key))}
-                              </span>
-                              <span className="text-label-sm leading-snug text-on-surface-variant">
-                                {t(permissionDescKey(def.key))}
-                              </span>
-                            </div>
-                            <Switch
-                              checked={standardrechte.has(def.key)}
-                              onCheckedChange={(an) =>
-                                setStandardrechte((vorher) => {
-                                  const neu = new Set(vorher)
-                                  if (an) neu.add(def.key)
-                                  else neu.delete(def.key)
-                                  return neu
-                                })
-                              }
-                              disabled={!canManage}
-                              aria-label={t('social.groupRoles.allow', { name: t(permissionTitleKey(def.key)) })}
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
+              {/* Dasselbe Bauteil wie im Rollen-Formular, nur ohne
+                  `manage_roles`: wer Rollen verwalten darf, kann sich jedes
+                  andere Recht selbst geben. */}
+              <RechteAbschnitte
+                rechte={rechteZeilen(t, NICHT_ALS_STANDARD)}
+                abschnitte={uebersetzteAbschnitte(t)}
+                gesetzt={standardrechte}
+                onToggle={(key, an) =>
+                  setStandardrechte((vorher) => {
+                    const neu = new Set(vorher)
+                    if (an) neu.add(key)
+                    else neu.delete(key)
+                    return neu
+                  })
+                }
+                disabled={!canManage}
+                zeilenBeschriftung={(titel) => t('social.groupRoles.allow', { name: titel })}
+              />
+
 
               {canManage && (
                 <div className="flex justify-end pt-2">

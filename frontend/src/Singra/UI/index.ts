@@ -49,4 +49,10 @@ export {
   VoiceRecordingBar,
   type VoiceRecordingBarProps,
 } from './VoiceRecordingBar'
+export {
+  RechteAbschnitte,
+  type RechteAbschnitteProps,
+  type RechteAbschnittDefinition,
+  type RechteZeile,
+} from './RechteAbschnitte'
 

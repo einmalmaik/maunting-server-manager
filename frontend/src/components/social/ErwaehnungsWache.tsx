@@ -49,6 +49,7 @@ function GruppenWache({ gruppe, eigeneId, identitaetRef, onErwaehnung }: WachePr
       art: 'gruppe',
       groupId: gruppe.id,
       mitglieder: (gruppe.members || []).map((m) => m.user_id),
+      istEigentuemer: gruppe.role === 'owner',
     },
     eigeneId,
     identitaetRef,

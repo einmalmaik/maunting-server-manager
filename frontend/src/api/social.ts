@@ -3,6 +3,8 @@
  */
 
 import { api, apiStream } from './client'
+import { nachweisKopf } from '@/services/mailboxNachweis'
+import { eigenerPushAbdruck } from '@/services/mailboxPush'
 import i18n from '@/i18n'
 
 export interface FriendItem {
@@ -287,10 +289,27 @@ export interface ChatGroupMemberItem {
 
 export interface ChatGroupItem {
   id: number
-  name: string
+  /**
+   * `null`, solange dieses Gerät den Namen nicht kennt.
+   *
+   * Der Server liefert hier seit Stufe 6 **immer** `null` — er kennt den Namen
+   * einer Gruppe nicht mehr. Gefüllt wird das Feld im Client aus dem
+   * versiegelten Namensspeicher und dem verschlüsselten Gruppenblock
+   * (`gruppenName.ts`). Dass der Typ das zulässt, ist Absicht: ein
+   * `name: string` wäre eine Zusage, die niemand mehr einhält, und jede
+   * Anzeige führe blind auf einen leeren String.
+   */
+  name: string | null
   description?: string | null
   avatar_url?: string | null
-  invite_code: string
+  /**
+   * `null`, wenn dieses Mitglied nicht einladen darf.
+   *
+   * Das Backend lässt den Code dann ganz weg — und das ist die einzige
+   * Durchsetzung, die `invite_members` haben kann: wer den Code hat, kommt
+   * rein. Bis 09/2026 ging er bei jedem Abruf an jedes Mitglied.
+   */
+  invite_code: string | null
   owner_user_id: number
   member_count: number
   role: string
@@ -312,9 +331,18 @@ export interface ChatGroupItem {
 
 export interface ChatGroupInvitePublic {
   group_id: number
-  name: string
+  /**
+   * Klartext — und nur, solange die Gruppe keine verschlüsselte Karte hat.
+   *
+   * Sobald sie eine hat, liefert der Server hier `null`, und die Vorschau kommt
+   * aus `invite_card` plus dem Schlüssel hinter der Raute im Link. Beides
+   * nebeneinander wäre Verschlüsselung als Zierde.
+   */
+  name?: string | null
   description?: string | null
   avatar_url?: string | null
+  /** `sv-einladung-v1:…` — Name, Beschreibung und Logo, verschlüsselt. */
+  invite_card?: string | null
   member_count: number
   /** Läuft gerade ein Gruppenanruf? Für die Vorschaukarte im Chat. */
   live_call: boolean
@@ -335,9 +363,15 @@ export interface DirectChatItem {
   updated_at: string
 }
 
-export async function getDirectChats(): Promise<DirectChatItem[]> {
-  return api<DirectChatItem[]>('/social/direct-chats')
-}
+/*
+ * `getDirectChats()` rief bis Stufe 6b `GET /social/direct-chats`.
+ *
+ * Diese Route ist entfernt. Sie beantwortete „mit wem schreibt dieses Konto?",
+ * und um das zu können, musste der Server es aufschreiben — in
+ * `direct_chats.user_a_id`/`user_b_id`. Die Liste führt jetzt der Client:
+ * `gespraechsListe()` aus `services/gespraechsListe.ts`, versiegelt im
+ * örtlichen Speicher.
+ */
 
 // Anrufe liegen in `api/calls.ts`: Einladungen, Zugangstoken für den
 // Medienserver, Raumschlüssel und die Betreiber-Einstellungen.
@@ -358,18 +392,47 @@ export async function startDirectChat(targetUserId: number): Promise<DirectChatI
   })
 }
 
+/**
+ * Hinterlegt den blinden Besitznachweis einer Mailbox.
+ *
+ * Der authentifizierte Übergang: danach verlangt der Server für diese Mailbox
+ * bei jedem Zugriff den Nachweis — zusätzlich zur bisherigen Prüfung, nicht an
+ * ihrer Stelle.
+ */
+export async function registriereMailbox(mailboxId: string, authToken: string): Promise<void> {
+  await api<{ ok: boolean }>('/social/e2ee/mailbox/register', {
+    method: 'POST',
+    body: JSON.stringify({ mailbox_id: mailboxId, auth_token: authToken }),
+  })
+}
+
+/**
+ * Ein blinder Umschlag — ohne Empfängerkennung.
+ *
+ * Bis 09/2026 reiste ein `recipient_id` mit. Für eine Mailbox, die der Server
+ * ohnehin ausrechnen kann, verriet es nichts Neues; für eine aus einem
+ * Geheimnis verriet es alles. Der Server nimmt es nicht mehr entgegen, und
+ * dieses Feld gibt es hier deshalb gar nicht mehr — ein durchgereichtes
+ * `recipient_id` wäre stiller Ballast, der irgendwann wieder jemand liest.
+ */
 export async function relayE2eeEnvelope(payload: {
   blind_mailbox_id: string
   ciphertext_envelope: string
-  recipient_id?: number | null
   client_uuid?: string | null
   is_control?: boolean
   control_type?: string | null
 
 }): Promise<BlindEnvelopeItem> {
+  // Der eigene Push-Abdruck hängt an jedem Umschlag und hält diesen Browser aus
+  // der Zustellung heraus. Auf dem kontogebundenen Weg braucht es ihn nicht —
+  // dort erkennt der Server den Absender an seiner Kennung. Auf dem
+  // Mailbox-Weg gibt es keine Kennung mehr, und ohne ihn bekäme man die
+  // Meldung über die eigene Nachricht.
+  const abdruck = eigenerPushAbdruck()
   return api<BlindEnvelopeItem>('/social/e2ee/relay', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify(abdruck ? { ...payload, push_ausnahme: abdruck } : payload),
+    headers: nachweisKopf(payload.blind_mailbox_id),
   })
 }
 
@@ -389,11 +452,11 @@ export async function uploadChatMedia(payload: {
   file_name: string
   media_type?: string
   group_id?: number | null
-  recipient_id?: number | null
 }): Promise<ChatMediaItem> {
   return api<ChatMediaItem>('/social/media/upload', {
     method: 'POST',
     body: JSON.stringify(payload),
+    headers: nachweisKopf(payload.blind_mailbox_id),
   })
 }
 
@@ -433,7 +496,7 @@ export async function loescheBlindeUmschlaege(
 ): Promise<{ ok: boolean; deleted: number }> {
   return api<{ ok: boolean; deleted: number }>(
     `/social/e2ee/envelopes/${encodeURIComponent(blindMailboxId)}?client_uuid=${encodeURIComponent(clientUuid)}`,
-    { method: 'DELETE' }
+    { method: 'DELETE', headers: nachweisKopf(blindMailboxId) }
   )
 }
 
@@ -470,7 +533,6 @@ export async function ladeAnhangHoch(eingabe: {
   blindMailboxId: string
   absenderId: number
   groupId?: number | null
-  recipientId?: number | null
 }): Promise<import('@/services/medienKrypto').MedienZeiger> {
   const { neueFileId, verschluesselePaket } = await import('@/services/medienKrypto')
   const fileId = neueFileId()
@@ -489,7 +551,6 @@ export async function ladeAnhangHoch(eingabe: {
     file_name: 'anhang.bin',
     media_type: 'application/octet-stream',
     group_id: eingabe.groupId,
-    recipient_id: eingabe.recipientId,
   })
   return { mediaId: hochgeladen.id, paketSchluessel, fileId }
 }
@@ -529,17 +590,19 @@ export async function fetchE2eeEnvelopes(
   sinceId?: number
 ): Promise<BlindEnvelopeItem[]> {
   const query = sinceId ? `?since_id=${sinceId}` : ''
-  return api<BlindEnvelopeItem[]>(`/social/e2ee/mailbox/${blindMailboxId}${query}`)
+  return api<BlindEnvelopeItem[]>(`/social/e2ee/mailbox/${blindMailboxId}${query}`, {
+    headers: nachweisKopf(blindMailboxId),
+  })
 }
 
 export async function sendTypingSignal(payload: {
   blind_mailbox_id: string
   status: 'typing' | 'recording' | 'idle'
-  recipient_id?: number | null
 }): Promise<{ ok: boolean }> {
   return api<{ ok: boolean }>('/social/e2ee/typing', {
     method: 'POST',
     body: JSON.stringify(payload),
+    headers: nachweisKopf(payload.blind_mailbox_id),
   })
 }
 
@@ -547,19 +610,40 @@ export async function getGroups(): Promise<ChatGroupItem[]> {
   return api<ChatGroupItem[]>('/social/groups')
 }
 
-export async function createGroup(payload: {
-  name: string
-  description?: string
-  avatar_url?: string
-}): Promise<ChatGroupItem> {
+/**
+ * Legt eine Gruppe an — ohne ihr einen Namen mitzugeben.
+ *
+ * Seit Stufe 6 hat der Aufruf keine Nutzlast mehr: Name, Beschreibung und Logo
+ * gehen den Server nichts an. Er vergibt eine Kennung und einen Einladungscode,
+ * alles Weitere schreibt der Client anschliessend in den verschlüsselten
+ * Gruppenblock (`sichereGruppenAnsicht`).
+ */
+export async function createGroup(): Promise<ChatGroupItem> {
   return api<ChatGroupItem>('/social/groups', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({}),
   })
 }
 
 export async function getGroupInviteInfo(inviteCode: string): Promise<ChatGroupInvitePublic> {
   return api<ChatGroupInvitePublic>(`/social/groups/invite/${inviteCode}`)
+}
+
+/**
+ * Hinterlegt die verschlüsselte Einladungskarte einer Gruppe.
+ *
+ * `null` nimmt sie zurück. Gerufen wird das beim Bauen eines Links — die Karte
+ * entsteht genau dann, wenn jemand einen teilt, und trägt denselben Stand wie
+ * er.
+ */
+export async function setzeEinladungsKarte(
+  groupId: number,
+  karte: string | null,
+): Promise<void> {
+  await api(`/social/groups/${groupId}/invite-card`, {
+    method: 'PUT',
+    body: JSON.stringify({ invite_card: karte }),
+  })
 }
 
 export async function joinGroupByInvite(inviteCode: string): Promise<ChatGroupItem> {
@@ -615,19 +699,50 @@ export async function updateGroupPermissions(
   })
 }
 
-/** Gruppenlogo setzen. Nur Besitzer und Admins der Gruppe dürfen das. */
-export async function uploadGroupAvatar(groupId: number, file: File): Promise<ChatGroupItem> {
-  const formular = new FormData()
-  formular.append('file', file)
-  return api<ChatGroupItem>(`/social/groups/${groupId}/avatar`, {
-    method: 'POST',
-    body: formular,
+/**
+ * Der verschlüsselte Gruppenzustand: die eigenen Rollen dieser Gruppe.
+ *
+ * `blob` ist ein Umschlag unter dem Gruppenschlüssel — das Backend reicht ihn
+ * durch und liest ihn nie. Ausgewertet wird er in `services/gruppenKonfig.ts`;
+ * hier steht nur der Transport.
+ */
+export interface GruppenKonfigAntwort {
+  group_id: number
+  blob: string
+  revision: number
+  updated_at: string
+}
+
+/** `null`, solange die Gruppe noch keinen Zustand hat — dann ist Revision 0. */
+export async function getGroupConfig(groupId: number): Promise<GruppenKonfigAntwort | null> {
+  return api<GruppenKonfigAntwort | null>(`/social/groups/${groupId}/config`)
+}
+
+/**
+ * Schreibt den nächsten Stand. `erwarteteRevision` ist der Stand, den dieses
+ * Gerät gelesen hat; kam ein anderes dazwischen, antwortet das Backend mit 409
+ * und es wird nichts überschrieben.
+ */
+export async function putGroupConfig(
+  groupId: number,
+  blob: string,
+  erwarteteRevision: number,
+): Promise<GruppenKonfigAntwort> {
+  return api<GruppenKonfigAntwort>(`/social/groups/${groupId}/config`, {
+    method: 'PUT',
+    body: JSON.stringify({ blob, erwartete_revision: erwarteteRevision }),
   })
 }
 
-export async function deleteGroupAvatar(groupId: number): Promise<ChatGroupItem> {
-  return api<ChatGroupItem>(`/social/groups/${groupId}/avatar`, { method: 'DELETE' })
-}
+/*
+ * `uploadGroupAvatar` und `deleteGroupAvatar` gibt es seit Stufe 6 nicht mehr.
+ *
+ * Ein Gruppenlogo auf der Platte des Servers ist eine Datei, die unter einer
+ * rate-URL jedem offensteht, und ein Bild sagt über eine Gruppe oft mehr als
+ * ihr Name. Das Logo lebt jetzt als Data-URL im verschlüsselten Gruppenblock;
+ * gesetzt wird es über `sichereGruppenAnsicht` in `services/gruppenName.ts`.
+ * Die Routen `POST/DELETE /social/groups/{id}/avatar` sind entfernt.
+ */
 
 export interface ChatStoryItem {
   id: number
