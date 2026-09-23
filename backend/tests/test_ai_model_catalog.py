@@ -932,8 +932,9 @@ async def test_capabilities_are_filled_in_from_the_foreign_catalog() -> None:
     assert gpt.name == "gpt-5.5"
 
     # Was der fremde Katalog nicht führt, bleibt unbekannt. Auch das ist eine
-    # Zusage: ergänzt wird, nicht geraten.
-    assert nach_id["whisper-1"].denkt is False
+    # Zusage: ergänzt wird, nicht geraten. Und „unbekannt" heißt ``None``, nie
+    # ``False`` — sonst stünde in der Oberfläche „denkt nicht nach".
+    assert nach_id["whisper-1"].denkt is None
     assert nach_id["whisper-1"].kontext_tokens is None
 
 
@@ -1019,9 +1020,9 @@ async def test_the_foreign_lookup_cannot_loop(monkeypatch: pytest.MonkeyPatch) -
     betreten: list[str] = []
     echt = ai_model_catalog._mit_faehigkeiten
 
-    async def zaehlend(client, spec, eigene):
+    async def zaehlend(client, spec, eigene, **weiter):
         betreten.append(spec.kind)
-        return await echt(client, spec, eigene)
+        return await echt(client, spec, eigene, **weiter)
 
     monkeypatch.setattr(ai_model_catalog, "_mit_faehigkeiten", zaehlend)
 
@@ -1238,3 +1239,257 @@ async def test_the_form_gets_reasoning_levels_where_there_is_no_catalog() -> Non
             kind="azure_anthropic", name="   ",
             request=_Anfrage(client), _=None,  # type: ignore[arg-type]
         ) is None
+
+
+# ── Was die Einstellungsseite zu sehen bekommt ───────────────────────────
+#
+# Am 22.09.2026 stand GPT-6 Luna in der Auswahl mit „Dieses Modell denkt nicht
+# nach". Zwei Ursachen, beide hier festgehalten: der OpenAI-Leser schrieb
+# ``denkt=False`` hin und meinte „unbekannt", und der geliehene Katalog durfte
+# bis zu sechs Stunden älter sein als OpenAIs eigene Liste — am Erscheinungstag
+# eines Modells fehlte es dort also genau dann, wenn es jemand auswählen wollte.
+
+#: OpenRouters Eintrag zu GPT-6 Luna, gekürzt aus dem Katalog vom 22.09.2026.
+LUNA = {
+    "id": "openai/gpt-6-luna",
+    "name": "OpenAI: GPT-6 Luna",
+    "context_length": 1_050_000,
+    "top_provider": {"context_length": 1_050_000, "max_completion_tokens": 128_000},
+    "reasoning": {
+        "mandatory": False,
+        "default_enabled": True,
+        "supported_efforts": ["max", "xhigh", "high", "medium", "low", "none"],
+        "default_effort": "medium",
+    },
+}
+
+
+def _wandelbare_kataloge():
+    """Zwei Kataloge, die sich zwischen zwei Abrufen ändern lassen.
+
+    Gibt den Client, die beiden Listen (zum Nachtragen) und die Abrufliste
+    zurück — gezählt wird je Gegenstelle, damit ein Test sagen kann, **welcher**
+    Katalog geholt wurde.
+    """
+    eigen = {"data": [dict(eintrag) for eintrag in EIGEN["data"]]}
+    fremd = {"data": [dict(eintrag) for eintrag in FREMD["data"]]}
+    abrufe: list[str] = []
+
+    def verteile(request: httpx.Request) -> httpx.Response:
+        abrufe.append(request.url.host)
+        if request.url.host == "openrouter.ai":
+            return httpx.Response(200, json=fremd)
+        return httpx.Response(200, json=eigen)
+
+    return _client(verteile), eigen, fremd, abrufe
+
+
+def _luna_erscheint(eigen: dict, fremd: dict) -> None:
+    eigen["data"].append({"id": "gpt-6-luna"})
+    fremd["data"].append(LUNA)
+
+
+@pytest.mark.asyncio
+async def test_what_no_catalog_knows_reaches_the_page_as_unknown() -> None:
+    """``null`` und nicht ``false``: „weiß ich nicht" ist kein „kann er nicht".
+
+    Der Unterschied war vorher nur im Sendepfad folgenlos — dort heisst beides
+    „nichts senden". Die Einstellungsseite dagegen machte aus ``false`` den
+    Satz „Dieses Modell denkt nicht nach", und das war eine Behauptung, die
+    niemand belegt hatte.
+    """
+    from routers.ai_providers import _katalogantwort
+
+    ai_model_catalog.schluesselquelle_setzen(lambda kind: "sk-test")
+    async with _zwei_kataloge() as client:
+        modelle = await ai_model_catalog.modelle(client, "openai")
+    nach_id = {m.model_id: _katalogantwort("openai", m) for m in modelle}
+
+    unbekannt = nach_id["whisper-1"]
+    assert unbekannt.reasoning is None
+    assert unbekannt.efforts == []
+    assert unbekannt.mandatory is False
+    assert unbekannt.context_tokens is None
+    assert unbekannt.max_output_tokens is None
+
+    # Das Fenster stand im Chat längst zur Verfügung (`ai_context_window`), nur
+    # der Betreiber sah es nirgends.
+    bekannt = nach_id["gpt-5.5"]
+    assert bekannt.reasoning is True
+    assert bekannt.context_tokens == 1_050_000
+    assert bekannt.max_output_tokens == 128_000
+
+
+@pytest.mark.asyncio
+async def test_the_borrowed_catalog_is_never_older_than_the_own_list() -> None:
+    """**Der Fall GPT-6 Luna.** In OpenAIs Liste schon, in OpenRouters Stand noch nicht.
+
+    Beide Kataloge haben dieselbe Frist, aber sie laufen nicht gleich ab. Nach
+    der alten Regel galt OpenRouters Stand hier noch drei Stunden als frisch,
+    und das neue Modell stand ohne Denkstufen und ohne Fenster in der Auswahl.
+    Im Betrieb läuft die Auffrischung im Hintergrund; der erste Aufruf danach
+    bekommt deshalb noch den alten Stand, und erst die Auffrischung trägt nach.
+    Geprüft wird genau dieser Weg, weil die Aufgabe dort ohne ``mindestens``
+    einen „frischen" Stand vorfände und nichts holte.
+
+    Der Schlüssel kommt hier vom Aufrufer, wie im Betrieb: ohne ihn gehört eine
+    im Hintergrund geholte kontogebundene Liste niemandem, der gerade fragt.
+    """
+    client, eigen, fremd, abrufe = _wandelbare_kataloge()
+
+    async def openai() -> dict:
+        liste = await ai_model_catalog.modelle(client, "openai", schluessel="sk-test")
+        return {m.model_id: m for m in liste}
+
+    async with client:
+        ai_model_catalog.laufzeit_setzen(client)
+        await openai()
+        assert abrufe == ["api.openai.com", "openrouter.ai"]
+
+        _luna_erscheint(eigen, fremd)
+        ai_model_catalog._cache["openai"].geholt_am -= ai_model_catalog.CACHE_TTL
+        ai_model_catalog._cache["openrouter"].geholt_am -= ai_model_catalog.CACHE_TTL / 2
+
+        # Die eigene Liste ist abgelaufen und wird im Hintergrund erneuert.
+        await openai()
+        await _auffrischung_abwarten("openai")
+        assert abrufe[-1] == "api.openai.com"
+
+        # Jetzt ist die eigene Liste jünger als der fremde Stand — also wird
+        # auch der erneuert, obwohl seine Frist noch läuft.
+        vorher = await openai()
+        assert vorher["gpt-6-luna"].denkt is None
+        await _auffrischung_abwarten("openrouter")
+        assert abrufe[-1] == "openrouter.ai"
+
+        nachher = await openai()
+
+    luna = nachher["gpt-6-luna"]
+    assert luna.denkt is True
+    assert luna.stufen == ("max", "xhigh", "high", "medium", "low", "none")
+    assert luna.standard_stufe == "medium"
+    assert luna.kontext_tokens == 1_050_000
+    assert luna.max_ausgabe_tokens == 128_000
+    # Und es bleibt bei einem Abruf je Katalog: der erneuerte fremde Stand ist
+    # jünger als der eigene und gilt wieder als frisch.
+    assert abrufe == ["api.openai.com", "openrouter.ai"] * 2
+
+
+@pytest.mark.asyncio
+async def test_the_reload_button_reloads_the_borrowed_catalog_too() -> None:
+    """„Modelle neu laden" holte nur die eigene Liste — und damit eine halbe Antwort.
+
+    Mit hinterlegtem Hintergrund-Client, wie im Betrieb. Ohne ihn holt schon
+    die Regel „nie älter als der eigene" den fremden Stand im Vordergrund, und
+    der Test bliebe grün, auch wenn der Knopf gar nicht bis dorthin reichte —
+    im Betrieb bekäme der Betreiber dann den alten Stand zurück und die
+    Auffrischung liefe erst danach.
+    """
+    client, eigen, fremd, abrufe = _wandelbare_kataloge()
+    async with client:
+        ai_model_catalog.laufzeit_setzen(client)
+        await ai_model_catalog.modelle(client, "openai", schluessel="sk-test")
+        await ai_model_catalog.modelle(client, "openai", schluessel="sk-test")
+        # Ohne Knopf bleibt es beim Zwischenspeicher, für beide Kataloge.
+        assert abrufe == ["api.openai.com", "openrouter.ai"]
+
+        _luna_erscheint(eigen, fremd)
+        neu = await ai_model_catalog.modelle(
+            client, "openai", erzwingen=True, schluessel="sk-test"
+        )
+
+    assert abrufe == ["api.openai.com", "openrouter.ai"] * 2
+    luna = {m.model_id: m for m in neu}["gpt-6-luna"]
+    assert luna.denkt is True
+    assert luna.kontext_tokens == 1_050_000
+
+
+def test_an_own_answer_about_thinking_is_never_mixed_with_a_borrowed_one() -> None:
+    """Geliehen wird ein **Wissen**, nicht einzelne Felder daraus.
+
+    Sagt der eigene Katalog selbst „denkt nicht", bleibt es dabei — samt leerer
+    Stufenliste. Vorher hieß die Regel ``eigen.denkt or fremd.denkt``, und ein
+    eigenes Nein wurde vom fremden Ja überschrieben: ein Modell, das der
+    Hersteller ohne Denken führt, hätte die Stufen eines Vermittlers bekommen,
+    und jede davon wäre beim Senden ein ``400`` gewesen.
+    """
+    from dataclasses import replace as _ersetzen
+
+    from services.ai_provider_registry import Modell
+
+    eigen = Modell(model_id="gpt-5.5", name="gpt-5.5", denkt=False)
+    fremd = Modell(
+        model_id="openai/gpt-5.5",
+        name="OpenAI: GPT-5.5",
+        denkt=True,
+        stufen=("high", "medium", "low"),
+        standard_stufe="medium",
+        zwingend=True,
+        kontext_tokens=400_000,
+    )
+
+    nein = ai_model_catalog._anreichern(eigen, fremd)
+    assert nein.denkt is False
+    assert nein.stufen == ()
+    assert nein.standard_stufe is None
+    assert nein.zwingend is False
+    # Das Fenster ist eine andere Frage und wandert weiter mit.
+    assert nein.kontext_tokens == 400_000
+
+    unbekannt = ai_model_catalog._anreichern(_ersetzen(eigen, denkt=None), fremd)
+    assert unbekannt.denkt is True
+    assert unbekannt.stufen == ("high", "medium", "low")
+    assert unbekannt.standard_stufe == "medium"
+    assert unbekannt.zwingend is True
+
+
+@pytest.mark.asyncio
+async def test_the_shutdown_date_is_the_makers_and_never_borrowed() -> None:
+    """Der Abschalttag gehört dem Hersteller, nicht dem Vermittler.
+
+    OpenRouters ``expiration_date`` sagt, wann OpenRouter ein Modell aus seiner
+    Liste nimmt. An einem OpenAI-Zugang wäre derselbe Tag eine Warnung vor
+    einer Abschaltung, die OpenAI nie angekündigt hat.
+    """
+    from routers.ai_providers import _katalogantwort
+
+    ai_model_catalog.schluesselquelle_setzen(lambda kind: "sk-test")
+    eigen = {
+        "data": [
+            {"id": "gpt-5.5", "shutdown_date": None},
+            {"id": "gpt-5.1-codex-mini", "shutdown_date": "2026-10-23"},
+            # Sieht aus wie ein Datum und ist keines.
+            {"id": "whisper-1", "shutdown_date": "2026-02-30"},
+            {"id": "tts-1", "shutdown_date": "bald"},
+        ]
+    }
+    fremd = {
+        "data": [
+            {**FREMD["data"][0], "expiration_date": "2026-11-01"},
+            FREMD["data"][1],
+        ]
+    }
+
+    def verteile(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "openrouter.ai":
+            return httpx.Response(200, json=fremd)
+        return httpx.Response(200, json=eigen)
+
+    async with _client(verteile) as client:
+        direkt = {m.model_id: m for m in await ai_model_catalog.modelle(client, "openai")}
+        vermittelt = {
+            m.model_id: m for m in await ai_model_catalog.modelle(client, "openrouter")
+        }
+
+    assert direkt["gpt-5.1-codex-mini"].abschaltung == "2026-10-23"
+    assert _katalogantwort("openai", direkt["gpt-5.1-codex-mini"]).shutdown_date == (
+        "2026-10-23"
+    )
+    # Beim Vermittler steht sein eigener Tag — dort ist er richtig.
+    assert vermittelt["openai/gpt-5.5"].abschaltung == "2026-11-01"
+    # Am OpenAI-Zugang nicht: OpenAI hat für gpt-5.5 nichts angekündigt.
+    assert direkt["gpt-5.5"].abschaltung is None
+    assert direkt["gpt-5.5"].denkt is True
+    # Was kein Datum ist, wird auch keines.
+    assert direkt["whisper-1"].abschaltung is None
+    assert direkt["tts-1"].abschaltung is None

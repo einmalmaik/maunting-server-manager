@@ -204,6 +204,19 @@ function webBelege(roh: unknown): Beleg[] {
 const LEITUNG_TRAEGT: ReadonlySet<string> = new Set(['hoert', 'spricht'])
 
 /**
+ * Endcodes, zu denen der Mensch mehr wissen muss als „hat nicht geklappt":
+ * Nach einem Sicherheitsstopp versucht niemand es still noch einmal, und ein
+ * Gespräch, das der Anbieter wegen seines Inhalts beendet hat, ist keine
+ * Netzstörung. Alles andere bleibt beim allgemeinen Text, den Code zeigt die
+ * Ansicht ohnehin daneben.
+ */
+const FEHLERTEXTE: Readonly<Record<string, string>> = {
+  AI_PROVIDER_SAFETY_STOPPED: 'ai.voice.errors.safety',
+  REALTIME_CONTENT_STOPPED: 'ai.voice.errors.content',
+  REALTIME_CONNECTION_LOST: 'ai.voice.errors.connection',
+}
+
+/**
  * Warum kam der Handshake nicht durch? Ein Browser-WebSocket verrät es nicht
  * (kein Statuscode, kein Grund) — aber der Config-Endpunkt desselben Backends
  * ist per HTTP erreichbar und trägt seit dem App-Sprachmodus den Marker
@@ -232,9 +245,48 @@ function adresse(providerId?: number | null): string {
   return providerId ? `${base}?provider_id=${providerId}` : base
 }
 
+type Sprachmodus = 'legacy' | 'openai_realtime' | 'openai_live' | 'gemini_live'
+
+/**
+ * Die Modi, deren Ton per WebRTC direkt zum Anbieter läuft — und wie.
+ *
+ * `iceAbwarten`: das Angebot erst schicken, wenn der Browser alle Kandidaten
+ * gesammelt hat. GPT-Live verlangt das ausdrücklich („Set the local
+ * description, wait for ICE candidate gathering, and send the offer", Doku
+ * voice-webrtc?api=live): die Anlage ist ein einziger Austausch, danach
+ * kommt kein Kandidat mehr an. OpenAIs Realtime-Endpunkt handelt ICE selbst
+ * aus, dort kostete das Warten nur Zeit (siehe unten).
+ */
+const WEBRTC_MODI: Partial<Record<Sprachmodus, { iceAbwarten: boolean }>> = {
+  openai_realtime: { iceAbwarten: false },
+  openai_live: { iceAbwarten: true },
+}
+
+/** Dieselbe Frist wie im Browserbeispiel der GPT-Live-Dokumentation. */
+const ICE_FRIST_MS = 10_000
+
+/** Wartet, bis die ICE-Sammlung fertig ist — oder bricht nach der Frist ab. */
+function iceAbwarten(peer: RTCPeerConnection): Promise<void> {
+  if (peer.iceGatheringState === 'complete') return Promise.resolve()
+  return new Promise((resolve, reject) => {
+    const frist = window.setTimeout(() => {
+      peer.removeEventListener('icegatheringstatechange', pruefen)
+      reject(Object.assign(new Error('ICE-Sammlung nicht fertig'), { name: 'ICE_TIMEOUT' }))
+    }, ICE_FRIST_MS)
+    function pruefen() {
+      if (peer.iceGatheringState !== 'complete') return
+      window.clearTimeout(frist)
+      peer.removeEventListener('icegatheringstatechange', pruefen)
+      resolve()
+    }
+    peer.addEventListener('icegatheringstatechange', pruefen)
+    pruefen()
+  })
+}
+
 export function useSprachsitzung(
   providerId?: number | null,
-  modus: 'legacy' | 'openai_realtime' | 'gemini_live' = 'legacy',
+  modus: Sprachmodus = 'legacy',
 ): Ergebnis {
   const [zustand, setZustand] = useState<Sprachzustand>('aus')
   const [zeilen, setZeilen] = useState<Sprachzeile[]>([])
@@ -331,7 +383,8 @@ export function useSprachsitzung(
     setZustand('verbindet')
     voiceDebug('VOICE_START', { providerId, modus })
 
-    const istRealtime = modus === 'openai_realtime'
+    const webrtc = WEBRTC_MODI[modus]
+    const istRealtime = webrtc !== undefined
 
     // Audio-Wiedergabe direkt bei der Nutzergeste (Klick) initialisieren,
     // um den AudioContext sofort im Zustand 'running' zu haben.
@@ -439,16 +492,27 @@ export function useSprachsitzung(
           }
           const offer = await peer.createOffer()
           await peer.setLocalDescription(offer)
-          // OpenAIs WebRTC-Endpunkt übernimmt die ICE-Aushandlung. Auf ein
+          // OpenAIs Realtime-Endpunkt übernimmt die ICE-Aushandlung. Auf ein
           // lokales `complete` zu warten fügte bei manchen Browsern bis zu drei
           // Sekunden hinzu, ohne den Vertrag des Endpunkts zu verbessern.
+          // GPT-Live dagegen verlangt es (`WEBRTC_MODI`).
+          if (webrtc?.iceAbwarten) {
+            await iceAbwarten(peer)
+            if (!gewollt.current || ws.current !== verbindung) return
+          }
           if (verbindung.readyState === WebSocket.OPEN && peer.localDescription?.sdp) {
             verbindung.send(JSON.stringify({ art: 'webrtc_offer', sdp: peer.localDescription.sdp }))
           }
         })().catch((fehler: unknown) => {
           const name = (fehler as { name?: string })?.name ?? ''
           voiceError('VOICE_RTC_FEHLER', { name, error: String(fehler) })
-          setFehler(name === 'NotAllowedError' ? 'ai.voice.errors.microphone' : 'ai.voice.errors.audio')
+          setFehler(
+            name === 'NotAllowedError'
+              ? 'ai.voice.errors.microphone'
+              : name === 'ICE_TIMEOUT'
+                ? 'ai.voice.errors.connection'
+                : 'ai.voice.errors.audio',
+          )
           setFehlerCode(name || 'RTC_FAILED')
           beenden()
         })
@@ -748,7 +812,7 @@ export function useSprachsitzung(
         case 'fehler': {
           const code = typeof nachricht.code === 'string' ? nachricht.code : 'UNKNOWN'
           voiceWarn('VOICE_FEHLER', { code })
-          setFehler('ai.voice.errors.provider')
+          setFehler(FEHLERTEXTE[code] ?? 'ai.voice.errors.provider')
           setFehlerCode(code)
           break
         }

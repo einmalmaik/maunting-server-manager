@@ -3,14 +3,20 @@
 Diese Datei ist der native Chat- und Tool-Weg für OpenAI direkt (`/v1/responses`
 sowie WebSocket `wss://api.openai.com/v1/responses`).
 
-Unterstützt die volle OpenAI Feature-Suite:
-- Responses API (`/v1/responses`) und persistenter WebSocket-Modus (`wss://...`)
-- Stateful Multi-Turn Chaining via `previous_response_id`
+Unterstützt:
+- Responses API per HTTP SSE (`/v1/responses`) — der Weg jedes Chatzugs
+- WebSocket-Modus (`wss://...`) über eine gehaltene Sitzung (``ws_session``);
+  nur dort trägt die Fortsetzung per `previous_response_id`
 - Stream-Multiplexing via `stream_id`
 - OpenAI Background Mode (`background: True`, Status-Polling, Event-Streaming)
 - Native File-Inputs (`input_file` für Logs, Konfigurationen, Anhänge)
-- Server-seitige Context Compaction (`compaction: True`)
 - Transparentes Fallback auf HTTP SSE und bestehende Chat-Completions-Pipelines
+
+Hier stand bis zum 23.09.2026 auch „Server-seitige Context Compaction
+(`compaction: True`)". Das Feld gibt es in der Responses-API nicht; OpenAI
+antwortet mit ``400 unknown_parameter`` (gemessen gegen gpt-6-luna). Jede
+Faltung eines Chats über diesen Zugang scheiterte daran, und der Chat blieb
+ungefaltet — `ai_compaction_service` fasst selbst zusammen und braucht es nicht.
 """
 
 from __future__ import annotations
@@ -32,36 +38,26 @@ from services.openai_compatible_adapter import (
     MAX_STREAM_FRAMES,
     MAX_STREAM_SECONDS,
     MAX_TOOL_ARGUMENT_CHARS,
+    SICHERHEITSSTOPP,
     AiProviderRequestError,
     ProviderToolCall,
     StreamChunk,
     StreamUsage,
-    _error_code,
-    _error_detail,
     _ganzzahl,
     _iter_sse_lines,
     _kurzfassung,
     _teilmenge,
+    anbieter_fehlercode,
+    fehler_der_antwort,
     schluesselkopf,
 )
 from services.openai_responses_websocket import (
     OpenAiResponsesWsSession,
-    stream_responses_ws,
-    ws_url_fuer_base_url,
+    fehler_im_rahmen,
 )
 
 
 logger = logging.getLogger(__name__)
-
-_FEHLERARTEN = {
-    "rate_limit_exceeded": "AI_PROVIDER_RATE_LIMITED",
-    "insufficient_quota": "AI_PROVIDER_PAYMENT_REQUIRED",
-    "billing_hard_limit_reached": "AI_PROVIDER_PAYMENT_REQUIRED",
-    "invalid_api_key": "AI_PROVIDER_AUTH_FAILED",
-    "authentication_error": "AI_PROVIDER_AUTH_FAILED",
-    "model_not_found": "AI_PROVIDER_ENDPOINT_NOT_FOUND",
-    "server_error": "AI_PROVIDER_UNAVAILABLE",
-}
 
 _TEXT_ATTACHMENT_HEADER = re.compile(
     r"^Unvertrauenswuerdiger Textanhang\s+([^\n:]+):\n(.*)$", re.DOTALL
@@ -271,25 +267,9 @@ def nachrichten_fuer_fortsetzung(messages: list[dict[str, Any]]) -> list[dict[st
 # ── Der Strom ─────────────────────────────────────────────────────────
 
 
-def _fehler_im_ereignis(rahmen: dict) -> tuple[str, str | None] | None:
-    """Ein Fehler, der im Strom gemeldet wird statt als Status."""
-    typ = rahmen.get("type")
-    if typ in ("response.failed", "response.incomplete", "error"):
-        antwort = rahmen.get("response")
-        fehler = None
-        if isinstance(antwort, dict):
-            fehler = antwort.get("error") or antwort.get("incomplete_details")
-        if fehler is None:
-            fehler = rahmen.get("error") or rahmen
-        marke = "AI_PROVIDER_REQUEST_REJECTED"
-        nachricht = ""
-        if isinstance(fehler, dict):
-            nachricht = str(fehler.get("message") or fehler.get("reason") or "")
-            code = fehler.get("code")
-            if isinstance(code, str):
-                marke = _FEHLERARTEN.get(code, marke)
-        return marke, _kurzfassung(nachricht or str(typ))
-    return None
+#: Ein Fehler, der im Strom gemeldet wird statt als Status. Derselbe Rahmen
+#: wie auf der WebSocket-Verbindung, also dieselbe Funktion.
+_fehler_im_ereignis = fehler_im_rahmen
 
 
 def _usage_uebernehmen(usage: StreamUsage, rohdaten: Any) -> None:
@@ -328,10 +308,12 @@ async def stream_responses_http(
     reasoning: bool = False,
     reasoning_effort: str | None = None,
     cache_marke: bool = False,
-    previous_response_id: str | None = None,
-    compaction: bool = False,
 ) -> AsyncIterator[StreamChunk]:
-    """Ein Chatzug über HTTP SSE ``POST /v1/responses``."""
+    """Ein Chatzug über HTTP SSE ``POST /v1/responses``, immer mit dem ganzen Verlauf.
+
+    Kein ``previous_response_id``: bei ``store: false`` kennt OpenAI die vorige
+    Antwort per HTTP nicht (siehe `stream_responses`).
+    """
     if provider.requires_api_key and not api_key:
         raise AiProviderRequestError("AI_PROVIDER_KEY_MISSING")
 
@@ -340,23 +322,12 @@ async def stream_responses_http(
     )
     headers["OpenAI-Beta"] = "responses=v1"
 
-    # Bei Vorhandensein von previous_response_id nur Deltas senden
-    input_items = (
-        nachrichten_fuer_fortsetzung(messages)
-        if previous_response_id
-        else nachrichten_uebersetzen(messages)
-    )
-
     request_body: dict[str, Any] = {
         "model": model or provider.default_model,
-        "input": input_items,
+        "input": nachrichten_uebersetzen(messages),
         "stream": True,
         "store": False,
     }
-    if previous_response_id:
-        request_body["previous_response_id"] = previous_response_id
-    if compaction:
-        request_body["compaction"] = True
 
     flache_werkzeuge = _werkzeuge_uebersetzen(tools)
     if flache_werkzeuge:
@@ -394,14 +365,14 @@ async def stream_responses_http(
             "POST", target, headers=headers, json=request_body
         ) as response:
             if response.status_code != 200:
-                detail = await _error_detail(response)
+                marke, detail = await fehler_der_antwort(response)
                 logger.warning(
                     "AI provider request failed provider_id=%s model=%s status=%s",
                     provider.id,
                     model or provider.default_model,
                     response.status_code,
                 )
-                raise AiProviderRequestError(_error_code(response.status_code), detail)
+                raise AiProviderRequestError(marke, detail)
 
             usage.anfragen += 1
 
@@ -557,12 +528,40 @@ async def stream_responses(
     cache_marke: bool = False,
     previous_response_id: str | None = None,
     use_websocket: bool = True,
-    compaction: bool = False,
     background: bool = False,
     ws_session: OpenAiResponsesWsSession | None = None,
     **kwargs: Any,
 ) -> AsyncIterator[StreamChunk]:
-    """Zentraler Einstiegspunkt für den OpenAI Responses-Weg (WebSocket / HTTP / Background)."""
+    """Zentraler Einstiegspunkt für den OpenAI Responses-Weg (WebSocket / HTTP / Background).
+
+    **Der Regelweg ist HTTP, mit dem ganzen Verlauf.** MSM sendet ``store:
+    false``, und dann kennt OpenAI eine vorige Antwort nur im Speicher
+    derselben WebSocket-Verbindung („connection-local in-memory cache",
+    Leitfaden zum WebSocket-Modus). Per HTTP ist ``previous_response_id``
+    deshalb ``400 previous_response_not_found`` — gemessen am 23.09.2026 gegen
+    gpt-6-luna. Bis dahin ging jede Werkzeugrunde erst mit Verweis hinaus,
+    scheiterte und wurde mit dem ganzen Verlauf wiederholt: eine verlorene
+    Anfrage je Runde.
+
+    **WebSocket nur über eine gehaltene Sitzung** (``ws_session``). Nur dort
+    trägt der Verweis, und nur dort spart der Modus etwas: eine neue Verbindung
+    für einen einzelnen Zug zahlt bloß den Aufbau — gemessen, je fünf Züge,
+    Median 1,43 s gegen 0,99 s per HTTP mit gehaltener Verbindung. Bis zum
+    23.09.2026 öffnete jeder Zug eine und schickte den Körper in einer Hülle,
+    die OpenAI mit „Missing required parameter: 'model'" ablehnte. Jeder Chatzug
+    zahlte also Verbindungsaufbau und Ablehnung, bevor er per HTTP lief.
+
+    **Ein Rückfall, und nur, solange noch nichts ausgeliefert ist.** Scheitert
+    die Sitzung, geht derselbe Zug per HTTP noch einmal hinaus. Vor dem ersten
+    Stück ist das unsichtbar; danach bekäme der Aufrufer den Anfang doppelt —
+    und ein Werkzeugaufruf, der schon hinausging, käme mit neuer Kennung ein
+    zweites Mal und würde zweimal ausgeführt. Bis zum 22.09.2026 fing der
+    WebSocket-Zweig jede Ausnahme, auch mitten im Strom.
+
+    **Ein Sicherheitsstopp wird nie wiederholt** (`SICHERHEITSSTOPP`), auch
+    nicht vor dem ersten Stück: OpenAI untersagt es ausdrücklich, und der
+    HTTP-Weg wäre genau die automatische Wiederholung, die gemeint ist.
+    """
     if background:
         async for chunk in stream_background_response(
             client,
@@ -576,101 +575,69 @@ async def stream_responses(
             reasoning=reasoning,
             reasoning_effort=reasoning_effort,
             previous_response_id=previous_response_id,
-            compaction=compaction,
         ):
             yield chunk
         return
 
-    # WebSocket-Pfad versuchen, wenn aktiviert und passend
-    if use_websocket and provider.provider_kind == "openai":
-        try:
-            ws_url = ws_url_fuer_base_url(provider_base_url(provider))
-            headers = schluesselkopf(
-                ai_provider_registry.anbieter(provider.provider_kind), api_key
-            )
-            headers["OpenAI-Beta"] = "responses=v1"
-
-            input_items = (
+    if use_websocket and ws_session is not None and provider.provider_kind == "openai":
+        payload: dict[str, Any] = {
+            "model": model or provider.default_model,
+            # Auf derselben Verbindung genügt, was seit der vorigen Antwort
+            # dazukam; den Rest hält OpenAI dort im Speicher.
+            "input": (
                 nachrichten_fuer_fortsetzung(messages)
                 if previous_response_id
                 else nachrichten_uebersetzen(messages)
-            )
+            ),
+            "store": False,
+        }
+        if previous_response_id:
+            payload["previous_response_id"] = previous_response_id
+        flache_werkzeuge = _werkzeuge_uebersetzen(tools)
+        if flache_werkzeuge:
+            payload["tools"] = flache_werkzeuge
+            payload["tool_choice"] = _werkzeugwahl_uebersetzen(tool_choice)
+        if reasoning and reasoning_effort:
+            payload["reasoning"] = {"effort": reasoning_effort, "summary": "auto"}
+        elif reasoning_effort:
+            payload["reasoning"] = {"effort": reasoning_effort}
 
-            payload: dict[str, Any] = {
-                "model": model or provider.default_model,
-                "input": input_items,
-                "store": False,
-            }
-            if previous_response_id:
-                payload["previous_response_id"] = previous_response_id
-            if compaction:
-                payload["compaction"] = True
-
-            flache_werkzeuge = _werkzeuge_uebersetzen(tools)
-            if flache_werkzeuge:
-                payload["tools"] = flache_werkzeuge
-                payload["tool_choice"] = _werkzeugwahl_uebersetzen(tool_choice)
-            if reasoning and reasoning_effort:
-                payload["reasoning"] = {"effort": reasoning_effort, "summary": "auto"}
-            elif reasoning_effort:
-                payload["reasoning"] = {"effort": reasoning_effort}
-
-            if ws_session is not None:
-                async for chunk in ws_session.stream_turn(payload, usage):
-                    yield chunk
-                return
-
-            async for chunk in stream_responses_ws(
-                ws_url, headers=headers, payload=payload, usage=usage
-            ):
+        # Ob schon etwas beim Aufrufer ist. Ab dann gibt es keinen stillen
+        # zweiten Anlauf mehr, siehe oben.
+        geliefert = False
+        try:
+            async for chunk in ws_session.stream_turn(payload, usage):
+                geliefert = True
                 yield chunk
             return
         except Exception as exc:
+            if geliefert or _nie_wiederholen(exc):
+                raise
             logger.info(
-                "WebSocket stream unavailable/interrupted (%s), transparently falling back to HTTP SSE",
-                exc,
+                "OpenAI Responses WS turn failed before output, falling back to HTTP "
+                "provider_id=%s error=%s",
+                provider.id, type(exc).__name__,
             )
 
-    # Fallback auf HTTP SSE
-    try:
-        async for chunk in stream_responses_http(
-            client,
-            provider=provider,
-            api_key=api_key,
-            messages=messages,
-            usage=usage,
-            model=model,
-            tools=tools,
-            tool_choice=tool_choice,
-            reasoning=reasoning,
-            reasoning_effort=reasoning_effort,
-            cache_marke=cache_marke,
-            previous_response_id=previous_response_id,
-            compaction=compaction,
-        ):
-            yield chunk
-    except AiProviderRequestError as exc:
-        # Falls Chaining wegen abgelaufener previous_response_id fehlschlägt: Retry mit vollem Kontext
-        if previous_response_id and exc.code in ("AI_PROVIDER_REQUEST_REJECTED", "AI_PROVIDER_ENDPOINT_NOT_FOUND"):
-            logger.info("Retrying turn without previous_response_id after chaining rejection")
-            async for chunk in stream_responses_http(
-                client,
-                provider=provider,
-                api_key=api_key,
-                messages=messages,
-                usage=usage,
-                model=model,
-                tools=tools,
-                tool_choice=tool_choice,
-                reasoning=reasoning,
-                reasoning_effort=reasoning_effort,
-                cache_marke=cache_marke,
-                previous_response_id=None,
-                compaction=compaction,
-            ):
-                yield chunk
-        else:
-            raise
+    async for chunk in stream_responses_http(
+        client,
+        provider=provider,
+        api_key=api_key,
+        messages=messages,
+        usage=usage,
+        model=model,
+        tools=tools,
+        tool_choice=tool_choice,
+        reasoning=reasoning,
+        reasoning_effort=reasoning_effort,
+        cache_marke=cache_marke,
+    ):
+        yield chunk
+
+
+def _nie_wiederholen(exc: BaseException) -> bool:
+    """Ein Fehler, nach dem kein zweiter Anlauf hinausgehen darf."""
+    return isinstance(exc, AiProviderRequestError) and exc.code == SICHERHEITSSTOPP
 
 
 # ── OpenAI Background Mode ───────────────────────────────────────────
@@ -688,7 +655,6 @@ async def create_background_response(
     reasoning: bool = False,
     reasoning_effort: str | None = None,
     previous_response_id: str | None = None,
-    compaction: bool = False,
 ) -> dict[str, Any]:
     """Startet eine asynchrone Hintergrund-Operation (`background: True`)."""
     if provider.requires_api_key and not api_key:
@@ -712,8 +678,6 @@ async def create_background_response(
     }
     if previous_response_id:
         request_body["previous_response_id"] = previous_response_id
-    if compaction:
-        request_body["compaction"] = True
 
     flache_werkzeuge = _werkzeuge_uebersetzen(tools)
     if flache_werkzeuge:
@@ -728,8 +692,7 @@ async def create_background_response(
     try:
         response = await client.post(target, headers=headers, json=request_body, timeout=30.0)
         if response.status_code not in (200, 202):
-            detail = await _error_detail(response)
-            raise AiProviderRequestError(_error_code(response.status_code), detail)
+            raise AiProviderRequestError(*await fehler_der_antwort(response))
         return response.json()
     except AiProviderRequestError:
         raise
@@ -756,8 +719,7 @@ async def get_background_response(
     try:
         response = await client.get(target, headers=headers, timeout=30.0)
         if response.status_code != 200:
-            detail = await _error_detail(response)
-            raise AiProviderRequestError(_error_code(response.status_code), detail)
+            raise AiProviderRequestError(*await fehler_der_antwort(response))
         return response.json()
     except AiProviderRequestError:
         raise
@@ -784,8 +746,7 @@ async def cancel_background_response(
     try:
         response = await client.post(target, headers=headers, timeout=30.0)
         if response.status_code != 200:
-            detail = await _error_detail(response)
-            raise AiProviderRequestError(_error_code(response.status_code), detail)
+            raise AiProviderRequestError(*await fehler_der_antwort(response))
         return response.json()
     except AiProviderRequestError:
         raise
@@ -814,8 +775,7 @@ async def poll_background_response(
         if status in ("failed", "cancelled", "incomplete"):
             fehler = daten.get("error") or {}
             nachricht = fehler.get("message") or f"Background response {status}"
-            code = fehler.get("code")
-            marke = _FEHLERARTEN.get(code, "AI_PROVIDER_REQUEST_REJECTED") if isinstance(code, str) else "AI_PROVIDER_REQUEST_REJECTED"
+            marke = anbieter_fehlercode(fehler.get("code"), "AI_PROVIDER_REQUEST_REJECTED")
             raise AiProviderRequestError(marke, _kurzfassung(nachricht))
 
         await asyncio.sleep(poll_interval)
@@ -836,7 +796,6 @@ async def stream_background_response(
     reasoning: bool = False,
     reasoning_effort: str | None = None,
     previous_response_id: str | None = None,
-    compaction: bool = False,
     poll_interval: float = 0.5,
     timeout: float = MAX_STREAM_SECONDS,
 ) -> AsyncIterator[StreamChunk]:
@@ -852,7 +811,6 @@ async def stream_background_response(
         reasoning=reasoning,
         reasoning_effort=reasoning_effort,
         previous_response_id=previous_response_id,
-        compaction=compaction,
     )
     usage.anfragen += 1
     resp_id = init_res.get("id")

@@ -84,7 +84,9 @@ ARBEITSPHASEN = ("diagnose", "eingriff", "beobachtung")
 #: * ``erledigt``    — die Anlage zeigt es: Vorfall geloest, Server laeuft.
 #: * ``eskaliert``   — es haengt an einer Entscheidung, die nur ein Mensch
 #:   treffen darf. Gesetzt wird das erst mit der E-Mail-Freigabe; bis dahin
-#:   fuehrt derselbe Fall ueber ``aufgegeben``.
+#:   fuehrt derselbe Fall ueber ``aufgegeben``. Und wenn die
+#:   Sicherheitsueberwachung des Anbieters einen Lauf angehalten hat — dann
+#:   prueft ein Mensch, bevor irgendetwas weiterlaeuft.
 #: * ``aufgegeben``  — Frist abgelaufen oder Versuche aufgebraucht.
 #: * ``abgebrochen`` — ein Mensch hat uebernommen.
 ENDPHASEN = ("erledigt", "eskaliert", "aufgegeben", "abgebrochen")

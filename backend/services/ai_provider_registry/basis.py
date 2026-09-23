@@ -21,6 +21,8 @@ Gegenwert.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
+import re
 
 
 @dataclass(frozen=True)
@@ -290,8 +292,23 @@ class Anbieter:
     #: der im Hintergrund arbeitet: er soll nachdenken duerfen, waehrend er
     #: Werkzeuge benutzt.
     protokoll_chat: str = "chat_completions"
-    #: Ob dieser Anbieter einen Realtime-Sprachmodus anbietet (OpenAI, Azure OpenAI).
-    realtime_tauglich: bool = False
+    #: Über welche **Sprachwege** dieser Anbieter einen Echtzeit-Sprachmodus
+    #: trägt — Namen aus `services.ai_voice.sprachwege`, dort steht, was jeder
+    #: Weg verlangt. Leer: keiner.
+    #:
+    #: Ein Tupel und kein Schalter, seit OpenAI zwei führt: die Realtime-API und
+    #: GPT-Live, mit verschiedenem Protokoll, verschiedenen Stimmen und
+    #: verschiedener Abrechnung. Welcher gilt, entscheidet das eingestellte
+    #: Modell (`sprachwege.sprachweg_fuer`). Ein dritter Weg ist ein Eintrag in
+    #: `sprachwege.WEGE` und ein Name hier — kein ``if kind ==`` irgendwo.
+    #:
+    #: Nur Namen, damit diese Datei weiter nichts aus anderen Paketen braucht.
+    sprachwege: tuple[str, ...] = ()
+
+    @property
+    def realtime_tauglich(self) -> bool:
+        """Ob dieser Anbieter überhaupt einen Echtzeit-Sprachmodus trägt."""
+        return bool(self.sprachwege)
 
 
 @dataclass(frozen=True)
@@ -338,11 +355,26 @@ class Modell:
     selbst zwischen, oder es kann es gar nicht. Beide Male ist nichts zu tun,
     und beide Male wäre eine Marke falsch: dort wirkungslos, hier eine Bitte um
     etwas, das nicht angeboten wird.
+
+    ``denkt`` kennt seit dem 22.09.2026 **drei** Werte, aus demselben Grund wie
+    ``sieht``: ``None`` heißt „der Katalog sagt dazu nichts". Vorher war es ein
+    ``bool``, und OpenAIs Leser musste für ein Modell, über das sein Katalog
+    schweigt, ``False`` hinschreiben. Die Einstellungsseite las daraus „denkt
+    nicht nach" — bei GPT-6 Luna, das sechs Denkstufen führt. Der Sendepfad
+    behandelt ``None`` wie bisher ``False``: er schickt zum Nachdenken nichts,
+    weil er nichts weiß. Nur die Anzeige darf den Unterschied nicht verwischen.
+
+    ``abschaltung`` ist der Tag, an dem der Anbieter das Modell abschaltet, als
+    ISO-Datum (``2027-02-26``), oder ``None``, wenn keiner angekündigt ist.
+    OpenAI führt ihn als ``shutdown_date``, OpenRouter als
+    ``expiration_date``. Er wird **nie** aus einem fremden Katalog geliehen:
+    wann ein Vermittler ein Modell aus seiner Liste nimmt, sagt nichts darüber,
+    wann der Hersteller es abschaltet.
     """
 
     model_id: str
     name: str
-    denkt: bool
+    denkt: bool | None
     stufen: tuple[str, ...] = ()
     standard_stufe: str | None = None
     zwingend: bool = False
@@ -350,6 +382,7 @@ class Modell:
     max_ausgabe_tokens: int | None = None
     cache_marke_noetig: bool = False
     sieht: bool | None = None
+    abschaltung: str | None = None
 
 
 def positive_zahl(wert: object) -> int | None:
@@ -366,3 +399,22 @@ def positive_zahl(wert: object) -> int | None:
     if isinstance(wert, bool) or not isinstance(wert, int):
         return None
     return wert if wert > 0 else None
+
+
+_ISO_DATUM = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def iso_datum(wert: object) -> str | None:
+    """Ein Kalendertag aus fremden Daten (``2027-02-26``), oder ``None``.
+
+    Geprüft wird die Form **und** der Tag selbst: ``2027-02-30`` hat die Form
+    eines Datums und ist keines. Ein Katalog, der dort Unsinn führt, soll in
+    der Oberfläche nicht als Abschalttermin erscheinen — dann lieber gar keiner.
+    """
+    if not isinstance(wert, str) or not _ISO_DATUM.fullmatch(wert):
+        return None
+    try:
+        date.fromisoformat(wert)
+    except ValueError:
+        return None
+    return wert

@@ -167,6 +167,33 @@ def abschlusstext(db: Session, run: AiRun, zustand: dict | None = None) -> str:
     return text[-MAX_BERICHT_ZEICHEN:]
 
 
+def sicherheitsstopp_vermerken(run: AiRun, bericht: str) -> str:
+    """Stellt einem Bericht voran, dass der Anbieter den Lauf angehalten hat.
+
+    Ein angehaltener Lauf hinterlaesst keinen Abschlussbericht — der Stopp kam
+    mitten in der Arbeit (`openai_compatible_adapter.SICHERHEITSSTOPP`). Ohne
+    diesen Vermerk laese der Betreiber nur „nicht geschafft" und wuesste weder,
+    warum, noch dass OpenAI von ihm eine Pruefung erwartet: was der Assistent
+    bis dahin getan hat, ist nicht zurueckgenommen.
+
+    Eine Stelle fuer alle drei Berichte — Aufgabe, Heilung und Worker-Meldung
+    ans Gehirn —, aus demselben Grund wie `abschlusstext`. Beim Gehirn ist der
+    Satz eine Tatsache und kein Verbot: es erfaehrt, was geschah und welche
+    Regel daran haengt, statt nur einen gescheiterten Auftrag zu sehen und den
+    naechsten Worker mit derselben Aufgabe loszuschicken.
+    """
+    from services.openai_compatible_adapter import SICHERHEITSSTOPP
+
+    if str(run.stop_reason or "") != SICHERHEITSSTOPP:
+        return bericht
+    return (
+        "Die Sicherheitsüberwachung des KI-Anbieters hat diesen Lauf angehalten. "
+        "Nach der Vorgabe des Anbieters wird er nicht automatisch wiederholt; "
+        "was der Assistent bis dahin getan hat, bleibt bestehen und gehört "
+        "von einem Menschen geprüft.\n\n" + bericht
+    )
+
+
 def bericht_versenden(db: Session, *, run: AiRun, zustand: dict) -> None:
     """Stellt den Bericht dieses Aufgabenlaufs zu.
 
@@ -213,6 +240,7 @@ def bericht_versenden(db: Session, *, run: AiRun, zustand: dict) -> None:
             "Der Assistent hat keine Zusammenfassung hinterlassen. "
             "Der Verlauf steht im KI-Chat des Panels."
         )
+    bericht = sicherheitsstopp_vermerken(run, bericht)
 
     _zustellen(
         db=db,

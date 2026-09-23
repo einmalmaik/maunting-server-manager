@@ -43,13 +43,24 @@ export interface AiProviderAdmin {
   realtime_default?: boolean
   realtime_model?: string | null
   realtime_voice?: string | null
-  realtime_reasoning_effort?: 'low' | 'medium' | 'high' | null
+  /**
+   * Die Wörter kommen vom Sprachweg des Modells (`AiSprachweg.denkstufen`) —
+   * bei GPT-Live sind es sechs, und sie gelten dort dem Backend-Modell.
+   */
+  realtime_reasoning_effort?: string | null
   realtime_language?: 'auto' | 'de' | 'en'
   realtime_vad_eagerness?: 'auto' | 'low' | 'medium' | 'high'
   realtime_text_input_price_micro_usd_per_million?: number | null
   realtime_text_output_price_micro_usd_per_million?: number | null
   realtime_audio_input_price_micro_usd_per_million?: number | null
   realtime_audio_output_price_micro_usd_per_million?: number | null
+  /**
+   * Nur GPT-Live: das Modell, das hinter der Stimme nachdenkt und die
+   * Werkzeuge ruft. `null` heisst „das Standardmodell des Zugangs".
+   */
+  realtime_backend_model?: string | null
+  /** Nur GPT-Live: der Preis je Minute Sitzung, in Micro-USD. */
+  realtime_minute_price_micro_usd?: number | null
   /**
    * Das Arbeitsmodell der Worker — die zweite Hälfte der Provider-Zweiteilung
    * (docs/agentic-framework.md, §5). `null` heisst: kein Hintergrund-Betrieb
@@ -196,13 +207,49 @@ export interface AiProviderKind {
    */
   kann_hoeren: boolean
   realtime_tauglich?: boolean
+  /**
+   * Die Sprachwege dieses Anbieters, in der Reihenfolge, in der sie ein Modell
+   * erkennen — dieselben Felder, nach denen der Server prüft
+   * (`services/ai_voice/sprachwege.py`).
+   */
+  sprachwege?: AiSprachweg[]
+}
+
+/**
+ * Ein Sprachweg: welche Echtzeit-Schnittstelle ein Sprachmodell spricht.
+ *
+ * Ein Modell gehört zu einem Weg, wenn seine Kennung `merkmal` enthält und
+ * keinen der `ausschluesse` — dieselbe Regel wie `Sprachweg.passt` im Server.
+ * Eine zweite, klügere Regel hier wäre eine zweite Antwort auf dieselbe Frage.
+ */
+export interface AiSprachweg {
+  weg: 'openai_realtime' | 'openai_live' | 'gemini_live' | (string & {})
+  merkmal: string
+  ausschluesse: string[]
+  stimmen: string[]
+  empfohlene_stimmen: string[]
+  empfohlene_modelle: string[]
+  denkstufen: string[]
+  /** Nur Modelle mit diesem Teilwort nehmen eine Denkstufe an; `null`: jedes. */
+  denkstufen_merkmal: string | null
+  /** Die Denkstufe gilt dem Backend-Modell, nicht der Stimme (GPT-Live). */
+  denkt_im_backend: boolean
+  vad: boolean
+  audiopreise: boolean
+  minutenpreis: boolean
+  backend_modell: boolean
 }
 
 /** Ein Modell aus dem Katalog des Anbieters, mit seinen Denkfaehigkeiten. */
 export interface AiCatalogModel {
   model_id: string
   name: string
-  reasoning: boolean
+  /**
+   * Ob das Modell nachdenkt. `null` heisst „der Katalog sagt dazu nichts" und
+   * nie „denkt nicht". Bis zum 22.09.2026 kam hier `false`, und GPT-6 Luna
+   * stand am Erscheinungstag mit „Dieses Modell denkt nicht nach" da.
+   */
+  reasoning: boolean | null
   efforts: string[]
   default_effort: string | null
   mandatory: boolean
@@ -222,6 +269,16 @@ export interface AiCatalogModel {
    * Modell waehlt — also hier.
    */
   vision: boolean | null
+  /** Das Kontextfenster in Token, `null` wenn der Katalog es nicht nennt. */
+  context_tokens: number | null
+  /** Die laengste Antwort in Token, `null` wenn der Katalog sie nicht nennt. */
+  max_output_tokens: number | null
+  /**
+   * Der angekuendigte Abschalttag des Herstellers als ISO-Datum, oder `null`.
+   * Nie der eines Vermittlers: OpenRouters Tag sagt, wann OpenRouter ein
+   * Modell aus seiner Liste nimmt, nicht wann OpenAI es abschaltet.
+   */
+  shutdown_date: string | null
 }
 
 /**
@@ -520,7 +577,7 @@ export interface AiProviderTestResult {
  */
 export interface AiVoiceConfig {
   available: boolean
-  mode?: 'legacy' | 'openai_realtime' | 'gemini_live'
+  mode?: 'legacy' | 'openai_realtime' | 'openai_live' | 'gemini_live'
   /** Nur zur Anzeige. `null`, solange nichts eingerichtet ist. */
   model: string | null
   /**
@@ -530,7 +587,12 @@ export interface AiVoiceConfig {
    */
   voice: string | null
   language?: string
-  reasoning_effort?: 'low' | 'medium' | 'high' | null
+  reasoning_effort?: string | null
+  /**
+   * Nur bei GPT-Live: das Modell, das hinter der Stimme nachdenkt — die
+   * Denkstufe darüber gehört dann ihm.
+   */
+  backend_model?: string | null
   dictation_available?: boolean
   dictation_monthly_limit_minutes?: number | null
   dictation_used_seconds?: number
@@ -1119,6 +1181,8 @@ export interface AiProviderWrite {
   realtime_text_output_price_micro_usd_per_million?: number | null
   realtime_audio_input_price_micro_usd_per_million?: number | null
   realtime_audio_output_price_micro_usd_per_million?: number | null
+  realtime_backend_model?: string | null
+  realtime_minute_price_micro_usd?: number | null
   /**
    * Wie `default_voice`: „nicht genannt" lässt den Stand stehen,
    * ausdrückliches `null` schaltet den Hintergrund-Betrieb ab.

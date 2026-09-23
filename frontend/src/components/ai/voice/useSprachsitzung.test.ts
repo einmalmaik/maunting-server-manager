@@ -138,6 +138,116 @@ describe('useSprachsitzung', () => {
     }
   })
 
+  describe('GPT-Live', () => {
+    /**
+     * Ein Peer, dessen ICE-Sammlung der Test beendet. GPT-Live nimmt genau ein
+     * Angebot und kein Nachreichen von Kandidaten — das Browserbeispiel der
+     * Dokumentation wartet deshalb auf `complete`, mit zehn Sekunden Frist.
+     */
+    class IcePeer extends EventTarget {
+      static instances: IcePeer[] = []
+      localDescription: RTCSessionDescriptionInit | null = null
+      remoteDescription: RTCSessionDescriptionInit | null = null
+      iceGatheringState: RTCIceGatheringState = 'new'
+      ontrack: ((event: RTCTrackEvent) => void) | null = null
+
+      constructor() {
+        super()
+        IcePeer.instances.push(this)
+      }
+
+      addTrack() {}
+      createDataChannel() { return {} }
+      async createOffer() { return { type: 'offer' as const, sdp: 'v=0\r\nlive-offer' } }
+      async setLocalDescription(value: RTCSessionDescriptionInit) {
+        this.localDescription = value
+        this.iceGatheringState = 'gathering'
+      }
+      async setRemoteDescription(value: RTCSessionDescriptionInit) { this.remoteDescription = value }
+      close() {}
+
+      sammlungFertig() {
+        this.localDescription = { type: 'offer', sdp: 'v=0\r\nlive-offer\r\na=candidate:1 1 udp 1 192.0.2.1 5000 typ host' }
+        this.iceGatheringState = 'complete'
+        this.dispatchEvent(new Event('icegatheringstatechange'))
+      }
+    }
+
+    let originalPeer: typeof RTCPeerConnection | undefined
+
+    beforeEach(() => {
+      IcePeer.instances = []
+      originalPeer = globalThis.RTCPeerConnection
+      ;(globalThis as { RTCPeerConnection?: unknown }).RTCPeerConnection = IcePeer
+    })
+
+    afterEach(() => {
+      if (originalPeer) globalThis.RTCPeerConnection = originalPeer
+      else delete (globalThis as { RTCPeerConnection?: unknown }).RTCPeerConnection
+    })
+
+    async function liveSitzung() {
+      const haken = renderHook(() => useSprachsitzung(undefined, 'openai_live'))
+      await act(() => haken.result.current.starten())
+      await act(async () => {
+        leitung().simulateOpen()
+        await Promise.resolve()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      return haken
+    }
+
+    it('schickt das Angebot erst mit den gesammelten Kandidaten', async () => {
+      await liveSitzung()
+
+      expect(IcePeer.instances).toHaveLength(1)
+      // Noch in der Sammlung: ein Angebot ohne Kandidaten wäre für GPT-Live
+      // ein Angebot, das nie zu einer Verbindung wird.
+      expect(leitung().sent).toHaveLength(0)
+
+      await act(async () => {
+        IcePeer.instances[0].sammlungFertig()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(leitung().sent).toHaveLength(1)
+      expect(JSON.parse(leitung().sent[0])).toEqual({
+        art: 'webrtc_offer',
+        sdp: 'v=0\r\nlive-offer\r\na=candidate:1 1 udp 1 192.0.2.1 5000 typ host',
+      })
+    })
+
+    it('gibt nach zehn Sekunden ohne fertige Sammlung auf und meldet die Verbindung', async () => {
+      const haken = await liveSitzung()
+
+      await act(async () => {
+        vi.advanceTimersByTime(10_000)
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      await waitFor(() => expect(haken.result.current.fehler).toBe('ai.voice.errors.connection'))
+      expect(haken.result.current.fehlerCode).toBe('ICE_TIMEOUT')
+      expect(leitung().sent).toHaveLength(0)
+    })
+  })
+
+  it.each([
+    ['AI_PROVIDER_SAFETY_STOPPED', 'ai.voice.errors.safety'],
+    ['REALTIME_CONTENT_STOPPED', 'ai.voice.errors.content'],
+    ['REALTIME_CONNECTION_LOST', 'ai.voice.errors.connection'],
+    ['REALTIME_HANDSHAKE_FAILED', 'ai.voice.errors.provider'],
+  ])('übersetzt den Endcode %s in %s', async (code, text) => {
+    // Ein Sicherheitsstopp ist keine Netzstörung, und „hat nicht geklappt"
+    // verschweigt, dass niemand es still noch einmal versucht.
+    const haken = await sitzung()
+
+    act(() => leitung().simulateMessage({ art: 'fehler', code }))
+
+    expect(haken.result.current.fehler).toBe(text)
+    expect(haken.result.current.fehlerCode).toBe(code)
+  })
+
   it('uebernimmt den Zustand vom Server', async () => {
     const haken = await sitzung()
 

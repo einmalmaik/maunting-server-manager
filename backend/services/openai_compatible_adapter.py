@@ -388,6 +388,74 @@ def _error_code(status_code: int) -> str:
     return "AI_PROVIDER_REQUEST_REJECTED"
 
 
+#: Der Code, unter dem ein Anbieter einen Lauf **aus Sicherheitsgruenden**
+#: angehalten hat. Heute sendet ihn nur OpenAIs Misalignment-Ueberwachung
+#: (GPT-6-Familie, Responses-API ueber WebSocket, mit persistiertem Denken oder
+#: mit Kompaktierung — genau der Weg, den MSM fuer OpenAI geht).
+#:
+#: Er ist der einzige Fehler, bei dem ein zweiter Versuch nicht bloss nutzlos,
+#: sondern **untersagt** ist. OpenAI schreibt dazu: „Stop dispatching further
+#: actions for the affected conversation. Do not automatically retry the blocked
+#: workflow." Ein Mensch vergleicht erst, was der Agent getan hat, mit dem, was
+#: er tun sollte — die Ueberwachung laeuft nebenher, eine Handlung kann also
+#: schon geschehen sein, bevor der Stopp kommt. Wer diesen Code liest, darf
+#: deshalb nirgends einen Rueckfall, eine Wiederholung oder einen naechsten
+#: Anlauf daraus machen: `openai_responses_adapter.stream_responses`
+#: (kein Wechsel von WebSocket auf HTTP), `ai_guardian_repair_service` (kein
+#: naechster Heilungsversuch) und `ai_meldestelle` (das Gehirn erfaehrt es).
+SICHERHEITSSTOPP = "AI_PROVIDER_SAFETY_STOPPED"
+
+#: Was OpenAI in ``error.code`` nennt, und welcher Satz fuer den Betreiber
+#: daraus wird. **Eine** Tabelle fuer alle Wege, auf denen ein solcher Fehler
+#: ankommt: als Status mit Koerper (`fehler_der_antwort`), als Ereignis im
+#: Strom und als Rahmen auf der WebSocket-Verbindung
+#: (`openai_responses_websocket.fehler_im_rahmen`) und am Ende eines
+#: Hintergrundauftrags. Bis zum 22.09.2026 stand sie zweimal da, und der
+#: Statusweg las den Code gar nicht: ein Sicherheitsstopp kommt als HTTP 403 und
+#: hiess dort „der API-Key wurde abgelehnt", ein leeres Guthaben kommt als 429
+#: und hiess „der Anbieter drosselt gerade — versuche es in einem Moment erneut".
+#:
+#: Was hier nicht steht, faellt auf die Marke zurueck, die der Aufrufer nennt —
+#: beim Status die aus `_error_code`. Die Tabelle ergaenzt, sie raet nicht.
+#:
+#: Quelle: developers.openai.com/api/docs/guides/error-codes und
+#: …/guides/safety-checks/misalignment-monitoring, gelesen am 22.09.2026.
+ANBIETER_FEHLERCODES: dict[str, str] = {
+    "rate_limit_exceeded": "AI_PROVIDER_RATE_LIMITED",
+    # Die Anfragerate stieg schneller, als der Dienst mitkommt — laut OpenAI
+    # auch dann, wenn sie innerhalb der eigenen Grenzen liegt. Dieselbe
+    # Handlung wie oben: warten.
+    "slow_down": "AI_PROVIDER_RATE_LIMITED",
+    "insufficient_quota": "AI_PROVIDER_PAYMENT_REQUIRED",
+    "billing_hard_limit_reached": "AI_PROVIDER_PAYMENT_REQUIRED",
+    # Vier Zahlungsgrenzen, die OpenAI als 429 meldet. Warten hilft bei keiner:
+    # „Retrying billing, spend, or quota errors won't restore API access."
+    "credit_balance_exhausted": "AI_PROVIDER_PAYMENT_REQUIRED",
+    "organization_spend_limit_exceeded": "AI_PROVIDER_PAYMENT_REQUIRED",
+    "project_spend_limit_exceeded": "AI_PROVIDER_PAYMENT_REQUIRED",
+    "organization_usage_limit_exceeded": "AI_PROVIDER_PAYMENT_REQUIRED",
+    "invalid_api_key": "AI_PROVIDER_AUTH_FAILED",
+    "authentication_error": "AI_PROVIDER_AUTH_FAILED",
+    "model_not_found": "AI_PROVIDER_ENDPOINT_NOT_FOUND",
+    "server_error": "AI_PROVIDER_UNAVAILABLE",
+    # Das Modell hat gerade keine Kapazitaet (503).
+    "server_is_overloaded": "AI_PROVIDER_UNAVAILABLE",
+    "misalignment_policy_violation": SICHERHEITSSTOPP,
+}
+
+
+def anbieter_fehlercode(code: object, rueckfall: str) -> str:
+    """Die MSM-Marke zu einem ``error.code`` des Anbieters, sonst ``rueckfall``.
+
+    ``code`` ist bei OpenAI ein Wort, bei OpenRouter manchmal eine Zahl, und
+    bei einem kaputten Rahmen irgendetwas. Nur ein bekanntes Wort aendert die
+    Marke; alles andere laesst den Rueckfall stehen.
+    """
+    if isinstance(code, str):
+        return ANBIETER_FEHLERCODES.get(code, rueckfall)
+    return rueckfall
+
+
 def _kurzfassung(message: str) -> str | None:
     """Fremdtext zu einer Zeile, die man einem Betreiber zeigen kann.
 
@@ -450,12 +518,35 @@ async def _error_detail(response: httpx.Response) -> str | None:
     Der Body wird nur bei einem Fehlerstatus gelesen und nie gestreamt. Alles
     daran ist Fremdtext: er wird redigiert, auf eine Zeile gebracht und gekuerzt.
     """
+    return (await _fehlerkoerper(response))[1]
+
+
+async def fehler_der_antwort(response: httpx.Response) -> tuple[str, str | None]:
+    """Marke und Wortlaut zu einer Antwort mit Fehlerstatus.
+
+    Der Code im Koerper schlaegt den Status, wo die Tabelle ihn kennt
+    (`ANBIETER_FEHLERCODES`). Derselbe Status traegt bei OpenAI naemlich
+    verschiedene Sachverhalte: 429 heisst „zu schnell" oder „kein Guthaben
+    mehr", 403 heisst „Land nicht unterstuetzt" oder „Sicherheitsstopp" — und
+    fuer den Betreiber ist das jedesmal eine andere Handlung.
+    """
+    code, detail = await _fehlerkoerper(response)
+    return anbieter_fehlercode(code, _error_code(response.status_code)), detail
+
+
+async def _fehlerkoerper(response: httpx.Response) -> tuple[object, str | None]:
+    """``error.code`` und die aufbereitete Meldung aus einem Fehler-Body.
+
+    Ein Lesevorgang fuer beides: der Koerper laesst sich nur einmal lesen, und
+    zwei Helfer, die ihn je fuer sich holen, bekaemen beim zweiten nichts mehr.
+    """
     try:
         raw = await response.aread()
     except (httpx.HTTPError, RuntimeError):
-        return None
+        return None, None
     text = raw[: MAX_PROVIDER_ERROR_BODY_BYTES].decode("utf-8", "replace")
     message: str | None = None
+    code: object = None
     try:
         parsed = json.loads(text)
     except (TypeError, json.JSONDecodeError):
@@ -463,6 +554,8 @@ async def _error_detail(response: httpx.Response) -> str | None:
     else:
         if isinstance(parsed, dict):
             error = parsed.get("error")
+            if isinstance(error, dict):
+                code = error.get("code")
             if isinstance(error, dict) and isinstance(error.get("message"), str):
                 message = error["message"]
             elif isinstance(error, str):
@@ -471,7 +564,7 @@ async def _error_detail(response: httpx.Response) -> str | None:
                 message = parsed["message"]
         if message is None:
             message = text
-    return _kurzfassung(message)
+    return code, _kurzfassung(message)
 
 
 def extract_thought_signature(data: Any) -> str | None:
@@ -569,7 +662,6 @@ async def stream_chat_completion(
     cache_marke: bool = False,
     previous_response_id: str | None = None,
     use_websocket: bool = True,
-    compaction: bool = False,
     background: bool = False,
     **kwargs: Any,
 ) -> AsyncIterator[StreamChunk]:
@@ -722,7 +814,6 @@ async def stream_chat_completion(
             cache_marke=cache_marke,
             previous_response_id=previous_response_id,
             use_websocket=use_websocket,
-            compaction=compaction,
             background=background,
             **kwargs,
         ):
@@ -831,7 +922,7 @@ async def stream_chat_completion(
             json=request_body,
         ) as response:
             if response.status_code != 200:
-                detail = await _error_detail(response)
+                marke, detail = await fehler_der_antwort(response)
                 logger.warning(
                     # Das Modell gehoert dazu: dieselbe Anlage bedient mehrere,
                     # und „abgelehnt" ohne den Namen zwingt zum Raten, welches.
@@ -840,9 +931,7 @@ async def stream_chat_completion(
                     model or provider.default_model,
                     response.status_code,
                 )
-                raise AiProviderRequestError(
-                    _error_code(response.status_code), detail
-                )
+                raise AiProviderRequestError(marke, detail)
 
             # Ab hier ist die Anfrage beim Anbieter angekommen und wird von ihm
             # abgerechnet — auch wenn der Strom gleich abbricht. Gezaehlt wird

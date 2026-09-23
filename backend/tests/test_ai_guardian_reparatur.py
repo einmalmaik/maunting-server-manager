@@ -448,6 +448,50 @@ class TestBremse:
         assert auftrag.phase == "aufgegeben"
         assert auftrag.next_run_at is None
 
+    def test_ein_sicherheitsstopp_des_anbieters_beendet_den_auftrag(self, db: Session):
+        """OpenAI untersagt die automatische Wiederholung — der Takt waere eine.
+
+        Die Misalignment-Ueberwachung der GPT-6-Familie haelt einen Lauf an,
+        wenn eine folgenreiche Handlung nicht zum Auftrag zu passen scheint.
+        Danach prueft ein Mensch, was der Agent schon getan hat. Ein naechster
+        Anlauf im 13-Minuten-Takt waere genau das, was OpenAI ausschliesst.
+        """
+        user = _benutzer(db)
+        server = _server(db)
+        vorfall = _vorfall(db, server)
+        auftrag = _auftrag(db, vorfall, server, user, phase="eingriff")
+        run = _lauf(
+            db, user, auftrag, status="failed", stop_reason="AI_PROVIDER_SAFETY_STOPPED"
+        )
+
+        reparatur.lauf_beendet(db, run, _zustand(run))
+
+        db.refresh(auftrag)
+        assert auftrag.phase == "eskaliert"
+        assert auftrag.next_run_at is None
+
+    def test_auch_ein_laufender_server_hebt_den_sicherheitsstopp_nicht_auf(
+        self, db: Session
+    ):
+        """Die Frage des Menschen ist, was der Agent getan hat — nicht, wie es dem Server geht.
+
+        Ohne den Vorrang vor der Wirkungsfrage ginge dieser Auftrag in die
+        Beobachtung und endete als ``erledigt``: der Betreiber bekaeme eine
+        Erfolgsmeldung ueber einen Lauf, den der Anbieter angehalten hat.
+        """
+        user = _benutzer(db)
+        server = _server(db, desired_power_state="running", guardian_observed_state="healthy")
+        vorfall = _vorfall(db, server, status="resolved")
+        auftrag = _auftrag(db, vorfall, server, user, phase="eingriff")
+        run = _lauf(
+            db, user, auftrag, status="failed", stop_reason="AI_PROVIDER_SAFETY_STOPPED"
+        )
+
+        reparatur.lauf_beendet(db, run, _zustand(run))
+
+        db.refresh(auftrag)
+        assert auftrag.phase == "eskaliert"
+
     def test_der_versuchsdeckel_beendet_den_auftrag(self, db: Session):
         """Acht Anlaeufe ohne Wirkung sind kein Argument fuer einen neunten."""
         user = _benutzer(db)

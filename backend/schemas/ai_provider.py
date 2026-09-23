@@ -192,6 +192,10 @@ class AiProviderCreate(BaseModel):
     realtime_text_output_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
     realtime_audio_input_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
     realtime_audio_output_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    #: Nur GPT-Live: das Modell hinter der Stimme (leer: das Standardmodell)
+    #: und der Preis je Minute Sitzung in Micro-USD.
+    realtime_backend_model: Modellkennung = Field(default=None, max_length=256)
+    realtime_minute_price_micro_usd: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
     # Die Worker-Rolle dieses Zugangs: das Modell, mit dem Auftraege im
     # Hintergrund arbeiten, und seine **feste** Denkstufe. Leer heisst „keine
     # Worker-Rolle" — dann gilt der heutige Ein-Modell-Betrieb. Die Stufe wird
@@ -253,6 +257,10 @@ class AiProviderUpdate(BaseModel):
     realtime_text_output_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
     realtime_audio_input_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
     realtime_audio_output_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    #: Nur GPT-Live: das Modell hinter der Stimme (leer: das Standardmodell)
+    #: und der Preis je Minute Sitzung in Micro-USD.
+    realtime_backend_model: Modellkennung = Field(default=None, max_length=256)
+    realtime_minute_price_micro_usd: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
     # Wie bei Stimme und Gehoer: „nicht mitgeschickt" laesst den Wert stehen,
     # ein ausdrueckliches ``null`` (bzw. leeres Feld) loescht ihn — getrennt
     # durch `model_dump(exclude_unset=True)` im Router.
@@ -301,6 +309,8 @@ class AiProviderResponse(BaseModel):
     realtime_text_output_price_micro_usd_per_million: int | None = None
     realtime_audio_input_price_micro_usd_per_million: int | None = None
     realtime_audio_output_price_micro_usd_per_million: int | None = None
+    realtime_backend_model: str | None = None
+    realtime_minute_price_micro_usd: int | None = None
     standard_enabled: bool = False
     worker_enabled: bool = False
     ethics_enabled: bool = False
@@ -342,6 +352,31 @@ class AiProviderResponse(BaseModel):
     updated_at: datetime
 
 
+class AiSprachwegResponse(BaseModel):
+    """Ein Sprachweg, so wie das Formular ihn braucht (`sprachwege.Sprachweg`).
+
+    Die Oberflaeche erkennt damit selbst, welcher Weg zu einem Modell gehoert
+    (``merkmal`` und ``ausschluesse`` — dieselbe Regel wie `Sprachweg.passt`),
+    und zeigt nur die Felder, die dieser Weg kennt. Ohne diese Angaben stuende
+    dieselbe Unterscheidung ein zweites Mal im Frontend, als
+    ``provider_kind === …`` — und der naechste Weg fehlte dort.
+    """
+
+    weg: str
+    merkmal: str
+    ausschluesse: list[str]
+    stimmen: list[str]
+    empfohlene_stimmen: list[str]
+    empfohlene_modelle: list[str]
+    denkstufen: list[str]
+    denkstufen_merkmal: str | None
+    denkt_im_backend: bool
+    vad: bool
+    audiopreise: bool
+    minutenpreis: bool
+    backend_modell: bool
+
+
 class AiProviderKindResponse(BaseModel):
     """Ein von MSM unterstuetzter Anbieter — die Auswahl im Einrichtungsformular."""
 
@@ -374,6 +409,10 @@ class AiProviderKindResponse(BaseModel):
     #: vergessene Eintrag darin ein Anbieter, den man nicht einrichten kann.
     ressource_noetig: bool
     realtime_tauglich: bool = False
+    #: Die Sprachwege dieses Anbieters in seiner Reihenfolge; leer heisst
+    #: „kein Sprachmodus". `realtime_tauglich` bleibt fuer aeltere Leser stehen
+    #: und ist nichts anderes als „diese Liste ist nicht leer".
+    sprachwege: list[AiSprachwegResponse] = []
     #: Ob dieser Anbieter ueberhaupt eine Modelliste fuehrt. ``False`` heisst
     #: **nicht** „Katalog gerade nicht erreichbar": bei Azure heisst ein Modell
     #: so, wie der Betreiber sein Deployment genannt hat, und eine Liste dafuer
@@ -410,16 +449,33 @@ class AiCatalogModelResponse(BaseModel):
     technischen Worten (`ai_stream_service.KEIN_BLICK_GRUND`), und ohne diese
     Marke haette der Betreiber keinen Ort, an dem er nachsehen koennte, warum
     sie nicht hinsieht.
+
+    ``reasoning`` folgt seit dem 22.09.2026 derselben Regel: ``null`` heisst
+    „der Katalog sagt dazu nichts" und nie „denkt nicht nach". Vorher war es
+    ein ``bool``, und ein Modell, das der geliehene Katalog noch nicht kannte,
+    stand mit „Dieses Modell denkt nicht nach" da — am Erscheinungstag von
+    GPT-6 Luna genau bei GPT-6 Luna.
+
+    ``context_tokens`` und ``max_output_tokens`` sind das Kontextfenster und
+    die Antwortgrenze aus dem Katalog, ``null`` wenn er sie nicht nennt. Der
+    Chat rechnet laengst damit (`ai_context_window`), nur der Betreiber sah
+    sie nirgends — er waehlte ein Modell, ohne zu wissen, wieviel es fasst.
+
+    ``shutdown_date`` ist der angekuendigte Abschalttag des Herstellers
+    (ISO-Datum) oder ``null``.
     """
 
     model_id: str
     name: str
-    reasoning: bool
+    reasoning: bool | None
     efforts: list[str]
     default_effort: str | None
     mandatory: bool
     recommended: bool = False
     vision: bool | None = None
+    context_tokens: int | None = None
+    max_output_tokens: int | None = None
+    shutdown_date: str | None = None
 
 
 class AiProviderAvailableResponse(BaseModel):

@@ -38,7 +38,7 @@ beschrieben, und „unbekannt" heißt weiterhin nie „klein" oder „kann er ni
 
 from __future__ import annotations
 
-from services.ai_provider_registry.basis import Anbieter, Modell
+from services.ai_provider_registry.basis import Anbieter, Modell, iso_datum
 
 
 ANBIETER = Anbieter(
@@ -81,8 +81,12 @@ ANBIETER = Anbieter(
     # Genau diese Luecke schliesst `faehigkeiten_aus` — jetzt weiss MSM es, und
     # `openai_compatible_adapter` sendet die Marke nur dann, wenn eine Stufe
     # feststeht. Kein Wissen, keine Stufe, keine Marke.
+    #
+    # ``"compaction"`` stand hier bis zum 23.09.2026 und ist entfallen: das Feld
+    # gibt es in der Responses-API nicht (``400 unknown_parameter``, gemessen
+    # gegen gpt-6-luna), siehe `openai_responses_adapter`.
     anfrage_erweiterungen=frozenset({
-        "reasoning_effort", "websocket", "background", "file_inputs", "compaction"
+        "reasoning_effort", "websocket", "background", "file_inputs"
     }),
     # **Der Chatweg ist `/responses` und nicht `/chat/completions`.**
     #
@@ -107,7 +111,11 @@ ANBIETER = Anbieter(
     # Abrechnung. Eine zweite Runde mit `function_call_output` fuehrt den Lauf
     # sauber fort (145 Eingabe-, 147 Ausgabetokens).
     protokoll_chat="responses",
-    realtime_tauglich=True,
+    # Zwei Sprachwege, und das Modell entscheidet, welcher gilt:
+    # ``gpt-realtime*`` spricht die Realtime-API, ``gpt-live*`` GPT-Live
+    # (``POST /v1/live/sessions``). Was jeder verlangt, steht in
+    # `services.ai_voice.sprachwege`.
+    sprachwege=("openai_realtime", "openai_live"),
     # **Keine Empfehlung fuer den Chat**, und das ist keine Nachlaessigkeit.
     # Die Empfehlung wird gegen den Katalog geprueft und faellt weg, wenn die
     # Kennung dort nicht steht — sie waere hier also im besten Fall wirkungslos.
@@ -129,14 +137,24 @@ def katalog_lesen(rohdaten: dict) -> Modell | None:
     kein Fehler in dieser Funktion, sondern der Umfang der Auskunft.
 
     Was hier herauskommt, ist deshalb **das Gerüst und nicht das fertige
-    Modell**: eine Kennung, sonst nichts. Die Fähigkeiten trägt
-    `ai_model_catalog` anschliessend aus OpenRouters Katalog nach
-    (``faehigkeiten_aus`` oben). ``denkt=False`` und ``kontext_tokens=None``
+    Modell**: eine Kennung und der Abschalttermin, sonst nichts. Die
+    Fähigkeiten trägt `ai_model_catalog` anschliessend aus OpenRouters Katalog
+    nach (``faehigkeiten_aus`` oben). ``denkt=None`` und ``kontext_tokens=None``
     sind hier also Ausgangswerte und keine Behauptungen — sie bedeuten
     „von hier aus unbekannt", nie „kann er nicht" oder „klein"
     (`ai_context_window.ermitteln`). Bleibt es dabei, weil der fremde Katalog
     das Modell nicht führt oder gerade nicht erreichbar ist, sendet MSM zum
     Nachdenken **gar nichts** und das Modell arbeitet in OpenAIs Voreinstellung.
+
+    Hier stand bis zum 22.09.2026 ``denkt=False``, weil das Feld nur zwei Werte
+    kannte. Der Sendepfad hat das richtig gelesen, die Einstellungsseite nicht:
+    sie zeigte „Dieses Modell denkt nicht nach" für jedes Modell, das der
+    geliehene Katalog (noch) nicht führte — am Erscheinungstag von GPT-6 Luna
+    also genau für GPT-6 Luna.
+
+    ``shutdown_date`` ist das eine Feld, das OpenAI über ein Modell selbst
+    verrät, und es wird übernommen: der Hersteller weiß am besten, wann er
+    abschaltet (``whisper-1`` am 26.02.2027).
 
     Nachgetragen wird nur, was OpenAI selbst nicht sagt. Nichts hiervon
     überschreibt eine Angabe aus dieser Funktion — der eigene Katalog eines
@@ -155,4 +173,9 @@ def katalog_lesen(rohdaten: dict) -> Modell | None:
     model_id = rohdaten.get("id")
     if not isinstance(model_id, str) or not model_id.strip():
         return None
-    return Modell(model_id=model_id, name=model_id, denkt=False)
+    return Modell(
+        model_id=model_id,
+        name=model_id,
+        denkt=None,
+        abschaltung=iso_datum(rohdaten.get("shutdown_date")),
+    )
