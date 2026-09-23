@@ -6127,6 +6127,7 @@
       "heading": "Invitation to a group",
       "memberCount_one": "{{count}} member",
       "memberCount_other": "{{count}} members",
+      "sealed": "Encrypted invitation",
       "join": "Join"
     },
     "videoNote": {

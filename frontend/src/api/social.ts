@@ -321,9 +321,18 @@ export interface ChatGroupItem {
 
 export interface ChatGroupInvitePublic {
   group_id: number
-  name: string
+  /**
+   * Klartext — und nur, solange die Gruppe keine verschlüsselte Karte hat.
+   *
+   * Sobald sie eine hat, liefert der Server hier `null`, und die Vorschau kommt
+   * aus `invite_card` plus dem Schlüssel hinter der Raute im Link. Beides
+   * nebeneinander wäre Verschlüsselung als Zierde.
+   */
+  name?: string | null
   description?: string | null
   avatar_url?: string | null
+  /** `sv-einladung-v1:…` — Name, Beschreibung und Logo, verschlüsselt. */
+  invite_card?: string | null
   member_count: number
   /** Läuft gerade ein Gruppenanruf? Für die Vorschaukarte im Chat. */
   live_call: boolean
@@ -594,6 +603,23 @@ export async function createGroup(payload: {
 
 export async function getGroupInviteInfo(inviteCode: string): Promise<ChatGroupInvitePublic> {
   return api<ChatGroupInvitePublic>(`/social/groups/invite/${inviteCode}`)
+}
+
+/**
+ * Hinterlegt die verschlüsselte Einladungskarte einer Gruppe.
+ *
+ * `null` nimmt sie zurück. Gerufen wird das beim Bauen eines Links — die Karte
+ * entsteht genau dann, wenn jemand einen teilt, und trägt denselben Stand wie
+ * er.
+ */
+export async function setzeEinladungsKarte(
+  groupId: number,
+  karte: string | null,
+): Promise<void> {
+  await api(`/social/groups/${groupId}/invite-card`, {
+    method: 'PUT',
+    body: JSON.stringify({ invite_card: karte }),
+  })
 }
 
 export async function joinGroupByInvite(inviteCode: string): Promise<ChatGroupItem> {

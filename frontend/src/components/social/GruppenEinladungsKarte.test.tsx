@@ -14,7 +14,12 @@ vi.mock('@/api/social', () => ({
 }))
 vi.mock('@/config/api', () => ({ apiUrl: (pfad: string) => `https://panel.test${pfad}` }))
 
-const { GruppenEinladungsKarte, findeEinladungsCode } = await import('./GruppenEinladungsKarte')
+const { GruppenEinladungsKarte, findeEinladung, findeEinladungsCode } = await import(
+  './GruppenEinladungsKarte'
+)
+const { baueEinladungsKarte, einladungsschluesselAus } = await import(
+  '@/services/einladungsKarte'
+)
 
 const ORIGIN = 'https://panel.test'
 
@@ -52,6 +57,30 @@ describe('findeEinladungsCode', () => {
 
   it('greift nicht bei zu kurzen Codes', () => {
     expect(findeEinladungsCode(`${ORIGIN}/chat/join/kurz`, ORIGIN)).toBeNull()
+  })
+
+  it('nimmt den Schluessel hinter der Raute mit', () => {
+    // Er steht im Nachrichtentext, nicht in location.hash: die Karte wird aus
+    // einer Chatnachricht gezeichnet, und dort steht der ganze Link.
+    const k = 'a'.repeat(64)
+    const text = `Komm rein: ${ORIGIN}/chat/join/AbCd1234efGH#k=${k}`
+    expect(findeEinladung(text, ORIGIN)).toEqual({ code: 'AbCd1234efGH', schluessel: k })
+  })
+
+  it('kommt ohne Schluessel aus', () => {
+    expect(findeEinladung(`${ORIGIN}/chat/join/AbCd1234efGH`, ORIGIN)).toEqual({
+      code: 'AbCd1234efGH',
+      schluessel: null,
+    })
+  })
+
+  it('ignoriert einen krummen Schluessel, behaelt aber den Code', () => {
+    // Sonst fiele die ganze Einladung weg, weil jemand den Link beim Kopieren
+    // abgeschnitten hat.
+    expect(findeEinladung(`${ORIGIN}/chat/join/AbCd1234efGH#k=zukurz`, ORIGIN)).toEqual({
+      code: 'AbCd1234efGH',
+      schluessel: null,
+    })
   })
 })
 
@@ -116,5 +145,99 @@ describe('GruppenEinladungsKarte', () => {
 
     await screen.findByText('Serverteam')
     expect(document.querySelector('img')).toBeNull()
+  })
+})
+
+describe('GruppenEinladungsKarte, verschlüsselt', () => {
+  const GEHEIMNIS = 'A'.repeat(43) + '='
+  const CODE = 'AbCd1234efGH'
+  const LOGO = 'data:image/webp;base64,UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA=='
+
+  /** Der Server, wie er antwortet, sobald eine Gruppe eine Karte hat. */
+  async function mitKarte(inhalt: Record<string, unknown> = {}) {
+    return {
+      ...INFO,
+      // Klartext ist dann weg — beides nebeneinander wäre Verschlüsselung als
+      // Zierde.
+      name: null,
+      description: null,
+      avatar_url: null,
+      invite_card: await baueEinladungsKarte(GEHEIMNIS, CODE, {
+        name: 'Serverteam',
+        beschreibung: 'Wir bauen Dinge',
+        ...inhalt,
+      }),
+    }
+  }
+
+  it('zeigt Name und Logo aus der entschlüsselten Karte', async () => {
+    getGroupInviteInfo.mockResolvedValue(await mitKarte({ logo: LOGO }))
+    const schluessel = await einladungsschluesselAus(GEHEIMNIS)
+
+    render(
+      <GruppenEinladungsKarte inviteCode={CODE} schluessel={schluessel} onJoin={vi.fn()} />,
+    )
+
+    expect(await screen.findByText('Serverteam')).toBeInTheDocument()
+    // Als Data-URL, nicht als Adresse: eine Adresse müsste der Server
+    // ausliefern und wüsste dabei, wer die Einladung gerade ansieht.
+    await waitFor(() => expect(document.querySelector('img')).toHaveAttribute('src', LOGO))
+  })
+
+  it('bleibt ohne Schlüssel zu und sagt das', async () => {
+    /*
+     * Der Link wurde ohne die Raute weitergereicht — oder jemand ruft den
+     * Endpunkt direkt auf. Beitreten geht trotzdem: der Code allein reicht
+     * dafür, und das ist seit jeher so. Nur die Vorschau fehlt.
+     */
+    getGroupInviteInfo.mockResolvedValue(await mitKarte())
+
+    render(<GruppenEinladungsKarte inviteCode={CODE} onJoin={vi.fn()} />)
+
+    expect(await screen.findByText(i18n.t('social.invite.sealed'))).toBeInTheDocument()
+    expect(screen.queryByText('Serverteam')).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: i18n.t('social.invite.join') }),
+    ).toBeInTheDocument()
+  })
+
+  it('bleibt mit dem falschen Schlüssel zu', async () => {
+    getGroupInviteInfo.mockResolvedValue(await mitKarte())
+    const fremd = await einladungsschluesselAus('B'.repeat(43) + '=')
+
+    render(<GruppenEinladungsKarte inviteCode={CODE} schluessel={fremd} onJoin={vi.fn()} />)
+
+    expect(await screen.findByText(i18n.t('social.invite.sealed'))).toBeInTheDocument()
+  })
+
+  it('zieht die Karte dem Klartext vor', async () => {
+    /*
+     * Der Vorrang ist nicht beliebig. Läge der Klartext vorn, zeigte die Karte
+     * bis Stufe 6 weiter den Serverstand — und niemandem fiele auf, dass die
+     * Verschlüsselung nichts bewirkt.
+     */
+    getGroupInviteInfo.mockResolvedValue({
+      ...(await mitKarte()),
+      name: 'Name vom Server',
+      avatar_url: '/api/social/groups/avatar/group_7_abc.png',
+    })
+    const schluessel = await einladungsschluesselAus(GEHEIMNIS)
+
+    render(
+      <GruppenEinladungsKarte inviteCode={CODE} schluessel={schluessel} onJoin={vi.fn()} />,
+    )
+
+    expect(await screen.findByText('Serverteam')).toBeInTheDocument()
+    expect(screen.queryByText('Name vom Server')).not.toBeInTheDocument()
+  })
+
+  it('nimmt weiter den Klartext, solange es keine Karte gibt', async () => {
+    // Der Altweg. Er hält Gruppen am Leben, die noch nie einen Link geteilt
+    // haben — und stirbt in Stufe 6 mit den Spalten, aus denen er kommt.
+    getGroupInviteInfo.mockResolvedValue({ ...INFO, invite_card: null })
+
+    render(<GruppenEinladungsKarte inviteCode={CODE} schluessel={null} onJoin={vi.fn()} />)
+
+    expect(await screen.findByText('Serverteam')).toBeInTheDocument()
   })
 })

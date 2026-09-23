@@ -28,6 +28,17 @@ class ChatGroup(Base):
     invite_code: Mapped[str] = mapped_column(
         String(32), unique=True, index=True, nullable=False, default=generate_invite_code
     )
+    #: Die Einladungskarte, verschlüsselt (`sv-einladung-v1:…`).
+    #:
+    #: Name, Beschreibung und Logo, wie ein Eingeladener sie sieht — und zwar
+    #: so, dass dieser Server sie nicht lesen kann. Der Schlüssel fällt aus dem
+    #: Gruppengeheimnis und steht **hinter der Raute** im Einladungslink; alles
+    #: hinter der Raute schickt der Browser nie an einen Server.
+    #:
+    #: Ohne diese Spalte hinge die Vorschau an `name` und `avatar_url` — genau
+    #: den Feldern, die in Stufe 6 verschwinden. Sie ist der Grund, warum die
+    #: Einladung das überlebt.
+    invite_card: Mapped[str | None] = mapped_column(Text, nullable=True)
     owner_user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )

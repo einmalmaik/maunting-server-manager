@@ -42,6 +42,7 @@ from schemas.social import (
     ChatGroupPermissionsUpdate,
     ChatGroupConfigWrite,
     ChatGroupConfigResponse,
+    ChatGroupInviteCardUpdate,
     ChatGroupInvitePublicResponse,
     ChatStoryCreate,
     ChatStoryResponse,
@@ -848,19 +849,71 @@ def get_group_invite_info(
     Wer den Code hat, soll beitreten können und darf deshalb sehen, ob sich das
     gerade lohnt. Mehr geht bewusst nicht hinaus: keine Namen, keine Kennungen,
     keine Nachrichten.
+
+    **Entweder verschlüsselt oder im Klartext, nie beides.** Hat die Gruppe
+    eine `invite_card`, geht nur die hinaus; Name, Beschreibung und Logo
+    bleiben `None`. Beides nebeneinander auszuliefern wäre Verschlüsselung als
+    Zierde — wer den Klartext danebenlegt, hat nichts verschlossen.
+
+    Der Klartextzweig ist Altbestand. Er stirbt in Stufe 6 mit den Spalten, aus
+    denen er kommt; bis dahin hält er Gruppen am Leben, die noch nie einen Link
+    geteilt haben und darum noch keine Karte besitzen.
     """
     group = SocialService.get_group_by_invite_code(db, invite_code)
     member_count = len(group.members) if group.members else 1
     raum = _offener_gruppenraum(group.id)
+    karte = (group.invite_card or "").strip() or None
     return {
         "group_id": group.id,
-        "name": group.name,
-        "description": group.description,
-        "avatar_url": group.avatar_url,
+        "name": None if karte else group.name,
+        "description": None if karte else group.description,
+        "avatar_url": None if karte else group.avatar_url,
+        "invite_card": karte,
         "member_count": member_count,
         "live_call": raum is not None,
         "live_participants": livekit_service.raum_teilnehmer(raum, db) if raum else 0,
     }
+
+
+@router.put(
+    "/groups/{group_id}/invite-card",
+    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)],
+)
+def set_group_invite_card(
+    group_id: int,
+    req: ChatGroupInviteCardUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Hinterlegt die verschlüsselte Einladungskarte.
+
+    **Wer den Link teilen darf, darf die Karte setzen** — dasselbe Recht
+    (`invite_members`), weil es dieselbe Handlung ist: die Karte entsteht genau
+    dann, wenn jemand einen Link baut. Ein eigenes Recht daneben wäre eine
+    zweite Fassung derselben Frage, und die zweite Fassung ist irgendwann die
+    nachsichtigere.
+
+    Nicht auf Besitzer und Administratoren eingeschränkt: ein Mitglied mit
+    Einladungsrecht, dessen Karte abgewiesen wird, teilt trotzdem einen Link —
+    nur einen ohne Vorschau. Die Schranke schützte dann nichts und kostete eine
+    kaputte Karte.
+
+    Der Server prüft die Form, nie den Inhalt. Er kann ihn nicht lesen; das ist
+    der Zweck.
+    """
+    if not SocialService.get_group_member(db, group_id, user.id):
+        raise HTTPException(status_code=404, detail="Gruppe nicht gefunden.")
+    if not SocialService.darf_einladen(db, group_id, user.id):
+        raise HTTPException(
+            status_code=403, detail="Kein Recht, Einladungen für diese Gruppe zu erstellen."
+        )
+    group = db.query(ChatGroup).filter(ChatGroup.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Gruppe nicht gefunden.")
+
+    group.invite_card = req.invite_card
+    db.commit()
+    return {"ok": True}
 
 
 def _offener_gruppenraum(group_id: int) -> str | None:

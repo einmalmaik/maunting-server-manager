@@ -105,6 +105,7 @@ import {
   sendTypingSignal,
   ladeAnhangHoch,
   uploadGroupAvatar,
+  setzeEinladungsKarte,
 } from '@/api/social'
 import { maxAnhangBytes } from '@/services/medienKrypto'
 import {
@@ -146,7 +147,13 @@ import {
 import { logischeUuid, DrZustellungFehlgeschlagenError } from '@/services/ratchetSitzung'
 import { geraeteVon, kontoNutztSignaturen, onNeuesGeraet } from '@/services/e2eeGeraet'
 import { pruefeNutzlast, signiereNutzlast } from '@/services/nutzlastSignatur'
-import { verwirfGruppenSchluessel } from '@/services/gruppenSchluessel'
+import { gruppenGeheimnis, verwirfGruppenSchluessel } from '@/services/gruppenSchluessel'
+import {
+  baueEinladungsKarte,
+  einladungsschluesselAus,
+  gruppenLogoAlsDatenUrl,
+  mitSchluessel,
+} from '@/services/einladungsKarte'
 import { ladeGruppenzustand, type Gruppenzustand } from '@/services/gruppenKonfig'
 import { wirksameGruppenrechte } from '@/services/gruppenRollen'
 import {
@@ -4509,13 +4516,43 @@ export function Messenger() {
    * Der Knopf erscheint dann gar nicht erst; diese Zeile fängt den Fall ab,
    * dass eine Liste noch aus einem älteren Abruf stammt.
    */
-  const handleCopyInviteLink = (group: ChatGroupItem) => {
+  const handleCopyInviteLink = async (group: ChatGroupItem) => {
     if (!group.invite_code) {
       toast.error(t('messenger.inviteNoRight'))
       return
     }
     const url = `${window.location.origin}/chat/join/${group.invite_code}`
-    navigator.clipboard.writeText(url)
+
+    /*
+     * Die Vorschaukarte entsteht hier — beim Teilen, nicht beim Anlegen.
+     *
+     * Zwei Gründe. Erstens trägt sie dann genau den Stand, den der Absender
+     * gerade sieht; eine beim Anlegen erzeugte Karte zeigte den Namen von
+     * vorgestern. Zweitens hat die Gruppe beim Anlegen oft noch gar kein
+     * Geheimnis: das entsteht, wenn der Eigentümer zum ersten Mal sendet.
+     *
+     * Ohne Geheimnis bleibt der Link, was er war — ohne Raute, mit
+     * Klartextvorschau aus der Datenbank. Das ist der Altweg, und er stirbt
+     * mit den Spalten in Stufe 6.
+     */
+    let fertig = url
+    try {
+      const geheimnis = await gruppenGeheimnis(group.id)
+      if (geheimnis) {
+        const karte = await baueEinladungsKarte(geheimnis, group.invite_code, {
+          name: group.name,
+          beschreibung: group.description ?? null,
+          logo: await gruppenLogoAlsDatenUrl(group.avatar_url),
+        })
+        await setzeEinladungsKarte(group.id, karte)
+        fertig = mitSchluessel(url, await einladungsschluesselAus(geheimnis))
+      }
+    } catch {
+      // Eine Karte, die nicht zustande kommt, darf das Einladen nicht
+      // aufhalten. Der Link ohne Raute funktioniert; nur die Vorschau fehlt.
+    }
+
+    navigator.clipboard.writeText(fertig)
     toast.success(t('messenger.inviteCopied'))
   }
 

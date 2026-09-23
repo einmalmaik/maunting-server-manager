@@ -672,14 +672,55 @@ class ChatGroupResponse(BaseModel):
 
 class ChatGroupInvitePublicResponse(BaseModel):
     group_id: int
-    name: str
+    #: Klartext — und nur noch, solange die Gruppe **keine** verschluesselte
+    #: Karte hat. Sobald sie eine hat, stehen hier `None` und der Eingeladene
+    #: braucht den Schluessel aus dem Link. Beides gleichzeitig auszuliefern
+    #: waere die Verschluesselung als Zierde: wer den Klartext daneben legt,
+    #: hat nichts verschlossen.
+    name: str | None = None
     description: str | None = None
     avatar_url: str | None = None
+    #: `sv-einladung-v1:…` — Name, Beschreibung und Logo, verschluesselt.
+    invite_card: str | None = None
     member_count: int
     # Fuer die Vorschaukarte im Chat: laeuft gerade ein Gruppenanruf, und wie
     # viele sind drin. Bewusst nur Ja/Nein und eine Zahl.
     live_call: bool = False
     live_participants: int = 0
+
+
+class ChatGroupInviteCardUpdate(BaseModel):
+    """Die verschluesselte Einladungskarte, wie ein Mitglied sie hinterlegt.
+
+    `None` nimmt sie zurueck — dann faellt die Vorschau wieder auf die
+    Klartextfelder, solange es die noch gibt.
+    """
+
+    invite_card: str | None = Field(None, max_length=262144)
+
+    @field_validator("invite_card")
+    @classmethod
+    def _pruefe_form(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        sauber = v.strip()
+        if not sauber:
+            return None
+        # Der Server kann nicht hineinsehen. Er kann aber darauf bestehen, dass
+        # es ein Umschlag ist und kein Klartext, der hier aus Versehen landet —
+        # einmal abgelegt, liefert er ihn ohne Anmeldung an jeden mit dem Code.
+        if not sauber.startswith("sv-einladung-v1:"):
+            raise ValueError("Einladungskarte muss ein sv-einladung-v1-Umschlag sein.")
+        rumpf = sauber[len("sv-einladung-v1:") :]
+        if len(rumpf) < 38:
+            raise ValueError("Einladungskarte zu kurz für gültigen IV und AEAD-Tag.")
+        import base64
+
+        try:
+            base64.b64decode(rumpf, validate=True)
+        except Exception as exc:
+            raise ValueError("Ungültige Base64-Kodierung in der Einladungskarte.") from exc
+        return sauber
 
 
 class GroupCallRoomResponse(BaseModel):

@@ -1092,6 +1092,28 @@ async function geheimnisFuer(
   return { geheimnis: abgelegt, frischErzeugt: true }
 }
 
+/**
+ * Das Gruppengeheimnis, falls dieses Gerät es kennt.
+ *
+ * Die eine Stelle, an der es nach aussen geht — und bewusst nur lesend. Wer
+ * es braucht, braucht etwas **daraus**: die Mailbox-Kennung, den
+ * Besitznachweis, den Einladungsschlüssel. Jeder dieser Werte ist ein
+ * einseitiger Hash, keiner führt zurück.
+ *
+ * `null` heisst: diese Gruppe hat noch keines, oder dieses Gerät hat es noch
+ * nicht bekommen. Beides ist Alltag und kein Fehler — das Geheimnis entsteht,
+ * wenn der Eigentümer zum ersten Mal sendet.
+ */
+export async function gruppenGeheimnis(groupId: number): Promise<string | null> {
+  try {
+    return (await ablage.liesGeheimnis(groupId))?.geheimnis ?? null
+  } catch {
+    // Verschlossene oder fehlende Ablage. Wie bei `gruppenZiele`: die Antwort
+    // ist „weiss ich nicht", nie ein geworfener Fehler beim Aufrufer.
+    return null
+  }
+}
+
 // ==========================================
 // Schlüssel
 // ==========================================
