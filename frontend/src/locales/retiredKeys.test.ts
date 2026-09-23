@@ -111,6 +111,11 @@ const ABGELOESTE_SCHLUESSEL = [
   'ai.providers.realtime.reasoningHint',
   'ai.providers.realtime.googleReasoningHint',
   'ai.providers.realtime.reasoningValues',
+  // 09/2026: Der Link zur Szene fiel mit dem neuen Copernicus-Katalog. Seine
+  // Adresse lädt bei CREODIAS nur die kleine Vorschau als Datei herunter, die
+  // der Reiter schon zeigt — Vollauflösung war das nie. Eine echte
+  // Vollansicht bräuchte einen eigenen Weg, etwa den Copernicus Browser.
+  'ai.geo.openFullScene',
 ]
 
 /** Die Nachfolger muss es geben — sonst wäre das Löschen ein Verlust. */

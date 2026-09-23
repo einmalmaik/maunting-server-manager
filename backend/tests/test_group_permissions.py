@@ -11,8 +11,11 @@ from __future__ import annotations
 
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from dependencies import get_current_user
+from main import app
 from models import User
 from services.social_service import (
     GROUP_PERMISSION_ALIASES,
@@ -275,7 +278,14 @@ def test_marke_je_mitglied_stimmt_mit_der_pruefung_ueberein(
     Sie kommen aus derselben ``effective_permissions``; dieser Test haelt fest,
     dass das so bleibt.
     """
-    for rechte in (None, "", "mention_everyone", "pin_messages", "send_messages"):
+    for rechte in (
+        None,
+        "",
+        "mention_everyone",
+        "pin_messages",
+        "set_disappearing_messages",
+        "send_messages",
+    ):
         gruppe = _gruppe(db, owner_user, regular_user, rechte)
         eintrag = next(
             g
@@ -286,6 +296,7 @@ def test_marke_je_mitglied_stimmt_mit_der_pruefung_ueberein(
             for recht, marke in (
                 ("mention_everyone", "can_mention_everyone"),
                 ("pin_messages", "can_pin_messages"),
+                ("set_disappearing_messages", "can_set_disappearing_messages"),
             ):
                 assert mitglied[marke] is SocialService.has_group_permission(
                     db, gruppe.id, mitglied["user_id"], recht
@@ -306,6 +317,154 @@ def test_gruppenmarke_beschreibt_mich_selbst(
     assert meins["can_mention_everyone"] is False
     besitzer = next(m for m in meins["members"] if m["user_id"] == owner_user.id)
     assert besitzer["can_mention_everyone"] is True
+
+
+# ── Verschwindende Nachrichten einstellen ───────────────────────────────────
+#
+# Dieselbe Bauart wie Wecken und Anheften: die Umstellung reist verschluesselt
+# durch die Gruppenmailbox, der Server liest sie nie und kann sie deshalb nicht
+# abweisen. Bis 09/2026 gab es dafuer gar kein Recht — jedes Mitglied stellte
+# die Frist fuer alle, und das empfangende Geraet glaubte obendrein dem Namen,
+# den das Paket selbst nannte. Seitdem prueft der Empfaenger zuerst den belegten
+# Urheber und dann dessen Marke ``can_set_disappearing_messages`` aus dieser
+# Antwort. Im Direktchat gibt es keine Rollen; dort duerfen weiterhin beide.
+
+
+def _standardrechte(db: Session, gruppe, besitzer: User, rechte: str) -> None:
+    SocialService.update_group_default_permissions(
+        db, group_id=gruppe.id, default_permissions=rechte, caller=besitzer
+    )
+
+
+def test_verfallsrecht_steht_im_vokabular() -> None:
+    assert "set_disappearing_messages" in GROUP_PERMISSIONS
+    # Ohne 422 und kanonisch zurueck: ein Dialog, der das Recht vergibt, darf
+    # nicht an der Namenspruefung scheitern.
+    assert (
+        SocialService.assert_known_permissions("set_disappearing_messages,send_messages")
+        == "send_messages,set_disappearing_messages"
+    )
+
+
+def test_mitglied_mit_standardrechten_stellt_keine_frist(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Der sichere Ausgangszustand, wie beim Wecken: bestehende Gruppen bekommen
+    # nichts dazu. Ein gewoehnliches Mitglied, das bis 09/2026 umstellen
+    # konnte, weil es gar kein Recht gab, braucht jetzt eines.
+    gruppe = _gruppe(db, owner_user, regular_user, None)
+    _standardrechte(db, gruppe, owner_user, "send_messages,attach_media,invite_members")
+
+    assert not SocialService.has_group_permission(
+        db, gruppe.id, regular_user.id, "set_disappearing_messages"
+    )
+    meins = next(
+        g for g in SocialService.list_user_groups(db, regular_user.id) if g["id"] == gruppe.id
+    )
+    assert meins["can_set_disappearing_messages"] is False
+    ich = next(m for m in meins["members"] if m["user_id"] == regular_user.id)
+    assert ich["can_set_disappearing_messages"] is False
+
+
+def test_eigentuemer_und_admin_stellen_die_frist_ohne_eintrag(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Dieselbe Begruendung wie beim Anheften: sie koennten es sich mit zwei
+    # Klicks selbst geben. Ein Eigentuemer, der die Frist seiner eigenen Gruppe
+    # nicht stellen darf, waere kein Schutz, sondern ein Raetsel.
+    gruppe = _gruppe(db, owner_user, regular_user, "")
+    eigene = SocialService.get_group_member(db, gruppe.id, owner_user.id)
+    eigene.permissions = ""
+    db.commit()
+    assert SocialService.has_group_permission(
+        db, gruppe.id, owner_user.id, "set_disappearing_messages"
+    )
+
+    SocialService.update_member_role_permissions(
+        db,
+        group_id=gruppe.id,
+        target_user_id=regular_user.id,
+        role="admin",
+        permissions="",
+        caller=owner_user,
+    )
+    assert SocialService.has_group_permission(
+        db, gruppe.id, regular_user.id, "set_disappearing_messages"
+    )
+
+
+def test_eine_rolle_gibt_das_recht_zur_frist(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    gruppe = _gruppe(db, owner_user, regular_user, None)
+    SocialService.update_member_role_permissions(
+        db,
+        group_id=gruppe.id,
+        target_user_id=regular_user.id,
+        role="moderator",
+        permissions="send_messages,set_disappearing_messages",
+        caller=owner_user,
+    )
+    assert SocialService.has_group_permission(
+        db, gruppe.id, regular_user.id, "set_disappearing_messages"
+    )
+
+
+def test_frist_darf_standardrecht_fuer_alle_sein(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Eine kleine Gruppe unter Freunden, in der jeder umstellen darf. Anders als
+    # ``manage_roles`` gibt dieses Recht keine weiteren Rechte frei und haengt
+    # deshalb nicht nur an einer Rolle.
+    gruppe = _gruppe(db, owner_user, regular_user, None)
+    _standardrechte(db, gruppe, owner_user, "send_messages,set_disappearing_messages")
+    assert SocialService.has_group_permission(
+        db, gruppe.id, regular_user.id, "set_disappearing_messages"
+    )
+
+
+def test_gruppenliste_meldet_die_verfallsmarke(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    # Zwei Marken, zwei Fragen: die an der Gruppe sagt „darf ich den Eintrag
+    # bedienen", die am Mitglied „gilt die Umstellung dieses Absenders".
+    gruppe = _gruppe(db, owner_user, regular_user, "send_messages")
+
+    meins = next(
+        g for g in SocialService.list_user_groups(db, regular_user.id) if g["id"] == gruppe.id
+    )
+    assert meins["can_set_disappearing_messages"] is False
+    marken = {m["user_id"]: m["can_set_disappearing_messages"] for m in meins["members"]}
+    assert marken == {owner_user.id: True, regular_user.id: False}
+
+    seins = next(
+        g for g in SocialService.list_user_groups(db, owner_user.id) if g["id"] == gruppe.id
+    )
+    assert seins["can_set_disappearing_messages"] is True
+
+
+def test_die_verfallsmarke_uebersteht_das_antwortschema(
+    client: TestClient, db: Session, owner_user: User, regular_user: User
+) -> None:
+    """``response_model`` wirft weg, was das Schema nicht kennt.
+
+    Fehlte das Feld in ``ChatGroupResponse`` oder ``ChatGroupMemberResponse``,
+    waeren alle Tests darueber gruen und die Oberflaeche bekaeme die Marke
+    trotzdem nie. Eine fehlende Marke heisst dort nein — in keiner Gruppe
+    koennte dann noch jemand die Frist stellen, und niemand saehe, warum.
+    """
+    gruppe = _gruppe(db, owner_user, regular_user, "send_messages")
+    app.dependency_overrides[get_current_user] = lambda: owner_user
+    try:
+        antwort = client.get("/api/social/groups")
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+    assert antwort.status_code == 200
+    eintrag = next(g for g in antwort.json() if g["id"] == gruppe.id)
+    assert eintrag["can_set_disappearing_messages"] is True
+    marken = {m["user_id"]: m["can_set_disappearing_messages"] for m in eintrag["members"]}
+    assert marken == {owner_user.id: True, regular_user.id: False}
 
 
 # ── Nur-Rollen-Rechte gehoeren nicht an @everyone ───────────────────────────

@@ -140,7 +140,7 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.3 vom 2026-09-23 aus (Unterschrift am Sitzungsaufbau, Rueckfrage vor der Uebergabe)', () => {
+  it('weist die Fassung 3.3 vom 2026-09-23 aus (Unterschrift am Sitzungsaufbau, Rueckfrage vor der Uebergabe, Recht fuer die Verfallsfrist in Gruppen)', () => {
     const { container } = renderPrivacy();
 
     expect(

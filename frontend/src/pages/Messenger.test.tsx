@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react'
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import i18n from '@/i18n'
 import { MemoryRouter } from 'react-router-dom'
 import { Messenger, clearSessionChatCache } from './Messenger'
@@ -8,6 +8,11 @@ import { leereMailboxAbos, offeneMailboxAbos } from '@/services/mailboxAbo'
 import { leereGespraeche, merkeGespraech } from '@/services/gespraechsListe'
 import { teamsApi } from '@/api/teams'
 import { useAuthStore } from '@/stores/authStore'
+import { erzeugeSignaturPaar, type SignaturPaar } from '@/services/absenderSignatur'
+import { signiereNutzlast } from '@/services/nutzlastSignatur'
+import { eigenesGeraet, signaturSchluesselVon } from '@/services/e2eeGeraet'
+import { decryptE2eeHybridWithKeyring } from '@/services/e2eeCrypto'
+import { verfallStand } from '@/services/nachrichtVerfall'
 
 /**
  * Seit 09/2026 stehen die Aktionen eines Chats im Blattmenue, nicht mehr als
@@ -2592,6 +2597,375 @@ describe('Messenger (Allround Chat)', () => {
     await hybridOhneBeleg([])
     await waitFor(() => {
       expect(screen.getByText('Vom Server erfunden')).toBeInTheDocument()
+    })
+  })
+
+  /**
+   * Wer die Verfallsfrist stellen darf — und wer sie gestellt hat.
+   *
+   * Bis 09/2026 las der `retention`-Zweig seinen Urheber ungeprüft aus
+   * `actor_id`, als einziges Steuerpaket neben Reaktion und Anheften, die
+   * längst über `urheberVon` liefen. Jedes Mitglied hält den Gruppenschlüssel
+   * und unterschreibt seine eigene Nutzlast; es konnte also bei allen die
+   * Zeile „<Eigentümer> hat eingestellt …" erzeugen. Ein Recht gab es auch
+   * nicht: jedes Mitglied stellte die Frist für die ganze Gruppe.
+   *
+   * Unterschrieben wird hier mit echtem ECDSA. Nachgebildet ist nur das
+   * Geräteverzeichnis — eine Serverauskunft, keine Kryptographie.
+   */
+  describe('Verfallsfrist: wer sie stellen darf', () => {
+    const GRUPPE = 'test-group-blind-mailbox'
+    const DIREKT = 'test-blind-mailbox'
+    const ICH = 1
+    const ALICE = 101
+    const BERT = 102
+    const OLGA = 103
+
+    /** `konto:gerät` → öffentlicher Signaturschlüssel, wie der Server ihn herausgibt. */
+    const verzeichnis = new Map<string, string>()
+    const paare = new Map<number, SignaturPaar>()
+    let warnung: ReturnType<typeof vi.spyOn>
+
+    beforeEach(() => {
+      verzeichnis.clear()
+      paare.clear()
+      vi.mocked(signaturSchluesselVon).mockImplementation(
+        async (konto: number, geraet: string) => verzeichnis.get(`${konto}:${geraet}`) ?? null,
+      )
+      // Alle Beteiligten führen einen Signaturschlüssel. Eine unsignierte
+      // Nutzlast in ihrem Namen ist damit keine Nachsicht wert.
+      kontenMitSignatur = [ICH, ALICE, BERT, OLGA]
+      // Die Fälschungstests oben lassen ihre Stellvertreter stehen.
+      vi.mocked(decryptE2eeHybridWithKeyring).mockImplementation(async () => 'Hallo Hybrid')
+      testKlartext.mockImplementation(async () => 'Hallo Welt')
+      warnung = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    })
+
+    afterEach(() => {
+      vi.mocked(signaturSchluesselVon).mockImplementation(async () => null)
+      warnung.mockRestore()
+    })
+
+    /** Eine Nutzlast, unterschrieben vom Gerät dieses Kontos. */
+    async function unterschrieben(
+      konto: number,
+      mailbox: string,
+      roh: Record<string, unknown>,
+    ): Promise<string> {
+      let paar = paare.get(konto)
+      if (!paar) {
+        paar = await erzeugeSignaturPaar()
+        paare.set(konto, paar)
+        verzeichnis.set(`${konto}:geraet-${konto}`, paar.publicKeyJwk)
+      }
+      vi.mocked(eigenesGeraet).mockResolvedValueOnce({
+        kennung: `geraet-${konto}`,
+        paar: identitaet.sendPair,
+        signaturPaar: paar,
+      } as any)
+      return JSON.stringify(await signiereNutzlast(mailbox, konto, roh))
+    }
+
+    const frist = (konto: number, dauer: number, actor: number, zeitpunkt: string) =>
+      unterschrieben(konto, GRUPPE, {
+        type: 'retention',
+        dauer,
+        actor_id: actor,
+        zeitpunkt,
+        client_uuid: `ctrl-frist-${konto}-${zeitpunkt}`,
+      })
+
+    /** Eine gewöhnliche Nachricht danach: ist sie da, ist der Durchlauf durch. */
+    const danach = (text: string) =>
+      unterschrieben(OLGA, GRUPPE, {
+        sender_id: OLGA,
+        text,
+        client_uuid: `nachricht-${text}`,
+        timestamp: '2026-09-23T10:09:00Z',
+      })
+
+    function mitglied(userId: number, username: string, role: string, darf: boolean) {
+      return {
+        user_id: userId,
+        username,
+        role,
+        permissions: null,
+        can_set_disappearing_messages: darf,
+        joined_at: '2026-09-01T00:00:00Z',
+      }
+    }
+
+    /** Olga ist Eigentümerin, ich bin gewöhnliches Mitglied. */
+    function verfallsgruppe({ aliceDarf, ichDarf = false }: { aliceDarf: boolean; ichDarf?: boolean }) {
+      return {
+        id: 77,
+        name: 'Verfallsgruppe',
+        description: null,
+        avatar_url: null,
+        invite_code: null,
+        owner_user_id: OLGA,
+        member_count: 4,
+        role: 'member',
+        default_permissions: 'attach_media,invite_members,send_messages',
+        can_set_disappearing_messages: ichDarf,
+        created_at: '2026-09-07T00:00:00Z',
+        members: [
+          mitglied(ICH, 'me', 'member', ichDarf),
+          mitglied(ALICE, 'alice', 'member', aliceDarf),
+          mitglied(BERT, 'bert', 'member', false),
+          mitglied(OLGA, 'olga', 'owner', true),
+        ],
+      } as any
+    }
+
+    /**
+     * Die Gruppenmailbox mit genau diesen Nutzlasten, in dieser Reihenfolge.
+     *
+     * Der Gruppenschlüssel ist hier nicht Gegenstand, geprüft wird, was nach
+     * dem Öffnen geschieht. Jeder Umschlag steht deshalb schon im
+     * Klartext-Zwischenspeicher, wie nach einem früheren Abruf; `useKonversation`
+     * nimmt ihn von dort, und zwar ohne `vonKonto`. In der Gruppe belegt also
+     * allein die Unterschrift an der Nutzlast, wer geschrieben hat.
+     */
+    function gruppenpost(nutzlasten: string[]) {
+      const umschlaege = nutzlasten.map((plain, i) => {
+        const id = 900 + i
+        mockEnvelopeCache.set(id, { plain, ok: true })
+        return {
+          id,
+          blind_mailbox_id: GRUPPE,
+          ciphertext_envelope: `gruppenumschlag-${id}`,
+          client_uuid: `umschlag-${id}`,
+          created_at: `2026-09-23T10:0${i}:00Z`,
+        }
+      })
+      vi.mocked(socialApi.fetchE2eeEnvelopes).mockImplementation(async (kennung: string) =>
+        kennung === GRUPPE ? (umschlaege as any) : [],
+      )
+    }
+
+    const oeffneGruppe = () =>
+      render(
+        <MemoryRouter initialEntries={['/chat?groupId=77']}>
+          <Messenger />
+        </MemoryRouter>
+      )
+
+    const gestellt = (name: string, stufe: 'h24' | 'd7') =>
+      i18n.t('messenger.retentionSetOther', {
+        name,
+        frist: i18n.t(`messenger.retentionDative.${stufe}`),
+      })
+
+    const vonMirGestellt = (stufe: 'h24' | 'd7') =>
+      i18n.t('messenger.retentionSetSelf', {
+        name: i18n.t('messenger.retentionYou'),
+        frist: i18n.t(`messenger.retentionDative.${stufe}`),
+      })
+
+    it('verwirft eine Umstellung, deren actor_id ein anderes Mitglied nennt als die Unterschrift', async () => {
+      // Alice darf die Frist stellen — geprüft wird hier allein die Fälschung.
+      // Sie unterschreibt selbst und behauptet, Olga habe umgestellt.
+      vi.mocked(socialApi.getGroups).mockResolvedValue([verfallsgruppe({ aliceDarf: true })])
+      gruppenpost([
+        await frist(ALICE, 86_400, OLGA, '2026-09-23T10:00:00.000Z'),
+        await danach('Nach der Umstellung'),
+      ])
+
+      oeffneGruppe()
+      await screen.findByText('Nach der Umstellung')
+
+      expect(screen.queryByText(gestellt('olga', 'h24'))).not.toBeInTheDocument()
+      // Nichts festgehalten: ein verworfenes Paket darf auch nicht als
+      // neuester Stand in der Ablage stehen.
+      expect(verfallStand(GRUPPE)).toEqual({ sekunden: 0, stand: '' })
+      expect(warnung).toHaveBeenCalledWith(
+        '[Messenger] Dropping retention packet with forged actor_id:',
+        OLGA,
+      )
+    })
+
+    it('lässt die Umstellung eines Mitglieds ohne das Recht folgenlos', async () => {
+      // Bert unterschreibt echt und nennt sich selbst — ihm fehlt nur das Recht.
+      vi.mocked(socialApi.getGroups).mockResolvedValue([verfallsgruppe({ aliceDarf: false })])
+      gruppenpost([
+        await frist(BERT, 86_400, BERT, '2026-09-23T10:00:00.000Z'),
+        await danach('Nach der Umstellung'),
+      ])
+
+      oeffneGruppe()
+      await screen.findByText('Nach der Umstellung')
+
+      expect(screen.queryByText(gestellt('bert', 'h24'))).not.toBeInTheDocument()
+      expect(verfallStand(GRUPPE)).toEqual({ sekunden: 0, stand: '' })
+    })
+
+    /**
+     * Davor liegt Berts Versuch, die Frist festzunageln: ohne Recht, „aus",
+     * mit einem Zeitpunkt weit in der Zukunft. Erreichte er
+     * `uebernehmeVerfall`, stünde er dort als neuester Stand, und jede spätere
+     * berechtigte Umstellung verlöre gegen ihn — lautlos, denn „aus" auf „aus"
+     * schreibt keine Zeile.
+     */
+    it('übernimmt die Umstellung eines Mitglieds mit dem Recht und nennt, wer unterschrieben hat', async () => {
+      vi.mocked(socialApi.getGroups).mockResolvedValue([verfallsgruppe({ aliceDarf: true })])
+      gruppenpost([
+        await frist(BERT, 0, BERT, '2099-01-01T00:00:00.000Z'),
+        await frist(ALICE, 86_400, ALICE, '2026-09-23T10:01:00.000Z'),
+        await danach('Nach der Umstellung'),
+      ])
+
+      oeffneGruppe()
+
+      expect(await screen.findByText(gestellt('alice', 'h24'))).toBeInTheDocument()
+      expect(verfallStand(GRUPPE)).toEqual({
+        sekunden: 86_400,
+        stand: '2026-09-23T10:01:00.000Z',
+      })
+    })
+
+    /**
+     * Im Direktchat gibt es keine Rollen: die Umstellung der Gegenseite gilt
+     * ohne jede Marke. Danach schickt Alice eine zweite und behauptet, ich
+     * hätte sie gestellt. Bis 09/2026 stand dann „Du hast eingestellt …" in
+     * meinem eigenen Verlauf, über eine Frist, die ich nie gewählt habe.
+     *
+     * Steuerpakete laufen dort über den Hybridumschlag, ohne Absenderkopf —
+     * den Urheber belegt auch hier allein die Unterschrift.
+     */
+    it('lässt im Direktchat ohne Recht umstellen und nennt nur, wer unterschrieben hat', async () => {
+      const umschlaege = new Map([
+        [
+          'sv-e2ee-hybrid-v1:frist-echt',
+          await unterschrieben(ALICE, DIREKT, {
+            type: 'retention',
+            dauer: 86_400,
+            actor_id: ALICE,
+            zeitpunkt: '2026-09-23T10:00:00.000Z',
+            client_uuid: 'ctrl-frist-echt',
+          }),
+        ],
+        [
+          'sv-e2ee-hybrid-v1:frist-in-meinem-namen',
+          await unterschrieben(ALICE, DIREKT, {
+            type: 'retention',
+            dauer: 604_800,
+            actor_id: ICH,
+            zeitpunkt: '2026-09-23T10:01:00.000Z',
+            client_uuid: 'ctrl-frist-falsch',
+          }),
+        ],
+      ])
+      vi.mocked(decryptE2eeHybridWithKeyring).mockImplementation(async (umschlag: string) => {
+        const klartext = umschlaege.get(umschlag)
+        if (!klartext) throw new Error('nicht für dieses Gerät')
+        return klartext
+      })
+      // Auch die Marke trägt Alices Unterschrift, wie jede Nutzlast eines
+      // Kontos mit Signaturschlüssel: eine unsignierte weist die
+      // Downgrade-Schranke am Ratchet ab, und der Test wartete vergeblich.
+      const { einpackenDr } = (await import('@/services/ratchetSitzung')) as any
+      const nachher = einpackenDr(
+        await unterschrieben(ALICE, DIREKT, {
+          sender_id: ALICE,
+          text: 'Nach der Umstellung',
+          client_uuid: 'alice-nachher',
+          timestamp: '2026-09-23T10:02:00Z',
+        }),
+        ALICE,
+      )
+      vi.mocked(socialApi.fetchE2eeEnvelopes).mockImplementation(async (kennung: string) =>
+        kennung === DIREKT
+          ? ([
+              {
+                id: 801,
+                blind_mailbox_id: DIREKT,
+                ciphertext_envelope: 'sv-e2ee-hybrid-v1:frist-echt',
+                client_uuid: 'ctrl-frist-echt#0',
+                created_at: '2026-09-23T10:00:00Z',
+              },
+              {
+                id: 802,
+                blind_mailbox_id: DIREKT,
+                ciphertext_envelope: 'sv-e2ee-hybrid-v1:frist-in-meinem-namen',
+                client_uuid: 'ctrl-frist-falsch#0',
+                created_at: '2026-09-23T10:01:00Z',
+              },
+              {
+                id: 803,
+                blind_mailbox_id: DIREKT,
+                ciphertext_envelope: nachher,
+                client_uuid: 'alice-nachher',
+                created_at: '2026-09-23T10:02:00Z',
+              },
+            ] as any)
+          : [],
+      )
+
+      // Über die Kontaktliste geöffnet und nicht über `?userId=`: dort steht
+      // der Kontakt beim ersten Abruf noch als „Benutzer #101" da, und die
+      // Zeile trüge diesen Platzhalter statt des Namens.
+      render(
+        <MemoryRouter>
+          <Messenger />
+        </MemoryRouter>
+      )
+      fireEvent.click(await screen.findByText('alice'))
+
+      expect(await screen.findByText(gestellt('alice', 'h24'))).toBeInTheDocument()
+      await screen.findByText('Nach der Umstellung')
+      expect(screen.queryByText(vonMirGestellt('d7'))).not.toBeInTheDocument()
+      expect(verfallStand(DIREKT)).toEqual({
+        sekunden: 86_400,
+        stand: '2026-09-23T10:00:00.000Z',
+      })
+    })
+
+    it('sperrt die Auswahl in einer Gruppe, in der mir das Recht fehlt', async () => {
+      vi.mocked(socialApi.getGroups).mockResolvedValue([verfallsgruppe({ aliceDarf: false })])
+      gruppenpost([await danach('Schon da')])
+
+      oeffneGruppe()
+      await screen.findByText('Schon da')
+      await oeffneChatMenue()
+
+      const eintrag = screen.getByText(i18n.t('messenger.disappearingMessages')).closest('button')!
+      expect(eintrag).toBeDisabled()
+      expect(eintrag).toHaveTextContent(i18n.t('messenger.retentionNoRight'))
+      fireEvent.click(eintrag)
+      // Die Auswahl der Stufen geht gar nicht erst auf.
+      expect(screen.queryByText(i18n.t('messenger.retention.h24'))).not.toBeInTheDocument()
+      expect(
+        vi
+          .mocked(socialApi.relayE2eeEnvelope)
+          .mock.calls.some(([auftrag]) => (auftrag as any)?.control_type === 'retention'),
+      ).toBe(false)
+    })
+
+    /**
+     * Die Gegenprobe zur Sperre darüber: im Direktchat gibt es kein Recht, das
+     * fehlen könnte. Eine Sperre, die nur nach der Gruppenmarke fragt, nähme
+     * die Frist aus jedem Direktchat — und kein anderer Test fiele.
+     */
+    it('lässt die Frist im Direktchat einstellen, über den Steuerweg', async () => {
+      render(
+        <MemoryRouter initialEntries={['/chat?userId=101']}>
+          <Messenger />
+        </MemoryRouter>
+      )
+      await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
+      await oeffneChatMenue()
+
+      const eintrag = screen.getByText(i18n.t('messenger.disappearingMessages')).closest('button')!
+      expect(eintrag).toBeEnabled()
+      fireEvent.click(eintrag)
+      fireEvent.click(await screen.findByText(i18n.t('messenger.retention.h24')))
+
+      expect(await screen.findByText(vonMirGestellt('h24'))).toBeInTheDocument()
+      expect(socialApi.relayE2eeEnvelope).toHaveBeenCalledWith(
+        expect.objectContaining({ is_control: true, control_type: 'retention' }),
+      )
+      expect(verfallStand(DIREKT).sekunden).toBe(86_400)
     })
   })
 })

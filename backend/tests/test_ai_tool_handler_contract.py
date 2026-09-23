@@ -383,6 +383,19 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
     und in derselben Unterhaltung nur einmal bezahlt. Wer das nächste Mal
     Platz sucht: erst prüfen, ob die Beschreibung überhaupt in den Katalog
     gehört, dann zusammenlegen, und kürzen zuletzt.
+
+    **Nachtrag 23.09.2026: die Regionsanalyse steht immer im Katalog, und die
+    Grenze bleibt bei 92.000.** Bis hierhin kamen `analyze_region` und
+    `control_region_camera` nur mit hinterlegtem Copernicus-Zugang dazu — und
+    den hat die Testumgebung nicht. Dieser Test hat die beiden deshalb nie
+    gesehen: eine Installation mit Copernicus lag schon bei **92.818** Zeichen.
+    Jetzt gibt es auch ohne Zugang ein Bild (das schlüsselfreie Kartenbild),
+    und beide stehen immer im Katalog. Ihre Beschreibungen sind dafür auf einen
+    Satz geschrumpft (1.636 → 735 Zeichen); Kameramodi und die Regel zu
+    `location` stehen in `ai_prompt.REGIONSANALYSE` und im Sprachmodus in
+    `REGION_ANWEISUNGEN`. Nachgemessen: aus der App **91.917** Zeichen, 91
+    Werkzeuge; aus dem Panel **86.444** Zeichen, 85 Werkzeuge. Die Luft beträgt
+    **83 Zeichen** — das nächste Werkzeug muss Platz mitbringen.
      """
     for herkunft in ("panel", "desktop"):
         erlaubt = herkunft_schnitt(

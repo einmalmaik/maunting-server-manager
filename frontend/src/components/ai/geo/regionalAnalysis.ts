@@ -1,4 +1,5 @@
 import type { AiGeoCameraCommand, AiRegionalAnalysis, AiSatelliteLayer, AiSatelliteScene } from '@/api/ai'
+import type { Ausschnitt, Bildform } from './kartenbildKamera'
 
 type RecordValue = Record<string, unknown>
 
@@ -65,6 +66,20 @@ function normalizeWeather(value: unknown): AiRegionalAnalysis['weather'] | undef
   }
 }
 
+/** Der Ausschnitt eines Kartenbilds — nur, wenn er als Box gültig ist. */
+function imageBbox(value: unknown): [number, number, number, number] | undefined {
+  if (!Array.isArray(value) || value.length !== 4) return undefined
+  const [minLongitude, minLatitude, maxLongitude, maxLatitude] = value.map(finiteNumber)
+  if (minLongitude === null || minLatitude === null || maxLongitude === null || maxLatitude === null) return undefined
+  if (
+    minLongitude < -180 || maxLongitude > 180 || minLatitude < -90 || maxLatitude > 90 ||
+    minLongitude >= maxLongitude || minLatitude >= maxLatitude
+  ) {
+    return undefined
+  }
+  return [minLongitude, minLatitude, maxLongitude, maxLatitude]
+}
+
 function normalizeLayers(value: unknown): Record<string, AiSatelliteLayer> | undefined {
   if (!isRecord(value)) return undefined
 
@@ -74,6 +89,7 @@ function normalizeLayers(value: unknown): Record<string, AiSatelliteLayer> | und
     const name = text(entry.name)
     const url = text(entry.url)
     if (!id || !name || !url) return []
+    const kind = entry.kind === 'scene' || entry.kind === 'map' ? entry.kind : undefined
     return [[id, {
       id,
       name,
@@ -81,10 +97,41 @@ function normalizeLayers(value: unknown): Record<string, AiSatelliteLayer> | und
       resolution: text(entry.resolution) || undefined,
       mission: text(entry.mission) || undefined,
       description: text(entry.description) || undefined,
+      kind,
+      scene_id: kind === 'scene' ? text(entry.scene_id) || undefined : undefined,
+      bbox: kind === 'map' ? imageBbox(entry.bbox) : undefined,
+      captured_at: kind === 'scene' ? text(entry.captured_at) || undefined : undefined,
+      cloud_cover_percent: finiteNumber(entry.cloud_cover_percent),
+      attribution: text(entry.attribution) || undefined,
     } satisfies AiSatelliteLayer] as const]
   })
 
   return layers.length > 0 ? Object.fromEntries(layers) : undefined
+}
+
+/**
+ * Wo das Panel das Bild einer Ebene holt — der Browser fragt nie ArcGIS oder
+ * Copernicus selbst (`/api/ai/geo/image`). `null`, wenn die Ebene kein
+ * abrufbares Bild beschreibt, etwa ein Stand von vor 09/2026.
+ */
+export function regionalbildPfad(layer: AiSatelliteLayer): string | null {
+  if (layer.kind === 'scene' && layer.scene_id) {
+    return `/ai/geo/image?kind=scene&scene_id=${encodeURIComponent(layer.scene_id)}`
+  }
+  if (layer.kind === 'map' && layer.bbox) return kartenbildPfad(layer.bbox)
+  return null
+}
+
+/** Das Kartenbild für einen Ausschnitt, in einer der drei Bildformen. */
+export function kartenbildPfad(ausschnitt: Ausschnitt, form: Bildform = 'landscape'): string {
+  const pfad = `/ai/geo/image?kind=map&bbox=${ausschnitt.join(',')}`
+  return form === 'landscape' ? pfad : `${pfad}&shape=${form}`
+}
+
+/** Die Ebene des Kartenbilds — die, auf die ohne MapTiler die Kamera zoomt. */
+export function kartenbildEbene(analysis: AiRegionalAnalysis | null | undefined): AiSatelliteLayer | null {
+  const ebenen = Object.values(analysis?.satellite?.layers ?? {})
+  return ebenen.find((ebene) => ebene.kind === 'map' && ebene.bbox) ?? null
 }
 
 function normalizeScene(value: unknown): AiSatelliteScene | null {

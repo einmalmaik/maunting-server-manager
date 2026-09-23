@@ -65,8 +65,12 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     # Durchgesetzt in ai_action_service._execute_web_search. Ohne hinterlegten
     # Suchschluessel wird das Werkzeug dem Modell gar nicht erst angeboten.
     PermissionDef("ai.web_search.use",         "ai",      "Websuche über die KI verwenden"),
-    # Durchgesetzt in ai_action_service._execute_analyze_region. Ohne hinterlegte
-    # Copernicus-Zugangsdaten wird das Werkzeug dem Modell nicht angeboten.
+    # Durchgesetzt in ai_tools/geo_tools (Regionsanalyse und Kamera) und an den
+    # Geo-Routen. Seit 09/2026 steht die Regionsanalyse immer im Katalog: ohne
+    # Copernicus-Zugang zeigt sie das schluesselfreie Kartenbild. Ortsname und
+    # Koordinaten gehen damit ohne Einrichtung an Nominatim, Open-Meteo, Reddit,
+    # Bluesky und Esri — `permissionDetails.ai_satellite_use` sagt das dem, der
+    # das Recht vergibt.
     PermissionDef("ai.satellite.use",          "ai",      "Satelliten- und Regionsanalyse über die KI verwenden"),
     #
     # `ai.social.message_friend` stand hier bis 09/2026 und ist ersatzlos weg.

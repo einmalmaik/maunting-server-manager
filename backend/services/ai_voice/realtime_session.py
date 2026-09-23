@@ -141,6 +141,10 @@ REGION_ANWEISUNGEN = (
     "Jede Sehenswürdigkeit erhält eine Markierung mit Hover-Name; die Markierungen bleiben während der Tour und verschwinden erst bei Neustart. "
     "Gehe vor dem nächsten Ziel wieder auf die Übersicht zurück. "
     "Führe diesen Ablauf für alle verlangten Orte fort, statt nur eine Liste vorzulesen.",
+    "analyze_region mit camera focus für eine normale Ortsanalyse, detail nur auf ausdrücklichen Wunsch zum Hineinzoomen, overview für die Weltübersicht. "
+    "control_region_camera mit focus_location braucht location aus Name und Stadt; zoom_in, zoom_out und overview nie mit location.",
+    "Das Bild der Region ist eine Sentinel-2-Szene mit Aufnahmezeitpunkt (kind scene) oder ein Kartenbild (kind map): "
+    "ein Mosaik ohne Zeitpunkt. Nenne ein Kartenbild nie aktuelle Aufnahme oder Überflug.",
     "Steuere die Regionalansicht mit voice_set_region_view, bevor du einen ihrer Bereiche erklärst. "
     "Bei einem Themenwechsel ohne Ortsbezug rufe voice_leave_region_view auf, damit die normale Sprachansicht zurückkehrt.",
 )

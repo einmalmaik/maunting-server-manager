@@ -51,6 +51,7 @@ GROUP_PERMISSIONS: frozenset[str] = frozenset(
         "manage_roles",
         "mention_everyone",
         "pin_messages",
+        "set_disappearing_messages",
     }
 )
 
@@ -66,15 +67,21 @@ GROUP_CALL_PERMISSIONS: frozenset[str] = frozenset(
     }
 )
 
-#: Rechte, die in die laufende Unterhaltung eingreifen: alle auf einmal wecken
-#: und eine Nachricht über den Verlauf heften. Dieselbe Begründung wie bei den
+#: Rechte, die in die laufende Unterhaltung eingreifen: alle auf einmal wecken,
+#: eine Nachricht über den Verlauf heften und die Frist stellen, nach der neue
+#: Nachrichten für alle verschwinden. Dieselbe Begründung wie bei den
 #: Anrufrechten — wer die Rollen verwaltet, kann sie sich ohnehin selbst
 #: eintragen, und ein Eigentümer, der seine eigene Gruppe nicht erreichen darf,
 #: wäre kein Schutz, sondern ein Rätsel.
+#:
+#: Durchgesetzt wird keines davon hier: die Handlung reist verschlüsselt, und
+#: der Server liest sie nie. Er rechnet nur die Marke je Mitglied aus
+#: (``list_user_groups``), gegen die das **empfangende** Gerät prüft.
 GROUP_MODERATION_PERMISSIONS: frozenset[str] = frozenset(
     {
         "mention_everyone",
         "pin_messages",
+        "set_disappearing_messages",
     }
 )
 
@@ -2249,13 +2256,15 @@ class SocialService:
                     else None
                 ),
                 # Der Server kann den Inhalt einer Nachricht nicht lesen und
-                # deshalb nicht pruefen, ob jemand ``@everyone`` geschrieben
-                # oder eine Nachricht angeheftet hat. Das entscheidet der
-                # **empfangende** Client — und er braucht dafuer die Rechtelage
-                # des *Absenders*, nicht seine eigene. Darum steht die Marke
-                # hier an jedem Mitglied und nicht nur an der Gruppe.
+                # deshalb nicht pruefen, ob jemand ``@everyone`` geschrieben,
+                # eine Nachricht angeheftet oder die Verfallsfrist gestellt
+                # hat. Das entscheidet der **empfangende** Client — und er
+                # braucht dafuer die Rechtelage des *Absenders*, nicht seine
+                # eigene. Darum steht die Marke hier an jedem Mitglied und
+                # nicht nur an der Gruppe.
                 "can_mention_everyone": "mention_everyone" in wirksam,
                 "can_pin_messages": "pin_messages" in wirksam,
+                "can_set_disappearing_messages": "set_disappearing_messages" in wirksam,
                 "joined_at": mem.joined_at,
             })
 
@@ -2310,6 +2319,9 @@ class SocialService:
                     db, g.id, user_id, "mention_everyone"
                 ),
                 "can_pin_messages": cls.has_group_permission(db, g.id, user_id, "pin_messages"),
+                "can_set_disappearing_messages": cls.has_group_permission(
+                    db, g.id, user_id, "set_disappearing_messages"
+                ),
                 "created_at": g.created_at,
                 "members": mems,
                 "room_token": offener_raum,

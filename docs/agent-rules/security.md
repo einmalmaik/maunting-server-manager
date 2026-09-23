@@ -316,7 +316,25 @@ Harte Invarianten:
   (`kontoNutztSignaturen`) — sonst nähme ein Fälscher einfach die Signatur weg
   und stünde wieder am Anfang. Wer ein neues Steuerpaket einführt, schickt es
   über `sendE2eeControlMessage` und wertet seinen Urheber über `urheberVon`
-  aus; beides zu umgehen ist genau der Weg zurück.
+  aus; beides zu umgehen ist genau der Weg zurück. Die Verfallsfrist
+  (`retention`) tat das bis 09/2026 nicht: sie las `actor_id` ungeprüft, und
+  jedes Mitglied konnte bei allen „<Eigentümer> hat eingestellt …" erscheinen
+  lassen, die Gegenseite im Direktchat ein „Du hast eingestellt …".
+- **Was der Server nicht lesen kann, prüft der Empfänger — am belegten
+  Urheber.** `@everyone` (`darfAlleWecken`), die angeheftete Nachricht
+  (`durfteAnheften`) und die Verfallsfrist einer Gruppe (`durfteVerfallStellen`,
+  Recht `set_disappearing_messages`) sind Wirkungen, die der Server nicht
+  durchsetzen kann, weil er den Umschlag nie öffnet. Das empfangende Gerät
+  fragt dafür die Marke `can_*` am **Absender** aus der Gruppenantwort; fehlt
+  sie, gilt nein. Erst der Urheber (`urheberVon`), dann das Recht: ein Recht
+  gegen die bloße `actor_id` zu prüfen hieße, sich das des Eigentümers zu
+  leihen. Und die Schranke steht vor jeder Ablage — eine verworfene Umstellung,
+  die `uebernehmeVerfall` erreicht, stünde dort als neuester Stand, und jede
+  spätere berechtigte verlöre lautlos gegen ihren Zeitpunkt. Die Grenze, die
+  bleibt: geprüft wird gegen die Mitgliederliste, die das Gerät gerade hat. Ist
+  sie veraltet, bleibt eine berechtigte Umstellung bis zum Neuladen liegen, und
+  ein eben entzogenes Recht zählt bis dahin noch. Im Direktchat gibt es keine
+  Rollen; dort dürfen beide Seiten umstellen.
 - **Ein zugestellter Gruppenschlüssel verdrängt keinen vorhandenen.** Er wird
   abgelegt — ohne ihn wäre die Nachricht unlesbar, für die er gilt —, aber der
   *aktuelle* wird er nur, wenn für die heutige Mitgliedschaft noch keiner da

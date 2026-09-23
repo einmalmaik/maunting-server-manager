@@ -26,8 +26,13 @@ Einzutragen ist die **Adresse der API**, nicht die der Weboberfläche. Das Panel
 - `frontend/src/desktop/` (im Nachbarordner) — der Desktop-Einstieg der
   gemeinsamen Oberfläche: Bootstrap mit Laufzeit-API-Adresse, Splash,
   Einrichtungs-Assistent, Desktop-Einstellungen (Reiter wie im Panel:
-  Desktop-Integration, Wake-Word, Audio, Gefahrenzone), Overlay-Sprachblase,
+  Desktop-Integration, Wake-Word, Audio, Gefahrenzone), Overlay mit dem
+  Sprachschwarm,
   Auftragsschleife und Übernahmekarte.
+
+Das Overlay hat keinen Kasten: Der Sprachschwarm schwebt frei über dem
+Desktop, und Klicks gehen durch das Fenster hindurch an das, was darunter
+liegt — nur das X nimmt sie an (`src-tauri/src/durchklick.rs`).
 
 ## Wake-Word
 

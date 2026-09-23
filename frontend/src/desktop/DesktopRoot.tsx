@@ -1,7 +1,7 @@
 /**
  * Weiche zwischen den zwei Fenstern der App — ein Bundle, zwei Fenster.
  *
- * `?fenster=overlay` ist das frameless Always-on-Top-Fenster der Sprachblase
+ * `?fenster=overlay` ist das frameless Always-on-Top-Fenster des Sprachschwarms
  * (tauri.conf.json), alles andere ist das Hauptfenster.
  */
 import { useEffect } from 'react'

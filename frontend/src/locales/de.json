@@ -1131,6 +1131,7 @@
       "start": "Sprachmodus starten",
       "stop": "Sprachmodus beenden",
       "zustand": {
+        "abgelaufen": "Sitzung abgelaufen",
         "aus": "Sprachmodus aus",
         "verbindet": "Verbindet …",
         "bereit": "Bereit, sprich einfach los",
@@ -1155,7 +1156,10 @@
       "end": "Gespräch beenden",
       "endHint": "ESC drücken",
       "settings": "Angaben zum Sprachmodus",
+      "werkzeug": "Ein Werkzeug läuft",
       "hint": {
+        "abgelaufen": "Die Höchstdauer ist erreicht, ich verbinde neu.",
+        "werkzeugZeit": "Das Werkzeug hat zu lange gebraucht. Die Sprachsitzung bleibt offen.",
         "aus": "Der Sprachmodus ist beendet.",
         "verbindet": "Die Verbindung wird aufgebaut.",
         "bereit": "Sprich mit mir, ich bin bereit.",
@@ -1411,7 +1415,6 @@
       "trafficNoMetricsBody": "TomTom hat für diese Abfrage keine Messwerte geliefert.",
       "weatherDetails": "Detaillierte Wetterdaten",
       "scenes": "Sentinel-2 L2A Szenen",
-      "openFullScene": "Szene in Vollauflösung öffnen",
       "tabs": {
         "overview": "Übersicht",
         "satellite": "Satellit",
@@ -1422,20 +1425,33 @@
       },
       "mobileTabs": {
         "chat": "Chat / Sprache",
-        "globe": "3D-Globus",
+        "globe": "Karte",
         "satellite": "Satellit & Info"
       },
       "processes": {
         "title": "Aktive Prozesse",
         "prefetch": "Spekulativer Abruf",
-        "satellite": "Satellitendaten (Sentinel-2)",
+        "satellite": "Bild der Region",
         "weather": "Wetterdaten",
         "news": "Nachrichten & Websuche",
         "done": "Fertig",
         "running": "Läuft …",
         "waiting": "Wartet …"
       },
-      "newsSourceMissing": "Für diese Region ist keine Nachrichtenquelle eingerichtet. Es werden keine Lageberichte geschätzt."
+      "newsSourceMissing": "Für diese Region ist keine Nachrichtenquelle eingerichtet. Es werden keine Lageberichte geschätzt.",
+      "imageHeading": "Bild der Region",
+      "mosaicBadge": "Mosaik",
+      "image": {
+        "scene": "Satellitenszene",
+        "map": "Kartenbild",
+        "capturedOn": "Aufgenommen am {{date}}",
+        "clouds": "{{percent}} % Bewölkung",
+        "mosaic": "Mosaik aus vielen Aufnahmen, kein Überflug",
+        "alt": "Bild der Region {{location}}",
+        "unavailable": "Bild nicht verfügbar",
+        "loading": "Bild wird geladen",
+        "source": "Quelle: {{source}}"
+      }
     },
     "usage": {
       "title": "KI-Nutzung",
@@ -2315,7 +2331,7 @@
     },
     "ai_satellite_use": {
       "title": "Satelliten- & Regionsanalyse nutzen",
-      "desc": "Ermöglicht der KI den Abruf von Sentinel-2-Satellitenbildern, Geodaten und Wetteranalysen."
+      "desc": "Ermöglicht der KI Regionsanalysen und das Steuern der Kartenansicht. Ortsname und Koordinaten gehen dabei ohne weitere Einrichtung an OpenStreetMap, Open-Meteo, Reddit, Bluesky und Esri (Kartenbild), mit hinterlegtem Zugang auch an Copernicus, TomTom und MapTiler."
     },
     "ai_autonomous_use": {
       "title": "Autonomen Modus nutzen",
@@ -3847,7 +3863,8 @@
       "commandLabel": "Öffentlicher Bootstrap",
       "copy": "Befehl kopieren",
       "copied": "Kopiert",
-      "releaseNote": "Der Bootstrap bevorzugt das getestete msm-panel-Artefakt des neuesten GitHub-Releases. install.sh bleibt für Bootstrap, Simple- und interaktiven Modus der zentrale Installer: Er installiert auf Minimal-Systemen alle benötigten Basispakete und repariert eine unvollständige Caddy-Paketquelle sicher, ohne eine vorhandene Caddyfile zu ersetzen."
+      "releaseNote": "Der Bootstrap bevorzugt das getestete msm-panel-Artefakt des neuesten GitHub-Releases. install.sh bleibt für Bootstrap, Simple- und interaktiven Modus der zentrale Installer: Er installiert auf Minimal-Systemen alle benötigten Basispakete und repariert eine unvollständige Caddy-Paketquelle sicher, ohne eine vorhandene Caddyfile zu ersetzen.",
+      "caddyUpdate": "Seit 09/2026 schreibt install.sh Cache-Regeln in die Caddy-Site: Die gehashten Assets bleiben ein Jahr im Browser, die Seite selbst lädt bei jedem Aufruf neu, und ein fehlender Chunk bleibt ein 404. Ohne diese Regeln konnte ein Browser nach einem Update eine alte, leere Seite festhalten. update.sh schreibt eine vorhandene Site nicht neu, sondern meldet eine ohne diese Regeln. Dann install.sh erneut ausführen: Es übernimmt die vorhandenen Einstellungen und schreibt die Site neu."
     },
     "topology": {
       "title": "Beispiel-Topologie: 20 Hosts",
@@ -4337,7 +4354,7 @@
           "mentions": "Ob aus einem @everyone eine Benachrichtigung wird, entscheidet nicht das sendende Gerät, sondern das empfangende: es prüft anhand der Gruppenrechte, ob der Absender alle wecken durfte, und lässt den Text sonst gewöhnlicher Text bleiben. Die Instanz kann das nicht prüfen, weil sie den Inhalt nicht liest. In einer stummgeschalteten Gruppe bleibt es bei einem Abzeichen in der Chatliste, ohne Ton. Dieselbe Prüfung gilt für die angeheftete Nachricht einer Gruppe: welche Nachricht das ist, merkt sich jedes Gerät für sich.",
           "attachments": "Bilder, Sprachnachrichten, Videonotizen und Dateien bekommen vor dem Hochladen einen eigenen Zufallsschlüssel. Der reist ausschließlich im verschlüsselten Nachrichtentext mit, ist also für jeden Anhang ein anderer und der Instanz nie bekannt. Sie erhält den verschlüsselten Block, seine Größe und seinen Zeitpunkt; Dateiname und Dateityp gehen nicht mit, sie stehen mit im verschlüsselten Teil. Wird ein solcher Block in ein anderes Gespräch kopiert, lässt er sich dort nicht öffnen.",
           "deletion": "Löschst du eine Nachricht für alle, verschwindet sie nicht nur aus der Anzeige: der Umschlag wird aus dem Postfach entfernt, ein hochgeladener Anhang wird mitgelöscht, und auf beiden Geräten werden Text und Anhang aus dem örtlichen Verlauf genommen. Stehen bleibt ein Platzhalter, der sagt, dass hier eine Nachricht war. Was ein Gerät vorher abgespeichert oder abfotografiert hat, erreicht diese Löschung nicht.",
-          "retention": "Verschwindende Nachrichten stellst du je Chat ein, und die Frist gilt für beide Seiten. Das Gerät deines Gegenübers übernimmt sie, zeigt die Umstellung im Verlauf, und ab da verfallen auch seine Nachrichten. Ist die Zeit um, nimmt jedes Gerät die Zeile aus seinem Verlauf, und jede Seite entfernt ihre eigenen Umschläge und Anhänge vom Server. Dort löschen kann nur, wer hochgeladen hat. Kommt ein Gerät nie wieder online, bleibt sein verschlüsselter Umschlag im Postfach liegen, auch wenn die Nachricht überall sonst verschwunden ist.",
+          "retention": "Verschwindende Nachrichten stellst du je Chat ein, und die Frist gilt für alle darin: im Einzelchat dürfen beide Seiten umstellen, in einer Gruppe nur, wer das Recht dazu hat. Ob der Absender es hatte, prüft jedes empfangende Gerät selbst; die Instanz kann die Umstellung nicht lesen. Die Geräte der anderen übernehmen die Frist, zeigen die Umstellung im Verlauf, und ab da verfallen auch ihre Nachrichten. Ist die Zeit um, nimmt jedes Gerät die Zeile aus seinem Verlauf, und jede Seite entfernt ihre eigenen Umschläge und Anhänge vom Server. Dort löschen kann nur, wer hochgeladen hat. Kommt ein Gerät nie wieder online, bleibt sein verschlüsselter Umschlag im Postfach liegen, auch wenn die Nachricht überall sonst verschwunden ist.",
           "receipts": "Zustell- und Lesebestätigungen laufen als verschlüsselte Steuernachrichten über denselben Weg. Kann eine Bestätigung nicht verschlüsselt werden, unterbleibt sie, statt ungeschützt zu gehen.",
           "push": "Hast du Benachrichtigungen eingeschaltet und die Anwendung geschlossen, meldet dein Browser eine Zustelladresse bei dem Push-Dienst seines Herstellers an — je nach Browser Google, Mozilla oder Apple. Diese Adresse speichert die Instanz, um dich erreichen zu können. Was sie dorthin schickt, ist für deinen Browser verschlüsselt und enthält ohnehin keinen Inhalt: weder Text noch Absender, nur „Neue Nachricht“.",
           "pushMetadata": "Der Push-Dienst sieht dabei, dass deine Zustelladresse zu diesem Zeitpunkt etwas bekommen hat. Das lässt sich auf diesem Weg nicht vermeiden, deshalb steht es hier. Schaltest du Benachrichtigungen im Profil ab oder meldest dich ab, wird die Adresse gelöscht und es geht nichts mehr hinaus. Ist ein Fenster geöffnet, unterbleibt der Versand: dann meldet sich die Anwendung selbst.",
@@ -6541,9 +6558,13 @@
           "title": "Nachricht anheften",
           "desc": "Heftet eine Nachricht als Leiste über den Verlauf, sichtbar für alle in der Gruppe. Auch hier entscheidet der Empfänger anhand der Rechte des Anheftenden, ob die Leiste erscheint."
         },
+        "set_disappearing_messages": {
+          "title": "Verschwindende Nachrichten einstellen",
+          "desc": "Stellt für die ganze Gruppe ein, nach welcher Frist neue Nachrichten verschwinden, oder schaltet das ab. Der Server kann die Umstellung nicht lesen und deshalb nicht prüfen: jedes Gerät gleicht sie selbst mit der Mitgliederliste ab, die es gerade kennt, und ohne dieses Recht bleibt sie folgenlos. Ist diese Liste veraltet, kann eine berechtigte Umstellung dort bis zum Neuladen unbeachtet bleiben, und ein eben entzogenes Recht zählt dort bis dahin noch."
+        },
         "manage_roles": {
           "title": "Rollen zuweisen & verwalten",
-          "desc": "Mitgliedern Rollen zuweisen und die Standard-Gruppenrechte anpassen. Eigentümer und Administratoren tragen „Alle auf einmal erwähnen“ und „Nachricht anheften“ ohnehin, weil sie sie sich mit zwei Klicks selbst geben könnten."
+          "desc": "Mitgliedern Rollen zuweisen und die Standard-Gruppenrechte anpassen. Eigentümer und Administratoren tragen „Alle auf einmal erwähnen“, „Nachricht anheften“ und „Verschwindende Nachrichten einstellen“ ohnehin, weil sie sie sich mit zwei Klicks selbst geben könnten."
         }
       }
     }
@@ -6825,6 +6846,7 @@
     "retentionOffSelf": "{{name}} hast verschwindende Nachrichten ausgeschaltet.",
     "retentionOffOther": "{{name}} hat verschwindende Nachrichten ausgeschaltet.",
     "retentionChangeFailed": "Die Umstellung konnte nicht gesendet werden.",
+    "retentionNoRight": "In dieser Gruppe darfst du die Frist nicht umstellen.",
     "disappearingMessages": "Verschwindende Nachrichten",
     "disappearingHint": "Gilt für beide Seiten. Neue Nachrichten werden nach Ablauf überall gelöscht, auch beim Server. Ein Gerät, das offline bleibt, räumt seinen Teil erst später ab.",
     "reactionFailed": "Die Reaktion konnte nicht gesendet werden.",

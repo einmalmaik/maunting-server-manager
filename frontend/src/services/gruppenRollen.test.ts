@@ -15,8 +15,16 @@
 
 import { describe, expect, it } from 'vitest'
 
+import de from '@/locales/de.json'
+import en from '@/locales/en.json'
 import { KONFIG_FORMAT, type Gruppenzustand } from './gruppenKonfig'
-import { GRUPPEN_RECHTE, leseRechte, wirksameGruppenrechte } from './gruppenRollen'
+import {
+  GRUPPEN_RECHTE,
+  leseRechte,
+  permissionDescKey,
+  permissionTitleKey,
+  wirksameGruppenrechte,
+} from './gruppenRollen'
 
 const ANNA = 101
 const BERT = 102
@@ -200,5 +208,70 @@ describe('wirksameGruppenrechte', () => {
         }),
       }).size,
     ).toBe(0)
+  })
+})
+
+/**
+ * Das Recht, die Verfallsfrist einer Gruppe zu stellen.
+ *
+ * Bis 09/2026 gab es keines: jedes Mitglied stellte die Frist für alle. Es
+ * gehört ins Vokabular, damit der Dialog es anbietet und `leseRechte` es nicht
+ * als Tippfehler verwirft. Ob eine Umstellung beim Empfänger gilt, entscheidet
+ * trotzdem die Marke vom Server (`durfteVerfallStellen`), nicht diese Datei.
+ */
+describe('set_disappearing_messages', () => {
+  it('steht im Vokabular und überlebt das Lesen einer Rechteliste', () => {
+    expect([...leseRechte('send_messages,set_disappearing_messages')].sort()).toEqual([
+      'send_messages',
+      'set_disappearing_messages',
+    ])
+  })
+
+  it('gehört dem Administrator, aber nicht der Vorlage „Moderator"', () => {
+    // Die Frist entscheidet, wie lange die Nachrichten **aller** leben — eine
+    // Einstellung der Gruppe, keine Moderation eines Gesprächs. In der Vorlage
+    // wäre sie obendrein keine Zusage: der Empfänger fragt die Marke vom
+    // Server, und der gibt einem Moderator ohne Eintrag nichts.
+    expect(
+      wirksameGruppenrechte({ konto: ANNA, systemRolle: 'admin' }).has('set_disappearing_messages'),
+    ).toBe(true)
+    expect(
+      wirksameGruppenrechte({
+        konto: ANNA,
+        systemRolle: 'moderator',
+        standardrechte: 'send_messages',
+        zustand: zustand([]),
+      }).has('set_disappearing_messages'),
+    ).toBe(false)
+  })
+})
+
+/** Ein Punktpfad durch eine Sprachdatei, ohne Rückfall auf die andere Sprache. */
+function nachschlagen(baum: unknown, schluessel: string): unknown {
+  return schluessel
+    .split('.')
+    .reduce<unknown>(
+      (knoten, teil) =>
+        knoten && typeof knoten === 'object' ? (knoten as Record<string, unknown>)[teil] : undefined,
+      baum,
+    )
+}
+
+describe('Beschriftung der Rechte', () => {
+  it('hat für jedes Recht Titel und Beschreibung, auf Deutsch und auf Englisch', () => {
+    // Der Dialog setzt den Schlüssel erst zur Laufzeit zusammen
+    // (`permissionTitleKey`), `check-i18n` sieht ihn deshalb nie. Ein
+    // vergessenes Paar stünde dort als roher Schlüssel — und die Beschreibung
+    // ist die Zusage, unter der jemand das Recht vergibt.
+    const fehlend: string[] = []
+    for (const [sprache, baum] of [['de', de], ['en', en]] as const) {
+      for (const { key } of GRUPPEN_RECHTE) {
+        for (const schluessel of [permissionTitleKey(key), permissionDescKey(key)]) {
+          const text = nachschlagen(baum, schluessel)
+          if (typeof text !== 'string' || !text.trim()) fehlend.push(`${sprache}: ${schluessel}`)
+        }
+      }
+    }
+    expect(fehlend).toEqual([])
   })
 })
