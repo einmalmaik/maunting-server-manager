@@ -69,6 +69,16 @@ def _fremder(db: Session) -> User:
     return user
 
 
+def _fremde_kekse(client: TestClient) -> dict:
+    """Meldet `_fremder` an. Setzt voraus, dass es ihn schon gibt."""
+    antwort = client.post(
+        "/api/auth/login",
+        json={"username": "fremder", "password": "FremdPass123!", "otp_code": None},
+    )
+    assert antwort.status_code == 200, antwort.text
+    return dict(antwort.cookies)
+
+
 def _gruppe(db: Session, besitzer: User, mitglied: User):
     gruppe = SocialService.create_group(db, besitzer, "Nachweisgruppe")
     SocialService.join_group_by_invite_code(db, mitglied, gruppe.invite_code)
@@ -299,9 +309,16 @@ def _registriere_ueber_http(client: TestClient, cookies: dict, mid: str, token: 
     assert antwort.status_code == 200, antwort.text
 
 
-def test_lesen_ohne_nachweis_ist_403(
+def test_lesen_ohne_nachweis_bleibt_verschlossen(
     client: TestClient, db: Session, owner_user: User, regular_user: User, owner_cookies: dict
 ) -> None:
+    """Ohne Nachweis geht die Mailbox nicht auf — auch fuer ein Mitglied nicht.
+
+    Seit 09/2026 antworten alle Gruende **gleich**: kein Mitglied, kein
+    Nachweis, falscher Nachweis, Mailbox gibt es nicht. Aus der Antwort ist
+    damit nicht zu lesen, ob es diese Mailbox gibt oder ob sie einen Nachweis
+    traegt — sonst liesse sich von aussen abfragen, welche Gruppen es gibt.
+    """
     gruppe = _gruppe(db, owner_user, regular_user)
     mid = SocialService.derive_group_blind_mailbox_id(gruppe.id)
     _registriere_ueber_http(client, owner_cookies, mid, _token("lesen"))
@@ -315,6 +332,11 @@ def test_lesen_ohne_nachweis_ist_403(
         headers={"X-Mailbox-Token": _token("daneben")},
     )
     assert falsch.status_code == 403
+    # Und die Gegenprobe, auf die es ankommt: eine Kennung, die es gar nicht
+    # gibt, antwortet genauso. Waeren die beiden unterscheidbar, liesse sich
+    # die Existenz einer Mailbox abfragen.
+    erfunden = client.get(f"/api/social/e2ee/mailbox/{'7' * 64}", cookies=owner_cookies)
+    assert erfunden.status_code == ohne.status_code
 
     richtig = client.get(
         f"/api/social/e2ee/mailbox/{mid}",
@@ -354,9 +376,10 @@ def test_senden_ohne_nachweis_ist_403(
     assert mit.status_code == 200, mit.text
 
 
-def test_loeschen_ohne_nachweis_ist_403(
+def test_loeschen_ohne_nachweis_bleibt_verschlossen(
     client: TestClient, db: Session, owner_user: User, regular_user: User, owner_cookies: dict
 ) -> None:
+    # Wie beim Lesen: eine Antwort fuer jeden Grund.
     gruppe = _gruppe(db, owner_user, regular_user)
     mid = SocialService.derive_group_blind_mailbox_id(gruppe.id)
     _registriere_ueber_http(client, owner_cookies, mid, _token("loeschen"))
@@ -366,6 +389,13 @@ def test_loeschen_ohne_nachweis_ist_403(
         f"/api/social/e2ee/envelopes/{mid}?client_uuid=egal", cookies=owner_cookies, headers=kopf
     )
     assert ohne.status_code == 403
+
+    mit = client.delete(
+        f"/api/social/e2ee/envelopes/{mid}?client_uuid=egal",
+        cookies=owner_cookies,
+        headers={**kopf, "X-Mailbox-Token": _token("loeschen")},
+    )
+    assert mit.status_code == 200, mit.text
 
 
 def test_tippen_ohne_nachweis_ist_403(
@@ -395,3 +425,158 @@ def test_mailbox_ohne_nachweis_bleibt_ohne_kopfzeile_erreichbar(
 
     antwort = client.get(f"/api/social/e2ee/mailbox/{mid}", cookies=owner_cookies)
     assert antwort.status_code == 200
+
+
+# ── Die Kennung aus dem Gruppengeheimnis (Stufe 3d) ─────────────────────────
+#
+# Bis hierher war jede Mailbox-Kennung aus kleinen Ganzzahlen nachrechenbar,
+# und `assert_mailbox_participant` konnte deshalb nachschlagen, wer dazugehoert.
+# Faellt die Kennung aus einem Gruppengeheimnis, **kann** der Server das nicht
+# mehr — er weiss nicht, wem sie gehoert, und soll es nicht wissen. Dann ist
+# der Besitznachweis keine zusaetzliche Schranke mehr, sondern die einzige
+# Berechtigung, die es gibt.
+
+
+UNABLEITBAR = "3" * 64
+
+
+def test_eine_unableitbare_mailbox_oeffnet_sich_mit_dem_nachweis(
+    client: TestClient, db: Session, owner_user: User, owner_cookies: dict
+) -> None:
+    """Der Kern von Stufe 3d: ohne diesen Weg waere die neue Kennung tot.
+
+    Kein Mitglied, keine Gruppe, kein Direktchat fuehrt auf diese Kennung.
+    Oeffnete sie sich nur ueber die Teilnehmerpruefung, koennte niemand sie
+    lesen — auch ihre Besitzer nicht.
+    """
+    _registriere_ueber_http(client, owner_cookies, UNABLEITBAR, _token("neu"))
+    _umschlag(db, UNABLEITBAR)
+
+    antwort = client.get(
+        f"/api/social/e2ee/mailbox/{UNABLEITBAR}",
+        cookies=owner_cookies,
+        headers={"X-Mailbox-Token": _token("neu")},
+    )
+
+    assert antwort.status_code == 200
+    assert len(antwort.json()) == 1
+
+
+def test_eine_unableitbare_mailbox_bleibt_ohne_nachweis_zu(
+    client: TestClient, db: Session, owner_user: User, owner_cookies: dict
+) -> None:
+    # Und die Kehrseite. Waere sie ohne Nachweis offen, haette die ganze Stufe
+    # nur die Adresse geaendert und keine Tuer zugemacht.
+    _registriere_ueber_http(client, owner_cookies, UNABLEITBAR, _token("neu"))
+    _umschlag(db, UNABLEITBAR)
+
+    ohne = client.get(f"/api/social/e2ee/mailbox/{UNABLEITBAR}", cookies=owner_cookies)
+    falsch = client.get(
+        f"/api/social/e2ee/mailbox/{UNABLEITBAR}",
+        cookies=owner_cookies,
+        headers={"X-Mailbox-Token": _token("daneben")},
+    )
+
+    assert ohne.status_code == 403
+    assert falsch.status_code == 403
+
+
+def test_ein_fremdes_konto_kommt_mit_dem_nachweis_hinein(
+    client: TestClient, db: Session, owner_user: User, owner_cookies: dict
+) -> None:
+    """Und das ist **kein** Fehler, sondern die Entscheidung dieser Stufe.
+
+    Der Server kann nicht pruefen, wer zu einer Mailbox gehoert, die er nicht
+    ausrechnen kann. Wer den Nachweis vorlegt, hat das Gruppengeheimnis — und
+    wer das Gruppengeheimnis hat, konnte ohnehin jede Nachricht lesen. Die
+    Schranke ist das Geheimnis, nicht das Konto.
+
+    Was daraus folgt, steht schwarz auf weiss: ein hinausgeworfenes Mitglied
+    kennt das Geheimnis noch. Dagegen hilft erst MLS, und bis dahin haelt die
+    Teilnehmerpruefung die **alte**, ableitbare Kennung.
+    """
+    _registriere_ueber_http(client, owner_cookies, UNABLEITBAR, _token("neu"))
+    _umschlag(db, UNABLEITBAR)
+    _fremder(db)
+    fremde_kekse = _fremde_kekse(client)
+
+    antwort = client.get(
+        f"/api/social/e2ee/mailbox/{UNABLEITBAR}",
+        cookies=fremde_kekse,
+        headers={"X-Mailbox-Token": _token("neu")},
+    )
+
+    assert antwort.status_code == 200
+
+
+def test_ein_fremdes_konto_kommt_ohne_nachweis_nicht_hinein(
+    client: TestClient, db: Session, owner_user: User, owner_cookies: dict
+) -> None:
+    _registriere_ueber_http(client, owner_cookies, UNABLEITBAR, _token("neu"))
+    _umschlag(db, UNABLEITBAR)
+    _fremder(db)
+    fremde_kekse = _fremde_kekse(client)
+
+    antwort = client.get(
+        f"/api/social/e2ee/mailbox/{UNABLEITBAR}", cookies=fremde_kekse
+    )
+
+    assert antwort.status_code == 403
+
+
+def test_die_alte_kennung_bleibt_fuer_mitglieder_offen(
+    client: TestClient, db: Session, owner_user: User, regular_user: User, owner_cookies: dict
+) -> None:
+    """Der Umzug darf den Bestand nicht mitnehmen.
+
+    Waehrend des Umzugs liegen Nachrichten in beiden Mailboxen, und die
+    Mitglieder bekommen das Geheimnis nicht gleichzeitig. Verschloesse sich die
+    alte Kennung mit, saehe ein Mitglied ohne Geheimnis gar nichts mehr — der
+    Fehler, der am 22.09.2026 schon einmal gemessen wurde.
+    """
+    gruppe = _gruppe(db, owner_user, regular_user)
+    alt = SocialService.derive_group_blind_mailbox_id(gruppe.id)
+    _umschlag(db, alt)
+    # Der Nachweis liegt auf der **neuen** Kennung, nicht auf der alten.
+    _registriere_ueber_http(client, owner_cookies, UNABLEITBAR, _token("neu"))
+
+    antwort = client.get(f"/api/social/e2ee/mailbox/{alt}", cookies=owner_cookies)
+
+    assert antwort.status_code == 200
+    assert len(antwort.json()) == 1
+
+
+def test_loeschen_geht_in_der_unableitbaren_mailbox(
+    client: TestClient, db: Session, owner_user: User, owner_cookies: dict
+) -> None:
+    # Eine geloeschte Nachricht muss auch dort verschwinden. Ginge das nicht,
+    # bliebe der Chiffretext liegen, waehrend die Anzeige „geloescht" sagt.
+    _registriere_ueber_http(client, owner_cookies, UNABLEITBAR, _token("neu"))
+    _umschlag(db, UNABLEITBAR)
+    kopf = {"X-CSRF-Token": owner_cookies.get("__Secure-csrf_token", "")}
+
+    antwort = client.delete(
+        f"/api/social/e2ee/envelopes/{UNABLEITBAR}?client_uuid=vorhanden-1",
+        cookies=owner_cookies,
+        headers={**kopf, "X-Mailbox-Token": _token("neu")},
+    )
+
+    assert antwort.status_code == 200
+    assert antwort.json()["deleted"] == 1
+
+
+def test_loeschen_ohne_nachweis_geht_dort_nicht(
+    client: TestClient, db: Session, owner_user: User, owner_cookies: dict
+) -> None:
+    _registriere_ueber_http(client, owner_cookies, UNABLEITBAR, _token("neu"))
+    _umschlag(db, UNABLEITBAR)
+    kopf = {"X-CSRF-Token": owner_cookies.get("__Secure-csrf_token", "")}
+
+    antwort = client.delete(
+        f"/api/social/e2ee/envelopes/{UNABLEITBAR}?client_uuid=vorhanden-1",
+        cookies=owner_cookies,
+        headers=kopf,
+    )
+
+    assert antwort.status_code == 403
+    assert db.query(E2eeBlindEnvelope).filter_by(blind_mailbox_id=UNABLEITBAR).count() == 1

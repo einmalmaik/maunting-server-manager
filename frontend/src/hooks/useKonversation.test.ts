@@ -31,13 +31,25 @@ const { lesungen, geraete, gruppenLesungen, gerufen, klartextCache, abgelegt } =
     verwirfDrSitzung: [] as string[],
     verarbeiteGruppenSteuerung: [] as string[],
     holeGeraeteSteuerung: [] as number[],
+    /** Aus welchen Mailboxen ein Durchlauf gelesen hat, in der Reihenfolge. */
+    gelesen: [] as string[],
   },
 }))
 
 let umschlaege: any[] = []
+/**
+ * Was in den einzelnen Mailboxen liegt, wenn eine Gruppe umgezogen ist.
+ *
+ * Leer heisst: alle Kennungen liefern `umschlaege`. So bleiben die Fälle, die
+ * den Umzug nicht betreffen, unverändert.
+ */
+const proMailbox = new Map<string, any[]>()
 
 vi.mock('@/api/social', () => ({
-  fetchE2eeEnvelopes: vi.fn(async () => umschlaege),
+  fetchE2eeEnvelopes: vi.fn(async (kennung: string) => {
+    gerufen.gelesen.push(kennung)
+    return proMailbox.get(kennung) ?? umschlaege
+  }),
 }))
 
 vi.mock('@/services/e2eeCrypto', () => ({
@@ -88,7 +100,18 @@ vi.mock('@/services/gruppenSchluessel', () => ({
     return 0
   }),
   verschluesseleFuerGruppe: vi.fn(async (k: any, payload: string) => `sv-e2ee-group-v1:${k.groupId}:${payload}`),
+  // Wohin gesendet und woraus gelesen wird. Ohne gesetzten Umzug bleibt es bei
+  // der alten Kennung — so verhalten sich alle Fälle wie vor Stufe 3d.
+  gruppenZiele: vi.fn(async (_g: number, alt: string) => {
+    const neu = umzug.get(alt)
+    return neu
+      ? { senden: neu, lesen: [neu, alt], nachweis: 'token' }
+      : { senden: alt, lesen: [alt], nachweis: null }
+  }),
 }))
+
+/** Gesetzt heisst: diese Gruppe ist in die neue Kennung umgezogen. */
+const umzug = new Map<string, string>()
 
 vi.mock('@/services/ratchetSitzung', () => ({
   baueZustellungen: vi.fn(async (_k: any, klartext: string, basisUuid: string) => [
@@ -173,6 +196,9 @@ describe('useKonversation', () => {
     gerufen.verwirfDrSitzung.length = 0
     gerufen.verarbeiteGruppenSteuerung.length = 0
     gerufen.holeGeraeteSteuerung.length = 0
+    gerufen.gelesen.length = 0
+    umzug.clear()
+    proMailbox.clear()
     klartextCache.clear()
     abgelegt.clear()
     identitaetRef.current = {
@@ -446,6 +472,49 @@ describe('useKonversation', () => {
       expect(gerufen.holeGeraeteSteuerung).toEqual([ICH])
     })
 
+    it('liest während des Umzugs aus beiden Mailboxen', async () => {
+      /*
+       * Der Fall, der sonst lautlos die Hälfte des Gesprächs verschluckt: die
+       * Mitglieder bekommen das Gruppengeheimnis nicht gleichzeitig. Wer es
+       * schon hat, sendet in die neue Mailbox; wer nicht, in die alte. Läse
+       * jeder nur seine eigene, sähe keiner den anderen — und niemand bekäme
+       * eine Fehlermeldung.
+       */
+      umzug.set('gruppe-7', 'geheime-mailbox')
+      proMailbox.set('geheime-mailbox', [umschlag(2, 'g-neu')])
+      proMailbox.set('gruppe-7', [umschlag(1, 'g-alt')])
+      gruppenLesungen.set('g-neu', { art: 'klartext', text: 'aus der neuen' })
+      gruppenLesungen.set('g-alt', { art: 'klartext', text: 'aus der alten' })
+
+      const { result } = await baueHook({ art: 'gruppe', groupId: 7, mitglieder: [ICH, DU] })
+      const gelesen = await result.current.liesUmschlaege()
+
+      expect(gerufen.gelesen).toEqual(['geheime-mailbox', 'gruppe-7'])
+      expect(gelesen?.map((l: any) => l.text)).toEqual(['aus der alten', 'aus der neuen'])
+    })
+
+    it('liest weiter, wenn eine der beiden Mailboxen streikt', async () => {
+      // Die alte Kennung kann 404 werden, sobald der Bestand geräumt ist. Das
+      // darf die neue nicht mitreissen — sonst nimmt ein aufgeräumter Server
+      // dem Gespräch die Gegenwart.
+      umzug.set('gruppe-7', 'geheime-mailbox')
+      proMailbox.set('geheime-mailbox', [umschlag(2, 'g-neu')])
+      gruppenLesungen.set('g-neu', { art: 'klartext', text: 'aus der neuen' })
+      const echt = (await import('@/api/social')).fetchE2eeEnvelopes as any
+      echt.mockImplementationOnce(async (k: string) => {
+        gerufen.gelesen.push(k)
+        return proMailbox.get(k) ?? []
+      })
+      echt.mockImplementationOnce(async () => {
+        throw new Error('404')
+      })
+
+      const { result } = await baueHook({ art: 'gruppe', groupId: 7, mitglieder: [ICH, DU] })
+      const gelesen = await result.current.liesUmschlaege()
+
+      expect(gelesen?.map((l: any) => l.text)).toEqual(['aus der neuen'])
+    })
+
     it('lässt die Geräte-Mailbox beim Direktchat aus', async () => {
       // Sie trägt Gruppenschlüssel. Ein Direktchat hat keine, und ein Aufruf
       // je Durchlauf wäre eine Abfrage, die nie etwas findet.
@@ -487,6 +556,19 @@ describe('useKonversation', () => {
     it('sendet nicht, solange die Mitgliederliste der Gruppe fehlt', async () => {
       const { result } = await baueHook({ art: 'gruppe', groupId: 7, mitglieder: [] })
       expect(await result.current.baueVersand('Hallo', 'uuid-3')).toEqual([])
+    })
+
+    it('adressiert die Kennung aus dem Gruppengeheimnis, sobald es eine gibt', async () => {
+      // Der Umzug aus Stufe 3d. Was der Server nicht ausrechnen kann, muss der
+      // Client adressieren — sonst landet die Nachricht in der alten Mailbox,
+      // die bald niemand mehr liest.
+      umzug.set('gruppe-7', 'geheime-mailbox')
+
+      const { result } = await baueHook({ art: 'gruppe', groupId: 7, mitglieder: [ICH, DU] })
+      const auftraege = await result.current.baueVersand('Hallo Gruppe', 'uuid-4')
+
+      expect(auftraege).toHaveLength(1)
+      expect(auftraege[0].blind_mailbox_id).toBe('geheime-mailbox')
     })
 
     it('versiegelt eine Quittung je Gerät, mit eigener Kennung', async () => {

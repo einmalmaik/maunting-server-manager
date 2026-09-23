@@ -1687,6 +1687,61 @@ class SocialService:
         return secrets.compare_digest(eintrag.auth_verifier, cls._verifier_von(auth_token))
 
     @classmethod
+    def hat_zugang(cls, db: Session, user_id: int, mailbox_id: str, token: str | None) -> bool:
+        """Darf dieses Konto diese eine Mailbox öffnen?
+
+        **Die eine Tür.** Es gibt zwei Arten hineinzukommen, und beide stehen
+        nur hier: das Konto gehört zur Mailbox (der Bestand), oder es legt den
+        Besitznachweis vor (das Neue). Jede Route, die eine einzelne Mailbox
+        aufschließt, fragt hier — und `erlaubte_mailboxen` fragt für Listen
+        dasselbe.
+
+        Der zweite Weg ist der Grund, warum Stufe 3 überhaupt funktionieren
+        kann: sobald die Kennung aus einem Gruppengeheimnis fällt, **kann** der
+        Server die Mitgliedschaft nicht mehr nachschlagen. Er weiß nicht, wem
+        die Mailbox gehört, und soll es nicht wissen. Bliebe es beim
+        Teilnehmerschloss allein, wäre die neue Kennung für jeden verschlossen,
+        auch für ihre Besitzer.
+
+        Der erste Weg bleibt, solange es ableitbare Kennungen gibt. Er ist
+        zugleich die Schranke, die ein hinausgeworfenes Mitglied hält: das
+        Gruppengeheimnis kennt es noch, den Nachweis kann es sich ausrechnen —
+        erst MLS trägt die Zugehörigkeit kryptographisch.
+        """
+        mid = (mailbox_id or "").strip()
+        if not mid:
+            return False
+        if cls.hat_gueltigen_nachweis(db, mid, token):
+            return True
+        try:
+            cls.assert_mailbox_participant(db, user_id, mid)
+            # Eine Mailbox mit hinterlegtem Nachweis öffnet sich nicht allein
+            # durch Mitgliedschaft — sonst wäre der eine Weg die Hintertür
+            # neben der verschlossenen Vordertür des anderen.
+            cls.assert_mailbox_token(db, mid, token)
+        except HTTPException:
+            return False
+        return True
+
+    @classmethod
+    def assert_mailbox_zugang(
+        cls, db: Session, user_id: int, mailbox_id: str, token: str | None
+    ) -> None:
+        """`hat_zugang`, aber mit 403 statt `False`.
+
+        **Eine Antwort für jeden Grund.** 403 ist, was
+        `assert_mailbox_participant` schon immer für einen Fremden gab; dass
+        auch der fehlende und der falsche Nachweis so antworten, ist der
+        Zugewinn: vorher unterschied sich „kein Mitglied" (403 aus der
+        Teilnehmerprüfung) nicht von „verschlossen" (403 aus der
+        Nachweisprüfung) nur zufällig — jetzt kann es sich gar nicht mehr
+        unterscheiden. Aus der Antwort ist nicht zu lesen, ob es diese Mailbox
+        gibt, ob sie einen Nachweis trägt oder wer dazugehört.
+        """
+        if not cls.hat_zugang(db, user_id, mailbox_id, token):
+            raise HTTPException(status_code=403, detail="Keine Berechtigung für diese Mailbox.")
+
+    @classmethod
     def erlaubte_mailboxen(
         cls, db: Session, user_id: int, eintraege: Iterable[tuple[str, str | None]]
     ) -> list[str]:
@@ -1698,8 +1753,8 @@ class SocialService:
         zweimal da, wäre die zweite Fassung irgendwann die nachsichtigere, und
         Push wäre der Weg, über den man erfährt, was der Strom einem nicht sagt.
 
-        Zwei Wege hinein, und jede Kennung geht einzeln: das Konto gehört zur
-        Mailbox (der Bestand), oder es legt den Besitznachweis vor (das Neue).
+        Geprüft wird je Kennung mit `hat_zugang` — dieselbe Tür, durch die auch
+        eine einzelne Mailbox aufgeht.
 
         **Was durchfällt, fällt still durch.** Die Antwort nennt nur, was
         erlaubt ist, nie warum etwas fehlt — eine einzelne Ablehnung wäre eine
@@ -1708,25 +1763,18 @@ class SocialService:
         erlaubt: list[str] = []
         for kennung, token in eintraege:
             mid = (kennung or "").strip()
-            if not mid:
-                continue
-            if cls.hat_gueltigen_nachweis(db, mid, token):
+            if mid and cls.hat_zugang(db, user_id, mid, token):
                 erlaubt.append(mid)
-                continue
-            try:
-                cls.assert_mailbox_participant(db, user_id, mid)
-                # Eine Mailbox mit hinterlegtem Nachweis öffnet sich nicht
-                # allein durch Mitgliedschaft — sonst wäre das Abo die
-                # Hintertür neben der verschlossenen Vordertür.
-                cls.assert_mailbox_token(db, mid, token)
-            except HTTPException:
-                continue
-            erlaubt.append(mid)
         return erlaubt
 
     @classmethod
     def delete_blind_envelopes(
-        cls, db: Session, blind_mailbox_id: str, client_uuid: str, user_id: int
+        cls,
+        db: Session,
+        blind_mailbox_id: str,
+        client_uuid: str,
+        user_id: int,
+        mailbox_token: str | None = None,
     ) -> int:
         """Entfernt die Umschläge einer Nachricht aus einer blinden Mailbox.
 
@@ -1760,7 +1808,7 @@ class SocialService:
         if not clean_uuid:
             raise HTTPException(status_code=400, detail="client_uuid fehlt.")
 
-        cls.assert_mailbox_participant(db, user_id, clean_mailbox)
+        cls.assert_mailbox_zugang(db, user_id, clean_mailbox, mailbox_token)
 
         rows = (
             db.query(E2eeBlindEnvelope)

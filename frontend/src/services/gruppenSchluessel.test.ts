@@ -70,9 +70,13 @@ let relaisKaputt = false
 /**
  * Jede Registrierung eines Besitznachweises, in der Reihenfolge.
  *
- * Muss in dieser Stufe leer bleiben — siehe den Test dazu.
+ * Erwartet wird genau eine, und zwar auf der Kennung **aus dem Geheimnis**.
+ * Eine auf der alten Kennung wäre der Fehler, der den Messenger schon einmal
+ * zerstört hat — siehe den Test dazu.
  */
 const registrierungen: { mailboxId: string; authToken: string }[] = []
+/** Gesetzt heisst: der Server nimmt den Nachweis nicht an. */
+let registrierungFehlschlag = false
 
 vi.mock('@/api/social', () => ({
   relayE2eeEnvelope: async (payload: {
@@ -99,6 +103,7 @@ vi.mock('@/api/social', () => ({
   // ist der Fall, den ein Nachzügler auslöst.
   getGroupMembers: async () => serverMitglieder.map((user_id) => ({ user_id })),
   registriereMailbox: async (mailboxId: string, authToken: string) => {
+    if (registrierungFehlschlag) throw new Error('409')
     registrierungen.push({ mailboxId, authToken })
   },
 }))
@@ -111,8 +116,11 @@ import {
   erzeugeGruppenSchluessel,
   fordereGruppenSchluessel,
   holeGeraeteSteuerung,
+  gruppenZiele,
   leereGeraeteStand,
+  leereUmzuege,
   setzeGruppenAblageFuerTest,
+  umgezogeneMailbox,
   verarbeiteGruppenSteuerung,
   verschluesseleFuerGruppe,
   GruppenSchluesselNichtZugestelltError,
@@ -894,8 +902,10 @@ describe('Gruppengeheimnis', () => {
     serverMitglieder = [...alle]
     relaisKaputt = false
     registrierungen.length = 0
+    registrierungFehlschlag = false
     leereMailboxNachweise()
     leereGeraeteStand()
+    leereUmzuege()
   })
 
   it('trennt Mailbox-Kennung und Besitznachweis', async () => {
@@ -930,8 +940,12 @@ describe('Gruppengeheimnis', () => {
 
     const geheimnis = await alice.ablage.liesGeheimnis(GRUPPE)
     expect(geheimnis).not.toBeNull()
-    // Der Nachweis liegt danach im Speicher und geht bei jedem Aufruf mit.
-    expect(mailboxNachweis(MAILBOX)).toBe(await nachweisAusGeheimnis(geheimnis!.geheimnis))
+    // Der Nachweis liegt danach im Speicher und geht bei jedem Aufruf mit —
+    // auf der Kennung **aus dem Geheimnis**, nicht auf der alten aus der
+    // `group_id`. Die alte bleibt offen und trägt den Bestand.
+    const neu = await mailboxAusGeheimnis(geheimnis!.geheimnis)
+    expect(mailboxNachweis(neu)).toBe(await nachweisAusGeheimnis(geheimnis!.geheimnis))
+    expect(mailboxNachweis(MAILBOX)).toBeNull()
   })
 
   it('reist mit dem Schlüssel zu den anderen Geräten', async () => {
@@ -982,22 +996,37 @@ describe('Gruppengeheimnis', () => {
     expect(alice.ablage.anzahl()).toBe(nachErster)
   })
 
-  it('registriert die Gruppenmailbox nicht, solange der Schlüssel durch sie läuft', async () => {
+  it('verschliesst die neue Kennung und lässt die alte offen', async () => {
     /*
-     * Der Test zu einem gemessenen Fehler, nicht zu einer Vermutung.
+     * Der Test zu einem gemessenen Fehler, nicht zu einer Vermutung — und zu
+     * seiner Auflösung.
      *
-     * Ein früherer Entwurf registrierte den Nachweis beim ersten Senden. Am
-     * laufenden System war die Gruppe danach tot: die Schlüsselzustellung geht
-     * durch dieselbe Mailbox (`anJedesGeraet` → `kontext.blindMailboxId`), und
-     * ein Mitglied ohne Geheimnis bekam dort 403 — also nie den Schlüssel, aus
-     * dem das Geheimnis gekommen wäre. Es sah die Nachricht nicht einmal als
+     * Ein früherer Entwurf registrierte den Nachweis auf der **alten**
+     * Kennung. Am laufenden System war die Gruppe danach tot: die
+     * Schlüsselzustellung lief damals durch genau diese Mailbox, und ein
+     * Mitglied ohne Geheimnis bekam dort 403 — also nie den Schlüssel, aus dem
+     * das Geheimnis gekommen wäre. Es sah die Nachricht nicht einmal als
      * „Verschlüsselte Nachricht"; die Mailbox lieferte gar nichts mehr.
      *
-     * Registriert werden darf erst, wenn die Zustellung woanders läuft.
+     * Jetzt geht es, weil der Schlüssel einen anderen Weg nimmt: in die
+     * Geräte-Mailbox des Empfängers. Durch die neue Gruppenmailbox kommt
+     * nichts, was man zum Öffnen der neuen Gruppenmailbox bräuchte.
+     *
+     * Beide Hälften stehen hier zusammen, weil die eine ohne die andere in die
+     * Irre führt: „registriert" allein wäre die Zusage, die den Messenger
+     * schon einmal zerstört hat.
      */
     const stand = naechsteId
     await sendeAlsEigentuemer(alice, alle, 'erste')
-    expect(registrierungen).toEqual([])
+
+    const geheimnis = (await alice.ablage.liesGeheimnis(GRUPPE))!.geheimnis
+    const neu = await mailboxAusGeheimnis(geheimnis)
+    expect(registrierungen).toEqual([
+      { mailboxId: neu, authToken: await nachweisAusGeheimnis(geheimnis) },
+    ])
+    // Die alte bleibt unverschlossen: sie trägt den Bestand und die Mitglieder,
+    // deren Geheimnis noch unterwegs ist.
+    expect(registrierungen.some((r) => r.mailboxId === MAILBOX)).toBe(false)
 
     // Und die Gegenprobe, die zählt: das Mitglied kommt an den Schlüssel.
     // Von Anfang an gelesen, denn die Zustellung liegt beim ersten Senden —
@@ -1007,6 +1036,46 @@ describe('Gruppengeheimnis', () => {
       texte: ['erste', 'zweite'],
       unlesbar: 0,
     })
+  })
+
+  it('bleibt sendefähig, wenn das Registrieren scheitert', async () => {
+    // Ein 409 hiesse „schon registriert, mit anderem Token", alles andere ist
+    // ein Netzfehler. Beides darf die Nachricht nicht aufhalten: der Nachweis
+    // ist jederzeit nachholbar, eine nicht gesendete Nachricht nicht.
+    registrierungFehlschlag = true
+    const stand = naechsteId
+
+    await sendeAlsEigentuemer(alice, alle, 'trotzdem')
+
+    expect(await lies(bob, alle, stand - 1)).toEqual({ texte: ['trotzdem'], unlesbar: 0 })
+  })
+
+  it('zieht Senden und Lesen in die Kennung aus dem Geheimnis um', async () => {
+    // Der Umzug selbst: `gruppenZiele` ist die eine Stelle, die ihn kennt.
+    await sendeAlsEigentuemer(alice, alle, 'erste')
+    const geheimnis = (await alice.ablage.liesGeheimnis(GRUPPE))!.geheimnis
+    const neu = await mailboxAusGeheimnis(geheimnis)
+
+    aktiviere(alice)
+    const ziele = await gruppenZiele(GRUPPE, MAILBOX)
+
+    expect(ziele.senden).toBe(neu)
+    // Beide, und die neue zuerst: der Bestand liegt noch in der alten, und die
+    // Mitglieder ohne Geheimnis senden weiter dorthin.
+    expect(ziele.lesen).toEqual([neu, MAILBOX])
+    expect(ziele.nachweis).toBe(await nachweisAusGeheimnis(geheimnis))
+    // Und wohin die alte Kennung zeigt — das braucht das Löschen, das nur sie hat.
+    expect(umgezogeneMailbox(MAILBOX)).toBe(neu)
+  })
+
+  it('bleibt bei der alten Kennung, solange es kein Geheimnis gibt', async () => {
+    // Bestandsgruppe, oder das Geheimnis ist noch unterwegs. Ein Umzug auf
+    // Verdacht wäre eine Mailbox, die niemand sonst liest.
+    aktiviere(bob)
+    const ziele = await gruppenZiele(GRUPPE, MAILBOX)
+
+    expect(ziele).toEqual({ senden: MAILBOX, lesen: [MAILBOX], nachweis: null })
+    expect(umgezogeneMailbox(MAILBOX)).toBeNull()
   })
 })
 

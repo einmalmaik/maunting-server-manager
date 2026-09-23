@@ -40,6 +40,7 @@ import type { E2eeIdentity } from '@/services/e2eeIdentity'
 import {
   entschluesseleGruppenUmschlag,
   fordereGruppenSchluessel,
+  gruppenZiele,
   holeGeraeteSteuerung,
   verarbeiteGruppenSteuerung,
   verschluesseleFuerGruppe,
@@ -236,10 +237,20 @@ export async function baueVersandFuer(
   if (!mid) throw new Error(i18n.t('chat.errors.noMailbox'))
 
   if (gruppenKontext) {
+    // Adressiert wird die Kennung aus dem Gruppengeheimnis, sobald es eines
+    // gibt. `blindMailboxId` bleibt die Kennung des **Gesprächs** — daran
+    // hängen der örtliche Klartext-Cache und die Anzeige, und die dürfen beim
+    // Umzug nicht mitwandern, sonst steht der Verlauf plötzlich woanders.
     // Der Gruppenschlüssel rotiert hier, falls sich die Mitgliedschaft
-    // geändert hat, und die Zustellung an alle Geräte läuft mit.
+    // geändert hat, und die Zustellung an alle Geräte läuft mit. Erst danach
+    // die Ziele holen: das Verschlüsseln legt das Geheimnis an, wenn es noch
+    // keines gab, und vorher gefragt ginge diese Nachricht noch in die alte
+    // Mailbox — die eine, die niemand sonst mehr liest.
     const umschlag = await verschluesseleFuerGruppe(gruppenKontext, payload)
-    return [{ blind_mailbox_id: mid, ciphertext_envelope: umschlag, client_uuid: clientUuid }]
+    const ziele = await gruppenZiele(gruppenKontext.groupId, mid)
+    return [
+      { blind_mailbox_id: ziele.senden, ciphertext_envelope: umschlag, client_uuid: clientUuid },
+    ]
   }
 
   if (drKontext) {
@@ -346,7 +357,37 @@ export function useKonversation({
       if (aktuelleMailbox.current !== mid) return null
     }
 
-    const umschlaege = await fetchE2eeEnvelopes(mid)
+    /**
+     * Aus welchen Mailboxen dieser Durchlauf liest.
+     *
+     * Bei einer Gruppe sind das zwei, solange der Umzug läuft: die Kennung aus
+     * dem Gruppengeheimnis und die alte aus der `group_id`. Die Mitglieder
+     * bekommen das Geheimnis nicht gleichzeitig — es reist als Steuerumschlag
+     * in ihre Geräte-Mailbox —, und wer es noch nicht hat, sendet weiter in
+     * die alte. Läse jeder nur seine eigene, verlöre das Gespräch lautlos die
+     * Hälfte seiner Nachrichten.
+     *
+     * Nach `holeGeraeteSteuerung`, nicht davor: genau dort kommt das
+     * Geheimnis an, und ein Durchlauf, der vorher fragt, liest die neue
+     * Mailbox erst beim nächsten Mal.
+     */
+    const lesen = gruppenKontext
+      ? (await gruppenZiele(gruppenKontext.groupId, mid)).lesen
+      : [mid]
+    if (aktuelleMailbox.current !== mid) return null
+
+    const umschlaege = (
+      await Promise.all(
+        lesen.map((kennung) =>
+          fetchE2eeEnvelopes(kennung).catch(() => [] as Awaited<ReturnType<typeof fetchE2eeEnvelopes>>),
+        ),
+      )
+    )
+      .flat()
+      // Beide Mailboxen zählen für sich, ihre Nummern laufen also durcheinander.
+      // Sortiert wird nach Zeit, und bei Gleichstand nach Nummer — sonst
+      // sprängen die Nachrichten zweier Mailboxen im Verlauf hin und her.
+      .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id - b.id)
     if (aktuelleMailbox.current !== mid) return null
     // Was hier steht, ist schon einmal geöffnet worden. Unverzichtbar, nicht
     // bloß schnell: ein Ratchet-Nachrichtenschlüssel ist nach dem ersten Öffnen

@@ -709,9 +709,11 @@ def fetch_blind_mailbox_envelopes(
     current_user: User = Depends(get_current_user),
     nachweis: str | None = Depends(mailbox_token),
 ) -> list[dict]:
-    # H-3: Jede Mailbox darf nur von berechtigten Teilnehmern abgefragt werden
-    SocialService.assert_mailbox_token(db, blind_mailbox_id, nachweis)
-    SocialService.assert_mailbox_participant(db, current_user.id, blind_mailbox_id)
+    # Eine Mailbox öffnet sich nur ihren Besitzern: entweder gehört das Konto
+    # dazu, oder es legt den Besitznachweis vor. Seit die Kennung aus einem
+    # Gruppengeheimnis fallen kann, ist der zweite Weg kein Zusatz mehr,
+    # sondern der einzige — der Server kann dort niemanden nachschlagen.
+    SocialService.assert_mailbox_zugang(db, current_user.id, blind_mailbox_id, nachweis)
 
     envelopes = SocialService.get_blind_envelopes(
         db, blind_mailbox_id=blind_mailbox_id, since_id=since_id, limit=limit
@@ -744,12 +746,12 @@ def delete_blind_mailbox_envelopes(
     Adressiert wird ueber die logische Nachrichtenkennung, nicht ueber die
     Umschlagkennung: eine Nachricht liegt als eine Kopie je Zielgeraet da.
     """
-    SocialService.assert_mailbox_token(db, blind_mailbox_id, nachweis)
     entfernt = SocialService.delete_blind_envelopes(
         db,
         blind_mailbox_id=blind_mailbox_id,
         client_uuid=client_uuid,
         user_id=current_user.id,
+        mailbox_token=nachweis,
     )
     return {"ok": True, "deleted": entfernt}
 

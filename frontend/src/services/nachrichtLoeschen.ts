@@ -22,6 +22,7 @@
  */
 
 import { loescheBlindeUmschlaege, loescheChatMedium } from '@/api/social'
+import { umgezogeneMailbox } from './gruppenSchluessel'
 import { leereUmschlagKlartext, updateMessageInLocalStore } from './messengerLocalStore'
 
 /** Ein Anhang, der auf einen hochgeladenen Blob zeigt. */
@@ -152,8 +153,26 @@ export async function tilgeNachrichtBeimServer(
   }
 
   if (blindMailboxId && msg.clientUuid) {
-    await loescheBlindeUmschlaege(blindMailboxId, msg.clientUuid)
+    for (const kennung of loeschZiele(blindMailboxId)) {
+      await loescheBlindeUmschlaege(kennung, msg.clientUuid)
+    }
   }
+}
+
+/**
+ * Alle Mailboxen, in denen diese Nachricht liegen könnte.
+ *
+ * Eine Gruppe zieht in eine Kennung aus ihrem Geheimnis um, und während des
+ * Umzugs liegen Nachrichten in beiden. Nur die eine zu räumen hiesse: „gelöscht"
+ * anzeigen, während der Chiffretext in der anderen liegenbleibt — genau die
+ * falsche Zusage, gegen die der Rest dieser Datei geschrieben ist.
+ *
+ * Ein Löschen in der falschen Mailbox kostet nichts: es findet die Kennung
+ * nicht und meldet `deleted: 0`.
+ */
+function loeschZiele(blindMailboxId: string): string[] {
+  const neu = umgezogeneMailbox(blindMailboxId)
+  return neu ? [neu, blindMailboxId] : [blindMailboxId]
 }
 
 /**
@@ -188,7 +207,9 @@ export async function tilgeFremdeNachrichtBeimServer(
   }
 
   if (blindMailboxId && msg.clientUuid) {
-    await loescheBlindeUmschlaege(blindMailboxId, msg.clientUuid)
+    for (const kennung of loeschZiele(blindMailboxId)) {
+      await loescheBlindeUmschlaege(kennung, msg.clientUuid)
+    }
   }
   return { medienGeblieben }
 }
