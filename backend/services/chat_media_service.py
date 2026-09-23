@@ -14,9 +14,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
 import uuid
-from typing import Any
 from fastapi import HTTPException
-from sqlalchemy import or_, and_
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -26,7 +24,6 @@ from models import (
     ChatMedia,
     DirectChat,
     User,
-    UserFriend,
 )
 from services.chat_media_validator import (
     MAX_MEDIA_BYTES,
@@ -107,35 +104,33 @@ class ChatMediaService:
             return
 
         # 2. Direktchat (1:1)
+        #
+        # Bis Stufe 6b stand in der Chatzeile, wer dazugehoert; hier wurde
+        # nachgeschlagen. Jetzt steht dort nur noch die Kennung der Mailbox,
+        # und die Zugehoerigkeit wird gerechnet: `gegenueber_aus_mailbox`
+        # leitet fuer jedes aktive Konto die Kennung ab, die dieses Paar
+        # ergaebe. Dieselbe Antwort, ohne dass der Server eine Liste fuehrt.
+        clean_mailbox = media.blind_mailbox_id.strip()
+        zeile = None
         if media.direct_chat_id is not None:
-            chat = db.query(DirectChat).filter(DirectChat.id == media.direct_chat_id).first()
-            if not chat or user_id not in (chat.user_a_id, chat.user_b_id):
+            zeile = db.query(DirectChat).filter(DirectChat.id == media.direct_chat_id).first()
+            if zeile is None:
                 raise HTTPException(
                     status_code=403,
                     detail="Keine Chat-Mitgliedschaft: Benutzer gehoert nicht zu dieser Konversation.",
                 )
+            clean_mailbox = (zeile.blind_mailbox_id or clean_mailbox).strip()
+        else:
+            zeile = db.query(DirectChat).filter_by(blind_mailbox_id=clean_mailbox).first()
 
-            # Blockierungspruefung
-            other_id = chat.get_other_user_id(user_id)
-            if _ist_blockiert(db, user_id, other_id):
-                raise HTTPException(
-                    status_code=403,
-                    detail="Kommunikation blockiert: Zugriff auf Medien verweigert.",
-                )
-            return
-
-        # 3. Blinde Mailbox Fallback
-        clean_mailbox = media.blind_mailbox_id.strip()
-        chat_by_box = db.query(DirectChat).filter_by(blind_mailbox_id=clean_mailbox).first()
-        if chat_by_box:
-            if user_id not in (chat_by_box.user_a_id, chat_by_box.user_b_id):
+        if zeile is not None:
+            gegenueber = SocialService.gegenueber_aus_mailbox(db, user_id, clean_mailbox)
+            if gegenueber is None:
                 raise HTTPException(
                     status_code=403,
                     detail="Keine Chat-Mitgliedschaft: Benutzer gehoert nicht zu diesem Chat.",
                 )
-            # Blockierungspruefung
-            other_id = chat_by_box.get_other_user_id(user_id)
-            if _ist_blockiert(db, user_id, other_id):
+            if _ist_blockiert(db, user_id, gegenueber):
                 raise HTTPException(
                     status_code=403,
                     detail="Kommunikation blockiert: Zugriff auf Medien verweigert.",

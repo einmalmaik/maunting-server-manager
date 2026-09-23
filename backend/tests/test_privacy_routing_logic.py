@@ -287,10 +287,13 @@ def test_messaging_non_friend_to_public_user_and_reply_rule(db: Session):
     )
     assert env1.id is not None
 
-    # Chat existiert nun in direct_chats
+    # Chat existiert nun in direct_chats — als Kennung, nicht als Namenspaar.
+    # `initiated_by_user_id` stand hier bis Stufe 6b; die Zeile sagt seitdem
+    # „dieses Gespraech gibt es", nicht „diese beiden fuehren es".
     chat = db.query(DirectChat).filter_by(blind_mailbox_id=mid).first()
     assert chat is not None
-    assert chat.initiated_by_user_id == user_a.id
+    assert not hasattr(chat, "initiated_by_user_id")
+    assert not hasattr(chat, "user_a_id")
 
     # 2. Antwort-Erlaubnis: B muss direkt antworten können, obwohl A 'private' ist und keine Freundschaft besteht!
     can_reply, reply_reason = SocialService.can_message_user(db, user_b.id, user_a.id)
@@ -306,12 +309,19 @@ def test_messaging_non_friend_to_public_user_and_reply_rule(db: Session):
     )
     assert env2.id is not None
 
-    # 3. Unterhaltung funktioniert in beide Richtungen uneingeschränkt
-    chats_a = SocialService.list_direct_chats(db, user_a.id)
-    assert any(c["other_user_id"] == user_b.id for c in chats_a)
+    # 3. Unterhaltung funktioniert in beide Richtungen uneingeschränkt.
+    #
+    # Geprueft wird am Zugang, nicht mehr an einer Liste: `list_direct_chats`
+    # gab es bis Stufe 6b, und sie beantwortete genau die Frage, die der Server
+    # nicht mehr beantworten soll. Was bleibt, ist die Tuer — beide kommen an
+    # die gemeinsame Mailbox, ein Dritter nicht.
+    SocialService.assert_mailbox_participant(db, user_a.id, mid)
+    SocialService.assert_mailbox_participant(db, user_b.id, mid)
 
-    chats_b = SocialService.list_direct_chats(db, user_b.id)
-    assert any(c["other_user_id"] == user_a.id for c in chats_b)
+    fremder = _create_user(db, "fremder_im_gespraech", privacy="public")
+    with pytest.raises(HTTPException) as fehler:
+        SocialService.assert_mailbox_participant(db, fremder.id, mid)
+    assert fehler.value.status_code == 403
 
 
 def test_messaging_forbidden_for_private_non_friend_without_existing_chat(db: Session):

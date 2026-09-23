@@ -363,9 +363,15 @@ export interface DirectChatItem {
   updated_at: string
 }
 
-export async function getDirectChats(): Promise<DirectChatItem[]> {
-  return api<DirectChatItem[]>('/social/direct-chats')
-}
+/*
+ * `getDirectChats()` rief bis Stufe 6b `GET /social/direct-chats`.
+ *
+ * Diese Route ist entfernt. Sie beantwortete „mit wem schreibt dieses Konto?",
+ * und um das zu können, musste der Server es aufschreiben — in
+ * `direct_chats.user_a_id`/`user_b_id`. Die Liste führt jetzt der Client:
+ * `gespraechsListe()` aus `services/gespraechsListe.ts`, versiegelt im
+ * örtlichen Speicher.
+ */
 
 // Anrufe liegen in `api/calls.ts`: Einladungen, Zugangstoken für den
 // Medienserver, Raumschlüssel und die Betreiber-Einstellungen.

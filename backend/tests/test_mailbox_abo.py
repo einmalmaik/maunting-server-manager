@@ -71,7 +71,7 @@ def _leere_abonnenten():
 
 
 def _gemeinsame_gruppe(db: Session, besitzer: User, mitglied: User):
-    gruppe = SocialService.create_group(db, besitzer, "Abogruppe")
+    gruppe = SocialService.create_group(db, besitzer)
     SocialService.join_group_by_invite_code(db, mitglied, gruppe.invite_code)
     return gruppe
 

@@ -537,6 +537,55 @@ class SocialService:
         return hashlib.sha256(f"msm-e2ee-box:{min_i}:{max_i}:".encode("utf-8")).hexdigest()
 
     @classmethod
+    def gegenueber_aus_mailbox(
+        cls, db: Session, user_id: int, blind_mailbox_id: str
+    ) -> int | None:
+        """Wer steht diesem Konto in dieser abgeleiteten Mailbox gegenüber?
+
+        Seit Stufe 6b steht in `direct_chats` kein Mensch mehr. Wo der Server
+        früher `user_a_id`/`user_b_id` nachschlug, rechnet er jetzt: für jedes
+        aktive Konto wird die Kennung abgeleitet, die dieses Paar ergäbe, und
+        mit der gesuchten verglichen.
+
+        **Das ist keine neue Auskunft, sondern dieselbe in teurer.** Die alten
+        Kennungen `msm:dm:<min>:<max>` und `msm-e2ee-box:<min>:<max>:` sind aus
+        zwei kleinen Ganzzahlen nachrechenbar; wer die Datenbank hat, konnte
+        sie immer schon zuordnen. Was mit den Spalten verschwindet, ist die
+        **Liste**: „zeig mir alle Gespräche von Konto 42" beantwortet keine
+        Abfrage mehr. Und eine Kennung aus einem Chatgeheimnis (Stufe 3d)
+        taucht hier gar nicht erst auf — sie ist unableitbar, und genau dorthin
+        zieht jedes Gespräch um, sobald beide Seiten das Geheimnis haben.
+
+        `None`, wenn die Kennung zu keinem Paar mit diesem Konto passt.
+        """
+        clean = (blind_mailbox_id or "").strip()
+        if not clean:
+            return None
+        for (kandidat,) in (
+            db.query(User.id).filter(User.is_active == True, User.id != user_id).all()  # noqa: E712
+        ):
+            if (
+                cls.derive_blind_mailbox_id(user_id, kandidat) == clean
+                or cls.derive_legacy_direct_mailbox_id(user_id, kandidat) == clean
+            ):
+                return kandidat
+        return None
+
+    @classmethod
+    def _direktchat_zeile(cls, db: Session, user_a_id: int, user_b_id: int) -> DirectChat | None:
+        """Die Gesprächszeile zweier Konten — gefunden über ihre Kennung.
+
+        Der Ersatz für `filter(user_a_id=..., user_b_id=...)`. Beide Ids liegen
+        dem Aufrufer in diesem Moment ohnehin vor; er rechnet daraus die
+        Kennung und sucht danach. Die Zeile selbst nennt niemanden mehr.
+        """
+        return (
+            db.query(DirectChat)
+            .filter_by(blind_mailbox_id=cls.derive_blind_mailbox_id(user_a_id, user_b_id))
+            .first()
+        )
+
+    @classmethod
     def is_blocked(cls, db: Session, user_a_id: int, user_b_id: int) -> bool:
         """Prüft, ob zwischen zwei Benutzern eine gegenseitige Blockierung vorliegt."""
         return (
@@ -602,19 +651,13 @@ class SocialService:
             if ziel is not None:
                 return ziel, None
 
-        # 1. Direktchat über bekannte Mailbox-ID in DB
-        chat = db.query(DirectChat).filter_by(blind_mailbox_id=clean_mailbox).first()
-        if chat:
-            if sender_user_id not in (chat.user_a_id, chat.user_b_id):
-                raise HTTPException(status_code=403, detail="Keine Berechtigung für diesen Chat.")
-            other_id = chat.get_other_user_id(sender_user_id)
-            if cls.is_blocked(db, sender_user_id, other_id):
-                raise HTTPException(status_code=403, detail="Benutzer ist blockiert.")
-            chat.updated_at = _now()
-            db.commit()
-            return other_id, chat
-
-        # 2. Kandidatensuche über aktive Benutzer (O(N) Fallback)
+        # Der Nachschlag in `direct_chats` stand hier bis Stufe 6b: eine Zeile
+        # je Gespräch, mit beiden Konto-Ids darin. Er war ein Abkürzung über
+        # die Suche darunter, keine eigene Fähigkeit — dieselbe Kennung findet
+        # die Kandidatensuche auch, nur ohne dass jemand aufschreiben müsste,
+        # wer mit wem schreibt.
+        #
+        # Kandidatensuche über aktive Benutzer (O(N)).
         candidates = db.query(User.id).filter(User.is_active == True, User.id != sender_user_id).all()
         for (cand_id,) in candidates:
             if (
@@ -710,20 +753,6 @@ class SocialService:
                 else freundschaft.user_id
             )
 
-        for chat in (
-            db.query(DirectChat)
-            .filter(
-                or_(
-                    DirectChat.user_a_id == sender_user_id,
-                    DirectChat.user_b_id == sender_user_id,
-                )
-            )
-            .all()
-        ):
-            gegenueber = chat.get_other_user_id(sender_user_id)
-            if gegenueber:
-                kandidaten.add(gegenueber)
-
         for uid in kandidaten:
             if cls.derive_user_device_mailbox_id(uid) == clean_mailbox:
                 # Eine Blockierung schneidet auch diesen Weg ab. Sonst wäre er
@@ -731,6 +760,29 @@ class SocialService:
                 if cls.is_blocked(db, sender_user_id, uid):
                     return None
                 return uid
+
+        # Die dritte Quelle, ohne dass jemand aufschreibt, wer mit wem schreibt.
+        #
+        # Bis Stufe 6b standen hier die Konto-Ids aus `direct_chats`. Jetzt wird
+        # es andersherum gerechnet: erst das Konto bestimmen, zu dem diese
+        # Geräte-Mailbox gehört, dann fragen, ob es zwischen ihm und dem
+        # Absender eine Gesprächszeile gibt. Die Zeile wird über die Kennung
+        # gefunden, die das Paar ergäbe — beide Ids liegen in diesem Moment vor,
+        # und der Server erfährt nichts, was er nicht ohnehin in Händen hält.
+        #
+        # Der Unterschied zur alten Fassung ist keiner in der Antwort, sondern
+        # in der Frage: „gehören diese beiden zusammen?" lässt sich beantworten,
+        # „mit wem gehört Konto 42 zusammen?" nicht mehr.
+        for (uid,) in (
+            db.query(User.id)
+            .filter(User.is_active == True, User.id != sender_user_id)  # noqa: E712
+            .all()
+        ):
+            if cls.derive_user_device_mailbox_id(uid) != clean_mailbox:
+                continue
+            if cls.is_blocked(db, sender_user_id, uid):
+                return None
+            return uid if cls._direktchat_zeile(db, sender_user_id, uid) else None
         return None
 
     @classmethod
@@ -763,14 +815,10 @@ class SocialService:
         if blocked:
             return False, "Kommunikation nicht möglich: Benutzer ist blockiert."
 
-        # Prüfe ob bereits ein DirectChat existiert (Antwort-Erlaubnis in beide Richtungen)
-        min_id, max_id = min(sender_id, target_user_id), max(sender_id, target_user_id)
-        existing_chat = (
-            db.query(DirectChat)
-            .filter(DirectChat.user_a_id == min_id, DirectChat.user_b_id == max_id)
-            .first()
-        )
-        if existing_chat:
+        # Prüfe ob bereits ein DirectChat existiert (Antwort-Erlaubnis in beide
+        # Richtungen). Gesucht wird über die Kennung, die dieses Paar ergibt —
+        # seit Stufe 6b stehen in der Zeile keine Konto-Ids mehr.
+        if cls._direktchat_zeile(db, sender_id, target_user_id):
             return True, None
 
         # Prüfe auch, ob schon Umschläge in der abgeleiteten Mailbox existieren
@@ -805,19 +853,14 @@ class SocialService:
         if not can_msg:
             raise HTTPException(status_code=403, detail=reason or "Keine Berechtigung zum Senden einer Nachricht.")
 
-        min_id, max_id = min(sender_id, target_user_id), max(sender_id, target_user_id)
-        chat = (
-            db.query(DirectChat)
-            .filter(DirectChat.user_a_id == min_id, DirectChat.user_b_id == max_id)
-            .first()
-        )
+        blind_mid = cls.derive_blind_mailbox_id(sender_id, target_user_id)
+        chat = db.query(DirectChat).filter_by(blind_mailbox_id=blind_mid).first()
         if not chat:
-            blind_mid = cls.derive_blind_mailbox_id(sender_id, target_user_id)
+            # Seit Stufe 6b ohne `user_a_id`, `user_b_id` und
+            # `initiated_by_user_id`: die Zeile sagt „dieses Gespräch gibt es",
+            # nicht „diese beiden führen es".
             chat = DirectChat(
-                user_a_id=min_id,
-                user_b_id=max_id,
                 blind_mailbox_id=blind_mid,
-                initiated_by_user_id=sender_id,
                 created_at=_now(),
                 updated_at=_now(),
             )
@@ -826,12 +869,11 @@ class SocialService:
                 db.commit()
                 db.refresh(chat)
             except Exception:
+                # Zwei gleichzeitige Erstnachrichten laufen in den eindeutigen
+                # Riegel auf `blind_mailbox_id`. Der Verlierer nimmt die Zeile
+                # des Gewinners.
                 db.rollback()
-                chat = (
-                    db.query(DirectChat)
-                    .filter(DirectChat.user_a_id == min_id, DirectChat.user_b_id == max_id)
-                    .first()
-                )
+                chat = db.query(DirectChat).filter_by(blind_mailbox_id=blind_mid).first()
                 if not chat:
                     raise
         else:
@@ -839,57 +881,23 @@ class SocialService:
             db.commit()
         return chat
 
-    @classmethod
-    def list_direct_chats(cls, db: Session, user_id: int) -> list[dict[str, Any]]:
-        """Liefert alle aktiven 1:1-Chats des Benutzers samt Präsenz und Freundesstatus."""
-        cls.assert_social_enabled(db)
-        chats = (
-            db.query(DirectChat)
-            .filter(or_(DirectChat.user_a_id == user_id, DirectChat.user_b_id == user_id))
-            .order_by(DirectChat.updated_at.desc())
-            .all()
-        )
-        if not chats:
-            return []
-
-        other_ids = [c.get_other_user_id(user_id) for c in chats]
-        users = {u.id: u for u in db.query(User).filter(User.id.in_(other_ids)).all()}
-
-        blocked_rels = (
-            db.query(UserFriend)
-            .filter(
-                or_(UserFriend.user_id == user_id, UserFriend.friend_id == user_id),
-                UserFriend.status == "blocked",
-            )
-            .all()
-        )
-        blocked_user_ids = {r.friend_id if r.user_id == user_id else r.user_id for r in blocked_rels}
-
-        results = []
-        for c in chats:
-            oid = c.get_other_user_id(user_id)
-            other = users.get(oid)
-            if not other or not other.is_active:
-                continue
-
-            is_friend = cls.is_confirmed_friend(db, user_id, oid)
-            is_blocked = oid in blocked_user_ids
-            pres = cls.get_presence_for_viewer(db, user_id, other)
-
-            results.append({
-                "id": c.id,
-                "other_user_id": other.id,
-                "other_username": other.username,
-                "other_avatar_url": other.avatar_url,
-                "blind_mailbox_id": c.blind_mailbox_id,
-                "is_friend": is_friend,
-                "is_blocked": is_blocked,
-                "other_privacy": getattr(other, "social_privacy", "friends"),
-                "presence": pres,
-                "created_at": c.created_at,
-                "updated_at": c.updated_at,
-            })
-        return results
+    # `list_direct_chats` gab es hier bis Stufe 6b.
+    #
+    # Sie beantwortete „mit wem schreibt Konto 42?" — genau die Frage, die der
+    # Server nicht mehr beantworten koennen soll. Dafuer las sie
+    # `direct_chats.user_a_id`/`user_b_id`, und solange sie existierte, mussten
+    # diese Spalten existieren.
+    #
+    # Die Liste fuehrt jetzt der Client: `gespraechsListe.ts` haelt sie
+    # versiegelt im oertlichen Speicher, gespeist aus `POST /chat/start` (dort
+    # nennt der Aufrufer das Gegenueber ohnehin selbst) und aus dem, was in
+    # seinen Mailboxen ankommt. Der Weg ist derselbe wie beim Gruppennamen in
+    # Stufe 6a.
+    #
+    # Was dabei verloren geht, und das gehoert ausgesprochen: die Anwesenheit
+    # eines Gespraechspartners, mit dem man nicht befreundet ist, wird nicht
+    # mehr angezeigt. Sie kam aus dieser Abfrage. Wer sie sehen will, wird
+    # Freund — und das ist ohnehin, was die Einstellung „nur Freunde" meint.
 
     @classmethod
     def get_presence(cls, db: Session, user_id: int) -> dict[str, Any]:
@@ -1068,15 +1076,17 @@ class SocialService:
             # Nur bestätigte Freunde erhalten gefilterte Updates (bei invisible strikt als offline maskiert)
             relevant_viewer_ids = {r.friend_id if r.user_id == user_id else r.user_id for r in friend_rels}
         else:
-            # Öffentlich & nicht unsichtbar: Chat-Partner und autorisierte Abonnenten einbeziehen
+            # Öffentlich & nicht unsichtbar: Freunde und autorisierte Abonnenten.
+            #
+            # Die Chatpartner standen hier bis Stufe 6b — sie kamen aus
+            # `direct_chats.user_a_id`/`user_b_id`, und mit den Spalten geht
+            # dieser Zweig. Wer die Anwesenheit eines Gesprächspartners sehen
+            # will, wird Freund oder abonniert ein öffentliches Profil.
+            #
+            # Der Tausch ist bewusst: ein Anwesenheitsereignis, das der Server
+            # an „alle, mit denen dieses Konto schreibt" verteilt, setzt voraus,
+            # dass er diese Liste führt. Genau die soll es nicht mehr geben.
             relevant_viewer_ids = {r.friend_id if r.user_id == user_id else r.user_id for r in friend_rels}
-            direct_chats = (
-                db.query(DirectChat)
-                .filter(or_(DirectChat.user_a_id == user_id, DirectChat.user_b_id == user_id))
-                .all()
-            )
-            for dc in direct_chats:
-                relevant_viewer_ids.add(dc.get_other_user_id(user_id))
             if user_obj and getattr(user_obj, "social_privacy", "friends") == "public":
                 relevant_viewer_ids |= subscriber_user_ids
 
@@ -1114,7 +1124,6 @@ class SocialService:
         u = db.query(User).filter_by(id=user_id).first()
         pres = cls.get_presence(db, user_id)
         is_invisible = pres.get("status") == "invisible"
-        privacy = getattr(u, "social_privacy", "friends") if u else "friends"
 
         # Ghost-Mode: Wenn unsichtbar, niemals an irgendwen broadcasten!
         if is_invisible:
@@ -1130,14 +1139,10 @@ class SocialService:
         )
         target_user_ids = {r.friend_id if r.user_id == user_id else r.user_id for r in rels}
 
-        if privacy == "public":
-            direct_chats = (
-                db.query(DirectChat)
-                .filter(or_(DirectChat.user_a_id == user_id, DirectChat.user_b_id == user_id))
-                .all()
-            )
-            for dc in direct_chats:
-                target_user_ids.add(dc.get_other_user_id(user_id))
+        # Die Chatpartner eines öffentlichen Profils standen hier bis Stufe 6b.
+        # Sie kamen aus `direct_chats.user_a_id`/`user_b_id`; mit den Spalten
+        # geht dieser Zweig. Benachrichtigt werden damit Freunde — und für ein
+        # öffentliches Profil die Abonnenten, die derselbe Weg schon kannte.
 
         # Blockierte Benutzer niemals benachrichtigen (Datenschutz-Invariante)
         blocked_rels = (
@@ -1545,8 +1550,16 @@ class SocialService:
         if clean == cls.derive_user_device_mailbox_id(user_id):
             return
 
-        chat = db.query(DirectChat).filter_by(blind_mailbox_id=clean).first()
-        if chat and user_id in (chat.user_a_id, chat.user_b_id):
+        # Der Direktchat: bis Stufe 6b ein Nachschlag in `direct_chats`, jetzt
+        # eine Rechnung. `gegenueber_aus_mailbox` leitet die Kennung für jedes
+        # aktive Konto ab und vergleicht — dieselbe Antwort, ohne dass jemand
+        # aufschreiben müsste, wer mit wem schreibt.
+        #
+        # Die Zeile wird zusätzlich verlangt: eine abgeleitete Kennung passt
+        # rechnerisch zu jedem Paar, auch zu einem, das nie miteinander zu tun
+        # hatte. Ohne sie wäre jede Konto-Kombination eine offene Tür.
+        gegenueber = cls.gegenueber_aus_mailbox(db, user_id, clean)
+        if gegenueber is not None and cls._direktchat_zeile(db, user_id, gegenueber):
             return
 
         for (gid,) in (
@@ -1895,20 +1908,18 @@ class SocialService:
 
         Zero-Knowledge Invariante:
         Es werden AUSSCHLIESSLICH Mailboxen zurückgegeben, an denen der Benutzer
-        nachweislich beteiligt ist (DirectChat, ChatGroupMember oder bestätigter UserFriend).
+        nachweislich beteiligt ist (ChatGroupMember oder bestätigter UserFriend).
+
+        **Die Direktchats fehlen hier seit Stufe 6b.** Sie kamen aus
+        `direct_chats.user_a_id`/`user_b_id` — der Abfrage „mit wem schreibt
+        Konto 42?", die es nicht mehr geben soll. Was bleibt, sind die
+        Gruppen, die Freunde und die eigene Geräte-Mailbox; alles andere
+        abonniert der Client selbst über `erlaubte_mailboxen`, wo er seine
+        Kennungen nennt und der Server nur prüft, statt sie aufzuzählen.
         """
         cls.assert_social_enabled(db)
         uid = current_user.id
         effective_since = max(0, since_id) if since_id is not None else 0
-
-        # 1. 1:1 DirectChats des Benutzers
-        direct_mids = [
-            row[0]
-            for row in db.query(DirectChat.blind_mailbox_id)
-            .filter(or_(DirectChat.user_a_id == uid, DirectChat.user_b_id == uid))
-            .all()
-            if row[0]
-        ]
 
         # 2. Chat-Gruppen des Benutzers
         group_ids = [
@@ -1938,7 +1949,7 @@ class SocialService:
         ]
 
         device_mid = cls.derive_user_device_mailbox_id(uid)
-        all_mids = list(set(direct_mids) | set(group_mids) | set(friend_mids) | {device_mid})
+        all_mids = list(set(group_mids) | set(friend_mids) | {device_mid})
         if not all_mids:
             return []
 

@@ -40,7 +40,6 @@ function drUmschlag(klartext: string, vonKonto: number = 1): string {
 vi.mock('@/api/social', () => ({
   getFriends: vi.fn(),
   getGroups: vi.fn().mockResolvedValue([]),
-  getDirectChats: vi.fn().mockResolvedValue([]),
   createGroup: vi.fn(),
   deleteGroup: vi.fn(),
   joinGroupByInvite: vi.fn(),
@@ -400,7 +399,6 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
     ])
 
     vi.mocked(socialApi.getGroups).mockResolvedValue([])
-    vi.mocked(socialApi.getDirectChats).mockResolvedValue([])
     vi.mocked(socialApi.getStories).mockResolvedValue([])
     vi.mocked(socialApi.getPublicProfiles).mockResolvedValue([])
     vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([])

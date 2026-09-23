@@ -14,6 +14,7 @@ import { clearGeraeteMemory } from '@/services/e2eeGeraet'
 import { leereGeraeteStand } from '@/services/gruppenSchluessel'
 import { leereMailboxAbos } from '@/services/mailboxAbo'
 import { leereGruppenNamen } from '@/services/gruppenName'
+import { leereGespraeche } from '@/services/gespraechsListe'
 import { leereMailboxNachweise } from '@/services/mailboxNachweis'
 import { kuendigeMailboxPush, leereMailboxPush } from '@/services/mailboxPush'
 import { kuendige } from '@/services/pushAbo'
@@ -150,6 +151,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // eine Gruppe heisst, sagt ueber ihren Besitzer oft mehr als jede einzelne
     // Nachricht darin. Der naechste Mensch an diesem Geraet erbt sie nicht.
     leereGruppenNamen()
+    // Und die Gespraechsliste. Seit Stufe 6b fuehrt sie der Client, weil der
+    // Server nicht mehr wissen soll, wer mit wem schreibt — dann darf sie auch
+    // keinen Abmeldevorgang ueberleben.
+    leereGespraeche()
     // Dasselbe fuer die Push-Adresse. Die Zeilen im Panel raeumt `logout()`
     // weg, solange die Sitzung noch gilt; hier faellt nur der gemerkte Stand,
     // damit der naechste Anmelder nicht auf eine Meldung wartet, die diese

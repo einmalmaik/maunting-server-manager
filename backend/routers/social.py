@@ -1,9 +1,6 @@
 import asyncio
 import logging
-import os
-import re
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Response, UploadFile, WebSocket
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, WebSocket
 from starlette.websockets import WebSocketDisconnect
 from sqlalchemy.orm import Session
 
@@ -55,7 +52,7 @@ from services.chat_media_validator import sanitize_attachment_filename
 from services.social_service import SocialService
 from services.sync_event_service import MAX_MAILBOXES, SyncEventService
 from services.call_room_service import GroupCallRoomRegistry
-from services import bild_upload, e2ee_device_service, livekit_service, webpush_service
+from services import e2ee_device_service, livekit_service, webpush_service
 
 logger = logging.getLogger(__name__)
 
@@ -630,14 +627,21 @@ def download_chat_media_blob(
 
 # --- Direkte Chats (1:1 Unterhaltungen & Berechtigungsprüfung) ---
 
-@router.get("/chats", response_model=list[DirectChatResponse], dependencies=[Depends(_check_social_enabled)])
-@router.get("/direct-chats", response_model=list[DirectChatResponse], dependencies=[Depends(_check_social_enabled)])
-def list_my_direct_chats(
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> list[dict]:
-    """Liefert alle aktiven 1:1-Chats des authentifizierten Benutzers."""
-    return SocialService.list_direct_chats(db, user.id)
+"""
+`GET /chats` und `GET /direct-chats` gab es hier bis Stufe 6b.
+
+Sie beantworteten „mit wem schreibt dieses Konto?" — und um sie beantworten
+zu koennen, musste der Server es aufschreiben. Genau das soll er nicht.
+
+Die Liste fuehrt jetzt der Client: `gespraechsListe.ts` haelt sie versiegelt
+im oertlichen Speicher. Gespeist wird sie aus `POST /chat/start/{id}` (dort
+nennt der Aufrufer sein Gegenueber selbst, der Server erfaehrt nichts Neues)
+und aus dem, was in den abonnierten Mailboxen ankommt.
+
+Die Routen sind entfernt und nicht etwa auf eine leere Liste gesetzt: ein
+Endpunkt, der immer `[]` liefert, sieht fuer einen alten Client wie „du hast
+keine Gespraeche" aus. Ein 404 ist die ehrlichere Auskunft.
+"""
 
 
 @router.get("/chat/can-message/{target_user_id}", response_model=CanMessageResponse, dependencies=[Depends(_check_social_enabled)])

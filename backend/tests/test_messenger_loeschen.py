@@ -36,14 +36,9 @@ def _umschlag(payload: bytes = b"test-secret-payload-bytes-12345678") -> str:
 def _lege_chat_an(db: Session, a: User, b: User) -> str:
     """Direktchat zwischen zwei Konten samt seiner blinden Mailbox-Kennung."""
     mailbox = SocialService.derive_blind_mailbox_id(a.id, b.id)
-    db.add(
-        DirectChat(
-            user_a_id=min(a.id, b.id),
-            user_b_id=max(a.id, b.id),
-            blind_mailbox_id=mailbox,
-            initiated_by_user_id=a.id,
-        )
-    )
+    # Seit Stufe 6b nennt die Zeile keine Menschen mehr: nur noch die Kennung
+    # der Mailbox. Wer dazugehoert, rechnet `gegenueber_aus_mailbox` aus.
+    db.add(DirectChat(blind_mailbox_id=mailbox))
     db.commit()
     return mailbox
 

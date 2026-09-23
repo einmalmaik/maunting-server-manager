@@ -992,10 +992,7 @@ def test_mailbox_participant_access_control_dm_and_group(
 
     dm_mid = SocialService.derive_blind_mailbox_id(owner_user.id, third_user.id)
     chat = DirectChat(
-        user_a_id=min(owner_user.id, third_user.id),
-        user_b_id=max(owner_user.id, third_user.id),
         blind_mailbox_id=dm_mid,
-        initiated_by_user_id=owner_user.id,
         created_at=datetime.now(timezone.utc),
     )
     db.add(chat)

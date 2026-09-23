@@ -93,7 +93,6 @@ import {
   type DirectChatItem,
   getFriends,
   getGroups,
-  getDirectChats,
   createGroup,
   joinGroupByInvite,
   sendFriendRequest,
@@ -167,6 +166,13 @@ import {
   sichereGruppenAnsicht,
   vergissGruppenName,
 } from '@/services/gruppenName'
+import {
+  fuelleNamenNach,
+  gespraechsListe,
+  gespraechsPartner,
+  merkeGespraech,
+  vergissGespraech,
+} from '@/services/gespraechsListe'
 import { ladeGruppenzustand, type Gruppenzustand } from '@/services/gruppenKonfig'
 import { wirksameGruppenrechte } from '@/services/gruppenRollen'
 import {
@@ -930,11 +936,22 @@ export function Messenger() {
 
   useEffect(() => {
     if (!currentUserId || !gespraechsAbdruck) return
-    void abonniereBekannteGespraeche(
-      currentUserId,
-      groups.map((g) => g.id),
-      directChats.map((c) => c.other_user_id),
-    )
+    void (async () => {
+      /*
+       * Die Gegenstellen kommen aus `gespraechsPartner()` und nicht aus
+       * `directChats`. Der Unterschied sind die noch **namenlosen** Einträge:
+       * ein Chatgeheimnis bringt eine Konto-Id mit, den Namen holt die
+       * Kontaktliste später nach. Bis dahin steht das Gespräch nicht in
+       * `directChats` — abonniert werden muss es trotzdem, sonst kommt die
+       * erste Nachricht des neuen Gegenübers nirgends an.
+       */
+      const partner = await gespraechsPartner().catch(() => [] as number[])
+      await abonniereBekannteGespraeche(
+        currentUserId,
+        groups.map((g) => g.id),
+        partner,
+      )
+    })()
     // `groups`/`directChats` bewusst nicht in der Liste: der Abdruck ist ihr
     // Inhalt, und die Felder selbst wechseln bei jedem Abruf die Identität.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1043,7 +1060,9 @@ export function Messenger() {
         teamsApi.list().catch(() => []),
         getStories().catch(() => []),
         getPublicProfiles().catch(() => []),
-        getDirectChats().catch(() => []),
+        // Kein Netzaufruf mehr: seit Stufe 6b weiss der Server nicht, mit wem
+        // dieses Konto schreibt. Die Liste liegt versiegelt auf diesem Gerät.
+        gespraechsListe().catch(() => []),
       ])
       setFriends(friendsData)
       // Der Server liefert für Gruppen seit Stufe 6 keinen Namen mehr. Diese
@@ -1092,7 +1111,11 @@ export function Messenger() {
             teamMembers: membersList,
             publicUsers: publicData,
             stories: storiesData,
-            directChats: directChatsData,
+            // Und aus demselben Grund gar nicht: die Gesprächsliste ist die
+            // Auskunft „mit wem schreibt dieser Mensch". Sie liegt versiegelt
+            // in `msm:gespraeche` und kommt von dort beim nächsten Laden —
+            // ein offener Abzug daneben machte die Versiegelung sinnlos.
+            directChats: [],
           })
         )
       } catch {}
@@ -1381,6 +1404,34 @@ export function Messenger() {
     })
   }, [friends, teamMembers, publicUsers, directChats])
 
+  /*
+   * Namenlose Gespräche benennen.
+   *
+   * Ein zugestelltes Chatgeheimnis bringt eine Konto-Id und keinen Namen — ein
+   * Anzeigename im Steuerumschlag wäre ein Feld, das der Absender frei wählt,
+   * und damit der Weg, sich in einer fremden Kontaktliste als jemand anderes
+   * auszugeben. Der Name kommt deshalb aus der Kontaktliste dieses Geräts, und
+   * zwar sobald sie geladen ist.
+   *
+   * `loadData()` danach: erst damit wandert der frisch gefundene Name auch in
+   * `directChats` und wird sichtbar.
+   */
+  useEffect(() => {
+    if (contactsList.length === 0) return
+    void fuelleNamenNach(
+      contactsList.map((c) => ({
+        userId: c.userId,
+        username: c.username,
+        avatarUrl: c.avatarUrl,
+      })),
+    )
+      .then((geaendert) => {
+        if (geaendert) void loadData()
+      })
+      .catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contactsList.length])
+
   const filteredContacts = useMemo(() => {
     return contactsList.filter((c) => {
       if (filterTab === 'groups') return false
@@ -1606,6 +1657,7 @@ export function Messenger() {
     setUeberall('aus')
   }, [activeContact?.userId, activeGroup?.id])
 
+
   // Auto-select group if groupId query parameter or storage is present
   useEffect(() => {
     if (queryGroupId && !activeContact && groups.length > 0) {
@@ -1769,6 +1821,28 @@ export function Messenger() {
     meldeSitzungsbruch: sitzungNeuGemeldet,
   })
   const blindMailboxId = konversation.blindMailboxId
+
+  /*
+   * Das offene Gespräch in den versiegelten örtlichen Speicher.
+   *
+   * Seit Stufe 6b weiss der Server nicht mehr, mit wem dieses Konto schreibt —
+   * `direct_chats` nennt keine Menschen, und `GET /social/direct-chats` ist
+   * entfernt. Diese Zeile ist der Ersatz: wer ein Gespräch öffnet, merkt es
+   * sich selbst.
+   *
+   * Nur Kontakte, die nicht ohnehin in der Kontaktliste stehen, brauchen das
+   * eigentlich — gemerkt wird trotzdem jeder. Ein Freund, der später keiner
+   * mehr ist, verschwände sonst samt seinem Chatverlauf aus der Liste, und ein
+   * Verlauf ohne Zeile ist ein Verlauf, den niemand mehr findet.
+   */
+  useEffect(() => {
+    if (!activeContact) return
+    void merkeGespraech(activeContact.userId, {
+      username: activeContact.username,
+      avatarUrl: activeContact.avatarUrl,
+      blindMailboxId: blindMailboxId,
+    }).catch(() => {})
+  }, [activeContact?.userId, activeContact?.username, blindMailboxId])
 
   /**
    * Der Wechsel in ein anderes Gespräch.
@@ -7847,6 +7921,11 @@ export function Messenger() {
                 onClick={async () => {
                   if (activeContact) {
                     await blockUser(activeContact.userId, activeContact.username, activeContact.avatarUrl)
+                    // Und aus der örtlichen Gesprächsliste. Seit Stufe 6b führt
+                    // sie dieses Gerät; bliebe die Zeile stehen, tauchte der
+                    // Blockierte weiter in der Kontaktliste auf und sein
+                    // Gespräch bliebe abonniert.
+                    await vergissGespraech(activeContact.userId).catch(() => {})
                     toast.success(t('messenger.contactBlockedToast', { name: activeContact.username }))
                   }
                   setIsBlockConfirmOpen(false)

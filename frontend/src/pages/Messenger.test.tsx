@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { Messenger, clearSessionChatCache } from './Messenger'
 import * as socialApi from '@/api/social'
 import { leereMailboxAbos, offeneMailboxAbos } from '@/services/mailboxAbo'
+import { leereGespraeche, merkeGespraech } from '@/services/gespraechsListe'
 import { teamsApi } from '@/api/teams'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -41,7 +42,6 @@ const { mockEnvelopeCache } = vi.hoisted(() => ({
 vi.mock('@/api/social', () => ({
   getFriends: vi.fn(),
   getGroups: vi.fn().mockResolvedValue([]),
-  getDirectChats: vi.fn().mockResolvedValue([]),
   createGroup: vi.fn(),
   deleteGroup: vi.fn(),
   joinGroupByInvite: vi.fn(),
@@ -368,6 +368,9 @@ describe('Messenger (Allround Chat)', () => {
     if (typeof localStorage !== 'undefined') localStorage.clear()
     clearSessionChatCache()
     mockEnvelopeCache.clear()
+    // Die Gesprächsliste liegt seit Stufe 6b im Arbeitsspeicher dieses Moduls
+    // und nicht nur in `localStorage`; `clear()` oben erreicht sie nicht.
+    leereGespraeche()
     kontenMitSignatur = []
     setupUser()
 
@@ -425,7 +428,6 @@ describe('Messenger (Allround Chat)', () => {
 
     vi.mocked(socialApi.getGroups).mockResolvedValue([])
     vi.mocked(socialApi.getPublicProfiles).mockResolvedValue([])
-    vi.mocked(socialApi.getDirectChats).mockResolvedValue([])
     vi.mocked(socialApi.getStories).mockResolvedValue([])
     vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([])
     vi.mocked(socialApi.getE2eePublicKey).mockResolvedValue({ user_id: 101, username: 'alice', public_key: null })
@@ -620,18 +622,16 @@ describe('Messenger (Allround Chat)', () => {
         members: [],
       },
     ])
-    vi.mocked(socialApi.getDirectChats).mockResolvedValue([
-      {
-        id: 3,
-        other_user_id: 104,
-        other_username: 'bob',
-        blind_mailbox_id: 'egal-der-client-rechnet-selbst',
-        is_friend: true,
-        other_privacy: 'friends',
-        created_at: '2026-09-07T00:00:00Z',
-        updated_at: '2026-09-07T00:00:00Z',
-      },
-    ])
+    /*
+     * Das Gespräch kommt seit Stufe 6b aus der versiegelten örtlichen Ablage
+     * und nicht mehr von `GET /social/direct-chats` — die Route ist entfernt,
+     * weil der Server nicht mehr wissen soll, wer mit wem schreibt.
+     *
+     * Konto 104 steht bewusst in **keiner** anderen Liste dieses Tests: kein
+     * Freund, kein Teammitglied, kein öffentliches Profil. Wäre es das, ginge
+     * die Anmeldung auch ohne die Ablage durch, und dieser Test prüfte nichts.
+     */
+    await merkeGespraech(104, { username: 'bob' })
 
     render(
       <MemoryRouter>

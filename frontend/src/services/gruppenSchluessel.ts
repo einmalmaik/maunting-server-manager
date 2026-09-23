@@ -939,6 +939,28 @@ async function nimmDmGeheimnis(eigeneId: number, roh: Record<string, unknown>): 
     return false
   }
 
+  /*
+   * Das Gespräch in den örtlichen Speicher — hier und nirgends sonst.
+   *
+   * Seit Stufe 6b führt der Server keine Liste mehr, mit wem dieses Konto
+   * schreibt. Dieser Umschlag ist der Moment, in dem ein bis dahin unbekanntes
+   * Gegenüber zum Gesprächspartner wird; wird er hier nicht festgehalten,
+   * abonniert dieses Gerät die neue Mailbox nie und die erste Nachricht kommt
+   * nirgends an.
+   *
+   * Ohne Namen: der Umschlag trägt eine Konto-Id, und das soll er auch. Ein
+   * Anzeigename darin wäre ein Feld, das ein Absender frei wählt — und damit
+   * der Weg, sich in einer Kontaktliste als jemand anderes auszugeben. Den
+   * Namen holt `fuelleNamenNach` aus der Kontaktliste.
+   */
+  try {
+    const { merkeGespraech } = await import('./gespraechsListe')
+    await merkeGespraech(gegenstelle, {})
+  } catch {
+    // Verschlossener Messenger oder volle Ablage. Das Geheimnis selbst zählt
+    // mehr als die Zeile daneben; der nächste `dmZiele` holt sie nach.
+  }
+
   const vorhanden = await ablage.liesDmGeheimnis(gegenstelle)
   const jetzt = new Date().toISOString()
   await ablage.schreibeDmGeheimnis({

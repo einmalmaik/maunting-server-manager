@@ -76,7 +76,7 @@ def _dritter(db: Session) -> User:
 
 
 def _gemeinsame_gruppe(db: Session, besitzer: User, mitglied: User):
-    gruppe = SocialService.create_group(db, besitzer, "Zustellgruppe")
+    gruppe = SocialService.create_group(db, besitzer)
     SocialService.join_group_by_invite_code(db, mitglied, gruppe.invite_code)
     return gruppe
 
