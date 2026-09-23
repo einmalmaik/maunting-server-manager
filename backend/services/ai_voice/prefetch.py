@@ -68,6 +68,10 @@ class VoicePrefetch:
         await self._senden(nachricht)
         if not prediction.arguments or not is_side_effect_free(prediction.intent):
             return
+        if not await asyncio.to_thread(
+            self._ohne_rueckfrage, prediction.intent, prediction.arguments
+        ):
+            return
         task = await prefetch_cache.prefetch(
             session_id=self.session_id,
             user_id=self._user_id,
@@ -82,6 +86,30 @@ class VoicePrefetch:
             asyncio.create_task(self._beobachten(task, prediction, revision))
             if prediction.intent == "analyze_region":
                 asyncio.create_task(self._geo_ziel_senden(prediction, revision))
+
+    def _ohne_rueckfrage(self, tool_name: str, arguments: dict) -> bool:
+        """Ob das Werkzeug ohne Zustimmung laufen dürfte, also vorab laufen darf.
+
+        Der Vorababruf führt ein Lesewerkzeug aus, bevor das Modell es gewählt
+        hat, und zeigt bei der Regionsanalyse sogar schon die Karte. Ohne
+        autonomen Modus wäre das eine Ausführung ohne das Ja, das der Lauf
+        danach einholt: die Websuche ginge mit den Worten des Benutzers hinaus,
+        bevor er zugestimmt hat. Der Chat fragt an derselben Stelle dasselbe
+        (`_fruehstart_lesewerkzeug_erlaubt`).
+        """
+        from services import ai_autonomy_service
+
+        server_id = arguments.get("server_id")
+        with SessionLocal() as db:
+            user = db.get(User, self._user_id)
+            if user is None or not user.is_active:
+                return False
+            return ai_autonomy_service.autonomy_allows(
+                db,
+                user=user,
+                server_id=server_id if isinstance(server_id, int) else None,
+                tool_name=tool_name,
+            )
 
     def _lesen(self, tool_name: str, arguments: dict) -> dict:
         from services.ai_action_service import execute_read_tool

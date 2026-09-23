@@ -342,6 +342,24 @@ def create_proposal(
             }
         elif tool_name == "list_my_servers":
             preview = {"operation": "list_my_servers"}
+        elif tool_name == "forget_memory":
+            # Vergessen ist ein Loeschvorgang und fragt deshalb auch im
+            # autonomen Modus. Wer zustimmt, soll auf der Karte lesen, was
+            # verschwindet, nicht nur den Werkzeugnamen.
+            schluessel = rest.get("keys")
+            preview = {
+                "operation": "forget_memory",
+                "memory_scope": redact_sensitive_text(str(rest.get("scope", "")))[:32],
+                "memory_keys": [
+                    redact_sensitive_text(str(eintrag))[:64]
+                    for eintrag in (schluessel if isinstance(schluessel, list) else [])[:25]
+                ],
+            }
+        elif tool_name == "forget_skill":
+            preview = {
+                "operation": "forget_skill",
+                "skill_key": redact_sensitive_text(str(rest.get("skill_key", "")))[:64],
+            }
         else:
             preview = {"operation": tool_name}
         expected_revision = None

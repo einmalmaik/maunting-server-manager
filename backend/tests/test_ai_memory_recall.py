@@ -775,7 +775,7 @@ def test_die_vorauswahl_folgt_der_frage_und_nicht_der_nutzung(
     assert "Blau" not in block
 
 
-def _achsen_encode(texts: list[str]) -> list[list[float]]:
+def _achsen_encode(texts: list[str], db=None) -> list[list[float]]:
     """Ein Modellersatz mit genau zwei Bedeutungen: Wartung und Farbe.
 
     Reicht für die eine Frage, um die es hier geht — trägt der Vektor die

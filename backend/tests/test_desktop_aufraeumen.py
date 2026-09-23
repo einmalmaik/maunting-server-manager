@@ -9,7 +9,8 @@ gefragt werden?" **im Panel** entsteht und nirgends sonst:
 1. Das Modell kann sie nicht setzen. Schickt es `autonom` oder `systembereich`
    in den Werkzeugargumenten mit, fliegen sie raus — sonst waere es eine
    Selbstermaechtigung, die genau einmal funktionieren muesste.
-2. Ohne Autonomiefreigabe ist die Antwort `False`, mit Freigabe `True`.
+2. Ohne Autonomiefreigabe ist die Antwort `False`, mit Freigabe `True` —
+   ausser der Aufruf loescht; dann bleibt sie `False` (seit 23.09.2026).
 3. Der Systembereich kommt aus dem Konto, nicht aus dem Aufruf.
 4. Ein Auftrag, der auf einen Menschen warten kann, bekommt die lange Frist —
    und seit dem Zusammenlegen von `desktop_takeover_control` in
@@ -71,13 +72,38 @@ class TestDasModellSetztSichNichtSelbstFrei:
         assert argumente["grund"] == "Aufraeumen"
 
     def test_mit_freigabe_steht_autonom_auf_wahr(self, db: Session, regular_user: User):
+        """Mit Freigabe laeuft auf dem Rechner ohne Karte, was nichts loescht."""
         _mit_autonomie(db, regular_user)
-        argumente = _desktop_argumente(
-            db,
-            user_id=regular_user.id,
-            call=_aufruf("desktop_aufraeumen", {"aktion": "papierkorb", "grund": "x"}),
-        )
-        assert argumente["autonom"] is True
+        for name, werkzeugargumente in (
+            ("desktop_dateien", {"aktion": "verschieben", "pfad": "a.txt", "ziel": "b.txt"}),
+            ("desktop_dateien", {"aktion": "schreiben", "pfad": "a.txt", "inhalt": "x"}),
+            ("desktop_system", {"aktion": "verzeichnis", "pfad": "C:\\"}),
+        ):
+            argumente = _desktop_argumente(
+                db, user_id=regular_user.id, call=_aufruf(name, werkzeugargumente)
+            )
+            assert argumente["autonom"] is True, (name, werkzeugargumente["aktion"])
+
+    def test_loeschen_fragt_auch_mit_freigabe(self, db: Session, regular_user: User):
+        """Die Vorgabe vom 23.09.2026: im autonomen Modus fragt das Loeschen.
+
+        Bis dahin stand hier, dass Aufraeumen mit Freigabe ohne Karte laeuft.
+        Die Vorgabe des Betreibers lautet aber "alles automatisch ausser
+        Loeschvorgaenge", und das gilt auf seinem Rechner genauso wie auf
+        einem Server. Der Rechner zeigt seine Karte, sobald ``autonom`` nicht
+        ``True`` ist.
+        """
+        _mit_autonomie(db, regular_user)
+        for name, werkzeugargumente in (
+            ("desktop_aufraeumen", {"aktion": "papierkorb", "grund": "x"}),
+            ("desktop_aufraeumen", {"aktion": "endgueltig", "grund": "x"}),
+            ("desktop_aufraeumen", {"aktion": "papierkorb_leeren", "grund": "x"}),
+            ("desktop_dateien", {"aktion": "loeschen", "pfad": "a.txt"}),
+        ):
+            argumente = _desktop_argumente(
+                db, user_id=regular_user.id, call=_aufruf(name, werkzeugargumente)
+            )
+            assert argumente["autonom"] is False, (name, werkzeugargumente["aktion"])
 
     def test_der_systembereich_kommt_aus_dem_konto(self, db: Session, regular_user: User):
         regular_user.ai_desktop_systembereich = "schreiben"

@@ -49,9 +49,10 @@ const SCHREIBWERKZEUGE = [
   'propose_task_set',
   'propose_task_delete',
   // Die Guardian-Kopplung. `propose_file_delete` steht im Bestätigungsdialog
-  // rot (`UNUMKEHRBAR` in AiActionProposalCard.tsx), obwohl es in der Registry
-  // nicht `immer_bestaetigen` ist — die Registry entscheidet, ob eine Freigabe
-  // übersprungen werden darf, die Farbe entscheidet, wie gefragt wird.
+  // rot (`UNUMKEHRBAR` in AiActionProposalCard.tsx). Seit dem 23.09.2026 ist es
+  // in der Registry auch `immer_bestaetigen`, wie jedes Löschen — die Registry
+  // entscheidet, ob eine Freigabe übersprungen werden darf, die Farbe
+  // entscheidet, wie gefragt wird.
   'propose_server_repair',
   'propose_file_delete',
   // Guardian je Server anders einstellen. Steht hier, seit die Reparatur den

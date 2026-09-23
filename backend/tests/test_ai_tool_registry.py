@@ -133,138 +133,132 @@ def test_planned_confirm_only_tools_are_not_offered() -> None:
     assert angeboten & ai_tool_registry.GEPLANT_IMMER_BESTAETIGEN == set()
 
 
-def test_only_the_irreversible_tools_are_confirm_only() -> None:
-    """Das Kriterium der Sperre ist Unumkehrbarkeit, nicht Risiko.
+def test_die_sperre_ist_ausgeschrieben() -> None:
+    """Was auch im autonomen Modus fragt, steht hier Name fuer Name.
 
-    Vorgabe des Betreibers: im autonomen Modus laeuft alles durch, ausser was
-    Daten vernichtet. Diese Liste steht hier ausgeschrieben, damit ein
-    zusaetzlicher Eintrag eine bewusste Entscheidung ist und nicht ein
-    Bauchgefuehl, das jemand beim Bauen eines Werkzeugs hatte — genau so waren
-    Blueprint-Wechsel und Bind-IP-Aenderung hineingeraten, obwohl beide
-    umkehrbar sind.
+    Die Vorgabe des Betreibers, woertlich: "autonome modus an bedeutet alles
+    wird automatisch bestaetigt ausser Loeschvorgaenge". Die Liste steht
+    ausgeschrieben, damit ein zusaetzlicher Eintrag eine bewusste Entscheidung
+    ist und kein Bauchgefuehl beim Bauen eines Werkzeugs. Drei Gruende tragen
+    sie:
 
-    Die drei Hoster-Werkzeuge sind bewusst dazugekommen und stehen unter dem
-    **zweiten** Kriterium, das `GEPLANT_IMMER_BESTAETIGEN` seit jeher fuehrt:
-    eine Rechteaenderung oder eine Schluesselerzeugung verschiebt den Rahmen, in
-    dem die KI selbst arbeitet. Bei `propose_hoster_integration` kommt ein
-    mechanischer Grund dazu — im autonomen Modus wird der Rueckgabewert und mit
-    ihm der einmalige API-Key verworfen; die Integration waere unbenutzbar.
+    * **Loeschen**, jedes, auch eines mit Rueckweg. Bis zum 23.09.2026 las die
+      Registry die Vorgabe als "unumkehrbar", und Datei-, Notiz-, Termin-,
+      Aufgaben- und DNS-Loeschen liefen ohne Rueckfrage. Dann haette das
+      Modell dem Betreiber fast seinen Discord-Bot geloescht. Ein Rueckweg
+      hilft nur, wenn jemand das Loeschen bemerkt. Vergessen (`forget_memory`,
+      `forget_skill`) ist ebenfalls Loeschen.
+    * **Unumkehrbares Ueberschreiben**: `propose_backup_restore` ersetzt einen
+      Stand, von dem es danach kein Backup mehr gibt.
+    * **Der Rahmen der KI**: die drei Hoster-Werkzeuge aendern Rechte oder
+      erzeugen Schluessel. Bei `propose_hoster_integration` kommt ein
+      mechanischer Grund dazu: im autonomen Modus ginge der einmalige API-Key
+      mit dem Rueckgabewert verloren.
 
-    `propose_blueprint_delete` ist der juengste Eintrag, und er ist genau die
-    bewusste Entscheidung, fuer die diese Liste ausgeschrieben dasteht: als das
-    Werkzeug gebaut wurde, fehlte die Sperre, und der Test fiel nicht auf, weil
-    niemand ihn angefasst hatte. `delete_community_blueprint` entfernt die Datei
-    per `unlink`; einen Versionsschnappschuss wie bei den Serverdateien gibt es
-    hier nicht, und die Registry haelt nur, was auf der Platte liegt. Der einzige
-    Weg zurueck ist ein Export, den vielleicht jemand gemacht hat — und
-    "vielleicht" ist kein nachgewiesener Rueckweg. Damit greift dasselbe
-    Kriterium wie bei `propose_server_delete`.
-
-    `propose_server_blueprint_switch` ist der juengste Eintrag und die
-    Korrektur einer Fehleinschaetzung, die genau umgekehrt begruendet war: er
-    galt als umkehrbar, "weil zwingend ein Backup angelegt wird". Das Backup
-    gibt es wirklich — es macht den Vorgang aber wiederherstellbar, nicht
-    harmlos. `switch_server_blueprint` ruft `wipe_server_root` und loescht das
-    **gesamte** Serververzeichnis: Welt, Configs, Mods. Der Weg zurueck ist eine
-    Wiederherstellung, die selbst Stunden dauert — genau das Kriterium, unter
-    `propose_email_send`, `propose_calendar_event_create` und
-    `propose_calendar_event_delete` sind externe Interaktionen mit fremden
-    Systemen (E-Mail-Empfaenger, Kalenderserver). Eine versendete E-Mail laesst
-    sich nicht zurueckholen ("Draft & Confirm"-Invariante).
+    Nicht in der Liste steht `propose_server_blueprint_switch`, obwohl der
+    Wechsel das Serververzeichnis leert. Der Betreiber hat ihn am 02.09.2026
+    ausdruecklich fuer den autonomen Modus freigegeben; vorher legt der
+    Wechsel zwingend ein Backup an.
     """
     gebaut = {
         name for name, spec in ai_tool_registry.WERKZEUGE.items()
         if spec.immer_bestaetigen
     }
     assert gebaut == {
+        # Loeschen
         "propose_server_delete",
         "propose_blueprint_delete",
-        "propose_backup_restore",
-        "propose_hoster_integration",
-        "propose_hoster_product",
-        "propose_ai_tarif_role",
-    }
-
-
-def test_ein_loeschwerkzeug_traegt_die_sperre_oder_nennt_seinen_rueckweg() -> None:
-    """Die Zusicherung, die den Befund verhindert haette — kuenftig statt rueckwirkend.
-
-    Der Test darueber zaehlt auf, was heute in der Sperre steht; er faellt auf,
-    wenn jemand etwas hinzufuegt. Er faellt aber **nicht** auf, wenn jemand ein
-    neues Loeschwerkzeug baut und die Sperre schlicht vergisst — dann sieht die
-    ausgeschriebene Liste weiterhin so aus, wie sie soll, und ein
-    `propose_..._delete` laeuft im autonomen Modus ohne Rueckfrage durch. Genau
-    das ist bei `propose_blueprint_delete` passiert.
-
-    Deshalb hier die Regel statt der Aufzaehlung: wer ein Werkzeug auf `_delete`
-    tauft, traegt `immer_bestaetigen` — oder er traegt sich unten ein und sagt
-    dabei, wo der Rueckweg liegt. Ein Name ist kein Beweis, aber er ist der
-    einzige Hinweis, den ein neues Werkzeug von sich aus gibt, und diese
-    Zusicherung macht daraus eine Entscheidung, die jemand treffen muss.
-
-    Die drei Ausnahmen sind keine Nachlaessigkeit, sondern haben einen
-    nachpruefbaren Rueckweg im Code:
-
-    * `propose_file_delete` — im Heilungslauf laeuft es ueberhaupt nur mit einem
-      nachweislich geglueckten Backup, das juenger ist als der Vorfall
-      (`ai_proposal_service._verlangt_gesichertes_backup`, geprueft beim Anlegen
-      und noch einmal vor der Ausfuehrung); im Chat ist der
-      Versionsschnappschuss aus `file_history_service` **Vorbedingung** —
-      `delete_server_text` loescht nicht, wenn er ausbleibt.
-    * `propose_task_delete` — eine stehende Aufgabe ist eine Datenbankzeile mit
-      Zeitplan und Prompt. Sie wieder anzulegen kostet einen Vorschlag, keine
-      Wiederherstellung; es geht nichts verloren, das ausserhalb der Zeile
-      existiert.
-    * `propose_calendar_event_delete` — ein Kalendertermin kann im Chat oder Kalender
-      jederzeit neu angelegt oder angepasst werden.
-
-    Faellt dieser Test, ist das die Frage: verschwindet hier etwas, das niemand
-    zurueckholt? Dann gehoert `immer_bestaetigen` an die Zeile. Sonst gehoert
-    der Grund hierher.
-    """
-    RUECKWEG_NACHGEWIESEN = {
         "propose_file_delete",
         "propose_task_delete",
         "propose_calendar_event_delete",
         "propose_note_delete",
         "propose_cloudflare_dns_delete",
+        "forget_memory",
+        "forget_skill",
+        # Unumkehrbares Ueberschreiben
+        "propose_backup_restore",
+        # Der Rahmen der KI
+        "propose_hoster_integration",
+        "propose_hoster_product",
+        "propose_ai_tarif_role",
     }
+    assert "propose_server_blueprint_switch" not in ai_tool_registry.ALWAYS_CONFIRM_TOOLS
 
+
+def test_jedes_loeschwerkzeug_traegt_die_sperre() -> None:
+    """Die Regel statt der Aufzaehlung, fuer das naechste Werkzeug.
+
+    Der Test darueber faellt auf, wenn jemand etwas in die Sperre schreibt. Er
+    faellt **nicht** auf, wenn jemand ein neues Loeschwerkzeug baut und die
+    Sperre vergisst. Genau so lief `propose_blueprint_delete` einmal ohne
+    Rueckfrage durch.
+
+    Deshalb die Regel: wer ein Werkzeug auf `_delete` oder `forget_` tauft,
+    traegt `immer_bestaetigen`. Ausnahmen gibt es seit dem 23.09.2026 keine
+    mehr. Vorher standen hier fuenf Loeschwerkzeuge, deren Rueckweg
+    nachgewiesen war, und genau das war die Luecke: ein Rueckweg ersetzt nicht
+    die Frage, ob geloescht werden soll.
+
+    Ein Name ist kein Beweis, aber er ist der einzige Hinweis, den ein neues
+    Werkzeug von sich aus gibt. Die Desktop-Werkzeuge fallen nicht darunter,
+    denn ob sie loeschen, haengt an ihrer `aktion`
+    (`test_desktop_loescht_haengt_an_der_aktion`).
+    """
     loeschwerkzeuge = {
-        name for name in ai_tool_registry.WERKZEUGE if name.endswith("_delete")
+        name for name in ai_tool_registry.WERKZEUGE
+        if name.endswith("_delete") or name.startswith("forget_")
     }
-    assert loeschwerkzeuge, "kein Werkzeug auf _delete — dann prueft das hier nichts"
+    # Sonst prueft die Zeile darunter nichts.
+    assert {"propose_file_delete", "forget_memory", "forget_skill"} <= loeschwerkzeuge
 
-    ohne_sperre = {
-        name for name in loeschwerkzeuge
-        if not ai_tool_registry.WERKZEUGE[name].immer_bestaetigen
-    }
-    assert ohne_sperre == RUECKWEG_NACHGEWIESEN
+    ohne_sperre = loeschwerkzeuge - ai_tool_registry.ALWAYS_CONFIRM_TOOLS
+    assert ohne_sperre == set()
+
+
+def test_desktop_loescht_haengt_an_der_aktion() -> None:
+    """Auf dem Rechner fragt, was loescht, und nur das.
+
+    Desktop-Werkzeuge sind `delegation` und tragen kein `immer_bestaetigen`.
+    Ob der Rechner seine Karte zeigt, entscheidet das Feld ``autonom`` im
+    Auftrag, und das setzt `_desktop_argumente` aus `desktop_loescht`.
+    `desktop_aufraeumen` loescht mit jeder Aktion, `desktop_dateien` nur mit
+    ``loeschen``. Lesen, Schreiben und Verschieben bleiben im autonomen Modus
+    ohne Rueckfrage.
+    """
+    loescht = ai_tool_registry.desktop_loescht
+
+    for aktion in ("papierkorb", "endgueltig", "papierkorb_leeren", None):
+        assert loescht("desktop_aufraeumen", {"aktion": aktion}) is True
+    assert loescht("desktop_aufraeumen", None) is True
+
+    assert loescht("desktop_dateien", {"aktion": "loeschen"}) is True
+    for aktion in ("auflisten", "lesen", "schreiben", "verschieben"):
+        assert loescht("desktop_dateien", {"aktion": aktion}) is False
+    assert loescht("desktop_dateien", None) is False
+
+    assert loescht("desktop_system", {"aktion": "loeschen"}) is False
+
+    # Ein umbenanntes Werkzeug liesse die Frage still ins Leere laufen.
+    assert set(ai_tool_registry.DESKTOP_LOESCHAKTIONEN) <= ai_tool_registry.DESKTOP_TOOLS
 
 
 def test_die_beiden_heilungswerkzeuge_sind_eingeordnet() -> None:
-    """`propose_server_repair` und `propose_file_delete` sind autonomiefaehig.
+    """`propose_server_repair` ist autonomiefaehig, `propose_file_delete` nicht mehr.
 
-    Das sieht beim Loeschwerkzeug nach einem Widerspruch aus, ist aber keiner:
-    das Kriterium der Registry ist **Unumkehrbarkeit**, nicht gefuehltes Risiko.
-    `propose_server_delete` und `propose_backup_restore` stehen in der Sperre,
-    weil danach kein Backup mehr hilft — das eine nimmt die Backups mit, das
-    andere ueberschreibt einen Stand, von dem es nie eines gab.
+    Bis zum 23.09.2026 waren es beide. Das Loeschwerkzeug galt als
+    autonomiefaehig, weil sein Rueckweg nachgewiesen ist: im Heilungslauf
+    laeuft es nur mit einem geglueckten Backup, das **juenger als der Vorfall**
+    ist (`ai_proposal_service._verlangt_gesichertes_backup`, geprueft beim
+    Anlegen und noch einmal vor der Ausfuehrung). Die Vorgabe des Betreibers
+    lautet aber "alles automatisch ausser Loeschvorgaenge", nicht "ausser
+    Unumkehrbarem". Loeschen fragt deshalb immer, und eine Heilung fragt per
+    Mail (`ai_approval_service`).
 
-    Beim Loeschen einer einzelnen Datei ist es umgekehrt: das Werkzeug laeuft im
-    Heilungslauf ueberhaupt nur, wenn ein nachweislich geglecktes Backup
-    vorliegt, das **juenger als der Vorfall** ist. Der Weg zurueck ist damit Teil
-    des Vorgangs — dieselbe Begruendung, aus der der Blueprint-Wechsel
-    autonomiefaehig ist, obwohl er das ganze Verzeichnis leert.
-
-    Wichtig ist, **wo** dieser Beweis liegt: in
-    `ai_proposal_service._verlangt_gesichertes_backup`, geprueft beim Anlegen und
-    noch einmal vor der Ausfuehrung. Nicht in einer Prompt-Regel. Eine Regel im
-    Prompt ist eine Bitte an ein Modell, dessen Eingaben aus Logzeilen eines
-    Servers stammen, auf dem Fremde spielen; sie kann die Sperre hier nicht
-    tragen. Wandert die Schranke je aus dem Vorschlagspfad in den Prompt, ist
-    diese Einordnung falsch geworden — und dieser Test die Stelle, an der das
-    auffaellt.
+    Die Backup-Schranke bleibt trotzdem. Sie schuetzt jetzt den Fall, dass ein
+    Mensch zugestimmt und sich geirrt hat. Und sie liegt weiter im
+    Vorschlagspfad, nicht in einer Prompt-Regel: eine Regel im Prompt ist eine
+    Bitte an ein Modell, dessen Eingaben aus Logzeilen eines Servers stammen,
+    auf dem Fremde spielen.
 
     Die Rechte sind bewusst schon vorhandene, und sie spiegeln die Panel-Routen
     fuer **denselben Vorgang** — nicht ein aehnliches Werkzeug. Hier stand
@@ -310,7 +304,7 @@ def test_die_beiden_heilungswerkzeuge_sind_eingeordnet() -> None:
     assert loeschen.art == "server_write"
     assert loeschen.recht == "server.files.delete"
     assert loeschen.recht_global is False
-    assert loeschen.immer_bestaetigen is False
+    assert loeschen.immer_bestaetigen is True
 
     # Und dieselbe Aussage noch einmal ueber die abgeleiteten Mengen: wer die
     # Zeile spaeter umhaengt, faellt auch dann auf, wenn er die Spalten oben
@@ -318,9 +312,9 @@ def test_die_beiden_heilungswerkzeuge_sind_eingeordnet() -> None:
     assert {"propose_server_repair", "propose_file_delete"} <= (
         ai_tool_registry.SERVER_WRITE_TOOLS
     )
-    assert {"propose_server_repair", "propose_file_delete"} & (
-        ai_tool_registry.ALWAYS_CONFIRM_TOOLS
-    ) == set()
+    assert "propose_server_repair" not in ai_tool_registry.ALWAYS_CONFIRM_TOOLS
+    assert "propose_file_delete" in ai_tool_registry.ALWAYS_CONFIRM_TOOLS
+    assert "propose_file_delete" in ai_tool_registry.GUARDIAN_BACKUP_PFLICHT_TOOLS
 
 
 def test_die_heilungsmenge_kennt_nur_wirklich_vorhandene_werkzeuge() -> None:
@@ -357,6 +351,15 @@ def test_die_heilung_kann_nichts_dauerhaftes_und_nichts_fremdes() -> None:
       `propose_server_delete`, `propose_backup_restore`, die drei
       Hoster-Werkzeuge und jeden kuenftigen Platzhalter aus
       `GEPLANT_IMMER_BESTAETIGEN` mit ab.
+
+      Mit genau einer Ausnahme: `propose_file_delete`. Es stand schon in der
+      Heilung, bevor Loeschen am 23.09.2026 immer fragen musste, und es bleibt
+      darin, weil eine kaputte Datei ein klassischer Grund fuer einen
+      Absturz ist. Ausfuehren kann die Heilung es trotzdem nicht allein: der
+      Vorschlag braucht eine Bestaetigung, die kommt per Mail
+      (`ai_approval_service`), und ohne hinterlegte Adresse endet der Lauf.
+      Die Ausnahme steht hier mit Namen, damit keine zweite unbemerkt
+      dazukommt.
     * `MEMORY_TOOLS` und `SKILL_TOOLS` — aus einem Vorfall soll sich das Modell
       nichts Dauerhaftes anlernen. Sonst waere ein praeparierter Logeintrag der
       Weg, eine Weisung in jeden spaeteren Chat des Benutzers zu tragen.
@@ -366,12 +369,13 @@ def test_die_heilung_kann_nichts_dauerhaftes_und_nichts_fremdes() -> None:
     der Name eines selbstgebauten Servers hat draussen nichts zu suchen, schon
     gar nicht, wenn ihn niemand gefragt hat.
 
-    Der **Blueprint-Wechsel** stand einmal in dieser Aufzaehlung und ist daraus
-    verschwunden, ohne dass sich etwas gelockert haette — im Gegenteil: er
-    traegt jetzt `immer_bestaetigen` und faellt damit unter die erste,
-    abgeleitete Regel. Das ist die bessere Stelle. Eine abgeleitete Sperre gilt
-    auch fuer das naechste Werkzeug, das jemand aehnlich baut; eine
-    ausgeschriebene gilt nur fuer den Namen, der dasteht.
+    Der **Blueprint-Wechsel** steht wieder ausgeschrieben da. Eine Zeit lang
+    trug er `immer_bestaetigen` und fiel unter die erste, abgeleitete Regel.
+    Seit der Betreiber ihn am 02.09.2026 fuer den autonomen Modus freigegeben
+    hat, deckt ihn die Ableitung nicht mehr, und ohne die Zeile unten fiele ein
+    Wechsel in der Heilung keinem Test auf. Er leert das ganze
+    Serververzeichnis; fuer eine zu knapp bemessene Startzeit die Welt zu
+    loeschen ist keine Behebung.
 
     Die **Ableitung eines Blueprints** dagegen ist bewusst hinzugekommen. Sie
     legt eine neue Datei an und ruehrt keinen Server an — das ist der Weg fuer
@@ -381,7 +385,7 @@ def test_die_heilung_kann_nichts_dauerhaftes_und_nichts_fremdes() -> None:
     """
     heilung = ai_tool_registry.GUARDIAN_HEILUNG_TOOLS
 
-    assert heilung & ai_tool_registry.ALWAYS_CONFIRM_TOOLS == set()
+    assert heilung & ai_tool_registry.ALWAYS_CONFIRM_TOOLS == {"propose_file_delete"}
     assert heilung & ai_tool_registry.MEMORY_TOOLS == set()
     assert heilung & ai_tool_registry.SKILL_TOOLS == set()
 
@@ -394,6 +398,7 @@ def test_die_heilung_kann_nichts_dauerhaftes_und_nichts_fremdes() -> None:
     for ausgeschlossen in (
         "propose_server_create",
         "propose_server_delete",
+        "propose_server_blueprint_switch",
         "web_search",
     ):
         assert ausgeschlossen in ai_tool_registry.WERKZEUGE, (

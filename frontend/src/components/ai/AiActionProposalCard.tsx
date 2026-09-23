@@ -80,6 +80,12 @@ const TATSACHEN: readonly string[] = [
   'location',
   'calendar_id',
   'event_id',
+  // Vergessen fragt seit dem 23.09.2026 auch im autonomen Modus. Die Karte
+  // nannte dabei bis dahin nur das Werkzeug; wer zustimmt, soll lesen, welche
+  // Einträge und welcher Skill gleich verschwinden.
+  'memory_scope',
+  'memory_keys',
+  'skill_key',
 ]
 
 function tatsachenZeilen(preview: Record<string, unknown>): [string, string][] {
@@ -119,11 +125,11 @@ const UNUMKEHRBAR: readonly string[] = [
   'propose_backup_restore',
   'propose_server_blueprint_switch',
   'propose_server_lifecycle',
-  // `propose_file_delete` steht hier, obwohl es in `ai_tool_registry` nicht
-  // `immer_bestaetigen` ist. Das ist kein Widerspruch: die Registry entscheidet,
-  // ob eine Freigabe uebersprungen werden darf, dieser Farbton entscheidet, wie
-  // ein Mensch die Frage gestellt bekommt, wenn er sie doch bekommt. Eine
-  // geloeschte Datei ist ohne Backup weg — das gehoert rot gefragt.
+  // `propose_file_delete` stand hier schon, als es in `ai_tool_registry` noch
+  // nicht `immer_bestaetigen` war (erst seit dem 23.09.2026). Die Registry
+  // entscheidet, ob eine Freigabe uebersprungen werden darf; dieser Farbton
+  // entscheidet, wie ein Mensch die Frage gestellt bekommt. Eine geloeschte
+  // Datei ist ohne Backup weg — das gehoert rot gefragt.
   // `propose_server_repair` fehlt hier bewusst: Rechte richten und einen Port
   // neu vergeben stellt einen Zustand her, den das Panel ohnehin herstellen
   // wuerde.

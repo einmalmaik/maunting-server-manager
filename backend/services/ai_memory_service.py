@@ -897,7 +897,7 @@ def upsert_entry(
     row.value_encrypted = DisClient.encrypt(safe_value, aad=_aad(row))
     # Der Vektor entsteht aus dem Klartext, bevor er verschluesselt wird —
     # danach waere er nicht mehr zu haben, ohne erneut zu entschluesseln.
-    refresh_embedding(row, safe_value)
+    refresh_embedding(db, row, safe_value)
     row.updated_at = datetime.now(timezone.utc)
     audit_service.record_privileged_action(
         db, user_id=user.id, action=action, target_type="ai_memory", target_id=row.id,
@@ -962,7 +962,7 @@ def aehnlicher_eintrag(
     waere ein Leseweg ueber die Bereichsgrenze hinweg, und sei es nur ueber
     ein Aehnlichkeitsmass.
     """
-    vektoren = ai_embedding_service.encode([_embedding_source(key, value)])
+    vektoren = ai_embedding_service.encode([_embedding_source(key, value)], db=db)
     if not vektoren:
         return None
 
@@ -1318,6 +1318,7 @@ def _bewertung(
 
 
 def _vorauswahl(
+    db: Session,
     rows: list[AiMemoryEntry],
     query: str,
     now: datetime,
@@ -1356,7 +1357,7 @@ def _vorauswahl(
     if len(rows) <= limit:
         return rows, False
     query_tokens = _tokens(query)
-    scores = _similarities(query, rows)
+    scores = _similarities(db, query, rows)
     ranked = sorted(
         zip(rows, scores),
         key=lambda paar: _bewertung(
@@ -1518,7 +1519,7 @@ def _embedding_source(key: str, value: str) -> str:
     return f"{readable_key}: {value}"
 
 
-def refresh_embedding(row: AiMemoryEntry, value: str) -> None:
+def refresh_embedding(db: Session, row: AiMemoryEntry, value: str) -> None:
     """Berechnet den Vektor eines Eintrags neu, falls ein Modell da ist.
 
     Schlägt es fehl, wird ein alter Vektor **verworfen** und der Eintrag eben
@@ -1532,11 +1533,11 @@ def refresh_embedding(row: AiMemoryEntry, value: str) -> None:
     damit zurecht — und `_vektoren_nachziehen` holt es beim nächsten Abruf in
     den Kontext nach, sobald wieder ein Modell da ist.
     """
-    vectors = ai_embedding_service.encode([_embedding_source(row.key, value)])
+    vectors = ai_embedding_service.encode([_embedding_source(row.key, value)], db=db)
     _vektor_setzen(row, vectors[0] if vectors else None)
 
 
-def _vektoren_nachziehen(decoded: list[tuple[AiMemoryEntry, str]]) -> None:
+def _vektoren_nachziehen(db: Session, decoded: list[tuple[AiMemoryEntry, str]]) -> None:
     """Berechnet fehlende Vektoren nach, solange der Klartext ohnehin vorliegt.
 
     `refresh_embedding` verwirft den Vektor, wenn `encode` beim Schreiben nichts
@@ -1575,7 +1576,7 @@ def _vektoren_nachziehen(decoded: list[tuple[AiMemoryEntry, str]]) -> None:
     if not offen:
         return
     vektoren = ai_embedding_service.encode(
-        [_embedding_source(row.key, value) for row, value in offen]
+        [_embedding_source(row.key, value) for row, value in offen], db=db
     )
     # Die Längenprüfung ist keine Formsache: käme weniger zurück als
     # hineingegeben, schriebe das `zip` den Vektor der einen Zeile an die
@@ -1899,7 +1900,9 @@ def _memory_line(
     return f"[{scope}/{origin}] {row.key}: {flattened}"
 
 
-def _similarities(query: str, rows: list[AiMemoryEntry]) -> list[float | None]:
+def _similarities(
+    db: Session, query: str, rows: list[AiMemoryEntry]
+) -> list[float | None]:
     """Bedeutungsaehnlichkeit der Eintraege zur Frage, oder lauter ``None``.
 
     ``None`` steht fuer "kein Vergleich moeglich" und nicht fuer "unaehnlich":
@@ -1908,7 +1911,7 @@ def _similarities(query: str, rows: list[AiMemoryEntry]) -> list[float | None]:
     """
     if not query.strip():
         return [None] * len(rows)
-    query_vectors = ai_embedding_service.encode([query])
+    query_vectors = ai_embedding_service.encode([query], db=db)
     if not query_vectors:
         return [None] * len(rows)
 
@@ -1966,7 +1969,7 @@ def server_shared_context(
         return None
     jetzt = datetime.now(timezone.utc)
     query_tokens = _tokens(query)
-    aehnlichkeiten = _similarities(query, [row for row, _ in decoded])
+    aehnlichkeiten = _similarities(db, query, [row for row, _ in decoded])
     for (row, wert), aehnlichkeit in zip(decoded, aehnlichkeiten):
         treffer = _reiz(aehnlichkeit, len(query_tokens & _tokens(f"{row.key} {wert}")))
         if treffer < VERBLASSEN_AB:
@@ -2079,20 +2082,20 @@ def provider_memory_context(
     # überschrieben, und `decoded` kennt nur, was ihm gegeben wurde. Die Zahl
     # muss deshalb hier festgehalten werden — der Hinweis unten nennt sie.
     vor_der_vorauswahl = len(rows)
-    rows, vorgekuerzt = _vorauswahl(rows, query, now, zeilen)
+    rows, vorgekuerzt = _vorauswahl(db, rows, query, now, zeilen)
     vorab_verworfen = vor_der_vorauswahl - len(rows)
     decoded = _entschluesseln(rows)
     # Zeilen aus einer Ausfallphase des Modells tragen keinen Vektor. Hier
     # liegt ihr Klartext ohnehin offen, also ist hier die Stelle, an der es
     # nichts extra kostet, ihn nachzurechnen — sonst blieben sie für immer
     # blind für Bedeutungsrang und Reiz.
-    _vektoren_nachziehen(decoded)
+    _vektoren_nachziehen(db, decoded)
     # **Die Abrufstaerke je Zeile**, einmal berechnet und danach zweimal
     # gebraucht: fuer die Darstellung (blass oder voll) und, falls das Budget
     # nicht reicht, als Teil der Auswahl. Die Vektoren liegen ohnehin schon an
     # den Zeilen; teuer ist hier nichts.
     query_tokens = _tokens(query)
-    aehnlichkeiten = _similarities(query, [row for row, _ in decoded])
+    aehnlichkeiten = _similarities(db, query, [row for row, _ in decoded])
     ueberlappungen = [
         len(query_tokens & _tokens(f"{row.key} {value}")) for row, value in decoded
     ]
@@ -2254,10 +2257,10 @@ def search_entries(
     # mit dem Budget wächst: eine Suche meldet höchstens `MAX_SEARCH_RESULTS`
     # Treffer in den Chat und hängt an der Lesbarkeit, nicht am Kontextfenster
     # des Modells. Mehr Kandidaten zu öffnen kaufte hier nichts.
-    rows, _vorgekuerzt = _vorauswahl(rows, query, now, MAX_CONTEXT_ROWS)
+    rows, _vorgekuerzt = _vorauswahl(db, rows, query, now, MAX_CONTEXT_ROWS)
     decoded = _entschluesseln(rows)
     query_tokens = _tokens(query)
-    scores = _similarities(query, [row for row, _ in decoded])
+    scores = _similarities(db, query, [row for row, _ in decoded])
     ranked = sorted(
         zip(decoded, scores),
         key=lambda item: _relevance(item[0][0], item[0][1], query_tokens, now, item[1]),

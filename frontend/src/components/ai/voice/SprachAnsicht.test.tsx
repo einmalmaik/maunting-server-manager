@@ -1,7 +1,7 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { AiRegionalAnalysis, AiVoiceConfig } from '@/api/ai'
+import { aiApi, type AiActionProposal, type AiRegionalAnalysis, type AiVoiceConfig } from '@/api/ai'
 import i18n from '@/i18n'
 import { SprachAnsicht } from './SprachAnsicht'
 import type { Beleg, Sprachzeile, Sprachzustand, Vorschlag } from './useSprachsitzung'
@@ -20,6 +20,7 @@ let sitzung: {
   fehlerCode?: string | null
   belege: Beleg[]
   vorschlag: Vorschlag | null
+  vorschlagErledigt: ReturnType<typeof vi.fn>
   geoData: AiRegionalAnalysis | null
   regionalFocus: { tab: 'overview' | 'satellite' | 'news' | 'social' | 'traffic' | 'weather'; source?: string } | null
   setGeoData: ReturnType<typeof vi.fn>
@@ -70,6 +71,7 @@ function ansicht(
     fehlerCode: null,
     belege: [],
     vorschlag: null,
+    vorschlagErledigt: vi.fn(),
     geoData: null,
     regionalFocus: null,
     setGeoData: vi.fn(),
@@ -236,27 +238,120 @@ describe('SprachAnsicht', () => {
     ansicht({
       zustand: 'spricht',
       vorschlag: {
-        werkzeug: 'propose_server_delete',
-        wirkung: 'Der Server „Kreativ" und alle seine Dateien werden entfernt.',
+        id: '0b7e7a52-2f6e-4a39-9d4e-3c2d1f0a9b11',
+        werkzeug: 'propose_backup',
+        wirkung: 'Vom Server „Kreativ" entsteht ein Backup.',
+        klick: false,
       },
     })
 
     expect(screen.getByText(i18n.t('ai.voice.vorschlag.heading'))).toBeInTheDocument()
     // Derselbe Werkzeugname wie auf der Karte im Chat, aus derselben Quelle.
     expect(
-      screen.getByText(i18n.t('ai.actions.tools.propose_server_delete')),
+      screen.getByText(i18n.t('ai.actions.tools.propose_backup')),
     ).toBeInTheDocument()
-    expect(screen.getByText(/Der Server „Kreativ"/)).toBeInTheDocument()
+    expect(screen.getByText(/Vom Server „Kreativ"/)).toBeInTheDocument()
 
-    // Der Kern der Zusage. Im Sprachmodus entscheidet die Stimme; ein Knopf
-    // waere ein zweiter Weg zum selben Ziel — und damit ein Zustand, den Bruecke
-    // und Ansicht auseinanderhalten muessten (geklickt, waehrend gesprochen
-    // wurde?). Die Knoepfe, die die Ansicht sonst hat, sind Mikrofon, Zahnrad
-    // und „Gespraech beenden"; im Vorschlagskasten selbst ist keiner.
+    // Ohne `klick` entscheidet die Stimme; ein Knopf waere ein zweiter Weg zum
+    // selben Ziel — und damit ein Zustand, den Bruecke und Ansicht
+    // auseinanderhalten muessten (geklickt, waehrend gesprochen wurde?). Die
+    // Knoepfe, die die Ansicht sonst hat, sind Mikrofon, Zahnrad und
+    // „Gespraech beenden"; im Vorschlagskasten selbst ist keiner.
     const kasten = screen.getByText(i18n.t('ai.voice.vorschlag.heading')).closest('section')
     expect(kasten).not.toBeNull()
     expect(kasten?.querySelector('button')).toBeNull()
     expect(screen.getByText(i18n.t('ai.voice.vorschlag.hint'))).toBeInTheDocument()
+  })
+
+  it('gibt einem Löschvorgang den Knopf, und der geht den Weg der Chatkarte', async () => {
+    // Betreiberwahl vom 23.09.2026: ein Löschen bestätigt nur der Klick, auch
+    // im autonomen Modus. Das gesprochene Ja könnte das Modell aus einer
+    // Webseite oder Mail „gehört" haben; der Klick kommt vom Menschen.
+    const kennung = '0b7e7a52-2f6e-4a39-9d4e-3c2d1f0a9b11'
+    const bestaetigt = vi.spyOn(aiApi, 'confirmAction').mockResolvedValue({
+      proposal_id: kennung, confirmation_token: 'einmal', expires_at: '',
+    })
+    const ausgefuehrt = vi.spyOn(aiApi, 'executeAction').mockResolvedValue({
+      proposal: { status: 'succeeded' } as AiActionProposal, result: {},
+    })
+    const { container } = ansicht({
+      zustand: 'spricht',
+      vorschlag: {
+        id: kennung,
+        werkzeug: 'propose_server_delete',
+        wirkung: 'Der Server „Kreativ" und alle seine Dateien werden entfernt.',
+        klick: true,
+      },
+    })
+
+    expect(screen.getByText(i18n.t('ai.voice.vorschlag.hintKlick'))).toBeInTheDocument()
+    expect(container.querySelectorAll('section button')).toHaveLength(2)
+
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('ai.actions.execute') }))
+
+    await waitFor(() => expect(sitzung.vorschlagErledigt).toHaveBeenCalledExactlyOnceWith(kennung))
+    expect(bestaetigt).toHaveBeenCalledWith(kennung)
+    expect(ausgefuehrt).toHaveBeenCalledWith(kennung, 'einmal')
+    bestaetigt.mockRestore()
+    ausgefuehrt.mockRestore()
+  })
+
+  it('baut den Kasten für eine nachkommende Karte frisch auf', async () => {
+    // Bestätigen und Ausführen dauern. Kommt währenddessen die nächste Karte,
+    // erbte sie ohne eigenen Schlüssel den gesperrten Knopf der vorigen.
+    const erste = '0b7e7a52-2f6e-4a39-9d4e-3c2d1f0a9b11'
+    const zweite = '5d0e6c1a-8f3b-4c2d-9e7a-1b2c3d4e5f60'
+    const haengt = vi.spyOn(aiApi, 'confirmAction').mockReturnValue(new Promise(() => {}))
+    try {
+      const { rerender, aufChat } = ansicht({
+        zustand: 'spricht',
+        vorschlag: { id: erste, werkzeug: 'propose_server_delete', wirkung: '', klick: true },
+      })
+
+      fireEvent.click(screen.getByRole('button', { name: i18n.t('ai.actions.execute') }))
+      expect(screen.getByRole('button', { name: i18n.t('ai.actions.executing') })).toBeDisabled()
+
+      sitzung.vorschlag = { id: zweite, werkzeug: 'propose_file_delete', wirkung: '', klick: true }
+      rerender(<SprachAnsicht konfiguration={KONFIGURATION} aufChat={aufChat} />)
+
+      expect(screen.getByRole('button', { name: i18n.t('ai.actions.execute') })).toBeEnabled()
+    } finally {
+      haengt.mockRestore()
+    }
+  })
+
+  it('lehnt einen Löschvorgang über den Knopf ab', async () => {
+    const kennung = '0b7e7a52-2f6e-4a39-9d4e-3c2d1f0a9b11'
+    const abgelehnt = vi.spyOn(aiApi, 'rejectAction').mockResolvedValue(
+      { status: 'rejected' } as AiActionProposal,
+    )
+    const bestaetigt = vi.spyOn(aiApi, 'confirmAction')
+    ansicht({
+      zustand: 'spricht',
+      vorschlag: { id: kennung, werkzeug: 'propose_server_delete', wirkung: '', klick: true },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('ai.actions.reject') }))
+
+    await waitFor(() => expect(sitzung.vorschlagErledigt).toHaveBeenCalledExactlyOnceWith(kennung))
+    expect(abgelehnt).toHaveBeenCalledWith(kennung)
+    expect(bestaetigt).not.toHaveBeenCalled()
+    abgelehnt.mockRestore()
+    bestaetigt.mockRestore()
+  })
+
+  it('schickt ohne brauchbare Kennung zur Karte im Chat statt zum Ja', () => {
+    // Die Kennung landet im Pfad eines API-Aufrufs; ohne sie gibt es hier
+    // nichts zu klicken. „Sag Ja" wäre trotzdem falsch: das Ja nimmt ein
+    // Löschen nie an. Die Karte hängt an derselben Unterhaltung im Chat.
+    const { container } = ansicht({
+      zustand: 'spricht',
+      vorschlag: { id: '', werkzeug: 'propose_server_delete', wirkung: '', klick: true },
+    })
+
+    expect(container.querySelector('section button')).toBeNull()
+    expect(screen.getByText(i18n.t('ai.voice.vorschlag.hintKlickChat'))).toBeInTheDocument()
+    expect(screen.queryByText(i18n.t('ai.voice.vorschlag.hint'))).not.toBeInTheDocument()
   })
 
   it('zeigt keinen Vorschlagskasten, solange keiner ansteht', () => {

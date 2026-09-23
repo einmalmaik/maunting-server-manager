@@ -406,6 +406,11 @@ def voice_werkzeug_ausfuehren(
     sich darüber hinaus nichts ausdenken. Was `dispatch_voice_action` für den
     Umweg über `execute_server_action` längst tut, gilt damit auch für den
     geraden Weg — deshalb steht der Zweig darunter und nicht darüber.
+
+    **Ein Lesewerkzeug läuft nur mit Freigabe sofort.** Ohne autonomen Modus
+    legt es eine Karte an und wartet auf ein gesprochenes Ja
+    (`ai_voice.interactions.freigabe_einholen`), genau wie im Chat. Bis zum
+    23.09.2026 lief hier jedes Lesewerkzeug ohne Rückfrage.
     """
     if call.name != "execute_server_action":
         with SessionLocal() as db:
@@ -440,7 +445,11 @@ def voice_werkzeug_ausfuehren(
         # Chatnachrichten; die Unterhaltung dient nur als Besitzergrenze für
         # Karte, Audit und spätere Bestätigung.
         from services.ai_stream.write_tools import _persist_write_proposals
+        from services.ai_voice import interactions as voice_interactions
 
+        # Und dieselbe Beratung wie in der Schreibrunde des Chats, neben der
+        # Vorschlagserzeugung statt davor (`ethik_anstossen`).
+        beratung = voice_interactions.ethik_anstossen(user_id, call)
         vorschlaege = _persist_write_proposals(
             user_id=user_id,
             conversation_id=conversation_id,
@@ -453,12 +462,38 @@ def voice_werkzeug_ausfuehren(
             None,
         )
         wert = {"proposals": vorschlaege}
-        return wert, fehler, _anzeigeeintrag(call, wert, fehler), vorschlaege
+        if hinweis := voice_interactions.klickhinweis(vorschlaege):
+            wert["hinweis"] = hinweis
+        return (
+            voice_interactions.mit_ethik(wert, voice_interactions.ethik_abholen(beratung, call)),
+            fehler,
+            _anzeigeeintrag(call, wert, fehler),
+            vorschlaege,
+        )
 
+    # Ohne Freigabe fragt die Stimme vor **jedem** Werkzeug, wie der Chat
+    # (Betreiberregel vom 23.09.2026, `freigabe_einholen`). Daneben berät die
+    # Ethik-Engine; im Modus `auto` schlägt sie hier bei Workern und dem
+    # Rechner an, nicht beim Lesen.
+    from services.ai_voice import interactions as voice_interactions
+
+    beratung = voice_interactions.ethik_anstossen(user_id, call)
+    karte = voice_interactions.freigabe_einholen(
+        user_id, call, conversation_id=conversation_id
+    )
+    if karte is not None:
+        karten_wert, fehler, anzeige, vorschlaege = karte
+        ethik = voice_interactions.ethik_abholen(beratung, call)
+        return voice_interactions.mit_ethik(karten_wert, ethik), fehler, anzeige, vorschlaege
     wert, fehler = _werkzeug_ausfuehren(
         user_id, call, herkunft=herkunft, familie=familie
     )
-    return wert, fehler, _anzeigeeintrag(call, wert, fehler), []
+    return (
+        voice_interactions.mit_ethik(wert, voice_interactions.ethik_abholen(beratung, call)),
+        fehler,
+        _anzeigeeintrag(call, wert, fehler),
+        [],
+    )
 
 
 def _gueltige_spekulative_argumente(call) -> bool:
@@ -738,6 +773,7 @@ async def _tool_followup_messages(
     vorab_aufgaben: dict[str, asyncio.Task] | None = None,
     schloss: asyncio.Semaphore | None = None,
     call_reihenfolge=None,
+    ethik_anbieter_id: int | None = None,
 ) -> tuple[list[dict], list[dict], dict | None]:
     """Fuehrt Lesewerkzeuge aus und baut daraus die Folge-Nachrichten.
 
@@ -804,6 +840,11 @@ async def _tool_followup_messages(
     zusätzlich im Klartext trüge, hätte genau diese Zusage gebrochen. Gelesen
     wird sie deshalb dort, wo sie ohnehin liegt, und nur wenn der Nachtrag
     wirklich ansteht.
+
+    Vor dem Ausführen berät die Ethik-Engine (`ai_ethics_service.beraten`),
+    ``ethik_anbieter_id`` ist der Anbieter des Laufs. Mit Freigabe kommen
+    Desktop-Werkzeuge und `worker_start` über diesen Weg und nicht über die
+    Schreibrunde; bis zum 23.09.2026 liefen sie hier ohne jede Beratung.
     """
     deferred = [(call, reason) for call, reason in deferred]
     if len(tool_calls) + len(deferred) > MAX_TOOL_CALLS:
@@ -1014,6 +1055,17 @@ async def _tool_followup_messages(
     # Warum die Ansage so aussieht, wie sie aussieht, steht bei `_werkzeuge_ansagen`.
     _werkzeuge_ansagen(run_id, offen)
 
+    # Die Ethik-Engine nach der Ansage, damit ihr Modellaufruf nicht still ist,
+    # und erst nach dem Aussortieren: beraten wird nur, was gleich wirklich
+    # läuft. Ein aussortierter Aufruf bekäme sonst einen Auditeintrag
+    # `ai.ethics.evaluated` für etwas, das nie geschah.
+    from services import ai_ethics_service
+
+    ethik = await ai_ethics_service.beraten(
+        user_id=user_id, aufrufe=list(tool_calls),
+        bevorzugt_id=ethik_anbieter_id,
+    )
+
     # **In Wellen, nicht alles auf einmal.** Das Budget hat zwei Aufgaben, und
     # nur eine davon ist der Kontext.
     #
@@ -1059,8 +1111,13 @@ async def _tool_followup_messages(
             # von aussen stammen koennen. Anhaenge tragen dieses Label seit jeher
             # (ai_attachment_service), Tool-Ergebnisse bisher nicht — obwohl sie
             # der offenere Kanal sind.
+            umschlag = werkzeugergebnis_umschlag(call.name, wert)
+            # Das Urteil der Ethik-Engine, wenn sie Bedenken hat. Neben den
+            # Daten und nicht in ihnen, wie in der Schreibrunde neben `outcomes`.
+            if hinweis := ethik.get(call.id):
+                umschlag["ethik"] = hinweis
             serialized = json.dumps(
-                werkzeugergebnis_umschlag(call.name, wert),
+                umschlag,
                 ensure_ascii=True,
                 separators=(",", ":"),
             )
@@ -1341,6 +1398,7 @@ async def _leserunde_ausfuehren(
         vorab_aufgaben=vorab_aufgaben,
         schloss=schloss,
         call_reihenfolge=call_reihenfolge,
+        ethik_anbieter_id=getattr(vorbereitung.provider, "id", None),
     )
     provider_messages.extend(followup)
     # Das Betriebswissen der Anlage, sobald feststeht welche. Genau

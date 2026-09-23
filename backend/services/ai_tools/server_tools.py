@@ -1701,6 +1701,9 @@ def _execute_global_read_tool(
             conversation_id=None,
             herkunft=herkunft,
             familie=familie,
+            # Hier kommt ein Chatlauf an, und der hat für diesen Aufruf schon
+            # gefragt oder autonom freigegeben (`ai_stream.engine`).
+            schon_freigegeben=True,
         )
         if fehler and isinstance(wert, dict) and "error" not in wert:
             wert["error"] = fehler

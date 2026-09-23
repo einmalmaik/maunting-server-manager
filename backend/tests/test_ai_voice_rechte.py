@@ -89,10 +89,10 @@ def test_eine_gesprochene_zustimmung_greift_nur_auf_eigene_vorschlaege(
     )
 
     bruecke = _Attrappe(owner_user.id)
-    erfolg, fortgesetzt = bruecke._ausfuehren("fremde-kennung")
+    ausgang = bruecke._ausfuehren("fremde-kennung")
 
-    assert erfolg is False
-    assert fortgesetzt is None
+    assert ausgang.erledigt is False
+    assert ausgang.lauf_id is None
     assert gerufen == []
 
 
@@ -118,6 +118,9 @@ def test_bestaetigen_und_ausfuehren_laufen_auf_den_sprechenden(
 
     class _Vorschlag:
         run_id = None
+        tool_name = "propose_server_lifecycle"
+        proposal_type = "write"
+        server_id = 1
 
     monkeypatch.setattr(
         ai_proposal_service, "owned_proposal", lambda db, kennung, user: _Vorschlag()
@@ -136,12 +139,12 @@ def test_bestaetigen_und_ausfuehren_laufen_auf_den_sprechenden(
     monkeypatch.setattr(ai_proposal_service, "execute_proposal", _execute)
 
     bruecke = _Attrappe(owner_user.id)
-    erfolg, fortgesetzt = bruecke._ausfuehren("eigene-kennung")
+    ausgang = bruecke._ausfuehren("eigene-kennung")
 
-    assert erfolg is True
+    assert ausgang.erledigt is True
     # Kein Lauf am Vorschlag — also auch nichts, dem sich die Bruecke
     # anschliessend anhaengen muesste.
-    assert fortgesetzt is None
+    assert ausgang.lauf_id is None
     assert gesehen["confirm"] == owner_user.id
     assert gesehen["execute"] == owner_user.id
     # Und der Token aus dem ersten Schritt geht in den zweiten. Ein neu
@@ -164,6 +167,9 @@ def test_ein_abgewiesener_vorschlag_reisst_die_sitzung_nicht_ab(
 
     class _Vorschlag:
         run_id = None
+        tool_name = "propose_server_lifecycle"
+        proposal_type = "write"
+        server_id = 1
 
     monkeypatch.setattr(
         ai_proposal_service, "owned_proposal", lambda db, kennung, user: _Vorschlag()
@@ -175,10 +181,53 @@ def test_ein_abgewiesener_vorschlag_reisst_die_sitzung_nicht_ab(
     monkeypatch.setattr(ai_proposal_service, "confirm_proposal", _confirm)
 
     bruecke = _Attrappe(owner_user.id)
-    erfolg, fortgesetzt = bruecke._ausfuehren("kennung")
+    ausgang = bruecke._ausfuehren("kennung")
 
-    assert erfolg is False
-    assert fortgesetzt is None
+    assert ausgang.erledigt is False
+    assert ausgang.lauf_id is None
+
+
+@pytest.mark.parametrize(
+    "werkzeug",
+    ["propose_file_delete", "propose_note_delete", "forget_memory"],
+)
+def test_ein_gesprochenes_ja_loescht_nichts(db, owner_user, monkeypatch, werkzeug) -> None:
+    """Löschen bestätigt nur der Klick auf die Karte, nie die Stimme.
+
+    Betreiberwahl vom 23.09.2026. Ein gesprochenes Ja stellt das *Modell* fest,
+    und das Modell kann es auch aus einer Webseite oder Mail „gehört" haben, in
+    der steht, der Benutzer habe zugestimmt. Deshalb wird hier weder bestätigt
+    noch ausgeführt, auch wenn der Vorschlag dem Sprechenden gehört und seine
+    Rechte reichen würden.
+    """
+    from services import ai_proposal_service
+
+    gerufen: list[str] = []
+
+    class _Vorschlag:
+        run_id = None
+        tool_name = werkzeug
+        proposal_type = "write"
+        server_id = 1
+
+    monkeypatch.setattr(
+        ai_proposal_service, "owned_proposal", lambda db, kennung, user: _Vorschlag()
+    )
+    monkeypatch.setattr(
+        ai_proposal_service,
+        "confirm_proposal",
+        lambda *a, **k: gerufen.append("confirm"),
+    )
+    monkeypatch.setattr(
+        ai_proposal_service,
+        "execute_proposal",
+        lambda *a, **k: gerufen.append("execute"),
+    )
+
+    ausgang = _Attrappe(owner_user.id)._ausfuehren("eigene-kennung")
+
+    assert ausgang.erledigt is False
+    assert gerufen == []
 
 
 @pytest.mark.parametrize(

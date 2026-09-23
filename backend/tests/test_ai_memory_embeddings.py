@@ -68,7 +68,7 @@ def test_without_a_model_nothing_breaks(
     Betriebsvoraussetzung sein. Wer ihn nicht hat, bekommt eine schlechtere
     Auswahl — kein kaputtes Panel.
     """
-    monkeypatch.setattr(ai_embedding_service, "encode", lambda texts: None)
+    monkeypatch.setattr(ai_embedding_service, "encode", lambda texts, db=None: None)
     _allow_memory(db, regular_user)
     row = _write(db, regular_user, "ram.bevorzugt", "8 GB fuer Minecraft")
 
@@ -204,12 +204,12 @@ def test_a_failed_write_discards_the_old_vector(
     """
     vorhanden = [[0.0] * ai_embedding_service.EMBEDDING_DIMENSIONS]
     vorhanden[0][0] = 1.0
-    monkeypatch.setattr(ai_embedding_service, "encode", lambda texts: vorhanden)
+    monkeypatch.setattr(ai_embedding_service, "encode", lambda texts, db=None: vorhanden)
     _allow_memory(db, regular_user)
     row = _write(db, regular_user, "lieblingsspiel", "Am liebsten spiele ich Minecraft")
     assert ai_memory_service._stored_vector(row) is not None
 
-    monkeypatch.setattr(ai_embedding_service, "encode", lambda texts: None)
+    monkeypatch.setattr(ai_embedding_service, "encode", lambda texts, db=None: None)
     row = _write(db, regular_user, "lieblingsspiel", "Am liebsten spiele ich Factorio")
 
     assert row.embedding_bytes is None
@@ -218,7 +218,7 @@ def test_a_failed_write_discards_the_old_vector(
     assert ai_memory_service._stored_vector(row) is None
 
 
-def _vektoren_fuer(texts: list[str]) -> list[list[float]]:
+def _vektoren_fuer(texts: list[str], db=None) -> list[list[float]]:
     """Ein Modellersatz: je Text ein brauchbarer, normierter Vektor.
 
     Bewusst einer je Eingabe — genau die Zusage, auf die sich das Nachziehen
@@ -246,7 +246,7 @@ def test_a_missing_vector_is_recomputed_on_the_next_recall(
     den Kontext.
     """
     _allow_memory(db, regular_user)
-    monkeypatch.setattr(ai_embedding_service, "encode", lambda texts: None)
+    monkeypatch.setattr(ai_embedding_service, "encode", lambda texts, db=None: None)
     row = _write(db, regular_user, "zeitzone", "Die Anlage steht auf Europe/Berlin")
     assert row.embedding_json is None, "ohne Modell entsteht kein Vektor"
 
@@ -270,7 +270,7 @@ def test_without_a_model_the_recall_leaves_the_missing_vector_alone(
     das Gedächtnis kaputtmacht.
     """
     _allow_memory(db, regular_user)
-    monkeypatch.setattr(ai_embedding_service, "encode", lambda texts: None)
+    monkeypatch.setattr(ai_embedding_service, "encode", lambda texts, db=None: None)
     row = _write(db, regular_user, "zeitzone", "Die Anlage steht auf Europe/Berlin")
 
     block = ai_memory_service.provider_memory_context(db, regular_user, query="Zeitzone?")
