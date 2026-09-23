@@ -147,14 +147,16 @@ def test_registry_supersede_different_room() -> None:
         raum="raum-neuer-12345678",
         art="gruppe",
         group_id=42,
-        group_name="Gaming",
         device_id="pc-web-2",
     )
     assert is_handoff is False
     assert prev is not None
     assert prev["raum"] == "raum-alter-12345678"
     assert call["raum"] == "raum-neuer-12345678"
-    assert call["group_name"] == "Gaming"
+    assert call["group_id"] == 42
+    # Keinen Namen: seit Stufe 6c gibt der Server keinen mehr heraus, und die
+    # Registratur haelt auch keinen mehr vor.
+    assert "group_name" not in call
 
 
 def test_registry_leave_and_heartbeat() -> None:

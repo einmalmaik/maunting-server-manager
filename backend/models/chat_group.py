@@ -22,17 +22,17 @@ class ChatGroup(Base):
     __tablename__ = "chat_groups"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    #: Leer, seit Stufe 6. Name, Beschreibung und Logo liegen im
-    #: verschlüsselten Gruppenblock und in der Einladungskarte — dieser Server
-    #: kennt sie nicht mehr.
+    #: `name`, `description` und `avatar_url` standen hier bis Stufe 6c.
     #:
-    #: Die Spalten bleiben stehen und bleiben leer. Sie zu entfernen hiesse,
-    #: jede Altmigration und jeden Bestand anzufassen, der noch darauf zeigt;
-    #: geleert sind sie genauso still. `20260923_03` hat sie einmal geräumt,
-    #: und nichts schreibt mehr hinein.
-    name: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    description: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: `20260923_03` hat sie geleert, `20260923_05` hat sie entfernt. Der
+    #: Unterschied ist nicht der Bestand — der war nach dem Leeren weg —,
+    #: sondern was ein späterer Zweig tun kann: in eine Spalte, die es gibt,
+    #: schreibt sich still zurück, was hier nie wieder stehen soll. Ein Feld,
+    #: das es nicht gibt, bricht den Bau.
+    #:
+    #: Name, Beschreibung und Logo liegen im verschlüsselten Gruppenblock
+    #: (`gruppenKonfig.ts`), im versiegelten örtlichen Namensspeicher
+    #: (`gruppenName.ts`) und in der Einladungskarte unten.
     invite_code: Mapped[str] = mapped_column(
         String(32), unique=True, index=True, nullable=False, default=generate_invite_code
     )

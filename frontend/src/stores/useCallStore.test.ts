@@ -128,6 +128,20 @@ vi.mock('@/services/raumSchluessel', () => ({
   ...schluessel,
 }))
 
+/*
+ * Der oertliche Namensspeicher, als Attrappe.
+ *
+ * Echt eingebunden zoege er `gruppenKonfig` und `gruppenSchluessel` mit
+ * herein, und `gruppenSchluessel` greift beim Laden nach `raumSchluessel` —
+ * das diese Datei selbst ersetzt. Das Ergebnis waere eine Ringabhaengigkeit
+ * beim Modulstart, kein Erkenntnisgewinn. Dass der Speicher wirklich
+ * entsiegelt und schreibt, steht in `gruppenName.test.ts`.
+ */
+const gruppenNamen = new Map<number, { name?: string | null }>()
+vi.mock('@/services/gruppenName', () => ({
+  ladeGruppenNamen: async () => gruppenNamen,
+}))
+
 const toastFehler = vi.fn()
 const toastInfo = vi.fn()
 vi.mock('@/stores/toastStore', () => ({
@@ -158,6 +172,7 @@ async function verbundenerAnruf() {
 beforeEach(() => {
   aktuellerRaum = new FakeRoom()
   vi.clearAllMocks()
+  gruppenNamen.clear()
   livekit.verbinde.mockImplementation(async () => ({ room: aktuellerRaum }))
   livekit.setzeMikrofon.mockResolvedValue(undefined)
   livekit.setzeKamera.mockResolvedValue(undefined)
@@ -766,7 +781,6 @@ describe('Geräteübergreifendes Anruf-Handoff (Cross-Device)', () => {
     device_id: 'dev-fremdes-handy',
     device_type: 'mobile',
     group_id: null,
-    group_name: null,
     partner: {
       user_id: 2,
       username: 'bob',
@@ -839,10 +853,11 @@ describe('Geräteübergreifendes Anruf-Handoff (Cross-Device)', () => {
       device_id: 'dev-fremdes-handy',
       device_type: 'mobile',
       group_id: 10,
-      group_name: 'Entwickler',
       partner: null,
       started_at: '2026-09-17T12:00:00Z',
     }
+    // Der Name steht seit Stufe 6c nur noch hier, im oertlichen Speicher.
+    gruppenNamen.set(10, { name: 'Entwickler' })
     useCallStore.setState({ crossDeviceCall: FREMDER_GRUPPENANRUF })
 
     await useCallStore.getState().transferCallToThisDevice()
@@ -1182,16 +1197,17 @@ describe('Geräteübergreifendes Anruf-Handoff (Cross-Device)', () => {
     useCallStore.getState().handleCallSyncEvent({
       type: 'group_call_started',
       group_id: 10,
-      group_name: 'Entwickler',
       room_token: 'grp_token_10',
     })
 
+    // Kein Name im Ereignis, und keiner im Eintrag: den setzt erst die
+    // Anzeige aus ihrem oertlichen Namensspeicher.
     expect(useCallStore.getState().activeGroupCalls).toEqual([
-      expect.objectContaining({
+      {
         group_id: 10,
-        group_name: 'Entwickler',
         room_token: 'grp_token_10',
-      }),
+        participant_count: 1,
+      },
     ])
 
     useCallStore.getState().handleCallSyncEvent({
@@ -1217,8 +1233,6 @@ describe('Geräteübergreifendes Anruf-Handoff (Cross-Device)', () => {
       group_calls: [
         {
           group_id: 7,
-          group_name: 'Support',
-          avatar_url: null,
           room_token: 'grp_supp_7',
           participant_count: 2,
         },
@@ -1233,6 +1247,11 @@ describe('Geräteübergreifendes Anruf-Handoff (Cross-Device)', () => {
     expect(state.partner?.avatarUrl).toBe('/avatar/dana.png')
     expect(state.raum).toBe('raum-pending-99')
     expect(state.activeGroupCalls).toHaveLength(1)
-    expect(state.activeGroupCalls[0].group_name).toBe('Support')
+    // Nur Kennung, Raum und Zahl — keinen Namen: den hat der Server nicht mehr.
+    expect(state.activeGroupCalls[0]).toEqual({
+      group_id: 7,
+      room_token: 'grp_supp_7',
+      participant_count: 2,
+    })
   })
 })

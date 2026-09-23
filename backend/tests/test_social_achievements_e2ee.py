@@ -354,9 +354,10 @@ def test_chat_group_create_join_invite(db: Session, owner_user: User, regular_us
     # 1. Gruppe erstellen
     group = SocialService.create_group(db, user=owner_user)
     assert group.id is not None
-    # Seit Stufe 6 legt der Server keinen Namen mehr ab. Was er zu einer Gruppe
-    # weiss, ist ihre Kennung, ihr Gruender und ihr Einladungscode.
-    assert group.name is None
+    # Seit Stufe 6 legt der Server keinen Namen mehr ab, und seit Stufe 6c gibt
+    # es die Spalte nicht einmal mehr. Was er zu einer Gruppe weiss, ist ihre
+    # Kennung, ihr Gruender und ihr Einladungscode.
+    assert not hasattr(group, "name")
     assert len(group.invite_code) >= 16
     assert group.owner_user_id == owner_user.id
 
@@ -367,7 +368,7 @@ def test_chat_group_create_join_invite(db: Session, owner_user: User, regular_us
     # Eingeladene sieht, steht in der verschluesselten Karte
     # (`test_gruppen_einladungskarte.py`) und geht nur mit dem Schluessel aus
     # dem Link auf.
-    assert invite_info.name is None
+    assert not hasattr(invite_info, "name")
 
     # 3. Zweiter Nutzer tritt über Einladungslink bei
     joined_group = SocialService.join_group_by_invite_code(db, regular_user, group.invite_code)
@@ -597,7 +598,7 @@ def test_die_ki_hat_keinen_zugang_zum_messenger(db: Session, owner_user: User) -
     db.add(alice)
     db.commit()
     db.add(UserFriend(user_id=owner_user.id, friend_id=alice.id, status="accepted"))
-    gruppe = ChatGroup(name="Gamer Community", owner_user_id=owner_user.id, invite_code="testinv123")
+    gruppe = ChatGroup(owner_user_id=owner_user.id, invite_code="testinv123")
     db.add(gruppe)
     db.commit()
     db.add_all([
@@ -949,9 +950,9 @@ def test_mailbox_participant_access_control_dm_and_group(
     PanelSettingsService.set("social_enabled", "true", db)
 
     # 1. Gruppen-Mailbox: Owner ist Mitglied, regular_user ist Fremder
+    # Ohne Namen: seit Stufe 6c gibt es die Spalte nicht mehr. Fuer diesen
+    # Test aendert das nichts — er fragt nach dem Zugang, nicht nach dem Namen.
     group = ChatGroup(
-        name="Geheime Runde",
-        description="Nur fuer Mitglieder",
         owner_user_id=owner_user.id,
         created_at=datetime.now(timezone.utc),
     )

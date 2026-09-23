@@ -11,6 +11,11 @@ Ein Gruppenname wird vom Server nicht gebraucht. Er ordnet nichts zu, er
 berechtigt nichts, er stellt nichts zu — er stand nur da, weil er von Anfang an
 dort stand.
 
+Seit Stufe 6c sind die Spalten nicht mehr leer, sondern **weg**. Der
+Unterschied zaehlt nicht fuer den Bestand, sondern fuer den naechsten Zweig:
+in eine Spalte, die es gibt, schreibt sich still zurueck, was dort nie wieder
+stehen soll.
+
 Diese Datei haelt fest, dass die Raeumung nicht nur eine Migration war, sondern
 eine Schranke:
 
@@ -26,6 +31,7 @@ eine Schranke:
 from __future__ import annotations
 
 import pytest
+import sqlalchemy as sa
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -53,9 +59,8 @@ def als_owner(client: TestClient, owner_user: User):
 def test_das_anlegen_nimmt_keinen_namen_mehr(db: Session, owner_user: User) -> None:
     gruppe = SocialService.create_group(db, user=owner_user)
 
-    assert gruppe.name is None
-    assert gruppe.description is None
-    assert gruppe.avatar_url is None
+    for feld in ("name", "description", "avatar_url"):
+        assert not hasattr(gruppe, feld), f"{feld} ist wieder am Modell"
     # Was bleibt, ist das, was der Server zum Zustellen wirklich braucht.
     assert gruppe.owner_user_id == owner_user.id
     assert len(gruppe.invite_code) >= 16
@@ -83,38 +88,62 @@ def test_ein_alter_client_bekommt_eine_gruppe_ohne_namen(als_owner: TestClient, 
     # Und auch nicht auf dem Umweg ueber die Datenbank.
     in_der_db = db.query(ChatGroup).filter(ChatGroup.id == daten["id"]).first()
     assert in_der_db is not None
-    assert in_der_db.name is None
+    assert not hasattr(in_der_db, "name")
     assert VERRAETERISCH not in (antwort.text or "")
 
 
-def test_keine_antwort_traegt_den_namen_zurueck(als_owner: TestClient, db: Session, owner_user: User) -> None:
-    """Auch dann nicht, wenn er noch in der Spalte steht.
+def test_die_spalten_gibt_es_nicht_mehr(db: Session) -> None:
+    """Nicht geleert, sondern weg.
 
-    Der harte Fall: eine Bestandsgruppe, deren Zeile die Migration noch nicht
-    gesehen hat, oder die ein anderer Weg nachtraeglich gefuellt hat. Die
-    Antwort darf ihn trotzdem nicht ausliefern — sonst haengt die Zusage an
-    einer einmal gelaufenen Migration statt an einer Schranke im Code.
+    Bis Stufe 6c stand hier der harte Fall: eine Bestandsgruppe, deren Zeile
+    noch einen Namen trug, darf ihn trotzdem nicht ausliefern. Den Fall gibt es
+    nicht mehr, weil es die Spalte nicht mehr gibt — und das ist die staerkere
+    Zusage. Eine geleerte Spalte haelt nur so lange, wie niemand hineinschreibt;
+    eine fehlende bricht den Bau.
     """
-    gruppe = SocialService.create_group(db, user=owner_user)
-    gruppe.name = VERRAETERISCH
-    gruppe.description = "Termine mit der Kanzlei"
-    gruppe.avatar_url = "/api/social/groups/avatar/group_1_abc.png"
-    db.commit()
+    spalten = {s["name"] for s in sa.inspect(db.get_bind()).get_columns("chat_groups")}
+
+    assert "name" not in spalten
+    assert "description" not in spalten
+    assert "avatar_url" not in spalten
+    # Und die Einladungskarte, die die Vorschau verschluesselt traegt, steht.
+    assert "invite_card" in spalten
+
+
+def test_keine_antwort_traegt_den_namen_zurueck(als_owner: TestClient) -> None:
+    """Die Antwortform sagt weiter `name`, und zwar leer.
+
+    Angelegt wird hier ueber die Route und **mit** dem Namen im Rumpf — so wie
+    ein nicht aktualisiertes Geraet es taete. Waere die Gruppe ueber
+    `create_group` entstanden, das den Namen gar nicht kennt, prueften die
+    folgenden Zeilen nichts: es gaebe nichts, was durchschlagen koennte.
+
+    Ein alter Client liest `name` aus der Antwort. Das Feld wegzulassen liesse
+    ihn auf `undefined` laufen; `null` sagt ihm sauber „dazu weiss dieser
+    Server nichts" — und genau das soll er vom Server auch nie erfahren.
+    """
+    angelegt = als_owner.post(
+        "/api/social/groups",
+        json={"name": VERRAETERISCH, "description": "Termine", "avatar_url": "/x.png"},
+    )
+    assert angelegt.status_code in (200, 201)
+    gruppe_id = angelegt.json()["id"]
+    invite_code = angelegt.json()["invite_code"]
 
     liste = als_owner.get("/api/social/groups")
     assert liste.status_code == 200
     assert VERRAETERISCH not in liste.text
-    eintrag = next(g for g in liste.json() if g["id"] == gruppe.id)
+    eintrag = next(g for g in liste.json() if g["id"] == gruppe_id)
     assert eintrag["name"] is None
     assert eintrag["description"] is None
     assert eintrag["avatar_url"] is None
 
-    einladung = als_owner.get(f"/api/social/groups/invite/{gruppe.invite_code}")
+    einladung = als_owner.get(f"/api/social/groups/invite/{invite_code}")
     assert einladung.status_code == 200
     assert VERRAETERISCH not in einladung.text
     assert einladung.json()["name"] is None
 
-    mitglieder = als_owner.get(f"/api/social/groups/{gruppe.id}/members")
+    mitglieder = als_owner.get(f"/api/social/groups/{gruppe_id}/members")
     assert mitglieder.status_code == 200
     assert VERRAETERISCH not in mitglieder.text
 

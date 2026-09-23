@@ -29,7 +29,6 @@ export interface ActiveCallInfo {
   raum: string
   art: 'direkt' | 'gruppe'
   group_id?: number | null
-  group_name?: string | null
   mode: 'audio' | 'video'
   device_id?: string | null
   device_type?: string | null
@@ -42,10 +41,16 @@ export interface ActiveCallResponse {
   call: ActiveCallInfo | null
 }
 
+/**
+ * Ein laufender Gruppenanruf — ohne zu sagen, wie die Gruppe heisst.
+ *
+ * `group_name` und `avatar_url` standen hier bis Stufe 6c und kamen aus
+ * `chat_groups.name`/`avatar_url`. Die Spalten sind entfernt; den Namen holt
+ * der Anzeigende aus seinem versiegelten Namensspeicher
+ * ([[gruppenName.ts]]) ueber die `group_id`.
+ */
 export interface PendingGroupCallInfo {
   group_id: number
-  group_name: string
-  avatar_url?: string | null
   room_token: string
   participant_count: number
 }

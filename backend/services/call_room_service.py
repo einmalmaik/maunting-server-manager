@@ -347,7 +347,10 @@ class _AktiverAnruf:
     raum: str
     art: Literal["direkt", "gruppe"]
     group_id: int | None
-    group_name: str | None
+    # `group_name` stand hier bis Stufe 6c. Der Server kennt seit Stufe 6a
+    # keinen Gruppennamen mehr; ein Feld, das nur noch `None` traegt, ist eine
+    # offene Einladung, es wieder zu fuellen. Den Namen setzt der Client aus
+    # seinem versiegelten Namensspeicher ueber die `group_id`.
     mode: Literal["audio", "video"]
     device_id: str | None
     device_type: str | None
@@ -374,7 +377,6 @@ class _AktiverAnruf:
             "raum": self.raum,
             "art": self.art,
             "group_id": self.group_id,
-            "group_name": self.group_name,
             "mode": self.mode,
             "device_id": self.device_id,
             "device_type": self.device_type or "web",
@@ -402,7 +404,6 @@ class UserActiveCallRegistry:
         art: Literal["direkt", "gruppe"],
         *,
         group_id: int | None = None,
-        group_name: str | None = None,
         mode: Literal["audio", "video"] = "audio",
         device_id: str | None = None,
         device_type: str | None = None,
@@ -434,7 +435,6 @@ class UserActiveCallRegistry:
                 raum=raum,
                 art=art,
                 group_id=group_id,
-                group_name=group_name,
                 mode=mode,
                 device_id=device_id,
                 device_type=device_type or "web",
@@ -472,7 +472,6 @@ class UserActiveCallRegistry:
                             "raum": partner_anruf.raum,
                             "art": "direkt",
                             "group_id": None,
-                            "group_name": None,
                             "mode": partner_anruf.mode,
                             "device_id": None,
                             "device_type": "web",

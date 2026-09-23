@@ -134,15 +134,13 @@ def test_mit_karte_verschwindet_der_klartext(client, db: Session, owner_user: Us
     Beides nebeneinander auszuliefern waere Verschluesselung als Zierde: wer
     den Klartext danebenlegt, hat nichts verschlossen.
 
-    Seit Stufe 6 steht in den Spalten ohnehin nichts mehr. Der Test setzt sie
-    deshalb von Hand — als Bestandszeile, wie sie in einer Datenbank liegen
-    koennte, die `20260923_03` noch nicht gesehen hat. Auch dann darf nichts
-    davon hinausgehen.
+    Die Klartextspalten von Hand zu fuellen geht seit Stufe 6c nicht mehr: sie
+    sind entfernt, nicht nur geleert. Was bleibt zu pruefen, ist die
+    Antwortform — sie nennt `name`, `description` und `avatar_url` weiter, weil
+    ein alter Client sie liest, und muss sie leer lassen, waehrend die Karte
+    danebensteht.
     """
     gruppe = _gruppe(db, owner_user)
-    gruppe.name = "Serverteam"
-    gruppe.description = "Wir bauen Dinge"
-    gruppe.avatar_url = "/api/social/groups/avatar/group_1_abc.png"
     gruppe.invite_card = _karte()
     db.commit()
 
