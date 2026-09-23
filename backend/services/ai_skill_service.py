@@ -364,7 +364,7 @@ def _stored_vector(row: AiSkill) -> list[float] | None:
     return vector
 
 
-def refresh_embedding(row: AiSkill) -> None:
+def refresh_embedding(db: Session, row: AiSkill) -> None:
     """Berechnet den Auswahlvektor neu, falls ein Modell geladen ist.
 
     Schlägt es fehl, wird ein vorhandener Vektor **verworfen** und der Skill
@@ -386,7 +386,7 @@ def refresh_embedding(row: AiSkill) -> None:
     sich also von selbst, sobald wieder ein Modell da ist.
     """
     vectors = ai_embedding_service.encode(
-        [_index_text(row.skill_key, row.name, row.description)]
+        [_index_text(row.skill_key, row.name, row.description)], db=db
     )
     if not vectors:
         row.embedding_json = None
@@ -423,7 +423,9 @@ def _candidate_vectors(db: Session, views: list[SkillView]) -> list[list[float]]
     missing = [view for view in views if stored.get(view.id) is None]
     fresh: list[list[float]] = []
     if missing:
-        encoded = ai_embedding_service.encode([_index_source(view) for view in missing])
+        encoded = ai_embedding_service.encode(
+            [_index_source(view) for view in missing], db=db
+        )
         if encoded is None or len(encoded) != len(missing):
             return None
         fresh = encoded
@@ -510,7 +512,7 @@ def skill_index(db: Session, user: User, query: str = "") -> list[SkillView]:
     if len(views) <= MAX_INDEXED_SKILLS or not query.strip():
         return _neueste_zuerst(views)
 
-    query_vectors = ai_embedding_service.encode([query])
+    query_vectors = ai_embedding_service.encode([query], db=db)
     if not query_vectors:
         return _neueste_zuerst(views)
     candidates = _candidate_vectors(db, views)
@@ -795,7 +797,7 @@ def upsert_skill(
         # hatte. Zusammen mit dem Inhalts-Abdruck in `approve` ist damit
         # nachvollziehbar, *wessen* Text der Betreiber freigibt.
         row.created_by = user.id
-    refresh_embedding(row)
+    refresh_embedding(db, row)
     row.updated_at = datetime.now(timezone.utc)
 
     audit_service.record_privileged_action(

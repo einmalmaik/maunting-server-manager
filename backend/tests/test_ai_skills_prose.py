@@ -972,7 +972,7 @@ def test_the_index_reuses_the_stored_vector(
 
     kodiert: list[str] = []
 
-    def _fake_encode(texts: list[str]) -> list[list[float]]:
+    def _fake_encode(texts: list[str], db=None) -> list[list[float]]:
         kodiert.extend(texts)
         laenge = ai_embedding_service.EMBEDDING_DIMENSIONS
         return [[1.0] + [0.0] * (laenge - 1) for _ in texts]
@@ -1017,7 +1017,7 @@ def test_a_failed_encode_discards_the_vector_of_the_old_text(
     """
     _allow(db, regular_user, "ai.skills.use", "ai.skills.manage")
 
-    def _fake_encode(texts: list[str]) -> list[list[float]]:
+    def _fake_encode(texts: list[str], db=None) -> list[list[float]]:
         laenge = ai_embedding_service.EMBEDDING_DIMENSIONS
         return [[1.0] + [0.0] * (laenge - 1) for _ in texts]
 
@@ -1032,7 +1032,7 @@ def test_a_failed_encode_discards_the_vector_of_the_old_text(
 
     # Das Modell fällt aus, und derselbe Skill wird auf ein anderes Thema
     # umgeschrieben — die Lage, in der ein stehengebliebener Vektor lügt.
-    monkeypatch.setattr(ai_embedding_service, "encode", lambda texts: None)
+    monkeypatch.setattr(ai_embedding_service, "encode", lambda texts, db=None: None)
     ai_skill_service.upsert_skill(
         db, user=regular_user, skill_key="umgelernt",
         name="Portkonflikt erkennen",

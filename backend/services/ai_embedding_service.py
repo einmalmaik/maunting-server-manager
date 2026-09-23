@@ -39,8 +39,12 @@ import time
 from array import array
 from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from config import settings
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 
 logger = logging.getLogger(__name__)
@@ -283,11 +287,44 @@ def encode_with_google(
         return None
 
 
-def encode(texts: list[str]) -> list[list[float]] | None:
+def _google_zugang(db: Session) -> tuple[str, dict[str, str]] | None:
+    """Schlüssel und Modellwahl des Google-Zugangs für den Rückfall, oder ``None``."""
+    from models import AiProvider
+    from services import ai_provider_service
+
+    google_prov = (
+        db.query(AiProvider)
+        .filter(
+            AiProvider.provider_kind == "google",
+            AiProvider.enabled.is_(True),
+        )
+        .first()
+    )
+    if not google_prov or not google_prov.operator_api_key_encrypted:
+        return None
+    key = ai_provider_service.resolve_api_key(db, google_prov, 0)
+    if not key:
+        return None
+    emb_kw = {}
+    if google_prov.default_model and "embedding" in google_prov.default_model.lower():
+        emb_kw["model"] = google_prov.default_model
+    return key, emb_kw
+
+
+def encode(texts: list[str], *, db: Session | None = None) -> list[list[float]] | None:
     """Wandelt Texte in normalisierte Vektoren um, oder ``None`` ohne Modell.
 
     Normalisiert wird hier, damit die Aehnlichkeit spaeter ein reines
     Skalarprodukt ist — der Aufrufer muss nichts ueber Vektorlaengen wissen.
+
+    ``db`` ist die Sitzung des Aufrufers. Gebraucht wird sie nur für den
+    Rückfall auf Google, und wer mitten in einer Schreibarbeit rechnet, muss sie
+    mitgeben. Eine zweite, eigene Sitzung liegt in der Testsuite auf derselben
+    Verbindung (`StaticPool`), und ihr Schließen rollt die offene Arbeit des
+    Aufrufers zurück: `learn_skill` legte das persönliche Team an, der Rückfall
+    schloss seine Sitzung, und der Skill zeigte danach auf ein Team, das es
+    nicht mehr gab — gemeldet als „parallel geändert". Nur wer keine Sitzung hat
+    (Absichtserkennung, Werkzeugauswahl), bekommt hier eine eigene, kurze.
     """
     if not texts:
         return []
@@ -295,29 +332,19 @@ def encode(texts: list[str]) -> list[list[float]] | None:
     if model is None:
         # Fallback auf konfigurierten Google AI Studio Provider, falls lokales Modell fehlt
         try:
-            from database import SessionLocal
-            from models import AiProvider
-            from services import ai_provider_service
+            if db is not None:
+                zugang = _google_zugang(db)
+            else:
+                from database import SessionLocal
 
-            with SessionLocal() as db:
-                google_prov = (
-                    db.query(AiProvider)
-                    .filter(
-                        AiProvider.provider_kind == "google",
-                        AiProvider.enabled.is_(True),
-                    )
-                    .first()
-                )
-                if google_prov and google_prov.operator_api_key_encrypted:
-                    key = ai_provider_service.resolve_api_key(db, google_prov, 0)
-                    if key:
-                        emb_kw = {}
-                        if google_prov.default_model and "embedding" in google_prov.default_model.lower():
-                            emb_kw["model"] = google_prov.default_model
-                        return encode_with_google(texts, api_key=key, **emb_kw)
+                with SessionLocal() as eigene:
+                    zugang = _google_zugang(eigene)
         except Exception:
-            pass
-        return None
+            return None
+        if zugang is None:
+            return None
+        key, emb_kw = zugang
+        return encode_with_google(texts, api_key=key, **emb_kw)
     try:
         import numpy as np
 
