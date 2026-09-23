@@ -1087,6 +1087,9 @@ def test_upload_unauthorized_mailbox_rejection(db: Session, owner_user: User):
             file_name="unauthorized.pdf",
         )
     assert exc_info.value.status_code == 403
-    assert "Keine gueltige Chat-Mitgliedschaft" in exc_info.value.detail
+    # Seit 09/2026 dieselbe Meldung wie im Relais: der Upload prueft die
+    # Mailbox mit `assert_mailbox_zugang` statt mit einer eigenen Fassung
+    # derselben Frage. Eine zweite Fassung waere irgendwann die nachsichtigere.
+    assert "Keine Berechtigung" in exc_info.value.detail
 
 

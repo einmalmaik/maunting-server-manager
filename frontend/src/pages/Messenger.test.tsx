@@ -4,6 +4,7 @@ import i18n from '@/i18n'
 import { MemoryRouter } from 'react-router-dom'
 import { Messenger, clearSessionChatCache } from './Messenger'
 import * as socialApi from '@/api/social'
+import { leereMailboxAbos, offeneMailboxAbos } from '@/services/mailboxAbo'
 import { teamsApi } from '@/api/teams'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -588,6 +589,62 @@ describe('Messenger (Allround Chat)', () => {
 
     await oeffneChatMenue()
     expect(screen.getByText(i18n.t('messenger.copyInvite'))).toBeInTheDocument()
+  })
+
+  it('meldet jede Gruppe und jeden Chat beim Strom an, nicht nur das offene Gespräch', async () => {
+    /*
+     * Die Zusage, an der seit Stufe 4 alles hängt.
+     *
+     * Der Server schlägt nicht mehr nach, wer zu einer Gruppe gehört — er
+     * stellt an die Abonnenten einer Mailbox zu und sonst an niemanden. Ohne
+     * diese Anmeldung erführe man von einer Gruppennachricht erst beim Öffnen
+     * genau dieses Gesprächs, und auf dem geschlossenen Tab nie. Der Ausfall
+     * wäre vollkommen still: die Nachrichten kommen ja an, nur eben erst beim
+     * nächsten Abruf.
+     *
+     * Deshalb wird hier nichts angeklickt. Gemessen wird, was **ohne**
+     * geöffnetes Gespräch im Abo steht.
+     */
+    leereMailboxAbos()
+    vi.mocked(socialApi.getGroups).mockResolvedValue([
+      {
+        id: 77,
+        name: 'Dev Community',
+        description: null,
+        avatar_url: null,
+        invite_code: 'dev-invite-123',
+        owner_user_id: 1,
+        member_count: 5,
+        role: 'admin',
+        created_at: '2026-09-07T00:00:00Z',
+        members: [],
+      },
+    ])
+    vi.mocked(socialApi.getDirectChats).mockResolvedValue([
+      {
+        id: 3,
+        other_user_id: 104,
+        other_username: 'bob',
+        blind_mailbox_id: 'egal-der-client-rechnet-selbst',
+        is_friend: true,
+        other_privacy: 'friends',
+        created_at: '2026-09-07T00:00:00Z',
+        updated_at: '2026-09-07T00:00:00Z',
+      },
+    ])
+
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    // Die Werte aus dem Stellvertreter für `e2eeCrypto` weiter oben.
+    await waitFor(() => {
+      expect(offeneMailboxAbos()).toEqual(
+        expect.arrayContaining(['test-group-blind-mailbox', 'test-blind-mailbox']),
+      )
+    })
   })
 
   it('erlaubt das Erstellen einer neuen Gruppe über den Dialog', async () => {
@@ -1543,7 +1600,6 @@ describe('Messenger (Allround Chat)', () => {
       expect(socialApi.sendTypingSignal).toHaveBeenCalledWith(
         expect.objectContaining({
           status: 'typing',
-          recipient_id: 104,
         })
       )
     })
@@ -1588,12 +1644,12 @@ describe('Messenger (Allround Chat)', () => {
     const input = screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder'))
     fireEvent.change(input, { target: { value: 'Nachricht aus Tauri' } })
 
-    // Typing signal uses actual userId (205), not friendship id (99)
+    // Das Tippsignal traegt keine Empfaengerkennung mehr; dass die richtige
+    // Gegenstelle gemeint ist, haelt der `baueZustellungen`-Aufruf unten fest.
     await waitFor(() => {
       expect(socialApi.sendTypingSignal).toHaveBeenCalledWith(
         expect.objectContaining({
           status: 'typing',
-          recipient_id: 205,
         })
       )
     })
@@ -1601,8 +1657,9 @@ describe('Messenger (Allround Chat)', () => {
     const sendBtn = screen.getByTitle('Senden')
     fireEvent.click(sendBtn)
 
-    // Der Ratchet baut je Zielgeraet einen Umschlag; relayed wird mit
-    // recipient_id = 205, der echten Benutzerkennung statt der Freundschafts-ID.
+    // Der Ratchet baut je Zielgeraet einen Umschlag. Der Empfaenger steht
+    // nicht mehr daneben — `baueZustellungen` oben haelt fest, dass es die
+    // echte Benutzerkennung (205) ist und nicht die Freundschafts-ID.
     await waitFor(() => {
       expect(baueZustellungen).toHaveBeenCalledWith(
         { eigeneId: 1, peerId: 205 },
@@ -1611,7 +1668,6 @@ describe('Messenger (Allround Chat)', () => {
       )
       expect(socialApi.relayE2eeEnvelope).toHaveBeenCalledWith(
         expect.objectContaining({
-          recipient_id: 205,
           ciphertext_envelope: expect.stringContaining('sv-e2ee-dr-v1:'),
         })
       )

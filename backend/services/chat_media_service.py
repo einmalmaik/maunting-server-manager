@@ -170,7 +170,7 @@ class ChatMediaService:
         file_name: str,
         media_type: str = "application/octet-stream",
         group_id: int | None = None,
-        recipient_id: int | None = None,
+        mailbox_token: str | None = None,
     ) -> ChatMedia:
         """Nimmt einen clientseitig verschluesselten E2EE-Medienblob entgegen."""
         SocialService.assert_social_enabled(db)
@@ -195,24 +195,32 @@ class ChatMediaService:
                 )
             target_group_id = group_id
         else:
-            target_recipient_id, _, direct_chat, resolved_group_id = SocialService.resolve_mailbox_target(
+            target_recipient_id, direct_chat = SocialService.resolve_mailbox_target(
                 db,
                 sender_user_id=uploader.id,
                 blind_mailbox_id=clean_mailbox,
-                recipient_id=recipient_id,
             )
-            if resolved_group_id:
-                target_group_id = resolved_group_id
-            elif target_recipient_id:
+            if target_recipient_id:
                 can_msg, reason = SocialService.can_message_user(db, uploader.id, target_recipient_id)
                 if not can_msg:
                     raise HTTPException(status_code=403, detail=reason or "Keine Berechtigung fuer diesen Chat.")
                 direct_chat_id = direct_chat.id if direct_chat else SocialService.ensure_direct_chat(db, uploader.id, target_recipient_id).id
             else:
-                raise HTTPException(
-                    status_code=403,
-                    detail="Upload verweigert: Keine gueltige Chat-Mitgliedschaft fuer die angegebene Mailbox-ID.",
-                )
+                # Eine Mailbox, die der Server keinem Konto zuordnen kann.
+                #
+                # Bis 09/2026 war das hier ein 403 — und damit war jeder
+                # Anhang in einer Gruppe mit geheimer Mailbox unmoeglich,
+                # ausser der Client nannte die `group_id` dazu. Die Zeile
+                # bleibt ohne `direct_chat_id` und ohne `group_id`: sie sagt
+                # nicht mehr, zu welchem Gespraech der Anhang gehoert, und
+                # `assert_chat_membership` faellt beim Lesen auf denselben
+                # Mailbox-Weg zurueck.
+                #
+                # Die Schranke ist dieselbe wie im Relais: Besitznachweis
+                # **oder** Teilnahme. Eine erfundene Kennung ohne beides ist
+                # weiter 403 — sonst waere der Upload eine Ablage, die jedes
+                # angemeldete Konto unter beliebigen Kennungen fuellen kann.
+                SocialService.assert_mailbox_zugang(db, uploader.id, clean_mailbox, mailbox_token)
 
         # 2. Server-seitige Validierung des verschluesselten Blobs
         # Stellt sicher: Server akzeptiert NUR E2EE Blobs, keine Klartexte und keine Riesen-Dateien

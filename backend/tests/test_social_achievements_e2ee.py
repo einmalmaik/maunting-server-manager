@@ -888,7 +888,6 @@ def test_user_device_mailbox_e2ee_key_sync_and_privacy(
         blind_mailbox_id=device_mailbox_owner,
         ciphertext_envelope=envelope,
         sender_user_id=owner_user.id,
-        recipient_id=owner_user.id,
         client_uuid="noteskey:devA:devB:12345",
         is_control=True,
         control_type="notes_key_sync",
@@ -901,7 +900,12 @@ def test_user_device_mailbox_e2ee_key_sync_and_privacy(
     mids = [m["blind_mailbox_id"] for m in synced]
     assert device_mailbox_owner in mids
 
-    # 3. Fremder Nutzer darf NICHT in die Geräte-Mailbox des Owners einliefern (mit recipient_id -> 400)
+    # 3. Fremder Nutzer darf NICHT in die Geräte-Mailbox des Owners einliefern.
+    #
+    # Bis 09/2026 standen hier zwei Fälle: mit genanntem `recipient_id` gab es
+    # 400 („stimmt nicht mit dem angegebenen Empfänger überein"), ohne 403.
+    # Das Feld gibt es nicht mehr, also bleibt der eine ehrliche Fall — und er
+    # antwortet mit derselben 403 wie jede andere verschlossene Mailbox.
     ct2 = base64.b64encode(b"\x03" * 12 + b"attack-secret-payload" + b"\x04" * 16).decode("ascii")
     with pytest.raises(HTTPException) as exc:
         SocialService.relay_blind_envelope(
@@ -909,22 +913,23 @@ def test_user_device_mailbox_e2ee_key_sync_and_privacy(
             blind_mailbox_id=device_mailbox_owner,
             ciphertext_envelope=f"sv-e2ee-hybrid-v1:{wk}.{ct2}",
             sender_user_id=regular_user.id,
-            recipient_id=owner_user.id,
             client_uuid="attack:123",
         )
-    assert exc.value.status_code == 400
+    assert exc.value.status_code == 403
 
-    # 3b. Fremder Nutzer darf auch OHNE recipient_id NICHT in fremde Geräte-Mailbox einliefern (403)
-    with pytest.raises(HTTPException) as exc_no_recip:
+    # 3b. Auch als Steuerumschlag nicht: `_steuerziel_geraetemailbox` verlangt
+    # eine bestehende Beziehung, und diese beiden haben keine.
+    with pytest.raises(HTTPException) as exc_steuerung:
         SocialService.relay_blind_envelope(
             db,
             blind_mailbox_id=device_mailbox_owner,
             ciphertext_envelope=f"sv-e2ee-hybrid-v1:{wk}.{ct2}",
             sender_user_id=regular_user.id,
-            recipient_id=None,
             client_uuid="attack:124",
+            is_control=True,
+            control_type="notes_key_sync",
         )
-    assert exc_no_recip.value.status_code == 403
+    assert exc_steuerung.value.status_code == 403
 
     # 4. Owner kann seine Geräte-Mailbox abfragen
     resp_owner = client.get(f"/api/social/e2ee/mailbox/{device_mailbox_owner}", cookies=owner_cookies)
@@ -973,7 +978,6 @@ def test_mailbox_participant_access_control_dm_and_group(
         blind_mailbox_id=group_mid,
         ciphertext_envelope=envelope,
         sender_user_id=owner_user.id,
-        recipient_id=None,
         client_uuid=str(uuid4()),
     )
 
@@ -1015,7 +1019,6 @@ def test_mailbox_participant_access_control_dm_and_group(
         blind_mailbox_id=dm_mid,
         ciphertext_envelope=dm_envelope,
         sender_user_id=owner_user.id,
-        recipient_id=third_user.id,
         client_uuid=str(uuid4()),
     )
 

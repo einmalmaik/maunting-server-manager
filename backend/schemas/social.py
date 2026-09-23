@@ -351,9 +351,22 @@ def validate_e2ee_envelope_format(envelope_str: str) -> None:
 
 
 class E2eeBlindEnvelopeCreate(BaseModel):
+    """Ein blinder Umschlag — ohne Empfängerkennung.
+
+    Bis 09/2026 stand hier ein `recipient_id`. Für eine **ableitbare** Mailbox
+    verriet es nichts Neues: der Server rechnet `sha256("msm:dm:<min>:<max>")`
+    ohnehin selbst nach. Für eine Mailbox aus einem Geheimnis verriet es alles
+    — er kann sie keinem Konto zuordnen, und genau das ist ihr Zweck; das Feld
+    daneben hätte die Antwort mitgeliefert und Stufe 3 zur Zierde gemacht.
+
+    Weggelassen statt abgewiesen: Pydantic überliest unbekannte Felder, ein
+    Altclient sendet also weiter `recipient_id` und wird schlicht nicht mehr
+    gehört. Das schliesst die Auskunft auch für Geräte, die noch nicht
+    aktualisiert sind — eine Fehlermeldung täte das nicht.
+    """
+
     blind_mailbox_id: str = Field(..., min_length=16, max_length=64)
     ciphertext_envelope: str = Field(..., min_length=10)
-    recipient_id: int | None = Field(None, description="Optionale Empfänger-User-ID zur strikten Push-Filterung")
     client_uuid: str | None = Field(None, max_length=64, description="Client-UUID zur Idempotenz und Deduplizierung")
     is_control: bool = Field(False, description="Markiert interne Steuernachrichten (z. B. Lesequittungen, Quittungen)")
     control_type: str | None = Field(None, description="Typ des Steuersignals (read_receipt, delivery_receipt, edit, delete)")
@@ -481,9 +494,16 @@ class MailboxPushAbos(PushSubscriptionCreate):
 
 
 class E2eeTypingSignalCreate(BaseModel):
+    """Ein flüchtiges „tippt gerade" — ebenfalls ohne Empfängerkennung.
+
+    Dasselbe wie beim Umschlag, und hier war es sogar eine Lücke: ein
+    genanntes `recipient_id` sprang an der Mailbox-Auflösung vorbei, sodass
+    jedes angemeldete Konto jedem anderen ein Signal schicken konnte. Die
+    Mailbox entscheidet jetzt allein, wer es bekommt.
+    """
+
     blind_mailbox_id: str = Field(..., min_length=16, max_length=64)
     status: str = Field(..., pattern="^(typing|recording|idle)$")
-    recipient_id: int | None = None
 
 
 class DirectChatResponse(BaseModel):

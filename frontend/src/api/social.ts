@@ -390,10 +390,18 @@ export async function registriereMailbox(mailboxId: string, authToken: string): 
   })
 }
 
+/**
+ * Ein blinder Umschlag — ohne Empfängerkennung.
+ *
+ * Bis 09/2026 reiste ein `recipient_id` mit. Für eine Mailbox, die der Server
+ * ohnehin ausrechnen kann, verriet es nichts Neues; für eine aus einem
+ * Geheimnis verriet es alles. Der Server nimmt es nicht mehr entgegen, und
+ * dieses Feld gibt es hier deshalb gar nicht mehr — ein durchgereichtes
+ * `recipient_id` wäre stiller Ballast, der irgendwann wieder jemand liest.
+ */
 export async function relayE2eeEnvelope(payload: {
   blind_mailbox_id: string
   ciphertext_envelope: string
-  recipient_id?: number | null
   client_uuid?: string | null
   is_control?: boolean
   control_type?: string | null
@@ -428,7 +436,6 @@ export async function uploadChatMedia(payload: {
   file_name: string
   media_type?: string
   group_id?: number | null
-  recipient_id?: number | null
 }): Promise<ChatMediaItem> {
   return api<ChatMediaItem>('/social/media/upload', {
     method: 'POST',
@@ -510,7 +517,6 @@ export async function ladeAnhangHoch(eingabe: {
   blindMailboxId: string
   absenderId: number
   groupId?: number | null
-  recipientId?: number | null
 }): Promise<import('@/services/medienKrypto').MedienZeiger> {
   const { neueFileId, verschluesselePaket } = await import('@/services/medienKrypto')
   const fileId = neueFileId()
@@ -529,7 +535,6 @@ export async function ladeAnhangHoch(eingabe: {
     file_name: 'anhang.bin',
     media_type: 'application/octet-stream',
     group_id: eingabe.groupId,
-    recipient_id: eingabe.recipientId,
   })
   return { mediaId: hochgeladen.id, paketSchluessel, fileId }
 }
@@ -577,7 +582,6 @@ export async function fetchE2eeEnvelopes(
 export async function sendTypingSignal(payload: {
   blind_mailbox_id: string
   status: 'typing' | 'recording' | 'idle'
-  recipient_id?: number | null
 }): Promise<{ ok: boolean }> {
   return api<{ ok: boolean }>('/social/e2ee/typing', {
     method: 'POST',

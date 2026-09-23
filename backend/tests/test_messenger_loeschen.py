@@ -202,7 +202,6 @@ def test_anhang_loescht_nur_der_absender(db: Session, owner_user: User, regular_
         blind_mailbox_id=mailbox,
         ciphertext_blob="sv-blob-v1:AES-GCM-256:iv=abcdef123456:tag=987654:ciphertext=abcabcabcabc",
         file_name="anhang.bin",
-        recipient_id=regular_user.id,
     )
 
     # Der Empfaenger darf den Blob lesen, aber nicht loeschen.

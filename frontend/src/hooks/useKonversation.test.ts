@@ -571,7 +571,9 @@ describe('useKonversation', () => {
         ['nachricht', 'uuid-1#aaa'],
         ['nachricht', 'uuid-1#bbb'],
       ])
-      expect(auftraege.every((a) => a.recipient_id === DU)).toBe(true)
+      // Und keiner nennt den Empfänger. Seit Stufe 4 nimmt das Relais keine
+      // Kennung mehr entgegen; die Mailbox **ist** die Adresse.
+      expect(auftraege.every((a) => !('recipient_id' in a))).toBe(true)
     })
 
     it('schickt in der Gruppe genau einen Umschlag', async () => {
@@ -581,7 +583,7 @@ describe('useKonversation', () => {
       expect(auftraege).toHaveLength(1)
       expect(auftraege[0].ciphertext_envelope).toBe('sv-e2ee-group-v1:7:Hallo Gruppe')
       // Kein Empfänger: die Gruppenmailbox gehört allen.
-      expect(auftraege[0].recipient_id).toBeUndefined()
+      expect('recipient_id' in auftraege[0]).toBe(false)
     })
 
     it('sendet nicht, solange die Mitgliederliste der Gruppe fehlt', async () => {

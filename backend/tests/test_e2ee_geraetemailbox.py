@@ -90,7 +90,7 @@ def test_steuerumschlag_an_ein_gruppenmitglied_findet_sein_ziel(
     _gemeinsame_gruppe(db, owner_user, regular_user)
     ziel_mailbox = SocialService.derive_user_device_mailbox_id(regular_user.id)
 
-    empfaenger, mitglieder, chat, gruppe = SocialService.resolve_mailbox_target(
+    empfaenger, chat = SocialService.resolve_mailbox_target(
         db,
         sender_user_id=owner_user.id,
         blind_mailbox_id=ziel_mailbox,
@@ -98,11 +98,11 @@ def test_steuerumschlag_an_ein_gruppenmitglied_findet_sein_ziel(
     )
 
     assert empfaenger == regular_user.id
-    # Eine Geraete-Mailbox gehoert einem Konto, nicht einer Gruppe: der
-    # Zustellweg darf dabei keine Mitgliederliste auffalten.
-    assert mitglieder == []
+    # Und kein Direktchat: eine Geraete-Mailbox gehoert einem Konto, nicht
+    # einem Gespraech. Eine Zeile in `direct_chats` waere hier die Auskunft,
+    # dass diese beiden miteinander zu tun haben — fuer eine Zustellung, die
+    # nur einen Schluessel traegt.
     assert chat is None
-    assert gruppe is None
 
 
 def test_ohne_steuerkennzeichen_bleibt_die_fremde_geraetemailbox_zu(
@@ -118,16 +118,17 @@ def test_ohne_steuerkennzeichen_bleibt_die_fremde_geraetemailbox_zu(
     _gemeinsame_gruppe(db, owner_user, regular_user)
     ziel_mailbox = SocialService.derive_user_device_mailbox_id(regular_user.id)
 
-    empfaenger, mitglieder, _, _ = SocialService.resolve_mailbox_target(
+    empfaenger, _ = SocialService.resolve_mailbox_target(
         db,
         sender_user_id=owner_user.id,
         blind_mailbox_id=ziel_mailbox,
         is_control=False,
     )
 
-    # Kein Ziel — und `relay_blind_envelope` macht daraus eine 403.
+    # Kein Ziel — und `relay_blind_envelope` macht daraus eine 403,
+    # weil zu einer fremden Geraete-Mailbox weder Nachweis noch Teilnahme
+    # vorliegt.
     assert empfaenger is None
-    assert mitglieder == []
 
 
 def test_relay_lehnt_die_nachricht_in_die_fremde_geraetemailbox_ab(
@@ -186,7 +187,7 @@ def test_ein_aussenstehender_erreicht_keine_geraetemailbox(
     aussen = _dritter(db)
     ziel_mailbox = SocialService.derive_user_device_mailbox_id(regular_user.id)
 
-    empfaenger, mitglieder, _, _ = SocialService.resolve_mailbox_target(
+    empfaenger, _ = SocialService.resolve_mailbox_target(
         db,
         sender_user_id=aussen.id,
         blind_mailbox_id=ziel_mailbox,
@@ -194,7 +195,6 @@ def test_ein_aussenstehender_erreicht_keine_geraetemailbox(
     )
 
     assert empfaenger is None
-    assert mitglieder == []
 
 
 def test_die_eigene_geraetemailbox_bleibt_ohne_steuerkennzeichen_erreichbar(
@@ -208,7 +208,7 @@ def test_die_eigene_geraetemailbox_bleibt_ohne_steuerkennzeichen_erreichbar(
     """
     eigene = SocialService.derive_user_device_mailbox_id(owner_user.id)
 
-    empfaenger, _, _, _ = SocialService.resolve_mailbox_target(
+    empfaenger, _ = SocialService.resolve_mailbox_target(
         db,
         sender_user_id=owner_user.id,
         blind_mailbox_id=eigene,
@@ -217,23 +217,30 @@ def test_die_eigene_geraetemailbox_bleibt_ohne_steuerkennzeichen_erreichbar(
     assert empfaenger == owner_user.id
 
 
-def test_die_gruppenmailbox_bleibt_unveraendert_erreichbar(
+def test_die_gruppenmailbox_wird_nicht_mehr_aufgeloest(
     db: Session, owner_user: User, regular_user: User
 ) -> None:
-    """Nachrichten gehen weiter dorthin. Nur die Steuerung ist ausgezogen."""
+    """Nachrichten gehen weiter dorthin — nur nicht mehr ueber Konten."""
     gruppe = _gemeinsame_gruppe(db, owner_user, regular_user)
+    aussen = _dritter(db)
     gruppen_mailbox = SocialService.derive_group_blind_mailbox_id(gruppe.id)
 
-    empfaenger, mitglieder, _, gid = SocialService.resolve_mailbox_target(
+    empfaenger, _ = SocialService.resolve_mailbox_target(
         db,
         sender_user_id=owner_user.id,
         blind_mailbox_id=gruppen_mailbox,
         is_control=False,
     )
 
+    # Seit 09/2026 loest der Server eine Gruppenmailbox nicht mehr auf. Er
+    # findet kein Konto — und genau das ist der Gewinn: er zaehlt nicht mehr
+    # bei jeder Nachricht auf, wer in dieser Gruppe ist. Zugestellt wird ueber
+    # das Abo, und die Berechtigung prueft `relay_blind_envelope` mit
+    # `hat_zugang`.
     assert empfaenger is None
-    assert gid == gruppe.id
-    assert set(mitglieder) == {owner_user.id, regular_user.id}
+    assert SocialService.hat_zugang(db, owner_user.id, gruppen_mailbox, None) is True
+    # Gegenprobe: ein Aussenstehender kommt dort nicht hinein.
+    assert SocialService.hat_zugang(db, aussen.id, gruppen_mailbox, None) is False
 
 
 def test_eine_unbekannte_kennung_bleibt_auch_als_steuerung_ohne_ziel(
@@ -246,7 +253,7 @@ def test_eine_unbekannte_kennung_bleibt_auch_als_steuerung_ohne_ziel(
     """
     _gemeinsame_gruppe(db, owner_user, regular_user)
 
-    empfaenger, mitglieder, _, _ = SocialService.resolve_mailbox_target(
+    empfaenger, _ = SocialService.resolve_mailbox_target(
         db,
         sender_user_id=owner_user.id,
         blind_mailbox_id="f" * 64,
@@ -254,7 +261,6 @@ def test_eine_unbekannte_kennung_bleibt_auch_als_steuerung_ohne_ziel(
     )
 
     assert empfaenger is None
-    assert mitglieder == []
 
 
 # ── Stufe 3e: das Chatgeheimnis nimmt denselben Weg ─────────────────────────
@@ -285,7 +291,7 @@ def test_steuerumschlag_an_einen_freund_ohne_gemeinsame_gruppe(
     _befreundet(db, owner_user, regular_user)
     ziel_mailbox = SocialService.derive_user_device_mailbox_id(regular_user.id)
 
-    empfaenger, mitglieder, chat, gruppe = SocialService.resolve_mailbox_target(
+    empfaenger, chat = SocialService.resolve_mailbox_target(
         db,
         sender_user_id=owner_user.id,
         blind_mailbox_id=ziel_mailbox,
@@ -293,9 +299,7 @@ def test_steuerumschlag_an_einen_freund_ohne_gemeinsame_gruppe(
     )
 
     assert empfaenger == regular_user.id
-    assert mitglieder == []
     assert chat is None
-    assert gruppe is None
 
 
 def test_steuerumschlag_an_einen_bestehenden_chat_ohne_freundschaft(
@@ -320,7 +324,7 @@ def test_steuerumschlag_an_einen_bestehenden_chat_ohne_freundschaft(
     db.commit()
     ziel_mailbox = SocialService.derive_user_device_mailbox_id(regular_user.id)
 
-    empfaenger, _, _, _ = SocialService.resolve_mailbox_target(
+    empfaenger, _ = SocialService.resolve_mailbox_target(
         db,
         sender_user_id=owner_user.id,
         blind_mailbox_id=ziel_mailbox,
@@ -342,7 +346,7 @@ def test_eine_offene_freundschaftsanfrage_reicht_nicht(
     SocialService.send_friend_request(db, owner_user.id, regular_user.username)
     ziel_mailbox = SocialService.derive_user_device_mailbox_id(regular_user.id)
 
-    empfaenger, mitglieder, _, _ = SocialService.resolve_mailbox_target(
+    empfaenger, _ = SocialService.resolve_mailbox_target(
         db,
         sender_user_id=owner_user.id,
         blind_mailbox_id=ziel_mailbox,
@@ -350,7 +354,6 @@ def test_eine_offene_freundschaftsanfrage_reicht_nicht(
     )
 
     assert empfaenger is None
-    assert mitglieder == []
 
 
 def test_ein_fremder_mit_oeffentlichem_profil_bleibt_draussen(
@@ -368,7 +371,7 @@ def test_ein_fremder_mit_oeffentlichem_profil_bleibt_draussen(
     db.commit()
     ziel_mailbox = SocialService.derive_user_device_mailbox_id(regular_user.id)
 
-    empfaenger, mitglieder, _, _ = SocialService.resolve_mailbox_target(
+    empfaenger, _ = SocialService.resolve_mailbox_target(
         db,
         sender_user_id=aussen.id,
         blind_mailbox_id=ziel_mailbox,
@@ -376,7 +379,6 @@ def test_ein_fremder_mit_oeffentlichem_profil_bleibt_draussen(
     )
 
     assert empfaenger is None
-    assert mitglieder == []
 
 
 def test_blockierung_schliesst_auch_die_geraetemailbox(
@@ -394,7 +396,7 @@ def test_blockierung_schliesst_auch_die_geraetemailbox(
     SocialService.block_user(db, regular_user.id, owner_user.id)
     ziel_mailbox = SocialService.derive_user_device_mailbox_id(regular_user.id)
 
-    empfaenger, mitglieder, _, _ = SocialService.resolve_mailbox_target(
+    empfaenger, _ = SocialService.resolve_mailbox_target(
         db,
         sender_user_id=owner_user.id,
         blind_mailbox_id=ziel_mailbox,
@@ -402,7 +404,6 @@ def test_blockierung_schliesst_auch_die_geraetemailbox(
     )
 
     assert empfaenger is None
-    assert mitglieder == []
 
 
 def test_das_chatgeheimnis_geht_durch_das_relais(

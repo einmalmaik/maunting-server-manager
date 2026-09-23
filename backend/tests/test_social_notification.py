@@ -117,7 +117,6 @@ def test_quittung_erreicht_nur_den_empfaenger(db: Session, owner_user: User):
             blind_mailbox_id=mailbox,
             ciphertext_envelope=ciphertext,
             sender_user_id=owner_user.id,
-            recipient_id=charlie.id,
         )
     finally:
         SyncEventService.publish = original_publish

@@ -148,7 +148,13 @@ describe('Medien gehen wirklich noch einmal hoch', () => {
     expect(vi.mocked(ladeAnhangHerunter)).not.toHaveBeenCalled()
   })
 
-  it('schickt bei einem Direktchat die Empfängerkennung statt einer Gruppe', async () => {
+  it('nennt bei einem Direktchat keine Gruppe — und auch keinen Empfänger', async () => {
+    /*
+     * Seit Stufe 4 trägt der Upload keine Empfängerkennung mehr. Für eine
+     * Mailbox, die der Server ausrechnen kann, verriet sie nichts Neues; für
+     * eine aus einem Geheimnis verriet sie alles. Er löst die Mailbox selbst
+     * auf, oder er weiß es nicht — und dann entscheidet der Besitznachweis.
+     */
     await baueWeiterleitung(
       { imageAttachment: ALTER_ANHANG },
       HERKUNFT,
@@ -156,8 +162,9 @@ describe('Medien gehen wirklich noch einmal hoch', () => {
       ICH,
     )
     expect(vi.mocked(ladeAnhangHoch)).toHaveBeenCalledWith(
-      expect.objectContaining({ recipientId: 11, groupId: null }),
+      expect.objectContaining({ blindMailboxId: 'mb-direkt', groupId: null }),
     )
+    expect(vi.mocked(ladeAnhangHoch).mock.calls[0][0]).not.toHaveProperty('recipientId')
   })
 })
 

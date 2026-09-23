@@ -558,7 +558,6 @@ def test_eine_nachricht_loest_den_versand_aus(
         blind_mailbox_id=chat.blind_mailbox_id,
         ciphertext_envelope=_umschlag(1),
         sender_user_id=owner_user.id,
-        recipient_id=regular_user.id,
         client_uuid="uuid-eins",
     )
 
@@ -591,7 +590,6 @@ def test_der_absender_bekommt_nichts_fuer_die_eigene_nachricht(
         blind_mailbox_id=chat.blind_mailbox_id,
         ciphertext_envelope=_umschlag(2),
         sender_user_id=owner_user.id,
-        recipient_id=regular_user.id,
         client_uuid="uuid-zwei",
     )
 
@@ -618,7 +616,6 @@ def test_eine_lesequittung_loest_keinen_versand_aus(
         blind_mailbox_id=chat.blind_mailbox_id,
         ciphertext_envelope=_umschlag(3),
         sender_user_id=owner_user.id,
-        recipient_id=regular_user.id,
         client_uuid="uuid-drei",
         is_control=True,
         control_type="read_receipt",

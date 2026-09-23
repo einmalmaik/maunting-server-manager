@@ -383,7 +383,6 @@ def test_e2ee_envelope_unauthorized_user_cannot_access_existing_uuid(db: Session
         blind_mailbox_id=mailbox,
         ciphertext_envelope=_umschlag("alice-secret"),
         sender_user_id=alice.id,
-        recipient_id=bob.id,
         client_uuid=uuid_tag,
     )
     assert env.id is not None
@@ -395,7 +394,6 @@ def test_e2ee_envelope_unauthorized_user_cannot_access_existing_uuid(db: Session
             blind_mailbox_id=mailbox,
             ciphertext_envelope=_umschlag("charlie-fake"),
             sender_user_id=charlie.id,
-            recipient_id=bob.id,
             client_uuid=uuid_tag,
         )
     # Muss mit 400 oder 403 abgewiesen werden (Berechtigungsfehler)
@@ -431,7 +429,6 @@ def test_e2ee_envelope_unauthorized_user_cannot_access_existing_uuid(db: Session
         blind_mailbox_id=mailbox,
         ciphertext_envelope=_umschlag("alice-secret"),
         sender_user_id=bob.id,
-        recipient_id=alice.id,
         client_uuid=uuid_tag,
     )
     assert wiederholung.id == env.id

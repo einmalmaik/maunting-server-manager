@@ -58,10 +58,14 @@ describe('deliveryReceiptService', () => {
     expect(socialApi.relayE2eeEnvelope).toHaveBeenCalledWith(
       expect.objectContaining({
         blind_mailbox_id: 'mailbox-abc',
-        recipient_id: 2,
         is_control: true,
         control_type: 'delivery_receipt',
       })
+    )
+    // Und ohne Empfängerkennung: seit Stufe 4 nimmt das Relais keine mehr
+    // entgegen. Eine Quittung verriete sonst je Nachricht, wer wem antwortet.
+    expect(vi.mocked(socialApi.relayE2eeEnvelope).mock.calls[0][0]).not.toHaveProperty(
+      'recipient_id',
     )
   })
 

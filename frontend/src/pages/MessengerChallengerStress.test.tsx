@@ -834,8 +834,9 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
       await waitFor(() => {
         expect(socialApi.relayE2eeEnvelope).toHaveBeenCalledWith(
           expect.objectContaining({
+            // Die Mailbox ist die Adresse; eine Empfaengerkennung gibt es
+            // seit Stufe 4 nicht mehr.
             blind_mailbox_id: bobMid,
-            recipient_id: bobId,
             is_control: true,
             control_type: 'delivery_receipt',
           })
@@ -1075,9 +1076,12 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
       })
 
       // Delivery receipt must NEVER be sent to blocked contact
+      // Ueber die Mailbox und nicht ueber die Kennung: `recipient_id` gibt es
+      // nicht mehr, und ein `not.toHaveBeenCalledWith` auf ein Feld, das
+      // niemand mehr setzt, waere aus dem falschen Grund gruen.
       expect(socialApi.relayE2eeEnvelope).not.toHaveBeenCalledWith(
         expect.objectContaining({
-          recipient_id: bobId,
+          blind_mailbox_id: mailboxId,
           control_type: 'delivery_receipt',
         })
       )

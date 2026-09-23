@@ -147,7 +147,11 @@ import {
 import { logischeUuid, DrZustellungFehlgeschlagenError } from '@/services/ratchetSitzung'
 import { geraeteVon, kontoNutztSignaturen, onNeuesGeraet } from '@/services/e2eeGeraet'
 import { pruefeNutzlast, signiereNutzlast } from '@/services/nutzlastSignatur'
-import { gruppenGeheimnis, verwirfGruppenSchluessel } from '@/services/gruppenSchluessel'
+import {
+  abonniereBekannteGespraeche,
+  gruppenGeheimnis,
+  verwirfGruppenSchluessel,
+} from '@/services/gruppenSchluessel'
 import {
   baueEinladungsKarte,
   einladungsschluesselAus,
@@ -861,7 +865,6 @@ export function Messenger() {
         void sendTypingSignal({
           blind_mailbox_id: blindMailboxId,
           status: 'typing',
-          recipient_id: activeContact?.userId ?? null,
         }).catch(() => {})
       }
     } else {
@@ -870,7 +873,6 @@ export function Messenger() {
         void sendTypingSignal({
           blind_mailbox_id: blindMailboxId,
           status: 'idle',
-          recipient_id: activeContact?.userId ?? null,
         }).catch(() => {})
       }
     }
@@ -879,6 +881,39 @@ export function Messenger() {
   }
 
   const currentUserId = user?.id || 0
+
+  /*
+   * Jede bekannte Mailbox beim Strom anmelden, nicht nur die offene.
+   *
+   * Der Server schlägt seit Stufe 4 nicht mehr nach, wer zu einer Gruppe
+   * gehört — er stellt an die Abonnenten einer Mailbox zu und sonst an
+   * niemanden. Ohne diese Stelle erführe man von einer Gruppennachricht erst
+   * beim Öffnen genau dieses Gesprächs, und auf dem geschlossenen Tab nie.
+   *
+   * Der Abdruck statt der Listen selbst: `groups` und `directChats` sind bei
+   * jedem Abruf neue Felder, auch wenn sich nichts geändert hat. An ihnen zu
+   * hängen hiesse, bei jedem Abruf erneut über alle Gespräche zu laufen und
+   * die Ablage zu lesen.
+   */
+  const gespraechsAbdruck = useMemo(
+    () =>
+      [...groups.map((g) => `g${g.id}`), ...directChats.map((c) => `d${c.other_user_id}`)]
+        .sort()
+        .join(','),
+    [groups, directChats],
+  )
+
+  useEffect(() => {
+    if (!currentUserId || !gespraechsAbdruck) return
+    void abonniereBekannteGespraeche(
+      currentUserId,
+      groups.map((g) => g.id),
+      directChats.map((c) => c.other_user_id),
+    )
+    // `groups`/`directChats` bewusst nicht in der Liste: der Abdruck ist ihr
+    // Inhalt, und die Felder selbst wechseln bei jedem Abruf die Identität.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUserId, gespraechsAbdruck])
 
   // 1. Identität des Kontos auflösen und Klartextreste aus der Altzeit entfernen.
   //
@@ -3808,7 +3843,6 @@ export function Messenger() {
       void sendTypingSignal({
         blind_mailbox_id: targetBlindMailboxId,
         status: 'idle',
-        recipient_id: targetUserId ?? null,
       }).catch(() => {})
     }
 
@@ -3868,7 +3902,6 @@ export function Messenger() {
           blindMailboxId: targetBlindMailboxId,
           absenderId: currentUserId,
           groupId: currentGroupId,
-          recipientId: targetUserId,
         })
 
       if (img) {
@@ -4203,7 +4236,6 @@ export function Messenger() {
         void sendTypingSignal({
           blind_mailbox_id: blindMailboxId,
           status: 'recording',
-          recipient_id: activeContact?.userId ?? null,
         }).catch(() => {})
       }
 
@@ -4220,7 +4252,6 @@ export function Messenger() {
       void sendTypingSignal({
         blind_mailbox_id: blindMailboxId,
         status: 'idle',
-        recipient_id: activeContact?.userId ?? null,
       }).catch(() => {})
     }
 

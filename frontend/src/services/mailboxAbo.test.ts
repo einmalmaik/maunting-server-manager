@@ -224,4 +224,38 @@ describe('mailboxAbo', () => {
     await ruhe()
     expect(rufe).toEqual([])
   })
+
+  describe('Der Deckel', () => {
+    /*
+     * Der Server nimmt 200 Einträge (`MailboxAboWrite.eintraege`). Seit der
+     * Messenger beim Start **jedes** bekannte Gespräch anmeldet, ist das keine
+     * theoretische Grenze mehr — und die Folge eines Überlaufs wäre der
+     * schlechtestmögliche Fall: eine zu lange Liste ist ein 422, `melde()`
+     * verschluckt ihn, und dann ist keine einzige Mailbox abonniert. Der
+     * Messenger wäre komplett stumm, und zwar lautlos.
+     */
+    const kennung = (i: number) => String(i).padStart(64, '0')
+
+    it('hält die Liste bei 200', async () => {
+      merkeStromKennung('conn-deckel')
+      for (let i = 0; i < 250; i++) abonniereMailbox(kennung(i))
+      await ruhe()
+
+      expect(offeneMailboxAbos()).toHaveLength(200)
+      // Und was hinausgeht, ist ebenfalls gedeckelt — sonst nützte die
+      // innere Liste nichts.
+      expect(rufe.every((r) => (r.koerper?.eintraege?.length ?? 0) <= 200)).toBe(true)
+    })
+
+    it('lässt die ältesten fallen, nicht die jüngsten', async () => {
+      // Das offene Gespräch kommt zuletzt dazu — es ist der eine Eintrag, bei
+      // dem eine verspätete Nachricht sofort auffällt.
+      for (let i = 0; i < 250; i++) abonniereMailbox(kennung(i))
+      await ruhe()
+
+      const offen = offeneMailboxAbos()
+      expect(offen).toContain(kennung(249))
+      expect(offen).not.toContain(kennung(0))
+    })
+  })
 })

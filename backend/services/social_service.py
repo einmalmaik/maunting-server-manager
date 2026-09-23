@@ -557,41 +557,50 @@ class SocialService:
         db: Session,
         sender_user_id: int,
         blind_mailbox_id: str,
-        recipient_id: int | None = None,
         is_control: bool = False,
-    ) -> tuple[int | None, list[int], DirectChat | None, int | None]:
+        lege_chat_an: bool = True,
+    ) -> tuple[int | None, DirectChat | None]:
         """Ermittelt das Ziel einer blinden Mailbox für den Absender.
 
-        Liefert (target_recipient_id, group_member_ids, direct_chat, target_group_id).
-        Wirft HTTPException bei fehlender Berechtigung oder ungültigem Empfänger.
+        Liefert `(target_recipient_id, direct_chat)` — oder `(None, None)`,
+        wenn der Server nicht weiss, wer gemeint ist. Das ist kein Fehler
+        mehr, sondern der Normalfall: die Kennung **ist** die Adresse, und
+        zugestellt wird über das Abo. Wirft HTTPException nur bei einer
+        Kennung, die der Server auflösen kann und die der Absender nicht
+        benutzen darf.
+
+        Zwei Dinge standen hier bis 09/2026 und sind bewusst weg:
+
+        - **Ein genanntes `recipient_id`.** Es sprang an der Auflösung vorbei
+          und beantwortete dem Server die eine Frage, die er nicht stellen
+          können soll.
+        - **Der Gruppen-Nachschlag.** Er lieferte für *jede* Gruppennachricht
+          die vollständige Mitgliederliste — der Server zählte bei jeder Zeile
+          auf, wer in dieser Gruppe ist. Gruppen laufen jetzt über das
+          Mailbox-Abo, und der Server erfährt nur, dass irgendwo etwas liegt.
+
+        Was bleibt, ist der kontogebundene Direktchat-Weg. Er trägt die
+        Erstaufnahme: `ensure_direct_chat` ist die Stelle, an der
+        `can_message_user` über Blockierung und Privatsphäre entscheidet, und
+        die gibt es erst mit MLS kryptographisch. Er fällt in Stufe 6.
+
+        `lege_chat_an=False` schlägt nur nach und schreibt nichts. Gedacht für
+        das flüchtige Tippsignal: es darf keine Zeile in `direct_chats`
+        entstehen lassen, sonst legt ein „tippt gerade" in einem Gespräch, aus
+        dem nie eine Nachricht wird, dauerhaft ab, dass diese beiden
+        miteinander zu tun hatten.
         """
         clean_mailbox = blind_mailbox_id.strip()
         cls.assert_social_enabled(db)
         user_device_box = cls.derive_user_device_mailbox_id(sender_user_id)
 
-        if clean_mailbox == user_device_box or (recipient_id and recipient_id == sender_user_id):
-            if clean_mailbox != user_device_box:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Mailbox-ID stimmt nicht mit der Geräte-Sync-Mailbox überein.",
-                )
-            return sender_user_id, [], None, None
+        if clean_mailbox == user_device_box:
+            return sender_user_id, None
 
         if is_control:
             ziel = cls._steuerziel_geraetemailbox(db, sender_user_id, clean_mailbox)
             if ziel is not None:
-                return ziel, [], None, None
-
-        if recipient_id:
-            expected_mailbox = cls.derive_blind_mailbox_id(sender_user_id, recipient_id)
-            legacy_mailbox = cls.derive_legacy_direct_mailbox_id(sender_user_id, recipient_id)
-            if clean_mailbox != expected_mailbox and clean_mailbox != legacy_mailbox:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Mailbox-ID stimmt nicht mit dem angegebenen Empfänger überein.",
-                )
-            chat = cls.ensure_direct_chat(db, sender_user_id, recipient_id)
-            return recipient_id, [], chat, None
+                return ziel, None
 
         # 1. Direktchat über bekannte Mailbox-ID in DB
         chat = db.query(DirectChat).filter_by(blind_mailbox_id=clean_mailbox).first()
@@ -603,7 +612,7 @@ class SocialService:
                 raise HTTPException(status_code=403, detail="Benutzer ist blockiert.")
             chat.updated_at = _now()
             db.commit()
-            return other_id, [], chat, None
+            return other_id, chat
 
         # 2. Kandidatensuche über aktive Benutzer (O(N) Fallback)
         candidates = db.query(User.id).filter(User.is_active == True, User.id != sender_user_id).all()
@@ -614,26 +623,12 @@ class SocialService:
             ):
                 if cls.is_blocked(db, sender_user_id, cand_id):
                     raise HTTPException(status_code=403, detail="Benutzer ist blockiert.")
+                if not lege_chat_an:
+                    return cand_id, None
                 chat = cls.ensure_direct_chat(db, sender_user_id, cand_id)
-                return cand_id, [], chat, None
+                return cand_id, chat
 
-        # 3. Gruppen-Mailbox prüfen
-        user_groups = (
-            db.query(ChatGroupMember.group_id)
-            .filter_by(user_id=sender_user_id)
-            .all()
-        )
-        for (gid,) in user_groups:
-            if cls.derive_group_blind_mailbox_id(gid) == clean_mailbox:
-                group_member_ids = [
-                    m.user_id
-                    for m in db.query(ChatGroupMember.user_id)
-                    .filter_by(group_id=gid)
-                    .all()
-                ]
-                return None, group_member_ids, None, gid
-
-        return None, [], None, None
+        return None, None
 
     @classmethod
     def _steuerziel_geraetemailbox(
@@ -1306,7 +1301,6 @@ class SocialService:
         blind_mailbox_id: str,
         ciphertext_envelope: str,
         sender_user_id: int | None = None,
-        recipient_id: int | None = None,
         client_uuid: str | None = None,
         is_control: bool = False,
         control_type: str | None = None,
@@ -1316,8 +1310,10 @@ class SocialService:
 
         """Speichert einen blinden E2EE-Umschlag mit serverseitiger Berechtigungsprüfung.
 
-        sender_user_id und recipient_id werden im SSE-Event mitgeliefert, damit
-        Outgoing Echo Prevention und striktes Empfänger-Filtering greifen.
+        sender_user_id wird im SSE-Event mitgeliefert, damit Outgoing Echo
+        Prevention greift. Eine Empfängerkennung nimmt diese Stelle nicht mehr
+        entgegen — was der Server über das Ziel weiss, rechnet er selbst aus
+        oder er weiss es nicht.
         client_uuid garantiert Idempotenz bei Netzwerk-Schwankungen und Retries.
 
         `push_ausnahme` ist der SHA-256 der eigenen Push-Adresse des Absenders.
@@ -1336,38 +1332,41 @@ class SocialService:
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
+        #: Bleibt `None`, wenn der Server zu dieser Mailbox kein Konto kennt.
+        #: Dann läuft die Zustellung über das Abo — er weiss schlicht nicht,
+        #: wer gemeint ist, und das ist der Normalfall.
         target_recipient_id: int | None = None
-        group_member_ids: list[int] = []
-        #: Eine Mailbox, die der Server nicht kennt, und die nur der Nachweis
-        #: geöffnet hat. Die Zustellung läuft dann über das Abo, nicht über
-        #: Konten — der Server weiss schlicht nicht, wer gemeint ist.
-        nur_ueber_nachweis = False
 
         if sender_user_id:
-            target_recipient_id, group_member_ids, _, _ = cls.resolve_mailbox_target(
+            target_recipient_id, _ = cls.resolve_mailbox_target(
                 db,
                 sender_user_id=sender_user_id,
                 blind_mailbox_id=clean_mailbox,
-                recipient_id=recipient_id,
                 is_control=is_control,
             )
-            if target_recipient_id is None and not group_member_ids:
+            if target_recipient_id is None:
                 # Kein kontogebundenes Ziel. Früher war das immer ein 403, und
                 # das musste es auch sein: jede Mailbox war aus kleinen
                 # Ganzzahlen nachrechenbar, eine unbekannte Kennung also
                 # entweder ein Tippfehler oder ein Versuch.
                 #
-                # Seit die Kennung aus einem Gruppengeheimnis fallen kann, gibt
-                # es einen dritten Fall — eine Mailbox, die *niemand* ausrechnen
-                # kann, auch der Server nicht. Dort ist der Besitznachweis keine
-                # zusätzliche Schranke mehr, sondern die einzige Berechtigung,
-                # die es überhaupt gibt. Deshalb zählt hier der strenge
-                # `hat_gueltigen_nachweis` und nicht das nachsichtige
-                # `assert_mailbox_token`: ohne hinterlegten Nachweis bleibt es
-                # beim 403.
-                if not cls.hat_gueltigen_nachweis(db, clean_mailbox, mailbox_token):
+                # Jetzt sind es zwei Fälle, und beide sind legitim:
+                #
+                # - Eine Kennung aus einem Geheimnis. Der Server kann sie
+                #   niemandem zuordnen; der Besitznachweis ist dort nicht eine
+                #   zusätzliche Schranke, sondern die einzige Berechtigung, die
+                #   es überhaupt gibt.
+                # - Eine Gruppen-Altkennung. Seit der Gruppen-Nachschlag weg
+                #   ist, landet auch sie hier — und für sie gibt es keinen
+                #   Nachweis, sondern nur die Mitgliedschaft.
+                #
+                # `hat_zugang` ist genau diese eine Tür: Nachweis **oder**
+                # Teilnahme, und eine Mailbox mit hinterlegtem Nachweis öffnet
+                # sich nicht mehr allein durch Mitgliedschaft. Der Unterschied
+                # zum nachsichtigen `assert_mailbox_token` bleibt: eine
+                # erfundene Kennung ohne beides ist weiter 403.
+                if not cls.hat_zugang(db, sender_user_id, clean_mailbox, mailbox_token):
                     raise HTTPException(status_code=403, detail="Keine Berechtigung für diese Mailbox.")
-                nur_ueber_nachweis = True
 
         # Idempotenz-Prüfung: Erst NACH erfolgreicher Autorisierung prüfen,
         # ob dieser Umschlag bereits mit dieser client_uuid existiert.
@@ -1453,7 +1452,10 @@ class SocialService:
             "client_uuid": envelope.client_uuid,
             "created_at": envelope.created_at.isoformat(),
             "sender_user_id": sender_user_id,
-            "recipient_id": recipient_id if recipient_id is not None else target_recipient_id,
+            # Nur, was der Server selbst herausgefunden hat. Auf dem
+            # Mailbox-Weg steht hier `None`, und das ist die Wahrheit: er
+            # weiss nicht, wer gemeint ist.
+            "recipient_id": target_recipient_id,
             "is_control": is_control,
             "control_type": control_type,
         }
@@ -1483,32 +1485,16 @@ class SocialService:
                 )
                 if nutzlast:
                     webpush_service.sende_an_konto(db, target_recipient_id, nutzlast)
-        elif group_member_ids:
-            # Gruppen-Nachrichten zielgerichtet nur an Mitglieder ausliefern (Zero Privacy Leak)
-            for g_uid in group_member_ids:
-                SyncEventService.publish(msg_payload, user_id=g_uid)
-                if sender_user_id and not NotificationService.is_outgoing_echo(
-                    sender_user_id=sender_user_id, current_user_id=g_uid
-                ):
-                    # Dasselbe je Mitglied. Der Deckel von vier Fäden im
-                    # Versender gilt für alle zusammen: eine große Gruppe
-                    # erzeugt keine Fadenlawine, sondern eine Warteschlange.
-                    nutzlast = NotificationService.prepare_push_dispatch(
-                        target_user_id=g_uid,
-                        sender_user_id=sender_user_id,
-                        title="Neue Gruppennachricht",
-                        is_e2ee=True,
-                        is_control=is_control,
-                        control_type=control_type,
-                        has_active_foreground_connection=SyncEventService.has_active_subscribers(g_uid),
-                        extra_data={"is_group": True},
-                    )
-                    if nutzlast:
-                        webpush_service.sende_an_konto(db, g_uid, nutzlast)
         else:
             # Kein kontogebundenes Ziel — die Mailbox **ist** die Adresse.
             #
-            # Hier stand bis 09/2026 ein `publish(msg_payload)` ohne jede
+            # Daneben stand bis 09/2026 ein eigener Gruppenzweig: der Server
+            # schlug die Mitgliederliste nach und stellte Zeile für Zeile an
+            # jedes Konto einzeln zu. Das war die teuerste Auskunft im ganzen
+            # Messenger — bei **jeder** Nachricht zählte er auf, wer in dieser
+            # Gruppe ist. Gruppen nehmen jetzt denselben Weg wie alles andere.
+            #
+            # Und hier selbst stand ein `publish(msg_payload)` ohne jede
             # Angabe, und das ist systemweit: jeder verbundene Client erfuhr,
             # dass in dieser Mailbox etwas liegt, samt Kennung und laufender
             # Nummer. Erreichbar war der Zweig nur ohne `sender_user_id`, also
@@ -1985,28 +1971,6 @@ class SocialService:
         return results
 
     @classmethod
-    def _kennung_passt_zum_empfaenger(
-        cls, sender_id: int, empfaenger_id: int, clean_mailbox: str
-    ) -> bool:
-        """Gehört diese Mailbox-Kennung zum Gespräch dieser beiden?
-
-        Beide Ableitungen zählen, die heutige und die alte — ein Gespräch, das
-        vor dem Wechsel begonnen hat, liegt noch unter der alten Kennung.
-
-        Rechnet nur, legt nichts an. Das ist der Unterschied zu
-        `resolve_mailbox_target`, das im Empfängerzweig `ensure_direct_chat`
-        ruft: ein Tippsignal darf keinen Chat entstehen lassen, sonst
-        schriebe ein flüchtiges Signal eine Zeile in `direct_chats` — und
-        genau die soll dort möglichst selten stehen.
-        """
-        if sender_id == empfaenger_id:
-            return False
-        return clean_mailbox in {
-            cls.derive_blind_mailbox_id(sender_id, empfaenger_id),
-            cls.derive_legacy_direct_mailbox_id(sender_id, empfaenger_id),
-        }
-
-    @classmethod
     def broadcast_typing_signal(
         cls,
         blind_mailbox_id: str,
@@ -2014,43 +1978,29 @@ class SocialService:
         sender_id: int,
         sender_username: str,
         db: Session | None = None,
-        recipient_id: int | None = None,
     ) -> None:
-        """Verteilt ein flüchtiges Tipp- oder Sprachaufnahme-Signal ohne Speicherung."""
+        """Verteilt ein flüchtiges Tipp- oder Sprachaufnahme-Signal ohne Speicherung.
+
+        Nimmt keine Empfängerkennung mehr entgegen. Bis 09/2026 war ein
+        genanntes `recipient_id` der ganze Weg: es sprang an der
+        Mailbox-Auflösung vorbei, und die einzige verbleibende Prüfung war die
+        Blockierung. Jedes angemeldete Konto konnte damit jedem anderen
+        „tippt gerade" schicken, mit einer frei erfundenen Kennung. Wer das
+        Signal bekommt, entscheidet jetzt allein die Mailbox.
+        """
         clean_mailbox = blind_mailbox_id.strip()
 
-        target_recipient_id: int | None = recipient_id
-        group_member_ids: list[int] = []
+        target_recipient_id: int | None = None
         if db:
-            if target_recipient_id and not cls._kennung_passt_zum_empfaenger(
-                sender_id, target_recipient_id, clean_mailbox
-            ):
-                # Der Absender nennt einen Empfänger, der nicht zu dieser
-                # Mailbox gehört. Bis 09/2026 war das der ganze Weg: ein
-                # genanntes `recipient_id` sprang an der Mailbox-Auflösung
-                # vorbei, und die einzige verbleibende Prüfung war die
-                # Blockierung. Jedes angemeldete Konto konnte damit jedem
-                # anderen „tippt gerade" schicken, mit einer frei erfundenen
-                # Kennung.
-                #
-                # Verworfen, nicht abgewiesen: die Mailbox entscheidet gleich
-                # selbst, wer das Signal bekommt. Ein Fehler wäre hier zu
-                # streng — Altclients schicken das Feld auch dort mit, wo es
-                # nicht hingehört.
-                target_recipient_id = None
-            if not target_recipient_id:
-                try:
-                    resolved_target, all_members, _, _ = cls.resolve_mailbox_target(
-                        db,
-                        sender_user_id=sender_id,
-                        blind_mailbox_id=clean_mailbox,
-                        recipient_id=recipient_id,
-                    )
-                    target_recipient_id = resolved_target
-                    if all_members:
-                        group_member_ids = [m for m in all_members if m != sender_id]
-                except HTTPException:
-                    return
+            try:
+                target_recipient_id, _ = cls.resolve_mailbox_target(
+                    db,
+                    sender_user_id=sender_id,
+                    blind_mailbox_id=clean_mailbox,
+                    lege_chat_an=False,
+                )
+            except HTTPException:
+                return
 
             if target_recipient_id and cls.is_blocked(db, sender_id, target_recipient_id):
                 return
@@ -2065,9 +2015,6 @@ class SocialService:
 
         if target_recipient_id:
             SyncEventService.publish(payload, user_id=target_recipient_id)
-        elif group_member_ids:
-            for g_uid in group_member_ids:
-                SyncEventService.publish(payload, user_id=g_uid)
         else:
             # An die Abonnenten dieser Mailbox, an niemanden sonst.
             #

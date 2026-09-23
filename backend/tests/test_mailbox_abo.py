@@ -305,14 +305,16 @@ def test_tippsignal_erreicht_die_abonnenten_seiner_mailbox(
     assert len(_empfangen(zuhoerer)) == 1
 
 
-def test_ein_genannter_empfaenger_muss_zur_mailbox_passen(
+def test_eine_erfundene_kennung_erreicht_niemanden(
     db: Session, owner_user: User, regular_user: User
 ) -> None:
     """Ein `recipient_id` sprang frueher an der Mailbox-Aufloesung vorbei.
 
     Die einzige verbleibende Pruefung war die Blockierung. Jedes angemeldete
     Konto konnte damit jedem anderen „tippt gerade" schicken, mit einer frei
-    erfundenen Kennung — eine Zustellung ohne jede Berechtigung.
+    erfundenen Kennung — eine Zustellung ohne jede Berechtigung. Seit 09/2026
+    nimmt die Stelle gar keine Empfaengerkennung mehr entgegen; wer das Signal
+    bekommt, entscheidet allein die Mailbox.
     """
     opfer = _abonniere(regular_user.id, [])  # hoert nur auf sein Konto
 
@@ -322,16 +324,19 @@ def test_ein_genannter_empfaenger_muss_zur_mailbox_passen(
         sender_id=owner_user.id,
         sender_username=owner_user.username,
         db=db,
-        recipient_id=regular_user.id,
     )
 
     assert _empfangen(opfer) == []
 
 
-def test_ein_passender_empfaenger_geht_weiterhin_durch(
+def test_im_echten_gespraech_traegt_der_kontoweg_weiter(
     db: Session, owner_user: User, regular_user: User
 ) -> None:
-    """Der Bestand: im echten Gespraech traegt der Weg wie bisher."""
+    """Der Bestand: eine ableitbare DM-Kennung findet ihr Konto von selbst.
+
+    Ohne genannten Empfaenger — der Server rechnet sie nach. Bis Stufe 6 ist
+    das der Weg, auf dem eine Erstaufnahme ueberhaupt zustande kommt.
+    """
     empfaenger = _abonniere(regular_user.id, [])
     mid = SocialService.derive_blind_mailbox_id(owner_user.id, regular_user.id)
 
@@ -341,10 +346,46 @@ def test_ein_passender_empfaenger_geht_weiterhin_durch(
         sender_id=owner_user.id,
         sender_username=owner_user.username,
         db=db,
-        recipient_id=regular_user.id,
     )
 
     assert len(_empfangen(empfaenger)) == 1
+
+
+def test_das_tippsignal_legt_keinen_chat_an(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    """Ein fluechtiges Signal darf keine Zeile hinterlassen.
+
+    `resolve_mailbox_target` ruft im Kandidatenzweig `ensure_direct_chat` —
+    und damit schriebe ein „tippt gerade" in einem Gespraech, aus dem nie eine
+    Nachricht wird, dauerhaft ab, dass diese beiden miteinander zu tun hatten.
+    Genau die Zeile soll moeglichst selten stehen; `lege_chat_an=False` haelt
+    sie heraus.
+    """
+    from models import DirectChat
+
+    # Der Empfaenger muss Nachrichten **annehmen** — sonst wirft
+    # `ensure_direct_chat` ohnehin, `broadcast_typing_signal` faengt das ab,
+    # und der Test waere aus dem falschen Grund gruen. Der Rot-Nachweis vom
+    # 23.09.2026 hat genau das aufgedeckt: ohne `lege_chat_an=False` blieb er
+    # unveraendert gruen. Ein offenes Profil ist zugleich der schaerfere Fall —
+    # dort darf jeder schreiben, und dann genuegte ein Tippen, um eine Zeile
+    # zu hinterlassen.
+    regular_user.social_privacy = "public"
+    db.commit()
+
+    mid = SocialService.derive_blind_mailbox_id(owner_user.id, regular_user.id)
+    assert db.query(DirectChat).filter_by(blind_mailbox_id=mid).first() is None
+
+    SocialService.broadcast_typing_signal(
+        blind_mailbox_id=mid,
+        status="typing",
+        sender_id=owner_user.id,
+        sender_username=owner_user.username,
+        db=db,
+    )
+
+    assert db.query(DirectChat).filter_by(blind_mailbox_id=mid).first() is None
 
 
 def test_die_alte_dm_kennung_gilt_auch(
@@ -360,19 +401,25 @@ def test_die_alte_dm_kennung_gilt_auch(
         sender_id=owner_user.id,
         sender_username=owner_user.username,
         db=db,
-        recipient_id=regular_user.id,
     )
 
     assert len(_empfangen(empfaenger)) == 1
 
 
-def test_die_gruppe_erreicht_ihre_mitglieder_wie_bisher(
+def test_die_gruppe_erreicht_ihre_mitglieder_ueber_das_abo(
     db: Session, owner_user: User, regular_user: User
 ) -> None:
-    """Der wichtigste Bestandstest: der Kontoweg bleibt fuer bekannte Mailboxen."""
+    """Die Umkehrung der Stufe 4c, und der teuerste Test dieser Datei.
+
+    Bis 09/2026 schlug der Server bei **jeder** Gruppennachricht die
+    Mitgliederliste nach und stellte an jedes Konto einzeln zu. Das war die
+    lauteste Auskunft im ganzen Messenger: er zaehlte Zeile fuer Zeile auf, wer
+    in dieser Gruppe ist. Jetzt geht die Nachricht an die Abonnenten der
+    Mailbox — und an niemanden sonst.
+    """
     gruppe = _gemeinsame_gruppe(db, owner_user, regular_user)
     mid = SocialService.derive_group_blind_mailbox_id(gruppe.id)
-    mitglied = _abonniere(regular_user.id, [])  # ohne Mailbox-Abo
+    mit_abo = _abonniere(regular_user.id, [mid])
 
     SocialService.relay_blind_envelope(
         db,
@@ -382,4 +429,60 @@ def test_die_gruppe_erreicht_ihre_mitglieder_wie_bisher(
         client_uuid="an-die-gruppe-1",
     )
 
-    assert len(_empfangen(mitglied)) == 1
+    assert len(_empfangen(mit_abo)) == 1
+
+
+def test_ohne_abo_erfaehrt_das_mitglied_nichts(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    """Die Kehrseite, und sie gehoert ausgesprochen.
+
+    Ein Mitglied, das diese Mailbox nicht abonniert hat, bekommt nichts — auch
+    wenn der Server seine Mitgliedschaft in `chat_group_members` stehen hat und
+    sie nachschlagen **koennte**. Genau darauf laeuft die Stufe hinaus, und
+    deshalb meldet der Client seit 09/2026 jede bekannte Mailbox an, nicht nur
+    die des offenen Gespraechs (`abonniereBekannteGespraeche`).
+    """
+    gruppe = _gemeinsame_gruppe(db, owner_user, regular_user)
+    mid = SocialService.derive_group_blind_mailbox_id(gruppe.id)
+    ohne_abo = _abonniere(regular_user.id, [])
+
+    SocialService.relay_blind_envelope(
+        db,
+        blind_mailbox_id=mid,
+        ciphertext_envelope=_umschlag("ohne-abo"),
+        sender_user_id=owner_user.id,
+        client_uuid="ohne-abo-1",
+    )
+
+    assert _empfangen(ohne_abo) == []
+
+
+def test_ein_aussenstehender_kommt_nicht_in_die_gruppenmailbox(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    """Die Schranke, die den Gruppen-Nachschlag ersetzt.
+
+    Die Altkennung einer Gruppe ist `sha256("msm:group:<id>")` und aus einer
+    kleinen Ganzzahl nachrechenbar. Ohne Pruefung waere der Wegfall des
+    Nachschlags kein Datenschutzgewinn, sondern ein offenes Tor: jedes
+    angemeldete Konto koennte in jede Gruppe schreiben. `hat_zugang` haelt es —
+    Besitznachweis **oder** Teilnahme, und dieser hat keines von beiden.
+    """
+    from services.auth_service import AuthService
+
+    gruppe = _gemeinsame_gruppe(db, owner_user, regular_user)
+    mid = SocialService.derive_group_blind_mailbox_id(gruppe.id)
+    aussen = AuthService.create_user(db, "gruppenfremder", "fremd@test.de", "FremdPass123!")
+    aussen.email_verified = True
+    db.commit()
+
+    with pytest.raises(HTTPException) as fehler:
+        SocialService.relay_blind_envelope(
+            db,
+            blind_mailbox_id=mid,
+            ciphertext_envelope=_umschlag("von-aussen"),
+            sender_user_id=aussen.id,
+            client_uuid="von-aussen-1",
+        )
+    assert fehler.value.status_code == 403

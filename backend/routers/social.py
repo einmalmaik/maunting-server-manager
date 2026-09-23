@@ -499,7 +499,6 @@ def relay_e2ee_message(
         blind_mailbox_id=req.blind_mailbox_id,
         ciphertext_envelope=req.ciphertext_envelope,
         sender_user_id=current_user.id,
-        recipient_id=req.recipient_id,
         client_uuid=req.client_uuid,
         is_control=req.is_control,
         control_type=req.control_type,
@@ -542,7 +541,7 @@ def upload_chat_media(
         file_name=req.file_name,
         media_type=req.media_type,
         group_id=req.group_id,
-        recipient_id=req.recipient_id,
+        mailbox_token=nachweis,
     )
     return {
         "id": media.id,
@@ -771,7 +770,6 @@ def send_e2ee_typing_signal(
         sender_id=user.id,
         sender_username=user.username,
         db=db,
-        recipient_id=req.recipient_id,
     )
     return {"ok": True}
 
@@ -1296,7 +1294,6 @@ async def social_websocket(
             elif msg_type == "typing":
                 blind_mailbox_id = data.get("blind_mailbox_id", "")
                 status = data.get("status", "idle")
-                recipient_id = data.get("recipient_id")
                 try:
                     with SessionLocal() as db:
                         # Derselbe Nachweis wie auf dem HTTP-Weg. Ohne ihn wäre
@@ -1311,14 +1308,12 @@ async def social_websocket(
                             sender_id=user_id,
                             sender_username=user_username,
                             db=db,
-                            recipient_id=recipient_id,
                         )
                 except Exception as exc:
                     logger.debug("Fehler bei broadcast_typing_signal: %s", exc)
             elif msg_type == "relay":
                 blind_mailbox_id = data.get("blind_mailbox_id", "")
                 ciphertext_envelope = data.get("ciphertext_envelope", "")
-                recipient_id = data.get("recipient_id")
                 is_control = bool(data.get("is_control", False))
                 control_type = data.get("control_type")
                 client_uuid = data.get("client_uuid")
@@ -1332,7 +1327,6 @@ async def social_websocket(
                             blind_mailbox_id=blind_mailbox_id,
                             ciphertext_envelope=ciphertext_envelope,
                             sender_user_id=user_id,
-                            recipient_id=recipient_id,
                             client_uuid=client_uuid,
                             is_control=is_control,
                             control_type=control_type,

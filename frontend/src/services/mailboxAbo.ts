@@ -36,6 +36,17 @@ export interface MailboxAbo {
   token?: string | null
 }
 
+/**
+ * So viele Mailboxen nimmt der Server in einer Meldung entgegen
+ * (`MailboxAboWrite.eintraege`, `max_length=200`).
+ *
+ * Der Deckel steht hier und nicht nur dort, weil die Folge sonst der
+ * schlechtestmögliche Fall wäre: eine zu lange Liste ist ein 422, `melde()`
+ * verschluckt ihn — und dann ist **keine einzige** Mailbox abonniert. Lieber
+ * die ältesten fallen lassen als alle.
+ */
+const DECKEL = 200
+
 let stromKennung: string | null = null
 let gewuenscht = new Map<string, string | null>()
 /** Was zuletzt erfolgreich gemeldet wurde — verhindert dieselbe Meldung zweimal. */
@@ -143,6 +154,13 @@ export function abonniereMailbox(mailboxId: string, token?: string | null): void
   const neu = token ?? bisher ?? null
   if (gewuenscht.has(id) && bisher === neu) return
   gewuenscht.set(id, neu)
+  // Über dem Deckel fällt die älteste Eintragung. Das offene Gespräch ist
+  // immer die jüngste — es kommt zuletzt dazu und bleibt deshalb drin.
+  while (gewuenscht.size > DECKEL) {
+    const aeltester = gewuenscht.keys().next()
+    if (aeltester.done) break
+    gewuenscht.delete(aeltester.value)
+  }
   void melde()
   meldePush()
 }

@@ -139,6 +139,7 @@ vi.mock('@/api/calls', () => ({ sendeRaumSchluessel: async () => undefined }))
 
 import {
   GRUPPE_PREFIX,
+  abonniereBekannteGespraeche,
   dmZiele,
   entschluesseleGruppenUmschlag,
   erzeugeGruppenSchluessel,
@@ -162,6 +163,7 @@ import {
   type GruppenSchluesselEintrag,
 } from './gruppenSchluessel'
 import { leereMailboxNachweise, mailboxNachweis } from './mailboxNachweis'
+import { leereMailboxAbos, offeneMailboxAbos } from './mailboxAbo'
 
 const ALICE = 1
 const BOB = 2
@@ -1667,5 +1669,103 @@ describe('Chatgeheimnis des Direktchats', () => {
     expect(await holeGeraeteSteuerung(BOB, entsiegleFuer(bob))).toBe(2)
     expect(await bob.ablage.liesAktuellen(GRUPPE)).not.toBeNull()
     expect(await bob.ablage.liesDmGeheimnis(ALICE)).not.toBeNull()
+  })
+})
+
+// ==========================================
+// Jede Mailbox anmelden, nicht nur die offene
+// ==========================================
+
+describe('Das Abo aller bekannten Gespräche', () => {
+  /*
+   * Die Gegenseite der Stufe 4: der Server schlägt nicht mehr nach, wer zu
+   * einer Gruppe gehört, sondern stellt an die Abonnenten einer Mailbox zu.
+   * Damit ist das Abo der **einzige** Weg, überhaupt von einer Nachricht zu
+   * erfahren — und ein Abo nur für das offene Gespräch hiesse: von allem
+   * anderen erfährt man erst beim nächsten Öffnen, und auf dem geschlossenen
+   * Tab nie.
+   */
+  beforeEach(() => {
+    verzeichnis.clear()
+    mailbox = []
+    naechsteId = 1
+    serverMitglieder = [ALICE, BOB]
+    relaisKaputt = false
+    registrierungen.length = 0
+    registrierungFehlschlag = false
+    leereMailboxNachweise()
+    leereGeraeteStand()
+    leereUmzuege()
+    leereMailboxAbos()
+  })
+
+  it('meldet jede Gruppe und jede Gegenstelle an', async () => {
+    aktiviere(geraet(ALICE, 'alice-laptop'))
+
+    await abonniereBekannteGespraeche(ALICE, [7, 8], [BOB, CAROL])
+
+    // Die abgeleiteten Kennungen aus dem Stellvertreter für `e2eeCrypto`.
+    expect(offeneMailboxAbos()).toEqual(
+      ['grp:7', 'grp:8', `dm:${ALICE}:${BOB}`, `dm:${ALICE}:${CAROL}`].sort(),
+    )
+  })
+
+  it('nimmt die Kennung aus dem Geheimnis, wo es eine gibt', async () => {
+    // Für eine umgezogene Gruppe ist die Altkennung nicht genug: dort kommt
+    // nichts mehr an. Beide gehören ins Abo, solange nicht alle umgezogen sind.
+    const alice = geraet(ALICE, 'alice-laptop')
+    aktiviere(alice)
+    await verschluesseleFuerGruppe(kontext(alice, [ALICE, BOB], true), 'Hallo')
+    const geheimnis = await alice.ablage.liesGeheimnis(GRUPPE)
+    leereMailboxAbos()
+
+    await abonniereBekannteGespraeche(ALICE, [GRUPPE], [])
+
+    const neu = await mailboxAusGeheimnis(geheimnis!.geheimnis)
+    expect(offeneMailboxAbos()).toEqual([MAILBOX, neu].sort())
+  })
+
+  it('erzeugt beim Zuhören kein Chatgeheimnis', async () => {
+    /*
+     * Ein Abo ist kein Versand. Entstünde hier ein Geheimnis, legte das
+     * blosse Öffnen des Messengers für jeden Kontakt eines an und verteilte
+     * es an dessen Geräte — eine Zustellung je Kontakt, ausgelöst davon, dass
+     * jemand die Anwendung startet.
+     */
+    const alice = geraet(ALICE, 'alice-laptop')
+    geraet(BOB, 'bob-handy')
+    aktiviere(alice)
+
+    await abonniereBekannteGespraeche(ALICE, [], [BOB])
+
+    expect(await alice.ablage.liesDmGeheimnis(BOB)).toBeNull()
+    expect(mailbox).toEqual([])
+  })
+
+  it('lässt eine klemmende Gruppe die anderen nicht mit stumm machen', async () => {
+    // Der Grund für das try/catch je Gespräch. Ohne das nähme die erste
+    // kaputte Ablage den ganzen Rest mit, und der Messenger wäre still.
+    aktiviere(geraet(ALICE, 'alice-laptop'))
+    const kaputt: GruppenAblage = {
+      ...neueAblage(),
+      async liesGeheimnis() {
+        throw new Error('IndexedDB verschlossen')
+      },
+    }
+    setzeGruppenAblageFuerTest(kaputt)
+
+    await abonniereBekannteGespraeche(ALICE, [7, 8], [])
+
+    // Beide sind da — auf der Altkennung, denn mehr ist ohne Ablage nicht zu
+    // holen. Stumm ist niemand.
+    expect(offeneMailboxAbos()).toEqual(['grp:7', 'grp:8'])
+  })
+
+  it('überspringt sich selbst als Gegenstelle', async () => {
+    aktiviere(geraet(ALICE, 'alice-laptop'))
+
+    await abonniereBekannteGespraeche(ALICE, [], [ALICE, BOB])
+
+    expect(offeneMailboxAbos()).toEqual([`dm:${ALICE}:${BOB}`])
   })
 })

@@ -225,7 +225,6 @@ export function enqueueMutation(
 export function enqueueMessageMutation(payload: {
   blind_mailbox_id: string
   ciphertext_envelope: string
-  recipient_id?: number | null
   client_uuid: string
   /**
    * Steuerumschläge müssen ihre Kennzeichnung auch über die Outbox behalten.

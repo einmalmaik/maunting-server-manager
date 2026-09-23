@@ -120,7 +120,6 @@ export function istNebenkopie(clientUuid: string | null | undefined): boolean {
 export interface Versandauftrag {
   blind_mailbox_id: string
   ciphertext_envelope: string
-  recipient_id?: number
   client_uuid: string
   is_control?: boolean
   control_type?: string
@@ -274,7 +273,6 @@ export async function baueVersandFuer(
         auftraege.push({
           blind_mailbox_id: ziel.senden,
           ciphertext_envelope: z.bootstrap,
-          recipient_id: drKontext.peerId,
           client_uuid: z.bootstrapClientUuid,
           is_control: true,
           control_type: 'dr-init',
@@ -283,7 +281,6 @@ export async function baueVersandFuer(
       auftraege.push({
         blind_mailbox_id: ziel.senden,
         ciphertext_envelope: z.nachricht,
-        recipient_id: drKontext.peerId,
         client_uuid: z.clientUuid,
       })
     }
@@ -675,7 +672,6 @@ export function useKonversation({
         geraete.map(async (geraet, i) => ({
           blind_mailbox_id: ziel.senden,
           ciphertext_envelope: await encryptE2eeHybrid(payload, geraet.public_key, sendPair.publicKeyJwk),
-          recipient_id: drKontext.peerId,
           // Je Gerät eine eigene Kennung, sonst gibt das Relais beim zweiten
           // Aufruf still den ersten Umschlag zurück und nur ein Gerät erfährt
           // von der Quittung.
