@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 from models import (
     AiConversation, AiMessage, AiRun, AiToolResult, Role, RolePermission, User,
 )
-from services import ai_memory_service
+from services import ai_memory_service, ai_prompt
 from services.ai_context_service import (
     MAX_TOOL_RESULT_CONTEXT_CHARS,
     TOOL_RESULT_TRUNCATION_MARK,
@@ -669,6 +669,21 @@ def test_the_nachspann_still_counts_against_the_window(
     Zählung mitverschiebt, gibt der Historie ein Budget, das der Nachspann
     hinterher überzieht — und der Anbieter lehnt die Anfrage ab, statt sie
     knapper zu beantworten.
+
+    Das Fenster richtet sich nach dem Systemprompt. Hier standen feste 60.000
+    Zeichen, und die trugen den Test nur, solange der Prompt klein war: bei
+    seiner Entstehung am 14.08.2026 belegte er 12.001 Zeichen, am 23.09.
+    waren es 55.753. Die festen Teile allein lagen damit über dem Fenster, die
+    Historie fiel auf ihren Sockel (`MIN_HISTORY_CHARS`), und die Summe hing
+    nur noch an der Promptlänge — die Grenze wurde deshalb zweimal
+    nachgezogen, auf 70.000 und auf 75.000. Unterscheiden konnte der Test
+    dabei kaum noch etwas: mit und ohne gezählten Nachspann lagen die Summen
+    nur 247 Zeichen auseinander (76.313 gegen 76.560) — bei 75.000 waren beide
+    rot, bei 77.000 wären beide grün gewesen.
+
+    Neben dem Prompt bleiben deshalb die 48.000 Zeichen, die der Test damals
+    hatte. Der Nachspann passt hinein, der Verlauf nicht — und wer den
+    Nachspann nicht zählt, liegt um genau dessen Länge über dem Fenster.
     """
     conversation = _conversation(db, regular_user)
     lauf = _lauf(db, conversation, regular_user)
@@ -684,10 +699,16 @@ def test_the_nachspann_still_counts_against_the_window(
             created_at=start + timedelta(minutes=index),
         ))
     db.commit()
+    fenster = len(ai_prompt.build(db=db)) + 48_000
 
-    nachrichten = build_provider_messages(db, conversation, context_chars=60_000)
+    nachrichten = build_provider_messages(db, conversation, context_chars=fenster)
 
-    assert message_character_count(nachrichten) <= 75_000
+    assert any(
+        isinstance(item.get("content"), str)
+        and item["content"].startswith(WERKZEUG_KONTEXT_KOPF)
+        for item in nachrichten
+    ), "ohne Werkzeugkontext fehlt der Nachspann, dessen Zählung hier geprüft wird"
+    assert message_character_count(nachrichten) <= fenster
 
 
 def test_an_image_attachment_counts_with_its_full_base64_url() -> None:
