@@ -291,7 +291,43 @@ function blobAlsDataUrl(blob: Blob): Promise<string> {
   })
 }
 
+/*
+ * `siegelAktiv()` steht neben dem Store, weil der seinen Stand erst nach
+ * `initialisiere()` kennt. Ohne diesen zweiten Blick zeigte der erste Durchlauf
+ * nach jedem Neuladen einen kurz aufblitzenden, leeren Messenger, bevor der
+ * Sperrschirm ihn ablöst. Gelesen hätte er nichts — die Ablagen geben ohne
+ * Schlüssel nichts heraus —, aber es sähe kaputt aus.
+ */
+const istGesperrt = (s: { entsperrt: boolean; eingerichtet: boolean }) =>
+  !s.entsperrt && (s.eingerichtet || siegelAktiv())
+
+/**
+ * Der Messenger hinter seinem Schloss.
+ *
+ * Gesperrt wird die Seite **ausgehängt**, nicht überdeckt. Bis 09/2026 stand
+ * der Sperrschirm als `return` in der Seite selbst: sie blieb eingehängt, und
+ * mit ihr im React-Zustand der entschlüsselte Verlauf des offenen Chats, das
+ * Eingabefeld, Antwort- und Bearbeitungsziel, die Suchtreffer. Nach dem
+ * Entsperren stand alles sofort wieder da, ohne dass etwas neu entsiegelt
+ * wurde.
+ *
+ * Ausgehängt ist das alles weg. Nach dem Entsperren baut sich die Seite neu
+ * auf und lädt den Verlauf aus der versiegelten Ablage. Welcher Chat offen war,
+ * steht in der Adresse und im `sessionStorage`, als Kennung, nicht als Inhalt.
+ */
 export function Messenger() {
+  const gesperrt = useMessengerSperre(istGesperrt)
+  if (gesperrt) {
+    return (
+      <div className="flex h-full w-full min-h-0 flex-1 flex-col overflow-hidden bg-surface">
+        <MessengerSperrschirm />
+      </div>
+    )
+  }
+  return <MessengerSeite />
+}
+
+function MessengerSeite() {
   const { t } = useTranslation()
 
   /**
@@ -311,17 +347,10 @@ export function Messenger() {
   )
 
   const { user } = useAuthStore()
-  // Der Sperrzustand wird ganz oben gelesen, damit kein Effekt darunter auf
-  // eine Ablage greift, die ohne Schlüssel nichts herausgibt.
-  //
-  // `siegelAktiv()` steht daneben, weil der Store seinen Stand erst nach
-  // `initialisiere()` kennt. Ohne diesen zweiten Blick zeigte der erste
-  // Durchlauf nach jedem Neuladen einen kurz aufblitzenden, leeren Messenger,
-  // bevor der Sperrschirm ihn ablöst. Gelesen hätte er nichts — die Ablagen
-  // geben ohne Schlüssel nichts heraus —, aber es sähe kaputt aus.
-  const messengerGesperrt = useMessengerSperre(
-    (s) => !s.entsperrt && (s.eingerichtet || siegelAktiv()),
-  )
+  // Die Hülle hängt diese Seite gesperrt gar nicht erst ein. Die Schranken
+  // unten bleiben trotzdem stehen: sie kosten nichts, und keiner der Effekte
+  // soll davon abhängen, von wem die Seite gerendert wird.
+  const messengerGesperrt = useMessengerSperre(istGesperrt)
   const [searchParams, setSearchParams] = useSearchParams()
   const { inviteCode } = useParams<{ inviteCode?: string }>()
   const navigate = useNavigate()
@@ -4078,17 +4107,6 @@ export function Messenger() {
     } catch (err: any) {
       toast.error(err?.message || t('messenger.friendRequestFailed'))
     }
-  }
-
-  // Gesperrt wird der Verlauf nicht überdeckt, sondern gar nicht erst gebaut.
-  // Er stünde auch nicht zur Verfügung: die lokalen Ablagen geben ohne
-  // Schlüssel nichts heraus (siehe `services/lokaleVersiegelung`).
-  if (messengerGesperrt) {
-    return (
-      <div className="flex h-full w-full min-h-0 flex-1 flex-col overflow-hidden bg-surface">
-        <MessengerSperrschirm />
-      </div>
-    )
   }
 
   return (

@@ -1848,6 +1848,96 @@ describe('Messenger (Allround Chat)', () => {
     })
   })
 
+  it('wirft beim Sperren den Verlauf aus der Seite und lädt ihn nach dem Entsperren neu', async () => {
+    vi.mocked(socialApi.getFriends).mockResolvedValue([
+      {
+        id: 1,
+        user_id: 206,
+        username: 'charlie_e2ee',
+        avatar_url: null,
+        status: 'accepted',
+        presence: { status: 'online' },
+      },
+    ])
+    vi.mocked(socialApi.fetchE2eeEnvelopes).mockResolvedValue([
+      {
+        id: 601,
+        blind_mailbox_id: 'test-blind-mailbox',
+        ciphertext_envelope: 'sv-e2ee-v1:hinter-dem-schloss',
+        created_at: '2026-09-10T12:00:00Z',
+      },
+    ])
+    testKlartext.mockImplementation(async () =>
+      JSON.stringify({ sender_id: 206, text: 'Nur hinter dem Schloss lesbar' }),
+    )
+
+    render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /charlie_e2ee/i }))
+    await screen.findByText('Nur hinter dem Schloss lesbar')
+
+    const { useMessengerSperre } = await import('@/services/messengerSperre')
+    const { setzeSiegelAktiv } = await import('@/services/lokaleVersiegelung')
+    const { loadLocalMessages } = await import('@/services/messengerLocalStore')
+    const { setzeAngemeldetesKonto } = await import('@/lib/angemeldetesKonto')
+    try {
+      // Das Siegel gilt je Konto; ohne angemeldetes Konto bleibt `sperren()` wirkungslos.
+      setzeAngemeldetesKonto(1)
+      setzeSiegelAktiv(true)
+      act(() => useMessengerSperre.getState().sperren())
+
+      expect(screen.getByText(i18n.t('profile.messengerLock.screenTitle'))).toBeInTheDocument()
+      expect(screen.queryByText('Nur hinter dem Schloss lesbar')).toBeNull()
+
+      // Die Quellen halten nach dem Entsperren an, bis das Tor aufgeht. Was
+      // davor schon dasteht, kam nicht aus der Ablage, sondern aus dem
+      // Arbeitsspeicher der Seite — und der soll gesperrt leer sein.
+      let oeffneTor!: () => void
+      const tor = new Promise<void>((r) => (oeffneTor = r))
+      const ablage = vi.mocked(loadLocalMessages).getMockImplementation()!
+      vi.mocked(loadLocalMessages).mockImplementation(async (mid: string) => {
+        await tor
+        return ablage(mid)
+      })
+      vi.mocked(socialApi.fetchE2eeEnvelopes).mockImplementation(async () => {
+        await tor
+        return [
+          {
+            id: 601,
+            blind_mailbox_id: 'test-blind-mailbox',
+            ciphertext_envelope: 'sv-e2ee-v1:hinter-dem-schloss',
+            created_at: '2026-09-10T12:00:00Z',
+          },
+        ]
+      })
+      const ladenVorher = vi.mocked(loadLocalMessages).mock.calls.length
+
+      await act(async () => {
+        useMessengerSperre.setState({ entsperrt: true })
+      })
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 50))
+      })
+
+      // Der offene Chat bleibt offen, sein Verlauf ist aber noch nicht da.
+      expect(screen.queryByText(i18n.t('profile.messengerLock.screenTitle'))).toBeNull()
+      expect(screen.getAllByText('charlie_e2ee').length).toBeGreaterThan(0)
+      expect(screen.queryByText('Nur hinter dem Schloss lesbar')).toBeNull()
+
+      oeffneTor()
+      await screen.findByText('Nur hinter dem Schloss lesbar')
+      expect(vi.mocked(loadLocalMessages).mock.calls.length).toBeGreaterThan(ladenVorher)
+    } finally {
+      setzeSiegelAktiv(false)
+      setzeAngemeldetesKonto(null)
+      useMessengerSperre.setState({ entsperrt: false, eingerichtet: false })
+      vi.mocked(loadLocalMessages).mockImplementation(async (mid: string) => nachrichten.get(mid) ?? [])
+    }
+  })
+
   it('dedupliziert eingehende Envelopes mit identischer client_uuid in der UI', async () => {
     vi.mocked(socialApi.getFriends).mockResolvedValue([
       {
