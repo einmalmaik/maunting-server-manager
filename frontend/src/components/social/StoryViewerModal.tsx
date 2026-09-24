@@ -78,25 +78,28 @@ export function StoryViewerModal({
     const step = (intervalMs / 6000) * 100
 
     timerRef.current = setInterval(() => {
-      setProgress((prev) => {
-        if (prev + step >= 100) {
-          // Advance to next or close if last
-          if (currentIndex < stories.length - 1) {
-            setCurrentIndex((i) => i + 1)
-            return 0
-          } else {
-            onOpenChange(false)
-            return 100
-          }
-        }
-        return prev + step
-      })
+      setProgress((prev) => Math.min(100, prev + step))
     }, intervalMs)
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
     }
-  }, [open, currentIndex, stories.length, isPaused, currentStory, onOpenChange])
+  }, [open, currentIndex, stories.length, isPaused, currentStory])
+
+  // Abgelaufen: zur nächsten Story oder schliessen. Das stand bis 09/2026 im
+  // Updater von `setProgress`; der läuft beim Rendern, und dort darf die Seite
+  // (`onOpenChange`) nicht geändert werden. Der Fortschritt geht in beiden
+  // Fällen im selben Schritt auf 0: bliebe er auf 100, sähe dieser Effekt ihn
+  // mit dem neuen Index oder beim nächsten Öffnen und liefe gleich noch einmal.
+  useEffect(() => {
+    if (!open || progress < 100) return
+    setProgress(0)
+    if (currentIndex < stories.length - 1) {
+      setCurrentIndex((i) => i + 1)
+    } else {
+      onOpenChange(false)
+    }
+  }, [open, progress, currentIndex, stories.length, onOpenChange])
 
   // Reset progress when index changes
   useEffect(() => {
