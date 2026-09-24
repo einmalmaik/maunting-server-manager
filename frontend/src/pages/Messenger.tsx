@@ -53,20 +53,13 @@ import {
 } from '@/components/social/ChatMessageBubble'
 import type { PresenceStatus } from '@/components/social/StatusIndicator'
 import {
-  type FriendItem,
   type ChatGroupItem,
   type ChatStoryItem,
-  type PublicProfileResponse,
-  type DirectChatItem,
-  getFriends,
-  getGroups,
   createGroup,
   joinGroupByInvite,
   sendFriendRequest,
-  getPublicProfiles,
   leaveGroup,
   deleteGroup,
-  getStories,
   relayE2eeEnvelope,
   sendTypingSignal,
   ladeAnhangHoch,
@@ -76,15 +69,21 @@ import {
 import { maxAnhangBytes } from '@/services/medienKrypto'
 import {
   chatMediaBlobCache,
-  holeAnhangUrl,
   type AudioAttachment,
   type FileAttachment,
   type ImageAttachment,
   type MedienBindungsKontext,
   type VideoNoteAttachment,
 } from '@/components/social/ChatMediaAttachments'
-import { teamsApi, type TeamMember } from '@/api/teams'
 import { baueVersandFuer, useKonversation, type GespraechsZiel } from '@/hooks/useKonversation'
+import { useSprachaufnahme } from '@/hooks/useSprachaufnahme'
+import { useSprachwiedergabe } from '@/hooks/useSprachwiedergabe'
+import { useChatSuche } from '@/hooks/useChatSuche'
+import { useEntwuerfe } from '@/hooks/useEntwuerfe'
+import { useKontaktdaten } from '@/hooks/useKontaktdaten'
+import { useSicherheitsnummern } from '@/hooks/useSicherheitsnummern'
+import { useStoryAnsicht } from '@/hooks/useStoryAnsicht'
+import { useUeberallAnsicht } from '@/hooks/useUeberallAnsicht'
 import { uebernimmAltbestand } from '@/services/altbestandUebernahme'
 import {
   loadNotesOfflineFirst,
@@ -121,7 +120,6 @@ import {
   eigenesGeraetFreigegeben,
   onEigeneFreigabe,
   onSchluesselWarnung,
-  sicherheitsnummer,
 } from '@/services/e2eeGeraet'
 import { pruefeNutzlast, signiereNutzlast } from '@/services/nutzlastSignatur'
 import {
@@ -139,14 +137,12 @@ import {
   type EinladungsInhalt,
 } from '@/services/einladungsKarte'
 import {
-  benenneGruppen,
   merkeGruppenName,
   sichereGruppenAnsicht,
   vergissGruppenName,
 } from '@/services/gruppenName'
 import {
   fuelleNamenNach,
-  gespraechsListe,
   gespraechsPartner,
   merkeGespraech,
   vergissGespraech,
@@ -199,15 +195,7 @@ import {
   istWeiterleitbar,
   type Weiterleitungsziel,
 } from '@/services/nachrichtWeiterleiten'
-import {
-  sammleAnMich,
-  sammleMarkierte,
-  sucheImChat,
-  sucheUeberall,
-  vergissMailbox,
-  type ChatTreffer,
-  type Treffer,
-} from '@/services/verlaufSuche'
+import { vergissMailbox, type Treffer } from '@/services/verlaufSuche'
 import {
   durfteVerfallStellen,
   faelligeZeilen,
@@ -222,11 +210,7 @@ import {
   verfallsfrist,
   verfallStand,
 } from '@/services/nachrichtVerfall'
-import {
-  ladeAlleEntwuerfe,
-  ladeEntwurf,
-  speichereEntwurf,
-} from '@/services/messengerLocalStore'
+import { ladeEntwurf } from '@/services/messengerLocalStore'
 import { ErwaehnungsWache } from '@/components/social/ErwaehnungsWache'
 import { NachrichtenMenue } from '@/components/social/NachrichtenMenue'
 import { WeiterleitenAnsicht } from '@/components/social/WeiterleitenAnsicht'
@@ -246,7 +230,6 @@ class E2eeIdentityLockedError extends Error {
   }
 }
 import { compressImageFile } from '@/lib/imageCompression'
-import { getAudioTrackConstraints } from '@/lib/audioSettings'
 import { CameraSnapshotModal } from '@/components/social/CameraSnapshotModal'
 import { CreateStoryModal } from '@/components/social/CreateStoryModal'
 import { MessengerSperrschirm } from '@/components/social/MessengerSperrschirm'
@@ -260,7 +243,7 @@ import { CalendarPickerDialog } from '@/components/social/modals/CalendarPickerD
 import { SendPhotoDialog } from '@/components/social/modals/SendPhotoDialog'
 import { DeleteGroupDialog } from '@/components/social/modals/DeleteGroupDialog'
 import { ChatMuteDialog } from '@/components/social/modals/ChatMuteDialog'
-import { SafetyNumberDialog, type SicherheitsnummerGeraet } from '@/components/social/modals/SafetyNumberDialog'
+import { SafetyNumberDialog } from '@/components/social/modals/SafetyNumberDialog'
 import { BlockConfirmDialog } from '@/components/social/modals/BlockConfirmDialog'
 import { MessengerModeNav, MessengerBottomNav } from '@/components/social/sidebar/MessengerModeNav'
 import { ContactFilterTabs } from '@/components/social/sidebar/ContactFilterTabs'
@@ -365,54 +348,11 @@ function blobAlsDataUrl(blob: Blob): Promise<string> {
   })
 }
 
-function getSupportedAudioMimeType(): string {
-  if (typeof MediaRecorder === 'undefined' || !MediaRecorder.isTypeSupported) {
-    return ''
-  }
-  const candidates = [
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/ogg;codecs=opus',
-    'audio/mp4',
-    'audio/aac',
-  ]
-  return candidates.find((c) => MediaRecorder.isTypeSupported(c)) || ''
-}
-
-const CONTACTS_CACHE_KEY = 'msm:chat_contacts_cache'
 // Zero-Knowledge In-Memory Session Cache: verhindert das unverschlüsselte Speichern von Plaintext-Nachrichten im LocalStorage
 export const sessionChatCache = new Map<string, ChatMessage[]>()
 
 export function clearSessionChatCache(): void {
   sessionChatCache.clear()
-}
-
-function loadInitialContactsCache(): {
-  friends: FriendItem[]
-  groups: ChatGroupItem[]
-  teamMembers: Array<{ member: TeamMember; teamName: string }>
-  publicUsers: PublicProfileResponse[]
-  stories: ChatStoryItem[]
-  directChats: DirectChatItem[]
-} {
-  if (typeof window === 'undefined') {
-    return { friends: [], groups: [], teamMembers: [], publicUsers: [], stories: [], directChats: [] }
-  }
-  try {
-    const raw = localStorage.getItem(CONTACTS_CACHE_KEY)
-    if (raw) {
-      const parsed = JSON.parse(raw)
-      return {
-        friends: Array.isArray(parsed.friends) ? parsed.friends : [],
-        groups: Array.isArray(parsed.groups) ? parsed.groups : [],
-        teamMembers: Array.isArray(parsed.teamMembers) ? parsed.teamMembers : [],
-        publicUsers: Array.isArray(parsed.publicUsers) ? parsed.publicUsers : [],
-        stories: Array.isArray(parsed.stories) ? parsed.stories : [],
-        directChats: Array.isArray(parsed.directChats) ? parsed.directChats : [],
-      }
-    }
-  } catch {}
-  return { friends: [], groups: [], teamMembers: [], publicUsers: [], stories: [], directChats: [] }
 }
 
 export function Messenger() {
@@ -454,13 +394,17 @@ export function Messenger() {
   const savedGroupId = typeof window !== 'undefined' && window.sessionStorage ? sessionStorage.getItem('msm:active_messenger_group_id') : null
   const queryGroupId = searchParams.get('groupId') || savedGroupId
 
-  const initialCache = useMemo(() => loadInitialContactsCache(), [])
-  const [friends, setFriends] = useState<FriendItem[]>(initialCache.friends)
-  const [groups, setGroups] = useState<ChatGroupItem[]>(initialCache.groups)
-  const [teamMembers, setTeamMembers] = useState<Array<{ member: TeamMember; teamName: string }>>(initialCache.teamMembers)
-  const [publicUsers, setPublicUsers] = useState<PublicProfileResponse[]>(initialCache.publicUsers)
-  const [directChats, setDirectChats] = useState<DirectChatItem[]>(initialCache.directChats)
-  const [stories, setStories] = useState<ChatStoryItem[]>(initialCache.stories)
+  const {
+    friends,
+    groups,
+    setGroups,
+    teamMembers,
+    publicUsers,
+    directChats,
+    stories,
+    setStories,
+    laden: loadData,
+  } = useKontaktdaten(user?.id || 0, messengerGesperrt)
 
   // Notification & Mute/Block Store
   const unreadCounts = useMessengerNotificationStore((s) => s.unreadCounts)
@@ -481,9 +425,6 @@ export function Messenger() {
   // Mute & Block modals
   const [isMuteModalOpen, setIsMuteModalOpen] = useState(false)
   const [isBlockConfirmOpen, setIsBlockConfirmOpen] = useState(false)
-  const [isSafetyNumberModalOpen, setIsSafetyNumberModalOpen] = useState(false)
-  const [contactDevices, setContactDevices] = useState<SicherheitsnummerGeraet[]>([])
-  const [loadingSafetyNumbers, setLoadingSafetyNumbers] = useState(false)
 
   // Pre-computed mailbox IDs
   const [contactMailboxMap, setContactMailboxMap] = useState<Record<number, string>>({})
@@ -492,6 +433,7 @@ export function Messenger() {
   // Selection
   const [activeContact, setActiveContact] = useState<ChatContact | null>(null)
   const [activeGroup, setActiveGroup] = useState<ChatGroupItem | null>(null)
+  const sicherheitsnummern = useSicherheitsnummern(activeContact?.userId)
   /**
    * Die eigenen Rollen der offenen Gruppe, entschlüsselt.
    *
@@ -504,45 +446,6 @@ export function Messenger() {
   const [searchQuery, setSearchQuery] = useState('')
   const [filterTab, setFilterTab] = useState<'all' | 'groups' | 'friends' | 'teams' | 'public'>('all')
   const [mobileNavTab, setMobileNavTab] = useState<'chats' | 'updates' | 'community'>('chats')
-
-  // Stories (Aktuelles)
-  const [isCreateStoryOpen, setIsCreateStoryOpen] = useState(false)
-  const [createStoryInitialMode, setCreateStoryInitialMode] = useState<'text' | 'photo'>('text')
-  const [pendingStoryPhotoUrl, setPendingStoryPhotoUrl] = useState<string | null>(null)
-  const [isViewerStoryOpen, setIsViewerStoryOpen] = useState(false)
-  const [viewerStoryIndex, setViewerStoryIndex] = useState(0)
-  const [activeViewerStories, setActiveViewerStories] = useState<ChatStoryItem[]>([])
-
-  // Seen stories persistence
-  const SEEN_STORIES_KEY = 'msm_seen_story_ids'
-  const [seenStoryIds, setSeenStoryIds] = useState<Set<number>>(() => {
-    if (typeof window === 'undefined') return new Set()
-    try {
-      const raw = localStorage.getItem(SEEN_STORIES_KEY)
-      return raw ? new Set(JSON.parse(raw)) : new Set()
-    } catch {
-      return new Set()
-    }
-  })
-
-  const markStoriesAsSeen = (storiesToMark: ChatStoryItem[]) => {
-    setSeenStoryIds((prev) => {
-      const next = new Set(prev)
-      let changed = false
-      for (const s of storiesToMark) {
-        if (!next.has(s.id)) {
-          next.add(s.id)
-          changed = true
-        }
-      }
-      if (changed && typeof window !== 'undefined') {
-        try {
-          localStorage.setItem(SEEN_STORIES_KEY, JSON.stringify(Array.from(next)))
-        } catch {}
-      }
-      return next
-    })
-  }
 
   // Group Permissions & Delete Modal State
   const [isGroupPermissionsOpen, setIsGroupPermissionsOpen] = useState(false)
@@ -605,20 +508,8 @@ export function Messenger() {
   // Group creation modal
   const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false)
 
-  // Voice recording state
-  const [isRecording, setIsRecording] = useState(false)
-  const [recordingDuration, setRecordingDuration] = useState(0)
   const [isVideoNoteRecording, setIsVideoNoteRecording] = useState(false)
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const mediaStreamRef = useRef<MediaStream | null>(null)
-  const audioChunksRef = useRef<Blob[]>([])
-  const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  // Voice playback state
-  const [playingAudioId, setPlayingAudioId] = useState<number | null>(null)
-  const [audioCurrentTime, setAudioCurrentTime] = useState<number>(0)
-  const [audioPlaybackRate, setAudioPlaybackRate] = useState<number>(1)
-  const audioInstanceRef = useRef<HTMLAudioElement | null>(null)
+  const tonWiedergabe = useSprachwiedergabe()
 
   // Double-import prevention state for shared notes & calendar entries
   const [importedAttachmentIds, setImportedAttachmentIds] = useState<Set<string>>(() => new Set())
@@ -654,17 +545,6 @@ export function Messenger() {
   /** Was weitergeleitet werden soll, und wie weit das Neu-Hochladen ist. */
   const [weiterzuleiten, setWeiterzuleiten] = useState<ChatMessage[] | null>(null)
   const [wlFortschritt, setWlFortschritt] = useState<{ gesamt: number; fertig: number } | null>(null)
-  /** Suche im offenen Chat. */
-  const [sucheOffen, setSucheOffen] = useState(false)
-  const [suchTreffer, setSuchTreffer] = useState<Treffer[]>([])
-  const [suchIndex, setSuchIndex] = useState(0)
-  const [sucheGesperrt, setSucheGesperrt] = useState(false)
-  /** Die Ansicht über alle Chats: Suche, Markiertes oder „an mich". */
-  const [ueberall, setUeberall] = useState<'aus' | 'suche' | 'markiert' | 'anMich'>('aus')
-  const [ueberallChats, setUeberallChats] = useState<ChatTreffer[]>([])
-  const [ueberallLaeuft, setUeberallLaeuft] = useState(false)
-  const [ueberallGesperrt, setUeberallGesperrt] = useState(false)
-  const [ueberallFrage, setUeberallFrage] = useState('')
   /** Kurz aufleuchtende Zielzeile nach einem Sprung. */
   const [hervorgehoben, setHervorgehoben] = useState<string | null>(null)
   /** Die Nachricht, die in dieser Gruppe oben klebt. */
@@ -673,8 +553,6 @@ export function Messenger() {
   const [verfallSekunden, setVerfallSekunden] = useState(0)
   const [verfallOffen, setVerfallOffen] = useState(false)
   /** Das Menü hinter den drei Punkten in der Chat-Kopfzeile. */
-  /** Chats mit ungesendetem Text, für die Vorschau in der Liste. */
-  const [entwuerfe, setEntwuerfe] = useState<Record<string, string>>({})
 
   const highestIncomingIdAcknowledgedRef = useRef<number>(0)
   const highestIncomingIdDeliveredRef = useRef<number>(0)
@@ -741,72 +619,10 @@ export function Messenger() {
     })
   }
 
-  /**
-   * Entwürfe: entprellt schreiben, versiegelt ablegen.
-   *
-   * Ein Entwurf ist ungesendeter Klartext und damit das Empfindlichste, was
-   * hier anfällt. Er geht deshalb in die versiegelte IndexedDB, nicht in den
-   * localStorage neben die Stummschaltungen.
-   */
-  const entwurfUhr = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const entwurfOffen = useRef<{ mid: string; text: string } | null>(null)
+  const entwuerfe = useEntwuerfe()
 
   /** Ob gerade ein Versand läuft. Siehe `handleSendMessage`. */
   const sendeLaeuft = useRef(false)
-
-  const schreibeEntwurf = useCallback(() => {
-    const offen = entwurfOffen.current
-    if (!offen) return
-    entwurfOffen.current = null
-    void speichereEntwurf(offen.mid, offen.text).catch(() => {})
-    setEntwuerfe((prev) => {
-      const kurz = offen.text.trim().slice(0, 80)
-      if ((prev[offen.mid] || '') === kurz) return prev
-      const neu = { ...prev }
-      if (kurz) neu[offen.mid] = kurz
-      else delete neu[offen.mid]
-      return neu
-    })
-  }, [])
-
-  const merkeEntwurf = useCallback(
-    (mid: string, text: string) => {
-      entwurfOffen.current = { mid, text }
-      if (entwurfUhr.current) clearTimeout(entwurfUhr.current)
-      entwurfUhr.current = setTimeout(schreibeEntwurf, 600)
-    },
-    [schreibeEntwurf],
-  )
-
-  /**
-   * Am Telefon reißt ein Anruf oder ein Zurückwischen das Getippte weg, bevor
-   * die Entprellung greift. `beforeunload` läuft auf iOS nicht zuverlässig,
-   * deshalb diese beiden.
-   */
-  useEffect(() => {
-    const sichern = () => schreibeEntwurf()
-    document.addEventListener('visibilitychange', sichern)
-    window.addEventListener('pagehide', sichern)
-    return () => {
-      document.removeEventListener('visibilitychange', sichern)
-      window.removeEventListener('pagehide', sichern)
-      sichern()
-    }
-  }, [schreibeEntwurf])
-
-  /** Die Vorschauen für die Chatliste einmal beim Öffnen der Seite. */
-  useEffect(() => {
-    ladeAlleEntwuerfe()
-      .then((alle) => {
-        const kurz: Record<string, string> = {}
-        for (const [mid, text] of Object.entries(alle)) {
-          const gekuerzt = text.trim().slice(0, 80)
-          if (gekuerzt) kurz[mid] = gekuerzt
-        }
-        setEntwuerfe(kurz)
-      })
-      .catch(() => {})
-  }, [])
 
   const handleInputChange = (text: string) => {
     setInputText(text)
@@ -845,7 +661,7 @@ export function Messenger() {
       }
     }
 
-    merkeEntwurf(blindMailboxId, text)
+    entwuerfe.merke(blindMailboxId, text)
   }
 
   const currentUserId = user?.id || 0
@@ -988,79 +804,6 @@ export function Messenger() {
     })
   }, [currentUserId, identity])
 
-  // 2. Load Friends, Groups, Team Members, Public Users, Direct Chats, and Stories
-  const loadData = async () => {
-    try {
-      const [friendsData, groupsData, teamsData, storiesData, publicData, directChatsData] = await Promise.all([
-        getFriends().catch(() => []),
-        getGroups().catch(() => []),
-        teamsApi.list().catch(() => []),
-        getStories().catch(() => []),
-        getPublicProfiles().catch(() => []),
-        // Kein Netzaufruf mehr: seit Stufe 6b weiss der Server nicht, mit wem
-        // dieses Konto schreibt. Die Liste liegt versiegelt auf diesem Gerät.
-        gespraechsListe().catch(() => []),
-      ])
-      setFriends(friendsData)
-      // Der Server liefert für Gruppen seit Stufe 6 keinen Namen mehr. Diese
-      // eine Zeile setzt ihn aus dem versiegelten örtlichen Speicher wieder
-      // ein — bewusst hier an der Liste und nicht an jeder Anzeige einzeln.
-      setGroups(await benenneGruppen(groupsData).catch(() => groupsData))
-      setStories(storiesData)
-      setPublicUsers(publicData)
-      setDirectChats(directChatsData)
-
-      const teamDetails = await Promise.all(
-        teamsData.map(async (t) => {
-          try {
-            const detail = await teamsApi.get(t.id)
-            return { team: t, detail }
-          } catch {
-            return { team: t, detail: null }
-          }
-        })
-      )
-
-      const membersList: Array<{ member: TeamMember; teamName: string }> = []
-      for (const { team, detail } of teamDetails) {
-        if (detail && detail.members) {
-          for (const m of detail.members) {
-            if (m.user_id !== currentUserId) {
-              membersList.push({ member: m, teamName: team.name })
-            }
-          }
-        }
-      }
-      setTeamMembers(membersList)
-
-      // Lokalen Cache für sofortiges 0ms-Laden beim nächsten Aufruf speichern
-      try {
-        localStorage.setItem(
-          CONTACTS_CACHE_KEY,
-          JSON.stringify({
-            friends: friendsData,
-            // Bewusst `groupsData` und nicht die benannte Liste: dieser Cache
-            // liegt offen in `localStorage`. Ein Gruppenname darin wäre genau
-            // die Zeile, die Stufe 6 aus der Datenbank entfernt hat, nur auf
-            // einer anderen Platte. Die Namen stehen versiegelt in
-            // `msm:gruppennamen` und kommen beim nächsten `benenneGruppen`.
-            groups: groupsData,
-            teamMembers: membersList,
-            publicUsers: publicData,
-            stories: storiesData,
-            // Und aus demselben Grund gar nicht: die Gesprächsliste ist die
-            // Auskunft „mit wem schreibt dieser Mensch". Sie liegt versiegelt
-            // in `msm:gespraeche` und kommt von dort beim nächsten Laden —
-            // ein offener Abzug daneben machte die Versiegelung sinnlos.
-            directChats: [],
-          })
-        )
-      } catch {}
-    } catch {
-      // Offline fallback
-    }
-  }
-
   const handleStoryCreated = (story: ChatStoryItem) => {
     setStories((prev) => [story, ...prev])
     toast.success(t('messenger.storyPublished'))
@@ -1070,16 +813,6 @@ export function Messenger() {
     setStories((prev) => prev.filter((s) => s.id !== storyId))
     toast.success(t('messenger.storyDeleted'))
   }
-
-  // `messengerGesperrt` in den Abhängigkeiten, damit das Entsperren sofort neu
-  // lädt: die Gruppennamen liegen versiegelt und sind vorher nicht zu haben.
-  // Ohne das stünde bis zum nächsten Takt — bis zu 15 Sekunden — überall
-  // „Verschlüsselte Gruppe", obwohl die PIN längst eingegeben ist.
-  useEffect(() => {
-    loadData()
-    const interval = setInterval(loadData, 15000)
-    return () => clearInterval(interval)
-  }, [currentUserId, messengerGesperrt])
 
   // 3. Handle public invite link join if inviteCode param is present
   useEffect(() => {
@@ -1501,45 +1234,7 @@ export function Messenger() {
     }
   }, [contactsList, groups, currentUserId])
 
-  // Stories grouped for Tray and Status views
-  const myStories = useMemo(() => {
-    return stories.filter((s) => s.user_id === currentUserId)
-  }, [stories, currentUserId])
-
-  const friendsStoriesGrouped = useMemo(() => {
-    const map = new Map<number, ChatStoryItem[]>()
-    for (const story of stories) {
-      if (story.user_id === currentUserId) continue
-      const list = map.get(story.user_id) || []
-      list.push(story)
-      map.set(story.user_id, list)
-    }
-    const grouped = Array.from(map.entries()).map(([userId, userStories]) => {
-      const contact = contactsList.find((c) => c.userId === userId)
-      const first = userStories[0]
-      const hasUnseen = userStories.some((s) => !seenStoryIds.has(s.id))
-      return {
-        userId,
-        username: contact?.username || first?.username || 'Freund',
-        avatarUrl: contact?.avatarUrl || first?.avatar_url,
-        stories: userStories,
-        latestStory: userStories[userStories.length - 1],
-        hasUnseen,
-      }
-    })
-    return grouped.sort((a, b) => {
-      if (a.hasUnseen && !b.hasUnseen) return -1
-      if (!a.hasUnseen && b.hasUnseen) return 1
-      return 0
-    })
-  }, [stories, currentUserId, contactsList, seenStoryIds])
-
-  const openStoryViewerForUser = (userStories: ChatStoryItem[], startIndex = 0) => {
-    setActiveViewerStories(userStories)
-    setViewerStoryIndex(startIndex)
-    setIsViewerStoryOpen(true)
-    markStoriesAsSeen(userStories)
-  }
+  const storyAnsicht = useStoryAnsicht(stories, currentUserId, contactsList)
 
   // Auto-select contact if userId query parameter or storage is present
   useEffect(() => {
@@ -1577,22 +1272,6 @@ export function Messenger() {
       }
     }
   }, [queryUserId, contactsList, activeGroup])
-
-  /**
-   * Ein anderer Chat schliesst die Vollbildansicht.
-   *
-   * „Markierte Nachrichten", „@ und Antworten an mich" und die Suche über alle
-   * Chats liegen als `fixed inset-0` über dem Gesprächsbereich — aber **nicht**
-   * über der Seitenleiste: die Hülle kappt den Stapelkontext im Inhaltsbereich
-   * (siehe `Shell.tsx`). Ein Klick auf einen Chat dort wechselte also die
-   * Adresse, öffnete das Gespräch und liess die Trefferliste darüber stehen.
-   * Man konnte tippen und senden, ohne etwas davon zu sehen; der einzige Weg
-   * zurück war der Zurück-Knopf der Ansicht. Ein Treffer selbst schliesst sie
-   * schon länger (`oeffneTreffer`), der Weg über die Seitenleiste nicht.
-   */
-  useEffect(() => {
-    setUeberall('aus')
-  }, [activeContact?.userId, activeGroup?.id])
 
 
   // Auto-select group if groupId query parameter or storage is present
@@ -1791,47 +1470,6 @@ export function Messenger() {
     return abbestellen
   }, [activeContact, activeGroup, currentUserId, t, zeigeSystemzeile])
 
-  useEffect(() => {
-    if (!isSafetyNumberModalOpen || !activeContact?.userId) {
-      setContactDevices([])
-      return
-    }
-    let aktiv = true
-    setLoadingSafetyNumbers(true)
-    geraeteVon(activeContact.userId)
-      .then(async (geraete) => {
-        const ergebnisse: { id: string; label: string; number: string }[] = []
-        for (const g of geraete) {
-          let num = ''
-          if (g.public_key) {
-            try {
-              num = await sicherheitsnummer(g.public_key)
-            } catch {
-              num = ''
-            }
-          }
-          ergebnisse.push({
-            id: g.device_id,
-            label: g.label || t('profile.e2eeDevices.unnamed'),
-            number: num,
-          })
-        }
-        if (aktiv) {
-          setContactDevices(ergebnisse)
-          setLoadingSafetyNumbers(false)
-        }
-      })
-      .catch(() => {
-        if (aktiv) {
-          setContactDevices([])
-          setLoadingSafetyNumbers(false)
-        }
-      })
-    return () => {
-      aktiv = false
-    }
-  }, [isSafetyNumberModalOpen, activeContact?.userId, t])
-
   const konversation = useKonversation({
     ziel: gespraechsZiel,
     eigeneId: currentUserId,
@@ -1888,8 +1526,7 @@ export function Messenger() {
 
     // Was zum neuen Chat gehört und nicht zum alten.
     setAntwortAuf(null)
-    setSucheOffen(false)
-    setSuchTreffer([])
+    chatSuche.schliesse()
     setAngeheftet(null)
     setAuswahlModus(false)
     setGewaehlteUuids([])
@@ -3343,37 +2980,28 @@ export function Messenger() {
     }
   }
 
-  /** Sucht im offenen Chat, entprellt durch die Suchleiste. */
-  const handleSuchen = useCallback(
-    (frage: string) => {
-      if (!blindMailboxId) return
-      if (!frage.trim()) {
-        setSuchTreffer([])
-        setSuchIndex(0)
-        setSucheGesperrt(false)
-        return
-      }
-      void sucheImChat(blindMailboxId, frage).then(({ treffer, gesperrt }) => {
-        setSuchTreffer(treffer)
-        setSuchIndex(0)
-        setSucheGesperrt(gesperrt)
-        if (treffer[0]?.clientUuid) springeZu(treffer[0].clientUuid)
-      })
-    },
-    [blindMailboxId],
-  )
+  const chatSuche = useChatSuche(blindMailboxId, springeZu)
+  const ueberall = useUeberallAnsicht(currentUserId, groups)
 
-  const blaettereTreffer = (richtung: 1 | -1) => {
-    if (!suchTreffer.length) return
-    const naechster = (suchIndex + richtung + suchTreffer.length) % suchTreffer.length
-    setSuchIndex(naechster)
-    const ziel = suchTreffer[naechster]
-    if (ziel.clientUuid) springeZu(ziel.clientUuid)
-  }
+  /**
+   * Ein anderer Chat schliesst die Vollbildansicht.
+   *
+   * „Markierte Nachrichten", „@ und Antworten an mich" und die Suche über alle
+   * Chats liegen als `fixed inset-0` über dem Gesprächsbereich — aber **nicht**
+   * über der Seitenleiste: die Hülle kappt den Stapelkontext im Inhaltsbereich
+   * (siehe `Shell.tsx`). Ein Klick auf einen Chat dort wechselte also die
+   * Adresse, öffnete das Gespräch und liess die Trefferliste darüber stehen.
+   * Man konnte tippen und senden, ohne etwas davon zu sehen; der einzige Weg
+   * zurück war der Zurück-Knopf der Ansicht. Ein Treffer selbst schliesst sie
+   * schon länger (`oeffneTreffer`), der Weg über die Seitenleiste nicht.
+   */
+  useEffect(() => {
+    ueberall.schliesse()
+  }, [activeContact?.userId, activeGroup?.id])
 
   /** Öffnet einen Treffer aus der Ansicht über alle Chats. */
   const oeffneTreffer = async (treffer: Treffer) => {
-    setUeberall('aus')
+    ueberall.schliesse()
     const meta = mailboxDirectory[treffer.blindMailboxId]
     if (meta?.isGroup && meta.groupId) {
       const gruppe = groups.find((g) => g.id === meta.groupId)
@@ -3395,42 +3023,6 @@ export function Messenger() {
     }
   }
 
-  /**
-   * Die Ansicht über alle Chats öffnen — Suche, Markiertes oder „an mich".
-   *
-   * Dieselbe Durchsicht, drei Fragen. Bei gesetztem PIN kostet das Entsiegeln
-   * Rechenzeit, deshalb läuft es asynchron mit sichtbarem „wird durchgesehen".
-   */
-  const oeffneUeberall = async (welche: 'suche' | 'markiert' | 'anMich', frage = '') => {
-    setUeberall(welche)
-    setUeberallFrage(frage)
-    setUeberallChats([])
-    setUeberallLaeuft(true)
-    setUeberallGesperrt(false)
-    try {
-      const ergebnis =
-        welche === 'suche'
-          ? await sucheUeberall(frage)
-          : welche === 'markiert'
-            ? await sammleMarkierte()
-            : await sammleAnMich(currentUserId, (m, mid) => {
-                // Eine Antwort auf meine Nachricht zählt genauso wie eine
-                // Erwähnung: beides heißt „hier werde ich gebraucht".
-                const bezug = m.antwortAuf as { absenderId?: number } | undefined
-                if (bezug?.absenderId && Number(bezug.absenderId) === Number(currentUserId)) return true
-                // Dieselbe Empfängerprüfung wie im Verlauf: ob aus `@everyone`
-                // eine Erwähnung wird, entscheidet das Recht des Absenders.
-                const meta = mailboxDirectory[mid]
-                const gruppe = meta?.groupId ? groups.find((g) => g.id === meta.groupId) : null
-                return binIchGemeint(m, currentUserId, gruppe ?? null)
-              })
-      setUeberallChats(ergebnis.chats)
-      setUeberallGesperrt(ergebnis.gesperrt)
-    } finally {
-      setUeberallLaeuft(false)
-    }
-  }
-
   // Action: Edit existing message
   const handleEditMessage = async (msg: ChatMessage, newText: string) => {
     const cleanText = newText.trim()
@@ -3447,15 +3039,7 @@ export function Messenger() {
        */
       setEditingMessage(null)
       setInputText('')
-      if (entwurfUhr.current) clearTimeout(entwurfUhr.current)
-      entwurfOffen.current = null
-      void speichereEntwurf(blindMailboxId, '').catch(() => {})
-      setEntwuerfe((v) => {
-        if (!v[blindMailboxId]) return v
-        const neu = { ...v }
-        delete neu[blindMailboxId]
-        return neu
-      })
+      entwuerfe.verwirf(blindMailboxId)
       return
     }
     const bearbeitetAm = new Date().toISOString()
@@ -3511,15 +3095,7 @@ export function Messenger() {
        * „Entwurf: …" zu einem Chat mit leerer Eingabe, und beim nächsten
        * Öffnen stand der bearbeitete Satz wieder im Feld.
        */
-      if (entwurfUhr.current) clearTimeout(entwurfUhr.current)
-      entwurfOffen.current = null
-      void speichereEntwurf(blindMailboxId, '').catch(() => {})
-      setEntwuerfe((v) => {
-        if (!v[blindMailboxId]) return v
-        const neu = { ...v }
-        delete neu[blindMailboxId]
-        return neu
-      })
+      entwuerfe.verwirf(blindMailboxId)
       await loadMessages(false)
     } catch {
       toast.error(t('messenger.messageEditFailed'))
@@ -4177,17 +3753,8 @@ export function Messenger() {
     setStagedFile(null)
     setAntwortAuf(null)
     setErwaehnungsVorschlaege([])
-    // Der Entwurf ist verschickt, also keiner mehr. Die wartende Entprellung
-    // muss mit weg, sonst schreibt sie den gerade gesendeten Text zurück.
-    if (entwurfUhr.current) clearTimeout(entwurfUhr.current)
-    entwurfOffen.current = null
-    void speichereEntwurf(targetBlindMailboxId, '').catch(() => {})
-    setEntwuerfe((v) => {
-      if (!v[targetBlindMailboxId]) return v
-      const neu = { ...v }
-      delete neu[targetBlindMailboxId]
-      return neu
-    })
+    // Der Entwurf ist verschickt, also keiner mehr.
+    entwuerfe.verwirf(targetBlindMailboxId)
     justSentRef.current = true
     lastTypingSentRef.current = 0
 
@@ -4549,116 +4116,11 @@ export function Messenger() {
     }
   }
 
-  // Voice recording handlers
-  const startRecording = async () => {
-    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-      toast.error(t('messenger.micUnavailable'))
-      return
-    }
-
-    try {
-      const constraints = getAudioTrackConstraints()
-      let stream: MediaStream
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: constraints })
-      } catch {
-        // Fallback without exact deviceId if preferred mic is unavailable
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-        })
-      }
-      mediaStreamRef.current = stream
-      audioChunksRef.current = []
-
-      const mimeType = getSupportedAudioMimeType()
-      const options = mimeType ? { mimeType } : undefined
-      const recorder = new MediaRecorder(stream, options)
-
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-          audioChunksRef.current.push(e.data)
-        }
-      }
-
-      recorder.start(100)
-      mediaRecorderRef.current = recorder
-      setIsRecording(true)
-      setRecordingDuration(0)
-
-      if (blindMailboxId) {
-        void sendTypingSignal({
-          blind_mailbox_id: blindMailboxId,
-          status: 'recording',
-        }).catch(() => {})
-      }
-
-      timerIntervalRef.current = setInterval(() => {
-        setRecordingDuration((prev) => prev + 1)
-      }, 1000)
-    } catch {
-      toast.error(t('messenger.micDenied'))
-    }
-  }
-
-  const stopRecording = (shouldSend: boolean) => {
-    if (blindMailboxId) {
-      void sendTypingSignal({
-        blind_mailbox_id: blindMailboxId,
-        status: 'idle',
-      }).catch(() => {})
-    }
-
-    if (timerIntervalRef.current) {
-      clearInterval(timerIntervalRef.current)
-      timerIntervalRef.current = null
-    }
-
-    const duration = recordingDuration
-    setIsRecording(false)
-    setRecordingDuration(0)
-
-    const recorder = mediaRecorderRef.current
-    const stream = mediaStreamRef.current
-
-    if (recorder && recorder.state !== 'inactive') {
-      recorder.onstop = () => {
-        stream?.getTracks().forEach((t) => t.stop())
-        mediaStreamRef.current = null
-        mediaRecorderRef.current = null
-
-        if (shouldSend && audioChunksRef.current.length > 0) {
-          const mime = recorder.mimeType || getSupportedAudioMimeType() || 'audio/webm'
-          const audioBlob = new Blob(audioChunksRef.current, { type: mime })
-          const reader = new FileReader()
-          reader.onload = () => {
-            const dataUrl = reader.result as string
-            if (dataUrl) {
-              handleSendMessage({
-                text: '',
-                audio: {
-                  dataUrl,
-                  durationSeconds: Math.max(1, duration),
-                  mimeType: mime,
-                },
-              })
-            }
-          }
-          reader.readAsDataURL(audioBlob)
-        }
-        audioChunksRef.current = []
-      }
-      recorder.stop()
-    } else {
-      stream?.getTracks().forEach((t) => t.stop())
-      mediaStreamRef.current = null
-      mediaRecorderRef.current = null
-      audioChunksRef.current = []
-    }
-  }
+  // Die fertige Sprachnachricht geht denselben Weg wie jede andere Nachricht.
+  const aufnahme = useSprachaufnahme({
+    blindMailboxId,
+    onFertig: (audio) => void handleSendMessage({ text: '', audio }),
+  })
 
   /**
    * Woran die Anhänge einer Nachricht hängen.
@@ -4672,154 +4134,6 @@ export function Messenger() {
     absenderId: Number(msg.senderId) || Number(currentUserId) || 0,
     blindMailboxId,
   })
-
-  /** Die eigene Aufnahme, solange sie lokal liegt; sonst aus dem Medienspeicher. */
-  const tonQuelle = async (
-    anhang: AudioAttachment,
-    bindung: MedienBindungsKontext
-  ): Promise<string | null> => anhang.dataUrl || (await holeAnhangUrl(anhang, bindung))
-
-  // Voice playback handler
-  const togglePlayAudio = async (
-    messageId: number,
-    anhang: AudioAttachment,
-    bindung: MedienBindungsKontext
-  ) => {
-    if (playingAudioId === messageId) {
-      if (audioInstanceRef.current) {
-        audioInstanceRef.current.pause()
-        audioInstanceRef.current.ontimeupdate = null
-        audioInstanceRef.current.onended = null
-        audioInstanceRef.current.onerror = null
-        audioInstanceRef.current = null
-      }
-      setPlayingAudioId(null)
-    } else {
-      if (audioInstanceRef.current) {
-        audioInstanceRef.current.pause()
-        audioInstanceRef.current.ontimeupdate = null
-        audioInstanceRef.current.onended = null
-        audioInstanceRef.current.onerror = null
-        audioInstanceRef.current = null
-      }
-      const quelle = await tonQuelle(anhang, bindung)
-      if (!quelle) {
-        toast.error(t('messenger.voiceLoadFailed'))
-        return
-      }
-
-      const audio = new Audio(quelle)
-      audio.playbackRate = audioPlaybackRate
-      audioInstanceRef.current = audio
-      setPlayingAudioId(messageId)
-      setAudioCurrentTime(0)
-
-      audio.ontimeupdate = () => {
-        setAudioCurrentTime(audio.currentTime)
-      }
-
-      audio.onended = () => {
-        setPlayingAudioId(null)
-        setAudioCurrentTime(0)
-      }
-
-      audio.onerror = () => {
-        setPlayingAudioId(null)
-        toast.error(t('messenger.voicePlayFailed'))
-      }
-
-      audio.play().catch(() => {
-        setPlayingAudioId(null)
-      })
-    }
-  }
-
-  // Cycle playback speed between 1x, 1.5x, and 2x (WhatsApp style)
-  const cycleAudioPlaybackRate = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    const rates = [1, 1.5, 2]
-    const nextRate = rates[(rates.indexOf(audioPlaybackRate) + 1) % rates.length] || 1
-    setAudioPlaybackRate(nextRate)
-    if (audioInstanceRef.current) {
-      audioInstanceRef.current.playbackRate = nextRate
-    }
-  }
-
-  // Seek audio playback when clicking anywhere on the waveform
-  const handleWaveformSeek = async (
-    messageId: number,
-    anhang: AudioAttachment,
-    bindung: MedienBindungsKontext,
-    e: React.MouseEvent<HTMLDivElement>
-  ) => {
-    e.stopPropagation()
-    // Die Maße des Elements müssen vor jedem `await` feststehen: React gibt das
-    // Ereignis danach frei und `currentTarget` ist null.
-    const rect = e.currentTarget.getBoundingClientRect()
-    const durationSeconds = anhang.durationSeconds
-    if (rect.width <= 0 || durationSeconds <= 0) return
-    const clickX = Math.max(0, Math.min(e.clientX - rect.left, rect.width))
-    const seekFrac = clickX / rect.width
-    const targetTime = seekFrac * durationSeconds
-
-    if (playingAudioId === messageId && audioInstanceRef.current) {
-      audioInstanceRef.current.currentTime = targetTime
-      setAudioCurrentTime(targetTime)
-    } else {
-      if (audioInstanceRef.current) {
-        audioInstanceRef.current.pause()
-        audioInstanceRef.current.ontimeupdate = null
-        audioInstanceRef.current.onended = null
-        audioInstanceRef.current.onerror = null
-        audioInstanceRef.current = null
-      }
-      const quelle = await tonQuelle(anhang, bindung)
-      if (!quelle) {
-        toast.error(t('messenger.voiceLoadFailed'))
-        return
-      }
-
-      const audio = new Audio(quelle)
-      audio.playbackRate = audioPlaybackRate
-      audio.currentTime = targetTime
-      audioInstanceRef.current = audio
-      setPlayingAudioId(messageId)
-      setAudioCurrentTime(targetTime)
-
-      audio.ontimeupdate = () => {
-        setAudioCurrentTime(audio.currentTime)
-      }
-      audio.onended = () => {
-        setPlayingAudioId(null)
-        setAudioCurrentTime(0)
-        audioInstanceRef.current = null
-      }
-      audio.onerror = () => {
-        setPlayingAudioId(null)
-        toast.error(t('messenger.voicePlayFailed'))
-      }
-      audio.play().catch(() => {
-        setPlayingAudioId(null)
-      })
-    }
-  }
-
-  // Cleanup audio playback on unmount
-  useEffect(() => {
-    return () => {
-      if (audioInstanceRef.current) {
-        audioInstanceRef.current.pause()
-        audioInstanceRef.current.ontimeupdate = null
-        audioInstanceRef.current.onended = null
-        audioInstanceRef.current.onerror = null
-        audioInstanceRef.current = null
-      }
-      if (timerIntervalRef.current) {
-        clearInterval(timerIntervalRef.current)
-      }
-      mediaStreamRef.current?.getTracks().forEach((t) => t.stop())
-    }
-  }, [])
 
   // Handle Photo / Camera capture
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -5285,7 +4599,7 @@ export function Messenger() {
         titel={gruppenTitel(g)}
         mid={gmid}
         ausgewaehlt={activeGroup?.id === g.id}
-        entwurf={gmid ? entwuerfe[gmid] || '' : ''}
+        entwurf={gmid ? entwuerfe.vorschau[gmid] || '' : ''}
         onOeffnen={() => {
           setActiveGroup(g)
           setActiveContact(null)
@@ -5306,7 +4620,7 @@ export function Messenger() {
         kontakt={c}
         mid={cmid}
         ausgewaehlt={activeContact?.userId === c.userId}
-        entwurf={cmid ? entwuerfe[cmid] || '' : ''}
+        entwurf={cmid ? entwuerfe.vorschau[cmid] || '' : ''}
         onOeffnen={() => {
           setActiveContact(c)
           setActiveGroup(null)
@@ -5319,11 +4633,6 @@ export function Messenger() {
     )
   }
 
-  const oeffneStoryErstellung = () => {
-    setCreateStoryInitialMode('text')
-    setPendingStoryPhotoUrl(null)
-    setIsCreateStoryOpen(true)
-  }
   const storyIch = { avatarUrl: user?.avatar_url, username: user?.username }
 
   /** Ein Anruf an den offenen Kontakt; nur unter Freunden angeboten. */
@@ -5463,10 +4772,10 @@ export function Messenger() {
           {mobileNavTab === 'chats' && !searchQuery.trim() && (
             <StoriesCarouselBar
               ich={storyIch}
-              eigeneStories={myStories}
-              freunde={friendsStoriesGrouped}
-              onOeffnen={(s) => openStoryViewerForUser(s, 0)}
-              onErstellen={oeffneStoryErstellung}
+              eigeneStories={storyAnsicht.eigene}
+              freunde={storyAnsicht.freunde}
+              onOeffnen={(s) => storyAnsicht.betrachter.oeffne(s)}
+              onErstellen={storyAnsicht.erstellung.mitText}
             />
           )}
 
@@ -5572,7 +4881,7 @@ export function Messenger() {
                 <div className="pt-2 mt-1 border-t border-outline-variant/20 space-y-0.5">
                   <button
                     type="button"
-                    onClick={() => void oeffneUeberall('markiert')}
+                    onClick={() => void ueberall.oeffne('markiert')}
                     className="w-full min-h-11 px-2.5 flex items-center gap-2.5 rounded-xl text-left text-xs text-on-surface-variant hover:bg-surface-container-high/60 transition-colors"
                   >
                     <Star className="w-4 h-4 text-status-warning shrink-0" />
@@ -5580,7 +4889,7 @@ export function Messenger() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => void oeffneUeberall('anMich')}
+                    onClick={() => void ueberall.oeffne('anMich')}
                     className="w-full min-h-11 px-2.5 flex items-center gap-2.5 rounded-xl text-left text-xs text-on-surface-variant hover:bg-surface-container-high/60 transition-colors"
                   >
                     <AtSign className="w-4 h-4 text-primary shrink-0" />
@@ -5589,7 +4898,7 @@ export function Messenger() {
                   {searchQuery.trim().length > 1 && (
                     <button
                       type="button"
-                      onClick={() => void oeffneUeberall('suche', searchQuery)}
+                      onClick={() => void ueberall.oeffne('suche', searchQuery)}
                       className="w-full min-h-11 px-2.5 flex items-center gap-2.5 rounded-xl text-left text-xs text-primary hover:bg-surface-container-high/60 transition-colors"
                     >
                       <Search className="w-4 h-4 shrink-0" />
@@ -5603,11 +4912,11 @@ export function Messenger() {
             {mobileNavTab === 'updates' && (
               <StatusUpdatesView
                 ich={storyIch}
-                eigeneStories={myStories}
-                freunde={friendsStoriesGrouped}
+                eigeneStories={storyAnsicht.eigene}
+                freunde={storyAnsicht.freunde}
                 kontakte={contactsList}
-                onOeffnen={(s) => openStoryViewerForUser(s, 0)}
-                onErstellen={oeffneStoryErstellung}
+                onOeffnen={(s) => storyAnsicht.betrachter.oeffne(s)}
+                onErstellen={storyAnsicht.erstellung.mitText}
                 onChat={(c) => {
                   setActiveContact(c)
                   setActiveGroup(null)
@@ -5700,7 +5009,7 @@ export function Messenger() {
               )}
 
               <ChatHeader
-                verborgen={auswahlModus || sucheOffen}
+                verborgen={auswahlModus || chatSuche.offen}
                 titel={(activeGroup ? gruppenTitel(activeGroup) : activeContact?.username) ?? ''}
                 gruppenBild={activeGroup?.avatar_url ? apiUrl(activeGroup.avatar_url) : null}
                 stumm={Boolean(blindMailboxId && isChatMuted(blindMailboxId))}
@@ -5718,7 +5027,7 @@ export function Messenger() {
                 onFreundschaftsanfrage={
                   activeContact && !activeContact.isFriend ? () => void sendeFreundschaftsanfrage() : undefined
                 }
-                onSuche={() => setSucheOffen(true)}
+                onSuche={chatSuche.oeffne}
                 menue={(schliessen) => (
                   <ChatActionsMenu
                     schliessen={schliessen}
@@ -5741,7 +5050,7 @@ export function Messenger() {
                     verfallStufe={stufenLabel(verfallSekunden > 0 ? verfallSekunden : 0, t)}
                     verfallErlaubt={darfVerfallStellen}
                     onStumm={() => setIsMuteModalOpen(true)}
-                    onSicherheitsnummer={() => setIsSafetyNumberModalOpen(true)}
+                    onSicherheitsnummer={() => sicherheitsnummern.setOffen(true)}
                     onVerfall={() => setVerfallOffen(true)}
                     onVideoanruf={() => void starteAnruf('video')}
                     onHintergrund={() => setIsWallpaperModalOpen(true)}
@@ -5755,7 +5064,7 @@ export function Messenger() {
                 )}
               />
 
-              {angeheftet && !auswahlModus && !sucheOffen && (
+              {angeheftet && !auswahlModus && !chatSuche.offen && (
                 <ChatPinnedBar
                   text={angeheftet.text || auszugFuerZitat(angeheftet)}
                   onOeffnen={() => angeheftet.clientUuid && springeZu(angeheftet.clientUuid)}
@@ -5790,16 +5099,7 @@ export function Messenger() {
                         msg.clientUuid && hervorgehoben === msg.clientUuid,
                       ),
                     }}
-                    ton={{
-                      playingAudioId,
-                      audioCurrentTime,
-                      audioPlaybackRate,
-                      onTogglePlay: (id, anhang, bindung) =>
-                        void togglePlayAudio(id, anhang, bindung),
-                      onCycleRate: cycleAudioPlaybackRate,
-                      onSeek: (id, anhang, bindung, e) =>
-                        void handleWaveformSeek(id, anhang, bindung, e),
-                    }}
+                    ton={tonWiedergabe}
                     aktionen={{
                       onViewImage: setViewingImage,
                       onEdit: (m) => {
@@ -5840,7 +5140,7 @@ export function Messenger() {
 
               {/* Nach unten. Schwebt über der Eingabe, nicht darunter, und weicht
                   dem Zitatkopf aus, wenn beide gleichzeitig da sind. */}
-              {weitOben && !sucheOffen && (
+              {weitOben && !chatSuche.offen && (
                 <div className="relative z-10">
                   <button
                     type="button"
@@ -5857,19 +5157,15 @@ export function Messenger() {
                   damit über der Tastatur: Feld, Zähler und Pfeile liegen alle
                   im Daumenbereich. Oben wären die Pfeile bei offener Tastatur
                   außer Reichweite. */}
-              {sucheOffen && (
+              {chatSuche.offen && (
                 <VerlaufSuchleiste
-                  onSchliessen={() => {
-                    setSucheOffen(false)
-                    setSuchTreffer([])
-                    setSuchIndex(0)
-                  }}
-                  onSuchen={handleSuchen}
-                  trefferAnzahl={suchTreffer.length}
-                  aktuellerTreffer={suchIndex}
-                  onVor={() => blaettereTreffer(1)}
-                  onZurueck={() => blaettereTreffer(-1)}
-                  gesperrt={sucheGesperrt}
+                  onSchliessen={chatSuche.schliesse}
+                  onSuchen={chatSuche.suchen}
+                  trefferAnzahl={chatSuche.treffer.length}
+                  aktuellerTreffer={chatSuche.index}
+                  onVor={() => chatSuche.blaettere(1)}
+                  onZurueck={() => chatSuche.blaettere(-1)}
+                  gesperrt={chatSuche.gesperrt}
                 />
               )}
 
@@ -5882,14 +5178,14 @@ export function Messenger() {
               <div className="p-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] border-t border-outline-variant/20 bg-surface-container-low relative z-1">
                 {activeContact && isBlocked(activeContact.userId) ? (
                   <BlockedNotice onAufheben={() => void unblockUser(activeContact.userId)} />
-                ) : isRecording ? (
+                ) : aufnahme.laeuft ? (
                   <VoiceRecordingBar
-                    durationSeconds={recordingDuration}
+                    durationSeconds={aufnahme.dauer}
                     statusLabel={t('messenger.voiceRecording')}
-                    stream={mediaStreamRef.current}
+                    stream={aufnahme.stream}
                     variant="danger"
-                    onCancel={() => stopRecording(false)}
-                    onConfirm={() => stopRecording(true)}
+                    onCancel={() => aufnahme.beende(false)}
+                    onConfirm={() => aufnahme.beende(true)}
                     cancelLabel="Abbrechen"
                     confirmLabel="Senden"
                     cancelIcon={<Trash2 className="w-3.5 h-3.5" />}
@@ -6014,7 +5310,7 @@ export function Messenger() {
                             hatInhalt={Boolean(inputText.trim() || selectedImage || stagedFile)}
                             sendet={sending}
                             onVideonotiz={() => setIsVideoNoteRecording(true)}
-                            onSprachnachricht={startRecording}
+                            onSprachnachricht={aufnahme.starte}
                           />
                         }
                       />
@@ -6089,26 +5385,26 @@ export function Messenger() {
       />
 
       <TrefferListe
-        offen={ueberall !== 'aus'}
+        offen={ueberall.art !== 'aus'}
         titel={
-          ueberall === 'markiert'
+          ueberall.art === 'markiert'
             ? t('messenger.markedMessages')
-            : ueberall === 'anMich'
+            : ueberall.art === 'anMich'
               ? t('messenger.mentionsAndReplies')
-              : t('messenger.searchFor', { frage: ueberallFrage })
+              : t('messenger.searchFor', { frage: ueberall.frage })
         }
         leerText={
-          ueberall === 'markiert'
+          ueberall.art === 'markiert'
             ? t('messenger.nothingMarkedYet')
-            : ueberall === 'anMich'
+            : ueberall.art === 'anMich'
               ? t('messenger.nothingMentioned')
               : t('messenger.noChatHasThisText')
         }
-        chats={ueberallChats}
+        chats={ueberall.chats}
         verzeichnis={mailboxDirectory}
-        gesperrt={ueberallGesperrt}
-        laeuft={ueberallLaeuft}
-        onSchliessen={() => setUeberall('aus')}
+        gesperrt={ueberall.gesperrt}
+        laeuft={ueberall.laeuft}
+        onSchliessen={ueberall.schliesse}
         onTreffer={(treffer) => void oeffneTreffer(treffer)}
       />
 
@@ -6297,31 +5593,26 @@ export function Messenger() {
 
       {/* Create Story Modal */}
       <CreateStoryModal
-        open={isCreateStoryOpen}
-        onOpenChange={(open) => {
-          setIsCreateStoryOpen(open)
-          if (!open) {
-            setPendingStoryPhotoUrl(null)
-          }
-        }}
+        open={storyAnsicht.erstellung.offen}
+        onOpenChange={storyAnsicht.erstellung.setOffen}
         onCreated={handleStoryCreated}
-        initialMode={createStoryInitialMode}
-        initialPhotoUrl={pendingStoryPhotoUrl}
+        initialMode={storyAnsicht.erstellung.modus}
+        initialPhotoUrl={storyAnsicht.erstellung.fotoUrl}
       />
 
       {/* Story Viewer Modal */}
       <StoryViewerModal
-        open={isViewerStoryOpen}
-        onOpenChange={setIsViewerStoryOpen}
-        stories={activeViewerStories.length > 0 ? activeViewerStories : stories}
-        initialIndex={viewerStoryIndex}
+        open={storyAnsicht.betrachter.offen}
+        onOpenChange={storyAnsicht.betrachter.setOffen}
+        stories={storyAnsicht.betrachter.stories}
+        initialIndex={storyAnsicht.betrachter.index}
         onDeleted={handleStoryDeleted}
         onReply={(targetUserId, _targetUsername, text, storyContext: StoryReplyContext) => {
           const contact = contactsList.find((c) => c.userId === targetUserId)
           if (contact) {
             setActiveContact(contact)
             setActiveGroup(null)
-            setIsViewerStoryOpen(false)
+            storyAnsicht.betrachter.setOffen(false)
             void handleSendMessage({ text, storyReply: storyContext })
           } else {
             toast.error(t('messenger.replyContactMissing'))
@@ -6336,9 +5627,7 @@ export function Messenger() {
         onCapture={(dataUrl) => {
           // If the user took a photo while on the "Aktuelles" (updates) tab, directly open the Story Creator with the photo!
           if (mobileNavTab === 'updates') {
-            setPendingStoryPhotoUrl(dataUrl)
-            setCreateStoryInitialMode('photo')
-            setIsCreateStoryOpen(true)
+            storyAnsicht.erstellung.mitFoto(dataUrl)
             return
           }
 
@@ -6385,11 +5674,11 @@ export function Messenger() {
       />
 
       <SafetyNumberDialog
-        open={isSafetyNumberModalOpen}
-        onOpenChange={setIsSafetyNumberModalOpen}
+        open={sicherheitsnummern.offen}
+        onOpenChange={sicherheitsnummern.setOffen}
         contactName={activeContact?.username || ''}
-        devices={contactDevices}
-        loading={loadingSafetyNumbers}
+        devices={sicherheitsnummern.geraete}
+        loading={sicherheitsnummern.laedt}
       />
 
       <BlockConfirmDialog
