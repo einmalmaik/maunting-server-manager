@@ -187,9 +187,11 @@ def test_encode_with_google_mock() -> None:
     mock_client = MagicMock()
     mock_client.post.return_value = mock_resp
 
-    res = ai_embedding_service.encode_with_google(
+    res = ai_embedding_service.encode_ueber_anbieter(
         ["Testtext für Embedding"],
         api_key="AIzaSyTestKey",
+        base_url=ai_provider_registry.anbieter("google").base_url,
+        model="text-embedding-004",
         client=mock_client,
     )
     assert res is not None
@@ -236,7 +238,7 @@ def test_embedding_fallback_to_google_provider(db: Session) -> None:
         operator_api_key="AIzaSyTestKey123456",
         default_model="gemini-2.5-flash",
     )
-    ai_embedding_service.set_google_rueckfall(True, db)
+    ai_embedding_service.set_rueckfall("google", db)
     db.commit()
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = db
@@ -246,7 +248,7 @@ def test_embedding_fallback_to_google_provider(db: Session) -> None:
          patch("services.ai_embedding_service.is_available", return_value=False), \
          patch("database.SessionLocal", return_value=mock_ctx), \
          patch("services.ai_provider_service.resolve_api_key", return_value="AIzaSyTestKey123456"), \
-         patch("services.ai_embedding_service.encode_with_google", return_value=[[0.1] * 256]) as mock_encode:
+         patch("services.ai_embedding_service.encode_ueber_anbieter", return_value=[[0.1] * 256]) as mock_encode:
         assert ai_embedding_service.is_ready() is True
         res = ai_embedding_service.encode(["Hallo Welt"])
         assert res == ai_embedding_service.Kodierung(
@@ -278,7 +280,7 @@ def test_ohne_erlaubnis_des_betreibers_verlaesst_nichts_das_haus(
     gesendet: list[str] = []
     monkeypatch.setattr(ai_embedding_service, "_load", lambda: None)
     monkeypatch.setattr(
-        ai_embedding_service, "encode_with_google",
+        ai_embedding_service, "encode_ueber_anbieter",
         lambda texts, **_: gesendet.extend(texts) or [[0.1] * 256 for _ in texts],
     )
     _allow_memory(db, regular_user)
@@ -291,44 +293,113 @@ def test_ohne_erlaubnis_des_betreibers_verlaesst_nichts_das_haus(
     assert ai_embedding_service.is_ready() is False
 
 
-def test_der_betreiber_schaltet_den_google_rueckfall_ueber_die_api(
+def test_mit_openai_als_rueckfall_rechnet_openai_und_nur_openai(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OpenAI ist der zweite Rückfallweg — und die Wahl gilt genau einem Anbieter.
+
+    Ein ebenfalls eingetragener Google-Zugang darf dabei nichts bekommen: die
+    Erlaubnis des Betreibers gilt dem Anbieter, den er gewählt hat, nicht
+    jedem, der zufällig einen Schlüssel hat.
+    """
+    # Die Schlüsselform zusammengesetzt, nicht als Literal: das Repo ist öffentlich.
+    schluessel = {"google": "test-schluessel", "openai": "s" + "k-" + "test-schluessel"}
+    for kind, name in (("google", "Google Studio"), ("openai", "OpenAI")):
+        ai_provider_service.create_provider(
+            db, name=name, provider_kind=kind, enabled=True,
+            requires_api_key=True, operator_api_key=schluessel[kind],
+            default_model="gpt-5.6" if kind == "openai" else "gemini-2.5-flash",
+        )
+    ai_embedding_service.set_rueckfall("openai", db)
+    db.commit()
+    monkeypatch.setattr(ai_embedding_service, "_load", lambda: None)
+    monkeypatch.setattr(ai_provider_service, "resolve_api_key", lambda db, prov, uid: "schluessel")
+
+    antwort = MagicMock()
+    antwort.status_code = 200
+    antwort.json.return_value = {"data": [{"embedding": [0.5] * 256}]}
+    gesendet: list[dict] = []
+
+    class Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+        def post(self, url, *, headers, json, timeout):
+            gesendet.append({"url": url, **json})
+            return antwort
+
+    monkeypatch.setattr(httpx, "Client", Client)
+
+    kodierung = ai_embedding_service.encode(["Wann laeuft das Backup?"], db=db)
+
+    assert kodierung is not None
+    assert kodierung.modell == "openai:text-embedding-3-small"
+    assert [(g["url"], g["model"], g["dimensions"]) for g in gesendet] == [
+        ("https://api.openai.com/v1/embeddings", "text-embedding-3-small", 256),
+    ]
+    assert ai_embedding_service.aktives_modell(db=db) == "openai:text-embedding-3-small"
+
+
+def test_der_betreiber_waehlt_den_rueckfall_ueber_die_api(
     client, owner_cookies: dict, db: Session
 ) -> None:
     csrf = {"X-CSRF-Token": owner_cookies.get("__Secure-csrf_token", "")}
 
     gelesen = client.get("/api/ai/settings/memory-search", cookies=owner_cookies)
     assert gelesen.status_code == 200
-    assert gelesen.json()["google_fallback"] is False
+    assert gelesen.json()["fallback"] == "off"
+    assert gelesen.json()["available"] == []
 
     gesetzt = client.put(
-        "/api/ai/settings/memory-search", json={"google_fallback": True},
+        "/api/ai/settings/memory-search", json={"fallback": "openai"},
         cookies=owner_cookies, headers=csrf,
     )
     assert gesetzt.status_code == 200
-    assert gesetzt.json()["google_fallback"] is True
-    assert ai_embedding_service.google_rueckfall_erlaubt() is True
+    assert gesetzt.json()["fallback"] == "openai"
+    assert ai_embedding_service.rueckfall() == "openai"
 
     from models import AuditLog
 
     eintrag = (
         db.query(AuditLog)
-        .filter(AuditLog.action == "ai.memory_search.google_fallback.updated")
+        .filter(AuditLog.action == "ai.memory_search.fallback.updated")
         .one()
     )
-    assert "true" in str(eintrag.details).lower()
+    assert "openai" in str(eintrag.details)
+
+    unbekannt = client.put(
+        "/api/ai/settings/memory-search", json={"fallback": "openrouter"},
+        cookies=owner_cookies, headers=csrf,
+    )
+    assert unbekannt.status_code == 422
+    assert ai_embedding_service.rueckfall() == "openai"
 
 
-def test_ein_benutzer_ohne_panelrecht_schaltet_den_rueckfall_nicht(
+def test_ein_altes_ja_zum_google_rueckfall_gilt_weiter(db: Session) -> None:
+    """Der Vorgänger war einen Tag lang ein Ja/Nein nur für Google."""
+    from services.panel_settings_service import PanelSettingsService
+
+    PanelSettingsService.set("ai_embedding_google_fallback", "true", db=db)
+    assert ai_embedding_service.rueckfall(db) == "google"
+
+    ai_embedding_service.set_rueckfall(None, db)
+    assert ai_embedding_service.rueckfall(db) is None
+
+
+def test_ein_benutzer_ohne_panelrecht_waehlt_keinen_rueckfall(
     client, user_cookies: dict
 ) -> None:
     antwort = client.put(
-        "/api/ai/settings/memory-search", json={"google_fallback": True},
+        "/api/ai/settings/memory-search", json={"fallback": "google"},
         cookies=user_cookies,
         headers={"X-CSRF-Token": user_cookies.get("__Secure-csrf_token", "")},
     )
 
     assert antwort.status_code == 403
-    assert ai_embedding_service.google_rueckfall_erlaubt() is False
+    assert ai_embedding_service.rueckfall() is None
 
 
 @pytest.mark.asyncio

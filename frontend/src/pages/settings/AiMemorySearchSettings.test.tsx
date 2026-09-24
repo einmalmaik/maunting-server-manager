@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { AiMemorySearchPolicy } from '@/api/ai'
 import * as client from '@/api/client'
 import i18n from '@/i18n'
 import { AiMemorySearchSettings } from './AiMemorySearchSettings'
@@ -13,16 +14,22 @@ vi.mock('@/api/client', async (importOriginal) => ({
 const api = vi.mocked(client.api)
 const PFAD = '/ai/settings/memory-search'
 
-function antworte(policy: { google_fallback: boolean; local_ready: boolean; ready: boolean }) {
+function antworte(policy: AiMemorySearchPolicy) {
   api.mockImplementation(((path: string, init?: RequestInit) => {
     if (path === PFAD && init?.method === 'PUT') {
-      const body = JSON.parse(String(init.body))
-      return Promise.resolve({ ...policy, google_fallback: body.google_fallback, ready: body.google_fallback })
+      const { fallback } = JSON.parse(String(init.body))
+      return Promise.resolve({
+        ...policy,
+        fallback,
+        ready: policy.local_ready || policy.available.includes(fallback),
+      })
     }
     if (path === PFAD) return Promise.resolve(policy)
     return Promise.resolve(null)
   }) as unknown as typeof client.api)
 }
+
+const auswahl = () => screen.findByRole('button', { name: i18n.t('ai.memorySearch.choice') })
 
 describe('AiMemorySearchSettings', () => {
   beforeEach(async () => {
@@ -30,36 +37,48 @@ describe('AiMemorySearchSettings', () => {
     api.mockReset()
   })
 
-  it('steht ab Werk auf aus und sagt, dass die Suche ohne Modell nicht rechnet', async () => {
-    antworte({ google_fallback: false, local_ready: false, ready: false })
+  it('steht ab Werk auf Aus und sagt, dass die Suche ohne Modell nicht rechnet', async () => {
+    antworte({ fallback: 'off', available: ['openai'], local_ready: false, ready: false })
 
     render(<AiMemorySearchSettings canWrite />)
 
-    const schalter = await screen.findByRole('switch')
-    expect(schalter).not.toBeChecked()
+    expect(await auswahl()).toHaveTextContent(i18n.t('ai.memorySearch.options.off'))
     expect(screen.getByText(i18n.t('ai.memorySearch.warning'))).toBeInTheDocument()
     expect(screen.getByText(new RegExp(i18n.t('ai.memorySearch.searchOff')))).toBeInTheDocument()
   })
 
-  it('schaltet den Rückfall ein und speichert genau diesen Wert', async () => {
-    antworte({ google_fallback: false, local_ready: false, ready: false })
+  it('wählt OpenAI und speichert genau diesen Anbieter', async () => {
+    antworte({ fallback: 'off', available: ['openai'], local_ready: false, ready: false })
 
     render(<AiMemorySearchSettings canWrite />)
-    fireEvent.click(await screen.findByRole('switch'))
+    fireEvent.click(await auswahl())
+    fireEvent.click(screen.getByRole('option', { name: new RegExp(i18n.t('ai.memorySearch.options.openai')) }))
 
     expect(api).toHaveBeenCalledWith(
       PFAD,
-      expect.objectContaining({ method: 'PUT', body: JSON.stringify({ google_fallback: true }) }),
+      expect.objectContaining({ method: 'PUT', body: JSON.stringify({ fallback: 'openai' }) }),
     )
-    expect(await screen.findByText(new RegExp(i18n.t('ai.memorySearch.fallbackActive')))).toBeInTheDocument()
+    expect(
+      await screen.findByText(new RegExp(i18n.t('ai.memorySearch.fallbackActive', { provider: 'OpenAI' }))),
+    ).toBeInTheDocument()
   })
 
-  it('sagt bei laufendem lokalem Modell, dass der Schalter nichts bewirkt', async () => {
-    antworte({ google_fallback: false, local_ready: true, ready: true })
+  it('sagt, wenn der gewählte Anbieter keinen Zugang hat', async () => {
+    antworte({ fallback: 'google', available: [], local_ready: false, ready: false })
+
+    render(<AiMemorySearchSettings canWrite />)
+
+    expect(
+      await screen.findByText(new RegExp(i18n.t('ai.memorySearch.noAccess', { provider: 'Google AI Studio' }))),
+    ).toBeInTheDocument()
+  })
+
+  it('sagt bei laufendem lokalem Modell, dass die Wahl nichts bewirkt', async () => {
+    antworte({ fallback: 'off', available: [], local_ready: true, ready: true })
 
     render(<AiMemorySearchSettings canWrite={false} />)
 
     expect(await screen.findByText(i18n.t('ai.memorySearch.localReady'))).toBeInTheDocument()
-    expect(screen.getByRole('switch')).toBeDisabled()
+    expect(await auswahl()).toBeDisabled()
   })
 })

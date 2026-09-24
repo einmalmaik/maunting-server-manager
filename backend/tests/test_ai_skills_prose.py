@@ -1061,10 +1061,13 @@ def test_ein_google_vektor_traegt_seine_eigene_kennung(
     _allow(db, regular_user, "ai.skills.use", "ai.skills.manage")
     laenge = ai_embedding_service.EMBEDDING_DIMENSIONS
     monkeypatch.setattr(ai_embedding_service, "_load", lambda: None)
-    ai_embedding_service.set_google_rueckfall(True, db)
-    monkeypatch.setattr(ai_embedding_service, "_google_zugang", lambda db: ("schluessel", {}))
+    ai_embedding_service.set_rueckfall("google", db)
     monkeypatch.setattr(
-        ai_embedding_service, "encode_with_google",
+        ai_embedding_service, "_zugang",
+        lambda db, anbieter: ("schluessel", "https://google.invalid", "text-embedding-004"),
+    )
+    monkeypatch.setattr(
+        ai_embedding_service, "encode_ueber_anbieter",
         lambda texts, **_: [[0.0, 1.0] + [0.0] * (laenge - 2) for _ in texts],
     )
 

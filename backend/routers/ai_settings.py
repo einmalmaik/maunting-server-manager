@@ -608,7 +608,8 @@ def _memory_search_status(db: Session) -> AiMemorySearchStatus:
     from services import ai_embedding_service
 
     return AiMemorySearchStatus(
-        google_fallback=ai_embedding_service.google_rueckfall_erlaubt(db),
+        fallback=ai_embedding_service.rueckfall(db) or "off",
+        available=ai_embedding_service.zugaenge_mit_schluessel(db),
         local_ready=ai_embedding_service.lokal_bereit(),
         ready=ai_embedding_service.is_ready(),
     )
@@ -629,23 +630,29 @@ def set_memory_search_policy(
     actor: User = Depends(require_global("panel.settings.write")),
     _: None = Depends(verify_csrf),
 ) -> AiMemorySearchStatus:
-    """Erlaubt oder verbietet den Google-Rückfall der Bedeutungssuche.
+    """Wählt, bei wem die Bedeutungssuche ohne lokales Modell rechnen darf.
 
-    Eine Datenschutzentscheidung und keine Komfortfrage: eingeschaltet gehen
-    Gedächtnistexte, Skillbeschreibungen und Chatfragen im Klartext an Google,
-    auch wenn im Chat ein anderer Anbieter gewählt ist. Deshalb Standard aus,
-    deshalb im Audit.
+    Eine Datenschutzentscheidung und keine Komfortfrage: gewählt gehen
+    Gedächtnistexte, Skillbeschreibungen und Chatfragen im Klartext an Google
+    oder OpenAI, auch wenn im Chat ein anderer Anbieter gewählt ist. Deshalb
+    Standard aus, deshalb im Audit.
+
+    Ein Anbieter ohne aktiven Zugang darf trotzdem gewählt werden: der
+    Betreiber trägt den Schlüssel vielleicht erst danach ein. Die Antwort
+    sagt über ``available`` und ``ready``, ob gerade gerechnet werden kann.
     """
     from services import ai_embedding_service
 
-    erlaubt = ai_embedding_service.set_google_rueckfall(payload.google_fallback, db)
+    gewaehlt = ai_embedding_service.set_rueckfall(
+        None if payload.fallback == "off" else payload.fallback, db
+    )
     audit_service.record_privileged_action(
         db,
         user_id=actor.id,
-        action="ai.memory_search.google_fallback.updated",
+        action="ai.memory_search.fallback.updated",
         target_type="panel_setting",
         target_id=None,
-        details={"enabled": erlaubt},
+        details={"fallback": gewaehlt or "off"},
     )
     db.commit()
     return _memory_search_status(db)

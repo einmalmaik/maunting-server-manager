@@ -719,14 +719,20 @@
       }
     },
     "memorySearch": {
-      "title": "Semantic search via Google",
-      "description": "Semantic search finds memories and skills across languages. It runs on a local model, and nothing leaves the panel. If that model is missing, it can use Google AI Studio instead.",
-      "warning": "When enabled, memory texts, skill descriptions and every chat question are then sent to Google in plain text, even if a different provider is selected for chat. Voice intent detection never asks Google.",
-      "statusEnabled": "Allowed",
-      "statusDisabled": "Off",
-      "localReady": "The local model is running. The switch only matters when it is missing.",
+      "title": "Semantic search without the local model",
+      "description": "Semantic search finds memories and skills across languages. It runs on a local model, and nothing leaves the panel. If that model is missing, it can run with a provider you choose here instead.",
+      "choice": "Fallback when the local model is missing",
+      "options": {
+        "off": "Off",
+        "google": "Google AI Studio",
+        "openai": "OpenAI"
+      },
+      "noAccessHint": "no active access",
+      "warning": "With a fallback, memory texts, skill descriptions and every chat question are sent to that provider in plain text, even if a different provider is selected for chat. The local model always takes precedence. Voice intent detection never runs outside the panel.",
+      "localReady": "The local model is running. The choice only matters when it is missing.",
       "localMissing": "The local model is missing.",
-      "fallbackActive": "Search is currently running via Google.",
+      "fallbackActive": "Search is currently running via {{provider}}.",
+      "noAccess": "No active access with a key is set up for {{provider}}, so semantic search is off.",
       "searchOff": "Semantic search is off. Memory still finds entries by word match, usage and recency.",
       "saved": "Setting saved",
       "errors": {
@@ -4419,7 +4425,7 @@
           "usage": "Provider, model, token reservation, actual or conservatively estimated usage, and timestamps are stored to enforce quotas; monetary cost is not claimed without an authoritative price source",
           "memory": "Optional memory entries are stored encrypted and cryptographically bound to their scope, and can be reviewed and deleted at any time. There are five scopes: personal entries and personal server-scoped notes are visible to nobody but the user; team entries are visible to every member of that team; a server's own knowledge is visible to everyone allowed to see that server and remains when its author leaves the panel; panel-wide entries are visible to every user of the panel",
           "memoryConsent": "Personal memory is disabled by default and activates only after explicit consent in chat. Consent can be revoked at any time and includes server-specific notes. Shared scopes (team, server, panel-wide) contain operational knowledge without personal data.",
-          "memorySearch": "Semantic search in memory runs on a local model inside the panel. Only if that model is missing and the operator has explicitly enabled it (default: off) does it run via Google AI Studio. Memory texts, skill descriptions and chat questions are then sent to Google in plain text, regardless of the model provider selected for chat.",
+          "memorySearch": "Semantic search in memory runs on a local model inside the panel. Only if that model is missing and the operator has explicitly chosen a fallback provider (Google AI Studio or OpenAI, default: none) does it run there. Memory texts, skill descriptions and chat questions are then sent to that provider in plain text, regardless of the model provider selected for chat.",
           "attachments": "Approved text, configuration, log, and image attachments are size- and type-checked, stored encrypted in the panel, and transferred with the conversation to the selected model provider",
           "autonomy": "Autonomous mode is optional and must be granted explicitly, per server or panel-wide; granted actions run without a further prompt but are still checked against the user's permissions unchanged and are recorded in full in the audit log as executed automatically",
           "tools": "When tools are used, limited and redacted excerpts from server logs, configuration files, mod and backup lists and Guardian incidents may be transmitted to the model provider; these results are stored for follow-up questions in the same chat and are deleted together with the chat",

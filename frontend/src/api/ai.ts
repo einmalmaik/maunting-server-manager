@@ -860,15 +860,18 @@ export interface AiContextPolicy {
   max_percent: number
 }
 
+export type AiMemorySearchFallback = 'off' | 'google' | 'openai'
+
 /**
- * Ob die Bedeutungssuche ohne lokales Modell bei Google rechnen darf.
+ * Bei wem die Bedeutungssuche ohne lokales Modell rechnen darf.
  *
- * `google_fallback` ist die Erlaubnis des Betreibers (Standard aus),
- * `local_ready` sagt, ob das lokale Modell läuft, und `ready`, ob die Suche
- * gerade überhaupt rechnen kann.
+ * `fallback` ist die Wahl des Betreibers (Standard `off`), `available` nennt
+ * die Rückfallanbieter mit aktivem Zugang, `local_ready` sagt, ob das lokale
+ * Modell läuft, und `ready`, ob die Suche gerade überhaupt rechnen kann.
  */
 export interface AiMemorySearchPolicy {
-  google_fallback: boolean
+  fallback: AiMemorySearchFallback
+  available: Exclude<AiMemorySearchFallback, 'off'>[]
   local_ready: boolean
   ready: boolean
 }
@@ -1629,9 +1632,9 @@ export const aiApi = {
     method: 'PUT', body: JSON.stringify({ compaction_percent: percent }),
   }),
   getMemorySearchPolicy: () => api<AiMemorySearchPolicy>('/ai/settings/memory-search'),
-  setMemorySearchPolicy: (googleFallback: boolean) =>
+  setMemorySearchPolicy: (fallback: AiMemorySearchFallback) =>
     api<AiMemorySearchPolicy>('/ai/settings/memory-search', {
-      method: 'PUT', body: JSON.stringify({ google_fallback: googleFallback }),
+      method: 'PUT', body: JSON.stringify({ fallback }),
     }),
   getWorkerPolicy: () => api<AiWorkerPolicy>('/ai/settings/worker'),
   setWorkerPolicy: (maxParallelWorkers: number, roundsPerWorker: number) =>

@@ -327,8 +327,8 @@ export function AiTab() {
               darf, bevor zusammengefasst wird. */}
           <AiContextSettings canWrite={canWrite} />
           {/* Neben dem Kontext, weil beide dieselbe Frage beantworten: was von
-              einer Anfrage wohin geht. Der Schalter betrifft den Google-Zugang
-              oben, aber nicht den Chat — nur die Bedeutungssuche. */}
+              einer Anfrage wohin geht. Die Wahl betrifft die Zugänge oben
+              (Google, OpenAI), aber nicht den Chat — nur die Bedeutungssuche. */}
           <AiMemorySearchSettings canWrite={canWrite} />
           {/* Die Währung steht direkt hinter der Providerwahl, weil der Preis dort
               eingetragen wird: welche Zahl „1,20" bedeutet, entscheidet sich hier. */}
