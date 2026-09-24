@@ -23,14 +23,12 @@ import {
   UsersRound,
   ChevronLeft,
   X,
-  Clock,
   RefreshCw,
   Mic,
   Trash2,
   Share2,
   Plus,
   LogOut,
-  Sparkles,
   Smile,
   Paperclip,
   FileText,
@@ -38,9 +36,6 @@ import {
   Shield,
   ShieldCheck,
   UserCheck,
-  Briefcase,
-  LayoutGrid,
-  Globe,
   UserPlus,
   Pencil,
   Image as ImageIcon,
@@ -78,8 +73,7 @@ import {
   type StickerAttachment,
   type StoryReplyAttachment,
 } from '@/components/social/ChatMessageBubble'
-import { DeviceBadge } from '@/components/social/DeviceBadge'
-import { StatusDot, type PresenceStatus } from '@/components/social/StatusIndicator'
+import type { PresenceStatus } from '@/components/social/StatusIndicator'
 import {
   type FriendItem,
   type ChatGroupItem,
@@ -260,7 +254,6 @@ import { NachrichtenMenue } from '@/components/social/NachrichtenMenue'
 import { WeiterleitenAnsicht } from '@/components/social/WeiterleitenAnsicht'
 import { VerlaufSuchleiste } from '@/components/social/VerlaufSuchleiste'
 import { TrefferListe } from '@/components/social/TrefferListe'
-import { ChatZeilenGeste } from '@/components/social/ChatZeilenGeste'
 
 /**
  * Der Kontoschlüssel ist auf diesem Gerät nicht zu öffnen — nicht gesendet.
@@ -292,6 +285,12 @@ import { DeleteGroupDialog } from '@/components/social/modals/DeleteGroupDialog'
 import { ChatMuteDialog } from '@/components/social/modals/ChatMuteDialog'
 import { SafetyNumberDialog, type SicherheitsnummerGeraet } from '@/components/social/modals/SafetyNumberDialog'
 import { BlockConfirmDialog } from '@/components/social/modals/BlockConfirmDialog'
+import { MessengerModeNav, MessengerBottomNav } from '@/components/social/sidebar/MessengerModeNav'
+import { ContactFilterTabs } from '@/components/social/sidebar/ContactFilterTabs'
+import { StoriesCarouselBar } from '@/components/social/sidebar/StoriesCarouselBar'
+import { StatusUpdatesView } from '@/components/social/sidebar/StatusUpdatesView'
+import { CommunityView } from '@/components/social/sidebar/CommunityView'
+import { GroupListItem, ContactListItem } from '@/components/social/sidebar/ConversationListItem'
 import { ChatHintergrund, ChatHintergrundDialog } from '@/features/chatHintergrund'
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
@@ -532,7 +531,6 @@ export function Messenger() {
   const mailboxDirectory = useMessengerNotificationStore((s) => s.mailboxDirectory)
   const pinnedChats = useMessengerNotificationStore((s) => s.pinnedChats)
   const archivedChats = useMessengerNotificationStore((s) => s.archivedChats)
-  const mentionedChats = useMessengerNotificationStore((s) => s.mentionedChats)
   const schalteAnheften = useMessengerNotificationStore((s) => s.schalteAnheften)
   const schalteArchiv = useMessengerNotificationStore((s) => s.schalteArchiv)
   const merkeErwaehnung = useMessengerNotificationStore((s) => s.merkeErwaehnung)
@@ -5344,179 +5342,63 @@ export function Messenger() {
     })
   }
 
-  /** Die Abzeichen rechts an einer Chatzeile — für Gruppen und Kontakte gleich. */
-  const zeilenAbzeichen = (mid: string | undefined) => {
-    if (!mid) return null
-    const unread = unreadCounts[mid] || 0
-    return (
-      <div className="flex items-center gap-1.5 shrink-0 ml-2">
-        {pinnedChats.includes(mid) && <Pin className="w-3.5 h-3.5 text-primary/70" />}
-        {archivedChats.includes(mid) && <Archive className="w-3.5 h-3.5 text-on-surface-variant/50" />}
-        {isChatMuted(mid) && <BellOff className="w-3.5 h-3.5 text-on-surface-variant/50" />}
-        {mentionedChats.includes(mid) && (
-          <span
-            title={t('messenger.youWereMentioned')}
-            className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full bg-primary/20 text-primary"
-          >
-            <AtSign className="w-3 h-3" />
-          </span>
-        )}
-        {unread > 0 && (
-          <span className="inline-flex items-center justify-center px-1.5 py-0.5 text-label-sm font-bold rounded-full bg-primary text-on-primary min-w-[18px]">
-            {unread > 99 ? '99+' : unread}
-          </span>
-        )}
-      </div>
-    )
+  /** Ein Chat aus der Liste geht auf: gelesen, und der Trenner merkt sich, wo man stand. */
+  const oeffneAusListe = (mid: string | undefined) => {
+    if (!mid) return
+    ungelesenBeimOeffnen.current = unreadCounts[mid] || 0
+    trennerGesetztFuer.current = null
+    markAsRead(mid)
   }
 
-  /** Die zweite Zeile: ein angefangener Entwurf schlägt jede Beschreibung. */
-  const zeilenVorschau = (mid: string | undefined, sonst: React.ReactNode) => {
-    const entwurf = mid ? entwuerfe[mid] : ''
-    if (!entwurf) return sonst
-    return (
-      <p className="text-label-sm truncate">
-        <span className="text-status-warning font-semibold">{t('messenger.draftPrefix')} </span>
-        <span className="text-on-surface-variant/80">{entwurf}</span>
-      </p>
-    )
-  }
-
-  /** Eine Gruppenzeile, eingefasst in Wischgeste und Langdruckmenü. */
   const zeichneGruppe = (g: ChatGroupItem) => {
-    const isSelected = activeGroup?.id === g.id
     const gmid = groupMailboxMap[g.id]
-    const imArchiv = gmid ? archivedChats.includes(gmid) : false
     return (
-      <ChatZeilenGeste
+      <GroupListItem
         key={`g-${g.id}`}
-        angeheftet={gmid ? pinnedChats.includes(gmid) : false}
-        archiviert={imArchiv}
-        onAnheften={() => gmid && handleAnheftenChat(gmid)}
-        onArchivieren={() => gmid && handleArchivieren(gmid)}
-        onMenue={() => gmid && setZeilenMenue({ mid: gmid, name: gruppenTitel(g) })}
-      >
-        <button
-          type="button"
-          onClick={() => {
-            setActiveGroup(g)
-            setActiveContact(null)
-            if (gmid) {
-              ungelesenBeimOeffnen.current = unreadCounts[gmid] || 0
-              trennerGesetztFuer.current = null
-              markAsRead(gmid)
-            }
-          }}
-          className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all ${
-            isSelected
-              ? 'bg-primary/15 border border-primary/30 shadow-sm'
-              : 'hover:bg-surface-container-high/60 border border-transparent'
-          } ${imArchiv ? 'opacity-60' : ''}`}
-        >
-          <div className="flex items-center gap-3 min-w-0 flex-1">
-            <div className="w-9 h-9 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs shrink-0">
-              {g.avatar_url ? (
-                <img src={g.avatar_url} alt="" className="w-full h-full rounded-full object-cover" />
-              ) : (
-                <UsersRound className="w-4 h-4" />
-              )}
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-1">
-                <span className="text-xs font-semibold text-primary truncate">{gruppenTitel(g)}</span>
-                <span className="text-label-sm text-on-surface-variant/60 shrink-0">{g.member_count} M.</span>
-              </div>
-              {zeilenVorschau(
-                gmid,
-                <p className="text-label-sm text-on-surface-variant/80 truncate">
-                  {g.description || t('messenger.encryptedGroup')}
-                </p>,
-              )}
-            </div>
-          </div>
-          {zeilenAbzeichen(gmid)}
-        </button>
-      </ChatZeilenGeste>
+        gruppe={g}
+        titel={gruppenTitel(g)}
+        mid={gmid}
+        ausgewaehlt={activeGroup?.id === g.id}
+        entwurf={gmid ? entwuerfe[gmid] || '' : ''}
+        onOeffnen={() => {
+          setActiveGroup(g)
+          setActiveContact(null)
+          oeffneAusListe(gmid)
+        }}
+        onAnheften={handleAnheftenChat}
+        onArchivieren={handleArchivieren}
+        onMenue={(mid, name) => setZeilenMenue({ mid, name })}
+      />
     )
   }
 
-  /** Eine Kontaktzeile. */
-  const zeichneKontakt = (c: (typeof contactsList)[number]) => {
-    const isSelected = activeContact?.userId === c.userId
+  const zeichneKontakt = (c: ChatContact) => {
     const cmid = contactMailboxMap[c.userId]
-    const isUserBlocked = isBlocked(c.userId)
-    const imArchiv = cmid ? archivedChats.includes(cmid) : false
     return (
-      <ChatZeilenGeste
+      <ContactListItem
         key={c.listKey}
-        angeheftet={cmid ? pinnedChats.includes(cmid) : false}
-        archiviert={imArchiv}
-        onAnheften={() => cmid && handleAnheftenChat(cmid)}
-        onArchivieren={() => cmid && handleArchivieren(cmid)}
-        onMenue={() => cmid && setZeilenMenue({ mid: cmid, name: c.username })}
-      >
-        <button
-          type="button"
-          onClick={() => {
-            setActiveContact(c)
-            setActiveGroup(null)
-            if (cmid) {
-              ungelesenBeimOeffnen.current = unreadCounts[cmid] || 0
-              trennerGesetztFuer.current = null
-              markAsRead(cmid)
-            }
-          }}
-          className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all ${
-            isSelected
-              ? 'bg-primary/15 border border-primary/30 shadow-sm'
-              : 'hover:bg-surface-container-high/60 border border-transparent'
-          } ${imArchiv ? 'opacity-60' : ''}`}
-        >
-          <div className="flex items-center gap-3 min-w-0 flex-1">
-            <div className="relative shrink-0">
-              <Avatar src={c.avatarUrl} name={c.username} size="sm" />
-              <StatusDot status={c.status} size="sm" className="absolute bottom-0 right-0" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-semibold text-primary truncate">{c.username}</span>
-                {isUserBlocked && (
-                  <span className="text-label-sm px-1 rounded bg-status-destructive/15 text-status-destructive font-medium">
-                    Blockiert
-                  </span>
-                )}
-                {c.isPublicUser && !c.isFriend && !c.teamName && !isUserBlocked && (
-                  <span className="text-label-sm px-1.5 py-0.2 rounded-md bg-primary/10 text-primary font-medium flex items-center gap-0.5">
-                    <Globe className="w-2.5 h-2.5" />
-                    <span>{t('messenger.public')}</span>
-                  </span>
-                )}
-                <DeviceBadge deviceType={c.deviceType} />
-              </div>
-              {zeilenVorschau(
-                cmid,
-                <>
-                  {c.teamName && (
-                    <p className="text-label-sm text-tertiary truncate flex items-center gap-1">
-                      <UsersRound className="w-2.5 h-2.5" />
-                      <span>{c.teamName}</span>
-                    </p>
-                  )}
-                  {c.isPublicUser && !c.isFriend && !c.teamName && (
-                    <p className="text-label-sm text-on-surface-variant/70 truncate">{t('messenger.e2eeReady')}</p>
-                  )}
-                  {c.activityLabel && !c.teamName && (
-                    <p className="text-label-sm text-on-surface-variant/80 truncate">{c.activityLabel}</p>
-                  )}
-                </>,
-              )}
-            </div>
-          </div>
-          {zeilenAbzeichen(cmid)}
-        </button>
-      </ChatZeilenGeste>
+        kontakt={c}
+        mid={cmid}
+        ausgewaehlt={activeContact?.userId === c.userId}
+        entwurf={cmid ? entwuerfe[cmid] || '' : ''}
+        onOeffnen={() => {
+          setActiveContact(c)
+          setActiveGroup(null)
+          oeffneAusListe(cmid)
+        }}
+        onAnheften={handleAnheftenChat}
+        onArchivieren={handleArchivieren}
+        onMenue={(mid, name) => setZeilenMenue({ mid, name })}
+      />
     )
   }
+
+  const oeffneStoryErstellung = () => {
+    setCreateStoryInitialMode('text')
+    setPendingStoryPhotoUrl(null)
+    setIsCreateStoryOpen(true)
+  }
+  const storyIch = { avatarUrl: user?.avatar_url, username: user?.username }
 
   // Gesperrt wird der Verlauf nicht überdeckt, sondern gar nicht erst gebaut.
   // Er stünde auch nicht zur Verfügung: die lokalen Ablagen geben ohne
@@ -5601,51 +5483,7 @@ export function Messenger() {
             isChatOpen ? 'hidden md:flex' : 'flex'
           }`}
         >
-          {/* Mode Navigation (Chats | Aktuelles | Gruppen) - Available on desktop */}
-          <div className="hidden md:flex px-2.5 pt-2 pb-1 border-b border-outline-variant/15 items-center gap-1 bg-surface-container/60">
-            <button
-              type="button"
-              onClick={() => setMobileNavTab('chats')}
-              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition-colors ${
-                mobileNavTab === 'chats'
-                  ? 'bg-primary text-on-primary shadow-sm font-semibold'
-                  : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60'
-              }`}
-              aria-label={t('messenger.nav.chats')}
-            >
-              <MessageSquare className="w-3.5 h-3.5" />
-              <span>{t('messenger.nav.chats')}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setMobileNavTab('updates')}
-              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition-colors relative ${
-                mobileNavTab === 'updates'
-                  ? 'bg-primary text-on-primary shadow-sm font-semibold'
-                  : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60'
-              }`}
-              aria-label={t('messenger.nav.updates')}
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>{t('messenger.nav.updates')}</span>
-              {stories.length > 0 && (
-                <span className={`w-2 h-2 rounded-full ${mobileNavTab === 'updates' ? 'bg-white' : 'bg-status-success animate-pulse'}`} />
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={() => setMobileNavTab('community')}
-              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition-colors ${
-                mobileNavTab === 'community'
-                  ? 'bg-primary text-on-primary shadow-sm font-semibold'
-                  : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60'
-              }`}
-              aria-label={t('messenger.nav.community')}
-            >
-              <UsersRound className="w-3.5 h-3.5" />
-              <span>{t('messenger.nav.community')}</span>
-            </button>
-          </div>
+          <MessengerModeNav modus={mobileNavTab} onModus={setMobileNavTab} hatStories={stories.length > 0} />
 
           {/* Top Search & Category Tabs */}
           <div className="p-2.5 border-b border-outline-variant/15 space-y-2 bg-surface-container/40">
@@ -5659,203 +5497,24 @@ export function Messenger() {
               />
             </div>
 
-            {/* WhatsApp Filter Tabs (Chats Mode) - Clean Segmented Control with clear intuitive icons & counts */}
             {mobileNavTab === 'chats' && (
-              <div className="grid grid-cols-5 gap-0.5 sm:gap-1 p-1 rounded-xl bg-surface-container-high/50 border border-outline-variant/15 w-full">
-                <button
-                  type="button"
-                  onClick={() => setFilterTab('all')}
-                  className={`h-7 rounded-lg flex items-center justify-center gap-1 transition-all text-xs font-semibold ${
-                    filterTab === 'all'
-                      ? 'bg-primary text-on-primary shadow-sm'
-                      : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
-                  }`}
-                  title={t('messenger.filterAll')}
-                  aria-label={t('messenger.filterAll')}
-                >
-                  <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
-                  <span className="text-label-sm leading-none hidden xs:inline">Alle</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setFilterTab('groups')}
-                  className={`h-7 rounded-lg flex items-center justify-center gap-0.5 sm:gap-1 transition-all text-xs font-semibold ${
-                    filterTab === 'groups'
-                      ? 'bg-primary text-on-primary shadow-sm'
-                      : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
-                  }`}
-                  title={t('messenger.filterGroups', { count: groups.length })}
-                  aria-label={t('messenger.filterGroups', { count: groups.length })}
-                >
-                  <UsersRound className="w-3.5 h-3.5 shrink-0" />
-                  {groups.length > 0 && (
-                    <span
-                      className={`text-label-sm px-1 py-0.2 rounded-full font-bold leading-none ${
-                        filterTab === 'groups' ? 'bg-white/20 text-white' : 'bg-surface-container-highest text-on-surface-variant'
-                      }`}
-                    >
-                      {groups.length}
-                    </span>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setFilterTab('friends')}
-                  className={`h-7 rounded-lg flex items-center justify-center gap-0.5 sm:gap-1 transition-all text-xs font-semibold ${
-                    filterTab === 'friends'
-                      ? 'bg-primary text-on-primary shadow-sm'
-                      : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
-                  }`}
-                  title={t('messenger.filterFriends', { count: contactsList.filter((c) => c.isFriend).length })}
-                  aria-label={t('messenger.filterFriends', { count: contactsList.filter((c) => c.isFriend).length })}
-                >
-                  <UserCheck className="w-3.5 h-3.5 shrink-0" />
-                  {contactsList.some((c) => c.isFriend) && (
-                    <span
-                      className={`text-label-sm px-1 py-0.2 rounded-full font-bold leading-none ${
-                        filterTab === 'friends' ? 'bg-white/20 text-white' : 'bg-surface-container-highest text-on-surface-variant'
-                      }`}
-                    >
-                      {contactsList.filter((c) => c.isFriend).length}
-                    </span>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setFilterTab('teams')}
-                  className={`h-7 rounded-lg flex items-center justify-center gap-0.5 sm:gap-1 transition-all text-xs font-semibold ${
-                    filterTab === 'teams'
-                      ? 'bg-primary text-on-primary shadow-sm'
-                      : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
-                  }`}
-                  title={t('messenger.filterTeams', { count: contactsList.filter((c) => c.teamName).length })}
-                  aria-label={t('messenger.filterTeams', { count: contactsList.filter((c) => c.teamName).length })}
-                >
-                  <Briefcase className="w-3.5 h-3.5 shrink-0" />
-                  {contactsList.some((c) => c.teamName) && (
-                    <span
-                      className={`text-label-sm px-1 py-0.2 rounded-full font-bold leading-none ${
-                        filterTab === 'teams' ? 'bg-white/20 text-white' : 'bg-surface-container-highest text-on-surface-variant'
-                      }`}
-                    >
-                      {contactsList.filter((c) => c.teamName).length}
-                    </span>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setFilterTab('public')}
-                  className={`h-7 rounded-lg flex items-center justify-center gap-0.5 sm:gap-1 transition-all text-xs font-semibold ${
-                    filterTab === 'public'
-                      ? 'bg-primary text-on-primary shadow-sm'
-                      : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/70'
-                  }`}
-                  title={t('messenger.filterPublic', { count: contactsList.filter((c) => c.isPublicUser).length })}
-                  aria-label={t('messenger.filterPublic', { count: contactsList.filter((c) => c.isPublicUser).length })}
-                >
-                  <Globe className="w-3.5 h-3.5 shrink-0" />
-                  <span className="text-label-sm leading-none hidden xs:inline">Entdecken</span>
-                  {contactsList.some((c) => c.isPublicUser) && (
-                    <span
-                      className={`text-label-sm px-1 py-0.2 rounded-full font-bold leading-none ${
-                        filterTab === 'public' ? 'bg-white/20 text-white' : 'bg-surface-container-highest text-on-surface-variant'
-                      }`}
-                    >
-                      {contactsList.filter((c) => c.isPublicUser).length}
-                    </span>
-                  )}
-                </button>
-              </div>
+              <ContactFilterTabs
+                filter={filterTab}
+                onFilter={setFilterTab}
+                gruppenAnzahl={groups.length}
+                kontakte={contactsList}
+              />
             )}
           </div>
 
-          {/* Instagram/WhatsApp Stories Tray (Visible in Chats Mode) */}
           {mobileNavTab === 'chats' && !searchQuery.trim() && (
-            <div className="px-2.5 py-2 border-b border-outline-variant/15 bg-surface-container/20">
-              <div className="flex items-center gap-3 overflow-x-auto no-scrollbar py-1">
-                {/* Dein Status Circle */}
-                <div className="flex flex-col items-center gap-1 shrink-0 w-14">
-                  <div
-                    className="relative cursor-pointer group"
-                    onClick={() => {
-                      if (myStories.length > 0) {
-                        openStoryViewerForUser(myStories, 0)
-                      } else {
-                        setCreateStoryInitialMode('text')
-                        setIsCreateStoryOpen(true)
-                      }
-                    }}
-                  >
-                    <div
-                      className={`w-12 h-12 rounded-full p-0.5 shrink-0 transition-transform group-hover:scale-105 flex items-center justify-center ${
-                        myStories.length > 0
-                          ? 'bg-gradient-to-tr from-cyan-400 via-sky-500 to-indigo-500 ring-2 ring-primary/30 ring-offset-2 ring-offset-surface'
-                          : 'border-2 border-dashed border-outline-variant/70'
-                      }`}
-                    >
-                      <Avatar
-                        src={user?.avatar_url}
-                        name={user?.username || 'Ich'}
-                        size="md"
-                      />
-                    </div>
-                    {myStories.length === 0 ? (
-                      <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-primary text-on-primary flex items-center justify-center text-label-sm shadow-sm border-2 border-surface">
-                        <Plus className="w-2.5 h-2.5" />
-                      </div>
-                    ) : (
-                      <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-status-success text-white text-label-sm font-bold flex items-center justify-center border-2 border-surface">
-                        {myStories.length}
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-label-sm text-on-surface-variant truncate w-full text-center">
-                    {myStories.length > 0 ? t('messenger.yourStatus') : 'Neu'}
-                  </span>
-                </div>
-
-                {/* Friends' Stories Circles */}
-                {friendsStoriesGrouped.map((group) => (
-                  <div
-                    key={`tray-user-${group.userId}`}
-                    className="flex flex-col items-center gap-1 shrink-0 w-14 cursor-pointer group"
-                    onClick={() => openStoryViewerForUser(group.stories, 0)}
-                  >
-                    <div className="relative shrink-0">
-                      <div
-                        className={`w-12 h-12 rounded-full p-0.5 shrink-0 transition-all duration-300 group-hover:scale-105 flex items-center justify-center ${
-                          group.hasUnseen
-                            ? 'bg-gradient-to-tr from-cyan-400 via-indigo-500 to-fuchsia-500 ring-2 ring-primary ring-offset-2 ring-offset-surface shadow-[0_0_14px_rgba(99,102,241,0.65)] animate-pulse'
-                            : 'bg-surface-container-highest ring-1 ring-outline-variant/50 opacity-85'
-                        }`}
-                      >
-                        <Avatar
-                          src={group.avatarUrl}
-                          name={group.username}
-                          size="md"
-                        />
-                      </div>
-                      {group.stories.length > 1 && (
-                        <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-primary text-on-primary text-label-sm font-bold flex items-center justify-center border-2 border-surface">
-                          {group.stories.length}
-                        </span>
-                      )}
-                    </div>
-                    <span
-                      className={`text-label-sm truncate w-full text-center ${
-                        group.hasUnseen ? 'text-primary font-bold' : 'text-on-surface-variant font-normal'
-                      }`}
-                    >
-                      {group.username}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <StoriesCarouselBar
+              ich={storyIch}
+              eigeneStories={myStories}
+              freunde={friendsStoriesGrouped}
+              onOeffnen={(s) => openStoryViewerForUser(s, 0)}
+              onErstellen={oeffneStoryErstellung}
+            />
           )}
 
           {/* Der Rückweg nach einer Wischgeste. Unten, weil dort der Daumen ist. */}
@@ -5988,332 +5647,37 @@ export function Messenger() {
               </>
             )}
 
-            {/* View 2: Aktuelles (Stories / 24h Status Updates & Contacts Presence) */}
             {mobileNavTab === 'updates' && (
-              <div className="space-y-4 p-1">
-                {/* Clean Top Bar: Title & Direct Add Action */}
-                <div className="flex items-center justify-between px-1">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-primary" />
-                    <span className="text-sm font-headline font-bold text-on-surface">Status</span>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="primary"
-                    size="sm"
-                    onClick={() => {
-                      setCreateStoryInitialMode('text')
-                      setPendingStoryPhotoUrl(null)
-                      setIsCreateStoryOpen(true)
-                    }}
-                    className="h-8 text-xs gap-1.5 px-3 rounded-xl font-medium"
-                    title={t('messenger.addStatus')}
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>{t('common.add')}</span>
-                  </Button>
-                </div>
-
-                {/* My Status Card with crisp contrast and clear visual identity */}
-                <div className="p-3.5 rounded-2xl bg-surface-container/70 border border-outline-variant/35 shadow-sm transition-colors hover:bg-surface-container/90">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-headline font-bold text-on-surface">{t('messenger.myStatus')}</span>
-                    <span className="text-label-sm text-on-surface-variant font-medium">{t('social.story.badge24h')}</span>
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    <div
-                      className="relative cursor-pointer shrink-0"
-                      onClick={() => {
-                        if (myStories.length > 0) {
-                          openStoryViewerForUser(myStories, 0)
-                        } else {
-                          setCreateStoryInitialMode('text')
-                          setPendingStoryPhotoUrl(null)
-                          setIsCreateStoryOpen(true)
-                        }
-                      }}
-                    >
-                      <div className={`w-12 h-12 rounded-full p-0.5 shrink-0 flex items-center justify-center ${
-                        myStories.length > 0
-                          ? 'bg-gradient-to-tr from-cyan-400 via-sky-500 to-indigo-500 ring-2 ring-primary/40 ring-offset-2 ring-offset-surface'
-                          : 'border-2 border-dashed border-outline-variant/80'
-                      }`}>
-                        <Avatar
-                          src={user?.avatar_url}
-                          name={user?.username || 'Ich'}
-                          size="md"
-                        />
-                      </div>
-                      <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-primary text-on-primary flex items-center justify-center text-xs shadow-md border-2 border-surface">
-                        <Plus className="w-3 h-3" />
-                      </div>
-                    </div>
-                    <div
-                      className="min-w-0 flex-1 cursor-pointer"
-                      onClick={() => {
-                        if (myStories.length > 0) {
-                          openStoryViewerForUser(myStories, 0)
-                        } else {
-                          setCreateStoryInitialMode('text')
-                          setPendingStoryPhotoUrl(null)
-                          setIsCreateStoryOpen(true)
-                        }
-                      }}
-                    >
-                      <div className="text-xs font-semibold text-on-surface truncate">
-                        {myStories.length > 0 ? t('messenger.viewStatus') : t('social.story.share')}
-                      </div>
-                      <p className="text-label-sm text-on-surface-variant truncate">
-                        {myStories.length > 0
-                          ? t('messenger.activeStories', { count: myStories.length })
-                          : t('messenger.statusHint')}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Friends' Stories Section */}
-                <div className="space-y-2">
-                  <div className="px-1 text-label-sm font-semibold text-on-surface-variant/80 uppercase tracking-wider flex items-center justify-between">
-                    <span>{t('messenger.recentUpdates')}</span>
-                    <span className="text-label-sm px-1.5 py-0.5 rounded-full bg-surface-container font-mono text-on-surface-variant">
-                      {friendsStoriesGrouped.length}
-                    </span>
-                  </div>
-
-                  {friendsStoriesGrouped.length === 0 ? (
-                    <div className="p-4 rounded-xl bg-surface-container/40 border border-outline-variant/25 text-center text-xs text-on-surface-variant">
-                      {t('messenger.noStatusUpdates')}
-                    </div>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {friendsStoriesGrouped.map((grp) => (
-                        <div
-                          key={`story-grp-${grp.userId}`}
-                          onClick={() => openStoryViewerForUser(grp.stories, 0)}
-                          className="flex items-center gap-3 p-2.5 rounded-xl border border-outline-variant/30 bg-surface-container/60 hover:bg-surface-container-high/80 cursor-pointer transition-colors"
-                        >
-                          <div className="relative shrink-0">
-                            <div
-                              className={`w-12 h-12 rounded-full p-0.5 shrink-0 transition-all duration-300 flex items-center justify-center ${
-                                grp.hasUnseen
-                                  ? 'bg-gradient-to-tr from-cyan-400 via-indigo-500 to-fuchsia-500 ring-2 ring-primary ring-offset-2 ring-offset-surface shadow-[0_0_14px_rgba(99,102,241,0.65)] animate-pulse'
-                                  : 'bg-surface-container-highest ring-1 ring-outline-variant/50 opacity-85'
-                              }`}
-                            >
-                              <Avatar
-                                src={grp.avatarUrl}
-                                name={grp.username}
-                                size="md"
-                              />
-                            </div>
-                            {grp.stories.length > 1 && (
-                              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-primary text-on-primary text-label-sm font-bold flex items-center justify-center border border-surface">
-                                {grp.stories.length}
-                              </span>
-                            )}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="text-xs font-semibold text-on-surface truncate">
-                              {grp.username}
-                            </div>
-                            <div className="text-label-sm text-on-surface-variant flex items-center gap-1">
-                              <Clock className="w-3 h-3" />
-                              <span>
-                                {grp.latestStory
-                                  ? new Date(grp.latestStory.created_at).toLocaleTimeString([], {
-                                      hour: '2-digit',
-                                      minute: '2-digit',
-                                    })
-                                  : ''}
-                              </span>
-                              {grp.stories.length > 1 && (
-                                <span className="text-on-surface-variant/70">• {grp.stories.length} Updates</span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Contacts Activity Section */}
-                <div className="space-y-2 pt-2 border-t border-outline-variant/20">
-                  <div className="px-1 text-label-sm font-semibold text-on-surface-variant/70 uppercase tracking-wider">
-                    {t('messenger.contactActivity')}
-                  </div>
-                  <div className="space-y-1">
-                    {contactsList.map((c) => (
-                      <div
-                        key={c.listKey}
-                        className="flex items-center justify-between p-2.5 rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60"
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="relative shrink-0">
-                            <Avatar src={c.avatarUrl} name={c.username} size="sm" />
-                            <StatusDot status={c.status} size="sm" className="absolute bottom-0 right-0" />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="text-xs font-semibold text-primary truncate flex items-center gap-1.5">
-                              <span>{c.username}</span>
-                              <DeviceBadge deviceType={c.deviceType} />
-                            </div>
-                            <div className="text-label-sm text-on-surface-variant/80 truncate">
-                              {c.activityLabel || (c.status === 'online' ? 'Online' : c.status === 'away' ? 'Abwesend' : 'Offline')}
-                            </div>
-                          </div>
-                        </div>
-
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setActiveContact(c)
-                            setActiveGroup(null)
-                          }}
-                          className="text-xs h-7 px-2 text-primary"
-                        >
-                          Chat
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
+              <StatusUpdatesView
+                ich={storyIch}
+                eigeneStories={myStories}
+                freunde={friendsStoriesGrouped}
+                kontakte={contactsList}
+                onOeffnen={(s) => openStoryViewerForUser(s, 0)}
+                onErstellen={oeffneStoryErstellung}
+                onChat={(c) => {
+                  setActiveContact(c)
+                  setActiveGroup(null)
+                }}
+              />
             )}
 
-            {/* View 3: Community (Groups & public invite links) */}
             {mobileNavTab === 'community' && (
-              <div className="space-y-3 p-1">
-                <div className="flex items-center justify-between px-1 pt-1">
-                  <div>
-                    <div className="text-xs font-headline font-bold text-primary flex items-center gap-1.5">
-                      <UsersRound className="w-3.5 h-3.5" />
-                      <span>{t('messenger.communitiesTitle')}</span>
-                      <span className="text-label-sm text-on-surface-variant/70">({groups.length})</span>
-                    </div>
-                    <p className="text-label-sm text-on-surface-variant/80">
-                      {t('messenger.communitySubtitle')}
-                    </p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="primary"
-                    size="sm"
-                    onClick={() => setIsCreateGroupOpen(true)}
-                    className="h-7 text-xs gap-1 px-2.5 rounded-full"
-                    aria-label={t('messenger.newGroup')}
-                    title={t('messenger.newGroup')}
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>{t('messenger.createGroup')}</span>
-                  </Button>
-                </div>
-
-                <div className="space-y-1.5 pt-1">
-                  {groups.length === 0 ? (
-                    <p className="py-6 text-center text-xs text-on-surface-variant/70">
-                      {t('messenger.noGroupsJoined')}
-                    </p>
-                  ) : (
-                    groups.map((g) => (
-                      <div
-                        key={`comm-g-${g.id}`}
-                        className="flex items-center justify-between p-2.5 rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60"
-                      >
-                        <div
-                          className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer"
-                          onClick={() => {
-                            setActiveGroup(g)
-                            setActiveContact(null)
-                          }}
-                        >
-                          <div className="w-9 h-9 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs shrink-0">
-                            {g.avatar_url ? (
-                              <img src={g.avatar_url} alt="" className="w-full h-full rounded-full object-cover" />
-                            ) : (
-                              <UsersRound className="w-4 h-4" />
-                            )}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="text-xs font-semibold text-primary truncate">{g.name}</div>
-                            <div className="text-label-sm text-on-surface-variant/70">{g.member_count} Mitglieder</div>
-                          </div>
-                        </div>
-
-                        {g.invite_code && (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleCopyInviteLink(g)}
-                            className="h-7 px-2 text-xs gap-1 text-primary"
-                            title={t('messenger.copyInvite')}
-                          >
-                            <Share2 className="w-3.5 h-3.5" />
-                            <span>Link</span>
-                          </Button>
-                        )}
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
+              <CommunityView
+                gruppen={groups}
+                onGruppe={(g) => {
+                  setActiveGroup(g)
+                  setActiveContact(null)
+                }}
+                onNeueGruppe={() => setIsCreateGroupOpen(true)}
+                onEinladungKopieren={handleCopyInviteLink}
+              />
             )}
           </div>
 
 
 
-          {/* Mobile WhatsApp-Style Bottom Navigation Bar (Chats, Aktuelles, Community) */}
-          {/* Höhe plus sichere Fläche, siehe die Eingabeleiste weiter unten. */}
-          {!isChatOpen && (
-            <nav className="md:hidden shrink-0 h-14 box-content pb-[env(safe-area-inset-bottom)] border-t border-outline-variant/20 bg-surface-container/95 backdrop-blur flex items-center justify-around px-2 z-10">
-              <button
-                type="button"
-                onClick={() => setMobileNavTab('chats')}
-                className={`flex flex-col items-center justify-center flex-1 py-1 transition-colors ${
-                  mobileNavTab === 'chats' ? 'text-primary font-semibold' : 'text-on-surface-variant/70 hover:text-on-surface'
-                }`}
-                aria-label={t('messenger.nav.chats')}
-              >
-                <div className={`p-1 rounded-full ${mobileNavTab === 'chats' ? 'bg-primary/15' : ''}`}>
-                  <MessageSquare className="w-4 h-4" />
-                </div>
-                <span className="text-label-sm mt-0.5">{t('messenger.nav.chats')}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setMobileNavTab('updates')}
-                className={`flex flex-col items-center justify-center flex-1 py-1 transition-colors ${
-                  mobileNavTab === 'updates' ? 'text-primary font-semibold' : 'text-on-surface-variant/70 hover:text-on-surface'
-                }`}
-                aria-label={t('messenger.nav.updates')}
-              >
-                <div className={`p-1 rounded-full ${mobileNavTab === 'updates' ? 'bg-primary/15' : ''}`}>
-                  <Sparkles className="w-4 h-4" />
-                </div>
-                <span className="text-label-sm mt-0.5">{t('messenger.nav.updates')}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setMobileNavTab('community')}
-                className={`flex flex-col items-center justify-center flex-1 py-1 transition-colors ${
-                  mobileNavTab === 'community' ? 'text-primary font-semibold' : 'text-on-surface-variant/70 hover:text-on-surface'
-                }`}
-                aria-label={t('messenger.nav.community')}
-              >
-                <div className={`p-1 rounded-full ${mobileNavTab === 'community' ? 'bg-primary/15' : ''}`}>
-                  <UsersRound className="w-4 h-4" />
-                </div>
-                <span className="text-label-sm mt-0.5">{t('messenger.nav.community')}</span>
-              </button>
-            </nav>
-          )}
+          {!isChatOpen && <MessengerBottomNav modus={mobileNavTab} onModus={setMobileNavTab} />}
         </div>
 
         {/* Right Column: Chat Thread & Input Area */}
