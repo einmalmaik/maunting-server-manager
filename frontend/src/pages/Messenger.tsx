@@ -9,44 +9,32 @@ import {
   VoiceRecordingBar,
   Blattmenue,
   Blatteintrag,
-  Blattknopf,
   type ChatInputBarRef,
 } from '@/Singra/UI'
 import {
   MessageSquare,
   Send,
-  Lock,
   Camera,
   StickyNote,
   Calendar as CalendarIcon,
   Search,
-  UsersRound,
-  ChevronLeft,
   X,
   RefreshCw,
   Mic,
   Trash2,
-  Share2,
   Plus,
-  LogOut,
   Smile,
   Paperclip,
   FileText,
   Upload,
-  Shield,
-  ShieldCheck,
   UserCheck,
-  UserPlus,
   Pencil,
   Image as ImageIcon,
-  ImagePlus,
   Bell,
   BellOff,
   Ban,
   Phone,
   Video,
-  Forward,
-  Copy,
   Star,
   Pin,
   PinOff,
@@ -291,48 +279,16 @@ import { StoriesCarouselBar } from '@/components/social/sidebar/StoriesCarouselB
 import { StatusUpdatesView } from '@/components/social/sidebar/StatusUpdatesView'
 import { CommunityView } from '@/components/social/sidebar/CommunityView'
 import { GroupListItem, ContactListItem } from '@/components/social/sidebar/ConversationListItem'
+import { ChatSelectionBar } from '@/components/social/chat/ChatSelectionBar'
+import { ChatHeader } from '@/components/social/chat/ChatHeader'
+import { ChatActionsMenu } from '@/components/social/chat/ChatActionsMenu'
+import { ChatPinnedBar } from '@/components/social/chat/ChatPinnedBar'
+import { ChatTimeline } from '@/components/social/chat/ChatTimeline'
 import { ChatHintergrund, ChatHintergrundDialog } from '@/features/chatHintergrund'
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
 import { useMessengerNotificationStore, PINS_MAX } from '@/stores/messengerNotificationStore'
 import { sanitizeSvg, getSafeAttachmentUrl } from '@/lib/sanitizeSvg'
-
-function formatChatDateBadge(
-  isoDateString: string,
-  t: (schluessel: string) => string,
-  sprache: string,
-): string {
-  try {
-    const d = new Date(isoDateString)
-    if (isNaN(d.getTime())) return ''
-    const now = new Date()
-
-    const isToday =
-      d.getDate() === now.getDate() &&
-      d.getMonth() === now.getMonth() &&
-      d.getFullYear() === now.getFullYear()
-    if (isToday) return t('messenger.today')
-
-    const yesterday = new Date(now)
-    yesterday.setDate(now.getDate() - 1)
-    const isYesterday =
-      d.getDate() === yesterday.getDate() &&
-      d.getMonth() === yesterday.getMonth() &&
-      d.getFullYear() === yesterday.getFullYear()
-    if (isYesterday) return t('messenger.yesterday')
-
-    const isSameYear = d.getFullYear() === now.getFullYear()
-    // Die Sprache kommt von i18next, nicht fest aus dem Code: sonst stünde im
-    // englischen Messenger ein deutsches Datum.
-    return d.toLocaleDateString(sprache, {
-      day: 'numeric',
-      month: 'long',
-      ...(isSameYear ? {} : { year: 'numeric' }),
-    })
-  } catch {
-    return ''
-  }
-}
 
 export interface ChatContact {
   /**
@@ -473,7 +429,7 @@ function loadInitialContactsCache(): {
 }
 
 export function Messenger() {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
 
   /**
    * Wie eine Gruppe in der Oberfläche heisst.
@@ -5400,6 +5356,33 @@ export function Messenger() {
   }
   const storyIch = { avatarUrl: user?.avatar_url, username: user?.username }
 
+  /** Ein Anruf an den offenen Kontakt; nur unter Freunden angeboten. */
+  const starteAnruf = async (art: 'audio' | 'video') => {
+    if (!activeContact) return
+    try {
+      await useCallStore.getState().initiateCall(
+        {
+          userId: activeContact.userId,
+          username: activeContact.username,
+          avatarUrl: activeContact.avatarUrl,
+        },
+        art,
+      )
+    } catch (err: any) {
+      toast.error(err?.message || t('messenger.callStartFailedSingle'))
+    }
+  }
+
+  const sendeFreundschaftsanfrage = async () => {
+    if (!activeContact) return
+    try {
+      await sendFriendRequest(activeContact.username)
+      toast.success(t('messenger.friendRequestSent', { name: activeContact.username }))
+    } catch (err: any) {
+      toast.error(err?.message || t('messenger.friendRequestFailed'))
+    }
+  }
+
   // Gesperrt wird der Verlauf nicht überdeckt, sondern gar nicht erst gebaut.
   // Er stünde auch nicht zur Verfügung: die lokalen Ablagen geben ohne
   // Schlüssel nichts heraus (siehe `services/lokaleVersiegelung`).
@@ -5724,546 +5707,154 @@ export function Messenger() {
 
           {isChatOpen ? (
             <>
-              {/* Die Auswahlleiste ersetzt die schwebenden Bedienelemente.
-                  Zähler und Abbrechen oben, die Aktionen unten in
-                  Daumenreichweite — am Telefon ist der obere Rand außer
-                  Reichweite, sobald man einhändig hält. */}
               {auswahlModus && (
-                <>
-                  <div className="absolute top-2.5 left-3 right-3 z-40 flex items-center justify-between gap-2 px-3 py-2 rounded-full bg-surface-container-high/95 backdrop-blur-md border border-outline-variant/30 shadow-sm">
-                    <span className="text-xs font-semibold text-on-surface tabular-nums">
-                      {gewaehlteUuids.length} ausgewählt
-                    </span>
-                    <button
-                      type="button"
-                      onClick={beendeAuswahl}
-                      className="w-9 h-9 -mr-1.5 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container-highest transition-colors"
-                      aria-label={t('messenger.endSelection')}
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  <div className="absolute bottom-0 left-0 right-0 z-40 px-3 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] border-t border-outline-variant/30 bg-surface-container-low flex items-center justify-around">
-                    <button
-                      type="button"
-                      disabled={gewaehlteUuids.length === 0}
-                      onClick={() => {
-                        const auswahl = gewaehlteNachrichten().filter(istWeiterleitbar)
-                        if (!auswahl.length) {
-                          toast.error(t('messenger.nothingToForwardPlural'))
-                          return
-                        }
-                        setWeiterzuleiten(auswahl)
-                      }}
-                      className="min-w-16 min-h-12 flex flex-col items-center justify-center gap-0.5 rounded-xl text-label-sm text-on-surface-variant hover:bg-surface-container-high disabled:opacity-40 transition-colors"
-                    >
-                      <Forward className="w-5 h-5" />
-                      <span>Weiterleiten</span>
-                    </button>
-                    <button
-                      type="button"
-                      disabled={gewaehlteUuids.length === 0}
-                      onClick={() => void handleAuswahlKopieren()}
-                      className="min-w-16 min-h-12 flex flex-col items-center justify-center gap-0.5 rounded-xl text-label-sm text-on-surface-variant hover:bg-surface-container-high disabled:opacity-40 transition-colors"
-                    >
-                      <Copy className="w-5 h-5" />
-                      <span>Kopieren</span>
-                    </button>
-                    <button
-                      type="button"
-                      disabled={gewaehlteUuids.length === 0}
-                      onClick={() => {
-                        for (const m of gewaehlteNachrichten()) handleMarkieren(m)
-                        beendeAuswahl()
-                      }}
-                      className="min-w-16 min-h-12 flex flex-col items-center justify-center gap-0.5 rounded-xl text-label-sm text-on-surface-variant hover:bg-surface-container-high disabled:opacity-40 transition-colors"
-                    >
-                      <Star className="w-5 h-5" />
-                      <span>Markieren</span>
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!gewaehlteNachrichten().some((m) => m.isSelf && !m.isDeleted)}
-                      onClick={() => void handleAuswahlLoeschen()}
-                      className="min-w-16 min-h-12 flex flex-col items-center justify-center gap-0.5 rounded-xl text-label-sm text-status-destructive hover:bg-status-destructive/10 disabled:opacity-40 transition-colors"
-                    >
-                      <Trash2 className="w-5 h-5" />
-                      <span>{t('common.delete')}</span>
-                    </button>
-                  </div>
-                </>
+                <ChatSelectionBar
+                  anzahl={gewaehlteUuids.length}
+                  loeschenMoeglich={gewaehlteNachrichten().some((m) => m.isSelf && !m.isDeleted)}
+                  onBeenden={beendeAuswahl}
+                  onWeiterleiten={() => {
+                    const auswahl = gewaehlteNachrichten().filter(istWeiterleitbar)
+                    if (!auswahl.length) {
+                      toast.error(t('messenger.nothingToForwardPlural'))
+                      return
+                    }
+                    setWeiterzuleiten(auswahl)
+                  }}
+                  onKopieren={() => void handleAuswahlKopieren()}
+                  onMarkieren={() => {
+                    for (const m of gewaehlteNachrichten()) handleMarkieren(m)
+                    beendeAuswahl()
+                  }}
+                  onLoeschen={() => void handleAuswahlLoeschen()}
+                />
               )}
 
-              {/* Floating Chat Controls (Header-free, maximal chat space) */}
-              <div
-                className={`absolute top-2.5 left-3 right-3 z-30 flex items-center justify-between gap-2 pointer-events-none ${
-                  auswahlModus || sucheOffen ? 'hidden' : ''
-                }`}
-              >
-                <div className="flex items-center gap-2 min-w-0 pointer-events-auto">
-                  {/* Mobile Back Button */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveContact(null)
-                      setActiveGroup(null)
-                    }}
-                    className="md:hidden w-11 h-11 flex items-center justify-center rounded-full bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant shadow-sm transition-colors"
-                    aria-label={t('messenger.backToContacts')}
-                    title={t('messenger.backToContacts')}
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-
-                  {/* Header Title Badge with Mute & Block Indicators */}
-                  <div className="flex items-center gap-2 min-w-0 px-3 py-1.5 rounded-full bg-surface-container-high/85 backdrop-blur-md border border-outline-variant/30 shadow-sm">
-                    {activeGroup?.avatar_url && (
-                      <img
-                        src={apiUrl(activeGroup.avatar_url)}
-                        alt=""
-                        className="-ml-1.5 h-5 w-5 shrink-0 rounded-full object-cover"
-                      />
-                    )}
-                    <span className="text-xs font-bold text-on-surface truncate max-w-[130px] sm:max-w-xs">
-                      {activeGroup ? gruppenTitel(activeGroup) : activeContact?.username}
-                    </span>
-                    {blindMailboxId && isChatMuted(blindMailboxId) && (
-                      <span title="Stummgeschaltet" className="inline-flex items-center text-status-warning">
-                        <BellOff className="w-3.5 h-3.5" />
-                      </span>
-                    )}
-                    {activeContact && isBlocked(activeContact.userId) && (
-                      <span className="px-1.5 py-0.2 rounded-md bg-status-destructive/15 text-status-destructive text-label-sm font-semibold">
-                        Blockiert
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Was oft gebraucht wird, steht hier. Alles Übrige liegt
-                    im Menü: acht Knöpfe passten bei 375 px nicht nebeneinander,
-                    die Gruppe lief 41 px über den rechten Rand hinaus und
-                    drängte den Namen auf null Abstand.
-
-                    Schlichte <button> statt der Button-Komponente: deren
-                    size="icon" setzt h-8 w-8 fest, und weil die Klassen nur
-                    aneinandergehängt werden, gewinnt im CSS die feste Größe
-                    gegen jede mitgegebene. Am Telefon braucht es 44 px. */}
-                <div className="flex items-center gap-1.5 shrink-0 pointer-events-auto">
-                  {activeGroup && (
-                    <button
-                      type="button"
-                      onClick={() => handleStartGroupCall(false)}
-                      disabled={!groupCallPermissions.canStart}
-                      className="flex items-center justify-center rounded-md h-11 w-11 sm:h-8 sm:w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary shadow-sm disabled:opacity-60"
-                      title={
-                        groupCallPermissions.canStart
-                          ? t('messenger.startGroupCall')
-                          : t('messenger.noStartCallRight')
-                      }
-                      aria-label={t('messenger.startGroupCall')}
-                    >
-                      <UsersRound className="w-4 h-4" />
-                    </button>
-                  )}
-
-                  {activeContact && activeContact.isFriend && (
-                    <button
-                        type="button"
-                        onClick={async () => {
-                          try {
-                            await useCallStore.getState().initiateCall(
-                              {
-                                userId: activeContact.userId,
-                                username: activeContact.username,
-                                avatarUrl: activeContact.avatarUrl,
-                              },
-                              'audio',
-                            )
-                          } catch (err: any) {
-                            toast.error(err?.message || t('messenger.callStartFailedSingle'))
+              <ChatHeader
+                verborgen={auswahlModus || sucheOffen}
+                titel={(activeGroup ? gruppenTitel(activeGroup) : activeContact?.username) ?? ''}
+                gruppenBild={activeGroup?.avatar_url ? apiUrl(activeGroup.avatar_url) : null}
+                stumm={Boolean(blindMailboxId && isChatMuted(blindMailboxId))}
+                blockiert={Boolean(activeContact && isBlocked(activeContact.userId))}
+                onZurueck={() => {
+                  setActiveContact(null)
+                  setActiveGroup(null)
+                }}
+                gruppenanruf={
+                  activeGroup
+                    ? { erlaubt: groupCallPermissions.canStart, onStarten: () => handleStartGroupCall(false) }
+                    : undefined
+                }
+                onSprachanruf={activeContact?.isFriend ? () => void starteAnruf('audio') : undefined}
+                onFreundschaftsanfrage={
+                  activeContact && !activeContact.isFriend ? () => void sendeFreundschaftsanfrage() : undefined
+                }
+                onSuche={() => setSucheOffen(true)}
+                menue={(schliessen) => (
+                  <ChatActionsMenu
+                    schliessen={schliessen}
+                    stumm={blindMailboxId ? isChatMuted(blindMailboxId) : null}
+                    kontakt={
+                      activeContact
+                        ? { istFreund: activeContact.isFriend, blockiert: isBlocked(activeContact.userId) }
+                        : null
+                    }
+                    gruppe={
+                      activeGroup
+                        ? {
+                            hatEinladung: Boolean(activeGroup.invite_code),
+                            istEigentuemer: activeGroup.owner_user_id === currentUserId,
+                            istAdmin: activeGroup.role === 'admin',
+                            logoLaedt,
                           }
-                        }}
-                        className="flex items-center justify-center rounded-md h-11 w-11 sm:h-8 sm:w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary shadow-sm"
-                        title={t('messenger.startVoiceCall')}
-                        aria-label={t('messenger.startVoiceCall')}
-                      >
-                      <Phone className="w-4 h-4" />
-                    </button>
-                  )}
+                        : null
+                    }
+                    verfallStufe={stufenLabel(verfallSekunden > 0 ? verfallSekunden : 0, t)}
+                    verfallErlaubt={darfVerfallStellen}
+                    onStumm={() => setIsMuteModalOpen(true)}
+                    onSicherheitsnummer={() => setIsSafetyNumberModalOpen(true)}
+                    onVerfall={() => setVerfallOffen(true)}
+                    onVideoanruf={() => void starteAnruf('video')}
+                    onHintergrund={() => setIsWallpaperModalOpen(true)}
+                    onEinladung={() => activeGroup && handleCopyInviteLink(activeGroup)}
+                    onLogo={() => gruppenLogoInputRef.current?.click()}
+                    onRollen={() => setIsGroupPermissionsOpen(true)}
+                    onLoeschen={() => activeGroup && handleDeleteGroup(activeGroup)}
+                    onVerlassen={() => activeGroup && handleLeaveGroup(activeGroup)}
+                    onBlockieren={() => setIsBlockConfirmOpen(true)}
+                  />
+                )}
+              />
 
-                  {activeContact && !activeContact.isFriend && (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          await sendFriendRequest(activeContact.username)
-                          toast.success(t('messenger.friendRequestSent', { name: activeContact.username }))
-                        } catch (err: any) {
-                          toast.error(err?.message || t('messenger.friendRequestFailed'))
-                        }
-                      }}
-                      className="flex items-center justify-center rounded-md h-11 w-11 sm:h-8 sm:w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-primary shadow-sm"
-                      title={t('messenger.sendFriendRequest')}
-                      aria-label={t('messenger.sendFriendRequest')}
-                    >
-                      <UserPlus className="w-4 h-4" />
-                    </button>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={() => setSucheOffen(true)}
-                    className="flex items-center justify-center rounded-md h-11 w-11 sm:h-8 sm:w-8 bg-surface-container-high/85 hover:bg-surface-container-high backdrop-blur-md border border-outline-variant/30 text-on-surface-variant hover:text-primary shadow-sm"
-                    title={t('messenger.searchInChat')}
-                    aria-label={t('messenger.searchInChat')}
-                  >
-                    <Search className="w-4 h-4" />
-                  </button>
-
-                  <Blattknopf
-                    variante="schwebend"
-                    label={t('messenger.moreChatSettings')}
-                    titel={activeGroup ? gruppenTitel(activeGroup) : activeContact?.username || t('messenger.chat')}
-                    ueberschrift={activeGroup ? gruppenTitel(activeGroup) : activeContact?.username}
-                  >
-                    {(schliessen) => (
-                      <>
-                      {blindMailboxId && (
-                        <Blatteintrag
-                          icon={isChatMuted(blindMailboxId) ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
-                          label={isChatMuted(blindMailboxId) ? t('messenger.unmute') : t('messenger.mute')}
-                          onClick={() => {
-                            schliessen()
-                            setIsMuteModalOpen(true)
-                          }}
-                        />
-                      )}
-                      {activeContact && (
-                        <Blatteintrag
-                          icon={<ShieldCheck className="w-4 h-4" />}
-                          label={t('messenger.verifySafetyNumber')}
-                          onClick={() => {
-                            schliessen()
-                            setIsSafetyNumberModalOpen(true)
-                          }}
-                        />
-                      )}
-                      {/* Die aktuelle Frist steht auch ohne das Recht da —
-                          wissen, wann die eigenen Nachrichten verschwinden,
-                          darf jedes Mitglied. */}
-                      <Blatteintrag
-                        icon={<Timer className="w-4 h-4" />}
-                        label={t('messenger.disappearingMessages')}
-                        hinweis={
-                          darfVerfallStellen
-                            ? stufenLabel(verfallSekunden > 0 ? verfallSekunden : 0, t)
-                            : `${stufenLabel(verfallSekunden > 0 ? verfallSekunden : 0, t)} · ${t('messenger.retentionNoRight')}`
-                        }
-                        disabled={!darfVerfallStellen}
-                        onClick={() => {
-                          schliessen()
-                          setVerfallOffen(true)
-                        }}
-                      />
-                      {activeContact && activeContact.isFriend && (
-                        <Blatteintrag
-                          icon={<Video className="w-4 h-4" />}
-                          label={t('messenger.videoCall')}
-                          onClick={async () => {
-                            schliessen()
-                            try {
-                              await useCallStore.getState().initiateCall(
-                                {
-                                  userId: activeContact.userId,
-                                  username: activeContact.username,
-                                  avatarUrl: activeContact.avatarUrl,
-                                },
-                                'video',
-                              )
-                            } catch (err: any) {
-                              toast.error(err?.message || t('messenger.callStartFailedSingle'))
-                            }
-                          }}
-                        />
-                      )}
-                      <Blatteintrag
-                        icon={<ImageIcon className="w-4 h-4" />}
-                        label={t('social.wallpaper.title')}
-                        onClick={() => {
-                          schliessen()
-                          setIsWallpaperModalOpen(true)
-                        }}
-                      />
-
-                      {activeGroup && (
-                        <>
-                          {activeGroup.invite_code && (
-                            <Blatteintrag
-                              icon={<Share2 className="w-4 h-4" />}
-                              label={t('messenger.copyInvite')}
-                              onClick={() => {
-                                schliessen()
-                                handleCopyInviteLink(activeGroup)
-                              }}
-                            />
-                          )}
-                          {(activeGroup.owner_user_id === currentUserId || activeGroup.role === 'admin') && (
-                            <>
-                              <Blatteintrag
-                                icon={<ImagePlus className="w-4 h-4" />}
-                                label={t('messenger.changeGroupLogo')}
-                                disabled={logoLaedt}
-                                onClick={() => {
-                                  schliessen()
-                                  gruppenLogoInputRef.current?.click()
-                                }}
-                              />
-                              <Blatteintrag
-                                icon={<Shield className="w-4 h-4" />}
-                                label={t('messenger.manageGroupRoles')}
-                                onClick={() => {
-                                  schliessen()
-                                  setIsGroupPermissionsOpen(true)
-                                }}
-                              />
-                            </>
-                          )}
-                          {activeGroup.owner_user_id === currentUserId ? (
-                            <Blatteintrag
-                              icon={<Trash2 className="w-4 h-4" />}
-                              label={t('messenger.deleteGroup')}
-                              gefahr
-                              onClick={() => {
-                                schliessen()
-                                handleDeleteGroup(activeGroup)
-                              }}
-                            />
-                          ) : (
-                            <Blatteintrag
-                              icon={<LogOut className="w-4 h-4" />}
-                              label={t('messenger.leaveGroup')}
-                              gefahr
-                              onClick={() => {
-                                schliessen()
-                                handleLeaveGroup(activeGroup)
-                              }}
-                            />
-                          )}
-                        </>
-                      )}
-
-                      {activeContact && (
-                        <Blatteintrag
-                          icon={<Ban className="w-4 h-4" />}
-                          label={
-                            isBlocked(activeContact.userId)
-                              ? t('messenger.unblockContact')
-                              : t('messenger.blockContact')
-                          }
-                          gefahr={!isBlocked(activeContact.userId)}
-                          onClick={() => {
-                            schliessen()
-                            setIsBlockConfirmOpen(true)
-                          }}
-                        />
-                      )}
-                      </>
-                    )}
-                  </Blattknopf>
-                </div>
-              </div>
-
-              {/* Die angeheftete Nachricht der Gruppe.
-                  Ob sie erscheint, entscheidet das Recht des **Anheftenden** —
-                  geprüft beim Empfänger, weil der Server den Inhalt nicht lesen
-                  und die Regel deshalb nicht durchsetzen kann. */}
               {angeheftet && !auswahlModus && !sucheOffen && (
-                <button
-                  type="button"
-                  onClick={() => angeheftet.clientUuid && springeZu(angeheftet.clientUuid)}
-                  className="absolute top-[4.25rem] sm:top-14 left-3 right-3 z-20 min-h-11 px-3 py-2 flex items-center gap-2.5 rounded-xl bg-surface-container-high/90 backdrop-blur-md border border-outline-variant/30 shadow-sm text-left"
-                >
-                  <Pin className="w-3.5 h-3.5 text-primary shrink-0" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-label-sm font-semibold text-primary">Angeheftet</span>
-                    <span className="block text-label-sm text-on-surface-variant truncate">
-                      {angeheftet.text || auszugFuerZitat(angeheftet)}
-                    </span>
-                  </span>
-                  {darfAnheften && (
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        void handleAnheften(angeheftet)
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key !== 'Enter' && e.key !== ' ') return
-                        e.preventDefault()
-                        e.stopPropagation()
-                        void handleAnheften(angeheftet)
-                      }}
-                      className="w-11 h-11 -mr-2 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container-highest transition-colors shrink-0"
-                      aria-label={t('messenger.unpin')}
-                    >
-                      <X className="w-4 h-4" />
-                    </span>
-                  )}
-                </button>
+                <ChatPinnedBar
+                  text={angeheftet.text || auszugFuerZitat(angeheftet)}
+                  onOeffnen={() => angeheftet.clientUuid && springeZu(angeheftet.clientUuid)}
+                  onLoesen={darfAnheften ? () => void handleAnheften(angeheftet) : undefined}
+                />
               )}
 
-              {/* Message Thread Scroll Area */}
-              <div
-                ref={scrollContainerRef}
-                // Das obere Polster muss die schwebende Kopfzeile freihalten.
-                // Am Telefon ist sie 44 px hoch (Trefflaeche), am Zeigergeraet
-                // 32 px; mit einem festen pt-12 verdeckte sie dort die ersten
-                // Zeilen des Verlaufs.
-                className="flex-1 overflow-y-auto p-4 pt-16 sm:pt-12 space-y-3 relative z-1"
-              >
-                {/* WhatsApp-style encryption notice banner */}
-                <div className="py-1 text-center">
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high/60 border border-outline-variant/30 text-label-sm text-on-surface-variant shadow-2xs">
-                    <Lock className="w-3 h-3 text-status-success" />
-                    <span>{t('messenger.e2eeBanner')}</span>
-                  </div>
-                </div>
-
-
-                {messages.length === 0 && !loadingMessages && (
-                  <div className="py-16 text-center text-xs text-on-surface-variant/70">
-                    {t('messenger.noMessagesYet')}
-                  </div>
+              <ChatTimeline
+                scrollRef={scrollContainerRef}
+                endeRef={messagesEndRef}
+                nachrichten={messages}
+                laedt={loadingMessages}
+                trennerId={trennerId}
+                aktivitaet={partnerActivity}
+                istGruppe={Boolean(activeGroup)}
+                zeichneNachricht={(msg) => (
+                  <ChatMessageBubble
+                    msg={msg}
+                    kontext={{
+                      activeGroup,
+                      activeContact,
+                      eigeneId: currentUserId,
+                      eigenerName: user?.username || 'Ich',
+                      eigenesBild: user?.avatar_url,
+                      readReceiptsEnabled,
+                      importedAttachmentIds,
+                      // Die Rechteprüfung für `@everyone` steht hier, beim
+                      // Empfänger: der Server kann den Inhalt nicht lesen
+                      // und die Regel deshalb nicht durchsetzen.
+                      michGemeint: binIchGemeint(msg, currentUserId, activeGroup),
+                      hervorgehoben: Boolean(
+                        msg.clientUuid && hervorgehoben === msg.clientUuid,
+                      ),
+                    }}
+                    ton={{
+                      playingAudioId,
+                      audioCurrentTime,
+                      audioPlaybackRate,
+                      onTogglePlay: (id, anhang, bindung) =>
+                        void togglePlayAudio(id, anhang, bindung),
+                      onCycleRate: cycleAudioPlaybackRate,
+                      onSeek: (id, anhang, bindung, e) =>
+                        void handleWaveformSeek(id, anhang, bindung, e),
+                    }}
+                    aktionen={{
+                      onViewImage: setViewingImage,
+                      onEdit: (m) => {
+                        setEditingMessage(m)
+                        setInputText(m.text)
+                      },
+                      onDelete: (m) => void handleDeleteMessage(m),
+                      onImportNote: (note, schluessel) => void handleImportNote(note, schluessel),
+                      onImportCalendar: (cal, schluessel) =>
+                        void handleImportCalendar(cal, schluessel),
+                      onJoinByInviteCode: handleJoinByInviteCode,
+                      onMenue: setMenueNachricht,
+                      onAntworten: handleAntworten,
+                      onReaktion: (m, emoji) => void handleReaktion(m, emoji),
+                      onSpringeZu: springeZu,
+                    }}
+                    auswahl={{
+                      aktiv: auswahlModus,
+                      gewaehlt: gewaehlteUuids.includes(msg.clientUuid || `#${msg.id}`),
+                      onUmschalten: handleAuswahlUmschalten,
+                    }}
+                    medienBindung={medienBindung}
+                  />
                 )}
-
-                {messages.map((msg, idx) => {
-                  // Eine Systemzeile ist keine Nachricht: sie hat keinen
-                  // Absender, keine Quittung und kein Kontextmenü. In der
-                  // Sprechblase gerendert sah sie aus, als hätte das Gegenüber
-                  // sie geschrieben — bei einer Meldung über die Sicherheit
-                  // dieses Gesprächs die denkbar schlechteste Verwechslung.
-                  if (msg.isSystem) {
-                    return (
-                      <div key={msg.id} className="py-1 text-center">
-                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-container-high/60 border border-outline-variant/30 text-label-sm text-on-surface-variant shadow-2xs">
-                          <Shield className="w-3 h-3 text-status-warning shrink-0" />
-                          <span>{msg.text}</span>
-                        </div>
-                      </div>
-                    )
-                  }
-
-                  const currentDateBadge = formatChatDateBadge(msg.createdAt, t, i18n.language)
-                  const prevDateBadge = idx > 0 ? formatChatDateBadge(messages[idx - 1].createdAt, t, i18n.language) : null
-                  const showDateSeparator = Boolean(currentDateBadge && currentDateBadge !== prevDateBadge)
-
-                  return (
-                    <React.Fragment key={msg.id}>
-                      {showDateSeparator && (
-                        <div className="flex justify-center my-3 pointer-events-none">
-                          <span className="px-3.5 py-1 rounded-full text-label-sm font-semibold bg-surface-container/90 text-on-surface-variant backdrop-blur-md border border-outline-variant/30 shadow-sm">
-                            {currentDateBadge}
-                          </span>
-                        </div>
-                      )}
-
-                      {trennerId !== null && msg.id === trennerId && (
-                        <div className="flex items-center gap-2 my-3">
-                          <span className="h-px flex-1 bg-primary/30" />
-                          <span className="text-label-sm font-semibold text-primary uppercase tracking-wide">
-                            Neue Nachrichten
-                          </span>
-                          <span className="h-px flex-1 bg-primary/30" />
-                        </div>
-                      )}
-
-                      <ChatMessageBubble
-                        msg={msg}
-                        kontext={{
-                          activeGroup,
-                          activeContact,
-                          eigeneId: currentUserId,
-                          eigenerName: user?.username || 'Ich',
-                          eigenesBild: user?.avatar_url,
-                          readReceiptsEnabled,
-                          importedAttachmentIds,
-                          // Die Rechteprüfung für `@everyone` steht hier, beim
-                          // Empfänger: der Server kann den Inhalt nicht lesen
-                          // und die Regel deshalb nicht durchsetzen.
-                          michGemeint: binIchGemeint(msg, currentUserId, activeGroup),
-                          hervorgehoben: Boolean(
-                            msg.clientUuid && hervorgehoben === msg.clientUuid,
-                          ),
-                        }}
-                        ton={{
-                          playingAudioId,
-                          audioCurrentTime,
-                          audioPlaybackRate,
-                          onTogglePlay: (id, anhang, bindung) =>
-                            void togglePlayAudio(id, anhang, bindung),
-                          onCycleRate: cycleAudioPlaybackRate,
-                          onSeek: (id, anhang, bindung, e) =>
-                            void handleWaveformSeek(id, anhang, bindung, e),
-                        }}
-                        aktionen={{
-                          onViewImage: setViewingImage,
-                          onEdit: (m) => {
-                            setEditingMessage(m)
-                            setInputText(m.text)
-                          },
-                          onDelete: (m) => void handleDeleteMessage(m),
-                          onImportNote: (note, schluessel) => void handleImportNote(note, schluessel),
-                          onImportCalendar: (cal, schluessel) =>
-                            void handleImportCalendar(cal, schluessel),
-                          onJoinByInviteCode: handleJoinByInviteCode,
-                          onMenue: setMenueNachricht,
-                          onAntworten: handleAntworten,
-                          onReaktion: (m, emoji) => void handleReaktion(m, emoji),
-                          onSpringeZu: springeZu,
-                        }}
-                        auswahl={{
-                          aktiv: auswahlModus,
-                          gewaehlt: gewaehlteUuids.includes(msg.clientUuid || `#${msg.id}`),
-                          onUmschalten: handleAuswahlUmschalten,
-                        }}
-                        medienBindung={medienBindung}
-                      />
-                    </React.Fragment>
-                  )
-                })}
-                {/* Floating Typing / Audio Recording Activity Indicator */}
-                {partnerActivity && (
-                  <div className="flex items-center gap-2 text-xs py-1.5 px-3 rounded-full bg-surface-container-high/90 border border-outline-variant/30 text-on-surface w-fit shadow-sm animate-slide-up">
-                    {partnerActivity.status === 'recording' ? (
-                      <>
-                        <Mic className="w-3.5 h-3.5 text-status-destructive animate-pulse" />
-                        <span className="text-label-sm text-status-destructive font-medium">
-                          {activeGroup
-                            ? t('messenger.someoneRecording', {
-                                name: partnerActivity.username || t('messenger.someone'),
-                              })
-                            : t('messenger.recordingVoice')}
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <span className="flex gap-1 items-center px-0.5">
-                          <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:-0.3s]" />
-                          <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:-0.15s]" />
-                          <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" />
-                        </span>
-                        <span className="text-label-sm text-primary font-medium">
-                          {activeGroup ? `${partnerActivity.username || 'Jemand'} schreibt …` : t('messenger.typing')}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                )}
-                <div ref={messagesEndRef} />
-              </div>
+              />
 
               {/* Staged Image Preview Bar */}
               {selectedImage && (
