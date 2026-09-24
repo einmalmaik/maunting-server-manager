@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { api } from '@/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { useIsOnline } from '@/hooks/useIsOnline'
@@ -13,6 +12,7 @@ import { StoryFableBadge } from './StoryFableBadge'
 import { BenachrichtigungsGlocke, ProfileDropdown, type ProfileDropdownItem, buttonClasses } from '@/Singra/UI'
 import { usePresenceAndActivity, type PresenceStatus } from '@/hooks/usePresenceAndActivity'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
+import { usePublicSettingsStore } from '@/stores/publicSettingsStore'
 
 interface SidebarProps {
   mobile?: boolean
@@ -65,27 +65,16 @@ export function Sidebar({ mobile = false, onNavigate, presenceStatus: propPresen
     return () => document.removeEventListener('keydown', trapFocus)
   }, [mobile])
 
-  const [calendarEnabled, setCalendarEnabled] = useState(true)
-  const [notesEnabled, setNotesEnabled] = useState(true)
-  const [socialEnabled, setSocialEnabled] = useState(true)
+  const publicSettings = usePublicSettingsStore()
+  const calendarEnabled = publicSettings.calendar_enabled
+  const notesEnabled = publicSettings.notes_enabled
+  const socialEnabled = publicSettings.social_enabled
   const localPresence = usePresenceAndActivity(socialEnabled, !propPresenceStatus && !mobile)
   const presenceStatus = propPresenceStatus ?? localPresence.status
   const handlePresenceChange = onPresenceChange ?? localPresence.changeStatus
 
   useEffect(() => {
-    api<{ calendar_enabled?: boolean; notes_enabled?: boolean; social_enabled?: boolean }>('/settings/public')
-      .then((res) => {
-        if (typeof res.calendar_enabled === 'boolean') {
-          setCalendarEnabled(res.calendar_enabled)
-        }
-        if (typeof res.notes_enabled === 'boolean') {
-          setNotesEnabled(res.notes_enabled)
-        }
-        if (typeof res.social_enabled === 'boolean') {
-          setSocialEnabled(res.social_enabled)
-        }
-      })
-      .catch(() => {})
+    void usePublicSettingsStore.getState().refresh()
   }, [])
 
   const handleLogout = async () => {

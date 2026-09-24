@@ -16,27 +16,10 @@ import { CredentialsTab } from './profile/CredentialsTab'
 import { MessengerSicherheitTab } from './profile/MessengerSicherheitTab'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { PageHeader } from '@/Singra/UI/PageHeader'
+import { usePublicSettingsStore } from '@/stores/publicSettingsStore'
 
 type TabId = 'account' | 'social' | 'audio' | 'messenger' | 'password' | '2fa' | 'linked' | 'credentials' | 'ai' | 'devices' | 'danger'
 
-const BASE_TABS: TabDef<TabId>[] = [
-  { id: 'account', labelKey: 'profile.tabs.account', icon: User },
-  { id: 'social', labelKey: 'profile.tabs.social', icon: Users },
-  { id: 'audio', labelKey: 'profile.tabs.audio', icon: Volume2 },
-  // PIN und automatische Sperre des Messengers. Steht neben Social, weil es
-  // dorthin gehoert, und nicht unter Passwort: das Kontopasswort meldet an,
-  // dieser PIN schuetzt, was auf diesem Geraet liegt.
-  { id: 'messenger', labelKey: 'profile.tabs.messenger', icon: Lock },
-  { id: 'password', labelKey: 'profile.tabs.password', icon: KeyRound },
-  { id: '2fa', labelKey: 'profile.tabs.2fa', icon: Shield },
-  { id: 'linked', labelKey: 'profile.tabs.linked', icon: Link2 },
-  // Eigener Zugangsdaten-Tresor: jeder Benutzer verwaltet seine eigenen
-  // Steam-/GitHub-Zugaenge selbst, ohne Operator-Hilfe.
-  // Wallet, nicht KeyRound: den trägt schon der Passwort-Reiter zwei Zeilen
-  // darüber. Zwei Reiter mit demselben Bild sind in einer Leiste, die auf
-  // schmalen Fenstern nur Bilder zeigt, nicht auseinanderzuhalten.
-  { id: 'credentials', labelKey: 'profile.tabs.credentials', icon: Wallet },
-]
 
 /**
  * Profil-Orchestrator.
@@ -53,22 +36,41 @@ export function Profile() {
   const { t } = useTranslation()
   const [searchParams] = useSearchParams()
   const canUseAi = useHasPermission('ai.chat.use')
+  const publicSettings = usePublicSettingsStore()
   const initialTab = (searchParams.get('tab') as TabId) || 'account'
   const [activeTab, setActiveTab] = useState<TabId>(initialTab)
 
   useEffect(() => {
     const tabParam = searchParams.get('tab') as TabId
     if (tabParam && ['account', 'social', 'audio', 'messenger', 'password', '2fa', 'linked', 'credentials', 'ai', 'devices', 'danger'].includes(tabParam)) {
-      setActiveTab(tabParam)
+      if ((tabParam === 'social' || tabParam === 'messenger') && !publicSettings.social_enabled) {
+        setActiveTab('account')
+      } else {
+        setActiveTab(tabParam)
+      }
     }
-  }, [searchParams])
+  }, [searchParams, publicSettings.social_enabled])
+
+  useEffect(() => {
+    if (!publicSettings.social_enabled && (activeTab === 'social' || activeTab === 'messenger')) {
+      setActiveTab('account')
+    }
+  }, [publicSettings.social_enabled, activeTab])
 
   const tabs: TabDef<TabId>[] = [
-    ...BASE_TABS,
+    { id: 'account', labelKey: 'profile.tabs.account', icon: User },
+    ...(publicSettings.social_enabled
+      ? [
+          { id: 'social' as const, labelKey: 'profile.tabs.social', icon: Users },
+          { id: 'messenger' as const, labelKey: 'profile.tabs.messenger', icon: Lock },
+        ]
+      : []),
+    { id: 'audio', labelKey: 'profile.tabs.audio', icon: Volume2 },
+    { id: 'password', labelKey: 'profile.tabs.password', icon: KeyRound },
+    { id: '2fa', labelKey: 'profile.tabs.2fa', icon: Shield },
+    { id: 'linked', labelKey: 'profile.tabs.linked', icon: Link2 },
+    { id: 'credentials', labelKey: 'profile.tabs.credentials', icon: Wallet },
     ...(canUseAi ? [{ id: 'ai' as const, labelKey: 'profile.tabs.ai', icon: Bot }] : []),
-    // Der Tab trägt zwei Dinge mit verschiedenen Schranken: die Kopplung
-    // (Smart System) und die Geräte mit Nachrichtenzugriff (Messenger).
-    // `DevicesTab` entscheidet, welche Karte erscheint.
     { id: 'devices' as const, labelKey: 'profile.tabs.devices', icon: MonitorSmartphone },
     { id: 'danger', labelKey: 'profile.tabs.danger', icon: AlertTriangle, variant: 'danger' },
   ]
@@ -85,9 +87,9 @@ export function Profile() {
       />
 
       {activeTab === 'account' && <AccountTab />}
-      {activeTab === 'social' && <SocialTab />}
+      {activeTab === 'social' && publicSettings.social_enabled && <SocialTab />}
       {activeTab === 'audio' && <AudioTab />}
-      {activeTab === 'messenger' && <MessengerSicherheitTab />}
+      {activeTab === 'messenger' && publicSettings.social_enabled && <MessengerSicherheitTab />}
       {activeTab === 'password' && <PasswordTab />}
       {activeTab === '2fa' && <TwoFactorTab />}
       {activeTab === 'linked' && <LinkedAccountsTab />}

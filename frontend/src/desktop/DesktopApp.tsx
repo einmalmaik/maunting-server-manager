@@ -12,7 +12,7 @@
  * navigieren mit `navigate('/ai?ansicht=…')` (Glocke, Guardian, Aufgaben),
  * und genau diese Route gibt es hier. Eine Adressleiste hat das Fenster nicht.
  */
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { MemoryRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { listen } from '@tauri-apps/api/event'
 import { Bot, BrainCircuit, Calendar as CalendarIcon, Eye, KeyRound, LogOut, Menu, MessageSquare, Settings as SettingsIcon, ShieldAlert, StickyNote, WifiOff, X } from 'lucide-react'
@@ -40,6 +40,7 @@ import { useAutoSperre } from '@/hooks/useAutoSperre'
 import { useMessengerSperreBereitschaft } from '@/hooks/useMessengerSperre'
 import { usePresenceAndActivity } from '@/hooks/usePresenceAndActivity'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
+import { usePublicSettingsStore } from '@/stores/publicSettingsStore'
 import { abmelden } from './auth'
 import { Einstellungen } from './Einstellungen'
 import { Splash } from './Splash'
@@ -79,19 +80,37 @@ const SPLASH_GESEHEN_KEY = 'mss:splash_gesehen'
 const LETZTE_ROUTE_KEY = 'mss:letzte_route'
 const ERLAUBTE_ROUTEN = ['/ai', '/chat', '/kalender', '/notizen', '/gedaechtnis', '/tresor', '/einstellungen']
 
-const OFFLINE_ERLAUBTE_ROUTEN = ['/tresor', '/kalender', '/notizen']
+export function getErlaubteOfflineRouten(settings = usePublicSettingsStore.getState()): string[] {
+  const routen: string[] = []
+  if (settings.vault_enabled) routen.push('/tresor')
+  if (settings.calendar_enabled) routen.push('/kalender')
+  if (settings.notes_enabled) routen.push('/notizen')
+  if (routen.length === 0) routen.push('/einstellungen')
+  return routen
+}
+
+export function getFallbackOfflineRoute(settings = usePublicSettingsStore.getState()): string {
+  const offlineRouten = getErlaubteOfflineRouten(settings)
+  return offlineRouten[0] || '/einstellungen'
+}
 
 function getInitialRoute(offline = false): string {
   try {
+    const settings = usePublicSettingsStore.getState()
     const gespeichert = localStorage.getItem(LETZTE_ROUTE_KEY)
     if (gespeichert && ERLAUBTE_ROUTEN.includes(gespeichert)) {
       if (offline) {
-        return OFFLINE_ERLAUBTE_ROUTEN.includes(gespeichert) ? gespeichert : '/tresor'
+        const offlineRouten = getErlaubteOfflineRouten(settings)
+        return offlineRouten.includes(gespeichert) ? gespeichert : getFallbackOfflineRoute(settings)
       }
+      if (gespeichert === '/chat' && !settings.social_enabled) return '/ai'
+      if (gespeichert === '/kalender' && !settings.calendar_enabled) return '/ai'
+      if (gespeichert === '/notizen' && !settings.notes_enabled) return '/ai'
+      if (gespeichert === '/tresor' && !settings.vault_enabled) return '/ai'
       return gespeichert
     }
   } catch {}
-  return offline ? '/tresor' : '/ai'
+  return offline ? getFallbackOfflineRoute() : '/ai'
 }
 
 export function DesktopApp() {
@@ -140,7 +159,9 @@ export function DesktopApp() {
   }, [])
 
   useEffect(() => {
+    void usePublicSettingsStore.getState().refresh()
     const handleOnline = () => {
+      void usePublicSettingsStore.getState().refresh()
       setIsOffline((prev) => {
         if (!prev) return false
         void (async () => {
@@ -355,6 +376,9 @@ export function DesktopApp() {
     setPhase('bereit')
   }
 
+  const publicSettings = usePublicSettingsStore()
+  const fallbackRoute = isOffline ? getFallbackOfflineRoute(publicSettings) : '/ai'
+
   let inhalt: ReactNode
   if (phase === 'laedt' || konfig === null) {
     inhalt = <Startbild text={startText} progress={updateProgress} />
@@ -391,54 +415,70 @@ export function DesktopApp() {
         <Route
           path="/chat"
           element={
-            <Hauptseite
-              bereich="chat"
-              konfig={konfig}
-              offeneUebernahme={offeneUebernahme}
-              onKonfigAenderung={ladeKonfigNeu}
-              isOffline={isOffline}
-            />
+            publicSettings.social_enabled ? (
+              <Hauptseite
+                bereich="chat"
+                konfig={konfig}
+                offeneUebernahme={offeneUebernahme}
+                onKonfigAenderung={ladeKonfigNeu}
+                isOffline={isOffline}
+              />
+            ) : (
+              <Navigate to={fallbackRoute} replace />
+            )
           }
         />
         <Route
           path="/chat/join/:inviteCode"
           element={
-            <Hauptseite
-              bereich="chat"
-              konfig={konfig}
-              offeneUebernahme={offeneUebernahme}
-              onKonfigAenderung={ladeKonfigNeu}
-              isOffline={isOffline}
-            />
+            publicSettings.social_enabled ? (
+              <Hauptseite
+                bereich="chat"
+                konfig={konfig}
+                offeneUebernahme={offeneUebernahme}
+                onKonfigAenderung={ladeKonfigNeu}
+                isOffline={isOffline}
+              />
+            ) : (
+              <Navigate to={fallbackRoute} replace />
+            )
           }
         />
-        <Route path="/messenger" element={<Navigate to="/chat" replace />} />
+        <Route path="/messenger" element={<Navigate to={publicSettings.social_enabled ? '/chat' : fallbackRoute} replace />} />
         <Route
           path="/kalender"
           element={
-            <Hauptseite
-              bereich="kalender"
-              konfig={konfig}
-              offeneUebernahme={offeneUebernahme}
-              onKonfigAenderung={ladeKonfigNeu}
-              isOffline={isOffline}
-            />
+            publicSettings.calendar_enabled ? (
+              <Hauptseite
+                bereich="kalender"
+                konfig={konfig}
+                offeneUebernahme={offeneUebernahme}
+                onKonfigAenderung={ladeKonfigNeu}
+                isOffline={isOffline}
+              />
+            ) : (
+              <Navigate to={fallbackRoute} replace />
+            )
           }
         />
-        <Route path="/calendar" element={<Navigate to="/kalender" replace />} />
+        <Route path="/calendar" element={<Navigate to={publicSettings.calendar_enabled ? '/kalender' : fallbackRoute} replace />} />
         <Route
           path="/notizen"
           element={
-            <Hauptseite
-              bereich="notizen"
-              konfig={konfig}
-              offeneUebernahme={offeneUebernahme}
-              onKonfigAenderung={ladeKonfigNeu}
-              isOffline={isOffline}
-            />
+            publicSettings.notes_enabled ? (
+              <Hauptseite
+                bereich="notizen"
+                konfig={konfig}
+                offeneUebernahme={offeneUebernahme}
+                onKonfigAenderung={ladeKonfigNeu}
+                isOffline={isOffline}
+              />
+            ) : (
+              <Navigate to={fallbackRoute} replace />
+            )
           }
         />
-        <Route path="/notes" element={<Navigate to="/notizen" replace />} />
+        <Route path="/notes" element={<Navigate to={publicSettings.notes_enabled ? '/notizen' : fallbackRoute} replace />} />
         <Route
           path="/gedaechtnis"
           element={
@@ -466,16 +506,20 @@ export function DesktopApp() {
         <Route
           path="/tresor"
           element={
-            <Hauptseite
-              bereich="tresor"
-              konfig={konfig}
-              offeneUebernahme={offeneUebernahme}
-              onKonfigAenderung={ladeKonfigNeu}
-              isOffline={isOffline}
-            />
+            publicSettings.vault_enabled ? (
+              <Hauptseite
+                bereich="tresor"
+                konfig={konfig}
+                offeneUebernahme={offeneUebernahme}
+                onKonfigAenderung={ladeKonfigNeu}
+                isOffline={isOffline}
+              />
+            ) : (
+              <Navigate to={fallbackRoute} replace />
+            )
           }
         />
-        <Route path="/vault" element={<Navigate to="/tresor" replace />} />
+        <Route path="/vault" element={<Navigate to={publicSettings.vault_enabled ? '/tresor' : fallbackRoute} replace />} />
         <Route
           path="/privacy"
           element={
@@ -484,7 +528,7 @@ export function DesktopApp() {
             </div>
           }
         />
-        <Route path="*" element={<Navigate to={isOffline ? '/tresor' : '/ai'} replace />} />
+        <Route path="*" element={<Navigate to={fallbackRoute} replace />} />
       </Routes>
     )
   }
@@ -494,7 +538,7 @@ export function DesktopApp() {
       <NavigationEmpfaenger isOffline={isOffline} />
       <div className="relative h-[100dvh] max-h-[100dvh] w-full overflow-hidden bg-background text-on-surface pb-[env(safe-area-inset-bottom,0px)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)] flex flex-col">
         <div className="msm-deep-grid pointer-events-none absolute inset-0 opacity-30" />
-        {phase === 'bereit' && <CrossDeviceCallBanner />}
+        {phase === 'bereit' && publicSettings.social_enabled && <CrossDeviceCallBanner />}
         <div className="relative z-10 flex h-full max-h-full min-h-0 flex-1 flex-col overflow-hidden">{inhalt}</div>
 
         {phase === 'bereit' && (
@@ -504,7 +548,7 @@ export function DesktopApp() {
             <AiRunNotice />
             <ServerIncidentNotifier />
             <PanelPopupModal />
-            <CallOverlay />
+            {publicSettings.social_enabled && <CallOverlay />}
             {isAndroid && <OverlayFenster inApp={true} />}
           </>
         )}
@@ -525,6 +569,7 @@ export function DesktopApp() {
 function NavigationEmpfaenger({ isOffline }: { isOffline: boolean }) {
   const navigate = useNavigate()
   const location = useLocation()
+  const publicSettings = usePublicSettingsStore()
 
   useEffect(() => {
     if (ERLAUBTE_ROUTEN.includes(location.pathname)) {
@@ -537,17 +582,26 @@ function NavigationEmpfaenger({ isOffline }: { isOffline: boolean }) {
   useEffect(() => {
     const unlisten = listen<string>('mss:navigiere-zu', (event) => {
       if (event.payload) {
-        if (isOffline && !OFFLINE_ERLAUBTE_ROUTEN.includes(event.payload)) {
-          navigate('/tresor')
-          return
+        const ziel = event.payload
+        if (ziel.startsWith('/chat') && !publicSettings.social_enabled) return
+        if (ziel.startsWith('/kalender') && !publicSettings.calendar_enabled) return
+        if (ziel.startsWith('/notizen') && !publicSettings.notes_enabled) return
+        if (ziel.startsWith('/tresor') && !publicSettings.vault_enabled) return
+
+        if (isOffline) {
+          const offlineRouten = getErlaubteOfflineRouten(publicSettings)
+          if (!offlineRouten.includes(ziel)) {
+            navigate(getFallbackOfflineRoute(publicSettings))
+            return
+          }
         }
-        navigate(event.payload)
+        navigate(ziel)
       }
     })
     return () => {
       void unlisten.then((u) => u())
     }
-  }, [navigate, isOffline])
+  }, [navigate, isOffline, publicSettings])
   return null
 }
 
@@ -724,53 +778,59 @@ function Hauptseite({
   const navigate = useNavigate()
   const location = useLocation()
   const user = useAuthStore((s) => s.user)
-  const darfChatten = useHasPermission('ai.chat.use')
+  const publicSettings = usePublicSettingsStore()
+  const darfChatten = !isOffline && useHasPermission('ai.chat.use')
   const hasPermissionKalender = useHasPermission('ai.calendar.use')
   const hasPermissionNotizen = useHasPermission('ai.notes.use')
-  const darfKalender = isOffline ? true : hasPermissionKalender
-  const darfNotizen = isOffline ? true : hasPermissionNotizen
-  const darfGedaechtnis = useHasPermission('ai.memory.use')
-  const [darfTresor, setDarfTresor] = useState(true)
-  const [darfMessenger, setDarfMessenger] = useState(true)
+  const darfKalender = publicSettings.calendar_enabled && (isOffline || hasPermissionKalender)
+  const darfNotizen = publicSettings.notes_enabled && (isOffline || hasPermissionNotizen)
+  const darfGedaechtnis = !isOffline && useHasPermission('ai.memory.use')
+  const darfTresor = publicSettings.vault_enabled
+  const darfMessenger = publicSettings.social_enabled
   const [mobileMenuOffen, setMobileMenuOffen] = useState(false)
   const totalMessengerUnread = useMessengerNotificationStore((s) => s.totalUnreadCount)
 
-  useEffect(() => {
-    let active = true
-    api<{ vault_enabled?: boolean; social_enabled?: boolean }>('/api/panel/settings/public')
-      .then((res) => {
-        if (active && res) {
-          if (typeof res.vault_enabled === 'boolean') {
-            setDarfTresor(res.vault_enabled)
-          }
-          if (typeof res.social_enabled === 'boolean') {
-            setDarfMessenger(res.social_enabled)
-          }
-        }
-      })
-      .catch(() => {})
-    return () => { active = false }
-  }, [])
+  const offlineRouten = useMemo(() => {
+    const routen: string[] = []
+    if (darfTresor) routen.push('/tresor')
+    if (darfKalender) routen.push('/kalender')
+    if (darfNotizen) routen.push('/notizen')
+    if (routen.length === 0) routen.push('/einstellungen')
+    return routen
+  }, [darfTresor, darfKalender, darfNotizen])
+
+  const fallbackRoute = isOffline
+    ? (offlineRouten[0] || '/einstellungen')
+    : '/ai'
 
   useEffect(() => {
     if (!darfTresor && bereich === 'tresor') {
-      navigate(isOffline ? '/kalender' : '/ai')
+      navigate(fallbackRoute, { replace: true })
     }
     if (!darfMessenger && bereich === 'chat') {
-      navigate(isOffline ? '/kalender' : '/ai')
+      navigate(fallbackRoute, { replace: true })
     }
-  }, [darfTresor, darfMessenger, bereich, navigate, isOffline])
+    if (!darfKalender && bereich === 'kalender') {
+      navigate(fallbackRoute, { replace: true })
+    }
+    if (!darfNotizen && bereich === 'notizen') {
+      navigate(fallbackRoute, { replace: true })
+    }
+  }, [darfTresor, darfMessenger, darfKalender, darfNotizen, bereich, navigate, fallbackRoute])
 
-  // Offline: Nur Tresor, Kalender und Notizen erlaubt -> redirect zu Tresor
+  // Offline: Nur aktivierte Offline-Routen erlauben
   useEffect(() => {
-    if (isOffline && !OFFLINE_ERLAUBTE_ROUTEN.includes(location.pathname)) {
-      navigate('/tresor', { replace: true })
+    if (isOffline && !offlineRouten.includes(location.pathname)) {
+      navigate(fallbackRoute, { replace: true })
     }
-  }, [isOffline, location.pathname, navigate])
+  }, [isOffline, location.pathname, navigate, offlineRouten, fallbackRoute])
 
   const agentName = user?.agent_name?.trim() || 'Assistent'
   const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
-  const { status: presenceStatus, changeStatus: handlePresenceChange } = usePresenceAndActivity(!isOffline, !isOffline)
+  const { status: presenceStatus, changeStatus: handlePresenceChange } = usePresenceAndActivity(
+    !isOffline && darfMessenger,
+    !isOffline && darfMessenger,
+  )
 
   const profileItems: ProfileDropdownItem[] = [
     ...(!isOffline

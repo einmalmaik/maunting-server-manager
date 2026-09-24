@@ -41,6 +41,7 @@ const Notes = lazy(() => import('./pages/Notes').then(module => ({ default: modu
 const Messenger = lazy(() => import('./pages/Messenger').then(module => ({ default: module.Messenger })))
 import { apiUrl } from '@/config/api'
 import { useAuthStore } from '@/stores/authStore'
+import { usePublicSettingsStore } from '@/stores/publicSettingsStore'
 import { PrivacyAcknowledgementNotice } from './components/ui/PrivacyAcknowledgementNotice'
 import { PrivacyNoticeVisibilityContext } from './components/ui/PrivacyNoticeVisibility'
 import { SupportWidgetLoader } from './components/SupportWidgetLoader'
@@ -51,8 +52,10 @@ function App() {
   const [setupEmailConfigured, setSetupEmailConfigured] = useState(false)
   const [privacyNoticeVisible, setPrivacyNoticeVisible] = useState(true)
   const { isAuthenticated } = useAuthStore()
+  const publicSettings = usePublicSettingsStore()
 
   useEffect(() => {
+    void usePublicSettingsStore.getState().refresh()
     return initOfflineSync()
   }, [])
 
@@ -141,12 +144,12 @@ function App() {
             }
           />
           <Route path="profile" element={<Profile />} />
-          <Route path="calendar" element={<Calendar />} />
-          <Route path="notes" element={<Notes />} />
+          <Route path="calendar" element={publicSettings.calendar_enabled ? <Calendar /> : <Navigate to="/" replace />} />
+          <Route path="notes" element={publicSettings.notes_enabled ? <Notes /> : <Navigate to="/" replace />} />
           <Route path="social" element={<Navigate to="/profile" replace />} />
-          <Route path="chat" element={<Messenger />} />
-          <Route path="chat/join/:inviteCode" element={<Messenger />} />
-          <Route path="messenger" element={<Navigate to="/chat" replace />} />
+          <Route path="chat" element={publicSettings.social_enabled ? <Messenger /> : <Navigate to="/" replace />} />
+          <Route path="chat/join/:inviteCode" element={publicSettings.social_enabled ? <Messenger /> : <Navigate to="/" replace />} />
+          <Route path="messenger" element={<Navigate to={publicSettings.social_enabled ? '/chat' : '/'} replace />} />
           <Route path="ai" element={<RequirePermission routeKey="ai"><Ai /></RequirePermission>} />
           <Route path="teams" element={<Teams />} />
           <Route path="docs" element={<Docs />} />

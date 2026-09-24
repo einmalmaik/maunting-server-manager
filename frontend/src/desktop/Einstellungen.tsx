@@ -77,6 +77,7 @@ import { usePublicLegalSettings } from '@/hooks/usePublicLegalSettings'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { MessengerSicherheitTab } from '@/pages/profile/MessengerSicherheitTab'
 import { TresorSicherheitTab } from './vault/TresorSicherheitTab'
+import { usePublicSettingsStore } from '@/stores/publicSettingsStore'
 import { Avatar, Badge, Button, Dropdown, type DropdownOption, Input, ProgressBar, Slider, Switch } from '@/Singra/UI'
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
@@ -114,51 +115,66 @@ type EinstellungsTab = 'konto' | 'social' | 'messenger' | 'tresor' | 'desktop' |
 
 const isAndroidClient = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
 
-const TABS: TabDef<EinstellungsTab>[] = [
-  { id: 'konto', labelKey: 'profile.tabs.account', icon: User },
-  { id: 'social', labelKey: 'profile.tabs.social', icon: Users },
-  // Derselbe Reiter wie im Web-Panel, dieselbe Komponente. Zwei Fassungen
-  // waeren zwei Staende.
-  { id: 'messenger', labelKey: 'profile.tabs.messenger', icon: Lock },
-  { id: 'tresor', labelKey: 'profile.tabs.vault', icon: ShieldCheck },
-  {
-    id: 'desktop',
-    labelKey: isAndroidClient ? 'mss.einstellungen.tab.app' : 'mss.einstellungen.tab.desktop',
-    icon: MonitorCog,
-  },
-  { id: 'wakeword', labelKey: 'mss.einstellungen.tab.wakeword', icon: Mic },
-  { id: 'audio', labelKey: 'mss.einstellungen.tab.audio', icon: Volume2 },
-  { id: 'rechtliches', labelKey: 'mss.einstellungen.tab.rechtliches', icon: FileSignature },
-  { id: 'gefahr', labelKey: 'mss.einstellungen.tab.gefahr', icon: AlertTriangle, variant: 'danger' },
-]
-
-function tabAusSuche(suche: string): EinstellungsTab {
-  const wunsch = new URLSearchParams(suche).get('tab')
-  if (wunsch === 'profil' || wunsch === 'account') return 'konto'
-  return TABS.some((tab) => tab.id === wunsch) ? (wunsch as EinstellungsTab) : 'desktop'
-}
-
 export function Einstellungen({ onKonfigAenderung }: { onKonfigAenderung?: () => void }) {
   const { t } = useTranslation()
   const ort = useLocation()
+  const publicSettings = usePublicSettingsStore()
+
+  const tabs: TabDef<EinstellungsTab>[] = useMemo(() => [
+    { id: 'konto', labelKey: 'profile.tabs.account', icon: User },
+    ...(publicSettings.social_enabled
+      ? [
+          { id: 'social' as const, labelKey: 'profile.tabs.social', icon: Users },
+          { id: 'messenger' as const, labelKey: 'profile.tabs.messenger', icon: Lock },
+        ]
+      : []),
+    ...(publicSettings.vault_enabled
+      ? [{ id: 'tresor' as const, labelKey: 'profile.tabs.vault', icon: ShieldCheck }]
+      : []),
+    {
+      id: 'desktop',
+      labelKey: isAndroidClient ? 'mss.einstellungen.tab.app' : 'mss.einstellungen.tab.desktop',
+      icon: MonitorCog,
+    },
+    { id: 'wakeword', labelKey: 'mss.einstellungen.tab.wakeword', icon: Mic },
+    { id: 'audio', labelKey: 'mss.einstellungen.tab.audio', icon: Volume2 },
+    { id: 'rechtliches', labelKey: 'mss.einstellungen.tab.rechtliches', icon: FileSignature },
+    { id: 'gefahr', labelKey: 'mss.einstellungen.tab.gefahr', icon: AlertTriangle, variant: 'danger' },
+  ], [publicSettings.social_enabled, publicSettings.vault_enabled])
+
+  const tabAusSuche = useCallback((suche: string): EinstellungsTab => {
+    const wunsch = new URLSearchParams(suche).get('tab')
+    if (wunsch === 'profil' || wunsch === 'account') return 'konto'
+    if (wunsch === 'social' && !publicSettings.social_enabled) return 'desktop'
+    if (wunsch === 'messenger' && !publicSettings.social_enabled) return 'desktop'
+    if (wunsch === 'tresor' && !publicSettings.vault_enabled) return 'desktop'
+    return tabs.some((entry) => entry.id === wunsch) ? (wunsch as EinstellungsTab) : 'desktop'
+  }, [tabs, publicSettings.social_enabled, publicSettings.vault_enabled])
+
   const [tab, setTab] = useState<EinstellungsTab>(() => tabAusSuche(ort.search))
 
   useEffect(() => {
     setTab(tabAusSuche(ort.search))
-  }, [ort.search])
+  }, [ort.search, tabAusSuche])
+
+  useEffect(() => {
+    if (tab === 'social' && !publicSettings.social_enabled) setTab('desktop')
+    if (tab === 'messenger' && !publicSettings.social_enabled) setTab('desktop')
+    if (tab === 'tresor' && !publicSettings.vault_enabled) setTab('desktop')
+  }, [tab, publicSettings.social_enabled, publicSettings.vault_enabled])
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
       <TabBar
-        tabs={TABS}
+        tabs={tabs}
         active={tab}
         onChange={setTab}
         ariaLabel={t('mss.app.einstellungen')}
       />
       {tab === 'konto' && <KontoEinstellungen />}
-      {tab === 'social' && <SocialEinstellungen />}
-      {tab === 'messenger' && <MessengerSicherheitTab />}
-      {tab === 'tresor' && <TresorSicherheitTab />}
+      {tab === 'social' && publicSettings.social_enabled && <SocialEinstellungen />}
+      {tab === 'messenger' && publicSettings.social_enabled && <MessengerSicherheitTab />}
+      {tab === 'tresor' && publicSettings.vault_enabled && <TresorSicherheitTab />}
       {tab === 'desktop' && <DesktopIntegration onKonfigAenderung={onKonfigAenderung} />}
       {tab === 'wakeword' && <WakewordEinrichtung />}
       {tab === 'audio' && <AudioEinstellungen />}
