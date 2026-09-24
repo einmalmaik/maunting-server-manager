@@ -8,6 +8,10 @@ from dependencies import require_global, verify_csrf
 from models import AiMemoryEntry, AiMemoryPreference, User
 from schemas.ai_memory import (
     AiMemoryClearResponse,
+    AiMemoryImportPreviewRequest,
+    AiMemoryImportPreviewResponse,
+    AiMemoryImportRequest,
+    AiMemoryImportResponse,
     AiMemoryNoticeAnswer,
     AiMemoryPage,
     AiMemoryPreferenceResponse,
@@ -16,7 +20,7 @@ from schemas.ai_memory import (
     AiMemoryWrite,
     MemoryScope,
 )
-from services import ai_memory_service
+from services import ai_memory_import_service, ai_memory_service
 from services.dis_client import DisSidecarError
 
 
@@ -144,6 +148,45 @@ def save_memory(
             team_id=payload.team_id, key=payload.key, value=payload.value,
         )
         return _response(row, value)
+    except DisSidecarError as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
+
+
+@router.post("/import/preview", response_model=AiMemoryImportPreviewResponse)
+def preview_memory_import(
+    payload: AiMemoryImportPreviewRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.memory.use")),
+    _: None = Depends(verify_csrf),
+) -> AiMemoryImportPreviewResponse:
+    """Zerlegt die Antwort einer fremden KI und gleicht sie mit dem Bereich ab.
+
+    Schreibt nichts. Ein POST trotzdem, weil der Text bis zu 100.000 Zeichen
+    lang sein darf und persönlich ist — in einer URL landete er in jedem
+    Zugriffsprotokoll.
+    """
+    try:
+        return ai_memory_import_service.analyze_preview(db, user, payload)
+    except DisSidecarError as exc:
+        raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
+
+
+@router.post("/import", response_model=AiMemoryImportResponse)
+def execute_memory_import(
+    payload: AiMemoryImportRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.memory.use")),
+    _: None = Depends(verify_csrf),
+) -> AiMemoryImportResponse:
+    """Übernimmt die in der Vorschau ausgewählten Einträge.
+
+    Fällt der Sidecar mittendrin aus, stehen die bis dahin geschriebenen
+    Einträge bereits fest — jeder wird einzeln festgeschrieben. Ein erneuter
+    Import meldet sie dann als vorhanden, statt sie doppelt anzulegen.
+    """
+    try:
+        return ai_memory_import_service.execute_import(db, user, payload)
     except DisSidecarError as exc:
         db.rollback()
         raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc

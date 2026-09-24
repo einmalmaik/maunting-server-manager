@@ -789,6 +789,48 @@ export interface AiMemoryPage {
   limit: number
 }
 
+/** Was die Vorschau über einen erkannten Fakt sagt — siehe `schemas/ai_memory.py`. */
+export type AiMemoryImportStatus = 'new' | 'exact_duplicate' | 'similar_existing' | 'has_secret'
+
+export interface AiMemoryImportPreviewItem {
+  key: string
+  value: string
+  category: string
+  evidence: string | null
+  status: AiMemoryImportStatus
+  existing_key: string | null
+  /** `null` auch dann, wenn der Schlüssel belegt, sein Inhalt aber unlesbar ist. */
+  existing_value: string | null
+  similarity: number | null
+}
+
+export interface AiMemoryImportPreview {
+  detected_source: string | null
+  items: AiMemoryImportPreviewItem[]
+  total_detected: number
+  total_valid: number
+  total_conflicts: number
+  total_secrets_blocked: number
+  /** Wieviele neue Schlüssel der Bereich noch fasst. Ersetzen kostet keinen Platz. */
+  available_slots: number
+  /** Ob die KI persönliche Einträge heute liest — sonst bleibt der Import liegen. */
+  memory_enabled: boolean
+}
+
+export interface AiMemoryImportTarget {
+  scope: AiMemoryEntry['scope']
+  server_id?: number
+  team_id?: number
+  source_provider?: string
+}
+
+export interface AiMemoryImportResult {
+  imported_count: number
+  updated_count: number
+  skipped_count: number
+  skipped: { key: string; reason: 'exists' | 'full' | 'rejected' | 'duplicate' | 'conflict' }[]
+}
+
 export interface AiMemoryPreference {
   enabled: boolean
   /**
@@ -1607,6 +1649,19 @@ export const aiApi = {
    */
   answerMemoryNotice: (enable: boolean, hideFuture: boolean) => api<AiMemoryPreference>('/ai/memory/notice', {
     method: 'POST', body: JSON.stringify({ enable, hide_future: hideFuture }),
+  }),
+  /** Zerlegt die Antwort einer fremden KI und gleicht sie ab — schreibt nichts. */
+  importMemoryPreview: (payload: AiMemoryImportTarget & { raw_text: string }) =>
+    api<AiMemoryImportPreview>('/ai/memory/import/preview', {
+      method: 'POST', body: JSON.stringify(payload),
+    }),
+  /** Übernimmt die ausgewählten Einträge; übersprungene kommen mit Grund zurück. */
+  executeMemoryImport: (
+    payload: AiMemoryImportTarget & {
+      items: { key: string; value: string; replace_existing: boolean }[]
+    },
+  ) => api<AiMemoryImportResult>('/ai/memory/import', {
+    method: 'POST', body: JSON.stringify(payload),
   }),
   /** Das Verzeichnis ohne Texte — dasselbe, das auch die KI im Prompt sieht. */
   listSkills: () => api<AiSkillSummary[]>('/ai/skills'),

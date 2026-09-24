@@ -140,6 +140,22 @@ VERBLASST_ZEICHEN = 60
 #: zusammengelegter Fakt ist teurer als ein doppelter.
 DUPLIKAT_AB = 0.70
 
+#: Ab wieviel Aehnlichkeit die Import-Vorschau einen Bestandseintrag daneben
+#: zeigt (`importabgleich`).
+#:
+#: Niedriger als `DUPLIKAT_AB`, weil hier nichts zusammengelegt wird: die
+#: Vorschau stellt den alten Eintrag nur daneben, und ersetzt wird allein auf
+#: Klick. Der teure Fehler, gegen den `DUPLIKAT_AB` hoch steht, kann hier also
+#: nicht passieren — der billige (ein Doppel, weil der Hinweis fehlte) schon.
+#: Gemessen am 25.09.2026 mit potion-multilingual-128M, Bestand gegen typische
+#: Importzeilen (Schlüssel ohne Kategoriepräfix, siehe
+#: `ai_memory_import_service.normalize_key`): derselbe Fakt 0,59 bis 0,87
+#: ("Antworte auf Deutsch." zu "Antworte immer auf Deutsch." 0,59; "Berlin"
+#: zu "Wohnt in Berlin." 0,86), verschiedene Fakten höchstens 0,31 ("Hat eine
+#: Schwester namens Mia" zu "Hat einen Bruder namens Tom." 0,31). 0,45 liegt
+#: in der Lücke.
+IMPORT_HINWEIS_AB = 0.45
+
 #: Wieviel Abrufstaerke ein frisch gemerkter Eintrag mitbringt.
 #:
 #: Ohne diesen Startwert waere jeder neue Eintrag sofort blass: er hat noch
@@ -987,6 +1003,110 @@ def aehnlicher_eintrag(
         if wert >= schwelle and (bester is None or wert > bester[1]):
             bester = (row, float(wert))
     return bester
+
+
+@dataclass(frozen=True)
+class Importabgleich:
+    """Was ein Bereich zu einer Liste von Importkandidaten schon weiß.
+
+    ``gleicher_schluessel`` nennt je belegtem Kandidatenschlüssel den Klartext,
+    der dort heute steht — ``None``, wenn er sich nicht mehr öffnen lässt.
+    ``aehnlich`` steht parallel zur Kandidatenliste: der nächstliegende
+    Bestandseintrag unter einem **anderen** Schlüssel ab `IMPORT_HINWEIS_AB`
+    als (Schlüssel, Klartext, Ähnlichkeit) oder ``None``. ``frei`` ist,
+    wieviele neue Einträge der Bereich noch fasst.
+    """
+
+    gleicher_schluessel: dict[str, str | None]
+    aehnlich: list[tuple[str, str, float] | None]
+    frei: int
+
+
+def importabgleich(
+    db: Session,
+    user: User,
+    scope: str,
+    server_id: int | None,
+    team_id: int | None,
+    kandidaten: list[tuple[str, str]],
+) -> Importabgleich:
+    """Gleicht Importkandidaten in **einem** Durchgang gegen den Bereich ab.
+
+    Dieselbe Frage wie `aehnlicher_eintrag`, nur für viele Kandidaten auf
+    einmal. Jene Funktion liest je Aufruf alle Vektoren des Bereichs; bei 200
+    importierten Fakten gegen 5.000 Einträge wären das eine Million gelesene
+    Vektoren statt 5.000. Hier wird der Bereich einmal gelesen, einmal
+    eingebettet, und entschlüsselt werden nur die Zeilen, die in der Vorschau
+    auch erscheinen.
+
+    Geprüft werden dieselben Rechte wie beim Schreiben: wer in diesen Bereich
+    nicht schreiben darf, bekommt die Absage schon in der Vorschau und nicht
+    erst nach dem Aussuchen.
+    """
+    identity, _owner, sid, tid = scope_identity(db, user, scope, server_id, team_id)
+    _assert_may_write(db, user, scope, tid, sid)
+
+    bestand = db.query(AiMemoryEntry).filter(AiMemoryEntry.scope_identity == identity).all()
+    nach_schluessel = {row.key: row for row in bestand}
+    treffer: list[tuple[AiMemoryEntry, float] | None] = [None] * len(kandidaten)
+
+    kodierung = (
+        ai_embedding_service.encode(
+            [_embedding_source(key, value) for key, value in kandidaten], db=db
+        )
+        if kandidaten and bestand
+        else None
+    )
+    if kodierung is not None and len(kodierung.vektoren) == len(kandidaten):
+        paare: list[tuple[AiMemoryEntry, Sequence[float]]] = []
+        for row in bestand:
+            vektor = _stored_vector(row, kodierung.modell)
+            if vektor is not None:
+                paare.append((row, vektor))
+        vektoren = [vektor for _row, vektor in paare]
+        for index, (key, _value) in enumerate(kandidaten):
+            if not paare:
+                break
+            werte = ai_embedding_service.similarity(kodierung.vektoren[index], vektoren)
+            for (row, _vektor), wert in zip(paare, werte):
+                # Derselbe Schlüssel ist kein Doppel, sondern ein Überschreiben —
+                # das meldet `gleicher_schluessel`.
+                if row.key == key or wert < IMPORT_HINWEIS_AB:
+                    continue
+                bisher = treffer[index]
+                if bisher is None or wert > bisher[1]:
+                    treffer[index] = (row, float(wert))
+
+    gebraucht: dict[str, AiMemoryEntry] = {}
+    for key, _value in kandidaten:
+        if key in nach_schluessel:
+            gebraucht[nach_schluessel[key].id] = nach_schluessel[key]
+    for fund in treffer:
+        if fund is not None:
+            gebraucht[fund[0].id] = fund[0]
+    klartext = {row.id: value for row, value in _entschluesseln_lesbare(list(gebraucht.values()))}
+
+    grenze = ai_limit_service.resolve_scope_memory_limit(
+        db, scope, user, team_id=tid, server_id=sid,
+    )
+    return Importabgleich(
+        # Auch eine Zeile, die sich nicht mehr öffnen lässt, belegt ihren
+        # Schlüssel — ``None`` sagt "besetzt, Inhalt unlesbar".
+        gleicher_schluessel={
+            key: klartext.get(nach_schluessel[key].id)
+            for key, _value in kandidaten
+            if key in nach_schluessel
+        },
+        # Eine Zeile, die sich nicht öffnen lässt, taugt nicht als Vergleich:
+        # der Benutzer soll sehen, womit er abwägt.
+        aehnlich=[
+            (fund[0].key, klartext[fund[0].id], fund[1])
+            if fund is not None and fund[0].id in klartext
+            else None
+            for fund in treffer
+        ],
+        frei=max(0, grenze - len(bestand)),
+    )
 
 
 def delete_entry(db: Session, user: User, entry_id: str) -> None:
