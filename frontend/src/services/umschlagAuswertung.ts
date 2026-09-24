@@ -145,9 +145,21 @@ export async function werteUmschlaegeAus(
       continue
     }
 
+    /*
+     * Nur das Lesen steht im `try`. Bis 09/2026 umschloss es auch die ganze
+     * Absenderprüfung. Warf sie (eine kaputte Unterschrift genügte), landete
+     * die Nutzlast im Zweig für Altklartext und stand in einer Gruppe als
+     * roher JSON-Text im Verlauf, ohne jede Absenderprüfung.
+     */
+    let parsed: any
     try {
-      const parsed = JSON.parse(plain)
-      if (typeof parsed === 'object' && parsed !== null) {
+      parsed = JSON.parse(plain)
+    } catch {
+      parsed = undefined
+    }
+
+    if (typeof parsed === 'object' && parsed !== null) {
+      try {
         /*
          * Wer das hier geschrieben hat — einmal beantwortet, für alles was
          * folgt.
@@ -566,59 +578,67 @@ export async function werteUmschlaegeAus(
           verfaelltAm: typeof parsed.verfaellt_am === 'string' ? parsed.verfaellt_am : undefined,
         })
         continue
-      }
-    } catch {
-      /*
-       * Klartext ohne JSON-Hülle, aus der Zeit vor der Hülle.
-       *
-       * Er trägt keine Unterschrift. Wer ihn geschrieben hat, sagt im
-       * Direktchat der Ratchet; ohne ihn bleibt nur die Behauptung —
-       * `[ME]:` am Anfang, sonst die Gegenseite. Bis 09/2026 galt die
-       * Behauptung auch über den Ratchet: eine Nachricht der Gegenseite
-       * mit `[ME]:` stand als eigene im Verlauf. Und wie jeder Beleg gilt
-       * sie nur für ein Konto, das nicht unterschreiben kann — wer es
-       * kann, schickt JSON mit Unterschrift.
-       */
-      const ratchetUrheber = lesung.art === 'klartext' ? lesung.vonKonto : undefined
-      const vonMirBehauptet = plain.startsWith('[ME]:')
-      const urheber =
-        ratchetUrheber !== undefined
-          ? Number(ratchetUrheber)
-          : vonMirBehauptet
-            ? Number(currentUserId)
-            : activeContact
-              ? Number(activeContact.userId)
-              : 0
-      if (urheber > 0 && (await kontoNutztSignaturen(urheber))) {
-        console.warn('[Messenger] Dropping unsigned plain-text message from an account that signs:', urheber)
+      } catch (err) {
+        // Eine Prüfung, die nicht zu Ende kommt, ist keine bestandene. Der
+        // Umschlag wird beim nächsten Abruf erneut ausgewertet.
+        console.warn(
+          '[Messenger] Dropping payload, sender check failed:',
+          err instanceof Error ? err.name : typeof err,
+        )
         continue
       }
-
-      const clientUuid = logischeUuid(env.client_uuid)
-      if (clientUuid && seenClientUuids.has(clientUuid)) {
-        continue
-      }
-      if (clientUuid) {
-        seenClientUuids.add(clientUuid)
-      }
-
-      const isSelf = urheber === Number(currentUserId)
-      // Die Markierung fällt nur weg, wo sie stimmt. Nennt der Ratchet die
-      // Gegenseite, bleibt sie stehen: so sieht man, was behauptet wurde.
-      const text = isSelf && vonMirBehauptet ? plain.slice('[ME]:'.length) : plain
-      const senderId = urheber || (activeContact ? activeContact.userId : 0)
-      if (!isSelf && env.id > maxIncomingId) {
-        maxIncomingId = env.id
-      }
-      decryptedList.push({
-        id: env.id,
-        clientUuid,
-        senderId,
-        text,
-        createdAt: env.created_at,
-        isSelf,
-      })
     }
+
+    /*
+     * Klartext ohne JSON-Hülle, aus der Zeit vor der Hülle.
+     *
+     * Er trägt keine Unterschrift. Wer ihn geschrieben hat, sagt im
+     * Direktchat der Ratchet; ohne ihn bleibt nur die Behauptung —
+     * `[ME]:` am Anfang, sonst die Gegenseite. Bis 09/2026 galt die
+     * Behauptung auch über den Ratchet: eine Nachricht der Gegenseite
+     * mit `[ME]:` stand als eigene im Verlauf. Und wie jeder Beleg gilt
+     * sie nur für ein Konto, das nicht unterschreiben kann — wer es
+     * kann, schickt JSON mit Unterschrift.
+     */
+    const ratchetUrheber = lesung.art === 'klartext' ? lesung.vonKonto : undefined
+    const vonMirBehauptet = plain.startsWith('[ME]:')
+    const urheber =
+      ratchetUrheber !== undefined
+        ? Number(ratchetUrheber)
+        : vonMirBehauptet
+          ? Number(currentUserId)
+          : activeContact
+            ? Number(activeContact.userId)
+            : 0
+    if (urheber > 0 && (await kontoNutztSignaturen(urheber))) {
+      console.warn('[Messenger] Dropping unsigned plain-text message from an account that signs:', urheber)
+      continue
+    }
+
+    const clientUuid = logischeUuid(env.client_uuid)
+    if (clientUuid && seenClientUuids.has(clientUuid)) {
+      continue
+    }
+    if (clientUuid) {
+      seenClientUuids.add(clientUuid)
+    }
+
+    const isSelf = urheber === Number(currentUserId)
+    // Die Markierung fällt nur weg, wo sie stimmt. Nennt der Ratchet die
+    // Gegenseite, bleibt sie stehen: so sieht man, was behauptet wurde.
+    const text = isSelf && vonMirBehauptet ? plain.slice('[ME]:'.length) : plain
+    const senderId = urheber || (activeContact ? activeContact.userId : 0)
+    if (!isSelf && env.id > maxIncomingId) {
+      maxIncomingId = env.id
+    }
+    decryptedList.push({
+      id: env.id,
+      clientUuid,
+      senderId,
+      text,
+      createdAt: env.created_at,
+      isSelf,
+    })
   }
 
   return {

@@ -395,7 +395,60 @@ describe('Steuerpakete', () => {
   })
 })
 
+describe('Prüfung, die nicht zu Ende kommt', () => {
+  const wirft = () =>
+    vi.mocked(pruefeNutzlast).mockImplementationOnce(async () => {
+      throw new Error('kaputte Unterschrift')
+    })
+
+  it('verwirft in der Gruppe, statt die Nutzlast als rohen Text zu zeigen', async () => {
+    wirft()
+    const { decryptedList } = await werteUmschlaegeAus(
+      [klartext({ text: 'untergeschoben', sender_id: BERT, _sig: 'kaputt' })],
+      gruppenkontext({ [BERT]: ALLES }),
+    )
+    expect(decryptedList).toEqual([])
+  })
+
+  it('verwirft im Direktchat, auch wenn die Gegenseite nicht unterschreibt', async () => {
+    wirft()
+    const { decryptedList } = await werteUmschlaegeAus(
+      [klartext({ text: 'untergeschoben', _sig: 'kaputt' })],
+      kontext(),
+    )
+    expect(decryptedList).toEqual([])
+  })
+
+  it('lässt ein Steuerpaket ohne Wirkung und schreibt keinen Inhalt ins Log', async () => {
+    const warnung = vi.mocked(console.warn)
+    warnung.mockClear()
+    wirft()
+    const k = kontext()
+    const { reaktionen, decryptedList } = await werteUmschlaegeAus(
+      [klartext({ type: 'reaction', emoji: '👍', target_id: 50, geheim: 'Inhalt' })],
+      k,
+    )
+    expect(reaktionen.anzahl).toBe(0)
+    expect(decryptedList).toEqual([])
+    expect(JSON.stringify(warnung.mock.calls)).not.toContain('Inhalt')
+  })
+
+  it('wertet den nächsten Umschlag normal aus', async () => {
+    wirft()
+    const { decryptedList } = await werteUmschlaegeAus(
+      [klartext({ text: 'kaputt' }), klartext({ text: 'danach', sender_id: BERT })],
+      kontext(),
+    )
+    expect(decryptedList.map((m) => m.text)).toEqual(['danach'])
+  })
+})
+
 describe('Altbestand und Unlesbares', () => {
+  it('zeigt Klartext, der zufällig gültiges JSON ohne Objekt ist', async () => {
+    const { decryptedList } = await werteUmschlaegeAus([klartext('42')], kontext())
+    expect(decryptedList[0]).toMatchObject({ text: '42', senderId: BERT, isSelf: false })
+  })
+
   it('lässt ein [ME]: stehen, wenn der Ratchet die Gegenseite nennt', async () => {
     const { decryptedList } = await werteUmschlaegeAus(
       [klartext('[ME]:das war ich', { vonKonto: BERT })],
