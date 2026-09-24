@@ -4,7 +4,6 @@ import { useSearchParams, useParams, useNavigate } from 'react-router-dom'
 import {
   Button,
   Input,
-  Avatar,
   ChatInputBar,
   VoiceRecordingBar,
   Blattmenue,
@@ -15,26 +14,17 @@ import {
   MessageSquare,
   Send,
   Camera,
-  StickyNote,
-  Calendar as CalendarIcon,
   Search,
   X,
   RefreshCw,
-  Mic,
   Trash2,
   Plus,
   Smile,
-  Paperclip,
-  FileText,
   Upload,
   UserCheck,
-  Pencil,
-  Image as ImageIcon,
   Bell,
   BellOff,
-  Ban,
   Phone,
-  Video,
   Star,
   Pin,
   PinOff,
@@ -257,7 +247,6 @@ class E2eeIdentityLockedError extends Error {
 }
 import { compressImageFile } from '@/lib/imageCompression'
 import { getAudioTrackConstraints } from '@/lib/audioSettings'
-import { IN_HOUSE_STICKERS, CATEGORIZED_EMOJIS } from '@/services/stickerCatalog'
 import { CameraSnapshotModal } from '@/components/social/CameraSnapshotModal'
 import { CreateStoryModal } from '@/components/social/CreateStoryModal'
 import { MessengerSperrschirm } from '@/components/social/MessengerSperrschirm'
@@ -284,11 +273,16 @@ import { ChatHeader } from '@/components/social/chat/ChatHeader'
 import { ChatActionsMenu } from '@/components/social/chat/ChatActionsMenu'
 import { ChatPinnedBar } from '@/components/social/chat/ChatPinnedBar'
 import { ChatTimeline } from '@/components/social/chat/ChatTimeline'
+import { StagedImageBar, StagedFileBar, EditingBanner, BlockedNotice } from '@/components/social/chat/ChatComposerBars'
+import { StickerEmojiPicker, type PickerReiter } from '@/components/social/chat/StickerEmojiPicker'
+import { AttachMenu } from '@/components/social/chat/AttachMenu'
+import { MentionSuggestions, ChatReplyBar } from '@/components/social/chat/ChatComposerTop'
+import { ComposerSendActions } from '@/components/social/chat/ComposerSendActions'
 import { ChatHintergrund, ChatHintergrundDialog } from '@/features/chatHintergrund'
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
 import { useMessengerNotificationStore, PINS_MAX } from '@/stores/messengerNotificationStore'
-import { sanitizeSvg, getSafeAttachmentUrl } from '@/lib/sanitizeSvg'
+import { getSafeAttachmentUrl } from '@/lib/sanitizeSvg'
 
 export interface ChatContact {
   /**
@@ -357,13 +351,6 @@ export interface SendeAuftrag {
   weitergeleitet?: boolean
   /** Ein anderes Ziel als der offene Chat — fürs Weiterleiten. */
   ziel?: { blindMailboxId: string; recipientId?: number | null; groupId?: number | null }
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
 }
 
 export { getSafeAttachmentUrl }
@@ -565,26 +552,9 @@ export function Messenger() {
 
   // Camera & Attachments
   const [isCameraModalOpen, setIsCameraModalOpen] = useState(false)
-  const [isAttachMenuOpen, setIsAttachMenuOpen] = useState(false)
-  const attachMenuRef = useRef<HTMLDivElement>(null)
   const [isDragOver, setIsDragOver] = useState(false)
   const [stagedFile, setStagedFile] = useState<FileAttachment | null>(null)
   const docInputRef = useRef<HTMLInputElement>(null)
-
-  // Close attachment menu on outside click
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (attachMenuRef.current && !attachMenuRef.current.contains(e.target as Node)) {
-        setIsAttachMenuOpen(false)
-      }
-    }
-    if (isAttachMenuOpen) {
-      document.addEventListener('mousedown', handleClickOutside)
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [isAttachMenuOpen])
 
   // Read receipts setting from profile
   const readReceiptsEnabled = useMemo(() => {
@@ -630,7 +600,7 @@ export function Messenger() {
 
   // Stickers / Emojis
   const [isStickerPickerOpen, setIsStickerPickerOpen] = useState(false)
-  const [stickerTab, setStickerTab] = useState<'stickers' | 'emojis'>('stickers')
+  const [stickerTab, setStickerTab] = useState<PickerReiter>('stickers')
 
   // Group creation modal
   const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false)
@@ -5856,80 +5826,16 @@ export function Messenger() {
                 )}
               />
 
-              {/* Staged Image Preview Bar */}
-              {selectedImage && (
-                <div className="px-4 py-2 border-t border-outline-variant/20 bg-surface-container flex items-center gap-3">
-                  <div className="relative">
-                    <img
-                      src={selectedImage.dataUrl}
-                      alt="Vorschau"
-                      className="w-12 h-12 object-cover rounded-lg border border-outline-variant/40"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setSelectedImage(null)}
-                      className="absolute -top-1 -right-1 p-0.5 rounded-full bg-surface-container-highest text-on-surface"
-                      aria-label={t('messenger.removeImage')}
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                  <span className="text-xs text-on-surface-variant truncate">
-                    Foto angehängt: {selectedImage.name || 'image.png'}
-                  </span>
-                </div>
-              )}
-
-              {/* Staged Document / File Preview Bar */}
-              {stagedFile && (
-                <div className="px-4 py-2 border-t border-outline-variant/20 bg-surface-container flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <div className="p-1.5 rounded-lg bg-primary/10 text-primary shrink-0">
-                      <FileText className="w-4 h-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold text-primary truncate">{stagedFile.name}</p>
-                      <p className="text-label-sm text-on-surface-variant">{formatFileSize(stagedFile.sizeBytes)}</p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setStagedFile(null)}
-                    className="p-1 rounded-full hover:bg-surface-container-highest text-on-surface-variant"
-                    aria-label={t('messenger.removeFile')}
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              )}
-
-              {/* Editing Mode Banner */}
+              {selectedImage && <StagedImageBar bild={selectedImage} onEntfernen={() => setSelectedImage(null)} />}
+              {stagedFile && <StagedFileBar datei={stagedFile} onEntfernen={() => setStagedFile(null)} />}
               {editingMessage && (
-                <div className="px-4 py-2 border-t border-outline-variant/20 bg-primary/10 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <div className="p-1.5 rounded-lg bg-primary/20 text-primary shrink-0">
-                      <Pencil className="w-3.5 h-3.5" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold text-primary">{t('messenger.editMessage')}</p>
-                      <p className="text-label-sm text-on-surface-variant truncate max-w-md">
-                        {editingMessage.text}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingMessage(null)
-                      setInputText('')
-                    }}
-                    className="p-1 rounded-full hover:bg-surface-container-highest text-on-surface-variant"
-                    aria-label={t('messenger.cancelEdit')}
-                    title="Abbrechen"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+                <EditingBanner
+                  text={editingMessage.text}
+                  onAbbrechen={() => {
+                    setEditingMessage(null)
+                    setInputText('')
+                  }}
+                />
               )}
 
               {/* Nach unten. Schwebt über der Eingabe, nicht darunter, und weicht
@@ -5975,20 +5881,7 @@ export function Messenger() {
                   die App weg, statt zu tippen. */}
               <div className="p-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] border-t border-outline-variant/20 bg-surface-container-low relative z-1">
                 {activeContact && isBlocked(activeContact.userId) ? (
-                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3 rounded-xl bg-status-destructive/10 border border-status-destructive/30 text-xs text-status-destructive">
-                    <div className="flex items-center gap-2">
-                      <Ban className="w-4 h-4 shrink-0" />
-                      <span>{t('messenger.contactBlocked')}</span>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => void unblockUser(activeContact.userId)}
-                      className="h-7 text-xs px-3 border border-status-destructive/30 hover:bg-status-destructive/20 text-status-destructive font-medium"
-                    >
-                      {t('messenger.unblock')}
-                    </Button>
-                  </div>
+                  <BlockedNotice onAufheben={() => void unblockUser(activeContact.userId)} />
                 ) : isRecording ? (
                   <VoiceRecordingBar
                     durationSeconds={recordingDuration}
@@ -6004,87 +5897,17 @@ export function Messenger() {
                   />
                 ) : (
                   <>
-                    {/* WhatsApp-Style Sticker & Emoji Picker Popover */}
                     {isStickerPickerOpen && (
-                      <div className="mb-2 p-2.5 rounded-xl bg-surface-container border border-outline-variant/30 shadow-lg animate-slide-up">
-                        <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-outline-variant/20">
-                          <div className="flex items-center gap-1.5">
-                            <Button
-                              type="button"
-                              variant={stickerTab === 'stickers' ? 'primary' : 'ghost'}
-                              size="sm"
-                              onClick={() => setStickerTab('stickers')}
-                              className="h-6 px-2.5 text-xs rounded-full"
-                            >
-                              Sticker
-                            </Button>
-                            <Button
-                              type="button"
-                              variant={stickerTab === 'emojis' ? 'primary' : 'ghost'}
-                              size="sm"
-                              onClick={() => setStickerTab('emojis')}
-                              className="h-6 px-2.5 text-xs rounded-full"
-                            >
-                              Emojis
-                            </Button>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setIsStickerPickerOpen(false)}
-                            className="p-1 rounded-md text-on-surface-variant hover:text-on-surface"
-                            aria-label={t('common.close')}
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-
-                        {stickerTab === 'stickers' ? (
-                          <div className="grid grid-cols-4 sm:grid-cols-8 gap-2 max-h-48 overflow-y-auto p-1.5">
-                            {IN_HOUSE_STICKERS.map((stk) => (
-                              <button
-                                key={stk.id}
-                                type="button"
-                                onClick={() => {
-                                  void handleSendMessage({ sticker: stk })
-                                  setIsStickerPickerOpen(false)
-                                }}
-                                className="flex flex-col items-center justify-center p-1.5 rounded-xl hover:bg-surface-container-high transition-transform hover:scale-105"
-                                title={stk.label}
-                              >
-                                <div
-                                  className="w-11 h-11 flex items-center justify-center"
-                                  dangerouslySetInnerHTML={{ __html: sanitizeSvg(stk.svg) }}
-                                />
-                                <span className="text-label-sm text-on-surface-variant/80 truncate w-full text-center mt-1 font-medium">
-                                  {stk.label}
-                                </span>
-                              </button>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="space-y-3 max-h-52 overflow-y-auto p-1.5">
-                            {CATEGORIZED_EMOJIS.map((cat) => (
-                              <div key={cat.category} className="space-y-1">
-                                <div className="text-label-sm font-bold text-on-surface-variant/70 uppercase tracking-wider px-1">
-                                  {cat.category}
-                                </div>
-                                <div className="grid grid-cols-8 sm:grid-cols-12 gap-1">
-                                  {cat.emojis.map((emoji) => (
-                                    <button
-                                      key={emoji}
-                                      type="button"
-                                      onClick={() => setInputText((prev) => prev + emoji)}
-                                      className="p-1 text-lg rounded-lg hover:bg-surface-container-high transition-transform hover:scale-125 flex items-center justify-center"
-                                    >
-                                      {emoji}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                      <StickerEmojiPicker
+                        reiter={stickerTab}
+                        onReiter={setStickerTab}
+                        onSticker={(stk) => {
+                          void handleSendMessage({ sticker: stk })
+                          setIsStickerPickerOpen(false)
+                        }}
+                        onEmoji={(emoji) => setInputText((prev) => prev + emoji)}
+                        onSchliessen={() => setIsStickerPickerOpen(false)}
+                      />
                     )}
 
                     <form
@@ -6124,66 +5947,8 @@ export function Messenger() {
                         onChange={handleInputChange}
                         topSlot={
                           <>
-                            {/* Die Vorschlagsliste beim Tippen von `@`.
-                                Liegt unmittelbar über dem Feld und damit über
-                                der Tastatur; jede Zeile ist 44 px hoch. */}
-                            {erwaehnungsVorschlaege.length > 0 && (
-                              <div className="border-b border-outline-variant/20 max-h-56 overflow-y-auto">
-                                {erwaehnungsVorschlaege.map((v) => (
-                                  <button
-                                    key={v.userId ?? 'alle'}
-                                    type="button"
-                                    onMouseDown={(e) => e.preventDefault()}
-                                    onClick={() => waehleErwaehnung(v)}
-                                    className="w-full min-h-11 px-3 py-1.5 flex items-center gap-2.5 text-left hover:bg-surface-container-high transition-colors"
-                                  >
-                                    {v.istAlle ? (
-                                      <span className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
-                                        <Bell className="w-3.5 h-3.5 text-primary" />
-                                      </span>
-                                    ) : (
-                                      <Avatar
-                                        src={v.avatarUrl ?? null}
-                                        name={v.name}
-                                        size="sm"
-                                        className="w-7 h-7 shrink-0"
-                                      />
-                                    )}
-                                    <span className="min-w-0 flex-1">
-                                      <span className="block text-xs text-on-surface truncate">@{v.name}</span>
-                                      {v.istAlle && (
-                                        <span className="block text-label-sm text-on-surface-variant">
-                                          Benachrichtigt alle in dieser Gruppe
-                                        </span>
-                                      )}
-                                    </span>
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-
-                            {/* Der Zitatkopf beim Antworten. */}
-                            {antwortAuf && (
-                              <div className="px-2.5 py-2 border-b border-outline-variant/20 flex items-center gap-2">
-                                <span className="w-0.5 self-stretch rounded-full bg-primary shrink-0" />
-                                <span className="min-w-0 flex-1">
-                                  <span className="block text-label-sm font-semibold text-primary truncate">
-                                    Antwort an {antwortAuf.absenderName || 'Nachricht'}
-                                  </span>
-                                  <span className="block text-label-sm text-on-surface-variant line-clamp-1">
-                                    {antwortAuf.auszug}
-                                  </span>
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => setAntwortAuf(null)}
-                                  className="w-11 h-11 -mr-1 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high transition-colors shrink-0"
-                                  aria-label={t('messenger.discardReply')}
-                                >
-                                  <X className="w-4 h-4" />
-                                </button>
-                              </div>
-                            )}
+                            <MentionSuggestions vorschlaege={erwaehnungsVorschlaege} onWaehlen={waehleErwaehnung} />
+                            {antwortAuf && <ChatReplyBar antwort={antwortAuf} onVerwerfen={() => setAntwortAuf(null)} />}
                           </>
                         }
                         onSubmit={() => {
@@ -6234,167 +5999,23 @@ export function Messenger() {
                               <Smile className="w-4 h-4" />
                             </button>
 
-                            {/* Unified Attachment Button with sleek Popover */}
-                            <div className="relative shrink-0" ref={attachMenuRef}>
-                              <button
-                                type="button"
-                                disabled={!darfAnhaengen}
-                                onClick={() => setIsAttachMenuOpen((prev) => !prev)}
-                                className={`w-11 h-11 sm:w-8 sm:h-8 shrink-0 flex items-center justify-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                                  isAttachMenuOpen
-                                    ? 'bg-surface-container-highest text-primary'
-                                    : 'text-on-surface-variant hover:text-primary'
-                                }`}
-                                title={darfAnhaengen ? t('messenger.addAttachment') : t('messenger.attachNoRight')}
-                                aria-label={darfAnhaengen ? t('messenger.addAttachment') : t('messenger.attachNoRight')}
-                              >
-                                <Plus className={`w-4 h-4 transition-transform duration-200 ${isAttachMenuOpen ? 'rotate-45 text-primary' : ''}`} />
-                              </button>
-
-                              {/* Attachment Popover Menu */}
-                              {isAttachMenuOpen && (
-                                <div className="absolute bottom-10 left-0 z-30 min-w-[210px] p-1.5 rounded-2xl bg-surface-container-high/95 backdrop-blur-md border border-outline-variant/30 shadow-xl space-y-1 animate-slide-up">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setIsAttachMenuOpen(false)
-                                      setIsCameraModalOpen(true)
-                                    }}
-                                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
-                                    aria-label={t('messenger.attachPhoto')}
-                                  >
-                                    <div className="w-7 h-7 rounded-lg bg-primary/15 text-primary flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                                      <Camera className="w-4 h-4" />
-                                    </div>
-                                    <div className="min-w-0 flex-1">
-                                      <div className="text-xs font-semibold text-primary">{t('social.camera.take')}</div>
-                                      <div className="text-label-sm text-on-surface-variant/70">{t('messenger.cameraSnapshot')}</div>
-                                    </div>
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setIsAttachMenuOpen(false)
-                                      fileInputRef.current?.click()
-                                    }}
-                                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
-                                    aria-label={t('messenger.pickPhoto')}
-                                  >
-                                    <div className="w-7 h-7 rounded-lg bg-primary/15 text-primary flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                                      <ImageIcon className="w-4 h-4" />
-                                    </div>
-                                    <div className="min-w-0 flex-1">
-                                      <div className="text-xs font-semibold text-primary">{t('messenger.photo')}</div>
-                                      <div className="text-label-sm text-on-surface-variant/70">{t('messenger.fromGallery')}</div>
-                                    </div>
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setIsAttachMenuOpen(false)
-                                      docInputRef.current?.click()
-                                    }}
-                                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
-                                    aria-label={t('messenger.attachFile')}
-                                  >
-                                    <div className="w-7 h-7 rounded-lg bg-primary/15 text-primary flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                                      <Paperclip className="w-4 h-4" />
-                                    </div>
-                                    <div className="min-w-0 flex-1">
-                                      <div className="text-xs font-semibold text-primary">{t('messenger.document')}</div>
-                                      <div className="text-label-sm text-on-surface-variant/70">{t('messenger.sendEncrypted')}</div>
-                                    </div>
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setIsAttachMenuOpen(false)
-                                      handleOpenNotePicker()
-                                    }}
-                                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
-                                    aria-label={t('messenger.shareNote')}
-                                  >
-                                    <div className="w-7 h-7 rounded-lg bg-primary/15 text-primary flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                                      <StickyNote className="w-4 h-4" />
-                                    </div>
-                                    <div className="min-w-0 flex-1">
-                                      <div className="text-xs font-semibold text-primary">{t('messenger.attachNote')}</div>
-                                      <div className="text-label-sm text-on-surface-variant/70">{t('messenger.fromNotes')}</div>
-                                    </div>
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setIsAttachMenuOpen(false)
-                                      handleOpenCalendarPicker()
-                                    }}
-                                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-surface-container-highest/80 transition-colors group"
-                                    aria-label={t('messenger.shareEvent')}
-                                  >
-                                    <div className="w-7 h-7 rounded-lg bg-primary/15 text-primary flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                                      <CalendarIcon className="w-4 h-4" />
-                                    </div>
-                                    <div className="min-w-0 flex-1">
-                                      <div className="text-xs font-semibold text-primary">{t('messenger.attachEvent')}</div>
-                                      <div className="text-label-sm text-on-surface-variant/70">{t('messenger.fromCalendar')}</div>
-                                    </div>
-                                  </button>
-                                </div>
-                              )}
-                            </div>
+                            <AttachMenu
+                              erlaubt={darfAnhaengen}
+                              onKamera={() => setIsCameraModalOpen(true)}
+                              onFoto={() => fileInputRef.current?.click()}
+                              onDokument={() => docInputRef.current?.click()}
+                              onNotiz={() => void handleOpenNotePicker()}
+                              onTermin={() => void handleOpenCalendarPicker()}
+                            />
                           </>
                         }
                         rightActions={
-                          inputText.trim() || selectedImage || stagedFile ? (
-                            /*
-                             * Ein einfacher Knopf, kein `<Button>` — wie seine
-                             * Nachbarn in dieser Leiste.
-                             *
-                             * `<Button size="sm">` bringt `h-8` mit, und das
-                             * gewinnt gegen ein `h-11` aus `className`: über
-                             * die Höhe entscheidet die Reihenfolge im
-                             * Stylesheet, nicht die im Attribut. Gemessen war
-                             * der Knopf am Telefon deshalb 44 × 32 statt
-                             * 44 × 44 — zu flach für einen Daumen, und das
-                             * bei der einen Handlung, für die es keinen
-                             * zweiten Weg gibt. `msm-btn-primary` bringt nur
-                             * die Farben mit und kollidiert mit nichts.
-                             */
-                            <button
-                              type="submit"
-                              disabled={sending}
-                              className="msm-btn-primary w-11 h-11 sm:w-8 sm:h-8 shrink-0 rounded-full flex items-center justify-center"
-                              title="Senden"
-                              aria-label="Senden"
-                            >
-                              <Send className="w-3.5 h-3.5" />
-                            </button>
-                          ) : (
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => setIsVideoNoteRecording(true)}
-                                className="w-11 h-11 sm:w-8 sm:h-8 shrink-0 flex items-center justify-center text-on-surface-variant hover:text-status-success hover:bg-status-success/10 rounded-full transition-colors"
-                                title={t('messenger.recordVideoNoteHint')}
-                                aria-label={t('messenger.recordVideoNote')}
-                              >
-                                <Video className="w-4 h-4" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={startRecording}
-                                className="w-11 h-11 sm:w-8 sm:h-8 shrink-0 flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-primary/10 rounded-full transition-colors"
-                                title={t('messenger.recordVoice')}
-                                aria-label={t('messenger.recordVoice')}
-                              >
-                                <Mic className="w-4 h-4" />
-                              </button>
-                            </div>
-                          )
+                          <ComposerSendActions
+                            hatInhalt={Boolean(inputText.trim() || selectedImage || stagedFile)}
+                            sendet={sending}
+                            onVideonotiz={() => setIsVideoNoteRecording(true)}
+                            onSprachnachricht={startRecording}
+                          />
                         }
                       />
                     </form>
