@@ -187,6 +187,24 @@ class AiContextPolicyStatus(BaseModel):
     memory_search_ready: bool
 
 
+class AiMemorySearchUpdate(BaseModel):
+    google_fallback: bool
+
+
+class AiMemorySearchStatus(BaseModel):
+    """Womit die Bedeutungssuche rechnet — und ob sie das Haus verlassen darf.
+
+    ``google_fallback`` ist die Erlaubnis des Betreibers, ohne lokales Modell
+    bei Google AI Studio rechnen zu lassen (Standard aus). ``local_ready`` sagt,
+    ob das lokale Modell da ist; dann bewirkt der Schalter nichts. ``ready``
+    ist das Ergebnis aus beidem, dieselbe Antwort wie `memory_search_ready`.
+    """
+
+    google_fallback: bool
+    local_ready: bool
+    ready: bool
+
+
 class AiWorkerPolicyUpdate(BaseModel):
     """Die Betreiber-Deckel der Worker (docs/agentic-framework.md, Abschnitt 5).
 

@@ -25,6 +25,8 @@ from schemas.ai_settings import (
     AiMapTilerKeyUpdate,
     AiMapTilerMapConfig,
     AiMapTilerStatus,
+    AiMemorySearchStatus,
+    AiMemorySearchUpdate,
     AiRoleLimitsResponse,
     AiRoleLimitsUpdate,
     AiSatelliteCredentialsUpdate,
@@ -600,6 +602,53 @@ def set_context_policy(
         max_percent=ai_context_window.MAX_SCHWELLE,
         memory_search_ready=ai_embedding_service.is_ready(),
     )
+
+
+def _memory_search_status(db: Session) -> AiMemorySearchStatus:
+    from services import ai_embedding_service
+
+    return AiMemorySearchStatus(
+        google_fallback=ai_embedding_service.google_rueckfall_erlaubt(db),
+        local_ready=ai_embedding_service.lokal_bereit(),
+        ready=ai_embedding_service.is_ready(),
+    )
+
+
+@router.get("/settings/memory-search", response_model=AiMemorySearchStatus)
+def get_memory_search_policy(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_global("panel.settings.read")),
+) -> AiMemorySearchStatus:
+    return _memory_search_status(db)
+
+
+@router.put("/settings/memory-search", response_model=AiMemorySearchStatus)
+def set_memory_search_policy(
+    payload: AiMemorySearchUpdate,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_global("panel.settings.write")),
+    _: None = Depends(verify_csrf),
+) -> AiMemorySearchStatus:
+    """Erlaubt oder verbietet den Google-Rückfall der Bedeutungssuche.
+
+    Eine Datenschutzentscheidung und keine Komfortfrage: eingeschaltet gehen
+    Gedächtnistexte, Skillbeschreibungen und Chatfragen im Klartext an Google,
+    auch wenn im Chat ein anderer Anbieter gewählt ist. Deshalb Standard aus,
+    deshalb im Audit.
+    """
+    from services import ai_embedding_service
+
+    erlaubt = ai_embedding_service.set_google_rueckfall(payload.google_fallback, db)
+    audit_service.record_privileged_action(
+        db,
+        user_id=actor.id,
+        action="ai.memory_search.google_fallback.updated",
+        target_type="panel_setting",
+        target_id=None,
+        details={"enabled": erlaubt},
+    )
+    db.commit()
+    return _memory_search_status(db)
 
 
 def _worker_policy_status() -> AiWorkerPolicyStatus:

@@ -23,8 +23,10 @@ from sqlalchemy.orm import Session
 
 from models import AiSkill, AuditLog, Role, RolePermission, Team, User
 from services import ai_action_service, ai_embedding_service, ai_skill_service, team_service
+from services.ai_embedding_service import MODEL_TAG
 from services.auth_service import AuthService
 from services.role_service import set_user_roles
+from tests._einbettung import modell_ersetzen, ohne_modell
 
 
 def _user(db: Session, name: str) -> User:
@@ -972,12 +974,12 @@ def test_the_index_reuses_the_stored_vector(
 
     kodiert: list[str] = []
 
-    def _fake_encode(texts: list[str], db=None) -> list[list[float]]:
+    def _fake_encode(texts: list[str]) -> list[list[float]]:
         kodiert.extend(texts)
         laenge = ai_embedding_service.EMBEDDING_DIMENSIONS
         return [[1.0] + [0.0] * (laenge - 1) for _ in texts]
 
-    monkeypatch.setattr(ai_embedding_service, "encode", _fake_encode)
+    modell_ersetzen(monkeypatch, _fake_encode)
 
     for index in range(ai_skill_service.MAX_INDEXED_SKILLS + 5):
         ai_skill_service.upsert_skill(
@@ -987,7 +989,7 @@ def test_the_index_reuses_the_stored_vector(
             body=f"Inhalt {index}", team_id=None,
         )
     abgelegt = db.query(AiSkill).filter(AiSkill.skill_key == "gespeichert-00").one()
-    assert abgelegt.embedding_model == ai_skill_service._EMBEDDING_MODEL_TAG
+    assert abgelegt.embedding_model == MODEL_TAG
 
     kodiert.clear()
     frage = "Wie loese ich einen Portkonflikt?"
@@ -1017,22 +1019,22 @@ def test_a_failed_encode_discards_the_vector_of_the_old_text(
     """
     _allow(db, regular_user, "ai.skills.use", "ai.skills.manage")
 
-    def _fake_encode(texts: list[str], db=None) -> list[list[float]]:
+    def _fake_encode(texts: list[str]) -> list[list[float]]:
         laenge = ai_embedding_service.EMBEDDING_DIMENSIONS
         return [[1.0] + [0.0] * (laenge - 1) for _ in texts]
 
-    monkeypatch.setattr(ai_embedding_service, "encode", _fake_encode)
+    modell_ersetzen(monkeypatch, _fake_encode)
     row = ai_skill_service.upsert_skill(
         db, user=regular_user, skill_key="umgelernt",
         name="Valheim braucht Arbeitsspeicher",
         description="Ein Valheim-Server endet ohne Fehlermeldung, wenn der Arbeitsspeicher fehlt.",
         body="Erste Fassung.", team_id=None,
     )
-    assert ai_skill_service._stored_vector(row) is not None
+    assert ai_skill_service._stored_vector(row, MODEL_TAG) is not None
 
     # Das Modell fällt aus, und derselbe Skill wird auf ein anderes Thema
     # umgeschrieben — die Lage, in der ein stehengebliebener Vektor lügt.
-    monkeypatch.setattr(ai_embedding_service, "encode", lambda texts, db=None: None)
+    ohne_modell(monkeypatch)
     ai_skill_service.upsert_skill(
         db, user=regular_user, skill_key="umgelernt",
         name="Portkonflikt erkennen",
@@ -1043,7 +1045,39 @@ def test_a_failed_encode_discards_the_vector_of_the_old_text(
     frisch = ai_skill_service.get_skill(db, row.id)
     assert frisch.embedding_json is None
     assert frisch.embedding_model is None
-    assert ai_skill_service._stored_vector(frisch) is None
+    assert ai_skill_service._stored_vector(frisch, MODEL_TAG) is None
+
+
+def test_ein_google_vektor_traegt_seine_eigene_kennung(
+    db: Session, regular_user: User, monkeypatch
+) -> None:
+    """Ein Vektor aus dem Google-Rückfall gibt sich nicht als lokaler aus.
+
+    Fehlt das lokale Modell, rechnet `encode` bei Google. Gespeichert wurde
+    der Vektor trotzdem unter der Kennung des lokalen Modells — und sobald das
+    zurück war, verglich `skill_index` lokale Fragen mit Google-Vektoren. Beide
+    haben 256 Zahlen, keine Prüfung schlug an, die Auswahl war Zufall.
+    """
+    _allow(db, regular_user, "ai.skills.use", "ai.skills.manage")
+    laenge = ai_embedding_service.EMBEDDING_DIMENSIONS
+    monkeypatch.setattr(ai_embedding_service, "_load", lambda: None)
+    ai_embedding_service.set_google_rueckfall(True, db)
+    monkeypatch.setattr(ai_embedding_service, "_google_zugang", lambda db: ("schluessel", {}))
+    monkeypatch.setattr(
+        ai_embedding_service, "encode_with_google",
+        lambda texts, **_: [[0.0, 1.0] + [0.0] * (laenge - 2) for _ in texts],
+    )
+
+    row = ai_skill_service.upsert_skill(
+        db, user=regular_user, skill_key="aus-dem-rueckfall",
+        name="Portkonflikt erkennen",
+        description="Zwei Anlagen belegen denselben Port, und die zweite startet deshalb nicht.",
+        body="Inhalt.", team_id=None,
+    )
+
+    assert row.embedding_model == "google:text-embedding-004"
+    assert ai_skill_service._stored_vector(row, MODEL_TAG) is None
+    assert ai_skill_service._stored_vector(row, "google:text-embedding-004") is not None
 
 
 # ── Die Warteschlange als eigenes Kontingent ──────────────────────────

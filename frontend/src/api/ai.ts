@@ -861,6 +861,19 @@ export interface AiContextPolicy {
 }
 
 /**
+ * Ob die Bedeutungssuche ohne lokales Modell bei Google rechnen darf.
+ *
+ * `google_fallback` ist die Erlaubnis des Betreibers (Standard aus),
+ * `local_ready` sagt, ob das lokale Modell läuft, und `ready`, ob die Suche
+ * gerade überhaupt rechnen kann.
+ */
+export interface AiMemorySearchPolicy {
+  google_fallback: boolean
+  local_ready: boolean
+  ready: boolean
+}
+
+/**
  * Wie Beträge angezeigt werden. Nicht, wie sie gebucht werden.
  *
  * Gebucht wird ausnahmslos in US-Cent-Microunits. Diese beiden Angaben machen
@@ -1615,6 +1628,11 @@ export const aiApi = {
   setContextPolicy: (percent: number) => api<AiContextPolicy>('/ai/settings/context', {
     method: 'PUT', body: JSON.stringify({ compaction_percent: percent }),
   }),
+  getMemorySearchPolicy: () => api<AiMemorySearchPolicy>('/ai/settings/memory-search'),
+  setMemorySearchPolicy: (googleFallback: boolean) =>
+    api<AiMemorySearchPolicy>('/ai/settings/memory-search', {
+      method: 'PUT', body: JSON.stringify({ google_fallback: googleFallback }),
+    }),
   getWorkerPolicy: () => api<AiWorkerPolicy>('/ai/settings/worker'),
   setWorkerPolicy: (maxParallelWorkers: number, roundsPerWorker: number) =>
     api<AiWorkerPolicy>('/ai/settings/worker', {

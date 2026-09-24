@@ -29,6 +29,15 @@ gerade gerechnet werden kann. Vorher war beides nicht so — ein einziger
 schlechter Moment beim Laden schaltete die Bedeutungssuche bis zum
 Prozess-Neustart ab, und der Betreiber erfuhr davon nur als eine Warnzeile im
 Log.
+
+**Der Google-Rückfall ist eine Entscheidung des Betreibers.** Fehlt das lokale
+Modell, darf `encode` bei Google AI Studio rechnen lassen — aber nur, wenn der
+Betreiber das unter `GOOGLE_RUECKFALL_SCHLUESSEL` eingeschaltet hat. Standard
+ist aus. Der Rückfall schickt Gedächtnistexte, Skillbeschreibungen und jede
+Chatfrage im Klartext an Google, auch wenn im Chat ein ganz anderer Anbieter
+gewählt ist; bis zum 24.09.2026 geschah das ohne jede Frage, sobald irgendein
+Google-Zugang aktiv war. Ist der Schalter aus, gilt der Satz oben wieder
+wörtlich: für die Suche verlässt nichts das Haus.
 """
 
 from __future__ import annotations
@@ -38,6 +47,7 @@ import threading
 import time
 from array import array
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -65,6 +75,36 @@ EMBEDDING_BYTES = EMBEDDING_DIMENSIONS * 4
 # Kennung früher je als eigenes Literal, und wer eines davon beim Modellwechsel
 # übersieht, bekommt in genau einem der beiden Bereiche stille Falschtreffer.
 MODEL_TAG = "potion-multilingual-128M"
+
+# Vorsilbe der Kennung für Vektoren aus dem Google-Rückfall; dahinter steht das
+# Modell, das Google gerechnet hat. Beide Räume haben 256 Zahlen und bestehen
+# jede Längenprüfung — getrennt hält sie allein diese Kennung. Vorher trug auch
+# ein Google-Vektor `MODEL_TAG`, und sobald das lokale Modell zurück war,
+# verglich die Suche potion-Fragen mit Google-Einträgen: Zahlen ohne Bedeutung,
+# und nichts meldete es.
+GOOGLE_TAG_PREFIX = "google:"
+
+# Breite der Spalte `embedding_model` in beiden Tabellen.
+_TAG_MAX = 64
+
+# Panel-Einstellung: darf `encode` ohne lokales Modell bei Google rechnen?
+# Fehlt der Eintrag, heißt das nein.
+GOOGLE_RUECKFALL_SCHLUESSEL = "ai_embedding_google_fallback"
+
+
+@dataclass(frozen=True)
+class Kodierung:
+    """Vektoren samt dem Modell, das sie gerechnet hat.
+
+    Die Kennung gehört an den Vektor und nicht an eine Konstante: `encode` hat
+    zwei Quellen, und welche gerade antwortet, weiß nur `encode`. Wer speichert,
+    legt ``modell`` daneben ab; wer vergleicht, nimmt nur gespeicherte Vektoren
+    mit derselben Kennung wie seine Frage.
+    """
+
+    vektoren: list[list[float]]
+    modell: str
+
 
 # Wie lange ein gescheiterter Ladeversuch gilt, bevor MSM es noch einmal
 # probiert. Vorher galt er für immer: wer die halb entpackten Gewichte
@@ -142,6 +182,35 @@ def _fehlschlag_gilt_noch() -> bool:
     return (time.monotonic() - _letzter_fehlschlag) < NEUVERSUCH_NACH_SEKUNDEN
 
 
+def google_rueckfall_erlaubt(db: Session | None = None) -> bool:
+    """Hat der Betreiber den Google-Rückfall eingeschaltet? Standard: nein."""
+    from services.panel_settings_service import PanelSettingsService
+
+    wert = PanelSettingsService.get(GOOGLE_RUECKFALL_SCHLUESSEL, "false", db=db)
+    return wert.strip().lower() == "true"
+
+
+def set_google_rueckfall(erlaubt: bool, db: Session) -> bool:
+    """Schaltet den Google-Rückfall; gespeichert wird mit dem Commit des Aufrufers."""
+    from services.panel_settings_service import PanelSettingsService
+
+    PanelSettingsService.set(GOOGLE_RUECKFALL_SCHLUESSEL, "true" if erlaubt else "false", db=db)
+    return erlaubt
+
+
+def lokal_bereit() -> bool:
+    """Kann das lokale Modell gerade rechnen? Ohne es zu laden.
+
+    Der lokale Teil von `is_ready`, einzeln gefragt von der Einstellungsseite:
+    dort entscheidet er, ob der Google-Schalter überhaupt etwas bewirkt.
+    """
+    if _model is not None:
+        return True
+    if _fehlschlag_gilt_noch():
+        return False
+    return is_available()
+
+
 def is_ready() -> bool:
     """Kann die Bedeutungssuche gerade rechnen? Einschließlich Ladefehlern.
 
@@ -156,14 +225,14 @@ def is_ready() -> bool:
     Geladen wird hier nichts — die Antwort muss auch in einem GET billig sein.
     Ist die Frist des Fehlschlags abgelaufen, entscheidet wieder allein, was im
     Verzeichnis liegt: der nächste Abruf wird es ohnehin erneut versuchen.
+
+    Ein Google-Zugang zählt nur, wenn der Betreiber den Rückfall erlaubt hat.
     """
-    if _model is not None:
-        return True
-    if _fehlschlag_gilt_noch():
-        return False
-    if is_available():
+    if lokal_bereit():
         return True
     try:
+        if not google_rueckfall_erlaubt():
+            return False
         from database import SessionLocal
         from models import AiProvider
 
@@ -311,8 +380,64 @@ def _google_zugang(db: Session) -> tuple[str, dict[str, str]] | None:
     return key, emb_kw
 
 
-def encode(texts: list[str], *, db: Session | None = None) -> list[list[float]] | None:
+def _google_tag(emb_kw: dict[str, str]) -> str:
+    """Die Kennung eines Google-Vektors: Vorsilbe plus gerechnetes Modell.
+
+    Das Modell steht mit darin, weil `text-embedding-004` und `embedding-001`
+    ebenso wenig in einen Raum gehören wie potion und Google. ``models/`` fällt
+    weg wie in `encode_with_google`, damit dieselbe Wahl dieselbe Kennung
+    ergibt, gleich wie der Betreiber sie geschrieben hat.
+    """
+    modell = emb_kw.get("model", "text-embedding-004")
+    if modell.startswith("models/"):
+        modell = modell[len("models/"):]
+    return (GOOGLE_TAG_PREFIX + modell)[:_TAG_MAX]
+
+
+def _google_zugang_mit(db: Session | None) -> tuple[str, dict[str, str]] | None:
+    """`_google_zugang` in der Sitzung des Aufrufers, sonst in einer eigenen.
+
+    ``None`` auch dann, wenn der Betreiber den Rückfall nicht erlaubt hat —
+    das ist die eine Stelle, an der der Schalter wirkt; `encode`,
+    `aktives_modell` und damit jeder Aufrufer gehen hier durch.
+    """
+    try:
+        if not google_rueckfall_erlaubt(db):
+            return None
+        if db is not None:
+            return _google_zugang(db)
+        from database import SessionLocal
+
+        with SessionLocal() as eigene:
+            return _google_zugang(eigene)
+    except Exception:
+        return None
+
+
+def aktives_modell(*, db: Session | None = None) -> str | None:
+    """Die Kennung, die `encode` jetzt liefern würde, ohne etwas zu rechnen.
+
+    Gebraucht von `ai_memory_service._vektoren_nachziehen`: dort muss vor dem
+    Rechnen feststehen, welche gespeicherten Vektoren zum heutigen Modell
+    passen und welche neu müssen. Ändert sich die Quelle zwischen dieser Frage
+    und dem Rechnen, schadet das nicht: gespeichert wird die Kennung aus der
+    `Kodierung`, und der nächste Abruf holt den Rest nach.
+    """
+    if _load() is not None:
+        return MODEL_TAG
+    zugang = _google_zugang_mit(db)
+    return None if zugang is None else _google_tag(zugang[1])
+
+
+def encode(
+    texts: list[str], *, db: Session | None = None, nur_lokal: bool = False
+) -> Kodierung | None:
     """Wandelt Texte in normalisierte Vektoren um, oder ``None`` ohne Modell.
+
+    Zurück kommt eine `Kodierung`: die Vektoren **und** die Kennung des
+    Modells, das sie gerechnet hat — lokal `MODEL_TAG`, im Rückfall
+    `GOOGLE_TAG_PREFIX` plus Modellname. Nur ein Vergleich zwischen gleichen
+    Kennungen hat eine Bedeutung.
 
     Normalisiert wird hier, damit die Aehnlichkeit spaeter ein reines
     Skalarprodukt ist — der Aufrufer muss nichts ueber Vektorlaengen wissen.
@@ -325,26 +450,24 @@ def encode(texts: list[str], *, db: Session | None = None) -> list[list[float]] 
     schloss seine Sitzung, und der Skill zeigte danach auf ein Team, das es
     nicht mehr gab — gemeldet als „parallel geändert". Nur wer keine Sitzung hat
     (Absichtserkennung, Werkzeugauswahl), bekommt hier eine eigene, kurze.
+
+    ``nur_lokal`` schließt den Google-Rückfall aus, auch wenn er erlaubt ist.
+    Für Aufrufer, die nicht auf das Netz warten dürfen: die Absichtserkennung
+    der Stimme rechnet synchron in der Ereignisschleife, je Teiltranskript.
     """
     if not texts:
-        return []
+        return Kodierung([], MODEL_TAG)
     model = _load()
     if model is None:
-        # Fallback auf konfigurierten Google AI Studio Provider, falls lokales Modell fehlt
-        try:
-            if db is not None:
-                zugang = _google_zugang(db)
-            else:
-                from database import SessionLocal
-
-                with SessionLocal() as eigene:
-                    zugang = _google_zugang(eigene)
-        except Exception:
+        if nur_lokal:
             return None
+        # Rückfall auf Google AI Studio — nur mit Erlaubnis des Betreibers.
+        zugang = _google_zugang_mit(db)
         if zugang is None:
             return None
         key, emb_kw = zugang
-        return encode_with_google(texts, api_key=key, **emb_kw)
+        vektoren = encode_with_google(texts, api_key=key, **emb_kw)
+        return None if vektoren is None else Kodierung(vektoren, _google_tag(emb_kw))
     try:
         import numpy as np
 
@@ -353,7 +476,7 @@ def encode(texts: list[str], *, db: Session | None = None) -> list[list[float]] 
         # Ein Nullvektor entsteht bei reinem Sonderzeichentext. Ohne diesen
         # Schutz waere das Ergebnis NaN und jede Aehnlichkeit unbrauchbar.
         norms[norms == 0] = 1.0
-        return (vectors / norms).astype("float32").tolist()
+        return Kodierung((vectors / norms).astype("float32").tolist(), MODEL_TAG)
     except Exception as exc:
         logger.warning("AI-Embedding fehlgeschlagen error=%s", type(exc).__name__)
         return None

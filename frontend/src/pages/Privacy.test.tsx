@@ -45,6 +45,7 @@ const KI_PUNKTE = [
   'usage',
   'memory',
   'memoryConsent',
+  'memorySearch',
   'attachments',
   'autonomy',
   'tools',
@@ -227,8 +228,9 @@ describe('Privacy page', () => {
     // Ausdruecklich als Zahl festgehalten: neun Punkte vor der
     // Guardian-Kopplung, zehn danach, elf seit den stehenden KI-Aufgaben,
     // dreizehn seit verknüpften Postfächern und Kalendern, vierzehn mit
-    // Sprachmodus, fuenfzehn seit die KI den Messenger nicht mehr erreicht.
-    expect(gerendert).toHaveLength(15);
+    // Sprachmodus, fuenfzehn seit die KI den Messenger nicht mehr erreicht,
+    // sechzehn seit dem Google-Rückfall der Bedeutungssuche (24.09.2026).
+    expect(gerendert).toHaveLength(16);
   });
 });
 

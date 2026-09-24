@@ -49,8 +49,8 @@ def _semantic_stub(monkeypatch):
             return [0, 0, 0, 0, 1.0, 0]
         return [0, 0, 0, 0, 0, 1.0]
 
-    def encode(texts):
-        return [one(text) for text in texts]
+    def encode(texts, *, db=None, nur_lokal=False):
+        return ai_embedding_service.Kodierung([one(text) for text in texts], ai_embedding_service.MODEL_TAG)
 
     monkeypatch.setattr(ai_embedding_service, "encode", encode)
     monkeypatch.setattr(ai_embedding_service, "similarity", lambda query, _: query)
@@ -65,6 +65,29 @@ def test_multilingual_semantic_predictions(monkeypatch):
         assert prediction is not None, text
         assert prediction.intent == expected
     assert classifier.classify("Wetter Berlin") is None
+
+
+def test_die_absichtserkennung_fragt_nie_google(monkeypatch):
+    """Auch mit erlaubtem Rückfall rechnet die Absichtserkennung nur lokal.
+
+    `classify` läuft synchron in der Ereignisschleife der Sprachsitzung, je
+    Teiltranskript. Ein Google-Aufruf dort hielte die ganze Sitzung bis zu
+    30 s an — und schickte jedes halbe Wort, das jemand sagt, an Google. Fehlt
+    das lokale Modell, gibt es eben keine Vorhersage.
+    """
+    gerufen: list[list[str]] = []
+    monkeypatch.setattr(ai_embedding_service, "_load", lambda: None)
+    monkeypatch.setattr(ai_embedding_service, "google_rueckfall_erlaubt", lambda db=None: True)
+    monkeypatch.setattr(ai_embedding_service, "_google_zugang", lambda db: ("schluessel", {}))
+    monkeypatch.setattr(
+        ai_embedding_service, "encode_with_google",
+        lambda texts, **_: gerufen.append(texts) or [[1.0] + [0.0] * 255 for _ in texts],
+    )
+    classifier = StreamingIntentClassifier(min_confidence=0.5)
+
+    assert classifier.warm() is False
+    assert classifier.classify("Wie ist das Wetter in Berlin heute") is None
+    assert gerufen == []
 
 
 def test_classifier_is_fast_after_warmup(monkeypatch):

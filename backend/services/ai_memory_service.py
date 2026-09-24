@@ -29,7 +29,6 @@ from services import (
 )
 from services.ai_redaction import enthaelt_zugangsdaten
 from services.ai_embedding_service import EMBEDDING_BYTES, EMBEDDING_DIMENSIONS
-from services.ai_embedding_service import MODEL_TAG as _EMBEDDING_MODEL_TAG
 from services.dis_client import DisClient, DisDecryptionError, DisSidecarError
 
 
@@ -962,8 +961,8 @@ def aehnlicher_eintrag(
     waere ein Leseweg ueber die Bereichsgrenze hinweg, und sei es nur ueber
     ein Aehnlichkeitsmass.
     """
-    vektoren = ai_embedding_service.encode([_embedding_source(key, value)], db=db)
-    if not vektoren:
+    kodierung = ai_embedding_service.encode([_embedding_source(key, value)], db=db)
+    if kodierung is None or not kodierung.vektoren:
         return None
 
     # Vektor und Zeile zusammen halten: die Filterung oben hat `None`
@@ -974,14 +973,14 @@ def aehnlicher_eintrag(
         AiMemoryEntry.scope_identity == scope_kennung,
         AiMemoryEntry.key != key,
     ).all():
-        vektor = _stored_vector(row)
+        vektor = _stored_vector(row, kodierung.modell)
         if vektor is not None:
             paare.append((row, vektor))
     if not paare:
         return None
 
     werte = ai_embedding_service.similarity(
-        vektoren[0], [vektor for _row, vektor in paare]
+        kodierung.vektoren[0], [vektor for _row, vektor in paare]
     )
     bester: tuple[AiMemoryEntry, float] | None = None
     for (row, _vektor), wert in zip(paare, werte):
@@ -1445,8 +1444,13 @@ def _liegt_im_klartext(row: AiMemoryEntry) -> bool:
     )
 
 
-def _stored_vector(row: AiMemoryEntry) -> Sequence[float] | None:
-    """Liest den gespeicherten Vektor, wenn er zum aktuellen Modell passt.
+def _stored_vector(row: AiMemoryEntry, modell: str) -> Sequence[float] | None:
+    """Liest den gespeicherten Vektor, wenn er aus dem Modell ``modell`` stammt.
+
+    ``modell`` ist die Kennung der Frage, gegen die verglichen wird
+    (`ai_embedding_service.Kodierung`), und keine Konstante: `encode` rechnet
+    lokal oder im Google-Rückfall, und ein Vektor aus dem jeweils anderen Raum
+    hat dieselbe Länge, aber keine vergleichbare Bedeutung.
 
     Zwei Spalten, eine Wahrheit. Geschrieben wird seit dem 19.08.2026 als
     float32-Bytes — seit dem 23.08.2026 unter AES-GCM —, und von dort wird
@@ -1469,7 +1473,7 @@ def _stored_vector(row: AiMemoryEntry) -> Sequence[float] | None:
     Absicht und keine Nachlässigkeit: beide Spalten beschreiben denselben
     Text, also ist die unversehrte von beiden die richtige Antwort.
     """
-    if row.embedding_model != _EMBEDDING_MODEL_TAG:
+    if row.embedding_model != modell:
         return None
     geoeffnet = _vektor_entschluesseln(row.embedding_bytes)
     vektor = ai_embedding_service.bytes_zu_vektor(
@@ -1488,7 +1492,9 @@ def _stored_vector(row: AiMemoryEntry) -> Sequence[float] | None:
     return alt
 
 
-def _vektor_setzen(row: AiMemoryEntry, vektor: Sequence[float] | None) -> None:
+def _vektor_setzen(
+    row: AiMemoryEntry, vektor: Sequence[float] | None, modell: str | None
+) -> None:
     """Schreibt den Vektor einer Zeile — in genau einer Form.
 
     ``embedding_json`` wird dabei immer geleert, auch wenn gar nichts
@@ -1505,7 +1511,7 @@ def _vektor_setzen(row: AiMemoryEntry, vektor: Sequence[float] | None) -> None:
         else _vektor_verschluesseln(ai_embedding_service.vektor_zu_bytes(vektor))
     )
     row.embedding_json = None
-    row.embedding_model = None if vektor is None else _EMBEDDING_MODEL_TAG
+    row.embedding_model = None if vektor is None else modell
 
 
 def _embedding_source(key: str, value: str) -> str:
@@ -1533,8 +1539,11 @@ def refresh_embedding(db: Session, row: AiMemoryEntry, value: str) -> None:
     damit zurecht — und `_vektoren_nachziehen` holt es beim nächsten Abruf in
     den Kontext nach, sobald wieder ein Modell da ist.
     """
-    vectors = ai_embedding_service.encode([_embedding_source(row.key, value)], db=db)
-    _vektor_setzen(row, vectors[0] if vectors else None)
+    kodierung = ai_embedding_service.encode([_embedding_source(row.key, value)], db=db)
+    if kodierung is None or not kodierung.vektoren:
+        _vektor_setzen(row, None, None)
+        return
+    _vektor_setzen(row, kodierung.vektoren[0], kodierung.modell)
 
 
 def _vektoren_nachziehen(db: Session, decoded: list[tuple[AiMemoryEntry, str]]) -> None:
@@ -1568,23 +1577,26 @@ def _vektoren_nachziehen(db: Session, decoded: list[tuple[AiMemoryEntry, str]]) 
     jemand von Hand anfasst. Neu gerechnet trägt sie dieselben Zahlen —
     `_vektor_setzen` räumt beide alten Formen dabei ab.
     """
+    modell = ai_embedding_service.aktives_modell(db=db)
+    if modell is None:
+        return
     offen = [
         (row, value)
         for row, value in decoded
-        if _stored_vector(row) is None or _liegt_im_klartext(row)
+        if _stored_vector(row, modell) is None or _liegt_im_klartext(row)
     ]
     if not offen:
         return
-    vektoren = ai_embedding_service.encode(
+    kodierung = ai_embedding_service.encode(
         [_embedding_source(row.key, value) for row, value in offen], db=db
     )
     # Die Längenprüfung ist keine Formsache: käme weniger zurück als
     # hineingegeben, schriebe das `zip` den Vektor der einen Zeile an die
     # andere — eine falsche Bedeutung unter dem richtigen Schlüssel.
-    if not vektoren or len(vektoren) != len(offen):
+    if kodierung is None or len(kodierung.vektoren) != len(offen):
         return
-    for (row, _value), vektor in zip(offen, vektoren):
-        _vektor_setzen(row, vektor)
+    for (row, _value), vektor in zip(offen, kodierung.vektoren):
+        _vektor_setzen(row, vektor, kodierung.modell)
 
 
 def _utc(value: datetime) -> datetime:
@@ -1911,16 +1923,19 @@ def _similarities(
     """
     if not query.strip():
         return [None] * len(rows)
-    query_vectors = ai_embedding_service.encode([query], db=db)
-    if not query_vectors:
+    kodierung = ai_embedding_service.encode([query], db=db)
+    if kodierung is None or not kodierung.vektoren:
         return [None] * len(rows)
 
-    stored = [_stored_vector(row) for row in rows]
+    # Nur Vektoren aus demselben Modell wie die Frage. Ein Eintrag aus dem
+    # anderen gilt als vektorlos — `None`, nicht unähnlich — bis
+    # `_vektoren_nachziehen` ihn neu gerechnet hat.
+    stored = [_stored_vector(row, kodierung.modell) for row in rows]
     known = [vector for vector in stored if vector is not None]
     if not known:
         return [None] * len(rows)
 
-    scores = ai_embedding_service.similarity(query_vectors[0], known)
+    scores = ai_embedding_service.similarity(kodierung.vektoren[0], known)
     if len(scores) != len(known):
         return [None] * len(rows)
     result: list[float | None] = []

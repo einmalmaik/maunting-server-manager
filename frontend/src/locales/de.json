@@ -718,6 +718,22 @@
         "unknown": "Das Kontextfenster dieses Modells ist nicht bekannt. MSM rechnet mit einem vorsichtigen Rückfallwert."
       }
     },
+    "memorySearch": {
+      "title": "Bedeutungssuche über Google",
+      "description": "Die Bedeutungssuche findet Erinnerungen und Skills auch über Sprachgrenzen hinweg. Sie rechnet mit einem lokalen Modell, und dabei verlässt nichts das Panel. Fehlt dieses Modell, kann sie ersatzweise Google AI Studio nutzen.",
+      "warning": "Eingeschaltet gehen dann Gedächtnistexte, Skillbeschreibungen und jede Chatfrage im Klartext an Google, auch wenn im Chat ein anderer Anbieter gewählt ist. Die Spracherkennung der Stimme fragt Google nie.",
+      "statusEnabled": "Erlaubt",
+      "statusDisabled": "Aus",
+      "localReady": "Das lokale Modell läuft. Der Schalter wirkt erst, wenn es fehlt.",
+      "localMissing": "Das lokale Modell fehlt.",
+      "fallbackActive": "Die Suche rechnet gerade über Google.",
+      "searchOff": "Die Bedeutungssuche ist aus. Das Gedächtnis findet weiter über Wortabgleich, Nutzung und Aktualität.",
+      "saved": "Einstellung gespeichert",
+      "errors": {
+        "load": "Einstellung zur Bedeutungssuche konnte nicht geladen werden",
+        "save": "Einstellung zur Bedeutungssuche konnte nicht gespeichert werden"
+      }
+    },
     "actions": {
       "title": "KI-Aktionsvorschlag",
       "tools": {
@@ -4403,6 +4419,7 @@
           "usage": "Provider, Modell, Tokenreservierung, tatsächlicher oder konservativ geschätzter Verbrauch und Zeitpunkte werden zur Kontingentdurchsetzung gespeichert; Preiswerte werden ohne belastbare Preisquelle nicht behauptet",
           "memory": "Optionale Memory-Einträge werden verschlüsselt und an ihren Bereich gebunden gespeichert, sind jederzeit einsehbar und löschbar. Es gibt fünf Bereiche: persönliche und persönliche serverbezogene Einträge sieht niemand außer dem Nutzer selbst; teambezogene sehen alle Mitglieder des jeweiligen Teams; das Wissen eines Servers sehen alle, die diesen Server sehen dürfen, und es bleibt bestehen, wenn der Verfasser das Panel verlässt; panelweite Einträge sieht jeder Nutzer des Panels",
           "memoryConsent": "Das persönliche Gedächtnis ist standardmäßig deaktiviert und wird erst nach ausdrücklicher Zustimmung im Chat aktiv. Die Zustimmung ist jederzeit widerrufbar und umfasst auch eigene serverbezogene Notizen. Geteilte Bereiche (Team, Server, panelweit) enthalten Betriebswissen ohne Personenbezug.",
+          "memorySearch": "Die Bedeutungssuche des Gedächtnisses rechnet mit einem lokalen Modell im Panel. Nur wenn dieses Modell fehlt und der Betreiber es ausdrücklich eingeschaltet hat (Standard: aus), rechnet sie über Google AI Studio. Dann gehen Gedächtnistexte, Skillbeschreibungen und Chatfragen im Klartext an Google, unabhängig vom im Chat gewählten Modellanbieter.",
           "attachments": "Freigegebene Text-, Konfigurations-, Log- und Bildanhänge werden größen- und typgeprüft, verschlüsselt im Panel gespeichert und zusammen mit der Unterhaltung an den gewählten Modellanbieter übertragen",
           "autonomy": "Der autonome Modus ist optional und muss pro Server oder panelweit ausdrücklich freigegeben werden; freigegebene Aktionen laufen ohne weitere Rückfrage, werden aber unverändert gegen die Berechtigungen des Nutzers geprüft und vollständig im Audit-Log als automatisch ausgeführt festgehalten",
           "tools": "Beim Einsatz von Werkzeugen können begrenzte, redigierte Ausschnitte aus Serverlogs, Konfigurationsdateien, Mod- und Backup-Listen sowie Guardian-Vorfällen an den Modellanbieter übertragen werden; diese Ergebnisse werden für Rückfragen im selben Chat gespeichert und mit dem Chat gelöscht",

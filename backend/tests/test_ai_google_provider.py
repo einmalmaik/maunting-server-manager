@@ -236,6 +236,8 @@ def test_embedding_fallback_to_google_provider(db: Session) -> None:
         operator_api_key="AIzaSyTestKey123456",
         default_model="gemini-2.5-flash",
     )
+    ai_embedding_service.set_google_rueckfall(True, db)
+    db.commit()
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = db
     mock_ctx.__exit__.return_value = None
@@ -247,8 +249,86 @@ def test_embedding_fallback_to_google_provider(db: Session) -> None:
          patch("services.ai_embedding_service.encode_with_google", return_value=[[0.1] * 256]) as mock_encode:
         assert ai_embedding_service.is_ready() is True
         res = ai_embedding_service.encode(["Hallo Welt"])
-        assert res == [[0.1] * 256]
+        assert res == ai_embedding_service.Kodierung(
+            [[0.1] * 256], "google:text-embedding-004"
+        )
         mock_encode.assert_called_once()
+
+
+def test_ohne_erlaubnis_des_betreibers_verlaesst_nichts_das_haus(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ein aktiver Google-Zugang allein ist keine Erlaubnis für die Suche.
+
+    Bis zum 24.09.2026 genügte er: fehlte das lokale Modell, gingen
+    Gedächtnistexte und jede Chatfrage im Klartext an Google, auch wenn der
+    Chat über einen ganz anderen Anbieter lief. Der Zugang war für den Chat
+    eingetragen worden, nicht für die Bedeutungssuche. Jetzt entscheidet ein
+    eigener Schalter, und der steht ab Werk auf aus.
+    """
+    from services import ai_memory_service
+    from tests.test_ai_memory_embeddings import _allow_memory, _write
+
+    ai_provider_service.create_provider(
+        db, name="Google Studio", provider_kind="google", enabled=True,
+        requires_api_key=True, operator_api_key="test-schluessel",
+        default_model="gemini-2.5-flash",
+    )
+    db.commit()
+    gesendet: list[str] = []
+    monkeypatch.setattr(ai_embedding_service, "_load", lambda: None)
+    monkeypatch.setattr(
+        ai_embedding_service, "encode_with_google",
+        lambda texts, **_: gesendet.extend(texts) or [[0.1] * 256 for _ in texts],
+    )
+    _allow_memory(db, regular_user)
+
+    row = _write(db, regular_user, "zeitzone", "Die Anlage steht auf Europe/Berlin")
+    ai_memory_service.provider_memory_context(db, regular_user, query="Zeitzone?")
+
+    assert gesendet == []
+    assert row.embedding_model is None
+    assert ai_embedding_service.is_ready() is False
+
+
+def test_der_betreiber_schaltet_den_google_rueckfall_ueber_die_api(
+    client, owner_cookies: dict, db: Session
+) -> None:
+    csrf = {"X-CSRF-Token": owner_cookies.get("__Secure-csrf_token", "")}
+
+    gelesen = client.get("/api/ai/settings/memory-search", cookies=owner_cookies)
+    assert gelesen.status_code == 200
+    assert gelesen.json()["google_fallback"] is False
+
+    gesetzt = client.put(
+        "/api/ai/settings/memory-search", json={"google_fallback": True},
+        cookies=owner_cookies, headers=csrf,
+    )
+    assert gesetzt.status_code == 200
+    assert gesetzt.json()["google_fallback"] is True
+    assert ai_embedding_service.google_rueckfall_erlaubt() is True
+
+    from models import AuditLog
+
+    eintrag = (
+        db.query(AuditLog)
+        .filter(AuditLog.action == "ai.memory_search.google_fallback.updated")
+        .one()
+    )
+    assert "true" in str(eintrag.details).lower()
+
+
+def test_ein_benutzer_ohne_panelrecht_schaltet_den_rueckfall_nicht(
+    client, user_cookies: dict
+) -> None:
+    antwort = client.put(
+        "/api/ai/settings/memory-search", json={"google_fallback": True},
+        cookies=user_cookies,
+        headers={"X-CSRF-Token": user_cookies.get("__Secure-csrf_token", "")},
+    )
+
+    assert antwort.status_code == 403
+    assert ai_embedding_service.google_rueckfall_erlaubt() is False
 
 
 @pytest.mark.asyncio
