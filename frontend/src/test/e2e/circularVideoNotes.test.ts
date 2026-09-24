@@ -57,7 +57,7 @@ function aufnahme(bytes: number): Uint8Array {
 }
 
 /**
- * Derselbe Schritt wie `blobAlsDataUrl` in `Messenger.tsx`, ohne `FileReader`.
+ * Derselbe Schritt wie `blobAlsDataUrl` in `nachrichtVersand.ts`, ohne `FileReader`.
  *
  * Den gibt es in Node nicht. Das Ergebnis ist bitgleich: Base64 des Blobs mit
  * vorangestelltem Typ, und genau das kostet das Drittel, mit dem

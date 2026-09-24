@@ -62,7 +62,6 @@ import {
   deleteGroup,
   relayE2eeEnvelope,
   sendTypingSignal,
-  ladeAnhangHoch,
   getGroupInviteInfo,
   setzeEinladungsKarte,
 } from '@/api/social'
@@ -72,7 +71,6 @@ import {
   type FileAttachment,
   type ImageAttachment,
   type MedienBindungsKontext,
-  type VideoNoteAttachment,
 } from '@/components/social/ChatMediaAttachments'
 import { baueVersandFuer, useKonversation, type GespraechsZiel } from '@/hooks/useKonversation'
 import { useSprachaufnahme } from '@/hooks/useSprachaufnahme'
@@ -89,7 +87,6 @@ import {
   loadCalendarEventsOfflineFirst,
   saveNoteOffline,
   saveCalendarEventOffline,
-  enqueueMessageMutation,
   getOutbox,
   setOutbox,
   replayOutbox,
@@ -193,7 +190,8 @@ import {
   verfallStand,
 } from '@/services/nachrichtVerfall'
 import { ladeEntwurf } from '@/services/messengerLocalStore'
-import { chatMediaBlobCache, sessionChatCache } from '@/services/klartextSpeicher'
+import { sessionChatCache } from '@/services/klartextSpeicher'
+import { baueNutzlast, ladeAnhaengeHoch, stelleZu } from '@/services/nachrichtVersand'
 import { ErwaehnungsWache } from '@/components/social/ErwaehnungsWache'
 import { NachrichtenMenue } from '@/components/social/NachrichtenMenue'
 import { WeiterleitenAnsicht } from '@/components/social/WeiterleitenAnsicht'
@@ -279,16 +277,6 @@ interface SendeAuftrag {
   weitergeleitet?: boolean
   /** Ein anderes Ziel als der offene Chat — fürs Weiterleiten. */
   ziel?: { blindMailboxId: string; recipientId?: number | null; groupId?: number | null }
-}
-
-/** Macht aus einer Aufnahme die Zeichenkette, die `medienKrypto` verschlüsselt. */
-function blobAlsDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const leser = new FileReader()
-    leser.onload = () => resolve(String(leser.result || ''))
-    leser.onerror = () => reject(leser.error ?? new Error('Aufnahme nicht lesbar'))
-    leser.readAsDataURL(blob)
-  })
 }
 
 /*
@@ -3232,123 +3220,12 @@ function MessengerSeite() {
       }
 
       const erwaehnt = erwaehnungsFelder(rawText)
-      const payloadObj: Record<string, unknown> = {
-        client_uuid: clientUuid,
-        sender_id: currentUserId,
-        sender_name: user?.username || 'Ich',
-        text: rawText,
-        timestamp: new Date().toISOString(),
-        // Nur setzen, was es gibt: ein Umschlag voller `undefined` kostet
-        // Bytes, und jedes Byte reist verschlüsselt mit.
-        ...(bezug ? { antwort_auf: bezug } : {}),
-        ...(weitergeleitet ? { weitergeleitet: true } : {}),
-        ...(erwaehnt.erwaehnungen?.length ? { erwaehnungen: erwaehnt.erwaehnungen } : {}),
-        ...(erwaehnt.erwaehntAlle ? { erwaehnt_alle: true } : {}),
-        ...(optimisticMessage.verfaelltAm ? { verfaellt_am: optimisticMessage.verfaelltAm } : {}),
-      }
+      const zeitpunkt = new Date().toISOString()
 
-      let finalImg: ImageAttachment | undefined = undefined
-      let finalFile: FileAttachment | undefined = undefined
-      let finalAudio: AudioAttachment | undefined = undefined
-      let finalVideoNote: VideoNoteAttachment | undefined = undefined
-
-      /**
-       * Verschlüsselt einen Anhang auf diesem Gerät und lädt ihn hoch.
-       *
-       * Mailbox und Absender gehen als Bindung mit ein: ein Blob, den jemand in
-       * ein anderes Gespräch umhängt, scheitert beim Empfänger am Tag. Deshalb
-       * steht der Upload hier und nicht schon beim Aufnehmen — dort ist noch
-       * nicht klar, wohin die Aufnahme geht.
-       */
-      const anhangHochladen = (klartext: string, dateiname: string, mimeType: string) =>
-        ladeAnhangHoch({
-          klartext,
-          dateiname,
-          mimeType,
-          blindMailboxId: targetBlindMailboxId,
-          absenderId: currentUserId,
-          groupId: currentGroupId,
-        })
-
-      if (img) {
-        if (img.mediaId) {
-          finalImg = {
-            mediaId: img.mediaId,
-            paketSchluessel: img.paketSchluessel,
-            fileId: img.fileId,
-            name: img.name,
-          }
-        } else if (img.dataUrl) {
-          try {
-            const mimeType = img.dataUrl.split(';')[0]?.replace('data:', '') || 'image/png'
-            const zeiger = await anhangHochladen(img.dataUrl, img.name || 'bild.png', mimeType)
-            chatMediaBlobCache.set(zeiger.mediaId, img.dataUrl)
-            finalImg = { ...zeiger, name: img.name }
-          } catch {
-            finalImg = { name: img.name }
-          }
-        }
-      }
-
-      if (file) {
-        if (file.mediaId) {
-          finalFile = {
-            mediaId: file.mediaId,
-            paketSchluessel: file.paketSchluessel,
-            fileId: file.fileId,
-            name: file.name,
-            sizeBytes: file.sizeBytes,
-            mimeType: file.mimeType,
-          }
-        } else if (file.dataUrl) {
-          try {
-            const zeiger = await anhangHochladen(
-              file.dataUrl,
-              file.name || 'anhang.bin',
-              file.mimeType || 'application/octet-stream'
-            )
-            chatMediaBlobCache.set(zeiger.mediaId, file.dataUrl)
-            finalFile = {
-              ...zeiger,
-              name: file.name,
-              sizeBytes: file.sizeBytes,
-              mimeType: file.mimeType,
-            }
-          } catch {
-            finalFile = { name: file.name, sizeBytes: file.sizeBytes, mimeType: file.mimeType }
-          }
-        }
-      }
-
-      // Ton und Videonotiz haben keinen Ersatz ohne Blob: eine Sprachnachricht
-      // ohne Aufnahme wäre eine leere Zeile. Scheitert der Upload, scheitert das
-      // Senden, und der catch-Zweig nimmt die Nachricht wieder aus dem Verlauf.
-      if (audio?.dataUrl) {
-        const zeiger = await anhangHochladen(
-          audio.dataUrl,
-          'sprachnachricht.webm',
-          audio.mimeType || 'audio/webm'
-        )
-        chatMediaBlobCache.set(zeiger.mediaId, audio.dataUrl)
-        finalAudio = {
-          ...zeiger,
-          durationSeconds: audio.durationSeconds,
-          mimeType: audio.mimeType,
-        }
-      }
-
-      if (videoNote) {
-        const dataUrl = await blobAlsDataUrl(videoNote.blob)
-        const zeiger = await anhangHochladen(dataUrl, 'videonotiz.webm', videoNote.mimeType)
-        chatMediaBlobCache.set(zeiger.mediaId, dataUrl)
-        finalVideoNote = {
-          ...zeiger,
-          durationSeconds: videoNote.durationSeconds,
-          width: videoNote.width,
-          height: videoNote.height,
-          mimeType: videoNote.mimeType,
-        }
-      }
+      const { finalImg, finalFile, finalAudio, finalVideoNote } = await ladeAnhaengeHoch(
+        { img, file, audio, videoNote },
+        { blindMailboxId: targetBlindMailboxId, absenderId: currentUserId, groupId: currentGroupId },
+      )
 
       // Was hochgeladen wurde, gehört auch in die eigene Zeile: sonst zeigt sie
       // nach einem Neuladen auf eine Blob-URL, die es nicht mehr gibt.
@@ -3364,14 +3241,25 @@ function MessengerSeite() {
         await updateMessageInLocalStore(targetBlindMailboxId, clientUuid, nachtrag).catch(() => {})
       }
 
-      if (note) payloadObj.note_attachment = note
-      if (cal) payloadObj.calendar_attachment = cal
-      if (finalImg) payloadObj.image_attachment = finalImg
-      if (finalAudio) payloadObj.audio_attachment = finalAudio
-      if (finalFile) payloadObj.file_attachment = finalFile
-      if (sticker) payloadObj.sticker_attachment = sticker
-      if (storyReply) payloadObj.story_reply = storyReply
-      if (finalVideoNote) payloadObj.video_note_attachment = finalVideoNote
+      const payloadObj = baueNutzlast({
+        clientUuid,
+        absenderId: currentUserId,
+        absenderName: user?.username || 'Ich',
+        text: rawText,
+        zeitpunkt,
+        bezug,
+        weitergeleitet,
+        erwaehnt,
+        verfaelltAm: optimisticMessage.verfaelltAm,
+        note,
+        cal,
+        sticker,
+        storyReply,
+        finalImg,
+        finalFile,
+        finalAudio,
+        finalVideoNote,
+      })
 
       // Der Beleg über den Absender. Im Direktchat trägt ihn schon der Ratchet,
       // in der Gruppe gäbe es ihn sonst nirgends — siehe `nutzlastSignatur.ts`.
@@ -3423,51 +3311,7 @@ function MessengerSeite() {
         throw new E2eeRecipientKeyMissingError(targetUserId ?? 0)
       }
 
-      /**
-       * Die niedrigste Umschlagkennung der Auffächerung gilt als Kennung dieser
-       * Nachricht. Quittungen der Gegenstelle nennen die Kennung der Kopie, die
-       * *sie* gesehen hat — also eine aus derselben Auffächerung und damit nie
-       * kleinere. Der Vergleich `quittiert >= meine` trägt deshalb weiter.
-       */
-      let niedrigsteId = 0
-      let verbindungsfehler = false
-      const gescheiterteGeraete = new Set<string>()
-      let ueberspringeNaechsteNachricht = false
-
-      for (const auftrag of auftraege) {
-        // H-6: Paarbildung im Sendepfad. Scheitert ein Auftrag (z. B. dr-init),
-        // darf die zugehörige Ratchet-Nachricht desselben Zielgeräts nicht gesendet
-        // werden, sondern muss ebenfalls eingereiht werden, um Sitzungsbrüche zu verhindern.
-        const raute = auftrag.client_uuid ? auftrag.client_uuid.indexOf('#') : -1
-        const rawSuffix = raute !== -1 ? auftrag.client_uuid.slice(raute + 1) : ''
-        const geraetKey = rawSuffix.startsWith('i') ? rawSuffix.slice(1) : rawSuffix
-
-        const mussUeberspringen =
-          (ueberspringeNaechsteNachricht && !auftrag.is_control) ||
-          Boolean(geraetKey && gescheiterteGeraete.has(geraetKey))
-
-        if (mussUeberspringen) {
-          enqueueMessageMutation(auftrag)
-          ueberspringeNaechsteNachricht = false
-          continue
-        }
-
-        try {
-          const r = await relayE2eeEnvelope(auftrag)
-          if (!auftrag.is_control && r && typeof r.id === 'number') {
-            if (niedrigsteId === 0 || r.id < niedrigsteId) niedrigsteId = r.id
-          }
-        } catch {
-          if (geraetKey) {
-            gescheiterteGeraete.add(geraetKey)
-          }
-          if (auftrag.is_control && auftrag.control_type === 'dr-init') {
-            ueberspringeNaechsteNachricht = true
-          }
-          enqueueMessageMutation(auftrag)
-          verbindungsfehler = true
-        }
-      }
+      const { niedrigsteId, verbindungsfehler } = await stelleZu(auftraege)
 
       if (verbindungsfehler && niedrigsteId === 0) {
         toast.info(t('messenger.queuedOffline'))
