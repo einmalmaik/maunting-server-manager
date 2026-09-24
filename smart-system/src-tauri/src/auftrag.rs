@@ -137,7 +137,7 @@ pub fn desktop_aktion_bestaetigen(app: &AppHandle, auftrag_id: &str) -> Result<V
         "desktop_dateien" => dateien(wartend.sandbox_pfad, &wartend.argumente),
         "desktop_launch_app" => starten(app, &wartend.argumente),
         "desktop_system" => system::ausfuehren(app, &wartend.argumente),
-        "desktop_steuern" => uebernahme::steuern(&wartend.argumente),
+        "desktop_steuern" => steuern_und_ansehen(app, &wartend.argumente),
         "desktop_artifact" => crate::artefakt::ausfuehren(app, &wartend.argumente),
         andere => Err(format!("Unbekanntes Werkzeug: '{andere}'")),
     }
@@ -239,7 +239,15 @@ fn aktion_beschreibung(werkzeug: &str, argumente: &Value) -> (String, String) {
         }
         "desktop_steuern" => (
             "Maus- oder Tastatureingabe".to_string(),
-            "Die KI möchte Maus- oder Tastaturaktionen auf deinem Computer ausführen.".to_string(),
+            format!(
+                "Die KI möchte an deinem Computer: {}.{}",
+                handgriffe(argumente),
+                if argumente["bild"].as_bool() == Some(false) {
+                    ""
+                } else {
+                    " Danach sieht sie auf den Bildschirm."
+                }
+            ),
         ),
         "desktop_artifact" => {
             let aktion = argumente["aktion"].as_str().unwrap_or("");
@@ -344,7 +352,7 @@ pub fn ausfuehren(
             "desktop_dateien" => dateien(sandbox_pfad, argumente).map(Some),
             "desktop_launch_app" => starten(app, argumente).map(Some),
             "desktop_system" => system::ausfuehren(app, argumente).map(Some),
-            "desktop_steuern" => uebernahme::steuern(argumente).map(Some),
+            "desktop_steuern" => steuern_und_ansehen(app, argumente).map(Some),
             "desktop_artifact" => crate::artefakt::ausfuehren(app, argumente).map(Some),
             andere => Err(format!("Unbekanntes Werkzeug: '{andere}'")),
         };
@@ -379,6 +387,63 @@ pub fn ausfuehren(
     }
 }
 
+/// Wie lange der Bildschirm nach einer Aktion Zeit bekommt, bevor fotografiert
+/// wird. Ein Menue, das gerade aufklappt, ist sonst noch nicht auf dem Bild.
+const NACH_DER_AKTION: Duration = Duration::from_millis(400);
+
+/// Maus und Tastatur, und danach gleich ein frisches Bild.
+///
+/// Vorher war das Ansehen ein eigener Auftrag: das Modell klickte, bekam
+/// "geklickt" zurueck, und fragte dann in einer zweiten Runde nach dem
+/// Bildschirm. Jede Runde kostet beim Anbieter rund drei Sekunden. Mit dem
+/// Bild in der Antwort ist es eine Runde je Handgriff statt zwei.
+///
+/// `bild` setzt das Panel, nicht das Modell: `false` bei einem Modell, das
+/// keine Bilder lesen kann. Fehlt das Feld (aelteres Panel), gibt es ein Bild.
+///
+/// Scheitert nur das Foto, bleibt die Aktion ein Erfolg — sie ist passiert.
+/// Das Modell erfaehrt es ueber `bild_fehler` und kann selbst nachsehen.
+fn steuern_und_ansehen(app: &AppHandle, argumente: &Value) -> Result<Value, String> {
+    let mut ergebnis = uebernahme::steuern(argumente)?;
+    if argumente["bild"].as_bool() == Some(false) {
+        return Ok(ergebnis);
+    }
+    std::thread::sleep(NACH_DER_AKTION);
+    match crate::bildschirm::aufnehmen(app) {
+        Ok(Value::Object(bild)) => {
+            if let Value::Object(felder) = &mut ergebnis {
+                felder.extend(bild);
+            }
+        }
+        Ok(_) => {}
+        Err(fehler) => ergebnis["bild_fehler"] = json!(fehler),
+    }
+    Ok(ergebnis)
+}
+
+/// Was die Bestaetigungskarte bei Maus und Tastatur zeigt: jeder Handgriff
+/// einzeln, damit der Mensch weiss, wozu er Ja sagt.
+fn handgriffe(argumente: &Value) -> String {
+    fn einer(schritt: &Value) -> String {
+        let aktion = schritt["aktion"].as_str().unwrap_or("?");
+        let text = schritt["text"].as_str().unwrap_or("");
+        match (schritt["x"].as_i64(), schritt["y"].as_i64()) {
+            _ if aktion == "tippen" => format!("tippen „{text}“"),
+            _ if !text.is_empty() => format!("{aktion} {text}"),
+            (Some(x), Some(y)) => format!("{aktion} bei ({x}|{y})"),
+            _ => aktion.to_string(),
+        }
+    }
+    match argumente["schritte"].as_array() {
+        Some(schritte) if argumente["aktion"].as_str() == Some("folge") => schritte
+            .iter()
+            .map(einer)
+            .collect::<Vec<_>>()
+            .join(", "),
+        _ => einer(argumente),
+    }
+}
+
 /// Maus und Tastatur — samt der Bitte um die Freigabe dafuer.
 fn steuern(
     app: &AppHandle,
@@ -386,7 +451,7 @@ fn steuern(
     auftrag_id: Option<&str>,
 ) -> Result<Ergebnis, String> {
     if argumente["aktion"].as_str() != Some("freigabe") {
-        return uebernahme::steuern(argumente).map(Some);
+        return steuern_und_ansehen(app, argumente).map(Some);
     }
     let minuten = argumente["minuten"]
         .as_u64()
@@ -694,6 +759,35 @@ mod tests {
         // Und was durchgeht, kommt getrimmt und ohne Leereintraege an.
         let liste = pfadliste(&json!({ "pfade": ["  C:\\a  ", "", "C:\\b"] })).unwrap();
         assert_eq!(liste, vec!["C:\\a".to_string(), "C:\\b".to_string()]);
+    }
+
+    #[test]
+    fn die_karte_nennt_jeden_handgriff_einer_folge() {
+        // Ohne autonomen Modus sagt der Mensch zu einer ganzen Folge einmal
+        // Ja. Dann muss er auch jeden Schritt darin sehen.
+        let (_, text) = aktion_beschreibung(
+            "desktop_steuern",
+            &json!({
+                "aktion": "folge",
+                "schritte": [
+                    { "aktion": "klick", "x": 320, "y": 40 },
+                    { "aktion": "tippen", "text": "wetter" },
+                    { "aktion": "taste", "text": "enter" }
+                ]
+            }),
+        );
+        assert!(text.contains("klick bei (320|40)"), "{text}");
+        assert!(text.contains("tippen „wetter“"), "{text}");
+        assert!(text.contains("taste enter"), "{text}");
+        assert!(text.contains("Bildschirm"), "{text}");
+
+        // Ohne Bild verspricht die Karte auch keinen Blick.
+        let (_, text) = aktion_beschreibung(
+            "desktop_steuern",
+            &json!({ "aktion": "klick", "x": 1, "y": 2, "bild": false }),
+        );
+        assert!(text.contains("klick bei (1|2)"), "{text}");
+        assert!(!text.contains("Bildschirm"), "{text}");
     }
 
     #[test]

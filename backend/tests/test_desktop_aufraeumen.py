@@ -276,3 +276,53 @@ class TestKlickenFolgtDemAutonomenModus:
         assert desktop_job_service._wartet_auf_menschen(
             "desktop_steuern", {"aktion": "freigabe", "autonom": False}
         )
+
+
+class TestDasBildNachDemHandgriff:
+    """Die App schickt nach jedem Klick gleich ein Bildschirmfoto mit.
+
+    Das spart eine Runde beim Anbieter je Handgriff (rund drei Sekunden).
+    Ob ein Bild mitkommt, entscheidet das Panel: ein Modell, das keine Bilder
+    lesen kann, bekaeme sonst eines in den Verlauf, das der Anbieter abweist.
+    """
+
+    def test_ein_sehendes_modell_bekommt_das_bild(self, db: Session, regular_user: User):
+        for sieht in (True, None):  # None heisst "unbekannt" — dann faehrt es mit
+            argumente = _desktop_argumente(
+                db,
+                user_id=regular_user.id,
+                call=_aufruf("desktop_steuern", {"aktion": "klick", "x": 1, "y": 1}),
+                sieht=sieht,
+            )
+            assert argumente["bild"] is True
+
+    def test_ein_blindes_modell_bekommt_keines(self, db: Session, regular_user: User):
+        argumente = _desktop_argumente(
+            db,
+            user_id=regular_user.id,
+            call=_aufruf("desktop_steuern", {"aktion": "klick", "bild": True}),
+            sieht=False,
+        )
+        # Auch nicht, wenn das Modell selbst eines verlangt.
+        assert argumente["bild"] is False
+
+    def test_andere_werkzeuge_bekommen_kein_bildfeld(self, db: Session, regular_user: User):
+        argumente = _desktop_argumente(
+            db,
+            user_id=regular_user.id,
+            call=_aufruf("desktop_system", {"aktion": "laufwerke", "bild": True}),
+            sieht=True,
+        )
+        assert "bild" not in argumente
+
+    def test_eine_folge_steht_im_katalog(self):
+        from services.ai_tools.system_tools import _desktop_tool_definitions
+
+        steuern = next(
+            eintrag["function"]
+            for eintrag in _desktop_tool_definitions()
+            if eintrag["function"]["name"] == "desktop_steuern"
+        )
+        felder = steuern["parameters"]["properties"]
+        assert "folge" in felder["aktion"]["enum"]
+        assert felder["schritte"]["maxItems"] == 20  # uebernahme::MAX_SCHRITTE

@@ -26,9 +26,7 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use serde_json::Value;
-#[cfg(windows)]
-use serde_json::json;
+use serde_json::{json, Value};
 
 /// Bis wann die Freigabe gilt. `None` heisst: keine.
 static FREIGABE: Mutex<Option<Instant>> = Mutex::new(None);
@@ -410,8 +408,92 @@ pub fn steuern(argumente: &Value) -> Result<Value, String> {
         pruefen()?;
     }
     let aktion = argumente["aktion"].as_str().unwrap_or("");
+    if aktion == "folge" {
+        return folge(argumente);
+    }
     let ergebnis = windows_impl::ausfuehren(aktion, argumente)?;
     Ok(ergebnis)
+}
+
+/// Hoechstens so viele Schritte in einer Folge.
+pub const MAX_SCHRITTE: usize = 20;
+
+/// So lange darf eine Folge warten und halten, alles zusammen. Eine einzelne
+/// Aktion wartet hoechstens 30 s; zwanzig davon hintereinander waeren zehn
+/// Minuten, in denen niemand sieht, was passiert.
+const MAX_FOLGE_MS: u64 = 30_000;
+
+/// Was in einer Folge stehen darf. Nicht `folge` (keine Verschachtelung) und
+/// nicht `freigabe`: die bittet einen Menschen und ist kein Handgriff.
+const SCHRITTAKTIONEN: &[&str] = &[
+    "klick", "doppelklick", "rechtsklick", "maus_halten", "maus_bewegen",
+    "maus_relativ", "kamera_drehen", "tippen", "taste", "taste_halten",
+    "scrollen", "warten",
+];
+
+/// Wie lange ein Schritt wartet oder haelt — dieselben Vorgaben wie beim
+/// Ausfuehren.
+fn geplante_ms(schritt: &Value) -> u64 {
+    match schritt["aktion"].as_str().unwrap_or("") {
+        "warten" => schritt["menge"].as_u64().unwrap_or(1).clamp(1, 30) * 1000,
+        "taste_halten" | "maus_halten" => schritt["dauer_ms"].as_u64().unwrap_or(500),
+        _ => 0,
+    }
+}
+
+/// Mehrere Handgriffe in einem Auftrag.
+///
+/// Der Grund ist die Zeit: jeder Auftrag ist eine Runde beim Anbieter, und
+/// eine Runde kostet rund drei Sekunden, bevor das Modell ueberhaupt
+/// antwortet. „Ins Suchfeld klicken, Text tippen, Enter" waren drei Runden,
+/// jetzt ist es eine.
+///
+/// Geprueft wird **alles vorher**: ein Tippfehler im fuenften Schritt soll
+/// nicht erst auffallen, wenn die ersten vier schon geklickt haben.
+fn folge(argumente: &Value) -> Result<Value, String> {
+    let schritte = argumente["schritte"]
+        .as_array()
+        .filter(|liste| !liste.is_empty())
+        .ok_or("Bei aktion=\"folge\" fehlen die 'schritte'.")?;
+    if schritte.len() > MAX_SCHRITTE {
+        return Err(format!(
+            "{} Schritte sind zu viele; hoechstens {MAX_SCHRITTE} in einer Folge.",
+            schritte.len()
+        ));
+    }
+    for (nummer, schritt) in schritte.iter().enumerate() {
+        let aktion = schritt["aktion"].as_str().unwrap_or("");
+        if !SCHRITTAKTIONEN.contains(&aktion) {
+            return Err(format!(
+                "Schritt {} ('{aktion}') geht in keiner Folge. Moeglich sind: {}.",
+                nummer + 1,
+                SCHRITTAKTIONEN.join(", ")
+            ));
+        }
+    }
+    let dauer: u64 = schritte.iter().map(geplante_ms).sum();
+    if dauer > MAX_FOLGE_MS {
+        return Err(format!(
+            "Die Folge wuerde {} s warten oder halten; hoechstens {} s. Teil sie auf.",
+            dauer / 1000,
+            MAX_FOLGE_MS / 1000
+        ));
+    }
+
+    for (nummer, schritt) in schritte.iter().enumerate() {
+        let aktion = schritt["aktion"].as_str().unwrap_or("");
+        windows_impl::ausfuehren(aktion, schritt).map_err(|fehler| {
+            // Was davor lief, ist passiert. Das Modell muss es wissen, sonst
+            // wiederholt es die ganze Folge und tippt den Text zweimal.
+            format!(
+                "Schritt {} von {} ('{aktion}') gescheitert: {fehler}. Die \
+                 Schritte davor sind ausgefuehrt; sieh nach, bevor du weitermachst.",
+                nummer + 1,
+                schritte.len()
+            )
+        })?;
+    }
+    Ok(json!({ "folge": schritte.len() }))
 }
 
 #[cfg(test)]
@@ -482,6 +564,73 @@ mod tests {
         freigeben(999).unwrap();
         assert!(restsekunden() <= MAX_MINUTEN * 60);
         widerrufen().unwrap();
+    }
+
+    #[test]
+    fn eine_folge_braucht_dieselbe_freigabe() {
+        widerrufen().unwrap();
+        let fehler = steuern(&json!({
+            "aktion": "folge",
+            "schritte": [{ "aktion": "klick", "x": 1, "y": 1 }]
+        }))
+        .unwrap_err();
+        assert!(fehler.contains("Keine gueltige Freigabe"), "{fehler}");
+    }
+
+    // Die folgenden Faelle scheitern alle an der Vorpruefung und klicken
+    // deshalb auch unter Windows nie wirklich.
+
+    #[test]
+    fn eine_folge_ohne_schritte_tut_nichts() {
+        for argumente in [
+            json!({ "aktion": "folge", "autonom": true }),
+            json!({ "aktion": "folge", "autonom": true, "schritte": [] }),
+        ] {
+            let fehler = steuern(&argumente).unwrap_err();
+            assert!(fehler.contains("schritte"), "{fehler}");
+        }
+    }
+
+    #[test]
+    fn freigabe_und_folge_stehen_in_keiner_folge() {
+        // Der Klick im ersten Schritt darf nicht laufen, wenn der zweite
+        // ungueltig ist: geprueft wird alles vorher.
+        for verboten in ["freigabe", "folge", "unbekannt"] {
+            let fehler = steuern(&json!({
+                "aktion": "folge",
+                "autonom": true,
+                "schritte": [
+                    { "aktion": "klick", "x": 1, "y": 1 },
+                    { "aktion": verboten }
+                ]
+            }))
+            .unwrap_err();
+            assert!(fehler.contains("Schritt 2"), "{fehler}");
+        }
+    }
+
+    #[test]
+    fn eine_folge_hat_eine_obergrenze() {
+        let viele: Vec<Value> = (0..=MAX_SCHRITTE)
+            .map(|_| json!({ "aktion": "taste", "text": "a" }))
+            .collect();
+        let fehler = steuern(&json!({
+            "aktion": "folge", "autonom": true, "schritte": viele
+        }))
+        .unwrap_err();
+        assert!(fehler.contains("zu viele"), "{fehler}");
+
+        // Und eine Zeitgrenze: zwei halbe Minuten Warten sind zu lang.
+        let fehler = steuern(&json!({
+            "aktion": "folge",
+            "autonom": true,
+            "schritte": [
+                { "aktion": "warten", "menge": 30 },
+                { "aktion": "taste_halten", "text": "w", "dauer_ms": 1000 }
+            ]
+        }))
+        .unwrap_err();
+        assert!(fehler.contains("warten oder halten"), "{fehler}");
     }
 
     #[test]

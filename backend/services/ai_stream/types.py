@@ -124,7 +124,7 @@ _FREITEXT_WERKZEUGE = frozenset({
 #: Felder, die der Rechner **nur** vom Panel entgegennimmt. Sie stehen in
 #: keinem Werkzeugschema, und was das Modell unter diesen Namen mitschickt,
 #: wird verworfen, bevor es den Auftrag erreicht.
-GESETZTE_FELDER = ("autonom", "systembereich")
+GESETZTE_FELDER = ("autonom", "systembereich", "bild")
 
 
 #: Das Feld, unter dem der Rechner ein Bildschirmfoto meldet (`bildschirm.rs`).

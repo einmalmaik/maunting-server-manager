@@ -92,18 +92,22 @@ def _desktop_tool_definitions() -> list[dict]:
         ),
         _function(
             "desktop_steuern",
-            "Übernimmt Maus und Tastatur. Starte mit aktion='freigabe': "
-            "im autonomen Modus sofort erteilt, sonst vom Benutzer bestätigt. "
-            "Koordinaten sind Bildpunkte des Bildschirmfotos (Ursprung links oben, "
-            "Hauptbildschirm). Vor Klicks mit desktop_system(aktion='bildschirm') prüfen.",
+            "Maus und Tastatur. Zuerst aktion='freigabe'. x/y sind Punkte im "
+            "letzten Bildschirmfoto. Antwortet mit einem neuen Foto.",
             {
                 "aktion": {
                     "type": "string",
                     "enum": [
-                        "freigabe", "klick", "doppelklick", "rechtsklick",
+                        "freigabe", "folge", "klick", "doppelklick", "rechtsklick",
                         "maus_halten", "maus_bewegen", "maus_relativ", "kamera_drehen",
                         "tippen", "taste", "taste_halten", "scrollen", "warten",
                     ],
+                },
+                "schritte": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": {"type": "object"},
+                    "description": "Bei folge: Aktionen mit ihren Feldern, der Reihe nach.",
                 },
                 "anliegen": {
                     "type": "string",

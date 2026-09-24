@@ -240,7 +240,7 @@ def _warten_behandeln(
     return _WartenErgebnis(signal="parken", wake_at=wake_at)
 
 
-def _desktop_argumente(db, *, user_id: int, call) -> dict:
+def _desktop_argumente(db, *, user_id: int, call, sieht: bool | None = None) -> dict:
     """Die Argumente des Modells plus das, was allein das Panel weiss.
 
     Zwei Entscheidungen faehrt der Rechner nicht selbst, weil er sie nicht
@@ -259,6 +259,10 @@ def _desktop_argumente(db, *, user_id: int, call) -> dict:
       zurueck, statt weiter durchzulaufen.
     * **`systembereich`** — wie weit die KI in Windows selbst greifen darf
       (`aus` / `lesen` / `schreiben`). Eine Kontoeinstellung, kein Werkzeugwert.
+    * **`bild`** — nur bei `desktop_steuern`: ob die App nach dem Handgriff
+      gleich ein Bildschirmfoto mitschickt. Aus bei einem Modell, das keine
+      Bilder lesen kann (``sieht`` ist ``False``, wie bei `_sieht_nicht`) —
+      sonst stuende ein Bild im Verlauf, das der Anbieter abweist.
 
     Beide werden **ueberschrieben**, nicht ergaenzt: schickte das Modell
     `{"autonom": true}` mit, waere das sonst eine Selbstermaechtigung, die
@@ -285,6 +289,8 @@ def _desktop_argumente(db, *, user_id: int, call) -> dict:
     # Der Systembereich betrifft Pfade — Maus und Tastatur haben keine.
     if call.name != "desktop_steuern":
         argumente["systembereich"] = systembereich_des_benutzers(benutzer)
+    else:
+        argumente["bild"] = sieht is not False
 
     # Gemäß Maunting Studios Grundsatz („Sicherheit braucht Vertrauen“):
     # Jedes Werkzeug auf dem Rechner des Benutzers unterliegt der Autonomie-
@@ -384,7 +390,9 @@ def _desktop_behandeln(
                 run_id=run_id,
                 tool_call_id=call.id,
                 tool_name=call.name,
-                arguments=_desktop_argumente(db, user_id=user_id, call=call),
+                arguments=_desktop_argumente(
+                    db, user_id=user_id, call=call, sieht=zustand.get("sieht")
+                ),
                 familie=familie,
             )
             job_ids.append(job.id)
