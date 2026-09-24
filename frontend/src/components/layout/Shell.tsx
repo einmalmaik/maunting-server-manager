@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { useTranslation } from 'react-i18next'
 import { Outlet, useLocation } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
@@ -7,23 +6,18 @@ import { VersionFooter } from '@/components/VersionFooter'
 import { AiRunNotice } from '@/components/ai/AiRunNotice'
 import { ServerIncidentNotifier } from '@/components/notifications/ServerIncidentNotifier'
 import { PanelPopupModal } from '@/components/popups/PanelPopupModal'
-import { FriendsListDock } from '@/components/social/FriendsListDock'
 import { CallOverlay } from '@/components/calling/CallOverlay'
 import { CrossDeviceCallBanner } from '@/components/calling/CrossDeviceCallBanner'
-import { Users } from 'lucide-react'
 import { api } from '@/api/client'
 import { useMessengerSperreBereitschaft } from '@/hooks/useMessengerSperre'
 import { usePresenceAndActivity } from '@/hooks/usePresenceAndActivity'
 
 export function Shell() {
-  const { t } = useTranslation()
-
   useMessengerSperreBereitschaft()
 
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false)
   const [sidebarHidden, setSidebarHidden] = useState(false)
   const [socialEnabled, setSocialEnabled] = useState(true)
-  const [mobileDockOpen, setMobileDockOpen] = useState(false)
   const mobileNavigationTriggerRef = useRef<HTMLButtonElement>(null)
 
   const { status: presenceStatus, changeStatus: handlePresenceChange } = usePresenceAndActivity(socialEnabled, true)
@@ -144,48 +138,6 @@ export function Shell() {
           weiterarbeitet: sonst muesste man den Chat offen lassen, also genau
           das tun, was nicht mehr noetig sein soll. */}
       <AiRunNotice />
-
-      {/* Floating Friends & Social Dock (Desktop + Mobile) */}
-      {socialEnabled && !isFullHeightPage && (
-        <>
-          {/* Desktop Dock */}
-          <div className="fixed bottom-4 right-6 z-30 hidden lg:block">
-            <FriendsListDock collapsedDefault={true} className="w-80 shadow-2xl" />
-          </div>
-
-          {/* Mobile FAB Trigger */}
-          <div className="fixed bottom-4 right-4 z-30 lg:hidden">
-            {!mobileDockOpen && (
-              <button
-                type="button"
-                onClick={() => setMobileDockOpen(true)}
-                className="w-11 h-11 rounded-full bg-primary text-on-primary shadow-lg flex items-center justify-center hover:bg-primary/90 transition-transform active:scale-95"
-                aria-label={t('social.friends.openDock')}
-              >
-                <Users className="w-5 h-5" />
-              </button>
-            )}
-          </div>
-
-          {/* Mobile Dock Drawer / Layer */}
-          {mobileDockOpen && (
-            <div className="fixed inset-0 z-50 lg:hidden flex flex-col justify-end" role="dialog" aria-label={t('social.friends.dockTitle')}>
-              <div
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setMobileDockOpen(false)}
-                aria-hidden="true"
-              />
-              <div className="relative z-10 w-full max-h-[85dvh] p-2">
-                <FriendsListDock
-                  collapsedDefault={false}
-                  className="w-full shadow-2xl"
-                  onClose={() => setMobileDockOpen(false)}
-                />
-              </div>
-            </div>
-          )}
-        </>
-      )}
 
       {/* Push- & Pop-up-Benachrichtigungen bei Server-Vorfällen & Kalender-Erinnerungen */}
       <ServerIncidentNotifier />
