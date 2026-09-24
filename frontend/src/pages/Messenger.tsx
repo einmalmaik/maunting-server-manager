@@ -68,7 +68,6 @@ import {
 } from '@/api/social'
 import { maxAnhangBytes } from '@/services/medienKrypto'
 import {
-  chatMediaBlobCache,
   type AudioAttachment,
   type FileAttachment,
   type ImageAttachment,
@@ -211,6 +210,7 @@ import {
   verfallStand,
 } from '@/services/nachrichtVerfall'
 import { ladeEntwurf } from '@/services/messengerLocalStore'
+import { chatMediaBlobCache, sessionChatCache } from '@/services/klartextSpeicher'
 import { ErwaehnungsWache } from '@/components/social/ErwaehnungsWache'
 import { NachrichtenMenue } from '@/components/social/NachrichtenMenue'
 import { WeiterleitenAnsicht } from '@/components/social/WeiterleitenAnsicht'
@@ -250,7 +250,7 @@ import { ContactFilterTabs } from '@/components/social/sidebar/ContactFilterTabs
 import { StoriesCarouselBar } from '@/components/social/sidebar/StoriesCarouselBar'
 import { StatusUpdatesView } from '@/components/social/sidebar/StatusUpdatesView'
 import { CommunityView } from '@/components/social/sidebar/CommunityView'
-import { GroupListItem, ContactListItem } from '@/components/social/sidebar/ConversationListItem'
+import { GroupListItem, ContactListItem, type ChatContact } from '@/components/social/sidebar/ConversationListItem'
 import { ChatSelectionBar } from '@/components/social/chat/ChatSelectionBar'
 import { ChatHeader } from '@/components/social/chat/ChatHeader'
 import { ChatActionsMenu } from '@/components/social/chat/ChatActionsMenu'
@@ -265,44 +265,6 @@ import { ChatHintergrund, ChatHintergrundDialog } from '@/features/chatHintergru
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
 import { useMessengerNotificationStore, PINS_MAX } from '@/stores/messengerNotificationStore'
-import { getSafeAttachmentUrl } from '@/lib/sanitizeSvg'
-
-export interface ChatContact {
-  /**
-   * Schlüssel für die Kontaktlisten. Wird beim Zusammenführen vergeben und
-   * stammt nicht aus der Server-Antwort: eine Benutzer-Id kann doppelt
-   * ankommen, dieser Wert nicht.
-   */
-  listKey: string
-  id: number
-  userId: number
-  username: string
-  avatarUrl?: string | null
-  status: PresenceStatus
-  deviceType?: string | null
-  activityLabel?: string | null
-  isFriend: boolean
-  teamName?: string | null
-  isPublicUser?: boolean
-}
-
-// Die Typen stehen bei den Komponenten, die sie anzeigen. Hier standen bis
-// 09/2026 zweite Fassungen davon, die auseinanderliefen, sobald sich eine
-// änderte. Weitergereicht wird nur, damit der bisherige Importweg bleibt.
-export type {
-  ImageAttachment,
-  AudioAttachment,
-  FileAttachment,
-  VideoNoteAttachment,
-} from '@/components/social/ChatMediaAttachments'
-export type {
-  AntwortBezug,
-  CalendarAttachment,
-  ChatMessage,
-  NoteAttachment,
-  StickerAttachment,
-  StoryReplyAttachment,
-}
 
 /**
  * Was gesendet werden soll.
@@ -316,7 +278,7 @@ export type {
  * Zählen. Alles ist freiwillig; was nichts zu senden hat, kommt gar nicht erst
  * bis zum Umschlag.
  */
-export interface SendeAuftrag {
+interface SendeAuftrag {
   /** Ohne Angabe wird genommen, was im Eingabefeld steht. */
   text?: string
   note?: NoteAttachment
@@ -336,8 +298,6 @@ export interface SendeAuftrag {
   ziel?: { blindMailboxId: string; recipientId?: number | null; groupId?: number | null }
 }
 
-export { getSafeAttachmentUrl }
-
 /** Macht aus einer Aufnahme die Zeichenkette, die `medienKrypto` verschlüsselt. */
 function blobAlsDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -346,13 +306,6 @@ function blobAlsDataUrl(blob: Blob): Promise<string> {
     leser.onerror = () => reject(leser.error ?? new Error('Aufnahme nicht lesbar'))
     leser.readAsDataURL(blob)
   })
-}
-
-// Zero-Knowledge In-Memory Session Cache: verhindert das unverschlüsselte Speichern von Plaintext-Nachrichten im LocalStorage
-export const sessionChatCache = new Map<string, ChatMessage[]>()
-
-export function clearSessionChatCache(): void {
-  sessionChatCache.clear()
 }
 
 export function Messenger() {
@@ -451,7 +404,6 @@ export function Messenger() {
   const [isGroupPermissionsOpen, setIsGroupPermissionsOpen] = useState(false)
   const [groupToDelete, setGroupToDelete] = useState<ChatGroupItem | null>(null)
   const [isDeletingGroup, setIsDeletingGroup] = useState(false)
-
 
   // Camera & Attachments
   const [isCameraModalOpen, setIsCameraModalOpen] = useState(false)
@@ -552,7 +504,6 @@ export function Messenger() {
   /** Verfallsfrist dieses Chats in Sekunden, 0 = aus. */
   const [verfallSekunden, setVerfallSekunden] = useState(0)
   const [verfallOffen, setVerfallOffen] = useState(false)
-  /** Das Menü hinter den drei Punkten in der Chat-Kopfzeile. */
 
   const highestIncomingIdAcknowledgedRef = useRef<number>(0)
   const highestIncomingIdDeliveredRef = useRef<number>(0)
@@ -710,7 +661,7 @@ export function Messenger() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUserId, gespraechsAbdruck])
 
-  // 1. Identität des Kontos auflösen und Klartextreste aus der Altzeit entfernen.
+  // Identität des Kontos auflösen und Klartextreste aus der Altzeit entfernen.
   //
   // Hier wird bewusst nichts erzeugt und nichts veröffentlicht. Vorher stand an
   // dieser Stelle `getOrGenerateLocalKeyPair` plus Upload: jedes Gerät schrieb
@@ -814,7 +765,7 @@ export function Messenger() {
     toast.success(t('messenger.storyDeleted'))
   }
 
-  // 3. Handle public invite link join if inviteCode param is present
+  // Handle public invite link join if inviteCode param is present
   useEffect(() => {
     if (!inviteCode || !currentUserId) return
     let active = true
@@ -1273,7 +1224,6 @@ export function Messenger() {
     }
   }, [queryUserId, contactsList, activeGroup])
 
-
   // Auto-select group if groupId query parameter or storage is present
   useEffect(() => {
     if (queryGroupId && !activeContact && groups.length > 0) {
@@ -1323,7 +1273,7 @@ export function Messenger() {
     }
   }, [activeContact, activeGroup, searchParams, setSearchParams])
 
-  // 4. When active contact or active group changes, derive mailbox ID
+  // When active contact or active group changes, derive mailbox ID
   /**
    * Das Gespräch, wie es die Krypto-Schicht sieht.
    *
@@ -1604,7 +1554,7 @@ export function Messenger() {
     await Promise.all(auftraege.map((auftrag) => relayE2eeEnvelope(auftrag)))
   }
 
-  // 5. Load and decrypt messages (non-flickering background sync + real-time)
+  // Load and decrypt messages (non-flickering background sync + real-time)
   /**
    * Was ein Konto in der offenen Gruppe darf.
    *
@@ -2891,7 +2841,6 @@ export function Messenger() {
    */
   const darfVerfallStellen = !activeGroup || Boolean(activeGroup.can_set_disappearing_messages)
 
-
   /**
    * Eine Nachricht über den Verlauf heften.
    *
@@ -3575,7 +3524,7 @@ export function Messenger() {
     return () => container.removeEventListener('scroll', pruefe)
   }, [blindMailboxId])
 
-  // 6. Send message (text, note, cal, img, audio, file, sticker)
+  // Send message (text, note, cal, img, audio, file, sticker)
   const handleSendMessage = async (auftrag: SendeAuftrag = {}) => {
     const {
       text: customText,
@@ -4936,8 +4885,6 @@ export function Messenger() {
               />
             )}
           </div>
-
-
 
           {!isChatOpen && <MessengerBottomNav modus={mobileNavTab} onModus={setMobileNavTab} />}
         </div>

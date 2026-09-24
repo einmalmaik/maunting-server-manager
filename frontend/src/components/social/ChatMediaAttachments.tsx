@@ -5,8 +5,7 @@ import { getSafeAttachmentUrl } from '@/lib/sanitizeSvg'
 import { ladeAnhangHerunter } from '@/api/social'
 import type { MedienZeiger } from '@/services/medienKrypto'
 import { toast } from '@/stores/toastStore'
-
-export const chatMediaBlobCache = new Map<string, string>()
+import { chatMediaBlobCache } from '@/services/klartextSpeicher'
 
 /**
  * Woran ein Anhang hängt: wer ihn geschickt hat und in welche Mailbox.

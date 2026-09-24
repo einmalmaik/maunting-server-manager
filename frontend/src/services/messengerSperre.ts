@@ -44,7 +44,7 @@ import {
 import { create } from 'zustand'
 import i18n from '@/i18n'
 
-import { leereSuchspeicher } from './verlaufSuche'
+import { leereKlartextSpeicher } from './klartextSpeicher'
 import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
 
 import {
@@ -495,9 +495,10 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
     // fröhlich weiter: er hätte alles, was er zum Entschlüsseln braucht, und
     // die Sperre wäre ein Vorhang.
     clearGeraeteMemory()
-    // Die Suche hält entsiegelte Verläufe im Arbeitsspeicher. Blieben sie
-    // liegen, ließe sich nach der Sperre weiter darin suchen.
-    leereSuchspeicher()
+    // Entsiegelte Verläufe, entschlüsselte Anhänge und die Suche darüber
+    // liegen im Arbeitsspeicher. Blieben sie liegen, hielte der Tab sie auch
+    // unter dem Sperrschirm bereit, und die Suche liefe weiter darin.
+    leereKlartextSpeicher()
     set({ entsperrt: false, fehler: null })
   },
 

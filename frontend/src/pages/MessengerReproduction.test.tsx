@@ -2,8 +2,9 @@ import React from 'react'
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react'
 import { beforeAll, beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
-import { Messenger, clearSessionChatCache } from './Messenger'
-import { ChatMediaImage, chatMediaBlobCache } from '@/components/social/ChatMediaAttachments'
+import { Messenger } from './Messenger'
+import { leereKlartextSpeicher } from '@/services/klartextSpeicher'
+import { ChatMediaImage } from '@/components/social/ChatMediaAttachments'
 import * as socialApi from '@/api/social'
 import { teamsApi } from '@/api/teams'
 import { useAuthStore } from '@/stores/authStore'
@@ -322,12 +323,11 @@ describe('Requirement R1 Reproduction: E2EE Messenger Failure Modes', () => {
     vi.clearAllMocks()
     localStorage.clear()
     sessionStorage.clear()
-    clearSessionChatCache()
+    leereKlartextSpeicher()
     clearEnvelopePlaintextCache()
     clearRsaPrivateKeyCache()
     clearMemoryKeyStore()
     clearBlindMailboxIdCache()
-    chatMediaBlobCache.clear()
     vi.mocked(socialApi.getE2eePublicKey).mockResolvedValue(undefined as any)
     // Standardlage: Gerät entsperrt, Gegenseite hat einen Schlüssel.
     identitaet.state = 'ready'

@@ -6,6 +6,7 @@ import { useToastStore } from './toastStore'
 import { useConfirmStore } from './confirmStore'
 import { usePromptStore } from './promptStore'
 import * as client from '@/api/client'
+import { chatMediaBlobCache, sessionChatCache } from '@/services/klartextSpeicher'
 
 vi.mock('@/api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/client')>()
@@ -260,6 +261,9 @@ describe('authStore', () => {
         toasts: [{ id: 1, message: 'Server prod-eu-1 gestoppt', type: 'error' }],
       })
       localStorage.setItem(SQL_VERLAUF, JSON.stringify(['SELECT * FROM users']))
+      // Entschlüsselter Klartext aus dem Messenger, nur im Arbeitsspeicher.
+      sessionChatCache.set('mailbox-1', [{ id: 1, senderId: 2, text: 'Das Passwort ist', createdAt: '', isSelf: false }])
+      chatMediaBlobCache.set('medium-1', 'data:image/png;base64,AAAA')
     }
 
     function speicherIstLeer() {
@@ -274,6 +278,8 @@ describe('authStore', () => {
       expect(useConfirmStore.getState().pending).toBeNull()
       expect(usePromptStore.getState().pending).toBeNull()
       expect(localStorage.getItem(SQL_VERLAUF)).toBeNull()
+      expect(sessionChatCache.size).toBe(0)
+      expect(chatMediaBlobCache.size).toBe(0)
       expect(client.clearCsrfTokenMemory).toHaveBeenCalled()
     }
 

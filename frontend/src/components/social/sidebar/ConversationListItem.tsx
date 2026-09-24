@@ -5,9 +5,28 @@ import { Avatar } from '@/Singra/UI'
 import type { ChatGroupItem } from '@/api/social'
 import { ChatZeilenGeste } from '@/components/social/ChatZeilenGeste'
 import { DeviceBadge } from '@/components/social/DeviceBadge'
-import { StatusDot } from '@/components/social/StatusIndicator'
-import type { ChatContact } from '@/pages/Messenger'
+import { StatusDot, type PresenceStatus } from '@/components/social/StatusIndicator'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
+
+/** Ein Kontakt, wie ihn die Chatliste zeigt. */
+export interface ChatContact {
+  /**
+   * Schlüssel für die Kontaktlisten. Wird beim Zusammenführen vergeben und
+   * stammt nicht aus der Server-Antwort: eine Benutzer-Id kann doppelt
+   * ankommen, dieser Wert nicht.
+   */
+  listKey: string
+  id: number
+  userId: number
+  username: string
+  avatarUrl?: string | null
+  status: PresenceStatus
+  deviceType?: string | null
+  activityLabel?: string | null
+  isFriend: boolean
+  teamName?: string | null
+  isPublicUser?: boolean
+}
 
 /** Was Gruppen- und Kontaktzeile gemeinsam haben. */
 interface ZeileProps {

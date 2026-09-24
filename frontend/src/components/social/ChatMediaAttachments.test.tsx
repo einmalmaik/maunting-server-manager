@@ -6,8 +6,8 @@ import {
   ChatMediaFile,
   formatFileSize,
   triggerDownload,
-  chatMediaBlobCache,
 } from './ChatMediaAttachments'
+import { chatMediaBlobCache } from '@/services/klartextSpeicher'
 import * as socialApi from '@/api/social'
 
 // Die Sprache festlegen: die Behauptungen unten prüfen deutsche Texte, und

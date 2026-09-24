@@ -4,7 +4,7 @@ import { Avatar, Button } from '@/Singra/UI'
 import type { ChatStoryItem } from '@/api/social'
 import { DeviceBadge } from '@/components/social/DeviceBadge'
 import { StatusDot } from '@/components/social/StatusIndicator'
-import type { ChatContact } from '@/pages/Messenger'
+import type { ChatContact } from '@/components/social/sidebar/ConversationListItem'
 import type { StoryGruppe, StoryIch } from './StoriesCarouselBar'
 
 interface StatusUpdatesViewProps {

@@ -11,7 +11,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import i18n from '@/i18n'
 import type { ChatGroupItem } from '@/api/social'
-import type { ChatContact } from '@/pages/Messenger'
+import type { ChatContact } from '@/components/social/sidebar/ConversationListItem'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
 import { ContactFilterTabs } from './ContactFilterTabs'
 import { ContactListItem, GroupListItem } from './ConversationListItem'

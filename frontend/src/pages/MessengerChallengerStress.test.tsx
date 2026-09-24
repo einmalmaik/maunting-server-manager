@@ -2,7 +2,8 @@ import React from 'react'
 import { render, screen, waitFor, fireEvent, cleanup, act } from '@testing-library/react'
 import { beforeAll, beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
-import { Messenger, clearSessionChatCache } from './Messenger'
+import { Messenger } from './Messenger'
+import { leereKlartextSpeicher } from '@/services/klartextSpeicher'
 import * as socialApi from '@/api/social'
 import { teamsApi } from '@/api/teams'
 import { useAuthStore } from '@/stores/authStore'
@@ -350,7 +351,7 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
     vi.clearAllMocks()
     localStorage.clear()
     sessionStorage.clear()
-    clearSessionChatCache()
+    leereKlartextSpeicher()
     clearEnvelopePlaintextCache()
     setupAuthUser(myUserId, 'me')
 

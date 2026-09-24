@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Briefcase, Globe, LayoutGrid, UserCheck, UsersRound, type LucideIcon } from 'lucide-react'
-import type { ChatContact } from '@/pages/Messenger'
+import type { ChatContact } from '@/components/social/sidebar/ConversationListItem'
 
 export type KontaktFilter = 'all' | 'groups' | 'friends' | 'teams' | 'public'
 

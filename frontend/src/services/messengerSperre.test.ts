@@ -48,6 +48,7 @@ vi.mock('./gruppenSchluessel', () => ({ schreibeGruppenBestandNeu: umstellung.gr
 
 const { istOffen, siegelAktiv } = await import('./lokaleVersiegelung')
 const { PIN_MINDESTLAENGE, useMessengerSperre } = await import('./messengerSperre')
+const { chatMediaBlobCache, sessionChatCache } = await import('./klartextSpeicher')
 
 const PIN = 'geheim-123'
 const FRIST = 120_000
@@ -106,6 +107,21 @@ describe('messengerSperre', () => {
       expect(umstellung.geraet).toHaveBeenCalledOnce()
       expect(umstellung.ratchet).toHaveBeenCalledOnce()
       expect(umstellung.gruppen).toHaveBeenCalledOnce()
+    },
+    FRIST,
+  )
+
+  it(
+    'wirft beim Sperren den entschlüsselten Klartext aus dem Arbeitsspeicher',
+    async () => {
+      await useMessengerSperre.getState().einrichten(PIN)
+      sessionChatCache.set('mailbox-1', [{ id: 1, senderId: 2, text: 'geheim', createdAt: '', isSelf: false }])
+      chatMediaBlobCache.set('medium-1', 'data:image/png;base64,AAAA')
+
+      useMessengerSperre.getState().sperren()
+
+      expect(sessionChatCache.size).toBe(0)
+      expect(chatMediaBlobCache.size).toBe(0)
     },
     FRIST,
   )

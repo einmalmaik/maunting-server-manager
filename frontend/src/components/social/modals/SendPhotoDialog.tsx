@@ -3,7 +3,7 @@ import { Camera, UsersRound } from 'lucide-react'
 import { Avatar, Dialog, DialogContent } from '@/Singra/UI'
 import { StatusDot } from '@/components/social/StatusIndicator'
 import type { ChatGroupItem } from '@/api/social'
-import type { ChatContact } from '@/pages/Messenger'
+import type { ChatContact } from '@/components/social/sidebar/ConversationListItem'
 
 interface SendPhotoDialogProps {
   open: boolean

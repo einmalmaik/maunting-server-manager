@@ -2,7 +2,8 @@ import { render, screen, fireEvent, waitFor, act, within } from '@testing-librar
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import i18n from '@/i18n'
 import { MemoryRouter } from 'react-router-dom'
-import { Messenger, clearSessionChatCache } from './Messenger'
+import { Messenger } from './Messenger'
+import { leereKlartextSpeicher } from '@/services/klartextSpeicher'
 import * as socialApi from '@/api/social'
 import { leereMailboxAbos, offeneMailboxAbos } from '@/services/mailboxAbo'
 import { ladeGespraeche, leereGespraeche, merkeGespraech } from '@/services/gespraechsListe'
@@ -415,7 +416,7 @@ describe('Messenger (Allround Chat)', () => {
     vi.clearAllMocks()
     if (typeof sessionStorage !== 'undefined') sessionStorage.clear()
     if (typeof localStorage !== 'undefined') localStorage.clear()
-    clearSessionChatCache()
+    leereKlartextSpeicher()
     mockEnvelopeCache.clear()
     // Die Gesprächsliste liegt seit Stufe 6b im Arbeitsspeicher dieses Moduls
     // und nicht nur in `localStorage`; `clear()` oben erreicht sie nicht.

@@ -16,6 +16,7 @@ import { leereMailboxAbos } from '@/services/mailboxAbo'
 import { leereGruppenNamen } from '@/services/gruppenName'
 import { leereGespraeche } from '@/services/gespraechsListe'
 import { leereMailboxNachweise } from '@/services/mailboxNachweis'
+import { leereKlartextSpeicher } from '@/services/klartextSpeicher'
 import { kuendigeMailboxPush, leereMailboxPush } from '@/services/mailboxPush'
 import { kuendige } from '@/services/pushAbo'
 import type { User } from '@/types'
@@ -164,6 +165,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // aber stehenzulassen hiesse, dem nächsten Konto in diesem Tab zu
     // verschweigen, was vor seiner Anmeldung dort ankam.
     leereGeraeteStand()
+    // Entschlüsselte Verläufe, Anhänge und die Suche darüber. Sie lagen bis
+    // 09/2026 nach dem Abmelden bis zum Neuladen des Tabs im Speicher.
+    leereKlartextSpeicher()
     // Die Knotenliste hält Name, Adresse und Port des Agenten sowie den
     // TLS-Fingerabdruck. Ohne dieses clear() bliebe sie bis zum nächsten
     // Neuladen der Seite im Speicher des Tabs liegen.
