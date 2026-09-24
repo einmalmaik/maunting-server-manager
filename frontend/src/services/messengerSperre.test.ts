@@ -300,6 +300,18 @@ describe('messengerSperre', () => {
     FRIST,
   )
 
+  it(
+    'meldet beim Einschalten der Biometrie einen falschen PIN in Worten, nicht als Bibliotheksfehler',
+    async () => {
+      await useMessengerSperre.getState().einrichten(PIN)
+      await expect(useMessengerSperre.getState().biometrieEinschalten('falsch-falsch')).rejects.toThrow(
+        'Der PIN stimmt nicht.',
+      )
+      expect(fach.verwahrePin).not.toHaveBeenCalled()
+    },
+    FRIST,
+  )
+
   describe('mit Gerätebindung', () => {
     const GEHEIMNIS = new Uint8Array(32).fill(7)
 
@@ -326,6 +338,43 @@ describe('messengerSperre', () => {
 
         fach.geraeteGeheimnis.mockResolvedValue(GEHEIMNIS)
         expect(await useMessengerSperre.getState().entsperren(PIN)).toBe(true)
+      },
+      FRIST,
+    )
+
+    it(
+      'nennt einen technischen Fehler nicht „Falscher PIN" und zählt ihn trotzdem',
+      async () => {
+        const warnung = vi.spyOn(console, 'warn').mockImplementation(() => {})
+        await useMessengerSperre.getState().einrichten(PIN)
+        useMessengerSperre.getState().sperren()
+
+        // Das Fach wirft, statt zu schweigen: der PIN wird gar nicht geprüft.
+        fach.geraeteGeheimnis.mockRejectedValue(new Error('Fach antwortet nicht'))
+        expect(await useMessengerSperre.getState().entsperren(PIN)).toBe(false)
+        expect(useMessengerSperre.getState().fehler).toMatch(/am PIN lag es nicht/)
+        // Die Bremse gegen das Durchprobieren hängt nicht an der Meldung.
+        expect(useMessengerSperre.getState().fehlversuche).toBe(1)
+        // Der PIN selbst landet nie im Log.
+        expect(JSON.stringify(warnung.mock.calls)).not.toContain(PIN)
+
+        await expect(useMessengerSperre.getState().abschalten(PIN)).rejects.toThrow(
+          /am PIN lag es nicht/,
+        )
+
+        fach.geraeteGeheimnis.mockResolvedValue(GEHEIMNIS)
+        useMessengerSperre.setState({ gesperrtBis: 0 })
+        await expect(useMessengerSperre.getState().pinAendern('falsch-falsch', 'neu-neu-neu')).rejects.toThrow(
+          'Der bisherige PIN stimmt nicht.',
+        )
+        fach.geraeteGeheimnis.mockRejectedValue(new Error('Fach antwortet nicht'))
+        await expect(useMessengerSperre.getState().pinAendern(PIN, 'neu-neu-neu')).rejects.toThrow(
+          /am PIN lag es nicht/,
+        )
+
+        fach.geraeteGeheimnis.mockResolvedValue(GEHEIMNIS)
+        expect(await useMessengerSperre.getState().entsperren(PIN)).toBe(true)
+        warnung.mockRestore()
       },
       FRIST,
     )

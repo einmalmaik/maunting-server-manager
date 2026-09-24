@@ -3509,6 +3509,7 @@
         "storageUnreachable": "This device's keystore is unreachable. The messenger cannot be unlocked right now.",
         "noPinOnDevice": "No PIN is stored on this device.",
         "wrongPin": "Incorrect PIN.",
+        "technical": "That didn't work just now, and it wasn't your PIN. Please try again.",
         "bioFailed": "Biometric verification failed.",
         "currentPinWrong": "The current PIN is incorrect.",
         "setupFirst": "Set up a PIN first.",

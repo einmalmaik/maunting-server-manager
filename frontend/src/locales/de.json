@@ -3509,6 +3509,7 @@
         "storageUnreachable": "Der Schlüsselspeicher dieses Geräts ist nicht erreichbar. Der Messenger lässt sich hier gerade nicht entsperren.",
         "noPinOnDevice": "Auf diesem Gerät ist kein PIN hinterlegt.",
         "wrongPin": "Falscher PIN.",
+        "technical": "Das hat gerade nicht geklappt, am PIN lag es nicht. Versuch es noch einmal.",
         "bioFailed": "Biometrische Bestätigung fehlgeschlagen.",
         "currentPinWrong": "Der bisherige PIN stimmt nicht.",
         "setupFirst": "Erst einen PIN einrichten.",

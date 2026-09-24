@@ -41,6 +41,7 @@ import {
   rotateWrappedKey,
   unwrapUserKey,
 } from '@msdis/shield/key-management'
+import { DisDecryptionError } from '@msdis/shield/core'
 import { create } from 'zustand'
 import i18n from '@/i18n'
 
@@ -229,6 +230,38 @@ async function leiteAb(
 /** Nullt Schlüsselbytes, sobald sie nicht mehr gebraucht werden. */
 function wische(bytes: Uint8Array | null): void {
   bytes?.fill(0)
+}
+
+/** Der Schlüsselspeicher des Geräts antwortet nicht; siehe `leiteAb`. */
+function istSpeicherWeg(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    (err.message.includes('Schlüsselspeicher') ||
+      err.message === i18n.t('profile.messengerLock.errors.storageUnreachable'))
+  )
+}
+
+/**
+ * Die Meldung zu einem gescheiterten Öffnen des PIN-Umschlags.
+ *
+ * Ein falscher PIN ergibt einen falschen Schlüssel, und an dem scheitert die
+ * Prüfung des Umschlags mit `DisDecryptionError`. Nur das heißt „PIN falsch".
+ * Ein fehlender Schlüsselspeicher behält seine eigene Meldung. Alles andere
+ * ist ein Fehler, an dem der PIN keinen Anteil hat. Bis 09/2026 hieß auch der
+ * „Falscher PIN": wer das liest, tippt denselben richtigen PIN wieder und
+ * wieder, und die eigentliche Ursache sieht niemand.
+ *
+ * Ins Log geht nur der Name des Fehlers, damit ein Wiederholungsfall eine Spur
+ * hinterlässt.
+ */
+function pinFehler(err: unknown, beiFalschemPin: string): Error {
+  if (err instanceof DisDecryptionError) return new Error(beiFalschemPin)
+  if (istSpeicherWeg(err)) return err as Error
+  console.warn(
+    '[Messenger-Sperre] Kein falscher PIN, sondern:',
+    err instanceof Error ? err.name : typeof err,
+  )
+  return new Error(i18n.t('profile.messengerLock.errors.technical'))
 }
 
 /**
@@ -446,23 +479,19 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
       })
       return true
     } catch (err) {
-      // Ein fehlender Schlüsselspeicher ist kein falscher PIN. `leiteAb` wirft
-      // dafür eine eigene Meldung, und die muss durchkommen: wer hier „PIN
-      // falsch" liest, tippt bis ans Ende seiner Tage.
-      const speicherWeg =
-        err instanceof Error &&
-        (err.message.includes('Schlüsselspeicher') ||
-          err.message === i18n.t('profile.messengerLock.errors.storageUnreachable'))
-      const fehlversuche = speicherWeg ? get().fehlversuche : get().fehlversuche + 1
+      // Gezählt wird jeder Fehlschlag außer dem fehlenden Schlüsselspeicher,
+      // auch einer, der nicht nach falschem PIN aussieht. Andersherum stünde
+      // die Bremse gegen das Durchprobieren still, sobald eine neue Fassung der
+      // Bibliothek einen falschen PIN anders meldet. Die Meldung dagegen sagt,
+      // was wirklich war (`pinFehler`).
+      const fehlversuche = istSpeicherWeg(err) ? get().fehlversuche : get().fehlversuche + 1
       const warteMs = wartezeitFuer(fehlversuche)
       const gesperrtBis = warteMs > 0 ? Date.now() + warteMs : 0
       schreibeVersuchsstand(fehlversuche, gesperrtBis)
       set({
         fehlversuche,
         gesperrtBis,
-        fehler: speicherWeg
-          ? (err as Error).message
-          : i18n.t('profile.messengerLock.errors.wrongPin'),
+        fehler: pinFehler(err, i18n.t('profile.messengerLock.errors.wrongPin')).message,
       })
       return false
     } finally {
@@ -531,11 +560,7 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
       // Der hinterlegte PIN wäre sonst der alte — und der öffnet nichts mehr.
       if (get().biometrieAktiv) await verwahrePin(neu)
     } catch (err) {
-      throw err instanceof Error &&
-        (err.message.includes('Schlüsselspeicher') ||
-          err.message === i18n.t('profile.messengerLock.errors.storageUnreachable'))
-        ? err
-        : new Error(i18n.t('profile.messengerLock.errors.currentPinWrong'))
+      throw pinFehler(err, i18n.t('profile.messengerLock.errors.currentPinWrong'))
     } finally {
       wische(alteBytes)
       wische(neueBytes)
@@ -551,7 +576,9 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
     // der Durchlauf schriebe leere Zeilen über den Verlauf.
     if (!get().entsperrt) {
       const offen = await get().entsperren(pin)
-      if (!offen) throw new Error(i18n.t('profile.messengerLock.errors.wrongPin'))
+      // `entsperren` hat schon gesagt, woran es lag: falscher PIN, Wartezeit
+      // oder etwas Technisches.
+      if (!offen) throw new Error(get().fehler || i18n.t('profile.messengerLock.errors.wrongPin'))
     } else {
       const umschlag = lies(UMSCHLAG)
       const salz = lies(SALZ)
@@ -560,8 +587,8 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
       try {
         bytes = await leiteAb(pin, salz, lies(BINDUNG) === 'true', false)
         await unwrapUserKey(umschlag, bytes)
-      } catch {
-        throw new Error(i18n.t('profile.messengerLock.errors.wrongPin'))
+      } catch (err) {
+        throw pinFehler(err, i18n.t('profile.messengerLock.errors.wrongPin'))
       } finally {
         wische(bytes)
       }
@@ -623,6 +650,12 @@ export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
       schreibe(BIOMETRIE, 'true')
       set({ biometrieAktiv: true })
     } catch (err) {
+      // Ein falscher PIN kam hier bis 09/2026 als rohes „Decryption failed"
+      // der Bibliothek an. Andere Fehler, etwa aus dem Fach, tragen ihre
+      // eigene Meldung und gehen weiter durch.
+      if (err instanceof DisDecryptionError) {
+        throw new Error(i18n.t('profile.messengerLock.errors.pinIncorrect'))
+      }
       throw err instanceof Error ? err : new Error(i18n.t('profile.messengerLock.errors.pinIncorrect'))
     } finally {
       wische(bytes)
