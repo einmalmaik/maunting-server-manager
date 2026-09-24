@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from database import SessionLocal
 from models import AiProvider, User
-from services import ai_provider_service, audit_service
+from services import ai_provider_service, ai_usage_service, audit_service
 from services.ai_ethics_trigger import DecisionContext, should_trigger_ethics
 from services.ai_redaction import redact_sensitive_text
 from services.openai_compatible_adapter import (
@@ -246,6 +246,81 @@ async def evaluate_decision(
         )
         return fallback_evaluation(
             context, reason=f"Provider-Fehler bei der Ethics Engine: {type(exc).__name__}"
+        )
+    finally:
+        # Auch nach einer unbrauchbaren Antwort, einem Abbruch mitten im Strom
+        # und dem Abbruch nach der Frist (`_Beratung.abbrechen`): bezahlt hat
+        # der Betreiber den Aufruf in jedem dieser Fälle.
+        _verbrauch_buchen(
+            db, user, target_provider,
+            usage=usage, messages=messages, antwort=raw_response_text,
+        )
+
+
+def _verbrauch_buchen(
+    db: Session,
+    user: User,
+    anbieter: AiProvider,
+    *,
+    usage: StreamUsage,
+    messages: list[dict],
+    antwort: str,
+) -> None:
+    """Bucht eine Beurteilung beim Benutzer, dessen Lauf sie ausgelöst hat.
+
+    Bis zum 24.09.2026 blieb jede Beratung ungebucht, obwohl sie seit dem
+    23.09. vor jedem folgenreichen Werkzeug läuft.
+
+    Gebucht wird nachträglich und ohne Prüfung der Grenzen
+    (`ai_usage_service.nachtraeglich_buchen`): die Engine berät, und ein
+    ausgeschöpftes Kontingent darf weder den Rat verhindern noch den Lauf
+    beenden. In Tokens und Kosten zählt sie trotzdem, nur nicht als Anfrage
+    pro Minute.
+
+    Bepreist mit den Ethikpreisen des Zugangs (Eingabe, Ausgabe, Cache), weil
+    das Ethikmodell ein anderes sein kann als das Chatmodell. Fehlt einer der
+    beiden ersten, gilt der gepflegte Rückfallpreis wie überall sonst. Meldet
+    der Anbieter den Betrag selbst, gilt der.
+
+    Nichts gebucht wird, wenn keine Antwort kam und der Anbieter nichts
+    gemeldet hat: dann ist der Aufruf nicht angekommen, wie bei
+    `fail_ai_usage`. Ein Fehler beim Buchen kostet die Buchung, nie die
+    Beratung.
+    """
+    if usage.total_tokens is None and not (
+        usage.vom_anbieter or antwort or usage.output_chars or usage.reasoning_chars
+    ):
+        return
+    eingabe = max(1, sum(len(str(m.get("content") or "")) for m in messages) // 4)
+    ausgabe = (len(antwort) + usage.reasoning_chars) // 4
+    try:
+        if not db.is_active:
+            # Ein gescheiterter Auditeintrag lässt die Sitzung im Fehlerzustand
+            # zurück; der Verbrauch ist trotzdem angefallen.
+            db.rollback()
+        ai_usage_service.nachtraeglich_buchen(
+            db,
+            user,
+            zweck=ai_usage_service.ZWECK_ETHIK,
+            usage=usage,
+            estimated_actual_tokens=min(eingabe + ausgabe, ai_usage_service.TOKEN_LIMIT_MAX),
+            provider_id=anbieter.id,
+            model=anbieter.ethics_model,
+            token_price_micro_usd_per_million=anbieter.token_price_micro_usd_per_million,
+            rollenpreise=(
+                anbieter.ethics_input_price_micro_usd_per_million,
+                anbieter.ethics_output_price_micro_usd_per_million,
+                anbieter.ethics_cache_price_micro_usd_per_million,
+            ),
+            geschaetzte_teile=(eingabe, ausgabe),
+        )
+        db.commit()
+    except Exception as fehler:  # noqa: BLE001 - Buchung hält die Beratung nicht auf
+        db.rollback()
+        logger.warning(
+            "Ethics Engine: Verbrauch nicht gebucht fuer Benutzer %s: %s",
+            getattr(user, "id", None),
+            type(fehler).__name__,
         )
 
 

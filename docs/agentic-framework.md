@@ -195,8 +195,21 @@ interne ethische Reflexions- und Urteilsinstanz bei folgenreichen Systementschei
   synchron vom DIS-Sidecar, und auf der Hauptschleife stünde dabei das ganze Panel still. Nach der
   Frist oder mit dem Ende des Laufs wird die Beurteilung abgebrochen; ein Urteil über einen Aufruf,
   der längst weiter ist, stünde nur im Audit. Es gilt die Engine des Anbieters, über den der Lauf
-  spricht, sonst die des ersten eingeschalteten Anbieters mit Engine. Als Verbrauch gebucht werden
-  die Aufrufe bisher nicht.
+  spricht, sonst die des ersten eingeschalteten Anbieters mit Engine.
+- **Wer sie bezahlt:** seit dem 24.09.2026 steht jede Beurteilung als eigene Verbrauchszeile beim
+  Benutzer, dessen Lauf sie ausgelöst hat, mit dem Ethikmodell als Modell und `zweck = 'ethik'`
+  (`ai_usage_service.nachtraeglich_buchen`). Der Betrag kommt, wenn der Anbieter ihn meldet, vom
+  Anbieter; sonst aus den Ethikpreisen des Zugangs, Eingabe, Ausgabe und gelesener Cache getrennt;
+  fehlt Eingabe- oder Ausgabepreis, aus dem gepflegten Rückfallpreis wie im Chat. Gebucht wird auch
+  eine unbrauchbare Antwort und eine nach der Frist abgebrochene; ein Aufruf, der nie eine Antwort
+  bekam, kostet nichts. Zum Kontingent: gebucht wird **nachträglich und ohne Prüfung** der
+  Grenzen, denn eine Reservierung davor fiele bei *gleichzeitigen Vorgängen* = 1 immer durch (der
+  Lauf hält seinen Platz selbst), und ein ausgeschöpftes Kontingent darf weder den Rat verhindern
+  noch den Lauf beenden. Die Zeile zählt danach in Tokens und Kosten wie jede andere, auch gegen
+  die Grenzen der **nächsten** Anfrage: angefallene Kosten zu verschweigen hiesse, dass der nächste
+  Anlauf wieder darunter beginnt. Als *Anfrage pro Minute* zählt sie nicht, sonst beendete bei
+  einem Limit von fünf die Engine den Lauf, den sie nur berät. Ein Fehler beim Buchen kostet die
+  Buchung, nie den Rat. Beleg: `backend/tests/test_ai_ethik_buchung.py`.
 - **Was sie sieht:** Werkzeug und Argumente, die Argumente geschwärzt. Kein Gedächtnis: das
   Ethikmodell kann bei einem anderen Anbieter liegen als das Chatmodell, ein Worker sieht keine
   persönlichen Erinnerungen (§7), und wem `ai.memory.use` fehlt, dessen Einträge gingen sonst
