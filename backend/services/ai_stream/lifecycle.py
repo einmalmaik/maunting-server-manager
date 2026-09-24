@@ -36,8 +36,8 @@ from services.ai_context_service import (
     auf_budget_kuerzen,
     build_provider_messages,
     estimate_reserved_tokens,
+    gesamtgrenze,
     message_character_count,
-    teilbudgets,
 )
 from services.ai_proposal_service import AufgabenKontext, GuardianKontext
 from services.ai_provider_service import estimate_cost_microunits, resolve_api_key
@@ -951,8 +951,16 @@ async def _werkzeuge_und_grenze(
     # damit ein sehr kleines Fenster nicht in eine negative Grenze fällt —
     # dort passt der Katalog allein schon nicht, und ein leerer Kontext wäre
     # nicht besser als ein knapper.
+    #
+    # Ohne bekanntes Fenster rechnet `gesamtgrenze` anders: dort kam der
+    # Prompt allein schon über die 24.000 Zeichen, und abzüglich des Katalogs
+    # schrumpfte jeder Lauf eines unbekannten Modells auf den Boden.
     kontextgrenze = max(
-        teilbudgets(zustand.get("context_chars")).gesamt - katalog_zeichen,
+        gesamtgrenze(
+            zustand.get("context_chars"),
+            zustand.get("provider_messages") or [],
+            katalog_zeichen=katalog_zeichen,
+        ),
         MIN_HISTORY_CHARS,
     )
     return tools, cache_marke, kontextgrenze, denken, denkstufe

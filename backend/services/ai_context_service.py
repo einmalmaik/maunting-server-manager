@@ -21,7 +21,8 @@ from services.ai_redaction import redact_sensitive_text
 # `_teilbudgets`): `MAX_CONTEXT_CHARS` ist der **Rueckfall**, wenn ueber das
 # Modell nichts bekannt ist, die uebrigen sind **Sockel** fuer die Teilbudgets.
 # Beides zusammen ergibt: ohne Katalogwissen verhaelt sich der Kontextaufbau
-# wortwoertlich wie vorher.
+# wortwoertlich wie vorher. Mit einer Ausnahme: der Rueckfall gilt dem
+# Gespraech neben dem Systemprompt, nicht dem Prompt mit (`gesamtgrenze`).
 MAX_CONTEXT_CHARS = 24_000
 MAX_HISTORY_MESSAGES = 20
 MAX_SUMMARY_CHARS = 4_000
@@ -173,6 +174,38 @@ def teilbudgets(context_chars: int | None) -> Teilbudgets:
     Dataclass-Objekt nicht taete.
     """
     return _teilbudgets(context_chars if context_chars else MAX_CONTEXT_CHARS)
+
+
+def gesamtgrenze(
+    context_chars: int | None,
+    nachrichten: list[dict[str, Any]],
+    *,
+    katalog_zeichen: int = 0,
+) -> int:
+    """Wieviel eine Anfrage an Nachrichten tragen darf, den Systemprompt eingeschlossen.
+
+    Ein bekanntes Fenster ist eine Grenze des Modells: alles, was über die
+    Leitung geht, muss hinein, auch der mitfahrende Werkzeugkatalog — er wird
+    abgezogen, sonst folgt keine knappere Antwort, sondern eine Absage.
+
+    Ohne Fensterangabe ist ``MAX_CONTEXT_CHARS`` keine Grenze des Modells,
+    sondern die alte Zusage an das Gespräch. Sie stammt aus der Zeit, als der
+    Systemprompt 12.001 Zeichen hatte; am 24.09.2026 hatte er 55.995 und lag
+    damit allein über ihr. Als Gesamtgrenze gelesen blieb einem unbekannten
+    Modell nur noch ``MIN_HISTORY_CHARS``: gemessen vier von zwölf
+    Verlaufszeilen, jede auf 200 Zeichen gekürzt, und ein gelesener Log als
+    200-Zeichen-Stummel. „Unbekannt" heißt nicht „klein" — deshalb bekommt das
+    Gespräch seine 24.000 Zeichen **neben** dem Prompt, wie es der Prompt
+    beim Festlegen der Zahl auch bekam. Der Katalog wird hier nicht
+    abgezogen: er schützt ein bekanntes Fenster vor der Absage, und bei einem
+    unbekannten gibt es keine Zahl, vor der er schützen könnte. Ein bekannt
+    kleines Fenster läuft durch den ersten Zweig und wird nie angehoben.
+    """
+    if context_chars:
+        return teilbudgets(context_chars).gesamt - katalog_zeichen
+    kopf = nachrichten[0] if nachrichten else {}
+    prompt = kopf.get("content") if kopf.get("role") == "system" else None
+    return MAX_CONTEXT_CHARS + (len(prompt) if isinstance(prompt, str) else 0)
 
 
 def _skill_index_block(
@@ -639,7 +672,11 @@ def build_provider_messages(
     # ohne die Frage, zu der er gehoert. Der Sockel kostet im schlimmsten Fall
     # `MIN_HISTORY_CHARS` ueber dem Ziel — neben einem Bildanhang faellt das
     # nicht ins Gewicht, eine Frage ohne Frage dagegen schon.
-    budget = max(grenzen.gesamt - used, MIN_HISTORY_CHARS)
+    #
+    # `gesamtgrenze` und nicht `grenzen.gesamt`: ohne bekanntes Fenster frass
+    # der Systemprompt allein die 24.000 Zeichen, und jede Anfrage lief auf
+    # den Sockel (Docstring dort).
+    budget = max(gesamtgrenze(context_chars, result) - used, MIN_HISTORY_CHARS)
     user_zone = ai_lage.zone_des_benutzers(user) if user else "UTC"
     for row in rows:
         if budget <= 0:

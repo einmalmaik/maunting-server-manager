@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 from models import (
     AiConversation, AiMessage, AiRun, AiToolResult, Role, RolePermission, User,
 )
-from services import ai_memory_service, ai_prompt
+from services import ai_memory_service, ai_prompt, ai_run_broker, ai_stream_service
 from services.ai_context_service import (
     MAX_TOOL_RESULT_CONTEXT_CHARS,
     TOOL_RESULT_TRUNCATION_MARK,
@@ -33,10 +33,12 @@ from services.ai_context_service import (
     _recent_tool_results,
     auf_budget_kuerzen,
     build_provider_messages,
+    gesamtgrenze,
     message_character_count,
     teilbudgets,
 )
 from services.role_service import set_user_roles
+from tests.test_ai_run import _KEIN_CLIENT, _fake_stream, _grant, _provider, _server
 
 
 def _enable_attachments(db: Session, user: User) -> None:
@@ -299,6 +301,11 @@ def test_a_large_window_lets_more_than_twenty_messages_through(
     Selbst mit einem Million-Token-Modell gingen nie mehr als zwanzig
     Nachrichten hinaus — das Zeichenbudget kam gar nicht erst zum Zug. Der Chat
     vergass also bei rund einem Prozent Auslastung.
+
+    600 Zeichen je Nachricht und nicht 300: ohne Fenster bekommt das Gespräch
+    seit dem 24.09.2026 seine 24.000 Zeichen neben dem Systemprompt
+    (`gesamtgrenze`). Sechzig Nachrichten zu 300 Zeichen passten dort ganz
+    hinein, und der enge Fall hätte nichts mehr abgeschnitten.
     """
     conversation = _conversation(db, regular_user)
     start = datetime.now(timezone.utc) - timedelta(hours=2)
@@ -306,7 +313,7 @@ def test_a_large_window_lets_more_than_twenty_messages_through(
         db.add(AiMessage(
             id=str(uuid4()), conversation_id=conversation.id,
             role="user" if index % 2 == 0 else "assistant",
-            content=f"Nachricht {index} " + "x" * 300,
+            content=f"Nachricht {index} " + "x" * 600,
             status="complete",
             created_at=start + timedelta(minutes=index),
         ))
@@ -1108,4 +1115,80 @@ def test_ein_selbst_geschriebener_zeitstempel_wird_abgestreift(
     assert treffer[0]["content"] == (
         "Auf deinen Windows-Rechner kann ich nicht zugreifen."
     )
+
+
+@pytest.mark.asyncio
+async def test_ein_unbekanntes_modell_sieht_den_juengsten_verlauf(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ohne Katalogeintrag bleibt vom Gespräch mehr als die Frage.
+
+    „Unbekannt" heißt: über das Modell ist nichts bekannt — nicht: das Fenster
+    ist klein (`ai_context_window.unbekannt`). Der Rückfall von 24.000 Zeichen
+    stammt aus der Zeit, als der Systemprompt ein paar tausend Zeichen maß.
+    Seit der Prompt allein größer ist (55.995 Zeichen am 24.09.2026), bekam
+    die Historie in `build_provider_messages` nur noch ihren Sockel, und die
+    Kürzung vor dem Anbieterruf (`auf_budget_kuerzen` gegen 24.000 minus
+    Werkzeugkatalog) stutzte danach jede ungeschützte Zeile auf
+    `MIN_GEKUERZTE_ZEICHEN`. Gemessen an diesem Lauf: von zwölf
+    Verlaufszeilen kamen vier an, je 200 Zeichen lang, und vom gelesenen Log
+    200 Zeichen; ein bekanntes 128k-Modell sah alles. Betroffen ist jeder
+    Anbieter ohne Katalog (Azure) und OpenAI ohne Katalogschlüssel.
+
+    Geprüft wird am ersten Anbieterruf eines echten Laufs, also hinter beiden
+    Kürzungen — der Testclient erreicht keinen Katalog, das Modell ist hier
+    also wirklich unbekannt.
+    """
+    provider = _provider(db)
+    _grant(db, regular_user, server=_server(db, "budget"), server_keys=("server.view",))
+    conversation = _conversation(db, regular_user)
+    lauf = _lauf(db, conversation, regular_user)
+    log = "LOGZEILE " * 700
+    _ergebnis(db, conversation, lauf=lauf, tool="read_server_logs", wert=log, sekunde=1)
+    start = datetime.now(timezone.utc) - timedelta(hours=1)
+    zeilen = [f"VERLAUF-{index:02d} " + "v" * 1_200 for index in range(12)]
+    for index, text in enumerate(zeilen):
+        db.add(AiMessage(
+            id=str(uuid4()), conversation_id=conversation.id,
+            role="user" if index % 2 == 0 else "assistant",
+            content=text, status="complete",
+            created_at=start + timedelta(minutes=index),
+        ))
+    db.commit()
+    gesehen = _fake_stream(monkeypatch, [])
+
+    run, fehler = ai_stream_service.lauf_beginnen(
+        db, user=regular_user, conversation=conversation, provider=provider,
+        request_id=uuid4(), content="Und was stand im Log von vorhin?",
+        reasoning=False, context_chars=None,
+    )
+    assert run is not None, fehler
+    ai_run_broker.eroeffnen(run.id)
+    await ai_stream_service.segment_ausfuehren(run.id, client=_KEIN_CLIENT)
+
+    inhalte = [m["content"] for m in gesehen[0] if isinstance(m.get("content"), str)]
+    for text in zeilen[-4:]:
+        assert any(text in inhalt for inhalt in inhalte), (
+            f"{text[:11]} kam nicht vollständig beim Anbieter an"
+        )
+    assert any(
+        inhalt.startswith(WERKZEUG_KONTEXT_KOPF) and log in inhalt for inhalt in inhalte
+    ), "der gelesene Log kam nur als Stummel beim Anbieter an"
+
+
+def test_ein_bekannt_kleines_fenster_wird_nicht_angehoben() -> None:
+    """Der Zuschlag für den Prompt gilt nur dem Unbekannten.
+
+    Ein Modell mit 16.000 Zeichen Fenster nimmt keine 70.000 an, nur weil der
+    Prompt groß ist — dort wäre mehr kein längerer Kontext, sondern eine
+    Absage des Anbieters. Der Katalog wird vom bekannten Fenster abgezogen,
+    vom unbekannten nicht.
+    """
+    nachrichten = [{"role": "system", "content": "p" * 60_000}]
+
+    assert gesamtgrenze(16_000, nachrichten) == teilbudgets(16_000).gesamt
+    assert gesamtgrenze(16_000, nachrichten, katalog_zeichen=5_000) == (
+        teilbudgets(16_000).gesamt - 5_000
+    )
+    assert gesamtgrenze(None, nachrichten, katalog_zeichen=5_000) == 24_000 + 60_000
 
