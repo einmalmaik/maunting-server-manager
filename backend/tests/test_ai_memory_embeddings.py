@@ -278,10 +278,13 @@ def test_ein_google_vektor_wird_neu_gerechnet_sobald_das_lokale_modell_zurueck_i
     laenge = ai_embedding_service.EMBEDDING_DIMENSIONS
     google_achse = [0.0, 1.0] + [0.0] * (laenge - 2)
     monkeypatch.setattr(ai_embedding_service, "_load", lambda: None)
-    ai_embedding_service.set_google_rueckfall(True, db)
-    monkeypatch.setattr(ai_embedding_service, "_google_zugang", lambda db: ("schluessel", {}))
+    ai_embedding_service.set_rueckfall("google", db)
     monkeypatch.setattr(
-        ai_embedding_service, "encode_with_google",
+        ai_embedding_service, "_zugang",
+        lambda db, anbieter: ("schluessel", "https://google.invalid", "text-embedding-004"),
+    )
+    monkeypatch.setattr(
+        ai_embedding_service, "encode_ueber_anbieter",
         lambda texts, **_: [list(google_achse) for _ in texts],
     )
     _allow_memory(db, regular_user)

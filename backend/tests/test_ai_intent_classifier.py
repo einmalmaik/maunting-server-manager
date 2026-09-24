@@ -77,10 +77,13 @@ def test_die_absichtserkennung_fragt_nie_google(monkeypatch):
     """
     gerufen: list[list[str]] = []
     monkeypatch.setattr(ai_embedding_service, "_load", lambda: None)
-    monkeypatch.setattr(ai_embedding_service, "google_rueckfall_erlaubt", lambda db=None: True)
-    monkeypatch.setattr(ai_embedding_service, "_google_zugang", lambda db: ("schluessel", {}))
+    monkeypatch.setattr(ai_embedding_service, "rueckfall", lambda db=None: "google")
     monkeypatch.setattr(
-        ai_embedding_service, "encode_with_google",
+        ai_embedding_service, "_zugang",
+        lambda db, anbieter: ("schluessel", "https://google.invalid", "text-embedding-004"),
+    )
+    monkeypatch.setattr(
+        ai_embedding_service, "encode_ueber_anbieter",
         lambda texts, **_: gerufen.append(texts) or [[1.0] + [0.0] * 255 for _ in texts],
     )
     classifier = StreamingIntentClassifier(min_confidence=0.5)

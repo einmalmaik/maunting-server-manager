@@ -30,14 +30,18 @@ schlechter Moment beim Laden schaltete die Bedeutungssuche bis zum
 Prozess-Neustart ab, und der Betreiber erfuhr davon nur als eine Warnzeile im
 Log.
 
-**Der Google-Rückfall ist eine Entscheidung des Betreibers.** Fehlt das lokale
-Modell, darf `encode` bei Google AI Studio rechnen lassen — aber nur, wenn der
-Betreiber das unter `GOOGLE_RUECKFALL_SCHLUESSEL` eingeschaltet hat. Standard
-ist aus. Der Rückfall schickt Gedächtnistexte, Skillbeschreibungen und jede
-Chatfrage im Klartext an Google, auch wenn im Chat ein ganz anderer Anbieter
-gewählt ist; bis zum 24.09.2026 geschah das ohne jede Frage, sobald irgendein
-Google-Zugang aktiv war. Ist der Schalter aus, gilt der Satz oben wieder
-wörtlich: für die Suche verlässt nichts das Haus.
+**Der Rückfall ist eine Entscheidung des Betreibers.** Fehlt das lokale Modell,
+darf `encode` bei Google AI Studio oder OpenAI rechnen lassen — aber nur bei
+dem Anbieter, den der Betreiber unter `RUECKFALL_SCHLUESSEL` gewählt hat.
+Standard ist keiner. Der Rückfall schickt Gedächtnistexte, Skillbeschreibungen
+und jede Chatfrage im Klartext an diesen Anbieter, auch wenn im Chat ein ganz
+anderer gewählt ist; bis zum 24.09.2026 geschah das bei Google ohne jede Frage,
+sobald irgendein Google-Zugang aktiv war. Ist kein Rückfall gewählt, gilt der
+Satz oben wieder wörtlich: für die Suche verlässt nichts das Haus.
+
+Das lokale Modell bleibt immer der erste Weg. Ein Rückfallanbieter ersetzt es
+nur, solange es fehlt — sonst verließe jede Suche das Haus, nur weil ein
+Schlüssel eingetragen ist.
 """
 
 from __future__ import annotations
@@ -76,20 +80,34 @@ EMBEDDING_BYTES = EMBEDDING_DIMENSIONS * 4
 # übersieht, bekommt in genau einem der beiden Bereiche stille Falschtreffer.
 MODEL_TAG = "potion-multilingual-128M"
 
-# Vorsilbe der Kennung für Vektoren aus dem Google-Rückfall; dahinter steht das
-# Modell, das Google gerechnet hat. Beide Räume haben 256 Zahlen und bestehen
+# Die Anbieter, bei denen `encode` ersatzweise rechnen darf, mit dem
+# Einbettungsmodell, das genommen wird, wenn der Zugang keines vorgibt. Beide
+# sprechen denselben OpenAI-kompatiblen `/embeddings`-Endpunkt und kürzen per
+# `dimensions` auf `EMBEDDING_DIMENSIONS` — deshalb ein Weg für beide
+# (`encode_ueber_anbieter`). Azure OpenAI fehlt, weil dort jede Ressource ihr
+# eigenes Einbettungs-Deployment braucht, das MSM nicht kennt.
+RUECKFALL_MODELLE: dict[str, str] = {
+    "google": "text-embedding-004",
+    "openai": "text-embedding-3-small",
+}
+
+# Breite der Spalte `embedding_model` in beiden Tabellen. Ein Rückfallvektor
+# trägt `<anbieter>:<modell>` (`_tag`). Alle Räume haben 256 Zahlen und bestehen
 # jede Längenprüfung — getrennt hält sie allein diese Kennung. Vorher trug auch
 # ein Google-Vektor `MODEL_TAG`, und sobald das lokale Modell zurück war,
 # verglich die Suche potion-Fragen mit Google-Einträgen: Zahlen ohne Bedeutung,
 # und nichts meldete es.
-GOOGLE_TAG_PREFIX = "google:"
-
-# Breite der Spalte `embedding_model` in beiden Tabellen.
 _TAG_MAX = 64
 
-# Panel-Einstellung: darf `encode` ohne lokales Modell bei Google rechnen?
-# Fehlt der Eintrag, heißt das nein.
-GOOGLE_RUECKFALL_SCHLUESSEL = "ai_embedding_google_fallback"
+# Panel-Einstellung: bei welchem Anbieter `encode` ohne lokales Modell rechnen
+# darf, ein Schlüssel aus `RUECKFALL_MODELLE` oder "off". Fehlt der Eintrag,
+# heißt das "off".
+RUECKFALL_SCHLUESSEL = "ai_embedding_fallback"
+
+# Der Vorgänger, ein Ja/Nein nur für Google, stand einen Tag lang in new-feat.
+# Ein dort gesetztes Ja gilt weiter als "google", solange nichts Neues gewählt
+# ist.
+_ALTER_SCHLUESSEL = "ai_embedding_google_fallback"
 
 
 @dataclass(frozen=True)
@@ -182,20 +200,29 @@ def _fehlschlag_gilt_noch() -> bool:
     return (time.monotonic() - _letzter_fehlschlag) < NEUVERSUCH_NACH_SEKUNDEN
 
 
-def google_rueckfall_erlaubt(db: Session | None = None) -> bool:
-    """Hat der Betreiber den Google-Rückfall eingeschaltet? Standard: nein."""
+def rueckfall(db: Session | None = None) -> str | None:
+    """Der gewählte Rückfallanbieter, oder ``None``. Standard: keiner."""
     from services.panel_settings_service import PanelSettingsService
 
-    wert = PanelSettingsService.get(GOOGLE_RUECKFALL_SCHLUESSEL, "false", db=db)
-    return wert.strip().lower() == "true"
+    wert = PanelSettingsService.get(RUECKFALL_SCHLUESSEL, "", db=db).strip().lower()
+    if not wert:
+        alt = PanelSettingsService.get(_ALTER_SCHLUESSEL, "false", db=db)
+        wert = "google" if alt.strip().lower() == "true" else "off"
+    return wert if wert in RUECKFALL_MODELLE else None
 
 
-def set_google_rueckfall(erlaubt: bool, db: Session) -> bool:
-    """Schaltet den Google-Rückfall; gespeichert wird mit dem Commit des Aufrufers."""
+def set_rueckfall(anbieter: str | None, db: Session) -> str | None:
+    """Wählt den Rückfallanbieter; gespeichert wird mit dem Commit des Aufrufers.
+
+    ``None`` schaltet den Rückfall ab. Ein unbekannter Anbieter ist ein
+    ``ValueError`` — lieber abgelehnt als still als „aus" gespeichert.
+    """
     from services.panel_settings_service import PanelSettingsService
 
-    PanelSettingsService.set(GOOGLE_RUECKFALL_SCHLUESSEL, "true" if erlaubt else "false", db=db)
-    return erlaubt
+    if anbieter is not None and anbieter not in RUECKFALL_MODELLE:
+        raise ValueError(f"unbekannter Rückfallanbieter: {anbieter}")
+    PanelSettingsService.set(RUECKFALL_SCHLUESSEL, anbieter or "off", db=db)
+    return anbieter
 
 
 def lokal_bereit() -> bool:
@@ -226,26 +253,18 @@ def is_ready() -> bool:
     Ist die Frist des Fehlschlags abgelaufen, entscheidet wieder allein, was im
     Verzeichnis liegt: der nächste Abruf wird es ohnehin erneut versuchen.
 
-    Ein Google-Zugang zählt nur, wenn der Betreiber den Rückfall erlaubt hat.
+    Ein Rückfallzugang zählt nur, wenn der Betreiber ihn gewählt hat.
     """
     if lokal_bereit():
         return True
     try:
-        if not google_rueckfall_erlaubt():
+        anbieter = rueckfall()
+        if anbieter is None:
             return False
         from database import SessionLocal
-        from models import AiProvider
 
         with SessionLocal() as db:
-            return bool(
-                db.query(AiProvider)
-                .filter(
-                    AiProvider.provider_kind == "google",
-                    AiProvider.enabled.is_(True),
-                    AiProvider.operator_api_key_encrypted.isnot(None),
-                )
-                .first()
-            )
+            return anbieter in zugaenge_mit_schluessel(db)
     except Exception:
         return False
 
@@ -291,15 +310,19 @@ def _load():
     return _model
 
 
-def encode_with_google(
+def encode_ueber_anbieter(
     texts: list[str],
     *,
     api_key: str,
-    base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai",
-    model: str = "text-embedding-004",
+    base_url: str,
+    model: str,
     client: Any | None = None,
 ) -> list[list[float]] | None:
-    """Berechnet 256-dimensionale normalisierte Vektoren über Google AI Studio."""
+    """Berechnet 256-dimensionale normalisierte Vektoren über `/embeddings`.
+
+    Google AI Studio und OpenAI sprechen hier dieselbe Form; der Unterschied
+    liegt allein in ``base_url`` und ``model``.
+    """
     if not texts:
         return []
     clean_model = model[len("models/"):] if model.startswith("models/") else model
@@ -329,7 +352,8 @@ def encode_with_google(
 
         if resp.status_code != 200:
             logger.warning(
-                "Google AI Studio Embedding fehlgeschlagen: status=%s body=%s",
+                "Embedding-Rückfall fehlgeschlagen: model=%s status=%s body=%s",
+                clean_model,
                 resp.status_code,
                 resp.text[:200],
             )
@@ -352,64 +376,84 @@ def encode_with_google(
         norms[norms == 0] = 1.0
         return (matrix / norms).astype("float32").tolist()
     except Exception as exc:
-        logger.warning("Google AI Studio Embedding fehlgeschlagen: error=%s", type(exc).__name__)
+        logger.warning("Embedding-Rückfall fehlgeschlagen: error=%s", type(exc).__name__)
         return None
 
 
-def _google_zugang(db: Session) -> tuple[str, dict[str, str]] | None:
-    """Schlüssel und Modellwahl des Google-Zugangs für den Rückfall, oder ``None``."""
+def _aktiver_zugang(db: Session, anbieter: str):
+    """Der erste aktive Zugang dieses Anbieters mit Betreiberschlüssel, oder ``None``."""
     from models import AiProvider
-    from services import ai_provider_service
 
-    google_prov = (
+    return (
         db.query(AiProvider)
         .filter(
-            AiProvider.provider_kind == "google",
+            AiProvider.provider_kind == anbieter,
             AiProvider.enabled.is_(True),
+            AiProvider.operator_api_key_encrypted.isnot(None),
         )
         .first()
     )
-    if not google_prov or not google_prov.operator_api_key_encrypted:
+
+
+def zugaenge_mit_schluessel(db: Session) -> list[str]:
+    """Welche Rückfallanbieter einen aktiven Zugang mit Schlüssel haben."""
+    return [anbieter for anbieter in RUECKFALL_MODELLE if _aktiver_zugang(db, anbieter)]
+
+
+def _zugang(db: Session, anbieter: str) -> tuple[str, str, str] | None:
+    """Schlüssel, Adresse und Einbettungsmodell eines Rückfallanbieters, oder ``None``.
+
+    Das Modell kommt aus dem Zugang, wenn dort ein Einbettungsmodell eingetragen
+    ist, sonst aus `RUECKFALL_MODELLE`. Die Adresse steht in der Anbieterdatei
+    (`ai_provider_registry`), nicht beim Betreiber.
+    """
+    from services import ai_provider_registry, ai_provider_service
+
+    zugang = _aktiver_zugang(db, anbieter)
+    if zugang is None:
         return None
-    key = ai_provider_service.resolve_api_key(db, google_prov, 0)
+    key = ai_provider_service.resolve_api_key(db, zugang, 0)
     if not key:
         return None
-    emb_kw = {}
-    if google_prov.default_model and "embedding" in google_prov.default_model.lower():
-        emb_kw["model"] = google_prov.default_model
-    return key, emb_kw
+    modell = RUECKFALL_MODELLE[anbieter]
+    if zugang.default_model and "embedding" in zugang.default_model.lower():
+        modell = zugang.default_model
+    return key, ai_provider_registry.anbieter(anbieter).base_url, modell
 
 
-def _google_tag(emb_kw: dict[str, str]) -> str:
-    """Die Kennung eines Google-Vektors: Vorsilbe plus gerechnetes Modell.
+def _tag(anbieter: str, modell: str) -> str:
+    """Die Kennung eines Rückfallvektors: Anbieter plus gerechnetes Modell.
 
-    Das Modell steht mit darin, weil `text-embedding-004` und `embedding-001`
-    ebenso wenig in einen Raum gehören wie potion und Google. ``models/`` fällt
-    weg wie in `encode_with_google`, damit dieselbe Wahl dieselbe Kennung
-    ergibt, gleich wie der Betreiber sie geschrieben hat.
+    Das Modell steht mit darin, weil `text-embedding-004` und
+    `text-embedding-3-small` ebenso wenig in einen Raum gehören wie potion und
+    Google. ``models/`` fällt weg wie in `encode_ueber_anbieter`, damit dieselbe
+    Wahl dieselbe Kennung ergibt, gleich wie der Betreiber sie geschrieben hat.
     """
-    modell = emb_kw.get("model", "text-embedding-004")
     if modell.startswith("models/"):
         modell = modell[len("models/"):]
-    return (GOOGLE_TAG_PREFIX + modell)[:_TAG_MAX]
+    return f"{anbieter}:{modell}"[:_TAG_MAX]
 
 
-def _google_zugang_mit(db: Session | None) -> tuple[str, dict[str, str]] | None:
-    """`_google_zugang` in der Sitzung des Aufrufers, sonst in einer eigenen.
+def _rueckfall_zugang(db: Session | None) -> tuple[str, str, str, str] | None:
+    """Anbieter, Schlüssel, Adresse und Modell des gewählten Rückfalls, oder ``None``.
 
-    ``None`` auch dann, wenn der Betreiber den Rückfall nicht erlaubt hat —
-    das ist die eine Stelle, an der der Schalter wirkt; `encode`,
-    `aktives_modell` und damit jeder Aufrufer gehen hier durch.
+    ``None`` auch dann, wenn der Betreiber keinen Rückfall gewählt hat — das
+    ist die eine Stelle, an der die Wahl wirkt; `encode`, `aktives_modell` und
+    damit jeder Aufrufer gehen hier durch. Gerechnet wird in der Sitzung des
+    Aufrufers, sonst in einer eigenen.
     """
     try:
-        if not google_rueckfall_erlaubt(db):
+        anbieter = rueckfall(db)
+        if anbieter is None:
             return None
         if db is not None:
-            return _google_zugang(db)
-        from database import SessionLocal
+            zugang = _zugang(db, anbieter)
+        else:
+            from database import SessionLocal
 
-        with SessionLocal() as eigene:
-            return _google_zugang(eigene)
+            with SessionLocal() as eigene:
+                zugang = _zugang(eigene, anbieter)
+        return None if zugang is None else (anbieter, *zugang)
     except Exception:
         return None
 
@@ -425,8 +469,8 @@ def aktives_modell(*, db: Session | None = None) -> str | None:
     """
     if _load() is not None:
         return MODEL_TAG
-    zugang = _google_zugang_mit(db)
-    return None if zugang is None else _google_tag(zugang[1])
+    zugang = _rueckfall_zugang(db)
+    return None if zugang is None else _tag(zugang[0], zugang[3])
 
 
 def encode(
@@ -436,14 +480,14 @@ def encode(
 
     Zurück kommt eine `Kodierung`: die Vektoren **und** die Kennung des
     Modells, das sie gerechnet hat — lokal `MODEL_TAG`, im Rückfall
-    `GOOGLE_TAG_PREFIX` plus Modellname. Nur ein Vergleich zwischen gleichen
-    Kennungen hat eine Bedeutung.
+    `<anbieter>:<modell>`. Nur ein Vergleich zwischen gleichen Kennungen hat
+    eine Bedeutung.
 
     Normalisiert wird hier, damit die Aehnlichkeit spaeter ein reines
     Skalarprodukt ist — der Aufrufer muss nichts ueber Vektorlaengen wissen.
 
     ``db`` ist die Sitzung des Aufrufers. Gebraucht wird sie nur für den
-    Rückfall auf Google, und wer mitten in einer Schreibarbeit rechnet, muss sie
+    Rückfall, und wer mitten in einer Schreibarbeit rechnet, muss sie
     mitgeben. Eine zweite, eigene Sitzung liegt in der Testsuite auf derselben
     Verbindung (`StaticPool`), und ihr Schließen rollt die offene Arbeit des
     Aufrufers zurück: `learn_skill` legte das persönliche Team an, der Rückfall
@@ -451,7 +495,7 @@ def encode(
     nicht mehr gab — gemeldet als „parallel geändert". Nur wer keine Sitzung hat
     (Absichtserkennung, Werkzeugauswahl), bekommt hier eine eigene, kurze.
 
-    ``nur_lokal`` schließt den Google-Rückfall aus, auch wenn er erlaubt ist.
+    ``nur_lokal`` schließt den Rückfall aus, auch wenn er gewählt ist.
     Für Aufrufer, die nicht auf das Netz warten dürfen: die Absichtserkennung
     der Stimme rechnet synchron in der Ereignisschleife, je Teiltranskript.
     """
@@ -461,13 +505,13 @@ def encode(
     if model is None:
         if nur_lokal:
             return None
-        # Rückfall auf Google AI Studio — nur mit Erlaubnis des Betreibers.
-        zugang = _google_zugang_mit(db)
+        # Rückfall — nur beim Anbieter, den der Betreiber gewählt hat.
+        zugang = _rueckfall_zugang(db)
         if zugang is None:
             return None
-        key, emb_kw = zugang
-        vektoren = encode_with_google(texts, api_key=key, **emb_kw)
-        return None if vektoren is None else Kodierung(vektoren, _google_tag(emb_kw))
+        anbieter, key, base_url, modell = zugang
+        vektoren = encode_ueber_anbieter(texts, api_key=key, base_url=base_url, model=modell)
+        return None if vektoren is None else Kodierung(vektoren, _tag(anbieter, modell))
     try:
         import numpy as np
 
