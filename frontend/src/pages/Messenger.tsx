@@ -4,12 +4,6 @@ import { useSearchParams, useParams, useNavigate } from 'react-router-dom'
 import {
   Button,
   Input,
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
   Avatar,
   ChatInputBar,
   VoiceRecordingBar,
@@ -290,6 +284,14 @@ import { siegelAktiv } from '@/services/lokaleVersiegelung'
 import { useMessengerSperre } from '@/services/messengerSperre'
 import { StoryViewerModal, type StoryReplyContext } from '@/components/social/StoryViewerModal'
 import { GroupPermissionsModal } from '@/components/social/GroupPermissionsModal'
+import { CreateGroupDialog } from '@/components/social/modals/CreateGroupDialog'
+import { NotePickerDialog } from '@/components/social/modals/NotePickerDialog'
+import { CalendarPickerDialog } from '@/components/social/modals/CalendarPickerDialog'
+import { SendPhotoDialog } from '@/components/social/modals/SendPhotoDialog'
+import { DeleteGroupDialog } from '@/components/social/modals/DeleteGroupDialog'
+import { ChatMuteDialog } from '@/components/social/modals/ChatMuteDialog'
+import { SafetyNumberDialog, type SicherheitsnummerGeraet } from '@/components/social/modals/SafetyNumberDialog'
+import { BlockConfirmDialog } from '@/components/social/modals/BlockConfirmDialog'
 import { ChatHintergrund, ChatHintergrundDialog } from '@/features/chatHintergrund'
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
@@ -539,7 +541,7 @@ export function Messenger() {
   const [isMuteModalOpen, setIsMuteModalOpen] = useState(false)
   const [isBlockConfirmOpen, setIsBlockConfirmOpen] = useState(false)
   const [isSafetyNumberModalOpen, setIsSafetyNumberModalOpen] = useState(false)
-  const [contactDevices, setContactDevices] = useState<{ id: string; label: string; number: string }[]>([])
+  const [contactDevices, setContactDevices] = useState<SicherheitsnummerGeraet[]>([])
   const [loadingSafetyNumbers, setLoadingSafetyNumbers] = useState(false)
 
   // Pre-computed mailbox IDs
@@ -663,11 +665,9 @@ export function Messenger() {
   // Attachments
   const [isNotePickerOpen, setIsNotePickerOpen] = useState(false)
   const [userNotes, setUserNotes] = useState<NoteItem[]>([])
-  const [noteSearch, setNoteSearch] = useState('')
 
   const [isCalendarPickerOpen, setIsCalendarPickerOpen] = useState(false)
   const [userEvents, setUserEvents] = useState<CalendarEventItem[]>([])
-  const [calendarSearch, setCalendarSearch] = useState('')
 
   const [selectedImage, setSelectedImage] = useState<ImageAttachment | null>(null)
   const [viewingImage, setViewingImage] = useState<string | null>(null)
@@ -680,9 +680,6 @@ export function Messenger() {
 
   // Group creation modal
   const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false)
-  const [groupName, setGroupName] = useState('')
-  const [groupDesc, setGroupDesc] = useState('')
-  const [creatingGroup, setCreatingGroup] = useState(false)
 
   // Voice recording state
   const [isRecording, setIsRecording] = useState(false)
@@ -4950,14 +4947,9 @@ export function Messenger() {
     }
   }
 
-  // Handle Create Group
-  const handleCreateGroup = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!groupName.trim()) return
-    setCreatingGroup(true)
+  // Handle Create Group. `true` heisst angelegt; dann leert der Dialog sein Formular.
+  const handleCreateGroup = async (name: string, beschreibung: string | null): Promise<boolean> => {
     try {
-      const name = groupName.trim()
-      const beschreibung = groupDesc.trim() || null
       // Der Server bekommt nur die Bitte, eine Gruppe anzulegen. Name und
       // Beschreibung gehen ihn nichts an.
       const roh = await createGroup()
@@ -4995,15 +4987,13 @@ export function Messenger() {
       const newGroup: ChatGroupItem = { ...roh, name, description: beschreibung }
       toast.success(t('messenger.groupCreated', { name }))
       setIsCreateGroupOpen(false)
-      setGroupName('')
-      setGroupDesc('')
       await loadData()
       setActiveGroup(newGroup)
       setActiveContact(null)
+      return true
     } catch {
       toast.error(t('messenger.groupCreateFailed'))
-    } finally {
-      setCreatingGroup(false)
+      return false
     }
   }
 
@@ -5106,6 +5096,23 @@ export function Messenger() {
     } finally {
       setIsDeletingGroup(false)
     }
+  }
+
+  // Blockieren oder Aufheben aus dem Bestätigungsdialog, je nach heutigem Stand.
+  const handleBlockConfirm = async () => {
+    if (activeContact && isBlocked(activeContact.userId)) {
+      await unblockUser(activeContact.userId)
+      toast.success(t('social.contacts.unblocked', { name: activeContact.username }))
+    } else if (activeContact) {
+      await blockUser(activeContact.userId, activeContact.username, activeContact.avatarUrl)
+      // Und aus der örtlichen Gesprächsliste. Seit Stufe 6b führt
+      // sie dieses Gerät; bliebe die Zeile stehen, tauchte der
+      // Blockierte weiter in der Kontaktliste auf und sein
+      // Gespräch bliebe abonniert.
+      await vergissGespraech(activeContact.userId).catch(() => {})
+      toast.success(t('messenger.contactBlockedToast', { name: activeContact.username }))
+    }
+    setIsBlockConfirmOpen(false)
   }
 
   // File Attachment Helper (for drag-and-drop and document input)
@@ -7624,184 +7631,48 @@ export function Messenger() {
         aktiv={!messengerGesperrt && !!currentUserId}
       />
 
-      {/* Create Group Modal */}
-      <Dialog open={isCreateGroupOpen} onOpenChange={setIsCreateGroupOpen}>
-        <DialogContent className="max-w-md p-5">
-          <div className="flex items-center justify-between pb-3 border-b border-outline-variant/20">
-            <div className="flex items-center gap-2">
-              <UsersRound className="w-5 h-5 text-primary" />
-              <span className="font-headline text-body-md font-bold text-primary">{t('messenger.newGroup')}</span>
-            </div>
-          </div>
+      <CreateGroupDialog
+        open={isCreateGroupOpen}
+        onOpenChange={setIsCreateGroupOpen}
+        onCreate={handleCreateGroup}
+      />
 
-          <form onSubmit={handleCreateGroup} className="space-y-4 pt-3">
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-on-surface">{t('messenger.groupNameLabel')}</label>
-              <Input
-                value={groupName}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setGroupName(e.target.value)}
-                placeholder={t('messenger.groupNamePlaceholder')}
-                required
-                className="text-xs h-9"
-              />
-            </div>
+      <NotePickerDialog
+        open={isNotePickerOpen}
+        onOpenChange={setIsNotePickerOpen}
+        notes={userNotes}
+        onPick={(n) => {
+          setIsNotePickerOpen(false)
+          handleSendMessage({
+            text: '',
+            note: {
+              title: n.title,
+              content: n.content,
+              color: n.color,
+              category: n.category,
+            },
+          })
+        }}
+      />
 
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-on-surface">{t('messenger.groupDescLabel')}</label>
-              <Input
-                value={groupDesc}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setGroupDesc(e.target.value)}
-                placeholder={t('messenger.groupDescPlaceholder')}
-                className="text-xs h-9"
-              />
-            </div>
-
-            <div className="p-3 rounded-xl bg-surface-container-high/60 border border-outline-variant/30 text-xs text-on-surface-variant space-y-1">
-              <div className="flex items-center gap-1.5 font-semibold text-primary">
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>{t('messenger.groupE2eeLabel')}</span>
-              </div>
-              <p className="text-label-sm">
-                {t('messenger.groupInviteHint')}
-              </p>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsCreateGroupOpen(false)}
-                disabled={creatingGroup}
-              >
-                Abbrechen
-              </Button>
-              <Button
-                type="submit"
-                variant="primary"
-                size="sm"
-                disabled={!groupName.trim() || creatingGroup}
-              >
-                {creatingGroup ? t('messenger.creating') : t('messenger.createGroup')}
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Note Picker Modal */}
-      <Dialog open={isNotePickerOpen} onOpenChange={setIsNotePickerOpen}>
-        <DialogContent className="max-w-md max-h-[75vh] flex flex-col p-4">
-          <div className="flex items-center justify-between pb-3 border-b border-outline-variant/20">
-            <div className="flex items-center gap-2">
-              <StickyNote className="w-4 h-4 text-status-warning" />
-              <span className="font-headline text-body-sm font-bold text-primary">{t('messenger.shareNote')}</span>
-            </div>
-          </div>
-
-          <div className="py-2">
-            <Input
-              value={noteSearch}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNoteSearch(e.target.value)}
-              placeholder={t('messenger.searchNote')}
-              className="text-xs h-8"
-            />
-          </div>
-
-          <div className="flex-1 overflow-y-auto space-y-2 py-2">
-            {userNotes.filter((n) => n.title.toLowerCase().includes(noteSearch.toLowerCase())).length === 0 ? (
-              <p className="text-center py-6 text-xs text-on-surface-variant/70">
-                Keine passenden Notizen gefunden.
-              </p>
-            ) : (
-              userNotes
-                .filter((n) => n.title.toLowerCase().includes(noteSearch.toLowerCase()))
-                .map((n) => (
-                  <div
-                    key={n.id}
-                    onClick={() => {
-                      setIsNotePickerOpen(false)
-                      handleSendMessage({
-                        text: '',
-                        note: {
-                          title: n.title,
-                          content: n.content,
-                          color: n.color,
-                          category: n.category,
-                        },
-                      })
-                    }}
-                    className="p-3 rounded-xl border border-outline-variant/30 hover:border-primary/50 hover:bg-surface-container transition-all cursor-pointer text-left"
-                  >
-                    <div className="font-semibold text-xs text-primary">{n.title}</div>
-                    <p className="text-label-sm text-on-surface-variant line-clamp-2 mt-0.5">
-                      {n.content}
-                    </p>
-                  </div>
-                ))
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Calendar Picker Modal */}
-      <Dialog open={isCalendarPickerOpen} onOpenChange={setIsCalendarPickerOpen}>
-        <DialogContent className="max-w-md max-h-[75vh] flex flex-col p-4">
-          <div className="flex items-center justify-between pb-3 border-b border-outline-variant/20">
-            <div className="flex items-center gap-2">
-              <CalendarIcon className="w-4 h-4 text-primary" />
-              <span className="font-headline text-body-sm font-bold text-primary">{t('messenger.shareEventTitle')}</span>
-            </div>
-          </div>
-
-          <div className="py-2">
-            <Input
-              value={calendarSearch}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCalendarSearch(e.target.value)}
-              placeholder={t('messenger.searchEvent')}
-              className="text-xs h-8"
-            />
-          </div>
-
-          <div className="flex-1 overflow-y-auto space-y-2 py-2">
-            {userEvents.filter((ev) => ev.title.toLowerCase().includes(calendarSearch.toLowerCase())).length === 0 ? (
-              <p className="text-center py-6 text-xs text-on-surface-variant/70">
-                Keine Termine gefunden.
-              </p>
-            ) : (
-              userEvents
-                .filter((ev) => ev.title.toLowerCase().includes(calendarSearch.toLowerCase()))
-                .map((ev) => (
-                  <div
-                    key={ev.event_id || ev.id}
-                    onClick={() => {
-                      setIsCalendarPickerOpen(false)
-                      handleSendMessage({
-                        text: '',
-                        cal: {
-                          title: ev.title,
-                          start: ev.start,
-                          end: ev.end,
-                          description: ev.description,
-                          location: ev.location,
-                        },
-                      })
-                    }}
-                    className="p-3 rounded-xl border border-outline-variant/30 hover:border-primary/50 hover:bg-surface-container transition-all cursor-pointer text-left"
-                  >
-                    <div className="font-semibold text-xs text-primary">{ev.title}</div>
-                    <div className="text-label-sm text-on-surface-variant flex items-center gap-1 mt-0.5">
-                      <Clock className="w-3 h-3" />
-                      <span>
-                        {new Date(ev.start).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
-                      </span>
-                    </div>
-                  </div>
-                ))
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <CalendarPickerDialog
+        open={isCalendarPickerOpen}
+        onOpenChange={setIsCalendarPickerOpen}
+        events={userEvents}
+        onPick={(ev) => {
+          setIsCalendarPickerOpen(false)
+          handleSendMessage({
+            text: '',
+            cal: {
+              title: ev.title,
+              start: ev.start,
+              end: ev.end,
+              description: ev.description,
+              location: ev.location,
+            },
+          })
+        }}
+      />
 
       {/* Full-size Image Viewer */}
       {viewingImage && (
@@ -7827,73 +7698,26 @@ export function Messenger() {
         </div>
       )}
 
-      {/* Send Photo To Contact / Group Dialog */}
-      <Dialog open={isSendPhotoOpen} onOpenChange={setIsSendPhotoOpen}>
-        <DialogContent className="max-w-md max-h-[80vh] flex flex-col p-4">
-          <div className="flex items-center justify-between pb-3 border-b border-outline-variant/20">
-            <div className="flex items-center gap-2">
-              <Camera className="w-4 h-4 text-primary" />
-              <span className="font-headline text-body-sm font-bold text-primary">{t('messenger.sendPhotoTo')}</span>
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto space-y-1 py-2">
-            <div className="text-label-sm font-semibold text-on-surface-variant/70 uppercase tracking-wider px-2 py-1">
-              {t('messenger.pickChat')}
-            </div>
-            {filteredGroups.map((g) => (
-              <button
-                key={`photo-g-${g.id}`}
-                type="button"
-                onClick={() => {
-                  setActiveGroup(g)
-                  setActiveContact(null)
-                  if (pendingPhotoToSend) setSelectedImage(pendingPhotoToSend)
-                  setPendingPhotoToSend(null)
-                  setIsSendPhotoOpen(false)
-                }}
-                className="w-full flex items-center gap-2.5 p-2.5 rounded-xl hover:bg-surface-container-high transition-colors text-left"
-              >
-                <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold shrink-0">
-                  {g.avatar_url ? (
-                    <img src={g.avatar_url} alt="" className="w-full h-full rounded-full object-cover" />
-                  ) : (
-                    <UsersRound className="w-4 h-4" />
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-semibold text-primary truncate">{g.name}</div>
-                  <div className="text-label-sm text-on-surface-variant/70">Gruppe ({g.member_count} Mitglieder)</div>
-                </div>
-              </button>
-            ))}
-
-            {filteredContacts.map((c) => (
-              <button
-                key={c.listKey}
-                type="button"
-                onClick={() => {
-                  setActiveContact(c)
-                  setActiveGroup(null)
-                  if (pendingPhotoToSend) setSelectedImage(pendingPhotoToSend)
-                  setPendingPhotoToSend(null)
-                  setIsSendPhotoOpen(false)
-                }}
-                className="w-full flex items-center gap-2.5 p-2.5 rounded-xl hover:bg-surface-container-high transition-colors text-left"
-              >
-                <div className="relative shrink-0">
-                  <Avatar src={c.avatarUrl} name={c.username} size="sm" />
-                  <StatusDot status={c.status} size="sm" className="absolute bottom-0 right-0" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-semibold text-primary truncate">{c.username}</div>
-                  <div className="text-label-sm text-on-surface-variant/70">{c.teamName || (c.isFriend ? 'Freund' : 'Kontakt')}</div>
-                </div>
-              </button>
-            ))}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <SendPhotoDialog
+        open={isSendPhotoOpen}
+        onOpenChange={setIsSendPhotoOpen}
+        groups={filteredGroups}
+        contacts={filteredContacts}
+        onPickGroup={(g) => {
+          setActiveGroup(g)
+          setActiveContact(null)
+          if (pendingPhotoToSend) setSelectedImage(pendingPhotoToSend)
+          setPendingPhotoToSend(null)
+          setIsSendPhotoOpen(false)
+        }}
+        onPickContact={(c) => {
+          setActiveContact(c)
+          setActiveGroup(null)
+          if (pendingPhotoToSend) setSelectedImage(pendingPhotoToSend)
+          setPendingPhotoToSend(null)
+          setIsSendPhotoOpen(false)
+        }}
+      />
 
       {/* Create Story Modal */}
       <CreateStoryModal
@@ -7964,41 +7788,12 @@ export function Messenger() {
         }}
       />
 
-      {/* Design-DNA Confirmation Dialog for Deleting Group */}
-      <Dialog open={Boolean(groupToDelete)} onOpenChange={(open) => !open && setGroupToDelete(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-error flex items-center gap-2">
-              <Trash2 className="w-5 h-5 text-error" />
-              <span>{t('messenger.deleteGroupTitle')}</span>
-            </DialogTitle>
-            <DialogDescription>
-              {t('messenger.deleteGroupMessage', { name: groupToDelete?.name ?? '' })}
-            </DialogDescription>
-          </DialogHeader>
-
-          <DialogFooter>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setGroupToDelete(null)}
-              disabled={isDeletingGroup}
-            >
-              Abbrechen
-            </Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={handleConfirmDeleteGroup}
-              disabled={isDeletingGroup}
-              className="gap-1.5"
-            >
-              <Trash2 className="w-4 h-4" />
-              <span>{isDeletingGroup ? t('messenger.deleting') : t('messenger.deleteForGood')}</span>
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DeleteGroupDialog
+        group={groupToDelete}
+        deleting={isDeletingGroup}
+        onCancel={() => setGroupToDelete(null)}
+        onConfirm={handleConfirmDeleteGroup}
+      />
       {/* Das Hintergrundfenster — dasselbe, das der KI-Chat öffnet. */}
       <ChatHintergrundDialog
         bereich="messenger"
@@ -8006,210 +7801,28 @@ export function Messenger() {
         onOffenChange={setIsWallpaperModalOpen}
       />
 
-      {/* Design-DNA Mute Dialog */}
-      <Dialog open={isMuteModalOpen} onOpenChange={setIsMuteModalOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <BellOff className="w-5 h-5 text-primary" />
-              <span>{t('messenger.muteNotifications')}</span>
-            </DialogTitle>
-            <DialogDescription>
-              Wähle, wie lange Benachrichtigungen für {activeGroup ? `"${gruppenTitel(activeGroup)}"` : activeContact ? `"${activeContact.username}"` : 'diesen Chat'} stummgeschaltet werden sollen.
-            </DialogDescription>
-          </DialogHeader>
+      <ChatMuteDialog
+        open={isMuteModalOpen}
+        onOpenChange={setIsMuteModalOpen}
+        mailboxId={blindMailboxId || null}
+        chatName={activeGroup ? gruppenTitel(activeGroup) : activeContact?.username ?? null}
+      />
 
-          <div className="flex flex-col gap-2 px-6 py-4">
-            <Button
-              variant="secondary"
-              className="w-full justify-start text-left text-xs py-2.5 h-auto"
-              onClick={() => {
-                if (blindMailboxId) {
-                  muteChat(blindMailboxId, 480)
-                  toast.success(t('messenger.muted8h'))
-                }
-                setIsMuteModalOpen(false)
-              }}
-            >
-              <Clock className="w-4 h-4 mr-2.5 text-on-surface-variant" />
-              <div>
-                <div className="font-semibold">{t('messenger.mute8h')}</div>
-                <div className="text-label-sm text-on-surface-variant/70">{t('messenger.mute8hHint')}</div>
-              </div>
-            </Button>
+      <SafetyNumberDialog
+        open={isSafetyNumberModalOpen}
+        onOpenChange={setIsSafetyNumberModalOpen}
+        contactName={activeContact?.username || ''}
+        devices={contactDevices}
+        loading={loadingSafetyNumbers}
+      />
 
-            <Button
-              variant="secondary"
-              className="w-full justify-start text-left text-xs py-2.5 h-auto"
-              onClick={() => {
-                if (blindMailboxId) {
-                  muteChat(blindMailboxId, 10080)
-                  toast.success(t('messenger.muted1w'))
-                }
-                setIsMuteModalOpen(false)
-              }}
-            >
-              <Clock className="w-4 h-4 mr-2.5 text-on-surface-variant" />
-              <div>
-                <div className="font-semibold">{t('messenger.mute1w')}</div>
-                <div className="text-label-sm text-on-surface-variant/70">{t('messenger.mute1wHint')}</div>
-              </div>
-            </Button>
-
-            <Button
-              variant="secondary"
-              className="w-full justify-start text-left text-xs py-2.5 h-auto"
-              onClick={() => {
-                if (blindMailboxId) {
-                  muteChat(blindMailboxId, 0)
-                  toast.success(t('messenger.mutedForever'))
-                }
-                setIsMuteModalOpen(false)
-              }}
-            >
-              <BellOff className="w-4 h-4 mr-2.5 text-on-surface-variant" />
-              <div>
-                <div className="font-semibold">Immer</div>
-                <div className="text-label-sm text-on-surface-variant/70">{t('messenger.muteForeverHint')}</div>
-              </div>
-            </Button>
-
-            {blindMailboxId && isChatMuted(blindMailboxId) && (
-              <Button
-                variant="ghost"
-                className="w-full justify-start text-left text-xs py-2.5 h-auto text-primary hover:bg-primary/10 mt-1 border border-primary/20"
-                onClick={() => {
-                  unmuteChat(blindMailboxId)
-                  toast.success(t('social.contacts.unmuted'))
-                  setIsMuteModalOpen(false)
-                }}
-              >
-                <Bell className="w-4 h-4 mr-2.5 text-primary" />
-                <div>
-                  <div className="font-semibold">{t('messenger.unmute')}</div>
-                  <div className="text-label-sm text-on-surface-variant/70">{t('messenger.unmuteHint')}</div>
-                </div>
-              </Button>
-            )}
-          </div>
-
-          <DialogFooter>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setIsMuteModalOpen(false)}
-            >
-              Abbrechen
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Design-DNA Sicherheitsnummer Dialog */}
-      <Dialog open={isSafetyNumberModalOpen} onOpenChange={setIsSafetyNumberModalOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ShieldCheck className="w-5 h-5 text-secondary" />
-              <span>{t('messenger.safetyNumberModalTitle')}</span>
-            </DialogTitle>
-            <DialogDescription>
-              {t('messenger.safetyNumberModalDesc')}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="flex flex-col gap-3 px-6 py-4">
-            {loadingSafetyNumbers && (
-              <p className="text-xs text-on-surface-variant">{t('common.loading')}</p>
-            )}
-            {!loadingSafetyNumbers && contactDevices.length === 0 && (
-              <p className="text-xs text-on-surface-variant">{t('messenger.noDeviceOnline', { name: activeContact?.username || '' })}</p>
-            )}
-            {!loadingSafetyNumbers && contactDevices.map((d) => (
-              <div key={d.id} className="rounded-lg border border-outline-variant/30 bg-surface-container-high/40 p-3 space-y-1">
-                <div className="flex items-center justify-between text-xs text-on-surface font-medium">
-                  <span>{d.label}</span>
-                  <span className="font-mono text-on-surface-variant">{d.id.slice(0, 10)}</span>
-                </div>
-                <div className="font-mono text-sm tracking-wider text-primary font-bold bg-surface-container-lowest/60 rounded px-2 py-1.5 text-center select-all">
-                  {d.number || '—'}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <DialogFooter>
-            <Button variant="secondary" size="sm" onClick={() => setIsSafetyNumberModalOpen(false)}>
-              {t('common.close')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Design-DNA Block / Unblock Confirmation Dialog */}
-      <Dialog open={isBlockConfirmOpen} onOpenChange={setIsBlockConfirmOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className={`flex items-center gap-2 ${activeContact && isBlocked(activeContact.userId) ? 'text-primary' : 'text-status-destructive'}`}>
-              <Ban className="w-5 h-5" />
-              <span>
-                {activeContact && isBlocked(activeContact.userId)
-                  ? t('messenger.unblockTitle')
-                  : t('messenger.blockTitle')}
-              </span>
-            </DialogTitle>
-            <DialogDescription>
-              {activeContact && isBlocked(activeContact.userId) ? (
-                t('messenger.unblockMessage', { name: activeContact.username })
-              ) : (
-                t('messenger.blockMessage', { name: activeContact?.username ?? '' })
-              )}
-            </DialogDescription>
-          </DialogHeader>
-
-          <DialogFooter>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setIsBlockConfirmOpen(false)}
-            >
-              Abbrechen
-            </Button>
-            {activeContact && isBlocked(activeContact.userId) ? (
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={async () => {
-                  await unblockUser(activeContact.userId)
-                  toast.success(t('social.contacts.unblocked', { name: activeContact.username }))
-                  setIsBlockConfirmOpen(false)
-                }}
-              >
-                {t('messenger.unblock')}
-              </Button>
-            ) : (
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={async () => {
-                  if (activeContact) {
-                    await blockUser(activeContact.userId, activeContact.username, activeContact.avatarUrl)
-                    // Und aus der örtlichen Gesprächsliste. Seit Stufe 6b führt
-                    // sie dieses Gerät; bliebe die Zeile stehen, tauchte der
-                    // Blockierte weiter in der Kontaktliste auf und sein
-                    // Gespräch bliebe abonniert.
-                    await vergissGespraech(activeContact.userId).catch(() => {})
-                    toast.success(t('messenger.contactBlockedToast', { name: activeContact.username }))
-                  }
-                  setIsBlockConfirmOpen(false)
-                }}
-              >
-                {t('messenger.block')}
-              </Button>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <BlockConfirmDialog
+        open={isBlockConfirmOpen}
+        onOpenChange={setIsBlockConfirmOpen}
+        contactName={activeContact?.username ?? ''}
+        blocked={Boolean(activeContact && isBlocked(activeContact.userId))}
+        onConfirm={handleBlockConfirm}
+      />
 
       {/* Dateiauswahl für das Gruppenlogo (der sichtbare Knopf steht im Kopf) */}
       <input

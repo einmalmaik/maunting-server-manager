@@ -5,9 +5,10 @@ import { MemoryRouter } from 'react-router-dom'
 import { Messenger, clearSessionChatCache } from './Messenger'
 import * as socialApi from '@/api/social'
 import { leereMailboxAbos, offeneMailboxAbos } from '@/services/mailboxAbo'
-import { leereGespraeche, merkeGespraech } from '@/services/gespraechsListe'
+import { ladeGespraeche, leereGespraeche, merkeGespraech } from '@/services/gespraechsListe'
 import { teamsApi } from '@/api/teams'
 import { useAuthStore } from '@/stores/authStore'
+import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
 import { erzeugeSignaturPaar, type SignaturPaar } from '@/services/absenderSignatur'
 import { signiereNutzlast } from '@/services/nutzlastSignatur'
 import { eigenesGeraet, signaturSchluesselVon } from '@/services/e2eeGeraet'
@@ -3056,6 +3057,83 @@ describe('Messenger (Allround Chat)', () => {
       expect(await screen.findByText(i18n.t('messenger.safetyNumberModalTitle'))).toBeInTheDocument()
       expect(screen.getByText(i18n.t('messenger.safetyNumberModalDesc'))).toBeInTheDocument()
       expect(await screen.findByText('11111 22222 33333 44444')).toBeInTheDocument()
+    })
+  })
+
+  /**
+   * Stummschalten und Blockieren kommen aus eigenen Dialogen. Hier steht, dass
+   * die Wahl im Dialog wirklich beim Store und in der Gesprächsliste ankommt.
+   */
+  describe('Stummschalten und Blockieren über das Chatmenü', () => {
+    afterEach(() => {
+      // Der Store lebt über den Test hinaus; `localStorage.clear()` erreicht
+      // seinen Arbeitsspeicher nicht.
+      useMessengerNotificationStore.setState({ mutedChats: {}, blockedUserIds: [], blockedProfiles: {} })
+    })
+
+    it('schaltet den offenen Chat für 8 Stunden stumm', async () => {
+      render(
+        <MemoryRouter initialEntries={['/chat?userId=101']}>
+          <Messenger />
+        </MemoryRouter>
+      )
+      await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
+      await oeffneChatMenue()
+      fireEvent.click(screen.getByText(i18n.t('messenger.mute')).closest('button')!)
+      fireEvent.click(await screen.findByText(i18n.t('messenger.mute8h')))
+
+      await waitFor(() => {
+        const fristen = Object.values(useMessengerNotificationStore.getState().mutedChats)
+        expect(fristen).toHaveLength(1)
+        expect(fristen[0]).toBeGreaterThan(Date.now() + 7 * 3600 * 1000)
+      })
+      await waitFor(() => {
+        expect(screen.queryByText(i18n.t('messenger.mute8h'))).not.toBeInTheDocument()
+      })
+    })
+
+    it('blockiert den Kontakt und nimmt das Gespräch aus der örtlichen Liste', async () => {
+      await merkeGespraech(101, { username: 'alice' })
+      render(
+        <MemoryRouter initialEntries={['/chat?userId=101']}>
+          <Messenger />
+        </MemoryRouter>
+      )
+      await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
+      await oeffneChatMenue()
+      fireEvent.click(screen.getByText(i18n.t('messenger.blockContact')).closest('button')!)
+      fireEvent.click(await screen.findByRole('button', { name: i18n.t('messenger.block') }))
+
+      await waitFor(() => {
+        expect(useMessengerNotificationStore.getState().isBlocked(101)).toBe(true)
+      })
+      await waitFor(async () => {
+        expect((await ladeGespraeche()).has(101)).toBe(false)
+      })
+    })
+
+    it('hebt eine Blockierung auf, ohne das Gespräch anzufassen', async () => {
+      useMessengerNotificationStore.setState({ blockedUserIds: [101] })
+      await merkeGespraech(101, { username: 'alice' })
+      render(
+        <MemoryRouter initialEntries={['/chat?userId=101']}>
+          <Messenger />
+        </MemoryRouter>
+      )
+      // Blockiert gibt es kein Eingabefeld; das Menü steht trotzdem da. Der
+      // Hinweisbalken unten trägt einen eigenen Aufheben-Knopf ohne Dialog,
+      // deshalb wird im Menü gesucht.
+      await oeffneChatMenue()
+      const menue = screen.getByRole('dialog')
+      fireEvent.click(within(menue).getByText(i18n.t('messenger.unblockContact')).closest('button')!)
+      const titel = await screen.findByText(i18n.t('messenger.unblockTitle'))
+      const frage = titel.closest<HTMLElement>('[role="dialog"]')!
+      fireEvent.click(within(frage).getByRole('button', { name: i18n.t('messenger.unblock') }))
+
+      await waitFor(() => {
+        expect(useMessengerNotificationStore.getState().isBlocked(101)).toBe(false)
+      })
+      expect((await ladeGespraeche()).has(101)).toBe(true)
     })
   })
 })
