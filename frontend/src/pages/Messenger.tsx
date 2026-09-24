@@ -115,12 +115,11 @@ import {
 } from '@/services/ratchetSitzung'
 import {
   geraeteVon,
-  kontoNutztSignaturen,
   eigenesGeraetFreigegeben,
   onEigeneFreigabe,
   onSchluesselWarnung,
 } from '@/services/e2eeGeraet'
-import { pruefeNutzlast, signiereNutzlast } from '@/services/nutzlastSignatur'
+import { signiereNutzlast } from '@/services/nutzlastSignatur'
 import {
   abonniereBekannteGespraeche,
   gruppenGeheimnis,
@@ -163,24 +162,11 @@ import {
   tilgeFremdeNachrichtBeimServer,
   tilgeNachrichtLokal,
 } from '@/services/nachrichtLoeschen'
-import {
-  bezugFelder,
-  istSteuerpaket,
-  neueBezugstafel,
-  neueSammeltafel,
-} from '@/services/nachrichtBezug'
-import {
-  anheftung,
-  durfteAnheften,
-  setzeAnheftung,
-  uebernehmeAnheftung,
-} from '@/services/nachrichtAnheftung'
+import { bezugFelder } from '@/services/nachrichtBezug'
+import { anheftung, setzeAnheftung } from '@/services/nachrichtAnheftung'
 import { merkeQuittung, quittungsstand } from '@/services/quittungsstand'
-import {
-  schalteReaktion,
-  wendeReaktionenAn,
-  type RohReaktion,
-} from '@/services/reaktionen'
+import { schalteReaktion, wendeReaktionenAn } from '@/services/reaktionen'
+import { werteUmschlaegeAus } from '@/services/umschlagAuswertung'
 import {
   binIchGemeint,
   findeErwaehnungen,
@@ -196,14 +182,11 @@ import {
 } from '@/services/nachrichtWeiterleiten'
 import { vergissMailbox, type Treffer } from '@/services/verlaufSuche'
 import {
-  durfteVerfallStellen,
   faelligeZeilen,
-  istBekannteStufe,
   raeumeAlleChats,
   setzeVerfallsfrist,
   stufenDativ,
   stufenLabel,
-  uebernehmeVerfall,
   VERFALL_STUFEN,
   verfaelltAm as berechneVerfall,
   verfallsfrist,
@@ -1596,7 +1579,7 @@ export function Messenger() {
    * `attach_media` standen seit je im Vokabular, ließen sich setzen und hatten
    * keinen Konsumenten: das Eingabefeld fragte nie.
    *
-   * Durchgesetzt wird das **beim Empfänger** (siehe `loadMessages`), nicht am
+   * Durchgesetzt wird das **beim Empfänger** (siehe `umschlagAuswertung.ts`), nicht am
    * Server. Der Server kann den Inhalt nicht lesen und weiß nach Stufe 6 auch
    * nicht mehr, wer Mitglied ist; eine Schranke dort wäre eine, die wir bald
    * wieder herausreißen. Hier zu sperren ist die Höflichkeit, dort zu
@@ -1631,545 +1614,31 @@ export function Messenger() {
       if (gelesen === null) return
       if (activeMailboxIdRef.current !== currentMid || currentLoadSeqRef.current !== seq) return
 
-      const decryptedList: ChatMessage[] = []
-      const seenEnvelopeIds = new Set<number>()
-      const seenClientUuids = new Set<string>()
-
-      // Wirkungen, die aus Steuerumschlägen kommen. Jede Tafel kennt ihre
-      // Nachricht über die Umschlagkennung **und** die logische Kennung; warum
-      // beides nötig ist, steht in `nachrichtBezug.ts`.
-      const aenderungen = neueBezugstafel<{ newText: string; editedAt: string }>()
-      const loeschungen = neueBezugstafel<{ deletedAt: string }>()
-      const reaktionen = neueSammeltafel<RohReaktion>()
-      let maxPartnerReadId = 0
-      let maxPartnerDeliveredId = 0
-      let maxIncomingId = 0
-
-      for (const lesung of gelesen) {
-        const env = lesung.env
-        if (seenEnvelopeIds.has(env.id)) continue
-        seenEnvelopeIds.add(env.id)
-        // 'still' — eine Kopie für ein anderes Gerät, die eigene
-        // Ratchet-Nachricht oder eine Schlüsselzustellung. Nichts davon ist ein
-        // Fehler, und nichts davon darf als „Verschlüsselte Nachricht" im
-        // Verlauf stehen.
-        if (lesung.art === 'still') continue
-        const plain = lesung.art === 'klartext' ? lesung.text : ''
-
-        if (!plain) {
-          const isControl =
-            Boolean((env as any).is_control) ||
-            Boolean((env as any).control_type) ||
-            Boolean(
-              env.client_uuid &&
-                (env.client_uuid.startsWith('receipt:') ||
-                  env.client_uuid.startsWith('ctrl-') ||
-                  env.client_uuid.startsWith('deliv-') ||
-                  env.client_uuid.toLowerCase().includes('control') ||
-                  env.client_uuid.toLowerCase().includes('receipt'))
-            )
-
-          if (isControl) {
-            // Silence un-decryptable control envelopes; never render in chat timeline
-            continue
-          }
-
-          const clientUuid = logischeUuid(env.client_uuid)
-          if (clientUuid && seenClientUuids.has(clientUuid)) {
-            continue
-          }
-          if (clientUuid) {
-            seenClientUuids.add(clientUuid)
-          }
-          decryptedList.push({
-            id: env.id,
-            clientUuid,
-            senderId: activeContact ? activeContact.userId : 0,
-            text: t('messenger.encryptedMessage'),
-            createdAt: env.created_at,
-            isSelf: false,
-          })
-          if (env.id > maxIncomingId) {
-            maxIncomingId = env.id
-          }
-          continue
-        }
-
-        try {
-          const parsed = JSON.parse(plain)
-          if (typeof parsed === 'object' && parsed !== null) {
-            /*
-             * Wer das hier geschrieben hat — einmal beantwortet, für alles was
-             * folgt.
-             *
-             * Zwei Belege können vorliegen: die Ratchet-Sitzung (nur im
-             * Direktchat, nur für Nachrichten) und die Nutzlastsignatur
-             * (überall, auch für Steuerpakete). Widersprechen sie einander,
-             * hat jemand an einer von beiden gedreht.
-             *
-             * `belegterUrheber` bleibt `undefined`, wenn keiner der beiden
-             * greift. Das ist kein Freibrief: jede Auswertung unten prüft
-             * zusätzlich, ob das behauptete Konto beglaubigen *könnte* — wer
-             * es kann, muss es auch.
-             */
-            const beleg = await pruefeNutzlast(currentMid, parsed as Record<string, unknown>)
-            if (beleg.art === 'gefaelscht') {
-              console.warn(
-                '[Messenger] Dropping payload with invalid sender signature, claimed:',
-                beleg.behauptet,
-              )
-              continue
-            }
-            const ratchetUrheber = lesung.art === 'klartext' ? lesung.vonKonto : undefined
-            if (
-              beleg.art === 'geprueft' &&
-              ratchetUrheber !== undefined &&
-              Number(ratchetUrheber) !== beleg.vonKonto
-            ) {
-              console.warn(
-                '[Messenger] Dropping payload: signature and ratchet disagree on sender',
-              )
-              continue
-            }
-            // Die Downgrade-Schranke gilt auch für den Ratchet. Eine Sitzung aus
-            // der Zeit vor der Unterschrift am Sitzungsaufbau (09/2026) wurde nie
-            // geprüft — auch eine untergeschobene nicht, und die liefe weiter.
-            // Wer unterschreiben kann, unterschreibt jede Nachricht; fehlt der
-            // Beleg trotzdem, schreibt jemand anderes über diese Sitzung.
-            if (
-              beleg.art === 'unsigniert' &&
-              ratchetUrheber !== undefined &&
-              (await kontoNutztSignaturen(Number(ratchetUrheber)))
-            ) {
-              console.warn(
-                '[Messenger] Dropping unsigned ratchet payload from an account that signs:',
-                ratchetUrheber,
-              )
-              continue
-            }
-            const belegterUrheber =
-              beleg.art === 'geprueft' ? beleg.vonKonto : ratchetUrheber
-
-            /**
-             * Der Urheber, gegen eine Behauptung aus der Nutzlast geprüft.
-             *
-             * `null` heißt verwerfen: entweder widerspricht die Behauptung dem
-             * Beleg, oder sie nennt ein Konto, das beglaubigen könnte und es
-             * hier nicht tut — das wäre der Weg, die Prüfung einfach
-             * wegzulassen.
-             */
-            const urheberVon = async (
-              behauptetRoh: unknown,
-            ): Promise<number | undefined | null> => {
-              const behauptet =
-                behauptetRoh === undefined || behauptetRoh === null
-                  ? undefined
-                  : Number(behauptetRoh)
-              if (belegterUrheber !== undefined) {
-                if (behauptet !== undefined && behauptet !== Number(belegterUrheber)) return null
-                return Number(belegterUrheber)
-              }
-              if (behauptet !== undefined && behauptet > 0) {
-                if (await kontoNutztSignaturen(behauptet)) return null
-              }
-              return behauptet
-            }
-
-            // 1. Read receipt control packet
-            if (parsed.type === 'read_receipt') {
-              const readUpTo = Number(parsed.read_up_to_id || 0)
-              const readerId = Number(parsed.reader_id || 0)
-              if (Number(readerId) !== Number(currentUserId)) {
-                if (readUpTo > maxPartnerReadId) {
-                  maxPartnerReadId = readUpTo
-                  maxPartnerReadIdRef.current = Math.max(maxPartnerReadIdRef.current, readUpTo)
-                }
-                if (readUpTo > maxPartnerDeliveredId) {
-                  maxPartnerDeliveredId = readUpTo
-                  maxPartnerDeliveredIdRef.current = Math.max(maxPartnerDeliveredIdRef.current, readUpTo)
-                }
-              } else {
-                // Multi-Device: Vom aktuellen Benutzer auf anderem Gerät gelesen
-                markAsRead(currentMid)
-              }
-              continue
-            }
-
-            // 1b. Delivery receipt control packet
-            if (parsed.type === 'delivery_receipt') {
-              const deliveredUpTo = Number(parsed.delivered_up_to_id || 0)
-              const receiverId = Number(parsed.receiver_id || 0)
-              if (Number(receiverId) !== Number(currentUserId) && deliveredUpTo > maxPartnerDeliveredId) {
-                maxPartnerDeliveredId = deliveredUpTo
-                maxPartnerDeliveredIdRef.current = Math.max(maxPartnerDeliveredIdRef.current, deliveredUpTo)
-              }
-              continue
-            }
-
-            // 2. Edit message control packet
-            if (parsed.type === 'edit_message') {
-              if (parsed.new_text) {
-                const urheber = await urheberVon(parsed.actor_id ?? parsed.sender_id)
-                if (urheber === null) {
-                  console.warn('[Messenger] Dropping edit packet with forged actor_id:', parsed.actor_id)
-                  continue
-                }
-                aenderungen.merke(
-                  parsed,
-                  {
-                    newText: String(parsed.new_text),
-                    editedAt: String(parsed.edited_at || env.created_at),
-                  },
-                  urheber,
-                )
-              }
-              continue
-            }
-
-            // 3. Delete message control packet
-            if (parsed.type === 'delete_message') {
-              const urheber = await urheberVon(parsed.actor_id ?? parsed.sender_id)
-              if (urheber === null) {
-                console.warn('[Messenger] Dropping delete packet with forged actor_id:', parsed.actor_id)
-                continue
-              }
-              loeschungen.merke(
-                parsed,
-                {
-                  deletedAt: String(parsed.deleted_at || env.created_at),
-                },
-                urheber,
-              )
-              continue
-            }
-
-            // 4. Reaktion auf eine Nachricht
-            if (parsed.type === 'reaction') {
-              const urheber = await urheberVon(parsed.actor_id)
-              if (urheber === null) {
-                console.warn('[Messenger] Dropping reaction with forged actor_id:', parsed.actor_id)
-                continue
-              }
-              const zeichen = String(parsed.emoji || '')
-              const wer = Number(urheber || 0)
-              if (zeichen && wer) {
-                reaktionen.ergaenze(parsed, {
-                  emoji: zeichen,
-                  actorId: wer,
-                  nehmen: parsed.aktion === 'nehmen',
-                  zeitpunkt: String(parsed.zeitpunkt || env.created_at),
-                })
-              }
-              continue
-            }
-
-            // 5. Verfallsfrist — gilt für beide Seiten, nicht nur für den,
-            //    der sie eingestellt hat. Ab hier hängen auch die eigenen
-            //    Nachrichten ihr `verfaellt_am` an. Wer zuletzt umstellt,
-            //    gewinnt; das entscheidet `uebernehmeVerfall` am Zeitpunkt.
-            //
-            //    Angewandt wird sofort und nicht am Ende des Durchlaufs: unten
-            //    stehen zwei Abbruchwächter für den Fall, dass inzwischen ein
-            //    zweiter Abruf läuft. Der Eintrag wäre dann schon geschrieben,
-            //    die Meldung darüber aber verschluckt — und `uebernehmeVerfall`
-            //    meldet dieselbe Umstellung kein zweites Mal.
-            //
-            //    Wer umgestellt hat, sagt der Beleg, nicht `actor_id`. Bis
-            //    09/2026 stand hier `Number(parsed.actor_id)`: jedes Mitglied
-            //    hält den Gruppenschlüssel und unterschreibt seine eigene
-            //    Nutzlast, konnte also bei allen „<Eigentümer> hat eingestellt
-            //    …" erscheinen lassen, und im Direktchat die Gegenseite ein
-            //    „Du hast eingestellt …". In der Gruppe braucht die Umstellung
-            //    seitdem auch das Recht `set_disappearing_messages`; im
-            //    Direktchat gibt es keine Rollen.
-            //
-            //    Beide Schranken stehen vor `uebernehmeVerfall`, nicht danach:
-            //    ein verworfenes Paket landete dort sonst als neuester Stand,
-            //    und jede spätere berechtigte Umstellung verlöre gegen seinen
-            //    Zeitpunkt — lautlos, wenn sich an der Frist nichts ändert.
-            if (parsed.type === 'retention') {
-              const urheber = await urheberVon(parsed.actor_id)
-              if (urheber === null) {
-                console.warn('[Messenger] Dropping retention packet with forged actor_id:', parsed.actor_id)
-                continue
-              }
-              const wer = Number(urheber || 0)
-              if (activeGroup && !(wer && durfteVerfallStellen(activeGroup, wer))) continue
-              const dauer = Number(parsed.dauer || 0)
-              const wann = String(parsed.zeitpunkt || env.created_at)
-              if (istBekannteStufe(dauer) && uebernehmeVerfall(currentMid, dauer, wann)) {
-                const selbst = wer === Number(currentUserId)
-                const name = selbst
-                  ? t('messenger.retentionYou')
-                  : (activeGroup?.members ?? []).find((m) => Number(m.user_id) === wer)?.username ||
-                    activeContact?.username ||
-                    t('messenger.retentionOther')
-                setVerfallSekunden(dauer)
-                zeigeSystemzeile(
-                  dauer > 0
-                    ? t(selbst ? 'messenger.retentionSetSelf' : 'messenger.retentionSetOther', {
-                        name,
-                        frist: stufenDativ(dauer, t),
-                      })
-                    : t(selbst ? 'messenger.retentionOffSelf' : 'messenger.retentionOffOther', { name }),
-                )
-              }
-              continue
-            }
-
-            // 6. Angeheftete Nachricht der Gruppe.
-            //
-            //    Die Schranke sitzt hier, beim Empfänger: der Server kann den
-            //    Inhalt nicht lesen und deshalb nicht prüfen, wer anheften
-            //    durfte. Ohne das Recht bleibt der Umschlag folgenlos.
-            if (parsed.type === 'pin_message') {
-              const urheber = await urheberVon(parsed.actor_id)
-              if (urheber === null) {
-                console.warn('[Messenger] Dropping pin packet with forged actor_id:', parsed.actor_id)
-                continue
-              }
-              const wer = Number(urheber || 0)
-              const ziel = String(parsed.target_client_uuid || '')
-              const wann = String(parsed.zeitpunkt || env.created_at)
-              const geloest = parsed.aktion === 'loesen'
-              if (wer && durfteAnheften(activeGroup, wer)) {
-                uebernehmeAnheftung(currentMid, geloest ? '' : ziel, wann)
-              }
-              continue
-            }
-
-            /**
-             * Ein Steuerpaket, für das dieser Stand keinen Zweig hat.
-             *
-             * Etwa von einem neueren Client. Ohne diese Schranke fiele es in
-             * den gewöhnlichen Weg und stünde als roher JSON-Text im Verlauf —
-             * und weil der Verlauf gespeichert wird, für immer. Genau so eine
-             * Zeile lag nach der ersten Laufzeitprobe im Testchat.
-             */
-            if (istSteuerpaket(parsed.type)) continue
-
-            /*
-             * Direktchat ohne jeden Beleg: keine Unterschrift und kein Ratchet.
-             *
-             * So kommt ein Hybridumschlag an, und versiegeln kann den jeder,
-             * der den Geräteschlüssel dieses Geräts kennt — der Server
-             * allemal. Bis 09/2026 stand er trotzdem als Nachricht der
-             * Gegenseite im Verlauf. Gilt nur noch, solange die Gegenseite
-             * nicht unterschreiben kann; dieselbe Schranke wie oben für den
-             * Ratchet. Vor der Kennungsliste, damit eine verworfene Fälschung
-             * der echten Nachricht mit derselben Kennung nicht den Platz nimmt.
-             */
-            if (
-              activeContact &&
-              belegterUrheber === undefined &&
-              (await kontoNutztSignaturen(Number(activeContact.userId)))
-            ) {
-              console.warn(
-                '[Messenger] Dropping unsigned direct message without a ratchet sender:',
-                activeContact.userId,
-              )
-              continue
-            }
-
-            // Normal Chat Message
-            // Die Kennung aus dem Umschlag trägt einen Gerätezusatz je Kopie;
-            // für den Verlauf zählt die logische darunter.
-            const clientUuid = (parsed.client_uuid as string) || logischeUuid(env.client_uuid)
-            if (clientUuid && seenClientUuids.has(clientUuid)) {
-              continue
-            }
-            if (clientUuid) {
-              seenClientUuids.add(clientUuid)
-            }
-
-            let senderId: number
-            let senderName: string
-            let isSelf: boolean
-            /** Im Direktchat immer; in der Gruppe entscheidet `attach_media`. */
-            let anhaengeErlaubt = true
-
-            if (activeContact) {
-              /*
-               * Direktchat: die Kennung kommt aus dem Beleg — dem Ratchet oder
-               * der Nutzlastsignatur —, nie aus `parsed.sender_id`.
-               *
-               * Fehlt jeder Beleg, ist die Gegenseite die einzig mögliche
-               * Antwort: in dieser Mailbox sitzen genau zwei Menschen, und der
-               * eigene Gesprächsanteil kommt aus dem lokalen Speicher, nicht
-               * von hier. Die Behauptung aus der Nutzlast gewinnt also in
-               * keinem der Fälle.
-               */
-              senderId = Number(belegterUrheber ?? activeContact.userId)
-              if (parsed.sender_id !== undefined && Number(parsed.sender_id) !== senderId) {
-                console.warn(
-                  '[Messenger] Dropping message with forged sender_id in direct chat:',
-                  parsed.sender_id,
-                  'expected:',
-                  senderId,
-                )
-                continue
-              }
-              isSelf = Number(senderId) === Number(currentUserId)
-              senderName = isSelf ? t('messenger.you') : activeContact.username
-            } else if (activeGroup) {
-              /*
-               * Gruppe: der Absender steht in der Nutzlastsignatur.
-               *
-               * Ein Gruppenschlüssel ist geteilt — jedes Mitglied kann jede
-               * Nachricht der Gruppe erzeugen. `parsed.sender_id` war deshalb
-               * nie eine Auskunft, sondern eine Behauptung. Anders als im
-               * Direktchat gibt es hier auch keinen Rückfall: „aus dieser
-               * Gruppe" sagt nichts darüber, von wem.
-               *
-               * Bleibt der Urheber unbelegt, weil das sendende Gerät die
-               * Signatur noch nicht kennt, gilt die Zeile weiterhin — aber nur
-               * solange das behauptete Konto nirgends einen Signaturschlüssel
-               * führt. Diese Prüfung steckt in `urheberVon`.
-               */
-              const urheber = await urheberVon(parsed.sender_id)
-              if (urheber === null) {
-                console.warn(
-                  '[Messenger] Dropping group message with forged sender_id:',
-                  parsed.sender_id,
-                )
-                continue
-              }
-              senderId = Number(urheber ?? 0)
-
-              isSelf = Number(senderId) === Number(currentUserId)
-
-              /**
-               * Durfte dieses Konto hier überhaupt schreiben?
-               *
-               * Hier sitzt die Durchsetzung von `send_messages` und
-               * `attach_media` — nicht am Eingabefeld. Ein verändertes Programm
-               * schickt trotzdem; dass es niemand **anzeigt**, ist die
-               * Wirkung. Dieselbe Bauart wie bei `@everyone` und beim
-               * Anheften.
-               *
-               * Zwei Feinheiten, die leicht verloren gehen:
-               *
-               * - Geprüft wird nur bei **aktuellen** Mitgliedern. Wer die
-               *   Gruppe verlassen hat oder hinausgeworfen wurde, steht in
-               *   keiner Rolle mehr; seine alten Nachrichten deshalb
-               *   nachträglich verschwinden zu lassen, wäre Geschichtsfälschung
-               *   — er durfte, als er schrieb.
-               * - Verworfen wird beim **ersten Sehen**. Eine Nachricht, die
-               *   schon in der Ablage steht, bleibt: `mischeVerlauf` behält
-               *   lokale Zeilen. Sonst löschte das Stummschalten rückwirkend
-               *   alles, was noch im Hundert-Umschläge-Fenster liegt.
-               */
-              const istMitglied = Boolean(
-                activeGroup.members?.some((m) => Number(m.user_id) === Number(senderId)),
-              )
-              const senderrechte = gruppenrechteVon(senderId)
-              if (!isSelf && istMitglied && !senderrechte.has('send_messages')) {
-                console.warn(
-                  '[Messenger] Gruppennachricht verworfen, Absender darf nicht schreiben:',
-                  senderId,
-                )
-                continue
-              }
-              // Ein Anhang ohne das Recht dazu fällt weg, der Text bleibt: die
-              // Nachricht ganz zu verwerfen nähme jemandem seine Worte wegen
-              // eines Bildes.
-              anhaengeErlaubt = isSelf || !istMitglied || senderrechte.has('attach_media')
-              // Der Anzeigename kommt aus der Mitgliederliste, nie aus der
-              // Nutzlast: sonst stünde unter der richtigen Kennung ein
-              // fremder Name.
-              const groupMember = activeGroup.members?.find((m) => Number(m.user_id) === Number(senderId))
-              senderName = isSelf
-                ? t('messenger.you')
-                : (groupMember?.username || parsed.sender_name || parsed.sender_username || '')
-            } else {
-              senderId = Number(parsed.sender_id || 0)
-              isSelf = Number(senderId) === Number(currentUserId)
-              senderName = parsed.sender_name || parsed.sender_username || ''
-            }
-
-            if (!isSelf && env.id > maxIncomingId) {
-              maxIncomingId = env.id
-            }
-
-            decryptedList.push({
-              id: env.id,
-              clientUuid,
-              senderId,
-              senderName,
-              text: parsed.text || '',
-              createdAt: env.created_at,
-              isSelf,
-              noteAttachment: anhaengeErlaubt ? parsed.note_attachment : undefined,
-              calendarAttachment: anhaengeErlaubt ? parsed.calendar_attachment : undefined,
-              imageAttachment: anhaengeErlaubt ? parsed.image_attachment : undefined,
-              audioAttachment: anhaengeErlaubt ? parsed.audio_attachment : undefined,
-              fileAttachment: anhaengeErlaubt ? parsed.file_attachment : undefined,
-              stickerAttachment: anhaengeErlaubt ? parsed.sticker_attachment : undefined,
-              storyReply: anhaengeErlaubt ? parsed.story_reply : undefined,
-              videoNoteAttachment: anhaengeErlaubt ? parsed.video_note_attachment : undefined,
-              antwortAuf: parsed.antwort_auf,
-              weitergeleitet: Boolean(parsed.weitergeleitet) || undefined,
-              erwaehnungen: Array.isArray(parsed.erwaehnungen) ? parsed.erwaehnungen : undefined,
-              // Ob daraus eine Erwähnung wird, entscheidet nicht dieses Feld,
-              // sondern die Rechtelage des Absenders — geprüft beim Anzeigen.
-              erwaehntAlle: Boolean(parsed.erwaehnt_alle) || undefined,
-              verfaelltAm: typeof parsed.verfaellt_am === 'string' ? parsed.verfaellt_am : undefined,
-            })
-            continue
-          }
-        } catch {
-          /*
-           * Klartext ohne JSON-Hülle, aus der Zeit vor der Hülle.
-           *
-           * Er trägt keine Unterschrift. Wer ihn geschrieben hat, sagt im
-           * Direktchat der Ratchet; ohne ihn bleibt nur die Behauptung —
-           * `[ME]:` am Anfang, sonst die Gegenseite. Bis 09/2026 galt die
-           * Behauptung auch über den Ratchet: eine Nachricht der Gegenseite
-           * mit `[ME]:` stand als eigene im Verlauf. Und wie jeder Beleg gilt
-           * sie nur für ein Konto, das nicht unterschreiben kann — wer es
-           * kann, schickt JSON mit Unterschrift.
-           */
-          const ratchetUrheber = lesung.art === 'klartext' ? lesung.vonKonto : undefined
-          const vonMirBehauptet = plain.startsWith('[ME]:')
-          const urheber =
-            ratchetUrheber !== undefined
-              ? Number(ratchetUrheber)
-              : vonMirBehauptet
-                ? Number(currentUserId)
-                : activeContact
-                  ? Number(activeContact.userId)
-                  : 0
-          if (urheber > 0 && (await kontoNutztSignaturen(urheber))) {
-            console.warn('[Messenger] Dropping unsigned plain-text message from an account that signs:', urheber)
-            continue
-          }
-
-          const clientUuid = logischeUuid(env.client_uuid)
-          if (clientUuid && seenClientUuids.has(clientUuid)) {
-            continue
-          }
-          if (clientUuid) {
-            seenClientUuids.add(clientUuid)
-          }
-
-          const isSelf = urheber === Number(currentUserId)
-          // Die Markierung fällt nur weg, wo sie stimmt. Nennt der Ratchet die
-          // Gegenseite, bleibt sie stehen: so sieht man, was behauptet wurde.
-          const text = isSelf && vonMirBehauptet ? plain.slice('[ME]:'.length) : plain
-          const senderId = urheber || (activeContact ? activeContact.userId : 0)
-          if (!isSelf && env.id > maxIncomingId) {
-            maxIncomingId = env.id
-          }
-          decryptedList.push({
-            id: env.id,
-            clientUuid,
-            senderId,
-            text,
-            createdAt: env.created_at,
-            isSelf,
-          })
-        }
-      }
+      const {
+        decryptedList,
+        aenderungen,
+        loeschungen,
+        reaktionen,
+        maxPartnerReadId,
+        maxPartnerDeliveredId,
+        maxIncomingId,
+      } = await werteUmschlaegeAus(gelesen, {
+        currentMid,
+        currentUserId,
+        activeContact,
+        activeGroup,
+        gruppenrechteVon,
+        t,
+        quittiertGelesen: (bis) => {
+          maxPartnerReadIdRef.current = Math.max(maxPartnerReadIdRef.current, bis)
+        },
+        quittiertZugestellt: (bis) => {
+          maxPartnerDeliveredIdRef.current = Math.max(maxPartnerDeliveredIdRef.current, bis)
+        },
+        markAsRead,
+        setVerfallSekunden,
+        zeigeSystemzeile,
+      })
 
       const findeAenderung = (m: ChatMessage) =>
         aenderungen.finde(m, (urheber) => urheber !== undefined && Number(urheber) === Number(m.senderId))
