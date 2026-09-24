@@ -680,6 +680,10 @@ export const SCHREIBWERKZEUGE = [
   'propose_cloudflare_dns_record',
   'propose_cloudflare_dns_delete',
   'propose_modpack_install',
+  'propose_user_server_permission',
+  'propose_role_set',
+  'propose_user_roles',
+  'propose_role_delete',
 ] as const
 
 export type AiWriteTool = (typeof SCHREIBWERKZEUGE)[number]

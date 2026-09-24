@@ -792,7 +792,11 @@
         "worker_cancel": "Worker abbrechen",
         "web_search": "Web-Recherche",
         "analyze_region": "Regions- und Satellitenanalyse",
-        "control_region_camera": "Kartenansicht steuern"
+        "control_region_camera": "Kartenansicht steuern",
+        "propose_user_server_permission": "Serverrechte eines Benutzers ändern",
+        "propose_role_set": "Rolle anlegen oder ändern",
+        "propose_user_roles": "Rollen eines Benutzers ändern",
+        "propose_role_delete": "Rolle löschen"
       },
       "type": {
         "read": "Lese-Zugriff",
@@ -844,7 +848,11 @@
         "propose_note_delete": "Diese Notiz endgültig löschen? Das lässt sich nicht rückgängig machen.",
         "propose_cloudflare_dns_delete": "DNS-Eintrag für Zone „{{zone_id}}“ wirklich löschen? Das lässt sich nicht rückgängig machen.",
         "propose_cloudflare_dns_record": "DNS-Eintrag „{{name}}“ ({{type}}) mit Ziel „{{content}}“ in Cloudflare anlegen?",
-        "propose_modpack_install": "Modpack „{{modpack_name}}“ auf dem Server installieren? Vorhandene Spieldateien können überschrieben werden."
+        "propose_modpack_install": "Modpack „{{modpack_name}}“ auf dem Server installieren? Vorhandene Spieldateien können überschrieben werden.",
+        "propose_user_server_permission": "Die Rechte dieses Benutzers auf dem Server wie angezeigt ändern? Hinzugefügte und entzogene Rechte stehen getrennt.",
+        "propose_role_set": "Die Rolle mit den angezeigten Rechten speichern? Die Änderung gilt für alle Benutzer mit dieser Rolle.",
+        "propose_user_roles": "Die Rollen dieses Benutzers wie angezeigt ändern? Rollen gelten für alle Server.",
+        "propose_role_delete": "Diese Rolle löschen? Sie ist niemandem mehr zugewiesen."
       },
       "executed": "KI-Vorschlag wurde autorisiert und ausgeführt.",
       "failed": "Die Aktion wurde sicher beendet. Details sind im Audit-Log verfügbar.",
@@ -881,7 +889,15 @@
         "startup_after": "Neue Startzeile",
         "startup_before": "Bisherige Startzeile",
         "terminate_grace_days": "Aufbewahrung nach Kündigung (Tage)",
-        "webhook_url": "Webhook-Ziel"
+        "webhook_url": "Webhook-Ziel",
+        "target_user": "Benutzer",
+        "permissions_after": "Rechte danach",
+        "permissions_added": "Neu vergeben",
+        "permissions_removed": "Entzogen",
+        "role_users": "Benutzer mit dieser Rolle",
+        "roles_after": "Rollen danach",
+        "roles_added": "Neue Rollen",
+        "roles_removed": "Entfernte Rollen"
       },
       "reasonLabel": "Begründung der KI",
       "effectLabel": "Erwartete Wirkung",
@@ -1005,7 +1021,14 @@
       "cloudflare_list_zones": "Cloudflare-Zonen gelesen",
       "execute_server_action": "Serveraktion ausgeführt",
       "search_curseforge_modpacks": "CurseForge-Modpacks durchsucht",
-      "search_curseforge_mods": "CurseForge-Mods durchsucht"
+      "search_curseforge_mods": "CurseForge-Mods durchsucht",
+      "list_users": "Benutzer gesucht",
+      "read_user_permissions": "Rechte eines Benutzers gelesen",
+      "list_roles": "Rollen gelesen",
+      "propose_user_server_permission": "Serverrechte vorbereitet",
+      "propose_role_set": "Rolle vorbereitet",
+      "propose_user_roles": "Rollenzuweisung vorbereitet",
+      "propose_role_delete": "Rollenlöschung vorbereitet"
     },
     "toolsRunning": {
       "ask_user": "Ich frage kurz nach",
@@ -1104,7 +1127,14 @@
       "search_curseforge_mods": "Ich suche bei CurseForge nach Mods",
       "propose_cloudflare_dns_delete": "Ich bereite die Löschung des DNS-Eintrags vor",
       "propose_cloudflare_dns_record": "Ich bereite den DNS-Eintrag vor",
-      "propose_modpack_install": "Ich bereite die Modpack-Installation vor"
+      "propose_modpack_install": "Ich bereite die Modpack-Installation vor",
+      "list_users": "Ich suche den Benutzer",
+      "read_user_permissions": "Ich sehe nach, welche Rechte er schon hat",
+      "list_roles": "Ich sehe mir die Rollen an",
+      "propose_user_server_permission": "Ich bereite die Serverrechte vor",
+      "propose_role_set": "Ich bereite die Rolle vor",
+      "propose_user_roles": "Ich bereite die Rollenzuweisung vor",
+      "propose_role_delete": "Ich bereite das Löschen der Rolle vor"
     },
     "errors": {
       "codes": {
@@ -2364,7 +2394,7 @@
     },
     "ai_autonomous_use": {
       "title": "Autonomen Modus nutzen",
-      "desc": "Erlaubt der KI, freigegebene Werkzeuge ohne Rückfrage auszuführen. Löschvorgänge fragen trotzdem immer nach."
+      "desc": "Erlaubt der KI, freigegebene Werkzeuge ohne Rückfrage auszuführen. Löschvorgänge fragen trotzdem immer nach, ebenso das Entziehen von Rechten und jede Vergabe über die einfachen Server-Bedienrechte hinaus."
     },
     "ai_tasks_manage": {
       "title": "KI-Aufgaben verwalten",

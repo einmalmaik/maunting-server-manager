@@ -212,9 +212,10 @@ def test_vorbereiten_trennt_stimme_und_backend(db: Session, regular_user, monkey
     assert v.reasoning_effort == "high"
     namen = {tool["name"] for tool in v.tools}
     # Dieselbe Werkzeugwahl wie bei Realtime (`angebotene_werkzeuge`): die
-    # Sprachsteuerung ja, Hintergrund-Worker nein.
+    # Sprachsteuerung ja, und `worker_start`, wenn das Angebot es enthaelt —
+    # Rechte anderer Benutzer aendert nur ein Worker.
     assert {"voice_resolve_latest_proposal", "voice_set_region_view"} <= namen
-    assert "worker_start" not in namen
+    assert "worker_start" in namen
     # Die Stimme bekommt die Liste, das Backend die Schemas und den Panelprompt.
     assert "- voice_resolve_latest_proposal" in v.instructions
     assert "PANELPROMPT" not in v.instructions

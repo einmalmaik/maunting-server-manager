@@ -277,6 +277,23 @@ WERKZEUGE: dict[str, Werkzeug] = {
     ),
     "execute_server_action": Werkzeug("global_read"),
 
+    # Benutzer und Rollen, lesend. Dieselben Rechte wie die Panel-Routen:
+    # die Benutzerliste `users.read` (`GET /api/admin/users`), die
+    # Delegationen eines Benutzers `users.permissions.manage`
+    # (`GET /api/admin/users/{id}/server-permissions`). Die Rollenliste steht
+    # im Panel jedem offen; angeboten wird sie trotzdem nur, wer Rollen oder
+    # Rechte verwaltet — sonst braucht sie niemand, und der Katalog geht in
+    # jeder Runde mit.
+    "list_users": Werkzeug("global_read", gruppe="users", angebot=("users.read",)),
+    "read_user_permissions": Werkzeug(
+        "global_read", gruppe="users", angebot=("users.permissions.manage",)
+    ),
+    "list_roles": Werkzeug(
+        "global_read",
+        gruppe="users",
+        angebot=("roles.manage", "users.permissions.manage"),
+    ),
+
     # ── Rueckfrage ────────────────────────────────────────────────────
     "ask_user": Werkzeug("ask"),
 
@@ -765,6 +782,56 @@ WERKZEUGE: dict[str, Werkzeug] = {
         recht="server.mods.write",
     ),
 
+    # ── Rechte anderer Benutzer ─────────────────────────────────────────
+    #
+    # Dieselben Rechte und dieselben Schranken wie im Panel: alle vier rufen
+    # `rechtevergabe_service`, wo auch die Router ihre Grenzen holen. Die KI
+    # kann damit nie mehr vergeben, als der Benutzer selbst dauerhaft haelt.
+    #
+    # Die Bestaetigung haengt hier am **Aufruf**, nicht am Werkzeug: im
+    # autonomen Modus laeuft ohne Rueckfrage nur, was ausschliesslich
+    # unkritische Serverrechte **hinzufuegt** (`UNCRITICAL_SERVER_PERMISSIONS`).
+    # Jedes Entziehen, jedes kritische und jedes globale Recht fragt immer —
+    # der Payload-Bau setzt dafuer `always_confirm` in die Vorschau
+    # (`verlangt_klick`). Das ist die Linie, die `GEPLANT_IMMER_BESTAETIGEN`
+    # fuer Rechteaenderungen gezogen hatte ("eine Autonomie, die ihren eigenen
+    # Rahmen verschiebt"), enger geschnitten: "gib ihm die normalen Rechte auf
+    # dem Minecraft-Server" soll unterwegs per Stimme gehen (Betreiberplan
+    # vom 24.09.2026), und sehen, starten und Logs lesen verschiebt keinen
+    # Rahmen.
+    #
+    # Serverbezogen, weil eine Delegation an genau einem Server haengt;
+    # `_resolve_server` prueft vorher, dass der Benutzer ihn sieht. Das Recht
+    # selbst ist global wie am Panel-Endpunkt.
+    "propose_user_server_permission": Werkzeug(
+        "server_write",
+        gruppe="users",
+        recht="users.permissions.manage",
+        recht_global=True,
+    ),
+    # Anlegen und aendern in einem Werkzeug, Muster `propose_task_set`: eine
+    # `role_id` entscheidet. Systemrollen (`admin`, `user`) fasst die KI nie
+    # an, auch dort nicht, wo das Panel dem Owner die `user`-Rolle oeffnet.
+    "propose_role_set": Werkzeug(
+        "global_write",
+        gruppe="users",
+        recht="roles.manage",
+        recht_global=True,
+    ),
+    "propose_user_roles": Werkzeug(
+        "global_write",
+        gruppe="users",
+        recht="users.permissions.manage",
+        recht_global=True,
+    ),
+    "propose_role_delete": Werkzeug(
+        "global_write",
+        gruppe="users",
+        immer_bestaetigen=True,
+        recht="roles.manage",
+        recht_global=True,
+    ),
+
     # ── Der Rechner des Benutzers (Smart System) ────────────────────────────
     #
     # `delegation` und nicht `global_write`, obwohl geschrieben wird: eine
@@ -850,15 +917,19 @@ WERKZEUGE: dict[str, Werkzeug] = {
 # autonomiefaehig zu sein.
 #
 # Die ersten beiden vernichten Daten und fallen damit unter dasselbe Kriterium
-# wie Loeschen und Einspielen. Die letzten beiden aus einem anderen Grund: eine
-# Rechteaenderung oder eine Schluesselrotation wirkt auf die Grenzen, innerhalb
-# derer die KI selbst arbeitet. Autonom ausgefuehrt waere das eine Autonomie,
-# die ihren eigenen Rahmen verschiebt — und die kann niemand mehr erteilen oder
-# entziehen.
+# wie Loeschen und Einspielen. Die Schluesselrotation aus einem anderen Grund:
+# sie wirkt auf die Grenzen, innerhalb derer die KI selbst arbeitet. Autonom
+# ausgefuehrt waere das eine Autonomie, die ihren eigenen Rahmen verschiebt —
+# und die kann niemand mehr erteilen oder entziehen.
+#
+# Hier stand auch `propose_permission_change`. Seit 09/2026 gibt es die
+# Rechtewerkzeuge wirklich (`propose_user_server_permission` und die drei
+# Rollenwerkzeuge), und die Grenze steht am Aufruf statt am Namen: was mehr
+# tut, als unkritische Serverrechte hinzuzufuegen, fragt immer
+# (`verlangt_klick`).
 GEPLANT_IMMER_BESTAETIGEN = frozenset({
     "propose_server_wipe",
     "propose_server_reinstall",
-    "propose_permission_change",
     "propose_secret_rotation",
 })
 
@@ -934,6 +1005,35 @@ DESKTOP_LOESCHAKTIONEN: dict[str, frozenset[str] | None] = {
     "desktop_aufraeumen": None,
     "desktop_dateien": frozenset({"loeschen"}),
 }
+
+
+#: Was die Rechte anderer Benutzer aendert. Nur ein Worker (oder ein Chat ohne
+#: Gehirn/Worker-Teilung) ruft diese Werkzeuge selbst; das Gehirn und die
+#: Stimme uebergeben sie mit `worker_start`. Der Umweg ueber
+#: `execute_server_action` reicht sie deshalb nicht weiter
+#: (`ai_voice.voice_dispatcher`).
+RECHTE_SCHREIBEN = frozenset({
+    "propose_user_server_permission",
+    "propose_role_set",
+    "propose_user_roles",
+    "propose_role_delete",
+})
+
+
+def verlangt_klick(name: object, vorschau: object = None) -> bool:
+    """Ob dieser eine Vorschlag auch im autonomen Modus bestaetigt werden muss.
+
+    Das Gegenstueck zu `ALWAYS_CONFIRM_TOOLS` fuer Werkzeuge, bei denen es am
+    Aufruf haengt: eine Rechtevergabe fragt, sobald sie etwas entzieht oder
+    mehr als unkritische Serverrechte vergibt. Entschieden hat das der
+    Payload-Bau, und zwar aus dem Bestand, nicht aus Modelltext — er setzt
+    `always_confirm` in die Vorschau. Die Vorschau ist damit der eine Ort, an
+    dem Autonomie (`create_proposal`) und Stimme (`klick_noetig`) dieselbe
+    Antwort lesen.
+    """
+    if name in ALWAYS_CONFIRM_TOOLS:
+        return True
+    return isinstance(vorschau, dict) and vorschau.get("always_confirm") is True
 
 
 def desktop_loescht(name: str, argumente: dict | None) -> bool:

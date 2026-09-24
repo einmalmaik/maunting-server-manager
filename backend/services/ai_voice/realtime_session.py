@@ -174,12 +174,17 @@ def angebotene_werkzeuge(db: Session, *, provider: AiProvider, user: User, herku
     ebenfalls dasselbe (`voice_werkzeug_ausfuehren`): der Weg ändert, **wer**
     ein Werkzeug wählt, nicht, **was** erlaubt ist.
     """
+    # `worker_start` bleibt, sofern der Benutzer `ai.background.use` hat (das
+    # prueft schon das Angebot): Rechte anderer Benutzer aendert nur ein
+    # Worker, und unterwegs per Stimme ist das der Weg dorthin
+    # (Betreiberplan vom 24.09.2026). Abbrechen und Antworten bleiben beim
+    # Chat — die Stimme sieht die Worker-Fenster nicht.
     erlaubt = (
         herkunft_schnitt(
             ai_action_service.angebotene_werkzeuge(db, user) & GEHIRN_TOOLS,
             herkunft,
         )
-        - WORKER_STEUERUNG
+        - (WORKER_STEUERUNG - {"worker_start"})
     ) | VOICE_CONTROL_TOOLS
     erlaubt = erlaubt - REALTIME_SCHWER
     from services.ai_tool_compat import realtime_tool_schema
@@ -203,10 +208,14 @@ def angebotene_werkzeuge(db: Session, *, provider: AiProvider, user: User, herku
         "propose_note_create",
         "propose_note_update",
         "propose_task_set",
+        # Wer gemeint ist und was er schon hat — die Stimme liest das selbst,
+        # die Aenderung geht an einen Worker.
+        "list_users",
+        "read_user_permissions",
+        "list_roles",
     }
     from services.tool_selection_port import HOTSET
-    hot_realtime = HOTSET - {"worker_start"}
-    keep_static = (hot_realtime | realtime_static_extra | VOICE_CONTROL_TOOLS) & erlaubt
+    keep_static = (HOTSET | realtime_static_extra | VOICE_CONTROL_TOOLS) & erlaubt
     if keep_static:
         tools = [t for t in tools if t.get("name") in keep_static]
     try:
@@ -306,7 +315,8 @@ def vorbereiten(
         "# Preambles\nNicht ankündigen, dass du prüfst oder ein Werkzeug verwendest.",
         "# Verbosity\nNenne zuerst das Ergebnis, dann nur die nötigen Details.",
         "# Tools\nUnabhängige Werkzeuge parallel nutzen. Recherchen und Kartenanfragen in diesem Realtime-Zug selbst erledigen; "
-        "keine Hintergrund-Worker starten. " + WERKZEUG_REGELN,
+        "keine Hintergrund-Worker dafür starten. Rechte und Rollen anderer Benutzer liest du selbst "
+        "(list_users, read_user_permissions, list_roles); ändern lässt du sie mit worker_start. " + WERKZEUG_REGELN,
         *REGION_ANWEISUNGEN,
         "# Unclear Audio\nBei unverständlicher Audioeingabe knapp um Wiederholung bitten; nichts erraten oder ausführen.",
         ENTITAETEN,

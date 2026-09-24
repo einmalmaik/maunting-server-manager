@@ -85,6 +85,13 @@ const SCHREIBWERKZEUGE = [
   'propose_cloudflare_dns_record',
   'propose_cloudflare_dns_delete',
   'propose_modpack_install',
+  // Rechte anderer Benutzer. Alle vier rufen dieselben Grenzen wie das Panel
+  // (`rechtevergabe_service`); die Karte zeigt Hinzugefuegtes und Entzogenes
+  // getrennt, damit niemand einer Liste zustimmt, deren Unterschied er raten muss.
+  'propose_user_server_permission',
+  'propose_role_set',
+  'propose_user_roles',
+  'propose_role_delete',
 ] as const
 
 const SPRACHEN = { de, en } as Record<string, typeof de>

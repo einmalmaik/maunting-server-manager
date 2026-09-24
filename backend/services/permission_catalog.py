@@ -90,6 +90,10 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     # duerfen, warum.
     PermissionDef("ai.usage.read.all",         "ai",      "KI-Nutzung aller Benutzer einsehen"),
     # Durchgesetzt in routers/ai_autonomy.py und services/ai_autonomy_service.py.
+    # Loeschen fragt trotzdem immer, ebenso eine Rechtevergabe, die etwas
+    # entzieht oder mehr als UNCRITICAL_SERVER_PERMISSIONS vergibt
+    # (ai_tool_registry.verlangt_klick). `permissionDetails.ai_autonomous_use`
+    # sagt das dem, der das Recht vergibt.
     PermissionDef("ai.autonomous.use",         "ai",      "Autonomen KI-Modus verwenden"),
     # Durchgesetzt in services/ai_task_service.py. Ein stehender Auftrag ist die
     # einzige Sache, die die KI *ohne* anwesenden Menschen in Gang setzt, ohne
@@ -203,6 +207,34 @@ SERVER_PERMISSIONS: tuple[PermissionDef, ...] = (
 GLOBAL_KEYS: frozenset[str] = frozenset(p.key for p in GLOBAL_PERMISSIONS)
 SERVER_KEYS: frozenset[str] = frozenset(p.key for p in SERVER_PERMISSIONS)
 ALL_KEYS: frozenset[str] = GLOBAL_KEYS | SERVER_KEYS
+
+
+# ── Unkritische Serverrechte ──────────────────────────────────────────
+# Was die KI im autonomen Modus ohne Rueckfrage vergeben darf, wenn jemand
+# "die normalen Rechte" fuer einen Server verlangt: sehen, starten, stoppen,
+# Konsole und Dateien lesen, Backups anlegen, Mods schalten. Nichts davon
+# schreibt eine Datei, sendet einen Befehl, vernichtet Daten oder verteilt
+# Rechte weiter.
+#
+# Die kritische Menge ist **abgeleitet**, nicht aufgezaehlt: ein neuer
+# Serverschluessel ist kritisch, bis ihn jemand ausdruecklich hier einordnet.
+# Umgekehrt waere jedes neue Recht still autonom vergebbar geworden.
+# Durchgesetzt in services/ai_proposals/user_proposals.py (`always_confirm`).
+
+UNCRITICAL_SERVER_PERMISSIONS: frozenset[str] = frozenset({
+    "server.view",
+    "server.start",
+    "server.stop",
+    "server.restart",
+    "server.console.read",
+    "server.files.read",
+    "server.backups.read",
+    "server.backups.create",
+    "server.mods.read",
+    "server.mods.toggle",
+})
+
+CRITICAL_SERVER_PERMISSIONS: frozenset[str] = SERVER_KEYS - UNCRITICAL_SERVER_PERMISSIONS
 
 
 def is_known_key(key: str) -> bool:

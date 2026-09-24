@@ -396,6 +396,30 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
     `REGION_ANWEISUNGEN`. Nachgemessen: aus der App **91.917** Zeichen, 91
     Werkzeuge; aus dem Panel **86.444** Zeichen, 85 Werkzeuge. Die Luft beträgt
     **83 Zeichen** — das nächste Werkzeug muss Platz mitbringen.
+
+    **Nachtrag 25.09.2026: Benutzer- und Rechteverwaltung, Grenze 96.000.**
+    Sieben Werkzeuge (`list_users`, `read_user_permissions`, `list_roles`,
+    `propose_user_server_permission`, `propose_role_set`,
+    `propose_user_roles`, `propose_role_delete`), bestellt im Betreiberplan
+    vom 24.09.: "gib dem Kollegen die normalen Rechte auf dem Server", auch
+    per Stimme. Nachgemessen: aus der App **95.787** Zeichen, 98 Werkzeuge;
+    aus dem Panel **90.307** Zeichen, 92 Werkzeuge. Die sieben kosten
+    zusammen 3.870 Zeichen, davon gut 1.300 allein für `reason` und
+    `expected_effect` der vier Schreibwerkzeuge.
+
+    Kein Platz ließ sich woanders freimachen, der nicht einen Betriebsanlass
+    kostet, und gekürzt ist schon: jede Beschreibung ist ein Satz, die
+    Anleitung (wen suchen, Server vor Rolle, was "unkritisch" heißt) steht in
+    `ai_prompt.BENUTZER_UND_RECHTE`, wo sie gecacht wird. Zusammengelegt ist,
+    was dasselbe Schema trägt (anlegen und ändern einer Rolle in
+    `propose_role_set`). Das Löschen bleibt ein eigenes Werkzeug, weil es
+    `immer_bestaetigen` trägt und die Namensregel
+    (`test_jedes_loeschwerkzeug_traegt_die_sperre`) es nur so erfasst.
+
+    Dieselbe Rechnung wie am 09.09.: angeboten werden die sieben nur, wer
+    Benutzer liest oder Rechte verwaltet (`angebot`); ein Kunde zahlt davon
+    nichts. Die Luft beträgt **213 Zeichen**. Fällt die Rechteverwaltung
+    wieder weg, geht die Grenze auf 92.000 zurück.
      """
     for herkunft in ("panel", "desktop"):
         erlaubt = herkunft_schnitt(
@@ -409,7 +433,7 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
             ],
             ensure_ascii=False,
         )
-        assert len(katalog) < 92_000, (
+        assert len(katalog) < 96_000, (
             f"Der Werkzeugkatalog der Herkunft '{herkunft}' ist auf "
             f"{len(katalog)} Zeichen gewachsen. Er geht in jeder Runde mit und "
             "taucht in keiner Budgetrechnung auf."

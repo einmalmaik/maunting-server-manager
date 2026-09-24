@@ -3,7 +3,6 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, selectinload
-from sqlalchemy.exc import SQLAlchemyError
 
 from database import get_db
 from models import (
@@ -25,45 +24,32 @@ from schemas.role import (
 from dependencies import require_global, verify_csrf
 from services import AuthService, EmailService
 from services.email_verification_service import EmailVerificationService
-from services.permission_service import (
-    direct_server_permission,
-    has_global_permission,
-    list_user_server_permission_keys,
-    set_user_server_permissions,
-)
-from services.permission_catalog import SYSTEM_ROLE_ADMIN, SYSTEM_ROLE_USER
+from services.permission_service import list_user_server_permission_keys
+from services.permission_catalog import SYSTEM_ROLE_USER
 from services.role_service import (
     effective_user_role_permission_keys,
-    get_role,
     get_role_by_name,
-    role_permission_keys,
     set_user_roles,
 )
-from services import audit_service, postgres_service
+from services import audit_service, postgres_service, rechtevergabe_service
 from services.postgres_service import PostgresServiceError
 from services.user_deletion_service import prepare_user_deletion
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
+def _http(fehler: rechtevergabe_service.RechteFehler) -> HTTPException:
+    return HTTPException(status_code=fehler.status_code, detail=fehler.detail)
+
+
 def _ensure_no_global_escalation(
     db: Session, actor: User, required_keys: list[str]
 ) -> None:
-    """Non-Owner darf nur Aktionen ausloesen, die Permissions verlangen,
-    die er selbst global besitzt — sonst Eskalation."""
-    if actor.is_owner:
-        return
-    missing = sorted(
-        {k for k in required_keys if not has_global_permission(db, actor, k)}
-    )
-    if missing:
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                "Du kannst nur Permissions vergeben/zuweisen, die du selbst "
-                f"besitzt. Fehlend: {missing}"
-            ),
-        )
+    """Die Schranke steht in `rechtevergabe_service`; hier nur als HTTP-Antwort."""
+    try:
+        rechtevergabe_service.ensure_no_global_escalation(db, actor, required_keys)
+    except rechtevergabe_service.RechteFehler as fehler:
+        raise _http(fehler) from None
 
 
 def _ensure_no_server_escalation(
@@ -72,38 +58,17 @@ def _ensure_no_server_escalation(
     server_id: int,
     required_keys: list[str],
 ) -> None:
-    """Non-Owner darf einem Sub-User auf einem Server nur die Server-Keys
-    delegieren, die er auf diesem Server **selbst und dauerhaft** hat.
+    """Die Schranke steht in `rechtevergabe_service`; hier nur als HTTP-Antwort.
 
-    Geprueft wird mit ``direct_server_permission`` und nicht mit
-    ``has_server_permission``. Der Unterschied sind die geliehenen Teamrechte:
-    ``has_server_permission`` zaehlt seit der Team-Erweiterung auch das mit, was
-    jemandem nur ueber eine Mitgliedschaft zusteht.
-
-    Geliehenes weiterzugeben heisst hier, es dauerhaft zu machen. Eine
-    ``ServerPermission``-Zeile ueberlebt den Austritt aus dem Team, das
-    Aufloesen des Teams und den Rechteverlust dessen, der das Recht ins Team
-    gebracht hat. Genau das soll die Leihe nicht koennen — ``permission_service``
-    begruendet im Modul-Docstring, dass ein entzogenes Teamrecht sich „selbst
-    heilt“, und ``team_service.set_server_grants`` prueft aus demselben Grund
-    bereits gegen die direkte Berechtigung.
-
-    Der Owner-Umweg bleibt erhalten: ``direct_server_permission`` beruecksichtigt
-    den Serverbesitzer selbst.
+    Warum gegen die **direkte** Berechtigung geprueft wird und nicht gegen die
+    geliehene Teamberechtigung, steht dort.
     """
-    if actor.is_owner:
-        return
-    missing = sorted(
-        {k for k in required_keys if not direct_server_permission(db, actor, server_id, k)}
-    )
-    if missing:
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                "Du kannst auf diesem Server nur Permissions delegieren, die "
-                f"du selbst besitzt. Fehlend: {missing}"
-            ),
+    try:
+        rechtevergabe_service.ensure_no_server_escalation(
+            db, actor, server_id, required_keys
         )
+    except rechtevergabe_service.RechteFehler as fehler:
+        raise _http(fehler) from None
 
 
 @router.get("/users", response_model=list[UserResponse])
@@ -308,69 +273,15 @@ def _assign_roles(
     db: Session,
     actor: User,
 ) -> User:
-    """Prüft Eskalationsgrenzen und speichert eine Multi-Role-Zuweisung."""
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User nicht gefunden")
-    if user.is_owner:
-        raise HTTPException(status_code=400, detail="Owner-Account hat keine zuweisbare Rolle")
-    # Self-Lockout-Schutz: ein User darf seine eigene Rolle nicht aendern.
-    # Ohne diesen Guard koennte ein Admin sich versehentlich oder durch
-    # Drittparteien (CSRF, kompromittierte Session) zum User downgraden und
-    # sich damit selbst aussperren. Rollenwechsel passiert immer durch einen
-    # anderen Account mit `users.permissions.manage`.
-    if user.id == actor.id:
-        raise HTTPException(
-            status_code=400,
-            detail="Du kannst deine eigene Rolle nicht ändern",
-        )
-    # Auch das Entfernen der aktuellen Rolle ist eine Eskalations-Aktion: ein
-    # Non-Owner darf einem User keine Rolle wegnehmen, deren Keys er selbst
-    # nicht besitzt (sonst koennte er einen Admin-Account "entwaffnen").
-    current_keys = effective_user_role_permission_keys(db, user)
-    _ensure_no_global_escalation(db, actor, current_keys)
+    """Prüft Eskalationsgrenzen und speichert eine Multi-Role-Zuweisung.
 
-    desired_role_ids = sorted(set(requested_role_ids))
-    desired_keys: set[str] = set()
-    for role_id in desired_role_ids:
-        role = get_role(db, role_id)
-        if not role:
-            raise HTTPException(status_code=404, detail="Rolle nicht gefunden")
-        # Zuweisung der `admin`-System-Rolle ist nur dem Owner erlaubt
-        # (verhindert Privilege-Escalation ueber `users.permissions.manage`).
-        if role.is_system and role.name == SYSTEM_ROLE_ADMIN and not actor.is_owner:
-            raise HTTPException(
-                status_code=403,
-                detail="Nur Owner kann die admin-Rolle zuweisen",
-            )
-        # Generalisiertes Eskalationsverbot: Actor muss alle Keys der
-        # Ziel-Rolle selbst global besitzen — sonst koennte er sich (oder
-        # andere) ueber eine Custom-Rolle hochziehen.
-        desired_keys.update(role_permission_keys(db, role.id))
-    _ensure_no_global_escalation(db, actor, sorted(desired_keys))
-
+    Die Grenzen stehen in `rechtevergabe_service.assign_roles` — dieselbe
+    Funktion ruft die KI.
+    """
     try:
-        set_user_roles(db, user, desired_role_ids, commit=False)
-        audit_service.record_privileged_action(
-            db,
-            user_id=actor.id,
-            action="user.roles.updated",
-            target_type="user",
-            target_id=user.id,
-            details={"role_ids": desired_role_ids},
-        )
-        db.commit()
-        db.refresh(user)
-    except ValueError as exc:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except SQLAlchemyError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail="Rollenzuweisung konnte wegen einer gleichzeitigen Änderung nicht gespeichert werden",
-        ) from exc
-    return user
+        return rechtevergabe_service.assign_roles(db, actor, user_id, requested_role_ids)
+    except rechtevergabe_service.RechteFehler as fehler:
+        raise _http(fehler) from None
 
 
 # ── Server-Permissions (Per-User-per-Server-Delegation) ───────────────
@@ -406,34 +317,17 @@ async def set_server_permissions(
     actor: User = Depends(require_global("users.permissions.manage")),
     _: None = Depends(verify_csrf),
 ) -> ServerPermissionsResponse:
-    target_user = db.query(User).filter(User.id == user_id).first()
-    if not target_user:
-        raise HTTPException(status_code=404, detail="User nicht gefunden")
-    if target_user.is_owner:
-        raise HTTPException(status_code=400, detail="Owner braucht keine Permissions")
-    server = db.query(Server).filter(Server.id == server_id).first()
-    if not server:
-        raise HTTPException(status_code=404, detail="Server nicht gefunden")
-    # Non-Owner darf auf einem Server nur Keys delegieren, die er selbst auf
-    # diesem Server besitzt — sonst kann ein User mit nur
-    # `users.permissions.manage` (ohne eigene Server-Rechte) beliebige
-    # Server-Aktionen an andere weiterreichen.
-    _ensure_no_server_escalation(db, actor, server_id, req.permissions)
-    # De-Eskalations-Schutz: Keys, die durch das Set entfernt werden,
-    # zaehlen ebenfalls als Mutation. Sonst koennte ein User ohne eigene
-    # Server-Rechte einem anderen User per leerem Set die Rechte entziehen.
-    existing_keys = list_user_server_permission_keys(db, user_id, server_id)
-    removed = [k for k in existing_keys if k not in set(req.permissions)]
-    if removed:
-        _ensure_no_server_escalation(db, actor, server_id, removed)
+    # Die Grenzen (Ziel, Owner, Eskalation in beide Richtungen) stehen in
+    # `rechtevergabe_service.set_server_permissions` — dieselbe Funktion ruft
+    # die KI.
+    try:
+        keys, erstmals, target_user, server = rechtevergabe_service.set_server_permissions(
+            db, actor, user_id, server_id, req.permissions
+        )
+    except rechtevergabe_service.RechteFehler as fehler:
+        raise _http(fehler) from None
 
-    had_any = bool(existing_keys)
-
-    keys = set_user_server_permissions(
-        db, user_id, server_id, req.permissions, granted_by=actor.id
-    )
-
-    if not had_any and keys and EmailService.is_configured() and target_user.email_notifications:
+    if erstmals and EmailService.is_configured() and target_user.email_notifications:
         await EmailService.send_user_added_to_server_notification(
             target_user.email, target_user.username, server.name, actor.username
         )

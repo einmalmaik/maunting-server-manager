@@ -232,8 +232,19 @@ def test_realtime_session_uses_semantic_vad_without_transcription() -> None:
     assert config["max_output_tokens"] == 32_768
 
 
-def test_realtime_never_offers_background_workers(db: Session, regular_user, monkeypatch) -> None:
-    provider = _realtime(db, "Realtime ohne Worker")
+def test_realtime_starts_workers_but_does_not_steer_them(db: Session, regular_user, monkeypatch) -> None:
+    """Die Stimme uebergibt Arbeit, steuert Worker aber nicht.
+
+    Vom 29.08. bis 24.09.2026 bekam Realtime gar kein Worker-Werkzeug:
+    Recherchen und Karten sollte die Stimme selbst erledigen. Seit dem
+    Betreiberplan zur Rechtevergabe ("unterwegs per Stimme die normalen Rechte
+    geben") ist `worker_start` wieder dabei, sofern das Angebot es enthaelt
+    (`ai.background.use`): Rechte anderer Benutzer aendert nur ein Worker.
+    Abbrechen und Antworten bleiben beim Chat — die Stimme sieht die
+    Worker-Fenster nicht. Die Regel fuer Recherchen gilt weiter und steht im
+    Text.
+    """
+    provider = _realtime(db, "Realtime mit Worker-Start")
     provider.worker_model = "gpt-worker"
     db.commit()
     rollen: list[str] = []
@@ -259,8 +270,10 @@ def test_realtime_never_offers_background_workers(db: Session, regular_user, mon
     namen = {tool["name"] for tool in vorbereiten.tools}
     assert "voice_resolve_latest_proposal" in namen
     assert {"voice_set_region_view", "voice_leave_region_view"} <= namen
-    assert namen.isdisjoint({"worker_start", "worker_cancel", "worker_antwort"})
-    assert "keine Hintergrund-Worker starten" in vorbereiten.instructions
+    assert "worker_start" in namen
+    assert namen.isdisjoint({"worker_cancel", "worker_antwort"})
+    assert "keine Hintergrund-Worker dafür starten" in vorbereiten.instructions
+    assert "ändern lässt du sie mit worker_start" in vorbereiten.instructions
     assert rollen == ["realtime"]
 
 

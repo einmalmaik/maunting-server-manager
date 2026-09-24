@@ -5,35 +5,14 @@ from database import get_db
 from dependencies import get_current_user, require_global, verify_csrf
 from models import User
 from schemas import RoleCreate, RoleResponse, RoleUpdate
-from services import audit_service, role_service
-from services.permission_catalog import SYSTEM_ROLE_ADMIN
-from services.permission_service import has_global_permission
+from services import rechtevergabe_service, role_service
 
 router = APIRouter(prefix="/api/roles", tags=["roles"])
 
 
-def _ensure_no_escalation(
-    db: Session, actor: User, requested_keys: list[str] | None
-) -> None:
-    """Verhindert Privilege-Escalation via Rollen-Mutation.
-
-    Ein Non-Owner darf nur Permission-Keys vergeben, die er selbst bereits
-    besitzt. Sonst koennte z. B. ein User mit nur `roles.manage` seiner
-    eigenen Rolle `users.manage` oder `servers.delete` hinzufuegen.
-    """
-    if requested_keys is None or actor.is_owner:
-        return
-    missing = sorted(
-        {k for k in requested_keys if not has_global_permission(db, actor, k)}
-    )
-    if missing:
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                "Du kannst nur Permissions vergeben, die du selbst besitzt. "
-                f"Fehlend: {missing}"
-            ),
-        )
+def _http(fehler: rechtevergabe_service.RechteFehler) -> HTTPException:
+    """Die Grenzen stehen in `rechtevergabe_service` — dieselben ruft die KI."""
+    return HTTPException(status_code=fehler.status_code, detail=fehler.detail)
 
 
 def _to_response(db: Session, role) -> RoleResponse:
@@ -89,22 +68,12 @@ def create_role(
     actor: User = Depends(require_global("roles.manage")),
     __: None = Depends(verify_csrf),
 ) -> RoleResponse:
-    if role_service.get_role_by_name(db, req.name):
-        raise HTTPException(status_code=400, detail="Name bereits vergeben")
-    _ensure_no_escalation(db, actor, req.permissions)
     try:
-        role = role_service.create_role(db, req.name, req.description, req.permissions)
-        audit_service.record_privileged_action(
-            db,
-            user_id=actor.id,
-            action="roles.create",
-            target_type="role",
-            target_id=role.id,
-            details={"name": role.name, "permissions": req.permissions or []},
-            commit=True,
+        role = rechtevergabe_service.create_role(
+            db, actor, req.name, req.description, req.permissions
         )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except rechtevergabe_service.RechteFehler as fehler:
+        raise _http(fehler) from None
     return _to_response(db, role)
 
 
@@ -116,39 +85,12 @@ def update_role(
     actor: User = Depends(require_global("roles.manage")),
     __: None = Depends(verify_csrf),
 ) -> RoleResponse:
-    role = role_service.get_role(db, role_id)
-    if not role:
-        raise HTTPException(status_code=404, detail="Rolle nicht gefunden")
-    if req.name is not None and req.name != role.name:
-        existing = role_service.get_role_by_name(db, req.name)
-        if existing and existing.id != role.id:
-            raise HTTPException(status_code=400, detail="Name bereits vergeben")
-    # De-Eskalations-Schutz: wer Permissions einer Rolle mutiert, muss alle
-    # AKTUELLEN Keys der Rolle selbst besitzen — sonst koennte ein
-    # `roles.manage`-User durch das Stripping einer maechtigen Custom-Rolle
-    # andere User effektiv entwaffnen. Name/Description-only-Updates
-    # (permissions=None) sind davon nicht betroffen.
-    if req.permissions is not None:
-        _ensure_no_escalation(
-            db, actor, role_service.role_permission_keys(db, role.id)
-        )
-    _ensure_no_escalation(db, actor, req.permissions)
     try:
-        role = role_service.update_role(db, role, req.name, req.description, req.permissions)
-        audit_service.record_privileged_action(
-            db,
-            user_id=actor.id,
-            action="roles.update",
-            target_type="role",
-            target_id=role.id,
-            details={
-                "name": role.name,
-                "permissions": req.permissions if req.permissions is not None else "[unchanged]",
-            },
-            commit=True,
+        role = rechtevergabe_service.update_role(
+            db, actor, role_id, req.name, req.description, req.permissions
         )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except rechtevergabe_service.RechteFehler as fehler:
+        raise _http(fehler) from None
     return _to_response(db, role)
 
 
@@ -159,20 +101,7 @@ def delete_role(
     actor: User = Depends(require_global("roles.manage")),
     __: None = Depends(verify_csrf),
 ) -> None:
-    role = role_service.get_role(db, role_id)
-    if not role:
-        raise HTTPException(status_code=404, detail="Rolle nicht gefunden")
-    role_name = role.name
     try:
-        role_service.delete_role(db, role)
-        audit_service.record_privileged_action(
-            db,
-            user_id=actor.id,
-            action="roles.delete",
-            target_type="role",
-            target_id=role_id,
-            details={"name": role_name},
-            commit=True,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        rechtevergabe_service.delete_role(db, actor, role_id)
+    except rechtevergabe_service.RechteFehler as fehler:
+        raise _http(fehler) from None

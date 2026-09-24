@@ -123,6 +123,11 @@ from services.ai_tools.system_tools import (
     _execute_web_search,
 )
 
+from services.ai_tools.user_tools import (
+    _user_tool_definitions,
+    execute_user_read_tool,
+)
+
 logger = logging.getLogger(__name__)
 
 def _global_tool_definitions() -> list[dict]:
@@ -965,6 +970,7 @@ def _global_tool_definitions() -> list[dict]:
         *_worker_tool_definitions(),
         *_mailbox_and_calendar_tool_definitions(),
         *_notes_tool_definitions(),
+        *_user_tool_definitions(),
     ]
 
 def provider_tool_definitions() -> list[dict]:
@@ -1947,6 +1953,11 @@ def _execute_global_read_tool(
             db, user=user, search=query, category=category, team_id=team_id, is_pinned=is_pinned
         )
         return {"notes": notes, "count": len(notes)}
+
+    if tool_name in ("list_users", "read_user_permissions", "list_roles"):
+        return execute_user_read_tool(
+            db, user=user, tool_name=tool_name, arguments=arguments
+        )
 
     if tool_name == "popups_read":
         # Dasselbe Recht wie das Schreibwerkzeug und nicht `panel.settings.read`:

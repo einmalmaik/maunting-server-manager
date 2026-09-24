@@ -604,7 +604,9 @@ class Sprachbruecke:
             "vorschlag": daten,
             # Ein Löschvorgang bekommt auf der Karte einen Knopf: ein Ja reicht
             # dort nicht (`voice_interactions.klick_noetig`).
-            "klick": voice_interactions.klick_noetig(daten.get("tool_name")),
+            "klick": voice_interactions.klick_noetig(
+                daten.get("tool_name"), daten.get("preview")
+            ),
         })
 
     async def _entscheidung(self, wortlaut: str) -> bool:

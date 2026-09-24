@@ -155,6 +155,12 @@ def test_die_sperre_ist_ausgeschrieben() -> None:
       mechanischer Grund dazu: im autonomen Modus ginge der einmalige API-Key
       mit dem Rueckgabewert verloren.
 
+      Die Rechte anderer Benutzer (`propose_user_server_permission`,
+      `propose_role_set`, `propose_user_roles`) stehen nicht in dieser Liste,
+      weil ihre Grenze am Aufruf haengt: autonom laeuft nur, was ausschliesslich
+      unkritische Serverrechte hinzufuegt, alles andere fragt ueber
+      `always_confirm` (`test_ai_user_permission_tools.py`).
+
     Nicht in der Liste steht `propose_server_blueprint_switch`, obwohl der
     Wechsel das Serververzeichnis leert. Der Betreiber hat ihn am 02.09.2026
     ausdruecklich fuer den autonomen Modus freigegeben; vorher legt der
@@ -173,6 +179,7 @@ def test_die_sperre_ist_ausgeschrieben() -> None:
         "propose_calendar_event_delete",
         "propose_note_delete",
         "propose_cloudflare_dns_delete",
+        "propose_role_delete",
         "forget_memory",
         "forget_skill",
         # Unumkehrbares Ueberschreiben

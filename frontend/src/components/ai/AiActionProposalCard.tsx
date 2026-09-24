@@ -86,6 +86,18 @@ const TATSACHEN: readonly string[] = [
   'memory_scope',
   'memory_keys',
   'skill_key',
+  // Rechte anderer Benutzer: wer, was danach gilt, und getrennt davon, was neu
+  // dazukommt und was wegfaellt. Ohne die beiden letzten muesste der
+  // Bestaetigende zwei Listen im Kopf vergleichen, um zu sehen, dass er gerade
+  // etwas entzieht.
+  'target_user',
+  'permissions_after',
+  'permissions_added',
+  'permissions_removed',
+  'role_users',
+  'roles_after',
+  'roles_added',
+  'roles_removed',
 ]
 
 function tatsachenZeilen(preview: Record<string, unknown>): [string, string][] {
@@ -211,6 +223,10 @@ export function AiActionProposalCard({
     propose_email_send: Mail,
     propose_calendar_event_create: CalendarClock,
     propose_calendar_event_delete: Trash2,
+    propose_user_server_permission: ShieldCheck,
+    propose_role_set: ShieldCheck,
+    propose_user_roles: ShieldCheck,
+    propose_role_delete: Trash2,
   }
   const Icon = ICONS[proposal.tool_name] ?? Power
   // Eine autonom ausgefuehrte Aktion ist keine Anfrage. Sie bekommt deshalb

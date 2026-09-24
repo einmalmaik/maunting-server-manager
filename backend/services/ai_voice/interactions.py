@@ -7,6 +7,7 @@ Sprachsitzung kein Werkzeug ohne Zustimmung (`freigabe_einholen`).
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 import threading
 from dataclasses import dataclass
@@ -52,15 +53,25 @@ VERWORFEN = (
 MAX_OFFENE_KARTEN = 10
 
 
-def klick_noetig(tool_name: object) -> bool:
+def klick_noetig(tool_name: object, vorschau: object = None) -> bool:
     """Ob ein Vorschlag dieses Werkzeugs nur per Klick bestätigt werden darf.
 
     Geführt wird die Liste an genau einer Stelle (`Werkzeug.immer_bestaetigen`),
-    nicht hier.
+    nicht hier. Die ``vorschau`` braucht es für die Rechtewerkzeuge: ob eine
+    Vergabe den Klick verlangt, hängt dort am Aufruf
+    (`ai_tool_registry.verlangt_klick`).
     """
-    from services.ai_tool_registry import ALWAYS_CONFIRM_TOOLS
+    from services.ai_tool_registry import verlangt_klick
 
-    return tool_name in ALWAYS_CONFIRM_TOOLS
+    return verlangt_klick(tool_name, vorschau)
+
+
+def _gespeicherte_vorschau(vorschlag: object) -> dict:
+    try:
+        vorschau = json.loads(getattr(vorschlag, "preview_json", None) or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return vorschau if isinstance(vorschau, dict) else {}
 
 
 def _offen(vorschlag: dict) -> bool:
@@ -74,7 +85,7 @@ def klickhinweis(vorschlaege: list[dict]) -> str | None:
     einem Ja, das sie danach gar nicht annehmen darf. So sagt sie gleich, wo
     bestätigt wird.
     """
-    if any(_offen(v) and klick_noetig(v.get("tool_name")) for v in vorschlaege):
+    if any(_offen(v) and klick_noetig(v.get("tool_name"), v.get("preview")) for v in vorschlaege):
         return KLICK_NOETIG
     return None
 
@@ -271,7 +282,9 @@ def braucht_klick(*, user_id: int, kennung: str) -> bool:
         vorschlag = ai_proposal_service.owned_proposal(db, kennung, benutzer)
         if vorschlag is None:
             return False
-        return klick_noetig(getattr(vorschlag, "tool_name", None))
+        return klick_noetig(
+            getattr(vorschlag, "tool_name", None), _gespeicherte_vorschau(vorschlag)
+        )
 
 
 def vorschlag_ausfuehren(*, user_id: int, kennung: str) -> Ausgang:
@@ -310,7 +323,9 @@ def vorschlag_ausfuehren(*, user_id: int, kennung: str) -> Ausgang:
             if vorschlag is None:
                 logger.info("Gesprochene Bestaetigung fuer fremden Vorschlag user=%s", user_id)
                 return Ausgang(erledigt=False)
-            if klick_noetig(getattr(vorschlag, "tool_name", None)):
+            if klick_noetig(
+                getattr(vorschlag, "tool_name", None), _gespeicherte_vorschau(vorschlag)
+            ):
                 logger.info(
                     "Gesprochene Bestaetigung fuer Klick-Aktion abgewiesen "
                     "user=%s tool=%s",
@@ -439,7 +454,11 @@ class OffeneVorschlaege:
         if not isinstance(kennung, str) or not kennung or not _offen(vorschlag):
             return None
         karte = {k: v for k, v in vorschlag.items() if k != "call_id"}
-        eintrag = {"id": kennung, "karte": karte, "klick": klick_noetig(karte.get("tool_name"))}
+        eintrag = {
+            "id": kennung,
+            "karte": karte,
+            "klick": klick_noetig(karte.get("tool_name"), karte.get("preview")),
+        }
         with self._schloss:
             self._karten = [k for k in self._karten if k["id"] != kennung]
             self._karten.append(eintrag)

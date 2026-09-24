@@ -792,7 +792,11 @@
         "worker_cancel": "Cancel worker",
         "web_search": "Web search",
         "analyze_region": "Regional and satellite analysis",
-        "control_region_camera": "Control map view"
+        "control_region_camera": "Control map view",
+        "propose_user_server_permission": "Change a user's server permissions",
+        "propose_role_set": "Create or change a role",
+        "propose_user_roles": "Change a user's roles",
+        "propose_role_delete": "Delete role"
       },
       "type": {
         "read": "Read access",
@@ -844,7 +848,11 @@
         "propose_note_delete": "Permanently delete this note? This cannot be undone.",
         "propose_cloudflare_dns_delete": "Permanently delete DNS record for zone “{{zone_id}}”? This cannot be undone.",
         "propose_cloudflare_dns_record": "Create DNS record “{{name}}” ({{type}}) with target “{{content}}” in Cloudflare?",
-        "propose_modpack_install": "Install modpack “{{modpack_name}}” on the server? Existing game files may be overwritten."
+        "propose_modpack_install": "Install modpack “{{modpack_name}}” on the server? Existing game files may be overwritten.",
+        "propose_user_server_permission": "Change this user's permissions on the server as shown? Added and removed permissions are listed separately.",
+        "propose_role_set": "Save the role with the permissions shown? The change applies to every user with this role.",
+        "propose_user_roles": "Change this user's roles as shown? Roles apply to all servers.",
+        "propose_role_delete": "Delete this role? It is no longer assigned to anyone."
       },
       "executed": "AI proposal was authorized and executed.",
       "failed": "The action was stopped safely. Details are available in the audit log.",
@@ -881,7 +889,15 @@
         "startup_after": "New start command",
         "startup_before": "Current start command",
         "terminate_grace_days": "Retention after cancellation (days)",
-        "webhook_url": "Webhook target"
+        "webhook_url": "Webhook target",
+        "target_user": "User",
+        "permissions_after": "Permissions afterwards",
+        "permissions_added": "Newly granted",
+        "permissions_removed": "Revoked",
+        "role_users": "Users with this role",
+        "roles_after": "Roles afterwards",
+        "roles_added": "Added roles",
+        "roles_removed": "Removed roles"
       },
       "reasonLabel": "AI reasoning",
       "effectLabel": "Expected effect",
@@ -1005,7 +1021,14 @@
       "cloudflare_list_zones": "Read Cloudflare zones",
       "execute_server_action": "Executed server action",
       "search_curseforge_modpacks": "Searched CurseForge modpacks",
-      "search_curseforge_mods": "Searched CurseForge mods"
+      "search_curseforge_mods": "Searched CurseForge mods",
+      "list_users": "Users searched",
+      "read_user_permissions": "User permissions read",
+      "list_roles": "Roles read",
+      "propose_user_server_permission": "Server permissions prepared",
+      "propose_role_set": "Role prepared",
+      "propose_user_roles": "Role assignment prepared",
+      "propose_role_delete": "Role deletion prepared"
     },
     "toolsRunning": {
       "ask_user": "Asking a quick question",
@@ -1104,7 +1127,14 @@
       "search_curseforge_mods": "Searching CurseForge for mods",
       "propose_cloudflare_dns_delete": "Preparing DNS record deletion",
       "propose_cloudflare_dns_record": "Preparing DNS record",
-      "propose_modpack_install": "Preparing modpack installation"
+      "propose_modpack_install": "Preparing modpack installation",
+      "list_users": "Looking for the user",
+      "read_user_permissions": "Checking which permissions they already have",
+      "list_roles": "Looking at the roles",
+      "propose_user_server_permission": "Preparing the server permissions",
+      "propose_role_set": "Preparing the role",
+      "propose_user_roles": "Preparing the role assignment",
+      "propose_role_delete": "Preparing to delete the role"
     },
     "errors": {
       "codes": {
@@ -2364,7 +2394,7 @@
     },
     "ai_autonomous_use": {
       "title": "Use autonomous mode",
-      "desc": "Allow the AI to run permitted tools without asking first. Deletions still always ask."
+      "desc": "Allow the AI to run permitted tools without asking first. Deletions still always ask, as do revoking permissions and granting anything beyond basic server operation rights."
     },
     "ai_tasks_manage": {
       "title": "Manage AI tasks",

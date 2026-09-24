@@ -8,7 +8,7 @@ from models.user import User
 from services import ai_action_service
 from services.ai_voice import interactions as voice_interactions
 from services.openai_compatible_adapter import ProviderToolCall
-from services.ai_tool_registry import WERKZEUGE, WRITE_TOOLS
+from services.ai_tool_registry import RECHTE_SCHREIBEN, WERKZEUGE, WRITE_TOOLS
 from services.semantic_tool_router_adapter import SemanticToolRouterAdapter
 
 
@@ -79,9 +79,14 @@ def dispatch_voice_action(
         if user is None:
             wert = {"error": "Benutzer nicht gefunden"}
             return wert, "Benutzer nicht gefunden", {"tool_name": "execute_server_action", "failed": True}, []
+        # Rechte anderer Benutzer aendert nur ein Worker: Gehirn und Stimme
+        # uebergeben sie mit `worker_start` (`ai_tool_registry.RECHTE_SCHREIBEN`).
+        # Ohne diese Zeile waere dieser Umweg der eine Pfad, auf dem sie es
+        # doch selbst tun.
         allowed = (
             ai_action_service.angebotene_werkzeuge(db, user)
             - {"execute_server_action", "worker_start", "worker_cancel", "worker_antwort", "ask_user", "wait_until"}
+            - RECHTE_SCHREIBEN
         )
 
     target_tool: str | None = None
