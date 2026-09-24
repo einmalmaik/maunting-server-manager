@@ -58,6 +58,7 @@ vi.mock('@/hooks/usePublicLegalSettings', () => ({
 }))
 
 import i18n from '@/i18n'
+import { usePublicSettingsStore, DEFAULT_PUBLIC_SETTINGS } from '@/stores/publicSettingsStore'
 import { Einstellungen } from './Einstellungen'
 
 /**
@@ -80,6 +81,7 @@ describe('Einstellungen Component', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     konfigLadenMock.mockResolvedValue({ ...mockKonfig })
+    usePublicSettingsStore.setState({ ...DEFAULT_PUBLIC_SETTINGS, isLoading: false, error: null })
   })
 
   afterEach(() => {
@@ -173,4 +175,43 @@ describe('Einstellungen Component', () => {
       configurable: true,
     })
   })
+
+  it('blendet Social-, Messenger- und Tresor-Reiter aus, wenn sie deaktiviert sind', async () => {
+    usePublicSettingsStore.setState({
+      ...DEFAULT_PUBLIC_SETTINGS,
+      social_enabled: false,
+      vault_enabled: false,
+    })
+
+    render(
+      <MemoryRouter>
+        <Einstellungen />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('tab', { name: txt('profile.tabs.account') })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: txt('profile.tabs.social') })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: txt('profile.tabs.messenger') })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: txt('profile.tabs.vault') })).not.toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: txt('mss.einstellungen.tab.desktop') })).toBeInTheDocument()
+  })
+
+  it('leitet bei direktem Aufruf eines deaktivierten Reiters auf desktop um', async () => {
+    usePublicSettingsStore.setState({
+      ...DEFAULT_PUBLIC_SETTINGS,
+      social_enabled: false,
+      vault_enabled: false,
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/einstellungen?tab=social']}>
+        <Einstellungen />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(konfigLadenMock).toHaveBeenCalled())
+    expect(screen.getByRole('tab', { name: txt('mss.einstellungen.tab.desktop'), selected: true })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: txt('profile.tabs.social') })).not.toBeInTheDocument()
+  })
 })
+

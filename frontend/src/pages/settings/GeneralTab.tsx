@@ -11,6 +11,7 @@ import { Dropdown } from '@/components/ui/Dropdown'
 import { Switch } from '@/components/ui/Switch'
 import { normalizePanelLanguage } from '@/config/panelLocales'
 import { PanelSettings, EMPTY_PANEL_SETTINGS } from './types'
+import { usePublicSettingsStore } from '@/stores/publicSettingsStore'
 
 import { Spinner } from '@/components/ui/Spinner'
 export function GeneralTab() {
@@ -61,6 +62,15 @@ export function GeneralTab() {
         }),
       })
       toast.success(t('settings.saved'))
+      usePublicSettingsStore.getState().setSettings({
+        calendar_enabled: settings.calendar_enabled,
+        notes_enabled: settings.notes_enabled,
+        social_enabled: settings.social_enabled,
+        vault_enabled: settings.vault_enabled,
+        desktop_app_download_enabled: settings.desktop_app_download_enabled,
+        story_fable_download_enabled: settings.story_fable_download_enabled,
+      })
+      void usePublicSettingsStore.getState().refresh()
     } catch (err: any) {
       toast.error(err.message)
     } finally {
