@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { FileText, Mic, MicOff, Settings, ShieldAlert, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import type { AiVoiceConfig } from '@/api/ai'
+import { aiApi, type AiVoiceConfig } from '@/api/ai'
+import { SanitizedApiError } from '@/api/client'
+import { toast } from '@/stores/toastStore'
 import { ActiveProcessesCard } from '../geo/ActiveProcessesCard'
 import { RegionalAnalysisLayout } from '../geo/RegionalAnalysisLayout'
 import { Schwarm, schwarmZustand } from './Schwarm'
@@ -41,6 +43,7 @@ export function SprachAnsicht({
     fehler,
     belege,
     vorschlag,
+    vorschlagErledigt,
     intentErkannt,
     geoData,
     regionalFocus,
@@ -188,6 +191,15 @@ export function SprachAnsicht({
               <Zustandstext {...textangaben} kompakt />
               {werkzeugLaeuft && werkzeug && <Werkzeuganzeige werkzeug={werkzeug} />}
             </div>
+            {/* Auch hier, nicht nur in der Mitte: ohne autonomen Modus fragt
+                schon die Regionsanalyse, und eine Löschkarte will ihren Knopf. */}
+            {vorschlag && (
+              <Vorschlagskasten
+                key={vorschlag.id || vorschlag.werkzeug}
+                vorschlag={vorschlag}
+                onErledigt={vorschlagErledigt}
+              />
+            )}
           </div>
 
           {/* Aktive Prozesse Card */}
@@ -246,7 +258,16 @@ export function SprachAnsicht({
         {werkzeugLaeuft && werkzeug && <Werkzeuganzeige werkzeug={werkzeug} />}
       </div>
 
-      {vorschlag && <Vorschlagskasten vorschlag={vorschlag} />}
+      {/* Der Schlüssel baut den Kasten je Karte frisch auf. Sonst erbte eine
+          Karte, die während Bestätigen und Ausführen nachkommt, den
+          gesperrten Knopf der vorigen (Review vom 23.09.2026). */}
+      {vorschlag && (
+        <Vorschlagskasten
+          key={vorschlag.id || vorschlag.werkzeug}
+          vorschlag={vorschlag}
+          onErledigt={vorschlagErledigt}
+        />
+      )}
       {beleg && <Belegkasten beleg={beleg} />}
 
       <div className="mt-8 flex items-center gap-4">
@@ -371,8 +392,56 @@ function Werkzeuganzeige({ werkzeug }: { werkzeug: string }) {
   )
 }
 
-function Vorschlagskasten({ vorschlag }: { vorschlag: Vorschlag }) {
+/**
+ * Was gleich passiert, und bei einem Löschvorgang der Knopf dafür.
+ *
+ * Der Knopf geht denselben Weg wie „Ausführen" auf der Karte im Chat:
+ * `confirmAction` holt den Einmal-Token, `executeAction` führt aus, und das
+ * Backend prüft die Rechte dabei zweimal. Die Karte ist nur die Stelle, an der
+ * geklickt wird.
+ */
+function Vorschlagskasten({
+  vorschlag,
+  onErledigt,
+}: {
+  vorschlag: Vorschlag
+  onErledigt: (kennung: string) => void
+}) {
   const { t } = useTranslation()
+  const [busy, setBusy] = useState(false)
+  const klickbar = vorschlag.klick && vorschlag.id !== ''
+
+  const bestaetigen = async () => {
+    setBusy(true)
+    try {
+      const freigabe = await aiApi.confirmAction(vorschlag.id)
+      const ausgefuehrt = await aiApi.executeAction(vorschlag.id, freigabe.confirmation_token)
+      toast.success(
+        ausgefuehrt.proposal.status === 'executing'
+          ? t('ai.actions.queued')
+          : t('ai.actions.executed'),
+      )
+      onErledigt(vorschlag.id)
+    } catch (error: unknown) {
+      toast.error(error instanceof SanitizedApiError ? error.message : t('ai.actions.error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const ablehnen = async () => {
+    setBusy(true)
+    try {
+      await aiApi.rejectAction(vorschlag.id)
+      toast.success(t('ai.actions.rejectedToast'))
+      onErledigt(vorschlag.id)
+    } catch (error: unknown) {
+      toast.error(error instanceof SanitizedApiError ? error.message : t('ai.actions.error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <section
       className="mt-4 w-full max-w-2xl rounded-xl border border-tertiary/40 bg-tertiary-container/20 px-4 py-3"
@@ -396,8 +465,39 @@ function Vorschlagskasten({ vorschlag }: { vorschlag: Vorschlag }) {
         </p>
       )}
       <p className="mt-2 text-xs text-on-surface-variant/70">
-        {t('ai.voice.vorschlag.hint')}
+        {/* Eine Löschkarte ohne brauchbare Kennung hat keinen Knopf. Das
+            gesprochene Ja nimmt sie trotzdem nicht an; bestätigt wird dann auf
+            der Karte im Chat, an derselben Unterhaltung. */}
+        {t(
+          klickbar
+            ? 'ai.voice.vorschlag.hintKlick'
+            : vorschlag.klick
+              ? 'ai.voice.vorschlag.hintKlickChat'
+              : 'ai.voice.vorschlag.hint',
+        )}
       </p>
+      {klickbar && (
+        <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={busy}
+            onClick={() => void ablehnen()}
+          >
+            {t('ai.actions.reject')}
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            disabled={busy}
+            onClick={() => void bestaetigen()}
+          >
+            {busy ? t('ai.actions.executing') : t('ai.actions.execute')}
+          </Button>
+        </div>
+      )}
     </section>
   )
 }

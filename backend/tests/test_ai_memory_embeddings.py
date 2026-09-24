@@ -28,7 +28,9 @@ from sqlalchemy.orm import Session
 
 from models import AiMemoryEntry, Role, RolePermission, User
 from services import ai_embedding_service, ai_memory_service
+from services.ai_embedding_service import MODEL_TAG
 from services.role_service import set_user_roles
+from tests._einbettung import modell_ersetzen, ohne_modell
 
 
 needs_model = pytest.mark.skipif(
@@ -68,7 +70,7 @@ def test_without_a_model_nothing_breaks(
     Betriebsvoraussetzung sein. Wer ihn nicht hat, bekommt eine schlechtere
     Auswahl — kein kaputtes Panel.
     """
-    monkeypatch.setattr(ai_embedding_service, "encode", lambda texts: None)
+    ohne_modell(monkeypatch)
     _allow_memory(db, regular_user)
     row = _write(db, regular_user, "ram.bevorzugt", "8 GB fuer Minecraft")
 
@@ -156,9 +158,10 @@ def test_a_stumbled_load_is_retried_after_the_window(
             ai_embedding_service.NEUVERSUCH_NACH_SEKUNDEN + 1
         )
 
-        vektoren = ai_embedding_service.encode(["irgendwas"])
-        assert vektoren is not None
-        assert len(vektoren[0]) == ai_embedding_service.EMBEDDING_DIMENSIONS
+        kodierung = ai_embedding_service.encode(["irgendwas"])
+        assert kodierung is not None
+        assert kodierung.modell == MODEL_TAG
+        assert len(kodierung.vektoren[0]) == ai_embedding_service.EMBEDDING_DIMENSIONS
         assert len(versuche) == 2
         assert ai_embedding_service.is_ready() is True
     finally:
@@ -204,18 +207,18 @@ def test_a_failed_write_discards_the_old_vector(
     """
     vorhanden = [[0.0] * ai_embedding_service.EMBEDDING_DIMENSIONS]
     vorhanden[0][0] = 1.0
-    monkeypatch.setattr(ai_embedding_service, "encode", lambda texts: vorhanden)
+    modell_ersetzen(monkeypatch, lambda texts: vorhanden)
     _allow_memory(db, regular_user)
     row = _write(db, regular_user, "lieblingsspiel", "Am liebsten spiele ich Minecraft")
-    assert ai_memory_service._stored_vector(row) is not None
+    assert ai_memory_service._stored_vector(row, MODEL_TAG) is not None
 
-    monkeypatch.setattr(ai_embedding_service, "encode", lambda texts: None)
+    ohne_modell(monkeypatch)
     row = _write(db, regular_user, "lieblingsspiel", "Am liebsten spiele ich Factorio")
 
     assert row.embedding_bytes is None
     assert row.embedding_json is None
     assert row.embedding_model is None
-    assert ai_memory_service._stored_vector(row) is None
+    assert ai_memory_service._stored_vector(row, MODEL_TAG) is None
 
 
 def _vektoren_fuer(texts: list[str]) -> list[list[float]]:
@@ -246,19 +249,57 @@ def test_a_missing_vector_is_recomputed_on_the_next_recall(
     den Kontext.
     """
     _allow_memory(db, regular_user)
-    monkeypatch.setattr(ai_embedding_service, "encode", lambda texts: None)
+    ohne_modell(monkeypatch)
     row = _write(db, regular_user, "zeitzone", "Die Anlage steht auf Europe/Berlin")
     assert row.embedding_json is None, "ohne Modell entsteht kein Vektor"
 
     # Das Modell ist wieder da — die nächste Anfrage muss aufholen.
-    monkeypatch.setattr(ai_embedding_service, "encode", _vektoren_fuer)
+    modell_ersetzen(monkeypatch, _vektoren_fuer)
     ai_memory_service.provider_memory_context(db, regular_user, query="Zeitzone?")
 
     db.refresh(row)
-    assert row.embedding_model == ai_memory_service._EMBEDDING_MODEL_TAG
-    vektor = ai_memory_service._stored_vector(row)
+    assert row.embedding_model == MODEL_TAG
+    vektor = ai_memory_service._stored_vector(row, MODEL_TAG)
     assert vektor is not None
     assert len(vektor) == ai_embedding_service.EMBEDDING_DIMENSIONS
+
+
+def test_ein_google_vektor_wird_neu_gerechnet_sobald_das_lokale_modell_zurueck_ist(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Zwei Modelle, zwei Räume — und die Kennung sagt, aus welchem ein Vektor stammt.
+
+    Fehlt das lokale Modell, rechnet `encode` bei Google. Gespeichert wurde
+    das Ergebnis trotzdem unter der Kennung des lokalen Modells. Sobald das
+    Modell zurück war, galt der Google-Vektor deshalb als lokaler: nichts
+    rechnete ihn nach, und jede Frage wurde mit Zahlen aus einem fremden Raum
+    verglichen. Gleiche Länge, keine Warnung, bedeutungslose Ähnlichkeit.
+    """
+    laenge = ai_embedding_service.EMBEDDING_DIMENSIONS
+    google_achse = [0.0, 1.0] + [0.0] * (laenge - 2)
+    monkeypatch.setattr(ai_embedding_service, "_load", lambda: None)
+    ai_embedding_service.set_rueckfall("google", db)
+    monkeypatch.setattr(
+        ai_embedding_service, "_zugang",
+        lambda db, anbieter: ("schluessel", "https://google.invalid", "text-embedding-004"),
+    )
+    monkeypatch.setattr(
+        ai_embedding_service, "encode_ueber_anbieter",
+        lambda texts, **_: [list(google_achse) for _ in texts],
+    )
+    _allow_memory(db, regular_user)
+    row = _write(db, regular_user, "zeitzone", "Die Anlage steht auf Europe/Berlin")
+    assert row.embedding_model == "google:text-embedding-004"
+
+    # Das lokale Modell ist wieder da; der nächste Abruf muss den Eintrag in
+    # dessen Raum holen, statt den Google-Vektor als lokalen zu lesen.
+    monkeypatch.setattr(ai_embedding_service, "_load", lambda: _FakeModel())
+    ai_memory_service.provider_memory_context(db, regular_user, query="Zeitzone?")
+
+    db.refresh(row)
+    assert row.embedding_model == MODEL_TAG
+    vektor = ai_memory_service._stored_vector(row, MODEL_TAG)
+    assert vektor is not None and vektor[0] == 1.0 and vektor[1] == 0.0
 
 
 def test_without_a_model_the_recall_leaves_the_missing_vector_alone(
@@ -270,7 +311,7 @@ def test_without_a_model_the_recall_leaves_the_missing_vector_alone(
     das Gedächtnis kaputtmacht.
     """
     _allow_memory(db, regular_user)
-    monkeypatch.setattr(ai_embedding_service, "encode", lambda texts: None)
+    ohne_modell(monkeypatch)
     row = _write(db, regular_user, "zeitzone", "Die Anlage steht auf Europe/Berlin")
 
     block = ai_memory_service.provider_memory_context(db, regular_user, query="Zeitzone?")
@@ -293,7 +334,7 @@ def test_a_vector_from_a_different_model_is_ignored(
     row.embedding_model = "irgendein-anderes-modell"
     db.commit()
 
-    assert ai_memory_service._stored_vector(row) is None
+    assert ai_memory_service._stored_vector(row, MODEL_TAG) is None
 
 
 def test_a_vector_with_the_wrong_length_is_ignored(
@@ -311,10 +352,10 @@ def test_a_vector_with_the_wrong_length_is_ignored(
         ai_embedding_service.vektor_zu_bytes([0.1, 0.2, 0.3])
     )
     row.embedding_json = None
-    row.embedding_model = ai_memory_service._EMBEDDING_MODEL_TAG
+    row.embedding_model = MODEL_TAG
     db.commit()
 
-    assert ai_memory_service._stored_vector(row) is None
+    assert ai_memory_service._stored_vector(row, MODEL_TAG) is None
 
 
 # ── Die Speicherform des Vektors ──────────────────────────────────────────
@@ -336,7 +377,7 @@ def test_a_written_vector_lands_in_the_byte_column(
     zurück, wenn die Bytes einmal fehlen.
     """
     _allow_memory(db, regular_user)
-    monkeypatch.setattr(ai_embedding_service, "encode", _vektoren_fuer)
+    modell_ersetzen(monkeypatch, _vektoren_fuer)
 
     row = _write(db, regular_user, "zeitzone", "Die Anlage steht auf Europe/Berlin")
 
@@ -344,7 +385,7 @@ def test_a_written_vector_lands_in_the_byte_column(
     assert row.embedding_bytes is not None
     # Die Zahlen selbst sind es nicht mehr: Nonce und Siegel kommen dazu.
     assert len(row.embedding_bytes) > ai_embedding_service.EMBEDDING_BYTES
-    vektor = ai_memory_service._stored_vector(row)
+    vektor = ai_memory_service._stored_vector(row, MODEL_TAG)
     assert vektor is not None and len(vektor) == ai_embedding_service.EMBEDDING_DIMENSIONS
 
 
@@ -360,14 +401,14 @@ def test_an_entry_from_before_the_migration_is_still_read(
     plötzlich nicht mehr kennt.
     """
     _allow_memory(db, regular_user)
-    monkeypatch.setattr(ai_embedding_service, "encode", _vektoren_fuer)
+    modell_ersetzen(monkeypatch, _vektoren_fuer)
     row = _write(db, regular_user, "zeitzone", "Die Anlage steht auf Europe/Berlin")
     # Der Stand vor der Migration: Vektor als Text, Byte-Spalte noch leer.
     row.embedding_json = json.dumps(list(_vektoren_fuer(["egal"])[0]))
     row.embedding_bytes = None
     db.commit()
 
-    vektor = ai_memory_service._stored_vector(row)
+    vektor = ai_memory_service._stored_vector(row, MODEL_TAG)
 
     assert vektor is not None
     assert len(vektor) == ai_embedding_service.EMBEDDING_DIMENSIONS
@@ -440,7 +481,7 @@ def test_der_gespeicherte_vektor_steht_nicht_im_klartext(
     dem, was aus ihm errechnet wurde.
     """
     _allow_memory(db, regular_user)
-    monkeypatch.setattr(ai_embedding_service, "encode", _vektoren_fuer)
+    modell_ersetzen(monkeypatch, _vektoren_fuer)
 
     row = _write(db, regular_user, "gehalt", "Verdient 4200 Euro im Monat")
 
@@ -448,7 +489,7 @@ def test_der_gespeicherte_vektor_steht_nicht_im_klartext(
     assert row.embedding_bytes is not None
     assert klartext not in row.embedding_bytes
     assert ai_embedding_service.bytes_zu_vektor(row.embedding_bytes) is None
-    assert list(ai_memory_service._stored_vector(row)) == list(
+    assert list(ai_memory_service._stored_vector(row, MODEL_TAG)) == list(
         _vektoren_fuer(["egal"])[0]
     )
 
@@ -469,13 +510,13 @@ def test_ein_klartextvektor_aus_dem_bestand_wird_weiter_gelesen_und_ersetzt(
     naechsten Abruf in den Kontext verpackt neu geschrieben.
     """
     _allow_memory(db, regular_user)
-    monkeypatch.setattr(ai_embedding_service, "encode", _vektoren_fuer)
+    modell_ersetzen(monkeypatch, _vektoren_fuer)
     row = _write(db, regular_user, "zeitzone", "Die Anlage steht auf Europe/Berlin")
     klartext = ai_embedding_service.vektor_zu_bytes(_vektoren_fuer(["egal"])[0])
     row.embedding_bytes = klartext
     db.commit()
 
-    assert ai_memory_service._stored_vector(row) is not None, "kein Rueckschritt"
+    assert ai_memory_service._stored_vector(row, MODEL_TAG) is not None, "kein Rueckschritt"
 
     ai_memory_service.provider_memory_context(db, regular_user, query="Zeitzone?")
     db.commit()
@@ -483,7 +524,7 @@ def test_ein_klartextvektor_aus_dem_bestand_wird_weiter_gelesen_und_ersetzt(
 
     assert row.embedding_bytes != klartext
     assert klartext not in row.embedding_bytes
-    assert ai_memory_service._stored_vector(row) is not None
+    assert ai_memory_service._stored_vector(row, MODEL_TAG) is not None
 
 
 def test_die_alte_textspalte_wird_beim_abruf_abgeraeumt(
@@ -499,7 +540,7 @@ def test_die_alte_textspalte_wird_beim_abruf_abgeraeumt(
     ab (`test_an_entry_from_before_the_migration_is_still_read`).
     """
     _allow_memory(db, regular_user)
-    monkeypatch.setattr(ai_embedding_service, "encode", _vektoren_fuer)
+    modell_ersetzen(monkeypatch, _vektoren_fuer)
     row = _write(db, regular_user, "wartung", "Sonntags ab drei Uhr")
     row.embedding_json = json.dumps(list(_vektoren_fuer(["egal"])[0]))
     row.embedding_bytes = None
@@ -511,7 +552,7 @@ def test_die_alte_textspalte_wird_beim_abruf_abgeraeumt(
 
     assert row.embedding_json is None
     assert row.embedding_bytes is not None
-    assert ai_memory_service._stored_vector(row) is not None
+    assert ai_memory_service._stored_vector(row, MODEL_TAG) is not None
 
 
 # ── Mit Modell ────────────────────────────────────────────────────────────
@@ -525,8 +566,8 @@ def test_writing_an_entry_stores_a_usable_vector(
 
     row = _write(db, regular_user, "ram.bevorzugt", "8 GB fuer neue Minecraft-Server")
 
-    assert row.embedding_model == ai_memory_service._EMBEDDING_MODEL_TAG
-    vector = ai_memory_service._stored_vector(row)
+    assert row.embedding_model == MODEL_TAG
+    vector = ai_memory_service._stored_vector(row, MODEL_TAG)
     assert vector is not None
     assert len(vector) == ai_embedding_service.EMBEDDING_DIMENSIONS
     # Normalisiert, damit die Aehnlichkeit ein reines Skalarprodukt ist.
@@ -600,7 +641,7 @@ def test_unrelated_entries_score_lower_than_related_ones(
     query = ai_embedding_service.encode(["Wann laeuft meine Sicherung?"])
     assert vectors and query
 
-    scores = ai_embedding_service.similarity(query[0], vectors)
+    scores = ai_embedding_service.similarity(query.vektoren[0], vectors.vektoren)
 
     assert scores[0] > scores[1]
     assert scores[0] > 0.2

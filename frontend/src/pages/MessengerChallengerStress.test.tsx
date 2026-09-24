@@ -253,7 +253,10 @@ vi.mock('@/services/e2eeGeraet', () => ({
   signaturSchluesselVon: vi.fn(async () => null),
   vergessenGeraete: vi.fn(),
   clearGeraeteMemory: vi.fn(),
-  onNeuesGeraet: vi.fn(() => () => {}),
+  eigenesGeraetFreigegeben: vi.fn(() => true),
+  onEigeneFreigabe: vi.fn(() => () => {}),
+  onSchluesselWarnung: vi.fn(() => () => {}),
+  sicherheitsnummer: vi.fn(async () => '11111 22222 33333 44444'),
   E2eeKeinGeraetError: class extends Error {},
 }))
 

@@ -26,6 +26,7 @@ from services import (
     permission_service,
 )
 from services.role_service import set_user_roles
+from tests._einbettung import modell_ersetzen
 
 
 def _allow_memory(db: Session, user: User) -> None:
@@ -810,7 +811,7 @@ def test_die_vorauswahl_liest_auch_bestandszeilen_im_alten_format(
     Bedeutung nicht lesen kann.
     """
     _allow_memory(db, regular_user)
-    monkeypatch.setattr(ai_embedding_service, "encode", _achsen_encode)
+    modell_ersetzen(monkeypatch, _achsen_encode)
     gesucht = _write(db, regular_user, "wartungsfenster", "Sonntags ab drei Uhr")
     frisch = _write(db, regular_user, "lieblingsfarbe", "Blau, seit jeher")
     gesucht.last_used_at = datetime.now(timezone.utc) - timedelta(days=30)

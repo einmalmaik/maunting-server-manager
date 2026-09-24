@@ -10,8 +10,8 @@ export function Privacy() {
     title: t('privacyPolicy.title'),
     intro: t('privacyPolicy.intro'),
     callout: t('privacyPolicy.callout'),
-    lastUpdated: '2026-09-23',
-    version: '3.3',
+    lastUpdated: '2026-09-24',
+    version: '3.4',
     meta: 'Maunting Studios — Sicherheit braucht Vertrauen',
     sections: [
       { heading: t('privacyPolicy.sections.scope.heading'), body: t('privacyPolicy.sections.scope.body') },
@@ -111,6 +111,7 @@ export function Privacy() {
           // der Verschluesselung — sie schuetzt die Datenbank, nicht die
           // Uebertragung an den Modellanbieter.
           t('privacyPolicy.sections.ai.items.memoryConsent'),
+          t('privacyPolicy.sections.ai.items.memorySearch'),
           t('privacyPolicy.sections.ai.items.attachments'),
           // Zielpunkt 17: der autonome Modus veraendert, wer eine Aktion
           // ausloest. Das gehoert ausdruecklich in den Datenschutzhinweis.

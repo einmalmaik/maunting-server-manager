@@ -299,6 +299,7 @@ const zielGeraete = () => [
 
 /** Konten, die laut Verzeichnis einen Signaturschlüssel führen. Je Test gesetzt. */
 let kontenMitSignatur: number[] = []
+let schluesselWarnungCallback: ((ev: any) => void) | null = null
 
 vi.mock('@/services/e2eeGeraet', () => ({
   eigenesGeraet: vi.fn(async () => ({
@@ -317,7 +318,15 @@ vi.mock('@/services/e2eeGeraet', () => ({
   signaturSchluesselVon: vi.fn(async () => null),
   vergessenGeraete: vi.fn(),
   clearGeraeteMemory: vi.fn(),
-  onNeuesGeraet: vi.fn(() => () => {}),
+  eigenesGeraetFreigegeben: vi.fn(() => true),
+  onEigeneFreigabe: vi.fn(() => () => {}),
+  onSchluesselWarnung: vi.fn((cb) => {
+    schluesselWarnungCallback = cb
+    return () => {
+      schluesselWarnungCallback = null
+    }
+  }),
+  sicherheitsnummer: vi.fn(async () => '11111 22222 33333 44444'),
   E2eeKeinGeraetError: class extends Error {},
 }))
 
@@ -2966,6 +2975,87 @@ describe('Messenger (Allround Chat)', () => {
         expect.objectContaining({ is_control: true, control_type: 'retention' }),
       )
       expect(verfallStand(DIREKT).sekunden).toBe(86_400)
+    })
+  })
+
+  describe('Schlüsselwarnungen und Sicherheitsnummer (Schritt 3)', () => {
+    it('blendet eine Warnung ein, wenn ein Kontakt ein nicht freigegebenes Gerät hat', async () => {
+      render(
+        <MemoryRouter initialEntries={['/chat?userId=101']}>
+          <Messenger />
+        </MemoryRouter>
+      )
+      await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
+
+      expect(schluesselWarnungCallback).not.toBeNull()
+      act(() => {
+        schluesselWarnungCallback!({
+          userId: 101,
+          typ: 'unbestaetigt',
+          geraete: ['dev-101'],
+        })
+      })
+
+      expect(
+        await screen.findByText(/hat ein Gerät, das nicht auf einem bekannten Gerät freigegeben wurde/),
+      ).toBeInTheDocument()
+    })
+
+    it('blendet eine Warnung ein, wenn ein Konto-Neustart erkannt wird', async () => {
+      render(
+        <MemoryRouter initialEntries={['/chat?userId=101']}>
+          <Messenger />
+        </MemoryRouter>
+      )
+      await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
+
+      expect(schluesselWarnungCallback).not.toBeNull()
+      act(() => {
+        schluesselWarnungCallback!({
+          userId: 101,
+          typ: 'konto_neustart',
+          geraete: ['dev-new-1', 'dev-new-2'],
+        })
+      })
+
+      expect(
+        await screen.findByText(/Alle Geräte von .* wurden ersetzt/),
+      ).toBeInTheDocument()
+    })
+
+    it('warnt auch fürs eigene Konto — ein Gerät, das jemand mit deinem Passwort einträgt', async () => {
+      render(
+        <MemoryRouter initialEntries={['/chat?userId=101']}>
+          <Messenger />
+        </MemoryRouter>
+      )
+      await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
+
+      act(() => {
+        schluesselWarnungCallback!({ userId: 1, typ: 'unbestaetigt', geraete: ['dieb-1'] })
+      })
+
+      expect(
+        await screen.findByText(/Für dein Konto ist ein Gerät eingetragen, das keines deiner Geräte freigegeben hat/),
+      ).toBeInTheDocument()
+    })
+
+    it('erlaubt das Öffnen der Sicherheitsnummer-Ansicht über das Chatmenü', async () => {
+      render(
+        <MemoryRouter initialEntries={['/chat?userId=101']}>
+          <Messenger />
+        </MemoryRouter>
+      )
+      await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
+      await oeffneChatMenue()
+
+      const eintrag = screen.getByText(i18n.t('messenger.verifySafetyNumber')).closest('button')!
+      expect(eintrag).toBeInTheDocument()
+      fireEvent.click(eintrag)
+
+      expect(await screen.findByText(i18n.t('messenger.safetyNumberModalTitle'))).toBeInTheDocument()
+      expect(screen.getByText(i18n.t('messenger.safetyNumberModalDesc'))).toBeInTheDocument()
+      expect(await screen.findByText('11111 22222 33333 44444')).toBeInTheDocument()
     })
   })
 })

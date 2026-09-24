@@ -22,6 +22,7 @@ import { AiContextSettings } from './AiContextSettings'
 import { AiCostSettings } from './AiCostSettings'
 import { AiWorkerSettings } from './AiWorkerSettings'
 import { AiGuardianSettings } from './AiGuardianSettings'
+import { AiMemorySearchSettings } from './AiMemorySearchSettings'
 import { AiLearningSettings } from './AiLearningSettings'
 import { AiProvidersSettings } from './AiProvidersSettings'
 import { AiUsageSettings } from './AiUsageSettings'
@@ -325,6 +326,10 @@ export function AiTab() {
               das dort gewählte Modell — einzustellen bleibt nur, wie voll er werden
               darf, bevor zusammengefasst wird. */}
           <AiContextSettings canWrite={canWrite} />
+          {/* Neben dem Kontext, weil beide dieselbe Frage beantworten: was von
+              einer Anfrage wohin geht. Die Wahl betrifft die Zugänge oben
+              (Google, OpenAI), aber nicht den Chat — nur die Bedeutungssuche. */}
+          <AiMemorySearchSettings canWrite={canWrite} />
           {/* Die Währung steht direkt hinter der Providerwahl, weil der Preis dort
               eingetragen wird: welche Zahl „1,20" bedeutet, entscheidet sich hier. */}
           <AiCostSettings canWrite={canWrite} />

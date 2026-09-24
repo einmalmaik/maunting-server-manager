@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import case, func
 from sqlalchemy.exc import IntegrityError
@@ -40,6 +40,8 @@ MICROUNITS_PER_CENT = 10_000
 # Produkt ausgeschrieben — einmal in der Reservierung, einmal beim Abschluss,
 # einmal beim Klemmen im Stream.
 MAX_COST_MICROUNITS = MONTHLY_COST_LIMIT_CENTS_MAX * MICROUNITS_PER_CENT
+# `AiUsageEvent.zweck` einer Beratung der Ethics Engine.
+ZWECK_ETHIK = "ethik"
 
 
 class AiQuotaExceeded(ValueError):
@@ -199,6 +201,10 @@ def reserve_ai_usage(
             AiUsageEvent.user_id == user.id,
             AiUsageEvent.status.in_(ACTIVE_STATUSES),
             AiUsageEvent.created_at >= current_time - timedelta(minutes=1),
+            # Nur Anfragen des Benutzers. Eine Beratung der Ethics Engine hat
+            # er nicht gestellt; zählte sie mit, beendete bei fünf Anfragen pro
+            # Minute die Engine den Lauf, den sie nur beraten soll.
+            AiUsageEvent.zweck.is_(None),
         )
         .scalar()
         or 0
@@ -297,6 +303,8 @@ def abrechnung(
     estimated_actual_tokens: int,
     failed: bool = False,
     token_price_micro_usd_per_million: int | None = None,
+    rollenpreise: tuple[int | None, int | None, int | None] | None = None,
+    geschaetzte_teile: tuple[int, int] | None = None,
 ) -> tuple[int, int, str]:
     """Was eine Anfrage gekostet hat — Tokens, Kosten, und woher die Zahl stammt.
 
@@ -307,11 +315,20 @@ def abrechnung(
        wurde, in USD. Ihn zu buchen ist genauer als jede Nachrechnung, weil es
        dieselbe Zahl ist, die im Dashboard des Anbieters steht. Genau daran
        soll sich die Anzeige nachprüfen lassen.
-    2. **Sonst der gepflegte Preis** (`estimate_cost_microunits`, hier
+    2. **Sonst die Rollenpreise**, wenn der Aufrufer welche mitgibt:
+       ``rollenpreise`` ist (Eingabe, Ausgabe, Cache) je Million Tokens, wie
+       sie am Zugang je Rolle stehen (`ethics_*_price_micro_usd_per_million`).
+       Gerechnet wird Eingabe und Ausgabe getrennt, gelesene Cache-Tokens zum
+       Cachepreis (ohne ihn zum Eingabepreis). Braucht Eingabe- und
+       Ausgabepreis und die Aufteilung der Tokens; meldet der Anbieter sie
+       nicht, gilt ``geschaetzte_teile`` (Eingabe, Ausgabe). Auch das ist eine
+       Näherung und als solche markiert, aber eine mit dem Tarif des Modells,
+       das tatsächlich gerufen wurde.
+    3. **Sonst der gepflegte Preis** (`estimate_cost_microunits`, hier
        nachgebildet, weil dort ein ``AiProvider`` erwartet wird und hier nur
        noch die Zahl vorliegt). Eine Näherung mit *einem* Preis auf *alle*
        Tokens — und als solche markiert.
-    3. **Sonst null.** MSM erfindet keinen Preis.
+    4. **Sonst null.** MSM erfindet keinen Preis.
 
     Im Stream stand hier früher ein ``max(reserviert, gerechnet)``. Der Gedanke
     war, dass eine Überschreitung nicht nachträglich verschwinden soll — die
@@ -341,10 +358,111 @@ def abrechnung(
 
     if usage.vom_anbieter and usage.cost_micro_usd is not None:
         return tokens, min(MAX_COST_MICROUNITS, max(0, usage.cost_micro_usd)), "provider"
+    rollenkosten = _rollenkosten(usage, rollenpreise, geschaetzte_teile)
+    if rollenkosten is not None:
+        return tokens, min(MAX_COST_MICROUNITS, rollenkosten), "estimate"
     if token_price_micro_usd_per_million:
         kosten = (tokens * int(token_price_micro_usd_per_million)) // 1_000_000
         return tokens, min(MAX_COST_MICROUNITS, kosten), "estimate"
     return tokens, 0, "none"
+
+
+def _rollenkosten(
+    usage: "StreamUsage",
+    rollenpreise: tuple[int | None, int | None, int | None] | None,
+    geschaetzte_teile: tuple[int, int] | None,
+) -> int | None:
+    """Stufe 2 von `abrechnung`, oder ``None``, wenn sie nicht greift."""
+    if rollenpreise is None:
+        return None
+    eingabepreis, ausgabepreis, cachepreis = rollenpreise
+    if eingabepreis is None or ausgabepreis is None:
+        return None
+    eingabe, ausgabe = usage.prompt_tokens, usage.completion_tokens
+    if (eingabe is None or ausgabe is None) and geschaetzte_teile is not None:
+        eingabe, ausgabe = geschaetzte_teile
+    if eingabe is None or ausgabe is None:
+        return None
+    eingabe, ausgabe = max(0, int(eingabe)), max(0, int(ausgabe))
+    # Teilmenge der Eingabe, keine zusätzlichen Tokens (`StreamUsage`).
+    gelesen = min(eingabe, max(0, int(usage.cached_tokens or 0)))
+    return (
+        (eingabe - gelesen) * int(eingabepreis)
+        + gelesen * int(eingabepreis if cachepreis is None else cachepreis)
+        + ausgabe * int(ausgabepreis)
+    ) // 1_000_000
+
+
+def nachtraeglich_buchen(
+    db: Session,
+    user: User,
+    *,
+    zweck: str,
+    usage: "StreamUsage",
+    estimated_actual_tokens: int,
+    provider_id: int | None,
+    model: str | None,
+    token_price_micro_usd_per_million: int | None,
+    rollenpreise: tuple[int | None, int | None, int | None] | None = None,
+    geschaetzte_teile: tuple[int, int] | None = None,
+    server_id: int | None = None,
+) -> AiUsageEvent:
+    """Bucht einen Aufruf, der schon stattgefunden hat, ohne Grenzen zu prüfen.
+
+    Für Anfragen, die nicht der Benutzer stellt, sondern MSM für ihn: die
+    Beratung der Ethics Engine vor einem Werkzeug. Ohne Reservierung davor aus
+    zwei Gründen, die beide darauf hinauslaufen, dass die Engine sonst den Lauf
+    aufhielte, den sie nur beraten soll:
+
+    * Der Lauf hält während der Beratung seine eigene Reservierung. Bei
+      *gleichzeitigen Vorgängen* = 1 würde jede Beratung abgewiesen, und die
+      Engine schwiege ausgerechnet bei den enger gehaltenen Benutzern.
+    * Eine Reservierung ist eine Zeile, und *Anfragen pro Minute* zählt Zeilen.
+
+    Gezählt wird der Verbrauch trotzdem: die Zeile steht in Tokens und Kosten
+    wie jede andere, in der Aufstellung und in den Summen, gegen die die
+    nächste Reservierung prüft. Dieselbe Regel wie bei
+    `realtime_verbrauch_ergaenzen` mit ``grenzen_pruefen=False``: angefallene
+    Kosten zu verschweigen hiesse, dass der nächste Anlauf wieder unter der
+    Grenze beginnt. Nur als Anfrage pro Minute zählt sie nicht (``zweck``).
+
+    Die Zeile entsteht gleich als ``completed``, eine offene Reservierung gibt
+    es nie. **Committet nicht**, wie `reservierung_abrechnen`.
+    """
+    tokens, kosten, herkunft = abrechnung(
+        usage,
+        reserved_tokens=estimated_actual_tokens,
+        estimated_actual_tokens=estimated_actual_tokens,
+        token_price_micro_usd_per_million=token_price_micro_usd_per_million,
+        rollenpreise=rollenpreise,
+        geschaetzte_teile=geschaetzte_teile,
+    )
+    jetzt = datetime.now(timezone.utc)
+    event = AiUsageEvent(
+        request_id=str(uuid4()),
+        user_id=user.id,
+        server_id=server_id,
+        provider_id=provider_id,
+        model=model,
+        status="completed",
+        reserved_tokens=tokens,
+        reserved_cost_microunits=kosten,
+        accounted_tokens=tokens,
+        accounted_cost_microunits=kosten,
+        prompt_tokens=usage.prompt_tokens,
+        completion_tokens=usage.completion_tokens,
+        cached_tokens=usage.cached_tokens,
+        cache_write_tokens=usage.cache_write_tokens,
+        reasoning_tokens=usage.reasoning_tokens,
+        provider_requests=max(1, usage.anfragen),
+        cost_source=herkunft,
+        zweck=zweck,
+        created_at=jetzt,
+        completed_at=jetzt,
+    )
+    db.add(event)
+    db.flush()
+    return event
 
 
 def reservierung_abrechnen(

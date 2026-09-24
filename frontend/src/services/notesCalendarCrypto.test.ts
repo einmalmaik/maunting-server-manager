@@ -106,6 +106,28 @@ describe('notesCalendarCrypto E2EE', () => {
     verzeichnis.set(konto, liste)
   }
 
+  /**
+   * Trägt ein Gerät ein, das ein vorhandenes freigegeben hat. Ohne diese
+   * Unterschrift gäbe ihm kein Client etwas, der das Konto schon kennt
+   * (`vertrauteGeraete`).
+   */
+  async function eintragenFreigegeben(
+    konto: number,
+    kennung: string,
+    paar: { publicKeyJwk: string },
+    signatur: SignaturPaar,
+    von: string,
+    vonSignatur: SignaturPaar,
+  ) {
+    eintragen(konto, kennung, paar, signatur)
+    const eintrag = verzeichnis.get(konto)!.find((g) => g.device_id === kennung)!
+    eintrag.approved_by = von
+    eintrag.approval_signature = await signiere(
+      await e2eeGeraet.freigabeDaten(konto, kennung, paar.publicKeyJwk, signatur.publicKeyJwk),
+      vonSignatur.privateKeyJwk,
+    )
+  }
+
   /** Ab jetzt ist „dieses Gerät" das genannte. */
   function binIch(kennung: string, paar: any, signaturPaar: SignaturPaar) {
     vi.mocked(e2eeGeraet.eigenesGeraet).mockResolvedValue({ kennung, paar, signaturPaar } as any)
@@ -830,7 +852,7 @@ describe('notesCalendarCrypto E2EE', () => {
       expect(await checkAndRespondToDeviceKeyRequests(KONTO)).toBe(0)
       expect(versandt()).toHaveLength(0)
 
-      eintragen(KONTO, 'dev-new-202', reqPair, reqSig)
+      await eintragenFreigegeben(KONTO, 'dev-new-202', reqPair, reqSig, 'dev-self-202', selfSig)
       e2eeGeraet.clearGeraeteMemory()
       expect(await checkAndRespondToDeviceKeyRequests(KONTO)).toBe(1)
       expect(await oeffnet(versandt()[0].ciphertext_envelope, reqPair)).not.toBeNull()

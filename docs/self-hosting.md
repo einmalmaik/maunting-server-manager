@@ -146,7 +146,9 @@ Was die App zum Betrieb braucht:
   Zwischenablage, Protected Client aktiv) bereitgestellt.
 - **Autonomie-Freigabefluss**: Bei deaktiviertem autonomen Modus lehnt die KI Werkzeugaufrufe
   nicht textuell ab, sondern erzeugt standardisierte Bestätigungskarten (`AiActionProposalCard`)
-  mit dem passenden `proposal_type` (`read`, `worker`, `write`).
+  mit dem passenden `proposal_type` (`read`, `worker`, `write`). Löschen auf dem Rechner
+  (`desktop_aufraeumen`, `desktop_dateien` mit `loeschen`) zeigt die Karte in der App auch im
+  autonomen Modus.
 - **Discord Rich Presence (RPC, optional)**: Die App meldet bei geöffnetem Discord den Status lokal über die Windows-Pipe (`\\.\pipe\discord-ipc-0`). Eigene Application-IDs und Statustexte können in der Konfigurationsdatei (`konfig.json`) über `"discord_client_id"`, `"discord_details"` und `"discord_state"` hinterlegt oder mit `"discord_rpc_aktiv": false` deaktiviert werden.
 - Panelseitig müssen `tauri://localhost`, `http://tauri.localhost` und
   `https://tauri.localhost` als Origins erlaubt sein. Das ist in
@@ -838,14 +840,15 @@ einer Karte. Führt die Quelle Profile, weist der Dienst eine Änderung an
 Das Recht ist `blueprints.manage`, und es ist panelweit: wer keine Blueprints
 verwalten darf, kommt an diesen Weg nicht heran. Wirksam wird eine so geänderte
 Vorlage außerdem erst, wenn ein Server auf ihr liegt — entweder weil er neu
-darauf angelegt wird, oder über `propose_server_blueprint_switch`, und der
-wischt das Serververzeichnis und will bestätigt werden.
+darauf angelegt wird, oder über `propose_server_blueprint_switch`. Der wischt
+das Serververzeichnis nach einem Pflicht-Backup und will ohne autonomen Modus
+bestätigt werden.
 
 ### Autonomer Modus
 
 Standard ist der unterstützte Modus: die KI analysiert, schlägt vor, wartet. Gemäß dem Grundsatz **„Sicherheit braucht Vertrauen“ / „Schutz braucht Vertrauen“** gilt:
 - **Autonomie-Modus AUS (Standard):** Jede Handlung und jedes Werkzeug der KI (ausnahmslos: Lesewerkzeuge wie `read_server_status`, `web_search`, das Deklarieren von Hintergrund-Workern `worker_start` sowie Schreib- und Verwaltungswerkzeuge) erfordert eine manuelle Bestätigung durch den Benutzer über eine Bestätigungskarte (mit „Bestätigen“ und „Ablehnen“).
-- **Autonomie-Modus AN:** Die KI darf Werkzeuge eigenständig und ohne Bestätigung im Chat und Hintergrund ausführen (ausgenommen unumkehrbare Löschvorgänge).
+- **Autonomie-Modus AN:** Die KI darf Werkzeuge eigenständig und ohne Bestätigung im Chat und Hintergrund ausführen, **außer Löschvorgängen**. Jedes Löschen fragt, auch eines, das sich zurückholen ließe: Dateien, Notizen, Termine, Aufgaben, DNS-Einträge, das Vergessen von Erinnerungen und Skills und das Aufräumen auf dem Rechner. Das gilt im Chat, in der Stimme, in Hintergrund-Workern und auf dem Rechner.
 - **Hintergrund-Aufgaben & Guardian-Heilung:** Geplante Aufgaben (`ai_tasks`) und automatische Guardian-Reparaturläufe können im Hintergrund nur dann eigenständig arbeiten, wenn der Autonomie-Modus für den betreffenden Benutzer bzw. Server aktiv freigegeben ist.
 
 Autonomie verlangt **vier** Bedingungen gleichzeitig:
@@ -858,23 +861,40 @@ Autonomie verlangt **vier** Bedingungen gleichzeitig:
    im Code `ALWAYS_CONFIRM_TOOLS` (`services/ai_tool_registry.py`) und ist dort
    keine eigene Aufzählung, sondern die Ableitung aus der Spalte
    `immer_bestaetigen` der Werkzeugtabelle. Gebaut und gesperrt sind heute:
-   `propose_server_delete`, `propose_blueprint_delete`, `propose_backup_restore`,
-   `propose_hoster_integration`, `propose_hoster_product` und
-   `propose_ai_tarif_role`. Dazu kommen vier Namen aus dem Zielbild, die es noch
-   nicht gibt und die vorsorglich gesperrt sind, damit ein künftiges Werkzeug
-   sich einordnen muss statt stillschweigend autonomiefähig zu sein:
-   `propose_server_wipe`, `propose_server_reinstall`,
-   `propose_permission_change` und `propose_secret_rotation`.
 
-   Das Kriterium ist **Unumkehrbarkeit, nicht Risiko** — ausdrückliche Vorgabe
-   des Betreibers, und sie ersetzt eine frühere Einteilung nach „das klingt
-   heikel". Was die KI selbst wieder zurückstellen kann, darf sie autonom tun;
-   was Daten vernichtet, die niemand zurückholt, fragt immer. Deshalb steht der
-   Blueprint-*Wechsel* trotz seiner Reichweite nicht auf der Liste (er legt
-   zwingend ein Backup an, bevor er etwas anfasst), das Blueprint-*Löschen*
-   dagegen schon: `unlink` ohne Schnappschuss. Die Rechte- und
-   Schlüsselwerkzeuge stehen aus einem anderen Grund darauf — sie wirken auf die
-   Grenzen, innerhalb derer die KI selbst arbeitet;
+   - **jedes Löschen**: `propose_server_delete`, `propose_blueprint_delete`,
+     `propose_file_delete`, `propose_task_delete`,
+     `propose_calendar_event_delete`, `propose_note_delete`,
+     `propose_cloudflare_dns_delete`, `forget_memory` und `forget_skill`;
+   - **unumkehrbares Überschreiben**: `propose_backup_restore`;
+   - **der Rahmen der KI**: `propose_hoster_integration`,
+     `propose_hoster_product` und `propose_ai_tarif_role`. Sie ändern Rechte
+     oder erzeugen Schlüssel, also die Grenzen, innerhalb derer die KI selbst
+     arbeitet.
+
+   Dazu kommen vier Namen aus dem Zielbild, die es noch nicht gibt und die
+   vorsorglich gesperrt sind, damit ein künftiges Werkzeug sich einordnen muss
+   statt stillschweigend autonomiefähig zu sein: `propose_server_wipe`,
+   `propose_server_reinstall`, `propose_permission_change` und
+   `propose_secret_rotation`. Die Desktop-Werkzeuge tragen die Spalte nicht,
+   weil bei ihnen die Aktion entscheidet: `desktop_aufraeumen` fragt immer,
+   `desktop_dateien` nur beim Löschen (`desktop_loescht`).
+
+   Das Kriterium ist die Vorgabe des Betreibers, wörtlich: „im autonomen Modus
+   wird alles automatisch bestätigt, außer Löschvorgänge". Bis zum 23.09.2026
+   las die Tabelle das als „außer Unumkehrbarem", und Datei-, Notiz-, Termin-,
+   Aufgaben- und DNS-Löschen liefen autonom, weil es einen Rückweg gab. Dann
+   hätte das Modell dem Betreiber im autonomen Modus fast einen Discord-Bot
+   gelöscht. Ein Rückweg hilft nur, wenn jemand das Löschen bemerkt; die
+   Rückfrage ist die Sicherheitslinie. Was dagegen nur heikel klingt, fragt
+   nicht. Der Blueprint-*Wechsel* steht nicht auf der Liste, obwohl er das
+   Serververzeichnis leert: der Betreiber hat ihn am 02.09.2026 ausdrücklich
+   für den autonomen Modus freigegeben, und er legt vorher zwingend ein Backup
+   an.
+
+   Ein unbeaufsichtigter Lauf (Guardian-Heilung, geplante Aufgabe), der etwas
+   von dieser Liste will, fragt per E-Mail. Ohne hinterlegte Adresse endet er,
+   statt zu warten;
 4. freies Stundenbudget (Standard 10 Aktionen). Ist es erschöpft, **schlägt
    nichts fehl** — die KI fragt einfach wieder nach.
 
@@ -952,11 +972,11 @@ angefasst — auch dann nicht, wenn der Lauf nur an seinem Rundenbudget endete.
   (`server.config.write`). Nimmt der Agent die Konfiguration nicht an, wird die
   Übersteuerung zurückgerollt — sonst hinge die Synchronisation dieses Servers
   dauerhaft in einem gespeicherten Fehler.
-- **Blueprints ableiten ja, wechseln nur mit Zustimmung.** Eine Ableitung legt
-  eine neue Datei an und rührt keinen Server an. Der *Wechsel* eines Servers auf
-  einen anderen Blueprint löscht dagegen das gesamte Serververzeichnis — Welt,
-  Konfigurationen, Mods — und installiert frisch; er verlangt deshalb immer eine
-  menschliche Bestätigung.
+- **Blueprints ableiten ja, wechseln nicht.** Eine Ableitung legt eine neue
+  Datei an und rührt keinen Server an. Den *Wechsel* eines Servers auf einen
+  anderen Blueprint kann eine Heilung gar nicht vorschlagen: er löscht das
+  gesamte Serververzeichnis — Welt, Konfigurationen, Mods — und installiert
+  frisch. Er steht nur im Chat zur Verfügung.
 - **Vor jedem schreibenden Eingriff muss ein Backup nachgewiesen sein.** Nicht
   „angestoßen", sondern nachgewiesen: `backups.verified_at` ist gesetzt, das
   Archiv ist nicht leer, seine sha256 wurde gerechnet, und es ist jünger als der
@@ -974,8 +994,9 @@ angefasst — auch dann nicht, wenn der Lauf nur an seinem Rundenbudget endete.
   „behoben" steht nur dort, wenn die Anlage es zeigt.
 - **Bestätigungspflichtige Schritte fragen per E-Mail**, statt den Lauf zu
   beenden. Trifft eine Reparatur auf etwas, das der autonome Modus nie ohne
-  Klick tut — Serverlöschung, Wipe, Neuinstallation, Blueprint-Wechsel,
-  Backup-Wiederherstellung —, geht ein Freigabelink an den Freigeber; der Lauf
+  Klick tut — in einer Heilung ist das seit dem 23.09.2026 das Löschen einer
+  Datei (`propose_file_delete`), wie jedes Löschen —, geht ein Freigabelink an
+  den Freigeber; der Lauf
   parkt und wird geweckt, sobald entschieden wurde. Der Link zeigt eine Seite
   (`GET`), entschieden wird per `POST` von dort: Mailscanner klicken Links. Er
   gilt 24 Stunden, lässt sich genau einmal verwenden, und **umgeht keine
@@ -1371,16 +1392,39 @@ notiert.
 
 ### Bestätigen per Stimme
 
-Soll etwas geändert werden, entsteht **derselbe Vorschlag wie im Chat** — hier
-aber als Kasten ohne Knopf, der nur den Namen der Aktion nennt. Entschieden wird
-gesprochen: die KI sagt, was sie vorhat, und fragt nach. Ein klares „Ja" führt
-aus, ein klares „Nein" lässt es.
+Es gilt dieselbe Regel wie im Chat (Betreiberentscheid vom 23.09.2026):
+
+- **Autonomer Modus aus:** jedes Werkzeug fragt vorher, auch das blosse
+  Nachsehen wie Wetter oder Dokumentation.
+- **Autonomer Modus an:** nichts fragt, **ausser Löschvorgängen**. Sie fragen
+  immer.
+
+Soll etwas geschehen, entsteht **derselbe Vorschlag wie im Chat** — hier als
+Kasten, der den Namen der Aktion nennt. Entschieden wird gesprochen: die KI sagt,
+was sie vorhat, und fragt nach. Ein klares „Ja" führt aus, ein klares „Nein"
+lässt es.
+
+**Ein Löschen bestätigt nur der Klick.** Der Kasten bekommt dann die Knöpfe
+„Ausführen" und „Ablehnen", und ein gesprochenes Ja führt nichts aus; die KI
+sagt das auch so. Der Grund: ein „Ja" stellt das Sprachmodell fest, und das kann
+es auch aus einer Webseite, einer Mail oder einer Logzeile „gehört" haben. Der
+Knopf geht denselben Weg wie „Ausführen" auf der Karte im Chat. Dasselbe gilt
+für das Einspielen eines Backups und die Hoster- und Tarifwerkzeuge: alles, was
+in der Registry `immer_bestaetigen` trägt.
+
+**Ein Ja gilt genau einem Vorschlag**, dem zuletzt gezeigten. Legt die KI
+mehrere auf einmal vor, verfallen die übrigen in der Stimme, sobald über diesen
+einen entschieden ist, auf jedem Sprachweg. Die KI sagt das an; bestätigen
+lassen sie sich auf ihrer Karte im Chat. So trifft auch ein doppelt geschicktes
+Ja oder das Ja zum Wiederholen einer gescheiterten Aktion nie einen Vorschlag,
+nach dem niemand gefragt hat. Wer einen Löschkasten per Knopf erledigt und
+danach noch „ja" sagt, hört, dass es schon erledigt ist.
 
 „Klar" heisst hier wörtlich: die Äusserung muss **nichts als** eine Zustimmung
 sein. „Ja, aber schau vorher nochmal in die Logs" ist keine — das ist ein neuer
 Auftrag, und als Zustimmung gelesen täte die KI das Gegenteil des Gesagten.
 
-Das gesprochene Ja ersetzt genau einen Schritt: den Klick. Alles andere bleibt —
+Wo es gilt, ersetzt das gesprochene Ja genau einen Schritt: den Klick. Alles andere bleibt —
 die Rechte werden beim Bestätigen erneut geprüft, beim Ausführen ein drittes
 Mal, der Einmal-Token wird atomar entwertet, der Server-Mutex greift, das Audit
 vermerkt den Vorgang.
@@ -1394,11 +1438,15 @@ vermerkt den Vorgang.
 
 Hier stand bis zum 16.08.2026, dass Löschen, Backup-Restore sowie Schlüssel und
 Rollen per Stimme **nicht** bestätigbar sind — mit der Begründung, eine
-gesprochene Zustimmung sei schwächer als ein Klick. Der Betreiber hat das
-ausdrücklich anders entschieden: er will „lösch den Server" sagen, „ist das in
-Ordnung?" hören und „ja" antworten können. Die Einschränkung ist deshalb
-entfallen. Das Restrisiko bleibt beschreibbar und steht hier: im Audit steht
-danach eine gesprochene Zustimmung, und wer im Raum mithört, kann sie
+gesprochene Zustimmung sei schwächer als ein Klick. Der Betreiber hat das damals
+anders entschieden: er wollte „lösch den Server" sagen, „ist das in Ordnung?"
+hören und „ja" antworten können. Am 23.09.2026 hat er es zurückgenommen, nachdem
+im autonomen Modus beinahe sein Discord-Bot gelöscht worden wäre, weil das
+Modell einen Löschvorgang aus Versehen angestossen hatte. Seitdem bestätigt ein
+Löschen wieder nur der Klick, in jedem Kanal.
+
+Das Restrisiko der übrigen Aktionen bleibt beschreibbar und steht hier: im Audit
+steht danach eine gesprochene Zustimmung, und wer im Raum mithört, kann sie
 aussprechen. Wem das zu weit geht, nimmt `ai.voice.use` aus der Rolle.
 
 **Rückfragen** funktionieren wie im Chat — dieselbe Logik, andere Ausgabe: statt

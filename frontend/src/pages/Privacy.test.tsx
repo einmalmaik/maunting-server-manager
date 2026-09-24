@@ -45,6 +45,7 @@ const KI_PUNKTE = [
   'usage',
   'memory',
   'memoryConsent',
+  'memorySearch',
   'attachments',
   'autonomy',
   'tools',
@@ -140,19 +141,19 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.3 vom 2026-09-23 aus (Unterschrift am Sitzungsaufbau, Rueckfrage vor der Uebergabe, Recht fuer die Verfallsfrist in Gruppen)', () => {
+  it('weist die Fassung 3.4 vom 2026-09-24 aus (Geraetefreigabe mit Unterschrift, Entfernen sperrt sofort, Anhaenge nach 90 Tagen)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.3`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.4`)),
     ).toBeInTheDocument();
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();
     // Maschinenlesbar und sichtbar muessen dasselbe Datum tragen: ein Leser
     // vergleicht den Text, ein Archiv das Attribut.
-    expect(stand).toHaveAttribute('datetime', '2026-09-23');
-    expect(stand).toHaveTextContent('2026-09-23');
+    expect(stand).toHaveAttribute('datetime', '2026-09-24');
+    expect(stand).toHaveTextContent('2026-09-24');
   });
 
   /**
@@ -164,31 +165,31 @@ describe('Privacy page', () => {
   it('sagt, was nach dem Ablehnen beim Koppeln weiterläuft und wie man ein Gerät loswird', () => {
     const de = i18n.t('privacyPolicy.sections.messenger.items.deviceHistory', { lng: 'de' })
     expect(de).toMatch(/nur mit der Unterschrift des übergebenden Geräts/)
-    expect(de).toMatch(/bleibt das Gerät gekoppelt/)
-    expect(de).toMatch(/entferne es/)
+    expect(de).toMatch(/bleibt das Gerät gekoppelt, aber ohne Freigabe/)
     const en = i18n.t('privacyPolicy.sections.messenger.items.deviceHistory', { lng: 'en' })
     expect(en).toMatch(/only accepts with the signature of the handing-over device/)
-    expect(en).toMatch(/the device stays paired/)
-    expect(en).toMatch(/remove it/)
+    expect(en).toMatch(/the device stays paired but unapproved/)
   });
 
   /**
-   * Durchsicht vom 23.09.: der Text las sich, als hielte die Rückfrage samt
-   * Entfernen den Schaden auf. Der Notizschlüssel geht aber an jedes Gerät des
-   * Kontos, bestätigt oder nicht, und wird beim Entfernen nicht erneuert; ein
-   * schon ausgestellter Zugang gilt noch bis zu 15 Minuten.
+   * Seit 24.09. sperrt Entfernen die Sitzung sofort; die 15 Minuten eines
+   * schon ausgestellten Zugangs sind weg. Was bleibt: der Notizschlüssel, den
+   * ein freigegebenes Gerät schon hatte, wird nicht erneuert. Und die
+   * Webversion schützt nicht gegen ihren eigenen Server — das steht dabei.
    */
   it('verspricht vom Entfernen nicht mehr, als es hält', () => {
     const de = i18n.t('privacyPolicy.sections.messenger.items.deviceHistory', { lng: 'de' })
-    expect(de).toMatch(/auch ohne die Rückfrage beim Koppeln/)
-    expect(de).toMatch(/Beim Entfernen wird er nicht erneuert/)
-    expect(de).toMatch(/bis zu 15 Minuten/)
+    expect(de).toMatch(/gilt ab der nächsten Anfrage nicht mehr/)
+    expect(de).toMatch(/beim Entfernen wird er nicht erneuert/)
+    expect(de).toMatch(/Gegen einen Betreiber, der ihn verändert/)
+    expect(de).not.toMatch(/15 Minuten/)
     const en = i18n.t('privacyPolicy.sections.messenger.items.deviceHistory', { lng: 'en' })
-    expect(en).toMatch(/without the confirmation used for pairing/)
-    expect(en).toMatch(/Removing a device does not replace that key/)
-    expect(en).toMatch(/up to 15 minutes/)
+    expect(en).toMatch(/stops working with its next request/)
+    expect(en).toMatch(/removing it does not replace that key/)
+    expect(en).toMatch(/an operator who changes it/)
+    expect(en).not.toMatch(/15 minutes/)
     for (const lng of ['de', 'en']) {
-      expect(i18n.t('ai.profile.devicePairRemoved', { lng })).toMatch(/15/)
+      expect(i18n.t('ai.profile.devicePairRemoved', { lng })).not.toMatch(/15/)
     }
   });
 
@@ -227,8 +228,9 @@ describe('Privacy page', () => {
     // Ausdruecklich als Zahl festgehalten: neun Punkte vor der
     // Guardian-Kopplung, zehn danach, elf seit den stehenden KI-Aufgaben,
     // dreizehn seit verknüpften Postfächern und Kalendern, vierzehn mit
-    // Sprachmodus, fuenfzehn seit die KI den Messenger nicht mehr erreicht.
-    expect(gerendert).toHaveLength(15);
+    // Sprachmodus, fuenfzehn seit die KI den Messenger nicht mehr erreicht,
+    // sechzehn seit dem Google-Rückfall der Bedeutungssuche (24.09.2026).
+    expect(gerendert).toHaveLength(16);
   });
 });
 

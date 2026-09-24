@@ -5,12 +5,12 @@ import { useTranslation } from 'react-i18next'
 import { formatRelativeTime } from '@/utils/timeFormat'
 
 import { api } from '@/api/client'
-import { deleteEigenesGeraet } from '@/api/social'
+import { getE2eeGeraete } from '@/api/social'
 import { API_ORIGIN } from '@/config/api'
 import { SecretOnce } from '@/components/ui/SecretOnce'
 import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
 import { Button } from '@/Singra/UI'
-import { sicherheitsnummer, vergessenGeraete } from '@/services/e2eeGeraet'
+import { entferneGeraet, gebeGeraetFrei, sicherheitsnummer } from '@/services/e2eeGeraet'
 import {
   uebergebeVerlauf,
   type KopplungsStatus,
@@ -167,10 +167,26 @@ export function AiDevicePairingCard() {
     }
   }
 
+  /**
+   * Der Eintrag des gekoppelten Geräts, wie der Server ihn hält — mit
+   * Signaturschlüssel, über den die Freigabe unterschreibt. Nur wenn der
+   * Verschlüsselungsschlüssel noch derselbe ist, dessen Nummer verglichen wurde.
+   */
+  const verzeichnisEintrag = async (ziel: UebergabeZiel) => {
+    const konto = angemeldetesKonto()
+    if (!konto) return null
+    const liste = await getE2eeGeraete(konto, true)
+    return liste.find((g) => g.device_id === ziel.device_id && g.public_key === ziel.public_key) ?? null
+  }
+
   const uebergeben = async () => {
     if (!rueckfrage) return
     setUebergibt(true)
     try {
+      // Die Nummern stimmen: das ist die Freigabe. Ohne sie bekäme das neue
+      // Gerät keine Nachrichten, sondern nur den Verlauf.
+      const eintrag = await verzeichnisEintrag(rueckfrage.ziel)
+      if (eintrag && eintrag.is_approved === false) await gebeGeraetFrei(eintrag)
       const abgelegt = await uebergebeVerlauf(rueckfrage.code, [rueckfrage.ziel])
       toast.success(
         t(abgelegt ? 'ai.profile.devicePairHandedOver' : 'ai.profile.devicePairSuccess'),
@@ -210,11 +226,10 @@ export function AiDevicePairingCard() {
           if (err?.status !== 404) throw err
         }
       }
-      await deleteEigenesGeraet(rueckfrage.ziel.device_id)
-      // Sonst verschlüsselte dieser Tab noch bis zu zehn Minuten lang auch an
-      // das gerade entfernte Gerät.
-      const konto = angemeldetesKonto()
-      if (konto) vergessenGeraete(konto)
+      // Vergisst auch den Cache: sonst verschlüsselte dieser Tab noch bis zu
+      // zehn Minuten lang auch an das gerade entfernte Gerät.
+      const eintrag = await verzeichnisEintrag(rueckfrage.ziel)
+      if (eintrag) await entferneGeraet(eintrag)
       toast.success(t('ai.profile.devicePairRemoved'))
       setRueckfrage(null)
     } catch (err: any) {

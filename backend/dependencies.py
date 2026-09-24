@@ -32,10 +32,32 @@ def _user_from_token(token: str | None, db: Session) -> User:
         raise HTTPException(status_code=401, detail="Ungültiges Token")
     if is_jwt_blacklisted(db, jti):
         raise HTTPException(status_code=401, detail="Token widerrufen")
+    if _familie_gesperrt(db, payload.get("familie")):
+        raise HTTPException(status_code=401, detail="Token widerrufen")
     user = AuthService.get_user_by_username(db, payload["sub"])
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User nicht gefunden oder inaktiv")
     return user
+
+
+def _familie_gesperrt(db: Session, familie: object) -> bool:
+    """Ist die Sitzungskette dieses Access-Tokens gesperrt?
+
+    Bis 09/2026 galt ein Access-Token nach dem Sperren seiner Familie noch bis
+    zu seinem Ablauf weiter — ein entferntes Geraet las eine Viertelstunde
+    lang mit. Gesperrt heisst: es gibt Zeilen der Familie, aber keine ohne
+    `revoked_at`. Eine Rotation setzt nur `used_at`, laesst die Familie also
+    offen; eine Familie ganz ohne Zeilen (abgelaufen und aufgeraeumt) sperrt
+    hier nichts — dafuer ist der Ablauf des Access-Tokens da.
+    """
+    if not familie:
+        return False
+    from models.refresh_token import RefreshToken
+
+    basis = db.query(RefreshToken.id).filter(RefreshToken.family == str(familie))
+    if basis.filter(RefreshToken.revoked_at.is_(None)).first() is not None:
+        return False
+    return basis.first() is not None
 
 
 def _bearer_token(request: Request) -> str | None:

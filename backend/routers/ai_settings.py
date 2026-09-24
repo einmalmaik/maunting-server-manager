@@ -25,6 +25,8 @@ from schemas.ai_settings import (
     AiMapTilerKeyUpdate,
     AiMapTilerMapConfig,
     AiMapTilerStatus,
+    AiMemorySearchStatus,
+    AiMemorySearchUpdate,
     AiRoleLimitsResponse,
     AiRoleLimitsUpdate,
     AiSatelliteCredentialsUpdate,
@@ -600,6 +602,60 @@ def set_context_policy(
         max_percent=ai_context_window.MAX_SCHWELLE,
         memory_search_ready=ai_embedding_service.is_ready(),
     )
+
+
+def _memory_search_status(db: Session) -> AiMemorySearchStatus:
+    from services import ai_embedding_service
+
+    return AiMemorySearchStatus(
+        fallback=ai_embedding_service.rueckfall(db) or "off",
+        available=ai_embedding_service.zugaenge_mit_schluessel(db),
+        local_ready=ai_embedding_service.lokal_bereit(),
+        ready=ai_embedding_service.is_ready(),
+    )
+
+
+@router.get("/settings/memory-search", response_model=AiMemorySearchStatus)
+def get_memory_search_policy(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_global("panel.settings.read")),
+) -> AiMemorySearchStatus:
+    return _memory_search_status(db)
+
+
+@router.put("/settings/memory-search", response_model=AiMemorySearchStatus)
+def set_memory_search_policy(
+    payload: AiMemorySearchUpdate,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_global("panel.settings.write")),
+    _: None = Depends(verify_csrf),
+) -> AiMemorySearchStatus:
+    """Wählt, bei wem die Bedeutungssuche ohne lokales Modell rechnen darf.
+
+    Eine Datenschutzentscheidung und keine Komfortfrage: gewählt gehen
+    Gedächtnistexte, Skillbeschreibungen und Chatfragen im Klartext an Google
+    oder OpenAI, auch wenn im Chat ein anderer Anbieter gewählt ist. Deshalb
+    Standard aus, deshalb im Audit.
+
+    Ein Anbieter ohne aktiven Zugang darf trotzdem gewählt werden: der
+    Betreiber trägt den Schlüssel vielleicht erst danach ein. Die Antwort
+    sagt über ``available`` und ``ready``, ob gerade gerechnet werden kann.
+    """
+    from services import ai_embedding_service
+
+    gewaehlt = ai_embedding_service.set_rueckfall(
+        None if payload.fallback == "off" else payload.fallback, db
+    )
+    audit_service.record_privileged_action(
+        db,
+        user_id=actor.id,
+        action="ai.memory_search.fallback.updated",
+        target_type="panel_setting",
+        target_id=None,
+        details={"fallback": gewaehlt or "off"},
+    )
+    db.commit()
+    return _memory_search_status(db)
 
 
 def _worker_policy_status() -> AiWorkerPolicyStatus:

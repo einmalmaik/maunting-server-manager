@@ -62,7 +62,6 @@ from sqlalchemy.orm import Session
 from models import AiSkill, User
 from services import ai_embedding_service, audit_service, permission_service, team_service
 from services.ai_embedding_service import EMBEDDING_DIMENSIONS
-from services.ai_embedding_service import MODEL_TAG as _EMBEDDING_MODEL_TAG
 from services.ai_redaction import enthaelt_zugangsdaten
 
 
@@ -344,8 +343,12 @@ def _index_source(view: SkillView) -> str:
     return _index_text(view.skill_key, view.name, view.description)
 
 
-def _stored_vector(row: AiSkill) -> list[float] | None:
-    """Liest den gespeicherten Auswahlvektor, wenn er zum geladenen Modell passt.
+def _stored_vector(row: AiSkill, modell: str) -> list[float] | None:
+    """Liest den gespeicherten Auswahlvektor, wenn er aus dem Modell ``modell`` stammt.
+
+    ``modell`` ist die Kennung der Frage, nicht eine Konstante — siehe
+    `ai_memory_service._stored_vector`: ein Google-Vektor aus dem Rückfall hat
+    dieselbe Länge wie ein lokaler und bestand bisher jede Prüfung.
 
     Die fehlende Gegenstelle zu `refresh_embedding`, gebaut wie die des
     Gedaechtnisses (`ai_memory_service._stored_vector`). Passt der Modellname
@@ -353,7 +356,7 @@ def _stored_vector(row: AiSkill) -> list[float] | None:
     der Skill wird frisch kodiert: ein Modellwechsel heilt sich damit von
     selbst, ohne Migration und ohne falsche Aehnlichkeiten in der Zwischenzeit.
     """
-    if not row.embedding_json or row.embedding_model != _EMBEDDING_MODEL_TAG:
+    if not row.embedding_json or row.embedding_model != modell:
         return None
     try:
         vector = json.loads(row.embedding_json)
@@ -364,7 +367,7 @@ def _stored_vector(row: AiSkill) -> list[float] | None:
     return vector
 
 
-def refresh_embedding(row: AiSkill) -> None:
+def refresh_embedding(db: Session, row: AiSkill) -> None:
     """Berechnet den Auswahlvektor neu, falls ein Modell geladen ist.
 
     Schlägt es fehl, wird ein vorhandener Vektor **verworfen** und der Skill
@@ -385,18 +388,20 @@ def refresh_embedding(row: AiSkill) -> None:
     solche Zeilen beim nächsten Abruf ohnehin frisch nach, der Zustand heilt
     sich also von selbst, sobald wieder ein Modell da ist.
     """
-    vectors = ai_embedding_service.encode(
-        [_index_text(row.skill_key, row.name, row.description)]
+    kodierung = ai_embedding_service.encode(
+        [_index_text(row.skill_key, row.name, row.description)], db=db
     )
-    if not vectors:
+    if kodierung is None or not kodierung.vektoren:
         row.embedding_json = None
         row.embedding_model = None
         return
-    row.embedding_json = json.dumps(vectors[0], separators=(",", ":"))
-    row.embedding_model = _EMBEDDING_MODEL_TAG
+    row.embedding_json = json.dumps(kodierung.vektoren[0], separators=(",", ":"))
+    row.embedding_model = kodierung.modell
 
 
-def _candidate_vectors(db: Session, views: list[SkillView]) -> list[list[float]] | None:
+def _candidate_vectors(
+    db: Session, views: list[SkillView], modell: str
+) -> list[list[float]] | None:
     """Die Vergleichsvektoren aller sichtbaren Skills — gespeichert, wo es geht.
 
     Diese Funktion laeuft bei **jeder** Chatnachricht, sobald mehr Skills
@@ -410,23 +415,31 @@ def _candidate_vectors(db: Session, views: list[SkillView]) -> list[list[float]]
     aus der Zeit eines anderen Embeddingmodells.
 
     ``None`` heisst "keine Auswahl moeglich"; dann bleibt es bei der
-    alphabetischen Reihenfolge, genau wie ohne Modell.
+    alphabetischen Reihenfolge, genau wie ohne Modell. Das gilt auch, wenn der
+    Nachschub aus einem anderen Modell kommt als ``modell``, die Frage —
+    etwa weil das lokale Modell zwischen beiden Aufrufen geladen wurde.
     """
     stored: dict[str, list[float]] = {}
     ids = [view.id for view in views if view.id is not None]
     if ids:
         for row in db.query(AiSkill).filter(AiSkill.id.in_(ids)).all():
-            vector = _stored_vector(row)
+            vector = _stored_vector(row, modell)
             if vector is not None:
                 stored[row.id] = vector
 
     missing = [view for view in views if stored.get(view.id) is None]
     fresh: list[list[float]] = []
     if missing:
-        encoded = ai_embedding_service.encode([_index_source(view) for view in missing])
-        if encoded is None or len(encoded) != len(missing):
+        encoded = ai_embedding_service.encode(
+            [_index_source(view) for view in missing], db=db
+        )
+        if (
+            encoded is None
+            or encoded.modell != modell
+            or len(encoded.vektoren) != len(missing)
+        ):
             return None
-        fresh = encoded
+        fresh = encoded.vektoren
 
     nachschub = iter(fresh)
     candidates: list[list[float]] = []
@@ -510,14 +523,14 @@ def skill_index(db: Session, user: User, query: str = "") -> list[SkillView]:
     if len(views) <= MAX_INDEXED_SKILLS or not query.strip():
         return _neueste_zuerst(views)
 
-    query_vectors = ai_embedding_service.encode([query])
-    if not query_vectors:
+    frage = ai_embedding_service.encode([query], db=db)
+    if frage is None or not frage.vektoren:
         return _neueste_zuerst(views)
-    candidates = _candidate_vectors(db, views)
+    candidates = _candidate_vectors(db, views, frage.modell)
     if candidates is None:
         return _neueste_zuerst(views)
 
-    scores = ai_embedding_service.similarity(query_vectors[0], candidates)
+    scores = ai_embedding_service.similarity(frage.vektoren[0], candidates)
     if len(scores) != len(views):
         return _neueste_zuerst(views)
     # Erster Schlüsselteil: mitgeliefert (`updated_at is None`) vor änderbar.
@@ -795,7 +808,7 @@ def upsert_skill(
         # hatte. Zusammen mit dem Inhalts-Abdruck in `approve` ist damit
         # nachvollziehbar, *wessen* Text der Betreiber freigibt.
         row.created_by = user.id
-    refresh_embedding(row)
+    refresh_embedding(db, row)
     row.updated_at = datetime.now(timezone.utc)
 
     audit_service.record_privileged_action(

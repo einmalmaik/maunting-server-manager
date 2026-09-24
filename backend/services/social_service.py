@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import logging
 from typing import Any
 from fastapi import HTTPException
@@ -32,6 +32,10 @@ from services.call_room_service import GroupCallRoomRegistry
 from services import webpush_service
 
 logger = logging.getLogger(__name__)
+
+#: Vorhaltefrist für E2EE-Umschläge auf dem Relais-Server (30 Tage).
+#: Schützt vor Datenanhäufung bei Datenlecks und erzwingt das Zero-Knowledge-Prinzip.
+E2EE_ENVELOPE_RETENTION_DAYS: int = 30
 
 
 #: Alle Rechte, die eine Gruppenrolle tragen kann. Wer hier nichts stehen hat,
@@ -1884,12 +1888,38 @@ class SocialService:
         return len(rows)
 
     @classmethod
+    def cleanup_expired_envelopes(
+        cls, db: Session, days: int = E2EE_ENVELOPE_RETENTION_DAYS
+    ) -> int:
+        """Löscht blinde Umschläge, die älter als `days` Tage sind (Default: 30 Tage).
+
+        Zero-Knowledge / Vorhaltefrist-Garantie:
+        Der Relais-Server speichert Umschläge maximal 30 Tage.
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        deleted = (
+            db.query(E2eeBlindEnvelope)
+            .filter(E2eeBlindEnvelope.created_at < cutoff)
+            .delete(synchronize_session=False)
+        )
+        if deleted > 0:
+            db.commit()
+            logger.info(
+                "E2EE-Vorhaltefrist: %d abgelaufene Umschläge (> %d Tage) bereinigt.",
+                deleted,
+                days,
+            )
+        return deleted
+
+    @classmethod
     def get_blind_envelopes(
         cls, db: Session, blind_mailbox_id: str, since_id: int = 0, limit: int = 50
     ) -> list[E2eeBlindEnvelope]:
-        """Holt blinde Umschläge aus einer Mailbox ab."""
+        """Holt blinde Umschläge aus einer Mailbox ab (maximal 30 Tage alt)."""
+        cutoff = datetime.now(timezone.utc) - timedelta(days=E2EE_ENVELOPE_RETENTION_DAYS)
         query = db.query(E2eeBlindEnvelope).filter(
-            E2eeBlindEnvelope.blind_mailbox_id == blind_mailbox_id
+            E2eeBlindEnvelope.blind_mailbox_id == blind_mailbox_id,
+            E2eeBlindEnvelope.created_at >= cutoff,
         )
         if since_id > 0:
             query = query.filter(E2eeBlindEnvelope.id > since_id)
@@ -1962,6 +1992,7 @@ class SocialService:
             return []
 
         # 4. Aggregiere Mailbox-Statistiken über E2eeBlindEnvelope in Batches à 500
+        cutoff = datetime.now(timezone.utc) - timedelta(days=E2EE_ENVELOPE_RETENTION_DAYS)
         results: list[dict[str, Any]] = []
         chunk_size = 500
         for i in range(0, len(all_mids), chunk_size):
@@ -1975,6 +2006,7 @@ class SocialService:
                 .filter(
                     E2eeBlindEnvelope.blind_mailbox_id.in_(chunk),
                     E2eeBlindEnvelope.id > effective_since,
+                    E2eeBlindEnvelope.created_at >= cutoff,
                 )
                 .group_by(E2eeBlindEnvelope.blind_mailbox_id)
                 .all()

@@ -9,6 +9,11 @@ from services.ai_voice import realtime_session
 from services.ai_tool_registry import WERKZEUGE
 
 
+def _ohne_karte():
+    """Die Frage nach der Zustimmung, beantwortet wie im autonomen Modus."""
+    return patch("services.ai_voice.interactions.freigabe_einholen", return_value=None)
+
+
 def test_execute_server_action_is_registered_in_registry():
     assert "execute_server_action" in WERKZEUGE
     assert WERKZEUGE["execute_server_action"].art == "global_read"
@@ -25,7 +30,8 @@ def test_dispatch_voice_action_empty_input():
 
 
 def test_dispatch_voice_action_routes_read_tool(db: Session, regular_user: User):
-    with patch("services.ai_voice.voice_dispatcher.ai_action_service.angebotene_werkzeuge") as mock_angebot:
+    # Mit autonomem Modus: keine Karte davor (`_ohne_karte`).
+    with patch("services.ai_voice.voice_dispatcher.ai_action_service.angebotene_werkzeuge") as mock_angebot, _ohne_karte():
         mock_angebot.return_value = frozenset({"read_server_ports", "list_my_servers"})
         with patch("services.ai_stream.read_tools._werkzeug_ausfuehren") as mock_exec:
             mock_exec.return_value = ({"ports": [2456, 2457]}, None)
@@ -40,6 +46,90 @@ def test_dispatch_voice_action_routes_read_tool(db: Session, regular_user: User)
             assert wert.get("executed_tool") == "read_server_ports"
             assert wert.get("data") == {"ports": [2456, 2457]}
             assert vorschlaege == []
+
+
+def test_ohne_autonomie_fragt_auch_der_umweg_erst(db: Session, regular_user: User):
+    """Ohne autonomen Modus liest `execute_server_action` nichts ohne Ja.
+
+    Vorgabe des Betreibers vom 23.09.2026: „autonome Modus aus heißt ALLES
+    muss bestätigt werden". Der Umweg über den Dispatcher erreicht jedes
+    Werkzeug des Benutzers. Liefe er an der Frage vorbei, wäre die Regel für
+    den geraden Weg eine Attrappe. `regular_user` hat keine Freigabe, also
+    entsteht eine Karte, und das Werkzeug selbst läuft nicht.
+    """
+    with patch("services.ai_voice.voice_dispatcher.ai_action_service.angebotene_werkzeuge") as mock_angebot:
+        mock_angebot.return_value = frozenset({"read_server_ports", "list_my_servers"})
+        with patch("services.ai_stream.write_tools._persist_write_proposals") as mock_persist, \
+                patch("services.ai_stream.read_tools._werkzeug_ausfuehren") as mock_exec:
+            mock_persist.return_value = [{
+                "id": "prop-lesen", "tool_name": "read_server_ports",
+                "status": "proposed", "autonomous": False,
+            }]
+
+            wert, fehler, anzeige, vorschlaege = dispatch_voice_action(
+                user_id=regular_user.id,
+                arguments={"action": "Welche Ports nutzt Server 3?", "server_id": 3},
+                conversation_id="conv-123",
+            )
+
+    assert fehler is None
+    assert wert["executed_tool"] == "read_server_ports"
+    assert wert["status"] == "needs_confirmation"
+    assert "voice_resolve_latest_proposal" in wert["hinweis"]
+    assert [v["id"] for v in vorschlaege] == ["prop-lesen"]
+    mock_exec.assert_not_called()
+
+
+def test_im_chat_fragt_der_umweg_kein_zweites_mal(db: Session, regular_user: User):
+    """Ein Chatlauf hat für `execute_server_action` schon gefragt.
+
+    Ohne Freigabe stand der Aufruf dort auf einer Karte (`ai_stream.engine`),
+    und nach dem Klick kommt er hier an. Bis zum Review vom 23.09.2026 legte
+    der Dispatcher dann eine zweite Karte an, und der bestätigte Aufruf lief
+    nie. `regular_user` hat keine Freigabe.
+    """
+    from services.ai_tools.server_tools import execute_read_tool
+
+    with patch("services.ai_voice.voice_dispatcher.ai_action_service.angebotene_werkzeuge") as mock_angebot:
+        mock_angebot.return_value = frozenset({"read_server_ports", "list_my_servers"})
+        with patch(
+            "services.ai_stream.write_tools._persist_write_proposals",
+            side_effect=AssertionError("eine zweite Karte"),
+        ), patch("services.ai_stream.read_tools._werkzeug_ausfuehren") as mock_exec:
+            mock_exec.return_value = ({"ports": [2456]}, None)
+
+            wert = execute_read_tool(
+                db, user=regular_user, tool_name="execute_server_action",
+                arguments={"action": "Welche Ports nutzt Server 3?", "server_id": 3},
+            )
+
+    assert wert["executed_tool"] == "read_server_ports"
+    assert wert["data"] == {"ports": [2456]}
+
+
+def test_im_chat_fragt_der_umweg_beim_loeschen_trotzdem(db: Session, regular_user: User):
+    """Was auch im autonomen Modus fragt, fragt hier weiter, und zwar per Klick."""
+    from services.ai_tools.server_tools import execute_read_tool
+    from services.ai_voice.interactions import KLICK_NOETIG
+
+    with patch("services.ai_voice.voice_dispatcher.ai_action_service.angebotene_werkzeuge") as mock_angebot:
+        mock_angebot.return_value = frozenset({"forget_memory", "list_my_servers"})
+        with patch("services.ai_stream.write_tools._persist_write_proposals") as mock_persist, \
+                patch("services.ai_stream.read_tools._werkzeug_ausfuehren") as mock_exec:
+            mock_persist.return_value = [{
+                "id": "prop-vergessen", "tool_name": "forget_memory",
+                "status": "proposed", "autonomous": False,
+            }]
+
+            wert = execute_read_tool(
+                db, user=regular_user, tool_name="execute_server_action",
+                arguments={"tool_name": "forget_memory", "parameters": {"key": "urlaub"}},
+            )
+
+    assert wert["executed_tool"] == "forget_memory"
+    assert wert["status"] == "needs_confirmation"
+    assert wert["hinweis"] == KLICK_NOETIG
+    mock_exec.assert_not_called()
 
 
 def test_dispatch_voice_action_routes_write_tool_as_proposal(db: Session, regular_user: User):
@@ -62,7 +152,7 @@ def test_dispatch_voice_action_routes_write_tool_as_proposal(db: Session, regula
 
 
 def test_dispatch_voice_action_explicit_tool_name(db: Session, regular_user: User):
-    with patch("services.ai_voice.voice_dispatcher.ai_action_service.angebotene_werkzeuge") as mock_angebot:
+    with patch("services.ai_voice.voice_dispatcher.ai_action_service.angebotene_werkzeuge") as mock_angebot, _ohne_karte():
         mock_angebot.return_value = frozenset({"search_workshop_mods", "list_my_servers"})
         with patch("services.ai_stream.read_tools._werkzeug_ausfuehren") as mock_exec:
             mock_exec.return_value = ({"mods": [{"id": "123", "name": "ValheimPlus"}]}, None)

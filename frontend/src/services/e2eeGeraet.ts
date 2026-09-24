@@ -45,7 +45,7 @@ import { sha256Hex } from '@msdis/shield/integrity'
 import i18n from '@/i18n'
 
 import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
-import { erzeugeSignaturPaar, pruefe, type SignaturPaar } from './absenderSignatur'
+import { erzeugeSignaturPaar, pruefe, signiere, type SignaturPaar } from './absenderSignatur'
 import { generateLocalE2eeKeyPair, type LocalE2eeKeyPair } from './e2eeCrypto'
 import {
   MessengerVerschlossenError,
@@ -55,8 +55,11 @@ import {
 } from './lokaleVersiegelung'
 import { uebernehmeAltbestand } from './ratchetSpeicher'
 import {
+  approveEigenesGeraet,
   getE2eeGeraete,
   putEigenesGeraet,
+  removeEigenesGeraet,
+  resetEigeneGeraete,
   type E2eeGeraetItem,
 } from '@/api/social'
 
@@ -439,12 +442,13 @@ let veroeffentlichtAls: string | null = null
 export async function geraetVeroeffentlichen(label = ''): Promise<EigenesGeraet> {
   const geraet = await eigenesGeraet()
   if (veroeffentlichtAls === geraet.kennung) return geraet
-  await putEigenesGeraet({
+  const antwort = await putEigenesGeraet({
     deviceId: geraet.kennung,
     publicKey: geraet.paar.publicKeyJwk,
     signingPublicKey: geraet.signaturPaar.publicKeyJwk,
     label,
   })
+  setzeEigeneFreigabe(antwort?.is_approved !== false)
   veroeffentlichtAls = geraet.kennung
   return geraet
 }
@@ -619,57 +623,277 @@ export async function geraeteVon(userId: number): Promise<E2eeGeraetItem[]> {
 }
 
 // ==========================================
-// Bekannte Geräte & Geräteverzeichnis-Prüfung (M-10)
+// Vertraute Geräte: der Server hat nicht das letzte Wort
 // ==========================================
 
-const BEKANNTE_GERAETE_PRAEFIX = 'msm_bekannte_geraete:'
-const bekannteGeraeteImRam = new Map<number, string[]>()
-
-export function getBekannteGeraete(userId: number): string[] | null {
-  try {
-    if (typeof localStorage !== 'undefined') {
-      const raw = localStorage.getItem(`${BEKANNTE_GERAETE_PRAEFIX}${userId}`)
-      if (raw) return JSON.parse(raw)
-    }
-  } catch {}
-  return bekannteGeraeteImRam.get(userId) ?? null
-}
-
-export function setBekannteGeraete(userId: number, deviceIds: string[]): void {
-  try {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(`${BEKANNTE_GERAETE_PRAEFIX}${userId}`, JSON.stringify(deviceIds))
-    }
-  } catch {}
-  bekannteGeraeteImRam.set(userId, deviceIds)
-}
-
-export function pruefeUndAktualisiereNeueGeraete(
+/**
+ * Was ein freigegebenes Gerät unterschreibt, wenn es ein neues freigibt.
+ * Dieselben Bytes wie `e2ee_device_service.freigabe_daten` im Backend.
+ */
+export async function freigabeDaten(
   userId: number,
-  aktuelleGeraete: { device_id: string }[],
-): string[] {
-  const aktuelleIds = aktuelleGeraete.map((g) => g.device_id)
-  const bekannt = getBekannteGeraete(userId)
-  if (bekannt === null) {
-    // Erstkontakt: Wir merken uns die aktuellen Geräte als Basisbestand ohne Warnung.
-    setBekannteGeraete(userId, aktuelleIds)
-    return []
-  }
-  const neue = aktuelleIds.filter((id) => !bekannt.includes(id))
-  if (neue.length > 0) {
-    setBekannteGeraete(userId, Array.from(new Set([...bekannt, ...aktuelleIds])))
-  }
-  return neue
+  deviceId: string,
+  publicKey: string,
+  signingPublicKey: string,
+): Promise<string> {
+  const k = await sha256Hex(utf8ToBytes(publicKey))
+  const s = await sha256Hex(utf8ToBytes(signingPublicKey || ''))
+  return `msm:device-approval:v2:${userId}:${deviceId}:${k}:${s}`
 }
 
-export type NeuesGeraetListener = (userId: number, neueGeraete: string[]) => void
-const neuesGeraetListeners = new Set<NeuesGeraetListener>()
+/** Was ein freigegebenes Gerät unterschreibt, wenn es ein Gerät entfernt. */
+export async function entfernenDaten(
+  userId: number,
+  deviceId: string,
+  publicKey: string,
+): Promise<string> {
+  const k = await sha256Hex(utf8ToBytes(publicKey))
+  return `msm:device-removal:v1:${userId}:${deviceId}:${k}`
+}
 
-export function onNeuesGeraet(listener: NeuesGeraetListener): () => void {
-  neuesGeraetListeners.add(listener)
-  return () => {
-    neuesGeraetListeners.delete(listener)
+/** Je Gerät: Hash des Verschlüsselungsschlüssels und der Signaturschlüssel. */
+type VertrautesGeraet = { k: string; s: string }
+type VertrauteListe = Record<string, VertrautesGeraet>
+
+/**
+ * Neues Präfix, nicht `msm_bekannte_geraete:`. Die alte Liste hielt nur fest,
+ * was der Server je gezeigt hatte — auch Geräte, die er selbst eingetragen
+ * haben könnte. Eine Liste mit diesem Präfix beginnt beim ersten Abruf nach
+ * dem Update von vorn, und ab da zählt die Kette.
+ */
+const VERTRAUT_PRAEFIX = 'msm_vertraute_geraete:'
+const vertrauteImRam = new Map<number, VertrauteListe>()
+
+function liesVertraute(userId: number): VertrauteListe | null {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const roh = localStorage.getItem(`${VERTRAUT_PRAEFIX}${userId}`)
+      if (roh) {
+        const wert = JSON.parse(roh)
+        if (wert && typeof wert === 'object') return wert as VertrauteListe
+      }
+    }
+  } catch {
+    // Unlesbar heißt: wie Erstkontakt.
   }
+  return vertrauteImRam.get(userId) ?? null
+}
+
+function schreibeVertraute(userId: number, liste: VertrauteListe): void {
+  vertrauteImRam.set(userId, liste)
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(`${VERTRAUT_PRAEFIX}${userId}`, JSON.stringify(liste))
+    }
+  } catch {
+    // Voller Speicher: der RAM hält es bis zum Neuladen.
+  }
+}
+
+/**
+ * - `neues_geraet`: ein Gerät kam dazu, von einem vertrauten freigegeben.
+ * - `unbestaetigt`: der Server nennt ein Gerät, das keine gültige Freigabe
+ *   trägt — neu oder mit neuem Schlüssel. Es bekommt nichts.
+ * - `konto_neustart`: keines der bekannten Geräte ist mehr da. Das ist der
+ *   Neustart nach Verlust aller Geräte — oder ein Server, der Geräte
+ *   austauscht. Unterscheiden kann das nur der Mensch: Sicherheitsnummer.
+ */
+export type SchluesselWarnungTyp = 'neues_geraet' | 'unbestaetigt' | 'konto_neustart'
+
+export interface SchluesselWarnungEvent {
+  userId: number
+  typ: SchluesselWarnungTyp
+  geraete: string[]
+}
+
+export type SchluesselWarnungListener = (event: SchluesselWarnungEvent) => void
+const schluesselWarnungListeners = new Set<SchluesselWarnungListener>()
+
+export function onSchluesselWarnung(listener: SchluesselWarnungListener): () => void {
+  schluesselWarnungListeners.add(listener)
+  return () => {
+    schluesselWarnungListeners.delete(listener)
+  }
+}
+
+function melde(event: SchluesselWarnungEvent): void {
+  for (const listener of schluesselWarnungListeners) {
+    try {
+      listener(event)
+    } catch {
+      // Ein kaputter Zuhörer hält die Prüfung nicht auf.
+    }
+  }
+}
+
+/**
+ * Die Geräte eines Kontos, denen dieser Client glaubt.
+ *
+ * `is_approved` ist ein Wort des Servers, und ein Server kann ein Gerät
+ * eintragen und freigeben, wie er will. Geglaubt wird deshalb nur:
+ *
+ * 1. beim ersten Kontakt allem, was er zeigt (anders geht es nicht — das ist
+ *    der Moment für die Sicherheitsnummer);
+ * 2. danach jedem Gerät mit denselben Schlüsseln wie beim letzten Mal;
+ * 3. jedem Gerät, das ein vertrautes Gerät über genau diese Schlüssel
+ *    freigegeben hat (`approved_by` + `approval_signature`), auch in Ketten.
+ *
+ * Der Rest bekommt nichts und löst eine Warnung aus. Sind gar keine bekannten
+ * Geräte mehr da, beginnt die Liste mit Warnung neu — sonst wäre ein Konto
+ * nach Verlust aller Geräte für immer stumm.
+ *
+ * Das eigene Gerät zählt immer: seine Schlüssel liegen hier.
+ */
+export async function vertrauteGeraete(
+  userId: number,
+  liste: E2eeGeraetItem[],
+): Promise<E2eeGeraetItem[]> {
+  const hashes = await Promise.all(liste.map((g) => sha256Hex(utf8ToBytes(g.public_key))))
+  const fingerabdruck = (i: number): VertrautesGeraet => ({
+    k: hashes[i],
+    s: liste[i].signing_public_key || '',
+  })
+  const bekannt = liesVertraute(userId)
+
+  if (bekannt === null) {
+    const neu: VertrauteListe = {}
+    liste.forEach((g, i) => {
+      neu[g.device_id] = fingerabdruck(i)
+    })
+    schreibeVertraute(userId, neu)
+    return liste
+  }
+
+  const eigenes = geraetImRam?.konto === userId ? geraetImRam.geraet : null
+  const vertraut = new Map<string, VertrautesGeraet>()
+  const offen: number[] = []
+  liste.forEach((g, i) => {
+    const fp = fingerabdruck(i)
+    const alt = bekannt[g.device_id]
+    const istEigenes =
+      eigenes?.kennung === g.device_id && eigenes.paar.publicKeyJwk === g.public_key
+    // Ein Signaturschlüssel, der zu einem bekannten Gerät nachkommt, ist die
+    // Nachrüstung des Bestands und kein Austausch.
+    const gleich = alt && alt.k === fp.k && (alt.s === fp.s || alt.s === '')
+    if (istEigenes || gleich) vertraut.set(g.device_id, fp)
+    else offen.push(i)
+  })
+
+  const neuFreigegeben: string[] = []
+  let weiter = true
+  while (weiter && offen.length > 0) {
+    weiter = false
+    for (let n = 0; n < offen.length; n += 1) {
+      const i = offen[n]
+      const g = liste[i]
+      const von = g.approved_by
+      if (!von || von === g.device_id || !g.approval_signature) continue
+      const schluessel = vertraut.get(von)?.s || bekannt[von]?.s
+      if (!schluessel) continue
+      const daten = await freigabeDaten(userId, g.device_id, g.public_key, g.signing_public_key)
+      if (!(await pruefe(daten, g.approval_signature, schluessel))) continue
+      vertraut.set(g.device_id, fingerabdruck(i))
+      neuFreigegeben.push(g.device_id)
+      offen.splice(n, 1)
+      n -= 1
+      weiter = true
+    }
+  }
+
+  if (vertraut.size === 0 && liste.length > 0) {
+    const neu: VertrauteListe = {}
+    liste.forEach((g, i) => {
+      neu[g.device_id] = fingerabdruck(i)
+    })
+    schreibeVertraute(userId, neu)
+    melde({ userId, typ: 'konto_neustart', geraete: liste.map((g) => g.device_id) })
+    return liste
+  }
+
+  // Entfernte Geräte bleiben in der Liste: ihr Signaturschlüssel beglaubigt
+  // weiter, was sie freigegeben haben, bevor sie gingen.
+  schreibeVertraute(userId, { ...bekannt, ...Object.fromEntries(vertraut) })
+  if (neuFreigegeben.length > 0) melde({ userId, typ: 'neues_geraet', geraete: neuFreigegeben })
+  if (offen.length > 0) {
+    melde({ userId, typ: 'unbestaetigt', geraete: offen.map((i) => liste[i].device_id) })
+  }
+  return liste.filter((g) => vertraut.has(g.device_id))
+}
+
+/** Ob der Server dieses Gerät zuletzt als freigegeben gemeldet hat. `null`: noch nicht gemeldet. */
+let eigeneFreigabe: boolean | null = null
+const eigeneFreigabeListeners = new Set<(freigegeben: boolean | null) => void>()
+
+export function eigenesGeraetFreigegeben(): boolean | null {
+  return eigeneFreigabe
+}
+
+/** Meldet jede Änderung von `eigenesGeraetFreigegeben` — für den Hinweis im Messenger. */
+export function onEigeneFreigabe(listener: (freigegeben: boolean | null) => void): () => void {
+  eigeneFreigabeListeners.add(listener)
+  return () => {
+    eigeneFreigabeListeners.delete(listener)
+  }
+}
+
+function setzeEigeneFreigabe(wert: boolean | null): void {
+  if (eigeneFreigabe === wert) return
+  eigeneFreigabe = wert
+  for (const listener of eigeneFreigabeListeners) {
+    try {
+      listener(wert)
+    } catch {
+      // Ein kaputter Zuhörer ändert nichts am Stand.
+    }
+  }
+}
+
+async function unterschreibeMitEigenem(daten: string): Promise<{ kennung: string; sig: string }> {
+  const meins = await eigenesGeraet()
+  return { kennung: meins.kennung, sig: await signiere(daten, meins.signaturPaar.privateKeyJwk) }
+}
+
+/** Gibt ein wartendes Gerät des eigenen Kontos frei — unterschrieben von diesem. */
+export async function gebeGeraetFrei(geraet: E2eeGeraetItem): Promise<void> {
+  const konto = meinKonto()
+  const daten = await freigabeDaten(
+    konto,
+    geraet.device_id,
+    geraet.public_key,
+    geraet.signing_public_key,
+  )
+  const { kennung, sig } = await unterschreibeMitEigenem(daten)
+  await approveEigenesGeraet(geraet.device_id, kennung, sig)
+  vergessenGeraete(konto)
+}
+
+/**
+ * Entfernt ein Gerät des eigenen Kontos. Ein freigegebenes verlangt die
+ * Unterschrift dieses Geräts; ein wartendes nicht — es hat nie etwas bekommen.
+ */
+export async function entferneGeraet(geraet: E2eeGeraetItem): Promise<void> {
+  const konto = meinKonto()
+  let unterschrift: { kennung: string; sig: string } | null = null
+  if (geraet.is_approved !== false) {
+    unterschrift = await unterschreibeMitEigenem(
+      await entfernenDaten(konto, geraet.device_id, geraet.public_key),
+    )
+  }
+  await removeEigenesGeraet(geraet.device_id, unterschrift?.kennung, unterschrift?.sig)
+  vergessenGeraete(konto)
+}
+
+/**
+ * Alle Geräte verloren: das Verzeichnis dieses Kontos leeren und neu beginnen.
+ * Alle anderen Sitzungen fliegen hinaus, dieses Gerät meldet sich danach als
+ * erstes wieder an, und die Kontakte bekommen eine Warnung.
+ */
+export async function geraeteZuruecksetzen(passwort: string): Promise<void> {
+  const konto = meinKonto()
+  await resetEigeneGeraete(passwort)
+  veroeffentlichtAls = null
+  vergessenGeraete(konto)
+  await geraetVeroeffentlichen()
 }
 
 /**
@@ -692,16 +916,16 @@ async function holeGeraete(userId: number, frist = CACHE_FRIST_MS): Promise<E2ee
     return cached.geraete
   }
   try {
-    const geraete = await getE2eeGeraete(userId)
-    geraeteCache.set(userId, { geraete, geholtAm: Date.now() })
-    const neue = pruefeUndAktualisiereNeueGeraete(userId, geraete)
-    if (neue.length > 0) {
-      for (const listener of neuesGeraetListeners) {
-        try {
-          listener(userId, neue)
-        } catch {}
-      }
+    // Gecacht wird die geprüfte Liste: wer aus dem Cache liest, bekommt nie
+    // ein Gerät, das die Prüfung nicht bestanden hat.
+    const roh = await getE2eeGeraete(userId)
+    // Die Liste nennt nur freigegebene Geräte. Steht dieses darin, hat ein
+    // anderes es inzwischen freigegeben — der Hinweis kann weg.
+    if (geraetImRam?.konto === userId && roh.some((g) => g.device_id === geraetImRam?.geraet.kennung)) {
+      setzeEigeneFreigabe(true)
     }
+    const geraete = await vertrauteGeraete(userId, roh)
+    geraeteCache.set(userId, { geraete, geholtAm: Date.now() })
     return geraete
   } catch (fehler) {
     // Ein abgelaufener Eintrag ist immer noch besser als gar keiner: die
@@ -765,7 +989,8 @@ export async function verlangeGeraeteVon(userId: number): Promise<E2eeGeraetItem
  */
 export function clearGeraeteMemory(): void {
   geraeteCache.clear()
-  bekannteGeraeteImRam.clear()
+  vertrauteImRam.clear()
+  setzeEigeneFreigabe(null)
   geraetImRam = null
   aufbau = null
   veroeffentlichtAls = null

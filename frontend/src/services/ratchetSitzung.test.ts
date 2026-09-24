@@ -65,8 +65,8 @@ vi.mock('./e2eeGeraet', async (importOriginal) => {
   }
 })
 
-import { erzeugeSignaturPaar, type SignaturPaar } from './absenderSignatur'
-import { clearGeraeteMemory, geraeteVon, verlangeGeraeteVon } from './e2eeGeraet'
+import { erzeugeSignaturPaar, signiere, type SignaturPaar } from './absenderSignatur'
+import { clearGeraeteMemory, freigabeDaten, geraeteVon, verlangeGeraeteVon } from './e2eeGeraet'
 import { setzeAblageFuerTest, type RatchetAblage } from './ratchetSpeicher'
 import {
   DR_PREFIX,
@@ -923,6 +923,20 @@ describe('ratchetSitzung', () => {
       // eben frisch geholt — Bobs wird deshalb von Hand auf den alten Stand
       // gebracht.
       const handyEintrag = verzeichnis.get(ALICE)!.find((g) => g.device_id === neuesHandy.kennung)!
+      // Freigegeben vom Laptop — ohne diese Unterschrift bekäme das Handy von
+      // Bob gar nichts (`vertrauteGeraete`), und darum geht es hier nicht.
+      Object.assign(handyEintrag, {
+        approved_by: alice.kennung,
+        approval_signature: await signiere(
+          await freigabeDaten(
+            ALICE,
+            neuesHandy.kennung,
+            handyEintrag.public_key,
+            handyEintrag.signing_public_key,
+          ),
+          alice.signaturPaar.privateKeyJwk,
+        ),
+      })
       verzeichnis.set(ALICE, verzeichnis.get(ALICE)!.filter((g) => g !== handyEintrag))
       clearGeraeteMemory()
       aktiviere(bob)

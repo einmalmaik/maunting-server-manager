@@ -193,9 +193,13 @@ class TestGeraeteliste:
         code = _code_erzeugen(client, user_cookies, label="AltesGeraet")["code"]
         client.post("/api/auth/devices/redeem", json={"code": code})
 
-        # Token revoken
+        # Nur die Sitzung des gekoppelten Geraets sperren. Wer alle sperrt,
+        # sperrt auch die Browsersitzung, die gleich die Liste abfragt — und die
+        # faellt seit 09/2026 sofort, nicht erst nach Ablauf ihres Tokens.
         from models import RefreshToken
-        db.query(RefreshToken).filter(RefreshToken.user_id == regular_user.id).update(
+        db.query(RefreshToken).filter(
+            RefreshToken.user_id == regular_user.id, RefreshToken.geraet == "desktop"
+        ).update(
             {"revoked_at": datetime.now(timezone.utc)}
         )
         db.commit()

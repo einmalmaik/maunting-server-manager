@@ -486,7 +486,7 @@
       "devicePairSuccess": "Device successfully paired!",
       "devicePairExpired": "Pairing code has expired.",
       "devicePairConfirmTitle": "Hand over the history to the new device?",
-      "devicePairRemoved": "Device removed and its sign-in revoked. Access it was already given stays valid for up to 15 minutes, and it may already have the key for notes and calendar entries.",
+      "devicePairRemoved": "Device removed and signed out immediately. It may already have the key for notes and calendar entries.",
       "devicePairRemove": "Remove device",
       "devicePairConfirmHint": "The device is paired. Compare the safety number with the one shown in the app. Only hand over the history if both numbers match. If they differ, a different device has registered – remove it.",
       "devicePairDevice": "Device",
@@ -718,6 +718,28 @@
         "unknown": "The context window of this model is unknown. MSM assumes a cautious fallback."
       }
     },
+    "memorySearch": {
+      "title": "Semantic search without the local model",
+      "description": "Semantic search finds memories and skills across languages. It runs on a local model, and nothing leaves the panel. If that model is missing, it can run with a provider you choose here instead.",
+      "choice": "Fallback when the local model is missing",
+      "options": {
+        "off": "Off",
+        "google": "Google AI Studio",
+        "openai": "OpenAI"
+      },
+      "noAccessHint": "no active access",
+      "warning": "With a fallback, memory texts, skill descriptions and every chat question are sent to that provider in plain text, even if a different provider is selected for chat. The local model always takes precedence. Voice intent detection never runs outside the panel.",
+      "localReady": "The local model is running. The choice only matters when it is missing.",
+      "localMissing": "The local model is missing.",
+      "fallbackActive": "Search is currently running via {{provider}}.",
+      "noAccess": "No active access with a key is set up for {{provider}}, so semantic search is off.",
+      "searchOff": "Semantic search is off. Memory still finds entries by word match, usage and recency.",
+      "saved": "Setting saved",
+      "errors": {
+        "load": "Semantic search setting could not be loaded",
+        "save": "Semantic search setting could not be saved"
+      }
+    },
     "actions": {
       "title": "AI action proposal",
       "tools": {
@@ -753,6 +775,8 @@
         "propose_note_create": "Create note",
         "propose_note_update": "Update note",
         "propose_note_delete": "Delete note",
+        "forget_memory": "Delete memory",
+        "forget_skill": "Delete skill",
         "propose_cloudflare_dns_delete": "Delete Cloudflare DNS record",
         "propose_cloudflare_dns_record": "Create Cloudflare DNS record",
         "propose_modpack_install": "Install CurseForge modpack",
@@ -843,6 +867,8 @@
         "game_type": "Blueprint",
         "image_after": "New image",
         "integration": "Integration",
+        "memory_keys": "Entries",
+        "memory_scope": "Area",
         "name": "Name",
         "node_id": "Node",
         "permissions": "Role permissions",
@@ -850,6 +876,7 @@
         "role": "Role granted on purchase",
         "role_permissions": "Permissions of this role",
         "service_user": "Service user",
+        "skill_key": "Skill",
         "slug": "Slug",
         "startup_after": "New start command",
         "startup_before": "Current start command",
@@ -1183,7 +1210,9 @@
       },
       "vorschlag": {
         "heading": "Waiting for you",
-        "hint": "Say yes and it runs. Say no, or anything else, and it does not."
+        "hint": "Say yes and it runs. Say no, or anything else, and it does not.",
+        "hintKlick": "Confirm this here with a click. Saying yes is not enough for this one.",
+        "hintKlickChat": "Confirm this with a click on the card in the chat. Saying yes is not enough for this one."
       }
     },
     "guardian": {
@@ -2335,7 +2364,7 @@
     },
     "ai_autonomous_use": {
       "title": "Use autonomous mode",
-      "desc": "Allow the AI to execute approved read and standard tools directly."
+      "desc": "Allow the AI to run permitted tools without asking first. Deletions still always ask."
     },
     "ai_tasks_manage": {
       "title": "Manage AI tasks",
@@ -3402,8 +3431,19 @@
       "loadFailed": "The list could not be loaded.",
       "remove": "Remove",
       "removeTitle": "Remove this device from delivery?",
-      "removeMessage": "This device will no longer receive new messages. If it signs in to your account again, it registers itself anew: removing it does not lock out anyone who still has access to the account.",
-      "removed": "Device removed."
+      "removeMessage": "The device is signed out immediately and receives no new messages. If it signs in again with your password, it has to be approved on one of your devices first.",
+      "removed": "Device removed.",
+      "pending": "Awaiting approval",
+      "approve": "Approve",
+      "approved": "Device approved.",
+      "safetyNumber": "Safety number",
+      "approvalHelp": "A new device only receives messages after you confirm it once on an approved device. Compare the safety number with the one the new device shows first.",
+      "thisDevicePending": "This device is waiting for approval. On one of your other devices, open Profile → Devices, compare the safety number and tap “Approve”.",
+      "resetTitle": "Lost all your other devices?",
+      "resetHelp": "Then you can start over: all other devices are signed out and removed, and this one becomes your first. Old messages stay unreadable, and your contacts see a warning.",
+      "resetPassword": "Password",
+      "resetButton": "Start over",
+      "resetDone": "Started over. This device is now approved."
     },
     "messengerLock": {
       "title": "Lock the messenger",
@@ -4344,17 +4384,17 @@
         "heading": "Messenger and end-to-end encryption",
         "body": "Messenger messages are encrypted on your device and only opened again on the other side. The instance relays ciphertext and nothing else.",
         "items": {
-          "envelopes": "What is stored is the encrypted envelope, the time it arrived, and a mailbox identifier derived from the participants. Message plaintext never resides on the server.",
+          "envelopes": "What is stored is the encrypted envelope, the time it arrived, and a mailbox identifier derived from the participants. Message plaintext never resides on the server. The server retains envelopes for a maximum of 30 days; older envelopes are purged irrevocably.",
           "deviceKey": "The key belongs to this device and is created on it the first time you open the messenger. Its private half never leaves the device. The instance only holds the public half, so that others can write to you.",
           "deviceFanout": "When you write to someone, your device encrypts the message separately for each of their devices and for your own other devices. The instance sees that an account has several devices, and nothing beyond that.",
-          "deviceHistory": "Each device keeps its own history. When you pair a new one, the panel shows the name and safety number of the device that registered. Only once you confirm that the number matches the one shown in the app does it receive the existing history encrypted from the device you already set up, together with the key for your notes and calendar entries, which it only accepts with the signature of the handing-over device; if several devices registered, nothing is handed over. If you decline, the device stays paired: it gets no history, but it does receive new messages and the key for notes and calendar entries. If the number does not match, remove it — its sign-in is then revoked, and within ten minutes at most new messages are no longer encrypted to its key. Access it already had stays valid for up to 15 minutes, and removing it does not undo what it does in that time. It may already have the key for notes and calendar entries by then: your devices pass it on to every device signed in to your account, without the confirmation used for pairing — only to devices of your own account and only with the signature of such a device. Removing a device does not replace that key. A new device fetches nothing retroactively from the server. In a browser the history lives in the site's storage: MSM asks the browser to keep that storage permanently, but clearing the site data clears this device's history with it. If you lose every device, the history is gone for good, and the operator cannot restore it, because the operator was never able to read it.",
+          "deviceHistory": "Each device keeps its own history. An additional device receives nothing until one of your approved devices approves it: in doing so it signs the new device's keys, and your contacts' devices check that signature themselves. A device that only the server reports as approved gets nothing from them, and they see a warning. So someone who only has your password does not read along. When you pair a new device, the panel shows the name and safety number of the device that registered. Confirming that the number matches the one shown in the app approves it, and it receives the existing history encrypted from the device you already set up, together with the key for your notes and calendar entries, which it only accepts with the signature of the handing-over device; if several devices registered, nothing is handed over. If you decline, the device stays paired but unapproved. Only an approved device can remove an approved device. Removal takes effect immediately: the device is signed out, its access stops working with its next request, and if it signs in again it waits for approval once more. It may already have the key for notes and calendar entries by then; removing it does not replace that key. A new device fetches nothing retroactively from the server. In a browser the history lives in the site's storage: MSM asks the browser to keep that storage permanently, but clearing the site data clears this device's history with it. If you lose all your approved devices, you can start over with your password: all other devices are signed out and removed, the current one becomes your first, and your contacts see a warning. The old history is gone then, and the operator cannot restore it, because the operator was never able to read it. One limit remains: in the web version the program code itself comes from the server. Only the desktop and Android apps protect against an operator who changes it.",
           "devicePin": "On the device itself this history is initially readable so it survives a reload. If you set up a messenger PIN under Profile, the history, device key, session states and group keys on that device are encrypted and opened only after the PIN is entered; in the desktop app Windows Hello can hold the PIN for you, in the Android app your fingerprint. The PIN is optional, off by default and can be removed at any time. Without it, anyone with access to this device can read the history. The PIN is stored nowhere and is unknown to the operator: forget it and this device's history is lost.",
           "ratchet": "Every message gets its own key, destroyed once the message has been read and impossible to derive from the keys before it. Someone who later gains access to your device can no longer open anything that came earlier. A new security session carries the signature of the device that sets it up, and your device only accepts it if that signature matches the device the instance lists for that account; a rejected one is stated in the conversation. If a security session had to be rebuilt — because the other side reinstalled, for instance — that is stated in the conversation too, not hidden away.",
           "groups": "In a group, all members share one key. It is created on the device that writes the first message and delivered encrypted separately to every device of every member; the instance relays that too and nothing more. Any change in membership produces a new one, so nobody keeps reading after leaving. When a device asks for the key, another one only answers if whoever asks belongs to the members it was created for: someone who joins reads from the moment they joined. When someone is removed, the instance renews the invite link; links shared before no longer lead in. Two differences from a one-to-one chat remain: a former member can still open older messages, and a group key covers every message of its generation rather than a single one.",
           "mentions": "Whether an @everyone becomes a notification is decided by the receiving device, not the sending one: it checks the group permissions to see whether the sender was allowed to alert everyone, and otherwise leaves the text as ordinary text. The instance cannot check this, because it does not read the content. In a muted group only a badge appears in the chat list, with no sound. The same check applies to a group's pinned message: which message that is, each device remembers for itself.",
-          "attachments": "Images, voice messages, video notes and files each get their own random key before upload. It travels only inside the encrypted message text, so it differs per attachment and the instance never learns it. What the instance receives is the encrypted block, its size and its timestamp; the file name and file type stay inside the encrypted part. Copy such a block into another conversation and it will not open there.",
+          "attachments": "Images, voice messages, video notes and files each get their own random key before upload. It travels only inside the encrypted message text, so it differs per attachment and the instance never learns it. What the instance receives is the encrypted block, its size and its timestamp; the file name and file type stay inside the encrypted part. Copy such a block into another conversation and it will not open there. The server deletes the block after 90 days.",
           "deletion": "Deleting a message for everyone does more than hide it: the envelope is removed from the mailbox, an uploaded attachment is deleted with it, and both devices drop the text and the attachment from their local history. What stays behind is a placeholder saying a message was here. Anything a device saved or photographed beforehand is beyond the reach of this deletion.",
-          "retention": "Disappearing messages are set per chat, and the time limit applies to everyone in it: in a one-to-one chat both sides may change it, in a group only those with the right to do so. Whether the sender had that right is checked by each receiving device itself; the instance cannot read the change. The other devices adopt the time limit, show the change in the conversation, and from then on their messages expire too. Once the time is up, every device drops the entry from its history, and each side removes its own envelopes and attachments from the server. Only whoever uploaded something can delete it there. If a device never comes back online, its encrypted envelope stays in the mailbox even though the message has disappeared everywhere else.",
+          "retention": "Disappearing messages are set per chat, and the time limit applies to everyone in it: in a one-to-one chat both sides may change it, in a group only those with the right to do so. Whether the sender had that right is checked by each receiving device itself; the instance cannot read the change. The other devices adopt the time limit, show the change in the conversation, and from then on their messages expire too. Once the time is up, every device drops the entry from its history, and each side removes its own envelopes and attachments from the server. Independently, the server automatically purges all encrypted envelopes after 30 days. If a device was offline for more than 30 days, it misses older envelopes; existing history on synced devices remains intact.",
           "receipts": "Delivery and read receipts travel as encrypted control messages over the same path. If a receipt cannot be encrypted, it is not sent rather than sent unprotected.",
           "push": "If you have notifications switched on and the application closed, your browser registers a delivery address with its vendor's push service — Google, Mozilla or Apple, depending on the browser. The instance stores that address so it can reach you. What it sends there is encrypted for your browser and carries no content anyway: no text, no sender, only “New message”.",
           "pushMetadata": "The push service does see that your delivery address received something at that moment. There is no way around this on this route, which is why it is stated here. Turn notifications off in your profile or sign out and the address is deleted, after which nothing leaves the instance. While a window is open nothing is sent at all: the application notifies you itself.",
@@ -4385,6 +4425,7 @@
           "usage": "Provider, model, token reservation, actual or conservatively estimated usage, and timestamps are stored to enforce quotas; monetary cost is not claimed without an authoritative price source",
           "memory": "Optional memory entries are stored encrypted and cryptographically bound to their scope, and can be reviewed and deleted at any time. There are five scopes: personal entries and personal server-scoped notes are visible to nobody but the user; team entries are visible to every member of that team; a server's own knowledge is visible to everyone allowed to see that server and remains when its author leaves the panel; panel-wide entries are visible to every user of the panel",
           "memoryConsent": "Personal memory is disabled by default and activates only after explicit consent in chat. Consent can be revoked at any time and includes server-specific notes. Shared scopes (team, server, panel-wide) contain operational knowledge without personal data.",
+          "memorySearch": "Semantic search in memory runs on a local model inside the panel. Only if that model is missing and the operator has explicitly chosen a fallback provider (Google AI Studio or OpenAI, default: none) does it run there. Memory texts, skill descriptions and chat questions are then sent to that provider in plain text, regardless of the model provider selected for chat.",
           "attachments": "Approved text, configuration, log, and image attachments are size- and type-checked, stored encrypted in the panel, and transferred with the conversation to the selected model provider",
           "autonomy": "Autonomous mode is optional and must be granted explicitly, per server or panel-wide; granted actions run without a further prompt but are still checked against the user's permissions unchanged and are recorded in full in the audit log as executed automatically",
           "tools": "When tools are used, limited and redacted excerpts from server logs, configuration files, mod and backup lists and Guardian incidents may be transmitted to the model provider; these results are stored for follow-up questions in the same chat and are deleted together with the chat",
@@ -4409,7 +4450,7 @@
           "bildschirm": "Screenshots: the AI can look at the main screen. The image is downscaled, never written to disk, and transmitted as a tool result to the panel, which stores it encrypted and passes it to the model provider. The provider therefore sees everything visible at that moment, including other windows, messages and open documents. An indicator lights up at the edge of the screen for every capture; it cannot be switched off.",
           "dateien": "Read access to the computer: the AI can inspect drives, folders and disk space, as far as the signed-in Windows user may do so. Drive details as well as folder and file names with sizes are transmitted. File contents are only read and transmitted from the sandbox folder you select yourself. Whether the Windows system area may be read is configured per account in the panel.",
           "schreiben": "Write access: creating and changing files happens exclusively inside the sandbox folder you select. The resolved path is checked so that a link cannot lead out of the folder.",
-          "aufraeumen": "Cleaning up outside the sandbox: deleting is possible outside it too. Deleted items go to the recycle bin; permanent deletion only on explicit request. Windows itself, program folders and other user profiles stay locked until you unlock them. The affected file paths, their size and their classification are sent to the panel and the model provider. With autonomous mode off, the app shows you the full list for confirmation first.",
+          "aufraeumen": "Cleaning up outside the sandbox: deleting is possible outside it too. Deleted items go to the recycle bin; permanent deletion only on explicit request. Windows itself, program folders and other user profiles stay locked until you unlock them. The affected file paths, their size and their classification are sent to the panel and the model provider. The app always shows you the full list for confirmation first, even in autonomous mode.",
           "virenscan": "Virus check: on request the app checks a file with the locally installed Microsoft Defender, without changing or removing it. The checked path and, if something is found, an excerpt of the Defender output (which contains file paths and threat names) go to the model provider.",
           "eingabe": "Mouse and keyboard: the app does not record your input. There is no capture of keystrokes or mouse movement, neither locally nor transmitted. Conversely the AI can take over mouse and keyboard; with autonomous mode off, every takeover must be confirmed on your machine and is time-limited. Text the AI types originates from the model and is contained in the transmitted job.",
           "discordRpc": "Discord Rich Presence (RPC): If the Discord desktop app is running on your computer, the desktop app can report your activity status locally via a Windows pipe to Discord (e.g. 'MSS Desktop Companion'). No server addresses, chat histories, IP addresses, or sensitive credentials are ever transmitted. This feature can be completely disabled in the desktop app configuration ('konfig.json' -> 'discord_rpc_aktiv': false).",
@@ -6646,6 +6687,10 @@
     "sessionRebuilt": "The security session with this device was rebuilt. Older messages from this device stay unreadable.",
     "sessionSetupRejected": "A session setup was rejected: it is not verifiably from the device it names. The existing session stays as it is; nothing sent through the rejected setup will be shown.",
     "newDeviceDetected": "{{name}} registered a new device.",
+    "accountResetWarning": "Security warning: All devices of {{name}} were replaced. Please verify the safety number.",
+    "verifySafetyNumber": "Verify safety number",
+    "safetyNumberModalTitle": "Safety number",
+    "safetyNumberModalDesc": "Compare these 20 digits with your contact over a secure channel (e.g. in person or by phone). If they match, the conversation is protected from eavesdropping.",
     "keyPreparing": "Preparing key …",
     "deviceKeyNotReady": "This device’s key is not ready yet.",
     "deviceKeyNotReadyRetry": "This device’s key is not ready yet. Try again in a moment.",
@@ -6894,7 +6939,12 @@
     "chat": "Chat",
     "videoCall": "Video call",
     "unblockContact": "Unblock",
-    "you": "You"
+    "you": "You",
+    "unverifiedDeviceWarning": "Security warning: {{name}} has a device that was not approved on a known device. It receives nothing from you.",
+    "ownUnverifiedDeviceWarning": "Security warning: a device is registered for your account that none of your devices approved. It receives nothing. Check Profile → Devices.",
+    "ownNewDevice": "A new device was approved for your account.",
+    "ownAccountResetWarning": "Security warning: all devices of your account that you knew were replaced. If this wasn't you, change your password now.",
+    "thisDevicePending": "This device is waiting for approval. Confirm it on one of your other devices under Profile → Devices. Until then it receives no messages."
   },
   "databaseManager": {
     "subtitle": "Manage and edit this server’s PostgreSQL databases.",

@@ -535,6 +535,43 @@ Harte Invarianten:
   `kick_group_member` setzt im selben Commit einen neuen Code und leert
   `invite_card` (deren gebundene Daten nennen den alten); die Antwort gibt den
   neuen nur an jemanden heraus, der `darf_einladen`.
+- **Ein Gerät bekommt erst etwas, wenn ein freigegebenes es unterschreibt.**
+  Das erste Gerät eines Kontos ist frei; jedes weitere wartet
+  (`is_approved = false`) und steht in keiner Liste, die Dritte bekommen.
+  Freigeben heißt: ein freigegebenes Gerät mit Signaturschlüssel unterschreibt
+  `freigabe_daten` — Konto, Kennung und die SHA-256 beider Schlüssel des neuen.
+  Die Unterschrift liegt als `approved_by`/`approval_signature` beim Gerät und
+  geht mit der Liste hinaus. **`is_approved` ist nur die Zustellsperre des
+  Servers.** Die Clients glauben ihm nicht: `vertrauteGeraete` nimmt beim
+  ersten Kontakt alles (TOFU), danach nur Geräte mit denselben Schlüsseln wie
+  beim letzten Mal oder mit gültiger Freigabe durch ein vertrautes — auch
+  eines, das inzwischen entfernt ist. Der Rest bekommt nichts und löst eine
+  Warnung aus, auch fürs eigene Konto. Ist keines der bekannten Geräte mehr
+  da, beginnt die Liste mit Warnung neu (Neustart nach Verlust aller Geräte).
+  Ein neuer Schlüssel unter bekannter Kennung verliert die Freigabe, aus einer
+  fremden Sitzung wird er abgewiesen (`FremdeSitzungError`, 409).
+- **Entfernen sperrt sofort und nur mit Unterschrift.** Ein freigegebenes
+  Gerät entfernt nur ein freigegebenes (`entfernen_daten`); sonst räumte, wer
+  nur das Passwort hat, die echten Geräte ab und stünde als erstes da. Jedes
+  Gerät trägt seine Refresh-Familie (`auth_family`); Entfernen sperrt sie, und
+  `_user_from_token` weist Access-Tokens einer gesperrten Familie sofort ab.
+  `POST /e2ee/devices/self/reset` leert das Verzeichnis nur gegen das Passwort
+  und sperrt alle anderen Familien. Grenze, die in der Datenschutzerklärung
+  steht: in der Webversion liefert der Server den Code selbst aus.
+- **Das Relais hält Umschläge 30 Tage, Anhänge 90.** Ältere Umschläge liefert
+  es nicht mehr aus und löscht sie stündlich (`cleanup_expired_envelopes`);
+  Anhänge nach `MEDIEN_AUFBEWAHRUNG_TAGE` (`cleanup_expired_media`). Ein Gerät,
+  das länger offline war, verpasst ältere Umschläge — auch Steuerumschläge wie
+  die Übergabe eines Chatgeheimnisses.
+- **Schlüsselantworten sind je Konto und Gruppe gedeckelt**, nicht je Gerät:
+  drei in zehn Minuten (`MAX_ANTWORTEN_PRO_FENSTER`). Die Gerätekennung steht
+  in der Anfrage und ist frei erfindbar.
+
+Die Weboberfläche trägt eine Content-Security-Policy ohne `'unsafe-inline'`
+für Skripte. Sie steht in `frontend/vite.csp.ts` und kommt als `<meta>` in die
+gebaute `index.html` — so erreicht sie jede Installation per Update. Der
+Caddy-Kopf in `install.sh` muss gleich lauten (plus `frame-ancestors`);
+`test_caddy_csp_und_gebaute_csp_sind_dieselbe` hält das fest.
 
 Wer eine dieser Zusagen ändert, muss `frontend/src/pages/Privacy.tsx`
 (Abschnitt `privacyPolicy.sections.messenger`) im selben Commit mitziehen.

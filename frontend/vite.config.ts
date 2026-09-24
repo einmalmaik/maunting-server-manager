@@ -2,10 +2,11 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
 
+import { panelCsp } from './vite.csp'
 import { fontsourceWoff2Only } from './vite.fontsource'
 
 export default defineConfig({
-  plugins: [fontsourceWoff2Only(), react()],
+  plugins: [fontsourceWoff2Only(), react(), panelCsp()],
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),

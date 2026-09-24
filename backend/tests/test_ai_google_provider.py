@@ -187,9 +187,11 @@ def test_encode_with_google_mock() -> None:
     mock_client = MagicMock()
     mock_client.post.return_value = mock_resp
 
-    res = ai_embedding_service.encode_with_google(
+    res = ai_embedding_service.encode_ueber_anbieter(
         ["Testtext für Embedding"],
         api_key="AIzaSyTestKey",
+        base_url=ai_provider_registry.anbieter("google").base_url,
+        model="text-embedding-004",
         client=mock_client,
     )
     assert res is not None
@@ -236,6 +238,8 @@ def test_embedding_fallback_to_google_provider(db: Session) -> None:
         operator_api_key="AIzaSyTestKey123456",
         default_model="gemini-2.5-flash",
     )
+    ai_embedding_service.set_rueckfall("google", db)
+    db.commit()
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = db
     mock_ctx.__exit__.return_value = None
@@ -244,11 +248,158 @@ def test_embedding_fallback_to_google_provider(db: Session) -> None:
          patch("services.ai_embedding_service.is_available", return_value=False), \
          patch("database.SessionLocal", return_value=mock_ctx), \
          patch("services.ai_provider_service.resolve_api_key", return_value="AIzaSyTestKey123456"), \
-         patch("services.ai_embedding_service.encode_with_google", return_value=[[0.1] * 256]) as mock_encode:
+         patch("services.ai_embedding_service.encode_ueber_anbieter", return_value=[[0.1] * 256]) as mock_encode:
         assert ai_embedding_service.is_ready() is True
         res = ai_embedding_service.encode(["Hallo Welt"])
-        assert res == [[0.1] * 256]
+        assert res == ai_embedding_service.Kodierung(
+            [[0.1] * 256], "google:text-embedding-004"
+        )
         mock_encode.assert_called_once()
+
+
+def test_ohne_erlaubnis_des_betreibers_verlaesst_nichts_das_haus(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ein aktiver Google-Zugang allein ist keine Erlaubnis für die Suche.
+
+    Bis zum 24.09.2026 genügte er: fehlte das lokale Modell, gingen
+    Gedächtnistexte und jede Chatfrage im Klartext an Google, auch wenn der
+    Chat über einen ganz anderen Anbieter lief. Der Zugang war für den Chat
+    eingetragen worden, nicht für die Bedeutungssuche. Jetzt entscheidet ein
+    eigener Schalter, und der steht ab Werk auf aus.
+    """
+    from services import ai_memory_service
+    from tests.test_ai_memory_embeddings import _allow_memory, _write
+
+    ai_provider_service.create_provider(
+        db, name="Google Studio", provider_kind="google", enabled=True,
+        requires_api_key=True, operator_api_key="test-schluessel",
+        default_model="gemini-2.5-flash",
+    )
+    db.commit()
+    gesendet: list[str] = []
+    monkeypatch.setattr(ai_embedding_service, "_load", lambda: None)
+    monkeypatch.setattr(
+        ai_embedding_service, "encode_ueber_anbieter",
+        lambda texts, **_: gesendet.extend(texts) or [[0.1] * 256 for _ in texts],
+    )
+    _allow_memory(db, regular_user)
+
+    row = _write(db, regular_user, "zeitzone", "Die Anlage steht auf Europe/Berlin")
+    ai_memory_service.provider_memory_context(db, regular_user, query="Zeitzone?")
+
+    assert gesendet == []
+    assert row.embedding_model is None
+    assert ai_embedding_service.is_ready() is False
+
+
+def test_mit_openai_als_rueckfall_rechnet_openai_und_nur_openai(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OpenAI ist der zweite Rückfallweg — und die Wahl gilt genau einem Anbieter.
+
+    Ein ebenfalls eingetragener Google-Zugang darf dabei nichts bekommen: die
+    Erlaubnis des Betreibers gilt dem Anbieter, den er gewählt hat, nicht
+    jedem, der zufällig einen Schlüssel hat.
+    """
+    # Die Schlüsselform zusammengesetzt, nicht als Literal: das Repo ist öffentlich.
+    schluessel = {"google": "test-schluessel", "openai": "s" + "k-" + "test-schluessel"}
+    for kind, name in (("google", "Google Studio"), ("openai", "OpenAI")):
+        ai_provider_service.create_provider(
+            db, name=name, provider_kind=kind, enabled=True,
+            requires_api_key=True, operator_api_key=schluessel[kind],
+            default_model="gpt-5.6" if kind == "openai" else "gemini-2.5-flash",
+        )
+    ai_embedding_service.set_rueckfall("openai", db)
+    db.commit()
+    monkeypatch.setattr(ai_embedding_service, "_load", lambda: None)
+    monkeypatch.setattr(ai_provider_service, "resolve_api_key", lambda db, prov, uid: "schluessel")
+
+    antwort = MagicMock()
+    antwort.status_code = 200
+    antwort.json.return_value = {"data": [{"embedding": [0.5] * 256}]}
+    gesendet: list[dict] = []
+
+    class Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+        def post(self, url, *, headers, json, timeout):
+            gesendet.append({"url": url, **json})
+            return antwort
+
+    monkeypatch.setattr(httpx, "Client", Client)
+
+    kodierung = ai_embedding_service.encode(["Wann laeuft das Backup?"], db=db)
+
+    assert kodierung is not None
+    assert kodierung.modell == "openai:text-embedding-3-small"
+    assert [(g["url"], g["model"], g["dimensions"]) for g in gesendet] == [
+        ("https://api.openai.com/v1/embeddings", "text-embedding-3-small", 256),
+    ]
+    assert ai_embedding_service.aktives_modell(db=db) == "openai:text-embedding-3-small"
+
+
+def test_der_betreiber_waehlt_den_rueckfall_ueber_die_api(
+    client, owner_cookies: dict, db: Session
+) -> None:
+    csrf = {"X-CSRF-Token": owner_cookies.get("__Secure-csrf_token", "")}
+
+    gelesen = client.get("/api/ai/settings/memory-search", cookies=owner_cookies)
+    assert gelesen.status_code == 200
+    assert gelesen.json()["fallback"] == "off"
+    assert gelesen.json()["available"] == []
+
+    gesetzt = client.put(
+        "/api/ai/settings/memory-search", json={"fallback": "openai"},
+        cookies=owner_cookies, headers=csrf,
+    )
+    assert gesetzt.status_code == 200
+    assert gesetzt.json()["fallback"] == "openai"
+    assert ai_embedding_service.rueckfall() == "openai"
+
+    from models import AuditLog
+
+    eintrag = (
+        db.query(AuditLog)
+        .filter(AuditLog.action == "ai.memory_search.fallback.updated")
+        .one()
+    )
+    assert "openai" in str(eintrag.details)
+
+    unbekannt = client.put(
+        "/api/ai/settings/memory-search", json={"fallback": "openrouter"},
+        cookies=owner_cookies, headers=csrf,
+    )
+    assert unbekannt.status_code == 422
+    assert ai_embedding_service.rueckfall() == "openai"
+
+
+def test_ein_altes_ja_zum_google_rueckfall_gilt_weiter(db: Session) -> None:
+    """Der Vorgänger war einen Tag lang ein Ja/Nein nur für Google."""
+    from services.panel_settings_service import PanelSettingsService
+
+    PanelSettingsService.set("ai_embedding_google_fallback", "true", db=db)
+    assert ai_embedding_service.rueckfall(db) == "google"
+
+    ai_embedding_service.set_rueckfall(None, db)
+    assert ai_embedding_service.rueckfall(db) is None
+
+
+def test_ein_benutzer_ohne_panelrecht_waehlt_keinen_rueckfall(
+    client, user_cookies: dict
+) -> None:
+    antwort = client.put(
+        "/api/ai/settings/memory-search", json={"fallback": "google"},
+        cookies=user_cookies,
+        headers={"X-CSRF-Token": user_cookies.get("__Secure-csrf_token", "")},
+    )
+
+    assert antwort.status_code == 403
+    assert ai_embedding_service.rueckfall() is None
 
 
 @pytest.mark.asyncio
@@ -277,6 +428,123 @@ async def test_gemini_live_session_tool_execution() -> None:
         res = await sitzung._werkzeug_ausfuehren("call_123", "test_tool", {"arg": "val"})
         assert res == {"status": "ok"}
         assert "call_123" in sitzung._gestartet
+
+
+def _gemini_sitzung() -> tuple[GeminiLiveSitzung, MagicMock]:
+    vorb = RealtimeVorbereitung(
+        provider_id=1,
+        provider_kind="google",
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+        model="gemini-2.5-flash",
+        voice="Puck",
+        api_key="AIzaSyTestKey",
+        instructions="Du bist der Serverassistent.",
+        tools=[{"name": "analyze_region"}, {"name": "voice_resolve_latest_proposal"}],
+    )
+    mock_ws = MagicMock()
+    mock_ws.send_json = AsyncMock()
+    sitzung = GeminiLiveSitzung(
+        websocket=mock_ws, vorbereitung=vorb, user_id=1, http_client=MagicMock()
+    )
+    return sitzung, mock_ws
+
+
+@pytest.mark.asyncio
+async def test_gemini_live_region_fragt_ohne_autonomie_erst() -> None:
+    """Dieselbe Frage wie auf dem Realtime-Weg: ohne Ja keine Regionsanalyse.
+
+    Die Regionsanalyse läuft an `voice_werkzeug_ausfuehren` vorbei und holte
+    Wetter, Satellit und Nachrichten, bevor jemand zugestimmt hatte (Vorgabe
+    des Betreibers vom 23.09.2026: ohne autonomen Modus fragt jedes Werkzeug).
+    """
+    from services.ai_voice import interactions as voice_interactions
+
+    sitzung, mock_ws = _gemini_sitzung()
+    kennung = "5d0e6c1a-8f3b-4c2d-9e7a-1b2c3d4e5f60"
+    karte = {
+        "id": kennung,
+        "call_id": "call_region",
+        "tool_name": "analyze_region",
+        "status": "proposed",
+        "autonomous": False,
+    }
+    wert = {"proposals": [karte], "status": "needs_confirmation",
+            "hinweis": voice_interactions.JA_NOETIG}
+
+    with patch.object(
+        voice_interactions,
+        "freigabe_einholen",
+        return_value=(wert, None, {"tool_name": "analyze_region"}, [karte]),
+    ), patch.object(sitzung, "_region_anfang", side_effect=AssertionError("ohne Ja")):
+        res = await sitzung._werkzeug_ausfuehren(
+            "call_region", "analyze_region", {"location": "Berlin"}
+        )
+
+    assert res["status"] == "needs_confirmation"
+    assert sitzung._vorschlaege.rahmen()["vorschlag"]["id"] == kennung
+    gesendet = [aufruf.args[0] for aufruf in mock_ws.send_json.call_args_list]
+    assert {
+        "art": "vorschlag",
+        "vorschlag": {k: v for k, v in karte.items() if k != "call_id"},
+        "klick": False,
+    } in gesendet
+    assert not any("geo_analysis" in rahmen for rahmen in gesendet)
+
+
+@pytest.mark.asyncio
+async def test_gemini_live_region_gibt_das_urteil_dem_modell_nicht_dem_schirm() -> None:
+    """Dieselbe Beratung wie auf dem Realtime-Weg, und dieselbe Trennung."""
+    from services.ai_voice import interactions as voice_interactions
+
+    sitzung, mock_ws = _gemini_sitzung()
+    initial = {"status": "success", "location": "Berlin", "weather": {"temperature_celsius": 20}}
+    hinweis = {"untrusted": True, "quelle": "ethik_engine", "einschaetzung": "review",
+               "empfehlung": "Nichts Privates zeigen.", "begruendung": "Ein Wohnhaus."}
+    nachgeladen: list[dict] = []
+
+    with patch.object(voice_interactions, "freigabe_einholen", return_value=None), \
+            patch.object(voice_interactions, "ethik_anstossen", return_value=None),             patch.object(voice_interactions, "ethik_abholen", return_value=hinweis), \
+            patch.object(sitzung, "_region_anfang", return_value=initial), \
+            patch.object(sitzung, "_region_nachladen",
+                         side_effect=lambda _args, stand: nachgeladen.append(stand)):
+        res = await sitzung._werkzeug_ausfuehren(
+            "call_region", "analyze_region", {"location": "Berlin"}
+        )
+
+    assert res == {**initial, "ethik": hinweis}
+    gesendet = [aufruf.args[0] for aufruf in mock_ws.send_json.call_args_list]
+    assert [r["geo_analysis"] for r in gesendet if "geo_analysis" in r] == [initial]
+    assert nachgeladen == [initial]
+
+
+def test_gemini_live_ja_bringt_das_ergebnis_mit_und_zaehlt_nur_einmal() -> None:
+    """Nach dem Ja kommt das Ergebnis mit; ein Ja nach dem Klick führt nichts aus."""
+    from services.ai_voice import interactions as voice_interactions
+
+    sitzung, _ = _gemini_sitzung()
+    ausgang = voice_interactions.Ausgang(
+        erledigt=True, werkzeug="web_search", ergebnis={"results": []}
+    )
+
+    sitzung._vorschlaege.merken(
+        {"id": "vorschlag-1", "tool_name": "web_search", "status": "proposed"}
+    )
+    with patch.object(voice_interactions, "schon_entschieden", return_value=None), \
+            patch.object(voice_interactions, "braucht_klick", return_value=False), \
+            patch.object(voice_interactions, "vorschlag_ausfuehren", return_value=ausgang):
+        wert, fehler = sitzung._vorschlag_entscheiden("confirm")
+    assert fehler is None
+    assert wert == {"status": "confirmed", "tool_name": "web_search", "result": {"results": []}}
+
+    sitzung._vorschlaege.merken(
+        {"id": "vorschlag-2", "tool_name": "web_search", "status": "proposed"}
+    )
+    with patch.object(voice_interactions, "schon_entschieden", return_value="succeeded"), \
+            patch.object(voice_interactions, "vorschlag_ausfuehren") as ausfuehren:
+        wert, fehler = sitzung._vorschlag_entscheiden("confirm")
+    assert fehler is None
+    assert wert == {"status": "already_decided", "stand": "succeeded"}
+    ausfuehren.assert_not_called()
 
 
 def test_clean_gemini_schema() -> None:

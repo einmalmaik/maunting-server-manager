@@ -187,6 +187,32 @@ class AiContextPolicyStatus(BaseModel):
     memory_search_ready: bool
 
 
+#: Die Rückfallanbieter der Bedeutungssuche. Dieselbe Liste wie
+#: `ai_embedding_service.RUECKFALL_MODELLE`, plus "off".
+MemorySearchFallback = Literal["off", "google", "openai"]
+
+
+class AiMemorySearchUpdate(BaseModel):
+    fallback: MemorySearchFallback
+
+
+class AiMemorySearchStatus(BaseModel):
+    """Womit die Bedeutungssuche rechnet — und ob sie das Haus verlassen darf.
+
+    ``fallback`` ist der Anbieter, bei dem ohne lokales Modell gerechnet werden
+    darf (Standard "off"). ``available`` nennt die Rückfallanbieter mit aktivem
+    Zugang und Schlüssel — ein gewählter ohne Zugang rechnet nicht.
+    ``local_ready`` sagt, ob das lokale Modell da ist; dann bewirkt die Wahl
+    nichts. ``ready`` ist das Ergebnis aus allem, dieselbe Antwort wie
+    `memory_search_ready`.
+    """
+
+    fallback: MemorySearchFallback
+    available: list[Literal["google", "openai"]]
+    local_ready: bool
+    ready: bool
+
+
 class AiWorkerPolicyUpdate(BaseModel):
     """Die Betreiber-Deckel der Worker (docs/agentic-framework.md, Abschnitt 5).
 

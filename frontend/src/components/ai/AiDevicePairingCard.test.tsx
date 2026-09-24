@@ -16,13 +16,14 @@ import { useToastStore } from '@/stores/toastStore'
 
 const CODE = 'ABCD-EFGH-JKLM'
 
-const { lage, uebergabe, entzogen, ausDerZustellung } = vi.hoisted(() => ({
+const { lage, uebergabe, entzogen, ausDerZustellung, freigegeben } = vi.hoisted(() => ({
   /** Was der Status-Endpunkt gerade antwortet. */
   lage: { status: null as Record<string, unknown> | null },
   uebergabe: vi.fn(async () => true),
   /** Die Familien, deren Anmeldung widerrufen wurde. */
   entzogen: [] as string[],
-  ausDerZustellung: vi.fn(async (_kennung: string) => ({ ok: true })),
+  ausDerZustellung: vi.fn(async (_geraet: { device_id: string }) => undefined),
+  freigegeben: vi.fn(async (_geraet: { device_id: string }) => undefined),
 }))
 
 vi.mock('@/api/client', () => ({
@@ -40,7 +41,23 @@ vi.mock('@/api/client', () => ({
   }),
 }))
 
-vi.mock('@/api/social', () => ({ deleteEigenesGeraet: ausDerZustellung }))
+// Das Verzeichnis, wie der Server es hält: das gekoppelte Gerät wartet.
+vi.mock('@/api/social', () => ({
+  getE2eeGeraete: vi.fn(async () => [
+    {
+      device_id: 'neu-0001',
+      public_key: 'schluessel-neu',
+      signing_public_key: 'sig-neu',
+      label: 'Arbeitsrechner',
+      is_approved: false,
+    },
+  ]),
+}))
+
+vi.mock('@/lib/angemeldetesKonto', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/angemeldetesKonto')>()),
+  angemeldetesKonto: () => 10,
+}))
 
 vi.mock('@/services/verlaufsUebergabe', () => ({ uebergebeVerlauf: uebergabe }))
 
@@ -50,7 +67,8 @@ vi.mock('@/services/e2eeGeraet', () => ({
   sicherheitsnummer: vi.fn(async (schluessel: string) =>
     schluessel === 'schluessel-neu' ? '11111 22222 33333 44444' : '99999 99999 99999 99999',
   ),
-  vergessenGeraete: vi.fn(),
+  entferneGeraet: ausDerZustellung,
+  gebeGeraetFrei: freigegeben,
 }))
 
 const { AiDevicePairingCard } = await import('./AiDevicePairingCard')
@@ -82,6 +100,7 @@ describe('AiDevicePairingCard — Rückfrage vor der Übergabe', () => {
   beforeEach(() => {
     uebergabe.mockClear()
     ausDerZustellung.mockClear()
+    freigegeben.mockClear()
     entzogen.length = 0
     useToastStore.setState({ toasts: [] })
   })
@@ -96,6 +115,9 @@ describe('AiDevicePairingCard — Rückfrage vor der Übergabe', () => {
     fireEvent.click(screen.getByRole('button', { name: i18n.t('ai.profile.devicePairHandOver') }))
 
     await waitFor(() => expect(uebergabe).toHaveBeenCalledWith(CODE, [NEUES_GERAET]))
+    // Die bestätigte Nummer ist die Freigabe: ohne sie bekäme das neue Gerät
+    // den Verlauf, aber keine Nachricht.
+    expect(freigegeben).toHaveBeenCalledWith(expect.objectContaining({ device_id: 'neu-0001' }))
   }, 15_000)
 
   it('übergibt nichts, wenn die Nummer nicht passt und abgelehnt wird', async () => {
@@ -140,7 +162,10 @@ describe('AiDevicePairingCard — Rückfrage vor der Übergabe', () => {
 
     fireEvent.click(screen.getByRole('button', { name: i18n.t('ai.profile.devicePairRemove') }))
 
-    await waitFor(() => expect(ausDerZustellung).toHaveBeenCalledWith('neu-0001'))
+    await waitFor(() =>
+      expect(ausDerZustellung).toHaveBeenCalledWith(expect.objectContaining({ device_id: 'neu-0001' })),
+    )
+    expect(freigegeben).not.toHaveBeenCalled()
     expect(entzogen).toEqual(['familie-neu'])
     expect(uebergabe).not.toHaveBeenCalled()
     await waitFor(() =>

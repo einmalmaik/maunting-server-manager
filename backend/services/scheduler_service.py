@@ -68,6 +68,7 @@ def start_scheduler():
     _ensure_git_update_check_job()
     _ensure_node_heartbeat_job()
     _ensure_calendar_reminder_job()
+    _ensure_e2ee_envelope_cleanup_job()
 
 
 def _utcnow() -> datetime:
@@ -1200,6 +1201,43 @@ def _ensure_calendar_reminder_job() -> None:
     )
 
 
+async def _e2ee_envelope_cleanup_task() -> None:
+    """Regelmäßiger Hintergrund-Task zur Durchsetzung der 30-Tage-Vorhaltefrist für E2EE-Umschläge."""
+    from services.chat_media_service import ChatMediaService
+    from services.social_service import SocialService
+    db = SessionLocal()
+    try:
+        SocialService.cleanup_expired_envelopes(db)
+    except Exception as e:
+        logger.error("Fehler bei E2EE-Umschlag-Bereinigung: %s", e)
+        db.rollback()
+    # Anhaenge nach Ablauf ihrer Aufbewahrung — bis dahin lagen sie ewig.
+    try:
+        ChatMediaService.cleanup_expired_media(db)
+    except Exception as e:
+        logger.error("Fehler bei Anhang-Bereinigung: %s", e)
+    finally:
+        db.close()
+
+
+def _ensure_e2ee_envelope_cleanup_job() -> None:
+    scheduler = get_scheduler()
+    job_id = "global_e2ee_envelope_cleanup"
+    try:
+        scheduler.remove_job(job_id)
+    except Exception:
+        pass
+    scheduler.add_job(
+        func=_e2ee_envelope_cleanup_task,
+        trigger=IntervalTrigger(hours=1),
+        id=job_id,
+        name="E2EE Blind Envelope 30-Tage-Bereinigung",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+
 def init_server_schedules(db):
     """Initialize schedules for all servers on startup."""
     from models import Server
@@ -1213,6 +1251,7 @@ def init_server_schedules(db):
     _ensure_ai_tasks_job()
     _ensure_hoster_maintenance_job()
     _ensure_calendar_reminder_job()
+    _ensure_e2ee_envelope_cleanup_job()
 
     servers = db.query(Server).all()
     for server in servers:

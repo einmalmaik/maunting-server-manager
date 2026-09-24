@@ -61,6 +61,8 @@ class SemanticToolRouterAdapter:
         self._schemas: dict[str, dict] = tool_schemas or {}
         self._searchable: dict[str, str] = {}
         self._vectors: dict[str, list[float]] | None = None
+        # Modell der Werkzeugvektoren; Frage und Index müssen aus demselben stammen.
+        self._vectors_modell: str | None = None
         self._ready = False
 
     def _ensure_index(self, allowed: frozenset[str]) -> None:
@@ -89,11 +91,12 @@ class SemanticToolRouterAdapter:
                 to_encode = sorted({n for n in allowed if n not in (self._vectors or {})})
             if to_encode:
                 texts = [self._searchable[n] for n in to_encode]
-                vecs = ai_embedding_service.encode(texts)
-                if vecs and len(vecs) == len(to_encode):
-                    if self._vectors is None:
+                kodierung = ai_embedding_service.encode(texts)
+                if kodierung is not None and len(kodierung.vektoren) == len(to_encode):
+                    if self._vectors is None or self._vectors_modell != kodierung.modell:
                         self._vectors = {}
-                    for n, v in zip(to_encode, vecs):
+                        self._vectors_modell = kodierung.modell
+                    for n, v in zip(to_encode, kodierung.vektoren):
                         self._vectors[n] = v
                     self._ready = True
 
@@ -112,8 +115,15 @@ class SemanticToolRouterAdapter:
         q_vec = None
         if self._vectors is not None:
             qv = ai_embedding_service.encode([query])
-            if qv:
-                q_vec = qv[0]
+            if qv is not None and qv.vektoren:
+                if qv.modell == self._vectors_modell:
+                    q_vec = qv.vektoren[0]
+                else:
+                    # Anderes Modell als der Index: diesmal nur BM25. Der
+                    # leere Index (nicht ``None``) lässt den nächsten
+                    # `_ensure_index` alles neu rechnen.
+                    self._vectors = {}
+                    self._vectors_modell = None
         scored: list[tuple[float, str]] = []
         max_bm25 = 0.0
         bm25_scores: dict[str, float] = {}

@@ -42,6 +42,7 @@ import {
   FileText,
   Upload,
   Shield,
+  ShieldCheck,
   UserCheck,
   Briefcase,
   LayoutGrid,
@@ -148,7 +149,14 @@ import {
   DrGeraetNichtEingetragenError,
   DrZustellungFehlgeschlagenError,
 } from '@/services/ratchetSitzung'
-import { geraeteVon, kontoNutztSignaturen, onNeuesGeraet } from '@/services/e2eeGeraet'
+import {
+  geraeteVon,
+  kontoNutztSignaturen,
+  eigenesGeraetFreigegeben,
+  onEigeneFreigabe,
+  onSchluesselWarnung,
+  sicherheitsnummer,
+} from '@/services/e2eeGeraet'
 import { pruefeNutzlast, signiereNutzlast } from '@/services/nutzlastSignatur'
 import {
   abonniereBekannteGespraeche,
@@ -530,6 +538,9 @@ export function Messenger() {
   // Mute & Block modals
   const [isMuteModalOpen, setIsMuteModalOpen] = useState(false)
   const [isBlockConfirmOpen, setIsBlockConfirmOpen] = useState(false)
+  const [isSafetyNumberModalOpen, setIsSafetyNumberModalOpen] = useState(false)
+  const [contactDevices, setContactDevices] = useState<{ id: string; label: string; number: string }[]>([])
+  const [loadingSafetyNumbers, setLoadingSafetyNumbers] = useState(false)
 
   // Pre-computed mailbox IDs
   const [contactMailboxMap, setContactMailboxMap] = useState<Record<number, string>>({})
@@ -1812,38 +1823,93 @@ export function Messenger() {
     )
   }, [])
 
-  // M-10: Überwachung des Geräteverzeichnisses — warnt bei neuen Geräten eines Gesprächspartners
+  // Geräteverzeichnis: wer die Liste holt, prüft sie (`vertrauteGeraete`) und
+  // meldet, was ihm auffällt. Das eigene Konto gehört dazu — ein Gerät, das
+  // jemand mit deinem Passwort einträgt, sollst zuerst du sehen.
   useEffect(() => {
     if (!activeContact?.userId) return
     geraeteVon(activeContact.userId).catch(() => {})
   }, [activeContact?.userId])
 
   useEffect(() => {
-    const abbestellen = onNeuesGeraet((peerId, neue) => {
-      if (neue.length === 0) return
-      if (activeContact && activeContact.userId === peerId) {
-        const name = activeContact.username || t('messenger.thisContact')
-        zeigeSystemzeile(
-          t('messenger.newDeviceDetected', {
-            name,
-            defaultValue: `${name} hat ein neues Gerät angemeldet.`,
-          }),
-        )
-      } else if (activeGroup) {
-        const member = (activeGroup.members ?? []).find((m) => Number(m.user_id) === peerId)
-        if (member) {
-          const name = member.username || t('messenger.thisContact')
-          zeigeSystemzeile(
-            t('messenger.newDeviceDetected', {
-              name,
-              defaultValue: `${name} hat ein neues Gerät angemeldet.`,
-            }),
-          )
-        }
+    if (!currentUserId) return
+    geraeteVon(currentUserId).catch(() => {})
+  }, [currentUserId])
+
+  // Ein wartendes Gerät bekommt nichts. Ohne Hinweis sähe das aus wie ein
+  // kaputter Messenger — also steht oben, was zu tun ist.
+  const [geraetWartet, setGeraetWartet] = useState(eigenesGeraetFreigegeben() === false)
+  useEffect(() => onEigeneFreigabe((frei) => setGeraetWartet(frei === false)), [])
+
+  useEffect(() => {
+    const abbestellen = onSchluesselWarnung((ev) => {
+      if (currentUserId === ev.userId) {
+        const text = {
+          neues_geraet: t('messenger.ownNewDevice'),
+          unbestaetigt: t('messenger.ownUnverifiedDeviceWarning'),
+          konto_neustart: t('messenger.ownAccountResetWarning'),
+        }[ev.typ]
+        zeigeSystemzeile(text)
+        return
       }
+      let name = ''
+      if (activeContact && activeContact.userId === ev.userId) {
+        name = activeContact.username || t('messenger.thisContact')
+      } else if (activeGroup) {
+        const member = (activeGroup.members ?? []).find((m) => Number(m.user_id) === ev.userId)
+        if (member) name = member.username || t('messenger.thisContact')
+      }
+      if (!name) return
+      const text = {
+        neues_geraet: t('messenger.newDeviceDetected', { name }),
+        unbestaetigt: t('messenger.unverifiedDeviceWarning', { name }),
+        konto_neustart: t('messenger.accountResetWarning', { name }),
+      }[ev.typ]
+      zeigeSystemzeile(text)
     })
     return abbestellen
-  }, [activeContact, activeGroup, t, zeigeSystemzeile])
+  }, [activeContact, activeGroup, currentUserId, t, zeigeSystemzeile])
+
+  useEffect(() => {
+    if (!isSafetyNumberModalOpen || !activeContact?.userId) {
+      setContactDevices([])
+      return
+    }
+    let aktiv = true
+    setLoadingSafetyNumbers(true)
+    geraeteVon(activeContact.userId)
+      .then(async (geraete) => {
+        const ergebnisse: { id: string; label: string; number: string }[] = []
+        for (const g of geraete) {
+          let num = ''
+          if (g.public_key) {
+            try {
+              num = await sicherheitsnummer(g.public_key)
+            } catch {
+              num = ''
+            }
+          }
+          ergebnisse.push({
+            id: g.device_id,
+            label: g.label || t('profile.e2eeDevices.unnamed'),
+            number: num,
+          })
+        }
+        if (aktiv) {
+          setContactDevices(ergebnisse)
+          setLoadingSafetyNumbers(false)
+        }
+      })
+      .catch(() => {
+        if (aktiv) {
+          setContactDevices([])
+          setLoadingSafetyNumbers(false)
+        }
+      })
+    return () => {
+      aktiv = false
+    }
+  }, [isSafetyNumberModalOpen, activeContact?.userId, t])
 
   const konversation = useKonversation({
     ziel: gespraechsZiel,
@@ -5458,6 +5524,15 @@ export function Messenger() {
 
   return (
     <div className="flex h-full w-full min-h-0 flex-1 flex-col overflow-hidden bg-surface">
+      {geraetWartet && (
+        <button
+          type="button"
+          onClick={() => navigate('/profile?tab=devices')}
+          className="shrink-0 border-b border-status-warning/30 bg-status-warning/10 px-4 py-2 text-left text-sm text-on-surface"
+        >
+          {t('messenger.thisDevicePending')}
+        </button>
+      )}
       {/* Slim, Compact Header - Only shown in overview mode when no chat is open, maximizing chat space */}
       {!isChatOpen && (
         <header className="h-12 shrink-0 border-b border-outline-variant/20 bg-surface-container/70 backdrop-blur px-3 sm:px-4 flex items-center justify-between z-10">
@@ -6491,6 +6566,16 @@ export function Messenger() {
                           onClick={() => {
                             schliessen()
                             setIsMuteModalOpen(true)
+                          }}
+                        />
+                      )}
+                      {activeContact && (
+                        <Blatteintrag
+                          icon={<ShieldCheck className="w-4 h-4" />}
+                          label={t('messenger.verifySafetyNumber')}
+                          onClick={() => {
+                            schliessen()
+                            setIsSafetyNumberModalOpen(true)
                           }}
                         />
                       )}
@@ -8015,6 +8100,47 @@ export function Messenger() {
               onClick={() => setIsMuteModalOpen(false)}
             >
               Abbrechen
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Design-DNA Sicherheitsnummer Dialog */}
+      <Dialog open={isSafetyNumberModalOpen} onOpenChange={setIsSafetyNumberModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-secondary" />
+              <span>{t('messenger.safetyNumberModalTitle')}</span>
+            </DialogTitle>
+            <DialogDescription>
+              {t('messenger.safetyNumberModalDesc')}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-3 px-6 py-4">
+            {loadingSafetyNumbers && (
+              <p className="text-xs text-on-surface-variant">{t('common.loading')}</p>
+            )}
+            {!loadingSafetyNumbers && contactDevices.length === 0 && (
+              <p className="text-xs text-on-surface-variant">{t('messenger.noDeviceOnline', { name: activeContact?.username || '' })}</p>
+            )}
+            {!loadingSafetyNumbers && contactDevices.map((d) => (
+              <div key={d.id} className="rounded-lg border border-outline-variant/30 bg-surface-container-high/40 p-3 space-y-1">
+                <div className="flex items-center justify-between text-xs text-on-surface font-medium">
+                  <span>{d.label}</span>
+                  <span className="font-mono text-on-surface-variant">{d.id.slice(0, 10)}</span>
+                </div>
+                <div className="font-mono text-sm tracking-wider text-primary font-bold bg-surface-container-lowest/60 rounded px-2 py-1.5 text-center select-all">
+                  {d.number || '—'}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <DialogFooter>
+            <Button variant="secondary" size="sm" onClick={() => setIsSafetyNumberModalOpen(false)}>
+              {t('common.close')}
             </Button>
           </DialogFooter>
         </DialogContent>

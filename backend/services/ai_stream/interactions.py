@@ -36,7 +36,7 @@ from services.ai_stream.types import (
     _WartenErgebnis,
 )
 from services.ai_stream.write_tools import _ask_formfehler_messages, _ask_refusal_messages
-from services.ai_tool_registry import ASK_TOOLS, DESKTOP_TOOLS
+from services.ai_tool_registry import ASK_TOOLS, DESKTOP_TOOLS, desktop_loescht
 from services.openai_compatible_adapter import StreamUsage
 
 logger = logging.getLogger(__name__)
@@ -248,8 +248,11 @@ def _desktop_argumente(db, *, user_id: int, call) -> dict:
 
     * **`autonom`** — ob ohne Rueckfrage gehandelt werden darf. Das ist die
       Freigabe des Betreibers (`AiAutonomyGrant`), und die Regel dazu ist
-      woertlich: autonomer Modus an, keine Bestaetigung; autonomer Modus aus,
-      immer eine. Sie hier zu berechnen und nicht in der App ist keine
+      woertlich: autonomer Modus an, keine Bestaetigung, **ausser beim
+      Loeschen**; autonomer Modus aus, immer eine. Ein loeschender Aufruf
+      (`desktop_loescht`) bekommt deshalb ``False``, auch mit Freigabe. Die
+      Ausnahme gilt seit dem 23.09.2026; vorher raeumte der autonome Modus
+      ohne Karte auf. Sie hier zu berechnen und nicht in der App ist keine
       Bequemlichkeit, sondern die Hausregel — die Wahrheit ueber Rechte liegt
       im Backend. Das Stundenbudget faehrt mit: ein Modell in einer Schleife
       faellt nach der zehnten Aktion von selbst auf Bestaetigungspflicht
@@ -286,8 +289,10 @@ def _desktop_argumente(db, *, user_id: int, call) -> dict:
     # Gemäß Maunting Studios Grundsatz („Sicherheit braucht Vertrauen“):
     # Jedes Werkzeug auf dem Rechner des Benutzers unterliegt der Autonomie-
     # Freigabe des Betreibers. Ist autonomer Modus aus, muss der Benutzer
-    # jede einzelne Aktion bestätigen.
-    argumente["autonom"] = ai_autonomy_service.autonomy_allows(
+    # jede einzelne Aktion bestätigen. Gelöscht wird nie ohne Karte.
+    argumente["autonom"] = not desktop_loescht(
+        call.name, argumente
+    ) and ai_autonomy_service.autonomy_allows(
         db, user=benutzer, server_id=None, tool_name=call.name
     )
     return argumente
