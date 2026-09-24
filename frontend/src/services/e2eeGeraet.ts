@@ -465,9 +465,24 @@ export async function signaturSchluesselVon(
   userId: number,
   deviceId: string,
 ): Promise<string | null> {
-  const geraete = await geraeteVon(userId)
-  const treffer = geraete.find((g) => g.device_id === deviceId)
-  return treffer?.signing_public_key || null
+  const schluesselIn = (geraete: E2eeGeraetItem[]) =>
+    geraete.find((g) => g.device_id === deviceId)?.signing_public_key || null
+
+  const gemerkt = schluesselIn(await geraeteVon(userId))
+  if (gemerkt) return gemerkt
+
+  // Die gemerkte Liste darf bis zu zehn Minuten alt sein, ein Gerät kann
+  // seitdem dazugekommen sein. Bis 09/2026 galt dann jede seiner Nachrichten
+  // als gefälscht, bis die Liste ablief: die des eigenen, gerade angemeldeten
+  // Geräts ebenso wie die vom neuen Telefon eines Freundes. Also einmal frisch
+  // nachsehen, höchstens alle `FRISCH_MS` je Konto. Die frische Liste läuft
+  // durch dieselbe Vertrauensprüfung, und die Unterschrift wird danach genauso
+  // streng geprüft.
+  try {
+    return schluesselIn(await verzeichnisVon(userId, { frisch: true }))
+  } catch {
+    return null
+  }
 }
 
 /**

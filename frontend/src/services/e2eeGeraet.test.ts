@@ -136,6 +136,7 @@ const {
   pruefeGeraeteBeleg,
   sicherheitsnummer,
   verzeichnisVon,
+  signaturSchluesselVon,
 } = await import('./e2eeGeraet')
 const { erzeugeSignaturPaar, signiere } = await import('./absenderSignatur')
 
@@ -508,6 +509,82 @@ describe('e2eeGeraet', () => {
         // Ab jetzt ist der neue Bestand der bekannte.
         expect(await vertrauteGeraete(4006, neu)).toEqual(neu)
         expect(warnungen).toHaveLength(1)
+      })
+    })
+
+    describe('Signaturschlüssel eines Geräts, das nach dem letzten Abruf dazukam', () => {
+      /** Die gemerkte Liste ist `ms` Millisekunden alt. */
+      const spaeter = async <T>(ms: number, lauf: () => Promise<T>): Promise<T> => {
+        const echtesJetzt = Date.now
+        Date.now = () => echtesJetzt() + ms
+        try {
+          return await lauf()
+        } finally {
+          Date.now = echtesJetzt
+        }
+      }
+
+      it('sieht einmal frisch nach, statt jede Nachricht des Geräts zu verwerfen', async () => {
+        const tel = await erzeugeSignaturPaar()
+        const neu = await erzeugeSignaturPaar()
+        fremdeGeraete.liste = [geraet('tel', 'pk-tel', tel.publicKeyJwk)] as any
+        expect(await signaturSchluesselVon(4008, 'tel')).toBe(tel.publicKeyJwk)
+        expect(fremdeGeraete.rufe).toBe(1)
+
+        // Das Telefon gibt ein neues Gerät frei; die gemerkte Liste kennt es nicht.
+        const sig = await signiere(
+          await freigabeDaten(4008, 'neu', 'pk-neu', neu.publicKeyJwk),
+          tel.privateKeyJwk,
+        )
+        fremdeGeraete.liste = [
+          geraet('tel', 'pk-tel', tel.publicKeyJwk),
+          geraet('neu', 'pk-neu', neu.publicKeyJwk, { approved_by: 'tel', approval_signature: sig }),
+        ] as any
+        expect(await spaeter(31_000, () => signaturSchluesselVon(4008, 'neu'))).toBe(neu.publicKeyJwk)
+        expect(fremdeGeraete.rufe).toBe(2)
+      })
+
+      it('traut auch frisch nachgesehen keinem Gerät, das nur der Server einträgt', async () => {
+        const tel = await erzeugeSignaturPaar()
+        const fremd = await erzeugeSignaturPaar()
+        fremdeGeraete.liste = [geraet('tel', 'pk-tel', tel.publicKeyJwk)] as any
+        await signaturSchluesselVon(4009, 'tel')
+
+        fremdeGeraete.liste = [
+          geraet('tel', 'pk-tel', tel.publicKeyJwk),
+          geraet('fremd', 'pk-fremd', fremd.publicKeyJwk, { is_approved: true }),
+        ] as any
+        expect(await spaeter(31_000, () => signaturSchluesselVon(4009, 'fremd'))).toBeNull()
+        expect(fremdeGeraete.rufe).toBe(2)
+      })
+
+      it('fragt je Konto höchstens alle 30 Sekunden frisch nach', async () => {
+        fremdeGeraete.liste = [geraet('tel', 'pk-tel', 'sig-tel')] as any
+        await signaturSchluesselVon(4010, 'tel')
+        expect(fremdeGeraete.rufe).toBe(1)
+
+        // Eine gefälschte Nutzlast nach der anderen löst keine Abrufflut aus.
+        for (let i = 0; i < 5; i += 1) {
+          expect(await signaturSchluesselVon(4010, `erfunden-${i}`)).toBeNull()
+        }
+        expect(fremdeGeraete.rufe).toBe(1)
+
+        await spaeter(31_000, async () => {
+          await signaturSchluesselVon(4010, 'erfunden-a')
+          await signaturSchluesselVon(4010, 'erfunden-b')
+        })
+        expect(fremdeGeraete.rufe).toBe(2)
+      })
+
+      it('antwortet bei einem Ausfall mit „kein Schlüssel", nicht mit einem Fehler', async () => {
+        fremdeGeraete.liste = [geraet('tel', 'pk-tel', 'sig-tel')] as any
+        await signaturSchluesselVon(4011, 'tel')
+        fremdeGeraete.fehler = new Error('Netzwerk weg')
+        try {
+          expect(await spaeter(31_000, () => signaturSchluesselVon(4011, 'neu'))).toBeNull()
+        } finally {
+          fremdeGeraete.fehler = null
+        }
       })
     })
 
