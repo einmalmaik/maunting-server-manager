@@ -4,7 +4,7 @@ import { toast } from '@/stores/toastStore'
 import { useAuthStore } from '@/stores/authStore'
 
 export { API_BASE, apiUrl } from '@/config/api'
-import { API_ORIGIN, getEffectiveApiUrl } from '@/config/api'
+import { getEffectiveApiUrl } from '@/config/api'
 
 /**
  * Checks whether a given URL points to the same origin / internal API.
