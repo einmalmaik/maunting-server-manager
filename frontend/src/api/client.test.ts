@@ -467,4 +467,65 @@ describe('api client', () => {
       await expect(api('/test')).rejects.toThrow('Internal Server Error')
     })
   })
+
+  describe('external origin security (isInternalApiUrl & token leak prevention)', () => {
+    it('correctly classifies internal and external URLs', async () => {
+      const { isInternalApiUrl } = await import('./client')
+      expect(isInternalApiUrl('/api/test')).toBe(true)
+      expect(isInternalApiUrl('api/test')).toBe(true)
+      expect(isInternalApiUrl('/media/avatar.png')).toBe(true)
+      expect(isInternalApiUrl(`${window.location.origin}/api/test`)).toBe(true)
+
+      expect(isInternalApiUrl('https://evil.com/avatar.png')).toBe(false)
+      expect(isInternalApiUrl('http://attacker.org/token')).toBe(false)
+      expect(isInternalApiUrl('//evil.com/avatar.png')).toBe(false)
+      expect(isInternalApiUrl('data:image/png;base64,...')).toBe(false)
+      expect(isInternalApiUrl('blob:http://localhost/uuid')).toBe(false)
+      expect(isInternalApiUrl('')).toBe(false)
+    })
+
+    it('does not attach Authorization or CSRF tokens to external URLs in api()', async () => {
+      const { registriereNativeSitzung } = await import('./client')
+      registriereNativeSitzung({
+        token: () => 'secret_jwt_token',
+        erneuern: async () => true,
+      })
+      document.cookie = '__Secure-csrf_token=super_secret_csrf;path=/;secure'
+
+      fetchSpy.mockReturnValueOnce(mockResponse(200, { ok: true }))
+      await api('https://evil.com/avatar.png', { method: 'POST', body: '{}' })
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1)
+      const call = fetchSpy.mock.calls[0]
+      const calledUrl = call[0]
+      const options = call[1] as RequestInit
+      expect(calledUrl).toBe('https://evil.com/avatar.png')
+      expect(options.credentials).toBe('omit')
+      const headers = (options.headers || {}) as Record<string, string>
+      expect(headers['Authorization']).toBeUndefined()
+      expect(headers['X-CSRF-Token']).toBeUndefined()
+    })
+
+    it('does not attach Authorization or CSRF tokens to external URLs in apiStream()', async () => {
+      const { registriereNativeSitzung } = await import('./client')
+      registriereNativeSitzung({
+        token: () => 'secret_jwt_token',
+        erneuern: async () => true,
+      })
+      document.cookie = '__Secure-csrf_token=super_secret_csrf;path=/;secure'
+
+      fetchSpy.mockReturnValueOnce(Promise.resolve(new Response('ok', { status: 200 })))
+      await apiStream('https://evil.com/stream', { method: 'POST' })
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1)
+      const call = fetchSpy.mock.calls[0]
+      const calledUrl = call[0]
+      const options = call[1] as RequestInit
+      expect(calledUrl).toBe('https://evil.com/stream')
+      expect(options.credentials).toBe('omit')
+      const headers = (options.headers || {}) as Record<string, string>
+      expect(headers['Authorization']).toBeUndefined()
+      expect(headers['X-CSRF-Token']).toBeUndefined()
+    })
+  })
 })

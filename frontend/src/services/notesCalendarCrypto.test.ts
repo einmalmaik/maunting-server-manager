@@ -22,6 +22,8 @@ import {
   checkAndRespondToDeviceKeyRequests,
   altschluessel,
   altschluesselUebernehmen,
+  bestaetigeGeraetFuerNotizenSchluessel,
+  istGeraetBestaetigtFuerNotizenSchluessel,
 } from './notesCalendarCrypto'
 import * as socialApi from '@/api/social'
 import * as e2eeGeraet from './e2eeGeraet'
@@ -1068,6 +1070,82 @@ describe('notesCalendarCrypto E2EE', () => {
       await getOrCreateUserNotesKey(2)
 
       await expect(decryptNoteTitle(encTitle, noteUid, undefined, 2)).rejects.toThrow()
+    })
+  })
+
+  describe('Vorfall 7: Schutz vor unterschobenen Geräten', () => {
+    it('gibt den Notizenschlüssel NICHT an ein vom Server als freigegeben gemeldetes Gerät, das nicht von uns freigegeben wurde', async () => {
+      const userId = 501
+      const raw32 = new Uint8Array(32).fill(99)
+      const rawB64 = btoa(String.fromCharCode(...raw32))
+      await setUserNotesKey(userId, rawB64)
+
+      binIch('dev-self-501', selfPair, selfSig)
+      eintragen(userId, 'dev-self-501', selfPair, selfSig)
+
+      // Ein Gerät, das der Serverbetreiber mit is_approved = true, aber fremdem approved_by unterschiebt
+      eintragen(userId, 'dev-rogue-501', reqPair, reqSig)
+      const rogueEntry = verzeichnis.get(userId)!.find((g) => g.device_id === 'dev-rogue-501')!
+      ;(rogueEntry as any).is_approved = true
+      ;(rogueEntry as any).approved_by = 'dev-attacker-unbekannt'
+
+      let pendingDispatched = false
+      const onPending = () => {
+        pendingDispatched = true
+      }
+      window.addEventListener('msm:notes-key-request-pending', onPending)
+
+      const reqPayload = JSON.stringify({
+        type: 'notes_key_request',
+        version: 1,
+        userId,
+        requesterDeviceId: 'dev-rogue-501',
+        timestamp: Date.now(),
+      })
+      const env = await encryptE2eeHybrid(reqPayload, selfPair.publicKeyJwk)
+
+      vi.mocked(socialApi.relayE2eeEnvelope).mockClear()
+      const processed = await processNotesKeyControlEnvelope(env, userId)
+
+      // Anfrage bleibt offen, Schlüssel wurde NICHT versandt
+      expect(processed).toBe(false)
+      expect(socialApi.relayE2eeEnvelope).not.toHaveBeenCalled()
+      expect(pendingDispatched).toBe(true)
+
+      window.removeEventListener('msm:notes-key-request-pending', onPending)
+
+      // Sobald der Benutzer das Gerät lokal für den Notizenschlüssel bestätigt:
+      bestaetigeGeraetFuerNotizenSchluessel(userId, 'dev-rogue-501')
+      expect(istGeraetBestaetigtFuerNotizenSchluessel(userId, 'dev-rogue-501')).toBe(true)
+
+      const processedAfterConfirm = await processNotesKeyControlEnvelope(env, userId)
+      expect(processedAfterConfirm).toBe(true)
+      expect(socialApi.relayE2eeEnvelope).toHaveBeenCalled()
+    })
+
+    it('syncNotesKeyToPairedDevices überspringt Geräte mit is_approved: false oder unbestätigte freigegebene Geräte', async () => {
+      const userId = 502
+      await setUserNotesKey(userId, btoa(String.fromCharCode(...new Uint8Array(32).fill(77))))
+      binIch('dev-self-502', selfPair, selfSig)
+      eintragen(userId, 'dev-self-502', selfPair, selfSig)
+
+      // Unapproved device
+      eintragen(userId, 'dev-pending-502', otherPair, otherSig)
+      const pendingEntry = verzeichnis.get(userId)!.find((g) => g.device_id === 'dev-pending-502')!
+      ;(pendingEntry as any).is_approved = false
+
+      // Rogue server-approved device without our approval
+      eintragen(userId, 'dev-rogue-502', reqPair, reqSig)
+      const rogueEntry = verzeichnis.get(userId)!.find((g) => g.device_id === 'dev-rogue-502')!
+      ;(rogueEntry as any).is_approved = true
+      ;(rogueEntry as any).approved_by = 'other-device'
+
+      vi.mocked(e2eeGeraet.geraeteVon).mockResolvedValue(verzeichnis.get(userId)! as any)
+      vi.mocked(socialApi.relayE2eeEnvelope).mockClear()
+
+      const sent = await syncNotesKeyToPairedDevices(userId)
+      expect(sent).toBe(0)
+      expect(socialApi.relayE2eeEnvelope).not.toHaveBeenCalled()
     })
   })
 })

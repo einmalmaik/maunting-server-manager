@@ -264,7 +264,50 @@ export interface ChatMessageBubbleProps {
   medienBindung: (msg: ChatMessage) => MedienBindungsKontext
 }
 
-export function ChatMessageBubble({
+export function safeFormatDate(val: unknown, options?: Intl.DateTimeFormatOptions, fallback = ''): string {
+  if (!val) return fallback
+  const d = new Date(val as string | number)
+  return isNaN(d.getTime()) ? fallback : d.toLocaleString([], options)
+}
+
+export function safeFormatTime(val: unknown, options?: Intl.DateTimeFormatOptions, fallback = ''): string {
+  if (!val) return fallback
+  const d = new Date(val as string | number)
+  return isNaN(d.getTime()) ? fallback : d.toLocaleTimeString([], options)
+}
+
+export class MessageErrorBoundary extends React.Component<
+  { children: React.ReactNode; fallback?: React.ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: React.ReactNode; fallback?: React.ReactNode }) {
+    super(props)
+    this.state = { hasError: false }
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error: any) {
+    console.warn('[Messenger] Fehler beim Rendern einer Nachricht abgefangen:', error)
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        this.props.fallback ?? (
+          <div className="p-3 my-1 rounded-xl bg-status-destructive/10 border border-status-destructive/30 text-xs text-status-destructive flex items-center gap-2">
+            <span>Nachricht konnte nicht dargestellt werden</span>
+          </div>
+        )
+      )
+    }
+    return this.props.children
+  }
+}
+
+function ChatMessageBubbleContent({
   msg,
   kontext,
   ton,
@@ -465,7 +508,11 @@ export function ChatMessageBubble({
                   (Number(msg.antwortAuf.absenderId) === Number(eigeneId) ? eigenerName : 'Nachricht')}
               </span>
               <span className="block text-label-sm opacity-80 line-clamp-2 leading-snug">
-                {msg.antwortAuf.auszug}
+                {typeof msg.antwortAuf.auszug === 'string'
+                  ? msg.antwortAuf.auszug
+                  : typeof msg.antwortAuf.auszug === 'object' && msg.antwortAuf.auszug !== null
+                    ? JSON.stringify(msg.antwortAuf.auszug)
+                    : String(msg.antwortAuf.auszug ?? '')}
               </span>
             </span>
           </button>
@@ -733,7 +780,7 @@ export function ChatMessageBubble({
             <div className="text-label-sm text-white/90 flex items-center gap-1.5 font-medium">
               <Clock className="w-3.5 h-3.5 text-primary shrink-0" />
               <span>
-                {new Date(msg.calendarAttachment.start).toLocaleString([], {
+                {safeFormatDate(msg.calendarAttachment.start, {
                   dateStyle: 'short',
                   timeStyle: 'short',
                 })}
@@ -945,7 +992,7 @@ export function ChatMessageBubble({
         )}
 
         <span>
-          {new Date(msg.createdAt).toLocaleTimeString([], {
+          {safeFormatTime(msg.createdAt, {
             hour: '2-digit',
             minute: '2-digit',
           })}
@@ -973,5 +1020,13 @@ export function ChatMessageBubble({
           ))}
       </div>
     </div>
+  )
+}
+
+export function ChatMessageBubble(props: ChatMessageBubbleProps) {
+  return (
+    <MessageErrorBoundary>
+      <ChatMessageBubbleContent {...props} />
+    </MessageErrorBoundary>
   )
 }

@@ -124,17 +124,19 @@ export async function werteUmschlaegeAus(
         continue
       }
 
+      const senderId = activeContact ? activeContact.userId : 0
       const clientUuid = logischeUuid(env.client_uuid)
-      if (clientUuid && seenClientUuids.has(clientUuid)) {
+      const dedupKey = `${senderId}:${clientUuid}`
+      if (clientUuid && seenClientUuids.has(dedupKey)) {
         continue
       }
       if (clientUuid) {
-        seenClientUuids.add(clientUuid)
+        seenClientUuids.add(dedupKey)
       }
       decryptedList.push({
         id: env.id,
         clientUuid,
-        senderId: activeContact ? activeContact.userId : 0,
+        senderId,
         text: t('messenger.encryptedMessage'),
         createdAt: env.created_at,
         isSelf: false,
@@ -437,12 +439,6 @@ export async function werteUmschlaegeAus(
         // Die Kennung aus dem Umschlag trägt einen Gerätezusatz je Kopie;
         // für den Verlauf zählt die logische darunter.
         const clientUuid = (parsed.client_uuid as string) || logischeUuid(env.client_uuid)
-        if (clientUuid && seenClientUuids.has(clientUuid)) {
-          continue
-        }
-        if (clientUuid) {
-          seenClientUuids.add(clientUuid)
-        }
 
         let senderId: number
         let senderName: string
@@ -549,6 +545,14 @@ export async function werteUmschlaegeAus(
           senderName = parsed.sender_name || parsed.sender_username || ''
         }
 
+        const dedupKey = `${senderId}:${clientUuid}`
+        if (clientUuid && seenClientUuids.has(dedupKey)) {
+          continue
+        }
+        if (clientUuid) {
+          seenClientUuids.add(dedupKey)
+        }
+
         if (!isSelf && env.id > maxIncomingId) {
           maxIncomingId = env.id
         }
@@ -561,15 +565,45 @@ export async function werteUmschlaegeAus(
           text: parsed.text || '',
           createdAt: env.created_at,
           isSelf,
-          noteAttachment: anhaengeErlaubt ? parsed.note_attachment : undefined,
-          calendarAttachment: anhaengeErlaubt ? parsed.calendar_attachment : undefined,
+          noteAttachment:
+            anhaengeErlaubt && parsed.note_attachment && typeof parsed.note_attachment === 'object'
+              ? {
+                  title: String(parsed.note_attachment.title ?? ''),
+                  content: String(parsed.note_attachment.content ?? ''),
+                  color: parsed.note_attachment.color ? String(parsed.note_attachment.color) : undefined,
+                  category: parsed.note_attachment.category ? String(parsed.note_attachment.category) : undefined,
+                }
+              : undefined,
+          calendarAttachment:
+            anhaengeErlaubt && parsed.calendar_attachment && typeof parsed.calendar_attachment === 'object'
+              ? {
+                  title: String(parsed.calendar_attachment.title ?? ''),
+                  start: String(parsed.calendar_attachment.start ?? ''),
+                  end: String(parsed.calendar_attachment.end ?? ''),
+                  description: parsed.calendar_attachment.description ? String(parsed.calendar_attachment.description) : undefined,
+                  location: parsed.calendar_attachment.location ? String(parsed.calendar_attachment.location) : undefined,
+                }
+              : undefined,
           imageAttachment: anhaengeErlaubt ? parsed.image_attachment : undefined,
           audioAttachment: anhaengeErlaubt ? parsed.audio_attachment : undefined,
           fileAttachment: anhaengeErlaubt ? parsed.file_attachment : undefined,
           stickerAttachment: anhaengeErlaubt ? parsed.sticker_attachment : undefined,
           storyReply: anhaengeErlaubt ? parsed.story_reply : undefined,
           videoNoteAttachment: anhaengeErlaubt ? parsed.video_note_attachment : undefined,
-          antwortAuf: parsed.antwort_auf,
+          antwortAuf:
+            parsed.antwort_auf && typeof parsed.antwort_auf === 'object'
+              ? {
+                  clientUuid: String(parsed.antwort_auf.clientUuid ?? parsed.antwort_auf.client_uuid ?? ''),
+                  absenderId: Number(parsed.antwort_auf.absenderId ?? parsed.antwort_auf.absender_id ?? 0),
+                  absenderName: parsed.antwort_auf.absenderName || parsed.antwort_auf.absender_name ? String(parsed.antwort_auf.absenderName ?? parsed.antwort_auf.absender_name) : undefined,
+                  auszug:
+                    typeof parsed.antwort_auf.auszug === 'string'
+                      ? parsed.antwort_auf.auszug
+                      : typeof parsed.antwort_auf.auszug === 'object' && parsed.antwort_auf.auszug !== null
+                        ? JSON.stringify(parsed.antwort_auf.auszug)
+                        : String(parsed.antwort_auf.auszug ?? ''),
+                }
+              : undefined,
           weitergeleitet: Boolean(parsed.weitergeleitet) || undefined,
           erwaehnungen: Array.isArray(parsed.erwaehnungen) ? parsed.erwaehnungen : undefined,
           // Ob daraus eine Erwähnung wird, entscheidet nicht dieses Feld,
@@ -615,19 +649,20 @@ export async function werteUmschlaegeAus(
       continue
     }
 
+    const senderId = urheber || (activeContact ? activeContact.userId : 0)
     const clientUuid = logischeUuid(env.client_uuid)
-    if (clientUuid && seenClientUuids.has(clientUuid)) {
+    const dedupKey = `${senderId}:${clientUuid}`
+    if (clientUuid && seenClientUuids.has(dedupKey)) {
       continue
     }
     if (clientUuid) {
-      seenClientUuids.add(clientUuid)
+      seenClientUuids.add(dedupKey)
     }
 
     const isSelf = urheber === Number(currentUserId)
     // Die Markierung fällt nur weg, wo sie stimmt. Nennt der Ratchet die
     // Gegenseite, bleibt sie stehen: so sieht man, was behauptet wurde.
     const text = isSelf && vonMirBehauptet ? plain.slice('[ME]:'.length) : plain
-    const senderId = urheber || (activeContact ? activeContact.userId : 0)
     if (!isSelf && env.id > maxIncomingId) {
       maxIncomingId = env.id
     }

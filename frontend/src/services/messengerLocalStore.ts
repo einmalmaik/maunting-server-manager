@@ -561,7 +561,8 @@ export function mischeVerlauf(
   lokal: readonly LocalStoredMessage[],
   frisch: readonly LocalStoredMessage[]
 ): LocalStoredMessage[] {
-  const schluessel = (m: LocalStoredMessage) => m.clientUuid || `#${m.id}`
+  const schluessel = (m: LocalStoredMessage) =>
+    m.clientUuid ? `${m.senderId ?? 0}:${m.clientUuid}` : `#${m.id}`
   const zusammen = new Map<string, LocalStoredMessage>()
 
   for (const m of lokal) zusammen.set(schluessel(m), m)
@@ -606,12 +607,12 @@ export async function loadLocalMessages(blindMailboxId: string): Promise<LocalSt
       (z) => nachrichtAad(blindMailboxId, z.id),
     )
 
-    // Deduplicate by clientUuid: if a confirmed server message exists with this clientUuid,
-    // discard any optimistic leftover with the same clientUuid.
+    // Deduplicate by clientUuid per sender: if a confirmed server message exists with this clientUuid,
+    // discard any optimistic leftover with the same clientUuid for that same sender.
     const confirmedUuids = new Set<string>()
     for (const m of rawMsgs) {
       if (m.clientUuid && !isOptimisticMessage(m)) {
-        confirmedUuids.add(m.clientUuid)
+        confirmedUuids.add(`${m.senderId ?? 0}:${m.clientUuid}`)
       }
     }
     const filtered = rawMsgs.filter((m) => {
@@ -639,7 +640,11 @@ export async function loadLocalMessages(blindMailboxId: string): Promise<LocalSt
       // Dasselbe für ein Steuerpaket, das keinen Zweig fand und als Nachricht
       // abgelegt wurde: der rohe JSON-Text bliebe sonst für immer stehen.
       if (istSteuerzeile(m.text)) return false
-      if (m.clientUuid && isOptimisticMessage(m) && confirmedUuids.has(m.clientUuid)) {
+      if (
+        m.clientUuid &&
+        isOptimisticMessage(m) &&
+        confirmedUuids.has(`${m.senderId ?? 0}:${m.clientUuid}`)
+      ) {
         return false
       }
       return true
@@ -703,14 +708,15 @@ export async function saveLocalMessages(
         ),
       )
       if (m.clientUuid) {
+        const key = `${m.senderId ?? 0}:${m.clientUuid}`
         if (isOptimisticMessage(m)) {
           // Beide Fassungen können in derselben Liste stehen — der Verlauf im
           // Arbeitsspeicher trägt die optimistische Zeile noch eine Runde mit.
-          const bisher = optimistischHier.get(m.clientUuid)
+          const bisher = optimistischHier.get(key)
           if (bisher) bisher.push(m.id)
-          else optimistischHier.set(m.clientUuid, [m.id])
+          else optimistischHier.set(key, [m.id])
         } else {
-          bestaetigt.add(m.clientUuid)
+          bestaetigt.add(key)
         }
       }
       // Only real server envelope IDs (< 1e11) advance lastSyncedEnvelopeId
@@ -729,22 +735,27 @@ export async function saveLocalMessages(
      * mehrfach, und der Index gäbe davon nur eine heraus.
      */
     const zuLoeschen: number[] = []
-    for (const [clientUuid, ids] of optimistischHier) {
-      if (bestaetigt.has(clientUuid)) zuLoeschen.push(...ids)
+    for (const [key, ids] of optimistischHier) {
+      if (bestaetigt.has(key)) zuLoeschen.push(...ids)
     }
     if (bestaetigt.size > 0) {
-      const vorhanden = await new Promise<LocalStoredMessage[]>((resolve) => {
+      const rohzeilen = await new Promise<Record<string, any>[]>((resolve) => {
         const tx = db.transaction(STORE_MESSAGES, 'readonly')
         const req = tx
           .objectStore(STORE_MESSAGES)
           .index('by_mailbox')
           .getAll(IDBKeyRange.only(blindMailboxId))
-        req.onsuccess = () => resolve((req.result || []) as LocalStoredMessage[])
+        req.onsuccess = () => resolve((req.result || []) as Record<string, any>[])
         req.onerror = () => resolve([])
       })
+      const vorhanden = await entsiegleZeilen<LocalStoredMessage>(
+        rohzeilen,
+        (z) => nachrichtAad(blindMailboxId, z.id)
+      )
       for (const m of vorhanden) {
         if (m.blindMailboxId !== blindMailboxId) continue
-        if (!m.clientUuid || !bestaetigt.has(m.clientUuid)) continue
+        const key = `${m.senderId ?? 0}:${m.clientUuid}`
+        if (!m.clientUuid || !bestaetigt.has(key)) continue
         if (!isOptimisticMessage(m)) continue
         zuLoeschen.push(m.id)
       }

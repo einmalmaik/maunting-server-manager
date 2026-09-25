@@ -103,6 +103,37 @@ const letzteAntwort = new Map<string, number>()
  */
 const ALTSCHLUESSEL_KENNUNG = 1
 
+const bestaetigteGeraeteFuerNotizen = new Set<string>()
+
+export function bestaetigeGeraetFuerNotizenSchluessel(userId: number, deviceId: string): void {
+  bestaetigteGeraeteFuerNotizen.add(`${userId}:${deviceId}`)
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(`msm_notes_approved_devices:${userId}`)
+      const list: string[] = raw ? JSON.parse(raw) : []
+      if (!list.includes(deviceId)) {
+        list.push(deviceId)
+        localStorage.setItem(`msm_notes_approved_devices:${userId}`, JSON.stringify(list))
+      }
+    }
+  } catch {}
+}
+
+export function istGeraetBestaetigtFuerNotizenSchluessel(userId: number, deviceId: string): boolean {
+  if (bestaetigteGeraeteFuerNotizen.has(`${userId}:${deviceId}`)) return true
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(`msm_notes_approved_devices:${userId}`)
+      if (!raw) return false
+      const list: string[] = JSON.parse(raw)
+      return Array.isArray(list) && list.includes(deviceId)
+    }
+  } catch {
+    return false
+  }
+  return false
+}
+
 /**
  * Leert den In-Memory-Schlüsselcache (z. B. bei Session-Wipe oder Tests).
  */
@@ -115,6 +146,7 @@ export function clearNotesKeyCache(): void {
   letzteAntwort.clear()
   laufendeVerteilung.clear()
   laufenderDurchgang.clear()
+  bestaetigteGeraeteFuerNotizen.clear()
 }
 
 /**
@@ -664,8 +696,17 @@ async function verteileSchluessel(userId: number): Promise<number> {
     .map((d) => ({
       deviceId: d.device_id || (d as any).deviceId,
       publicKey: d.public_key || (d as any).publicKey,
+      isApproved: d.is_approved,
+      approvedBy: d.approved_by,
     }))
     .filter((d) => d.deviceId && d.deviceId !== ich.kennung && d.publicKey)
+    .filter((d) => d.isApproved !== false)
+    .filter(
+      (d) =>
+        d.isApproved !== true ||
+        d.approvedBy === ich.kennung ||
+        istGeraetBestaetigtFuerNotizenSchluessel(userId, d.deviceId),
+    )
     .filter((d) => !schonGegeben(userId, ich.kennung, abdruck, d.deviceId))
 
   if (targetDevices.length === 0) return 0
@@ -903,6 +944,31 @@ async function verarbeiteSteuerumschlag(
     // Endgültig vermerkt, bekäme es nie eine Antwort — so geschehen in der
     // Laufzeitprobe vom 23.09. Gesendet wird ohne Eintrag ohnehin nichts.
     if (!ziel) return 'offen'
+
+    // Schutz gegen unterschobene Geräte (Vorfall 7):
+    // Ein Gerät, das der Server als freigegeben meldet (`is_approved === true`),
+    // darf den Notizenschlüssel nur erhalten, wenn dieses Gerät die Freigabe
+    // selbst unterschrieben hat (`approved_by === self.kennung`) oder der Benutzer
+    // das Gerät interaktiv für den Notizenschlüssel bestätigt hat.
+    // Ein nicht freigegebenes Gerät (`is_approved === false`) erhält den Schlüssel nicht.
+    if (ziel.is_approved === false) {
+      return 'offen'
+    }
+    if (
+      ziel.is_approved === true &&
+      ziel.approved_by !== self.kennung &&
+      !istGeraetBestaetigtFuerNotizenSchluessel(userId, anGeraet)
+    ) {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('msm:notes-key-request-pending', {
+            detail: { userId, deviceId: anGeraet, label: ziel.label },
+          }),
+        )
+      }
+      return 'offen'
+    }
+
     try {
       const payload = await unterschriebeneUebergabe(self, userId, anGeraet, existingRawKey)
       if (!payload) return 'offen'

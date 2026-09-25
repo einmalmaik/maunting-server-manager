@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { User as UserIcon } from 'lucide-react'
 import { apiUrl, getIsAbsoluteApi } from '@/config/api'
-import { apiStream } from '@/api/client'
+import { apiStream, isInternalApiUrl } from '@/api/client'
 
 export interface AvatarProps {
   src?: string | null
@@ -82,7 +82,10 @@ async function fetchImageBlobUrl(url: string): Promise<string | null> {
 
   const promise = (async () => {
     try {
-      const res = await apiStream(url, { method: 'GET', headers: { Accept: 'image/*' } })
+      const isInternal = isInternalApiUrl(url)
+      const res = isInternal
+        ? await apiStream(url, { method: 'GET', headers: { Accept: 'image/*' } })
+        : await fetch(url, { method: 'GET', credentials: 'omit', headers: { Accept: 'image/*' } })
       if (!res.ok) return null
       const blob = await res.blob()
       if (!blob || blob.size === 0) return null

@@ -31,8 +31,14 @@ import {
  * nimmt seine Umschläge nicht mehr an. Geprüft wird hier ohnehin die Schicht
  * darüber: Häkchen, Verlauf, Quittungen.
  */
-function drUmschlag(klartext: string): string {
-  return 'sv-e2ee-dr-v1:1.testgeraet.zielgeraet.' + btoa(unescape(encodeURIComponent(klartext)))
+function drUmschlag(klartext: string, vonKonto: number = 1): string {
+  try {
+    const p = JSON.parse(klartext)
+    if (p && typeof p === 'object' && p.sender_id) {
+      vonKonto = Number(p.sender_id)
+    }
+  } catch {}
+  return `sv-e2ee-dr-v1:${vonKonto}.testgeraet.zielgeraet.` + btoa(unescape(encodeURIComponent(klartext)))
 }
 
 vi.mock('@/api/social', () => ({
@@ -172,7 +178,17 @@ vi.mock('@/services/ratchetSitzung', () => {
         // kein zweites Mal auf.
         const schon = await klartext.lies()
         if (schon !== null) {
-          return { art: 'klartext', text: schon, vonKonto: 101, vonGeraet: 'zielgeraet' }
+          let von = 101
+          if (umschlag.startsWith(PREFIX)) {
+            const h = Number(umschlag.slice(PREFIX.length).split('.')[0])
+            if (!isNaN(h) && h > 0) von = h
+          } else {
+            try {
+              const p = JSON.parse(schon)
+              if (p && typeof p === 'object' && p.sender_id) von = Number(p.sender_id)
+            } catch {}
+          }
+          return { art: 'klartext', text: schon, vonKonto: von, vonGeraet: 'zielgeraet' }
         }
         // Was nicht im Ratchet-Format ankommt, ist Altbestand. Der echte
         // `liesDrUmschlag` antwortet darauf `unbekannt`, und der Messenger
@@ -192,11 +208,26 @@ vi.mock('@/services/ratchetSitzung', () => {
           return { art: 'unbekannt' }
         }
         await klartext.lege(text)
-        return { art: 'klartext', text, vonKonto: 101, vonGeraet: 'zielgeraet' }
+        let von = 101
+        if (umschlag.startsWith(PREFIX)) {
+          const h = Number(umschlag.slice(PREFIX.length).split('.')[0])
+          if (!isNaN(h) && h > 0) von = h
+        } else {
+          try {
+            const p = JSON.parse(text)
+            if (p && typeof p === 'object' && p.sender_id) von = Number(p.sender_id)
+          } catch {}
+        }
+        return { art: 'klartext', text, vonKonto: von, vonGeraet: 'zielgeraet' }
       }
     ),
     verarbeiteBootstrap: vi.fn(async () => ({ istAufbau: false, ersetzt: false })),
     verwirfDrSitzung: vi.fn(async () => {}),
+    drUrheber: (u: string) => {
+      if (!u.startsWith(PREFIX)) return null
+      const [konto, geraet] = u.slice(PREFIX.length).split('.')
+      return Number(konto) > 0 ? { vonKonto: Number(konto), vonGeraet: geraet } : null
+    },
     logischeUuid: (u?: string | null) =>
       !u ? undefined : u.indexOf('#') === -1 ? u : u.slice(0, u.indexOf('#')),
   }

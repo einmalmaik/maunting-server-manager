@@ -149,6 +149,7 @@ export function Calendar() {
   // Serientermine. `formSerie` ist das Dokument des Termins, wie es gespeichert
   // ist; die Einzelfelder darunter sind seine zerlegte Form fürs Formular.
   const [formSerie, setFormSerie] = useState<Serie>(LEERE_SERIE)
+  const [formRawRecurrence, setFormRawRecurrence] = useState<string>('')
   const [formTakt, setFormTakt] = useState<Frequenz | null>(null)
   const [formIntervall, setFormIntervall] = useState(1)
   const [formWochentage, setFormWochentage] = useState<string[]>([])
@@ -387,6 +388,7 @@ export function Calendar() {
     setFormServerId(null)
     setFormColor(getDefaultColorForType(targetType))
     setzeSerienFelder(LEERE_SERIE)
+    setFormRawRecurrence('')
     setFormVorkommen('')
     setFormUmfang('einzeln')
     setFormKopf(null)
@@ -433,6 +435,7 @@ export function Calendar() {
     setFormServerId(ev.server_id || null)
     setFormColor(ev.color ? (ev.color === 'blue' ? 'primary' : ev.color === 'green' ? 'emerald' : ev.color) : getDefaultColorForType(evType))
 
+    setFormRawRecurrence(ev.recurrence || '')
     const serie = serieLesen(ev.recurrence)
     setzeSerienFelder(serie)
     setFormVorkommen(ev.istSerie ? ev.vorkommen : '')
@@ -492,6 +495,11 @@ export function Calendar() {
             anzahl: formEndeArt === 'anzahl' ? formAnzahl : null,
           }, formSerie)
 
+      let recurrenceString: string | null = serieSchreiben(neueSerie)
+      if (formRawRecurrence && formRawRecurrence.startsWith('sv-cal-v1:') && !neueSerie.rrule && formTakt === null) {
+        recurrenceString = formRawRecurrence
+      }
+
       const payload = {
         title: einzelnesVorkommen ? (formKopf?.title ?? formTitle.trim()) : formTitle.trim(),
         start_time: einzelnesVorkommen ? (formKopf?.start ?? formStart) : formStart,
@@ -503,7 +511,7 @@ export function Calendar() {
         event_type: formEventType,
         team_id: formEventType === 'team' ? formTeamId : null,
         server_id: formEventType === 'server' ? formServerId : null,
-        recurrence: serieSchreiben(neueSerie),
+        recurrence: recurrenceString,
       }
 
       await saveCalendarEventOffline(payload, formEventId)

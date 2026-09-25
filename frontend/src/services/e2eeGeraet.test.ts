@@ -302,6 +302,22 @@ describe('e2eeGeraet', () => {
       expect(zweites.kennung).not.toBe('altbestand0000')
     }, 60_000)
 
+    it('übernimmt keinen self-Eintrag, der explizit einem anderen Konto zugeordnet war', async () => {
+      platte.clear()
+      platte.set('devices:self', {
+        id: 'self',
+        kennung: 'altbestand999',
+        konto: 99,
+        publicKeyJwk: '{"kty":"RSA","n":"alt"}',
+        privateKeyJwk: '{"kty":"RSA","d":"alt"}',
+      })
+
+      setzeAngemeldetesKonto(10)
+      const g = await eigenesGeraet()
+      expect(g.kennung).not.toBe('altbestand999')
+      expect(platte.has('devices:self')).toBe(true)
+    }, 60_000)
+
     it('versucht das Umbenennen der Sitzungen erneut, wenn es scheitert', async () => {
       // Am laufenden System schiefgegangen: der Schlüssel war umgehängt, das
       // Umbenennen scheiterte, `self` war weg — und es gab keinen zweiten

@@ -163,6 +163,7 @@ import {
   type GruppenSchluesselEintrag,
 } from './gruppenSchluessel'
 import { leereMailboxNachweise, mailboxNachweis } from './mailboxNachweis'
+import { signiereNutzlast } from './nutzlastSignatur'
 import { leereMailboxAbos, offeneMailboxAbos } from './mailboxAbo'
 
 const ALICE = 1
@@ -530,6 +531,48 @@ describe('gruppenSchluessel', () => {
 
     aktiviere(bob)
     expect((await verarbeiteGruppenSteuerung(kontext(bob, alle), fremd)).art).toBe('keine')
+    expect(bob.ablage.anzahl()).toBe(0)
+  })
+
+  it('weist einen Gruppenschlüssel mit ungültiger Signatur ab', async () => {
+    await sende(alice, alle, 'egal')
+    const zustellung = mailbox.find((u) => u.control_type === 'group_key' && oeffneHybrid(bob, u.ciphertext_envelope))!
+    const inhalt = JSON.parse(oeffneHybrid(bob, zustellung.ciphertext_envelope)!)
+    const gefaelscht = JSON.stringify({ ...inhalt, sig: 'ungueltige_signatur' })
+
+    aktiviere(bob)
+    expect((await verarbeiteGruppenSteuerung(kontext(bob, alle), gefaelscht)).art).toBe('keine')
+    expect(bob.ablage.anzahl()).toBe(0)
+  })
+
+  it('weist einen Gruppenschlüssel von einem Nicht-Mitglied ab', async () => {
+    const eve = geraet(999, 'eve')
+    aktiviere(eve)
+    const { keyId, schluessel } = await erzeugeGruppenSchluessel()
+    const basis = {
+      typ: 'group_key',
+      v: 1,
+      groupId: GRUPPE,
+      keyId,
+      schluessel: Buffer.from(schluessel).toString('base64'),
+      mitglieder: alle,
+    }
+    const signiertVonEve = await signiereNutzlast(MAILBOX, eve.konto, basis)
+
+    aktiviere(bob)
+    expect((await verarbeiteGruppenSteuerung(kontext(bob, alle), JSON.stringify(signiertVonEve))).art).toBe('keine')
+    expect(bob.ablage.anzahl()).toBe(0)
+  })
+
+  it('weist einen unbeglaubigten Gruppenschlüssel ab, wenn Absender Signaturschlüssel führt (Downgrade)', async () => {
+    await sende(alice, alle, 'egal')
+    const zustellung = mailbox.find((u) => u.control_type === 'group_key' && oeffneHybrid(bob, u.ciphertext_envelope))!
+    const inhalt = JSON.parse(oeffneHybrid(bob, zustellung.ciphertext_envelope)!)
+    delete inhalt.sig
+    const ohneSignatur = JSON.stringify(inhalt)
+
+    aktiviere(bob)
+    expect((await verarbeiteGruppenSteuerung(kontext(bob, alle), ohneSignatur)).art).toBe('keine')
     expect(bob.ablage.anzahl()).toBe(0)
   })
 

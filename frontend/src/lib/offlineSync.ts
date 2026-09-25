@@ -709,20 +709,24 @@ export async function loadNotesOfflineFirst(_options?: {
           const itemUid = n.user_id || effectiveUid
           let title = n.title
           let content = n.content
-          try {
-            title = await mitAltbestand(itemUid, (k) =>
-              decryptNoteTitle(n.title, n.note_uid, k, itemUid),
-            )
-          } catch {
-            // Bei fehlendem oder falschem Schlüssel Ciphertext im Offline-Cache belassen,
-            // damit nach Key-Sync redecryptPendingOfflineNotesAndCalendar greift
+          if (typeof title === 'string' && title.startsWith(NOTE_CIPHERTEXT_PREFIX)) {
+            try {
+              title = await mitAltbestand(itemUid, (k) =>
+                decryptNoteTitle(n.title, n.note_uid, k, itemUid),
+              )
+            } catch {
+              // Bei fehlendem oder falschem Schlüssel Ciphertext im Offline-Cache belassen,
+              // damit nach Key-Sync redecryptPendingOfflineNotesAndCalendar greift
+            }
           }
-          try {
-            content = await mitAltbestand(itemUid, (k) =>
-              decryptNoteContent(n.content, n.note_uid, k, itemUid),
-            )
-          } catch {
-            // Ciphertext belassen
+          if (typeof content === 'string' && content.startsWith(NOTE_CIPHERTEXT_PREFIX)) {
+            try {
+              content = await mitAltbestand(itemUid, (k) =>
+                decryptNoteContent(n.content, n.note_uid, k, itemUid),
+              )
+            } catch {
+              // Ciphertext belassen
+            }
           }
           return {
             ...n,
@@ -765,11 +769,22 @@ export async function saveNoteOffline(
   // getrennt mitgegeben, sonst greift der Vorgabewert 1 und der Schlüssel
   // landet unter dem falschen Konto. Siehe ALTSCHLUESSEL_KENNUNG.
   const kennung = getEffectiveUserId()
-  const encryptedTitle = await encryptNoteTitle(payload.title, targetUid, undefined, kennung)
-  const encryptedContent =
-    payload.content !== undefined
-      ? await encryptNoteContent(payload.content, targetUid, undefined, kennung)
-      : ''
+  const isTeam =
+    payload.note_type === 'team' ||
+    Boolean(payload.team_id) ||
+    editingNote?.note_type === 'team' ||
+    Boolean(editingNote?.team_id)
+
+  let encryptedTitle = payload.title
+  let encryptedContent = payload.content !== undefined ? payload.content : ''
+
+  if (!isTeam) {
+    encryptedTitle = await encryptNoteTitle(payload.title, targetUid, undefined, kennung)
+    encryptedContent =
+      payload.content !== undefined
+        ? await encryptNoteContent(payload.content, targetUid, undefined, kennung)
+        : ''
+  }
 
   const wirePayload = {
     ...payload,
@@ -953,12 +968,15 @@ export async function toggleCheckItemOffline(
   const updated = localNotes.map((n) => (n.note_uid === note.note_uid ? updatedNote : n))
   setOfflineNotes(updated)
 
-  const encContent = await encryptNoteContent(
-    updatedContent,
-    note.note_uid,
-    undefined,
-    note.user_id || getEffectiveUserId(),
-  )
+  const isTeam = note.note_type === 'team' || Boolean(note.team_id)
+  const encContent = isTeam
+    ? updatedContent
+    : await encryptNoteContent(
+        updatedContent,
+        note.note_uid,
+        undefined,
+        note.user_id || getEffectiveUserId(),
+      )
   enqueueMutation({
     entity: 'note',
     action: 'update',
@@ -992,32 +1010,34 @@ async function entschluesselterTermin(
   let description = ev.description
   let location = ev.location
   let recurrence = ev.recurrence
-  try {
-    title = await mitAltbestand(itemUid, (k) =>
-      decryptCalendarField(ev.title, ev.event_id, 'title', k, itemUid),
-    )
-  } catch {}
-  try {
-    description = ev.description
-      ? await mitAltbestand(itemUid, (k) =>
-          decryptCalendarField(ev.description, ev.event_id, 'description', k, itemUid),
-        )
-      : ''
-  } catch {}
-  try {
-    location = ev.location
-      ? await mitAltbestand(itemUid, (k) =>
-          decryptCalendarField(ev.location, ev.event_id, 'location', k, itemUid),
-        )
-      : ''
-  } catch {}
-  try {
-    recurrence = ev.recurrence
-      ? await mitAltbestand(itemUid, (k) =>
-          decryptCalendarField(ev.recurrence, ev.event_id, 'recurrence', k, itemUid),
-        )
-      : ''
-  } catch {}
+  if (typeof ev.title === 'string' && ev.title.startsWith(CALENDAR_CIPHERTEXT_PREFIX)) {
+    try {
+      title = await mitAltbestand(itemUid, (k) =>
+        decryptCalendarField(ev.title, ev.event_id, 'title', k, itemUid),
+      )
+    } catch {}
+  }
+  if (typeof ev.description === 'string' && ev.description.startsWith(CALENDAR_CIPHERTEXT_PREFIX)) {
+    try {
+      description = await mitAltbestand(itemUid, (k) =>
+        decryptCalendarField(ev.description, ev.event_id, 'description', k, itemUid),
+      )
+    } catch {}
+  }
+  if (typeof ev.location === 'string' && ev.location.startsWith(CALENDAR_CIPHERTEXT_PREFIX)) {
+    try {
+      location = await mitAltbestand(itemUid, (k) =>
+        decryptCalendarField(ev.location, ev.event_id, 'location', k, itemUid),
+      )
+    } catch {}
+  }
+  if (typeof ev.recurrence === 'string' && ev.recurrence.startsWith(CALENDAR_CIPHERTEXT_PREFIX)) {
+    try {
+      recurrence = await mitAltbestand(itemUid, (k) =>
+        decryptCalendarField(ev.recurrence, ev.event_id, 'recurrence', k, itemUid),
+      )
+    } catch {}
+  }
   return { ...ev, title, description, location, recurrence }
 }
 
@@ -1167,15 +1187,23 @@ export async function saveCalendarEventOffline(
   // getrennt mitgegeben, sonst greift der Vorgabewert 1 und der Schlüssel
   // landet unter dem falschen Konto. Siehe ALTSCHLUESSEL_KENNUNG.
   const kennung = getEffectiveUserId()
-  const encryptedTitle = await encryptCalendarField(payload.title, targetUid, 'title', undefined, kennung)
-  const encryptedDesc = payload.description ? await encryptCalendarField(payload.description, targetUid, 'description', undefined, kennung) : (payload.description ?? '')
-  const encryptedLoc = payload.location ? await encryptCalendarField(payload.location, targetUid, 'location', undefined, kennung) : (payload.location ?? '')
-
-  // Das Wiederholungsdokument geht **immer** mit, auch bei Einzelterminen —
-  // dann eben als verschlüsseltes "keine Wiederholung". Ein leeres Feld neben
-  // lauter gefüllten wäre in der Datenbank selbst eine Auskunft.
+  const isTeam = payload.event_type === 'team' || Boolean(payload.team_id)
   const klartextSerie = payload.recurrence || LEERES_DOKUMENT
-  const encryptedRec = await encryptCalendarField(klartextSerie, targetUid, 'recurrence', undefined, kennung)
+
+  let encryptedTitle = payload.title
+  let encryptedDesc = payload.description ?? ''
+  let encryptedLoc = payload.location ?? ''
+  let encryptedRec = klartextSerie
+
+  if (!isTeam) {
+    encryptedTitle = await encryptCalendarField(payload.title, targetUid, 'title', undefined, kennung)
+    encryptedDesc = payload.description ? await encryptCalendarField(payload.description, targetUid, 'description', undefined, kennung) : (payload.description ?? '')
+    encryptedLoc = payload.location ? await encryptCalendarField(payload.location, targetUid, 'location', undefined, kennung) : (payload.location ?? '')
+    // Das Wiederholungsdokument geht **immer** mit, auch bei Einzelterminen —
+    // dann eben als verschlüsseltes "keine Wiederholung". Ein leeres Feld neben
+    // lauter gefüllten wäre in der Datenbank selbst eine Auskunft.
+    encryptedRec = await encryptCalendarField(klartextSerie, targetUid, 'recurrence', undefined, kennung)
+  }
 
   const wirePayload = {
     ...payload,

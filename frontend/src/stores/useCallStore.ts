@@ -316,6 +316,20 @@ function quellenNummer(quelle: Track.Source): number {
   }
 }
 
+export function sanitizeAvatarUrl(url: unknown): string | null {
+  if (typeof url !== 'string') return null
+  const trimmed = url.trim()
+  if (!trimmed) return null
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed
+  }
+  // Safe relative paths (e.g. /media/avatar.png, /avatar/dana.png), not protocol-relative //
+  if (trimmed.startsWith('/') && !trimmed.startsWith('//')) {
+    return trimmed
+  }
+  return null
+}
+
 type Bekannte = Map<number, { username: string; avatarUrl?: string | null }>
 
 function sammleTeilnehmer(room: Room, bekannte: Bekannte, sprechend: Set<string>): CallParticipant[] {
@@ -337,9 +351,10 @@ function sammleTeilnehmer(room: Room, bekannte: Bekannte, sprechend: Set<string>
       ? (currentUser?.username || meta?.username || stammdaten?.username || anzeigename(teilnehmer))
       : (meta?.username || stammdaten?.username || anzeigename(teilnehmer))
 
-    const resolvedAvatarUrl = istSelbst
+    const rawAvatar = istSelbst
       ? (currentUser?.avatar_url ?? meta?.avatar_url ?? stammdaten?.avatarUrl ?? null)
       : (meta?.avatar_url ?? stammdaten?.avatarUrl ?? null)
+    const resolvedAvatarUrl = sanitizeAvatarUrl(rawAvatar)
 
     if (rawUserId) {
       bekannte.set(rawUserId, {
@@ -1050,7 +1065,7 @@ export const useCallStore = create<UseCallState>((set, get) => {
             {
               userId: c.caller_id,
               username: c.caller_username,
-              avatarUrl: c.caller_avatar_url ?? null,
+              avatarUrl: sanitizeAvatarUrl(c.caller_avatar_url) ?? null,
             },
             c.mode === 'video' ? 'video' : 'audio',
             c.signaling_token,

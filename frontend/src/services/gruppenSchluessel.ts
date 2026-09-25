@@ -1330,11 +1330,12 @@ async function anJedesGeraet(
   return zugestellt
 }
 
-function schluesselNutzlast(
+async function schluesselNutzlast(
+  kontext: GruppenKontext,
   eintrag: GruppenSchluesselEintrag,
   geheimnis: string | null,
-): string {
-  return JSON.stringify({
+): Promise<string> {
+  const basis: Record<string, unknown> = {
     typ: GRUPPEN_SCHLUESSEL_TYP,
     v: 1,
     groupId: eintrag.groupId,
@@ -1345,7 +1346,9 @@ function schluesselNutzlast(
     // Empfänger, der nichts bekommt, bleibt schlicht ohne — er darf selbst
     // keines erzeugen.
     ...(geheimnis ? { geheimnis } : {}),
-  })
+  }
+  const signiert = await signiereNutzlast(kontext.blindMailboxId, kontext.eigeneId, basis)
+  return JSON.stringify(signiert)
 }
 
 async function verteileSchluessel(
@@ -1357,7 +1360,7 @@ async function verteileSchluessel(
   return anJedesGeraet(
     kontext,
     empfaenger,
-    schluesselNutzlast(eintrag, geheimnis),
+    await schluesselNutzlast(kontext, eintrag, geheimnis),
     GRUPPEN_SCHLUESSEL_TYP,
   )
 }
@@ -1438,6 +1441,46 @@ async function nimmSchluessel(
   kontext: GruppenKontext,
   roh: Record<string, unknown>,
 ): Promise<GruppenSteuerung> {
+  const pruefung = await pruefeNutzlast(kontext.blindMailboxId, roh)
+  if (pruefung.art === 'gefaelscht') {
+    console.warn('[E2EE] Gruppenschlüssel mit ungültiger Signatur abgewiesen', {
+      groupId: kontext.groupId,
+      behauptet: pruefung.behauptet,
+    })
+    return { art: 'keine' }
+  }
+
+  const gueltigeMitglieder = new Set([...kontext.mitglieder, kontext.eigeneId])
+
+  if (pruefung.art === 'geprueft') {
+    if (!gueltigeMitglieder.has(pruefung.vonKonto)) {
+      console.warn('[E2EE] Gruppenschlüssel von Nicht-Mitglied abgewiesen', {
+        groupId: kontext.groupId,
+        vonKonto: pruefung.vonKonto,
+      })
+      return { art: 'keine' }
+    }
+  } else {
+    // unsigniert
+    const behauptet = Number(roh.von_konto ?? roh.absenderId ?? 0)
+    if (behauptet > 0) {
+      if (!gueltigeMitglieder.has(behauptet)) {
+        console.warn('[E2EE] Unsignierter Gruppenschlüssel von Nicht-Mitglied abgewiesen', {
+          groupId: kontext.groupId,
+          vonKonto: behauptet,
+        })
+        return { art: 'keine' }
+      }
+      if (await kontoNutztSignaturen(behauptet)) {
+        console.warn('[E2EE] Unsignierter Gruppenschlüssel trotz Signaturfähigkeit abgewiesen', {
+          groupId: kontext.groupId,
+          vonKonto: behauptet,
+        })
+        return { art: 'keine' }
+      }
+    }
+  }
+
   const keyId = String(roh.keyId ?? '')
   const schluessel = String(roh.schluessel ?? '')
   if (!KEY_ID_MUSTER.test(keyId) || !schluessel) return { art: 'keine' }
@@ -1642,14 +1685,15 @@ async function beantworteAnfrage(
   // Fragende versucht es in einer Minute erneut.
   let zugestellt = 0
   try {
+    const nutzlast = await schluesselNutzlast(
+      kontext,
+      eintrag,
+      (await ablage.liesGeheimnis(kontext.groupId))?.geheimnis ?? null,
+    )
     zugestellt = await anJedesGeraet(
       kontext,
       [anfragerId],
-      // Das Geheimnis geht mit: wer nachfragt, hat es oft ebenfalls nicht —
-      // ein frisches Gerät eines Mitglieds kennt weder Schlüssel noch
-      // Geheimnis, und eine Antwort mit nur der Hälfte liesse es in der
-      // falschen Mailbox zurück.
-      schluesselNutzlast(eintrag, (await ablage.liesGeheimnis(kontext.groupId))?.geheimnis ?? null),
+      nutzlast,
       GRUPPEN_SCHLUESSEL_TYP,
     )
   } catch {

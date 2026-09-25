@@ -216,6 +216,11 @@ vi.mock('@/services/ratchetSitzung', () => {
     ),
     verarbeiteBootstrap: vi.fn(async () => ({ istAufbau: false, ersetzt: false })),
     verwirfDrSitzung: vi.fn(async () => {}),
+    drUrheber: (u: string) => {
+      if (!u.startsWith(PREFIX)) return null
+      const [konto, geraet] = u.slice(PREFIX.length).split('.')
+      return Number(konto) > 0 ? { vonKonto: Number(konto), vonGeraet: geraet } : null
+    },
     logischeUuid: (u?: string | null) =>
       !u ? undefined : u.indexOf('#') === -1 ? u : u.slice(0, u.indexOf('#')),
   }
@@ -599,6 +604,7 @@ describe('Empirical Challenger: Delivery Receipt Synchronization & Reload Hydrat
       // All 3 messages are now acknowledged and show 2 checkmarks
       await waitFor(() => {
         const doubleTicks = screen.getAllByTitle(doubleGrayTickTitle)
+        console.log('DOUBLE TICKS FOUND:', doubleTicks.length, 'SINGLE TICKS:', screen.queryAllByTitle(singleTickTitle).length)
         expect(doubleTicks.length).toBe(3)
         expect(screen.queryByTitle(singleTickTitle)).not.toBeInTheDocument()
       })

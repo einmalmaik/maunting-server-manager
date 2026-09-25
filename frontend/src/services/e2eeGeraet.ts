@@ -284,6 +284,16 @@ async function uebernimmAltbestand(kontoId: number): Promise<GeraeteZeile | null
       req.onsuccess = () => resolve(req.result ?? null)
       req.onerror = () => reject(req.error)
     })
+    if (
+      roh &&
+      ((roh.konto !== undefined && Number(roh.konto) !== kontoId) ||
+        (roh.userId !== undefined && Number(roh.userId) !== kontoId) ||
+        (roh.user_id !== undefined && Number(roh.user_id) !== kontoId))
+    ) {
+      // Fremder Altbestand gehört einem anderen Konto — niemals übernehmen!
+      return null
+    }
+
     const alt = ausZeile(await entsiegleZeile(roh, geraetAad(kontoId)))
     if (!alt) return null
 

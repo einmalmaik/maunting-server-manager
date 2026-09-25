@@ -11,7 +11,8 @@ import { clearSqlConsoleHistory } from '@/lib/sqlConsoleStorage'
 import { useVaultStore } from '@/desktop/vault/vaultStore'
 import { clearMemoryKeyStore } from '@/services/e2eeCrypto'
 import { clearGeraeteMemory } from '@/services/e2eeGeraet'
-import { leereGeraeteStand } from '@/services/gruppenSchluessel'
+import { clearNotesKeyCache } from '@/services/notesCalendarCrypto'
+import { leereAntwortSperren, leereGeraeteStand, leereUmzuege } from '@/services/gruppenSchluessel'
 import { leereMailboxAbos } from '@/services/mailboxAbo'
 import { leereGruppenNamen } from '@/services/gruppenName'
 import { leereGespraeche } from '@/services/gespraechsListe'
@@ -141,6 +142,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // Wiederherstellungsschlüssel fragen.
     clearMemoryKeyStore()
     clearGeraeteMemory()
+    clearNotesKeyCache()
+    leereUmzuege()
+    leereAntwortSperren()
     // Die Besitznachweise der Mailboxen liegen nur im Arbeitsspeicher und sind
     // aus dem Gruppengeheimnis jederzeit nachrechenbar. Hier stehenzulassen
     // hiesse, dem naechsten Menschen an diesem Geraet fertige Nachweise zu

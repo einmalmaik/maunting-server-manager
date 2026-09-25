@@ -969,6 +969,32 @@ describe('mischeVerlauf', () => {
     expect(zusammen).toHaveLength(1)
     expect(zusammen[0].text).toBe('neu')
   })
+
+  it('überschreibt keine Nachricht eines anderen Absenders mit gleicher clientUuid', () => {
+    const lokal = [
+      nachricht({
+        id: 10,
+        senderId: 1,
+        clientUuid: 'kollision-uuid',
+        text: 'Nachricht von Opfer',
+        createdAt: '2026-09-17T12:00:00Z',
+      }),
+    ]
+    const frisch = [
+      nachricht({
+        id: 11,
+        senderId: 2,
+        clientUuid: 'kollision-uuid',
+        text: 'Nachricht von Angreifer',
+        createdAt: '2026-09-17T12:01:00Z',
+      }),
+    ]
+
+    const zusammen = mischeVerlauf(lokal, frisch)
+    expect(zusammen).toHaveLength(2)
+    expect(zusammen.find((m) => m.senderId === 1)?.text).toBe('Nachricht von Opfer')
+    expect(zusammen.find((m) => m.senderId === 2)?.text).toBe('Nachricht von Angreifer')
+  })
 })
 
 describe('sichereDauerhafteAblage', () => {

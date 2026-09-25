@@ -1444,4 +1444,80 @@ describe('Offline Storage & Unified Real-Time SSE Sync Engine', () => {
       expect(exportUserNotesKey(KONTO)).toBeNull()
     })
   })
+
+  describe('Team-Elemente (Klartext fuer DIS-Backend-Schutz)', () => {
+    const KONTO = 2001
+
+    beforeEach(() => {
+      useAuthStore.setState({ user: { id: KONTO, username: 'testuser' } as any })
+      vi.mocked(client.api).mockRejectedValue(new TypeError('Failed to fetch'))
+    })
+
+    it('speichert Team-Notizen im Klartext und persoenliche Notizen verschluesselt', async () => {
+      // 1. Team-Notiz
+      await saveNoteOffline({
+        title: 'Team Roadmap',
+        content: 'Alle arbeiten am Release',
+        note_type: 'team',
+        team_id: 42,
+      })
+
+      const outbox = getOutbox()
+      const teamMutation = outbox.find((m) => (m.payload as any)?.note_type === 'team')
+      expect(teamMutation).toBeDefined()
+      expect((teamMutation!.payload as any).title).toBe('Team Roadmap')
+      expect((teamMutation!.payload as any).content).toBe('Alle arbeiten am Release')
+      expect((teamMutation!.payload as any).title.startsWith(NOTE_CIPHERTEXT_PREFIX)).toBe(false)
+
+      // 2. Persoenliche Notiz
+      await saveNoteOffline({
+        title: 'Mein Geheimnis',
+        content: 'Streng vertraulich',
+        note_type: 'personal',
+      })
+
+      const personalMutation = getOutbox().find((m) => (m.payload as any)?.note_type === 'personal')
+      expect(personalMutation).toBeDefined()
+      expect((personalMutation!.payload as any).title.startsWith(NOTE_CIPHERTEXT_PREFIX)).toBe(true)
+      expect((personalMutation!.payload as any).content.startsWith(NOTE_CIPHERTEXT_PREFIX)).toBe(true)
+    })
+
+    it('speichert Team-Termine im Klartext und persoenliche Termine verschluesselt', async () => {
+      // 1. Team-Termin
+      await saveCalendarEventOffline({
+        title: 'Sprint Planning',
+        description: 'Planung fuer Q3',
+        location: 'Raum 101',
+        start_time: '2026-06-01T10:00:00.000Z',
+        end_time: '2026-06-01T11:00:00.000Z',
+        event_type: 'team',
+        team_id: 42,
+        recurrence: '{"rrule":"FREQ=WEEKLY"}',
+      })
+
+      const outbox = getOutbox()
+      const teamMutation = outbox.find((m) => (m.payload as any)?.event_type === 'team')
+      expect(teamMutation).toBeDefined()
+      expect((teamMutation!.payload as any).title).toBe('Sprint Planning')
+      expect((teamMutation!.payload as any).description).toBe('Planung fuer Q3')
+      expect((teamMutation!.payload as any).location).toBe('Raum 101')
+      expect((teamMutation!.payload as any).recurrence).toBe('{"rrule":"FREQ=WEEKLY"}')
+      expect((teamMutation!.payload as any).title.startsWith(CALENDAR_CIPHERTEXT_PREFIX)).toBe(false)
+
+      // 2. Persoenlicher Termin
+      await saveCalendarEventOffline({
+        title: 'Zahnarzt',
+        description: 'Kontrolle',
+        location: 'Praxis',
+        start_time: '2026-06-02T10:00:00.000Z',
+        end_time: '2026-06-02T11:00:00.000Z',
+        event_type: 'personal',
+      })
+
+      const personalMutation = getOutbox().find((m) => (m.payload as any)?.event_type === 'personal')
+      expect(personalMutation).toBeDefined()
+      expect((personalMutation!.payload as any).title.startsWith(CALENDAR_CIPHERTEXT_PREFIX)).toBe(true)
+    })
+  })
 })
+

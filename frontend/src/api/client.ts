@@ -4,6 +4,50 @@ import { toast } from '@/stores/toastStore'
 import { useAuthStore } from '@/stores/authStore'
 
 export { API_BASE, apiUrl } from '@/config/api'
+import { API_ORIGIN, getEffectiveApiUrl } from '@/config/api'
+
+/**
+ * Checks whether a given URL points to the same origin / internal API.
+ * External URLs (third-party domains) must NEVER receive authorization headers,
+ * session cookies, or CSRF tokens.
+ */
+export function isInternalApiUrl(url: string): boolean {
+  if (!url) return false
+  const trimmed = url.trim()
+  if (!trimmed) return false
+  // Protocol-relative URLs (e.g. "//attacker.com/evil") are external
+  if (trimmed.startsWith('//')) return false
+  // Relative paths without scheme: internal (e.g. "/api/foo", "api/foo", "avatar.png")
+  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) {
+    return true
+  }
+  // Data or blob URLs don't receive API auth tokens
+  if (/^(data:|blob:)/i.test(trimmed)) {
+    return false
+  }
+  // Absolute HTTP/HTTPS URLs: check if origin matches allowed origin
+  try {
+    const parsed = new URL(trimmed)
+    const allowed = new Set<string>()
+    if (typeof window !== 'undefined' && window.location?.origin) {
+      allowed.add(window.location.origin.toLowerCase())
+    }
+    const effective = getEffectiveApiUrl()
+    if (effective) {
+      try {
+        allowed.add(new URL(effective).origin.toLowerCase())
+      } catch {}
+    }
+    if (API_ORIGIN) {
+      try {
+        allowed.add(new URL(API_ORIGIN).origin.toLowerCase())
+      } catch {}
+    }
+    return allowed.has(parsed.origin.toLowerCase())
+  } catch {
+    return false
+  }
+}
 
 /**
  * Error thrown by the API client for failures that originated from a
@@ -262,26 +306,32 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
     headers['Content-Type'] = 'application/json'
   }
 
-  const bearer = nativesToken()
-  if (bearer) {
-    headers['Authorization'] = `Bearer ${bearer}`
-  }
+  const url = apiUrl(path)
+  const isInternal = isInternalApiUrl(url)
 
-  if (isStateChanging) {
-    const csrf = getCsrfToken()
-    if (csrf) {
-      headers['X-CSRF-Token'] = csrf
+  if (isInternal) {
+    const bearer = nativesToken()
+    if (bearer) {
+      headers['Authorization'] = `Bearer ${bearer}`
     }
+
+    if (isStateChanging) {
+      const csrf = getCsrfToken()
+      if (csrf) {
+        headers['X-CSRF-Token'] = csrf
+      }
+    }
+  } else {
+    delete headers['Authorization']
+    delete headers['X-CSRF-Token']
   }
 
   const fetchOptions: RequestInit = {
     ...options,
-    credentials: 'include',
+    credentials: isInternal ? 'include' : 'omit',
     headers,
     ...(method === 'GET' ? { cache: 'no-store' } : {}),
   }
-
-  const url = apiUrl(path)
 
   const makeRequest = async (): Promise<Response> => {
     return fetch(url, fetchOptions)
@@ -305,8 +355,8 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   }
   captureCsrfFromResponse(res)
 
-  // Token-Refresh bei 401 (ausser bei Login/Refresh selbst)
-  if (res.status === 401 && path !== '/auth/refresh' && path !== '/auth/login') {
+  // Token-Refresh bei 401 (nur bei internen Endpoints und ausser bei Login/Refresh selbst)
+  if (res.status === 401 && isInternal && path !== '/auth/refresh' && path !== '/auth/login') {
     let refreshed = false
     try {
       await refreshToken()
@@ -413,25 +463,33 @@ export async function apiStream(path: string, options: RequestInit): Promise<Res
     Accept: 'text/event-stream',
     ...((options.headers as Record<string, string>) || {}),
   }
-  const bearer = nativesToken()
-  if (bearer) headers['Authorization'] = `Bearer ${bearer}`
-  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
-    const csrf = getCsrfToken()
-    if (csrf) headers['X-CSRF-Token'] = csrf
-  }
 
   const url = apiUrl(path)
+  const isInternal = isInternalApiUrl(url)
+
+  if (isInternal) {
+    const bearer = nativesToken()
+    if (bearer) headers['Authorization'] = `Bearer ${bearer}`
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+      const csrf = getCsrfToken()
+      if (csrf) headers['X-CSRF-Token'] = csrf
+    }
+  } else {
+    delete headers['Authorization']
+    delete headers['X-CSRF-Token']
+  }
+
   const fetchOptions: RequestInit = {
     ...options,
     method,
-    credentials: 'include',
+    credentials: isInternal ? 'include' : 'omit',
     headers,
     cache: 'no-store',
   }
   let res = await fetch(url, fetchOptions)
   captureCsrfFromResponse(res)
 
-  if (res.status === 401 && path !== '/auth/refresh' && path !== '/auth/login') {
+  if (res.status === 401 && isInternal && path !== '/auth/refresh' && path !== '/auth/login') {
     let refreshed = false
     try {
       await refreshToken()

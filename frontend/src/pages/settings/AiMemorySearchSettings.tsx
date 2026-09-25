@@ -48,7 +48,8 @@ export function AiMemorySearchSettings({ canWrite }: { canWrite: boolean }) {
 
   if (!state) return null
 
-  const fehltZugang = state.fallback !== 'off' && !state.available.includes(state.fallback)
+  const available = Array.isArray(state.available) ? state.available : []
+  const fehltZugang = state.fallback !== 'off' && !available.includes(state.fallback)
   const status = state.local_ready
     ? t('ai.memorySearch.localReady')
     : [
@@ -82,7 +83,7 @@ export function AiMemorySearchSettings({ canWrite }: { canWrite: boolean }) {
           options={WAHLEN.map((wahl) => ({
             value: wahl,
             label: t(`ai.memorySearch.options.${wahl}`),
-            hint: wahl !== 'off' && !state.available.includes(wahl)
+            hint: wahl !== 'off' && !available.includes(wahl)
               ? t('ai.memorySearch.noAccessHint')
               : undefined,
           }))}
