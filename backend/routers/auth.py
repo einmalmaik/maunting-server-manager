@@ -803,7 +803,7 @@ def update_agent_name(
     db: Session = Depends(get_db),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    """Setzt den Rufnamen des Assistenten (None/leer = Standardname 'Singra').
+    """Setzt den Rufnamen des Assistenten (None/leer = Standardname 'Assistent').
 
     Der Name landet im Lageblock (services/ai_lage.py), nie im statischen
     Systemprompt — sonst waere der Prompt je Benutzer verschieden und das
