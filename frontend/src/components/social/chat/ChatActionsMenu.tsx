@@ -14,6 +14,7 @@ import {
   Video,
 } from 'lucide-react'
 import { Blatteintrag } from '@/Singra/UI'
+import { DisBadge } from '@/components/DisBadge'
 
 /** Was das Menü über den offenen Direktchat wissen muss. */
 export interface MenueKontakt {
@@ -162,6 +163,11 @@ export function ChatActionsMenu({
           onClick={tu(aktion.onBlockieren)}
         />
       )}
+
+      <div className="mt-3 pt-3 pb-1 border-t border-outline-variant/15 flex items-center justify-between px-3 text-on-surface-variant/70">
+        <span className="text-label-sm">{t('messenger.e2eeSecured', 'Ende-zu-Ende verschlüsselt')}</span>
+        <DisBadge size={14} className="py-0.5 px-2" />
+      </div>
     </>
   )
 }

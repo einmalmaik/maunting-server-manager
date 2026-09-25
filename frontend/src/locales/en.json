@@ -6705,6 +6705,10 @@
       "community": "Community"
     },
     "headerSubtitle": "• Chats & groups",
+    "betaBadge": "Beta",
+    "betaNotice": "Beta version: Errors may still occur.",
+    "betaNoticeMobile": "Beta: errors possible",
+    "e2eeSecured": "End-to-end encrypted",
     "searchPlaceholder": "Search friends or team members …",
     "filterAll": "All chats",
     "filterGroups": "Groups ({{count}})",

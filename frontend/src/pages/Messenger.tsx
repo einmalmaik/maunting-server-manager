@@ -246,6 +246,8 @@ import { ChatHintergrund, ChatHintergrundDialog } from '@/features/chatHintergru
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
 import { useMessengerNotificationStore, PINS_MAX } from '@/stores/messengerNotificationStore'
+import { MessengerBetaBanner, MESSENGER_IS_BETA } from '@/components/social/MessengerBetaBanner'
+import { DisBadge } from '@/components/DisBadge'
 
 /**
  * Was gesendet werden soll.
@@ -3955,6 +3957,7 @@ function MessengerSeite() {
 
   return (
     <div className="flex h-full w-full min-h-0 flex-1 flex-col overflow-hidden bg-surface">
+      <MessengerBetaBanner />
       {geraetWartet && (
         <button
           type="button"
@@ -3972,7 +3975,13 @@ function MessengerSeite() {
               <MessageSquare className="w-4 h-4" />
             </div>
             <span className="font-headline text-body-md font-bold text-primary">Messenger</span>
-            <span className="text-label-sm text-on-surface-variant/60 hidden sm:inline">{t('messenger.headerSubtitle')}</span>
+            {MESSENGER_IS_BETA && (
+              <span className="px-1.5 py-0.5 rounded bg-status-warning/15 text-status-warning border border-status-warning/30 text-label-sm font-bold uppercase tracking-wider">
+                {t('messenger.betaBadge', 'Beta')}
+              </span>
+            )}
+            <DisBadge size={14} className="hidden sm:inline-flex py-0.5 px-2" />
+            <span className="text-label-sm text-on-surface-variant/60 hidden md:inline">{t('messenger.headerSubtitle')}</span>
           </div>
 
           <div className="flex items-center gap-1">
@@ -4603,12 +4612,23 @@ function MessengerSeite() {
               <div className="p-4 rounded-2xl bg-primary/10 border border-primary/20 text-primary mb-3">
                 <MessageSquare className="w-8 h-8" />
               </div>
-              <h3 className="font-headline text-body-lg font-bold text-primary mb-1">
-                Deine Konversationen
-              </h3>
-              <p className="max-w-sm font-body text-xs text-on-surface-variant">
+              <div className="flex items-center gap-2 mb-1">
+                <h3 className="font-headline text-body-lg font-bold text-primary">
+                  Deine Konversationen
+                </h3>
+                {MESSENGER_IS_BETA && (
+                  <span className="px-1.5 py-0.5 rounded bg-status-warning/15 text-status-warning border border-status-warning/30 text-label-sm font-bold uppercase tracking-wider">
+                    {t('messenger.betaBadge', 'Beta')}
+                  </span>
+                )}
+              </div>
+              <p className="max-w-sm font-body text-xs text-on-surface-variant mb-4">
                 {t('messenger.pickChatHint')}
               </p>
+              <div className="flex items-center gap-2 pt-3 border-t border-outline-variant/20 text-on-surface-variant/70">
+                <span className="text-label-sm">{t('messenger.e2eeSecured', 'Ende-zu-Ende verschlüsselt')}</span>
+                <DisBadge size={14} className="py-0.5 px-2" />
+              </div>
             </div>
           )}
         </div>

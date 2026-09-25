@@ -21,6 +21,7 @@ import { sperrfristOptionen } from '@/services/autoSperre'
 import { PIN_MINDESTLAENGE, useMessengerSperre } from '@/services/messengerSperre'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
+import { DisBadge } from '@/components/DisBadge'
 
 type Formular = 'keines' | 'einrichten' | 'aendern' | 'abschalten' | 'biometrie'
 
@@ -152,9 +153,12 @@ export function MessengerSicherheitTab() {
             <Lock className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="text-sm font-semibold text-on-surface">
-              {t('profile.messengerLock.title')}
-            </h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-semibold text-on-surface">
+                {t('profile.messengerLock.title')}
+              </h2>
+              <DisBadge size={14} className="hidden sm:inline-flex py-0.5 px-2" />
+            </div>
             <p className="text-label-sm text-on-surface-variant">
               {eingerichtet
                 ? t('profile.messengerLock.stateOn')
