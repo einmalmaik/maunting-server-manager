@@ -500,8 +500,9 @@ behaupte keine Ausfuehrung. Ein Schreib-Werkzeug legt einen Vorschlag vor. Ob \
 der auf einen Klick wartet oder sofort laeuft, entscheidest nicht du: das \
 sagt die Lage. Ist der autonome Modus dort aktiv, ist die Erlaubnis bereits \
 erteilt — dann fragst du nicht noch einmal, sondern handelst und nennst \
-danach, was passiert ist. Ausgenommen bleibt allein, was Daten vernichtet; \
-das fragt in jedem Fall. Ist der autonome Modus nicht aktiv, rufe Werkzeuge \
+danach, was passiert ist. Ausgenommen bleibt, was Server-, Datei- oder \
+Backupdaten vernichtet oder Rechte anderer Benutzer beschneidet; das fragt in \
+jedem Fall, und das Ergebnis sagt es dir. Ist der autonome Modus nicht aktiv, rufe Werkzeuge \
 trotzdem normal auf: das System erzeugt automatisch eine Bestätigungskarte für \
 den Benutzer. Sage niemals wegen inaktiver Autonomie ab."""
 
@@ -748,8 +749,10 @@ Nutze für DNS-Löschungen NIEMALS Server-Lifecycle-Werkzeuge wie `execute_serve
 # Minecraft-Server" — unterwegs, per Stimme. Der Block zeigt drei
 # Unterscheidungen statt Verbote: wer gemeint ist (suchen, nicht raten),
 # Server oder Rolle (ein Projekt ist ein Server), und was "normal" heisst.
-# Die Grenze selbst ist Code: was mehr tut, als unkritische Serverrechte
-# hinzuzufuegen, fragt immer (`ai_tool_registry.verlangt_klick`), und keine
+# Die Grenze selbst ist Code: eine Vergabe an einen anderen Benutzer, die mehr
+# tut, als unkritische Serverrechte hinzuzufuegen, fragt immer
+# (`ai_tool_registry.verlangt_klick`); eine Rolle anlegen oder aendern laeuft
+# seit dem 25.09.2026 autonom, loeschen fragt. Keine
 # Vergabe geht ueber die eigenen Rechte des Benutzers hinaus
 # (`rechtevergabe_service`). Der Block sagt dem Modell das, damit es die Karte
 # ankuendigt statt Vollzug zu melden.
@@ -775,9 +778,11 @@ starten, Konsole und Dateien lesen, Backups sehen und anlegen, Mods sehen und \
 schalten. Befehle an Konsole oder Container, Dateien schreiben oder löschen, \
 Backups einspielen oder löschen, Netz, Ressourcen, Zugangsdaten und die \
 Rechteverwaltung selbst gehören nicht dazu — die vergibst du, wenn der Benutzer \
-sie ausdrücklich nennt. Nur Unkritisches läuft im autonomen Modus ohne \
-Rückfrage; jedes Entziehen und alles andere bekommt immer eine Karte, per \
-Stimme bestätigt nur durch Klick. Sag das an, statt Vollzug zu melden.
+sie ausdrücklich nennt. Im autonomen Modus läuft ohne Rückfrage: Rollen \
+anlegen und ändern und unkritische Serverrechte vergeben. Eine Karte bekommen \
+immer: Rechte entziehen, kritische oder globale Rechte einem Benutzer geben \
+und Rollen löschen. Bestätigt wird eine Karte nur per Klick. Sag das an, statt \
+Vollzug zu melden.
 Rechte ändern ist Arbeit: hast du die Schreibwerkzeuge dafür nicht, übergib \
 es mit `worker_start` und schreib Benutzer (Name und `user_id`), Server (Name \
 und `server_id`) und die genauen Rechteschlüssel in den Auftrag. Sag danach, \
@@ -1708,30 +1713,25 @@ NUR_GETIPPT = frozenset({
 #: (`HINTER_DER_STIMME`) — zwei Abschriften liefen beim naechsten Umbau
 #: auseinander. `GESPROCHEN` ist dadurch byteweise unveraendert.
 #:
-#: Der letzte Absatz ist seit dem 23.09.2026 umgekehrt. Vorher stand hier, es
-#: gebe nichts, was auf eine Karte gehoere, Loeschen eingeschlossen, und im
-#: Sprachmodus gebe es keinen Knopf. Dann hat ein Modul im autonomen Modus
-#: einen Loeschvorgang gestartet, der beinahe den Discord-Bot des Betreibers
-#: gekostet haette. Seine Regel: Autonomie aus heisst, alles wird bestaetigt;
-#: Autonomie an heisst, alles laeuft, ausser Loeschen. Was nur per Klick
-#: bestaetigt wird, fuehrt `Werkzeug.immer_bestaetigen`; das Ergebnis traegt
-#: dann den Hinweis `ai_voice.interactions.KLICK_NOETIG`. Der Absatz zaehlt
-#: deshalb nichts auf, er sagt, was bei diesem Hinweis zu tun ist.
+#: Seit dem 25.09.2026 bestaetigt nur noch der Klick auf die Karte, im Chat
+#: wie in der Sprachansicht (Vorgabe des Betreibers: "alles wird mit Karte
+#: bestaetigt"). Bis dahin fuehrte ein gesprochenes Ja aus, ausser bei dem, was
+#: `Werkzeug.immer_bestaetigen` fuehrt — und ein falsch erkanntes Geraeusch
+#: konnte ein Ja sein. Welche Werkzeuge im autonomen Modus trotzdem eine Karte
+#: bekommen, zaehlt der Absatz nicht auf; das entscheidet der Code, und das
+#: Ergebnis sagt es (`ai_voice.interactions.KLICK_NOETIG`).
 ZUSTIMMUNG_GESPROCHEN = """\
-Wartet ein Vorschlag auf seine Zustimmung, sag in einem Satz, was du tun
-wuerdest, und frag, ob du es tun sollst. Ohne autonomen Modus gilt das fuer
-jedes Werkzeug, auch fuers blosse Nachsehen. Ein klares "Ja" fuehrt es aus, ein
-klares "Nein" laesst es. Sagt er etwas anderes, ist das keine Antwort auf die
-Frage, sondern ein neuer Auftrag — behandle ihn so.
+Wartet ein Vorschlag auf seine Zustimmung, steht dazu eine Karte auf dem
+Bildschirm des Menschen. Sag in einem Satz, was du tun wuerdest, und dass die
+Karte auf seinen Klick wartet. Bestaetigt wird nur dort, nie mit einem
+gesprochenen Ja; frag also nicht nach einem Ja, das nichts ausfuehren darf.
+Sagt er klar "Nein", lehne den Vorschlag ab. Sagt er etwas anderes, ist das
+ein neuer Auftrag — behandle ihn so.
 
 Wartet er nicht — die Lage nennt den autonomen Modus als aktiv —, dann frag
 auch nicht. Er laeuft, waehrend du redest; sag hinterher in einem Satz, was
-passiert ist.
-
-Loeschen ist die Ausnahme, auch im autonomen Modus. Steht am Ergebnis, dass
-nur ein Klick bestaetigt, dann bestaetigt der Mensch mit dem Knopf auf der
-Karte und nie mit einem gesprochenen Ja. Sag ihm das in einem Satz, statt nach
-einem Ja zu fragen, das nichts ausfuehren darf."""
+passiert ist. Auch im autonomen Modus bekommt manches eine Karte, etwa
+Server oder Dateien loeschen; dann steht es am Ergebnis."""
 
 
 #: Was nur gesprochen gilt — der Gegenpol zu `NUR_GETIPPT`.

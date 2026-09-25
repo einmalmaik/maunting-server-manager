@@ -107,19 +107,23 @@ def test_im_chat_fragt_der_umweg_kein_zweites_mal(db: Session, regular_user: Use
     assert wert["data"] == {"ports": [2456]}
 
 
-def test_im_chat_fragt_der_umweg_beim_loeschen_trotzdem(db: Session, regular_user: User):
-    """Was auch im autonomen Modus fragt, fragt hier weiter, und zwar per Klick."""
+def test_im_chat_fragt_auch_vergessen_kein_zweites_mal(db: Session, regular_user: User):
+    """Auch Vergessen läuft nach der ersten Karte ohne zweite.
+
+    Vom 23. bis 25.09.2026 fragte der Umweg hier trotzdem, weil Vergessen
+    auch im autonomen Modus eine Karte verlangte. Seitdem gehört es zu den
+    eigenen Daten (`EIGENE_DATEN_LOESCHEN`), und kein Lesewerkzeug verlangt
+    den Klick mehr über die erste Karte hinaus (`verlangt_klick`).
+    """
     from services.ai_tools.server_tools import execute_read_tool
-    from services.ai_voice.interactions import KLICK_NOETIG
 
     with patch("services.ai_voice.voice_dispatcher.ai_action_service.angebotene_werkzeuge") as mock_angebot:
         mock_angebot.return_value = frozenset({"forget_memory", "list_my_servers"})
-        with patch("services.ai_stream.write_tools._persist_write_proposals") as mock_persist, \
-                patch("services.ai_stream.read_tools._werkzeug_ausfuehren") as mock_exec:
-            mock_persist.return_value = [{
-                "id": "prop-vergessen", "tool_name": "forget_memory",
-                "status": "proposed", "autonomous": False,
-            }]
+        with patch(
+            "services.ai_stream.write_tools._persist_write_proposals",
+            side_effect=AssertionError("eine zweite Karte"),
+        ), patch("services.ai_stream.read_tools._werkzeug_ausfuehren") as mock_exec:
+            mock_exec.return_value = ({"forgotten": ["urlaub"]}, None)
 
             wert = execute_read_tool(
                 db, user=regular_user, tool_name="execute_server_action",
@@ -127,9 +131,8 @@ def test_im_chat_fragt_der_umweg_beim_loeschen_trotzdem(db: Session, regular_use
             )
 
     assert wert["executed_tool"] == "forget_memory"
-    assert wert["status"] == "needs_confirmation"
-    assert wert["hinweis"] == KLICK_NOETIG
-    mock_exec.assert_not_called()
+    assert wert["data"] == {"forgotten": ["urlaub"]}
+    mock_exec.assert_called_once()
 
 
 def test_die_suche_allein_schreibt_nie(db: Session, regular_user: User):

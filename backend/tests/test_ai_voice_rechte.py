@@ -138,6 +138,12 @@ def test_bestaetigen_und_ausfuehren_laufen_auf_den_sprechenden(
     monkeypatch.setattr(ai_proposal_service, "confirm_proposal", _confirm)
     monkeypatch.setattr(ai_proposal_service, "execute_proposal", _execute)
 
+    # Seit dem 25.09.2026 führt kein gesprochenes Ja aus (`klick_noetig`).
+    # Geprüft wird der Weg dahinter, der als Schranke stehen bleibt.
+    from services.ai_voice import interactions as voice_interactions
+
+    monkeypatch.setattr(voice_interactions, "klick_noetig", lambda *_a, **_k: False)
+
     bruecke = _Attrappe(owner_user.id)
     ausgang = bruecke._ausfuehren("eigene-kennung")
 

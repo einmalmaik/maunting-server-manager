@@ -1,6 +1,7 @@
 """Bestaetigung und Ausfuehrung persistenter AI-Aktionsvorschlaege."""
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, or_
@@ -34,6 +35,11 @@ from services.dis_client import DisSidecarError
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ai", tags=["ai-actions"])
+
+#: Wie lange eine Karte ohne Lauf (aus der Stimme) als offen gilt. Ein
+#: Vorschlag verfällt nicht von selbst; ohne Grenze stünde jede nie
+#: angeklickte Sprachkarte für immer in der Sprachansicht.
+OFFEN_OHNE_LAUF = timedelta(hours=1)
 
 
 def _state_error(exc: ai_action_errors.AiActionStateError) -> HTTPException:
@@ -88,6 +94,13 @@ def list_conversation_actions(
             "Hat Vorrang vor kind."
         ),
     ),
+    offen: bool = Query(
+        False,
+        description=(
+            "Nur Karten, auf deren Klick gerade jemand wartet — für die "
+            "Sprachansicht."
+        ),
+    ),
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.chat.use")),
 ) -> list[AiActionProposalResponse]:
@@ -114,6 +127,15 @@ def list_conversation_actions(
     nichts — die Karte bleibt bei ihrem Auftrag, sie wird hier nur
     **mitgeliefert**, und zwar allein, solange sie offen ist. Erledigte,
     abgelehnte und verfallene Karten bleiben im Auftragsfenster.
+
+    **``offen`` liefert nur, worauf gerade jemand wartet** — die Liste der
+    Sprachansicht (Betreiber, 25.09.2026: die Karte erscheint dort, wo man
+    ist, und bestaetigt wird nur per Klick). Offen heisst: noch
+    ``proposed`` und an einem lebenden Lauf, oder ohne Lauf (die Stimme
+    legt ihre Karten ohne an) und juenger als `OFFEN_OHNE_LAUF`. Die
+    Verlaufskarten eines laengst beendeten Chatlaufs stehen weiter im Chat,
+    aber nicht mehr zwischen dem Menschen und der Karte, um die es gerade
+    geht.
 
     Sicherheitlich aendert das nichts: `conversation_id` ist an keiner
     Rechtepruefung beteiligt. Bestaetigen und Ausfuehren gehen weiter durch
@@ -156,6 +178,20 @@ def list_conversation_actions(
             and_(
                 AiActionProposal.conversation_id.in_(eigene_worker),
                 AiActionProposal.status == "proposed",
+            ),
+        )
+    if offen:
+        lebende_laeufe = db.query(AiRun.id).filter(AiRun.status.notin_(BEENDET))
+        frisch = datetime.now(timezone.utc) - OFFEN_OHNE_LAUF
+        bedingung = and_(
+            bedingung,
+            AiActionProposal.status == "proposed",
+            or_(
+                AiActionProposal.run_id.in_(lebende_laeufe),
+                and_(
+                    AiActionProposal.run_id.is_(None),
+                    AiActionProposal.created_at >= frisch,
+                ),
             ),
         )
     rows = db.query(AiActionProposal).filter(

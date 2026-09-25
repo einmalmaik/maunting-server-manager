@@ -61,41 +61,6 @@ export interface Beleg {
 }
 
 /**
- * Eine Aktion, die auf die Zustimmung des Menschen wartet.
- *
- * **Ohne Knopf, und das ist der Punkt.** Im Chat steht hier eine Karte mit
- * „Ausführen"; im Sprachmodus fragt die KI, und der Mensch antwortet. Ein Knopf
- * daneben wäre ein zweiter Weg zum selben Ziel — und damit ein zweiter Zustand,
- * den beide Seiten auseinanderhalten müssten (geklickt, während gesprochen
- * wurde?). Gezeigt wird nur, *was* gleich passiert: welches Werkzeug, welcher
- * Server. Gesprochen ist das schwer zu behalten, gelesen ist es ein Blick.
- *
- * **Die eine Ausnahme ist `klick`.** Was auch im autonomen Modus fragt, seit dem
- * 23.09.2026 jedes Löschen, nimmt kein gesprochenes Ja an: das Ja könnte das
- * Modell auch aus einer Webseite oder Mail „gehört" haben. Dort gibt es also
- * keinen zweiten Weg, sondern nur diesen einen, und die Karte bekommt den
- * Knopf, den der Betreiber gewählt hat („Klick auf die Karte").
- *
- * `wirkung` ist vom Modell verfasster Text und wird als reiner Text gezeichnet.
- */
-export interface Vorschlag {
-  /**
-   * Die Kennung des Vorschlags, nur für den Knopf. Leer, wenn der Rahmen keine
-   * brauchbare Kennung trug; dann gibt es auch keinen Knopf.
-   */
-  id: string
-  /** Die Kennung des Werkzeugs, für `ai.actions.tools.<name>`. */
-  werkzeug: string
-  /** Was das Modell als Folge erwartet. Leer, wenn es nichts gesagt hat. */
-  wirkung: string
-  /** Ob nur ein Klick bestätigt und kein gesprochenes Ja (siehe oben). */
-  klick: boolean
-}
-
-/** Eine Vorschlagskennung, wie das Backend sie vergibt (UUID). */
-const VORSCHLAGSKENNUNG = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-/**
  * Eine während des Sprechens vorhersagend erkannte Werkzeug-Absicht.
  */
 export interface IntentErkannt {
@@ -153,14 +118,14 @@ interface Ergebnis {
    * Neuzeichnen mitten im Wechsel nicht ins Leere greift.
    */
   belege: Beleg[]
-  /** Die Aktion, auf die gerade ein Ja oder ein Klick fehlt. `null`, wenn keine. */
-  vorschlag: Vorschlag | null
   /**
-   * Nimmt die Karte weg, nachdem auf ihrem Knopf entschieden wurde, aber nur,
-   * wenn sie noch dieselbe ist. Während Bestätigen und Ausführen laufen, kann
-   * die Sitzung schon die nächste wartende Karte geschickt haben.
+   * Zählt die Karten, die die Sitzung gemeldet hat. Die Ansicht lädt ihre
+   * Liste daraufhin sofort neu (`OffeneKarten`). Die Karte selbst kommt nicht
+   * aus dem Rahmen, sondern aus derselben Liste wie im Chat: seit dem
+   * 25.09.2026 bestätigt nur der Klick, und die Ansicht zeigt auch die Karten
+   * der Worker, die diese Sitzung nie sieht.
    */
-  vorschlagErledigt: (kennung: string) => void
+  kartenImpuls: number
   /** Spekulativ vorab erkannte Absicht des Nutzers. */
   intentErkannt: IntentErkannt | null
   /** Regionale Satelliten- und Geodaten, falls ein entsprechendes Werkzeug lief. */
@@ -337,7 +302,7 @@ export function useSprachsitzung(
   const [fehlerDetails, setFehlerDetails] = useState<Record<string, unknown> | null>(null)
   const [fehler, setFehler] = useState<string | null>(null)
   const [belege, setBelege] = useState<Beleg[]>([])
-  const [vorschlag, setVorschlag] = useState<Vorschlag | null>(null)
+  const [kartenImpuls, setKartenImpuls] = useState(0)
   const [intentErkannt, setIntentErkannt] = useState<IntentErkannt | null>(null)
   const [geoData, setGeoData] = useState<AiRegionalAnalysis | null>(null)
   const [regionalFocus, setRegionalFocus] = useState<RegionalFocus | null>(null)
@@ -393,7 +358,6 @@ export function useSprachsitzung(
     setZustand('aus')
     setWerkzeug(null)
     setWerkzeugLaeuft(false)
-    setVorschlag(null)
     setIntentErkannt(null)
     setRegionalFocus(null)
     setRegionalContextActive(true)
@@ -699,15 +663,6 @@ export function useSprachsitzung(
           break
         }
         case 'gehoert':
-          // Wer spricht, hat entschieden — ja, nein oder etwas ganz anderes.
-          // Die Brücke räumt ihre offenen Vorschläge auf jedem dieser drei
-          // Wege weg (`_entscheidung`), also verschwindet die Karte hier
-          // genauso bedingungslos. Sie stehen zu lassen, bis eine Antwort
-          // eintrifft, hiesse: sie steht noch da, während die Löschung läuft.
-          //
-          // Ausgenommen ist die Karte mit Knopf: über sie entscheidet kein
-          // gesprochenes Wort, und ohne sie gäbe es nichts mehr zu klicken.
-          setVorschlag((bisher) => (bisher?.klick ? bisher : null))
           zeileAnhaengen('ich', String(nachricht.text ?? ''))
           break
         case 'antworttext':
@@ -845,32 +800,12 @@ export function useSprachsitzung(
           )
           break
         }
-        case 'vorschlag': {
-          // Fremdinhalt in einem eigenen Rahmen: `tool_name` ist eine Kennung
-          // aus der Werkzeugliste des Backends und wird gleich als
-          // Übersetzungsschlüssel benutzt — deshalb wird nur übernommen, was
-          // wie eine solche Kennung aussieht. Ohne diese Prüfung liesse ein
-          // Feld voller Punkte den Menschen in `de.json` spazieren gehen.
-          const daten = nachricht.vorschlag
-          if (daten === null) {
-            setVorschlag(null)
-            break
-          }
-          if (typeof daten !== 'object') break
-          const roh = daten as Record<string, unknown>
-          const werkzeug = String(roh.tool_name ?? '')
-          if (!/^[a-z0-9_]{1,64}$/.test(werkzeug)) break
-          // Die Kennung landet im Pfad eines API-Aufrufs. Übernommen wird
-          // deshalb nur, was wie eine UUID aussieht, und sonst nichts.
-          const kennung = typeof roh.id === 'string' && VORSCHLAGSKENNUNG.test(roh.id) ? roh.id : ''
-          setVorschlag({
-            id: kennung,
-            werkzeug,
-            wirkung: String(roh.expected_effect ?? '').slice(0, 400),
-            klick: nachricht.klick === true,
-          })
+        case 'vorschlag':
+          // Nur der Anstoss, die Liste neu zu laden. Was auf der Karte steht,
+          // kommt aus der Vorschlagsliste des Panels und nicht aus diesem
+          // Rahmen; ein Rahmen ohne Karte (`null`) meldet nichts Neues.
+          if (nachricht.vorschlag) setKartenImpuls((zahl) => zahl + 1)
           break
-        }
         case 'abgelaufen':
           // Planmäßiges Ende nach der Höchstdauer. Der Server schließt gleich;
           // `onclose` verbindet dann neu.
@@ -947,10 +882,6 @@ export function useSprachsitzung(
       ws.current = null
       setWerkzeug(null)
       setWerkzeugLaeuft(false)
-      // Die offenen Vorschläge der Brücke leben in der Sitzung und nicht in
-      // der Datenbank. Nach dem Neuverbinden nimmt kein gesprochenes Ja sie
-      // mehr an — eine Karte, die stehen bliebe, versprächt das Gegenteil.
-      setVorschlag(null)
 
       if (planmaessig.current && gewollt.current) {
         voiceDebug('VOICE_ABGELAUFEN_RECONNECT')
@@ -1009,11 +940,6 @@ export function useSprachsitzung(
     [zustand],
   )
 
-  const vorschlagErledigt = useCallback(
-    (kennung: string) => setVorschlag((bisher) => (bisher?.id === kennung ? null : bisher)),
-    [],
-  )
-
   return {
     zustand,
     abgelaufen,
@@ -1028,8 +954,7 @@ export function useSprachsitzung(
     fehlerDetails,
     fehler,
     belege,
-    vorschlag,
-    vorschlagErledigt,
+    kartenImpuls,
     intentErkannt,
     geoData,
     regionalFocus,

@@ -90,10 +90,12 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     # duerfen, warum.
     PermissionDef("ai.usage.read.all",         "ai",      "KI-Nutzung aller Benutzer einsehen"),
     # Durchgesetzt in routers/ai_autonomy.py und services/ai_autonomy_service.py.
-    # Loeschen fragt trotzdem immer, ebenso eine Rechtevergabe, die etwas
-    # entzieht oder mehr als UNCRITICAL_SERVER_PERMISSIONS vergibt
-    # (ai_tool_registry.verlangt_klick). `permissionDetails.ai_autonomous_use`
-    # sagt das dem, der das Recht vergibt.
+    # Trotzdem fragt, was `ai_tool_registry.verlangt_klick` nennt: Server,
+    # Dateien, Backups, Blueprints und Rollen loeschen, Shop und Tarif, und eine
+    # Rechtevergabe an einen Benutzer, die etwas entzieht oder mehr als
+    # UNCRITICAL_SERVER_PERMISSIONS vergibt. `permissionDetails.ai_autonomous_use`
+    # zaehlt das dem auf, der das Recht vergibt — eine Zusage, bei jeder
+    # Aenderung dort mitziehen.
     PermissionDef("ai.autonomous.use",         "ai",      "Autonomen KI-Modus verwenden"),
     # Durchgesetzt in services/ai_task_service.py. Ein stehender Auftrag ist die
     # einzige Sache, die die KI *ohne* anwesenden Menschen in Gang setzt, ohne

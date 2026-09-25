@@ -116,6 +116,11 @@ const ABGELOESTE_SCHLUESSEL = [
   // der Reiter schon zeigt — Vollauflösung war das nie. Eine echte
   // Vollansicht bräuchte einen eigenen Weg, etwa den Copernicus Browser.
   'ai.geo.openFullScene',
+  // 25.09.2026: jede Karte bestätigt nur noch der Klick, auch im Sprachmodus.
+  // Die Unterscheidung „sag Ja" / „klick hier" / „klick im Chat" gibt es
+  // nicht mehr; `ai.voice.vorschlag.hint` sagt jetzt das eine.
+  'ai.voice.vorschlag.hintKlick',
+  'ai.voice.vorschlag.hintKlickChat',
 ]
 
 /** Die Nachfolger muss es geben — sonst wäre das Löschen ein Verlust. */

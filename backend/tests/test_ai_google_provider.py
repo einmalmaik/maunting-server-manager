@@ -469,7 +469,7 @@ async def test_gemini_live_region_fragt_ohne_autonomie_erst() -> None:
         "autonomous": False,
     }
     wert = {"proposals": [karte], "status": "needs_confirmation",
-            "hinweis": voice_interactions.JA_NOETIG}
+            "hinweis": voice_interactions.KLICK_NOETIG}
 
     with patch.object(
         voice_interactions,
@@ -486,7 +486,7 @@ async def test_gemini_live_region_fragt_ohne_autonomie_erst() -> None:
     assert {
         "art": "vorschlag",
         "vorschlag": {k: v for k, v in karte.items() if k != "call_id"},
-        "klick": False,
+        "klick": True,
     } in gesendet
     assert not any("geo_analysis" in rahmen for rahmen in gesendet)
 

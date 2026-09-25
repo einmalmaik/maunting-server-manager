@@ -1515,6 +1515,13 @@ export const aiApi = {
   listActions: (kind: AiConversationKind = 'primary') =>
     api<AiActionProposal[]>(`/ai/conversation/actions?kind=${kind}`),
   /**
+   * Nur die Karten, auf deren Klick gerade jemand wartet — eigene und die
+   * lebender Worker. Die Liste der Sprachansicht: bestätigt wird seit dem
+   * 25.09.2026 nur per Klick, und die Karte steht dort, wo man gerade ist.
+   */
+  listOpenActions: () =>
+    api<AiActionProposal[]>('/ai/conversation/actions?kind=primary&offen=true'),
+  /**
    * Die Vorschläge eines Worker-Fensters — über die Kennung, denn
    * `kind=worker` ist mehrdeutig: es gibt je Auftrag ein Fenster.
    */

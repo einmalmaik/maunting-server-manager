@@ -13,7 +13,7 @@ def realtime_tool_schema(entry: dict) -> dict | None:
     spec = WERKZEUGE[name]
     description = func.get("description") or ""
     if spec.art in {"server_write", "global_write"}:
-        description = description + " Im Sprachmodus nur Vorschlag erzeugen; Bestaetigung via voice_resolve_latest_proposal."
+        description = description + " Im Sprachmodus nur Vorschlag erzeugen; bestaetigt wird per Klick auf die Karte."
     return {
         "type": "function",
         "name": name,

@@ -307,6 +307,13 @@ def test_ein_geweckter_worker_wird_geweckt_aber_nicht_verfolgt(
         lambda db_, *, run_id: geweckt.append(run_id) or True,
     )
 
+    # Seit dem 25.09.2026 führt kein gesprochenes Ja aus (`klick_noetig`).
+    # Geprüft wird der Weg dahinter, der als Schranke stehen bleibt; ohne
+    # diese Zeile endete er schon an ihr.
+    from services.ai_voice import interactions as voice_interactions
+
+    monkeypatch.setattr(voice_interactions, "klick_noetig", lambda *_a, **_k: False)
+
     bruecke = _Attrappe(user_id=owner_user.id)
     ausgang = bruecke._ausfuehren("kennung")
 
@@ -314,3 +321,29 @@ def test_ein_geweckter_worker_wird_geweckt_aber_nicht_verfolgt(
     # Das Wecken selbst bleibt in beiden Fällen — nur das Zuhören entfällt.
     assert geweckt == [lauf.id]
     assert ausgang.lauf_id == (lauf.id if verfolgt else None)
+
+
+@pytest.mark.asyncio
+async def test_ein_nein_lehnt_die_juengste_karte_ab(monkeypatch) -> None:
+    """Das Nein gilt der zuletzt gezeigten Karte, wie der Knopf „Ablehnen".
+
+    Bis zum 25.09.2026 vergass die Brücke nur die Kennung, und der Vorschlag
+    blieb ausführbar. Seitdem zeigt die Sprachansicht jede offene Karte mit
+    Knöpfen — nach dem Nein stünde sie noch da.
+    """
+    from services.ai_voice import interactions as voice_interactions
+
+    abgelehnt: list[str] = []
+    monkeypatch.setattr(
+        voice_interactions,
+        "vorschlag_ablehnen",
+        lambda *, user_id, kennung: abgelehnt.append(kennung) or True,
+    )
+    bruecke = _Attrappe()
+    bruecke._offene_vorschlaege = ["aelter", "juengste"]
+
+    entschieden = await bruecke._entscheidung("Nein")
+
+    assert entschieden is True
+    assert abgelehnt == ["juengste"]
+    assert bruecke._offene_vorschlaege == []

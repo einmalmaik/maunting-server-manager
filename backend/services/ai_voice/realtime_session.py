@@ -119,7 +119,7 @@ class RealtimeVorbereitung:
 WERKZEUG_REGELN = (
     "Persönliche Notizen (Einkaufslisten, To-Dos mit propose_note_create) und Kalendereinträge (Termine mit propose_calendar_event_create) direkt aufrufen. "
     "Für erweiterte Server-, Mod-, Konfigurations- oder Verwaltungsaktionen ohne direktes Einzelwerkzeug execute_server_action verwenden. "
-    "voice_resolve_latest_proposal nur für die zuletzt sichtbare Vorschlagskarte und nur bei eindeutiger Zustimmung oder Ablehnung verwenden."
+    "Vorschlagskarten bestätigt der Benutzer per Klick; voice_resolve_latest_proposal nur bei eindeutiger Ablehnung der zuletzt sichtbaren Karte verwenden."
 )
 #: Wie Regionsanalyse, Karte und Regionalansicht zu bedienen sind. Gilt dem
 #: Modell, das die Werkzeuge ruft — bei Realtime dem Sprachmodell selbst, bei

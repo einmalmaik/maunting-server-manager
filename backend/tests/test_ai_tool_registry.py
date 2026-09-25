@@ -136,80 +136,78 @@ def test_planned_confirm_only_tools_are_not_offered() -> None:
 def test_die_sperre_ist_ausgeschrieben() -> None:
     """Was auch im autonomen Modus fragt, steht hier Name fuer Name.
 
-    Die Vorgabe des Betreibers, woertlich: "autonome modus an bedeutet alles
-    wird automatisch bestaetigt ausser Loeschvorgaenge". Die Liste steht
+    Die Vorgabe des Betreibers vom 25.09.2026: "autonomer Modus bedeutet ja,
+    dass er autonom arbeiten soll". Gefragt wird nur noch, wo ein Fehler den
+    Server, seine Daten oder den Rahmen der KI trifft. Die Liste steht
     ausgeschrieben, damit ein zusaetzlicher Eintrag eine bewusste Entscheidung
-    ist und kein Bauchgefuehl beim Bauen eines Werkzeugs. Drei Gruende tragen
-    sie:
+    ist und kein Bauchgefuehl beim Bauen eines Werkzeugs:
 
-    * **Loeschen**, jedes, auch eines mit Rueckweg. Bis zum 23.09.2026 las die
-      Registry die Vorgabe als "unumkehrbar", und Datei-, Notiz-, Termin-,
-      Aufgaben- und DNS-Loeschen liefen ohne Rueckfrage. Dann haette das
-      Modell dem Betreiber fast seinen Discord-Bot geloescht. Ein Rueckweg
-      hilft nur, wenn jemand das Loeschen bemerkt. Vergessen (`forget_memory`,
-      `forget_skill`) ist ebenfalls Loeschen.
-    * **Unumkehrbares Ueberschreiben**: `propose_backup_restore` ersetzt einen
-      Stand, von dem es danach kein Backup mehr gibt.
+    * **Server und seine Daten**: Server, Dateien und Blueprints loeschen,
+      ein Backup einspielen (ersetzt einen Stand, von dem es danach kein
+      Backup mehr gibt). Wipe und Neuinstallation stehen in
+      `GEPLANT_IMMER_BESTAETIGEN`.
+    * **Rollen loeschen**: nimmt jedem Mitglied Rechte.
     * **Der Rahmen der KI**: die drei Hoster-Werkzeuge aendern Rechte oder
       erzeugen Schluessel. Bei `propose_hoster_integration` kommt ein
       mechanischer Grund dazu: im autonomen Modus ginge der einmalige API-Key
       mit dem Rueckgabewert verloren.
 
-      Die Rechte anderer Benutzer (`propose_user_server_permission`,
-      `propose_role_set`, `propose_user_roles`) stehen nicht in dieser Liste,
-      weil ihre Grenze am Aufruf haengt: autonom laeuft nur, was ausschliesslich
-      unkritische Serverrechte hinzufuegt, alles andere fragt ueber
-      `always_confirm` (`test_ai_user_permission_tools.py`).
+    Die Rechte anderer Benutzer (`propose_user_server_permission`,
+    `propose_user_roles`) stehen nicht in dieser Liste, weil ihre Grenze am
+    Aufruf haengt: autonom laeuft nur, was ausschliesslich unkritische
+    Serverrechte hinzufuegt, alles andere fragt ueber `always_confirm`
+    (`test_ai_user_permission_tools.py`). Eine Rolle anlegen oder aendern
+    (`propose_role_set`) fragt seit dem 25.09.2026 nie.
 
-    Nicht in der Liste steht `propose_server_blueprint_switch`, obwohl der
-    Wechsel das Serververzeichnis leert. Der Betreiber hat ihn am 02.09.2026
-    ausdruecklich fuer den autonomen Modus freigegeben; vorher legt der
-    Wechsel zwingend ein Backup an.
+    Nicht in der Liste stehen die eigenen Daten des Benutzers
+    (`EIGENE_DATEN_LOESCHEN`, 23.–25.09.2026 gesperrt) und
+    `propose_server_blueprint_switch`, obwohl der Wechsel das
+    Serververzeichnis leert: der Betreiber hat ihn am 02.09.2026 fuer den
+    autonomen Modus freigegeben; vorher legt der Wechsel zwingend ein Backup an.
     """
     gebaut = {
         name for name, spec in ai_tool_registry.WERKZEUGE.items()
         if spec.immer_bestaetigen
     }
     assert gebaut == {
-        # Loeschen
+        # Server und seine Daten
         "propose_server_delete",
         "propose_blueprint_delete",
         "propose_file_delete",
-        "propose_task_delete",
-        "propose_calendar_event_delete",
-        "propose_note_delete",
-        "propose_cloudflare_dns_delete",
-        "propose_role_delete",
-        "forget_memory",
-        "forget_skill",
-        # Unumkehrbares Ueberschreiben
         "propose_backup_restore",
+        # Rollen
+        "propose_role_delete",
         # Der Rahmen der KI
         "propose_hoster_integration",
         "propose_hoster_product",
         "propose_ai_tarif_role",
     }
+    assert ai_tool_registry.GEPLANT_IMMER_BESTAETIGEN == {
+        "propose_server_wipe",
+        "propose_server_reinstall",
+        "propose_secret_rotation",
+    }
     assert "propose_server_blueprint_switch" not in ai_tool_registry.ALWAYS_CONFIRM_TOOLS
+    assert "propose_role_set" not in ai_tool_registry.ALWAYS_CONFIRM_TOOLS
 
 
-def test_jedes_loeschwerkzeug_traegt_die_sperre() -> None:
+def test_jedes_loeschwerkzeug_ist_entschieden() -> None:
     """Die Regel statt der Aufzaehlung, fuer das naechste Werkzeug.
 
     Der Test darueber faellt auf, wenn jemand etwas in die Sperre schreibt. Er
-    faellt **nicht** auf, wenn jemand ein neues Loeschwerkzeug baut und die
-    Sperre vergisst. Genau so lief `propose_blueprint_delete` einmal ohne
+    faellt **nicht** auf, wenn jemand ein neues Loeschwerkzeug baut und nicht
+    darueber nachdenkt. Genau so lief `propose_blueprint_delete` einmal ohne
     Rueckfrage durch.
 
     Deshalb die Regel: wer ein Werkzeug auf `_delete` oder `forget_` tauft,
-    traegt `immer_bestaetigen`. Ausnahmen gibt es seit dem 23.09.2026 keine
-    mehr. Vorher standen hier fuenf Loeschwerkzeuge, deren Rueckweg
-    nachgewiesen war, und genau das war die Luecke: ein Rueckweg ersetzt nicht
-    die Frage, ob geloescht werden soll.
+    entscheidet, wohin es gehoert — in die Sperre oder zu den eigenen Daten
+    (`EIGENE_DATEN_LOESCHEN`), die im autonomen Modus ohne Rueckfrage laufen
+    (Betreiber, 25.09.2026). Beides zugleich waere ein Widerspruch.
 
     Ein Name ist kein Beweis, aber er ist der einzige Hinweis, den ein neues
-    Werkzeug von sich aus gibt. Die Desktop-Werkzeuge fallen nicht darunter,
-    denn ob sie loeschen, haengt an ihrer `aktion`
-    (`test_desktop_loescht_haengt_an_der_aktion`).
+    Werkzeug von sich aus gibt. Die Desktop-Werkzeuge fallen nicht darunter;
+    auf dem eigenen Rechner entscheidet allein die Freigabe
+    (`test_desktop_aufraeumen.py`).
     """
     loeschwerkzeuge = {
         name for name in ai_tool_registry.WERKZEUGE
@@ -218,35 +216,13 @@ def test_jedes_loeschwerkzeug_traegt_die_sperre() -> None:
     # Sonst prueft die Zeile darunter nichts.
     assert {"propose_file_delete", "forget_memory", "forget_skill"} <= loeschwerkzeuge
 
-    ohne_sperre = loeschwerkzeuge - ai_tool_registry.ALWAYS_CONFIRM_TOOLS
-    assert ohne_sperre == set()
+    gesperrt = ai_tool_registry.ALWAYS_CONFIRM_TOOLS
+    eigene = ai_tool_registry.EIGENE_DATEN_LOESCHEN
+    assert loeschwerkzeuge - gesperrt - eigene == set()
+    assert gesperrt & eigene == set()
+    # Eine umbenannte Zeile liesse die Menge still ins Leere zeigen.
+    assert eigene <= set(ai_tool_registry.WERKZEUGE)
 
-
-def test_desktop_loescht_haengt_an_der_aktion() -> None:
-    """Auf dem Rechner fragt, was loescht, und nur das.
-
-    Desktop-Werkzeuge sind `delegation` und tragen kein `immer_bestaetigen`.
-    Ob der Rechner seine Karte zeigt, entscheidet das Feld ``autonom`` im
-    Auftrag, und das setzt `_desktop_argumente` aus `desktop_loescht`.
-    `desktop_aufraeumen` loescht mit jeder Aktion, `desktop_dateien` nur mit
-    ``loeschen``. Lesen, Schreiben und Verschieben bleiben im autonomen Modus
-    ohne Rueckfrage.
-    """
-    loescht = ai_tool_registry.desktop_loescht
-
-    for aktion in ("papierkorb", "endgueltig", "papierkorb_leeren", None):
-        assert loescht("desktop_aufraeumen", {"aktion": aktion}) is True
-    assert loescht("desktop_aufraeumen", None) is True
-
-    assert loescht("desktop_dateien", {"aktion": "loeschen"}) is True
-    for aktion in ("auflisten", "lesen", "schreiben", "verschieben"):
-        assert loescht("desktop_dateien", {"aktion": aktion}) is False
-    assert loescht("desktop_dateien", None) is False
-
-    assert loescht("desktop_system", {"aktion": "loeschen"}) is False
-
-    # Ein umbenanntes Werkzeug liesse die Frage still ins Leere laufen.
-    assert set(ai_tool_registry.DESKTOP_LOESCHAKTIONEN) <= ai_tool_registry.DESKTOP_TOOLS
 
 
 def test_die_beiden_heilungswerkzeuge_sind_eingeordnet() -> None:

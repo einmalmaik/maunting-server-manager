@@ -80,9 +80,9 @@ const TATSACHEN: readonly string[] = [
   'location',
   'calendar_id',
   'event_id',
-  // Vergessen fragt seit dem 23.09.2026 auch im autonomen Modus. Die Karte
-  // nannte dabei bis dahin nur das Werkzeug; wer zustimmt, soll lesen, welche
-  // Einträge und welcher Skill gleich verschwinden.
+  // Die Karte eines Vergessens nannte bis zum 23.09.2026 nur das Werkzeug;
+  // wer zustimmt, soll lesen, welche Einträge und welcher Skill gleich
+  // verschwinden.
   'memory_scope',
   'memory_keys',
   'skill_key',
@@ -138,7 +138,7 @@ const UNUMKEHRBAR: readonly string[] = [
   'propose_server_blueprint_switch',
   'propose_server_lifecycle',
   // `propose_file_delete` stand hier schon, als es in `ai_tool_registry` noch
-  // nicht `immer_bestaetigen` war (erst seit dem 23.09.2026). Die Registry
+  // nicht `immer_bestaetigen` war (seit dem 23.09.2026). Die Registry
   // entscheidet, ob eine Freigabe uebersprungen werden darf; dieser Farbton
   // entscheidet, wie ein Mensch die Frage gestellt bekommt. Eine geloeschte
   // Datei ist ohne Backup weg — das gehoert rot gefragt.
@@ -157,9 +157,16 @@ const UNUMKEHRBAR: readonly string[] = [
 export function AiActionProposalCard({
   proposal,
   onChange,
+  nurAnsicht = false,
 }: {
   proposal: AiActionProposal
   onChange: (proposal: AiActionProposal) => void
+  /**
+   * Ohne Knöpfe, mit dem Hinweis, wo bestätigt wird. Für das Worker-Fenster:
+   * es ist zum Nachsehen da (Betreiber, 25.09.2026), und dieselbe Karte steht
+   * mit Knöpfen im Chat und in der Sprachansicht.
+   */
+  nurAnsicht?: boolean
 }) {
   const { t } = useTranslation()
   const [busy, setBusy] = useState(false)
@@ -370,7 +377,12 @@ export function AiActionProposalCard({
           )}
           {proposal.error_code && <p className="mt-1.5 flex items-center gap-1 text-xs text-status-destructive"><AlertTriangle className="h-3.5 w-3.5" />{t('ai.actions.failed')}</p>}
         </div>
-        {proposal.status === 'proposed' && !proposal.autonomous && (
+        {proposal.status === 'proposed' && !proposal.autonomous && nurAnsicht && (
+          <p className="mt-2 w-full text-xs text-on-surface-variant sm:mt-0 sm:w-auto sm:max-w-[14rem] sm:text-right">
+            {t('ai.actions.nurAnsicht')}
+          </p>
+        )}
+        {proposal.status === 'proposed' && !proposal.autonomous && !nurAnsicht && (
           <div className="flex w-full sm:w-auto flex-wrap items-center gap-2 justify-end mt-2 sm:mt-0">
             <Button
               type="button"

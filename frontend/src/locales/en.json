@@ -959,6 +959,7 @@
       },
       "reasonLabel": "AI reasoning",
       "effectLabel": "Expected effect",
+      "nurAnsicht": "Confirm in the chat or in the voice view.",
       "autonomousBadge": "Executed automatically",
       "autonomousHint": "This action ran without asking because you enabled autonomous mode for this scope. Permissions were checked unchanged; the operation is fully recorded in the audit log."
     },
@@ -1298,9 +1299,7 @@
       },
       "vorschlag": {
         "heading": "Waiting for you",
-        "hint": "Say yes and it runs. Say no, or anything else, and it does not.",
-        "hintKlick": "Confirm this here with a click. Saying yes is not enough for this one.",
-        "hintKlickChat": "Confirm this with a click on the card in the chat. Saying yes is not enough for this one."
+        "hint": "Confirm here with a click. Saying yes is not enough; saying no rejects it."
       }
     },
     "guardian": {
@@ -2452,7 +2451,7 @@
     },
     "ai_autonomous_use": {
       "title": "Use autonomous mode",
-      "desc": "Allow the AI to run permitted tools without asking first. Deletions still always ask, as do revoking permissions and granting anything beyond basic server operation rights."
+      "desc": "Allow the AI to run permitted tools without asking first. It still always asks before: deleting, wiping or reinstalling a server, deleting files, restoring a backup, deleting a blueprint or role, revoking other users' permissions or granting them more than basic server operation rights, shop integrations, shop products, the plan role and new credentials. Confirming is always a click on the card."
     },
     "ai_tasks_manage": {
       "title": "Manage AI tasks",

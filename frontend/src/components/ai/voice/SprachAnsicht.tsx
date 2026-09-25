@@ -2,13 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { FileText, Mic, MicOff, Settings, ShieldAlert, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { aiApi, type AiVoiceConfig } from '@/api/ai'
-import { SanitizedApiError } from '@/api/client'
-import { toast } from '@/stores/toastStore'
+import { type AiVoiceConfig } from '@/api/ai'
 import { ActiveProcessesCard } from '../geo/ActiveProcessesCard'
 import { RegionalAnalysisLayout } from '../geo/RegionalAnalysisLayout'
+import { OffeneKarten } from './OffeneKarten'
 import { Schwarm, schwarmZustand } from './Schwarm'
-import { useSprachsitzung, type Beleg, type Sprachzustand, type Vorschlag } from './useSprachsitzung'
+import { useSprachsitzung, type Beleg, type Sprachzustand } from './useSprachsitzung'
 import { Button } from '@/Singra/UI'
 
 /**
@@ -42,8 +41,7 @@ export function SprachAnsicht({
     fehlerDetails,
     fehler,
     belege,
-    vorschlag,
-    vorschlagErledigt,
+    kartenImpuls,
     intentErkannt,
     geoData,
     regionalFocus,
@@ -54,6 +52,10 @@ export function SprachAnsicht({
     beenden,
   } = useSprachsitzung(providerId, konfiguration?.mode ?? 'legacy')
   const [einstellungenOffen, setEinstellungenOffen] = useState(false)
+  // Wartet eine Karte, rückt der Schwarm zusammen. In voller Größe liess er
+  // ihr auf einem gewöhnlichen Bildschirm gut 100 Pixel, und der Knopf lag
+  // im Kasten unter dem Rand.
+  const [wartendeKarten, setWartendeKarten] = useState(0)
 
   // Wer in den Sprachmodus wechselt, will sprechen.
   useEffect(() => {
@@ -192,14 +194,8 @@ export function SprachAnsicht({
               {werkzeugLaeuft && werkzeug && <Werkzeuganzeige werkzeug={werkzeug} />}
             </div>
             {/* Auch hier, nicht nur in der Mitte: ohne autonomen Modus fragt
-                schon die Regionsanalyse, und eine Löschkarte will ihren Knopf. */}
-            {vorschlag && (
-              <Vorschlagskasten
-                key={vorschlag.id || vorschlag.werkzeug}
-                vorschlag={vorschlag}
-                onErledigt={vorschlagErledigt}
-              />
-            )}
+                schon die Regionsanalyse, und jede Karte will ihren Klick. */}
+            <OffeneKarten impuls={kartenImpuls} />
           </div>
 
           {/* Aktive Prozesse Card */}
@@ -249,7 +245,11 @@ export function SprachAnsicht({
         zustand={figur}
         pegel={pegel}
         impulse={werkzeugStarts}
-        className="h-[clamp(260px,56vh,600px)] w-full max-w-5xl"
+        className={
+          wartendeKarten > 0
+            ? 'h-[clamp(120px,22vh,260px)] w-full max-w-5xl'
+            : 'h-[clamp(260px,56vh,600px)] w-full max-w-5xl'
+        }
       />
 
       {/* Zustand als Text */}
@@ -258,16 +258,7 @@ export function SprachAnsicht({
         {werkzeugLaeuft && werkzeug && <Werkzeuganzeige werkzeug={werkzeug} />}
       </div>
 
-      {/* Der Schlüssel baut den Kasten je Karte frisch auf. Sonst erbte eine
-          Karte, die während Bestätigen und Ausführen nachkommt, den
-          gesperrten Knopf der vorigen (Review vom 23.09.2026). */}
-      {vorschlag && (
-        <Vorschlagskasten
-          key={vorschlag.id || vorschlag.werkzeug}
-          vorschlag={vorschlag}
-          onErledigt={vorschlagErledigt}
-        />
-      )}
+      <OffeneKarten impuls={kartenImpuls} onAnzahl={setWartendeKarten} />
       {beleg && <Belegkasten beleg={beleg} />}
 
       <div className="mt-8 flex items-center gap-4">
@@ -389,116 +380,6 @@ function Werkzeuganzeige({ werkzeug }: { werkzeug: string }) {
       <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[hsl(var(--dna-voice-think))]" aria-hidden="true" />
       {t(`ai.toolsRunning.${werkzeug}`, { defaultValue: t('ai.voice.werkzeug') })}
     </p>
-  )
-}
-
-/**
- * Was gleich passiert, und bei einem Löschvorgang der Knopf dafür.
- *
- * Der Knopf geht denselben Weg wie „Ausführen" auf der Karte im Chat:
- * `confirmAction` holt den Einmal-Token, `executeAction` führt aus, und das
- * Backend prüft die Rechte dabei zweimal. Die Karte ist nur die Stelle, an der
- * geklickt wird.
- */
-function Vorschlagskasten({
-  vorschlag,
-  onErledigt,
-}: {
-  vorschlag: Vorschlag
-  onErledigt: (kennung: string) => void
-}) {
-  const { t } = useTranslation()
-  const [busy, setBusy] = useState(false)
-  const klickbar = vorschlag.klick && vorschlag.id !== ''
-
-  const bestaetigen = async () => {
-    setBusy(true)
-    try {
-      const freigabe = await aiApi.confirmAction(vorschlag.id)
-      const ausgefuehrt = await aiApi.executeAction(vorschlag.id, freigabe.confirmation_token)
-      toast.success(
-        ausgefuehrt.proposal.status === 'executing'
-          ? t('ai.actions.queued')
-          : t('ai.actions.executed'),
-      )
-      onErledigt(vorschlag.id)
-    } catch (error: unknown) {
-      toast.error(error instanceof SanitizedApiError ? error.message : t('ai.actions.error'))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const ablehnen = async () => {
-    setBusy(true)
-    try {
-      await aiApi.rejectAction(vorschlag.id)
-      toast.success(t('ai.actions.rejectedToast'))
-      onErledigt(vorschlag.id)
-    } catch (error: unknown) {
-      toast.error(error instanceof SanitizedApiError ? error.message : t('ai.actions.error'))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <section
-      className="mt-4 w-full max-w-2xl rounded-xl border border-tertiary/40 bg-tertiary-container/20 px-4 py-3"
-      aria-live="polite"
-    >
-      <div className="flex items-baseline gap-2">
-        <ShieldAlert
-          className="h-3.5 w-3.5 shrink-0 self-center text-tertiary"
-          aria-hidden="true"
-        />
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-          {t('ai.voice.vorschlag.heading')}
-        </h3>
-        <span className="ml-auto min-w-0 truncate text-sm font-medium text-on-surface">
-          {t(`ai.actions.tools.${vorschlag.werkzeug}`, vorschlag.werkzeug)}
-        </span>
-      </div>
-      {vorschlag.wirkung && (
-        <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">
-          {vorschlag.wirkung}
-        </p>
-      )}
-      <p className="mt-2 text-xs text-on-surface-variant/70">
-        {/* Eine Löschkarte ohne brauchbare Kennung hat keinen Knopf. Das
-            gesprochene Ja nimmt sie trotzdem nicht an; bestätigt wird dann auf
-            der Karte im Chat, an derselben Unterhaltung. */}
-        {t(
-          klickbar
-            ? 'ai.voice.vorschlag.hintKlick'
-            : vorschlag.klick
-              ? 'ai.voice.vorschlag.hintKlickChat'
-              : 'ai.voice.vorschlag.hint',
-        )}
-      </p>
-      {klickbar && (
-        <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            disabled={busy}
-            onClick={() => void ablehnen()}
-          >
-            {t('ai.actions.reject')}
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            size="sm"
-            disabled={busy}
-            onClick={() => void bestaetigen()}
-          >
-            {busy ? t('ai.actions.executing') : t('ai.actions.execute')}
-          </Button>
-        </div>
-      )}
-    </section>
   )
 }
 

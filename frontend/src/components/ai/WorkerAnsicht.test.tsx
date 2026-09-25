@@ -8,7 +8,8 @@
  * 1. Das Fenster lädt über die **Kennung** — `kind=worker` ist mehrdeutig,
  *    und ein Laden über die Art griffe bei N Aufträgen den falschen.
  * 2. Es gibt kein Eingabefeld und keinen Abbruch-Knopf; die Fusszeile nennt
- *    den Steuerweg (im Gespräch, `worker_cancel` ruft das Gehirn).
+ *    den Steuerweg (im Gespräch, `worker_cancel` ruft das Gehirn). Auch die
+ *    Vorschlagskarten sind hier nur zu sehen (seit 25.09.2026).
  * 3. Die Leiste zeigt, was das Backend als lebend meldet, führt über die
  *    UUID in das Fenster — und rendert ohne Aufträge gar nichts.
  */
@@ -16,7 +17,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { aiApi, attachAiRun, type AiMessage, type AiWorkerInfo } from '@/api/ai'
+import { aiApi, attachAiRun, type AiActionProposal, type AiMessage, type AiWorkerInfo } from '@/api/ai'
 import { SanitizedApiError } from '@/api/client'
 import i18n from '@/i18n'
 import { useToastStore } from '@/stores/toastStore'
@@ -101,6 +102,42 @@ describe('WorkerAnsicht', () => {
     expect(document.querySelector('textarea')).toBeNull()
     expect(document.querySelector('input[type="text"]')).toBeNull()
     expect(screen.getByText(/Gesteuert wird im Gespräch/)).toBeInTheDocument()
+  })
+
+  it('zeigt eine wartende Karte ohne Knöpfe und sagt, wo bestätigt wird', async () => {
+    // Betreiber, 25.09.2026: „Der Worker-Chat ist eigentlich nur zum
+    // Nachschauen". Dieselbe Karte steht mit Knöpfen im Chat und in der
+    // Sprachansicht.
+    const karte: AiActionProposal = {
+      id: '0b7e7a52-2f6e-4a39-9d4e-3c2d1f0a9b11',
+      conversation_id: 'konv-worker-1',
+      server_id: 3,
+      tool_name: 'propose_backup',
+      proposal_type: 'write',
+      preview: {},
+      expected_revision: null,
+      requires_confirmation: true,
+      autonomous: false,
+      reason: null,
+      expected_effect: null,
+      status: 'proposed',
+      task_id: null,
+      error_code: null,
+      run_id: 'lauf-1',
+      created_at: '2026-08-18T04:00:01Z',
+    }
+    vi.mocked(aiApi.listWorkerActions).mockResolvedValue([karte])
+
+    render(
+      <MemoryRouter>
+        <WorkerAnsicht conversationId="konv-worker-1" />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText(i18n.t('ai.actions.tools.propose_backup'))).toBeInTheDocument()
+    expect(screen.getByText(i18n.t('ai.actions.nurAnsicht'))).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: i18n.t('ai.actions.execute') })).toBeNull()
+    expect(screen.queryByRole('button', { name: i18n.t('ai.actions.reject') })).toBeNull()
   })
 
   it('sagt ruhig, wenn es diesen Auftrag nicht gibt', async () => {

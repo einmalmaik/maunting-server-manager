@@ -959,6 +959,7 @@
       },
       "reasonLabel": "Begründung der KI",
       "effectLabel": "Erwartete Wirkung",
+      "nurAnsicht": "Bestätigen im Chat oder in der Sprachansicht.",
       "autonomousBadge": "Automatisch ausgeführt",
       "autonomousHint": "Diese Aktion lief ohne Rückfrage, weil du den autonomen Modus für diesen Bereich freigegeben hast. Berechtigungen wurden unverändert geprüft; der Vorgang steht vollständig im Audit-Log."
     },
@@ -1298,9 +1299,7 @@
       },
       "vorschlag": {
         "heading": "Wartet auf dich",
-        "hint": "Sag Ja, dann wird es ausgeführt. Sag Nein oder etwas anderes, dann nicht.",
-        "hintKlick": "Das bestätigst du hier mit einem Klick. Ein gesprochenes Ja reicht dafür nicht.",
-        "hintKlickChat": "Das bestätigst du mit einem Klick auf der Karte im Chat. Ein gesprochenes Ja reicht dafür nicht."
+        "hint": "Bestätigt wird hier mit einem Klick. Ein gesprochenes Ja reicht dafür nicht, ein Nein lehnt ab."
       }
     },
     "guardian": {
@@ -2452,7 +2451,7 @@
     },
     "ai_autonomous_use": {
       "title": "Autonomen Modus nutzen",
-      "desc": "Erlaubt der KI, freigegebene Werkzeuge ohne Rückfrage auszuführen. Löschvorgänge fragen trotzdem immer nach, ebenso das Entziehen von Rechten und jede Vergabe über die einfachen Server-Bedienrechte hinaus."
+      "desc": "Erlaubt der KI, freigegebene Werkzeuge ohne Rückfrage auszuführen. Trotzdem immer nachgefragt wird vor: Server löschen, zurücksetzen oder neu installieren, Dateien löschen, Backup einspielen, Blueprint oder Rolle löschen, Rechte anderer Benutzer entziehen oder über die einfachen Server-Bedienrechte hinaus vergeben, Shop-Anbindung, Shop-Produkten, Tarif-Rolle und neuen Zugangsdaten. Bestätigt wird immer per Klick auf die Karte."
     },
     "ai_tasks_manage": {
       "title": "KI-Aufgaben verwalten",

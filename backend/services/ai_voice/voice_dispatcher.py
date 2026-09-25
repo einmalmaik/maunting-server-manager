@@ -8,7 +8,7 @@ from models.user import User
 from services import ai_action_service
 from services.ai_voice import interactions as voice_interactions
 from services.openai_compatible_adapter import ProviderToolCall
-from services.ai_tool_registry import RECHTE_SCHREIBEN, WERKZEUGE, WRITE_TOOLS
+from services.ai_tool_registry import RECHTE_SCHREIBEN, WERKZEUGE, WRITE_TOOLS, verlangt_klick
 from services.semantic_tool_router_adapter import SemanticToolRouterAdapter
 
 
@@ -256,7 +256,7 @@ def dispatch_voice_action(
             "executed_tool": target_tool,
             "status": "proposal_created",
             "proposals": vorschlaege,
-            "message": "Vorschlagskarte wurde im Panel erstellt. Bitte den Benutzer um Bestätigung.",
+            "message": "Vorschlagskarte wurde im Panel erstellt; sie wartet auf den Klick des Benutzers.",
         }
         if hinweis := voice_interactions.klickhinweis(vorschlaege):
             wert["hinweis"] = hinweis
@@ -274,7 +274,7 @@ def dispatch_voice_action(
     # Hat ein Chatlauf schon gefragt, bleibt nur das Löschen übrig.
     beratung = voice_interactions.ethik_anstossen(user_id, target_call)
     karte = None
-    if not schon_freigegeben or voice_interactions.klick_noetig(target_tool):
+    if not schon_freigegeben or verlangt_klick(target_tool):
         karte = voice_interactions.freigabe_einholen(
             user_id,
             target_call,

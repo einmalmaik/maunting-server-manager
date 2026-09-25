@@ -17,10 +17,10 @@ def _voice_tool_definitions() -> list[dict]:
     return [
         _function(
             "voice_resolve_latest_proposal",
-            "Bestätigt oder verwirft ausschließlich den zuletzt in dieser "
-            "Sprachsitzung angezeigten Vorschlag. Nutze dies nur, wenn der "
-            "Benutzer dem sichtbaren Vorschlag eindeutig zustimmt oder ihn "
-            "eindeutig ablehnt.",
+            "Verwirft den zuletzt in dieser Sprachsitzung angezeigten "
+            "Vorschlag, wenn der Benutzer ihn eindeutig ablehnt (reject). "
+            "Bestätigt wird nur per Klick auf die Karte; confirm führt "
+            "nichts aus und liefert nur diesen Hinweis.",
             {
                 "decision": {
                     "type": "string",

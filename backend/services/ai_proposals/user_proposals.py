@@ -9,10 +9,12 @@ Panel-Router fragen. Hier steht nur, was die KI zusaetzlich braucht:
 * **Die Karte zeigt die Aenderung, nicht den Wunsch.** Hinzugefuegt und
   entzogen stehen getrennt da, aufgeloest aus dem Bestand. Wer bestaetigt,
   liest, was passiert, nicht was das Modell darueber schreibt.
-* **`always_confirm`** entscheidet der Bestand: entzieht der Vorschlag etwas
-  oder vergibt er mehr als `UNCRITICAL_SERVER_PERMISSIONS`, fragt er auch im
-  autonomen Modus, und die Stimme will dafuer den Klick
-  (`ai_tool_registry.verlangt_klick`).
+* **`always_confirm`** entscheidet der Bestand: entzieht eine Vergabe an einen
+  Benutzer etwas oder gibt sie ihm mehr als `UNCRITICAL_SERVER_PERMISSIONS`,
+  fragt sie auch im autonomen Modus (`ai_tool_registry.verlangt_klick`). Eine
+  Rolle anzulegen oder zu aendern fragt dort nie, auch mit kritischen Rechten:
+  sie wirkt erst, wenn sie jemandem zugewiesen wird, und diese Zuweisung fragt
+  (Vorgabe des Betreibers vom 25.09.2026).
 * **Der Stand beim Vorschlagen reist mit.** Zwischen Karte und Klick liegt ein
   Zeitfenster ohne Obergrenze. Hat jemand die Rechte darin im Panel geaendert,
   fuehrt der Klick nicht den alten Plan ueber den neuen Stand aus, sondern
@@ -331,7 +333,9 @@ def _role_set_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
         "permissions_removed": sorted(weg),
         "role_users": betroffen,
     }
-    return payload, _vorschau(preview, entzogen=bool(weg), vergeben=hinzu)
+    # Ohne `_vorschau`: siehe Modulkopf. Aendert die Rolle Benutzer, die sie
+    # schon tragen, sagt es die Karte trotzdem (`role_users`).
+    return payload, preview
 
 
 def _ausfuehren_role_set(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:

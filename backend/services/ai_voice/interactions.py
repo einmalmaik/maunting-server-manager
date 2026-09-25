@@ -22,30 +22,24 @@ logger = logging.getLogger(__name__)
 #: beide Sprachwege (`realtime_session`, `gemini_live_session`) denselben Satz
 #: brauchen und ein zweiter davon irgendwann anders lauten wuerde.
 #:
-#: Bis zum 23.09.2026 hiess es hier „nicht rückholbar". Seitdem braucht jedes
-#: Löschen den Klick, auch eines mit Rückweg, und der Satz wäre falsch.
+#: Seit dem 25.09.2026 gilt der Satz für **jede** Karte: bestätigt wird nur
+#: noch per Klick, im Chat wie in der Sprachansicht (Vorgabe des Betreibers).
+#: Vorher genügte bei den meisten Karten ein gesprochenes Ja, und hier stand
+#: daneben ein zweiter Satz, der danach fragen ließ.
 KLICK_NOETIG = (
-    "Das bestätigt der Benutzer nur per Klick auf die Karte, nicht mit einem "
-    "gesprochenen Ja. Sag ihm das in eigenen Worten."
-)
-
-#: Was das Modell erfährt, wenn ein Werkzeug auf ein gesprochenes Ja wartet.
-#: Ohne den letzten Halbsatz riefe es nach dem Ja das Werkzeug ein zweites Mal
-#: auf, statt die Karte zu bestätigen, und bekäme wieder nur eine Karte.
-JA_NOETIG = (
-    "Dieses Werkzeug läuft erst, wenn der Benutzer zustimmt. Sag ihm kurz, was "
-    "du vorhast, und frag, ob du darfst. Bei einem klaren Ja rufe "
-    "voice_resolve_latest_proposal mit decision confirm auf, nicht das "
-    "Werkzeug selbst; das Ergebnis kommt dann mit."
+    "Das bestätigt der Benutzer per Klick auf die Karte auf seinem Bildschirm, "
+    "nicht mit einem gesprochenen Ja. Sag ihm in einem Satz, was du vorhast und "
+    "dass die Karte auf seinen Klick wartet. Ein Nein darfst du mit "
+    "voice_resolve_latest_proposal (decision reject) annehmen."
 )
 
 #: Was das Modell erfährt, wenn mit einer Entscheidung andere Karten verfallen.
 #: Ohne ihn verschwänden sie still, und der Mensch hielte sie für bestätigt.
 VERWORFEN = (
-    "Ein Ja gilt genau einem Vorschlag. Die übrigen (verworfene_vorschlaege) "
-    "laufen in diesem Gespräch nicht mehr; bestätigen lassen sie sich auf ihrer "
-    "Karte im Chat. Sag das dem Benutzer kurz. Will er einen davon jetzt, schlag "
-    "ihn neu vor."
+    "Ein Nein gilt genau einem Vorschlag. Über die übrigen (verworfene_vorschlaege) "
+    "entscheidest du in diesem Gespräch nicht mehr; sie warten weiter auf ihrer "
+    "Karte und werden dort per Klick bestätigt oder abgelehnt. Sag das dem "
+    "Benutzer kurz."
 )
 
 #: Wie viele wartende Karten eine Sprachsitzung höchstens hält. Ältere bleiben
@@ -53,17 +47,22 @@ VERWORFEN = (
 MAX_OFFENE_KARTEN = 10
 
 
-def klick_noetig(tool_name: object, vorschau: object = None) -> bool:
-    """Ob ein Vorschlag dieses Werkzeugs nur per Klick bestätigt werden darf.
+def klick_noetig(tool_name: object = None, vorschau: object = None) -> bool:
+    """Ob ein Vorschlag nur per Klick bestätigt werden darf: immer.
 
-    Geführt wird die Liste an genau einer Stelle (`Werkzeug.immer_bestaetigen`),
-    nicht hier. Die ``vorschau`` braucht es für die Rechtewerkzeuge: ob eine
-    Vergabe den Klick verlangt, hängt dort am Aufruf
-    (`ai_tool_registry.verlangt_klick`).
+    Vorgabe des Betreibers vom 25.09.2026: „alles wird mit Karte bestätigt,
+    sowohl Chat als auch Echtzeit". Ein gesprochenes Ja kann ein falsch
+    erkanntes Geräusch sein, oder ein Satz aus einem gelesenen Log, den das
+    Modell für die Zustimmung hält. Bis dahin genügte es bei allem außer dem,
+    was `ai_tool_registry.verlangt_klick` nannte.
+
+    Die Parameter bleiben, damit die Aufrufer nicht wissen müssen, dass die
+    Antwort nicht mehr vom Werkzeug abhängt. Ob überhaupt eine Karte kommt,
+    entscheidet die Autonomie (`autonomy_allows`, `verlangt_klick`), nicht diese
+    Funktion.
     """
-    from services.ai_tool_registry import verlangt_klick
-
-    return verlangt_klick(tool_name, vorschau)
+    del tool_name, vorschau
+    return True
 
 
 def _gespeicherte_vorschau(vorschlag: object) -> dict:
@@ -143,7 +142,7 @@ def freigabe_einholen(
     wert: dict = {"proposals": vorschlaege}
     if any(_offen(v) for v in vorschlaege):
         wert["status"] = "needs_confirmation"
-        wert["hinweis"] = klickhinweis(vorschlaege) or JA_NOETIG
+        wert["hinweis"] = klickhinweis(vorschlaege)
     # Die Anzeige ohne Ergebnis: eine Karte, die noch wartet, ist weder eine
     # Regionsanalyse noch ein Suchtreffer, und das Panel soll keine zeichnen.
     return wert, fehler, _anzeigeeintrag(call, None, fehler), vorschlaege
@@ -287,6 +286,41 @@ def braucht_klick(*, user_id: int, kennung: str) -> bool:
         )
 
 
+def vorschlag_ablehnen(*, user_id: int, kennung: str) -> bool:
+    """Lehnt einen eigenen Vorschlag ab, wie der Knopf „Ablehnen" auf der Karte.
+
+    Seit dem 25.09.2026 zeigt die Sprachansicht jede offene Karte mit Knöpfen.
+    Vorher vergaß ein gesprochenes Nein nur die Kennung in der Sitzung, und der
+    Vorschlag blieb ``proposed``: die Karte stünde weiter mit „Ausführen" da,
+    nachdem der Mensch Nein gesagt hat. Ablehnen ist harmlos — ein falsch
+    gehörtes Nein kostet einen neuen Vorschlag, nie eine Aktion. Deshalb gilt
+    es gesprochen, das Ja nicht (`klick_noetig`).
+
+    Ein Lauf, der auf die Karte gewartet hat, wird geweckt wie nach dem Klick
+    (`routers/ai_actions.reject_action`), sonst hinge ein Worker geparkt.
+    """
+    from services import ai_action_errors, ai_proposal_service, ai_run_service
+
+    with SessionLocal() as db:
+        benutzer = db.get(User, user_id)
+        if benutzer is None:
+            return False
+        try:
+            vorschlag = ai_proposal_service.reject_proposal(
+                db, proposal_id=kennung, user=benutzer
+            )
+        except ai_action_errors.AiActionStateError:
+            db.rollback()
+            return False
+        lauf_id = getattr(vorschlag, "run_id", None)
+        if lauf_id:
+            try:
+                ai_run_service.lauf_fortsetzen(db, run_id=lauf_id)
+            except Exception:  # noqa: BLE001 - die Ablehnung steht, das Wecken ist Zugabe
+                logger.warning("Lauf nach gesprochener Ablehnung nicht geweckt run=%s", lauf_id)
+        return True
+
+
 def vorschlag_ausfuehren(*, user_id: int, kennung: str) -> Ausgang:
     """Bestätigt und führt einen eigenen Vorschlag wie der Chat-Klick aus.
 
@@ -300,12 +334,11 @@ def vorschlag_ausfuehren(*, user_id: int, kennung: str) -> Ausgang:
     genau die Vorlage, auf die ein Modell hereinfällt. Die Untrusted-Markierung
     macht das unwahrscheinlicher; sie ist ein Prompt und keine Schranke.
 
-    Deshalb dieselbe Trennlinie, die der Betreiber für den autonomen Modus
-    gezogen hat — „alles automatisch, ausser Löschvorgänge". Was auch im
-    autonomen Modus nicht ohne Rückfrage läuft, will einen Finger auf der
-    Karte sehen und kein gesprochenes Ja. Geführt wird die Liste an genau einer
-    Stelle (`Werkzeug.immer_bestaetigen`), nicht hier. Am 23.09.2026 hat der
-    Betreiber das für jedes Löschen bestätigt („Klick auf die Karte").
+    Seit dem 25.09.2026 will **jede** Karte einen Finger und kein gesprochenes
+    Ja (`klick_noetig`). Diese Funktion führt damit nichts mehr aus, was aus der
+    Stimme kommt; sie bleibt als Schranke stehen, damit ein künftiger Weg, der
+    sie ruft, an derselben Stelle abprallt. Vorher galt die Trennlinie des
+    autonomen Modus — ein Ja genügte, außer beim Löschen.
 
     Die Karte bleibt dabei stehen. Abgelehnt wird die *gesprochene* Bestätigung,
     nicht der Vorschlag — der Benutzer drückt auf der Karte, und die Stimme sagt
@@ -411,11 +444,11 @@ class OffeneVorschlaege:
     """Die Karten einer Sprachsitzung, über die noch zu entscheiden ist.
 
     `voice_resolve_latest_proposal` entscheidet über die jüngste, und zwar nur
-    über sie: ein Ja gilt genau einem Vorschlag, wie in der Pipeline-Stimme
+    über sie: ein Nein gilt genau einem Vorschlag, wie in der Pipeline-Stimme
     (`ai_voice_bridge._entscheidung`, Regel vom 17.08.2026). Die übrigen
-    verfallen dabei in der Stimme und bleiben auf ihrer Karte im Chat
-    bestätigbar; das Modell erfährt, welche (`VERWORFEN`). Nur eine Karte, die
-    den Klick braucht, bleibt nach einem Ja stehen, bis der Knopf gedrückt ist.
+    verfallen dabei in der Stimme und bleiben auf ihrer Karte bestätigbar; das
+    Modell erfährt, welche (`VERWORFEN`). Ein Ja führt seit dem 25.09.2026 nie
+    aus (`klick_noetig`): die Karte bleibt stehen, bis der Knopf gedrückt ist.
 
     Bis zum 23.09.2026 hielt jede Sitzung genau eine Kennung (Review vom selben
     Tag). Ein Ja zu einer Klickkarte löschte sie, obwohl die Karte stehen
@@ -525,6 +558,9 @@ class OffeneVorschlaege:
             if stand is not None:
                 return {"status": "already_decided", "stand": stand, **verfallen}, None
             if entscheidung == "reject":
+                if not vorschlag_ablehnen(user_id=user_id, kennung=kennung):
+                    fehler = "Vorschlag konnte nicht abgelehnt werden"
+                    return {"error": fehler, **verfallen}, fehler
                 return {"status": "rejected_by_user", **verfallen}, None
             try:
                 ausgang = vorschlag_ausfuehren(user_id=user_id, kennung=kennung)

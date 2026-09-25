@@ -362,7 +362,8 @@ def _freigabe_melden(user_id: int, conversation_id: str, zustand: dict) -> None:
                 text=(
                     f"{benannt} wartet auf eine Freigabe: der nächste "
                     "Schritt ist vorgeschlagen, aber noch nicht ausgeführt. "
-                    "Die Karte dazu steht im Chat und braucht einen Klick."
+                    "Die Karte wartet auf einen Klick, im Chat oder in der "
+                    "Sprachansicht."
                 ),
                 kanal=kanal,
                 worker_id=conversation_id,

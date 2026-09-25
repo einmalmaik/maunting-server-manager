@@ -848,7 +848,8 @@ bestätigt werden.
 
 Standard ist der unterstützte Modus: die KI analysiert, schlägt vor, wartet. Gemäß dem Grundsatz **„Sicherheit braucht Vertrauen“ / „Schutz braucht Vertrauen“** gilt:
 - **Autonomie-Modus AUS (Standard):** Jede Handlung und jedes Werkzeug der KI (ausnahmslos: Lesewerkzeuge wie `read_server_status`, `web_search`, das Deklarieren von Hintergrund-Workern `worker_start` sowie Schreib- und Verwaltungswerkzeuge) erfordert eine manuelle Bestätigung durch den Benutzer über eine Bestätigungskarte (mit „Bestätigen“ und „Ablehnen“).
-- **Autonomie-Modus AN:** Die KI darf Werkzeuge eigenständig und ohne Bestätigung im Chat und Hintergrund ausführen, **außer Löschvorgängen**. Jedes Löschen fragt, auch eines, das sich zurückholen ließe: Dateien, Notizen, Termine, Aufgaben, DNS-Einträge, das Vergessen von Erinnerungen und Skills und das Aufräumen auf dem Rechner. Das gilt im Chat, in der Stimme, in Hintergrund-Workern und auf dem Rechner.
+- **Autonomie-Modus AN:** Die KI darf Werkzeuge eigenständig und ohne Bestätigung im Chat und Hintergrund ausführen. Nachgefragt wird nur noch, wo ein Fehler den Server, seine Daten oder fremde Rechte trifft: Server löschen, zurücksetzen oder neu installieren, Dateien löschen, Backup einspielen, Blueprint oder Rolle löschen, Rechte anderer Benutzer entziehen oder kritisch bzw. global vergeben, Shop-Anbindung, Shop-Produkte, Tarif-Rolle und neue Zugangsdaten. Eigene Notizen, Termine, Aufgaben, DNS-Einträge, Erinnerungen und Skills löscht die KI ohne Rückfrage, ebenso auf dem eigenen Rechner (dort geht Gelöschtes in den Papierkorb). Eine Rolle anlegen oder ändern fragt nicht, auch mit kritischen Rechten; gefragt wird, wenn sie einem Benutzer zugewiesen wird. Das gilt im Chat, in der Stimme, in Hintergrund-Workern und auf dem Rechner.
+- **Bestätigt wird immer per Klick auf die Karte**, im Chat wie in der Sprachansicht; ein gesprochenes „Ja" führt nichts aus, ein „Nein" lehnt ab. Die Sprachansicht zeigt jede offene Karte, auch die eines Hintergrund-Workers. Im Worker-Fenster sind Karten nur zu sehen.
 - **Hintergrund-Aufgaben & Guardian-Heilung:** Geplante Aufgaben (`ai_tasks`) und automatische Guardian-Reparaturläufe können im Hintergrund nur dann eigenständig arbeiten, wenn der Autonomie-Modus für den betreffenden Benutzer bzw. Server aktiv freigegeben ist.
 
 Autonomie verlangt **vier** Bedingungen gleichzeitig:
@@ -862,32 +863,33 @@ Autonomie verlangt **vier** Bedingungen gleichzeitig:
    keine eigene Aufzählung, sondern die Ableitung aus der Spalte
    `immer_bestaetigen` der Werkzeugtabelle. Gebaut und gesperrt sind heute:
 
-   - **jedes Löschen**: `propose_server_delete`, `propose_blueprint_delete`,
-     `propose_file_delete`, `propose_task_delete`,
-     `propose_calendar_event_delete`, `propose_note_delete`,
-     `propose_cloudflare_dns_delete`, `forget_memory` und `forget_skill`;
-   - **unumkehrbares Überschreiben**: `propose_backup_restore`;
+   - **Server und seine Daten**: `propose_server_delete`,
+     `propose_blueprint_delete`, `propose_file_delete` und
+     `propose_backup_restore`;
+   - **Rollen löschen**: `propose_role_delete`;
    - **der Rahmen der KI**: `propose_hoster_integration`,
      `propose_hoster_product` und `propose_ai_tarif_role`. Sie ändern Rechte
      oder erzeugen Schlüssel, also die Grenzen, innerhalb derer die KI selbst
      arbeitet.
 
-   Dazu kommen vier Namen aus dem Zielbild, die es noch nicht gibt und die
+   Dazu kommen drei Namen aus dem Zielbild, die es noch nicht gibt und die
    vorsorglich gesperrt sind, damit ein künftiges Werkzeug sich einordnen muss
    statt stillschweigend autonomiefähig zu sein: `propose_server_wipe`,
-   `propose_server_reinstall`, `propose_permission_change` und
-   `propose_secret_rotation`. Die Desktop-Werkzeuge tragen die Spalte nicht,
-   weil bei ihnen die Aktion entscheidet: `desktop_aufraeumen` fragt immer,
-   `desktop_dateien` nur beim Löschen (`desktop_loescht`).
+   `propose_server_reinstall` und `propose_secret_rotation`. Die Rechte
+   anderer Benutzer (`propose_user_server_permission`, `propose_user_roles`)
+   fragen je nach Aufruf: autonom läuft nur, was ausschließlich unkritische
+   Serverrechte hinzufügt. Die Desktop-Werkzeuge tragen die Spalte nicht; auf
+   dem eigenen Rechner entscheidet allein die Freigabe.
 
-   Das Kriterium ist die Vorgabe des Betreibers, wörtlich: „im autonomen Modus
-   wird alles automatisch bestätigt, außer Löschvorgänge". Bis zum 23.09.2026
-   las die Tabelle das als „außer Unumkehrbarem", und Datei-, Notiz-, Termin-,
-   Aufgaben- und DNS-Löschen liefen autonom, weil es einen Rückweg gab. Dann
-   hätte das Modell dem Betreiber im autonomen Modus fast einen Discord-Bot
-   gelöscht. Ein Rückweg hilft nur, wenn jemand das Löschen bemerkt; die
-   Rückfrage ist die Sicherheitslinie. Was dagegen nur heikel klingt, fragt
-   nicht. Der Blueprint-*Wechsel* steht nicht auf der Liste, obwohl er das
+   Das Kriterium ist die Vorgabe des Betreibers vom 25.09.2026: „autonomer
+   Modus bedeutet ja, dass er autonom arbeiten soll". Vom 23. bis 25.09.2026
+   fragte jedes Löschen, nachdem das Modell dem Betreiber im autonomen Modus
+   fast einen Discord-Bot gelöscht hätte. Seitdem fragt nur noch, was den
+   Server, seine Daten oder fremde Rechte trifft; die eigenen Daten des
+   Benutzers (`EIGENE_DATEN_LOESCHEN`) löscht die KI mit Freigabe selbst. Ein
+   neues Löschwerkzeug muss in eine der beiden Mengen, sonst schlägt
+   `test_jedes_loeschwerkzeug_ist_entschieden` an. Was nur heikel klingt,
+   fragt nicht. Der Blueprint-*Wechsel* steht nicht auf der Liste, obwohl er das
    Serververzeichnis leert: der Betreiber hat ihn am 02.09.2026 ausdrücklich
    für den autonomen Modus freigegeben, und er legt vorher zwingend ein Backup
    an.

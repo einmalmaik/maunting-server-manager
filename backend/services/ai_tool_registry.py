@@ -46,19 +46,20 @@ class Werkzeug:
     Symbol statt des allgemeinen Werkzeugsymbols.
 
     ``immer_bestaetigen`` schliesst ein Werkzeug vom autonomen Modus aus, auch
-    bei erteilter Freigabe. Das Kriterium ist die Vorgabe des Betreibers,
-    woertlich: "im autonomen Modus wird alles automatisch bestaetigt, ausser
-    Loeschvorgaenge". **Jedes** Loeschen fragt, auch eines, das sich
-    zurueckholen liesse. Dazu kommt, was unumkehrbar ueberschreibt
-    (`propose_backup_restore`), und was den Rahmen verschiebt, in dem die KI
-    selbst arbeitet (Rechte, Schluessel).
+    bei erteilter Freigabe. Die Liste ist eine Vorgabe des Betreibers vom
+    25.09.2026, woertlich: nur noch Server loeschen, zuruecksetzen oder neu
+    installieren, Dateien loeschen, Backup einspielen, Blueprint oder Rolle
+    loeschen, Rechte anderer Benutzer (die stehen am Aufruf, `verlangt_klick`),
+    Shop-Anbindung, Tarif-Rolle und Zugangsdaten. Was nur die eigenen Daten des
+    Benutzers loescht — Notiz, Termin, Aufgabe, DNS-Eintrag, Erinnerung, Skill —
+    laeuft autonom (`EIGENE_DATEN_LOESCHEN`).
 
-    Bis zum 23.09.2026 las diese Tabelle die Vorgabe als "unumkehrbar", und
-    damit liefen Datei-, Notiz-, Termin-, Aufgaben- und DNS-Loeschen im
-    autonomen Modus ohne Rueckfrage: es gab ja einen Rueckweg. Dann haette das
-    Modell dem Betreiber im autonomen Modus fast seinen Discord-Bot geloescht,
-    weil es einen Loeschvorgang aus Versehen anstiess. Ein Rueckweg hilft nur,
-    wenn jemand das Loeschen bemerkt. Die Rueckfrage ist die Sicherheitslinie.
+    Dazwischen lag die Regel vom 23.09.2026, "jedes Loeschen fragt", nachdem
+    das Modell dem Betreiber im autonomen Modus fast seinen Discord-Bot geloescht
+    haette. Der Betreiber hat sie zwei Tage spaeter zurueckgenommen: autonom
+    heisst autonom, und gefragt wird dort, wo sich ein Fehlgriff nicht mehr
+    auffangen laesst. Bestaetigt wird in jedem Fall per Klick auf die Karte, nie
+    per gesprochenem Ja (`ai_voice.interactions.klick_noetig`).
 
     Umgekehrt fragt nicht, was nur heikel klingt: eine falsche Bind-IP stellt
     derselbe Aufruf zurueck. Eine bewusste Ausnahme ist der Blueprint-Wechsel.
@@ -66,9 +67,9 @@ class Werkzeug:
     ausdruecklich fuer den autonomen Modus freigegeben; davor legt er zwingend
     ein Backup an.
 
-    Desktop-Werkzeuge tragen das Feld nicht, weil sie `delegation` sind. Ob sie
-    loeschen, haengt an ihrer `aktion`, und die kennt erst der Aufruf:
-    `desktop_loescht` weiter unten.
+    Desktop-Werkzeuge tragen das Feld nicht, weil sie `delegation` sind. Seit
+    dem 25.09.2026 loeschen sie im autonomen Modus auch ohne Karte; ob sie
+    fragen, entscheidet allein die Freigabe (`ai_stream.interactions`).
 
     ``recht`` ist der Permission-Key, den ein Schreibwerkzeug verlangt. Er stand
     frueher in einer if-Kette in `ai_proposal_service._permission_for` — ein
@@ -220,19 +221,15 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # etwas", sondern "fasst einen Server an und braucht deshalb eine
     # Bestaetigung". Ein gemerkter Satz im Profil des Benutzers tut das nicht.
     #
-    # Vergessen ist trotzdem ein Loeschvorgang und fragt deshalb immer, auch im
-    # autonomen Modus (siehe `Werkzeug`). Das Feld wirkt auch bei einem
-    # Lesewerkzeug: `autonomy_allows` verneint, und der Aufruf geht als
-    # Lesevorschlag auf eine Karte.
+    # Vergessen laeuft im autonomen Modus ohne Karte: es loescht nur das eigene
+    # Gedaechtnis (`EIGENE_DATEN_LOESCHEN`). Ohne Freigabe geht es wie jedes
+    # Werkzeug als Karte zur Bestaetigung.
     "remember": Werkzeug("global_read", gruppe="memory", angebot=("ai.memory.use",)),
     "search_memory": Werkzeug(
         "global_read", gruppe="memory", angebot=("ai.memory.use",)
     ),
     "forget_memory": Werkzeug(
-        "global_read",
-        gruppe="memory",
-        immer_bestaetigen=True,
-        angebot=("ai.memory.use",),
+        "global_read", gruppe="memory", angebot=("ai.memory.use",)
     ),
 
     # Der Rufname des Assistenten — dasselbe Feld wie Profil → KI im Panel
@@ -249,10 +246,7 @@ WERKZEUGE: dict[str, Werkzeug] = {
     "read_skill": Werkzeug("global_read", gruppe="skill", angebot=("ai.skills.use",)),
     "learn_skill": Werkzeug("global_read", gruppe="skill", angebot=("ai.skills.use",)),
     "forget_skill": Werkzeug(
-        "global_read",
-        gruppe="skill",
-        immer_bestaetigen=True,
-        angebot=("ai.skills.use",),
+        "global_read", gruppe="skill", angebot=("ai.skills.use",)
     ),
 
     # E-Mail- & Kalender-Lesewerkzeuge (Verknuepfte Postfaecher & Kalender).
@@ -536,11 +530,9 @@ WERKZEUGE: dict[str, Werkzeug] = {
     "propose_task_set": Werkzeug(
         "global_write", gruppe="tasks", recht="ai.tasks.manage", recht_global=True
     ),
-    # Loeschen fragt immer, auch im autonomen Modus (siehe `Werkzeug`).
     "propose_task_delete": Werkzeug(
         "global_write",
         gruppe="tasks",
-        immer_bestaetigen=True,
         recht="ai.tasks.manage",
         recht_global=True,
     ),
@@ -627,8 +619,9 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # `immer_bestaetigen` seit dem 23.09.2026, obwohl es einen Rueckweg gibt.
     # Bis dahin fehlte die Sperre genau mit dieser Begruendung, und der
     # autonome Modus loeschte Dateien ohne Rueckfrage. Die Vorgabe des
-    # Betreibers ist aber "alles automatisch ausser Loeschvorgaenge", nicht
-    # "ausser Unumkehrbarem" (siehe `Werkzeug`). Eine Guardian-Heilung, die eine
+    # Betreibers war "alles automatisch ausser Loeschvorgaenge", nicht
+    # "ausser Unumkehrbarem"; seit dem 25.09.2026 fragt das Loeschen nur noch,
+    # wo es Server, Dateien und Backups trifft (siehe `Werkzeug`). Eine Guardian-Heilung, die eine
     # Datei loeschen will, loescht deshalb nicht selbst. Sie fragt per Mail
     # (`ai_approval_service`), und ohne hinterlegte Adresse endet sie.
     #
@@ -722,13 +715,12 @@ WERKZEUGE: dict[str, Werkzeug] = {
         recht="ai.calendar.use",
         recht_global=True,
     ),
-    # Die drei persoenlichen Loeschwerkzeuge liefen bis zum 23.09.2026 im
-    # autonomen Modus ohne Rueckfrage, sogar ohne Stundenbudget (eine
-    # Abkuerzung in `autonomy_allows`). Loeschen fragt immer (siehe `Werkzeug`).
+    # Die persoenlichen Loeschwerkzeuge laufen im autonomen Modus ohne Karte
+    # (`EIGENE_DATEN_LOESCHEN`), aber mit Stundenbudget: die Abkuerzung in
+    # `autonomy_allows` gilt nur fuer Anlegen und Aendern.
     "propose_calendar_event_delete": Werkzeug(
         "global_write",
         gruppe="calendar",
-        immer_bestaetigen=True,
         recht="ai.calendar.use",
         recht_global=True,
     ),
@@ -747,7 +739,6 @@ WERKZEUGE: dict[str, Werkzeug] = {
     "propose_note_delete": Werkzeug(
         "global_write",
         gruppe="notes",
-        immer_bestaetigen=True,
         recht="ai.notes.use",
         recht_global=True,
     ),
@@ -772,7 +763,6 @@ WERKZEUGE: dict[str, Werkzeug] = {
     "propose_cloudflare_dns_delete": Werkzeug(
         "global_write",
         gruppe="domains",
-        immer_bestaetigen=True,
         recht="cloudflare.manage",
         recht_global=True,
     ),
@@ -998,14 +988,19 @@ ALWAYS_CONFIRM_TOOLS = (
     | set(GEPLANT_IMMER_BESTAETIGEN)
 )
 
-#: Die Desktop-Werkzeuge, die loeschen, und bei welcher `aktion`. ``None``
-#: heisst: jede Aktion loescht. `desktop_aufraeumen` kennt nur Loeschen (in den
-#: Papierkorb, endgueltig, Papierkorb leeren).
-DESKTOP_LOESCHAKTIONEN: dict[str, frozenset[str] | None] = {
-    "desktop_aufraeumen": None,
-    "desktop_dateien": frozenset({"loeschen"}),
-}
-
+#: Was loescht und trotzdem im autonomen Modus ohne Karte laeuft: nur die
+#: eigenen Daten des Benutzers (Vorgabe des Betreibers vom 25.09.2026). Eine
+#: ausdrueckliche Aufzaehlung, keine Regel — ein neues Loeschwerkzeug muss hier
+#: oder bei `immer_bestaetigen` stehen
+#: (`test_jedes_loeschwerkzeug_ist_entschieden`).
+EIGENE_DATEN_LOESCHEN = frozenset({
+    "forget_memory",
+    "forget_skill",
+    "propose_note_delete",
+    "propose_calendar_event_delete",
+    "propose_task_delete",
+    "propose_cloudflare_dns_delete",
+})
 
 #: Was die Rechte anderer Benutzer aendert. Nur ein Worker (oder ein Chat ohne
 #: Gehirn/Worker-Teilung) ruft diese Werkzeuge selbst; das Gehirn und die
@@ -1024,33 +1019,19 @@ def verlangt_klick(name: object, vorschau: object = None) -> bool:
     """Ob dieser eine Vorschlag auch im autonomen Modus bestaetigt werden muss.
 
     Das Gegenstueck zu `ALWAYS_CONFIRM_TOOLS` fuer Werkzeuge, bei denen es am
-    Aufruf haengt: eine Rechtevergabe fragt, sobald sie etwas entzieht oder
-    mehr als unkritische Serverrechte vergibt. Entschieden hat das der
-    Payload-Bau, und zwar aus dem Bestand, nicht aus Modelltext — er setzt
-    `always_confirm` in die Vorschau. Die Vorschau ist damit der eine Ort, an
-    dem Autonomie (`create_proposal`) und Stimme (`klick_noetig`) dieselbe
-    Antwort lesen.
+    Aufruf haengt: eine Rechtevergabe an einen Benutzer fragt, sobald sie etwas
+    entzieht oder mehr als unkritische Serverrechte vergibt. Entschieden hat das
+    der Payload-Bau, und zwar aus dem Bestand, nicht aus Modelltext — er setzt
+    `always_confirm` in die Vorschau.
+
+    Der Name stammt aus der Zeit, als die Stimme manches per Ja und manches nur
+    per Klick bestaetigte. Seit dem 25.09.2026 ist jede Bestaetigung ein Klick
+    (`ai_voice.interactions.klick_noetig`); die Frage hier ist nur noch, ob
+    ueberhaupt eine Karte kommt.
     """
     if name in ALWAYS_CONFIRM_TOOLS:
         return True
     return isinstance(vorschau, dict) and vorschau.get("always_confirm") is True
-
-
-def desktop_loescht(name: str, argumente: dict | None) -> bool:
-    """Ob dieser Aufruf auf dem Rechner des Benutzers etwas loescht.
-
-    Das Gegenstueck zu `immer_bestaetigen` fuer die Desktop-Werkzeuge. Sie
-    tragen das Feld nicht (`delegation`), und bei `desktop_dateien` loescht nur
-    eine von fuenf Aktionen. Gefragt wird deshalb am Aufruf und nicht am
-    Namen. Die Antwort setzt `_desktop_argumente` als ``autonom=False``, und
-    der Rechner zeigt daraufhin seine Karte.
-    """
-    if name not in DESKTOP_LOESCHAKTIONEN:
-        return False
-    aktionen = DESKTOP_LOESCHAKTIONEN[name]
-    if aktionen is None:
-        return True
-    return (argumente or {}).get("aktion") in aktionen
 
 
 # ── Gehirn und Worker (docs/agentic-framework.md, Abschnitt 3) ────────────

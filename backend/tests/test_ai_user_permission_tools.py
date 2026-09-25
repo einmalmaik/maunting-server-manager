@@ -351,8 +351,8 @@ def test_kritisches_und_entziehen_fragen_immer(db: Session, vorher, argumente) -
     assert vorschlag.requires_confirmation is True
     vorschau = json.loads(vorschlag.preview_json)
     assert vorschau["always_confirm"] is True
-    # Per Stimme reicht dafuer kein Ja.
-    assert voice_interactions.klick_noetig(vorschlag.tool_name, vorschau) is True
+    # Auch im autonomen Modus eine Karte.
+    assert ai_tool_registry.verlangt_klick(vorschlag.tool_name, vorschau) is True
     with pytest.raises(AiActionStateError, match="AI_ACTION_NOT_AUTONOMOUS"):
         ai_proposal_service.execute_autonomously(db, proposal_id=vorschlag.id, user=verwalter)
 
@@ -466,24 +466,40 @@ def test_eine_rolle_traegt_nur_eigene_rechte(db: Session) -> None:
 
 
 def test_rolle_anlegen_aendern_und_loeschen(db: Session) -> None:
+    """Anlegen und Aendern laufen autonom, auch mit kritischen Rechten.
+
+    Betreiber, 25.09.2026: "Rolle anlegen, auch mit kritischen Rechten, soll
+    nicht nachfragen." Eine Rolle gibt noch niemandem etwas; gefragt wird bei
+    der Zuweisung an einen Benutzer und beim Loeschen. Bis dahin fragte jede
+    Rolle, die mehr als unkritische Serverrechte trug oder etwas wegnahm.
+    """
     verwalter = _verwalter(db, autonom=True)
 
     anlegen = _vorschlag(
         db, verwalter, "propose_role_set",
-        name="spielleitung", permissions=["server.view", "server.start"],
+        name="spielleitung", permissions=["server.view", "server.start", "roles.manage"],
     )
     assert anlegen.autonomous is True
+    assert not json.loads(anlegen.preview_json).get("always_confirm")
     ai_proposal_service.execute_autonomously(db, proposal_id=anlegen.id, user=verwalter)
     rolle = get_role_by_name(db, "spielleitung")
     assert rolle is not None
 
-    # Ein Recht wegnehmen trifft jeden mit dieser Rolle — immer mit Karte.
+    # Wer die Rolle mit dem kritischen Recht bekommt, entscheidet ein Klick.
+    ziel = _konto(db, "spielleiter")
+    zuweisen = _vorschlag(db, verwalter, "propose_user_roles", user_id=ziel.id, role_ids=[rolle.id])
+    assert zuweisen.autonomous is False
+    assert json.loads(zuweisen.preview_json)["always_confirm"] is True
+
+    # Ein Recht wegnehmen laeuft ebenfalls ohne Karte.
     aendern = _vorschlag(
         db, verwalter, "propose_role_set", role_id=rolle.id, permissions=["server.view"],
     )
-    assert aendern.autonomous is False
-    assert json.loads(aendern.preview_json)["permissions_removed"] == ["server.start"]
-    _bestaetigen(db, verwalter, aendern)
+    assert aendern.autonomous is True
+    assert json.loads(aendern.preview_json)["permissions_removed"] == [
+        "roles.manage", "server.start",
+    ]
+    ai_proposal_service.execute_autonomously(db, proposal_id=aendern.id, user=verwalter)
 
     loeschen = _vorschlag(db, verwalter, "propose_role_delete", role_id=rolle.id)
     assert "propose_role_delete" in ai_tool_registry.ALWAYS_CONFIRM_TOOLS
@@ -554,16 +570,20 @@ def test_die_stimme_liest_selbst_und_uebergibt_die_aenderung(
     assert "propose_user_server_permission" not in namen
 
 
-def test_klick_noetig_liest_die_vorschau() -> None:
-    assert voice_interactions.klick_noetig("propose_user_server_permission", {}) is False
-    assert voice_interactions.klick_noetig(
-        "propose_user_server_permission", {"always_confirm": True}
-    ) is True
+def test_verlangt_klick_liest_die_vorschau() -> None:
+    verlangt_klick = ai_tool_registry.verlangt_klick
+    assert verlangt_klick("propose_user_server_permission", {}) is False
+    assert verlangt_klick("propose_user_server_permission", {"always_confirm": True}) is True
     # Das Modell kann die Vorschau nicht setzen; ein Text statt True zaehlt nicht.
-    assert voice_interactions.klick_noetig(
-        "propose_user_server_permission", {"always_confirm": "ja"}
-    ) is False
-    assert voice_interactions.klick_noetig("propose_role_delete") is True
+    assert verlangt_klick("propose_user_server_permission", {"always_confirm": "ja"}) is False
+    assert verlangt_klick("propose_role_delete") is True
+    assert verlangt_klick("propose_role_set", {}) is False
+
+
+def test_die_stimme_bestaetigt_nie() -> None:
+    """Seit dem 25.09.2026 bestaetigt jede Karte nur der Klick, auch per Stimme."""
+    assert voice_interactions.klick_noetig("propose_user_server_permission", {}) is True
+    assert voice_interactions.klick_noetig("propose_role_set", {}) is True
 
 
 def test_die_aehnlichkeit_trennt_treffer_von_zufall() -> None:

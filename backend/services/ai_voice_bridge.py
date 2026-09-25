@@ -101,7 +101,8 @@ from services.ai_voice.text import (
 # PCM-Frames oder TTS-Schlüssel werden sitzungsübergreifend aufbewahrt.
 _USER_KADENZ_CACHE: dict[int, float] = {}
 
-#: Was die Sprachansicht zeigt, wenn jemand zu einem Löschvorgang „ja" sagt.
+#: Was die Sprachansicht zeigt, wenn jemand zu einer Karte „ja" sagt. Seit dem
+#: 25.09.2026 gilt das für jede Karte (`voice_interactions.klick_noetig`).
 #: Nur angezeigt und nicht gesprochen: feste Sätze spricht die Stimme nicht
 #: (Betreiber-Veto vom 18.08.2026, die Quittung kommt vom Modell).
 KLICK_TEXT = "Das bestätigst du mit dem Knopf auf der Karte, nicht mit einem Ja."
@@ -584,7 +585,7 @@ class Sprachbruecke:
         await stimme.sagen(text)
 
     async def _vorschlag_merken(self, daten: dict) -> None:
-        """Ein Vorschlag wartet auf ein Ja.
+        """Ein Vorschlag wartet auf seinen Klick.
 
         Vorgelesen wird er **nicht** hier. Das Modell hat im selben Zug bereits
         gesagt, was es vorhat — der Prompt verlangt das —, und die Karte
@@ -594,16 +595,12 @@ class Sprachbruecke:
         kennung = daten.get("id")
         if isinstance(kennung, str) and kennung:
             self._offene_vorschlaege.append(kennung)
-        # Die Karte geht trotzdem an den Browser, aber ohne Knopf: sie sagt,
-        # *was* gleich passiert — welcher Server, welche Aktion —, und das ist
-        # gesprochen schwer zu behalten. Entschieden wird ausschliesslich per
-        # Stimme; ein zweiter Weg neben dem gesprochenen Ja waere ein zweiter
-        # Zustand, den der Sprachmodus dann pflegen muesste.
+        # Der Rahmen stösst die Sprachansicht an, ihre Kartenliste neu zu
+        # laden; bestätigt wird dort per Klick (seit dem 25.09.2026 jede Karte,
+        # `voice_interactions.klick_noetig`).
         await self._senden({
             "art": "vorschlag",
             "vorschlag": daten,
-            # Ein Löschvorgang bekommt auf der Karte einen Knopf: ein Ja reicht
-            # dort nicht (`voice_interactions.klick_noetig`).
             "klick": voice_interactions.klick_noetig(
                 daten.get("tool_name"), daten.get("preview")
             ),
@@ -616,25 +613,39 @@ class Sprachbruecke:
         das war keine Entscheidung, sondern etwas Neues — dann wird der Wortlaut
         als gewöhnliche Nachricht behandelt.
 
-        Weggeräumt wird dabei nur **diese Liste hier**, also das Wissen der
-        Brücke, welche Kennungen ein gesprochenes Ja gerade meinen könnte. Der
-        Vorschlag selbst bleibt in der Datenbank ausführbar, bis seine Frist
-        abläuft — genau wie eine Karte im Chat, die niemand anklickt.
+        Ein Nein lehnt die jüngste Karte ab. Sonst wird nur **diese Liste
+        hier** weggeräumt, also das Wissen der Brücke, welche Kennungen eine
+        Entscheidung gerade meinen könnte. Der Vorschlag selbst bleibt in der
+        Datenbank ausführbar, bis jemand auf seine Karte klickt — genau wie eine
+        Karte im Chat.
         `vorgaenger_abloesen` beendet den alten **Lauf** und sagt dazu
         ausdrücklich, dass der Vorschlag davon unberührt bleibt.
         """
         offene = self._offene_vorschlaege
         if ist_zustimmung(wortlaut):
+            letzter, verworfene = offene[-1], offene[:-1]
+            stand, klick = await asyncio.to_thread(self._vorschlagslage, letzter)
+            if stand is not None:
+                # Schon entschieden, meist per Knopf auf der Karte. Ein
+                # zweites Ausführen gäbe nur eine Störung.
+                self._offene_vorschlaege = []
+                await self._zustand_melden(ZUSTAND_BEREIT)
+                return True
+            if klick:
+                # Jede Karte wartet auf den Klick, nicht auf ein Ja
+                # (`voice_interactions.klick_noetig`, seit dem 25.09.2026).
+                # Die Kennungen bleiben: ein „nein" danach lehnt noch ab, und
+                # ein zweites „ja" hört wieder, wo der Knopf ist.
+                await self._senden({"art": "antworttext", "text": KLICK_TEXT})
+                await self._zustand_melden(ZUSTAND_BEREIT)
+                return True
             self._offene_vorschlaege = []
-            # Ein Ja meint **einen** Vorschlag, nicht alle. Der Browser zeigt
-            # nur die zuletzt geschickte Karte (`useSprachsitzung.ts` hält
-            # genau einen `vorschlag`) — ein Ja auf alle offenen anzuwenden
-            # hiesse, Dinge auszuführen, die der Mensch nie gesehen hat.
-            # Die übrigen verhalten sich wie beim Nein: die Kennung wird
-            # vergessen, der Vorschlag bleibt in der Datenbank ausführbar, bis
+            # Ein Ja meint **einen** Vorschlag, nicht alle — ein Ja auf alle
+            # offenen anzuwenden hiesse, Dinge auszuführen, die der Mensch nie
+            # gesehen hat. Die übrigen verhalten sich wie beim Nein: die
+            # Kennung wird vergessen, der Vorschlag bleibt ausführbar, bis
             # seine Frist abläuft. Und es wird angesagt, damit niemand glaubt,
             # alles sei bestätigt worden.
-            letzter, verworfene = offene[-1], offene[:-1]
             if verworfene:
                 await self._senden({
                     "art": "antworttext",
@@ -643,19 +654,6 @@ class Sprachbruecke:
                         f"{len(verworfene)} weitere wurden verworfen."
                     ),
                 })
-            stand, klick = await asyncio.to_thread(self._vorschlagslage, letzter)
-            if stand is not None:
-                # Schon entschieden, meist per Knopf auf der Karte. Ein
-                # zweites Ausführen gäbe nur eine Störung.
-                await self._zustand_melden(ZUSTAND_BEREIT)
-                return True
-            if klick:
-                # Ein Löschvorgang wartet auf den Klick, nicht auf ein Ja
-                # (`voice_interactions.vorschlag_ausfuehren`). Ohne diesen
-                # Zweig hiess die Antwort auf „ja" hier „Störung".
-                await self._senden({"art": "antworttext", "text": KLICK_TEXT})
-                await self._zustand_melden(ZUSTAND_BEREIT)
-                return True
             await self._zustand_melden(ZUSTAND_DENKT)
             ausgang = await asyncio.to_thread(self._ausfuehren, letzter)
             if not ausgang.erledigt:
@@ -665,13 +663,17 @@ class Sprachbruecke:
             await self._fortsetzung_verfolgen(ausgang.lauf_id)
             return True
         if ist_ablehnung(wortlaut):
-            # Nichts an der Datenbank. Ein abgelehnter Vorschlag verhält sich
-            # genau wie eine Karte, die niemand anklickt: er bleibt ausführbar,
-            # bis seine Frist abläuft. Vergessen wird nur die Kennung hier.
-            # Einen eigenen Ablehnungsweg gibt es im Chat nicht — hier einen zu
-            # erfinden hiesse, im Sprachmodus einen Zustand herstellen zu
-            # können, den der Chat nicht kennt.
+            # Das Nein gilt der zuletzt gezeigten Karte, wie der Knopf
+            # „Ablehnen" (`voice_interactions.vorschlag_ablehnen`). Bis zum
+            # 25.09.2026 vergass es nur die Kennung hier, und die Karte blieb
+            # ausführbar — seitdem steht sie in der Sprachansicht mit Knopf und
+            # stünde nach dem Nein noch da. Die übrigen bleiben auf ihren Karten.
             self._offene_vorschlaege = []
+            await asyncio.to_thread(
+                voice_interactions.vorschlag_ablehnen,
+                user_id=self._user_id,
+                kennung=offene[-1],
+            )
             await self._zustand_melden(ZUSTAND_BEREIT)
             return True
         self._offene_vorschlaege = []
@@ -693,11 +695,9 @@ class Sprachbruecke:
         einen Schritt — den Klick — und keinen einzigen der Schutzmechanismen.
 
         Es gibt **keine** Werkzeugmenge, die der Sprachmodus sich vorbehält: er
-        nimmt denselben Katalog wie der Chat. Ein gesprochenes Ja ersetzt aber
-        nicht jeden Klick. Was auch im autonomen Modus fragt
-        (``immer_bestaetigen``, seit dem 23.09.2026 jedes Löschen), bestätigt
-        der Benutzer auf der Karte; `vorschlag_ausfuehren` weist das Ja dort ab,
-        und `_entscheidung` sagt es vorher.
+        nimmt denselben Katalog wie der Chat. Seit dem 25.09.2026 ersetzt ein
+        gesprochenes Ja keinen Klick mehr: `vorschlag_ausfuehren` weist es ab,
+        und `_entscheidung` sagt es vorher (`KLICK_TEXT`).
 
         Zurück kommt neben dem Erfolg der **geweckte Lauf**: `lauf_fortsetzen`
         hat ihn wieder auf „running" gestellt, und der Aufrufer muss sich

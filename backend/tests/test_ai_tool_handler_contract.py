@@ -414,7 +414,7 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
     was dasselbe Schema trägt (anlegen und ändern einer Rolle in
     `propose_role_set`). Das Löschen bleibt ein eigenes Werkzeug, weil es
     `immer_bestaetigen` trägt und die Namensregel
-    (`test_jedes_loeschwerkzeug_traegt_die_sperre`) es nur so erfasst.
+    (`test_jedes_loeschwerkzeug_ist_entschieden`) es nur so erfasst.
 
     Dieselbe Rechnung wie am 09.09.: angeboten werden die sieben nur, wer
     Benutzer liest oder Rechte verwaltet (`angebot`); ein Kunde zahlt davon

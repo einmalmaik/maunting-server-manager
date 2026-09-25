@@ -407,8 +407,10 @@ def lageblock(db: Session, user: User, *, mit_workern: bool = False) -> str:
         )
         sofortlauf = (
             "Schreibvorschläge im Gespräch laufen damit sofort, ohne Klick des "
-            "Benutzers; nur Unumkehrbares (Löschen, Backup einspielen) fragt "
-            "weiterhin."
+            "Benutzers, auch das Löschen eigener Notizen, Termine, Aufgaben "
+            "und Erinnerungen. Eine Karte bekommt nur, was Server, Dateien, "
+            "Backups, Blueprints, Rollen oder die Rechte anderer trifft; ob "
+            "ein Vorschlag wartet, sagt sein Ergebnis."
         )
         if ai_autonomy_service.hat_engere_server_freigabe(
             db, user_id=user.id, panelweit=freigabe

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Bot, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { aiApi, type AiActionProposal, type AiRunInfo } from '@/api/ai'
+import { aiApi, type AiRunInfo } from '@/api/ai'
 import { SanitizedApiError } from '@/api/client'
 import { Button } from '@/Singra/UI'
 import { ChatHintergrund } from '@/features/chatHintergrund'
@@ -25,9 +25,11 @@ const NACHSEHEN_MS = 20_000
  * geht an das Gehirn, das `worker_cancel` ruft
  * (docs/agentic-framework.md, §6).
  *
- * Vorschlagskarten bleiben bedienbar: eine Karte zu bestätigen ist keine
- * Nachricht, sie löst nichts ab, sondern weckt den geparkten Lauf dort, wo
- * er steht.
+ * Auch die Vorschlagskarten sind hier nur zu sehen (Betreiber, 25.09.2026:
+ * „Der Worker-Chat ist eigentlich nur zum Nachschauen"). Bestätigt wird im
+ * Chat oder in der Sprachansicht; beide zeigen die offenen Karten lebender
+ * Worker mit Knöpfen. Der Klick dort weckt den geparkten Lauf, und dieses
+ * Fenster hängt sich beim nächsten Nachsehen an.
  */
 export function WorkerAnsicht({ conversationId }: { conversationId: string }) {
   const { t } = useTranslation()
@@ -118,17 +120,6 @@ export function WorkerAnsicht({ conversationId }: { conversationId: string }) {
     const bereich = verlaufRef.current
     if (bereich) bereich.scrollTop = bereich.scrollHeight
   }, [amEnde, entries, laufendeWerkzeuge])
-
-  const aufVorschlag = useCallback((updated: AiActionProposal) => {
-    merkeVorschlag(updated)
-    // Der geparkte Auftrag wartet auf genau diese Entscheidung — ohne das
-    // Anhängen bliebe es hier still, bis jemand die Seite neu lädt.
-    const id = updated.run_id ?? lauf?.id
-    if (id && updated.status !== 'proposed') {
-      angehaengtRef.current = id
-      void haengeAn(id)
-    }
-  }, [haengeAn, lauf?.id, merkeVorschlag])
 
   /** Die Status-Pille des Kopfes — vier Zustände, ruhig erzählt. */
   const statusPille = () => {
@@ -236,7 +227,8 @@ export function WorkerAnsicht({ conversationId }: { conversationId: string }) {
             <AiVerlauf
               entries={entries}
               laufendeWerkzeuge={laufendeWerkzeuge}
-              onProposalChange={aufVorschlag}
+              onProposalChange={merkeVorschlag}
+              nurAnsicht
             />
           )}
         </div>

@@ -580,7 +580,7 @@ async def test_realtime_region_fragt_ohne_autonomie_erst(monkeypatch) -> None:
     wert = {
         "proposals": [karte],
         "status": "needs_confirmation",
-        "hinweis": realtime_session.voice_interactions.JA_NOETIG,
+        "hinweis": realtime_session.voice_interactions.KLICK_NOETIG,
     }
     monkeypatch.setattr(
         realtime_session.voice_interactions,
@@ -602,7 +602,7 @@ async def test_realtime_region_fragt_ohne_autonomie_erst(monkeypatch) -> None:
     assert vorschlagsrahmen == [{
         "art": "vorschlag",
         "vorschlag": {k: v for k, v in karte.items() if k != "call_id"},
-        "klick": False,
+        "klick": True,
     }]
     assert session._vorschlaege.rahmen() == vorschlagsrahmen[0]
     assert not session._region_tasks

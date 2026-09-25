@@ -1,21 +1,27 @@
-"""Autonom aus: alles fragt. Autonom an: nur das Löschen fragt.
+"""Autonom aus: alles fragt. Autonom an: nur, was Server oder Rechte trifft.
 
 Die Vorgabe des Betreibers vom 23.09.2026, wörtlich: „autonome Modus aus heißt
 ALLES muss bestätigt werden, autonome Modus an bedeutet alles wird automatisch
 bestätigt AUßer Löschvorgänge". Anlass war ein Beinahe-Verlust: im autonomen
-Modus hätte das Modell dem Betreiber fast seinen Discord-Bot gelöscht, weil es
-einen Löschvorgang aus Versehen anstieß.
+Modus hätte das Modell dem Betreiber fast seinen Discord-Bot gelöscht.
+
+Am 25.09.2026 hat er die Ausnahme enger gezogen („autonomer Modus bedeutet ja,
+dass er autonom arbeiten soll"): seine eigenen Notizen, Termine, Aufgaben,
+Erinnerungen, Skills und DNS-Einträge löscht die KI mit Freigabe ohne
+Rückfrage (`EIGENE_DATEN_LOESCHEN`). Server, Dateien, Backups, Blueprints,
+Rollen und fremde Rechte fragen weiter. Und bestätigt wird jede Karte nur noch
+per Klick, auch in der Sprachansicht.
 
 Geprüft wird an den Stellen, an denen die Regel entschieden wird, mit echter
 Datenbank und ohne Attrappe an der Entscheidung selbst:
 
-* `autonomy_allows` verneint jedes Löschen, auch mit Freigabe.
-* `create_proposal` legt ein Vergessen auch mit Freigabe als Karte an.
+* `autonomy_allows` verneint jedes gesperrte Löschen, auch mit Freigabe, und
+  bejaht die eigenen Daten.
+* `create_proposal` legt ein Vergessen mit Freigabe autonom an, nicht als Karte.
 * Ein bestätigter Lesevorschlag kommt geschwärzt zurück, wie ein direkter
   Aufruf (`_ausfuehren_read_tool`).
-* Die Stimme fragt ohne Freigabe vor jedem Werkzeug (`freigabe_einholen`), und
-  ein gesprochenes Ja führt den Lesevorschlag aus und bringt sein Ergebnis mit.
-* Ein Löschen bestätigt nur der Klick, nie die Stimme.
+* Die Stimme fragt ohne Freigabe vor jedem Werkzeug (`freigabe_einholen`) und
+  schickt zum Knopf; ein gesprochenes Ja führt nichts aus, ein Nein lehnt ab.
 """
 
 from __future__ import annotations
@@ -23,7 +29,6 @@ from __future__ import annotations
 import json
 from uuid import uuid4
 
-import pytest
 from sqlalchemy.orm import Session
 
 from models import AiActionProposal, AiConversation, Role, RolePermission, User
@@ -78,38 +83,61 @@ def _vorschlaege(db: Session, user: User) -> list[AiActionProposal]:
     return db.query(AiActionProposal).filter(AiActionProposal.user_id == user.id).all()
 
 
-# ── Autonom an: nur das Löschen fragt ─────────────────────────────────────
+# ── Autonom an: nur, was Server oder Rechte trifft, fragt ────────────────
 
 
-def test_mit_freigabe_fragt_jedes_loeschen(db: Session, regular_user: User) -> None:
-    """Die Freigabe trägt alles außer dem Löschen.
+def test_mit_freigabe_fragt_nur_das_gesperrte_loeschen(
+    db: Session, regular_user: User
+) -> None:
+    """Die Freigabe trägt die eigenen Daten, nicht Server, Dateien und Rollen.
 
     Die Gegenprobe steht dabei: ohne sie bewiese ein `False` nur, dass die
     Freigabe gar nicht greift.
     """
     _benutzer(db, regular_user, autonom=True)
-    assert LOESCHWERKZEUGE  # sonst prüft die Schleife nichts
+    gesperrt = [n for n in LOESCHWERKZEUGE if n in ai_tool_registry.ALWAYS_CONFIRM_TOOLS]
+    eigene = [n for n in LOESCHWERKZEUGE if n in ai_tool_registry.EIGENE_DATEN_LOESCHEN]
+    # Sonst prüfen die Schleifen nichts.
+    assert {"propose_file_delete", "propose_role_delete"} <= set(gesperrt)
+    assert {"forget_memory", "propose_note_delete"} <= set(eigene)
 
-    for name in LOESCHWERKZEUGE:
+    for name in gesperrt:
         assert not ai_autonomy_service.autonomy_allows(
             db, user=regular_user, server_id=None, tool_name=name
         ), name
 
-    for name in ("propose_note_create", "search_docs", "propose_task_set"):
+    for name in [*eigene, "propose_note_create", "search_docs", "propose_task_set"]:
         assert ai_autonomy_service.autonomy_allows(
             db, user=regular_user, server_id=None, tool_name=name
         ), name
 
 
-def test_vergessen_steht_auch_mit_freigabe_auf_einer_karte(
+def test_vergessen_laeuft_mit_freigabe_ohne_karte(
     db: Session, regular_user: User
 ) -> None:
-    """Vergessen ist Löschen, auch wenn es als Lesewerkzeug geführt wird.
+    """Betreiber, 25.09.2026: im autonomen Modus fragt Vergessen nicht mehr."""
+    unterhaltung = _benutzer(db, regular_user, autonom=True)
 
-    Die Karte nennt, was verschwindet, nicht nur den Werkzeugnamen: wer
+    vorschlag = ai_proposal_service.create_proposal(
+        db,
+        user=regular_user,
+        conversation=unterhaltung,
+        tool_name="forget_memory",
+        arguments={"scope": "user", "keys": ["lieblingsfarbe"], "server_id": None},
+        correlation_id=str(uuid4()),
+    )
+
+    assert vorschlag.requires_confirmation is False
+    assert vorschlag.autonomous is True
+
+
+def test_ohne_freigabe_nennt_die_vergessen_karte_was_verschwindet(
+    db: Session, regular_user: User
+) -> None:
+    """Die Karte nennt, was verschwindet, nicht nur den Werkzeugnamen: wer
     zustimmt, soll wissen, welche Einträge weg sind.
     """
-    unterhaltung = _benutzer(db, regular_user, autonom=True)
+    unterhaltung = _benutzer(db, regular_user, autonom=False)
 
     vorschlag = ai_proposal_service.create_proposal(
         db,
@@ -188,7 +216,7 @@ def test_ohne_freigabe_fragt_die_stimme_vor_dem_lesen(
     wert, fehler, anzeige, vorschlaege = karte
     assert fehler is None
     assert wert["status"] == "needs_confirmation"
-    assert wert["hinweis"] == voice_interactions.JA_NOETIG
+    assert wert["hinweis"] == voice_interactions.KLICK_NOETIG
     # Eine wartende Karte ist kein Suchergebnis: das Panel zeichnet nichts.
     assert "web_results" not in anzeige and "geo_analysis" not in anzeige
     assert [v["tool_name"] for v in vorschlaege] == ["search_docs"]
@@ -233,39 +261,72 @@ def test_ohne_unterhaltung_laeuft_nichts(db: Session, regular_user: User) -> Non
     assert _vorschlaege(db, regular_user) == []
 
 
-def test_ein_ja_fuehrt_den_lesevorschlag_aus_und_bringt_das_ergebnis_mit(
+def test_ein_ja_fuehrt_auch_den_lesevorschlag_nicht_aus(
     db: Session, regular_user: User, monkeypatch
 ) -> None:
-    """Das Ja ersetzt den Klick, und das Ergebnis kommt geschwärzt zurück.
+    """Seit dem 25.09.2026 ersetzt kein gesprochenes Ja den Klick, auch beim Lesen.
 
-    Ein Lesevorschlag der Stimme hängt an keinem Lauf, der das Ergebnis
-    weitertrüge. Ohne `Ausgang.ergebnis` erführe das Modell nach dem Ja nur
-    „bestätigt".
+    Vorher führte es einen Lesevorschlag aus. Ein falsch erkanntes Geräusch
+    war damit eine Zustimmung (Betreiber: „alles wird mit Karte bestätigt,
+    sowohl Chat als auch Echtzeit").
     """
     unterhaltung = _benutzer(db, regular_user, autonom=False)
-    monkeypatch.setattr(ai_action_service, "execute_read_tool", lambda *a, **k: ROHERGEBNIS)
-    wert, _, _, vorschlaege = voice_interactions.freigabe_einholen(
+    gelaufen: list[str] = []
+    monkeypatch.setattr(
+        ai_action_service,
+        "execute_read_tool",
+        lambda *a, **k: gelaufen.append("lesen") or ROHERGEBNIS,
+    )
+    _, _, _, vorschlaege = voice_interactions.freigabe_einholen(
         regular_user.id,
         ProviderToolCall(id="ruf-1", name="search_docs", arguments={"query": "rcon"}),
         conversation_id=unterhaltung.id,
     )
     kennung = vorschlaege[0]["id"]
 
-    assert voice_interactions.schon_entschieden(user_id=regular_user.id, kennung=kennung) is None
+    assert voice_interactions.braucht_klick(user_id=regular_user.id, kennung=kennung) is True
     ausgang = voice_interactions.vorschlag_ausfuehren(user_id=regular_user.id, kennung=kennung)
 
-    assert ausgang.erledigt is True
-    assert ausgang.werkzeug == "search_docs"
-    assert ausgang.ergebnis == {"runtime": {"env": {"RCON_PASSWORD": "[REDACTED]"}}}
-    assert voice_interactions.ergebnis_fuers_modell(ausgang) == {
-        "status": "confirmed",
-        "tool_name": "search_docs",
-        "result": ausgang.ergebnis,
+    assert ausgang.erledigt is False
+    assert gelaufen == []
+    assert [v.status for v in _vorschlaege(db, regular_user)] == ["proposed"]
+
+
+def test_ein_gesprochenes_ja_bekommt_den_knopf_ein_nein_lehnt_ab(
+    db: Session, regular_user: User
+) -> None:
+    """Am Stapel der Sprachsitzung: Ja zeigt auf die Karte, Nein gilt."""
+    unterhaltung = _benutzer(db, regular_user, autonom=False)
+    stapel = voice_interactions.OffeneVorschlaege()
+    for ruf in ("ruf-1", "ruf-2"):
+        _, _, _, vorschlaege = voice_interactions.freigabe_einholen(
+            regular_user.id,
+            ProviderToolCall(id=ruf, name="search_docs", arguments={"query": ruf}),
+            conversation_id=unterhaltung.id,
+        )
+        stapel.merken(vorschlaege[0])
+
+    wert, fehler = stapel.entscheiden(user_id=regular_user.id, entscheidung="confirm")
+    assert fehler is None
+    assert wert == {
+        "status": "needs_panel_confirmation",
+        "hinweis": voice_interactions.KLICK_NOETIG,
     }
-    # Ein zweites Ja findet den Vorschlag erledigt und führt nichts mehr aus.
-    assert voice_interactions.schon_entschieden(
-        user_id=regular_user.id, kennung=kennung
-    ) == "succeeded"
+    assert [v.status for v in _vorschlaege(db, regular_user)] == ["proposed", "proposed"]
+
+    wert, fehler = stapel.entscheiden(user_id=regular_user.id, entscheidung="reject")
+    assert fehler is None
+    assert wert["status"] == "rejected_by_user"
+    assert wert["hinweis_verworfen"] == voice_interactions.VERWORFEN
+    # Abgelehnt wie per Knopf: sonst stünde die Karte in der Sprachansicht
+    # nach dem Nein weiter mit „Ausführen" da. Die ältere wartet weiter.
+    stand = sorted(
+        (v.created_at, v.status, v.error_code) for v in _vorschlaege(db, regular_user)
+    )
+    assert [(s, f) for _, s, f in stand] == [
+        ("proposed", None),
+        ("expired", "AI_ACTION_REJECTED"),
+    ]
 
 
 def test_die_stimme_schickt_zum_knopf_statt_nach_dem_ja_zu_fragen() -> None:
@@ -278,23 +339,22 @@ def test_die_stimme_schickt_zum_knopf_statt_nach_dem_ja_zu_fragen() -> None:
     """
     from services import ai_prompt
 
-    text = ai_prompt.ZUSTIMMUNG_GESPROCHEN
+    text = " ".join(ai_prompt.ZUSTIMMUNG_GESPROCHEN.split())
     assert "im Sprachmodus gibt es keinen" not in text
-    assert "Knopf auf der\nKarte" in text or "Knopf auf der Karte" in text
+    assert "Karte auf seinen Klick wartet" in text
     assert "nie mit einem gesprochenen Ja" in text
+    # Kein Rest der alten Regel, die nach einem Ja fragen liess.
+    assert 'klares "Ja" fuehrt' not in text
 
 
-@pytest.mark.parametrize("autonom", [False, True])
-def test_vergessen_bestaetigt_nur_der_klick(
-    db: Session, regular_user: User, autonom: bool
-) -> None:
-    """Auch mit Freigabe eine Karte, und ein gesprochenes Ja führt sie nicht aus.
+def test_vergessen_bestaetigt_nur_der_klick(db: Session, regular_user: User) -> None:
+    """Ohne Freigabe eine Karte, und ein gesprochenes Ja führt sie nicht aus.
 
     Betreiberwahl vom 23.09.2026 („Klick auf die Karte"): ein Ja stellt das
     Modell fest, und das Modell kann es aus einer Webseite oder Mail „gehört"
     haben. Die Stimme sagt deshalb gleich, wo bestätigt wird.
     """
-    unterhaltung = _benutzer(db, regular_user, autonom=autonom)
+    unterhaltung = _benutzer(db, regular_user, autonom=False)
 
     karte = voice_interactions.freigabe_einholen(
         regular_user.id,
