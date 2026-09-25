@@ -403,7 +403,7 @@ def _global_tool_definitions() -> list[dict]:
             "set_agent_name",
             "Setzt deinen Rufnamen fuer diesen Benutzer — nur auf seinen "
             "ausdruecklichen Wunsch (\"nenn dich ab jetzt …\"). Ein leerer "
-            "Name stellt den Standardnamen Singra wieder her. In der "
+            "Name stellt den Standardnamen Assistent wieder her. In der "
             "Desktop-App ist der Name zugleich das Wake-Word; der Benutzer "
             "bekommt dort von selbst den Vorschlag, es neu zu kalibrieren.",
             {

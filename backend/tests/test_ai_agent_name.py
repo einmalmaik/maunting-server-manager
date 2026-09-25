@@ -4,7 +4,7 @@ Die Invarianten:
 
 1. Der Name steht im **Lageblock** ("Dein Name: ..."), nie im Systemprompt —
    der Prompt bleibt byteweise statisch, sonst stirbt das Prompt-Caching.
-2. Ohne Eintrag gilt der Standardname 'Singra'.
+2. Ohne Eintrag gilt der Standardname 'Assistent'.
 3. Das Schema lässt nur einzeilige, harmlose Namen zu; für Bestandsdaten
    flacht `name_des_assistenten` Umbrüche ab, damit kein Name eine eigene
    Lageblock-Zeile eröffnen kann.
@@ -24,14 +24,14 @@ from services.ai_prompt import IDENTITAET, build
 class TestLageblockName:
     def test_standardname_ohne_eintrag(self, db: Session, regular_user: User):
         text = ai_lage.lageblock(db, regular_user)
-        assert "Dein Name: Singra." in text
+        assert "Dein Name: Assistent." in text
 
     def test_vergebener_name_steht_im_lageblock(self, db: Session, regular_user: User):
         regular_user.agent_name = "Jarvis"
         db.commit()
         text = ai_lage.lageblock(db, regular_user)
         assert "Dein Name: Jarvis." in text
-        assert "Singra" not in text
+        assert "Assistent" not in text
 
     def test_umbruch_im_bestandsnamen_wird_abgeflacht(self, db: Session, regular_user: User):
         # Das Schema verhindert Umbrüche — diese zweite Schranke gilt für
@@ -46,6 +46,7 @@ class TestLageblockName:
         regular_user.agent_name = "   "
         db.commit()
         assert ai_lage.name_des_assistenten(regular_user) == ai_lage.STANDARD_NAME
+        assert ai_lage.name_des_assistenten(regular_user) == "Assistent"
 
 
 class TestAgentNameApi:
@@ -112,11 +113,19 @@ class TestPromptIdentitaet:
         # die naheliegendste Frage.
         assert IDENTITAET in build(gesprochen=True)
 
+    def test_identitaet_regelt_rufnamen_und_abweisung_von_modell_und_assistent_label(self):
+        # Bei vergebenem Namen nimmt die KI diesen Namen an und weigert sich,
+        # sich als generischer 'Assistent' oder Sprachmodell zu bezeichnen.
+        assert 'Wenn dort ein gewählter Rufname steht' in IDENTITAET
+        assert 'verschwindet dann vollständig für dich' in IDENTITAET
+        assert 'Wenn im Lageblock als Name "Assistent" steht' in IDENTITAET
+
     def test_worker_traegt_keinen_rufnamen(self):
         assert IDENTITAET not in build(rolle="worker")
 
     def test_prompt_bleibt_byteweise_statisch(self):
-        # Kein konkreter Name im Prompt — der kommt ausschliesslich aus dem
+        # Kein individueller Name im Prompt — der kommt ausschliesslich aus dem
         # Lageblock. Stünde er hier, wäre der Prompt je Benutzer verschieden.
         assert "Singra" not in build()
+        assert "Jarvis" not in build()
         assert build() == build()
