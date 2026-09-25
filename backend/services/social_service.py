@@ -1262,8 +1262,10 @@ class SocialService:
             }
 
         pres_data = cls.get_presence_for_viewer(db, viewer_user_id, target_user)
-        stats = AchievementService.get_user_stats(db, target_user.id)
-        achievements = AchievementService.get_user_achievements(db, target_user.id)
+        stats = AchievementService.get_user_stats(db, target_user.id, fuer_fremde=not is_self)
+        achievements = AchievementService.get_user_achievements(
+            db, target_user.id, fuer_fremde=not is_self
+        )
 
         return {
             "user_id": target_user.id,

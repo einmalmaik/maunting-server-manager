@@ -9,7 +9,6 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
-from config import get_cors_origins
 from database import SessionLocal
 from database import get_db
 from models import Server, User
@@ -20,6 +19,7 @@ from dependencies import (
     get_current_user_for_ws,
     require_server_permission,
     verify_csrf,
+    ws_origin_erlaubt,
 )
 from services import audit_service, permission_service, postgres_service
 from games import get_plugin
@@ -1031,11 +1031,11 @@ def unlock_server(
 def _ws_origin_allowed(origin: str | None) -> bool:
     """Prueft den Origin-Header des WS-Upgrade-Requests. SameSite-Cookie + Origin-Check
     ersetzen die fehlende CSRF-Pruefung (WS sind keine 'simple requests').
+
+    Die Konsole verlangt die Herkunft auch beim Bearer-Weg; die Pruefung selbst
+    steht in `dependencies.ws_origin_erlaubt`.
     """
-    if not origin:
-        return False
-    allowed = {o.rstrip("/") for o in get_cors_origins()}
-    return origin.rstrip("/") in allowed
+    return ws_origin_erlaubt(origin)
 
 
 @router.websocket("/{server_id}/console/ws")

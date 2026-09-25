@@ -14,6 +14,9 @@ from services.auth_service import AuthService
 from services.social_service import SocialService
 from services.sync_event_service import SyncEventService
 
+# Der Cookie-Weg verlangt eine erlaubte Herkunft (dependencies.get_current_user_for_ws).
+HERKUNFT = {"origin": "http://localhost:3000"}
+
 
 # Die Schlüsselkennung im Kopf eines Gruppenumschlags, wie sie seit 09/2026
 # vor dem Chiffretext steht.
@@ -197,7 +200,7 @@ def test_websocket_relay_ack_and_idempotency(db: Session, client: TestClient):
     umschlag = _umschlag("ws-relay-cipher")
     cookies = _login_user(client, "ws_dedup_anna")
 
-    with client.websocket_connect("/api/social/ws", cookies=cookies) as ws:
+    with client.websocket_connect("/api/social/ws", cookies=cookies, headers=HERKUNFT) as ws:
         ws.send_json({
             "type": "relay",
             "blind_mailbox_id": mailbox,
@@ -239,7 +242,7 @@ def test_websocket_relay_in_fremde_mailbox_wird_abgelehnt(db: Session, client: T
     fremde = _create_user(db, "ws_dedup_fremde")
     cookies = _login_user(client, "ws_dedup_fremde")
 
-    with client.websocket_connect("/api/social/ws", cookies=cookies) as ws:
+    with client.websocket_connect("/api/social/ws", cookies=cookies, headers=HERKUNFT) as ws:
         ws.send_json({
             "type": "relay",
             "blind_mailbox_id": "ws-mailbox-dedup-test",
@@ -261,7 +264,7 @@ def test_websocket_relay_in_fremde_mailbox_wird_abgelehnt(db: Session, client: T
 
 def test_websocket_ping_pong_isolated(client: TestClient, owner_cookies: dict):
     """Prüft, dass Heartbeats (ping/pong) direkt beantwortet werden und keine Events triggern."""
-    with client.websocket_connect("/api/social/ws", cookies=owner_cookies) as ws:
+    with client.websocket_connect("/api/social/ws", cookies=owner_cookies, headers=HERKUNFT) as ws:
         ws.send_json({"type": "ping"})
         data = ws.receive_json()
         assert data == {"type": "pong"}
@@ -283,9 +286,9 @@ def test_websocket_ghost_mode_never_leaks_to_strangers(db: Session, client: Test
     alice_cookies = _login_user(client, "alice_ghost")
 
     # Bob verbindet sich mit WebSocket
-    with client.websocket_connect("/api/social/ws", cookies=stranger_cookies) as ws_bob:
+    with client.websocket_connect("/api/social/ws", cookies=stranger_cookies, headers=HERKUNFT) as ws_bob:
         # Alice verbindet sich und sendet join
-        with client.websocket_connect("/api/social/ws", cookies=alice_cookies) as ws_alice:
+        with client.websocket_connect("/api/social/ws", cookies=alice_cookies, headers=HERKUNFT) as ws_alice:
             ws_alice.send_json({"type": "join"})
 
             # Bob sendet ping, um zu verifizieren, dass die Socket-Verbindung aktiv ist
@@ -313,9 +316,9 @@ def test_websocket_friends_join_broadcasts_only_to_friends(db: Session, client: 
     cookies2 = _login_user(client, "user_friend")
     cookies3 = _login_user(client, "user_unrelated")
 
-    with client.websocket_connect("/api/social/ws", cookies=cookies2) as ws_friend:
-        with client.websocket_connect("/api/social/ws", cookies=cookies3) as ws_unrelated:
-            with client.websocket_connect("/api/social/ws", cookies=cookies1) as ws_alice:
+    with client.websocket_connect("/api/social/ws", cookies=cookies2, headers=HERKUNFT) as ws_friend:
+        with client.websocket_connect("/api/social/ws", cookies=cookies3, headers=HERKUNFT) as ws_unrelated:
+            with client.websocket_connect("/api/social/ws", cookies=cookies1, headers=HERKUNFT) as ws_alice:
                 ws_alice.send_json({"type": "join"})
 
             # Freund erhält user_joined Event
@@ -336,7 +339,7 @@ def test_websocket_friends_join_broadcasts_only_to_friends(db: Session, client: 
 def test_websocket_rapid_connect_disconnect_stress(client: TestClient, owner_cookies: dict):
     """Stresstest für 25 aufeinanderfolgende schnelle Connect/Disconnect Zyklen ohne Session-Leaks."""
     for i in range(25):
-        with client.websocket_connect("/api/social/ws", cookies=owner_cookies) as ws:
+        with client.websocket_connect("/api/social/ws", cookies=owner_cookies, headers=HERKUNFT) as ws:
             ws.send_json({"type": "ping"})
             resp = ws.receive_json()
             assert resp == {"type": "pong"}
@@ -346,7 +349,7 @@ def test_websocket_rapid_connect_disconnect_stress(client: TestClient, owner_coo
 def test_sync_events_websocket_rapid_connect_disconnect(client: TestClient, owner_cookies: dict):
     """Stresstest für /api/events/ws (Sync Events WebSocket) ohne Session-Leaks."""
     for i in range(15):
-        with client.websocket_connect("/api/events/ws", cookies=owner_cookies) as ws:
+        with client.websocket_connect("/api/events/ws", cookies=owner_cookies, headers=HERKUNFT) as ws:
             ready = ws.receive_json()
             assert ready.get("type") == "ready"
             ws.send_json({"type": "ping"})
@@ -440,7 +443,7 @@ def test_websocket_handles_invalid_relay_without_crash_or_disconnect(db: Session
     alice = _create_user(db, "alice_ws_crash_test")
     cookies = _login_user(client, "alice_ws_crash_test")
 
-    with client.websocket_connect("/api/social/ws", cookies=cookies) as ws:
+    with client.websocket_connect("/api/social/ws", cookies=cookies, headers=HERKUNFT) as ws:
         # Sende ungültigen Frame (falscher recipient_id für eine unpassende Mailbox)
         ws.send_json({
             "type": "relay",
@@ -477,8 +480,8 @@ def test_websocket_blocked_user_never_receives_user_joined(db: Session, client: 
     alice_cookies = _login_user(client, "alice_blocker")
     bob_cookies = _login_user(client, "bob_blocked")
 
-    with client.websocket_connect("/api/social/ws", cookies=bob_cookies) as ws_bob:
-        with client.websocket_connect("/api/social/ws", cookies=alice_cookies) as ws_alice:
+    with client.websocket_connect("/api/social/ws", cookies=bob_cookies, headers=HERKUNFT) as ws_bob:
+        with client.websocket_connect("/api/social/ws", cookies=alice_cookies, headers=HERKUNFT) as ws_alice:
             ws_alice.send_json({"type": "join"})
 
         # Bob sendet ping — darf KEIN user_joined von Alice erhalten!
@@ -511,3 +514,26 @@ def test_e2ee_envelope_concurrent_duplicate_relays_race_condition(db: Session):
     assert env1.id == env2.id
     assert db.query(E2eeBlindEnvelope).filter_by(blind_mailbox_id=mailbox, client_uuid=uuid_tag).count() == 1
 
+
+
+@pytest.mark.parametrize(
+    "pfad", ["/api/social/ws", "/api/events/ws", "/api/events/live/ws", "/api/sync/ws", "/api/sync/events/ws"]
+)
+@pytest.mark.parametrize("herkunft", [{"origin": "https://fremd.example"}, {}])
+def test_fremde_seite_liest_den_live_strom_nicht_mit(
+    client: TestClient, owner_cookies: dict, pfad: str, herkunft: dict
+):
+    """Eine fremde Seite öffnet den Socket, der Browser legt das Cookie bei.
+
+    Mit getrenntem Frontend (SameSite=None) tut Chrome das für jede Seite.
+    Ohne Herkunftsprüfung läse sie KI-Notizen, Team-Notizen und
+    Anrufeinladungen mit.
+    """
+    from starlette.websockets import WebSocketDisconnect
+
+    with pytest.raises(WebSocketDisconnect) as fehler:
+        # Nimmt der Server an, endet der Block ohne Ausnahme und der Test
+        # ist rot, statt auf eine Nachricht zu warten.
+        with client.websocket_connect(pfad, cookies=owner_cookies, headers=herkunft):
+            pass
+    assert fehler.value.code == 1008

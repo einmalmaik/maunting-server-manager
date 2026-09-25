@@ -5,7 +5,7 @@ from starlette.websockets import WebSocketDisconnect
 from sqlalchemy.orm import Session
 
 from database import SessionLocal, get_db
-from dependencies import get_current_user, get_optional_user, verify_csrf, get_current_user_for_ws, session_familie, ws_subprotokoll
+from dependencies import get_current_user, verify_csrf, get_current_user_for_ws, session_familie, ws_subprotokoll
 from models import ChatGroup, ChatGroupConfig, User
 from schemas.chat_media import (
     ChatMediaUploadRequest,
@@ -227,18 +227,22 @@ def get_own_stats(
 
 
 # --- Profile (Privat / Freunde / Öffentlich) ---
+#
+# Alle Profilrouten verlangen eine Anmeldung. Ohne sie antworteten sie mit 404
+# oder einem Profil, und jeder konnte Nutzernamen und Konto-IDs durchprobieren.
+# "Öffentlich" heißt: sichtbar für alle Konten dieses Panels, nicht fürs Netz.
 
 @router.get("/profile/user/{target_user_id}", response_model=SocialProfileResponse, dependencies=[Depends(_check_social_enabled)])
 @router.get("/profile/{target_user_id}", response_model=SocialProfileResponse, dependencies=[Depends(_check_social_enabled)])
 def get_user_profile(
     target_user_id: int,
     db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_user),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
     target = db.query(User).filter_by(id=target_user_id).first()
     if not target or not target.is_active:
         raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
-    viewer_id = current_user.id if current_user else None
+    viewer_id = current_user.id
     return SocialService.get_profile(db, viewer_id, target)
 
 
@@ -248,9 +252,9 @@ def list_public_profiles(
     limit: int = 50,
     offset: int = 0,
     db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_user),
+    current_user: User = Depends(get_current_user),
 ) -> list[dict]:
-    viewer_id = current_user.id if current_user else None
+    viewer_id = current_user.id
     return SocialService.get_public_profiles(
         db, viewer_user_id=viewer_id, search=search, limit=min(max(limit, 1), 100), offset=max(offset, 0)
     )
@@ -260,12 +264,12 @@ def list_public_profiles(
 def get_public_profile(
     username: str,
     db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_user),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
     target = db.query(User).filter(User.username.ilike(username.strip())).first()
     if not target or not target.is_active:
         raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
-    viewer_id = current_user.id if current_user else None
+    viewer_id = current_user.id
     return SocialService.get_profile(db, viewer_id, target)
 
 

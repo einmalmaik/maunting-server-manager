@@ -47,10 +47,17 @@ class _Handshake:
     beim HTTP-Stub in test_device_pairing).
     """
 
-    def __init__(self, *, protokolle: str | None = None, cookie: str | None = None):
-        self.headers = Headers(
-            {"sec-websocket-protocol": protokolle} if protokolle else {}
-        )
+    def __init__(
+        self,
+        *,
+        protokolle: str | None = None,
+        cookie: str | None = None,
+        origin: str | None = "http://localhost:3000",
+    ):
+        kopf = {"sec-websocket-protocol": protokolle} if protokolle else {}
+        if origin:
+            kopf["origin"] = origin
+        self.headers = Headers(kopf)
         self.cookies = {"__Secure-access_token": cookie} if cookie else {}
 
 
@@ -75,6 +82,26 @@ class TestSubprotokollAuth:
 
     def test_der_cookie_weg_bleibt_unveraendert(self, db: Session, regular_user: User):
         ws = _Handshake(cookie=_token(regular_user, "ws-b"))
+        assert get_current_user_for_ws(ws, db).id == regular_user.id
+
+    def test_der_cookie_weg_verlangt_eine_erlaubte_herkunft(
+        self, db: Session, regular_user: User
+    ):
+        # WebSockets kennen kein CORS: eine fremde Seite öffnet den Socket, und
+        # der Browser legt das Cookie bei. Nur die Herkunft verrät sie.
+        for origin in ("https://fremd.example", None):
+            ws = _Handshake(cookie=_token(regular_user, f"ws-o-{origin}"), origin=origin)
+            with pytest.raises(HTTPException) as fehler:
+                get_current_user_for_ws(ws, db)
+            assert fehler.value.status_code == 403
+
+    def test_das_subprotokoll_braucht_keine_herkunft(
+        self, db: Session, regular_user: User
+    ):
+        # Das Token kann keine fremde Seite beilegen; die App schickt je nach
+        # Plattform gar keinen oder einen eigenen Origin.
+        marke = _token(regular_user, "ws-o-app", geraet="desktop")
+        ws = _Handshake(protokolle=f"{WS_BEARER_PROTOKOLL}, {marke}", origin=None)
         assert get_current_user_for_ws(ws, db).id == regular_user.id
 
     def test_ein_kaputtes_token_im_subprotokoll_ist_keine_anmeldung(

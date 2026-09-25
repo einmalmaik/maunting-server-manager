@@ -15,6 +15,7 @@ import { CaptchaWidget } from '@/components/ui/CaptchaWidget'
 import { Shield, ArrowRight, KeyRound, Mail, Check } from 'lucide-react'
 import { Button, buttonClasses } from '@/Singra/UI'
 import { Spinner } from '@/components/ui/Spinner'
+import { sicheresZiel } from '@/lib/sicheresZiel'
 export function Login() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -37,8 +38,7 @@ export function Login() {
   // Nach der Anmeldung geht es dorthin zurück statt immer auf das Dashboard.
   const redirectParam = searchParams.get('redirect')
   const gemerktesZiel = (location.state as { from?: string } | null)?.from || redirectParam
-  const zielNachLogin =
-    gemerktesZiel?.startsWith('/') && !gemerktesZiel.startsWith('//') ? gemerktesZiel : '/'
+  const zielNachLogin = sicheresZiel(gemerktesZiel)
 
 
   const oauthStep = searchParams.get('step')

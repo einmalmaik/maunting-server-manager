@@ -858,6 +858,21 @@ ACHIEVEMENTS_CATALOG: list[dict[str, Any]] = [
 ACHIEVEMENTS_BY_ID = {a["id"]: a for a in ACHIEVEMENTS_CATALOG}
 
 
+def nur_fuer_den_inhaber(achievement: dict[str, Any]) -> bool:
+    """Verrät dieses Abzeichen, wie ein Konto geschützt ist?
+
+    „Sicherheitsbewusst" heißt: 2FA oder Tresor ist an, „Festung MSM": alle
+    Schutzmodule sind scharf. Auf einem öffentlichen Profil sagte das jedem,
+    bei welchem Konto ein gestohlenes Passwort allein genügt. Solche Abzeichen
+    sieht nur, wem das Konto gehört: die ganze Kategorie „security" und die
+    beiden Einsteiger-Abzeichen zu 2FA und Tresor.
+    """
+    return achievement["category"] == "security" or achievement["id"] in (
+        "starter_security_first",
+        "starter_vault_master",
+    )
+
+
 class AchievementService:
     """Verwaltet Meilensteine, dynamische Seltenheit und aktive Nutzungszeit."""
 
@@ -901,8 +916,14 @@ class AchievementService:
         return result
 
     @classmethod
-    def get_user_achievements(cls, db: Session, user_id: int) -> list[dict[str, Any]]:
-        """Liefert alle Errungenschaften inklusive Freischaltstatus und Rarity für einen Benutzer."""
+    def get_user_achievements(
+        cls, db: Session, user_id: int, fuer_fremde: bool = False
+    ) -> list[dict[str, Any]]:
+        """Liefert alle Errungenschaften inklusive Freischaltstatus und Rarity für einen Benutzer.
+
+        `fuer_fremde` lässt die Abzeichen weg, die verraten, wie ein Konto
+        geschützt ist (siehe `nur_fuer_den_inhaber`).
+        """
         cls.check_automatic_achievements(db, user_id)
         rarity_map = cls.get_rarity_stats(db)
         unlocked_rows = (
@@ -915,6 +936,8 @@ class AchievementService:
         results = []
         for ach in ACHIEVEMENTS_CATALOG:
             aid = ach["id"]
+            if fuer_fremde and nur_fuer_den_inhaber(ach):
+                continue
             rarity = rarity_map.get(
                 aid,
                 {"percentage": 0.0, "tier": "common", "rarity_text": "Noch nicht freigeschaltet"},
@@ -949,10 +972,16 @@ class AchievementService:
         }
 
     @classmethod
-    def get_user_stats(cls, db: Session, user_id: int) -> dict[str, Any]:
-        """Ermittelt Gesamtpunkte, freigeschaltete Meilensteine und aktive Nutzungszeiten."""
-        achievements = cls.get_user_achievements(db, user_id)
-        total_points = sum(a["points"] for a in ACHIEVEMENTS_CATALOG)
+    def get_user_stats(
+        cls, db: Session, user_id: int, fuer_fremde: bool = False
+    ) -> dict[str, Any]:
+        """Ermittelt Gesamtpunkte, freigeschaltete Meilensteine und aktive Nutzungszeiten.
+
+        Mit `fuer_fremde` zählen nur die Abzeichen, die Fremde auch sehen. Sonst
+        verriete die Punktedifferenz, was die Liste verschweigt.
+        """
+        achievements = cls.get_user_achievements(db, user_id, fuer_fremde)
+        total_points = sum(a["points"] for a in achievements)
         earned_points = sum(a["points"] for a in achievements if a["unlocked"])
         unlocked_count = sum(1 for a in achievements if a["unlocked"])
 
@@ -966,7 +995,7 @@ class AchievementService:
         total_seconds = sum(time_by_category.values())
 
         return {
-            "total_achievements": len(ACHIEVEMENTS_CATALOG),
+            "total_achievements": len(achievements),
             "unlocked_achievements": unlocked_count,
             "total_points": total_points,
             "earned_points": earned_points,

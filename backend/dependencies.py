@@ -116,7 +116,7 @@ def _ws_bearer_token(ws: WebSocket) -> str | None:
     (WebSockets kennen kein CORS), aber nicht fuellen: ohne das Token des
     Opfers steht dort nichts, was `_user_from_token` gelten laesst — anders
     als beim Cookie, das der Browser ungefragt mitschickt (dafuer gibt es den
-    Origin-Check der Endpunkte).
+    Origin-Check in `get_current_user_for_ws`).
     """
     roh = ws.headers.get("sec-websocket-protocol", "")
     eintraege = [teil.strip() for teil in roh.split(",") if teil.strip()]
@@ -135,17 +135,42 @@ def ws_subprotokoll(ws: WebSocket) -> str | None:
     return WS_BEARER_PROTOKOLL if _ws_bearer_token(ws) is not None else None
 
 
+def ws_origin_erlaubt(origin: str | None) -> bool:
+    """Steht die Herkunft eines WS-Upgrades auf der CORS-Allowlist?
+
+    Dieselbe Liste wie fuer CORS (panel_url + MSM_CORS_ALLOWED_ORIGINS +
+    Desktop/Dev). Ohne Origin-Header ist die Antwort nein.
+    """
+    from config import get_cors_origins
+
+    if not origin:
+        return False
+    return origin.rstrip("/") in {o.rstrip("/") for o in get_cors_origins()}
+
+
 def get_current_user_for_ws(ws: WebSocket, db: Session) -> User:
-    """Auth fuer WebSocket-Endpoints. Wirft HTTPException(401) wie der HTTP-Pfad,
-    muss im Endpoint aber in einen sauberen WS-Close (1008) umgesetzt werden.
+    """Auth fuer WebSocket-Endpoints. Wirft HTTPException(401/403) wie der
+    HTTP-Pfad, muss im Endpoint aber in einen sauberen WS-Close (1008)
+    umgesetzt werden.
 
     Zwei Wege, dieselbe Rangfolge wie bei HTTP (`get_current_user`): erst das
     Bearer-Token aus dem Subprotokoll (native Clients, die kein Cookie haben),
     dann das Access-Token-Cookie (Browser senden es beim WS-Upgrade von
-    selbst). Keine CSRF-Pruefung noetig, weil WS-Frames keine "simple requests"
-    sind und der Origin-Header im Endpoint explizit geprueft wird.
+    selbst).
+
+    Beim Cookie-Weg ist die Herkunft Pflicht. WebSockets kennen kein CORS:
+    Oeffnet eine fremde Seite `new WebSocket("wss://panel/api/events/ws")`,
+    schickt der Browser das Cookie mit, sofern SameSite es zulaesst. Mit
+    getrenntem Frontend (`--external-frontend`, SameSite=None) tut Chrome das
+    fuer jede Seite, im Standardaufbau fuer jede Nachbar-Subdomain. Ohne
+    diese Pruefung laese die fremde Seite dann den Live-Strom mit. Ein
+    Bearer-Token dagegen kann keine fremde Seite beilegen.
     """
-    token = _ws_bearer_token(ws) or ws.cookies.get("__Secure-access_token")
+    token = _ws_bearer_token(ws)
+    if token is None:
+        if not ws_origin_erlaubt(ws.headers.get("origin")):
+            raise HTTPException(status_code=403, detail="Herkunft nicht erlaubt.")
+        token = ws.cookies.get("__Secure-access_token")
     return _user_from_token(token, db)
 
 

@@ -13,6 +13,7 @@ import { Shield, ArrowRight, Check, Mail } from 'lucide-react'
 import { Button } from '@/Singra/UI'
 
 import { Spinner } from '@/components/ui/Spinner'
+import { sicheresZiel } from '@/lib/sicheresZiel'
 export function Register() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -22,8 +23,7 @@ export function Register() {
 
   const redirectParam = searchParams.get('redirect')
   const gemerktesZiel = (location.state as { from?: string } | null)?.from || redirectParam
-  const zielNachLogin =
-    gemerktesZiel?.startsWith('/') && !gemerktesZiel.startsWith('//') ? gemerktesZiel : '/'
+  const zielNachLogin = sicheresZiel(gemerktesZiel)
 
   const [error, setError] = useState('')
   const [captchaToken, setCaptchaToken] = useState<string | null>(null)
